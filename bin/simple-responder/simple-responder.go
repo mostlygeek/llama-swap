@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	"os"
 )
 
 func main() {
@@ -17,7 +18,18 @@ func main() {
 
 	// Set up the handler function using the provided response message
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Set the header to text/plain
+		w.Header().Set("Content-Type", "text/plain")
+
 		fmt.Fprintln(w, *responseMessage)
+
+		// Get environment variables
+		envVars := os.Environ()
+
+		// Write each environment variable to the response
+		for _, envVar := range envVars {
+			fmt.Fprintln(w, envVar)
+		}
 	})
 
 	// Set up the /health endpoint handler function

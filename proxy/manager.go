@@ -61,6 +61,8 @@ func (pm *ProxyManager) swapModel(requestedModel string) error {
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.Env = modelConfig.Env
+
 	err := cmd.Start()
 	if err != nil {
 		return err
@@ -99,9 +101,9 @@ func (pm *ProxyManager) checkHealthEndpoint() error {
 		resp, err := client.Do(req)
 		if err != nil {
 			if strings.Contains(err.Error(), "connection refused") {
-				// llama.cpp /health endpoint commes up fast, give it 5 seconds
-				// happens when llama.cpp exited, keeps the code simple if TCP dial is not
-				// able to talk to the proxy endpoint
+
+				// if TCP dial can't connect any HTTP response after 5 seconds
+				// exit quickly.
 				if time.Since(startTime) > 5*time.Second {
 					return fmt.Errorf("/healthy endpoint took more than 5 seconds to respond")
 				}

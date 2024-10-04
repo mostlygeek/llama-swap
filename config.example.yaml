@@ -11,10 +11,21 @@ models:
     aliases:
     - "gpt-4o-mini"
   "qwen":
-    cmd: "models/llama-server-osx --port 8999 -m models/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf "
+    cmd: "models/llama-server-osx --port 8999 -m models/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf"
     proxy: "http://127.0.0.1:8999"
     aliases:
     - "gpt-3.5-turbo"
-  "broken":
-    cmd: "models/llama-server-osx --port 8999 -m models/doesnotexist.gguf "
+
+  "simple":
+    # example of setting environment variables
+    env:
+      - "CUDA_VISIBLE_DEVICES=0,1"
+      - "env1=hello"
+    cmd: "build/simple-responder --port 8999"
     proxy: "http://127.0.0.1:8999"
+
+  # don't use this, just for testing if things are broken
+  "broken":
+    cmd: "models/llama-server-osx --port 8999 -m models/doesnotexist.gguf"
+    proxy: "http://127.0.0.1:8999"
+
