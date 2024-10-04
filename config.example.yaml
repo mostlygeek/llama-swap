@@ -1,7 +1,20 @@
+# Seconds to wait for llama.cpp to be available to serve requests
+# Default (and minimum): 15 seconds
+healthCheckTimeout: 60
+
 models:
   "llama":
     cmd: "models/llama-server-osx --port 8999 -m models/Llama-3.2-1B-Instruct-Q4_K_M.gguf"
     proxy: "http://127.0.0.1:8999"
+
+    # list of model name aliases this llama.cpp instance can serve
+    aliases:
+    - "gpt-4o-mini"
   "qwen":
     cmd: "models/llama-server-osx --port 8999 -m models/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf "
+    proxy: "http://127.0.0.1:8999"
+    aliases:
+    - "gpt-3.5-turbo"
+  "broken":
+    cmd: "models/llama-server-osx --port 8999 -m models/doesnotexist.gguf "
     proxy: "http://127.0.0.1:8999"
