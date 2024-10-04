@@ -25,7 +25,7 @@ func main() {
 	proxyManager := proxy.New(config)
 	http.HandleFunc("/", proxyManager.HandleFunc)
 
-	fmt.Println("Proxy server started on :8080")
+	fmt.Println("Proxy server started on " + *listenStr)
 	if err := http.ListenAndServe(*listenStr, nil); err != nil {
 		fmt.Printf("Error starting server: %v\n", err)
 		os.Exit(1)
