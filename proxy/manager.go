@@ -18,10 +18,9 @@ import (
 type ProxyManager struct {
 	sync.Mutex
 
-	config       *Config
-	currentCmd   *exec.Cmd
-	currentModel string
-	currentProxy string
+	config        *Config
+	currentCmd    *exec.Cmd
+	currentConfig ModelConfig
 }
 
 func New(config *Config) *ProxyManager {
@@ -32,29 +31,31 @@ func (pm *ProxyManager) HandleFunc(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/v1/chat/completions" {
 		pm.proxyChatRequest(w, r)
 	} else {
-		http.Error(w, "Endpoint not supported", http.StatusNotFound)
+		http.Error(w, "endpoint not supported", http.StatusNotFound)
 	}
 }
 
-func (pm *ProxyManager) swapModel(model string) error {
+func (pm *ProxyManager) swapModel(requestedModel string) error {
 	pm.Lock()
 	defer pm.Unlock()
 
-	if model == pm.currentModel {
+	// find the model configuration matching requestedModel
+	modelConfig, found := pm.config.FindConfig(requestedModel)
+	if !found {
+		return fmt.Errorf("could not find configuration for %s", requestedModel)
+	}
+
+	// no need to swap llama.cpp instances
+	if pm.currentConfig.Cmd == modelConfig.Cmd {
 		return nil
 	}
 
-	modelConfig, ok := pm.config.Models[model]
-	if !ok {
-		return fmt.Errorf("unknown model %s", model)
-	}
-
+	// kill the current running one to swap it
 	if pm.currentCmd != nil {
 		pm.currentCmd.Process.Signal(syscall.SIGTERM)
 	}
 
-	pm.currentModel = model
-	pm.currentProxy = modelConfig.Proxy
+	pm.currentConfig = modelConfig
 
 	args := strings.Fields(modelConfig.Cmd)
 	cmd := exec.Command(args[0], args[1:]...)
@@ -66,20 +67,24 @@ func (pm *ProxyManager) swapModel(model string) error {
 	}
 	pm.currentCmd = cmd
 
-	if err := pm.checkHealthEndpoint(60 * time.Second); err != nil {
+	if err := pm.checkHealthEndpoint(); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (pm *ProxyManager) checkHealthEndpoint(maxDuration time.Duration) error {
+func (pm *ProxyManager) checkHealthEndpoint() error {
 
-	if pm.currentProxy == "" {
+	if pm.currentConfig.Proxy == "" {
 		return fmt.Errorf("no upstream available to check /health")
 	}
 
-	healthURL := pm.currentProxy + "/health"
+	proxyTo := pm.currentConfig.Proxy
+
+	maxDuration := time.Second * time.Duration(pm.config.HealthCheckTimeout)
+
+	healthURL := proxyTo + "/health"
 	client := &http.Client{}
 	startTime := time.Now()
 
@@ -93,6 +98,15 @@ func (pm *ProxyManager) checkHealthEndpoint(maxDuration time.Duration) error {
 		req = req.WithContext(ctx)
 		resp, err := client.Do(req)
 		if err != nil {
+			if strings.Contains(err.Error(), "connection refused") {
+				// llama.cpp /health endpoint commes up fast, give it 5 seconds
+				// happens when llama.cpp exited, keeps the code simple if TCP dial is not
+				// able to talk to the proxy endpoint
+				if time.Since(startTime) > 5*time.Second {
+					return fmt.Errorf("/healthy endpoint took more than 5 seconds to respond")
+				}
+			}
+
 			if time.Since(startTime) >= maxDuration {
 				return fmt.Errorf("failed to check /healthy from: %s", healthURL)
 			}
@@ -127,14 +141,25 @@ func (pm *ProxyManager) proxyChatRequest(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	pm.swapModel(model)
+	if err := pm.swapModel(model); err != nil {
+		http.Error(w, fmt.Sprintf("unable to swap to model: %s", err.Error()), http.StatusNotFound)
+		return
+	}
+
 	r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 	pm.proxyRequest(w, r)
 }
 
 func (pm *ProxyManager) proxyRequest(w http.ResponseWriter, r *http.Request) {
+	if pm.currentConfig.Proxy == "" {
+		http.Error(w, "No upstream proxy", http.StatusInternalServerError)
+		return
+	}
+
+	proxyTo := pm.currentConfig.Proxy
+
 	client := &http.Client{}
-	req, err := http.NewRequest(r.Method, pm.currentProxy+r.URL.String(), r.Body)
+	req, err := http.NewRequest(r.Method, proxyTo+r.URL.String(), r.Body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
