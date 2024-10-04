@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/mostlygeek/go-llama-cpp-proxy/config"
 	"github.com/mostlygeek/go-llama-cpp-proxy/proxy"
 )
 
@@ -17,7 +16,7 @@ func main() {
 
 	flag.Parse() // Parse the command-line flags
 
-	config, err := config.LoadConfig(*configPath)
+	config, err := proxy.LoadConfig(*configPath)
 	if err != nil {
 		fmt.Printf("Error loading config: %v\n", err)
 		os.Exit(1)
