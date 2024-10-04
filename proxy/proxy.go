@@ -13,20 +13,18 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
-	"github.com/mostlygeek/go-llama-cpp-proxy/config"
 )
 
 type ProxyManager struct {
 	sync.Mutex
 
-	config       *config.Config
+	config       *Config
 	currentCmd   *exec.Cmd
 	currentModel string
 	currentProxy string
 }
 
-func New(config *config.Config) *ProxyManager {
+func New(config *Config) *ProxyManager {
 	return &ProxyManager{config: config}
 }
 
