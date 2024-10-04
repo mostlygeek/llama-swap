@@ -34,34 +34,7 @@ func (pm *ProxyManager) HandleFunc(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/v1/chat/completions" {
 		// extracts the `model` from json body
 		pm.proxyChatRequest(w, r)
-	} else if r.URL.Path == "/v1/models" {
-
-		// Transform Models to the desired JSON structure
-		jsonOutput := map[string]interface{}{
-			"object": "list",
-			"data":   []map[string]string{},
-		}
-
-		for id := range pm.config.Models {
-			modelData := map[string]string{
-				"id":     id,
-				"object": "model",
-			}
-			jsonOutput["data"] = append(jsonOutput["data"].([]map[string]string), modelData)
-		}
-
-		// Marshal the JSON output for display
-		result, err := json.MarshalIndent(jsonOutput, "", "  ")
-		if err != nil {
-			http.Error(w, "JSON marshal error", http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(result)
-
 	} else {
-
 		pm.proxyRequest(w, r)
 	}
 }
