@@ -18,6 +18,9 @@ healthCheckTimeout: 60
 # define models
 models:
   "llama":
+    env:
+      - "CUDA_VISIBLE_DEVICES=0"
+
     cmd: "llama-server --port 8999 -m Llama-3.2-1B-Instruct-Q4_K_M.gguf"
 
     # address where llama-ser
@@ -31,7 +34,6 @@ models:
   "qwen":
     cmd: "llama-server --port 8999 -m path/to/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf"
     proxy: "http://127.0.0.1:8999"
-    aliases:
 ```
 
 ## Testing with CURL

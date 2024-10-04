@@ -10,6 +10,7 @@ type ModelConfig struct {
 	Cmd     string   `yaml:"cmd"`
 	Proxy   string   `yaml:"proxy"`
 	Aliases []string `yaml:"aliases"`
+	Env     []string `yaml:"env"`
 }
 
 type Config struct {

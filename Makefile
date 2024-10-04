@@ -19,6 +19,11 @@ linux:
 	@echo "Building Linux binary..."
 	GOOS=linux GOARCH=amd64 go build -o $(BUILD_DIR)/$(APP_NAME)-linux-amd64
 
+# for testing things
+simple-responder:
+	@echo "Building simple responder"
+	go build -o $(BUILD_DIR)/simple-responder bin/simple-responder/simple-responder.go
+
 # Ensure build directory exists
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
