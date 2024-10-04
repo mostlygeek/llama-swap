@@ -1,0 +1,7 @@
+models:
+  "llama":
+    cmd: "models/llama-server-osx --port 8999 -m models/Llama-3.2-1B-Instruct-Q4_K_M.gguf"
+    proxy: "http://127.0.0.1:8999"
+  "qwen":
+    cmd: "models/llama-server-osx --port 8999 -m models/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf "
+    proxy: "http://127.0.0.1:8999"
