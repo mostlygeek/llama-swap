@@ -1,4 +1,4 @@
-module golang-llama-cpp-proxy
+module github.com/mostlygeek/go-llama-cpp-proxy
 
 go 1.23.0
 
