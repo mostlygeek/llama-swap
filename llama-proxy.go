@@ -181,7 +181,27 @@ func proxyRequest(w http.ResponseWriter, r *http.Request, config *Config, state 
 	}
 	w.WriteHeader(resp.StatusCode)
 
-	io.Copy(w, resp.Body)
+	buf := make([]byte, 32*1024) // Buffer size set to 32KB
+	for {
+		n, err := resp.Body.Read(buf)
+		if n > 0 {
+			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
+				http.Error(w, writeErr.Error(), http.StatusInternalServerError)
+				return
+			}
+			// Flush the buffer to the client
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+	}
 }
 
 func main() {
