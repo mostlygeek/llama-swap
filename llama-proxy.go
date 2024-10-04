@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/mostlygeek/go-llama-cpp-proxy/proxy"
+	"github.com/mostlygeek/llamagate/proxy"
 )
 
 func main() {
@@ -25,7 +25,7 @@ func main() {
 	proxyManager := proxy.New(config)
 	http.HandleFunc("/", proxyManager.HandleFunc)
 
-	fmt.Println("Proxy server started on " + *listenStr)
+	fmt.Println("llamagate listening on " + *listenStr)
 	if err := http.ListenAndServe(*listenStr, nil); err != nil {
 		fmt.Printf("Error starting server: %v\n", err)
 		os.Exit(1)

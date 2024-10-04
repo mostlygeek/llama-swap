@@ -1,4 +1,4 @@
-module github.com/mostlygeek/go-llama-cpp-proxy
+module github.com/mostlygeek/llamagate
 
 go 1.23.0
 
