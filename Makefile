@@ -3,7 +3,7 @@ APP_NAME = llamagate
 BUILD_DIR = build
 
 # Default target: Builds binaries for both OSX and Linux
-all: mac linux
+all: mac linux simple-responder
 
 # Clean build directory
 clean:
