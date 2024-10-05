@@ -57,6 +57,9 @@ func (pm *ProxyManager) swapModel(requestedModel string) error {
 	// kill the current running one to swap it
 	if pm.currentCmd != nil {
 		pm.currentCmd.Process.Signal(syscall.SIGTERM)
+
+		// wait for it to end
+		pm.currentCmd.Process.Wait()
 	}
 
 	pm.currentConfig = modelConfig
