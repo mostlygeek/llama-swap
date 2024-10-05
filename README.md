@@ -1,49 +1,71 @@
-# LLaMAGate
+# llama-swap
 
-A golang gateway that automatically manages [llama-server](https://github.com/ggerganov/llama.cpp/tree/master/examples/server) to serve the requested `model` in the HTTP request. Serve all the models you have downloaded without manually swapping between them.
+[llama.cpp's server](https://github.com/ggerganov/llama.cpp/tree/master/examples/server) can't swap models, so let's swap llama-server instead!
 
-Created because I wanted:
+llama-swap is a proxy server that sits in front of llama-server. When a request for `/v1/chat/completions` comes in it will extract the `model` requested and change the underlying llama-server automatically.
 
 - ✅ easy to deploy: single binary with no dependencies
 - ✅ full control over llama-server's startup settings
-- ✅ ❤️ for Nvidia P40 users who are rely on llama.cpp row split mode for large models
+- ✅ ❤️ for nvidia P40 users who are rely on llama.cpp for inference
 
-## YAML Configuration
+## config.yaml
+
+llama-swap's configuration purposefully simple.
 
 ```yaml
-# Seconds to wait for llama.cpp to be available to serve requests
-# Default (and minimum): 15 seconds
+# Seconds to wait for llama.cpp to load and be ready to serve requests
+# Default (and minimum) is 15 seconds
 healthCheckTimeout: 60
 
-# define models
+# define valid model values and the upstream server start
 models:
   "llama":
-    env:
-      - "CUDA_VISIBLE_DEVICES=0"
-
     cmd: "llama-server --port 8999 -m Llama-3.2-1B-Instruct-Q4_K_M.gguf"
 
-    # address where llama-ser
+    # Where to proxy to, important it matches this format
     proxy: "http://127.0.0.1:8999"
 
-    # list of aliases this llama.cpp instance can also serve
+    # aliases model names to use this configuration for
     aliases:
     - "gpt-4o-mini"
     - "gpt-3.5-turbo"
 
   "qwen":
+    # environment variables to pass to the command
+    env:
+      - "CUDA_VISIBLE_DEVICES=0"
     cmd: "llama-server --port 8999 -m path/to/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf"
     proxy: "http://127.0.0.1:8999"
 ```
 
-## Testing with CURL
+## Deployment
 
-```bash
-> curl http://localhost:8080/v1/chat/completions -N -d '{"messages":[{"role":"user","content":"write a 3 word story"}], "model":"llama"}'| jq -c '.choices[].message.content'
+1. Create a configuration file, see [config.example.yaml](config.example.yaml)
+1. Download a [release](https://github.com/mostlygeek/llama-swap/releases) appropriate for your OS and architecture.
+    * _Note: Windows currently untested._
+1. Run the binary with `llama-swap --config path/to/config.yaml`
 
-# will reuse the llama-server instance
-> curl http://localhost:8080/v1/chat/completions -N -d '{"messages":[{"role":"user","content":"write a 3 word story"}], "model":"gpt-4o-mini"}'| jq -c '.choices[].message.content'
+## Systemd Unit Files
 
-# swap to Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
-> curl http://localhost:8080/v1/chat/completions -N -d '{"messages":[{"role":"user","content":"write a 3 word story"}], "model":"qwen"}'| jq -c '.choices[].message.content'
+Use this unit file to start llama-swap on boot
+
+`/etc/systemd/system/llama-swap.service`
+```
+[Unit]
+Description=llama-swap
+After=network.target
+
+[Service]
+User=nobody
+
+# set this to match your environment
+ExecStart=/path/to/llama-swap --config /path/to/llama-swap.config.yml
+
+Restart=on-failure
+RestartSec=3
+StartLimitBurst=3
+StartLimitInterval=30
+
+[Install]
+WantedBy=multi-user.target
 ```
