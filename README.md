@@ -38,7 +38,7 @@ models:
     proxy: "http://127.0.0.1:8999"
 ```
 
-## Deployment
+## Installation
 
 1. Create a configuration file, see [config.example.yaml](config.example.yaml)
 1. Download a [release](https://github.com/mostlygeek/llama-swap/releases) appropriate for your OS and architecture.
@@ -47,7 +47,7 @@ models:
 
 ## Systemd Unit Files
 
-Use this unit file to start llama-swap on boot
+Use this unit file to start llama-swap on boot. This is only tested on Ubuntu.
 
 `/etc/systemd/system/llama-swap.service`
 ```
@@ -69,3 +69,9 @@ StartLimitInterval=30
 [Install]
 WantedBy=multi-user.target
 ```
+
+## Building from Source
+
+1. Install golang for your system
+1. run `make clean all`
+1. binaries will be built into `build/` directory
