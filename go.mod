@@ -1,4 +1,4 @@
-module github.com/mostlygeek/llamagate
+module github.com/mostlygeek/llama-swap
 
 go 1.23.0
 
