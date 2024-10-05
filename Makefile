@@ -1,5 +1,5 @@
 # Define variables for the application
-APP_NAME = llamagate
+APP_NAME = llama-swap
 BUILD_DIR = build
 
 # Default target: Builds binaries for both OSX and Linux
@@ -22,7 +22,7 @@ linux:
 # for testing things
 simple-responder:
 	@echo "Building simple responder"
-	go build -o $(BUILD_DIR)/simple-responder bin/simple-responder/simple-responder.go
+	go build -o $(BUILD_DIR)/simple-responder misc/simple-responder/simple-responder.go
 
 # Ensure build directory exists
 $(BUILD_DIR):

@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/mostlygeek/llamagate/proxy"
+	"github.com/mostlygeek/llama-swap/proxy"
 )
 
 func main() {
