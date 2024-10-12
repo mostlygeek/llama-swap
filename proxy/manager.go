@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -89,11 +90,23 @@ func (pm *ProxyManager) checkHealthEndpoint() error {
 		return fmt.Errorf("no upstream available to check /health")
 	}
 
+	checkEndpoint := strings.TrimSpace(pm.currentConfig.CheckEndpoint)
+
+	if checkEndpoint == "none" {
+		return nil
+	}
+
+	// keep default behaviour
+	if checkEndpoint == "" {
+		checkEndpoint = "/health"
+	}
+
 	proxyTo := pm.currentConfig.Proxy
-
 	maxDuration := time.Second * time.Duration(pm.config.HealthCheckTimeout)
-
-	healthURL := proxyTo + "/health"
+	healthURL, err := url.JoinPath(proxyTo, checkEndpoint)
+	if err != nil {
+		return fmt.Errorf("failed to create health url with with %s and path %s", proxyTo, checkEndpoint)
+	}
 	client := &http.Client{}
 	startTime := time.Now()
 
@@ -112,12 +125,12 @@ func (pm *ProxyManager) checkHealthEndpoint() error {
 				// if TCP dial can't connect any HTTP response after 5 seconds
 				// exit quickly.
 				if time.Since(startTime) > 5*time.Second {
-					return fmt.Errorf("/healthy endpoint took more than 5 seconds to respond")
+					return fmt.Errorf("health check endpoint took more than 5 seconds to respond")
 				}
 			}
 
 			if time.Since(startTime) >= maxDuration {
-				return fmt.Errorf("failed to check /healthy from: %s", healthURL)
+				return fmt.Errorf("failed to check health from: %s", healthURL)
 			}
 			time.Sleep(time.Second)
 			continue
@@ -127,7 +140,7 @@ func (pm *ProxyManager) checkHealthEndpoint() error {
 			return nil
 		}
 		if time.Since(startTime) >= maxDuration {
-			return fmt.Errorf("failed to check /healthy from: %s", healthURL)
+			return fmt.Errorf("failed to check health from: %s", healthURL)
 		}
 		time.Sleep(time.Second)
 	}
