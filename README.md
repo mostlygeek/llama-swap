@@ -30,6 +30,13 @@ models:
     - "gpt-4o-mini"
     - "gpt-3.5-turbo"
 
+    # wait for this path to return an HTTP 200 before serving requests
+    # defaults to /health to match llama.cpp
+    #
+    # use "none" to skip endpoint checking. This may cause requests to fail
+    # until the server is ready
+    checkEndpoint: "/custom-endpoint"
+
   "qwen":
     # environment variables to pass to the command
     env:

@@ -25,7 +25,7 @@ func main() {
 	proxyManager := proxy.New(config)
 	http.HandleFunc("/", proxyManager.HandleFunc)
 
-	fmt.Println("llamagate listening on " + *listenStr)
+	fmt.Println("llama-swap listening on " + *listenStr)
 	if err := http.ListenAndServe(*listenStr, nil); err != nil {
 		fmt.Printf("Error starting server: %v\n", err)
 		os.Exit(1)

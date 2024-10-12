@@ -7,10 +7,11 @@ import (
 )
 
 type ModelConfig struct {
-	Cmd     string   `yaml:"cmd"`
-	Proxy   string   `yaml:"proxy"`
-	Aliases []string `yaml:"aliases"`
-	Env     []string `yaml:"env"`
+	Cmd           string   `yaml:"cmd"`
+	Proxy         string   `yaml:"proxy"`
+	Aliases       []string `yaml:"aliases"`
+	Env           []string `yaml:"env"`
+	CheckEndpoint string   `yaml:"checkEndpoint"`
 }
 
 type Config struct {

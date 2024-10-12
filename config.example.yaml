@@ -10,6 +10,10 @@ models:
     # list of model name aliases this llama.cpp instance can serve
     aliases:
     - "gpt-4o-mini"
+
+    # check this path for a HTTP 200 response for the server to be ready
+    checkEndpoint: "/health"
+
   "qwen":
     cmd: "models/llama-server-osx --port 8999 -m models/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf"
     proxy: "http://127.0.0.1:8999"
@@ -23,6 +27,10 @@ models:
       - "env1=hello"
     cmd: "build/simple-responder --port 8999"
     proxy: "http://127.0.0.1:8999"
+
+    # use "none" to skip check. Caution this may cause some requests to fail
+    # until the upstream server is ready for traffic
+    checkEndpoint: "none"
 
   # don't use this, just for testing if things are broken
   "broken":
