@@ -1,7 +1,9 @@
 package proxy
 
 import (
+	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -12,6 +14,10 @@ type ModelConfig struct {
 	Aliases       []string `yaml:"aliases"`
 	Env           []string `yaml:"env"`
 	CheckEndpoint string   `yaml:"checkEndpoint"`
+}
+
+func (m *ModelConfig) SanitizedCommand() ([]string, error) {
+	return SanitizeCommand(m.Cmd)
 }
 
 type Config struct {
@@ -54,4 +60,20 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	return &config, nil
+}
+
+func SanitizeCommand(cmdStr string) ([]string, error) {
+	// Remove trailing backslashes
+	cmdStr = strings.ReplaceAll(cmdStr, "\\ \n", " ")
+	cmdStr = strings.ReplaceAll(cmdStr, "\\\n", " ")
+
+	// Split the command into arguments
+	args := strings.Fields(cmdStr)
+
+	// Ensure the command is not empty
+	if len(args) == 0 {
+		return nil, fmt.Errorf("empty command")
+	}
+
+	return args, nil
 }

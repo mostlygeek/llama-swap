@@ -65,13 +65,16 @@ func (pm *ProxyManager) swapModel(requestedModel string) error {
 
 	pm.currentConfig = modelConfig
 
-	args := strings.Fields(modelConfig.Cmd)
+	args, err := modelConfig.SanitizedCommand()
+	if err != nil {
+		return fmt.Errorf("unable to get sanitized command: %v", err)
+	}
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Env = modelConfig.Env
 
-	err := cmd.Start()
+	err = cmd.Start()
 	if err != nil {
 		return err
 	}
