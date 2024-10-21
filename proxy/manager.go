@@ -31,12 +31,34 @@ func New(config *Config) *ProxyManager {
 func (pm *ProxyManager) HandleFunc(w http.ResponseWriter, r *http.Request) {
 
 	// https://github.com/ggerganov/llama.cpp/blob/master/examples/server/README.md#api-endpoints
-
 	if r.URL.Path == "/v1/chat/completions" {
 		// extracts the `model` from json body
 		pm.proxyChatRequest(w, r)
+	} else if r.URL.Path == "/v1/models" {
+		pm.listModels(w, r)
 	} else {
 		pm.proxyRequest(w, r)
+	}
+}
+
+func (pm *ProxyManager) listModels(w http.ResponseWriter, r *http.Request) {
+	data := []interface{}{}
+	for id := range pm.config.Models {
+		data = append(data, map[string]interface{}{
+			"id":       id,
+			"object":   "model",
+			"created":  time.Now().Unix(),
+			"owned_by": "llama-swap",
+		})
+	}
+
+	// Set the Content-Type header to application/json
+	w.Header().Set("Content-Type", "application/json")
+
+	// Encode the data as JSON and write it to the response writer
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{"data": data}); err != nil {
+		http.Error(w, "Error encoding JSON", http.StatusInternalServerError)
+		return
 	}
 }
 
