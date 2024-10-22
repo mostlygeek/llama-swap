@@ -2,13 +2,13 @@
 
 ![llama-swap header image](header.jpeg)
 
-[llama.cpp's server](https://github.com/ggerganov/llama.cpp/tree/master/examples/server) can't swap models, so let's swap llama-server instead!
+[llama.cpp's server](https://github.com/ggerganov/llama.cpp/tree/master/examples/server) can't swap models on demand. So let's swap the server on demand instead!
 
 llama-swap is a proxy server that sits in front of llama-server. When a request for `/v1/chat/completions` comes in it will extract the `model` requested and change the underlying llama-server automatically.
 
 - ✅ easy to deploy: single binary with no dependencies
 - ✅ full control over llama-server's startup settings
-- ✅ ❤️ for nvidia P40 users who are rely on llama.cpp for inference
+- ✅ ❤️ for users who are rely on llama.cpp for LLM inference
 
 ## config.yaml
 
@@ -22,10 +22,10 @@ healthCheckTimeout: 60
 # define valid model values and the upstream server start
 models:
   "llama":
-    cmd: "llama-server --port 8999 -m Llama-3.2-1B-Instruct-Q4_K_M.gguf"
+    cmd: llama-server --port 8999 -m Llama-3.2-1B-Instruct-Q4_K_M.gguf
 
-    # Where to proxy to, important it matches this format
-    proxy: "http://127.0.0.1:8999"
+    # where to reach the server started by cmd
+    proxy: http://127.0.0.1:8999
 
     # aliases model names to use this configuration for
     aliases:
@@ -37,14 +37,19 @@ models:
     #
     # use "none" to skip endpoint checking. This may cause requests to fail
     # until the server is ready
-    checkEndpoint: "/custom-endpoint"
+    checkEndpoint: /custom-endpoint
 
   "qwen":
     # environment variables to pass to the command
     env:
       - "CUDA_VISIBLE_DEVICES=0"
-    cmd: "llama-server --port 8999 -m path/to/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf"
-    proxy: "http://127.0.0.1:8999"
+
+    # multiline for readability
+    cmd: >
+      llama-server --port 8999
+      --model path/to/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
+
+    proxy: http://127.0.0.1:8999
 ```
 
 ## Installation
