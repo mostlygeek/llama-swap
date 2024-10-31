@@ -9,6 +9,9 @@ all: mac linux simple-responder
 clean:
 	rm -rf $(BUILD_DIR)
 
+test:
+	go test -v ./proxy
+
 # Build OSX binary
 mac:
 	@echo "Building Mac binary..."

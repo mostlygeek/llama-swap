@@ -61,9 +61,9 @@ func (pm *ProxyManager) streamLogs(w http.ResponseWriter, r *http.Request) {
 	skipHistory := r.URL.Query().Has("skip")
 	if !skipHistory {
 		// Send history first
-		history := pm.logMonitor.getHistory()
-		if history != "" {
-			fmt.Fprint(w, history)
+		history := pm.logMonitor.GetHistory()
+		if len(history) != 0 {
+			w.Write(history)
 			flusher.Flush()
 		}
 	}
@@ -76,7 +76,7 @@ func (pm *ProxyManager) streamLogs(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case msg := <-ch:
-			fmt.Fprint(w, msg)
+			w.Write(msg)
 			flusher.Flush()
 		case <-notify:
 			return
