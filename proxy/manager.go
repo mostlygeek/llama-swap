@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -22,10 +21,11 @@ type ProxyManager struct {
 	config        *Config
 	currentCmd    *exec.Cmd
 	currentConfig ModelConfig
+	logMonitor    *LogMonitor
 }
 
 func New(config *Config) *ProxyManager {
-	return &ProxyManager{config: config}
+	return &ProxyManager{config: config, logMonitor: NewLogMonitor()}
 }
 
 func (pm *ProxyManager) HandleFunc(w http.ResponseWriter, r *http.Request) {
@@ -36,12 +36,55 @@ func (pm *ProxyManager) HandleFunc(w http.ResponseWriter, r *http.Request) {
 		pm.proxyChatRequest(w, r)
 	} else if r.URL.Path == "/v1/models" {
 		pm.listModels(w, r)
+	} else if r.URL.Path == "/logs" {
+		pm.streamLogs(w, r)
 	} else {
 		pm.proxyRequest(w, r)
 	}
 }
 
-func (pm *ProxyManager) listModels(w http.ResponseWriter, r *http.Request) {
+func (pm *ProxyManager) streamLogs(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("Transfer-Encoding", "chunked")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+
+	ch := pm.logMonitor.Subscribe()
+	defer pm.logMonitor.Unsubscribe(ch)
+
+	notify := r.Context().Done()
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	skipHistory := r.URL.Query().Has("skip")
+	if !skipHistory {
+		// Send history first
+		history := pm.logMonitor.getHistory()
+		if history != "" {
+			fmt.Fprint(w, history)
+			flusher.Flush()
+		}
+	}
+
+	if !r.URL.Query().Has("stream") {
+		return
+	}
+
+	// Stream new logs
+	for {
+		select {
+		case msg := <-ch:
+			fmt.Fprint(w, msg)
+			flusher.Flush()
+		case <-notify:
+			return
+		}
+	}
+}
+
+func (pm *ProxyManager) listModels(w http.ResponseWriter, _ *http.Request) {
 	data := []interface{}{}
 	for id := range pm.config.Models {
 		data = append(data, map[string]interface{}{
@@ -92,8 +135,12 @@ func (pm *ProxyManager) swapModel(requestedModel string) error {
 		return fmt.Errorf("unable to get sanitized command: %v", err)
 	}
 	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+
+	// logMonitor only writes to stdout
+	// so the upstream's stderr will go to os.Stdout
+	cmd.Stdout = pm.logMonitor
+	cmd.Stderr = pm.logMonitor
+
 	cmd.Env = modelConfig.Env
 
 	err = cmd.Start()
