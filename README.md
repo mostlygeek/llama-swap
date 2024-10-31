@@ -59,6 +59,26 @@ models:
     * _Note: Windows currently untested._
 1. Run the binary with `llama-swap --config path/to/config.yaml`
 
+## Monitoring Logs
+
+The `/logs` endpoint is available to monitor what llama-swap is doing. It will send the last 10KB of logs. Useful for monitoring the output of llama-server. It also supports streaming of logs.
+
+Usage:
+
+```
+# basic, sends up to the last 10KB of logs
+curl http://host/logs'
+
+# add `stream` to stream new logs as they come in
+curl -Ns 'http://host/logs?stream'
+
+# add `skip` to skip history (only useful if used with stream)
+curl -Ns 'http://host/logs?stream&skip'
+
+# will output nothing :)
+curl -Ns 'http://host/logs?skip'
+```
+
 ## Systemd Unit Files
 
 Use this unit file to start llama-swap on boot. This is only tested on Ubuntu.
