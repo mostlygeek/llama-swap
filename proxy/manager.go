@@ -187,26 +187,28 @@ func (pm *ProxyManager) checkHealthEndpoint() error {
 		if err != nil {
 			return err
 		}
+
 		ctx, cancel := context.WithTimeout(req.Context(), 250*time.Millisecond)
 		defer cancel()
 		req = req.WithContext(ctx)
 		resp, err := client.Do(req)
+
 		if err != nil {
-			if strings.Contains(err.Error(), "connection refused") {
-
-				// if TCP dial can't connect any HTTP response after 5 seconds
-				// exit quickly.
-				if time.Since(startTime) > 5*time.Second {
-					return fmt.Errorf("health check endpoint took more than 5 seconds to respond")
-				}
-			}
-
 			if time.Since(startTime) >= maxDuration {
 				return fmt.Errorf("failed to check health from: %s", healthURL)
 			}
-			time.Sleep(time.Second)
+
+			// wait a bit longer for TCP connection issues
+			if strings.Contains(err.Error(), "connection refused") {
+				fmt.Fprintf(pm.logMonitor, "Connection refused on %s\n", healthURL)
+				time.Sleep(5 * time.Second)
+			} else {
+				time.Sleep(time.Second)
+			}
+
 			continue
 		}
+
 		defer resp.Body.Close()
 		if resp.StatusCode == http.StatusOK {
 			return nil
@@ -214,6 +216,7 @@ func (pm *ProxyManager) checkHealthEndpoint() error {
 		if time.Since(startTime) >= maxDuration {
 			return fmt.Errorf("failed to check health from: %s", healthURL)
 		}
+
 		time.Sleep(time.Second)
 	}
 }

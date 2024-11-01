@@ -35,7 +35,10 @@ models:
     # until the upstream server is ready for traffic
     checkEndpoint: none
 
-  # don't use this, just for testing if things are broken
+  # don't use these, just for testing if things are broken
   "broken":
     cmd: models/llama-server-osx --port 8999 -m models/doesnotexist.gguf
     proxy: http://127.0.0.1:8999
+  "broken_timeout":
+    cmd: models/llama-server-osx --port 8999 -m models/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
+    proxy: http://127.0.0.1:9000
