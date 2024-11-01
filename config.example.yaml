@@ -1,6 +1,6 @@
 # Seconds to wait for llama.cpp to be available to serve requests
 # Default (and minimum): 15 seconds
-healthCheckTimeout: 60
+healthCheckTimeout: 15
 
 models:
   "llama":
