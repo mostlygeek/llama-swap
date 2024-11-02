@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"io"
 	"sync"
 	"testing"
@@ -59,5 +60,36 @@ func TestLogMonitor(t *testing.T) {
 	c2Data := string(client2Messages)
 	if c2Data != expectedHistory {
 		t.Errorf("Client2 expected %s, got: %s", expectedHistory, c2Data)
+	}
+}
+
+func TestWrite_ImmutableBuffer(t *testing.T) {
+	// Create a new LogMonitor instance
+	lm := NewLogMonitorWriter(io.Discard)
+
+	// Prepare a message to write
+	msg := []byte("Hello, World!")
+	lenmsg := len(msg)
+
+	// Write the message to the LogMonitor
+	n, err := lm.Write(msg)
+	if err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	if n != lenmsg {
+		t.Errorf("Expected %d bytes written but got %d", lenmsg, n)
+	}
+
+	// Change the original message
+	msg[0] = 'B' // This should not affect the buffer
+
+	// Get the history from the LogMonitor
+	history := lm.GetHistory()
+
+	// Check that the history contains the original message, not the modified one
+	expected := []byte("Hello, World!")
+	if !bytes.Equal(history, expected) {
+		t.Errorf("Expected history to be %q, got %q", expected, history)
 	}
 }
