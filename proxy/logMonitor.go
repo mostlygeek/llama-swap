@@ -30,13 +30,19 @@ func NewLogMonitorWriter(stdout io.Writer) *LogMonitor {
 }
 
 func (w *LogMonitor) Write(p []byte) (n int, err error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+
 	n, err = w.stdout.Write(p)
 	if err != nil {
 		return n, err
 	}
 
 	w.bufferMu.Lock()
-	w.buffer.Value = p
+	bufferCopy := make([]byte, len(p))
+	copy(bufferCopy, p)
+	w.buffer.Value = bufferCopy
 	w.buffer = w.buffer.Next()
 	w.bufferMu.Unlock()
 
@@ -49,7 +55,7 @@ func (w *LogMonitor) GetHistory() []byte {
 	defer w.bufferMu.RUnlock()
 
 	var history []byte
-	w.buffer.Do(func(p interface{}) {
+	w.buffer.Do(func(p any) {
 		if p != nil {
 			if content, ok := p.([]byte); ok {
 				history = append(history, content...)
