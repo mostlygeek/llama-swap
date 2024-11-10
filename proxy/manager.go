@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -203,7 +204,7 @@ func (pm *ProxyManager) checkHealthEndpoint(cmdCtx context.Context) error {
 			return err
 		}
 
-		ctx, cancel := context.WithTimeout(cmdCtx, 250*time.Millisecond)
+		ctx, cancel := context.WithTimeout(cmdCtx, time.Second)
 		defer cancel()
 		req = req.WithContext(ctx)
 		resp, err := client.Do(req)
@@ -214,7 +215,10 @@ func (pm *ProxyManager) checkHealthEndpoint(cmdCtx context.Context) error {
 			// check if the context was cancelled
 			select {
 			case <-ctx.Done():
-				return context.Cause(ctx)
+				err := context.Cause(ctx)
+				if !errors.Is(err, context.DeadlineExceeded) {
+					return err
+				}
 			default:
 			}
 
@@ -307,7 +311,6 @@ func (pm *ProxyManager) proxyRequest(w http.ResponseWriter, r *http.Request) {
 		n, err := resp.Body.Read(buf)
 		if n > 0 {
 			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
-				http.Error(w, writeErr.Error(), http.StatusInternalServerError)
 				return
 			}
 			if flusher, ok := w.(http.Flusher); ok {
