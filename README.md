@@ -77,6 +77,9 @@ curl -Ns 'http://host/logs?stream&skip'
 
 # will output nothing :)
 curl -Ns 'http://host/logs?skip'
+
+# combine with pipes
+curl -Ns 'http://host/logs?stream&skip' | grep 'tokens per second'
 ```
 
 ## Systemd Unit Files
