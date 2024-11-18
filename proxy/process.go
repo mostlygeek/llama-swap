@@ -21,6 +21,10 @@ type Process struct {
 	config     ModelConfig
 	cmd        *exec.Cmd
 	logMonitor *LogMonitor
+
+	// Only useful for go testing the proxy functionality
+	// will leave the start/stop of process to go code
+	overrideProxyFunc *func(w http.ResponseWriter, r *http.Request)
 }
 
 func NewProcess(ID string, config ModelConfig, logMonitor *LogMonitor) *Process {
@@ -115,6 +119,7 @@ func (p *Process) checkHealthEndpoint(cmdCtx context.Context, healthCheckTimeout
 	startTime := time.Now()
 
 	for {
+		time.Sleep(time.Second)
 		req, err := http.NewRequest("GET", healthURL, nil)
 		if err != nil {
 			return err
@@ -141,7 +146,6 @@ func (p *Process) checkHealthEndpoint(cmdCtx context.Context, healthCheckTimeout
 			// wait a bit longer for TCP connection issues
 			if strings.Contains(err.Error(), "connection refused") {
 				fmt.Fprintf(p.logMonitor, "Connection refused on %s, ttl %.0fs\n", healthURL, ttl)
-
 				time.Sleep(5 * time.Second)
 			} else {
 				time.Sleep(time.Second)
@@ -162,13 +166,23 @@ func (p *Process) checkHealthEndpoint(cmdCtx context.Context, healthCheckTimeout
 		if ttl < 0 {
 			return fmt.Errorf("failed to check health from: %s", healthURL)
 		}
-
-		time.Sleep(time.Second)
 	}
 }
 
-// sends the request to the upstream process
 func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
+	if p.overrideProxyFunc != nil {
+		(*p.overrideProxyFunc)(w, r)
+	} else {
+		p.defaultProxyHandler(w, r)
+	}
+}
+
+func (p *Process) SetOverride(f func(http.ResponseWriter, *http.Request)) {
+	p.overrideProxyFunc = &f
+}
+
+// sends the request to the upstream process
+func (p *Process) defaultProxyHandler(w http.ResponseWriter, r *http.Request) {
 	if p.cmd == nil {
 		http.Error(w, "process not started", http.StatusInternalServerError)
 		return
