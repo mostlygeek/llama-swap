@@ -23,7 +23,7 @@ func main() {
 	}
 
 	proxyManager := proxy.New(config)
-	http.HandleFunc("/", proxyManager.HandleFunc)
+	http.HandleFunc("/", proxyManager.HandlerFunc)
 
 	fmt.Println("llama-swap listening on " + *listenStr)
 	if err := http.ListenAndServe(*listenStr, nil); err != nil {
