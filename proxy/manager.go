@@ -38,7 +38,6 @@ func (pm *ProxyManager) HandleFunc(w http.ResponseWriter, r *http.Request) {
 		} else {
 			http.Error(w, "no strategy to handle request", http.StatusBadRequest)
 		}
-
 	}
 }
 

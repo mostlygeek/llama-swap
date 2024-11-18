@@ -39,7 +39,7 @@ func main() {
 		w.Write([]byte(response))
 	})
 
-	address := ":" + *port // Address with the specified port
+	address := "127.0.0.1:" + *port // Address with the specified port
 	fmt.Printf("Server is listening on port %s\n", *port)
 
 	// Start the server and log any error if it occurs
