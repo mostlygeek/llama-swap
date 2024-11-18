@@ -75,7 +75,7 @@ func (pm *ProxyManager) streamLogsHandlerSSE(c *gin.Context) {
 	notify := c.Request.Context().Done()
 
 	// Send history first if not skipped
-	_, skipHistory := c.GetQuery("skip")
+	_, skipHistory := c.GetQuery("no-history")
 	if !skipHistory {
 		history := pm.logMonitor.GetHistory()
 		if len(history) != 0 {

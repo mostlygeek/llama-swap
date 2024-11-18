@@ -66,20 +66,17 @@ The `/logs` endpoint is available to monitor what llama-swap is doing. It will s
 Usage:
 
 ```
-# basic, sends up to the last 10KB of logs
+# sends up to the last 10KB of logs
 curl http://host/logs'
 
-# add `stream` to stream new logs as they come in
-curl -Ns 'http://host/logs?stream'
+# streams logs using chunk encoding
+curl -Ns 'http://host/logs/stream'
 
-# add `skip` to skip history (only useful if used with stream)
-curl -Ns 'http://host/logs?stream&skip'
+# skips history and just streams new log entries
+curl -Ns 'http://host/logs/stream?no-history'
 
-# will output nothing :)
-curl -Ns 'http://host/logs?skip'
-
-# combine with pipes
-curl -Ns 'http://host/logs?stream&skip' | grep 'tokens per second'
+# streams logs using Server Sent Events
+curl -Ns 'http://host/logs/streamSSE'
 ```
 
 ## Systemd Unit Files
