@@ -91,18 +91,21 @@ func TestFindConfig(t *testing.T) {
 	}
 
 	// Test finding a model by its name
-	modelConfig, found := config.FindConfig("model1")
+	modelConfig, modelId, found := config.FindConfig("model1")
 	assert.True(t, found)
+	assert.Equal(t, "model1", modelId)
 	assert.Equal(t, config.Models["model1"], modelConfig)
 
 	// Test finding a model by its alias
-	modelConfig, found = config.FindConfig("m1")
+	modelConfig, modelId, found = config.FindConfig("m1")
 	assert.True(t, found)
+	assert.Equal(t, "model1", modelId)
 	assert.Equal(t, config.Models["model1"], modelConfig)
 
 	// Test finding a model that does not exist
-	modelConfig, found = config.FindConfig("model3")
+	modelConfig, modelId, found = config.FindConfig("model3")
 	assert.False(t, found)
+	assert.Equal(t, "", modelId)
 	assert.Equal(t, ModelConfig{}, modelConfig)
 }
 
