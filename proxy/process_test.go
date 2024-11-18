@@ -29,7 +29,7 @@ func getBinaryPath() string {
 	return filepath.Join("..", "build", fmt.Sprintf("simple-responder_%s_%s", goos, goarch))
 }
 
-func TestProcess_StartProxyStop(t *testing.T) {
+func TestProcess_ProcessStartStop(t *testing.T) {
 	// Define the range
 	min := 12000
 	max := 13000
