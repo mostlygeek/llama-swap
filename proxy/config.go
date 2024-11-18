@@ -25,22 +25,22 @@ type Config struct {
 	HealthCheckTimeout int                    `yaml:"healthCheckTimeout"`
 }
 
-func (c *Config) FindConfig(modelName string) (ModelConfig, bool) {
+func (c *Config) FindConfig(modelName string) (ModelConfig, string, bool) {
 	modelConfig, found := c.Models[modelName]
 	if found {
-		return modelConfig, true
+		return modelConfig, modelName, true
 	}
 
 	// Search through aliases to find the right config
-	for _, config := range c.Models {
+	for actual, config := range c.Models {
 		for _, alias := range config.Aliases {
 			if alias == modelName {
-				return config, true
+				return config, actual, true
 			}
 		}
 	}
 
-	return ModelConfig{}, false
+	return ModelConfig{}, "", false
 }
 
 func LoadConfig(path string) (*Config, error) {
