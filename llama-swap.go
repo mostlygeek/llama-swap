@@ -3,9 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
-	"net/http"
 	"os"
 
+	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/proxy"
 )
 
@@ -22,12 +22,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	proxyManager := proxy.New(config)
-	http.HandleFunc("/", proxyManager.HandlerFunc)
+	if mode := os.Getenv("GIN_MODE"); mode != "" {
+		gin.SetMode(mode)
+	} else {
+		gin.SetMode(gin.ReleaseMode)
+	}
 
+	proxyManager := proxy.New(config)
 	fmt.Println("llama-swap listening on " + *listenStr)
-	if err := http.ListenAndServe(*listenStr, nil); err != nil {
-		fmt.Printf("Error starting server: %v\n", err)
+	if err := proxyManager.Run(*listenStr); err != nil {
+		fmt.Printf("Server error: %v\n", err)
 		os.Exit(1)
 	}
 }

@@ -46,6 +46,10 @@ func New(config *Config) *ProxyManager {
 	return pm
 }
 
+func (pm *ProxyManager) Run(addr ...string) error {
+	return pm.ginEngine.Run(addr...)
+}
+
 func (pm *ProxyManager) HandlerFunc(w http.ResponseWriter, r *http.Request) {
 	pm.ginEngine.ServeHTTP(w, r)
 }
