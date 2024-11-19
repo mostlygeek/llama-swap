@@ -99,8 +99,8 @@ func (pm *ProxyManager) swapModel(requestedModel string) error {
 		}
 	}
 
-	pm.currentProcess = NewProcess(modelID, modelConfig, pm.logMonitor)
-	return pm.currentProcess.Start(pm.config.HealthCheckTimeout)
+	pm.currentProcess = NewProcess(modelID, pm.config.HealthCheckTimeout, modelConfig, pm.logMonitor)
+	return nil
 }
 
 func (pm *ProxyManager) proxyChatRequestHandler(c *gin.Context) {
