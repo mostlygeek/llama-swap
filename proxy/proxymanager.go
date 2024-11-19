@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -121,6 +122,11 @@ func (pm *ProxyManager) proxyChatRequestHandler(c *gin.Context) {
 	}
 
 	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+
+	// dechunk it as we already have all the body bytes see issue #11
+	c.Request.Header.Del("transfer-encoding")
+	c.Request.Header.Add("content-length", strconv.Itoa(len(bodyBytes)))
+
 	pm.currentProcess.ProxyRequest(c.Writer, c.Request)
 }
 

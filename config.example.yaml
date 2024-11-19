@@ -7,7 +7,7 @@ models:
     cmd: >
       models/llama-server-osx
       --port 8999
-      -m models/Llama-3.2-1B-Instruct-Q4_K_M.gguf
+      -m models/Llama-3.2-1B-Instruct-Q4_0.gguf
     proxy: http://127.0.0.1:8999
 
     # list of model name aliases this llama.cpp instance can serve
@@ -18,7 +18,7 @@ models:
     checkEndpoint: /health
 
   "qwen":
-    cmd: models/llama-server-osx --port 8999 -m models/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
+    cmd: models/llama-server-osx --port 8999 -m models/qwen2.5-0.5b-instruct-q8_0.gguf
     proxy: http://127.0.0.1:8999
     aliases:
     - gpt-3.5-turbo
@@ -40,5 +40,5 @@ models:
     cmd: models/llama-server-osx --port 8999 -m models/doesnotexist.gguf
     proxy: http://127.0.0.1:8999
   "broken_timeout":
-    cmd: models/llama-server-osx --port 8999 -m models/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
+    cmd: models/llama-server-osx --port 8999 -m models/qwen2.5-0.5b-instruct-q8_0.gguf
     proxy: http://127.0.0.1:9000
