@@ -17,6 +17,9 @@ models:
     # check this path for a HTTP 200 response for the server to be ready
     checkEndpoint: /health
 
+    # unload model after 5 seconds
+    ttl: 5
+
   "qwen":
     cmd: models/llama-server-osx --port 8999 -m models/qwen2.5-0.5b-instruct-q8_0.gguf
     proxy: http://127.0.0.1:8999
