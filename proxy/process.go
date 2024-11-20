@@ -17,27 +17,33 @@ import (
 type Process struct {
 	sync.Mutex
 
-	ID         string
-	config     ModelConfig
-	cmd        *exec.Cmd
-	logMonitor *LogMonitor
+	ID                 string
+	config             ModelConfig
+	cmd                *exec.Cmd
+	logMonitor         *LogMonitor
+	healthCheckTimeout int
+
+	isRunning          bool
+	lastRequestHandled time.Time
 }
 
-func NewProcess(ID string, config ModelConfig, logMonitor *LogMonitor) *Process {
+func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, logMonitor *LogMonitor) *Process {
 	return &Process{
-		ID:         ID,
-		config:     config,
-		cmd:        nil,
-		logMonitor: logMonitor,
+		ID:                 ID,
+		config:             config,
+		cmd:                nil,
+		logMonitor:         logMonitor,
+		healthCheckTimeout: healthCheckTimeout,
 	}
 }
 
-func (p *Process) Start(healthCheckTimeout int) error {
+// start the process and check it for errors
+func (p *Process) start() error {
 	p.Lock()
 	defer p.Unlock()
 
-	if p.cmd != nil {
-		return fmt.Errorf("process already started")
+	if p.isRunning {
+		return fmt.Errorf("process already running")
 	}
 
 	args, err := p.config.SanitizedCommand()
@@ -51,6 +57,8 @@ func (p *Process) Start(healthCheckTimeout int) error {
 	p.cmd.Env = p.config.Env
 
 	err = p.cmd.Start()
+	p.isRunning = true
+
 	if err != nil {
 		return err
 	}
@@ -58,7 +66,8 @@ func (p *Process) Start(healthCheckTimeout int) error {
 	// watch for the command to exit
 	cmdCtx, cancel := context.WithCancelCause(context.Background())
 
-	// monitor the command's exit status
+	// monitor the command's exit status. Usually this happens if
+	// the process exited unexpectedly
 	go func() {
 		err := p.cmd.Wait()
 		if err != nil {
@@ -66,11 +75,35 @@ func (p *Process) Start(healthCheckTimeout int) error {
 		} else {
 			cancel(nil)
 		}
+
+		p.isRunning = false
 	}()
 
+	// wait a bit for process to start before checking the health endpoint
+	time.Sleep(250 * time.Millisecond)
+
 	// wait for checkHealthEndpoint
-	if err := p.checkHealthEndpoint(cmdCtx, healthCheckTimeout); err != nil {
+	if err := p.checkHealthEndpoint(cmdCtx); err != nil {
 		return err
+	}
+
+	if p.config.UnloadAfter > 0 {
+		// start a goroutine to check every second if
+		// the process should be stopped
+		go func() {
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			maxDuration := time.Duration(p.config.UnloadAfter) * time.Second
+
+			for {
+				<-ticker.C
+				if time.Since(p.lastRequestHandled) > maxDuration {
+					fmt.Fprintf(p.logMonitor, "!!! Unloading model %s, TTL of %d reached.\n", p.ID, p.config.UnloadAfter)
+					p.Stop()
+					return
+				}
+			}
+		}()
 	}
 
 	return nil
@@ -80,15 +113,20 @@ func (p *Process) Stop() {
 	p.Lock()
 	defer p.Unlock()
 
-	if p.cmd == nil {
+	if !p.isRunning {
 		return
 	}
 
 	p.cmd.Process.Signal(syscall.SIGTERM)
 	p.cmd.Process.Wait()
+	p.isRunning = false
 }
 
-func (p *Process) checkHealthEndpoint(cmdCtx context.Context, healthCheckTimeout int) error {
+func (p *Process) IsRunning() bool {
+	return p.isRunning
+}
+
+func (p *Process) checkHealthEndpoint(cmdCtx context.Context) error {
 	if p.config.Proxy == "" {
 		return fmt.Errorf("no upstream available to check /health")
 	}
@@ -105,7 +143,7 @@ func (p *Process) checkHealthEndpoint(cmdCtx context.Context, healthCheckTimeout
 	}
 
 	proxyTo := p.config.Proxy
-	maxDuration := time.Second * time.Duration(healthCheckTimeout)
+	maxDuration := time.Second * time.Duration(p.healthCheckTimeout)
 	healthURL, err := url.JoinPath(proxyTo, checkEndpoint)
 	if err != nil {
 		return fmt.Errorf("failed to create health url with with %s and path %s", proxyTo, checkEndpoint)
@@ -115,7 +153,6 @@ func (p *Process) checkHealthEndpoint(cmdCtx context.Context, healthCheckTimeout
 	startTime := time.Now()
 
 	for {
-		time.Sleep(time.Second)
 		req, err := http.NewRequest("GET", healthURL, nil)
 		if err != nil {
 			return err
@@ -162,14 +199,21 @@ func (p *Process) checkHealthEndpoint(cmdCtx context.Context, healthCheckTimeout
 		if ttl < 0 {
 			return fmt.Errorf("failed to check health from: %s", healthURL)
 		}
+
+		time.Sleep(time.Second)
 	}
 }
 
 func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
-	if p.cmd == nil {
-		http.Error(w, "process not started", http.StatusInternalServerError)
-		return
+	if !p.isRunning {
+		if err := p.start(); err != nil {
+			errstr := fmt.Sprintf("unable to start process: %s", err)
+			http.Error(w, errstr, http.StatusInternalServerError)
+			return
+		}
 	}
+
+	p.lastRequestHandled = time.Now()
 
 	proxyTo := p.config.Proxy
 	client := &http.Client{}

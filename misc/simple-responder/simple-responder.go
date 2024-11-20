@@ -20,7 +20,11 @@ func main() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// Set the header to text/plain
 		w.Header().Set("Content-Type", "text/plain")
+		fmt.Fprintln(w, *responseMessage)
+	})
 
+	http.HandleFunc("/env", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
 		fmt.Fprintln(w, *responseMessage)
 
 		// Get environment variables

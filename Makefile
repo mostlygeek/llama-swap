@@ -10,6 +10,9 @@ clean:
 	rm -rf $(BUILD_DIR)
 
 test:
+	go test -short -v ./proxy
+
+test-all:
 	go test -v ./proxy
 
 # Build OSX binary
