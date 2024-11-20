@@ -23,7 +23,8 @@ type Process struct {
 	logMonitor         *LogMonitor
 	healthCheckTimeout int
 
-	isRunning bool
+	isRunning          bool
+	lastRequestHandled time.Time
 }
 
 func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, logMonitor *LogMonitor) *Process {
@@ -84,6 +85,25 @@ func (p *Process) start() error {
 	// wait for checkHealthEndpoint
 	if err := p.checkHealthEndpoint(cmdCtx); err != nil {
 		return err
+	}
+
+	if p.config.UnloadAfter > 0 {
+		// start a goroutine to check every second if
+		// the process should be stopped
+		go func() {
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			maxDuration := time.Duration(p.config.UnloadAfter) * time.Second
+
+			for {
+				<-ticker.C
+				if time.Since(p.lastRequestHandled) > maxDuration {
+					fmt.Fprintf(p.logMonitor, "!!! Unloading model %s, TTL of %d reached.\n", p.ID, p.config.UnloadAfter)
+					p.Stop()
+					return
+				}
+			}
+		}()
 	}
 
 	return nil
@@ -179,6 +199,8 @@ func (p *Process) checkHealthEndpoint(cmdCtx context.Context) error {
 		if ttl < 0 {
 			return fmt.Errorf("failed to check health from: %s", healthURL)
 		}
+
+		time.Sleep(time.Second)
 	}
 }
 
@@ -190,6 +212,8 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+
+	p.lastRequestHandled = time.Now()
 
 	proxyTo := p.config.Proxy
 	client := &http.Client{}

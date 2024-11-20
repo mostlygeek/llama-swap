@@ -39,6 +39,11 @@ models:
     # until the server is ready
     checkEndpoint: /custom-endpoint
 
+    # automatically unload the model after 10 seconds
+    # ttl values must be a value greater than 0
+    # default: 0 = never unload model
+    ttl: 5
+
   "qwen":
     # environment variables to pass to the command
     env:

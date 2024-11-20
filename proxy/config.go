@@ -14,6 +14,7 @@ type ModelConfig struct {
 	Aliases       []string `yaml:"aliases"`
 	Env           []string `yaml:"env"`
 	CheckEndpoint string   `yaml:"checkEndpoint"`
+	UnloadAfter   int      `yaml:"ttl"`
 }
 
 func (m *ModelConfig) SanitizedCommand() ([]string, error) {
