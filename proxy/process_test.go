@@ -19,7 +19,7 @@ func TestProcess_AutomaticallyStartsUpstream(t *testing.T) {
 	process := NewProcess("test-process", 5, config, logMonitor)
 	defer process.Stop()
 
-	req := httptest.NewRequest("GET", "/", nil)
+	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
 
 	// process is automatically started
@@ -78,7 +78,7 @@ func TestProcess_UnloadAfterTTL(t *testing.T) {
 	process := NewProcess("ttl", 2, config, NewLogMonitorWriter(io.Discard))
 	defer process.Stop()
 
-	req := httptest.NewRequest("GET", "/", nil)
+	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
 
 	// Proxy the request (auto start)
