@@ -56,6 +56,5 @@ models:
 #  - loading one model will load all the models in the group
 groups:
   code:
-    models:
-      - "qwen"
-      - "llama"
+    - "qwen"
+    - "llama"

@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestLoadConfig(t *testing.T) {
+func TestConfig_Load(t *testing.T) {
 	// Create a temporary YAML file for testing
 	tempDir, err := os.MkdirTemp("", "test-config")
 	if err != nil {
@@ -17,7 +17,8 @@ func TestLoadConfig(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	tempFile := filepath.Join(tempDir, "config.yaml")
-	content := `models:
+	content := `
+models:
   model1:
     cmd: path/to/cmd --arg1 one
     proxy: "http://localhost:8080"
@@ -28,7 +29,17 @@ func TestLoadConfig(t *testing.T) {
       - "VAR1=value1"
       - "VAR2=value2"
     checkEndpoint: "/health"
+  model2:
+    cmd: path/to/cmd --arg1 one
+    proxy: "http://localhost:8081"
+    aliases:
+      - "m2"
+    checkEndpoint: "/"
 healthCheckTimeout: 15
+groups:
+  test:
+    - model1
+    - model2
 `
 
 	if err := os.WriteFile(tempFile, []byte(content), 0644); err != nil {
@@ -50,14 +61,24 @@ healthCheckTimeout: 15
 				Env:           []string{"VAR1=value1", "VAR2=value2"},
 				CheckEndpoint: "/health",
 			},
+			"model2": {
+				Cmd:           "path/to/cmd --arg1 one",
+				Proxy:         "http://localhost:8081",
+				Aliases:       []string{"m2"},
+				Env:           nil,
+				CheckEndpoint: "/",
+			},
 		},
 		HealthCheckTimeout: 15,
+		Groups: map[string][]string{
+			"test": {"model1", "model2"},
+		},
 	}
 
 	assert.Equal(t, expected, config)
 }
 
-func TestModelConfigSanitizedCommand(t *testing.T) {
+func TestConfig_ModelConfigSanitizedCommand(t *testing.T) {
 	config := &ModelConfig{
 		Cmd: `python model1.py \
     --arg1 value1 \
@@ -69,7 +90,7 @@ func TestModelConfigSanitizedCommand(t *testing.T) {
 	assert.Equal(t, []string{"python", "model1.py", "--arg1", "value1", "--arg2", "value2"}, args)
 }
 
-func TestFindConfig(t *testing.T) {
+func TestConfig_FindConfig(t *testing.T) {
 	config := &Config{
 		Models: map[string]ModelConfig{
 			"model1": {
@@ -109,7 +130,7 @@ func TestFindConfig(t *testing.T) {
 	assert.Equal(t, ModelConfig{}, modelConfig)
 }
 
-func TestSanitizeCommand(t *testing.T) {
+func TestConfig_SanitizeCommand(t *testing.T) {
 	// Test a simple command
 	args, err := SanitizeCommand("python model1.py")
 	assert.NoError(t, err)
