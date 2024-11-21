@@ -1,53 +1,14 @@
 package proxy
 
 import (
-	"fmt"
 	"io"
-	"math/rand"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 )
-
-// Check if the binary exists
-func TestMain(m *testing.M) {
-	binaryPath := getBinaryPath()
-	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
-		fmt.Printf("simple-responder not found at %s, did you `make simple-responder`?\n", binaryPath)
-		os.Exit(1)
-	}
-	m.Run()
-}
-
-// Helper function to get the binary path
-func getBinaryPath() string {
-	goos := runtime.GOOS
-	goarch := runtime.GOARCH
-	return filepath.Join("..", "build", fmt.Sprintf("simple-responder_%s_%s", goos, goarch))
-}
-
-func getTestSimpleResponderConfig(expectedMessage string) ModelConfig {
-	// Define the range
-	min := 12000
-	max := 13000
-
-	// Generate a random number between 12000 and 13000
-	randomPort := rand.Intn(max-min+1) + min
-	binaryPath := getBinaryPath()
-
-	// Create a process configuration
-	return ModelConfig{
-		Cmd:           fmt.Sprintf("%s --port %d --respond '%s'", binaryPath, randomPort, expectedMessage),
-		Proxy:         fmt.Sprintf("http://127.0.0.1:%d", randomPort),
-		CheckEndpoint: "/health",
-	}
-}
 
 func TestProcess_AutomaticallyStartsUpstream(t *testing.T) {
 	logMonitor := NewLogMonitorWriter(io.Discard)
@@ -56,6 +17,8 @@ func TestProcess_AutomaticallyStartsUpstream(t *testing.T) {
 
 	// Create a process
 	process := NewProcess("test-process", 5, config, logMonitor)
+	defer process.Stop()
+
 	req := httptest.NewRequest("GET", "/", nil)
 	w := httptest.NewRecorder()
 
@@ -92,6 +55,8 @@ func TestProcess_BrokenModelConfig(t *testing.T) {
 	}
 
 	process := NewProcess("broken", 1, config, NewLogMonitor())
+	defer process.Stop()
+
 	req := httptest.NewRequest("GET", "/", nil)
 	w := httptest.NewRecorder()
 	process.ProxyRequest(w, req)
@@ -111,6 +76,8 @@ func TestProcess_UnloadAfterTTL(t *testing.T) {
 	assert.Equal(t, 3, config.UnloadAfter)
 
 	process := NewProcess("ttl", 2, config, NewLogMonitorWriter(io.Discard))
+	defer process.Stop()
+
 	req := httptest.NewRequest("GET", "/", nil)
 	w := httptest.NewRecorder()
 

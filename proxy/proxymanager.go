@@ -59,6 +59,12 @@ func (pm *ProxyManager) HandlerFunc(w http.ResponseWriter, r *http.Request) {
 	pm.ginEngine.ServeHTTP(w, r)
 }
 
+func (pm *ProxyManager) StopProcesses() {
+	if pm.currentProcess != nil {
+		pm.currentProcess.Stop()
+	}
+}
+
 func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 	data := []interface{}{}
 	for id := range pm.config.Models {

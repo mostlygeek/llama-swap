@@ -17,13 +17,18 @@ type ModelConfig struct {
 	UnloadAfter   int      `yaml:"ttl"`
 }
 
+type ModelGroup struct {
+	Models []ModelConfig `yaml:"models"`
+}
+
 func (m *ModelConfig) SanitizedCommand() ([]string, error) {
 	return SanitizeCommand(m.Cmd)
 }
 
 type Config struct {
-	Models             map[string]ModelConfig `yaml:"models"`
 	HealthCheckTimeout int                    `yaml:"healthCheckTimeout"`
+	Models             map[string]ModelConfig `yaml:"models"`
+	Groups             map[string]ModelGroup  `yaml:"groups"`
 }
 
 func (c *Config) FindConfig(modelName string) (ModelConfig, string, bool) {

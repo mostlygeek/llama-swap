@@ -113,7 +113,7 @@ func (p *Process) Stop() {
 	p.Lock()
 	defer p.Unlock()
 
-	if !p.isRunning {
+	if !p.isRunning || p.cmd == nil || p.cmd.Process == nil {
 		return
 	}
 
