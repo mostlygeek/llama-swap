@@ -73,9 +73,18 @@ groups:
 		Groups: map[string][]string{
 			"test": {"model1", "model2"},
 		},
+		aliases: map[string]string{
+			"m1":        "model1",
+			"model-one": "model1",
+			"m2":        "model2",
+		},
 	}
 
 	assert.Equal(t, expected, config)
+
+	realname, found := config.RealModelName("m1")
+	assert.True(t, found)
+	assert.Equal(t, "model1", realname)
 }
 
 func TestConfig_ModelConfigSanitizedCommand(t *testing.T) {
@@ -91,6 +100,9 @@ func TestConfig_ModelConfigSanitizedCommand(t *testing.T) {
 }
 
 func TestConfig_FindConfig(t *testing.T) {
+
+	// TODO?
+	// make make this shared between the different tests
 	config := &Config{
 		Models: map[string]ModelConfig{
 			"model1": {
@@ -109,6 +121,11 @@ func TestConfig_FindConfig(t *testing.T) {
 			},
 		},
 		HealthCheckTimeout: 10,
+		aliases: map[string]string{
+			"m1":        "model1",
+			"model-one": "model1",
+			"m2":        "model2",
+		},
 	}
 
 	// Test finding a model by its name

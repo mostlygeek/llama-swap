@@ -25,24 +25,27 @@ type Config struct {
 	HealthCheckTimeout int                    `yaml:"healthCheckTimeout"`
 	Models             map[string]ModelConfig `yaml:"models"`
 	Groups             map[string][]string    `yaml:"groups"`
+
+	// map aliases to actual model IDs
+	aliases map[string]string
+}
+
+func (c *Config) RealModelName(search string) (string, bool) {
+	if _, found := c.Models[search]; found {
+		return search, true
+	} else if name, found := c.aliases[search]; found {
+		return name, found
+	} else {
+		return "", false
+	}
 }
 
 func (c *Config) FindConfig(modelName string) (ModelConfig, string, bool) {
-	modelConfig, found := c.Models[modelName]
-	if found {
-		return modelConfig, modelName, true
+	if realName, found := c.RealModelName(modelName); !found {
+		return ModelConfig{}, "", false
+	} else {
+		return c.Models[realName], realName, true
 	}
-
-	// Search through aliases to find the right config
-	for actual, config := range c.Models {
-		for _, alias := range config.Aliases {
-			if alias == modelName {
-				return config, actual, true
-			}
-		}
-	}
-
-	return ModelConfig{}, "", false
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -59,6 +62,14 @@ func LoadConfig(path string) (*Config, error) {
 
 	if config.HealthCheckTimeout < 15 {
 		config.HealthCheckTimeout = 15
+	}
+
+	// Populate the aliases map
+	config.aliases = make(map[string]string)
+	for modelName, modelConfig := range config.Models {
+		for _, alias := range modelConfig.Aliases {
+			config.aliases[alias] = modelName
+		}
 	}
 
 	return &config, nil
