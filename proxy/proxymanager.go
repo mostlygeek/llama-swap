@@ -119,11 +119,9 @@ func (pm *ProxyManager) swapModel(requestedModel string) (*Process, error) {
 		return nil, fmt.Errorf("could not find modelID for %s", requestedModel)
 	}
 
-	realRequestedModelKey := groupName + "/" + realModelName
-
 	// exit early when already running, otherwise stop everything and swap
-	processKey := groupName + "/" + realModelName
-	if process, found := pm.currentProcesses[processKey]; found {
+	requestedProcessKey := groupName + "/" + realModelName
+	if process, found := pm.currentProcesses[requestedProcessKey]; found {
 		return process, nil
 	}
 
@@ -137,7 +135,7 @@ func (pm *ProxyManager) swapModel(requestedModel string) (*Process, error) {
 		}
 
 		process := NewProcess(modelID, pm.config.HealthCheckTimeout, modelConfig, pm.logMonitor)
-		processKey = groupName + "/" + modelID
+		processKey := groupName + "/" + modelID
 		pm.currentProcesses[processKey] = process
 	} else {
 		for _, modelName := range pm.config.Groups[groupName] {
@@ -148,13 +146,14 @@ func (pm *ProxyManager) swapModel(requestedModel string) (*Process, error) {
 				}
 
 				process := NewProcess(modelID, pm.config.HealthCheckTimeout, modelConfig, pm.logMonitor)
-				processKey = groupName + "/" + modelID
+				processKey := groupName + "/" + modelID
 				pm.currentProcesses[processKey] = process
 			}
 		}
 	}
 
-	return pm.currentProcesses[realRequestedModelKey], nil
+	// requestedProcessKey should exist due to swap
+	return pm.currentProcesses[requestedProcessKey], nil
 }
 
 func (pm *ProxyManager) proxyChatRequestHandler(c *gin.Context) {
