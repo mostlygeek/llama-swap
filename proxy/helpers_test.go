@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"sync"
 	"testing"
+
+	"github.com/gin-gonic/gin"
 )
 
 var (
@@ -21,6 +23,9 @@ func TestMain(m *testing.M) {
 		fmt.Printf("simple-responder not found at %s, did you `make simple-responder`?\n", binaryPath)
 		os.Exit(1)
 	}
+
+	gin.SetMode(gin.TestMode)
+
 	m.Run()
 }
 

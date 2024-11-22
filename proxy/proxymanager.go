@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -99,21 +100,61 @@ func (pm *ProxyManager) swapModel(requestedModel string) (*Process, error) {
 	pm.Lock()
 	defer pm.Unlock()
 
-	// find the model configuration matching requestedModel
-	modelConfig, modelID, found := pm.config.FindConfig(requestedModel)
+	// Check if requestedModel contains a /
+	groupName, modelName := "", requestedModel
+	if idx := strings.Index(requestedModel, "/"); idx != -1 {
+		groupName = requestedModel[:idx]
+		modelName = requestedModel[idx+1:]
+	}
+
+	if groupName != "" {
+		if _, found := pm.config.Groups[groupName]; !found {
+			return nil, fmt.Errorf("model group not found %s", groupName)
+		}
+	}
+
+	// de-alias the real model name and get a real one
+	realModelName, found := pm.config.RealModelName(modelName)
 	if !found {
-		return nil, fmt.Errorf("could not find configuration for %s", requestedModel)
+		return nil, fmt.Errorf("could not find modelID for %s", requestedModel)
 	}
 
-	if process, found := pm.currentProcesses[modelID]; found {
+	realRequestedModelKey := groupName + "/" + realModelName
+
+	// exit early when already running, otherwise stop everything and swap
+	processKey := groupName + "/" + realModelName
+	if process, found := pm.currentProcesses[processKey]; found {
 		return process, nil
-	} else {
-		pm.stopProcesses()
 	}
 
-	process := NewProcess(modelID, pm.config.HealthCheckTimeout, modelConfig, pm.logMonitor)
-	pm.currentProcesses[modelID] = process
-	return process, nil
+	// stop all running models
+	pm.stopProcesses()
+
+	if groupName == "" {
+		modelConfig, modelID, found := pm.config.FindConfig(realModelName)
+		if !found {
+			return nil, fmt.Errorf("could not find configuration for %s", realModelName)
+		}
+
+		process := NewProcess(modelID, pm.config.HealthCheckTimeout, modelConfig, pm.logMonitor)
+		processKey = groupName + "/" + modelID
+		pm.currentProcesses[processKey] = process
+	} else {
+		for _, modelName := range pm.config.Groups[groupName] {
+			if realModelName, found := pm.config.RealModelName(modelName); found {
+				modelConfig, modelID, found := pm.config.FindConfig(realModelName)
+				if !found {
+					return nil, fmt.Errorf("could not find configuration for %s in group %s", realModelName, groupName)
+				}
+
+				process := NewProcess(modelID, pm.config.HealthCheckTimeout, modelConfig, pm.logMonitor)
+				processKey = groupName + "/" + modelID
+				pm.currentProcesses[processKey] = process
+			}
+		}
+	}
+
+	return pm.currentProcesses[realRequestedModelKey], nil
 }
 
 func (pm *ProxyManager) proxyChatRequestHandler(c *gin.Context) {
