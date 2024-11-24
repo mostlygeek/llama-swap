@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestLoadConfig(t *testing.T) {
+func TestConfig_Load(t *testing.T) {
 	// Create a temporary YAML file for testing
 	tempDir, err := os.MkdirTemp("", "test-config")
 	if err != nil {
@@ -17,7 +17,8 @@ func TestLoadConfig(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	tempFile := filepath.Join(tempDir, "config.yaml")
-	content := `models:
+	content := `
+models:
   model1:
     cmd: path/to/cmd --arg1 one
     proxy: "http://localhost:8080"
@@ -28,7 +29,17 @@ func TestLoadConfig(t *testing.T) {
       - "VAR1=value1"
       - "VAR2=value2"
     checkEndpoint: "/health"
+  model2:
+    cmd: path/to/cmd --arg1 one
+    proxy: "http://localhost:8081"
+    aliases:
+      - "m2"
+    checkEndpoint: "/"
 healthCheckTimeout: 15
+profiles:
+  test:
+    - model1
+    - model2
 `
 
 	if err := os.WriteFile(tempFile, []byte(content), 0644); err != nil {
@@ -50,14 +61,33 @@ healthCheckTimeout: 15
 				Env:           []string{"VAR1=value1", "VAR2=value2"},
 				CheckEndpoint: "/health",
 			},
+			"model2": {
+				Cmd:           "path/to/cmd --arg1 one",
+				Proxy:         "http://localhost:8081",
+				Aliases:       []string{"m2"},
+				Env:           nil,
+				CheckEndpoint: "/",
+			},
 		},
 		HealthCheckTimeout: 15,
+		Profiles: map[string][]string{
+			"test": {"model1", "model2"},
+		},
+		aliases: map[string]string{
+			"m1":        "model1",
+			"model-one": "model1",
+			"m2":        "model2",
+		},
 	}
 
 	assert.Equal(t, expected, config)
+
+	realname, found := config.RealModelName("m1")
+	assert.True(t, found)
+	assert.Equal(t, "model1", realname)
 }
 
-func TestModelConfigSanitizedCommand(t *testing.T) {
+func TestConfig_ModelConfigSanitizedCommand(t *testing.T) {
 	config := &ModelConfig{
 		Cmd: `python model1.py \
     --arg1 value1 \
@@ -69,7 +99,10 @@ func TestModelConfigSanitizedCommand(t *testing.T) {
 	assert.Equal(t, []string{"python", "model1.py", "--arg1", "value1", "--arg2", "value2"}, args)
 }
 
-func TestFindConfig(t *testing.T) {
+func TestConfig_FindConfig(t *testing.T) {
+
+	// TODO?
+	// make make this shared between the different tests
 	config := &Config{
 		Models: map[string]ModelConfig{
 			"model1": {
@@ -88,6 +121,11 @@ func TestFindConfig(t *testing.T) {
 			},
 		},
 		HealthCheckTimeout: 10,
+		aliases: map[string]string{
+			"m1":        "model1",
+			"model-one": "model1",
+			"m2":        "model2",
+		},
 	}
 
 	// Test finding a model by its name
@@ -109,7 +147,7 @@ func TestFindConfig(t *testing.T) {
 	assert.Equal(t, ModelConfig{}, modelConfig)
 }
 
-func TestSanitizeCommand(t *testing.T) {
+func TestConfig_SanitizeCommand(t *testing.T) {
 	// Test a simple command
 	args, err := SanitizeCommand("python model1.py")
 	assert.NoError(t, err)

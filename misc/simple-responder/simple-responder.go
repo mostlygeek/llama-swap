@@ -16,12 +16,16 @@ func main() {
 
 	flag.Parse() // Parse the command-line flags
 
-	// Set up the handler function using the provided response message
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	responseMessageHandler := func(w http.ResponseWriter, r *http.Request) {
 		// Set the header to text/plain
 		w.Header().Set("Content-Type", "text/plain")
 		fmt.Fprintln(w, *responseMessage)
-	})
+	}
+
+	// Set up the handler function using the provided response message
+	http.HandleFunc("/v1/chat/completions", responseMessageHandler)
+	http.HandleFunc("/v1/completions", responseMessageHandler)
+	http.HandleFunc("/test", responseMessageHandler)
 
 	http.HandleFunc("/env", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
@@ -41,6 +45,11 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		response := `{"status": "ok"}`
 		w.Write([]byte(response))
+	})
+
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		fmt.Fprintf(w, "%s %s", r.Method, r.URL.Path)
 	})
 
 	address := "127.0.0.1:" + *port // Address with the specified port
