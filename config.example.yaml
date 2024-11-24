@@ -6,9 +6,9 @@ models:
   "llama":
     cmd: >
       models/llama-server-osx
-      --port 8999
+      --port 9001
       -m models/Llama-3.2-1B-Instruct-Q4_0.gguf
-    proxy: http://127.0.0.1:8999
+    proxy: http://127.0.0.1:9001
 
     # list of model name aliases this llama.cpp instance can serve
     aliases:
@@ -21,8 +21,8 @@ models:
     ttl: 5
 
   "qwen":
-    cmd: models/llama-server-osx --port 8999 -m models/qwen2.5-0.5b-instruct-q8_0.gguf
-    proxy: http://127.0.0.1:8999
+    cmd: models/llama-server-osx --port 9002 -m models/qwen2.5-0.5b-instruct-q8_0.gguf
+    proxy: http://127.0.0.1:9002
     aliases:
     - gpt-3.5-turbo
 
@@ -45,3 +45,9 @@ models:
   "broken_timeout":
     cmd: models/llama-server-osx --port 8999 -m models/qwen2.5-0.5b-instruct-q8_0.gguf
     proxy: http://127.0.0.1:9000
+
+# creating a coding profile with models for code generation and general questions
+profiles:
+  coding:
+    - "qwen"
+    - "llama"
