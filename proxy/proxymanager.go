@@ -108,7 +108,7 @@ func (pm *ProxyManager) swapModel(requestedModel string) (*Process, error) {
 	}
 
 	if groupName != "" {
-		if _, found := pm.config.Groups[groupName]; !found {
+		if _, found := pm.config.Profiles[groupName]; !found {
 			return nil, fmt.Errorf("model group not found %s", groupName)
 		}
 	}
@@ -138,7 +138,7 @@ func (pm *ProxyManager) swapModel(requestedModel string) (*Process, error) {
 		processKey := groupName + "/" + modelID
 		pm.currentProcesses[processKey] = process
 	} else {
-		for _, modelName := range pm.config.Groups[groupName] {
+		for _, modelName := range pm.config.Profiles[groupName] {
 			if realModelName, found := pm.config.RealModelName(modelName); found {
 				modelConfig, modelID, found := pm.config.FindConfig(realModelName)
 				if !found {

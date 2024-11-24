@@ -46,15 +46,8 @@ models:
     cmd: models/llama-server-osx --port 8999 -m models/qwen2.5-0.5b-instruct-q8_0.gguf
     proxy: http://127.0.0.1:9000
 
-# groups allows more control over the usage of VRAM. In case where there is more
-# VRAM available than required it is desirable to have multiple models loaded
-# to reduce thet time to first token.
-#
-# important:
-#  - each model *must* be listening on a unique address and port
-#  - the model name is now in this format: "group/model", like "code/qwen"
-#  - loading one model will load all the models in the group
-groups:
-  code:
+# creating a coding profile with models for code generation and general questions
+profiles:
+  coding:
     - "qwen"
     - "llama"

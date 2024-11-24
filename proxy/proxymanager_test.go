@@ -47,7 +47,7 @@ func TestProxyManager_SwapMultiProcess(t *testing.T) {
 			"model1": getTestSimpleResponderConfig("model1"),
 			"model2": getTestSimpleResponderConfig("model2"),
 		},
-		Groups: map[string][]string{
+		Profiles: map[string][]string{
 			"test": {"model1", "model2"},
 		},
 	}

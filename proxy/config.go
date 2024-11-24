@@ -24,7 +24,7 @@ func (m *ModelConfig) SanitizedCommand() ([]string, error) {
 type Config struct {
 	HealthCheckTimeout int                    `yaml:"healthCheckTimeout"`
 	Models             map[string]ModelConfig `yaml:"models"`
-	Groups             map[string][]string    `yaml:"groups"`
+	Profiles           map[string][]string    `yaml:"profiles"`
 
 	// map aliases to actual model IDs
 	aliases map[string]string

@@ -64,6 +64,7 @@ func TestProcess_BrokenModelConfig(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "unable to start process")
 }
 
+// test that the process unloads after the TTL
 func TestProcess_UnloadAfterTTL(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping long auto unload TTL test")

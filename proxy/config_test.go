@@ -36,7 +36,7 @@ models:
       - "m2"
     checkEndpoint: "/"
 healthCheckTimeout: 15
-groups:
+profiles:
   test:
     - model1
     - model2
@@ -70,7 +70,7 @@ groups:
 			},
 		},
 		HealthCheckTimeout: 15,
-		Groups: map[string][]string{
+		Profiles: map[string][]string{
 			"test": {"model1", "model2"},
 		},
 		aliases: map[string]string{
