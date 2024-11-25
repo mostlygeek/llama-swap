@@ -8,12 +8,13 @@ Features:
 
 - ✅ Easy to deploy: single binary with no dependencies
 - ✅ Single yaml configuration file
-- ✅ Automatically switching between models
+- ✅ Automatic switching between models
 - ✅ Full control over llama.cpp server settings per model
 - ✅ OpenAI API support (`v1/completions` and `v1/chat/completions`)
 - ✅ Multiple GPU support
 - ✅ Run multiple models at once with `profiles`
 - ✅ Remote log monitoring at `/log`
+- ✅ Automatic unloading of models from GPUs after timeout
 
 ## config.yaml
 
