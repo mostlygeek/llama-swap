@@ -49,7 +49,7 @@ func TestProcess_AutomaticallyStartsUpstream(t *testing.T) {
 func TestProcess_BrokenModelConfig(t *testing.T) {
 	// Create a process configuration
 	config := ModelConfig{
-		Cmd:           "nonexistant-command",
+		Cmd:           "nonexistent-command",
 		Proxy:         "http://127.0.0.1:9913",
 		CheckEndpoint: "/health",
 	}
