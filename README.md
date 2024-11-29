@@ -72,7 +72,7 @@ profiles:
     - "llama"
 ```
 
-More complex [examples](examples/README.md) for different use cases.
+More [examples](examples/README.md) are available for different use cases.
 
 ## Installation
 
