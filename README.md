@@ -72,6 +72,8 @@ profiles:
     - "llama"
 ```
 
+More complex [examples](examples/README.md) for different use cases.
+
 ## Installation
 
 1. Create a configuration file, see [config.example.yaml](config.example.yaml)
