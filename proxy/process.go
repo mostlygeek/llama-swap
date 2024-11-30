@@ -14,6 +14,14 @@ import (
 	"time"
 )
 
+type ProcessState string
+
+const (
+	StateStopped ProcessState = ProcessState("stopped")
+	StateReady   ProcessState = ProcessState("ready")
+	StateFailed  ProcessState = ProcessState("failed")
+)
+
 type Process struct {
 	sync.Mutex
 
@@ -23,8 +31,12 @@ type Process struct {
 	logMonitor         *LogMonitor
 	healthCheckTimeout int
 
-	isRunning          bool
 	lastRequestHandled time.Time
+
+	stateMutex sync.RWMutex
+	state      ProcessState
+
+	inFlightRequests sync.WaitGroup
 }
 
 func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, logMonitor *LogMonitor) *Process {
@@ -34,16 +46,22 @@ func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, logMonito
 		cmd:                nil,
 		logMonitor:         logMonitor,
 		healthCheckTimeout: healthCheckTimeout,
+		state:              StateStopped,
 	}
 }
 
-// start the process and check it for errors
+// start the process and returns when it is ready
 func (p *Process) start() error {
-	p.Lock()
-	defer p.Unlock()
 
-	if p.isRunning {
-		return fmt.Errorf("process already running")
+	p.stateMutex.Lock()
+	defer p.stateMutex.Unlock()
+
+	if p.state == StateReady {
+		return nil
+	}
+
+	if p.state == StateFailed {
+		return fmt.Errorf("process is in a failed state and can not be restarted")
 	}
 
 	args, err := p.config.SanitizedCommand()
@@ -57,34 +75,47 @@ func (p *Process) start() error {
 	p.cmd.Env = p.config.Env
 
 	err = p.cmd.Start()
-	p.isRunning = true
 
 	if err != nil {
 		return err
 	}
 
-	// watch for the command to exit
-	cmdCtx, cancel := context.WithCancelCause(context.Background())
+	// One of three things can happen at this stage:
+	// 1. The command exits unexpectedly
+	// 2. The health check fails
+	// 3. The health check passes
+	//
+	// only in the third case will the process be considered Ready to accept
+	healthCheckContext, cancelHealthCheck := context.WithCancelCause(context.Background())
+	defer cancelHealthCheck(nil) // clean up
+	cmdWaitChan := make(chan error, 1)
+	healthCheckChan := make(chan error, 1)
 
-	// monitor the command's exit status. Usually this happens if
-	// the process exited unexpectedly
 	go func() {
-		err := p.cmd.Wait()
-		if err != nil {
-			cancel(fmt.Errorf("command [%s] %s", strings.Join(p.cmd.Args, " "), err.Error()))
-		} else {
-			cancel(nil)
-		}
-
-		p.isRunning = false
+		// possible cmd exits early
+		cmdWaitChan <- p.cmd.Wait()
 	}()
 
-	// wait a bit for process to start before checking the health endpoint
-	time.Sleep(250 * time.Millisecond)
+	go func() {
+		<-time.After(250 * time.Millisecond) // give process a bit of time to start
+		healthCheckChan <- p.checkHealthEndpoint(healthCheckContext)
+	}()
 
-	// wait for checkHealthEndpoint
-	if err := p.checkHealthEndpoint(cmdCtx); err != nil {
+	select {
+	case err := <-cmdWaitChan:
+		p.state = StateFailed
+		if err != nil {
+			err = fmt.Errorf("command [%s] %s", strings.Join(p.cmd.Args, " "), err.Error())
+		} else {
+			err = fmt.Errorf("command [%s] exited unexpected", strings.Join(p.cmd.Args, " "))
+		}
+		cancelHealthCheck(err)
 		return err
+	case err := <-healthCheckChan:
+		if err != nil {
+			p.state = StateFailed
+			return err
+		}
 	}
 
 	if p.config.UnloadAfter > 0 {
@@ -106,27 +137,64 @@ func (p *Process) start() error {
 		}()
 	}
 
+	p.state = StateReady
 	return nil
 }
 
 func (p *Process) Stop() {
-	p.Lock()
-	defer p.Unlock()
+	// wait for any inflight requests before proceeding
+	p.inFlightRequests.Wait()
 
-	if !p.isRunning || p.cmd == nil || p.cmd.Process == nil {
+	p.stateMutex.Lock()
+	defer p.stateMutex.Unlock()
+
+	if p.state != StateReady {
 		return
 	}
 
+	if p.cmd == nil || p.cmd.Process == nil {
+		// this situation should never happen... but if it does just update the state
+		fmt.Fprintf(p.logMonitor, "!!! State is Ready but Command is nil.")
+		p.state = StateStopped
+		return
+	}
+
+	// Pretty sure this stopping code needs some work for windows and
+	// will be a source of pain in the future.
+
 	p.cmd.Process.Signal(syscall.SIGTERM)
-	p.cmd.Process.Wait()
-	p.isRunning = false
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- p.cmd.Wait()
+	}()
+
+	select {
+	case <-ctx.Done():
+		fmt.Printf("!!! process for %s timed out waiting to stop\n", p.ID)
+		p.cmd.Process.Kill()
+		p.cmd.Wait()
+	case err := <-done:
+		if err != nil {
+			if err.Error() != "wait: no child processes" {
+				// possible that simple-responder for testing is just not
+				// existing right, so suppress those errors.
+				fmt.Printf("!!! process for %s stopped with error > %v\n", p.ID, err)
+			}
+		}
+	}
+	p.state = StateStopped
 }
 
-func (p *Process) IsRunning() bool {
-	return p.isRunning
+func (p *Process) CurrentState() ProcessState {
+	p.stateMutex.RLock()
+	defer p.stateMutex.RUnlock()
+	return p.state
 }
 
-func (p *Process) checkHealthEndpoint(cmdCtx context.Context) error {
+func (p *Process) checkHealthEndpoint(ctxFromStart context.Context) error {
 	if p.config.Proxy == "" {
 		return fmt.Errorf("no upstream available to check /health")
 	}
@@ -158,7 +226,7 @@ func (p *Process) checkHealthEndpoint(cmdCtx context.Context) error {
 			return err
 		}
 
-		ctx, cancel := context.WithTimeout(cmdCtx, time.Second)
+		ctx, cancel := context.WithTimeout(ctxFromStart, time.Second)
 		defer cancel()
 		req = req.WithContext(ctx)
 		resp, err := client.Do(req)
@@ -205,7 +273,11 @@ func (p *Process) checkHealthEndpoint(cmdCtx context.Context) error {
 }
 
 func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
-	if !p.isRunning {
+
+	p.inFlightRequests.Add(1)
+	defer p.inFlightRequests.Done()
+
+	if p.CurrentState() != StateReady {
 		if err := p.start(); err != nil {
 			errstr := fmt.Sprintf("unable to start process: %s", err)
 			http.Error(w, errstr, http.StatusInternalServerError)
