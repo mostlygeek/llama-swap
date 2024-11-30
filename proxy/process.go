@@ -142,7 +142,6 @@ func (p *Process) start() error {
 }
 
 func (p *Process) Stop() {
-
 	// wait for any inflight requests before proceeding
 	p.inFlightRequests.Wait()
 
@@ -160,8 +159,32 @@ func (p *Process) Stop() {
 		return
 	}
 
+	// Pretty sure this stopping code needs some work for windows and
+	// will be a source of pain in the future.
+
 	p.cmd.Process.Signal(syscall.SIGTERM)
-	p.cmd.Process.Wait()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- p.cmd.Wait()
+	}()
+
+	select {
+	case <-ctx.Done():
+		fmt.Printf("!!! process for %s timed out waiting to stop\n", p.ID)
+		p.cmd.Process.Kill()
+		p.cmd.Wait()
+	case err := <-done:
+		if err != nil {
+			if err.Error() != "wait: no child processes" {
+				// possible that simple-responder for testing is just not
+				// existing right, so suppress those errors.
+				fmt.Printf("!!! process for %s stopped with error > %v\n", p.ID, err)
+			}
+		}
+	}
 	p.state = StateStopped
 }
 
@@ -250,6 +273,10 @@ func (p *Process) checkHealthEndpoint(ctxFromStart context.Context) error {
 }
 
 func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
+
+	p.inFlightRequests.Add(1)
+	defer p.inFlightRequests.Done()
+
 	if p.CurrentState() != StateReady {
 		if err := p.start(); err != nil {
 			errstr := fmt.Sprintf("unable to start process: %s", err)
@@ -257,9 +284,6 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-
-	p.inFlightRequests.Add(1)
-	defer p.inFlightRequests.Done()
 
 	p.lastRequestHandled = time.Now()
 

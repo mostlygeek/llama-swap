@@ -3,9 +3,12 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -19,6 +22,8 @@ func main() {
 	// Define a command-line flag for the response message
 	responseMessage := flag.String("respond", "hi", "message to respond with")
 
+	silent := flag.Bool("silent", false, "disable all logging")
+
 	flag.Parse() // Parse the command-line flags
 
 	// Create a new Gin router
@@ -27,6 +32,12 @@ func main() {
 	// Set up the handler function using the provided response message
 	r.POST("/v1/chat/completions", func(c *gin.Context) {
 		c.Header("Content-Type", "text/plain")
+
+		// add a wait to simulate a slow query
+		if wait, err := time.ParseDuration(c.Query("wait")); err == nil {
+			time.Sleep(wait)
+		}
+
 		c.String(200, *responseMessage)
 	})
 
@@ -95,10 +106,34 @@ func main() {
 	})
 
 	address := "127.0.0.1:" + *port // Address with the specified port
-	fmt.Printf("Server is listening on port %s\n", *port)
 
-	// Start the server and log any error if it occurs
-	if err := r.Run(address); err != nil {
-		log.Printf("Error starting server: %s\n", err)
+	srv := &http.Server{
+		Addr:    address,
+		Handler: r.Handler(),
 	}
+
+	// Disable logging if the --silent flag is set
+	if *silent {
+		gin.SetMode(gin.ReleaseMode)
+		gin.DefaultWriter = io.Discard
+		log.SetOutput(io.Discard)
+	}
+
+	go func() {
+		log.Printf("simple-responder listening on %s\n", address)
+		// service connections
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("simple-responder err: %s\n", err)
+		}
+	}()
+
+	// Wait for interrupt signal to gracefully shutdown the server with
+	// a timeout of 5 seconds.
+	quit := make(chan os.Signal, 1)
+	// kill (no param) default send syscall.SIGTERM
+	// kill -2 is syscall.SIGINT
+	// kill -9 is syscall.SIGKILL but can't be catch, so don't need add it
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("simple-responder shutting down")
 }

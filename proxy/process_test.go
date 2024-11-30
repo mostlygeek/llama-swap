@@ -101,7 +101,7 @@ func TestProcess_UnloadAfterTTL(t *testing.T) {
 // issue #19
 func TestProcess_HTTPRequestsHaveTimeToFinish(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping long auto unload TTL test")
+		t.Skip("skipping long test")
 	}
 
 	expectedMessage := "12345"
