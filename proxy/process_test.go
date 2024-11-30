@@ -1,9 +1,12 @@
 package proxy
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -84,6 +87,7 @@ func TestProcess_UnloadAfterTTL(t *testing.T) {
 
 	// Proxy the request (auto start)
 	process.ProxyRequest(w, req)
+
 	assert.Equal(t, http.StatusOK, w.Code, "Expected status code %d, got %d", http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), expectedMessage)
 
@@ -93,4 +97,58 @@ func TestProcess_UnloadAfterTTL(t *testing.T) {
 	time.Sleep(5 * time.Second)
 
 	assert.False(t, process.IsRunning())
+}
+
+func TestProcess_HTTPRequestsHaveTimeToFinish(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping long auto unload TTL test")
+	}
+
+	expectedMessage := "12345"
+	config := getTestSimpleResponderConfig(expectedMessage)
+	process := NewProcess("t", 10, config, NewLogMonitorWriter(os.Stdout))
+	defer process.Stop()
+
+	results := map[string]string{
+		"12345": "",
+		"abcde": "",
+		"fghij": "",
+	}
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	// after 20ms tell the process to Stop() this should
+	// wait until all queued http requests have completed
+	go func() {
+		<-time.After(20 * time.Millisecond)
+		//process.Stop()
+	}()
+
+	for key := range results {
+		wg.Add(1)
+		go func(key string) {
+			defer wg.Done()
+			// Send a request that takes 100ms to complete (10 characters, 10ms / character)
+			req := httptest.NewRequest("GET", fmt.Sprintf("/slow-respond?echo=%s&delay=100ms", key), nil)
+			w := httptest.NewRecorder()
+
+			process.ProxyRequest(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Errorf("Expected status OK, got %d for key %s", w.Code, key)
+			}
+
+			mu.Lock()
+			results[key] = w.Body.String()
+			mu.Unlock()
+
+		}(key)
+	}
+
+	wg.Wait()
+
+	for key, result := range results {
+		assert.Equal(t, key, result)
+	}
 }

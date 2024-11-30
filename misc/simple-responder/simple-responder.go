@@ -4,7 +4,9 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -31,6 +33,36 @@ func main() {
 	r.POST("/v1/completions", func(c *gin.Context) {
 		c.Header("Content-Type", "text/plain")
 		c.String(200, *responseMessage)
+	})
+
+	r.GET("/slow-respond", func(c *gin.Context) {
+		echo := c.Query("echo")
+		delay := c.Query("delay")
+
+		if echo == "" {
+			echo = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+		}
+
+		// Parse the duration
+		if delay == "" {
+			delay = "100ms"
+		}
+
+		t, err := time.ParseDuration(delay)
+		if err != nil {
+			c.Header("Content-Type", "text/plain")
+			c.String(http.StatusBadRequest, fmt.Sprintf("Invalid duration: %s", err))
+			return
+		}
+
+		c.Header("Content-Type", "text/plain")
+		for _, char := range echo {
+			c.Writer.Write([]byte(string(char)))
+			c.Writer.Flush()
+
+			// wait
+			<-time.After(t)
+		}
 	})
 
 	r.GET("/test", func(c *gin.Context) {
