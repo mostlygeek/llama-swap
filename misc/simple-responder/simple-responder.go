@@ -3,60 +3,137 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
 func main() {
+	gin.SetMode(gin.TestMode)
 	// Define a command-line flag for the port
 	port := flag.String("port", "8080", "port to listen on")
 
 	// Define a command-line flag for the response message
 	responseMessage := flag.String("respond", "hi", "message to respond with")
 
+	silent := flag.Bool("silent", false, "disable all logging")
+
 	flag.Parse() // Parse the command-line flags
 
-	responseMessageHandler := func(w http.ResponseWriter, r *http.Request) {
-		// Set the header to text/plain
-		w.Header().Set("Content-Type", "text/plain")
-		fmt.Fprintln(w, *responseMessage)
-	}
+	// Create a new Gin router
+	r := gin.New()
 
 	// Set up the handler function using the provided response message
-	http.HandleFunc("/v1/chat/completions", responseMessageHandler)
-	http.HandleFunc("/v1/completions", responseMessageHandler)
-	http.HandleFunc("/test", responseMessageHandler)
+	r.POST("/v1/chat/completions", func(c *gin.Context) {
+		c.Header("Content-Type", "text/plain")
 
-	http.HandleFunc("/env", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain")
-		fmt.Fprintln(w, *responseMessage)
+		// add a wait to simulate a slow query
+		if wait, err := time.ParseDuration(c.Query("wait")); err == nil {
+			time.Sleep(wait)
+		}
+
+		c.String(200, *responseMessage)
+	})
+
+	r.POST("/v1/completions", func(c *gin.Context) {
+		c.Header("Content-Type", "text/plain")
+		c.String(200, *responseMessage)
+	})
+
+	r.GET("/slow-respond", func(c *gin.Context) {
+		echo := c.Query("echo")
+		delay := c.Query("delay")
+
+		if echo == "" {
+			echo = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+		}
+
+		// Parse the duration
+		if delay == "" {
+			delay = "100ms"
+		}
+
+		t, err := time.ParseDuration(delay)
+		if err != nil {
+			c.Header("Content-Type", "text/plain")
+			c.String(http.StatusBadRequest, fmt.Sprintf("Invalid duration: %s", err))
+			return
+		}
+
+		c.Header("Content-Type", "text/plain")
+		for _, char := range echo {
+			c.Writer.Write([]byte(string(char)))
+			c.Writer.Flush()
+
+			// wait
+			<-time.After(t)
+		}
+	})
+
+	r.GET("/test", func(c *gin.Context) {
+		c.Header("Content-Type", "text/plain")
+		c.String(200, *responseMessage)
+	})
+
+	r.GET("/env", func(c *gin.Context) {
+		c.Header("Content-Type", "text/plain")
+		c.String(200, *responseMessage)
 
 		// Get environment variables
 		envVars := os.Environ()
 
 		// Write each environment variable to the response
 		for _, envVar := range envVars {
-			fmt.Fprintln(w, envVar)
+			c.String(200, envVar)
 		}
 	})
 
 	// Set up the /health endpoint handler function
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		response := `{"status": "ok"}`
-		w.Write([]byte(response))
+	r.GET("/health", func(c *gin.Context) {
+		c.Header("Content-Type", "application/json")
+		c.JSON(200, gin.H{"status": "ok"})
 	})
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain")
-		fmt.Fprintf(w, "%s %s", r.Method, r.URL.Path)
+	r.GET("/", func(c *gin.Context) {
+		c.Header("Content-Type", "text/plain")
+		c.String(200, fmt.Sprintf("%s %s", c.Request.Method, c.Request.URL.Path))
 	})
 
 	address := "127.0.0.1:" + *port // Address with the specified port
-	fmt.Printf("Server is listening on port %s\n", *port)
 
-	// Start the server and log any error if it occurs
-	if err := http.ListenAndServe(address, nil); err != nil {
-		fmt.Printf("Error starting server: %s\n", err)
+	srv := &http.Server{
+		Addr:    address,
+		Handler: r.Handler(),
 	}
+
+	// Disable logging if the --silent flag is set
+	if *silent {
+		gin.SetMode(gin.ReleaseMode)
+		gin.DefaultWriter = io.Discard
+		log.SetOutput(io.Discard)
+	}
+
+	go func() {
+		log.Printf("simple-responder listening on %s\n", address)
+		// service connections
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("simple-responder err: %s\n", err)
+		}
+	}()
+
+	// Wait for interrupt signal to gracefully shutdown the server with
+	// a timeout of 5 seconds.
+	quit := make(chan os.Signal, 1)
+	// kill (no param) default send syscall.SIGTERM
+	// kill -2 is syscall.SIGINT
+	// kill -9 is syscall.SIGKILL but can't be catch, so don't need add it
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("simple-responder shutting down")
 }

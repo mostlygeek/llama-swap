@@ -69,9 +69,14 @@ func (pm *ProxyManager) StopProcesses() {
 
 // for internal usage
 func (pm *ProxyManager) stopProcesses() {
+	if len(pm.currentProcesses) == 0 {
+		return
+	}
+
 	for _, process := range pm.currentProcesses {
 		process.Stop()
 	}
+
 	pm.currentProcesses = make(map[string]*Process)
 }
 
@@ -185,7 +190,6 @@ func (pm *ProxyManager) proxyChatRequestHandler(c *gin.Context) {
 
 		process.ProxyRequest(c.Writer, c.Request)
 	}
-
 }
 
 func (pm *ProxyManager) proxyNoRouteHandler(c *gin.Context) {
