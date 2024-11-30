@@ -93,6 +93,7 @@ func TestProxyManager_SwapMultiProcessParallelRequests(t *testing.T) {
 	}
 
 	proxy := New(config)
+	defer proxy.StopProcesses()
 
 	results := map[string]string{}
 
@@ -105,7 +106,7 @@ func TestProxyManager_SwapMultiProcessParallelRequests(t *testing.T) {
 			defer wg.Done()
 
 			reqBody := fmt.Sprintf(`{"model":"%s"}`, key)
-			req := httptest.NewRequest("POST", "/v1/chat/completions?wait=1500ms", bytes.NewBufferString(reqBody))
+			req := httptest.NewRequest("POST", "/v1/chat/completions?wait=1000ms", bytes.NewBufferString(reqBody))
 			w := httptest.NewRecorder()
 
 			proxy.HandlerFunc(w, req)
@@ -129,6 +130,4 @@ func TestProxyManager_SwapMultiProcessParallelRequests(t *testing.T) {
 	for key, result := range results {
 		assert.Equal(t, key, result)
 	}
-
-	proxy.StopProcesses()
 }
