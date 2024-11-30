@@ -3,11 +3,14 @@ package main
 import (
 	"flag"
 	"fmt"
-	"net/http"
+	"log"
 	"os"
+
+	"github.com/gin-gonic/gin"
 )
 
 func main() {
+	gin.SetMode(gin.TestMode)
 	// Define a command-line flag for the port
 	port := flag.String("port", "8080", "port to listen on")
 
@@ -16,47 +19,54 @@ func main() {
 
 	flag.Parse() // Parse the command-line flags
 
-	responseMessageHandler := func(w http.ResponseWriter, r *http.Request) {
-		// Set the header to text/plain
-		w.Header().Set("Content-Type", "text/plain")
-		fmt.Fprintln(w, *responseMessage)
-	}
+	// Create a new Gin router
+	r := gin.New()
 
 	// Set up the handler function using the provided response message
-	http.HandleFunc("/v1/chat/completions", responseMessageHandler)
-	http.HandleFunc("/v1/completions", responseMessageHandler)
-	http.HandleFunc("/test", responseMessageHandler)
+	r.POST("/v1/chat/completions", func(c *gin.Context) {
+		c.Header("Content-Type", "text/plain")
+		c.String(200, *responseMessage)
+	})
 
-	http.HandleFunc("/env", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain")
-		fmt.Fprintln(w, *responseMessage)
+	r.POST("/v1/completions", func(c *gin.Context) {
+		c.Header("Content-Type", "text/plain")
+		c.String(200, *responseMessage)
+	})
+
+	r.GET("/test", func(c *gin.Context) {
+		c.Header("Content-Type", "text/plain")
+		c.String(200, *responseMessage)
+	})
+
+	r.GET("/env", func(c *gin.Context) {
+		c.Header("Content-Type", "text/plain")
+		c.String(200, *responseMessage)
 
 		// Get environment variables
 		envVars := os.Environ()
 
 		// Write each environment variable to the response
 		for _, envVar := range envVars {
-			fmt.Fprintln(w, envVar)
+			c.String(200, envVar)
 		}
 	})
 
 	// Set up the /health endpoint handler function
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		response := `{"status": "ok"}`
-		w.Write([]byte(response))
+	r.GET("/health", func(c *gin.Context) {
+		c.Header("Content-Type", "application/json")
+		c.JSON(200, gin.H{"status": "ok"})
 	})
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain")
-		fmt.Fprintf(w, "%s %s", r.Method, r.URL.Path)
+	r.GET("/", func(c *gin.Context) {
+		c.Header("Content-Type", "text/plain")
+		c.String(200, fmt.Sprintf("%s %s", c.Request.Method, c.Request.URL.Path))
 	})
 
 	address := "127.0.0.1:" + *port // Address with the specified port
 	fmt.Printf("Server is listening on port %s\n", *port)
 
 	// Start the server and log any error if it occurs
-	if err := http.ListenAndServe(address, nil); err != nil {
-		fmt.Printf("Error starting server: %s\n", err)
+	if err := r.Run(address); err != nil {
+		log.Printf("Error starting server: %s\n", err)
 	}
 }
