@@ -17,10 +17,9 @@ import (
 type ProcessState string
 
 const (
-	StateStopped  ProcessState = ProcessState("stopped")
-	StateReady    ProcessState = ProcessState("ready")
-	StateFailed   ProcessState = ProcessState("failed")
-	StateStopping ProcessState = ProcessState("stopping")
+	StateStopped ProcessState = ProcessState("stopped")
+	StateReady   ProcessState = ProcessState("ready")
+	StateFailed  ProcessState = ProcessState("failed")
 )
 
 type Process struct {
