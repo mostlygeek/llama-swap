@@ -148,17 +148,26 @@ func TestConfig_FindConfig(t *testing.T) {
 }
 
 func TestConfig_SanitizeCommand(t *testing.T) {
-	// Test a simple command
-	args, err := SanitizeCommand("python model1.py")
-	assert.NoError(t, err)
-	assert.Equal(t, []string{"python", "model1.py"}, args)
 
 	// Test a command with spaces and newlines
-	args, err = SanitizeCommand(`python model1.py \
-    --arg1 value1 \
-    --arg2 value2`)
+	args, err := SanitizeCommand(`python model1.py \
+    -a "double quotes" \
+    --arg2 'single quotes'
+	-s
+	--arg3 123 \
+	--arg4 '"string in string"'
+	-c "'single quoted'"
+	`)
 	assert.NoError(t, err)
-	assert.Equal(t, []string{"python", "model1.py", "--arg1", "value1", "--arg2", "value2"}, args)
+	assert.Equal(t, []string{
+		"python", "model1.py",
+		"-a", "double quotes",
+		"--arg2", "single quotes",
+		"-s",
+		"--arg3", "123",
+		"--arg4", `"string in string"`,
+		"-c", `'single quoted'`,
+	}, args)
 
 	// Test an empty command
 	args, err = SanitizeCommand("")

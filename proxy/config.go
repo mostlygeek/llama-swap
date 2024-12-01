@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/google/shlex"
 	"gopkg.in/yaml.v3"
 )
 
@@ -81,7 +82,10 @@ func SanitizeCommand(cmdStr string) ([]string, error) {
 	cmdStr = strings.ReplaceAll(cmdStr, "\\\n", " ")
 
 	// Split the command into arguments
-	args := strings.Fields(cmdStr)
+	args, err := shlex.Split(cmdStr)
+	if err != nil {
+		return nil, err
+	}
 
 	// Ensure the command is not empty
 	if len(args) == 0 {
