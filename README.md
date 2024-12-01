@@ -64,7 +64,7 @@ models:
 #
 # Tips:
 #  - each model must be listening on a unique address and port
-#  - the model name is in this format: "profile_name/model", like "coding/qwen"
+#  - the model name is in this format: "profile_name:model", like "coding:qwen"
 #  - the profile will load and unload all models in the profile at the same time
 profiles:
   coding:
