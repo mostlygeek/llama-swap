@@ -33,7 +33,7 @@ func TestProxyManager_SwapProcessCorrectly(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Body.String(), modelName)
 
-		_, exists := proxy.currentProcesses["/"+modelName]
+		_, exists := proxy.currentProcesses[ProcessKeyName("", modelName)]
 		assert.True(t, exists, "expected %s key in currentProcesses", modelName)
 
 	}
@@ -43,21 +43,31 @@ func TestProxyManager_SwapProcessCorrectly(t *testing.T) {
 }
 
 func TestProxyManager_SwapMultiProcess(t *testing.T) {
+
+	model1 := "path1/model1"
+	model2 := "path2/model2"
+
+	profileModel1 := ProcessKeyName("test", model1)
+	profileModel2 := ProcessKeyName("test", model2)
+
 	config := &Config{
 		HealthCheckTimeout: 15,
 		Models: map[string]ModelConfig{
-			"model1": getTestSimpleResponderConfig("model1"),
-			"model2": getTestSimpleResponderConfig("model2"),
+			model1: getTestSimpleResponderConfig("model1"),
+			model2: getTestSimpleResponderConfig("model2"),
 		},
 		Profiles: map[string][]string{
-			"test": {"model1", "model2"},
+			"test": {model1, model2},
 		},
 	}
 
 	proxy := New(config)
 	defer proxy.StopProcesses()
 
-	for modelID, requestedModel := range map[string]string{"model1": "test/model1", "model2": "test/model2"} {
+	for modelID, requestedModel := range map[string]string{
+		"model1": profileModel1,
+		"model2": profileModel2,
+	} {
 		reqBody := fmt.Sprintf(`{"model":"%s"}`, requestedModel)
 		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
 		w := httptest.NewRecorder()
@@ -69,11 +79,11 @@ func TestProxyManager_SwapMultiProcess(t *testing.T) {
 
 	// make sure there's two loaded models
 	assert.Len(t, proxy.currentProcesses, 2)
-	_, exists := proxy.currentProcesses["test/model1"]
-	assert.True(t, exists, "expected test/model1 key in currentProcesses")
+	_, exists := proxy.currentProcesses[profileModel1]
+	assert.True(t, exists, "expected "+profileModel1+" key in currentProcesses")
 
-	_, exists = proxy.currentProcesses["test/model2"]
-	assert.True(t, exists, "expected test/model2 key in currentProcesses")
+	_, exists = proxy.currentProcesses[profileModel2]
+	assert.True(t, exists, "expected "+profileModel2+" key in currentProcesses")
 }
 
 // When a request for a different model comes in ProxyManager should wait until
