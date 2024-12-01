@@ -14,6 +14,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const (
+	PROFILE_SPLIT_CHAR = ":"
+)
+
 type ProxyManager struct {
 	sync.Mutex
 
@@ -106,15 +110,15 @@ func (pm *ProxyManager) swapModel(requestedModel string) (*Process, error) {
 	defer pm.Unlock()
 
 	// Check if requestedModel contains a /
-	groupName, modelName := "", requestedModel
-	if idx := strings.Index(requestedModel, "/"); idx != -1 {
-		groupName = requestedModel[:idx]
+	profileName, modelName := "", requestedModel
+	if idx := strings.Index(requestedModel, PROFILE_SPLIT_CHAR); idx != -1 {
+		profileName = requestedModel[:idx]
 		modelName = requestedModel[idx+1:]
 	}
 
-	if groupName != "" {
-		if _, found := pm.config.Profiles[groupName]; !found {
-			return nil, fmt.Errorf("model group not found %s", groupName)
+	if profileName != "" {
+		if _, found := pm.config.Profiles[profileName]; !found {
+			return nil, fmt.Errorf("model group not found %s", profileName)
 		}
 	}
 
@@ -125,7 +129,8 @@ func (pm *ProxyManager) swapModel(requestedModel string) (*Process, error) {
 	}
 
 	// exit early when already running, otherwise stop everything and swap
-	requestedProcessKey := groupName + "/" + realModelName
+	requestedProcessKey := ProcessKeyName(profileName, realModelName)
+
 	if process, found := pm.currentProcesses[requestedProcessKey]; found {
 		return process, nil
 	}
@@ -133,25 +138,25 @@ func (pm *ProxyManager) swapModel(requestedModel string) (*Process, error) {
 	// stop all running models
 	pm.stopProcesses()
 
-	if groupName == "" {
+	if profileName == "" {
 		modelConfig, modelID, found := pm.config.FindConfig(realModelName)
 		if !found {
 			return nil, fmt.Errorf("could not find configuration for %s", realModelName)
 		}
 
 		process := NewProcess(modelID, pm.config.HealthCheckTimeout, modelConfig, pm.logMonitor)
-		processKey := groupName + "/" + modelID
+		processKey := ProcessKeyName(profileName, modelID)
 		pm.currentProcesses[processKey] = process
 	} else {
-		for _, modelName := range pm.config.Profiles[groupName] {
+		for _, modelName := range pm.config.Profiles[profileName] {
 			if realModelName, found := pm.config.RealModelName(modelName); found {
 				modelConfig, modelID, found := pm.config.FindConfig(realModelName)
 				if !found {
-					return nil, fmt.Errorf("could not find configuration for %s in group %s", realModelName, groupName)
+					return nil, fmt.Errorf("could not find configuration for %s in group %s", realModelName, profileName)
 				}
 
 				process := NewProcess(modelID, pm.config.HealthCheckTimeout, modelConfig, pm.logMonitor)
-				processKey := groupName + "/" + modelID
+				processKey := ProcessKeyName(profileName, modelID)
 				pm.currentProcesses[processKey] = process
 			}
 		}
@@ -200,4 +205,8 @@ func (pm *ProxyManager) proxyNoRouteHandler(c *gin.Context) {
 	}
 
 	c.AbortWithError(http.StatusBadRequest, fmt.Errorf("no strategy to handle request"))
+}
+
+func ProcessKeyName(groupName, modelName string) string {
+	return groupName + PROFILE_SPLIT_CHAR + modelName
 }
