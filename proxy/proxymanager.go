@@ -98,6 +98,10 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 	// Set the Content-Type header to application/json
 	c.Header("Content-Type", "application/json")
 
+	if origin := c.Request.Header.Get("Origin"); origin != "" {
+		c.Header("Access-Control-Allow-Origin", origin)
+	}
+
 	// Encode the data as JSON and write it to the response writer
 	if err := json.NewEncoder(c.Writer).Encode(map[string]interface{}{"data": data}); err != nil {
 		c.AbortWithError(http.StatusInternalServerError, fmt.Errorf("error encoding JSON"))
