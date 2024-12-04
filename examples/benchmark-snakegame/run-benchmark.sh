@@ -22,22 +22,19 @@ for model in "$@"; do
     echo -n "$model,"
 
     for lang in "python" "typescript" "swift"; do
-        response=$(curl -s --url "$url/v1/chat/completions" -d "{\"messages\": [{\"role\": \"system\", \"content\": \"you only write code.\"}, {\"role\": \"user\", \"content\": \"write snake game in $lang\"}], \"temperature\": 0.1, \"model\":\"$model\"}")
+        # expects a llama.cpp after PR https://github.com/ggerganov/llama.cpp/pull/10548
+        # (Dec 3rd/2024)
+        time=$(curl -s --url "$url/v1/chat/completions" -d "{\"messages\": [{\"role\": \"system\", \"content\": \"you only write code.\"}, {\"role\": \"user\", \"content\": \"write snake game in $lang\"}], \"top_k\": 1, \"timings_per_token\":true, \"model\":\"$model\"}" | jq -r .timings.predicted_per_second)
+
         if [ $? -ne 0 ]; then
             time="error"
-        else
-            time=$(curl -s --url "$url/logs" | grep -oE '\d+(?:\.\d+)? tokens per second' | awk '{print $1}' | tail -n 1)
-            if [ $? -ne 0 ]; then
-                time="error"
-            fi
+            exit 1
         fi
 
         if [ "$lang" != "swift" ]; then
-            echo -n "$time,"
+            printf "%0.2f tps," $time
         else
-            echo -n "$time"
+            printf "%0.2f tps\n" $time
         fi
     done
-
-    echo ""
 done
