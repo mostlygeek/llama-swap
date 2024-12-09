@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Logs</title>
+    <style>
+        body {
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            font-family: "Courier New", Courier, monospace;
+        }
+        #log-stream {
+            flex: 1;
+            margin: 1em;
+            padding: 10px;
+            background: #f4f4f4;
+            overflow-y: auto;
+            white-space: pre-wrap; /* Ensures line wrapping */
+            word-wrap: break-word; /* Ensures long words wrap */
+        }
+    </style>
+</head>
+<body>
+    <pre id="log-stream">Waiting for logs...
+</pre>
+
+    <script>
+        // Establish an EventSource connection to the SSE endpoint
+        if (typeof(EventSource) !== "undefined") {
+            const eventSource = new EventSource("/logs/streamSSE");
+
+            eventSource.onmessage = function(event) {
+                // Append the new log message to the <pre> element
+                const logStream = document.getElementById('log-stream');
+
+                logStream.textContent += event.data;
+
+                // Auto-scroll to the bottom
+                logStream.scrollTop = logStream.scrollHeight;
+            };
+
+            eventSource.onerror = function(err) {
+                console.error("EventSource failed:", err);
+            };
+        } else {
+            console.error("SSE not supported by this browser.");
+        }
+    </script>
+</body>
+</html>
