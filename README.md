@@ -9,13 +9,24 @@ Features:
 
 - ✅ Easy to deploy: single binary with no dependencies
 - ✅ Single yaml configuration file
-- ✅ Automatic switching between models
-- ✅ Full control over llama.cpp server settings per model
+- ✅ On-demand model switching
+- ✅ Full control over server settings per model
 - ✅ OpenAI API support (`v1/completions` and `v1/chat/completions`)
 - ✅ Multiple GPU support
 - ✅ Run multiple models at once with `profiles`
 - ✅ Remote log monitoring at `/log`
 - ✅ Automatic unloading of models from GPUs after timeout
+
+## Releases
+
+Builds for Linux and OSX are available on the [Releases](https://github.com/mostlygeek/llama-swap/releases) page.
+
+### Building from source
+
+1. Install golang for your system
+1. `git clone git@github.com:mostlygeek/llama-swap.git`
+1. `make clean all`
+1. Binaries will be in `build/` subdirectory
 
 ## config.yaml
 
@@ -126,9 +137,3 @@ StartLimitInterval=30
 [Install]
 WantedBy=multi-user.target
 ```
-
-## Building from Source
-
-1. Install golang for your system
-1. run `make clean all`
-1. binaries will be built into `build/` directory
