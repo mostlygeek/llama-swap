@@ -1,19 +1,41 @@
 package proxy
 
 import (
+	"embed"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
 
+//go:embed html/logs.html
+var logsHTML []byte
+
+// make sure embed is kept there by the IDE auto-package importer
+var _ = embed.FS{}
+
 func (pm *ProxyManager) sendLogsHandlers(c *gin.Context) {
-	c.Header("Content-Type", "text/plain")
-	history := pm.logMonitor.GetHistory()
-	_, err := c.Writer.Write(history)
-	if err != nil {
-		c.AbortWithError(http.StatusInternalServerError, err)
-		return
+
+	accept := c.GetHeader("Accept")
+	if strings.Contains(accept, "text/html") {
+		// Set the Content-Type header to text/html
+		c.Header("Content-Type", "text/html")
+
+		// Write the embedded HTML content to the response
+		_, err := c.Writer.Write(logsHTML)
+		if err != nil {
+			c.AbortWithError(http.StatusInternalServerError, fmt.Errorf("failed to write response: %v", err))
+			return
+		}
+	} else {
+		c.Header("Content-Type", "text/plain")
+		history := pm.logMonitor.GetHistory()
+		_, err := c.Writer.Write(history)
+		if err != nil {
+			c.AbortWithError(http.StatusInternalServerError, err)
+			return
+		}
 	}
 }
 

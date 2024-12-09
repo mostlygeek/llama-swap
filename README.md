@@ -2,7 +2,8 @@
 
 ![llama-swap header image](header.jpeg)
 
-llama-swap is a golang server that automatically swaps the llama.cpp server on demand. Since [llama.cpp's server](https://github.com/ggerganov/llama.cpp/tree/master/examples/server) can't swap models, let's swap the server instead!
+# Introduction
+llama-swap is an OpenAI API compatible server that gives you complete control over how you use your hardware. It automatically swaps to the configuration of your choice for serving a model. Since [llama.cpp's server](https://github.com/ggerganov/llama.cpp/tree/master/examples/server) can't swap models, let's swap the server instead!
 
 Features:
 
@@ -83,22 +84,22 @@ More [examples](examples/README.md) are available for different use cases.
 
 ## Monitoring Logs
 
-The `/logs` endpoint is available to monitor what llama-swap is doing. It will send the last 10KB of logs. Useful for monitoring the output of llama-server. It also supports streaming of logs.
+Open the `http://<host>/logs` with your browser to get a web interface with streaming logs.
 
-Usage:
+Of course, CLI access is also supported:
 
 ```
 # sends up to the last 10KB of logs
 curl http://host/logs'
 
-# streams logs using chunk encoding
+# streams logs
 curl -Ns 'http://host/logs/stream'
+
+# stream and filter logs with linux pipes
+curl -Ns http://host/logs/stream | grep 'eval time'
 
 # skips history and just streams new log entries
 curl -Ns 'http://host/logs/stream?no-history'
-
-# streams logs using Server Sent Events
-curl -Ns 'http://host/logs/streamSSE'
 ```
 
 ## Systemd Unit Files
