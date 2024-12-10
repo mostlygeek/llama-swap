@@ -16,6 +16,7 @@ Features:
 - ✅ Run multiple models at once with `profiles`
 - ✅ Remote log monitoring at `/log`
 - ✅ Automatic unloading of models from GPUs after timeout
+- ✅ Use any local server that provides an OpenAI compatible API (llama.cpp, vllm, tabblyAPI, etc)
 
 ## Releases
 
