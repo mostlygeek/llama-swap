@@ -82,18 +82,31 @@ func TestProcess_UnloadAfterTTL(t *testing.T) {
 	process := NewProcess("ttl", 2, config, NewLogMonitorWriter(io.Discard))
 	defer process.Stop()
 
-	req := httptest.NewRequest("GET", "/test", nil)
+	// this should take 4 seconds
+	req1 := httptest.NewRequest("GET", "/slow-respond?echo=1234&delay=1000ms", nil)
+	req2 := httptest.NewRequest("GET", "/test", nil)
+
 	w := httptest.NewRecorder()
 
-	// Proxy the request (auto start)
-	process.ProxyRequest(w, req)
+	// Proxy the request (auto start) with a slow response that takes longer than config.UnloadAfter
+	process.ProxyRequest(w, req1)
 
+	t.Log("sending slow first request (4 seconds)")
+	assert.Equal(t, http.StatusOK, w.Code, "Expected status code %d, got %d", http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "1234")
+	assert.Equal(t, StateReady, process.CurrentState())
+
+	// ensure the TTL timeout does not race slow requests (see issue #25)
+	t.Log("sending second request (1 second)")
+	time.Sleep(time.Second)
+	w = httptest.NewRecorder()
+	process.ProxyRequest(w, req2)
 	assert.Equal(t, http.StatusOK, w.Code, "Expected status code %d, got %d", http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), expectedMessage)
-
 	assert.Equal(t, StateReady, process.CurrentState())
 
 	// wait 5 seconds
+	t.Log("sleep 5 seconds and check if unloaded")
 	time.Sleep(5 * time.Second)
 	assert.Equal(t, StateStopped, process.CurrentState())
 }

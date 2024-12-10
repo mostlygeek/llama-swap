@@ -122,16 +122,15 @@ func (p *Process) start() error {
 		// start a goroutine to check every second if
 		// the process should be stopped
 		go func() {
-			ticker := time.NewTicker(time.Second)
-			defer ticker.Stop()
 			maxDuration := time.Duration(p.config.UnloadAfter) * time.Second
 
-			for {
-				<-ticker.C
+			for range time.Tick(time.Second) {
+				// wait for all inflight requests to complete and ticker
+				p.inFlightRequests.Wait()
+
 				if time.Since(p.lastRequestHandled) > maxDuration {
 					fmt.Fprintf(p.logMonitor, "!!! Unloading model %s, TTL of %d reached.\n", p.ID, p.config.UnloadAfter)
 					p.Stop()
-					return
 				}
 			}
 		}()
@@ -275,7 +274,11 @@ func (p *Process) checkHealthEndpoint(ctxFromStart context.Context) error {
 func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 
 	p.inFlightRequests.Add(1)
-	defer p.inFlightRequests.Done()
+
+	defer func() {
+		p.lastRequestHandled = time.Now()
+		p.inFlightRequests.Done()
+	}()
 
 	if p.CurrentState() != StateReady {
 		if err := p.start(); err != nil {
@@ -284,8 +287,6 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-
-	p.lastRequestHandled = time.Now()
 
 	proxyTo := p.config.Proxy
 	client := &http.Client{}
