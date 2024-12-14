@@ -25,6 +25,12 @@ jobs:
         id: get_commit_count
         run: echo "COMMIT_COUNT=$(git rev-list --count HEAD)" >> $GITHUB_OUTPUT
 
+      - name: Create release tag
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git tag -a v${{ steps.get_commit_count.outputs.COMMIT_COUNT }} -m "Release v${{ steps.get_commit_count.outputs.COMMIT_COUNT }}"
+          git push origin v${{ steps.get_commit_count.outputs.COMMIT_COUNT }}
       -
         name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
@@ -34,4 +40,3 @@ jobs:
           args: release --clean --snapshot
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GORELEASER_CURRENT_TAG: v${{ steps.get_commit_count.outputs.COMMIT_COUNT }}
