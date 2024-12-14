@@ -9,9 +9,6 @@ ifneq ($(shell git status --porcelain),)
     GIT_HASH := $(GIT_HASH)+
 endif
 
-# Get the build number from the commit count on the main branch
-COMMIT_COUNT := $(shell git rev-list --count HEAD)
-
 # Capture the current build date in RFC3339 format
 BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
@@ -31,12 +28,12 @@ test-all:
 # Build OSX binary
 mac:
 	@echo "Building Mac binary..."
-	GOOS=darwin GOARCH=arm64 go build -ldflags="-X main.commit=${GIT_HASH} -X main.version=${COMMIT_COUNT} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-darwin-arm64
+	GOOS=darwin GOARCH=arm64 go build -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-darwin-arm64
 
 # Build Linux binary
 linux:
 	@echo "Building Linux binary..."
-	GOOS=linux GOARCH=amd64 go build -ldflags="-X main.commit=${GIT_HASH} -X main.version=${COMMIT_COUNT} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-linux-amd64
+	GOOS=linux GOARCH=amd64 go build -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-linux-amd64
 
 # for testing proxy.Process
 simple-responder:
@@ -55,9 +52,12 @@ release:
 		echo "Error: There are unstaged changes. Please commit or stash your changes before creating a release tag." >&2; \
 		exit 1; \
 	fi
-	@echo "Creating release tag v$(COMMIT_COUNT)..."
-	git tag v$(COMMIT_COUNT)
-	git push origin v$(COMMIT_COUNT)
+
+# Get the highest tag in v{number} format, increment it, and create a new tag
+	@highest_tag=$$(git tag --sort=-v:refname | grep -E '^v[0-9]+$$' | head -n 1 || echo "v0"); \
+	new_tag="v$$(( $${highest_tag#v} + 1 ))"; \
+	echo "tagging new version: $$new_tag"; \
+	git tag "$$new_tag";
 
 # Phony targets
 .PHONY: all clean osx linux

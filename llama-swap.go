@@ -22,7 +22,7 @@ func main() {
 	flag.Parse() // Parse the command-line flags
 
 	if *showVersion {
-		fmt.Printf("version: v%s (%s), built at %s\n", version, commit, date)
+		fmt.Printf("version: %s (%s), built at %s\n", version, commit, date)
 		os.Exit(0)
 	}
 
