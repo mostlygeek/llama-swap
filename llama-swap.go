@@ -9,9 +9,9 @@ import (
 	"github.com/mostlygeek/llama-swap/proxy"
 )
 
-// see Makefile which injects new values at build time
-var GIT_HASH string = "abcd1234"
-var COMMIT_COUNT string = "0-dev"
+var version string = "0"
+var commit string = "abcd1234"
+var date = "unknown"
 
 func main() {
 	// Define a command-line flag for the port
@@ -22,7 +22,7 @@ func main() {
 	flag.Parse() // Parse the command-line flags
 
 	if *showVersion {
-		fmt.Printf("version: v%s (%s)\n", COMMIT_COUNT, GIT_HASH)
+		fmt.Printf("version: v%s (%s), built at %s\n", version, commit, date)
 		os.Exit(0)
 	}
 
