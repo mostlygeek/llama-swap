@@ -45,5 +45,16 @@ simple-responder:
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
+# Create a new release tag
+release:
+	@echo "Checking for unstaged changes..."
+	@if [ -n "$(shell git status --porcelain)" ]; then \
+		echo "Error: There are unstaged changes. Please commit or stash your changes before creating a release tag." >&2; \
+		exit 1; \
+	fi
+	@echo "Creating release tag v$(COMMIT_COUNT)..."
+	git tag v$(COMMIT_COUNT)
+	git push origin v$(COMMIT_COUNT)
+
 # Phony targets
 .PHONY: all clean osx linux
