@@ -2,8 +2,8 @@ name: goreleaser
 
 on:
   push:
-    tags:
-      - '*'
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -20,14 +20,18 @@ jobs:
       -
         name: Set up Go
         uses: actions/setup-go@v5
+
+      - name: Get commit count
+        id: get_commit_count
+        run: echo "COMMIT_COUNT=$(git rev-list --count HEAD)" >> $GITHUB_OUTPUT
+
       -
         name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
-          # either 'goreleaser' (default) or 'goreleaser-pro'
           distribution: goreleaser
-          # 'latest', 'nightly', or a semver
-          version: '~> v2'
-          args: release --clean
+          version: latest
+          args: release --clean --snapshot
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GORELEASER_CURRENT_TAG: v${{ steps.get_commit_count.outputs.COMMIT_COUNT }}

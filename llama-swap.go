@@ -9,12 +9,22 @@ import (
 	"github.com/mostlygeek/llama-swap/proxy"
 )
 
+// see Makefile which injects new values at build time
+var GIT_HASH string = "abcd1234"
+var COMMIT_COUNT string = "0-dev"
+
 func main() {
 	// Define a command-line flag for the port
 	configPath := flag.String("config", "config.yaml", "config file name")
 	listenStr := flag.String("listen", ":8080", "listen ip/port")
+	showVersion := flag.Bool("version", false, "show version of build")
 
 	flag.Parse() // Parse the command-line flags
+
+	if *showVersion {
+		fmt.Printf("version: v%s (%s)\n", COMMIT_COUNT, GIT_HASH)
+		os.Exit(0)
+	}
 
 	config, err := proxy.LoadConfig(*configPath)
 	if err != nil {
