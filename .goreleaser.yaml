@@ -1,5 +1,8 @@
 version: 2
 
+release:
+  name_template: "v{{.Env.GORELEASER_CURRENT_TAG}}"
+
 builds:
   - env:
       - CGO_ENABLED=0
