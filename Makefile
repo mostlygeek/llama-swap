@@ -12,6 +12,9 @@ endif
 # Get the build number from the commit count on the main branch
 COMMIT_COUNT := $(shell git rev-list --count HEAD)
 
+# Capture the current build date in RFC3339 format
+BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+
 # Default target: Builds binaries for both OSX and Linux
 all: mac linux simple-responder
 
@@ -28,12 +31,12 @@ test-all:
 # Build OSX binary
 mac:
 	@echo "Building Mac binary..."
-	GOOS=darwin GOARCH=arm64 go build -ldflags="-X main.GIT_HASH=${GIT_HASH} -X main.COMMIT_COUNT=${COMMIT_COUNT}" -o $(BUILD_DIR)/$(APP_NAME)-darwin-arm64
+	GOOS=darwin GOARCH=arm64 go build -ldflags="-X main.commit=${GIT_HASH} -X main.version=${COMMIT_COUNT} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-darwin-arm64
 
 # Build Linux binary
 linux:
 	@echo "Building Linux binary..."
-	GOOS=linux GOARCH=amd64 go build -ldflags="-X main.GIT_HASH=${GIT_HASH} -X main.COMMIT_COUNT=${COMMIT_COUNT}" -o $(BUILD_DIR)/$(APP_NAME)-linux-amd64
+	GOOS=linux GOARCH=amd64 go build -ldflags="-X main.commit=${GIT_HASH} -X main.version=${COMMIT_COUNT} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-linux-amd64
 
 # for testing proxy.Process
 simple-responder:
