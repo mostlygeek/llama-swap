@@ -125,6 +125,10 @@ func (p *Process) start() error {
 			maxDuration := time.Duration(p.config.UnloadAfter) * time.Second
 
 			for range time.Tick(time.Second) {
+				if p.state != StateReady {
+					return
+				}
+
 				// wait for all inflight requests to complete and ticker
 				p.inFlightRequests.Wait()
 
@@ -162,25 +166,25 @@ func (p *Process) Stop() {
 	// will be a source of pain in the future.
 
 	p.cmd.Process.Signal(syscall.SIGTERM)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	sigtermTimeout, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	done := make(chan error, 1)
+	sigtermNormal := make(chan error, 1)
 	go func() {
-		done <- p.cmd.Wait()
+		sigtermNormal <- p.cmd.Wait()
 	}()
 
 	select {
-	case <-ctx.Done():
-		fmt.Printf("!!! process for %s timed out waiting to stop\n", p.ID)
+	case <-sigtermTimeout.Done():
+		fmt.Fprintf(p.logMonitor, "!!! process for %s timed out waiting to stop\n", p.ID)
 		p.cmd.Process.Kill()
 		p.cmd.Wait()
-	case err := <-done:
+	case err := <-sigtermNormal:
 		if err != nil {
 			if err.Error() != "wait: no child processes" {
 				// possible that simple-responder for testing is just not
 				// existing right, so suppress those errors.
-				fmt.Printf("!!! process for %s stopped with error > %v\n", p.ID, err)
+				fmt.Fprintf(p.logMonitor, "!!! process for %s stopped with error > %v\n", p.ID, err)
 			}
 		}
 	}
