@@ -47,6 +47,7 @@ func New(config *Config) *ProxyManager {
 	pm.ginEngine.GET("/logs", pm.sendLogsHandlers)
 	pm.ginEngine.GET("/logs/stream", pm.streamLogsHandler)
 	pm.ginEngine.GET("/logs/streamSSE", pm.streamLogsHandlerSSE)
+	pm.ginEngine.Any("/upstream/:model_id/*upstreamPath", pm.proxyToUpstream)
 
 	// Disable console color for testing
 	gin.DisableConsoleColor()
@@ -111,7 +112,7 @@ func (pm *ProxyManager) swapModel(requestedModel string) (*Process, error) {
 	pm.Lock()
 	defer pm.Unlock()
 
-	// Check if requestedModel contains a /
+	// Check if requestedModel contains a PROFILE_SPLIT_CHAR
 	profileName, modelName := "", requestedModel
 	if idx := strings.Index(requestedModel, PROFILE_SPLIT_CHAR); idx != -1 {
 		profileName = requestedModel[:idx]
@@ -166,6 +167,23 @@ func (pm *ProxyManager) swapModel(requestedModel string) (*Process, error) {
 
 	// requestedProcessKey should exist due to swap
 	return pm.currentProcesses[requestedProcessKey], nil
+}
+
+func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
+	requestedModel := c.Param("model_id")
+
+	if requestedModel == "" {
+		c.AbortWithError(http.StatusBadRequest, fmt.Errorf("model id required in path"))
+		return
+	}
+
+	if process, err := pm.swapModel(requestedModel); err != nil {
+		c.AbortWithError(http.StatusNotFound, fmt.Errorf("unable to swap to model, %s", err.Error()))
+	} else {
+		// rewrite the path
+		c.Request.URL.Path = c.Param("upstreamPath")
+		process.ProxyRequest(c.Writer, c.Request)
+	}
 }
 
 func (pm *ProxyManager) proxyChatRequestHandler(c *gin.Context) {
