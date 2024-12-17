@@ -8,7 +8,7 @@ llama-swap is an OpenAI API compatible server that gives you complete control ov
 Features:
 
 - ✅ Easy to deploy: single binary with no dependencies
-- ✅ Single yaml configuration file
+- ✅ Easy to config: single yaml file
 - ✅ On-demand model switching
 - ✅ Full control over server settings per model
 - ✅ OpenAI API support (`v1/completions` and `v1/chat/completions`)
@@ -16,7 +16,8 @@ Features:
 - ✅ Run multiple models at once with `profiles`
 - ✅ Remote log monitoring at `/log`
 - ✅ Automatic unloading of models from GPUs after timeout
-- ✅ Use any local server that provides an OpenAI compatible API (llama.cpp, vllm, tabblyAPI, etc)
+- ✅ Use any local OpenAI compatible server (llama.cpp, vllm, tabblyAPI, etc)
+- ✅ Direct access to proxied upstream HTTP server via `/upstream/:model_id`
 
 ## Releases
 
