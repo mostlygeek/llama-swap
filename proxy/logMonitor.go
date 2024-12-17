@@ -46,7 +46,7 @@ func (w *LogMonitor) Write(p []byte) (n int, err error) {
 	w.buffer = w.buffer.Next()
 	w.bufferMu.Unlock()
 
-	w.broadcast(p)
+	w.broadcast(bufferCopy)
 	return n, nil
 }
 
