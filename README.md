@@ -73,6 +73,12 @@ models:
       --model path/to/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
     proxy: http://127.0.0.1:8999
 
+  # unlisted models do not show up in /v1/models or /upstream lists
+  # but they can still be requested as normal
+  "qwen-unlisted":
+    cmd: llama-server --port 9999 -m Llama-3.2-1B-Instruct-Q4_K_M.gguf -ngl 0
+    unlisted: true
+
 # profiles make it easy to managing multi model (and gpu) configurations.
 #
 # Tips:

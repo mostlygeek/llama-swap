@@ -33,6 +33,7 @@ models:
       - env1=hello
     cmd: build/simple-responder --port 8999
     proxy: http://127.0.0.1:8999
+    unlisted: true
 
     # use "none" to skip check. Caution this may cause some requests to fail
     # until the upstream server is ready for traffic
@@ -42,9 +43,11 @@ models:
   "broken":
     cmd: models/llama-server-osx --port 8999 -m models/doesnotexist.gguf
     proxy: http://127.0.0.1:8999
+    unlisted: true
   "broken_timeout":
     cmd: models/llama-server-osx --port 8999 -m models/qwen2.5-0.5b-instruct-q8_0.gguf
     proxy: http://127.0.0.1:9000
+    unlisted: true
 
 # creating a coding profile with models for code generation and general questions
 profiles:

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,6 +48,7 @@ func New(config *Config) *ProxyManager {
 	pm.ginEngine.GET("/logs", pm.sendLogsHandlers)
 	pm.ginEngine.GET("/logs/stream", pm.streamLogsHandler)
 	pm.ginEngine.GET("/logs/streamSSE", pm.streamLogsHandlerSSE)
+	pm.ginEngine.GET("/upstream", pm.upstreamIndex)
 	pm.ginEngine.Any("/upstream/:model_id/*upstreamPath", pm.proxyToUpstream)
 
 	// Disable console color for testing
@@ -85,7 +87,11 @@ func (pm *ProxyManager) stopProcesses() {
 
 func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 	data := []interface{}{}
-	for id := range pm.config.Models {
+	for id, modelConfig := range pm.config.Models {
+		if modelConfig.Unlisted {
+			continue
+		}
+
 		data = append(data, map[string]interface{}{
 			"id":       id,
 			"object":   "model",
@@ -184,6 +190,31 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 		c.Request.URL.Path = c.Param("upstreamPath")
 		process.ProxyRequest(c.Writer, c.Request)
 	}
+}
+
+func (pm *ProxyManager) upstreamIndex(c *gin.Context) {
+	var html strings.Builder
+
+	html.WriteString("<html><body><h1>Available Models</h1><ul>")
+
+	// Extract keys and sort them
+	var modelIDs []string
+	for modelID, modelConfig := range pm.config.Models {
+		if modelConfig.Unlisted {
+			continue
+		}
+
+		modelIDs = append(modelIDs, modelID)
+	}
+	sort.Strings(modelIDs)
+
+	// Iterate over sorted keys
+	for _, modelID := range modelIDs {
+		html.WriteString(fmt.Sprintf("<li><a href=\"/upstream/%s\">%s</a></li>", modelID, modelID))
+	}
+	html.WriteString("</ul></body></html>")
+	c.Header("Content-Type", "text/html")
+	c.String(http.StatusOK, html.String())
 }
 
 func (pm *ProxyManager) proxyChatRequestHandler(c *gin.Context) {
