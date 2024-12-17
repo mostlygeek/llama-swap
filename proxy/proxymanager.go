@@ -48,8 +48,6 @@ func New(config *Config) *ProxyManager {
 	pm.ginEngine.GET("/logs/stream", pm.streamLogsHandler)
 	pm.ginEngine.GET("/logs/streamSSE", pm.streamLogsHandlerSSE)
 
-	pm.ginEngine.NoRoute(pm.proxyNoRouteHandler)
-
 	// Disable console color for testing
 	gin.DisableConsoleColor()
 
@@ -199,16 +197,6 @@ func (pm *ProxyManager) proxyChatRequestHandler(c *gin.Context) {
 
 		process.ProxyRequest(c.Writer, c.Request)
 	}
-}
-
-func (pm *ProxyManager) proxyNoRouteHandler(c *gin.Context) {
-	// since maps are unordered, just use the first available process if one exists
-	for _, process := range pm.currentProcesses {
-		process.ProxyRequest(c.Writer, c.Request)
-		return
-	}
-
-	c.AbortWithError(http.StatusBadRequest, fmt.Errorf("no strategy to handle request"))
 }
 
 func ProcessKeyName(groupName, modelName string) string {
