@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,6 +19,15 @@ import (
 const (
 	PROFILE_SPLIT_CHAR = ":"
 )
+
+//go:embed html/favicon.ico
+var faviconData []byte
+
+//go:embed html/logs.html
+var logsHTML []byte
+
+// make sure embed is kept there by the IDE auto-package importer
+var _ = embed.FS{}
 
 type ProxyManager struct {
 	sync.Mutex
@@ -48,8 +58,13 @@ func New(config *Config) *ProxyManager {
 	pm.ginEngine.GET("/logs", pm.sendLogsHandlers)
 	pm.ginEngine.GET("/logs/stream", pm.streamLogsHandler)
 	pm.ginEngine.GET("/logs/streamSSE", pm.streamLogsHandlerSSE)
+
 	pm.ginEngine.GET("/upstream", pm.upstreamIndex)
 	pm.ginEngine.Any("/upstream/:model_id/*upstreamPath", pm.proxyToUpstream)
+
+	pm.ginEngine.GET("/favicon.ico", func(c *gin.Context) {
+		c.Data(http.StatusOK, "image/x-icon", faviconData)
+	})
 
 	// Disable console color for testing
 	gin.DisableConsoleColor()
@@ -195,7 +210,7 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 func (pm *ProxyManager) upstreamIndex(c *gin.Context) {
 	var html strings.Builder
 
-	html.WriteString("<html><body><h1>Available Models</h1><ul>")
+	html.WriteString("<!doctype HTML>\n<html><body><h1>Available Models</h1><ul>")
 
 	// Extract keys and sort them
 	var modelIDs []string
