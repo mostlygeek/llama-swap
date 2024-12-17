@@ -1,19 +1,12 @@
 package proxy
 
 import (
-	"embed"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 )
-
-//go:embed html/logs.html
-var logsHTML []byte
-
-// make sure embed is kept there by the IDE auto-package importer
-var _ = embed.FS{}
 
 func (pm *ProxyManager) sendLogsHandlers(c *gin.Context) {
 
