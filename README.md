@@ -17,7 +17,7 @@ Features:
 - ✅ Remote log monitoring at `/log`
 - ✅ Automatic unloading of models from GPUs after timeout
 - ✅ Use any local OpenAI compatible server (llama.cpp, vllm, tabblyAPI, etc)
-- ✅ Direct access to proxied upstream HTTP server via `/upstream/:model_id`
+- ✅ Direct access to upstream HTTP server via `/upstream/:model_id` ([demo](https://github.com/mostlygeek/llama-swap/pull/31))
 
 ## Releases
 
