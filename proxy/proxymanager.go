@@ -48,12 +48,12 @@ func New(config *Config) *ProxyManager {
 
 	// Set up routes using the Gin engine
 	pm.ginEngine.POST("/v1/chat/completions", pm.proxyOAIHandler)
+	// Support legacy /v1/completions api, see issue #12
+	pm.ginEngine.POST("/v1/completions", pm.proxyOAIHandler)
 
 	// Support embeddings
 	pm.ginEngine.POST("/v1/embeddings", pm.proxyOAIHandler)
-
-	// Support legacy /v1/completions api, see issue #12
-	pm.ginEngine.POST("/v1/completions", pm.proxyOAIHandler)
+	pm.ginEngine.POST("/v1/rerank", pm.proxyOAIHandler)
 
 	pm.ginEngine.GET("/v1/models", pm.listModelsHandler)
 
