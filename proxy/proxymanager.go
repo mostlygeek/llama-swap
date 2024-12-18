@@ -49,6 +49,9 @@ func New(config *Config) *ProxyManager {
 	// Set up routes using the Gin engine
 	pm.ginEngine.POST("/v1/chat/completions", pm.proxyChatRequestHandler)
 
+	// Support embeddings
+	pm.ginEngine.POST("/v1/embeddings", pm.proxyChatRequestHandler)
+
 	// Support legacy /v1/completions api, see issue #12
 	pm.ginEngine.POST("/v1/completions", pm.proxyChatRequestHandler)
 
