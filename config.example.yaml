@@ -26,6 +26,8 @@ models:
     aliases:
     - gpt-3.5-turbo
 
+  # Embedding example with Nomic
+  # https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF
   "nomic":
     proxy: http://127.0.0.1:9005
     cmd: >
@@ -37,6 +39,17 @@ models:
       --rope-freq-scale 0.75
       -ngl 99
       --embeddings
+
+  # Reranking example with bge-reranker
+  # https://huggingface.co/gpustack/bge-reranker-v2-m3-GGUF
+  "bge-reranker":
+    proxy: http://127.0.0.1:9006
+    cmd: >
+      models/llama-server-osx --port 9006
+      -m models/bge-reranker-v2-m3-Q4_K_M.gguf
+      --ctx-size 8192
+      --reranking
+
 
   "simple":
     # example of setting environment variables
