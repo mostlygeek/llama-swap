@@ -26,6 +26,18 @@ models:
     aliases:
     - gpt-3.5-turbo
 
+  "nomic":
+    proxy: http://127.0.0.1:9005
+    cmd: >
+      models/llama-server-osx --port 9005
+      -m models/nomic-embed-text-v1.5.Q8_0.gguf
+      --ctx-size 8192
+      --batch-size 8192
+      --rope-scaling yarn
+      --rope-freq-scale 0.75
+      -ngl 99
+      --embeddings
+
   "simple":
     # example of setting environment variables
     env:
