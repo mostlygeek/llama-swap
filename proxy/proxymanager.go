@@ -46,6 +46,38 @@ func New(config *Config) *ProxyManager {
 		ginEngine:        gin.New(),
 	}
 
+	if config.LogRequests {
+		pm.ginEngine.Use(func(c *gin.Context) {
+			// Start timer
+			start := time.Now()
+
+			// Process request
+			c.Next()
+
+			// Stop timer
+			duration := time.Since(start)
+
+			// Log request details
+			clientIP := c.ClientIP()
+			method := c.Request.Method
+			path := c.Request.URL.Path
+			statusCode := c.Writer.Status()
+			bodySize := c.Writer.Size()
+
+			fmt.Fprintf(pm.logMonitor, "[llama-swap] %s [%s] \"%s %s %s\" %d %d \"%s\" %v\n",
+				clientIP,
+				time.Now().Format("2006-01-02 15:04:05"),
+				method,
+				path,
+				c.Request.Proto,
+				statusCode,
+				bodySize,
+				c.Request.UserAgent(),
+				duration,
+			)
+		})
+	}
+
 	// Set up routes using the Gin engine
 	pm.ginEngine.POST("/v1/chat/completions", pm.proxyOAIHandler)
 	// Support legacy /v1/completions api, see issue #12
@@ -127,7 +159,7 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 
 	// Encode the data as JSON and write it to the response writer
 	if err := json.NewEncoder(c.Writer).Encode(map[string]interface{}{"data": data}); err != nil {
-		c.AbortWithError(http.StatusInternalServerError, fmt.Errorf("error encoding JSON"))
+		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error encoding JSON %s", err.Error()))
 		return
 	}
 }
@@ -197,12 +229,12 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 	requestedModel := c.Param("model_id")
 
 	if requestedModel == "" {
-		c.AbortWithError(http.StatusBadRequest, fmt.Errorf("model id required in path"))
+		pm.sendErrorResponse(c, http.StatusBadRequest, "model id required in path")
 		return
 	}
 
 	if process, err := pm.swapModel(requestedModel); err != nil {
-		c.AbortWithError(http.StatusNotFound, fmt.Errorf("unable to swap to model, %s", err.Error()))
+		pm.sendErrorResponse(c, http.StatusNotFound, fmt.Sprintf("unable to swap to model, %s", err.Error()))
 	} else {
 		// rewrite the path
 		c.Request.URL.Path = c.Param("upstreamPath")
@@ -238,22 +270,23 @@ func (pm *ProxyManager) upstreamIndex(c *gin.Context) {
 func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		c.AbortWithError(http.StatusBadRequest, fmt.Errorf("invalid JSON"))
+		pm.sendErrorResponse(c, http.StatusBadRequest, "could not ready request body")
 		return
 	}
+
 	var requestBody map[string]interface{}
 	if err := json.Unmarshal(bodyBytes, &requestBody); err != nil {
-		c.AbortWithError(http.StatusBadRequest, fmt.Errorf("invalid JSON"))
+		pm.sendErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("invalid JSON: %s", err.Error()))
 		return
 	}
 	model, ok := requestBody["model"].(string)
 	if !ok {
-		c.AbortWithError(http.StatusBadRequest, fmt.Errorf("missing or invalid 'model' key"))
+		pm.sendErrorResponse(c, http.StatusBadRequest, "missing or invalid 'model' key")
 		return
 	}
 
 	if process, err := pm.swapModel(model); err != nil {
-		c.AbortWithError(http.StatusNotFound, fmt.Errorf("unable to swap to model, %s", err.Error()))
+		pm.sendErrorResponse(c, http.StatusNotFound, fmt.Sprintf("unable to swap to model, %s", err.Error()))
 		return
 	} else {
 		c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
@@ -263,6 +296,16 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 		c.Request.Header.Add("content-length", strconv.Itoa(len(bodyBytes)))
 
 		process.ProxyRequest(c.Writer, c.Request)
+	}
+}
+
+func (pm *ProxyManager) sendErrorResponse(c *gin.Context, statusCode int, message string) {
+	acceptHeader := c.GetHeader("Accept")
+
+	if strings.Contains(acceptHeader, "application/json") {
+		c.JSON(statusCode, gin.H{"error": message})
+	} else {
+		c.String(statusCode, message)
 	}
 }
 
