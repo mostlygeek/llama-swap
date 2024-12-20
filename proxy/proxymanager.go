@@ -51,16 +51,17 @@ func New(config *Config) *ProxyManager {
 			// Start timer
 			start := time.Now()
 
+			// capture these because /upstream/:model rewrites them in c.Next()
+			clientIP := c.ClientIP()
+			method := c.Request.Method
+			path := c.Request.URL.Path
+
 			// Process request
 			c.Next()
 
 			// Stop timer
 			duration := time.Since(start)
 
-			// Log request details
-			clientIP := c.ClientIP()
-			method := c.Request.Method
-			path := c.Request.URL.Path
 			statusCode := c.Writer.Status()
 			bodySize := c.Writer.Size()
 
