@@ -25,6 +25,7 @@ func (m *ModelConfig) SanitizedCommand() ([]string, error) {
 
 type Config struct {
 	HealthCheckTimeout int                    `yaml:"healthCheckTimeout"`
+	LogRequests        bool                   `yaml:"logRequests"`
 	Models             map[string]ModelConfig `yaml:"models"`
 	Profiles           map[string][]string    `yaml:"profiles"`
 

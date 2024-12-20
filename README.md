@@ -37,7 +37,10 @@ llama-swap's configuration is purposefully simple.
 ```yaml
 # Seconds to wait for llama.cpp to load and be ready to serve requests
 # Default (and minimum) is 15 seconds
-healthCheckTimeout: 60gi
+healthCheckTimeout: 60
+
+# Write HTTP logs (useful for troubleshooting), defaults to false
+logRequests: true
 
 # define valid model values and the upstream server start
 models:

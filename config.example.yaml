@@ -2,6 +2,9 @@
 # Default (and minimum): 15 seconds
 healthCheckTimeout: 15
 
+# Log HTTP requests helpful for troubleshoot, defaults to False
+logRequests: true
+
 models:
   "llama":
     cmd: >
