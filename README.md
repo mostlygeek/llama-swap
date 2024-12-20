@@ -11,7 +11,7 @@ Features:
 - ✅ Easy to config: single yaml file
 - ✅ On-demand model switching
 - ✅ Full control over server settings per model
-- ✅ OpenAI API support (`v1/completions` and `v1/chat/completions`)
+- ✅ OpenAI API support (`v1/completions`, `v1/chat/completions`, `v1/embeddings` and `v1/rerank`)
 - ✅ Multiple GPU support
 - ✅ Run multiple models at once with `profiles`
 - ✅ Remote log monitoring at `/log`
@@ -37,7 +37,7 @@ llama-swap's configuration is purposefully simple.
 ```yaml
 # Seconds to wait for llama.cpp to load and be ready to serve requests
 # Default (and minimum) is 15 seconds
-healthCheckTimeout: 60
+healthCheckTimeout: 60gi
 
 # define valid model values and the upstream server start
 models:
@@ -92,7 +92,7 @@ profiles:
     - "llama"
 ```
 
-**Guides and examples**
+**Advanced examples**
 
 - [config.example.yaml](config.example.yaml) includes example for supporting `v1/embeddings` and `v1/rerank` endpoints
 - [Speculative Decoding](examples/speculative-decoding/README.md) - using a small draft model can increase inference speeds from 20% to 40%. This example includes a configurations Qwen2.5-Coder-32B (2.5x increase) and Llama-3.1-70B (1.4x increase) in the best cases.
