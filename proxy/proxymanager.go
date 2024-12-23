@@ -88,6 +88,23 @@ func New(config *Config) *ProxyManager {
 	pm.ginEngine.GET("/upstream", pm.upstreamIndex)
 	pm.ginEngine.Any("/upstream/:model_id/*upstreamPath", pm.proxyToUpstream)
 
+	pm.ginEngine.GET("/", func(c *gin.Context) {
+		// Set the Content-Type header to text/html
+		c.Header("Content-Type", "text/html")
+
+		// Write the embedded HTML content to the response
+		htmlData, err := getHTMLFile("index.html")
+		if err != nil {
+			c.String(http.StatusInternalServerError, err.Error())
+			return
+		}
+		_, err = c.Writer.Write(htmlData)
+		if err != nil {
+			c.String(http.StatusInternalServerError, fmt.Sprintf("failed to write response: %v", err))
+			return
+		}
+	})
+
 	pm.ginEngine.GET("/favicon.ico", func(c *gin.Context) {
 		if data, err := getHTMLFile("favicon.ico"); err == nil {
 			c.Data(http.StatusOK, "image/x-icon", data)
