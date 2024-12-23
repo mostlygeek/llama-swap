@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"bytes"
-	"embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,15 +18,6 @@ import (
 const (
 	PROFILE_SPLIT_CHAR = ":"
 )
-
-//go:embed html/favicon.ico
-var faviconData []byte
-
-//go:embed html/logs.html
-var logsHTML []byte
-
-// make sure embed is kept there by the IDE auto-package importer
-var _ = embed.FS{}
 
 type ProxyManager struct {
 	sync.Mutex
@@ -99,7 +89,11 @@ func New(config *Config) *ProxyManager {
 	pm.ginEngine.Any("/upstream/:model_id/*upstreamPath", pm.proxyToUpstream)
 
 	pm.ginEngine.GET("/favicon.ico", func(c *gin.Context) {
-		c.Data(http.StatusOK, "image/x-icon", faviconData)
+		if data, err := getHTMLFile("favicon.ico"); err == nil {
+			c.Data(http.StatusOK, "image/x-icon", data)
+		} else {
+			c.String(http.StatusInternalServerError, err.Error())
+		}
 	})
 
 	// Disable console color for testing

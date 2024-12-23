@@ -16,9 +16,14 @@ func (pm *ProxyManager) sendLogsHandlers(c *gin.Context) {
 		c.Header("Content-Type", "text/html")
 
 		// Write the embedded HTML content to the response
-		_, err := c.Writer.Write(logsHTML)
+		logsHTML, err := getHTMLFile("logs.html")
 		if err != nil {
-			c.AbortWithError(http.StatusInternalServerError, fmt.Errorf("failed to write response: %v", err))
+			c.String(http.StatusInternalServerError, err.Error())
+			return
+		}
+		_, err = c.Writer.Write(logsHTML)
+		if err != nil {
+			c.String(http.StatusInternalServerError, fmt.Sprintf("failed to write response: %v", err))
 			return
 		}
 	} else {
@@ -43,7 +48,7 @@ func (pm *ProxyManager) streamLogsHandler(c *gin.Context) {
 	notify := c.Request.Context().Done()
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
-		c.AbortWithError(http.StatusInternalServerError, fmt.Errorf("Streaming unsupported"))
+		c.AbortWithError(http.StatusInternalServerError, fmt.Errorf("streaming unsupported"))
 		return
 	}
 
@@ -53,11 +58,7 @@ func (pm *ProxyManager) streamLogsHandler(c *gin.Context) {
 	if !skipHistory {
 		history := pm.logMonitor.GetHistory()
 		if len(history) != 0 {
-			_, err := c.Writer.Write(history)
-			if err != nil {
-				c.AbortWithError(http.StatusInternalServerError, err)
-				return
-			}
+			c.Writer.Write(history)
 			flusher.Flush()
 		}
 	}
@@ -68,7 +69,7 @@ func (pm *ProxyManager) streamLogsHandler(c *gin.Context) {
 		case msg := <-ch:
 			_, err := c.Writer.Write(msg)
 			if err != nil {
-				c.AbortWithError(http.StatusInternalServerError, err)
+				// just break the loop if we can't write for some reason
 				return
 			}
 			flusher.Flush()
