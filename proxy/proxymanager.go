@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"io"
+	"log"
 	"net/http"
 	"sort"
 	"strconv"
@@ -69,6 +71,19 @@ func New(config *Config) *ProxyManager {
 		})
 	}
 
+	// templates
+	templ := template.Must(template.New("").ParseFS(files, "files/templates/*.html"))
+
+	// Get all templates
+	templates := templ.Templates()
+
+	// Print the names of the templates
+	for _, t := range templates {
+		log.Println("Template name:", t.Name())
+	}
+
+	pm.ginEngine.SetHTMLTemplate(templ)
+
 	// Set up routes using the Gin engine
 	pm.ginEngine.POST("/v1/chat/completions", pm.proxyOAIHandler)
 	// Support legacy /v1/completions api, see issue #12
@@ -89,28 +104,12 @@ func New(config *Config) *ProxyManager {
 	pm.ginEngine.Any("/upstream/:model_id/*upstreamPath", pm.proxyToUpstream)
 
 	pm.ginEngine.GET("/", func(c *gin.Context) {
-		// Set the Content-Type header to text/html
-		c.Header("Content-Type", "text/html")
-
-		// Write the embedded HTML content to the response
-		htmlData, err := getHTMLFile("index.html")
-		if err != nil {
-			c.String(http.StatusInternalServerError, err.Error())
-			return
-		}
-		_, err = c.Writer.Write(htmlData)
-		if err != nil {
-			c.String(http.StatusInternalServerError, fmt.Sprintf("failed to write response: %v", err))
-			return
-		}
+		c.HTML(http.StatusOK, "index.html", gin.H{"Title": "llama-swap"})
 	})
 
 	pm.ginEngine.GET("/favicon.ico", func(c *gin.Context) {
-		if data, err := getHTMLFile("favicon.ico"); err == nil {
-			c.Data(http.StatusOK, "image/x-icon", data)
-		} else {
-			c.String(http.StatusInternalServerError, err.Error())
-		}
+		favicon, _ := files.ReadFile("files/favicon.ico")
+		c.Data(http.StatusOK, "image/x-icon", favicon)
 	})
 
 	// Disable console color for testing
@@ -255,10 +254,6 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 }
 
 func (pm *ProxyManager) upstreamIndex(c *gin.Context) {
-	var html strings.Builder
-
-	html.WriteString("<!doctype HTML>\n<html><body><h1>Available Models</h1><ul>")
-
 	// Extract keys and sort them
 	var modelIDs []string
 	for modelID, modelConfig := range pm.config.Models {
@@ -270,13 +265,9 @@ func (pm *ProxyManager) upstreamIndex(c *gin.Context) {
 	}
 	sort.Strings(modelIDs)
 
-	// Iterate over sorted keys
-	for _, modelID := range modelIDs {
-		html.WriteString(fmt.Sprintf("<li><a href=\"/upstream/%s\">%s</a></li>", modelID, modelID))
-	}
-	html.WriteString("</ul></body></html>")
-	c.Header("Content-Type", "text/html")
-	c.String(http.StatusOK, html.String())
+	c.HTML(http.StatusOK, "upstream_list.html", gin.H{
+		"modelIDs": modelIDs,
+	})
 }
 
 func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {

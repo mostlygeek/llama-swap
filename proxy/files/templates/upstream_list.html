@@ -1,0 +1,7 @@
+{{ template "head.html" . }}
+<ul>
+    {{range .modelIDs}}
+    <li><a href="/upstream/{{.}}">{{.}}</a></li>
+    {{end}}
+</ul>
+{{ template "foot.html" . }}
