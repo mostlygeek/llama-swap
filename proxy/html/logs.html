@@ -12,42 +12,134 @@
             flex-direction: column;
             font-family: "Courier New", Courier, monospace;
         }
+        #log-controls {
+            margin: 0.5em;
+            display: flex;
+            align-items: center;
+            justify-content: space-between; /* Spaces out elements evenly */
+        }
+        #log-controls input {
+            flex: 1;
+        }
+        #log-controls input:focus {
+           outline: none; /* Ensures no outline is shown when the input is focused */
+        }
         #log-stream {
             flex: 1;
-            margin: 1em;
-            padding: 10px;
+            margin: 0.5em;
+            padding: 1em;
             background: #f4f4f4;
             overflow-y: auto;
             white-space: pre-wrap; /* Ensures line wrapping */
             word-wrap: break-word; /* Ensures long words wrap */
         }
+
+        .regex-error {
+            background-color: #ff0000 !important;
+        }
+
+        /* Dark mode styles */
+        @media (prefers-color-scheme: dark) {
+            body {
+                background-color: #333;
+                color: #fff;
+            }
+
+            #log-stream {
+                background: #444;
+                color: #fff;
+            }
+
+            #log-controls input {
+                background: #555;
+                color: #fff;
+                border: 1px solid #777;
+            }
+
+            #log-controls button {
+                background: #555;
+                color: #fff;
+                border: 1px solid #777;
+            }
+        }
     </style>
 </head>
 <body>
-    <pre id="log-stream">Waiting for logs...
-</pre>
-
+    <pre id="log-stream">Waiting for logs...</pre>
+    <div id="log-controls">
+        <input type="text" id="filter-input" placeholder="regex filter">
+        <button id="clear-button">clear</button>
+    </div>
     <script>
-        // Establish an EventSource connection to the SSE endpoint
-        if (typeof(EventSource) !== "undefined") {
-            const eventSource = new EventSource("/logs/streamSSE");
+        const logStream = document.getElementById('log-stream');
+        const filterInput = document.getElementById('filter-input');
+        var logData = "";
+        let regexFilter = null;
 
-            eventSource.onmessage = function(event) {
-                // Append the new log message to the <pre> element
-                const logStream = document.getElementById('log-stream');
+        function setupEventSource() {
+            if (typeof(EventSource) !== "undefined") {
+                const eventSource = new EventSource("/logs/streamSSE");
 
-                logStream.textContent += event.data;
+                eventSource.onmessage = function(event) {
+                    logData += event.data;
+                    render()
+                };
 
-                // Auto-scroll to the bottom
-                logStream.scrollTop = logStream.scrollHeight;
-            };
-
-            eventSource.onerror = function(err) {
-                console.error("EventSource failed:", err);
-            };
-        } else {
-            console.error("SSE not supported by this browser.");
+                eventSource.onerror = function(err) {
+                    logData = "EventSource failed: " + err.message;
+                };
+            } else {
+                logData = "SSE Not supported by this browser."
+            }
         }
+
+        // poor-ai's react  ¯\_(ツ)_/¯
+        function render() {
+            if (regexFilter) {
+                const lines = logData.split('\n');
+                const filteredLines = lines.filter(line => {
+                    return regexFilter === null || regexFilter.test(line);
+                });
+
+                if (filteredLines.length > 0) {
+                    logStream.textContent = filteredLines.join('\n') + '\n';
+                } else {
+                    logStream.textContent = "";
+                }
+            } else {
+                logStream.textContent = logData;
+            }
+
+            logStream.scrollTop = logStream.scrollHeight;
+        }
+
+        function updateFilter() {
+            const pattern = filterInput.value.trim();
+            filterInput.classList.remove('regex-error');
+            if (pattern) {
+                try {
+                    regexFilter = new RegExp(pattern);
+                } catch (e) {
+                    console.error("Invalid regex pattern:", e);
+                    regexFilter = null;
+                    filterInput.classList.add('regex-error');
+                    return
+                }
+            } else {
+                regexFilter = null;
+            }
+
+            render();
+        }
+
+        filterInput.addEventListener('input', updateFilter);
+        document.getElementById('clear-button').addEventListener('click', () => {
+            filterInput.value = "";
+            regexFilter = null;
+            render();
+        });
+        setupEventSource();
+        updateFilter();
     </script>
 </body>
 </html>
