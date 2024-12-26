@@ -108,8 +108,7 @@ func New(config *Config) *ProxyManager {
 	})
 
 	pm.ginEngine.GET("/favicon.ico", func(c *gin.Context) {
-		favicon, _ := files.ReadFile("files/favicon.ico")
-		c.Data(http.StatusOK, "image/x-icon", favicon)
+		c.FileFromFS("files/favicon.ico", http.FS(files))
 	})
 
 	// expose the embedded files system
