@@ -112,6 +112,12 @@ func New(config *Config) *ProxyManager {
 		c.Data(http.StatusOK, "image/x-icon", favicon)
 	})
 
+	// expose the embedded files system
+	pm.ginEngine.GET("/files/*filepath", func(c *gin.Context) {
+		filepath := c.Param("filepath")
+		c.FileFromFS("files"+filepath, http.FS(files))
+	})
+
 	// Disable console color for testing
 	gin.DisableConsoleColor()
 

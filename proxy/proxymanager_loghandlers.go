@@ -14,18 +14,8 @@ func (pm *ProxyManager) sendLogsHandlers(c *gin.Context) {
 	if strings.Contains(accept, "text/html") {
 		// Set the Content-Type header to text/html
 		c.Header("Content-Type", "text/html")
-
-		// Write the embedded HTML content to the response
-		logsHTML, err := getHTMLFile("logs.html")
-		if err != nil {
-			c.String(http.StatusInternalServerError, err.Error())
-			return
-		}
-		_, err = c.Writer.Write(logsHTML)
-		if err != nil {
-			c.String(http.StatusInternalServerError, fmt.Sprintf("failed to write response: %v", err))
-			return
-		}
+		logsHTML, _ := files.ReadFile("files/logs.html")
+		c.Data(http.StatusOK, "text/html", logsHTML)
 	} else {
 		c.Header("Content-Type", "text/plain")
 		history := pm.logMonitor.GetHistory()
