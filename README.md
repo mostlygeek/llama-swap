@@ -3,7 +3,7 @@
 ![llama-swap header image](header.jpeg)
 
 # Introduction
-llama-swap is an OpenAI API compatible server that gives you complete control over how you use your hardware. It automatically swaps to the configuration of your choice for serving a model. Since [llama.cpp's server](https://github.com/ggerganov/llama.cpp/tree/master/examples/server) can't swap models, let's swap the server instead!
+llama-swap is a transparent proxy server that automatically loads the right llama.cpp server configuration to serve the request. 
 
 Features:
 
