@@ -3,9 +3,19 @@
 ![llama-swap header image](header.jpeg)
 
 # Introduction
-llama-swap is a transparent proxy server that automatically loads the right llama.cpp server configuration to serve the request. 
+llama-swap is a light weight, transparent proxy server that provides automatic model swapping to llama.cpp's server. 
 
-Features:
+Written in golang, it is very easy to install (single binary with no dependancies) and configure (single yaml file). Download a pre-built [release](https://github.com/mostlygeek/llama-swap/releases) or built it yourself from source with `make clean all`. 
+
+## How does it work?
+When a request is made to one of the OpenAI compatible endpoints, lama-swap will extracts the `model` value and make sure the right server configuration is loaded to serve it. If the wrong model server is running it will stop it and start the correct one. This is where the "swap" part comes in. The upstream server is swapped to the correct one to serve the request. 
+
+In the most basic configuration llama-swap handles one model at a time. Using the Profiles multiple models can be loaded at the same time. You have complete control over how your GPU resources are used. 
+
+## Do I need to use llama.cpp's server (llama-server)? 
+Any OpenAI compatible server would work. llama-swap was originally designed for llama-server and it is the best supported. For Python based inference servers like vllm or tabbyAPI it is recommended to run them via podman. This provides clean environment isolation as well as responding correctly to `SIGTERM` signals to shutdown. 
+
+## Features:
 
 - ✅ Easy to deploy: single binary with no dependencies
 - ✅ Easy to config: single yaml file
@@ -16,19 +26,8 @@ Features:
 - ✅ Run multiple models at once with `profiles`
 - ✅ Remote log monitoring at `/log`
 - ✅ Automatic unloading of models from GPUs after timeout
-- ✅ Use any local OpenAI compatible server (llama.cpp, vllm, tabblyAPI, etc)
+- ✅ Use any local OpenAI compatible server (llama.cpp, vllm, tabbyAPI, etc)
 - ✅ Direct access to upstream HTTP server via `/upstream/:model_id` ([demo](https://github.com/mostlygeek/llama-swap/pull/31))
-
-## Releases
-
-Builds for Linux and OSX are available on the [Releases](https://github.com/mostlygeek/llama-swap/releases) page.
-
-### Building from source
-
-1. Install golang for your system
-1. `git clone git@github.com:mostlygeek/llama-swap.git`
-1. `make clean all`
-1. Binaries will be in `build/` subdirectory
 
 ## config.yaml
 
@@ -95,18 +94,25 @@ profiles:
     - "llama"
 ```
 
-**Advanced examples**
+### Advanced Examples
 
 - [config.example.yaml](config.example.yaml) includes example for supporting `v1/embeddings` and `v1/rerank` endpoints
 - [Speculative Decoding](examples/speculative-decoding/README.md) - using a small draft model can increase inference speeds from 20% to 40%. This example includes a configurations Qwen2.5-Coder-32B (2.5x increase) and Llama-3.1-70B (1.4x increase) in the best cases.
 - [Optimizing Code Generation](examples/benchmark-snakegame/README.md) - find the optimal settings for your machine. This example demonstrates defining multiple configurations and testing which one is fastest.
 
-## Installation
+### Installation
 
 1. Create a configuration file, see [config.example.yaml](config.example.yaml)
 1. Download a [release](https://github.com/mostlygeek/llama-swap/releases) appropriate for your OS and architecture.
     * _Note: Windows currently untested._
 1. Run the binary with `llama-swap --config path/to/config.yaml`
+
+### Building from source
+
+1. Install golang for your system
+1. `git clone git@github.com:mostlygeek/llama-swap.git`
+1. `make clean all`
+1. Binaries will be in `build/` subdirectory
 
 ## Monitoring Logs
 
