@@ -8,7 +8,7 @@ llama-swap is a light weight, transparent proxy server that provides automatic m
 Written in golang, it is very easy to install (single binary with no dependancies) and configure (single yaml file). Download a pre-built [release](https://github.com/mostlygeek/llama-swap/releases) or built it yourself from source with `make clean all`. 
 
 ## How does it work?
-When a request is made to one of the OpenAI compatible endpoints, lama-swap will extracts the `model` value and make sure the right server configuration is loaded to serve it. If the wrong model server is running it will stop it and start the correct one. This is where the "swap" part comes in. The upstream server is swapped to the correct one to serve the request. 
+When a request is made to an OpenAI compatible endpoints, lama-swap will extract the `model` value load the appropriate server configuration to serve it. If a server is already running it will stop it and start a new one. This is where the "swap" part comes in. The upstream server is automatically swapped to the correct one to serve the request. 
 
 In the most basic configuration llama-swap handles one model at a time. Using the Profiles multiple models can be loaded at the same time. You have complete control over how your GPU resources are used. 
 
