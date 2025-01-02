@@ -10,7 +10,7 @@ Written in golang, it is very easy to install (single binary with no dependancie
 ## How does it work?
 When a request is made to an OpenAI compatible endpoints, lama-swap will extract the `model` value load the appropriate server configuration to serve it. If a server is already running it will stop it and start a new one. This is where the "swap" part comes in. The upstream server is automatically swapped to the correct one to serve the request. 
 
-In the most basic configuration llama-swap handles one model at a time. Using the Profiles multiple models can be loaded at the same time. You have complete control over how your GPU resources are used. 
+In the most basic configuration llama-swap handles one model at a time. For more advanced use cases, the `profiles` feature can load multiple models at the same time. You have complete control over how your system resources are used. 
 
 ## Do I need to use llama.cpp's server (llama-server)? 
 Any OpenAI compatible server would work. llama-swap was originally designed for llama-server and it is the best supported. For Python based inference servers like vllm or tabbyAPI it is recommended to run them via podman. This provides clean environment isolation as well as responding correctly to `SIGTERM` signals to shutdown. 
