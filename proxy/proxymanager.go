@@ -78,6 +78,9 @@ func New(config *Config) *ProxyManager {
 	pm.ginEngine.POST("/v1/embeddings", pm.proxyOAIHandler)
 	pm.ginEngine.POST("/v1/rerank", pm.proxyOAIHandler)
 
+	// Support audio/speech endpoint
+	pm.ginEngine.POST("/v1/audio/speech", pm.proxyOAIHandler)
+
 	pm.ginEngine.GET("/v1/models", pm.listModelsHandler)
 
 	// in proxymanager_loghandlers.go
