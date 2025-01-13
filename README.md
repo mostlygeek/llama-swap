@@ -26,7 +26,7 @@ Any OpenAI compatible server would work. llama-swap was originally designed for 
   - `v1/chat/completions`
   - `v1/embeddings`
   - `v1/rerank`
-  - `v1/audio/speech`
+  - `v1/audio/speech` ([#36](https://github.com/mostlygeek/llama-swap/issues/36))
 - ✅ Multiple GPU support
 - ✅ Run multiple models at once with `profiles`
 - ✅ Remote log monitoring at `/log`
