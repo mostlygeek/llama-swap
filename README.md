@@ -3,17 +3,17 @@
 ![llama-swap header image](header.jpeg)
 
 # Introduction
-llama-swap is a light weight, transparent proxy server that provides automatic model swapping to llama.cpp's server. 
+llama-swap is a light weight, transparent proxy server that provides automatic model swapping to llama.cpp's server.
 
-Written in golang, it is very easy to install (single binary with no dependancies) and configure (single yaml file). Download a pre-built [release](https://github.com/mostlygeek/llama-swap/releases) or built it yourself from source with `make clean all`. 
+Written in golang, it is very easy to install (single binary with no dependancies) and configure (single yaml file). Download a pre-built [release](https://github.com/mostlygeek/llama-swap/releases) or built it yourself from source with `make clean all`.
 
 ## How does it work?
-When a request is made to an OpenAI compatible endpoints, lama-swap will extract the `model` value load the appropriate server configuration to serve it. If a server is already running it will stop it and start a new one. This is where the "swap" part comes in. The upstream server is automatically swapped to the correct one to serve the request. 
+When a request is made to an OpenAI compatible endpoints, lama-swap will extract the `model` value load the appropriate server configuration to serve it. If a server is already running it will stop it and start a new one. This is where the "swap" part comes in. The upstream server is automatically swapped to the correct one to serve the request.
 
-In the most basic configuration llama-swap handles one model at a time. For more advanced use cases, the `profiles` feature can load multiple models at the same time. You have complete control over how your system resources are used. 
+In the most basic configuration llama-swap handles one model at a time. For more advanced use cases, the `profiles` feature can load multiple models at the same time. You have complete control over how your system resources are used.
 
-## Do I need to use llama.cpp's server (llama-server)? 
-Any OpenAI compatible server would work. llama-swap was originally designed for llama-server and it is the best supported. For Python based inference servers like vllm or tabbyAPI it is recommended to run them via podman. This provides clean environment isolation as well as responding correctly to `SIGTERM` signals to shutdown. 
+## Do I need to use llama.cpp's server (llama-server)?
+Any OpenAI compatible server would work. llama-swap was originally designed for llama-server and it is the best supported. For Python based inference servers like vllm or tabbyAPI it is recommended to run them via podman. This provides clean environment isolation as well as responding correctly to `SIGTERM` signals to shutdown.
 
 ## Features:
 
@@ -21,7 +21,12 @@ Any OpenAI compatible server would work. llama-swap was originally designed for 
 - ✅ Easy to config: single yaml file
 - ✅ On-demand model switching
 - ✅ Full control over server settings per model
-- ✅ OpenAI API support (`v1/completions`, `v1/chat/completions`, `v1/embeddings` and `v1/rerank`)
+- ✅ OpenAI API supported endpoints:
+  - `v1/completions`
+  - `v1/chat/completions`
+  - `v1/embeddings`
+  - `v1/rerank`
+  - `v1/audio/speech`
 - ✅ Multiple GPU support
 - ✅ Run multiple models at once with `profiles`
 - ✅ Remote log monitoring at `/log`
