@@ -202,6 +202,21 @@ func (pm *ProxyManager) swapModel(requestedModel string) (*Process, error) {
 		return nil, fmt.Errorf("could not find modelID for %s", requestedModel)
 	}
 
+	// check if model is part of the profile
+	if profileName != "" {
+		found := false
+		for _, item := range pm.config.Profiles[profileName] {
+			if item == realModelName {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			return nil, fmt.Errorf("model %s part of profile %s", realModelName, profileName)
+		}
+	}
+
 	// exit early when already running, otherwise stop everything and swap
 	requestedProcessKey := ProcessKeyName(profileName, realModelName)
 
