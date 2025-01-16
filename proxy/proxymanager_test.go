@@ -210,3 +210,47 @@ func TestProxyManager_ListModelsHandler(t *testing.T) {
 	// Ensure all expected models were returned
 	assert.Empty(t, expectedModels, "not all expected models were returned")
 }
+
+func TestProxyManager_ProfileNonMember(t *testing.T) {
+
+	model1 := "path1/model1"
+	model2 := "path2/model2"
+
+	profileMemberName := ProcessKeyName("test", model1)
+	profileNonMemberName := ProcessKeyName("test", model2)
+
+	config := &Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]ModelConfig{
+			model1: getTestSimpleResponderConfig("model1"),
+			model2: getTestSimpleResponderConfig("model2"),
+		},
+		Profiles: map[string][]string{
+			"test": {model1},
+		},
+	}
+
+	proxy := New(config)
+	defer proxy.StopProcesses()
+
+	// actual member of profile
+	{
+		reqBody := fmt.Sprintf(`{"model":"%s"}`, profileMemberName)
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := httptest.NewRecorder()
+
+		proxy.HandlerFunc(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "model1")
+	}
+
+	// actual model, but non-member will 404
+	{
+		reqBody := fmt.Sprintf(`{"model":"%s"}`, profileNonMemberName)
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := httptest.NewRecorder()
+
+		proxy.HandlerFunc(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	}
+}
