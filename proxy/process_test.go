@@ -67,7 +67,6 @@ func TestProcess_BrokenModelConfig(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "unable to start process")
 }
 
-// test that the process unloads after the TTL
 func TestProcess_UnloadAfterTTL(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping long auto unload TTL test")
@@ -79,7 +78,7 @@ func TestProcess_UnloadAfterTTL(t *testing.T) {
 	config.UnloadAfter = 3 // seconds
 	assert.Equal(t, 3, config.UnloadAfter)
 
-	process := NewProcess("ttl", 2, config, NewLogMonitorWriter(io.Discard))
+	process := NewProcess("ttl_test", 2, config, NewLogMonitorWriter(io.Discard))
 	defer process.Stop()
 
 	// this should take 4 seconds
@@ -109,6 +108,33 @@ func TestProcess_UnloadAfterTTL(t *testing.T) {
 	t.Log("sleep 5 seconds and check if unloaded")
 	time.Sleep(5 * time.Second)
 	assert.Equal(t, StateStopped, process.CurrentState())
+}
+
+func TestProcess_LowTTLValue(t *testing.T) {
+	if true { // change this code to run this ...
+		t.Skip("skipping test, edit process_test.go to run it ")
+	}
+
+	config := getTestSimpleResponderConfig("fast_ttl")
+	assert.Equal(t, 0, config.UnloadAfter)
+	config.UnloadAfter = 1 // second
+	assert.Equal(t, 1, config.UnloadAfter)
+
+	process := NewProcess("ttl", 2, config, NewLogMonitorWriter(os.Stdout))
+	defer process.Stop()
+
+	for i := 0; i < 100; i++ {
+		t.Logf("Waiting before sending request %d", i)
+		time.Sleep(1500 * time.Millisecond)
+
+		expected := fmt.Sprintf("echo=test_%d", i)
+		req := httptest.NewRequest("GET", fmt.Sprintf("/slow-respond?echo=%s&delay=50ms", expected), nil)
+		w := httptest.NewRecorder()
+		process.ProxyRequest(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), expected)
+	}
+
 }
 
 // issue #19
