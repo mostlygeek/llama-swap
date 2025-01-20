@@ -135,6 +135,7 @@ func (p *Process) start() error {
 				if time.Since(p.lastRequestHandled) > maxDuration {
 					fmt.Fprintf(p.logMonitor, "!!! Unloading model %s, TTL of %ds reached.\n", p.ID, p.config.UnloadAfter)
 					p.Stop()
+					return
 				}
 			}
 		}()
@@ -165,7 +166,6 @@ func (p *Process) Stop() {
 	// Pretty sure this stopping code needs some work for windows and
 	// will be a source of pain in the future.
 
-	p.cmd.Process.Signal(syscall.SIGTERM)
 	sigtermTimeout, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -174,9 +174,11 @@ func (p *Process) Stop() {
 		sigtermNormal <- p.cmd.Wait()
 	}()
 
+	p.cmd.Process.Signal(syscall.SIGTERM)
+
 	select {
 	case <-sigtermTimeout.Done():
-		fmt.Fprintf(p.logMonitor, "!!! process for %s timed out waiting to stop\n", p.ID)
+		fmt.Fprintf(p.logMonitor, "XXX Process for %s timed out waiting to stop, sending SIGKILL to PID: %d\n", p.ID, p.cmd.Process.Pid)
 		p.cmd.Process.Kill()
 		p.cmd.Wait()
 	case err := <-sigtermNormal:
