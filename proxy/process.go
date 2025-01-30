@@ -188,6 +188,11 @@ func (p *Process) Stop() {
 			// leave the state as it is?
 			return
 		}
+
+		err = cmd.Wait()
+		if err != nil {
+			fmt.Fprintf(p.logMonitor, "!!! WARNING error waiting for stop command to complete: %v", err)
+		}
 	} else {
 		sigtermTimeout, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
