@@ -153,6 +153,7 @@ func (p *Process) Stop() {
 	defer p.stateMutex.Unlock()
 
 	if p.state != StateReady {
+		fmt.Fprintf(p.logMonitor, "!!! Stop() called but Process State is not READY")
 		return
 	}
 
@@ -166,30 +167,53 @@ func (p *Process) Stop() {
 	// Pretty sure this stopping code needs some work for windows and
 	// will be a source of pain in the future.
 
-	sigtermTimeout, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	sigtermNormal := make(chan error, 1)
-	go func() {
-		sigtermNormal <- p.cmd.Wait()
-	}()
-
-	p.cmd.Process.Signal(syscall.SIGTERM)
-
-	select {
-	case <-sigtermTimeout.Done():
-		fmt.Fprintf(p.logMonitor, "XXX Process for %s timed out waiting to stop, sending SIGKILL to PID: %d\n", p.ID, p.cmd.Process.Pid)
-		p.cmd.Process.Kill()
-		p.cmd.Wait()
-	case err := <-sigtermNormal:
+	if p.config.CmdStop != "" {
+		// for issue #35 to do things like `docker stop`
+		args, err := p.config.SanitizeCommandStop()
 		if err != nil {
-			if err.Error() != "wait: no child processes" {
-				// possible that simple-responder for testing is just not
-				// existing right, so suppress those errors.
-				fmt.Fprintf(p.logMonitor, "!!! process for %s stopped with error > %v\n", p.ID, err)
+			fmt.Fprintf(p.logMonitor, "!!! Error sanitizing stop command: %v", err)
+
+			// leave the state as it is?
+			return
+		}
+
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Stdout = p.logMonitor
+		cmd.Stderr = p.logMonitor
+		err = cmd.Start()
+		if err != nil {
+			fmt.Fprintf(p.logMonitor, "!!! Error running stop command: %v", err)
+
+			// leave the state as it is?
+			return
+		}
+	} else {
+		sigtermTimeout, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		sigtermNormal := make(chan error, 1)
+		go func() {
+			sigtermNormal <- p.cmd.Wait()
+		}()
+
+		p.cmd.Process.Signal(syscall.SIGTERM)
+
+		select {
+		case <-sigtermTimeout.Done():
+			fmt.Fprintf(p.logMonitor, "XXX Process for %s timed out waiting to stop, sending SIGKILL to PID: %d\n", p.ID, p.cmd.Process.Pid)
+			p.cmd.Process.Kill()
+			p.cmd.Wait()
+		case err := <-sigtermNormal:
+			if err != nil {
+				if err.Error() != "wait: no child processes" {
+					// possible that simple-responder for testing is just not
+					// existing right, so suppress those errors.
+					fmt.Fprintf(p.logMonitor, "!!! process for %s stopped with error > %v\n", p.ID, err)
+				}
 			}
 		}
 	}
+
 	p.state = StateStopped
 }
 
