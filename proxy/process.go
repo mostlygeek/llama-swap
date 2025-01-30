@@ -171,19 +171,19 @@ func (p *Process) Stop() {
 		// for issue #35 to do things like `docker stop`
 		args, err := p.config.SanitizeCommandStop()
 		if err != nil {
-			fmt.Fprintf(p.logMonitor, "!!! Error sanitizing stop command: %v", err)
+			fmt.Fprintf(p.logMonitor, "!!! Error sanitizing stop command: %v\n", err)
 
 			// leave the state as it is?
 			return
 		}
 
-		fmt.Fprintf(p.logMonitor, "!!! Running stop command: %s", strings.Join(args, " "))
+		fmt.Fprintf(p.logMonitor, "!!! Running stop command: %s\n", strings.Join(args, " "))
 		cmd := exec.Command(args[0], args[1:]...)
 		cmd.Stdout = p.logMonitor
 		cmd.Stderr = p.logMonitor
 		err = cmd.Start()
 		if err != nil {
-			fmt.Fprintf(p.logMonitor, "!!! Error running stop command: %v", err)
+			fmt.Fprintf(p.logMonitor, "!!! Error running stop command: %v\n", err)
 
 			// leave the state as it is?
 			return
@@ -191,7 +191,7 @@ func (p *Process) Stop() {
 
 		err = cmd.Wait()
 		if err != nil {
-			fmt.Fprintf(p.logMonitor, "!!! WARNING error waiting for stop command to complete: %v", err)
+			fmt.Fprintf(p.logMonitor, "!!! WARNING error waiting for stop command to complete: %v\n", err)
 		}
 	} else {
 		sigtermTimeout, cancel := context.WithTimeout(context.Background(), 5*time.Second)
