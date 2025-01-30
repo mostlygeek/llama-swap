@@ -177,6 +177,7 @@ func (p *Process) Stop() {
 			return
 		}
 
+		fmt.Fprintf(p.logMonitor, "!!! Running stop command: %s", strings.Join(args, " "))
 		cmd := exec.Command(args[0], args[1:]...)
 		cmd.Stdout = p.logMonitor
 		cmd.Stderr = p.logMonitor
