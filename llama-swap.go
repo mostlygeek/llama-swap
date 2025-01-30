@@ -4,6 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/proxy"
@@ -39,6 +41,16 @@ func main() {
 	}
 
 	proxyManager := proxy.New(config)
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		fmt.Println("Shutting down llama-swap")
+		proxyManager.StopProcesses()
+		os.Exit(0)
+	}()
+
 	fmt.Println("llama-swap listening on " + *listenStr)
 	if err := proxyManager.Run(*listenStr); err != nil {
 		fmt.Printf("Server error: %v\n", err)

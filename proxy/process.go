@@ -153,13 +153,13 @@ func (p *Process) Stop() {
 	defer p.stateMutex.Unlock()
 
 	if p.state != StateReady {
-		fmt.Fprintf(p.logMonitor, "!!! Stop() called but Process State is not READY")
+		fmt.Fprintf(p.logMonitor, "!!! Stop() called but Process State is not READY\n")
 		return
 	}
 
 	if p.cmd == nil || p.cmd.Process == nil {
 		// this situation should never happen... but if it does just update the state
-		fmt.Fprintf(p.logMonitor, "!!! State is Ready but Command is nil.")
+		fmt.Fprintf(p.logMonitor, "!!! State is Ready but Command is nil.\n")
 		p.state = StateStopped
 		return
 	}
