@@ -69,6 +69,19 @@ func New(config *Config) *ProxyManager {
 		})
 	}
 
+	// see: https://github.com/mostlygeek/llama-swap/issues/42
+	// respond with permissive OPTIONS for any endpoint
+	pm.ginEngine.Use(func(c *gin.Context) {
+		if c.Request.Method == "OPTIONS" {
+			c.Header("Access-Control-Allow-Origin", "*")
+			c.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			c.AbortWithStatus(204)
+			return
+		}
+		c.Next()
+	})
+
 	// Set up routes using the Gin engine
 	pm.ginEngine.POST("/v1/chat/completions", pm.proxyOAIHandler)
 	// Support legacy /v1/completions api, see issue #12
