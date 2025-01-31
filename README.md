@@ -30,13 +30,12 @@ Any OpenAI compatible server would work. llama-swap was originally designed for 
   - `v1/rerank`
   - `v1/audio/speech` ([#36](https://github.com/mostlygeek/llama-swap/issues/36))
 - ✅ Multiple GPU support
-- ✅ Docker Support ([#40](https://github.com/mostlygeek/llama-swap/pull/40))
+- ✅ Docker and Podman support
 - ✅ Run multiple models at once with `profiles`
 - ✅ Remote log monitoring at `/log`
 - ✅ Automatic unloading of models from GPUs after timeout
 - ✅ Use any local OpenAI compatible server (llama.cpp, vllm, tabbyAPI, etc)
 - ✅ Direct access to upstream HTTP server via `/upstream/:model_id` ([demo](https://github.com/mostlygeek/llama-swap/pull/31))
--
 
 ## config.yaml
 
@@ -91,14 +90,9 @@ models:
     cmd: llama-server --port 9999 -m Llama-3.2-1B-Instruct-Q4_K_M.gguf -ngl 0
     unlisted: true
 
-  # Docker Support (Experimental)
-  # see: https://github.com/mostlygeek/llama-swap/pull/40
-  "dockertest":
+  # Docker Support (v26.1.4+ required!)
+  "docker-llama":
     proxy: "http://127.0.0.1:9790"
-
-    # introduced to reliably stop containers
-    cmd_stop: docker stop -t 2 dockertest
-
     cmd: >
       docker run --name dockertest
       --init --rm -p 9790:8080 -v /mnt/nvme/models:/models

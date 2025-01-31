@@ -11,7 +11,6 @@ import (
 
 type ModelConfig struct {
 	Cmd           string   `yaml:"cmd"`
-	CmdStop       string   `yaml:"cmd_stop"`
 	Proxy         string   `yaml:"proxy"`
 	Aliases       []string `yaml:"aliases"`
 	Env           []string `yaml:"env"`
@@ -22,9 +21,6 @@ type ModelConfig struct {
 
 func (m *ModelConfig) SanitizedCommand() ([]string, error) {
 	return SanitizeCommand(m.Cmd)
-}
-func (m *ModelConfig) SanitizeCommandStop() ([]string, error) {
-	return SanitizeCommand(m.CmdStop)
 }
 
 type Config struct {

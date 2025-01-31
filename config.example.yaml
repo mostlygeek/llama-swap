@@ -53,16 +53,12 @@ models:
       --ctx-size 8192
       --reranking
 
-  # EXPERIMENTAL! Docker Support
+  # Docker Support (v26.1.4+ required!)
   # see:
   #  - https://github.com/mostlygeek/llama-swap/pull/40
   #  - https://github.com/mostlygeek/llama-swap/issues/35
   "dockertest":
     proxy: "http://127.0.0.1:9790"
-
-    # use this to reliably stop named containers
-    cmd_stop: docker stop -t 2 dockertest
-
     cmd: >
       docker run --name dockertest
       --init --rm -p 9790:8080 -v /mnt/nvme/models:/models
