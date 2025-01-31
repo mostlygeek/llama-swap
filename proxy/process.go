@@ -326,7 +326,7 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 
 	proxyTo := p.config.Proxy
 	client := &http.Client{}
-	req, err := http.NewRequest(r.Method, proxyTo+r.URL.String(), r.Body)
+	req, err := http.NewRequestWithContext(r.Context(), r.Method, proxyTo+r.URL.String(), r.Body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
