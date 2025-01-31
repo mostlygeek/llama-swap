@@ -54,9 +54,6 @@ models:
       --reranking
 
   # Docker Support (v26.1.4+ required!)
-  # see:
-  #  - https://github.com/mostlygeek/llama-swap/pull/40
-  #  - https://github.com/mostlygeek/llama-swap/issues/35
   "dockertest":
     proxy: "http://127.0.0.1:9790"
     cmd: >
