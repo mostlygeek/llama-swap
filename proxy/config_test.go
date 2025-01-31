@@ -35,6 +35,11 @@ models:
     aliases:
       - "m2"
     checkEndpoint: "/"
+  docker:
+    cmd: docker run -p 9999:8080 --name "my_container"
+    cmd_stop: docker stop my_container
+    proxy: "http://localhost:9999"
+    checkEndpoint: "/health"
 healthCheckTimeout: 15
 profiles:
   test:
@@ -56,6 +61,7 @@ profiles:
 		Models: map[string]ModelConfig{
 			"model1": {
 				Cmd:           "path/to/cmd --arg1 one",
+				CmdStop:       "",
 				Proxy:         "http://localhost:8080",
 				Aliases:       []string{"m1", "model-one"},
 				Env:           []string{"VAR1=value1", "VAR2=value2"},
@@ -63,10 +69,18 @@ profiles:
 			},
 			"model2": {
 				Cmd:           "path/to/cmd --arg1 one",
+				CmdStop:       "",
 				Proxy:         "http://localhost:8081",
 				Aliases:       []string{"m2"},
 				Env:           nil,
 				CheckEndpoint: "/",
+			},
+			"docker": {
+				Cmd:           `docker run -p 9999:8080 --name "my_container"`,
+				CmdStop:       "docker stop my_container",
+				Proxy:         "http://localhost:9999",
+				Env:           nil,
+				CheckEndpoint: "/health",
 			},
 		},
 		HealthCheckTimeout: 15,
@@ -97,6 +111,18 @@ func TestConfig_ModelConfigSanitizedCommand(t *testing.T) {
 	args, err := config.SanitizedCommand()
 	assert.NoError(t, err)
 	assert.Equal(t, []string{"python", "model1.py", "--arg1", "value1", "--arg2", "value2"}, args)
+}
+
+func TestConfig_ModelConfigSanitizedCommandStop(t *testing.T) {
+	config := &ModelConfig{
+		CmdStop: `docker stop my_container \
+		--arg1 1
+		--arg2 2`,
+	}
+
+	args, err := config.SanitizeCommandStop()
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"docker", "stop", "my_container", "--arg1", "1", "--arg2", "2"}, args)
 }
 
 func TestConfig_FindConfig(t *testing.T) {
