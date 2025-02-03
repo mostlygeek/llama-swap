@@ -157,7 +157,14 @@ func (p *Process) Stop() {
 			if errno, ok := err.(syscall.Errno); ok {
 				fmt.Fprintf(p.logMonitor, "!!! process [%s] errno >> %v\n", p.ID, errno)
 			} else if exitError, ok := err.(*exec.ExitError); ok {
-				fmt.Fprintf(p.logMonitor, "!!! process [%s] ExitError >> %v, exit code: %d\n", p.ID, exitError, exitError.ExitCode())
+				if strings.Contains(exitError.String(), "signal: terminated") {
+					fmt.Fprintf(p.logMonitor, "!!! process [%s] stopped OK\n", p.ID)
+				} else if strings.Contains(exitError.String(), "signal: interrupt") {
+					fmt.Fprintf(p.logMonitor, "!!! process [%s] interrupted OK\n", p.ID)
+				} else {
+					fmt.Fprintf(p.logMonitor, "!!! process [%s] ExitError >> %v, exit code: %d\n", p.ID, exitError, exitError.ExitCode())
+				}
+
 			} else {
 				fmt.Fprintf(p.logMonitor, "!!! process [%s] exited >> %v\n", p.ID, err)
 			}
