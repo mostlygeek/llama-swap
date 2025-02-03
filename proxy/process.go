@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -86,36 +85,11 @@ func (p *Process) start() error {
 	// 3. The health check passes
 	//
 	// only in the third case will the process be considered Ready to accept
-	healthCheckContext, cancelHealthCheck := context.WithCancelCause(context.Background())
-	defer cancelHealthCheck(nil) // clean up
-	cmdWaitChan := make(chan error, 1)
-	healthCheckChan := make(chan error, 1)
+	<-time.After(250 * time.Millisecond) // give process a bit of time to start
 
-	go func() {
-		// possible cmd exits early
-		cmdWaitChan <- p.cmd.Wait()
-	}()
-
-	go func() {
-		<-time.After(250 * time.Millisecond) // give process a bit of time to start
-		healthCheckChan <- p.checkHealthEndpoint(healthCheckContext)
-	}()
-
-	select {
-	case err := <-cmdWaitChan:
+	if err := p.checkHealthEndpoint(); err != nil {
 		p.state = StateFailed
-		if err != nil {
-			err = fmt.Errorf("command [%s] %s", strings.Join(p.cmd.Args, " "), err.Error())
-		} else {
-			err = fmt.Errorf("command [%s] exited unexpected", strings.Join(p.cmd.Args, " "))
-		}
-		cancelHealthCheck(err)
 		return err
-	case err := <-healthCheckChan:
-		if err != nil {
-			p.state = StateFailed
-			return err
-		}
 	}
 
 	if p.config.UnloadAfter > 0 {
@@ -176,15 +150,23 @@ func (p *Process) Stop() {
 
 	select {
 	case <-sigtermTimeout.Done():
-		fmt.Fprintf(p.logMonitor, "XXX Process for %s timed out waiting to stop, sending SIGKILL to PID: %d\n", p.ID, p.cmd.Process.Pid)
+		fmt.Fprintf(p.logMonitor, "!!! process [%s] timed out waiting to stop, sending KILL signal\n", p.ID)
 		p.cmd.Process.Kill()
-		p.cmd.Wait()
 	case err := <-sigtermNormal:
 		if err != nil {
-			if err.Error() != "wait: no child processes" {
-				// possible that simple-responder for testing is just not
-				// existing right, so suppress those errors.
-				fmt.Fprintf(p.logMonitor, "!!! process for %s stopped with error > %v\n", p.ID, err)
+			if errno, ok := err.(syscall.Errno); ok {
+				fmt.Fprintf(p.logMonitor, "!!! process [%s] errno >> %v\n", p.ID, errno)
+			} else if exitError, ok := err.(*exec.ExitError); ok {
+				if strings.Contains(exitError.String(), "signal: terminated") {
+					fmt.Fprintf(p.logMonitor, "!!! process [%s] stopped OK\n", p.ID)
+				} else if strings.Contains(exitError.String(), "signal: interrupt") {
+					fmt.Fprintf(p.logMonitor, "!!! process [%s] interrupted OK\n", p.ID)
+				} else {
+					fmt.Fprintf(p.logMonitor, "!!! process [%s] ExitError >> %v, exit code: %d\n", p.ID, exitError, exitError.ExitCode())
+				}
+
+			} else {
+				fmt.Fprintf(p.logMonitor, "!!! process [%s] exited >> %v\n", p.ID, err)
 			}
 		}
 	}
@@ -198,7 +180,7 @@ func (p *Process) CurrentState() ProcessState {
 	return p.state
 }
 
-func (p *Process) checkHealthEndpoint(ctxFromStart context.Context) error {
+func (p *Process) checkHealthEndpoint() error {
 	if p.config.Proxy == "" {
 		return fmt.Errorf("no upstream available to check /health")
 	}
@@ -230,24 +212,11 @@ func (p *Process) checkHealthEndpoint(ctxFromStart context.Context) error {
 			return err
 		}
 
-		ctx, cancel := context.WithTimeout(ctxFromStart, time.Second)
-		defer cancel()
-		req = req.WithContext(ctx)
 		resp, err := client.Do(req)
 
 		ttl := (maxDuration - time.Since(startTime)).Seconds()
 
 		if err != nil {
-			// check if the context was cancelled
-			select {
-			case <-ctx.Done():
-				err := context.Cause(ctx)
-				if !errors.Is(err, context.DeadlineExceeded) {
-					return err
-				}
-			default:
-			}
-
 			// wait a bit longer for TCP connection issues
 			if strings.Contains(err.Error(), "connection refused") {
 				fmt.Fprintf(p.logMonitor, "Connection refused on %s, ttl %.0fs\n", healthURL, ttl)
