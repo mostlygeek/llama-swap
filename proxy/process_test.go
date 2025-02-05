@@ -292,7 +292,6 @@ func TestProcess_ShutdownInterruptsHealthCheck(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		<-time.After(time.Second * 2)
-		fmt.Println("Shutting down")
 		process.Shutdown()
 	}()
 	wg.Add(1)

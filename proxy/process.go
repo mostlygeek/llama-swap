@@ -187,11 +187,11 @@ loop:
 		case <-p.shutdownCtx.Done():
 			return errors.New("health check interrupted due to shutdown")
 		default:
-			if err := p.checkHealthEndpoint(endpoint); err != nil {
-				fmt.Printf("!!! Health check failed: %v\n", err)
-			} else {
+			if err := p.checkHealthEndpoint(endpoint); err == nil {
 				cancelHealthCheck()
 				break loop
+			} else {
+				//fmt.Printf("!!! Health check failed: %v\n", err)
 			}
 		}
 
