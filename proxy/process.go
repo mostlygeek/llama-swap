@@ -22,8 +22,6 @@ const (
 )
 
 type Process struct {
-	sync.Mutex
-
 	ID                 string
 	config             ModelConfig
 	cmd                *exec.Cmd
