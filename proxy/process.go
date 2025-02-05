@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -44,9 +45,14 @@ type Process struct {
 
 	// used to block on multiple start() calls
 	waitStarting sync.WaitGroup
+
+	// for managing shutdown state
+	shutdownCtx    context.Context
+	shutdownCancel context.CancelFunc
 }
 
 func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, logMonitor *LogMonitor) *Process {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Process{
 		ID:                 ID,
 		config:             config,
@@ -54,6 +60,8 @@ func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, logMonito
 		logMonitor:         logMonitor,
 		healthCheckTimeout: healthCheckTimeout,
 		state:              StateStopped,
+		shutdownCtx:        ctx,
+		shutdownCancel:     cancel,
 	}
 }
 
@@ -103,6 +111,10 @@ func (p *Process) CurrentState() ProcessState {
 // it is a private method because starting is automatic but stopping can be called
 // at any time.
 func (p *Process) start() error {
+
+	if p.config.Proxy == "" {
+		return fmt.Errorf("can not start(), upstream proxy missing")
+	}
 
 	// wait for the other start() to complete
 	curState := p.CurrentState()
@@ -156,9 +168,44 @@ func (p *Process) start() error {
 	// only in the third case will the process be considered Ready to accept
 	<-time.After(250 * time.Millisecond) // give process a bit of time to start
 
-	if err := p.checkHealthEndpoint(); err != nil {
-		return p.setState(StateFailed)
+	checkStartTime := time.Now()
+	maxDuration := time.Second * time.Duration(p.healthCheckTimeout)
+	endpoint := strings.TrimSpace(p.config.CheckEndpoint)
+
+	checkDeadline, cancelHealthCheck := context.WithDeadline(
+		context.Background(),
+		checkStartTime.Add(maxDuration),
+	)
+	defer cancelHealthCheck()
+
+loop:
+	for {
+		select {
+		case <-checkDeadline.Done():
+			p.setState(StateFailed)
+			return fmt.Errorf("health check failed after %vs", maxDuration)
+		case <-p.shutdownCtx.Done():
+			return errors.New("health check interrupted due to shutdown")
+		default:
+			if err := p.checkHealthEndpoint(endpoint); err != nil {
+				fmt.Printf("!!! Health check failed: %v\n", err)
+			} else {
+				cancelHealthCheck()
+				break loop
+			}
+		}
+
+		<-time.After(time.Second)
 	}
+
+	// // ran out of time
+	// ttl := (maxDuration - time.Since(checkStartTime)).Seconds()
+	// if ttl <= 0 {
+	// 	p.setState(StateFailed)
+	// 	return fmt.Errorf("health check failed after %v", maxDuration)
+	// }
+
+	// wait 1 second before trying again
 
 	if p.config.UnloadAfter > 0 {
 		// start a goroutine to check every second if
@@ -210,7 +257,19 @@ func (p *Process) Stop() {
 // of time for any inflight requests to complete before shutting down. If the Process
 // is in the state of starting, it will cancel it and shut it down
 func (p *Process) Shutdown() {
+	// cancel anything that can be interrupted by a shutdown (ie: healthcheck)
+	p.shutdownCancel()
 
+	p.stateMutex.Lock()
+	defer p.stateMutex.Unlock()
+	p.setState(StateStopping)
+
+	// 5 seconds to stop the process
+	p.stopCommand(5 * time.Second)
+	if err := p.setState(StateShutdown); err != nil {
+		fmt.Printf("!!! Shutdown() failed to set state to shutdown: %v", err)
+	}
+	p.setState(StateShutdown)
 }
 
 // stopCommand will send a SIGTERM to the process and wait for it to exit.
@@ -225,8 +284,7 @@ func (p *Process) stopCommand(sigtermTTL time.Duration) {
 	}()
 
 	if p.cmd == nil || p.cmd.Process == nil {
-		fmt.Println("huh")
-		return
+		panic("this should not happen, cmd or cmd.Process is nil")
 	}
 
 	p.cmd.Process.Signal(syscall.SIGTERM)
@@ -255,13 +313,7 @@ func (p *Process) stopCommand(sigtermTTL time.Duration) {
 	}
 }
 
-func (p *Process) checkHealthEndpoint() error {
-	if p.config.Proxy == "" {
-		return fmt.Errorf("no upstream available to check /health")
-	}
-
-	checkEndpoint := strings.TrimSpace(p.config.CheckEndpoint)
-
+func (p *Process) checkHealthEndpoint(checkEndpoint string) error {
 	if checkEndpoint == "none" {
 		return nil
 	}
@@ -272,52 +324,32 @@ func (p *Process) checkHealthEndpoint() error {
 	}
 
 	proxyTo := p.config.Proxy
-	maxDuration := time.Second * time.Duration(p.healthCheckTimeout)
 	healthURL, err := url.JoinPath(proxyTo, checkEndpoint)
 	if err != nil {
-		return fmt.Errorf("failed to create health url with with %s and path %s", proxyTo, checkEndpoint)
+		return fmt.Errorf("failed to create health URL with %s and path %s", proxyTo, checkEndpoint)
 	}
 
-	client := &http.Client{}
-	startTime := time.Now()
-
-	for {
-		req, err := http.NewRequest("GET", healthURL, nil)
-		if err != nil {
-			return err
-		}
-
-		resp, err := client.Do(req)
-
-		ttl := (maxDuration - time.Since(startTime)).Seconds()
-
-		if err != nil {
-			// wait a bit longer for TCP connection issues
-			if strings.Contains(err.Error(), "connection refused") {
-				fmt.Fprintf(p.logMonitor, "Connection refused on %s, ttl %.0fs\n", healthURL, ttl)
-				time.Sleep(5 * time.Second)
-			} else {
-				time.Sleep(time.Second)
-			}
-
-			if ttl < 0 {
-				return fmt.Errorf("failed to check health from: %s", healthURL)
-			}
-
-			continue
-		}
-
-		defer resp.Body.Close()
-		if resp.StatusCode == http.StatusOK {
-			return nil
-		}
-
-		if ttl < 0 {
-			return fmt.Errorf("failed to check health from: %s", healthURL)
-		}
-
-		time.Sleep(time.Second)
+	client := &http.Client{
+		Timeout: 500 * time.Millisecond,
 	}
+
+	req, err := http.NewRequest("GET", healthURL, nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	// got a response but it was not an OK
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("status code: %d", resp.StatusCode)
+	}
+
+	return nil
 }
 
 func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {

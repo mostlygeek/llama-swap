@@ -271,3 +271,36 @@ func TestSetState(t *testing.T) {
 		})
 	}
 }
+
+func TestProcess_ShutdownInterruptsHealthCheck(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping long shutdown test")
+	}
+
+	logMonitor := NewLogMonitorWriter(io.Discard)
+	expectedMessage := "testing91931"
+
+	// make a config where the healthcheck will always fail because port is wrong
+	config := getTestSimpleResponderConfigPort(expectedMessage, 9999)
+	config.Proxy = "http://localhost:9998/test"
+
+	healthCheckTTLSeconds := 30
+	process := NewProcess("test-process", healthCheckTTLSeconds, config, logMonitor)
+
+	// start a goroutine to simulate a shutdown
+	var wg sync.WaitGroup
+	go func() {
+		defer wg.Done()
+		<-time.After(time.Second * 2)
+		fmt.Println("Shutting down")
+		process.Shutdown()
+	}()
+	wg.Add(1)
+
+	// start the process, this is a blocking call
+	err := process.start()
+
+	wg.Wait()
+	assert.ErrorContains(t, err, "health check interrupted due to shutdown")
+	assert.Equal(t, StateShutdown, process.CurrentState())
+}

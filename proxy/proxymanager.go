@@ -157,7 +157,7 @@ func (pm *ProxyManager) stopProcesses() {
 	}
 
 	for _, process := range pm.currentProcesses {
-		process.Stop()
+		process.Shutdown()
 	}
 
 	pm.currentProcesses = make(map[string]*Process)
