@@ -16,9 +16,16 @@ import (
 type ProcessState string
 
 const (
-	StateStopped ProcessState = ProcessState("stopped")
-	StateReady   ProcessState = ProcessState("ready")
-	StateFailed  ProcessState = ProcessState("failed")
+	StateStopped  ProcessState = ProcessState("stopped")
+	StateStarting ProcessState = ProcessState("starting")
+	StateReady    ProcessState = ProcessState("ready")
+	StateStopping ProcessState = ProcessState("stopping")
+
+	// failed a health check on start and will not be recovered
+	StateFailed ProcessState = ProcessState("failed")
+
+	// process is shutdown and will not be restarted
+	StateShutdown ProcessState = ProcessState("shutdown")
 )
 
 type Process struct {
@@ -47,18 +54,50 @@ func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, logMonito
 	}
 }
 
+func (p *Process) setState(newState ProcessState) error {
+	// enforce valid state transitions
+	invalidTransition := false
+	if p.state == StateStopped {
+		// stopped -> starting
+		if newState != StateStarting {
+			invalidTransition = true
+		}
+	} else if p.state == StateStarting {
+		// starting -> (ready | failed)
+		if newState != StateReady && newState != StateFailed {
+			invalidTransition = true
+		}
+	} else if p.state == StateReady {
+		// ready -> stopping
+		if newState != StateStopping {
+			invalidTransition = true
+		}
+	} else if p.state == StateStopping {
+		// stopping -> stopped
+		if newState != StateStopped {
+			invalidTransition = true
+		}
+	} else if p.state == StateFailed || p.state == StateShutdown {
+		invalidTransition = true
+	}
+
+	if invalidTransition {
+		//panic(fmt.Sprintf("Invalid state transition from %s to %s", p.state, newState))
+		return fmt.Errorf("invalid state transition from %s to %s", p.state, newState)
+	}
+
+	p.state = newState
+	return nil
+}
+
 // start the process and returns when it is ready
 func (p *Process) start() error {
 
 	p.stateMutex.Lock()
 	defer p.stateMutex.Unlock()
 
-	if p.state == StateReady {
-		return nil
-	}
-
-	if p.state == StateFailed {
-		return fmt.Errorf("process is in a failed state and can not be restarted")
+	if err := p.setState(StateStarting); err != nil {
+		return err
 	}
 
 	args, err := p.config.SanitizedCommand()
@@ -113,8 +152,7 @@ func (p *Process) start() error {
 		}()
 	}
 
-	p.state = StateReady
-	return nil
+	return p.setState(StateReady)
 }
 
 func (p *Process) Stop() {
