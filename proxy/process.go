@@ -90,6 +90,12 @@ func (p *Process) setState(newState ProcessState) error {
 	return nil
 }
 
+func (p *Process) CurrentState() ProcessState {
+	p.stateMutex.RLock()
+	defer p.stateMutex.RUnlock()
+	return p.state
+}
+
 // start the process and returns when it is ready
 func (p *Process) start() error {
 
@@ -158,24 +164,27 @@ func (p *Process) start() error {
 func (p *Process) Stop() {
 	// wait for any inflight requests before proceeding
 	p.inFlightRequests.Wait()
-
 	p.stateMutex.Lock()
 	defer p.stateMutex.Unlock()
 
-	if p.state != StateReady {
-		fmt.Fprintf(p.logMonitor, "!!! Info - Stop() called but Process State is not READY\n")
+	// calling Stop() when state is wrong is a no-op
+	if err := p.setState(StateStopping); err != nil {
+		fmt.Fprintf(p.logMonitor, "!!! Info - Stop() err: %v\n", err)
 		return
 	}
 
-	if p.cmd == nil || p.cmd.Process == nil {
-		// this situation should never happen... but if it does just update the state
-		fmt.Fprintf(p.logMonitor, "!!! State is Ready but Command is nil.\n")
-		p.state = StateStopped
-		return
-	}
+	p.stopCommand(5 * time.Second)
 
-	sigtermTimeout, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	if err := p.setState(StateStopped); err != nil {
+		panic(fmt.Sprintf("Stop() failed to set state to stopped: %v", err))
+	}
+}
+
+// stopCommand will send a SIGTERM to the process and wait for it to exit.
+// If it does not exit within 5 seconds, it will send a SIGKILL.
+func (p *Process) stopCommand(sigtermTTL time.Duration) {
+	sigtermTimeout, cancelTimeout := context.WithTimeout(context.Background(), sigtermTTL)
+	defer cancelTimeout()
 
 	sigtermNormal := make(chan error, 1)
 	go func() {
@@ -206,14 +215,6 @@ func (p *Process) Stop() {
 			}
 		}
 	}
-
-	p.state = StateStopped
-}
-
-func (p *Process) CurrentState() ProcessState {
-	p.stateMutex.RLock()
-	defer p.stateMutex.RUnlock()
-	return p.state
 }
 
 func (p *Process) checkHealthEndpoint() error {
