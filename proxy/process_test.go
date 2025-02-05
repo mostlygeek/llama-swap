@@ -48,6 +48,33 @@ func TestProcess_AutomaticallyStartsUpstream(t *testing.T) {
 	}
 }
 
+// TestProcess_WaitOnMultipleStarts tests that multiple concurrent requests
+// are all handled successfully, even though they all may ask for the process to .start()
+func TestProcess_WaitOnMultipleStarts(t *testing.T) {
+
+	logMonitor := NewLogMonitorWriter(io.Discard)
+	expectedMessage := "testing91931"
+	config := getTestSimpleResponderConfig(expectedMessage)
+
+	process := NewProcess("test-process", 5, config, logMonitor)
+	defer process.Stop()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func(reqID int) {
+			defer wg.Done()
+			req := httptest.NewRequest("GET", "/test", nil)
+			w := httptest.NewRecorder()
+			process.ProxyRequest(w, req)
+			assert.Equal(t, http.StatusOK, w.Code, "Worker %d got wrong HTTP code", reqID)
+			assert.Contains(t, w.Body.String(), expectedMessage, "Worker %d got wrong message", reqID)
+		}(i)
+	}
+	wg.Wait()
+	assert.Equal(t, StateReady, process.CurrentState())
+}
+
 // test that the automatic start returns the expected error type
 func TestProcess_BrokenModelConfig(t *testing.T) {
 	// Create a process configuration
@@ -58,13 +85,17 @@ func TestProcess_BrokenModelConfig(t *testing.T) {
 	}
 
 	process := NewProcess("broken", 1, config, NewLogMonitor())
-	defer process.Stop()
 
 	req := httptest.NewRequest("GET", "/", nil)
 	w := httptest.NewRecorder()
 	process.ProxyRequest(w, req)
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 	assert.Contains(t, w.Body.String(), "unable to start process")
+
+	w = httptest.NewRecorder()
+	process.ProxyRequest(w, req)
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.Contains(t, w.Body.String(), "Process can not ProxyRequest, state is failed")
 }
 
 func TestProcess_UnloadAfterTTL(t *testing.T) {
@@ -202,8 +233,10 @@ func TestSetState(t *testing.T) {
 		{"Stopped to Starting", StateStopped, StateStarting, nil, StateStarting},
 		{"Starting to Ready", StateStarting, StateReady, nil, StateReady},
 		{"Starting to Failed", StateStarting, StateFailed, nil, StateFailed},
+		{"Starting to Stopping", StateStarting, StateStopping, nil, StateStopping},
 		{"Ready to Stopping", StateReady, StateStopping, nil, StateStopping},
 		{"Stopping to Stopped", StateStopping, StateStopped, nil, StateStopped},
+		{"Stopping to Shutdown", StateStopping, StateShutdown, nil, StateShutdown},
 		{"Stopped to Ready", StateStopped, StateReady, fmt.Errorf("invalid state transition from stopped to ready"), StateStopped},
 		{"Starting to Stopped", StateStarting, StateStopped, fmt.Errorf("invalid state transition from starting to stopped"), StateStarting},
 		{"Ready to Starting", StateReady, StateStarting, fmt.Errorf("invalid state transition from ready to starting"), StateReady},
@@ -212,6 +245,7 @@ func TestSetState(t *testing.T) {
 		{"Failed to Stopped", StateFailed, StateStopped, fmt.Errorf("invalid state transition from failed to stopped"), StateFailed},
 		{"Failed to Starting", StateFailed, StateStarting, fmt.Errorf("invalid state transition from failed to starting"), StateFailed},
 		{"Shutdown to Stopped", StateShutdown, StateStopped, fmt.Errorf("invalid state transition from shutdown to stopped"), StateShutdown},
+		{"Shutdown to Starting", StateShutdown, StateStarting, fmt.Errorf("invalid state transition from shutdown to starting"), StateShutdown},
 	}
 
 	for _, test := range tests {

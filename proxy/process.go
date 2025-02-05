@@ -41,6 +41,9 @@ type Process struct {
 	state      ProcessState
 
 	inFlightRequests sync.WaitGroup
+
+	// used to block on multiple start() calls
+	waitStarting sync.WaitGroup
 }
 
 func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, logMonitor *LogMonitor) *Process {
@@ -63,8 +66,8 @@ func (p *Process) setState(newState ProcessState) error {
 			invalidTransition = true
 		}
 	} else if p.state == StateStarting {
-		// starting -> (ready | failed)
-		if newState != StateReady && newState != StateFailed {
+		// starting -> ready | failed | stopping
+		if newState != StateReady && newState != StateFailed && newState != StateStopping {
 			invalidTransition = true
 		}
 	} else if p.state == StateReady {
@@ -73,8 +76,8 @@ func (p *Process) setState(newState ProcessState) error {
 			invalidTransition = true
 		}
 	} else if p.state == StateStopping {
-		// stopping -> stopped
-		if newState != StateStopped {
+		// stopping -> stopped | shutdown
+		if newState != StateStopped && newState != StateShutdown {
 			invalidTransition = true
 		}
 	} else if p.state == StateFailed || p.state == StateShutdown {
@@ -96,8 +99,27 @@ func (p *Process) CurrentState() ProcessState {
 	return p.state
 }
 
-// start the process and returns when it is ready
+// start starts the upstream command, checks the health endpoint, and sets the state to Ready
+// it is a private method because starting is automatic but stopping can be called
+// at any time.
 func (p *Process) start() error {
+
+	// wait for the other start() to complete
+	curState := p.CurrentState()
+
+	if curState == StateReady {
+		return nil
+	}
+
+	if curState == StateStarting {
+		p.waitStarting.Wait()
+
+		if state := p.CurrentState(); state != StateReady {
+			return fmt.Errorf("start() failed current state: %v", state)
+		}
+
+		return nil
+	}
 
 	p.stateMutex.Lock()
 	defer p.stateMutex.Unlock()
@@ -105,6 +127,9 @@ func (p *Process) start() error {
 	if err := p.setState(StateStarting); err != nil {
 		return err
 	}
+
+	p.waitStarting.Add(1)
+	defer p.waitStarting.Done()
 
 	args, err := p.config.SanitizedCommand()
 	if err != nil {
@@ -119,7 +144,8 @@ func (p *Process) start() error {
 	err = p.cmd.Start()
 
 	if err != nil {
-		return err
+		p.setState(StateFailed)
+		return fmt.Errorf("start() failed: %v", err)
 	}
 
 	// One of three things can happen at this stage:
@@ -131,8 +157,7 @@ func (p *Process) start() error {
 	<-time.After(250 * time.Millisecond) // give process a bit of time to start
 
 	if err := p.checkHealthEndpoint(); err != nil {
-		p.state = StateFailed
-		return err
+		return p.setState(StateFailed)
 	}
 
 	if p.config.UnloadAfter > 0 {
@@ -167,17 +192,25 @@ func (p *Process) Stop() {
 	p.stateMutex.Lock()
 	defer p.stateMutex.Unlock()
 
-	// calling Stop() when state is wrong is a no-op
+	// calling Stop() when state is invalid is a no-op
 	if err := p.setState(StateStopping); err != nil {
 		fmt.Fprintf(p.logMonitor, "!!! Info - Stop() err: %v\n", err)
 		return
 	}
 
+	// stop the process with a graceful exit timeout
 	p.stopCommand(5 * time.Second)
 
 	if err := p.setState(StateStopped); err != nil {
 		panic(fmt.Sprintf("Stop() failed to set state to stopped: %v", err))
 	}
+}
+
+// Shutdown is called when llama-swap is shutting down. It will give a little bit
+// of time for any inflight requests to complete before shutting down. If the Process
+// is in the state of starting, it will cancel it and shut it down
+func (p *Process) Shutdown() {
+
 }
 
 // stopCommand will send a SIGTERM to the process and wait for it to exit.
@@ -190,6 +223,11 @@ func (p *Process) stopCommand(sigtermTTL time.Duration) {
 	go func() {
 		sigtermNormal <- p.cmd.Wait()
 	}()
+
+	if p.cmd == nil || p.cmd.Process == nil {
+		fmt.Println("huh")
+		return
+	}
 
 	p.cmd.Process.Signal(syscall.SIGTERM)
 
@@ -284,13 +322,20 @@ func (p *Process) checkHealthEndpoint() error {
 
 func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 
-	p.inFlightRequests.Add(1)
+	// prevent new requests from being made while stopping or irrecoverable
+	currentState := p.CurrentState()
+	if currentState == StateFailed || currentState == StateShutdown || currentState == StateStopping {
+		http.Error(w, fmt.Sprintf("Process can not ProxyRequest, state is %s", currentState), http.StatusServiceUnavailable)
+		return
+	}
 
+	p.inFlightRequests.Add(1)
 	defer func() {
 		p.lastRequestHandled = time.Now()
 		p.inFlightRequests.Done()
 	}()
 
+	// start the process on demand
 	if p.CurrentState() != StateReady {
 		if err := p.start(); err != nil {
 			errstr := fmt.Sprintf("unable to start process: %s", err)
