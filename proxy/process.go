@@ -170,42 +170,54 @@ func (p *Process) start() error {
 
 	checkStartTime := time.Now()
 	maxDuration := time.Second * time.Duration(p.healthCheckTimeout)
-	endpoint := strings.TrimSpace(p.config.CheckEndpoint)
+	checkEndpoint := strings.TrimSpace(p.config.CheckEndpoint)
 
-	checkDeadline, cancelHealthCheck := context.WithDeadline(
-		context.Background(),
-		checkStartTime.Add(maxDuration),
-	)
-	defer cancelHealthCheck()
-
-loop:
-	for {
-		select {
-		case <-checkDeadline.Done():
-			p.setState(StateFailed)
-			return fmt.Errorf("health check failed after %vs", maxDuration)
-		case <-p.shutdownCtx.Done():
-			return errors.New("health check interrupted due to shutdown")
-		default:
-			if err := p.checkHealthEndpoint(endpoint); err == nil {
-				cancelHealthCheck()
-				break loop
-			} else {
-				//fmt.Printf("!!! Health check failed: %v\n", err)
-			}
+	// a "none" means don't check for health ... I could have picked a better word :facepalm:
+	if checkEndpoint != "none" {
+		// keep default behaviour
+		if checkEndpoint == "" {
+			checkEndpoint = "/health"
 		}
 
-		<-time.After(time.Second)
+		proxyTo := p.config.Proxy
+		healthURL, err := url.JoinPath(proxyTo, checkEndpoint)
+		if err != nil {
+			return fmt.Errorf("failed to create health check URL proxy=%s and checkEndpoint=%s", proxyTo, checkEndpoint)
+		}
+
+		checkDeadline, cancelHealthCheck := context.WithDeadline(
+			context.Background(),
+			checkStartTime.Add(maxDuration),
+		)
+		defer cancelHealthCheck()
+
+		// Health check loop
+	loop:
+		for {
+			select {
+			case <-checkDeadline.Done():
+				p.setState(StateFailed)
+				return fmt.Errorf("health check failed after %vs", maxDuration.Seconds())
+			case <-p.shutdownCtx.Done():
+				return errors.New("health check interrupted due to shutdown")
+			default:
+				if err := p.checkHealthEndpoint(healthURL); err == nil {
+					cancelHealthCheck()
+					break loop
+				} else {
+					if strings.Contains(err.Error(), "connection refused") {
+						endTime, _ := checkDeadline.Deadline()
+						ttl := time.Until(endTime)
+						fmt.Fprintf(p.logMonitor, "!!! Connection refused on %s, ttl %.0fs\n", healthURL, ttl.Seconds())
+					} else {
+						fmt.Fprintf(p.logMonitor, "!!! Health check error: %v\n", err)
+					}
+				}
+			}
+
+			<-time.After(time.Second)
+		}
 	}
-
-	// // ran out of time
-	// ttl := (maxDuration - time.Since(checkStartTime)).Seconds()
-	// if ttl <= 0 {
-	// 	p.setState(StateFailed)
-	// 	return fmt.Errorf("health check failed after %v", maxDuration)
-	// }
-
-	// wait 1 second before trying again
 
 	if p.config.UnloadAfter > 0 {
 		// start a goroutine to check every second if
@@ -313,21 +325,7 @@ func (p *Process) stopCommand(sigtermTTL time.Duration) {
 	}
 }
 
-func (p *Process) checkHealthEndpoint(checkEndpoint string) error {
-	if checkEndpoint == "none" {
-		return nil
-	}
-
-	// keep default behaviour
-	if checkEndpoint == "" {
-		checkEndpoint = "/health"
-	}
-
-	proxyTo := p.config.Proxy
-	healthURL, err := url.JoinPath(proxyTo, checkEndpoint)
-	if err != nil {
-		return fmt.Errorf("failed to create health URL with %s and path %s", proxyTo, checkEndpoint)
-	}
+func (p *Process) checkHealthEndpoint(healthURL string) error {
 
 	client := &http.Client{
 		Timeout: 500 * time.Millisecond,
