@@ -48,6 +48,33 @@ func TestProcess_AutomaticallyStartsUpstream(t *testing.T) {
 	}
 }
 
+// TestProcess_WaitOnMultipleStarts tests that multiple concurrent requests
+// are all handled successfully, even though they all may ask for the process to .start()
+func TestProcess_WaitOnMultipleStarts(t *testing.T) {
+
+	logMonitor := NewLogMonitorWriter(io.Discard)
+	expectedMessage := "testing91931"
+	config := getTestSimpleResponderConfig(expectedMessage)
+
+	process := NewProcess("test-process", 5, config, logMonitor)
+	defer process.Stop()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func(reqID int) {
+			defer wg.Done()
+			req := httptest.NewRequest("GET", "/test", nil)
+			w := httptest.NewRecorder()
+			process.ProxyRequest(w, req)
+			assert.Equal(t, http.StatusOK, w.Code, "Worker %d got wrong HTTP code", reqID)
+			assert.Contains(t, w.Body.String(), expectedMessage, "Worker %d got wrong message", reqID)
+		}(i)
+	}
+	wg.Wait()
+	assert.Equal(t, StateReady, process.CurrentState())
+}
+
 // test that the automatic start returns the expected error type
 func TestProcess_BrokenModelConfig(t *testing.T) {
 	// Create a process configuration
@@ -58,13 +85,17 @@ func TestProcess_BrokenModelConfig(t *testing.T) {
 	}
 
 	process := NewProcess("broken", 1, config, NewLogMonitor())
-	defer process.Stop()
 
 	req := httptest.NewRequest("GET", "/", nil)
 	w := httptest.NewRecorder()
 	process.ProxyRequest(w, req)
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Equal(t, http.StatusBadGateway, w.Code)
 	assert.Contains(t, w.Body.String(), "unable to start process")
+
+	w = httptest.NewRecorder()
+	process.ProxyRequest(w, req)
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.Contains(t, w.Body.String(), "Process can not ProxyRequest, state is failed")
 }
 
 func TestProcess_UnloadAfterTTL(t *testing.T) {
@@ -189,4 +220,86 @@ func TestProcess_HTTPRequestsHaveTimeToFinish(t *testing.T) {
 	for key, result := range results {
 		assert.Equal(t, key, result)
 	}
+}
+
+func TestSetState(t *testing.T) {
+	tests := []struct {
+		name           string
+		currentState   ProcessState
+		newState       ProcessState
+		expectedError  error
+		expectedResult ProcessState
+	}{
+		{"Stopped to Starting", StateStopped, StateStarting, nil, StateStarting},
+		{"Starting to Ready", StateStarting, StateReady, nil, StateReady},
+		{"Starting to Failed", StateStarting, StateFailed, nil, StateFailed},
+		{"Starting to Stopping", StateStarting, StateStopping, nil, StateStopping},
+		{"Ready to Stopping", StateReady, StateStopping, nil, StateStopping},
+		{"Stopping to Stopped", StateStopping, StateStopped, nil, StateStopped},
+		{"Stopping to Shutdown", StateStopping, StateShutdown, nil, StateShutdown},
+		{"Stopped to Ready", StateStopped, StateReady, fmt.Errorf("invalid state transition from stopped to ready"), StateStopped},
+		{"Starting to Stopped", StateStarting, StateStopped, fmt.Errorf("invalid state transition from starting to stopped"), StateStarting},
+		{"Ready to Starting", StateReady, StateStarting, fmt.Errorf("invalid state transition from ready to starting"), StateReady},
+		{"Ready to Failed", StateReady, StateFailed, fmt.Errorf("invalid state transition from ready to failed"), StateReady},
+		{"Stopping to Ready", StateStopping, StateReady, fmt.Errorf("invalid state transition from stopping to ready"), StateStopping},
+		{"Failed to Stopped", StateFailed, StateStopped, fmt.Errorf("invalid state transition from failed to stopped"), StateFailed},
+		{"Failed to Starting", StateFailed, StateStarting, fmt.Errorf("invalid state transition from failed to starting"), StateFailed},
+		{"Shutdown to Stopped", StateShutdown, StateStopped, fmt.Errorf("invalid state transition from shutdown to stopped"), StateShutdown},
+		{"Shutdown to Starting", StateShutdown, StateStarting, fmt.Errorf("invalid state transition from shutdown to starting"), StateShutdown},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			p := &Process{
+				state: test.currentState,
+			}
+
+			err := p.setState(test.newState)
+			if err != nil && test.expectedError == nil {
+				t.Errorf("Unexpected error: %v", err)
+			} else if err == nil && test.expectedError != nil {
+				t.Errorf("Expected error: %v, but got none", test.expectedError)
+			} else if err != nil && test.expectedError != nil {
+				if err.Error() != test.expectedError.Error() {
+					t.Errorf("Expected error: %v, got: %v", test.expectedError, err)
+				}
+			}
+
+			if p.state != test.expectedResult {
+				t.Errorf("Expected state: %v, got: %v", test.expectedResult, p.state)
+			}
+		})
+	}
+}
+
+func TestProcess_ShutdownInterruptsHealthCheck(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping long shutdown test")
+	}
+
+	logMonitor := NewLogMonitorWriter(io.Discard)
+	expectedMessage := "testing91931"
+
+	// make a config where the healthcheck will always fail because port is wrong
+	config := getTestSimpleResponderConfigPort(expectedMessage, 9999)
+	config.Proxy = "http://localhost:9998/test"
+
+	healthCheckTTLSeconds := 30
+	process := NewProcess("test-process", healthCheckTTLSeconds, config, logMonitor)
+
+	// start a goroutine to simulate a shutdown
+	var wg sync.WaitGroup
+	go func() {
+		defer wg.Done()
+		<-time.After(time.Second * 2)
+		process.Shutdown()
+	}()
+	wg.Add(1)
+
+	// start the process, this is a blocking call
+	err := process.start()
+
+	wg.Wait()
+	assert.ErrorContains(t, err, "health check interrupted due to shutdown")
+	assert.Equal(t, StateShutdown, process.CurrentState())
 }
