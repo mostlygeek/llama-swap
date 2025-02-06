@@ -254,3 +254,53 @@ func TestProxyManager_ProfileNonMember(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, w.Code)
 	}
 }
+
+func TestProxyManager_Shutdown(t *testing.T) {
+	// make broken model configurations
+	model1Config := getTestSimpleResponderConfigPort("model1", 9991)
+	model1Config.Proxy = "http://localhost:10001/"
+
+	model2Config := getTestSimpleResponderConfigPort("model2", 9992)
+	model2Config.Proxy = "http://localhost:10002/"
+
+	model3Config := getTestSimpleResponderConfigPort("model3", 9993)
+	model3Config.Proxy = "http://localhost:10003/"
+
+	config := &Config{
+		HealthCheckTimeout: 15,
+		Profiles: map[string][]string{
+			"test": {"model1", "model2", "model3"},
+		},
+		Models: map[string]ModelConfig{
+			"model1": model1Config,
+			"model2": model2Config,
+			"model3": model3Config,
+		},
+	}
+
+	proxy := New(config)
+
+	// Start all the processes
+	var wg sync.WaitGroup
+	for _, modelName := range []string{"test:model1", "test:model2", "test:model3"} {
+		wg.Add(1)
+		go func(modelName string) {
+			defer wg.Done()
+			reqBody := fmt.Sprintf(`{"model":"%s"}`, modelName)
+			req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+			w := httptest.NewRecorder()
+
+			// send a request to trigger the proxy to load
+			proxy.HandlerFunc(w, req)
+			assert.Equal(t, http.StatusBadGateway, w.Code)
+			assert.Contains(t, w.Body.String(), "health check interrupted due to shutdown")
+			//fmt.Println(w.Code, w.Body.String())
+		}(modelName)
+	}
+
+	go func() {
+		<-time.After(time.Second)
+		proxy.Shutdown()
+	}()
+	wg.Wait()
+}

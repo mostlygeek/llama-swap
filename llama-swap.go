@@ -47,7 +47,7 @@ func main() {
 	go func() {
 		<-sigChan
 		fmt.Println("Shutting down llama-swap")
-		proxyManager.StopProcesses()
+		proxyManager.Shutdown()
 		os.Exit(0)
 	}()
 
