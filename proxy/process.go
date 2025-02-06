@@ -371,7 +371,7 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	if p.CurrentState() != StateReady {
 		if err := p.start(); err != nil {
 			errstr := fmt.Sprintf("unable to start process: %s", err)
-			http.Error(w, errstr, http.StatusInternalServerError)
+			http.Error(w, errstr, http.StatusBadGateway)
 			return
 		}
 	}

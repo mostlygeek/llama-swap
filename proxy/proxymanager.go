@@ -156,11 +156,36 @@ func (pm *ProxyManager) stopProcesses() {
 		return
 	}
 
+	// stop Processes in parallel
+	var wg sync.WaitGroup
 	for _, process := range pm.currentProcesses {
-		process.Shutdown()
+		wg.Add(1)
+		go func(process *Process) {
+			defer wg.Done()
+			process.Stop()
+		}(process)
 	}
+	wg.Wait()
 
 	pm.currentProcesses = make(map[string]*Process)
+}
+
+// Shutdown is called to shutdown all upstream processes
+// when llama-swap is shutting down.
+func (pm *ProxyManager) Shutdown() {
+	pm.Lock()
+	defer pm.Unlock()
+
+	// shutdown process in parallel
+	var wg sync.WaitGroup
+	for _, process := range pm.currentProcesses {
+		wg.Add(1)
+		go func(process *Process) {
+			defer wg.Done()
+			process.Shutdown()
+		}(process)
+	}
+	wg.Wait()
 }
 
 func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
