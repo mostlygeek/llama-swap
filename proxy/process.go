@@ -296,7 +296,8 @@ func (p *Process) stopCommand(sigtermTTL time.Duration) {
 	}()
 
 	if p.cmd == nil || p.cmd.Process == nil {
-		panic("this should not happen, cmd or cmd.Process is nil")
+		fmt.Fprintf(p.logMonitor, "!!! process [%s] cmd or cmd.Process is nil", p.ID)
+		return
 	}
 
 	p.cmd.Process.Signal(syscall.SIGTERM)
