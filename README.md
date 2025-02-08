@@ -1,8 +1,6 @@
-# llama-swap
-
 ![llama-swap header image](header.jpeg)
 
-# Introduction
+# llama-swap
 llama-swap is a light weight, transparent proxy server that provides automatic model swapping to llama.cpp's server.
 
 Written in golang, it is very easy to install (single binary with no dependancies) and configure (single yaml file).
