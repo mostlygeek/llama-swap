@@ -13,7 +13,9 @@ When a request is made to an OpenAI compatible endpoint, lama-swap will extract 
 In the most basic configuration llama-swap handles one model at a time. For more advanced use cases, the `profiles` feature can load multiple models at the same time. You have complete control over how your system resources are used.
 
 ## Do I need to use llama.cpp's server (llama-server)?
-Any OpenAI compatible server would work. llama-swap was originally designed for llama-server and it is the best supported. For Python based inference servers like vllm or tabbyAPI it is recommended to run them via podman. This provides clean environment isolation as well as responding correctly to `SIGTERM` signals to shutdown.
+Any OpenAI compatible server would work. llama-swap was originally designed for llama-server and it is the best supported.
+
+For Python based inference servers like vllm or tabbyAPI it is recommended to run them via podman or docker. This provides clean environment isolation as well as responding correctly to `SIGTERM` signals to shutdown.
 
 ## Features:
 
