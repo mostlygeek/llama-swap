@@ -60,4 +60,4 @@ release:
 	git tag "$$new_tag";
 
 # Phony targets
-.PHONY: all clean osx linux
+.PHONY: all clean mac linux
