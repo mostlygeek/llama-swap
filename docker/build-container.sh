@@ -5,7 +5,7 @@ cd $(dirname "$0")
 ARCH=$1
 
 # List of allowed architectures
-ALLOWED_ARCHS=("intel" "vulkan" "musa" "cuda", "cpu")
+ALLOWED_ARCHS=("intel" "vulkan" "musa" "cuda" "cpu")
 
 # Check if ARCH is in the allowed list
 if [[ ! " ${ALLOWED_ARCHS[@]} " =~ " ${ARCH} " ]]; then
