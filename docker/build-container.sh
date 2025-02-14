@@ -28,6 +28,7 @@ if [ "$ARCH" == "cpu" ]; then
     CONTAINER_LATEST="ghcr.io/mostlygeek/llama-swap:cpu"
     echo "Building ${CONTAINER_LATEST} $LS_VER"
     docker build -f llama-swap.Containerfile --build-arg BASE_TAG=server --build-arg LS_VER=${LS_VER} -t ${CONTAINER_LATEST} .
+    docker push ${CONTAINER_LATEST}
 else
     LCPP_TAG=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
         "https://api.github.com/users/ggerganov/packages/container/llama.cpp/versions" \
@@ -38,13 +39,6 @@ else
     CONTAINER_LATEST="ghcr.io/mostlygeek/llama-swap:${ARCH}"
     echo "Building ${CONTAINER_TAG} $LS_VER"
     docker build -f llama-swap.Containerfile --build-arg BASE_TAG=server-${ARCH}-${LCPP_TAG} --build-arg LS_VER=${LS_VER} -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} .
+    docker push ${CONTAINER_TAG}
+    docker push ${CONTAINER_LATEST}
 fi
-exit
-
-CONTAINER_TAG="ghcr.io/mostlygeek/llama-swap:v${LS_VER}-${ARCH}-${LCPP_TAG}"
-CONTAINER_LATEST="ghcr.io/mostlygeek/llama-swap:${ARCH}"
-
-echo "Building ${CONTAINER_TAG} $LS_VER"
-docker build -f llama-swap.Containerfile --build-arg BASE_TAG=server-${ARCH}-${LCPP_TAG} --build-arg LS_VER=${LS_VER} -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} .
-docker push ${CONTAINER_TAG}
-docker push ${CONTAINER_LATEST}
