@@ -1,5 +1,8 @@
 name: Build Containers
 
+permissions:
+  packages: write
+
 on:
   # schedule:
   #   - cron: "0 11 * * *" # Runs daily at 11 AM UTC (3 AM PST)
@@ -26,7 +29,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Run build-image script
+      - name: Run build-container
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./docker/build-container.sh ${{ matrix.platform }}
