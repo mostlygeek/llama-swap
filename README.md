@@ -4,7 +4,7 @@
 
 llama-swap is a light weight, transparent proxy server that provides automatic model swapping to llama.cpp's server.
 
-Written in golang, it is very easy to install (single binary with no dependancies) and configure (single yaml file).
+Written in golang, it is very easy to install (single binary with no dependancies) and configure (single yaml file). To get started, download a pre-built binary or use the provided docker images.
 
 ## Features:
 
@@ -26,68 +26,11 @@ Written in golang, it is very easy to install (single binary with no dependancie
 - ✅ Use any local OpenAI compatible server (llama.cpp, vllm, tabbyAPI, etc)
 - ✅ Direct access to upstream HTTP server via `/upstream/:model_id` ([demo](https://github.com/mostlygeek/llama-swap/pull/31))
 
-## Docker Install ([download images](https://github.com/mostlygeek/llama-swap/pkgs/container/llama-swap))
-
-Docker is the quickest way to try out llama-swap:
-
-```
-# use CPU inference
-$ docker run -it --rm -p 9292:8080 ghcr.io/mostlygeek/llama-swap:cpu
-
-
-# qwen2.5 0.5B
-$ curl -s http://localhost:9292/v1/chat/completions \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer no-key" \
-    -d '{"model":"qwen2.5","messages": [{"role": "user","content": "tell me a joke"}]}' | \
-    jq -r '.choices[0].message.content'
-
-
-# SmolLM2 135M
-$ curl -s http://localhost:9292/v1/chat/completions \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer no-key" \
-    -d '{"model":"smollm2","messages": [{"role": "user","content": "tell me a joke"}]}' | \
-    jq -r '.choices[0].message.content'
-```
-
-Docker images are [published nightly](https://github.com/mostlygeek/llama-swap/pkgs/container/llama-swap) that include the latest llama-swap and llama-server:
-
-- `ghcr.io/mostlygeek/llama-swap:cpu`
-- `ghcr.io/mostlygeek/llama-swap:cuda`
-- `ghcr.io/mostlygeek/llama-swap:intel`
-- `ghcr.io/mostlygeek/llama-swap:vulkan`
-- ROCm disabled until fixed in llama.cpp container
-- musa disabled until requested.
-
-Specific versions are also available and are tagged with the llama-swap, architecture and llama.cpp versions. For example: `ghcr.io/mostlygeek/llama-swap:v89-cuda-b4716`
-
-Beyond the demo you will likely want to run the containers with your downloaded models and custom configuration.
-
-```
-$ docker run -it --rm --runtime nvidia -p 9292:8080 \
-  -v /path/to/models:/models \
-  -v /path/to/custom/config.yaml:/app/config.yaml \
-  ghcr.io/mostlygeek/llama-swap:cuda
-```
-
-## Bare metal Install ([download](https://github.com/mostlygeek/llama-swap/releases))
-
-Pre-built binaries are available for Linux, FreeBSD and Darwin (OSX). These are automatically published and are likely a few hours ahead of the docker releases. The baremetal install works with any OpenAI compatible server, not just llama-server.
-
-You can also build llama-swap yourself from source with `make clean all`.
-
 ## How does llama-swap work?
 
 When a request is made to an OpenAI compatible endpoint, lama-swap will extract the `model` value and load the appropriate server configuration to serve it. If the wrong upstream server is running, it will be replaced with the correct one. This is where the "swap" part comes in. The upstream server is automatically swapped to the correct one to serve the request.
 
 In the most basic configuration llama-swap handles one model at a time. For more advanced use cases, the `profiles` feature can load multiple models at the same time. You have complete control over how your system resources are used.
-
-## Do I need to use llama.cpp's server (llama-server)?
-
-Any OpenAI compatible server would work. llama-swap was originally designed for llama-server and it is the best supported.
-
-For Python based inference servers like vllm or tabbyAPI it is recommended to run them via podman or docker. This provides clean environment isolation as well as responding correctly to `SIGTERM` signals to shutdown.
 
 ## config.yaml
 
@@ -110,7 +53,8 @@ models:
       --port 9999
 ```
 
-But can grow to specific use cases:
+<details>
+<summary>But also very powerful ...</summary>
 
 ```yaml
 # Seconds to wait for llama.cpp to load and be ready to serve requests
@@ -188,7 +132,61 @@ profiles:
 - [Speculative Decoding](examples/speculative-decoding/README.md) - using a small draft model can increase inference speeds from 20% to 40%. This example includes a configurations Qwen2.5-Coder-32B (2.5x increase) and Llama-3.1-70B (1.4x increase) in the best cases.
 - [Optimizing Code Generation](examples/benchmark-snakegame/README.md) - find the optimal settings for your machine. This example demonstrates defining multiple configurations and testing which one is fastest.
 
-### Installation
+</details>
+
+## Docker Install ([download images](https://github.com/mostlygeek/llama-swap/pkgs/container/llama-swap))
+
+Docker is the quickest way to try out llama-swap:
+
+```
+# use CPU inference
+$ docker run -it --rm -p 9292:8080 ghcr.io/mostlygeek/llama-swap:cpu
+
+
+# qwen2.5 0.5B
+$ curl -s http://localhost:9292/v1/chat/completions \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer no-key" \
+    -d '{"model":"qwen2.5","messages": [{"role": "user","content": "tell me a joke"}]}' | \
+    jq -r '.choices[0].message.content'
+
+
+# SmolLM2 135M
+$ curl -s http://localhost:9292/v1/chat/completions \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer no-key" \
+    -d '{"model":"smollm2","messages": [{"role": "user","content": "tell me a joke"}]}' | \
+    jq -r '.choices[0].message.content'
+```
+
+<details>
+<summary>Docker images are nightly ...</summary>
+
+They include:
+
+- `ghcr.io/mostlygeek/llama-swap:cpu`
+- `ghcr.io/mostlygeek/llama-swap:cuda`
+- `ghcr.io/mostlygeek/llama-swap:intel`
+- `ghcr.io/mostlygeek/llama-swap:vulkan`
+- ROCm disabled until fixed in llama.cpp container
+- musa disabled until requested.
+
+Specific versions are also available and are tagged with the llama-swap, architecture and llama.cpp versions. For example: `ghcr.io/mostlygeek/llama-swap:v89-cuda-b4716`
+
+Beyond the demo you will likely want to run the containers with your downloaded models and custom configuration.
+
+```
+$ docker run -it --rm --runtime nvidia -p 9292:8080 \
+  -v /path/to/models:/models \
+  -v /path/to/custom/config.yaml:/app/config.yaml \
+  ghcr.io/mostlygeek/llama-swap:cuda
+```
+
+</details>
+
+## Bare metal Install ([download](https://github.com/mostlygeek/llama-swap/releases))
+
+Pre-built binaries are available for Linux, FreeBSD and Darwin (OSX). These are automatically published and are likely a few hours ahead of the docker releases. The baremetal install works with any OpenAI compatible server, not just llama-server.
 
 1. Create a configuration file, see [config.example.yaml](config.example.yaml)
 1. Download a [release](https://github.com/mostlygeek/llama-swap/releases) appropriate for your OS and architecture.
@@ -221,6 +219,12 @@ curl -Ns http://host/logs/stream | grep 'eval time'
 # skips history and just streams new log entries
 curl -Ns 'http://host/logs/stream?no-history'
 ```
+
+## Do I need to use llama.cpp's server (llama-server)?
+
+Any OpenAI compatible server would work. llama-swap was originally designed for llama-server and it is the best supported.
+
+For Python based inference servers like vllm or tabbyAPI it is recommended to run them via podman or docker. This provides clean environment isolation as well as responding correctly to `SIGTERM` signals to shutdown.
 
 ## Systemd Unit Files
 
