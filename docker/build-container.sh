@@ -13,6 +13,12 @@ if [[ ! " ${ALLOWED_ARCHS[@]} " =~ " ${ARCH} " ]]; then
   exit 1
 fi
 
+# Check if GITHUB_TOKEN is set and not empty
+if [[ -z "$GITHUB_TOKEN" ]]; then
+  echo "Error: GITHUB_TOKEN is not set or is empty."
+  exit 1
+fi
+
 # the most recent llama-swap tag
 # have to strip out the 'v' due to .tar.gz file naming
 LS_VER=$(curl -s https://api.github.com/repos/mostlygeek/llama-swap/releases/latest | jq -r .tag_name | sed 's/v//')
