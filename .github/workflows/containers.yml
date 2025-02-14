@@ -1,7 +1,7 @@
 name: Build Containers
 
-permissions:
-  packages: write
+# permissions:
+#   packages: write
 
 on:
   # schedule:
