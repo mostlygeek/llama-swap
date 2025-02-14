@@ -79,7 +79,7 @@ You can also build llama-swap yourself from source with `make clean all`.
 
 ## How does llama-swap work?
 
-When a request is made to an OpenAI compatible endpoint, lama-swap will extract the `model` value and load the appropriate server configuration to serve it. If a server is already running it will stop it and start the correct one. This is where the "swap" part comes in. The upstream server is automatically swapped to the correct one to serve the request.
+When a request is made to an OpenAI compatible endpoint, lama-swap will extract the `model` value and load the appropriate server configuration to serve it. If the wrong upstream server is running, it will be replaced with the correct one. This is where the "swap" part comes in. The upstream server is automatically swapped to the correct one to serve the request.
 
 In the most basic configuration llama-swap handles one model at a time. For more advanced use cases, the `profiles` feature can load multiple models at the same time. You have complete control over how your system resources are used.
 
@@ -92,6 +92,25 @@ For Python based inference servers like vllm or tabbyAPI it is recommended to ru
 ## config.yaml
 
 llama-swap's configuration is purposefully simple.
+
+```yaml
+models:
+  "qwen2.5":
+    proxy: "http://127.0.0.1:9999"
+    cmd: >
+      /app/llama-server
+      -hf bartowski/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M
+      --port 9999
+
+  "smollm2":
+    proxy: "http://127.0.0.1:9999"
+    cmd: >
+      /app/llama-server
+      -hf bartowski/SmolLM2-135M-Instruct-GGUF:Q4_K_M
+      --port 9999
+```
+
+But can grow to specific use cases:
 
 ```yaml
 # Seconds to wait for llama.cpp to load and be ready to serve requests
@@ -139,8 +158,8 @@ models:
   # unlisted models do not show up in /v1/models or /upstream lists
   # but they can still be requested as normal
   "qwen-unlisted":
-    cmd: llama-server --port 9999 -m Llama-3.2-1B-Instruct-Q4_K_M.gguf -ngl 0
     unlisted: true
+    cmd: llama-server --port 9999 -m Llama-3.2-1B-Instruct-Q4_K_M.gguf -ngl 0
 
   # Docker Support (v26.1.4+ required!)
   "docker-llama":
