@@ -6,6 +6,10 @@ builds:
     goos:
       - linux
       - darwin
+      - freebsd
     goarch:
       - amd64
       - arm64
+    ignore:
+      - goos: freebsd
+        goarch: arm64
