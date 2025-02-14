@@ -1,12 +1,14 @@
 name: Build Containers
 
 on:
-  # schedule:
-  #   - cron: "0 11 * * *" # Runs daily at 11 AM UTC (3 AM PST)
-  # push:
-  #   tags:
-  #     - "*" # Triggers on any new tag
-  workflow_dispatch: # Allows manual triggering of the workflow
+  # time has no specific meaning, trying to time it after
+  # the llama.cpp daily packages are published
+  # https://github.com/ggerganov/llama.cpp/blob/master/.github/workflows/docker.yml
+  schedule:
+    - cron: "37 5 * * *"
+
+  # Allows manual triggering of the workflow
+  workflow_dispatch:
 
 jobs:
   build-and-push:
