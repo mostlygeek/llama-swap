@@ -1,0 +1,17 @@
+healthCheckTimeout: 300
+logRequests: true
+
+models:
+  "qwen2.5":
+    proxy: "http://127.0.0.1:9999"
+    cmd: >
+      /app/llama-server
+      -hf bartowski/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M
+      --port 9999
+
+  "smollm2":
+    proxy: "http://127.0.0.1:9999"
+    cmd: >
+      /app/llama-server
+      -hf bartowski/SmolLM2-135M-Instruct-GGUF:Q4_K_M
+      --port 9999
