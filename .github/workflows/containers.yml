@@ -27,4 +27,6 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run build-image script
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./docker/build-container.sh ${{ matrix.platform }}
