@@ -1,0 +1,30 @@
+name: Build and Push Images
+
+on:
+  # schedule:
+  #   - cron: "0 11 * * *" # Runs daily at 11 AM UTC (3 AM PST)
+  # push:
+  #   tags:
+  #     - "*" # Triggers on any new tag
+  workflow_dispatch: # Allows manual triggering of the workflow
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform: [cuda, vulkan]
+        #platform: [intel, cuda, vulkan, musa]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run build-image script
+        run: ./docker/build-container.sh ${{ matrix.platform }}
