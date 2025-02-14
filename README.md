@@ -31,7 +31,8 @@ Written in golang, it is very easy to install (single binary with no dependancie
 Docker is the quickest way to try out llama-swap:
 
 ```
-$ docker run -it --rm --runtime nvidia -p 9292:8080 ghcr.io/mostlygeek/llama-swap:cuda
+# use CPU inference
+$ docker run -it --rm -p 9292:8080 ghcr.io/mostlygeek/llama-swap:cpu
 
 
 # qwen2.5 0.5B
@@ -52,10 +53,12 @@ $ curl -s http://localhost:9292/v1/chat/completions \
 
 Docker images are [published nightly](https://github.com/mostlygeek/llama-swap/pkgs/container/llama-swap) that include the latest llama-swap and llama-server:
 
+- `ghcr.io/mostlygeek/llama-swap:cpu`
 - `ghcr.io/mostlygeek/llama-swap:cuda`
 - `ghcr.io/mostlygeek/llama-swap:intel`
 - `ghcr.io/mostlygeek/llama-swap:vulkan`
-- `ghcr.io/mostlygeek/llama-swap:musa`
+- ROCm disabled until fixed in llama.cpp container
+- musa disabled until requested.
 
 Specific versions are also available and are tagged with the llama-swap, architecture and llama.cpp versions. For example: `ghcr.io/mostlygeek/llama-swap:v89-cuda-b4716`
 
