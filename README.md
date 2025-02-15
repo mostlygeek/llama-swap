@@ -20,7 +20,7 @@ Written in golang, it is very easy to install (single binary with no dependancie
   - `v1/audio/speech` ([#36](https://github.com/mostlygeek/llama-swap/issues/36))
 - ✅ Multiple GPU support
 - ✅ Docker and Podman support
-- ✅ Run multiple models at once with `profiles`
+- ✅ Run multiple models at once with `profiles` ([docs](https://github.com/mostlygeek/llama-swap/issues/53#issuecomment-2660761741))
 - ✅ Remote log monitoring at `/log`
 - ✅ Automatic unloading of models from GPUs after timeout
 - ✅ Use any local OpenAI compatible server (llama.cpp, vllm, tabbyAPI, etc)
