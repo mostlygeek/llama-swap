@@ -31,7 +31,7 @@ if [ "$ARCH" == "cpu" ]; then
     docker push ${CONTAINER_LATEST}
 else
     LCPP_TAG=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
-        "https://api.github.com/users/ggml-org/packages/container/llama.cpp/versions" \
+        "https://api.github.com/users/ggerganov/packages/container/llama.cpp/versions" \
         | jq -r --arg arch "$ARCH" '.[] | select(.metadata.container.tags[] | startswith("server-\($arch)")) | .metadata.container.tags[]' \
         | sort -r | head -n1 | awk -F '-' '{print $3}')
 
