@@ -15,9 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        platform: [cpu]
-        #platform: [intel, cuda, vulkan, cpu]
-        #platform: [intel, cuda, vulkan, musa]
+        platform: [intel, cuda, vulkan, cpu, musa]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
