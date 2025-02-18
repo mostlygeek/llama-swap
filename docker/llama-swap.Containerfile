@@ -1,5 +1,5 @@
 ARG BASE_TAG=server-cuda
-FROM ghcr.io/ggerganov/llama.cpp:${BASE_TAG}
+FROM ghcr.io/ggml-org/llama.cpp:${BASE_TAG}
 
 # has to be after the FROM
 ARG LS_VER=89
