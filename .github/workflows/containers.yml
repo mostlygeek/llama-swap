@@ -32,3 +32,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./docker/build-container.sh ${{ matrix.platform }} true
+
+      - uses: actions/delete-package-versions@v5
+        with:
+          package-name: 'llama-swap'
+          package-type: 'container'
+          delete-only-untagged-versions: 'true'
