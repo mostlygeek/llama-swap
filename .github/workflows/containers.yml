@@ -39,6 +39,6 @@ jobs:
     steps:
       - uses: actions/delete-package-versions@v5
         with:
-          package-name: 'llama-swap'
+          package-name: 'mostlygeek/llama-swap'
           package-type: 'container'
           delete-only-untagged-versions: 'true'
