@@ -33,6 +33,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./docker/build-container.sh ${{ matrix.platform }} true
 
+  delete-untagged-containers:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
       - uses: actions/delete-package-versions@v5
         with:
           package-name: 'llama-swap'
