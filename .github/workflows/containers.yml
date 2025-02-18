@@ -34,12 +34,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./docker/build-container.sh ${{ matrix.platform }} true
 
+  # note make sure mostlygeek/llama-swap has admin rights to the llama-swap package
+  # see: https://github.com/actions/delete-package-versions/issues/74
   delete-untagged-containers:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
       - uses: actions/delete-package-versions@v5
         with:
-          package-name: 'mostlygeek/llama-swap'
+          package-name: 'llama-swap'
           package-type: 'container'
           delete-only-untagged-versions: 'true'
