@@ -3,6 +3,7 @@
 cd $(dirname "$0")
 
 ARCH=$1
+PUSH_IMAGES=${2:-false}
 
 # List of allowed architectures
 ALLOWED_ARCHS=("intel" "vulkan" "musa" "cuda" "cpu")
@@ -28,10 +29,12 @@ if [ "$ARCH" == "cpu" ]; then
     CONTAINER_LATEST="ghcr.io/mostlygeek/llama-swap:cpu"
     echo "Building ${CONTAINER_LATEST} $LS_VER"
     docker build -f llama-swap.Containerfile --build-arg BASE_TAG=server --build-arg LS_VER=${LS_VER} -t ${CONTAINER_LATEST} .
-    docker push ${CONTAINER_LATEST}
+    if [ "$PUSH_IMAGES" == "true" ]; then
+      docker push ${CONTAINER_LATEST}
+    fi
 else
     LCPP_TAG=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
-        "https://api.github.com/users/ggerganov/packages/container/llama.cpp/versions" \
+        "https://api.github.com/users/ggml-org/packages/container/llama.cpp/versions" \
         | jq -r --arg arch "$ARCH" '.[] | select(.metadata.container.tags[] | startswith("server-\($arch)")) | .metadata.container.tags[]' \
         | sort -r | head -n1 | awk -F '-' '{print $3}')
 
@@ -39,6 +42,8 @@ else
     CONTAINER_LATEST="ghcr.io/mostlygeek/llama-swap:${ARCH}"
     echo "Building ${CONTAINER_TAG} $LS_VER"
     docker build -f llama-swap.Containerfile --build-arg BASE_TAG=server-${ARCH}-${LCPP_TAG} --build-arg LS_VER=${LS_VER} -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} .
-    docker push ${CONTAINER_TAG}
-    docker push ${CONTAINER_LATEST}
+    if [ "$PUSH_IMAGES" == "true" ]; then
+      docker push ${CONTAINER_TAG}
+      docker push ${CONTAINER_LATEST}
+    fi
 fi

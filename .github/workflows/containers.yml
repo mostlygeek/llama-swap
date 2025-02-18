@@ -3,7 +3,7 @@ name: Build Containers
 on:
   # time has no specific meaning, trying to time it after
   # the llama.cpp daily packages are published
-  # https://github.com/ggerganov/llama.cpp/blob/master/.github/workflows/docker.yml
+  # https://github.com/ggml-org/llama.cpp/blob/master/.github/workflows/docker.yml
   schedule:
     - cron: "37 5 * * *"
 
@@ -31,4 +31,4 @@ jobs:
       - name: Run build-container
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./docker/build-container.sh ${{ matrix.platform }}
+        run: ./docker/build-container.sh ${{ matrix.platform }} true
