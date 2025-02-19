@@ -65,4 +65,4 @@ release:
 	git tag "$$new_tag";
 
 # Phony targets
-.PHONY: all clean mac linux windows
+.PHONY: all clean mac linux windows simple-responder

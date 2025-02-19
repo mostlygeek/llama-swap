@@ -7,9 +7,12 @@ builds:
       - linux
       - darwin
       - freebsd
+      - windows
     goarch:
       - amd64
       - arm64
     ignore:
       - goos: freebsd
+        goarch: arm64
+      - goos: windows
         goarch: arm64
