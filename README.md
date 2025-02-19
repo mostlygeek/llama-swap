@@ -189,7 +189,6 @@ Pre-built binaries are available for Linux, FreeBSD and Darwin (OSX). These are 
 
 1. Create a configuration file, see [config.example.yaml](config.example.yaml)
 1. Download a [release](https://github.com/mostlygeek/llama-swap/releases) appropriate for your OS and architecture.
-   - _Note: Windows currently untested._
 1. Run the binary with `llama-swap --config path/to/config.yaml`
 
 ### Building from source

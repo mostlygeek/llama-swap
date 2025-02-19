@@ -35,6 +35,11 @@ linux:
 	@echo "Building Linux binary..."
 	GOOS=linux GOARCH=amd64 go build -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-linux-amd64
 
+# Build Windows binary
+windows:
+	@echo "Building Windows binary..."
+	GOOS=windows GOARCH=amd64 go build -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-windows-amd64.exe
+
 # for testing proxy.Process
 simple-responder:
 	@echo "Building simple responder"
@@ -60,4 +65,4 @@ release:
 	git tag "$$new_tag";
 
 # Phony targets
-.PHONY: all clean mac linux
+.PHONY: all clean mac linux windows
