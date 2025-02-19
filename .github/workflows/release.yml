@@ -5,6 +5,9 @@ on:
     tags:
       - '*'
 
+  # Allows manual triggering of the workflow
+  workflow_dispatch:
+
 permissions:
   contents: write
 
