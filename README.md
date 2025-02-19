@@ -169,7 +169,6 @@ They include:
 - `ghcr.io/mostlygeek/llama-swap:intel`
 - `ghcr.io/mostlygeek/llama-swap:vulkan`
 - ROCm disabled until fixed in llama.cpp container
-- musa disabled until requested.
 
 Specific versions are also available and are tagged with the llama-swap, architecture and llama.cpp versions. For example: `ghcr.io/mostlygeek/llama-swap:v89-cuda-b4716`
 
