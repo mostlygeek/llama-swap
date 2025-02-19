@@ -215,7 +215,7 @@ func (p *Process) start() error {
 				}
 			}
 
-			<-time.After(time.Second)
+			<-time.After(5 * time.Second)
 		}
 	}
 
