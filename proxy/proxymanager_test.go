@@ -304,3 +304,25 @@ func TestProxyManager_Shutdown(t *testing.T) {
 	}()
 	wg.Wait()
 }
+
+func TestProxyManager_Unload(t *testing.T) {
+	config := &Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]ModelConfig{
+			"model1": getTestSimpleResponderConfig("model1"),
+		},
+	}
+
+	proxy := New(config)
+	proc, err := proxy.swapModel("model1")
+	assert.NoError(t, err)
+	assert.NotNil(t, proc)
+
+	assert.Len(t, proxy.currentProcesses, 1)
+	req := httptest.NewRequest("GET", "/unload", nil)
+	w := httptest.NewRecorder()
+	proxy.HandlerFunc(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, w.Body.String(), "OK")
+	assert.Len(t, proxy.currentProcesses, 0)
+}

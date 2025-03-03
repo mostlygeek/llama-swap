@@ -104,6 +104,8 @@ func New(config *Config) *ProxyManager {
 	pm.ginEngine.GET("/upstream", pm.upstreamIndex)
 	pm.ginEngine.Any("/upstream/:model_id/*upstreamPath", pm.proxyToUpstream)
 
+	pm.ginEngine.GET("/unload", pm.unloadAllModelsHandler)
+
 	pm.ginEngine.GET("/", func(c *gin.Context) {
 		// Set the Content-Type header to text/html
 		c.Header("Content-Type", "text/html")
@@ -375,6 +377,11 @@ func (pm *ProxyManager) sendErrorResponse(c *gin.Context, statusCode int, messag
 	} else {
 		c.String(statusCode, message)
 	}
+}
+
+func (pm *ProxyManager) unloadAllModelsHandler(c *gin.Context) {
+	pm.StopProcesses()
+	c.String(http.StatusOK, "OK")
 }
 
 func ProcessKeyName(groupName, modelName string) string {
