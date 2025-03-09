@@ -326,3 +326,26 @@ func TestProxyManager_Unload(t *testing.T) {
 	assert.Equal(t, w.Body.String(), "OK")
 	assert.Len(t, proxy.currentProcesses, 0)
 }
+
+// issue 62, strip profile slug from model name
+func TestProxyManager_StripProfileSlug(t *testing.T) {
+	config := &Config{
+		HealthCheckTimeout: 15,
+		Profiles: map[string][]string{
+			"test": {"TheExpectedModel"}, // TheExpectedModel is default in simple-responder.go
+		},
+		Models: map[string]ModelConfig{
+			"TheExpectedModel": getTestSimpleResponderConfig("TheExpectedModel"),
+		},
+	}
+
+	proxy := New(config)
+	defer proxy.StopProcesses()
+
+	reqBody := fmt.Sprintf(`{"model":"%s"}`, "test:TheExpectedModel")
+	req := httptest.NewRequest("POST", "/v1/audio/speech", bytes.NewBufferString(reqBody))
+	w := httptest.NewRecorder()
+	proxy.HandlerFunc(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "ok")
+}
