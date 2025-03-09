@@ -12,12 +12,14 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 func main() {
 	gin.SetMode(gin.TestMode)
 	// Define a command-line flag for the port
 	port := flag.String("port", "8080", "port to listen on")
+	expectedModel := flag.String("model", "TheExpectedModel", "model name to expect")
 
 	// Define a command-line flag for the response message
 	responseMessage := flag.String("respond", "hi", "message to respond with")
@@ -39,6 +41,25 @@ func main() {
 		}
 
 		c.String(200, *responseMessage)
+	})
+
+	// for issue #62 to check model name strips profile slug
+	// has to be one of the openAI API endpoints that llama-swap proxies
+	// curl http://localhost:8080/v1/audio/speech -d '{"model":"profile:TheExpectedModel"}'
+	r.POST("/v1/audio/speech", func(c *gin.Context) {
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read request body"})
+			return
+		}
+		defer c.Request.Body.Close()
+		modelName := gjson.GetBytes(body, "model").String()
+		if modelName != *expectedModel {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid model: %s, expected: %s", modelName, *expectedModel)})
+			return
+		} else {
+			c.JSON(http.StatusOK, gin.H{"message": "ok"})
+		}
 	})
 
 	r.POST("/v1/completions", func(c *gin.Context) {

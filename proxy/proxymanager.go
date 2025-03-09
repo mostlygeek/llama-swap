@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 const (
@@ -224,11 +226,7 @@ func (pm *ProxyManager) swapModel(requestedModel string) (*Process, error) {
 	defer pm.Unlock()
 
 	// Check if requestedModel contains a PROFILE_SPLIT_CHAR
-	profileName, modelName := "", requestedModel
-	if idx := strings.Index(requestedModel, PROFILE_SPLIT_CHAR); idx != -1 {
-		profileName = requestedModel[:idx]
-		modelName = requestedModel[idx+1:]
-	}
+	profileName, modelName := splitRequestedModel(requestedModel)
 
 	if profileName != "" {
 		if _, found := pm.config.Profiles[profileName]; !found {
@@ -344,21 +342,26 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 		return
 	}
 
-	var requestBody map[string]interface{}
-	if err := json.Unmarshal(bodyBytes, &requestBody); err != nil {
-		pm.sendErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("invalid JSON: %s", err.Error()))
-		return
-	}
-	model, ok := requestBody["model"].(string)
-	if !ok {
+	requestedModel := gjson.GetBytes(bodyBytes, "model").String()
+	if requestedModel == "" {
 		pm.sendErrorResponse(c, http.StatusBadRequest, "missing or invalid 'model' key")
-		return
 	}
 
-	if process, err := pm.swapModel(model); err != nil {
+	if process, err := pm.swapModel(requestedModel); err != nil {
 		pm.sendErrorResponse(c, http.StatusNotFound, fmt.Sprintf("unable to swap to model, %s", err.Error()))
 		return
 	} else {
+
+		// strip
+		profileName, modelName := splitRequestedModel(requestedModel)
+		if profileName != "" {
+			bodyBytes, err = sjson.SetBytes(bodyBytes, "model", modelName)
+			if err != nil {
+				pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error updating JSON: %s", err.Error()))
+				return
+			}
+		}
+
 		c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
 		// dechunk it as we already have all the body bytes see issue #11
@@ -386,4 +389,13 @@ func (pm *ProxyManager) unloadAllModelsHandler(c *gin.Context) {
 
 func ProcessKeyName(groupName, modelName string) string {
 	return groupName + PROFILE_SPLIT_CHAR + modelName
+}
+
+func splitRequestedModel(requestedModel string) (string, string) {
+	profileName, modelName := "", requestedModel
+	if idx := strings.Index(requestedModel, PROFILE_SPLIT_CHAR); idx != -1 {
+		profileName = requestedModel[:idx]
+		modelName = requestedModel[idx+1:]
+	}
+	return profileName, modelName
 }
