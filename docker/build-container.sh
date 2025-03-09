@@ -38,6 +38,12 @@ else
         | jq -r --arg arch "$ARCH" '.[] | select(.metadata.container.tags[] | startswith("server-\($arch)")) | .metadata.container.tags[]' \
         | sort -r | head -n1 | awk -F '-' '{print $3}')
 
+    # Abort if LCPP_TAG is empty.
+    if [[ -z "$LCPP_TAG" ]]; then
+        echo "Abort: Could not find llama-server container for arch: $ARCH"
+        exit 1
+    fi
+
     CONTAINER_TAG="ghcr.io/mostlygeek/llama-swap:v${LS_VER}-${ARCH}-${LCPP_TAG}"
     CONTAINER_LATEST="ghcr.io/mostlygeek/llama-swap:${ARCH}"
     echo "Building ${CONTAINER_TAG} $LS_VER"
