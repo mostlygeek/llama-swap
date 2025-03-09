@@ -16,6 +16,7 @@ jobs:
     strategy:
       matrix:
         platform: [intel, cuda, vulkan, cpu, musa]
+      fail-fast: false
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
