@@ -110,7 +110,7 @@ func (p *Process) CurrentState() ProcessState {
 // start starts the upstream command, checks the health endpoint, and sets the state to Ready
 // it is a private method because starting is automatic but stopping can be called
 // at any time.
-func (p *Process) start() error {
+func (p *Process) start(localModel *string) error {
 
 	if p.config.Proxy == "" {
 		return fmt.Errorf("can not start(), upstream proxy missing")
@@ -234,6 +234,7 @@ func (p *Process) start() error {
 				p.inFlightRequests.Wait()
 
 				if time.Since(p.lastRequestHandled) > maxDuration {
+					*localModel = "*none*"
 					fmt.Fprintf(p.logMonitor, "!!! Unloading model %s, TTL of %ds reached.\n", p.ID, p.config.UnloadAfter)
 					p.Stop()
 					return
@@ -351,7 +352,7 @@ func (p *Process) checkHealthEndpoint(healthURL string) error {
 	return nil
 }
 
-func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
+func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request, localModel *string) {
 
 	// prevent new requests from being made while stopping or irrecoverable
 	currentState := p.CurrentState()
@@ -368,7 +369,7 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 
 	// start the process on demand
 	if p.CurrentState() != StateReady {
-		if err := p.start(); err != nil {
+		if err := p.start(localModel); err != nil {
 			errstr := fmt.Sprintf("unable to start process: %s", err)
 			http.Error(w, errstr, http.StatusBadGateway)
 			return
@@ -416,4 +417,7 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+
+	// Save the loaded model for future inquiries via /v1/models endpoint response header value
+	*localModel = p.ID
 }
