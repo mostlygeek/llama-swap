@@ -25,6 +25,7 @@ Written in golang, it is very easy to install (single binary with no dependancie
 - ✅ Automatic unloading of models after timeout by setting a `ttl`
 - ✅ Use any local OpenAI compatible server (llama.cpp, vllm, tabbyAPI, etc)
 - ✅ Docker and Podman support
+- ✅ Determine the currently loaded model by inspecting the 'Loaded-Model' header via `/v1/models` endpoint (*none* if no model is currently loaded in memory)
 
 ## How does llama-swap work?
 

@@ -28,6 +28,7 @@ type ProxyManager struct {
 	currentProcesses map[string]*Process
 	logMonitor       *LogMonitor
 	ginEngine        *gin.Engine
+	loadedModel      string
 }
 
 func New(config *Config) *ProxyManager {
@@ -36,6 +37,7 @@ func New(config *Config) *ProxyManager {
 		currentProcesses: make(map[string]*Process),
 		logMonitor:       NewLogMonitor(),
 		ginEngine:        gin.New(),
+		loadedModel:      "*none*",
 	}
 
 	if config.LogRequests {
@@ -210,6 +212,9 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 	// Set the Content-Type header to application/json
 	c.Header("Content-Type", "application/json")
 
+	// Set the Loaded-Model header to the last requested model name or to *none* if no model is currently loaded
+	c.Header("Loaded-Model", pm.loadedModel)
+
 	if origin := c.Request.Header.Get("Origin"); origin != "" {
 		c.Header("Access-Control-Allow-Origin", origin)
 	}
@@ -306,7 +311,7 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 	} else {
 		// rewrite the path
 		c.Request.URL.Path = c.Param("upstreamPath")
-		process.ProxyRequest(c.Writer, c.Request)
+		process.ProxyRequest(c.Writer, c.Request, &pm.loadedModel)
 	}
 }
 
@@ -368,7 +373,7 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 		c.Request.Header.Del("transfer-encoding")
 		c.Request.Header.Add("content-length", strconv.Itoa(len(bodyBytes)))
 
-		process.ProxyRequest(c.Writer, c.Request)
+		process.ProxyRequest(c.Writer, c.Request, &pm.loadedModel)
 	}
 }
 
@@ -385,6 +390,7 @@ func (pm *ProxyManager) sendErrorResponse(c *gin.Context, statusCode int, messag
 func (pm *ProxyManager) unloadAllModelsHandler(c *gin.Context) {
 	pm.StopProcesses()
 	c.String(http.StatusOK, "OK")
+	pm.loadedModel = "unloaded"
 }
 
 func ProcessKeyName(groupName, modelName string) string {
