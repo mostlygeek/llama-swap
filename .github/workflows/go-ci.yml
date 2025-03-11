@@ -26,5 +26,5 @@ jobs:
       run: make simple-responder
 
     - name: Test all
-      #run: make test-all
-      run: go test -timeout 10s -run ^TestProcess_HTTPRequestsHaveTimeToFinish ./proxy/
+      run: make test-all
+      #run: go test -timeout 10s -run ^TestProcess_HTTPRequestsHaveTimeToFinish ./proxy/
