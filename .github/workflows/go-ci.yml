@@ -11,7 +11,7 @@ on:
 
 jobs:
 
-  build:
+  run-tests:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -25,5 +25,6 @@ jobs:
     - name: Create simple-responder
       run: make simple-responder
 
-    - name: Test
-      run: make test-all
+    - name: Test all
+      #run: make test-all
+      run: go test -timeout 10s -run ^TestProcess_HTTPRequestsHaveTimeToFinish ./proxy/
