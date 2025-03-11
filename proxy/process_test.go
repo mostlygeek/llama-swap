@@ -169,6 +169,8 @@ func TestProcess_LowTTLValue(t *testing.T) {
 }
 
 // issue #19
+// This test makes sure using Process.Stop() does not affect pending HTTP
+// requests. All HTTP requests in this test should complete successfully.
 func TestProcess_HTTPRequestsHaveTimeToFinish(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping slow test")
@@ -192,8 +194,9 @@ func TestProcess_HTTPRequestsHaveTimeToFinish(t *testing.T) {
 		wg.Add(1)
 		go func(key string) {
 			defer wg.Done()
-			// send a request that should take 5 * 200ms (1 second) to complete
-			req := httptest.NewRequest("GET", fmt.Sprintf("/slow-respond?echo=%s&delay=200ms", key), nil)
+			// send a request where simple-responder is will wait 300ms before responding
+			// this will simulate an in-progress request.
+			req := httptest.NewRequest("GET", fmt.Sprintf("/slow-respond?echo=%s&delay=300ms", key), nil)
 			w := httptest.NewRecorder()
 
 			process.ProxyRequest(w, req)
@@ -209,9 +212,9 @@ func TestProcess_HTTPRequestsHaveTimeToFinish(t *testing.T) {
 		}(key)
 	}
 
-	// stop the requests in the middle
+	// Stop the process while requests are still being processed
 	go func() {
-		<-time.After(500 * time.Millisecond)
+		<-time.After(150 * time.Millisecond)
 		process.Stop()
 	}()
 
