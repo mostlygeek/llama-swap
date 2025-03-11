@@ -108,6 +108,8 @@ func New(config *Config) *ProxyManager {
 
 	pm.ginEngine.GET("/unload", pm.unloadAllModelsHandler)
 
+	pm.ginEngine.GET("/running", pm.running)
+
 	pm.ginEngine.GET("/", func(c *gin.Context) {
 		// Set the Content-Type header to text/html
 		c.Header("Content-Type", "text/html")
@@ -385,6 +387,27 @@ func (pm *ProxyManager) sendErrorResponse(c *gin.Context, statusCode int, messag
 func (pm *ProxyManager) unloadAllModelsHandler(c *gin.Context) {
 	pm.StopProcesses()
 	c.String(http.StatusOK, "OK")
+}
+
+func (pm *ProxyManager) running(context *gin.Context) {
+	context.Header("Content-Type", "application/json")
+	response := gin.H{} // Default to an empty JSON object
+
+	for _, process := range pm.currentProcesses {
+		if process.config.Unlisted {
+			break // Stop checking if an unlisted process is found
+		}
+
+		// Assign response with model details
+		response = gin.H{
+			"model": process.ID,
+			"state": process.state,
+		}
+		break // Exit loop after finding a valid model
+
+	}
+
+	context.JSON(http.StatusOK, response) // Always return 200 OK
 }
 
 func ProcessKeyName(groupName, modelName string) string {
