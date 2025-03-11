@@ -133,8 +133,23 @@ func (p *Process) start() error {
 		return nil
 	}
 
+	// There is the possibility of a hard to replicate race condition where
+	// curState *WAS* StateStopped but by the time we get to the p.stateMutex.Lock()
+	// below, it's value has changed!
+
 	p.stateMutex.Lock()
 	defer p.stateMutex.Unlock()
+
+	// with the exclusive lock, check if p.state is StateStopped, which is the only valid state
+	// to transition from to StateReady
+
+	if p.state != StateStopped {
+		if p.state == StateReady {
+			return nil
+		} else {
+			return fmt.Errorf("start() can not proceed expected StateReady but process is in %v", p.state)
+		}
+	}
 
 	if err := p.setState(StateStarting); err != nil {
 		return err
