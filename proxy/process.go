@@ -116,7 +116,9 @@ func (p *Process) start() error {
 		return fmt.Errorf("can not start(), upstream proxy missing")
 	}
 
-	// wait for the other start() to complete
+	// multiple start() calls will wait for the one that is actually starting to
+	// complete before proceeding.
+	// ===========
 	curState := p.CurrentState()
 
 	if curState == StateReady {
@@ -132,6 +134,7 @@ func (p *Process) start() error {
 
 		return nil
 	}
+	// ===========
 
 	// There is the possibility of a hard to replicate race condition where
 	// curState *WAS* StateStopped but by the time we get to the p.stateMutex.Lock()
