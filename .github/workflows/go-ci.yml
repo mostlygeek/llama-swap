@@ -3,8 +3,6 @@
 name: Go
 
 on:
-  push:
-    branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
 
@@ -22,6 +20,10 @@ jobs:
       uses: actions/setup-go@v4
       with:
         go-version: '1.23'
+
+    # necessary for testing processes
+    - name: Create simple-responder
+      run: make simple-responder
 
     - name: Test
       run: make test-all
