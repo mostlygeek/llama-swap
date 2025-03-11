@@ -3,6 +3,9 @@
 name: CI
 
 on:
+  push:
+    branches: [ "main" ]
+
   pull_request:
     branches: [ "main" ]
 
@@ -21,10 +24,9 @@ jobs:
       with:
         go-version: '1.23'
 
-    # necessary for testing processes
+    # necessary for testing proxy/Process swapping
     - name: Create simple-responder
       run: make simple-responder
 
     - name: Test all
       run: make test-all
-      #run: go test -timeout 10s -run ^TestProcess_HTTPRequestsHaveTimeToFinish ./proxy/
