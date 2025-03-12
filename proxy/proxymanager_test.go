@@ -350,6 +350,7 @@ func TestProxyManager_StripProfileSlug(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "ok")
 }
 
+// Test issue #61 `Listing the current list of models and the loaded model.`
 func TestProxyManager_RunningEndpoint(t *testing.T) {
 	// Define a helper struct to parse the JSON response
 	type RunningResponse struct {
@@ -372,7 +373,11 @@ func TestProxyManager_RunningEndpoint(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 
 		var response RunningResponse
+
+		// Check if this is a valid JSON object
 		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+
+		// We should have an empty running array here.
 		assert.Empty(t, response.Running, "expected no running models")
 	})
 
@@ -387,14 +392,14 @@ func TestProxyManager_RunningEndpoint(t *testing.T) {
 		proxy := New(config)
 		defer proxy.StopProcesses()
 
-		// Load model1
+		// Load just a model.
 		reqBody := `{"model":"model1"}`
 		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
 		w := httptest.NewRecorder()
 		proxy.HandlerFunc(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		// Check /running
+		// Simulate browser call fro /running.
 		req = httptest.NewRequest("GET", "/running", nil)
 		w = httptest.NewRecorder()
 		proxy.HandlerFunc(w, req)
@@ -402,8 +407,13 @@ func TestProxyManager_RunningEndpoint(t *testing.T) {
 		var response RunningResponse
 		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 
+		// Check if we have a single array element.
 		assert.Len(t, response.Running, 1)
+
+		// Is this the right model?
 		assert.Equal(t, "model1", response.Running[0].Model)
+
+		// Is the model loaded?
 		assert.Equal(t, "ready", response.Running[0].State)
 	})
 
@@ -426,7 +436,7 @@ func TestProxyManager_RunningEndpoint(t *testing.T) {
 		proxy := New(config)
 		defer proxy.StopProcesses()
 
-		// Load both models through profile
+		// Load more than one model
 		for _, model := range []string{model1, model2} {
 			profileModel := ProcessKeyName(profileName, model)
 			reqBody := fmt.Sprintf(`{"model":"%s"}`, profileModel)
@@ -436,26 +446,33 @@ func TestProxyManager_RunningEndpoint(t *testing.T) {
 			assert.Equal(t, http.StatusOK, w.Code)
 		}
 
-		// Verify /running
+		// Simulate  the browser call
 		req := httptest.NewRequest("GET", "/running", nil)
 		w := httptest.NewRecorder()
 		proxy.HandlerFunc(w, req)
 
 		var response RunningResponse
+
+		// The JSON response must be valid.
 		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 
+		// The response should contain 2 models.
 		assert.Len(t, response.Running, 2)
 
 		expectedModels := map[string]struct{}{
 			model1: {},
 			model2: {},
 		}
+
+		// Iterate through the models and check their states as well.
 		for _, entry := range response.Running {
 			_, exists := expectedModels[entry.Model]
 			assert.True(t, exists, "unexpected model %s", entry.Model)
 			assert.Equal(t, "ready", entry.State)
 			delete(expectedModels, entry.Model)
 		}
-		assert.Empty(t, expectedModels, "missing models in response")
+
+		// Since we deleted each model while testing for its validity we should have no more models in the response.
+		assert.Empty(t, expectedModels, "unexpected additional models in response")
 	})
 }
