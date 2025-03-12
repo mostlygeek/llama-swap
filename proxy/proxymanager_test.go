@@ -349,3 +349,113 @@ func TestProxyManager_StripProfileSlug(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "ok")
 }
+
+func TestProxyManager_RunningEndpoint(t *testing.T) {
+	// Define a helper struct to parse the JSON response
+	type RunningResponse struct {
+		Running []struct {
+			Model string `json:"model"`
+			State string `json:"state"`
+		} `json:"running"`
+	}
+
+	t.Run("no models loaded", func(t *testing.T) {
+		config := &Config{}
+
+		proxy := New(config)
+		defer proxy.StopProcesses()
+
+		req := httptest.NewRequest("GET", "/running", nil)
+		w := httptest.NewRecorder()
+		proxy.HandlerFunc(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var response RunningResponse
+		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+		assert.Empty(t, response.Running, "expected no running models")
+	})
+
+	t.Run("single model loaded", func(t *testing.T) {
+		config := &Config{
+			HealthCheckTimeout: 15,
+			Models: map[string]ModelConfig{
+				"model1": getTestSimpleResponderConfig("model1"),
+			},
+		}
+
+		proxy := New(config)
+		defer proxy.StopProcesses()
+
+		// Load model1
+		reqBody := `{"model":"model1"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := httptest.NewRecorder()
+		proxy.HandlerFunc(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		// Check /running
+		req = httptest.NewRequest("GET", "/running", nil)
+		w = httptest.NewRecorder()
+		proxy.HandlerFunc(w, req)
+
+		var response RunningResponse
+		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+
+		assert.Len(t, response.Running, 1)
+		assert.Equal(t, "model1", response.Running[0].Model)
+		assert.Equal(t, "ready", response.Running[0].State)
+	})
+
+	t.Run("multiple models via profile", func(t *testing.T) {
+		profileName := "test"
+		model1 := "model1"
+		model2 := "model2"
+
+		config := &Config{
+			HealthCheckTimeout: 15,
+			Models: map[string]ModelConfig{
+				model1: getTestSimpleResponderConfig(model1),
+				model2: getTestSimpleResponderConfig(model2),
+			},
+			Profiles: map[string][]string{
+				profileName: {model1, model2},
+			},
+		}
+
+		proxy := New(config)
+		defer proxy.StopProcesses()
+
+		// Load both models through profile
+		for _, model := range []string{model1, model2} {
+			profileModel := ProcessKeyName(profileName, model)
+			reqBody := fmt.Sprintf(`{"model":"%s"}`, profileModel)
+			req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+			w := httptest.NewRecorder()
+			proxy.HandlerFunc(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+		}
+
+		// Verify /running
+		req := httptest.NewRequest("GET", "/running", nil)
+		w := httptest.NewRecorder()
+		proxy.HandlerFunc(w, req)
+
+		var response RunningResponse
+		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+
+		assert.Len(t, response.Running, 2)
+
+		expectedModels := map[string]struct{}{
+			model1: {},
+			model2: {},
+		}
+		for _, entry := range response.Running {
+			_, exists := expectedModels[entry.Model]
+			assert.True(t, exists, "unexpected model %s", entry.Model)
+			assert.Equal(t, "ready", entry.State)
+			delete(expectedModels, entry.Model)
+		}
+		assert.Empty(t, expectedModels, "missing models in response")
+	})
+}
