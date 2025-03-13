@@ -352,7 +352,6 @@ func TestProxyManager_StripProfileSlug(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "ok")
 }
 
-<<<<<<< HEAD
 // Test issue #61 `Listing the current list of models and the loaded model.`
 func TestProxyManager_RunningEndpoint(t *testing.T) {
 
