@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math/rand"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -350,6 +352,7 @@ func TestProxyManager_StripProfileSlug(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "ok")
 }
 
+<<<<<<< HEAD
 // Test issue #61 `Listing the current list of models and the loaded model.`
 func TestProxyManager_RunningEndpoint(t *testing.T) {
 
@@ -459,4 +462,74 @@ func TestProxyManager_RunningEndpoint(t *testing.T) {
 		// Since we deleted each model while testing for its validity we should have no more models in the response.
 		assert.Empty(t, expectedModels, "unexpected additional models in response")
 	})
+}
+
+func TestProxyManager_AudioTranscriptionHandler(t *testing.T) {
+	config := &Config{
+		HealthCheckTimeout: 15,
+		Profiles: map[string][]string{
+			"test": {"TheExpectedModel"},
+		},
+		Models: map[string]ModelConfig{
+			"TheExpectedModel": getTestSimpleResponderConfig("TheExpectedModel"),
+		},
+	}
+
+	proxy := New(config)
+	defer proxy.StopProcesses()
+
+	testCases := []struct {
+		name        string
+		modelInput  string
+		expectModel string
+	}{
+		{
+			name:        "With Profile Prefix",
+			modelInput:  "test:TheExpectedModel",
+			expectModel: "TheExpectedModel", // Profile prefix should be stripped
+		},
+		{
+			name:        "Without Profile Prefix",
+			modelInput:  "TheExpectedModel",
+			expectModel: "TheExpectedModel", // Should remain the same
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create a buffer with multipart form data
+			var b bytes.Buffer
+			w := multipart.NewWriter(&b)
+
+			// Add the model field
+			fw, err := w.CreateFormField("model")
+			assert.NoError(t, err)
+			_, err = fw.Write([]byte(tc.modelInput))
+			assert.NoError(t, err)
+
+			// Add a file field
+			fw, err = w.CreateFormFile("file", "test.mp3")
+			assert.NoError(t, err)
+			// Generate random content length between 10 and 20
+			contentLength := rand.Intn(11) + 10 // 10 to 20
+			content := make([]byte, contentLength)
+			_, err = fw.Write(content)
+			assert.NoError(t, err)
+			w.Close()
+
+			// Create the request with the multipart form data
+			req := httptest.NewRequest("POST", "/v1/audio/transcriptions", &b)
+			req.Header.Set("Content-Type", w.FormDataContentType())
+			rec := httptest.NewRecorder()
+			proxy.HandlerFunc(rec, req)
+
+			// Verify the response
+			assert.Equal(t, http.StatusOK, rec.Code)
+			var response map[string]string
+			err = json.Unmarshal(rec.Body.Bytes(), &response)
+			assert.NoError(t, err)
+			assert.Equal(t, tc.expectModel, response["model"])
+			assert.Equal(t, response["text"], fmt.Sprintf("The length of the file is %d bytes", contentLength)) // matches simple-responder
+		})
+	}
 }
