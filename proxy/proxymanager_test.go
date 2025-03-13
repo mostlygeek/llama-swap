@@ -352,7 +352,20 @@ func TestProxyManager_StripProfileSlug(t *testing.T) {
 
 // Test issue #61 `Listing the current list of models and the loaded model.`
 func TestProxyManager_RunningEndpoint(t *testing.T) {
-	// Define a helper struct to parse the JSON response
+
+	// Shared configuration
+	config := &Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]ModelConfig{
+			"model1": getTestSimpleResponderConfig("model1"),
+			"model2": getTestSimpleResponderConfig("model2"),
+		},
+		Profiles: map[string][]string{
+			"test": {"model1", "model2"},
+		},
+	}
+
+	// Define a helper struct to parse the JSON response.
 	type RunningResponse struct {
 		Running []struct {
 			Model string `json:"model"`
@@ -360,12 +373,11 @@ func TestProxyManager_RunningEndpoint(t *testing.T) {
 		} `json:"running"`
 	}
 
+	// Create proxy once for all tests
+	proxy := New(config)
+	defer proxy.StopProcesses()
+
 	t.Run("no models loaded", func(t *testing.T) {
-		config := &Config{}
-
-		proxy := New(config)
-		defer proxy.StopProcesses()
-
 		req := httptest.NewRequest("GET", "/running", nil)
 		w := httptest.NewRecorder()
 		proxy.HandlerFunc(w, req)
@@ -374,7 +386,7 @@ func TestProxyManager_RunningEndpoint(t *testing.T) {
 
 		var response RunningResponse
 
-		// Check if this is a valid JSON object
+		// Check if this is a valid JSON object.
 		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 
 		// We should have an empty running array here.
@@ -382,16 +394,6 @@ func TestProxyManager_RunningEndpoint(t *testing.T) {
 	})
 
 	t.Run("single model loaded", func(t *testing.T) {
-		config := &Config{
-			HealthCheckTimeout: 15,
-			Models: map[string]ModelConfig{
-				"model1": getTestSimpleResponderConfig("model1"),
-			},
-		}
-
-		proxy := New(config)
-		defer proxy.StopProcesses()
-
 		// Load just a model.
 		reqBody := `{"model":"model1"}`
 		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
@@ -399,7 +401,7 @@ func TestProxyManager_RunningEndpoint(t *testing.T) {
 		proxy.HandlerFunc(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		// Simulate browser call fro /running.
+		// Simulate browser call for the `/running` endpoint.
 		req = httptest.NewRequest("GET", "/running", nil)
 		w = httptest.NewRecorder()
 		proxy.HandlerFunc(w, req)
@@ -418,27 +420,9 @@ func TestProxyManager_RunningEndpoint(t *testing.T) {
 	})
 
 	t.Run("multiple models via profile", func(t *testing.T) {
-		profileName := "test"
-		model1 := "model1"
-		model2 := "model2"
-
-		config := &Config{
-			HealthCheckTimeout: 15,
-			Models: map[string]ModelConfig{
-				model1: getTestSimpleResponderConfig(model1),
-				model2: getTestSimpleResponderConfig(model2),
-			},
-			Profiles: map[string][]string{
-				profileName: {model1, model2},
-			},
-		}
-
-		proxy := New(config)
-		defer proxy.StopProcesses()
-
-		// Load more than one model
-		for _, model := range []string{model1, model2} {
-			profileModel := ProcessKeyName(profileName, model)
+		// Load more than one model.
+		for _, model := range []string{"model1", "model2"} {
+			profileModel := ProcessKeyName("test", model)
 			reqBody := fmt.Sprintf(`{"model":"%s"}`, profileModel)
 			req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
 			w := httptest.NewRecorder()
@@ -446,7 +430,7 @@ func TestProxyManager_RunningEndpoint(t *testing.T) {
 			assert.Equal(t, http.StatusOK, w.Code)
 		}
 
-		// Simulate  the browser call
+		// Simulate the browser call.
 		req := httptest.NewRequest("GET", "/running", nil)
 		w := httptest.NewRecorder()
 		proxy.HandlerFunc(w, req)
@@ -460,8 +444,8 @@ func TestProxyManager_RunningEndpoint(t *testing.T) {
 		assert.Len(t, response.Running, 2)
 
 		expectedModels := map[string]struct{}{
-			model1: {},
-			model2: {},
+			"model1": {},
+			"model2": {},
 		}
 
 		// Iterate through the models and check their states as well.
