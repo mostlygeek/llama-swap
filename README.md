@@ -11,7 +11,6 @@ Written in golang, it is very easy to install (single binary with no dependancie
 - ✅ Easy to deploy: single binary with no dependencies
 - ✅ Easy to config: single yaml file
 - ✅ On-demand model switching
-- ✅ Full control over server settings per model
 - ✅ OpenAI API supported endpoints:
   - `v1/completions`
   - `v1/chat/completions`
@@ -19,14 +18,16 @@ Written in golang, it is very easy to install (single binary with no dependancie
   - `v1/rerank`
   - `v1/audio/speech` ([#36](https://github.com/mostlygeek/llama-swap/issues/36))
   - `v1/audio/transcriptions` ([docs](https://github.com/mostlygeek/llama-swap/issues/41#issuecomment-2722637867))
+- ✅ llama-swap custom API endpoints
+  - `/log` - remote log monitoring
+  - `/upstream/:model_id` - direct access to upstream HTTP server ([demo](https://github.com/mostlygeek/llama-swap/pull/31))
+  - `/unload` - manually unload running models ([#58](https://github.com/mostlygeek/llama-swap/issues/58))
+  - `/running` - list currently running models ([#61](https://github.com/mostlygeek/llama-swap/issues/61))
 - ✅ Run multiple models at once with `profiles` ([docs](https://github.com/mostlygeek/llama-swap/issues/53#issuecomment-2660761741))
-- ✅ Remote log monitoring at `/log`
-- ✅ Direct access to upstream HTTP server via `/upstream/:model_id` ([demo](https://github.com/mostlygeek/llama-swap/pull/31))
-- ✅ Manually unload models via `/unload` endpoint ([#58](https://github.com/mostlygeek/llama-swap/issues/58))
-- ✅ Check current monitoring state via `/running` endpoint ([#61](https://github.com/mostlygeek/llama-swap/issues/61))
 - ✅ Automatic unloading of models after timeout by setting a `ttl`
 - ✅ Use any local OpenAI compatible server (llama.cpp, vllm, tabbyAPI, etc)
 - ✅ Docker and Podman support
+- ✅ Full control over server settings per model
 
 ## How does llama-swap work?
 
