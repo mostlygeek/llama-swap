@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"sort"
 	"strconv"
@@ -95,6 +96,7 @@ func New(config *Config) *ProxyManager {
 
 	// Support audio/speech endpoint
 	pm.ginEngine.POST("/v1/audio/speech", pm.proxyOAIHandler)
+	pm.ginEngine.POST("/v1/audio/transcriptions", pm.proxyOAIAudioTranscriptionHandler)
 
 	pm.ginEngine.GET("/v1/models", pm.listModelsHandler)
 
@@ -372,6 +374,105 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 
 		process.ProxyRequest(c.Writer, c.Request)
 	}
+}
+
+func (pm *ProxyManager) proxyOAIAudioTranscriptionHandler(c *gin.Context) {
+	// We need to reconstruct the multipart form in any case since the body is consumed
+	// Create a new buffer for the reconstructed request
+	var requestBuffer bytes.Buffer
+	multipartWriter := multipart.NewWriter(&requestBuffer)
+
+	// Parse multipart form
+	if err := c.Request.ParseMultipartForm(32 << 20); err != nil { // 32MB max memory, larger files go to tmp disk
+		pm.sendErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("error parsing multipart form: %s", err.Error()))
+		return
+	}
+
+	// Get model parameter from the form
+	requestedModel := c.Request.FormValue("model")
+	if requestedModel == "" {
+		pm.sendErrorResponse(c, http.StatusBadRequest, "missing or invalid 'model' parameter in form data")
+		return
+	}
+
+	// Swap to the requested model
+	process, err := pm.swapModel(requestedModel)
+	if err != nil {
+		pm.sendErrorResponse(c, http.StatusNotFound, fmt.Sprintf("unable to swap to model, %s", err.Error()))
+		return
+	}
+
+	// Get profile name and model name from the requested model
+	profileName, modelName := splitRequestedModel(requestedModel)
+
+	// Copy all form values
+	for key, values := range c.Request.MultipartForm.Value {
+		for _, value := range values {
+			fieldValue := value
+			// If this is the model field and we have a profile, use just the model name
+			if key == "model" && profileName != "" {
+				fieldValue = modelName
+			}
+			field, err := multipartWriter.CreateFormField(key)
+			if err != nil {
+				pm.sendErrorResponse(c, http.StatusInternalServerError, "error recreating form field")
+				return
+			}
+			if _, err = field.Write([]byte(fieldValue)); err != nil {
+				pm.sendErrorResponse(c, http.StatusInternalServerError, "error writing form field")
+				return
+			}
+		}
+	}
+
+	// Copy all files from the original request
+	for key, fileHeaders := range c.Request.MultipartForm.File {
+		for _, fileHeader := range fileHeaders {
+			formFile, err := multipartWriter.CreateFormFile(key, fileHeader.Filename)
+			if err != nil {
+				pm.sendErrorResponse(c, http.StatusInternalServerError, "error recreating form file")
+				return
+			}
+
+			file, err := fileHeader.Open()
+			if err != nil {
+				pm.sendErrorResponse(c, http.StatusInternalServerError, "error opening uploaded file")
+				return
+			}
+
+			if _, err = io.Copy(formFile, file); err != nil {
+				file.Close()
+				pm.sendErrorResponse(c, http.StatusInternalServerError, "error copying file data")
+				return
+			}
+			file.Close()
+		}
+	}
+
+	// Close the multipart writer to finalize the form
+	if err := multipartWriter.Close(); err != nil {
+		pm.sendErrorResponse(c, http.StatusInternalServerError, "error finalizing multipart form")
+		return
+	}
+
+	// Create a new request with the reconstructed form data
+	modifiedReq, err := http.NewRequestWithContext(
+		c.Request.Context(),
+		c.Request.Method,
+		c.Request.URL.String(),
+		&requestBuffer,
+	)
+	if err != nil {
+		pm.sendErrorResponse(c, http.StatusInternalServerError, "error creating modified request")
+		return
+	}
+
+	// Copy the headers from the original request
+	modifiedReq.Header = c.Request.Header.Clone()
+	modifiedReq.Header.Set("Content-Type", multipartWriter.FormDataContentType())
+
+	// Use the modified request for proxying
+	process.ProxyRequest(c.Writer, modifiedReq)
 }
 
 func (pm *ProxyManager) sendErrorResponse(c *gin.Context, statusCode int, message string) {

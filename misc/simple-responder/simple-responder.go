@@ -67,6 +67,46 @@ func main() {
 		c.String(200, *responseMessage)
 	})
 
+	// issue #41
+	r.POST("/v1/audio/transcriptions", func(c *gin.Context) {
+		// Parse the multipart form
+		if err := c.Request.ParseMultipartForm(10 << 20); err != nil { // 10 MB max memory
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Error parsing multipart form: %s", err)})
+			return
+		}
+
+		// Get the model from the form values
+		model := c.Request.FormValue("model")
+
+		if model == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Missing model parameter"})
+			return
+		}
+
+		// Get the file from the form
+		file, _, err := c.Request.FormFile("file")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Error getting file: %s", err)})
+			return
+		}
+		defer file.Close()
+
+		// Read the file content to get its size
+		fileBytes, err := io.ReadAll(file)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error reading file: %s", err)})
+			return
+		}
+
+		fileSize := len(fileBytes)
+
+		// Return a JSON response with the model and transcription text including file size
+		c.JSON(http.StatusOK, gin.H{
+			"text":  fmt.Sprintf("The length of the file is %d bytes", fileSize),
+			"model": model,
+		})
+	})
+
 	r.GET("/slow-respond", func(c *gin.Context) {
 		echo := c.Query("echo")
 		delay := c.Query("delay")
