@@ -22,6 +22,7 @@ Written in golang, it is very easy to install (single binary with no dependancie
 - ✅ Remote log monitoring at `/log`
 - ✅ Direct access to upstream HTTP server via `/upstream/:model_id` ([demo](https://github.com/mostlygeek/llama-swap/pull/31))
 - ✅ Manually unload models via `/unload` endpoint ([#58](https://github.com/mostlygeek/llama-swap/issues/58))
+- ✅ Check current monitoring state via `/running` endpoint ([#61](https://github.com/mostlygeek/llama-swap/issues/61))
 - ✅ Automatic unloading of models after timeout by setting a `ttl`
 - ✅ Use any local OpenAI compatible server (llama.cpp, vllm, tabbyAPI, etc)
 - ✅ Docker and Podman support
