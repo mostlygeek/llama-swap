@@ -117,6 +117,13 @@ models:
       ghcr.io/ggerganov/llama.cpp:server
       --model '/models/Qwen2.5-Coder-0.5B-Instruct-Q4_K_M.gguf'
 
+  # `useModelName` will send a specific model name to the upstream server
+  # overriding whatever was set in the request
+  "qwq":
+    proxy: http://127.0.0.1:11434
+    cmd: my-server
+    useModelName: "qwen:qwq"
+
 # profiles make it easy to managing multi model (and gpu) configurations.
 #
 # Tips:
