@@ -532,3 +532,33 @@ func TestProxyManager_AudioTranscriptionHandler(t *testing.T) {
 		})
 	}
 }
+
+func TestProxyManager_SplitRequestedModel(t *testing.T) {
+
+	tests := []struct {
+		name            string
+		requestedModel  string
+		expectedProfile string
+		expectedModel   string
+	}{
+		{"no profile", "gpt-4", "", "gpt-4"},
+		{"with profile", "profile1:gpt-4", "profile1", "gpt-4"},
+		{"only profile", "profile1:", "profile1", ""},
+		{"empty model", ":gpt-4", "", "gpt-4"},
+		{"empty profile", ":", "", ""},
+		{"no split char", "gpt-4", "", "gpt-4"},
+		{"profile and model with delimiter", "profile1:delimiter:gpt-4", "profile1", "delimiter:gpt-4"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			profileName, modelName := splitRequestedModel(tt.requestedModel)
+			if profileName != tt.expectedProfile {
+				t.Errorf("splitRequestedModel(%q) = %q, %q; want %q, %q", tt.requestedModel, profileName, modelName, tt.expectedProfile, tt.expectedModel)
+			}
+			if modelName != tt.expectedModel {
+				t.Errorf("splitRequestedModel(%q) = %q, %q; want %q, %q", tt.requestedModel, profileName, modelName, tt.expectedProfile, tt.expectedModel)
+			}
+		})
+	}
+}
