@@ -80,12 +80,12 @@ func (p *Process) swapState(expectedState, newState ProcessState) (ProcessState,
 	p.stateMutex.Lock()
 	defer p.stateMutex.Unlock()
 
-	if !isValidTransition(p.state, newState) {
-		return p.state, ErrInvalidStateTransition
-	}
-
 	if p.state != expectedState {
 		return p.state, ErrExpectedStateMismatch
+	}
+
+	if !isValidTransition(p.state, newState) {
+		return p.state, ErrInvalidStateTransition
 	}
 
 	p.state = newState
@@ -143,6 +143,8 @@ func (p *Process) start() error {
 			} else {
 				return fmt.Errorf("processes was in state %v when start() was called", curState)
 			}
+		} else {
+			return fmt.Errorf("failed to set Process state to starting: current state: %v, error: %v", curState, err)
 		}
 	}
 
@@ -236,7 +238,7 @@ func (p *Process) start() error {
 			maxDuration := time.Duration(p.config.UnloadAfter) * time.Second
 
 			for range time.Tick(time.Second) {
-				if p.state != StateReady {
+				if p.CurrentState() != StateReady {
 					return
 				}
 
