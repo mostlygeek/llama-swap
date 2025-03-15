@@ -70,7 +70,14 @@ logRequests: true
 # define valid model values and the upstream server start
 models:
   "llama":
-    cmd: llama-server --port 8999 -m Llama-3.2-1B-Instruct-Q4_K_M.gguf
+    # multiline for readability
+    cmd: >
+      llama-server --port 8999
+      --model path/to/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
+
+    # environment variables to pass to the command
+    env:
+      - "CUDA_VISIBLE_DEVICES=0"
 
     # where to reach the server started by cmd, make sure the ports match
     proxy: http://127.0.0.1:8999
@@ -91,16 +98,9 @@ models:
     # default: 0 = never unload model
     ttl: 60
 
-  "qwen":
-    # environment variables to pass to the command
-    env:
-      - "CUDA_VISIBLE_DEVICES=0"
-
-    # multiline for readability
-    cmd: >
-      llama-server --port 8999
-      --model path/to/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
-    proxy: http://127.0.0.1:8999
+    # `useModelName` overrides the model name in the request
+    # and sends a specific name to the upstream server
+    useModelName: "qwen:qwq"
 
   # unlisted models do not show up in /v1/models or /upstream lists
   # but they can still be requested as normal
@@ -117,14 +117,7 @@ models:
       ghcr.io/ggerganov/llama.cpp:server
       --model '/models/Qwen2.5-Coder-0.5B-Instruct-Q4_K_M.gguf'
 
-  # `useModelName` will send a specific model name to the upstream server
-  # overriding whatever was set in the request
-  "qwq":
-    proxy: http://127.0.0.1:11434
-    cmd: my-server
-    useModelName: "qwen:qwq"
-
-# profiles make it easy to managing multi model (and gpu) configurations.
+# profiles eliminates swapping by running multiple models at the same time
 #
 # Tips:
 #  - each model must be listening on a unique address and port
@@ -132,8 +125,8 @@ models:
 #  - the profile will load and unload all models in the profile at the same time
 profiles:
   coding:
-    - "qwen"
     - "llama"
+    - "qwen-unlisted"
 ```
 
 ### Use Case Examples
