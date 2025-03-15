@@ -77,10 +77,15 @@ func (p *Process) swapState(expectedState, newState ProcessState) (ProcessState,
 	p.stateMutex.Lock()
 	defer p.stateMutex.Unlock()
 
+	if !isValidTransition(p.state, newState) {
+		return p.state, ErrInvalidStateTransition
+	}
+
 	if p.state != expectedState {
 		return p.state, ErrExpectedStateMismatch
 	}
 
+	p.state = newState
 	return p.state, nil
 }
 

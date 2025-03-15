@@ -275,6 +275,58 @@ func TestSetState(t *testing.T) {
 	}
 }
 
+func TestProcess_SwapState(t *testing.T) {
+	tests := []struct {
+		name           string
+		currentState   ProcessState
+		expectedState  ProcessState
+		newState       ProcessState
+		expectedError  error
+		expectedResult ProcessState
+	}{
+		{"Stopped to Starting", StateStopped, StateStopped, StateStarting, nil, StateStarting},
+		{"Starting to Ready", StateStarting, StateStarting, StateReady, nil, StateReady},
+		{"Starting to Failed", StateStarting, StateStarting, StateFailed, nil, StateFailed},
+		{"Starting to Stopping", StateStarting, StateStarting, StateStopping, nil, StateStopping},
+		{"Ready to Stopping", StateReady, StateReady, StateStopping, nil, StateStopping},
+		{"Stopping to Stopped", StateStopping, StateStopping, StateStopped, nil, StateStopped},
+		{"Stopping to Shutdown", StateStopping, StateStopping, StateShutdown, nil, StateShutdown},
+		{"Stopped to Ready", StateStopped, StateStopped, StateReady, ErrInvalidStateTransition, StateStopped},
+		{"Starting to Stopped", StateStarting, StateStarting, StateStopped, ErrInvalidStateTransition, StateStarting},
+		{"Ready to Starting", StateReady, StateReady, StateStarting, ErrInvalidStateTransition, StateReady},
+		{"Ready to Failed", StateReady, StateReady, StateFailed, ErrInvalidStateTransition, StateReady},
+		{"Stopping to Ready", StateStopping, StateStopping, StateReady, ErrInvalidStateTransition, StateStopping},
+		{"Failed to Stopped", StateFailed, StateFailed, StateStopped, ErrInvalidStateTransition, StateFailed},
+		{"Failed to Starting", StateFailed, StateFailed, StateStarting, ErrInvalidStateTransition, StateFailed},
+		{"Shutdown to Stopped", StateShutdown, StateShutdown, StateStopped, ErrInvalidStateTransition, StateShutdown},
+		{"Shutdown to Starting", StateShutdown, StateShutdown, StateStarting, ErrInvalidStateTransition, StateShutdown},
+		{"Expected state mismatch", StateStopped, StateStarting, StateStarting, ErrExpectedStateMismatch, StateStopped},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			p := &Process{
+				state: test.currentState,
+			}
+
+			resultState, err := p.swapState(test.expectedState, test.newState)
+			if err != nil && test.expectedError == nil {
+				t.Errorf("Unexpected error: %v", err)
+			} else if err == nil && test.expectedError != nil {
+				t.Errorf("Expected error: %v, but got none", test.expectedError)
+			} else if err != nil && test.expectedError != nil {
+				if err.Error() != test.expectedError.Error() {
+					t.Errorf("Expected error: %v, got: %v", test.expectedError, err)
+				}
+			}
+
+			if resultState != test.expectedResult {
+				t.Errorf("Expected state: %v, got: %v", test.expectedResult, resultState)
+			}
+		})
+	}
+}
+
 func TestProcess_ShutdownInterruptsHealthCheck(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping long shutdown test")
