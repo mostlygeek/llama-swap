@@ -65,40 +65,50 @@ func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, logMonito
 	}
 }
 
-func (p *Process) setState(newState ProcessState) error {
-	// enforce valid state transitions
-	invalidTransition := false
-	if p.state == StateStopped {
-		// stopped -> starting
-		if newState != StateStarting {
-			invalidTransition = true
-		}
-	} else if p.state == StateStarting {
-		// starting -> ready | failed | stopping
-		if newState != StateReady && newState != StateFailed && newState != StateStopping {
-			invalidTransition = true
-		}
-	} else if p.state == StateReady {
-		// ready -> stopping
-		if newState != StateStopping {
-			invalidTransition = true
-		}
-	} else if p.state == StateStopping {
-		// stopping -> stopped | shutdown
-		if newState != StateStopped && newState != StateShutdown {
-			invalidTransition = true
-		}
-	} else if p.state == StateFailed || p.state == StateShutdown {
-		invalidTransition = true
+// custom error types for swapping state
+var (
+	ErrExpectedStateMismatch  = errors.New("expected state mismatch")
+	ErrInvalidStateTransition = errors.New("invalid state transition")
+)
+
+// swapState performs a compare and swap of the state atomically. It returns the current state
+// and an error if the swap failed.
+func (p *Process) swapState(expectedState, newState ProcessState) (ProcessState, error) {
+	p.stateMutex.Lock()
+	defer p.stateMutex.Unlock()
+
+	if p.state != expectedState {
+		return p.state, ErrExpectedStateMismatch
 	}
 
-	if invalidTransition {
+	return p.state, nil
+}
+
+func (p *Process) setState(newState ProcessState) error {
+	if !isValidTransition(p.state, newState) {
 		//panic(fmt.Sprintf("Invalid state transition from %s to %s", p.state, newState))
 		return fmt.Errorf("invalid state transition from %s to %s", p.state, newState)
 	}
 
 	p.state = newState
 	return nil
+}
+
+// Helper function to encapsulate transition rules
+func isValidTransition(from, to ProcessState) bool {
+	switch from {
+	case StateStopped:
+		return to == StateStarting
+	case StateStarting:
+		return to == StateReady || to == StateFailed || to == StateStopping
+	case StateReady:
+		return to == StateStopping
+	case StateStopping:
+		return to == StateStopped || to == StateShutdown
+	case StateFailed, StateShutdown:
+		return false // No transitions allowed from these states
+	}
+	return false
 }
 
 func (p *Process) CurrentState() ProcessState {
