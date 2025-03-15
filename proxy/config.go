@@ -17,6 +17,7 @@ type ModelConfig struct {
 	CheckEndpoint string   `yaml:"checkEndpoint"`
 	UnloadAfter   int      `yaml:"ttl"`
 	Unlisted      bool     `yaml:"unlisted"`
+	UseModelName  string   `yaml:"useModelName"`
 }
 
 func (m *ModelConfig) SanitizedCommand() ([]string, error) {
