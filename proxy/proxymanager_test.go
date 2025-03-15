@@ -532,3 +532,112 @@ func TestProxyManager_AudioTranscriptionHandler(t *testing.T) {
 		})
 	}
 }
+
+func TestProxyManager_SplitRequestedModel(t *testing.T) {
+
+	tests := []struct {
+		name            string
+		requestedModel  string
+		expectedProfile string
+		expectedModel   string
+	}{
+		{"no profile", "gpt-4", "", "gpt-4"},
+		{"with profile", "profile1:gpt-4", "profile1", "gpt-4"},
+		{"only profile", "profile1:", "profile1", ""},
+		{"empty model", ":gpt-4", "", "gpt-4"},
+		{"empty profile", ":", "", ""},
+		{"no split char", "gpt-4", "", "gpt-4"},
+		{"profile and model with delimiter", "profile1:delimiter:gpt-4", "profile1", "delimiter:gpt-4"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			profileName, modelName := splitRequestedModel(tt.requestedModel)
+			if profileName != tt.expectedProfile {
+				t.Errorf("splitRequestedModel(%q) = %q, %q; want %q, %q", tt.requestedModel, profileName, modelName, tt.expectedProfile, tt.expectedModel)
+			}
+			if modelName != tt.expectedModel {
+				t.Errorf("splitRequestedModel(%q) = %q, %q; want %q, %q", tt.requestedModel, profileName, modelName, tt.expectedProfile, tt.expectedModel)
+			}
+		})
+	}
+}
+
+// Test useModelName in configuration sends overrides what is sent to upstream
+func TestProxyManager_UseModelName(t *testing.T) {
+
+	upstreamModelName := "upstreamModel"
+
+	modelConfig := getTestSimpleResponderConfig(upstreamModelName)
+	modelConfig.UseModelName = upstreamModelName
+
+	config := &Config{
+		HealthCheckTimeout: 15,
+		Profiles: map[string][]string{
+			"test": {"model1"},
+		},
+
+		Models: map[string]ModelConfig{
+			"model1": modelConfig,
+		},
+	}
+
+	proxy := New(config)
+	defer proxy.StopProcesses()
+
+	tests := []struct {
+		description    string
+		requestedModel string
+	}{
+		{"useModelName over rides requested model", "model1"},
+		{"useModelName over rides requested profile:model", "test:model1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.description+": /v1/chat/completions", func(t *testing.T) {
+			reqBody := fmt.Sprintf(`{"model":"%s"}`, tt.requestedModel)
+			req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+			w := httptest.NewRecorder()
+
+			proxy.HandlerFunc(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Contains(t, w.Body.String(), upstreamModelName)
+
+		})
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.description+": /v1/audio/transcriptions", func(t *testing.T) {
+			// Create a buffer with multipart form data
+			var b bytes.Buffer
+			w := multipart.NewWriter(&b)
+
+			// Add the model field
+			fw, err := w.CreateFormField("model")
+			assert.NoError(t, err)
+			_, err = fw.Write([]byte(tt.requestedModel))
+			assert.NoError(t, err)
+
+			// Add a file field
+			fw, err = w.CreateFormFile("file", "test.mp3")
+			assert.NoError(t, err)
+			_, err = fw.Write([]byte("test"))
+			assert.NoError(t, err)
+			w.Close()
+
+			// Create the request with the multipart form data
+			req := httptest.NewRequest("POST", "/v1/audio/transcriptions", &b)
+			req.Header.Set("Content-Type", w.FormDataContentType())
+			rec := httptest.NewRecorder()
+			proxy.HandlerFunc(rec, req)
+
+			// Verify the response
+			assert.Equal(t, http.StatusOK, rec.Code)
+			var response map[string]string
+			err = json.Unmarshal(rec.Body.Bytes(), &response)
+			assert.NoError(t, err)
+			assert.Equal(t, upstreamModelName, response["model"])
+		})
+	}
+
+}
