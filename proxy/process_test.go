@@ -225,56 +225,6 @@ func TestProcess_HTTPRequestsHaveTimeToFinish(t *testing.T) {
 	}
 }
 
-func TestSetState(t *testing.T) {
-	tests := []struct {
-		name           string
-		currentState   ProcessState
-		newState       ProcessState
-		expectedError  error
-		expectedResult ProcessState
-	}{
-		{"Stopped to Starting", StateStopped, StateStarting, nil, StateStarting},
-		{"Starting to Ready", StateStarting, StateReady, nil, StateReady},
-		{"Starting to Failed", StateStarting, StateFailed, nil, StateFailed},
-		{"Starting to Stopping", StateStarting, StateStopping, nil, StateStopping},
-		{"Ready to Stopping", StateReady, StateStopping, nil, StateStopping},
-		{"Stopping to Stopped", StateStopping, StateStopped, nil, StateStopped},
-		{"Stopping to Shutdown", StateStopping, StateShutdown, nil, StateShutdown},
-		{"Stopped to Ready", StateStopped, StateReady, fmt.Errorf("invalid state transition from stopped to ready"), StateStopped},
-		{"Starting to Stopped", StateStarting, StateStopped, fmt.Errorf("invalid state transition from starting to stopped"), StateStarting},
-		{"Ready to Starting", StateReady, StateStarting, fmt.Errorf("invalid state transition from ready to starting"), StateReady},
-		{"Ready to Failed", StateReady, StateFailed, fmt.Errorf("invalid state transition from ready to failed"), StateReady},
-		{"Stopping to Ready", StateStopping, StateReady, fmt.Errorf("invalid state transition from stopping to ready"), StateStopping},
-		{"Failed to Stopped", StateFailed, StateStopped, fmt.Errorf("invalid state transition from failed to stopped"), StateFailed},
-		{"Failed to Starting", StateFailed, StateStarting, fmt.Errorf("invalid state transition from failed to starting"), StateFailed},
-		{"Shutdown to Stopped", StateShutdown, StateStopped, fmt.Errorf("invalid state transition from shutdown to stopped"), StateShutdown},
-		{"Shutdown to Starting", StateShutdown, StateStarting, fmt.Errorf("invalid state transition from shutdown to starting"), StateShutdown},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			p := &Process{
-				state: test.currentState,
-			}
-
-			err := p.setState(test.newState)
-			if err != nil && test.expectedError == nil {
-				t.Errorf("Unexpected error: %v", err)
-			} else if err == nil && test.expectedError != nil {
-				t.Errorf("Expected error: %v, but got none", test.expectedError)
-			} else if err != nil && test.expectedError != nil {
-				if err.Error() != test.expectedError.Error() {
-					t.Errorf("Expected error: %v, got: %v", test.expectedError, err)
-				}
-			}
-
-			if p.state != test.expectedResult {
-				t.Errorf("Expected state: %v, got: %v", test.expectedResult, p.state)
-			}
-		})
-	}
-}
-
 func TestProcess_SwapState(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -342,11 +292,14 @@ func TestProcess_ShutdownInterruptsHealthCheck(t *testing.T) {
 	healthCheckTTLSeconds := 30
 	process := NewProcess("test-process", healthCheckTTLSeconds, config, logMonitor)
 
+	// make it a lot faster
+	process.healthCheckLoopInterval = time.Second
+
 	// start a goroutine to simulate a shutdown
 	var wg sync.WaitGroup
 	go func() {
 		defer wg.Done()
-		<-time.After(time.Second * 2)
+		<-time.After(time.Millisecond * 500)
 		process.Shutdown()
 	}()
 	wg.Add(1)

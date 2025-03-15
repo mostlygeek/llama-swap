@@ -30,11 +30,13 @@ const (
 )
 
 type Process struct {
-	ID                 string
-	config             ModelConfig
-	cmd                *exec.Cmd
-	logMonitor         *LogMonitor
-	healthCheckTimeout int
+	ID         string
+	config     ModelConfig
+	cmd        *exec.Cmd
+	logMonitor *LogMonitor
+
+	healthCheckTimeout      int
+	healthCheckLoopInterval time.Duration
 
 	lastRequestHandled time.Time
 
@@ -54,14 +56,15 @@ type Process struct {
 func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, logMonitor *LogMonitor) *Process {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Process{
-		ID:                 ID,
-		config:             config,
-		cmd:                nil,
-		logMonitor:         logMonitor,
-		healthCheckTimeout: healthCheckTimeout,
-		state:              StateStopped,
-		shutdownCtx:        ctx,
-		shutdownCancel:     cancel,
+		ID:                      ID,
+		config:                  config,
+		cmd:                     nil,
+		logMonitor:              logMonitor,
+		healthCheckTimeout:      healthCheckTimeout,
+		healthCheckLoopInterval: 5 * time.Second, /* default, can not be set by user - used for testing */
+		state:                   StateStopped,
+		shutdownCtx:             ctx,
+		shutdownCancel:          cancel,
 	}
 }
 
@@ -87,16 +90,6 @@ func (p *Process) swapState(expectedState, newState ProcessState) (ProcessState,
 
 	p.state = newState
 	return p.state, nil
-}
-
-func (p *Process) setState(newState ProcessState) error {
-	if !isValidTransition(p.state, newState) {
-		//panic(fmt.Sprintf("Invalid state transition from %s to %s", p.state, newState))
-		return fmt.Errorf("invalid state transition from %s to %s", p.state, newState)
-	}
-
-	p.state = newState
-	return nil
 }
 
 // Helper function to encapsulate transition rules
@@ -131,55 +124,30 @@ func (p *Process) start() error {
 		return fmt.Errorf("can not start(), upstream proxy missing")
 	}
 
-	// multiple start() calls will wait for the one that is actually starting to
-	// complete before proceeding.
-	// ===========
-	curState := p.CurrentState()
-
-	if curState == StateReady {
-		return nil
-	}
-
-	if curState == StateStarting {
-		p.waitStarting.Wait()
-
-		if state := p.CurrentState(); state != StateReady {
-			return fmt.Errorf("start() failed current state: %v", state)
-		}
-
-		return nil
-	}
-	// ===========
-
-	// There is the possibility of a hard to replicate race condition where
-	// curState *WAS* StateStopped but by the time we get to the p.stateMutex.Lock()
-	// below, it's value has changed!
-
-	p.stateMutex.Lock()
-	defer p.stateMutex.Unlock()
-
-	// with the exclusive lock, check if p.state is StateStopped, which is the only valid state
-	// to transition from to StateReady
-
-	if p.state != StateStopped {
-		if p.state == StateReady {
-			return nil
-		} else {
-			return fmt.Errorf("start() can not proceed expected StateReady but process is in %v", p.state)
-		}
-	}
-
-	if err := p.setState(StateStarting); err != nil {
-		return err
-	}
-
-	p.waitStarting.Add(1)
-	defer p.waitStarting.Done()
-
 	args, err := p.config.SanitizedCommand()
 	if err != nil {
 		return fmt.Errorf("unable to get sanitized command: %v", err)
 	}
+
+	if curState, err := p.swapState(StateStopped, StateStarting); err != nil {
+		if err == ErrExpectedStateMismatch {
+			// already starting, just wait for it to complete and expect
+			// it to be be in the Ready start after. If not, return an error
+			if curState == StateStarting {
+				p.waitStarting.Wait()
+				if state := p.CurrentState(); state == StateReady {
+					return nil
+				} else {
+					return fmt.Errorf("process was already starting but wound up in state %v", state)
+				}
+			} else {
+				return fmt.Errorf("processes was in state %v when start() was called", curState)
+			}
+		}
+	}
+
+	p.waitStarting.Add(1)
+	defer p.waitStarting.Done()
 
 	p.cmd = exec.Command(args[0], args[1:]...)
 	p.cmd.Stdout = p.logMonitor
@@ -188,8 +156,14 @@ func (p *Process) start() error {
 
 	err = p.cmd.Start()
 
+	// Set process state to failed
 	if err != nil {
-		p.setState(StateFailed)
+		if curState, swapErr := p.swapState(StateStarting, StateFailed); err != nil {
+			return fmt.Errorf(
+				"failed to start command and state swap failed. command error: %v, current state: %v, state swap error: %v",
+				err, curState, swapErr,
+			)
+		}
 		return fmt.Errorf("start() failed: %v", err)
 	}
 
@@ -224,13 +198,16 @@ func (p *Process) start() error {
 		)
 		defer cancelHealthCheck()
 
-		// Health check loop
 	loop:
+		// Ready Check loop
 		for {
 			select {
 			case <-checkDeadline.Done():
-				p.setState(StateFailed)
-				return fmt.Errorf("health check failed after %vs", maxDuration.Seconds())
+				if curState, err := p.swapState(StateStarting, StateFailed); err != nil {
+					return fmt.Errorf("health check timed out after %vs AND state swap failed: %v, current state: %v", maxDuration.Seconds(), err, curState)
+				} else {
+					return fmt.Errorf("health check timed out after %vs", maxDuration.Seconds())
+				}
 			case <-p.shutdownCtx.Done():
 				return errors.New("health check interrupted due to shutdown")
 			default:
@@ -248,7 +225,7 @@ func (p *Process) start() error {
 				}
 			}
 
-			<-time.After(5 * time.Second)
+			<-time.After(p.healthCheckLoopInterval)
 		}
 	}
 
@@ -275,26 +252,28 @@ func (p *Process) start() error {
 		}()
 	}
 
-	return p.setState(StateReady)
+	if curState, err := p.swapState(StateStarting, StateReady); err != nil {
+		return fmt.Errorf("failed to set Process state to ready: current state: %v, error: %v", curState, err)
+	} else {
+		return nil
+	}
 }
 
 func (p *Process) Stop() {
 	// wait for any inflight requests before proceeding
 	p.inFlightRequests.Wait()
-	p.stateMutex.Lock()
-	defer p.stateMutex.Unlock()
 
 	// calling Stop() when state is invalid is a no-op
-	if err := p.setState(StateStopping); err != nil {
-		fmt.Fprintf(p.logMonitor, "!!! Info - Stop() err: %v\n", err)
+	if curState, err := p.swapState(StateReady, StateStopping); err != nil {
+		fmt.Fprintf(p.logMonitor, "!!! Info - Stop() Ready -> StateStopping err: %v, current state: %v\n", err, curState)
 		return
 	}
 
 	// stop the process with a graceful exit timeout
 	p.stopCommand(5 * time.Second)
 
-	if err := p.setState(StateStopped); err != nil {
-		panic(fmt.Sprintf("Stop() failed to set state to stopped: %v", err))
+	if curState, err := p.swapState(StateStopping, StateStopped); err != nil {
+		fmt.Fprintf(p.logMonitor, "!!! Info - Stop() StateStopping -> StateStopped err: %v, current state: %v\n", err, curState)
 	}
 }
 
@@ -302,19 +281,9 @@ func (p *Process) Stop() {
 // of time for any inflight requests to complete before shutting down. If the Process
 // is in the state of starting, it will cancel it and shut it down
 func (p *Process) Shutdown() {
-	// cancel anything that can be interrupted by a shutdown (ie: healthcheck)
 	p.shutdownCancel()
-
-	p.stateMutex.Lock()
-	defer p.stateMutex.Unlock()
-	p.setState(StateStopping)
-
-	// 5 seconds to stop the process
 	p.stopCommand(5 * time.Second)
-	if err := p.setState(StateShutdown); err != nil {
-		fmt.Printf("!!! Shutdown() failed to set state to shutdown: %v", err)
-	}
-	p.setState(StateShutdown)
+	p.state = StateShutdown
 }
 
 // stopCommand will send a SIGTERM to the process and wait for it to exit.
