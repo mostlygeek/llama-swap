@@ -16,3 +16,15 @@ builds:
         goarch: arm64
       - goos: windows
         goarch: arm64
+
+# use zip format for windows
+archives:
+  - id: default
+    format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    builds_info:
+      group: root
+      owner: root
+    format_overrides:
+      - goos: windows
+        format: zip
