@@ -79,7 +79,7 @@ func New(config *Config) *ProxyManager {
 			c.Header("Access-Control-Allow-Origin", "*")
 			c.Header("Access-Control-Allow-Methods", "*")
 			c.Header("Access-Control-Allow-Headers", "*")
-			c.AbortWithStatus(204)
+			c.AbortWithStatus(http.StatusNoContent)
 			return
 		}
 		c.Next()
