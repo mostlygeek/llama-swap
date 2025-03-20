@@ -77,9 +77,9 @@ func New(config *Config) *ProxyManager {
 	pm.ginEngine.Use(func(c *gin.Context) {
 		if c.Request.Method == "OPTIONS" {
 			c.Header("Access-Control-Allow-Origin", "*")
-			c.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-			c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
-			c.AbortWithStatus(204)
+			c.Header("Access-Control-Allow-Methods", "*")
+			c.Header("Access-Control-Allow-Headers", "*")
+			c.AbortWithStatus(http.StatusNoContent)
 			return
 		}
 		c.Next()
