@@ -160,7 +160,7 @@ func (p *Process) start() error {
 
 	// Set process state to failed
 	if err != nil {
-		if curState, swapErr := p.swapState(StateStarting, StateFailed); err != nil {
+		if curState, swapErr := p.swapState(StateStarting, StateFailed); swapErr != nil {
 			return fmt.Errorf(
 				"failed to start command and state swap failed. command error: %v, current state: %v, state swap error: %v",
 				err, curState, swapErr,
