@@ -72,13 +72,26 @@ func New(config *Config) *ProxyManager {
 		})
 	}
 
-	// see: https://github.com/mostlygeek/llama-swap/issues/42
+	// see: issue: #81, #77 and #42 for CORS issues
 	// respond with permissive OPTIONS for any endpoint
 	pm.ginEngine.Use(func(c *gin.Context) {
+
+		// set this for all requests
+		c.Header("Access-Control-Allow-Origin", "*")
+
 		if c.Request.Method == "OPTIONS" {
-			c.Header("Access-Control-Allow-Origin", "*")
-			c.Header("Access-Control-Allow-Methods", "*")
-			c.Header("Access-Control-Allow-Headers", "*")
+			c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+
+			// allow whatever the client requested by default
+			if headers := c.Request.Header.Get("Access-Control-Request-Headers"); headers != "" {
+				c.Header("Access-Control-Allow-Headers", headers)
+			} else {
+				c.Header(
+					"Access-Control-Allow-Headers",
+					"Content-Type, Authorization, Accept, X-Requested-With",
+				)
+			}
+			c.Header("Access-Control-Max-Age", "86400")
 			c.AbortWithStatus(http.StatusNoContent)
 			return
 		}
