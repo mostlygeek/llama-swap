@@ -304,7 +304,9 @@ func (p *Process) stopCommand(sigtermTTL time.Duration) {
 		return
 	}
 
-	p.cmd.Process.Signal(syscall.SIGTERM)
+	if err := p.terminateProcess(); err != nil {
+		fmt.Fprintf(p.logMonitor, "!!! failed to gracefully terminate process [%s]: %v\n", p.ID, err)
+	}
 
 	select {
 	case <-sigtermTimeout.Done():
