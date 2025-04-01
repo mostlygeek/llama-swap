@@ -84,7 +84,8 @@ func New(config *Config) *ProxyManager {
 
 			// allow whatever the client requested by default
 			if headers := c.Request.Header.Get("Access-Control-Request-Headers"); headers != "" {
-				c.Header("Access-Control-Allow-Headers", headers)
+				sanitized := SanitizeAccessControlRequestHeaderValues(headers)
+				c.Header("Access-Control-Allow-Headers", sanitized)
 			} else {
 				c.Header(
 					"Access-Control-Allow-Headers",
