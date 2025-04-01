@@ -58,6 +58,11 @@ func TestSanitizeAccessControlRequestHeaderValues(t *testing.T) {
 			input:    "content-type, \x00invalid, x-requested-with",
 			expected: "content-type, x-requested-with",
 		},
+		{
+			name:     "mixed case values",
+			input:    "Content-Type, my-Valid-Header, Another-hEader",
+			expected: "Content-Type, my-Valid-Header, Another-hEader",
+		},
 	}
 
 	for _, tt := range tests {
