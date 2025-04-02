@@ -68,6 +68,11 @@ func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, logMonito
 	}
 }
 
+// LogMonitor returns the log monitor associated with the process.
+func (p *Process) LogMonitor() *LogMonitor {
+	return p.logMonitor
+}
+
 // custom error types for swapping state
 var (
 	ErrExpectedStateMismatch  = errors.New("expected state mismatch")

@@ -29,7 +29,7 @@ type ProxyManager struct {
 	config           *Config
 	currentProcesses map[string]*Process
 	proxyLogger      *LogMonitor
-	muxLogs          *LogMonitor
+	muxLogger        *LogMonitor
 	ginEngine        *gin.Engine
 }
 
@@ -40,7 +40,7 @@ func New(config *Config) *ProxyManager {
 		config:           config,
 		currentProcesses: make(map[string]*Process),
 		proxyLogger:      proxyLogger,
-		muxLogs:          stdoutLogger,
+		muxLogger:        stdoutLogger,
 		ginEngine:        gin.New(),
 	}
 
@@ -123,6 +123,8 @@ func New(config *Config) *ProxyManager {
 	pm.ginEngine.GET("/logs", pm.sendLogsHandlers)
 	pm.ginEngine.GET("/logs/stream", pm.streamLogsHandler)
 	pm.ginEngine.GET("/logs/streamSSE", pm.streamLogsHandlerSSE)
+	pm.ginEngine.GET("/logs/stream/:logMonitorID", pm.streamLogsHandler)
+	pm.ginEngine.GET("/logs/streamSSE/:logMonitorID", pm.streamLogsHandlerSSE)
 
 	pm.ginEngine.GET("/upstream", pm.upstreamIndex)
 	pm.ginEngine.Any("/upstream/:model_id/*upstreamPath", pm.proxyToUpstream)
@@ -294,7 +296,7 @@ func (pm *ProxyManager) swapModel(requestedModel string) (*Process, error) {
 			return nil, fmt.Errorf("could not find configuration for %s", realModelName)
 		}
 
-		processLogMonitor := NewLogMonitorWriter(pm.proxyLogger)
+		processLogMonitor := NewLogMonitorWriter(pm.muxLogger)
 		process := NewProcess(modelID, pm.config.HealthCheckTimeout, modelConfig, processLogMonitor)
 		processKey := ProcessKeyName(profileName, modelID)
 		pm.currentProcesses[processKey] = process
