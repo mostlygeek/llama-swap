@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,15 +28,19 @@ type ProxyManager struct {
 
 	config           *Config
 	currentProcesses map[string]*Process
-	logMonitor       *LogMonitor
+	proxyLogger      *LogMonitor
+	muxLogs          *LogMonitor
 	ginEngine        *gin.Engine
 }
 
 func New(config *Config) *ProxyManager {
+	stdoutLogger := NewLogMonitorWriter(os.Stdout)
+	proxyLogger := NewLogMonitorWriter(stdoutLogger)
 	pm := &ProxyManager{
 		config:           config,
 		currentProcesses: make(map[string]*Process),
-		logMonitor:       NewLogMonitor(),
+		proxyLogger:      proxyLogger,
+		muxLogs:          stdoutLogger,
 		ginEngine:        gin.New(),
 	}
 
@@ -58,7 +63,7 @@ func New(config *Config) *ProxyManager {
 			statusCode := c.Writer.Status()
 			bodySize := c.Writer.Size()
 
-			fmt.Fprintf(pm.logMonitor, "[llama-swap] %s [%s] \"%s %s %s\" %d %d \"%s\" %v\n",
+			fmt.Fprintf(pm.proxyLogger, "[llama-swap] %s [%s] \"%s %s %s\" %d %d \"%s\" %v\n",
 				clientIP,
 				time.Now().Format("2006-01-02 15:04:05"),
 				method,
@@ -289,7 +294,8 @@ func (pm *ProxyManager) swapModel(requestedModel string) (*Process, error) {
 			return nil, fmt.Errorf("could not find configuration for %s", realModelName)
 		}
 
-		process := NewProcess(modelID, pm.config.HealthCheckTimeout, modelConfig, pm.logMonitor)
+		processLogMonitor := NewLogMonitorWriter(pm.proxyLogger)
+		process := NewProcess(modelID, pm.config.HealthCheckTimeout, modelConfig, processLogMonitor)
 		processKey := ProcessKeyName(profileName, modelID)
 		pm.currentProcesses[processKey] = process
 	} else {
@@ -300,7 +306,7 @@ func (pm *ProxyManager) swapModel(requestedModel string) (*Process, error) {
 					return nil, fmt.Errorf("could not find configuration for %s in group %s", realModelName, profileName)
 				}
 
-				process := NewProcess(modelID, pm.config.HealthCheckTimeout, modelConfig, pm.logMonitor)
+				process := NewProcess(modelID, pm.config.HealthCheckTimeout, modelConfig, pm.proxyLogger)
 				processKey := ProcessKeyName(profileName, modelID)
 				pm.currentProcesses[processKey] = process
 			}

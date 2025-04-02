@@ -28,7 +28,7 @@ func (pm *ProxyManager) sendLogsHandlers(c *gin.Context) {
 		}
 	} else {
 		c.Header("Content-Type", "text/plain")
-		history := pm.logMonitor.GetHistory()
+		history := pm.proxyLogger.GetHistory()
 		_, err := c.Writer.Write(history)
 		if err != nil {
 			c.AbortWithError(http.StatusInternalServerError, err)
@@ -42,8 +42,8 @@ func (pm *ProxyManager) streamLogsHandler(c *gin.Context) {
 	c.Header("Transfer-Encoding", "chunked")
 	c.Header("X-Content-Type-Options", "nosniff")
 
-	ch := pm.logMonitor.Subscribe()
-	defer pm.logMonitor.Unsubscribe(ch)
+	ch := pm.proxyLogger.Subscribe()
+	defer pm.proxyLogger.Unsubscribe(ch)
 
 	notify := c.Request.Context().Done()
 	flusher, ok := c.Writer.(http.Flusher)
@@ -56,7 +56,7 @@ func (pm *ProxyManager) streamLogsHandler(c *gin.Context) {
 	// Send history first if not skipped
 
 	if !skipHistory {
-		history := pm.logMonitor.GetHistory()
+		history := pm.proxyLogger.GetHistory()
 		if len(history) != 0 {
 			c.Writer.Write(history)
 			flusher.Flush()
@@ -85,15 +85,15 @@ func (pm *ProxyManager) streamLogsHandlerSSE(c *gin.Context) {
 	c.Header("Connection", "keep-alive")
 	c.Header("X-Content-Type-Options", "nosniff")
 
-	ch := pm.logMonitor.Subscribe()
-	defer pm.logMonitor.Unsubscribe(ch)
+	ch := pm.proxyLogger.Subscribe()
+	defer pm.proxyLogger.Unsubscribe(ch)
 
 	notify := c.Request.Context().Done()
 
 	// Send history first if not skipped
 	_, skipHistory := c.GetQuery("no-history")
 	if !skipHistory {
-		history := pm.logMonitor.GetHistory()
+		history := pm.proxyLogger.GetHistory()
 		if len(history) != 0 {
 			c.SSEvent("message", string(history))
 			c.Writer.Flush()
