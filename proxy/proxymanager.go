@@ -289,15 +289,14 @@ func (pm *ProxyManager) swapModel(requestedModel string) (*Process, error) {
 
 	// stop all running models
 	pm.stopProcesses()
-
+	processLogMonitor := NewLogMonitorWriter(pm.muxLogger)
 	if profileName == "" {
 		modelConfig, modelID, found := pm.config.FindConfig(realModelName)
 		if !found {
 			return nil, fmt.Errorf("could not find configuration for %s", realModelName)
 		}
 
-		processLogMonitor := NewLogMonitorWriter(pm.muxLogger)
-		process := NewProcess(modelID, pm.config.HealthCheckTimeout, modelConfig, processLogMonitor)
+		process := NewProcess(modelID, pm.config.HealthCheckTimeout, modelConfig, processLogMonitor, pm.proxyLogger)
 		processKey := ProcessKeyName(profileName, modelID)
 		pm.currentProcesses[processKey] = process
 	} else {
@@ -308,7 +307,7 @@ func (pm *ProxyManager) swapModel(requestedModel string) (*Process, error) {
 					return nil, fmt.Errorf("could not find configuration for %s in group %s", realModelName, profileName)
 				}
 
-				process := NewProcess(modelID, pm.config.HealthCheckTimeout, modelConfig, pm.proxyLogger)
+				process := NewProcess(modelID, pm.config.HealthCheckTimeout, modelConfig, processLogMonitor, pm.proxyLogger)
 				processKey := ProcessKeyName(profileName, modelID)
 				pm.currentProcesses[processKey] = process
 			}

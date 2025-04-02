@@ -30,10 +30,12 @@ const (
 )
 
 type Process struct {
-	ID         string
-	config     ModelConfig
-	cmd        *exec.Cmd
-	logMonitor *LogMonitor
+	ID     string
+	config ModelConfig
+	cmd    *exec.Cmd
+
+	processLogger *LogMonitor
+	proxyLogger   *LogMonitor
 
 	healthCheckTimeout      int
 	healthCheckLoopInterval time.Duration
@@ -53,13 +55,14 @@ type Process struct {
 	shutdownCancel context.CancelFunc
 }
 
-func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, logMonitor *LogMonitor) *Process {
+func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor) *Process {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Process{
 		ID:                      ID,
 		config:                  config,
 		cmd:                     nil,
-		logMonitor:              logMonitor,
+		processLogger:           processLogger,
+		proxyLogger:             proxyLogger,
 		healthCheckTimeout:      healthCheckTimeout,
 		healthCheckLoopInterval: 5 * time.Second, /* default, can not be set by user - used for testing */
 		state:                   StateStopped,
@@ -70,7 +73,7 @@ func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, logMonito
 
 // LogMonitor returns the log monitor associated with the process.
 func (p *Process) LogMonitor() *LogMonitor {
-	return p.logMonitor
+	return p.processLogger
 }
 
 // custom error types for swapping state
@@ -157,8 +160,8 @@ func (p *Process) start() error {
 	defer p.waitStarting.Done()
 
 	p.cmd = exec.Command(args[0], args[1:]...)
-	p.cmd.Stdout = p.logMonitor
-	p.cmd.Stderr = p.logMonitor
+	p.cmd.Stdout = p.processLogger
+	p.cmd.Stderr = p.processLogger
 	p.cmd.Env = p.config.Env
 
 	err = p.cmd.Start()
@@ -225,9 +228,9 @@ func (p *Process) start() error {
 					if strings.Contains(err.Error(), "connection refused") {
 						endTime, _ := checkDeadline.Deadline()
 						ttl := time.Until(endTime)
-						fmt.Fprintf(p.logMonitor, "!!! Connection refused on %s, ttl %.0fs\n", healthURL, ttl.Seconds())
+						fmt.Fprintf(p.proxyLogger, "!!! Connection refused on %s, ttl %.0fs\n", healthURL, ttl.Seconds())
 					} else {
-						fmt.Fprintf(p.logMonitor, "!!! Health check error: %v\n", err)
+						fmt.Fprintf(p.proxyLogger, "!!! Health check error: %v\n", err)
 					}
 				}
 			}
@@ -251,7 +254,7 @@ func (p *Process) start() error {
 				p.inFlightRequests.Wait()
 
 				if time.Since(p.lastRequestHandled) > maxDuration {
-					fmt.Fprintf(p.logMonitor, "!!! Unloading model %s, TTL of %ds reached.\n", p.ID, p.config.UnloadAfter)
+					fmt.Fprintf(p.proxyLogger, "!!! Unloading model %s, TTL of %ds reached.\n", p.ID, p.config.UnloadAfter)
 					p.Stop()
 					return
 				}
@@ -272,7 +275,7 @@ func (p *Process) Stop() {
 
 	// calling Stop() when state is invalid is a no-op
 	if curState, err := p.swapState(StateReady, StateStopping); err != nil {
-		fmt.Fprintf(p.logMonitor, "!!! Info - Stop() Ready -> StateStopping err: %v, current state: %v\n", err, curState)
+		fmt.Fprintf(p.proxyLogger, "!!! Info - Stop() Ready -> StateStopping err: %v, current state: %v\n", err, curState)
 		return
 	}
 
@@ -280,7 +283,7 @@ func (p *Process) Stop() {
 	p.stopCommand(5 * time.Second)
 
 	if curState, err := p.swapState(StateStopping, StateStopped); err != nil {
-		fmt.Fprintf(p.logMonitor, "!!! Info - Stop() StateStopping -> StateStopped err: %v, current state: %v\n", err, curState)
+		fmt.Fprintf(p.proxyLogger, "!!! Info - Stop() StateStopping -> StateStopped err: %v, current state: %v\n", err, curState)
 	}
 }
 
@@ -305,33 +308,33 @@ func (p *Process) stopCommand(sigtermTTL time.Duration) {
 	}()
 
 	if p.cmd == nil || p.cmd.Process == nil {
-		fmt.Fprintf(p.logMonitor, "!!! process [%s] cmd or cmd.Process is nil", p.ID)
+		fmt.Fprintf(p.proxyLogger, "!!! process [%s] cmd or cmd.Process is nil", p.ID)
 		return
 	}
 
 	if err := p.terminateProcess(); err != nil {
-		fmt.Fprintf(p.logMonitor, "!!! failed to gracefully terminate process [%s]: %v\n", p.ID, err)
+		fmt.Fprintf(p.proxyLogger, "!!! failed to gracefully terminate process [%s]: %v\n", p.ID, err)
 	}
 
 	select {
 	case <-sigtermTimeout.Done():
-		fmt.Fprintf(p.logMonitor, "!!! process [%s] timed out waiting to stop, sending KILL signal\n", p.ID)
+		fmt.Fprintf(p.proxyLogger, "!!! process [%s] timed out waiting to stop, sending KILL signal\n", p.ID)
 		p.cmd.Process.Kill()
 	case err := <-sigtermNormal:
 		if err != nil {
 			if errno, ok := err.(syscall.Errno); ok {
-				fmt.Fprintf(p.logMonitor, "!!! process [%s] errno >> %v\n", p.ID, errno)
+				fmt.Fprintf(p.proxyLogger, "!!! process [%s] errno >> %v\n", p.ID, errno)
 			} else if exitError, ok := err.(*exec.ExitError); ok {
 				if strings.Contains(exitError.String(), "signal: terminated") {
-					fmt.Fprintf(p.logMonitor, "!!! process [%s] stopped OK\n", p.ID)
+					fmt.Fprintf(p.proxyLogger, "!!! process [%s] stopped OK\n", p.ID)
 				} else if strings.Contains(exitError.String(), "signal: interrupt") {
-					fmt.Fprintf(p.logMonitor, "!!! process [%s] interrupted OK\n", p.ID)
+					fmt.Fprintf(p.proxyLogger, "!!! process [%s] interrupted OK\n", p.ID)
 				} else {
-					fmt.Fprintf(p.logMonitor, "!!! process [%s] ExitError >> %v, exit code: %d\n", p.ID, exitError, exitError.ExitCode())
+					fmt.Fprintf(p.proxyLogger, "!!! process [%s] ExitError >> %v, exit code: %d\n", p.ID, exitError, exitError.ExitCode())
 				}
 
 			} else {
-				fmt.Fprintf(p.logMonitor, "!!! process [%s] exited >> %v\n", p.ID, err)
+				fmt.Fprintf(p.proxyLogger, "!!! process [%s] exited >> %v\n", p.ID, err)
 			}
 		}
 	}

@@ -138,7 +138,7 @@ func (pm *ProxyManager) getLogger(logMonitorId string) (*LogMonitor, error) {
 	if logMonitorId == "" {
 		// maintain the default
 		logger = pm.muxLogger
-	} else if logMonitorId == "_llama-swap" {
+	} else if logMonitorId == ".llama-swap" {
 		logger = pm.proxyLogger
 	} else if processLogKey != "" {
 		if process, found := pm.currentProcesses[processLogKey]; found {
