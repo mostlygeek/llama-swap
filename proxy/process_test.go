@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -13,13 +12,17 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+var (
+	discardLogger = NewLogMonitorWriter(io.Discard)
+)
+
 func TestProcess_AutomaticallyStartsUpstream(t *testing.T) {
-	logMonitor := NewLogMonitorWriter(io.Discard)
+
 	expectedMessage := "testing91931"
 	config := getTestSimpleResponderConfig(expectedMessage)
 
 	// Create a process
-	process := NewProcess("test-process", 5, config, logMonitor)
+	process := NewProcess("test-process", 5, config, discardLogger, discardLogger)
 	defer process.Stop()
 
 	req := httptest.NewRequest("GET", "/test", nil)
@@ -52,11 +55,10 @@ func TestProcess_AutomaticallyStartsUpstream(t *testing.T) {
 // are all handled successfully, even though they all may ask for the process to .start()
 func TestProcess_WaitOnMultipleStarts(t *testing.T) {
 
-	logMonitor := NewLogMonitorWriter(io.Discard)
 	expectedMessage := "testing91931"
 	config := getTestSimpleResponderConfig(expectedMessage)
 
-	process := NewProcess("test-process", 5, config, logMonitor)
+	process := NewProcess("test-process", 5, config, discardLogger, discardLogger)
 	defer process.Stop()
 
 	var wg sync.WaitGroup
@@ -84,7 +86,7 @@ func TestProcess_BrokenModelConfig(t *testing.T) {
 		CheckEndpoint: "/health",
 	}
 
-	process := NewProcess("broken", 1, config, NewLogMonitor())
+	process := NewProcess("broken", 1, config, discardLogger, discardLogger)
 
 	req := httptest.NewRequest("GET", "/", nil)
 	w := httptest.NewRecorder()
@@ -109,7 +111,7 @@ func TestProcess_UnloadAfterTTL(t *testing.T) {
 	config.UnloadAfter = 3 // seconds
 	assert.Equal(t, 3, config.UnloadAfter)
 
-	process := NewProcess("ttl_test", 2, config, NewLogMonitorWriter(io.Discard))
+	process := NewProcess("ttl_test", 2, config, discardLogger, discardLogger)
 	defer process.Stop()
 
 	// this should take 4 seconds
@@ -151,7 +153,7 @@ func TestProcess_LowTTLValue(t *testing.T) {
 	config.UnloadAfter = 1 // second
 	assert.Equal(t, 1, config.UnloadAfter)
 
-	process := NewProcess("ttl", 2, config, NewLogMonitorWriter(os.Stdout))
+	process := NewProcess("ttl", 2, config, discardLogger, discardLogger)
 	defer process.Stop()
 
 	for i := 0; i < 100; i++ {
@@ -178,7 +180,7 @@ func TestProcess_HTTPRequestsHaveTimeToFinish(t *testing.T) {
 
 	expectedMessage := "12345"
 	config := getTestSimpleResponderConfig(expectedMessage)
-	process := NewProcess("t", 10, config, NewLogMonitorWriter(os.Stdout))
+	process := NewProcess("t", 10, config, discardLogger, discardLogger)
 	defer process.Stop()
 
 	results := map[string]string{
@@ -282,7 +284,6 @@ func TestProcess_ShutdownInterruptsHealthCheck(t *testing.T) {
 		t.Skip("skipping long shutdown test")
 	}
 
-	logMonitor := NewLogMonitorWriter(io.Discard)
 	expectedMessage := "testing91931"
 
 	// make a config where the healthcheck will always fail because port is wrong
@@ -290,7 +291,7 @@ func TestProcess_ShutdownInterruptsHealthCheck(t *testing.T) {
 	config.Proxy = "http://localhost:9998/test"
 
 	healthCheckTTLSeconds := 30
-	process := NewProcess("test-process", healthCheckTTLSeconds, config, logMonitor)
+	process := NewProcess("test-process", healthCheckTTLSeconds, config, discardLogger, discardLogger)
 
 	// make it a lot faster
 	process.healthCheckLoopInterval = time.Second
