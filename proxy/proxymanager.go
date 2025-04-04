@@ -75,11 +75,8 @@ func New(config *Config) *ProxyManager {
 	// see: issue: #81, #77 and #42 for CORS issues
 	// respond with permissive OPTIONS for any endpoint
 	pm.ginEngine.Use(func(c *gin.Context) {
-
-		// set this for all requests
-		c.Header("Access-Control-Allow-Origin", "*")
-
 		if c.Request.Method == "OPTIONS" {
+			c.Header("Access-Control-Allow-Origin", "*")
 			c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 
 			// allow whatever the client requested by default
