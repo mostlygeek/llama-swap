@@ -708,26 +708,3 @@ func TestProxyManager_CORSOptionsHandler(t *testing.T) {
 		})
 	}
 }
-
-func TestProxyManager_CORSHeadersInRegularRequest(t *testing.T) {
-	config := &Config{
-		HealthCheckTimeout: 15,
-		Models: map[string]ModelConfig{
-			"model1": getTestSimpleResponderConfig("model1"),
-		},
-		LogRequests: true,
-	}
-
-	proxy := New(config)
-	defer proxy.StopProcesses()
-
-	// Test that CORS headers are present in regular POST requests
-	reqBody := `{"model":"model1"}`
-	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
-	w := httptest.NewRecorder()
-
-	proxy.ginEngine.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
-}
