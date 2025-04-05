@@ -93,10 +93,12 @@ func (p *Process) swapState(expectedState, newState ProcessState) (ProcessState,
 	}
 
 	if !isValidTransition(p.state, newState) {
+		p.proxyLogger.Warnf("Invalid state transition from %s to %s", p.state, newState)
 		return p.state, ErrInvalidStateTransition
 	}
 
 	p.state = newState
+	p.proxyLogger.Debugf("State transition from %s to %s", expectedState, newState)
 	return p.state, nil
 }
 
