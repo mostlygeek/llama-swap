@@ -12,30 +12,63 @@
             flex-direction: column;
             font-family: "Courier New", Courier, monospace;
         }
-        #log-controls {
-            margin: 0.5em;
+        .log-container {
             display: flex;
-            align-items: center;
-            justify-content: space-between; /* Spaces out elements evenly */
-        }
-        #log-controls input {
             flex: 1;
-        }
-        #log-controls input:focus {
-           outline: none; /* Ensures no outline is shown when the input is focused */
-        }
-        #log-stream {
-            flex: 1;
+            gap: 0.5em;
             margin: 0.5em;
+            min-height: 0;
+        }
+        .log-column {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            min-width: 0;
+            transition: flex 0.3s ease;
+        }
+        .log-column.minimized {
+            flex: 0.1;
+            max-width: 50px;
+            border: 1px solid #777;
+            color: green;
+        }
+        .log-controls {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 0.5em;
+            margin-bottom: 0.5em;
+        }
+        .log-controls input {
+            width: 100%;
+            padding: 4px;
+        }
+        .log-controls input:focus {
+           outline: none;
+        }
+        .log-stream {
+            flex: 1;
             padding: 1em;
             background: #f4f4f4;
             overflow-y: auto;
-            white-space: pre-wrap; /* Ensures line wrapping */
-            word-wrap: break-word; /* Ensures long words wrap */
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            min-height: 0;
         }
 
         .regex-error {
             background-color: #ff0000 !important;
+        }
+
+        /* Make headers clickable and show pointer cursor */
+        h2 {
+            cursor: pointer;
+            user-select: none;
+            margin: 0 0 0.5em 0;
+            padding: 0.5em;
+        }
+
+        h2:hover {
+            background-color: rgba(0, 0, 0, 0.05);
         }
 
         /* Dark mode styles */
@@ -45,101 +78,181 @@
                 color: #fff;
             }
 
-            #log-stream {
+            .log-stream {
                 background: #444;
                 color: #fff;
             }
 
-            #log-controls input {
+            .log-controls input {
                 background: #555;
                 color: #fff;
                 border: 1px solid #777;
             }
 
-            #log-controls button {
+            .log-controls button {
                 background: #555;
                 color: #fff;
                 border: 1px solid #777;
             }
+
+            h2:hover {
+                background-color: rgba(255, 255, 255, 0.1);
+            }
+        }
+
+        /* Hide content when minimized */
+        .log-column.minimized .log-controls,
+        .log-column.minimized .log-stream {
+            display: none;
+        }
+
+        .log-column.minimized h2 {
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+            transform: rotate(180deg);
+            white-space: nowrap;
+            margin: auto;
         }
     </style>
 </head>
 <body>
-    <pre id="log-stream">Waiting for logs...</pre>
-    <div id="log-controls">
-        <input type="text" id="filter-input" placeholder="regex filter">
-        <button id="clear-button">clear</button>
+    <div class="log-container">
+        <div class="log-column">
+            <h2>Proxy Logs</h2>
+            <div class="log-controls">
+                <input type="text" id="proxy-filter-input" placeholder="proxy regex filter">
+                <button id="proxy-clear-button">clear</button>
+            </div>
+            <pre class="log-stream" id="proxy-log-stream">Waiting for proxy logs...</pre>
+        </div>
+        <div class="log-column minimized">
+            <h2>Upstream Logs</h2>
+            <div class="log-controls">
+                <input type="text" id="upstream-filter-input" placeholder="upstream regex filter">
+                <button id="upstream-clear-button">clear</button>
+            </div>
+            <pre class="log-stream" id="upstream-log-stream">Waiting for upstream logs...</pre>
+        </div>
     </div>
     <script>
-        const logStream = document.getElementById('log-stream');
-        const filterInput = document.getElementById('filter-input');
-        var logData = "";
-        let regexFilter = null;
+        class LogStream {
+            constructor(streamElement, filterInput, clearButton, endpoint) {
+                this.streamElement = streamElement;
+                this.filterInput = filterInput;
+                this.clearButton = clearButton;
+                this.endpoint = endpoint;
+                this.logData = "";
+                this.regexFilter = null;
+                this.eventSource = null;
 
-        function setupEventSource() {
-            if (typeof(EventSource) !== "undefined") {
-                const eventSource = new EventSource("/logs/streamSSE");
-
-                eventSource.onmessage = function(event) {
-                    logData += event.data;
-                    render()
-                };
-
-                eventSource.onerror = function(err) {
-                    logData = "EventSource failed: " + err.message;
-                };
-            } else {
-                logData = "SSE Not supported by this browser."
+                this.initialize();
             }
-        }
 
-        // poor-ai's react  ¯\_(ツ)_/¯
-        function render() {
-            if (regexFilter) {
-                const lines = logData.split('\n');
-                const filteredLines = lines.filter(line => {
-                    return regexFilter === null || regexFilter.test(line);
+            initialize() {
+                this.filterInput.addEventListener('input', () => this.updateFilter());
+                this.clearButton.addEventListener('click', () => {
+                    this.filterInput.value = "";
+                    this.regexFilter = null;
+                    this.render();
                 });
-
-                if (filteredLines.length > 0) {
-                    logStream.textContent = filteredLines.join('\n') + '\n';
-                } else {
-                    logStream.textContent = "";
-                }
-            } else {
-                logStream.textContent = logData;
+                this.setupEventSource();
             }
 
-            logStream.scrollTop = logStream.scrollHeight;
-        }
+            setupEventSource() {
+                if (typeof(EventSource) === "undefined") {
+                    this.logData = "SSE Not supported by this browser.";
+                    this.render();
+                    return;
+                }
 
-        function updateFilter() {
-            const pattern = filterInput.value.trim();
-            filterInput.classList.remove('regex-error');
-            if (pattern) {
+                const connect = () => {
+                    this.eventSource = new EventSource(this.endpoint);
+
+                    this.eventSource.onmessage = (event) => {
+                        this.logData += event.data;
+                        this.render();
+                    };
+
+                    this.eventSource.onerror = (err) => {
+                        // Close the current connection
+                        this.eventSource.close();
+
+                        this.logData += "\nConnection lost. Retrying in 5 seconds...\n";
+                        this.render();
+
+                        // Attempt to reconnect after 5 seconds
+                        setTimeout(() => {
+                            this.logData += "Attempting to reconnect...\n";
+                            this.render();
+                            connect();
+                        }, 5000);
+                    };
+                };
+
+                // Initial connection
+                connect();
+            }
+
+            render() {
+                let content = this.logData;
+
+                if (this.regexFilter) {
+                    const lines = content.split('\n');
+                    const filteredLines = lines.filter(line => this.regexFilter.test(line));
+                    content = filteredLines.length > 0 ? filteredLines.join('\n') + '\n' : "";
+                }
+
+                this.streamElement.textContent = content;
+                this.streamElement.scrollTop = this.streamElement.scrollHeight;
+            }
+
+            updateFilter() {
+                const pattern = this.filterInput.value.trim();
+                this.filterInput.classList.remove('regex-error');
+
+                if (!pattern) {
+                    this.regexFilter = null;
+                    this.render();
+                    return;
+                }
+
                 try {
-                    regexFilter = new RegExp(pattern);
+                    this.regexFilter = new RegExp(pattern);
                 } catch (e) {
                     console.error("Invalid regex pattern:", e);
-                    regexFilter = null;
-                    filterInput.classList.add('regex-error');
-                    return
+                    this.regexFilter = null;
+                    this.filterInput.classList.add('regex-error');
+                    return;
                 }
-            } else {
-                regexFilter = null;
-            }
 
-            render();
+                this.render();
+            }
         }
 
-        filterInput.addEventListener('input', updateFilter);
-        document.getElementById('clear-button').addEventListener('click', () => {
-            filterInput.value = "";
-            regexFilter = null;
-            render();
+        // Initialize both log streams
+        document.addEventListener('DOMContentLoaded', () => {
+            new LogStream(
+                document.getElementById('proxy-log-stream'),
+                document.getElementById('proxy-filter-input'),
+                document.getElementById('proxy-clear-button'),
+                "/logs/streamSSE/proxy"
+            );
+
+            new LogStream(
+                document.getElementById('upstream-log-stream'),
+                document.getElementById('upstream-filter-input'),
+                document.getElementById('upstream-clear-button'),
+                "/logs/streamSSE/upstream"
+            );
+
+            // Initialize clickable headers
+            document.querySelectorAll('h2').forEach(header => {
+                header.addEventListener('click', () => {
+                    const column = header.closest('.log-column');
+                    column.classList.toggle('minimized');
+                });
+            });
         });
-        setupEventSource();
-        updateFilter();
     </script>
 </body>
 </html>
