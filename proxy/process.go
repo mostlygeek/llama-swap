@@ -30,10 +30,12 @@ const (
 )
 
 type Process struct {
-	ID         string
-	config     ModelConfig
-	cmd        *exec.Cmd
-	logMonitor *LogMonitor
+	ID     string
+	config ModelConfig
+	cmd    *exec.Cmd
+
+	processLogger *LogMonitor
+	proxyLogger   *LogMonitor
 
 	healthCheckTimeout      int
 	healthCheckLoopInterval time.Duration
@@ -53,19 +55,25 @@ type Process struct {
 	shutdownCancel context.CancelFunc
 }
 
-func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, logMonitor *LogMonitor) *Process {
+func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor) *Process {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Process{
 		ID:                      ID,
 		config:                  config,
 		cmd:                     nil,
-		logMonitor:              logMonitor,
+		processLogger:           processLogger,
+		proxyLogger:             proxyLogger,
 		healthCheckTimeout:      healthCheckTimeout,
 		healthCheckLoopInterval: 5 * time.Second, /* default, can not be set by user - used for testing */
 		state:                   StateStopped,
 		shutdownCtx:             ctx,
 		shutdownCancel:          cancel,
 	}
+}
+
+// LogMonitor returns the log monitor associated with the process.
+func (p *Process) LogMonitor() *LogMonitor {
+	return p.processLogger
 }
 
 // custom error types for swapping state
@@ -85,9 +93,11 @@ func (p *Process) swapState(expectedState, newState ProcessState) (ProcessState,
 	}
 
 	if !isValidTransition(p.state, newState) {
+		p.proxyLogger.Warnf("Invalid state transition from %s to %s", p.state, newState)
 		return p.state, ErrInvalidStateTransition
 	}
 
+	p.proxyLogger.Debugf("State transition from %s to %s", expectedState, newState)
 	p.state = newState
 	return p.state, nil
 }
@@ -152,8 +162,8 @@ func (p *Process) start() error {
 	defer p.waitStarting.Done()
 
 	p.cmd = exec.Command(args[0], args[1:]...)
-	p.cmd.Stdout = p.logMonitor
-	p.cmd.Stderr = p.logMonitor
+	p.cmd.Stdout = p.processLogger
+	p.cmd.Stderr = p.processLogger
 	p.cmd.Env = p.config.Env
 
 	err = p.cmd.Start()
@@ -214,15 +224,16 @@ func (p *Process) start() error {
 				return errors.New("health check interrupted due to shutdown")
 			default:
 				if err := p.checkHealthEndpoint(healthURL); err == nil {
+					p.proxyLogger.Infof("Health check passed on %s", healthURL)
 					cancelHealthCheck()
 					break loop
 				} else {
 					if strings.Contains(err.Error(), "connection refused") {
 						endTime, _ := checkDeadline.Deadline()
 						ttl := time.Until(endTime)
-						fmt.Fprintf(p.logMonitor, "!!! Connection refused on %s, ttl %.0fs\n", healthURL, ttl.Seconds())
+						p.proxyLogger.Infof("Connection refused on %s, retrying in %.0fs", healthURL, ttl.Seconds())
 					} else {
-						fmt.Fprintf(p.logMonitor, "!!! Health check error: %v\n", err)
+						p.proxyLogger.Infof("Health check error on %s, %v", healthURL, err)
 					}
 				}
 			}
@@ -246,7 +257,8 @@ func (p *Process) start() error {
 				p.inFlightRequests.Wait()
 
 				if time.Since(p.lastRequestHandled) > maxDuration {
-					fmt.Fprintf(p.logMonitor, "!!! Unloading model %s, TTL of %ds reached.\n", p.ID, p.config.UnloadAfter)
+
+					p.proxyLogger.Infof("Unloading model %s, TTL of %ds reached.", p.ID, p.config.UnloadAfter)
 					p.Stop()
 					return
 				}
@@ -267,7 +279,7 @@ func (p *Process) Stop() {
 
 	// calling Stop() when state is invalid is a no-op
 	if curState, err := p.swapState(StateReady, StateStopping); err != nil {
-		fmt.Fprintf(p.logMonitor, "!!! Info - Stop() Ready -> StateStopping err: %v, current state: %v\n", err, curState)
+		p.proxyLogger.Infof("Stop() Ready -> StateStopping err: %v, current state: %v", err, curState)
 		return
 	}
 
@@ -275,7 +287,7 @@ func (p *Process) Stop() {
 	p.stopCommand(5 * time.Second)
 
 	if curState, err := p.swapState(StateStopping, StateStopped); err != nil {
-		fmt.Fprintf(p.logMonitor, "!!! Info - Stop() StateStopping -> StateStopped err: %v, current state: %v\n", err, curState)
+		p.proxyLogger.Infof("Stop() StateStopping -> StateStopped err: %v, current state: %v", err, curState)
 	}
 }
 
@@ -300,33 +312,32 @@ func (p *Process) stopCommand(sigtermTTL time.Duration) {
 	}()
 
 	if p.cmd == nil || p.cmd.Process == nil {
-		fmt.Fprintf(p.logMonitor, "!!! process [%s] cmd or cmd.Process is nil", p.ID)
+		p.proxyLogger.Warnf("Process [%s] cmd or cmd.Process is nil", p.ID)
 		return
 	}
 
 	if err := p.terminateProcess(); err != nil {
-		fmt.Fprintf(p.logMonitor, "!!! failed to gracefully terminate process [%s]: %v\n", p.ID, err)
+		p.proxyLogger.Infof("Failed to gracefully terminate process [%s]: %v", p.ID, err)
 	}
 
 	select {
 	case <-sigtermTimeout.Done():
-		fmt.Fprintf(p.logMonitor, "!!! process [%s] timed out waiting to stop, sending KILL signal\n", p.ID)
+		p.proxyLogger.Infof("Process [%s] timed out waiting to stop, sending KILL signal", p.ID)
 		p.cmd.Process.Kill()
 	case err := <-sigtermNormal:
 		if err != nil {
 			if errno, ok := err.(syscall.Errno); ok {
-				fmt.Fprintf(p.logMonitor, "!!! process [%s] errno >> %v\n", p.ID, errno)
+				p.proxyLogger.Errorf("Process [%s] errno >> %v", p.ID, errno)
 			} else if exitError, ok := err.(*exec.ExitError); ok {
 				if strings.Contains(exitError.String(), "signal: terminated") {
-					fmt.Fprintf(p.logMonitor, "!!! process [%s] stopped OK\n", p.ID)
+					p.proxyLogger.Infof("Process [%s] stopped OK", p.ID)
 				} else if strings.Contains(exitError.String(), "signal: interrupt") {
-					fmt.Fprintf(p.logMonitor, "!!! process [%s] interrupted OK\n", p.ID)
+					p.proxyLogger.Infof("Process [%s] interrupted OK", p.ID)
 				} else {
-					fmt.Fprintf(p.logMonitor, "!!! process [%s] ExitError >> %v, exit code: %d\n", p.ID, exitError, exitError.ExitCode())
+					p.proxyLogger.Warnf("Process [%s] ExitError >> %v, exit code: %d", p.ID, exitError, exitError.ExitCode())
 				}
-
 			} else {
-				fmt.Fprintf(p.logMonitor, "!!! process [%s] exited >> %v\n", p.ID, err)
+				p.proxyLogger.Errorf("Process [%s] exited >> %v", p.ID, err)
 			}
 		}
 	}

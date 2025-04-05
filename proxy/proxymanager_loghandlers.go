@@ -9,7 +9,6 @@ import (
 )
 
 func (pm *ProxyManager) sendLogsHandlers(c *gin.Context) {
-
 	accept := c.GetHeader("Accept")
 	if strings.Contains(accept, "text/html") {
 		// Set the Content-Type header to text/html
@@ -28,7 +27,7 @@ func (pm *ProxyManager) sendLogsHandlers(c *gin.Context) {
 		}
 	} else {
 		c.Header("Content-Type", "text/plain")
-		history := pm.logMonitor.GetHistory()
+		history := pm.muxLogger.GetHistory()
 		_, err := c.Writer.Write(history)
 		if err != nil {
 			c.AbortWithError(http.StatusInternalServerError, err)
@@ -42,8 +41,14 @@ func (pm *ProxyManager) streamLogsHandler(c *gin.Context) {
 	c.Header("Transfer-Encoding", "chunked")
 	c.Header("X-Content-Type-Options", "nosniff")
 
-	ch := pm.logMonitor.Subscribe()
-	defer pm.logMonitor.Unsubscribe(ch)
+	logMonitorId := c.Param("logMonitorID")
+	logger, err := pm.getLogger(logMonitorId)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	ch := logger.Subscribe()
+	defer logger.Unsubscribe(ch)
 
 	notify := c.Request.Context().Done()
 	flusher, ok := c.Writer.(http.Flusher)
@@ -56,7 +61,7 @@ func (pm *ProxyManager) streamLogsHandler(c *gin.Context) {
 	// Send history first if not skipped
 
 	if !skipHistory {
-		history := pm.logMonitor.GetHistory()
+		history := logger.GetHistory()
 		if len(history) != 0 {
 			c.Writer.Write(history)
 			flusher.Flush()
@@ -85,15 +90,21 @@ func (pm *ProxyManager) streamLogsHandlerSSE(c *gin.Context) {
 	c.Header("Connection", "keep-alive")
 	c.Header("X-Content-Type-Options", "nosniff")
 
-	ch := pm.logMonitor.Subscribe()
-	defer pm.logMonitor.Unsubscribe(ch)
+	logMonitorId := c.Param("logMonitorID")
+	logger, err := pm.getLogger(logMonitorId)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	ch := logger.Subscribe()
+	defer logger.Unsubscribe(ch)
 
 	notify := c.Request.Context().Done()
 
 	// Send history first if not skipped
 	_, skipHistory := c.GetQuery("no-history")
 	if !skipHistory {
-		history := pm.logMonitor.GetHistory()
+		history := logger.GetHistory()
 		if len(history) != 0 {
 			c.SSEvent("message", string(history))
 			c.Writer.Flush()
@@ -110,4 +121,22 @@ func (pm *ProxyManager) streamLogsHandlerSSE(c *gin.Context) {
 			return
 		}
 	}
+}
+
+// getLogger searches for the appropriate logger based on the logMonitorId
+func (pm *ProxyManager) getLogger(logMonitorId string) (*LogMonitor, error) {
+	var logger *LogMonitor
+
+	if logMonitorId == "" {
+		// maintain the default
+		logger = pm.muxLogger
+	} else if logMonitorId == "proxy" {
+		logger = pm.proxyLogger
+	} else if logMonitorId == "upstream" {
+		logger = pm.upstreamLogger
+	} else {
+		return nil, fmt.Errorf("invalid logger. Use 'proxy' or 'upstream'")
+	}
+
+	return logger, nil
 }

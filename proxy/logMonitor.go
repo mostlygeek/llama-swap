@@ -2,9 +2,19 @@ package proxy
 
 import (
 	"container/ring"
+	"fmt"
 	"io"
 	"os"
 	"sync"
+)
+
+type LogLevel int
+
+const (
+	LevelDebug LogLevel = iota
+	LevelInfo
+	LevelWarn
+	LevelError
 )
 
 type LogMonitor struct {
@@ -15,6 +25,10 @@ type LogMonitor struct {
 
 	// typically this can be os.Stdout
 	stdout io.Writer
+
+	// logging levels
+	level  LogLevel
+	prefix string
 }
 
 func NewLogMonitor() *LogMonitor {
@@ -26,6 +40,8 @@ func NewLogMonitorWriter(stdout io.Writer) *LogMonitor {
 		clients: make(map[chan []byte]bool),
 		buffer:  ring.New(10 * 1024), // keep 10KB of buffered logs
 		stdout:  stdout,
+		level:   LevelInfo,
+		prefix:  "",
 	}
 }
 
@@ -92,5 +108,79 @@ func (w *LogMonitor) broadcast(msg []byte) {
 		default:
 			// If client buffer is full, skip
 		}
+	}
+}
+
+func (w *LogMonitor) SetPrefix(prefix string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.prefix = prefix
+}
+
+func (w *LogMonitor) SetLogLevel(level LogLevel) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.level = level
+}
+
+func (w *LogMonitor) formatMessage(level string, msg string) []byte {
+	prefix := ""
+	if w.prefix != "" {
+		prefix = fmt.Sprintf("[%s] ", w.prefix)
+	}
+	return []byte(fmt.Sprintf("%s[%s] %s\n", prefix, level, msg))
+}
+
+func (w *LogMonitor) log(level LogLevel, msg string) {
+	if level < w.level {
+		return
+	}
+	w.Write(w.formatMessage(level.String(), msg))
+}
+
+func (w *LogMonitor) Debug(msg string) {
+	w.log(LevelDebug, msg)
+}
+
+func (w *LogMonitor) Info(msg string) {
+	w.log(LevelInfo, msg)
+}
+
+func (w *LogMonitor) Warn(msg string) {
+	w.log(LevelWarn, msg)
+}
+
+func (w *LogMonitor) Error(msg string) {
+	w.log(LevelError, msg)
+}
+
+func (w *LogMonitor) Debugf(format string, args ...interface{}) {
+	w.log(LevelDebug, fmt.Sprintf(format, args...))
+}
+
+func (w *LogMonitor) Infof(format string, args ...interface{}) {
+	w.log(LevelInfo, fmt.Sprintf(format, args...))
+}
+
+func (w *LogMonitor) Warnf(format string, args ...interface{}) {
+	w.log(LevelWarn, fmt.Sprintf(format, args...))
+}
+
+func (w *LogMonitor) Errorf(format string, args ...interface{}) {
+	w.log(LevelError, fmt.Sprintf(format, args...))
+}
+
+func (l LogLevel) String() string {
+	switch l {
+	case LevelDebug:
+		return "DEBUG"
+	case LevelInfo:
+		return "INFO"
+	case LevelWarn:
+		return "WARN"
+	case LevelError:
+		return "ERROR"
+	default:
+		return "UNKNOWN"
 	}
 }
