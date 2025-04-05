@@ -1,9 +1,9 @@
 # Seconds to wait for llama.cpp to be available to serve requests
 # Default (and minimum): 15 seconds
-healthCheckTimeout: 15
+healthCheckTimeout: 90
 
-# Log HTTP requests helpful for troubleshoot, defaults to False
-logRequests: true
+# valid log levels: debug, info (default), warn, error
+logLevel: info
 
 models:
   "llama":

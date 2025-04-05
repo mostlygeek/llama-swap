@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,50 +28,76 @@ type ProxyManager struct {
 
 	config           *Config
 	currentProcesses map[string]*Process
-	logMonitor       *LogMonitor
 	ginEngine        *gin.Engine
+
+	// logging
+	proxyLogger    *LogMonitor
+	upstreamLogger *LogMonitor
+	muxLogger      *LogMonitor
 }
 
 func New(config *Config) *ProxyManager {
+	// set up loggers
+	stdoutLogger := NewLogMonitorWriter(os.Stdout)
+	upstreamLogger := NewLogMonitorWriter(stdoutLogger)
+	proxyLogger := NewLogMonitorWriter(stdoutLogger)
+
+	if config.LogRequests {
+		proxyLogger.Warn("LogRequests configuration is deprecated. Use logLevel instead.")
+	}
+
+	switch strings.ToLower(strings.TrimSpace(config.LogLevel)) {
+	case "debug":
+		proxyLogger.SetLogLevel(LevelDebug)
+	case "info":
+		proxyLogger.SetLogLevel(LevelInfo)
+	case "warn":
+		proxyLogger.SetLogLevel(LevelWarn)
+	case "error":
+		proxyLogger.SetLogLevel(LevelError)
+	default:
+		proxyLogger.SetLogLevel(LevelInfo)
+	}
+
 	pm := &ProxyManager{
 		config:           config,
 		currentProcesses: make(map[string]*Process),
-		logMonitor:       NewLogMonitor(),
 		ginEngine:        gin.New(),
+
+		proxyLogger:    proxyLogger,
+		muxLogger:      stdoutLogger,
+		upstreamLogger: upstreamLogger,
 	}
 
-	if config.LogRequests {
-		pm.ginEngine.Use(func(c *gin.Context) {
-			// Start timer
-			start := time.Now()
+	pm.ginEngine.Use(func(c *gin.Context) {
+		// Start timer
+		start := time.Now()
 
-			// capture these because /upstream/:model rewrites them in c.Next()
-			clientIP := c.ClientIP()
-			method := c.Request.Method
-			path := c.Request.URL.Path
+		// capture these because /upstream/:model rewrites them in c.Next()
+		clientIP := c.ClientIP()
+		method := c.Request.Method
+		path := c.Request.URL.Path
 
-			// Process request
-			c.Next()
+		// Process request
+		c.Next()
 
-			// Stop timer
-			duration := time.Since(start)
+		// Stop timer
+		duration := time.Since(start)
 
-			statusCode := c.Writer.Status()
-			bodySize := c.Writer.Size()
+		statusCode := c.Writer.Status()
+		bodySize := c.Writer.Size()
 
-			fmt.Fprintf(pm.logMonitor, "[llama-swap] %s [%s] \"%s %s %s\" %d %d \"%s\" %v\n",
-				clientIP,
-				time.Now().Format("2006-01-02 15:04:05"),
-				method,
-				path,
-				c.Request.Proto,
-				statusCode,
-				bodySize,
-				c.Request.UserAgent(),
-				duration,
-			)
-		})
-	}
+		pm.proxyLogger.Infof("Request %s \"%s %s %s\" %d %d \"%s\" %v",
+			clientIP,
+			method,
+			path,
+			c.Request.Proto,
+			statusCode,
+			bodySize,
+			c.Request.UserAgent(),
+			duration,
+		)
+	})
 
 	// see: issue: #81, #77 and #42 for CORS issues
 	// respond with permissive OPTIONS for any endpoint
@@ -115,6 +142,8 @@ func New(config *Config) *ProxyManager {
 	pm.ginEngine.GET("/logs", pm.sendLogsHandlers)
 	pm.ginEngine.GET("/logs/stream", pm.streamLogsHandler)
 	pm.ginEngine.GET("/logs/streamSSE", pm.streamLogsHandlerSSE)
+	pm.ginEngine.GET("/logs/stream/:logMonitorID", pm.streamLogsHandler)
+	pm.ginEngine.GET("/logs/streamSSE/:logMonitorID", pm.streamLogsHandlerSSE)
 
 	pm.ginEngine.GET("/upstream", pm.upstreamIndex)
 	pm.ginEngine.Any("/upstream/:model_id/*upstreamPath", pm.proxyToUpstream)
@@ -274,19 +303,20 @@ func (pm *ProxyManager) swapModel(requestedModel string) (*Process, error) {
 	requestedProcessKey := ProcessKeyName(profileName, realModelName)
 
 	if process, found := pm.currentProcesses[requestedProcessKey]; found {
+		pm.proxyLogger.Debugf("No-swap, using existing process for model [%s]", requestedModel)
 		return process, nil
 	}
 
 	// stop all running models
+	pm.proxyLogger.Infof("Swapping model to [%s]", requestedModel)
 	pm.stopProcesses()
-
 	if profileName == "" {
 		modelConfig, modelID, found := pm.config.FindConfig(realModelName)
 		if !found {
 			return nil, fmt.Errorf("could not find configuration for %s", realModelName)
 		}
 
-		process := NewProcess(modelID, pm.config.HealthCheckTimeout, modelConfig, pm.logMonitor)
+		process := NewProcess(modelID, pm.config.HealthCheckTimeout, modelConfig, pm.upstreamLogger, pm.proxyLogger)
 		processKey := ProcessKeyName(profileName, modelID)
 		pm.currentProcesses[processKey] = process
 	} else {
@@ -297,7 +327,7 @@ func (pm *ProxyManager) swapModel(requestedModel string) (*Process, error) {
 					return nil, fmt.Errorf("could not find configuration for %s in group %s", realModelName, profileName)
 				}
 
-				process := NewProcess(modelID, pm.config.HealthCheckTimeout, modelConfig, pm.logMonitor)
+				process := NewProcess(modelID, pm.config.HealthCheckTimeout, modelConfig, pm.upstreamLogger, pm.proxyLogger)
 				processKey := ProcessKeyName(profileName, modelID)
 				pm.currentProcesses[processKey] = process
 			}
@@ -385,7 +415,6 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 				return
 			}
 		}
-
 	}
 
 	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
