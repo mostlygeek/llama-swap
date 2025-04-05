@@ -257,9 +257,8 @@ func TestProcess_SwapState(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			p := &Process{
-				state: test.currentState,
-			}
+			p := NewProcess("test", 10, getTestSimpleResponderConfig("test"), discardLogger, discardLogger)
+			p.state = test.currentState
 
 			resultState, err := p.swapState(test.expectedState, test.newState)
 			if err != nil && test.expectedError == nil {

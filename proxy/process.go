@@ -97,8 +97,8 @@ func (p *Process) swapState(expectedState, newState ProcessState) (ProcessState,
 		return p.state, ErrInvalidStateTransition
 	}
 
-	p.state = newState
 	p.proxyLogger.Debugf("State transition from %s to %s", expectedState, newState)
+	p.state = newState
 	return p.state, nil
 }
 
