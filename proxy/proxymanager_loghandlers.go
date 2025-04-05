@@ -127,27 +127,15 @@ func (pm *ProxyManager) streamLogsHandlerSSE(c *gin.Context) {
 func (pm *ProxyManager) getLogger(logMonitorId string) (*LogMonitor, error) {
 	var logger *LogMonitor
 
-	// search for a specific model name if it is loaded
-	var processLogKey string
-	profileName, modelName := splitRequestedModel(logMonitorId)
-	realModelName, modelFound := pm.config.RealModelName(modelName)
-	if modelFound {
-		processLogKey = ProcessKeyName(profileName, realModelName)
-	}
-
 	if logMonitorId == "" {
 		// maintain the default
 		logger = pm.muxLogger
-	} else if logMonitorId == ".llama-swap" {
+	} else if logMonitorId == "proxy" {
 		logger = pm.proxyLogger
-	} else if processLogKey != "" {
-		if process, found := pm.currentProcesses[processLogKey]; found {
-			logger = process.LogMonitor()
-		} else {
-			return nil, fmt.Errorf("can not find logger for model because it is not currently loaded: %s", logMonitorId)
-		}
+	} else if logMonitorId == "upstream" {
+		logger = pm.upstreamLogger
 	} else {
-		return nil, fmt.Errorf("invalid configuration ID: %s", logMonitorId)
+		return nil, fmt.Errorf("invalid logger. Use 'proxy' or 'upstream'")
 	}
 
 	return logger, nil

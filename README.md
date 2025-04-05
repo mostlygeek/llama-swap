@@ -3,8 +3,6 @@
 ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/mostlygeek/llama-swap/go-ci.yml)
 ![GitHub Repo stars](https://img.shields.io/github/stars/mostlygeek/llama-swap)
 
-
-
 # llama-swap
 
 llama-swap is a light weight, transparent proxy server that provides automatic model swapping to llama.cpp's server.
@@ -69,8 +67,8 @@ models:
 # Default (and minimum) is 15 seconds
 healthCheckTimeout: 60
 
-# Write HTTP logs (useful for troubleshooting), defaults to false
-logRequests: true
+# Valid log levels: debug, info (default), warn, error
+logLevel: info
 
 # define valid model values and the upstream server start
 models:
@@ -221,8 +219,14 @@ Of course, CLI access is also supported:
 # sends up to the last 10KB of logs
 curl http://host/logs'
 
-# streams logs
+# streams combined logs
 curl -Ns 'http://host/logs/stream'
+
+# just llama-swap's logs
+curl -Ns 'http://host/logs/stream/proxy'
+
+# just upstream's logs
+curl -Ns 'http://host/logs/stream/upstream'
 
 # stream and filter logs with linux pipes
 curl -Ns http://host/logs/stream | grep 'eval time'
