@@ -1,0 +1,28 @@
+# this makes use of llama-swap's profile feature to
+# keep the architect and editor models in VRAM on different GPUs
+
+- name: "openai/aider:QwQ"
+  edit_format: diff
+  extra_params:
+    max_tokens: 16384
+    top_p: 0.95
+    top_k: 40
+    presence_penalty: 0.1
+    repetition_penalty: 1
+    num_ctx: 16384
+  use_temperature: 0.6
+  reasoning_tag: think
+  weak_model_name: "openai/aider:qwen-coder-32B"
+  editor_model_name: "openai/aider:qwen-coder-32B"
+
+- name: "openai/aider:qwen-coder-32B"
+  edit_format: diff
+  extra_params:
+    max_tokens: 16384
+    top_p: 0.8
+    top_k: 20
+    repetition_penalty: 1.05
+  use_temperature: 0.6
+  reasoning_tag: think
+  editor_edit_format: editor-diff
+  editor_model_name: "openai/aider:qwen-coder-32B"
