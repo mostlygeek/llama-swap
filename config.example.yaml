@@ -3,7 +3,7 @@
 healthCheckTimeout: 90
 
 # valid log levels: debug, info (default), warn, error
-logLevel: info
+logLevel: debug
 
 models:
   "llama":
