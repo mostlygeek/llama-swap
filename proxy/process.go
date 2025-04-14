@@ -303,6 +303,11 @@ func (p *Process) Shutdown() {
 // stopCommand will send a SIGTERM to the process and wait for it to exit.
 // If it does not exit within 5 seconds, it will send a SIGKILL.
 func (p *Process) stopCommand(sigtermTTL time.Duration) {
+	stopStartTime := time.Now()
+	defer func() {
+		p.proxyLogger.Debugf("Process [%s] stopCommand took %v", p.ID, time.Since(stopStartTime))
+	}()
+
 	sigtermTimeout, cancelTimeout := context.WithTimeout(context.Background(), sigtermTTL)
 	defer cancelTimeout()
 
@@ -369,6 +374,8 @@ func (p *Process) checkHealthEndpoint(healthURL string) error {
 }
 
 func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
+	requestBeginTime := time.Now()
+	var startDuration time.Duration
 
 	// prevent new requests from being made while stopping or irrecoverable
 	currentState := p.CurrentState()
@@ -385,11 +392,13 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 
 	// start the process on demand
 	if p.CurrentState() != StateReady {
+		beginStartTime := time.Now()
 		if err := p.start(); err != nil {
 			errstr := fmt.Sprintf("unable to start process: %s", err)
 			http.Error(w, errstr, http.StatusBadGateway)
 			return
 		}
+		startDuration = time.Since(beginStartTime)
 	}
 
 	proxyTo := p.config.Proxy
@@ -433,4 +442,8 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+
+	totalTime := time.Since(requestBeginTime)
+	p.proxyLogger.Debugf("Process [%s] request %s - start: %v, total: %v",
+		p.ID, r.RequestURI, startDuration, totalTime)
 }
