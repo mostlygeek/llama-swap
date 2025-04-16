@@ -162,6 +162,7 @@ func (p *Process) start() error {
 	defer p.waitStarting.Done()
 
 	p.cmd = exec.Command(args[0], args[1:]...)
+	p.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	p.cmd.Stdout = p.processLogger
 	p.cmd.Stderr = p.processLogger
 	p.cmd.Env = p.config.Env
@@ -328,7 +329,15 @@ func (p *Process) stopCommand(sigtermTTL time.Duration) {
 	select {
 	case <-sigtermTimeout.Done():
 		p.proxyLogger.Infof("Process [%s] timed out waiting to stop, sending KILL signal", p.ID)
-		p.cmd.Process.Kill()
+		pgid, err := syscall.Getpgid(p.cmd.Process.Pid)
+		if err == nil {
+			p.proxyLogger.Infof("Killing process group -%d", pgid)
+			syscall.Kill(-pgid, syscall.SIGKILL)
+		} else {
+			p.proxyLogger.Warnf("Failed to get pgid, falling back to single Kill: %v", err)
+			p.cmd.Process.Kill()
+		}
+
 	case err := <-sigtermNormal:
 		if err != nil {
 			if errno, ok := err.(syscall.Errno); ok {
