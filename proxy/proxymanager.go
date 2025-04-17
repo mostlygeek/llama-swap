@@ -37,6 +37,15 @@ type ProxyManager struct {
 }
 
 func New(config *Config) *ProxyManager {
+    // Populate aliases map if not already set
+    if config.aliases == nil {
+        config.aliases = make(map[string]string)
+        for modelName, modelConfig := range config.Models {
+            for _, alias := range modelConfig.Aliases {
+                config.aliases[alias] = modelName
+            }
+        }
+    }
 	// set up loggers
 	stdoutLogger := NewLogMonitorWriter(os.Stdout)
 	upstreamLogger := NewLogMonitorWriter(stdoutLogger)
@@ -243,12 +252,27 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 			continue
 		}
 
+		// primary model
 		data = append(data, map[string]interface{}{
 			"id":       id,
 			"object":   "model",
 			"created":  time.Now().Unix(),
 			"owned_by": "llama-swap",
 		})
+
+	}
+
+
+	// also list all aliases from config.aliases
+	for alias, realModel := range pm.config.aliases {
+	    if mCfg, exists := pm.config.Models[realModel]; exists && !mCfg.Unlisted {
+	        data = append(data, map[string]interface{}{
+	            "id":       alias,
+	            "object":   "model",
+	            "created":  time.Now().Unix(),
+	            "owned_by": "llama-swap",
+	        })
+	    }
 	}
 
 	// Set the Content-Type header to application/json
