@@ -5,3 +5,4 @@ dist/
 .vscode
 .DS_Store
 config.yaml
+llama-swap
