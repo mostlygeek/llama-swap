@@ -34,6 +34,9 @@ type Process struct {
 	config ModelConfig
 	cmd    *exec.Cmd
 
+	// for p.cmd.Wait() select { ... }
+	cmdWaitChan chan error
+
 	processLogger *LogMonitor
 	proxyLogger   *LogMonitor
 
@@ -61,6 +64,7 @@ func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLo
 		ID:                      ID,
 		config:                  config,
 		cmd:                     nil,
+		cmdWaitChan:             make(chan error, 1),
 		processLogger:           processLogger,
 		proxyLogger:             proxyLogger,
 		healthCheckTimeout:      healthCheckTimeout,
@@ -179,6 +183,15 @@ func (p *Process) start() error {
 		return fmt.Errorf("start() failed: %v", err)
 	}
 
+	// Capture the exit error for later signaling
+	go func() {
+		exitErr := p.cmd.Wait()
+		// ensure that cmdWaitChan always gets an error
+		if exitErr != nil {
+			p.cmdWaitChan <- exitErr
+		}
+	}()
+
 	// One of three things can happen at this stage:
 	// 1. The command exits unexpectedly
 	// 2. The health check fails
@@ -222,6 +235,12 @@ func (p *Process) start() error {
 				}
 			case <-p.shutdownCtx.Done():
 				return errors.New("health check interrupted due to shutdown")
+			case exitErr := <-p.cmdWaitChan:
+				if curState, err := p.swapState(StateStarting, StateFailed); err != nil {
+					return fmt.Errorf("upstream command exited unexpectedly: %s AND state swap failed: %v, current state: %v", exitErr.Error(), err, curState)
+				} else {
+					return fmt.Errorf("upstream command exited unexpectedly: %s", exitErr.Error())
+				}
 			default:
 				if err := p.checkHealthEndpoint(healthURL); err == nil {
 					p.proxyLogger.Infof("Health check passed on %s", healthURL)
@@ -311,11 +330,6 @@ func (p *Process) stopCommand(sigtermTTL time.Duration) {
 	sigtermTimeout, cancelTimeout := context.WithTimeout(context.Background(), sigtermTTL)
 	defer cancelTimeout()
 
-	sigtermNormal := make(chan error, 1)
-	go func() {
-		sigtermNormal <- p.cmd.Wait()
-	}()
-
 	if p.cmd == nil || p.cmd.Process == nil {
 		p.proxyLogger.Warnf("Process [%s] cmd or cmd.Process is nil", p.ID)
 		return
@@ -329,7 +343,11 @@ func (p *Process) stopCommand(sigtermTTL time.Duration) {
 	case <-sigtermTimeout.Done():
 		p.proxyLogger.Infof("Process [%s] timed out waiting to stop, sending KILL signal", p.ID)
 		p.cmd.Process.Kill()
-	case err := <-sigtermNormal:
+	case err := <-p.cmdWaitChan:
+		// Note: in start(), p.cmdWaitChan also has a select { ... }. That should be OK
+		// because if we make it here then the cmd has been successfully running and made it
+		// through the health check. There is a possibility that ithe cmd crashed after the health check
+		// succeeded but that's not a case llama-swap is handling for now.
 		if err != nil {
 			if errno, ok := err.(syscall.Errno); ok {
 				p.proxyLogger.Errorf("Process [%s] errno >> %v", p.ID, errno)
