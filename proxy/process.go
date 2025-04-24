@@ -231,7 +231,7 @@ func (p *Process) start() error {
 					if strings.Contains(err.Error(), "connection refused") {
 						endTime, _ := checkDeadline.Deadline()
 						ttl := time.Until(endTime)
-						p.proxyLogger.Infof("Connection refused on %s, retrying in %.0fs", healthURL, ttl.Seconds())
+						p.proxyLogger.Infof("Connection refused on %s, giving up in %.0fs", healthURL, ttl.Seconds())
 					} else {
 						p.proxyLogger.Infof("Health check error on %s, %v", healthURL, err)
 					}
