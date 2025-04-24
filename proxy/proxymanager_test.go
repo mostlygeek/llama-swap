@@ -22,6 +22,7 @@ func TestProxyManager_SwapProcessCorrectly(t *testing.T) {
 			"model1": getTestSimpleResponderConfig("model1"),
 			"model2": getTestSimpleResponderConfig("model2"),
 		},
+		LogLevel: "error",
 	}
 
 	proxy := New(config)
@@ -62,6 +63,7 @@ func TestProxyManager_SwapMultiProcess(t *testing.T) {
 		Profiles: map[string][]string{
 			"test": {model1, model2},
 		},
+		LogLevel: "error",
 	}
 
 	proxy := New(config)
@@ -103,6 +105,7 @@ func TestProxyManager_SwapMultiProcessParallelRequests(t *testing.T) {
 			"model2": getTestSimpleResponderConfig("model2"),
 			"model3": getTestSimpleResponderConfig("model3"),
 		},
+		LogLevel: "error",
 	}
 
 	proxy := New(config)
@@ -153,6 +156,7 @@ func TestProxyManager_ListModelsHandler(t *testing.T) {
 			"model2": getTestSimpleResponderConfig("model2"),
 			"model3": getTestSimpleResponderConfig("model3"),
 		},
+		LogLevel: "error",
 	}
 
 	proxy := New(config)
@@ -230,6 +234,7 @@ func TestProxyManager_ProfileNonMember(t *testing.T) {
 		Profiles: map[string][]string{
 			"test": {model1},
 		},
+		LogLevel: "error",
 	}
 
 	proxy := New(config)
@@ -278,6 +283,7 @@ func TestProxyManager_Shutdown(t *testing.T) {
 			"model2": model2Config,
 			"model3": model3Config,
 		},
+		LogLevel: "error",
 	}
 
 	proxy := New(config)
@@ -313,6 +319,7 @@ func TestProxyManager_Unload(t *testing.T) {
 		Models: map[string]ModelConfig{
 			"model1": getTestSimpleResponderConfig("model1"),
 		},
+		LogLevel: "error",
 	}
 
 	proxy := New(config)
@@ -339,6 +346,7 @@ func TestProxyManager_StripProfileSlug(t *testing.T) {
 		Models: map[string]ModelConfig{
 			"TheExpectedModel": getTestSimpleResponderConfig("TheExpectedModel"),
 		},
+		LogLevel: "error",
 	}
 
 	proxy := New(config)
@@ -365,6 +373,7 @@ func TestProxyManager_RunningEndpoint(t *testing.T) {
 		Profiles: map[string][]string{
 			"test": {"model1", "model2"},
 		},
+		LogLevel: "error",
 	}
 
 	// Define a helper struct to parse the JSON response.
@@ -472,6 +481,7 @@ func TestProxyManager_AudioTranscriptionHandler(t *testing.T) {
 		Models: map[string]ModelConfig{
 			"TheExpectedModel": getTestSimpleResponderConfig("TheExpectedModel"),
 		},
+		LogLevel: "error",
 	}
 
 	proxy := New(config)
@@ -580,6 +590,8 @@ func TestProxyManager_UseModelName(t *testing.T) {
 		Models: map[string]ModelConfig{
 			"model1": modelConfig,
 		},
+
+		LogLevel: "error",
 	}
 
 	proxy := New(config)
@@ -647,7 +659,7 @@ func TestProxyManager_CORSOptionsHandler(t *testing.T) {
 		Models: map[string]ModelConfig{
 			"model1": getTestSimpleResponderConfig("model1"),
 		},
-		LogRequests: true,
+		LogLevel: "error",
 	}
 
 	tests := []struct {
