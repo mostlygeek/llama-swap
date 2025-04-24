@@ -2,9 +2,9 @@ package proxy
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -13,8 +13,17 @@ import (
 )
 
 var (
-	discardLogger = NewLogMonitorWriter(io.Discard)
+	debugLogger = NewLogMonitorWriter(os.Stdout)
 )
+
+func init() {
+	// flip to help with debugging tests
+	if false {
+		debugLogger.SetLogLevel(LevelDebug)
+	} else {
+		debugLogger.SetLogLevel(LevelError)
+	}
+}
 
 func TestProcess_AutomaticallyStartsUpstream(t *testing.T) {
 
@@ -22,7 +31,7 @@ func TestProcess_AutomaticallyStartsUpstream(t *testing.T) {
 	config := getTestSimpleResponderConfig(expectedMessage)
 
 	// Create a process
-	process := NewProcess("test-process", 5, config, discardLogger, discardLogger)
+	process := NewProcess("test-process", 5, config, debugLogger, debugLogger)
 	defer process.Stop()
 
 	req := httptest.NewRequest("GET", "/test", nil)
@@ -58,7 +67,7 @@ func TestProcess_WaitOnMultipleStarts(t *testing.T) {
 	expectedMessage := "testing91931"
 	config := getTestSimpleResponderConfig(expectedMessage)
 
-	process := NewProcess("test-process", 5, config, discardLogger, discardLogger)
+	process := NewProcess("test-process", 5, config, debugLogger, debugLogger)
 	defer process.Stop()
 
 	var wg sync.WaitGroup
@@ -86,7 +95,7 @@ func TestProcess_BrokenModelConfig(t *testing.T) {
 		CheckEndpoint: "/health",
 	}
 
-	process := NewProcess("broken", 1, config, discardLogger, discardLogger)
+	process := NewProcess("broken", 1, config, debugLogger, debugLogger)
 
 	req := httptest.NewRequest("GET", "/", nil)
 	w := httptest.NewRecorder()
@@ -111,7 +120,7 @@ func TestProcess_UnloadAfterTTL(t *testing.T) {
 	config.UnloadAfter = 3 // seconds
 	assert.Equal(t, 3, config.UnloadAfter)
 
-	process := NewProcess("ttl_test", 2, config, discardLogger, discardLogger)
+	process := NewProcess("ttl_test", 2, config, debugLogger, debugLogger)
 	defer process.Stop()
 
 	// this should take 4 seconds
@@ -153,7 +162,7 @@ func TestProcess_LowTTLValue(t *testing.T) {
 	config.UnloadAfter = 1 // second
 	assert.Equal(t, 1, config.UnloadAfter)
 
-	process := NewProcess("ttl", 2, config, discardLogger, discardLogger)
+	process := NewProcess("ttl", 2, config, debugLogger, debugLogger)
 	defer process.Stop()
 
 	for i := 0; i < 100; i++ {
@@ -180,7 +189,7 @@ func TestProcess_HTTPRequestsHaveTimeToFinish(t *testing.T) {
 
 	expectedMessage := "12345"
 	config := getTestSimpleResponderConfig(expectedMessage)
-	process := NewProcess("t", 10, config, discardLogger, discardLogger)
+	process := NewProcess("t", 10, config, debugLogger, debugLogger)
 	defer process.Stop()
 
 	results := map[string]string{
@@ -257,7 +266,7 @@ func TestProcess_SwapState(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			p := NewProcess("test", 10, getTestSimpleResponderConfig("test"), discardLogger, discardLogger)
+			p := NewProcess("test", 10, getTestSimpleResponderConfig("test"), debugLogger, debugLogger)
 			p.state = test.currentState
 
 			resultState, err := p.swapState(test.expectedState, test.newState)
@@ -290,7 +299,7 @@ func TestProcess_ShutdownInterruptsHealthCheck(t *testing.T) {
 	config.Proxy = "http://localhost:9998/test"
 
 	healthCheckTTLSeconds := 30
-	process := NewProcess("test-process", healthCheckTTLSeconds, config, discardLogger, discardLogger)
+	process := NewProcess("test-process", healthCheckTTLSeconds, config, debugLogger, debugLogger)
 
 	// make it a lot faster
 	process.healthCheckLoopInterval = time.Second
@@ -310,4 +319,24 @@ func TestProcess_ShutdownInterruptsHealthCheck(t *testing.T) {
 	wg.Wait()
 	assert.ErrorContains(t, err, "health check interrupted due to shutdown")
 	assert.Equal(t, StateShutdown, process.CurrentState())
+}
+
+func TestProcess_ExitInterruptsHealthCheck(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Exit Interrupts Health Check test")
+	}
+
+	// should run and exit but interrupt the long checkHealthTimeout
+	checkHealthTimeout := 5
+	config := ModelConfig{
+		Cmd:           "sleep 1",
+		Proxy:         "http://127.0.0.1:9913",
+		CheckEndpoint: "/health",
+	}
+
+	process := NewProcess("sleepy", checkHealthTimeout, config, debugLogger, debugLogger)
+	process.healthCheckLoopInterval = time.Second // make it faster
+	err := process.start()
+	assert.Equal(t, "upstream command exited prematurely with no error", err.Error())
+	assert.Equal(t, process.CurrentState(), StateFailed)
 }

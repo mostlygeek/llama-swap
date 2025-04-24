@@ -49,14 +49,19 @@ func New(config *Config) *ProxyManager {
 	switch strings.ToLower(strings.TrimSpace(config.LogLevel)) {
 	case "debug":
 		proxyLogger.SetLogLevel(LevelDebug)
+		upstreamLogger.SetLogLevel(LevelDebug)
 	case "info":
 		proxyLogger.SetLogLevel(LevelInfo)
+		upstreamLogger.SetLogLevel(LevelInfo)
 	case "warn":
 		proxyLogger.SetLogLevel(LevelWarn)
+		upstreamLogger.SetLogLevel(LevelWarn)
 	case "error":
 		proxyLogger.SetLogLevel(LevelError)
+		upstreamLogger.SetLogLevel(LevelError)
 	default:
 		proxyLogger.SetLogLevel(LevelInfo)
+		upstreamLogger.SetLogLevel(LevelInfo)
 	}
 
 	pm := &ProxyManager{
