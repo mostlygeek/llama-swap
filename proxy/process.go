@@ -93,16 +93,17 @@ func (p *Process) swapState(expectedState, newState ProcessState) (ProcessState,
 	defer p.stateMutex.Unlock()
 
 	if p.state != expectedState {
+		p.proxyLogger.Warnf("swapState() Unexpected current state %s, expected %s", p.state, expectedState)
 		return p.state, ErrExpectedStateMismatch
 	}
 
 	if !isValidTransition(p.state, newState) {
-		p.proxyLogger.Warnf("Invalid state transition from %s to %s", p.state, newState)
+		p.proxyLogger.Warnf("swapState() Invalid state transition from %s to %s", p.state, newState)
 		return p.state, ErrInvalidStateTransition
 	}
 
-	p.proxyLogger.Debugf("State transition from %s to %s", expectedState, newState)
 	p.state = newState
+	p.proxyLogger.Debugf("swapState() State transitioned from %s to %s", expectedState, newState)
 	return p.state, nil
 }
 
@@ -186,10 +187,8 @@ func (p *Process) start() error {
 	// Capture the exit error for later signaling
 	go func() {
 		exitErr := p.cmd.Wait()
-		// ensure that cmdWaitChan always gets an error
-		if exitErr != nil {
-			p.cmdWaitChan <- exitErr
-		}
+		p.proxyLogger.Debugf("cmd.Wait() returned for [%s] error: %v", p.ID, exitErr)
+		p.cmdWaitChan <- exitErr
 	}()
 
 	// One of three things can happen at this stage:
@@ -236,10 +235,12 @@ func (p *Process) start() error {
 			case <-p.shutdownCtx.Done():
 				return errors.New("health check interrupted due to shutdown")
 			case exitErr := <-p.cmdWaitChan:
-				if curState, err := p.swapState(StateStarting, StateFailed); err != nil {
-					return fmt.Errorf("upstream command exited unexpectedly: %s AND state swap failed: %v, current state: %v", exitErr.Error(), err, curState)
-				} else {
-					return fmt.Errorf("upstream command exited unexpectedly: %s", exitErr.Error())
+				if exitErr != nil {
+					if curState, err := p.swapState(StateStarting, StateFailed); err != nil {
+						return fmt.Errorf("upstream command exited unexpectedly: %s AND state swap failed: %v, current state: %v", exitErr.Error(), err, curState)
+					} else {
+						return fmt.Errorf("upstream command exited unexpectedly: %s", exitErr.Error())
+					}
 				}
 			default:
 				if err := p.checkHealthEndpoint(healthURL); err == nil {
@@ -276,7 +277,6 @@ func (p *Process) start() error {
 				p.inFlightRequests.Wait()
 
 				if time.Since(p.lastRequestHandled) > maxDuration {
-
 					p.proxyLogger.Infof("Unloading model %s, TTL of %ds reached.", p.ID, p.config.UnloadAfter)
 					p.Stop()
 					return
@@ -295,6 +295,7 @@ func (p *Process) start() error {
 func (p *Process) Stop() {
 	// wait for any inflight requests before proceeding
 	p.inFlightRequests.Wait()
+	p.proxyLogger.Debugf("Stopping process [%s]", p.ID)
 
 	// calling Stop() when state is invalid is a no-op
 	if curState, err := p.swapState(StateReady, StateStopping); err != nil {
