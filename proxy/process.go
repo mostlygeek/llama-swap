@@ -236,10 +236,18 @@ func (p *Process) start() error {
 				return errors.New("health check interrupted due to shutdown")
 			case exitErr := <-p.cmdWaitChan:
 				if exitErr != nil {
+					p.proxyLogger.Warnf("upstream command exited prematurely with error: %v", exitErr)
 					if curState, err := p.swapState(StateStarting, StateFailed); err != nil {
 						return fmt.Errorf("upstream command exited unexpectedly: %s AND state swap failed: %v, current state: %v", exitErr.Error(), err, curState)
 					} else {
 						return fmt.Errorf("upstream command exited unexpectedly: %s", exitErr.Error())
+					}
+				} else {
+					p.proxyLogger.Warnf("upstream command exited prematurely with no error")
+					if curState, err := p.swapState(StateStarting, StateFailed); err != nil {
+						return fmt.Errorf("upstream command exited prematurely with no error AND state swap failed: %v, current state: %v", err, curState)
+					} else {
+						return fmt.Errorf("upstream command exited prematurely with no error")
 					}
 				}
 			default:

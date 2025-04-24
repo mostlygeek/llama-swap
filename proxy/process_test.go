@@ -311,3 +311,21 @@ func TestProcess_ShutdownInterruptsHealthCheck(t *testing.T) {
 	assert.ErrorContains(t, err, "health check interrupted due to shutdown")
 	assert.Equal(t, StateShutdown, process.CurrentState())
 }
+
+func TestProcess_ExitInterruptsHealthCheck(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping Exit Interrupts Health Check test")
+	}
+
+	// should run and exit but interrupt the long checkHealthTimeout
+	checkHealthTimeout := 5
+	config := ModelConfig{
+		Cmd:           "sleep 1",
+		Proxy:         "http://127.0.0.1:9913",
+		CheckEndpoint: "/health",
+	}
+
+	process := NewProcess("sleepy", checkHealthTimeout, config, discardLogger, discardLogger)
+	err := process.start()
+	assert.Equal(t, "upstream command exited prematurely with no error", err.Error())
+}
