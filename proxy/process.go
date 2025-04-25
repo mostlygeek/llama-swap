@@ -93,17 +93,17 @@ func (p *Process) swapState(expectedState, newState ProcessState) (ProcessState,
 	defer p.stateMutex.Unlock()
 
 	if p.state != expectedState {
-		p.proxyLogger.Warnf("swapState() Unexpected current state %s, expected %s", p.state, expectedState)
+		p.proxyLogger.Warnf("<%s> swapState() Unexpected current state %s, expected %s", p.ID, p.state, expectedState)
 		return p.state, ErrExpectedStateMismatch
 	}
 
 	if !isValidTransition(p.state, newState) {
-		p.proxyLogger.Warnf("swapState() Invalid state transition from %s to %s", p.state, newState)
+		p.proxyLogger.Warnf("<%s> swapState() Invalid state transition from %s to %s", p.ID, p.state, newState)
 		return p.state, ErrInvalidStateTransition
 	}
 
 	p.state = newState
-	p.proxyLogger.Debugf("swapState() State transitioned from %s to %s", expectedState, newState)
+	p.proxyLogger.Debugf("<%s> swapState() State transitioned from %s to %s", p.ID, expectedState, newState)
 	return p.state, nil
 }
 
@@ -187,7 +187,7 @@ func (p *Process) start() error {
 	// Capture the exit error for later signaling
 	go func() {
 		exitErr := p.cmd.Wait()
-		p.proxyLogger.Debugf("cmd.Wait() returned for [%s] error: %v", p.ID, exitErr)
+		p.proxyLogger.Debugf("<%s> cmd.Wait() returned error: %v", p.ID, exitErr)
 		p.cmdWaitChan <- exitErr
 	}()
 
@@ -236,32 +236,32 @@ func (p *Process) start() error {
 				return errors.New("health check interrupted due to shutdown")
 			case exitErr := <-p.cmdWaitChan:
 				if exitErr != nil {
-					p.proxyLogger.Warnf("upstream command exited prematurely with error: %v", exitErr)
+					p.proxyLogger.Warnf("<%s> upstream command exited prematurely with error: %v", p.ID, exitErr)
 					if curState, err := p.swapState(StateStarting, StateFailed); err != nil {
 						return fmt.Errorf("upstream command exited unexpectedly: %s AND state swap failed: %v, current state: %v", exitErr.Error(), err, curState)
 					} else {
 						return fmt.Errorf("upstream command exited unexpectedly: %s", exitErr.Error())
 					}
 				} else {
-					p.proxyLogger.Warnf("upstream command exited prematurely with no error")
+					p.proxyLogger.Warnf("<%s> upstream command exited prematurely but successfully", p.ID)
 					if curState, err := p.swapState(StateStarting, StateFailed); err != nil {
-						return fmt.Errorf("upstream command exited prematurely with no error AND state swap failed: %v, current state: %v", err, curState)
+						return fmt.Errorf("upstream command exited prematurely but successfully AND state swap failed: %v, current state: %v", err, curState)
 					} else {
-						return fmt.Errorf("upstream command exited prematurely with no error")
+						return fmt.Errorf("upstream command exited prematurely but successfully")
 					}
 				}
 			default:
 				if err := p.checkHealthEndpoint(healthURL); err == nil {
-					p.proxyLogger.Infof("Health check passed on %s", healthURL)
+					p.proxyLogger.Infof("<%s> Health check passed on %s", p.ID, healthURL)
 					cancelHealthCheck()
 					break loop
 				} else {
 					if strings.Contains(err.Error(), "connection refused") {
 						endTime, _ := checkDeadline.Deadline()
 						ttl := time.Until(endTime)
-						p.proxyLogger.Infof("Connection refused on %s, giving up in %.0fs", healthURL, ttl.Seconds())
+						p.proxyLogger.Infof("<%s> Connection refused on %s, giving up in %.0fs", p.ID, healthURL, ttl.Seconds())
 					} else {
-						p.proxyLogger.Infof("Health check error on %s, %v", healthURL, err)
+						p.proxyLogger.Infof("<%s> Health check error on %s, %v", p.ID, healthURL, err)
 					}
 				}
 			}
@@ -285,7 +285,7 @@ func (p *Process) start() error {
 				p.inFlightRequests.Wait()
 
 				if time.Since(p.lastRequestHandled) > maxDuration {
-					p.proxyLogger.Infof("Unloading model %s, TTL of %ds reached.", p.ID, p.config.UnloadAfter)
+					p.proxyLogger.Infof("<%s> Unloading model, TTL of %ds reached", p.ID, p.config.UnloadAfter)
 					p.Stop()
 					return
 				}
@@ -303,11 +303,11 @@ func (p *Process) start() error {
 func (p *Process) Stop() {
 	// wait for any inflight requests before proceeding
 	p.inFlightRequests.Wait()
-	p.proxyLogger.Debugf("Stopping process [%s]", p.ID)
+	p.proxyLogger.Debugf("<%s> Stopping process", p.ID)
 
 	// calling Stop() when state is invalid is a no-op
 	if curState, err := p.swapState(StateReady, StateStopping); err != nil {
-		p.proxyLogger.Infof("Stop() Ready -> StateStopping err: %v, current state: %v", err, curState)
+		p.proxyLogger.Infof("<%s> Stop() Ready -> StateStopping err: %v, current state: %v", p.ID, err, curState)
 		return
 	}
 
@@ -315,7 +315,7 @@ func (p *Process) Stop() {
 	p.stopCommand(5 * time.Second)
 
 	if curState, err := p.swapState(StateStopping, StateStopped); err != nil {
-		p.proxyLogger.Infof("Stop() StateStopping -> StateStopped err: %v, current state: %v", err, curState)
+		p.proxyLogger.Infof("<%s> Stop() StateStopping -> StateStopped err: %v, current state: %v", p.ID, err, curState)
 	}
 }
 
@@ -333,24 +333,24 @@ func (p *Process) Shutdown() {
 func (p *Process) stopCommand(sigtermTTL time.Duration) {
 	stopStartTime := time.Now()
 	defer func() {
-		p.proxyLogger.Debugf("Process [%s] stopCommand took %v", p.ID, time.Since(stopStartTime))
+		p.proxyLogger.Debugf("<%s> stopCommand took %v", p.ID, time.Since(stopStartTime))
 	}()
 
 	sigtermTimeout, cancelTimeout := context.WithTimeout(context.Background(), sigtermTTL)
 	defer cancelTimeout()
 
 	if p.cmd == nil || p.cmd.Process == nil {
-		p.proxyLogger.Warnf("Process [%s] cmd or cmd.Process is nil", p.ID)
+		p.proxyLogger.Warnf("<%s> cmd or cmd.Process is nil", p.ID)
 		return
 	}
 
 	if err := p.terminateProcess(); err != nil {
-		p.proxyLogger.Infof("Failed to gracefully terminate process [%s]: %v", p.ID, err)
+		p.proxyLogger.Infof("<%s> Failed to gracefully terminate process: %v", p.ID, err)
 	}
 
 	select {
 	case <-sigtermTimeout.Done():
-		p.proxyLogger.Infof("Process [%s] timed out waiting to stop, sending KILL signal", p.ID)
+		p.proxyLogger.Infof("<%s> Process timed out waiting to stop, sending KILL signal", p.ID)
 		p.cmd.Process.Kill()
 	case err := <-p.cmdWaitChan:
 		// Note: in start(), p.cmdWaitChan also has a select { ... }. That should be OK
@@ -359,24 +359,23 @@ func (p *Process) stopCommand(sigtermTTL time.Duration) {
 		// succeeded but that's not a case llama-swap is handling for now.
 		if err != nil {
 			if errno, ok := err.(syscall.Errno); ok {
-				p.proxyLogger.Errorf("Process [%s] errno >> %v", p.ID, errno)
+				p.proxyLogger.Errorf("<%s> errno >> %v", p.ID, errno)
 			} else if exitError, ok := err.(*exec.ExitError); ok {
 				if strings.Contains(exitError.String(), "signal: terminated") {
-					p.proxyLogger.Infof("Process [%s] stopped OK", p.ID)
+					p.proxyLogger.Infof("<%s> Process stopped OK", p.ID)
 				} else if strings.Contains(exitError.String(), "signal: interrupt") {
-					p.proxyLogger.Infof("Process [%s] interrupted OK", p.ID)
+					p.proxyLogger.Infof("<%s> Process interrupted OK", p.ID)
 				} else {
-					p.proxyLogger.Warnf("Process [%s] ExitError >> %v, exit code: %d", p.ID, exitError, exitError.ExitCode())
+					p.proxyLogger.Warnf("<%s> ExitError >> %v, exit code: %d", p.ID, exitError, exitError.ExitCode())
 				}
 			} else {
-				p.proxyLogger.Errorf("Process [%s] exited >> %v", p.ID, err)
+				p.proxyLogger.Errorf("<%s> Process exited >> %v", p.ID, err)
 			}
 		}
 	}
 }
 
 func (p *Process) checkHealthEndpoint(healthURL string) error {
-
 	client := &http.Client{
 		Timeout: 500 * time.Millisecond,
 	}
@@ -471,6 +470,6 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	totalTime := time.Since(requestBeginTime)
-	p.proxyLogger.Debugf("Process [%s] request %s - start: %v, total: %v",
+	p.proxyLogger.Debugf("<%s> request %s - start: %v, total: %v",
 		p.ID, r.RequestURI, startDuration, totalTime)
 }
