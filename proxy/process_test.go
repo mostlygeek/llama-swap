@@ -337,6 +337,6 @@ func TestProcess_ExitInterruptsHealthCheck(t *testing.T) {
 	process := NewProcess("sleepy", checkHealthTimeout, config, debugLogger, debugLogger)
 	process.healthCheckLoopInterval = time.Second // make it faster
 	err := process.start()
-	assert.Equal(t, "upstream command exited prematurely with no error", err.Error())
+	assert.Equal(t, "upstream command exited prematurely but successfully", err.Error())
 	assert.Equal(t, process.CurrentState(), StateFailed)
 }
