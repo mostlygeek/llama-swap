@@ -9,6 +9,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const DEFAULT_GROUP_ID = "(default)"
+
 type ModelConfig struct {
 	Cmd           string   `yaml:"cmd"`
 	Proxy         string   `yaml:"proxy"`
@@ -24,12 +26,19 @@ func (m *ModelConfig) SanitizedCommand() ([]string, error) {
 	return SanitizeCommand(m.Cmd)
 }
 
+type GroupConfig struct {
+	Swap      bool     `yaml:"swap"`
+	Exclusive bool     `yaml:"exclusive"`
+	Members   []string `yaml:"members"`
+}
+
 type Config struct {
 	HealthCheckTimeout int                    `yaml:"healthCheckTimeout"`
 	LogRequests        bool                   `yaml:"logRequests"`
 	LogLevel           string                 `yaml:"logLevel"`
-	Models             map[string]ModelConfig `yaml:"models"`
+	Models             map[string]ModelConfig `yaml:"models"` /* key is model ID */
 	Profiles           map[string][]string    `yaml:"profiles"`
+	Groups             map[string]GroupConfig `yaml:"groups"` /* key is group ID */
 
 	// map aliases to actual model IDs
 	aliases map[string]string
@@ -76,6 +85,41 @@ func LoadConfig(path string) (*Config, error) {
 			config.aliases[alias] = modelName
 		}
 	}
+
+	// rewrite the configuration of Groups to include a default group
+
+	defaultGroup := GroupConfig{
+		Swap:      true,
+		Exclusive: true,
+		Members:   []string{},
+	}
+	// if groups is empty, create a default group and put
+	// all models into it
+	if len(config.Groups) == 0 {
+		for modelName := range config.Models {
+			defaultGroup.Members = append(defaultGroup.Members, modelName)
+		}
+	} else {
+		// iterate over existing group members and add non-grouped models into the default group
+		for modelName, _ := range config.Models {
+			foundModel := false
+		found:
+			// search for the model in existing groups
+			for _, groupConfig := range config.Groups {
+				for _, member := range groupConfig.Members {
+					if member == modelName {
+						foundModel = true
+						break found
+					}
+				}
+			}
+
+			if !foundModel {
+				defaultGroup.Members = append(defaultGroup.Members, modelName)
+			}
+		}
+	}
+	config.Groups[DEFAULT_GROUP_ID] = defaultGroup
 
 	return &config, nil
 }

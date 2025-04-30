@@ -35,11 +35,23 @@ models:
     aliases:
       - "m2"
     checkEndpoint: "/"
+  model3:
+    cmd: path/to/cmd --arg1 one
+    proxy: "http://localhost:8081"
+    aliases:
+      - "mthree"
+    checkEndpoint: "/"
+
 healthCheckTimeout: 15
 profiles:
   test:
     - model1
     - model2
+groups:
+  group1:
+    swap: true
+    exclusive: false
+    members: ["model2"]
 `
 
 	if err := os.WriteFile(tempFile, []byte(content), 0644); err != nil {
@@ -68,6 +80,13 @@ profiles:
 				Env:           nil,
 				CheckEndpoint: "/",
 			},
+			"model3": {
+				Cmd:           "path/to/cmd --arg1 one",
+				Proxy:         "http://localhost:8081",
+				Aliases:       []string{"mthree"},
+				Env:           nil,
+				CheckEndpoint: "/",
+			},
 		},
 		HealthCheckTimeout: 15,
 		Profiles: map[string][]string{
@@ -77,6 +96,19 @@ profiles:
 			"m1":        "model1",
 			"model-one": "model1",
 			"m2":        "model2",
+			"mthree":    "model3",
+		},
+		Groups: map[string]GroupConfig{
+			DEFAULT_GROUP_ID: {
+				Swap:      true,
+				Exclusive: true,
+				Members:   []string{"model1", "model3"},
+			},
+			"group1": {
+				Swap:      true,
+				Exclusive: false,
+				Members:   []string{"model2"},
+			},
 		},
 	}
 
