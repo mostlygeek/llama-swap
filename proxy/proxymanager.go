@@ -188,14 +188,13 @@ func New(config *Config) *ProxyManager {
 	return pm
 }
 
-func (pm *ProxyManager) Run(addr ...string) error {
-	return pm.ginEngine.Run(addr...)
-}
-
-func (pm *ProxyManager) HandlerFunc(w http.ResponseWriter, r *http.Request) {
+// ServeHTTP implements http.Handler interface
+func (pm *ProxyManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	pm.ginEngine.ServeHTTP(w, r)
 }
 
+// StopProcesses acquires a lock and stops all running upstream processes.
+// This is the public method safe for concurrent calls.
 func (pm *ProxyManager) StopProcesses() {
 	pm.Lock()
 	defer pm.Unlock()
@@ -203,11 +202,15 @@ func (pm *ProxyManager) StopProcesses() {
 	pm.stopProcesses()
 }
 
-// for internal usage
+// stopProcesses stops all running upstream processes.
+// This internal method assumes the caller holds the necessary lock.
 func (pm *ProxyManager) stopProcesses() {
 	if len(pm.currentProcesses) == 0 {
+		pm.proxyLogger.Debug("stopProcesses called, no processes are running.")
 		return
 	}
+
+	pm.proxyLogger.Debugf("Stopping %d running upstream process(es)...", len(pm.currentProcesses))
 
 	// stop Processes in parallel
 	var wg sync.WaitGroup
@@ -223,22 +226,19 @@ func (pm *ProxyManager) stopProcesses() {
 	pm.currentProcesses = make(map[string]*Process)
 }
 
-// Shutdown is called to shutdown all upstream processes
-// when llama-swap is shutting down.
+// Shutdown stops all processes managed by this ProxyManager
 func (pm *ProxyManager) Shutdown() {
 	pm.Lock()
 	defer pm.Unlock()
 
-	// shutdown process in parallel
-	var wg sync.WaitGroup
+	// First, call Shutdown() on all processes to cancel their contexts
 	for _, process := range pm.currentProcesses {
-		wg.Add(1)
-		go func(process *Process) {
-			defer wg.Done()
-			process.Shutdown()
-		}(process)
+		process.Shutdown()
 	}
-	wg.Wait()
+
+	// Then clear the map (processes are already shut down)
+	pm.currentProcesses = make(map[string]*Process)
+	pm.proxyLogger.Debug("ProxyManager shutdown complete")
 }
 
 func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
