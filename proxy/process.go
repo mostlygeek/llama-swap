@@ -301,6 +301,10 @@ func (p *Process) start() error {
 }
 
 func (p *Process) Stop() {
+	if !isValidTransition(p.CurrentState(), StateStopping) {
+		return
+	}
+
 	// wait for any inflight requests before proceeding
 	p.inFlightRequests.Wait()
 	p.proxyLogger.Debugf("<%s> Stopping process", p.ID)
