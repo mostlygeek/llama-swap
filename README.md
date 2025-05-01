@@ -26,7 +26,7 @@ Written in golang, it is very easy to install (single binary with no dependancie
   - `/upstream/:model_id` - direct access to upstream HTTP server ([demo](https://github.com/mostlygeek/llama-swap/pull/31))
   - `/unload` - manually unload running models ([#58](https://github.com/mostlygeek/llama-swap/issues/58))
   - `/running` - list currently running models ([#61](https://github.com/mostlygeek/llama-swap/issues/61))
-- ✅ Run multiple models at once with `profiles` ([docs](https://github.com/mostlygeek/llama-swap/issues/53#issuecomment-2660761741))
+- ✅ Run multiple models at once with `Groups` ([#107](https://github.com/mostlygeek/llama-swap/issues/107))
 - ✅ Automatic unloading of models after timeout by setting a `ttl`
 - ✅ Use any local OpenAI compatible server (llama.cpp, vllm, tabbyAPI, etc)
 - ✅ Docker and Podman support
@@ -36,7 +36,7 @@ Written in golang, it is very easy to install (single binary with no dependancie
 
 When a request is made to an OpenAI compatible endpoint, lama-swap will extract the `model` value and load the appropriate server configuration to serve it. If the wrong upstream server is running, it will be replaced with the correct one. This is where the "swap" part comes in. The upstream server is automatically swapped to the correct one to serve the request.
 
-In the most basic configuration llama-swap handles one model at a time. For more advanced use cases, the `profiles` feature can load multiple models at the same time. You have complete control over how your system resources are used.
+In the most basic configuration llama-swap handles one model at a time. For more advanced use cases, the `groups` feature allows multiple models to be loaded at the same time. You have complete control over how your system resources are used.
 
 ## config.yaml
 
@@ -120,16 +120,45 @@ models:
       ghcr.io/ggerganov/llama.cpp:server
       --model '/models/Qwen2.5-Coder-0.5B-Instruct-Q4_K_M.gguf'
 
-# profiles eliminates swapping by running multiple models at the same time
+# Groups provide advanced controls over model swapping behaviour. Using groups
+# some models can be kept loaded indefinitely, while others are swapped out.
 #
 # Tips:
-#  - each model must be listening on a unique address and port
-#  - the model name is in this format: "profile_name:model", like "coding:qwen"
-#  - the profile will load and unload all models in the profile at the same time
-profiles:
-  coding:
-    - "llama"
-    - "qwen-unlisted"
+#
+#  - models must be defined above in the Models section
+#  - a model can only be a member of one group
+#  - group behaviour is controlled via the `swap` and `exclusive` fields
+#  - make sure models that are loaded together do not conflict in resource usage or
+#    listening ports
+#
+groups:
+  # group1 is the default behaviour of llama-swap where only one model is allowed
+  # to run a time across the whole llama-swap instance
+  "group1":
+    # swap controls the model swapping behaviour in within the group
+    # - true : only one model is allowed to run at a time
+    # - false: all models can run together, no swapping
+    swap: true
+
+    # exclusive controls how the group affects other groups
+    # - true: causes all other groups to unload their models when this group runs a model
+    # - false: does not affect other groups
+    exclusive: true
+
+    # members references the models defined above
+    members:
+      - "llama"
+      - "qwen-unlisted"
+
+  # models in this group are never unloaded
+  "group2":
+    swap: false
+    exclusive: false
+    members:
+      - "docker-llama"
+      # (not defined above, here for example)
+      - "modelA"
+      - "modelB"
 ```
 
 ### Use Case Examples

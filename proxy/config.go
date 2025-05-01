@@ -88,6 +88,24 @@ func LoadConfig(path string) (Config, error) {
 	}
 
 	config = AddDefaultGroupToConfig(config)
+	// check that members are all unique in the groups
+	memberUsage := make(map[string]string) // maps member to group it appears in
+	for groupID, groupConfig := range config.Groups {
+		prevSet := make(map[string]bool)
+		for _, member := range groupConfig.Members {
+			// Check for duplicates within this group
+			if _, found := prevSet[member]; found {
+				return Config{}, fmt.Errorf("duplicate model member %s found in group: %s", member, groupID)
+			}
+			prevSet[member] = true
+
+			// Check if member is used in another group
+			if existingGroup, exists := memberUsage[member]; exists {
+				return Config{}, fmt.Errorf("model member %s is used in multiple groups: %s and %s", member, existingGroup, groupID)
+			}
+			memberUsage[member] = groupID
+		}
+	}
 
 	return config, nil
 }

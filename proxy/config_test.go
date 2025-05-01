@@ -119,6 +119,51 @@ groups:
 	assert.Equal(t, "model1", realname)
 }
 
+func TestConfig_GroupMemberIsUnique(t *testing.T) {
+	// Create a temporary YAML file for testing
+	tempDir, err := os.MkdirTemp("", "test-config")
+	if err != nil {
+		t.Fatalf("Failed to create temporary directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	tempFile := filepath.Join(tempDir, "config.yaml")
+	content := `
+models:
+  model1:
+    cmd: path/to/cmd --arg1 one
+    proxy: "http://localhost:8080"
+  model2:
+    cmd: path/to/cmd --arg1 one
+    proxy: "http://localhost:8081"
+    checkEndpoint: "/"
+  model3:
+    cmd: path/to/cmd --arg1 one
+    proxy: "http://localhost:8081"
+    checkEndpoint: "/"
+
+healthCheckTimeout: 15
+groups:
+  group1:
+    swap: true
+    exclusive: false
+    members: ["model2"]
+  group2:
+    swap: true
+    exclusive: false
+    members: ["model2"]
+`
+
+	if err := os.WriteFile(tempFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to write temporary file: %v", err)
+	}
+
+	// Load the config and verify
+	_, err = LoadConfig(tempFile)
+	assert.NotNil(t, err)
+
+}
+
 func TestConfig_ModelConfigSanitizedCommand(t *testing.T) {
 	config := &ModelConfig{
 		Cmd: `python model1.py \

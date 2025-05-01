@@ -34,6 +34,10 @@ func main() {
 		os.Exit(1)
 	}
 
+	if len(config.Profiles) > 0 {
+		fmt.Println("WARNING: Profile functionality has been removed in favor of Groups. See the README for more information.")
+	}
+
 	if mode := os.Getenv("GIN_MODE"); mode != "" {
 		gin.SetMode(mode)
 	} else {
