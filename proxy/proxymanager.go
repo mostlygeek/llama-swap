@@ -246,6 +246,30 @@ func (pm *ProxyManager) Shutdown() {
 	wg.Wait()
 }
 
+func (pm *ProxyManager) swapProcessGroup(requestedModel string) (*ProcessGroup, string, error) {
+	// de-alias the real model name and get a real one
+	realModelName, found := pm.config.RealModelName(requestedModel)
+	if !found {
+		return nil, realModelName, fmt.Errorf("could not find real modelID for %s", requestedModel)
+	}
+
+	processGroup := pm.findGroupByModelName(realModelName)
+	if processGroup == nil {
+		return nil, realModelName, fmt.Errorf("could not find process group for model %s", requestedModel)
+	}
+
+	if processGroup.exclusive {
+		pm.proxyLogger.Debugf("Exclusive mode for group %s, stopping other process groups", processGroup.id)
+		for groupId, otherGroup := range pm.processGroups {
+			if groupId != processGroup.id {
+				otherGroup.StopProcesses()
+			}
+		}
+	}
+
+	return processGroup, realModelName, nil
+}
+
 func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 	data := []interface{}{}
 	for id, modelConfig := range pm.config.Models {
@@ -283,19 +307,9 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 		return
 	}
 
-	processGroup := pm.findGroupByModelName(requestedModel)
-	if processGroup == nil {
-		pm.sendErrorResponse(c, http.StatusNotFound, fmt.Sprintf("could not find process group for model %s ", requestedModel))
-		return
-	}
-
-	if processGroup.exclusive {
-		pm.proxyLogger.Debugf("Exclusive mode for group %s, stopping other process groups", processGroup.id)
-		for groupId, otherGroup := range pm.processGroups {
-			if groupId != processGroup.id {
-				otherGroup.StopProcesses()
-			}
-		}
+	processGroup, _, err := pm.swapProcessGroup(requestedModel)
+	if err != nil {
+		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
 	}
 
 	// rewrite the path
@@ -340,26 +354,9 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 		pm.sendErrorResponse(c, http.StatusBadRequest, "missing or invalid 'model' key")
 	}
 
-	// de-alias the real model name and get a real one
-	realModelName, found := pm.config.RealModelName(requestedModel)
-	if !found {
-		pm.sendErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("could not find modelID for %s", requestedModel))
-		return
-	}
-
-	processGroup := pm.findGroupByModelName(realModelName)
-	if processGroup == nil {
-		pm.sendErrorResponse(c, http.StatusNotFound, fmt.Sprintf("could not find process group for model %s ", requestedModel))
-		return
-	}
-
-	if processGroup.exclusive {
-		pm.proxyLogger.Debugf("Exclusive mode for group %s, stopping other process groups", processGroup.id)
-		for groupId, otherGroup := range pm.processGroups {
-			if groupId != processGroup.id {
-				otherGroup.StopProcesses()
-			}
-		}
+	processGroup, realModelName, err := pm.swapProcessGroup(requestedModel)
+	if err != nil {
+		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
 	}
 
 	// issue #69 allow custom model names to be sent to upstream
@@ -403,26 +400,9 @@ func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
 		return
 	}
 
-	// de-alias the real model name and get a real one
-	realModelName, found := pm.config.RealModelName(requestedModel)
-	if !found {
-		pm.sendErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("could not find modelID for %s", requestedModel))
-		return
-	}
-
-	processGroup := pm.findGroupByModelName(realModelName)
-	if processGroup == nil {
-		pm.sendErrorResponse(c, http.StatusNotFound, fmt.Sprintf("could not find process group for model %s ", requestedModel))
-		return
-	}
-
-	if processGroup.exclusive {
-		pm.proxyLogger.Debugf("Exclusive mode for group %s, stopping other process groups", processGroup.id)
-		for groupId, otherGroup := range pm.processGroups {
-			if groupId != processGroup.id {
-				otherGroup.StopProcesses()
-			}
-		}
+	processGroup, realModelName, err := pm.swapProcessGroup(requestedModel)
+	if err != nil {
+		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
 	}
 
 	// Copy all form values
