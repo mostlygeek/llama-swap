@@ -64,7 +64,7 @@ groups:
 		t.Fatalf("Failed to load config: %v", err)
 	}
 
-	expected := &Config{
+	expected := Config{
 		Models: map[string]ModelConfig{
 			"model1": {
 				Cmd:           "path/to/cmd --arg1 one",

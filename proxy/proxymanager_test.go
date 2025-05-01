@@ -16,14 +16,14 @@ import (
 )
 
 func TestProxyManager_SwapProcessCorrectly(t *testing.T) {
-	config := &Config{
+	config := AddDefaultGroupToConfig(Config{
 		HealthCheckTimeout: 15,
 		Models: map[string]ModelConfig{
 			"model1": getTestSimpleResponderConfig("model1"),
 			"model2": getTestSimpleResponderConfig("model2"),
 		},
 		LogLevel: "error",
-	}
+	})
 
 	proxy := New(config)
 	defer proxy.StopProcesses()
@@ -36,59 +36,52 @@ func TestProxyManager_SwapProcessCorrectly(t *testing.T) {
 		proxy.HandlerFunc(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Body.String(), modelName)
-
-		_, exists := proxy.currentProcesses[ProcessKeyName("", modelName)]
-		assert.True(t, exists, "expected %s key in currentProcesses", modelName)
-
 	}
-
-	// make sure there's only one loaded model
-	assert.Len(t, proxy.currentProcesses, 1)
 }
 
 func TestProxyManager_SwapMultiProcess(t *testing.T) {
 
-	model1 := "path1/model1"
-	model2 := "path2/model2"
-
-	profileModel1 := ProcessKeyName("test", model1)
-	profileModel2 := ProcessKeyName("test", model2)
-
-	config := &Config{
+	config := AddDefaultGroupToConfig(Config{
 		HealthCheckTimeout: 15,
 		Models: map[string]ModelConfig{
-			model1: getTestSimpleResponderConfig("model1"),
-			model2: getTestSimpleResponderConfig("model2"),
-		},
-		Profiles: map[string][]string{
-			"test": {model1, model2},
+			"model1": getTestSimpleResponderConfig("model1"),
+			"model2": getTestSimpleResponderConfig("model2"),
 		},
 		LogLevel: "error",
-	}
+		Groups: map[string]GroupConfig{
+			"G1": {
+				Swap:      true,
+				Exclusive: false,
+				Members:   []string{"model1"},
+			},
+			"G2": {
+				Swap:      true,
+				Exclusive: false,
+				Members:   []string{"model2"},
+			},
+		},
+	})
 
 	proxy := New(config)
 	defer proxy.StopProcesses()
 
-	for modelID, requestedModel := range map[string]string{
-		"model1": profileModel1,
-		"model2": profileModel2,
-	} {
-		reqBody := fmt.Sprintf(`{"model":"%s"}`, requestedModel)
-		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
-		w := httptest.NewRecorder()
+	tests := []string{"model1", "model2"}
+	for _, requestedModel := range tests {
+		t.Run(requestedModel, func(t *testing.T) {
+			reqBody := fmt.Sprintf(`{"model":"%s"}`, requestedModel)
+			req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+			w := httptest.NewRecorder()
 
-		proxy.HandlerFunc(w, req)
-		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(t, w.Body.String(), modelID)
+			proxy.HandlerFunc(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Contains(t, w.Body.String(), requestedModel)
+
+		})
 	}
 
 	// make sure there's two loaded models
-	assert.Len(t, proxy.currentProcesses, 2)
-	_, exists := proxy.currentProcesses[profileModel1]
-	assert.True(t, exists, "expected "+profileModel1+" key in currentProcesses")
-
-	_, exists = proxy.currentProcesses[profileModel2]
-	assert.True(t, exists, "expected "+profileModel2+" key in currentProcesses")
+	assert.Equal(t, proxy.findGroupByModelName("model1").processes["model1"].CurrentState(), StateReady)
+	assert.Equal(t, proxy.findGroupByModelName("model2").processes["model2"].CurrentState(), StateReady)
 }
 
 // When a request for a different model comes in ProxyManager should wait until
@@ -98,7 +91,7 @@ func TestProxyManager_SwapMultiProcessParallelRequests(t *testing.T) {
 		t.Skip("skipping slow test")
 	}
 
-	config := &Config{
+	config := AddDefaultGroupToConfig(Config{
 		HealthCheckTimeout: 15,
 		Models: map[string]ModelConfig{
 			"model1": getTestSimpleResponderConfig("model1"),
@@ -106,7 +99,7 @@ func TestProxyManager_SwapMultiProcessParallelRequests(t *testing.T) {
 			"model3": getTestSimpleResponderConfig("model3"),
 		},
 		LogLevel: "error",
-	}
+	})
 
 	proxy := New(config)
 	defer proxy.StopProcesses()
@@ -149,7 +142,7 @@ func TestProxyManager_SwapMultiProcessParallelRequests(t *testing.T) {
 }
 
 func TestProxyManager_ListModelsHandler(t *testing.T) {
-	config := &Config{
+	config := Config{
 		HealthCheckTimeout: 15,
 		Models: map[string]ModelConfig{
 			"model1": getTestSimpleResponderConfig("model1"),
@@ -217,51 +210,6 @@ func TestProxyManager_ListModelsHandler(t *testing.T) {
 	assert.Empty(t, expectedModels, "not all expected models were returned")
 }
 
-func TestProxyManager_ProfileNonMember(t *testing.T) {
-
-	model1 := "path1/model1"
-	model2 := "path2/model2"
-
-	profileMemberName := ProcessKeyName("test", model1)
-	profileNonMemberName := ProcessKeyName("test", model2)
-
-	config := &Config{
-		HealthCheckTimeout: 15,
-		Models: map[string]ModelConfig{
-			model1: getTestSimpleResponderConfig("model1"),
-			model2: getTestSimpleResponderConfig("model2"),
-		},
-		Profiles: map[string][]string{
-			"test": {model1},
-		},
-		LogLevel: "error",
-	}
-
-	proxy := New(config)
-	defer proxy.StopProcesses()
-
-	// actual member of profile
-	{
-		reqBody := fmt.Sprintf(`{"model":"%s"}`, profileMemberName)
-		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
-		w := httptest.NewRecorder()
-
-		proxy.HandlerFunc(w, req)
-		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(t, w.Body.String(), "model1")
-	}
-
-	// actual model, but non-member will 404
-	{
-		reqBody := fmt.Sprintf(`{"model":"%s"}`, profileNonMemberName)
-		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
-		w := httptest.NewRecorder()
-
-		proxy.HandlerFunc(w, req)
-		assert.Equal(t, http.StatusNotFound, w.Code)
-	}
-}
-
 func TestProxyManager_Shutdown(t *testing.T) {
 	// make broken model configurations
 	model1Config := getTestSimpleResponderConfigPort("model1", 9991)
@@ -273,24 +221,27 @@ func TestProxyManager_Shutdown(t *testing.T) {
 	model3Config := getTestSimpleResponderConfigPort("model3", 9993)
 	model3Config.Proxy = "http://localhost:10003/"
 
-	config := &Config{
+	config := AddDefaultGroupToConfig(Config{
 		HealthCheckTimeout: 15,
-		Profiles: map[string][]string{
-			"test": {"model1", "model2", "model3"},
-		},
 		Models: map[string]ModelConfig{
 			"model1": model1Config,
 			"model2": model2Config,
 			"model3": model3Config,
 		},
 		LogLevel: "error",
-	}
+		Groups: map[string]GroupConfig{
+			"test": {
+				Swap:    false,
+				Members: []string{"model1", "model2", "model3"},
+			},
+		},
+	})
 
 	proxy := New(config)
 
 	// Start all the processes
 	var wg sync.WaitGroup
-	for _, modelName := range []string{"test:model1", "test:model2", "test:model3"} {
+	for _, modelName := range []string{"model1", "model2", "model3"} {
 		wg.Add(1)
 		go func(modelName string) {
 			defer wg.Done()
@@ -298,11 +249,10 @@ func TestProxyManager_Shutdown(t *testing.T) {
 			req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
 			w := httptest.NewRecorder()
 
-			// send a request to trigger the proxy to load
+			// send a request to trigger the proxy to load ... this should hang waiting for start up
 			proxy.HandlerFunc(w, req)
 			assert.Equal(t, http.StatusBadGateway, w.Code)
 			assert.Contains(t, w.Body.String(), "health check interrupted due to shutdown")
-			//fmt.Println(w.Code, w.Body.String())
 		}(modelName)
 	}
 
@@ -314,67 +264,44 @@ func TestProxyManager_Shutdown(t *testing.T) {
 }
 
 func TestProxyManager_Unload(t *testing.T) {
-	config := &Config{
+	config := AddDefaultGroupToConfig(Config{
 		HealthCheckTimeout: 15,
 		Models: map[string]ModelConfig{
 			"model1": getTestSimpleResponderConfig("model1"),
 		},
 		LogLevel: "error",
-	}
+	})
 
 	proxy := New(config)
-	proc, err := proxy.swapModel("model1")
-	assert.NoError(t, err)
-	assert.NotNil(t, proc)
-
-	assert.Len(t, proxy.currentProcesses, 1)
-	req := httptest.NewRequest("GET", "/unload", nil)
+	reqBody := fmt.Sprintf(`{"model":"%s"}`, "model1")
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
 	w := httptest.NewRecorder()
+	proxy.HandlerFunc(w, req)
+
+	assert.Equal(t, proxy.processGroups[DEFAULT_GROUP_ID].processes["model1"].CurrentState(), StateReady)
+	req = httptest.NewRequest("GET", "/unload", nil)
+	w = httptest.NewRecorder()
 	proxy.HandlerFunc(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, w.Body.String(), "OK")
-	assert.Len(t, proxy.currentProcesses, 0)
-}
 
-// issue 62, strip profile slug from model name
-func TestProxyManager_StripProfileSlug(t *testing.T) {
-	config := &Config{
-		HealthCheckTimeout: 15,
-		Profiles: map[string][]string{
-			"test": {"TheExpectedModel"}, // TheExpectedModel is default in simple-responder.go
-		},
-		Models: map[string]ModelConfig{
-			"TheExpectedModel": getTestSimpleResponderConfig("TheExpectedModel"),
-		},
-		LogLevel: "error",
-	}
-
-	proxy := New(config)
-	defer proxy.StopProcesses()
-
-	reqBody := fmt.Sprintf(`{"model":"%s"}`, "test:TheExpectedModel")
-	req := httptest.NewRequest("POST", "/v1/audio/speech", bytes.NewBufferString(reqBody))
-	w := httptest.NewRecorder()
-	proxy.HandlerFunc(w, req)
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), "ok")
+	// give it a bit of time to stop
+	<-time.After(time.Millisecond * 250)
+	assert.Equal(t, proxy.processGroups[DEFAULT_GROUP_ID].processes["model1"].CurrentState(), StateStopped)
 }
 
 // Test issue #61 `Listing the current list of models and the loaded model.`
 func TestProxyManager_RunningEndpoint(t *testing.T) {
 
 	// Shared configuration
-	config := &Config{
+	config := AddDefaultGroupToConfig(Config{
 		HealthCheckTimeout: 15,
 		Models: map[string]ModelConfig{
 			"model1": getTestSimpleResponderConfig("model1"),
 			"model2": getTestSimpleResponderConfig("model2"),
 		},
-		Profiles: map[string][]string{
-			"test": {"model1", "model2"},
-		},
-		LogLevel: "error",
-	}
+		LogLevel: "debug",
+	})
 
 	// Define a helper struct to parse the JSON response.
 	type RunningResponse struct {
@@ -429,238 +356,126 @@ func TestProxyManager_RunningEndpoint(t *testing.T) {
 		// Is the model loaded?
 		assert.Equal(t, "ready", response.Running[0].State)
 	})
-
-	t.Run("multiple models via profile", func(t *testing.T) {
-		// Load more than one model.
-		for _, model := range []string{"model1", "model2"} {
-			profileModel := ProcessKeyName("test", model)
-			reqBody := fmt.Sprintf(`{"model":"%s"}`, profileModel)
-			req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
-			w := httptest.NewRecorder()
-			proxy.HandlerFunc(w, req)
-			assert.Equal(t, http.StatusOK, w.Code)
-		}
-
-		// Simulate the browser call.
-		req := httptest.NewRequest("GET", "/running", nil)
-		w := httptest.NewRecorder()
-		proxy.HandlerFunc(w, req)
-
-		var response RunningResponse
-
-		// The JSON response must be valid.
-		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
-
-		// The response should contain 2 models.
-		assert.Len(t, response.Running, 2)
-
-		expectedModels := map[string]struct{}{
-			"model1": {},
-			"model2": {},
-		}
-
-		// Iterate through the models and check their states as well.
-		for _, entry := range response.Running {
-			_, exists := expectedModels[entry.Model]
-			assert.True(t, exists, "unexpected model %s", entry.Model)
-			assert.Equal(t, "ready", entry.State)
-			delete(expectedModels, entry.Model)
-		}
-
-		// Since we deleted each model while testing for its validity we should have no more models in the response.
-		assert.Empty(t, expectedModels, "unexpected additional models in response")
-	})
 }
 
 func TestProxyManager_AudioTranscriptionHandler(t *testing.T) {
-	config := &Config{
+	config := AddDefaultGroupToConfig(Config{
 		HealthCheckTimeout: 15,
-		Profiles: map[string][]string{
-			"test": {"TheExpectedModel"},
-		},
 		Models: map[string]ModelConfig{
 			"TheExpectedModel": getTestSimpleResponderConfig("TheExpectedModel"),
 		},
 		LogLevel: "error",
-	}
+	})
 
 	proxy := New(config)
 	defer proxy.StopProcesses()
 
-	testCases := []struct {
-		name        string
-		modelInput  string
-		expectModel string
-	}{
-		{
-			name:        "With Profile Prefix",
-			modelInput:  "test:TheExpectedModel",
-			expectModel: "TheExpectedModel", // Profile prefix should be stripped
-		},
-		{
-			name:        "Without Profile Prefix",
-			modelInput:  "TheExpectedModel",
-			expectModel: "TheExpectedModel", // Should remain the same
-		},
-	}
+	// Create a buffer with multipart form data
+	var b bytes.Buffer
+	w := multipart.NewWriter(&b)
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Create a buffer with multipart form data
-			var b bytes.Buffer
-			w := multipart.NewWriter(&b)
+	// Add the model field
+	fw, err := w.CreateFormField("model")
+	assert.NoError(t, err)
+	_, err = fw.Write([]byte("TheExpectedModel"))
+	assert.NoError(t, err)
 
-			// Add the model field
-			fw, err := w.CreateFormField("model")
-			assert.NoError(t, err)
-			_, err = fw.Write([]byte(tc.modelInput))
-			assert.NoError(t, err)
+	// Add a file field
+	fw, err = w.CreateFormFile("file", "test.mp3")
+	assert.NoError(t, err)
+	// Generate random content length between 10 and 20
+	contentLength := rand.Intn(11) + 10 // 10 to 20
+	content := make([]byte, contentLength)
+	_, err = fw.Write(content)
+	assert.NoError(t, err)
+	w.Close()
 
-			// Add a file field
-			fw, err = w.CreateFormFile("file", "test.mp3")
-			assert.NoError(t, err)
-			// Generate random content length between 10 and 20
-			contentLength := rand.Intn(11) + 10 // 10 to 20
-			content := make([]byte, contentLength)
-			_, err = fw.Write(content)
-			assert.NoError(t, err)
-			w.Close()
+	// Create the request with the multipart form data
+	req := httptest.NewRequest("POST", "/v1/audio/transcriptions", &b)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	rec := httptest.NewRecorder()
+	proxy.HandlerFunc(rec, req)
 
-			// Create the request with the multipart form data
-			req := httptest.NewRequest("POST", "/v1/audio/transcriptions", &b)
-			req.Header.Set("Content-Type", w.FormDataContentType())
-			rec := httptest.NewRecorder()
-			proxy.HandlerFunc(rec, req)
-
-			// Verify the response
-			assert.Equal(t, http.StatusOK, rec.Code)
-			var response map[string]string
-			err = json.Unmarshal(rec.Body.Bytes(), &response)
-			assert.NoError(t, err)
-			assert.Equal(t, tc.expectModel, response["model"])
-			assert.Equal(t, response["text"], fmt.Sprintf("The length of the file is %d bytes", contentLength)) // matches simple-responder
-		})
-	}
-}
-
-func TestProxyManager_SplitRequestedModel(t *testing.T) {
-
-	tests := []struct {
-		name            string
-		requestedModel  string
-		expectedProfile string
-		expectedModel   string
-	}{
-		{"no profile", "gpt-4", "", "gpt-4"},
-		{"with profile", "profile1:gpt-4", "profile1", "gpt-4"},
-		{"only profile", "profile1:", "profile1", ""},
-		{"empty model", ":gpt-4", "", "gpt-4"},
-		{"empty profile", ":", "", ""},
-		{"no split char", "gpt-4", "", "gpt-4"},
-		{"profile and model with delimiter", "profile1:delimiter:gpt-4", "profile1", "delimiter:gpt-4"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			profileName, modelName := splitRequestedModel(tt.requestedModel)
-			if profileName != tt.expectedProfile {
-				t.Errorf("splitRequestedModel(%q) = %q, %q; want %q, %q", tt.requestedModel, profileName, modelName, tt.expectedProfile, tt.expectedModel)
-			}
-			if modelName != tt.expectedModel {
-				t.Errorf("splitRequestedModel(%q) = %q, %q; want %q, %q", tt.requestedModel, profileName, modelName, tt.expectedProfile, tt.expectedModel)
-			}
-		})
-	}
+	// Verify the response
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var response map[string]string
+	err = json.Unmarshal(rec.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Equal(t, "TheExpectedModel", response["model"])
+	assert.Equal(t, response["text"], fmt.Sprintf("The length of the file is %d bytes", contentLength)) // matches simple-responder
 }
 
 // Test useModelName in configuration sends overrides what is sent to upstream
 func TestProxyManager_UseModelName(t *testing.T) {
-
 	upstreamModelName := "upstreamModel"
 
 	modelConfig := getTestSimpleResponderConfig(upstreamModelName)
 	modelConfig.UseModelName = upstreamModelName
 
-	config := &Config{
+	config := AddDefaultGroupToConfig(Config{
 		HealthCheckTimeout: 15,
-		Profiles: map[string][]string{
-			"test": {"model1"},
-		},
-
 		Models: map[string]ModelConfig{
 			"model1": modelConfig,
 		},
-
 		LogLevel: "error",
-	}
+	})
 
 	proxy := New(config)
 	defer proxy.StopProcesses()
 
-	tests := []struct {
-		description    string
-		requestedModel string
-	}{
-		{"useModelName over rides requested model", "model1"},
-		{"useModelName over rides requested profile:model", "test:model1"},
-	}
+	requestedModel := "model1"
 
-	for _, tt := range tests {
-		t.Run(tt.description+": /v1/chat/completions", func(t *testing.T) {
-			reqBody := fmt.Sprintf(`{"model":"%s"}`, tt.requestedModel)
-			req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
-			w := httptest.NewRecorder()
+	t.Run("useModelName over rides requested model: /v1/chat/completions", func(t *testing.T) {
+		reqBody := fmt.Sprintf(`{"model":"%s"}`, requestedModel)
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := httptest.NewRecorder()
 
-			proxy.HandlerFunc(w, req)
-			assert.Equal(t, http.StatusOK, w.Code)
-			assert.Contains(t, w.Body.String(), upstreamModelName)
+		proxy.HandlerFunc(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), upstreamModelName)
+	})
 
-		})
-	}
+	t.Run("useModelName over rides requested model: /v1/audio/transcriptions", func(t *testing.T) {
+		// Create a buffer with multipart form data
+		var b bytes.Buffer
+		w := multipart.NewWriter(&b)
 
-	for _, tt := range tests {
-		t.Run(tt.description+": /v1/audio/transcriptions", func(t *testing.T) {
-			// Create a buffer with multipart form data
-			var b bytes.Buffer
-			w := multipart.NewWriter(&b)
+		// Add the model field
+		fw, err := w.CreateFormField("model")
+		assert.NoError(t, err)
+		_, err = fw.Write([]byte(requestedModel))
+		assert.NoError(t, err)
 
-			// Add the model field
-			fw, err := w.CreateFormField("model")
-			assert.NoError(t, err)
-			_, err = fw.Write([]byte(tt.requestedModel))
-			assert.NoError(t, err)
+		// Add a file field
+		fw, err = w.CreateFormFile("file", "test.mp3")
+		assert.NoError(t, err)
+		_, err = fw.Write([]byte("test"))
+		assert.NoError(t, err)
+		w.Close()
 
-			// Add a file field
-			fw, err = w.CreateFormFile("file", "test.mp3")
-			assert.NoError(t, err)
-			_, err = fw.Write([]byte("test"))
-			assert.NoError(t, err)
-			w.Close()
+		// Create the request with the multipart form data
+		req := httptest.NewRequest("POST", "/v1/audio/transcriptions", &b)
+		req.Header.Set("Content-Type", w.FormDataContentType())
+		rec := httptest.NewRecorder()
+		proxy.HandlerFunc(rec, req)
 
-			// Create the request with the multipart form data
-			req := httptest.NewRequest("POST", "/v1/audio/transcriptions", &b)
-			req.Header.Set("Content-Type", w.FormDataContentType())
-			rec := httptest.NewRecorder()
-			proxy.HandlerFunc(rec, req)
-
-			// Verify the response
-			assert.Equal(t, http.StatusOK, rec.Code)
-			var response map[string]string
-			err = json.Unmarshal(rec.Body.Bytes(), &response)
-			assert.NoError(t, err)
-			assert.Equal(t, upstreamModelName, response["model"])
-		})
-	}
+		// Verify the response
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var response map[string]string
+		err = json.Unmarshal(rec.Body.Bytes(), &response)
+		assert.NoError(t, err)
+		assert.Equal(t, upstreamModelName, response["model"])
+	})
 }
 
 func TestProxyManager_CORSOptionsHandler(t *testing.T) {
-	config := &Config{
+	config := AddDefaultGroupToConfig(Config{
 		HealthCheckTimeout: 15,
 		Models: map[string]ModelConfig{
 			"model1": getTestSimpleResponderConfig("model1"),
 		},
 		LogLevel: "error",
-	}
+	})
 
 	tests := []struct {
 		name            string
@@ -719,4 +534,22 @@ func TestProxyManager_CORSOptionsHandler(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestProxyManager_Upstream(t *testing.T) {
+	config := AddDefaultGroupToConfig(Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]ModelConfig{
+			"model1": getTestSimpleResponderConfig("model1"),
+		},
+		LogLevel: "error",
+	})
+
+	proxy := New(config)
+	defer proxy.StopProcesses()
+	req := httptest.NewRequest("GET", "/upstream/model1/test", nil)
+	rec := httptest.NewRecorder()
+	proxy.HandlerFunc(rec, req)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "model1", rec.Body.String())
 }

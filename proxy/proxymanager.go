@@ -26,17 +26,18 @@ const (
 type ProxyManager struct {
 	sync.Mutex
 
-	config           *Config
-	currentProcesses map[string]*Process
-	ginEngine        *gin.Engine
+	config    Config
+	ginEngine *gin.Engine
 
 	// logging
 	proxyLogger    *LogMonitor
 	upstreamLogger *LogMonitor
 	muxLogger      *LogMonitor
+
+	processGroups map[string]*ProcessGroup
 }
 
-func New(config *Config) *ProxyManager {
+func New(config Config) *ProxyManager {
 	// set up loggers
 	stdoutLogger := NewLogMonitorWriter(os.Stdout)
 	upstreamLogger := NewLogMonitorWriter(stdoutLogger)
@@ -65,13 +66,20 @@ func New(config *Config) *ProxyManager {
 	}
 
 	pm := &ProxyManager{
-		config:           config,
-		currentProcesses: make(map[string]*Process),
-		ginEngine:        gin.New(),
+		config:    config,
+		ginEngine: gin.New(),
 
 		proxyLogger:    proxyLogger,
 		muxLogger:      stdoutLogger,
 		upstreamLogger: upstreamLogger,
+
+		processGroups: make(map[string]*ProcessGroup),
+	}
+
+	// create the process groups
+	for groupID := range config.Groups {
+		processGroup := NewProcessGroup(groupID, config, proxyLogger, upstreamLogger)
+		pm.processGroups[groupID] = processGroup
 	}
 
 	pm.ginEngine.Use(func(c *gin.Context) {
@@ -205,22 +213,17 @@ func (pm *ProxyManager) StopProcesses() {
 
 // for internal usage
 func (pm *ProxyManager) stopProcesses() {
-	if len(pm.currentProcesses) == 0 {
-		return
-	}
-
 	// stop Processes in parallel
 	var wg sync.WaitGroup
-	for _, process := range pm.currentProcesses {
+	for _, processGroup := range pm.processGroups {
 		wg.Add(1)
-		go func(process *Process) {
+		go func(processGroup *ProcessGroup) {
 			defer wg.Done()
-			process.Stop()
-		}(process)
+			processGroup.stopProcesses()
+		}(processGroup)
 	}
-	wg.Wait()
 
-	pm.currentProcesses = make(map[string]*Process)
+	wg.Wait()
 }
 
 // Shutdown is called to shutdown all upstream processes
@@ -229,14 +232,16 @@ func (pm *ProxyManager) Shutdown() {
 	pm.Lock()
 	defer pm.Unlock()
 
-	// shutdown process in parallel
+	pm.proxyLogger.Debug("Shutdown() called in proxy manager")
+
 	var wg sync.WaitGroup
-	for _, process := range pm.currentProcesses {
+	// Send shutdown signal to all process in groups
+	for _, processGroup := range pm.processGroups {
 		wg.Add(1)
-		go func(process *Process) {
+		go func(processGroup *ProcessGroup) {
 			defer wg.Done()
-			process.Shutdown()
-		}(process)
+			processGroup.Shutdown()
+		}(processGroup)
 	}
 	wg.Wait()
 }
@@ -270,79 +275,6 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 	}
 }
 
-func (pm *ProxyManager) swapModel(requestedModel string) (*Process, error) {
-	pm.Lock()
-	defer pm.Unlock()
-
-	// Check if requestedModel contains a PROFILE_SPLIT_CHAR
-	profileName, modelName := splitRequestedModel(requestedModel)
-
-	if profileName != "" {
-		if _, found := pm.config.Profiles[profileName]; !found {
-			return nil, fmt.Errorf("model group not found %s", profileName)
-		}
-	}
-
-	// de-alias the real model name and get a real one
-	realModelName, found := pm.config.RealModelName(modelName)
-	if !found {
-		return nil, fmt.Errorf("could not find modelID for %s", requestedModel)
-	}
-
-	// check if model is part of the profile
-	if profileName != "" {
-		found := false
-		for _, item := range pm.config.Profiles[profileName] {
-			if item == realModelName {
-				found = true
-				break
-			}
-		}
-
-		if !found {
-			return nil, fmt.Errorf("model %s part of profile %s", realModelName, profileName)
-		}
-	}
-
-	// exit early when already running, otherwise stop everything and swap
-	requestedProcessKey := ProcessKeyName(profileName, realModelName)
-
-	if process, found := pm.currentProcesses[requestedProcessKey]; found {
-		pm.proxyLogger.Debugf("No-swap, using existing process for model [%s]", requestedModel)
-		return process, nil
-	}
-
-	// stop all running models
-	pm.proxyLogger.Infof("Swapping model to [%s]", requestedModel)
-	pm.stopProcesses()
-	if profileName == "" {
-		modelConfig, modelID, found := pm.config.FindConfig(realModelName)
-		if !found {
-			return nil, fmt.Errorf("could not find configuration for %s", realModelName)
-		}
-
-		process := NewProcess(modelID, pm.config.HealthCheckTimeout, modelConfig, pm.upstreamLogger, pm.proxyLogger)
-		processKey := ProcessKeyName(profileName, modelID)
-		pm.currentProcesses[processKey] = process
-	} else {
-		for _, modelName := range pm.config.Profiles[profileName] {
-			if realModelName, found := pm.config.RealModelName(modelName); found {
-				modelConfig, modelID, found := pm.config.FindConfig(realModelName)
-				if !found {
-					return nil, fmt.Errorf("could not find configuration for %s in group %s", realModelName, profileName)
-				}
-
-				process := NewProcess(modelID, pm.config.HealthCheckTimeout, modelConfig, pm.upstreamLogger, pm.proxyLogger)
-				processKey := ProcessKeyName(profileName, modelID)
-				pm.currentProcesses[processKey] = process
-			}
-		}
-	}
-
-	// requestedProcessKey should exist due to swap
-	return pm.currentProcesses[requestedProcessKey], nil
-}
-
 func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 	requestedModel := c.Param("model_id")
 
@@ -351,13 +283,24 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 		return
 	}
 
-	if process, err := pm.swapModel(requestedModel); err != nil {
-		pm.sendErrorResponse(c, http.StatusNotFound, fmt.Sprintf("unable to swap to model, %s", err.Error()))
-	} else {
-		// rewrite the path
-		c.Request.URL.Path = c.Param("upstreamPath")
-		process.ProxyRequest(c.Writer, c.Request)
+	processGroup := pm.findGroupByModelName(requestedModel)
+	if processGroup == nil {
+		pm.sendErrorResponse(c, http.StatusNotFound, fmt.Sprintf("could not find process group for model %s ", requestedModel))
+		return
 	}
+
+	if processGroup.exclusive {
+		pm.proxyLogger.Debugf("Exclusive mode for group %s, stopping other process groups", processGroup.id)
+		for groupId, otherGroup := range pm.processGroups {
+			if groupId != processGroup.id {
+				otherGroup.StopProcesses()
+			}
+		}
+	}
+
+	// rewrite the path
+	c.Request.URL.Path = c.Param("upstreamPath")
+	processGroup.ProxyRequest(requestedModel, c.Writer, c.Request)
 }
 
 func (pm *ProxyManager) upstreamIndex(c *gin.Context) {
@@ -397,28 +340,35 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 		pm.sendErrorResponse(c, http.StatusBadRequest, "missing or invalid 'model' key")
 	}
 
-	process, err := pm.swapModel(requestedModel)
-
-	if err != nil {
-		pm.sendErrorResponse(c, http.StatusNotFound, fmt.Sprintf("unable to swap to model, %s", err.Error()))
+	// de-alias the real model name and get a real one
+	realModelName, found := pm.config.RealModelName(requestedModel)
+	if !found {
+		pm.sendErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("could not find modelID for %s", requestedModel))
 		return
 	}
 
-	// issue #69 allow custom model names to be sent to upstream
-	if process.config.UseModelName != "" {
-		bodyBytes, err = sjson.SetBytes(bodyBytes, "model", process.config.UseModelName)
-		if err != nil {
-			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error updating JSON: %s", err.Error()))
-			return
-		}
-	} else {
-		profileName, modelName := splitRequestedModel(requestedModel)
-		if profileName != "" {
-			bodyBytes, err = sjson.SetBytes(bodyBytes, "model", modelName)
-			if err != nil {
-				pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error updating JSON: %s", err.Error()))
-				return
+	processGroup := pm.findGroupByModelName(realModelName)
+	if processGroup == nil {
+		pm.sendErrorResponse(c, http.StatusNotFound, fmt.Sprintf("could not find process group for model %s ", requestedModel))
+		return
+	}
+
+	if processGroup.exclusive {
+		pm.proxyLogger.Debugf("Exclusive mode for group %s, stopping other process groups", processGroup.id)
+		for groupId, otherGroup := range pm.processGroups {
+			if groupId != processGroup.id {
+				otherGroup.StopProcesses()
 			}
+		}
+	}
+
+	// issue #69 allow custom model names to be sent to upstream
+	useModelName := pm.config.Models[realModelName].UseModelName
+	if useModelName != "" {
+		bodyBytes, err = sjson.SetBytes(bodyBytes, "model", useModelName)
+		if err != nil {
+			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error rewriting model name in JSON: %s", err.Error()))
+			return
 		}
 	}
 
@@ -428,8 +378,10 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 	c.Request.Header.Del("transfer-encoding")
 	c.Request.Header.Add("content-length", strconv.Itoa(len(bodyBytes)))
 
-	process.ProxyRequest(c.Writer, c.Request)
-
+	if err := processGroup.ProxyRequest(realModelName, c.Writer, c.Request); err != nil {
+		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
+		pm.proxyLogger.Errorf("Error Proxying Request for processGroup %s and model %s", processGroup.id, realModelName)
+	}
 }
 
 func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
@@ -451,15 +403,27 @@ func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
 		return
 	}
 
-	// Swap to the requested model
-	process, err := pm.swapModel(requestedModel)
-	if err != nil {
-		pm.sendErrorResponse(c, http.StatusNotFound, fmt.Sprintf("unable to swap to model, %s", err.Error()))
+	// de-alias the real model name and get a real one
+	realModelName, found := pm.config.RealModelName(requestedModel)
+	if !found {
+		pm.sendErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("could not find modelID for %s", requestedModel))
 		return
 	}
 
-	// Get profile name and model name from the requested model
-	profileName, modelName := splitRequestedModel(requestedModel)
+	processGroup := pm.findGroupByModelName(realModelName)
+	if processGroup == nil {
+		pm.sendErrorResponse(c, http.StatusNotFound, fmt.Sprintf("could not find process group for model %s ", requestedModel))
+		return
+	}
+
+	if processGroup.exclusive {
+		pm.proxyLogger.Debugf("Exclusive mode for group %s, stopping other process groups", processGroup.id)
+		for groupId, otherGroup := range pm.processGroups {
+			if groupId != processGroup.id {
+				otherGroup.StopProcesses()
+			}
+		}
+	}
 
 	// Copy all form values
 	for key, values := range c.Request.MultipartForm.Value {
@@ -467,10 +431,13 @@ func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
 			fieldValue := value
 			// If this is the model field and we have a profile, use just the model name
 			if key == "model" {
-				if process.config.UseModelName != "" {
-					fieldValue = process.config.UseModelName
-				} else if profileName != "" {
-					fieldValue = modelName
+				// # issue #69 allow custom model names to be sent to upstream
+				useModelName := pm.config.Models[realModelName].UseModelName
+
+				if useModelName != "" {
+					fieldValue = useModelName
+				} else {
+					fieldValue = requestedModel
 				}
 			}
 			field, err := multipartWriter.CreateFormField(key)
@@ -532,7 +499,10 @@ func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
 	modifiedReq.Header.Set("Content-Type", multipartWriter.FormDataContentType())
 
 	// Use the modified request for proxying
-	process.ProxyRequest(c.Writer, modifiedReq)
+	if err := processGroup.ProxyRequest(realModelName, c.Writer, modifiedReq); err != nil {
+		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
+		pm.proxyLogger.Errorf("Error Proxying Request for processGroup %s and model %s", processGroup.id, realModelName)
+	}
 }
 
 func (pm *ProxyManager) sendErrorResponse(c *gin.Context, statusCode int, message string) {
@@ -554,14 +524,15 @@ func (pm *ProxyManager) listRunningProcessesHandler(context *gin.Context) {
 	context.Header("Content-Type", "application/json")
 	runningProcesses := make([]gin.H, 0) // Default to an empty response.
 
-	for _, process := range pm.currentProcesses {
-
-		// Append the process ID and State (multiple entries if profiles are being used).
-		runningProcesses = append(runningProcesses, gin.H{
-			"model": process.ID,
-			"state": process.state,
-		})
-
+	for _, processGroup := range pm.processGroups {
+		for _, process := range processGroup.processes {
+			if process.CurrentState() == StateReady {
+				runningProcesses = append(runningProcesses, gin.H{
+					"model": process.ID,
+					"state": process.state,
+				})
+			}
+		}
 	}
 
 	// Put the results under the `running` key.
@@ -572,15 +543,11 @@ func (pm *ProxyManager) listRunningProcessesHandler(context *gin.Context) {
 	context.JSON(http.StatusOK, response) // Always return 200 OK
 }
 
-func ProcessKeyName(groupName, modelName string) string {
-	return groupName + PROFILE_SPLIT_CHAR + modelName
-}
-
-func splitRequestedModel(requestedModel string) (string, string) {
-	profileName, modelName := "", requestedModel
-	if idx := strings.Index(requestedModel, PROFILE_SPLIT_CHAR); idx != -1 {
-		profileName = requestedModel[:idx]
-		modelName = requestedModel[idx+1:]
+func (pm *ProxyManager) findGroupByModelName(modelName string) *ProcessGroup {
+	for _, group := range pm.processGroups {
+		if group.HasMember(modelName) {
+			return group
+		}
 	}
-	return profileName, modelName
+	return nil
 }

@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-var processGroupTestConfig = &Config{
+var processGroupTestConfig = AddDefaultGroupToConfig(Config{
 	HealthCheckTimeout: 15,
 	Models: map[string]ModelConfig{
 		"model1": getTestSimpleResponderConfig("model1"),
@@ -30,6 +30,11 @@ var processGroupTestConfig = &Config{
 			Members:   []string{"model3", "model4"},
 		},
 	},
+})
+
+func TestProcessGroup_DefaultHasCorrectModel(t *testing.T) {
+	pg := NewProcessGroup(DEFAULT_GROUP_ID, processGroupTestConfig, testLogger, testLogger)
+	assert.True(t, pg.HasMember("model5"))
 }
 
 func TestProcessGroup_HasMember(t *testing.T) {

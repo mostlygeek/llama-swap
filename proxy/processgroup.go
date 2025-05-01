@@ -10,7 +10,7 @@ import (
 type ProcessGroup struct {
 	sync.Mutex
 
-	config    *Config
+	config    Config
 	id        string
 	swap      bool
 	exclusive bool
@@ -23,7 +23,7 @@ type ProcessGroup struct {
 	lastUsedProcess string
 }
 
-func NewProcessGroup(id string, config *Config, proxyLogger *LogMonitor, upstreamLogger *LogMonitor) *ProcessGroup {
+func NewProcessGroup(id string, config Config, proxyLogger *LogMonitor, upstreamLogger *LogMonitor) *ProcessGroup {
 	groupConfig, ok := config.Groups[id]
 	if !ok {
 		panic("Unable to find configuration for group id: " + id)
@@ -90,6 +90,18 @@ func (pg *ProcessGroup) stopProcesses() {
 		go func(process *Process) {
 			defer wg.Done()
 			process.Stop()
+		}(process)
+	}
+	wg.Wait()
+}
+
+func (pg *ProcessGroup) Shutdown() {
+	var wg sync.WaitGroup
+	for _, process := range pg.processes {
+		wg.Add(1)
+		go func(process *Process) {
+			defer wg.Done()
+			process.Shutdown()
 		}(process)
 	}
 	wg.Wait()

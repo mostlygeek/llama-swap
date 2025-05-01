@@ -3,6 +3,7 @@ package proxy
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/google/shlex"
@@ -62,16 +63,16 @@ func (c *Config) FindConfig(modelName string) (ModelConfig, string, bool) {
 	}
 }
 
-func LoadConfig(path string) (*Config, error) {
+func LoadConfig(path string) (Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return Config{}, err
 	}
 
 	var config Config
 	err = yaml.Unmarshal(data, &config)
 	if err != nil {
-		return nil, err
+		return Config{}, err
 	}
 
 	if config.HealthCheckTimeout < 15 {
@@ -86,7 +87,17 @@ func LoadConfig(path string) (*Config, error) {
 		}
 	}
 
-	// rewrite the configuration of Groups to include a default group
+	config = AddDefaultGroupToConfig(config)
+
+	return config, nil
+}
+
+// rewrites the yaml to include a default group with any orphaned models
+func AddDefaultGroupToConfig(config Config) Config {
+
+	if config.Groups == nil {
+		config.Groups = make(map[string]GroupConfig)
+	}
 
 	defaultGroup := GroupConfig{
 		Swap:      true,
@@ -119,9 +130,11 @@ func LoadConfig(path string) (*Config, error) {
 			}
 		}
 	}
+
+	sort.Strings(defaultGroup.Members) // make consistent ordering for testing
 	config.Groups[DEFAULT_GROUP_ID] = defaultGroup
 
-	return &config, nil
+	return config
 }
 
 func SanitizeCommand(cmdStr string) ([]string, error) {
