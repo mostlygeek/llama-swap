@@ -296,8 +296,8 @@ func TestProxyManager_Shutdown(t *testing.T) {
 		assert.Equal(t, StateFailed, process.CurrentState(), "process should be in failed state")
 	})
 
-	// Test Case 2: Clean shutdown of running processes
-	t.Run("clean shutdown of processes", func(t *testing.T) {
+	// Test Case 2: Clean shutdown waits for in-flight requests
+	t.Run("clean shutdown waits for requests", func(t *testing.T) {
 		// Create configuration with valid model
 		config := &Config{
 			HealthCheckTimeout: 15,
@@ -309,18 +309,54 @@ func TestProxyManager_Shutdown(t *testing.T) {
 
 		proxy := New(config)
 
-		// Start a model
-		reqBody := `{"model":"model1"}`
-		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
-		w := httptest.NewRecorder()
-		proxy.ServeHTTP(w, req)
+		// Start a model and keep track of request completion
+		requestDone := make(chan bool)
+		requestStarted := make(chan bool)
 
-		// Verify model started successfully
-		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Len(t, proxy.currentProcesses, 1, "process should be running")
+		// Start long-running request in goroutine
+		go func() {
+			reqBody := fmt.Sprintf(`{"model":"model1"}`)
+			req := httptest.NewRequest("POST", "/v1/chat/completions?wait=3000ms", bytes.NewBufferString(reqBody))
+			w := httptest.NewRecorder()
 
-		// Shutdown
-		proxy.Shutdown()
+			// Signal that request is about to start
+			requestStarted <- true
+
+			proxy.ServeHTTP(w, req)
+
+			// Verify request completed successfully
+			assert.Equal(t, http.StatusOK, w.Code)
+			requestDone <- true
+		}()
+
+		// Wait for request to start
+		<-requestStarted
+
+		// Start shutdown in goroutine
+		shutdownComplete := make(chan bool)
+		go func() {
+			proxy.StopProcesses()
+			shutdownComplete <- true
+		}()
+
+		// Verify shutdown waits for request
+		select {
+		case <-shutdownComplete:
+			t.Error("Shutdown completed before request finished")
+		case <-time.After(1 * time.Second):
+			// Expected: shutdown is still waiting after 1 second
+		}
+
+		// Wait for request to complete
+		<-requestDone
+
+		// Now shutdown should complete quickly
+		select {
+		case <-shutdownComplete:
+			// Expected: shutdown completes after request is done
+		case <-time.After(1 * time.Second):
+			t.Error("Shutdown did not complete after request finished")
+		}
 
 		// Verify cleanup
 		assert.Len(t, proxy.currentProcesses, 0, "no processes should remain after shutdown")

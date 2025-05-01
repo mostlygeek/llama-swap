@@ -78,7 +78,10 @@ func main() {
 		for {
 			select {
 			case newManager := <-reloadChan:
-				// Stop old manager processes and swap handler
+				log.Println("Config change detected, waiting for in-flight requests to complete...")
+				// Stop old manager processes gracefully (this waits for in-flight requests)
+				currentManager.StopProcesses()
+				// Now do a full shutdown to clear the process map
 				currentManager.Shutdown()
 				currentManager = newManager
 				srv.Handler = newManager
