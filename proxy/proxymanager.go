@@ -208,11 +208,6 @@ func (pm *ProxyManager) StopProcesses() {
 	pm.Lock()
 	defer pm.Unlock()
 
-	pm.stopProcesses()
-}
-
-// for internal usage
-func (pm *ProxyManager) stopProcesses() {
 	// stop Processes in parallel
 	var wg sync.WaitGroup
 	for _, processGroup := range pm.processGroups {
