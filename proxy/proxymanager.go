@@ -261,7 +261,7 @@ func (pm *ProxyManager) swapProcessGroup(requestedModel string) (*ProcessGroup, 
 	if processGroup.exclusive {
 		pm.proxyLogger.Debugf("Exclusive mode for group %s, stopping other process groups", processGroup.id)
 		for groupId, otherGroup := range pm.processGroups {
-			if groupId != processGroup.id {
+			if groupId != processGroup.id && !otherGroup.persistent {
 				otherGroup.StopProcesses()
 			}
 		}

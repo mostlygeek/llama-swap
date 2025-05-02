@@ -40,7 +40,6 @@ func TestProxyManager_SwapProcessCorrectly(t *testing.T) {
 }
 
 func TestProxyManager_SwapMultiProcess(t *testing.T) {
-
 	config := AddDefaultGroupToConfig(Config{
 		HealthCheckTimeout: 15,
 		Models: map[string]ModelConfig{
@@ -82,6 +81,46 @@ func TestProxyManager_SwapMultiProcess(t *testing.T) {
 	// make sure there's two loaded models
 	assert.Equal(t, proxy.findGroupByModelName("model1").processes["model1"].CurrentState(), StateReady)
 	assert.Equal(t, proxy.findGroupByModelName("model2").processes["model2"].CurrentState(), StateReady)
+}
+
+// Test that a persistent group is not affected by the swapping behaviour of
+// other groups.
+func TestProxyManager_PersistentGroupsAreNotSwapped(t *testing.T) {
+	config := AddDefaultGroupToConfig(Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]ModelConfig{
+			"model1": getTestSimpleResponderConfig("model1"), // goes into the default group
+			"model2": getTestSimpleResponderConfig("model2"),
+		},
+		LogLevel: "error",
+		Groups: map[string]GroupConfig{
+			// the forever group is persistent and should not be affected by model1
+			"forever": {
+				Swap:       true,
+				Exclusive:  false,
+				Persistent: true,
+				Members:    []string{"model2"},
+			},
+		},
+	})
+
+	proxy := New(config)
+	defer proxy.StopProcesses()
+
+	// make requests to load all models, loading model1 should not affect model2
+	tests := []string{"model2", "model1"}
+	for _, requestedModel := range tests {
+		reqBody := fmt.Sprintf(`{"model":"%s"}`, requestedModel)
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := httptest.NewRecorder()
+
+		proxy.HandlerFunc(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), requestedModel)
+	}
+
+	assert.Equal(t, proxy.findGroupByModelName("model2").processes["model2"].CurrentState(), StateReady)
+	assert.Equal(t, proxy.findGroupByModelName("model1").processes["model1"].CurrentState(), StateReady)
 }
 
 // When a request for a different model comes in ProxyManager should wait until

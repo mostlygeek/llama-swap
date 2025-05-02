@@ -28,9 +28,28 @@ func (m *ModelConfig) SanitizedCommand() ([]string, error) {
 }
 
 type GroupConfig struct {
-	Swap      bool     `yaml:"swap"`
-	Exclusive bool     `yaml:"exclusive"`
-	Members   []string `yaml:"members"`
+	Swap       bool     `yaml:"swap"`
+	Exclusive  bool     `yaml:"exclusive"`
+	Persistent bool     `yaml:"persistent"`
+	Members    []string `yaml:"members"`
+}
+
+// set default values for GroupConfig
+func (c *GroupConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	type rawGroupConfig GroupConfig
+	defaults := rawGroupConfig{
+		Swap:       true,
+		Exclusive:  true,
+		Persistent: false,
+		Members:    []string{},
+	}
+
+	if err := unmarshal(&defaults); err != nil {
+		return err
+	}
+
+	*c = GroupConfig(defaults)
+	return nil
 }
 
 type Config struct {

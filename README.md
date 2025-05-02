@@ -127,10 +127,10 @@ models:
 #
 #  - models must be defined above in the Models section
 #  - a model can only be a member of one group
-#  - group behaviour is controlled via the `swap` and `exclusive` fields
-#  - make sure models that are loaded together do not conflict in resource usage or
-#    listening ports
+#  - group behaviour is controlled via the `swap`, `exclusive` and `persistent` fields
+#  - see issue #109 for details
 #
+# NOTE: the example below uses model names that are not defined above for demonstration purposes
 groups:
   # group1 is the default behaviour of llama-swap where only one model is allowed
   # to run a time across the whole llama-swap instance
@@ -159,6 +159,19 @@ groups:
       # (not defined above, here for example)
       - "modelA"
       - "modelB"
+
+  "forever":
+    # setting persistent to true causes the group to never be affected by the swapping behaviour of
+    # other groups. It is a shortcut to keeping some models always loaded.
+    persistent: true
+
+    # set swap/exclusive to false to prevent swapping inside the group and effect on other groups
+    swap: false
+    exclusive: false
+    members:
+      - "forever-modelA"
+      - "forever-modelB"
+      - "forever-modelc"
 ```
 
 ### Use Case Examples

@@ -41,6 +41,9 @@ models:
     aliases:
       - "mthree"
     checkEndpoint: "/"
+  model4:
+    cmd: path/to/cmd --arg1 one
+    checkEndpoint: "/"
 
 healthCheckTimeout: 15
 profiles:
@@ -52,6 +55,11 @@ groups:
     swap: true
     exclusive: false
     members: ["model2"]
+  forever:
+    exclusive: false
+    persistent: true
+    members:
+      - "model4"
 `
 
 	if err := os.WriteFile(tempFile, []byte(content), 0644); err != nil {
@@ -87,6 +95,10 @@ groups:
 				Env:           nil,
 				CheckEndpoint: "/",
 			},
+			"model4": {
+				Cmd:           "path/to/cmd --arg1 one",
+				CheckEndpoint: "/",
+			},
 		},
 		HealthCheckTimeout: 15,
 		Profiles: map[string][]string{
@@ -108,6 +120,12 @@ groups:
 				Swap:      true,
 				Exclusive: false,
 				Members:   []string{"model2"},
+			},
+			"forever": {
+				Swap:       true,
+				Exclusive:  false,
+				Persistent: true,
+				Members:    []string{"model4"},
 			},
 		},
 	}
