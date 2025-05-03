@@ -35,11 +35,31 @@ models:
     aliases:
       - "m2"
     checkEndpoint: "/"
+  model3:
+    cmd: path/to/cmd --arg1 one
+    proxy: "http://localhost:8081"
+    aliases:
+      - "mthree"
+    checkEndpoint: "/"
+  model4:
+    cmd: path/to/cmd --arg1 one
+    checkEndpoint: "/"
+
 healthCheckTimeout: 15
 profiles:
   test:
     - model1
     - model2
+groups:
+  group1:
+    swap: true
+    exclusive: false
+    members: ["model2"]
+  forever:
+    exclusive: false
+    persistent: true
+    members:
+      - "model4"
 `
 
 	if err := os.WriteFile(tempFile, []byte(content), 0644); err != nil {
@@ -52,7 +72,7 @@ profiles:
 		t.Fatalf("Failed to load config: %v", err)
 	}
 
-	expected := &Config{
+	expected := Config{
 		Models: map[string]ModelConfig{
 			"model1": {
 				Cmd:           "path/to/cmd --arg1 one",
@@ -68,6 +88,17 @@ profiles:
 				Env:           nil,
 				CheckEndpoint: "/",
 			},
+			"model3": {
+				Cmd:           "path/to/cmd --arg1 one",
+				Proxy:         "http://localhost:8081",
+				Aliases:       []string{"mthree"},
+				Env:           nil,
+				CheckEndpoint: "/",
+			},
+			"model4": {
+				Cmd:           "path/to/cmd --arg1 one",
+				CheckEndpoint: "/",
+			},
 		},
 		HealthCheckTimeout: 15,
 		Profiles: map[string][]string{
@@ -77,6 +108,25 @@ profiles:
 			"m1":        "model1",
 			"model-one": "model1",
 			"m2":        "model2",
+			"mthree":    "model3",
+		},
+		Groups: map[string]GroupConfig{
+			DEFAULT_GROUP_ID: {
+				Swap:      true,
+				Exclusive: true,
+				Members:   []string{"model1", "model3"},
+			},
+			"group1": {
+				Swap:      true,
+				Exclusive: false,
+				Members:   []string{"model2"},
+			},
+			"forever": {
+				Swap:       true,
+				Exclusive:  false,
+				Persistent: true,
+				Members:    []string{"model4"},
+			},
 		},
 	}
 
@@ -85,6 +135,51 @@ profiles:
 	realname, found := config.RealModelName("m1")
 	assert.True(t, found)
 	assert.Equal(t, "model1", realname)
+}
+
+func TestConfig_GroupMemberIsUnique(t *testing.T) {
+	// Create a temporary YAML file for testing
+	tempDir, err := os.MkdirTemp("", "test-config")
+	if err != nil {
+		t.Fatalf("Failed to create temporary directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	tempFile := filepath.Join(tempDir, "config.yaml")
+	content := `
+models:
+  model1:
+    cmd: path/to/cmd --arg1 one
+    proxy: "http://localhost:8080"
+  model2:
+    cmd: path/to/cmd --arg1 one
+    proxy: "http://localhost:8081"
+    checkEndpoint: "/"
+  model3:
+    cmd: path/to/cmd --arg1 one
+    proxy: "http://localhost:8081"
+    checkEndpoint: "/"
+
+healthCheckTimeout: 15
+groups:
+  group1:
+    swap: true
+    exclusive: false
+    members: ["model2"]
+  group2:
+    swap: true
+    exclusive: false
+    members: ["model2"]
+`
+
+	if err := os.WriteFile(tempFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to write temporary file: %v", err)
+	}
+
+	// Load the config and verify
+	_, err = LoadConfig(tempFile)
+	assert.NotNil(t, err)
+
 }
 
 func TestConfig_ModelConfigSanitizedCommand(t *testing.T) {
