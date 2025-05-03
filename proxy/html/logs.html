@@ -170,6 +170,7 @@
 
                     this.eventSource.onmessage = (event) => {
                         this.logData += event.data;
+                        this.logData = this.logData.slice(-1024 * 100);
                         this.render();
                     };
 
