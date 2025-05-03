@@ -57,14 +57,16 @@ func (pg *ProcessGroup) ProxyRequest(modelID string, writer http.ResponseWriter,
 		return fmt.Errorf("model %s not part of group %s", modelID, pg.id)
 	}
 
-	pg.Lock()
-	if pg.swap && pg.lastUsedProcess != modelID {
-		if pg.lastUsedProcess != "" {
-			pg.processes[pg.lastUsedProcess].Stop()
+	if pg.swap {
+		pg.Lock()
+		if pg.lastUsedProcess != modelID {
+			if pg.lastUsedProcess != "" {
+				pg.processes[pg.lastUsedProcess].Stop()
+			}
+			pg.lastUsedProcess = modelID
 		}
-		pg.lastUsedProcess = modelID
+		pg.Unlock()
 	}
-	pg.Unlock()
 
 	pg.processes[modelID].ProxyRequest(writer, request)
 	return nil
