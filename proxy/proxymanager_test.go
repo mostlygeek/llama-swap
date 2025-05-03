@@ -297,9 +297,12 @@ func TestProxyManager_AudioTranscriptionHandler(t *testing.T) {
 func TestProxyManager_Shutdown(t *testing.T) {
 	// Test Case 1: Startup failure due to unavailable proxy
 	t.Run("startup failure with unavailable proxy", func(t *testing.T) {
-		// Create configuration with invalid proxy URL
-		modelConfig := getTestSimpleResponderConfigPort("model1", 9991)
-		modelConfig.Proxy = "http://localhost:10001/" // Invalid proxy URL
+		// Create configuration with invalid command that will fail immediately
+		modelConfig := ModelConfig{
+			Cmd:           "/invalid-command", // Invalid executable path that will fail to start
+			Proxy:         "http://localhost:9991",
+			CheckEndpoint: "/health",
+		}
 
 		config := AddDefaultGroupToConfig(Config{
 			HealthCheckTimeout: 15,
@@ -319,7 +322,7 @@ func TestProxyManager_Shutdown(t *testing.T) {
 		proxy.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadGateway, w.Code)
-		assert.Contains(t, w.Body.String(), "unable to start process: upstream command exited unexpectedly: exit status 1")
+		assert.Contains(t, w.Body.String(), "unable to start process: start() failed: fork/exec /invalid-command: no such file or directory")
 
 		// Verify process is tracked but in failed state
 		processGroup := proxy.findGroupByModelName("model1")
