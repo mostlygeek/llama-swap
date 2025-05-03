@@ -33,11 +33,9 @@ func TestLogMonitor(t *testing.T) {
 		defer wg.Done()
 		messageCount := 0
 		for messageCount < 3 {
-			select {
-			case data := <-client1:
-				client1Messages = append(client1Messages, data...)
-				messageCount++
-			}
+			data := <-client1
+			client1Messages = append(client1Messages, data...)
+			messageCount++
 		}
 	}()
 
@@ -45,14 +43,11 @@ func TestLogMonitor(t *testing.T) {
 		defer wg.Done()
 		messageCount := 0
 		for messageCount < 3 {
-			select {
-			case data := <-client2:
-				client2Messages = append(client2Messages, data...)
-				messageCount++
-			}
+			data := <-client2
+			client2Messages = append(client2Messages, data...)
+			messageCount++
 		}
 	}()
-
 	// Wait for both goroutines to finish
 	wg.Wait()
 

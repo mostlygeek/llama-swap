@@ -36,6 +36,24 @@ type ProxyManager struct {
 	muxLogger      *LogMonitor
 }
 
+// NewWithLoggers creates a new ProxyManager with provided loggers.
+// This allows loggers to be defined at a higher level and shared across instances.
+func NewWithLoggers(config *Config, muxLogger *LogMonitor, proxyLogger *LogMonitor, upstreamLogger *LogMonitor) *ProxyManager {
+	pm := &ProxyManager{
+		config:           config,
+		currentProcesses: make(map[string]*Process),
+		ginEngine:        gin.New(),
+
+		proxyLogger:    proxyLogger,
+		muxLogger:      muxLogger,
+		upstreamLogger: upstreamLogger,
+	}
+
+	pm.setupGinEngine()
+	return pm
+}
+
+// New creates a new ProxyManager with default loggers.
 func New(config *Config) *ProxyManager {
 	// set up loggers
 	stdoutLogger := NewLogMonitorWriter(os.Stdout)
@@ -64,16 +82,11 @@ func New(config *Config) *ProxyManager {
 		upstreamLogger.SetLogLevel(LevelInfo)
 	}
 
-	pm := &ProxyManager{
-		config:           config,
-		currentProcesses: make(map[string]*Process),
-		ginEngine:        gin.New(),
+	return NewWithLoggers(config, stdoutLogger, proxyLogger, upstreamLogger)
+}
 
-		proxyLogger:    proxyLogger,
-		muxLogger:      stdoutLogger,
-		upstreamLogger: upstreamLogger,
-	}
-
+// setupGinEngine configures the Gin engine with all necessary routes and middleware
+func (pm *ProxyManager) setupGinEngine() {
 	pm.ginEngine.Use(func(c *gin.Context) {
 		// Start timer
 		start := time.Now()
@@ -184,8 +197,6 @@ func New(config *Config) *ProxyManager {
 
 	// Disable console color for testing
 	gin.DisableConsoleColor()
-
-	return pm
 }
 
 // ServeHTTP implements http.Handler interface
