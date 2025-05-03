@@ -14,6 +14,7 @@ import (
 var (
 	nextTestPort int = 12000
 	portMutex    sync.Mutex
+	testLogger   = NewLogMonitorWriter(os.Stdout)
 )
 
 // Check if the binary exists
@@ -25,6 +26,17 @@ func TestMain(m *testing.M) {
 	}
 
 	gin.SetMode(gin.TestMode)
+
+	switch os.Getenv("LOG_LEVEL") {
+	case "debug":
+		testLogger.SetLogLevel(LevelDebug)
+	case "warn":
+		testLogger.SetLogLevel(LevelWarn)
+	case "info":
+		testLogger.SetLogLevel(LevelInfo)
+	default:
+		testLogger.SetLogLevel(LevelWarn)
+	}
 
 	m.Run()
 }
