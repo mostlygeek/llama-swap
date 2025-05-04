@@ -305,6 +305,7 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 	processGroup, _, err := pm.swapProcessGroup(requestedModel)
 	if err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
+		return
 	}
 
 	// rewrite the path
@@ -347,11 +348,13 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 	requestedModel := gjson.GetBytes(bodyBytes, "model").String()
 	if requestedModel == "" {
 		pm.sendErrorResponse(c, http.StatusBadRequest, "missing or invalid 'model' key")
+		return
 	}
 
 	processGroup, realModelName, err := pm.swapProcessGroup(requestedModel)
 	if err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
+		return
 	}
 
 	// issue #69 allow custom model names to be sent to upstream
@@ -373,6 +376,7 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 	if err := processGroup.ProxyRequest(realModelName, c.Writer, c.Request); err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
 		pm.proxyLogger.Errorf("Error Proxying Request for processGroup %s and model %s", processGroup.id, realModelName)
+		return
 	}
 }
 
@@ -398,6 +402,7 @@ func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
 	processGroup, realModelName, err := pm.swapProcessGroup(requestedModel)
 	if err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
+		return
 	}
 
 	// Copy all form values
@@ -477,6 +482,7 @@ func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
 	if err := processGroup.ProxyRequest(realModelName, c.Writer, modifiedReq); err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
 		pm.proxyLogger.Errorf("Error Proxying Request for processGroup %s and model %s", processGroup.id, realModelName)
+		return
 	}
 }
 
