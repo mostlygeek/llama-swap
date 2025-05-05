@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -83,7 +84,16 @@ func (c *Config) FindConfig(modelName string) (ModelConfig, string, bool) {
 }
 
 func LoadConfig(path string) (Config, error) {
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
+	if err != nil {
+		return Config{}, err
+	}
+	defer file.Close()
+	return LoadConfigFromReader(file)
+}
+
+func LoadConfigFromReader(r io.Reader) (Config, error) {
+	data, err := io.ReadAll(r)
 	if err != nil {
 		return Config{}, err
 	}
@@ -102,6 +112,9 @@ func LoadConfig(path string) (Config, error) {
 	config.aliases = make(map[string]string)
 	for modelName, modelConfig := range config.Models {
 		for _, alias := range modelConfig.Aliases {
+			if _, found := config.aliases[alias]; found {
+				return Config{}, fmt.Errorf("duplicate alias %s found in model: %s", alias, modelName)
+			}
 			config.aliases[alias] = modelName
 		}
 	}

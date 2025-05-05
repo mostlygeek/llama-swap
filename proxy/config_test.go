@@ -3,6 +3,7 @@ package proxy
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -138,14 +139,6 @@ groups:
 }
 
 func TestConfig_GroupMemberIsUnique(t *testing.T) {
-	// Create a temporary YAML file for testing
-	tempDir, err := os.MkdirTemp("", "test-config")
-	if err != nil {
-		t.Fatalf("Failed to create temporary directory: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	tempFile := filepath.Join(tempDir, "config.yaml")
 	content := `
 models:
   model1:
@@ -171,15 +164,32 @@ groups:
     exclusive: false
     members: ["model2"]
 `
+	// Load the config and verify
+	_, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.Equal(t, "model member model2 is used in multiple groups: group1 and group2", err.Error())
 
-	if err := os.WriteFile(tempFile, []byte(content), 0644); err != nil {
-		t.Fatalf("Failed to write temporary file: %v", err)
-	}
+}
+
+func TestConfig_ModelAliasesAreUnique(t *testing.T) {
+	content := `
+models:
+  model1:
+    cmd: path/to/cmd --arg1 one
+    proxy: "http://localhost:8080"
+    aliases:
+      - m1
+  model2:
+    cmd: path/to/cmd --arg1 one
+    proxy: "http://localhost:8081"
+    checkEndpoint: "/"
+    aliases:
+      - m1
+      - m2
+`
 
 	// Load the config and verify
-	_, err = LoadConfig(tempFile)
-	assert.NotNil(t, err)
-
+	_, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.Equal(t, "duplicate alias m1 found in model: model2", err.Error())
 }
 
 func TestConfig_ModelConfigSanitizedCommand(t *testing.T) {
