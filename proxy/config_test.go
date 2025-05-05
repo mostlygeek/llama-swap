@@ -280,7 +280,7 @@ func TestConfig_SanitizeCommand(t *testing.T) {
 	assert.Nil(t, args)
 }
 
-func TestConfig_PortRanges(t *testing.T) {
+func TestConfig_AutomaticPortAssignments(t *testing.T) {
 
 	t.Run("Default Port Ranges", func(t *testing.T) {
 		content := ``
@@ -301,16 +301,6 @@ func TestConfig_PortRanges(t *testing.T) {
 		assert.Equal(t, 1000, config.StartPort)
 	})
 
-	t.Run("nextPort is equal to StartPort", func(t *testing.T) {
-		content := `start_port: 1000`
-		config, err := LoadConfigFromReader(strings.NewReader(content))
-		if !assert.NoError(t, err) {
-			t.Fatalf("Failed to load config: %v", err)
-		}
-
-		assert.Equal(t, config.StartPort, config.nextPort)
-	})
-
 	t.Run("Invalid start port", func(t *testing.T) {
 		content := `start_port: abcd`
 		_, err := LoadConfigFromReader(strings.NewReader(content))
@@ -322,4 +312,35 @@ func TestConfig_PortRanges(t *testing.T) {
 		_, err := LoadConfigFromReader(strings.NewReader(content))
 		assert.NotNil(t, err)
 	})
+
+	t.Run("Automatic port assignments", func(t *testing.T) {
+		content := `
+start_port: 5800
+models:
+  model1:
+    cmd: svr --port ${PORT}
+  model2:
+    cmd: svr --port ${PORT}
+    proxy: "http://172.11.22.33:${PORT}"
+  model3:
+    cmd: svr --port 1999
+    proxy: "http://1.2.3.4:1999"
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		if !assert.NoError(t, err) {
+			t.Fatalf("Failed to load config: %v", err)
+		}
+
+		assert.Equal(t, 5800, config.StartPort)
+		assert.Equal(t, "svr --port 5800", config.Models["model1"].Cmd)
+		assert.Equal(t, "http://localhost:5800", config.Models["model1"].Proxy)
+
+		assert.Equal(t, "svr --port 5801", config.Models["model2"].Cmd)
+		assert.Equal(t, "http://172.11.22.33:5801", config.Models["model2"].Proxy)
+
+		assert.Equal(t, "svr --port 1999", config.Models["model3"].Cmd)
+		assert.Equal(t, "http://1.2.3.4:1999", config.Models["model3"].Proxy)
+
+	})
+
 }
