@@ -279,3 +279,47 @@ func TestConfig_SanitizeCommand(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, args)
 }
+
+func TestConfig_PortRanges(t *testing.T) {
+
+	t.Run("Default Port Ranges", func(t *testing.T) {
+		content := ``
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		if !assert.NoError(t, err) {
+			t.Fatalf("Failed to load config: %v", err)
+		}
+
+		assert.Equal(t, 5800, config.StartPort)
+	})
+	t.Run("User specific port ranges", func(t *testing.T) {
+		content := `start_port: 1000`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		if !assert.NoError(t, err) {
+			t.Fatalf("Failed to load config: %v", err)
+		}
+
+		assert.Equal(t, 1000, config.StartPort)
+	})
+
+	t.Run("nextPort is equal to StartPort", func(t *testing.T) {
+		content := `start_port: 1000`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		if !assert.NoError(t, err) {
+			t.Fatalf("Failed to load config: %v", err)
+		}
+
+		assert.Equal(t, config.StartPort, config.nextPort)
+	})
+
+	t.Run("Invalid start port", func(t *testing.T) {
+		content := `start_port: abcd`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NotNil(t, err)
+	})
+
+	t.Run("start port must be greater than 1", func(t *testing.T) {
+		content := `start_port: -99`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NotNil(t, err)
+	})
+}

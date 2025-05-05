@@ -63,6 +63,10 @@ type Config struct {
 
 	// map aliases to actual model IDs
 	aliases map[string]string
+
+	// automatic port assignments
+	StartPort int `yaml:"start_port"`
+	nextPort  int
 }
 
 func (c *Config) RealModelName(search string) (string, bool) {
@@ -107,6 +111,16 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	if config.HealthCheckTimeout < 15 {
 		config.HealthCheckTimeout = 15
 	}
+
+	// set default port ranges
+	if config.StartPort == 0 {
+		// default to 5800
+		config.StartPort = 5800
+	} else if config.StartPort < 1 {
+		return Config{}, fmt.Errorf("start_port must be greater than 1")
+	}
+
+	config.nextPort = config.StartPort
 
 	// Populate the aliases map
 	config.aliases = make(map[string]string)
