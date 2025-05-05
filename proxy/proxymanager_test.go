@@ -166,7 +166,9 @@ func TestProxyManager_SwapMultiProcessParallelRequests(t *testing.T) {
 
 			mu.Lock()
 
-			results[key] = w.Body.String()
+			var response map[string]string
+			assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+			results[key] = response["responseMessage"]
 			mu.Unlock()
 		}(key)
 
