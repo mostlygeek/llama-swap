@@ -152,6 +152,8 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			}
 			nextPort++
 			config.Models[modelId] = modelConfig
+		} else if modelConfig.Proxy == "" {
+			return Config{}, fmt.Errorf("model %s requires a proxy value when not using automatic ${PORT}", modelId)
 		}
 	}
 	config = AddDefaultGroupToConfig(config)

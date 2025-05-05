@@ -44,6 +44,7 @@ models:
     checkEndpoint: "/"
   model4:
     cmd: path/to/cmd --arg1 one
+    proxy: "http://localhost:8082"
     checkEndpoint: "/"
 
 healthCheckTimeout: 15
@@ -99,6 +100,7 @@ groups:
 			},
 			"model4": {
 				Cmd:           "path/to/cmd --arg1 one",
+				Proxy:         "http://localhost:8082",
 				CheckEndpoint: "/",
 			},
 		},
@@ -167,8 +169,9 @@ groups:
 `
 	// Load the config and verify
 	_, err := LoadConfigFromReader(strings.NewReader(content))
-	assert.Equal(t, "model member model2 is used in multiple groups: group1 and group2", err.Error())
 
+	// a Contains as order of the map is not guaranteed
+	assert.Contains(t, err.Error(), "model member model2 is used in multiple groups:")
 }
 
 func TestConfig_ModelAliasesAreUnique(t *testing.T) {
@@ -187,10 +190,12 @@ models:
       - m1
       - m2
 `
-
 	// Load the config and verify
 	_, err := LoadConfigFromReader(strings.NewReader(content))
-	assert.Equal(t, "duplicate alias m1 found in model: model2", err.Error())
+
+	// this is a contains because it could be `model1` or `model2` depending on the order
+	// go decided on the order of the map
+	assert.Contains(t, err.Error(), "duplicate alias m1 found in model: model")
 }
 
 func TestConfig_ModelConfigSanitizedCommand(t *testing.T) {
@@ -344,4 +349,13 @@ models:
 
 	})
 
+	t.Run("Proxy value required if no ${PORT} in cmd", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: svr --port 111
+`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.Equal(t, "model model1 requires a proxy value when not using automatic ${PORT}", err.Error())
+	})
 }
