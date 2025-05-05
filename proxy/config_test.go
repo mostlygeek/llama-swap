@@ -74,6 +74,7 @@ groups:
 	}
 
 	expected := Config{
+		StartPort: 5800,
 		Models: map[string]ModelConfig{
 			"model1": {
 				Cmd:           "path/to/cmd --arg1 one",
@@ -292,7 +293,7 @@ func TestConfig_AutomaticPortAssignments(t *testing.T) {
 		assert.Equal(t, 5800, config.StartPort)
 	})
 	t.Run("User specific port ranges", func(t *testing.T) {
-		content := `start_port: 1000`
+		content := `startPort: 1000`
 		config, err := LoadConfigFromReader(strings.NewReader(content))
 		if !assert.NoError(t, err) {
 			t.Fatalf("Failed to load config: %v", err)
@@ -302,20 +303,20 @@ func TestConfig_AutomaticPortAssignments(t *testing.T) {
 	})
 
 	t.Run("Invalid start port", func(t *testing.T) {
-		content := `start_port: abcd`
+		content := `startPort: abcd`
 		_, err := LoadConfigFromReader(strings.NewReader(content))
 		assert.NotNil(t, err)
 	})
 
 	t.Run("start port must be greater than 1", func(t *testing.T) {
-		content := `start_port: -99`
+		content := `startPort: -99`
 		_, err := LoadConfigFromReader(strings.NewReader(content))
 		assert.NotNil(t, err)
 	})
 
 	t.Run("Automatic port assignments", func(t *testing.T) {
 		content := `
-start_port: 5800
+startPort: 5800
 models:
   model1:
     cmd: svr --port ${PORT}

@@ -66,7 +66,7 @@ type Config struct {
 	aliases map[string]string
 
 	// automatic port assignments
-	StartPort int `yaml:"start_port"`
+	StartPort int `yaml:"startPort"`
 }
 
 func (c *Config) RealModelName(search string) (string, bool) {
