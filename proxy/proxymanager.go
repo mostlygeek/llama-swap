@@ -371,7 +371,6 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 
 	// dechunk it as we already have all the body bytes see issue #11
 	c.Request.Header.Del("transfer-encoding")
-	c.Request.Header.Del("content-length")
 	c.Request.Header.Add("content-length", strconv.Itoa(len(bodyBytes)))
 
 	if err := processGroup.ProxyRequest(realModelName, c.Writer, c.Request); err != nil {
@@ -382,11 +381,6 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 }
 
 func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
-	// We need to reconstruct the multipart form in any case since the body is consumed
-	// Create a new buffer for the reconstructed request
-	var requestBuffer bytes.Buffer
-	multipartWriter := multipart.NewWriter(&requestBuffer)
-
 	// Parse multipart form
 	if err := c.Request.ParseMultipartForm(32 << 20); err != nil { // 32MB max memory, larger files go to tmp disk
 		pm.sendErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("error parsing multipart form: %s", err.Error()))
@@ -405,6 +399,11 @@ func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
 		return
 	}
+
+	// We need to reconstruct the multipart form in any case since the body is consumed
+	// Create a new buffer for the reconstructed request
+	var requestBuffer bytes.Buffer
+	multipartWriter := multipart.NewWriter(&requestBuffer)
 
 	// Copy all form values
 	for key, values := range c.Request.MultipartForm.Value {
@@ -478,6 +477,10 @@ func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
 	// Copy the headers from the original request
 	modifiedReq.Header = c.Request.Header.Clone()
 	modifiedReq.Header.Set("Content-Type", multipartWriter.FormDataContentType())
+
+	// set the content length of the body
+	modifiedReq.Header.Set("Content-Length", strconv.Itoa(requestBuffer.Len()))
+	modifiedReq.ContentLength = int64(requestBuffer.Len())
 
 	// Use the modified request for proxying
 	if err := processGroup.ProxyRequest(realModelName, c.Writer, modifiedReq); err != nil {

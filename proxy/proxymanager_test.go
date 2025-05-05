@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -442,6 +443,7 @@ func TestProxyManager_AudioTranscriptionHandler(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "TheExpectedModel", response["model"])
 	assert.Equal(t, response["text"], fmt.Sprintf("The length of the file is %d bytes", contentLength)) // matches simple-responder
+	assert.Equal(t, strconv.Itoa(370+contentLength), response["h_content_length"])
 }
 
 // Test useModelName in configuration sends overrides what is sent to upstream
@@ -591,4 +593,28 @@ func TestProxyManager_Upstream(t *testing.T) {
 	proxy.HandlerFunc(rec, req)
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "model1", rec.Body.String())
+}
+
+func TestProxyManager_ChatContentLength(t *testing.T) {
+	config := AddDefaultGroupToConfig(Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]ModelConfig{
+			"model1": getTestSimpleResponderConfig("model1"),
+		},
+		LogLevel: "error",
+	})
+
+	proxy := New(config)
+	defer proxy.StopProcesses()
+
+	reqBody := fmt.Sprintf(`{"model":"%s", "x": "this is just some content to push the length out a bit"}`, "model1")
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+	w := httptest.NewRecorder()
+
+	proxy.HandlerFunc(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	var response map[string]string
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	assert.Equal(t, "81", response["h_content_length"])
+	assert.Equal(t, "model1", response["responseMessage"])
 }
