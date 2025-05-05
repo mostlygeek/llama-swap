@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -439,6 +440,12 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Header = r.Header.Clone()
+
+	contentLength, err := strconv.ParseInt(req.Header.Get("content-length"), 10, 64)
+	if err == nil {
+		req.ContentLength = contentLength
+	}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)

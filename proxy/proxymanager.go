@@ -368,6 +368,7 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 
 	// dechunk it as we already have all the body bytes see issue #11
 	c.Request.Header.Del("transfer-encoding")
+	c.Request.Header.Del("content-length")
 	c.Request.Header.Add("content-length", strconv.Itoa(len(bodyBytes)))
 
 	if err := processGroup.ProxyRequest(realModelName, c.Writer, c.Request); err != nil {
