@@ -33,14 +33,17 @@ func main() {
 
 	// Set up the handler function using the provided response message
 	r.POST("/v1/chat/completions", func(c *gin.Context) {
-		c.Header("Content-Type", "text/plain")
+		c.Header("Content-Type", "application/json")
 
 		// add a wait to simulate a slow query
 		if wait, err := time.ParseDuration(c.Query("wait")); err == nil {
 			time.Sleep(wait)
 		}
 
-		c.String(200, *responseMessage)
+		c.JSON(http.StatusOK, gin.H{
+			"responseMessage":  *responseMessage,
+			"h_content_length": c.Request.Header.Get("Content-Length"),
+		})
 	})
 
 	// for issue #62 to check model name strips profile slug
@@ -63,8 +66,11 @@ func main() {
 	})
 
 	r.POST("/v1/completions", func(c *gin.Context) {
-		c.Header("Content-Type", "text/plain")
-		c.String(200, *responseMessage)
+		c.Header("Content-Type", "application/json")
+		c.JSON(http.StatusOK, gin.H{
+			"responseMessage": *responseMessage,
+		})
+
 	})
 
 	// issue #41
@@ -104,6 +110,10 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{
 			"text":  fmt.Sprintf("The length of the file is %d bytes", fileSize),
 			"model": model,
+
+			// expose some header values for testing
+			"h_content_type":   c.GetHeader("Content-Type"),
+			"h_content_length": c.GetHeader("Content-Length"),
 		})
 	})
 
