@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/google/shlex"
@@ -63,6 +64,9 @@ type Config struct {
 
 	// map aliases to actual model IDs
 	aliases map[string]string
+
+	// automatic port assignments
+	StartPort int `yaml:"startPort"`
 }
 
 func (c *Config) RealModelName(search string) (string, bool) {
@@ -108,6 +112,14 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		config.HealthCheckTimeout = 15
 	}
 
+	// set default port ranges
+	if config.StartPort == 0 {
+		// default to 5800
+		config.StartPort = 5800
+	} else if config.StartPort < 1 {
+		return Config{}, fmt.Errorf("startPort must be greater than 1")
+	}
+
 	// Populate the aliases map
 	config.aliases = make(map[string]string)
 	for modelName, modelConfig := range config.Models {
@@ -119,6 +131,31 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		}
 	}
 
+	// iterate over the models and replace any ${PORT} with the next available port
+	// Get and sort all model IDs first, makes testing more consistent
+	modelIds := make([]string, 0, len(config.Models))
+	for modelId := range config.Models {
+		modelIds = append(modelIds, modelId)
+	}
+	sort.Strings(modelIds) // This guarantees stable iteration order
+
+	// iterate over the sorted models
+	nextPort := config.StartPort
+	for _, modelId := range modelIds {
+		modelConfig := config.Models[modelId]
+		if strings.Contains(modelConfig.Cmd, "${PORT}") {
+			modelConfig.Cmd = strings.ReplaceAll(modelConfig.Cmd, "${PORT}", strconv.Itoa(nextPort))
+			if modelConfig.Proxy == "" {
+				modelConfig.Proxy = fmt.Sprintf("http://localhost:%d", nextPort)
+			} else {
+				modelConfig.Proxy = strings.ReplaceAll(modelConfig.Proxy, "${PORT}", strconv.Itoa(nextPort))
+			}
+			nextPort++
+			config.Models[modelId] = modelConfig
+		} else if modelConfig.Proxy == "" {
+			return Config{}, fmt.Errorf("model %s requires a proxy value when not using automatic ${PORT}", modelId)
+		}
+	}
 	config = AddDefaultGroupToConfig(config)
 	// check that members are all unique in the groups
 	memberUsage := make(map[string]string) // maps member to group it appears in
