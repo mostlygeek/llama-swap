@@ -119,8 +119,10 @@ func isValidTransition(from, to ProcessState) bool {
 		return to == StateStopping
 	case StateStopping:
 		return to == StateStopped || to == StateShutdown
-	case StateFailed, StateShutdown:
-		return false // No transitions allowed from these states
+	case StateFailed:
+		return to == StateStopped // Allow resetting a failed process
+	case StateShutdown:
+		return false // No transitions from shutdown
 	}
 	return false
 }
@@ -260,9 +262,9 @@ func (p *Process) start() error {
 					if strings.Contains(err.Error(), "connection refused") {
 						endTime, _ := checkDeadline.Deadline()
 						ttl := time.Until(endTime)
-						p.proxyLogger.Infof("<%s> Connection refused on %s, giving up in %.0fs", p.ID, healthURL, ttl.Seconds())
+						p.proxyLogger.Debugf("<%s> Connection refused on %s, giving up in %.0fs (normal during startup)", p.ID, healthURL, ttl.Seconds())
 					} else {
-						p.proxyLogger.Infof("<%s> Health check error on %s, %v", p.ID, healthURL, err)
+						p.proxyLogger.Debugf("<%s> Health check error on %s, %v (normal during startup)", p.ID, healthURL, err)
 					}
 				}
 			}
@@ -345,31 +347,33 @@ func (p *Process) stopCommand(sigtermTTL time.Duration) {
 	defer cancelTimeout()
 
 	if p.cmd == nil || p.cmd.Process == nil {
-		p.proxyLogger.Warnf("<%s> cmd or cmd.Process is nil", p.ID)
+		p.proxyLogger.Debugf("<%s> cmd or cmd.Process is nil (normal during config reload)", p.ID)
 		return
 	}
 
 	if err := p.terminateProcess(); err != nil {
-		p.proxyLogger.Infof("<%s> Failed to gracefully terminate process: %v", p.ID, err)
+		p.proxyLogger.Debugf("<%s> Process already terminated: %v (normal during shutdown)", p.ID, err)
 	}
 
 	select {
 	case <-sigtermTimeout.Done():
-		p.proxyLogger.Infof("<%s> Process timed out waiting to stop, sending KILL signal", p.ID)
-		p.cmd.Process.Kill()
+		p.proxyLogger.Debugf("<%s> Process timed out waiting to stop, sending KILL signal (normal during shutdown)", p.ID)
+		if err := p.cmd.Process.Kill(); err != nil {
+			p.proxyLogger.Errorf("<%s> Failed to kill process: %v", p.ID, err)
+		}
 	case err := <-p.cmdWaitChan:
 		// Note: in start(), p.cmdWaitChan also has a select { ... }. That should be OK
 		// because if we make it here then the cmd has been successfully running and made it
-		// through the health check. There is a possibility that ithe cmd crashed after the health check
+		// through the health check. There is a possibility that the cmd crashed after the health check
 		// succeeded but that's not a case llama-swap is handling for now.
 		if err != nil {
 			if errno, ok := err.(syscall.Errno); ok {
 				p.proxyLogger.Errorf("<%s> errno >> %v", p.ID, errno)
 			} else if exitError, ok := err.(*exec.ExitError); ok {
 				if strings.Contains(exitError.String(), "signal: terminated") {
-					p.proxyLogger.Infof("<%s> Process stopped OK", p.ID)
+					p.proxyLogger.Debugf("<%s> Process stopped OK", p.ID)
 				} else if strings.Contains(exitError.String(), "signal: interrupt") {
-					p.proxyLogger.Infof("<%s> Process interrupted OK", p.ID)
+					p.proxyLogger.Debugf("<%s> Process interrupted OK", p.ID)
 				} else {
 					p.proxyLogger.Warnf("<%s> ExitError >> %v, exit code: %d", p.ID, exitError, exitError.ExitCode())
 				}
@@ -410,7 +414,20 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 
 	// prevent new requests from being made while stopping or irrecoverable
 	currentState := p.CurrentState()
-	if currentState == StateFailed || currentState == StateShutdown || currentState == StateStopping {
+
+	if currentState == StateFailed {
+		p.proxyLogger.Infof("<%s> Attempting to recover from failed state.", p.ID)
+		// Attempt to reset the state to stopped so it can be restarted
+		if _, err := p.swapState(StateFailed, StateStopped); err != nil {
+			p.proxyLogger.Errorf("<%s> Failed to reset state from Failed to Stopped: %v. Current state: %s", p.ID, err, p.CurrentState())
+			http.Error(w, fmt.Sprintf("Process failed and could not be reset, state is %s", p.CurrentState()), http.StatusServiceUnavailable)
+			return
+		}
+		p.proxyLogger.Infof("<%s> Process state reset to Stopped from Failed.", p.ID)
+		currentState = p.CurrentState() // Re-fetch current state, should now be StateStopped
+	}
+
+	if currentState == StateShutdown || currentState == StateStopping {
 		http.Error(w, fmt.Sprintf("Process can not ProxyRequest, state is %s", currentState), http.StatusServiceUnavailable)
 		return
 	}

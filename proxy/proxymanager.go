@@ -82,6 +82,11 @@ func New(config Config) *ProxyManager {
 		pm.processGroups[groupID] = processGroup
 	}
 
+	pm.setupGinEngine()
+	return pm
+}
+
+func (pm *ProxyManager) setupGinEngine() {
 	pm.ginEngine.Use(func(c *gin.Context) {
 		// Start timer
 		start := time.Now()
@@ -192,18 +197,17 @@ func New(config Config) *ProxyManager {
 
 	// Disable console color for testing
 	gin.DisableConsoleColor()
-
-	return pm
 }
 
-func (pm *ProxyManager) Run(addr ...string) error {
-	return pm.ginEngine.Run(addr...)
-}
-
-func (pm *ProxyManager) HandlerFunc(w http.ResponseWriter, r *http.Request) {
+// ServeHTTP implements http.Handler interface
+func (pm *ProxyManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	pm.ginEngine.ServeHTTP(w, r)
 }
 
+// StopProcesses acquires a lock and stops all running upstream processes.
+// This is the public method safe for concurrent calls.
+// Unlike Shutdown, this method only stops the processes but doesn't perform
+// a complete shutdown, allowing for process replacement without full termination.
 func (pm *ProxyManager) StopProcesses() {
 	pm.Lock()
 	defer pm.Unlock()
@@ -221,8 +225,7 @@ func (pm *ProxyManager) StopProcesses() {
 	wg.Wait()
 }
 
-// Shutdown is called to shutdown all upstream processes
-// when llama-swap is shutting down.
+// Shutdown stops all processes managed by this ProxyManager
 func (pm *ProxyManager) Shutdown() {
 	pm.Lock()
 	defer pm.Unlock()

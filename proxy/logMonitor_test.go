@@ -21,27 +21,40 @@ func TestLogMonitor(t *testing.T) {
 	client2Messages := make([]byte, 0)
 
 	var wg sync.WaitGroup
-	wg.Add(1)
+	wg.Add(2) // One for each client (goroutine)
 
+	// Write messages first
+	if _, err := logMonitor.Write([]byte("1")); err != nil {
+		t.Fatalf("Failed to write log message: %v", err)
+	}
+	if _, err := logMonitor.Write([]byte("2")); err != nil {
+		t.Fatalf("Failed to write log message: %v", err)
+	}
+	if _, err := logMonitor.Write([]byte("3")); err != nil {
+		t.Fatalf("Failed to write log message: %v", err)
+	}
+
+	// Start goroutines to collect messages
 	go func() {
 		defer wg.Done()
-		for {
-			select {
-			case data := <-client1:
-				client1Messages = append(client1Messages, data...)
-			case data := <-client2:
-				client2Messages = append(client2Messages, data...)
-			default:
-				return
-			}
+		messageCount := 0
+		for messageCount < 3 {
+			data := <-client1
+			client1Messages = append(client1Messages, data...)
+			messageCount++
 		}
 	}()
 
-	logMonitor.Write([]byte("1"))
-	logMonitor.Write([]byte("2"))
-	logMonitor.Write([]byte("3"))
-
-	// Wait for the goroutine to finish
+	go func() {
+		defer wg.Done()
+		messageCount := 0
+		for messageCount < 3 {
+			data := <-client2
+			client2Messages = append(client2Messages, data...)
+			messageCount++
+		}
+	}()
+	// Wait for both goroutines to finish
 	wg.Wait()
 
 	// Check the buffer
