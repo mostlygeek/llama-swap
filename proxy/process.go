@@ -356,7 +356,9 @@ func (p *Process) stopCommand(sigtermTTL time.Duration) {
 	select {
 	case <-sigtermTimeout.Done():
 		p.proxyLogger.Debugf("<%s> Process timed out waiting to stop, sending KILL signal (normal during shutdown)", p.ID)
-		p.cmd.Process.Kill()
+		if err := p.cmd.Process.Kill(); err != nil {
+			p.proxyLogger.Errorf("<%s> Failed to kill process: %v", p.ID, err)
+		}
 	case err := <-p.cmdWaitChan:
 		// Note: in start(), p.cmdWaitChan also has a select { ... }. That should be OK
 		// because if we make it here then the cmd has been successfully running and made it

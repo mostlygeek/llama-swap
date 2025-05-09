@@ -251,41 +251,56 @@ func TestProxyManager_ListModelsHandler(t *testing.T) {
 }
 
 func TestProxyManager_Shutdown(t *testing.T) {
-	// Test Case 1: Startup failure due to unavailable proxy
-	t.Run("startup failure with unavailable proxy", func(t *testing.T) {
-		// Create configuration with invalid command that will fail immediately
-		modelConfig := ModelConfig{
-			Cmd:           "/invalid-command", // Invalid executable path that will fail to start
-			Proxy:         "http://localhost:9991",
-			CheckEndpoint: "/health",
-		}
+	// make broken model configurations
+	model1Config := getTestSimpleResponderConfigPort("model1", 9991)
+	model1Config.Proxy = "http://localhost:10001/"
 
-		config := AddDefaultGroupToConfig(Config{
-			HealthCheckTimeout: 15,
-			Models: map[string]ModelConfig{
-				"model1": modelConfig,
+	model2Config := getTestSimpleResponderConfigPort("model2", 9992)
+	model2Config.Proxy = "http://localhost:10002/"
+
+	model3Config := getTestSimpleResponderConfigPort("model3", 9993)
+	model3Config.Proxy = "http://localhost:10003/"
+
+	config := AddDefaultGroupToConfig(Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]ModelConfig{
+			"model1": model1Config,
+			"model2": model2Config,
+			"model3": model3Config,
+		},
+		LogLevel: "error",
+		Groups: map[string]GroupConfig{
+			"test": {
+				Swap:    false,
+				Members: []string{"model1", "model2", "model3"},
 			},
-			LogLevel: "error",
-		})
-
-		proxy := New(config)
-		defer proxy.Shutdown()
-
-		// Try to start the model
-		reqBody := `{"model":"model1"}`
-		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
-		w := httptest.NewRecorder()
-		proxy.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusBadGateway, w.Code)
-		assert.Contains(t, w.Body.String(), "unable to start process: start() failed: fork/exec /invalid-command: no such file or directory")
-
-		// Verify process is tracked but in failed state
-		processGroup := proxy.findGroupByModelName("model1")
-		assert.NotNil(t, processGroup)
-		process := processGroup.processes["model1"]
-		assert.Equal(t, StateFailed, process.CurrentState())
+		},
 	})
+
+	proxy := New(config)
+
+	// Start all the processes
+	var wg sync.WaitGroup
+	for _, modelName := range []string{"model1", "model2", "model3"} {
+		wg.Add(1)
+		go func(modelName string) {
+			defer wg.Done()
+			reqBody := fmt.Sprintf(`{"model":"%s"}`, modelName)
+			req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+			w := httptest.NewRecorder()
+
+			// send a request to trigger the proxy to load ... this should hang waiting for start up
+			proxy.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadGateway, w.Code)
+			assert.Contains(t, w.Body.String(), "health check interrupted due to shutdown")
+		}(modelName)
+	}
+
+	go func() {
+		<-time.After(time.Second)
+		proxy.Shutdown()
+	}()
+	wg.Wait()
 }
 
 func TestProxyManager_Unload(t *testing.T) {
@@ -382,8 +397,6 @@ func TestProxyManager_RunningEndpoint(t *testing.T) {
 	})
 }
 
-
-
 func TestProxyManager_AudioTranscriptionHandler(t *testing.T) {
 	config := AddDefaultGroupToConfig(Config{
 		HealthCheckTimeout: 15,
@@ -432,6 +445,68 @@ func TestProxyManager_AudioTranscriptionHandler(t *testing.T) {
 	assert.Equal(t, strconv.Itoa(370+contentLength), response["h_content_length"])
 }
 
+// Test useModelName in configuration sends overrides what is sent to upstream
+func TestProxyManager_UseModelName(t *testing.T) {
+	upstreamModelName := "upstreamModel"
+
+	modelConfig := getTestSimpleResponderConfig(upstreamModelName)
+	modelConfig.UseModelName = upstreamModelName
+
+	config := AddDefaultGroupToConfig(Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]ModelConfig{
+			"model1": modelConfig,
+		},
+		LogLevel: "error",
+	})
+
+	proxy := New(config)
+	defer proxy.StopProcesses()
+
+	requestedModel := "model1"
+
+	t.Run("useModelName over rides requested model: /v1/chat/completions", func(t *testing.T) {
+		reqBody := fmt.Sprintf(`{"model":"%s"}`, requestedModel)
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := httptest.NewRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), upstreamModelName)
+	})
+
+	t.Run("useModelName over rides requested model: /v1/audio/transcriptions", func(t *testing.T) {
+		// Create a buffer with multipart form data
+		var b bytes.Buffer
+		w := multipart.NewWriter(&b)
+
+		// Add the model field
+		fw, err := w.CreateFormField("model")
+		assert.NoError(t, err)
+		_, err = fw.Write([]byte(requestedModel))
+		assert.NoError(t, err)
+
+		// Add a file field
+		fw, err = w.CreateFormFile("file", "test.mp3")
+		assert.NoError(t, err)
+		_, err = fw.Write([]byte("test"))
+		assert.NoError(t, err)
+		w.Close()
+
+		// Create the request with the multipart form data
+		req := httptest.NewRequest("POST", "/v1/audio/transcriptions", &b)
+		req.Header.Set("Content-Type", w.FormDataContentType())
+		rec := httptest.NewRecorder()
+		proxy.ServeHTTP(rec, req)
+
+		// Verify the response
+		assert.Equal(t, http.StatusOK, rec.Code)
+		var response map[string]string
+		err = json.Unmarshal(rec.Body.Bytes(), &response)
+		assert.NoError(t, err)
+		assert.Equal(t, upstreamModelName, response["model"])
+	})
+}
 
 func TestProxyManager_CORSOptionsHandler(t *testing.T) {
 	config := AddDefaultGroupToConfig(Config{
@@ -499,69 +574,6 @@ func TestProxyManager_CORSOptionsHandler(t *testing.T) {
 			}
 		})
 	}
-}
-
-// Test useModelName in configuration sends overrides what is sent to upstream
-func TestProxyManager_UseModelName(t *testing.T) {
-	upstreamModelName := "upstreamModel"
-
-	modelConfig := getTestSimpleResponderConfig(upstreamModelName)
-	modelConfig.UseModelName = upstreamModelName
-
-	config := AddDefaultGroupToConfig(Config{
-		HealthCheckTimeout: 15,
-		Models: map[string]ModelConfig{
-			"model1": modelConfig,
-		},
-		LogLevel: "error",
-	})
-
-	proxy := New(config)
-	defer proxy.StopProcesses()
-
-	requestedModel := "model1"
-
-	t.Run("useModelName over rides requested model: /v1/chat/completions", func(t *testing.T) {
-		reqBody := fmt.Sprintf(`{"model":"%s"}`, requestedModel)
-		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
-		w := httptest.NewRecorder()
-
-		proxy.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(t, w.Body.String(), upstreamModelName)
-	})
-
-	t.Run("useModelName over rides requested model: /v1/audio/transcriptions", func(t *testing.T) {
-		// Create a buffer with multipart form data
-		var b bytes.Buffer
-		w := multipart.NewWriter(&b)
-
-		// Add the model field
-		fw, err := w.CreateFormField("model")
-		assert.NoError(t, err)
-		_, err = fw.Write([]byte(requestedModel))
-		assert.NoError(t, err)
-
-		// Add a file field
-		fw, err = w.CreateFormFile("file", "test.mp3")
-		assert.NoError(t, err)
-		_, err = fw.Write([]byte("test"))
-		assert.NoError(t, err)
-		w.Close()
-
-		// Create the request with the multipart form data
-		req := httptest.NewRequest("POST", "/v1/audio/transcriptions", &b)
-		req.Header.Set("Content-Type", w.FormDataContentType())
-		rec := httptest.NewRecorder()
-		proxy.ServeHTTP(rec, req)
-
-		// Verify the response
-		assert.Equal(t, http.StatusOK, rec.Code)
-		var response map[string]string
-		err = json.Unmarshal(rec.Body.Bytes(), &response)
-		assert.NoError(t, err)
-		assert.Equal(t, upstreamModelName, response["model"])
-	})
 }
 
 func TestProxyManager_Upstream(t *testing.T) {

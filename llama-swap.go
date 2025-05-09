@@ -153,10 +153,22 @@ func watchConfigFileWithReload(configPath string, reloadChan chan<- *proxy.Proxy
 				debounceTimer = time.AfterFunc(debounceDuration, func() {
 					log.Printf("Config file modified: %s, reloading...", event.Name)
 
-					// Load new configuration
-					newConfig, err := proxy.LoadConfig(configPath)
+					// Try up to 3 times with exponential backoff
+					var newConfig proxy.Config
+					var err error
+					for retries := 0; retries < 3; retries++ {
+						// Load new configuration
+						newConfig, err = proxy.LoadConfig(configPath)
+						if err == nil {
+							break
+						}
+						log.Printf("Error loading new config (attempt %d/3): %v", retries+1, err)
+						if retries < 2 {
+							time.Sleep(time.Duration(1<<retries) * time.Second)
+						}
+					}
 					if err != nil {
-						log.Printf("Error loading new config: %v", err)
+						log.Printf("Failed to load new config after retries: %v", err)
 						return
 					}
 

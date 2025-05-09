@@ -37,7 +37,6 @@ type ProxyManager struct {
 	processGroups map[string]*ProcessGroup
 }
 
-// New creates a new ProxyManager with default loggers.
 func New(config Config) *ProxyManager {
 	// set up loggers
 	stdoutLogger := NewLogMonitorWriter(os.Stdout)
@@ -87,7 +86,6 @@ func New(config Config) *ProxyManager {
 	return pm
 }
 
-// setupGinEngine configures the Gin engine with all necessary routes and middleware
 func (pm *ProxyManager) setupGinEngine() {
 	pm.ginEngine.Use(func(c *gin.Context) {
 		// Start timer
@@ -208,6 +206,8 @@ func (pm *ProxyManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // StopProcesses acquires a lock and stops all running upstream processes.
 // This is the public method safe for concurrent calls.
+// Unlike Shutdown, this method only stops the processes but doesn't perform
+// a complete shutdown, allowing for process replacement without full termination.
 func (pm *ProxyManager) StopProcesses() {
 	pm.Lock()
 	defer pm.Unlock()

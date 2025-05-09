@@ -21,12 +21,18 @@ func TestLogMonitor(t *testing.T) {
 	client2Messages := make([]byte, 0)
 
 	var wg sync.WaitGroup
-	wg.Add(2) // One for each client
+	wg.Add(2) // One for each client (goroutine)
 
 	// Write messages first
-	logMonitor.Write([]byte("1"))
-	logMonitor.Write([]byte("2"))
-	logMonitor.Write([]byte("3"))
+	if _, err := logMonitor.Write([]byte("1")); err != nil {
+		t.Fatalf("Failed to write log message: %v", err)
+	}
+	if _, err := logMonitor.Write([]byte("2")); err != nil {
+		t.Fatalf("Failed to write log message: %v", err)
+	}
+	if _, err := logMonitor.Write([]byte("3")); err != nil {
+		t.Fatalf("Failed to write log message: %v", err)
+	}
 
 	// Start goroutines to collect messages
 	go func() {

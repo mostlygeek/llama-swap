@@ -18,20 +18,21 @@ var (
 
 func init() {
 	// flip to help with debugging tests
-	if false {
+	if false { // Reverted to false
 		debugLogger.SetLogLevel(LevelDebug)
 	} else {
-		debugLogger.SetLogLevel(LevelError)
+		debugLogger.SetLogLevel(LevelError) // This will now be active
 	}
 }
 
 func TestProcess_AutomaticallyStartsUpstream(t *testing.T) {
 
 	expectedMessage := "testing91931"
-	config := getTestSimpleResponderConfig(expectedMessage)
+	// Use a specific port for the first instance in this test
+	config1 := getTestSimpleResponderConfigPort(expectedMessage, 12901)
 
 	// Create a process
-	process := NewProcess("test-process", 5, config, debugLogger, debugLogger)
+	process := NewProcess("test-process", 5, config1, debugLogger, debugLogger)
 	defer process.Stop()
 
 	req := httptest.NewRequest("GET", "/test", nil)
@@ -48,6 +49,13 @@ func TestProcess_AutomaticallyStartsUpstream(t *testing.T) {
 	// Stop the process
 	process.Stop()
 
+	// Ensure the process is fully stopped and port is likely released
+	time.Sleep(100 * time.Millisecond) // Small delay to help port release
+
+	// Use a different specific port for the second instance
+	config2 := getTestSimpleResponderConfigPort(expectedMessage, 12902)
+	process.config = config2 // Update the process config to use the new port
+
 	req = httptest.NewRequest("GET", "/", nil)
 	w = httptest.NewRecorder()
 
@@ -56,7 +64,7 @@ func TestProcess_AutomaticallyStartsUpstream(t *testing.T) {
 
 	// should have automatically started the process again
 	if w.Code != http.StatusOK {
-		t.Errorf("Expected status code %d, got %d", http.StatusOK, w.Code)
+		t.Errorf("Expected status code %d, got %d (URL: %s, Port: %s)", http.StatusOK, w.Code, req.URL.Path, process.config.Proxy)
 	}
 }
 
@@ -65,7 +73,8 @@ func TestProcess_AutomaticallyStartsUpstream(t *testing.T) {
 func TestProcess_WaitOnMultipleStarts(t *testing.T) {
 
 	expectedMessage := "testing91931"
-	config := getTestSimpleResponderConfig(expectedMessage)
+	// Use a specific, high port for this test to reduce collision likelihood
+	config := getTestSimpleResponderConfigPort(expectedMessage, 12903)
 
 	process := NewProcess("test-process", 5, config, debugLogger, debugLogger)
 	defer process.Stop()
