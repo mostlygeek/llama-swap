@@ -119,8 +119,10 @@ func isValidTransition(from, to ProcessState) bool {
 		return to == StateStopping
 	case StateStopping:
 		return to == StateStopped || to == StateShutdown
-	case StateFailed, StateShutdown:
-		return false // No transitions allowed from these states
+	case StateFailed:
+		return to == StateStopped // Allow resetting a failed process
+	case StateShutdown:
+		return false // No transitions from shutdown
 	}
 	return false
 }
@@ -412,7 +414,20 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 
 	// prevent new requests from being made while stopping or irrecoverable
 	currentState := p.CurrentState()
-	if currentState == StateFailed || currentState == StateShutdown || currentState == StateStopping {
+
+	if currentState == StateFailed {
+		p.proxyLogger.Infof("<%s> Attempting to recover from failed state.", p.ID)
+		// Attempt to reset the state to stopped so it can be restarted
+		if _, err := p.swapState(StateFailed, StateStopped); err != nil {
+			p.proxyLogger.Errorf("<%s> Failed to reset state from Failed to Stopped: %v. Current state: %s", p.ID, err, p.CurrentState())
+			http.Error(w, fmt.Sprintf("Process failed and could not be reset, state is %s", p.CurrentState()), http.StatusServiceUnavailable)
+			return
+		}
+		p.proxyLogger.Infof("<%s> Process state reset to Stopped from Failed.", p.ID)
+		currentState = p.CurrentState() // Re-fetch current state, should now be StateStopped
+	}
+
+	if currentState == StateShutdown || currentState == StateStopping {
 		http.Error(w, fmt.Sprintf("Process can not ProxyRequest, state is %s", currentState), http.StatusServiceUnavailable)
 		return
 	}

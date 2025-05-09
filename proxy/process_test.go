@@ -109,13 +109,16 @@ func TestProcess_BrokenModelConfig(t *testing.T) {
 	req := httptest.NewRequest("GET", "/", nil)
 	w := httptest.NewRecorder()
 	process.ProxyRequest(w, req)
-	assert.Equal(t, http.StatusBadGateway, w.Code)
-	assert.Contains(t, w.Body.String(), "unable to start process")
+	assert.Equal(t, http.StatusBadGateway, w.Code) // First attempt fails to start
+	assert.Contains(t, w.Body.String(), "unable to start process: start() failed: exec: \"nonexistent-command\": executable file not found in $PATH")
+	assert.Equal(t, StateFailed, process.CurrentState()) // Should be in failed state after first attempt
 
+	// Second request should also attempt to start and fail similarly due to recovery logic
 	w = httptest.NewRecorder()
 	process.ProxyRequest(w, req)
-	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
-	assert.Contains(t, w.Body.String(), "Process can not ProxyRequest, state is failed")
+	assert.Equal(t, http.StatusBadGateway, w.Code) // Second attempt also fails to start
+	assert.Contains(t, w.Body.String(), "unable to start process: start() failed: exec: \"nonexistent-command\": executable file not found in $PATH")
+	assert.Equal(t, StateFailed, process.CurrentState()) // Should end up in failed state again
 }
 
 func TestProcess_UnloadAfterTTL(t *testing.T) {
@@ -266,7 +269,7 @@ func TestProcess_SwapState(t *testing.T) {
 		{"Ready to Starting", StateReady, StateReady, StateStarting, ErrInvalidStateTransition, StateReady},
 		{"Ready to Failed", StateReady, StateReady, StateFailed, ErrInvalidStateTransition, StateReady},
 		{"Stopping to Ready", StateStopping, StateStopping, StateReady, ErrInvalidStateTransition, StateStopping},
-		{"Failed to Stopped", StateFailed, StateFailed, StateStopped, ErrInvalidStateTransition, StateFailed},
+		{"Failed to Stopped", StateFailed, StateFailed, StateStopped, nil, StateStopped},
 		{"Failed to Starting", StateFailed, StateFailed, StateStarting, ErrInvalidStateTransition, StateFailed},
 		{"Shutdown to Stopped", StateShutdown, StateShutdown, StateStopped, ErrInvalidStateTransition, StateShutdown},
 		{"Shutdown to Starting", StateShutdown, StateShutdown, StateStarting, ErrInvalidStateTransition, StateShutdown},
