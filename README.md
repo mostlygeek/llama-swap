@@ -70,6 +70,14 @@ healthCheckTimeout: 60
 # Valid log levels: debug, info (default), warn, error
 logLevel: info
 
+# Automatic Port Values
+# use ${PORT} in model.cmd and model.proxy to use an automatic port number
+# when you use ${PORT} you can omit a custom model.proxy value, as it will
+# default to http://localhost:${PORT}
+
+# override the default port (5800) for automatic port values
+startPort: 10001
+
 # define valid model values and the upstream server start
 models:
   "llama":
@@ -83,6 +91,7 @@ models:
       - "CUDA_VISIBLE_DEVICES=0"
 
     # where to reach the server started by cmd, make sure the ports match
+    # can be omitted if you use an automatic ${PORT} in cmd
     proxy: http://127.0.0.1:8999
 
     # aliases names to use this model for
@@ -109,14 +118,14 @@ models:
   # but they can still be requested as normal
   "qwen-unlisted":
     unlisted: true
-    cmd: llama-server --port 9999 -m Llama-3.2-1B-Instruct-Q4_K_M.gguf -ngl 0
+    cmd: llama-server --port ${PORT} -m Llama-3.2-1B-Instruct-Q4_K_M.gguf -ngl 0
 
   # Docker Support (v26.1.4+ required!)
   "docker-llama":
-    proxy: "http://127.0.0.1:9790"
+    proxy: "http://127.0.0.1:${PORT}"
     cmd: >
       docker run --name dockertest
-      --init --rm -p 9790:8080 -v /mnt/nvme/models:/models
+      --init --rm -p ${PORT}:8080 -v /mnt/nvme/models:/models
       ghcr.io/ggerganov/llama.cpp:server
       --model '/models/Qwen2.5-Coder-0.5B-Instruct-Q4_K_M.gguf'
 
@@ -180,11 +189,6 @@ groups:
 - [Speculative Decoding](examples/speculative-decoding/README.md) - using a small draft model can increase inference speeds from 20% to 40%. This example includes a configurations Qwen2.5-Coder-32B (2.5x increase) and Llama-3.1-70B (1.4x increase) in the best cases.
 - [Optimizing Code Generation](examples/benchmark-snakegame/README.md) - find the optimal settings for your machine. This example demonstrates defining multiple configurations and testing which one is fastest.
 - [Restart on Config Change](examples/restart-on-config-change/README.md) - automatically restart llama-swap when trying out different configurations.
-
-## Configuration
-
-llama-s
-
 </details>
 
 ## Docker Install ([download images](https://github.com/mostlygeek/llama-swap/pkgs/container/llama-swap))

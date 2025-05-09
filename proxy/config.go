@@ -2,8 +2,10 @@ package proxy
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/google/shlex"
@@ -62,6 +64,9 @@ type Config struct {
 
 	// map aliases to actual model IDs
 	aliases map[string]string
+
+	// automatic port assignments
+	StartPort int `yaml:"startPort"`
 }
 
 func (c *Config) RealModelName(search string) (string, bool) {
@@ -83,7 +88,16 @@ func (c *Config) FindConfig(modelName string) (ModelConfig, string, bool) {
 }
 
 func LoadConfig(path string) (Config, error) {
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
+	if err != nil {
+		return Config{}, err
+	}
+	defer file.Close()
+	return LoadConfigFromReader(file)
+}
+
+func LoadConfigFromReader(r io.Reader) (Config, error) {
+	data, err := io.ReadAll(r)
 	if err != nil {
 		return Config{}, err
 	}
@@ -98,14 +112,50 @@ func LoadConfig(path string) (Config, error) {
 		config.HealthCheckTimeout = 15
 	}
 
+	// set default port ranges
+	if config.StartPort == 0 {
+		// default to 5800
+		config.StartPort = 5800
+	} else if config.StartPort < 1 {
+		return Config{}, fmt.Errorf("startPort must be greater than 1")
+	}
+
 	// Populate the aliases map
 	config.aliases = make(map[string]string)
 	for modelName, modelConfig := range config.Models {
 		for _, alias := range modelConfig.Aliases {
+			if _, found := config.aliases[alias]; found {
+				return Config{}, fmt.Errorf("duplicate alias %s found in model: %s", alias, modelName)
+			}
 			config.aliases[alias] = modelName
 		}
 	}
 
+	// iterate over the models and replace any ${PORT} with the next available port
+	// Get and sort all model IDs first, makes testing more consistent
+	modelIds := make([]string, 0, len(config.Models))
+	for modelId := range config.Models {
+		modelIds = append(modelIds, modelId)
+	}
+	sort.Strings(modelIds) // This guarantees stable iteration order
+
+	// iterate over the sorted models
+	nextPort := config.StartPort
+	for _, modelId := range modelIds {
+		modelConfig := config.Models[modelId]
+		if strings.Contains(modelConfig.Cmd, "${PORT}") {
+			modelConfig.Cmd = strings.ReplaceAll(modelConfig.Cmd, "${PORT}", strconv.Itoa(nextPort))
+			if modelConfig.Proxy == "" {
+				modelConfig.Proxy = fmt.Sprintf("http://localhost:%d", nextPort)
+			} else {
+				modelConfig.Proxy = strings.ReplaceAll(modelConfig.Proxy, "${PORT}", strconv.Itoa(nextPort))
+			}
+			nextPort++
+			config.Models[modelId] = modelConfig
+		} else if modelConfig.Proxy == "" {
+			return Config{}, fmt.Errorf("model %s requires a proxy value when not using automatic ${PORT}", modelId)
+		}
+	}
 	config = AddDefaultGroupToConfig(config)
 	// check that members are all unique in the groups
 	memberUsage := make(map[string]string) // maps member to group it appears in
