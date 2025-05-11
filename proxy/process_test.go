@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -29,43 +28,35 @@ func init() {
 func TestProcess_AutomaticallyStartsUpstream(t *testing.T) {
 
 	expectedMessage := "testing91931"
-	// Use a specific port for the first instance in this test
-	config1 := getTestSimpleResponderConfigPort(expectedMessage, 12901)
+	config := getTestSimpleResponderConfig(expectedMessage)
 
 	// Create a process
-	process := NewProcess("test-process", 5, config1, debugLogger, debugLogger)
+	process := NewProcess("test-process", 5, config, debugLogger, debugLogger)
 	defer process.Stop()
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
 
+	// process is automatically started
+	assert.Equal(t, StateStopped, process.CurrentState())
 	process.ProxyRequest(w, req)
+	assert.Equal(t, StateReady, process.CurrentState())
 
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status code %d, got %d", http.StatusOK, w.Code)
-	}
-	if !strings.Contains(w.Body.String(), expectedMessage) {
-		t.Errorf("Expected body to contain '%s', got '%s'", expectedMessage, w.Body.String())
-	}
+	assert.Equal(t, http.StatusOK, w.Code, "Expected status code %d, got %d", http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), expectedMessage)
 
 	// Stop the process
 	process.Stop()
 
-	// Ensure the process is fully stopped and port is likely released
-	time.Sleep(100 * time.Millisecond) // Small delay to help port release
-
-	// Use a different specific port for the second instance
-	config2 := getTestSimpleResponderConfigPort(expectedMessage, 12902)
-	process.config = config2 // Update the process config to use the new port
-
 	req = httptest.NewRequest("GET", "/", nil)
 	w = httptest.NewRecorder()
 
+	// Proxy the request
 	process.ProxyRequest(w, req)
 
 	// should have automatically started the process again
 	if w.Code != http.StatusOK {
-		t.Errorf("Expected status code %d, got %d (URL: %s, Port: %s)", http.StatusOK, w.Code, req.URL.Path, process.config.Proxy)
+		t.Errorf("Expected status code %d, got %d", http.StatusOK, w.Code)
 	}
 }
 
@@ -74,8 +65,7 @@ func TestProcess_AutomaticallyStartsUpstream(t *testing.T) {
 func TestProcess_WaitOnMultipleStarts(t *testing.T) {
 
 	expectedMessage := "testing91931"
-	// Use a specific, high port for this test to reduce collision likelihood
-	config := getTestSimpleResponderConfigPort(expectedMessage, 12903)
+	config := getTestSimpleResponderConfig(expectedMessage)
 
 	process := NewProcess("test-process", 5, config, debugLogger, debugLogger)
 	defer process.Stop()
