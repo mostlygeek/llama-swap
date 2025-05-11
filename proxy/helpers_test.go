@@ -63,7 +63,7 @@ func getTestSimpleResponderConfigPort(expectedMessage string, port int) ModelCon
 
 	// Create a process configuration
 	return ModelConfig{
-		Cmd:           fmt.Sprintf("%s --port %d --silent --respond %s", binaryPath, port, expectedMessage), // Re-added --silent
+		Cmd:           fmt.Sprintf("%s --port %d --respond %s", binaryPath, port, expectedMessage),
 		Proxy:         fmt.Sprintf("http://127.0.0.1:%d", port),
 		CheckEndpoint: "/health",
 	}

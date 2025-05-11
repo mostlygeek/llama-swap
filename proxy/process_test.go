@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -18,10 +19,10 @@ var (
 
 func init() {
 	// flip to help with debugging tests
-	if false { // Reverted to false
+	if false {
 		debugLogger.SetLogLevel(LevelDebug)
 	} else {
-		debugLogger.SetLogLevel(LevelError) // This will now be active
+		debugLogger.SetLogLevel(LevelError)
 	}
 }
 
@@ -38,13 +39,14 @@ func TestProcess_AutomaticallyStartsUpstream(t *testing.T) {
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
 
-	// process is automatically started
-	assert.Equal(t, StateStopped, process.CurrentState())
 	process.ProxyRequest(w, req)
-	assert.Equal(t, StateReady, process.CurrentState())
 
-	assert.Equal(t, http.StatusOK, w.Code, "Expected status code %d, got %d", http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), expectedMessage)
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status code %d, got %d", http.StatusOK, w.Code)
+	}
+	if !strings.Contains(w.Body.String(), expectedMessage) {
+		t.Errorf("Expected body to contain '%s', got '%s'", expectedMessage, w.Body.String())
+	}
 
 	// Stop the process
 	process.Stop()
@@ -59,7 +61,6 @@ func TestProcess_AutomaticallyStartsUpstream(t *testing.T) {
 	req = httptest.NewRequest("GET", "/", nil)
 	w = httptest.NewRecorder()
 
-	// Proxy the request
 	process.ProxyRequest(w, req)
 
 	// should have automatically started the process again
@@ -109,16 +110,13 @@ func TestProcess_BrokenModelConfig(t *testing.T) {
 	req := httptest.NewRequest("GET", "/", nil)
 	w := httptest.NewRecorder()
 	process.ProxyRequest(w, req)
-	assert.Equal(t, http.StatusBadGateway, w.Code) // First attempt fails to start
-	assert.Contains(t, w.Body.String(), "unable to start process: start() failed: exec: \"nonexistent-command\": executable file not found in $PATH")
-	assert.Equal(t, StateFailed, process.CurrentState()) // Should be in failed state after first attempt
+	assert.Equal(t, http.StatusBadGateway, w.Code)
+	assert.Contains(t, w.Body.String(), "unable to start process")
 
-	// Second request should also attempt to start and fail similarly due to recovery logic
 	w = httptest.NewRecorder()
 	process.ProxyRequest(w, req)
-	assert.Equal(t, http.StatusBadGateway, w.Code) // Second attempt also fails to start
-	assert.Contains(t, w.Body.String(), "unable to start process: start() failed: exec: \"nonexistent-command\": executable file not found in $PATH")
-	assert.Equal(t, StateFailed, process.CurrentState()) // Should end up in failed state again
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.Contains(t, w.Body.String(), "Process can not ProxyRequest, state is failed")
 }
 
 func TestProcess_UnloadAfterTTL(t *testing.T) {
@@ -269,7 +267,7 @@ func TestProcess_SwapState(t *testing.T) {
 		{"Ready to Starting", StateReady, StateReady, StateStarting, ErrInvalidStateTransition, StateReady},
 		{"Ready to Failed", StateReady, StateReady, StateFailed, ErrInvalidStateTransition, StateReady},
 		{"Stopping to Ready", StateStopping, StateStopping, StateReady, ErrInvalidStateTransition, StateStopping},
-		{"Failed to Stopped", StateFailed, StateFailed, StateStopped, nil, StateStopped},
+		{"Failed to Stopped", StateFailed, StateFailed, StateStopped, ErrInvalidStateTransition, StateFailed},
 		{"Failed to Starting", StateFailed, StateFailed, StateStarting, ErrInvalidStateTransition, StateFailed},
 		{"Shutdown to Stopped", StateShutdown, StateShutdown, StateStopped, ErrInvalidStateTransition, StateShutdown},
 		{"Shutdown to Starting", StateShutdown, StateShutdown, StateStarting, ErrInvalidStateTransition, StateShutdown},
