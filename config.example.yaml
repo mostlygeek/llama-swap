@@ -5,13 +5,20 @@ healthCheckTimeout: 90
 # valid log levels: debug, info (default), warn, error
 logLevel: debug
 
+# creating a coding profile with models for code generation and general questions
+groups:
+  coding:
+    swap: false
+    members:
+      - "qwen"
+      - "llama"
+
 models:
   "llama":
     cmd: >
       models/llama-server-osx
-      --port 9001
+      --port ${PORT}
       -m models/Llama-3.2-1B-Instruct-Q4_0.gguf
-    proxy: http://127.0.0.1:9001
 
     # list of model name aliases this llama.cpp instance can serve
     aliases:
@@ -24,17 +31,15 @@ models:
     ttl: 5
 
   "qwen":
-    cmd: models/llama-server-osx --port 9002 -m models/qwen2.5-0.5b-instruct-q8_0.gguf
-    proxy: http://127.0.0.1:9002
+    cmd: models/llama-server-osx --port ${PORT} -m models/qwen2.5-0.5b-instruct-q8_0.gguf
     aliases:
-    - gpt-3.5-turbo
+      - gpt-3.5-turbo
 
   # Embedding example with Nomic
   # https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF
   "nomic":
-    proxy: http://127.0.0.1:9005
     cmd: >
-      models/llama-server-osx --port 9005
+      models/llama-server-osx --port ${PORT}
       -m models/nomic-embed-text-v1.5.Q8_0.gguf
       --ctx-size 8192
       --batch-size 8192
@@ -46,19 +51,17 @@ models:
   # Reranking example with bge-reranker
   # https://huggingface.co/gpustack/bge-reranker-v2-m3-GGUF
   "bge-reranker":
-    proxy: http://127.0.0.1:9006
     cmd: >
-      models/llama-server-osx --port 9006
+      models/llama-server-osx --port ${PORT}
       -m models/bge-reranker-v2-m3-Q4_K_M.gguf
       --ctx-size 8192
       --reranking
 
   # Docker Support (v26.1.4+ required!)
   "dockertest":
-    proxy: "http://127.0.0.1:9790"
     cmd: >
       docker run --name dockertest
-      --init --rm -p 9790:8080 -v /mnt/nvme/models:/models
+      --init --rm -p ${PORT}:8080 -v /mnt/nvme/models:/models
       ghcr.io/ggerganov/llama.cpp:server
       --model '/models/Qwen2.5-Coder-0.5B-Instruct-Q4_K_M.gguf'
 
@@ -67,8 +70,7 @@ models:
     env:
       - CUDA_VISIBLE_DEVICES=0,1
       - env1=hello
-    cmd: build/simple-responder --port 8999
-    proxy: http://127.0.0.1:8999
+    cmd: build/simple-responder --port ${PORT}
     unlisted: true
 
     # use "none" to skip check. Caution this may cause some requests to fail
@@ -84,9 +86,3 @@ models:
     cmd: models/llama-server-osx --port 8999 -m models/qwen2.5-0.5b-instruct-q8_0.gguf
     proxy: http://127.0.0.1:9000
     unlisted: true
-
-# creating a coding profile with models for code generation and general questions
-profiles:
-  coding:
-    - "qwen"
-    - "llama"
