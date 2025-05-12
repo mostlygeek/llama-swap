@@ -34,7 +34,7 @@ func TestProxyManager_SwapProcessCorrectly(t *testing.T) {
 		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
 		w := httptest.NewRecorder()
 
-		proxy.HandlerFunc(w, req)
+		proxy.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Body.String(), modelName)
 	}
@@ -72,10 +72,9 @@ func TestProxyManager_SwapMultiProcess(t *testing.T) {
 			req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
 			w := httptest.NewRecorder()
 
-			proxy.HandlerFunc(w, req)
+			proxy.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusOK, w.Code)
 			assert.Contains(t, w.Body.String(), requestedModel)
-
 		})
 	}
 
@@ -115,7 +114,7 @@ func TestProxyManager_PersistentGroupsAreNotSwapped(t *testing.T) {
 		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
 		w := httptest.NewRecorder()
 
-		proxy.HandlerFunc(w, req)
+		proxy.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Body.String(), requestedModel)
 	}
@@ -158,14 +157,13 @@ func TestProxyManager_SwapMultiProcessParallelRequests(t *testing.T) {
 			req := httptest.NewRequest("POST", "/v1/chat/completions?wait=1000ms", bytes.NewBufferString(reqBody))
 			w := httptest.NewRecorder()
 
-			proxy.HandlerFunc(w, req)
+			proxy.ServeHTTP(w, req)
 
 			if w.Code != http.StatusOK {
 				t.Errorf("Expected status OK, got %d for key %s", w.Code, key)
 			}
 
 			mu.Lock()
-
 			var response map[string]string
 			assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 			results[key] = response["responseMessage"]
@@ -202,7 +200,7 @@ func TestProxyManager_ListModelsHandler(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	// Call the listModelsHandler
-	proxy.HandlerFunc(w, req)
+	proxy.ServeHTTP(w, req)
 
 	// Check the response status code
 	assert.Equal(t, http.StatusOK, w.Code)
@@ -292,7 +290,7 @@ func TestProxyManager_Shutdown(t *testing.T) {
 			w := httptest.NewRecorder()
 
 			// send a request to trigger the proxy to load ... this should hang waiting for start up
-			proxy.HandlerFunc(w, req)
+			proxy.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusBadGateway, w.Code)
 			assert.Contains(t, w.Body.String(), "health check interrupted due to shutdown")
 		}(modelName)
@@ -318,12 +316,12 @@ func TestProxyManager_Unload(t *testing.T) {
 	reqBody := fmt.Sprintf(`{"model":"%s"}`, "model1")
 	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
 	w := httptest.NewRecorder()
-	proxy.HandlerFunc(w, req)
+	proxy.ServeHTTP(w, req)
 
 	assert.Equal(t, proxy.processGroups[DEFAULT_GROUP_ID].processes["model1"].CurrentState(), StateReady)
 	req = httptest.NewRequest("GET", "/unload", nil)
 	w = httptest.NewRecorder()
-	proxy.HandlerFunc(w, req)
+	proxy.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, w.Body.String(), "OK")
 
@@ -334,7 +332,6 @@ func TestProxyManager_Unload(t *testing.T) {
 
 // Test issue #61 `Listing the current list of models and the loaded model.`
 func TestProxyManager_RunningEndpoint(t *testing.T) {
-
 	// Shared configuration
 	config := AddDefaultGroupToConfig(Config{
 		HealthCheckTimeout: 15,
@@ -360,7 +357,7 @@ func TestProxyManager_RunningEndpoint(t *testing.T) {
 	t.Run("no models loaded", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/running", nil)
 		w := httptest.NewRecorder()
-		proxy.HandlerFunc(w, req)
+		proxy.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
 
@@ -378,13 +375,13 @@ func TestProxyManager_RunningEndpoint(t *testing.T) {
 		reqBody := `{"model":"model1"}`
 		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
 		w := httptest.NewRecorder()
-		proxy.HandlerFunc(w, req)
+		proxy.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 
 		// Simulate browser call for the `/running` endpoint.
 		req = httptest.NewRequest("GET", "/running", nil)
 		w = httptest.NewRecorder()
-		proxy.HandlerFunc(w, req)
+		proxy.ServeHTTP(w, req)
 
 		var response RunningResponse
 		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
@@ -436,7 +433,7 @@ func TestProxyManager_AudioTranscriptionHandler(t *testing.T) {
 	req := httptest.NewRequest("POST", "/v1/audio/transcriptions", &b)
 	req.Header.Set("Content-Type", w.FormDataContentType())
 	rec := httptest.NewRecorder()
-	proxy.HandlerFunc(rec, req)
+	proxy.ServeHTTP(rec, req)
 
 	// Verify the response
 	assert.Equal(t, http.StatusOK, rec.Code)
@@ -473,7 +470,7 @@ func TestProxyManager_UseModelName(t *testing.T) {
 		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
 		w := httptest.NewRecorder()
 
-		proxy.HandlerFunc(w, req)
+		proxy.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Body.String(), upstreamModelName)
 	})
@@ -500,7 +497,7 @@ func TestProxyManager_UseModelName(t *testing.T) {
 		req := httptest.NewRequest("POST", "/v1/audio/transcriptions", &b)
 		req.Header.Set("Content-Type", w.FormDataContentType())
 		rec := httptest.NewRecorder()
-		proxy.HandlerFunc(rec, req)
+		proxy.ServeHTTP(rec, req)
 
 		// Verify the response
 		assert.Equal(t, http.StatusOK, rec.Code)
@@ -568,7 +565,7 @@ func TestProxyManager_CORSOptionsHandler(t *testing.T) {
 			}
 
 			w := httptest.NewRecorder()
-			proxy.ginEngine.ServeHTTP(w, req)
+			proxy.ServeHTTP(w, req)
 
 			assert.Equal(t, tt.expectedStatus, w.Code)
 
@@ -592,7 +589,7 @@ func TestProxyManager_Upstream(t *testing.T) {
 	defer proxy.StopProcesses()
 	req := httptest.NewRequest("GET", "/upstream/model1/test", nil)
 	rec := httptest.NewRecorder()
-	proxy.HandlerFunc(rec, req)
+	proxy.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "model1", rec.Body.String())
 }
@@ -613,7 +610,7 @@ func TestProxyManager_ChatContentLength(t *testing.T) {
 	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
 	w := httptest.NewRecorder()
 
-	proxy.HandlerFunc(w, req)
+	proxy.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 	var response map[string]string
 	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
