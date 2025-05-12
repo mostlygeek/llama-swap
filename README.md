@@ -195,7 +195,7 @@ groups:
 
 Docker is the quickest way to try out llama-swap:
 
-```
+```shell
 # use CPU inference
 $ docker run -it --rm -p 9292:8080 ghcr.io/mostlygeek/llama-swap:cpu
 
@@ -231,7 +231,7 @@ Specific versions are also available and are tagged with the llama-swap, archite
 
 Beyond the demo you will likely want to run the containers with your downloaded models and custom configuration.
 
-```
+```shell
 $ docker run -it --rm --runtime nvidia -p 9292:8080 \
   -v /path/to/models:/models \
   -v /path/to/custom/config.yaml:/app/config.yaml \
@@ -246,7 +246,12 @@ Pre-built binaries are available for Linux, FreeBSD and Darwin (OSX). These are 
 
 1. Create a configuration file, see [config.example.yaml](config.example.yaml)
 1. Download a [release](https://github.com/mostlygeek/llama-swap/releases) appropriate for your OS and architecture.
-1. Run the binary with `llama-swap --config path/to/config.yaml`
+1. Run the binary with `llama-swap --config path/to/config.yaml`.
+  Available flags:
+    - `--config`: Path to the configuration file (default: `config.yaml`).
+    - `--listen`: Address and port to listen on (default: `:8080`).
+    - `--version`: Show version information and exit.
+    - `--watch-config`: Automatically reload the configuration file when it changes. This will wait for in-flight requests to complete then stop all running models (default: `false`).
 
 ### Building from source
 
@@ -261,7 +266,7 @@ Open the `http://<host>/logs` with your browser to get a web interface with stre
 
 Of course, CLI access is also supported:
 
-```
+```shell
 # sends up to the last 10KB of logs
 curl http://host/logs'
 
