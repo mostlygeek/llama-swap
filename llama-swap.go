@@ -84,7 +84,7 @@ func main() {
 			case newManager := <-reloadChan:
 				log.Println("Config change detected, waiting for in-flight requests to complete...")
 				// Stop old manager processes gracefully (this waits for in-flight requests)
-				currentManager.StopProcesses()
+				currentManager.StopProcesses(proxy.StopWaitForInflightRequest)
 				// Now do a full shutdown to clear the process map
 				currentManager.Shutdown()
 				currentManager = newManager

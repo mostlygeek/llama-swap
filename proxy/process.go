@@ -30,6 +30,13 @@ const (
 	StateShutdown ProcessState = ProcessState("shutdown")
 )
 
+type StopStrategy int
+
+const (
+	StopImmediately StopStrategy = iota
+	StopWaitForInflightRequest
+)
+
 type Process struct {
 	ID     string
 	config ModelConfig
@@ -313,13 +320,25 @@ func (p *Process) start() error {
 	}
 }
 
+// Stop will wait for inflight requests to complete before stopping the process.
 func (p *Process) Stop() {
 	if !isValidTransition(p.CurrentState(), StateStopping) {
 		return
 	}
 
 	// wait for any inflight requests before proceeding
+	p.proxyLogger.Debugf("<%s> Stop(): Waiting for inflight requests to complete", p.ID)
 	p.inFlightRequests.Wait()
+	p.StopImmediately()
+}
+
+// StopImmediately will transition the process to the stopping state and stop the process with a SIGTERM.
+// If the process does not stop within the specified timeout, it will be forcefully stopped with a SIGKILL.
+func (p *Process) StopImmediately() {
+	if !isValidTransition(p.CurrentState(), StateStopping) {
+		return
+	}
+
 	p.proxyLogger.Debugf("<%s> Stopping process", p.ID)
 
 	// calling Stop() when state is invalid is a no-op
@@ -338,7 +357,8 @@ func (p *Process) Stop() {
 
 // Shutdown is called when llama-swap is shutting down. It will give a little bit
 // of time for any inflight requests to complete before shutting down. If the Process
-// is in the state of starting, it will cancel it and shut it down
+// is in the state of starting, it will cancel it and shut it down. Once a process is in
+// the StateShutdown state, it can not be started again.
 func (p *Process) Shutdown() {
 	p.shutdownCancel()
 	p.stopCommand(5 * time.Second)

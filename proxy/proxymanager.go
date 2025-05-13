@@ -208,7 +208,7 @@ func (pm *ProxyManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // This is the public method safe for concurrent calls.
 // Unlike Shutdown, this method only stops the processes but doesn't perform
 // a complete shutdown, allowing for process replacement without full termination.
-func (pm *ProxyManager) StopProcesses() {
+func (pm *ProxyManager) StopProcesses(strategy StopStrategy) {
 	pm.Lock()
 	defer pm.Unlock()
 
@@ -218,7 +218,7 @@ func (pm *ProxyManager) StopProcesses() {
 		wg.Add(1)
 		go func(processGroup *ProcessGroup) {
 			defer wg.Done()
-			processGroup.stopProcesses()
+			processGroup.StopProcesses(strategy)
 		}(processGroup)
 	}
 
@@ -260,7 +260,7 @@ func (pm *ProxyManager) swapProcessGroup(requestedModel string) (*ProcessGroup, 
 		pm.proxyLogger.Debugf("Exclusive mode for group %s, stopping other process groups", processGroup.id)
 		for groupId, otherGroup := range pm.processGroups {
 			if groupId != processGroup.id && !otherGroup.persistent {
-				otherGroup.StopProcesses()
+				otherGroup.StopProcesses(StopWaitForInflightRequest)
 			}
 		}
 	}
@@ -504,7 +504,7 @@ func (pm *ProxyManager) sendErrorResponse(c *gin.Context, statusCode int, messag
 }
 
 func (pm *ProxyManager) unloadAllModelsHandler(c *gin.Context) {
-	pm.StopProcesses()
+	pm.StopProcesses(StopImmediately)
 	c.String(http.StatusOK, "OK")
 }
 
