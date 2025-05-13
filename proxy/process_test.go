@@ -372,3 +372,24 @@ func TestProcess_ConcurrencyLimit(t *testing.T) {
 	process.ProxyRequest(w, denied)
 	assert.Equal(t, http.StatusTooManyRequests, w.Code)
 }
+
+func TestProcess_StopImmediately(t *testing.T) {
+	expectedMessage := "test_stop_immediate"
+	config := getTestSimpleResponderConfig(expectedMessage)
+
+	process := NewProcess("stop_immediate", 2, config, debugLogger, debugLogger)
+	defer process.Stop()
+
+	err := process.start()
+	assert.Nil(t, err)
+	assert.Equal(t, process.CurrentState(), StateReady)
+	go func() {
+		// slow, but will get killed by StopImmediate
+		req := httptest.NewRequest("GET", "/slow-respond?echo=12345&delay=1s", nil)
+		w := httptest.NewRecorder()
+		process.ProxyRequest(w, req)
+	}()
+	<-time.After(time.Millisecond)
+	process.StopImmediately()
+	assert.Equal(t, process.CurrentState(), StateStopped)
+}
