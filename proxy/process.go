@@ -57,10 +57,19 @@ type Process struct {
 	// for managing shutdown state
 	shutdownCtx    context.Context
 	shutdownCancel context.CancelFunc
+
+	// for managing concurrency limits
+	concurrencyLimitSemaphore chan struct{}
 }
 
 func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor) *Process {
 	ctx, cancel := context.WithCancel(context.Background())
+	concurrentLimit := 10
+	if config.ConcurrencyLimit > 0 {
+		concurrentLimit = config.ConcurrencyLimit
+	} else {
+		proxyLogger.Debugf("Concurrency limit for model %s not set, defaulting to 10", ID)
+	}
 	return &Process{
 		ID:                      ID,
 		config:                  config,
@@ -73,6 +82,9 @@ func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLo
 		state:                   StateStopped,
 		shutdownCtx:             ctx,
 		shutdownCancel:          cancel,
+
+		// concurrency limit
+		concurrencyLimitSemaphore: make(chan struct{}, concurrentLimit),
 	}
 }
 
@@ -414,6 +426,14 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	currentState := p.CurrentState()
 	if currentState == StateFailed || currentState == StateShutdown || currentState == StateStopping {
 		http.Error(w, fmt.Sprintf("Process can not ProxyRequest, state is %s", currentState), http.StatusServiceUnavailable)
+		return
+	}
+
+	select {
+	case p.concurrencyLimitSemaphore <- struct{}{}:
+		defer func() { <-p.concurrencyLimitSemaphore }()
+	default:
+		http.Error(w, "Too many requests", http.StatusTooManyRequests)
 		return
 	}
 
