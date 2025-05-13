@@ -23,6 +23,9 @@ type ModelConfig struct {
 	UnloadAfter   int      `yaml:"ttl"`
 	Unlisted      bool     `yaml:"unlisted"`
 	UseModelName  string   `yaml:"useModelName"`
+
+	// Limit concurrency of HTTP requests to process
+	ConcurrencyLimit int `yaml:"concurrencyLimit"`
 }
 
 func (m *ModelConfig) SanitizedCommand() ([]string, error) {

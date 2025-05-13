@@ -340,3 +340,35 @@ func TestProcess_ExitInterruptsHealthCheck(t *testing.T) {
 	assert.Equal(t, "upstream command exited prematurely but successfully", err.Error())
 	assert.Equal(t, process.CurrentState(), StateFailed)
 }
+
+func TestProcess_ConcurrencyLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping long concurrency limit test")
+	}
+
+	expectedMessage := "concurrency_limit_test"
+	config := getTestSimpleResponderConfig(expectedMessage)
+
+	// only allow 1 concurrent request at a time
+	config.ConcurrencyLimit = 1
+
+	process := NewProcess("ttl_test", 2, config, debugLogger, debugLogger)
+	assert.Equal(t, 1, cap(process.concurrencyLimitSemaphore))
+	defer process.Stop()
+
+	// launch a goroutine first to take up the semaphore
+	go func() {
+		req1 := httptest.NewRequest("GET", "/slow-respond?echo=12345&delay=75ms", nil)
+		w := httptest.NewRecorder()
+		process.ProxyRequest(w, req1)
+		assert.Equal(t, http.StatusOK, w.Code)
+	}()
+
+	// let the goroutine start
+	<-time.After(time.Millisecond * 25)
+
+	denied := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	process.ProxyRequest(w, denied)
+	assert.Equal(t, http.StatusTooManyRequests, w.Code)
+}
