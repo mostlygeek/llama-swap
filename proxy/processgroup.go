@@ -76,14 +76,10 @@ func (pg *ProcessGroup) HasMember(modelName string) bool {
 	return slices.Contains(pg.config.Groups[pg.id].Members, modelName)
 }
 
-func (pg *ProcessGroup) StopProcesses() {
+func (pg *ProcessGroup) StopProcesses(strategy StopStrategy) {
 	pg.Lock()
 	defer pg.Unlock()
-	pg.stopProcesses()
-}
 
-// stopProcesses stops all processes in the group
-func (pg *ProcessGroup) stopProcesses() {
 	if len(pg.processes) == 0 {
 		return
 	}
@@ -94,7 +90,12 @@ func (pg *ProcessGroup) stopProcesses() {
 		wg.Add(1)
 		go func(process *Process) {
 			defer wg.Done()
-			process.Stop()
+			switch strategy {
+			case StopImmediately:
+				process.StopImmediately()
+			default:
+				process.Stop()
+			}
 		}(process)
 	}
 	wg.Wait()

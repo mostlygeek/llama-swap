@@ -27,7 +27,7 @@ func TestProxyManager_SwapProcessCorrectly(t *testing.T) {
 	})
 
 	proxy := New(config)
-	defer proxy.StopProcesses()
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
 
 	for _, modelName := range []string{"model1", "model2"} {
 		reqBody := fmt.Sprintf(`{"model":"%s"}`, modelName)
@@ -63,7 +63,7 @@ func TestProxyManager_SwapMultiProcess(t *testing.T) {
 	})
 
 	proxy := New(config)
-	defer proxy.StopProcesses()
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
 
 	tests := []string{"model1", "model2"}
 	for _, requestedModel := range tests {
@@ -105,7 +105,7 @@ func TestProxyManager_PersistentGroupsAreNotSwapped(t *testing.T) {
 	})
 
 	proxy := New(config)
-	defer proxy.StopProcesses()
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
 
 	// make requests to load all models, loading model1 should not affect model2
 	tests := []string{"model2", "model1"}
@@ -141,7 +141,7 @@ func TestProxyManager_SwapMultiProcessParallelRequests(t *testing.T) {
 	})
 
 	proxy := New(config)
-	defer proxy.StopProcesses()
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
 
 	results := map[string]string{}
 
@@ -352,7 +352,7 @@ func TestProxyManager_RunningEndpoint(t *testing.T) {
 
 	// Create proxy once for all tests
 	proxy := New(config)
-	defer proxy.StopProcesses()
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
 
 	t.Run("no models loaded", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/running", nil)
@@ -407,7 +407,7 @@ func TestProxyManager_AudioTranscriptionHandler(t *testing.T) {
 	})
 
 	proxy := New(config)
-	defer proxy.StopProcesses()
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
 
 	// Create a buffer with multipart form data
 	var b bytes.Buffer
@@ -461,7 +461,7 @@ func TestProxyManager_UseModelName(t *testing.T) {
 	})
 
 	proxy := New(config)
-	defer proxy.StopProcesses()
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
 
 	requestedModel := "model1"
 
@@ -557,7 +557,7 @@ func TestProxyManager_CORSOptionsHandler(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			proxy := New(config)
-			defer proxy.StopProcesses()
+			defer proxy.StopProcesses(StopWaitForInflightRequest)
 
 			req := httptest.NewRequest(tt.method, "/v1/chat/completions", nil)
 			for k, v := range tt.requestHeaders {
@@ -586,7 +586,7 @@ func TestProxyManager_Upstream(t *testing.T) {
 	})
 
 	proxy := New(config)
-	defer proxy.StopProcesses()
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
 	req := httptest.NewRequest("GET", "/upstream/model1/test", nil)
 	rec := httptest.NewRecorder()
 	proxy.ServeHTTP(rec, req)
@@ -604,7 +604,7 @@ func TestProxyManager_ChatContentLength(t *testing.T) {
 	})
 
 	proxy := New(config)
-	defer proxy.StopProcesses()
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
 
 	reqBody := fmt.Sprintf(`{"model":"%s", "x": "this is just some content to push the length out a bit"}`, "model1")
 	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
