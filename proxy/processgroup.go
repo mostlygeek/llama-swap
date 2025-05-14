@@ -86,17 +86,23 @@ func (pg *ProcessGroup) StopProcesses(strategy StopStrategy) {
 
 	// stop Processes in parallel
 	var wg sync.WaitGroup
-	for _, process := range pg.processes {
+	for modelID, process := range pg.processes {
 		wg.Add(1)
-		go func(process *Process) {
+		go func(modelID string, process *Process) {
 			defer wg.Done()
 			switch strategy {
 			case StopImmediately:
 				process.StopImmediately()
+
+			// stop all processes and replace with a new prestine Process
+			case StopAndReset:
+				process.StopImmediately()
+				modelConfig, actualModelID, _ := pg.config.FindConfig(modelID)
+				pg.processes[actualModelID] = NewProcess(modelID, pg.config.HealthCheckTimeout, modelConfig, pg.upstreamLogger, pg.proxyLogger)
 			default:
 				process.Stop()
 			}
-		}(process)
+		}(modelID, process)
 	}
 	wg.Wait()
 }

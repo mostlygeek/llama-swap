@@ -504,7 +504,7 @@ func (pm *ProxyManager) sendErrorResponse(c *gin.Context, statusCode int, messag
 }
 
 func (pm *ProxyManager) unloadAllModelsHandler(c *gin.Context) {
-	pm.StopProcesses(StopImmediately)
+	pm.StopProcesses(StopAndReset)
 	c.String(http.StatusOK, "OK")
 }
 

@@ -30,11 +30,15 @@ const (
 	StateShutdown ProcessState = ProcessState("shutdown")
 )
 
+// Strategies used for controlling the desired stopping behaviour
 type StopStrategy int
 
 const (
 	StopImmediately StopStrategy = iota
 	StopWaitForInflightRequest
+
+	// stop the process and reset its state to pristine
+	StopAndReset
 )
 
 type Process struct {
@@ -201,6 +205,7 @@ func (p *Process) start() error {
 
 	// Set process state to failed
 	if err != nil {
+		p.proxyLogger.Errorf("<%s> cmd.Start() failed: %s", p.ID, err.Error())
 		if curState, swapErr := p.swapState(StateStarting, StateFailed); swapErr != nil {
 			return fmt.Errorf(
 				"failed to start command and state swap failed. command error: %v, current state: %v, state swap error: %v",
