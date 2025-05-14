@@ -339,7 +339,7 @@ func TestProxyManager_RunningEndpoint(t *testing.T) {
 			"model1": getTestSimpleResponderConfig("model1"),
 			"model2": getTestSimpleResponderConfig("model2"),
 		},
-		LogLevel: "debug",
+		LogLevel: "warn",
 	})
 
 	// Define a helper struct to parse the JSON response.
