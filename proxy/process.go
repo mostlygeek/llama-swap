@@ -76,6 +76,7 @@ type Process struct {
 	gracefulStopTimeout time.Duration
 }
 
+// Create a new Process
 func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor) *Process {
 	ctx, cancel := context.WithCancel(context.Background())
 	concurrentLimit := 10
