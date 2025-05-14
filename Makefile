@@ -20,10 +20,10 @@ clean:
 	rm -rf $(BUILD_DIR)
 
 test:
-	go test -short -v ./proxy
+	go test -short -v -count=1 ./proxy
 
 test-all:
-	go test -v ./proxy
+	go test -v -count=1 ./proxy
 
 # Build OSX binary
 mac:

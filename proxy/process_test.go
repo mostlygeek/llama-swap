@@ -393,3 +393,53 @@ func TestProcess_StopImmediately(t *testing.T) {
 	process.StopImmediately()
 	assert.Equal(t, process.CurrentState(), StateStopped)
 }
+
+// Test that SIGKILL is sent when gracefulStopTimeout is reached and properly terminates
+// the upstream command
+func TestProcess_ForceStopWithKill(t *testing.T) {
+
+	expectedMessage := "test_sigkill"
+	binaryPath := getSimpleResponderPath()
+	port := getTestPort()
+
+	config := ModelConfig{
+		// note --ignore-sig-term which ignores the SIGTERM signal so a SIGKILL must be sent
+		// to force the process to exit
+		Cmd:           fmt.Sprintf("%s --port %d --respond %s --silent --ignore-sig-term", binaryPath, port, expectedMessage),
+		Proxy:         fmt.Sprintf("http://127.0.0.1:%d", port),
+		CheckEndpoint: "/health",
+	}
+
+	process := NewProcess("stop_immediate", 2, config, debugLogger, debugLogger)
+	defer process.Stop()
+
+	// reduce to make testing go faster
+	process.gracefulStopTimeout = time.Second
+
+	err := process.start()
+	assert.Nil(t, err)
+	assert.Equal(t, process.CurrentState(), StateReady)
+
+	waitChan := make(chan struct{})
+	go func() {
+		// slow, but will get killed by StopImmediate
+		req := httptest.NewRequest("GET", "/slow-respond?echo=12345&delay=2s", nil)
+		w := httptest.NewRecorder()
+		process.ProxyRequest(w, req)
+
+		// StatusOK because that was already sent before the kill
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		// unexpected EOF because the kill happened, the "1" is sent before the kill
+		// then the unexpected EOF is sent after the kill
+		assert.Equal(t, "1unexpected EOF\n", w.Body.String())
+		close(waitChan)
+	}()
+
+	<-time.After(time.Millisecond)
+	process.StopImmediately()
+	assert.Equal(t, process.CurrentState(), StateStopped)
+
+	// the request should have been interrupted by SIGKILL
+	<-waitChan
+}
