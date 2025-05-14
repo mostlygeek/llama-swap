@@ -21,6 +21,7 @@ type ProcessGroup struct {
 
 	// map of current processes
 	processes       map[string]*Process
+	processMutex    sync.Mutex
 	lastUsedProcess string
 }
 
@@ -98,7 +99,9 @@ func (pg *ProcessGroup) StopProcesses(strategy StopStrategy) {
 			case StopAndReset:
 				process.StopImmediately()
 				modelConfig, actualModelID, _ := pg.config.FindConfig(modelID)
+				pg.processMutex.Lock()
 				pg.processes[actualModelID] = NewProcess(modelID, pg.config.HealthCheckTimeout, modelConfig, pg.upstreamLogger, pg.proxyLogger)
+				pg.processMutex.Unlock()
 			default:
 				process.Stop()
 			}
