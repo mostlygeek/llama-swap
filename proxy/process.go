@@ -70,6 +70,9 @@ type Process struct {
 
 	// stop timeout waiting for graceful shutdown
 	gracefulStopTimeout time.Duration
+
+	// track that this happened
+	upstreamWasStoppedWithKill bool
 }
 
 func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor) *Process {
@@ -97,7 +100,8 @@ func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLo
 		concurrencyLimitSemaphore: make(chan struct{}, concurrentLimit),
 
 		// stop timeout
-		gracefulStopTimeout: 5 * time.Second,
+		gracefulStopTimeout:        5 * time.Second,
+		upstreamWasStoppedWithKill: false,
 	}
 }
 
@@ -217,9 +221,12 @@ func (p *Process) start() error {
 
 		// there is a race condition when SIGKILL is used, p.cmd.Wait() returns, and then
 		// the code below fires, putting an error into cmdWaitChan. This code is to prevent this
-		if exitErr != nil && exitErr.Error() == "signal: killed" {
+		if p.upstreamWasStoppedWithKill {
+			p.proxyLogger.Debugf("<%s> process was killed, NOT sending exitErr: %v", p.ID, exitErr)
+			p.upstreamWasStoppedWithKill = false
 			return
 		}
+
 		p.cmdWaitChan <- exitErr
 	}()
 
@@ -400,6 +407,7 @@ func (p *Process) stopCommand(sigtermTTL time.Duration) {
 	select {
 	case <-sigtermTimeout.Done():
 		p.proxyLogger.Debugf("<%s> Process timed out waiting to stop, sending KILL signal (normal during shutdown)", p.ID)
+		p.upstreamWasStoppedWithKill = true
 		if err := p.cmd.Process.Kill(); err != nil {
 			p.proxyLogger.Errorf("<%s> Failed to kill process: %v", p.ID, err)
 		}
