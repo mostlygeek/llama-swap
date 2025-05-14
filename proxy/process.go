@@ -214,6 +214,12 @@ func (p *Process) start() error {
 	go func() {
 		exitErr := p.cmd.Wait()
 		p.proxyLogger.Debugf("<%s> cmd.Wait() returned error: %v", p.ID, exitErr)
+
+		// there is a race condition when SIGKILL is used, p.cmd.Wait() returns, and then
+		// the code below fires, putting an error into cmdWaitChan. This code is to prevent this
+		if exitErr != nil && exitErr.Error() == "signal: killed" {
+			return
+		}
 		p.cmdWaitChan <- exitErr
 	}()
 
