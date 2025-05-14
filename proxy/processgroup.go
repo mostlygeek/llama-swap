@@ -98,10 +98,10 @@ func (pg *ProcessGroup) StopProcesses(strategy StopStrategy) {
 			// stop all processes and replace with a new prestine Process
 			case StopAndReset:
 				process.StopImmediately()
-				modelConfig, actualModelID, _ := pg.config.FindConfig(modelID)
+				modelConfig, _, _ := pg.config.FindConfig(modelID)
 				pg.processMutex.Lock()
 				pg.proxyLogger.Debugf("<%s> Stopped and replaced with new Process", modelID)
-				pg.processes[actualModelID] = NewProcess(modelID, pg.config.HealthCheckTimeout, modelConfig, pg.upstreamLogger, pg.proxyLogger)
+				pg.processes[modelID] = NewProcess(modelID, pg.config.HealthCheckTimeout, modelConfig, pg.upstreamLogger, pg.proxyLogger)
 				pg.processMutex.Unlock()
 			default:
 				process.Stop()
