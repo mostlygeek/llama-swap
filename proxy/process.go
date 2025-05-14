@@ -67,6 +67,9 @@ type Process struct {
 
 	// for managing concurrency limits
 	concurrencyLimitSemaphore chan struct{}
+
+	// stop timeout waiting for graceful shutdown
+	gracefulStopTimeout time.Duration
 }
 
 func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor) *Process {
@@ -92,6 +95,9 @@ func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLo
 
 		// concurrency limit
 		concurrencyLimitSemaphore: make(chan struct{}, concurrentLimit),
+
+		// stop timeout
+		gracefulStopTimeout: 5 * time.Second,
 	}
 }
 
@@ -348,7 +354,7 @@ func (p *Process) StopImmediately() {
 	}
 
 	// stop the process with a graceful exit timeout
-	p.stopCommand(5 * time.Second)
+	p.stopCommand(p.gracefulStopTimeout)
 
 	if curState, err := p.swapState(StateStopping, StateStopped); err != nil {
 		p.proxyLogger.Infof("<%s> Stop() StateStopping -> StateStopped err: %v, current state: %v", p.ID, err, curState)
@@ -361,7 +367,7 @@ func (p *Process) StopImmediately() {
 // the StateShutdown state, it can not be started again.
 func (p *Process) Shutdown() {
 	p.shutdownCancel()
-	p.stopCommand(5 * time.Second)
+	p.stopCommand(p.gracefulStopTimeout)
 	p.state = StateShutdown
 }
 

@@ -48,14 +48,18 @@ func getSimpleResponderPath() string {
 	return filepath.Join("..", "build", fmt.Sprintf("simple-responder_%s_%s", goos, goarch))
 }
 
-func getTestSimpleResponderConfig(expectedMessage string) ModelConfig {
+func getTestPort() int {
 	portMutex.Lock()
 	defer portMutex.Unlock()
 
 	port := nextTestPort
 	nextTestPort++
 
-	return getTestSimpleResponderConfigPort(expectedMessage, port)
+	return port
+}
+
+func getTestSimpleResponderConfig(expectedMessage string) ModelConfig {
+	return getTestSimpleResponderConfigPort(expectedMessage, getTestPort())
 }
 
 func getTestSimpleResponderConfigPort(expectedMessage string, port int) ModelConfig {

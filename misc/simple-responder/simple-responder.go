@@ -26,6 +26,8 @@ func main() {
 
 	silent := flag.Bool("silent", false, "disable all logging")
 
+	ignoreSigTerm := flag.Bool("ignore-sig-term", false, "ignore SIGTERM signal")
+
 	flag.Parse() // Parse the command-line flags
 
 	// Create a new Gin router
@@ -190,6 +192,10 @@ func main() {
 		log.SetOutput(io.Discard)
 	}
 
+	if !*silent {
+		fmt.Printf("My PID: %d\n", os.Getpid())
+	}
+
 	go func() {
 		log.Printf("simple-responder listening on %s\n", address)
 		// service connections
@@ -200,11 +206,36 @@ func main() {
 
 	// Wait for interrupt signal to gracefully shutdown the server with
 	// a timeout of 5 seconds.
-	quit := make(chan os.Signal, 1)
+	sigChan := make(chan os.Signal, 1)
 	// kill (no param) default send syscall.SIGTERM
 	// kill -2 is syscall.SIGINT
 	// kill -9 is syscall.SIGKILL but can't be catch, so don't need add it
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	countSigInt := 0
+
+runloop:
+	for {
+		signal := <-sigChan
+		switch signal {
+		case syscall.SIGINT:
+			countSigInt++
+			if countSigInt > 1 {
+				break runloop
+			} else {
+				log.Println("Recieved SIGINT, send another SIGINT to shutdown")
+			}
+		case syscall.SIGTERM:
+			if *ignoreSigTerm {
+				log.Println("Ignoring SIGTERM")
+			} else {
+				log.Println("Recieved SIGTERM, shutting down")
+				break runloop
+			}
+		default:
+			break runloop
+		}
+	}
+
 	log.Println("simple-responder shutting down")
 }
