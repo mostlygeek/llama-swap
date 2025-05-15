@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/google/shlex"
+	"github.com/billziss-gh/golib/shlex"
 	"gopkg.in/yaml.v3"
 )
 
@@ -233,9 +234,11 @@ func SanitizeCommand(cmdStr string) ([]string, error) {
 	cmdStr = strings.ReplaceAll(cmdStr, "\\\n", " ")
 
 	// Split the command into arguments
-	args, err := shlex.Split(cmdStr)
-	if err != nil {
-		return nil, err
+	var args []string
+	if runtime.GOOS == "windows" {
+		args = shlex.Windows.Split(cmdStr)
+	} else {
+		args = shlex.Posix.Split(cmdStr)
 	}
 
 	// Ensure the command is not empty
