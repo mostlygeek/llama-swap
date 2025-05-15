@@ -23,7 +23,7 @@ func TestConfig_SanitizeCommand(t *testing.T) {
 		"-a", "double quotes",
 		"-s",
 		"--arg3", "123",
-		"--arg4", `"string in string"`,
+		"--arg4", `\"string in string\"`,
 		"-c", `'single quoted'`,
 	}, args)
 

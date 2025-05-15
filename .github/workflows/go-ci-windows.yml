@@ -24,10 +24,26 @@ jobs:
       with:
         go-version: '1.23'
 
+    # can be quite slow to build simple-responder, 2+ min on Windows
+    - name: Restore Simple Responder
+      id: restore-simple-responder
+      uses: actions/cache/restore@v4
+      with:
+        path: ./build
+        key: ${{ runner.os }}-simple-responder-{{ hashFiles(misc/simple-responder/simple-responder.go) }}
+
     # necessary for testing proxy/Process swapping
     - name: Create simple-responder
+      if: steps.restore-simple-responder.outputs.cache-hit != 'true'
       shell: bash
       run: make simple-responder-windows
+
+    - name: Save Simple Responder
+      id: save-simple-responder
+      uses: actions/cache/save@v4
+      with:
+        path: ./build
+        key: ${{ runner.os }}-simple-responder-{{ hashFiles(misc/simple-responder/simple-responder.go) }}
 
     - name: Test all
       shell: bash
