@@ -1,13 +1,13 @@
 # This workflow will build a golang project
 
-name: Linux CI
+name: Windows CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "windows-tests" ]
 
   pull_request:
-    branches: [ "main" ]
+    branches: [ "windows-tests" ]
 
   # Allows manual triggering of the workflow
   workflow_dispatch:
@@ -15,7 +15,7 @@ on:
 jobs:
 
   run-tests:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
     - uses: actions/checkout@v4
 
@@ -26,7 +26,9 @@ jobs:
 
     # necessary for testing proxy/Process swapping
     - name: Create simple-responder
+      shell: bash
       run: make simple-responder
 
     - name: Test all
+      shell: bash
       run: make test-all
