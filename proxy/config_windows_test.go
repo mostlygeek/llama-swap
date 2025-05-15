@@ -9,11 +9,9 @@ import (
 )
 
 func TestConfig_SanitizeCommand(t *testing.T) {
-
-	// Test a command with spaces and newlines
+	// does not support single quoted strings like in config_posix_test.go
 	args, err := SanitizeCommand(`python model1.py \
     -a "double quotes" \
-    --arg2 'single quotes'
 	-s
 	--arg3 123 \
 	--arg4 '"string in string"'
@@ -23,7 +21,6 @@ func TestConfig_SanitizeCommand(t *testing.T) {
 	assert.Equal(t, []string{
 		"python", "model1.py",
 		"-a", "double quotes",
-		"--arg2", "single quotes",
 		"-s",
 		"--arg3", "123",
 		"--arg4", `"string in string"`,
@@ -34,4 +31,5 @@ func TestConfig_SanitizeCommand(t *testing.T) {
 	args, err = SanitizeCommand("")
 	assert.Error(t, err)
 	assert.Nil(t, args)
+
 }

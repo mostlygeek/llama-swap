@@ -9,20 +9,20 @@ import (
 )
 
 func TestConfig_SanitizeCommand(t *testing.T) {
-
-	// specific for Windows
-	// does not support single quoted strings like in config_posix_test.go
+	// Test a command with spaces and newlines
 	args, err := SanitizeCommand(`python model1.py \
-    -a "double quotes" \
-	-s
-	--arg3 123 \
-	--arg4 '"string in string"'
-	-c "'single quoted'"
-	`)
+		-a "double quotes" \
+		--arg2 'single quotes'
+		-s
+		--arg3 123 \
+		--arg4 '"string in string"'
+		-c "'single quoted'"
+		`)
 	assert.NoError(t, err)
 	assert.Equal(t, []string{
 		"python", "model1.py",
 		"-a", "double quotes",
+		"--arg2", "single quotes",
 		"-s",
 		"--arg3", "123",
 		"--arg4", `"string in string"`,
