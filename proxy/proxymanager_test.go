@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/tidwall/gjson"
 )
 
 func TestProxyManager_SwapProcessCorrectly(t *testing.T) {
@@ -448,7 +449,6 @@ func TestProxyManager_AudioTranscriptionHandler(t *testing.T) {
 // Test useModelName in configuration sends overrides what is sent to upstream
 func TestProxyManager_UseModelName(t *testing.T) {
 	upstreamModelName := "upstreamModel"
-
 	modelConfig := getTestSimpleResponderConfig(upstreamModelName)
 	modelConfig.UseModelName = upstreamModelName
 
@@ -473,6 +473,12 @@ func TestProxyManager_UseModelName(t *testing.T) {
 		proxy.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Body.String(), upstreamModelName)
+
+		// make sure the content length was set correctly
+		// simple-responder will return the content length it got in the response
+		body := w.Body.Bytes()
+		contentLength := int(gjson.GetBytes(body, "h_content_length").Int())
+		assert.Equal(t, len(fmt.Sprintf(`{"model":"%s"}`, upstreamModelName)), contentLength)
 	})
 
 	t.Run("useModelName over rides requested model: /v1/audio/transcriptions", func(t *testing.T) {
