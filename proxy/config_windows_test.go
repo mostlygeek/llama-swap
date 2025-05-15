@@ -11,10 +11,17 @@ import (
 func TestConfig_SanitizeCommand(t *testing.T) {
 	// does not support single quoted strings like in config_posix_test.go
 	args, err := SanitizeCommand(`python model1.py \
-    -a "double quotes" \
+
+	-a "double quotes" \
 	-s
 	--arg3 123 \
+
+	   # comment 2
 	--arg4 '"string in string"'
+
+
+
+	# this will get stripped out as well as the white space above
 	-c "'single quoted'"
 	`)
 	assert.NoError(t, err)
