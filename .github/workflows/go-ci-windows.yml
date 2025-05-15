@@ -24,7 +24,7 @@ jobs:
       with:
         go-version: '1.23'
 
-    # can be quite slow to build simple-responder, 2+ min on Windows
+    # cache simple-responder to save the build time
     - name: Restore Simple Responder
       id: restore-simple-responder
       uses: actions/cache/restore@v4
@@ -39,6 +39,8 @@ jobs:
       run: make simple-responder-windows
 
     - name: Save Simple Responder
+      # nothing new to save ... skip this step
+      if: steps.restore-simple-responder.outputs.cache-hit != 'true'
       id: save-simple-responder
       uses: actions/cache/save@v4
       with:
