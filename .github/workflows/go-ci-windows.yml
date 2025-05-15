@@ -27,7 +27,7 @@ jobs:
     # necessary for testing proxy/Process swapping
     - name: Create simple-responder
       shell: bash
-      run: make simple-responder
+      run: make simple-responder-windows
 
     - name: Test all
       shell: bash
