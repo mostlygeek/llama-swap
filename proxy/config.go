@@ -229,9 +229,23 @@ func AddDefaultGroupToConfig(config Config) Config {
 }
 
 func SanitizeCommand(cmdStr string) ([]string, error) {
-	// Remove trailing backslashes
-	cmdStr = strings.ReplaceAll(cmdStr, "\\ \n", " ")
-	cmdStr = strings.ReplaceAll(cmdStr, "\\\n", " ")
+	var cleanedLines []string
+	for _, line := range strings.Split(cmdStr, "\n") {
+		trimmed := strings.TrimSpace(line)
+		// Skip comment lines
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		// Handle trailing backslashes by replacing with space
+		if strings.HasSuffix(trimmed, "\\") {
+			cleanedLines = append(cleanedLines, strings.TrimSuffix(trimmed, "\\")+" ")
+		} else {
+			cleanedLines = append(cleanedLines, line)
+		}
+	}
+
+	// put it back together
+	cmdStr = strings.Join(cleanedLines, "\n")
 
 	// Split the command into arguments
 	var args []string

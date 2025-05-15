@@ -14,8 +14,14 @@ func TestConfig_SanitizeCommand(t *testing.T) {
 		-a "double quotes" \
 		--arg2 'single quotes'
 		-s
+		# comment 1
 		--arg3 123 \
+
+		  # comment 2
 		--arg4 '"string in string"'
+
+
+		# this will get stripped out as well as the white space above
 		-c "'single quoted'"
 		`)
 	assert.NoError(t, err)
