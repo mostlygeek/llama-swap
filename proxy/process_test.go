@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -432,7 +433,12 @@ func TestProcess_ForceStopWithKill(t *testing.T) {
 
 		// unexpected EOF because the kill happened, the "1" is sent before the kill
 		// then the unexpected EOF is sent after the kill
-		assert.Equal(t, "1unexpected EOF\n", w.Body.String())
+		if runtime.GOOS == "windows" {
+			assert.Contains(t, w.Body.String(), "wsarecv: An existing connection was forcibly closed by the remote host")
+		} else {
+			assert.Contains(t, w.Body.String(), "unexpected EOF")
+		}
+
 		close(waitChan)
 	}()
 

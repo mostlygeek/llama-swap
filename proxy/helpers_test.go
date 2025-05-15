@@ -45,7 +45,12 @@ func TestMain(m *testing.M) {
 func getSimpleResponderPath() string {
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH
-	return filepath.Join("..", "build", fmt.Sprintf("simple-responder_%s_%s", goos, goarch))
+
+	if goos == "windows" {
+		return filepath.Join("..", "build", "simple-responder.exe")
+	} else {
+		return filepath.Join("..", "build", fmt.Sprintf("simple-responder_%s_%s", goos, goarch))
+	}
 }
 
 func getTestPort() int {
