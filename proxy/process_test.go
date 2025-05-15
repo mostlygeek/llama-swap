@@ -18,7 +18,7 @@ var (
 
 func init() {
 	// flip to help with debugging tests
-	if false {
+	if true {
 		debugLogger.SetLogLevel(LevelDebug)
 	} else {
 		debugLogger.SetLogLevel(LevelError)

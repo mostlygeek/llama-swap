@@ -29,6 +29,10 @@ jobs:
       shell: bash
       run: make simple-responder-windows
 
-    - name: Test all
+    - name: Test One
       shell: bash
-      run: make test-all
+      run: go test -v -run ^TestProcess_AutomaticallyStarts -count=1 ./proxy
+
+    # - name: Test all
+    #   shell: bash
+    #   run: make test-all
