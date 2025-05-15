@@ -1,13 +1,11 @@
-# This workflow will build a golang project
-
 name: Windows CI
 
 on:
   push:
-    branches: [ "windows-tests" ]
+    branches: [ "main" ]
 
   pull_request:
-    branches: [ "windows-tests" ]
+    branches: [ "main" ]
 
   # Allows manual triggering of the workflow
   workflow_dispatch:
@@ -24,10 +22,28 @@ jobs:
       with:
         go-version: '1.23'
 
+    # cache simple-responder to save the build time
+    - name: Restore Simple Responder
+      id: restore-simple-responder
+      uses: actions/cache/restore@v4
+      with:
+        path: ./build
+        key: ${{ runner.os }}-simple-responder-${{ hashFiles('misc/simple-responder/simple-responder.go') }}
+
     # necessary for testing proxy/Process swapping
     - name: Create simple-responder
+      if: steps.restore-simple-responder.outputs.cache-hit != 'true'
       shell: bash
-      run: make simple-responder
+      run: make simple-responder-windows
+
+    - name: Save Simple Responder
+      # nothing new to save ... skip this step
+      if: steps.restore-simple-responder.outputs.cache-hit != 'true'
+      id: save-simple-responder
+      uses: actions/cache/save@v4
+      with:
+        path: ./build
+        key: ${{ runner.os }}-simple-responder-${{ hashFiles('misc/simple-responder/simple-responder.go') }}
 
     - name: Test all
       shell: bash
