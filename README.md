@@ -46,14 +46,14 @@ llama-swap's configuration is purposefully simple.
 models:
   "qwen2.5":
     proxy: "http://127.0.0.1:9999"
-    cmd: >
+    cmd: |
       /app/llama-server
       -hf bartowski/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M
       --port 9999
 
   "smollm2":
     proxy: "http://127.0.0.1:9999"
-    cmd: >
+    cmd: |
       /app/llama-server
       -hf bartowski/SmolLM2-135M-Instruct-GGUF:Q4_K_M
       --port 9999
@@ -82,7 +82,7 @@ startPort: 10001
 models:
   "llama":
     # multiline for readability
-    cmd: >
+    cmd: |
       llama-server --port 8999
       --model path/to/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
 
@@ -123,7 +123,7 @@ models:
   # Docker Support (v26.1.4+ required!)
   "docker-llama":
     proxy: "http://127.0.0.1:${PORT}"
-    cmd: >
+    cmd: |
       docker run --name dockertest
       --init --rm -p ${PORT}:8080 -v /mnt/nvme/models:/models
       ghcr.io/ggerganov/llama.cpp:server
@@ -247,11 +247,11 @@ Pre-built binaries are available for Linux, FreeBSD and Darwin (OSX). These are 
 1. Create a configuration file, see [config.example.yaml](config.example.yaml)
 1. Download a [release](https://github.com/mostlygeek/llama-swap/releases) appropriate for your OS and architecture.
 1. Run the binary with `llama-swap --config path/to/config.yaml`.
-  Available flags:
-    - `--config`: Path to the configuration file (default: `config.yaml`).
-    - `--listen`: Address and port to listen on (default: `:8080`).
-    - `--version`: Show version information and exit.
-    - `--watch-config`: Automatically reload the configuration file when it changes. This will wait for in-flight requests to complete then stop all running models (default: `false`).
+   Available flags:
+   - `--config`: Path to the configuration file (default: `config.yaml`).
+   - `--listen`: Address and port to listen on (default: `:8080`).
+   - `--version`: Show version information and exit.
+   - `--watch-config`: Automatically reload the configuration file when it changes. This will wait for in-flight requests to complete then stop all running models (default: `false`).
 
 ### Building from source
 

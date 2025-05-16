@@ -15,7 +15,7 @@ groups:
 
 models:
   "llama":
-    cmd: >
+    cmd: |
       models/llama-server-osx
       --port ${PORT}
       -m models/Llama-3.2-1B-Instruct-Q4_0.gguf
@@ -38,7 +38,7 @@ models:
   # Embedding example with Nomic
   # https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF
   "nomic":
-    cmd: >
+    cmd: |
       models/llama-server-osx --port ${PORT}
       -m models/nomic-embed-text-v1.5.Q8_0.gguf
       --ctx-size 8192
@@ -51,7 +51,7 @@ models:
   # Reranking example with bge-reranker
   # https://huggingface.co/gpustack/bge-reranker-v2-m3-GGUF
   "bge-reranker":
-    cmd: >
+    cmd: |
       models/llama-server-osx --port ${PORT}
       -m models/bge-reranker-v2-m3-Q4_K_M.gguf
       --ctx-size 8192
@@ -59,7 +59,7 @@ models:
 
   # Docker Support (v26.1.4+ required!)
   "dockertest":
-    cmd: >
+    cmd: |
       docker run --name dockertest
       --init --rm -p ${PORT}:8080 -v /mnt/nvme/models:/models
       ghcr.io/ggerganov/llama.cpp:server
