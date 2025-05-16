@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -403,6 +404,10 @@ func (p *Process) stopCommand(sigtermTTL time.Duration) {
 	// if err := p.terminateProcess(); err != nil {
 	// 	p.proxyLogger.Debugf("<%s> Process already terminated: %v (normal during shutdown)", p.ID, err)
 	// }
+	// the default cmdStop to taskkill /f /t /pid ${PID}
+	if runtime.GOOS == "windows" && strings.TrimSpace(p.config.CmdStop) == "" {
+		p.config.CmdStop = "taskkill /f /t /pid ${PID}"
+	}
 
 	if p.config.CmdStop != "" {
 		// replace ${PID} with the pid of the process

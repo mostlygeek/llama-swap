@@ -159,11 +159,6 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		} else if modelConfig.Proxy == "" {
 			return Config{}, fmt.Errorf("model %s requires a proxy value when not using automatic ${PORT}", modelId)
 		}
-
-		// the default cmdStop to taskkill /f /t /pid ${PID}
-		if runtime.GOOS == "windows" && strings.TrimSpace(modelConfig.CmdStop) == "" {
-			modelConfig.CmdStop = "taskkill /f /t /pid ${PID}"
-		}
 	}
 
 	config = AddDefaultGroupToConfig(config)
