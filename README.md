@@ -129,6 +129,10 @@ models:
       ghcr.io/ggerganov/llama.cpp:server
       --model '/models/Qwen2.5-Coder-0.5B-Instruct-Q4_K_M.gguf'
 
+    # use a custom command to stop the model when swapping. By default
+    # this is SIGTERM on POSIX systems, and taskkill on Windows systems
+    cmdStop: docker stop dockertest
+
 # Groups provide advanced controls over model swapping behaviour. Using groups
 # some models can be kept loaded indefinitely, while others are swapped out.
 #
