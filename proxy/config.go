@@ -161,13 +161,8 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		}
 
 		// the default cmdStop to taskkill /f /t /pid ${PID}
-		if runtime.GOOS == "windows" {
-			if strings.TrimSpace(modelConfig.CmdStop) == "" {
-				modelConfig.CmdStop = "taskkill /f /t /pid ${PID}"
-			} else {
-				// debug tihs in windows ci
-				fmt.Println("XXX: ", modelConfig.CmdStop)
-			}
+		if runtime.GOOS == "windows" && strings.TrimSpace(modelConfig.CmdStop) == "" {
+			modelConfig.CmdStop = "taskkill /f /t /pid ${PID}"
 		}
 	}
 
