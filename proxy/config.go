@@ -17,6 +17,7 @@ const DEFAULT_GROUP_ID = "(default)"
 
 type ModelConfig struct {
 	Cmd           string   `yaml:"cmd"`
+	CmdStop       string   `yaml:"cmdStop"`
 	Proxy         string   `yaml:"proxy"`
 	Aliases       []string `yaml:"aliases"`
 	Env           []string `yaml:"env"`
@@ -135,7 +136,6 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		}
 	}
 
-	// iterate over the models and replace any ${PORT} with the next available port
 	// Get and sort all model IDs first, makes testing more consistent
 	modelIds := make([]string, 0, len(config.Models))
 	for modelId := range config.Models {
@@ -143,10 +143,10 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	}
 	sort.Strings(modelIds) // This guarantees stable iteration order
 
-	// iterate over the sorted models
 	nextPort := config.StartPort
 	for _, modelId := range modelIds {
 		modelConfig := config.Models[modelId]
+		// iterate over the models and replace any ${PORT} with the next available port
 		if strings.Contains(modelConfig.Cmd, "${PORT}") {
 			modelConfig.Cmd = strings.ReplaceAll(modelConfig.Cmd, "${PORT}", strconv.Itoa(nextPort))
 			if modelConfig.Proxy == "" {
@@ -159,7 +159,15 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		} else if modelConfig.Proxy == "" {
 			return Config{}, fmt.Errorf("model %s requires a proxy value when not using automatic ${PORT}", modelId)
 		}
+
+		// the default cmdStop to taskkill /f /t /pid ${PID}
+		if runtime.GOOS == "windows" {
+			if modelConfig.CmdStop == "" {
+				modelConfig.CmdStop = "taskkill /f /t /pid ${PID}"
+			}
+		}
 	}
+
 	config = AddDefaultGroupToConfig(config)
 	// check that members are all unique in the groups
 	memberUsage := make(map[string]string) // maps member to group it appears in
