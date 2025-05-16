@@ -449,3 +449,22 @@ func TestProcess_ForceStopWithKill(t *testing.T) {
 	// the request should have been interrupted by SIGKILL
 	<-waitChan
 }
+
+func TestProcess_StopCmd(t *testing.T) {
+	config := getTestSimpleResponderConfig("test_stop_cmd")
+
+	if runtime.GOOS == "windows" {
+		config.CmdStop = "taskkill /f /t /pid ${PID}"
+	} else {
+		config.CmdStop = "kill -TERM ${PID}"
+	}
+
+	process := NewProcess("testStopCmd", 2, config, debugLogger, debugLogger)
+	defer process.Stop()
+
+	err := process.start()
+	assert.Nil(t, err)
+	assert.Equal(t, process.CurrentState(), StateReady)
+	process.StopImmediately()
+	assert.Equal(t, process.CurrentState(), StateStopped)
+}

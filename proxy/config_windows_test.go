@@ -38,5 +38,4 @@ func TestConfig_SanitizeCommand(t *testing.T) {
 	args, err = SanitizeCommand("")
 	assert.Error(t, err)
 	assert.Nil(t, args)
-
 }
