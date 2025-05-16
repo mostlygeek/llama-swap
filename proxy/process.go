@@ -400,8 +400,34 @@ func (p *Process) stopCommand(sigtermTTL time.Duration) {
 		return
 	}
 
-	if err := p.terminateProcess(); err != nil {
-		p.proxyLogger.Debugf("<%s> Process already terminated: %v (normal during shutdown)", p.ID, err)
+	// if err := p.terminateProcess(); err != nil {
+	// 	p.proxyLogger.Debugf("<%s> Process already terminated: %v (normal during shutdown)", p.ID, err)
+	// }
+
+	if p.config.CmdStop != "" {
+		// replace ${PID} with the pid of the process
+		stopArgs, err := SanitizeCommand(strings.ReplaceAll(p.config.CmdStop, "${PID}", fmt.Sprintf("%d", p.cmd.Process.Pid)))
+		if err != nil {
+			p.proxyLogger.Errorf("<%s> Failed to sanitize stop command: %v", p.ID, err)
+			return
+		}
+
+		p.proxyLogger.Debugf("<%s> Executing stop command: %s", p.ID, strings.Join(stopArgs, " "))
+
+		stopCmd := exec.Command(stopArgs[0], stopArgs[1:]...)
+		stopCmd.Stdout = p.processLogger
+		stopCmd.Stderr = p.processLogger
+		stopCmd.Env = p.config.Env
+
+		if err := stopCmd.Run(); err != nil {
+			p.proxyLogger.Errorf("<%s> Failed to exec stop command: %v", p.ID, err)
+			return
+		}
+	} else {
+		if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+			p.proxyLogger.Errorf("<%s> Failed to send SIGTERM to process: %v", p.ID, err)
+			return
+		}
 	}
 
 	select {
