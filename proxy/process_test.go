@@ -452,7 +452,13 @@ func TestProcess_ForceStopWithKill(t *testing.T) {
 
 func TestProcess_StopCmd(t *testing.T) {
 	config := getTestSimpleResponderConfig("test_stop_cmd")
-	config.CmdStop = "kill -TERM ${PID}"
+
+	if runtime.GOOS == "windows" {
+		config.CmdStop = "taskkill /f /t /pid ${PID}"
+	} else {
+		config.CmdStop = "kill -TERM ${PID}"
+	}
+
 	process := NewProcess("testStopCmd", 2, config, debugLogger, debugLogger)
 	defer process.Stop()
 
