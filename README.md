@@ -131,6 +131,8 @@ models:
 
     # use a custom command to stop the model when swapping. By default
     # this is SIGTERM on POSIX systems, and taskkill on Windows systems
+    # the ${PID} variable can be used in cmdStop, it will be automatically replaced
+    # with the PID of the running model
     cmdStop: docker stop dockertest
 
 # Groups provide advanced controls over model swapping behaviour. Using groups
