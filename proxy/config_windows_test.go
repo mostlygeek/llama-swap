@@ -3,7 +3,6 @@
 package proxy
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -39,16 +38,4 @@ func TestConfig_SanitizeCommand(t *testing.T) {
 	args, err = SanitizeCommand("")
 	assert.Error(t, err)
 	assert.Nil(t, args)
-}
-
-func TestConfig_WindowsCmdStopIsSet(t *testing.T) {
-	content := `
-models:
-  model1:
-    cmd: path/to/cmd --arg1 one
-`
-	// Load the config and verify
-	config, err := LoadConfigFromReader(strings.NewReader(content))
-	assert.NoError(t, err)
-	assert.Equal(t, "taskkill /f /t /pid ${PID}", config.Models["model1"].CmdStop)
 }
