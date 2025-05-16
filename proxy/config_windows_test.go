@@ -43,10 +43,10 @@ func TestConfig_SanitizeCommand(t *testing.T) {
 
 func TestConfig_WindowsCmdStopIsSet(t *testing.T) {
 	content := `
-	models:
-	  model1:
-        cmd: path/to/cmd --arg1 one
-	`
+models:
+  model1:
+    cmd: path/to/cmd --arg1 one
+`
 	// Load the config and verify
 	config, err := LoadConfigFromReader(strings.NewReader(content))
 	assert.NoError(t, err)
