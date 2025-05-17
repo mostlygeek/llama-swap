@@ -352,6 +352,8 @@ func (pm *ProxyManager) upstreamIndex(c *gin.Context) {
 					stateStr = "Failed"
 				case StateShutdown:
 					stateStr = "Shutdown"
+				case StateStopped:
+					stateStr = "Stopped"
 				default:
 					stateStr = "Unknown"
 				}

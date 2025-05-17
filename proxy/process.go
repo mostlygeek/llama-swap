@@ -149,7 +149,9 @@ func isValidTransition(from, to ProcessState) bool {
 		return to == StateStopping
 	case StateStopping:
 		return to == StateStopped || to == StateShutdown
-	case StateFailed, StateShutdown:
+	case StateFailed:
+		return to == StateStopping
+	case StateShutdown:
 		return false // No transitions allowed from these states
 	}
 	return false
@@ -359,12 +361,19 @@ func (p *Process) StopImmediately() {
 		return
 	}
 
-	p.proxyLogger.Debugf("<%s> Stopping process", p.ID)
+	p.proxyLogger.Debugf("<%s> Stopping process, current state: %s", p.ID, p.CurrentState())
+	currentState := p.CurrentState()
 
-	// calling Stop() when state is invalid is a no-op
-	if curState, err := p.swapState(StateReady, StateStopping); err != nil {
-		p.proxyLogger.Infof("<%s> Stop() Ready -> StateStopping err: %v, current state: %v", p.ID, err, curState)
-		return
+	if currentState == StateFailed {
+		if curState, err := p.swapState(StateFailed, StateStopping); err != nil {
+			p.proxyLogger.Infof("<%s> Stop() Failed -> StateStopping err: %v, current state: %v", p.ID, err, curState)
+			return
+		}
+	} else {
+		if curState, err := p.swapState(StateReady, StateStopping); err != nil {
+			p.proxyLogger.Infof("<%s> Stop() Ready -> StateStopping err: %v, current state: %v", p.ID, err, curState)
+			return
+		}
 	}
 
 	// stop the process with a graceful exit timeout
