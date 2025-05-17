@@ -365,13 +365,11 @@ func (p *Process) StopImmediately() {
 	currentState := p.CurrentState()
 
 	if currentState == StateFailed {
-		// calling Stop() when state is invalid is a no-op
 		if curState, err := p.swapState(StateFailed, StateStopping); err != nil {
 			p.proxyLogger.Infof("<%s> Stop() Failed -> StateStopping err: %v, current state: %v", p.ID, err, curState)
 			return
 		}
 	} else {
-		// calling Stop() when state is invalid is a no-op
 		if curState, err := p.swapState(StateReady, StateStopping); err != nil {
 			p.proxyLogger.Infof("<%s> Stop() Ready -> StateStopping err: %v, current state: %v", p.ID, err, curState)
 			return
