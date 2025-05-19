@@ -389,8 +389,14 @@ func (p *Process) StopImmediately() {
 // is in the state of starting, it will cancel it and shut it down. Once a process is in
 // the StateShutdown state, it can not be started again.
 func (p *Process) Shutdown() {
+	if !isValidTransition(p.CurrentState(), StateStopping) {
+		return
+	}
+
 	p.shutdownCancel()
 	p.stopCommand(p.gracefulStopTimeout)
+
+	// just force it to this state since there is no recovery from shutdown
 	p.state = StateShutdown
 }
 
