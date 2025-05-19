@@ -51,6 +51,14 @@ case "$ARCH" in
     *) error "Unsupported architecture: $ARCH" ;;
 esac
 
+IS_WSL2=false
+
+KERN=$(uname -r)
+case "$KERN" in
+    *icrosoft*WSL2 | *icrosoft*wsl2) IS_WSL2=true;;
+    *icrosoft) error "Microsoft WSL1 is not currently supported. Please use WSL2 with 'wsl --set-version <distro> 2'" ;;
+    *) ;;
+esac
 
 download_binary() {
     ASSET_NAME="linux_$ARCH"
@@ -162,4 +170,14 @@ EOF
 
 if available systemctl; then
     configure_systemd
+fi
+
+# WSL2 only supports GPUs via nvidia passthrough
+# so check for nvidia-smi to determine if GPU is available
+if [ "$IS_WSL2" = true ]; then
+    if available nvidia-smi && [ -n "$(nvidia-smi | grep -o "CUDA Version: [0-9]*\.[0-9]*")" ]; then
+        status "Nvidia GPU detected."
+    fi
+    install_success
+    exit 0
 fi
