@@ -176,7 +176,6 @@ install_success() {
     status 'Customize the config file at /usr/share/llama-swap/config.yaml.'
     status 'Install complete.'
 }
-trap install_success EXIT
 
 # WSL2 only supports GPUs via nvidia passthrough
 # so check for nvidia-smi to determine if GPU is available
@@ -186,3 +185,5 @@ if [ "$IS_WSL2" = true ]; then
     fi
     exit 0
 fi
+
+install_success
