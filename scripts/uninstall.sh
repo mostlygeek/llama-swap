@@ -41,7 +41,8 @@ fi
 
 if [ -f "/usr/share/llama-swap/config.yaml" ]; then
     while true; do
-        read -p "Delete config.yaml (/usr/share/llama-swap/config.yaml)? [y/N] " answer
+        printf "Delete config.yaml (/usr/share/llama-swap/config.yaml)? [y/N] " >&2
+        read answer
         case "$answer" in
             [Yy]* ) 
                 $SUDO rm -r /usr/share/llama-swap
