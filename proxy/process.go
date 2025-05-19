@@ -81,9 +81,8 @@ func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLo
 	concurrentLimit := 10
 	if config.ConcurrencyLimit > 0 {
 		concurrentLimit = config.ConcurrencyLimit
-	} else {
-		proxyLogger.Debugf("Concurrency limit for model %s not set, defaulting to 10", ID)
 	}
+
 	return &Process{
 		ID:                      ID,
 		config:                  config,
