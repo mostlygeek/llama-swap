@@ -1,3 +1,7 @@
+#!/bin/sh
+# This script installs llama-swap on Linux.
+# It detects the current operating system architecture and installs the appropriate version of llama-swap.
+
 set -eu
 
 red="$( (/usr/bin/tput bold || :; /usr/bin/tput setaf 1 || :) 2>&-)"

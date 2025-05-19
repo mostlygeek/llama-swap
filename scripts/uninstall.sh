@@ -1,3 +1,6 @@
+#!/bin/sh
+# This script uninstalls llama-swap on Linux.
+# It removes the binary, systemd service, config.yaml (optional), and llama-swap user and group.
 
 set -eu
 
