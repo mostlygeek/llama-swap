@@ -72,8 +72,33 @@ configure_systemd() {
     status "Adding current user to llama-swap group..."
     $SUDO usermod -a -G llama-swap $(whoami)
 
-    status "Creating llama-swap config..."
-    sudo -u llama-swap touch /usr/share/llama-swap/config.yaml
+    if [ ! -f "/usr/share/llama-swap/config.yaml" ]; then
+        status "Creating default config.yaml..."
+        cat <<EOF | $SUDO -u llama-swap tee /usr/share/llama-swap/config.yaml >/dev/null
+healthCheckTimeout: 60
+
+models:
+  "qwen2.5":
+    cmd: |
+      docker run
+        --rm
+        -p \${PORT}:8080
+        --name qwen2.5
+      ghcr.io/ggml-org/llama.cpp:server
+        -hf bartowski/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M
+    cmdStop: docker stop qwen2.5
+
+  "smollm2":
+    cmd: |
+      docker run
+        --rm
+        -p \${PORT}:8080
+        --name smollm2
+      ghcr.io/ggml-org/llama.cpp:server
+        -hf bartowski/SmolLM2-135M-Instruct-GGUF:Q4_K_M
+    cmdStop: docker stop smollm2
+EOF
+    fi
 
     status "Creating llama-swap systemd service..."
     cat <<EOF | $SUDO tee /etc/systemd/system/llama-swap.service >/dev/null
