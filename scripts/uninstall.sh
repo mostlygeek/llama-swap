@@ -1,0 +1,58 @@
+
+set -eu
+
+red="$( (/usr/bin/tput bold || :; /usr/bin/tput setaf 1 || :) 2>&-)"
+plain="$( (/usr/bin/tput sgr0 || :) 2>&-)"
+
+status() { echo ">>> $*" >&2; }
+error() { echo "${red}ERROR:${plain} $*"; exit 1; }
+warning() { echo "${red}WARNING:${plain} $*"; }
+
+available() { command -v $1 >/dev/null; }
+
+SUDO=
+if [ "$(id -u)" -ne 0 ]; then
+    # Running as root, no need for sudo
+    if ! available sudo; then
+        error "This script requires superuser permissions. Please re-run as root."
+    fi
+
+    SUDO="sudo"
+fi
+
+status "Stopping llama-swap service..."
+$SUDO systemctl stop llama-swap
+
+status "Disabling llama-swap service..."
+$SUDO systemctl disable llama-swap
+
+if available llama-swap; then
+    status "Removing llama-swap binary..."
+    $SUDO rm $(which llama-swap)
+fi
+
+while true; do
+    read -p "Delete config.yaml (/usr/share/llama-swap/config.yaml)? [y/N] " answer
+    case "$answer" in
+        [Yy]* ) 
+            $SUDO rm -r /usr/share/llama-swap
+            break
+            ;;
+        [Nn]* | "" ) 
+            break
+            ;;
+        * ) 
+            echo "Invalid input. Please enter y or n."
+            ;;
+    esac
+done
+
+if id llama-swap >/dev/null 2>&1; then
+    status "Removing llama-swap user..."
+    $SUDO userdel llama-swap
+fi
+
+if getent group llama-swap >/dev/null 2>&1; then
+    status "Removing llama-swap group..."
+    $SUDO groupdel llama-swap
+fi
