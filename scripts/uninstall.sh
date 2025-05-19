@@ -20,11 +20,16 @@ if [ "$(id -u)" -ne 0 ]; then
     SUDO="sudo"
 fi
 
-status "Stopping llama-swap service..."
-$SUDO systemctl stop llama-swap
+configure_systemd() {
+    status "Stopping llama-swap service..."
+    $SUDO systemctl stop llama-swap
 
-status "Disabling llama-swap service..."
-$SUDO systemctl disable llama-swap
+    status "Disabling llama-swap service..."
+    $SUDO systemctl disable llama-swap
+}
+if available systemctl; then
+    configure_systemd
+fi
 
 if available llama-swap; then
     status "Removing llama-swap binary..."
