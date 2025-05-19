@@ -39,21 +39,23 @@ if available llama-swap; then
     $SUDO rm $(which llama-swap)
 fi
 
-while true; do
-    read -p "Delete config.yaml (/usr/share/llama-swap/config.yaml)? [y/N] " answer
-    case "$answer" in
-        [Yy]* ) 
-            $SUDO rm -r /usr/share/llama-swap
-            break
-            ;;
-        [Nn]* | "" ) 
-            break
-            ;;
-        * ) 
-            echo "Invalid input. Please enter y or n."
-            ;;
-    esac
-done
+if [ -f "/usr/share/llama-swap/config.yaml" ]; then
+    while true; do
+        read -p "Delete config.yaml (/usr/share/llama-swap/config.yaml)? [y/N] " answer
+        case "$answer" in
+            [Yy]* ) 
+                $SUDO rm -r /usr/share/llama-swap
+                break
+                ;;
+            [Nn]* | "" ) 
+                break
+                ;;
+            * ) 
+                echo "Invalid input. Please enter y or n."
+                ;;
+        esac
+    done
+fi
 
 if id llama-swap >/dev/null 2>&1; then
     status "Removing llama-swap user..."
