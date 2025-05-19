@@ -12,6 +12,16 @@ error() { echo "${red}ERROR:${plain} $*"; exit 1; }
 warning() { echo "${red}WARNING:${plain} $*"; }
 
 available() { command -v $1 >/dev/null; }
+require() {
+    local MISSING=''
+    for TOOL in $*; do
+        if ! available $TOOL; then
+            MISSING="$MISSING $TOOL"
+        fi
+    done
+
+    echo $MISSING
+}
 
 SUDO=
 if [ "$(id -u)" -ne 0 ]; then
@@ -21,6 +31,15 @@ if [ "$(id -u)" -ne 0 ]; then
     fi
 
     SUDO="sudo"
+fi
+
+NEEDS=$(require curl tee jq tar)
+if [ -n "$NEEDS" ]; then
+    status "ERROR: The following tools are required but missing:"
+    for NEED in $NEEDS; do
+        echo "  - $NEED"
+    done
+    exit 1
 fi
 
 [ "$(uname -s)" = "Linux" ] || error 'This script is intended to run on Linux only.'
