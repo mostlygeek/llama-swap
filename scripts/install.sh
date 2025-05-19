@@ -75,6 +75,7 @@ configure_systemd() {
     if [ ! -f "/usr/share/llama-swap/config.yaml" ]; then
         status "Creating default config.yaml..."
         cat <<EOF | $SUDO -u llama-swap tee /usr/share/llama-swap/config.yaml >/dev/null
+# default 15s likely to fail for default models due to downloading models
 healthCheckTimeout: 60
 
 models:
