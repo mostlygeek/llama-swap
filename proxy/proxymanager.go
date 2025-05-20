@@ -319,7 +319,7 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 func (pm *ProxyManager) upstreamIndex(c *gin.Context) {
 	var html strings.Builder
 
-	html.WriteString("<!doctype HTML>\n<html><body><h1>Available Models</h1><a href=\"/unload/\">Unload all models</a><ul>")
+	html.WriteString("<!doctype HTML>\n<html><body><h1>Available Models</h1><a href=\"/unload\">Unload all models</a><ul>")
 
 	// Extract keys and sort them
 	var modelIDs []string
