@@ -32,7 +32,7 @@ if [ "$(id -u)" -ne 0 ]; then
     SUDO="sudo"
 fi
 
-NEEDS=$(require curl tee jq tar)
+NEEDS=$(require tee tar python3)
 if [ -n "$NEEDS" ]; then
     status "ERROR: The following tools are required but missing:"
     for NEED in $NEEDS; do
@@ -62,18 +62,40 @@ esac
 download_binary() {
     ASSET_NAME="linux_$ARCH"
 
-    # Fetch the latest release info and extract the matching asset URL
-    DL_URL=$(curl -s "https://api.github.com/repos/mostlygeek/llama-swap/releases/latest" | \
-        jq -r --arg name "$ASSET_NAME" \
-        '.assets[] | select(.name | contains($name)) | .browser_download_url')
+    TMPDIR=$(mktemp -d)
+    trap 'rm -rf "${TMPDIR}"' EXIT INT TERM HUP
+    PYTHON_SCRIPT=$(cat <<EOF
+import os
+import json
+import sys
+import urllib.request
 
-    # Check if a URL was successfully extracted
-    if [ -z "$DL_URL" ]; then
-        error "No matching asset found with name containing '$ASSET_NAME'."
+ASSET_NAME = "${ASSET_NAME}"
+
+with urllib.request.urlopen("https://api.github.com/repos/mostlygeek/llama-swap/releases/latest") as resp:
+    data = json.load(resp)
+    for asset in data.get("assets", []):
+        if ASSET_NAME in asset.get("name", ""):
+            url = asset["browser_download_url"]
+            break
+    else:
+        print("ERROR: Matching asset not found.", file=sys.stderr)
+        exit(1)
+
+print("Downloading:", url, file=sys.stderr)
+output_path = os.path.join("${TMPDIR}", "llama-swap.tar.gz")
+urllib.request.urlretrieve(url, output_path)
+print(output_path)
+EOF
+)
+
+    TARFILE=$(python3 -c "$PYTHON_SCRIPT")
+    if [ ! -f "$TARFILE" ]; then
+        error "Failed to download binary."
     fi
 
-    status "Downloading Linux $ARCH binary"
-    curl -s -L "$DL_URL" | $SUDO tar -xzf - -C /usr/local/bin llama-swap
+    status "Extracting to /usr/local/bin"
+    $SUDO tar -xzf "$TARFILE" -C /usr/local/bin llama-swap
 }
 download_binary
 
