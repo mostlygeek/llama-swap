@@ -223,13 +223,13 @@ runloop:
 			if countSigInt > 1 {
 				break runloop
 			} else {
-				log.Println("Recieved SIGINT, send another SIGINT to shutdown")
+				log.Println("Received SIGINT, send another SIGINT to shutdown")
 			}
 		case syscall.SIGTERM:
 			if *ignoreSigTerm {
 				log.Println("Ignoring SIGTERM")
 			} else {
-				log.Println("Recieved SIGTERM, shutting down")
+				log.Println("Received SIGTERM, shutting down")
 				break runloop
 			}
 		default:
