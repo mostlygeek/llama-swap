@@ -4,6 +4,8 @@
 
 set -eu
 
+LLAMA_SWAP_DEFAULT_ADDRESS=${LLAMA_SWAP_DEFAULT_ADDRESS:-"127.0.0.1:8080"}
+
 red="$( (/usr/bin/tput bold || :; /usr/bin/tput setaf 1 || :) 2>&-)"
 plain="$( (/usr/bin/tput sgr0 || :) 2>&-)"
 
@@ -160,7 +162,7 @@ User=llama-swap
 Group=llama-swap
 
 # set this to match your environment
-ExecStart=/usr/local/bin/llama-swap --config /usr/share/llama-swap/config.yaml --watch-config
+ExecStart=/usr/local/bin/llama-swap --config /usr/share/llama-swap/config.yaml --watch-config -listen ${LLAMA_SWAP_DEFAULT_ADDRESS}
 
 Restart=on-failure
 RestartSec=3
@@ -194,7 +196,7 @@ if available systemctl; then
 fi
 
 install_success() {
-    status 'The llama-swap API is now available at 127.0.0.1:8080.'
+    status "The llama-swap API is now available at http://${LLAMA_SWAP_DEFAULT_ADDRESS}"
     status 'Customize the config file at /usr/share/llama-swap/config.yaml.'
     status 'Install complete.'
 }
