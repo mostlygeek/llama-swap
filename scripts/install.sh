@@ -13,14 +13,14 @@ warning() { echo "${red}WARNING:${plain} $*"; }
 
 available() { command -v "$1" >/dev/null; }
 require() {
-    local MISSING=''
+    _MISSING=''
     for TOOL in "$@"; do
         if ! available "$TOOL"; then
-            MISSING="$MISSING $TOOL"
+            _MISSING="$_MISSING $TOOL"
         fi
     done
 
-    echo "$MISSING"
+    echo "$_MISSING"
 }
 
 SUDO=
