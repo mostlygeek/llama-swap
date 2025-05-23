@@ -11,16 +11,16 @@ status() { echo ">>> $*" >&2; }
 error() { echo "${red}ERROR:${plain} $*"; exit 1; }
 warning() { echo "${red}WARNING:${plain} $*"; }
 
-available() { command -v $1 >/dev/null; }
+available() { command -v "$1" >/dev/null; }
 require() {
     local MISSING=''
-    for TOOL in $*; do
-        if ! available $TOOL; then
+    for TOOL in "$@"; do
+        if ! available "$TOOL"; then
             MISSING="$MISSING $TOOL"
         fi
     done
 
-    echo $MISSING
+    echo "$MISSING"
 }
 
 SUDO=
@@ -118,7 +118,7 @@ configure_systemd() {
     fi
 
     status "Adding current user to llama-swap group..."
-    $SUDO usermod -a -G llama-swap $(whoami)
+    $SUDO usermod -a -G llama-swap "$(whoami)"
 
     if [ ! -f "/usr/share/llama-swap/config.yaml" ]; then
         status "Creating default config.yaml..."
