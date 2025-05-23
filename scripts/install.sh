@@ -4,6 +4,8 @@
 
 set -eu
 
+LLAMA_SWAP_DEFAULT_ADDRESS=${LLAMA_SWAP_DEFAULT_ADDRESS:-"127.0.0.1:8080"}
+
 red="$( (/usr/bin/tput bold || :; /usr/bin/tput setaf 1 || :) 2>&-)"
 plain="$( (/usr/bin/tput sgr0 || :) 2>&-)"
 
@@ -11,16 +13,16 @@ status() { echo ">>> $*" >&2; }
 error() { echo "${red}ERROR:${plain} $*"; exit 1; }
 warning() { echo "${red}WARNING:${plain} $*"; }
 
-available() { command -v $1 >/dev/null; }
+available() { command -v "$1" >/dev/null; }
 require() {
-    local MISSING=''
-    for TOOL in $*; do
-        if ! available $TOOL; then
-            MISSING="$MISSING $TOOL"
+    _MISSING=''
+    for TOOL in "$@"; do
+        if ! available "$TOOL"; then
+            _MISSING="$_MISSING $TOOL"
         fi
     done
 
-    echo $MISSING
+    echo "$_MISSING"
 }
 
 SUDO=
@@ -32,7 +34,7 @@ if [ "$(id -u)" -ne 0 ]; then
     SUDO="sudo"
 fi
 
-NEEDS=$(require curl tee jq tar)
+NEEDS=$(require tee tar python3 mktemp)
 if [ -n "$NEEDS" ]; then
     status "ERROR: The following tools are required but missing:"
     for NEED in $NEEDS; do
@@ -62,18 +64,40 @@ esac
 download_binary() {
     ASSET_NAME="linux_$ARCH"
 
-    # Fetch the latest release info and extract the matching asset URL
-    DL_URL=$(curl -s "https://api.github.com/repos/mostlygeek/llama-swap/releases/latest" | \
-        jq -r --arg name "$ASSET_NAME" \
-        '.assets[] | select(.name | contains($name)) | .browser_download_url')
+    TMPDIR=$(mktemp -d)
+    trap 'rm -rf "${TMPDIR}"' EXIT INT TERM HUP
+    PYTHON_SCRIPT=$(cat <<EOF
+import os
+import json
+import sys
+import urllib.request
 
-    # Check if a URL was successfully extracted
-    if [ -z "$DL_URL" ]; then
-        error "No matching asset found with name containing '$ASSET_NAME'."
+ASSET_NAME = "${ASSET_NAME}"
+
+with urllib.request.urlopen("https://api.github.com/repos/mostlygeek/llama-swap/releases/latest") as resp:
+    data = json.load(resp)
+    for asset in data.get("assets", []):
+        if ASSET_NAME in asset.get("name", ""):
+            url = asset["browser_download_url"]
+            break
+    else:
+        print("ERROR: Matching asset not found.", file=sys.stderr)
+        exit(1)
+
+print("Downloading:", url, file=sys.stderr)
+output_path = os.path.join("${TMPDIR}", "llama-swap.tar.gz")
+urllib.request.urlretrieve(url, output_path)
+print(output_path)
+EOF
+)
+
+    TARFILE=$(python3 -c "$PYTHON_SCRIPT")
+    if [ ! -f "$TARFILE" ]; then
+        error "Failed to download binary."
     fi
 
-    status "Downloading Linux $ARCH binary"
-    curl -s -L "$DL_URL" | $SUDO tar -xzf - -C /usr/local/bin llama-swap
+    status "Extracting to /usr/local/bin"
+    $SUDO tar -xzf "$TARFILE" -C /usr/local/bin llama-swap
 }
 download_binary
 
@@ -96,7 +120,7 @@ configure_systemd() {
     fi
 
     status "Adding current user to llama-swap group..."
-    $SUDO usermod -a -G llama-swap $(whoami)
+    $SUDO usermod -a -G llama-swap "$(whoami)"
 
     if [ ! -f "/usr/share/llama-swap/config.yaml" ]; then
         status "Creating default config.yaml..."
@@ -138,7 +162,7 @@ User=llama-swap
 Group=llama-swap
 
 # set this to match your environment
-ExecStart=/usr/local/bin/llama-swap --config /usr/share/llama-swap/config.yaml --watch-config
+ExecStart=/usr/local/bin/llama-swap --config /usr/share/llama-swap/config.yaml --watch-config -listen ${LLAMA_SWAP_DEFAULT_ADDRESS}
 
 Restart=on-failure
 RestartSec=3
@@ -172,7 +196,7 @@ if available systemctl; then
 fi
 
 install_success() {
-    status 'The llama-swap API is now available at 127.0.0.1:8080.'
+    status "The llama-swap API is now available at http://${LLAMA_SWAP_DEFAULT_ADDRESS}"
     status 'Customize the config file at /usr/share/llama-swap/config.yaml.'
     status 'Install complete.'
 }
