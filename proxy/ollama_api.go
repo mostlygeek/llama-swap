@@ -41,28 +41,45 @@ func (pm *ProxyManager) ollamaListTagsHandler() gin.HandlerFunc {
 			if modelCfg.Unlisted {
 				continue
 			}
+			details := OllamaModelDetails{Format: "gguf"}
+			if modelCfg.Metadata.Family != "" {
+				details.Family = modelCfg.Metadata.Family
+			} else {
+				// Basic inference for list view
+				arch := "unknown"
+				if modelCfg.Metadata.Architecture != "" {
+					arch = modelCfg.Metadata.Architecture
+				} else {
+					arch = inferPattern(id, architecturePatterns, orderedArchKeys)
+				}
+				details.Family = inferFamilyFromName(id, arch)
+			}
+			if modelCfg.Metadata.ParameterSize != "" {
+				details.ParameterSize = modelCfg.Metadata.ParameterSize
+			} else {
+				details.ParameterSize = inferParameterSizeFromName(id)
+			}
+			if modelCfg.Metadata.QuantizationLevel != "" {
+				details.QuantizationLevel = modelCfg.Metadata.QuantizationLevel
+			} else {
+				details.QuantizationLevel = inferQuantizationLevelFromName(id)
+			}
+			if details.Family != "unknown" && details.Family != "" {
+				details.Families = []string{details.Family}
+			}
+
 			models = append(models, OllamaModelResponse{
-				Name:       id,                    // Ollama uses full name like "llama2:latest"
-				Model:      id,                    // Model name without tag, for llama-swap it's the same as ID
-				ModifiedAt: now,                   // Placeholder, could use config file mod time
-				Size:       0,                     // Placeholder, llama-swap doesn't track this
-				Digest:     fmt.Sprintf("%x", id), // Placeholder digest
-				Details:    dummyDetails(),        // Placeholder details, could be improved
+				Name:       id,
+				Model:      id,
+				ModifiedAt: now,
+				Size:       0,
+				Digest:     fmt.Sprintf("%x", id),
+				Details:    details,
 			})
 		}
 		pm.RUnlock()
 
 		c.JSON(http.StatusOK, OllamaListTagsResponse{Models: models})
-	}
-}
-
-func dummyDetails() OllamaModelDetails {
-	//TODO: Improve parsing logic to extract family, size, etc.
-	return OllamaModelDetails{
-		Format:            "gguf",
-		Family:            "unknown",
-		ParameterSize:     "unknown",
-		QuantizationLevel: "unknown",
 	}
 }
 
@@ -76,7 +93,7 @@ func (pm *ProxyManager) ollamaShowHandler() gin.HandlerFunc {
 
 		modelName := req.Model
 		if modelName == "" {
-			modelName = req.Name // For compatibility with older Ollama clients
+			modelName = req.Name
 		}
 
 		if modelName == "" {
@@ -84,26 +101,71 @@ func (pm *ProxyManager) ollamaShowHandler() gin.HandlerFunc {
 			return
 		}
 
-		// pm.RLock()
-		// modelCfg, id, found := pm.config.FindConfig(modelName)
-		// pm.RUnlock()
+		pm.RLock()
+		modelCfg, id, found := pm.config.FindConfig(modelName) // id is realModelName
+		pm.RUnlock()
 
-		// if !found {
-		// 	pm.sendOllamaError(c, http.StatusNotFound, fmt.Sprintf("Model '%s' not found.", modelName))
-		// 	return
-		// }
+		if !found {
+			pm.sendOllamaError(c, http.StatusNotFound, fmt.Sprintf("Model '%s' not found.", modelName))
+			return
+		}
+
+		parser := NewLlamaServerParser()
+		parsedArgs := parser.Parse(modelCfg.Cmd, id)
+
+		arch := parsedArgs.Architecture
+		family := parsedArgs.Family
+		paramSize := parsedArgs.ParameterSize
+		quantLevel := parsedArgs.QuantizationLevel
+		ctxLength := parsedArgs.ContextLength
+		caps := parsedArgs.Capabilities
+		if len(caps) == 0 {
+			caps = []string{"completion"}
+		}
+
+		// Override with MetadataConfig if present
+		if modelCfg.Metadata.Architecture != "" {
+			arch = modelCfg.Metadata.Architecture
+		}
+		if modelCfg.Metadata.Family != "" {
+			family = modelCfg.Metadata.Family
+		}
+		if modelCfg.Metadata.ParameterSize != "" {
+			paramSize = modelCfg.Metadata.ParameterSize
+		}
+		if modelCfg.Metadata.QuantizationLevel != "" {
+			quantLevel = modelCfg.Metadata.QuantizationLevel
+		}
+		if modelCfg.Metadata.ContextLength > 0 {
+			ctxLength = modelCfg.Metadata.ContextLength
+		}
+		if len(modelCfg.Metadata.Capabilities) > 0 {
+			caps = modelCfg.Metadata.Capabilities
+		}
+
+		details := OllamaModelDetails{
+			Format:            "gguf",
+			Family:            family,
+			ParameterSize:     paramSize,
+			QuantizationLevel: quantLevel,
+		}
+		if family != "unknown" && family != "" {
+			details.Families = []string{family}
+		}
+
+		modelInfo := map[string]interface{}{
+			"general.architecture": arch,
+		}
+		if ctxLength > 0 {
+			modelInfo["llama.context_length"] = ctxLength
+		} else {
+			modelInfo["llama.context_length"] = 2048
+		}
+
 		resp := OllamaShowResponse{
-			Details: dummyDetails(),
-			ModelInfo: map[string]interface{}{
-				// copilot expects 'general.architecture'
-				"general.architecture": "unknown", //qwen2, llama, etc
-				"includes":             "unknown", //not sure what copilot is expecting here
-				//"llama.context_length": modelCfg.,
-			},
-			Capabilities: []string {
-				"completion",
-				"tools",
-			},
+			Details:      details,
+			ModelInfo:    modelInfo,
+			Capabilities: caps,
 		}
 
 		c.JSON(http.StatusOK, resp)
@@ -122,23 +184,51 @@ func (pm *ProxyManager) ollamaPSHandler() gin.HandlerFunc {
 				if process.CurrentState() == StateReady {
 					expiresAt := time.Time{} // Zero time if no TTL
 					if process.config.UnloadAfter > 0 {
-						// This is a rough estimation, Ollama's expiry is more dynamic
 						expiresAt = process.lastRequestHandled.Add(time.Duration(process.config.UnloadAfter) * time.Second)
-						if expiresAt.Before(now) && !process.lastRequestHandled.IsZero() { // If already past, but was used
+						if expiresAt.Before(now) && !process.lastRequestHandled.IsZero() {
 							expiresAt = now.Add(time.Duration(process.config.UnloadAfter) * time.Second)
-						} else if process.lastRequestHandled.IsZero() { // Never used, but ready
+						} else if process.lastRequestHandled.IsZero() {
 							expiresAt = now.Add(time.Duration(process.config.UnloadAfter) * time.Second)
 						}
+					}
+
+					modelCfg := process.config
+					details := OllamaModelDetails{Format: "gguf"}
+
+					arch := "unknown"
+					if modelCfg.Metadata.Architecture != "" {
+						arch = modelCfg.Metadata.Architecture
+					} else {
+						arch = inferPattern(modelID, architecturePatterns, orderedArchKeys)
+					}
+
+					if modelCfg.Metadata.Family != "" {
+						details.Family = modelCfg.Metadata.Family
+					} else {
+						details.Family = inferFamilyFromName(modelID, arch)
+					}
+					if modelCfg.Metadata.ParameterSize != "" {
+						details.ParameterSize = modelCfg.Metadata.ParameterSize
+					} else {
+						details.ParameterSize = inferParameterSizeFromName(modelID)
+					}
+					if modelCfg.Metadata.QuantizationLevel != "" {
+						details.QuantizationLevel = modelCfg.Metadata.QuantizationLevel
+					} else {
+						details.QuantizationLevel = inferQuantizationLevelFromName(modelID)
+					}
+					if details.Family != "unknown" && details.Family != "" {
+						details.Families = []string{details.Family}
 					}
 
 					runningModels = append(runningModels, OllamaProcessModelResponse{
 						Name:      modelID,
 						Model:     modelID,
-						Size:      0,                          // Placeholder
-						Digest:    fmt.Sprintf("%x", modelID), // Placeholder
-						Details:   dummyDetails(),
+						Size:      0,
+						Digest:    fmt.Sprintf("%x", modelID),
+						Details:   details,
 						ExpiresAt: expiresAt,
-						SizeVRAM:  0, // Placeholder
+						SizeVRAM:  0,
 					})
 				}
 			}
@@ -190,12 +280,7 @@ func (trw *transformingResponseWriter) Flush() {
 		if strings.HasPrefix(line, "data: ") {
 			jsonData := strings.TrimPrefix(line, "data: ")
 			if jsonData == "[DONE]" {
-				// This is the end of the OpenAI stream.
-				// For Ollama, the 'done: true' is part of the last content message.
-				// We might have already sent it if finish_reason was present.
-				// If not, we might need to send a final empty message with done:true,
-				// but typically the last content chunk from OpenAI has finish_reason.
-				break // Stop processing, [DONE] is handled by finish_reason
+				break
 			}
 
 			var ollamaChunkJSON []byte
@@ -207,7 +292,7 @@ func (trw *transformingResponseWriter) Flush() {
 					if len(openAIChatChunk.Choices) > 0 {
 						choice := openAIChatChunk.Choices[0]
 						ollamaResp := OllamaChatResponse{
-							Model:     trw.modelName, // Or openAIChatChunk.Model if preferred
+							Model:     trw.modelName,
 							CreatedAt: time.Now().UTC(),
 							Message: OllamaMessage{
 								Role:    openAIRoleToOllama(choice.Delta.Role),
@@ -217,7 +302,7 @@ func (trw *transformingResponseWriter) Flush() {
 							DoneReason: openAIFinishReasonToOllama(choice.FinishReason),
 						}
 						if choice.Delta.Role == "" && ollamaResp.Message.Role == "" {
-							ollamaResp.Message.Role = "assistant" // Default role for content delta
+							ollamaResp.Message.Role = "assistant"
 						}
 						if openAIChatChunk.Usage != nil {
 							ollamaResp.PromptEvalCount = openAIChatChunk.Usage.PromptTokens
@@ -233,7 +318,7 @@ func (trw *transformingResponseWriter) Flush() {
 					if len(openAIGenChunk.Choices) > 0 {
 						choice := openAIGenChunk.Choices[0]
 						ollamaResp := OllamaGenerateResponse{
-							Model:      trw.modelName, // Or openAIGenChunk.Model
+							Model:      trw.modelName,
 							CreatedAt:  time.Now().UTC(),
 							Response:   choice.Text,
 							Done:       choice.FinishReason != "",
@@ -252,23 +337,13 @@ func (trw *transformingResponseWriter) Flush() {
 				processedBuffer.Write(ollamaChunkJSON)
 				processedBuffer.WriteString("\n")
 			} else if err != nil {
-				// Log error, decide if to stop or continue
 				fmt.Fprintf(trw.ginWriter, "{\"error\":\"Error transforming stream: %v\"}\n", err)
 			}
 		} else if line != "" {
-			// This might be an error from the upstream if not SSE, or some other non-SSE data.
-			// Or it could be a partial line if the original Write didn't end with \n.
-			// For now, let's assume full lines from scanner.Scan().
-			// If it's an error from upstream, it should ideally be JSON.
 			var errResp OllamaErrorResponse
 			if json.Unmarshal([]byte(line), &errResp) == nil && errResp.Error != "" {
-				processedBuffer.Write([]byte(line)) // Pass through JSON error
+				processedBuffer.Write([]byte(line))
 				processedBuffer.WriteString("\n")
-			} else {
-				// Non-SSE, non-JSON error line, or unexpected format.
-				// Could write as a generic error or ignore.
-				// For safety, let's write it as a generic error if it's not empty.
-				// fmt.Fprintf(trw.ginWriter, "{\"error\":\"Unexpected stream data: %s\"}\n", line)
 			}
 		}
 	}
@@ -276,7 +351,6 @@ func (trw *transformingResponseWriter) Flush() {
 		fmt.Fprintf(trw.ginWriter, "{\"error\":\"Error scanning stream buffer: %v\"}\n", err)
 	}
 
-	// Preserve the remaining part of the buffer that wasn't a full line
 	unprocessedSuffix = trw.buffer.Bytes()[trw.buffer.Len()-len(scanner.Bytes()):]
 	trw.buffer.Reset()
 	trw.buffer.Write(unprocessedSuffix)
@@ -314,16 +388,12 @@ func (pm *ProxyManager) ollamaChatHandler() gin.HandlerFunc {
 			return
 		}
 
-		// Transform Ollama messages to OpenAI messages
 		openAIMessages := ollamaMessagesToOpenAI(ollamaReq.Messages)
-
-		// Use UseModelName if configured, otherwise use realModelName
 		modelNameToUse := realModelName
 		if pm.config.Models[realModelName].UseModelName != "" {
 			modelNameToUse = pm.config.Models[realModelName].UseModelName
 		}
 
-		// Create OpenAI-compatible request body
 		isStreaming := ollamaReq.Stream != nil && *ollamaReq.Stream
 		openAIReqBodyBytes, err := createOpenAIRequestBody(modelNameToUse, openAIMessages, isStreaming, ollamaReq.Options)
 		if err != nil {
@@ -331,18 +401,13 @@ func (pm *ProxyManager) ollamaChatHandler() gin.HandlerFunc {
 			return
 		}
 
-		// Create a new http.Request to be sent to the model process
-		// The URL path here is nominal as ProxyRequest constructs its own target URL.
-		// However, it's good practice to set it to what the underlying model might expect if it were a direct OpenAI call.
 		proxyDestReq, err := http.NewRequestWithContext(c.Request.Context(), "POST", "/v1/chat/completions", bytes.NewBuffer(openAIReqBodyBytes))
 		if err != nil {
 			pm.sendOllamaError(c, http.StatusInternalServerError, fmt.Sprintf("Error creating internal request: %v", err))
 			return
 		}
 		proxyDestReq.Header.Set("Content-Type", "application/json")
-		proxyDestReq.Header.Set("Accept", "application/json, text/event-stream") // Accept SSE for streaming
-		// Copy other relevant headers from original request if needed (e.g., Authorization, custom headers)
-		// For now, keeping it simple.
+		proxyDestReq.Header.Set("Accept", "application/json, text/event-stream")
 
 		if isStreaming {
 			c.Header("Content-Type", "application/x-ndjson")
@@ -350,17 +415,14 @@ func (pm *ProxyManager) ollamaChatHandler() gin.HandlerFunc {
 			c.Header("Cache-Control", "no-cache")
 			c.Header("Connection", "keep-alive")
 
-			// Use transformingResponseWriter to convert SSE to Ollama ndjson
 			trw := newTransformingResponseWriter(c.Writer, ollamaReq.Model, true)
 			process.ProxyRequest(trw, proxyDestReq)
-			// Final flush for any remaining buffered data in trw
 			trw.Flush()
 		} else {
 			recorder := httptest.NewRecorder()
 			process.ProxyRequest(recorder, proxyDestReq)
 
 			if recorder.Code != http.StatusOK {
-				// Try to parse error from recorder and forward
 				var openAIError struct {
 					Error struct {
 						Message string `json:"message"`
@@ -375,7 +437,6 @@ func (pm *ProxyManager) ollamaChatHandler() gin.HandlerFunc {
 				return
 			}
 
-			// Transform OpenAI non-streaming response to Ollama non-streaming response
 			var openAIResp OpenAIChatCompletionResponse
 			if err := json.Unmarshal(recorder.Body.Bytes(), &openAIResp); err != nil {
 				pm.sendOllamaError(c, http.StatusInternalServerError, fmt.Sprintf("Error parsing OpenAI response: %v. Body: %s", err, recorder.Body.String()))
@@ -389,7 +450,7 @@ func (pm *ProxyManager) ollamaChatHandler() gin.HandlerFunc {
 
 			choice := openAIResp.Choices[0]
 			ollamaFinalResp := OllamaChatResponse{
-				Model:     ollamaReq.Model, // Use the requested model name
+				Model:     ollamaReq.Model,
 				CreatedAt: time.Unix(openAIResp.Created, 0).UTC(),
 				Message: OllamaMessage{
 					Role:    openAIRoleToOllama(choice.Message.Role),
@@ -397,8 +458,8 @@ func (pm *ProxyManager) ollamaChatHandler() gin.HandlerFunc {
 				},
 				Done:            true,
 				DoneReason:      openAIFinishReasonToOllama(choice.FinishReason),
-				TotalDuration:   0, // Placeholder
-				LoadDuration:    0, // Placeholder
+				TotalDuration:   0,
+				LoadDuration:    0,
 				PromptEvalCount: openAIResp.Usage.PromptTokens,
 				EvalCount:       openAIResp.Usage.CompletionTokens,
 			}
@@ -440,24 +501,16 @@ func (pm *ProxyManager) ollamaGenerateHandler() gin.HandlerFunc {
 			return
 		}
 
-		// Use UseModelName if configured, otherwise use realModelName
 		modelNameToUse := realModelName
 		if pm.config.Models[realModelName].UseModelName != "" {
 			modelNameToUse = pm.config.Models[realModelName].UseModelName
 		}
 
-		// Create OpenAI-compatible legacy completion request body
 		isStreaming := ollamaReq.Stream != nil && *ollamaReq.Stream
-
-		// Construct prompt for legacy completion
-		// Ollama's /api/generate can take system and template, which are usually for chat.
-		// For simplicity, we'll combine system and prompt if system is provided.
-		// A more advanced implementation might convert this to a chat-like structure if the backend prefers.
 		fullPrompt := ollamaReq.Prompt
 		if ollamaReq.System != "" {
-			fullPrompt = ollamaReq.System + "\n\n" + ollamaReq.Prompt // Basic concatenation
+			fullPrompt = ollamaReq.System + "\n\n" + ollamaReq.Prompt
 		}
-		// Note: ollamaReq.Template is ignored for now as llama-swap doesn't handle templating.
 
 		openAIReqBodyBytes, err := createOpenAILegacyCompletionRequestBody(modelNameToUse, fullPrompt, isStreaming, ollamaReq.Options)
 		if err != nil {
@@ -479,9 +532,9 @@ func (pm *ProxyManager) ollamaGenerateHandler() gin.HandlerFunc {
 			c.Header("Cache-Control", "no-cache")
 			c.Header("Connection", "keep-alive")
 
-			trw := newTransformingResponseWriter(c.Writer, ollamaReq.Model, false) // false for isChat
+			trw := newTransformingResponseWriter(c.Writer, ollamaReq.Model, false)
 			process.ProxyRequest(trw, proxyDestReq)
-			trw.Flush() // Final flush
+			trw.Flush()
 		} else {
 			recorder := httptest.NewRecorder()
 			process.ProxyRequest(recorder, proxyDestReq)
@@ -513,12 +566,11 @@ func (pm *ProxyManager) ollamaGenerateHandler() gin.HandlerFunc {
 
 			choice := openAIResp.Choices[0]
 			ollamaFinalResp := OllamaGenerateResponse{
-				Model:      ollamaReq.Model,
-				CreatedAt:  time.Unix(openAIResp.Created, 0).UTC(),
-				Response:   choice.Text,
-				Done:       true,
-				DoneReason: openAIFinishReasonToOllama(choice.FinishReason),
-				// Context: Not directly available from OpenAI legacy completion in this way
+				Model:           ollamaReq.Model,
+				CreatedAt:       time.Unix(openAIResp.Created, 0).UTC(),
+				Response:        choice.Text,
+				Done:            true,
+				DoneReason:      openAIFinishReasonToOllama(choice.FinishReason),
 				PromptEvalCount: openAIResp.Usage.PromptTokens,
 				EvalCount:       openAIResp.Usage.CompletionTokens,
 			}
@@ -546,8 +598,8 @@ type OllamaGenerateRequest struct {
 	Context   []int                  `json:"context,omitempty"`
 	Stream    *bool                  `json:"stream,omitempty"`
 	Raw       bool                   `json:"raw,omitempty"`
-	Format    string                 `json:"format,omitempty"` // e.g., "json"
-	Images    []string               `json:"images,omitempty"` // Base64 encoded images
+	Format    string                 `json:"format,omitempty"`
+	Images    []string               `json:"images,omitempty"`
 	KeepAlive string                 `json:"keep_alive,omitempty"`
 	Options   map[string]interface{} `json:"options,omitempty"`
 }
@@ -556,23 +608,23 @@ type OllamaGenerateRequest struct {
 type OllamaGenerateResponse struct {
 	Model              string    `json:"model"`
 	CreatedAt          time.Time `json:"created_at"`
-	Response           string    `json:"response,omitempty"` // Empty if streaming and no content yet
+	Response           string    `json:"response,omitempty"`
 	Done               bool      `json:"done"`
 	DoneReason         string    `json:"done_reason,omitempty"`
 	Context            []int     `json:"context,omitempty"`
-	TotalDuration      int64     `json:"total_duration,omitempty"` // Nanoseconds
-	LoadDuration       int64     `json:"load_duration,omitempty"`  // Nanoseconds
+	TotalDuration      int64     `json:"total_duration,omitempty"`
+	LoadDuration       int64     `json:"load_duration,omitempty"`
 	PromptEvalCount    int       `json:"prompt_eval_count,omitempty"`
-	PromptEvalDuration int64     `json:"prompt_eval_duration,omitempty"` // Nanoseconds
+	PromptEvalDuration int64     `json:"prompt_eval_duration,omitempty"`
 	EvalCount          int       `json:"eval_count,omitempty"`
-	EvalDuration       int64     `json:"eval_duration,omitempty"` // Nanoseconds
+	EvalDuration       int64     `json:"eval_duration,omitempty"`
 }
 
 // OllamaMessage represents a single message in a chat.
 type OllamaMessage struct {
-	Role    string   `json:"role"` // "system", "user", or "assistant"
+	Role    string   `json:"role"`
 	Content string   `json:"content"`
-	Images  []string `json:"images,omitempty"` // Base64 encoded images
+	Images  []string `json:"images,omitempty"`
 }
 
 // OllamaChatRequest describes a request to /api/chat.
@@ -580,7 +632,7 @@ type OllamaChatRequest struct {
 	Model     string                 `json:"model"`
 	Messages  []OllamaMessage        `json:"messages"`
 	Stream    *bool                  `json:"stream,omitempty"`
-	Format    string                 `json:"format,omitempty"` // e.g., "json"
+	Format    string                 `json:"format,omitempty"`
 	KeepAlive string                 `json:"keep_alive,omitempty"`
 	Options   map[string]interface{} `json:"options,omitempty"`
 }
@@ -589,15 +641,15 @@ type OllamaChatRequest struct {
 type OllamaChatResponse struct {
 	Model              string        `json:"model"`
 	CreatedAt          time.Time     `json:"created_at"`
-	Message            OllamaMessage `json:"message,omitempty"` // Empty if streaming and no content yet
+	Message            OllamaMessage `json:"message,omitempty"`
 	Done               bool          `json:"done"`
 	DoneReason         string        `json:"done_reason,omitempty"`
-	TotalDuration      int64         `json:"total_duration,omitempty"` // Nanoseconds
-	LoadDuration       int64         `json:"load_duration,omitempty"`  // Nanoseconds
+	TotalDuration      int64         `json:"total_duration,omitempty"`
+	LoadDuration       int64         `json:"load_duration,omitempty"`
 	PromptEvalCount    int           `json:"prompt_eval_count,omitempty"`
-	PromptEvalDuration int64         `json:"prompt_eval_duration,omitempty"` // Nanoseconds
+	PromptEvalDuration int64         `json:"prompt_eval_duration,omitempty"`
 	EvalCount          int           `json:"eval_count,omitempty"`
-	EvalDuration       int64         `json:"eval_duration,omitempty"` // Nanoseconds
+	EvalDuration       int64         `json:"eval_duration,omitempty"`
 }
 
 // OllamaListTagsResponse is the response from /api/tags.
@@ -607,22 +659,22 @@ type OllamaListTagsResponse struct {
 
 // OllamaModelResponse describes a single model in the list.
 type OllamaModelResponse struct {
-	Name       string             `json:"name"`  // Full model name with tag
-	Model      string             `json:"model"` // Model name (e.g. "llama2:7b")
+	Name       string             `json:"name"`
+	Model      string             `json:"model"`
 	ModifiedAt time.Time          `json:"modified_at"`
-	Size       int64              `json:"size"`   // Placeholder, llama-swap doesn't track exact size
-	Digest     string             `json:"digest"` // Placeholder or hash of model ID
+	Size       int64              `json:"size"`
+	Digest     string             `json:"digest"`
 	Details    OllamaModelDetails `json:"details"`
 }
 
 // OllamaModelDetails provides more details about a model.
 type OllamaModelDetails struct {
 	ParentModel       string   `json:"parent_model,omitempty"`
-	Format            string   `json:"format,omitempty"`             // e.g., "gguf"
-	Family            string   `json:"family,omitempty"`             // e.g., "llama"
-	Families          []string `json:"families,omitempty"`           // e.g., ["llama"]
-	ParameterSize     string   `json:"parameter_size,omitempty"`     // e.g., "7B"
-	QuantizationLevel string   `json:"quantization_level,omitempty"` // e.g., "Q4_0"
+	Format            string   `json:"format,omitempty"`
+	Family            string   `json:"family,omitempty"`
+	Families          []string `json:"families,omitempty"`
+	ParameterSize     string   `json:"parameter_size,omitempty"`
+	QuantizationLevel string   `json:"quantization_level,omitempty"`
 }
 
 type OllamaTensor struct {
@@ -633,8 +685,8 @@ type OllamaTensor struct {
 
 // OllamaShowRequest is the request for /api/show.
 type OllamaShowRequest struct {
-	Model string `json:"model,omitempty"` // Ollama uses 'model' in newer versions
-	Name  string `json:"name,omitempty"`  // Ollama used 'name' in older versions
+	Model string `json:"model,omitempty"`
+	Name  string `json:"name,omitempty"`
 }
 
 // OllamaShowResponse is the response from /api/show.
@@ -649,7 +701,7 @@ type OllamaShowResponse struct {
 	ModelInfo     map[string]any     `json:"model_info,omitempty"`
 	ProjectorInfo map[string]any     `json:"projector_info,omitempty"`
 	Tensors       []OllamaTensor     `json:"tensors,omitempty"`
-	Capabilities  []string 			 `json:"capabilities,omitempty"`
+	Capabilities  []string           `json:"capabilities,omitempty"`
 	ModifiedAt    time.Time          `json:"modified_at,omitempty"`
 }
 
@@ -662,11 +714,11 @@ type OllamaProcessResponse struct {
 type OllamaProcessModelResponse struct {
 	Name      string             `json:"name"`
 	Model     string             `json:"model"`
-	Size      int64              `json:"size"`   // Placeholder
-	Digest    string             `json:"digest"` // Placeholder
+	Size      int64              `json:"size"`
+	Digest    string             `json:"digest"`
 	Details   OllamaModelDetails `json:"details"`
-	ExpiresAt time.Time          `json:"expires_at"` // Placeholder or calculated if TTL
-	SizeVRAM  int64              `json:"size_vram"`  // Placeholder
+	ExpiresAt time.Time          `json:"expires_at"`
+	SizeVRAM  int64              `json:"size_vram"`
 }
 
 // --- Helper types for transforming OpenAI stream to Ollama stream ---
@@ -691,8 +743,7 @@ type OpenAIStreamingChatResponse struct {
 	Created int64                              `json:"created"`
 	Model   string                             `json:"model"`
 	Choices []OpenAIChatCompletionStreamChoice `json:"choices"`
-	// Usage can appear in the last message if supported by the backend
-	Usage *OpenAIUsage `json:"usage,omitempty"`
+	Usage   *OpenAIUsage                       `json:"usage,omitempty"`
 }
 
 // OpenAICompletionStreamChoice is part of an OpenAI legacy completion stream event.
@@ -709,8 +760,7 @@ type OpenAIStreamingCompletionResponse struct {
 	Created int64                          `json:"created"`
 	Model   string                         `json:"model"`
 	Choices []OpenAICompletionStreamChoice `json:"choices"`
-	// Usage can appear in the last message if supported by the backend
-	Usage *OpenAIUsage `json:"usage,omitempty"`
+	Usage   *OpenAIUsage                   `json:"usage,omitempty"`
 }
 
 // OpenAIUsage represents token usage statistics.
@@ -749,11 +799,10 @@ type OpenAICompletionResponse struct {
 	Object  string                         `json:"object"`
 	Created int64                          `json:"created"`
 	Model   string                         `json:"model"`
-	Choices []OpenAICompletionStreamChoice `json:"choices"` // Re-use stream choice for simplicity
+	Choices []OpenAICompletionStreamChoice `json:"choices"`
 	Usage   OpenAIUsage                    `json:"usage"`
 }
 
-// Helper to convert OpenAI stream finish_reason to Ollama done_reason
 func openAIFinishReasonToOllama(reason string) string {
 	switch reason {
 	case "stop":
@@ -763,16 +812,15 @@ func openAIFinishReasonToOllama(reason string) string {
 	case "content_filter":
 		return "content_filter"
 	case "tool_calls":
-		return "tool_calls" // Or handle more specifically if llama-swap supports tools
+		return "tool_calls"
 	default:
 		if reason != "" {
-			return "unknown" // Or pass through if it's a custom reason
+			return "unknown"
 		}
 		return ""
 	}
 }
 
-// Helper to convert OpenAI role to Ollama role (should be compatible but good for consistency)
 func openAIRoleToOllama(role string) string {
 	switch role {
 	case "system":
@@ -782,29 +830,21 @@ func openAIRoleToOllama(role string) string {
 	case "assistant":
 		return "assistant"
 	default:
-		return role // Pass through if unknown, though unlikely for standard OpenAI
+		return role
 	}
 }
 
-// Helper to convert Ollama messages to OpenAI messages
 func ollamaMessagesToOpenAI(ollamaMsgs []OllamaMessage) []map[string]interface{} {
 	openAIMsgs := make([]map[string]interface{}, len(ollamaMsgs))
 	for i, msg := range ollamaMsgs {
-		// Basic transformation. Image handling would require more complex logic
-		// if the target OpenAI model supports multimodal input in this specific way.
-		// For now, we assume text-only or that the backend handles image URIs if passed.
 		openAIMsgs[i] = map[string]interface{}{
 			"role":    msg.Role,
 			"content": msg.Content,
 		}
-		// Note: OpenAI's vision models expect images in a specific content array format.
-		// This basic conversion won't handle that directly.
-		// If msg.Images is populated, a more sophisticated conversion is needed.
 	}
 	return openAIMsgs
 }
 
-// Helper to create a JSON request body
 func createOpenAIRequestBody(modelName string, messages []map[string]interface{}, stream bool, options map[string]interface{}) ([]byte, error) {
 	requestBody := map[string]interface{}{
 		"model":    modelName,
@@ -812,11 +852,8 @@ func createOpenAIRequestBody(modelName string, messages []map[string]interface{}
 		"stream":   stream,
 	}
 
-	// Merge options from Ollama request if any
-	// This is a simple merge; more sophisticated mapping might be needed for specific options
 	if options != nil {
 		for k, v := range options {
-			// Avoid overwriting core fields unless explicitly intended
 			if _, exists := requestBody[k]; !exists {
 				requestBody[k] = v
 			}

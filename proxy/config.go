@@ -15,16 +15,27 @@ import (
 
 const DEFAULT_GROUP_ID = "(default)"
 
+// MetadataConfig allows overriding auto-detected model metadata.
+type MetadataConfig struct {
+	Architecture      string   `yaml:"architecture,omitempty"`
+	ContextLength     int      `yaml:"contextLength,omitempty"`
+	Capabilities      []string `yaml:"capabilities,omitempty"`
+	Family            string   `yaml:"family,omitempty"`
+	ParameterSize     string   `yaml:"parameterSize,omitempty"`
+	QuantizationLevel string   `yaml:"quantizationLevel,omitempty"`
+}
+
 type ModelConfig struct {
-	Cmd           string   `yaml:"cmd"`
-	CmdStop       string   `yaml:"cmdStop"`
-	Proxy         string   `yaml:"proxy"`
-	Aliases       []string `yaml:"aliases"`
-	Env           []string `yaml:"env"`
-	CheckEndpoint string   `yaml:"checkEndpoint"`
-	UnloadAfter   int      `yaml:"ttl"`
-	Unlisted      bool     `yaml:"unlisted"`
-	UseModelName  string   `yaml:"useModelName"`
+	Cmd           string         `yaml:"cmd"`
+	CmdStop       string         `yaml:"cmdStop"`
+	Proxy         string         `yaml:"proxy"`
+	Aliases       []string       `yaml:"aliases"`
+	Env           []string       `yaml:"env"`
+	CheckEndpoint string         `yaml:"checkEndpoint"`
+	UnloadAfter   int            `yaml:"ttl"`
+	Unlisted      bool           `yaml:"unlisted"`
+	UseModelName  string         `yaml:"useModelName"`
+	Metadata      MetadataConfig `yaml:"metadata"`
 
 	// Limit concurrency of HTTP requests to process
 	ConcurrencyLimit int `yaml:"concurrencyLimit"`
