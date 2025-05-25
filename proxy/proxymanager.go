@@ -83,6 +83,9 @@ func New(config Config) *ProxyManager {
 	}
 
 	pm.setupGinEngine()
+	if config.EnableOllamaAPI {
+		pm.RegisterOllamaRoutes()
+	}
 	return pm
 }
 
