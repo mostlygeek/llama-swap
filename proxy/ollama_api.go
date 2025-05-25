@@ -41,35 +41,28 @@ func (pm *ProxyManager) ollamaListTagsHandler() gin.HandlerFunc {
 			if modelCfg.Unlisted {
 				continue
 			}
-
-			// Basic details, can be enhanced if more info is added to ModelConfig
-			details := OllamaModelDetails{
-				Format:            "gguf", // Common default, or make configurable
-				Family:            "unknown",
-				ParameterSize:     "unknown",
-				QuantizationLevel: "unknown",
-			}
-			// Try to infer from ID if typical patterns are used, e.g., "llama2-7b-q4_0"
-			parts := strings.Split(id, "-")
-			if len(parts) > 0 {
-				details.Family = parts[0]
-			}
-			if len(parts) > 1 {
-				details.ParameterSize = parts[1] // This is a rough guess
-			}
-
 			models = append(models, OllamaModelResponse{
 				Name:       id,                    // Ollama uses full name like "llama2:latest"
 				Model:      id,                    // Model name without tag, for llama-swap it's the same as ID
 				ModifiedAt: now,                   // Placeholder, could use config file mod time
 				Size:       0,                     // Placeholder, llama-swap doesn't track this
 				Digest:     fmt.Sprintf("%x", id), // Placeholder digest
-				Details:    details,
+				Details:    dummyDetails(),        // Placeholder details, could be improved
 			})
 		}
 		pm.RUnlock()
 
 		c.JSON(http.StatusOK, OllamaListTagsResponse{Models: models})
+	}
+}
+
+func dummyDetails() OllamaModelDetails {
+	//TODO: Improve parsing logic to extract family, size, etc.
+	return OllamaModelDetails{
+		Format:            "gguf",
+		Family:            "unknown",
+		ParameterSize:     "unknown",
+		QuantizationLevel: "unknown",
 	}
 }
 
@@ -91,55 +84,25 @@ func (pm *ProxyManager) ollamaShowHandler() gin.HandlerFunc {
 			return
 		}
 
-		pm.RLock()
-		modelCfg, id, found := pm.config.FindConfig(modelName)
-		pm.RUnlock()
+		// pm.RLock()
+		// modelCfg, id, found := pm.config.FindConfig(modelName)
+		// pm.RUnlock()
 
-		if !found {
-			pm.sendOllamaError(c, http.StatusNotFound, fmt.Sprintf("Model '%s' not found.", modelName))
-			return
-		}
-
-		details := OllamaModelDetails{
-			Format:            "gguf",
-			Family:            "unknown",
-			ParameterSize:     "unknown",
-			QuantizationLevel: "unknown",
-		}
-		parts := strings.Split(id, "-")
-		if len(parts) > 0 {
-			details.Family = parts[0]
-		}
-		if len(parts) > 1 {
-			details.ParameterSize = parts[1]
-		}
-
-		// Construct a basic modelfile representation
-		var modelfileBuilder strings.Builder
-		modelfileBuilder.WriteString(fmt.Sprintf("FROM %s\n\n", id))
-		if modelCfg.Cmd != "" {
-			modelfileBuilder.WriteString(fmt.Sprintf("# CMD %s\n", modelCfg.Cmd))
-		}
-		if modelCfg.Proxy != "" {
-			modelfileBuilder.WriteString(fmt.Sprintf("# PROXY %s\n", modelCfg.Proxy))
-		}
-		if len(modelCfg.Env) > 0 {
-			modelfileBuilder.WriteString("\n# ENVIRONMENT VARIABLES\n")
-			for _, envVar := range modelCfg.Env {
-				modelfileBuilder.WriteString(fmt.Sprintf("# ENV %s\n", envVar))
-			}
-		}
-
+		// if !found {
+		// 	pm.sendOllamaError(c, http.StatusNotFound, fmt.Sprintf("Model '%s' not found.", modelName))
+		// 	return
+		// }
 		resp := OllamaShowResponse{
-			Modelfile:  modelfileBuilder.String(),
-			Parameters: strings.Join(modelCfg.Env, "\n"), // Simple representation
-			Template:   "",                               // llama-swap doesn't manage templates this way
-			System:     "",                               // llama-swap doesn't manage system prompts this way
-			Details:    details,
-			ModifiedAt: time.Now().UTC(), // Placeholder
+			Details: dummyDetails(),
 			ModelInfo: map[string]interface{}{
-				"cmd":   modelCfg.Cmd,
-				"proxy": modelCfg.Proxy,
+				// copilot expects 'general.architecture'
+				"general.architecture": "unknown", //qwen2, llama, etc
+				"includes":             "unknown", //not sure what copilot is expecting here
+				//"llama.context_length": modelCfg.,
+			},
+			Capabilities: []string {
+				"completion",
+				"tools",
 			},
 		}
 
@@ -157,20 +120,6 @@ func (pm *ProxyManager) ollamaPSHandler() gin.HandlerFunc {
 			group.Lock() // Lock group while iterating its processes
 			for modelID, process := range group.processes {
 				if process.CurrentState() == StateReady {
-					details := OllamaModelDetails{
-						Format:            "gguf",
-						Family:            "unknown",
-						ParameterSize:     "unknown",
-						QuantizationLevel: "unknown",
-					}
-					parts := strings.Split(modelID, "-")
-					if len(parts) > 0 {
-						details.Family = parts[0]
-					}
-					if len(parts) > 1 {
-						details.ParameterSize = parts[1]
-					}
-
 					expiresAt := time.Time{} // Zero time if no TTL
 					if process.config.UnloadAfter > 0 {
 						// This is a rough estimation, Ollama's expiry is more dynamic
@@ -187,7 +136,7 @@ func (pm *ProxyManager) ollamaPSHandler() gin.HandlerFunc {
 						Model:     modelID,
 						Size:      0,                          // Placeholder
 						Digest:    fmt.Sprintf("%x", modelID), // Placeholder
-						Details:   details,
+						Details:   dummyDetails(),
 						ExpiresAt: expiresAt,
 						SizeVRAM:  0, // Placeholder
 					})
@@ -676,6 +625,12 @@ type OllamaModelDetails struct {
 	QuantizationLevel string   `json:"quantization_level,omitempty"` // e.g., "Q4_0"
 }
 
+type OllamaTensor struct {
+	Name  string   `json:"name"`
+	Type  string   `json:"type"`
+	Shape []uint64 `json:"shape"`
+}
+
 // OllamaShowRequest is the request for /api/show.
 type OllamaShowRequest struct {
 	Model string `json:"model,omitempty"` // Ollama uses 'model' in newer versions
@@ -684,16 +639,18 @@ type OllamaShowRequest struct {
 
 // OllamaShowResponse is the response from /api/show.
 type OllamaShowResponse struct {
-	License       string                 `json:"license,omitempty"`
-	Modelfile     string                 `json:"modelfile,omitempty"`
-	Parameters    string                 `json:"parameters,omitempty"`
-	Template      string                 `json:"template,omitempty"`
-	System        string                 `json:"system,omitempty"`
-	Details       OllamaModelDetails     `json:"details,omitempty"`
-	Messages      []OllamaMessage        `json:"messages,omitempty"` // For chat models
-	ModelInfo     map[string]interface{} `json:"model_info,omitempty"`
-	ProjectorInfo map[string]interface{} `json:"projector_info,omitempty"` // For multimodal models
-	ModifiedAt    time.Time              `json:"modified_at,omitempty"`
+	License       string             `json:"license,omitempty"`
+	Modelfile     string             `json:"modelfile,omitempty"`
+	Parameters    string             `json:"parameters,omitempty"`
+	Template      string             `json:"template,omitempty"`
+	System        string             `json:"system,omitempty"`
+	Details       OllamaModelDetails `json:"details,omitempty"`
+	Messages      []OllamaMessage    `json:"messages,omitempty"`
+	ModelInfo     map[string]any     `json:"model_info,omitempty"`
+	ProjectorInfo map[string]any     `json:"projector_info,omitempty"`
+	Tensors       []OllamaTensor     `json:"tensors,omitempty"`
+	Capabilities  []string 			 `json:"capabilities,omitempty"`
+	ModifiedAt    time.Time          `json:"modified_at,omitempty"`
 }
 
 // OllamaProcessResponse is the response from /api/ps.
