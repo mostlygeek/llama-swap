@@ -29,6 +29,7 @@ func main() {
 	listenStr := flag.String("listen", ":8080", "listen ip/port")
 	showVersion := flag.Bool("version", false, "show version of build")
 	watchConfig := flag.Bool("watch-config", false, "Automatically reload config file on change")
+	ollamaAPI := flag.Bool("ollama-api", false, "Enable Ollama compatible API endpoints")
 
 	flag.Parse() // Parse the command-line flags
 
@@ -54,6 +55,11 @@ func main() {
 	}
 
 	proxyManager := proxy.New(config)
+
+	if *ollamaAPI {
+		proxyManager.RegisterOllamaRoutes()
+		fmt.Println("Ollama API enabled.")
+	}
 
 	// Setup channels for server management
 	reloadChan := make(chan *proxy.ProxyManager)
@@ -90,6 +96,9 @@ func main() {
 				currentManager = newManager
 				srv.Handler = newManager
 				log.Println("Server handler updated with new config")
+				if *ollamaAPI { // Re-register Ollama routes if enabled
+					currentManager.RegisterOllamaRoutes()
+				}
 			case sig := <-sigChan:
 				fmt.Printf("Received signal %v, shutting down...\n", sig)
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

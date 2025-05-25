@@ -24,7 +24,7 @@ const (
 )
 
 type ProxyManager struct {
-	sync.Mutex
+	sync.RWMutex
 
 	config    Config
 	ginEngine *gin.Engine
@@ -197,6 +197,33 @@ func (pm *ProxyManager) setupGinEngine() {
 
 	// Disable console color for testing
 	gin.DisableConsoleColor()
+}
+
+// RegisterOllamaRoutes sets up the Ollama-compatible API endpoints.
+func (pm *ProxyManager) RegisterOllamaRoutes() {
+	// General Ollama API
+	pm.ginEngine.HEAD("/", pm.ollamaHeartbeatHandler) //HEAD '/' does not conflict with llama-swap's GET '/'
+	pm.ginEngine.GET("/api/version", pm.ollamaVersionHandler())
+	pm.ginEngine.HEAD("/api/version", pm.ollamaVersionHandler())
+
+	// Model management
+	pm.ginEngine.GET("/api/tags", pm.ollamaListTagsHandler())
+	pm.ginEngine.POST("/api/show", pm.ollamaShowHandler())
+	pm.ginEngine.GET("/api/ps", pm.ollamaPSHandler())
+
+	// Inference
+	pm.ginEngine.POST("/api/generate", pm.ollamaGenerateHandler())
+	pm.ginEngine.POST("/api/chat", pm.ollamaChatHandler())
+
+	// Stubbed endpoints
+	stubbedPostRoutes := []string{
+		"/api/pull", "/api/push", "/api/copy",
+		"/api/create", "/api/delete", "/api/embeddings",
+	}
+	for _, route := range stubbedPostRoutes {
+		pm.ginEngine.POST(route, pm.ollamaNotImplementedHandler)
+	}
+	pm.ginEngine.POST("/api/blobs/:digest", pm.ollamaNotImplementedHandler)
 }
 
 // ServeHTTP implements http.Handler interface
@@ -405,7 +432,7 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 
 	if err := processGroup.ProxyRequest(realModelName, c.Writer, c.Request); err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
-		pm.proxyLogger.Errorf("Error Proxying Request for processGroup %s and model %s", processGroup.id, realModelName)
+		pm.proxyLogger.Errorf("Error Proxying Request for processGroup %s and model %s: %s", processGroup.id, realModelName, err)
 		return
 	}
 }
@@ -515,7 +542,7 @@ func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
 	// Use the modified request for proxying
 	if err := processGroup.ProxyRequest(realModelName, c.Writer, modifiedReq); err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
-		pm.proxyLogger.Errorf("Error Proxying Request for processGroup %s and model %s", processGroup.id, realModelName)
+		pm.proxyLogger.Errorf("Error Proxying Request for processGroup %s and model %s: %s", processGroup.id, realModelName, err)
 		return
 	}
 }
@@ -523,7 +550,7 @@ func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
 func (pm *ProxyManager) sendErrorResponse(c *gin.Context, statusCode int, message string) {
 	acceptHeader := c.GetHeader("Accept")
 
-	if strings.Contains(acceptHeader, "application/json") {
+	if strings.Contains(acceptHeader, "application/json") || strings.Contains(acceptHeader, "application/x-ndjson") {
 		c.JSON(statusCode, gin.H{"error": message})
 	} else {
 		c.String(statusCode, message)
