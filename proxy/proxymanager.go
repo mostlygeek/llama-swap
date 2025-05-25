@@ -400,7 +400,15 @@ func (pm *ProxyManager) upstreamIndex(c *gin.Context) {
 func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		pm.sendErrorResponse(c, http.StatusBadRequest, "could not ready request body")
+		pm.sendErrorResponse(c, http.StatusBadRequest, "could not read request body")
+		return
+	}
+
+	// Some clients (Copilot) omit parameters in function definitions instead of sending empty ones
+	// llama-server is strict about the schema. This ensures compliance.
+	bodyBytes, err = ensureOpenAIToolParameters(bodyBytes, pm.proxyLogger)
+	if err != nil {
+		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error processing tools in request: %s", err.Error()))
 		return
 	}
 
@@ -438,6 +446,57 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 		pm.proxyLogger.Errorf("Error Proxying Request for processGroup %s and model %s: %s", processGroup.id, realModelName, err)
 		return
 	}
+}
+
+// ensureOpenAIToolParameters checks the request body for OpenAI tools
+// and adds a default empty parameters object if a function tool is missing it.
+func ensureOpenAIToolParameters(bodyBytes []byte, proxyLogger *LogMonitor) ([]byte, error) {
+	toolsResult := gjson.GetBytes(bodyBytes, "tools")
+
+	if !toolsResult.Exists() || !toolsResult.IsArray() {
+		return bodyBytes, nil
+	}
+
+	currentBodyBytes := bodyBytes
+	madeChanges := false
+
+	for i, tool := range toolsResult.Array() {
+		if tool.Get("type").String() == "function" {
+			// Check if 'function' object exists and 'parameters' is missing within it
+			functionPath := fmt.Sprintf("tools.%d.function", i)
+			functionResult := gjson.GetBytes(currentBodyBytes, functionPath)
+
+			if functionResult.Exists() && functionResult.IsObject() {
+				parametersPath := functionPath + ".parameters"
+				if !gjson.GetBytes(currentBodyBytes, parametersPath).Exists() {
+					defaultParameters := map[string]interface{}{
+						"type":       "object",
+						"properties": map[string]interface{}{},
+					}
+
+					newBodyBytes, err := sjson.SetBytes(currentBodyBytes, parametersPath, defaultParameters)
+					if err != nil {
+						return nil, fmt.Errorf("failed to set default parameters for tool %d using sjson: %w", i, err)
+					}
+					currentBodyBytes = newBodyBytes
+					madeChanges = true
+
+					if proxyLogger != nil {
+						funcName := functionResult.Get("name").String()
+						if funcName == "" {
+							funcName = fmt.Sprintf("tool at index %d", i)
+						}
+						proxyLogger.Debugf("OpenAI Proxy: Added default parameters to tool function '%s' in request body using sjson", funcName)
+					}
+				}
+			}
+		}
+	}
+
+	if madeChanges {
+		return currentBodyBytes, nil
+	}
+	return bodyBytes, nil // Return original if no changes
 }
 
 func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
