@@ -113,7 +113,12 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		return Config{}, err
 	}
 
-	if config.HealthCheckTimeout < 15 {
+	if config.HealthCheckTimeout == 0 {
+		// this high default timeout helps avoid failing health checks
+		// for configurations that wait for docker or have slower startup
+		config.HealthCheckTimeout = 120
+	} else if config.HealthCheckTimeout < 15 {
+		// set a minimum of 15 seconds
 		config.HealthCheckTimeout = 15
 	}
 

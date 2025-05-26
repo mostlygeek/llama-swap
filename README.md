@@ -63,9 +63,10 @@ models:
 <summary>But also very powerful ...</summary>
 
 ```yaml
-# Seconds to wait for llama.cpp to load and be ready to serve requests
-# Default (and minimum) is 15 seconds
-healthCheckTimeout: 60
+# Seconds to wait for upstream to load and be ready to serve requests
+# minimum is 15 seconds
+# default is 120 seconds
+healthCheckTimeout: 500
 
 # Valid log levels: debug, info (default), warn, error
 logLevel: info

@@ -100,7 +100,7 @@ func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLo
 		concurrencyLimitSemaphore: make(chan struct{}, concurrentLimit),
 
 		// stop timeout
-		gracefulStopTimeout:        5 * time.Second,
+		gracefulStopTimeout:        10 * time.Second,
 		upstreamWasStoppedWithKill: false,
 	}
 }
