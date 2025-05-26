@@ -299,32 +299,6 @@ Any OpenAI compatible server would work. llama-swap was originally designed for 
 
 For Python based inference servers like vllm or tabbyAPI it is recommended to run them via podman or docker. This provides clean environment isolation as well as responding correctly to `SIGTERM` signals to shutdown.
 
-## Systemd Unit Files
-
-Use this unit file to start llama-swap on boot. This is only tested on Ubuntu.
-
-`/etc/systemd/system/llama-swap.service`
-
-```
-[Unit]
-Description=llama-swap
-After=network.target
-
-[Service]
-User=nobody
-
-# set this to match your environment
-ExecStart=/path/to/llama-swap --config /path/to/llama-swap.config.yml
-
-Restart=on-failure
-RestartSec=3
-StartLimitBurst=3
-StartLimitInterval=30
-
-[Install]
-WantedBy=multi-user.target
-```
-
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=mostlygeek/llama-swap&type=Date)](https://www.star-history.com/#mostlygeek/llama-swap&Date)
