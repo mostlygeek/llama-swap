@@ -127,7 +127,7 @@ models:
     cmd: |
       docker run --name dockertest
       --init --rm -p ${PORT}:8080 -v /mnt/nvme/models:/models
-      ghcr.io/ggerganov/llama.cpp:server
+      ghcr.io/ggml-org/llama.cpp:server
       --model '/models/Qwen2.5-Coder-0.5B-Instruct-Q4_K_M.gguf'
 
     # use a custom command to stop the model when swapping. By default
