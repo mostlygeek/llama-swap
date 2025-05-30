@@ -76,7 +76,7 @@ Check the [configuration documentation](https://github.com/mostlygeek/llama-swap
 Docker is the quickest way to try out llama-swap:
 
 ```shell
-# use CPU inference
+# use CPU inference comes with the example config above
 $ docker run -it --rm -p 9292:8080 ghcr.io/mostlygeek/llama-swap:cpu
 
 # qwen2.5 0.5B
@@ -95,7 +95,7 @@ $ curl -s http://localhost:9292/v1/chat/completions \
 ```
 
 <details>
-<summary>Docker images are built nightly ...</summary>
+<summary>Docker images are built nightly for cuda, intel, vulcan, etc ...</summary>
 
 They include:
 
