@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -66,6 +67,9 @@ type Config struct {
 	Models             map[string]ModelConfig `yaml:"models"` /* key is model ID */
 	Profiles           map[string][]string    `yaml:"profiles"`
 	Groups             map[string]GroupConfig `yaml:"groups"` /* key is group ID */
+
+	// for key/value replacements in model's cmd, cmdStop, proxy, checkEndPoint
+	Macros map[string]string `yaml:"macros"`
 
 	// map aliases to actual model IDs
 	aliases map[string]string
@@ -141,6 +145,30 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		}
 	}
 
+	/* check macro constraint rules:
+
+	- name must fit the regex ^[a-zA-Z0-9_-]+$
+	- names must be less than 64 characters (no reason, just cause)
+	- name can not be any reserved macros: PORT
+	- macro values must be less than 1024 characters
+	*/
+	macroNameRegex := regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+	for macroName, macroValue := range config.Macros {
+		if len(macroName) >= 64 {
+			return Config{}, fmt.Errorf("macro name '%s' exceeds maximum length of 63 characters", macroName)
+		}
+		if !macroNameRegex.MatchString(macroName) {
+			return Config{}, fmt.Errorf("macro name '%s' contains invalid characters, must match pattern ^[a-zA-Z0-9_-]+$", macroName)
+		}
+		if len(macroValue) >= 1024 {
+			return Config{}, fmt.Errorf("macro value for '%s' exceeds maximum length of 1024 characters", macroName)
+		}
+		switch macroName {
+		case "PORT":
+			return Config{}, fmt.Errorf("macro name '%s' is reserved and cannot be used", macroName)
+		}
+	}
+
 	// Get and sort all model IDs first, makes testing more consistent
 	modelIds := make([]string, 0, len(config.Models))
 	for modelId := range config.Models {
@@ -151,19 +179,51 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	nextPort := config.StartPort
 	for _, modelId := range modelIds {
 		modelConfig := config.Models[modelId]
-		// iterate over the models and replace any ${PORT} with the next available port
-		if strings.Contains(modelConfig.Cmd, "${PORT}") {
-			modelConfig.Cmd = strings.ReplaceAll(modelConfig.Cmd, "${PORT}", strconv.Itoa(nextPort))
+
+		// go through model config fields: cmd, cmdStop, proxy, checkEndPoint and replace macros with macro values
+		for macroName, macroValue := range config.Macros {
+			macroSlug := fmt.Sprintf("${%s}", macroName)
+			modelConfig.Cmd = strings.ReplaceAll(modelConfig.Cmd, macroSlug, macroValue)
+			modelConfig.CmdStop = strings.ReplaceAll(modelConfig.CmdStop, macroSlug, macroValue)
+			modelConfig.Proxy = strings.ReplaceAll(modelConfig.Proxy, macroSlug, macroValue)
+			modelConfig.CheckEndpoint = strings.ReplaceAll(modelConfig.CheckEndpoint, macroSlug, macroValue)
+		}
+
+		// only iterate over models that use ${PORT} to keep port numbers from increasing unnecessarily
+		if strings.Contains(modelConfig.Cmd, "${PORT}") || strings.Contains(modelConfig.Proxy, "${PORT}") || strings.Contains(modelConfig.CmdStop, "${PORT}") {
 			if modelConfig.Proxy == "" {
-				modelConfig.Proxy = fmt.Sprintf("http://localhost:%d", nextPort)
-			} else {
-				modelConfig.Proxy = strings.ReplaceAll(modelConfig.Proxy, "${PORT}", strconv.Itoa(nextPort))
+				modelConfig.Proxy = "http://localhost:${PORT}"
 			}
+
+			nextPortStr := strconv.Itoa(nextPort)
+			modelConfig.Cmd = strings.ReplaceAll(modelConfig.Cmd, "${PORT}", nextPortStr)
+			modelConfig.CmdStop = strings.ReplaceAll(modelConfig.CmdStop, "${PORT}", nextPortStr)
+			modelConfig.Proxy = strings.ReplaceAll(modelConfig.Proxy, "${PORT}", nextPortStr)
 			nextPort++
-			config.Models[modelId] = modelConfig
 		} else if modelConfig.Proxy == "" {
 			return Config{}, fmt.Errorf("model %s requires a proxy value when not using automatic ${PORT}", modelId)
 		}
+
+		// make sure there are no unknown macros that have not been replaced
+		macroPattern := regexp.MustCompile(`\$\{([a-zA-Z0-9_-]+)\}`)
+		fieldMap := map[string]string{
+			"cmd":           modelConfig.Cmd,
+			"cmdStop":       modelConfig.CmdStop,
+			"proxy":         modelConfig.Proxy,
+			"checkEndpoint": modelConfig.CheckEndpoint,
+		}
+
+		for fieldName, fieldValue := range fieldMap {
+			matches := macroPattern.FindAllStringSubmatch(fieldValue, -1)
+			for _, match := range matches {
+				macroName := match[1]
+				if _, exists := config.Macros[macroName]; !exists {
+					return Config{}, fmt.Errorf("unknown macro '${%s}' found in %s.%s", macroName, modelId, fieldName)
+				}
+			}
+		}
+
+		config.Models[modelId] = modelConfig
 	}
 
 	config = AddDefaultGroupToConfig(config)
