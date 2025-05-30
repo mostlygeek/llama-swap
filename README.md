@@ -40,7 +40,7 @@ In the most basic configuration llama-swap handles one model at a time. For more
 
 ## config.yaml
 
-llama-swap's configuration is purposefully simple.
+llama-swap's configuration is purposefully simple:
 
 ```yaml
 models:
@@ -57,19 +57,19 @@ models:
       --port ${PORT}
 ```
 
-But also very powerful:
+.. but also supports many advanced features:
 
-- ⚡ `groups` to run multiple models at once
-- ⚡ `macros` for reusable snippets
-- ⚡ `ttl` to automatically unload models
-- ⚡ `aliases` to use familiar model names (e.g., "gpt-4o-mini")
-- ⚡ `env` variables to pass custom environment to inference servers
-- ⚡ `useModelName` to override model names sent to upstream servers
-- ⚡ `healthCheckTimeout` to control model startup wait times
-- ⚡ `${PORT}` automatic port variables for dynamic port assignment
-- ⚡ Docker/podman compatible
+- `groups` to run multiple models at once
+- `macros` for reusable snippets
+- `ttl` to automatically unload models
+- `aliases` to use familiar model names (e.g., "gpt-4o-mini")
+- `env` variables to pass custom environment to inference servers
+- `useModelName` to override model names sent to upstream servers
+- `healthCheckTimeout` to control model startup wait times
+- `${PORT}` automatic port variables for dynamic port assignment
+- `cmdStop` for to gracefully stop Docker/Podman containers
 
-Check the [wiki](https://github.com/mostlygeek/llama-swap/wiki/Configuration) full documentation.
+Check the [configuration documentation](https://github.com/mostlygeek/llama-swap/wiki/Configuration) in the wiki for all options.
 
 ## Docker Install ([download images](https://github.com/mostlygeek/llama-swap/pkgs/container/llama-swap))
 
@@ -79,14 +79,12 @@ Docker is the quickest way to try out llama-swap:
 # use CPU inference
 $ docker run -it --rm -p 9292:8080 ghcr.io/mostlygeek/llama-swap:cpu
 
-
 # qwen2.5 0.5B
 $ curl -s http://localhost:9292/v1/chat/completions \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer no-key" \
     -d '{"model":"qwen2.5","messages": [{"role": "user","content": "tell me a joke"}]}' | \
     jq -r '.choices[0].message.content'
-
 
 # SmolLM2 135M
 $ curl -s http://localhost:9292/v1/chat/completions \
@@ -97,7 +95,7 @@ $ curl -s http://localhost:9292/v1/chat/completions \
 ```
 
 <details>
-<summary>Docker images are nightly ...</summary>
+<summary>Docker images are built nightly ...</summary>
 
 They include:
 
