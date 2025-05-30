@@ -19,6 +19,8 @@ func TestConfig_Load(t *testing.T) {
 
 	tempFile := filepath.Join(tempDir, "config.yaml")
 	content := `
+macros:
+  svr-path: "path/to/server"
 models:
   model1:
     cmd: path/to/cmd --arg1 one
@@ -31,7 +33,7 @@ models:
       - "VAR2=value2"
     checkEndpoint: "/health"
   model2:
-    cmd: path/to/cmd --arg1 one
+    cmd: ${svr-path} --arg1 one
     proxy: "http://localhost:8081"
     aliases:
       - "m2"
@@ -76,6 +78,9 @@ groups:
 
 	expected := Config{
 		StartPort: 5800,
+		Macros: map[string]string{
+			"svr-path": "path/to/server",
+		},
 		Models: map[string]ModelConfig{
 			"model1": {
 				Cmd:           "path/to/cmd --arg1 one",
@@ -85,7 +90,7 @@ groups:
 				CheckEndpoint: "/health",
 			},
 			"model2": {
-				Cmd:           "path/to/cmd --arg1 one",
+				Cmd:           "path/to/server --arg1 one",
 				Proxy:         "http://localhost:8081",
 				Aliases:       []string{"m2"},
 				Env:           nil,
@@ -330,4 +335,107 @@ models:
 		_, err := LoadConfigFromReader(strings.NewReader(content))
 		assert.Equal(t, "model model1 requires a proxy value when not using automatic ${PORT}", err.Error())
 	})
+}
+
+func TestConfig_MacroReplacement(t *testing.T) {
+	content := `
+startPort: 9990
+macros:
+  svr-path: "path/to/server"
+  argOne: "--arg1"
+  argTwo: "--arg2"
+  autoPort: "--port ${PORT}"
+
+models:
+  model1:
+    cmd: |
+      ${svr-path} ${argTwo}
+      # the automatic ${PORT} is replaced
+      ${autoPort}
+      ${argOne}
+      --arg3 three
+    cmdStop: |
+      /path/to/stop.sh --port ${PORT} ${argTwo}
+`
+
+	config, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.NoError(t, err)
+	sanitizedCmd, err := SanitizeCommand(config.Models["model1"].Cmd)
+	assert.NoError(t, err)
+	assert.Equal(t, "path/to/server --arg2 --port 9990 --arg1 --arg3 three", strings.Join(sanitizedCmd, " "))
+
+	sanitizedCmdStop, err := SanitizeCommand(config.Models["model1"].CmdStop)
+	assert.NoError(t, err)
+	assert.Equal(t, "/path/to/stop.sh --port 9990 --arg2", strings.Join(sanitizedCmdStop, " "))
+}
+
+func TestConfig_MacroErrorOnUnknownMacros(t *testing.T) {
+	tests := []struct {
+		name    string
+		field   string
+		content string
+	}{
+		{
+			name:  "unknown macro in cmd",
+			field: "cmd",
+			content: `
+startPort: 9990
+macros:
+  svr-path: "path/to/server"
+models:
+  model1:
+    cmd: |
+      ${svr-path} --port ${PORT}
+      ${unknownMacro}
+`,
+		},
+		{
+			name:  "unknown macro in cmdStop",
+			field: "cmdStop",
+			content: `
+startPort: 9990
+macros:
+  svr-path: "path/to/server"
+models:
+  model1:
+    cmd: "${svr-path} --port ${PORT}"
+    cmdStop: "kill ${unknownMacro}"
+`,
+		},
+		{
+			name:  "unknown macro in proxy",
+			field: "proxy",
+			content: `
+startPort: 9990
+macros:
+  svr-path: "path/to/server"
+models:
+  model1:
+    cmd: "${svr-path} --port ${PORT}"
+    proxy: "http://localhost:${unknownMacro}"
+`,
+		},
+		{
+			name:  "unknown macro in checkEndpoint",
+			field: "checkEndpoint",
+			content: `
+startPort: 9990
+macros:
+  svr-path: "path/to/server"
+models:
+  model1:
+    cmd: "${svr-path} --port ${PORT}"
+    checkEndpoint: "http://localhost:${unknownMacro}/health"
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := LoadConfigFromReader(strings.NewReader(tt.content))
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "unknown macro '${unknownMacro}' found in model1."+tt.field)
+			//t.Log(err)
+		})
+	}
 }

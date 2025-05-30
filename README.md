@@ -45,158 +45,31 @@ llama-swap's configuration is purposefully simple.
 ```yaml
 models:
   "qwen2.5":
-    proxy: "http://127.0.0.1:9999"
     cmd: |
       /app/llama-server
       -hf bartowski/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M
-      --port 9999
+      --port ${PORT}
 
   "smollm2":
-    proxy: "http://127.0.0.1:9999"
     cmd: |
       /app/llama-server
       -hf bartowski/SmolLM2-135M-Instruct-GGUF:Q4_K_M
-      --port 9999
+      --port ${PORT}
 ```
 
-<details>
-<summary>But also very powerful ...</summary>
+But also very powerful:
 
-```yaml
-# Seconds to wait for upstream to load and be ready to serve requests
-# minimum is 15 seconds
-# default is 120 seconds
-healthCheckTimeout: 500
+- ⚡ `groups` to run multiple models at once
+- ⚡ `macros` for reusable snippets
+- ⚡ `ttl` to automatically unload models
+- ⚡ `aliases` to use familiar model names (e.g., "gpt-4o-mini")
+- ⚡ `env` variables to pass custom environment to inference servers
+- ⚡ `useModelName` to override model names sent to upstream servers
+- ⚡ `healthCheckTimeout` to control model startup wait times
+- ⚡ `${PORT}` automatic port variables for dynamic port assignment
+- ⚡ Docker/podman compatible
 
-# Valid log levels: debug, info (default), warn, error
-logLevel: info
-
-# Automatic Port Values
-# use ${PORT} in model.cmd and model.proxy to use an automatic port number
-# when you use ${PORT} you can omit a custom model.proxy value, as it will
-# default to http://localhost:${PORT}
-
-# override the default port (5800) for automatic port values
-startPort: 10001
-
-# define valid model values and the upstream server start
-models:
-  "llama":
-    # multiline for readability
-    cmd: |
-      llama-server --port 8999
-      --model path/to/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
-
-    # environment variables to pass to the command
-    env:
-      - "CUDA_VISIBLE_DEVICES=0"
-
-    # where to reach the server started by cmd, make sure the ports match
-    # can be omitted if you use an automatic ${PORT} in cmd
-    proxy: http://127.0.0.1:8999
-
-    # aliases names to use this model for
-    aliases:
-      - "gpt-4o-mini"
-      - "gpt-3.5-turbo"
-
-    # check this path for an HTTP 200 OK before serving requests
-    # default: /health to match llama.cpp
-    # use "none" to skip endpoint checking, but may cause HTTP errors
-    # until the model is ready
-    checkEndpoint: /custom-endpoint
-
-    # automatically unload the model after this many seconds
-    # ttl values must be a value greater than 0
-    # default: 0 = never unload model
-    ttl: 60
-
-    # `useModelName` overrides the model name in the request
-    # and sends a specific name to the upstream server
-    useModelName: "qwen:qwq"
-
-  # unlisted models do not show up in /v1/models or /upstream lists
-  # but they can still be requested as normal
-  "qwen-unlisted":
-    unlisted: true
-    cmd: llama-server --port ${PORT} -m Llama-3.2-1B-Instruct-Q4_K_M.gguf -ngl 0
-
-  # Docker Support (v26.1.4+ required!)
-  "docker-llama":
-    proxy: "http://127.0.0.1:${PORT}"
-    cmd: |
-      docker run --name dockertest
-      --init --rm -p ${PORT}:8080 -v /mnt/nvme/models:/models
-      ghcr.io/ggml-org/llama.cpp:server
-      --model '/models/Qwen2.5-Coder-0.5B-Instruct-Q4_K_M.gguf'
-
-    # use a custom command to stop the model when swapping. By default
-    # this is SIGTERM on POSIX systems, and taskkill on Windows systems
-    # the ${PID} variable can be used in cmdStop, it will be automatically replaced
-    # with the PID of the running model
-    cmdStop: docker stop dockertest
-
-# Groups provide advanced controls over model swapping behaviour. Using groups
-# some models can be kept loaded indefinitely, while others are swapped out.
-#
-# Tips:
-#
-#  - models must be defined above in the Models section
-#  - a model can only be a member of one group
-#  - group behaviour is controlled via the `swap`, `exclusive` and `persistent` fields
-#  - see issue #109 for details
-#
-# NOTE: the example below uses model names that are not defined above for demonstration purposes
-groups:
-  # group1 is the default behaviour of llama-swap where only one model is allowed
-  # to run a time across the whole llama-swap instance
-  "group1":
-    # swap controls the model swapping behaviour in within the group
-    # - true : only one model is allowed to run at a time
-    # - false: all models can run together, no swapping
-    swap: true
-
-    # exclusive controls how the group affects other groups
-    # - true: causes all other groups to unload their models when this group runs a model
-    # - false: does not affect other groups
-    exclusive: true
-
-    # members references the models defined above
-    members:
-      - "llama"
-      - "qwen-unlisted"
-
-  # models in this group are never unloaded
-  "group2":
-    swap: false
-    exclusive: false
-    members:
-      - "docker-llama"
-      # (not defined above, here for example)
-      - "modelA"
-      - "modelB"
-
-  "forever":
-    # setting persistent to true causes the group to never be affected by the swapping behaviour of
-    # other groups. It is a shortcut to keeping some models always loaded.
-    persistent: true
-
-    # set swap/exclusive to false to prevent swapping inside the group and effect on other groups
-    swap: false
-    exclusive: false
-    members:
-      - "forever-modelA"
-      - "forever-modelB"
-      - "forever-modelc"
-```
-
-### Use Case Examples
-
-- [config.example.yaml](config.example.yaml) includes example for supporting `v1/embeddings` and `v1/rerank` endpoints
-- [Speculative Decoding](examples/speculative-decoding/README.md) - using a small draft model can increase inference speeds from 20% to 40%. This example includes a configurations Qwen2.5-Coder-32B (2.5x increase) and Llama-3.1-70B (1.4x increase) in the best cases.
-- [Optimizing Code Generation](examples/benchmark-snakegame/README.md) - find the optimal settings for your machine. This example demonstrates defining multiple configurations and testing which one is fastest.
-- [Restart on Config Change](examples/restart-on-config-change/README.md) - automatically restart llama-swap when trying out different configurations.
-</details>
+Check the [wiki](https://github.com/mostlygeek/llama-swap/wiki/Configuration) full documentation.
 
 ## Docker Install ([download images](https://github.com/mostlygeek/llama-swap/pkgs/container/llama-swap))
 
