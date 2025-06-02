@@ -291,7 +291,7 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 	}
 
 	// Encode the data as JSON and write it to the response writer
-	if err := json.NewEncoder(c.Writer).Encode(map[string]interface{}{"data": data}); err != nil {
+	if err := json.NewEncoder(c.Writer).Encode(map[string]interface{}{"object": "list", "data": data}); err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error encoding JSON %s", err.Error()))
 		return
 	}
