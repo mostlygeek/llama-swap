@@ -72,7 +72,7 @@ type Process struct {
 	// These properties are to be removed when migration over exec.CommandContext is complete
 
 	// for p.cmd.Wait() select { ... }
-	cmdWaitChan chan error
+	cmdWaitChan chan struct{}
 	// stop timeout waiting for graceful shutdown
 	gracefulStopTimeout time.Duration
 }
@@ -102,7 +102,7 @@ func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLo
 		// To be removed when migration over exec.CommandContext is complete
 		// stop timeout
 		gracefulStopTimeout: 10 * time.Second,
-		cmdWaitChan:         make(chan error, 1),
+		cmdWaitChan:         make(chan struct{}),
 	}
 }
 
@@ -207,6 +207,7 @@ func (p *Process) start() error {
 	p.cmd.Cancel = p.cmdStopUpstreamProcess
 	p.cmd.WaitDelay = p.gracefulStopTimeout
 	p.cancelUpstream = ctxCancelUpstream
+	p.cmdWaitChan = make(chan struct{})
 
 	err = p.cmd.Start()
 
@@ -249,59 +250,32 @@ func (p *Process) start() error {
 			return fmt.Errorf("failed to create health check URL proxy=%s and checkEndpoint=%s", proxyTo, checkEndpoint)
 		}
 
-		checkDeadline, cancelHealthCheck := context.WithDeadline(
-			context.Background(),
-			checkStartTime.Add(maxDuration),
-		)
-		defer cancelHealthCheck()
-
-	loop:
 		// Ready Check loop
 		for {
 			currentState := p.CurrentState()
 			if currentState != StateStarting {
+				if currentState == StateStopped {
+					return fmt.Errorf("upstream command exited prematurely but successfully")
+				}
 				return errors.New("health check interrupted due to shutdown")
 			}
 
-			select {
-			case <-checkDeadline.Done():
-				if curState, err := p.swapState(StateStarting, StateFailed); err != nil {
-					return fmt.Errorf("health check timed out after %vs AND state swap failed: %v, current state: %v", maxDuration.Seconds(), err, curState)
-				} else {
-					return fmt.Errorf("health check timed out after %vs", maxDuration.Seconds())
-				}
-			case exitErr := <-p.cmdWaitChan:
-				if exitErr != nil {
-					p.proxyLogger.Warnf("<%s> upstream command exited prematurely with error: %v", p.ID, exitErr)
-					if curState, err := p.swapState(StateStarting, StateFailed); err != nil {
-						return fmt.Errorf("upstream command exited unexpectedly: %s AND state swap failed: %v, current state: %v", exitErr.Error(), err, curState)
-					} else {
-						return fmt.Errorf("upstream command exited unexpectedly: %s", exitErr.Error())
-					}
-				} else {
-					p.proxyLogger.Warnf("<%s> upstream command exited prematurely but successfully", p.ID)
-					if curState, err := p.swapState(StateStarting, StateFailed); err != nil {
-						return fmt.Errorf("upstream command exited prematurely but successfully AND state swap failed: %v, current state: %v", err, curState)
-					} else {
-						return fmt.Errorf("upstream command exited prematurely but successfully")
-					}
-				}
-			default:
-				if err := p.checkHealthEndpoint(healthURL); err == nil {
-					p.proxyLogger.Infof("<%s> Health check passed on %s", p.ID, healthURL)
-					cancelHealthCheck()
-					break loop
-				} else {
-					if strings.Contains(err.Error(), "connection refused") {
-						endTime, _ := checkDeadline.Deadline()
-						ttl := time.Until(endTime)
-						p.proxyLogger.Debugf("<%s> Connection refused on %s, giving up in %.0fs (normal during startup)", p.ID, healthURL, ttl.Seconds())
-					} else {
-						p.proxyLogger.Debugf("<%s> Health check error on %s, %v (normal during startup)", p.ID, healthURL, err)
-					}
-				}
+			if time.Since(checkStartTime) > maxDuration {
+				p.stopCommand()
+				return fmt.Errorf("health check timed out after %vs", maxDuration.Seconds())
 			}
 
+			if err := p.checkHealthEndpoint(healthURL); err == nil {
+				p.proxyLogger.Infof("<%s> Health check passed on %s", p.ID, healthURL)
+				break
+			} else {
+				if strings.Contains(err.Error(), "connection refused") {
+					ttl := time.Until(checkStartTime.Add(maxDuration))
+					p.proxyLogger.Debugf("<%s> Connection refused on %s, giving up in %.0fs (normal during startup)", p.ID, healthURL, ttl.Seconds())
+				} else {
+					p.proxyLogger.Debugf("<%s> Health check error on %s, %v (normal during startup)", p.ID, healthURL, err)
+				}
+			}
 			<-time.After(p.healthCheckLoopInterval)
 		}
 	}
@@ -401,30 +375,7 @@ func (p *Process) stopCommand() {
 	}
 
 	p.cancelUpstream()
-	err := <-p.cmdWaitChan
-
-	// Note: in start(), p.cmdWaitChan also has a select { ... }. That should be OK
-	// because if we make it here then the cmd has been successfully running and made it
-	// through the health check. There is a possibility that the cmd crashed after the health check
-	// succeeded but that's not a case llama-swap is handling for now.
-	if err != nil {
-		if errno, ok := err.(syscall.Errno); ok {
-			p.proxyLogger.Errorf("<%s> errno >> %v", p.ID, errno)
-		} else if exitError, ok := err.(*exec.ExitError); ok {
-			if strings.Contains(exitError.String(), "signal: terminated") {
-				p.proxyLogger.Debugf("<%s> Process stopped OK", p.ID)
-			} else if strings.Contains(exitError.String(), "signal: interrupt") {
-				p.proxyLogger.Debugf("<%s> Process interrupted OK", p.ID)
-			} else {
-				p.proxyLogger.Warnf("<%s> ExitError >> %v, exit code: %d", p.ID, exitError, exitError.ExitCode())
-			}
-		} else {
-			if err.Error() != "context canceled" /* this is normal */ {
-				p.proxyLogger.Errorf("<%s> Process exited >> %v", p.ID, err)
-			}
-		}
-	}
-
+	<-p.cmdWaitChan
 }
 
 func (p *Process) checkHealthEndpoint(healthURL string) error {
@@ -553,14 +504,36 @@ func (p *Process) waitForCmd() {
 		return
 	}
 
-	// handle state clean up and changes
-	if p.CurrentState() == StateStopping {
-		if curState, err := p.swapState(StateStopping, StateStopped); err != nil {
-			p.proxyLogger.Infof("<%s> Stop() StateStopping -> StateStopped err: %v, current state: %v", p.ID, err, curState)
+	if exitErr != nil {
+		if errno, ok := exitErr.(syscall.Errno); ok {
+			p.proxyLogger.Errorf("<%s> errno >> %v", p.ID, errno)
+		} else if exitError, ok := exitErr.(*exec.ExitError); ok {
+			if strings.Contains(exitError.String(), "signal: terminated") {
+				p.proxyLogger.Debugf("<%s> Process stopped OK", p.ID)
+			} else if strings.Contains(exitError.String(), "signal: interrupt") {
+				p.proxyLogger.Debugf("<%s> Process interrupted OK", p.ID)
+			} else {
+				p.proxyLogger.Warnf("<%s> ExitError >> %v, exit code: %d", p.ID, exitError, exitError.ExitCode())
+			}
+		} else {
+			if exitErr.Error() != "context canceled" /* this is normal */ {
+				p.proxyLogger.Errorf("<%s> Process exited >> %v", p.ID, exitErr)
+			}
 		}
 	}
 
-	p.cmdWaitChan <- exitErr
+	currentState := p.CurrentState()
+	switch currentState {
+	case StateStopping:
+		if curState, err := p.swapState(StateStopping, StateStopped); err != nil {
+			p.proxyLogger.Errorf("<%s> Process exited but could not swap to StateStopped. curState=%s, err: %v", p.ID, curState, err)
+			p.state = StateStopped
+		}
+	default:
+		p.proxyLogger.Infof("<%s> process exited but not StateStopping, current state: %s", p.ID, currentState)
+		p.state = StateStopped // force it to be in this state
+	}
+	close(p.cmdWaitChan)
 }
 
 // cmdStopUpstreamProcess attemps to stop the upstream process gracefully

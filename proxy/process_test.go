@@ -339,7 +339,7 @@ func TestProcess_ExitInterruptsHealthCheck(t *testing.T) {
 	process.healthCheckLoopInterval = time.Second // make it faster
 	err := process.start()
 	assert.Equal(t, "upstream command exited prematurely but successfully", err.Error())
-	assert.Equal(t, process.CurrentState(), StateFailed)
+	assert.Equal(t, process.CurrentState(), StateStopped)
 }
 
 func TestProcess_ConcurrencyLimit(t *testing.T) {
