@@ -46,6 +46,9 @@ type Process struct {
 	// PR #155 called to cancel the upstream process
 	cancelUpstream context.CancelFunc
 
+	// closed when command exits
+	cmdWaitChan chan struct{}
+
 	processLogger *LogMonitor
 	proxyLogger   *LogMonitor
 
@@ -65,15 +68,7 @@ type Process struct {
 	// for managing concurrency limits
 	concurrencyLimitSemaphore chan struct{}
 
-	// track that this happened
-	upstreamWasStoppedWithKill bool
-
-	// !!!
-	// These properties are to be removed when migration over exec.CommandContext is complete
-
-	// for p.cmd.Wait() select { ... }
-	cmdWaitChan chan struct{}
-	// stop timeout waiting for graceful shutdown
+	// used for testing to override the default value
 	gracefulStopTimeout time.Duration
 }
 
@@ -96,8 +91,6 @@ func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLo
 
 		// concurrency limit
 		concurrencyLimitSemaphore: make(chan struct{}, concurrentLimit),
-
-		upstreamWasStoppedWithKill: false,
 
 		// To be removed when migration over exec.CommandContext is complete
 		// stop timeout
@@ -495,14 +488,6 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 func (p *Process) waitForCmd() {
 	exitErr := p.cmd.Wait()
 	p.proxyLogger.Debugf("<%s> cmd.Wait() returned error: %v", p.ID, exitErr)
-
-	// there is a race condition when SIGKILL is used, p.cmd.Wait() returns, and then
-	// the code below fires, putting an error into cmdWaitChan. This code is to prevent this
-	if p.upstreamWasStoppedWithKill {
-		p.proxyLogger.Debugf("<%s> process was killed, NOT sending exitErr: %v", p.ID, exitErr)
-		p.upstreamWasStoppedWithKill = false
-		return
-	}
 
 	if exitErr != nil {
 		if errno, ok := exitErr.(syscall.Errno); ok {
