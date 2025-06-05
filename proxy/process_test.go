@@ -106,8 +106,8 @@ func TestProcess_BrokenModelConfig(t *testing.T) {
 
 	w = httptest.NewRecorder()
 	process.ProxyRequest(w, req)
-	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
-	assert.Contains(t, w.Body.String(), "Process can not ProxyRequest, state is failed")
+	assert.Equal(t, http.StatusBadGateway, w.Code)
+	assert.Contains(t, w.Body.String(), "start() failed: ")
 }
 
 func TestProcess_UnloadAfterTTL(t *testing.T) {
@@ -248,18 +248,14 @@ func TestProcess_SwapState(t *testing.T) {
 	}{
 		{"Stopped to Starting", StateStopped, StateStopped, StateStarting, nil, StateStarting},
 		{"Starting to Ready", StateStarting, StateStarting, StateReady, nil, StateReady},
-		{"Starting to Failed", StateStarting, StateStarting, StateFailed, nil, StateFailed},
 		{"Starting to Stopping", StateStarting, StateStarting, StateStopping, nil, StateStopping},
+		{"Starting to Stopped", StateStarting, StateStarting, StateStopped, nil, StateStopped},
 		{"Ready to Stopping", StateReady, StateReady, StateStopping, nil, StateStopping},
 		{"Stopping to Stopped", StateStopping, StateStopping, StateStopped, nil, StateStopped},
 		{"Stopping to Shutdown", StateStopping, StateStopping, StateShutdown, nil, StateShutdown},
 		{"Stopped to Ready", StateStopped, StateStopped, StateReady, ErrInvalidStateTransition, StateStopped},
-		{"Starting to Stopped", StateStarting, StateStarting, StateStopped, ErrInvalidStateTransition, StateStarting},
 		{"Ready to Starting", StateReady, StateReady, StateStarting, ErrInvalidStateTransition, StateReady},
-		{"Ready to Failed", StateReady, StateReady, StateFailed, ErrInvalidStateTransition, StateReady},
 		{"Stopping to Ready", StateStopping, StateStopping, StateReady, ErrInvalidStateTransition, StateStopping},
-		{"Failed to Stopped", StateFailed, StateFailed, StateStopped, ErrInvalidStateTransition, StateFailed},
-		{"Failed to Starting", StateFailed, StateFailed, StateStarting, ErrInvalidStateTransition, StateFailed},
 		{"Shutdown to Stopped", StateShutdown, StateShutdown, StateStopped, ErrInvalidStateTransition, StateShutdown},
 		{"Shutdown to Starting", StateShutdown, StateShutdown, StateStarting, ErrInvalidStateTransition, StateShutdown},
 		{"Expected state mismatch", StateStopped, StateStarting, StateStarting, ErrExpectedStateMismatch, StateStopped},
@@ -339,7 +335,7 @@ func TestProcess_ExitInterruptsHealthCheck(t *testing.T) {
 	process.healthCheckLoopInterval = time.Second // make it faster
 	err := process.start()
 	assert.Equal(t, "upstream command exited prematurely but successfully", err.Error())
-	assert.Equal(t, process.CurrentState(), StateFailed)
+	assert.Equal(t, process.CurrentState(), StateStopped)
 }
 
 func TestProcess_ConcurrencyLimit(t *testing.T) {

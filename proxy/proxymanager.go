@@ -348,8 +348,6 @@ func (pm *ProxyManager) upstreamIndex(c *gin.Context) {
 					stateStr = "Starting"
 				case StateStopping:
 					stateStr = "Stopping"
-				case StateFailed:
-					stateStr = "Failed"
 				case StateShutdown:
 					stateStr = "Shutdown"
 				case StateStopped:
