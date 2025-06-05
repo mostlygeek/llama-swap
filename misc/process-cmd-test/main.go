@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -39,7 +40,7 @@ func main() {
 	//cmd := exec.CommandContext(ctx, "sleep", "1")
 	cmd := exec.CommandContext(ctx,
 		"../../build/simple-responder_darwin_arm64",
-		"-ignore-sig-term", /* so it doesn't exit on receiving SIGTERM, test cmd.WaitTimeout */
+		//"-ignore-sig-term", /* so it doesn't exit on receiving SIGTERM, test cmd.WaitTimeout */
 	)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -50,7 +51,18 @@ func main() {
 	cmd.Cancel = func() error {
 		fmt.Println("✔︎ Cancel() called, sending SIGTERM")
 		cmd.Process.Signal(syscall.SIGTERM)
-		return nil
+
+		//return nil
+
+		// this error is returned by cmd.Wait(), and can be used to
+		// single an error when the process couldn't be normally terminated
+		// but since a SIGTERM is sent, it's probably ok to return a nil
+		// as WaitDelay timing out will override the any error set here.
+		//
+		// test by enabling/disabling -ignore-sig-term on the process
+		// with -ignore-sig-term enabled, cmd.Wait() will have "signal: killed"
+		// without it, it will show the "new error from cancel"
+		return errors.New("error from cmd.Cancel()") // sets error returned by cmd.Wait()
 	}
 
 	if err := cmd.Start(); err != nil {

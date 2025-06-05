@@ -43,8 +43,8 @@ type Process struct {
 	config ModelConfig
 	cmd    *exec.Cmd
 
-	// for p.cmd.Wait() select { ... }
-	cmdWaitChan chan error
+	// PR #155 called to cancel the upstream process
+	cancelUpstream context.CancelFunc
 
 	processLogger *LogMonitor
 	proxyLogger   *LogMonitor
@@ -65,11 +65,16 @@ type Process struct {
 	// for managing concurrency limits
 	concurrencyLimitSemaphore chan struct{}
 
-	// stop timeout waiting for graceful shutdown
-	gracefulStopTimeout time.Duration
-
 	// track that this happened
 	upstreamWasStoppedWithKill bool
+
+	// !!!
+	// These properties are to be removed when migration over exec.CommandContext is complete
+
+	// for p.cmd.Wait() select { ... }
+	cmdWaitChan chan error
+	// stop timeout waiting for graceful shutdown
+	gracefulStopTimeout time.Duration
 }
 
 func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor) *Process {
@@ -82,7 +87,7 @@ func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLo
 		ID:                      ID,
 		config:                  config,
 		cmd:                     nil,
-		cmdWaitChan:             make(chan error, 1),
+		cancelUpstream:          nil,
 		processLogger:           processLogger,
 		proxyLogger:             proxyLogger,
 		healthCheckTimeout:      healthCheckTimeout,
@@ -92,9 +97,12 @@ func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLo
 		// concurrency limit
 		concurrencyLimitSemaphore: make(chan struct{}, concurrentLimit),
 
-		// stop timeout
-		gracefulStopTimeout:        10 * time.Second,
 		upstreamWasStoppedWithKill: false,
+
+		// To be removed when migration over exec.CommandContext is complete
+		// stop timeout
+		gracefulStopTimeout: 10 * time.Second,
+		cmdWaitChan:         make(chan error, 1),
 	}
 }
 
@@ -190,11 +198,15 @@ func (p *Process) start() error {
 
 	p.waitStarting.Add(1)
 	defer p.waitStarting.Done()
-
-	p.cmd = exec.Command(args[0], args[1:]...)
+	cmdContext, ctxCancelUpstream := context.WithCancel(context.Background())
+	p.cmd = exec.CommandContext(cmdContext, args[0], args[1:]...)
 	p.cmd.Stdout = p.processLogger
 	p.cmd.Stderr = p.processLogger
 	p.cmd.Env = p.config.Env
+
+	p.cmd.Cancel = p.cmdStopUpstreamProcess
+	p.cmd.WaitDelay = p.gracefulStopTimeout
+	p.cancelUpstream = ctxCancelUpstream
 
 	err = p.cmd.Start()
 
@@ -358,12 +370,7 @@ func (p *Process) StopImmediately() {
 		}
 	}
 
-	// stop the process with a graceful exit timeout
-	p.stopCommand(p.gracefulStopTimeout)
-
-	if curState, err := p.swapState(StateStopping, StateStopped); err != nil {
-		p.proxyLogger.Infof("<%s> Stop() StateStopping -> StateStopped err: %v, current state: %v", p.ID, err, curState)
-	}
+	p.stopCommand()
 }
 
 // Shutdown is called when llama-swap is shutting down. It will give a little bit
@@ -375,90 +382,49 @@ func (p *Process) Shutdown() {
 		return
 	}
 
-	p.stopCommand(p.gracefulStopTimeout)
-
+	p.stopCommand()
 	// just force it to this state since there is no recovery from shutdown
 	p.state = StateShutdown
 }
 
 // stopCommand will send a SIGTERM to the process and wait for it to exit.
 // If it does not exit within 5 seconds, it will send a SIGKILL.
-func (p *Process) stopCommand(sigtermTTL time.Duration) {
+func (p *Process) stopCommand() {
 	stopStartTime := time.Now()
 	defer func() {
 		p.proxyLogger.Debugf("<%s> stopCommand took %v", p.ID, time.Since(stopStartTime))
 	}()
 
-	sigtermTimeout, cancelTimeout := context.WithTimeout(context.Background(), sigtermTTL)
-	defer cancelTimeout()
-
-	if p.cmd == nil || p.cmd.Process == nil {
-		p.proxyLogger.Debugf("<%s> cmd or cmd.Process is nil (normal during config reload)", p.ID)
+	if p.cancelUpstream == nil {
+		p.proxyLogger.Errorf("<%s> stopCommand has a nil p.cancelUpstream()", p.ID)
 		return
 	}
 
-	// if err := p.terminateProcess(); err != nil {
-	// 	p.proxyLogger.Debugf("<%s> Process already terminated: %v (normal during shutdown)", p.ID, err)
-	// }
-	// the default cmdStop to taskkill /f /t /pid ${PID}
-	if runtime.GOOS == "windows" && strings.TrimSpace(p.config.CmdStop) == "" {
-		p.config.CmdStop = "taskkill /f /t /pid ${PID}"
-	}
+	p.cancelUpstream()
+	err := <-p.cmdWaitChan
 
-	if p.config.CmdStop != "" {
-		// replace ${PID} with the pid of the process
-		stopArgs, err := SanitizeCommand(strings.ReplaceAll(p.config.CmdStop, "${PID}", fmt.Sprintf("%d", p.cmd.Process.Pid)))
-		if err != nil {
-			p.proxyLogger.Errorf("<%s> Failed to sanitize stop command: %v", p.ID, err)
-			return
-		}
-
-		p.proxyLogger.Debugf("<%s> Executing stop command: %s", p.ID, strings.Join(stopArgs, " "))
-
-		stopCmd := exec.Command(stopArgs[0], stopArgs[1:]...)
-		stopCmd.Stdout = p.processLogger
-		stopCmd.Stderr = p.processLogger
-		stopCmd.Env = p.config.Env
-
-		if err := stopCmd.Run(); err != nil {
-			p.proxyLogger.Errorf("<%s> Failed to exec stop command: %v", p.ID, err)
-			return
-		}
-	} else {
-		if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
-			p.proxyLogger.Errorf("<%s> Failed to send SIGTERM to process: %v", p.ID, err)
-			return
-		}
-	}
-
-	select {
-	case <-sigtermTimeout.Done():
-		p.proxyLogger.Debugf("<%s> Process timed out waiting to stop, sending KILL signal (normal during shutdown)", p.ID)
-		p.upstreamWasStoppedWithKill = true
-		if err := p.cmd.Process.Kill(); err != nil {
-			p.proxyLogger.Errorf("<%s> Failed to kill process: %v", p.ID, err)
-		}
-	case err := <-p.cmdWaitChan:
-		// Note: in start(), p.cmdWaitChan also has a select { ... }. That should be OK
-		// because if we make it here then the cmd has been successfully running and made it
-		// through the health check. There is a possibility that the cmd crashed after the health check
-		// succeeded but that's not a case llama-swap is handling for now.
-		if err != nil {
-			if errno, ok := err.(syscall.Errno); ok {
-				p.proxyLogger.Errorf("<%s> errno >> %v", p.ID, errno)
-			} else if exitError, ok := err.(*exec.ExitError); ok {
-				if strings.Contains(exitError.String(), "signal: terminated") {
-					p.proxyLogger.Debugf("<%s> Process stopped OK", p.ID)
-				} else if strings.Contains(exitError.String(), "signal: interrupt") {
-					p.proxyLogger.Debugf("<%s> Process interrupted OK", p.ID)
-				} else {
-					p.proxyLogger.Warnf("<%s> ExitError >> %v, exit code: %d", p.ID, exitError, exitError.ExitCode())
-				}
+	// Note: in start(), p.cmdWaitChan also has a select { ... }. That should be OK
+	// because if we make it here then the cmd has been successfully running and made it
+	// through the health check. There is a possibility that the cmd crashed after the health check
+	// succeeded but that's not a case llama-swap is handling for now.
+	if err != nil {
+		if errno, ok := err.(syscall.Errno); ok {
+			p.proxyLogger.Errorf("<%s> errno >> %v", p.ID, errno)
+		} else if exitError, ok := err.(*exec.ExitError); ok {
+			if strings.Contains(exitError.String(), "signal: terminated") {
+				p.proxyLogger.Debugf("<%s> Process stopped OK", p.ID)
+			} else if strings.Contains(exitError.String(), "signal: interrupt") {
+				p.proxyLogger.Debugf("<%s> Process interrupted OK", p.ID)
 			} else {
+				p.proxyLogger.Warnf("<%s> ExitError >> %v, exit code: %d", p.ID, exitError, exitError.ExitCode())
+			}
+		} else {
+			if err.Error() != "context canceled" /* this is normal */ {
 				p.proxyLogger.Errorf("<%s> Process exited >> %v", p.ID, err)
 			}
 		}
 	}
+
 }
 
 func (p *Process) checkHealthEndpoint(healthURL string) error {
@@ -587,5 +553,56 @@ func (p *Process) waitForCmd() {
 		return
 	}
 
+	// handle state clean up and changes
+	if p.CurrentState() == StateStopping {
+		if curState, err := p.swapState(StateStopping, StateStopped); err != nil {
+			p.proxyLogger.Infof("<%s> Stop() StateStopping -> StateStopped err: %v, current state: %v", p.ID, err, curState)
+		}
+	}
+
 	p.cmdWaitChan <- exitErr
+}
+
+// cmdStopUpstreamProcess attemps to stop the upstream process gracefully
+func (p *Process) cmdStopUpstreamProcess() error {
+	p.processLogger.Debugf("<%s> cmdStopUpstreamProcess() initiating graceful stop of upstream process", p.ID)
+
+	// this should never happen ...
+	if p.cmd == nil || p.cmd.Process == nil {
+		p.proxyLogger.Debugf("<%s> cmd or cmd.Process is nil (normal during config reload)", p.ID)
+		return fmt.Errorf("<%s> process is nil or cmd is nil, skipping graceful stop", p.ID)
+	}
+
+	// the default cmdStop to taskkill /f /t /pid ${PID}
+	if runtime.GOOS == "windows" && strings.TrimSpace(p.config.CmdStop) == "" {
+		p.config.CmdStop = "taskkill /f /t /pid ${PID}"
+	}
+
+	if p.config.CmdStop != "" {
+		// replace ${PID} with the pid of the process
+		stopArgs, err := SanitizeCommand(strings.ReplaceAll(p.config.CmdStop, "${PID}", fmt.Sprintf("%d", p.cmd.Process.Pid)))
+		if err != nil {
+			p.proxyLogger.Errorf("<%s> Failed to sanitize stop command: %v", p.ID, err)
+			return err
+		}
+
+		p.proxyLogger.Debugf("<%s> Executing stop command: %s", p.ID, strings.Join(stopArgs, " "))
+
+		stopCmd := exec.Command(stopArgs[0], stopArgs[1:]...)
+		stopCmd.Stdout = p.processLogger
+		stopCmd.Stderr = p.processLogger
+		stopCmd.Env = p.config.Env
+
+		if err := stopCmd.Run(); err != nil {
+			p.proxyLogger.Errorf("<%s> Failed to exec stop command: %v", p.ID, err)
+			return err
+		}
+	} else {
+		if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+			p.proxyLogger.Errorf("<%s> Failed to send SIGTERM to process: %v", p.ID, err)
+			return err
+		}
+	}
+
+	return nil
 }
