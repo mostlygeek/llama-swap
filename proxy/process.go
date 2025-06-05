@@ -62,10 +62,6 @@ type Process struct {
 	// used to block on multiple start() calls
 	waitStarting sync.WaitGroup
 
-	// for managing shutdown state
-	shutdownCtx    context.Context
-	shutdownCancel context.CancelFunc
-
 	// for managing concurrency limits
 	concurrencyLimitSemaphore chan struct{}
 
@@ -77,7 +73,6 @@ type Process struct {
 }
 
 func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor) *Process {
-	ctx, cancel := context.WithCancel(context.Background())
 	concurrentLimit := 10
 	if config.ConcurrencyLimit > 0 {
 		concurrentLimit = config.ConcurrencyLimit
@@ -93,8 +88,6 @@ func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLo
 		healthCheckTimeout:      healthCheckTimeout,
 		healthCheckLoopInterval: 5 * time.Second, /* default, can not be set by user - used for testing */
 		state:                   StateStopped,
-		shutdownCtx:             ctx,
-		shutdownCancel:          cancel,
 
 		// concurrency limit
 		concurrencyLimitSemaphore: make(chan struct{}, concurrentLimit),
@@ -266,6 +259,11 @@ func (p *Process) start() error {
 	loop:
 		// Ready Check loop
 		for {
+			currentState := p.CurrentState()
+			if currentState != StateStarting {
+				return errors.New("health check interrupted due to shutdown")
+			}
+
 			select {
 			case <-checkDeadline.Done():
 				if curState, err := p.swapState(StateStarting, StateFailed); err != nil {
@@ -273,8 +271,6 @@ func (p *Process) start() error {
 				} else {
 					return fmt.Errorf("health check timed out after %vs", maxDuration.Seconds())
 				}
-			case <-p.shutdownCtx.Done():
-				return errors.New("health check interrupted due to shutdown")
 			case exitErr := <-p.cmdWaitChan:
 				if exitErr != nil {
 					p.proxyLogger.Warnf("<%s> upstream command exited prematurely with error: %v", p.ID, exitErr)
@@ -392,7 +388,6 @@ func (p *Process) Shutdown() {
 		return
 	}
 
-	p.shutdownCancel()
 	p.stopCommand(p.gracefulStopTimeout)
 
 	// just force it to this state since there is no recovery from shutdown
