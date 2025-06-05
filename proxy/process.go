@@ -24,9 +24,6 @@ const (
 	StateReady    ProcessState = ProcessState("ready")
 	StateStopping ProcessState = ProcessState("stopping")
 
-	// failed a health check on start and will not be recovered
-	StateFailed ProcessState = ProcessState("failed")
-
 	// process is shutdown and will not be restarted
 	StateShutdown ProcessState = ProcessState("shutdown")
 )
@@ -70,6 +67,9 @@ type Process struct {
 
 	// used for testing to override the default value
 	gracefulStopTimeout time.Duration
+
+	// track the number of failed starts
+	failedStartCount int
 }
 
 func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor) *Process {
@@ -137,13 +137,11 @@ func isValidTransition(from, to ProcessState) bool {
 	case StateStopped:
 		return to == StateStarting
 	case StateStarting:
-		return to == StateReady || to == StateFailed || to == StateStopping
+		return to == StateReady || to == StateStopping || to == StateStopped
 	case StateReady:
 		return to == StateStopping
 	case StateStopping:
 		return to == StateStopped || to == StateShutdown
-	case StateFailed:
-		return to == StateStopping
 	case StateShutdown:
 		return false // No transitions allowed from these states
 	}
@@ -202,11 +200,13 @@ func (p *Process) start() error {
 	p.cancelUpstream = ctxCancelUpstream
 	p.cmdWaitChan = make(chan struct{})
 
+	p.failedStartCount++ // this will be reset to zero when the process has successfully started
 	err = p.cmd.Start()
 
 	// Set process state to failed
 	if err != nil {
-		if curState, swapErr := p.swapState(StateStarting, StateFailed); swapErr != nil {
+		if curState, swapErr := p.swapState(StateStarting, StateStopped); swapErr != nil {
+			p.state = StateStopped // force it into a stopped state
 			return fmt.Errorf(
 				"failed to start command and state swap failed. command error: %v, current state: %v, state swap error: %v",
 				err, curState, swapErr,
@@ -299,6 +299,7 @@ func (p *Process) start() error {
 	if curState, err := p.swapState(StateStarting, StateReady); err != nil {
 		return fmt.Errorf("failed to set Process state to ready: current state: %v, error: %v", curState, err)
 	} else {
+		p.failedStartCount = 0
 		return nil
 	}
 }
@@ -323,18 +324,9 @@ func (p *Process) StopImmediately() {
 	}
 
 	p.proxyLogger.Debugf("<%s> Stopping process, current state: %s", p.ID, p.CurrentState())
-	currentState := p.CurrentState()
-
-	if currentState == StateFailed {
-		if curState, err := p.swapState(StateFailed, StateStopping); err != nil {
-			p.proxyLogger.Infof("<%s> Stop() Failed -> StateStopping err: %v, current state: %v", p.ID, err, curState)
-			return
-		}
-	} else {
-		if curState, err := p.swapState(StateReady, StateStopping); err != nil {
-			p.proxyLogger.Infof("<%s> Stop() Ready -> StateStopping err: %v, current state: %v", p.ID, err, curState)
-			return
-		}
+	if curState, err := p.swapState(StateReady, StateStopping); err != nil {
+		p.proxyLogger.Infof("<%s> Stop() Ready -> StateStopping err: %v, current state: %v", p.ID, err, curState)
+		return
 	}
 
 	p.stopCommand()
@@ -401,7 +393,7 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 
 	// prevent new requests from being made while stopping or irrecoverable
 	currentState := p.CurrentState()
-	if currentState == StateFailed || currentState == StateShutdown || currentState == StateStopping {
+	if currentState == StateShutdown || currentState == StateStopping {
 		http.Error(w, fmt.Sprintf("Process can not ProxyRequest, state is %s", currentState), http.StatusServiceUnavailable)
 		return
 	}
