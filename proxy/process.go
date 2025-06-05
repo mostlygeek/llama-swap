@@ -210,20 +210,7 @@ func (p *Process) start() error {
 	}
 
 	// Capture the exit error for later signalling
-	go func() {
-		exitErr := p.cmd.Wait()
-		p.proxyLogger.Debugf("<%s> cmd.Wait() returned error: %v", p.ID, exitErr)
-
-		// there is a race condition when SIGKILL is used, p.cmd.Wait() returns, and then
-		// the code below fires, putting an error into cmdWaitChan. This code is to prevent this
-		if p.upstreamWasStoppedWithKill {
-			p.proxyLogger.Debugf("<%s> process was killed, NOT sending exitErr: %v", p.ID, exitErr)
-			p.upstreamWasStoppedWithKill = false
-			return
-		}
-
-		p.cmdWaitChan <- exitErr
-	}()
+	go p.waitForCmd()
 
 	// One of three things can happen at this stage:
 	// 1. The command exits unexpectedly
@@ -585,4 +572,20 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	totalTime := time.Since(requestBeginTime)
 	p.proxyLogger.Debugf("<%s> request %s - start: %v, total: %v",
 		p.ID, r.RequestURI, startDuration, totalTime)
+}
+
+// waitForCmd waits for the command to exit and handles exit conditions depending on current state
+func (p *Process) waitForCmd() {
+	exitErr := p.cmd.Wait()
+	p.proxyLogger.Debugf("<%s> cmd.Wait() returned error: %v", p.ID, exitErr)
+
+	// there is a race condition when SIGKILL is used, p.cmd.Wait() returns, and then
+	// the code below fires, putting an error into cmdWaitChan. This code is to prevent this
+	if p.upstreamWasStoppedWithKill {
+		p.proxyLogger.Debugf("<%s> process was killed, NOT sending exitErr: %v", p.ID, exitErr)
+		p.upstreamWasStoppedWithKill = false
+		return
+	}
+
+	p.cmdWaitChan <- exitErr
 }
