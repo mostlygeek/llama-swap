@@ -6,8 +6,8 @@
   --color-surface: rgba(255, 255, 253, 1);
 
   /* text colors */
-  --color-main: rgba(19, 52, 59, 1);
-  --color-secondary: rgba(98, 108, 113, 1);
+  --color-txtmain: rgba(19, 52, 59, 1);
+  --color-txtsecondary: rgba(98, 108, 113, 1);
 
   --color-primary: rgba(33, 128, 141, 1);
   --color-primary-hover: rgba(29, 116, 128, 1);
@@ -33,8 +33,8 @@
     --color-background: rgba(31, 33, 33, 1);
     --color-surface: rgba(38, 40, 40, 1);
     /* text colors */
-    --color-main: rgba(245, 245, 245, 1);
-    --color-secondary: rgba(167, 169, 169, 0.7);
+    --color-txtmain: rgba(245, 245, 245, 1);
+    --color-txtsecondary: rgba(167, 169, 169, 0.7);
 
     --color-primary: rgba(50, 184, 198, 1);
     --color-primary-hover: rgba(45, 166, 178, 1);
@@ -59,7 +59,7 @@
 @layer base {
   body {
     /* example of how colors using theme colors*/
-    @apply bg-background text-main;
+    @apply bg-background text-txtmain;
   }
 
   h1,
@@ -75,7 +75,200 @@
 /* define CSS classes here for specific types of components */
 @layer components {
   .navlink {
-    @apply dark:text-white dark:hover:text-blue-500;
+    @apply text-txtsecondary hover:bg-secondary hover:text-txtmain rounded-lg p-2;
+  }
+  .navlink.active {
+    @apply bg-primary text-black;
+  }
+
+  /* Dashboard Styles */
+  .status-grid {
+    @apply grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-5 mb-8;
+  }
+
+  .status-card {
+    @apply transition-transform duration-200 ease-out;
+  }
+
+  .status-card:hover {
+    @apply -translate-y-0.5;
+  }
+
+  .status-card-header {
+    @apply flex items-center justify-between mb-3;
+  }
+
+  .status-card-header h3 {
+    @apply m-0 text-base text-txtsecondary font-medium;
+  }
+
+  .status-card-number {
+    @apply text-2xl font-bold text-primary;
+  }
+
+  .status-card-value {
+    @apply text-lg font-semibold m-0 mb-1;
+  }
+
+  .status-card-detail {
+    @apply text-txtsecondary text-sm;
+  }
+
+  /* Card component */
+  .card {
+    @apply bg-surface rounded-lg border border-card-border shadow-sm overflow-hidden transition-shadow duration-300 ease-out;
+  }
+
+  .card:hover {
+    @apply shadow-md;
+  }
+
+  .card__body {
+    @apply p-4;
+  }
+
+  .card__header,
+  .card__footer {
+    @apply p-4 border-b border-card-border-inner;
+  }
+
+  /* Logs Styles */
+  .logs-container {
+    @apply flex flex-col gap-5 h-[calc(100vh-250px)];
+  }
+
+  .log-panel {
+    @apply bg-surface border border-border rounded-lg overflow-hidden flex flex-col min-h-[300px] transition-all duration-300 ease-out;
+  }
+
+  .log-panel.collapsed {
+    @apply min-h-auto;
+  }
+
+  .log-panel.collapsed .log-content {
+    @apply hidden;
+  }
+
+  .log-panel-header {
+    @apply p-4 border-b border-border flex items-center justify-between bg-secondary flex-wrap gap-3;
+  }
+
+  .log-panel-title {
+    @apply flex items-center gap-3;
+  }
+
+  .log-panel-title h3 {
+    @apply m-0 text-lg;
+  }
+
+  .log-panel-controls {
+    @apply flex items-center gap-2;
+  }
+
+  .log-filter {
+    @apply w-[200px] text-sm;
+  }
+
+  .collapse-toggle {
+    @apply bg-transparent border-none text-txtsecondary cursor-pointer text-lg p-1 rounded-sm transition-all duration-200 ease-out;
+  }
+
+  .collapse-toggle:hover {
+    @apply bg-secondary-hover;
+  }
+
+  .collapsed .collapse-toggle {
+    @apply -rotate-90;
+  }
+
+  .log-content {
+    @apply flex-1 overflow-y-auto bg-background font-mono text-sm leading-[1.4] p-3;
+  }
+
+  .log-entry {
+    @apply py-0.5 border-b border-border break-words;
+  }
+
+  .log-entry:last-child {
+    @apply border-b-0;
+  }
+
+  .log-entry.log-info {
+    @apply text-info;
+  }
+
+  .log-entry.log-debug {
+    @apply text-txtsecondary;
+  }
+
+  .log-entry.log-error {
+    @apply text-error;
+  }
+
+  .log-entry.log-warn {
+    @apply text-warning;
+  }
+
+  /** models section */
+  .models-section {
+    @apply mb-8;
+  }
+
+  .models-section h2 {
+    @apply mb-5 text-2xl;
+  }
+
+  .models-grid {
+    @apply grid grid-cols-[repeat(auto-fit,minmax(350px,1fr))] gap-4;
+  }
+
+  .model-item {
+    @apply bg-surface border border-border rounded-lg p-5 transition-all duration-200 ease-out;
+  }
+
+  .model-item:hover {
+    @apply shadow-md -translate-y-px;
+  }
+
+  .model-header {
+    @apply flex items-start justify-between mb-3 gap-3;
+  }
+
+  .model-details h4 {
+    @apply m-0 mb-1 text-lg;
+  }
+
+  .model-meta {
+    @apply flex flex-col gap-1 mb-4;
+  }
+
+  .model-meta-item {
+    @apply flex justify-between items-center text-sm;
+  }
+
+  .model-meta-item .label {
+    @apply text-txtsecondary font-medium;
+  }
+
+  .model-meta-item .value {
+    @apply font-mono text-txtmain;
+  }
+
+  .model-controls {
+    @apply flex gap-2 flex-wrap;
+  }
+
+  /* Status variants for models */
+  .status--starting {
+    @apply bg-warning/10 text-warning border border-warning/20;
+  }
+
+  .status--stopped {
+    @apply bg-error/10 text-error border border-error/20;
+  }
+
+  .status--ready {
+    @apply bg-success/10 text-success border border-success/20;
   }
 }
 
