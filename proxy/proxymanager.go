@@ -195,6 +195,44 @@ func (pm *ProxyManager) setupGinEngine() {
 		}
 	})
 
+	// Serve /ui/*
+	reactFS, err := GetReactFS()
+	if err != nil {
+		pm.proxyLogger.Errorf("Failed to load React filesystem: %v", err)
+	} else {
+		// serve files that exist under /ui/*
+		pm.ginEngine.StaticFS("/ui", reactFS)
+
+		// server SPA for UI under /ui/*
+		pm.ginEngine.NoRoute(func(c *gin.Context) {
+			if !strings.HasPrefix(c.Request.URL.Path, "/ui") {
+				c.AbortWithStatus(http.StatusNotFound)
+				return
+			}
+
+			file, err := reactFS.Open("index.html")
+			if err != nil {
+				c.String(http.StatusInternalServerError, err.Error())
+				return
+			}
+			defer file.Close()
+			http.ServeContent(c.Writer, c.Request, "index.html", time.Now(), file)
+
+		})
+	}
+
+	// Add API endpoints for React to consume
+	apiGroup := pm.ginEngine.Group("/api")
+	{
+		apiGroup.GET("/models/running", pm.listRunningProcessesHandler)
+		apiGroup.GET("/models/available", pm.listModelsHandler)
+		apiGroup.POST("/models/unload", pm.unloadAllModelsHandler)
+
+		// Log streaming endpoints for React
+		apiGroup.GET("/logs/stream", pm.streamLogsHandlerSSE)
+		apiGroup.GET("/logs/stream/:logMonitorID", pm.streamLogsHandlerSSE)
+	}
+
 	// Disable console color for testing
 	gin.DisableConsoleColor()
 }
