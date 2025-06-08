@@ -2,18 +2,19 @@ import { BrowserRouter as Router, Routes, Route, Navigate, NavLink } from "react
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import DashboardPage from "./pages/Dashboard";
 import LogViewerPage from "./pages/LogViewer";
-import ModelsPage from "./pages/Models";
+import { useTheme } from "./contexts/ThemeProvider";
 
 const queryClient = new QueryClient();
 
 function App() {
+  const theme = useTheme();
   return (
     <QueryClientProvider client={queryClient}>
       <Router basename="/ui">
         <div>
           <nav className="bg-surface border-b border-border p-4">
-            <div className="flex items-center space-x-8">
-              <h1 className="text-xl font-semibold">llama-swap</h1>
+            <div className="flex items-center justify-between max-w-7xl mx-auto px-4">
+              <h1>llama-swap</h1>
               <div className="flex space-x-4">
                 <NavLink to="/" className={({ isActive }) => (isActive ? "navlink active" : "navlink")}>
                   Dashboard
@@ -21,18 +22,17 @@ function App() {
                 <NavLink to="/logs" className={({ isActive }) => (isActive ? "navlink active" : "navlink")}>
                   Logs
                 </NavLink>
-                <NavLink to="/models" className={({ isActive }) => (isActive ? "navlink active" : "navlink")}>
-                  Models
-                </NavLink>
+                <button className="btn btn--sm" onClick={theme.toggleTheme}>
+                  {theme.isDarkMode ? "🌙" : "☀️"}
+                </button>
               </div>
             </div>
           </nav>
 
-          <main className="max-w-7xl mx-auto py-6">
+          <main className="max-w-7xl mx-auto py-4 px-4">
             <Routes>
               <Route path="/" element={<DashboardPage />} />
               <Route path="/logs" element={<LogViewerPage />} />
-              <Route path="/models" element={<ModelsPage />} />
               <Route path="*" element={<Navigate to="/ui/" replace />} />
             </Routes>
           </main>
