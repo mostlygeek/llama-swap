@@ -204,11 +204,11 @@
 
   /* Logs Styles */
   .logs-container {
-    @apply flex flex-col gap-5 h-[calc(100vh-250px)];
+    @apply flex flex-col gap-5;
   }
 
   .log-panel {
-    @apply bg-surface border border-border rounded-lg overflow-hidden flex flex-col min-h-[300px] transition-all duration-300 ease-out;
+    @apply bg-surface border border-border rounded-lg overflow-hidden flex flex-col transition-all duration-300 ease-out;
   }
 
   .log-panel.collapsed {
@@ -252,7 +252,7 @@
   }
 
   .log-content {
-    @apply flex-1 overflow-y-auto bg-background font-mono text-sm leading-[1.4] p-3;
+    @apply flex-1 bg-background font-mono text-sm leading-[1.4] p-3;
   }
 
   .log-entry {
