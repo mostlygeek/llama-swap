@@ -1,16 +1,14 @@
 import { BrowserRouter as Router, Routes, Route, Navigate, NavLink } from "react-router-dom";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import DashboardPage from "./pages/Dashboard";
 import LogViewerPage from "./pages/LogViewer";
 import { useTheme } from "./contexts/ThemeProvider";
-
-const queryClient = new QueryClient();
+import { APIProvider } from "./contexts/APIProvider";
 
 function App() {
   const theme = useTheme();
   return (
-    <QueryClientProvider client={queryClient}>
-      <Router basename="/ui">
+    <Router basename="/ui/">
+      <APIProvider>
         <div>
           <nav className="bg-surface border-b border-border p-4">
             <div className="flex items-center justify-between max-w-7xl mx-auto px-4">
@@ -37,8 +35,8 @@ function App() {
             </Routes>
           </main>
         </div>
-      </Router>
-    </QueryClientProvider>
+      </APIProvider>
+    </Router>
   );
 }
 
