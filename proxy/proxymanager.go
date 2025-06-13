@@ -127,7 +127,6 @@ func (pm *ProxyManager) setupGinEngine() {
 		}
 
 		if c.Request.Method == "OPTIONS" {
-			c.Header("Access-Control-Allow-Origin", "*")
 			c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 
 			// allow whatever the client requested by default
