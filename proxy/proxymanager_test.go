@@ -529,34 +529,36 @@ func TestProxyManager_CORSOptionsHandler(t *testing.T) {
 		requestHeaders  map[string]string
 		expectedStatus  int
 		expectedHeaders map[string]string
+		origin          string
 	}{
 		{
-			name:           "OPTIONS with no headers",
+			name:           "OPTIONS with no headers and no Origin",
 			method:         "OPTIONS",
 			expectedStatus: http.StatusNoContent,
 			expectedHeaders: map[string]string{
-				"Access-Control-Allow-Origin":  "*",
 				"Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
 				"Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, X-Requested-With",
 			},
+			origin: "",
 		},
 		{
-			name:   "OPTIONS with specific headers",
+			name:   "OPTIONS with specific headers and Origin",
 			method: "OPTIONS",
 			requestHeaders: map[string]string{
 				"Access-Control-Request-Headers": "X-Custom-Header, Some-Other-Header",
 			},
 			expectedStatus: http.StatusNoContent,
 			expectedHeaders: map[string]string{
-				"Access-Control-Allow-Origin":  "*",
 				"Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
 				"Access-Control-Allow-Headers": "X-Custom-Header, Some-Other-Header",
 			},
+			origin: "https://example.com",
 		},
 		{
 			name:           "Non-OPTIONS request",
 			method:         "GET",
 			expectedStatus: http.StatusNotFound, // Since we don't have a GET route defined
+			origin:         "https://example.com",
 		},
 	}
 
@@ -569,11 +571,22 @@ func TestProxyManager_CORSOptionsHandler(t *testing.T) {
 			for k, v := range tt.requestHeaders {
 				req.Header.Set(k, v)
 			}
+			if tt.origin != "" {
+				req.Header.Set("Origin", tt.origin)
+			}
 
 			w := httptest.NewRecorder()
 			proxy.ServeHTTP(w, req)
 
 			assert.Equal(t, tt.expectedStatus, w.Code)
+
+			// If Origin is set, Access-Control-Allow-Origin should match it, and Vary: Origin should be present
+			if tt.origin != "" {
+				assert.Equal(t, tt.origin, w.Header().Get("Access-Control-Allow-Origin"))
+				assert.Contains(t, w.Header().Get("Vary"), "Origin")
+			} else {
+				assert.Empty(t, w.Header().Get("Access-Control-Allow-Origin"))
+			}
 
 			for header, expectedValue := range tt.expectedHeaders {
 				assert.Equal(t, expectedValue, w.Header().Get(header))
