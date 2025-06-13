@@ -15,7 +15,7 @@
   --color-secondary: rgba(94, 82, 64, 0.12);
   --color-secondary-hover: rgba(94, 82, 64, 0.2);
   --color-secondary-active: rgba(94, 82, 64, 0.25);
-  --color-border: rgba(94, 82, 64, 0.2);
+  --color-border: rgba(94, 82, 64, 0.3);
   --color-btn-primary-text: rgba(252, 252, 249, 1);
   --color-card-border: rgba(94, 82, 64, 0.12);
   --color-card-border-inner: rgba(94, 82, 64, 0.12);
@@ -25,6 +25,7 @@
   --color-info: rgba(98, 108, 113, 1);
   --color-focus-ring: rgba(33, 128, 141, 0.4);
   --color-select-caret: rgba(19, 52, 59, 0.8);
+  --color-btn-border: rgba(94, 82, 64, 0.7);
 }
 
 @layer theme {
@@ -191,7 +192,7 @@
 
   /* Buttons */
   .btn {
-    @apply bg-surface p-4 text-sm rounded-md border border-transparent transition-colors duration-200;
+    @apply bg-surface p-2 px-4 text-sm rounded-full border border-2 transition-colors duration-200 border-btn-border;
   }
 
   .btn--sm {

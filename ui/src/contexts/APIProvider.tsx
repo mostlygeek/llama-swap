@@ -1,4 +1,4 @@
-import { createContext, useState, useContext, useEffect, useCallback, useMemo, type ReactNode } from "react";
+import { useRef, createContext, useState, useContext, useEffect, useCallback, useMemo, type ReactNode } from "react";
 
 type ModelStatus = "ready" | "starting" | "stopped";
 const LOG_LENGTH_LIMIT = 1024 * 100; /* 100KB of log data */
@@ -26,8 +26,8 @@ type APIProviderProps = {
 export function APIProvider({ children }: APIProviderProps) {
   const [proxyLogs, setProxyLogs] = useState("");
   const [upstreamLogs, setUpstreamLogs] = useState("");
-  const [proxyEventSource, setProxyEventSource] = useState<EventSource | null>(null);
-  const [upstreamEventSource, setUpstreamEventSource] = useState<EventSource | null>(null);
+  const proxyEventSource = useRef<EventSource | null>(null);
+  const upstreamEventSource = useRef<EventSource | null>(null);
 
   const appendLog = useCallback((newData: string, setter: React.Dispatch<React.SetStateAction<string>>) => {
     setter((prev) => {
@@ -47,7 +47,7 @@ export function APIProvider({ children }: APIProviderProps) {
     (e: MessageEvent) => {
       appendLog(e.data, setUpstreamLogs);
     },
-    [upstreamLogs, appendLog]
+    [appendLog]
   );
 
   const enableProxyLogs = useCallback(
@@ -55,13 +55,13 @@ export function APIProvider({ children }: APIProviderProps) {
       if (enabled) {
         const eventSource = new EventSource("/logs/streamSSE/proxy");
         eventSource.onmessage = handleProxyMessage;
-        setProxyEventSource(eventSource);
+        proxyEventSource.current = eventSource;
       } else {
-        proxyEventSource?.close();
-        setProxyEventSource(null);
+        proxyEventSource.current?.close();
+        proxyEventSource.current = null;
       }
     },
-    [proxyEventSource, handleProxyMessage]
+    [handleProxyMessage]
   );
 
   const enableUpstreamLogs = useCallback(
@@ -69,10 +69,10 @@ export function APIProvider({ children }: APIProviderProps) {
       if (enabled) {
         const eventSource = new EventSource("/logs/streamSSE/upstream");
         eventSource.onmessage = handleUpstreamMessage;
-        setUpstreamEventSource(eventSource);
+        upstreamEventSource.current = eventSource;
       } else {
-        upstreamEventSource?.close();
-        setUpstreamEventSource(null);
+        upstreamEventSource.current?.close();
+        upstreamEventSource.current = null;
       }
     },
     [upstreamEventSource, handleUpstreamMessage]
@@ -80,10 +80,10 @@ export function APIProvider({ children }: APIProviderProps) {
 
   useEffect(() => {
     return () => {
-      proxyEventSource?.close();
-      upstreamEventSource?.close();
+      proxyEventSource.current?.close();
+      upstreamEventSource.current?.close();
     };
-  }, [proxyEventSource, upstreamEventSource]);
+  }, []);
 
   const listModels = useCallback(async (): Promise<Model[]> => {
     const response = await fetch("/api/models");
