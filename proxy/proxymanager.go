@@ -123,6 +123,7 @@ func (pm *ProxyManager) setupGinEngine() {
 		origin := c.Request.Header.Get("Origin")
 		if origin != "" {
 			c.Header("Access-Control-Allow-Origin", origin)
+			c.Header("Vary", "Origin")
 		}
 
 		if c.Request.Method == "OPTIONS" {
