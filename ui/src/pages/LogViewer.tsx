@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useAPI } from "../contexts/APIProvider";
+import { usePersistentState } from "../hooks/usePersistentState";
 
 const LogViewer = () => {
   const { proxyLogs, upstreamLogs, enableProxyLogs, enableUpstreamLogs } = useAPI();
@@ -15,23 +16,35 @@ const LogViewer = () => {
 
   return (
     <div className="flex flex-col gap-5">
-      <LogPanel title="Proxy Logs" logData={proxyLogs} />
-      <LogPanel title="Upstream Logs" logData={upstreamLogs} />
+      <LogPanel id="proxy" title="Proxy Logs" logData={proxyLogs} />
+      <LogPanel id="upstream" title="Upstream Logs" logData={upstreamLogs} />
     </div>
   );
 };
 
 interface LogPanelProps {
+  id: string;
   title: string;
   logData: string;
 }
 
-const LogPanel = ({ title, logData }: LogPanelProps) => {
+const LogPanel = ({ id, title, logData }: LogPanelProps) => {
   const [filterRegex, setFilterRegex] = useState("");
-  const [panelState, setPanelState] = useState<"show" | "hide" | "max">("show");
-  const [fontSize, setFontSize] = useState<"xxs" | "xs" | "small" | "normal">("normal");
+  const [panelState, setPanelState] = usePersistentState<"hide" | "small" | "max">(
+    `logPanel-${id}-panelState`,
+    "small"
+  );
+  const [fontSize, setFontSize] = usePersistentState<"xxs" | "xs" | "small" | "normal">(
+    `logPanel-${id}-fontSize`,
+    "normal"
+  );
+  const [wrapText, setTextWrap] = usePersistentState(`logPanel-${id}-wrapText`, false);
 
-  const toggleFontSize = () => {
+  const textWrapClass = useMemo(() => {
+    return wrapText ? "whitespace-pre-wrap" : "whitespace-pre";
+  }, [wrapText]);
+
+  const toggleFontSize = useCallback(() => {
     setFontSize((prev) => {
       switch (prev) {
         case "xxs":
@@ -44,20 +57,28 @@ const LogPanel = ({ title, logData }: LogPanelProps) => {
           return "xxs";
       }
     });
-  };
+  }, []);
 
-  const getFontSizeClass = () => {
+  const togglePanelState = useCallback(() => {
+    setPanelState((prev) => {
+      if (prev === "small") return "max";
+      if (prev === "hide") return "small";
+      return "hide";
+    });
+  }, []);
+
+  const fontSizeClass = useMemo(() => {
     switch (fontSize) {
       case "xxs":
-        return "text-xxs"; // 0.5rem (8px)
+        return "text-[0.5rem]"; // 0.5rem (8px)
       case "xs":
-        return "text-xs"; // 0.75rem (12px)
+        return "text-[0.75rem]"; // 0.75rem (12px)
       case "small":
-        return "text-sm"; // 0.875rem (14px)
+        return "text-[0.875rem]"; // 0.875rem (14px)
       case "normal":
         return "text-base"; // 1rem (16px)
     }
-  };
+  }, [fontSize]);
 
   const filteredLogs = useMemo(() => {
     if (!filterRegex) return logData;
@@ -80,36 +101,41 @@ const LogPanel = ({ title, logData }: LogPanelProps) => {
 
   return (
     <div className="bg-surface border border-border rounded-lg overflow-hidden flex flex-col">
-      <div className="p-4 border-b border-border flex items-center justify-between bg-secondary gap-3">
-        <div className="flex items-center gap-3 flex-shrink-0">
-          <h3 className="m-0 text-lg">{title}</h3>
-          <button
-            className="btn btn--sm"
-            onClick={() => {
-              setPanelState((prev) => {
-                if (prev === "show") return "max";
-                if (prev === "hide") return "show";
-                return "hide";
-              });
-            }}
-          >
-            {panelState}
-          </button>
-          <button className="btn btn--sm" onClick={toggleFontSize}>
-            {fontSize}
-          </button>
-        </div>
-        <div className="flex items-center gap-2 flex-1 min-w-0 justify-end">
-          <input
-            type="text"
-            className="min-w-[200px] text-sm border p-2 rounded"
-            placeholder="Filter logs..."
-            value={filterRegex}
-            onChange={(e) => setFilterRegex(e.target.value)}
-          />
-          <button className="btn btn--sm btn--outline flex-shrink-0" onClick={() => setFilterRegex("")}>
-            Clear
-          </button>
+      <div className="p-4 border-b border-border bg-secondary">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          {/* Title - Always full width on mobile, normal on desktop */}
+          <div className="w-full md:w-auto" onClick={togglePanelState}>
+            <h3 className="m-0 text-lg">{title}</h3>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
+            {/* Sizing Buttons - Stacks vertically on mobile */}
+            <div className="flex flex-wrap gap-2">
+              <button className="btn" onClick={togglePanelState}>
+                size: {panelState}
+              </button>
+              <button className="btn" onClick={toggleFontSize}>
+                font: {fontSize}
+              </button>
+              <button className="btn" onClick={() => setTextWrap((prev) => !prev)}>
+                {wrapText ? "wrap" : "wrap off"}
+              </button>
+            </div>
+
+            {/* Filtering Options - Full width on mobile, normal on desktop */}
+            <div className="flex flex-1 min-w-0 gap-2">
+              <input
+                type="text"
+                className="flex-1 min-w-[120px] text-sm border p-2 rounded"
+                placeholder="Filter logs..."
+                value={filterRegex}
+                onChange={(e) => setFilterRegex(e.target.value)}
+              />
+              <button className="btn" onClick={() => setFilterRegex("")}>
+                Clear
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -117,7 +143,7 @@ const LogPanel = ({ title, logData }: LogPanelProps) => {
         <div className="flex-1 bg-background font-mono text-sm leading-[1.4] p-3">
           <pre
             ref={preTagRef}
-            className={`flex-1 p-4 overflow-y-auto whitespace-pre min-h-0 ${getFontSizeClass()}`}
+            className={`flex-1 p-4 overflow-y-auto whitespace-pre min-h-0 ${textWrapClass} ${fontSizeClass}`}
             style={{
               maxHeight: panelState === "max" ? "1500px" : "500px",
             }}

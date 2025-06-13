@@ -14,12 +14,12 @@ function App() {
             <div className="flex items-center justify-between mx-auto px-4">
               <h1>llama-swap</h1>
               <div className="flex space-x-4">
-                <NavLink to="/logs" className={({ isActive }) => (isActive ? "navlink active" : "navlink")}>
+                <NavLink to="/" className={({ isActive }) => (isActive ? "navlink active" : "navlink")}>
                   Logs
                 </NavLink>
 
-                <NavLink to="/" className={({ isActive }) => (isActive ? "navlink active" : "navlink")}>
-                  Dashboard
+                <NavLink to="/models" className={({ isActive }) => (isActive ? "navlink active" : "navlink")}>
+                  Models
                 </NavLink>
                 <button className="btn btn--sm" onClick={theme.toggleTheme}>
                   {theme.isDarkMode ? "🌙" : "☀️"}
@@ -30,8 +30,8 @@ function App() {
 
           <main className="mx-auto py-4 px-4">
             <Routes>
-              <Route path="/" element={<DashboardPage />} />
-              <Route path="/logs" element={<LogViewerPage />} />
+              <Route path="/" element={<LogViewerPage />} />
+              <Route path="/models" element={<DashboardPage />} />
               <Route path="*" element={<Navigate to="/ui/" replace />} />
             </Routes>
           </main>
