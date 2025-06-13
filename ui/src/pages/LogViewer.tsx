@@ -29,6 +29,36 @@ interface LogPanelProps {
 const LogPanel = ({ title, logData }: LogPanelProps) => {
   const [filterRegex, setFilterRegex] = useState("");
   const [panelState, setPanelState] = useState<"show" | "hide" | "max">("show");
+  const [fontSize, setFontSize] = useState<"xxs" | "xs" | "small" | "normal">("normal");
+
+  const toggleFontSize = () => {
+    setFontSize((prev) => {
+      switch (prev) {
+        case "xxs":
+          return "xs";
+        case "xs":
+          return "small";
+        case "small":
+          return "normal";
+        case "normal":
+          return "xxs";
+      }
+    });
+  };
+
+  const getFontSizeClass = () => {
+    switch (fontSize) {
+      case "xxs":
+        return "text-xxs"; // 0.5rem (8px)
+      case "xs":
+        return "text-xs"; // 0.75rem (12px)
+      case "small":
+        return "text-sm"; // 0.875rem (14px)
+      case "normal":
+        return "text-base"; // 1rem (16px)
+    }
+  };
+
   const filteredLogs = useMemo(() => {
     if (!filterRegex) return logData;
     try {
@@ -65,6 +95,9 @@ const LogPanel = ({ title, logData }: LogPanelProps) => {
           >
             {panelState}
           </button>
+          <button className="btn btn--sm" onClick={toggleFontSize}>
+            {fontSize}
+          </button>
         </div>
         <div className="flex items-center gap-2 flex-1 min-w-0 justify-end">
           <input
@@ -84,9 +117,8 @@ const LogPanel = ({ title, logData }: LogPanelProps) => {
         <div className="flex-1 bg-background font-mono text-sm leading-[1.4] p-3">
           <pre
             ref={preTagRef}
-            className="flex-1 p-4 overflow-y-auto whitespace-pre min-h-0 text-sm"
+            className={`flex-1 p-4 overflow-y-auto whitespace-pre min-h-0 ${getFontSizeClass()}`}
             style={{
-              scrollbarWidth: "auto",
               maxHeight: panelState === "max" ? "1500px" : "500px",
             }}
           >
