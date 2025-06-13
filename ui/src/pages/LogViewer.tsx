@@ -1,12 +1,8 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useAPI } from "../contexts/APIProvider";
 
-function LogViewer() {
+const LogViewer = () => {
   const { proxyLogs, upstreamLogs, enableProxyLogs, enableUpstreamLogs } = useAPI();
-  const proxyLogsRef = useRef<HTMLPreElement>(null);
-  const upstreamLogsRef = useRef<HTMLPreElement>(null);
-  const [proxyFilter, setProxyFilter] = useState("");
-  const [upstreamFilter, setUpstreamFilter] = useState("");
 
   useEffect(() => {
     enableProxyLogs(true);
@@ -17,105 +13,89 @@ function LogViewer() {
     };
   }, []);
 
-  const filteredProxyLogs = useMemo(() => {
-    if (!proxyFilter) return proxyLogs;
-    try {
-      const regex = new RegExp(proxyFilter, "i");
-      const lines = proxyLogs.split("\n");
-      const filtered = lines.filter((line) => regex.test(line));
-      return filtered.join("\n");
-    } catch (e) {
-      return proxyLogs; // Return unfiltered if regex is invalid
-    }
-  }, [proxyLogs, proxyFilter]);
-
-  const filteredUpstreamLogs = useMemo(() => {
-    if (!upstreamFilter) return upstreamLogs;
-    try {
-      const regex = new RegExp(upstreamFilter, "i");
-      const lines = upstreamLogs.split("\n");
-      const filtered = lines.filter((line) => regex.test(line));
-      return filtered.join("\n");
-    } catch (e) {
-      return upstreamLogs; // Return unfiltered if regex is invalid
-    }
-  }, [upstreamLogs, upstreamFilter]);
-
-  useEffect(() => {
-    if (!proxyLogsRef.current) return;
-    proxyLogsRef.current.scrollTop = proxyLogsRef.current.scrollHeight;
-  }, [filteredProxyLogs]);
-
-  useEffect(() => {
-    if (!upstreamLogsRef.current) return;
-    upstreamLogsRef.current.scrollTop = upstreamLogsRef.current.scrollHeight;
-  }, [filteredUpstreamLogs]);
-
   return (
-    <div className="logs-container">
-      <div className="log-panel">
-        <div className="log-panel-header">
-          <div className="log-panel-title">
-            <h3>Proxy Logs</h3>
-            <span className="status status--success">Live</span>
-          </div>
-          <div className="log-panel-controls">
-            <input
-              type="text"
-              className="form-control log-filter"
-              placeholder="Filter logs..."
-              value={proxyFilter}
-              onChange={(e) => setProxyFilter(e.target.value)}
-            />
-            <button className="btn btn--sm btn--outline" onClick={() => setProxyFilter("")}>
-              Clear
-            </button>
-          </div>
-        </div>
-        <div className="log-content" id="proxy-logs">
-          <pre
-            ref={proxyLogsRef}
-            className="flex-1 p-4 overflow-y-auto whitespace-pre-wrap break-words min-h-0 max-h-[500px]"
-          >
-            {filteredProxyLogs}
-          </pre>
-        </div>
-      </div>
-
-      <div className="log-panel" id="upstream-panel">
-        <div className="log-panel-header" id="upstream-header">
-          <div className="log-panel-title">
-            <h3>Upstream Logs</h3>
-            <span className="status status--info">Minimized</span>
-            <button className="collapse-toggle" id="upstream-toggle">
-              ▼
-            </button>
-          </div>
-          <div className="log-panel-controls">
-            <input
-              type="text"
-              className="form-control log-filter"
-              placeholder="Filter logs..."
-              value={upstreamFilter}
-              onChange={(e) => setUpstreamFilter(e.target.value)}
-            />
-            <button className="btn btn--sm btn--outline" onClick={() => setUpstreamFilter("")}>
-              Clear
-            </button>
-          </div>
-        </div>
-
-        <div className="log-content">
-          <pre
-            ref={upstreamLogsRef}
-            className="flex-1 p-4 overflow-y-auto whitespace-pre-wrap break-words min-h-0 max-h-[500px]"
-          >
-            {filteredUpstreamLogs}
-          </pre>
-        </div>
-      </div>
+    <div className="flex flex-col gap-5">
+      <LogPanel title="Proxy Logs" logData={proxyLogs} />
+      <LogPanel title="Upstream Logs" logData={upstreamLogs} />
     </div>
   );
+};
+
+interface LogPanelProps {
+  title: string;
+  logData: string;
 }
+
+const LogPanel = ({ title, logData }: LogPanelProps) => {
+  const [filterRegex, setFilterRegex] = useState("");
+  const [panelState, setPanelState] = useState<"show" | "hide" | "max">("show");
+  const filteredLogs = useMemo(() => {
+    if (!filterRegex) return logData;
+    try {
+      const regex = new RegExp(filterRegex, "i");
+      const lines = logData.split("\n");
+      const filtered = lines.filter((line) => regex.test(line));
+      return filtered.join("\n");
+    } catch (e) {
+      return logData; // Return unfiltered if regex is invalid
+    }
+  }, [logData, filterRegex]);
+
+  // auto scroll to bottom
+  const preTagRef = useRef<HTMLPreElement>(null);
+  useEffect(() => {
+    if (!preTagRef.current) return;
+    preTagRef.current.scrollTop = preTagRef.current.scrollHeight;
+  }, [filteredLogs]);
+
+  return (
+    <div className="bg-surface border border-border rounded-lg overflow-hidden flex flex-col">
+      <div className="p-4 border-b border-border flex items-center justify-between bg-secondary gap-3">
+        <div className="flex items-center gap-3 flex-shrink-0">
+          <h3 className="m-0 text-lg">{title}</h3>
+          <button
+            className="btn btn--sm"
+            onClick={() => {
+              setPanelState((prev) => {
+                if (prev === "show") return "max";
+                if (prev === "hide") return "show";
+                return "hide";
+              });
+            }}
+          >
+            {panelState}
+          </button>
+        </div>
+        <div className="flex items-center gap-2 flex-1 min-w-0 justify-end">
+          <input
+            type="text"
+            className="min-w-[200px] text-sm border p-2 rounded"
+            placeholder="Filter logs..."
+            value={filterRegex}
+            onChange={(e) => setFilterRegex(e.target.value)}
+          />
+          <button className="btn btn--sm btn--outline flex-shrink-0" onClick={() => setFilterRegex("")}>
+            Clear
+          </button>
+        </div>
+      </div>
+
+      {panelState !== "hide" && (
+        <div className="flex-1 bg-background font-mono text-sm leading-[1.4] p-3">
+          <pre
+            ref={preTagRef}
+            className="flex-1 p-4 overflow-y-auto whitespace-pre min-h-0 text-sm"
+            style={{
+              scrollbarWidth: "auto",
+              maxHeight: panelState === "max" ? "1500px" : "500px",
+            }}
+          >
+            {filteredLogs}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+};
 
 export default LogViewer;

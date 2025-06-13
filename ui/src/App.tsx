@@ -11,14 +11,15 @@ function App() {
       <APIProvider>
         <div>
           <nav className="bg-surface border-b border-border p-4">
-            <div className="flex items-center justify-between max-w-7xl mx-auto px-4">
+            <div className="flex items-center justify-between mx-auto px-4">
               <h1>llama-swap</h1>
               <div className="flex space-x-4">
-                <NavLink to="/" className={({ isActive }) => (isActive ? "navlink active" : "navlink")}>
-                  Dashboard
-                </NavLink>
                 <NavLink to="/logs" className={({ isActive }) => (isActive ? "navlink active" : "navlink")}>
                   Logs
+                </NavLink>
+
+                <NavLink to="/" className={({ isActive }) => (isActive ? "navlink active" : "navlink")}>
+                  Dashboard
                 </NavLink>
                 <button className="btn btn--sm" onClick={theme.toggleTheme}>
                   {theme.isDarkMode ? "🌙" : "☀️"}
@@ -27,7 +28,7 @@ function App() {
             </div>
           </nav>
 
-          <main className="max-w-7xl mx-auto py-4 px-4">
+          <main className="mx-auto py-4 px-4">
             <Routes>
               <Route path="/" element={<DashboardPage />} />
               <Route path="/logs" element={<LogViewerPage />} />
