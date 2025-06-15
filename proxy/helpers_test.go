@@ -73,13 +73,13 @@ func getTestSimpleResponderConfigPort(expectedMessage string, port int) ModelCon
 
 	// Create a YAML string with just the values we want to set
 	yamlStr := fmt.Sprintf(`
-cmd: "%s --port %d --silent --respond %s"
+cmd: "%q --port %d --silent --respond %q"
 proxy: "http://127.0.0.1:%d"
 `, binaryPath, port, expectedMessage, port)
 
 	var cfg ModelConfig
 	if err := yaml.Unmarshal([]byte(yamlStr), &cfg); err != nil {
-		panic(fmt.Sprintf("failed to unmarshal test config: %v", err))
+		panic(fmt.Sprintf("failed to unmarshal test config: %v in [%s]", err, yamlStr))
 	}
 
 	return cfg
