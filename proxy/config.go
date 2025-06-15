@@ -35,7 +35,7 @@ func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	type rawModelConfig ModelConfig
 	defaults := rawModelConfig{
 		Cmd:              "",
-		CmdStop:          "",
+		CmdStop:          "test ${PID}",
 		Proxy:            "http://localhost:${PORT}",
 		Aliases:          []string{},
 		Env:              []string{},
@@ -241,6 +241,9 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			matches := macroPattern.FindAllStringSubmatch(fieldValue, -1)
 			for _, match := range matches {
 				macroName := match[1]
+				if macroName == "PID" && fieldName == "cmdStop" {
+					continue // this is ok, has to be replaced by process later
+				}
 				if _, exists := config.Macros[macroName]; !exists {
 					return Config{}, fmt.Errorf("unknown macro '${%s}' found in %s.%s", macroName, modelId, fieldName)
 				}
