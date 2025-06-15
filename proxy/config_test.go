@@ -77,6 +77,7 @@ groups:
 	}
 
 	expected := Config{
+		LogLevel:  "info",
 		StartPort: 5800,
 		Macros: map[string]string{
 			"svr-path": "path/to/server",
@@ -93,20 +94,22 @@ groups:
 				Cmd:           "path/to/server --arg1 one",
 				Proxy:         "http://localhost:8081",
 				Aliases:       []string{"m2"},
-				Env:           nil,
+				Env:           []string{},
 				CheckEndpoint: "/",
 			},
 			"model3": {
 				Cmd:           "path/to/cmd --arg1 one",
 				Proxy:         "http://localhost:8081",
 				Aliases:       []string{"mthree"},
-				Env:           nil,
+				Env:           []string{},
 				CheckEndpoint: "/",
 			},
 			"model4": {
 				Cmd:           "path/to/cmd --arg1 one",
 				Proxy:         "http://localhost:8082",
 				CheckEndpoint: "/",
+				Aliases:       []string{},
+				Env:           []string{},
 			},
 		},
 		HealthCheckTimeout: 15,

@@ -31,6 +31,34 @@ type ModelConfig struct {
 	ConcurrencyLimit int `yaml:"concurrencyLimit"`
 }
 
+func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	type rawModelConfig ModelConfig
+	defaults := rawModelConfig{
+		Cmd:              "",
+		CmdStop:          "",
+		Proxy:            "http://localhost:${PORT}",
+		Aliases:          []string{},
+		Env:              []string{},
+		CheckEndpoint:    "/health",
+		UnloadAfter:      0,
+		Unlisted:         false,
+		UseModelName:     "",
+		ConcurrencyLimit: 0,
+	}
+
+	// the default cmdStop to taskkill /f /t /pid ${PID}
+	if runtime.GOOS == "windows" {
+		defaults.CmdStop = "taskkill /f /t /pid ${PID}"
+	}
+
+	if err := unmarshal(&defaults); err != nil {
+		return err
+	}
+
+	*m = ModelConfig(defaults)
+	return nil
+}
+
 func (m *ModelConfig) SanitizedCommand() ([]string, error) {
 	return SanitizeCommand(m.Cmd)
 }
@@ -111,26 +139,23 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		return Config{}, err
 	}
 
-	var config Config
+	// default configuration values
+	config := Config{
+		HealthCheckTimeout: 120,
+		StartPort:          5800,
+		LogLevel:           "info",
+	}
 	err = yaml.Unmarshal(data, &config)
 	if err != nil {
 		return Config{}, err
 	}
 
-	if config.HealthCheckTimeout == 0 {
-		// this high default timeout helps avoid failing health checks
-		// for configurations that wait for docker or have slower startup
-		config.HealthCheckTimeout = 120
-	} else if config.HealthCheckTimeout < 15 {
+	if config.HealthCheckTimeout < 15 {
 		// set a minimum of 15 seconds
 		config.HealthCheckTimeout = 15
 	}
 
-	// set default port ranges
-	if config.StartPort == 0 {
-		// default to 5800
-		config.StartPort = 5800
-	} else if config.StartPort < 1 {
+	if config.StartPort < 1 {
 		return Config{}, fmt.Errorf("startPort must be greater than 1")
 	}
 
@@ -180,6 +205,11 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	for _, modelId := range modelIds {
 		modelConfig := config.Models[modelId]
 
+		// enforce ${PORT} used in both cmd and proxy
+		if !strings.Contains(modelConfig.Cmd, "${PORT}") && strings.Contains(modelConfig.Proxy, "${PORT}") {
+			return Config{}, fmt.Errorf("model %s requires a proxy value when not using automatic ${PORT}", modelId)
+		}
+
 		// go through model config fields: cmd, cmdStop, proxy, checkEndPoint and replace macros with macro values
 		for macroName, macroValue := range config.Macros {
 			macroSlug := fmt.Sprintf("${%s}", macroName)
@@ -191,17 +221,11 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 
 		// only iterate over models that use ${PORT} to keep port numbers from increasing unnecessarily
 		if strings.Contains(modelConfig.Cmd, "${PORT}") || strings.Contains(modelConfig.Proxy, "${PORT}") || strings.Contains(modelConfig.CmdStop, "${PORT}") {
-			if modelConfig.Proxy == "" {
-				modelConfig.Proxy = "http://localhost:${PORT}"
-			}
-
 			nextPortStr := strconv.Itoa(nextPort)
 			modelConfig.Cmd = strings.ReplaceAll(modelConfig.Cmd, "${PORT}", nextPortStr)
 			modelConfig.CmdStop = strings.ReplaceAll(modelConfig.CmdStop, "${PORT}", nextPortStr)
 			modelConfig.Proxy = strings.ReplaceAll(modelConfig.Proxy, "${PORT}", nextPortStr)
 			nextPort++
-		} else if modelConfig.Proxy == "" {
-			return Config{}, fmt.Errorf("model %s requires a proxy value when not using automatic ${PORT}", modelId)
 		}
 
 		// make sure there are no unknown macros that have not been replaced
