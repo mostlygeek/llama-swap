@@ -68,7 +68,7 @@ models:
 	assert.True(t, exists, "model1 should exist")
 	if assert.NotNil(t, model1, "model1 should not be nil") {
 		assert.Equal(t, "path/to/cmd --port 5800", model1.Cmd) // has the port replaced
-		assert.Equal(t, "", model1.CmdStop)
+		assert.Equal(t, "taskkill /f /t /pid ${PID}", model1.CmdStop)
 		assert.Equal(t, "http://localhost:5800", model1.Proxy)
 		assert.Equal(t, "/health", model1.CheckEndpoint)
 		assert.Equal(t, []string{}, model1.Aliases)
