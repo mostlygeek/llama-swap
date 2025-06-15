@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"os/exec"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -232,11 +231,6 @@ func (p *Process) start() error {
 
 	// a "none" means don't check for health ... I could have picked a better word :facepalm:
 	if checkEndpoint != "none" {
-		// keep default behaviour
-		if checkEndpoint == "" {
-			checkEndpoint = "/health"
-		}
-
 		proxyTo := p.config.Proxy
 		healthURL, err := url.JoinPath(proxyTo, checkEndpoint)
 		if err != nil {
@@ -521,11 +515,6 @@ func (p *Process) cmdStopUpstreamProcess() error {
 	if p.cmd == nil || p.cmd.Process == nil {
 		p.proxyLogger.Debugf("<%s> cmd or cmd.Process is nil (normal during config reload)", p.ID)
 		return fmt.Errorf("<%s> process is nil or cmd is nil, skipping graceful stop", p.ID)
-	}
-
-	// the default cmdStop to taskkill /f /t /pid ${PID}
-	if runtime.GOOS == "windows" && strings.TrimSpace(p.config.CmdStop) == "" {
-		p.config.CmdStop = "taskkill /f /t /pid ${PID}"
 	}
 
 	if p.config.CmdStop != "" {

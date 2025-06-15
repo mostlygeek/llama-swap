@@ -405,6 +405,7 @@ func TestProcess_ForceStopWithKill(t *testing.T) {
 		Cmd:           fmt.Sprintf("%s --port %d --respond %s --silent --ignore-sig-term", binaryPath, port, expectedMessage),
 		Proxy:         fmt.Sprintf("http://127.0.0.1:%d", port),
 		CheckEndpoint: "/health",
+		CmdStop:       "taskkill /f /t /pid ${PID}",
 	}
 
 	process := NewProcess("stop_immediate", 2, config, debugLogger, debugLogger)
