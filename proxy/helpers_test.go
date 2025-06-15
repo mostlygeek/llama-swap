@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -70,10 +71,16 @@ func getTestSimpleResponderConfig(expectedMessage string) ModelConfig {
 func getTestSimpleResponderConfigPort(expectedMessage string, port int) ModelConfig {
 	binaryPath := getSimpleResponderPath()
 
-	// Create a process configuration
-	return ModelConfig{
-		Cmd:           fmt.Sprintf("%s --port %d --silent --respond %s", binaryPath, port, expectedMessage),
-		Proxy:         fmt.Sprintf("http://127.0.0.1:%d", port),
-		CheckEndpoint: "/health",
+	// Create a YAML string with just the values we want to set
+	yamlStr := fmt.Sprintf(`
+cmd: '%s --port %d --silent --respond %s'
+proxy: "http://127.0.0.1:%d"
+`, binaryPath, port, expectedMessage, port)
+
+	var cfg ModelConfig
+	if err := yaml.Unmarshal([]byte(yamlStr), &cfg); err != nil {
+		panic(fmt.Sprintf("failed to unmarshal test config: %v in [%s]", err, yamlStr))
 	}
+
+	return cfg
 }
