@@ -1,4 +1,5 @@
 import { createContext, useState, useContext, useEffect, type ReactNode } from "react";
+import { usePersistentState } from "../hooks/usePersistentState";
 
 type ThemeContextType = {
   isDarkMode: boolean;
@@ -12,13 +13,9 @@ type ThemeProviderProps = {
 };
 
 export function ThemeProvider({ children }: ThemeProviderProps) {
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
-    const savedTheme = localStorage.getItem("theme");
-    return savedTheme ? savedTheme === "dark" : true; // default to dark if no saved preference
-  });
+  const [isDarkMode, setIsDarkMode] = usePersistentState<boolean>("theme", false);
 
   useEffect(() => {
-    localStorage.setItem("theme", isDarkMode ? "dark" : "light");
     document.documentElement.setAttribute("data-theme", isDarkMode ? "dark" : "light");
   }, [isDarkMode]);
 
