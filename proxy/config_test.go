@@ -336,7 +336,7 @@ models:
     cmd: svr --port 111
 `
 		_, err := LoadConfigFromReader(strings.NewReader(content))
-		assert.Equal(t, "model model1 requires a proxy value when not using automatic ${PORT}", err.Error())
+		assert.Equal(t, "model model1: proxy uses ${PORT} but cmd does not - ${PORT} is only available when used in cmd", err.Error())
 	})
 }
 

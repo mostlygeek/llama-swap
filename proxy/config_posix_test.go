@@ -44,7 +44,7 @@ func TestConfig_SanitizeCommand(t *testing.T) {
 
 // Test the default values are automatically set for global, model and group configurations
 // after loading the configuration
-func TestConfig_DefaultValues(t *testing.T) {
+func TestConfig_DefaultValuesPosix(t *testing.T) {
 	content := `
 models:
   model1:

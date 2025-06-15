@@ -207,7 +207,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 
 		// enforce ${PORT} used in both cmd and proxy
 		if !strings.Contains(modelConfig.Cmd, "${PORT}") && strings.Contains(modelConfig.Proxy, "${PORT}") {
-			return Config{}, fmt.Errorf("model %s requires a proxy value when not using automatic ${PORT}", modelId)
+			return Config{}, fmt.Errorf("model %s: proxy uses ${PORT} but cmd does not - ${PORT} is only available when used in cmd", modelId)
 		}
 
 		// go through model config fields: cmd, cmdStop, proxy, checkEndPoint and replace macros with macro values
