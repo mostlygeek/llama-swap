@@ -73,7 +73,7 @@ func getTestSimpleResponderConfigPort(expectedMessage string, port int) ModelCon
 
 	// Create a YAML string with just the values we want to set
 	yamlStr := fmt.Sprintf(`
-cmd: "%q --port %d --silent --respond %q"
+cmd: '%s --port %d --silent --respond %s'
 proxy: "http://127.0.0.1:%d"
 `, binaryPath, port, expectedMessage, port)
 
