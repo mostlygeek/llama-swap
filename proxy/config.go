@@ -35,7 +35,7 @@ func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	type rawModelConfig ModelConfig
 	defaults := rawModelConfig{
 		Cmd:              "",
-		CmdStop:          "test ${PID}",
+		CmdStop:          "",
 		Proxy:            "http://localhost:${PORT}",
 		Aliases:          []string{},
 		Env:              []string{},
