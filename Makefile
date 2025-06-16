@@ -19,24 +19,31 @@ all: mac linux simple-responder
 clean:
 	rm -rf $(BUILD_DIR)
 
-test:
+proxy/ui_dist/placeholder.txt:
+	mkdir -p proxy/ui_dist
+	touch $@
+
+test: proxy/ui_dist/placeholder.txt
 	go test -short -v -count=1 ./proxy
 
-test-all:
+test-all: proxy/ui_dist/placeholder.txt
 	go test -v -count=1 ./proxy
 
+# build react UI
+ui:
+	cd ui && npm run build
 # Build OSX binary
-mac:
+mac: ui
 	@echo "Building Mac binary..."
 	GOOS=darwin GOARCH=arm64 go build -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-darwin-arm64
 
 # Build Linux binary
-linux:
+linux: ui
 	@echo "Building Linux binary..."
 	GOOS=linux GOARCH=amd64 go build -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-linux-amd64
 
 # Build Windows binary
-windows:
+windows: ui
 	@echo "Building Windows binary..."
 	GOOS=windows GOARCH=amd64 go build -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-windows-amd64.exe
 
@@ -69,4 +76,4 @@ release:
 	git tag "$$new_tag";
 
 # Phony targets
-.PHONY: all clean mac linux windows simple-responder
+.PHONY: all clean ui mac linux windows simple-responder

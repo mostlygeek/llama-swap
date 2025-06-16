@@ -1,3 +1,8 @@
+# ======
+# For a more detailed configuration example:
+# https://github.com/mostlygeek/llama-swap/wiki/Configuration
+# ======
+
 # Seconds to wait for llama.cpp to be available to serve requests
 # Default (and minimum): 15 seconds
 healthCheckTimeout: 90
