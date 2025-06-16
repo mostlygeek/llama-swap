@@ -174,7 +174,7 @@ func (pm *ProxyManager) setupGinEngine() {
 	})
 
 	pm.ginEngine.GET("/favicon.ico", func(c *gin.Context) {
-		if data, err := getHTMLFile("favicon.ico"); err == nil {
+		if data, err := reactStaticFS.ReadFile("ui_dist/favicon.ico"); err == nil {
 			c.Data(http.StatusOK, "image/x-icon", data)
 		} else {
 			c.String(http.StatusInternalServerError, err.Error())
@@ -186,6 +186,7 @@ func (pm *ProxyManager) setupGinEngine() {
 	if err != nil {
 		pm.proxyLogger.Errorf("Failed to load React filesystem: %v", err)
 	} else {
+
 		// serve files that exist under /ui/*
 		pm.ginEngine.StaticFS("/ui", reactFS)
 
