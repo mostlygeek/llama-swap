@@ -8,7 +8,7 @@ logLevel: debug
 # creating a coding profile with models for code generation and general questions
 groups:
   coding:
-    swap: false
+    swap: true
     members:
       - "qwen"
       - "llama"

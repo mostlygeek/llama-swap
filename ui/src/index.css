@@ -8,8 +8,10 @@
   /* text colors */
   --color-txtmain: rgba(19, 52, 59, 1);
   --color-txtsecondary: rgba(98, 108, 113, 1);
+  --color-navlink-active: rgba(245, 245, 245, 1);
 
-  --color-primary: rgba(33, 128, 141, 1);
+  --color-primary: rgba(50, 184, 198, 1);
+
   --color-primary-hover: rgba(29, 116, 128, 1);
   --color-primary-active: rgba(26, 104, 115, 1);
   --color-secondary: rgba(94, 82, 64, 0.12);
@@ -37,7 +39,9 @@
     --color-txtmain: rgba(245, 245, 245, 1);
     --color-txtsecondary: rgba(167, 169, 169, 0.7);
 
-    --color-primary: rgba(50, 184, 198, 1);
+    --color-navlink-active: rgba(245, 245, 245, 1);
+
+    --color-primary: rgba(33, 128, 141, 1);
     --color-primary-hover: rgba(45, 166, 178, 1);
     --color-primary-active: rgba(41, 150, 161, 1);
     --color-secondary: rgba(119, 124, 124, 0.15);
@@ -64,22 +68,22 @@
   }
 
   h1 {
-    @apply text-4xl text-txtmain font-bold;
+    @apply text-4xl text-txtmain font-bold pb-4;
   }
   h2 {
-    @apply text-3xl text-txtmain font-bold;
+    @apply text-3xl text-txtmain font-bold pb-4;
   }
   h3 {
-    @apply text-2xl text-txtmain font-bold;
+    @apply text-2xl text-txtmain font-bold pb-4;
   }
   h4 {
-    @apply text-xl text-txtmain font-bold;
+    @apply text-xl text-txtmain font-bold pb-4;
   }
   h5 {
-    @apply text-lg text-txtmain font-bold;
+    @apply text-lg text-txtmain font-bold pb-4;
   }
   h6 {
-    @apply text-base text-txtmain font-bold;
+    @apply text-base text-txtmain font-bold pb-4;
   }
 }
 
@@ -95,12 +99,12 @@
     @apply text-txtsecondary hover:bg-secondary hover:text-txtmain rounded-lg p-2;
   }
   .navlink.active {
-    @apply bg-primary text-black;
+    @apply bg-primary text-navlink-active;
   }
 
   /* Card component */
   .card {
-    @apply bg-surface rounded-lg border border-card-border shadow-sm overflow-hidden;
+    @apply bg-surface rounded-lg border border-card-border shadow-sm overflow-hidden p-4;
   }
 
   .card:hover {
@@ -114,63 +118,6 @@
   .card__header,
   .card__footer {
     @apply p-4 border-b border-card-border-inner;
-  }
-
-  /* Dashboard Styles */
-  .status-grid {
-    @apply grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-4;
-  }
-
-  .status-card {
-    @apply transition-transform duration-200 ease-out;
-  }
-
-  .status-card:hover {
-    @apply -translate-y-0.5;
-  }
-
-  .status-card-header {
-    @apply flex items-center justify-between mb-3;
-  }
-
-  .status-card-header h3 {
-    @apply m-0 text-base text-txtsecondary font-medium;
-  }
-
-  .status-card-number {
-    @apply text-2xl font-bold text-primary;
-  }
-
-  .status-card-value {
-    @apply text-lg font-semibold m-0 mb-1;
-  }
-
-  .status-card-detail {
-    @apply text-txtsecondary text-sm;
-  }
-
-  .model-table {
-    @apply w-full border-collapse mb-8;
-  }
-
-  .model-table thead {
-    @apply bg-secondary;
-  }
-
-  .model-table th {
-    @apply p-3 text-left text-txtsecondary font-medium text-sm border-b border-border;
-  }
-
-  .model-table td {
-    @apply p-3 text-txtmain border-b border-border;
-  }
-
-  .model-table tr:last-child td {
-    @apply border-b-0;
-  }
-
-  .model-table tr:hover {
-    @apply bg-secondary;
   }
 
   /* Status Badges */

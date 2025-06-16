@@ -1,8 +1,8 @@
 import { BrowserRouter as Router, Routes, Route, Navigate, NavLink } from "react-router-dom";
-import DashboardPage from "./pages/Dashboard";
-import LogViewerPage from "./pages/LogViewer";
 import { useTheme } from "./contexts/ThemeProvider";
 import { APIProvider } from "./contexts/APIProvider";
+import LogViewerPage from "./pages/LogViewer";
+import ModelPage from "./pages/Models";
 
 function App() {
   const theme = useTheme();
@@ -31,7 +31,7 @@ function App() {
           <main className="mx-auto py-4 px-4">
             <Routes>
               <Route path="/" element={<LogViewerPage />} />
-              <Route path="/models" element={<DashboardPage />} />
+              <Route path="/models" element={<ModelPage />} />
               <Route path="*" element={<Navigate to="/ui/" replace />} />
             </Routes>
           </main>

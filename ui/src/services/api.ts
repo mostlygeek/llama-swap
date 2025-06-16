@@ -5,14 +5,14 @@ const api = axios.create({
   timeout: 10000,
 });
 
-export const fetchRunningModels = async () => {
-  const response = await api.get("/models/running");
-  return response.data.running || [];
-};
+export interface Model {
+  id: string;
+  state: string;
+}
 
-export const fetchAvailableModels = async () => {
-  const response = await api.get("/models/available");
-  return response.data.data || [];
+export const fetchModels = async (): Promise<Model[]> => {
+  const response = await api.get("/models/");
+  return response.data || [];
 };
 
 export const unloadAllModels = async () => {

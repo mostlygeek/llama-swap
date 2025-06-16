@@ -221,17 +221,9 @@ func (pm *ProxyManager) setupGinEngine() {
 		})
 	}
 
-	// Add API endpoints for React to consume
-	apiGroup := pm.ginEngine.Group("/api")
-	{
-		apiGroup.GET("/models/running", pm.listRunningProcessesHandler)
-		apiGroup.GET("/models/available", pm.listModelsHandler)
-		apiGroup.POST("/models/unload", pm.unloadAllModelsHandler)
-
-		// Log streaming endpoints for React
-		apiGroup.GET("/logs/stream", pm.streamLogsHandlerSSE)
-		apiGroup.GET("/logs/stream/:logMonitorID", pm.streamLogsHandlerSSE)
-	}
+	// proxymanager_api.go
+	// add API handler functions
+	addApiHandlers(pm)
 
 	// Disable console color for testing
 	gin.DisableConsoleColor()
