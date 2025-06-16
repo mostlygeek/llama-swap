@@ -162,16 +162,20 @@ func (pm *ProxyManager) setupGinEngine() {
 	pm.ginEngine.GET("/logs/stream/:logMonitorID", pm.streamLogsHandler)
 	pm.ginEngine.GET("/logs/streamSSE/:logMonitorID", pm.streamLogsHandlerSSE)
 
-	pm.ginEngine.GET("/upstream", pm.upstreamIndex)
-	pm.ginEngine.Any("/upstream/:model_id/*upstreamPath", pm.proxyToUpstream)
-
-	pm.ginEngine.GET("/unload", pm.unloadAllModelsHandler)
-
-	pm.ginEngine.GET("/running", pm.listRunningProcessesHandler)
-
+	/**
+	 * User Interface Endpoints
+	 */
 	pm.ginEngine.GET("/", func(c *gin.Context) {
 		c.Redirect(http.StatusFound, "/ui")
 	})
+
+	pm.ginEngine.GET("/upstream", func(c *gin.Context) {
+		c.Redirect(http.StatusFound, "/ui/models")
+	})
+	pm.ginEngine.Any("/upstream/:model_id/*upstreamPath", pm.proxyToUpstream)
+
+	pm.ginEngine.GET("/unload", pm.unloadAllModelsHandler)
+	pm.ginEngine.GET("/running", pm.listRunningProcessesHandler)
 
 	pm.ginEngine.GET("/favicon.ico", func(c *gin.Context) {
 		if data, err := reactStaticFS.ReadFile("ui_dist/favicon.ico"); err == nil {
@@ -181,7 +185,6 @@ func (pm *ProxyManager) setupGinEngine() {
 		}
 	})
 
-	// Serve /ui/*
 	reactFS, err := GetReactFS()
 	if err != nil {
 		pm.proxyLogger.Errorf("Failed to load React filesystem: %v", err)
@@ -208,7 +211,7 @@ func (pm *ProxyManager) setupGinEngine() {
 		})
 	}
 
-	// proxymanager_api.go
+	// see: proxymanager_api.go
 	// add API handler functions
 	addApiHandlers(pm)
 
@@ -331,11 +334,6 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 	// rewrite the path
 	c.Request.URL.Path = c.Param("upstreamPath")
 	processGroup.ProxyRequest(requestedModel, c.Writer, c.Request)
-}
-
-func (pm *ProxyManager) upstreamIndex(c *gin.Context) {
-	c.Redirect(http.StatusFound, "/ui/models")
-
 }
 
 func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {

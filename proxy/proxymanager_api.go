@@ -32,12 +32,8 @@ func (pm *ProxyManager) getModelStatus() []Model {
 	// Extract keys and sort them
 	models := []Model{}
 
-	var modelIDs []string
-	for modelID, modelConfig := range pm.config.Models {
-		if modelConfig.Unlisted {
-			continue
-		}
-
+	modelIDs := make([]string, 0, len(pm.config.Models))
+	for modelID := range pm.config.Models {
 		modelIDs = append(modelIDs, modelID)
 	}
 	sort.Strings(modelIDs)
