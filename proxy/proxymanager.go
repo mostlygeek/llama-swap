@@ -8,7 +8,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -163,37 +162,58 @@ func (pm *ProxyManager) setupGinEngine() {
 	pm.ginEngine.GET("/logs/stream/:logMonitorID", pm.streamLogsHandler)
 	pm.ginEngine.GET("/logs/streamSSE/:logMonitorID", pm.streamLogsHandlerSSE)
 
-	pm.ginEngine.GET("/upstream", pm.upstreamIndex)
+	/**
+	 * User Interface Endpoints
+	 */
+	pm.ginEngine.GET("/", func(c *gin.Context) {
+		c.Redirect(http.StatusFound, "/ui")
+	})
+
+	pm.ginEngine.GET("/upstream", func(c *gin.Context) {
+		c.Redirect(http.StatusFound, "/ui/models")
+	})
 	pm.ginEngine.Any("/upstream/:model_id/*upstreamPath", pm.proxyToUpstream)
 
 	pm.ginEngine.GET("/unload", pm.unloadAllModelsHandler)
-
 	pm.ginEngine.GET("/running", pm.listRunningProcessesHandler)
 
-	pm.ginEngine.GET("/", func(c *gin.Context) {
-		// Set the Content-Type header to text/html
-		c.Header("Content-Type", "text/html")
-
-		// Write the embedded HTML content to the response
-		htmlData, err := getHTMLFile("index.html")
-		if err != nil {
-			c.String(http.StatusInternalServerError, err.Error())
-			return
-		}
-		_, err = c.Writer.Write(htmlData)
-		if err != nil {
-			c.String(http.StatusInternalServerError, fmt.Sprintf("failed to write response: %v", err))
-			return
-		}
-	})
-
 	pm.ginEngine.GET("/favicon.ico", func(c *gin.Context) {
-		if data, err := getHTMLFile("favicon.ico"); err == nil {
+		if data, err := reactStaticFS.ReadFile("ui_dist/favicon.ico"); err == nil {
 			c.Data(http.StatusOK, "image/x-icon", data)
 		} else {
 			c.String(http.StatusInternalServerError, err.Error())
 		}
 	})
+
+	reactFS, err := GetReactFS()
+	if err != nil {
+		pm.proxyLogger.Errorf("Failed to load React filesystem: %v", err)
+	} else {
+
+		// serve files that exist under /ui/*
+		pm.ginEngine.StaticFS("/ui", reactFS)
+
+		// server SPA for UI under /ui/*
+		pm.ginEngine.NoRoute(func(c *gin.Context) {
+			if !strings.HasPrefix(c.Request.URL.Path, "/ui") {
+				c.AbortWithStatus(http.StatusNotFound)
+				return
+			}
+
+			file, err := reactFS.Open("index.html")
+			if err != nil {
+				c.String(http.StatusInternalServerError, err.Error())
+				return
+			}
+			defer file.Close()
+			http.ServeContent(c.Writer, c.Request, "index.html", time.Now(), file)
+
+		})
+	}
+
+	// see: proxymanager_api.go
+	// add API handler functions
+	addApiHandlers(pm)
 
 	// Disable console color for testing
 	gin.DisableConsoleColor()
@@ -314,55 +334,6 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 	// rewrite the path
 	c.Request.URL.Path = c.Param("upstreamPath")
 	processGroup.ProxyRequest(requestedModel, c.Writer, c.Request)
-}
-
-func (pm *ProxyManager) upstreamIndex(c *gin.Context) {
-	var html strings.Builder
-
-	html.WriteString("<!doctype HTML>\n<html><body><h1>Available Models</h1><a href=\"/unload\">Unload all models</a><ul>")
-
-	// Extract keys and sort them
-	var modelIDs []string
-	for modelID, modelConfig := range pm.config.Models {
-		if modelConfig.Unlisted {
-			continue
-		}
-
-		modelIDs = append(modelIDs, modelID)
-	}
-	sort.Strings(modelIDs)
-
-	// Iterate over sorted keys
-	for _, modelID := range modelIDs {
-		// Get process state
-		processGroup := pm.findGroupByModelName(modelID)
-		var state string
-		if processGroup != nil {
-			process := processGroup.processes[modelID]
-			if process != nil {
-				var stateStr string
-				switch process.CurrentState() {
-				case StateReady:
-					stateStr = "Ready"
-				case StateStarting:
-					stateStr = "Starting"
-				case StateStopping:
-					stateStr = "Stopping"
-				case StateShutdown:
-					stateStr = "Shutdown"
-				case StateStopped:
-					stateStr = "Stopped"
-				default:
-					stateStr = "Unknown"
-				}
-				state = stateStr
-			}
-		}
-		html.WriteString(fmt.Sprintf("<li><a href=\"/upstream/%s\">%s</a> - %s</li>", modelID, modelID, state))
-	}
-	html.WriteString("</ul></body></html>")
-	c.Header("Content-Type", "text/html")
-	c.String(http.StatusOK, html.String())
 }
 
 func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
