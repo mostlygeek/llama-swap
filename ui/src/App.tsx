@@ -32,7 +32,7 @@ function App() {
             <Routes>
               <Route path="/" element={<LogViewerPage />} />
               <Route path="/models" element={<ModelPage />} />
-              <Route path="*" element={<Navigate to="/ui/" replace />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </main>
         </div>

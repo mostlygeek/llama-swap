@@ -112,15 +112,31 @@ export function APIProvider({ children }: APIProviderProps) {
   }, []);
 
   const listModels = useCallback(async (): Promise<Model[]> => {
-    const response = await fetch("/api/models/");
-    const data = await response.json();
-    return data || [];
+    try {
+      const response = await fetch("/api/models/");
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      return data || [];
+    } catch (error) {
+      console.error("Failed to fetch models:", error);
+      return []; // Return empty array as fallback
+    }
   }, []);
 
   const unloadAllModels = useCallback(async () => {
-    await fetch(`/api/models/unload/`, {
-      method: "POST",
-    });
+    try {
+      const response = await fetch(`/api/models/unload/`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to unload models: ${response.status}`);
+      }
+    } catch (error) {
+      console.error("Failed to unload models:", error);
+      throw error; // Re-throw to let calling code handle it
+    }
   }, []);
 
   const value = useMemo(
