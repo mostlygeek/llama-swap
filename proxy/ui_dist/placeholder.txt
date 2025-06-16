@@ -1,0 +1,1 @@
+here something to embed for ui_dist/ in golang compile.
