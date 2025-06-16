@@ -20,7 +20,7 @@ clean:
 	rm -rf $(BUILD_DIR)
 
 proxy/ui_dist/placeholder.txt:
-    mkdir -p proxy/ui_dist
+	mkdir -p proxy/ui_dist
 	touch $@
 
 test: proxy/ui_dist/placeholder.txt
