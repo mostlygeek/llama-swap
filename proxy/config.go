@@ -205,11 +205,6 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	for _, modelId := range modelIds {
 		modelConfig := config.Models[modelId]
 
-		// enforce ${PORT} used in both cmd and proxy
-		if !strings.Contains(modelConfig.Cmd, "${PORT}") && strings.Contains(modelConfig.Proxy, "${PORT}") {
-			return Config{}, fmt.Errorf("model %s: proxy uses ${PORT} but cmd does not - ${PORT} is only available when used in cmd", modelId)
-		}
-
 		// go through model config fields: cmd, cmdStop, proxy, checkEndPoint and replace macros with macro values
 		for macroName, macroValue := range config.Macros {
 			macroSlug := fmt.Sprintf("${%s}", macroName)
@@ -217,6 +212,11 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			modelConfig.CmdStop = strings.ReplaceAll(modelConfig.CmdStop, macroSlug, macroValue)
 			modelConfig.Proxy = strings.ReplaceAll(modelConfig.Proxy, macroSlug, macroValue)
 			modelConfig.CheckEndpoint = strings.ReplaceAll(modelConfig.CheckEndpoint, macroSlug, macroValue)
+		}
+
+		// enforce ${PORT} used in both cmd and proxy
+		if !strings.Contains(modelConfig.Cmd, "${PORT}") && strings.Contains(modelConfig.Proxy, "${PORT}") {
+			return Config{}, fmt.Errorf("model %s: proxy uses ${PORT} but cmd does not - ${PORT} is only available when used in cmd", modelId)
 		}
 
 		// only iterate over models that use ${PORT} to keep port numbers from increasing unnecessarily
