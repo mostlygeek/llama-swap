@@ -19,10 +19,13 @@ all: mac linux simple-responder
 clean:
 	rm -rf $(BUILD_DIR)
 
-test:
+proxy/ui_dist/placeholder.txt:
+	touch $@
+
+test: proxy/ui_dist/placeholder.txt
 	go test -short -v -count=1 ./proxy
 
-test-all:
+test-all: proxy/ui_dist/placeholder.txt
 	go test -v -count=1 ./proxy
 
 # build react UI
