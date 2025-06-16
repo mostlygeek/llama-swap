@@ -8,7 +8,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -171,20 +170,7 @@ func (pm *ProxyManager) setupGinEngine() {
 	pm.ginEngine.GET("/running", pm.listRunningProcessesHandler)
 
 	pm.ginEngine.GET("/", func(c *gin.Context) {
-		// Set the Content-Type header to text/html
-		c.Header("Content-Type", "text/html")
-
-		// Write the embedded HTML content to the response
-		htmlData, err := getHTMLFile("index.html")
-		if err != nil {
-			c.String(http.StatusInternalServerError, err.Error())
-			return
-		}
-		_, err = c.Writer.Write(htmlData)
-		if err != nil {
-			c.String(http.StatusInternalServerError, fmt.Sprintf("failed to write response: %v", err))
-			return
-		}
+		c.Redirect(http.StatusFound, "/ui")
 	})
 
 	pm.ginEngine.GET("/favicon.ico", func(c *gin.Context) {
@@ -347,52 +333,8 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 }
 
 func (pm *ProxyManager) upstreamIndex(c *gin.Context) {
-	var html strings.Builder
+	c.Redirect(http.StatusFound, "/ui/models")
 
-	html.WriteString("<!doctype HTML>\n<html><body><h1>Available Models</h1><a href=\"/unload\">Unload all models</a><ul>")
-
-	// Extract keys and sort them
-	var modelIDs []string
-	for modelID, modelConfig := range pm.config.Models {
-		if modelConfig.Unlisted {
-			continue
-		}
-
-		modelIDs = append(modelIDs, modelID)
-	}
-	sort.Strings(modelIDs)
-
-	// Iterate over sorted keys
-	for _, modelID := range modelIDs {
-		// Get process state
-		processGroup := pm.findGroupByModelName(modelID)
-		var state string
-		if processGroup != nil {
-			process := processGroup.processes[modelID]
-			if process != nil {
-				var stateStr string
-				switch process.CurrentState() {
-				case StateReady:
-					stateStr = "Ready"
-				case StateStarting:
-					stateStr = "Starting"
-				case StateStopping:
-					stateStr = "Stopping"
-				case StateShutdown:
-					stateStr = "Shutdown"
-				case StateStopped:
-					stateStr = "Stopped"
-				default:
-					stateStr = "Unknown"
-				}
-				state = stateStr
-			}
-		}
-		html.WriteString(fmt.Sprintf("<li><a href=\"/upstream/%s\">%s</a> - %s</li>", modelID, modelID, state))
-	}
-	html.WriteString("</ul></body></html>")
-	c.Header("Content-Type", "text/html")
-	c.String(http.StatusOK, html.String())
 }
 
 func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {

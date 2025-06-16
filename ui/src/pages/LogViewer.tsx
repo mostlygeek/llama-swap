@@ -26,9 +26,10 @@ interface LogPanelProps {
   id: string;
   title: string;
   logData: string;
+  className?: string;
 }
 
-const LogPanel = ({ id, title, logData }: LogPanelProps) => {
+export const LogPanel = ({ id, title, logData, className }: LogPanelProps) => {
   const [filterRegex, setFilterRegex] = useState("");
   const [panelState, setPanelState] = usePersistentState<"hide" | "small" | "max">(
     `logPanel-${id}-panelState`,
@@ -100,7 +101,7 @@ const LogPanel = ({ id, title, logData }: LogPanelProps) => {
   }, [filteredLogs]);
 
   return (
-    <div className="bg-surface border border-border rounded-lg overflow-hidden flex flex-col">
+    <div className={`bg-surface border border-border rounded-lg overflow-hidden flex flex-col ${className || ""}`}>
       <div className="p-4 border-b border-border bg-secondary">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           {/* Title - Always full width on mobile, normal on desktop */}

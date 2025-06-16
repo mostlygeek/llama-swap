@@ -1,14 +1,17 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAPI } from "../contexts/APIProvider";
+import { LogPanel } from "./LogViewer";
 
 export default function ModelsPage() {
-  const { models, enableModelUpdates, unloadAllModels } = useAPI();
+  const { models, enableModelUpdates, unloadAllModels, upstreamLogs, enableUpstreamLogs } = useAPI();
   const [isUnloading, setIsUnloading] = useState(false);
 
   useEffect(() => {
     enableModelUpdates(true);
+    enableUpstreamLogs(true);
     return () => {
       enableModelUpdates(false);
+      enableUpstreamLogs(false);
     };
   }, []);
 
@@ -28,10 +31,10 @@ export default function ModelsPage() {
 
   return (
     <div className="h-screen">
-      <div className="flex flex-col md:flex-row gap-4 h-full">
+      <div className="flex flex-col md:flex-row gap-4">
         {/* Left Column */}
-        <div className="w-full md:w-1/2 h-[80%] flex items-top">
-          <div className="card h-[90%] w-full">
+        <div className="w-full md:w-1/2 flex items-top">
+          <div className="card w-full">
             <h2 className="">Models</h2>
             <button className="btn" onClick={handleUnloadAllModels} disabled={isUnloading}>
               {isUnloading ? "Unloading..." : "Unload All Models"}
@@ -58,8 +61,8 @@ export default function ModelsPage() {
         </div>
 
         {/* Right Column */}
-        <div className="w-full md:w-1/2 h-[80%] flex items-top">
-          <div className="card h-[90%] w-full"></div>
+        <div className="w-full md:w-1/2  flex items-top">
+          <LogPanel id="modelsupstream" title="Upstream Logs" logData={upstreamLogs} className="h-full" />
         </div>
       </div>
     </div>
