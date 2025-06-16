@@ -23,7 +23,7 @@
   --color-card-border-inner: rgba(94, 82, 64, 0.12);
   --color-error: rgba(192, 21, 47, 1);
   --color-success: rgba(33, 128, 141, 1);
-  --color-warning: rgba(168, 75, 47, 1);
+  --color-warning: rgb(244, 155, 0);
   --color-info: rgba(98, 108, 113, 1);
   --color-focus-ring: rgba(33, 128, 141, 0.4);
   --color-select-caret: rgba(19, 52, 59, 0.8);
@@ -50,7 +50,7 @@
     --color-border: rgba(119, 124, 124, 0.3);
     --color-error: rgba(255, 84, 89, 1);
     --color-success: rgba(50, 184, 198, 1);
-    --color-warning: rgba(230, 129, 97, 1);
+    --color-warning: rgb(244, 155, 0);
     --color-info: rgba(167, 169, 169, 1);
     --color-focus-ring: rgba(50, 184, 198, 0.4);
     --color-btn-primary-text: rgba(19, 52, 59, 1);
@@ -129,7 +129,8 @@
     @apply bg-success/10 text-success;
   }
 
-  .status--starting {
+  .status--starting,
+  .status--stopping {
     @apply bg-warning/10 text-warning;
   }
 

@@ -1,19 +1,20 @@
 import { useRef, createContext, useState, useContext, useEffect, useCallback, useMemo, type ReactNode } from "react";
 
-type ModelStatus = "ready" | "starting" | "stopped";
+type ModelStatus = "ready" | "starting" | "stopping" | "stopped" | "shutdown" | "unknown";
 const LOG_LENGTH_LIMIT = 1024 * 100; /* 100KB of log data */
 
-interface Model {
-  name: string;
-  status: ModelStatus;
+export interface Model {
+  id: string;
+  state: ModelStatus;
 }
 
 interface APIProviderType {
+  models: Model[];
   listModels: () => Promise<Model[]>;
-  unloadModel: (modelName: string) => Promise<void>;
   unloadAllModels: () => Promise<void>;
   enableProxyLogs: (enabled: boolean) => void;
   enableUpstreamLogs: (enabled: boolean) => void;
+  enableModelUpdates: (enabled: boolean) => void;
   proxyLogs: string;
   upstreamLogs: string;
 }
@@ -28,6 +29,9 @@ export function APIProvider({ children }: APIProviderProps) {
   const [upstreamLogs, setUpstreamLogs] = useState("");
   const proxyEventSource = useRef<EventSource | null>(null);
   const upstreamEventSource = useRef<EventSource | null>(null);
+
+  const [models, setModels] = useState<Model[]>([]);
+  const modelStatusEventSource = useRef<EventSource | null>(null);
 
   const appendLog = useCallback((newData: string, setter: React.Dispatch<React.SetStateAction<string>>) => {
     setter((prev) => {
@@ -78,23 +82,39 @@ export function APIProvider({ children }: APIProviderProps) {
     [upstreamEventSource, handleUpstreamMessage]
   );
 
+  const enableModelUpdates = useCallback(
+    (enabled: boolean) => {
+      if (enabled) {
+        const eventSource = new EventSource("/api/modelsSSE");
+        eventSource.onmessage = (e: MessageEvent) => {
+          try {
+            const models = JSON.parse(e.data) as Model[];
+            setModels(models);
+          } catch (e) {
+            console.error(e);
+          }
+        };
+        modelStatusEventSource.current = eventSource;
+      } else {
+        modelStatusEventSource.current?.close();
+        modelStatusEventSource.current = null;
+      }
+    },
+    [setModels]
+  );
+
   useEffect(() => {
     return () => {
       proxyEventSource.current?.close();
       upstreamEventSource.current?.close();
+      modelStatusEventSource.current?.close();
     };
   }, []);
 
   const listModels = useCallback(async (): Promise<Model[]> => {
-    const response = await fetch("/api/models");
+    const response = await fetch("/api/models/");
     const data = await response.json();
-    return data.data || [];
-  }, []);
-
-  const unloadModel = useCallback(async (modelName: string) => {
-    await fetch(`/api/models/unload/${modelName}`, {
-      method: "POST",
-    });
+    return data || [];
   }, []);
 
   const unloadAllModels = useCallback(async () => {
@@ -105,15 +125,25 @@ export function APIProvider({ children }: APIProviderProps) {
 
   const value = useMemo(
     () => ({
+      models,
       listModels,
-      unloadModel,
       unloadAllModels,
       enableProxyLogs,
       enableUpstreamLogs,
+      enableModelUpdates,
       proxyLogs,
       upstreamLogs,
     }),
-    [listModels, unloadModel, unloadAllModels, enableProxyLogs, enableUpstreamLogs, proxyLogs, upstreamLogs]
+    [
+      models,
+      listModels,
+      unloadAllModels,
+      enableProxyLogs,
+      enableUpstreamLogs,
+      enableModelUpdates,
+      proxyLogs,
+      upstreamLogs,
+    ]
   );
 
   return <APIContext.Provider value={value}>{children}</APIContext.Provider>;
