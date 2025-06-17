@@ -48,7 +48,7 @@ It can be very minimal to start:
 models:
   "qwen2.5":
     cmd: |
-      /app/llama-server
+      /path/to/llama-server
       -hf bartowski/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M
       --port ${PORT}
 ```
