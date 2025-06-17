@@ -40,7 +40,9 @@ In the most basic configuration llama-swap handles one model at a time. For more
 
 ## config.yaml
 
-llama-swap's configuration is purposefully simple:
+llama-swap is managed entirely through a yaml configuration file. 
+
+It can be very minimal to start: 
 
 ```yaml
 models:
@@ -49,27 +51,21 @@ models:
       /app/llama-server
       -hf bartowski/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M
       --port ${PORT}
-
-  "smollm2":
-    cmd: |
-      /app/llama-server
-      -hf bartowski/SmolLM2-135M-Instruct-GGUF:Q4_K_M
-      --port ${PORT}
 ```
 
-.. but also supports many advanced features:
+However, there are many more capabilities that llama-swap supports: 
 
 - `groups` to run multiple models at once
-- `macros` for reusable snippets
 - `ttl` to automatically unload models
+- `macros` for reusable snippets
 - `aliases` to use familiar model names (e.g., "gpt-4o-mini")
-- `env` variables to pass custom environment to inference servers
+- `env` to pass custom environment variables to inference servers
+- `cmdStop` for to gracefully stop Docker/Podman containers
 - `useModelName` to override model names sent to upstream servers
 - `healthCheckTimeout` to control model startup wait times
 - `${PORT}` automatic port variables for dynamic port assignment
-- `cmdStop` for to gracefully stop Docker/Podman containers
 
-Check the [configuration documentation](https://github.com/mostlygeek/llama-swap/wiki/Configuration) in the wiki for all options.
+See the [configuration documentation](https://github.com/mostlygeek/llama-swap/wiki/Configuration) in the wiki all options and examples.
 
 ## Docker Install ([download images](https://github.com/mostlygeek/llama-swap/pkgs/container/llama-swap))
 
@@ -120,11 +116,11 @@ $ docker run -it --rm --runtime nvidia -p 9292:8080 \
 
 ## Bare metal Install ([download](https://github.com/mostlygeek/llama-swap/releases))
 
-Pre-built binaries are available for Linux, FreeBSD and Darwin (OSX). These are automatically published and are likely a few hours ahead of the docker releases. The baremetal install works with any OpenAI compatible server, not just llama-server.
+Pre-built binaries are available for Linux, Mac, Windows and FreeBSD. These are automatically published and are likely a few hours ahead of the docker releases. The baremetal install works with any OpenAI compatible server, not just llama-server.
 
-1. Create a configuration file, see [config.example.yaml](config.example.yaml)
 1. Download a [release](https://github.com/mostlygeek/llama-swap/releases) appropriate for your OS and architecture.
-1. Run the binary with `llama-swap --config path/to/config.yaml`.
+1. Create a configuration file, see the [configuration documentation](https://github.com/mostlygeek/llama-swap/wiki/Configuration).
+1. Run the binary with `llama-swap --config path/to/config.yaml --listen localhost:8080`.
    Available flags:
    - `--config`: Path to the configuration file (default: `config.yaml`).
    - `--listen`: Address and port to listen on (default: `:8080`).
@@ -133,16 +129,16 @@ Pre-built binaries are available for Linux, FreeBSD and Darwin (OSX). These are 
 
 ### Building from source
 
-1. Install golang for your system
+1. Build requires golang and nodejs for the user interface.
 1. `git clone git@github.com:mostlygeek/llama-swap.git`
 1. `make clean all`
 1. Binaries will be in `build/` subdirectory
 
 ## Monitoring Logs
 
-Open the `http://<host>/logs` with your browser to get a web interface with streaming logs.
+Open the `http://<host>:<port>/` with your browser to get a web interface with streaming logs.
 
-Of course, CLI access is also supported:
+CLI access is also supported:
 
 ```shell
 # sends up to the last 10KB of logs
