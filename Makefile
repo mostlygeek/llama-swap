@@ -29,9 +29,13 @@ test: proxy/ui_dist/placeholder.txt
 test-all: proxy/ui_dist/placeholder.txt
 	go test -v -count=1 ./proxy
 
+ui/node_modules:
+	cd ui && npm install
+
 # build react UI
-ui:
+ui: ui/node_modules
 	cd ui && npm run build
+
 # Build OSX binary
 mac: ui
 	@echo "Building Mac binary..."
