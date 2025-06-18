@@ -17,14 +17,16 @@ builds:
       - goos: windows
         goarch: arm64
 
-# use zip format for windows
 archives:
   - id: default
-    format: tar.gz
+    formats:
+      - tar.gz
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     builds_info:
       group: root
       owner: root
     format_overrides:
+      # use zip format for windows
       - goos: windows
-        formats: ['zip']
+        formats:
+          - zip
