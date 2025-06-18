@@ -22,6 +22,7 @@ Written in golang, it is very easy to install (single binary with no dependencie
   - `v1/audio/speech` ([#36](https://github.com/mostlygeek/llama-swap/issues/36))
   - `v1/audio/transcriptions` ([docs](https://github.com/mostlygeek/llama-swap/issues/41#issuecomment-2722637867))
 - ✅ llama-swap custom API endpoints
+  - `/ui` - web UI
   - `/log` - remote log monitoring
   - `/upstream/:model_id` - direct access to upstream HTTP server ([demo](https://github.com/mostlygeek/llama-swap/pull/31))
   - `/unload` - manually unload running models ([#58](https://github.com/mostlygeek/llama-swap/issues/58))
@@ -66,6 +67,14 @@ However, there are many more capabilities that llama-swap supports:
 - `${PORT}` automatic port variables for dynamic port assignment
 
 See the [configuration documentation](https://github.com/mostlygeek/llama-swap/wiki/Configuration) in the wiki all options and examples.
+
+## Web UI
+
+llama-swap ships with a web based interface to make it easier to monitor logs and check the status of models. 
+
+<img width="1854" alt="image" src="https://github.com/user-attachments/assets/ee0025f0-f031-4158-9b5d-cd98b2b9fe4d" />
+
+
 
 ## Docker Install ([download images](https://github.com/mostlygeek/llama-swap/pkgs/container/llama-swap))
 
