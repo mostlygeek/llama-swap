@@ -189,6 +189,7 @@ func (p *Process) start() error {
 	p.waitStarting.Add(1)
 	defer p.waitStarting.Done()
 	cmdContext, ctxCancelUpstream := context.WithCancel(context.Background())
+	p.proxyLogger.Debugf("<%s> Executing start command: %s", p.ID, strings.Join(args, " "))
 	p.cmd = exec.CommandContext(cmdContext, args[0], args[1:]...)
 	p.cmd.Stdout = p.processLogger
 	p.cmd.Stderr = p.processLogger
