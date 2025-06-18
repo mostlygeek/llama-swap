@@ -394,6 +394,9 @@ func TestProcess_StopImmediately(t *testing.T) {
 // Test that SIGKILL is sent when gracefulStopTimeout is reached and properly terminates
 // the upstream command
 func TestProcess_ForceStopWithKill(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping SIGTERM test on Windows ")
+	}
 
 	expectedMessage := "test_sigkill"
 	binaryPath := getSimpleResponderPath()
