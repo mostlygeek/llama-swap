@@ -193,7 +193,7 @@ func (p *Process) start() error {
 	p.cmd = exec.CommandContext(cmdContext, args[0], args[1:]...)
 	p.cmd.Stdout = p.processLogger
 	p.cmd.Stderr = p.processLogger
-	p.cmd.Env = p.config.Env
+	p.cmd.Env = append(p.cmd.Environ(), p.config.Env...)
 
 	p.cmd.Cancel = p.cmdStopUpstreamProcess
 	p.cmd.WaitDelay = p.gracefulStopTimeout
@@ -531,7 +531,7 @@ func (p *Process) cmdStopUpstreamProcess() error {
 		stopCmd := exec.Command(stopArgs[0], stopArgs[1:]...)
 		stopCmd.Stdout = p.processLogger
 		stopCmd.Stderr = p.processLogger
-		stopCmd.Env = p.config.Env
+		stopCmd.Env = append(stopCmd.Environ(), p.config.Env...)
 
 		if err := stopCmd.Run(); err != nil {
 			p.proxyLogger.Errorf("<%s> Failed to exec stop command: %v", p.ID, err)
