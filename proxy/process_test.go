@@ -394,6 +394,9 @@ func TestProcess_StopImmediately(t *testing.T) {
 // Test that SIGKILL is sent when gracefulStopTimeout is reached and properly terminates
 // the upstream command
 func TestProcess_ForceStopWithKill(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping SIGTERM test on Windows ")
+	}
 
 	expectedMessage := "test_sigkill"
 	binaryPath := getSimpleResponderPath()
@@ -405,7 +408,6 @@ func TestProcess_ForceStopWithKill(t *testing.T) {
 		Cmd:           fmt.Sprintf("%s --port %d --respond %s --silent --ignore-sig-term", binaryPath, port, expectedMessage),
 		Proxy:         fmt.Sprintf("http://127.0.0.1:%d", port),
 		CheckEndpoint: "/health",
-		CmdStop:       "taskkill /f /t /pid ${PID}",
 	}
 
 	process := NewProcess("stop_immediate", 2, config, debugLogger, debugLogger)
@@ -464,4 +466,28 @@ func TestProcess_StopCmd(t *testing.T) {
 	assert.Equal(t, process.CurrentState(), StateReady)
 	process.StopImmediately()
 	assert.Equal(t, process.CurrentState(), StateStopped)
+}
+
+func TestProcess_EnvironmentSetCorrectly(t *testing.T) {
+	expectedMessage := "test_env_not_emptied"
+	config := getTestSimpleResponderConfig(expectedMessage)
+
+	// ensure that the the default config does not blank out the inherited environment
+	configWEnv := config
+
+	// ensure the additiona variables are appended to the process' environment
+	configWEnv.Env = append(configWEnv.Env, "TEST_ENV1=1", "TEST_ENV2=2")
+
+	process1 := NewProcess("env_test", 2, config, debugLogger, debugLogger)
+	process2 := NewProcess("env_test", 2, configWEnv, debugLogger, debugLogger)
+
+	process1.start()
+	defer process1.Stop()
+	process2.start()
+	defer process2.Stop()
+
+	assert.NotZero(t, len(process1.cmd.Environ()))
+	assert.NotZero(t, len(process2.cmd.Environ()))
+	assert.Equal(t, len(process1.cmd.Environ())+2, len(process2.cmd.Environ()), "process2 should have 2 more environment variables than process1")
+
 }
