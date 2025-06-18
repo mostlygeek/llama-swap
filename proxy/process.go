@@ -532,7 +532,7 @@ func (p *Process) cmdStopUpstreamProcess() error {
 		stopCmd := exec.Command(stopArgs[0], stopArgs[1:]...)
 		stopCmd.Stdout = p.processLogger
 		stopCmd.Stderr = p.processLogger
-		stopCmd.Env = p.config.Env
+		stopCmd.Env = p.cmd.Env
 
 		if err := stopCmd.Run(); err != nil {
 			p.proxyLogger.Errorf("<%s> Failed to exec stop command: %v", p.ID, err)
