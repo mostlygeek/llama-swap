@@ -12,6 +12,7 @@ interface APIProviderType {
   models: Model[];
   listModels: () => Promise<Model[]>;
   unloadAllModels: () => Promise<void>;
+  loadModel: (model: string) => Promise<void>;
   enableProxyLogs: (enabled: boolean) => void;
   enableUpstreamLogs: (enabled: boolean) => void;
   enableModelUpdates: (enabled: boolean) => void;
@@ -139,11 +140,26 @@ export function APIProvider({ children }: APIProviderProps) {
     }
   }, []);
 
+  const loadModel = useCallback(async (model: string) => {
+    try {
+      const response = await fetch(`/upstream/${model}/`, {
+        method: "GET",
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to load model: ${response.status}`);
+      }
+    } catch (error) {
+      console.error("Failed to load model:", error);
+      throw error; // Re-throw to let calling code handle it
+    }
+  }, []);
+
   const value = useMemo(
     () => ({
       models,
       listModels,
       unloadAllModels,
+      loadModel,
       enableProxyLogs,
       enableUpstreamLogs,
       enableModelUpdates,
@@ -154,6 +170,7 @@ export function APIProvider({ children }: APIProviderProps) {
       models,
       listModels,
       unloadAllModels,
+      loadModel,
       enableProxyLogs,
       enableUpstreamLogs,
       enableModelUpdates,
