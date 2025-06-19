@@ -3,7 +3,7 @@ import { useAPI } from "../contexts/APIProvider";
 import { LogPanel } from "./LogViewer";
 
 export default function ModelsPage() {
-  const { models, enableModelUpdates, unloadAllModels, upstreamLogs, enableUpstreamLogs } = useAPI();
+  const { models, enableModelUpdates, unloadAllModels, loadModel, upstreamLogs, enableUpstreamLogs } = useAPI();
   const [isUnloading, setIsUnloading] = useState(false);
 
   useEffect(() => {
@@ -43,6 +43,8 @@ export default function ModelsPage() {
               <thead>
                 <tr className="border-b border-primary">
                   <th className="text-left p-2">Name</th>
+                  <th className="text-left p-2">Upstream</th>
+                  <th className="text-left p-2">Actions</th>
                   <th className="text-left p-2">State</th>
                 </tr>
               </thead>
@@ -50,9 +52,15 @@ export default function ModelsPage() {
                 {models.map((model) => (
                   <tr key={model.id} className="border-b hover:bg-secondary-hover border-border">
                     <td className="p-2">
-                      <a href={`/upstream/${model.id}/`} className="underline" target="top">
-                        {model.id}
+                      <span className="">{model.id}</span>
+                    </td>
+                    <td className="p-2">
+                      <a href={`/upstream/${model.id}/`} className="underline" target="_blank">
+                        Direct Link
                       </a>
+                    </td>
+                    <td className="p-2">
+                      <button className="btn btn--sm" disabled={model.state !== "stopped"} onClick={() => loadModel(model.id)}>Load</button>
                     </td>
                     <td className="p-2">
                       <span className={`status status--${model.state}`}>{model.state}</span>
