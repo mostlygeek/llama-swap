@@ -43,8 +43,7 @@ export default function ModelsPage() {
               <thead>
                 <tr className="border-b border-primary">
                   <th className="text-left p-2">Name</th>
-                  <th className="text-left p-2">Upstream</th>
-                  <th className="text-left p-2">Actions</th>
+                  <th className="text-left p-2"></th>
                   <th className="text-left p-2">State</th>
                 </tr>
               </thead>
@@ -52,11 +51,8 @@ export default function ModelsPage() {
                 {models.map((model) => (
                   <tr key={model.id} className="border-b hover:bg-secondary-hover border-border">
                     <td className="p-2">
-                      <span className="">{model.id}</span>
-                    </td>
-                    <td className="p-2">
                       <a href={`/upstream/${model.id}/`} className="underline" target="_blank">
-                        Direct Link
+                        {model.id}
                       </a>
                     </td>
                     <td className="p-2">
