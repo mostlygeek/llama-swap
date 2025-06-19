@@ -143,6 +143,10 @@
     @apply bg-surface p-2 px-4 text-sm rounded-full border border-2 transition-colors duration-200 border-btn-border;
   }
 
+  .btn:hover {
+    cursor: pointer;
+  }
+
   .btn--sm {
     @apply px-2 py-0.5 text-xs;
   }
