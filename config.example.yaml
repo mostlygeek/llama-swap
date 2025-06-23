@@ -1,93 +1,191 @@
-# ======
-# For a more detailed configuration example:
-# https://github.com/mostlygeek/llama-swap/wiki/Configuration
-# ======
+# llama-swap YAML configuration example
+# -------------------------------------
+#
+# - Below are all the available configuration options for llama-swap.
+# - Settings with a default value, or noted as optional can be omitted.
+# - Settings that are marked required must be in your configuration file
 
-# Seconds to wait for llama.cpp to be available to serve requests
-# Default (and minimum): 15 seconds
-healthCheckTimeout: 90
+# healthCheckTimeout: number of seconds to wait for a model to be ready to serve requests
+# - optional, default: 120
+# - minimum value is 15 seconds, anything less will be set to this value
+healthCheckTimeout: 500
 
-# valid log levels: debug, info (default), warn, error
-logLevel: debug
+# logLevel: sets the logging value
+# - optional, default: info
+# - Valid log levels: debug, info, warn, error
+logLevel: info
 
-# creating a coding profile with models for code generation and general questions
-groups:
-  coding:
-    swap: false
-    members:
-      - "qwen"
-      - "llama"
+# startPort: sets the starting port number for the automatic ${PORT} macro.
+# - optional, default: 5800
+# - the ${PORT} macro can be used in model.cmd and model.proxy settings
+# - it is automatically incremented for every model that uses it
+startPort: 10001
 
+# macros: sets a dictionary of string:string pairs
+# - optional, default: empty dictionary
+# - these are reusable snippets
+# - used in a model's cmd, cmdStop, proxy and checkEndpoint
+# - useful for reducing common configuration settings
+macros:
+  "latest-llama": >
+    /path/to/llama-server/llama-server-ec9e0301
+    --port ${PORT}
+
+# models: a dictionary of model configurations
+# - required
+# - each key is the model's ID, used in API requests
+# - model settings have default values that are used if they are not defined here
+# - below are examples of the various settings a model can have:
+# - available model settings: env, cmd, cmdStop, proxy, aliases, checkEndpoint, ttl, unlisted
 models:
+
+  # keys are the model names used in API requests
   "llama":
+    # cmd: the command to run to start the inference server.
+    # - required
+    # - it is just a string, similar to what you would run on the CLI
+    # - using `|` allows for comments in the command, these will be parsed out
+    # - macros can be used within cmd
     cmd: |
-      models/llama-server-osx
-      --port ${PORT}
-      -m models/Llama-3.2-1B-Instruct-Q4_0.gguf
+      # ${latest-llama} is a macro that is defined above
+      ${latest-llama}
+      --model path/to/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
 
-    # list of model name aliases this llama.cpp instance can serve
+    # env: define an array of environment variables to inject into cmd's environment
+    # - optional, default: empty array
+    # - each value is a single string
+    # - in the format: ENV_NAME=value
+    env:
+      - "CUDA_VISIBLE_DEVICES=0,1,2"
+
+    # proxy: the URL where llama-swap routes API requests
+    # - optional, default: http://localhost:${PORT}
+    # - if you used ${PORT} in cmd this can be omitted
+    # - if you use a custom port in cmd this *must* be set
+    proxy: http://127.0.0.1:8999
+
+    # aliases: alternative model names that this model configuration is used for
+    # - optional, default: empty array
+    # - aliases must be unique globally
+    # - useful for impersonating a specific model
     aliases:
-    - gpt-4o-mini
+      - "gpt-4o-mini"
+      - "gpt-3.5-turbo"
 
-    # check this path for a HTTP 200 response for the server to be ready
-    checkEndpoint: /health
+    # checkEndpoint: URL path to check if the server is ready
+    # - optional, default: /health
+    # - use "none" to skip endpoint ready checking
+    # - endpoint is expected to return an HTTP 200 response
+    # - all requests wait until the endpoint is ready (or fails)
+    checkEndpoint: /custom-endpoint
 
-    # unload model after 5 seconds
-    ttl: 5
+    # ttl: automatically unload the model after this many seconds
+    # - optional, default: 0
+    # - ttl values must be a value greater than 0
+    # - a value of 0 disables automatic unloading of the model
+    ttl: 60
 
-  "qwen":
-    cmd: models/llama-server-osx --port ${PORT} -m models/qwen2.5-0.5b-instruct-q8_0.gguf
-    aliases:
-      - gpt-3.5-turbo
+    # useModelName: overrides the model name that is sent to upstream server
+    # - optional, default: ""
+    # - useful when the upstream server expects a specific model name or format
+    useModelName: "qwen:qwq"
 
-  # Embedding example with Nomic
-  # https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF
-  "nomic":
-    cmd: |
-      models/llama-server-osx --port ${PORT}
-      -m models/nomic-embed-text-v1.5.Q8_0.gguf
-      --ctx-size 8192
-      --batch-size 8192
-      --rope-scaling yarn
-      --rope-freq-scale 0.75
-      -ngl 99
-      --embeddings
+    # filters: a dictionary of filter settings
+    # - optional, default: empty dictionary
+    filters:
+      # strip_params: a comma separated list of parameters to remove from the request
+      # - optional, default: ""
+      # - useful for preventing overriding of default server params by requests
+      # - `model` parameter is never removed
+      # - can be any JSON key in the request body
+      # - recommended to stick to sampling parameters
+      strip_params: "temperature, top_p, top_k"
 
-  # Reranking example with bge-reranker
-  # https://huggingface.co/gpustack/bge-reranker-v2-m3-GGUF
-  "bge-reranker":
-    cmd: |
-      models/llama-server-osx --port ${PORT}
-      -m models/bge-reranker-v2-m3-Q4_K_M.gguf
-      --ctx-size 8192
-      --reranking
+  # Unlisted model example:
+  "qwen-unlisted":
+    # unlisted: true or false
+    # - optional, default: false
+    # - unlisted models do not show up in /v1/models or /upstream lists
+    # - can be requested as normal through all apis
+    unlisted: true
+    cmd: llama-server --port ${PORT} -m Llama-3.2-1B-Instruct-Q4_K_M.gguf -ngl 0
 
-  # Docker Support (v26.1.4+ required!)
-  "dockertest":
+  # Docker example:
+  # container run times like Docker and Podman can also be used with a
+  # a combination of cmd and cmdStop.
+  "docker-llama":
+    proxy: "http://127.0.0.1:${PORT}"
     cmd: |
       docker run --name dockertest
       --init --rm -p ${PORT}:8080 -v /mnt/nvme/models:/models
-      ghcr.io/ggerganov/llama.cpp:server
+      ghcr.io/ggml-org/llama.cpp:server
       --model '/models/Qwen2.5-Coder-0.5B-Instruct-Q4_K_M.gguf'
 
-  "simple":
-    # example of setting environment variables
-    env:
-      - CUDA_VISIBLE_DEVICES=0,1
-      - env1=hello
-    cmd: build/simple-responder --port ${PORT}
-    unlisted: true
+    # cmdStop: command to run to stop the model gracefully
+    # - optional, default: ""
+    # - useful for stopping commands managed by another system
+    # - on POSIX systems: a SIGTERM is sent for graceful shutdown
+    # - on Windows, taskkill is used
+    # - processes are given 5 seconds to shutdown until they are forcefully killed
+    # - the upstream's process id is available in the ${PID} macro
+    cmdStop: docker stop dockertest
 
-    # use "none" to skip check. Caution this may cause some requests to fail
-    # until the upstream server is ready for traffic
-    checkEndpoint: none
+# groups: a dictionary of group settings
+# - optional, default: empty dictionary
+# - provide advanced controls over model swapping behaviour.
+# - Using groups some models can be kept loaded indefinitely, while others are swapped out.
+# - model ids must be defined in the Models section
+# - a model can only be a member of one group
+# - group behaviour is controlled via the `swap`, `exclusive` and `persistent` fields
+# - see issue #109 for details
+#
+# NOTE: the example below uses model names that are not defined above for demonstration purposes
+groups:
+  # group1 is same as the default behaviour of llama-swap where only one model is allowed
+  # to run a time across the whole llama-swap instance
+  "group1":
+    # swap: controls the model swapping behaviour in within the group
+    # - optional, default: true
+    # - true : only one model is allowed to run at a time
+    # - false: all models can run together, no swapping
+    swap: true
 
-  # don't use these, just for testing if things are broken
-  "broken":
-    cmd: models/llama-server-osx --port 8999 -m models/doesnotexist.gguf
-    proxy: http://127.0.0.1:8999
-    unlisted: true
-  "broken_timeout":
-    cmd: models/llama-server-osx --port 8999 -m models/qwen2.5-0.5b-instruct-q8_0.gguf
-    proxy: http://127.0.0.1:9000
-    unlisted: true
+    # exclusive: controls how the group affects other groups
+    # - optional, default: true
+    # - true: causes all other groups to unload when this group runs a model
+    # - false: does not affect other groups
+    exclusive: true
+
+    # members references the models defined above
+    # required
+    members:
+      - "llama"
+      - "qwen-unlisted"
+
+  # Example:
+  # - in this group all the models can run at the same time
+  # - when a different group loads all running models in this group are unloaded
+  "group2":
+    swap: false
+    exclusive: false
+    members:
+      - "docker-llama"
+      - "modelA"
+      - "modelB"
+
+  # Example:
+  # - a persistent group, prevents other groups from unloading it
+  "forever":
+    # persistent: prevents over groups from unloading the models in this group
+    # - optional, default: false
+    # - does not affect individual model behaviour
+    persistent: true
+
+    # set swap/exclusive to false to prevent swapping inside the group
+    # and the unloading of other groups
+    swap: false
+    exclusive: false
+    members:
+      - "forever-modelA"
+      - "forever-modelB"
+      - "forever-modelc"

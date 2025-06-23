@@ -365,6 +365,21 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 		}
 	}
 
+	// issue #174 strip parameters from the JSON body
+	stripParams, err := pm.config.Models[realModelName].Filters.SanitizedStripParams()
+	if err != nil { // just log it and continue
+		pm.proxyLogger.Errorf("Error sanitizing strip params string: %s, %s", pm.config.Models[realModelName].Filters.StripParams, err.Error())
+	} else {
+		for _, param := range stripParams {
+			pm.proxyLogger.Debugf("<%s> stripping param: %s", realModelName, param)
+			bodyBytes, err = sjson.DeleteBytes(bodyBytes, param)
+			if err != nil {
+				pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error deleting parameter %s from request", param))
+				return
+			}
+		}
+	}
+
 	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
 	// dechunk it as we already have all the body bytes see issue #11
