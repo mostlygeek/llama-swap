@@ -58,9 +58,27 @@ export function APIProvider({ children }: APIProviderProps) {
   const enableProxyLogs = useCallback(
     (enabled: boolean) => {
       if (enabled) {
-        const eventSource = new EventSource("/logs/streamSSE/proxy");
-        eventSource.onmessage = handleProxyMessage;
-        proxyEventSource.current = eventSource;
+        let retryCount = 0;
+        const maxRetries = 3;
+        const initialDelay = 1000; // 1 second
+
+        const connect = () => {
+          const eventSource = new EventSource("/logs/streamSSE/proxy");
+
+          eventSource.onmessage = handleProxyMessage;
+          eventSource.onerror = () => {
+            eventSource.close();
+            if (retryCount < maxRetries) {
+              retryCount++;
+              const delay = initialDelay * Math.pow(2, retryCount - 1);
+              setTimeout(connect, delay);
+            }
+          };
+
+          proxyEventSource.current = eventSource;
+        };
+
+        connect();
       } else {
         proxyEventSource.current?.close();
         proxyEventSource.current = null;
@@ -72,15 +90,33 @@ export function APIProvider({ children }: APIProviderProps) {
   const enableUpstreamLogs = useCallback(
     (enabled: boolean) => {
       if (enabled) {
-        const eventSource = new EventSource("/logs/streamSSE/upstream");
-        eventSource.onmessage = handleUpstreamMessage;
-        upstreamEventSource.current = eventSource;
+        let retryCount = 0;
+        const maxRetries = 3;
+        const initialDelay = 1000; // 1 second
+
+        const connect = () => {
+          const eventSource = new EventSource("/logs/streamSSE/upstream");
+
+          eventSource.onmessage = handleUpstreamMessage;
+          eventSource.onerror = () => {
+            eventSource.close();
+            if (retryCount < maxRetries) {
+              retryCount++;
+              const delay = initialDelay * Math.pow(2, retryCount - 1);
+              setTimeout(connect, delay);
+            }
+          };
+
+          upstreamEventSource.current = eventSource;
+        };
+
+        connect();
       } else {
         upstreamEventSource.current?.close();
         upstreamEventSource.current = null;
       }
     },
-    [upstreamEventSource, handleUpstreamMessage]
+    [handleUpstreamMessage]
   );
 
   const enableModelUpdates = useCallback(
