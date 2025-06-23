@@ -623,3 +623,37 @@ func TestProxyManager_ChatContentLength(t *testing.T) {
 	assert.Equal(t, "81", response["h_content_length"])
 	assert.Equal(t, "model1", response["responseMessage"])
 }
+
+func TestProxyManager_FiltersStripParams(t *testing.T) {
+	modelConfig := getTestSimpleResponderConfig("model1")
+	modelConfig.Filters = ModelFilters{
+		StripParams: "temperature, model, stream",
+	}
+
+	config := AddDefaultGroupToConfig(Config{
+		HealthCheckTimeout: 15,
+		LogLevel:           "error",
+		Models: map[string]ModelConfig{
+			"model1": modelConfig,
+		},
+	})
+
+	proxy := New(config)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+	reqBody := `{"model":"model1", "temperature":0.1, "x_param":"123", "y_param":"abc", "stream":true}`
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+	w := httptest.NewRecorder()
+
+	proxy.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	var response map[string]string
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+
+	// `temperature` and `stream` are gone but model remains
+	assert.Equal(t, `{"model":"model1", "x_param":"123", "y_param":"abc"}`, response["request_body"])
+
+	// assert.Nil(t, response["temperature"])
+	// assert.Equal(t, "123", response["x_param"])
+	// assert.Equal(t, "abc", response["y_param"])
+	// t.Logf("%v", response)
+}

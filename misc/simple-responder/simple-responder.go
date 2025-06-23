@@ -42,9 +42,12 @@ func main() {
 			time.Sleep(wait)
 		}
 
+		bodyBytes, _ := io.ReadAll(c.Request.Body)
+
 		c.JSON(http.StatusOK, gin.H{
 			"responseMessage":  *responseMessage,
 			"h_content_length": c.Request.Header.Get("Content-Length"),
+			"request_body":     string(bodyBytes),
 		})
 	})
 
