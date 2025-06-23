@@ -371,6 +371,7 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 		pm.proxyLogger.Errorf("Error sanitizing strip params string: %s, %s", pm.config.Models[realModelName].Filters.StripParams, err.Error())
 	} else {
 		for _, param := range stripParams {
+			pm.proxyLogger.Debugf("<%s> stripping param: %s", realModelName, param)
 			bodyBytes, err = sjson.DeleteBytes(bodyBytes, param)
 			if err != nil {
 				pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error deleting parameter %s from request", param))
