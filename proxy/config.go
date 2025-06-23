@@ -6,6 +6,7 @@ import (
 	"os"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,6 +30,9 @@ type ModelConfig struct {
 
 	// Limit concurrency of HTTP requests to process
 	ConcurrencyLimit int `yaml:"concurrencyLimit"`
+
+	// Model filters see issue #174
+	Filters ModelFilters `yaml:"filters"`
 }
 
 func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
@@ -61,6 +65,46 @@ func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 func (m *ModelConfig) SanitizedCommand() ([]string, error) {
 	return SanitizeCommand(m.Cmd)
+}
+
+// ModelFilters see issue #174
+type ModelFilters struct {
+	StripParams string `yaml:"strip_params"`
+}
+
+func (m *ModelFilters) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	type rawModelFilters ModelFilters
+	defaults := rawModelFilters{
+		StripParams: "",
+	}
+
+	if err := unmarshal(&defaults); err != nil {
+		return err
+	}
+
+	*m = ModelFilters(defaults)
+	return nil
+}
+
+func (f ModelFilters) SanitizedStripParams() ([]string, error) {
+	if f.StripParams == "" {
+		return nil, nil
+	}
+
+	params := strings.Split(f.StripParams, ",")
+	cleaned := make([]string, 0, len(params))
+
+	for _, param := range params {
+		trimmed := strings.TrimSpace(param)
+		if trimmed == "model" || trimmed == "" {
+			continue
+		}
+		cleaned = append(cleaned, strings.TrimSpace(param))
+	}
+
+	// sort cleaned
+	slices.Sort(cleaned)
+	return cleaned, nil
 }
 
 type GroupConfig struct {
@@ -212,6 +256,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			modelConfig.CmdStop = strings.ReplaceAll(modelConfig.CmdStop, macroSlug, macroValue)
 			modelConfig.Proxy = strings.ReplaceAll(modelConfig.Proxy, macroSlug, macroValue)
 			modelConfig.CheckEndpoint = strings.ReplaceAll(modelConfig.CheckEndpoint, macroSlug, macroValue)
+			modelConfig.Filters.StripParams = strings.ReplaceAll(modelConfig.Filters.StripParams, macroSlug, macroValue)
 		}
 
 		// enforce ${PORT} used in both cmd and proxy

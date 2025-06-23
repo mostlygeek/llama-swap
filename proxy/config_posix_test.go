@@ -83,6 +83,9 @@ models:
 		assert.Equal(t, "", model1.UseModelName)
 		assert.Equal(t, 0, model1.ConcurrencyLimit)
 	}
+
+	// default empty filter exists
+	assert.Equal(t, "", model1.Filters.StripParams)
 }
 
 func TestConfig_LoadPosix(t *testing.T) {
