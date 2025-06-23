@@ -374,6 +374,7 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 			bodyBytes, err = sjson.DeleteBytes(bodyBytes, param)
 			if err != nil {
 				pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error deleting parameter %s from request", param))
+				return
 			}
 		}
 	}
