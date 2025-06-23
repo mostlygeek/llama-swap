@@ -99,7 +99,7 @@ func (f ModelFilters) SanitizedStripParams() ([]string, error) {
 		if trimmed == "model" || trimmed == "" {
 			continue
 		}
-		cleaned = append(cleaned, strings.TrimSpace(param))
+		cleaned = append(cleaned, trimmed)
 	}
 
 	// sort cleaned
