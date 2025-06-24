@@ -72,9 +72,7 @@ See the [configuration documentation](https://github.com/mostlygeek/llama-swap/w
 
 llama-swap ships with a web based interface to make it easier to monitor logs and check the status of models. 
 
-<img width="1854" alt="image" src="https://github.com/user-attachments/assets/ee0025f0-f031-4158-9b5d-cd98b2b9fe4d" />
-
-
+<img width="1758" alt="image" src="https://github.com/user-attachments/assets/31ae5bcd-5efd-46b0-b64b-6db9e60196d3" />
 
 ## Docker Install ([download images](https://github.com/mostlygeek/llama-swap/pkgs/container/llama-swap))
 
