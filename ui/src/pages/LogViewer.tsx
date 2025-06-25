@@ -15,7 +15,7 @@ const LogViewer = () => {
   }, []);
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-5" style={{ height: "calc(100vh - 125px)" }}>
       <LogPanel id="proxy" title="Proxy Logs" logData={proxyLogs} />
       <LogPanel id="upstream" title="Upstream Logs" logData={upstreamLogs} />
     </div>
@@ -30,11 +30,8 @@ interface LogPanelProps {
 }
 
 export const LogPanel = ({ id, title, logData, className }: LogPanelProps) => {
+  const [isCollapsed, setIsCollapsed] = usePersistentState(`logPanel-${id}-isCollapsed`, false);
   const [filterRegex, setFilterRegex] = useState("");
-  const [panelState, setPanelState] = usePersistentState<"hide" | "small" | "max">(
-    `logPanel-${id}-panelState`,
-    "small"
-  );
   const [fontSize, setFontSize] = usePersistentState<"xxs" | "xs" | "small" | "normal">(
     `logPanel-${id}-fontSize`,
     "normal"
@@ -57,14 +54,6 @@ export const LogPanel = ({ id, title, logData, className }: LogPanelProps) => {
         case "normal":
           return "xxs";
       }
-    });
-  }, []);
-
-  const togglePanelState = useCallback(() => {
-    setPanelState((prev) => {
-      if (prev === "small") return "max";
-      if (prev === "hide") return "small";
-      return "hide";
     });
   }, []);
 
@@ -101,20 +90,21 @@ export const LogPanel = ({ id, title, logData, className }: LogPanelProps) => {
   }, [filteredLogs]);
 
   return (
-    <div className={`bg-surface border border-border rounded-lg overflow-hidden flex flex-col ${className || ""}`}>
+    <div
+      className={`bg-surface border border-border rounded-lg overflow-hidden flex flex-col ${
+        !isCollapsed && "h-full"
+      } ${className || ""}`}
+    >
       <div className="p-4 border-b border-border bg-secondary">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           {/* Title - Always full width on mobile, normal on desktop */}
-          <div className="w-full md:w-auto" onClick={togglePanelState}>
+          <div className="w-full md:w-auto" onClick={() => setIsCollapsed(!isCollapsed)}>
             <h3 className="m-0 text-lg">{title}</h3>
           </div>
 
           <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
             {/* Sizing Buttons - Stacks vertically on mobile */}
             <div className="flex flex-wrap gap-2">
-              <button className="btn" onClick={togglePanelState}>
-                size: {panelState}
-              </button>
               <button className="btn" onClick={toggleFontSize}>
                 font: {fontSize}
               </button>
@@ -140,14 +130,11 @@ export const LogPanel = ({ id, title, logData, className }: LogPanelProps) => {
         </div>
       </div>
 
-      {panelState !== "hide" && (
-        <div className="flex-1 bg-background font-mono text-sm leading-[1.4] p-3">
+      {!isCollapsed && (
+        <div className="flex-1 bg-background font-mono text-sm p-3 overflow-hidden">
           <pre
             ref={preTagRef}
-            className={`flex-1 p-4 overflow-y-auto whitespace-pre min-h-0 ${textWrapClass} ${fontSizeClass}`}
-            style={{
-              maxHeight: panelState === "max" ? "1500px" : "500px",
-            }}
+            className={`h-full p-4 overflow-y-auto whitespace-pre min-h-0 ${textWrapClass} ${fontSizeClass}`}
           >
             {filteredLogs}
           </pre>
@@ -156,5 +143,4 @@ export const LogPanel = ({ id, title, logData, className }: LogPanelProps) => {
     </div>
   );
 };
-
 export default LogViewer;
