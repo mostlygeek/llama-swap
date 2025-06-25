@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useAPI } from "../contexts/APIProvider";
 import { LogPanel } from "./LogViewer";
+import { processEvalTimes } from "../lib/Utils";
 
 export default function ModelsPage() {
   const { models, enableModelUpdates, unloadAllModels, loadModel, upstreamLogs, enableUpstreamLogs } = useAPI();
@@ -29,8 +30,12 @@ export default function ModelsPage() {
     }
   }, []);
 
+  const [totalLines, totalTokens, avgTokensPerSecond] = useMemo(() => {
+    return processEvalTimes(upstreamLogs);
+  }, [upstreamLogs]);
+
   return (
-    <div className="h-screen">
+    <div>
       <div className="flex flex-col md:flex-row gap-4">
         {/* Left Column */}
         <div className="w-full md:w-1/2 flex items-top">
@@ -56,7 +61,13 @@ export default function ModelsPage() {
                       </a>
                     </td>
                     <td className="p-2">
-                      <button className="btn btn--sm" disabled={model.state !== "stopped"} onClick={() => loadModel(model.id)}>Load</button>
+                      <button
+                        className="btn btn--sm"
+                        disabled={model.state !== "stopped"}
+                        onClick={() => loadModel(model.id)}
+                      >
+                        Load
+                      </button>
                     </td>
                     <td className="p-2">
                       <span className={`status status--${model.state}`}>{model.state}</span>
@@ -69,8 +80,29 @@ export default function ModelsPage() {
         </div>
 
         {/* Right Column */}
-        <div className="w-full md:w-1/2  flex items-top">
-          <LogPanel id="modelsupstream" title="Upstream Logs" logData={upstreamLogs} className="h-full" />
+        <div className="w-full md:w-1/2 flex flex-col" style={{ height: "calc(100vh - 125px)" }}>
+          <div className="card mb-4 min-h-[250px]">
+            <h2>Log Stats</h2>
+            <p className="italic my-2">note: eval logs from llama-server</p>
+            <table className="w-full border border-gray-200">
+              <tbody>
+                <tr className="border-b border-gray-200">
+                  <td className="py-2 px-4 font-medium border-r border-gray-200">Requests</td>
+                  <td className="py-2 px-4 text-right">{totalLines}</td>
+                </tr>
+                <tr className="border-b border-gray-200">
+                  <td className="py-2 px-4 font-medium border-r border-gray-200">Total Tokens Generated</td>
+                  <td className="py-2 px-4 text-right">{totalTokens}</td>
+                </tr>
+                <tr>
+                  <td className="py-2 px-4 font-medium border-r border-gray-200">Average Tokens/Second</td>
+                  <td className="py-2 px-4 text-right">{avgTokensPerSecond}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <LogPanel id="modelsupstream" title="Upstream Logs" logData={upstreamLogs} />
         </div>
       </div>
     </div>

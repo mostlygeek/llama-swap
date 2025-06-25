@@ -10,10 +10,10 @@ function App() {
     <Router basename="/ui/">
       <APIProvider>
         <div>
-          <nav className="bg-surface border-b border-border p-4">
-            <div className="flex items-center justify-between mx-auto px-4">
-              <h1>llama-swap</h1>
-              <div className="flex space-x-4">
+          <nav className="bg-surface border-b border-border p-2 h-[75px]">
+            <div className="flex items-center justify-between mx-auto px-4 h-full">
+              <h1 className="flex items-center p-0">llama-swap</h1>
+              <div className="flex items-center space-x-4">
                 <NavLink to="/" className={({ isActive }) => (isActive ? "navlink active" : "navlink")}>
                   Logs
                 </NavLink>
