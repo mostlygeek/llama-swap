@@ -144,8 +144,8 @@ func watchConfigFileWithReload(configPath string, reloadChan chan<- *proxy.Proxy
 			if !ok {
 				return
 			}
-			// We only care about writes to the specific config file
-			if event.Name == configPath && event.Has(fsnotify.Write) {
+			// We only care about writes/creates to the specific config file
+			if event.Name == configPath && (event.Has(fsnotify.Write) || event.Has(fsnotify.Create)) {
 				// Reset or start the debounce timer
 				if debounceTimer != nil {
 					debounceTimer.Stop()
