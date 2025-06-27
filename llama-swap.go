@@ -145,7 +145,7 @@ func watchConfigFileWithReload(configPath string, reloadChan chan<- *proxy.Proxy
 				return
 			}
 			// We only care about writes/creates to the specific config file
-			if event.Name == configPath && (event.Has(fsnotify.Write) || event.Has(fsnotify.Create)) {
+			if event.Name == configPath && (event.Has(fsnotify.Write) || event.Has(fsnotify.Create) || event.Has(fsnotify.Remove)) {
 				// Reset or start the debounce timer
 				if debounceTimer != nil {
 					debounceTimer.Stop()
@@ -176,6 +176,13 @@ func watchConfigFileWithReload(configPath string, reloadChan chan<- *proxy.Proxy
 					newPM := proxy.New(newConfig)
 					reloadChan <- newPM
 					log.Println("Config reloaded successfully")
+					if (event.Has(fsnotify.Remove)) {
+						// re-add watcher
+						err = watcher.Add(configPath)
+						if err != nil {
+							log.Printf("Could not re-add watcher for %s: %s", configPath, err)
+						}
+					}
 				})
 			}
 		case err, ok := <-watcher.Errors:
