@@ -3,9 +3,9 @@ package proxy
 import (
 	"net/http"
 	"sort"
-	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kelindar/event"
 )
 
 type Model struct {
@@ -84,18 +84,17 @@ func (pm *ProxyManager) apiListModelsSSE(c *gin.Context) {
 	c.Header("Connection", "keep-alive")
 	c.Header("X-Content-Type-Options", "nosniff")
 
-	notify := c.Request.Context().Done()
+	// flush the first one
+	c.SSEvent("message", pm.getModelStatus())
+	c.Writer.Flush()
 
-	// Stream new events
-	for {
-		select {
-		case <-notify:
-			return
-		default:
+	defer event.On(func(e ProcessStateChangeEvent) {
+		if c != nil && c.Writer != nil {
 			models := pm.getModelStatus()
 			c.SSEvent("message", models)
 			c.Writer.Flush()
-			<-time.After(1000 * time.Millisecond)
 		}
-	}
+	})()
+
+	<-c.Request.Context().Done()
 }
