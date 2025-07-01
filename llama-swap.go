@@ -77,6 +77,13 @@ func main() {
 			currentPM.Shutdown()
 			srv.Handler = proxy.New(config)
 			fmt.Println("Configuration Reloaded")
+
+			// wait a few seconds and tell any UI to reload
+			time.AfterFunc(3*time.Second, func() {
+				event.Emit(proxy.ConfigFileChangedEvent{
+					ReloadingState: "end",
+				})
+			})
 		} else {
 			config, err = proxy.LoadConfig(*configPath)
 			if err != nil {
@@ -92,7 +99,9 @@ func main() {
 	debouncedReload := debounce(time.Second, reloadProxyManager)
 	if *watchConfig {
 		defer event.On(func(e proxy.ConfigFileChangedEvent) {
-			debouncedReload()
+			if e.ReloadingState == "start" {
+				debouncedReload()
+			}
 		})()
 
 		fmt.Println("Watching Configuration for changes")
@@ -119,7 +128,9 @@ func main() {
 				select {
 				case changeEvent := <-watcher.Events:
 					if changeEvent.Name == absConfigPath && (changeEvent.Has(fsnotify.Write) || changeEvent.Has(fsnotify.Create) || changeEvent.Has(fsnotify.Remove)) {
-						event.Emit(proxy.ConfigFileChangedEvent{})
+						event.Emit(proxy.ConfigFileChangedEvent{
+							ReloadingState: "start",
+						})
 					}
 
 				case err := <-watcher.Errors:

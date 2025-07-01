@@ -24,7 +24,9 @@ func (e ChatCompletionStats) Type() uint32 {
 	return ChatCompletionStatsEventID
 }
 
-type ConfigFileChangedEvent struct{}
+type ConfigFileChangedEvent struct {
+	ReloadingState string
+}
 
 func (e ConfigFileChangedEvent) Type() uint32 {
 	return ConfigFileChangedEventID

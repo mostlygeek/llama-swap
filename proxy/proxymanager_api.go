@@ -88,8 +88,18 @@ func (pm *ProxyManager) apiListModelsSSE(c *gin.Context) {
 	c.SSEvent("message", pm.getModelStatus())
 	c.Writer.Flush()
 
+	// send whenever the any process state
 	defer event.On(func(e ProcessStateChangeEvent) {
 		if c != nil && c.Writer != nil {
+			models := pm.getModelStatus()
+			c.SSEvent("message", models)
+			c.Writer.Flush()
+		}
+	})()
+
+	// resend the models when the config is reloaded
+	defer event.On(func(e ConfigFileChangedEvent) {
+		if c != nil && c.Writer != nil && e.ReloadingState == "end" {
 			models := pm.getModelStatus()
 			c.SSEvent("message", models)
 			c.Writer.Flush()
