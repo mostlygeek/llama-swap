@@ -34,10 +34,7 @@ func (pm *ProxyManager) streamLogsHandler(c *gin.Context) {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
-	ch := logger.Subscribe()
-	defer logger.Unsubscribe(ch)
 
-	notify := c.Request.Context().Done()
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
 		c.AbortWithError(http.StatusInternalServerError, fmt.Errorf("streaming unsupported"))
@@ -55,20 +52,14 @@ func (pm *ProxyManager) streamLogsHandler(c *gin.Context) {
 		}
 	}
 
-	// Stream new logs
-	for {
-		select {
-		case msg := <-ch:
-			_, err := c.Writer.Write(msg)
-			if err != nil {
-				// just break the loop if we can't write for some reason
-				return
-			}
+	cancelFn := logger.OnLogData(func(data []byte) {
+		if c != nil && c.Writer != nil {
+			c.Writer.Write(data)
 			flusher.Flush()
-		case <-notify:
-			return
 		}
-	}
+	})
+	defer cancelFn()
+	<-c.Request.Context().Done()
 }
 
 func (pm *ProxyManager) streamLogsHandlerSSE(c *gin.Context) {
@@ -83,10 +74,6 @@ func (pm *ProxyManager) streamLogsHandlerSSE(c *gin.Context) {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
-	ch := logger.Subscribe()
-	defer logger.Unsubscribe(ch)
-
-	notify := c.Request.Context().Done()
 
 	// Send history first if not skipped
 	_, skipHistory := c.GetQuery("no-history")
@@ -98,16 +85,14 @@ func (pm *ProxyManager) streamLogsHandlerSSE(c *gin.Context) {
 		}
 	}
 
-	// Stream new logs
-	for {
-		select {
-		case msg := <-ch:
-			c.SSEvent("message", string(msg))
+	cancelFn := logger.OnLogData(func(data []byte) {
+		if c != nil && c.Writer != nil {
+			c.SSEvent("message", string(data))
 			c.Writer.Flush()
-		case <-notify:
-			return
 		}
-	}
+	})
+	defer cancelFn()
+	<-c.Request.Context().Done()
 }
 
 // getLogger searches for the appropriate logger based on the logMonitorId

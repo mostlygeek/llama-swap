@@ -3,46 +3,26 @@ package proxy
 import (
 	"bytes"
 	"io"
-	"sync"
 	"testing"
 )
 
 func TestLogMonitor(t *testing.T) {
 	logMonitor := NewLogMonitorWriter(io.Discard)
 
-	// Test subscription
-	client1 := logMonitor.Subscribe()
-	client2 := logMonitor.Subscribe()
-
-	defer logMonitor.Unsubscribe(client1)
-	defer logMonitor.Unsubscribe(client2)
-
 	client1Messages := make([]byte, 0)
 	client2Messages := make([]byte, 0)
 
-	var wg sync.WaitGroup
-	wg.Add(1)
+	defer logMonitor.OnLogData(func(data []byte) {
+		client1Messages = append(client1Messages, data...)
+	})()
 
-	go func() {
-		defer wg.Done()
-		for {
-			select {
-			case data := <-client1:
-				client1Messages = append(client1Messages, data...)
-			case data := <-client2:
-				client2Messages = append(client2Messages, data...)
-			default:
-				return
-			}
-		}
-	}()
+	defer logMonitor.OnLogData(func(data []byte) {
+		client2Messages = append(client2Messages, data...)
+	})()
 
 	logMonitor.Write([]byte("1"))
 	logMonitor.Write([]byte("2"))
 	logMonitor.Write([]byte("3"))
-
-	// Wait for the goroutine to finish
-	wg.Wait()
 
 	// Check the buffer
 	expectedHistory := "123"

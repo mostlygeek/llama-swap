@@ -2,13 +2,24 @@ package proxy
 
 import (
 	"container/ring"
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"sync"
+
+	"github.com/kelindar/event"
 )
 
 type LogLevel int
+
+type LogDataEvent struct {
+	Data []byte
+}
+
+func (e LogDataEvent) Type() uint32 {
+	return 0x01
+}
 
 const (
 	LevelDebug LogLevel = iota
@@ -18,7 +29,7 @@ const (
 )
 
 type LogMonitor struct {
-	clients  map[chan []byte]bool
+	eventbus *event.Dispatcher
 	mu       sync.RWMutex
 	buffer   *ring.Ring
 	bufferMu sync.RWMutex
@@ -37,11 +48,11 @@ func NewLogMonitor() *LogMonitor {
 
 func NewLogMonitorWriter(stdout io.Writer) *LogMonitor {
 	return &LogMonitor{
-		clients: make(map[chan []byte]bool),
-		buffer:  ring.New(10 * 1024), // keep 10KB of buffered logs
-		stdout:  stdout,
-		level:   LevelInfo,
-		prefix:  "",
+		eventbus: event.NewDispatcher(),
+		buffer:   ring.New(10 * 1024), // keep 10KB of buffered logs
+		stdout:   stdout,
+		level:    LevelInfo,
+		prefix:   "",
 	}
 }
 
@@ -81,34 +92,14 @@ func (w *LogMonitor) GetHistory() []byte {
 	return history
 }
 
-func (w *LogMonitor) Subscribe() chan []byte {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	ch := make(chan []byte, 100)
-	w.clients[ch] = true
-	return ch
-}
-
-func (w *LogMonitor) Unsubscribe(ch chan []byte) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	delete(w.clients, ch)
-	close(ch)
+func (w *LogMonitor) OnLogData(callback func(data []byte)) context.CancelFunc {
+	return event.Subscribe(w.eventbus, func(e LogDataEvent) {
+		callback(e.Data)
+	})
 }
 
 func (w *LogMonitor) broadcast(msg []byte) {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-
-	for client := range w.clients {
-		select {
-		case client <- msg:
-		default:
-			// If client buffer is full, skip
-		}
-	}
+	event.Publish(w.eventbus, LogDataEvent{Data: msg})
 }
 
 func (w *LogMonitor) SetPrefix(prefix string) {

@@ -92,7 +92,7 @@ func main() {
 				log.Println("Server handler updated with new config")
 			case sig := <-sigChan:
 				fmt.Printf("Received signal %v, shutting down...\n", sig)
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 				defer cancel()
 				currentManager.Shutdown()
 				if err := srv.Shutdown(ctx); err != nil {
@@ -176,7 +176,7 @@ func watchConfigFileWithReload(configPath string, reloadChan chan<- *proxy.Proxy
 					newPM := proxy.New(newConfig)
 					reloadChan <- newPM
 					log.Println("Config reloaded successfully")
-					if (event.Has(fsnotify.Remove)) {
+					if event.Has(fsnotify.Remove) {
 						// re-add watcher
 						err = watcher.Add(configPath)
 						if err != nil {
