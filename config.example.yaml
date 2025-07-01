@@ -49,7 +49,19 @@ models:
     cmd: |
       # ${latest-llama} is a macro that is defined above
       ${latest-llama}
-      --model path/to/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
+      --model path/to/llama-8B-Q4_K_M.gguf
+
+    # name: a display name for the model
+    # - optional, default: empty string
+    # - if set, it will be used in the v1/models API response
+    # - if not set, it will be omitted in the JSON model record
+    name: "llama 3.1 8B"
+
+    # description: a description for the model
+    # - optional, default: empty string
+    # - if set, it will be used in the v1/models API response
+    # - if not set, it will be omitted in the JSON model record
+    description: "A small but capable model used for quick testing"
 
     # env: define an array of environment variables to inject into cmd's environment
     # - optional, default: empty array

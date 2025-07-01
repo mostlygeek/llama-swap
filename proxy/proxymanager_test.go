@@ -183,11 +183,20 @@ func TestProxyManager_SwapMultiProcessParallelRequests(t *testing.T) {
 }
 
 func TestProxyManager_ListModelsHandler(t *testing.T) {
+
+	model1Config := getTestSimpleResponderConfig("model1")
+	model1Config.Name = "Model 1"
+	model1Config.Description = "Model 1 description is used for testing"
+
+	model2Config := getTestSimpleResponderConfig("model2")
+	model2Config.Name = "     " // empty whitespace only strings will get ignored
+	model2Config.Description = "  "
+
 	config := Config{
 		HealthCheckTimeout: 15,
 		Models: map[string]ModelConfig{
-			"model1": getTestSimpleResponderConfig("model1"),
-			"model2": getTestSimpleResponderConfig("model2"),
+			"model1": model1Config,
+			"model2": model2Config,
 			"model3": getTestSimpleResponderConfig("model3"),
 		},
 		LogLevel: "error",
@@ -213,6 +222,7 @@ func TestProxyManager_ListModelsHandler(t *testing.T) {
 	var response struct {
 		Data []map[string]interface{} `json:"data"`
 	}
+
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatalf("Failed to parse JSON response: %v", err)
 	}
@@ -227,6 +237,7 @@ func TestProxyManager_ListModelsHandler(t *testing.T) {
 		"model3": {},
 	}
 
+	// make all models
 	for _, model := range response.Data {
 		modelID, ok := model["id"].(string)
 		assert.True(t, ok, "model ID should be a string")
@@ -245,6 +256,21 @@ func TestProxyManager_ListModelsHandler(t *testing.T) {
 		ownedBy, ok := model["owned_by"].(string)
 		assert.True(t, ok, "owned_by should be a string")
 		assert.Equal(t, "llama-swap", ownedBy)
+
+		// check for optional name and description
+		if modelID == "model1" {
+			name, ok := model["name"].(string)
+			assert.True(t, ok, "name should be a string")
+			assert.Equal(t, "Model 1", name)
+			description, ok := model["description"].(string)
+			assert.True(t, ok, "description should be a string")
+			assert.Equal(t, "Model 1 description is used for testing", description)
+		} else {
+			_, exists := model["name"]
+			assert.False(t, exists, "unexpected name field for model: %s", modelID)
+			_, exists = model["description"]
+			assert.False(t, exists, "unexpected description field for model: %s", modelID)
+		}
 	}
 
 	// Ensure all expected models were returned
