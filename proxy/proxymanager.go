@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -289,32 +288,41 @@ func (pm *ProxyManager) swapProcessGroup(requestedModel string) (*ProcessGroup, 
 }
 
 func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
-	data := []interface{}{}
+	data := make([]gin.H, 0, len(pm.config.Models))
+	createdTime := time.Now().Unix()
+
 	for id, modelConfig := range pm.config.Models {
 		if modelConfig.Unlisted {
 			continue
 		}
 
-		data = append(data, map[string]interface{}{
+		record := gin.H{
 			"id":       id,
 			"object":   "model",
-			"created":  time.Now().Unix(),
+			"created":  createdTime,
 			"owned_by": "llama-swap",
-		})
+		}
+
+		if name := strings.TrimSpace(modelConfig.Name); name != "" {
+			record["name"] = name
+		}
+		if desc := strings.TrimSpace(modelConfig.Description); desc != "" {
+			record["description"] = desc
+		}
+
+		data = append(data, record)
 	}
 
-	// Set the Content-Type header to application/json
-	c.Header("Content-Type", "application/json")
-
-	if origin := c.Request.Header.Get("Origin"); origin != "" {
+	// Set CORS headers if origin exists
+	if origin := c.GetHeader("Origin"); origin != "" {
 		c.Header("Access-Control-Allow-Origin", origin)
 	}
 
-	// Encode the data as JSON and write it to the response writer
-	if err := json.NewEncoder(c.Writer).Encode(map[string]interface{}{"object": "list", "data": data}); err != nil {
-		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error encoding JSON %s", err.Error()))
-		return
-	}
+	// Use gin's JSON method which handles content-type and encoding
+	c.JSON(http.StatusOK, gin.H{
+		"object": "list",
+		"data":   data,
+	})
 }
 
 func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {

@@ -104,6 +104,8 @@ models:
   model1:
     cmd: path/to/cmd --arg1 one
     proxy: "http://localhost:8080"
+    name: "Model 1"
+    description: "This is model 1"
     aliases:
       - "m1"
       - "model-one"
@@ -168,6 +170,8 @@ groups:
 				Aliases:       []string{"m1", "model-one"},
 				Env:           []string{"VAR1=value1", "VAR2=value2"},
 				CheckEndpoint: "/health",
+				Name:          "Model 1",
+				Description:   "This is model 1",
 			},
 			"model2": {
 				Cmd:           "path/to/server --arg1 one",
