@@ -52,14 +52,18 @@ func (pm *ProxyManager) streamLogsHandler(c *gin.Context) {
 		}
 	}
 
-	cancelFn := logger.OnLogData(func(data []byte) {
+	defer logger.OnLogData(func(data []byte) {
 		if c != nil && c.Writer != nil {
 			c.Writer.Write(data)
 			flusher.Flush()
 		}
-	})
-	defer cancelFn()
-	<-c.Request.Context().Done()
+	})()
+
+	select {
+	case <-c.Request.Context().Done():
+	case <-pm.shutdownCtx.Done():
+	}
+
 }
 
 func (pm *ProxyManager) streamLogsHandlerSSE(c *gin.Context) {
@@ -85,14 +89,17 @@ func (pm *ProxyManager) streamLogsHandlerSSE(c *gin.Context) {
 		}
 	}
 
-	cancelFn := logger.OnLogData(func(data []byte) {
+	defer logger.OnLogData(func(data []byte) {
 		if c != nil && c.Writer != nil {
 			c.SSEvent("message", string(data))
 			c.Writer.Flush()
 		}
-	})
-	defer cancelFn()
-	<-c.Request.Context().Done()
+	})()
+
+	select {
+	case <-c.Request.Context().Done():
+	case <-pm.shutdownCtx.Done():
+	}
 }
 
 // getLogger searches for the appropriate logger based on the logMonitorId

@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -33,6 +34,10 @@ type ProxyManager struct {
 	muxLogger      *LogMonitor
 
 	processGroups map[string]*ProcessGroup
+
+	// shutdown signaling
+	shutdownCtx    context.Context
+	shutdownCancel context.CancelFunc
 }
 
 func New(config Config) *ProxyManager {
@@ -63,6 +68,8 @@ func New(config Config) *ProxyManager {
 		upstreamLogger.SetLogLevel(LevelInfo)
 	}
 
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+
 	pm := &ProxyManager{
 		config:    config,
 		ginEngine: gin.New(),
@@ -72,6 +79,9 @@ func New(config Config) *ProxyManager {
 		upstreamLogger: upstreamLogger,
 
 		processGroups: make(map[string]*ProcessGroup),
+
+		shutdownCtx:    shutdownCtx,
+		shutdownCancel: shutdownCancel,
 	}
 
 	// create the process groups
@@ -261,6 +271,7 @@ func (pm *ProxyManager) Shutdown() {
 		}(processGroup)
 	}
 	wg.Wait()
+	pm.shutdownCancel()
 }
 
 func (pm *ProxyManager) swapProcessGroup(requestedModel string) (*ProcessGroup, string, error) {

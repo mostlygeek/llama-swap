@@ -96,5 +96,9 @@ func (pm *ProxyManager) apiListModelsSSE(c *gin.Context) {
 		}
 	})()
 
-	<-c.Request.Context().Done()
+	select {
+	case <-c.Request.Context().Done():
+	case <-pm.shutdownCtx.Done():
+	}
+
 }
