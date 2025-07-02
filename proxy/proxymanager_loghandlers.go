@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -34,10 +35,7 @@ func (pm *ProxyManager) streamLogsHandler(c *gin.Context) {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
-	ch := logger.Subscribe()
-	defer logger.Unsubscribe(ch)
 
-	notify := c.Request.Context().Done()
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
 		c.AbortWithError(http.StatusInternalServerError, fmt.Errorf("streaming unsupported"))
@@ -55,57 +53,28 @@ func (pm *ProxyManager) streamLogsHandler(c *gin.Context) {
 		}
 	}
 
-	// Stream new logs
+	sendChan := make(chan []byte, 10)
+	ctx, cancel := context.WithCancel(c.Request.Context())
+	defer logger.OnLogData(func(data []byte) {
+		select {
+		case sendChan <- data:
+		case <-ctx.Done():
+			return
+		default:
+		}
+	})()
+
 	for {
 		select {
-		case msg := <-ch:
-			_, err := c.Writer.Write(msg)
-			if err != nil {
-				// just break the loop if we can't write for some reason
-				return
-			}
+		case <-c.Request.Context().Done():
+			cancel()
+			return
+		case <-pm.shutdownCtx.Done():
+			cancel()
+			return
+		case data := <-sendChan:
+			c.Writer.Write(data)
 			flusher.Flush()
-		case <-notify:
-			return
-		}
-	}
-}
-
-func (pm *ProxyManager) streamLogsHandlerSSE(c *gin.Context) {
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Content-Type-Options", "nosniff")
-
-	logMonitorId := c.Param("logMonitorID")
-	logger, err := pm.getLogger(logMonitorId)
-	if err != nil {
-		c.String(http.StatusBadRequest, err.Error())
-		return
-	}
-	ch := logger.Subscribe()
-	defer logger.Unsubscribe(ch)
-
-	notify := c.Request.Context().Done()
-
-	// Send history first if not skipped
-	_, skipHistory := c.GetQuery("no-history")
-	if !skipHistory {
-		history := logger.GetHistory()
-		if len(history) != 0 {
-			c.SSEvent("message", string(history))
-			c.Writer.Flush()
-		}
-	}
-
-	// Stream new logs
-	for {
-		select {
-		case msg := <-ch:
-			c.SSEvent("message", string(msg))
-			c.Writer.Flush()
-		case <-notify:
-			return
 		}
 	}
 }

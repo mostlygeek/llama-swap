@@ -9,6 +9,7 @@ require (
 	github.com/tidwall/gjson v1.18.0
 	github.com/tidwall/sjson v1.2.5
 	gopkg.in/yaml.v3 v3.0.1
+	github.com/kelindar/event v1.5.2
 )
 
 require (
