@@ -6,6 +6,8 @@ const LOG_LENGTH_LIMIT = 1024 * 100; /* 100KB of log data */
 export interface Model {
   id: string;
   state: ModelStatus;
+  name: string;
+  description: string;
 }
 
 interface APIProviderType {

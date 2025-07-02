@@ -11,8 +11,10 @@ import (
 )
 
 type Model struct {
-	Id    string `json:"id"`
-	State string `json:"state"`
+	Id          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	State       string `json:"state"`
 }
 
 func addApiHandlers(pm *ProxyManager) {
@@ -66,8 +68,10 @@ func (pm *ProxyManager) getModelStatus() []Model {
 			}
 		}
 		models = append(models, Model{
-			Id:    modelID,
-			State: state,
+			Id:          modelID,
+			Name:        pm.config.Models[modelID].Name,
+			Description: pm.config.Models[modelID].Description,
+			State:       state,
 		})
 	}
 

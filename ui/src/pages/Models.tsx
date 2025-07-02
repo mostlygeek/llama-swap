@@ -55,8 +55,13 @@ export default function ModelsPage() {
                   <tr key={model.id} className="border-b hover:bg-secondary-hover border-border">
                     <td className="p-2">
                       <a href={`/upstream/${model.id}/`} className="underline" target="_blank">
-                        {model.id}
+                        {model.name !== "" ? model.name : model.id}
                       </a>
+                      {model.description != "" && (
+                        <p>
+                          <em>{model.description}</em>
+                        </p>
+                      )}
                     </td>
                     <td className="p-2">
                       <button
