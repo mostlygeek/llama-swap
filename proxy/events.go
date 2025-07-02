@@ -5,6 +5,7 @@ package proxy
 const ProcessStateChangeEventID = 0x01
 const ChatCompletionStatsEventID = 0x02
 const ConfigFileChangedEventID = 0x03
+const LogDataEventID = 0x04
 
 type ProcessStateChangeEvent struct {
 	ProcessName string
@@ -30,4 +31,12 @@ type ConfigFileChangedEvent struct {
 
 func (e ConfigFileChangedEvent) Type() uint32 {
 	return ConfigFileChangedEventID
+}
+
+type LogDataEvent struct {
+	Data []byte
+}
+
+func (e LogDataEvent) Type() uint32 {
+	return LogDataEventID
 }

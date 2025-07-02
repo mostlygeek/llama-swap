@@ -13,14 +13,6 @@ import (
 
 type LogLevel int
 
-type LogDataEvent struct {
-	Data []byte
-}
-
-func (e LogDataEvent) Type() uint32 {
-	return 0x01
-}
-
 const (
 	LevelDebug LogLevel = iota
 	LevelInfo

@@ -147,7 +147,12 @@ func main() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 		defer cancel()
 
-		srv.Handler.(*proxy.ProxyManager).Shutdown()
+		if pm, ok := srv.Handler.(*proxy.ProxyManager); ok {
+			pm.Shutdown()
+		} else {
+			fmt.Println("srv.Handler is not of type *proxy.ProxyManager")
+		}
+
 		if err := srv.Shutdown(ctx); err != nil {
 			fmt.Printf("Server shutdown error: %v\n", err)
 		}
