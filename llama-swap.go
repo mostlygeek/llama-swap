@@ -117,9 +117,10 @@ func main() {
 				return
 			}
 
-			err = watcher.Add(absConfigPath)
+			configDir := filepath.Dir(absConfigPath)
+			err = watcher.Add(configDir)
 			if err != nil {
-				fmt.Printf("Error adding config path (%s) to watcher: %v. File watching disabled.", absConfigPath, err)
+				fmt.Printf("Error adding config path directory (%s) to watcher: %v. File watching disabled.", configDir, err)
 				return
 			}
 
