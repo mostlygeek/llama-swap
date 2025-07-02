@@ -15,6 +15,7 @@ type Model struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	State       string `json:"state"`
+	Unlisted    bool   `json:"unlisted"`
 }
 
 func addApiHandlers(pm *ProxyManager) {
@@ -72,6 +73,7 @@ func (pm *ProxyManager) getModelStatus() []Model {
 			Name:        pm.config.Models[modelID].Name,
 			Description: pm.config.Models[modelID].Description,
 			State:       state,
+			Unlisted:    pm.config.Models[modelID].Unlisted,
 		})
 	}
 
