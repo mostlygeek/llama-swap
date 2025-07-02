@@ -67,11 +67,13 @@ export function APIProvider({ children }: APIProviderProps) {
           const message = JSON.parse(e.data) as APIEventEnvelope;
           switch (message.type) {
             case "modelStatus":
-              const models = JSON.parse(message.data) as Model[];
-              setModels(models);
+              {
+                const models = JSON.parse(message.data) as Model[];
+                setModels(models);
+              }
               break;
 
-            case "logData":
+            case "logData": {
               const logData = JSON.parse(message.data) as LogData;
               switch (logData.source) {
                 case "proxy":
@@ -81,7 +83,7 @@ export function APIProvider({ children }: APIProviderProps) {
                   appendLog(logData.data, setUpstreamLogs);
                   break;
               }
-            //console.log(logData);
+            }
           }
         } catch (err) {
           console.error(e.data, err);

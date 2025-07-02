@@ -8,13 +8,8 @@ export default function ModelsPage() {
   const [isUnloading, setIsUnloading] = useState(false);
 
   useEffect(() => {
-    // enableModelUpdates(true);
-    // enableUpstreamLogs(true);
     enableAPIEvents(true);
-
     return () => {
-      // enableModelUpdates(false);
-      // enableUpstreamLogs(false);
       enableAPIEvents(false);
     };
   }, []);
