@@ -1,25 +1,28 @@
 package proxy
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"sort"
-	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kelindar/event"
 )
 
 type Model struct {
-	Id    string `json:"id"`
-	State string `json:"state"`
+	Id          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	State       string `json:"state"`
 }
 
 func addApiHandlers(pm *ProxyManager) {
 	// Add API endpoints for React to consume
 	apiGroup := pm.ginEngine.Group("/api")
 	{
-		apiGroup.GET("/models", pm.apiListModels)
-		apiGroup.GET("/modelsSSE", pm.apiListModelsSSE)
 		apiGroup.POST("/models/unload", pm.apiUnloadAllModels)
+		apiGroup.GET("/events", pm.apiSendEvents)
 	}
 }
 
@@ -65,37 +68,102 @@ func (pm *ProxyManager) getModelStatus() []Model {
 			}
 		}
 		models = append(models, Model{
-			Id:    modelID,
-			State: state,
+			Id:          modelID,
+			Name:        pm.config.Models[modelID].Name,
+			Description: pm.config.Models[modelID].Description,
+			State:       state,
 		})
 	}
 
 	return models
 }
 
-func (pm *ProxyManager) apiListModels(c *gin.Context) {
-	c.JSON(http.StatusOK, pm.getModelStatus())
+type messageType string
+
+const (
+	msgTypeModelStatus messageType = "modelStatus"
+	msgTypeLogData     messageType = "logData"
+)
+
+type messageEnvelope struct {
+	Type messageType `json:"type"`
+	Data string      `json:"data"`
 }
 
-// stream the models as a SSE
-func (pm *ProxyManager) apiListModelsSSE(c *gin.Context) {
+// sends a stream of different message types that happen on the server
+func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 	c.Header("X-Content-Type-Options", "nosniff")
 
-	notify := c.Request.Context().Done()
+	sendBuffer := make(chan messageEnvelope, 25)
+	ctx, cancel := context.WithCancel(c.Request.Context())
+	sendModels := func() {
+		data, err := json.Marshal(pm.getModelStatus())
+		if err == nil {
+			msg := messageEnvelope{Type: msgTypeModelStatus, Data: string(data)}
+			select {
+			case sendBuffer <- msg:
+			case <-ctx.Done():
+				return
+			default:
+			}
 
-	// Stream new events
+		}
+	}
+
+	sendLogData := func(source string, data []byte) {
+		data, err := json.Marshal(gin.H{
+			"source": source,
+			"data":   string(data),
+		})
+		if err == nil {
+			select {
+			case sendBuffer <- messageEnvelope{Type: msgTypeLogData, Data: string(data)}:
+			case <-ctx.Done():
+				return
+			default:
+			}
+		}
+	}
+
+	/**
+	 * Send updated models list
+	 */
+	defer event.On(func(e ProcessStateChangeEvent) {
+		sendModels()
+	})()
+	defer event.On(func(e ConfigFileChangedEvent) {
+		sendModels()
+	})()
+
+	/**
+	 * Send Log data
+	 */
+	defer pm.proxyLogger.OnLogData(func(data []byte) {
+		sendLogData("proxy", data)
+	})()
+	defer pm.upstreamLogger.OnLogData(func(data []byte) {
+		sendLogData("upstream", data)
+	})()
+
+	// send initial batch of data
+	sendLogData("proxy", pm.proxyLogger.GetHistory())
+	sendLogData("upstream", pm.upstreamLogger.GetHistory())
+	sendModels()
+
 	for {
 		select {
-		case <-notify:
+		case <-c.Request.Context().Done():
+			cancel()
 			return
-		default:
-			models := pm.getModelStatus()
-			c.SSEvent("message", models)
+		case <-pm.shutdownCtx.Done():
+			cancel()
+			return
+		case msg := <-sendBuffer:
+			c.SSEvent("message", msg)
 			c.Writer.Flush()
-			<-time.After(1000 * time.Millisecond)
 		}
 	}
 }

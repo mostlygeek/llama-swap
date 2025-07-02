@@ -4,15 +4,13 @@ import { LogPanel } from "./LogViewer";
 import { processEvalTimes } from "../lib/Utils";
 
 export default function ModelsPage() {
-  const { models, enableModelUpdates, unloadAllModels, loadModel, upstreamLogs, enableUpstreamLogs } = useAPI();
+  const { models, unloadAllModels, loadModel, upstreamLogs, enableAPIEvents } = useAPI();
   const [isUnloading, setIsUnloading] = useState(false);
 
   useEffect(() => {
-    enableModelUpdates(true);
-    enableUpstreamLogs(true);
+    enableAPIEvents(true);
     return () => {
-      enableModelUpdates(false);
-      enableUpstreamLogs(false);
+      enableAPIEvents(false);
     };
   }, []);
 
@@ -57,8 +55,13 @@ export default function ModelsPage() {
                   <tr key={model.id} className="border-b hover:bg-secondary-hover border-border">
                     <td className="p-2">
                       <a href={`/upstream/${model.id}/`} className="underline" target="_blank">
-                        {model.id}
+                        {model.name !== "" ? model.name : model.id}
                       </a>
+                      {model.description != "" && (
+                        <p>
+                          <em>{model.description}</em>
+                        </p>
+                      )}
                     </td>
                     <td className="p-2">
                       <button
