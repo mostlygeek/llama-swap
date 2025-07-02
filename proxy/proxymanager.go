@@ -167,9 +167,7 @@ func (pm *ProxyManager) setupGinEngine() {
 	// in proxymanager_loghandlers.go
 	pm.ginEngine.GET("/logs", pm.sendLogsHandlers)
 	pm.ginEngine.GET("/logs/stream", pm.streamLogsHandler)
-	pm.ginEngine.GET("/logs/streamSSE", pm.streamLogsHandlerSSE)
 	pm.ginEngine.GET("/logs/stream/:logMonitorID", pm.streamLogsHandler)
-	pm.ginEngine.GET("/logs/streamSSE/:logMonitorID", pm.streamLogsHandlerSSE)
 
 	/**
 	 * User Interface Endpoints

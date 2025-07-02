@@ -4,15 +4,18 @@ import { LogPanel } from "./LogViewer";
 import { processEvalTimes } from "../lib/Utils";
 
 export default function ModelsPage() {
-  const { models, enableModelUpdates, unloadAllModels, loadModel, upstreamLogs, enableUpstreamLogs } = useAPI();
+  const { models, unloadAllModels, loadModel, upstreamLogs, enableAPIEvents } = useAPI();
   const [isUnloading, setIsUnloading] = useState(false);
 
   useEffect(() => {
-    enableModelUpdates(true);
-    enableUpstreamLogs(true);
+    // enableModelUpdates(true);
+    // enableUpstreamLogs(true);
+    enableAPIEvents(true);
+
     return () => {
-      enableModelUpdates(false);
-      enableUpstreamLogs(false);
+      // enableModelUpdates(false);
+      // enableUpstreamLogs(false);
+      enableAPIEvents(false);
     };
   }, []);
 

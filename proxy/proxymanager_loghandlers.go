@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -52,53 +53,29 @@ func (pm *ProxyManager) streamLogsHandler(c *gin.Context) {
 		}
 	}
 
+	sendChan := make(chan []byte, 10)
+	ctx, cancel := context.WithCancel(c.Request.Context())
 	defer logger.OnLogData(func(data []byte) {
-		if c != nil && c.Writer != nil {
+		select {
+		case sendChan <- data:
+		case <-ctx.Done():
+			return
+		default:
+		}
+	})()
+
+	for {
+		select {
+		case <-c.Request.Context().Done():
+			cancel()
+			return
+		case <-pm.shutdownCtx.Done():
+			cancel()
+			return
+		case data := <-sendChan:
 			c.Writer.Write(data)
 			flusher.Flush()
 		}
-	})()
-
-	select {
-	case <-c.Request.Context().Done():
-	case <-pm.shutdownCtx.Done():
-	}
-
-}
-
-func (pm *ProxyManager) streamLogsHandlerSSE(c *gin.Context) {
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Content-Type-Options", "nosniff")
-
-	logMonitorId := c.Param("logMonitorID")
-	logger, err := pm.getLogger(logMonitorId)
-	if err != nil {
-		c.String(http.StatusBadRequest, err.Error())
-		return
-	}
-
-	// Send history first if not skipped
-	_, skipHistory := c.GetQuery("no-history")
-	if !skipHistory {
-		history := logger.GetHistory()
-		if len(history) != 0 {
-			c.SSEvent("message", string(history))
-			c.Writer.Flush()
-		}
-	}
-
-	defer logger.OnLogData(func(data []byte) {
-		if c != nil && c.Writer != nil {
-			c.SSEvent("message", string(data))
-			c.Writer.Flush()
-		}
-	})()
-
-	select {
-	case <-c.Request.Context().Done():
-	case <-pm.shutdownCtx.Done():
 	}
 }
 

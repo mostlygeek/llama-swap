@@ -3,14 +3,12 @@ import { useAPI } from "../contexts/APIProvider";
 import { usePersistentState } from "../hooks/usePersistentState";
 
 const LogViewer = () => {
-  const { proxyLogs, upstreamLogs, enableProxyLogs, enableUpstreamLogs } = useAPI();
+  const { proxyLogs, upstreamLogs, enableAPIEvents } = useAPI();
 
   useEffect(() => {
-    enableProxyLogs(true);
-    enableUpstreamLogs(true);
+    enableAPIEvents(true);
     return () => {
-      enableProxyLogs(false);
-      enableUpstreamLogs(false);
+      enableAPIEvents(false);
     };
   }, []);
 

@@ -3,26 +3,37 @@ package proxy
 import (
 	"bytes"
 	"io"
+	"sync"
 	"testing"
 )
 
 func TestLogMonitor(t *testing.T) {
 	logMonitor := NewLogMonitorWriter(io.Discard)
 
+	// A WaitGroup is used to wait for all the expected writes to complete
+	var wg sync.WaitGroup
+
 	client1Messages := make([]byte, 0)
 	client2Messages := make([]byte, 0)
 
 	defer logMonitor.OnLogData(func(data []byte) {
 		client1Messages = append(client1Messages, data...)
+		wg.Done()
 	})()
 
 	defer logMonitor.OnLogData(func(data []byte) {
 		client2Messages = append(client2Messages, data...)
+		wg.Done()
 	})()
+
+	wg.Add(6) // 2 x 3 writes
 
 	logMonitor.Write([]byte("1"))
 	logMonitor.Write([]byte("2"))
 	logMonitor.Write([]byte("3"))
+
+	// wait for all writes to complete
+	wg.Wait()
 
 	// Check the buffer
 	expectedHistory := "123"
