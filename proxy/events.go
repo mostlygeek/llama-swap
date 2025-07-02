@@ -25,8 +25,15 @@ func (e ChatCompletionStats) Type() uint32 {
 	return ChatCompletionStatsEventID
 }
 
+type ReloadingState int
+
+const (
+	ReloadingStateStart ReloadingState = iota
+	ReloadingStateEnd
+)
+
 type ConfigFileChangedEvent struct {
-	ReloadingState string
+	ReloadingState ReloadingState
 }
 
 func (e ConfigFileChangedEvent) Type() uint32 {

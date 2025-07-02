@@ -81,7 +81,7 @@ func main() {
 			// wait a few seconds and tell any UI to reload
 			time.AfterFunc(3*time.Second, func() {
 				event.Emit(proxy.ConfigFileChangedEvent{
-					ReloadingState: "end",
+					ReloadingState: proxy.ReloadingStateEnd,
 				})
 			})
 		} else {
@@ -99,7 +99,7 @@ func main() {
 	debouncedReload := debounce(time.Second, reloadProxyManager)
 	if *watchConfig {
 		defer event.On(func(e proxy.ConfigFileChangedEvent) {
-			if e.ReloadingState == "start" {
+			if e.ReloadingState == proxy.ReloadingStateStart {
 				debouncedReload()
 			}
 		})()
@@ -129,7 +129,7 @@ func main() {
 				case changeEvent := <-watcher.Events:
 					if changeEvent.Name == absConfigPath && (changeEvent.Has(fsnotify.Write) || changeEvent.Has(fsnotify.Create) || changeEvent.Has(fsnotify.Remove)) {
 						event.Emit(proxy.ConfigFileChangedEvent{
-							ReloadingState: "start",
+							ReloadingState: proxy.ReloadingStateStart,
 						})
 					}
 
