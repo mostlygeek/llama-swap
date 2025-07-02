@@ -2,10 +2,16 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useAPI } from "../contexts/APIProvider";
 import { LogPanel } from "./LogViewer";
 import { processEvalTimes } from "../lib/Utils";
+import { usePersistentState } from "../hooks/usePersistentState";
 
 export default function ModelsPage() {
   const { models, unloadAllModels, loadModel, upstreamLogs, enableAPIEvents } = useAPI();
   const [isUnloading, setIsUnloading] = useState(false);
+  const [showUnlisted, setShowUnlisted] = usePersistentState("showUnlisted", true);
+
+  const filteredModels = useMemo(() => {
+    return models.filter((model) => showUnlisted || !model.unlisted);
+  }, [models, showUnlisted]);
 
   useEffect(() => {
     enableAPIEvents(true);
@@ -39,9 +45,15 @@ export default function ModelsPage() {
         <div className="w-full md:w-1/2 flex items-top">
           <div className="card w-full">
             <h2 className="">Models</h2>
-            <button className="btn" onClick={handleUnloadAllModels} disabled={isUnloading}>
-              {isUnloading ? "Unloading..." : "Unload All Models"}
-            </button>
+            <div className="flex justify-between">
+              <button className="btn" onClick={() => setShowUnlisted(!showUnlisted)} style={{ lineHeight: "1.2" }}>
+                {showUnlisted ? "🟢 unlisted" : "⚫️ unlisted"}
+              </button>
+              <button className="btn" onClick={handleUnloadAllModels} disabled={isUnloading}>
+                {isUnloading ? "Stopping ..." : "Stop All"}
+              </button>
+            </div>
+
             <table className="w-full mt-4">
               <thead>
                 <tr className="border-b border-primary">
@@ -51,7 +63,7 @@ export default function ModelsPage() {
                 </tr>
               </thead>
               <tbody>
-                {models.map((model) => (
+                {filteredModels.map((model) => (
                   <tr key={model.id} className="border-b hover:bg-secondary-hover border-border">
                     <td className="p-2">
                       <a href={`/upstream/${model.id}/`} className="underline" target="_blank">
@@ -63,7 +75,7 @@ export default function ModelsPage() {
                         </p>
                       )}
                     </td>
-                    <td className="p-2">
+                    <td className="p-2 w-[50px]">
                       <button
                         className="btn btn--sm"
                         disabled={model.state !== "stopped"}
@@ -72,7 +84,7 @@ export default function ModelsPage() {
                         Load
                       </button>
                     </td>
-                    <td className="p-2">
+                    <td className="p-2 w-[75px]">
                       <span className={`status status--${model.state}`}>{model.state}</span>
                     </td>
                   </tr>
