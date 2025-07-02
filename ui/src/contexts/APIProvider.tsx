@@ -8,6 +8,7 @@ export interface Model {
   state: ModelStatus;
   name: string;
   description: string;
+  unlisted: boolean;
 }
 
 interface APIProviderType {
@@ -58,7 +59,6 @@ export function APIProvider({ children }: APIProviderProps) {
     }
 
     let retryCount = 0;
-    const maxRetries = 3;
     const initialDelay = 1000; // 1 second
 
     const connect = () => {
@@ -93,11 +93,9 @@ export function APIProvider({ children }: APIProviderProps) {
       };
       eventSource.onerror = () => {
         eventSource.close();
-        if (retryCount < maxRetries) {
-          retryCount++;
-          const delay = initialDelay * Math.pow(2, retryCount - 1);
-          setTimeout(connect, delay);
-        }
+        retryCount++;
+        const delay = Math.min(initialDelay * Math.pow(2, retryCount - 1), 5000);
+        setTimeout(connect, delay);
       };
 
       apiEventSource.current = eventSource;
