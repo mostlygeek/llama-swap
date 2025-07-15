@@ -255,6 +255,10 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	for _, modelId := range modelIds {
 		modelConfig := config.Models[modelId]
 
+		// Strip comments from command fields before macro expansion
+		modelConfig.Cmd = StripComments(modelConfig.Cmd)
+		modelConfig.CmdStop = StripComments(modelConfig.CmdStop)
+
 		// go through model config fields: cmd, cmdStop, proxy, checkEndPoint and replace macros with macro values
 		for macroName, macroValue := range config.Macros {
 			macroSlug := fmt.Sprintf("${%s}", macroName)
@@ -405,4 +409,17 @@ func SanitizeCommand(cmdStr string) ([]string, error) {
 	}
 
 	return args, nil
+}
+
+func StripComments(cmdStr string) string {
+	var cleanedLines []string
+	for _, line := range strings.Split(cmdStr, "\n") {
+		trimmed := strings.TrimSpace(line)
+		// Skip comment lines
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		cleanedLines = append(cleanedLines, line)
+	}
+	return strings.Join(cleanedLines, "\n")
 }

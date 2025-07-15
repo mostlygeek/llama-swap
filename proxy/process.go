@@ -212,11 +212,11 @@ func (p *Process) start() error {
 		if curState, swapErr := p.swapState(StateStarting, StateStopped); swapErr != nil {
 			p.state = StateStopped // force it into a stopped state
 			return fmt.Errorf(
-				"failed to start command and state swap failed. command error: %v, current state: %v, state swap error: %v",
-				err, curState, swapErr,
+				"failed to start command '%s' and state swap failed. command error: %v, current state: %v, state swap error: %v",
+				strings.Join(args, " "), err, curState, swapErr,
 			)
 		}
-		return fmt.Errorf("start() failed: %v", err)
+		return fmt.Errorf("start() failed for command '%s': %v", strings.Join(args, " "), err)
 	}
 
 	// Capture the exit error for later signalling

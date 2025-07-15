@@ -107,7 +107,7 @@ func TestProcess_BrokenModelConfig(t *testing.T) {
 	w = httptest.NewRecorder()
 	process.ProxyRequest(w, req)
 	assert.Equal(t, http.StatusBadGateway, w.Code)
-	assert.Contains(t, w.Body.String(), "start() failed: ")
+	assert.Contains(t, w.Body.String(), "start() failed for command 'nonexistent-command':")
 }
 
 func TestProcess_UnloadAfterTTL(t *testing.T) {
