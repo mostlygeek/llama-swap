@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -324,4 +325,118 @@ models:
 	if assert.NoError(t, err) {
 		assert.Equal(t, []string{"temperature", "top_k", "top_p"}, sanitized)
 	}
+}
+
+func TestStripComments(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "no comments",
+			input:    "echo hello\necho world",
+			expected: "echo hello\necho world",
+		},
+		{
+			name:     "single comment line",
+			input:    "# this is a comment\necho hello",
+			expected: "echo hello",
+		},
+		{
+			name:     "multiple comment lines",
+			input:    "# comment 1\necho hello\n# comment 2\necho world",
+			expected: "echo hello\necho world",
+		},
+		{
+			name:     "comment with spaces",
+			input:    "   # indented comment\necho hello",
+			expected: "echo hello",
+		},
+		{
+			name:     "empty lines preserved",
+			input:    "echo hello\n\necho world",
+			expected: "echo hello\n\necho world",
+		},
+		{
+			name:     "only comments",
+			input:    "# comment 1\n# comment 2",
+			expected: "",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := StripComments(tt.input)
+			if result != tt.expected {
+				t.Errorf("StripComments() = %q, expected %q", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestConfig_MacroInCommentStrippedBeforeExpansion(t *testing.T) {
+	// Test case that reproduces the original bug where a macro in a comment
+	// would get expanded and cause the comment text to be included in the command
+	content := `
+startPort: 9990
+macros:
+  "latest-llama": >
+    /user/llama.cpp/build/bin/llama-server
+    --port ${PORT}
+
+models:
+  "test-model":
+    cmd: |
+      # ${latest-llama} is a macro that is defined above
+      ${latest-llama}
+      --model /path/to/model.gguf
+      -ngl 99
+`
+
+	config, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.NoError(t, err)
+
+	// Get the sanitized command
+	sanitizedCmd, err := SanitizeCommand(config.Models["test-model"].Cmd)
+	assert.NoError(t, err)
+
+	// Join the command for easier inspection
+	cmdStr := strings.Join(sanitizedCmd, " ")
+
+	// Verify that comment text is NOT present in the final command as separate arguments
+	commentWords := []string{"is", "macro", "that", "defined", "above"}
+	for _, word := range commentWords {
+		found := slices.Contains(sanitizedCmd, word)
+		assert.False(t, found, "Comment text '%s' should not be present as a separate argument in final command", word)
+	}
+
+	// Verify that the actual command components ARE present
+	expectedParts := []string{
+		"/user/llama.cpp/build/bin/llama-server",
+		"--port",
+		"9990",
+		"--model",
+		"/path/to/model.gguf",
+		"-ngl",
+		"99",
+	}
+
+	for _, part := range expectedParts {
+		assert.Contains(t, cmdStr, part, "Expected command part '%s' not found in final command", part)
+	}
+
+	// Verify the server path appears exactly once (not duplicated due to macro expansion)
+	serverPath := "/user/llama.cpp/build/bin/llama-server"
+	count := strings.Count(cmdStr, serverPath)
+	assert.Equal(t, 1, count, "Expected exactly 1 occurrence of server path, found %d", count)
+
+	// Verify the expected final command structure
+	expectedCmd := "/user/llama.cpp/build/bin/llama-server --port 9990 --model /path/to/model.gguf -ngl 99"
+	assert.Equal(t, expectedCmd, cmdStr, "Final command does not match expected structure")
 }
