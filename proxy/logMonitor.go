@@ -7,8 +7,9 @@ import (
 	"io"
 	"os"
 	"sync"
+	"time"
 
-	"github.com/kelindar/event"
+	"github.com/mostlygeek/llama-swap/event"
 )
 
 type LogLevel int
@@ -40,7 +41,7 @@ func NewLogMonitor() *LogMonitor {
 
 func NewLogMonitorWriter(stdout io.Writer) *LogMonitor {
 	return &LogMonitor{
-		eventbus: event.NewDispatcher(),
+		eventbus: event.NewDispatcherConfig(time.Millisecond*50, 1000),
 		buffer:   ring.New(10 * 1024), // keep 10KB of buffered logs
 		stdout:   stdout,
 		level:    LevelInfo,
