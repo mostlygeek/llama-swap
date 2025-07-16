@@ -3,17 +3,16 @@ module github.com/mostlygeek/llama-swap
 go 1.23.0
 
 require (
+	github.com/billziss-gh/golib v0.2.0
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/gin-gonic/gin v1.10.0
 	github.com/stretchr/testify v1.9.0
 	github.com/tidwall/gjson v1.18.0
 	github.com/tidwall/sjson v1.2.5
 	gopkg.in/yaml.v3 v3.0.1
-	github.com/kelindar/event v1.5.2
 )
 
 require (
-	github.com/billziss-gh/golib v0.2.0 // indirect
 	github.com/bytedance/sonic v1.11.6 // indirect
 	github.com/bytedance/sonic/loader v0.1.1 // indirect
 	github.com/cloudwego/base64x v0.1.4 // indirect

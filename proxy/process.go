@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kelindar/event"
+	"github.com/mostlygeek/llama-swap/event"
 )
 
 type ProcessState string

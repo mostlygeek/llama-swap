@@ -7,7 +7,7 @@ import (
 	"sort"
 
 	"github.com/gin-gonic/gin"
-	"github.com/kelindar/event"
+	"github.com/mostlygeek/llama-swap/event"
 )
 
 type Model struct {
