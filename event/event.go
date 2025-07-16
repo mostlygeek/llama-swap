@@ -1,5 +1,5 @@
-// Copyright (c) Roman Atachiants and contributore. All rights reserved.
-// Licensed under the MIT license. See LICENSE file in the project root for detaile.
+// Copyright (c) Roman Atachiants and contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE file in the project root for details.
 
 package event
 
@@ -11,7 +11,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 )
 
 // Event represents an event contract
@@ -31,27 +30,18 @@ type registry struct {
 type Dispatcher struct {
 	subs     atomic.Pointer[registry] // Atomic pointer to immutable array
 	done     chan struct{}            // Cancellation
-	df       time.Duration            // Flush interval
 	maxQueue int                      // Maximum queue size per consumer
 	mu       sync.Mutex               // Only for writes (subscribe/unsubscribe)
 }
 
 // NewDispatcher creates a new dispatcher of events.
 func NewDispatcher() *Dispatcher {
-
-	// original defaults from kelindar/events
-	// the high flush interval is highly responsive and performant but creates high CPU utilization
-	// when idle
-	return NewDispatcherConfig(
-		500*time.Microsecond,
-		50000,
-	)
+	return NewDispatcherConfig(50000)
 }
 
-// NewDispatcherConfig creates a new dispatcher with custom flushes per second and max queue size
-func NewDispatcherConfig(flushInterval time.Duration, maxQueue int) *Dispatcher {
+// NewDispatcherConfig creates a new dispatcher with configurable max queue size
+func NewDispatcherConfig(maxQueue int) *Dispatcher {
 	d := &Dispatcher{
-		df:       flushInterval,
 		done:     make(chan struct{}),
 		maxQueue: maxQueue,
 	}
@@ -125,7 +115,8 @@ func SubscribeTo[T Event](broker *Dispatcher, eventType uint32, handler func(T))
 			grp.Del(sub)
 		}
 	}
-	// Create new grp
+
+	// Create new group
 	grp := &group[T]{cond: sync.NewCond(new(sync.Mutex)), maxQueue: broker.maxQueue}
 	sub := grp.Add(handler)
 
@@ -155,8 +146,6 @@ func SubscribeTo[T Event](broker *Dispatcher, eventType uint32, handler func(T))
 	newReg := &registry{keys: newKeys, grps: newGrps}
 	broker.subs.Store(newReg)
 
-	// Start processing
-	go grp.Process(broker.df, broker.done)
 	return func() {
 		grp.Del(sub)
 	}
@@ -222,6 +211,9 @@ func (s *consumer[T]) Listen(c *sync.Cond, fn func(T)) {
 		for _, event := range pending {
 			fn(event)
 		}
+
+		// Notify potential publishers waiting due to backpressure
+		c.Broadcast()
 	}
 }
 
@@ -235,50 +227,42 @@ type group[T Event] struct {
 	maxLen   int // Current maximum queue length across all consumers
 }
 
-// Process periodically broadcasts events
-func (s *group[T]) Process(interval time.Duration, done chan struct{}) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-done:
-			return
-		case <-ticker.C:
-			s.cond.L.Lock()
-			s.maxLen = 0 // Reset high water mark after consumers have processed
-			s.cond.L.Unlock()
-			s.cond.Broadcast()
-		}
-	}
-}
-
 // Broadcast sends an event to all consumers
 func (s *group[T]) Broadcast(ev T) {
 	s.cond.L.Lock()
 	defer s.cond.L.Unlock()
 
-	// Backpressure handling: if any queue is at capacity, wait until consumers can process
+	// Calculate current maximum queue length
+	s.maxLen = 0
+	for _, sub := range s.subs {
+		if len(sub.queue) > s.maxLen {
+			s.maxLen = len(sub.queue)
+		}
+	}
+
+	// Backpressure: wait if queues are full
 	for s.maxLen >= s.maxQueue {
+		s.cond.Wait()
+
+		// Recalculate after wakeup
 		s.maxLen = 0
 		for _, sub := range s.subs {
 			if len(sub.queue) > s.maxLen {
 				s.maxLen = len(sub.queue)
 			}
 		}
-
-		// If still at capacity after update, wait
-		if s.maxLen >= s.maxQueue {
-			s.cond.Wait()
-		}
 	}
 
-	// Add to all queues and update high water mark
+	// Add event to all queues and track new maximum
+	newMax := 0
 	for _, sub := range s.subs {
 		sub.queue = append(sub.queue, ev)
-		if len(sub.queue) > s.maxLen {
-			s.maxLen = len(sub.queue)
+		if len(sub.queue) > newMax {
+			newMax = len(sub.queue)
 		}
 	}
+	s.maxLen = newMax
+	s.cond.Broadcast() // Wake consumers
 }
 
 // Add adds a subscriber to the list

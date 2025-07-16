@@ -5,11 +5,10 @@ package event
 
 import (
 	"context"
-	"time"
 )
 
 // Default initializes a default in-process dispatcher
-var Default = NewDispatcherConfig(time.Millisecond*50, 25000) // flush event queues 20 times/second
+var Default = NewDispatcherConfig(25000)
 
 // On subscribes to an event, the type of the event will be automatically
 // inferred from the provided type. Must be constant for this to work. This
