@@ -23,17 +23,20 @@ type MetricsParser struct {
 	mu              sync.RWMutex
 	metrics         []TokenMetrics
 	maxMetrics      int
+	logPath         string
 	promptEvalRegex *regexp.Regexp
 	evalRegex       *regexp.Regexp
 }
 
 // NewMetricsParser creates a new metrics parser
-func NewMetricsParser(maxMetrics int) *MetricsParser {
+func NewMetricsParser(config *Config) *MetricsParser {
+	maxMetrics := config.MetricsMaxInMemory
 	if maxMetrics <= 0 {
 		maxMetrics = 1000 // Default fallback
 	}
 	return &MetricsParser{
 		maxMetrics:      maxMetrics,
+		logPath:         config.MetricsLogPath,
 		promptEvalRegex: regexp.MustCompile(`prompt eval time\s*=\s*(\d+(?:\.\d+)?)\s*ms\s*/\s*(\d+)\s*tokens\s*\(\s*(\d+(?:\.\d+)?)\s*ms per token,\s*(\d+(?:\.\d+)?)\s*tokens per second\s*\)`),
 		evalRegex:       regexp.MustCompile(`eval time\s*=\s*(\d+(?:\.\d+)?)\s*ms\s*/\s*(\d+)\s*tokens\s*\(\s*(\d+(?:\.\d+)?)\s*ms per token,\s*(\d+(?:\.\d+)?)\s*tokens per second\s*\)`),
 	}
