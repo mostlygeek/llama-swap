@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"sort"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/event"
@@ -26,7 +25,6 @@ func addApiHandlers(pm *ProxyManager) {
 		apiGroup.POST("/models/unload", pm.apiUnloadAllModels)
 		apiGroup.GET("/events", pm.apiSendEvents)
 		apiGroup.GET("/metrics", pm.apiGetMetrics)
-		apiGroup.GET("/metrics/:model", pm.apiGetModelMetrics)
 	}
 }
 
@@ -174,72 +172,13 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 }
 
 func (pm *ProxyManager) apiGetMetrics(c *gin.Context) {
-	// Collect metrics from all processes
-	allMetrics := []map[string]interface{}{}
-
-	for _, processGroup := range pm.processGroups {
-		for _, process := range processGroup.processes {
-			metrics := process.metricsParser.GetMetrics()
-
-			// Convert TokenMetrics to the expected API format
-			for _, metric := range metrics {
-				apiMetric := map[string]interface{}{
-					"timestamp":         metric.Timestamp.Format(time.RFC3339),
-					"model":             metric.Model,
-					"input_tokens":      metric.InputTokens,
-					"output_tokens":     metric.OutputTokens,
-					"duration_ms":       metric.DurationMs,
-					"tokens_per_second": metric.TokensPerSecond,
-					"status_code":       200, // Default success status
-				}
-				allMetrics = append(allMetrics, apiMetric)
-			}
-		}
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"metrics": allMetrics,
-	})
-}
-
-func (pm *ProxyManager) apiGetModelMetrics(c *gin.Context) {
-	modelName := c.Param("model")
-	if modelName == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "model parameter is required"})
+	// Get metrics from the shared metrics parser
+	jsonData, err := pm.metricsParser.GetMetricsJSON()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get metrics"})
 		return
 	}
 
-	// Find the process for this model
-	var targetProcess *Process
-	for _, processGroup := range pm.processGroups {
-		if process, exists := processGroup.processes[modelName]; exists {
-			targetProcess = process
-			break
-		}
-	}
-
-	if targetProcess == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "model not found"})
-		return
-	}
-
-	// Get metrics for this specific model
-	metrics := targetProcess.metricsParser.GetMetrics()
-	modelMetrics := []map[string]interface{}{}
-
-	for _, metric := range metrics {
-		apiMetric := map[string]interface{}{
-			"timestamp":         metric.Timestamp.Format(time.RFC3339),
-			"model":             metric.Model,
-			"input_tokens":      metric.InputTokens,
-			"output_tokens":     metric.OutputTokens,
-			"duration_ms":       metric.DurationMs,
-			"tokens_per_second": metric.TokensPerSecond,
-		}
-		modelMetrics = append(modelMetrics, apiMetric)
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"metrics": modelMetrics,
-	})
+	// Return the raw JSON data
+	c.Data(http.StatusOK, "application/json", jsonData)
 }

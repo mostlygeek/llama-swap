@@ -38,6 +38,7 @@ type ProxyManager struct {
 	metricsLogger  *LogMonitor
 
 	processGroups map[string]*ProcessGroup
+	metricsParser *MetricsParser
 
 	// shutdown signaling
 	shutdownCtx    context.Context
@@ -92,6 +93,7 @@ func New(config Config) *ProxyManager {
 		muxLogger:      stdoutLogger,
 		upstreamLogger: upstreamLogger,
 		metricsLogger:  metricsLogger,
+		metricsParser:  NewMetricsParser(config.MetricsMaxInMemory),
 
 		processGroups: make(map[string]*ProcessGroup),
 
@@ -101,7 +103,7 @@ func New(config Config) *ProxyManager {
 
 	// create the process groups
 	for groupID := range config.Groups {
-		processGroup := NewProcessGroup(groupID, config, proxyLogger, upstreamLogger)
+		processGroup := NewProcessGroup(groupID, config, proxyLogger, upstreamLogger, pm.metricsParser)
 		pm.processGroups[groupID] = processGroup
 	}
 

@@ -23,18 +23,16 @@ type MetricsParser struct {
 	mu              sync.RWMutex
 	metrics         []TokenMetrics
 	maxMetrics      int
-	modelName       string
 	promptEvalRegex *regexp.Regexp
 	evalRegex       *regexp.Regexp
 }
 
-// NewMetricsParser creates a new metrics parser for a specific model
-func NewMetricsParser(modelName string, maxMetrics int) *MetricsParser {
+// NewMetricsParser creates a new metrics parser
+func NewMetricsParser(maxMetrics int) *MetricsParser {
 	if maxMetrics <= 0 {
 		maxMetrics = 1000 // Default fallback
 	}
 	return &MetricsParser{
-		modelName:       modelName,
 		maxMetrics:      maxMetrics,
 		promptEvalRegex: regexp.MustCompile(`prompt eval time\s*=\s*(\d+(?:\.\d+)?)\s*ms\s*/\s*(\d+)\s*tokens\s*\(\s*(\d+(?:\.\d+)?)\s*ms per token,\s*(\d+(?:\.\d+)?)\s*tokens per second\s*\)`),
 		evalRegex:       regexp.MustCompile(`eval time\s*=\s*(\d+(?:\.\d+)?)\s*ms\s*/\s*(\d+)\s*tokens\s*\(\s*(\d+(?:\.\d+)?)\s*ms per token,\s*(\d+(?:\.\d+)?)\s*tokens per second\s*\)`),
@@ -53,7 +51,7 @@ func (mp *MetricsParser) addMetric(metric *TokenMetrics) {
 }
 
 // ParseLogLine parses a single log line for token metrics
-func (mp *MetricsParser) ParseLogLine(line string) *TokenMetrics {
+func (mp *MetricsParser) ParseLogLine(line string, modelName string) *TokenMetrics {
 	// Check for prompt evaluation metrics (input tokens)
 	if matches := mp.promptEvalRegex.FindStringSubmatch(line); matches != nil {
 		durationMs, _ := strconv.ParseFloat(matches[1], 64)
@@ -62,7 +60,7 @@ func (mp *MetricsParser) ParseLogLine(line string) *TokenMetrics {
 
 		metric := &TokenMetrics{
 			Timestamp:       time.Now(),
-			Model:           mp.modelName,
+			Model:           modelName,
 			OutputTokens:    0,
 			TokensPerSecond: tokensPerSecond,
 			InputTokens:     tokens,
@@ -81,7 +79,7 @@ func (mp *MetricsParser) ParseLogLine(line string) *TokenMetrics {
 
 		metric := &TokenMetrics{
 			Timestamp:       time.Now(),
-			Model:           mp.modelName,
+			Model:           modelName,
 			OutputTokens:    tokens,
 			TokensPerSecond: tokensPerSecond,
 			DurationMs:      int(durationMs),
@@ -94,19 +92,9 @@ func (mp *MetricsParser) ParseLogLine(line string) *TokenMetrics {
 	return nil
 }
 
-// GetMetrics returns all collected metrics
-func (mp *MetricsParser) GetMetrics() []TokenMetrics {
-	mp.mu.RLock()
-	defer mp.mu.RUnlock()
-
-	// Return a copy
-	result := make([]TokenMetrics, len(mp.metrics))
-	copy(result, mp.metrics)
-	return result
-}
-
 // GetMetricsJSON returns metrics as JSON
 func (mp *MetricsParser) GetMetricsJSON() ([]byte, error) {
-	metrics := mp.GetMetrics()
-	return json.Marshal(metrics)
+	mp.mu.RLock()
+	defer mp.mu.RUnlock()
+	return json.Marshal(mp.metrics)
 }

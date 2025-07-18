@@ -75,7 +75,7 @@ type Process struct {
 	failedStartCount int
 }
 
-func NewProcess(ID string, healthCheckTimeout int, metricsMaxInMemory int, config ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor) *Process {
+func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor, metricsParser *MetricsParser) *Process {
 	concurrentLimit := 10
 	if config.ConcurrencyLimit > 0 {
 		concurrentLimit = config.ConcurrencyLimit
@@ -88,7 +88,7 @@ func NewProcess(ID string, healthCheckTimeout int, metricsMaxInMemory int, confi
 		cancelUpstream:          nil,
 		processLogger:           processLogger,
 		proxyLogger:             proxyLogger,
-		metricsParser:           NewMetricsParser(ID, metricsMaxInMemory),
+		metricsParser:           metricsParser,
 		healthCheckTimeout:      healthCheckTimeout,
 		healthCheckLoopInterval: 5 * time.Second, /* default, can not be set by user - used for testing */
 		state:                   StateStopped,
@@ -526,21 +526,23 @@ func (p *Process) waitForCmd() {
 // processOutput reads from a pipe and sends data to both LogMonitor and MetricsParser
 func (p *Process) processOutput(reader *io.PipeReader, streamType string) {
 	defer reader.Close()
-	
+
 	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
 			continue
 		}
-		
+
 		// Send to LogMonitor for logging
 		p.processLogger.Write([]byte(line + "\n"))
-		
+
 		// Send to MetricsParser for parsing
-		p.metricsParser.ParseLogLine(line)
+		if p.metricsParser != nil {
+			p.metricsParser.ParseLogLine(line, p.ID)
+		}
 	}
-	
+
 	if err := scanner.Err(); err != nil && err != io.EOF {
 		p.proxyLogger.Errorf("<%s> Error reading %s: %v", p.ID, streamType, err)
 	}
