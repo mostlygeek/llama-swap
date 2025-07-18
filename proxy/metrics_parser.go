@@ -29,10 +29,13 @@ type MetricsParser struct {
 }
 
 // NewMetricsParser creates a new metrics parser for a specific model
-func NewMetricsParser(modelName string) *MetricsParser {
+func NewMetricsParser(modelName string, maxMetrics int) *MetricsParser {
+	if maxMetrics <= 0 {
+		maxMetrics = 1000 // Default fallback
+	}
 	return &MetricsParser{
 		modelName:       modelName,
-		maxMetrics:      1000, // Keep last 1000 metrics
+		maxMetrics:      maxMetrics,
 		promptEvalRegex: regexp.MustCompile(`prompt eval time\s*=\s*(\d+(?:\.\d+)?)\s*ms\s*/\s*(\d+)\s*tokens\s*\(\s*(\d+(?:\.\d+)?)\s*ms per token,\s*(\d+(?:\.\d+)?)\s*tokens per second\s*\)`),
 		evalRegex:       regexp.MustCompile(`eval time\s*=\s*(\d+(?:\.\d+)?)\s*ms\s*/\s*(\d+)\s*tokens\s*\(\s*(\d+(?:\.\d+)?)\s*ms per token,\s*(\d+(?:\.\d+)?)\s*tokens per second\s*\)`),
 	}

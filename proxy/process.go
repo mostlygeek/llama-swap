@@ -75,7 +75,7 @@ type Process struct {
 	failedStartCount int
 }
 
-func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor) *Process {
+func NewProcess(ID string, healthCheckTimeout int, metricsMaxInMemory int, config ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor) *Process {
 	concurrentLimit := 10
 	if config.ConcurrencyLimit > 0 {
 		concurrentLimit = config.ConcurrencyLimit
@@ -88,7 +88,7 @@ func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLo
 		cancelUpstream:          nil,
 		processLogger:           processLogger,
 		proxyLogger:             proxyLogger,
-		metricsParser:           NewMetricsParser(ID),
+		metricsParser:           NewMetricsParser(ID, metricsMaxInMemory),
 		healthCheckTimeout:      healthCheckTimeout,
 		healthCheckLoopInterval: 5 * time.Second, /* default, can not be set by user - used for testing */
 		state:                   StateStopped,
