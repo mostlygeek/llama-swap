@@ -92,7 +92,7 @@ func New(config Config) *ProxyManager {
 		muxLogger:      stdoutLogger,
 		upstreamLogger: upstreamLogger,
 		metricsLogger:  metricsLogger,
-		metricsParser:  NewMetricsParser(&config),
+		metricsParser:  NewMetricsParser(&config, proxyLogger),
 
 		processGroups: make(map[string]*ProcessGroup),
 
