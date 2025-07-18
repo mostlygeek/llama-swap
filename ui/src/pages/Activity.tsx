@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState, useEffect } from 'react';
 
 interface Metric {
   timestamp: string;
@@ -15,6 +15,10 @@ const ActivityPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    fetchMetrics();
+  }, []);
+
   const fetchMetrics = async () => {
     try {
       const response = await fetch('/api/metrics');
@@ -22,7 +26,7 @@ const ActivityPage = () => {
         throw new Error('Failed to fetch metrics');
       }
       const data = await response.json();
-      setMetrics(data);
+      setMetrics(data || []);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load metrics');
@@ -30,7 +34,6 @@ const ActivityPage = () => {
       setLoading(false);
     }
   };
-  useEffect(() => { fetchMetrics(); });
 
   const formatTimestamp = (timestamp: string) => {
     return new Date(timestamp).toLocaleString();
