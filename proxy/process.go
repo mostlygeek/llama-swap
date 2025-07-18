@@ -49,6 +49,7 @@ type Process struct {
 
 	processLogger *LogMonitor
 	proxyLogger   *LogMonitor
+	metricsParser *MetricsParser
 
 	healthCheckTimeout      int
 	healthCheckLoopInterval time.Duration
@@ -86,6 +87,7 @@ func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLo
 		cancelUpstream:          nil,
 		processLogger:           processLogger,
 		proxyLogger:             proxyLogger,
+		metricsParser:           NewMetricsParser(ID),
 		healthCheckTimeout:      healthCheckTimeout,
 		healthCheckLoopInterval: 5 * time.Second, /* default, can not be set by user - used for testing */
 		state:                   StateStopped,

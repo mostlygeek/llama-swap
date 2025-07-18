@@ -28,6 +28,7 @@ func addApiHandlers(pm *ProxyManager) {
 		apiGroup.POST("/models/unload", pm.apiUnloadAllModels)
 		apiGroup.GET("/events", pm.apiSendEvents)
 		apiGroup.GET("/metrics", pm.apiGetMetrics)
+		apiGroup.GET("/metrics/:model", pm.apiGetModelMetrics)
 	}
 }
 
