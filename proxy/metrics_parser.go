@@ -39,8 +39,8 @@ func NewMetricsParser(maxMetrics int) *MetricsParser {
 	}
 }
 
-// addMetric adds a new metric to the collection
-func (mp *MetricsParser) addMetric(metric TokenMetrics) {
+// addMetrics adds a new metric to the collection
+func (mp *MetricsParser) addMetrics(metric TokenMetrics) {
 	mp.mu.Lock()
 	defer mp.mu.Unlock()
 
@@ -58,7 +58,7 @@ func (mp *MetricsParser) ParseLogLine(line string, modelName string) {
 		tokens, _ := strconv.Atoi(matches[2])
 		tokensPerSecond, _ := strconv.ParseFloat(matches[4], 64)
 
-		metric := TokenMetrics{
+		metrics := TokenMetrics{
 			Timestamp:       time.Now(),
 			Model:           modelName,
 			OutputTokens:    0,
@@ -66,23 +66,21 @@ func (mp *MetricsParser) ParseLogLine(line string, modelName string) {
 			InputTokens:     tokens,
 			DurationMs:      int(durationMs),
 		}
-
-		mp.addMetric(metric)
+		mp.addMetrics(metrics)
 	} else if matches := mp.evalRegex.FindStringSubmatch(line); matches != nil {
 		// Check for evaluation metrics (output tokens)
 		durationMs, _ := strconv.ParseFloat(matches[1], 64)
 		tokens, _ := strconv.Atoi(matches[2])
 		tokensPerSecond, _ := strconv.ParseFloat(matches[4], 64)
 
-		metric := TokenMetrics{
+		metrics := TokenMetrics{
 			Timestamp:       time.Now(),
 			Model:           modelName,
 			OutputTokens:    tokens,
 			TokensPerSecond: tokensPerSecond,
 			DurationMs:      int(durationMs),
 		}
-
-		mp.addMetric(metric)
+		mp.addMetrics(metrics)
 	}
 }
 
