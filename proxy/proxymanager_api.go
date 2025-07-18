@@ -1,13 +1,11 @@
 package proxy
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
-	"os"
 	"sort"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/event"
@@ -176,36 +174,73 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 }
 
 func (pm *ProxyManager) apiGetMetrics(c *gin.Context) {
-	if pm.metricsLogger == nil || pm.config.MetricsLogPath == "" {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "metrics logging not enabled"})
-		return
-	}
+	// Collect metrics from all processes
+	allMetrics := []map[string]interface{}{}
 
-	file, err := os.Open(pm.config.MetricsLogPath)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to open metrics log: %v", err)})
-		return
-	}
-	defer file.Close()
+	for _, processGroup := range pm.processGroups {
+		for _, process := range processGroup.processes {
+			metrics := process.metricsParser.GetMetrics()
 
-	var metrics []map[string]interface{}
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		var entry map[string]interface{}
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err == nil {
-			metrics = append(metrics, entry)
+			// Convert TokenMetrics to the expected API format
+			for _, metric := range metrics {
+				apiMetric := map[string]interface{}{
+					"timestamp":     metric.Timestamp.Format(time.RFC3339),
+					"model":         metric.Model,
+					"input_tokens":  metric.PromptTokens,
+					"output_tokens": metric.TokensGenerated,
+					"duration_ms":   metric.DurationMs,
+					"speed_tps":     metric.TokensPerSecond,
+					"status_code":   200, // Default success status
+				}
+				allMetrics = append(allMetrics, apiMetric)
+			}
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to read metrics log: %v", err)})
+	c.JSON(http.StatusOK, gin.H{
+		"metrics": allMetrics,
+	})
+}
+
+func (pm *ProxyManager) apiGetModelMetrics(c *gin.Context) {
+	modelName := c.Param("model")
+	if modelName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "model parameter is required"})
 		return
 	}
 
-	// Reverse to show newest first
-	for i, j := 0, len(metrics)-1; i < j; i, j = i+1, j-1 {
-		metrics[i], metrics[j] = metrics[j], metrics[i]
+	// Find the process for this model
+	var targetProcess *Process
+	for _, processGroup := range pm.processGroups {
+		if process, exists := processGroup.processes[modelName]; exists {
+			targetProcess = process
+			break
+		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"metrics": metrics})
+	if targetProcess == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "model not found"})
+		return
+	}
+
+	// Get metrics for this specific model
+	metrics := targetProcess.metricsParser.GetMetrics()
+	modelMetrics := []map[string]interface{}{}
+
+	for _, metric := range metrics {
+		apiMetric := map[string]interface{}{
+			"timestamp":     metric.Timestamp.Format(time.RFC3339),
+			"model":         metric.Model,
+			"input_tokens":  metric.PromptTokens,
+			"output_tokens": metric.TokensGenerated,
+			"duration_ms":   metric.DurationMs,
+			"speed_tps":     metric.TokensPerSecond,
+			"status_code":   200, // Default success status
+		}
+		modelMetrics = append(modelMetrics, apiMetric)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"metrics": modelMetrics,
+	})
 }

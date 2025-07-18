@@ -164,18 +164,6 @@ func (mp *MetricsParser) GetMetrics() []TokenMetrics {
 	return result
 }
 
-// GetLatestMetrics returns the most recent metrics
-func (mp *MetricsParser) GetLatestMetrics() *TokenMetrics {
-	mp.mu.RLock()
-	defer mp.mu.RUnlock()
-
-	if len(mp.metrics) == 0 {
-		return nil
-	}
-
-	return &mp.metrics[len(mp.metrics)-1]
-}
-
 // GetMetricsJSON returns metrics as JSON
 func (mp *MetricsParser) GetMetricsJSON() ([]byte, error) {
 	metrics := mp.GetMetrics()
