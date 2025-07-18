@@ -3,7 +3,6 @@ package proxy
 import (
 	"bufio"
 	"encoding/json"
-	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -13,37 +12,37 @@ import (
 
 // TokenMetrics represents parsed token statistics from llama-server logs
 type TokenMetrics struct {
-	Timestamp     time.Time `json:"timestamp"`
-	Model         string    `json:"model"`
-	TokensGenerated int     `json:"tokens_generated"`
-	TokensPerSecond float64 `json:"tokens_per_second"`
-	PromptTokens    int     `json:"prompt_tokens,omitempty"`
-	TotalTokens     int     `json:"total_tokens,omitempty"`
-	DurationMs      int     `json:"duration_ms,omitempty"`
+	Timestamp       time.Time `json:"timestamp"`
+	Model           string    `json:"model"`
+	TokensGenerated int       `json:"tokens_generated"`
+	TokensPerSecond float64   `json:"tokens_per_second"`
+	PromptTokens    int       `json:"prompt_tokens,omitempty"`
+	TotalTokens     int       `json:"total_tokens,omitempty"`
+	DurationMs      int       `json:"duration_ms,omitempty"`
 }
 
 // MetricsParser parses llama-server output for token statistics
 type MetricsParser struct {
-	mu              sync.RWMutex
-	metrics         []TokenMetrics
-	maxMetrics      int
-	modelName       string
-	tokenRegex      *regexp.Regexp
-	speedRegex      *regexp.Regexp
-	promptRegex     *regexp.Regexp
-	totalRegex      *regexp.Regexp
-	durationRegex   *regexp.Regexp
+	mu            sync.RWMutex
+	metrics       []TokenMetrics
+	maxMetrics    int
+	modelName     string
+	tokenRegex    *regexp.Regexp
+	speedRegex    *regexp.Regexp
+	promptRegex   *regexp.Regexp
+	totalRegex    *regexp.Regexp
+	durationRegex *regexp.Regexp
 }
 
 // NewMetricsParser creates a new metrics parser for a specific model
 func NewMetricsParser(modelName string) *MetricsParser {
 	return &MetricsParser{
-		modelName:  modelName,
-		maxMetrics: 1000, // Keep last 1000 metrics
-		tokenRegex: regexp.MustCompile(`(\d+)\s+tokens?`),
-		speedRegex: regexp.MustCompile(`(\d+\.?\d*)\s+t/s`),
-		promptRegex: regexp.MustCompile(`prompt:\s*(\d+)\s+tokens?`),
-		totalRegex: regexp.MustCompile(`total:\s*(\d+)\s+tokens?`),
+		modelName:     modelName,
+		maxMetrics:    1000, // Keep last 1000 metrics
+		tokenRegex:    regexp.MustCompile(`(\d+)\s+tokens?`),
+		speedRegex:    regexp.MustCompile(`(\d+\.?\d*)\s+t/s`),
+		promptRegex:   regexp.MustCompile(`prompt:\s*(\d+)\s+tokens?`),
+		totalRegex:    regexp.MustCompile(`total:\s*(\d+)\s+tokens?`),
 		durationRegex: regexp.MustCompile(`(\d+)\s*ms`),
 	}
 }
@@ -59,7 +58,7 @@ func (mp *MetricsParser) ParseLogLine(line string) *TokenMetrics {
 	// Pattern 1: "llama_print_timings: prompt eval time = 123.45 ms / 45 tokens (33.33 ms per token, 30.00 tokens per second)"
 	// Pattern 2: "llama_print_timings:        eval time = 234.56 ms / 67 tokens (3.50 ms per token, 285.71 tokens per second)"
 	// Pattern 3: "prompt: 45 tokens, total: 112 tokens, t/s: 89.50"
-	
+
 	var tokensGenerated int
 	var tokensPerSecond float64
 	var promptTokens int
@@ -77,7 +76,7 @@ func (mp *MetricsParser) ParseLogLine(line string) *TokenMetrics {
 				durationMs, _ = strconv.Atoi(tokensMatch[1])
 				tokensGenerated, _ = strconv.Atoi(tokensMatch[2])
 			}
-			
+
 			// Extract speed from the end
 			speedMatch := regexp.MustCompile(`(\d+\.?\d*)`).FindStringSubmatch(parts[len(parts)-1])
 			if len(speedMatch) >= 2 {
@@ -90,13 +89,13 @@ func (mp *MetricsParser) ParseLogLine(line string) *TokenMetrics {
 		if len(promptMatch) >= 2 {
 			promptTokens, _ = strconv.Atoi(promptMatch[1])
 		}
-		
+
 		totalMatch := mp.totalRegex.FindStringSubmatch(line)
 		if len(totalMatch) >= 2 {
 			totalTokens, _ = strconv.Atoi(totalMatch[1])
 			tokensGenerated = totalTokens - promptTokens
 		}
-		
+
 		speedMatch := regexp.MustCompile(`t/s:\s*(\d+\.?\d*)`).FindStringSubmatch(line)
 		if len(speedMatch) >= 2 {
 			tokensPerSecond, _ = strconv.ParseFloat(speedMatch[1], 64)
@@ -128,12 +127,12 @@ func (mp *MetricsParser) ParseLogLine(line string) *TokenMetrics {
 
 		mp.mu.Lock()
 		defer mp.mu.Unlock()
-		
+
 		mp.metrics = append(mp.metrics, *metric)
 		if len(mp.metrics) > mp.maxMetrics {
 			mp.metrics = mp.metrics[1:] // Remove oldest
 		}
-		
+
 		return metric
 	}
 
@@ -144,13 +143,13 @@ func (mp *MetricsParser) ParseLogLine(line string) *TokenMetrics {
 func (mp *MetricsParser) ParseLogData(data []byte) []TokenMetrics {
 	scanner := bufio.NewScanner(strings.NewReader(string(data)))
 	var newMetrics []TokenMetrics
-	
+
 	for scanner.Scan() {
 		if metric := mp.ParseLogLine(scanner.Text()); metric != nil {
 			newMetrics = append(newMetrics, *metric)
 		}
 	}
-	
+
 	return newMetrics
 }
 
@@ -158,7 +157,7 @@ func (mp *MetricsParser) ParseLogData(data []byte) []TokenMetrics {
 func (mp *MetricsParser) GetMetrics() []TokenMetrics {
 	mp.mu.RLock()
 	defer mp.mu.RUnlock()
-	
+
 	// Return a copy
 	result := make([]TokenMetrics, len(mp.metrics))
 	copy(result, mp.metrics)
@@ -169,11 +168,11 @@ func (mp *MetricsParser) GetMetrics() []TokenMetrics {
 func (mp *MetricsParser) GetLatestMetrics() *TokenMetrics {
 	mp.mu.RLock()
 	defer mp.mu.RUnlock()
-	
+
 	if len(mp.metrics) == 0 {
 		return nil
 	}
-	
+
 	return &mp.metrics[len(mp.metrics)-1]
 }
 
@@ -187,19 +186,19 @@ func (mp *MetricsParser) GetMetricsJSON() ([]byte, error) {
 func (mp *MetricsParser) GetSummary() map[string]interface{} {
 	mp.mu.RLock()
 	defer mp.mu.RUnlock()
-	
+
 	if len(mp.metrics) == 0 {
 		return map[string]interface{}{
-			"total_requests": 0,
-			"total_tokens":   0,
+			"total_requests":        0,
+			"total_tokens":          0,
 			"avg_tokens_per_second": 0,
 			"max_tokens_per_second": 0,
 		}
 	}
-	
+
 	var totalTokens, totalDuration int
 	var maxTPS float64
-	
+
 	for _, m := range mp.metrics {
 		totalTokens += m.TokensGenerated
 		totalDuration += m.DurationMs
@@ -207,17 +206,17 @@ func (mp *MetricsParser) GetSummary() map[string]interface{} {
 			maxTPS = m.TokensPerSecond
 		}
 	}
-	
+
 	avgTPS := 0.0
 	if totalDuration > 0 {
 		avgTPS = float64(totalTokens) / (float64(totalDuration) / 1000.0)
 	}
-	
+
 	return map[string]interface{}{
-		"total_requests": len(mp.metrics),
-		"total_tokens": totalTokens,
-		"avg_tokens_per_second": avgTPS,
-		"max_tokens_per_second": maxTPS,
+		"total_requests":           len(mp.metrics),
+		"total_tokens":             totalTokens,
+		"avg_tokens_per_second":    avgTPS,
+		"max_tokens_per_second":    maxTPS,
 		"latest_tokens_per_second": mp.metrics[len(mp.metrics)-1].TokensPerSecond,
 	}
 }
