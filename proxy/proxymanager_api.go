@@ -1,9 +1,12 @@
 package proxy
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
 	"sort"
 
 	"github.com/gin-gonic/gin"
@@ -24,6 +27,7 @@ func addApiHandlers(pm *ProxyManager) {
 	{
 		apiGroup.POST("/models/unload", pm.apiUnloadAllModels)
 		apiGroup.GET("/events", pm.apiSendEvents)
+		apiGroup.GET("/metrics", pm.apiGetMetrics)
 	}
 }
 
@@ -168,4 +172,39 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 			c.Writer.Flush()
 		}
 	}
+}
+
+func (pm *ProxyManager) apiGetMetrics(c *gin.Context) {
+	if pm.metricsLogger == nil || pm.config.MetricsLogPath == "" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "metrics logging not enabled"})
+		return
+	}
+
+	file, err := os.Open(pm.config.MetricsLogPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to open metrics log: %v", err)})
+		return
+	}
+	defer file.Close()
+
+	var metrics []map[string]interface{}
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		var entry map[string]interface{}
+		if err := json.Unmarshal(scanner.Bytes(), &entry); err == nil {
+			metrics = append(metrics, entry)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to read metrics log: %v", err)})
+		return
+	}
+
+	// Reverse to show newest first
+	for i, j := 0, len(metrics)-1; i < j; i, j = i+1, j-1 {
+		metrics[i], metrics[j] = metrics[j], metrics[i]
+	}
+
+	c.JSON(http.StatusOK, gin.H{"metrics": metrics})
 }

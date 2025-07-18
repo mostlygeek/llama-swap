@@ -1,12 +1,15 @@
 package proxy
 
 import (
+	
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strconv"
 	"strings"
@@ -32,6 +35,7 @@ type ProxyManager struct {
 	proxyLogger    *LogMonitor
 	upstreamLogger *LogMonitor
 	muxLogger      *LogMonitor
+	metricsLogger  *LogMonitor
 
 	processGroups map[string]*ProcessGroup
 
@@ -68,6 +72,16 @@ func New(config Config) *ProxyManager {
 		upstreamLogger.SetLogLevel(LevelInfo)
 	}
 
+	// Set up metrics logger if path is configured
+	var metricsLogger *LogMonitor
+	if config.MetricsLogPath != "" {
+		if f, err := os.OpenFile(config.MetricsLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+			metricsLogger = NewLogMonitorWriter(f)
+		} else {
+			proxyLogger.Errorf("Failed to open metrics log file: %v", err)
+		}
+	}
+
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 
 	pm := &ProxyManager{
@@ -77,6 +91,7 @@ func New(config Config) *ProxyManager {
 		proxyLogger:    proxyLogger,
 		muxLogger:      stdoutLogger,
 		upstreamLogger: upstreamLogger,
+		metricsLogger:  metricsLogger,
 
 		processGroups: make(map[string]*ProcessGroup),
 
@@ -354,6 +369,7 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 }
 
 func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
+	startTime := time.Now()
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		pm.sendErrorResponse(c, http.StatusBadRequest, "could not ready request body")
@@ -364,6 +380,12 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 	if requestedModel == "" {
 		pm.sendErrorResponse(c, http.StatusBadRequest, "missing or invalid 'model' key")
 		return
+	}
+
+	// Get input token count from request
+	inputTokens := int(gjson.GetBytes(bodyBytes, "max_tokens").Int())
+	if inputTokens == 0 {
+		inputTokens = int(gjson.GetBytes(bodyBytes, "messages.#").Int()) // Fallback to message count
 	}
 
 	processGroup, realModelName, err := pm.swapProcessGroup(requestedModel)
@@ -404,10 +426,47 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 	c.Request.Header.Set("content-length", strconv.Itoa(len(bodyBytes)))
 	c.Request.ContentLength = int64(len(bodyBytes))
 
-	if err := processGroup.ProxyRequest(realModelName, c.Writer, c.Request); err != nil {
+	// Create a response recorder to capture the response
+	w := httptest.NewRecorder()
+	if err := processGroup.ProxyRequest(realModelName, w, c.Request); err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
 		pm.proxyLogger.Errorf("Error Proxying Request for processGroup %s and model %s", processGroup.id, realModelName)
 		return
+	}
+
+	// Copy the recorded response to the original writer
+	for k, v := range w.Header() {
+		c.Writer.Header()[k] = v
+	}
+	c.Writer.WriteHeader(w.Code)
+	if _, err := c.Writer.Write(w.Body.Bytes()); err != nil {
+		pm.proxyLogger.Errorf("Error writing response: %v", err)
+	}
+
+	// Calculate metrics
+	duration := time.Since(startTime)
+	outputTokens := int(gjson.GetBytes(w.Body.Bytes(), "usage.completion_tokens").Int())
+	if outputTokens == 0 {
+		outputTokens = len(gjson.GetBytes(w.Body.Bytes(), "choices.#.message.content").Array()) // Fallback to content length
+	}
+	generationSpeed := float64(outputTokens) / duration.Seconds()
+
+	// Log metrics if configured
+	if pm.metricsLogger != nil {
+		metrics := map[string]interface{}{
+			"timestamp":      startTime.Format(time.RFC3339),
+			"model":         realModelName,
+			"input_tokens":  inputTokens,
+			"output_tokens": outputTokens,
+			"duration_ms":   duration.Milliseconds(),
+			"speed_tps":     generationSpeed,
+			"status_code":   w.Code,
+		}
+		if jsonData, err := json.Marshal(metrics); err == nil {
+			pm.metricsLogger.Info(string(jsonData))
+		} else {
+			pm.proxyLogger.Errorf("Failed to marshal metrics: %v", err)
+		}
 	}
 }
 

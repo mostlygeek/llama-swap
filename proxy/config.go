@@ -142,6 +142,7 @@ type Config struct {
 	HealthCheckTimeout int                    `yaml:"healthCheckTimeout"`
 	LogRequests        bool                   `yaml:"logRequests"`
 	LogLevel           string                 `yaml:"logLevel"`
+	MetricsLogPath     string                 `yaml:"metricsLogPath"`
 	Models             map[string]ModelConfig `yaml:"models"` /* key is model ID */
 	Profiles           map[string][]string    `yaml:"profiles"`
 	Groups             map[string]GroupConfig `yaml:"groups"` /* key is group ID */
@@ -194,6 +195,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		HealthCheckTimeout: 120,
 		StartPort:          5800,
 		LogLevel:           "info",
+		MetricsLogPath:     "",
 	}
 	err = yaml.Unmarshal(data, &config)
 	if err != nil {
