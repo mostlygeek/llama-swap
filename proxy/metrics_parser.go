@@ -40,25 +40,25 @@ func NewMetricsParser(maxMetrics int) *MetricsParser {
 }
 
 // addMetric adds a new metric to the collection
-func (mp *MetricsParser) addMetric(metric *TokenMetrics) {
+func (mp *MetricsParser) addMetric(metric TokenMetrics) {
 	mp.mu.Lock()
 	defer mp.mu.Unlock()
 
-	mp.metrics = append(mp.metrics, *metric)
+	mp.metrics = append(mp.metrics, metric)
 	if len(mp.metrics) > mp.maxMetrics {
 		mp.metrics = mp.metrics[len(mp.metrics)-mp.maxMetrics:]
 	}
 }
 
 // ParseLogLine parses a single log line for token metrics
-func (mp *MetricsParser) ParseLogLine(line string, modelName string) *TokenMetrics {
-	// Check for prompt evaluation metrics (input tokens)
+func (mp *MetricsParser) ParseLogLine(line string, modelName string) {
 	if matches := mp.promptEvalRegex.FindStringSubmatch(line); matches != nil {
+		// Check for prompt evaluation metrics (input tokens)
 		durationMs, _ := strconv.ParseFloat(matches[1], 64)
 		tokens, _ := strconv.Atoi(matches[2])
 		tokensPerSecond, _ := strconv.ParseFloat(matches[4], 64)
 
-		metric := &TokenMetrics{
+		metric := TokenMetrics{
 			Timestamp:       time.Now(),
 			Model:           modelName,
 			OutputTokens:    0,
@@ -68,16 +68,13 @@ func (mp *MetricsParser) ParseLogLine(line string, modelName string) *TokenMetri
 		}
 
 		mp.addMetric(metric)
-		return metric
-	}
-
-	// Check for evaluation metrics (output tokens)
-	if matches := mp.evalRegex.FindStringSubmatch(line); matches != nil {
+	} else if matches := mp.evalRegex.FindStringSubmatch(line); matches != nil {
+		// Check for evaluation metrics (output tokens)
 		durationMs, _ := strconv.ParseFloat(matches[1], 64)
 		tokens, _ := strconv.Atoi(matches[2])
 		tokensPerSecond, _ := strconv.ParseFloat(matches[4], 64)
 
-		metric := &TokenMetrics{
+		metric := TokenMetrics{
 			Timestamp:       time.Now(),
 			Model:           modelName,
 			OutputTokens:    tokens,
@@ -86,10 +83,7 @@ func (mp *MetricsParser) ParseLogLine(line string, modelName string) *TokenMetri
 		}
 
 		mp.addMetric(metric)
-		return metric
 	}
-
-	return nil
 }
 
 // GetMetricsJSON returns metrics as JSON
