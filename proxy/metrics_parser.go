@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"bufio"
 	"encoding/json"
 	"regexp"
 	"strconv"
@@ -137,20 +136,6 @@ func (mp *MetricsParser) ParseLogLine(line string) *TokenMetrics {
 	}
 
 	return nil
-}
-
-// ParseLogData parses multiple log lines for metrics
-func (mp *MetricsParser) ParseLogData(data []byte) []TokenMetrics {
-	scanner := bufio.NewScanner(strings.NewReader(string(data)))
-	var newMetrics []TokenMetrics
-
-	for scanner.Scan() {
-		if metric := mp.ParseLogLine(scanner.Text()); metric != nil {
-			newMetrics = append(newMetrics, *metric)
-		}
-	}
-
-	return newMetrics
 }
 
 // GetMetrics returns all collected metrics

@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -195,14 +196,22 @@ func (p *Process) start() error {
 	defer p.waitStarting.Done()
 	cmdContext, ctxCancelUpstream := context.WithCancel(context.Background())
 
+	// Create a pipe to capture stdout and feed both LogMonitor and MetricsParser
+	stdoutReader, stdoutWriter := io.Pipe()
+	stderrReader, stderrWriter := io.Pipe()
+
 	p.cmd = exec.CommandContext(cmdContext, args[0], args[1:]...)
-	p.cmd.Stdout = p.processLogger
-	p.cmd.Stderr = p.processLogger
+	p.cmd.Stdout = stdoutWriter
+	p.cmd.Stderr = stderrWriter
 	p.cmd.Env = append(p.cmd.Environ(), p.config.Env...)
 	p.cmd.Cancel = p.cmdStopUpstreamProcess
 	p.cmd.WaitDelay = p.gracefulStopTimeout
 	p.cancelUpstream = ctxCancelUpstream
 	p.cmdWaitChan = make(chan struct{})
+
+	// Start goroutines to process stdout and stderr
+	go p.processOutput(stdoutReader, "stdout")
+	go p.processOutput(stderrReader, "stderr")
 
 	p.failedStartCount++ // this will be reset to zero when the process has successfully started
 
@@ -512,6 +521,29 @@ func (p *Process) waitForCmd() {
 		p.state = StateStopped // force it to be in this state
 	}
 	close(p.cmdWaitChan)
+}
+
+// processOutput reads from a pipe and sends data to both LogMonitor and MetricsParser
+func (p *Process) processOutput(reader *io.PipeReader, streamType string) {
+	defer reader.Close()
+	
+	scanner := bufio.NewScanner(reader)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+		
+		// Send to LogMonitor for logging
+		p.processLogger.Write([]byte(line + "\n"))
+		
+		// Send to MetricsParser for parsing
+		p.metricsParser.ParseLogLine(line)
+	}
+	
+	if err := scanner.Err(); err != nil && err != io.EOF {
+		p.proxyLogger.Errorf("<%s> Error reading %s: %v", p.ID, streamType, err)
+	}
 }
 
 // cmdStopUpstreamProcess attemps to stop the upstream process gracefully
