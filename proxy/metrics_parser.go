@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"regexp"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 )
@@ -13,125 +12,79 @@ import (
 type TokenMetrics struct {
 	Timestamp       time.Time `json:"timestamp"`
 	Model           string    `json:"model"`
-	TokensGenerated int       `json:"tokens_generated"`
+	InputTokens     int       `json:"input_tokens"`
+	OutputTokens    int       `json:"output_tokens"`
 	TokensPerSecond float64   `json:"tokens_per_second"`
-	PromptTokens    int       `json:"prompt_tokens,omitempty"`
-	TotalTokens     int       `json:"total_tokens,omitempty"`
-	DurationMs      int       `json:"duration_ms,omitempty"`
+	DurationMs      int       `json:"duration_ms"`
 }
 
 // MetricsParser parses llama-server output for token statistics
 type MetricsParser struct {
-	mu            sync.RWMutex
-	metrics       []TokenMetrics
-	maxMetrics    int
-	modelName     string
-	tokenRegex    *regexp.Regexp
-	speedRegex    *regexp.Regexp
-	promptRegex   *regexp.Regexp
-	totalRegex    *regexp.Regexp
-	durationRegex *regexp.Regexp
+	mu              sync.RWMutex
+	metrics         []TokenMetrics
+	maxMetrics      int
+	modelName       string
+	promptEvalRegex *regexp.Regexp
+	evalRegex       *regexp.Regexp
 }
 
 // NewMetricsParser creates a new metrics parser for a specific model
 func NewMetricsParser(modelName string) *MetricsParser {
 	return &MetricsParser{
-		modelName:     modelName,
-		maxMetrics:    1000, // Keep last 1000 metrics
-		tokenRegex:    regexp.MustCompile(`(\d+)\s+tokens?`),
-		speedRegex:    regexp.MustCompile(`(\d+\.?\d*)\s+t/s`),
-		promptRegex:   regexp.MustCompile(`prompt:\s*(\d+)\s+tokens?`),
-		totalRegex:    regexp.MustCompile(`total:\s*(\d+)\s+tokens?`),
-		durationRegex: regexp.MustCompile(`(\d+)\s*ms`),
+		modelName:       modelName,
+		maxMetrics:      1000, // Keep last 1000 metrics
+		promptEvalRegex: regexp.MustCompile(`prompt eval time\s*=\s*(\d+(?:\.\d+)?)\s*ms\s*/\s*(\d+)\s*tokens\s*\(\s*(\d+(?:\.\d+)?)\s*ms per token,\s*(\d+(?:\.\d+)?)\s*tokens per second\s*\)`),
+		evalRegex:       regexp.MustCompile(`eval time\s*=\s*(\d+(?:\.\d+)?)\s*ms\s*/\s*(\d+)\s*tokens\s*\(\s*(\d+(?:\.\d+)?)\s*ms per token,\s*(\d+(?:\.\d+)?)\s*tokens per second\s*\)`),
+	}
+}
+
+// addMetric adds a new metric to the collection
+func (mp *MetricsParser) addMetric(metric *TokenMetrics) {
+	mp.mu.Lock()
+	defer mp.mu.Unlock()
+
+	mp.metrics = append(mp.metrics, *metric)
+	if len(mp.metrics) > mp.maxMetrics {
+		mp.metrics = mp.metrics[len(mp.metrics)-mp.maxMetrics:]
 	}
 }
 
 // ParseLogLine parses a single log line for token metrics
 func (mp *MetricsParser) ParseLogLine(line string) *TokenMetrics {
-	line = strings.TrimSpace(line)
-	if line == "" {
-		return nil
-	}
+	// Check for prompt evaluation metrics (input tokens)
+	if matches := mp.promptEvalRegex.FindStringSubmatch(line); matches != nil {
+		durationMs, _ := strconv.ParseFloat(matches[1], 64)
+		tokens, _ := strconv.Atoi(matches[2])
+		tokensPerSecond, _ := strconv.ParseFloat(matches[4], 64)
 
-	// Look for common llama-server output patterns
-	// Pattern 1: "llama_print_timings: prompt eval time = 123.45 ms / 45 tokens (33.33 ms per token, 30.00 tokens per second)"
-	// Pattern 2: "llama_print_timings:        eval time = 234.56 ms / 67 tokens (3.50 ms per token, 285.71 tokens per second)"
-	// Pattern 3: "prompt: 45 tokens, total: 112 tokens, t/s: 89.50"
-
-	var tokensGenerated int
-	var tokensPerSecond float64
-	var promptTokens int
-	var totalTokens int
-	var durationMs int
-
-	// Try to extract tokens and speed from various patterns
-	if strings.Contains(line, "eval time") && strings.Contains(line, "tokens per second") {
-		// Pattern: eval time = X ms / Y tokens (... Z tokens per second)
-		parts := strings.Split(line, "tokens per second")
-		if len(parts) >= 1 {
-			// Extract tokens from "X ms / Y tokens"
-			tokensMatch := regexp.MustCompile(`(\d+)\s+ms\s*/\s*(\d+)\s+tokens`).FindStringSubmatch(parts[0])
-			if len(tokensMatch) >= 3 {
-				durationMs, _ = strconv.Atoi(tokensMatch[1])
-				tokensGenerated, _ = strconv.Atoi(tokensMatch[2])
-			}
-
-			// Extract speed from the end
-			speedMatch := regexp.MustCompile(`(\d+\.?\d*)`).FindStringSubmatch(parts[len(parts)-1])
-			if len(speedMatch) >= 2 {
-				tokensPerSecond, _ = strconv.ParseFloat(speedMatch[1], 64)
-			}
-		}
-	} else if strings.Contains(line, "t/s:") {
-		// Pattern: prompt: X tokens, total: Y tokens, t/s: Z
-		promptMatch := mp.promptRegex.FindStringSubmatch(line)
-		if len(promptMatch) >= 2 {
-			promptTokens, _ = strconv.Atoi(promptMatch[1])
-		}
-
-		totalMatch := mp.totalRegex.FindStringSubmatch(line)
-		if len(totalMatch) >= 2 {
-			totalTokens, _ = strconv.Atoi(totalMatch[1])
-			tokensGenerated = totalTokens - promptTokens
-		}
-
-		speedMatch := regexp.MustCompile(`t/s:\s*(\d+\.?\d*)`).FindStringSubmatch(line)
-		if len(speedMatch) >= 2 {
-			tokensPerSecond, _ = strconv.ParseFloat(speedMatch[1], 64)
-		}
-	} else if strings.Contains(line, "decoded") && strings.Contains(line, "tokens in") {
-		// Pattern: "decoded 123 tokens in 456.78ms"
-		decodedMatch := regexp.MustCompile(`decoded\s+(\d+)\s+tokens?\s+in\s+(\d+\.?\d*)\s*ms`).FindStringSubmatch(line)
-		if len(decodedMatch) >= 3 {
-			tokensGenerated, _ = strconv.Atoi(decodedMatch[1])
-			duration, _ := strconv.ParseFloat(decodedMatch[2], 64)
-			durationMs = int(duration)
-			if duration > 0 {
-				tokensPerSecond = float64(tokensGenerated) / (duration / 1000.0)
-			}
-		}
-	}
-
-	// Only create metrics if we found meaningful data
-	if tokensGenerated > 0 || tokensPerSecond > 0 {
 		metric := &TokenMetrics{
 			Timestamp:       time.Now(),
 			Model:           mp.modelName,
-			TokensGenerated: tokensGenerated,
+			OutputTokens:    0,
 			TokensPerSecond: tokensPerSecond,
-			PromptTokens:    promptTokens,
-			TotalTokens:     totalTokens,
-			DurationMs:      durationMs,
+			InputTokens:     tokens,
+			DurationMs:      int(durationMs),
 		}
 
-		mp.mu.Lock()
-		defer mp.mu.Unlock()
+		mp.addMetric(metric)
+		return metric
+	}
 
-		mp.metrics = append(mp.metrics, *metric)
-		if len(mp.metrics) > mp.maxMetrics {
-			mp.metrics = mp.metrics[1:] // Remove oldest
+	// Check for evaluation metrics (output tokens)
+	if matches := mp.evalRegex.FindStringSubmatch(line); matches != nil {
+		durationMs, _ := strconv.ParseFloat(matches[1], 64)
+		tokens, _ := strconv.Atoi(matches[2])
+		tokensPerSecond, _ := strconv.ParseFloat(matches[4], 64)
+
+		metric := &TokenMetrics{
+			Timestamp:       time.Now(),
+			Model:           mp.modelName,
+			OutputTokens:    tokens,
+			TokensPerSecond: tokensPerSecond,
+			DurationMs:      int(durationMs),
 		}
 
+		mp.addMetric(metric)
 		return metric
 	}
 
@@ -173,7 +126,7 @@ func (mp *MetricsParser) GetSummary() map[string]interface{} {
 	var maxTPS float64
 
 	for _, m := range mp.metrics {
-		totalTokens += m.TokensGenerated
+		totalTokens += m.OutputTokens
 		totalDuration += m.DurationMs
 		if m.TokensPerSecond > maxTPS {
 			maxTPS = m.TokensPerSecond

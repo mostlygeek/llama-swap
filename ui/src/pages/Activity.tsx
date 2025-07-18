@@ -6,7 +6,7 @@ interface Metric {
   input_tokens: number;
   output_tokens: number;
   duration_ms: number;
-  speed_tps: number;
+  tokens_per_second: number;
   status_code: number;
 }
 
@@ -106,9 +106,6 @@ const ActivityPage = () => {
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Duration
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Status
-                </th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
@@ -127,19 +124,10 @@ const ActivityPage = () => {
                     {metric.output_tokens.toLocaleString()}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {formatSpeed(metric.speed_tps)}
+                    {formatSpeed(metric.tokens_per_second)}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                     {formatDuration(metric.duration_ms)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                      metric.status_code === 200 
-                        ? 'bg-green-100 text-green-800' 
-                        : 'bg-red-100 text-red-800'
-                    }`}>
-                      {metric.status_code}
-                    </span>
                   </td>
                 </tr>
               ))}

@@ -184,13 +184,13 @@ func (pm *ProxyManager) apiGetMetrics(c *gin.Context) {
 			// Convert TokenMetrics to the expected API format
 			for _, metric := range metrics {
 				apiMetric := map[string]interface{}{
-					"timestamp":     metric.Timestamp.Format(time.RFC3339),
-					"model":         metric.Model,
-					"input_tokens":  metric.PromptTokens,
-					"output_tokens": metric.TokensGenerated,
-					"duration_ms":   metric.DurationMs,
-					"speed_tps":     metric.TokensPerSecond,
-					"status_code":   200, // Default success status
+					"timestamp":         metric.Timestamp.Format(time.RFC3339),
+					"model":             metric.Model,
+					"input_tokens":      metric.InputTokens,
+					"output_tokens":     metric.OutputTokens,
+					"duration_ms":       metric.DurationMs,
+					"tokens_per_second": metric.TokensPerSecond,
+					"status_code":       200, // Default success status
 				}
 				allMetrics = append(allMetrics, apiMetric)
 			}
@@ -229,13 +229,12 @@ func (pm *ProxyManager) apiGetModelMetrics(c *gin.Context) {
 
 	for _, metric := range metrics {
 		apiMetric := map[string]interface{}{
-			"timestamp":     metric.Timestamp.Format(time.RFC3339),
-			"model":         metric.Model,
-			"input_tokens":  metric.PromptTokens,
-			"output_tokens": metric.TokensGenerated,
-			"duration_ms":   metric.DurationMs,
-			"speed_tps":     metric.TokensPerSecond,
-			"status_code":   200, // Default success status
+			"timestamp":         metric.Timestamp.Format(time.RFC3339),
+			"model":             metric.Model,
+			"input_tokens":      metric.InputTokens,
+			"output_tokens":     metric.OutputTokens,
+			"duration_ms":       metric.DurationMs,
+			"tokens_per_second": metric.TokensPerSecond,
 		}
 		modelMetrics = append(modelMetrics, apiMetric)
 	}
