@@ -48,9 +48,11 @@ type Process struct {
 	// closed when command exits
 	cmdWaitChan chan struct{}
 
-	processLogger  *LogMonitor
-	proxyLogger    *LogMonitor
-	metricsMonitor *MetricsMonitor
+	processLogger *LogMonitor
+	proxyLogger   *LogMonitor
+
+	metricsMonitor    *MetricsMonitor
+	metricsDataCancel context.CancelFunc
 
 	healthCheckTimeout      int
 	healthCheckLoopInterval time.Duration
@@ -73,9 +75,6 @@ type Process struct {
 
 	// track the number of failed starts
 	failedStartCount int
-
-	// for managing log event subscriptions
-	logDataCancel context.CancelFunc
 }
 
 func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor, metricsMonitor *MetricsMonitor) *Process {
@@ -230,7 +229,7 @@ func (p *Process) start() error {
 		}()
 
 		// Run both cancel function and writer for cleanup
-		p.logDataCancel = func() {
+		p.metricsDataCancel = func() {
 			cancelFunc()
 			writer.Close()
 		}
@@ -388,9 +387,9 @@ func (p *Process) stopCommand() {
 	}()
 
 	// Clean up log subscription if it exists
-	if p.logDataCancel != nil {
-		p.logDataCancel()
-		p.logDataCancel = nil
+	if p.metricsDataCancel != nil {
+		p.metricsDataCancel()
+		p.metricsDataCancel = nil
 	}
 
 	if p.cancelUpstream == nil {
