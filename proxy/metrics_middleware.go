@@ -9,8 +9,8 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// ResponseMiddlewareConfig holds configuration for the response middleware
-type ResponseMiddlewareConfig struct {
+// MetricsMiddlewareConfig holds configuration for the response middleware
+type MetricsMiddlewareConfig struct {
 	MetricsParser   *MetricsMonitor
 	Logger          *LogMonitor
 	ModelName       string
@@ -19,16 +19,8 @@ type ResponseMiddlewareConfig struct {
 	ParseForMetrics bool
 }
 
-// ResponseData holds captured response information
-type ResponseData struct {
-	StatusCode int
-	Header     map[string][]string
-	Body       []byte
-}
-
-// ResponseMiddleware is a gin middleware that captures and processes responses
-// It replaces both ResponseRecorder and StreamingResponseRecorder classes
-func ResponseMiddleware(config ResponseMiddlewareConfig) gin.HandlerFunc {
+// MetricsMiddleware is a gin middleware that captures and processes responses
+func MetricsMiddleware(config MetricsMiddlewareConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Skip processing if metrics parsing is disabled
 		if !config.ParseForMetrics || config.MetricsParser == nil {
@@ -36,37 +28,26 @@ func ResponseMiddleware(config ResponseMiddlewareConfig) gin.HandlerFunc {
 			return
 		}
 
-		// Create response data holder
-		responseData := &ResponseData{
-			StatusCode: http.StatusOK,
-			Header:     make(map[string][]string),
-		}
-
-		// Create custom response writer based on streaming mode
-		if config.IsStreaming {
-			// Handle streaming responses
-			writer := &streamingResponseWriter{
+		// Create response recorder for non-streaming
+		if !config.IsStreaming {
+			c.Writer = &bufferingResponseWriter{
+				ResponseWriter: c.Writer,
+			}
+		} else {
+			c.Writer = &streamingResponseWriter{
 				ResponseWriter: c.Writer,
 				config:         config,
-				responseData:   responseData,
-				buffer:         make([]byte, 0),
 			}
-			c.Writer = writer
-		} else {
-			// Handle non-streaming responses
-			writer := &bufferingResponseWriter{
-				ResponseWriter: c.Writer,
-				responseData:   responseData,
-			}
-			c.Writer = writer
 		}
 
 		// Process the request
 		c.Next()
 
 		// Handle non-streaming response processing after request completes
-		if !config.IsStreaming && len(responseData.Body) > 0 {
-			processNonStreamingResponse(config, responseData)
+		if !config.IsStreaming {
+			if writer, ok := c.Writer.(*bufferingResponseWriter); ok && len(writer.body) > 0 {
+				processNonStreamingResponse(config, writer.body)
+			}
 		}
 	}
 }
@@ -74,9 +55,8 @@ func ResponseMiddleware(config ResponseMiddlewareConfig) gin.HandlerFunc {
 // streamingResponseWriter handles streaming responses (SSE)
 type streamingResponseWriter struct {
 	gin.ResponseWriter
-	config       ResponseMiddlewareConfig
-	responseData *ResponseData
-	buffer       []byte
+	config MetricsMiddlewareConfig
+	buffer []byte
 }
 
 func (w *streamingResponseWriter) Write(b []byte) (int, error) {
@@ -154,17 +134,15 @@ func (w *streamingResponseWriter) processBuffer() {
 // bufferingResponseWriter captures the entire response for non-streaming
 type bufferingResponseWriter struct {
 	gin.ResponseWriter
-	responseData *ResponseData
+	body []byte
 }
 
 func (w *bufferingResponseWriter) Write(b []byte) (int, error) {
-	// Capture the response data
-	w.responseData.Body = append(w.responseData.Body, b...)
+	w.body = append(w.body, b...)
 	return w.ResponseWriter.Write(b)
 }
 
 func (w *bufferingResponseWriter) WriteHeader(statusCode int) {
-	w.responseData.StatusCode = statusCode
 	w.ResponseWriter.WriteHeader(statusCode)
 }
 
@@ -173,14 +151,14 @@ func (w *bufferingResponseWriter) Header() http.Header {
 }
 
 // processNonStreamingResponse processes metrics for non-streaming responses
-func processNonStreamingResponse(config ResponseMiddlewareConfig, responseData *ResponseData) {
-	if len(responseData.Body) == 0 {
+func processNonStreamingResponse(config MetricsMiddlewareConfig, body []byte) {
+	if len(body) == 0 {
 		return
 	}
 
 	// Parse JSON to extract usage information
-	if gjson.ValidBytes(responseData.Body) {
-		jsonData := gjson.ParseBytes(responseData.Body)
+	if gjson.ValidBytes(body) {
+		jsonData := gjson.ParseBytes(body)
 
 		// Check if response contains usage information
 		if jsonData.Get("usage").Exists() {
