@@ -12,7 +12,6 @@ import (
 // MetricsMiddlewareConfig holds configuration for the response middleware
 type MetricsMiddlewareConfig struct {
 	MetricsParser   *MetricsMonitor
-	Logger          *LogMonitor
 	ModelName       string
 	StartTime       time.Time
 	IsStreaming     bool
