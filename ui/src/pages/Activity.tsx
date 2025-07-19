@@ -41,6 +41,8 @@ const ActivityPage = () => {
     const controller = new AbortController();
 
     const streamMetrics = async () => {
+      // Fetch historical metrics first
+      await fetchMetrics();
       // Continuously stream
       try {
         const response = await fetch('/api/metrics/stream', {

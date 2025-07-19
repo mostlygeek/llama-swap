@@ -206,16 +206,6 @@ func (pm *ProxyManager) apiStreamMetrics(c *gin.Context) {
 		return
 	}
 
-	// Send existing metrics first
-	_, skipHistory := c.GetQuery("no-history")
-	if !skipHistory {
-		metrics, err := pm.metricsMonitor.GetMetricsJSONByLines()
-		if err == nil {
-			c.Writer.Write(metrics)
-			flusher.Flush()
-		}
-	}
-
 	// Set up real-time streaming
 	sendChan := make(chan TokenMetrics, 10)
 	ctx, cancel := context.WithCancel(c.Request.Context())

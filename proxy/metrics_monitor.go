@@ -78,23 +78,6 @@ func (mp *MetricsMonitor) GetMetricsJSON() ([]byte, error) {
 	return json.Marshal(mp.metrics)
 }
 
-// GetMetricsJSONByLines returns metrics as JSON lines
-func (mp *MetricsMonitor) GetMetricsJSONByLines() ([]byte, error) {
-	mp.mu.RLock()
-	defer mp.mu.RUnlock()
-
-	var result []byte
-	for _, metric := range mp.metrics {
-		jsonData, err := json.Marshal(metric)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, jsonData...)
-		result = append(result, '\n')
-	}
-	return result, nil
-}
-
 // GetMetrics returns a copy of the current metrics
 func (mp *MetricsMonitor) GetMetrics() []TokenMetrics {
 	mp.mu.RLock()
