@@ -382,12 +382,6 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 		return
 	}
 
-	// Get input token count from request
-	inputTokens := int(gjson.GetBytes(bodyBytes, "max_tokens").Int())
-	if inputTokens == 0 {
-		inputTokens = int(gjson.GetBytes(bodyBytes, "messages.#").Int()) // Fallback to message count
-	}
-
 	processGroup, realModelName, err := pm.swapProcessGroup(requestedModel)
 	if err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
@@ -453,7 +447,7 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 		inputTokens := int(gjson.GetBytes(responseBody, "usage.prompt_tokens").Int())
 
 		if outputTokens > 0 {
-			generationSpeed := float64(outputTokens) / duration.Seconds()
+			generationSpeed := float64(inputTokens+outputTokens) / duration.Seconds()
 
 			// Use MetricsParser to add metrics
 			metrics := TokenMetrics{
