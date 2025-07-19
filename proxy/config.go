@@ -139,14 +139,15 @@ func (c *GroupConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 }
 
 type Config struct {
-	HealthCheckTimeout int                    `yaml:"healthCheckTimeout"`
-	LogRequests        bool                   `yaml:"logRequests"`
-	LogLevel           string                 `yaml:"logLevel"`
-	MetricsLogPath     string                 `yaml:"metricsLogPath"`
-	MetricsMaxInMemory int                    `yaml:"metricsMaxInMemory"`
-	Models             map[string]ModelConfig `yaml:"models"` /* key is model ID */
-	Profiles           map[string][]string    `yaml:"profiles"`
-	Groups             map[string]GroupConfig `yaml:"groups"` /* key is group ID */
+	HealthCheckTimeout       int                    `yaml:"healthCheckTimeout"`
+	LogRequests              bool                   `yaml:"logRequests"`
+	LogLevel                 string                 `yaml:"logLevel"`
+	MetricsLogPath           string                 `yaml:"metricsLogPath"`
+	MetricsMaxInMemory       int                    `yaml:"metricsMaxInMemory"`
+	MetricsUseServerResponse bool                   `yaml:"metricsUseServerResponse"`
+	Models                   map[string]ModelConfig `yaml:"models"` /* key is model ID */
+	Profiles                 map[string][]string    `yaml:"profiles"`
+	Groups                   map[string]GroupConfig `yaml:"groups"` /* key is group ID */
 
 	// for key/value replacements in model's cmd, cmdStop, proxy, checkEndPoint
 	Macros map[string]string `yaml:"macros"`
@@ -196,7 +197,6 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		HealthCheckTimeout: 120,
 		StartPort:          5800,
 		LogLevel:           "info",
-		MetricsLogPath:     "",
 		MetricsMaxInMemory: 1000,
 	}
 	err = yaml.Unmarshal(data, &config)
