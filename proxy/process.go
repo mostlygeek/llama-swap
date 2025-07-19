@@ -196,22 +196,24 @@ func (p *Process) start() error {
 	defer p.waitStarting.Done()
 	cmdContext, ctxCancelUpstream := context.WithCancel(context.Background())
 
-	// Create a pipe to capture stdout and feed both LogMonitor and MetricsParser
-	stdoutReader, stdoutWriter := io.Pipe()
-	stderrReader, stderrWriter := io.Pipe()
-
 	p.cmd = exec.CommandContext(cmdContext, args[0], args[1:]...)
-	p.cmd.Stdout = stdoutWriter
-	p.cmd.Stderr = stderrWriter
+	p.cmd.Stderr = p.processLogger
 	p.cmd.Env = append(p.cmd.Environ(), p.config.Env...)
 	p.cmd.Cancel = p.cmdStopUpstreamProcess
 	p.cmd.WaitDelay = p.gracefulStopTimeout
 	p.cancelUpstream = ctxCancelUpstream
 	p.cmdWaitChan = make(chan struct{})
 
-	// Start goroutines to process stdout and stderr
-	go p.processOutput(stdoutReader, "stdout")
-	go p.processOutput(stderrReader, "stderr")
+	if p.metricsParser.useServerResponse {
+		// Server response is used, pass stdout as is
+		p.cmd.Stdout = p.processLogger
+	} else {
+		// Create a pipe to capture stdout and feed both LogMonitor and MetricsParser
+		stdoutReader, stdoutWriter := io.Pipe()
+		p.cmd.Stdout = stdoutWriter
+		// Start goroutines to process stdout and stderr
+		go p.processOutput(stdoutReader, "stdout")
+	}
 
 	p.failedStartCount++ // this will be reset to zero when the process has successfully started
 

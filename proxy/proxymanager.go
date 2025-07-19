@@ -452,10 +452,10 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 		duration := time.Since(startTime)
 		outputTokens := int(gjson.GetBytes(responseBody, "usage.completion_tokens").Int())
 		inputTokens := int(gjson.GetBytes(responseBody, "usage.prompt_tokens").Int())
-		
+
 		if outputTokens > 0 {
 			generationSpeed := float64(outputTokens) / duration.Seconds()
-			
+
 			// Use MetricsParser to add metrics
 			metrics := TokenMetrics{
 				Timestamp:       time.Now(),

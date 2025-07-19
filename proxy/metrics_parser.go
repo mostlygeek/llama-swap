@@ -22,13 +22,14 @@ type TokenMetrics struct {
 
 // MetricsParser parses llama-server output for token statistics
 type MetricsParser struct {
-	mu              sync.RWMutex
-	metrics         []TokenMetrics
-	maxMetrics      int
-	logPath         string
-	promptEvalRegex *regexp.Regexp
-	evalRegex       *regexp.Regexp
-	proxyLogger     *LogMonitor
+	mu               sync.RWMutex
+	metrics          []TokenMetrics
+	maxMetrics       int
+	logPath          string
+	promptEvalRegex  *regexp.Regexp
+	evalRegex        *regexp.Regexp
+	proxyLogger      *LogMonitor
+	useServerResponse bool
 }
 
 // NewMetricsParser creates a new metrics parser
@@ -39,11 +40,12 @@ func NewMetricsParser(config *Config, proxyLogger *LogMonitor) *MetricsParser {
 	}
 
 	mp := &MetricsParser{
-		maxMetrics:      maxMetrics,
-		logPath:         config.MetricsLogPath,
-		promptEvalRegex: regexp.MustCompile(`prompt eval time\s*=\s*(\d+(?:\.\d+)?)\s*ms\s*/\s*(\d+)\s*tokens\s*\(\s*(\d+(?:\.\d+)?)\s*ms per token,\s*(\d+(?:\.\d+)?)\s*tokens per second\s*\)`),
-		evalRegex:       regexp.MustCompile(`eval time\s*=\s*(\d+(?:\.\d+)?)\s*ms\s*/\s*(\d+)\s*tokens\s*\(\s*(\d+(?:\.\d+)?)\s*ms per token,\s*(\d+(?:\.\d+)?)\s*tokens per second\s*\)`),
-		proxyLogger:     proxyLogger,
+		maxMetrics:        maxMetrics,
+		logPath:           config.MetricsLogPath,
+		promptEvalRegex:   regexp.MustCompile(`prompt eval time\s*=\s*(\d+(?:\.\d+)?)\s*ms\s*/\s*(\d+)\s*tokens\s*\(\s*(\d+(?:\.\d+)?)\s*ms per token,\s*(\d+(?:\.\d+)?)\s*tokens per second\s*\)`),
+		evalRegex:         regexp.MustCompile(`eval time\s*=\s*(\d+(?:\.\d+)?)\s*ms\s*/\s*(\d+)\s*tokens\s*\(\s*(\d+(?:\.\d+)?)\s*ms per token,\s*(\d+(?:\.\d+)?)\s*tokens per second\s*\)`),
+		proxyLogger:       proxyLogger,
+		useServerResponse: config.MetricsUseServerResponse,
 	}
 
 	// Load existing metrics from file if path is provided
