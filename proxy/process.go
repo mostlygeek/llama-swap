@@ -209,12 +209,13 @@ func (p *Process) start() error {
 	p.cmdWaitChan = make(chan struct{})
 
 	if p.metricsParser != nil && p.metricsParser.useServerResponse {
+		// Subscribe to log events from processLogger
 		reader, writer := io.Pipe()
 		scanner := bufio.NewScanner(reader)
 
 		// Subscribe to log events
 		cancelFunc := p.processLogger.OnLogData(func(data []byte) {
-			_, _ = writer.Write(data)
+			writer.Write(data)
 		})
 
 		// Process lines in a separate goroutine
@@ -228,7 +229,7 @@ func (p *Process) start() error {
 			}
 		}()
 
-		// Store both cancel function and writer for cleanup
+		// Run both cancel function and writer for cleanup
 		p.logDataCancel = func() {
 			cancelFunc()
 			writer.Close()

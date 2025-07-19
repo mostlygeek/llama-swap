@@ -7,7 +7,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
-	"net/http/httptest"
+	
 	"os"
 	"strconv"
 	"strings"
@@ -417,23 +417,17 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 	// Create a response recorder to capture the response
 	var responseBody []byte
 	if pm.config.MetricsUseServerResponse && pm.metricsParser != nil {
-		// Only record response if metrics logging is configured to use server response
-		w := httptest.NewRecorder()
-		if err := processGroup.ProxyRequest(realModelName, w, c.Request); err != nil {
+		// Use a custom response recorder instead of httptest.NewRecorder
+		recorder := newResponseRecorder(c.Writer)
+		if err := processGroup.ProxyRequest(realModelName, recorder, c.Request); err != nil {
 			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
 			pm.proxyLogger.Errorf("Error Proxying Request for processGroup %s and model %s", processGroup.id, realModelName)
 			return
 		}
 
 		// Copy the recorded response to the original writer
-		for k, v := range w.Header() {
-			c.Writer.Header()[k] = v
-		}
-		c.Writer.WriteHeader(w.Code)
-		responseBody = w.Body.Bytes()
-		if _, err := c.Writer.Write(responseBody); err != nil {
-			pm.proxyLogger.Errorf("Error writing response: %v", err)
-		}
+		responseBody = recorder.body.Bytes()
+		recorder.writeToOriginal()
 
 		// Log metrics using recorded response
 		duration := time.Since(startTime)
@@ -619,4 +613,42 @@ func (pm *ProxyManager) findGroupByModelName(modelName string) *ProcessGroup {
 		}
 	}
 	return nil
+}
+
+// responseRecorder is a custom response recorder that implements http.ResponseWriter
+// to capture response data without using httptest.NewRecorder
+type responseRecorder struct {
+	original http.ResponseWriter
+	body     bytes.Buffer
+	header   http.Header
+	status   int
+}
+
+func newResponseRecorder(original http.ResponseWriter) *responseRecorder {
+	return &responseRecorder{
+		original: original,
+		header:   make(http.Header),
+		status:   http.StatusOK,
+	}
+}
+
+func (r *responseRecorder) Header() http.Header {
+	return r.header
+}
+
+func (r *responseRecorder) Write(b []byte) (int, error) {
+	return r.body.Write(b)
+}
+
+func (r *responseRecorder) WriteHeader(statusCode int) {
+	r.status = statusCode
+}
+
+func (r *responseRecorder) writeToOriginal() {
+	// Copy headers to original writer
+	for k, v := range r.header {
+		r.original.Header()[k] = v
+	}
+	r.original.WriteHeader(r.status)
+	r.original.Write(r.body.Bytes())
 }
