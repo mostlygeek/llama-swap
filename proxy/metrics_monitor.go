@@ -18,7 +18,7 @@ type TokenMetrics struct {
 	Timestamp       time.Time `json:"timestamp"`
 	Model           string    `json:"model"`
 	InputTokens     int       `json:"input_tokens"`
-	OutputTokens    int       `json:"output_tokens"`
+	OutputTokens    int       `json:"output_tokens"` // may be parsed as a separate entry if metricsUseServerResponse is set to false
 	TokensPerSecond float64   `json:"tokens_per_second"`
 	DurationMs      int       `json:"duration_ms"`
 }
