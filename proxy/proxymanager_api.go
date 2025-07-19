@@ -25,6 +25,7 @@ func addApiHandlers(pm *ProxyManager) {
 		apiGroup.POST("/models/unload", pm.apiUnloadAllModels)
 		apiGroup.GET("/events", pm.apiSendEvents)
 		apiGroup.GET("/metrics", pm.apiGetMetrics)
+		apiGroup.GET("/metrics/stream", pm.apiStreamMetrics)
 	}
 }
 
@@ -186,4 +187,72 @@ func (pm *ProxyManager) apiGetMetrics(c *gin.Context) {
 
 	// Return the raw JSON data
 	c.Data(http.StatusOK, "application/json", jsonData)
+}
+
+func (pm *ProxyManager) apiStreamMetrics(c *gin.Context) {
+	c.Header("Content-Type", "text/plain")
+	c.Header("Transfer-Encoding", "chunked")
+	c.Header("X-Content-Type-Options", "nosniff")
+
+	if pm.metricsParser == nil {
+		c.String(http.StatusInternalServerError, "metrics parser not initialized")
+		return
+	}
+
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		c.AbortWithError(http.StatusInternalServerError, fmt.Errorf("streaming unsupported"))
+		return
+	}
+
+	// Send existing metrics first
+	_, skipHistory := c.GetQuery("no-history")
+	if !skipHistory {
+		metrics := pm.metricsParser.GetMetrics()
+		if len(metrics) > 0 {
+			for _, metric := range metrics {
+				jsonData, err := json.Marshal(metric)
+				if err != nil {
+					continue
+				}
+				c.Writer.Write(jsonData)
+				c.Writer.Write([]byte("\n"))
+			}
+			flusher.Flush()
+		}
+	}
+
+	// Set up real-time streaming
+	sendChan := make(chan TokenMetrics, 10)
+	ctx, cancel := context.WithCancel(c.Request.Context())
+
+	// Subscribe to new metrics
+	cancelFunc := pm.metricsParser.SubscribeToMetrics(func(event TokenMetricsEvent) {
+		select {
+		case sendChan <- event.Metrics:
+		case <-ctx.Done():
+			return
+		default:
+			// Drop if channel is full
+		}
+	})
+	defer cancelFunc()
+	defer cancel()
+
+	for {
+		select {
+		case <-c.Request.Context().Done():
+			return
+		case <-pm.shutdownCtx.Done():
+			return
+		case metric := <-sendChan:
+			jsonData, err := json.Marshal(metric)
+			if err != nil {
+				continue
+			}
+			c.Writer.Write(jsonData)
+			c.Writer.Write([]byte("\n"))
+			flusher.Flush()
+		}
+	}
 }

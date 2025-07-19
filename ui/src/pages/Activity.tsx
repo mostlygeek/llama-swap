@@ -7,17 +7,13 @@ interface Metric {
   output_tokens: number;
   duration_ms: number;
   tokens_per_second: number;
-  status_code: number;
 }
 
 const ActivityPage = () => {
   const [metrics, setMetrics] = useState<Metric[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetchMetrics();
-  }, []);
+  const maxShownMetrics = 1000;
 
   const fetchMetrics = async () => {
     try {
@@ -26,7 +22,12 @@ const ActivityPage = () => {
         throw new Error('Failed to fetch metrics');
       }
       const data = await response.json();
-      setMetrics(data || []);
+      if (data) {
+        data.reverse();
+        setMetrics(data);
+      } else {
+        setMetrics([]);
+      }
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load metrics');
@@ -34,6 +35,78 @@ const ActivityPage = () => {
       setLoading(false);
     }
   };
+
+  const setupStreaming = () => {
+    const controller = new AbortController();
+
+    const streamMetrics = async () => {
+      // Fetch on first request
+      await fetchMetrics();
+      // Continuously stream
+      try {
+        const response = await fetch('/api/metrics/stream', {
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to connect to metrics stream');
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) {
+          throw new Error('No response body');
+        }
+
+        setLoading(false);
+        setError(null);
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+
+          // Process complete lines
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+          for (const line of lines) {
+            const trimmedLine = line.trim();
+            if (trimmedLine) {
+              try {
+                const newMetric: Metric = JSON.parse(trimmedLine);
+                setMetrics(prevMetrics => {
+                  const updatedMetrics = [newMetric, ...prevMetrics];
+                  return updatedMetrics.slice(0, maxShownMetrics);
+                });
+              } catch (err) {
+                console.error('Error parsing metrics data:', err);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        const error = err as Error;
+        if (error.name !== 'AbortError') {
+          console.error('Streaming error:', error);
+          // Fallback to polling if streaming fails
+          fetchMetrics();
+        }
+      }
+    };
+
+    streamMetrics();
+
+    // Cleanup on unmount
+    return () => {
+      controller.abort();
+    };
+  };
+  useEffect(setupStreaming, []);
 
   const formatTimestamp = (timestamp: string) => {
     return new Date(timestamp).toLocaleString();
@@ -73,7 +146,7 @@ const ActivityPage = () => {
   return (
     <div className="p-6">
       <h1 className="text-2xl font-bold mb-4">Activity</h1>
-      
+
       {metrics.length === 0 ? (
         <div className="text-center py-8">
           <p className="text-gray-600">No metrics data available</p>
