@@ -48,9 +48,9 @@ type Process struct {
 	// closed when command exits
 	cmdWaitChan chan struct{}
 
-	processLogger *LogMonitor
-	proxyLogger   *LogMonitor
-	metricsParser *MetricsParser
+	processLogger  *LogMonitor
+	proxyLogger    *LogMonitor
+	metricsMonitor *MetricsMonitor
 
 	healthCheckTimeout      int
 	healthCheckLoopInterval time.Duration
@@ -78,7 +78,7 @@ type Process struct {
 	logDataCancel context.CancelFunc
 }
 
-func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor, metricsParser *MetricsParser) *Process {
+func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor, metricsMonitor *MetricsMonitor) *Process {
 	concurrentLimit := 10
 	if config.ConcurrencyLimit > 0 {
 		concurrentLimit = config.ConcurrencyLimit
@@ -91,7 +91,7 @@ func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLo
 		cancelUpstream:          nil,
 		processLogger:           processLogger,
 		proxyLogger:             proxyLogger,
-		metricsParser:           metricsParser,
+		metricsMonitor:          metricsMonitor,
 		healthCheckTimeout:      healthCheckTimeout,
 		healthCheckLoopInterval: 5 * time.Second, /* default, can not be set by user - used for testing */
 		state:                   StateStopped,
@@ -208,7 +208,7 @@ func (p *Process) start() error {
 	p.cancelUpstream = ctxCancelUpstream
 	p.cmdWaitChan = make(chan struct{})
 
-	if p.metricsParser != nil && !p.metricsParser.useServerResponse {
+	if p.metricsMonitor != nil && !p.metricsMonitor.useServerResponse {
 		// Subscribe to log events from processLogger
 		reader, writer := io.Pipe()
 		scanner := bufio.NewScanner(reader)
@@ -224,7 +224,7 @@ func (p *Process) start() error {
 			for scanner.Scan() {
 				line := scanner.Text()
 				if line != "" {
-					p.metricsParser.ParseLogLine(line, p.ID)
+					p.metricsMonitor.ParseLogLine(line, p.ID)
 				}
 			}
 		}()

@@ -24,7 +24,7 @@ type ProcessGroup struct {
 	lastUsedProcess string
 }
 
-func NewProcessGroup(id string, config Config, proxyLogger *LogMonitor, upstreamLogger *LogMonitor, metricsParser *MetricsParser) *ProcessGroup {
+func NewProcessGroup(id string, config Config, proxyLogger *LogMonitor, upstreamLogger *LogMonitor, metricsMonitor *MetricsMonitor) *ProcessGroup {
 	groupConfig, ok := config.Groups[id]
 	if !ok {
 		panic("Unable to find configuration for group id: " + id)
@@ -44,7 +44,7 @@ func NewProcessGroup(id string, config Config, proxyLogger *LogMonitor, upstream
 	// Create a Process for each member in the group
 	for _, modelID := range groupConfig.Members {
 		modelConfig, modelID, _ := pg.config.FindConfig(modelID)
-		process := NewProcess(modelID, pg.config.HealthCheckTimeout, modelConfig, pg.upstreamLogger, pg.proxyLogger, metricsParser)
+		process := NewProcess(modelID, pg.config.HealthCheckTimeout, modelConfig, pg.upstreamLogger, pg.proxyLogger, metricsMonitor)
 		pg.processes[modelID] = process
 	}
 

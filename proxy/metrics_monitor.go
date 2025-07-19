@@ -30,8 +30,8 @@ func (e TokenMetricsEvent) Type() uint32 {
 	return TokenMetricsEventID
 }
 
-// MetricsParser parses llama-server output for token statistics
-type MetricsParser struct {
+// MetricsMonitor parses llama-server output for token statistics
+type MetricsMonitor struct {
 	mu                sync.RWMutex
 	metrics           []TokenMetrics
 	maxMetrics        int
@@ -43,13 +43,13 @@ type MetricsParser struct {
 }
 
 // NewMetricsParser creates a new metrics parser
-func NewMetricsParser(config *Config, debugLogger *LogMonitor) *MetricsParser {
+func NewMetricsParser(config *Config, debugLogger *LogMonitor) *MetricsMonitor {
 	maxMetrics := config.MetricsMaxInMemory
 	if maxMetrics <= 0 {
 		maxMetrics = 1000 // Default fallback
 	}
 
-	mp := &MetricsParser{
+	mp := &MetricsMonitor{
 		maxMetrics:        maxMetrics,
 		promptEvalRegex:   regexp.MustCompile(`prompt eval time\s*=\s*(\d+(?:\.\d+)?)\s*ms\s*/\s*(\d+)\s*tokens\s*\(\s*(\d+(?:\.\d+)?)\s*ms per token,\s*(\d+(?:\.\d+)?)\s*tokens per second\s*\)`),
 		evalRegex:         regexp.MustCompile(`eval time\s*=\s*(\d+(?:\.\d+)?)\s*ms\s*/\s*(\d+)\s*tokens\s*\(\s*(\d+(?:\.\d+)?)\s*ms per token,\s*(\d+(?:\.\d+)?)\s*tokens per second\s*\)`),
@@ -62,7 +62,7 @@ func NewMetricsParser(config *Config, debugLogger *LogMonitor) *MetricsParser {
 }
 
 // addMetrics adds a new metric to the collection and publishes an event
-func (mp *MetricsParser) addMetrics(metric TokenMetrics) {
+func (mp *MetricsMonitor) addMetrics(metric TokenMetrics) {
 	mp.mu.Lock()
 	defer mp.mu.Unlock()
 
@@ -76,7 +76,7 @@ func (mp *MetricsParser) addMetrics(metric TokenMetrics) {
 }
 
 // ParseLogLine parses a single log line for token metrics
-func (mp *MetricsParser) ParseLogLine(line string, modelName string) {
+func (mp *MetricsMonitor) ParseLogLine(line string, modelName string) {
 	if matches := mp.promptEvalRegex.FindStringSubmatch(line); matches != nil {
 		// Check for prompt evaluation metrics (input tokens)
 		durationMs, _ := strconv.ParseFloat(matches[1], 64)
@@ -111,14 +111,14 @@ func (mp *MetricsParser) ParseLogLine(line string, modelName string) {
 }
 
 // GetMetricsJSON returns metrics as JSON
-func (mp *MetricsParser) GetMetricsJSON() ([]byte, error) {
+func (mp *MetricsMonitor) GetMetricsJSON() ([]byte, error) {
 	mp.mu.RLock()
 	defer mp.mu.RUnlock()
 	return json.Marshal(mp.metrics)
 }
 
 // GetMetrics returns a copy of the current metrics
-func (mp *MetricsParser) GetMetrics() []TokenMetrics {
+func (mp *MetricsMonitor) GetMetrics() []TokenMetrics {
 	mp.mu.RLock()
 	defer mp.mu.RUnlock()
 
@@ -128,11 +128,11 @@ func (mp *MetricsParser) GetMetrics() []TokenMetrics {
 }
 
 // SubscribeToMetrics subscribes to new metrics events
-func (mp *MetricsParser) SubscribeToMetrics(callback func(TokenMetricsEvent)) context.CancelFunc {
+func (mp *MetricsMonitor) SubscribeToMetrics(callback func(TokenMetricsEvent)) context.CancelFunc {
 	return event.Subscribe(mp.eventbus, callback)
 }
 
 // Close closes the event dispatcher
-func (mp *MetricsParser) Close() error {
+func (mp *MetricsMonitor) Close() error {
 	return mp.eventbus.Close()
 }

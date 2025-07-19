@@ -174,13 +174,13 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 }
 
 func (pm *ProxyManager) apiGetMetrics(c *gin.Context) {
-	if pm.metricsParser == nil {
+	if pm.metricsMonitor == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "metrics parser not initialized"})
 		return
 	}
 
 	// Get metrics from the shared metrics parser
-	jsonData, err := pm.metricsParser.GetMetricsJSON()
+	jsonData, err := pm.metricsMonitor.GetMetricsJSON()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get metrics"})
 		return
@@ -195,7 +195,7 @@ func (pm *ProxyManager) apiStreamMetrics(c *gin.Context) {
 	c.Header("Transfer-Encoding", "chunked")
 	c.Header("X-Content-Type-Options", "nosniff")
 
-	if pm.metricsParser == nil {
+	if pm.metricsMonitor == nil {
 		c.String(http.StatusInternalServerError, "metrics parser not initialized")
 		return
 	}
@@ -209,7 +209,7 @@ func (pm *ProxyManager) apiStreamMetrics(c *gin.Context) {
 	// Send existing metrics first
 	_, skipHistory := c.GetQuery("no-history")
 	if !skipHistory {
-		metrics := pm.metricsParser.GetMetrics()
+		metrics := pm.metricsMonitor.GetMetrics()
 		if len(metrics) > 0 {
 			for _, metric := range metrics {
 				jsonData, err := json.Marshal(metric)
@@ -228,7 +228,7 @@ func (pm *ProxyManager) apiStreamMetrics(c *gin.Context) {
 	ctx, cancel := context.WithCancel(c.Request.Context())
 
 	// Subscribe to new metrics
-	cancelFunc := pm.metricsParser.SubscribeToMetrics(func(event TokenMetricsEvent) {
+	cancelFunc := pm.metricsMonitor.SubscribeToMetrics(func(event TokenMetricsEvent) {
 		select {
 		case sendChan <- event.Metrics:
 		case <-ctx.Done():

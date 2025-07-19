@@ -11,7 +11,7 @@ import (
 
 // ResponseMiddlewareConfig holds configuration for the response middleware
 type ResponseMiddlewareConfig struct {
-	MetricsParser   *MetricsParser
+	MetricsParser   *MetricsMonitor
 	Logger          *LogMonitor
 	ModelName       string
 	StartTime       time.Time

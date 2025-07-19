@@ -33,8 +33,8 @@ type ProxyManager struct {
 	upstreamLogger *LogMonitor
 	muxLogger      *LogMonitor
 
-	processGroups map[string]*ProcessGroup
-	metricsParser *MetricsParser
+	processGroups  map[string]*ProcessGroup
+	metricsMonitor *MetricsMonitor
 
 	// shutdown signaling
 	shutdownCtx    context.Context
@@ -84,7 +84,7 @@ func New(config Config) *ProxyManager {
 		proxyLogger:    proxyLogger,
 		muxLogger:      stdoutLogger,
 		upstreamLogger: upstreamLogger,
-		metricsParser:  NewMetricsParser(&config, metricsDebugLogger),
+		metricsMonitor: NewMetricsParser(&config, metricsDebugLogger),
 
 		processGroups: make(map[string]*ProcessGroup),
 
@@ -94,7 +94,7 @@ func New(config Config) *ProxyManager {
 
 	// create the process groups
 	for groupID := range config.Groups {
-		processGroup := NewProcessGroup(groupID, config, proxyLogger, upstreamLogger, pm.metricsParser)
+		processGroup := NewProcessGroup(groupID, config, proxyLogger, upstreamLogger, pm.metricsMonitor)
 		pm.processGroups[groupID] = processGroup
 	}
 
@@ -414,13 +414,13 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 	c.Request.ContentLength = int64(len(bodyBytes))
 
 	// Determine if we should parse response for metrics
-	parseResponseForUsage := pm.config.MetricsUseServerResponse && pm.metricsParser != nil
+	parseResponseForUsage := pm.config.MetricsUseServerResponse && pm.metricsMonitor != nil
 	isStreaming := gjson.GetBytes(bodyBytes, "stream").Bool()
 
 	// Apply response middleware if metrics parsing is enabled
 	if parseResponseForUsage {
 		middleware := ResponseMiddleware(ResponseMiddlewareConfig{
-			MetricsParser:   pm.metricsParser,
+			MetricsParser:   pm.metricsMonitor,
 			Logger:          pm.proxyLogger,
 			ModelName:       realModelName,
 			StartTime:       startTime,
