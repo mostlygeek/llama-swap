@@ -204,7 +204,7 @@ func (p *Process) start() error {
 	p.cancelUpstream = ctxCancelUpstream
 	p.cmdWaitChan = make(chan struct{})
 
-	if p.metricsParser.useServerResponse {
+	if p.metricsParser == nil || p.metricsParser.useServerResponse {
 		// Server response is used, pass stdout as is
 		p.cmd.Stdout = p.processLogger
 	} else {
