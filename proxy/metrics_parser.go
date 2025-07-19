@@ -2,12 +2,15 @@ package proxy
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"os"
 	"regexp"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/mostlygeek/llama-swap/event"
 )
 
 // TokenMetrics represents parsed token statistics from llama-server logs
@@ -20,20 +23,30 @@ type TokenMetrics struct {
 	DurationMs      int       `json:"duration_ms"`
 }
 
+// TokenMetricsEvent represents a token metrics event
+type TokenMetricsEvent struct {
+	Metrics TokenMetrics
+}
+
+func (e TokenMetricsEvent) Type() uint32 {
+	return TokenMetricsEventID
+}
+
 // MetricsParser parses llama-server output for token statistics
 type MetricsParser struct {
-	mu               sync.RWMutex
-	metrics          []TokenMetrics
-	maxMetrics       int
-	logPath          string
-	promptEvalRegex  *regexp.Regexp
-	evalRegex        *regexp.Regexp
-	proxyLogger      *LogMonitor
+	mu                sync.RWMutex
+	metrics           []TokenMetrics
+	maxMetrics        int
+	logPath           string
+	promptEvalRegex   *regexp.Regexp
+	evalRegex         *regexp.Regexp
+	debugLogger       *LogMonitor
+	eventbus          *event.Dispatcher
 	useServerResponse bool
 }
 
 // NewMetricsParser creates a new metrics parser
-func NewMetricsParser(config *Config, proxyLogger *LogMonitor) *MetricsParser {
+func NewMetricsParser(config *Config, debugLogger *LogMonitor) *MetricsParser {
 	maxMetrics := config.MetricsMaxInMemory
 	if maxMetrics <= 0 {
 		maxMetrics = 1000 // Default fallback
@@ -44,13 +57,15 @@ func NewMetricsParser(config *Config, proxyLogger *LogMonitor) *MetricsParser {
 		logPath:           config.MetricsLogPath,
 		promptEvalRegex:   regexp.MustCompile(`prompt eval time\s*=\s*(\d+(?:\.\d+)?)\s*ms\s*/\s*(\d+)\s*tokens\s*\(\s*(\d+(?:\.\d+)?)\s*ms per token,\s*(\d+(?:\.\d+)?)\s*tokens per second\s*\)`),
 		evalRegex:         regexp.MustCompile(`eval time\s*=\s*(\d+(?:\.\d+)?)\s*ms\s*/\s*(\d+)\s*tokens\s*\(\s*(\d+(?:\.\d+)?)\s*ms per token,\s*(\d+(?:\.\d+)?)\s*tokens per second\s*\)`),
-		proxyLogger:       proxyLogger,
+		debugLogger:       debugLogger,
+		eventbus:          event.NewDispatcherConfig(1000),
 		useServerResponse: config.MetricsUseServerResponse,
 	}
 
 	// Load existing metrics from file if path is provided
 	if config.MetricsLogPath != "" {
 		_ = mp.LoadMetrics() // Only warn, don't error as requested
+		_ = mp.LoadMetrics()
 	}
 
 	return mp
@@ -68,8 +83,8 @@ func (mp *MetricsParser) LoadMetrics() error {
 			// File doesn't exist yet, which is fine
 			return nil
 		}
-		if mp.proxyLogger != nil {
-			mp.proxyLogger.Warnf("Failed to open metrics log file for reading: %v", err)
+		if mp.debugLogger != nil {
+			mp.debugLogger.Warnf("Failed to open metrics log file for reading: %v", err)
 		}
 		return err
 	}
@@ -90,8 +105,8 @@ func (mp *MetricsParser) LoadMetrics() error {
 
 		var metric TokenMetrics
 		if err := json.Unmarshal([]byte(line), &metric); err != nil {
-			if mp.proxyLogger != nil {
-				mp.proxyLogger.Warnf("Skipping malformed metrics line %d: %v", lineNum, err)
+			if mp.debugLogger != nil {
+				mp.debugLogger.Warnf("Skipping malformed metrics line %d: %v", lineNum, err)
 			}
 			continue
 		}
@@ -103,14 +118,14 @@ func (mp *MetricsParser) LoadMetrics() error {
 		mp.metrics = mp.metrics[len(mp.metrics)-mp.maxMetrics:]
 	}
 
-	if err := scanner.Err(); err != nil && mp.proxyLogger != nil {
-		mp.proxyLogger.Warnf("Error reading metrics log file: %v", err)
+	if err := scanner.Err(); err != nil && mp.debugLogger != nil {
+		mp.debugLogger.Warnf("Error reading metrics log file: %v", err)
 	}
 
 	return scanner.Err()
 }
 
-// addMetrics adds a new metric to the collection and appends to file if configured
+// addMetrics adds a new metric to the collection and publishes an event
 func (mp *MetricsParser) addMetrics(metric TokenMetrics) {
 	mp.mu.Lock()
 	defer mp.mu.Unlock()
@@ -119,6 +134,9 @@ func (mp *MetricsParser) addMetrics(metric TokenMetrics) {
 	if len(mp.metrics) > mp.maxMetrics {
 		mp.metrics = mp.metrics[len(mp.metrics)-mp.maxMetrics:]
 	}
+
+	// Publish event
+	event.Publish(mp.eventbus, TokenMetricsEvent{Metrics: metric})
 
 	// Append to JSONL file if path is configured
 	if mp.logPath != "" {
@@ -130,8 +148,8 @@ func (mp *MetricsParser) addMetrics(metric TokenMetrics) {
 func (mp *MetricsParser) appendToFile(metric TokenMetrics) {
 	file, err := os.OpenFile(mp.logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
-		if mp.proxyLogger != nil {
-			mp.proxyLogger.Warnf("Failed to open metrics log file for appending: %v", err)
+		if mp.debugLogger != nil {
+			mp.debugLogger.Warnf("Failed to open metrics log file for appending: %v", err)
 		}
 		return
 	}
@@ -139,8 +157,8 @@ func (mp *MetricsParser) appendToFile(metric TokenMetrics) {
 
 	jsonData, err := json.Marshal(metric)
 	if err != nil {
-		if mp.proxyLogger != nil {
-			mp.proxyLogger.Warnf("Failed to marshal metrics data: %v", err)
+		if mp.debugLogger != nil {
+			mp.debugLogger.Warnf("Failed to marshal metrics data: %v", err)
 		}
 		return
 	}
@@ -148,10 +166,11 @@ func (mp *MetricsParser) appendToFile(metric TokenMetrics) {
 	// Append newline and write
 	jsonData = append(jsonData, '\n')
 	if _, err := file.Write(jsonData); err != nil {
-		if mp.proxyLogger != nil {
-			mp.proxyLogger.Warnf("Failed to write metrics to log file: %v", err)
+		if mp.debugLogger != nil {
+			mp.debugLogger.Warnf("Failed to write metrics to log file: %v", err)
 		}
 	}
+	file.Write(jsonData)
 }
 
 // ParseLogLine parses a single log line for token metrics
@@ -194,4 +213,24 @@ func (mp *MetricsParser) GetMetricsJSON() ([]byte, error) {
 	mp.mu.RLock()
 	defer mp.mu.RUnlock()
 	return json.Marshal(mp.metrics)
+}
+
+// GetMetrics returns a copy of the current metrics
+func (mp *MetricsParser) GetMetrics() []TokenMetrics {
+	mp.mu.RLock()
+	defer mp.mu.RUnlock()
+
+	result := make([]TokenMetrics, len(mp.metrics))
+	copy(result, mp.metrics)
+	return result
+}
+
+// SubscribeToMetrics subscribes to new metrics events
+func (mp *MetricsParser) SubscribeToMetrics(callback func(TokenMetricsEvent)) context.CancelFunc {
+	return event.Subscribe(mp.eventbus, callback)
+}
+
+// Close closes the event dispatcher
+func (mp *MetricsParser) Close() error {
+	return mp.eventbus.Close()
 }

@@ -30,10 +30,10 @@ type ProxyManager struct {
 	ginEngine *gin.Engine
 
 	// logging
-	proxyLogger    *LogMonitor
-	upstreamLogger *LogMonitor
-	muxLogger      *LogMonitor
-	metricsLogger  *LogMonitor
+	proxyLogger       *LogMonitor
+	upstreamLogger    *LogMonitor
+	muxLogger         *LogMonitor
+	metricsFileLogger *LogMonitor
 
 	processGroups map[string]*ProcessGroup
 	metricsParser *MetricsParser
@@ -48,6 +48,7 @@ func New(config Config) *ProxyManager {
 	stdoutLogger := NewLogMonitorWriter(os.Stdout)
 	upstreamLogger := NewLogMonitorWriter(stdoutLogger)
 	proxyLogger := NewLogMonitorWriter(stdoutLogger)
+	metricsDebugLogger := NewLogMonitorWriter(stdoutLogger)
 
 	if config.LogRequests {
 		proxyLogger.Warn("LogRequests configuration is deprecated. Use logLevel instead.")
@@ -57,25 +58,30 @@ func New(config Config) *ProxyManager {
 	case "debug":
 		proxyLogger.SetLogLevel(LevelDebug)
 		upstreamLogger.SetLogLevel(LevelDebug)
+		metricsDebugLogger.SetLogLevel(LevelDebug)
 	case "info":
 		proxyLogger.SetLogLevel(LevelInfo)
 		upstreamLogger.SetLogLevel(LevelInfo)
+		metricsDebugLogger.SetLogLevel(LevelInfo)
 	case "warn":
 		proxyLogger.SetLogLevel(LevelWarn)
 		upstreamLogger.SetLogLevel(LevelWarn)
+		metricsDebugLogger.SetLogLevel(LevelWarn)
 	case "error":
 		proxyLogger.SetLogLevel(LevelError)
 		upstreamLogger.SetLogLevel(LevelError)
+		metricsDebugLogger.SetLogLevel(LevelError)
 	default:
 		proxyLogger.SetLogLevel(LevelInfo)
 		upstreamLogger.SetLogLevel(LevelInfo)
+		metricsDebugLogger.SetLogLevel(LevelInfo)
 	}
 
 	// Set up metrics logger if path is configured
-	var metricsLogger *LogMonitor
+	var metricsFileLogger *LogMonitor
 	if config.MetricsLogPath != "" {
 		if f, err := os.OpenFile(config.MetricsLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-			metricsLogger = NewLogMonitorWriter(f)
+			metricsFileLogger = NewLogMonitorWriter(f)
 		} else {
 			proxyLogger.Errorf("Failed to open metrics log file: %v", err)
 		}
@@ -87,11 +93,11 @@ func New(config Config) *ProxyManager {
 		config:    config,
 		ginEngine: gin.New(),
 
-		proxyLogger:    proxyLogger,
-		muxLogger:      stdoutLogger,
-		upstreamLogger: upstreamLogger,
-		metricsLogger:  metricsLogger,
-		metricsParser:  NewMetricsParser(&config, proxyLogger),
+		proxyLogger:       proxyLogger,
+		muxLogger:         stdoutLogger,
+		upstreamLogger:    upstreamLogger,
+		metricsFileLogger: metricsFileLogger,
+		metricsParser:     NewMetricsParser(&config, metricsDebugLogger),
 
 		processGroups: make(map[string]*ProcessGroup),
 
