@@ -52,8 +52,10 @@ func NewMetricsParser(config *Config, debugLogger *LogMonitor) *MetricsMonitor {
 	}
 
 	mp := &MetricsMonitor{
-		maxMetrics:        maxMetrics,
-		promptEvalRegex:   regexp.MustCompile(`prompt eval time\s*=\s*(\d+(?:\.\d+)?)\s*ms\s*/\s*(\d+)\s*tokens\s*\(\s*(\d+(?:\.\d+)?)\s*ms per token,\s*(\d+(?:\.\d+)?)\s*tokens per second\s*\)`),
+		maxMetrics: maxMetrics,
+		// Matches: `prompt eval time = 123.45 ms / 100 tokens (1.23 ms per token, 456.78 tokens per second)`
+		promptEvalRegex: regexp.MustCompile(`prompt eval time\s*=\s*(\d+(?:\.\d+)?)\s*ms\s*/\s*(\d+)\s*tokens\s*\(\s*(\d+(?:\.\d+)?)\s*ms per token,\s*(\d+(?:\.\d+)?)\s*tokens per second\s*\)`),
+		// Matches: `eval time = 123.45 ms / 100 tokens (1.23 ms per token, 456.78 tokens per second)`
 		evalRegex:         regexp.MustCompile(`eval time\s*=\s*(\d+(?:\.\d+)?)\s*ms\s*/\s*(\d+)\s*tokens\s*\(\s*(\d+(?:\.\d+)?)\s*ms per token,\s*(\d+(?:\.\d+)?)\s*tokens per second\s*\)`),
 		debugLogger:       debugLogger,
 		eventbus:          event.NewDispatcherConfig(1000),
