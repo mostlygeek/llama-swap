@@ -188,10 +188,10 @@ const ActivityPage = () => {
                     {metric.model}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    {metric.input_tokens ? metric.input_tokens.toLocaleString() : '-'}
+                    {metric.input_tokens}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    {metric.output_tokens ? metric.output_tokens.toLocaleString() : '-'}
+                    {metric.output_tokens}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">
                     {formatSpeed(metric.tokens_per_second)}

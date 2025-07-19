@@ -30,7 +30,7 @@ type TokenMetricsEvent struct {
 }
 
 func (e TokenMetricsEvent) Type() uint32 {
-	return TokenMetricsEventID
+	return TokenMetricsEventID // defined in events.go
 }
 
 // MetricsMonitor parses llama-server output for token statistics
