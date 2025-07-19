@@ -73,6 +73,9 @@ type Process struct {
 
 	// track the number of failed starts
 	failedStartCount int
+
+	// for managing log event subscriptions
+	logDataCancel context.CancelFunc
 }
 
 func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor, metricsParser *MetricsParser) *Process {
@@ -197,25 +200,49 @@ func (p *Process) start() error {
 	cmdContext, ctxCancelUpstream := context.WithCancel(context.Background())
 
 	p.cmd = exec.CommandContext(cmdContext, args[0], args[1:]...)
+	p.cmd.Stdout = p.processLogger
+	p.cmd.Stderr = p.processLogger
 	p.cmd.Env = append(p.cmd.Environ(), p.config.Env...)
 	p.cmd.Cancel = p.cmdStopUpstreamProcess
 	p.cmd.WaitDelay = p.gracefulStopTimeout
 	p.cancelUpstream = ctxCancelUpstream
 	p.cmdWaitChan = make(chan struct{})
 
-	if p.metricsParser == nil || p.metricsParser.useServerResponse {
-		// Server response is used, pass output as is
-		p.cmd.Stdout = p.processLogger
-		p.cmd.Stderr = p.processLogger
-	} else {
-		// Create a pipe to capture output and feed both LogMonitor and MetricsParser
-		stdoutReader, stdoutWriter := io.Pipe()
-		stderrReader, stderrWriter := io.Pipe()
-		p.cmd.Stdout = stdoutWriter
-		p.cmd.Stderr = stderrWriter
-		// Start goroutines to process stdout and stderr
-		go p.processOutput(stdoutReader)
-		go p.processOutput(stderrReader)
+	if p.metricsParser != nil && p.metricsParser.useServerResponse {
+		// Subscribe to log events from processLogger instead of manually capturing output
+		var buffer []byte
+		cancelFunc := p.processLogger.OnLogData(func(data []byte) {
+			// Handle line-by-line parsing of log data
+			buffer = append(buffer, data...)
+
+			// Process complete lines
+			for {
+				newlineIndex := -1
+				for i, b := range buffer {
+					if b == '\n' {
+						newlineIndex = i
+						break
+					}
+				}
+
+				if newlineIndex == -1 {
+					// No complete line yet, wait for more data
+					break
+				}
+
+				// Extract the complete line (excluding newline)
+				line := string(buffer[:newlineIndex])
+				if line != "" {
+					p.metricsParser.ParseLogLine(line, p.ID)
+				}
+
+				// Move remaining data to the beginning of buffer
+				buffer = buffer[newlineIndex+1:]
+			}
+		})
+
+		// Store the cancel function to clean up when process stops
+		p.logDataCancel = cancelFunc
 	}
 
 	p.failedStartCount++ // this will be reset to zero when the process has successfully started
@@ -368,6 +395,12 @@ func (p *Process) stopCommand() {
 	defer func() {
 		p.proxyLogger.Debugf("<%s> stopCommand took %v", p.ID, time.Since(stopStartTime))
 	}()
+
+	// Clean up log subscription if it exists
+	if p.logDataCancel != nil {
+		p.logDataCancel()
+		p.logDataCancel = nil
+	}
 
 	if p.cancelUpstream == nil {
 		p.proxyLogger.Errorf("<%s> stopCommand has a nil p.cancelUpstream()", p.ID)
@@ -526,31 +559,6 @@ func (p *Process) waitForCmd() {
 		p.state = StateStopped // force it to be in this state
 	}
 	close(p.cmdWaitChan)
-}
-
-// processOutput reads from a pipe and sends data to both LogMonitor and MetricsParser
-func (p *Process) processOutput(reader *io.PipeReader) {
-	defer reader.Close()
-
-	scanner := bufio.NewScanner(reader)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			continue
-		}
-
-		// Send to LogMonitor for logging
-		p.processLogger.Write([]byte(line + "\n"))
-
-		// Send to MetricsParser for parsing
-		if p.metricsParser != nil {
-			p.metricsParser.ParseLogLine(line, p.ID)
-		}
-	}
-
-	if err := scanner.Err(); err != nil && err != io.EOF {
-		p.proxyLogger.Errorf("<%s> Error reading stream: %v", p.ID, err)
-	}
 }
 
 // cmdStopUpstreamProcess attemps to stop the upstream process gracefully
