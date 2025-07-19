@@ -29,14 +29,14 @@ func (config *MetricsMiddlewareConfig) parseAndRecordMetrics(jsonData gjson.Resu
 
 	if outputTokens > 0 {
 		duration := time.Since(config.StartTime)
-		generationSpeed := float64(inputTokens+outputTokens) / duration.Seconds()
+		tokensPerSecond := float64(inputTokens+outputTokens) / duration.Seconds()
 
 		metrics := TokenMetrics{
 			Timestamp:       time.Now(),
 			Model:           config.ModelName,
 			InputTokens:     inputTokens,
 			OutputTokens:    outputTokens,
-			TokensPerSecond: generationSpeed,
+			TokensPerSecond: tokensPerSecond,
 			DurationMs:      int(duration.Milliseconds()),
 		}
 		config.MetricsParser.addMetrics(metrics)
