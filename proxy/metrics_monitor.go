@@ -1,8 +1,10 @@
 package proxy
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"io"
 	"regexp"
 	"strconv"
 	"sync"
@@ -130,6 +132,34 @@ func (mp *MetricsMonitor) GetMetrics() []TokenMetrics {
 // SubscribeToMetrics subscribes to new metrics events
 func (mp *MetricsMonitor) SubscribeToMetrics(callback func(TokenMetricsEvent)) context.CancelFunc {
 	return event.Subscribe(mp.eventbus, callback)
+}
+
+// SubscribeToProcessLogs subscribes to log events from a process logger and returns a cleanup function
+func (mp *MetricsMonitor) SubscribeToProcessLogs(processLogger *LogMonitor, modelName string) context.CancelFunc {
+	reader, writer := io.Pipe()
+	scanner := bufio.NewScanner(reader)
+
+	// Subscribe to log events
+	cancelFunc := processLogger.OnLogData(func(data []byte) {
+		writer.Write(data)
+	})
+
+	// Process lines in a separate goroutine
+	go func() {
+		defer reader.Close()
+		for scanner.Scan() {
+			line := scanner.Text()
+			if line != "" {
+				mp.ParseLogLine(line, modelName)
+			}
+		}
+	}()
+
+	// Return a cleanup function
+	return func() {
+		cancelFunc()
+		writer.Close()
+	}
 }
 
 // Close closes the event dispatcher

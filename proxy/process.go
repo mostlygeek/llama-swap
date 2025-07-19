@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -208,31 +207,7 @@ func (p *Process) start() error {
 	p.cmdWaitChan = make(chan struct{})
 
 	if p.metricsMonitor != nil && !p.metricsMonitor.useServerResponse {
-		// Subscribe to log events from processLogger
-		reader, writer := io.Pipe()
-		scanner := bufio.NewScanner(reader)
-
-		// Subscribe to log events
-		cancelFunc := p.processLogger.OnLogData(func(data []byte) {
-			writer.Write(data)
-		})
-
-		// Process lines in a separate goroutine
-		go func() {
-			defer reader.Close()
-			for scanner.Scan() {
-				line := scanner.Text()
-				if line != "" {
-					p.metricsMonitor.ParseLogLine(line, p.ID)
-				}
-			}
-		}()
-
-		// Run both cancel function and writer for cleanup
-		p.metricsDataCancel = func() {
-			cancelFunc()
-			writer.Close()
-		}
+		p.metricsDataCancel = p.metricsMonitor.SubscribeToProcessLogs(p.processLogger, p.ID)
 	}
 
 	p.failedStartCount++ // this will be reset to zero when the process has successfully started
