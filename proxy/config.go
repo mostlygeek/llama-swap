@@ -142,7 +142,6 @@ type Config struct {
 	HealthCheckTimeout       int                    `yaml:"healthCheckTimeout"`
 	LogRequests              bool                   `yaml:"logRequests"`
 	LogLevel                 string                 `yaml:"logLevel"`
-	MetricsLogPath           string                 `yaml:"metricsLogPath"`
 	MetricsMaxInMemory       int                    `yaml:"metricsMaxInMemory"`
 	MetricsUseServerResponse bool                   `yaml:"metricsUseServerResponse"`
 	Models                   map[string]ModelConfig `yaml:"models"` /* key is model ID */

@@ -21,12 +21,6 @@ logLevel: info
 # - useful for limiting memory usage when processing large volumes of metrics
 metricsMaxInMemory: 1000
 
-# metricsLogPath: sets the path to the metrics log file
-# - optional, default: empty string
-# - if set, metrics will be logged to the specified file
-# - useful for persistent logging of metrics
-metricsLogPath: /path/to/metrics.log
-
 # metricsUseServerResponse: whether to parse metrics from server response instead of stdout
 # - optional, default: false
 # - if true, metrics will be parsed from the server's JSON response

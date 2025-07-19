@@ -30,10 +30,9 @@ type ProxyManager struct {
 	ginEngine *gin.Engine
 
 	// logging
-	proxyLogger       *LogMonitor
-	upstreamLogger    *LogMonitor
-	muxLogger         *LogMonitor
-	metricsFileLogger *LogMonitor
+	proxyLogger    *LogMonitor
+	upstreamLogger *LogMonitor
+	muxLogger      *LogMonitor
 
 	processGroups map[string]*ProcessGroup
 	metricsParser *MetricsParser
@@ -77,27 +76,16 @@ func New(config Config) *ProxyManager {
 		metricsDebugLogger.SetLogLevel(LevelInfo)
 	}
 
-	// Set up metrics logger if path is configured
-	var metricsFileLogger *LogMonitor
-	if config.MetricsLogPath != "" {
-		if f, err := os.OpenFile(config.MetricsLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-			metricsFileLogger = NewLogMonitorWriter(f)
-		} else {
-			proxyLogger.Errorf("Failed to open metrics log file: %v", err)
-		}
-	}
-
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 
 	pm := &ProxyManager{
 		config:    config,
 		ginEngine: gin.New(),
 
-		proxyLogger:       proxyLogger,
-		muxLogger:         stdoutLogger,
-		upstreamLogger:    upstreamLogger,
-		metricsFileLogger: metricsFileLogger,
-		metricsParser:     NewMetricsParser(&config, metricsDebugLogger),
+		proxyLogger:    proxyLogger,
+		muxLogger:      stdoutLogger,
+		upstreamLogger: upstreamLogger,
+		metricsParser:  NewMetricsParser(&config, metricsDebugLogger),
 
 		processGroups: make(map[string]*ProcessGroup),
 
