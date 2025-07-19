@@ -37,8 +37,6 @@ type APIProviderProps = {
 export function APIProvider({ children }: APIProviderProps) {
   const [proxyLogs, setProxyLogs] = useState("");
   const [upstreamLogs, setUpstreamLogs] = useState("");
-  const proxyEventSource = useRef<EventSource | null>(null);
-  const upstreamEventSource = useRef<EventSource | null>(null);
   const apiEventSource = useRef<EventSource | null>(null);
 
   const [models, setModels] = useState<Model[]>([]);
@@ -106,8 +104,6 @@ export function APIProvider({ children }: APIProviderProps) {
 
   useEffect(() => {
     return () => {
-      proxyEventSource.current?.close();
-      upstreamEventSource.current?.close();
       modelStatusEventSource.current?.close();
     };
   }, []);
