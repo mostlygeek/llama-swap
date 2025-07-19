@@ -436,7 +436,13 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 		}
 	} else if !isStreaming && parseResponseForUsage {
 		// Handle non-streaming response with metrics
-		recorder := NewResponseRecorder(c.Writer)
+		recorder := &ResponseRecorder{
+			ResponseWriter: c.Writer,
+			body:           bytes.Buffer{},
+			header:         http.Header{},
+			status:         http.StatusOK,
+		}
+
 		if err := processGroup.ProxyRequest(realModelName, recorder, c.Request); err != nil {
 			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
 			pm.proxyLogger.Errorf("Error proxying Request for processGroup %s and model %s", processGroup.id, realModelName)

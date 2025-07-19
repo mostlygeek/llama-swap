@@ -14,15 +14,6 @@ type ResponseRecorder struct {
 	status int
 }
 
-func NewResponseRecorder(writer http.ResponseWriter) *ResponseRecorder {
-	return &ResponseRecorder{
-		ResponseWriter: writer,
-		body:           bytes.Buffer{},
-		header:         make(http.Header),
-		status:         http.StatusOK,
-	}
-}
-
 func (r *ResponseRecorder) Write(b []byte) (int, error) {
 	return r.body.Write(b)
 }
