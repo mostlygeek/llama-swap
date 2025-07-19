@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 
 interface Metric {
+  id: number;
   timestamp: string;
   model: string;
   input_tokens: number;
@@ -179,7 +180,7 @@ const ActivityPage = () => {
             </thead>
             <tbody className="divide-y">
               {metrics.map((metric, index) => (
-                <tr key={index}>
+                <tr key={`${metric.id}-${index}`}>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">
                     {formatTimestamp(metric.timestamp)}
                   </td>

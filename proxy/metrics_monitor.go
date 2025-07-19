@@ -15,6 +15,7 @@ import (
 
 // TokenMetrics represents parsed token statistics from llama-server logs
 type TokenMetrics struct {
+	ID              int       `json:"id"`
 	Timestamp       time.Time `json:"timestamp"`
 	Model           string    `json:"model"`
 	InputTokens     int       `json:"input_tokens"`
@@ -37,6 +38,7 @@ type MetricsMonitor struct {
 	mu                sync.RWMutex
 	metrics           []TokenMetrics
 	maxMetrics        int
+	nextID            int
 	promptEvalRegex   *regexp.Regexp
 	evalRegex         *regexp.Regexp
 	debugLogger       *LogMonitor
@@ -70,6 +72,8 @@ func (mp *MetricsMonitor) addMetrics(metric TokenMetrics) {
 	mp.mu.Lock()
 	defer mp.mu.Unlock()
 
+	metric.ID = mp.nextID
+	mp.nextID++
 	mp.metrics = append(mp.metrics, metric)
 	if len(mp.metrics) > mp.maxMetrics {
 		mp.metrics = mp.metrics[len(mp.metrics)-mp.maxMetrics:]
