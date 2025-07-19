@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -210,12 +211,12 @@ func (p *Process) start() error {
 	if p.metricsParser != nil && p.metricsParser.useServerResponse {
 		reader, writer := io.Pipe()
 		scanner := bufio.NewScanner(reader)
-		
+
 		// Subscribe to log events
 		cancelFunc := p.processLogger.OnLogData(func(data []byte) {
 			_, _ = writer.Write(data)
 		})
-		
+
 		// Process lines in a separate goroutine
 		go func() {
 			defer reader.Close()
@@ -226,7 +227,7 @@ func (p *Process) start() error {
 				}
 			}
 		}()
-		
+
 		// Store both cancel function and writer for cleanup
 		p.logDataCancel = func() {
 			cancelFunc()
