@@ -139,14 +139,13 @@ func (c *GroupConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 }
 
 type Config struct {
-	HealthCheckTimeout       int                    `yaml:"healthCheckTimeout"`
-	LogRequests              bool                   `yaml:"logRequests"`
-	LogLevel                 string                 `yaml:"logLevel"`
-	MetricsMaxInMemory       int                    `yaml:"metricsMaxInMemory"`
-	MetricsUseServerResponse bool                   `yaml:"metricsUseServerResponse"`
-	Models                   map[string]ModelConfig `yaml:"models"` /* key is model ID */
-	Profiles                 map[string][]string    `yaml:"profiles"`
-	Groups                   map[string]GroupConfig `yaml:"groups"` /* key is group ID */
+	HealthCheckTimeout int                    `yaml:"healthCheckTimeout"`
+	LogRequests        bool                   `yaml:"logRequests"`
+	LogLevel           string                 `yaml:"logLevel"`
+	MetricsMaxInMemory int                    `yaml:"metricsMaxInMemory"`
+	Models             map[string]ModelConfig `yaml:"models"` /* key is model ID */
+	Profiles           map[string][]string    `yaml:"profiles"`
+	Groups             map[string]GroupConfig `yaml:"groups"` /* key is group ID */
 
 	// for key/value replacements in model's cmd, cmdStop, proxy, checkEndPoint
 	Macros map[string]string `yaml:"macros"`

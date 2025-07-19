@@ -94,7 +94,7 @@ func New(config Config) *ProxyManager {
 
 	// create the process groups
 	for groupID := range config.Groups {
-		processGroup := NewProcessGroup(groupID, config, proxyLogger, upstreamLogger, pm.metricsMonitor)
+		processGroup := NewProcessGroup(groupID, config, proxyLogger, upstreamLogger)
 		pm.processGroups[groupID] = processGroup
 	}
 
@@ -414,11 +414,10 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 	c.Request.ContentLength = int64(len(bodyBytes))
 
 	// Determine if we should parse response for metrics
-	parseResponseForUsage := pm.config.MetricsUseServerResponse && pm.metricsMonitor != nil
 	isStreaming := gjson.GetBytes(bodyBytes, "stream").Bool()
 
 	// Apply response middleware if metrics parsing is enabled
-	if parseResponseForUsage {
+	if pm.metricsMonitor != nil {
 		middleware := MetricsMiddleware(MetricsMiddlewareConfig{
 			MetricsParser:   pm.metricsMonitor,
 			ModelName:       realModelName,

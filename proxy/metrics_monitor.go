@@ -1,12 +1,8 @@
 package proxy
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
-	"io"
-	"regexp"
-	"strconv"
 	"sync"
 	"time"
 
@@ -19,7 +15,7 @@ type TokenMetrics struct {
 	Timestamp       time.Time `json:"timestamp"`
 	Model           string    `json:"model"`
 	InputTokens     int       `json:"input_tokens"`
-	OutputTokens    int       `json:"output_tokens"` // may be parsed as a separate entry if metricsUseServerResponse is set to false
+	OutputTokens    int       `json:"output_tokens"`
 	TokensPerSecond float64   `json:"tokens_per_second"`
 	DurationMs      int       `json:"duration_ms"`
 }
@@ -35,15 +31,12 @@ func (e TokenMetricsEvent) Type() uint32 {
 
 // MetricsMonitor parses llama-server output for token statistics
 type MetricsMonitor struct {
-	mu                sync.RWMutex
-	metrics           []TokenMetrics
-	maxMetrics        int
-	nextID            int
-	promptEvalRegex   *regexp.Regexp
-	evalRegex         *regexp.Regexp
-	debugLogger       *LogMonitor
-	eventbus          *event.Dispatcher
-	useServerResponse bool
+	mu          sync.RWMutex
+	metrics     []TokenMetrics
+	maxMetrics  int
+	nextID      int
+	debugLogger *LogMonitor
+	eventbus    *event.Dispatcher
 }
 
 // NewMetricsParser creates a new metrics parser
@@ -54,14 +47,9 @@ func NewMetricsParser(config *Config, debugLogger *LogMonitor) *MetricsMonitor {
 	}
 
 	mp := &MetricsMonitor{
-		maxMetrics: maxMetrics,
-		// Matches: `prompt eval time = 123.45 ms / 100 tokens (1.23 ms per token, 456.78 tokens per second)`
-		promptEvalRegex: regexp.MustCompile(`prompt eval time\s*=\s*(\d+(?:\.\d+)?)\s*ms\s*/\s*(\d+)\s*tokens\s*\(\s*(\d+(?:\.\d+)?)\s*ms per token,\s*(\d+(?:\.\d+)?)\s*tokens per second\s*\)`),
-		// Matches: `eval time = 123.45 ms / 100 tokens (1.23 ms per token, 456.78 tokens per second)`
-		evalRegex:         regexp.MustCompile(`eval time\s*=\s*(\d+(?:\.\d+)?)\s*ms\s*/\s*(\d+)\s*tokens\s*\(\s*(\d+(?:\.\d+)?)\s*ms per token,\s*(\d+(?:\.\d+)?)\s*tokens per second\s*\)`),
-		debugLogger:       debugLogger,
-		eventbus:          event.NewDispatcherConfig(1000),
-		useServerResponse: config.MetricsUseServerResponse,
+		maxMetrics:  maxMetrics,
+		debugLogger: debugLogger,
+		eventbus:    event.NewDispatcherConfig(maxMetrics),
 	}
 
 	return mp
@@ -81,41 +69,6 @@ func (mp *MetricsMonitor) addMetrics(metric TokenMetrics) {
 
 	// Publish event
 	event.Publish(mp.eventbus, TokenMetricsEvent{Metrics: metric})
-}
-
-// ParseLogLine parses a single log line for token metrics
-func (mp *MetricsMonitor) ParseLogLine(line string, modelName string) {
-	if matches := mp.promptEvalRegex.FindStringSubmatch(line); matches != nil {
-		// Check for prompt evaluation metrics (input tokens)
-		durationMs, _ := strconv.ParseFloat(matches[1], 64)
-		tokens, _ := strconv.Atoi(matches[2])
-		tokensPerSecond, _ := strconv.ParseFloat(matches[4], 64)
-
-		metrics := TokenMetrics{
-			Timestamp:       time.Now(),
-			Model:           modelName,
-			InputTokens:     tokens,
-			OutputTokens:    0,
-			TokensPerSecond: tokensPerSecond,
-			DurationMs:      int(durationMs),
-		}
-		mp.addMetrics(metrics)
-	} else if matches := mp.evalRegex.FindStringSubmatch(line); matches != nil {
-		// Check for evaluation metrics (output tokens)
-		durationMs, _ := strconv.ParseFloat(matches[1], 64)
-		tokens, _ := strconv.Atoi(matches[2])
-		tokensPerSecond, _ := strconv.ParseFloat(matches[4], 64)
-
-		metrics := TokenMetrics{
-			Timestamp:       time.Now(),
-			Model:           modelName,
-			InputTokens:     0,
-			OutputTokens:    tokens,
-			TokensPerSecond: tokensPerSecond,
-			DurationMs:      int(durationMs),
-		}
-		mp.addMetrics(metrics)
-	}
 }
 
 // GetMetricsJSON returns metrics as JSON
@@ -155,34 +108,6 @@ func (mp *MetricsMonitor) GetMetrics() []TokenMetrics {
 // SubscribeToMetrics subscribes to new metrics events
 func (mp *MetricsMonitor) SubscribeToMetrics(callback func(TokenMetricsEvent)) context.CancelFunc {
 	return event.Subscribe(mp.eventbus, callback)
-}
-
-// SubscribeToProcessLogs subscribes to log events from a process logger and returns a cleanup function
-func (mp *MetricsMonitor) SubscribeToProcessLogs(processLogger *LogMonitor, modelName string) context.CancelFunc {
-	reader, writer := io.Pipe()
-	scanner := bufio.NewScanner(reader)
-
-	// Subscribe to log events
-	cancelFunc := processLogger.OnLogData(func(data []byte) {
-		writer.Write(data)
-	})
-
-	// Process lines in a separate goroutine
-	go func() {
-		defer reader.Close()
-		for scanner.Scan() {
-			line := scanner.Text()
-			if line != "" {
-				mp.ParseLogLine(line, modelName)
-			}
-		}
-	}()
-
-	// Return a cleanup function
-	return func() {
-		cancelFunc()
-		writer.Close()
-	}
 }
 
 // Close closes the event dispatcher

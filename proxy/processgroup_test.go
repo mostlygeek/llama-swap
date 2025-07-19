@@ -33,19 +33,19 @@ var processGroupTestConfig = AddDefaultGroupToConfig(Config{
 })
 
 func TestProcessGroup_DefaultHasCorrectModel(t *testing.T) {
-	pg := NewProcessGroup(DEFAULT_GROUP_ID, processGroupTestConfig, testLogger, testLogger, nil)
+	pg := NewProcessGroup(DEFAULT_GROUP_ID, processGroupTestConfig, testLogger, testLogger)
 	assert.True(t, pg.HasMember("model5"))
 }
 
 func TestProcessGroup_HasMember(t *testing.T) {
-	pg := NewProcessGroup("G1", processGroupTestConfig, testLogger, testLogger, nil)
+	pg := NewProcessGroup("G1", processGroupTestConfig, testLogger, testLogger)
 	assert.True(t, pg.HasMember("model1"))
 	assert.True(t, pg.HasMember("model2"))
 	assert.False(t, pg.HasMember("model3"))
 }
 
 func TestProcessGroup_ProxyRequestSwapIsTrue(t *testing.T) {
-	pg := NewProcessGroup("G1", processGroupTestConfig, testLogger, testLogger, nil)
+	pg := NewProcessGroup("G1", processGroupTestConfig, testLogger, testLogger)
 	defer pg.StopProcesses(StopWaitForInflightRequest)
 
 	tests := []string{"model1", "model2"}
@@ -73,7 +73,7 @@ func TestProcessGroup_ProxyRequestSwapIsTrue(t *testing.T) {
 }
 
 func TestProcessGroup_ProxyRequestSwapIsFalse(t *testing.T) {
-	pg := NewProcessGroup("G2", processGroupTestConfig, testLogger, testLogger, nil)
+	pg := NewProcessGroup("G2", processGroupTestConfig, testLogger, testLogger)
 	defer pg.StopProcesses(StopWaitForInflightRequest)
 
 	tests := []string{"model3", "model4"}

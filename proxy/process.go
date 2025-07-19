@@ -50,9 +50,6 @@ type Process struct {
 	processLogger *LogMonitor
 	proxyLogger   *LogMonitor
 
-	metricsMonitor    *MetricsMonitor
-	metricsDataCancel context.CancelFunc
-
 	healthCheckTimeout      int
 	healthCheckLoopInterval time.Duration
 
@@ -76,7 +73,7 @@ type Process struct {
 	failedStartCount int
 }
 
-func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor, metricsMonitor *MetricsMonitor) *Process {
+func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor) *Process {
 	concurrentLimit := 10
 	if config.ConcurrencyLimit > 0 {
 		concurrentLimit = config.ConcurrencyLimit
@@ -89,7 +86,6 @@ func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLo
 		cancelUpstream:          nil,
 		processLogger:           processLogger,
 		proxyLogger:             proxyLogger,
-		metricsMonitor:          metricsMonitor,
 		healthCheckTimeout:      healthCheckTimeout,
 		healthCheckLoopInterval: 5 * time.Second, /* default, can not be set by user - used for testing */
 		state:                   StateStopped,
@@ -205,10 +201,6 @@ func (p *Process) start() error {
 	p.cmd.WaitDelay = p.gracefulStopTimeout
 	p.cancelUpstream = ctxCancelUpstream
 	p.cmdWaitChan = make(chan struct{})
-
-	if p.metricsMonitor != nil && !p.metricsMonitor.useServerResponse {
-		p.metricsDataCancel = p.metricsMonitor.SubscribeToProcessLogs(p.processLogger, p.ID)
-	}
 
 	p.failedStartCount++ // this will be reset to zero when the process has successfully started
 
@@ -360,12 +352,6 @@ func (p *Process) stopCommand() {
 	defer func() {
 		p.proxyLogger.Debugf("<%s> stopCommand took %v", p.ID, time.Since(stopStartTime))
 	}()
-
-	// Clean up log subscription if it exists
-	if p.metricsDataCancel != nil {
-		p.metricsDataCancel()
-		p.metricsDataCancel = nil
-	}
 
 	if p.cancelUpstream == nil {
 		p.proxyLogger.Errorf("<%s> stopCommand has a nil p.cancelUpstream()", p.ID)
