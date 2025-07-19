@@ -208,7 +208,7 @@ func (p *Process) start() error {
 	p.cancelUpstream = ctxCancelUpstream
 	p.cmdWaitChan = make(chan struct{})
 
-	if p.metricsParser != nil && p.metricsParser.useServerResponse {
+	if p.metricsParser != nil && !p.metricsParser.useServerResponse {
 		// Subscribe to log events from processLogger
 		reader, writer := io.Pipe()
 		scanner := bufio.NewScanner(reader)
