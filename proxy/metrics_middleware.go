@@ -18,6 +18,31 @@ type MetricsMiddlewareConfig struct {
 	ParseForMetrics bool
 }
 
+// parseAndRecordMetrics parses usage data from JSON and records metrics
+func (config *MetricsMiddlewareConfig) parseAndRecordMetrics(jsonData gjson.Result) {
+	if !jsonData.Get("usage").Exists() {
+		return
+	}
+
+	outputTokens := int(jsonData.Get("usage.completion_tokens").Int())
+	inputTokens := int(jsonData.Get("usage.prompt_tokens").Int())
+
+	if outputTokens > 0 {
+		duration := time.Since(config.StartTime)
+		generationSpeed := float64(inputTokens+outputTokens) / duration.Seconds()
+
+		metrics := TokenMetrics{
+			Timestamp:       time.Now(),
+			Model:           config.ModelName,
+			InputTokens:     inputTokens,
+			OutputTokens:    outputTokens,
+			TokensPerSecond: generationSpeed,
+			DurationMs:      int(duration.Milliseconds()),
+		}
+		config.MetricsParser.addMetrics(metrics)
+	}
+}
+
 // MetricsMiddleware is a gin middleware that captures and processes responses
 func MetricsMiddleware(config MetricsMiddlewareConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -104,27 +129,7 @@ func (w *streamingResponseWriter) processBuffer() {
 			// Parse JSON to look for usage data
 			if gjson.ValidBytes(data) {
 				jsonData := gjson.ParseBytes(data)
-
-				// Check if this chunk contains usage information
-				if jsonData.Get("usage").Exists() {
-					outputTokens := int(jsonData.Get("usage.completion_tokens").Int())
-					inputTokens := int(jsonData.Get("usage.prompt_tokens").Int())
-
-					if outputTokens > 0 {
-						duration := time.Since(w.config.StartTime)
-						generationSpeed := float64(inputTokens+outputTokens) / duration.Seconds()
-
-						metrics := TokenMetrics{
-							Timestamp:       time.Now(),
-							Model:           w.config.ModelName,
-							InputTokens:     inputTokens,
-							OutputTokens:    outputTokens,
-							TokensPerSecond: generationSpeed,
-							DurationMs:      int(duration.Milliseconds()),
-						}
-						w.config.MetricsParser.addMetrics(metrics)
-					}
-				}
+				w.config.parseAndRecordMetrics(jsonData)
 			}
 		}
 	}
@@ -158,26 +163,6 @@ func processNonStreamingResponse(config MetricsMiddlewareConfig, body []byte) {
 	// Parse JSON to extract usage information
 	if gjson.ValidBytes(body) {
 		jsonData := gjson.ParseBytes(body)
-
-		// Check if response contains usage information
-		if jsonData.Get("usage").Exists() {
-			outputTokens := int(jsonData.Get("usage.completion_tokens").Int())
-			inputTokens := int(jsonData.Get("usage.prompt_tokens").Int())
-
-			if outputTokens > 0 {
-				duration := time.Since(config.StartTime)
-				generationSpeed := float64(inputTokens+outputTokens) / duration.Seconds()
-
-				metrics := TokenMetrics{
-					Timestamp:       time.Now(),
-					Model:           config.ModelName,
-					InputTokens:     inputTokens,
-					OutputTokens:    outputTokens,
-					TokensPerSecond: generationSpeed,
-					DurationMs:      int(duration.Milliseconds()),
-				}
-				config.MetricsParser.addMetrics(metrics)
-			}
-		}
+		config.parseAndRecordMetrics(jsonData)
 	}
 }

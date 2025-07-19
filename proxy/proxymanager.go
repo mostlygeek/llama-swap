@@ -421,7 +421,6 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 	if parseResponseForUsage {
 		middleware := MetricsMiddleware(MetricsMiddlewareConfig{
 			MetricsParser:   pm.metricsMonitor,
-			Logger:          pm.proxyLogger,
 			ModelName:       realModelName,
 			StartTime:       startTime,
 			IsStreaming:     isStreaming,
