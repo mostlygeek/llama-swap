@@ -420,7 +420,7 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 
 	if isStreaming && parseResponseForUsage {
 		// Handle streaming response
-		proxyWriter := &StreamingResponseWriter{
+		recorder := &StreamingResponseRecorder{
 			ResponseWriter: c.Writer,
 			modelName:      realModelName,
 			startTime:      startTime,
@@ -428,7 +428,7 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 			proxyLogger:    pm.proxyLogger,
 		}
 
-		if err := processGroup.ProxyRequest(realModelName, proxyWriter, c.Request); err != nil {
+		if err := processGroup.ProxyRequest(realModelName, recorder, c.Request); err != nil {
 			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
 			pm.proxyLogger.Errorf("Error Proxying Request for processGroup %s and model %s", processGroup.id, realModelName)
 			return

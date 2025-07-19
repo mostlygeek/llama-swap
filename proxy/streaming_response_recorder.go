@@ -8,8 +8,8 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// StreamingResponseWriter wraps gin.ResponseWriter to capture and parse streaming responses
-type StreamingResponseWriter struct {
+// StreamingResponseRecorder wraps gin.ResponseWriter to capture and parse streaming responses
+type StreamingResponseRecorder struct {
 	gin.ResponseWriter
 	modelName     string
 	startTime     time.Time
@@ -18,7 +18,7 @@ type StreamingResponseWriter struct {
 	buffer        []byte
 }
 
-func (w *StreamingResponseWriter) Write(b []byte) (int, error) {
+func (w *StreamingResponseRecorder) Write(b []byte) (int, error) {
 	// Write to the actual response writer first
 	n, err := w.ResponseWriter.Write(b)
 	if err != nil {
@@ -34,7 +34,7 @@ func (w *StreamingResponseWriter) Write(b []byte) (int, error) {
 	return n, nil
 }
 
-func (w *StreamingResponseWriter) processBuffer() {
+func (w *StreamingResponseRecorder) processBuffer() {
 	// Process each line as potential SSE data
 	lines := bytes.Split(w.buffer, []byte("\n"))
 
