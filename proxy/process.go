@@ -197,7 +197,6 @@ func (p *Process) start() error {
 	cmdContext, ctxCancelUpstream := context.WithCancel(context.Background())
 
 	p.cmd = exec.CommandContext(cmdContext, args[0], args[1:]...)
-	p.cmd.Stderr = p.processLogger
 	p.cmd.Env = append(p.cmd.Environ(), p.config.Env...)
 	p.cmd.Cancel = p.cmdStopUpstreamProcess
 	p.cmd.WaitDelay = p.gracefulStopTimeout
@@ -205,14 +204,18 @@ func (p *Process) start() error {
 	p.cmdWaitChan = make(chan struct{})
 
 	if p.metricsParser == nil || p.metricsParser.useServerResponse {
-		// Server response is used, pass stdout as is
+		// Server response is used, pass output as is
 		p.cmd.Stdout = p.processLogger
+		p.cmd.Stderr = p.processLogger
 	} else {
-		// Create a pipe to capture stdout and feed both LogMonitor and MetricsParser
+		// Create a pipe to capture output and feed both LogMonitor and MetricsParser
 		stdoutReader, stdoutWriter := io.Pipe()
+		stderrReader, stderrWriter := io.Pipe()
 		p.cmd.Stdout = stdoutWriter
+		p.cmd.Stderr = stderrWriter
 		// Start goroutines to process stdout and stderr
-		go p.processOutput(stdoutReader, "stdout")
+		go p.processOutput(stdoutReader)
+		go p.processOutput(stderrReader)
 	}
 
 	p.failedStartCount++ // this will be reset to zero when the process has successfully started
@@ -526,7 +529,7 @@ func (p *Process) waitForCmd() {
 }
 
 // processOutput reads from a pipe and sends data to both LogMonitor and MetricsParser
-func (p *Process) processOutput(reader *io.PipeReader, streamType string) {
+func (p *Process) processOutput(reader *io.PipeReader) {
 	defer reader.Close()
 
 	scanner := bufio.NewScanner(reader)
@@ -546,7 +549,7 @@ func (p *Process) processOutput(reader *io.PipeReader, streamType string) {
 	}
 
 	if err := scanner.Err(); err != nil && err != io.EOF {
-		p.proxyLogger.Errorf("<%s> Error reading %s: %v", p.ID, streamType, err)
+		p.proxyLogger.Errorf("<%s> Error reading stream: %v", p.ID, err)
 	}
 }
 
