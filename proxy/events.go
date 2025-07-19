@@ -6,6 +6,7 @@ const ProcessStateChangeEventID = 0x01
 const ChatCompletionStatsEventID = 0x02
 const ConfigFileChangedEventID = 0x03
 const LogDataEventID = 0x04
+const TokenMetricsEventID = 0x05
 
 type ProcessStateChangeEvent struct {
 	ProcessName string

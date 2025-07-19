@@ -34,6 +34,7 @@ type ProxyManager struct {
 	muxLogger      *LogMonitor
 
 	processGroups map[string]*ProcessGroup
+	metricsParser *MetricsParser
 
 	// shutdown signaling
 	shutdownCtx    context.Context
@@ -45,6 +46,7 @@ func New(config Config) *ProxyManager {
 	stdoutLogger := NewLogMonitorWriter(os.Stdout)
 	upstreamLogger := NewLogMonitorWriter(stdoutLogger)
 	proxyLogger := NewLogMonitorWriter(stdoutLogger)
+	metricsDebugLogger := NewLogMonitorWriter(stdoutLogger)
 
 	if config.LogRequests {
 		proxyLogger.Warn("LogRequests configuration is deprecated. Use logLevel instead.")
@@ -54,18 +56,23 @@ func New(config Config) *ProxyManager {
 	case "debug":
 		proxyLogger.SetLogLevel(LevelDebug)
 		upstreamLogger.SetLogLevel(LevelDebug)
+		metricsDebugLogger.SetLogLevel(LevelDebug)
 	case "info":
 		proxyLogger.SetLogLevel(LevelInfo)
 		upstreamLogger.SetLogLevel(LevelInfo)
+		metricsDebugLogger.SetLogLevel(LevelInfo)
 	case "warn":
 		proxyLogger.SetLogLevel(LevelWarn)
 		upstreamLogger.SetLogLevel(LevelWarn)
+		metricsDebugLogger.SetLogLevel(LevelWarn)
 	case "error":
 		proxyLogger.SetLogLevel(LevelError)
 		upstreamLogger.SetLogLevel(LevelError)
+		metricsDebugLogger.SetLogLevel(LevelError)
 	default:
 		proxyLogger.SetLogLevel(LevelInfo)
 		upstreamLogger.SetLogLevel(LevelInfo)
+		metricsDebugLogger.SetLogLevel(LevelInfo)
 	}
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
@@ -77,6 +84,7 @@ func New(config Config) *ProxyManager {
 		proxyLogger:    proxyLogger,
 		muxLogger:      stdoutLogger,
 		upstreamLogger: upstreamLogger,
+		metricsParser:  NewMetricsParser(&config, metricsDebugLogger),
 
 		processGroups: make(map[string]*ProcessGroup),
 
@@ -86,7 +94,7 @@ func New(config Config) *ProxyManager {
 
 	// create the process groups
 	for groupID := range config.Groups {
-		processGroup := NewProcessGroup(groupID, config, proxyLogger, upstreamLogger)
+		processGroup := NewProcessGroup(groupID, config, proxyLogger, upstreamLogger, pm.metricsParser)
 		pm.processGroups[groupID] = processGroup
 	}
 
@@ -354,6 +362,7 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 }
 
 func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
+	startTime := time.Now()
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		pm.sendErrorResponse(c, http.StatusBadRequest, "could not ready request body")
@@ -404,6 +413,29 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 	c.Request.Header.Set("content-length", strconv.Itoa(len(bodyBytes)))
 	c.Request.ContentLength = int64(len(bodyBytes))
 
+	// Determine if we should parse response for metrics
+	parseResponseForUsage := pm.config.MetricsUseServerResponse && pm.metricsParser != nil
+	isStreaming := gjson.GetBytes(bodyBytes, "stream").Bool()
+
+	// Apply response middleware if metrics parsing is enabled
+	if parseResponseForUsage {
+		middleware := ResponseMiddleware(ResponseMiddlewareConfig{
+			MetricsParser:   pm.metricsParser,
+			Logger:          pm.proxyLogger,
+			ModelName:       realModelName,
+			StartTime:       startTime,
+			IsStreaming:     isStreaming,
+			ParseForMetrics: true,
+		})
+
+		// Create a new context with the middleware
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	// Proxy the request
 	if err := processGroup.ProxyRequest(realModelName, c.Writer, c.Request); err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
 		pm.proxyLogger.Errorf("Error Proxying Request for processGroup %s and model %s", processGroup.id, realModelName)

@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -49,6 +50,7 @@ type Process struct {
 
 	processLogger *LogMonitor
 	proxyLogger   *LogMonitor
+	metricsParser *MetricsParser
 
 	healthCheckTimeout      int
 	healthCheckLoopInterval time.Duration
@@ -71,9 +73,12 @@ type Process struct {
 
 	// track the number of failed starts
 	failedStartCount int
+
+	// for managing log event subscriptions
+	logDataCancel context.CancelFunc
 }
 
-func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor) *Process {
+func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor, metricsParser *MetricsParser) *Process {
 	concurrentLimit := 10
 	if config.ConcurrencyLimit > 0 {
 		concurrentLimit = config.ConcurrencyLimit
@@ -86,6 +91,7 @@ func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLo
 		cancelUpstream:          nil,
 		processLogger:           processLogger,
 		proxyLogger:             proxyLogger,
+		metricsParser:           metricsParser,
 		healthCheckTimeout:      healthCheckTimeout,
 		healthCheckLoopInterval: 5 * time.Second, /* default, can not be set by user - used for testing */
 		state:                   StateStopped,
@@ -201,6 +207,34 @@ func (p *Process) start() error {
 	p.cmd.WaitDelay = p.gracefulStopTimeout
 	p.cancelUpstream = ctxCancelUpstream
 	p.cmdWaitChan = make(chan struct{})
+
+	if p.metricsParser != nil && !p.metricsParser.useServerResponse {
+		// Subscribe to log events from processLogger
+		reader, writer := io.Pipe()
+		scanner := bufio.NewScanner(reader)
+
+		// Subscribe to log events
+		cancelFunc := p.processLogger.OnLogData(func(data []byte) {
+			writer.Write(data)
+		})
+
+		// Process lines in a separate goroutine
+		go func() {
+			defer reader.Close()
+			for scanner.Scan() {
+				line := scanner.Text()
+				if line != "" {
+					p.metricsParser.ParseLogLine(line, p.ID)
+				}
+			}
+		}()
+
+		// Run both cancel function and writer for cleanup
+		p.logDataCancel = func() {
+			cancelFunc()
+			writer.Close()
+		}
+	}
 
 	p.failedStartCount++ // this will be reset to zero when the process has successfully started
 
@@ -352,6 +386,12 @@ func (p *Process) stopCommand() {
 	defer func() {
 		p.proxyLogger.Debugf("<%s> stopCommand took %v", p.ID, time.Since(stopStartTime))
 	}()
+
+	// Clean up log subscription if it exists
+	if p.logDataCancel != nil {
+		p.logDataCancel()
+		p.logDataCancel = nil
+	}
 
 	if p.cancelUpstream == nil {
 		p.proxyLogger.Errorf("<%s> stopCommand has a nil p.cancelUpstream()", p.ID)

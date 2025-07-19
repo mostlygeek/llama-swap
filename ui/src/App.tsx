@@ -3,6 +3,7 @@ import { useTheme } from "./contexts/ThemeProvider";
 import { APIProvider } from "./contexts/APIProvider";
 import LogViewerPage from "./pages/LogViewer";
 import ModelPage from "./pages/Models";
+import ActivityPage from "./pages/Activity";
 
 function App() {
   const theme = useTheme();
@@ -21,6 +22,10 @@ function App() {
                 <NavLink to="/models" className={({ isActive }) => (isActive ? "navlink active" : "navlink")}>
                   Models
                 </NavLink>
+
+                <NavLink to="/activity" className={({ isActive }) => (isActive ? "navlink active" : "navlink")}>
+                  Activity
+                </NavLink>
                 <button className="btn btn--sm" onClick={theme.toggleTheme}>
                   {theme.isDarkMode ? "🌙" : "☀️"}
                 </button>
@@ -32,6 +37,7 @@ function App() {
             <Routes>
               <Route path="/" element={<LogViewerPage />} />
               <Route path="/models" element={<ModelPage />} />
+              <Route path="/activity" element={<ActivityPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </main>
