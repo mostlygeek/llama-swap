@@ -413,71 +413,33 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 	c.Request.Header.Set("content-length", strconv.Itoa(len(bodyBytes)))
 	c.Request.ContentLength = int64(len(bodyBytes))
 
-	// Create a response recorder to capture the response
-	var responseBody []byte
+	// Determine if we should parse response for metrics
 	parseResponseForUsage := pm.config.MetricsUseServerResponse && pm.metricsParser != nil
 	isStreaming := gjson.GetBytes(bodyBytes, "stream").Bool()
 
-	if isStreaming && parseResponseForUsage {
-		// Handle streaming response
-		recorder := &StreamingResponseRecorder{
-			ResponseWriter: c.Writer,
-			modelName:      realModelName,
-			startTime:      startTime,
-			metricsParser:  pm.metricsParser,
-			proxyLogger:    pm.proxyLogger,
-		}
+	// Apply response middleware if metrics parsing is enabled
+	if parseResponseForUsage {
+		middleware := ResponseMiddleware(ResponseMiddlewareConfig{
+			MetricsParser:   pm.metricsParser,
+			Logger:          pm.proxyLogger,
+			ModelName:       realModelName,
+			StartTime:       startTime,
+			IsStreaming:     isStreaming,
+			ParseForMetrics: true,
+		})
 
-		if err := processGroup.ProxyRequest(realModelName, recorder, c.Request); err != nil {
-			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
-			pm.proxyLogger.Errorf("Error Proxying Request for processGroup %s and model %s", processGroup.id, realModelName)
+		// Create a new context with the middleware
+		middleware(c)
+		if c.IsAborted() {
 			return
 		}
-	} else if !isStreaming && parseResponseForUsage {
-		// Handle non-streaming response with metrics
-		recorder := &ResponseRecorder{
-			ResponseWriter: c.Writer,
-			body:           bytes.Buffer{},
-			header:         http.Header{},
-			status:         http.StatusOK,
-		}
+	}
 
-		if err := processGroup.ProxyRequest(realModelName, recorder, c.Request); err != nil {
-			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
-			pm.proxyLogger.Errorf("Error proxying Request for processGroup %s and model %s", processGroup.id, realModelName)
-			return
-		}
-
-		// Copy the recorded response to the original writer
-		responseBody = recorder.body.Bytes()
-		recorder.WriteToOriginal()
-
-		// Log metrics using recorded response
-		duration := time.Since(startTime)
-		outputTokens := int(gjson.GetBytes(responseBody, "usage.completion_tokens").Int())
-		inputTokens := int(gjson.GetBytes(responseBody, "usage.prompt_tokens").Int())
-
-		if outputTokens > 0 {
-			generationSpeed := float64(inputTokens+outputTokens) / duration.Seconds()
-
-			// Use MetricsParser to add metrics
-			metrics := TokenMetrics{
-				Timestamp:       time.Now(),
-				Model:           realModelName,
-				InputTokens:     inputTokens,
-				OutputTokens:    outputTokens,
-				TokensPerSecond: generationSpeed,
-				DurationMs:      int(duration.Milliseconds()),
-			}
-			pm.metricsParser.addMetrics(metrics)
-		}
-	} else {
-		// Direct proxy without recording response
-		if err := processGroup.ProxyRequest(realModelName, c.Writer, c.Request); err != nil {
-			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
-			pm.proxyLogger.Errorf("Error Proxying Request for processGroup %s and model %s", processGroup.id, realModelName)
-			return
-		}
+	// Proxy the request
+	if err := processGroup.ProxyRequest(realModelName, c.Writer, c.Request); err != nil {
+		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
+		pm.proxyLogger.Errorf("Error Proxying Request for processGroup %s and model %s", processGroup.id, realModelName)
+		return
 	}
 }
 
