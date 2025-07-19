@@ -27,6 +27,12 @@ metricsMaxInMemory: 1000
 # - useful for persistent logging of metrics
 metricsLogPath: /path/to/metrics.log
 
+# metricsUseServerResponse: whether to parse metrics from server response instead of stdout
+# - optional, default: false
+# - if true, metrics will be parsed from the server's HTTP response
+# - if false, metrics will be parsed from the server's stdout
+metricsUseServerResponse: false
+
 # startPort: sets the starting port number for the automatic ${PORT} macro.
 # - optional, default: 5800
 # - the ${PORT} macro can be used in model.cmd and model.proxy settings
