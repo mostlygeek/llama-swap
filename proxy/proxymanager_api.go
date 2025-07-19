@@ -209,16 +209,9 @@ func (pm *ProxyManager) apiStreamMetrics(c *gin.Context) {
 	// Send existing metrics first
 	_, skipHistory := c.GetQuery("no-history")
 	if !skipHistory {
-		metrics := pm.metricsMonitor.GetMetrics()
-		if len(metrics) > 0 {
-			for _, metric := range metrics {
-				jsonData, err := json.Marshal(metric)
-				if err != nil {
-					continue
-				}
-				c.Writer.Write(jsonData)
-				c.Writer.Write([]byte("\n"))
-			}
+		metrics, err := pm.metricsMonitor.GetMetricsJSONByLines()
+		if err == nil {
+			c.Writer.Write(metrics)
 			flusher.Flush()
 		}
 	}
