@@ -29,7 +29,7 @@ metricsLogPath: /path/to/metrics.log
 
 # metricsUseServerResponse: whether to parse metrics from server response instead of stdout
 # - optional, default: false
-# - if true, metrics will be parsed from the server's HTTP response
+# - if true, metrics will be parsed from the server's JSON response
 # - if false, metrics will be parsed from the server's stdout
 metricsUseServerResponse: false
 
