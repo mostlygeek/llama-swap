@@ -33,8 +33,9 @@ type ProxyManager struct {
 	upstreamLogger *LogMonitor
 	muxLogger      *LogMonitor
 
-	processGroups  map[string]*ProcessGroup
 	metricsMonitor *MetricsMonitor
+
+	processGroups map[string]*ProcessGroup
 
 	// shutdown signaling
 	shutdownCtx    context.Context
