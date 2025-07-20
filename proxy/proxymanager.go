@@ -153,21 +153,20 @@ func (pm *ProxyManager) setupGinEngine() {
 		c.Next()
 	})
 
-	mmSetup := MetricsMiddlewareSetup(pm)
-	mmFlush := MetricsMiddlewareFlush
+	mm := MetricsMiddleware(pm)
 
 	// Set up routes using the Gin engine
-	pm.ginEngine.POST("/v1/chat/completions", mmSetup, pm.proxyOAIHandler, mmFlush)
+	pm.ginEngine.POST("/v1/chat/completions", mm, pm.proxyOAIHandler)
 	// Support legacy /v1/completions api, see issue #12
-	pm.ginEngine.POST("/v1/completions", mmSetup, pm.proxyOAIHandler, mmFlush)
+	pm.ginEngine.POST("/v1/completions", mm, pm.proxyOAIHandler)
 
 	// Support embeddings
-	pm.ginEngine.POST("/v1/embeddings", mmSetup, pm.proxyOAIHandler, mmFlush)
-	pm.ginEngine.POST("/v1/rerank", mmSetup, pm.proxyOAIHandler, mmFlush)
+	pm.ginEngine.POST("/v1/embeddings", mm, pm.proxyOAIHandler)
+	pm.ginEngine.POST("/v1/rerank", mm, pm.proxyOAIHandler)
 
 	// Support audio/speech endpoint
-	pm.ginEngine.POST("/v1/audio/speech", mmSetup, pm.proxyOAIHandler, mmFlush)
-	pm.ginEngine.POST("/v1/audio/transcriptions", mmSetup, pm.proxyOAIPostFormHandler, mmFlush)
+	pm.ginEngine.POST("/v1/audio/speech", mm, pm.proxyOAIHandler)
+	pm.ginEngine.POST("/v1/audio/transcriptions", mm, pm.proxyOAIPostFormHandler)
 
 	pm.ginEngine.GET("/v1/models", pm.listModelsHandler)
 

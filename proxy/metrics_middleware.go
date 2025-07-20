@@ -10,8 +10,8 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// MetricsMiddlewareSetup sets up the MetricsResponseWriter for capturing upstream requests
-func MetricsMiddlewareSetup(pm *ProxyManager) gin.HandlerFunc {
+// MetricsMiddleware sets up the MetricsResponseWriter for capturing upstream requests
+func MetricsMiddleware(pm *ProxyManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		bodyBytes, err := io.ReadAll(c.Request.Body)
 		if err != nil {
@@ -20,24 +20,19 @@ func MetricsMiddlewareSetup(pm *ProxyManager) gin.HandlerFunc {
 		}
 		c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
-		c.Writer = &MetricsResponseWriter{
+		writer := &MetricsResponseWriter{
 			ResponseWriter: c.Writer,
 			metricsRecorder: &MetricsRecorder{
 				metricsMonitor: pm.metricsMonitor,
 				isStreaming:    gjson.GetBytes(bodyBytes, "stream").Bool(),
 			},
 		}
+		c.Writer = writer
 		c.Next()
-	}
-}
 
-// MetricsMiddlewareFlush uses the writer's recorded HTTP response for metrics processing.
-// The middleware expects the fields modelName,... to be set after setup.
-func MetricsMiddlewareFlush(c *gin.Context) {
-	writer := c.Writer.(*MetricsResponseWriter)
-	rec := writer.metricsRecorder
-	rec.processBody(writer.body)
-	c.Next()
+		rec := writer.metricsRecorder
+		rec.processBody(writer.body)
+	}
 }
 
 type MetricsRecorder struct {
