@@ -167,11 +167,9 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 	/**
 	 * Send Metrics data
 	 */
-	if pm.metricsMonitor != nil {
-		defer pm.metricsMonitor.SubscribeToMetrics(func(event TokenMetricsEvent) {
-			sendMetrics(event.Metrics)
-		})()
-	}
+	defer event.On(func(e TokenMetricsEvent) {
+		sendMetrics(e.Metrics)
+	})()
 
 	// send initial batch of data
 	sendLogData("proxy", pm.proxyLogger.GetHistory())

@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"context"
 	"encoding/json"
 	"sync"
 	"time"
@@ -35,7 +34,6 @@ type MetricsMonitor struct {
 	metrics    []TokenMetrics
 	maxMetrics int
 	nextID     int
-	eventbus   *event.Dispatcher
 }
 
 // NewMetricsParser creates a new metrics parser
@@ -47,7 +45,6 @@ func NewMetricsParser(config *Config) *MetricsMonitor {
 
 	mp := &MetricsMonitor{
 		maxMetrics: maxMetrics,
-		eventbus:   event.NewDispatcherConfig(maxMetrics),
 	}
 
 	return mp
@@ -65,8 +62,7 @@ func (mp *MetricsMonitor) addMetrics(metric TokenMetrics) {
 		mp.metrics = mp.metrics[len(mp.metrics)-mp.maxMetrics:]
 	}
 
-	// Publish event
-	event.Publish(mp.eventbus, TokenMetricsEvent{Metrics: metric})
+	event.Emit(TokenMetricsEvent{Metrics: metric})
 }
 
 // GetMetrics returns a copy of the current metrics
@@ -84,14 +80,4 @@ func (mp *MetricsMonitor) GetMetricsJSON() ([]byte, error) {
 	mp.mu.RLock()
 	defer mp.mu.RUnlock()
 	return json.Marshal(mp.metrics)
-}
-
-// SubscribeToMetrics subscribes to new metrics events
-func (mp *MetricsMonitor) SubscribeToMetrics(callback func(TokenMetricsEvent)) context.CancelFunc {
-	return event.Subscribe(mp.eventbus, callback)
-}
-
-// Close closes the event dispatcher
-func (mp *MetricsMonitor) Close() error {
-	return mp.eventbus.Close()
 }
