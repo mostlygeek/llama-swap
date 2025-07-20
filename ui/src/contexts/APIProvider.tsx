@@ -99,10 +99,12 @@ export function APIProvider({ children }: APIProviderProps) {
               break;
 
             case "metrics":
-              const newMetric = JSON.parse(message.data) as Metrics;
-              setMetrics(prevMetrics => {
-                return [newMetric, ...prevMetrics];
-              });
+              {
+                const newMetric = JSON.parse(message.data) as Metrics;
+                setMetrics(prevMetrics => {
+                  return [newMetric, ...prevMetrics];
+                });
+              }
               break;
           }
         } catch (err) {
