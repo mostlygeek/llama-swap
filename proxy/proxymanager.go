@@ -47,7 +47,6 @@ func New(config Config) *ProxyManager {
 	stdoutLogger := NewLogMonitorWriter(os.Stdout)
 	upstreamLogger := NewLogMonitorWriter(stdoutLogger)
 	proxyLogger := NewLogMonitorWriter(stdoutLogger)
-	metricsDebugLogger := NewLogMonitorWriter(stdoutLogger)
 
 	if config.LogRequests {
 		proxyLogger.Warn("LogRequests configuration is deprecated. Use logLevel instead.")
@@ -57,23 +56,18 @@ func New(config Config) *ProxyManager {
 	case "debug":
 		proxyLogger.SetLogLevel(LevelDebug)
 		upstreamLogger.SetLogLevel(LevelDebug)
-		metricsDebugLogger.SetLogLevel(LevelDebug)
 	case "info":
 		proxyLogger.SetLogLevel(LevelInfo)
 		upstreamLogger.SetLogLevel(LevelInfo)
-		metricsDebugLogger.SetLogLevel(LevelInfo)
 	case "warn":
 		proxyLogger.SetLogLevel(LevelWarn)
 		upstreamLogger.SetLogLevel(LevelWarn)
-		metricsDebugLogger.SetLogLevel(LevelWarn)
 	case "error":
 		proxyLogger.SetLogLevel(LevelError)
 		upstreamLogger.SetLogLevel(LevelError)
-		metricsDebugLogger.SetLogLevel(LevelError)
 	default:
 		proxyLogger.SetLogLevel(LevelInfo)
 		upstreamLogger.SetLogLevel(LevelInfo)
-		metricsDebugLogger.SetLogLevel(LevelInfo)
 	}
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
@@ -85,7 +79,7 @@ func New(config Config) *ProxyManager {
 		proxyLogger:    proxyLogger,
 		muxLogger:      stdoutLogger,
 		upstreamLogger: upstreamLogger,
-		metricsMonitor: NewMetricsParser(&config, metricsDebugLogger),
+		metricsMonitor: NewMetricsParser(&config),
 
 		processGroups: make(map[string]*ProcessGroup),
 

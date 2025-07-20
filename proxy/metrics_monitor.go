@@ -31,25 +31,23 @@ func (e TokenMetricsEvent) Type() uint32 {
 
 // MetricsMonitor parses llama-server output for token statistics
 type MetricsMonitor struct {
-	mu          sync.RWMutex
-	metrics     []TokenMetrics
-	maxMetrics  int
-	nextID      int
-	debugLogger *LogMonitor
-	eventbus    *event.Dispatcher
+	mu         sync.RWMutex
+	metrics    []TokenMetrics
+	maxMetrics int
+	nextID     int
+	eventbus   *event.Dispatcher
 }
 
 // NewMetricsParser creates a new metrics parser
-func NewMetricsParser(config *Config, debugLogger *LogMonitor) *MetricsMonitor {
+func NewMetricsParser(config *Config) *MetricsMonitor {
 	maxMetrics := config.MetricsMaxInMemory
 	if maxMetrics <= 0 {
 		maxMetrics = 1000 // Default fallback
 	}
 
 	mp := &MetricsMonitor{
-		maxMetrics:  maxMetrics,
-		debugLogger: debugLogger,
-		eventbus:    event.NewDispatcherConfig(maxMetrics),
+		maxMetrics: maxMetrics,
+		eventbus:   event.NewDispatcherConfig(maxMetrics),
 	}
 
 	return mp
