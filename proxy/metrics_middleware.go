@@ -17,7 +17,27 @@ type MetricsMiddlewareConfig struct {
 	StartTime     time.Time
 }
 
-// parseAndRecordMetrics parses usage data from JSON and records metrics
+// MetricsMiddleware is a gin middleware that captures and processes responses
+func MetricsMiddleware(config MetricsMiddlewareConfig) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		config.StartTime = time.Now()
+
+		// Pass the request to upstream
+		writer := &MetricsResponseWriter{
+			ResponseWriter: c.Writer,
+		}
+		c.Writer = writer
+		c.Next()
+
+		// Handle response processing after request completes
+		if config.IsStreaming {
+			config.processStreamingResponse(writer.body)
+		} else {
+			config.processNonStreamingResponse(writer.body)
+		}
+	}
+}
+
 func (config *MetricsMiddlewareConfig) parseAndRecordMetrics(jsonData gjson.Result) {
 	if !jsonData.Get("usage").Exists() {
 		return
@@ -42,70 +62,8 @@ func (config *MetricsMiddlewareConfig) parseAndRecordMetrics(jsonData gjson.Resu
 	}
 }
 
-// MetricsMiddleware is a gin middleware that captures and processes responses
-func MetricsMiddleware(config MetricsMiddlewareConfig) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		config.StartTime = time.Now()
-
-		// Create response recorder for non-streaming
-		if !config.IsStreaming {
-			c.Writer = &bufferingResponseWriter{
-				ResponseWriter: c.Writer,
-			}
-		} else {
-			c.Writer = &streamingResponseWriter{
-				ResponseWriter: c.Writer,
-				config:         config,
-			}
-		}
-
-		// Process the request
-		c.Next()
-
-		// Handle non-streaming response processing after request completes
-		if !config.IsStreaming {
-			if writer, ok := c.Writer.(*bufferingResponseWriter); ok && len(writer.body) > 0 {
-				processNonStreamingResponse(config, writer.body)
-			}
-		}
-	}
-}
-
-// streamingResponseWriter handles streaming responses (SSE)
-type streamingResponseWriter struct {
-	gin.ResponseWriter
-	config MetricsMiddlewareConfig
-	buffer []byte
-}
-
-func (w *streamingResponseWriter) Write(b []byte) (int, error) {
-	// Write to the actual response writer first
-	n, err := w.ResponseWriter.Write(b)
-	if err != nil {
-		return n, err
-	}
-
-	// Append to buffer for parsing
-	w.buffer = append(w.buffer, b...)
-
-	// Process the buffer for complete SSE events
-	w.processBuffer()
-
-	return n, nil
-}
-
-func (w *streamingResponseWriter) processBuffer() {
-	// Process each line as potential SSE data
-	lines := bytes.Split(w.buffer, []byte("\n"))
-
-	// Keep incomplete line in buffer
-	if len(lines) > 0 && !bytes.HasSuffix(w.buffer, []byte("\n")) {
-		w.buffer = lines[len(lines)-1]
-		lines = lines[:len(lines)-1]
-	} else {
-		w.buffer = nil
-	}
-
+func (config *MetricsMiddlewareConfig) processStreamingResponse(body []byte) {
+	lines := bytes.Split(body, []byte("\n"))
 	for _, line := range lines {
 		line = bytes.TrimSpace(line)
 		if len(line) == 0 {
@@ -115,49 +73,47 @@ func (w *streamingResponseWriter) processBuffer() {
 		// Check for SSE data prefix
 		if bytes.HasPrefix(line, []byte("data: ")) {
 			data := bytes.TrimSpace(line[6:])
-
-			// Skip SSE comments and empty data
-			if len(data) == 0 || bytes.Equal(data, []byte("[DONE]")) {
+			if len(data) == 0 {
 				continue
+			}
+			if bytes.Equal(data, []byte("[DONE]")) {
+				break
 			}
 
 			// Parse JSON to look for usage data
 			if gjson.ValidBytes(data) {
-				jsonData := gjson.ParseBytes(data)
-				w.config.parseAndRecordMetrics(jsonData)
+				config.parseAndRecordMetrics(gjson.ParseBytes(data))
 			}
 		}
 	}
 }
 
-// bufferingResponseWriter captures the entire response for non-streaming
-type bufferingResponseWriter struct {
-	gin.ResponseWriter
-	body []byte
-}
-
-func (w *bufferingResponseWriter) Write(b []byte) (int, error) {
-	w.body = append(w.body, b...)
-	return w.ResponseWriter.Write(b)
-}
-
-func (w *bufferingResponseWriter) WriteHeader(statusCode int) {
-	w.ResponseWriter.WriteHeader(statusCode)
-}
-
-func (w *bufferingResponseWriter) Header() http.Header {
-	return w.ResponseWriter.Header()
-}
-
-// processNonStreamingResponse processes metrics for non-streaming responses
-func processNonStreamingResponse(config MetricsMiddlewareConfig, body []byte) {
+func (config *MetricsMiddlewareConfig) processNonStreamingResponse(body []byte) {
 	if len(body) == 0 {
 		return
 	}
 
 	// Parse JSON to extract usage information
 	if gjson.ValidBytes(body) {
-		jsonData := gjson.ParseBytes(body)
-		config.parseAndRecordMetrics(jsonData)
+		config.parseAndRecordMetrics(gjson.ParseBytes(body))
 	}
+}
+
+// MetricsResponseWriter captures the entire response for non-streaming
+type MetricsResponseWriter struct {
+	gin.ResponseWriter
+	body []byte
+}
+
+func (w *MetricsResponseWriter) Write(b []byte) (int, error) {
+	w.body = append(w.body, b...)
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *MetricsResponseWriter) WriteHeader(statusCode int) {
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (w *MetricsResponseWriter) Header() http.Header {
+	return w.ResponseWriter.Header()
 }
