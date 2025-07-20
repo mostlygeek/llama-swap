@@ -11,11 +11,10 @@ import (
 
 // MetricsMiddlewareConfig holds configuration for the response middleware
 type MetricsMiddlewareConfig struct {
-	MetricsParser   *MetricsMonitor
-	ModelName       string
-	StartTime       time.Time
-	IsStreaming     bool
-	ParseForMetrics bool
+	MetricsParser *MetricsMonitor
+	ModelName     string
+	IsStreaming   bool
+	StartTime     time.Time
 }
 
 // parseAndRecordMetrics parses usage data from JSON and records metrics
@@ -46,11 +45,7 @@ func (config *MetricsMiddlewareConfig) parseAndRecordMetrics(jsonData gjson.Resu
 // MetricsMiddleware is a gin middleware that captures and processes responses
 func MetricsMiddleware(config MetricsMiddlewareConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Skip processing if metrics parsing is disabled
-		if !config.ParseForMetrics || config.MetricsParser == nil {
-			c.Next()
-			return
-		}
+		config.StartTime = time.Now()
 
 		// Create response recorder for non-streaming
 		if !config.IsStreaming {

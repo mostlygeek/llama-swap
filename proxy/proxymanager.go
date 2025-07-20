@@ -357,7 +357,6 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 }
 
 func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
-	startTime := time.Now()
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		pm.sendErrorResponse(c, http.StatusBadRequest, "could not ready request body")
@@ -413,11 +412,9 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 
 	// Apply response middleware if metrics parsing is enabled
 	middleware := MetricsMiddleware(MetricsMiddlewareConfig{
-		MetricsParser:   pm.metricsMonitor,
-		ModelName:       realModelName,
-		StartTime:       startTime,
-		IsStreaming:     isStreaming,
-		ParseForMetrics: true,
+		MetricsParser: pm.metricsMonitor,
+		ModelName:     realModelName,
+		IsStreaming:   isStreaming,
 	})
 
 	// Create a new context with the middleware
