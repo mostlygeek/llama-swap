@@ -48,9 +48,6 @@ const ActivityPage = () => {
       {metrics.length === 0 ? (
         <div className="text-center py-8">
           <p className="text-gray-600">No metrics data available</p>
-          <p className="text-sm mt-2">
-            Ensure metrics logging is enabled in your configuration
-          </p>
         </div>
       ) : (
         <div className="overflow-x-auto">
