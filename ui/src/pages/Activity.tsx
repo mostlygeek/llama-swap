@@ -15,10 +15,18 @@ const ActivityPage = () => {
 
   // Set loading to false once we have metrics data
   useEffect(() => {
+    // Set a timeout to clear loading state even if no metrics arrive
+    const timer = setTimeout(() => {
+      setLoading(false);
+    }, 2000); // 2 second timeout
+
     if (metrics.length > 0) {
+      clearTimeout(timer);
       setLoading(false);
       setError(null);
     }
+
+    return () => clearTimeout(timer);
   }, [metrics]);
 
   const formatTimestamp = (timestamp: string) => {
