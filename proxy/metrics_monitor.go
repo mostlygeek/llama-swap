@@ -71,13 +71,6 @@ func (mp *MetricsMonitor) addMetrics(metric TokenMetrics) {
 	event.Publish(mp.eventbus, TokenMetricsEvent{Metrics: metric})
 }
 
-// GetMetricsJSON returns metrics as JSON
-func (mp *MetricsMonitor) GetMetricsJSON() ([]byte, error) {
-	mp.mu.RLock()
-	defer mp.mu.RUnlock()
-	return json.Marshal(mp.metrics)
-}
-
 // GetMetrics returns a copy of the current metrics
 func (mp *MetricsMonitor) GetMetrics() []TokenMetrics {
 	mp.mu.RLock()
@@ -86,6 +79,13 @@ func (mp *MetricsMonitor) GetMetrics() []TokenMetrics {
 	result := make([]TokenMetrics, len(mp.metrics))
 	copy(result, mp.metrics)
 	return result
+}
+
+// GetMetricsJSON returns metrics as JSON
+func (mp *MetricsMonitor) GetMetricsJSON() ([]byte, error) {
+	mp.mu.RLock()
+	defer mp.mu.RUnlock()
+	return json.Marshal(mp.metrics)
 }
 
 // SubscribeToMetrics subscribes to new metrics events

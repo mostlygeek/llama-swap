@@ -19,13 +19,25 @@ interface APIProviderType {
   enableAPIEvents: (enabled: boolean) => void;
   proxyLogs: string;
   upstreamLogs: string;
+  metrics: Metrics[];
 }
+
+interface Metrics {
+  id: number;
+  timestamp: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  tokens_per_second: number;
+  duration_ms: number;
+}
+
 interface LogData {
   source: "upstream" | "proxy";
   data: string;
 }
 interface APIEventEnvelope {
-  type: "modelStatus" | "logData";
+  type: "modelStatus" | "logData" | "metrics";
   data: string;
 }
 
@@ -37,6 +49,7 @@ type APIProviderProps = {
 export function APIProvider({ children }: APIProviderProps) {
   const [proxyLogs, setProxyLogs] = useState("");
   const [upstreamLogs, setUpstreamLogs] = useState("");
+  const [metrics, setMetrics] = useState<Metrics[]>([]);
   const apiEventSource = useRef<EventSource | null>(null);
 
   const [models, setModels] = useState<Model[]>([]);
@@ -73,7 +86,7 @@ export function APIProvider({ children }: APIProviderProps) {
               }
               break;
 
-            case "logData": {
+            case "logData":
               const logData = JSON.parse(message.data) as LogData;
               switch (logData.source) {
                 case "proxy":
@@ -83,7 +96,14 @@ export function APIProvider({ children }: APIProviderProps) {
                   appendLog(logData.data, setUpstreamLogs);
                   break;
               }
-            }
+              break;
+
+            case "metrics":
+              const newMetric = JSON.parse(message.data) as Metrics;
+              setMetrics(prevMetrics => {
+                return [newMetric, ...prevMetrics];
+              });
+              break;
           }
         } catch (err) {
           console.error(e.data, err);
@@ -159,8 +179,9 @@ export function APIProvider({ children }: APIProviderProps) {
       enableAPIEvents,
       proxyLogs,
       upstreamLogs,
+      metrics,
     }),
-    [models, listModels, unloadAllModels, loadModel, enableAPIEvents, proxyLogs, upstreamLogs]
+    [models, listModels, unloadAllModels, loadModel, enableAPIEvents, proxyLogs, upstreamLogs, metrics]
   );
 
   return <APIContext.Provider value={value}>{children}</APIContext.Provider>;
