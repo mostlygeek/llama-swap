@@ -412,20 +412,18 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 	isStreaming := gjson.GetBytes(bodyBytes, "stream").Bool()
 
 	// Apply response middleware if metrics parsing is enabled
-	if pm.metricsMonitor != nil {
-		middleware := MetricsMiddleware(MetricsMiddlewareConfig{
-			MetricsParser:   pm.metricsMonitor,
-			ModelName:       realModelName,
-			StartTime:       startTime,
-			IsStreaming:     isStreaming,
-			ParseForMetrics: true,
-		})
+	middleware := MetricsMiddleware(MetricsMiddlewareConfig{
+		MetricsParser:   pm.metricsMonitor,
+		ModelName:       realModelName,
+		StartTime:       startTime,
+		IsStreaming:     isStreaming,
+		ParseForMetrics: true,
+	})
 
-		// Create a new context with the middleware
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
+	// Create a new context with the middleware
+	middleware(c)
+	if c.IsAborted() {
+		return
 	}
 
 	// Proxy the request

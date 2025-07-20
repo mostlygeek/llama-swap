@@ -175,10 +175,8 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 	sendLogData("proxy", pm.proxyLogger.GetHistory())
 	sendLogData("upstream", pm.upstreamLogger.GetHistory())
 	sendModels()
-	if pm.metricsMonitor != nil {
-		for _, metrics := range pm.metricsMonitor.GetMetrics() {
-			sendMetrics(metrics)
-		}
+	for _, metrics := range pm.metricsMonitor.GetMetrics() {
+		sendMetrics(metrics)
 	}
 
 	for {
@@ -197,11 +195,6 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 }
 
 func (pm *ProxyManager) apiGetMetrics(c *gin.Context) {
-	if pm.metricsMonitor == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "metrics parser not initialized"})
-		return
-	}
-
 	// Get metrics from the shared metrics parser
 	jsonData, err := pm.metricsMonitor.GetMetricsJSON()
 	if err != nil {
