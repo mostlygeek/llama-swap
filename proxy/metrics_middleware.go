@@ -31,7 +31,8 @@ func MetricsMiddlewareSetup(pm *ProxyManager) gin.HandlerFunc {
 	}
 }
 
-// MetricsMiddlewareFlush uses the writer's recorded HTTP response for metrics processing
+// MetricsMiddlewareFlush uses the writer's recorded HTTP response for metrics processing.
+// The middleware expects the fields modelName,... to be set after setup.
 func MetricsMiddlewareFlush(c *gin.Context) {
 	writer := c.Writer.(*MetricsResponseWriter)
 	rec := writer.metricsRecorder
