@@ -79,6 +79,7 @@ func New(config Config) *ProxyManager {
 		proxyLogger:    proxyLogger,
 		muxLogger:      stdoutLogger,
 		upstreamLogger: upstreamLogger,
+
 		metricsMonitor: NewMetricsParser(&config),
 
 		processGroups: make(map[string]*ProcessGroup),
@@ -152,18 +153,21 @@ func (pm *ProxyManager) setupGinEngine() {
 		c.Next()
 	})
 
+	mmSetup := MetricsMiddlewareSetup(pm)
+	mmFlush := MetricsMiddlewareFlush
+
 	// Set up routes using the Gin engine
-	pm.ginEngine.POST("/v1/chat/completions", pm.proxyOAIHandler)
+	pm.ginEngine.POST("/v1/chat/completions", mmSetup, pm.proxyOAIHandler, mmFlush)
 	// Support legacy /v1/completions api, see issue #12
-	pm.ginEngine.POST("/v1/completions", pm.proxyOAIHandler)
+	pm.ginEngine.POST("/v1/completions", mmSetup, pm.proxyOAIHandler, mmFlush)
 
 	// Support embeddings
-	pm.ginEngine.POST("/v1/embeddings", pm.proxyOAIHandler)
-	pm.ginEngine.POST("/v1/rerank", pm.proxyOAIHandler)
+	pm.ginEngine.POST("/v1/embeddings", mmSetup, pm.proxyOAIHandler, mmFlush)
+	pm.ginEngine.POST("/v1/rerank", mmSetup, pm.proxyOAIHandler, mmFlush)
 
 	// Support audio/speech endpoint
-	pm.ginEngine.POST("/v1/audio/speech", pm.proxyOAIHandler)
-	pm.ginEngine.POST("/v1/audio/transcriptions", pm.proxyOAIPostFormHandler)
+	pm.ginEngine.POST("/v1/audio/speech", mmSetup, pm.proxyOAIHandler, mmFlush)
+	pm.ginEngine.POST("/v1/audio/transcriptions", mmSetup, pm.proxyOAIPostFormHandler, mmFlush)
 
 	pm.ginEngine.GET("/v1/models", pm.listModelsHandler)
 
@@ -407,27 +411,18 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 	c.Request.Header.Set("content-length", strconv.Itoa(len(bodyBytes)))
 	c.Request.ContentLength = int64(len(bodyBytes))
 
-	// Determine if we should parse response for metrics
-	isStreaming := gjson.GetBytes(bodyBytes, "stream").Bool()
+	startTime := time.Now()
 
-	// Apply response middleware if metrics parsing is enabled
-	middleware := MetricsMiddleware(MetricsMiddlewareConfig{
-		MetricsParser: pm.metricsMonitor,
-		ModelName:     realModelName,
-		IsStreaming:   isStreaming,
-	})
-
-	// Create a new context with the middleware
-	middleware(c)
-	if c.IsAborted() {
-		return
-	}
-
-	// Proxy the request
 	if err := processGroup.ProxyRequest(realModelName, c.Writer, c.Request); err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
 		pm.proxyLogger.Errorf("Error Proxying Request for processGroup %s and model %s", processGroup.id, realModelName)
 		return
+	}
+
+	if writer, ok := c.Writer.(*MetricsResponseWriter); ok {
+		rec := writer.metricsRecorder
+		rec.modelName = realModelName
+		rec.startTime = startTime
 	}
 }
 
@@ -533,11 +528,19 @@ func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
 	modifiedReq.Header.Set("Content-Length", strconv.Itoa(requestBuffer.Len()))
 	modifiedReq.ContentLength = int64(requestBuffer.Len())
 
+	startTime := time.Now()
+
 	// Use the modified request for proxying
 	if err := processGroup.ProxyRequest(realModelName, c.Writer, modifiedReq); err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
 		pm.proxyLogger.Errorf("Error Proxying Request for processGroup %s and model %s", processGroup.id, realModelName)
 		return
+	}
+
+	if writer, ok := c.Writer.(*MetricsResponseWriter); ok {
+		rec := writer.metricsRecorder
+		rec.modelName = realModelName
+		rec.startTime = startTime
 	}
 }
 
