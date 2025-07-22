@@ -195,13 +195,10 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 }
 
 func (pm *ProxyManager) apiGetMetrics(c *gin.Context) {
-	// Get metrics from the shared metrics parser
 	jsonData, err := pm.metricsMonitor.GetMetricsJSON()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get metrics"})
 		return
 	}
-
-	// Return the raw JSON data
 	c.Data(http.StatusOK, "application/json", jsonData)
 }

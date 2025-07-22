@@ -36,8 +36,7 @@ type MetricsMonitor struct {
 	nextID     int
 }
 
-// NewMetricsParser creates a new metrics parser
-func NewMetricsParser(config *Config) *MetricsMonitor {
+func NewMetricsMonitor(config *Config) *MetricsMonitor {
 	maxMetrics := config.MetricsMaxInMemory
 	if maxMetrics <= 0 {
 		maxMetrics = 1000 // Default fallback
