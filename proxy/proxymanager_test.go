@@ -667,7 +667,7 @@ func TestProxyManager_FiltersStripParams(t *testing.T) {
 	proxy := New(config)
 	defer proxy.StopProcesses(StopWaitForInflightRequest)
 	reqBody := `{"model":"model1", "temperature":0.1, "x_param":"123", "y_param":"abc", "stream":true}`
-	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+	req := httptest.NewRequest("POST", "/v1/chat/completions?stream=true", bytes.NewBufferString(reqBody))
 	w := httptest.NewRecorder()
 
 	proxy.ServeHTTP(w, req)

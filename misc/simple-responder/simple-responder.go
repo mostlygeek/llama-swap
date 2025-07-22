@@ -38,7 +38,8 @@ func main() {
 		bodyBytes, _ := io.ReadAll(c.Request.Body)
 
 		// Check if streaming is requested
-		isStreaming := gjson.GetBytes(bodyBytes, "stream").Bool()
+		// Query is checked instead of JSON body since that event stream conflicts with other tests
+		isStreaming := c.Query("stream") == "true"
 
 		if isStreaming {
 			// Set headers for streaming
