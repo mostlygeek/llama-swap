@@ -1,5 +1,6 @@
 healthCheckTimeout: 300
 logRequests: true
+metricsMaxInMemory: 1000
 
 models:
   "qwen2.5":

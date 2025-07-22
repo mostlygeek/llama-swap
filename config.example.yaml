@@ -15,6 +15,12 @@ healthCheckTimeout: 500
 # - Valid log levels: debug, info, warn, error
 logLevel: info
 
+# metricsMaxInMemory: maximum number of metrics to keep in memory
+# - optional, default: 1000
+# - controls how many metrics are stored in memory before older ones are discarded
+# - useful for limiting memory usage when processing large volumes of metrics
+metricsMaxInMemory: 1000
+
 # startPort: sets the starting port number for the automatic ${PORT} macro.
 # - optional, default: 5800
 # - the ${PORT} macro can be used in model.cmd and model.proxy settings

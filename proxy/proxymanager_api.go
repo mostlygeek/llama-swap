@@ -24,6 +24,7 @@ func addApiHandlers(pm *ProxyManager) {
 	{
 		apiGroup.POST("/models/unload", pm.apiUnloadAllModels)
 		apiGroup.GET("/events", pm.apiSendEvents)
+		apiGroup.GET("/metrics", pm.apiGetMetrics)
 	}
 }
 
@@ -85,6 +86,7 @@ type messageType string
 const (
 	msgTypeModelStatus messageType = "modelStatus"
 	msgTypeLogData     messageType = "logData"
+	msgTypeMetrics     messageType = "metrics"
 )
 
 type messageEnvelope struct {
@@ -130,6 +132,18 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 		}
 	}
 
+	sendMetrics := func(metrics TokenMetrics) {
+		jsonData, err := json.Marshal(metrics)
+		if err == nil {
+			select {
+			case sendBuffer <- messageEnvelope{Type: msgTypeMetrics, Data: string(jsonData)}:
+			case <-ctx.Done():
+				return
+			default:
+			}
+		}
+	}
+
 	/**
 	 * Send updated models list
 	 */
@@ -150,10 +164,20 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 		sendLogData("upstream", data)
 	})()
 
+	/**
+	 * Send Metrics data
+	 */
+	defer event.On(func(e TokenMetricsEvent) {
+		sendMetrics(e.Metrics)
+	})()
+
 	// send initial batch of data
 	sendLogData("proxy", pm.proxyLogger.GetHistory())
 	sendLogData("upstream", pm.upstreamLogger.GetHistory())
 	sendModels()
+	for _, metrics := range pm.metricsMonitor.GetMetrics() {
+		sendMetrics(metrics)
+	}
 
 	for {
 		select {
@@ -168,4 +192,13 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 			c.Writer.Flush()
 		}
 	}
+}
+
+func (pm *ProxyManager) apiGetMetrics(c *gin.Context) {
+	jsonData, err := pm.metricsMonitor.GetMetricsJSON()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get metrics"})
+		return
+	}
+	c.Data(http.StatusOK, "application/json", jsonData)
 }

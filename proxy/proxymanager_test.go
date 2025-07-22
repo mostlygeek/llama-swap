@@ -165,9 +165,11 @@ func TestProxyManager_SwapMultiProcessParallelRequests(t *testing.T) {
 			}
 
 			mu.Lock()
-			var response map[string]string
+			var response map[string]interface{}
 			assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
-			results[key] = response["responseMessage"]
+			result, ok := response["responseMessage"].(string)
+			assert.Equal(t, ok, true)
+			results[key] = result
 			mu.Unlock()
 		}(key)
 
@@ -644,7 +646,7 @@ func TestProxyManager_ChatContentLength(t *testing.T) {
 
 	proxy.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
-	var response map[string]string
+	var response map[string]interface{}
 	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 	assert.Equal(t, "81", response["h_content_length"])
 	assert.Equal(t, "model1", response["responseMessage"])
@@ -672,7 +674,7 @@ func TestProxyManager_FiltersStripParams(t *testing.T) {
 
 	proxy.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
-	var response map[string]string
+	var response map[string]interface{}
 	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 
 	// `temperature` and `stream` are gone but model remains
@@ -682,4 +684,70 @@ func TestProxyManager_FiltersStripParams(t *testing.T) {
 	// assert.Equal(t, "123", response["x_param"])
 	// assert.Equal(t, "abc", response["y_param"])
 	// t.Logf("%v", response)
+}
+
+func TestProxyManager_MiddlewareWritesMetrics_NonStreaming(t *testing.T) {
+	config := AddDefaultGroupToConfig(Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]ModelConfig{
+			"model1": getTestSimpleResponderConfig("model1"),
+		},
+		LogLevel: "error",
+	})
+
+	proxy := New(config)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+
+	// Make a non-streaming request
+	reqBody := `{"model":"model1", "stream": false}`
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+	w := httptest.NewRecorder()
+
+	proxy.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Check that metrics were recorded
+	metrics := proxy.metricsMonitor.GetMetrics()
+	assert.NotEmpty(t, metrics, "metrics should be recorded for non-streaming request")
+
+	// Verify the last metric has the correct model
+	lastMetric := metrics[len(metrics)-1]
+	assert.Equal(t, "model1", lastMetric.Model)
+	assert.Equal(t, 25, lastMetric.InputTokens, "input tokens should be 25")
+	assert.Equal(t, 10, lastMetric.OutputTokens, "output tokens should be 10")
+	assert.Greater(t, lastMetric.TokensPerSecond, 0.0, "tokens per second should be greater than 0")
+	assert.Greater(t, lastMetric.DurationMs, 0, "duration should be greater than 0")
+}
+
+func TestProxyManager_MiddlewareWritesMetrics_Streaming(t *testing.T) {
+	config := AddDefaultGroupToConfig(Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]ModelConfig{
+			"model1": getTestSimpleResponderConfig("model1"),
+		},
+		LogLevel: "error",
+	})
+
+	proxy := New(config)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+
+	// Make a streaming request
+	reqBody := `{"model":"model1", "stream": true}`
+	req := httptest.NewRequest("POST", "/v1/chat/completions?stream=true", bytes.NewBufferString(reqBody))
+	w := httptest.NewRecorder()
+
+	proxy.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Check that metrics were recorded
+	metrics := proxy.metricsMonitor.GetMetrics()
+	assert.NotEmpty(t, metrics, "metrics should be recorded for streaming request")
+
+	// Verify the last metric has the correct model
+	lastMetric := metrics[len(metrics)-1]
+	assert.Equal(t, "model1", lastMetric.Model)
+	assert.Equal(t, 25, lastMetric.InputTokens, "input tokens should be 25")
+	assert.Equal(t, 10, lastMetric.OutputTokens, "output tokens should be 10")
+	assert.Greater(t, lastMetric.TokensPerSecond, 0.0, "tokens per second should be greater than 0")
+	assert.Greater(t, lastMetric.DurationMs, 0, "duration should be greater than 0")
 }

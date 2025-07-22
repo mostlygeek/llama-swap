@@ -193,6 +193,7 @@ groups:
 			},
 		},
 		HealthCheckTimeout: 15,
+		MetricsMaxInMemory: 1000,
 		Profiles: map[string][]string{
 			"test": {"model1", "model2"},
 		},

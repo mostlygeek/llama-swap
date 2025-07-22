@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
@@ -32,6 +31,8 @@ type ProxyManager struct {
 	proxyLogger    *LogMonitor
 	upstreamLogger *LogMonitor
 	muxLogger      *LogMonitor
+
+	metricsMonitor *MetricsMonitor
 
 	processGroups map[string]*ProcessGroup
 
@@ -77,6 +78,8 @@ func New(config Config) *ProxyManager {
 		proxyLogger:    proxyLogger,
 		muxLogger:      stdoutLogger,
 		upstreamLogger: upstreamLogger,
+
+		metricsMonitor: NewMetricsMonitor(&config),
 
 		processGroups: make(map[string]*ProcessGroup),
 
@@ -149,10 +152,12 @@ func (pm *ProxyManager) setupGinEngine() {
 		c.Next()
 	})
 
+	mm := MetricsMiddleware(pm)
+
 	// Set up routes using the Gin engine
-	pm.ginEngine.POST("/v1/chat/completions", pm.proxyOAIHandler)
+	pm.ginEngine.POST("/v1/chat/completions", mm, pm.proxyOAIHandler)
 	// Support legacy /v1/completions api, see issue #12
-	pm.ginEngine.POST("/v1/completions", pm.proxyOAIHandler)
+	pm.ginEngine.POST("/v1/completions", mm, pm.proxyOAIHandler)
 
 	// Support embeddings
 	pm.ginEngine.POST("/v1/embeddings", pm.proxyOAIHandler)
@@ -360,13 +365,8 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 		return
 	}
 
-	requestedModel := gjson.GetBytes(bodyBytes, "model").String()
-	if requestedModel == "" {
-		pm.sendErrorResponse(c, http.StatusBadRequest, "missing or invalid 'model' key")
-		return
-	}
-
-	processGroup, realModelName, err := pm.swapProcessGroup(requestedModel)
+	realModelName := c.GetString("ls-real-model-name") // Should be set in MetricsMiddleware
+	processGroup, _, err := pm.swapProcessGroup(realModelName)
 	if err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
 		return
