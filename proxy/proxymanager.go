@@ -366,12 +366,7 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 		return
 	}
 
-	requestedModel := gjson.GetBytes(bodyBytes, "model").String()
-	if requestedModel == "" {
-		pm.sendErrorResponse(c, http.StatusBadRequest, "missing or invalid 'model' key")
-		return
-	}
-
+	requestedModel := c.GetString("ls-requested-model") // Should be set in MetricsMiddleware
 	processGroup, realModelName, err := pm.swapProcessGroup(requestedModel)
 	if err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))

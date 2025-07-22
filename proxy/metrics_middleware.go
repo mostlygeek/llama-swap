@@ -20,6 +20,13 @@ func MetricsMiddleware(pm *ProxyManager) gin.HandlerFunc {
 		}
 		c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
+		requestedModel := gjson.GetBytes(bodyBytes, "model").String()
+		if requestedModel == "" {
+			pm.sendErrorResponse(c, http.StatusBadRequest, "missing or invalid 'model' key")
+			return
+		}
+		c.Set("ls-requested-model", requestedModel)
+
 		writer := &MetricsResponseWriter{
 			ResponseWriter: c.Writer,
 			metricsRecorder: &MetricsRecorder{
