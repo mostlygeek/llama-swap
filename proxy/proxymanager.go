@@ -513,19 +513,11 @@ func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
 	modifiedReq.Header.Set("Content-Length", strconv.Itoa(requestBuffer.Len()))
 	modifiedReq.ContentLength = int64(requestBuffer.Len())
 
-	startTime := time.Now()
-
 	// Use the modified request for proxying
 	if err := processGroup.ProxyRequest(realModelName, c.Writer, modifiedReq); err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
 		pm.proxyLogger.Errorf("Error Proxying Request for processGroup %s and model %s", processGroup.id, realModelName)
 		return
-	}
-
-	if writer, ok := c.Writer.(*MetricsResponseWriter); ok {
-		rec := writer.metricsRecorder
-		rec.modelName = realModelName
-		rec.startTime = startTime
 	}
 }
 
