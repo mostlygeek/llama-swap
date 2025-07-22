@@ -40,6 +40,7 @@ func MetricsMiddleware(pm *ProxyManager) gin.HandlerFunc {
 				metricsMonitor: pm.metricsMonitor,
 				realModelName:  realModelName,
 				isStreaming:    gjson.GetBytes(bodyBytes, "stream").Bool(),
+				startTime:      time.Now(),
 			},
 		}
 		c.Writer = writer
