@@ -366,6 +366,11 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 	}
 
 	realModelName := c.GetString("ls-real-model-name") // Should be set in MetricsMiddleware
+	if realModelName == "" {
+		pm.sendErrorResponse(c, http.StatusInternalServerError, "ls-real-model-name not set")
+		return
+	}
+
 	processGroup, _, err := pm.swapProcessGroup(realModelName)
 	if err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
