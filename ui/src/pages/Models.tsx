@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useAPI } from "../contexts/APIProvider";
 import { LogPanel } from "./LogViewer";
 import { usePersistentState } from "../hooks/usePersistentState";
