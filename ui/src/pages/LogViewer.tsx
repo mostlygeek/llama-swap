@@ -3,14 +3,7 @@ import { useAPI } from "../contexts/APIProvider";
 import { usePersistentState } from "../hooks/usePersistentState";
 
 const LogViewer = () => {
-  const { proxyLogs, upstreamLogs, enableAPIEvents } = useAPI();
-
-  useEffect(() => {
-    enableAPIEvents(true);
-    return () => {
-      enableAPIEvents(false);
-    };
-  }, []);
+  const { proxyLogs, upstreamLogs } = useAPI();
 
   return (
     <div className="flex flex-col gap-5" style={{ height: "calc(100vh - 125px)" }}>
