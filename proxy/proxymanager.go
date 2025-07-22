@@ -161,12 +161,12 @@ func (pm *ProxyManager) setupGinEngine() {
 	pm.ginEngine.POST("/v1/completions", mm, pm.proxyOAIHandler)
 
 	// Support embeddings
-	pm.ginEngine.POST("/v1/embeddings", mm, pm.proxyOAIHandler)
-	pm.ginEngine.POST("/v1/rerank", mm, pm.proxyOAIHandler)
+	pm.ginEngine.POST("/v1/embeddings", pm.proxyOAIHandler)
+	pm.ginEngine.POST("/v1/rerank", pm.proxyOAIHandler)
 
 	// Support audio/speech endpoint
-	pm.ginEngine.POST("/v1/audio/speech", mm, pm.proxyOAIHandler)
-	pm.ginEngine.POST("/v1/audio/transcriptions", mm, pm.proxyOAIPostFormHandler)
+	pm.ginEngine.POST("/v1/audio/speech", pm.proxyOAIHandler)
+	pm.ginEngine.POST("/v1/audio/transcriptions", pm.proxyOAIPostFormHandler)
 
 	pm.ginEngine.GET("/v1/models", pm.listModelsHandler)
 
@@ -410,18 +410,10 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 	c.Request.Header.Set("content-length", strconv.Itoa(len(bodyBytes)))
 	c.Request.ContentLength = int64(len(bodyBytes))
 
-	startTime := time.Now()
-
 	if err := processGroup.ProxyRequest(realModelName, c.Writer, c.Request); err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
 		pm.proxyLogger.Errorf("Error Proxying Request for processGroup %s and model %s", processGroup.id, realModelName)
 		return
-	}
-
-	if writer, ok := c.Writer.(*MetricsResponseWriter); ok {
-		rec := writer.metricsRecorder
-		rec.modelName = realModelName
-		rec.startTime = startTime
 	}
 }
 
