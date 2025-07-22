@@ -70,9 +70,10 @@ See the [configuration documentation](https://github.com/mostlygeek/llama-swap/w
 
 ## Web UI
 
-llama-swap ships with a web based interface to make it easier to monitor logs and check the status of models. 
+llama-swap ships with a real time web interface to monitor logs and status of models:
 
-<img width="1758" alt="image" src="https://github.com/user-attachments/assets/31ae5bcd-5efd-46b0-b64b-6db9e60196d3" />
+<img width="1786" height="1334" alt="image" src="https://github.com/user-attachments/assets/d6258cb9-1dad-40db-828f-2be860aec8fe" />
+
 
 ## Docker Install ([download images](https://github.com/mostlygeek/llama-swap/pkgs/container/llama-swap))
 
