@@ -1,16 +1,9 @@
-import { useState, useEffect } from 'react';
-import { useAPI } from '../contexts/APIProvider';
+import { useState, useEffect } from "react";
+import { useAPI } from "../contexts/APIProvider";
 
 const ActivityPage = () => {
-  const { metrics, enableAPIEvents } = useAPI();
+  const { metrics } = useAPI();
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    enableAPIEvents(true);
-    return () => {
-      enableAPIEvents(false);
-    };
-  }, []);
 
   useEffect(() => {
     if (metrics.length > 0) {
@@ -23,11 +16,11 @@ const ActivityPage = () => {
   };
 
   const formatSpeed = (speed: number) => {
-    return speed.toFixed(2) + ' t/s';
+    return speed.toFixed(2) + " t/s";
   };
 
   const formatDuration = (ms: number) => {
-    return (ms / 1000).toFixed(2) + 's';
+    return (ms / 1000).toFixed(2) + "s";
   };
 
   if (error) {
@@ -54,47 +47,23 @@ const ActivityPage = () => {
           <table className="min-w-full divide-y">
             <thead>
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">
-                  Timestamp
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">
-                  Model
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">
-                  Input Tokens
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">
-                  Output Tokens
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">
-                  Processing Speed
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">
-                  Duration
-                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Timestamp</th>
+                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Model</th>
+                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Input Tokens</th>
+                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Output Tokens</th>
+                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Processing Speed</th>
+                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Duration</th>
               </tr>
             </thead>
             <tbody className="divide-y">
               {metrics.map((metric, index) => (
                 <tr key={`${metric.id}-${index}`}>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    {formatTimestamp(metric.timestamp)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    {metric.model}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    {metric.input_tokens.toLocaleString()}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    {metric.output_tokens.toLocaleString()}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    {formatSpeed(metric.tokens_per_second)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    {formatDuration(metric.duration_ms)}
-                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm">{formatTimestamp(metric.timestamp)}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm">{metric.model}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm">{metric.input_tokens.toLocaleString()}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm">{metric.output_tokens.toLocaleString()}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm">{formatSpeed(metric.tokens_per_second)}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm">{formatDuration(metric.duration_ms)}</td>
                 </tr>
               ))}
             </tbody>

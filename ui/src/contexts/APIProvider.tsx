@@ -44,16 +44,16 @@ interface APIEventEnvelope {
 const APIContext = createContext<APIProviderType | undefined>(undefined);
 type APIProviderProps = {
   children: ReactNode;
+  autoStartAPIEvents?: boolean;
 };
 
-export function APIProvider({ children }: APIProviderProps) {
+export function APIProvider({ children, autoStartAPIEvents = true }: APIProviderProps) {
   const [proxyLogs, setProxyLogs] = useState("");
   const [upstreamLogs, setUpstreamLogs] = useState("");
   const [metrics, setMetrics] = useState<Metrics[]>([]);
   const apiEventSource = useRef<EventSource | null>(null);
 
   const [models, setModels] = useState<Model[]>([]);
-  const modelStatusEventSource = useRef<EventSource | null>(null);
 
   const appendLog = useCallback((newData: string, setter: React.Dispatch<React.SetStateAction<string>>) => {
     setter((prev) => {
@@ -66,6 +66,7 @@ export function APIProvider({ children }: APIProviderProps) {
     if (!enabled) {
       apiEventSource.current?.close();
       apiEventSource.current = null;
+      setMetrics([]);
       return;
     }
 
@@ -101,7 +102,7 @@ export function APIProvider({ children }: APIProviderProps) {
             case "metrics":
               {
                 const newMetric = JSON.parse(message.data) as Metrics;
-                setMetrics(prevMetrics => {
+                setMetrics((prevMetrics) => {
                   return [newMetric, ...prevMetrics];
                 });
               }
@@ -125,10 +126,14 @@ export function APIProvider({ children }: APIProviderProps) {
   }, []);
 
   useEffect(() => {
+    if (autoStartAPIEvents) {
+      enableAPIEvents(true);
+    }
+
     return () => {
-      modelStatusEventSource.current?.close();
+      enableAPIEvents(false);
     };
-  }, []);
+  }, [enableAPIEvents, autoStartAPIEvents]);
 
   const listModels = useCallback(async (): Promise<Model[]> => {
     try {
