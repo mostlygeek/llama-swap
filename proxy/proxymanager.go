@@ -365,13 +365,12 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 		return
 	}
 
-	requestedModel := c.GetString("ls-requested-model") // Should be set in MetricsMiddleware
-	processGroup, realModelName, err := pm.swapProcessGroup(requestedModel)
+	realModelName := c.GetString("ls-real-model-name") // Should be set in MetricsMiddleware
+	processGroup, _, err := pm.swapProcessGroup(realModelName)
 	if err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
 		return
 	}
-	c.Writer.(*MetricsResponseWriter).metricsRecorder.modelName = realModelName
 
 	// issue #69 allow custom model names to be sent to upstream
 	useModelName := pm.config.Models[realModelName].UseModelName

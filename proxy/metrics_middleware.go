@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -25,13 +26,19 @@ func MetricsMiddleware(pm *ProxyManager) gin.HandlerFunc {
 			pm.sendErrorResponse(c, http.StatusBadRequest, "missing or invalid 'model' key")
 			return
 		}
-		c.Set("ls-requested-model", requestedModel)
+
+		realModelName, found := pm.config.RealModelName(requestedModel)
+		if !found {
+			pm.sendErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("could not find real modelID for %s", requestedModel))
+			return
+		}
+		c.Set("ls-real-model-name", realModelName)
 
 		writer := &MetricsResponseWriter{
 			ResponseWriter: c.Writer,
 			metricsRecorder: &MetricsRecorder{
 				metricsMonitor: pm.metricsMonitor,
-				modelName:      requestedModel, // will be updated in proxyOAIHandler
+				realModelName:  realModelName,
 				isStreaming:    gjson.GetBytes(bodyBytes, "stream").Bool(),
 			},
 		}
@@ -45,7 +52,7 @@ func MetricsMiddleware(pm *ProxyManager) gin.HandlerFunc {
 
 type MetricsRecorder struct {
 	metricsMonitor *MetricsMonitor
-	modelName      string
+	realModelName  string
 	isStreaming    bool
 	startTime      time.Time
 }
@@ -73,7 +80,7 @@ func (rec *MetricsRecorder) parseAndRecordMetrics(jsonData gjson.Result) {
 
 		metrics := TokenMetrics{
 			Timestamp:       time.Now(),
-			Model:           rec.modelName,
+			Model:           rec.realModelName,
 			InputTokens:     inputTokens,
 			OutputTokens:    outputTokens,
 			TokensPerSecond: tokensPerSecond,
