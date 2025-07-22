@@ -48,6 +48,11 @@ func main() {
 			"responseMessage":  *responseMessage,
 			"h_content_length": c.Request.Header.Get("Content-Length"),
 			"request_body":     string(bodyBytes),
+			"usage": gin.H{
+				"completion_tokens": 10,
+				"prompt_tokens":     25,
+				"total_tokens":      35,
+			},
 		})
 	})
 
@@ -74,6 +79,11 @@ func main() {
 		c.Header("Content-Type", "application/json")
 		c.JSON(http.StatusOK, gin.H{
 			"responseMessage": *responseMessage,
+			"usage": gin.H{
+				"completion_tokens": 10,
+				"prompt_tokens":     25,
+				"total_tokens":      35,
+			},
 		})
 
 	})

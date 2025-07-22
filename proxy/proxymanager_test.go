@@ -711,8 +711,8 @@ func TestProxyManager_MiddlewareWritesMetrics_NonStreaming(t *testing.T) {
 	// Verify the last metric has the correct model
 	lastMetric := metrics[len(metrics)-1]
 	assert.Equal(t, "model1", lastMetric.Model)
-	assert.Greater(t, lastMetric.InputTokens, 0, "input tokens should be greater than 0")
-	assert.Greater(t, lastMetric.OutputTokens, 0, "output tokens should be greater than 0")
+	assert.Equal(t, 25, lastMetric.InputTokens, "input tokens should be 25")
+	assert.Equal(t, 10, lastMetric.OutputTokens, "output tokens should be 10")
 	assert.Greater(t, lastMetric.TokensPerSecond, 0.0, "tokens per second should be greater than 0")
 	assert.Greater(t, lastMetric.DurationMs, 0, "duration should be greater than 0")
 }
@@ -744,8 +744,8 @@ func TestProxyManager_MiddlewareWritesMetrics_Streaming(t *testing.T) {
 	// Verify the last metric has the correct model
 	lastMetric := metrics[len(metrics)-1]
 	assert.Equal(t, "model1", lastMetric.Model)
-	assert.Greater(t, lastMetric.InputTokens, 0, "input tokens should be greater than 0")
-	assert.Greater(t, lastMetric.OutputTokens, 0, "output tokens should be greater than 0")
+	assert.Equal(t, 25, lastMetric.InputTokens, "input tokens should be 25")
+	assert.Equal(t, 10, lastMetric.OutputTokens, "output tokens should be 10")
 	assert.Greater(t, lastMetric.TokensPerSecond, 0.0, "tokens per second should be greater than 0")
 	assert.Greater(t, lastMetric.DurationMs, 0, "duration should be greater than 0")
 }

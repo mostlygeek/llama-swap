@@ -371,6 +371,7 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
 		return
 	}
+	c.Writer.(*MetricsResponseWriter).metricsRecorder.modelName = realModelName
 
 	// issue #69 allow custom model names to be sent to upstream
 	useModelName := pm.config.Models[realModelName].UseModelName

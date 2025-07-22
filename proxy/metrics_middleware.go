@@ -31,6 +31,7 @@ func MetricsMiddleware(pm *ProxyManager) gin.HandlerFunc {
 			ResponseWriter: c.Writer,
 			metricsRecorder: &MetricsRecorder{
 				metricsMonitor: pm.metricsMonitor,
+				modelName:      requestedModel, // will be updated in proxyOAIHandler
 				isStreaming:    gjson.GetBytes(bodyBytes, "stream").Bool(),
 			},
 		}
