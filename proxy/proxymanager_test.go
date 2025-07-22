@@ -644,7 +644,7 @@ func TestProxyManager_ChatContentLength(t *testing.T) {
 
 	proxy.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
-	var response map[string]string
+	var response map[string]interface{}
 	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 	assert.Equal(t, "81", response["h_content_length"])
 	assert.Equal(t, "model1", response["responseMessage"])
@@ -672,7 +672,7 @@ func TestProxyManager_FiltersStripParams(t *testing.T) {
 
 	proxy.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
-	var response map[string]string
+	var response map[string]interface{}
 	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 
 	// `temperature` and `stream` are gone but model remains
