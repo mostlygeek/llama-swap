@@ -683,3 +683,69 @@ func TestProxyManager_FiltersStripParams(t *testing.T) {
 	// assert.Equal(t, "abc", response["y_param"])
 	// t.Logf("%v", response)
 }
+
+func TestProxyManager_MiddlewareWritesMetrics_NonStreaming(t *testing.T) {
+	config := AddDefaultGroupToConfig(Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]ModelConfig{
+			"model1": getTestSimpleResponderConfig("model1"),
+		},
+		LogLevel: "error",
+	})
+
+	proxy := New(config)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+
+	// Make a non-streaming request
+	reqBody := `{"model":"model1", "stream": false}`
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+	w := httptest.NewRecorder()
+
+	proxy.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Check that metrics were recorded
+	metrics := proxy.metricsMonitor.GetMetrics()
+	assert.NotEmpty(t, metrics, "metrics should be recorded for non-streaming request")
+
+	// Verify the last metric has the correct model
+	lastMetric := metrics[len(metrics)-1]
+	assert.Equal(t, "model1", lastMetric.Model)
+	assert.Greater(t, lastMetric.InputTokens, 0, "input tokens should be greater than 0")
+	assert.Greater(t, lastMetric.OutputTokens, 0, "output tokens should be greater than 0")
+	assert.Greater(t, lastMetric.TokensPerSecond, 0.0, "tokens per second should be greater than 0")
+	assert.Greater(t, lastMetric.DurationMs, 0, "duration should be greater than 0")
+}
+
+func TestProxyManager_MiddlewareWritesMetrics_Streaming(t *testing.T) {
+	config := AddDefaultGroupToConfig(Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]ModelConfig{
+			"model1": getTestSimpleResponderConfig("model1"),
+		},
+		LogLevel: "error",
+	})
+
+	proxy := New(config)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+
+	// Make a streaming request
+	reqBody := `{"model":"model1", "stream": true}`
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+	w := httptest.NewRecorder()
+
+	proxy.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Check that metrics were recorded
+	metrics := proxy.metricsMonitor.GetMetrics()
+	assert.NotEmpty(t, metrics, "metrics should be recorded for streaming request")
+
+	// Verify the last metric has the correct model
+	lastMetric := metrics[len(metrics)-1]
+	assert.Equal(t, "model1", lastMetric.Model)
+	assert.Greater(t, lastMetric.InputTokens, 0, "input tokens should be greater than 0")
+	assert.Greater(t, lastMetric.OutputTokens, 0, "output tokens should be greater than 0")
+	assert.Greater(t, lastMetric.TokensPerSecond, 0.0, "tokens per second should be greater than 0")
+	assert.Greater(t, lastMetric.DurationMs, 0, "duration should be greater than 0")
+}
