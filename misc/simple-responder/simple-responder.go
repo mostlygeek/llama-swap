@@ -35,25 +35,74 @@ func main() {
 
 	// Set up the handler function using the provided response message
 	r.POST("/v1/chat/completions", func(c *gin.Context) {
-		c.Header("Content-Type", "application/json")
-
-		// add a wait to simulate a slow query
-		if wait, err := time.ParseDuration(c.Query("wait")); err == nil {
-			time.Sleep(wait)
-		}
-
 		bodyBytes, _ := io.ReadAll(c.Request.Body)
 
-		c.JSON(http.StatusOK, gin.H{
-			"responseMessage":  *responseMessage,
-			"h_content_length": c.Request.Header.Get("Content-Length"),
-			"request_body":     string(bodyBytes),
-			"usage": gin.H{
-				"completion_tokens": 10,
-				"prompt_tokens":     25,
-				"total_tokens":      35,
-			},
-		})
+		// Check if streaming is requested
+		isStreaming := gjson.GetBytes(bodyBytes, "stream").Bool()
+
+		if isStreaming {
+			// Set headers for streaming
+			c.Header("Content-Type", "text/event-stream")
+			c.Header("Cache-Control", "no-cache")
+			c.Header("Connection", "keep-alive")
+			c.Header("Transfer-Encoding", "chunked")
+
+			// add a wait to simulate a slow query
+			if wait, err := time.ParseDuration(c.Query("wait")); err == nil {
+				time.Sleep(wait)
+			}
+
+			// Send 10 "asdf" tokens
+			for i := 0; i < 10; i++ {
+				data := gin.H{
+					"created": time.Now().Unix(),
+					"choices": []gin.H{
+						{
+							"index": 0,
+							"delta": gin.H{
+								"content": "asdf",
+							},
+							"finish_reason": nil,
+						},
+					},
+				}
+				c.SSEvent("message", data)
+				c.Writer.Flush()
+			}
+
+			// Send final data with usage info
+			finalData := gin.H{
+				"usage": gin.H{
+					"completion_tokens": 10,
+					"prompt_tokens":     25,
+					"total_tokens":      35,
+				},
+			}
+			c.SSEvent("message", finalData)
+			c.Writer.Flush()
+
+			// Send [DONE]
+			c.SSEvent("message", "[DONE]")
+			c.Writer.Flush()
+		} else {
+			c.Header("Content-Type", "application/json")
+
+			// add a wait to simulate a slow query
+			if wait, err := time.ParseDuration(c.Query("wait")); err == nil {
+				time.Sleep(wait)
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"responseMessage":  *responseMessage,
+				"h_content_length": c.Request.Header.Get("Content-Length"),
+				"request_body":     string(bodyBytes),
+				"usage": gin.H{
+					"completion_tokens": 10,
+					"prompt_tokens":     25,
+					"total_tokens":      35,
+				},
+			})
+		}
 	})
 
 	// for issue #62 to check model name strips profile slug

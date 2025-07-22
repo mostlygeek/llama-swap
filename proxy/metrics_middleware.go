@@ -92,8 +92,8 @@ func (rec *MetricsRecorder) processStreamingResponse(body []byte) {
 		}
 
 		// Check for SSE data prefix
-		if bytes.HasPrefix(line, []byte("data: ")) {
-			data := bytes.TrimSpace(line[6:])
+		if data, found := bytes.CutPrefix(line, []byte("data:")); found {
+			data = bytes.TrimSpace(data)
 			if len(data) == 0 {
 				continue
 			}
