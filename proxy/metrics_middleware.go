@@ -68,27 +68,21 @@ func (rec *MetricsRecorder) processBody(body []byte) {
 }
 
 func (rec *MetricsRecorder) parseAndRecordMetrics(jsonData gjson.Result) {
-
 	usage := jsonData.Get("usage")
 	if !usage.Exists() {
 		return
 	}
 
 	// default values
-	outputTokens := 0
-	inputTokens := 0
+	outputTokens := int(jsonData.Get("usage.completion_tokens").Int())
+	inputTokens := int(jsonData.Get("usage.prompt_tokens").Int())
 	tokensPerSecond := -1.0
-	durationMs := 0
+	durationMs := int(time.Since(rec.startTime).Milliseconds())
 
-	if timings := jsonData.Get("timings"); timings.Exists() { /* llama-server timing data which is more accurate */
-		outputTokens = int(jsonData.Get("timings.predicted_n").Int())
-		inputTokens = int(jsonData.Get("timings.prompt_n").Int())
+	// use llama-server's timing data for tok/sec and duration as it is more accurate
+	if timings := jsonData.Get("timings"); timings.Exists() {
 		tokensPerSecond = jsonData.Get("timings.predicted_per_second").Float()
 		durationMs = int(jsonData.Get("timings.prompt_ms").Float() + jsonData.Get("timings.predicted_ms").Float())
-	} else { /* openAI compatible usage data */
-		outputTokens = int(jsonData.Get("usage.completion_tokens").Int())
-		inputTokens = int(jsonData.Get("usage.prompt_tokens").Int())
-		durationMs = int(time.Since(rec.startTime).Milliseconds())
 	}
 
 	rec.metricsMonitor.addMetrics(TokenMetrics{
@@ -129,13 +123,7 @@ func (rec *MetricsRecorder) processStreamingResponse(body []byte) {
 		}
 
 		if gjson.ValidBytes(data) {
-			result := gjson.ParseBytes(data)
-
-			// finish after the first usage record is found
-			if result.Get("usage").Exists() {
-				rec.parseAndRecordMetrics(result)
-				return
-			}
+			rec.parseAndRecordMetrics(gjson.ParseBytes(body))
 		}
 	}
 }

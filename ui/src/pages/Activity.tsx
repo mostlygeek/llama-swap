@@ -51,7 +51,7 @@ const ActivityPage = () => {
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Model</th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Input Tokens</th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Output Tokens</th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Processing Speed</th>
+                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Generation Speed</th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Duration</th>
               </tr>
             </thead>
