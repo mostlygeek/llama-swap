@@ -160,7 +160,7 @@ func (pm *ProxyManager) setupGinEngine() {
 	pm.ginEngine.POST("/v1/completions", mm, pm.proxyOAIHandler)
 
 	// Support embeddings
-	pm.ginEngine.POST("/v1/embeddings", pm.proxyOAIHandler)
+	pm.ginEngine.POST("/v1/embeddings", mm, pm.proxyOAIHandler)
 	pm.ginEngine.POST("/v1/rerank", mm, pm.proxyOAIHandler)
 	pm.ginEngine.POST("/v1/reranking", mm, pm.proxyOAIHandler)
 	pm.ginEngine.POST("/rerank", mm, pm.proxyOAIHandler)
