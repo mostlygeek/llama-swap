@@ -27,10 +27,13 @@ export default function ModelsPage() {
   }, []);
 
   const [totalRequests, totalTokens, avgTokensPerSecond] = useMemo(() => {
-    const totalTokens = metrics.reduce((sum, m) => sum + m.input_tokens + m.output_tokens, 0);
-    const totalSeconds = metrics.reduce((sum, m) => sum + m.duration_ms / 1000, 0);
-    const avgTokensPerSecond = totalSeconds > 0 ? totalTokens / totalSeconds : 0;
-    return [metrics.length, totalTokens, avgTokensPerSecond.toFixed(2)];
+    const totalRequests = metrics.length;
+    if (totalRequests === 0) {
+      return [0, 0, 0];
+    }
+    const totalTokens = metrics.reduce((sum, m) => sum + m.output_tokens, 0);
+    const avgTokensPerSecond = (metrics.reduce((sum, m) => sum + m.tokens_per_second, 0) / totalRequests).toFixed(2);
+    return [totalRequests, totalTokens, avgTokensPerSecond];
   }, [metrics]);
 
   return (
