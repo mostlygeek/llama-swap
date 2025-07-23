@@ -708,7 +708,9 @@ func TestProxyManager_MiddlewareWritesMetrics_NonStreaming(t *testing.T) {
 
 	// Check that metrics were recorded
 	metrics := proxy.metricsMonitor.GetMetrics()
-	assert.NotEmpty(t, metrics, "metrics should be recorded for non-streaming request")
+	if !assert.NotEmpty(t, metrics, "metrics should be recorded for non-streaming request") {
+		return
+	}
 
 	// Verify the last metric has the correct model
 	lastMetric := metrics[len(metrics)-1]
@@ -741,7 +743,9 @@ func TestProxyManager_MiddlewareWritesMetrics_Streaming(t *testing.T) {
 
 	// Check that metrics were recorded
 	metrics := proxy.metricsMonitor.GetMetrics()
-	assert.NotEmpty(t, metrics, "metrics should be recorded for streaming request")
+	if !assert.NotEmpty(t, metrics, "metrics should be recorded for streaming request") {
+		return
+	}
 
 	// Verify the last metric has the correct model
 	lastMetric := metrics[len(metrics)-1]

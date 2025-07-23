@@ -78,6 +78,14 @@ func main() {
 					"prompt_tokens":     25,
 					"total_tokens":      35,
 				},
+				// add timings to simulate llama.cpp
+				"timings": gin.H{
+					"prompt_n":             25,
+					"prompt_ms":            13,
+					"predicted_n":          10,
+					"predicted_ms":         17,
+					"predicted_per_second": 10,
+				},
 			}
 			c.SSEvent("message", finalData)
 			c.Writer.Flush()
@@ -101,6 +109,13 @@ func main() {
 					"completion_tokens": 10,
 					"prompt_tokens":     25,
 					"total_tokens":      35,
+				},
+				"timings": gin.H{
+					"prompt_n":             25,
+					"prompt_ms":            13,
+					"predicted_n":          10,
+					"predicted_ms":         17,
+					"predicted_per_second": 10,
 				},
 			})
 		}
