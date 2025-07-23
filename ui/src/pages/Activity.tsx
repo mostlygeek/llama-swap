@@ -1,6 +1,18 @@
 import { useState, useEffect } from "react";
 import { useAPI } from "../contexts/APIProvider";
 
+const formatTimestamp = (timestamp: string): string => {
+  return new Date(timestamp).toLocaleString();
+};
+
+const formatSpeed = (speed: number): string => {
+  return speed < 0 ? "unknown" : speed.toFixed(2) + " t/s";
+};
+
+const formatDuration = (ms: number): string => {
+  return (ms / 1000).toFixed(2) + "s";
+};
+
 const ActivityPage = () => {
   const { metrics } = useAPI();
   const [error, setError] = useState<string | null>(null);
@@ -10,18 +22,6 @@ const ActivityPage = () => {
       setError(null);
     }
   }, [metrics]);
-
-  const formatTimestamp = (timestamp: string) => {
-    return new Date(timestamp).toLocaleString();
-  };
-
-  const formatSpeed = (speed: number) => {
-    return speed.toFixed(2) + " t/s";
-  };
-
-  const formatDuration = (ms: number) => {
-    return (ms / 1000).toFixed(2) + "s";
-  };
 
   if (error) {
     return (
@@ -51,7 +51,7 @@ const ActivityPage = () => {
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Model</th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Input Tokens</th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Output Tokens</th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Processing Speed</th>
+                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Generation Speed</th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Duration</th>
               </tr>
             </thead>
