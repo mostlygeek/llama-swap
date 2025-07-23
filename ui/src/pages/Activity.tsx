@@ -1,6 +1,18 @@
 import { useState, useEffect } from "react";
 import { useAPI } from "../contexts/APIProvider";
 
+const formatTimestamp = (timestamp: string): string => {
+  return new Date(timestamp).toLocaleString();
+};
+
+const formatSpeed = (speed: number): string => {
+  return speed < 0 ? "unknown" : speed.toFixed(2) + " t/s";
+};
+
+const formatDuration = (ms: number): string => {
+  return (ms / 1000).toFixed(2) + "s";
+};
+
 const ActivityPage = () => {
   const { metrics } = useAPI();
   const [error, setError] = useState<string | null>(null);
@@ -10,18 +22,6 @@ const ActivityPage = () => {
       setError(null);
     }
   }, [metrics]);
-
-  const formatTimestamp = (timestamp: string) => {
-    return new Date(timestamp).toLocaleString();
-  };
-
-  const formatSpeed = (speed: number) => {
-    return speed.toFixed(2) + " t/s";
-  };
-
-  const formatDuration = (ms: number) => {
-    return (ms / 1000).toFixed(2) + "s";
-  };
 
   if (error) {
     return (

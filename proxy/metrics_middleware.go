@@ -68,50 +68,73 @@ func (rec *MetricsRecorder) processBody(body []byte) {
 }
 
 func (rec *MetricsRecorder) parseAndRecordMetrics(jsonData gjson.Result) {
-	if !jsonData.Get("usage").Exists() {
+
+	usage := jsonData.Get("usage")
+	if !usage.Exists() {
 		return
 	}
 
-	outputTokens := int(jsonData.Get("usage.completion_tokens").Int())
-	inputTokens := int(jsonData.Get("usage.prompt_tokens").Int())
+	// default values
+	outputTokens := 0
+	inputTokens := 0
+	tokensPerSecond := -1.0
+	durationMs := 0
 
-	if outputTokens > 0 {
-		duration := time.Since(rec.startTime)
-		tokensPerSecond := float64(inputTokens+outputTokens) / duration.Seconds()
-
-		metrics := TokenMetrics{
-			Timestamp:       time.Now(),
-			Model:           rec.realModelName,
-			InputTokens:     inputTokens,
-			OutputTokens:    outputTokens,
-			TokensPerSecond: tokensPerSecond,
-			DurationMs:      int(duration.Milliseconds()),
-		}
-		rec.metricsMonitor.addMetrics(metrics)
+	if timings := jsonData.Get("timings"); timings.Exists() { /* llama-server timing data which is more accurate */
+		outputTokens = int(jsonData.Get("timings.predicted_n").Int())
+		inputTokens = int(jsonData.Get("timings.prompt_n").Int())
+		tokensPerSecond = jsonData.Get("timings.predicted_per_second").Float()
+		durationMs = int(jsonData.Get("timings.prompt_ms").Float() + jsonData.Get("timings.predicted_ms").Float())
+	} else { /* openAI compatible usage data */
+		outputTokens = int(jsonData.Get("usage.completion_tokens").Int())
+		inputTokens = int(jsonData.Get("usage.prompt_tokens").Int())
+		durationMs = int(time.Since(rec.startTime).Milliseconds())
 	}
+
+	rec.metricsMonitor.addMetrics(TokenMetrics{
+		Timestamp:       time.Now(),
+		Model:           rec.realModelName,
+		InputTokens:     inputTokens,
+		OutputTokens:    outputTokens,
+		TokensPerSecond: tokensPerSecond,
+		DurationMs:      durationMs,
+	})
 }
 
 func (rec *MetricsRecorder) processStreamingResponse(body []byte) {
+	// Iterate **backwards** through the lines looking for the data payload with
+	// usage data
 	lines := bytes.Split(body, []byte("\n"))
-	for _, line := range lines {
-		line = bytes.TrimSpace(line)
+
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := bytes.TrimSpace(lines[i])
 		if len(line) == 0 {
 			continue
 		}
 
-		// Check for SSE data prefix
-		if data, found := bytes.CutPrefix(line, []byte("data:")); found {
-			data = bytes.TrimSpace(data)
-			if len(data) == 0 {
-				continue
-			}
-			if bytes.Equal(data, []byte("[DONE]")) {
-				break
-			}
+		// SSE payload always follows "data:"
+		prefix := []byte("data:")
+		if !bytes.HasPrefix(line, prefix) {
+			continue
+		}
+		data := bytes.TrimSpace(line[len(prefix):])
 
-			// Parse JSON to look for usage data
-			if gjson.ValidBytes(data) {
-				rec.parseAndRecordMetrics(gjson.ParseBytes(data))
+		if len(data) == 0 {
+			continue
+		}
+
+		if bytes.Equal(data, []byte("[DONE]")) {
+			// [DONE] line itself contains nothing of interest.
+			continue
+		}
+
+		if gjson.ValidBytes(data) {
+			result := gjson.ParseBytes(data)
+
+			// finish after the first usage record is found
+			if result.Get("usage").Exists() {
+				rec.parseAndRecordMetrics(result)
+				return
 			}
 		}
 	}
