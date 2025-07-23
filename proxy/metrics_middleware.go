@@ -67,10 +67,10 @@ func (rec *MetricsRecorder) processBody(body []byte) {
 	}
 }
 
-func (rec *MetricsRecorder) parseAndRecordMetrics(jsonData gjson.Result) {
+func (rec *MetricsRecorder) parseAndRecordMetrics(jsonData gjson.Result) bool {
 	usage := jsonData.Get("usage")
 	if !usage.Exists() {
-		return
+		return false
 	}
 
 	// default values
@@ -93,6 +93,8 @@ func (rec *MetricsRecorder) parseAndRecordMetrics(jsonData gjson.Result) {
 		TokensPerSecond: tokensPerSecond,
 		DurationMs:      durationMs,
 	})
+
+	return true
 }
 
 func (rec *MetricsRecorder) processStreamingResponse(body []byte) {
@@ -123,7 +125,9 @@ func (rec *MetricsRecorder) processStreamingResponse(body []byte) {
 		}
 
 		if gjson.ValidBytes(data) {
-			rec.parseAndRecordMetrics(gjson.ParseBytes(body))
+			if rec.parseAndRecordMetrics(gjson.ParseBytes(data)) {
+				return // short circuit if a metric was recorded
+			}
 		}
 	}
 }
