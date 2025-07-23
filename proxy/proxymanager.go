@@ -162,6 +162,8 @@ func (pm *ProxyManager) setupGinEngine() {
 	// Support embeddings
 	pm.ginEngine.POST("/v1/embeddings", pm.proxyOAIHandler)
 	pm.ginEngine.POST("/v1/rerank", pm.proxyOAIHandler)
+	pm.ginEngine.POST("/v1/reranking", mm, pm.proxyOAIHandler)
+	pm.ginEngine.POST("/rerank", mm, pm.proxyOAIHandler)
 
 	// Support audio/speech endpoint
 	pm.ginEngine.POST("/v1/audio/speech", pm.proxyOAIHandler)
