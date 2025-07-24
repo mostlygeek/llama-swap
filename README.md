@@ -18,7 +18,7 @@ Written in golang, it is very easy to install (single binary with no dependencie
   - `v1/completions`
   - `v1/chat/completions`
   - `v1/embeddings`
-  - `v1/rerank`
+  - `v1/rerank`, `v1/reranking`, `rerank`
   - `v1/audio/speech` ([#36](https://github.com/mostlygeek/llama-swap/issues/36))
   - `v1/audio/transcriptions` ([docs](https://github.com/mostlygeek/llama-swap/issues/41#issuecomment-2722637867))
 - ✅ llama-swap custom API endpoints
