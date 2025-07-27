@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
@@ -367,9 +368,15 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 		return
 	}
 
-	realModelName := c.GetString("ls-real-model-name") // Should be set in MetricsMiddleware
-	if realModelName == "" {
-		pm.sendErrorResponse(c, http.StatusInternalServerError, "ls-real-model-name not set")
+	requestedModel := gjson.GetBytes(bodyBytes, "model").String()
+	if requestedModel == "" {
+		pm.sendErrorResponse(c, http.StatusBadRequest, "missing or invalid 'model' key")
+		return
+	}
+
+	realModelName, found := pm.config.RealModelName(requestedModel)
+	if !found {
+		pm.sendErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("could not find real modelID for %s", requestedModel))
 		return
 	}
 

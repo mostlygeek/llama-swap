@@ -32,7 +32,6 @@ func MetricsMiddleware(pm *ProxyManager) gin.HandlerFunc {
 			pm.sendErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("could not find real modelID for %s", requestedModel))
 			return
 		}
-		c.Set("ls-real-model-name", realModelName)
 
 		writer := &MetricsResponseWriter{
 			ResponseWriter: c.Writer,
