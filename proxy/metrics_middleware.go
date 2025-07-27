@@ -17,6 +17,7 @@ func MetricsMiddleware(pm *ProxyManager) gin.HandlerFunc {
 		bodyBytes, err := io.ReadAll(c.Request.Body)
 		if err != nil {
 			pm.sendErrorResponse(c, http.StatusBadRequest, "could not ready request body")
+			c.Abort()
 			return
 		}
 		c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
@@ -24,15 +25,16 @@ func MetricsMiddleware(pm *ProxyManager) gin.HandlerFunc {
 		requestedModel := gjson.GetBytes(bodyBytes, "model").String()
 		if requestedModel == "" {
 			pm.sendErrorResponse(c, http.StatusBadRequest, "missing or invalid 'model' key")
+			c.Abort()
 			return
 		}
 
 		realModelName, found := pm.config.RealModelName(requestedModel)
 		if !found {
 			pm.sendErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("could not find real modelID for %s", requestedModel))
+			c.Abort()
 			return
 		}
-		c.Set("ls-real-model-name", realModelName)
 
 		writer := &MetricsResponseWriter{
 			ResponseWriter: c.Writer,
