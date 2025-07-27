@@ -166,8 +166,8 @@ func (pm *ProxyManager) setupGinEngine() {
 	pm.ginEngine.POST("/rerank", mm, pm.proxyOAIHandler)
 
 	// Support audio/speech endpoint
-	pm.ginEngine.POST("/v1/audio/speech", pm.proxyOAIHandler)
-	pm.ginEngine.POST("/v1/audio/transcriptions", pm.proxyOAIPostFormHandler)
+	pm.ginEngine.POST("/v1/audio/speech", mm, pm.proxyOAIHandler)
+	pm.ginEngine.POST("/v1/audio/transcriptions", mm, pm.proxyOAIPostFormHandler)
 
 	pm.ginEngine.GET("/v1/models", pm.listModelsHandler)
 
