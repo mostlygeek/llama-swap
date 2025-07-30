@@ -27,6 +27,7 @@ Written in golang, it is very easy to install (single binary with no dependencie
   - `/upstream/:model_id` - direct access to upstream HTTP server ([demo](https://github.com/mostlygeek/llama-swap/pull/31))
   - `/unload` - manually unload running models ([#58](https://github.com/mostlygeek/llama-swap/issues/58))
   - `/running` - list currently running models ([#61](https://github.com/mostlygeek/llama-swap/issues/61))
+  - `/health` - just returns "OK"
 - ✅ Run multiple models at once with `Groups` ([#107](https://github.com/mostlygeek/llama-swap/issues/107))
 - ✅ Automatic unloading of models after timeout by setting a `ttl`
 - ✅ Use any local OpenAI compatible server (llama.cpp, vllm, tabbyAPI, etc)
@@ -74,10 +75,18 @@ llama-swap ships with a real time web interface to monitor logs and status of mo
 
 <img width="1786" height="1334" alt="image" src="https://github.com/user-attachments/assets/d6258cb9-1dad-40db-828f-2be860aec8fe" />
 
+## Installation
 
-## Docker Install ([download images](https://github.com/mostlygeek/llama-swap/pkgs/container/llama-swap))
+llama-swap can be installed in multiple ways
 
-Docker is the quickest way to try out llama-swap:
+1. Docker
+2. Homebrew (OSX and Linux)
+3. From release binaries
+4. From source
+
+### Docker Install ([download images](https://github.com/mostlygeek/llama-swap/pkgs/container/llama-swap))
+
+Docker images with llama-swap and llama-server are built nightly. 
 
 ```shell
 # use CPU inference comes with the example config above
@@ -99,7 +108,7 @@ $ curl -s http://localhost:9292/v1/chat/completions \
 ```
 
 <details>
-<summary>Docker images are built nightly for cuda, intel, vulcan, etc ...</summary>
+<summary>Docker images are built nightly with llama-server for cuda, intel, vulcan and musa.</summary>
 
 They include:
 
@@ -122,9 +131,9 @@ $ docker run -it --rm --runtime nvidia -p 9292:8080 \
 
 </details>
 
-## Homebrew Install (macOS/Linux)
+### Homebrew Install (macOS/Linux)
 
-For macOS & Linux users, `llama-swap` can be installed via [Homebrew](https://brew.sh):
+The latest release of `llama-swap` can be installed via [Homebrew](https://brew.sh). 
 
 ```shell
 # Set up tap and install formula 
@@ -136,9 +145,9 @@ llama-swap --config path/to/config.yaml --listen localhost:8080
 
 This will install the `llama-swap` binary and make it available in your path. See the [configuration documentation](https://github.com/mostlygeek/llama-swap/wiki/Configuration)
 
-## Bare metal Install ([download](https://github.com/mostlygeek/llama-swap/releases))
+### Pre-built Binaries ([download](https://github.com/mostlygeek/llama-swap/releases))
 
-Pre-built binaries are available for Linux, Mac, Windows and FreeBSD. These are automatically published and are likely a few hours ahead of the docker releases. The baremetal install works with any OpenAI compatible server, not just llama-server.
+Binaries are available for Linux, Mac, Windows and FreeBSD. These are automatically published and are likely a few hours ahead of the docker releases. The binary install works with any OpenAI compatible server, not just llama-server.
 
 1. Download a [release](https://github.com/mostlygeek/llama-swap/releases) appropriate for your OS and architecture.
 1. Create a configuration file, see the [configuration documentation](https://github.com/mostlygeek/llama-swap/wiki/Configuration).
