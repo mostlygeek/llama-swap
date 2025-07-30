@@ -191,6 +191,9 @@ func (pm *ProxyManager) setupGinEngine() {
 
 	pm.ginEngine.GET("/unload", pm.unloadAllModelsHandler)
 	pm.ginEngine.GET("/running", pm.listRunningProcessesHandler)
+	pm.ginEngine.GET("/health", func(c *gin.Context) {
+		c.String(http.StatusOK, "OK")
+	})
 
 	pm.ginEngine.GET("/favicon.ico", func(c *gin.Context) {
 		if data, err := reactStaticFS.ReadFile("ui_dist/favicon.ico"); err == nil {

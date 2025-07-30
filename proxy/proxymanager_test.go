@@ -755,3 +755,21 @@ func TestProxyManager_MiddlewareWritesMetrics_Streaming(t *testing.T) {
 	assert.Greater(t, lastMetric.TokensPerSecond, 0.0, "tokens per second should be greater than 0")
 	assert.Greater(t, lastMetric.DurationMs, 0, "duration should be greater than 0")
 }
+
+func TestProxyManager_HealthEndpoint(t *testing.T) {
+	config := AddDefaultGroupToConfig(Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]ModelConfig{
+			"model1": getTestSimpleResponderConfig("model1"),
+		},
+		LogLevel: "error",
+	})
+
+	proxy := New(config)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+	req := httptest.NewRequest("GET", "/health", nil)
+	rec := httptest.NewRecorder()
+	proxy.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "OK", rec.Body.String())
+}
