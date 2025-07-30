@@ -122,6 +122,20 @@ $ docker run -it --rm --runtime nvidia -p 9292:8080 \
 
 </details>
 
+## Homebrew Install (macOS/Linux)
+
+For macOS & Linux users, `llama-swap` can be installed via [Homebrew](https://brew.sh):
+
+```shell
+# Set up tap and install formula 
+brew tap mostlygeek/llama-swap
+brew install llama-swap
+# Run llama-swap
+llama-swap --config path/to/config.yaml --listen localhost:8080
+```
+
+This will install the `llama-swap` binary and make it available in your path. See the [configuration documentation](https://github.com/mostlygeek/llama-swap/wiki/Configuration)
+
 ## Bare metal Install ([download](https://github.com/mostlygeek/llama-swap/releases))
 
 Pre-built binaries are available for Linux, Mac, Windows and FreeBSD. These are automatically published and are likely a few hours ahead of the docker releases. The baremetal install works with any OpenAI compatible server, not just llama-server.
