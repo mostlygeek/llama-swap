@@ -3,6 +3,9 @@ on:
   release:
     types: [published]
 
+  # Allows manual triggering of the workflow
+  workflow_dispatch:
+
 jobs:
   trigger-tap-update:
     runs-on: ubuntu-latest
