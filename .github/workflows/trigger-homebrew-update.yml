@@ -1,0 +1,21 @@
+name: Trigger Homebrew Tap Update
+on:
+  release:
+    types: [published]
+
+jobs:
+  trigger-tap-update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Trigger tap repository update"
+        uses: peter-evans/repository-dispatch@v2
+        with:
+          token: ${{ secrets.TAP_REPO_PAT }}
+          repository: mostlygeek/homebrew-llama-swap
+          event-type: new-release
+          client-payload: |-
+            {
+              "release": {
+                  "tag_name": "${{ github.event.release.tag_name }}"
+              }
+            }
