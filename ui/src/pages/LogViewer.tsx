@@ -6,7 +6,7 @@ const LogViewer = () => {
   const { proxyLogs, upstreamLogs } = useAPI();
 
   return (
-    <div className="flex flex-col gap-5" style={{ height: "calc(100vh - 125px)" }}>
+    <div className="flex flex-col lg:flex-row gap-5" style={{ height: "calc(100vh - 125px)" }}>
       <LogPanel id="proxy" title="Proxy Logs" logData={proxyLogs} />
       <LogPanel id="upstream" title="Upstream Logs" logData={upstreamLogs} />
     </div>
