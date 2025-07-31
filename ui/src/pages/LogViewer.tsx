@@ -90,34 +90,36 @@ export const LogPanel = ({ id, title, logData, className }: LogPanelProps) => {
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           {/* Title - Always full width on mobile, normal on desktop */}
           <div className="w-full md:w-auto" onClick={() => setIsCollapsed(!isCollapsed)}>
-            <h3 className="m-0 text-lg">{title}</h3>
+            <h3 className="m-0 text-lg p-0">{title}</h3>
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
-            {/* Sizing Buttons - Stacks vertically on mobile */}
-            <div className="flex flex-wrap gap-2">
-              <button className="btn" onClick={toggleFontSize}>
-                font: {fontSize}
-              </button>
-              <button className="btn" onClick={() => setTextWrap((prev) => !prev)}>
-                {wrapText ? "wrap" : "wrap off"}
-              </button>
-            </div>
+          {!isCollapsed && (
+            <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
+              {/* Sizing Buttons - Stacks vertically on mobile */}
+              <div className="flex flex-wrap gap-2">
+                <button className="btn" onClick={toggleFontSize}>
+                  font: {fontSize}
+                </button>
+                <button className="btn" onClick={() => setTextWrap((prev) => !prev)}>
+                  {wrapText ? "wrap" : "wrap off"}
+                </button>
+              </div>
 
-            {/* Filtering Options - Full width on mobile, normal on desktop */}
-            <div className="flex flex-1 min-w-0 gap-2">
-              <input
-                type="text"
-                className="flex-1 min-w-[120px] text-sm border p-2 rounded"
-                placeholder="Filter logs..."
-                value={filterRegex}
-                onChange={(e) => setFilterRegex(e.target.value)}
-              />
-              <button className="btn" onClick={() => setFilterRegex("")}>
-                Clear
-              </button>
+              {/* Filtering Options - Full width on mobile, normal on desktop */}
+              <div className="flex flex-1 min-w-0 gap-2">
+                <input
+                  type="text"
+                  className="flex-1 min-w-[120px] text-sm border p-2 rounded"
+                  placeholder="Filter logs..."
+                  value={filterRegex}
+                  onChange={(e) => setFilterRegex(e.target.value)}
+                />
+                <button className="btn" onClick={() => setFilterRegex("")}>
+                  Clear
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
 
