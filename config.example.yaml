@@ -17,7 +17,7 @@ logLevel: info
 
 # logHTTPRequests: enable logging of all HTTP requests
 # - optional, default: false
-# - when true, logs all incoming HTTP requests with method, path, and headers
+# - when true, logs all incoming HTTP request and response bodies
 logHTTPRequests: false
 
 # metricsMaxInMemory: maximum number of metrics to keep in memory
