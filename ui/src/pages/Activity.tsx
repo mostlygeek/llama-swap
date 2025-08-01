@@ -17,12 +17,24 @@ const ActivityPage = () => {
   const { metrics } = useAPI();
   const [error, setError] = useState<string | null>(null);
   const [expandedMetrics, setExpandedMetrics] = useState<Set<string>>(new Set());
+  const [parseJson, setParseJson] = useState<boolean>(false);
 
   useEffect(() => {
     if (metrics.length > 0) {
       setError(null);
     }
   }, [metrics]);
+
+  const beautifyJson = (jsonString?: string): string => {
+    if (typeof jsonString !== "string")
+      return "";
+    try {
+      const parsed = JSON.parse(jsonString);
+      return JSON.stringify(parsed, null, 2);
+    } catch (e) {
+      return jsonString;
+    }
+  };
 
   if (error) {
     return (
@@ -78,11 +90,11 @@ const ActivityPage = () => {
               <div className="mt-2">
                 <h4 className="font-bold text-sm mb-2">Request</h4>
                 <pre className="bg-white p-3 rounded border text-sm whitespace-pre-wrap break-all max-h-40 overflow-y-auto">
-                  <code>{metric.request_body}</code>
+                  <code>{parseJson ? beautifyJson(metric.request_body) : metric.request_body}</code>
                 </pre>
                 <h4 className="font-bold text-sm mt-4 mb-2">Response</h4>
                 <pre className="bg-white p-3 rounded border text-sm whitespace-pre-wrap break-all max-h-40 overflow-y-auto">
-                  <code>{metric.response_body}</code>
+                  <code>{parseJson ? beautifyJson(metric.response_body) : metric.response_body}</code>
                 </pre>
               </div>
             </td>
@@ -95,6 +107,18 @@ const ActivityPage = () => {
   return (
     <div className="p-6">
       <h1 className="text-2xl font-bold mb-4">Activity</h1>
+
+      <div>
+        <input
+          type="checkbox"
+          id="parse-json"
+          checked={parseJson}
+          onChange={(e) => setParseJson(e.target.checked)}
+        />
+        <label htmlFor="parse-json">
+          Parse request data as JSON and beautify
+        </label>
+      </div>
 
       {metrics.length === 0 ? (
         <div className="text-center py-8">
