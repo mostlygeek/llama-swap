@@ -102,8 +102,8 @@ func (rec *MetricsRecorder) parseAndRecordMetrics(responseBody []byte) bool {
 		DurationMs:      durationMs,
 	}
 	if rec.metricsMonitor.logHTTPRequests {
-		metrics.RequestBody = rec.requestBody
-		metrics.ResponseBody = responseBody
+		metrics.RequestBody = string(rec.requestBody)
+		metrics.ResponseBody = string(responseBody)
 	}
 	rec.metricsMonitor.addMetrics(metrics)
 

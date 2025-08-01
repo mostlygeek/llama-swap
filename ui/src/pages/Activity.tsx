@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, Fragment } from "react";
 import { useAPI } from "../contexts/APIProvider";
 
 const formatTimestamp = (timestamp: string): string => {
@@ -34,6 +34,50 @@ const ActivityPage = () => {
     );
   }
 
+  const renderMetricRow = (metric: typeof metrics[0], index: number) => {
+    const [isExpanded, setIsExpanded] = useState(false);
+    const hasRequestData = metric.request_body && metric.response_body;
+
+    return (
+      <Fragment key={`${metric.id}-${index}`}>
+        <tr>
+          <td className="px-6 py-4 whitespace-nowrap text-sm">{formatTimestamp(metric.timestamp)}</td>
+          <td className="px-6 py-4 whitespace-nowrap text-sm">{metric.model}</td>
+          <td className="px-6 py-4 whitespace-nowrap text-sm">{metric.input_tokens.toLocaleString()}</td>
+          <td className="px-6 py-4 whitespace-nowrap text-sm">{metric.output_tokens.toLocaleString()}</td>
+          <td className="px-6 py-4 whitespace-nowrap text-sm">{formatSpeed(metric.tokens_per_second)}</td>
+          <td className="px-6 py-4 whitespace-nowrap text-sm">{formatDuration(metric.duration_ms)}</td>
+          {hasRequestData && (
+            <td className="px-6 py-4 whitespace-nowrap text-sm">
+              <button
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+              >
+                {isExpanded ? 'Hide' : 'Show'}
+              </button>
+            </td>
+          )}
+        </tr>
+        {isExpanded && hasRequestData && (
+          <tr>
+            <td colSpan={7} className="px-6 py-4 bg-gray-50 border-t">
+              <div className="mt-2">
+                <h4 className="font-medium text-sm mb-2">Request</h4>
+                <pre className="bg-white p-3 rounded border text-sm overflow-auto max-h-40">
+                  <code>{metric.request_body}</code>
+                </pre>
+                <h4 className="font-medium text-sm mt-4 mb-2">Response</h4>
+                <pre className="bg-white p-3 rounded border text-sm overflow-auto max-h-40">
+                  <code>{metric.response_body}</code>
+                </pre>
+              </div>
+            </td>
+          </tr>
+        )}
+      </Fragment>
+    );
+  };
+
   return (
     <div className="p-6">
       <h1 className="text-2xl font-bold mb-4">Activity</h1>
@@ -53,19 +97,11 @@ const ActivityPage = () => {
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Output Tokens</th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Generation Speed</th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Duration</th>
+                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Request data</th>
               </tr>
             </thead>
             <tbody className="divide-y">
-              {metrics.map((metric, index) => (
-                <tr key={`${metric.id}-${index}`}>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">{formatTimestamp(metric.timestamp)}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">{metric.model}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">{metric.input_tokens.toLocaleString()}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">{metric.output_tokens.toLocaleString()}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">{formatSpeed(metric.tokens_per_second)}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">{formatDuration(metric.duration_ms)}</td>
-                </tr>
-              ))}
+              {metrics.map(renderMetricRow)}
             </tbody>
           </table>
         </div>

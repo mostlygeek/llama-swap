@@ -17,8 +17,8 @@ type TokenMetrics struct {
 	OutputTokens    int       `json:"output_tokens"`
 	TokensPerSecond float64   `json:"tokens_per_second"`
 	DurationMs      int       `json:"duration_ms"`
-	RequestBody     []byte    `json:"request_body,omitempty"`
-	ResponseBody    []byte    `json:"response_body,omitempty"`
+	RequestBody     string    `json:"request_body,omitempty"`
+	ResponseBody    string    `json:"response_body,omitempty"`
 }
 
 // TokenMetricsEvent represents a token metrics event
