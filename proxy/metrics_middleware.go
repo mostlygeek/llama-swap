@@ -36,14 +36,18 @@ func MetricsMiddleware(pm *ProxyManager) gin.HandlerFunc {
 			return
 		}
 
+		metricsRecorder := &MetricsRecorder{
+			metricsMonitor: pm.metricsMonitor,
+			realModelName:  realModelName,
+			isStreaming:    gjson.GetBytes(bodyBytes, "stream").Bool(),
+			startTime:      time.Now(),
+		}
+		if pm.metricsMonitor.logHTTPRequests {
+			metricsRecorder.requestBody = bodyBytes
+		}
 		writer := &MetricsResponseWriter{
-			ResponseWriter: c.Writer,
-			metricsRecorder: &MetricsRecorder{
-				metricsMonitor: pm.metricsMonitor,
-				realModelName:  realModelName,
-				isStreaming:    gjson.GetBytes(bodyBytes, "stream").Bool(),
-				startTime:      time.Now(),
-			},
+			ResponseWriter:  c.Writer,
+			metricsRecorder: metricsRecorder,
 		}
 		c.Writer = writer
 		c.Next()
@@ -58,6 +62,7 @@ type MetricsRecorder struct {
 	realModelName  string
 	isStreaming    bool
 	startTime      time.Time
+	requestBody    []byte
 }
 
 // processBody handles response processing after request completes
@@ -69,7 +74,8 @@ func (rec *MetricsRecorder) processBody(body []byte) {
 	}
 }
 
-func (rec *MetricsRecorder) parseAndRecordMetrics(jsonData gjson.Result) bool {
+func (rec *MetricsRecorder) parseAndRecordMetrics(responseBody []byte) bool {
+	jsonData := gjson.ParseBytes(responseBody)
 	usage := jsonData.Get("usage")
 	if !usage.Exists() {
 		return false
@@ -87,14 +93,19 @@ func (rec *MetricsRecorder) parseAndRecordMetrics(jsonData gjson.Result) bool {
 		durationMs = int(jsonData.Get("timings.prompt_ms").Float() + jsonData.Get("timings.predicted_ms").Float())
 	}
 
-	rec.metricsMonitor.addMetrics(TokenMetrics{
+	metrics := TokenMetrics{
 		Timestamp:       time.Now(),
 		Model:           rec.realModelName,
 		InputTokens:     inputTokens,
 		OutputTokens:    outputTokens,
 		TokensPerSecond: tokensPerSecond,
 		DurationMs:      durationMs,
-	})
+	}
+	if rec.metricsMonitor.logHTTPRequests {
+		metrics.RequestBody = rec.requestBody
+		metrics.ResponseBody = responseBody
+	}
+	rec.metricsMonitor.addMetrics(metrics)
 
 	return true
 }
@@ -126,10 +137,8 @@ func (rec *MetricsRecorder) processStreamingResponse(body []byte) {
 			continue
 		}
 
-		if gjson.ValidBytes(data) {
-			if rec.parseAndRecordMetrics(gjson.ParseBytes(data)) {
-				return // short circuit if a metric was recorded
-			}
+		if gjson.ValidBytes(data) && rec.parseAndRecordMetrics(data) {
+			return // short circuit if a metric was recorded
 		}
 	}
 }
@@ -141,7 +150,7 @@ func (rec *MetricsRecorder) processNonStreamingResponse(body []byte) {
 
 	// Parse JSON to extract usage information
 	if gjson.ValidBytes(body) {
-		rec.parseAndRecordMetrics(gjson.ParseBytes(body))
+		rec.parseAndRecordMetrics(body)
 	}
 }
 

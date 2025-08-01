@@ -17,6 +17,8 @@ type TokenMetrics struct {
 	OutputTokens    int       `json:"output_tokens"`
 	TokensPerSecond float64   `json:"tokens_per_second"`
 	DurationMs      int       `json:"duration_ms"`
+	RequestBody     []byte    `json:"request_body,omitempty"`
+	ResponseBody    []byte    `json:"response_body,omitempty"`
 }
 
 // TokenMetricsEvent represents a token metrics event
@@ -30,10 +32,11 @@ func (e TokenMetricsEvent) Type() uint32 {
 
 // MetricsMonitor parses llama-server output for token statistics
 type MetricsMonitor struct {
-	mu         sync.RWMutex
-	metrics    []TokenMetrics
-	maxMetrics int
-	nextID     int
+	mu              sync.RWMutex
+	metrics         []TokenMetrics
+	maxMetrics      int
+	nextID          int
+	logHTTPRequests bool
 }
 
 func NewMetricsMonitor(config *Config) *MetricsMonitor {
@@ -43,13 +46,15 @@ func NewMetricsMonitor(config *Config) *MetricsMonitor {
 	}
 
 	mp := &MetricsMonitor{
-		maxMetrics: maxMetrics,
+		maxMetrics:      maxMetrics,
+		logHTTPRequests: config.LogHTTPRequests,
 	}
 
 	return mp
 }
 
 // addMetrics adds a new metric to the collection and publishes an event
+// If logHTTPRequests is enabled, it records the request and response bodies
 func (mp *MetricsMonitor) addMetrics(metric TokenMetrics) {
 	mp.mu.Lock()
 	defer mp.mu.Unlock()
