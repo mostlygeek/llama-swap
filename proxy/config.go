@@ -141,6 +141,7 @@ func (c *GroupConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 type Config struct {
 	HealthCheckTimeout int                    `yaml:"healthCheckTimeout"`
 	LogRequests        bool                   `yaml:"logRequests"`
+	LogHTTPRequests    bool                   `yaml:"logHTTPRequests"`
 	LogLevel           string                 `yaml:"logLevel"`
 	MetricsMaxInMemory int                    `yaml:"metricsMaxInMemory"`
 	Models             map[string]ModelConfig `yaml:"models"` /* key is model ID */
@@ -193,6 +194,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	// default configuration values
 	config := Config{
 		HealthCheckTimeout: 120,
+		LogHTTPRequests:    false,
 		StartPort:          5800,
 		LogLevel:           "info",
 		MetricsMaxInMemory: 1000,

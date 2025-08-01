@@ -15,6 +15,11 @@ healthCheckTimeout: 500
 # - Valid log levels: debug, info, warn, error
 logLevel: info
 
+# logHTTPRequests: enable logging of all HTTP requests
+# - optional, default: false
+# - when true, logs all incoming HTTP requests with method, path, and headers
+logHTTPRequests: false
+
 # metricsMaxInMemory: maximum number of metrics to keep in memory
 # - optional, default: 1000
 # - controls how many metrics are stored in memory before older ones are discarded
