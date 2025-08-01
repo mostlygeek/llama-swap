@@ -62,12 +62,12 @@ const ActivityPage = () => {
           <tr>
             <td colSpan={7} className="px-6 py-4 bg-gray-50 border-t">
               <div className="mt-2">
-                <h4 className="font-medium text-sm mb-2">Request</h4>
-                <pre className="bg-white p-3 rounded border text-sm overflow-auto max-h-40">
+                <h4 className="font-bold text-sm mb-2">Request</h4>
+                <pre className="bg-white p-3 rounded border text-sm whitespace-pre-wrap break-all max-h-40 overflow-y-auto">
                   <code>{metric.request_body}</code>
                 </pre>
-                <h4 className="font-medium text-sm mt-4 mb-2">Response</h4>
-                <pre className="bg-white p-3 rounded border text-sm overflow-auto max-h-40">
+                <h4 className="font-bold text-sm mt-4 mb-2">Response</h4>
+                <pre className="bg-white p-3 rounded border text-sm whitespace-pre-wrap break-all max-h-40 overflow-y-auto">
                   <code>{metric.response_body}</code>
                 </pre>
               </div>
