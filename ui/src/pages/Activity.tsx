@@ -16,6 +16,7 @@ const formatDuration = (ms: number): string => {
 const ActivityPage = () => {
   const { metrics } = useAPI();
   const [error, setError] = useState<string | null>(null);
+  const [expandedMetrics, setExpandedMetrics] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (metrics.length > 0) {
@@ -34,12 +35,25 @@ const ActivityPage = () => {
     );
   }
 
+  const toggleExpanded = (id: string) => {
+    setExpandedMetrics(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  };
+
   const renderMetricRow = (metric: typeof metrics[0], index: number) => {
-    const [isExpanded, setIsExpanded] = useState(false);
+    const key = `${metric.id}-${index}`;
+    const isExpanded = expandedMetrics.has(key);
     const hasRequestData = metric.request_body && metric.response_body;
 
     return (
-      <Fragment key={`${metric.id}-${index}`}>
+      <Fragment key={key}>
         <tr>
           <td className="px-6 py-4 whitespace-nowrap text-sm">{formatTimestamp(metric.timestamp)}</td>
           <td className="px-6 py-4 whitespace-nowrap text-sm">{metric.model}</td>
@@ -50,7 +64,7 @@ const ActivityPage = () => {
           {hasRequestData && (
             <td className="px-6 py-4 whitespace-nowrap text-sm">
               <button
-                onClick={() => setIsExpanded(!isExpanded)}
+                onClick={() => toggleExpanded(key)}
                 className="text-blue-600 hover:text-blue-800 text-sm font-medium"
               >
                 {isExpanded ? 'Hide' : 'Show'}
