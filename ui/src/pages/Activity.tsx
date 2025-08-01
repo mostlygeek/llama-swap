@@ -108,14 +108,14 @@ const ActivityPage = () => {
     <div className="p-6">
       <h1 className="text-2xl font-bold mb-4">Activity</h1>
 
-      <div>
+      <div className="mb-4">
         <input
           type="checkbox"
           id="parse-json"
           checked={parseJson}
           onChange={(e) => setParseJson(e.target.checked)}
         />
-        <label htmlFor="parse-json">
+        <label htmlFor="parse-json" className="ml-2">
           Parse request data as JSON and beautify
         </label>
       </div>
