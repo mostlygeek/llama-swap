@@ -161,7 +161,7 @@ Binaries are available for Linux, Mac, Windows and FreeBSD. These are automatica
 ### Building from source
 
 1. Build requires golang and nodejs for the user interface.
-1. `git clone git@github.com:mostlygeek/llama-swap.git`
+1. `git clone https://github.com/mostlygeek/llama-swap.git`
 1. `make clean all`
 1. Binaries will be in `build/` subdirectory
 
