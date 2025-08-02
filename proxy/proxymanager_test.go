@@ -773,3 +773,43 @@ func TestProxyManager_HealthEndpoint(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "OK", rec.Body.String())
 }
+
+func TestProxyManager_RequestResponseBodyIsRecorded(t *testing.T) {
+	// Create config with logHTTPRequests enabled
+	config := AddDefaultGroupToConfig(Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]ModelConfig{
+			"model1": getTestSimpleResponderConfig("model1"),
+		},
+		LogLevel:           "error",
+		LogHTTPRequests:    true,
+		MetricsMaxInMemory: 100,
+	})
+
+	proxy := New(config)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+
+	// Make a request
+	reqBody := `{"model":"model1", "prompt": "test prompt"}`
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+	w := httptest.NewRecorder()
+
+	proxy.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Check that metrics were recorded
+	metrics := proxy.metricsMonitor.GetMetrics()
+	if !assert.NotEmpty(t, metrics, "metrics should be recorded") {
+		return
+	}
+
+	// Verify the last metric has request and response bodies
+	lastMetric := metrics[len(metrics)-1]
+	assert.NotEmpty(t, lastMetric.RequestBody, "request body should be recorded when logHTTPRequests is true")
+	assert.NotEmpty(t, lastMetric.ResponseBody, "response body should be recorded when logHTTPRequests is true")
+
+	// Verify the content matches what we sent and received
+	assert.Contains(t, lastMetric.RequestBody, "model1", "request body should contain the model name")
+	assert.Contains(t, lastMetric.RequestBody, "test prompt", "request body should contain the prompt")
+	assert.Contains(t, lastMetric.ResponseBody, "model1", "response body should contain the model name")
+}
