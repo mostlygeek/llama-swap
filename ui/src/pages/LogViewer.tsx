@@ -1,15 +1,38 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useAPI } from "../contexts/APIProvider";
 import { usePersistentState } from "../hooks/usePersistentState";
+import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import {
+  RiTextWrap,
+  RiAlignJustify,
+  RiFontSize,
+  RiMenuSearchLine,
+  RiMenuSearchFill,
+  RiCloseCircleFill,
+} from "react-icons/ri";
+import { useTheme } from "../contexts/ThemeProvider";
 
 const LogViewer = () => {
   const { proxyLogs, upstreamLogs } = useAPI();
+  const { isNarrow } = useTheme();
+  const direction = isNarrow ? "vertical" : "horizontal";
 
   return (
-    <div className="flex flex-col lg:flex-row gap-5" style={{ height: "calc(100vh - 125px)" }}>
-      <LogPanel id="proxy" title="Proxy Logs" logData={proxyLogs} />
-      <LogPanel id="upstream" title="Upstream Logs" logData={upstreamLogs} />
-    </div>
+    <PanelGroup direction={direction} className="gap-4" autoSaveId={`logviewer-panel-group-${direction}`}>
+      <Panel id="proxy" defaultSize={50} minSize={5} maxSize={100} collapsible={true}>
+        <LogPanel id="proxy" title="Proxy Logs" logData={proxyLogs} />
+      </Panel>
+      <PanelResizeHandle
+        className={
+          direction === "horizontal"
+            ? "w-2 h-full bg-border hover:bg-primary transition-colors"
+            : "w-full h-2 bg-border hover:bg-primary transition-colors"
+        }
+      />
+      <Panel id="upstream" defaultSize={50} minSize={5} maxSize={100} collapsible={true}>
+        <LogPanel id="upstream" title="Upstream Logs" logData={upstreamLogs} />
+      </Panel>
+    </PanelGroup>
   );
 };
 
@@ -19,15 +42,14 @@ interface LogPanelProps {
   logData: string;
   className?: string;
 }
-
 export const LogPanel = ({ id, title, logData, className }: LogPanelProps) => {
-  const [isCollapsed, setIsCollapsed] = usePersistentState(`logPanel-${id}-isCollapsed`, false);
   const [filterRegex, setFilterRegex] = useState("");
   const [fontSize, setFontSize] = usePersistentState<"xxs" | "xs" | "small" | "normal">(
     `logPanel-${id}-fontSize`,
     "normal"
   );
   const [wrapText, setTextWrap] = usePersistentState(`logPanel-${id}-wrapText`, false);
+  const [showFilter, setShowFilter] = usePersistentState(`logPanel-${id}-showFilter`, false);
 
   const textWrapClass = useMemo(() => {
     return wrapText ? "whitespace-pre-wrap" : "whitespace-pre";
@@ -81,58 +103,47 @@ export const LogPanel = ({ id, title, logData, className }: LogPanelProps) => {
   }, [filteredLogs]);
 
   return (
-    <div
-      className={`bg-surface border border-border rounded-lg overflow-hidden flex flex-col ${
-        !isCollapsed && "h-full"
-      } ${className || ""}`}
-    >
+    <div className="bg-surface border border-border rounded-lg overflow-hidden flex flex-col h-full">
       <div className="p-4 border-b border-border bg-secondary">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          {/* Title - Always full width on mobile, normal on desktop */}
-          <div className="w-full md:w-auto" onClick={() => setIsCollapsed(!isCollapsed)}>
-            <h3 className="m-0 text-lg p-0">{title}</h3>
+        <div className="flex items-center justify-between">
+          <h3 className="m-0 text-lg p-0">{title}</h3>
+
+          <div className="flex gap-2 items-center">
+            <button className="btn" onClick={toggleFontSize}>
+              <RiFontSize />
+            </button>
+            <button className="btn" onClick={() => setTextWrap((prev) => !prev)}>
+              {wrapText ? <RiTextWrap /> : <RiAlignJustify />}
+            </button>
+            <button className="btn" onClick={() => setShowFilter((prev) => !prev)}>
+              {showFilter ? <RiMenuSearchFill /> : <RiMenuSearchLine />}
+            </button>
           </div>
+        </div>
 
-          {!isCollapsed && (
-            <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
-              {/* Sizing Buttons - Stacks vertically on mobile */}
-              <div className="flex flex-wrap gap-2">
-                <button className="btn" onClick={toggleFontSize}>
-                  font: {fontSize}
-                </button>
-                <button className="btn" onClick={() => setTextWrap((prev) => !prev)}>
-                  {wrapText ? "wrap" : "wrap off"}
-                </button>
-              </div>
-
-              {/* Filtering Options - Full width on mobile, normal on desktop */}
-              <div className="flex flex-1 min-w-0 gap-2">
-                <input
-                  type="text"
-                  className="flex-1 min-w-[120px] text-sm border p-2 rounded"
-                  placeholder="Filter logs..."
-                  value={filterRegex}
-                  onChange={(e) => setFilterRegex(e.target.value)}
-                />
-                <button className="btn" onClick={() => setFilterRegex("")}>
-                  Clear
-                </button>
-              </div>
+        {/* Filtering Options - Full width on mobile, normal on desktop */}
+        {showFilter && (
+          <div className="mt-2 w-full">
+            <div className="flex gap-2 items-center w-full">
+              <input
+                type="text"
+                className="w-full text-sm border p-2 rounded"
+                placeholder="Filter logs..."
+                value={filterRegex}
+                onChange={(e) => setFilterRegex(e.target.value)}
+              />
+              <button className="pl-2" onClick={() => setFilterRegex("")}>
+                <RiCloseCircleFill size="24" />
+              </button>
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
-
-      {!isCollapsed && (
-        <div className="flex-1 bg-background font-mono text-sm p-3 overflow-hidden">
-          <pre
-            ref={preTagRef}
-            className={`h-full p-4 overflow-y-auto whitespace-pre min-h-0 ${textWrapClass} ${fontSizeClass}`}
-          >
-            {filteredLogs}
-          </pre>
-        </div>
-      )}
+      <div className="bg-background font-mono text-sm flex-1 overflow-hidden">
+        <pre ref={preTagRef} className={`${textWrapClass} ${fontSizeClass} h-full overflow-auto p-4`}>
+          {filteredLogs}
+        </pre>
+      </div>
     </div>
   );
 };
