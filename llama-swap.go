@@ -132,6 +132,11 @@ func main() {
 						event.Emit(proxy.ConfigFileChangedEvent{
 							ReloadingState: proxy.ReloadingStateStart,
 						})
+					} else if changeEvent.Name == filepath.Join(configDir, "..data") && changeEvent.Has(fsnotify.Create) {
+						// the change for k8s configmap 
+						event.Emit(proxy.ConfigFileChangedEvent{
+							ReloadingState: proxy.ReloadingStateStart,
+						})
 					}
 
 				case err := <-watcher.Errors:
