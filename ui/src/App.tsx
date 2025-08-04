@@ -7,8 +7,7 @@ import ActivityPage from "./pages/Activity";
 import { RiSunFill, RiMoonFill } from "react-icons/ri";
 
 function App() {
-  const theme = useTheme();
-  const { isNarrow } = useTheme();
+  const { isNarrow, toggleTheme, isDarkMode } = useTheme();
 
   return (
     <Router basename="/ui/">
@@ -29,8 +28,8 @@ function App() {
                 <NavLink to="/activity" className={({ isActive }) => (isActive ? "navlink active" : "navlink")}>
                   Activity
                 </NavLink>
-                <button className="" onClick={theme.toggleTheme}>
-                  {theme.isDarkMode ? <RiMoonFill /> : <RiSunFill />}
+                <button className="" onClick={toggleTheme}>
+                  {isDarkMode ? <RiMoonFill /> : <RiSunFill />}
                 </button>
               </div>
             </div>

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, type ReactNode, useMemo } from "react";
+import { createContext, useContext, useEffect, type ReactNode, useMemo, useState } from "react";
 import { usePersistentState } from "../hooks/usePersistentState";
 
 type ScreenWidth = "xs" | "sm" | "md" | "lg" | "xl" | "2xl";
@@ -17,7 +17,7 @@ type ThemeProviderProps = {
 
 export function ThemeProvider({ children }: ThemeProviderProps) {
   const [isDarkMode, setIsDarkMode] = usePersistentState<boolean>("theme", false);
-  const [screenWidth, setScreenWidth] = usePersistentState<ScreenWidth>("screenWidth", "md"); // Default to md
+  const [screenWidth, setScreenWidth] = useState<ScreenWidth>("md"); // Default to md
 
   // matches tailwind classes
   // https://tailwindcss.com/docs/responsive-design

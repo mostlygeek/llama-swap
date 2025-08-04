@@ -26,7 +26,7 @@ export default function ModelsPage() {
       />
       <Panel collapsible={true} defaultSize={50} minSize={0}>
         <div className="flex flex-col h-full space-y-4">
-          {direction == "horizontal" && <StatsPanel />}
+          {direction === "horizontal" && <StatsPanel />}
           <div className="flex-1 min-h-0">
             <LogPanel id="modelsupstream" title="Upstream Logs" logData={upstreamLogs} />
           </div>
@@ -92,7 +92,7 @@ function ModelsPanel() {
                   <a href={`/upstream/${model.id}/`} className={`underline`} target="_blank">
                     {model.name !== "" ? model.name : model.id}
                   </a>
-                  {model.description != "" && (
+                  {model.description !== "" && (
                     <p className={model.unlisted ? "text-opacity-70" : ""}>
                       <em>{model.description}</em>
                     </p>
