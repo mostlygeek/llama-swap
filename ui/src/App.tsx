@@ -4,6 +4,7 @@ import { APIProvider } from "./contexts/APIProvider";
 import LogViewerPage from "./pages/LogViewer";
 import ModelPage from "./pages/Models";
 import ActivityPage from "./pages/Activity";
+import { RiSunFill, RiMoonFill } from "react-icons/ri";
 
 function App() {
   const theme = useTheme();
@@ -28,8 +29,8 @@ function App() {
                 <NavLink to="/activity" className={({ isActive }) => (isActive ? "navlink active" : "navlink")}>
                   Activity
                 </NavLink>
-                <button className="btn btn--sm" onClick={theme.toggleTheme}>
-                  {theme.isDarkMode ? "🌙" : "☀️"}
+                <button className="" onClick={theme.toggleTheme}>
+                  {theme.isDarkMode ? <RiMoonFill /> : <RiSunFill />}
                 </button>
               </div>
             </div>
