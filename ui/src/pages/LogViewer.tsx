@@ -18,15 +18,15 @@ const LogViewer = () => {
   const direction = isNarrow ? "vertical" : "horizontal";
 
   return (
-    <PanelGroup direction={direction} className="gap-4" autoSaveId={`logviewer-panel-group-${direction}`}>
+    <PanelGroup direction={direction} className="gap-2" autoSaveId={`logviewer-panel-group-${direction}`}>
       <Panel id="proxy" defaultSize={50} minSize={5} maxSize={100} collapsible={true}>
         <LogPanel id="proxy" title="Proxy Logs" logData={proxyLogs} />
       </Panel>
       <PanelResizeHandle
         className={
           direction === "horizontal"
-            ? "w-2 h-full bg-border hover:bg-primary transition-colors"
-            : "w-full h-2 bg-border hover:bg-primary transition-colors"
+            ? "w-2 h-full bg-primary hover:bg-success transition-colors rounded"
+            : "w-full h-2 bg-primary hover:bg-success transition-colors rounded"
         }
       />
       <Panel id="upstream" defaultSize={50} minSize={5} maxSize={100} collapsible={true}>
@@ -40,9 +40,8 @@ interface LogPanelProps {
   id: string;
   title: string;
   logData: string;
-  className?: string;
 }
-export const LogPanel = ({ id, title, logData, className }: LogPanelProps) => {
+export const LogPanel = ({ id, title, logData }: LogPanelProps) => {
   const [filterRegex, setFilterRegex] = useState("");
   const [fontSize, setFontSize] = usePersistentState<"xxs" | "xs" | "small" | "normal">(
     `logPanel-${id}-fontSize`,
@@ -69,6 +68,19 @@ export const LogPanel = ({ id, title, logData, className }: LogPanelProps) => {
       }
     });
   }, []);
+
+  const toggleWrapText = useCallback(() => {
+    setTextWrap((prev) => !prev);
+  }, []);
+
+  const toggleFilter = useCallback(() => {
+    if (showFilter) {
+      setShowFilter(false);
+      setFilterRegex(""); // Clear filter when closing
+    } else {
+      setShowFilter(true);
+    }
+  }, [filterRegex, setFilterRegex, showFilter]);
 
   const fontSizeClass = useMemo(() => {
     switch (fontSize) {
@@ -112,10 +124,10 @@ export const LogPanel = ({ id, title, logData, className }: LogPanelProps) => {
             <button className="btn" onClick={toggleFontSize}>
               <RiFontSize />
             </button>
-            <button className="btn" onClick={() => setTextWrap((prev) => !prev)}>
+            <button className="btn" onClick={toggleWrapText}>
               {wrapText ? <RiTextWrap /> : <RiAlignJustify />}
             </button>
-            <button className="btn" onClick={() => setShowFilter((prev) => !prev)}>
+            <button className="btn" onClick={toggleFilter}>
               {showFilter ? <RiMenuSearchFill /> : <RiMenuSearchLine />}
             </button>
           </div>
