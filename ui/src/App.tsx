@@ -4,16 +4,18 @@ import { APIProvider } from "./contexts/APIProvider";
 import LogViewerPage from "./pages/LogViewer";
 import ModelPage from "./pages/Models";
 import ActivityPage from "./pages/Activity";
+import { RiSunFill, RiMoonFill } from "react-icons/ri";
 
 function App() {
-  const theme = useTheme();
+  const { isNarrow, toggleTheme, isDarkMode } = useTheme();
+
   return (
     <Router basename="/ui/">
       <APIProvider>
-        <div>
+        <div className="flex flex-col h-screen">
           <nav className="bg-surface border-b border-border p-2 h-[75px]">
             <div className="flex items-center justify-between mx-auto px-4 h-full">
-              <h1 className="flex items-center p-0">llama-swap</h1>
+              {!isNarrow && <h1 className="flex items-center p-0">llama-swap</h1>}
               <div className="flex items-center space-x-4">
                 <NavLink to="/" className={({ isActive }) => (isActive ? "navlink active" : "navlink")}>
                   Logs
@@ -26,14 +28,14 @@ function App() {
                 <NavLink to="/activity" className={({ isActive }) => (isActive ? "navlink active" : "navlink")}>
                   Activity
                 </NavLink>
-                <button className="btn btn--sm" onClick={theme.toggleTheme}>
-                  {theme.isDarkMode ? "🌙" : "☀️"}
+                <button className="" onClick={toggleTheme}>
+                  {isDarkMode ? <RiMoonFill /> : <RiSunFill />}
                 </button>
               </div>
             </div>
           </nav>
 
-          <main className="mx-auto py-4 px-4">
+          <main className="flex-1 overflow-auto p-4">
             <Routes>
               <Route path="/" element={<LogViewerPage />} />
               <Route path="/models" element={<ModelPage />} />
