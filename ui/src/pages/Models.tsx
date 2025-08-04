@@ -79,7 +79,7 @@ function ModelsPanel() {
       <div className="flex-1 overflow-y-auto">
         <table className="w-full">
           <thead className="sticky top-0 bg-card z-10">
-            <tr className="border-b border-primary">
+            <tr className="border-b border-primary bg-surface">
               <th className="text-left p-2">Name</th>
               <th className="text-left p-2"></th>
               <th className="text-left p-2">State</th>
