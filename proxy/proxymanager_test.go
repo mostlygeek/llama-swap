@@ -279,6 +279,51 @@ func TestProxyManager_ListModelsHandler(t *testing.T) {
 	assert.Empty(t, expectedModels, "not all expected models were returned")
 }
 
+func TestProxyManager_ListModelsHandler_SortedByID(t *testing.T) {
+    // Intentionally add models in non-sorted order and with an unlisted model
+    config := Config{
+        HealthCheckTimeout: 15,
+        Models: map[string]ModelConfig{
+            "zeta":   getTestSimpleResponderConfig("zeta"),
+            "alpha":  getTestSimpleResponderConfig("alpha"),
+            "beta":   getTestSimpleResponderConfig("beta"),
+            "hidden": func() ModelConfig {
+                mc := getTestSimpleResponderConfig("hidden")
+                mc.Unlisted = true
+                return mc
+            }(),
+        },
+        LogLevel: "error",
+    }
+
+    proxy := New(config)
+
+    // Request models list
+    req := httptest.NewRequest("GET", "/v1/models", nil)
+    w := httptest.NewRecorder()
+    proxy.ServeHTTP(w, req)
+
+    assert.Equal(t, http.StatusOK, w.Code)
+
+    var response struct {
+        Data []map[string]interface{} `json:"data"`
+    }
+    if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+        t.Fatalf("Failed to parse JSON response: %v", err)
+    }
+
+    // We expect only the listed models in sorted order by id
+    expectedOrder := []string{"alpha", "beta", "zeta"}
+    if assert.Len(t, response.Data, len(expectedOrder), "unexpected number of listed models") {
+        got := make([]string, 0, len(response.Data))
+        for _, m := range response.Data {
+            id, _ := m["id"].(string)
+            got = append(got, id)
+        }
+        assert.Equal(t, expectedOrder, got, "models should be sorted by id ascending")
+    }
+}
+
 func TestProxyManager_Shutdown(t *testing.T) {
 	// make broken model configurations
 	model1Config := getTestSimpleResponderConfigPort("model1", 9991)
