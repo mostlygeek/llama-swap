@@ -18,7 +18,7 @@ const LogViewer = () => {
   const direction = isNarrow ? "vertical" : "horizontal";
 
   return (
-    <PanelGroup direction={direction} className="gap-2" autoSaveId={`logviewer-panel-group-${direction}`}>
+    <PanelGroup direction={direction} className="gap-2" autoSaveId="logviewer-panel-group">
       <Panel id="proxy" defaultSize={50} minSize={5} maxSize={100} collapsible={true}>
         <LogPanel id="proxy" title="Proxy Logs" logData={proxyLogs} />
       </Panel>
