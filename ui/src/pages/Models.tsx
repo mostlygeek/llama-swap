@@ -12,7 +12,7 @@ export default function ModelsPage() {
   const { upstreamLogs } = useAPI();
 
   return (
-    <PanelGroup direction={direction} className="gap-2" autoSaveId={`models-panel-group-${direction}`}>
+    <PanelGroup direction={direction} className="gap-2" autoSaveId={"models-panel-group"}>
       <Panel id="models" defaultSize={50} minSize={isNarrow ? 0 : 25} maxSize={100} collapsible={isNarrow}>
         <ModelsPanel />
       </Panel>
