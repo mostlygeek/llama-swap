@@ -170,8 +170,9 @@ func (pm *ProxyManager) setupGinEngine() {
 	pm.ginEngine.POST("/v1/audio/speech", pm.proxyOAIHandler)
 	pm.ginEngine.POST("/v1/audio/transcriptions", pm.proxyOAIPostFormHandler)
 
-	// Support custom ASR endpoint
+	// Support custom ASR and detect language endpoint
 	pm.ginEngine.POST("/asr", pm.proxyASRHandler)
+	pm.ginEngine.POST("/detect-language", pm.proxyDetectLanguageHandler)
 
 	pm.ginEngine.GET("/v1/models", pm.listModelsHandler)
 
@@ -378,6 +379,21 @@ func (pm *ProxyManager) proxyASRHandler(c *gin.Context) {
 
     // Always route to /asr on the backend
     c.Request.URL.Path = "/asr"
+
+    processGroup.ProxyRequest(requestedModel, c.Writer, c.Request)
+}
+
+func (pm *ProxyManager) proxyDetectLanguageHandler(c *gin.Context) {
+    requestedModel := "asr"
+
+    processGroup, _, err := pm.swapProcessGroup(requestedModel)
+    if err != nil {
+        pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
+        return
+    }
+
+    // Always route to /detect-language on the backend
+    c.Request.URL.Path = "/detect-language"
 
     processGroup.ProxyRequest(requestedModel, c.Writer, c.Request)
 }
