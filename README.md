@@ -197,13 +197,6 @@ Any OpenAI compatible server would work. llama-swap was originally designed for 
 
 For Python based inference servers like vllm or tabbyAPI it is recommended to run them via podman or docker. This provides clean environment isolation as well as responding correctly to `SIGTERM` signals to shutdown.
 
-## Contributors 
-<a href="https://github.com/mostlygeek/llama-swap/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=mostlygeek/llama-swap" />
-</a>
-
-Made with [contrib.rocks](https://contrib.rocks).
-
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=mostlygeek/llama-swap&type=Date)](https://www.star-history.com/#mostlygeek/llama-swap&Date)
