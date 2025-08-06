@@ -376,12 +376,10 @@ func (pm *ProxyManager) proxyASRHandler(c *gin.Context) {
         return
     }
 
-    // Directly proxy the request as-is, do not rewrite path or body
-    if err := processGroup.ProxyRequest(requestedModel, c.Writer, c.Request); err != nil {
-        pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
-        pm.proxyLogger.Errorf("Error Proxying Request for processGroup %s and model %s", processGroup.id, requestedModel)
-        return
-    }
+    // Always route to /asr on the backend
+    c.Request.URL.Path = "/asr"
+
+    processGroup.ProxyRequest(requestedModel, c.Writer, c.Request)
 }
 
 func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
