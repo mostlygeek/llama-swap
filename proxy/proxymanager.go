@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -332,6 +333,13 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 
 		data = append(data, record)
 	}
+
+	// Sort by the "id" key
+	sort.Slice(data, func(i, j int) bool {
+		si, _ := data[i]["id"].(string)
+		sj, _ := data[j]["id"].(string)
+		return si < sj
+	})
 
 	// Set CORS headers if origin exists
 	if origin := c.GetHeader("Origin"); origin != "" {
