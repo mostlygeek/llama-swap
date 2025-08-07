@@ -4,7 +4,7 @@ import { LogPanel } from "./LogViewer";
 import { usePersistentState } from "../hooks/usePersistentState";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { useTheme } from "../contexts/ThemeProvider";
-import { RiEyeFill, RiEyeOffFill, RiStopCircleLine } from "react-icons/ri";
+import { RiEyeFill, RiEyeOffFill, RiStopCircleLine, RiSwapBoxFill } from "react-icons/ri";
 
 export default function ModelsPage() {
   const { isNarrow } = useTheme();
@@ -40,6 +40,7 @@ function ModelsPanel() {
   const { models, loadModel, unloadAllModels } = useAPI();
   const [isUnloading, setIsUnloading] = useState(false);
   const [showUnlisted, setShowUnlisted] = usePersistentState("showUnlisted", true);
+  const [showIdorName, setShowIdorName] = usePersistentState<"id" | "name">("showIdorName", "id"); // true = show ID, false = show name
 
   const filteredModels = useMemo(() => {
     return models.filter((model) => showUnlisted || !model.unlisted);
@@ -58,18 +59,28 @@ function ModelsPanel() {
     }
   }, [unloadAllModels]);
 
+  const toggleIdorName = useCallback(() => {
+    setShowIdorName((prev) => (prev === "name" ? "id" : "name"));
+  }, [showIdorName]);
+
   return (
     <div className="card h-full flex flex-col">
       <div className="shrink-0">
         <h2>Models</h2>
         <div className="flex justify-between">
-          <button
-            className="btn flex items-center gap-2"
-            onClick={() => setShowUnlisted(!showUnlisted)}
-            style={{ lineHeight: "1.2" }}
-          >
-            {showUnlisted ? <RiEyeFill /> : <RiEyeOffFill />} unlisted
-          </button>
+          <div className="flex gap-2">
+            <button className="btn flex items-center gap-2" onClick={toggleIdorName} style={{ lineHeight: "1.2" }}>
+              <RiSwapBoxFill /> {showIdorName === "id" ? "ID" : "Name"}
+            </button>
+
+            <button
+              className="btn flex items-center gap-2"
+              onClick={() => setShowUnlisted(!showUnlisted)}
+              style={{ lineHeight: "1.2" }}
+            >
+              {showUnlisted ? <RiEyeFill /> : <RiEyeOffFill />} unlisted
+            </button>
+          </div>
           <button className="btn flex items-center gap-2" onClick={handleUnloadAllModels} disabled={isUnloading}>
             <RiStopCircleLine size="24" /> {isUnloading ? "Unloading..." : "Unload"}
           </button>
@@ -80,7 +91,7 @@ function ModelsPanel() {
         <table className="w-full">
           <thead className="sticky top-0 bg-card z-10">
             <tr className="border-b border-primary bg-surface">
-              <th className="text-left p-2">Name</th>
+              <th className="text-left p-2">{showIdorName === "id" ? "Model ID" : "Name"}</th>
               <th className="text-left p-2"></th>
               <th className="text-left p-2">State</th>
             </tr>
@@ -90,7 +101,7 @@ function ModelsPanel() {
               <tr key={model.id} className="border-b hover:bg-secondary-hover border-border">
                 <td className={`p-2 ${model.unlisted ? "text-txtsecondary" : ""}`}>
                   <a href={`/upstream/${model.id}/`} className={`underline`} target="_blank">
-                    {model.name !== "" ? model.name : model.id}
+                    {showIdorName === "id" ? model.id : model.name !== "" ? model.name : model.id}
                   </a>
                   {model.description !== "" && (
                     <p className={model.unlisted ? "text-opacity-70" : ""}>
