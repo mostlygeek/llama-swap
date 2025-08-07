@@ -83,6 +83,12 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
             case "modelStatus":
               {
                 const models = JSON.parse(message.data) as Model[];
+
+                // sort models by name and id
+                models.sort((a, b) => {
+                  return (a.name + a.id).localeCompare(b.name + b.id);
+                });
+
                 setModels(models);
               }
               break;
