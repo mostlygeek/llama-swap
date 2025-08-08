@@ -73,7 +73,7 @@ See the [configuration documentation](https://github.com/mostlygeek/llama-swap/w
 
 llama-swap ships with a real time web interface to monitor logs and status of models:
 
-<img width="1786" height="1334" alt="image" src="https://github.com/user-attachments/assets/d6258cb9-1dad-40db-828f-2be860aec8fe" />
+<img width="1360" height="963" alt="image" src="https://github.com/user-attachments/assets/adef4a8e-de0b-49db-885a-8f6dedae6799" />
 
 ## Installation
 
