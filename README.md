@@ -71,9 +71,13 @@ See the [configuration documentation](https://github.com/mostlygeek/llama-swap/w
 
 ## Web UI
 
-llama-swap ships with a real time web interface to monitor logs and status of models:
+llama-swap includes a real time web interface for monitoring logs and models:
 
 <img width="1360" height="963" alt="image" src="https://github.com/user-attachments/assets/adef4a8e-de0b-49db-885a-8f6dedae6799" />
+
+The Activity Page shows recent requests:
+
+<img width="1360" height="963" alt="image" src="https://github.com/user-attachments/assets/5f3edee6-d03a-4ae5-ae06-b20ac1f135bd" />
 
 ## Installation
 
