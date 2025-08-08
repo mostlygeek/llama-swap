@@ -361,7 +361,7 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 		return
 	}
 
-	processGroup, _, err := pm.swapProcessGroup(requestedModel)
+	processGroup, realModelName, err := pm.swapProcessGroup(requestedModel)
 	if err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
 		return
@@ -369,7 +369,7 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 
 	// rewrite the path
 	c.Request.URL.Path = c.Param("upstreamPath")
-	processGroup.ProxyRequest(requestedModel, c.Writer, c.Request)
+	processGroup.ProxyRequest(realModelName, c.Writer, c.Request)
 }
 
 func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
