@@ -242,6 +242,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		}
 		switch macroName {
 		case "PORT":
+		case "MODEL_ID":
 			return Config{}, fmt.Errorf("macro name '%s' is reserved and cannot be used", macroName)
 		}
 	}
@@ -300,6 +301,15 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 				macroName := match[1]
 				if macroName == "PID" && fieldName == "cmdStop" {
 					continue // this is ok, has to be replaced by process later
+				}
+				if macroName == "MODEL_ID" {
+					modelConfig.Cmd = strings.ReplaceAll(modelConfig.Cmd, "${MODEL_ID}", modelId)
+					modelConfig.CmdStop = strings.ReplaceAll(modelConfig.CmdStop, "${MODEL_ID}", modelId)
+					modelConfig.Proxy = strings.ReplaceAll(modelConfig.Proxy, "${MODEL_ID}", modelId)
+					modelConfig.CheckEndpoint = strings.ReplaceAll(modelConfig.CheckEndpoint, "${MODEL_ID}", modelId)
+					modelConfig.Filters.StripParams = strings.ReplaceAll(modelConfig.Filters.StripParams, "${MODEL_ID}", modelId)
+
+					continue
 				}
 				if _, exists := config.Macros[macroName]; !exists {
 					return Config{}, fmt.Errorf("unknown macro '${%s}' found in %s.%s", macroName, modelId, fieldName)
