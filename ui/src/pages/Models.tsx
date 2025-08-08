@@ -133,35 +133,41 @@ function ModelsPanel() {
 function StatsPanel() {
   const { metrics } = useAPI();
 
-  const [totalRequests, totalTokens, avgTokensPerSecond] = useMemo(() => {
+  const [totalRequests, totalInputTokens, totalOutputTokens, avgTokensPerSecond] = useMemo(() => {
     const totalRequests = metrics.length;
     if (totalRequests === 0) {
       return [0, 0, 0];
     }
-    const totalTokens = metrics.reduce((sum, m) => sum + m.output_tokens, 0);
+    const totalInputTokens = metrics.reduce((sum, m) => sum + m.input_tokens, 0);
+    const totalOutputTokens = metrics.reduce((sum, m) => sum + m.output_tokens, 0);
     const avgTokensPerSecond = (metrics.reduce((sum, m) => sum + m.tokens_per_second, 0) / totalRequests).toFixed(2);
-    return [totalRequests, totalTokens, avgTokensPerSecond];
+    return [totalRequests, totalInputTokens, totalOutputTokens, avgTokensPerSecond];
   }, [metrics]);
 
   return (
     <div className="card">
-      <h2>Chat Activity</h2>
-      <table className="w-full border border-gray-200">
-        <tbody>
-          <tr className="border-b border-gray-200">
-            <td className="py-2 px-4 font-medium border-r border-gray-200">Requests</td>
-            <td className="py-2 px-4 text-right">{totalRequests}</td>
-          </tr>
-          <tr className="border-b border-gray-200">
-            <td className="py-2 px-4 font-medium border-r border-gray-200">Total Tokens Generated</td>
-            <td className="py-2 px-4 text-right">{totalTokens}</td>
-          </tr>
-          <tr>
-            <td className="py-2 px-4 font-medium border-r border-gray-200">Average Tokens/Second</td>
-            <td className="py-2 px-4 text-right">{avgTokensPerSecond}</td>
-          </tr>
-        </tbody>
-      </table>
+      <div className="rounded-lg overflow-hidden border border-gray-200">
+        <table className="w-full">
+          <tbody>
+            <tr>
+              <th className="p-2 font-medium border-b border-gray-200 text-right">Requests</th>
+              <th className="p-2 font-medium border-l border-b border-gray-200 text-right">Processed</th>
+              <th className="p-2 font-medium border-l border-b border-gray-200 text-right">Generated</th>
+              <th className="p-2 font-medium border-l border-b border-gray-200 text-right">Tokens/Sec</th>
+            </tr>
+            <tr>
+              <td className="p-2 text-right border-r border-gray-200">{totalRequests}</td>
+              <td className="p-2 text-right border-r border-gray-200">
+                {new Intl.NumberFormat().format(totalInputTokens)}
+              </td>
+              <td className="p-2 text-right border-r border-gray-200">
+                {new Intl.NumberFormat().format(totalOutputTokens)}
+              </td>
+              <td className="p-2 text-right">{avgTokensPerSecond}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
