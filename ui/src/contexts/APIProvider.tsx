@@ -30,6 +30,8 @@ interface Metrics {
   output_tokens: number;
   tokens_per_second: number;
   duration_ms: number;
+  request_body?: string;
+  response_body?: string;
 }
 
 interface LogData {
