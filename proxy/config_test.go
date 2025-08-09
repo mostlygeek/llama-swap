@@ -440,3 +440,11 @@ models:
 	expectedCmd := "/user/llama.cpp/build/bin/llama-server --port 9990 --model /path/to/model.gguf -ngl 99"
 	assert.Equal(t, expectedCmd, cmdStr, "Final command does not match expected structure")
 }
+
+func TestConfig_HooksOnStartup(t *testing.T) {
+	/* Placeholder to test
+	- that real model names are resolved in hooks
+	- everything that is not in models: is removed
+	*/
+
+}

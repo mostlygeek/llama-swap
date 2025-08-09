@@ -96,6 +96,26 @@ func New(config Config) *ProxyManager {
 	}
 
 	pm.setupGinEngine()
+
+	// run any startup hooks
+	if len(config.Hooks.OnStartup.Preload) > 0 {
+		// do it in the background, don't block startup -- not sure if good idea yet
+		go func() {
+			discardWriter := &DiscardWriter{}
+			for _, realModelName := range config.Hooks.OnStartup.Preload {
+				proxyLogger.Infof("Preloading model: %s", realModelName)
+				processGroup, _, err := pm.swapProcessGroup(realModelName)
+				if err != nil {
+					proxyLogger.Errorf("Failed to preload model %s: %v", realModelName, err)
+					continue
+				} else {
+					req, _ := http.NewRequest("GET", "/", nil)
+					processGroup.ProxyRequest(realModelName, discardWriter, req)
+				}
+			}
+		}()
+	}
+
 	return pm
 }
 
