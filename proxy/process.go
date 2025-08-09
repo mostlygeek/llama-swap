@@ -447,6 +447,7 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 			w.Header().Add(k, v)
 		}
 	}
+	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(resp.StatusCode)
 
 	// faster than io.Copy when streaming
