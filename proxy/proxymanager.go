@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/mostlygeek/llama-swap/event"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -105,12 +106,21 @@ func New(config Config) *ProxyManager {
 			for _, realModelName := range config.Hooks.OnStartup.Preload {
 				proxyLogger.Infof("Preloading model: %s", realModelName)
 				processGroup, _, err := pm.swapProcessGroup(realModelName)
+
 				if err != nil {
+					event.Emit(ModelPreloadedEvent{
+						ModelName: realModelName,
+						Success:   false,
+					})
 					proxyLogger.Errorf("Failed to preload model %s: %v", realModelName, err)
 					continue
 				} else {
 					req, _ := http.NewRequest("GET", "/", nil)
 					processGroup.ProxyRequest(realModelName, discardWriter, req)
+					event.Emit(ModelPreloadedEvent{
+						ModelName: realModelName,
+						Success:   true,
+					})
 				}
 			}
 		}()

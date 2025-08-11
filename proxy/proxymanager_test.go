@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/event"
 	"github.com/stretchr/testify/assert"
 	"github.com/tidwall/gjson"
 )
@@ -831,4 +832,53 @@ func TestProxyManager_HealthEndpoint(t *testing.T) {
 	proxy.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "OK", rec.Body.String())
+}
+
+func TestProxyManager_StartupHooks(t *testing.T) {
+
+	// using real YAML as the configuration has gotten more complex
+	// is the right approach as LoadConfigFromReader() does a lot more
+	// than parse YAML now. Eventually migrate all tests to use this approach
+	configStr := strings.Replace(`
+logLevel: error
+hooks:
+  on_startup:
+    preload:
+      - model1
+      - model2
+groups:
+  test:
+    swap: false
+    members:
+       - model1
+       - model2
+models:
+  model1:
+    cmd: ${simpleresponderpath} --port ${PORT} --silent --respond model1
+  model2:
+      cmd: ${simpleresponderpath} --port ${PORT} --silent --respond model2
+`, "${simpleresponderpath}", simpleResponderPath, -1)
+
+	// Create a test model configuration
+	config, err := LoadConfigFromReader(strings.NewReader(configStr))
+	if !assert.NoError(t, err, "Invalid configuration") {
+		return
+	}
+
+	// Create the proxy which should trigger preloading
+	proxy := New(config)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+
+	var w sync.WaitGroup
+	w.Add(2)
+
+	event.On(func(e ModelPreloadedEvent) {
+		w.Done()
+	})
+
+	w.Wait()
+
+	// make sure they are both loaded
+	assert.Equal(t, StateReady, proxy.processGroups["test"].processes["model1"].CurrentState())
+	assert.Equal(t, StateReady, proxy.processGroups["test"].processes["model2"].CurrentState())
 }
