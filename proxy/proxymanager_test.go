@@ -879,6 +879,10 @@ models:
 	w.Wait()
 
 	// make sure they are both loaded
+	_, foundGroup := proxy.processGroups["test"]
+	if !assert.True(t, foundGroup, "test group should exist") {
+		return
+	}
 	assert.Equal(t, StateReady, proxy.processGroups["test"].processes["model1"].CurrentState())
 	assert.Equal(t, StateReady, proxy.processGroups["test"].processes["model2"].CurrentState())
 }
