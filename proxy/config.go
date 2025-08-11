@@ -139,9 +139,11 @@ func (c *GroupConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 }
 
 type HooksConfig struct {
-	OnStartup struct {
-		Preload []string `yaml:"preload"`
-	} `yaml:"on_startup"`
+	OnStartup HookOnStartup `yaml:"on_startup"`
+}
+
+type HookOnStartup struct {
+	Preload []string `yaml:"preload"`
 }
 
 type Config struct {
