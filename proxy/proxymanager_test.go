@@ -847,7 +847,7 @@ hooks:
       - model1
       - model2
 groups:
-  test:
+  preloadTestGroup:
     swap: false
     members:
        - model1
@@ -865,24 +865,30 @@ models:
 		return
 	}
 
+	preloadChan := make(chan ModelPreloadedEvent, 2) // buffer for 2 expected events
+
+	unsub := event.On(func(e ModelPreloadedEvent) {
+		preloadChan <- e
+	})
+
+	defer unsub()
+
 	// Create the proxy which should trigger preloading
 	proxy := New(config)
 	defer proxy.StopProcesses(StopWaitForInflightRequest)
 
-	var w sync.WaitGroup
-	w.Add(2)
-
-	event.On(func(e ModelPreloadedEvent) {
-		w.Done()
-	})
-
-	w.Wait()
-
+	for i := 0; i < 2; i++ {
+		select {
+		case <-preloadChan:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for models to preload")
+		}
+	}
 	// make sure they are both loaded
-	_, foundGroup := proxy.processGroups["test"]
-	if !assert.True(t, foundGroup, "test group should exist") {
+	_, foundGroup := proxy.processGroups["preloadTestGroup"]
+	if !assert.True(t, foundGroup, "preloadTestGroup should exist") {
 		return
 	}
-	assert.Equal(t, StateReady, proxy.processGroups["test"].processes["model1"].CurrentState())
-	assert.Equal(t, StateReady, proxy.processGroups["test"].processes["model2"].CurrentState())
+	assert.Equal(t, StateReady, proxy.processGroups["preloadTestGroup"].processes["model1"].CurrentState())
+	assert.Equal(t, StateReady, proxy.processGroups["preloadTestGroup"].processes["model2"].CurrentState())
 }
