@@ -28,6 +28,7 @@ interface Metrics {
   model: string;
   input_tokens: number;
   output_tokens: number;
+  prompt_per_second: number;
   tokens_per_second: number;
   duration_ms: number;
 }
