@@ -36,7 +36,7 @@ Written in golang, it is very easy to install (single binary with no dependencie
 
 ## How does llama-swap work?
 
-When a request is made to an OpenAI compatible endpoint, lama-swap will extract the `model` value and load the appropriate server configuration to serve it. If the wrong upstream server is running, it will be replaced with the correct one. This is where the "swap" part comes in. The upstream server is automatically swapped to the correct one to serve the request.
+When a request is made to an OpenAI compatible endpoint, llama-swap will extract the `model` value and load the appropriate server configuration to serve it. If the wrong upstream server is running, it will be replaced with the correct one. This is where the "swap" part comes in. The upstream server is automatically swapped to the correct one to serve the request.
 
 In the most basic configuration llama-swap handles one model at a time. For more advanced use cases, the `groups` feature allows multiple models to be loaded at the same time. You have complete control over how your system resources are used.
 
@@ -71,9 +71,13 @@ See the [configuration documentation](https://github.com/mostlygeek/llama-swap/w
 
 ## Web UI
 
-llama-swap ships with a real time web interface to monitor logs and status of models:
+llama-swap includes a real time web interface for monitoring logs and models:
 
-<img width="1786" height="1334" alt="image" src="https://github.com/user-attachments/assets/d6258cb9-1dad-40db-828f-2be860aec8fe" />
+<img width="1360" height="963" alt="image" src="https://github.com/user-attachments/assets/adef4a8e-de0b-49db-885a-8f6dedae6799" />
+
+The Activity Page shows recent requests:
+
+<img width="1360" height="963" alt="image" src="https://github.com/user-attachments/assets/5f3edee6-d03a-4ae5-ae06-b20ac1f135bd" />
 
 ## Installation
 
@@ -196,13 +200,6 @@ curl -Ns 'http://host/logs/stream?no-history'
 Any OpenAI compatible server would work. llama-swap was originally designed for llama-server and it is the best supported.
 
 For Python based inference servers like vllm or tabbyAPI it is recommended to run them via podman or docker. This provides clean environment isolation as well as responding correctly to `SIGTERM` signals to shutdown.
-
-## Contributors 
-<a href="https://github.com/mostlygeek/llama-swap/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=mostlygeek/llama-swap" />
-</a>
-
-Made with [contrib.rocks](https://contrib.rocks).
 
 ## Star History
 

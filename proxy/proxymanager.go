@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -337,6 +338,13 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 		data = append(data, record)
 	}
 
+	// Sort by the "id" key
+	sort.Slice(data, func(i, j int) bool {
+		si, _ := data[i]["id"].(string)
+		sj, _ := data[j]["id"].(string)
+		return si < sj
+	})
+
 	// Set CORS headers if origin exists
 	if origin := c.GetHeader("Origin"); origin != "" {
 		c.Header("Access-Control-Allow-Origin", origin)
@@ -357,7 +365,7 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 		return
 	}
 
-	processGroup, _, err := pm.swapProcessGroup(requestedModel)
+	processGroup, realModelName, err := pm.swapProcessGroup(requestedModel)
 	if err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
 		return
@@ -365,7 +373,7 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 
 	// rewrite the path
 	c.Request.URL.Path = c.Param("upstreamPath")
-	processGroup.ProxyRequest(requestedModel, c.Writer, c.Request)
+	processGroup.ProxyRequest(realModelName, c.Writer, c.Request)
 }
 
 func (pm *ProxyManager) proxyASRHandler(c *gin.Context) {
