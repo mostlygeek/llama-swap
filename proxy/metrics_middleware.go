@@ -79,10 +79,12 @@ func (rec *MetricsRecorder) parseAndRecordMetrics(jsonData gjson.Result) bool {
 	outputTokens := int(jsonData.Get("usage.completion_tokens").Int())
 	inputTokens := int(jsonData.Get("usage.prompt_tokens").Int())
 	tokensPerSecond := -1.0
+	promptPerSecond := -1.0
 	durationMs := int(time.Since(rec.startTime).Milliseconds())
 
 	// use llama-server's timing data for tok/sec and duration as it is more accurate
 	if timings := jsonData.Get("timings"); timings.Exists() {
+		promptPerSecond = jsonData.Get("timings.prompt_per_second").Float()
 		tokensPerSecond = jsonData.Get("timings.predicted_per_second").Float()
 		durationMs = int(jsonData.Get("timings.prompt_ms").Float() + jsonData.Get("timings.predicted_ms").Float())
 	}
@@ -92,6 +94,7 @@ func (rec *MetricsRecorder) parseAndRecordMetrics(jsonData gjson.Result) bool {
 		Model:           rec.realModelName,
 		InputTokens:     inputTokens,
 		OutputTokens:    outputTokens,
+		PromptPerSecond: promptPerSecond,
 		TokensPerSecond: tokensPerSecond,
 		DurationMs:      durationMs,
 	})
