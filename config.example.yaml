@@ -1,6 +1,13 @@
 # llama-swap YAML configuration example
 # -------------------------------------
 #
+# 💡 Tip - Use an LLM with this file!
+# ====================================
+#  This example configuration is written to be LLM friendly! Try
+#  copying this file into an LLM and asking it to explain or generate
+#  sections for you.
+# ====================================
+#
 # - Below are all the available configuration options for llama-swap.
 # - Settings with a default value, or noted as optional can be omitted.
 # - Settings that are marked required must be in your configuration file
@@ -207,3 +214,19 @@ groups:
       - "forever-modelA"
       - "forever-modelB"
       - "forever-modelc"
+
+# hooks: a dictionary of event triggers and actions
+# - optional, default: empty dictionary
+# - the only supported hook is on_startup
+hooks:
+  # on_startup: a dictionary of actions to perform on startup
+  # - optional, default: empty dictionar
+  # - the only supported action is preload
+  on_startup:
+        # preload: a list of model ids to load on startup
+        # - optional, default: empty list
+        # - model names must match keys in the models sections
+        # - when preloading multiple models at once, define a group
+        #   otherwise models will be loaded and swapped out
+    preload:
+      - "llama"
