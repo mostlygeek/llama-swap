@@ -51,6 +51,7 @@ const ActivityPage = () => {
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Model</th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Input Tokens</th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Output Tokens</th>
+                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Prompt Processing</th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Generation Speed</th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Duration</th>
               </tr>
@@ -62,6 +63,7 @@ const ActivityPage = () => {
                   <td className="px-6 py-4 whitespace-nowrap text-sm">{metric.model}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">{metric.input_tokens.toLocaleString()}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">{metric.output_tokens.toLocaleString()}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm">{formatSpeed(metric.prompt_per_second)}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">{formatSpeed(metric.tokens_per_second)}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">{formatDuration(metric.duration_ms)}</td>
                 </tr>
