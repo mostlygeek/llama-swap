@@ -100,6 +100,9 @@ func TestConfig_LoadPosix(t *testing.T) {
 	content := `
 macros:
   svr-path: "path/to/server"
+hooks:
+  on_startup:
+    preload: ["model1", "model2"]
 models:
   model1:
     cmd: path/to/cmd --arg1 one
@@ -162,6 +165,11 @@ groups:
 		StartPort: 5800,
 		Macros: map[string]string{
 			"svr-path": "path/to/server",
+		},
+		Hooks: HooksConfig{
+			OnStartup: HookOnStartup{
+				Preload: []string{"model1", "model2"},
+			},
 		},
 		Models: map[string]ModelConfig{
 			"model1": {

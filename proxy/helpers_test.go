@@ -13,9 +13,10 @@ import (
 )
 
 var (
-	nextTestPort int = 12000
-	portMutex    sync.Mutex
-	testLogger   = NewLogMonitorWriter(os.Stdout)
+	nextTestPort        int = 12000
+	portMutex           sync.Mutex
+	testLogger          = NewLogMonitorWriter(os.Stdout)
+	simpleResponderPath = getSimpleResponderPath()
 )
 
 // Check if the binary exists
@@ -69,13 +70,11 @@ func getTestSimpleResponderConfig(expectedMessage string) ModelConfig {
 }
 
 func getTestSimpleResponderConfigPort(expectedMessage string, port int) ModelConfig {
-	binaryPath := getSimpleResponderPath()
-
 	// Create a YAML string with just the values we want to set
 	yamlStr := fmt.Sprintf(`
 cmd: '%s --port %d --silent --respond %s'
 proxy: "http://127.0.0.1:%d"
-`, binaryPath, port, expectedMessage, port)
+`, simpleResponderPath, port, expectedMessage, port)
 
 	var cfg ModelConfig
 	if err := yaml.Unmarshal([]byte(yamlStr), &cfg); err != nil {
