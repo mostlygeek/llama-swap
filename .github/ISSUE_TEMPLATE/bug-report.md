@@ -2,7 +2,7 @@
 name: Bug Report
 about: I found a defect
 title: ''
-labels: bug
+labels: 'unconfirmed bug'
 assignees: ''
 
 ---
