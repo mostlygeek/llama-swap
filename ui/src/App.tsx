@@ -4,6 +4,7 @@ import { APIProvider } from "./contexts/APIProvider";
 import LogViewerPage from "./pages/LogViewer";
 import ModelPage from "./pages/Models";
 import ActivityPage from "./pages/Activity";
+import ConnectionStatus from "./components/ConnectionStatus";
 import { RiSunFill, RiMoonFill } from "react-icons/ri";
 
 function App() {
@@ -31,6 +32,7 @@ function App() {
                 <button className="" onClick={toggleTheme}>
                   {isDarkMode ? <RiMoonFill /> : <RiSunFill />}
                 </button>
+                <ConnectionStatus />
               </div>
             </div>
           </nav>
