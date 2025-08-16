@@ -20,6 +20,7 @@ interface APIProviderType {
   proxyLogs: string;
   upstreamLogs: string;
   metrics: Metrics[];
+  getConnectionStatus: () => "connected" | "connecting" | "disconnected";
 }
 
 interface Metrics {
@@ -61,6 +62,16 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
       const updatedLog = prev + newData;
       return updatedLog.length > LOG_LENGTH_LIMIT ? updatedLog.slice(-LOG_LENGTH_LIMIT) : updatedLog;
     });
+  }, []);
+
+  const getConnectionStatus = useCallback(() => {
+    if (apiEventSource.current?.readyState === EventSource.OPEN) {
+      return "connected";
+    } else if (apiEventSource.current?.readyState === EventSource.CONNECTING) {
+      return "connecting";
+    } else {
+      return "disconnected";
+    }
   }, []);
 
   const enableAPIEvents = useCallback((enabled: boolean) => {
@@ -202,6 +213,7 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
       proxyLogs,
       upstreamLogs,
       metrics,
+      getConnectionStatus,
     }),
     [models, listModels, unloadAllModels, loadModel, enableAPIEvents, proxyLogs, upstreamLogs, metrics]
   );
