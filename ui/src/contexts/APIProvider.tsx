@@ -108,9 +108,9 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
 
             case "metrics":
               {
-                const newMetric = JSON.parse(message.data) as Metrics;
+                const newMetrics = JSON.parse(message.data) as Metrics[];
                 setMetrics((prevMetrics) => {
-                  return [newMetric, ...prevMetrics];
+                  return [...newMetrics, ...prevMetrics];
                 });
               }
               break;
