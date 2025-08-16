@@ -43,8 +43,8 @@ const ActivityPage = () => {
               </tr>
             </thead>
             <tbody className="divide-y">
-              {sortedMetrics.map((metric, index) => (
-                <tr key={`${metric.id}-${index}`}>
+              {sortedMetrics.map((metric) => (
+                <tr key={`metric_${metric.id}`}>
                   <td className="px-4 py-4 whitespace-nowrap text-sm">{metric.id + 1 /* un-zero index */}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">{formatTimestamp(metric.timestamp)}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">{metric.model}</td>

@@ -77,6 +77,14 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
     const connect = () => {
       const eventSource = new EventSource("/api/events");
 
+      eventSource.onopen = () => {
+        // clear everything out on connect to keep things in sync
+        setProxyLogs("");
+        setUpstreamLogs("");
+        setMetrics([]); // clear metrics on reconnect
+        setModels([]); // clear models on reconnect
+      };
+
       eventSource.onmessage = (e: MessageEvent) => {
         try {
           const message = JSON.parse(e.data) as APIEventEnvelope;
