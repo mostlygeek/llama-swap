@@ -1,4 +1,5 @@
 import { useRef, createContext, useState, useContext, useEffect, useCallback, useMemo, type ReactNode } from "react";
+import type { ConnectionState } from "../lib/types";
 
 type ModelStatus = "ready" | "starting" | "stopping" | "stopped" | "shutdown" | "unknown";
 const LOG_LENGTH_LIMIT = 1024 * 100; /* 100KB of log data */
@@ -20,7 +21,7 @@ interface APIProviderType {
   proxyLogs: string;
   upstreamLogs: string;
   metrics: Metrics[];
-  getConnectionStatus: () => "connected" | "connecting" | "disconnected";
+  getConnectionStatus: () => ConnectionState;
 }
 
 interface Metrics {
@@ -64,7 +65,7 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
     });
   }, []);
 
-  const getConnectionStatus = useCallback(() => {
+  const getConnectionStatus = useCallback((): ConnectionState => {
     if (apiEventSource.current?.readyState === EventSource.OPEN) {
       return "connected";
     } else if (apiEventSource.current?.readyState === EventSource.CONNECTING) {
