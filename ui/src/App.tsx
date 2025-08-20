@@ -34,11 +34,11 @@ function App() {
                 contentEditable
                 suppressContentEditableWarning
                 className="flex items-center p-0 outline-none hover:bg-gray-100 dark:hover:bg-gray-700 rounded px-1"
-                onBlur={(e) => handleTitleChange(e.currentTarget.textContent)}
+                onBlur={(e) => handleTitleChange(e.currentTarget.textContent || "(set title)")}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
-                    handleTitleChange(e.currentTarget.textContent);
+                    handleTitleChange(e.currentTarget.textContent || "(set title)");
                     e.currentTarget.blur();
                   }
                 }}

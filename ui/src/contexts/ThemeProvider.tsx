@@ -12,7 +12,6 @@ type ThemeContextType = {
   // for managing the window title and connection state information
   appTitle: string;
   setAppTitle: (title: string) => void;
-  connectionState: ConnectionState;
   setConnectionState: (state: ConnectionState) => void;
 };
 
@@ -81,7 +80,6 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
         isNarrow,
         appTitle,
         setAppTitle,
-        connectionState,
         setConnectionState,
       }}
     >
