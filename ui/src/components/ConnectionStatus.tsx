@@ -1,21 +1,11 @@
 import { useAPI } from "../contexts/APIProvider";
-import { useEffect, useState, useMemo } from "react";
+import { useMemo } from "react";
 
-type ConnectionStatus = "disconnected" | "connecting" | "connected";
-
-const ConnectionStatus = () => {
-  const { getConnectionStatus } = useAPI();
-  const [eventStreamStatus, setEventStreamStatus] = useState<ConnectionStatus>("disconnected");
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setEventStreamStatus(getConnectionStatus());
-    }, 1000);
-    return () => clearInterval(interval);
-  });
+const ConnectionStatusIcon = () => {
+  const { connectionStatus } = useAPI();
 
   const eventStatusColor = useMemo(() => {
-    switch (eventStreamStatus) {
+    switch (connectionStatus) {
       case "connected":
         return "bg-green-500";
       case "connecting":
@@ -24,13 +14,13 @@ const ConnectionStatus = () => {
       default:
         return "bg-red-500";
     }
-  }, [eventStreamStatus]);
+  }, [connectionStatus]);
 
   return (
-    <div className="flex items-center" title={`event stream: ${eventStreamStatus}`}>
+    <div className="flex items-center" title={`event stream: ${connectionStatus}`}>
       <span className={`inline-block w-3 h-3 rounded-full ${eventStatusColor} mr-2`}></span>
     </div>
   );
 };
 
-export default ConnectionStatus;
+export default ConnectionStatusIcon;
