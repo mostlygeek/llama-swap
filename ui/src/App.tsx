@@ -5,11 +5,11 @@ import { useAPI } from "./contexts/APIProvider";
 import LogViewerPage from "./pages/LogViewer";
 import ModelPage from "./pages/Models";
 import ActivityPage from "./pages/Activity";
-import ConnectionStatus from "./components/ConnectionStatus";
+import ConnectionStatusIcon from "./components/ConnectionStatus";
 import { RiSunFill, RiMoonFill } from "react-icons/ri";
 
 function App() {
-  const { isNarrow, toggleTheme, isDarkMode, appTitle, setAppTitle, connectionState, setConnectionState } = useTheme();
+  const { isNarrow, toggleTheme, isDarkMode, appTitle, setAppTitle, setConnectionState } = useTheme();
   const handleTitleChange = useCallback(
     (newTitle: string) => {
       setAppTitle(newTitle.replace(/\n/g, "").trim().substring(0, 64) || "llama-swap");
@@ -17,18 +17,12 @@ function App() {
     [setAppTitle]
   );
 
-  const { getConnectionStatus } = useAPI();
+  const { connectionStatus } = useAPI();
 
   // Synchronize the window.title connections state with the actual connection state
   useEffect(() => {
-    const interval = setInterval(() => {
-      const newState = getConnectionStatus();
-      if (newState !== connectionState) {
-        setConnectionState(newState);
-      }
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
+    setConnectionState(connectionStatus);
+  }, [connectionStatus]);
 
   return (
     <Router basename="/ui/">
@@ -56,18 +50,16 @@ function App() {
               <NavLink to="/" className={({ isActive }) => (isActive ? "navlink active" : "navlink")}>
                 Logs
               </NavLink>
-
               <NavLink to="/models" className={({ isActive }) => (isActive ? "navlink active" : "navlink")}>
                 Models
               </NavLink>
-
               <NavLink to="/activity" className={({ isActive }) => (isActive ? "navlink active" : "navlink")}>
                 Activity
               </NavLink>
               <button className="" onClick={toggleTheme}>
                 {isDarkMode ? <RiMoonFill /> : <RiSunFill />}
               </button>
-              <ConnectionStatus />
+              <ConnectionStatusIcon />
             </div>
           </div>
         </nav>

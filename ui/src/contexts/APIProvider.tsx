@@ -21,7 +21,7 @@ interface APIProviderType {
   proxyLogs: string;
   upstreamLogs: string;
   metrics: Metrics[];
-  getConnectionStatus: () => ConnectionState;
+  connectionStatus: ConnectionState;
 }
 
 interface Metrics {
@@ -54,6 +54,7 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
   const [proxyLogs, setProxyLogs] = useState("");
   const [upstreamLogs, setUpstreamLogs] = useState("");
   const [metrics, setMetrics] = useState<Metrics[]>([]);
+  const [connectionStatus, setConnectionState] = useState<ConnectionState>("disconnected");
   const apiEventSource = useRef<EventSource | null>(null);
 
   const [models, setModels] = useState<Model[]>([]);
@@ -63,16 +64,6 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
       const updatedLog = prev + newData;
       return updatedLog.length > LOG_LENGTH_LIMIT ? updatedLog.slice(-LOG_LENGTH_LIMIT) : updatedLog;
     });
-  }, []);
-
-  const getConnectionStatus = useCallback((): ConnectionState => {
-    if (apiEventSource.current?.readyState === EventSource.OPEN) {
-      return "connected";
-    } else if (apiEventSource.current?.readyState === EventSource.CONNECTING) {
-      return "connecting";
-    } else {
-      return "disconnected";
-    }
   }, []);
 
   const enableAPIEvents = useCallback((enabled: boolean) => {
@@ -87,7 +78,9 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
     const initialDelay = 1000; // 1 second
 
     const connect = () => {
+      apiEventSource.current = null;
       const eventSource = new EventSource("/api/events");
+      setConnectionState("connecting");
 
       eventSource.onopen = () => {
         // clear everything out on connect to keep things in sync
@@ -95,6 +88,9 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
         setUpstreamLogs("");
         setMetrics([]); // clear metrics on reconnect
         setModels([]); // clear models on reconnect
+        apiEventSource.current = eventSource;
+        retryCount = 0;
+        setConnectionState("connected");
       };
 
       eventSource.onmessage = (e: MessageEvent) => {
@@ -139,14 +135,14 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
           console.error(e.data, err);
         }
       };
+
       eventSource.onerror = () => {
         eventSource.close();
         retryCount++;
         const delay = Math.min(initialDelay * Math.pow(2, retryCount - 1), 5000);
+        setConnectionState("disconnected");
         setTimeout(connect, delay);
       };
-
-      apiEventSource.current = eventSource;
     };
 
     connect();
@@ -214,7 +210,7 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
       proxyLogs,
       upstreamLogs,
       metrics,
-      getConnectionStatus,
+      connectionStatus,
     }),
     [models, listModels, unloadAllModels, loadModel, enableAPIEvents, proxyLogs, upstreamLogs, metrics]
   );
