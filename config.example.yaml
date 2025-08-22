@@ -129,6 +129,15 @@ models:
       # - recommended to stick to sampling parameters
       strip_params: "temperature, top_p, top_k"
 
+    # concurrencyLimit: overrides the allowed number of active parallel requests to a model
+    # - optional, default: 0
+    # - useful for limiting the number of active parallel requests a model can process
+    # - must be set per model
+    # - any number greater than 0 will override the internal default value of 10
+    # - any requests that exceeds the limit will receive an HTTP 429 Too Many Requests response
+    # - recommended to be omitted and the default used
+    concurrencyLimit: 0
+
   # Unlisted model example:
   "qwen-unlisted":
     # unlisted: boolean, true or false
