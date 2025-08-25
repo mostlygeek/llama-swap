@@ -65,7 +65,8 @@ func main() {
 	}
 
 	// Support for watching config and reloading when it changes
-	reloadProxyManager := func() {
+	var reloadProxyManager func()
+	reloadProxyManager = func() {
 		if currentPM, ok := srv.Handler.(*proxy.ProxyManager); ok {
 			config, err = proxy.LoadConfig(*configPath)
 			if err != nil {
@@ -75,7 +76,9 @@ func main() {
 
 			fmt.Println("Configuration Changed")
 			currentPM.Shutdown()
-			srv.Handler = proxy.New(config)
+			newPM := proxy.New(config)
+			newPM.SetAdminControls(*configPath, *watchConfig, reloadProxyManager)
+			srv.Handler = newPM
 			fmt.Println("Configuration Reloaded")
 
 			// wait a few seconds and tell any UI to reload
@@ -90,7 +93,9 @@ func main() {
 				fmt.Printf("Error, unable to load configuration: %v\n", err)
 				os.Exit(1)
 			}
-			srv.Handler = proxy.New(config)
+			newPM := proxy.New(config)
+			newPM.SetAdminControls(*configPath, *watchConfig, reloadProxyManager)
+			srv.Handler = newPM
 		}
 	}
 

@@ -42,6 +42,11 @@ type ProxyManager struct {
 	// shutdown signaling
 	shutdownCtx    context.Context
 	shutdownCancel context.CancelFunc
+
+	// admin controls wiring
+	configPath         string
+	reloadCallback     func()
+	watchConfigEnabled bool
 }
 
 func New(config Config) *ProxyManager {
@@ -621,4 +626,12 @@ func (pm *ProxyManager) findGroupByModelName(modelName string) *ProcessGroup {
 		}
 	}
 	return nil
+}
+
+// SetAdminControls wires admin-related controls into the ProxyManager.
+// These are carried for future admin APIs and safe reload operations.
+func (pm *ProxyManager) SetAdminControls(configPath string, watchEnabled bool, reload func()) {
+	pm.configPath = configPath
+	pm.watchConfigEnabled = watchEnabled
+	pm.reloadCallback = reload
 }
