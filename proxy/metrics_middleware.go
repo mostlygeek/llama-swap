@@ -65,27 +65,35 @@ func (rec *MetricsRecorder) processBody(body []byte) {
 	if rec.isStreaming {
 		rec.processStreamingResponse(body)
 	} else {
-		// debug print
-		fmt.Printf("Non-streaming response: %s\n", string(body))
 		rec.processNonStreamingResponse(body)
 	}
 }
 
 func (rec *MetricsRecorder) parseAndRecordMetrics(jsonData gjson.Result) bool {
 	usage := jsonData.Get("usage")
-	if !usage.Exists() {
+	timings := jsonData.Get("timings")
+	if !usage.Exists() && !timings.Exists() {
 		return false
 	}
 
 	// default values
-	outputTokens := int(jsonData.Get("usage.completion_tokens").Int())
-	inputTokens := int(jsonData.Get("usage.prompt_tokens").Int())
+	outputTokens := 0
+	inputTokens := 0
+
+	// timings data
 	tokensPerSecond := -1.0
 	promptPerSecond := -1.0
 	durationMs := int(time.Since(rec.startTime).Milliseconds())
 
+	if usage.Exists() {
+		outputTokens = int(jsonData.Get("usage.completion_tokens").Int())
+		inputTokens = int(jsonData.Get("usage.prompt_tokens").Int())
+	}
+
 	// use llama-server's timing data for tok/sec and duration as it is more accurate
-	if timings := jsonData.Get("timings"); timings.Exists() {
+	if timings.Exists() {
+		inputTokens = int(jsonData.Get("timings.prompt_n").Int())
+		outputTokens = int(jsonData.Get("timings.predicted_n").Int())
 		promptPerSecond = jsonData.Get("timings.prompt_per_second").Float()
 		tokensPerSecond = jsonData.Get("timings.predicted_per_second").Float()
 		durationMs = int(jsonData.Get("timings.prompt_ms").Float() + jsonData.Get("timings.predicted_ms").Float())
