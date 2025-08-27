@@ -193,11 +193,14 @@ func (pm *ProxyManager) setupGinEngine() {
 
 	// Support embeddings and reranking
 	pm.ginEngine.POST("/v1/embeddings", mm, pm.proxyOAIHandler)
+
+	// llama-server's /reranking endpoint + aliases
+	pm.ginEngine.POST("/reranking", mm, pm.proxyOAIHandler)
+	pm.ginEngine.POST("/rerank", mm, pm.proxyOAIHandler)
 	pm.ginEngine.POST("/v1/rerank", mm, pm.proxyOAIHandler)
 	pm.ginEngine.POST("/v1/reranking", mm, pm.proxyOAIHandler)
-	pm.ginEngine.POST("/rerank", mm, pm.proxyOAIHandler)
 
-	// support infill (llama-server) endpoint
+	// llama-server's /infill endpoint for code infilling
 	pm.ginEngine.POST("/infill", mm, pm.proxyOAIHandler)
 
 	// Support audio/speech endpoint
