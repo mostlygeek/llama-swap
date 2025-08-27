@@ -65,6 +65,8 @@ func (rec *MetricsRecorder) processBody(body []byte) {
 	if rec.isStreaming {
 		rec.processStreamingResponse(body)
 	} else {
+		// debug print
+		fmt.Printf("Non-streaming response: %s\n", string(body))
 		rec.processNonStreamingResponse(body)
 	}
 }

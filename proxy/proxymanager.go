@@ -191,11 +191,14 @@ func (pm *ProxyManager) setupGinEngine() {
 	// Support legacy /v1/completions api, see issue #12
 	pm.ginEngine.POST("/v1/completions", mm, pm.proxyOAIHandler)
 
-	// Support embeddings
+	// Support embeddings and reranking
 	pm.ginEngine.POST("/v1/embeddings", mm, pm.proxyOAIHandler)
 	pm.ginEngine.POST("/v1/rerank", mm, pm.proxyOAIHandler)
 	pm.ginEngine.POST("/v1/reranking", mm, pm.proxyOAIHandler)
 	pm.ginEngine.POST("/rerank", mm, pm.proxyOAIHandler)
+
+	// support infill (llama-server) endpoint
+	pm.ginEngine.POST("/infill", mm, pm.proxyOAIHandler)
 
 	// Support audio/speech endpoint
 	pm.ginEngine.POST("/v1/audio/speech", pm.proxyOAIHandler)
