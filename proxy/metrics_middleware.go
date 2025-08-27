@@ -5,11 +5,19 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
+
+type MetricsRecorder struct {
+	metricsMonitor *MetricsMonitor
+	realModelName  string
+	//	isStreaming    bool
+	startTime time.Time
+}
 
 // MetricsMiddleware sets up the MetricsResponseWriter for capturing upstream requests
 func MetricsMiddleware(pm *ProxyManager) gin.HandlerFunc {
@@ -41,31 +49,19 @@ func MetricsMiddleware(pm *ProxyManager) gin.HandlerFunc {
 			metricsRecorder: &MetricsRecorder{
 				metricsMonitor: pm.metricsMonitor,
 				realModelName:  realModelName,
-				isStreaming:    gjson.GetBytes(bodyBytes, "stream").Bool(),
 				startTime:      time.Now(),
 			},
 		}
 		c.Writer = writer
 		c.Next()
 
-		rec := writer.metricsRecorder
-		rec.processBody(writer.body)
-	}
-}
+		// check for streaming response
+		if strings.Contains(c.Writer.Header().Get("Content-Type"), "text/event-stream") {
+			writer.metricsRecorder.processStreamingResponse(writer.body)
+		} else {
+			writer.metricsRecorder.processNonStreamingResponse(writer.body)
+		}
 
-type MetricsRecorder struct {
-	metricsMonitor *MetricsMonitor
-	realModelName  string
-	isStreaming    bool
-	startTime      time.Time
-}
-
-// processBody handles response processing after request completes
-func (rec *MetricsRecorder) processBody(body []byte) {
-	if rec.isStreaming {
-		rec.processStreamingResponse(body)
-	} else {
-		rec.processNonStreamingResponse(body)
 	}
 }
 
