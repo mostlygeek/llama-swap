@@ -836,24 +836,24 @@ func TestProxyManager_HealthEndpoint(t *testing.T) {
 
 // Ensure the custom llama-server /completion endpoint proxies correctly
 func TestProxyManager_CompletionEndpoint(t *testing.T) {
-    config := AddDefaultGroupToConfig(Config{
-        HealthCheckTimeout: 15,
-        Models: map[string]ModelConfig{
-            "model1": getTestSimpleResponderConfig("model1"),
-        },
-        LogLevel: "error",
-    })
+	config := AddDefaultGroupToConfig(Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]ModelConfig{
+			"model1": getTestSimpleResponderConfig("model1"),
+		},
+		LogLevel: "error",
+	})
 
-    proxy := New(config)
-    defer proxy.StopProcesses(StopWaitForInflightRequest)
+	proxy := New(config)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
 
-    reqBody := `{"model":"model1"}`
-    req := httptest.NewRequest("POST", "/completion", bytes.NewBufferString(reqBody))
-    w := httptest.NewRecorder()
+	reqBody := `{"model":"model1"}`
+	req := httptest.NewRequest("POST", "/completion", bytes.NewBufferString(reqBody))
+	w := httptest.NewRecorder()
 
-    proxy.ServeHTTP(w, req)
-    assert.Equal(t, http.StatusOK, w.Code)
-    assert.Contains(t, w.Body.String(), "model1")
+	proxy.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "model1")
 }
 
 func TestProxyManager_StartupHooks(t *testing.T) {
