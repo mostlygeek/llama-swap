@@ -211,6 +211,10 @@ func (pm *ProxyManager) setupGinEngine() {
 	pm.ginEngine.POST("/asr", pm.proxyASRHandler)
 	pm.ginEngine.POST("/detect-language", pm.proxyDetectLanguageHandler)
 
+	// Support custom Marker-api endpoints
+	pm.ginEngine.POST("/marker", pm.proxyMarkerHandler)
+	pm.ginEngine.POST("/marker/upload", pm.proxyMarkerUpHandler)
+	
 	pm.ginEngine.GET("/v1/models", pm.listModelsHandler)
 
 	// in proxymanager_loghandlers.go
@@ -438,6 +442,36 @@ func (pm *ProxyManager) proxyDetectLanguageHandler(c *gin.Context) {
 
     // Always route to /detect-language on the backend
     c.Request.URL.Path = "/detect-language"
+
+    processGroup.ProxyRequest(requestedModel, c.Writer, c.Request)
+}
+
+func (pm *ProxyManager) proxyMarkerHandler(c *gin.Context) {
+    requestedModel := "marker"
+
+    processGroup, _, err := pm.swapProcessGroup(requestedModel)
+    if err != nil {
+        pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
+        return
+    }
+
+    // Always route to /marker on the backend
+    c.Request.URL.Path = "/marker"
+
+    processGroup.ProxyRequest(requestedModel, c.Writer, c.Request)
+}
+
+func (pm *ProxyManager) proxyMarkerUpHandler(c *gin.Context) {
+    requestedModel := "marker"
+
+    processGroup, _, err := pm.swapProcessGroup(requestedModel)
+    if err != nil {
+        pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
+        return
+    }
+
+    // Always route to /marker/upload on the backend
+    c.Request.URL.Path = "/marker/upload"
 
     processGroup.ProxyRequest(requestedModel, c.Writer, c.Request)
 }
