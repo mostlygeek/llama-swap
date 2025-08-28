@@ -203,6 +203,9 @@ func (pm *ProxyManager) setupGinEngine() {
 	// llama-server's /infill endpoint for code infilling
 	pm.ginEngine.POST("/infill", mm, pm.proxyOAIHandler)
 
+	// llama-server's /completion endpoint
+	pm.ginEngine.POST("/completion", mm, pm.proxyOAIHandler)
+
 	// Support audio/speech endpoint
 	pm.ginEngine.POST("/v1/audio/speech", pm.proxyOAIHandler)
 	pm.ginEngine.POST("/v1/audio/transcriptions", pm.proxyOAIPostFormHandler)
