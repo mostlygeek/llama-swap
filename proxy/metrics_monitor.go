@@ -15,6 +15,7 @@ type TokenMetrics struct {
 	Model           string    `json:"model"`
 	InputTokens     int       `json:"input_tokens"`
 	OutputTokens    int       `json:"output_tokens"`
+	PromptPerSecond float64   `json:"prompt_per_second"`
 	TokensPerSecond float64   `json:"tokens_per_second"`
 	DurationMs      int       `json:"duration_ms"`
 }

@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, type ReactNode, useMemo, useState } from "react";
 import { usePersistentState } from "../hooks/usePersistentState";
+import type { ConnectionState } from "../lib/types";
 
 type ScreenWidth = "xs" | "sm" | "md" | "lg" | "xl" | "2xl";
 type ThemeContextType = {
@@ -7,6 +8,11 @@ type ThemeContextType = {
   screenWidth: ScreenWidth;
   isNarrow: boolean;
   toggleTheme: () => void;
+
+  // for managing the window title and connection state information
+  appTitle: string;
+  setAppTitle: (title: string) => void;
+  setConnectionState: (state: ConnectionState) => void;
 };
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
@@ -16,6 +22,17 @@ type ThemeProviderProps = {
 };
 
 export function ThemeProvider({ children }: ThemeProviderProps) {
+  const [appTitle, setAppTitle] = usePersistentState("app-title", "llama-swap");
+  const [connectionState, setConnectionState] = useState<ConnectionState>("disconnected");
+
+  /**
+   * Set the document.title with informative information
+   */
+  useEffect(() => {
+    const connectionIcon = connectionState === "connecting" ? "🟡" : connectionState === "connected" ? "🟢" : "🔴";
+    document.title = connectionIcon + " " + appTitle; // Set initial title
+  }, [appTitle, connectionState]);
+
   const [isDarkMode, setIsDarkMode] = usePersistentState<boolean>("theme", false);
   const [screenWidth, setScreenWidth] = useState<ScreenWidth>("md"); // Default to md
 
@@ -55,7 +72,19 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
   }, [screenWidth]);
 
   return (
-    <ThemeContext.Provider value={{ isDarkMode, toggleTheme, screenWidth, isNarrow }}>{children}</ThemeContext.Provider>
+    <ThemeContext.Provider
+      value={{
+        isDarkMode,
+        toggleTheme,
+        screenWidth,
+        isNarrow,
+        appTitle,
+        setAppTitle,
+        setConnectionState,
+      }}
+    >
+      {children}
+    </ThemeContext.Provider>
   );
 }
 

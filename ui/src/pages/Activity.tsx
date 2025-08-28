@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useMemo } from "react";
 import { useAPI } from "../contexts/APIProvider";
 
 const formatTimestamp = (timestamp: string): string => {
@@ -15,24 +15,9 @@ const formatDuration = (ms: number): string => {
 
 const ActivityPage = () => {
   const { metrics } = useAPI();
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (metrics.length > 0) {
-      setError(null);
-    }
+  const sortedMetrics = useMemo(() => {
+    return [...metrics].sort((a, b) => b.id - a.id);
   }, [metrics]);
-
-  if (error) {
-    return (
-      <div className="p-6">
-        <h1 className="text-2xl font-bold mb-4">Activity</h1>
-        <div className="bg-red-50 border border-red-200 rounded-md p-4">
-          <p className="text-red-800">{error}</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="p-6">
@@ -47,21 +32,25 @@ const ActivityPage = () => {
           <table className="min-w-full divide-y">
             <thead>
               <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider">Id</th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Timestamp</th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Model</th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Input Tokens</th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Output Tokens</th>
+                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Prompt Processing</th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Generation Speed</th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Duration</th>
               </tr>
             </thead>
             <tbody className="divide-y">
-              {metrics.map((metric, index) => (
-                <tr key={`${metric.id}-${index}`}>
+              {sortedMetrics.map((metric) => (
+                <tr key={`metric_${metric.id}`}>
+                  <td className="px-4 py-4 whitespace-nowrap text-sm">{metric.id + 1 /* un-zero index */}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">{formatTimestamp(metric.timestamp)}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">{metric.model}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">{metric.input_tokens.toLocaleString()}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">{metric.output_tokens.toLocaleString()}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm">{formatSpeed(metric.prompt_per_second)}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">{formatSpeed(metric.tokens_per_second)}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">{formatDuration(metric.duration_ms)}</td>
                 </tr>

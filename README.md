@@ -18,9 +18,11 @@ Written in golang, it is very easy to install (single binary with no dependencie
   - `v1/completions`
   - `v1/chat/completions`
   - `v1/embeddings`
-  - `v1/rerank`, `v1/reranking`, `rerank`
   - `v1/audio/speech` ([#36](https://github.com/mostlygeek/llama-swap/issues/36))
   - `v1/audio/transcriptions` ([docs](https://github.com/mostlygeek/llama-swap/issues/41#issuecomment-2722637867))
+- ✅ llama-server (llama.cpp) supported endpoints:
+  - `v1/rerank`, `v1/reranking`, `/rerank`
+  - `/infill` - for code infilling
 - ✅ llama-swap custom API endpoints
   - `/ui` - web UI
   - `/log` - remote log monitoring
@@ -31,8 +33,9 @@ Written in golang, it is very easy to install (single binary with no dependencie
 - ✅ Run multiple models at once with `Groups` ([#107](https://github.com/mostlygeek/llama-swap/issues/107))
 - ✅ Automatic unloading of models after timeout by setting a `ttl`
 - ✅ Use any local OpenAI compatible server (llama.cpp, vllm, tabbyAPI, etc)
-- ✅ Docker and Podman support
+- ✅ Reliable Docker and Podman support with `cmdStart` and `cmdStop`
 - ✅ Full control over server settings per model
+- ✅ Preload models on startup with `hooks` ([#235](https://github.com/mostlygeek/llama-swap/pull/235))
 
 ## How does llama-swap work?
 
@@ -42,9 +45,9 @@ In the most basic configuration llama-swap handles one model at a time. For more
 
 ## config.yaml
 
-llama-swap is managed entirely through a yaml configuration file. 
+llama-swap is managed entirely through a yaml configuration file.
 
-It can be very minimal to start: 
+It can be very minimal to start:
 
 ```yaml
 models:
@@ -55,7 +58,7 @@ models:
       --port ${PORT}
 ```
 
-However, there are many more capabilities that llama-swap supports: 
+However, there are many more capabilities that llama-swap supports:
 
 - `groups` to run multiple models at once
 - `ttl` to automatically unload models
@@ -90,7 +93,7 @@ llama-swap can be installed in multiple ways
 
 ### Docker Install ([download images](https://github.com/mostlygeek/llama-swap/pkgs/container/llama-swap))
 
-Docker images with llama-swap and llama-server are built nightly. 
+Docker images with llama-swap and llama-server are built nightly.
 
 ```shell
 # use CPU inference comes with the example config above
@@ -137,10 +140,10 @@ $ docker run -it --rm --runtime nvidia -p 9292:8080 \
 
 ### Homebrew Install (macOS/Linux)
 
-The latest release of `llama-swap` can be installed via [Homebrew](https://brew.sh). 
+The latest release of `llama-swap` can be installed via [Homebrew](https://brew.sh).
 
 ```shell
-# Set up tap and install formula 
+# Set up tap and install formula
 brew tap mostlygeek/llama-swap
 brew install llama-swap
 # Run llama-swap

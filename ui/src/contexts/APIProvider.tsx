@@ -1,4 +1,5 @@
 import { useRef, createContext, useState, useContext, useEffect, useCallback, useMemo, type ReactNode } from "react";
+import type { ConnectionState } from "../lib/types";
 
 type ModelStatus = "ready" | "starting" | "stopping" | "stopped" | "shutdown" | "unknown";
 const LOG_LENGTH_LIMIT = 1024 * 100; /* 100KB of log data */
@@ -20,6 +21,7 @@ interface APIProviderType {
   proxyLogs: string;
   upstreamLogs: string;
   metrics: Metrics[];
+  connectionStatus: ConnectionState;
 }
 
 interface Metrics {
@@ -28,6 +30,7 @@ interface Metrics {
   model: string;
   input_tokens: number;
   output_tokens: number;
+  prompt_per_second: number;
   tokens_per_second: number;
   duration_ms: number;
 }
@@ -51,6 +54,7 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
   const [proxyLogs, setProxyLogs] = useState("");
   const [upstreamLogs, setUpstreamLogs] = useState("");
   const [metrics, setMetrics] = useState<Metrics[]>([]);
+  const [connectionStatus, setConnectionState] = useState<ConnectionState>("disconnected");
   const apiEventSource = useRef<EventSource | null>(null);
 
   const [models, setModels] = useState<Model[]>([]);
@@ -74,7 +78,20 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
     const initialDelay = 1000; // 1 second
 
     const connect = () => {
+      apiEventSource.current = null;
       const eventSource = new EventSource("/api/events");
+      setConnectionState("connecting");
+
+      eventSource.onopen = () => {
+        // clear everything out on connect to keep things in sync
+        setProxyLogs("");
+        setUpstreamLogs("");
+        setMetrics([]); // clear metrics on reconnect
+        setModels([]); // clear models on reconnect
+        apiEventSource.current = eventSource;
+        retryCount = 0;
+        setConnectionState("connected");
+      };
 
       eventSource.onmessage = (e: MessageEvent) => {
         try {
@@ -107,9 +124,9 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
 
             case "metrics":
               {
-                const newMetric = JSON.parse(message.data) as Metrics;
+                const newMetrics = JSON.parse(message.data) as Metrics[];
                 setMetrics((prevMetrics) => {
-                  return [newMetric, ...prevMetrics];
+                  return [...newMetrics, ...prevMetrics];
                 });
               }
               break;
@@ -118,14 +135,14 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
           console.error(e.data, err);
         }
       };
+
       eventSource.onerror = () => {
         eventSource.close();
         retryCount++;
         const delay = Math.min(initialDelay * Math.pow(2, retryCount - 1), 5000);
+        setConnectionState("disconnected");
         setTimeout(connect, delay);
       };
-
-      apiEventSource.current = eventSource;
     };
 
     connect();
@@ -193,6 +210,7 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
       proxyLogs,
       upstreamLogs,
       metrics,
+      connectionStatus,
     }),
     [models, listModels, unloadAllModels, loadModel, enableAPIEvents, proxyLogs, upstreamLogs, metrics]
   );

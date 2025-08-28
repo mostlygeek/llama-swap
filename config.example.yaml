@@ -1,9 +1,17 @@
 # llama-swap YAML configuration example
 # -------------------------------------
 #
+# 💡 Tip - Use an LLM with this file!
+# ====================================
+#  This example configuration is written to be LLM friendly. Try
+#  copying this file into an LLM and asking it to explain or generate
+#  sections for you.
+# ====================================
+
+# Usage notes:
 # - Below are all the available configuration options for llama-swap.
-# - Settings with a default value, or noted as optional can be omitted.
-# - Settings that are marked required must be in your configuration file
+# - Settings noted as "required" must be in your configuration file
+# - Settings noted as "optional" can be omitted
 
 # healthCheckTimeout: number of seconds to wait for a model to be ready to serve requests
 # - optional, default: 120
@@ -27,9 +35,9 @@ metricsMaxInMemory: 1000
 # - it is automatically incremented for every model that uses it
 startPort: 10001
 
-# macros: sets a dictionary of string:string pairs
+# macros: a dictionary of string substitutions
 # - optional, default: empty dictionary
-# - these are reusable snippets
+# - macros are reusable snippets
 # - used in a model's cmd, cmdStop, proxy and checkEndpoint
 # - useful for reducing common configuration settings
 macros:
@@ -92,44 +100,55 @@ models:
 
     # checkEndpoint: URL path to check if the server is ready
     # - optional, default: /health
-    # - use "none" to skip endpoint ready checking
     # - endpoint is expected to return an HTTP 200 response
-    # - all requests wait until the endpoint is ready (or fails)
+    # - all requests wait until the endpoint is ready or fails
+    # - use "none" to skip endpoint health checking
     checkEndpoint: /custom-endpoint
 
-    # ttl: automatically unload the model after this many seconds
+    # ttl: automatically unload the model after ttl seconds
     # - optional, default: 0
     # - ttl values must be a value greater than 0
     # - a value of 0 disables automatic unloading of the model
     ttl: 60
 
-    # useModelName: overrides the model name that is sent to upstream server
+    # useModelName: override the model name that is sent to upstream server
     # - optional, default: ""
-    # - useful when the upstream server expects a specific model name or format
+    # - useful for when the upstream server expects a specific model name that
+    #   is different from the model's ID
     useModelName: "qwen:qwq"
 
     # filters: a dictionary of filter settings
     # - optional, default: empty dictionary
+    # - only strip_params is currently supported
     filters:
       # strip_params: a comma separated list of parameters to remove from the request
       # - optional, default: ""
-      # - useful for preventing overriding of default server params by requests
-      # - `model` parameter is never removed
+      # - useful for server side enforcement of sampling parameters
+      # - the `model` parameter can never be removed
       # - can be any JSON key in the request body
       # - recommended to stick to sampling parameters
       strip_params: "temperature, top_p, top_k"
 
+    # concurrencyLimit: overrides the allowed number of active parallel requests to a model
+    # - optional, default: 0
+    # - useful for limiting the number of active parallel requests a model can process
+    # - must be set per model
+    # - any number greater than 0 will override the internal default value of 10
+    # - any requests that exceeds the limit will receive an HTTP 429 Too Many Requests response
+    # - recommended to be omitted and the default used
+    concurrencyLimit: 0
+
   # Unlisted model example:
   "qwen-unlisted":
-    # unlisted: true or false
+    # unlisted: boolean, true or false
     # - optional, default: false
-    # - unlisted models do not show up in /v1/models or /upstream lists
+    # - unlisted models do not show up in /v1/models api requests
     # - can be requested as normal through all apis
     unlisted: true
     cmd: llama-server --port ${PORT} -m Llama-3.2-1B-Instruct-Q4_K_M.gguf -ngl 0
 
   # Docker example:
-  # container run times like Docker and Podman can also be used with a
+  # container run times like Docker and Podman can be used reliably with a
   # a combination of cmd and cmdStop.
   "docker-llama":
     proxy: "http://127.0.0.1:${PORT}"
@@ -142,24 +161,26 @@ models:
     # cmdStop: command to run to stop the model gracefully
     # - optional, default: ""
     # - useful for stopping commands managed by another system
-    # - on POSIX systems: a SIGTERM is sent for graceful shutdown
-    # - on Windows, taskkill is used
-    # - processes are given 5 seconds to shutdown until they are forcefully killed
     # - the upstream's process id is available in the ${PID} macro
+    #
+    # When empty, llama-swap has this default behaviour:
+    # - on POSIX systems: a SIGTERM signal is sent
+    # - on Windows, calls taskkill to stop the process
+    # - processes have 5 seconds to shutdown until forceful termination is attempted
     cmdStop: docker stop dockertest
 
 # groups: a dictionary of group settings
 # - optional, default: empty dictionary
-# - provide advanced controls over model swapping behaviour.
-# - Using groups some models can be kept loaded indefinitely, while others are swapped out.
-# - model ids must be defined in the Models section
+# - provides advanced controls over model swapping behaviour
+# - using groups some models can be kept loaded indefinitely, while others are swapped out
+# - model IDs must be defined in the Models section
 # - a model can only be a member of one group
 # - group behaviour is controlled via the `swap`, `exclusive` and `persistent` fields
 # - see issue #109 for details
 #
 # NOTE: the example below uses model names that are not defined above for demonstration purposes
 groups:
-  # group1 is same as the default behaviour of llama-swap where only one model is allowed
+  # group1 works the same as the default behaviour of llama-swap where only one model is allowed
   # to run a time across the whole llama-swap instance
   "group1":
     # swap: controls the model swapping behaviour in within the group
@@ -181,10 +202,13 @@ groups:
       - "qwen-unlisted"
 
   # Example:
-  # - in this group all the models can run at the same time
-  # - when a different group loads all running models in this group are unloaded
+  # - in group2 all models can run at the same time
+  # - when a different group is loaded it causes all running models in this group to unload
   "group2":
     swap: false
+
+    # exclusive: false does not unload other groups when a model in group2 is requested
+    # - the models in group2 will be loaded but will not unload any other groups
     exclusive: false
     members:
       - "docker-llama"
@@ -207,3 +231,19 @@ groups:
       - "forever-modelA"
       - "forever-modelB"
       - "forever-modelc"
+
+# hooks: a dictionary of event triggers and actions
+# - optional, default: empty dictionary
+# - the only supported hook is on_startup
+hooks:
+  # on_startup: a dictionary of actions to perform on startup
+  # - optional, default: empty dictionary
+  # - the only supported action is preload
+  on_startup:
+        # preload: a list of model ids to load on startup
+        # - optional, default: empty list
+        # - model names must match keys in the models sections
+        # - when preloading multiple models at once, define a group
+        #   otherwise models will be loaded and swapped out
+    preload:
+      - "llama"

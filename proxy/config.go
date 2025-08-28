@@ -138,6 +138,14 @@ func (c *GroupConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	return nil
 }
 
+type HooksConfig struct {
+	OnStartup HookOnStartup `yaml:"on_startup"`
+}
+
+type HookOnStartup struct {
+	Preload []string `yaml:"preload"`
+}
+
 type Config struct {
 	HealthCheckTimeout int                    `yaml:"healthCheckTimeout"`
 	LogRequests        bool                   `yaml:"logRequests"`
@@ -155,6 +163,9 @@ type Config struct {
 
 	// automatic port assignments
 	StartPort int `yaml:"startPort"`
+
+	// hooks, see: #209
+	Hooks HooksConfig `yaml:"hooks"`
 }
 
 func (c *Config) RealModelName(search string) (string, bool) {
@@ -328,6 +339,22 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			}
 			memberUsage[member] = groupID
 		}
+	}
+
+	// clean up hooks preload
+	if len(config.Hooks.OnStartup.Preload) > 0 {
+		var toPreload []string
+		for _, modelID := range config.Hooks.OnStartup.Preload {
+			modelID = strings.TrimSpace(modelID)
+			if modelID == "" {
+				continue
+			}
+			if real, found := config.RealModelName(modelID); found {
+				toPreload = append(toPreload, real)
+			}
+		}
+
+		config.Hooks.OnStartup.Preload = toPreload
 	}
 
 	return config, nil

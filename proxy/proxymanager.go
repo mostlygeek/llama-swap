@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/mostlygeek/llama-swap/event"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -96,6 +97,35 @@ func New(config Config) *ProxyManager {
 	}
 
 	pm.setupGinEngine()
+
+	// run any startup hooks
+	if len(config.Hooks.OnStartup.Preload) > 0 {
+		// do it in the background, don't block startup -- not sure if good idea yet
+		go func() {
+			discardWriter := &DiscardWriter{}
+			for _, realModelName := range config.Hooks.OnStartup.Preload {
+				proxyLogger.Infof("Preloading model: %s", realModelName)
+				processGroup, _, err := pm.swapProcessGroup(realModelName)
+
+				if err != nil {
+					event.Emit(ModelPreloadedEvent{
+						ModelName: realModelName,
+						Success:   false,
+					})
+					proxyLogger.Errorf("Failed to preload model %s: %v", realModelName, err)
+					continue
+				} else {
+					req, _ := http.NewRequest("GET", "/", nil)
+					processGroup.ProxyRequest(realModelName, discardWriter, req)
+					event.Emit(ModelPreloadedEvent{
+						ModelName: realModelName,
+						Success:   true,
+					})
+				}
+			}
+		}()
+	}
+
 	return pm
 }
 
@@ -161,11 +191,17 @@ func (pm *ProxyManager) setupGinEngine() {
 	// Support legacy /v1/completions api, see issue #12
 	pm.ginEngine.POST("/v1/completions", mm, pm.proxyOAIHandler)
 
-	// Support embeddings
+	// Support embeddings and reranking
 	pm.ginEngine.POST("/v1/embeddings", mm, pm.proxyOAIHandler)
+
+	// llama-server's /reranking endpoint + aliases
+	pm.ginEngine.POST("/reranking", mm, pm.proxyOAIHandler)
+	pm.ginEngine.POST("/rerank", mm, pm.proxyOAIHandler)
 	pm.ginEngine.POST("/v1/rerank", mm, pm.proxyOAIHandler)
 	pm.ginEngine.POST("/v1/reranking", mm, pm.proxyOAIHandler)
-	pm.ginEngine.POST("/rerank", mm, pm.proxyOAIHandler)
+
+	// llama-server's /infill endpoint for code infilling
+	pm.ginEngine.POST("/infill", mm, pm.proxyOAIHandler)
 
 	// Support audio/speech endpoint
 	pm.ginEngine.POST("/v1/audio/speech", pm.proxyOAIHandler)
