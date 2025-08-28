@@ -364,7 +364,7 @@ func (p *Process) stopCommand() {
 
 func (p *Process) checkHealthEndpoint(healthURL string) error {
 	client := &http.Client{
-		Timeout: 500 * time.Millisecond,
+		Timeout: 2000 * time.Millisecond,
 	}
 
 	req, err := http.NewRequest("GET", healthURL, nil)
