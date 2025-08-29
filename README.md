@@ -9,9 +9,6 @@ llama-swap is a light weight, transparent proxy server that provides automatic m
 
 Written in golang, it is very easy to install (single binary with no dependencies) and configure (single yaml file). To get started, download a pre-built binary, a provided docker images or Homebrew.
 
-> [!NOTE]
-> ⭐️ Star this project to help others discover it! Every star helps boost visibility in searches and showcases community support.
-
 ## Features:
 
 - ✅ Easy to deploy: single binary with no dependencies
@@ -209,5 +206,8 @@ Any OpenAI compatible server would work. llama-swap was originally designed for 
 For Python based inference servers like vllm or tabbyAPI it is recommended to run them via podman or docker. This provides clean environment isolation as well as responding correctly to `SIGTERM` signals to shutdown.
 
 ## Star History
+
+> [!NOTE]
+> ⭐️ Star this project to help others discover it! 
 
 [![Star History Chart](https://api.star-history.com/svg?repos=mostlygeek/llama-swap&type=Date)](https://www.star-history.com/#mostlygeek/llama-swap&Date)
