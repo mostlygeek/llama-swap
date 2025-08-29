@@ -42,7 +42,6 @@ func TestProxyManager_SwapProcessCorrectly(t *testing.T) {
 		assert.Contains(t, w.Body.String(), modelName)
 	}
 }
-
 func TestProxyManager_SwapMultiProcess(t *testing.T) {
 	config := AddDefaultGroupToConfig(Config{
 		HealthCheckTimeout: 15,

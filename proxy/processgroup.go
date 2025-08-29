@@ -60,10 +60,20 @@ func (pg *ProcessGroup) ProxyRequest(modelID string, writer http.ResponseWriter,
 	if pg.swap {
 		pg.Lock()
 		if pg.lastUsedProcess != modelID {
+
+			// is there something already running?
 			if pg.lastUsedProcess != "" {
 				pg.processes[pg.lastUsedProcess].Stop()
 			}
+
+			// wait for the request to the new model to be fully handled
+			// and prevent race conditions see issue #277
+			pg.processes[modelID].ProxyRequest(writer, request)
 			pg.lastUsedProcess = modelID
+
+			// short circuit and exit
+			pg.Unlock()
+			return nil
 		}
 		pg.Unlock()
 	}
