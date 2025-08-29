@@ -23,6 +23,7 @@ Written in golang, it is very easy to install (single binary with no dependencie
 - ✅ llama-server (llama.cpp) supported endpoints:
   - `v1/rerank`, `v1/reranking`, `/rerank`
   - `/infill` - for code infilling
+  - `/completion` - for completion endpoint
 - ✅ llama-swap custom API endpoints
   - `/ui` - web UI
   - `/log` - remote log monitoring
