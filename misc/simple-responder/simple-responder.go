@@ -153,6 +153,19 @@ func main() {
 
 	})
 
+	// llama-server compatibility: /completion
+	r.POST("/completion", func(c *gin.Context) {
+		c.Header("Content-Type", "application/json")
+		c.JSON(http.StatusOK, gin.H{
+			"responseMessage": *responseMessage,
+			"usage": gin.H{
+				"completion_tokens": 10,
+				"prompt_tokens":     25,
+				"total_tokens":      35,
+			},
+		})
+	})
+
 	// issue #41
 	r.POST("/v1/audio/transcriptions", func(c *gin.Context) {
 		// Parse the multipart form
