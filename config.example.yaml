@@ -49,6 +49,7 @@ macros:
 # - required
 # - each key is the model's ID, used in API requests
 # - model settings have default values that are used if they are not defined here
+# - the model's ID is available in the ${MODEL_ID} macro, also available in macros defined above
 # - below are examples of the various settings a model can have:
 # - available model settings: env, cmd, cmdStop, proxy, aliases, checkEndpoint, ttl, unlisted
 models:
@@ -148,12 +149,12 @@ models:
     cmd: llama-server --port ${PORT} -m Llama-3.2-1B-Instruct-Q4_K_M.gguf -ngl 0
 
   # Docker example:
-  # container run times like Docker and Podman can be used reliably with a
-  # a combination of cmd and cmdStop.
+  # container runtimes like Docker and Podman can be used reliably with
+  # a combination of cmd, cmdStop, and ${MODEL_ID}
   "docker-llama":
     proxy: "http://127.0.0.1:${PORT}"
     cmd: |
-      docker run --name dockertest
+      docker run --name ${MODEL_ID}
       --init --rm -p ${PORT}:8080 -v /mnt/nvme/models:/models
       ghcr.io/ggml-org/llama.cpp:server
       --model '/models/Qwen2.5-Coder-0.5B-Instruct-Q4_K_M.gguf'
@@ -167,7 +168,7 @@ models:
     # - on POSIX systems: a SIGTERM signal is sent
     # - on Windows, calls taskkill to stop the process
     # - processes have 5 seconds to shutdown until forceful termination is attempted
-    cmdStop: docker stop dockertest
+    cmdStop: docker stop ${MODEL_ID}
 
 # groups: a dictionary of group settings
 # - optional, default: empty dictionary
