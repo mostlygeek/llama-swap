@@ -50,8 +50,7 @@ macros:
 # - each key is the model's ID, used in API requests
 # - model settings have default values that are used if they are not defined here
 # - the model's ID is available in the ${MODEL_ID} macro, also available in macros defined above
-# - below are examples of the various settings a model can have:
-# - available model settings: env, cmd, cmdStop, proxy, aliases, checkEndpoint, ttl, unlisted
+# - below are examples of the all the settings a model can have
 models:
 
   # keys are the model names used in API requests
