@@ -237,7 +237,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 
 	- name must fit the regex ^[a-zA-Z0-9_-]+$
 	- names must be less than 64 characters (no reason, just cause)
-	- name can not be any reserved macros: PORT
+	- name can not be any reserved macros: PORT, MODEL_ID
 	- macro values must be less than 1024 characters
 	*/
 	macroNameRegex := regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
@@ -253,6 +253,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		}
 		switch macroName {
 		case "PORT":
+		case "MODEL_ID":
 			return Config{}, fmt.Errorf("macro name '%s' is reserved and cannot be used", macroName)
 		}
 	}
@@ -294,6 +295,11 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			modelConfig.CmdStop = strings.ReplaceAll(modelConfig.CmdStop, "${PORT}", nextPortStr)
 			modelConfig.Proxy = strings.ReplaceAll(modelConfig.Proxy, "${PORT}", nextPortStr)
 			nextPort++
+		}
+
+		if strings.Contains(modelConfig.Cmd, "${MODEL_ID}") || strings.Contains(modelConfig.CmdStop, "${MODEL_ID}") {
+			modelConfig.Cmd = strings.ReplaceAll(modelConfig.Cmd, "${MODEL_ID}", modelId)
+			modelConfig.CmdStop = strings.ReplaceAll(modelConfig.CmdStop, "${MODEL_ID}", modelId)
 		}
 
 		// make sure there are no unknown macros that have not been replaced
