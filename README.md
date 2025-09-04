@@ -34,7 +34,7 @@ Written in golang, it is very easy to install (single binary with no dependencie
 - ✅ Run multiple models at once with `Groups` ([#107](https://github.com/mostlygeek/llama-swap/issues/107))
 - ✅ Automatic unloading of models after timeout by setting a `ttl`
 - ✅ Use any local OpenAI compatible server (llama.cpp, vllm, tabbyAPI, etc)
-- ✅ Reliable Docker and Podman support with `cmdStart` and `cmdStop`
+- ✅ Reliable Docker and Podman support using `cmd` and `cmdStop` together
 - ✅ Full control over server settings per model
 - ✅ Preload models on startup with `hooks` ([#235](https://github.com/mostlygeek/llama-swap/pull/235))
 
