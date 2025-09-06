@@ -61,7 +61,6 @@ func MetricsMiddleware(pm *ProxyManager) gin.HandlerFunc {
 		} else {
 			writer.metricsRecorder.processNonStreamingResponse(writer.body)
 		}
-
 	}
 }
 

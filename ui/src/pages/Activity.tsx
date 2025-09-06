@@ -1,10 +1,6 @@
 import { useMemo } from "react";
 import { useAPI } from "../contexts/APIProvider";
 
-const formatTimestamp = (timestamp: string): string => {
-  return new Date(timestamp).toLocaleString();
-};
-
 const formatSpeed = (speed: number): string => {
   return speed < 0 ? "unknown" : speed.toFixed(2) + " t/s";
 };
@@ -18,21 +14,26 @@ const formatRelativeTime = (timestamp: string): string => {
   const date = new Date(timestamp);
   const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
 
+  // Handle future dates by returning "just now"
+  if (diffInSeconds < 0) {
+    return "now";
+  }
+
   if (diffInSeconds < 60) {
-    return `${diffInSeconds} second${diffInSeconds !== 1 ? "s" : ""} ago`;
+    return `${diffInSeconds}s ago`;
   }
 
   const diffInMinutes = Math.floor(diffInSeconds / 60);
   if (diffInMinutes < 60) {
-    return `${diffInMinutes} minute${diffInMinutes !== 1 ? "s" : ""} ago`;
+    return `${diffInMinutes}m ago`;
   }
 
   const diffInHours = Math.floor(diffInMinutes / 60);
   if (diffInHours < 24) {
-    return `${diffInHours} hour${diffInHours !== 1 ? "s" : ""} ago`;
+    return `${diffInHours}h ago`;
   }
 
-  return "a long time ago";
+  return "a while ago";
 };
 
 const ActivityPage = () => {
@@ -55,7 +56,7 @@ const ActivityPage = () => {
             <thead>
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider">Id</th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Timestamp</th>
+                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Time</th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Model</th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Prompt</th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Cached</th>
