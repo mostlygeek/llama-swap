@@ -62,8 +62,7 @@ const ActivityPage = () => {
                   Cached <Tooltip content="prompt tokens from cache" />
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">
-                  Prompt
-                  <Tooltip content="new prompt tokens processed" />
+                  Prompt <Tooltip content="new prompt tokens processed" />
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Generated</th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Prompt Processing</th>
