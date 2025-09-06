@@ -103,8 +103,8 @@ func main() {
 	}
 
 	// load the initial proxy manager
+	reloadProxyManager()
 	debouncedReload := debounce(time.Second, reloadProxyManager)
-	debouncedReload()
 	if *watchConfig {
 		defer event.On(func(e proxy.ConfigFileChangedEvent) {
 			if e.ReloadingState == proxy.ReloadingStateStart {
