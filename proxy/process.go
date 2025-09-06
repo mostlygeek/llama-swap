@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os/exec"
@@ -363,8 +364,18 @@ func (p *Process) stopCommand() {
 }
 
 func (p *Process) checkHealthEndpoint(healthURL string) error {
+
 	client := &http.Client{
-		Timeout: 500 * time.Millisecond,
+		// wait a short time for a tcp connection to be established
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout: 500 * time.Millisecond,
+			}).DialContext,
+		},
+
+		// give a long time to respond to the health check endpoint
+		// after the connection is established. See issue: 276
+		Timeout: 5000 * time.Millisecond,
 	}
 
 	req, err := http.NewRequest("GET", healthURL, nil)

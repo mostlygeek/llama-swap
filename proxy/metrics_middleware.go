@@ -5,11 +5,19 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
+
+type MetricsRecorder struct {
+	metricsMonitor *MetricsMonitor
+	realModelName  string
+	//	isStreaming    bool
+	startTime time.Time
+}
 
 // MetricsMiddleware sets up the MetricsResponseWriter for capturing upstream requests
 func MetricsMiddleware(pm *ProxyManager) gin.HandlerFunc {
@@ -41,49 +49,47 @@ func MetricsMiddleware(pm *ProxyManager) gin.HandlerFunc {
 			metricsRecorder: &MetricsRecorder{
 				metricsMonitor: pm.metricsMonitor,
 				realModelName:  realModelName,
-				isStreaming:    gjson.GetBytes(bodyBytes, "stream").Bool(),
 				startTime:      time.Now(),
 			},
 		}
 		c.Writer = writer
 		c.Next()
 
-		rec := writer.metricsRecorder
-		rec.processBody(writer.body)
-	}
-}
+		// check for streaming response
+		if strings.Contains(c.Writer.Header().Get("Content-Type"), "text/event-stream") {
+			writer.metricsRecorder.processStreamingResponse(writer.body)
+		} else {
+			writer.metricsRecorder.processNonStreamingResponse(writer.body)
+		}
 
-type MetricsRecorder struct {
-	metricsMonitor *MetricsMonitor
-	realModelName  string
-	isStreaming    bool
-	startTime      time.Time
-}
-
-// processBody handles response processing after request completes
-func (rec *MetricsRecorder) processBody(body []byte) {
-	if rec.isStreaming {
-		rec.processStreamingResponse(body)
-	} else {
-		rec.processNonStreamingResponse(body)
 	}
 }
 
 func (rec *MetricsRecorder) parseAndRecordMetrics(jsonData gjson.Result) bool {
 	usage := jsonData.Get("usage")
-	if !usage.Exists() {
+	timings := jsonData.Get("timings")
+	if !usage.Exists() && !timings.Exists() {
 		return false
 	}
 
 	// default values
-	outputTokens := int(jsonData.Get("usage.completion_tokens").Int())
-	inputTokens := int(jsonData.Get("usage.prompt_tokens").Int())
+	outputTokens := 0
+	inputTokens := 0
+
+	// timings data
 	tokensPerSecond := -1.0
 	promptPerSecond := -1.0
 	durationMs := int(time.Since(rec.startTime).Milliseconds())
 
+	if usage.Exists() {
+		outputTokens = int(jsonData.Get("usage.completion_tokens").Int())
+		inputTokens = int(jsonData.Get("usage.prompt_tokens").Int())
+	}
+
 	// use llama-server's timing data for tok/sec and duration as it is more accurate
-	if timings := jsonData.Get("timings"); timings.Exists() {
+	if timings.Exists() {
+		inputTokens = int(jsonData.Get("timings.prompt_n").Int())
+		outputTokens = int(jsonData.Get("timings.predicted_n").Int())
 		promptPerSecond = jsonData.Get("timings.prompt_per_second").Float()
 		tokensPerSecond = jsonData.Get("timings.predicted_per_second").Float()
 		durationMs = int(jsonData.Get("timings.prompt_ms").Float() + jsonData.Get("timings.predicted_ms").Float())

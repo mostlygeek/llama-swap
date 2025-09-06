@@ -440,3 +440,44 @@ models:
 	expectedCmd := "/user/llama.cpp/build/bin/llama-server --port 9990 --model /path/to/model.gguf -ngl 99"
 	assert.Equal(t, expectedCmd, cmdStr, "Final command does not match expected structure")
 }
+
+func TestConfig_MacroModelId(t *testing.T) {
+	content := `
+startPort: 9000
+macros:
+  "docker-llama": docker run --name ${MODEL_ID} -p ${PORT}:8080 docker_img
+  "docker-stop": docker stop ${MODEL_ID}
+
+models:
+  model1:
+    cmd: /path/to/server -p ${PORT} -hf ${MODEL_ID}
+
+  model2:
+    cmd: ${docker-llama}
+    cmdStop: ${docker-stop}
+
+  author/model:F16:
+    cmd: /path/to/server -p ${PORT} -hf ${MODEL_ID}
+    cmdStop: stop
+`
+
+	config, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.NoError(t, err)
+	sanitizedCmd, err := SanitizeCommand(config.Models["model1"].Cmd)
+	assert.NoError(t, err)
+	assert.Equal(t, "/path/to/server -p 9001 -hf model1", strings.Join(sanitizedCmd, " "))
+
+	assert.Equal(t, "docker stop ${MODEL_ID}", config.Macros["docker-stop"])
+
+	sanitizedCmd2, err := SanitizeCommand(config.Models["model2"].Cmd)
+	assert.NoError(t, err)
+	assert.Equal(t, "docker run --name model2 -p 9002:8080 docker_img", strings.Join(sanitizedCmd2, " "))
+
+	sanitizedCmdStop, err := SanitizeCommand(config.Models["model2"].CmdStop)
+	assert.NoError(t, err)
+	assert.Equal(t, "docker stop model2", strings.Join(sanitizedCmdStop, " "))
+
+	sanitizedCmd3, err := SanitizeCommand(config.Models["author/model:F16"].Cmd)
+	assert.NoError(t, err)
+	assert.Equal(t, "/path/to/server -p 9000 -hf author/model:F16", strings.Join(sanitizedCmd3, " "))
+}
