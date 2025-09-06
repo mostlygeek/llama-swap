@@ -19,9 +19,10 @@ import (
 )
 
 var (
-	version string = "0"
-	commit  string = "abcd1234"
-	date    string = "unknown"
+	version string            = "0"
+	commit  string            = "abcd1234"
+	date    string            = "unknown"
+	mainlog *proxy.LogMonitor = proxy.NewLogMonitor()
 )
 
 func main() {
@@ -33,6 +34,10 @@ func main() {
 
 	flag.Parse() // Parse the command-line flags
 
+	// the log level is reset after the configuration is loaded
+	// by default use Debug to catch any loading issues
+	mainlog.SetLogLevel(proxy.LevelDebug)
+
 	if *showVersion {
 		fmt.Printf("version: %s (%s), built at %s\n", version, commit, date)
 		os.Exit(0)
@@ -40,7 +45,7 @@ func main() {
 
 	config, err := proxy.LoadConfig(*configPath)
 	if err != nil {
-		fmt.Printf("Error loading config: %v\n", err)
+		mainlog.Errorf("unable to load configuration config: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -69,14 +74,17 @@ func main() {
 		if currentPM, ok := srv.Handler.(*proxy.ProxyManager); ok {
 			config, err = proxy.LoadConfig(*configPath)
 			if err != nil {
-				fmt.Printf("Warning, unable to reload configuration: %v\n", err)
+				mainlog.Warnf("[WARN] unable to reload configuration: %v\n", err)
 				return
 			}
 
-			fmt.Println("Configuration Changed")
+			// use mainlog after this
+			mainlog.SetLogLevel(config.GetLogLevel())
+
+			mainlog.Info("Configuration Changed")
 			currentPM.Shutdown()
 			srv.Handler = proxy.New(config)
-			fmt.Println("Configuration Reloaded")
+			mainlog.Info("Configuration Reloaded")
 
 			// wait a few seconds and tell any UI to reload
 			time.AfterFunc(3*time.Second, func() {
@@ -87,7 +95,7 @@ func main() {
 		} else {
 			config, err = proxy.LoadConfig(*configPath)
 			if err != nil {
-				fmt.Printf("Error, unable to load configuration: %v\n", err)
+				mainlog.Errorf("unable to load configuration: %v\n", err)
 				os.Exit(1)
 			}
 			srv.Handler = proxy.New(config)
@@ -95,8 +103,8 @@ func main() {
 	}
 
 	// load the initial proxy manager
-	reloadProxyManager()
 	debouncedReload := debounce(time.Second, reloadProxyManager)
+	debouncedReload()
 	if *watchConfig {
 		defer event.On(func(e proxy.ConfigFileChangedEvent) {
 			if e.ReloadingState == proxy.ReloadingStateStart {
@@ -104,23 +112,23 @@ func main() {
 			}
 		})()
 
-		fmt.Println("Watching Configuration for changes")
+		mainlog.Info("watching Configuration for changes")
 		go func() {
 			absConfigPath, err := filepath.Abs(*configPath)
 			if err != nil {
-				fmt.Printf("Error getting absolute path for watching config file: %v\n", err)
+				mainlog.Errorf("unable to get absolute path for watching config file: %v\n", err)
 				return
 			}
 			watcher, err := fsnotify.NewWatcher()
 			if err != nil {
-				fmt.Printf("Error creating file watcher: %v. File watching disabled.\n", err)
+				mainlog.Errorf("failed to create file watcher: %v. File watching disabled.\n", err)
 				return
 			}
 
 			configDir := filepath.Dir(absConfigPath)
 			err = watcher.Add(configDir)
 			if err != nil {
-				fmt.Printf("Error adding config path directory (%s) to watcher: %v. File watching disabled.", configDir, err)
+				mainlog.Errorf("unable to add config path directory (%s) to watcher: %v. File watching disabled.", configDir, err)
 				return
 			}
 
@@ -149,24 +157,24 @@ func main() {
 	// shutdown on signal
 	go func() {
 		sig := <-sigChan
-		fmt.Printf("Received signal %v, shutting down...\n", sig)
+		mainlog.Infof("Received signal %v, shutting down...\n", sig)
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 		defer cancel()
 
 		if pm, ok := srv.Handler.(*proxy.ProxyManager); ok {
 			pm.Shutdown()
 		} else {
-			fmt.Println("srv.Handler is not of type *proxy.ProxyManager")
+			mainlog.Error("srv.Handler is not of type *proxy.ProxyManager")
 		}
 
 		if err := srv.Shutdown(ctx); err != nil {
-			fmt.Printf("Server shutdown error: %v\n", err)
+			mainlog.Errorf("server shutdown error: %v\n", err)
 		}
 		close(exitChan)
 	}()
 
 	// Start server
-	fmt.Printf("llama-swap listening on %s\n", *listenStr)
+	mainlog.Infof("llama-swap listening on %s\n", *listenStr)
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Fatal server error: %v\n", err)
@@ -181,8 +189,12 @@ func debounce(interval time.Duration, f func()) func() {
 	var timer *time.Timer
 	return func() {
 		if timer != nil {
+			mainlog.Debug("debounce cancel previous timer")
 			timer.Stop()
 		}
-		timer = time.AfterFunc(interval, f)
+		timer = time.AfterFunc(interval, func() {
+			mainlog.Debug("running debounced function")
+			f()
+		})
 	}
 }
