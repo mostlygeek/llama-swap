@@ -15,7 +15,7 @@ const formatRelativeTime = (timestamp: string): string => {
   const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
 
   // Handle future dates by returning "just now"
-  if (diffInSeconds < 0) {
+  if (diffInSeconds < 5) {
     return "now";
   }
 
