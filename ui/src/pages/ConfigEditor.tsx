@@ -132,12 +132,13 @@ const ConfigEditor = () => {
     setSuccessMsg(null);
 
     try {
+      const payload = content; // capture exactly what we send
       const res = await fetch("/api/config", {
         method: "PUT",
         headers: {
           "Content-Type": "text/plain",
         },
-        body: content,
+        body: payload,
       });
 
       if (!res.ok) {
@@ -145,8 +146,8 @@ const ConfigEditor = () => {
         throw new Error(msg);
       }
 
-      // success
-      setOriginalContent(content);
+      // success: mark exactly what was persisted
+      setOriginalContent(payload);
       setSuccessMsg("Saved");
       // transient success
       setTimeout(() => setSuccessMsg(null), 1500);
