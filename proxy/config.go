@@ -186,6 +186,20 @@ func (c *Config) FindConfig(modelName string) (ModelConfig, string, bool) {
 	}
 }
 
+// GetLogLevel returns the LogLevel in the configuration
+func (c *Config) GetLogLevel() LogLevel {
+	switch strings.ToLower(c.LogLevel) {
+	case "debug":
+		return LevelDebug
+	case "warn":
+		return LevelWarn
+	case "error":
+		return LevelError
+	default:
+		return LevelInfo
+	}
+}
+
 func LoadConfig(path string) (Config, error) {
 	file, err := os.Open(path)
 	if err != nil {
