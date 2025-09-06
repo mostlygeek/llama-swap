@@ -28,6 +28,7 @@ interface Metrics {
   id: number;
   timestamp: string;
   model: string;
+  cache_tokens: number;
   input_tokens: number;
   output_tokens: number;
   prompt_per_second: number;
