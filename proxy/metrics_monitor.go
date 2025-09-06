@@ -13,6 +13,7 @@ type TokenMetrics struct {
 	ID              int       `json:"id"`
 	Timestamp       time.Time `json:"timestamp"`
 	Model           string    `json:"model"`
+	CachedTokens    int       `json:"cache_tokens"`
 	InputTokens     int       `json:"input_tokens"`
 	OutputTokens    int       `json:"output_tokens"`
 	PromptPerSecond float64   `json:"prompt_per_second"`
@@ -61,7 +62,6 @@ func (mp *MetricsMonitor) addMetrics(metric TokenMetrics) {
 	if len(mp.metrics) > mp.maxMetrics {
 		mp.metrics = mp.metrics[len(mp.metrics)-mp.maxMetrics:]
 	}
-
 	event.Emit(TokenMetricsEvent{Metrics: metric})
 }
 

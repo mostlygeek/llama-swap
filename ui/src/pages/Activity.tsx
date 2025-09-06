@@ -13,6 +13,28 @@ const formatDuration = (ms: number): string => {
   return (ms / 1000).toFixed(2) + "s";
 };
 
+const formatRelativeTime = (timestamp: string): string => {
+  const now = new Date();
+  const date = new Date(timestamp);
+  const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+  if (diffInSeconds < 60) {
+    return `${diffInSeconds} second${diffInSeconds !== 1 ? "s" : ""} ago`;
+  }
+
+  const diffInMinutes = Math.floor(diffInSeconds / 60);
+  if (diffInMinutes < 60) {
+    return `${diffInMinutes} minute${diffInMinutes !== 1 ? "s" : ""} ago`;
+  }
+
+  const diffInHours = Math.floor(diffInMinutes / 60);
+  if (diffInHours < 24) {
+    return `${diffInHours} hour${diffInHours !== 1 ? "s" : ""} ago`;
+  }
+
+  return "a long time ago";
+};
+
 const ActivityPage = () => {
   const { metrics } = useAPI();
   const sortedMetrics = useMemo(() => {
@@ -35,8 +57,9 @@ const ActivityPage = () => {
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider">Id</th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Timestamp</th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Model</th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Input Tokens</th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Output Tokens</th>
+                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Prompt</th>
+                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Cached</th>
+                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Generated</th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Prompt Processing</th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Generation Speed</th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Duration</th>
@@ -46,9 +69,13 @@ const ActivityPage = () => {
               {sortedMetrics.map((metric) => (
                 <tr key={`metric_${metric.id}`}>
                   <td className="px-4 py-4 whitespace-nowrap text-sm">{metric.id + 1 /* un-zero index */}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">{formatTimestamp(metric.timestamp)}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm">{formatRelativeTime(metric.timestamp)}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">{metric.model}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">{metric.input_tokens.toLocaleString()}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm">
+                    {metric.cache_tokens > 0 ? metric.cache_tokens.toLocaleString() : "-"}
+                  </td>
+
                   <td className="px-6 py-4 whitespace-nowrap text-sm">{metric.output_tokens.toLocaleString()}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">{formatSpeed(metric.prompt_per_second)}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">{formatSpeed(metric.tokens_per_second)}</td>
