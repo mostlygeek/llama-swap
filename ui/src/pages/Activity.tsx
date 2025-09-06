@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, useEffect } from "react";
+import { useMemo } from "react";
 import { useAPI } from "../contexts/APIProvider";
 
 const formatSpeed = (speed: number): string => {
