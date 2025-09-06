@@ -61,7 +61,6 @@ func MetricsMiddleware(pm *ProxyManager) gin.HandlerFunc {
 		} else {
 			writer.metricsRecorder.processNonStreamingResponse(writer.body)
 		}
-
 	}
 }
 
@@ -73,6 +72,7 @@ func (rec *MetricsRecorder) parseAndRecordMetrics(jsonData gjson.Result) bool {
 	}
 
 	// default values
+	cachedTokens := -1 // unknown or missing data
 	outputTokens := 0
 	inputTokens := 0
 
@@ -93,11 +93,16 @@ func (rec *MetricsRecorder) parseAndRecordMetrics(jsonData gjson.Result) bool {
 		promptPerSecond = jsonData.Get("timings.prompt_per_second").Float()
 		tokensPerSecond = jsonData.Get("timings.predicted_per_second").Float()
 		durationMs = int(jsonData.Get("timings.prompt_ms").Float() + jsonData.Get("timings.predicted_ms").Float())
+
+		if cachedValue := jsonData.Get("timings.cache_n"); cachedValue.Exists() {
+			cachedTokens = int(cachedValue.Int())
+		}
 	}
 
 	rec.metricsMonitor.addMetrics(TokenMetrics{
 		Timestamp:       time.Now(),
 		Model:           rec.realModelName,
+		CachedTokens:    cachedTokens,
 		InputTokens:     inputTokens,
 		OutputTokens:    outputTokens,
 		PromptPerSecond: promptPerSecond,
