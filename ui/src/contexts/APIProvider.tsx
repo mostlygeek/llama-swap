@@ -1,4 +1,4 @@
-import { useRef, createContext, useState, useContext, useEffect, useCallback, useMemo, type ReactNode } from "react";
+import { createContext, useState, useContext, useEffect, useCallback, useMemo, type ReactNode } from "react";
 import type { ConnectionState } from "../lib/types";
 
 type ModelStatus = "ready" | "starting" | "stopping" | "stopped" | "shutdown" | "unknown";
@@ -51,12 +51,14 @@ type APIProviderProps = {
   autoStartAPIEvents?: boolean;
 };
 
+let apiEventSource: EventSource | null = null;
+
 export function APIProvider({ children, autoStartAPIEvents = true }: APIProviderProps) {
   const [proxyLogs, setProxyLogs] = useState("");
   const [upstreamLogs, setUpstreamLogs] = useState("");
   const [metrics, setMetrics] = useState<Metrics[]>([]);
   const [connectionStatus, setConnectionState] = useState<ConnectionState>("disconnected");
-  const apiEventSource = useRef<EventSource | null>(null);
+  //const apiEventSource = useRef<EventSource | null>(null);
 
   const [models, setModels] = useState<Model[]>([]);
 
@@ -69,8 +71,8 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
 
   const enableAPIEvents = useCallback((enabled: boolean) => {
     if (!enabled) {
-      apiEventSource.current?.close();
-      apiEventSource.current = null;
+      apiEventSource?.close();
+      apiEventSource = null;
       setMetrics([]);
       return;
     }
@@ -79,22 +81,22 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
     const initialDelay = 1000; // 1 second
 
     const connect = () => {
-      apiEventSource.current = null;
-      const eventSource = new EventSource("/api/events");
+      apiEventSource?.close();
+      apiEventSource = new EventSource("/api/events");
+
       setConnectionState("connecting");
 
-      eventSource.onopen = () => {
+      apiEventSource.onopen = () => {
         // clear everything out on connect to keep things in sync
         setProxyLogs("");
         setUpstreamLogs("");
         setMetrics([]); // clear metrics on reconnect
         setModels([]); // clear models on reconnect
-        apiEventSource.current = eventSource;
         retryCount = 0;
         setConnectionState("connected");
       };
 
-      eventSource.onmessage = (e: MessageEvent) => {
+      apiEventSource.onmessage = (e: MessageEvent) => {
         try {
           const message = JSON.parse(e.data) as APIEventEnvelope;
           switch (message.type) {
@@ -137,8 +139,8 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
         }
       };
 
-      eventSource.onerror = () => {
-        eventSource.close();
+      apiEventSource.onerror = () => {
+        apiEventSource?.close();
         retryCount++;
         const delay = Math.min(initialDelay * Math.pow(2, retryCount - 1), 5000);
         setConnectionState("disconnected");
