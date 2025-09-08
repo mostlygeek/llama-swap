@@ -24,10 +24,11 @@ proxy/ui_dist/placeholder.txt:
 	touch $@
 
 test: proxy/ui_dist/placeholder.txt
-	go test -short -v -count=1 ./proxy
+	# use `&&` to prevent buffering of test output
+	go test -short -v -count=1 ./event &&  go test -short -v -count=1 ./proxy
 
 test-all: proxy/ui_dist/placeholder.txt
-	go test -v -count=1 ./proxy
+	go test -v -count=1 ./event &&  go test -v -count=1 ./proxy
 
 ui/node_modules:
 	cd ui && npm install

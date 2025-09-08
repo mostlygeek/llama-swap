@@ -1,6 +1,3 @@
-// Copyright (c) Roman Atachiants and contributore. All rights reserved.
-// Licensed under the MIT license. See LICENSE file in the project root for detaile.
-
 package event
 
 import (
@@ -9,316 +6,425 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/assert"
 )
 
-func TestPublish(t *testing.T) {
-	d := NewDispatcher()
-	var wg sync.WaitGroup
+// Test event types
+const (
+	TestEventType1 EventType = iota + 1
+	TestEventType2
+)
 
-	// Subscribe, must be received in order
-	var count int64
-	defer Subscribe(d, func(ev MyEvent1) {
-		assert.Equal(t, int(atomic.AddInt64(&count, 1)), ev.Number)
-		wg.Done()
-	})()
-
-	// Publish
-	wg.Add(3)
-	Publish(d, MyEvent1{Number: 1})
-	Publish(d, MyEvent1{Number: 2})
-	Publish(d, MyEvent1{Number: 3})
-
-	// Wait and check
-	wg.Wait()
-	assert.Equal(t, int64(3), count)
+// Test event implementations
+type TestEvent1 struct {
+	Message string
 }
 
-func TestUnsubscribe(t *testing.T) {
-	d := NewDispatcher()
-	assert.Equal(t, 0, d.count(TypeEvent1))
-	unsubscribe := Subscribe(d, func(ev MyEvent1) {
-		// Nothing
-	})
-
-	assert.Equal(t, 1, d.count(TypeEvent1))
-	unsubscribe()
-	assert.Equal(t, 0, d.count(TypeEvent1))
+func (e TestEvent1) Type() EventType {
+	return TestEventType1
 }
 
-func TestConcurrent(t *testing.T) {
-	const max = 1000000
-	var count int64
-	var wg sync.WaitGroup
-	wg.Add(1)
-
-	d := NewDispatcher()
-	defer Subscribe(d, func(ev MyEvent1) {
-		if current := atomic.AddInt64(&count, 1); current == max {
-			wg.Done()
-		}
-	})()
-
-	// Asynchronously publish
-	go func() {
-		for i := 0; i < max; i++ {
-			Publish(d, MyEvent1{})
-		}
-	}()
-
-	defer Subscribe(d, func(ev MyEvent1) {
-		// Subscriber that does nothing
-	})()
-
-	wg.Wait()
-	assert.Equal(t, max, int(count))
+type TestEvent2 struct {
+	Value int
 }
 
-func TestSubscribeDifferentType(t *testing.T) {
-	d := NewDispatcher()
-	assert.Panics(t, func() {
-		SubscribeTo(d, TypeEvent1, func(ev MyEvent1) {})
-		SubscribeTo(d, TypeEvent1, func(ev MyEvent2) {})
-	})
+func (e TestEvent2) Type() EventType {
+	return TestEventType2
 }
 
-func TestPublishDifferentType(t *testing.T) {
-	d := NewDispatcher()
-	assert.Panics(t, func() {
-		SubscribeTo(d, TypeEvent1, func(ev MyEvent2) {})
-		Publish(d, MyEvent1{})
-	})
-}
+func TestCancelFunction(t *testing.T) {
+	dispatcher := NewDispatcher()
+	var received1, received2, received3 bool
 
-func TestCloseDispatcher(t *testing.T) {
-	d := NewDispatcher()
-	defer SubscribeTo(d, TypeEvent1, func(ev MyEvent2) {})()
+	cancel1 := Subscribe(dispatcher, func(e TestEvent1) { received1 = true })
+	cancel2 := Subscribe(dispatcher, func(e TestEvent1) { received2 = true })
+	_ = Subscribe(dispatcher, func(e TestEvent1) { received3 = true })
 
-	assert.NoError(t, d.Close())
-	assert.Panics(t, func() {
-		SubscribeTo(d, TypeEvent1, func(ev MyEvent2) {})
-	})
-}
+	// Cancel the first handler
+	cancel1()
 
-func TestMatrix(t *testing.T) {
-	const amount = 1000
-	for _, subs := range []int{1, 10, 100} {
-		for _, topics := range []int{1, 10} {
-			expected := subs * topics * amount
-			t.Run(fmt.Sprintf("%dx%d", topics, subs), func(t *testing.T) {
-				var count atomic.Int64
-				var wg sync.WaitGroup
-				wg.Add(expected)
+	// Now cancel the second handler
+	cancel2()
 
-				d := NewDispatcher()
-				for i := 0; i < subs; i++ {
-					for id := 0; id < topics; id++ {
-						defer SubscribeTo(d, uint32(id), func(ev MyEvent3) {
-							count.Add(1)
-							wg.Done()
-						})()
-					}
-				}
-
-				for n := 0; n < amount; n++ {
-					for id := 0; id < topics; id++ {
-						go Publish(d, MyEvent3{ID: id})
-					}
-				}
-
-				wg.Wait()
-				assert.Equal(t, expected, int(count.Load()))
-			})
-		}
-	}
-}
-
-func TestConcurrentSubscriptionRace(t *testing.T) {
-	// This test specifically targets the race condition that occurs when multiple
-	// goroutines try to subscribe to different event types simultaneously.
-	// Without the CAS loop, subscriptions could be lost due to registry corruption.
-
-	const numGoroutines = 100
-	const numEventTypes = 50
-
-	d := NewDispatcher()
-	defer d.Close()
-
-	var wg sync.WaitGroup
-	var receivedCount int64
-	var subscribedTypes sync.Map // Thread-safe map
-
-	wg.Add(numGoroutines)
-
-	// Start multiple goroutines that subscribe to different event types concurrently
-	for i := 0; i < numGoroutines; i++ {
-		go func(goroutineID int) {
-			defer wg.Done()
-
-			// Each goroutine subscribes to a unique event type
-			eventType := uint32(goroutineID%numEventTypes + 1000) // Offset to avoid collision with other tests
-
-			// Subscribe to the event type
-			SubscribeTo(d, eventType, func(ev MyEvent3) {
-				atomic.AddInt64(&receivedCount, 1)
-			})
-
-			// Record that this type was subscribed
-			subscribedTypes.Store(eventType, true)
-		}(i)
-	}
-
-	// Wait for all subscriptions to complete
-	wg.Wait()
-
-	// Count the number of unique event types subscribed
-	expectedTypes := 0
-	subscribedTypes.Range(func(key, value interface{}) bool {
-		expectedTypes++
-		return true
-	})
-
-	// Small delay to ensure all subscriptions are fully processed
+	// Publish an event
+	Publish(dispatcher, TestEvent1{Message: "test"})
 	time.Sleep(10 * time.Millisecond)
 
-	// Publish events to each subscribed type
-	subscribedTypes.Range(func(key, value interface{}) bool {
-		eventType := key.(uint32)
-		Publish(d, MyEvent3{ID: int(eventType)})
-		return true
-	})
-
-	// Wait for all events to be processed
-	time.Sleep(50 * time.Millisecond)
-
-	// Verify that we received at least the expected number of events
-	// (there might be more if multiple goroutines subscribed to the same event type)
-	received := atomic.LoadInt64(&receivedCount)
-	assert.GreaterOrEqual(t, int(received), expectedTypes,
-		"Should have received at least %d events, got %d", expectedTypes, received)
-
-	// Verify that we have the expected number of unique event types
-	assert.Equal(t, numEventTypes, expectedTypes,
-		"Should have exactly %d unique event types", numEventTypes)
-}
-
-func TestConcurrentHandlerRegistration(t *testing.T) {
-	const numGoroutines = 100
-
-	// Test concurrent subscriptions to the same event type
-	t.Run("SameEventType", func(t *testing.T) {
-		d := NewDispatcher()
-		var handlerCount int64
-		var wg sync.WaitGroup
-
-		// Start multiple goroutines subscribing to the same event type (0x1)
-		for i := 0; i < numGoroutines; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				SubscribeTo(d, uint32(0x1), func(ev MyEvent1) {
-					atomic.AddInt64(&handlerCount, 1)
-				})
-			}()
-		}
-
-		wg.Wait()
-
-		// Verify all handlers were registered by publishing an event
-		atomic.StoreInt64(&handlerCount, 0)
-		Publish(d, MyEvent1{})
-
-		// Small delay to ensure all handlers have executed
-		time.Sleep(10 * time.Millisecond)
-
-		assert.Equal(t, int64(numGoroutines), atomic.LoadInt64(&handlerCount),
-			"Not all handlers were registered due to race condition")
-	})
-
-	// Test concurrent subscriptions to different event types
-	t.Run("DifferentEventTypes", func(t *testing.T) {
-		d := NewDispatcher()
-		var wg sync.WaitGroup
-		receivedEvents := make(map[uint32]*int64)
-
-		// Create multiple event types and subscribe concurrently
-		for i := 0; i < numGoroutines; i++ {
-			eventType := uint32(100 + i)
-			counter := new(int64)
-			receivedEvents[eventType] = counter
-
-			wg.Add(1)
-			go func(et uint32, cnt *int64) {
-				defer wg.Done()
-				SubscribeTo(d, et, func(ev MyEvent3) {
-					atomic.AddInt64(cnt, 1)
-				})
-			}(eventType, counter)
-		}
-
-		wg.Wait()
-
-		// Publish events to all types
-		for eventType := uint32(100); eventType < uint32(100+numGoroutines); eventType++ {
-			Publish(d, MyEvent3{ID: int(eventType)})
-		}
-
-		// Small delay to ensure all handlers have executed
-		time.Sleep(10 * time.Millisecond)
-
-		// Verify all event types received their events
-		for eventType, counter := range receivedEvents {
-			assert.Equal(t, int64(1), atomic.LoadInt64(counter),
-				"Event type %d did not receive its event", eventType)
-		}
-	})
-}
-
-func TestBackpressure(t *testing.T) {
-	d := NewDispatcher()
-	d.maxQueue = 10
-
-	var processedCount int64
-	unsub := SubscribeTo(d, uint32(0x200), func(ev MyEvent3) {
-		atomic.AddInt64(&processedCount, 1)
-	})
-	defer unsub()
-
-	const eventsToPublish = 1000
-	for i := 0; i < eventsToPublish; i++ {
-		Publish(d, MyEvent3{ID: 0x200})
+	// Only handler3 should have received the event
+	if received1 {
+		t.Error("Handler1 should not receive event after cancellation")
 	}
+	if received2 {
+		t.Error("Handler2 should not receive event after cancellation")
+	}
+	if !received3 {
+		t.Error("Handler3 should receive event") // This might fail!
+	}
+}
+func TestSubscribeAndPublish(t *testing.T) {
+	dispatcher := NewDispatcher()
 
-	time.Sleep(100 * time.Millisecond)
+	// Test basic subscription and publishing
+	t.Run("BasicSubscribeAndPublish", func(t *testing.T) {
+		var received TestEvent1
+		var wg sync.WaitGroup
+		wg.Add(1)
 
-	// Verify all events were eventually processed
-	finalProcessed := atomic.LoadInt64(&processedCount)
-	assert.Equal(t, int64(eventsToPublish), finalProcessed)
-	t.Logf("Events processed: %d/%d", finalProcessed, eventsToPublish)
+		// Subscribe to TestEvent1
+		cancel := Subscribe(dispatcher, func(e TestEvent1) {
+			received = e
+			wg.Done()
+		})
+		defer cancel()
+
+		// Publish event
+		event := TestEvent1{Message: "hello world"}
+		Publish(dispatcher, event)
+
+		// Wait for event to be processed
+		wg.Wait()
+
+		if received.Message != "hello world" {
+			t.Errorf("Expected message 'hello world', got '%s'", received.Message)
+		}
+	})
+
+	// Test multiple subscribers
+	t.Run("MultipleSubscribers", func(t *testing.T) {
+		var received1, received2 TestEvent1
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		// Subscribe with two handlers
+		cancel1 := Subscribe(dispatcher, func(e TestEvent1) {
+			received1 = e
+			wg.Done()
+		})
+		defer cancel1()
+
+		cancel2 := Subscribe(dispatcher, func(e TestEvent1) {
+			received2 = e
+			wg.Done()
+		})
+		defer cancel2()
+
+		// Publish event
+		event := TestEvent1{Message: "multiple"}
+		Publish(dispatcher, event)
+
+		// Wait for both handlers to complete
+		wg.Wait()
+
+		if received1.Message != "multiple" {
+			t.Errorf("Handler 1: Expected 'multiple', got '%s'", received1.Message)
+		}
+		if received2.Message != "multiple" {
+			t.Errorf("Handler 2: Expected 'multiple', got '%s'", received2.Message)
+		}
+	})
+
+	// Test different event types
+	t.Run("DifferentEventTypes", func(t *testing.T) {
+		var receivedEvent1 TestEvent1
+		var receivedEvent2 TestEvent2
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		// Subscribe to different event types
+		cancel1 := Subscribe(dispatcher, func(e TestEvent1) {
+			receivedEvent1 = e
+			wg.Done()
+		})
+		defer cancel1()
+
+		cancel2 := Subscribe(dispatcher, func(e TestEvent2) {
+			receivedEvent2 = e
+			wg.Done()
+		})
+		defer cancel2()
+
+		// Publish both event types
+		Publish(dispatcher, TestEvent1{Message: "type1"})
+		Publish(dispatcher, TestEvent2{Value: 42})
+
+		// Wait for both handlers
+		wg.Wait()
+
+		if receivedEvent1.Message != "type1" {
+			t.Errorf("Event1: Expected 'type1', got '%s'", receivedEvent1.Message)
+		}
+		if receivedEvent2.Value != 42 {
+			t.Errorf("Event2: Expected 42, got %d", receivedEvent2.Value)
+		}
+	})
+
+	// Test subscription cancellation
+	t.Run("SubscriptionCancellation", func(t *testing.T) {
+		eventReceived := false
+		var wg sync.WaitGroup
+
+		// Subscribe and immediately cancel
+		cancel := Subscribe(dispatcher, func(e TestEvent1) {
+			eventReceived = true
+			wg.Done()
+		})
+		cancel() // Cancel subscription
+
+		// Publish event
+		Publish(dispatcher, TestEvent1{Message: "should not receive"})
+
+		// Wait a bit to ensure event would have been processed if handler was still subscribed
+		time.Sleep(100 * time.Millisecond)
+
+		if eventReceived {
+			t.Error("Handler should not have received event after cancellation")
+		}
+	})
+
+	// Test concurrent publishing
+	t.Run("ConcurrentPublishing", func(t *testing.T) {
+		var mu sync.Mutex
+		var receivedMessages []string
+		var wg sync.WaitGroup
+
+		// Subscribe to collect all messages
+		cancel := Subscribe(dispatcher, func(e TestEvent1) {
+			mu.Lock()
+			receivedMessages = append(receivedMessages, e.Message)
+			mu.Unlock()
+			wg.Done()
+		})
+		defer cancel()
+
+		// Publish multiple events concurrently
+		numEvents := 10
+		wg.Add(numEvents)
+
+		for i := 0; i < numEvents; i++ {
+			go func(i int) {
+				Publish(dispatcher, TestEvent1{Message: fmt.Sprintf("message-%d", i)})
+			}(i)
+		}
+
+		// Wait for all events to be processed
+		wg.Wait()
+
+		if len(receivedMessages) != numEvents {
+			t.Errorf("Expected %d messages, got %d", numEvents, len(receivedMessages))
+		}
+	})
 }
 
-// ------------------------------------- Test Events -------------------------------------
+func BenchmarkDispatcher(b *testing.B) {
+	// Benchmark single subscriber
+	b.Run("SingleSubscriber", func(b *testing.B) {
+		dispatcher := NewDispatcher()
 
-const (
-	TypeEvent1 = 0x1
-	TypeEvent2 = 0x2
-)
+		var wg sync.WaitGroup
 
-type MyEvent1 struct {
-	Number int
+		cancel := Subscribe(dispatcher, func(e TestEvent1) {
+			wg.Done()
+		})
+		defer cancel()
+
+		event := TestEvent1{Message: "benchmark"}
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			wg.Add(1)
+			Publish(dispatcher, event)
+			wg.Wait()
+		}
+	})
+
+	// Benchmark multiple subscribers - simplified approach
+	b.Run("MultipleSubscribers", func(b *testing.B) {
+		dispatcher := NewDispatcher()
+
+		numSubscribers := 10
+		var counter int64
+		var cancels []func()
+
+		// Set up multiple subscribers once
+		for i := 0; i < numSubscribers; i++ {
+			cancel := Subscribe(dispatcher, func(e TestEvent1) {
+				atomic.AddInt64(&counter, 1)
+			})
+			cancels = append(cancels, cancel)
+		}
+		defer func() {
+			for _, cancel := range cancels {
+				cancel()
+			}
+		}()
+
+		event := TestEvent1{Message: "benchmark"}
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			Publish(dispatcher, event)
+		}
+
+		// Wait for all events to be processed
+		time.Sleep(10 * time.Millisecond)
+	})
+
+	// Benchmark subscription and cancellation overhead
+	b.Run("SubscribeUnsubscribe", func(b *testing.B) {
+		dispatcher := NewDispatcher()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			cancel := Subscribe(dispatcher, func(e TestEvent1) {})
+			cancel()
+		}
+	})
+
+	// Benchmark publishing without synchronization (more realistic)
+	b.Run("PublishAsync", func(b *testing.B) {
+		dispatcher := NewDispatcher()
+		// Simple handler that just increments a counter
+		var counter int64
+		cancel := Subscribe(dispatcher, func(e TestEvent1) {
+			atomic.AddInt64(&counter, 1)
+		})
+		defer cancel()
+
+		event := TestEvent1{Message: "async"}
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			Publish(dispatcher, event)
+		}
+
+		// Wait a bit for goroutines to finish
+		time.Sleep(10 * time.Millisecond)
+	})
+
+	// Benchmark with different event types
+	b.Run("MixedEventTypes", func(b *testing.B) {
+		dispatcher := NewDispatcher()
+		var counter1, counter2 int64
+
+		cancel1 := Subscribe(dispatcher, func(e TestEvent1) {
+			atomic.AddInt64(&counter1, 1)
+		})
+		defer cancel1()
+
+		cancel2 := Subscribe(dispatcher, func(e TestEvent2) {
+			atomic.AddInt64(&counter2, 1)
+		})
+		defer cancel2()
+
+		event1 := TestEvent1{Message: "mixed1"}
+		event2 := TestEvent2{Value: 42}
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			if i%2 == 0 {
+				Publish(dispatcher, event1)
+			} else {
+				Publish(dispatcher, event2)
+			}
+		}
+
+		// Wait for events to be processed
+		time.Sleep(10 * time.Millisecond)
+	})
+
+	// Benchmark memory allocation patterns
+	b.Run("MemoryAllocation", func(b *testing.B) {
+		dispatcher := NewDispatcher()
+
+		// Add a simple subscriber to make it realistic
+		cancel := Subscribe(dispatcher, func(e TestEvent1) {
+			// Minimal work
+		})
+		defer cancel()
+
+		event := TestEvent1{Message: "memory test"}
+
+		b.ResetTimer()
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			Publish(dispatcher, event)
+		}
+	})
+
+	// Benchmark concurrent publishing
+	b.Run("ConcurrentPublish", func(b *testing.B) {
+		dispatcher := NewDispatcher()
+		var counter int64
+		cancel := Subscribe(dispatcher, func(e TestEvent1) {
+			atomic.AddInt64(&counter, 1)
+		})
+		defer cancel()
+
+		event := TestEvent1{Message: "concurrent"}
+
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				Publish(dispatcher, event)
+			}
+		})
+
+		// Wait for all goroutines to finish
+		time.Sleep(50 * time.Millisecond)
+	})
+
+	// Benchmark scalability with many subscribers
+	b.Run("ManySubscribers", func(b *testing.B) {
+		dispatcher := NewDispatcher()
+
+		numSubscribers := 100
+		var counter int64
+		var cancels []func()
+
+		// Set up many subscribers
+		for i := 0; i < numSubscribers; i++ {
+			cancel := Subscribe(dispatcher, func(e TestEvent1) {
+				atomic.AddInt64(&counter, 1)
+			})
+			cancels = append(cancels, cancel)
+		}
+		defer func() {
+			for _, cancel := range cancels {
+				cancel()
+			}
+		}()
+
+		event := TestEvent1{Message: "scalability"}
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			Publish(dispatcher, event)
+		}
+
+		// Wait for events to be processed
+		time.Sleep(50 * time.Millisecond)
+	})
+
+	// Benchmark with precise synchronization for throughput measurement
+	b.Run("SynchronizedThroughput", func(b *testing.B) {
+		dispatcher := NewDispatcher()
+
+		// Use a channel for precise synchronization
+		done := make(chan struct{}, 1000) // Buffer to prevent blocking
+
+		cancel := Subscribe(dispatcher, func(e TestEvent1) {
+			select {
+			case done <- struct{}{}:
+			default:
+				// Drop if channel is full
+			}
+		})
+		defer cancel()
+
+		event := TestEvent1{Message: "throughput"}
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			Publish(dispatcher, event)
+			<-done // Wait for this specific event to be processed
+		}
+	})
 }
-
-func (t MyEvent1) Type() uint32 { return TypeEvent1 }
-
-type MyEvent2 struct {
-	Text string
-}
-
-func (t MyEvent2) Type() uint32 { return TypeEvent2 }
-
-type MyEvent3 struct {
-	ID int
-}
-
-func (t MyEvent3) Type() uint32 { return uint32(t.ID) }

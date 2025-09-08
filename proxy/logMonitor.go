@@ -40,7 +40,7 @@ func NewLogMonitor() *LogMonitor {
 
 func NewLogMonitorWriter(stdout io.Writer) *LogMonitor {
 	return &LogMonitor{
-		eventbus: event.NewDispatcherConfig(1000),
+		eventbus: event.NewDispatcher(),
 		buffer:   ring.New(10 * 1024), // keep 10KB of buffered logs
 		stdout:   stdout,
 		level:    LevelInfo,

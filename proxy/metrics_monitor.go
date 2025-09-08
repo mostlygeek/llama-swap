@@ -26,7 +26,7 @@ type TokenMetricsEvent struct {
 	Metrics TokenMetrics
 }
 
-func (e TokenMetricsEvent) Type() uint32 {
+func (e TokenMetricsEvent) Type() event.EventType {
 	return TokenMetricsEventID // defined in events.go
 }
 

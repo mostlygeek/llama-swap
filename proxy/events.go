@@ -1,13 +1,16 @@
 package proxy
 
-// package level registry of the different event types
+import "github.com/mostlygeek/llama-swap/event"
 
-const ProcessStateChangeEventID = 0x01
-const ChatCompletionStatsEventID = 0x02
-const ConfigFileChangedEventID = 0x03
-const LogDataEventID = 0x04
-const TokenMetricsEventID = 0x05
-const ModelPreloadedEventID = 0x06
+// package level registry of the different event types
+const (
+	ProcessStateChangeEventID event.EventType = iota
+	ChatCompletionStatsEventID
+	ConfigFileChangedEventID
+	LogDataEventID
+	TokenMetricsEventID
+	ModelPreloadedEventID
+)
 
 type ProcessStateChangeEvent struct {
 	ProcessName string
@@ -15,7 +18,7 @@ type ProcessStateChangeEvent struct {
 	OldState    ProcessState
 }
 
-func (e ProcessStateChangeEvent) Type() uint32 {
+func (e ProcessStateChangeEvent) Type() event.EventType {
 	return ProcessStateChangeEventID
 }
 
@@ -23,7 +26,7 @@ type ChatCompletionStats struct {
 	TokensGenerated int
 }
 
-func (e ChatCompletionStats) Type() uint32 {
+func (e ChatCompletionStats) Type() event.EventType {
 	return ChatCompletionStatsEventID
 }
 
@@ -38,7 +41,7 @@ type ConfigFileChangedEvent struct {
 	ReloadingState ReloadingState
 }
 
-func (e ConfigFileChangedEvent) Type() uint32 {
+func (e ConfigFileChangedEvent) Type() event.EventType {
 	return ConfigFileChangedEventID
 }
 
@@ -46,7 +49,7 @@ type LogDataEvent struct {
 	Data []byte
 }
 
-func (e LogDataEvent) Type() uint32 {
+func (e LogDataEvent) Type() event.EventType {
 	return LogDataEventID
 }
 
@@ -55,6 +58,6 @@ type ModelPreloadedEvent struct {
 	Success   bool
 }
 
-func (e ModelPreloadedEvent) Type() uint32 {
+func (e ModelPreloadedEvent) Type() event.EventType {
 	return ModelPreloadedEventID
 }
