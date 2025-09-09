@@ -100,6 +100,8 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 	c.Header("X-Content-Type-Options", "nosniff")
+	// prevent nginx from buffering SSE
+	c.Header("X-Accel-Buffering", "no")
 
 	sendBuffer := make(chan messageEnvelope, 25)
 	ctx, cancel := context.WithCancel(c.Request.Context())
