@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -935,7 +936,11 @@ func TestProxyManager_StreamingEndpointsReturnNoBufferingHeader(t *testing.T) {
 
 	for _, endpoint := range endpoints {
 		t.Run(endpoint, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
 			req := httptest.NewRequest("GET", endpoint, nil)
+			req = req.WithContext(ctx)
 			rec := httptest.NewRecorder()
 
 			// We don't need the handler to fully complete, just to set the headers
