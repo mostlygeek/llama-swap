@@ -458,6 +458,10 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 			w.Header().Add(k, v)
 		}
 	}
+	// prevent nginx from buffering streaming responses (e.g., SSE)
+	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		w.Header().Set("X-Accel-Buffering", "no")
+	}
 	w.WriteHeader(resp.StatusCode)
 
 	// faster than io.Copy when streaming

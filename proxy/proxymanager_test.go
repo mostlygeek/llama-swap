@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -912,4 +913,68 @@ models:
 	}
 	assert.Equal(t, StateReady, proxy.processGroups["preloadTestGroup"].processes["model1"].CurrentState())
 	assert.Equal(t, StateReady, proxy.processGroups["preloadTestGroup"].processes["model2"].CurrentState())
+}
+
+func TestProxyManager_StreamingEndpointsReturnNoBufferingHeader(t *testing.T) {
+	config := AddDefaultGroupToConfig(Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]ModelConfig{
+			"model1": getTestSimpleResponderConfig("model1"),
+		},
+		LogLevel: "error",
+	})
+
+	proxy := New(config)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+
+	endpoints := []string{
+		"/api/events",
+		"/logs/stream",
+		"/logs/stream/proxy",
+		"/logs/stream/upstream",
+	}
+
+	for _, endpoint := range endpoints {
+		t.Run(endpoint, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			req := httptest.NewRequest("GET", endpoint, nil)
+			req = req.WithContext(ctx)
+			rec := httptest.NewRecorder()
+
+			// We don't need the handler to fully complete, just to set the headers
+			// so run it in a goroutine and check the headers after a short delay
+			go proxy.ServeHTTP(rec, req)
+			time.Sleep(10 * time.Millisecond) // give it time to start and write headers
+
+			assert.Equal(t, http.StatusOK, rec.Code)
+			assert.Equal(t, "no", rec.Header().Get("X-Accel-Buffering"))
+		})
+	}
+}
+
+func TestProxyManager_ProxiedStreamingEndpointReturnsNoBufferingHeader(t *testing.T) {
+	config := AddDefaultGroupToConfig(Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]ModelConfig{
+			"streaming-model": getTestSimpleResponderConfig("streaming-model"),
+		},
+		LogLevel: "error",
+	})
+
+	proxy := New(config)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+
+	// Make a streaming request
+	reqBody := `{"model":"streaming-model"}`
+	// simple-responder will return text/event-stream when stream=true is in the query
+	req := httptest.NewRequest("POST", "/v1/chat/completions?stream=true", bytes.NewBufferString(reqBody))
+	rec := httptest.NewRecorder()
+
+	proxy.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "no", rec.Header().Get("X-Accel-Buffering"))
+	assert.Contains(t, rec.Header().Get("Content-Type"), "text/event-stream")
 }

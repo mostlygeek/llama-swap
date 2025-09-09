@@ -73,6 +73,30 @@ However, there are many more capabilities that llama-swap supports:
 
 See the [configuration documentation](https://github.com/mostlygeek/llama-swap/wiki/Configuration) in the wiki all options and examples.
 
+## Reverse Proxy Configuration (nginx)
+
+If you deploy llama-swap behind nginx, disable response buffering for streaming endpoints. By default, nginx buffers responses which breaks Server‑Sent Events (SSE) and streaming chat completion. ([#236](https://github.com/mostlygeek/llama-swap/issues/236))
+
+Recommended nginx configuration snippets:
+
+```nginx
+# SSE for UI events/logs
+location /api/events {
+    proxy_pass http://your-llama-swap-backend;
+    proxy_buffering off;
+    proxy_cache off;
+}
+
+# Streaming chat completions (stream=true)
+location /v1/chat/completions {
+    proxy_pass http://your-llama-swap-backend;
+    proxy_buffering off;
+    proxy_cache off;
+}
+```
+
+As a safeguard, llama-swap also sets `X-Accel-Buffering: no` on SSE responses. However, explicitly disabling `proxy_buffering` at your reverse proxy is still recommended for reliable streaming behavior.
+
 ## Web UI
 
 llama-swap includes a real time web interface for monitoring logs and models:

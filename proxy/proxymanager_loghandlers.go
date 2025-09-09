@@ -28,6 +28,8 @@ func (pm *ProxyManager) streamLogsHandler(c *gin.Context) {
 	c.Header("Content-Type", "text/plain")
 	c.Header("Transfer-Encoding", "chunked")
 	c.Header("X-Content-Type-Options", "nosniff")
+	// prevent nginx from buffering streamed logs
+	c.Header("X-Accel-Buffering", "no")
 
 	logMonitorId := c.Param("logMonitorID")
 	logger, err := pm.getLogger(logMonitorId)
