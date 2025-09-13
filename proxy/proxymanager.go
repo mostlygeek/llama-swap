@@ -435,30 +435,30 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
 		return
 	}
-	
+
 	// If the model name ends with "-high", add chat_template_kwargs
 	if strings.HasSuffix(requestedModel, "-high") {
-	    // map[string]string is automatically converted to a JSON object
-	    bodyBytes, err = sjson.SetBytes(bodyBytes, "chat_template_kwargs", map[string]string{
-	        "reasoning_effort": "high",
-	    })
-	    if err != nil {
-	        pm.sendErrorResponse(c, http.StatusInternalServerError,
-	            fmt.Sprintf("error adding chat_template_kwargs: %s", err.Error()))
-	        return
-	    }
+		// map[string]string is automatically converted to a JSON object
+		bodyBytes, err = sjson.SetBytes(bodyBytes, "chat_template_kwargs", map[string]string{
+			"reasoning_effort": "high",
+		})
+		if err != nil {
+			pm.sendErrorResponse(c, http.StatusInternalServerError,
+				fmt.Sprintf("error adding chat_template_kwargs: %s", err.Error()))
+			return
+		}
 	} else if strings.HasSuffix(requestedModel, "-low") {
-	    // map[string]string is automatically converted to a JSON object
-	    bodyBytes, err = sjson.SetBytes(bodyBytes, "chat_template_kwargs", map[string]string{
-	        "reasoning_effort": "low",
-	    })
-	    if err != nil {
-	        pm.sendErrorResponse(c, http.StatusInternalServerError,
-	            fmt.Sprintf("error adding chat_template_kwargs: %s", err.Error()))
-	        return
-	    }
+		// map[string]string is automatically converted to a JSON object
+		bodyBytes, err = sjson.SetBytes(bodyBytes, "chat_template_kwargs", map[string]string{
+			"reasoning_effort": "low",
+		})
+		if err != nil {
+			pm.sendErrorResponse(c, http.StatusInternalServerError,
+				fmt.Sprintf("error adding chat_template_kwargs: %s", err.Error()))
+			return
+		}
 	}
-	
+
 	// issue #69 allow custom model names to be sent to upstream
 	useModelName := pm.config.Models[realModelName].UseModelName
 	if useModelName != "" {
