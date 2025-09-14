@@ -147,11 +147,12 @@ type HookOnStartup struct {
 }
 
 type PeerConfig struct {
-	Name        string `yaml:"name"`
-	Description string `yaml:"description"`
-	BaseURL     string `yaml:"baseURL"`
-	ApiKey      string `yaml:"apikey"`
-	Priority    int    `yaml:"priority"`
+	Name        string   `yaml:"name"`
+	Description string   `yaml:"description"`
+	BaseURL     string   `yaml:"baseURL"`
+	ApiKey      string   `yaml:"apikey"`
+	Priority    int      `yaml:"priority"`
+	Filters     []string `yaml:"filters"`
 }
 
 type Config struct {
