@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/config"
 	"github.com/mostlygeek/llama-swap/event"
 )
 
@@ -39,7 +40,7 @@ const (
 
 type Process struct {
 	ID     string
-	config ModelConfig
+	config config.ModelConfig
 	cmd    *exec.Cmd
 
 	// PR #155 called to cancel the upstream process
@@ -74,7 +75,7 @@ type Process struct {
 	failedStartCount int
 }
 
-func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor) *Process {
+func NewProcess(ID string, healthCheckTimeout int, config config.ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor) *Process {
 	concurrentLimit := 10
 	if config.ConcurrencyLimit > 0 {
 		concurrentLimit = config.ConcurrencyLimit
@@ -539,7 +540,7 @@ func (p *Process) cmdStopUpstreamProcess() error {
 
 	if p.config.CmdStop != "" {
 		// replace ${PID} with the pid of the process
-		stopArgs, err := SanitizeCommand(strings.ReplaceAll(p.config.CmdStop, "${PID}", fmt.Sprintf("%d", p.cmd.Process.Pid)))
+		stopArgs, err := config.SanitizeCommand(strings.ReplaceAll(p.config.CmdStop, "${PID}", fmt.Sprintf("%d", p.cmd.Process.Pid)))
 		if err != nil {
 			p.proxyLogger.Errorf("<%s> Failed to sanitize stop command: %v", p.ID, err)
 			return err
