@@ -5,6 +5,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -155,7 +156,7 @@ peers:
     baseURL: "http://10.0.4.11:8080"
     apikey: "secret-key"
     priority: 10
-    filters: [".*"]
+    filters: []
 `
 
 	if err := os.WriteFile(tempFile, []byte(content), 0644); err != nil {
@@ -247,7 +248,8 @@ peers:
 				BaseURL:     "http://10.0.4.11:8080",
 				ApiKey:      "secret-key",
 				Priority:    10,
-				Filters:     []string{`.*`},
+				Filters:     []string{},
+				reFilters:   []*regexp.Regexp{}, /* leave blank, test in peer_test.go */
 			},
 		},
 	}

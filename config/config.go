@@ -146,15 +146,6 @@ type HookOnStartup struct {
 	Preload []string `yaml:"preload"`
 }
 
-type PeerConfig struct {
-	Name        string   `yaml:"name"`
-	Description string   `yaml:"description"`
-	BaseURL     string   `yaml:"baseURL"`
-	ApiKey      string   `yaml:"apikey"`
-	Priority    int      `yaml:"priority"`
-	Filters     []string `yaml:"filters"`
-}
-
 type Config struct {
 	HealthCheckTimeout int                    `yaml:"healthCheckTimeout"`
 	LogRequests        bool                   `yaml:"logRequests"`
