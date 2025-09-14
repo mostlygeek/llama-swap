@@ -146,6 +146,14 @@ type HookOnStartup struct {
 	Preload []string `yaml:"preload"`
 }
 
+type PeerConfig struct {
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
+	BaseURL     string `yaml:"baseURL"`
+	ApiKey      string `yaml:"apikey"`
+	Priority    int    `yaml:"priority"`
+}
+
 type Config struct {
 	HealthCheckTimeout int                    `yaml:"healthCheckTimeout"`
 	LogRequests        bool                   `yaml:"logRequests"`
@@ -154,6 +162,7 @@ type Config struct {
 	Models             map[string]ModelConfig `yaml:"models"` /* key is model ID */
 	Profiles           map[string][]string    `yaml:"profiles"`
 	Groups             map[string]GroupConfig `yaml:"groups"` /* key is group ID */
+	Peers              map[string]PeerConfig  `yaml:"peers"`  /* key is peer ID */
 
 	// for key/value replacements in model's cmd, cmdStop, proxy, checkEndPoint
 	Macros map[string]string `yaml:"macros"`

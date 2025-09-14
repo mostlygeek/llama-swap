@@ -148,6 +148,13 @@ groups:
     persistent: true
     members:
       - "model4"
+peers:
+  desktop:
+    name: "Desktop"
+    description: "runs Linux"
+    baseURL: "http://10.0.4.11:8080"
+    apikey: "secret-key"
+    priority: 10
 `
 
 	if err := os.WriteFile(tempFile, []byte(content), 0644); err != nil {
@@ -230,6 +237,15 @@ groups:
 				Exclusive:  false,
 				Persistent: true,
 				Members:    []string{"model4"},
+			},
+		},
+		Peers: map[string]PeerConfig{
+			"desktop": {
+				Name:        "Desktop",
+				Description: "runs Linux",
+				BaseURL:     "http://10.0.4.11:8080",
+				ApiKey:      "secret-key",
+				Priority:    10,
 			},
 		},
 	}
