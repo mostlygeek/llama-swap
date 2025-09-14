@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/config"
 	"github.com/mostlygeek/llama-swap/event"
 )
 
@@ -38,7 +39,7 @@ type MetricsMonitor struct {
 	nextID     int
 }
 
-func NewMetricsMonitor(config *Config) *MetricsMonitor {
+func NewMetricsMonitor(config *config.Config) *MetricsMonitor {
 	maxMetrics := config.MetricsMaxInMemory
 	if maxMetrics <= 0 {
 		maxMetrics = 1000 // Default fallback
