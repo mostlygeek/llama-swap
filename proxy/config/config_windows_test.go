@@ -1,6 +1,6 @@
 //go:build windows
 
-package proxy
+package config
 
 import (
 	"os"
@@ -221,6 +221,7 @@ groups:
 				Members:    []string{"model4"},
 			},
 		},
+		Peers: map[string]PeerConfig{}, // empty here, see config_posix_test.go
 	}
 
 	assert.Equal(t, expected, config)

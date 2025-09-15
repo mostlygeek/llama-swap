@@ -24,11 +24,11 @@ proxy/ui_dist/placeholder.txt:
 	touch $@
 
 test: proxy/ui_dist/placeholder.txt
-	go test -short ./config ./proxy
+	go test -short ./proxy/...
 
 # for CI - full test (takes longer)
 test-all: proxy/ui_dist/placeholder.txt
-	go test -v -count=1 ./config && go test -v -count=1 ./proxy
+	go test -count=1 ./proxy/...
 
 ui/node_modules:
 	cd ui && npm install

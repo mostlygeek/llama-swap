@@ -15,8 +15,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mostlygeek/llama-swap/config"
 	"github.com/mostlygeek/llama-swap/event"
+	"github.com/mostlygeek/llama-swap/proxy/config"
 )
 
 type ProcessState string
