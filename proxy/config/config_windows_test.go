@@ -221,7 +221,7 @@ groups:
 				Members:    []string{"model4"},
 			},
 		},
-		Peers: map[string]PeerConfig{}, // empty here, see config_posix_test.go
+		Peers: nil, // empty here, see config_posix_test.go
 	}
 
 	assert.Equal(t, expected, config)
