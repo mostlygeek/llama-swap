@@ -169,6 +169,13 @@ models:
     # - processes have 5 seconds to shutdown until forceful termination is attempted
     cmdStop: docker stop ${MODEL_ID}
 
+  # mlx_lm.server example:
+  "mlx-community/Qwen3-Next-80B-A3B-Thinking-4bit":
+    cmd: |
+      mlx_lm.server --port ${PORT}
+      --model /models/mlx-community/Qwen3-Next-80B-A3B-Thinking-4bit
+      useModelName: "/models/mlx-community/Qwen3-Next-80B-A3B-Thinking-4bit"
+
 # groups: a dictionary of group settings
 # - optional, default: empty dictionary
 # - provides advanced controls over model swapping behaviour
