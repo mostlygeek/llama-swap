@@ -7,19 +7,20 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/mostlygeek/llama-swap/proxy/config"
 	"github.com/stretchr/testify/assert"
 )
 
-var processGroupTestConfig = AddDefaultGroupToConfig(Config{
+var processGroupTestConfig = config.AddDefaultGroupToConfig(config.Config{
 	HealthCheckTimeout: 15,
-	Models: map[string]ModelConfig{
+	Models: map[string]config.ModelConfig{
 		"model1": getTestSimpleResponderConfig("model1"),
 		"model2": getTestSimpleResponderConfig("model2"),
 		"model3": getTestSimpleResponderConfig("model3"),
 		"model4": getTestSimpleResponderConfig("model4"),
 		"model5": getTestSimpleResponderConfig("model5"),
 	},
-	Groups: map[string]GroupConfig{
+	Groups: map[string]config.GroupConfig{
 		"G1": {
 			Swap:      true,
 			Exclusive: true,
@@ -34,7 +35,7 @@ var processGroupTestConfig = AddDefaultGroupToConfig(Config{
 })
 
 func TestProcessGroup_DefaultHasCorrectModel(t *testing.T) {
-	pg := NewProcessGroup(DEFAULT_GROUP_ID, processGroupTestConfig, testLogger, testLogger)
+	pg := NewProcessGroup(config.DEFAULT_GROUP_ID, processGroupTestConfig, testLogger, testLogger)
 	assert.True(t, pg.HasMember("model5"))
 }
 
@@ -48,9 +49,9 @@ func TestProcessGroup_HasMember(t *testing.T) {
 // TestProcessGroup_ProxyRequestSwapIsTrueParallel tests that when swap is true
 // and multiple requests are made in parallel, only one process is running at a time.
 func TestProcessGroup_ProxyRequestSwapIsTrueParallel(t *testing.T) {
-	var processGroupTestConfig = AddDefaultGroupToConfig(Config{
+	var processGroupTestConfig = config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,
-		Models: map[string]ModelConfig{
+		Models: map[string]config.ModelConfig{
 			// use the same listening so if a model is already running, it will fail
 			// this is a way to test that swap isolation is working
 			// properly when there are parallel requests made at the
@@ -61,7 +62,7 @@ func TestProcessGroup_ProxyRequestSwapIsTrueParallel(t *testing.T) {
 			"model4": getTestSimpleResponderConfigPort("model4", 9832),
 			"model5": getTestSimpleResponderConfigPort("model5", 9832),
 		},
-		Groups: map[string]GroupConfig{
+		Groups: map[string]config.GroupConfig{
 			"G1": {
 				Swap:    true,
 				Members: []string{"model1", "model2", "model3", "model4", "model5"},

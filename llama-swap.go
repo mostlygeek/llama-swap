@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/event"
 	"github.com/mostlygeek/llama-swap/proxy"
+	"github.com/mostlygeek/llama-swap/proxy/config"
 )
 
 var (
@@ -38,13 +39,13 @@ func main() {
 		os.Exit(0)
 	}
 
-	config, err := proxy.LoadConfig(*configPath)
+	conf, err := config.LoadConfig(*configPath)
 	if err != nil {
 		fmt.Printf("Error loading config: %v\n", err)
 		os.Exit(1)
 	}
 
-	if len(config.Profiles) > 0 {
+	if len(conf.Profiles) > 0 {
 		fmt.Println("WARNING: Profile functionality has been removed in favor of Groups. See the README for more information.")
 	}
 
@@ -67,7 +68,7 @@ func main() {
 	// Support for watching config and reloading when it changes
 	reloadProxyManager := func() {
 		if currentPM, ok := srv.Handler.(*proxy.ProxyManager); ok {
-			config, err = proxy.LoadConfig(*configPath)
+			conf, err = config.LoadConfig(*configPath)
 			if err != nil {
 				fmt.Printf("Warning, unable to reload configuration: %v\n", err)
 				return
@@ -75,7 +76,7 @@ func main() {
 
 			fmt.Println("Configuration Changed")
 			currentPM.Shutdown()
-			srv.Handler = proxy.New(config)
+			srv.Handler = proxy.New(conf)
 			fmt.Println("Configuration Reloaded")
 
 			// wait a few seconds and tell any UI to reload
@@ -85,12 +86,12 @@ func main() {
 				})
 			})
 		} else {
-			config, err = proxy.LoadConfig(*configPath)
+			conf, err = config.LoadConfig(*configPath)
 			if err != nil {
 				fmt.Printf("Error, unable to load configuration: %v\n", err)
 				os.Exit(1)
 			}
-			srv.Handler = proxy.New(config)
+			srv.Handler = proxy.New(conf)
 		}
 	}
 

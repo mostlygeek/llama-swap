@@ -16,6 +16,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/event"
+	"github.com/mostlygeek/llama-swap/proxy/config"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -27,7 +28,7 @@ const (
 type ProxyManager struct {
 	sync.Mutex
 
-	config    Config
+	config    config.Config
 	ginEngine *gin.Engine
 
 	// logging
@@ -44,7 +45,7 @@ type ProxyManager struct {
 	shutdownCancel context.CancelFunc
 }
 
-func New(config Config) *ProxyManager {
+func New(config config.Config) *ProxyManager {
 	// set up loggers
 	stdoutLogger := NewLogMonitorWriter(os.Stdout)
 	upstreamLogger := NewLogMonitorWriter(stdoutLogger)

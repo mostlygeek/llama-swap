@@ -1,4 +1,4 @@
-package proxy
+package config
 
 import (
 	"fmt"
@@ -154,6 +154,7 @@ type Config struct {
 	Models             map[string]ModelConfig `yaml:"models"` /* key is model ID */
 	Profiles           map[string][]string    `yaml:"profiles"`
 	Groups             map[string]GroupConfig `yaml:"groups"` /* key is group ID */
+	Peers              map[string]PeerConfig  `yaml:"peers"`  /* key is peer ID */
 
 	// for key/value replacements in model's cmd, cmdStop, proxy, checkEndPoint
 	Macros map[string]string `yaml:"macros"`

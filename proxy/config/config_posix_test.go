@@ -1,10 +1,11 @@
 //go:build !windows
 
-package proxy
+package config
 
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -148,6 +149,14 @@ groups:
     persistent: true
     members:
       - "model4"
+peers:
+  desktop:
+    name: "Desktop"
+    description: "runs Linux"
+    baseURL: "http://10.0.4.11:8080"
+    apikey: "secret-key"
+    priority: 10
+    filters: []
 `
 
 	if err := os.WriteFile(tempFile, []byte(content), 0644); err != nil {
@@ -230,6 +239,17 @@ groups:
 				Exclusive:  false,
 				Persistent: true,
 				Members:    []string{"model4"},
+			},
+		},
+		Peers: map[string]PeerConfig{
+			"desktop": {
+				Name:        "Desktop",
+				Description: "runs Linux",
+				BaseURL:     "http://10.0.4.11:8080",
+				ApiKey:      "secret-key",
+				Priority:    10,
+				Filters:     []string{},
+				reFilters:   []*regexp.Regexp{}, /* leave blank, test in peer_test.go */
 			},
 		},
 	}

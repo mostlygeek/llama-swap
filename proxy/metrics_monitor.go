@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/mostlygeek/llama-swap/event"
+	"github.com/mostlygeek/llama-swap/proxy/config"
 )
 
 // TokenMetrics represents parsed token statistics from llama-server logs
@@ -38,7 +39,7 @@ type MetricsMonitor struct {
 	nextID     int
 }
 
-func NewMetricsMonitor(config *Config) *MetricsMonitor {
+func NewMetricsMonitor(config *config.Config) *MetricsMonitor {
 	maxMetrics := config.MetricsMaxInMemory
 	if maxMetrics <= 0 {
 		maxMetrics = 1000 // Default fallback
