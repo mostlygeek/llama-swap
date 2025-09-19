@@ -69,19 +69,27 @@ function ModelsPanel() {
         <h2>Models</h2>
         <div className="flex justify-between">
           <div className="flex gap-2">
-            <button className="btn flex items-center gap-2" onClick={toggleIdorName} style={{ lineHeight: "1.2" }}>
-              <RiSwapBoxFill /> {showIdorName === "id" ? "ID" : "Name"}
+            <button
+              className="btn text-base flex items-center gap-2"
+              onClick={toggleIdorName}
+              style={{ lineHeight: "1.2" }}
+            >
+              <RiSwapBoxFill size="20" /> {showIdorName === "id" ? "ID" : "Name"}
             </button>
 
             <button
-              className="btn flex items-center gap-2"
+              className="btn text-base flex items-center gap-2"
               onClick={() => setShowUnlisted(!showUnlisted)}
               style={{ lineHeight: "1.2" }}
             >
-              {showUnlisted ? <RiEyeFill /> : <RiEyeOffFill />} unlisted
+              {showUnlisted ? <RiEyeFill size="20" /> : <RiEyeOffFill size="20" />} unlisted
             </button>
           </div>
-          <button className="btn flex items-center gap-2" onClick={handleUnloadAllModels} disabled={isUnloading}>
+          <button
+            className="btn text-base flex items-center gap-2"
+            onClick={handleUnloadAllModels}
+            disabled={isUnloading}
+          >
             <RiStopCircleLine size="24" /> {isUnloading ? "Unloading..." : "Unload"}
           </button>
         </div>
@@ -90,26 +98,27 @@ function ModelsPanel() {
       <div className="flex-1 overflow-y-auto">
         <table className="w-full">
           <thead className="sticky top-0 bg-card z-10">
-            <tr className="border-b border-primary bg-surface">
-              <th className="text-left p-2">{showIdorName === "id" ? "Model ID" : "Name"}</th>
-              <th className="text-left p-2"></th>
-              <th className="text-left p-2">State</th>
+            <tr className="text-left border-b border-primary bg-surface">
+              <th>{showIdorName === "id" ? "Model ID" : "Name"}</th>
+              <th></th>
+              <th>State</th>
             </tr>
           </thead>
           <tbody>
             {filteredModels.map((model) => (
               <tr key={model.id} className="border-b hover:bg-secondary-hover border-border">
-                <td className={`p-2 ${model.unlisted ? "text-txtsecondary" : ""}`}>
-                  <a href={`/upstream/${model.id}/`} className={`underline`} target="_blank">
+                <td className={`${model.unlisted ? "text-txtsecondary" : ""}`}>
+                  <a href={`/upstream/${model.id}/`} className="font-semibold" target="_blank">
                     {showIdorName === "id" ? model.id : model.name !== "" ? model.name : model.id}
                   </a>
-                  {model.description !== "" && (
+
+                  {!!model.description && (
                     <p className={model.unlisted ? "text-opacity-70" : ""}>
                       <em>{model.description}</em>
                     </p>
                   )}
                 </td>
-                <td className="p-2 w-[50px]">
+                <td className="w-12">
                   <button
                     className="btn btn--sm"
                     disabled={model.state !== "stopped"}
@@ -118,8 +127,8 @@ function ModelsPanel() {
                     Load
                   </button>
                 </td>
-                <td className="p-2 w-[75px]">
-                  <span className={`status status--${model.state}`}>{model.state}</span>
+                <td className="w-20">
+                  <span className={`w-16 text-center status status--${model.state}`}>{model.state}</span>
                 </td>
               </tr>
             ))}
@@ -148,22 +157,20 @@ function StatsPanel() {
     <div className="card">
       <div className="rounded-lg overflow-hidden border border-gray-200">
         <table className="w-full">
-          <tbody>
-            <tr>
-              <th className="p-2 font-medium border-b border-gray-200 text-right">Requests</th>
-              <th className="p-2 font-medium border-l border-b border-gray-200 text-right">Processed</th>
-              <th className="p-2 font-medium border-l border-b border-gray-200 text-right">Generated</th>
-              <th className="p-2 font-medium border-l border-b border-gray-200 text-right">Tokens/Sec</th>
+          <thead>
+            <tr className="border-b border-gray-200 text-right">
+              <th>Requests</th>
+              <th className="border-l border-gray-200">Processed</th>
+              <th className="border-l border-gray-200">Generated</th>
+              <th className="border-l border-gray-200">Tokens/Sec</th>
             </tr>
-            <tr>
-              <td className="p-2 text-right border-r border-gray-200">{totalRequests}</td>
-              <td className="p-2 text-right border-r border-gray-200">
-                {new Intl.NumberFormat().format(totalInputTokens)}
-              </td>
-              <td className="p-2 text-right border-r border-gray-200">
-                {new Intl.NumberFormat().format(totalOutputTokens)}
-              </td>
-              <td className="p-2 text-right">{avgTokensPerSecond}</td>
+          </thead>
+          <tbody>
+            <tr className="text-right">
+              <td className="border-r border-gray-200">{totalRequests}</td>
+              <td className="border-r border-gray-200">{new Intl.NumberFormat().format(totalInputTokens)}</td>
+              <td className="border-r border-gray-200">{new Intl.NumberFormat().format(totalOutputTokens)}</td>
+              <td>{avgTokensPerSecond}</td>
             </tr>
           </tbody>
         </table>
