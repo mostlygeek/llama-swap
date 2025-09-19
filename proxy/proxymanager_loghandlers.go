@@ -12,7 +12,7 @@ import (
 func (pm *ProxyManager) sendLogsHandlers(c *gin.Context) {
 	accept := c.GetHeader("Accept")
 	if strings.Contains(accept, "text/html") {
-		c.Redirect(http.StatusFound, "/ui/")
+		c.Redirect(http.StatusFound, "/admin/")
 	} else {
 		c.Header("Content-Type", "text/plain")
 		history := pm.muxLogger.GetHistory()

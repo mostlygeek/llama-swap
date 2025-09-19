@@ -221,11 +221,11 @@ func (pm *ProxyManager) setupGinEngine() {
 	 * User Interface Endpoints
 	 */
 	pm.ginEngine.GET("/", func(c *gin.Context) {
-		c.Redirect(http.StatusFound, "/ui")
+		c.Redirect(http.StatusFound, "/admin")
 	})
 
 	pm.ginEngine.GET("/upstream", func(c *gin.Context) {
-		c.Redirect(http.StatusFound, "/ui/models")
+		c.Redirect(http.StatusFound, "/admin/models")
 	})
 	pm.ginEngine.Any("/upstream/*upstreamPath", pm.proxyToUpstream)
 
@@ -248,12 +248,12 @@ func (pm *ProxyManager) setupGinEngine() {
 		pm.proxyLogger.Errorf("Failed to load React filesystem: %v", err)
 	} else {
 
-		// serve files that exist under /ui/*
-		pm.ginEngine.StaticFS("/ui", reactFS)
+		// serve files that exist under /admin/*
+		pm.ginEngine.StaticFS("/admin", reactFS)
 
-		// server SPA for UI under /ui/*
+		// server SPA for UI under /admin/*
 		pm.ginEngine.NoRoute(func(c *gin.Context) {
-			if !strings.HasPrefix(c.Request.URL.Path, "/ui") {
+			if !strings.HasPrefix(c.Request.URL.Path, "/admin") {
 				c.AbortWithStatus(http.StatusNotFound)
 				return
 			}

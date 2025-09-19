@@ -25,7 +25,7 @@ Written in golang, it is very easy to install (single binary with no dependencie
   - `/infill` - for code infilling
   - `/completion` - for completion endpoint
 - ✅ llama-swap custom API endpoints
-  - `/ui` - web UI
+  - `/admin` - Admin Web UI
   - `/log` - remote log monitoring
   - `/upstream/:model_id` - direct access to upstream HTTP server ([demo](https://github.com/mostlygeek/llama-swap/pull/31))
   - `/unload` - manually unload running models ([#58](https://github.com/mostlygeek/llama-swap/issues/58))
@@ -232,6 +232,6 @@ For Python based inference servers like vllm or tabbyAPI it is recommended to ru
 ## Star History
 
 > [!NOTE]
-> ⭐️ Star this project to help others discover it! 
+> ⭐️ Star this project to help others discover it!
 
 [![Star History Chart](https://api.star-history.com/svg?repos=mostlygeek/llama-swap&type=Date)](https://www.star-history.com/#mostlygeek/llama-swap&Date)

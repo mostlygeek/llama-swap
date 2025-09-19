@@ -18,7 +18,7 @@ function App() {
   }, [connectionStatus]);
 
   return (
-    <Router basename="/ui/">
+    <Router basename="/admin/">
       <div className="flex flex-col h-screen">
         <Header />
 
