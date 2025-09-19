@@ -140,7 +140,7 @@
 
   /* Buttons */
   .btn {
-    @apply bg-surface p-2 px-4 text-sm rounded-full border border-2 transition-colors duration-200 border-btn-border;
+    @apply bg-surface py-2 px-4 text-sm rounded-md border transition-colors duration-200 border-btn-border;
   }
 
   .btn:hover {
