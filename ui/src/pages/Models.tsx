@@ -98,7 +98,7 @@ function ModelsPanel() {
       <div className="flex-1 overflow-y-auto">
         <table className="w-full">
           <thead className="sticky top-0 bg-card z-10">
-            <tr className="text-left border-b border-primary bg-surface">
+            <tr className="text-left border-b border-gray-200 dark:border-white/10 bg-surface">
               <th>{showIdorName === "id" ? "Model ID" : "Name"}</th>
               <th></th>
               <th>State</th>
@@ -106,7 +106,7 @@ function ModelsPanel() {
           </thead>
           <tbody>
             {filteredModels.map((model) => (
-              <tr key={model.id} className="border-b hover:bg-secondary-hover border-border">
+              <tr key={model.id} className="border-b hover:bg-secondary-hover border-gray-200">
                 <td className={`${model.unlisted ? "text-txtsecondary" : ""}`}>
                   <a href={`/upstream/${model.id}/`} className="font-semibold" target="_blank">
                     {showIdorName === "id" ? model.id : model.name !== "" ? model.name : model.id}
@@ -155,21 +155,25 @@ function StatsPanel() {
 
   return (
     <div className="card">
-      <div className="rounded-lg overflow-hidden border border-gray-200">
+      <div className="rounded-lg overflow-hidden border border-gray-200 dark:border-white/10">
         <table className="w-full">
           <thead>
-            <tr className="border-b border-gray-200 text-right">
+            <tr className="border-b border-gray-200 dark:border-white/10 text-right">
               <th>Requests</th>
-              <th className="border-l border-gray-200">Processed</th>
-              <th className="border-l border-gray-200">Generated</th>
-              <th className="border-l border-gray-200">Tokens/Sec</th>
+              <th className="border-l border-gray-200 dark:border-white/10">Processed</th>
+              <th className="border-l border-gray-200 dark:border-white/10">Generated</th>
+              <th className="border-l border-gray-200 dark:border-white/10">Tokens/Sec</th>
             </tr>
           </thead>
           <tbody>
             <tr className="text-right">
-              <td className="border-r border-gray-200">{totalRequests}</td>
-              <td className="border-r border-gray-200">{new Intl.NumberFormat().format(totalInputTokens)}</td>
-              <td className="border-r border-gray-200">{new Intl.NumberFormat().format(totalOutputTokens)}</td>
+              <td className="border-r border-gray-200 dark:border-white/10">{totalRequests}</td>
+              <td className="border-r border-gray-200 dark:border-white/10">
+                {new Intl.NumberFormat().format(totalInputTokens)}
+              </td>
+              <td className="border-r border-gray-200 dark:border-white/10">
+                {new Intl.NumberFormat().format(totalOutputTokens)}
+              </td>
               <td>{avgTokensPerSecond}</td>
             </tr>
           </tbody>

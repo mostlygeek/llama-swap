@@ -54,7 +54,7 @@ const ActivityPage = () => {
       {metrics.length > 0 && (
         <div className="card overflow-auto">
           <table className="min-w-full divide-y">
-            <thead className="border-gray-200 dark:border-gray-700">
+            <thead className="border-gray-200 dark:border-white/10">
               <tr className="text-left text-xs uppercase tracking-wider">
                 <th className="px-6 py-3">ID</th>
                 <th className="px-6 py-3">Time</th>
@@ -73,7 +73,7 @@ const ActivityPage = () => {
             </thead>
             <tbody className="divide-y">
               {sortedMetrics.map((metric) => (
-                <tr key={metric.id} className="whitespace-nowrap text-sm border-gray-200 dark:border-gray-700">
+                <tr key={metric.id} className="whitespace-nowrap text-sm border-gray-200 dark:border-white/10">
                   <td className="px-4 py-4">{metric.id + 1 /* un-zero index */}</td>
                   <td className="px-6 py-4">{formatRelativeTime(metric.timestamp)}</td>
                   <td className="px-6 py-4">{metric.model}</td>
