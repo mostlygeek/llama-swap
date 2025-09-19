@@ -93,6 +93,14 @@
     @apply px-4;
   }
 
+  /* Tables */
+  table th {
+    @apply p-2 font-semibold;
+  }
+  table td {
+    @apply p-2;
+  }
+
   /* Navigation Header */
 
   .navlink {
@@ -122,7 +130,7 @@
 
   /* Status Badges */
   .status {
-    @apply inline-block px-2 py-1 text-xs font-medium rounded-full;
+    @apply inline-block px-2 py-1 text-xs font-medium rounded-lg;
   }
 
   .status--ready {
@@ -140,7 +148,7 @@
 
   /* Buttons */
   .btn {
-    @apply bg-surface p-2 px-4 text-sm rounded-full border border-2 transition-colors duration-200 border-btn-border;
+    @apply bg-surface py-2 px-4 text-sm rounded-md border transition-colors duration-200 border-btn-border;
   }
 
   .btn:hover {
