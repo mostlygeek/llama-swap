@@ -7,9 +7,9 @@ const ConnectionStatusIcon = () => {
   const eventStatusColor = useMemo(() => {
     switch (connectionStatus) {
       case "connected":
-        return "bg-green-500";
+        return "bg-emerald-500";
       case "connecting":
-        return "bg-yellow-500";
+        return "bg-amber-500";
       case "disconnected":
       default:
         return "bg-red-500";

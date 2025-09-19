@@ -43,47 +43,46 @@ const ActivityPage = () => {
   }, [metrics]);
 
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-4">Activity</h1>
+    <div className="p-2">
+      <h1 className="text-2xl font-bold">Activity</h1>
 
-      {metrics.length === 0 ? (
+      {metrics.length === 0 && (
         <div className="text-center py-8">
           <p className="text-gray-600">No metrics data available</p>
         </div>
-      ) : (
-        <div className="overflow-x-auto">
+      )}
+      {metrics.length > 0 && (
+        <div className="card overflow-auto">
           <table className="min-w-full divide-y">
-            <thead>
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider">ID</th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Time</th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Model</th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">
+            <thead className="border-gray-200 dark:border-white/10">
+              <tr className="text-left text-xs uppercase tracking-wider">
+                <th className="px-6 py-3">ID</th>
+                <th className="px-6 py-3">Time</th>
+                <th className="px-6 py-3">Model</th>
+                <th className="px-6 py-3">
                   Cached <Tooltip content="prompt tokens from cache" />
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">
+                <th className="px-6 py-3">
                   Prompt <Tooltip content="new prompt tokens processed" />
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Generated</th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Prompt Processing</th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Generation Speed</th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Duration</th>
+                <th className="px-6 py-3">Generated</th>
+                <th className="px-6 py-3">Prompt Processing</th>
+                <th className="px-6 py-3">Generation Speed</th>
+                <th className="px-6 py-3">Duration</th>
               </tr>
             </thead>
             <tbody className="divide-y">
               {sortedMetrics.map((metric) => (
-                <tr key={`metric_${metric.id}`}>
-                  <td className="px-4 py-4 whitespace-nowrap text-sm">{metric.id + 1 /* un-zero index */}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">{formatRelativeTime(metric.timestamp)}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">{metric.model}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    {metric.cache_tokens > 0 ? metric.cache_tokens.toLocaleString() : "-"}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">{metric.input_tokens.toLocaleString()}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">{metric.output_tokens.toLocaleString()}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">{formatSpeed(metric.prompt_per_second)}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">{formatSpeed(metric.tokens_per_second)}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">{formatDuration(metric.duration_ms)}</td>
+                <tr key={metric.id} className="whitespace-nowrap text-sm border-gray-200 dark:border-white/10">
+                  <td className="px-4 py-4">{metric.id + 1 /* un-zero index */}</td>
+                  <td className="px-6 py-4">{formatRelativeTime(metric.timestamp)}</td>
+                  <td className="px-6 py-4">{metric.model}</td>
+                  <td className="px-6 py-4">{metric.cache_tokens > 0 ? metric.cache_tokens.toLocaleString() : "-"}</td>
+                  <td className="px-6 py-4">{metric.input_tokens.toLocaleString()}</td>
+                  <td className="px-6 py-4">{metric.output_tokens.toLocaleString()}</td>
+                  <td className="px-6 py-4">{formatSpeed(metric.prompt_per_second)}</td>
+                  <td className="px-6 py-4">{formatSpeed(metric.tokens_per_second)}</td>
+                  <td className="px-6 py-4">{formatDuration(metric.duration_ms)}</td>
                 </tr>
               ))}
             </tbody>
