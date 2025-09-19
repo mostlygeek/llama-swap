@@ -37,11 +37,11 @@ export function Header() {
       )}
 
       <menu className="flex items-center gap-4">
-        <NavLink to="/" className={navLinkClass} type="button">
-          Logs
-        </NavLink>
         <NavLink to="/models" className={navLinkClass} type="button">
           Models
+        </NavLink>
+        <NavLink to="/logs" className={navLinkClass} type="button">
+          Logs
         </NavLink>
         <NavLink to="/activity" className={navLinkClass} type="button">
           Activity
