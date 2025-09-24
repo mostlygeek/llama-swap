@@ -401,9 +401,59 @@ func TestProxyManager_Unload(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, w.Body.String(), "OK")
 
-	// give it a bit of time to stop
-	<-time.After(time.Millisecond * 250)
+	select {
+	case <-proxy.processGroups[DEFAULT_GROUP_ID].processes["model1"].cmdWaitChan:
+		// good
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for model1 to stop")
+	}
 	assert.Equal(t, proxy.processGroups[DEFAULT_GROUP_ID].processes["model1"].CurrentState(), StateStopped)
+}
+
+func TestProxyManager_UnloadSingleModel(t *testing.T) {
+	const testGroupId = "testGroup"
+	config := AddDefaultGroupToConfig(Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]ModelConfig{
+			"model1": getTestSimpleResponderConfig("model1"),
+			"model2": getTestSimpleResponderConfig("model2"),
+		},
+		Groups: map[string]GroupConfig{
+			testGroupId: {
+				Swap:    false,
+				Members: []string{"model1", "model2"},
+			},
+		},
+		LogLevel: "error",
+	})
+
+	proxy := New(config)
+
+	// start both model
+	for _, modelName := range []string{"model1", "model2"} {
+		reqBody := fmt.Sprintf(`{"model":"%s"}`, modelName)
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := httptest.NewRecorder()
+		proxy.ServeHTTP(w, req)
+	}
+
+	assert.Equal(t, proxy.processGroups[testGroupId].processes["model1"].CurrentState(), StateReady)
+	assert.Equal(t, proxy.processGroups[testGroupId].processes["model2"].CurrentState(), StateReady)
+
+	req := httptest.NewRequest("GET", "/unload/model1", nil)
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, w.Body.String(), "OK")
+
+	select {
+	case <-proxy.processGroups[testGroupId].processes["model1"].cmdWaitChan:
+		// good
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for model1 to stop")
+	}
+
+	assert.Equal(t, proxy.processGroups[testGroupId].processes["model1"].CurrentState(), StateStopped)
 }
 
 // Test issue #61 `Listing the current list of models and the loaded model.`

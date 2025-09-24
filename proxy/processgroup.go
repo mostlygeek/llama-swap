@@ -86,6 +86,19 @@ func (pg *ProcessGroup) HasMember(modelName string) bool {
 	return slices.Contains(pg.config.Groups[pg.id].Members, modelName)
 }
 
+func (pg *ProcessGroup) StopProcess(modelID string) error {
+	pg.Lock()
+	defer pg.Unlock()
+
+	process, exists := pg.processes[modelID]
+	if !exists {
+		return fmt.Errorf("process not found for %s", modelID)
+	}
+
+	process.StopImmediately()
+	return nil
+}
+
 func (pg *ProcessGroup) StopProcesses(strategy StopStrategy) {
 	pg.Lock()
 	defer pg.Unlock()

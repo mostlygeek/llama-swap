@@ -37,7 +37,7 @@ export default function ModelsPage() {
 }
 
 function ModelsPanel() {
-  const { models, loadModel, unloadAllModels } = useAPI();
+  const { models, loadModel, unloadAllModels, unloadSingleModel } = useAPI();
   const [isUnloading, setIsUnloading] = useState(false);
   const [showUnlisted, setShowUnlisted] = usePersistentState("showUnlisted", true);
   const [showIdorName, setShowIdorName] = usePersistentState<"id" | "name">("showIdorName", "id"); // true = show ID, false = show name
@@ -119,13 +119,19 @@ function ModelsPanel() {
                   )}
                 </td>
                 <td className="w-12">
-                  <button
-                    className="btn btn--sm"
-                    disabled={model.state !== "stopped"}
-                    onClick={() => loadModel(model.id)}
-                  >
-                    Load
-                  </button>
+                  {model.state === "stopped" ? (
+                    <button className="btn btn--sm" onClick={() => loadModel(model.id)}>
+                      Load
+                    </button>
+                  ) : (
+                    <button
+                      className="btn btn--sm"
+                      onClick={() => unloadSingleModel(model.id)}
+                      disabled={model.state !== "ready"}
+                    >
+                      Unload
+                    </button>
+                  )}
                 </td>
                 <td className="w-20">
                   <span className={`w-16 text-center status status--${model.state}`}>{model.state}</span>
