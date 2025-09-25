@@ -4,7 +4,7 @@ import { LogPanel } from "./LogViewer";
 import { usePersistentState } from "../hooks/usePersistentState";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { useTheme } from "../contexts/ThemeProvider";
-import { RiEyeFill, RiEyeOffFill, RiStopCircleLine, RiSwapBoxFill } from "react-icons/ri";
+import { RiEyeFill, RiEyeOffFill, RiSwapBoxFill, RiEjectLine } from "react-icons/ri";
 
 export default function ModelsPage() {
   const { isNarrow } = useTheme();
@@ -90,7 +90,7 @@ function ModelsPanel() {
             onClick={handleUnloadAllModels}
             disabled={isUnloading}
           >
-            <RiStopCircleLine size="24" /> {isUnloading ? "Unloading..." : "Unload"}
+            <RiEjectLine size="24" /> {isUnloading ? "Unloading..." : "Unload All"}
           </button>
         </div>
       </div>

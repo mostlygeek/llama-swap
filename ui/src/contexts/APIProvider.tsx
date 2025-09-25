@@ -178,7 +178,7 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
 
   const unloadAllModels = useCallback(async () => {
     try {
-      const response = await fetch(`/api/models/unload/`, {
+      const response = await fetch(`/api/models/unload`, {
         method: "POST",
       });
       if (!response.ok) {
@@ -192,8 +192,8 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
 
   const unloadSingleModel = useCallback(async (model: string) => {
     try {
-      const response = await fetch(`/unload/${model}`, {
-        method: "GET",
+      const response = await fetch(`/api/models/unload/${model}`, {
+        method: "POST",
       });
       if (!response.ok) {
         throw new Error(`Failed to unload model: ${response.status}`);

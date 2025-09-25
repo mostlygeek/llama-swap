@@ -228,8 +228,6 @@ func (pm *ProxyManager) setupGinEngine() {
 		c.Redirect(http.StatusFound, "/ui/models")
 	})
 	pm.ginEngine.Any("/upstream/*upstreamPath", pm.proxyToUpstream)
-
-	pm.ginEngine.GET("/unload/*model", pm.unloadSingleModelHandler)
 	pm.ginEngine.GET("/unload", pm.unloadAllModelsHandler)
 	pm.ginEngine.GET("/running", pm.listRunningProcessesHandler)
 	pm.ginEngine.GET("/health", func(c *gin.Context) {
@@ -627,29 +625,6 @@ func (pm *ProxyManager) sendErrorResponse(c *gin.Context, statusCode int, messag
 func (pm *ProxyManager) unloadAllModelsHandler(c *gin.Context) {
 	pm.StopProcesses(StopImmediately)
 	c.String(http.StatusOK, "OK")
-}
-
-func (pm *ProxyManager) unloadSingleModelHandler(c *gin.Context) {
-	requestedModel := strings.TrimPrefix(c.Param("model"), "/")
-
-	realModelName, found := pm.config.RealModelName(requestedModel)
-	if !found {
-		c.String(http.StatusNotFound, "Model not found")
-		return
-	}
-
-	processGroup := pm.findGroupByModelName(realModelName)
-	if processGroup == nil {
-		c.String(http.StatusInternalServerError, "process group not found for model %s", requestedModel)
-		return
-	}
-
-	if err := processGroup.StopProcess(realModelName); err != nil {
-		c.String(http.StatusInternalServerError, "error stopping process: %s", err.Error())
-		return
-	} else {
-		c.String(http.StatusOK, "OK")
-	}
 }
 
 func (pm *ProxyManager) listRunningProcessesHandler(context *gin.Context) {

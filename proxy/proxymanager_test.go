@@ -428,6 +428,7 @@ func TestProxyManager_UnloadSingleModel(t *testing.T) {
 	})
 
 	proxy := New(config)
+	defer proxy.StopProcesses(StopImmediately)
 
 	// start both model
 	for _, modelName := range []string{"model1", "model2"} {
@@ -437,14 +438,16 @@ func TestProxyManager_UnloadSingleModel(t *testing.T) {
 		proxy.ServeHTTP(w, req)
 	}
 
-	assert.Equal(t, proxy.processGroups[testGroupId].processes["model1"].CurrentState(), StateReady)
-	assert.Equal(t, proxy.processGroups[testGroupId].processes["model2"].CurrentState(), StateReady)
+	assert.Equal(t, StateReady, proxy.processGroups[testGroupId].processes["model1"].CurrentState())
+	assert.Equal(t, StateReady, proxy.processGroups[testGroupId].processes["model2"].CurrentState())
 
-	req := httptest.NewRequest("GET", "/unload/model1", nil)
+	req := httptest.NewRequest("POST", "/api/models/unload/model1", nil)
 	w := httptest.NewRecorder()
 	proxy.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, w.Body.String(), "OK")
+	if !assert.Equal(t, w.Body.String(), "OK") {
+		t.FailNow()
+	}
 
 	select {
 	case <-proxy.processGroups[testGroupId].processes["model1"].cmdWaitChan:
@@ -454,6 +457,7 @@ func TestProxyManager_UnloadSingleModel(t *testing.T) {
 	}
 
 	assert.Equal(t, proxy.processGroups[testGroupId].processes["model1"].CurrentState(), StateStopped)
+	assert.Equal(t, proxy.processGroups[testGroupId].processes["model2"].CurrentState(), StateReady)
 }
 
 // Test issue #61 `Listing the current list of models and the loaded model.`
