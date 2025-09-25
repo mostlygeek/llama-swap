@@ -423,9 +423,18 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 			// Check if this is exactly a model name with no additional path
 			// and doesn't end with a trailing slash
 			if remainingPath == "/" && !strings.HasSuffix(upstreamPath, "/") {
-				// Redirect to add trailing slash
+				// Build new URL with query parameters preserved
 				newPath := "/upstream/" + searchModelName + "/"
-				c.Redirect(http.StatusMovedPermanently, newPath)
+				if c.Request.URL.RawQuery != "" {
+					newPath += "?" + c.Request.URL.RawQuery
+				}
+
+				// Use 308 for non-GET/HEAD requests to preserve method
+				if c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead {
+					c.Redirect(http.StatusMovedPermanently, newPath)
+				} else {
+					c.Redirect(http.StatusPermanentRedirect, newPath)
+				}
 				return
 			}
 			break
