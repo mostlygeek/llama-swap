@@ -15,6 +15,7 @@ export default defineConfig({
       "/api": "http://localhost:8080", // Proxy API calls to Go backend during development
       "/logs": "http://localhost:8080",
       "/upstream": "http://localhost:8080",
+      "/unload": "http://localhost:8080",
     },
   },
 });
