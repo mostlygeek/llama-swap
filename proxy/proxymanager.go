@@ -419,6 +419,15 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 			modelName = real
 			remainingPath = "/" + strings.Join(parts[i+1:], "/")
 			modelFound = true
+
+			// Check if this is exactly a model name with no additional path
+			// and doesn't end with a trailing slash
+			if remainingPath == "/" && !strings.HasSuffix(upstreamPath, "/") {
+				// Redirect to add trailing slash
+				newPath := "/upstream/" + searchModelName + "/"
+				c.Redirect(http.StatusMovedPermanently, newPath)
+				return
+			}
 			break
 		}
 	}
@@ -438,6 +447,7 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 	c.Request.URL.Path = remainingPath
 	processGroup.ProxyRequest(realModelName, c.Writer, c.Request)
 }
+
 func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
