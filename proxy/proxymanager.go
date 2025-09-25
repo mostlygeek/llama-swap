@@ -419,6 +419,24 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 			modelName = real
 			remainingPath = "/" + strings.Join(parts[i+1:], "/")
 			modelFound = true
+
+			// Check if this is exactly a model name with no additional path
+			// and doesn't end with a trailing slash
+			if remainingPath == "/" && !strings.HasSuffix(upstreamPath, "/") {
+				// Build new URL with query parameters preserved
+				newPath := "/upstream/" + searchModelName + "/"
+				if c.Request.URL.RawQuery != "" {
+					newPath += "?" + c.Request.URL.RawQuery
+				}
+
+				// Use 308 for non-GET/HEAD requests to preserve method
+				if c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead {
+					c.Redirect(http.StatusMovedPermanently, newPath)
+				} else {
+					c.Redirect(http.StatusPermanentRedirect, newPath)
+				}
+				return
+			}
 			break
 		}
 	}
@@ -438,6 +456,7 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 	c.Request.URL.Path = remainingPath
 	processGroup.ProxyRequest(realModelName, c.Writer, c.Request)
 }
+
 func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
