@@ -5,12 +5,14 @@ import (
 	"net/http"
 	"slices"
 	"sync"
+
+	"github.com/mostlygeek/llama-swap/proxy/config"
 )
 
 type ProcessGroup struct {
 	sync.Mutex
 
-	config     Config
+	config     config.Config
 	id         string
 	swap       bool
 	exclusive  bool
@@ -24,7 +26,7 @@ type ProcessGroup struct {
 	lastUsedProcess string
 }
 
-func NewProcessGroup(id string, config Config, proxyLogger *LogMonitor, upstreamLogger *LogMonitor) *ProcessGroup {
+func NewProcessGroup(id string, config config.Config, proxyLogger *LogMonitor, upstreamLogger *LogMonitor) *ProcessGroup {
 	groupConfig, ok := config.Groups[id]
 	if !ok {
 		panic("Unable to find configuration for group id: " + id)
