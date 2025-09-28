@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/proxy/config"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -90,7 +91,7 @@ func TestProcess_WaitOnMultipleStarts(t *testing.T) {
 // test that the automatic start returns the expected error type
 func TestProcess_BrokenModelConfig(t *testing.T) {
 	// Create a process configuration
-	config := ModelConfig{
+	config := config.ModelConfig{
 		Cmd:           "nonexistent-command",
 		Proxy:         "http://127.0.0.1:9913",
 		CheckEndpoint: "/health",
@@ -325,7 +326,7 @@ func TestProcess_ExitInterruptsHealthCheck(t *testing.T) {
 
 	// should run and exit but interrupt the long checkHealthTimeout
 	checkHealthTimeout := 5
-	config := ModelConfig{
+	config := config.ModelConfig{
 		Cmd:           "sleep 1",
 		Proxy:         "http://127.0.0.1:9913",
 		CheckEndpoint: "/health",
@@ -402,7 +403,7 @@ func TestProcess_ForceStopWithKill(t *testing.T) {
 	binaryPath := getSimpleResponderPath()
 	port := getTestPort()
 
-	config := ModelConfig{
+	conf := config.ModelConfig{
 		// note --ignore-sig-term which ignores the SIGTERM signal so a SIGKILL must be sent
 		// to force the process to exit
 		Cmd:           fmt.Sprintf("%s --port %d --respond %s --silent --ignore-sig-term", binaryPath, port, expectedMessage),
@@ -410,7 +411,7 @@ func TestProcess_ForceStopWithKill(t *testing.T) {
 		CheckEndpoint: "/health",
 	}
 
-	process := NewProcess("stop_immediate", 2, config, debugLogger, debugLogger)
+	process := NewProcess("stop_immediate", 2, conf, debugLogger, debugLogger)
 	defer process.Stop()
 
 	// reduce to make testing go faster
@@ -450,15 +451,15 @@ func TestProcess_ForceStopWithKill(t *testing.T) {
 }
 
 func TestProcess_StopCmd(t *testing.T) {
-	config := getTestSimpleResponderConfig("test_stop_cmd")
+	conf := getTestSimpleResponderConfig("test_stop_cmd")
 
 	if runtime.GOOS == "windows" {
-		config.CmdStop = "taskkill /f /t /pid ${PID}"
+		conf.CmdStop = "taskkill /f /t /pid ${PID}"
 	} else {
-		config.CmdStop = "kill -TERM ${PID}"
+		conf.CmdStop = "kill -TERM ${PID}"
 	}
 
-	process := NewProcess("testStopCmd", 2, config, debugLogger, debugLogger)
+	process := NewProcess("testStopCmd", 2, conf, debugLogger, debugLogger)
 	defer process.Stop()
 
 	err := process.start()
@@ -470,15 +471,15 @@ func TestProcess_StopCmd(t *testing.T) {
 
 func TestProcess_EnvironmentSetCorrectly(t *testing.T) {
 	expectedMessage := "test_env_not_emptied"
-	config := getTestSimpleResponderConfig(expectedMessage)
+	conf := getTestSimpleResponderConfig(expectedMessage)
 
 	// ensure that the the default config does not blank out the inherited environment
-	configWEnv := config
+	configWEnv := conf
 
 	// ensure the additiona variables are appended to the process' environment
 	configWEnv.Env = append(configWEnv.Env, "TEST_ENV1=1", "TEST_ENV2=2")
 
-	process1 := NewProcess("env_test", 2, config, debugLogger, debugLogger)
+	process1 := NewProcess("env_test", 2, conf, debugLogger, debugLogger)
 	process2 := NewProcess("env_test", 2, configWEnv, debugLogger, debugLogger)
 
 	process1.start()
