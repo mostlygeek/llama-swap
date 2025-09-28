@@ -24,7 +24,7 @@ proxy/ui_dist/placeholder.txt:
 	touch $@
 
 test: proxy/ui_dist/placeholder.txt
-	go test -short ./proxy/...
+	go test -short -count=1 ./proxy/...
 
 # for CI - full test (takes longer)
 test-all: proxy/ui_dist/placeholder.txt
