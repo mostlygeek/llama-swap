@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mostlygeek/llama-swap/config"
+	"github.com/mostlygeek/llama-swap/proxy/config"
 	"github.com/stretchr/testify/assert"
 )
 

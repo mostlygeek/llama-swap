@@ -14,9 +14,9 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/gin-gonic/gin"
-	"github.com/mostlygeek/llama-swap/config"
 	"github.com/mostlygeek/llama-swap/event"
 	"github.com/mostlygeek/llama-swap/proxy"
+	"github.com/mostlygeek/llama-swap/proxy/config"
 )
 
 var (
