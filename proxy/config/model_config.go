@@ -104,12 +104,14 @@ func (f ModelFilters) SanitizedStripParams() ([]string, error) {
 
 	params := strings.Split(f.StripParams, ",")
 	cleaned := make([]string, 0, len(params))
+	seen := make(map[string]bool)
 
 	for _, param := range params {
 		trimmed := strings.TrimSpace(param)
-		if trimmed == "model" || trimmed == "" {
+		if trimmed == "model" || trimmed == "" || seen[trimmed] {
 			continue
 		}
+		seen[trimmed] = true
 		cleaned = append(cleaned, trimmed)
 	}
 
