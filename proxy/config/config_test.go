@@ -223,6 +223,61 @@ models:
 	assert.Equal(t, "/path/to/stop.sh --port 9990 --arg2", strings.Join(sanitizedCmdStop, " "))
 }
 
+func TestConfig_MacroReservedNames(t *testing.T) {
+
+	tests := []struct {
+		name          string
+		config        string
+		expectedError string
+	}{
+		{
+			name: "global macro named PORT",
+			config: `
+macros:
+  PORT: "1111"
+`,
+			expectedError: "macro name 'PORT' is reserved",
+		},
+		{
+			name: "global macro named MODEL_ID",
+			config: `
+macros:
+  MODEL_ID: model1
+`,
+			expectedError: "macro name 'MODEL_ID' is reserved",
+		},
+		{
+			name: "model macro named PORT",
+			config: `
+models:
+  model1:
+    macros:
+      PORT: 1111
+`,
+			expectedError: "model model1: macro name 'PORT' is reserved",
+		},
+
+		{
+			name: "model macro named MODEL_ID",
+			config: `
+models:
+  model1:
+    macros:
+      MODEL_ID: model1
+`,
+			expectedError: "model model1: macro name 'MODEL_ID' is reserved",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := LoadConfigFromReader(strings.NewReader(tt.config))
+			assert.NotNil(t, err)
+			assert.Equal(t, tt.expectedError, err.Error())
+		})
+	}
+}
+
 func TestConfig_MacroErrorOnUnknownMacros(t *testing.T) {
 	tests := []struct {
 		name    string

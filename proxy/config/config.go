@@ -385,9 +385,8 @@ func validateMacro(name, value string) error {
 	}
 
 	switch name {
-	case "PORT":
-	case "MODEL_ID":
-		return fmt.Errorf("macro name '%s' is reserved and cannot be used", name)
+	case "PORT", "MODEL_ID":
+		return fmt.Errorf("macro name '%s' is reserved", name)
 	}
 
 	return nil
