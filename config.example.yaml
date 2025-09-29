@@ -38,12 +38,14 @@ startPort: 10001
 # macros: a dictionary of string substitutions
 # - optional, default: empty dictionary
 # - macros are reusable snippets
-# - used in a model's cmd, cmdStop, proxy and checkEndpoint
+# - used in a model's cmd, cmdStop, proxy, checkEndpoint, filters.stripParams
 # - useful for reducing common configuration settings
 # - macro names are strings and must be less than 64 characters
 # - macro names must match the regex ^[a-zA-Z0-9_-]+$
 # - macro names must not be a reserved name: PORT or MODEL_ID
 # - macro values must be less than 1024 characters
+#
+# Important: do not nest macros inside other macros; expansion is single-pass
 macros:
   "latest-llama": >
     /path/to/llama-server/llama-server-ec9e0301

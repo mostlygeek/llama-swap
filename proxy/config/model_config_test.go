@@ -40,7 +40,6 @@ models:
 	assert.NoError(t, err)
 	for modelId, modelConfig := range config.Models {
 		t.Run(fmt.Sprintf("Testing macros in filters for model %s", modelId), func(t *testing.T) {
-			// make sure `model` and enmpty strings are not in the list
 			assert.Equal(t, "model, top_k, top_k, temperature, temperature, top_p, , ,", modelConfig.Filters.StripParams)
 			sanitized, err := modelConfig.Filters.SanitizedStripParams()
 			if assert.NoError(t, err) {
