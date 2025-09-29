@@ -40,10 +40,15 @@ startPort: 10001
 # - macros are reusable snippets
 # - used in a model's cmd, cmdStop, proxy and checkEndpoint
 # - useful for reducing common configuration settings
+# - macro names are strings and must be less than 64 characters
+# - macro names must match the regex ^[a-zA-Z0-9_-]+$
+# - macro names must not be a reserved name: PORT or MODEL_ID
+# - macro values must be less than 1024 characters
 macros:
   "latest-llama": >
     /path/to/llama-server/llama-server-ec9e0301
     --port ${PORT}
+  "default_ctx": "4096"
 
 # models: a dictionary of model configurations
 # - required
@@ -55,6 +60,13 @@ models:
 
   # keys are the model names used in API requests
   "llama":
+    # macros: a dictionary of string substitutions specific to this model
+    # - optional, default: empty dictionary
+    # - macros defined here override macros defined in the global macros section
+    # - model level macros follow the same rules as global macros
+    macros:
+      "default_ctx": "16384"
+
     # cmd: the command to run to start the inference server.
     # - required
     # - it is just a string, similar to what you would run on the CLI
@@ -64,6 +76,7 @@ models:
       # ${latest-llama} is a macro that is defined above
       ${latest-llama}
       --model path/to/llama-8B-Q4_K_M.gguf
+      --ctx-size ${default_ctx}
 
     # name: a display name for the model
     # - optional, default: empty string

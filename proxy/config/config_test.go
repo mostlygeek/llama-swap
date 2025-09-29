@@ -65,18 +65,6 @@ models:
 	assert.Contains(t, err.Error(), "duplicate alias m1 found in model: model")
 }
 
-func TestConfig_ModelConfigSanitizedCommand(t *testing.T) {
-	config := &ModelConfig{
-		Cmd: `python model1.py \
-    --arg1 value1 \
-    --arg2 value2`,
-	}
-
-	args, err := config.SanitizedCommand()
-	assert.NoError(t, err)
-	assert.Equal(t, []string{"python", "model1.py", "--arg1", "value1", "--arg2", "value2"}, args)
-}
-
 func TestConfig_FindConfig(t *testing.T) {
 
 	// TODO?
@@ -207,15 +195,19 @@ macros:
   argOne: "--arg1"
   argTwo: "--arg2"
   autoPort: "--port ${PORT}"
+  overriddenByModelMacro: failed
 
 models:
   model1:
+    macros:
+      overriddenByModelMacro: success
     cmd: |
       ${svr-path} ${argTwo}
       # the automatic ${PORT} is replaced
       ${autoPort}
       ${argOne}
       --arg3 three
+      --overridden ${overriddenByModelMacro}
     cmdStop: |
       /path/to/stop.sh --port ${PORT} ${argTwo}
 `
@@ -224,7 +216,7 @@ models:
 	assert.NoError(t, err)
 	sanitizedCmd, err := SanitizeCommand(config.Models["model1"].Cmd)
 	assert.NoError(t, err)
-	assert.Equal(t, "path/to/server --arg2 --port 9990 --arg1 --arg3 three", strings.Join(sanitizedCmd, " "))
+	assert.Equal(t, "path/to/server --arg2 --port 9990 --arg1 --arg3 three --overridden success", strings.Join(sanitizedCmd, " "))
 
 	sanitizedCmdStop, err := SanitizeCommand(config.Models["model1"].CmdStop)
 	assert.NoError(t, err)
@@ -301,32 +293,6 @@ models:
 		})
 	}
 }
-
-func TestConfig_ModelFilters(t *testing.T) {
-	content := `
-macros:
-  default_strip: "temperature, top_p"
-models:
-  model1:
-    cmd: path/to/cmd --port ${PORT}
-    filters:
-      strip_params: "model, top_k, ${default_strip}, , ,"
-`
-	config, err := LoadConfigFromReader(strings.NewReader(content))
-	assert.NoError(t, err)
-	modelConfig, ok := config.Models["model1"]
-	if !assert.True(t, ok) {
-		t.FailNow()
-	}
-
-	// make sure `model` and enmpty strings are not in the list
-	assert.Equal(t, "model, top_k, temperature, top_p, , ,", modelConfig.Filters.StripParams)
-	sanitized, err := modelConfig.Filters.SanitizedStripParams()
-	if assert.NoError(t, err) {
-		assert.Equal(t, []string{"temperature", "top_k", "top_p"}, sanitized)
-	}
-}
-
 func TestStripComments(t *testing.T) {
 	tests := []struct {
 		name     string
