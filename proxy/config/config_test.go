@@ -337,13 +337,28 @@ models:
     checkEndpoint: "http://localhost:${unknownMacro}/health"
 `,
 		},
+		{
+			name:  "unknown macro in filters.stripParams",
+			field: "filters.stripParams",
+			content: `
+startPort: 9990
+macros:
+  svr-path: "path/to/server"
+models:
+  model1:
+    cmd: "${svr-path} --port ${PORT}"
+    filters:
+      stripParams: "model,${unknownMacro}"
+`,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := LoadConfigFromReader(strings.NewReader(tt.content))
-			assert.Error(t, err)
-			assert.Contains(t, err.Error(), "unknown macro '${unknownMacro}' found in model1."+tt.field)
+			if assert.Error(t, err) {
+				assert.Contains(t, err.Error(), "unknown macro '${unknownMacro}' found in model1."+tt.field)
+			}
 			//t.Log(err)
 		})
 	}

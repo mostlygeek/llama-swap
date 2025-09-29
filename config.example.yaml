@@ -132,15 +132,15 @@ models:
 
     # filters: a dictionary of filter settings
     # - optional, default: empty dictionary
-    # - only strip_params is currently supported
+    # - only stripParams is currently supported
     filters:
-      # strip_params: a comma separated list of parameters to remove from the request
+      # stripParams: a comma separated list of parameters to remove from the request
       # - optional, default: ""
       # - useful for server side enforcement of sampling parameters
       # - the `model` parameter can never be removed
       # - can be any JSON key in the request body
       # - recommended to stick to sampling parameters
-      strip_params: "temperature, top_p, top_k"
+      stripParams: "temperature, top_p, top_k"
 
     # concurrencyLimit: overrides the allowed number of active parallel requests to a model
     # - optional, default: 0

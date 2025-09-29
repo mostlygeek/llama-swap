@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"runtime"
 	"slices"
 	"strings"
@@ -68,7 +69,7 @@ func (m *ModelConfig) SanitizedCommand() ([]string, error) {
 
 // ModelFilters see issue #174
 type ModelFilters struct {
-	StripParams string `yaml:"strip_params"`
+	StripParams string `yaml:"stripParams"`
 }
 
 func (m *ModelFilters) UnmarshalYAML(unmarshal func(interface{}) error) error {
@@ -79,6 +80,17 @@ func (m *ModelFilters) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 	if err := unmarshal(&defaults); err != nil {
 		return err
+	}
+
+	// Try to unmarshal with the old field name for backwards compatibility
+	if defaults.StripParams == "" {
+		var legacy struct {
+			StripParams string `yaml:"strip_params"`
+		}
+		if legacyErr := unmarshal(&legacy); legacyErr != nil {
+			return errors.New("failed to unmarshal legacy filters.strip_params: " + legacyErr.Error())
+		}
+		defaults.StripParams = legacy.StripParams
 	}
 
 	*m = ModelFilters(defaults)

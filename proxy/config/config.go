@@ -214,10 +214,11 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		// make sure there are no unknown macros that have not been replaced
 		macroPattern := regexp.MustCompile(`\$\{([a-zA-Z0-9_-]+)\}`)
 		fieldMap := map[string]string{
-			"cmd":           modelConfig.Cmd,
-			"cmdStop":       modelConfig.CmdStop,
-			"proxy":         modelConfig.Proxy,
-			"checkEndpoint": modelConfig.CheckEndpoint,
+			"cmd":                 modelConfig.Cmd,
+			"cmdStop":             modelConfig.CmdStop,
+			"proxy":               modelConfig.Proxy,
+			"checkEndpoint":       modelConfig.CheckEndpoint,
+			"filters.stripParams": modelConfig.Filters.StripParams,
 		}
 
 		for fieldName, fieldValue := range fieldMap {
