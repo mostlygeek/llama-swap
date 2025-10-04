@@ -31,6 +31,10 @@ type ModelConfig struct {
 	// Macros: see #264
 	// Model level macros take precedence over the global macros
 	Macros MacroList `yaml:"macros"`
+
+	// Metadata: see #264
+	// Arbitrary metadata that can be exposed through the API
+	Metadata map[string]any `yaml:"metadata"`
 }
 
 func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {

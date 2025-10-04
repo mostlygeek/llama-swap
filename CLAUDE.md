@@ -11,9 +11,8 @@ llama-swap is a light weight, transparent proxy server that provides automatic m
 
 ## Testing
 
-- `make test` - does a quick test run. Generally use this
-- `make test-all` - does a more extensive run with timeout testing.
-- `make all` - builds llama-swap.go and ui for multiple platforms
+- `make test-dev` - Use this when making iterative changes. Runs `go test` and `staticcheck`. Fix any static checking errors.
+- `make test-all` - runs at the end before completing work. Includes long running concurrency tests.
 
 ## Workflow Tasks
 

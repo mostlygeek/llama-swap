@@ -23,6 +23,11 @@ proxy/ui_dist/placeholder.txt:
 	mkdir -p proxy/ui_dist
 	touch $@
 
+# use cached test results while developing
+test-dev: proxy/ui_dist/placeholder.txt
+	go test -short ./proxy/...
+	staticcheck ./proxy/... || true
+
 test: proxy/ui_dist/placeholder.txt
 	go test -short -count=1 ./proxy/...
 
@@ -82,4 +87,4 @@ release:
 	git tag "$$new_tag";
 
 # Phony targets
-.PHONY: all clean ui mac linux windows simple-responder test test-all
+.PHONY: all clean ui mac linux windows simple-responder test test-all test-dev

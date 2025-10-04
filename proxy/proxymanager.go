@@ -370,6 +370,11 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 			record["description"] = desc
 		}
 
+		// Add metadata if present
+		if len(modelConfig.Metadata) > 0 {
+			record["llamaswap_meta"] = modelConfig.Metadata
+		}
+
 		data = append(data, record)
 	}
 

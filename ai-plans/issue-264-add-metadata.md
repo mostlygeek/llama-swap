@@ -211,60 +211,60 @@ The metadata will be schemaless, allowing users to define any key-value pairs th
 
 ### Configuration Schema Changes
 
-- [ ] Change `MacroList` type from `map[string]string` to `map[string]any` in [proxy/config/config.go:19](proxy/config/config.go#L19)
-- [ ] Add `Metadata map[string]any` field to `ModelConfig` struct in [proxy/config/model_config.go:33](proxy/config/model_config.go#L33)
-- [ ] Update `validateMacro()` function signature to accept `any` type for values
-- [ ] Add validation logic to ensure macro values are scalar types only
+- [x] Change `MacroList` type from `map[string]string` to `map[string]any` in [proxy/config/config.go:19](proxy/config/config.go#L19)
+- [x] Add `Metadata map[string]any` field to `ModelConfig` struct in [proxy/config/model_config.go:37](proxy/config/model_config.go#L37)
+- [x] Update `validateMacro()` function signature to accept `any` type for values
+- [x] Add validation logic to ensure macro values are scalar types only
 
 ### Macro Substitution Logic
 
-- [ ] Create generic recursive function `substituteMetadataMacros()` to handle `any` types
-- [ ] Implement type-preserving direct substitution logic
-- [ ] Implement string interpolation with type conversion
-- [ ] Handle maps: recursively process all values
-- [ ] Handle slices: recursively process all elements
-- [ ] Handle scalar types: perform string-based macro substitution if value is string
-- [ ] Integrate macro substitution into `LoadConfigFromReader()` after existing macro expansion
-- [ ] Update existing macro substitution calls to use merged macros with correct types
+- [x] Create generic recursive function `substituteMetadataMacros()` to handle `any` types
+- [x] Implement type-preserving direct substitution logic
+- [x] Implement string interpolation with type conversion
+- [x] Handle maps: recursively process all values
+- [x] Handle slices: recursively process all elements
+- [x] Handle scalar types: perform string-based macro substitution if value is string
+- [x] Integrate macro substitution into `LoadConfigFromReader()` after existing macro expansion
+- [x] Update existing macro substitution calls to use merged macros with correct types
 
 ### API Response Changes
 
-- [ ] Modify `listModelsHandler()` in [proxy/proxymanager.go:350](proxy/proxymanager.go#L350)
-- [ ] Add `llamaswap_meta` field to model records when metadata exists
-- [ ] Ensure empty metadata results in omitted `llamaswap_meta` key
-- [ ] Verify JSON marshaling preserves all types correctly
+- [x] Modify `listModelsHandler()` in [proxy/proxymanager.go:350](proxy/proxymanager.go#L350)
+- [x] Add `llamaswap_meta` field to model records when metadata exists
+- [x] Ensure empty metadata results in omitted `llamaswap_meta` key
+- [x] Verify JSON marshaling preserves all types correctly
 
 ### Testing - Config Package
 
-- [ ] Add test for string macros in metadata: [proxy/config/config_test.go](proxy/config/config_test.go)
-- [ ] Add test for int macros in metadata: [proxy/config/config_test.go](proxy/config/config_test.go)
-- [ ] Add test for float macros in metadata: [proxy/config/config_test.go](proxy/config/config_test.go)
-- [ ] Add test for bool macros in metadata: [proxy/config/config_test.go](proxy/config/config_test.go)
-- [ ] Add test for string interpolation in metadata: [proxy/config/config_test.go](proxy/config/config_test.go)
-- [ ] Add test for model-level macro precedence: [proxy/config/config_test.go](proxy/config/config_test.go)
-- [ ] Add test for nested structures in metadata: [proxy/config/config_test.go](proxy/config/config_test.go)
-- [ ] Add test for unknown macro in metadata (should error): [proxy/config/config_test.go](proxy/config/config_test.go)
-- [ ] Add test for invalid macro type validation: [proxy/config/config_test.go](proxy/config/config_test.go)
+- [x] Add test for string macros in metadata: [proxy/config/config_test.go](proxy/config/config_test.go)
+- [x] Add test for int macros in metadata: [proxy/config/config_test.go](proxy/config/config_test.go)
+- [x] Add test for float macros in metadata: [proxy/config/config_test.go](proxy/config/config_test.go)
+- [x] Add test for bool macros in metadata: [proxy/config/config_test.go](proxy/config/config_test.go)
+- [x] Add test for string interpolation in metadata: [proxy/config/config_test.go](proxy/config/config_test.go)
+- [x] Add test for model-level macro precedence: [proxy/config/config_test.go](proxy/config/config_test.go)
+- [x] Add test for nested structures in metadata: [proxy/config/config_test.go](proxy/config/config_test.go)
+- [x] Add test for unknown macro in metadata (should error): [proxy/config/config_test.go](proxy/config/config_test.go)
+- [x] Add test for invalid macro type validation: [proxy/config/config_test.go](proxy/config/config_test.go)
 
 ### Testing - Model Config Package
 
-- [ ] Add test cases to [proxy/config/model_config_test.go](proxy/config/model_config_test.go) for metadata unmarshaling
-- [ ] Test metadata with various scalar types
-- [ ] Test metadata with nested objects and arrays
+- [x] Add test cases to [proxy/config/model_config_test.go](proxy/config/model_config_test.go) for metadata unmarshaling
+- [x] Test metadata with various scalar types
+- [x] Test metadata with nested objects and arrays
 
 ### Testing - Proxy Manager
 
-- [ ] Update `TestProxyManager_ListModelsHandler` in [proxy/proxymanager_test.go](proxy/proxymanager_test.go)
-- [ ] Add test case for model with metadata
-- [ ] Add test case for model without metadata
-- [ ] Verify `llamaswap_meta` key presence/absence
-- [ ] Verify type preservation in JSON output
-- [ ] Verify macro substitution has occurred
+- [x] Update `TestProxyManager_ListModelsHandler` in [proxy/proxymanager_test.go](proxy/proxymanager_test.go)
+- [x] Add test case for model with metadata
+- [x] Add test case for model without metadata
+- [x] Verify `llamaswap_meta` key presence/absence
+- [x] Verify type preservation in JSON output
+- [x] Verify macro substitution has occurred
 
 ### Documentation
 
-- [ ] Verify [config.example.yaml](config.example.yaml) already has complete metadata examples (lines 149-171)
-- [ ] No additional documentation needed per project instructions
+- [x] Verify [config.example.yaml](config.example.yaml) already has complete metadata examples (lines 149-171)
+- [x] No additional documentation needed per project instructions
 
 ## Known Issues and Considerations
 

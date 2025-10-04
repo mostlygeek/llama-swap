@@ -282,6 +282,80 @@ func TestProxyManager_ListModelsHandler(t *testing.T) {
 	assert.Empty(t, expectedModels, "not all expected models were returned")
 }
 
+func TestProxyManager_ListModelsHandler_WithMetadata(t *testing.T) {
+	// Process config through LoadConfigFromReader to apply macro substitution
+	configYaml := `
+healthCheckTimeout: 15
+logLevel: error
+startPort: 10000
+models:
+  model1:
+    cmd: /path/to/server -p ${PORT}
+    macros:
+      PORT_NUM: 10001
+      TEMP: 0.7
+      NAME: "llama"
+    metadata:
+      port: ${PORT_NUM}
+      temperature: ${TEMP}
+      enabled: true
+      note: "Running on port ${PORT_NUM}"
+      nested:
+        value: ${TEMP}
+  model2:
+    cmd: /path/to/server -p ${PORT}
+`
+	processedConfig, err := config.LoadConfigFromReader(strings.NewReader(configYaml))
+	assert.NoError(t, err)
+
+	proxy := New(processedConfig)
+
+	req := httptest.NewRequest("GET", "/v1/models", nil)
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response struct {
+		Data []map[string]any `json:"data"`
+	}
+
+	err = json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Len(t, response.Data, 2)
+
+	// Find model1 and model2 in response
+	var model1Data, model2Data map[string]any
+	for _, model := range response.Data {
+		if model["id"] == "model1" {
+			model1Data = model
+		} else if model["id"] == "model2" {
+			model2Data = model
+		}
+	}
+
+	// Verify model1 has llamaswap_meta
+	assert.NotNil(t, model1Data)
+	meta, exists := model1Data["llamaswap_meta"]
+	assert.True(t, exists, "model1 should have llamaswap_meta")
+
+	metaMap := meta.(map[string]any)
+	// Verify type preservation
+	assert.Equal(t, float64(10001), metaMap["port"]) // JSON numbers are float64
+	assert.Equal(t, 0.7, metaMap["temperature"])
+	assert.Equal(t, true, metaMap["enabled"])
+	// Verify string interpolation
+	assert.Equal(t, "Running on port 10001", metaMap["note"])
+	// Verify nested structure
+	nested := metaMap["nested"].(map[string]any)
+	assert.Equal(t, 0.7, nested["value"])
+
+	// Verify model2 does NOT have llamaswap_meta
+	assert.NotNil(t, model2Data)
+	_, exists = model2Data["llamaswap_meta"]
+	assert.False(t, exists, "model2 should not have llamaswap_meta")
+}
+
 func TestProxyManager_ListModelsHandler_SortedByID(t *testing.T) {
 	// Intentionally add models in non-sorted order and with an unlisted model
 	config := config.Config{
