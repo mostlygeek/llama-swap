@@ -1,0 +1,24 @@
+# Plan Summary
+
+- see config.example.yaml to understand configuration schema and examples
+  - see `models.llama.metadata` as an example
+  - the `metadata` key is an object, but it is schemaless
+- golang logic configuration in `config` package
+  - `config/config.go` and `config/config_test.go` - main configuration schema and functionality
+  - `config/model_config.go` and `config/model_config_test.go` - model schema and functionality
+- change `macros` at the global and model levels to be `map[string]any`
+  - previously they were `map[string]string`. Updated macro substitution code to be use `any` type
+  - use golang generics and limit `T` to scalar types: int, string, float, bool (true/false)
+- add support for a `metadata` key in `ModelConfig` struct.
+  - will have macros replaced into values that has a macro
+    - `key: ${macro}` - will keep the type of the macro `value` to be substituted in
+      - if `macro` is a string, `key: "hello"`
+      - if `macro` is an int, `key: 123`
+      - if `macro` is a float, `key: 1.23`
+      - if `macro` is a bool, `key: true`
+    - `key: "my ${macro}` - will convert `value` to a string
+- Update `listModelsHandler()` in `proxy/proxymanager.go` to marshal the metadata
+  - put metadata under the `llamaswap_meta` key
+- add tests in `config/model_config_test.go` for changes
+- add tests in `proxy/proxymanager_test.go`, `TestProxyManager_ListModelsHandler` to test metadata is encoded correctly
+- add tests in `config/config_test.go` to test that macros were substituted correctly
