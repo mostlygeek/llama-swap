@@ -155,7 +155,7 @@ groups:
 	expected := Config{
 		LogLevel:  "info",
 		StartPort: 5800,
-		Macros: map[string]string{
+		Macros: MacroList{
 			"svr-path": "path/to/server",
 		},
 		Models: map[string]ModelConfig{

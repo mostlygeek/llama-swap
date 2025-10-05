@@ -67,7 +67,8 @@ models:
     # - macros defined here override macros defined in the global macros section
     # - model level macros follow the same rules as global macros
     macros:
-      "default_ctx": "16384"
+      "default_ctx": 16384
+      "temp": 0.7
 
     # cmd: the command to run to start the inference server.
     # - required
@@ -79,6 +80,7 @@ models:
       ${latest-llama}
       --model path/to/llama-8B-Q4_K_M.gguf
       --ctx-size ${default_ctx}
+      --temperature ${temp}
 
     # name: a display name for the model
     # - optional, default: empty string
@@ -143,6 +145,30 @@ models:
       # - can be any JSON key in the request body
       # - recommended to stick to sampling parameters
       stripParams: "temperature, top_p, top_k"
+
+    # metadata: a dictionary of arbitrary values that are included in /v1/models
+    # - optional, default: empty dictionary
+    # - while metadata can contains complex types it is recommended to keep it simple
+    # - metadata is only passed through in /v1/models responses
+    metadata:
+      # port will remain an integer
+      port: ${PORT}
+
+      # the ${temp} macro will remain a float
+      temperature: ${temp}
+      note: "The ${MODEL_ID} is running on port ${PORT} temp=${temp}, context=${default_ctx}"
+
+      a_list:
+        - 1
+        - 1.23
+        - "macros are OK in list and dictionary types: ${MODEL_ID}"
+
+      an_obj:
+        a: "1"
+        b: 2
+        # objects can contain complex types with macro substitution
+        # becomes: c: [0.7, false, "model: llama"]
+        c: ["${temp}", false, "model: ${MODEL_ID}"]
 
     # concurrencyLimit: overrides the allowed number of active parallel requests to a model
     # - optional, default: 0
