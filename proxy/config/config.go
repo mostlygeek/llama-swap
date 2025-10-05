@@ -25,6 +25,11 @@ type GroupConfig struct {
 	Members    []string `yaml:"members"`
 }
 
+var (
+	macroNameRegex    = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+	macroPatternRegex = regexp.MustCompile(`\$\{([a-zA-Z0-9_-]+)\}`)
+)
+
 // set default values for GroupConfig
 func (c *GroupConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	type rawGroupConfig GroupConfig
@@ -214,7 +219,6 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		}
 
 		// make sure there are no unknown macros that have not been replaced
-		macroPattern := regexp.MustCompile(`\$\{([a-zA-Z0-9_-]+)\}`)
 		fieldMap := map[string]string{
 			"cmd":                 modelConfig.Cmd,
 			"cmdStop":             modelConfig.CmdStop,
@@ -224,7 +228,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		}
 
 		for fieldName, fieldValue := range fieldMap {
-			matches := macroPattern.FindAllStringSubmatch(fieldValue, -1)
+			matches := macroPatternRegex.FindAllStringSubmatch(fieldValue, -1)
 			for _, match := range matches {
 				macroName := match[1]
 				if macroName == "PID" && fieldName == "cmdStop" {
@@ -380,10 +384,6 @@ func StripComments(cmdStr string) string {
 	return strings.Join(cleanedLines, "\n")
 }
 
-var (
-	macroNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
-)
-
 // validateMacro validates macro name and value constraints
 func validateMacro(name string, value any) error {
 	if len(name) >= 64 {
@@ -429,8 +429,7 @@ func substituteMetadataMacros(value any, macros MacroList) (any, error) {
 		}
 
 		// Handle string interpolation
-		macroPattern := regexp.MustCompile(`\$\{([a-zA-Z0-9_-]+)\}`)
-		matches := macroPattern.FindAllStringSubmatch(v, -1)
+		matches := macroPatternRegex.FindAllStringSubmatch(v, -1)
 		result := v
 		for _, match := range matches {
 			macroName := match[1]
