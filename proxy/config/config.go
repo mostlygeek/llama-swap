@@ -187,6 +187,8 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			mergedMacros[k] = v
 		}
 
+		mergedMacros["MODEL_ID"] = modelId
+
 		// go through model config fields: cmd, cmdStop, proxy, checkEndPoint and replace macros with macro values
 		for macroName, macroValue := range mergedMacros {
 			macroSlug := fmt.Sprintf("${%s}", macroName)
@@ -210,12 +212,11 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			modelConfig.Cmd = strings.ReplaceAll(modelConfig.Cmd, "${PORT}", nextPortStr)
 			modelConfig.CmdStop = strings.ReplaceAll(modelConfig.CmdStop, "${PORT}", nextPortStr)
 			modelConfig.Proxy = strings.ReplaceAll(modelConfig.Proxy, "${PORT}", nextPortStr)
-			nextPort++
-		}
 
-		if strings.Contains(modelConfig.Cmd, "${MODEL_ID}") || strings.Contains(modelConfig.CmdStop, "${MODEL_ID}") {
-			modelConfig.Cmd = strings.ReplaceAll(modelConfig.Cmd, "${MODEL_ID}", modelId)
-			modelConfig.CmdStop = strings.ReplaceAll(modelConfig.CmdStop, "${MODEL_ID}", modelId)
+			// add port to merged macros so it can be used in metadata
+			mergedMacros["PORT"] = nextPort
+
+			nextPort++
 		}
 
 		// make sure there are no unknown macros that have not been replaced

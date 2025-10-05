@@ -561,18 +561,16 @@ func TestConfig_NestedStructuresInMetadata(t *testing.T) {
 	content := `
 startPort: 10000
 macros:
-  PORT_NUM: 10001
   TEMP: 0.7
-  MODEL_NAME: "llama"
 
 models:
   test-model:
     cmd: /path/to/server -p ${PORT}
     metadata:
       config:
-        port: ${PORT_NUM}
+        port: ${PORT}
         temperature: ${TEMP}
-      tags: ["model:${MODEL_NAME}", "port:${PORT_NUM}"]
+      tags: ["model:${MODEL_ID}", "port:${PORT}"]
       nested:
         deep:
           value: ${TEMP}
@@ -586,13 +584,13 @@ models:
 
 	// Verify nested objects
 	configMap := meta["config"].(map[string]any)
-	assert.Equal(t, 10001, configMap["port"])
+	assert.Equal(t, 10000, configMap["port"])
 	assert.Equal(t, 0.7, configMap["temperature"])
 
 	// Verify arrays
 	tags := meta["tags"].([]any)
-	assert.Equal(t, "model:llama", tags[0])
-	assert.Equal(t, "port:10001", tags[1])
+	assert.Equal(t, "model:test-model", tags[0])
+	assert.Equal(t, "port:10000", tags[1])
 
 	// Verify deeply nested structures
 	nested := meta["nested"].(map[string]any)
