@@ -336,18 +336,28 @@ models:
 
 	// Verify model1 has llamaswap_meta
 	assert.NotNil(t, model1Data)
-	meta, exists := model1Data["llamaswap_meta"]
-	assert.True(t, exists, "model1 should have llamaswap_meta")
+	meta, exists := model1Data["meta"]
+	if !assert.True(t, exists, "model1 should have meta key") {
+		t.FailNow()
+	}
 
 	metaMap := meta.(map[string]any)
+
+	lsmeta, exists := metaMap["llamaswap"]
+	if !assert.True(t, exists, "model1 should have meta.llamaswap key") {
+		t.FailNow()
+	}
+
+	lsmetamap := lsmeta.(map[string]any)
+
 	// Verify type preservation
-	assert.Equal(t, float64(10001), metaMap["port"]) // JSON numbers are float64
-	assert.Equal(t, 0.7, metaMap["temperature"])
-	assert.Equal(t, true, metaMap["enabled"])
+	assert.Equal(t, float64(10001), lsmetamap["port"]) // JSON numbers are float64
+	assert.Equal(t, 0.7, lsmetamap["temperature"])
+	assert.Equal(t, true, lsmetamap["enabled"])
 	// Verify string interpolation
-	assert.Equal(t, "Running on port 10001", metaMap["note"])
+	assert.Equal(t, "Running on port 10001", lsmetamap["note"])
 	// Verify nested structure
-	nested := metaMap["nested"].(map[string]any)
+	nested := lsmetamap["nested"].(map[string]any)
 	assert.Equal(t, 0.7, nested["value"])
 
 	// Verify model2 does NOT have llamaswap_meta
