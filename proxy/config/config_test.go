@@ -517,3 +517,243 @@ models:
 	assert.NoError(t, err)
 	assert.Equal(t, "/path/to/server -p 9000 -hf author/model:F16", strings.Join(sanitizedCmd3, " "))
 }
+
+func TestConfig_TypedMacrosInMetadata(t *testing.T) {
+	content := `
+startPort: 10000
+macros:
+  PORT_NUM: 10001
+  TEMP: 0.7
+  ENABLED: true
+  NAME: "llama model"
+  CTX: 16384
+
+models:
+  test-model:
+    cmd: /path/to/server -p ${PORT}
+    metadata:
+      port: ${PORT_NUM}
+      temperature: ${TEMP}
+      enabled: ${ENABLED}
+      model_name: ${NAME}
+      context: ${CTX}
+      note: "Running on port ${PORT_NUM} with temp ${TEMP} and context ${CTX}"
+`
+
+	config, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.NoError(t, err)
+
+	meta := config.Models["test-model"].Metadata
+	assert.NotNil(t, meta)
+
+	// Verify direct substitution preserves types
+	assert.Equal(t, 10001, meta["port"])
+	assert.Equal(t, 0.7, meta["temperature"])
+	assert.Equal(t, true, meta["enabled"])
+	assert.Equal(t, "llama model", meta["model_name"])
+	assert.Equal(t, 16384, meta["context"])
+
+	// Verify string interpolation converts to string
+	assert.Equal(t, "Running on port 10001 with temp 0.7 and context 16384", meta["note"])
+}
+
+func TestConfig_NestedStructuresInMetadata(t *testing.T) {
+	content := `
+startPort: 10000
+macros:
+  TEMP: 0.7
+
+models:
+  test-model:
+    cmd: /path/to/server -p ${PORT}
+    metadata:
+      config:
+        port: ${PORT}
+        temperature: ${TEMP}
+      tags: ["model:${MODEL_ID}", "port:${PORT}"]
+      nested:
+        deep:
+          value: ${TEMP}
+`
+
+	config, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.NoError(t, err)
+
+	meta := config.Models["test-model"].Metadata
+	assert.NotNil(t, meta)
+
+	// Verify nested objects
+	configMap := meta["config"].(map[string]any)
+	assert.Equal(t, 10000, configMap["port"])
+	assert.Equal(t, 0.7, configMap["temperature"])
+
+	// Verify arrays
+	tags := meta["tags"].([]any)
+	assert.Equal(t, "model:test-model", tags[0])
+	assert.Equal(t, "port:10000", tags[1])
+
+	// Verify deeply nested structures
+	nested := meta["nested"].(map[string]any)
+	deep := nested["deep"].(map[string]any)
+	assert.Equal(t, 0.7, deep["value"])
+}
+
+func TestConfig_ModelLevelMacroPrecedenceInMetadata(t *testing.T) {
+	content := `
+startPort: 10000
+macros:
+  TEMP: 0.5
+  GLOBAL_VAL: "global"
+
+models:
+  test-model:
+    cmd: /path/to/server -p ${PORT}
+    macros:
+      TEMP: 0.9
+      LOCAL_VAL: "local"
+    metadata:
+      temperature: ${TEMP}
+      global: ${GLOBAL_VAL}
+      local: ${LOCAL_VAL}
+`
+
+	config, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.NoError(t, err)
+
+	meta := config.Models["test-model"].Metadata
+	assert.NotNil(t, meta)
+
+	// Model-level macro should override global
+	assert.Equal(t, 0.9, meta["temperature"])
+	// Global macro should be accessible
+	assert.Equal(t, "global", meta["global"])
+	// Model-level macro should be accessible
+	assert.Equal(t, "local", meta["local"])
+}
+
+func TestConfig_UnknownMacroInMetadata(t *testing.T) {
+	content := `
+startPort: 10000
+models:
+  test-model:
+    cmd: /path/to/server -p ${PORT}
+    metadata:
+      value: ${UNKNOWN_MACRO}
+`
+
+	_, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "test-model")
+	assert.Contains(t, err.Error(), "UNKNOWN_MACRO")
+}
+
+func TestConfig_InvalidMacroType(t *testing.T) {
+	content := `
+startPort: 10000
+macros:
+  INVALID:
+    nested: value
+
+models:
+  test-model:
+    cmd: /path/to/server -p ${PORT}
+`
+
+	_, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "INVALID")
+	assert.Contains(t, err.Error(), "must be a scalar type")
+}
+
+func TestConfig_MacroTypeValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		yaml      string
+		shouldErr bool
+	}{
+		{
+			name: "string macro",
+			yaml: `
+startPort: 10000
+macros:
+  STR: "test"
+models:
+  test-model:
+    cmd: /path/to/server -p ${PORT}
+`,
+			shouldErr: false,
+		},
+		{
+			name: "int macro",
+			yaml: `
+startPort: 10000
+macros:
+  NUM: 42
+models:
+  test-model:
+    cmd: /path/to/server -p ${PORT}
+`,
+			shouldErr: false,
+		},
+		{
+			name: "float macro",
+			yaml: `
+startPort: 10000
+macros:
+  FLOAT: 3.14
+models:
+  test-model:
+    cmd: /path/to/server -p ${PORT}
+`,
+			shouldErr: false,
+		},
+		{
+			name: "bool macro",
+			yaml: `
+startPort: 10000
+macros:
+  BOOL: true
+models:
+  test-model:
+    cmd: /path/to/server -p ${PORT}
+`,
+			shouldErr: false,
+		},
+		{
+			name: "array macro (invalid)",
+			yaml: `
+startPort: 10000
+macros:
+  ARR: [1, 2, 3]
+models:
+  test-model:
+    cmd: /path/to/server -p ${PORT}
+`,
+			shouldErr: true,
+		},
+		{
+			name: "map macro (invalid)",
+			yaml: `
+startPort: 10000
+macros:
+  MAP:
+    key: value
+models:
+  test-model:
+    cmd: /path/to/server -p ${PORT}
+`,
+			shouldErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := LoadConfigFromReader(strings.NewReader(tt.yaml))
+			if tt.shouldErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
