@@ -495,19 +495,22 @@ models:
   author/model:F16:
     cmd: /path/to/server -p ${PORT} -hf ${MODEL_ID}
     cmdStop: stop
+
+  abc:
+    cmd: ${docker-llama}
 `
 
 	config, err := LoadConfigFromReader(strings.NewReader(content))
 	assert.NoError(t, err)
 	sanitizedCmd, err := SanitizeCommand(config.Models["model1"].Cmd)
 	assert.NoError(t, err)
-	assert.Equal(t, "/path/to/server -p 9001 -hf model1", strings.Join(sanitizedCmd, " "))
+	assert.Equal(t, "/path/to/server -p 9002 -hf model1", strings.Join(sanitizedCmd, " "))
 
 	assert.Equal(t, "docker stop ${MODEL_ID}", config.Macros["docker-stop"])
 
 	sanitizedCmd2, err := SanitizeCommand(config.Models["model2"].Cmd)
 	assert.NoError(t, err)
-	assert.Equal(t, "docker run --name model2 -p 9002:8080 docker_img", strings.Join(sanitizedCmd2, " "))
+	assert.Equal(t, "docker run --name model2 -p 9003:8080 docker_img", strings.Join(sanitizedCmd2, " "))
 
 	sanitizedCmdStop, err := SanitizeCommand(config.Models["model2"].CmdStop)
 	assert.NoError(t, err)
@@ -515,7 +518,7 @@ models:
 
 	sanitizedCmd3, err := SanitizeCommand(config.Models["author/model:F16"].Cmd)
 	assert.NoError(t, err)
-	assert.Equal(t, "/path/to/server -p 9000 -hf author/model:F16", strings.Join(sanitizedCmd3, " "))
+	assert.Equal(t, "/path/to/server -p 9001 -hf author/model:F16", strings.Join(sanitizedCmd3, " "))
 }
 
 func TestConfig_TypedMacrosInMetadata(t *testing.T) {
@@ -756,4 +759,21 @@ models:
 			}
 		})
 	}
+}
+
+func TestConfig_MaxMacroRecursion(t *testing.T) {
+	// ensure only 5 max iterations when expanding macros
+	content := `
+startPort: 9000
+macros:
+  "macro_a": "docker run ${macro_b} --port ${PORT}"
+  "macro_b": "${macro_a}"
+
+models:
+  "model":
+    cmd: ${macro_a}
+`
+
+	_, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.Contains(t, err.Error(), "macro expansion exceeded 5 iterations for model.cmd")
 }

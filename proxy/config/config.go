@@ -189,16 +189,43 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 
 		mergedMacros["MODEL_ID"] = modelId
 
+		// recursively replace macros to account for nesting and range's undefined order for maps
+		replaceMacros := func(input string) (string, error) {
+			result := input
+			for range 5 {
+				changed := false
+				for macroName, macroValue := range mergedMacros {
+					macroSlug := fmt.Sprintf("${%s}", macroName)
+					// Convert macro value to string for command/string field substitution
+					macroStr := fmt.Sprintf("%v", macroValue)
+					if strings.Contains(result, macroSlug) {
+						result = strings.ReplaceAll(result, macroSlug, macroStr)
+						changed = true
+					}
+				}
+				if !changed {
+					return result, nil
+				}
+			}
+
+			return "", fmt.Errorf("macro expansion exceeded 5 iterations")
+		}
+
 		// go through model config fields: cmd, cmdStop, proxy, checkEndPoint and replace macros with macro values
-		for macroName, macroValue := range mergedMacros {
-			macroSlug := fmt.Sprintf("${%s}", macroName)
-			// Convert macro value to string for command/string field substitution
-			macroStr := fmt.Sprintf("%v", macroValue)
-			modelConfig.Cmd = strings.ReplaceAll(modelConfig.Cmd, macroSlug, macroStr)
-			modelConfig.CmdStop = strings.ReplaceAll(modelConfig.CmdStop, macroSlug, macroStr)
-			modelConfig.Proxy = strings.ReplaceAll(modelConfig.Proxy, macroSlug, macroStr)
-			modelConfig.CheckEndpoint = strings.ReplaceAll(modelConfig.CheckEndpoint, macroSlug, macroStr)
-			modelConfig.Filters.StripParams = strings.ReplaceAll(modelConfig.Filters.StripParams, macroSlug, macroStr)
+		macrosFieldMap := map[string]*string{
+			"cmd":                 &modelConfig.Cmd,
+			"cmdStop":             &modelConfig.CmdStop,
+			"proxy":               &modelConfig.Proxy,
+			"checkEndpoint":       &modelConfig.CheckEndpoint,
+			"filters.stripParams": &modelConfig.Filters.StripParams,
+		}
+
+		for sectionName, ptr := range macrosFieldMap {
+			expanded, err := replaceMacros(*ptr)
+			if err != nil {
+				return Config{}, fmt.Errorf("%s for %s.%s", err.Error(), modelId, sectionName)
+			}
+			*ptr = expanded
 		}
 
 		// enforce ${PORT} used in both cmd and proxy
