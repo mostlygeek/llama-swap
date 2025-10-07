@@ -43,14 +43,21 @@ startPort: 10001
 # - macro names are strings and must be less than 64 characters
 # - macro names must match the regex ^[a-zA-Z0-9_-]+$
 # - macro names must not be a reserved name: PORT or MODEL_ID
-# - macro values must be less than 1024 characters
+# - macro values can be numbers, bools, or strings
+# - macros can contain other macros, but they must be defined before they are used
 #
 # Important: do not nest macros inside other macros; expansion is single-pass
 macros:
+  # Example of a multi-line macro
   "latest-llama": >
     /path/to/llama-server/llama-server-ec9e0301
     --port ${PORT}
-  "default_ctx": "4096"
+
+  "default_ctx": 4096
+
+  # Example of macro-in-macro usage. macros can contain other macros
+  # but they must be previously declared.
+  "default_args": "--ctx-size ${default_ctx}"
 
 # models: a dictionary of model configurations
 # - required

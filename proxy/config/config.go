@@ -61,18 +61,6 @@ func (ml MacroList) Get(name string) (any, bool) {
 	return nil, false
 }
 
-// Set adds or updates a macro entry. If the macro exists, it's replaced in-place.
-// If it doesn't exist, it's appended to the end.
-func (ml MacroList) Set(name string, value any) MacroList {
-	for i, entry := range ml {
-		if entry.Name == name {
-			ml[i].Value = value
-			return ml
-		}
-	}
-	return append(ml, MacroEntry{Name: name, Value: value})
-}
-
 // ToMap converts MacroList to a map (for backward compatibility if needed)
 func (ml MacroList) ToMap() map[string]any {
 	result := make(map[string]any, len(ml))
