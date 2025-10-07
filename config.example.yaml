@@ -45,8 +45,6 @@ startPort: 10001
 # - macro names must not be a reserved name: PORT or MODEL_ID
 # - macro values can be numbers, bools, or strings
 # - macros can contain other macros, but they must be defined before they are used
-#
-# Important: do not nest macros inside other macros; expansion is single-pass
 macros:
   # Example of a multi-line macro
   "latest-llama": >
