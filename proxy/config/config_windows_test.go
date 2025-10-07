@@ -156,7 +156,7 @@ groups:
 		LogLevel:  "info",
 		StartPort: 5800,
 		Macros: MacroList{
-			"svr-path": "path/to/server",
+			{"svr-path", "path/to/server"},
 		},
 		Models: map[string]ModelConfig{
 			"model1": {
