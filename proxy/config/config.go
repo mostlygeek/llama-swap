@@ -342,25 +342,8 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 				if macroName == "PORT" || macroName == "MODEL_ID" {
 					return Config{}, fmt.Errorf("macro '${%s}' should have been substituted in %s.%s", macroName, modelId, fieldName)
 				}
-				// Check if macro exists in original config (global or model-level)
-				macroExists := false
-				for _, macro := range config.Macros {
-					if macro.Name == macroName {
-						macroExists = true
-						break
-					}
-				}
-				if !macroExists {
-					for _, macro := range modelConfig.Macros {
-						if macro.Name == macroName {
-							macroExists = true
-							break
-						}
-					}
-				}
-				if !macroExists {
-					return Config{}, fmt.Errorf("unknown macro '${%s}' found in %s.%s", macroName, modelId, fieldName)
-				}
+				// Any other macro is unknown
+				return Config{}, fmt.Errorf("unknown macro '${%s}' found in %s.%s", macroName, modelId, fieldName)
 			}
 		}
 
