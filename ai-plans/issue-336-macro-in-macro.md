@@ -1,5 +1,7 @@
 # Improve macro-in-macro support
 
+**Status: COMPLETED ✅**
+
 ## Title
 
 Fix macro substitution ordering by preserving definition order using ordered YAML parsing

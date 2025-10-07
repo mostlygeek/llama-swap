@@ -213,7 +213,9 @@ models:
 `
 
 	config, err := LoadConfigFromReader(strings.NewReader(content))
-	assert.NoError(t, err)
+	if !assert.NoError(t, err) {
+		t.FailNow()
+	}
 	sanitizedCmd, err := SanitizeCommand(config.Models["model1"].Cmd)
 	assert.NoError(t, err)
 	assert.Equal(t, "path/to/server --arg2 --port 9990 --arg1 --arg3 three --overridden success", strings.Join(sanitizedCmd, " "))
@@ -503,7 +505,9 @@ models:
 	assert.NoError(t, err)
 	assert.Equal(t, "/path/to/server -p 9001 -hf model1", strings.Join(sanitizedCmd, " "))
 
-	assert.Equal(t, "docker stop ${MODEL_ID}", config.Macros["docker-stop"])
+	dockerStopMacro, found := config.Macros.Get("docker-stop")
+	assert.True(t, found)
+	assert.Equal(t, "docker stop ${MODEL_ID}", dockerStopMacro)
 
 	sanitizedCmd2, err := SanitizeCommand(config.Models["model2"].Cmd)
 	assert.NoError(t, err)
