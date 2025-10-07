@@ -14,16 +14,16 @@ The current macro implementation uses `map[string]any` which does not preserve i
 - Macros can reference other macros defined earlier in the config
 - Macro substitution is deterministic and order-dependent
 - Single-pass substitution prevents circular dependencies
-- Migration from deprecated `gopkg.in/yaml.v3` to actively maintained `goccy/go-yaml`
+- Use `yaml.Node` from `gopkg.in/yaml.v3` to preserve macro definition order
 - All existing tests pass
 - New tests validate substitution order and self-reference detection
 
 ## Design Requirements
 
-### 1. YAML Library Migration
-- **Migrate from:** `gopkg.in/yaml.v3` (archived, unmaintained)
-- **Migrate to:** `github.com/goccy/go-yaml` (actively maintained, supports ordered maps)
-- **Reason:** Need `MapSlice`-like ordered data structure to preserve macro definition order
+### 1. YAML Parsing Strategy
+- **Continue using:** `gopkg.in/yaml.v3` (current library)
+- **Use:** `yaml.Node` for ordered parsing of macros
+- **Reason:** `yaml.Node` preserves document structure and order, avoiding need for migration
 
 ### 2. Data Structure Changes
 
@@ -42,7 +42,7 @@ type MacroEntry struct {
 }
 ```
 
-**Alternative:** Use `yaml.MapSlice` directly from goccy/go-yaml if it provides the needed API.
+**Implementation Note:** Parse macros using `yaml.Node` to extract key-value pairs in document order, then construct the ordered `MacroList`.
 
 ### 3. Macro Substitution Order Rules
 
@@ -86,7 +86,6 @@ unknown macro '${bar}' in model.cmd
 #### Files to Modify
 
 1. **[proxy/config/config.go](proxy/config/config.go)**
-   - Line 3-14: Update imports (replace `gopkg.in/yaml.v3` with `github.com/goccy/go-yaml`)
    - Line 19: Change `MacroList` type definition
    - Line 69: Update `Macros MacroList` field
    - Line 153-157: Update macro validation loop to work with ordered structure
@@ -326,15 +325,9 @@ macros:
 
 ## Checklist
 
-### Phase 1: YAML Library Migration
-- [ ] Add `github.com/goccy/go-yaml` dependency to `go.mod`
-- [ ] Update imports in [proxy/config/config.go](proxy/config/config.go#L3-L14)
-- [ ] Run `go mod tidy`
-- [ ] Run existing tests to ensure basic compatibility
-- [ ] Remove `gopkg.in/yaml.v3` if no longer used elsewhere
-
-### Phase 2: Data Structure Changes
-- [ ] Define new ordered `MacroList` type (or adopt `yaml.MapSlice`)
+### Phase 1: Data Structure Changes
+- [ ] Implement custom `UnmarshalYAML` method for `MacroList` that uses `yaml.Node`
+- [ ] Define new ordered `MacroList` type as `[]MacroEntry`
 - [ ] Update `MacroList` type definition in [config.go](proxy/config/config.go#L19)
 - [ ] Update `Config.Macros` field type in [config.go](proxy/config/config.go#L69)
 - [ ] Update `ModelConfig.Macros` field type in [model_config.go](proxy/config/model_config.go#L33)
@@ -343,13 +336,13 @@ macros:
   - [ ] `func (ml MacroList) Set(name string, value any) MacroList` - add/override entry
   - [ ] `func (ml MacroList) ToMap() map[string]any` - convert to map if needed
 
-### Phase 3: Macro Validation Updates
+### Phase 2: Macro Validation Updates
 - [ ] Update macro validation loop at [config.go:153-157](proxy/config/config.go#L153-L157)
 - [ ] Update model macro validation at [config.go:175-179](proxy/config/config.go#L175-L179)
 - [ ] Add self-reference detection to `validateMacro` function [config.go:389](proxy/config/config.go#L389)
 - [ ] Test self-reference detection with new test case
 
-### Phase 4: Macro Substitution Algorithm
+### Phase 3: Macro Substitution Algorithm
 - [ ] Implement ordered macro merging (global → model → reserved) at [config.go:181-188](proxy/config/config.go#L181-L188)
 - [ ] Implement single-pass LIFO substitution loop (reverse iteration) at [config.go:193-202](proxy/config/config.go#L193-L202)
   - [ ] Substitute in all string fields (cmd, cmdStop, proxy, checkEndpoint, stripParams)
@@ -359,7 +352,7 @@ macros:
 - [ ] Replace `substituteMetadataMacros` with new `substituteMacroInValue` function that processes one macro at a time [config.go:420](proxy/config/config.go#L420)
 - [ ] Remove old metadata substitution code that was separate from main loop [config.go:245-251](proxy/config/config.go#L245-L251)
 
-### Phase 5: Testing
+### Phase 4: Testing
 - [ ] Run `make test-dev` - fix any static checking errors
 - [ ] Add test: macro-in-macro basic substitution
 - [ ] Add test: LIFO substitution order with 3+ macro levels
@@ -371,7 +364,7 @@ macros:
 - [ ] Verify all existing macro tests pass: `TestConfig_Macro*`
 - [ ] Run `make test-all` - ensure all tests including concurrency tests pass
 
-### Phase 6: Documentation
+### Phase 5: Documentation
 - [ ] Update plan status in this file (mark completed)
 - [ ] Update CLAUDE.md if macro behavior needs documentation
 - [ ] Verify no new error messages need user documentation
