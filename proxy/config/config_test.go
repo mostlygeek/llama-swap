@@ -323,7 +323,7 @@ macros:
 models:
   model1:
     cmd: "${svr-path} --port ${PORT}"
-    proxy: "http://localhost:${unknownMacro}"
+    proxy: "http://${unknownMacro}:${PORT}"
 `,
 		},
 		{

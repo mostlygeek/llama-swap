@@ -244,6 +244,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 
 		// Merge global config and model macros. Model macros take precedence
 		mergedMacros := make(MacroList, 0, len(config.Macros)+len(modelConfig.Macros))
+		mergedMacros = append(mergedMacros, MacroEntry{Name: "MODEL_ID", Value: modelId})
 
 		// Add global macros first
 		mergedMacros = append(mergedMacros, config.Macros...)
@@ -289,32 +290,13 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			}
 		}
 
-		// Second pass: Substitute reserved MODEL_ID macro (after user macros)
-		modelIdEntry := MacroEntry{Name: "MODEL_ID", Value: modelId}
-		{
-			macroSlug := "${MODEL_ID}"
-			macroStr := modelId
-
-			modelConfig.Cmd = strings.ReplaceAll(modelConfig.Cmd, macroSlug, macroStr)
-			modelConfig.CmdStop = strings.ReplaceAll(modelConfig.CmdStop, macroSlug, macroStr)
-			modelConfig.Proxy = strings.ReplaceAll(modelConfig.Proxy, macroSlug, macroStr)
-			modelConfig.CheckEndpoint = strings.ReplaceAll(modelConfig.CheckEndpoint, macroSlug, macroStr)
-			modelConfig.Filters.StripParams = strings.ReplaceAll(modelConfig.Filters.StripParams, macroSlug, macroStr)
-
-			if len(modelConfig.Metadata) > 0 {
-				var err error
-				result, err := substituteMacroInValue(modelConfig.Metadata, modelIdEntry.Name, modelIdEntry.Value)
-				if err != nil {
-					return Config{}, fmt.Errorf("model %s metadata: %s", modelId, err.Error())
-				}
-				modelConfig.Metadata = result.(map[string]any)
-			}
-		}
-
-		// Check if PORT macro is needed after macro expansion
-		if strings.Contains(modelConfig.Cmd, "${PORT}") || strings.Contains(modelConfig.Proxy, "${PORT}") || strings.Contains(modelConfig.CmdStop, "${PORT}") {
-			// enforce ${PORT} used in both cmd and proxy
-			if !strings.Contains(modelConfig.Cmd, "${PORT}") && strings.Contains(modelConfig.Proxy, "${PORT}") {
+		// Final pass: check if PORT macro is needed after macro expansion
+		// ${PORT} is a resource on the local machine so a new port is only allocated
+		// if it is required in either cmd or proxy keys
+		cmdHasPort := strings.Contains(modelConfig.Cmd, "${PORT}")
+		proxyHasPort := strings.Contains(modelConfig.Proxy, "${PORT}")
+		if cmdHasPort || proxyHasPort { // either has it
+			if !cmdHasPort && proxyHasPort { // but both don't have it
 				return Config{}, fmt.Errorf("model %s: proxy uses ${PORT} but cmd does not - ${PORT} is only available when used in cmd", modelId)
 			}
 
