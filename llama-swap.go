@@ -28,7 +28,7 @@ var (
 func main() {
 	// Define a command-line flag for the port
 	configPath := flag.String("config", "config.yaml", "config file name")
-	listenStr := flag.String("listen", ":8080", "listen ip/port")
+	listenStr := flag.String("listen", "", "listen ip/port")
 	certFile := flag.String("tls-cert-file", "", "TLS certificate file")
 	keyFile := flag.String("tls-key-file", "", "TLS key file")
 	showVersion := flag.Bool("version", false, "show version of build")
@@ -39,12 +39,6 @@ func main() {
 	if *showVersion {
 		fmt.Printf("version: %s (%s), built at %s\n", version, commit, date)
 		os.Exit(0)
-	}
-
-	if (*certFile != "" && *keyFile == "") ||
-		(*certFile == "" && *keyFile != "") {
-		fmt.Println("Error: Both --tls-cert-file and --tls-key-file must be provided for TLS.")
-		os.Exit(1)
 	}
 
 	conf, err := config.LoadConfig(*configPath)
@@ -61,6 +55,24 @@ func main() {
 		gin.SetMode(mode)
 	} else {
 		gin.SetMode(gin.ReleaseMode)
+	}
+
+	// Validate TLS flags.
+	var useTLS bool
+	if (*certFile != "" && *keyFile == "") ||
+		(*certFile == "" && *keyFile != "") {
+		fmt.Println("Error: Both --tls-cert-file and --tls-key-file must be provided for TLS.")
+		os.Exit(1)
+	} else {
+		useTLS = true
+	}
+	// Set default ports.
+	if *listenStr == "" {
+		defaultPort := ":8080"
+		if useTLS {
+			defaultPort = ":8443"
+		}
+		listenStr = &defaultPort
 	}
 
 	// Setup channels for server management
@@ -177,7 +189,7 @@ func main() {
 	// Start server
 	go func() {
 		var err error
-		if *certFile != "" && *keyFile != "" {
+		if useTLS {
 			fmt.Printf("llama-swap listening with TLS on https://%s\n", *listenStr)
 			err = srv.ListenAndServeTLS(*certFile, *keyFile)
 		} else {
