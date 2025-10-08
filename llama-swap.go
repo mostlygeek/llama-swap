@@ -29,6 +29,8 @@ func main() {
 	// Define a command-line flag for the port
 	configPath := flag.String("config", "config.yaml", "config file name")
 	listenStr := flag.String("listen", ":8080", "listen ip/port")
+	certFile := flag.String("tls-cert-file", "", "TLS certificate file")
+	keyFile := flag.String("tls-key-file", "", "TLS key file")
 	showVersion := flag.Bool("version", false, "show version of build")
 	watchConfig := flag.Bool("watch-config", false, "Automatically reload config file on change")
 
@@ -37,6 +39,12 @@ func main() {
 	if *showVersion {
 		fmt.Printf("version: %s (%s), built at %s\n", version, commit, date)
 		os.Exit(0)
+	}
+
+	if (*certFile != "" && *keyFile == "") ||
+		(*certFile == "" && *keyFile != "") {
+		fmt.Println("Error: Both --tls-cert-file and --tls-key-file must be provided for TLS.")
+		os.Exit(1)
 	}
 
 	conf, err := config.LoadConfig(*configPath)
@@ -167,9 +175,16 @@ func main() {
 	}()
 
 	// Start server
-	fmt.Printf("llama-swap listening on %s\n", *listenStr)
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		var err error
+		if *certFile != "" && *keyFile != "" {
+			fmt.Printf("llama-swap listening with TLS on https://%s\n", *listenStr)
+			err = srv.ListenAndServeTLS(*certFile, *keyFile)
+		} else {
+			fmt.Printf("llama-swap listening on http://%s\n", *listenStr)
+			err = srv.ListenAndServe()
+		}
+		if err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Fatal server error: %v\n", err)
 		}
 	}()
