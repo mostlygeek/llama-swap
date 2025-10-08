@@ -58,14 +58,13 @@ func main() {
 	}
 
 	// Validate TLS flags.
-	var useTLS bool
+	var useTLS = (*certFile != "" && *keyFile != "")
 	if (*certFile != "" && *keyFile == "") ||
 		(*certFile == "" && *keyFile != "") {
 		fmt.Println("Error: Both --tls-cert-file and --tls-key-file must be provided for TLS.")
 		os.Exit(1)
-	} else {
-		useTLS = true
 	}
+
 	// Set default ports.
 	if *listenStr == "" {
 		defaultPort := ":8080"
