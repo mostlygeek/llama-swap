@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"regexp"
 	"runtime"
@@ -341,6 +342,15 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 				return Config{}, err
 			}
 		}
+
+		// Parse the proxy URL.
+		parsedURL, err := url.Parse(modelConfig.Proxy)
+		if err != nil {
+			return Config{}, fmt.Errorf(
+				"model %s: invalid proxy URL: %w", modelId, err,
+			)
+		}
+		modelConfig.ProxyURL = parsedURL
 
 		config.Models[modelId] = modelConfig
 	}
