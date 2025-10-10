@@ -24,10 +24,10 @@ function App() {
 
         <main className="flex-1 overflow-auto p-4">
           <Routes>
-            <Route path="/" element={<LogViewerPage />} />
+            <Route path="/logs" element={<LogViewerPage />} />
             <Route path="/models" element={<ModelPage />} />
             <Route path="/activity" element={<ActivityPage />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
+            <Route path="*" element={<Navigate to="/models" replace />} />
           </Routes>
         </main>
       </div>
