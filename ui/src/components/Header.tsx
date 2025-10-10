@@ -5,7 +5,7 @@ import { useTheme } from "../contexts/ThemeProvider";
 import ConnectionStatusIcon from "./ConnectionStatus";
 
 export function Header() {
-  const { screenWidth, toggleTheme, isDarkMode, appTitle, setAppTitle } = useTheme();
+  const { screenWidth, toggleTheme, isDarkMode, appTitle, setAppTitle, isNarrow } = useTheme();
   const handleTitleChange = useCallback(
     (newTitle: string) => {
       setAppTitle(newTitle.replace(/\n/g, "").trim().substring(0, 64) || "llama-swap");
@@ -17,7 +17,7 @@ export function Header() {
     `text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1 ${isActive ? "font-semibold" : ""}`;
 
   return (
-    <header className="flex items-center justify-between bg-surface border-b border-border p-2 px-4 h-[75px]">
+    <header className={`flex items-center justify-between bg-surface border-b border-border px-4 ${isNarrow ? "py-1 h-[60px]" : "p-2 h-[75px]"}`}>
       {screenWidth !== "xs" && screenWidth !== "sm" && (
         <h1
           contentEditable
