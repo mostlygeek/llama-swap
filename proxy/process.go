@@ -4,12 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"os/exec"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -39,9 +38,10 @@ const (
 )
 
 type Process struct {
-	ID     string
-	config config.ModelConfig
-	cmd    *exec.Cmd
+	ID           string
+	config       config.ModelConfig
+	cmd          *exec.Cmd
+	reverseProxy *httputil.ReverseProxy
 
 	// PR #155 called to cancel the upstream process
 	cancelUpstream context.CancelFunc
@@ -81,10 +81,20 @@ func NewProcess(ID string, healthCheckTimeout int, config config.ModelConfig, pr
 		concurrentLimit = config.ConcurrencyLimit
 	}
 
+	reverseProxy := httputil.NewSingleHostReverseProxy(config.ProxyURL)
+	reverseProxy.ModifyResponse = func(resp *http.Response) error {
+		// prevent nginx from buffering streaming responses (e.g., SSE)
+		if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+			resp.Header.Set("X-Accel-Buffering", "no")
+		}
+		return nil
+	}
+
 	return &Process{
 		ID:                      ID,
 		config:                  config,
 		cmd:                     nil,
+		reverseProxy:            reverseProxy,
 		cancelUpstream:          nil,
 		processLogger:           processLogger,
 		proxyLogger:             proxyLogger,
@@ -434,57 +444,7 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		startDuration = time.Since(beginStartTime)
 	}
 
-	proxyTo := p.config.Proxy
-	client := &http.Client{}
-	req, err := http.NewRequestWithContext(r.Context(), r.Method, proxyTo+r.URL.String(), r.Body)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	req.Header = r.Header.Clone()
-
-	contentLength, err := strconv.ParseInt(req.Header.Get("content-length"), 10, 64)
-	if err == nil {
-		req.ContentLength = contentLength
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
-		return
-	}
-	defer resp.Body.Close()
-	for k, vv := range resp.Header {
-		for _, v := range vv {
-			w.Header().Add(k, v)
-		}
-	}
-	// prevent nginx from buffering streaming responses (e.g., SSE)
-	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
-		w.Header().Set("X-Accel-Buffering", "no")
-	}
-	w.WriteHeader(resp.StatusCode)
-
-	// faster than io.Copy when streaming
-	buf := make([]byte, 32*1024)
-	for {
-		n, err := resp.Body.Read(buf)
-		if n > 0 {
-			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
-				return
-			}
-			if flusher, ok := w.(http.Flusher); ok {
-				flusher.Flush()
-			}
-		}
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-	}
+	p.reverseProxy.ServeHTTP(w, r)
 
 	totalTime := time.Since(requestBeginTime)
 	p.proxyLogger.Debugf("<%s> request %s - start: %v, total: %v",

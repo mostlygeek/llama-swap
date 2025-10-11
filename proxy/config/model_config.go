@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"net/url"
 	"runtime"
 	"slices"
 	"strings"
@@ -11,6 +12,7 @@ type ModelConfig struct {
 	Cmd           string   `yaml:"cmd"`
 	CmdStop       string   `yaml:"cmdStop"`
 	Proxy         string   `yaml:"proxy"`
+	ProxyURL      *url.URL `yaml:"-"`
 	Aliases       []string `yaml:"aliases"`
 	Env           []string `yaml:"env"`
 	CheckEndpoint string   `yaml:"checkEndpoint"`
