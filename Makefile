@@ -61,12 +61,12 @@ windows: ui
 # for testing proxy.Process
 simple-responder:
 	@echo "Building simple responder"
-	GOOS=darwin GOARCH=arm64 go build -o $(BUILD_DIR)/simple-responder_darwin_arm64 misc/simple-responder/simple-responder.go
-	GOOS=linux GOARCH=amd64 go build -o $(BUILD_DIR)/simple-responder_linux_amd64 misc/simple-responder/simple-responder.go
+	GOOS=darwin GOARCH=arm64 go build -o $(BUILD_DIR)/simple-responder_darwin_arm64 cmd/simple-responder/simple-responder.go
+	GOOS=linux GOARCH=amd64 go build -o $(BUILD_DIR)/simple-responder_linux_amd64 cmd/simple-responder/simple-responder.go
 
 simple-responder-windows:
 	@echo "Building simple responder for windows"
-	GOOS=windows GOARCH=amd64 go build -o $(BUILD_DIR)/simple-responder.exe misc/simple-responder/simple-responder.go
+	GOOS=windows GOARCH=amd64 go build -o $(BUILD_DIR)/simple-responder.exe cmd/simple-responder/simple-responder.go
 
 # Ensure build directory exists
 $(BUILD_DIR):
@@ -87,4 +87,4 @@ release:
 	git tag "$$new_tag";
 
 # Phony targets
-.PHONY: all clean ui mac linux windows simple-responder test test-all test-dev
+.PHONY: all clean ui mac linux windows simple-responder simple-responder-windows test test-all test-dev
