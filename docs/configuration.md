@@ -1,0 +1,386 @@
+# config.yaml
+
+llama-swap is designed to be very simple: one binary, one configuration file.
+
+## minimal viable config
+
+```yaml
+models:
+  model1:
+    cmd: llama-server --port ${PORT} --model /path/to/model.gguf
+```
+
+This is enough to launch `llama-server` to serve `model1`. Of course, llama-swap is about making it possible to serve many models:
+
+```yaml
+models:
+  model1:
+    cmd: llama-server --port ${PORT} -m /path/to/model.gguf
+  model2:
+    cmd: llama-server --port ${PORT} -m /path/to/another_model.gguf
+  model3:
+    cmd: llama-server --port ${PORT} -m /path/to/third_model.gguf
+```
+
+With this configuration models will be hot swapped and loaded on demand. The special `${PORT}` macro provides a unique port per model. Useful if you want to run multiple models at the same time with the `groups` feature.
+
+## Advanced control with `cmd`
+
+llama-swap is also about customizability. You can use any CLI flag available:
+
+```yaml
+models:
+  model1:
+    cmd: | # support for multi-line
+      llama-server --PORT ${PORT} -m /path/to/model.gguf
+      --ctx-size 8192
+      --jinja
+      --cache-type-k q8_0
+      --cache-type-v q8_0
+```
+
+## Support for any OpenAI API compatible server
+
+llama-swap supports any OpenAI API compatible server. If you can run it on the CLI llama-swap will be able to manage it. Even if it's run in Docker or Podman containers.
+
+```yaml
+models:
+  "Q3-30B-CODER-VLLM":
+    name: "Qwen3 30B Coder vllm AWQ (Q3-30B-CODER-VLLM)"
+    # cmdStop provides a reliable way to stop containers
+    cmdStop: docker stop vllm-coder
+    cmd: |
+      docker run --init --rm --name vllm-coder
+        --runtime=nvidia --gpus '"device=2,3"'
+        --shm-size=16g
+        -v /mnt/nvme/vllm-cache:/root/.cache
+        -v /mnt/ssd-extra/models:/models -p ${PORT}:8000
+        vllm/vllm-openai:v0.10.0
+        --model "/models/cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ"
+        --served-model-name "Q3-30B-CODER-VLLM"
+        --enable-expert-parallel
+        --swap-space 16
+        --max-num-seqs 512
+        --max-model-len 65536
+        --max-seq-len-to-capture 65536
+        --gpu-memory-utilization 0.9
+        --tensor-parallel-size 2
+        --trust-remote-code
+```
+
+## Many more features..
+
+llama-swap supports many more features to customize how you want to manage your environment.
+
+| Feature   | Description                                    |
+| --------- | ---------------------------------------------- |
+| `ttl`     | automatic unloading of models after a timeout  |
+| `macros`  | reusable snippets to use in configurations     |
+| `groups`  | run multiple models at a time                  |
+| `hooks`   | event driven functionality                     |
+| `env`     | define environment variables per model         |
+| `aliases` | serve a model with different names             |
+| `filters` | modify requests before sending to the upstream |
+| `...`     | And many more tweaks                           |
+
+## Full Configuration Example
+
+> [!NOTE]
+> This is a copy of `config.example.yaml`. Always check that for the most up to date examples.
+
+```yaml
+# llama-swap YAML configuration example
+# -------------------------------------
+#
+# 💡 Tip - Use an LLM with this file!
+# ====================================
+#  This example configuration is written to be LLM friendly. Try
+#  copying this file into an LLM and asking it to explain or generate
+#  sections for you.
+# ====================================
+
+# Usage notes:
+# - Below are all the available configuration options for llama-swap.
+# - Settings noted as "required" must be in your configuration file
+# - Settings noted as "optional" can be omitted
+
+# healthCheckTimeout: number of seconds to wait for a model to be ready to serve requests
+# - optional, default: 120
+# - minimum value is 15 seconds, anything less will be set to this value
+healthCheckTimeout: 500
+
+# logLevel: sets the logging value
+# - optional, default: info
+# - Valid log levels: debug, info, warn, error
+logLevel: info
+
+# metricsMaxInMemory: maximum number of metrics to keep in memory
+# - optional, default: 1000
+# - controls how many metrics are stored in memory before older ones are discarded
+# - useful for limiting memory usage when processing large volumes of metrics
+metricsMaxInMemory: 1000
+
+# startPort: sets the starting port number for the automatic ${PORT} macro.
+# - optional, default: 5800
+# - the ${PORT} macro can be used in model.cmd and model.proxy settings
+# - it is automatically incremented for every model that uses it
+startPort: 10001
+
+# macros: a dictionary of string substitutions
+# - optional, default: empty dictionary
+# - macros are reusable snippets
+# - used in a model's cmd, cmdStop, proxy, checkEndpoint, filters.stripParams
+# - useful for reducing common configuration settings
+# - macro names are strings and must be less than 64 characters
+# - macro names must match the regex ^[a-zA-Z0-9_-]+$
+# - macro names must not be a reserved name: PORT or MODEL_ID
+# - macro values can be numbers, bools, or strings
+# - macros can contain other macros, but they must be defined before they are used
+macros:
+  # Example of a multi-line macro
+  "latest-llama": >
+    /path/to/llama-server/llama-server-ec9e0301
+    --port ${PORT}
+
+  "default_ctx": 4096
+
+  # Example of macro-in-macro usage. macros can contain other macros
+  # but they must be previously declared.
+  "default_args": "--ctx-size ${default_ctx}"
+
+# models: a dictionary of model configurations
+# - required
+# - each key is the model's ID, used in API requests
+# - model settings have default values that are used if they are not defined here
+# - the model's ID is available in the ${MODEL_ID} macro, also available in macros defined above
+# - below are examples of the all the settings a model can have
+models:
+  # keys are the model names used in API requests
+  "llama":
+    # macros: a dictionary of string substitutions specific to this model
+    # - optional, default: empty dictionary
+    # - macros defined here override macros defined in the global macros section
+    # - model level macros follow the same rules as global macros
+    macros:
+      "default_ctx": 16384
+      "temp": 0.7
+
+    # cmd: the command to run to start the inference server.
+    # - required
+    # - it is just a string, similar to what you would run on the CLI
+    # - using `|` allows for comments in the command, these will be parsed out
+    # - macros can be used within cmd
+    cmd: |
+      # ${latest-llama} is a macro that is defined above
+      ${latest-llama}
+      --model path/to/llama-8B-Q4_K_M.gguf
+      --ctx-size ${default_ctx}
+      --temperature ${temp}
+
+    # name: a display name for the model
+    # - optional, default: empty string
+    # - if set, it will be used in the v1/models API response
+    # - if not set, it will be omitted in the JSON model record
+    name: "llama 3.1 8B"
+
+    # description: a description for the model
+    # - optional, default: empty string
+    # - if set, it will be used in the v1/models API response
+    # - if not set, it will be omitted in the JSON model record
+    description: "A small but capable model used for quick testing"
+
+    # env: define an array of environment variables to inject into cmd's environment
+    # - optional, default: empty array
+    # - each value is a single string
+    # - in the format: ENV_NAME=value
+    env:
+      - "CUDA_VISIBLE_DEVICES=0,1,2"
+
+    # proxy: the URL where llama-swap routes API requests
+    # - optional, default: http://localhost:${PORT}
+    # - if you used ${PORT} in cmd this can be omitted
+    # - if you use a custom port in cmd this *must* be set
+    proxy: http://127.0.0.1:8999
+
+    # aliases: alternative model names that this model configuration is used for
+    # - optional, default: empty array
+    # - aliases must be unique globally
+    # - useful for impersonating a specific model
+    aliases:
+      - "gpt-4o-mini"
+      - "gpt-3.5-turbo"
+
+    # checkEndpoint: URL path to check if the server is ready
+    # - optional, default: /health
+    # - endpoint is expected to return an HTTP 200 response
+    # - all requests wait until the endpoint is ready or fails
+    # - use "none" to skip endpoint health checking
+    checkEndpoint: /custom-endpoint
+
+    # ttl: automatically unload the model after ttl seconds
+    # - optional, default: 0
+    # - ttl values must be a value greater than 0
+    # - a value of 0 disables automatic unloading of the model
+    ttl: 60
+
+    # useModelName: override the model name that is sent to upstream server
+    # - optional, default: ""
+    # - useful for when the upstream server expects a specific model name that
+    #   is different from the model's ID
+    useModelName: "qwen:qwq"
+
+    # filters: a dictionary of filter settings
+    # - optional, default: empty dictionary
+    # - only stripParams is currently supported
+    filters:
+      # stripParams: a comma separated list of parameters to remove from the request
+      # - optional, default: ""
+      # - useful for server side enforcement of sampling parameters
+      # - the `model` parameter can never be removed
+      # - can be any JSON key in the request body
+      # - recommended to stick to sampling parameters
+      stripParams: "temperature, top_p, top_k"
+
+    # metadata: a dictionary of arbitrary values that are included in /v1/models
+    # - optional, default: empty dictionary
+    # - while metadata can contains complex types it is recommended to keep it simple
+    # - metadata is only passed through in /v1/models responses
+    metadata:
+      # port will remain an integer
+      port: ${PORT}
+
+      # the ${temp} macro will remain a float
+      temperature: ${temp}
+      note: "The ${MODEL_ID} is running on port ${PORT} temp=${temp}, context=${default_ctx}"
+
+      a_list:
+        - 1
+        - 1.23
+        - "macros are OK in list and dictionary types: ${MODEL_ID}"
+
+      an_obj:
+        a: "1"
+        b: 2
+        # objects can contain complex types with macro substitution
+        # becomes: c: [0.7, false, "model: llama"]
+        c: ["${temp}", false, "model: ${MODEL_ID}"]
+
+    # concurrencyLimit: overrides the allowed number of active parallel requests to a model
+    # - optional, default: 0
+    # - useful for limiting the number of active parallel requests a model can process
+    # - must be set per model
+    # - any number greater than 0 will override the internal default value of 10
+    # - any requests that exceeds the limit will receive an HTTP 429 Too Many Requests response
+    # - recommended to be omitted and the default used
+    concurrencyLimit: 0
+
+  # Unlisted model example:
+  "qwen-unlisted":
+    # unlisted: boolean, true or false
+    # - optional, default: false
+    # - unlisted models do not show up in /v1/models api requests
+    # - can be requested as normal through all apis
+    unlisted: true
+    cmd: llama-server --port ${PORT} -m Llama-3.2-1B-Instruct-Q4_K_M.gguf -ngl 0
+
+  # Docker example:
+  # container runtimes like Docker and Podman can be used reliably with
+  # a combination of cmd, cmdStop, and ${MODEL_ID}
+  "docker-llama":
+    proxy: "http://127.0.0.1:${PORT}"
+    cmd: |
+      docker run --name ${MODEL_ID}
+      --init --rm -p ${PORT}:8080 -v /mnt/nvme/models:/models
+      ghcr.io/ggml-org/llama.cpp:server
+      --model '/models/Qwen2.5-Coder-0.5B-Instruct-Q4_K_M.gguf'
+
+    # cmdStop: command to run to stop the model gracefully
+    # - optional, default: ""
+    # - useful for stopping commands managed by another system
+    # - the upstream's process id is available in the ${PID} macro
+    #
+    # When empty, llama-swap has this default behaviour:
+    # - on POSIX systems: a SIGTERM signal is sent
+    # - on Windows, calls taskkill to stop the process
+    # - processes have 5 seconds to shutdown until forceful termination is attempted
+    cmdStop: docker stop ${MODEL_ID}
+
+# groups: a dictionary of group settings
+# - optional, default: empty dictionary
+# - provides advanced controls over model swapping behaviour
+# - using groups some models can be kept loaded indefinitely, while others are swapped out
+# - model IDs must be defined in the Models section
+# - a model can only be a member of one group
+# - group behaviour is controlled via the `swap`, `exclusive` and `persistent` fields
+# - see issue #109 for details
+#
+# NOTE: the example below uses model names that are not defined above for demonstration purposes
+groups:
+  # group1 works the same as the default behaviour of llama-swap where only one model is allowed
+  # to run a time across the whole llama-swap instance
+  "group1":
+    # swap: controls the model swapping behaviour in within the group
+    # - optional, default: true
+    # - true : only one model is allowed to run at a time
+    # - false: all models can run together, no swapping
+    swap: true
+
+    # exclusive: controls how the group affects other groups
+    # - optional, default: true
+    # - true: causes all other groups to unload when this group runs a model
+    # - false: does not affect other groups
+    exclusive: true
+
+    # members references the models defined above
+    # required
+    members:
+      - "llama"
+      - "qwen-unlisted"
+
+  # Example:
+  # - in group2 all models can run at the same time
+  # - when a different group is loaded it causes all running models in this group to unload
+  "group2":
+    swap: false
+
+    # exclusive: false does not unload other groups when a model in group2 is requested
+    # - the models in group2 will be loaded but will not unload any other groups
+    exclusive: false
+    members:
+      - "docker-llama"
+      - "modelA"
+      - "modelB"
+
+  # Example:
+  # - a persistent group, prevents other groups from unloading it
+  "forever":
+    # persistent: prevents over groups from unloading the models in this group
+    # - optional, default: false
+    # - does not affect individual model behaviour
+    persistent: true
+
+    # set swap/exclusive to false to prevent swapping inside the group
+    # and the unloading of other groups
+    swap: false
+    exclusive: false
+    members:
+      - "forever-modelA"
+      - "forever-modelB"
+      - "forever-modelc"
+
+# hooks: a dictionary of event triggers and actions
+# - optional, default: empty dictionary
+# - the only supported hook is on_startup
+hooks:
+  # on_startup: a dictionary of actions to perform on startup
+  # - optional, default: empty dictionary
+  # - the only supported action is preload
+  on_startup:
+    # preload: a list of model ids to load on startup
+    # - optional, default: empty list
+    # - model names must match keys in the models sections
+    # - when preloading multiple models at once, define a group
+    #   otherwise models will be loaded and swapped out
+    preload:
+      - "llama"
+```
