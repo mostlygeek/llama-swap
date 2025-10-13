@@ -1075,18 +1075,28 @@ func TestProxyManager_StreamingEndpointsReturnNoBufferingHeader(t *testing.T) {
 
 	for _, endpoint := range endpoints {
 		t.Run(endpoint, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 
 			req := httptest.NewRequest("GET", endpoint, nil)
 			req = req.WithContext(ctx)
 			rec := httptest.NewRecorder()
 
-			// We don't need the handler to fully complete, just to set the headers
-			// so run it in a goroutine and check the headers after a short delay
-			go proxy.ServeHTTP(rec, req)
-			time.Sleep(10 * time.Millisecond) // give it time to start and write headers
+			// Run handler in goroutine and wait for context timeout
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				proxy.ServeHTTP(rec, req)
+			}()
 
+			// Wait for either the handler to complete or context to timeout
+			<-ctx.Done()
+
+			// At this point, the handler has either finished or been cancelled
+			// Wait for the goroutine to fully exit before reading
+			<-done
+
+			// Now it's safe to read from rec - no more concurrent writes
 			assert.Equal(t, http.StatusOK, rec.Code)
 			assert.Equal(t, "no", rec.Header().Get("X-Accel-Buffering"))
 		})
