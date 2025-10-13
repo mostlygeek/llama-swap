@@ -145,6 +145,13 @@ func (p *Process) swapState(expectedState, newState ProcessState) (ProcessState,
 	}
 
 	p.state = newState
+
+	// Atomically increment waitStarting when entering StateStarting
+	// This ensures any thread that sees StateStarting will also see the WaitGroup counter incremented
+	if newState == StateStarting {
+		p.waitStarting.Add(1)
+	}
+
 	p.proxyLogger.Debugf("<%s> swapState() State transitioned from %s to %s", p.ID, expectedState, newState)
 	event.Emit(ProcessStateChangeEvent{ProcessName: p.ID, NewState: newState, OldState: expectedState})
 	return p.state, nil
@@ -206,7 +213,7 @@ func (p *Process) start() error {
 		}
 	}
 
-	p.waitStarting.Add(1)
+	// waitStarting.Add(1) is now called atomically in swapState() when transitioning to StateStarting
 	defer p.waitStarting.Done()
 	cmdContext, ctxCancelUpstream := context.WithCancel(context.Background())
 
