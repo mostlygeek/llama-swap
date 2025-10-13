@@ -55,7 +55,8 @@ type Process struct {
 	healthCheckTimeout      int
 	healthCheckLoopInterval time.Duration
 
-	lastRequestHandled time.Time
+	lastRequestHandledMutex sync.RWMutex
+	lastRequestHandled      time.Time
 
 	stateMutex sync.RWMutex
 	state      ProcessState
@@ -105,6 +106,20 @@ func NewProcess(ID string, healthCheckTimeout int, config config.ModelConfig, pr
 // LogMonitor returns the log monitor associated with the process.
 func (p *Process) LogMonitor() *LogMonitor {
 	return p.processLogger
+}
+
+// setLastRequestHandled sets the last request handled time in a thread-safe manner.
+func (p *Process) setLastRequestHandled(t time.Time) {
+	p.lastRequestHandledMutex.Lock()
+	defer p.lastRequestHandledMutex.Unlock()
+	p.lastRequestHandled = t
+}
+
+// getLastRequestHandled gets the last request handled time in a thread-safe manner.
+func (p *Process) getLastRequestHandled() time.Time {
+	p.lastRequestHandledMutex.RLock()
+	defer p.lastRequestHandledMutex.RUnlock()
+	return p.lastRequestHandled
 }
 
 // custom error types for swapping state
@@ -288,7 +303,7 @@ func (p *Process) start() error {
 				// wait for all inflight requests to complete and ticker
 				p.inFlightRequests.Wait()
 
-				if time.Since(p.lastRequestHandled) > maxDuration {
+				if time.Since(p.getLastRequestHandled()) > maxDuration {
 					p.proxyLogger.Infof("<%s> Unloading model, TTL of %ds reached", p.ID, p.config.UnloadAfter)
 					p.Stop()
 					return
@@ -419,7 +434,7 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 
 	p.inFlightRequests.Add(1)
 	defer func() {
-		p.lastRequestHandled = time.Now()
+		p.setLastRequestHandled(time.Now())
 		p.inFlightRequests.Done()
 	}()
 
