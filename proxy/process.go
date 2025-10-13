@@ -307,9 +307,6 @@ func (p *Process) start() error {
 					return
 				}
 
-				// wait for all inflight requests to complete and ticker
-				p.inFlightRequests.Wait()
-
 				if time.Since(p.getLastRequestHandled()) > maxDuration {
 					p.proxyLogger.Infof("<%s> Unloading model, TTL of %ds reached", p.ID, p.config.UnloadAfter)
 					p.Stop()
