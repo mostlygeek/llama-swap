@@ -33,7 +33,7 @@ test: proxy/ui_dist/placeholder.txt
 
 # for CI - full test (takes longer)
 test-all: proxy/ui_dist/placeholder.txt
-	go test -count=1 ./proxy/...
+	go test -race -count=1 ./proxy/...
 
 ui/node_modules:
 	cd ui && npm install
