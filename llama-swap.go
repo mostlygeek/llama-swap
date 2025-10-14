@@ -23,14 +23,18 @@ var (
 	version string = "0"
 	commit  string = "abcd1234"
 	date    string = "unknown"
+	listenStr *string
+	sigChan chan os.Signal
 )
 
 func main() {
 	// Define a command-line flag for the port
 	configPath := flag.String("config", "config.yaml", "config file name")
-	listenStr := flag.String("listen", ":8080", "listen ip/port")
+	listenStr = flag.String("listen", ":8080", "listen ip/port")
 	showVersion := flag.Bool("version", false, "show version of build")
 	watchConfig := flag.Bool("watch-config", false, "Automatically reload config file on change")
+
+	addFlagsIfNeed(flag.CommandLine)
 
 	flag.Parse() // Parse the command-line flags
 
@@ -38,6 +42,8 @@ func main() {
 		fmt.Printf("version: %s (%s), built at %s\n", version, commit, date)
 		os.Exit(0)
 	}
+
+	restartIfNeed()
 
 	conf, err := config.LoadConfig(*configPath)
 	if err != nil {
@@ -57,7 +63,7 @@ func main() {
 
 	// Setup channels for server management
 	exitChan := make(chan struct{})
-	sigChan := make(chan os.Signal, 1)
+	sigChan = make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	// Create server with initial handler
@@ -173,6 +179,8 @@ func main() {
 			log.Fatalf("Fatal server error: %v\n", err)
 		}
 	}()
+
+	go runTrayIfAvailable()
 
 	// Wait for exit signal
 	<-exitChan
