@@ -65,7 +65,7 @@ func onReady() {
 
 	mOpenLog := systray.AddMenuItem("Open log", "Open llamaSwap-Web log page")
 	mOpenModel := systray.AddMenuItem("Open model", "Open llamaSwap-Web model page")
-	mTerminateChild := systray.AddMenuItem("Exit", "Ext llamaSwap")
+	mTerminateChild := systray.AddMenuItem("Exit", "Exit llamaSwap")
 
 	go func() {
 		for {
