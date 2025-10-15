@@ -3,14 +3,14 @@
 package main
 
 import (
-    _ "embed"
-    "flag"
-    "os"
-    "os/exec"
-    "syscall"
+	_ "embed"
+	"flag"
+	"os"
+	"os/exec"
+	"syscall"
 
-    "golang.org/x/sys/windows"
-    "github.com/getlantern/systray"
+	"github.com/getlantern/systray"
+	"golang.org/x/sys/windows"
 )
 
 const TargetURL = "http://localhost"
@@ -20,62 +20,68 @@ var iconData []byte
 var tray *bool
 
 func addFlagsIfNeed(flag *flag.FlagSet) {
-    tray = flag.Bool("tray", false, "add tray icon")
+	tray = flag.Bool("tray", false, "add tray icon")
 }
 
 func restartIfNeed() {
-    if !*tray { return }
+	if !*tray {
+		return
+	}
 
-    kernel32 := syscall.MustLoadDLL("kernel32.dll")
-    getConsoleWindow := kernel32.MustFindProc("GetConsoleWindow")
-    ret , _, _ := getConsoleWindow.Call()
-    if ret == 0 { return }
+	kernel32 := syscall.MustLoadDLL("kernel32.dll")
+	getConsoleWindow := kernel32.MustFindProc("GetConsoleWindow")
+	ret, _, _ := getConsoleWindow.Call()
+	if ret == 0 {
+		return
+	}
 
-    programPath := os.Args[0]
-    cmd := exec.Command(programPath,os.Args[1:] ...)
-    cmd.SysProcAttr = &syscall.SysProcAttr{
-        HideWindow:    true,
-        CreationFlags: windows.CREATE_NO_WINDOW,
-    }
-    cmd.Start()
-    os.Exit(0)
+	programPath := os.Args[0]
+	cmd := exec.Command(programPath, os.Args[1:]...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: windows.CREATE_NO_WINDOW,
+	}
+	cmd.Start()
+	os.Exit(0)
 }
 
 func runTrayIfAvailable() {
-    if !*tray { return }
+	if !*tray {
+		return
+	}
 
-    systray.Run(onReady, onExit )
+	systray.Run(onReady, onExit)
 }
 
 func onReady() {
 
-    systray.SetIcon(iconData)
-    systray.SetTitle("llamaSwap")
-    systray.SetTooltip("llamaSwap")
+	systray.SetIcon(iconData)
+	systray.SetTitle("llamaSwap")
+	systray.SetTooltip("llamaSwap")
 
-    mOpenLog := systray.AddMenuItem("Open log", "Open llamaSwap-Web log page")
-    mOpenModel := systray.AddMenuItem("Open model", "Open llamaSwap-Web model page")
-    mTerminateChild := systray.AddMenuItem("Exit", "Ext llamaSwap")
+	mOpenLog := systray.AddMenuItem("Open log", "Open llamaSwap-Web log page")
+	mOpenModel := systray.AddMenuItem("Open model", "Open llamaSwap-Web model page")
+	mTerminateChild := systray.AddMenuItem("Exit", "Ext llamaSwap")
 
-    go func() {
-        for {
-            select {
-            case <-mOpenLog.ClickedCh:
-                openBrowser("/ui")
+	go func() {
+		for {
+			select {
+			case <-mOpenLog.ClickedCh:
+				openBrowser("/ui")
 
-            case <-mOpenModel.ClickedCh:
-                openBrowser("/ui/models")
+			case <-mOpenModel.ClickedCh:
+				openBrowser("/ui/models")
 
-            case <-mTerminateChild.ClickedCh:
-                systray.Quit()
-            }
-        }
-    }()
+			case <-mTerminateChild.ClickedCh:
+				systray.Quit()
+			}
+		}
+	}()
 }
 func onExit() {
-    sigChan <- syscall.SIGINT
+	sigChan <- syscall.SIGINT
 }
 
 func openBrowser(page string) {
-    exec.Command("rundll32", "url.dll,FileProtocolHandler", TargetURL+ *listenStr + page ).Start()
+	exec.Command("rundll32", "url.dll,FileProtocolHandler", TargetURL+*listenStr+page).Start()
 }
