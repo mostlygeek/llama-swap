@@ -5,6 +5,7 @@ package main
 import (
 	_ "embed"
 	"flag"
+	"log"
 	"os"
 	"os/exec"
 	"syscall"
@@ -41,7 +42,10 @@ func restartIfNeed() {
 		HideWindow:    true,
 		CreationFlags: windows.CREATE_NO_WINDOW,
 	}
-	cmd.Start()
+	err := cmd.Start()
+	if err != nil {
+		log.Fatalf("Fatal restart error: %v\n", err)
+	}
 	os.Exit(0)
 }
 
@@ -83,5 +87,14 @@ func onExit() {
 }
 
 func openBrowser(page string) {
-	exec.Command("rundll32", "url.dll,FileProtocolHandler", TargetURL+*listenStr+page).Start()
+	err := exec.Command("rundll32", "url.dll,FileProtocolHandler", TargetURL+*listenStr+page).Start()
+	if err != nil {
+		showErrorMessageBox("Can't launch browser\n" + err.Error())
+	}
+}
+
+func showErrorMessageBox(message string) {
+	titlePtr, _ := windows.UTF16PtrFromString("Error")
+	messagePtr, _ := windows.UTF16PtrFromString(message)
+	windows.MessageBox(0, messagePtr, titlePtr, 0)
 }
