@@ -20,11 +20,11 @@ import (
 )
 
 var (
-	version   string = "0"
-	commit    string = "abcd1234"
-	date      string = "unknown"
+	version string = "0"
+	commit  string = "abcd1234"
+	date    string = "unknown"
 	listenStr *string
-	sigChan   chan os.Signal
+	sigChan chan os.Signal
 )
 
 func main() {
