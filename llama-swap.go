@@ -15,6 +15,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/event"
+	"github.com/mostlygeek/llama-swap/platform/tray"
 	"github.com/mostlygeek/llama-swap/proxy"
 	"github.com/mostlygeek/llama-swap/proxy/config"
 )
@@ -33,6 +34,7 @@ func main() {
 	keyFile := flag.String("tls-key-file", "", "TLS key file")
 	showVersion := flag.Bool("version", false, "show version of build")
 	watchConfig := flag.Bool("watch-config", false, "Automatically reload config file on change")
+	trayFlag := flag.Bool("tray", false, "add tray icon")
 
 	flag.Parse() // Parse the command-line flags
 
@@ -41,6 +43,9 @@ func main() {
 		os.Exit(0)
 	}
 
+	if *trayFlag {
+		tray.RestartIfNeed()
+	}
 	conf, err := config.LoadConfig(*configPath)
 	if err != nil {
 		fmt.Printf("Error loading config: %v\n", err)
@@ -200,6 +205,13 @@ func main() {
 		}
 	}()
 
+	if *trayFlag {
+		url := fmt.Sprintf("http%s://localhost%s", map[bool]string{true: "s", false: ""}[useTLS], *listenStr)
+		traySv := tray.New(func() { sigChan <- syscall.SIGINT }, url)
+		if traySv != nil {
+			traySv.Start()
+		}
+	}
 	// Wait for exit signal
 	<-exitChan
 }
