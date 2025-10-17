@@ -23,6 +23,9 @@ func New(onexit func(), webpage string) Tray {
 	}
 }
 
+// restartIfNeeded checks if the program is running with a console window attached.
+// If a console window is detected, it stops the current process and restarts it
+// without the console window, allowing it to run as a system tray application.
 func restartIfNeeded() {
 
 	kernel32 := windows.MustLoadDLL("kernel32.dll")
