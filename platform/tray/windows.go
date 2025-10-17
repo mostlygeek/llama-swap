@@ -23,7 +23,7 @@ func New(onexit func(), webpage string) Tray {
 	}
 }
 
-func RestartIfNeed() {
+func restartIfNeed() {
 
 	kernel32 := syscall.MustLoadDLL("kernel32.dll")
 	getConsoleWindow := kernel32.MustFindProc("GetConsoleWindow")
@@ -40,7 +40,7 @@ func RestartIfNeed() {
 	}
 	err := cmd.Start()
 	if err != nil {
-		log.Fatalf("Fatal restart error: %v\n", err)
+		log.Fatalf("Failed to restart after closing console window: %v\n", err)
 	}
 	os.Exit(0)
 }
@@ -51,6 +51,7 @@ type WindowsTray struct {
 }
 
 func (t *WindowsTray) Start() {
+	restartIfNeed()
 	systray.Run(t.onReady, t.onExit)
 }
 
@@ -61,14 +62,14 @@ func (t *WindowsTray) onReady() {
 	systray.SetTooltip("show llama-swap options")
 
 	mOpenWeb := systray.AddMenuItem("Show UI", "open user interface in default browser")
-	mTerminateChild := systray.AddMenuItem("Quit", "quit llama-swap process")
+	mTerminate := systray.AddMenuItem("Quit", "quit llama-swap process")
 
 	go func() {
 		for {
 			select {
 			case <-mOpenWeb.ClickedCh:
 				openBrowser(t.webPage)
-			case <-mTerminateChild.ClickedCh:
+			case <-mTerminate.ClickedCh:
 				systray.Quit()
 				return
 			}

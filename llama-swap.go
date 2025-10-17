@@ -43,9 +43,6 @@ func main() {
 		os.Exit(0)
 	}
 
-	if *trayFlag {
-		tray.RestartIfNeed()
-	}
 	conf, err := config.LoadConfig(*configPath)
 	if err != nil {
 		fmt.Printf("Error loading config: %v\n", err)
