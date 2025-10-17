@@ -23,7 +23,7 @@ func New(onexit func(), webpage string) Tray {
 	}
 }
 
-func restartIfNeed() {
+func restartIfNeeded() {
 
 	kernel32 := syscall.MustLoadDLL("kernel32.dll")
 	getConsoleWindow := kernel32.MustFindProc("GetConsoleWindow")
@@ -51,7 +51,7 @@ type WindowsTray struct {
 }
 
 func (t *WindowsTray) Start() {
-	restartIfNeed()
+	restartIfNeeded()
 	systray.Run(t.onReady, t.onExit)
 }
 
