@@ -25,7 +25,8 @@ func New(onexit func(), webpage string) Tray {
 
 func restartIfNeeded() {
 
-	kernel32 := syscall.MustLoadDLL("kernel32.dll")
+	kernel32 := windows.MustLoadDLL("kernel32.dll")
+	defer kernel32.Release()
 	getConsoleWindow := kernel32.MustFindProc("GetConsoleWindow")
 	ret, _, _ := getConsoleWindow.Call()
 	if ret == 0 {
