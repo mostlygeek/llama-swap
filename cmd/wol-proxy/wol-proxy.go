@@ -1,0 +1,231 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"log/slog"
+	"net"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"os"
+	"os/signal"
+	"sync"
+	"time"
+)
+
+var (
+	flagMac      = flag.String("mac", "", "mac address to send WoL packet to")
+	flagUpstream = flag.String("upstream", "", "upstream proxy address to send requests to")
+	flagListen   = flag.String("listen", ":8080", "listen address to listen on")
+	flagLog      = flag.String("log", "info", "log level (debug, info, warn, error)")
+	flagTimeout  = flag.Int("timeout", 60, "seconds requests wait for upstream response before failing")
+)
+
+func main() {
+	flag.Parse()
+
+	switch *flagLog {
+	case "debug":
+		slog.SetLogLoggerLevel(slog.LevelDebug)
+	case "info":
+		slog.SetLogLoggerLevel(slog.LevelInfo)
+	case "warn":
+		slog.SetLogLoggerLevel(slog.LevelWarn)
+	case "error":
+		slog.SetLogLoggerLevel(slog.LevelError)
+	default:
+		slog.Error("invalid log level", "logLevel", *flagLog)
+	}
+
+	// Validate flags
+	if *flagListen == "" {
+		slog.Error("listen address is required")
+		return
+	}
+
+	if *flagMac == "" {
+		slog.Error("mac address is required")
+		return
+	}
+
+	if *flagTimeout < 1 {
+		slog.Error("timeout must be greater than 0")
+		return
+	}
+
+	var upstreamURL *url.URL
+	var err error
+	// validate mac address
+	if _, err = net.ParseMAC(*flagMac); err != nil {
+		slog.Error("invalid mac address", "error", err)
+	}
+
+	if *flagUpstream == "" {
+		slog.Error("upstream proxy address is required")
+		return
+	} else {
+		upstreamURL, err = url.ParseRequestURI(*flagUpstream)
+		if err != nil {
+			slog.Error("error parsing upstream url", "error", err)
+			return
+		}
+	}
+
+	proxy := newProxy(upstreamURL)
+	server := &http.Server{
+		Addr:    *flagListen,
+		Handler: proxy,
+	}
+
+	// start the server
+	go func() {
+		slog.Info("server starting on", "address", *flagListen)
+		if err := server.ListenAndServe(); err != nil {
+			slog.Error("error starting server", "error", err)
+		}
+	}()
+
+	// catch exit signal
+	// signal handler
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt)
+
+	// wait for signal
+	<-sigChan
+}
+
+type upstreamStatus string
+
+const (
+	notready upstreamStatus = "not ready"
+	ready    upstreamStatus = "ready"
+)
+
+type proxyServer struct {
+	upstreamProxy *httputil.ReverseProxy
+	failCount     int
+	statusMutex   sync.RWMutex
+	status        upstreamStatus
+}
+
+func newProxy(url *url.URL) *proxyServer {
+	p := httputil.NewSingleHostReverseProxy(url)
+	proxy := &proxyServer{
+		upstreamProxy: p,
+		status:        notready,
+		failCount:     0,
+	}
+
+	// start a goroutien to check upstream status
+	go func() {
+		checkUrl := url.Scheme + "://" + url.Host + "/wol-health"
+		client := &http.Client{Timeout: time.Second}
+		for {
+			<-time.After(2 * time.Second)
+
+			slog.Debug("checking upstream status at", "url", checkUrl)
+			resp, err := client.Get(checkUrl)
+			if err == nil && resp.StatusCode == 200 {
+				slog.Debug("upstream status: ready")
+				proxy.setStatus(ready)
+				proxy.failCount = 0
+			} else {
+				slog.Debug("upstream status: notready", "error", err)
+				proxy.setStatus(notready)
+				proxy.failCount += 1
+			}
+
+		}
+	}()
+
+	return proxy
+}
+
+func (p *proxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "GET" && r.URL.Path == "/status" {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(200)
+		fmt.Fprintf(w, "status: %s\n", string(p.status))
+		fmt.Fprintf(w, "failures: %d\n", p.failCount)
+		return
+	}
+
+	if p.getStatus() == notready {
+		slog.Info("upstream not ready, sending magic packet", "mac", *flagMac)
+		sendMagicPacket(*flagMac)
+		timeout, cancel := context.WithTimeout(context.Background(), time.Duration(*flagTimeout)*time.Second)
+		defer cancel()
+		for {
+			select {
+			case <-timeout.Done():
+				slog.Info("timeout waiting for upstream to be ready")
+				http.Error(w, "timeout", http.StatusRequestTimeout)
+				return
+			default:
+				if p.getStatus() == ready {
+					break
+				}
+				// prevent busy waiting
+				<-time.After(100 * time.Millisecond)
+			}
+
+			// break the loop
+			if p.getStatus() == ready {
+				break
+			}
+		}
+	}
+
+	p.upstreamProxy.ServeHTTP(w, r)
+}
+
+func (p *proxyServer) getStatus() upstreamStatus {
+	p.statusMutex.RLock()
+	defer p.statusMutex.RUnlock()
+	return p.status
+}
+
+func (p *proxyServer) setStatus(status upstreamStatus) {
+	p.statusMutex.Lock()
+	defer p.statusMutex.Unlock()
+	p.status = status
+}
+
+func sendMagicPacket(macAddr string) error {
+	hwAddr, err := net.ParseMAC(macAddr)
+	if err != nil {
+		return err
+	}
+
+	if len(hwAddr) != 6 {
+		return errors.New("invalid MAC address")
+	}
+
+	// Create the magic packet.
+	packet := make([]byte, 102)
+	// Add 6 bytes of 0xFF.
+	for i := 0; i < 6; i++ {
+		packet[i] = 0xFF
+	}
+	// Repeat the MAC address 16 times.
+	for i := 1; i <= 16; i++ {
+		copy(packet[i*6:], hwAddr)
+	}
+
+	// Send the packet using UDP.
+	addr := net.UDPAddr{
+		IP:   net.IPv4bcast,
+		Port: 9,
+	}
+	conn, err := net.DialUDP("udp", nil, &addr)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	_, err = conn.Write(packet)
+	return err
+}
