@@ -39,6 +39,7 @@ func main() {
 		slog.SetLogLoggerLevel(slog.LevelError)
 	default:
 		slog.Error("invalid log level", "logLevel", *flagLog)
+		return
 	}
 
 	// Validate flags
@@ -162,10 +163,14 @@ func newProxy(url *url.URL) *proxyServer {
 
 func (p *proxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" && r.URL.Path == "/status" {
+		p.statusMutex.RLock()
+		status := string(p.status)
+		failCount := p.failCount
+		p.statusMutex.RUnlock()
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(200)
-		fmt.Fprintf(w, "status: %s\n", string(p.status))
-		fmt.Fprintf(w, "failures: %d\n", p.failCount)
+		fmt.Fprintf(w, "status: %s\n", status)
+		fmt.Fprintf(w, "failures: %d\n", failCount)
 		return
 	}
 
@@ -174,25 +179,21 @@ func (p *proxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err := sendMagicPacket(*flagMac); err != nil {
 			slog.Warn("failed to send magic WoL packet", "error", err)
 		}
+		ticker := time.NewTicker(250 * time.Millisecond)
 		timeout, cancel := context.WithTimeout(context.Background(), time.Duration(*flagTimeout)*time.Second)
 		defer cancel()
+	loop:
 		for {
 			select {
 			case <-timeout.Done():
 				slog.Info("timeout waiting for upstream to be ready")
 				http.Error(w, "timeout", http.StatusRequestTimeout)
 				return
-			default:
+			case <-ticker.C:
 				if p.getStatus() == ready {
-					break
+					ticker.Stop()
+					break loop
 				}
-				// prevent busy waiting
-				<-time.After(100 * time.Millisecond)
-			}
-
-			// break the loop
-			if p.getStatus() == ready {
-				break
 			}
 		}
 	}
