@@ -175,7 +175,7 @@ func (p *proxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if p.getStatus() == notready {
-		slog.Info("upstream not ready, sending magic packet", "mac", *flagMac)
+		slog.Info("upstream not ready, sending magic packet", "req", r.URL.Path, "from", r.RemoteAddr)
 		if err := sendMagicPacket(*flagMac); err != nil {
 			slog.Warn("failed to send magic WoL packet", "error", err)
 		}
