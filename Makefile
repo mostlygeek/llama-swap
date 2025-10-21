@@ -86,5 +86,11 @@ release:
 	echo "tagging new version: $$new_tag"; \
 	git tag "$$new_tag";
 
+GOOS ?= $(shell go env GOOS 2>/dev/null || echo linux)
+GOARCH ?= $(shell go env GOARCH 2>/dev/null || echo amd64)
+wol-proxy: $(BUILD_DIR)
+	@echo "Building wol-proxy"
+	go build -o $(BUILD_DIR)/wol-proxy-$(GOOS)-$(GOARCH) cmd/wol-proxy/wol-proxy.go
+
 # Phony targets
-.PHONY: all clean ui mac linux windows simple-responder simple-responder-windows test test-all test-dev
+.PHONY: all clean ui mac linux windows simple-responder simple-responder-windows test test-all test-dev wol-proxy

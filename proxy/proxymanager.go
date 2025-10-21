@@ -131,7 +131,15 @@ func New(config config.Config) *ProxyManager {
 }
 
 func (pm *ProxyManager) setupGinEngine() {
+
 	pm.ginEngine.Use(func(c *gin.Context) {
+
+		// don't log the Wake on Lan proxy health check
+		if c.Request.URL.Path == "/wol-health" {
+			c.Next()
+			return
+		}
+
 		// Start timer
 		start := time.Now()
 
@@ -232,6 +240,11 @@ func (pm *ProxyManager) setupGinEngine() {
 	pm.ginEngine.GET("/unload", pm.unloadAllModelsHandler)
 	pm.ginEngine.GET("/running", pm.listRunningProcessesHandler)
 	pm.ginEngine.GET("/health", func(c *gin.Context) {
+		c.String(http.StatusOK, "OK")
+	})
+
+	// see cmd/wol-proxy/wol-proxy.go, not logged
+	pm.ginEngine.GET("/wol-health", func(c *gin.Context) {
 		c.String(http.StatusOK, "OK")
 	})
 
