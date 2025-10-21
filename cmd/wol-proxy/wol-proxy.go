@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -61,6 +62,7 @@ func main() {
 	// validate mac address
 	if _, err = net.ParseMAC(*flagMac); err != nil {
 		slog.Error("invalid mac address", "error", err)
+		return
 	}
 
 	if *flagUpstream == "" {
@@ -88,13 +90,15 @@ func main() {
 		}
 	}()
 
-	// catch exit signal
-	// signal handler
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt)
-
-	// wait for signal
-	<-sigChan
+	// graceful shutdown
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	<-ctx.Done()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		slog.Error("server shutdown error", "error", err)
+	}
 }
 
 type upstreamStatus string
@@ -123,19 +127,31 @@ func newProxy(url *url.URL) *proxyServer {
 	go func() {
 		checkUrl := url.Scheme + "://" + url.Host + "/wol-health"
 		client := &http.Client{Timeout: time.Second}
-		for {
-			<-time.After(2 * time.Second)
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
 
 			slog.Debug("checking upstream status at", "url", checkUrl)
 			resp, err := client.Get(checkUrl)
-			if err == nil && resp.StatusCode == 200 {
+
+			// drain the body
+			if err == nil && resp != nil {
+				_, _ = io.Copy(io.Discard, resp.Body)
+				_ = resp.Body.Close()
+			}
+
+			if err == nil && resp != nil && resp.StatusCode == http.StatusOK {
 				slog.Debug("upstream status: ready")
 				proxy.setStatus(ready)
+				proxy.statusMutex.Lock()
 				proxy.failCount = 0
+				proxy.statusMutex.Unlock()
 			} else {
 				slog.Debug("upstream status: notready", "error", err)
 				proxy.setStatus(notready)
-				proxy.failCount += 1
+				proxy.statusMutex.Lock()
+				proxy.failCount++
+				proxy.statusMutex.Unlock()
 			}
 
 		}
@@ -155,7 +171,9 @@ func (p *proxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if p.getStatus() == notready {
 		slog.Info("upstream not ready, sending magic packet", "mac", *flagMac)
-		sendMagicPacket(*flagMac)
+		if err := sendMagicPacket(*flagMac); err != nil {
+			slog.Warn("failed to send magic WoL packet", "error", err)
+		}
 		timeout, cancel := context.WithTimeout(context.Background(), time.Duration(*flagTimeout)*time.Second)
 		defer cancel()
 		for {

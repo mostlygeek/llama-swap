@@ -10,10 +10,10 @@ This utility helps conserve energy by allowing GPU-heavy servers to remain suspe
 
 ```shell
 # minimal
-$ ./wol-proxy -mac 88:88:88:88:88:87:88 -upstream http://192.168.1.13:8080
+$ ./wol-proxy -mac BA:DC:0F:FE:E0:00 -upstream http://192.168.1.13:8080
 
 # everything
-$ ./wol-proxy -mac 88:88:88:88:87:88 -upstream http://192.168.1.13:8080 \
+$ ./wol-proxy -mac BA:DC:0F:FE:E0:00 -upstream http://192.168.1.13:8080 \
     # use debug log level
     -log debug \
     # altenerative listening port
