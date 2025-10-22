@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"time"
 )
@@ -175,7 +176,14 @@ func (p *proxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if p.getStatus() == notready {
-		slog.Info("upstream not ready, sending magic packet", "req", r.URL.Path, "from", r.RemoteAddr)
+		path := r.URL.Path
+		if strings.HasPrefix(path, "/api/events") {
+			slog.Info("Skipping wake up", "req", path)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		slog.Info("upstream not ready, sending magic packet", "req", path, "from", r.RemoteAddr)
 		if err := sendMagicPacket(*flagMac); err != nil {
 			slog.Warn("failed to send magic WoL packet", "error", err)
 		}
