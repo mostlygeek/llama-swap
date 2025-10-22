@@ -194,26 +194,45 @@ function ModelsPanel() {
 function StatsPanel() {
   const { metrics } = useAPI();
 
-  const [totalRequests, totalInputTokens, totalOutputTokens, avgTokensPerSecond] = useMemo(() => {
+  const [totalRequests, totalInputTokens, totalOutputTokens, tokenStats] = useMemo(() => {
     const totalRequests = metrics.length;
     if (totalRequests === 0) {
-      return [0, 0, 0, 0];
+      return [0, 0, 0, { avg: 0, p50: 0, p75: 0, p90: 0 }];
     }
     const totalInputTokens = metrics.reduce((sum, m) => sum + m.input_tokens, 0);
     const totalOutputTokens = metrics.reduce((sum, m) => sum + m.output_tokens, 0);
 
-    // Calculate tokens/second using output_tokens and duration_ms for better accuracy
+    // Calculate token statistics using output_tokens and duration_ms
     // Filter out metrics with invalid duration or output tokens
     const validMetrics = metrics.filter((m) => m.duration_ms > 0 && m.output_tokens > 0);
     if (validMetrics.length === 0) {
-      return [totalRequests, totalInputTokens, totalOutputTokens, 0];
+      return [totalRequests, totalInputTokens, totalOutputTokens, { avg: 0, p50: 0, p75: 0, p90: 0 }];
     }
 
-    const totalOutputTokensForValid = validMetrics.reduce((sum, m) => sum + m.output_tokens, 0);
-    const totalDurationSeconds = validMetrics.reduce((sum, m) => sum + m.duration_ms / 1000, 0);
-    const avgTokensPerSecond = (totalOutputTokensForValid / totalDurationSeconds).toFixed(2);
+    // Calculate tokens/second for each valid metric
+    const tokensPerSecond = validMetrics.map((m) => m.output_tokens / (m.duration_ms / 1000));
 
-    return [totalRequests, totalInputTokens, totalOutputTokens, avgTokensPerSecond];
+    // Sort for percentile calculation
+    tokensPerSecond.sort((a, b) => a - b);
+
+    const avg = tokensPerSecond.reduce((sum, tps) => sum + tps, 0) / tokensPerSecond.length;
+
+    // Calculate percentiles
+    const p50 = tokensPerSecond[Math.floor(tokensPerSecond.length * 0.5)];
+    const p75 = tokensPerSecond[Math.floor(tokensPerSecond.length * 0.75)];
+    const p90 = tokensPerSecond[Math.floor(tokensPerSecond.length * 0.9)];
+
+    return [
+      totalRequests,
+      totalInputTokens,
+      totalOutputTokens,
+      {
+        avg: avg.toFixed(2),
+        p50: p50.toFixed(2),
+        p75: p75.toFixed(2),
+        p90: p90.toFixed(2),
+      },
+    ];
   }, [metrics]);
 
   const nf = new Intl.NumberFormat();
@@ -221,21 +240,73 @@ function StatsPanel() {
   return (
     <div className="card">
       <div className="rounded-lg overflow-hidden border border-gray-200 dark:border-white/10">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-gray-200 dark:border-white/10 text-right">
-              <th>Requests</th>
-              <th className="border-l border-gray-200 dark:border-white/10">Processed</th>
-              <th className="border-l border-gray-200 dark:border-white/10">Generated</th>
-              <th className="border-l border-gray-200 dark:border-white/10">Tokens/Sec</th>
+        <table className="min-w-full divide-y divide-gray-200 dark:divide-white/10">
+          <thead className="bg-gray-50 dark:bg-gray-800">
+            <tr>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-300">
+                Requests
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-300 border-l border-gray-200 dark:border-white/10">
+                Processed
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-300 border-l border-gray-200 dark:border-white/10">
+                Generated
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-300 border-l border-gray-200 dark:border-white/10">
+                Token Stats (tokens/sec)
+              </th>
             </tr>
           </thead>
-          <tbody>
-            <tr className="text-right">
-              <td className="border-r border-gray-200 dark:border-white/10">{totalRequests}</td>
-              <td className="border-r border-gray-200 dark:border-white/10">{nf.format(totalInputTokens)}</td>
-              <td className="border-r border-gray-200 dark:border-white/10">{nf.format(totalOutputTokens)}</td>
-              <td>{avgTokensPerSecond ?? 0}</td>
+
+          <tbody className="bg-white dark:bg-slate-900 divide-y divide-gray-100 dark:divide-white/5">
+            <tr className="hover:bg-gray-50 dark:hover:bg-white/5">
+              <td className="px-4 py-4 text-sm font-semibold text-gray-900 dark:text-white">{totalRequests}</td>
+
+              <td className="px-4 py-4 text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-white/10">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">{nf.format(totalInputTokens)}</span>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">tokens</span>
+                </div>
+              </td>
+
+              <td className="px-4 py-4 text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-white/10">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">{nf.format(totalOutputTokens)}</span>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">tokens</span>
+                </div>
+              </td>
+
+              <td className="px-4 py-4 border-l border-gray-200 dark:border-white/10">
+                <div className="grid grid-cols-4 gap-2 items-center">
+                  <div className="text-center">
+                    <div className="text-xs text-gray-500 dark:text-gray-400">Avg</div>
+                    <div className="mt-1 inline-block rounded-full bg-gray-100 dark:bg-white/5 px-3 py-1 text-sm font-semibold text-gray-800 dark:text-white">
+                      {tokenStats.avg}
+                    </div>
+                  </div>
+
+                  <div className="text-center">
+                    <div className="text-xs text-gray-500 dark:text-gray-400">P50</div>
+                    <div className="mt-1 inline-block rounded-full bg-gray-100 dark:bg-white/5 px-3 py-1 text-sm font-semibold text-gray-800 dark:text-white">
+                      {tokenStats.p50}
+                    </div>
+                  </div>
+
+                  <div className="text-center">
+                    <div className="text-xs text-gray-500 dark:text-gray-400">P75</div>
+                    <div className="mt-1 inline-block rounded-full bg-gray-100 dark:bg-white/5 px-3 py-1 text-sm font-semibold text-gray-800 dark:text-white">
+                      {tokenStats.p75}
+                    </div>
+                  </div>
+
+                  <div className="text-center">
+                    <div className="text-xs text-gray-500 dark:text-gray-400">P90</div>
+                    <div className="mt-1 inline-block rounded-full bg-gray-100 dark:bg-white/5 px-3 py-1 text-sm font-semibold text-gray-800 dark:text-white">
+                      {tokenStats.p90}
+                    </div>
+                  </div>
+                </div>
+              </td>
             </tr>
           </tbody>
         </table>
