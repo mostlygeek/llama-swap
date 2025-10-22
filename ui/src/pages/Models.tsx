@@ -197,13 +197,26 @@ function StatsPanel() {
   const [totalRequests, totalInputTokens, totalOutputTokens, avgTokensPerSecond] = useMemo(() => {
     const totalRequests = metrics.length;
     if (totalRequests === 0) {
-      return [0, 0, 0];
+      return [0, 0, 0, 0];
     }
     const totalInputTokens = metrics.reduce((sum, m) => sum + m.input_tokens, 0);
     const totalOutputTokens = metrics.reduce((sum, m) => sum + m.output_tokens, 0);
-    const avgTokensPerSecond = (metrics.reduce((sum, m) => sum + m.tokens_per_second, 0) / totalRequests).toFixed(2);
+
+    // Calculate tokens/second using output_tokens and duration_ms for better accuracy
+    // Filter out metrics with invalid duration or output tokens
+    const validMetrics = metrics.filter((m) => m.duration_ms > 0 && m.output_tokens > 0);
+    if (validMetrics.length === 0) {
+      return [totalRequests, totalInputTokens, totalOutputTokens, 0];
+    }
+
+    const totalOutputTokensForValid = validMetrics.reduce((sum, m) => sum + m.output_tokens, 0);
+    const totalDurationSeconds = validMetrics.reduce((sum, m) => sum + m.duration_ms / 1000, 0);
+    const avgTokensPerSecond = (totalOutputTokensForValid / totalDurationSeconds).toFixed(2);
+
     return [totalRequests, totalInputTokens, totalOutputTokens, avgTokensPerSecond];
   }, [metrics]);
+
+  const nf = new Intl.NumberFormat();
 
   return (
     <div className="card">
@@ -220,13 +233,9 @@ function StatsPanel() {
           <tbody>
             <tr className="text-right">
               <td className="border-r border-gray-200 dark:border-white/10">{totalRequests}</td>
-              <td className="border-r border-gray-200 dark:border-white/10">
-                {new Intl.NumberFormat().format(totalInputTokens)}
-              </td>
-              <td className="border-r border-gray-200 dark:border-white/10">
-                {new Intl.NumberFormat().format(totalOutputTokens)}
-              </td>
-              <td>{avgTokensPerSecond}</td>
+              <td className="border-r border-gray-200 dark:border-white/10">{nf.format(totalInputTokens)}</td>
+              <td className="border-r border-gray-200 dark:border-white/10">{nf.format(totalOutputTokens)}</td>
+              <td>{avgTokensPerSecond ?? 0}</td>
             </tr>
           </tbody>
         </table>
