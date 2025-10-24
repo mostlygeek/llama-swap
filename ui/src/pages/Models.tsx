@@ -197,7 +197,7 @@ function StatsPanel() {
   const [totalRequests, totalInputTokens, totalOutputTokens, tokenStats] = useMemo(() => {
     const totalRequests = metrics.length;
     if (totalRequests === 0) {
-      return [0, 0, 0, { avg: 0, p50: 0, p75: 0, p90: 0 }];
+      return [0, 0, 0, { p99: 0, p95: 0, p50: 0 }];
     }
     const totalInputTokens = metrics.reduce((sum, m) => sum + m.input_tokens, 0);
     const totalOutputTokens = metrics.reduce((sum, m) => sum + m.output_tokens, 0);
@@ -206,7 +206,7 @@ function StatsPanel() {
     // Filter out metrics with invalid duration or output tokens
     const validMetrics = metrics.filter((m) => m.duration_ms > 0 && m.output_tokens > 0);
     if (validMetrics.length === 0) {
-      return [totalRequests, totalInputTokens, totalOutputTokens, { avg: 0, p50: 0, p75: 0, p90: 0 }];
+      return [totalRequests, totalInputTokens, totalOutputTokens, { p99: 0, p95: 0, p50: 0 }];
     }
 
     // Calculate tokens/second for each valid metric
@@ -215,22 +215,22 @@ function StatsPanel() {
     // Sort for percentile calculation
     tokensPerSecond.sort((a, b) => a - b);
 
-    const avg = tokensPerSecond.reduce((sum, tps) => sum + tps, 0) / tokensPerSecond.length;
-
-    // Calculate percentiles
+    // Calculate percentiles - showing speed thresholds where X% of requests are SLOWER (below)
+    // P99: 99% of requests are slower than this speed (99th percentile - fast requests)
+    // P95: 95% of requests are slower than this speed (95th percentile)
+    // P50: 50% of requests are slower than this speed (median)
+    const p99 = tokensPerSecond[Math.floor(tokensPerSecond.length * 0.99)];
+    const p95 = tokensPerSecond[Math.floor(tokensPerSecond.length * 0.95)];
     const p50 = tokensPerSecond[Math.floor(tokensPerSecond.length * 0.5)];
-    const p75 = tokensPerSecond[Math.floor(tokensPerSecond.length * 0.75)];
-    const p90 = tokensPerSecond[Math.floor(tokensPerSecond.length * 0.9)];
 
     return [
       totalRequests,
       totalInputTokens,
       totalOutputTokens,
       {
-        avg: avg.toFixed(2),
+        p99: p99.toFixed(2),
+        p95: p95.toFixed(2),
         p50: p50.toFixed(2),
-        p75: p75.toFixed(2),
-        p90: p90.toFixed(2),
       },
     ];
   }, [metrics]);
@@ -239,27 +239,27 @@ function StatsPanel() {
 
   return (
     <div className="card">
-      <div className="rounded-lg overflow-hidden border border-gray-200 dark:border-white/10">
-        <table className="min-w-full divide-y divide-gray-200 dark:divide-white/10">
-          <thead className="bg-gray-50 dark:bg-gray-800">
+      <div className="rounded-lg overflow-hidden border border-card-border-inner">
+        <table className="min-w-full divide-y divide-card-border-inner">
+          <thead className="bg-secondary">
             <tr>
-              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-300">
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-txtmain">
                 Requests
               </th>
-              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-300 border-l border-gray-200 dark:border-white/10">
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-txtmain border-l border-card-border-inner">
                 Processed
               </th>
-              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-300 border-l border-gray-200 dark:border-white/10">
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-txtmain border-l border-card-border-inner">
                 Generated
               </th>
-              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-300 border-l border-gray-200 dark:border-white/10">
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-txtmain border-l border-card-border-inner">
                 Token Stats (tokens/sec)
               </th>
             </tr>
           </thead>
 
-          <tbody className="bg-white dark:bg-slate-900 divide-y divide-gray-100 dark:divide-white/5">
-            <tr className="hover:bg-gray-50 dark:hover:bg-white/5">
+          <tbody className="bg-surface divide-y divide-card-border-inner">
+            <tr className="hover:bg-secondary">
               <td className="px-4 py-4 text-sm font-semibold text-gray-900 dark:text-white">{totalRequests}</td>
 
               <td className="px-4 py-4 text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-white/10">
@@ -277,14 +277,7 @@ function StatsPanel() {
               </td>
 
               <td className="px-4 py-4 border-l border-gray-200 dark:border-white/10">
-                <div className="grid grid-cols-4 gap-2 items-center">
-                  <div className="text-center">
-                    <div className="text-xs text-gray-500 dark:text-gray-400">Avg</div>
-                    <div className="mt-1 inline-block rounded-full bg-gray-100 dark:bg-white/5 px-3 py-1 text-sm font-semibold text-gray-800 dark:text-white">
-                      {tokenStats.avg}
-                    </div>
-                  </div>
-
+                <div className="grid grid-cols-3 gap-2 items-center">
                   <div className="text-center">
                     <div className="text-xs text-gray-500 dark:text-gray-400">P50</div>
                     <div className="mt-1 inline-block rounded-full bg-gray-100 dark:bg-white/5 px-3 py-1 text-sm font-semibold text-gray-800 dark:text-white">
@@ -293,16 +286,16 @@ function StatsPanel() {
                   </div>
 
                   <div className="text-center">
-                    <div className="text-xs text-gray-500 dark:text-gray-400">P75</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">P95</div>
                     <div className="mt-1 inline-block rounded-full bg-gray-100 dark:bg-white/5 px-3 py-1 text-sm font-semibold text-gray-800 dark:text-white">
-                      {tokenStats.p75}
+                      {tokenStats.p95}
                     </div>
                   </div>
 
                   <div className="text-center">
-                    <div className="text-xs text-gray-500 dark:text-gray-400">P90</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">P99</div>
                     <div className="mt-1 inline-block rounded-full bg-gray-100 dark:bg-white/5 px-3 py-1 text-sm font-semibold text-gray-800 dark:text-white">
-                      {tokenStats.p90}
+                      {tokenStats.p99}
                     </div>
                   </div>
                 </div>
