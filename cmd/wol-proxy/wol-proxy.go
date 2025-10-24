@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -93,14 +94,9 @@ func main() {
 	}()
 
 	// graceful shutdown
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
+	ctx, _ := signal.NotifyContext(context.Background(), os.Interrupt)
 	<-ctx.Done()
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		slog.Error("server shutdown error", "error", err)
-	}
+	server.Close()
 }
 
 type upstreamStatus string
@@ -125,37 +121,81 @@ func newProxy(url *url.URL) *proxyServer {
 		failCount:     0,
 	}
 
-	// start a goroutien to check upstream status
+	// start a goroutine to monitor upstream status via SSE
 	go func() {
-		checkUrl := url.Scheme + "://" + url.Host + "/wol-health"
-		client := &http.Client{Timeout: time.Second}
-		ticker := time.NewTicker(2 * time.Second)
-		defer ticker.Stop()
-		for range ticker.C {
+		eventsUrl := url.Scheme + "://" + url.Host + "/api/events"
+		client := &http.Client{
+			Timeout: 0, // No timeout for SSE connection
+		}
 
-			slog.Debug("checking upstream status at", "url", checkUrl)
-			resp, err := client.Get(checkUrl)
+		waitDuration := 10 * time.Second
 
-			// drain the body
-			if err == nil && resp != nil {
-				_, _ = io.Copy(io.Discard, resp.Body)
-				_ = resp.Body.Close()
+		for {
+			slog.Debug("connecting to SSE endpoint", "url", eventsUrl)
+
+			req, err := http.NewRequest("GET", eventsUrl, nil)
+			if err != nil {
+				slog.Warn("failed to create SSE request", "error", err)
+				proxy.setStatus(notready)
+				proxy.failCount++
+				time.Sleep(waitDuration)
+				continue
 			}
 
-			if err == nil && resp != nil && resp.StatusCode == http.StatusOK {
-				slog.Debug("upstream status: ready")
-				proxy.setStatus(ready)
-				proxy.statusMutex.Lock()
-				proxy.failCount = 0
-				proxy.statusMutex.Unlock()
-			} else {
-				slog.Debug("upstream status: notready", "error", err)
+			req.Header.Set("Accept", "text/event-stream")
+			req.Header.Set("Cache-Control", "no-cache")
+			req.Header.Set("Connection", "keep-alive")
+
+			resp, err := client.Do(req)
+			if err != nil {
+				slog.Error("failed to connect to SSE endpoint", "error", err)
 				proxy.setStatus(notready)
 				proxy.statusMutex.Lock()
 				proxy.failCount++
 				proxy.statusMutex.Unlock()
+				time.Sleep(10 * time.Second)
+				continue
 			}
 
+			if resp.StatusCode != http.StatusOK {
+				slog.Warn("SSE endpoint returned non-OK status", "status", resp.StatusCode)
+				_, _ = io.Copy(io.Discard, resp.Body)
+				_ = resp.Body.Close()
+				proxy.setStatus(notready)
+				proxy.failCount++
+				time.Sleep(10 * time.Second)
+				continue
+			}
+
+			// Successfully connected to SSE endpoint
+			slog.Info("connected to SSE endpoint, upstream ready")
+			proxy.setStatus(ready)
+			proxy.failCount = 0
+
+			// Read from the SSE stream to detect disconnection
+			scanner := bufio.NewScanner(resp.Body)
+			events := 0
+			if slog.Default().Enabled(context.Background(), slog.LevelDebug) {
+				fmt.Print("Events: ")
+			}
+			for scanner.Scan() {
+				if slog.Default().Enabled(context.Background(), slog.LevelDebug) {
+					// Just read the events to keep connection alive
+					// We don't need to process the event data
+					events++
+					fmt.Printf("%d, ", events)
+				}
+			}
+			fmt.Println()
+
+			// Connection closed or error occurred
+			_ = resp.Body.Close()
+			slog.Info("SSE connection closed, upstream not ready")
+			proxy.setStatus(notready)
+			proxy.failCount++
+
+			// Wait before reconnecting
+			time.Sleep(waitDuration)
 		}
 	}()
 
@@ -178,7 +218,7 @@ func (p *proxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if p.getStatus() == notready {
 		path := r.URL.Path
 		if strings.HasPrefix(path, "/api/events") {
-			slog.Info("Skipping wake up", "req", path)
+			slog.Debug("Skipping wake up", "req", path)
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
