@@ -137,7 +137,7 @@ func newProxy(url *url.URL) *proxyServer {
 			if err != nil {
 				slog.Warn("failed to create SSE request", "error", err)
 				proxy.setStatus(notready)
-				proxy.failCount++
+				proxy.incFail(1)
 				time.Sleep(waitDuration)
 				continue
 			}
@@ -150,9 +150,7 @@ func newProxy(url *url.URL) *proxyServer {
 			if err != nil {
 				slog.Error("failed to connect to SSE endpoint", "error", err)
 				proxy.setStatus(notready)
-				proxy.statusMutex.Lock()
-				proxy.failCount++
-				proxy.statusMutex.Unlock()
+				proxy.incFail(1)
 				time.Sleep(10 * time.Second)
 				continue
 			}
@@ -162,7 +160,7 @@ func newProxy(url *url.URL) *proxyServer {
 				_, _ = io.Copy(io.Discard, resp.Body)
 				_ = resp.Body.Close()
 				proxy.setStatus(notready)
-				proxy.failCount++
+				proxy.incFail(1)
 				time.Sleep(10 * time.Second)
 				continue
 			}
@@ -170,7 +168,7 @@ func newProxy(url *url.URL) *proxyServer {
 			// Successfully connected to SSE endpoint
 			slog.Info("connected to SSE endpoint, upstream ready")
 			proxy.setStatus(ready)
-			proxy.failCount = 0
+			proxy.resetFailures()
 
 			// Read from the SSE stream to detect disconnection
 			scanner := bufio.NewScanner(resp.Body)
@@ -199,7 +197,7 @@ func newProxy(url *url.URL) *proxyServer {
 			_ = resp.Body.Close()
 			slog.Info("SSE connection closed, upstream not ready")
 			proxy.setStatus(notready)
-			proxy.failCount++
+			proxy.incFail(1)
 
 			// Wait before reconnecting
 			time.Sleep(waitDuration)
@@ -211,10 +209,8 @@ func newProxy(url *url.URL) *proxyServer {
 
 func (p *proxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" && r.URL.Path == "/status" {
-		p.statusMutex.RLock()
-		status := string(p.status)
-		failCount := p.failCount
-		p.statusMutex.RUnlock()
+		status := string(p.getStatus())
+		failCount := p.getFailures()
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(200)
 		fmt.Fprintf(w, "status: %s\n", status)
@@ -266,6 +262,24 @@ func (p *proxyServer) setStatus(status upstreamStatus) {
 	p.statusMutex.Lock()
 	defer p.statusMutex.Unlock()
 	p.status = status
+}
+
+func (p *proxyServer) incFail(num int) {
+	p.statusMutex.Lock()
+	defer p.statusMutex.Unlock()
+	p.failCount += num
+}
+
+func (p *proxyServer) getFailures() int {
+	p.statusMutex.RLock()
+	defer p.statusMutex.RUnlock()
+	return p.failCount
+}
+
+func (p *proxyServer) resetFailures() {
+	p.statusMutex.Lock()
+	defer p.statusMutex.Unlock()
+	p.failCount = 0
 }
 
 func sendMagicPacket(macAddr string) error {
