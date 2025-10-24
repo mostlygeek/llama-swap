@@ -191,42 +191,300 @@ function ModelsPanel() {
   );
 }
 
+interface HistogramData {
+  bins: number[];
+  min: number;
+  max: number;
+  binSize: number;
+  p99: number;
+  p95: number;
+  p50: number;
+}
+
+function TokenHistogram({ data }: { data: HistogramData }) {
+  const { bins, min, max, p50, p95, p99 } = data;
+  const maxCount = Math.max(...bins);
+
+  const height = 120;
+  const padding = { top: 10, right: 15, bottom: 25, left: 45 };
+
+  // Use viewBox for responsive sizing
+  const viewBoxWidth = 600;
+  const chartWidth = viewBoxWidth - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+
+  const barWidth = chartWidth / bins.length;
+  const range = max - min;
+
+  // Calculate x position for a given value
+  const getXPosition = (value: number) => {
+    return padding.left + ((value - min) / range) * chartWidth;
+  };
+
+  return (
+    <div className="mt-2 w-full">
+      <svg
+        viewBox={`0 0 ${viewBoxWidth} ${height}`}
+        className="w-full h-auto"
+        preserveAspectRatio="xMidYMid meet"
+      >
+        {/* Y-axis */}
+        <line
+          x1={padding.left}
+          y1={padding.top}
+          x2={padding.left}
+          y2={height - padding.bottom}
+          stroke="currentColor"
+          strokeWidth="1"
+          opacity="0.3"
+        />
+
+        {/* X-axis */}
+        <line
+          x1={padding.left}
+          y1={height - padding.bottom}
+          x2={viewBoxWidth - padding.right}
+          y2={height - padding.bottom}
+          stroke="currentColor"
+          strokeWidth="1"
+          opacity="0.3"
+        />
+
+        {/* Histogram bars */}
+        {bins.map((count, i) => {
+          const barHeight = maxCount > 0 ? (count / maxCount) * chartHeight : 0;
+          const x = padding.left + i * barWidth;
+          const y = height - padding.bottom - barHeight;
+          const binStart = min + i * data.binSize;
+          const binEnd = binStart + data.binSize;
+
+          return (
+            <g key={i}>
+              <rect
+                x={x}
+                y={y}
+                width={Math.max(barWidth - 1, 1)}
+                height={barHeight}
+                fill="currentColor"
+                opacity="0.6"
+                className="text-blue-500 dark:text-blue-400 hover:opacity-90 transition-opacity cursor-pointer"
+              />
+              <title>{`${binStart.toFixed(1)} - ${binEnd.toFixed(1)} tokens/sec\nCount: ${count}`}</title>
+            </g>
+          );
+        })}
+
+        {/* Percentile lines */}
+        <line
+          x1={getXPosition(p50)}
+          y1={padding.top}
+          x2={getXPosition(p50)}
+          y2={height - padding.bottom}
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeDasharray="4 2"
+          opacity="0.7"
+          className="text-gray-600 dark:text-gray-400"
+        />
+
+        <line
+          x1={getXPosition(p95)}
+          y1={padding.top}
+          x2={getXPosition(p95)}
+          y2={height - padding.bottom}
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeDasharray="4 2"
+          opacity="0.7"
+          className="text-orange-500 dark:text-orange-400"
+        />
+
+        <line
+          x1={getXPosition(p99)}
+          y1={padding.top}
+          x2={getXPosition(p99)}
+          y2={height - padding.bottom}
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeDasharray="4 2"
+          opacity="0.7"
+          className="text-green-500 dark:text-green-400"
+        />
+
+        {/* X-axis labels */}
+        <text
+          x={padding.left}
+          y={height - 5}
+          fontSize="10"
+          fill="currentColor"
+          opacity="0.6"
+          textAnchor="start"
+        >
+          {min.toFixed(1)}
+        </text>
+
+        <text
+          x={viewBoxWidth - padding.right}
+          y={height - 5}
+          fontSize="10"
+          fill="currentColor"
+          opacity="0.6"
+          textAnchor="end"
+        >
+          {max.toFixed(1)}
+        </text>
+
+        {/* X-axis label */}
+        <text
+          x={padding.left + chartWidth / 2}
+          y={height - 2}
+          fontSize="10"
+          fill="currentColor"
+          opacity="0.6"
+          textAnchor="middle"
+        >
+          Tokens/Second Distribution
+        </text>
+      </svg>
+    </div>
+  );
+}
+
 function StatsPanel() {
   const { metrics } = useAPI();
 
-  const [totalRequests, totalInputTokens, totalOutputTokens, avgTokensPerSecond] = useMemo(() => {
+  const [totalRequests, totalInputTokens, totalOutputTokens, tokenStats, histogramData] = useMemo(() => {
     const totalRequests = metrics.length;
     if (totalRequests === 0) {
-      return [0, 0, 0];
+      return [0, 0, 0, { p99: 0, p95: 0, p50: 0 }, null];
     }
     const totalInputTokens = metrics.reduce((sum, m) => sum + m.input_tokens, 0);
     const totalOutputTokens = metrics.reduce((sum, m) => sum + m.output_tokens, 0);
-    const avgTokensPerSecond = (metrics.reduce((sum, m) => sum + m.tokens_per_second, 0) / totalRequests).toFixed(2);
-    return [totalRequests, totalInputTokens, totalOutputTokens, avgTokensPerSecond];
+
+    // Calculate token statistics using output_tokens and duration_ms
+    // Filter out metrics with invalid duration or output tokens
+    const validMetrics = metrics.filter((m) => m.duration_ms > 0 && m.output_tokens > 0);
+    if (validMetrics.length === 0) {
+      return [totalRequests, totalInputTokens, totalOutputTokens, { p99: 0, p95: 0, p50: 0 }, null];
+    }
+
+    // Calculate tokens/second for each valid metric
+    const tokensPerSecond = validMetrics.map((m) => m.output_tokens / (m.duration_ms / 1000));
+
+    // Sort for percentile calculation
+    const sortedTokensPerSecond = [...tokensPerSecond].sort((a, b) => a - b);
+
+    // Calculate percentiles - showing speed thresholds where X% of requests are SLOWER (below)
+    // P99: 99% of requests are slower than this speed (99th percentile - fast requests)
+    // P95: 95% of requests are slower than this speed (95th percentile)
+    // P50: 50% of requests are slower than this speed (median)
+    const p99 = sortedTokensPerSecond[Math.floor(sortedTokensPerSecond.length * 0.99)];
+    const p95 = sortedTokensPerSecond[Math.floor(sortedTokensPerSecond.length * 0.95)];
+    const p50 = sortedTokensPerSecond[Math.floor(sortedTokensPerSecond.length * 0.5)];
+
+    // Create histogram data
+    const min = Math.min(...tokensPerSecond);
+    const max = Math.max(...tokensPerSecond);
+    const binCount = Math.min(30, Math.max(10, Math.floor(tokensPerSecond.length / 5))); // Adaptive bin count
+    const binSize = (max - min) / binCount;
+
+    const bins = Array(binCount).fill(0);
+    tokensPerSecond.forEach((value) => {
+      const binIndex = Math.min(Math.floor((value - min) / binSize), binCount - 1);
+      bins[binIndex]++;
+    });
+
+    const histogramData = {
+      bins,
+      min,
+      max,
+      binSize,
+      p99,
+      p95,
+      p50,
+    };
+
+    return [
+      totalRequests,
+      totalInputTokens,
+      totalOutputTokens,
+      {
+        p99: p99.toFixed(2),
+        p95: p95.toFixed(2),
+        p50: p50.toFixed(2),
+      },
+      histogramData,
+    ];
   }, [metrics]);
+
+  const nf = new Intl.NumberFormat();
 
   return (
     <div className="card">
-      <div className="rounded-lg overflow-hidden border border-gray-200 dark:border-white/10">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-gray-200 dark:border-white/10 text-right">
-              <th>Requests</th>
-              <th className="border-l border-gray-200 dark:border-white/10">Processed</th>
-              <th className="border-l border-gray-200 dark:border-white/10">Generated</th>
-              <th className="border-l border-gray-200 dark:border-white/10">Tokens/Sec</th>
+      <div className="rounded-lg overflow-hidden border border-card-border-inner">
+        <table className="min-w-full divide-y divide-card-border-inner">
+          <thead className="bg-secondary">
+            <tr>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-txtmain">
+                Requests
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-txtmain border-l border-card-border-inner">
+                Processed
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-txtmain border-l border-card-border-inner">
+                Generated
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-txtmain border-l border-card-border-inner">
+                Token Stats (tokens/sec)
+              </th>
             </tr>
           </thead>
-          <tbody>
-            <tr className="text-right">
-              <td className="border-r border-gray-200 dark:border-white/10">{totalRequests}</td>
-              <td className="border-r border-gray-200 dark:border-white/10">
-                {new Intl.NumberFormat().format(totalInputTokens)}
+
+          <tbody className="bg-surface divide-y divide-card-border-inner">
+            <tr className="hover:bg-secondary">
+              <td className="px-4 py-4 text-sm font-semibold text-gray-900 dark:text-white">{totalRequests}</td>
+
+              <td className="px-4 py-4 text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-white/10">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">{nf.format(totalInputTokens)}</span>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">tokens</span>
+                </div>
               </td>
-              <td className="border-r border-gray-200 dark:border-white/10">
-                {new Intl.NumberFormat().format(totalOutputTokens)}
+
+              <td className="px-4 py-4 text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-white/10">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">{nf.format(totalOutputTokens)}</span>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">tokens</span>
+                </div>
               </td>
-              <td>{avgTokensPerSecond}</td>
+
+              <td className="px-4 py-4 border-l border-gray-200 dark:border-white/10">
+                <div className="space-y-3">
+                  <div className="grid grid-cols-3 gap-2 items-center">
+                    <div className="text-center">
+                      <div className="text-xs text-gray-500 dark:text-gray-400">P50</div>
+                      <div className="mt-1 inline-block rounded-full bg-gray-100 dark:bg-white/5 px-3 py-1 text-sm font-semibold text-gray-800 dark:text-white">
+                        {tokenStats.p50}
+                      </div>
+                    </div>
+
+                    <div className="text-center">
+                      <div className="text-xs text-gray-500 dark:text-gray-400">P95</div>
+                      <div className="mt-1 inline-block rounded-full bg-gray-100 dark:bg-white/5 px-3 py-1 text-sm font-semibold text-gray-800 dark:text-white">
+                        {tokenStats.p95}
+                      </div>
+                    </div>
+
+                    <div className="text-center">
+                      <div className="text-xs text-gray-500 dark:text-gray-400">P99</div>
+                      <div className="mt-1 inline-block rounded-full bg-gray-100 dark:bg-white/5 px-3 py-1 text-sm font-semibold text-gray-800 dark:text-white">
+                        {tokenStats.p99}
+                      </div>
+                    </div>
+                  </div>
+                  {histogramData && <TokenHistogram data={histogramData} />}
+                </div>
+              </td>
             </tr>
           </tbody>
         </table>
