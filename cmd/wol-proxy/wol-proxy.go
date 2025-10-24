@@ -174,6 +174,10 @@ func newProxy(url *url.URL) *proxyServer {
 
 			// Read from the SSE stream to detect disconnection
 			scanner := bufio.NewScanner(resp.Body)
+
+			// use a fairly large buffer to avoid scanner errors when reading large SSE events
+			buf := make([]byte, 0, 1024*1024*2)
+			scanner.Buffer(buf, 1024*1024*2)
 			events := 0
 			if slog.Default().Enabled(context.Background(), slog.LevelDebug) {
 				fmt.Print("Events: ")
@@ -187,6 +191,9 @@ func newProxy(url *url.URL) *proxyServer {
 				}
 			}
 			fmt.Println()
+			if err := scanner.Err(); err != nil {
+				slog.Error("error reading from SSE stream", "error", err)
+			}
 
 			// Connection closed or error occurred
 			_ = resp.Body.Close()
