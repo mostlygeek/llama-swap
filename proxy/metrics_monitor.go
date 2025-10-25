@@ -132,12 +132,23 @@ func (mp *MetricsMonitor) WrapHandler(
 }
 
 func processStreamingResponse(modelID string, start time.Time, body []byte) (TokenMetrics, error) {
-	// Iterate **backwards** through the lines looking for the data payload with
-	// usage data
-	lines := bytes.Split(body, []byte("\n"))
+	// Iterate **backwards** through the body looking for the data payload with
+	// usage data. This avoids allocating a slice of all lines via bytes.Split.
 
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := bytes.TrimSpace(lines[i])
+	// Start from the end of the body and scan backwards for newlines
+	pos := len(body)
+	for pos > 0 {
+		// Find the previous newline (or start of body)
+		lineStart := bytes.LastIndexByte(body[:pos], '\n')
+		if lineStart == -1 {
+			lineStart = 0
+		} else {
+			lineStart++ // Move past the newline
+		}
+
+		line := bytes.TrimSpace(body[lineStart:pos])
+		pos = lineStart - 1 // Move position before the newline for next iteration
+
 		if len(line) == 0 {
 			continue
 		}
