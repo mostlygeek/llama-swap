@@ -677,3 +677,45 @@ data: [DONE]
 		assert.Equal(t, 0, len(metrics))
 	})
 }
+
+// Benchmark tests
+func BenchmarkMetricsMonitor_AddMetrics(b *testing.B) {
+	mm := NewMetricsMonitor(&config.Config{MetricsMaxInMemory: 1000})
+
+	metric := TokenMetrics{
+		Model:           "test-model",
+		CachedTokens:    100,
+		InputTokens:     500,
+		OutputTokens:    250,
+		PromptPerSecond: 1200.5,
+		TokensPerSecond: 45.8,
+		DurationMs:      5000,
+		Timestamp:       time.Now(),
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		mm.addMetrics(metric)
+	}
+}
+
+func BenchmarkMetricsMonitor_AddMetrics_SmallBuffer(b *testing.B) {
+	// Test performance with a smaller buffer where wrapping occurs more frequently
+	mm := NewMetricsMonitor(&config.Config{MetricsMaxInMemory: 100})
+
+	metric := TokenMetrics{
+		Model:           "test-model",
+		CachedTokens:    100,
+		InputTokens:     500,
+		OutputTokens:    250,
+		PromptPerSecond: 1200.5,
+		TokensPerSecond: 45.8,
+		DurationMs:      5000,
+		Timestamp:       time.Now(),
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		mm.addMetrics(metric)
+	}
+}
