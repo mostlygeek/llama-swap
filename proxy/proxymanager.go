@@ -193,27 +193,25 @@ func (pm *ProxyManager) setupGinEngine() {
 		c.Next()
 	})
 
-	mm := MetricsMiddleware(pm)
-
 	// Set up routes using the Gin engine
-	pm.ginEngine.POST("/v1/chat/completions", mm, pm.proxyOAIHandler)
+	pm.ginEngine.POST("/v1/chat/completions", pm.proxyOAIHandler)
 	// Support legacy /v1/completions api, see issue #12
-	pm.ginEngine.POST("/v1/completions", mm, pm.proxyOAIHandler)
+	pm.ginEngine.POST("/v1/completions", pm.proxyOAIHandler)
 
 	// Support embeddings and reranking
-	pm.ginEngine.POST("/v1/embeddings", mm, pm.proxyOAIHandler)
+	pm.ginEngine.POST("/v1/embeddings", pm.proxyOAIHandler)
 
 	// llama-server's /reranking endpoint + aliases
-	pm.ginEngine.POST("/reranking", mm, pm.proxyOAIHandler)
-	pm.ginEngine.POST("/rerank", mm, pm.proxyOAIHandler)
-	pm.ginEngine.POST("/v1/rerank", mm, pm.proxyOAIHandler)
-	pm.ginEngine.POST("/v1/reranking", mm, pm.proxyOAIHandler)
+	pm.ginEngine.POST("/reranking", pm.proxyOAIHandler)
+	pm.ginEngine.POST("/rerank", pm.proxyOAIHandler)
+	pm.ginEngine.POST("/v1/rerank", pm.proxyOAIHandler)
+	pm.ginEngine.POST("/v1/reranking", pm.proxyOAIHandler)
 
 	// llama-server's /infill endpoint for code infilling
-	pm.ginEngine.POST("/infill", mm, pm.proxyOAIHandler)
+	pm.ginEngine.POST("/infill", pm.proxyOAIHandler)
 
 	// llama-server's /completion endpoint
-	pm.ginEngine.POST("/completion", mm, pm.proxyOAIHandler)
+	pm.ginEngine.POST("/completion", pm.proxyOAIHandler)
 
 	// Support audio/speech endpoint
 	pm.ginEngine.POST("/v1/audio/speech", pm.proxyOAIHandler)
@@ -475,7 +473,13 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 
 	// rewrite the path
 	c.Request.URL.Path = remainingPath
-	processGroup.ProxyRequest(realModelName, c.Writer, c.Request)
+
+	// attempt to record metrics if it is a POST request
+	if pm.metricsMonitor != nil && c.Request.Method == "POST" {
+		pm.metricsMonitor.WrapHandler(realModelName, c.Writer, c.Request, processGroup.ProxyRequest)
+	} else {
+		processGroup.ProxyRequest(realModelName, c.Writer, c.Request)
+	}
 }
 
 func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
@@ -535,10 +539,18 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 	c.Request.Header.Set("content-length", strconv.Itoa(len(bodyBytes)))
 	c.Request.ContentLength = int64(len(bodyBytes))
 
-	if err := processGroup.ProxyRequest(realModelName, c.Writer, c.Request); err != nil {
-		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
-		pm.proxyLogger.Errorf("Error Proxying Request for processGroup %s and model %s", processGroup.id, realModelName)
-		return
+	if pm.metricsMonitor != nil {
+		if err := pm.metricsMonitor.WrapHandler(realModelName, c.Writer, c.Request, processGroup.ProxyRequest); err != nil {
+			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying metrics wrapped request: %s", err.Error()))
+			pm.proxyLogger.Errorf("Error Proxying Metrics Wrapped Request for processGroup %s and model %s", processGroup.id, realModelName)
+			return
+		}
+	} else {
+		if err := processGroup.ProxyRequest(realModelName, c.Writer, c.Request); err != nil {
+			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
+			pm.proxyLogger.Errorf("Error Proxying Request for processGroup %s and model %s", processGroup.id, realModelName)
+			return
+		}
 	}
 }
 
