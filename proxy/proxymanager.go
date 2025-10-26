@@ -36,7 +36,7 @@ type ProxyManager struct {
 	upstreamLogger *LogMonitor
 	muxLogger      *LogMonitor
 
-	metricsMonitor *MetricsMonitor
+	metricsMonitor *metricsMonitor
 
 	processGroups map[string]*ProcessGroup
 
@@ -75,6 +75,13 @@ func New(config config.Config) *ProxyManager {
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 
+	var maxMetrics int
+	if config.MetricsMaxInMemory <= 0 {
+		maxMetrics = 1000 // Default fallback
+	} else {
+		maxMetrics = config.MetricsMaxInMemory
+	}
+
 	pm := &ProxyManager{
 		config:    config,
 		ginEngine: gin.New(),
@@ -83,7 +90,7 @@ func New(config config.Config) *ProxyManager {
 		muxLogger:      stdoutLogger,
 		upstreamLogger: upstreamLogger,
 
-		metricsMonitor: NewMetricsMonitor(&config),
+		metricsMonitor: newMetricsMonitor(proxyLogger, maxMetrics),
 
 		processGroups: make(map[string]*ProcessGroup),
 
@@ -472,13 +479,22 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 	}
 
 	// rewrite the path
+	originalPath := c.Request.URL.Path
 	c.Request.URL.Path = remainingPath
 
 	// attempt to record metrics if it is a POST request
 	if pm.metricsMonitor != nil && c.Request.Method == "POST" {
-		pm.metricsMonitor.WrapHandler(realModelName, c.Writer, c.Request, processGroup.ProxyRequest)
+		if err := pm.metricsMonitor.wrapHandler(realModelName, c.Writer, c.Request, processGroup.ProxyRequest); err != nil {
+			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying metrics wrapped request: %s", err.Error()))
+			pm.proxyLogger.Errorf("Error proxying wrapped upstream request for model %s, path=%s", realModelName, originalPath)
+			return
+		}
 	} else {
-		processGroup.ProxyRequest(realModelName, c.Writer, c.Request)
+		if err := processGroup.ProxyRequest(realModelName, c.Writer, c.Request); err != nil {
+			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
+			pm.proxyLogger.Errorf("Error proxying upstream request for model %s, path=%s", realModelName, originalPath)
+			return
+		}
 	}
 }
 
@@ -539,8 +555,8 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 	c.Request.Header.Set("content-length", strconv.Itoa(len(bodyBytes)))
 	c.Request.ContentLength = int64(len(bodyBytes))
 
-	if pm.metricsMonitor != nil {
-		if err := pm.metricsMonitor.WrapHandler(realModelName, c.Writer, c.Request, processGroup.ProxyRequest); err != nil {
+	if pm.metricsMonitor != nil && c.Request.Method == "POST" {
+		if err := pm.metricsMonitor.wrapHandler(realModelName, c.Writer, c.Request, processGroup.ProxyRequest); err != nil {
 			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying metrics wrapped request: %s", err.Error()))
 			pm.proxyLogger.Errorf("Error Proxying Metrics Wrapped Request for processGroup %s and model %s", processGroup.id, realModelName)
 			return

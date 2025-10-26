@@ -10,44 +10,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/event"
-	"github.com/mostlygeek/llama-swap/proxy/config"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestMetricsMonitor_NewMetricsMonitor(t *testing.T) {
-	t.Run("with configured max metrics", func(t *testing.T) {
-		cfg := &config.Config{
-			MetricsMaxInMemory: 500,
-		}
-		mm := NewMetricsMonitor(cfg)
-		assert.NotNil(t, mm)
-		assert.Equal(t, 500, mm.maxMetrics)
-		assert.Equal(t, 0, mm.nextID)
-		assert.Equal(t, 0, len(mm.metrics))
-	})
-
-	t.Run("with zero max metrics uses default", func(t *testing.T) {
-		cfg := &config.Config{
-			MetricsMaxInMemory: 0,
-		}
-		mm := NewMetricsMonitor(cfg)
-		assert.NotNil(t, mm)
-		assert.Equal(t, 1000, mm.maxMetrics)
-	})
-
-	t.Run("with negative max metrics uses default", func(t *testing.T) {
-		cfg := &config.Config{
-			MetricsMaxInMemory: -10,
-		}
-		mm := NewMetricsMonitor(cfg)
-		assert.NotNil(t, mm)
-		assert.Equal(t, 1000, mm.maxMetrics)
-	})
-}
-
 func TestMetricsMonitor_AddMetrics(t *testing.T) {
 	t.Run("adds metrics and assigns ID", func(t *testing.T) {
-		mm := NewMetricsMonitor(&config.Config{MetricsMaxInMemory: 10})
+		mm := newMetricsMonitor(testLogger, 10)
 
 		metric := TokenMetrics{
 			Model:        "test-model",
@@ -57,7 +25,7 @@ func TestMetricsMonitor_AddMetrics(t *testing.T) {
 
 		mm.addMetrics(metric)
 
-		metrics := mm.GetMetrics()
+		metrics := mm.getMetrics()
 		assert.Equal(t, 1, len(metrics))
 		assert.Equal(t, 0, metrics[0].ID)
 		assert.Equal(t, "test-model", metrics[0].Model)
@@ -66,13 +34,13 @@ func TestMetricsMonitor_AddMetrics(t *testing.T) {
 	})
 
 	t.Run("increments ID for each metric", func(t *testing.T) {
-		mm := NewMetricsMonitor(&config.Config{MetricsMaxInMemory: 10})
+		mm := newMetricsMonitor(testLogger, 10)
 
 		for i := 0; i < 5; i++ {
 			mm.addMetrics(TokenMetrics{Model: "model"})
 		}
 
-		metrics := mm.GetMetrics()
+		metrics := mm.getMetrics()
 		assert.Equal(t, 5, len(metrics))
 		for i := 0; i < 5; i++ {
 			assert.Equal(t, i, metrics[i].ID)
@@ -80,7 +48,7 @@ func TestMetricsMonitor_AddMetrics(t *testing.T) {
 	})
 
 	t.Run("respects max metrics limit", func(t *testing.T) {
-		mm := NewMetricsMonitor(&config.Config{MetricsMaxInMemory: 3})
+		mm := newMetricsMonitor(testLogger, 3)
 
 		// Add 5 metrics
 		for i := 0; i < 5; i++ {
@@ -90,7 +58,7 @@ func TestMetricsMonitor_AddMetrics(t *testing.T) {
 			})
 		}
 
-		metrics := mm.GetMetrics()
+		metrics := mm.getMetrics()
 		assert.Equal(t, 3, len(metrics))
 
 		// Should keep the last 3 metrics (IDs 2, 3, 4)
@@ -100,7 +68,7 @@ func TestMetricsMonitor_AddMetrics(t *testing.T) {
 	})
 
 	t.Run("emits TokenMetricsEvent", func(t *testing.T) {
-		mm := NewMetricsMonitor(&config.Config{MetricsMaxInMemory: 10})
+		mm := newMetricsMonitor(testLogger, 10)
 
 		receivedEvent := make(chan TokenMetricsEvent, 1)
 		cancel := event.On(func(e TokenMetricsEvent) {
@@ -130,19 +98,19 @@ func TestMetricsMonitor_AddMetrics(t *testing.T) {
 
 func TestMetricsMonitor_GetMetrics(t *testing.T) {
 	t.Run("returns empty slice when no metrics", func(t *testing.T) {
-		mm := NewMetricsMonitor(&config.Config{MetricsMaxInMemory: 10})
-		metrics := mm.GetMetrics()
+		mm := newMetricsMonitor(testLogger, 10)
+		metrics := mm.getMetrics()
 		assert.NotNil(t, metrics)
 		assert.Equal(t, 0, len(metrics))
 	})
 
 	t.Run("returns copy of metrics", func(t *testing.T) {
-		mm := NewMetricsMonitor(&config.Config{MetricsMaxInMemory: 10})
+		mm := newMetricsMonitor(testLogger, 10)
 		mm.addMetrics(TokenMetrics{Model: "model1"})
 		mm.addMetrics(TokenMetrics{Model: "model2"})
 
-		metrics1 := mm.GetMetrics()
-		metrics2 := mm.GetMetrics()
+		metrics1 := mm.getMetrics()
+		metrics2 := mm.getMetrics()
 
 		// Verify we got copies
 		assert.Equal(t, 2, len(metrics1))
@@ -150,15 +118,15 @@ func TestMetricsMonitor_GetMetrics(t *testing.T) {
 
 		// Modify the returned slice shouldn't affect the original
 		metrics1[0].Model = "modified"
-		metrics3 := mm.GetMetrics()
+		metrics3 := mm.getMetrics()
 		assert.Equal(t, "model1", metrics3[0].Model)
 	})
 }
 
 func TestMetricsMonitor_GetMetricsJSON(t *testing.T) {
 	t.Run("returns valid JSON for empty metrics", func(t *testing.T) {
-		mm := NewMetricsMonitor(&config.Config{MetricsMaxInMemory: 10})
-		jsonData, err := mm.GetMetricsJSON()
+		mm := newMetricsMonitor(testLogger, 10)
+		jsonData, err := mm.getMetricsJSON()
 		assert.NoError(t, err)
 		assert.NotNil(t, jsonData)
 
@@ -169,7 +137,7 @@ func TestMetricsMonitor_GetMetricsJSON(t *testing.T) {
 	})
 
 	t.Run("returns valid JSON with metrics", func(t *testing.T) {
-		mm := NewMetricsMonitor(&config.Config{MetricsMaxInMemory: 10})
+		mm := newMetricsMonitor(testLogger, 10)
 		mm.addMetrics(TokenMetrics{
 			Model:           "model1",
 			InputTokens:     100,
@@ -183,7 +151,7 @@ func TestMetricsMonitor_GetMetricsJSON(t *testing.T) {
 			TokensPerSecond: 30.0,
 		})
 
-		jsonData, err := mm.GetMetricsJSON()
+		jsonData, err := mm.getMetricsJSON()
 		assert.NoError(t, err)
 
 		var metrics []TokenMetrics
@@ -197,7 +165,7 @@ func TestMetricsMonitor_GetMetricsJSON(t *testing.T) {
 
 func TestMetricsMonitor_WrapHandler(t *testing.T) {
 	t.Run("successful non-streaming request with usage data", func(t *testing.T) {
-		mm := NewMetricsMonitor(&config.Config{MetricsMaxInMemory: 10})
+		mm := newMetricsMonitor(testLogger, 10)
 
 		responseBody := `{
 			"usage": {
@@ -217,10 +185,10 @@ func TestMetricsMonitor_WrapHandler(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
 
-		err := mm.WrapHandler("test-model", ginCtx.Writer, req, nextHandler)
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
 		assert.NoError(t, err)
 
-		metrics := mm.GetMetrics()
+		metrics := mm.getMetrics()
 		assert.Equal(t, 1, len(metrics))
 		assert.Equal(t, "test-model", metrics[0].Model)
 		assert.Equal(t, 100, metrics[0].InputTokens)
@@ -228,7 +196,7 @@ func TestMetricsMonitor_WrapHandler(t *testing.T) {
 	})
 
 	t.Run("successful request with timings data", func(t *testing.T) {
-		mm := NewMetricsMonitor(&config.Config{MetricsMaxInMemory: 10})
+		mm := newMetricsMonitor(testLogger, 10)
 
 		responseBody := `{
 			"timings": {
@@ -253,10 +221,10 @@ func TestMetricsMonitor_WrapHandler(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
 
-		err := mm.WrapHandler("test-model", ginCtx.Writer, req, nextHandler)
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
 		assert.NoError(t, err)
 
-		metrics := mm.GetMetrics()
+		metrics := mm.getMetrics()
 		assert.Equal(t, 1, len(metrics))
 		assert.Equal(t, "test-model", metrics[0].Model)
 		assert.Equal(t, 100, metrics[0].InputTokens)
@@ -268,7 +236,7 @@ func TestMetricsMonitor_WrapHandler(t *testing.T) {
 	})
 
 	t.Run("streaming request with SSE format", func(t *testing.T) {
-		mm := NewMetricsMonitor(&config.Config{MetricsMaxInMemory: 10})
+		mm := newMetricsMonitor(testLogger, 10)
 
 		// Note: SSE format requires proper line breaks - each data line followed by blank line
 		responseBody := `data: {"choices":[{"text":"Hello"}]}
@@ -292,10 +260,10 @@ data: [DONE]
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
 
-		err := mm.WrapHandler("test-model", ginCtx.Writer, req, nextHandler)
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
 		assert.NoError(t, err)
 
-		metrics := mm.GetMetrics()
+		metrics := mm.getMetrics()
 		assert.Equal(t, 1, len(metrics))
 		assert.Equal(t, "test-model", metrics[0].Model)
 		// When timings data is present, it takes precedence
@@ -304,7 +272,7 @@ data: [DONE]
 	})
 
 	t.Run("non-OK status code does not record metrics", func(t *testing.T) {
-		mm := NewMetricsMonitor(&config.Config{MetricsMaxInMemory: 10})
+		mm := newMetricsMonitor(testLogger, 10)
 
 		nextHandler := func(modelID string, w http.ResponseWriter, r *http.Request) error {
 			w.WriteHeader(http.StatusBadRequest)
@@ -316,15 +284,15 @@ data: [DONE]
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
 
-		err := mm.WrapHandler("test-model", ginCtx.Writer, req, nextHandler)
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
 		assert.NoError(t, err)
 
-		metrics := mm.GetMetrics()
+		metrics := mm.getMetrics()
 		assert.Equal(t, 0, len(metrics))
 	})
 
 	t.Run("empty response body does not record metrics", func(t *testing.T) {
-		mm := NewMetricsMonitor(&config.Config{MetricsMaxInMemory: 10})
+		mm := newMetricsMonitor(testLogger, 10)
 
 		nextHandler := func(modelID string, w http.ResponseWriter, r *http.Request) error {
 			w.WriteHeader(http.StatusOK)
@@ -335,15 +303,15 @@ data: [DONE]
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
 
-		err := mm.WrapHandler("test-model", ginCtx.Writer, req, nextHandler)
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
 		assert.NoError(t, err)
 
-		metrics := mm.GetMetrics()
+		metrics := mm.getMetrics()
 		assert.Equal(t, 0, len(metrics))
 	})
 
 	t.Run("invalid JSON does not record metrics", func(t *testing.T) {
-		mm := NewMetricsMonitor(&config.Config{MetricsMaxInMemory: 10})
+		mm := newMetricsMonitor(testLogger, 10)
 
 		nextHandler := func(modelID string, w http.ResponseWriter, r *http.Request) error {
 			w.Header().Set("Content-Type", "application/json")
@@ -356,15 +324,15 @@ data: [DONE]
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
 
-		err := mm.WrapHandler("test-model", ginCtx.Writer, req, nextHandler)
-		assert.Error(t, err)
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
+		assert.NoError(t, err) // Errors after response is sent are logged, not returned
 
-		metrics := mm.GetMetrics()
+		metrics := mm.getMetrics()
 		assert.Equal(t, 0, len(metrics))
 	})
 
 	t.Run("next handler error is propagated", func(t *testing.T) {
-		mm := NewMetricsMonitor(&config.Config{MetricsMaxInMemory: 10})
+		mm := newMetricsMonitor(testLogger, 10)
 
 		expectedErr := assert.AnError
 		nextHandler := func(modelID string, w http.ResponseWriter, r *http.Request) error {
@@ -375,15 +343,15 @@ data: [DONE]
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
 
-		err := mm.WrapHandler("test-model", ginCtx.Writer, req, nextHandler)
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
 		assert.Equal(t, expectedErr, err)
 
-		metrics := mm.GetMetrics()
+		metrics := mm.getMetrics()
 		assert.Equal(t, 0, len(metrics))
 	})
 
-	t.Run("response without usage or timings returns error", func(t *testing.T) {
-		mm := NewMetricsMonitor(&config.Config{MetricsMaxInMemory: 10})
+	t.Run("response without usage or timings does not record metrics", func(t *testing.T) {
+		mm := newMetricsMonitor(testLogger, 10)
 
 		responseBody := `{"result": "ok"}`
 
@@ -398,9 +366,11 @@ data: [DONE]
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
 
-		err := mm.WrapHandler("test-model", ginCtx.Writer, req, nextHandler)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "no usage or timings data found")
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
+		assert.NoError(t, err) // Errors after response is sent are logged, not returned
+
+		metrics := mm.getMetrics()
+		assert.Equal(t, 0, len(metrics))
 	})
 }
 
@@ -408,7 +378,7 @@ func TestMetricsMonitor_ResponseBodyCopier(t *testing.T) {
 	t.Run("captures response body", func(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
-		copier := NewMetricsBodyRecorder(ginCtx.Writer)
+		copier := newBodyCopier(ginCtx.Writer)
 
 		testData := []byte("test response body")
 		n, err := copier.Write(testData)
@@ -422,7 +392,7 @@ func TestMetricsMonitor_ResponseBodyCopier(t *testing.T) {
 	t.Run("sets start time on first write", func(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
-		copier := NewMetricsBodyRecorder(ginCtx.Writer)
+		copier := newBodyCopier(ginCtx.Writer)
 
 		assert.True(t, copier.StartTime().IsZero())
 
@@ -434,7 +404,7 @@ func TestMetricsMonitor_ResponseBodyCopier(t *testing.T) {
 	t.Run("preserves headers", func(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
-		copier := NewMetricsBodyRecorder(ginCtx.Writer)
+		copier := newBodyCopier(ginCtx.Writer)
 
 		copier.Header().Set("X-Test", "value")
 
@@ -444,7 +414,7 @@ func TestMetricsMonitor_ResponseBodyCopier(t *testing.T) {
 	t.Run("preserves status code", func(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
-		copier := NewMetricsBodyRecorder(ginCtx.Writer)
+		copier := newBodyCopier(ginCtx.Writer)
 
 		copier.WriteHeader(http.StatusCreated)
 
@@ -455,7 +425,7 @@ func TestMetricsMonitor_ResponseBodyCopier(t *testing.T) {
 
 func TestMetricsMonitor_Concurrent(t *testing.T) {
 	t.Run("concurrent addMetrics is safe", func(t *testing.T) {
-		mm := NewMetricsMonitor(&config.Config{MetricsMaxInMemory: 1000})
+		mm := newMetricsMonitor(testLogger, 1000)
 
 		var wg sync.WaitGroup
 		numGoroutines := 10
@@ -477,12 +447,12 @@ func TestMetricsMonitor_Concurrent(t *testing.T) {
 
 		wg.Wait()
 
-		metrics := mm.GetMetrics()
+		metrics := mm.getMetrics()
 		assert.Equal(t, numGoroutines*metricsPerGoroutine, len(metrics))
 	})
 
 	t.Run("concurrent reads and writes are safe", func(t *testing.T) {
-		mm := NewMetricsMonitor(&config.Config{MetricsMaxInMemory: 100})
+		mm := newMetricsMonitor(testLogger, 100)
 
 		done := make(chan bool)
 
@@ -502,8 +472,8 @@ func TestMetricsMonitor_Concurrent(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				for j := 0; j < 20; j++ {
-					_ = mm.GetMetrics()
-					_, _ = mm.GetMetricsJSON()
+					_ = mm.getMetrics()
+					_, _ = mm.getMetricsJSON()
 					time.Sleep(2 * time.Millisecond)
 				}
 			}()
@@ -513,14 +483,14 @@ func TestMetricsMonitor_Concurrent(t *testing.T) {
 		wg.Wait()
 
 		// Final check
-		metrics := mm.GetMetrics()
+		metrics := mm.getMetrics()
 		assert.Equal(t, 50, len(metrics))
 	})
 }
 
 func TestMetricsMonitor_ParseMetrics(t *testing.T) {
 	t.Run("prefers timings over usage data", func(t *testing.T) {
-		mm := NewMetricsMonitor(&config.Config{MetricsMaxInMemory: 10})
+		mm := newMetricsMonitor(testLogger, 10)
 
 		// Timings should take precedence over usage
 		responseBody := `{
@@ -549,10 +519,10 @@ func TestMetricsMonitor_ParseMetrics(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
 
-		err := mm.WrapHandler("test-model", ginCtx.Writer, req, nextHandler)
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
 		assert.NoError(t, err)
 
-		metrics := mm.GetMetrics()
+		metrics := mm.getMetrics()
 		assert.Equal(t, 1, len(metrics))
 		// Should use timings values, not usage values
 		assert.Equal(t, 100, metrics[0].InputTokens)
@@ -560,7 +530,7 @@ func TestMetricsMonitor_ParseMetrics(t *testing.T) {
 	})
 
 	t.Run("handles missing cache_n in timings", func(t *testing.T) {
-		mm := NewMetricsMonitor(&config.Config{MetricsMaxInMemory: 10})
+		mm := newMetricsMonitor(testLogger, 10)
 
 		responseBody := `{
 			"timings": {
@@ -584,10 +554,10 @@ func TestMetricsMonitor_ParseMetrics(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
 
-		err := mm.WrapHandler("test-model", ginCtx.Writer, req, nextHandler)
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
 		assert.NoError(t, err)
 
-		metrics := mm.GetMetrics()
+		metrics := mm.getMetrics()
 		assert.Equal(t, 1, len(metrics))
 		assert.Equal(t, -1, metrics[0].CachedTokens) // Default value when not present
 	})
@@ -595,7 +565,7 @@ func TestMetricsMonitor_ParseMetrics(t *testing.T) {
 
 func TestMetricsMonitor_StreamingResponse(t *testing.T) {
 	t.Run("finds metrics in last valid SSE data", func(t *testing.T) {
-		mm := NewMetricsMonitor(&config.Config{MetricsMaxInMemory: 10})
+		mm := newMetricsMonitor(testLogger, 10)
 
 		// Metrics should be found in the last data line before [DONE]
 		responseBody := `data: {"choices":[{"text":"First"}]}
@@ -619,17 +589,17 @@ data: [DONE]
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
 
-		err := mm.WrapHandler("test-model", ginCtx.Writer, req, nextHandler)
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
 		assert.NoError(t, err)
 
-		metrics := mm.GetMetrics()
+		metrics := mm.getMetrics()
 		assert.Equal(t, 1, len(metrics))
 		assert.Equal(t, 100, metrics[0].InputTokens)
 		assert.Equal(t, 50, metrics[0].OutputTokens)
 	})
 
 	t.Run("handles streaming with no valid JSON", func(t *testing.T) {
-		mm := NewMetricsMonitor(&config.Config{MetricsMaxInMemory: 10})
+		mm := newMetricsMonitor(testLogger, 10)
 
 		responseBody := `data: not json
 
@@ -648,13 +618,15 @@ data: [DONE]
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
 
-		err := mm.WrapHandler("test-model", ginCtx.Writer, req, nextHandler)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "no valid JSON data found in stream")
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
+		assert.NoError(t, err) // Errors after response is sent are logged, not returned
+
+		metrics := mm.getMetrics()
+		assert.Equal(t, 0, len(metrics))
 	})
 
 	t.Run("handles empty streaming response", func(t *testing.T) {
-		mm := NewMetricsMonitor(&config.Config{MetricsMaxInMemory: 10})
+		mm := newMetricsMonitor(testLogger, 10)
 
 		responseBody := ``
 
@@ -669,18 +641,18 @@ data: [DONE]
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
 
-		err := mm.WrapHandler("test-model", ginCtx.Writer, req, nextHandler)
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
 		// Empty body should not trigger WrapHandler processing
 		assert.NoError(t, err)
 
-		metrics := mm.GetMetrics()
+		metrics := mm.getMetrics()
 		assert.Equal(t, 0, len(metrics))
 	})
 }
 
 // Benchmark tests
 func BenchmarkMetricsMonitor_AddMetrics(b *testing.B) {
-	mm := NewMetricsMonitor(&config.Config{MetricsMaxInMemory: 1000})
+	mm := newMetricsMonitor(testLogger, 1000)
 
 	metric := TokenMetrics{
 		Model:           "test-model",
@@ -701,7 +673,7 @@ func BenchmarkMetricsMonitor_AddMetrics(b *testing.B) {
 
 func BenchmarkMetricsMonitor_AddMetrics_SmallBuffer(b *testing.B) {
 	// Test performance with a smaller buffer where wrapping occurs more frequently
-	mm := NewMetricsMonitor(&config.Config{MetricsMaxInMemory: 100})
+	mm := newMetricsMonitor(testLogger, 100)
 
 	metric := TokenMetrics{
 		Model:           "test-model",

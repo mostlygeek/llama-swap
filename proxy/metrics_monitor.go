@@ -12,7 +12,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/event"
-	"github.com/mostlygeek/llama-swap/proxy/config"
 	"github.com/tidwall/gjson"
 )
 
@@ -38,21 +37,18 @@ func (e TokenMetricsEvent) Type() uint32 {
 	return TokenMetricsEventID // defined in events.go
 }
 
-// MetricsMonitor parses llama-server output for token statistics
-type MetricsMonitor struct {
+// metricsMonitor parses llama-server output for token statistics
+type metricsMonitor struct {
 	mu         sync.RWMutex
 	metrics    []TokenMetrics
 	maxMetrics int
 	nextID     int
+	logger     *LogMonitor
 }
 
-func NewMetricsMonitor(config *config.Config) *MetricsMonitor {
-	maxMetrics := config.MetricsMaxInMemory
-	if maxMetrics <= 0 {
-		maxMetrics = 1000 // Default fallback
-	}
-
-	mp := &MetricsMonitor{
+func newMetricsMonitor(logger *LogMonitor, maxMetrics int) *metricsMonitor {
+	mp := &metricsMonitor{
+		logger:     logger,
 		maxMetrics: maxMetrics,
 	}
 
@@ -60,7 +56,7 @@ func NewMetricsMonitor(config *config.Config) *MetricsMonitor {
 }
 
 // addMetrics adds a new metric to the collection and publishes an event
-func (mp *MetricsMonitor) addMetrics(metric TokenMetrics) {
+func (mp *metricsMonitor) addMetrics(metric TokenMetrics) {
 	mp.mu.Lock()
 	defer mp.mu.Unlock()
 
@@ -73,8 +69,8 @@ func (mp *MetricsMonitor) addMetrics(metric TokenMetrics) {
 	event.Emit(TokenMetricsEvent{Metrics: metric})
 }
 
-// GetMetrics returns a copy of the current metrics
-func (mp *MetricsMonitor) GetMetrics() []TokenMetrics {
+// getMetrics returns a copy of the current metrics
+func (mp *metricsMonitor) getMetrics() []TokenMetrics {
 	mp.mu.RLock()
 	defer mp.mu.RUnlock()
 
@@ -83,51 +79,59 @@ func (mp *MetricsMonitor) GetMetrics() []TokenMetrics {
 	return result
 }
 
-// GetMetricsJSON returns metrics as JSON
-func (mp *MetricsMonitor) GetMetricsJSON() ([]byte, error) {
+// getMetricsJSON returns metrics as JSON
+func (mp *metricsMonitor) getMetricsJSON() ([]byte, error) {
 	mp.mu.RLock()
 	defer mp.mu.RUnlock()
 	return json.Marshal(mp.metrics)
 }
 
-func (mp *MetricsMonitor) WrapHandler(
+// wrapHandler wraps the proxy handler to extract token metrics
+// if wrapHandler returns an error it is safe to assume that no
+// data was sent to the client
+func (mp *metricsMonitor) wrapHandler(
 	modelID string,
 	writer gin.ResponseWriter,
 	request *http.Request,
 	next func(modelID string, w http.ResponseWriter, r *http.Request) error,
 ) error {
-	recorder := NewMetricsBodyRecorder(writer)
-	var err error
-	var tm TokenMetrics
-
-	if err = next(modelID, recorder, request); err != nil {
+	recorder := newBodyCopier(writer)
+	if err := next(modelID, recorder, request); err != nil {
 		return err
 	}
 
+	// after this point we have to assume that data was sent to the client
+	// and we can only log errors but not send them to clients
+
 	if recorder.Status() != http.StatusOK {
+		mp.logger.Warnf("metrics skipped, HTTP status=%d, path=%s", recorder.Status(), request.URL.Path)
 		return nil
 	}
 
 	body := recorder.body.Bytes()
 	if len(body) == 0 {
+		mp.logger.Warn("metrics skipped, empty body")
 		return nil
 	}
 
 	if strings.Contains(recorder.Header().Get("Content-Type"), "text/event-stream") {
-		tm, err = processStreamingResponse(modelID, recorder.StartTime(), body)
+		if tm, err := processStreamingResponse(modelID, recorder.StartTime(), body); err != nil {
+			mp.logger.Warnf("error processing streaming response: %v, path=%s", err, request.URL.Path)
+		} else {
+			mp.addMetrics(tm)
+		}
 	} else {
 		if gjson.ValidBytes(body) {
-			tm, err = parseMetrics(modelID, recorder.StartTime(), gjson.ParseBytes(body)) //
+			if tm, err := parseMetrics(modelID, recorder.StartTime(), gjson.ParseBytes(body)); err != nil {
+				mp.logger.Warnf("error parsing metrics: %v, path=%s", err, request.URL.Path)
+			} else {
+				mp.addMetrics(tm)
+			}
 		} else {
-			err = fmt.Errorf("invalid JSON in response body")
+			mp.logger.Warnf("metrics skipped, invalid JSON in response body path=%s", request.URL.Path)
 		}
 	}
 
-	if err != nil {
-		return err
-	}
-
-	mp.addMetrics(tm)
 	return nil
 }
 
@@ -223,25 +227,25 @@ func parseMetrics(modelID string, start time.Time, jsonData gjson.Result) (Token
 	}, nil
 }
 
-// ResponseBodyCopier records the response body and writes to the original response writer
+// responseBodyCopier records the response body and writes to the original response writer
 // while also capturing it in a buffer for later processing
-type ResponseBodyCopier struct {
+type responseBodyCopier struct {
 	gin.ResponseWriter
 	body  *bytes.Buffer
 	tee   io.Writer
 	start time.Time
 }
 
-func NewMetricsBodyRecorder(w gin.ResponseWriter) *ResponseBodyCopier {
+func newBodyCopier(w gin.ResponseWriter) *responseBodyCopier {
 	bodyBuffer := &bytes.Buffer{}
-	return &ResponseBodyCopier{
+	return &responseBodyCopier{
 		ResponseWriter: w,
 		body:           bodyBuffer,
 		tee:            io.MultiWriter(w, bodyBuffer),
 	}
 }
 
-func (w *ResponseBodyCopier) Write(b []byte) (int, error) {
+func (w *responseBodyCopier) Write(b []byte) (int, error) {
 	if w.start.IsZero() {
 		w.start = time.Now()
 	}
@@ -250,14 +254,14 @@ func (w *ResponseBodyCopier) Write(b []byte) (int, error) {
 	return w.tee.Write(b)
 }
 
-func (w *ResponseBodyCopier) WriteHeader(statusCode int) {
+func (w *responseBodyCopier) WriteHeader(statusCode int) {
 	w.ResponseWriter.WriteHeader(statusCode)
 }
 
-func (w *ResponseBodyCopier) Header() http.Header {
+func (w *responseBodyCopier) Header() http.Header {
 	return w.ResponseWriter.Header()
 }
 
-func (w *ResponseBodyCopier) StartTime() time.Time {
+func (w *responseBodyCopier) StartTime() time.Time {
 	return w.start
 }
