@@ -499,6 +499,18 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		startDuration = time.Since(beginStartTime)
 	}
 
+	// recover from http.ErrAbortHandler panics that can occur when the client
+	// disconnects before the response is sent
+	defer func() {
+		if r := recover(); r != nil {
+			if r == http.ErrAbortHandler {
+				p.proxyLogger.Infof("<%s> recovered from client disconnection during streaming", p.ID)
+			} else {
+				p.proxyLogger.Infof("<%s> recovered from panic: %v", p.ID, r)
+			}
+		}
+	}()
+
 	if p.reverseProxy != nil {
 		p.reverseProxy.ServeHTTP(w, r)
 	} else {
