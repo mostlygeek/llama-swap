@@ -494,3 +494,74 @@ func TestProcess_EnvironmentSetCorrectly(t *testing.T) {
 	assert.Equal(t, len(process1.cmd.Environ())+2, len(process2.cmd.Environ()), "process2 should have 2 more environment variables than process1")
 
 }
+
+// TestProcess_ReverseProxyPanicIsHandled tests that panics from
+// httputil.ReverseProxy in Process.ProxyRequest(w, r) do not bubble up and are
+// handled appropriately.
+//
+// httputil.ReverseProxy will panic with http.ErrAbortHandler when it has sent headers
+// can't copy the body. This can be caused by a client disconnecting before the full
+// response is sent from some reason.
+//
+// bug: https://github.com/mostlygeek/llama-swap/issues/362
+// see: https://github.com/golang/go/issues/23643 (where panic was added to httputil.ReverseProxy)
+func TestProcess_ReverseProxyPanicIsHandled(t *testing.T) {
+	// Add defer/recover to catch any panics that aren't handled by ProxyRequest
+	// If this recover() is hit, it means ProxyRequest didn't handle the panic properly
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("ProxyRequest should handle panics from reverseProxy.ServeHTTP, but panic was not caught: %v", r)
+		}
+	}()
+
+	expectedMessage := "panic_test"
+	config := getTestSimpleResponderConfig(expectedMessage)
+
+	process := NewProcess("panic-test", 5, config, debugLogger, debugLogger)
+	defer process.Stop()
+
+	// Start the process
+	err := process.start()
+	assert.Nil(t, err)
+	assert.Equal(t, StateReady, process.CurrentState())
+
+	// Create a custom ResponseWriter that simulates a client disconnect
+	// by panicking when Write is called after headers are sent
+	panicWriter := &panicOnWriteResponseWriter{
+		ResponseRecorder: httptest.NewRecorder(),
+		shouldPanic:      true,
+	}
+
+	// Make a request that will trigger the panic
+	req := httptest.NewRequest("GET", "/slow-respond?echo=test&delay=100ms", nil)
+
+	// This should panic inside reverseProxy.ServeHTTP when the panicWriter.Write() is called.
+	// ProxyRequest should catch and handle this panic gracefully.
+	process.ProxyRequest(panicWriter, req)
+
+	// If we get here, the panic was properly recovered in ProxyRequest
+	// The process should still be in a ready state
+	assert.Equal(t, StateReady, process.CurrentState())
+}
+
+// panicOnWriteResponseWriter is a ResponseWriter that panics on Write
+// to simulate a client disconnect after headers are sent
+// used by: TestProcess_ReverseProxyPanicIsHandled
+type panicOnWriteResponseWriter struct {
+	*httptest.ResponseRecorder
+	shouldPanic   bool
+	headerWritten bool
+}
+
+func (w *panicOnWriteResponseWriter) WriteHeader(statusCode int) {
+	w.headerWritten = true
+	w.ResponseRecorder.WriteHeader(statusCode)
+}
+
+func (w *panicOnWriteResponseWriter) Write(b []byte) (int, error) {
+	if w.shouldPanic && w.headerWritten {
+		// Simulate the panic that httputil.ReverseProxy throws
+		panic(http.ErrAbortHandler)
+	}
+	return w.ResponseRecorder.Write(b)
+}
