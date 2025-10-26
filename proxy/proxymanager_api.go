@@ -180,7 +180,7 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 	sendLogData("proxy", pm.proxyLogger.GetHistory())
 	sendLogData("upstream", pm.upstreamLogger.GetHistory())
 	sendModels()
-	sendMetrics(pm.metricsMonitor.GetMetrics())
+	sendMetrics(pm.metricsMonitor.getMetrics())
 
 	for {
 		select {
@@ -198,7 +198,7 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 }
 
 func (pm *ProxyManager) apiGetMetrics(c *gin.Context) {
-	jsonData, err := pm.metricsMonitor.GetMetricsJSON()
+	jsonData, err := pm.metricsMonitor.getMetricsJSON()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get metrics"})
 		return
