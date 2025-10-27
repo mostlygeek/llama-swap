@@ -33,6 +33,7 @@ func main() {
 	keyFile := flag.String("tls-key-file", "", "TLS key file")
 	showVersion := flag.Bool("version", false, "show version of build")
 	watchConfig := flag.Bool("watch-config", false, "Automatically reload config file on change")
+	enrichCot := flag.Bool("enrich-cot", false, "Add swap progress logs to reasoning_content when streaming responses")
 
 	flag.Parse() // Parse the command-line flags
 
@@ -95,7 +96,9 @@ func main() {
 
 			fmt.Println("Configuration Changed")
 			currentPM.Shutdown()
-			srv.Handler = proxy.New(conf)
+			newPM := proxy.New(conf)
+			newPM.SetCoTEnrichment(*enrichCot)
+			srv.Handler = newPM
 			fmt.Println("Configuration Reloaded")
 
 			// wait a few seconds and tell any UI to reload
@@ -110,7 +113,9 @@ func main() {
 				fmt.Printf("Error, unable to load configuration: %v\n", err)
 				os.Exit(1)
 			}
-			srv.Handler = proxy.New(conf)
+			newPM := proxy.New(conf)
+			newPM.SetCoTEnrichment(*enrichCot)
+			srv.Handler = newPM
 		}
 	}
 

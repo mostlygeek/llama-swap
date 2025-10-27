@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/mostlygeek/llama-swap/proxy/config"
@@ -24,6 +25,8 @@ type ProcessGroup struct {
 	// map of current processes
 	processes       map[string]*Process
 	lastUsedProcess string
+
+	cotEnrichment bool
 }
 
 func NewProcessGroup(id string, config config.Config, proxyLogger *LogMonitor, upstreamLogger *LogMonitor) *ProcessGroup {
@@ -47,10 +50,31 @@ func NewProcessGroup(id string, config config.Config, proxyLogger *LogMonitor, u
 	for _, modelID := range groupConfig.Members {
 		modelConfig, modelID, _ := pg.config.FindConfig(modelID)
 		process := NewProcess(modelID, pg.config.HealthCheckTimeout, modelConfig, pg.upstreamLogger, pg.proxyLogger)
+		displayName := strings.TrimSpace(modelConfig.Name)
+		if displayName == "" {
+			displayName = modelID
+		}
+		process.SetDisplayName(displayName)
+		process.SetCoTEnrichment(pg.cotEnrichment)
 		pg.processes[modelID] = process
 	}
 
 	return pg
+}
+
+// SetCoTEnrichment toggles chain-of-thought enrichment for all managed processes.
+func (pg *ProcessGroup) SetCoTEnrichment(enabled bool) {
+	pg.Lock()
+	pg.cotEnrichment = enabled
+	processes := make([]*Process, 0, len(pg.processes))
+	for _, process := range pg.processes {
+		processes = append(processes, process)
+	}
+	pg.Unlock()
+
+	for _, process := range processes {
+		process.SetCoTEnrichment(enabled)
+	}
 }
 
 // ProxyRequest proxies a request to the specified model
@@ -62,6 +86,11 @@ func (pg *ProcessGroup) ProxyRequest(modelID string, writer http.ResponseWriter,
 	if pg.swap {
 		pg.Lock()
 		if pg.lastUsedProcess != modelID {
+			if pg.cotEnrichment && isCoTEnrichment(request.Context()) {
+				process := pg.processes[modelID]
+				process.PrepareCoTSession()
+				process.AppendCoTLine(fmt.Sprintf("Swapping backend process to: %s", process.DisplayName()))
+			}
 
 			// is there something already running?
 			if pg.lastUsedProcess != "" {

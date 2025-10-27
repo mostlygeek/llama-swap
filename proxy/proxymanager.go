@@ -43,6 +43,8 @@ type ProxyManager struct {
 	// shutdown signaling
 	shutdownCtx    context.Context
 	shutdownCancel context.CancelFunc
+
+	cotEnrichment bool
 }
 
 func New(config config.Config) *ProxyManager {
@@ -103,6 +105,9 @@ func New(config config.Config) *ProxyManager {
 		processGroup := NewProcessGroup(groupID, config, proxyLogger, upstreamLogger)
 		pm.processGroups[groupID] = processGroup
 	}
+
+	// apply CoT enrichment preference if enabled later
+	pm.cotEnrichment = false
 
 	pm.setupGinEngine()
 
@@ -293,6 +298,21 @@ func (pm *ProxyManager) setupGinEngine() {
 
 	// Disable console color for testing
 	gin.DisableConsoleColor()
+}
+
+// SetCoTEnrichment toggles reasoning enrichment for all process groups.
+func (pm *ProxyManager) SetCoTEnrichment(enabled bool) {
+	pm.Lock()
+	pm.cotEnrichment = enabled
+	groups := make([]*ProcessGroup, 0, len(pm.processGroups))
+	for _, group := range pm.processGroups {
+		groups = append(groups, group)
+	}
+	pm.Unlock()
+
+	for _, group := range groups {
+		group.SetCoTEnrichment(enabled)
+	}
 }
 
 // ServeHTTP implements http.Handler interface
@@ -511,6 +531,8 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 		return
 	}
 
+	isStream := gjson.GetBytes(bodyBytes, "stream").Bool()
+
 	realModelName, found := pm.config.RealModelName(requestedModel)
 	if !found {
 		pm.sendErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("could not find real modelID for %s", requestedModel))
@@ -547,6 +569,9 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 			}
 		}
 	}
+
+	ctx := withCoTEnrichment(c.Request.Context(), pm.cotEnrichment && isStream)
+	c.Request = c.Request.WithContext(ctx)
 
 	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -43,6 +44,12 @@ type Process struct {
 	config       config.ModelConfig
 	cmd          *exec.Cmd
 	reverseProxy *httputil.ReverseProxy
+
+	displayName string
+
+	cotMutex      sync.RWMutex
+	cotEnrichment bool
+	cotSession    *cotSession
 
 	// PR #155 called to cancel the upstream process
 	cmdMutex       sync.RWMutex
@@ -103,11 +110,12 @@ func NewProcess(ID string, healthCheckTimeout int, config config.ModelConfig, pr
 		}
 	}
 
-	return &Process{
+	process := &Process{
 		ID:                      ID,
 		config:                  config,
 		cmd:                     nil,
 		reverseProxy:            reverseProxy,
+		displayName:             strings.TrimSpace(ID),
 		cancelUpstream:          nil,
 		processLogger:           processLogger,
 		proxyLogger:             proxyLogger,
@@ -123,6 +131,222 @@ func NewProcess(ID string, healthCheckTimeout int, config config.ModelConfig, pr
 		gracefulStopTimeout: 10 * time.Second,
 		cmdWaitChan:         make(chan struct{}),
 	}
+
+	if process.reverseProxy != nil {
+		process.reverseProxy.Transport = &cotRoundTripper{
+			base:    process.reverseProxy.Transport,
+			process: process,
+		}
+	}
+
+	return process
+}
+
+// SetDisplayName overrides the human friendly name used in condensed logs.
+func (p *Process) SetDisplayName(name string) {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return
+	}
+
+	p.cotMutex.Lock()
+	p.displayName = trimmed
+	p.cotMutex.Unlock()
+}
+
+// DisplayName returns the effective name of the process for logging.
+func (p *Process) DisplayName() string {
+	p.cotMutex.RLock()
+	defer p.cotMutex.RUnlock()
+	if p.displayName != "" {
+		return p.displayName
+	}
+	return p.ID
+}
+
+// SetCoTEnrichment enables or disables streaming chain-of-thought enrichment.
+func (p *Process) SetCoTEnrichment(enabled bool) {
+	p.cotMutex.Lock()
+	p.cotEnrichment = enabled
+	session := p.cotSession
+	if !enabled {
+		p.cotSession = nil
+	}
+	p.cotMutex.Unlock()
+
+	if !enabled && session != nil {
+		session.abort()
+	}
+}
+
+func (p *Process) cotEnabled() bool {
+	p.cotMutex.RLock()
+	defer p.cotMutex.RUnlock()
+	return p.cotEnrichment
+}
+
+// PrepareCoTSession clears any buffered enrichment lines and marks the session as active.
+func (p *Process) PrepareCoTSession() {
+	if !p.cotEnabled() {
+		return
+	}
+
+	p.cotMutex.Lock()
+	previous := p.cotSession
+	p.cotSession = newCOTSession()
+	p.cotMutex.Unlock()
+
+	if previous != nil {
+		previous.abort()
+	}
+}
+
+// ensureCoTSession activates enrichment buffering if not already active.
+func (p *Process) ensureCoTSession() {
+	if !p.cotEnabled() {
+		return
+	}
+
+	p.cotMutex.Lock()
+	if p.cotSession == nil {
+		p.cotSession = newCOTSession()
+	}
+	p.cotMutex.Unlock()
+}
+
+// AppendCoTLine appends a formatted enrichment line to the buffer.
+func (p *Process) AppendCoTLine(line string) {
+	if !p.cotEnabled() {
+		return
+	}
+
+	p.cotMutex.Lock()
+	session := p.cotSession
+	if session == nil {
+		session = newCOTSession()
+		p.cotSession = session
+	}
+	p.cotMutex.Unlock()
+
+	formatted := strings.TrimRight(line, "\r\n")
+	if formatted == "" {
+		return
+	}
+
+	session.appendLine(fmt.Sprintf("[llama-swap] %s", formatted))
+}
+
+func (p *Process) appendCoTInline(content string) {
+	if !p.cotEnabled() {
+		return
+	}
+
+	if content == "" {
+		return
+	}
+
+	p.cotMutex.Lock()
+	session := p.cotSession
+	if session == nil {
+		session = newCOTSession()
+		p.cotSession = session
+	}
+	p.cotMutex.Unlock()
+
+	session.appendInline(content)
+}
+
+func (p *Process) attachCoTWriter(w http.ResponseWriter) bool {
+	if !p.cotEnabled() || w == nil {
+		return false
+	}
+
+	headers := w.Header()
+	if headers.Get("Content-Type") == "" {
+		headers.Set("Content-Type", "text/event-stream")
+	}
+	headers.Set("Cache-Control", "no-cache")
+	headers.Set("Connection", "keep-alive")
+	headers.Del("Content-Length")
+
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+
+	p.cotMutex.RLock()
+	session := p.cotSession
+	p.cotMutex.RUnlock()
+	if session == nil {
+		return false
+	}
+
+	return session.attachWriter(w)
+}
+
+func (p *Process) finishCoTSession() {
+	if !p.cotEnabled() {
+		return
+	}
+
+	p.cotMutex.RLock()
+	session := p.cotSession
+	p.cotMutex.RUnlock()
+	if session != nil {
+		session.finish()
+	}
+}
+
+func (p *Process) abortCoTSession() {
+	p.cotMutex.Lock()
+	session := p.cotSession
+	p.cotSession = nil
+	p.cotMutex.Unlock()
+
+	if session != nil {
+		session.abort()
+	}
+}
+
+func (p *Process) wrapCoTStream(body io.ReadCloser) io.ReadCloser {
+	p.cotMutex.Lock()
+	session := p.cotSession
+	p.cotSession = nil
+	p.cotMutex.Unlock()
+
+	if session == nil {
+		return body
+	}
+
+	return session.attach(body)
+}
+
+func (p *Process) shouldInjectCoT(ctx context.Context, resp *http.Response) bool {
+	if !p.cotEnabled() {
+		return false
+	}
+
+	if ctx == nil || !isCoTEnrichment(ctx) {
+		return false
+	}
+
+	if resp == nil || resp.Body == nil {
+		return false
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+
+	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
+	if !strings.Contains(contentType, "text/event-stream") {
+		return false
+	}
+
+	p.cotMutex.RLock()
+	session := p.cotSession
+	p.cotMutex.RUnlock()
+
+	return session != nil
 }
 
 // LogMonitor returns the log monitor associated with the process.
@@ -220,9 +444,20 @@ func (p *Process) start() error {
 		return fmt.Errorf("can not start(), upstream proxy missing")
 	}
 
+	success := false
+	defer func() {
+		if !success && p.cotEnabled() {
+			p.abortCoTSession()
+		}
+	}()
+
 	args, err := p.config.SanitizedCommand()
 	if err != nil {
 		return fmt.Errorf("unable to get sanitized command: %v", err)
+	}
+
+	if p.cotEnabled() && len(args) > 0 {
+		p.AppendCoTLine(strings.Join(args, " "))
 	}
 
 	if curState, err := p.swapState(StateStopped, StateStarting); err != nil {
@@ -249,8 +484,18 @@ func (p *Process) start() error {
 	cmdContext, ctxCancelUpstream := context.WithCancel(context.Background())
 
 	p.cmd = exec.CommandContext(cmdContext, args[0], args[1:]...)
-	p.cmd.Stdout = p.processLogger
-	p.cmd.Stderr = p.processLogger
+
+	var progressWriter *swapProgressWriter
+	if p.cotEnabled() {
+		p.ensureCoTSession()
+		progressWriter = newSwapProgressWriter(p.AppendCoTLine, p.appendCoTInline)
+		multiWriter := io.MultiWriter(p.processLogger, progressWriter)
+		p.cmd.Stdout = multiWriter
+		p.cmd.Stderr = multiWriter
+	} else {
+		p.cmd.Stdout = p.processLogger
+		p.cmd.Stderr = p.processLogger
+	}
 	p.cmd.Env = append(p.cmd.Environ(), p.config.Env...)
 	p.cmd.Cancel = p.cmdStopUpstreamProcess
 	p.cmd.WaitDelay = p.gracefulStopTimeout
@@ -263,6 +508,10 @@ func (p *Process) start() error {
 	p.failedStartCount++ // this will be reset to zero when the process has successfully started
 
 	p.proxyLogger.Debugf("<%s> Executing start command: %s, env: %s", p.ID, strings.Join(args, " "), strings.Join(p.config.Env, ", "))
+	if progressWriter != nil {
+		defer progressWriter.Flush()
+	}
+
 	err = p.cmd.Start()
 
 	// Set process state to failed
@@ -358,7 +607,15 @@ func (p *Process) start() error {
 	if curState, err := p.swapState(StateStarting, StateReady); err != nil {
 		return fmt.Errorf("failed to set Process state to ready: current state: %v, error: %v", curState, err)
 	} else {
+		if p.cotEnabled() {
+			if progressWriter != nil {
+				progressWriter.Flush()
+			}
+			p.AppendCoTLine(fmt.Sprintf("Starting inference with: %s", p.DisplayName()))
+			p.finishCoTSession()
+		}
 		p.failedStartCount = 0
+		success = true
 		return nil
 	}
 }
@@ -464,6 +721,14 @@ func (p *Process) checkHealthEndpoint(healthURL string) error {
 func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	requestBeginTime := time.Now()
 	var startDuration time.Duration
+
+	if p.cotEnabled() && !isCoTEnrichment(r.Context()) {
+		defer p.abortCoTSession()
+	}
+
+	if p.cotEnabled() && isCoTEnrichment(r.Context()) {
+		p.attachCoTWriter(w)
+	}
 
 	// prevent new requests from being made while stopping or irrecoverable
 	currentState := p.CurrentState()
