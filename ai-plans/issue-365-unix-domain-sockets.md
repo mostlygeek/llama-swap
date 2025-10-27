@@ -74,9 +74,9 @@ Current default:
 Proxy: "http://localhost:${PORT}",
 ```
 
-**Issue identified**: With `${UNIX}` support, we cannot have a single default that works for both.
-
-**Resolution**: Keep the existing default unchanged. The `${UNIX}` substitution logic will handle setting the proxy appropriately when `${UNIX}` is detected in `cmd`, similar to how `${PORT}` works.
+**Resolution**: Keep the existing default unchanged. The macro substitution logic will handle setting the proxy appropriately:
+- If proxy is blank/empty, set the appropriate default for either `${PORT}` or `${UNIX}` based on which macro is used in cmd
+- If proxy is not blank, leave it as-is and perform normal macro substitution
 
 ### 2. Macro Substitution Logic
 
@@ -130,8 +130,12 @@ For each model:
      Substitute ${UNIX} in: cmd, cmdStop, proxy, checkEndpoint, filters.stripParams, metadata
 
   9. Auto-set proxy if needed:
-     IF proxy still contains ${PORT} (default) AND ${UNIX} was in cmd:
-       proxy = "unix://" + socketPath
+     IF proxy is blank/empty:
+       IF ${UNIX} was used in cmd:
+         proxy = "unix://" + socketPath
+       ELSE IF ${PORT} was used in cmd:
+         proxy = "http://localhost:${PORT}"
+     // If proxy is not blank, leave it as-is for normal macro substitution
 ```
 
 #### 2.2 Path Sanitization Function
@@ -164,7 +168,7 @@ Create `sanitizeModelIDForPath(modelID string) string`:
 
 **Location**: Config macro substitution and proxy URL handling
 
-**Decision**: Use `unix://{socketPath}` format.
+**Decision**: Use `unix://` + socketPath format.
 
 Since llama-swap always connects using HTTP (to llama.cpp's HTTP API), we don't need to specify the protocol in the URL scheme. The Unix socket is just an alternative transport to TCP.
 
@@ -173,6 +177,8 @@ Since llama-swap always connects using HTTP (to llama.cpp's HTTP API), we don't 
 ```
 unix://{socketPath}
 ```
+
+When socketPath is an absolute path (e.g., `/tmp/llama-swap-sockets/my_model.sock`), the resulting URL will have a triple slash: `unix:///tmp/llama-swap-sockets/my_model.sock`. This is correct URL formatting where the scheme is `unix`, the host is empty, and the path is `/tmp/llama-swap-sockets/my_model.sock`.
 
 **Example**:
 
@@ -187,7 +193,7 @@ models:
 **URL parsing notes**:
 
 - Scheme: `unix`
-- Host: empty (resulting in triple slash: `unix:///path`)
+- Host: empty (resulting in triple slash: `unix:///path` for absolute paths)
 - Path: contains the socket file path
 - Example: `unix:///tmp/llama-swap-sockets/my_model.sock`
 
@@ -223,6 +229,9 @@ if proxyURL != nil {
         // Extract socket path from URL
         // For unix:///path/to/socket.sock, the path is in proxyURL.Path
         socketPath := proxyURL.Path
+        if socketPath == "" {
+            return nil, fmt.Errorf("unix socket URL missing path: %s", proxyURL)
+        }
 
         reverseProxy.Transport = &http.Transport{
             DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -263,9 +272,49 @@ Add `UNIX` to reserved macro names alongside `PORT` and `MODEL_ID`:
 - Users cannot define `${UNIX}` in their macros section
 - Error message: "UNIX is a reserved macro name and cannot be redefined"
 
-### 5. Platform-Specific Handling
+### 5. Configuration Validation and Initialization
 
-#### 5.1 Windows Error Detection
+#### 5.1 SocketPath Initialization and Validation
+
+**Location**: `proxy/config/config.go` in `LoadConfigFromReader()`
+
+After loading the YAML config, initialize and validate socketPath:
+
+```go
+// Set default socketPath on POSIX systems if not specified
+if runtime.GOOS != "windows" && config.SocketPath == "" {
+    config.SocketPath = "/tmp/llama-swap-sockets"
+}
+
+// Validate socketPath if any model uses ${UNIX}
+// (this check happens after scanning all models for ${UNIX} usage)
+if anyModelUsesUnix && config.SocketPath != "" {
+    // Validate absolute path
+    if !filepath.IsAbs(config.SocketPath) {
+        return nil, fmt.Errorf("socketPath must be an absolute path, got: %s", config.SocketPath)
+    }
+
+    // Create directory if it doesn't exist
+    if err := os.MkdirAll(config.SocketPath, 0755); err != nil {
+        return nil, fmt.Errorf("failed to create socket directory '%s': %w", config.SocketPath, err)
+    }
+
+    // Verify directory is writable by attempting to create a test file
+    testFile := filepath.Join(config.SocketPath, ".write-test")
+    if err := os.WriteFile(testFile, []byte{}, 0644); err != nil {
+        return nil, fmt.Errorf("socketPath '%s' is not writable: %w", config.SocketPath, err)
+    }
+    os.Remove(testFile) // Clean up test file
+}
+```
+
+**Notes**:
+- socketPath can be set on Windows without error (it's simply ignored unless ${UNIX} is used)
+- Validation only occurs if at least one model uses ${UNIX}
+- Relative paths are rejected with a clear error message
+- Directory creation and write permission are verified during config load
+
+#### 5.2 Platform-Specific Error Detection
 
 **Location**: `proxy/config/config.go` in LoadConfigFromReader()
 
@@ -277,23 +326,63 @@ if runtime.GOOS == "windows" && (cmdHasUnix || proxyHasUnix) {
 }
 ```
 
-#### 5.2 Socket Directory Creation
+**Note**: This only errors when ${UNIX} is actually used on Windows, not when socketPath is merely configured.
 
-**Location**: `proxy/config/config.go` initialization
+### 6. Socket File Lifecycle Management
 
-After loading config on POSIX systems:
+#### 6.1 Socket File Cleanup
+
+**Location**: `proxy/process.go`
+
+Unix domain socket files must be cleaned up to avoid leaving stale socket files on the filesystem.
+
+**Implementation locations**:
+
+1. **Before Process.Start()** - Remove stale socket file before starting the model server
+2. **In Process.Stop()** - Remove socket file after stopping the model server
+
+**Code changes for cleanup before start**:
+
+In `Process.Start()` method (before starting the command):
 
 ```go
-if config.SocketPath != "" {
-    if err := os.MkdirAll(config.SocketPath, 0755); err != nil {
-        return nil, fmt.Errorf("failed to create socket directory '%s': %w", config.SocketPath, err)
+// Clean up stale Unix socket file if using Unix socket
+if p.proxyURL != nil && p.proxyURL.Scheme == "unix" {
+    socketPath := p.proxyURL.Path
+    if socketPath != "" {
+        // Remove socket file if it exists (ignore errors if it doesn't exist)
+        os.Remove(socketPath)
     }
 }
 ```
 
-### 6. Testing Tool Updates
+**Code changes for cleanup after stop**:
 
-#### 6.1 Update simple-responder for Unix Socket Support
+In `Process.Stop()` method (after stopping the command):
+
+```go
+// Clean up Unix socket file if using Unix socket
+if p.proxyURL != nil && p.proxyURL.Scheme == "unix" {
+    socketPath := p.proxyURL.Path
+    if socketPath != "" {
+        // Remove socket file (ignore errors if it doesn't exist)
+        if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
+            // Log warning but don't fail the stop operation
+            log.Printf("Warning: failed to remove socket file '%s': %v", socketPath, err)
+        }
+    }
+}
+```
+
+**Notes**:
+- Cleanup before start handles cases where previous process crashed without cleanup
+- Cleanup after stop ensures no stale socket files remain
+- Errors during cleanup are logged but don't fail the operations
+- `os.IsNotExist` check prevents logging when file already doesn't exist
+
+### 7. Testing Tool Updates
+
+#### 7.1 Update simple-responder for Unix Socket Support
 
 **Location**: `cmd/simple-responder/simple-responder.go`
 
@@ -302,7 +391,7 @@ The `simple-responder` tool is used for testing. It should support Unix sockets 
 **Implementation required**:
 
 1. **Add `-unix` flag** - Accept Unix socket path as command-line argument
-2. **Mutual exclusion** - Error if both `-port` and `-unix` are specified
+2. **Override behavior** - If `-unix` is specified, it overrides `-port` (no error, no mutual exclusion check)
 3. **Unix socket listener** - Use `net.Listen("unix", socketPath)` when `-unix` is provided
 4. **Socket cleanup** - Remove socket file on shutdown
 
@@ -310,12 +399,10 @@ The `simple-responder` tool is used for testing. It should support Unix sockets 
 
 ```go
 // Add new flag after line 21
-unixSocket := flag.String("unix", "", "unix socket path to listen on (mutually exclusive with -port)")
+unixSocket := flag.String("unix", "", "unix socket path to listen on (overrides -port)")
 
-// After flag.Parse() (after line 31), add validation:
-if *unixSocket != "" && *port != "8080" {
-    log.Fatal("Error: cannot use both -port and -unix flags")
-}
+// After flag.Parse() (after line 31), no validation needed
+// -unix will override -port if specified
 
 // Replace the server startup section (lines 272-296) with:
 var listener net.Listener
@@ -323,7 +410,7 @@ var err error
 var address string
 
 if *unixSocket != "" {
-    // Unix socket mode
+    // Unix socket mode (overrides -port)
     address = *unixSocket
 
     // Remove existing socket file if it exists
@@ -366,12 +453,12 @@ go func() {
 # TCP mode (existing behavior)
 simple-responder -port 8080
 
-# Unix socket mode (new)
+# Unix socket mode (new, overrides default port)
 simple-responder -unix /tmp/test.sock
 
-# Error case
+# Unix socket overrides explicit port
 simple-responder -port 8080 -unix /tmp/test.sock
-# Error: cannot use both -port and -unix flags
+# Listens on /tmp/test.sock (not port 8080)
 ```
 
 **Testing notes**:
@@ -380,9 +467,9 @@ simple-responder -port 8080 -unix /tmp/test.sock
 - Socket file is automatically cleaned up on graceful shutdown
 - Compatible with existing TCP-based tests (no breaking changes)
 
-### 7. Documentation Updates
+### 8. Documentation Updates
 
-#### 7.1 config.example.yaml Updates
+#### 8.1 config.example.yaml Updates
 
 **Location**: `config.example.yaml`
 
@@ -436,7 +523,7 @@ Tests should follow existing patterns in:
 - `proxy/config/config_posix_test.go` - POSIX-specific tests
 - `proxy/config/config_windows_test.go` - Windows-specific tests
 
-### 7.1 POSIX-Specific Tests (config_posix_test.go)
+### 9.1 POSIX-Specific Tests (config_posix_test.go)
 
 #### Test: Basic Unix socket allocation
 
@@ -490,8 +577,9 @@ func TestUnixSocketPathCollisions(t *testing.T)
 
 - Two models with IDs that sanitize to the same name
 - Example: `"my/model"` and `"my-model"` both sanitize to `"my-model"`
-- First model gets `my-model.sock`, second gets `my-model-1.sock`
-- Third collision would get `my-model-2.sock`, etc.
+- One model gets `my-model.sock`, the other gets `my-model-1.sock`
+- A third collision would get `my-model-2.sock`, etc.
+- Test should verify all models get unique socket paths (exact allocation order doesn't matter)
 
 #### Test: Unix socket path too long
 
@@ -532,7 +620,7 @@ func TestUnixSocketNotSupportedOnWindows(t *testing.T)
 - Model with `${UNIX}` in proxy returns error
 - Error message: "uses ${UNIX} which is not supported on Windows"
 
-### 7.3 Cross-Platform Tests (config_test.go)
+### 9.3 Cross-Platform Tests (config_test.go)
 
 #### Test: Unix is reserved macro name
 
@@ -561,7 +649,36 @@ func TestDefaultSocketPath(t *testing.T)
 - Config without `socketPath` uses platform default
 - Verify default is `/tmp/llama-swap-sockets` on POSIX
 
-### 7.4 Integration Tests
+#### Test: Relative socketPath rejected
+
+```go
+func TestRelativeSocketPathRejected(t *testing.T)
+```
+
+- Config with relative socketPath (e.g., `./sockets`) returns error during initialization
+- Error: "socketPath must be an absolute path, got: ./sockets"
+- Test only when model uses `${UNIX}` (relative path ignored if ${UNIX} not used)
+
+#### Test: socketPath not writable
+
+```go
+func TestSocketPathNotWritable(t *testing.T)
+```
+
+- Config with socketPath pointing to read-only directory returns error
+- Error includes "is not writable"
+- Test only when model uses `${UNIX}`
+
+#### Test: socketPath set on Windows without ${UNIX} usage
+
+```go
+func TestSocketPathOnWindowsWithoutUnixMacro(t *testing.T)
+```
+
+- Config with `socketPath` set on Windows but no models using `${UNIX}` loads successfully
+- socketPath is ignored when not used
+
+### 9.4 Integration Tests
 
 #### Test: Socket directory creation
 
@@ -600,8 +717,8 @@ func TestUnixSocketEndToEnd(t *testing.T)
 ### Configuration Structure
 
 - [ ] Add `SocketPath string` field to `Config` struct in `proxy/config/config.go`
-- [ ] Set default value for `SocketPath` to `/tmp/llama-swap-sockets` (POSIX) or empty string (Windows)
-- [ ] Add `socketPath` to YAML struct tags with appropriate default
+- [ ] Add `socketPath` to YAML struct tags
+- [ ] Set default value for `SocketPath` in `LoadConfigFromReader()` (hard-coded to `/tmp/llama-swap-sockets` on POSIX, empty on Windows)
 
 ### Path Sanitization
 
@@ -623,45 +740,52 @@ func TestUnixSocketEndToEnd(t *testing.T)
 - [ ] Add generated socket path to tracking map after allocation
 - [ ] Implement socket path length validation (max 96 chars for portability)
 - [ ] Create `MacroEntry{Name: "UNIX", Value: socketPath}` and substitute in all fields
-- [ ] Auto-set proxy to `unix://{socketPath}` when cmd uses `${UNIX}` but proxy is default
+- [ ] Auto-set proxy logic: if proxy is blank/empty, set to `unix://{socketPath}` for ${UNIX} or `http://localhost:${PORT}` for ${PORT}
+- [ ] If proxy is not blank, leave it as-is for normal macro substitution
 
 ### Reserved Macro Updates
 
 - [ ] Add "UNIX" to reserved macro names validation
 - [ ] Update error message to include UNIX in reserved names list
 
-### Socket Directory Management
+### Configuration Validation and Initialization
 
-- [ ] Implement socket directory creation with `os.MkdirAll(config.SocketPath, 0755)`
-- [ ] Add error handling if directory creation fails
-- [ ] Ensure directory is only created on POSIX systems
+- [ ] Implement default socketPath setting: `/tmp/llama-swap-sockets` on POSIX, empty on Windows (hard-coded in `LoadConfigFromReader()`)
+- [ ] Implement socketPath absolute path validation (error if relative path when ${UNIX} is used)
+- [ ] Implement socket directory creation with `os.MkdirAll(config.SocketPath, 0755)` (only when ${UNIX} is used)
+- [ ] Implement socketPath writability check using test file creation (only when ${UNIX} is used)
+- [ ] Add error handling if directory creation or write test fails
+- [ ] Ensure validation only runs when at least one model uses ${UNIX}
 
 ### Testing Tool Updates (simple-responder)
 
 - [ ] Add `-unix` flag to `cmd/simple-responder/simple-responder.go` for Unix socket path
-- [ ] Implement mutual exclusion check: error if both `-port` and `-unix` flags are used
+- [ ] Implement override behavior: `-unix` overrides `-port` (no mutual exclusion error needed)
 - [ ] Implement Unix socket listener using `net.Listen("unix", socketPath)`
 - [ ] Remove existing socket file before listening (handle if doesn't exist)
 - [ ] Add `defer os.Remove(socketPath)` to clean up socket file on shutdown
 - [ ] Update server to use `srv.Serve(listener)` instead of `srv.ListenAndServe()`
 - [ ] Test simple-responder with `-unix /tmp/test.sock` flag
-- [ ] Verify error when both `-port` and `-unix` are specified
+- [ ] Verify `-unix` overrides `-port` when both are specified
 
 ### HTTP Client Unix Socket Support
 
 - [ ] Implement Unix socket detection in `NewProcess()` (check if `proxyURL.Scheme == "unix"`)
 - [ ] Extract socket path from URL (`socketPath := proxyURL.Path`)
+- [ ] Validate socket path is not empty (return error if empty)
 - [ ] Create custom `http.Transport` with Unix socket `DialContext` function
 - [ ] Set `reverseProxy.Transport` to the custom transport for Unix socket URLs
-- [ ] Handle edge case: ensure URL parsing works for `unix:///path/to/socket.sock` format
 - [ ] Test HTTP requests over Unix sockets work correctly with reverse proxy
 
-### Socket File Cleanup
+### Socket File Lifecycle Management
 
-- [ ] Implement socket file cleanup in `Process.Stop()` in `proxy/process.go`
+- [ ] Implement socket file cleanup before start in `Process.Start()` in `proxy/process.go`
 - [ ] Extract socket path from proxy URL when `proxyURL.Scheme == "unix"`
-- [ ] Use `os.Remove(socketPath)` to delete the socket file
-- [ ] Handle cases where socket file doesn't exist gracefully (ignore "file not found" errors)
+- [ ] Use `os.Remove(socketPath)` to delete stale socket file before starting (ignore errors if doesn't exist)
+- [ ] Implement socket file cleanup after stop in `Process.Stop()` in `proxy/process.go`
+- [ ] Use `os.Remove(socketPath)` to delete the socket file after stopping
+- [ ] Handle cases where socket file doesn't exist gracefully (check `os.IsNotExist`)
+- [ ] Log warnings for cleanup failures but don't fail the stop operation
 
 ### POSIX Tests (config_posix_test.go)
 
@@ -685,6 +809,9 @@ func TestUnixSocketEndToEnd(t *testing.T)
 - [ ] Test: Unix is reserved macro name (`TestUnixReservedMacroName`)
 - [ ] Test: Unix macro with custom socketPath (`TestCustomSocketPath`)
 - [ ] Test: Unix macro without socketPath uses default (`TestDefaultSocketPath`)
+- [ ] Test: Relative socketPath rejected (`TestRelativeSocketPathRejected`)
+- [ ] Test: socketPath not writable (`TestSocketPathNotWritable`)
+- [ ] Test: socketPath set on Windows without ${UNIX} usage (`TestSocketPathOnWindowsWithoutUnixMacro`)
 - [ ] Test: Socket directory creation (`TestSocketDirectoryCreation`)
 - [ ] Test: Unknown macro detection still works (`TestUnknownMacroWithUnix`)
 
