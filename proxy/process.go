@@ -748,7 +748,7 @@ func (s *statusResponseWriter) statusUpdates(ctx context.Context) {
 	})
 	ri := 0
 
-	// Pick a random duration between 5-10 seconds for when to send a remark
+	// Pick a random duration to send a remark
 	nextRemarkIn := time.Duration(2+rand.Intn(4)) * time.Second
 	lastRemarkTime := time.Now()
 
@@ -770,7 +770,7 @@ func (s *statusResponseWriter) statusUpdates(ctx context.Context) {
 				s.sendLine(fmt.Sprintf("\n%s", remark))
 				lastRemarkTime = time.Now()
 				// Pick a new random duration for the next remark
-				nextRemarkIn = time.Duration(5+rand.Intn(10)) * time.Second
+				nextRemarkIn = time.Duration(5+rand.Intn(5)) * time.Second
 			} else {
 				s.sendData(".")
 			}
