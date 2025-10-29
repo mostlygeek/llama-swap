@@ -356,7 +356,8 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		// if sendLoadingState is nil, set it to the global config value
 		// see #366
 		if modelConfig.SendLoadingState == nil {
-			modelConfig.SendLoadingState = &config.SendLoadingState
+			v := config.SendLoadingState // copy it
+			modelConfig.SendLoadingState = &v
 		}
 
 		config.Models[modelId] = modelConfig
