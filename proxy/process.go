@@ -732,8 +732,16 @@ func (s *statusResponseWriter) statusUpdates(ctx context.Context) {
 		s.cancel()
 	}()
 
+	// Create a shuffled copy of loadingRemarks
+	remarks := make([]string, len(loadingRemarks))
+	copy(remarks, loadingRemarks)
+	rand.Shuffle(len(remarks), func(i, j int) {
+		remarks[i], remarks[j] = remarks[j], remarks[i]
+	})
+	ri := 0
+
 	// Pick a random duration between 5-10 seconds for when to send a remark
-	nextRemarkIn := time.Duration(5+rand.Intn(6)) * time.Second
+	nextRemarkIn := time.Duration(2+rand.Intn(4)) * time.Second
 	lastRemarkTime := time.Now()
 
 	ticker := time.NewTicker(time.Second)
@@ -748,11 +756,12 @@ func (s *statusResponseWriter) statusUpdates(ctx context.Context) {
 
 			// Check if it's time for a snarky remark
 			if time.Since(lastRemarkTime) >= nextRemarkIn {
-				remark := loadingRemarks[rand.Intn(len(loadingRemarks))]
+				remark := remarks[ri%len(remarks)]
+				ri++
 				s.sendLine(fmt.Sprintf("\n%s", remark))
 				lastRemarkTime = time.Now()
 				// Pick a new random duration for the next remark
-				nextRemarkIn = time.Duration(5+rand.Intn(6)) * time.Second
+				nextRemarkIn = time.Duration(5+rand.Intn(10)) * time.Second
 			} else {
 				s.sendData(".")
 			}
