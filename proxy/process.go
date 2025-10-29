@@ -539,8 +539,14 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 
 	//
 	if srw != nil && p.reverseProxy != nil {
-		// wait for it to complete
-		<-srw.complete.Done()
+		// wait for it to complete with timeout to prevent indefinite blocking
+		select {
+		case <-srw.complete.Done():
+			// status updates completed normally
+		case <-time.After(500 * time.Millisecond):
+			// timeout: status updates didn't complete, but proceed anyway
+			p.proxyLogger.Warnf("<%s> status updates goroutine did not complete within timeout, proceeding with proxy request", p.ID)
+		}
 		p.reverseProxy.ServeHTTP(srw, r)
 	} else {
 		if p.reverseProxy != nil {
@@ -720,7 +726,7 @@ func newStatusResponseWriter(p *Process, w http.ResponseWriter) *statusResponseW
 	s.Header().Set("Cache-Control", "no-cache")         // no-cache
 	s.Header().Set("Connection", "keep-alive")          // keep-alive
 	s.WriteHeader(http.StatusOK)                        // send status code 200
-	s.sendLine("━━━━━━━━━━━━━━━━━━━━━━━━━")
+	s.sendLine("━━━━━")
 	s.sendLine(fmt.Sprintf("llama-swap loading model: %s", p.ID))
 	return s
 }
@@ -730,7 +736,7 @@ func (s *statusResponseWriter) statusUpdates(ctx context.Context) {
 	defer func() {
 		duration := time.Since(s.start)
 		s.sendLine(fmt.Sprintf("\nDone! (%.2fs)", duration.Seconds()))
-		s.sendLine("━━━━━━━━━━━━━━━━━━━━━━━━━")
+		s.sendLine("━━━━━")
 		s.sendLine(" ")
 		s.cancel()
 	}()
@@ -748,6 +754,7 @@ func (s *statusResponseWriter) statusUpdates(ctx context.Context) {
 	lastRemarkTime := time.Now()
 
 	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop() // Ensure ticker is stopped to prevent resource leak
 	for {
 		select {
 		case <-ctx.Done():
