@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -630,6 +631,69 @@ func (p *Process) cmdStopUpstreamProcess() error {
 	return nil
 }
 
+var loadingRemarks = []string{
+	"Still faster than your last standup meeting...",
+	"Reticulating splines...",
+	"Waking up the hamsters...",
+	"Teaching the model manners...",
+	"Convincing the GPU to participate...",
+	"Loading weights (they're heavy)...",
+	"Herding electrons...",
+	"Compiling excuses for the delay...",
+	"Downloading more RAM...",
+	"Asking the model nicely to boot up...",
+	"Bribing CUDA with cookies...",
+	"Still loading (blame VRAM)...",
+	"The model is fashionably late...",
+	"Warming up those tensors...",
+	"Making the neural net do push-ups...",
+	"Your patience is appreciated (really)...",
+	"Almost there (probably)...",
+	"Loading like it's 1999...",
+	"The model forgot where it put its keys...",
+	"Quantum tunneling through layers...",
+	"Negotiating with the PCIe bus...",
+	"Defrosting frozen parameters...",
+	"Teaching attention heads to focus...",
+	"Running the matrix (slowly)...",
+	"Untangling transformer blocks...",
+	"Calibrating the flux capacitor...",
+	"Spinning up the probability wheels...",
+	"Waiting for the GPU to wake from its nap...",
+	"Converting caffeine to compute...",
+	"Allocating virtual patience...",
+	"Performing arcane CUDA rituals...",
+	"The model is stuck in traffic...",
+	"Inflating embeddings...",
+	"Summoning computational demons...",
+	"Pleading with the OOM killer...",
+	"Calculating the meaning of life (still at 42)...",
+	"Training the training wheels...",
+	"Optimizing the optimizer...",
+	"Bootstrapping the bootstrapper...",
+	"Loading loading screen...",
+	"Processing processing logs...",
+	"Buffering buffer overflow jokes...",
+	"The model hit snooze...",
+	"Debugging the debugger...",
+	"Compiling the compiler...",
+	"Parsing the parser (meta)...",
+	"Tokenizing tokens...",
+	"Encoding the encoder...",
+	"Hashing hash browns...",
+	"Forking spoons (not forks)...",
+	"The model is contemplating existence...",
+	"Transcending dimensional barriers...",
+	"Invoking elder tensor gods...",
+	"Unfurling probability clouds...",
+	"Synchronizing parallel universes...",
+	"The GPU is having second thoughts...",
+	"Recalibrating reality matrices...",
+	"Time is an illusion, loading doubly so...",
+	"Convincing bits to flip themselves...",
+	"The model is reading its own documentation...",
+}
+
 type statusResponseWriter struct {
 	hasWritten bool
 	writer     http.ResponseWriter
@@ -668,6 +732,10 @@ func (s *statusResponseWriter) statusUpdates(ctx context.Context) {
 		s.cancel()
 	}()
 
+	// Pick a random duration between 5-10 seconds for when to send a remark
+	nextRemarkIn := time.Duration(5+rand.Intn(6)) * time.Second
+	lastRemarkTime := time.Now()
+
 	ticker := time.NewTicker(time.Second)
 	for {
 		select {
@@ -678,8 +746,16 @@ func (s *statusResponseWriter) statusUpdates(ctx context.Context) {
 				return
 			}
 
-			// this can be improved in the future
-			s.sendData(".")
+			// Check if it's time for a snarky remark
+			if time.Since(lastRemarkTime) >= nextRemarkIn {
+				remark := loadingRemarks[rand.Intn(len(loadingRemarks))]
+				s.sendLine(fmt.Sprintf("\n%s", remark))
+				lastRemarkTime = time.Now()
+				// Pick a new random duration for the next remark
+				nextRemarkIn = time.Duration(5+rand.Intn(6)) * time.Second
+			} else {
+				s.sendData(".")
+			}
 		}
 	}
 }
