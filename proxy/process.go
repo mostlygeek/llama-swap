@@ -499,9 +499,12 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		// start a goroutine to stream loading status messages into the response writer
 		// add a sync so the streaming client only runs when the goroutine has exited
 
-		if isStreaming, _ := r.Context().Value(proxyCtxKey("streaming")).(bool); isStreaming {
+		isStreaming, _ := r.Context().Value(proxyCtxKey("streaming")).(bool)
+		if p.config.SendLoadingState != nil && *p.config.SendLoadingState && isStreaming {
 			srw = newStatusResponseWriter(p, w)
 			go srw.statusUpdates(swapCtx)
+		} else {
+			p.proxyLogger.Debugf("<%s> SendLoadingState is nil or false, not streaming loading state", p.ID)
 		}
 
 		beginStartTime := time.Now()
