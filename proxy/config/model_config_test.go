@@ -50,5 +50,25 @@ models:
 			}
 		})
 	}
+}
 
+func TestConfig_ModelSendLoadingState(t *testing.T) {
+	content := `
+sendLoadingState: true
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    sendLoadingState: false
+  model2:
+    cmd: path/to/cmd --port ${PORT}
+`
+	config, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.NoError(t, err)
+	assert.True(t, config.SendLoadingState)
+	if assert.NotNil(t, config.Models["model1"].SendLoadingState) {
+		assert.False(t, *config.Models["model1"].SendLoadingState)
+	}
+	if assert.NotNil(t, config.Models["model2"].SendLoadingState) {
+		assert.True(t, *config.Models["model2"].SendLoadingState)
+	}
 }

@@ -129,6 +129,9 @@ type Config struct {
 
 	// hooks, see: #209
 	Hooks HooksConfig `yaml:"hooks"`
+
+	// send loading state in reasoning
+	SendLoadingState bool `yaml:"sendLoadingState"`
 }
 
 func (c *Config) RealModelName(search string) (string, bool) {
@@ -348,6 +351,13 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			return Config{}, fmt.Errorf(
 				"model %s: invalid proxy URL: %w", modelId, err,
 			)
+		}
+
+		// if sendLoadingState is nil, set it to the global config value
+		// see #366
+		if modelConfig.SendLoadingState == nil {
+			v := config.SendLoadingState // copy it
+			modelConfig.SendLoadingState = &v
 		}
 
 		config.Models[modelId] = modelConfig
