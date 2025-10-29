@@ -464,6 +464,12 @@ func (p *Process) checkHealthEndpoint(healthURL string) error {
 }
 
 func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
+
+	if p.reverseProxy == nil {
+		http.Error(w, fmt.Sprintf("No reverse proxy available for %s", p.ID), http.StatusInternalServerError)
+		return
+	}
+
 	requestBeginTime := time.Now()
 	var startDuration time.Duration
 
@@ -512,8 +518,11 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 			errstr := fmt.Sprintf("unable to start process: %s", err)
 			cancelLoadCtx()
 			if srw != nil {
-				srw.cancel()
 				srw.sendData(fmt.Sprintf("Unable to swap model err: %s\n", errstr))
+				// Wait for statusUpdates goroutine to finish writing its deferred "Done!" messages
+				// before closing the connection. Without this, the connection would close before
+				// the goroutine can write its cleanup messages, causing incomplete SSE output.
+				srw.waitForCompletion(100 * time.Millisecond)
 			} else {
 				http.Error(w, errstr, http.StatusBadGateway)
 			}
@@ -537,23 +546,15 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	//
-	if srw != nil && p.reverseProxy != nil {
-		// wait for it to complete with timeout to prevent indefinite blocking
-		select {
-		case <-srw.complete.Done():
-			// status updates completed normally
-		case <-time.After(500 * time.Millisecond):
-			// timeout: status updates didn't complete, but proceed anyway
-			p.proxyLogger.Warnf("<%s> status updates goroutine did not complete within timeout, proceeding with proxy request", p.ID)
+	if srw != nil {
+		// Wait for the goroutine to finish writing its final messages
+		const completionTimeout = 1 * time.Second
+		if !srw.waitForCompletion(completionTimeout) {
+			p.proxyLogger.Warnf("<%s> status updates goroutine did not complete within %v, proceeding with proxy request", p.ID, completionTimeout)
 		}
 		p.reverseProxy.ServeHTTP(srw, r)
 	} else {
-		if p.reverseProxy != nil {
-			p.reverseProxy.ServeHTTP(w, r)
-		} else {
-			http.Error(w, fmt.Sprintf("No reverse proxy available for %s", p.ID), http.StatusInternalServerError)
-		}
+		p.reverseProxy.ServeHTTP(w, r)
 	}
 
 	totalTime := time.Since(requestBeginTime)
@@ -707,21 +708,17 @@ type statusResponseWriter struct {
 	hasWritten bool
 	writer     http.ResponseWriter
 	process    *Process
-	complete   context.Context
-	cancel     context.CancelFunc
+	wg         sync.WaitGroup // Track goroutine completion
 	start      time.Time
 }
 
 func newStatusResponseWriter(p *Process, w http.ResponseWriter) *statusResponseWriter {
-	c, cx := context.WithCancel(context.Background())
 	s := &statusResponseWriter{
-		writer:   w,
-		process:  p,
-		complete: c,
-		cancel:   cx,
+		writer:  w,
+		process: p,
+		start:   time.Now(),
 	}
 
-	s.start = time.Now()
 	s.Header().Set("Content-Type", "text/event-stream") // SSE
 	s.Header().Set("Cache-Control", "no-cache")         // no-cache
 	s.Header().Set("Connection", "keep-alive")          // keep-alive
@@ -733,12 +730,14 @@ func newStatusResponseWriter(p *Process, w http.ResponseWriter) *statusResponseW
 
 // statusUpdates sends status updates to the client while the model is loading
 func (s *statusResponseWriter) statusUpdates(ctx context.Context) {
+	s.wg.Add(1)
+	defer s.wg.Done()
+
 	defer func() {
 		duration := time.Since(s.start)
 		s.sendLine(fmt.Sprintf("\nDone! (%.2fs)", duration.Seconds()))
 		s.sendLine("━━━━━")
 		s.sendLine(" ")
-		s.cancel()
 	}()
 
 	// Create a shuffled copy of loadingRemarks
@@ -779,6 +778,22 @@ func (s *statusResponseWriter) statusUpdates(ctx context.Context) {
 	}
 }
 
+// waitForCompletion waits for the statusUpdates goroutine to finish
+func (s *statusResponseWriter) waitForCompletion(timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
 func (s *statusResponseWriter) sendLine(line string) {
 	s.sendData(line + "\n")
 }
@@ -811,10 +826,11 @@ func (s *statusResponseWriter) sendData(data string) {
 		return
 	}
 
-	// Write SSE formatted data
-	s.writer.Write([]byte("data: "))
-	s.writer.Write(jsonData)
-	s.writer.Write([]byte("\n\n"))
+	// Write SSE formatted data, panic if not able to write
+	_, err = fmt.Fprintf(s.writer, "data: %s\n\n", jsonData)
+	if err != nil {
+		panic(fmt.Sprintf("<%s> Failed to write SSE data: %v", s.process.ID, err))
+	}
 	s.Flush()
 }
 
