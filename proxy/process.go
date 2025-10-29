@@ -488,16 +488,37 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		p.inFlightRequests.Done()
 	}()
 
+	// for #366
+	// - extract streaming param from request context, should have been set by proxymanager
+	var srw *statusResponseWriter
+	swapCtx, cancelLoadCtx := context.WithCancel(r.Context())
 	// start the process on demand
 	if p.CurrentState() != StateReady {
+		// start a goroutine to stream loading status messages into the response writer
+		// add a sync so the streaming client only runs when the goroutine has exited
+
+		if isStreaming, _ := r.Context().Value(proxyCtxKey("streaming")).(bool); isStreaming {
+			srw = newStatusResponseWriter(p, w)
+			go srw.statusUpdates(swapCtx)
+		}
+
 		beginStartTime := time.Now()
 		if err := p.start(); err != nil {
 			errstr := fmt.Sprintf("unable to start process: %s", err)
-			http.Error(w, errstr, http.StatusBadGateway)
+			cancelLoadCtx()
+			if srw != nil {
+				srw.cancel()
+				srw.sendData(fmt.Sprintf("Unable to swap model err: %s\n", errstr))
+			} else {
+				http.Error(w, errstr, http.StatusBadGateway)
+			}
 			return
 		}
 		startDuration = time.Since(beginStartTime)
 	}
+
+	// should trigger srw to stop sending loading events ...
+	cancelLoadCtx()
 
 	// recover from http.ErrAbortHandler panics that can occur when the client
 	// disconnects before the response is sent
@@ -511,10 +532,17 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	if p.reverseProxy != nil {
-		p.reverseProxy.ServeHTTP(w, r)
+	//
+	if srw != nil && p.reverseProxy != nil {
+		// wait for it to complete
+		<-srw.complete.Done()
+		p.reverseProxy.ServeHTTP(srw, r)
 	} else {
-		http.Error(w, fmt.Sprintf("No reverse proxy available for %s", p.ID), http.StatusInternalServerError)
+		if p.reverseProxy != nil {
+			p.reverseProxy.ServeHTTP(w, r)
+		} else {
+			http.Error(w, fmt.Sprintf("No reverse proxy available for %s", p.ID), http.StatusInternalServerError)
+		}
 	}
 
 	totalTime := time.Since(requestBeginTime)
@@ -599,4 +627,76 @@ func (p *Process) cmdStopUpstreamProcess() error {
 	}
 
 	return nil
+}
+
+type statusResponseWriter struct {
+	hasWritten bool
+	writer     http.ResponseWriter
+	process    *Process
+	complete   context.Context
+	cancel     context.CancelFunc
+}
+
+func newStatusResponseWriter(p *Process, w http.ResponseWriter) *statusResponseWriter {
+	c, cx := context.WithCancel(context.Background())
+	s := &statusResponseWriter{
+		writer:   w,
+		process:  p,
+		complete: c,
+		cancel:   cx,
+	}
+
+	s.Header().Set("Content-Type", "text/event-stream") // SSE
+	s.Header().Set("Cache-Control", "no-cache")         // no-cache
+	s.Header().Set("Connection", "keep-alive")          // keep-alive
+	s.WriteHeader(http.StatusOK)                        // send status code 200
+	s.sendLine("================================")
+	s.sendLine(fmt.Sprintf("llama-swap loading model: %s", p.ID))
+
+	return s
+}
+
+// statusUpdates sends status updates to the client while the model is loading
+func (s *statusResponseWriter) statusUpdates(ctx context.Context) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer s.sendLine("================================")
+	defer s.cancel()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if s.process.CurrentState() == StateReady {
+				return
+			}
+
+			// this can be improved in the future
+			s.sendData(".")
+		}
+	}
+}
+
+func (s *statusResponseWriter) sendLine(line string) {
+	s.sendData(fmt.Sprintf("%s", line))
+}
+func (s *statusResponseWriter) sendData(data string) {
+	s.writer.Write([]byte(`data: {"choices":[{"delta":{"reasoning_content":"`))
+	s.writer.Write([]byte(data))
+	s.writer.Write([]byte("\"}}]}\n\n"))
+}
+
+func (s *statusResponseWriter) Header() http.Header {
+	return s.writer.Header()
+}
+
+func (s *statusResponseWriter) Write(data []byte) (int, error) {
+	return s.writer.Write(data)
+}
+
+func (s *statusResponseWriter) WriteHeader(statusCode int) {
+	if s.hasWritten {
+		return
+	}
+	s.hasWritten = true
+	s.writer.WriteHeader(statusCode)
 }
