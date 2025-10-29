@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -635,6 +636,7 @@ type statusResponseWriter struct {
 	process    *Process
 	complete   context.Context
 	cancel     context.CancelFunc
+	start      time.Time
 }
 
 func newStatusResponseWriter(p *Process, w http.ResponseWriter) *statusResponseWriter {
@@ -646,21 +648,27 @@ func newStatusResponseWriter(p *Process, w http.ResponseWriter) *statusResponseW
 		cancel:   cx,
 	}
 
+	s.start = time.Now()
 	s.Header().Set("Content-Type", "text/event-stream") // SSE
 	s.Header().Set("Cache-Control", "no-cache")         // no-cache
 	s.Header().Set("Connection", "keep-alive")          // keep-alive
 	s.WriteHeader(http.StatusOK)                        // send status code 200
-	s.sendLine("================================")
+	s.sendLine("━━━━━━━━━━━━━━━━━━━━━━━━━")
 	s.sendLine(fmt.Sprintf("llama-swap loading model: %s", p.ID))
-
 	return s
 }
 
 // statusUpdates sends status updates to the client while the model is loading
 func (s *statusResponseWriter) statusUpdates(ctx context.Context) {
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer s.sendLine("================================")
-	defer s.cancel()
+	defer func() {
+		duration := time.Since(s.start)
+		s.sendLine(fmt.Sprintf("\nDone! (%.2fs)", duration.Seconds()))
+		s.sendLine("━━━━━━━━━━━━━━━━━━━━━━━━━")
+		s.sendLine(" ")
+		s.cancel()
+	}()
+
+	ticker := time.NewTicker(time.Second)
 	for {
 		select {
 		case <-ctx.Done():
@@ -677,12 +685,42 @@ func (s *statusResponseWriter) statusUpdates(ctx context.Context) {
 }
 
 func (s *statusResponseWriter) sendLine(line string) {
-	s.sendData(fmt.Sprintf("%s", line))
+	s.sendData(line + "\n")
 }
+
 func (s *statusResponseWriter) sendData(data string) {
-	s.writer.Write([]byte(`data: {"choices":[{"delta":{"reasoning_content":"`))
-	s.writer.Write([]byte(data))
-	s.writer.Write([]byte("\"}}]}\n\n"))
+	// Create the proper SSE JSON structure
+	type Delta struct {
+		ReasoningContent string `json:"reasoning_content"`
+	}
+	type Choice struct {
+		Delta Delta `json:"delta"`
+	}
+	type SSEMessage struct {
+		Choices []Choice `json:"choices"`
+	}
+
+	msg := SSEMessage{
+		Choices: []Choice{
+			{
+				Delta: Delta{
+					ReasoningContent: data,
+				},
+			},
+		},
+	}
+
+	jsonData, err := json.Marshal(msg)
+	if err != nil {
+		s.process.proxyLogger.Errorf("<%s> Failed to marshal SSE message: %v", s.process.ID, err)
+		return
+	}
+
+	// Write SSE formatted data
+	s.writer.Write([]byte("data: "))
+	s.writer.Write(jsonData)
+	s.writer.Write([]byte("\n\n"))
+	s.Flush()
 }
 
 func (s *statusResponseWriter) Header() http.Header {
@@ -699,4 +737,12 @@ func (s *statusResponseWriter) WriteHeader(statusCode int) {
 	}
 	s.hasWritten = true
 	s.writer.WriteHeader(statusCode)
+	s.Flush()
+}
+
+// Add Flush method
+func (s *statusResponseWriter) Flush() {
+	if flusher, ok := s.writer.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
