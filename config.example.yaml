@@ -35,6 +35,14 @@ metricsMaxInMemory: 1000
 # - it is automatically incremented for every model that uses it
 startPort: 10001
 
+# sendLoadingState: inject loading status updates into the reasoning (thinking)
+# field
+# - optional, default: false
+# - when true, a stream of loading messages will be sent to the client in the
+#   reasoning field so chat UIs can show that loading is in progress.
+# - see #366 for more details
+sendLoadingState: true
+
 # macros: a dictionary of string substitutions
 # - optional, default: empty dictionary
 # - macros are reusable snippets
@@ -183,6 +191,10 @@ models:
     # - any requests that exceeds the limit will receive an HTTP 429 Too Many Requests response
     # - recommended to be omitted and the default used
     concurrencyLimit: 0
+
+    # sendLoadingState: overrides the global sendLoadingState setting for this model
+    # - optional, default: undefined (use global setting)
+    sendLoadingState: false
 
   # Unlisted model example:
   "qwen-unlisted":

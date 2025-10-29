@@ -35,6 +35,9 @@ type ModelConfig struct {
 	// Metadata: see #264
 	// Arbitrary metadata that can be exposed through the API
 	Metadata map[string]any `yaml:"metadata"`
+
+	// override global setting
+	SendLoadingState *bool `yaml:"sendLoadingState"`
 }
 
 func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {

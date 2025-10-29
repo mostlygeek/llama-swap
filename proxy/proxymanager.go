@@ -25,6 +25,8 @@ const (
 	PROFILE_SPLIT_CHAR = ":"
 )
 
+type proxyCtxKey string
+
 type ProxyManager struct {
 	sync.Mutex
 
@@ -554,6 +556,12 @@ func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
 	c.Request.Header.Del("transfer-encoding")
 	c.Request.Header.Set("content-length", strconv.Itoa(len(bodyBytes)))
 	c.Request.ContentLength = int64(len(bodyBytes))
+
+	// issue #366 extract values that downstream handlers may need
+	isStreaming := gjson.GetBytes(bodyBytes, "stream").Bool()
+	ctx := context.WithValue(c.Request.Context(), proxyCtxKey("streaming"), isStreaming)
+	ctx = context.WithValue(ctx, proxyCtxKey("model"), realModelName)
+	c.Request = c.Request.WithContext(ctx)
 
 	if pm.metricsMonitor != nil && c.Request.Method == "POST" {
 		if err := pm.metricsMonitor.wrapHandler(realModelName, c.Writer, c.Request, processGroup.ProxyRequest); err != nil {
