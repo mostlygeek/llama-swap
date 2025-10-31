@@ -5,9 +5,9 @@ FROM ghcr.io/ggml-org/llama.cpp:${BASE_TAG}
 ARG LS_VER=170
 
 # Set default UID/GID arguments
-ARG UID=0
-ARG GID=0
-ARG USER_HOME=/root
+ARG UID=10001
+ARG GID=10001
+ARG USER_HOME=/app
 
 # Add user/group
 ENV HOME=$USER_HOME
