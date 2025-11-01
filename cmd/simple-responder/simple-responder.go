@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -19,6 +20,7 @@ func main() {
 	gin.SetMode(gin.TestMode)
 	// Define a command-line flag for the port
 	port := flag.String("port", "8080", "port to listen on")
+	unixSocket := flag.String("unix", "", "unix domain socket path (e.g., /tmp/simple-responder.sock)")
 	expectedModel := flag.String("model", "TheExpectedModel", "model name to expect")
 
 	// Define a command-line flag for the response message
@@ -29,6 +31,11 @@ func main() {
 	ignoreSigTerm := flag.Bool("ignore-sig-term", false, "ignore SIGTERM signal")
 
 	flag.Parse() // Parse the command-line flags
+
+	// Validate that only one of port or unix socket is specified
+	if *unixSocket != "" && *port != "8080" {
+		log.Fatal("Cannot specify both -port and -unix flags")
+	}
 
 	// Create a new Gin router
 	r := gin.New()
@@ -269,7 +276,47 @@ func main() {
 		c.String(200, fmt.Sprintf("%s %s", c.Request.Method, c.Request.URL.Path))
 	})
 
-	address := "127.0.0.1:" + *port // Address with the specified port
+	var address string
+	var listener net.Listener
+	var err error
+
+	if *unixSocket != "" {
+		address = *unixSocket
+
+		// Safety checks before removing socket file
+		if len(*unixSocket) < 5 || (*unixSocket)[len(*unixSocket)-5:] != ".sock" {
+			log.Fatal("Unix socket path must end with .sock")
+		}
+
+		// Check if file exists and verify it's a socket with no data
+		if fileInfo, err := os.Stat(*unixSocket); err == nil {
+			// File exists, verify it's a socket
+			if fileInfo.Mode()&os.ModeSocket != os.ModeSocket {
+				log.Fatalf("File %s exists but is not a socket", *unixSocket)
+			}
+			// For sockets, Size() returns 0, but let's be explicit
+			if fileInfo.Size() != 0 {
+				log.Fatalf("Socket file %s has non-zero size: %d", *unixSocket, fileInfo.Size())
+			}
+			// Safe to remove the existing socket
+			if err := os.Remove(*unixSocket); err != nil {
+				log.Fatalf("Failed to remove existing socket file: %s\n", err)
+			}
+		}
+
+		listener, err = net.Listen("unix", *unixSocket)
+		if err != nil {
+			log.Fatalf("Failed to create unix socket listener: %s\n", err)
+		}
+		// Ensure socket file is removed on exit
+		defer os.Remove(*unixSocket)
+	} else {
+		address = "127.0.0.1:" + *port
+		listener, err = net.Listen("tcp", address)
+		if err != nil {
+			log.Fatalf("Failed to create tcp listener: %s\n", err)
+		}
+	}
 
 	srv := &http.Server{
 		Addr:    address,
@@ -288,9 +335,8 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("simple-responder listening on %s\n", address)
-		// service connections
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Printf("simple-responder listening at  %s\n", address)
+		if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("simple-responder err: %s\n", err)
 		}
 	}()
