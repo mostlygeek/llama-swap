@@ -20,7 +20,10 @@ The macro will generate unique socket paths based on model IDs and handle path s
 ### Example Configuration
 
 ```yaml
-socketPath: /tmp/llama-swap-sockets # optional, has sensible default
+# socketPath: path to directory to store socket files for ${UNIX} macro
+# - optional, has sensible default
+# - default, /tmp/llama-swap-sockets/
+socketPath: /tmp/llama-swap-sockets/
 
 models:
   my_model:
@@ -68,14 +71,9 @@ SocketPath string `yaml:"socketPath"` // Directory for Unix domain socket files
 
 **Location**: `proxy/config/model_config.go`
 
-Current default:
-
-```go
-Proxy: "http://localhost:${PORT}",
-```
-
-**Resolution**: Keep the existing default unchanged. The macro substitution logic will handle setting the proxy appropriately:
 - If proxy is blank/empty, set the appropriate default for either `${PORT}` or `${UNIX}` based on which macro is used in cmd
+- default value for `${PORT}` will be: http://127.0.0.1:${PORT}
+- default value for `${UNIX}` will be: `unix://${UNIX}` (the full path to the domain socket)
 - If proxy is not blank, leave it as-is and perform normal macro substitution
 
 ### 2. Macro Substitution Logic
@@ -199,7 +197,220 @@ models:
 
 **Note**: llama.cpp server doesn't parse this URL - it only needs to listen on the Unix socket. The `unix://` URL is used internally by llama-swap to determine it should connect via Unix socket instead of TCP.
 
-#### 3.2 HTTP Client Changes
+#### 3.2 Health Check Changes
+
+**Location**: `proxy/process.go`
+
+The health check system needs updates in two places to support Unix domain sockets:
+
+1. **Update `checkHealthEndpoint()` signature** - Change to accept separate host and path parameters
+2. **Update health check call site** - Parse proxy URL to extract host and path before calling
+
+##### 3.2.1 Change checkHealthEndpoint() Signature
+
+**Current signature** (line 432):
+
+```go
+func (p *Process) checkHealthEndpoint(healthURL string) error
+```
+
+**New signature**:
+
+```go
+func (p *Process) checkHealthEndpoint(host string, path string) error
+```
+
+**Parameters**:
+
+- `host`: URL with scheme - either `http://...` for TCP or `unix://...` for Unix sockets
+  - TCP example: `http://127.0.0.1:8080`
+  - Unix socket example: `unix:///tmp/llama-swap-sockets/my_model.sock`
+- `path`: The HTTP path to request (e.g., `/health`)
+
+**Implementation logic**:
+
+```go
+func (p *Process) checkHealthEndpoint(host string, path string) error {
+    // Parse host URL to determine connection type
+    hostURL, err := url.Parse(host)
+    if err != nil {
+        return fmt.Errorf("failed to parse host URL: %w", err)
+    }
+
+    var transport *http.Transport
+    var requestURL string
+
+    if hostURL.Scheme == "unix" {
+        // Unix socket mode
+        socketPath := hostURL.Path
+        if socketPath == "" {
+            return fmt.Errorf("unix socket URL missing path: %s", host)
+        }
+
+        transport = &http.Transport{
+            DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+                // Ignore network and addr - always dial the Unix socket
+                return (&net.Dialer{
+                    Timeout: 500 * time.Millisecond,
+                }).DialContext(ctx, "unix", socketPath)
+            },
+        }
+        // For Unix sockets, use dummy host in URL (transport handles actual connection)
+        requestURL = "http://localhost" + path
+
+    } else if hostURL.Scheme == "http" || hostURL.Scheme == "https" {
+        // TCP mode (existing behavior)
+        transport = &http.Transport{
+            DialContext: (&net.Dialer{
+                Timeout: 500 * time.Millisecond,
+            }).DialContext,
+        }
+        // Construct full URL from TCP host and path
+        requestURL = host + path
+
+    } else {
+        return fmt.Errorf("unsupported URL scheme: %s (expected http, https, or unix)", hostURL.Scheme)
+    }
+
+    client := &http.Client{
+        Transport: transport,
+        Timeout:   5000 * time.Millisecond, // Keep existing timeout
+    }
+
+    req, err := http.NewRequest("GET", requestURL, nil)
+    if err != nil {
+        return err
+    }
+
+    resp, err := client.Do(req)
+    if err != nil {
+        return err
+    }
+    defer resp.Body.Close()
+
+    if resp.StatusCode != http.StatusOK {
+        return fmt.Errorf("status code: %d", resp.StatusCode)
+    }
+
+    return nil
+}
+```
+
+**Key design decisions**:
+
+1. **URL scheme detection**: Parse `host` URL and check scheme
+
+   - `unix` → Unix socket connection
+   - `http` or `https` → TCP connection
+   - Other schemes → Error
+
+2. **Transport configuration**:
+
+   - Unix socket: Custom `DialContext` that connects to socket path
+   - TCP: Existing TCP dialer behavior
+
+3. **Request URL construction**:
+
+   - Unix socket: `http://localhost` + path (transport handles actual socket connection)
+   - TCP: host + path (e.g., `http://127.0.0.1:8080/health`)
+
+4. **Error handling**: Clear errors for invalid schemes or missing socket paths
+
+5. **Backwards compatibility**: TCP health checks continue working with same behavior
+
+##### 3.2.2 Update Health Check Call Site
+
+**Location**: `proxy/process.go` around line 300-320 in `Start()` method
+
+**Current code** (lines 299-303):
+
+```go
+proxyTo := p.config.Proxy
+healthURL, err := url.JoinPath(proxyTo, checkEndpoint)
+if err != nil {
+    return fmt.Errorf("failed to create health check URL proxy=%s and checkEndpoint=%s", proxyTo, checkEndpoint)
+}
+```
+
+**Then later** (line 320):
+
+```go
+if err := p.checkHealthEndpoint(healthURL); err == nil {
+```
+
+**New code**:
+
+```go
+proxyTo := p.config.Proxy
+
+// Parse proxy URL to extract host for health check
+proxyURL, err := url.Parse(proxyTo)
+if err != nil {
+    return fmt.Errorf("failed to parse proxy URL: %s, error: %w", proxyTo, err)
+}
+
+// Construct host parameter (scheme + host/path depending on scheme)
+var host string
+if proxyURL.Scheme == "unix" {
+    // Unix socket: include full unix:// URL
+    host = proxyTo // e.g., unix:///tmp/llama-swap-sockets/my_model.sock
+} else {
+    // TCP: include scheme + host
+    host = proxyURL.Scheme + "://" + proxyURL.Host // e.g., http://127.0.0.1:8080
+}
+
+// Health check path
+healthPath := checkEndpoint
+if !strings.HasPrefix(healthPath, "/") {
+    healthPath = "/" + healthPath
+}
+```
+
+**Then update the call** (line 320):
+
+```go
+if err := p.checkHealthEndpoint(host, healthPath); err == nil {
+```
+
+**Implementation notes**:
+
+1. **Parse proxy URL**: Use `url.Parse()` to extract scheme and host information
+2. **Unix socket**: Pass full `unix://` URL as host parameter
+3. **TCP**: Reconstruct `scheme://host:port` from parsed URL
+4. **HTTP path**: Use `checkEndpoint` directly with `/` prefix normalization
+5. **No url.JoinPath needed**: Parameters are now separate, avoiding Unix socket path issues
+
+**Example transformations**:
+
+| Proxy URL                        | Check Endpoint | Host (param)                     | Path (param) |
+| -------------------------------- | -------------- | -------------------------------- | ------------ |
+| `unix:///tmp/sockets/model.sock` | `/health`      | `unix:///tmp/sockets/model.sock` | `/health`    |
+| `http://127.0.0.1:8080`          | `/health`      | `http://127.0.0.1:8080`          | `/health`    |
+| `http://localhost:9000`          | `/v1/health`   | `http://localhost:9000`          | `/v1/health` |
+
+**Why this design is cleaner**:
+
+1. **Clear separation**: Host and path are separate concerns
+2. **Scheme handling**: `checkHealthEndpoint()` handles scheme-specific logic internally
+3. **No URL joining issues**: Avoids problems with `url.JoinPath()` and Unix socket URLs
+4. **Type safety**: Host parameter always includes scheme for explicit type identification
+
+**Error handling**:
+
+- URL parsing errors return clear error messages
+- Invalid schemes caught by `checkHealthEndpoint()`
+- Empty socket paths handled with clear error
+- Existing health check error handling remains unchanged
+
+**Testing requirements**:
+
+- Unit test: Health check with Unix socket succeeds
+- Unit test: Health check with TCP address succeeds (backwards compatibility)
+- Unit test: Malformed proxy URLs return errors
+- Unit test: Invalid URL schemes return errors
+- Integration test: End-to-end health check over Unix socket with simple-responder
+
+#### 3.3 HTTP Client Changes
 
 **Location**: `proxy/process.go` in `NewProcess()` function (around line 82-126)
 
@@ -309,6 +520,7 @@ if anyModelUsesUnix && config.SocketPath != "" {
 ```
 
 **Notes**:
+
 - socketPath can be set on Windows without error (it's simply ignored unless ${UNIX} is used)
 - Validation only occurs if at least one model uses ${UNIX}
 - Relative paths are rejected with a clear error message
@@ -375,101 +587,15 @@ if p.proxyURL != nil && p.proxyURL.Scheme == "unix" {
 ```
 
 **Notes**:
+
 - Cleanup before start handles cases where previous process crashed without cleanup
 - Cleanup after stop ensures no stale socket files remain
 - Errors during cleanup are logged but don't fail the operations
 - `os.IsNotExist` check prevents logging when file already doesn't exist
 
-### 7. Testing Tool Updates
+### 7. Documentation Updates
 
-#### 7.1 Update simple-responder for Unix Socket Support
-
-**Location**: `cmd/simple-responder/simple-responder.go`
-
-The `simple-responder` tool is used for testing. It should support Unix sockets to enable testing of the `${UNIX}` macro functionality.
-
-**Implementation required**:
-
-1. **Add `-unix` flag** - Accept Unix socket path as command-line argument
-2. **Override behavior** - If `-unix` is specified, it overrides `-port` (no error, no mutual exclusion check)
-3. **Unix socket listener** - Use `net.Listen("unix", socketPath)` when `-unix` is provided
-4. **Socket cleanup** - Remove socket file on shutdown
-
-**Code changes**:
-
-```go
-// Add new flag after line 21
-unixSocket := flag.String("unix", "", "unix socket path to listen on (overrides -port)")
-
-// After flag.Parse() (after line 31), no validation needed
-// -unix will override -port if specified
-
-// Replace the server startup section (lines 272-296) with:
-var listener net.Listener
-var err error
-var address string
-
-if *unixSocket != "" {
-    // Unix socket mode (overrides -port)
-    address = *unixSocket
-
-    // Remove existing socket file if it exists
-    os.Remove(*unixSocket)
-
-    listener, err = net.Listen("unix", *unixSocket)
-    if err != nil {
-        log.Fatalf("Failed to listen on Unix socket %s: %v", *unixSocket, err)
-    }
-
-    // Ensure socket file is cleaned up on exit
-    defer os.Remove(*unixSocket)
-
-} else {
-    // TCP mode (default)
-    address = "127.0.0.1:" + *port
-    listener, err = net.Listen("tcp", address)
-    if err != nil {
-        log.Fatalf("Failed to listen on TCP %s: %v", address, err)
-    }
-}
-
-srv := &http.Server{
-    Handler: r.Handler(),
-}
-
-// ... rest of the code (logging, goroutine) ...
-
-go func() {
-    log.Printf("simple-responder listening on %s\n", address)
-    if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
-        log.Fatalf("simple-responder err: %s\n", err)
-    }
-}()
-```
-
-**Usage examples**:
-
-```bash
-# TCP mode (existing behavior)
-simple-responder -port 8080
-
-# Unix socket mode (new, overrides default port)
-simple-responder -unix /tmp/test.sock
-
-# Unix socket overrides explicit port
-simple-responder -port 8080 -unix /tmp/test.sock
-# Listens on /tmp/test.sock (not port 8080)
-```
-
-**Testing notes**:
-
-- This enables testing `${UNIX}` macro with simple-responder in integration tests
-- Socket file is automatically cleaned up on graceful shutdown
-- Compatible with existing TCP-based tests (no breaking changes)
-
-### 8. Documentation Updates
-
-#### 8.1 config.example.yaml Updates
+#### 7.1 config.example.yaml Updates
 
 **Location**: `config.example.yaml`
 
@@ -523,7 +649,7 @@ Tests should follow existing patterns in:
 - `proxy/config/config_posix_test.go` - POSIX-specific tests
 - `proxy/config/config_windows_test.go` - Windows-specific tests
 
-### 9.1 POSIX-Specific Tests (config_posix_test.go)
+### 8.1 POSIX-Specific Tests (config_posix_test.go)
 
 #### Test: Basic Unix socket allocation
 
@@ -720,6 +846,11 @@ func TestUnixSocketEndToEnd(t *testing.T)
 - [ ] Add `socketPath` to YAML struct tags
 - [ ] Set default value for `SocketPath` in `LoadConfigFromReader()` (hard-coded to `/tmp/llama-swap-sockets` on POSIX, empty on Windows)
 
+### Reserved Macro Updates
+
+- [ ] Add "UNIX" to reserved macro names validation
+- [ ] Update error message to include UNIX in reserved names list
+
 ### Path Sanitization
 
 - [ ] Implement `sanitizeModelIDForPath(modelID string) string` function in `proxy/config/config.go`
@@ -743,11 +874,6 @@ func TestUnixSocketEndToEnd(t *testing.T)
 - [ ] Auto-set proxy logic: if proxy is blank/empty, set to `unix://{socketPath}` for ${UNIX} or `http://localhost:${PORT}` for ${PORT}
 - [ ] If proxy is not blank, leave it as-is for normal macro substitution
 
-### Reserved Macro Updates
-
-- [ ] Add "UNIX" to reserved macro names validation
-- [ ] Update error message to include UNIX in reserved names list
-
 ### Configuration Validation and Initialization
 
 - [ ] Implement default socketPath setting: `/tmp/llama-swap-sockets` on POSIX, empty on Windows (hard-coded in `LoadConfigFromReader()`)
@@ -757,16 +883,23 @@ func TestUnixSocketEndToEnd(t *testing.T)
 - [ ] Add error handling if directory creation or write test fails
 - [ ] Ensure validation only runs when at least one model uses ${UNIX}
 
-### Testing Tool Updates (simple-responder)
+### Health Check Unix Socket Support
 
-- [ ] Add `-unix` flag to `cmd/simple-responder/simple-responder.go` for Unix socket path
-- [ ] Implement override behavior: `-unix` overrides `-port` (no mutual exclusion error needed)
-- [ ] Implement Unix socket listener using `net.Listen("unix", socketPath)`
-- [ ] Remove existing socket file before listening (handle if doesn't exist)
-- [ ] Add `defer os.Remove(socketPath)` to clean up socket file on shutdown
-- [ ] Update server to use `srv.Serve(listener)` instead of `srv.ListenAndServe()`
-- [ ] Test simple-responder with `-unix /tmp/test.sock` flag
-- [ ] Verify `-unix` overrides `-port` when both are specified
+- [ ] Update `checkHealthEndpoint()` signature to accept `(host string, path string)` parameters in `proxy/process.go`
+- [ ] Implement URL parsing in `checkHealthEndpoint()` to detect scheme (unix, http, https)
+- [ ] Create custom transport for Unix socket connections (check `hostURL.Scheme == "unix"`)
+- [ ] Extract socket path from host URL for Unix sockets (`hostURL.Path`)
+- [ ] Validate socket path is not empty for Unix socket URLs (return error if empty)
+- [ ] Construct request URL as `http://localhost` + path for Unix sockets
+- [ ] Keep existing TCP behavior for http/https schemes
+- [ ] Return error for unsupported URL schemes
+- [ ] Update health check call site in `Start()` method (around line 300-320)
+- [ ] Replace `url.JoinPath()` call with URL parsing logic
+- [ ] Extract host parameter: full `unix://` URL for Unix sockets, `scheme://host:port` for TCP
+- [ ] Extract path parameter from `checkEndpoint` with `/` prefix normalization
+- [ ] Update `checkHealthEndpoint()` call to pass `(host, healthPath)` parameters
+- [ ] Test health checks work with Unix socket URLs
+- [ ] Test health checks still work with TCP URLs (backwards compatibility)
 
 ### HTTP Client Unix Socket Support
 
