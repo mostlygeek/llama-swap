@@ -733,6 +733,14 @@ func (s *statusResponseWriter) statusUpdates(ctx context.Context) {
 	s.wg.Add(1)
 	defer s.wg.Done()
 
+	// Recover from panics caused by client disconnection
+	// Note: recover() only works within the same goroutine, so we need it here
+	defer func() {
+		if r := recover(); r != nil {
+			s.process.proxyLogger.Debugf("<%s> statusUpdates recovered from panic (likely client disconnect): %v", s.process.ID, r)
+		}
+	}()
+
 	defer func() {
 		duration := time.Since(s.start)
 		s.sendLine(fmt.Sprintf("\nDone! (%.2fs)", duration.Seconds()))
