@@ -13,9 +13,9 @@ ARG USER_HOME=/app
 ENV HOME=$USER_HOME
 RUN if [ $UID -ne 0 ]; then \
       if [ $GID -ne 0 ]; then \
-        addgroup --system --gid $GID app; \
+        groupadd --system --gid $GID app; \
       fi; \
-      adduser --system --no-create-home --uid $UID --gid $GID \
+      useradd --system --uid $UID --gid $GID \
       --home $USER_HOME app; \
     fi
 
