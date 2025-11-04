@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	_ "embed"
 	"errors"
 	"flag"
 	"fmt"
@@ -18,6 +19,9 @@ import (
 	"sync"
 	"time"
 )
+
+//go:embed index.html
+var loadingPageHTML string
 
 var (
 	flagMac      = flag.String("mac", "", "mac address to send WoL packet to")
@@ -230,6 +234,15 @@ func (p *proxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err := sendMagicPacket(*flagMac); err != nil {
 			slog.Warn("failed to send magic WoL packet", "error", err)
 		}
+
+		// For root path requests, return loading page with status polling
+		if path == "/" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, loadingPageHTML)
+			return
+		}
+
 		ticker := time.NewTicker(250 * time.Millisecond)
 		timeout, cancel := context.WithTimeout(context.Background(), time.Duration(*flagTimeout)*time.Second)
 		defer cancel()
