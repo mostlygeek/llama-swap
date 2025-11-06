@@ -1,6 +1,6 @@
-//go:build !windows
+//go:build windows
 
-package proxy
+package config
 
 import (
 	"os"
@@ -12,29 +12,28 @@ import (
 )
 
 func TestConfig_SanitizeCommand(t *testing.T) {
-	// Test a command with spaces and newlines
+	// does not support single quoted strings like in config_posix_test.go
 	args, err := SanitizeCommand(`python model1.py \
-		-a "double quotes" \
-		--arg2 'single quotes'
-		-s
-		# comment 1
-		--arg3 123 \
 
-		  # comment 2
-		--arg4 '"string in string"'
+	-a "double quotes" \
+	-s
+	--arg3 123 \
+
+	   # comment 2
+	--arg4 '"string in string"'
 
 
-		# this will get stripped out as well as the white space above
-		-c "'single quoted'"
-		`)
+
+	# this will get stripped out as well as the white space above
+	-c "'single quoted'"
+	`)
 	assert.NoError(t, err)
 	assert.Equal(t, []string{
 		"python", "model1.py",
 		"-a", "double quotes",
-		"--arg2", "single quotes",
 		"-s",
 		"--arg3", "123",
-		"--arg4", `"string in string"`,
+		"--arg4", "'string in string'", // this is a little weird but the lexer says so...?
 		"-c", `'single quoted'`,
 	}, args)
 
@@ -44,9 +43,7 @@ func TestConfig_SanitizeCommand(t *testing.T) {
 	assert.Nil(t, args)
 }
 
-// Test the default values are automatically set for global, model and group configurations
-// after loading the configuration
-func TestConfig_DefaultValuesPosix(t *testing.T) {
+func TestConfig_DefaultValuesWindows(t *testing.T) {
 	content := `
 models:
   model1:
@@ -73,7 +70,7 @@ models:
 	assert.True(t, exists, "model1 should exist")
 	if assert.NotNil(t, model1, "model1 should not be nil") {
 		assert.Equal(t, "path/to/cmd --port 5800", model1.Cmd) // has the port replaced
-		assert.Equal(t, "", model1.CmdStop)
+		assert.Equal(t, "taskkill /f /t /pid ${PID}", model1.CmdStop)
 		assert.Equal(t, "http://localhost:5800", model1.Proxy)
 		assert.Equal(t, "/health", model1.CheckEndpoint)
 		assert.Equal(t, []string{}, model1.Aliases)
@@ -88,7 +85,7 @@ models:
 	assert.Equal(t, "", model1.Filters.StripParams)
 }
 
-func TestConfig_LoadPosix(t *testing.T) {
+func TestConfig_LoadWindows(t *testing.T) {
 	// Create a temporary YAML file for testing
 	tempDir, err := os.MkdirTemp("", "test-config")
 	if err != nil {
@@ -100,15 +97,10 @@ func TestConfig_LoadPosix(t *testing.T) {
 	content := `
 macros:
   svr-path: "path/to/server"
-hooks:
-  on_startup:
-    preload: ["model1", "model2"]
 models:
   model1:
     cmd: path/to/cmd --arg1 one
     proxy: "http://localhost:8080"
-    name: "Model 1"
-    description: "This is model 1"
     aliases:
       - "m1"
       - "model-one"
@@ -160,47 +152,51 @@ groups:
 		t.Fatalf("Failed to load config: %v", err)
 	}
 
+	modelLoadingState := false
+
 	expected := Config{
 		LogLevel:  "info",
 		StartPort: 5800,
-		Macros: map[string]string{
-			"svr-path": "path/to/server",
+		Macros: MacroList{
+			{"svr-path", "path/to/server"},
 		},
-		Hooks: HooksConfig{
-			OnStartup: HookOnStartup{
-				Preload: []string{"model1", "model2"},
-			},
-		},
+		SendLoadingState: false,
 		Models: map[string]ModelConfig{
 			"model1": {
-				Cmd:           "path/to/cmd --arg1 one",
-				Proxy:         "http://localhost:8080",
-				Aliases:       []string{"m1", "model-one"},
-				Env:           []string{"VAR1=value1", "VAR2=value2"},
-				CheckEndpoint: "/health",
-				Name:          "Model 1",
-				Description:   "This is model 1",
+				Cmd:              "path/to/cmd --arg1 one",
+				CmdStop:          "taskkill /f /t /pid ${PID}",
+				Proxy:            "http://localhost:8080",
+				Aliases:          []string{"m1", "model-one"},
+				Env:              []string{"VAR1=value1", "VAR2=value2"},
+				CheckEndpoint:    "/health",
+				SendLoadingState: &modelLoadingState,
 			},
 			"model2": {
-				Cmd:           "path/to/server --arg1 one",
-				Proxy:         "http://localhost:8081",
-				Aliases:       []string{"m2"},
-				Env:           []string{},
-				CheckEndpoint: "/",
+				Cmd:              "path/to/server --arg1 one",
+				CmdStop:          "taskkill /f /t /pid ${PID}",
+				Proxy:            "http://localhost:8081",
+				Aliases:          []string{"m2"},
+				Env:              []string{},
+				CheckEndpoint:    "/",
+				SendLoadingState: &modelLoadingState,
 			},
 			"model3": {
-				Cmd:           "path/to/cmd --arg1 one",
-				Proxy:         "http://localhost:8081",
-				Aliases:       []string{"mthree"},
-				Env:           []string{},
-				CheckEndpoint: "/",
+				Cmd:              "path/to/cmd --arg1 one",
+				CmdStop:          "taskkill /f /t /pid ${PID}",
+				Proxy:            "http://localhost:8081",
+				Aliases:          []string{"mthree"},
+				Env:              []string{},
+				CheckEndpoint:    "/",
+				SendLoadingState: &modelLoadingState,
 			},
 			"model4": {
-				Cmd:           "path/to/cmd --arg1 one",
-				Proxy:         "http://localhost:8082",
-				CheckEndpoint: "/",
-				Aliases:       []string{},
-				Env:           []string{},
+				Cmd:              "path/to/cmd --arg1 one",
+				CmdStop:          "taskkill /f /t /pid ${PID}",
+				Proxy:            "http://localhost:8082",
+				CheckEndpoint:    "/",
+				Aliases:          []string{},
+				Env:              []string{},
+				SendLoadingState: &modelLoadingState,
 			},
 		},
 		HealthCheckTimeout: 15,

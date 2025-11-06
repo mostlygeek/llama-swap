@@ -3,8 +3,10 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/event"
@@ -23,6 +25,7 @@ func addApiHandlers(pm *ProxyManager) {
 	apiGroup := pm.ginEngine.Group("/api")
 	{
 		apiGroup.POST("/models/unload", pm.apiUnloadAllModels)
+		apiGroup.POST("/models/unload/*model", pm.apiUnloadSingleModelHandler)
 		apiGroup.GET("/events", pm.apiSendEvents)
 		apiGroup.GET("/metrics", pm.apiGetMetrics)
 	}
@@ -100,6 +103,8 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 	c.Header("X-Content-Type-Options", "nosniff")
+	// prevent nginx from buffering SSE
+	c.Header("X-Accel-Buffering", "no")
 
 	sendBuffer := make(chan messageEnvelope, 25)
 	ctx, cancel := context.WithCancel(c.Request.Context())
@@ -175,7 +180,7 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 	sendLogData("proxy", pm.proxyLogger.GetHistory())
 	sendLogData("upstream", pm.upstreamLogger.GetHistory())
 	sendModels()
-	sendMetrics(pm.metricsMonitor.GetMetrics())
+	sendMetrics(pm.metricsMonitor.getMetrics())
 
 	for {
 		select {
@@ -193,10 +198,32 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 }
 
 func (pm *ProxyManager) apiGetMetrics(c *gin.Context) {
-	jsonData, err := pm.metricsMonitor.GetMetricsJSON()
+	jsonData, err := pm.metricsMonitor.getMetricsJSON()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get metrics"})
 		return
 	}
 	c.Data(http.StatusOK, "application/json", jsonData)
+}
+
+func (pm *ProxyManager) apiUnloadSingleModelHandler(c *gin.Context) {
+	requestedModel := strings.TrimPrefix(c.Param("model"), "/")
+	realModelName, found := pm.config.RealModelName(requestedModel)
+	if !found {
+		pm.sendErrorResponse(c, http.StatusNotFound, "Model not found")
+		return
+	}
+
+	processGroup := pm.findGroupByModelName(realModelName)
+	if processGroup == nil {
+		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("process group not found for model %s", requestedModel))
+		return
+	}
+
+	if err := processGroup.StopProcess(realModelName, StopImmediately); err != nil {
+		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error stopping process: %s", err.Error()))
+		return
+	} else {
+		c.String(http.StatusOK, "OK")
+	}
 }

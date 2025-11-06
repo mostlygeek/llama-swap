@@ -14,8 +14,8 @@ import { useTheme } from "../contexts/ThemeProvider";
 
 const LogViewer = () => {
   const { proxyLogs, upstreamLogs } = useAPI();
-  const { isNarrow } = useTheme();
-  const direction = isNarrow ? "vertical" : "horizontal";
+  const { screenWidth } = useTheme();
+  const direction = screenWidth === "xs" || screenWidth === "sm" ? "vertical" : "horizontal";
 
   return (
     <PanelGroup direction={direction} className="gap-2" autoSaveId="logviewer-panel-group">
@@ -115,19 +115,19 @@ export const LogPanel = ({ id, title, logData }: LogPanelProps) => {
   }, [filteredLogs]);
 
   return (
-    <div className="bg-surface border border-border rounded-lg overflow-hidden flex flex-col h-full">
-      <div className="p-4 border-b border-border bg-secondary">
+    <div className="rounded-lg overflow-hidden flex flex-col bg-gray-950/5 dark:bg-white/10 h-full p-1">
+      <div className="p-4">
         <div className="flex items-center justify-between">
           <h3 className="m-0 text-lg p-0">{title}</h3>
 
           <div className="flex gap-2 items-center">
-            <button className="btn" onClick={toggleFontSize}>
+            <button className="btn border-0" onClick={toggleFontSize}>
               <RiFontSize />
             </button>
-            <button className="btn" onClick={toggleWrapText}>
+            <button className="btn border-0" onClick={toggleWrapText}>
               {wrapText ? <RiTextWrap /> : <RiAlignJustify />}
             </button>
-            <button className="btn" onClick={toggleFilter}>
+            <button className="btn border-0" onClick={toggleFilter}>
               {showFilter ? <RiMenuSearchFill /> : <RiMenuSearchLine />}
             </button>
           </div>
@@ -139,7 +139,7 @@ export const LogPanel = ({ id, title, logData }: LogPanelProps) => {
             <div className="flex gap-2 items-center w-full">
               <input
                 type="text"
-                className="w-full text-sm border p-2 rounded"
+                className="w-full text-sm border border-gray-950/10 dark:border-white/5 p-2 rounded outline-none"
                 placeholder="Filter logs..."
                 value={filterRegex}
                 onChange={(e) => setFilterRegex(e.target.value)}
@@ -151,7 +151,7 @@ export const LogPanel = ({ id, title, logData }: LogPanelProps) => {
           </div>
         )}
       </div>
-      <div className="bg-background font-mono text-sm flex-1 overflow-hidden">
+      <div className="rounded-lg bg-background font-mono text-sm flex-1 overflow-hidden">
         <pre ref={preTagRef} className={`${textWrapClass} ${fontSizeClass} h-full overflow-auto p-4`}>
           {filteredLogs}
         </pre>

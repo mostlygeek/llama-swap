@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/event"
 	"github.com/mostlygeek/llama-swap/proxy"
+	"github.com/mostlygeek/llama-swap/proxy/config"
 )
 
 var (
@@ -27,7 +28,9 @@ var (
 func main() {
 	// Define a command-line flag for the port
 	configPath := flag.String("config", "config.yaml", "config file name")
-	listenStr := flag.String("listen", ":8080", "listen ip/port")
+	listenStr := flag.String("listen", "", "listen ip/port")
+	certFile := flag.String("tls-cert-file", "", "TLS certificate file")
+	keyFile := flag.String("tls-key-file", "", "TLS key file")
 	showVersion := flag.Bool("version", false, "show version of build")
 	watchConfig := flag.Bool("watch-config", false, "Automatically reload config file on change")
 
@@ -38,13 +41,13 @@ func main() {
 		os.Exit(0)
 	}
 
-	config, err := proxy.LoadConfig(*configPath)
+	conf, err := config.LoadConfig(*configPath)
 	if err != nil {
 		fmt.Printf("Error loading config: %v\n", err)
 		os.Exit(1)
 	}
 
-	if len(config.Profiles) > 0 {
+	if len(conf.Profiles) > 0 {
 		fmt.Println("WARNING: Profile functionality has been removed in favor of Groups. See the README for more information.")
 	}
 
@@ -52,6 +55,23 @@ func main() {
 		gin.SetMode(mode)
 	} else {
 		gin.SetMode(gin.ReleaseMode)
+	}
+
+	// Validate TLS flags.
+	var useTLS = (*certFile != "" && *keyFile != "")
+	if (*certFile != "" && *keyFile == "") ||
+		(*certFile == "" && *keyFile != "") {
+		fmt.Println("Error: Both --tls-cert-file and --tls-key-file must be provided for TLS.")
+		os.Exit(1)
+	}
+
+	// Set default ports.
+	if *listenStr == "" {
+		defaultPort := ":8080"
+		if useTLS {
+			defaultPort = ":8443"
+		}
+		listenStr = &defaultPort
 	}
 
 	// Setup channels for server management
@@ -67,7 +87,7 @@ func main() {
 	// Support for watching config and reloading when it changes
 	reloadProxyManager := func() {
 		if currentPM, ok := srv.Handler.(*proxy.ProxyManager); ok {
-			config, err = proxy.LoadConfig(*configPath)
+			conf, err = config.LoadConfig(*configPath)
 			if err != nil {
 				fmt.Printf("Warning, unable to reload configuration: %v\n", err)
 				return
@@ -75,7 +95,7 @@ func main() {
 
 			fmt.Println("Configuration Changed")
 			currentPM.Shutdown()
-			srv.Handler = proxy.New(config)
+			srv.Handler = proxy.New(conf)
 			fmt.Println("Configuration Reloaded")
 
 			// wait a few seconds and tell any UI to reload
@@ -85,12 +105,12 @@ func main() {
 				})
 			})
 		} else {
-			config, err = proxy.LoadConfig(*configPath)
+			conf, err = config.LoadConfig(*configPath)
 			if err != nil {
 				fmt.Printf("Error, unable to load configuration: %v\n", err)
 				os.Exit(1)
 			}
-			srv.Handler = proxy.New(config)
+			srv.Handler = proxy.New(conf)
 		}
 	}
 
@@ -166,9 +186,16 @@ func main() {
 	}()
 
 	// Start server
-	fmt.Printf("llama-swap listening on %s\n", *listenStr)
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		var err error
+		if useTLS {
+			fmt.Printf("llama-swap listening with TLS on https://%s\n", *listenStr)
+			err = srv.ListenAndServeTLS(*certFile, *keyFile)
+		} else {
+			fmt.Printf("llama-swap listening on http://%s\n", *listenStr)
+			err = srv.ListenAndServe()
+		}
+		if err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Fatal server error: %v\n", err)
 		}
 	}()

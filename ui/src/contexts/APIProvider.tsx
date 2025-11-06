@@ -1,4 +1,4 @@
-import { useRef, createContext, useState, useContext, useEffect, useCallback, useMemo, type ReactNode } from "react";
+import { createContext, useState, useContext, useEffect, useCallback, useMemo, type ReactNode } from "react";
 import type { ConnectionState } from "../lib/types";
 
 type ModelStatus = "ready" | "starting" | "stopping" | "stopped" | "shutdown" | "unknown";
@@ -16,6 +16,7 @@ interface APIProviderType {
   models: Model[];
   listModels: () => Promise<Model[]>;
   unloadAllModels: () => Promise<void>;
+  unloadSingleModel: (model: string) => Promise<void>;
   loadModel: (model: string) => Promise<void>;
   enableAPIEvents: (enabled: boolean) => void;
   proxyLogs: string;
@@ -28,6 +29,7 @@ interface Metrics {
   id: number;
   timestamp: string;
   model: string;
+  cache_tokens: number;
   input_tokens: number;
   output_tokens: number;
   prompt_per_second: number;
@@ -50,12 +52,14 @@ type APIProviderProps = {
   autoStartAPIEvents?: boolean;
 };
 
+let apiEventSource: EventSource | null = null;
+
 export function APIProvider({ children, autoStartAPIEvents = true }: APIProviderProps) {
   const [proxyLogs, setProxyLogs] = useState("");
   const [upstreamLogs, setUpstreamLogs] = useState("");
   const [metrics, setMetrics] = useState<Metrics[]>([]);
   const [connectionStatus, setConnectionState] = useState<ConnectionState>("disconnected");
-  const apiEventSource = useRef<EventSource | null>(null);
+  //const apiEventSource = useRef<EventSource | null>(null);
 
   const [models, setModels] = useState<Model[]>([]);
 
@@ -68,8 +72,8 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
 
   const enableAPIEvents = useCallback((enabled: boolean) => {
     if (!enabled) {
-      apiEventSource.current?.close();
-      apiEventSource.current = null;
+      apiEventSource?.close();
+      apiEventSource = null;
       setMetrics([]);
       return;
     }
@@ -78,22 +82,22 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
     const initialDelay = 1000; // 1 second
 
     const connect = () => {
-      apiEventSource.current = null;
-      const eventSource = new EventSource("/api/events");
+      apiEventSource?.close();
+      apiEventSource = new EventSource("/api/events");
+
       setConnectionState("connecting");
 
-      eventSource.onopen = () => {
+      apiEventSource.onopen = () => {
         // clear everything out on connect to keep things in sync
         setProxyLogs("");
         setUpstreamLogs("");
         setMetrics([]); // clear metrics on reconnect
         setModels([]); // clear models on reconnect
-        apiEventSource.current = eventSource;
         retryCount = 0;
         setConnectionState("connected");
       };
 
-      eventSource.onmessage = (e: MessageEvent) => {
+      apiEventSource.onmessage = (e: MessageEvent) => {
         try {
           const message = JSON.parse(e.data) as APIEventEnvelope;
           switch (message.type) {
@@ -136,8 +140,8 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
         }
       };
 
-      eventSource.onerror = () => {
-        eventSource.close();
+      apiEventSource.onerror = () => {
+        apiEventSource?.close();
         retryCount++;
         const delay = Math.min(initialDelay * Math.pow(2, retryCount - 1), 5000);
         setConnectionState("disconnected");
@@ -174,7 +178,7 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
 
   const unloadAllModels = useCallback(async () => {
     try {
-      const response = await fetch(`/api/models/unload/`, {
+      const response = await fetch(`/api/models/unload`, {
         method: "POST",
       });
       if (!response.ok) {
@@ -183,6 +187,20 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
     } catch (error) {
       console.error("Failed to unload models:", error);
       throw error; // Re-throw to let calling code handle it
+    }
+  }, []);
+
+  const unloadSingleModel = useCallback(async (model: string) => {
+    try {
+      const response = await fetch(`/api/models/unload/${model}`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to unload model: ${response.status}`);
+      }
+    } catch (error) {
+      console.error("Failed to unload model", model, error);
+      throw error;
     }
   }, []);
 
@@ -205,6 +223,7 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
       models,
       listModels,
       unloadAllModels,
+      unloadSingleModel,
       loadModel,
       enableAPIEvents,
       proxyLogs,

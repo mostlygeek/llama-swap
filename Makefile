@@ -23,11 +23,17 @@ proxy/ui_dist/placeholder.txt:
 	mkdir -p proxy/ui_dist
 	touch $@
 
-test: proxy/ui_dist/placeholder.txt
-	go test -short -v -count=1 ./proxy
+# use cached test results while developing
+test-dev: proxy/ui_dist/placeholder.txt
+	go test -short ./proxy/...
+	staticcheck ./proxy/... || true
 
+test: proxy/ui_dist/placeholder.txt
+	go test -short -count=1 ./proxy/...
+
+# for CI - full test (takes longer)
 test-all: proxy/ui_dist/placeholder.txt
-	go test -v -count=1 ./proxy
+	go test -race -count=1 ./proxy/...
 
 ui/node_modules:
 	cd ui && npm install
@@ -55,12 +61,12 @@ windows: ui
 # for testing proxy.Process
 simple-responder:
 	@echo "Building simple responder"
-	GOOS=darwin GOARCH=arm64 go build -o $(BUILD_DIR)/simple-responder_darwin_arm64 misc/simple-responder/simple-responder.go
-	GOOS=linux GOARCH=amd64 go build -o $(BUILD_DIR)/simple-responder_linux_amd64 misc/simple-responder/simple-responder.go
+	GOOS=darwin GOARCH=arm64 go build -o $(BUILD_DIR)/simple-responder_darwin_arm64 cmd/simple-responder/simple-responder.go
+	GOOS=linux GOARCH=amd64 go build -o $(BUILD_DIR)/simple-responder_linux_amd64 cmd/simple-responder/simple-responder.go
 
 simple-responder-windows:
 	@echo "Building simple responder for windows"
-	GOOS=windows GOARCH=amd64 go build -o $(BUILD_DIR)/simple-responder.exe misc/simple-responder/simple-responder.go
+	GOOS=windows GOARCH=amd64 go build -o $(BUILD_DIR)/simple-responder.exe cmd/simple-responder/simple-responder.go
 
 # Ensure build directory exists
 $(BUILD_DIR):
@@ -80,5 +86,11 @@ release:
 	echo "tagging new version: $$new_tag"; \
 	git tag "$$new_tag";
 
+GOOS ?= $(shell go env GOOS 2>/dev/null || echo linux)
+GOARCH ?= $(shell go env GOARCH 2>/dev/null || echo amd64)
+wol-proxy: $(BUILD_DIR)
+	@echo "Building wol-proxy"
+	go build -o $(BUILD_DIR)/wol-proxy-$(GOOS)-$(GOARCH)-$(shell date +%Y-%m-%d) cmd/wol-proxy/wol-proxy.go
+
 # Phony targets
-.PHONY: all clean ui mac linux windows simple-responder
+.PHONY: all clean ui mac linux windows simple-responder simple-responder-windows test test-all test-dev wol-proxy

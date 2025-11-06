@@ -2,19 +2,23 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+	"math/rand"
+	"net"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"os/exec"
-	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/mostlygeek/llama-swap/event"
+	"github.com/mostlygeek/llama-swap/proxy/config"
 )
 
 type ProcessState string
@@ -37,11 +41,13 @@ const (
 )
 
 type Process struct {
-	ID     string
-	config ModelConfig
-	cmd    *exec.Cmd
+	ID           string
+	config       config.ModelConfig
+	cmd          *exec.Cmd
+	reverseProxy *httputil.ReverseProxy
 
 	// PR #155 called to cancel the upstream process
+	cmdMutex       sync.RWMutex
 	cancelUpstream context.CancelFunc
 
 	// closed when command exits
@@ -53,12 +59,14 @@ type Process struct {
 	healthCheckTimeout      int
 	healthCheckLoopInterval time.Duration
 
-	lastRequestHandled time.Time
+	lastRequestHandledMutex sync.RWMutex
+	lastRequestHandled      time.Time
 
 	stateMutex sync.RWMutex
 	state      ProcessState
 
-	inFlightRequests sync.WaitGroup
+	inFlightRequests      sync.WaitGroup
+	inFlightRequestsCount atomic.Int32
 
 	// used to block on multiple start() calls
 	waitStarting sync.WaitGroup
@@ -73,16 +81,35 @@ type Process struct {
 	failedStartCount int
 }
 
-func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor) *Process {
+func NewProcess(ID string, healthCheckTimeout int, config config.ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor) *Process {
 	concurrentLimit := 10
 	if config.ConcurrencyLimit > 0 {
 		concurrentLimit = config.ConcurrencyLimit
+	}
+
+	// Setup the reverse proxy.
+	proxyURL, err := url.Parse(config.Proxy)
+	if err != nil {
+		proxyLogger.Errorf("<%s> invalid proxy URL %q: %v", ID, config.Proxy, err)
+	}
+
+	var reverseProxy *httputil.ReverseProxy
+	if proxyURL != nil {
+		reverseProxy = httputil.NewSingleHostReverseProxy(proxyURL)
+		reverseProxy.ModifyResponse = func(resp *http.Response) error {
+			// prevent nginx from buffering streaming responses (e.g., SSE)
+			if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+				resp.Header.Set("X-Accel-Buffering", "no")
+			}
+			return nil
+		}
 	}
 
 	return &Process{
 		ID:                      ID,
 		config:                  config,
 		cmd:                     nil,
+		reverseProxy:            reverseProxy,
 		cancelUpstream:          nil,
 		processLogger:           processLogger,
 		proxyLogger:             proxyLogger,
@@ -103,6 +130,20 @@ func NewProcess(ID string, healthCheckTimeout int, config ModelConfig, processLo
 // LogMonitor returns the log monitor associated with the process.
 func (p *Process) LogMonitor() *LogMonitor {
 	return p.processLogger
+}
+
+// setLastRequestHandled sets the last request handled time in a thread-safe manner.
+func (p *Process) setLastRequestHandled(t time.Time) {
+	p.lastRequestHandledMutex.Lock()
+	defer p.lastRequestHandledMutex.Unlock()
+	p.lastRequestHandled = t
+}
+
+// getLastRequestHandled gets the last request handled time in a thread-safe manner.
+func (p *Process) getLastRequestHandled() time.Time {
+	p.lastRequestHandledMutex.RLock()
+	defer p.lastRequestHandledMutex.RUnlock()
+	return p.lastRequestHandled
 }
 
 // custom error types for swapping state
@@ -128,6 +169,13 @@ func (p *Process) swapState(expectedState, newState ProcessState) (ProcessState,
 	}
 
 	p.state = newState
+
+	// Atomically increment waitStarting when entering StateStarting
+	// This ensures any thread that sees StateStarting will also see the WaitGroup counter incremented
+	if newState == StateStarting {
+		p.waitStarting.Add(1)
+	}
+
 	p.proxyLogger.Debugf("<%s> swapState() State transitioned from %s to %s", p.ID, expectedState, newState)
 	event.Emit(ProcessStateChangeEvent{ProcessName: p.ID, NewState: newState, OldState: expectedState})
 	return p.state, nil
@@ -154,6 +202,15 @@ func (p *Process) CurrentState() ProcessState {
 	p.stateMutex.RLock()
 	defer p.stateMutex.RUnlock()
 	return p.state
+}
+
+// forceState forces the process state to the new state with mutex protection.
+// This should only be used in exceptional cases where the normal state transition
+// validation via swapState() cannot be used.
+func (p *Process) forceState(newState ProcessState) {
+	p.stateMutex.Lock()
+	defer p.stateMutex.Unlock()
+	p.state = newState
 }
 
 // start starts the upstream command, checks the health endpoint, and sets the state to Ready
@@ -189,7 +246,7 @@ func (p *Process) start() error {
 		}
 	}
 
-	p.waitStarting.Add(1)
+	// waitStarting.Add(1) is now called atomically in swapState() when transitioning to StateStarting
 	defer p.waitStarting.Done()
 	cmdContext, ctxCancelUpstream := context.WithCancel(context.Background())
 
@@ -199,8 +256,11 @@ func (p *Process) start() error {
 	p.cmd.Env = append(p.cmd.Environ(), p.config.Env...)
 	p.cmd.Cancel = p.cmdStopUpstreamProcess
 	p.cmd.WaitDelay = p.gracefulStopTimeout
+
+	p.cmdMutex.Lock()
 	p.cancelUpstream = ctxCancelUpstream
 	p.cmdWaitChan = make(chan struct{})
+	p.cmdMutex.Unlock()
 
 	p.failedStartCount++ // this will be reset to zero when the process has successfully started
 
@@ -210,7 +270,7 @@ func (p *Process) start() error {
 	// Set process state to failed
 	if err != nil {
 		if curState, swapErr := p.swapState(StateStarting, StateStopped); swapErr != nil {
-			p.state = StateStopped // force it into a stopped state
+			p.forceState(StateStopped) // force it into a stopped state
 			return fmt.Errorf(
 				"failed to start command '%s' and state swap failed. command error: %v, current state: %v, state swap error: %v",
 				strings.Join(args, " "), err, curState, swapErr,
@@ -283,10 +343,12 @@ func (p *Process) start() error {
 					return
 				}
 
-				// wait for all inflight requests to complete and ticker
-				p.inFlightRequests.Wait()
+				// skip the TTL check if there are inflight requests
+				if p.inFlightRequestsCount.Load() != 0 {
+					continue
+				}
 
-				if time.Since(p.lastRequestHandled) > maxDuration {
+				if time.Since(p.getLastRequestHandled()) > maxDuration {
 					p.proxyLogger.Infof("<%s> Unloading model, TTL of %ds reached", p.ID, p.config.UnloadAfter)
 					p.Stop()
 					return
@@ -342,7 +404,7 @@ func (p *Process) Shutdown() {
 
 	p.stopCommand()
 	// just force it to this state since there is no recovery from shutdown
-	p.state = StateShutdown
+	p.forceState(StateShutdown)
 }
 
 // stopCommand will send a SIGTERM to the process and wait for it to exit.
@@ -353,18 +415,37 @@ func (p *Process) stopCommand() {
 		p.proxyLogger.Debugf("<%s> stopCommand took %v", p.ID, time.Since(stopStartTime))
 	}()
 
-	if p.cancelUpstream == nil {
+	p.cmdMutex.RLock()
+	cancelUpstream := p.cancelUpstream
+	cmdWaitChan := p.cmdWaitChan
+	p.cmdMutex.RUnlock()
+
+	if cancelUpstream == nil {
 		p.proxyLogger.Errorf("<%s> stopCommand has a nil p.cancelUpstream()", p.ID)
 		return
 	}
 
-	p.cancelUpstream()
-	<-p.cmdWaitChan
+	cancelUpstream()
+	<-cmdWaitChan
 }
 
 func (p *Process) checkHealthEndpoint(healthURL string) error {
+
 	client := &http.Client{
+<<<<<<< HEAD
 		Timeout: 2000 * time.Millisecond,
+=======
+		// wait a short time for a tcp connection to be established
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout: 500 * time.Millisecond,
+			}).DialContext,
+		},
+
+		// give a long time to respond to the health check endpoint
+		// after the connection is established. See issue: 276
+		Timeout: 5000 * time.Millisecond,
+>>>>>>> upstream/main
 	}
 
 	req, err := http.NewRequest("GET", healthURL, nil)
@@ -387,6 +468,12 @@ func (p *Process) checkHealthEndpoint(healthURL string) error {
 }
 
 func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
+
+	if p.reverseProxy == nil {
+		http.Error(w, fmt.Sprintf("No reverse proxy available for %s", p.ID), http.StatusInternalServerError)
+		return
+	}
+
 	requestBeginTime := time.Now()
 	var startDuration time.Duration
 
@@ -406,68 +493,72 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p.inFlightRequests.Add(1)
+	p.inFlightRequestsCount.Add(1)
 	defer func() {
-		p.lastRequestHandled = time.Now()
+		p.setLastRequestHandled(time.Now())
+		p.inFlightRequestsCount.Add(-1)
 		p.inFlightRequests.Done()
 	}()
 
+	// for #366
+	// - extract streaming param from request context, should have been set by proxymanager
+	var srw *statusResponseWriter
+	swapCtx, cancelLoadCtx := context.WithCancel(r.Context())
 	// start the process on demand
 	if p.CurrentState() != StateReady {
+		// start a goroutine to stream loading status messages into the response writer
+		// add a sync so the streaming client only runs when the goroutine has exited
+
+		isStreaming, _ := r.Context().Value(proxyCtxKey("streaming")).(bool)
+		if p.config.SendLoadingState != nil && *p.config.SendLoadingState && isStreaming {
+			srw = newStatusResponseWriter(p, w)
+			go srw.statusUpdates(swapCtx)
+		} else {
+			p.proxyLogger.Debugf("<%s> SendLoadingState is nil or false, not streaming loading state", p.ID)
+		}
+
 		beginStartTime := time.Now()
 		if err := p.start(); err != nil {
 			errstr := fmt.Sprintf("unable to start process: %s", err)
-			http.Error(w, errstr, http.StatusBadGateway)
+			cancelLoadCtx()
+			if srw != nil {
+				srw.sendData(fmt.Sprintf("Unable to swap model err: %s\n", errstr))
+				// Wait for statusUpdates goroutine to finish writing its deferred "Done!" messages
+				// before closing the connection. Without this, the connection would close before
+				// the goroutine can write its cleanup messages, causing incomplete SSE output.
+				srw.waitForCompletion(100 * time.Millisecond)
+			} else {
+				http.Error(w, errstr, http.StatusBadGateway)
+			}
 			return
 		}
 		startDuration = time.Since(beginStartTime)
 	}
 
-	proxyTo := p.config.Proxy
-	client := &http.Client{}
-	req, err := http.NewRequestWithContext(r.Context(), r.Method, proxyTo+r.URL.String(), r.Body)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	req.Header = r.Header.Clone()
+	// should trigger srw to stop sending loading events ...
+	cancelLoadCtx()
 
-	contentLength, err := strconv.ParseInt(req.Header.Get("content-length"), 10, 64)
-	if err == nil {
-		req.ContentLength = contentLength
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
-		return
-	}
-	defer resp.Body.Close()
-	for k, vv := range resp.Header {
-		for _, v := range vv {
-			w.Header().Add(k, v)
-		}
-	}
-	w.WriteHeader(resp.StatusCode)
-
-	// faster than io.Copy when streaming
-	buf := make([]byte, 32*1024)
-	for {
-		n, err := resp.Body.Read(buf)
-		if n > 0 {
-			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
-				return
-			}
-			if flusher, ok := w.(http.Flusher); ok {
-				flusher.Flush()
+	// recover from http.ErrAbortHandler panics that can occur when the client
+	// disconnects before the response is sent
+	defer func() {
+		if r := recover(); r != nil {
+			if r == http.ErrAbortHandler {
+				p.proxyLogger.Infof("<%s> recovered from client disconnection during streaming", p.ID)
+			} else {
+				p.proxyLogger.Infof("<%s> recovered from panic: %v", p.ID, r)
 			}
 		}
-		if err == io.EOF {
-			break
+	}()
+
+	if srw != nil {
+		// Wait for the goroutine to finish writing its final messages
+		const completionTimeout = 1 * time.Second
+		if !srw.waitForCompletion(completionTimeout) {
+			p.proxyLogger.Warnf("<%s> status updates goroutine did not complete within %v, proceeding with proxy request", p.ID, completionTimeout)
 		}
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
+		p.reverseProxy.ServeHTTP(srw, r)
+	} else {
+		p.reverseProxy.ServeHTTP(w, r)
 	}
 
 	totalTime := time.Since(requestBeginTime)
@@ -503,13 +594,16 @@ func (p *Process) waitForCmd() {
 	case StateStopping:
 		if curState, err := p.swapState(StateStopping, StateStopped); err != nil {
 			p.proxyLogger.Errorf("<%s> Process exited but could not swap to StateStopped. curState=%s, err: %v", p.ID, curState, err)
-			p.state = StateStopped
+			p.forceState(StateStopped)
 		}
 	default:
 		p.proxyLogger.Infof("<%s> process exited but not StateStopping, current state: %s", p.ID, currentState)
-		p.state = StateStopped // force it to be in this state
+		p.forceState(StateStopped) // force it to be in this state
 	}
+
+	p.cmdMutex.Lock()
 	close(p.cmdWaitChan)
+	p.cmdMutex.Unlock()
 }
 
 // cmdStopUpstreamProcess attemps to stop the upstream process gracefully
@@ -524,7 +618,7 @@ func (p *Process) cmdStopUpstreamProcess() error {
 
 	if p.config.CmdStop != "" {
 		// replace ${PID} with the pid of the process
-		stopArgs, err := SanitizeCommand(strings.ReplaceAll(p.config.CmdStop, "${PID}", fmt.Sprintf("%d", p.cmd.Process.Pid)))
+		stopArgs, err := config.SanitizeCommand(strings.ReplaceAll(p.config.CmdStop, "${PID}", fmt.Sprintf("%d", p.cmd.Process.Pid)))
 		if err != nil {
 			p.proxyLogger.Errorf("<%s> Failed to sanitize stop command: %v", p.ID, err)
 			return err
@@ -549,4 +643,229 @@ func (p *Process) cmdStopUpstreamProcess() error {
 	}
 
 	return nil
+}
+
+var loadingRemarks = []string{
+	"Still faster than your last standup meeting...",
+	"Reticulating splines...",
+	"Waking up the hamsters...",
+	"Teaching the model manners...",
+	"Convincing the GPU to participate...",
+	"Loading weights (they're heavy)...",
+	"Herding electrons...",
+	"Compiling excuses for the delay...",
+	"Downloading more RAM...",
+	"Asking the model nicely to boot up...",
+	"Bribing CUDA with cookies...",
+	"Still loading (blame VRAM)...",
+	"The model is fashionably late...",
+	"Warming up those tensors...",
+	"Making the neural net do push-ups...",
+	"Your patience is appreciated (really)...",
+	"Almost there (probably)...",
+	"Loading like it's 1999...",
+	"The model forgot where it put its keys...",
+	"Quantum tunneling through layers...",
+	"Negotiating with the PCIe bus...",
+	"Defrosting frozen parameters...",
+	"Teaching attention heads to focus...",
+	"Running the matrix (slowly)...",
+	"Untangling transformer blocks...",
+	"Calibrating the flux capacitor...",
+	"Spinning up the probability wheels...",
+	"Waiting for the GPU to wake from its nap...",
+	"Converting caffeine to compute...",
+	"Allocating virtual patience...",
+	"Performing arcane CUDA rituals...",
+	"The model is stuck in traffic...",
+	"Inflating embeddings...",
+	"Summoning computational demons...",
+	"Pleading with the OOM killer...",
+	"Calculating the meaning of life (still at 42)...",
+	"Training the training wheels...",
+	"Optimizing the optimizer...",
+	"Bootstrapping the bootstrapper...",
+	"Loading loading screen...",
+	"Processing processing logs...",
+	"Buffering buffer overflow jokes...",
+	"The model hit snooze...",
+	"Debugging the debugger...",
+	"Compiling the compiler...",
+	"Parsing the parser (meta)...",
+	"Tokenizing tokens...",
+	"Encoding the encoder...",
+	"Hashing hash browns...",
+	"Forking spoons (not forks)...",
+	"The model is contemplating existence...",
+	"Transcending dimensional barriers...",
+	"Invoking elder tensor gods...",
+	"Unfurling probability clouds...",
+	"Synchronizing parallel universes...",
+	"The GPU is having second thoughts...",
+	"Recalibrating reality matrices...",
+	"Time is an illusion, loading doubly so...",
+	"Convincing bits to flip themselves...",
+	"The model is reading its own documentation...",
+}
+
+type statusResponseWriter struct {
+	hasWritten bool
+	writer     http.ResponseWriter
+	process    *Process
+	wg         sync.WaitGroup // Track goroutine completion
+	start      time.Time
+}
+
+func newStatusResponseWriter(p *Process, w http.ResponseWriter) *statusResponseWriter {
+	s := &statusResponseWriter{
+		writer:  w,
+		process: p,
+		start:   time.Now(),
+	}
+
+	s.Header().Set("Content-Type", "text/event-stream") // SSE
+	s.Header().Set("Cache-Control", "no-cache")         // no-cache
+	s.Header().Set("Connection", "keep-alive")          // keep-alive
+	s.WriteHeader(http.StatusOK)                        // send status code 200
+	s.sendLine("━━━━━")
+	s.sendLine(fmt.Sprintf("llama-swap loading model: %s", p.ID))
+	return s
+}
+
+// statusUpdates sends status updates to the client while the model is loading
+func (s *statusResponseWriter) statusUpdates(ctx context.Context) {
+	s.wg.Add(1)
+	defer s.wg.Done()
+
+	// Recover from panics caused by client disconnection
+	// Note: recover() only works within the same goroutine, so we need it here
+	defer func() {
+		if r := recover(); r != nil {
+			s.process.proxyLogger.Debugf("<%s> statusUpdates recovered from panic (likely client disconnect): %v", s.process.ID, r)
+		}
+	}()
+
+	defer func() {
+		duration := time.Since(s.start)
+		s.sendLine(fmt.Sprintf("\nDone! (%.2fs)", duration.Seconds()))
+		s.sendLine("━━━━━")
+		s.sendLine(" ")
+	}()
+
+	// Create a shuffled copy of loadingRemarks
+	remarks := make([]string, len(loadingRemarks))
+	copy(remarks, loadingRemarks)
+	rand.Shuffle(len(remarks), func(i, j int) {
+		remarks[i], remarks[j] = remarks[j], remarks[i]
+	})
+	ri := 0
+
+	// Pick a random duration to send a remark
+	nextRemarkIn := time.Duration(2+rand.Intn(4)) * time.Second
+	lastRemarkTime := time.Now()
+
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop() // Ensure ticker is stopped to prevent resource leak
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if s.process.CurrentState() == StateReady {
+				return
+			}
+
+			// Check if it's time for a snarky remark
+			if time.Since(lastRemarkTime) >= nextRemarkIn {
+				remark := remarks[ri%len(remarks)]
+				ri++
+				s.sendLine(fmt.Sprintf("\n%s", remark))
+				lastRemarkTime = time.Now()
+				// Pick a new random duration for the next remark
+				nextRemarkIn = time.Duration(5+rand.Intn(5)) * time.Second
+			} else {
+				s.sendData(".")
+			}
+		}
+	}
+}
+
+// waitForCompletion waits for the statusUpdates goroutine to finish
+func (s *statusResponseWriter) waitForCompletion(timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
+func (s *statusResponseWriter) sendLine(line string) {
+	s.sendData(line + "\n")
+}
+
+func (s *statusResponseWriter) sendData(data string) {
+	// Create the proper SSE JSON structure
+	type Delta struct {
+		ReasoningContent string `json:"reasoning_content"`
+	}
+	type Choice struct {
+		Delta Delta `json:"delta"`
+	}
+	type SSEMessage struct {
+		Choices []Choice `json:"choices"`
+	}
+
+	msg := SSEMessage{
+		Choices: []Choice{
+			{
+				Delta: Delta{
+					ReasoningContent: data,
+				},
+			},
+		},
+	}
+
+	jsonData, err := json.Marshal(msg)
+	if err != nil {
+		s.process.proxyLogger.Errorf("<%s> Failed to marshal SSE message: %v", s.process.ID, err)
+		return
+	}
+
+	// Write SSE formatted data, panic if not able to write
+	_, err = fmt.Fprintf(s.writer, "data: %s\n\n", jsonData)
+	if err != nil {
+		panic(fmt.Sprintf("<%s> Failed to write SSE data: %v", s.process.ID, err))
+	}
+	s.Flush()
+}
+
+func (s *statusResponseWriter) Header() http.Header {
+	return s.writer.Header()
+}
+
+func (s *statusResponseWriter) Write(data []byte) (int, error) {
+	return s.writer.Write(data)
+}
+
+func (s *statusResponseWriter) WriteHeader(statusCode int) {
+	if s.hasWritten {
+		return
+	}
+	s.hasWritten = true
+	s.writer.WriteHeader(statusCode)
+	s.Flush()
+}
+
+// Add Flush method
+func (s *statusResponseWriter) Flush() {
+	if flusher, ok := s.writer.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }

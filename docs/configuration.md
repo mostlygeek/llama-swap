@@ -1,3 +1,94 @@
+# config.yaml
+
+llama-swap is designed to be very simple: one binary, one configuration file.
+
+## minimal viable config
+
+```yaml
+models:
+  model1:
+    cmd: llama-server --port ${PORT} --model /path/to/model.gguf
+```
+
+This is enough to launch `llama-server` to serve `model1`. Of course, llama-swap is about making it possible to serve many models:
+
+```yaml
+models:
+  model1:
+    cmd: llama-server --port ${PORT} -m /path/to/model.gguf
+  model2:
+    cmd: llama-server --port ${PORT} -m /path/to/another_model.gguf
+  model3:
+    cmd: llama-server --port ${PORT} -m /path/to/third_model.gguf
+```
+
+With this configuration models will be hot swapped and loaded on demand. The special `${PORT}` macro provides a unique port per model. Useful if you want to run multiple models at the same time with the `groups` feature.
+
+## Advanced control with `cmd`
+
+llama-swap is also about customizability. You can use any CLI flag available:
+
+```yaml
+models:
+  model1:
+    cmd: | # support for multi-line
+      llama-server --PORT ${PORT} -m /path/to/model.gguf
+      --ctx-size 8192
+      --jinja
+      --cache-type-k q8_0
+      --cache-type-v q8_0
+```
+
+## Support for any OpenAI API compatible server
+
+llama-swap supports any OpenAI API compatible server. If you can run it on the CLI llama-swap will be able to manage it. Even if it's run in Docker or Podman containers.
+
+```yaml
+models:
+  "Q3-30B-CODER-VLLM":
+    name: "Qwen3 30B Coder vllm AWQ (Q3-30B-CODER-VLLM)"
+    # cmdStop provides a reliable way to stop containers
+    cmdStop: docker stop vllm-coder
+    cmd: |
+      docker run --init --rm --name vllm-coder
+        --runtime=nvidia --gpus '"device=2,3"'
+        --shm-size=16g
+        -v /mnt/nvme/vllm-cache:/root/.cache
+        -v /mnt/ssd-extra/models:/models -p ${PORT}:8000
+        vllm/vllm-openai:v0.10.0
+        --model "/models/cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ"
+        --served-model-name "Q3-30B-CODER-VLLM"
+        --enable-expert-parallel
+        --swap-space 16
+        --max-num-seqs 512
+        --max-model-len 65536
+        --max-seq-len-to-capture 65536
+        --gpu-memory-utilization 0.9
+        --tensor-parallel-size 2
+        --trust-remote-code
+```
+
+## Many more features..
+
+llama-swap supports many more features to customize how you want to manage your environment.
+
+| Feature   | Description                                    |
+| --------- | ---------------------------------------------- |
+| `ttl`     | automatic unloading of models after a timeout  |
+| `macros`  | reusable snippets to use in configurations     |
+| `groups`  | run multiple models at a time                  |
+| `hooks`   | event driven functionality                     |
+| `env`     | define environment variables per model         |
+| `aliases` | serve a model with different names             |
+| `filters` | modify requests before sending to the upstream |
+| `...`     | And many more tweaks                           |
+
+## Full Configuration Example
+
+> [!NOTE]
+> This is a copy of `config.example.yaml`. Always check that for the most up to date examples.
+
+```yaml
 # llama-swap YAML configuration example
 # -------------------------------------
 #
@@ -35,14 +126,6 @@ metricsMaxInMemory: 1000
 # - it is automatically incremented for every model that uses it
 startPort: 10001
 
-# sendLoadingState: inject loading status updates into the reasoning (thinking)
-# field
-# - optional, default: false
-# - when true, a stream of loading messages will be sent to the client in the
-#   reasoning field so chat UIs can show that loading is in progress.
-# - see #366 for more details
-sendLoadingState: true
-
 # macros: a dictionary of string substitutions
 # - optional, default: empty dictionary
 # - macros are reusable snippets
@@ -72,7 +155,6 @@ macros:
 # - the model's ID is available in the ${MODEL_ID} macro, also available in macros defined above
 # - below are examples of the all the settings a model can have
 models:
-
   # keys are the model names used in API requests
   "llama":
     # macros: a dictionary of string substitutions specific to this model
@@ -192,10 +274,6 @@ models:
     # - recommended to be omitted and the default used
     concurrencyLimit: 0
 
-    # sendLoadingState: overrides the global sendLoadingState setting for this model
-    # - optional, default: undefined (use global setting)
-    sendLoadingState: false
-
   # Unlisted model example:
   "qwen-unlisted":
     # unlisted: boolean, true or false
@@ -298,10 +376,11 @@ hooks:
   # - optional, default: empty dictionary
   # - the only supported action is preload
   on_startup:
-        # preload: a list of model ids to load on startup
-        # - optional, default: empty list
-        # - model names must match keys in the models sections
-        # - when preloading multiple models at once, define a group
-        #   otherwise models will be loaded and swapped out
+    # preload: a list of model ids to load on startup
+    # - optional, default: empty list
+    # - model names must match keys in the models sections
+    # - when preloading multiple models at once, define a group
+    #   otherwise models will be loaded and swapped out
     preload:
       - "llama"
+```
