@@ -36,19 +36,22 @@ jobs:
           set -e
           git config user.name  'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
-
           git fetch upstream
-          # Try a fast-forward first, then fall back to real merge
+          git fetch origin
+
+          # Delete any leftover branch on GitHub (ignore error if it doesn't exist)
+          git push -d origin auto-merge-upstream 2>/dev/null || true
+
+          # Try fast-forward first
           if git merge --ff-only upstream/main; then
               echo "result=ff" >> $GITHUB_OUTPUT
           else
-              echo "Merge conflict – creating branch for manual resolution"
-              git checkout -b auto-merge-upstream
-              git merge --no-edit upstream/main || true   # keep conflicts staged
-              git add .   # mark all conflicts as “to be resolved”
-              git commit -m "WIP: merge upstream (conflicts left"
-              git push -u origin auto-merge-upstream
               echo "result=conflict" >> $GITHUB_OUTPUT
+              git checkout -B auto-merge-upstream   # create/reset branch
+              git merge --no-edit upstream/main || true   # keep conflicts staged
+              git add .
+              git commit -m "WIP: merge upstream (conflicts left)"
+              git push -f -u origin auto-merge-upstream   # force-push clean branch
           fi
 
       - name: Create PR only if conflict branch exists
