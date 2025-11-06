@@ -61,6 +61,6 @@ jobs:
         with:
           source_branch: auto-merge-upstream
           destination_branch: main
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          github_token: ${{ secrets.PR_TOKEN }}
           pr_title: "Resolve upstream merge conflicts"
           pr_body: "Please finish resolving the conflicts inside this PR."       
