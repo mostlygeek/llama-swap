@@ -1,0 +1,6 @@
+version: "1"
+rules:
+  - base: main
+    upstream: mostlygeek:main
+    mergeMethod: merge          # or "rebase" if you prefer
+    mergeUnstable: false
