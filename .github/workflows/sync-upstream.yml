@@ -63,3 +63,5 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           pr_title: "Resolve upstream merge conflicts"
           pr_body: "Please finish resolving the conflicts inside this PR."
+        permissions:          # <-- add this line
+          pull-requests: write
