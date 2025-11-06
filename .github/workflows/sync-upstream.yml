@@ -5,6 +5,10 @@ on:
     - cron: '0 * * * *'        # every hour
   workflow_dispatch:           # manual button
 
+permissions:
+  contents: write          # push commits
+  pull-requests: write
+
 jobs:
   merge:
     runs-on: ubuntu-latest
