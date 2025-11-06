@@ -26,8 +26,11 @@ jobs:
           git remote add upstream https://github.com/mostlygeek/llama-swap.git
           git fetch upstream
 
-      - name: Merge upstream
-        run: |
-          git checkout main
-          git merge --no-edit upstream/main   # real merge, keeps your commits
-          git push origin main
+      - name: Merge or PR on conflict
+        uses: repo-sync/pull-request@v2
+        with:
+          source_branch: "auto-merge-upstream"
+          destination_branch: "main"
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          pr_title: "Merge upstream changes"
+          pr_body: "Automated merge failed; please resolve conflicts."
