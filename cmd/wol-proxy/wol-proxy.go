@@ -235,8 +235,9 @@ func (p *proxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("failed to send magic WoL packet", "error", err)
 		}
 
-		// For root path requests, return loading page with status polling
-		if path == "/" {
+		// For root or UI path requests, return loading page with status polling
+		// the web page will do the polling and redirect when ready
+		if path == "/" || strings.HasPrefix(path, "/ui/") {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
 			fmt.Fprint(w, loadingPageHTML)
