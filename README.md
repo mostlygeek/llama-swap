@@ -42,7 +42,8 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
 
 llama-swap includes a real time web interface for monitoring logs and controlling models:
 
-<img width="1360" height="963" alt="image" src="https://github.com/user-attachments/assets/adef4a8e-de0b-49db-885a-8f6dedae6799" />
+<img width="1164" height="745" alt="image" src="https://github.com/user-attachments/assets/bacf3f9d-819f-430b-9ed2-1bfaa8d54579" />
+
 
 The Activity Page shows recent requests:
 
