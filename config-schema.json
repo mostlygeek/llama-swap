@@ -1,0 +1,250 @@
+{
+    "$schema": "https://json-schema.org/draft-07/schema#",
+    "$id": "llama-swap-config-schema.json",
+    "title": "llama-swap configuration",
+    "description": "Configuration file for llama-swap",
+    "type": "object",
+    "required": [
+        "models"
+    ],
+    "definitions": {
+        "macros": {
+            "type": "object",
+            "additionalProperties": {
+                "oneOf": [
+                    {
+                        "type": "string",
+                        "minLength": 0,
+                        "maxLength": 1024
+                    },
+                    {
+                        "type": "number"
+                    },
+                    {
+                        "type": "boolean"
+                    }
+                ]
+            },
+            "propertyNames": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[a-zA-Z0-9_-]+$",
+                "not": {
+                    "enum": [
+                        "PORT",
+                        "MODEL_ID"
+                    ]
+                }
+            },
+            "default": {},
+            "description": "A dictionary of string substitutions. Macros are reusable snippets used in model cmd, cmdStop, proxy, checkEndpoint, filters.stripParams. Macro names must be <64 chars, match ^[a-zA-Z0-9_-]+$, and not be PORT or MODEL_ID. Values can be string, number, or boolean. Macros can reference other macros defined before them."
+        }
+    },
+    "properties": {
+        "healthCheckTimeout": {
+            "type": "integer",
+            "minimum": 15,
+            "default": 120,
+            "description": "Number of seconds to wait for a model to be ready to serve requests."
+        },
+        "logLevel": {
+            "type": "string",
+            "enum": [
+                "debug",
+                "info",
+                "warn",
+                "error"
+            ],
+            "default": "info",
+            "description": "Sets the logging value. Valid values: debug, info, warn, error."
+        },
+        "metricsMaxInMemory": {
+            "type": "integer",
+            "default": 1000,
+            "description": "Maximum number of metrics to keep in memory. Controls how many metrics are stored before older ones are discarded."
+        },
+        "startPort": {
+            "type": "integer",
+            "default": 5800,
+            "description": "Starting port number for the automatic ${PORT} macro. The ${PORT} macro is incremented for every model that uses it."
+        },
+        "sendLoadingState": {
+            "type": "boolean",
+            "default": false,
+            "description": "Inject loading status updates into the reasoning field. When true, a stream of loading messages will be sent to the client."
+        },
+        "macros": {
+            "$ref": "#/definitions/macros"
+        },
+        "models": {
+            "type": "object",
+            "description": "A dictionary of model configurations. Each key is a model's ID. Model settings have defaults if not defined. The model's ID is available as ${MODEL_ID}.",
+            "additionalProperties": {
+                "type": "object",
+                "required": [
+                    "cmd"
+                ],
+                "properties": {
+                    "macros": {
+                        "$ref": "#/definitions/macros"
+                    },
+                    "cmd": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Command to run to start the inference server. Macros can be used. Comments allowed with |."
+                    },
+                    "cmdStop": {
+                        "type": "string",
+                        "default": "",
+                        "description": "Command to run to stop the model gracefully. Uses ${PID} macro for upstream process id. If empty, default shutdown behavior is used."
+                    },
+                    "name": {
+                        "type": "string",
+                        "default": "",
+                        "maxLength": 128,
+                        "description": "Display name for the model. Used in v1/models API response."
+                    },
+                    "description": {
+                        "type": "string",
+                        "default": "",
+                        "maxLength": 1024,
+                        "description": "Description for the model. Used in v1/models API response."
+                    },
+                    "env": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "pattern": "^[A-Z_][A-Z0-9_]*=.*$"
+                        },
+                        "default": [],
+                        "description": "Array of environment variables to inject into cmd's environment. Each value is a string in ENV_NAME=value format."
+                    },
+                    "proxy": {
+                        "type": "string",
+                        "default": "http://localhost:${PORT}",
+                        "format": "uri",
+                        "description": "URL where llama-swap routes API requests. If custom port is used in cmd, this must be set."
+                    },
+                    "aliases": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "minLength": 1
+                        },
+                        "default": [],
+                        "description": "Alternative model names for this configuration. Must be unique globally."
+                    },
+                    "checkEndpoint": {
+                        "type": "string",
+                        "default": "/health",
+                        "pattern": "^/.*$|^none$",
+                        "description": "URL path to check if the server is ready. Use 'none' to skip health checking."
+                    },
+                    "ttl": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 0,
+                        "description": "Automatically unload the model after ttl seconds. 0 disables unloading. Must be >0 to enable."
+                    },
+                    "useModelName": {
+                        "type": "string",
+                        "default": "",
+                        "description": "Override the model name sent to upstream server. Useful if upstream expects a different name."
+                    },
+                    "filters": {
+                        "type": "object",
+                        "properties": {
+                            "stripParams": {
+                                "type": "string",
+                                "default": "",
+                                "pattern": "^[a-zA-Z0-9_, ]*$",
+                                "description": "Comma separated list of parameters to remove from the request. Used for server-side enforcement of sampling parameters."
+                            }
+                        },
+                        "additionalProperties": false,
+                        "default": {},
+                        "description": "Dictionary of filter settings. Only stripParams is supported."
+                    },
+                    "metadata": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "default": {},
+                        "description": "Dictionary of arbitrary values included in /v1/models. Can contain complex types. Only passed through in /v1/models responses."
+                    },
+                    "concurrencyLimit": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 0,
+                        "description": "Overrides allowed number of active parallel requests to a model. 0 uses internal default of 10. >0 overrides default. Requests exceeding limit get HTTP 429."
+                    },
+                    "sendLoadingState": {
+                        "type": "boolean",
+                        "description": "Overrides the global sendLoadingState for this model. Ommitting this property will use the global setting."
+                    },
+                    "unlisted": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "If true the model will not show up in /v1/models responses. It can still be used as normal in API requests."
+                    }
+                }
+            }
+        },
+        "groups": {
+            "type": "object",
+            "additionalProperties": {
+                "type": "object",
+                "required": [
+                    "members"
+                ],
+                "properties": {
+                    "swap": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Controls model swapping behaviour within the group. True: only one model runs at a time. False: all models can run together."
+                    },
+                    "exclusive": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Controls how the group affects other groups. True: causes all other groups to unload when this group runs a model. False: does not affect other groups."
+                    },
+                    "persistent": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Prevents other groups from unloading the models in this group. Does not affect individual model behaviour."
+                    },
+                    "members": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Array of model IDs that are members of this group. Model IDs must be defined in models."
+                    }
+                }
+            },
+            "description": "A dictionary of group settings. Provides advanced controls over model swapping behaviour. Model IDs must be defined in models. A model can only be a member of one group. Behaviour controlled via swap, exclusive, persistent."
+        },
+        "hooks": {
+            "type": "object",
+            "properties": {
+                "on_startup": {
+                    "type": "object",
+                    "properties": {
+                        "preload": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            },
+                            "default": [],
+                            "description": "List of model IDs to load on startup. Model names must match keys in models. When preloading multiple models, define a group to prevent swapping."
+                        }
+                    },
+                    "additionalProperties": false,
+                    "description": "Actions to perform on startup. Only supported action is preload."
+                }
+            },
+            "additionalProperties": false,
+            "description": "A dictionary of event triggers and actions. Only supported hook is on_startup."
+        }
+    }
+}
