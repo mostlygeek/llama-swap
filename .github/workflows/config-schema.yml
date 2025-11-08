@@ -1,0 +1,41 @@
+name: Validate JSON Schema
+
+on:
+  pull_request:
+    paths:
+      - "config-schema.json"
+  push:
+    branches:
+      - main
+    paths:
+      - "config-schema.json"
+
+  workflow_dispatch:
+
+jobs:
+  validate-schema:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate JSON Schema
+        run: |
+          # Check if the file is valid JSON
+          if ! jq empty config-schema.json 2>/dev/null; then
+            echo "Error: config-schema.json is not valid JSON"
+            exit 1
+          fi
+
+          # Validate that it's a valid JSON Schema
+          # Check for required $schema field
+          if ! jq -e '."$schema"' config-schema.json > /dev/null; then
+            echo "Warning: config-schema.json should have a \$schema field"
+          fi
+
+          # Check that it has either properties or definitions
+          if ! jq -e '.properties or .definitions or ."$defs"' config-schema.json > /dev/null; then
+            echo "Warning: JSON Schema should contain properties, definitions, or \$defs"
+          fi
+
+          echo "✓ config-schema.json is valid"
