@@ -1,5 +1,8 @@
 version: 2
 
+env:
+  - GO111MODULE={{ if index .Env "GO111MODULE"  }}{{ .Env.GO111MODULE }}{{ else }}auto{{ end }}
+
 builds:
   - env:
       - CGO_ENABLED=0

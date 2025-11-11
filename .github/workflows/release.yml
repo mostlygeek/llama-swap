@@ -18,6 +18,8 @@ permissions:
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
+    env:
+      GO111MODULE: ${{ vars.GO111MODULE || 'auto' }}
     steps:
       -
         name: Checkout
