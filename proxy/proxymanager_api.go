@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/event"
+	"github.com/mostlygeek/llama-swap/version"
 )
 
 type Model struct {
@@ -28,6 +29,7 @@ func addApiHandlers(pm *ProxyManager) {
 		apiGroup.POST("/models/unload/*model", pm.apiUnloadSingleModelHandler)
 		apiGroup.GET("/events", pm.apiSendEvents)
 		apiGroup.GET("/metrics", pm.apiGetMetrics)
+		apiGroup.GET("/version", pm.apiGetVersion)
 	}
 }
 
@@ -226,4 +228,13 @@ func (pm *ProxyManager) apiUnloadSingleModelHandler(c *gin.Context) {
 	} else {
 		c.String(http.StatusOK, "OK")
 	}
+}
+
+func (pm *ProxyManager) apiGetVersion(c *gin.Context) {
+	data, err := json.Marshal(version.VersionJSON)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get version"})
+		return
+	}
+	c.Data(http.StatusOK, "application/json", data)
 }

@@ -16,6 +16,8 @@ builds:
         goarch: arm64
       - goos: windows
         goarch: arm64
+    ldflags:
+      - -X github.com/mostlygeek/llama-swap/version.Version={{.Version}} -X github.com/mostlygeek/llama-swap/version.Commit={{.Commit}} -X github.com/mostlygeek/llama-swap/version.Date={{.CommitDate}}
 
 archives:
   - id: default

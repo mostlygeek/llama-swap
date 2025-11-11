@@ -23,6 +23,8 @@ interface APIProviderType {
   upstreamLogs: string;
   metrics: Metrics[];
   connectionStatus: ConnectionState;
+  versionInfo: VersionInfo | null;
+  getVersionInfo: () => Promise<void>;
 }
 
 interface Metrics {
@@ -41,9 +43,16 @@ interface LogData {
   source: "upstream" | "proxy";
   data: string;
 }
+
 interface APIEventEnvelope {
   type: "modelStatus" | "logData" | "metrics";
   data: string;
+}
+
+interface VersionInfo {
+  version: string;
+  commit: string;
+  date: string;
 }
 
 const APIContext = createContext<APIProviderType | undefined>(undefined);
@@ -59,6 +68,7 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
   const [upstreamLogs, setUpstreamLogs] = useState("");
   const [metrics, setMetrics] = useState<Metrics[]>([]);
   const [connectionStatus, setConnectionState] = useState<ConnectionState>("disconnected");
+  const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
   //const apiEventSource = useRef<EventSource | null>(null);
 
   const [models, setModels] = useState<Model[]>([]);
@@ -145,6 +155,7 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
         retryCount++;
         const delay = Math.min(initialDelay * Math.pow(2, retryCount - 1), 5000);
         setConnectionState("disconnected");
+        setVersionInfo(null);
         setTimeout(connect, delay);
       };
     };
@@ -218,6 +229,19 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
     }
   }, []);
 
+  const getVersionInfo = useCallback(async () => {
+    try {
+      const response = await fetch("/api/version");
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data: VersionInfo = await response.json();
+      setVersionInfo(data);
+    } catch (error) {
+      return;
+    }
+  }, []);
+
   const value = useMemo(
     () => ({
       models,
@@ -230,8 +254,10 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
       upstreamLogs,
       metrics,
       connectionStatus,
+      versionInfo,
+      getVersionInfo,
     }),
-    [models, listModels, unloadAllModels, loadModel, enableAPIEvents, proxyLogs, upstreamLogs, metrics]
+    [models, listModels, unloadAllModels, unloadSingleModel, loadModel, enableAPIEvents, proxyLogs, upstreamLogs, metrics, connectionStatus, versionInfo, getVersionInfo]
   );
 
   return <APIContext.Provider value={value}>{children}</APIContext.Provider>;

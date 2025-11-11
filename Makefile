@@ -45,18 +45,18 @@ ui: ui/node_modules
 # Build OSX binary
 mac: ui
 	@echo "Building Mac binary..."
-	GOOS=darwin GOARCH=arm64 go build -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-darwin-arm64
+	GOOS=darwin GOARCH=arm64 go build -ldflags="-X github.com/mostlygeek/llama-swap/version.Commit=${GIT_HASH} -X github.com/mostlygeek/llama-swap/version.Version=local_${GIT_HASH} -X github.com/mostlygeek/llama-swap/version.Date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-darwin-arm64
 
 # Build Linux binary
 linux: ui
 	@echo "Building Linux binary..."
-	GOOS=linux GOARCH=amd64 go build -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-linux-amd64
-	GOOS=linux GOARCH=arm64 go build -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-linux-arm64
+	GOOS=linux GOARCH=amd64 go build -ldflags="-X github.com/mostlygeek/llama-swap/version.Commit=${GIT_HASH} -X github.com/mostlygeek/llama-swap/version.Version=local_${GIT_HASH} -X github.com/mostlygeek/llama-swap/version.Date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-linux-amd64
+	GOOS=linux GOARCH=arm64 go build -ldflags="-X github.com/mostlygeek/llama-swap/version.Commit=${GIT_HASH} -X github.com/mostlygeek/llama-swap/version.Version=local_${GIT_HASH} -X github.com/mostlygeek/llama-swap/version.Date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-linux-arm64
 
 # Build Windows binary
 windows: ui
 	@echo "Building Windows binary..."
-	GOOS=windows GOARCH=amd64 go build -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-windows-amd64.exe
+	GOOS=windows GOARCH=amd64 go build -ldflags="-X github.com/mostlygeek/llama-swap/version.Commit=${GIT_HASH} -X github.com/mostlygeek/llama-swap/version.Version=local_${GIT_HASH} -X github.com/mostlygeek/llama-swap/version.Date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-windows-amd64.exe
 
 # for testing proxy.Process
 simple-responder:

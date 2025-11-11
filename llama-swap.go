@@ -17,12 +17,7 @@ import (
 	"github.com/mostlygeek/llama-swap/event"
 	"github.com/mostlygeek/llama-swap/proxy"
 	"github.com/mostlygeek/llama-swap/proxy/config"
-)
-
-var (
-	version string = "0"
-	commit  string = "abcd1234"
-	date    string = "unknown"
+	"github.com/mostlygeek/llama-swap/version"
 )
 
 func main() {
@@ -37,7 +32,7 @@ func main() {
 	flag.Parse() // Parse the command-line flags
 
 	if *showVersion {
-		fmt.Printf("version: %s (%s), built at %s\n", version, commit, date)
+		fmt.Printf("version: %s (%s), built at %s\n", version.Version, version.Commit, version.Date)
 		os.Exit(0)
 	}
 
