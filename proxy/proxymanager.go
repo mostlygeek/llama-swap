@@ -75,6 +75,54 @@ func New(config config.Config) *ProxyManager {
 		upstreamLogger.SetLogLevel(LevelInfo)
 	}
 
+	switch strings.ToLower(strings.TrimSpace(config.LogTimeFormat)) {
+	case "ansic":
+		proxyLogger.SetLogTimeFormat(time.ANSIC)
+		upstreamLogger.SetLogTimeFormat(time.ANSIC)
+	case "unixdate":
+		proxyLogger.SetLogTimeFormat(time.UnixDate)
+		upstreamLogger.SetLogTimeFormat(time.UnixDate)
+	case "rubydate":
+		proxyLogger.SetLogTimeFormat(time.RubyDate)
+		upstreamLogger.SetLogTimeFormat(time.RubyDate)
+	case "rfc822":
+		proxyLogger.SetLogTimeFormat(time.RFC822)
+		upstreamLogger.SetLogTimeFormat(time.RFC822)
+	case "rfc822z":
+		proxyLogger.SetLogTimeFormat(time.RFC822Z)
+		upstreamLogger.SetLogTimeFormat(time.RFC822Z)
+	case "rfc850":
+		proxyLogger.SetLogTimeFormat(time.RFC850)
+		upstreamLogger.SetLogTimeFormat(time.RFC850)
+	case "rfc1123":
+		proxyLogger.SetLogTimeFormat(time.RFC1123)
+		upstreamLogger.SetLogTimeFormat(time.RFC1123)
+	case "rfc1123z":
+		proxyLogger.SetLogTimeFormat(time.RFC1123Z)
+		upstreamLogger.SetLogTimeFormat(time.RFC1123Z)
+	case "rfc3339":
+		proxyLogger.SetLogTimeFormat(time.RFC3339)
+		upstreamLogger.SetLogTimeFormat(time.RFC3339)
+	case "rfc3339nano":
+		proxyLogger.SetLogTimeFormat(time.RFC3339Nano)
+		upstreamLogger.SetLogTimeFormat(time.RFC3339Nano)
+	case "kitchen":
+		proxyLogger.SetLogTimeFormat(time.Kitchen)
+		upstreamLogger.SetLogTimeFormat(time.Kitchen)
+	case "stamp":
+		proxyLogger.SetLogTimeFormat(time.Stamp)
+		upstreamLogger.SetLogTimeFormat(time.Stamp)
+	case "stampmilli":
+		proxyLogger.SetLogTimeFormat(time.StampMilli)
+		upstreamLogger.SetLogTimeFormat(time.StampMilli)
+	case "stampmicro":
+		proxyLogger.SetLogTimeFormat(time.StampMicro)
+		upstreamLogger.SetLogTimeFormat(time.StampMicro)
+	case "stampnano":
+		proxyLogger.SetLogTimeFormat(time.StampNano)
+		upstreamLogger.SetLogTimeFormat(time.StampNano)
+        }
+
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 
 	var maxMetrics int

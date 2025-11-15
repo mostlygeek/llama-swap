@@ -26,6 +26,12 @@ healthCheckTimeout: 500
 # - Valid log levels: debug, info, warn, error
 logLevel: info
 
+# logTimeFormat: enables and sets the logging timestamp format
+# - optional, default (disabled): ""
+# - Valid example time formats: UnixDate, RFC822, RFC822Z, RFC3339
+# - For more read: https://pkg.go.dev/time#pkg-constants
+logTimeFormat: ""
+
 # metricsMaxInMemory: maximum number of metrics to keep in memory
 # - optional, default: 1000
 # - controls how many metrics are stored in memory before older ones are discarded
