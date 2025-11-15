@@ -376,28 +376,40 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 			continue
 		}
 
-		record := gin.H{
-			"id":       id,
-			"object":   "model",
-			"created":  createdTime,
-			"owned_by": "llama-swap",
+		newRecord := func(modelId string) gin.H {
+			record := gin.H{
+				"id":       modelId,
+				"object":   "model",
+				"created":  createdTime,
+				"owned_by": "llama-swap",
+			}
+
+			if name := strings.TrimSpace(modelConfig.Name); name != "" {
+				record["name"] = name
+			}
+			if desc := strings.TrimSpace(modelConfig.Description); desc != "" {
+				record["description"] = desc
+			}
+
+			// Add metadata if present
+			if len(modelConfig.Metadata) > 0 {
+				record["meta"] = gin.H{
+					"llamaswap": modelConfig.Metadata,
+				}
+			}
+			return record
 		}
 
-		if name := strings.TrimSpace(modelConfig.Name); name != "" {
-			record["name"] = name
-		}
-		if desc := strings.TrimSpace(modelConfig.Description); desc != "" {
-			record["description"] = desc
-		}
+		data = append(data, newRecord(id))
 
-		// Add metadata if present
-		if len(modelConfig.Metadata) > 0 {
-			record["meta"] = gin.H{
-				"llamaswap": modelConfig.Metadata,
+		// Include aliases
+		if pm.config.IncludeAliasesInList {
+			for _, alias := range modelConfig.Aliases {
+				if alias := strings.TrimSpace(alias); alias != "" {
+					data = append(data, newRecord(alias))
+				}
 			}
 		}
-
-		data = append(data, record)
 	}
 
 	// Sort by the "id" key

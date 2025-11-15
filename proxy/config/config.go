@@ -132,6 +132,9 @@ type Config struct {
 
 	// send loading state in reasoning
 	SendLoadingState bool `yaml:"sendLoadingState"`
+
+	// present aliases to /v1/models OpenAI API listing
+	IncludeAliasesInList bool `yaml:"includeAliasesInList"`
 }
 
 func (c *Config) RealModelName(search string) (string, bool) {
