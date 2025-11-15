@@ -112,9 +112,9 @@ func (w *LogMonitor) SetLogLevel(level LogLevel) {
 }
 
 func (w *LogMonitor) SetLogTimeFormat(tFormat string) {
-        w.mu.Lock()
-        defer w.mu.Unlock()
-        w.tFormat = tFormat
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.tFormat = tFormat
 }
 
 func (w *LogMonitor) formatMessage(t time.Time, level string, msg string) []byte {
@@ -123,9 +123,9 @@ func (w *LogMonitor) formatMessage(t time.Time, level string, msg string) []byte
 		prefix = fmt.Sprintf("[%s] ", w.prefix)
 	}
 	tFormat := ""
-        if w.tFormat != "" {
-                tFormat = fmt.Sprintf("%s ", w.tFormat)
-        }
+	if w.tFormat != "" {
+		tFormat = fmt.Sprintf("%s ", w.tFormat)
+	}
 	return []byte(fmt.Sprintf("%s%s[%s] %s\n", t.Format(tFormat), prefix, level, msg))
 }
 

@@ -121,7 +121,7 @@ func New(config config.Config) *ProxyManager {
 	case "stampnano":
 		proxyLogger.SetLogTimeFormat(time.StampNano)
 		upstreamLogger.SetLogTimeFormat(time.StampNano)
-        }
+	}
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 

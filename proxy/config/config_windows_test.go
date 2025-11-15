@@ -156,9 +156,9 @@ groups:
 	modelLoadingState := false
 
 	expected := Config{
-		LogLevel:  "info",
+		LogLevel:      "info",
 		LogTimeFormat: "",
-		StartPort: 5800,
+		StartPort:     5800,
 		Macros: MacroList{
 			{"svr-path", "path/to/server"},
 		},
