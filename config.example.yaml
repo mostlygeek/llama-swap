@@ -46,6 +46,12 @@ startPort: 10001
 # - see #366 for more details
 sendLoadingState: true
 
+# includeAliasesInList: present aliases within the /v1/models OpenAI API listing
+# - optional, default: false
+# - when true, model aliases will be output to the API model listing duplicating
+#   all fields except for Id so chat UIs can use the alias equivalent to the original.
+includeAliasesInList: false
+
 # macros: a dictionary of string substitutions
 # - optional, default: empty dictionary
 # - macros are reusable snippets

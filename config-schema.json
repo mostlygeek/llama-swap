@@ -74,6 +74,11 @@
             "default": false,
             "description": "Inject loading status updates into the reasoning field. When true, a stream of loading messages will be sent to the client."
         },
+        "includeAliasesInList": {
+            "type": "boolean",
+            "default": false,
+            "description": "Present aliases within the /v1/models OpenAI API listing. when true, model aliases will be output to the API model listing duplicating all fields except for Id so chat UIs can use the alias equivalent to the original."
+        },
         "macros": {
             "$ref": "#/definitions/macros"
         },
