@@ -28,8 +28,10 @@ logLevel: info
 
 # logTimeFormat: enables and sets the logging timestamp format
 # - optional, default (disabled): ""
-# - Valid example time formats: UnixDate, RFC822, RFC822Z, RFC3339
-# - For more, read: https://pkg.go.dev/time#pkg-constants
+# - Valid values: "", "ansic", "unixdate", "rubydate", "rfc822", "rfc822z",
+#   "rfc850", "rfc1123", "rfc1123z", "rfc3339", "rfc3339nano", "kitchen",
+#   "stamp", "stampmilli", "stampmicro", and "stampnano".
+# - For more info, read: https://pkg.go.dev/time#pkg-constants
 logTimeFormat: ""
 
 # metricsMaxInMemory: maximum number of metrics to keep in memory

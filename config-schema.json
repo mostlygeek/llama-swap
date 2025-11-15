@@ -80,7 +80,7 @@
                 "stampnano"
             ],
             "default": "",
-            "description": "Enables and sets the logging timestamp format. Valid example time formats: unixdate, rfc822, rfc822z, rfc3339. For more, read: https://pkg.go.dev/time#pkg-constants"
+            "description": "Enables and sets the logging timestamp format. Valid values: \"\", \"ansic\", \"unixdate\", \"rubydate\", \"rfc822\", \"rfc822z\", \"rfc850\", \"rfc1123\", \"rfc1123z\", \"rfc3339\", \"rfc3339nano\", \"kitchen\", \"stamp\", \"stampmilli\", \"stampmicro\", and \"stampnano\". For more info, read: https://pkg.go.dev/time#pkg-constants"
         },
         "metricsMaxInMemory": {
             "type": "integer",

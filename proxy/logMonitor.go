@@ -117,14 +117,14 @@ func (w *LogMonitor) SetLogTimeFormat(tFormat string) {
 	w.tFormat = tFormat
 }
 
-func (w *LogMonitor) formatMessage(t time.Time, level string, msg string) []byte {
+func (w *LogMonitor) formatMessage(level string, msg string) []byte {
 	prefix := ""
 	if w.prefix != "" {
 		prefix = fmt.Sprintf("[%s] ", w.prefix)
 	}
 	timestamp := ""
 	if w.tFormat != "" {
-		timestamp = fmt.Sprintf("%s ", t.Format(w.tFormat))
+		timestamp = fmt.Sprintf("%s ", time.Now().Format(w.tFormat))
 	}
 	return []byte(fmt.Sprintf("%s%s[%s] %s\n", timestamp, prefix, level, msg))
 }
@@ -133,7 +133,7 @@ func (w *LogMonitor) log(level LogLevel, msg string) {
 	if level < w.level {
 		return
 	}
-	w.Write(w.formatMessage(time.Now(), level.String(), msg))
+	w.Write(w.formatMessage(level.String(), msg))
 }
 
 func (w *LogMonitor) Debug(msg string) {
