@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/mostlygeek/llama-swap/event"
 )
@@ -32,6 +33,9 @@ type LogMonitor struct {
 	// logging levels
 	level  LogLevel
 	prefix string
+
+	// timestamps
+	tFormat string
 }
 
 func NewLogMonitor() *LogMonitor {
@@ -45,6 +49,7 @@ func NewLogMonitorWriter(stdout io.Writer) *LogMonitor {
 		stdout:   stdout,
 		level:    LevelInfo,
 		prefix:   "",
+		tFormat:  "",
 	}
 }
 
@@ -106,19 +111,29 @@ func (w *LogMonitor) SetLogLevel(level LogLevel) {
 	w.level = level
 }
 
-func (w *LogMonitor) formatMessage(level string, msg string) []byte {
+func (w *LogMonitor) SetLogTimeFormat(tFormat string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.tFormat = tFormat
+}
+
+func (w *LogMonitor) formatMessage(t time.Time, level string, msg string) []byte {
 	prefix := ""
 	if w.prefix != "" {
 		prefix = fmt.Sprintf("[%s] ", w.prefix)
 	}
-	return []byte(fmt.Sprintf("%s[%s] %s\n", prefix, level, msg))
+	timestamp := ""
+	if w.tFormat != "" {
+		timestamp = fmt.Sprintf("%s ", t.Format(w.tFormat))
+	}
+	return []byte(fmt.Sprintf("%s%s[%s] %s\n", timestamp, prefix, level, msg))
 }
 
 func (w *LogMonitor) log(level LogLevel, msg string) {
 	if level < w.level {
 		return
 	}
-	w.Write(w.formatMessage(level.String(), msg))
+	w.Write(w.formatMessage(time.Now(), level.String(), msg))
 }
 
 func (w *LogMonitor) Debug(msg string) {
