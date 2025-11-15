@@ -62,6 +62,7 @@
         "logTimeFormat": {
             "type": "string",
             "enum": [
+                "",
                 "ansic",
                 "unixdate",
                 "rubydate",
@@ -79,7 +80,7 @@
                 "stampnano"
             ],
             "default": "",
-            "description": "Enables and sets the logging timestamp format. Valid example time formats: unixdate, rfc822, rfc822z, rfc3339. For, more read: https://pkg.go.dev/time#pkg-constants"
+            "description": "Enables and sets the logging timestamp format. Valid example time formats: unixdate, rfc822, rfc822z, rfc3339. For more, read: https://pkg.go.dev/time#pkg-constants"
         },
         "metricsMaxInMemory": {
             "type": "integer",

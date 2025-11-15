@@ -122,11 +122,11 @@ func (w *LogMonitor) formatMessage(t time.Time, level string, msg string) []byte
 	if w.prefix != "" {
 		prefix = fmt.Sprintf("[%s] ", w.prefix)
 	}
-	tFormat := ""
+	timestamp := ""
 	if w.tFormat != "" {
-		tFormat = fmt.Sprintf("%s ", w.tFormat)
+		timestamp = fmt.Sprintf("%s ", t.Format(w.tFormat))
 	}
-	return []byte(fmt.Sprintf("%s%s[%s] %s\n", t.Format(tFormat), prefix, level, msg))
+	return []byte(fmt.Sprintf("%s%s[%s] %s\n", timestamp, prefix, level, msg))
 }
 
 func (w *LogMonitor) log(level LogLevel, msg string) {
