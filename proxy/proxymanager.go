@@ -403,9 +403,11 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 		data = append(data, newRecord(id))
 
 		// Include aliases
-		for _, alias := range modelConfig.Aliases {
-			if alias := strings.TrimSpace(alias); alias != "" {
-				data = append(data, newRecord(alias))
+		if pm.config.IncludeAliasesInList {
+			for _, alias := range modelConfig.Aliases {
+				if alias := strings.TrimSpace(alias); alias != "" {
+					data = append(data, newRecord(alias))
+				}
 			}
 		}
 	}

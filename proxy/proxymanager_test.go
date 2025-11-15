@@ -437,6 +437,70 @@ func TestProxyManager_ListModelsHandler_SortedByID(t *testing.T) {
 	}
 }
 
+func TestProxyManager_ListModelsHandler_IncludeAliasesInList(t *testing.T) {
+	// Configure alias
+	config := config.Config{
+		HealthCheckTimeout:   15,
+		IncludeAliasesInList: true,
+		Models: map[string]config.ModelConfig{
+			"model1": func() config.ModelConfig {
+				mc := getTestSimpleResponderConfig("model1")
+				mc.Name = "Model 1"
+				mc.Aliases = []string{"alias1"}
+				return mc
+			}(),
+		},
+		LogLevel: "error",
+	}
+
+	proxy := New(config)
+
+	// Request models list
+	req := httptest.NewRequest("GET", "/v1/models", nil)
+	w := CreateTestResponseRecorder()
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response struct {
+		Data []map[string]interface{} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Failed to parse JSON response: %v", err)
+	}
+
+	// We expect both base id and alias
+	var model1Data, alias1Data map[string]any
+	for _, model := range response.Data {
+		if model["id"] == "model1" {
+			model1Data = model
+		} else if model["id"] == "alias1" {
+			alias1Data = model
+		}
+	}
+
+	// Verify model1 has name
+	assert.NotNil(t, model1Data)
+	_, exists := model1Data["name"]
+	if !assert.True(t, exists, "model1 should have name key") {
+		t.FailNow()
+	}
+	name1, ok := model1Data["name"].(string)
+	assert.True(t, ok, "name1 should be a string")
+
+	// Verify alias1 has name
+	assert.NotNil(t, alias1Data)
+	_, exists = alias1Data["name"]
+	if !assert.True(t, exists, "alias1 should have name key") {
+		t.FailNow()
+	}
+	name2, ok := alias1Data["name"].(string)
+	assert.True(t, ok, "name2 should be a string")
+
+	// Name keys should match
+	assert.Equal(t, name1, name2)
+}
+
 func TestProxyManager_Shutdown(t *testing.T) {
 	// make broken model configurations
 	model1Config := getTestSimpleResponderConfigPort("model1", 9991)
