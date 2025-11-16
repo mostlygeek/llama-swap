@@ -26,6 +26,14 @@ healthCheckTimeout: 500
 # - Valid log levels: debug, info, warn, error
 logLevel: info
 
+# logTimeFormat: enables and sets the logging timestamp format
+# - optional, default (disabled): ""
+# - Valid values: "", "ansic", "unixdate", "rubydate", "rfc822", "rfc822z",
+#   "rfc850", "rfc1123", "rfc1123z", "rfc3339", "rfc3339nano", "kitchen",
+#   "stamp", "stampmilli", "stampmicro", and "stampnano".
+# - For more info, read: https://pkg.go.dev/time#pkg-constants
+logTimeFormat: ""
+
 # metricsMaxInMemory: maximum number of metrics to keep in memory
 # - optional, default: 1000
 # - controls how many metrics are stored in memory before older ones are discarded

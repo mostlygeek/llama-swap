@@ -58,6 +58,7 @@ models:
 	assert.Equal(t, 120, config.HealthCheckTimeout)
 	assert.Equal(t, 5800, config.StartPort)
 	assert.Equal(t, "info", config.LogLevel)
+	assert.Equal(t, "", config.LogTimeFormat)
 
 	// Test default group exists
 	defaultGroup, exists := config.Groups["(default)"]
@@ -163,8 +164,9 @@ groups:
 	modelLoadingState := false
 
 	expected := Config{
-		LogLevel:  "info",
-		StartPort: 5800,
+		LogLevel:      "info",
+		LogTimeFormat: "",
+		StartPort:     5800,
 		Macros: MacroList{
 			{"svr-path", "path/to/server"},
 		},
