@@ -35,7 +35,7 @@ type LogMonitor struct {
 	prefix string
 
 	// timestamps
-	tFormat string
+	timeFormat string
 }
 
 func NewLogMonitor() *LogMonitor {
@@ -44,12 +44,12 @@ func NewLogMonitor() *LogMonitor {
 
 func NewLogMonitorWriter(stdout io.Writer) *LogMonitor {
 	return &LogMonitor{
-		eventbus: event.NewDispatcherConfig(1000),
-		buffer:   ring.New(10 * 1024), // keep 10KB of buffered logs
-		stdout:   stdout,
-		level:    LevelInfo,
-		prefix:   "",
-		tFormat:  "",
+		eventbus:   event.NewDispatcherConfig(1000),
+		buffer:     ring.New(10 * 1024), // keep 10KB of buffered logs
+		stdout:     stdout,
+		level:      LevelInfo,
+		prefix:     "",
+		timeFormat: "",
 	}
 }
 
@@ -111,10 +111,10 @@ func (w *LogMonitor) SetLogLevel(level LogLevel) {
 	w.level = level
 }
 
-func (w *LogMonitor) SetLogTimeFormat(tFormat string) {
+func (w *LogMonitor) SetLogTimeFormat(timeFormat string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.tFormat = tFormat
+	w.timeFormat = timeFormat
 }
 
 func (w *LogMonitor) formatMessage(level string, msg string) []byte {
@@ -123,8 +123,8 @@ func (w *LogMonitor) formatMessage(level string, msg string) []byte {
 		prefix = fmt.Sprintf("[%s] ", w.prefix)
 	}
 	timestamp := ""
-	if w.tFormat != "" {
-		timestamp = fmt.Sprintf("%s ", time.Now().Format(w.tFormat))
+	if w.timeFormat != "" {
+		timestamp = fmt.Sprintf("%s ", time.Now().Format(w.timeFormat))
 	}
 	return []byte(fmt.Sprintf("%s%s[%s] %s\n", timestamp, prefix, level, msg))
 }
