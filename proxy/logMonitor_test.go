@@ -3,9 +3,9 @@ package proxy
 import (
 	"bytes"
 	"io"
+	"strings"
 	"sync"
 	"testing"
-	"strings"
 	"time"
 )
 
@@ -88,17 +88,17 @@ func TestWrite_ImmutableBuffer(t *testing.T) {
 }
 
 func TestWrite_LogTimeFormat(t *testing.T) {
-        // Create a new LogMonitor instance
-        lm := NewLogMonitorWriter(io.Discard)
+	// Create a new LogMonitor instance
+	lm := NewLogMonitorWriter(io.Discard)
 
 	// Enable timestamps
-	lm.timeFormat = time.RFC3339 
+	lm.timeFormat = time.RFC3339
 
-        // Write the message to the LogMonitor
-        lm.Info("Hello, World!")
+	// Write the message to the LogMonitor
+	lm.Info("Hello, World!")
 
-        // Get the history from the LogMonitor
-        history := lm.GetHistory()
+	// Get the history from the LogMonitor
+	history := lm.GetHistory()
 
 	timestamp := ""
 	fields := strings.Fields(string(history))
