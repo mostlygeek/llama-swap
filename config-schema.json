@@ -59,6 +59,29 @@
             "default": "info",
             "description": "Sets the logging value. Valid values: debug, info, warn, error."
         },
+        "logTimeFormat": {
+            "type": "string",
+            "enum": [
+                "",
+                "ansic",
+                "unixdate",
+                "rubydate",
+                "rfc822",
+                "rfc822z",
+                "rfc850",
+                "rfc1123",
+                "rfc1123z",
+                "rfc3339",
+                "rfc3339nano",
+                "kitchen",
+                "stamp",
+                "stampmilli",
+                "stampmicro",
+                "stampnano"
+            ],
+            "default": "",
+            "description": "Enables and sets the logging timestamp format. Valid values: \"\", \"ansic\", \"unixdate\", \"rubydate\", \"rfc822\", \"rfc822z\", \"rfc850\", \"rfc1123\", \"rfc1123z\", \"rfc3339\", \"rfc3339nano\", \"kitchen\", \"stamp\", \"stampmilli\", \"stampmicro\", and \"stampnano\". For more info, read: https://pkg.go.dev/time#pkg-constants"
+        },
         "metricsMaxInMemory": {
             "type": "integer",
             "default": 1000,

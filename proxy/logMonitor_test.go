@@ -3,8 +3,10 @@ package proxy
 import (
 	"bytes"
 	"io"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestLogMonitor(t *testing.T) {
@@ -82,5 +84,32 @@ func TestWrite_ImmutableBuffer(t *testing.T) {
 	expected := []byte("Hello, World!")
 	if !bytes.Equal(history, expected) {
 		t.Errorf("Expected history to be %q, got %q", expected, history)
+	}
+}
+
+func TestWrite_LogTimeFormat(t *testing.T) {
+	// Create a new LogMonitor instance
+	lm := NewLogMonitorWriter(io.Discard)
+
+	// Enable timestamps
+	lm.timeFormat = time.RFC3339
+
+	// Write the message to the LogMonitor
+	lm.Info("Hello, World!")
+
+	// Get the history from the LogMonitor
+	history := lm.GetHistory()
+
+	timestamp := ""
+	fields := strings.Fields(string(history))
+	if len(fields) > 0 {
+		timestamp = fields[0]
+	} else {
+		t.Fatalf("Cannot extract string from history")
+	}
+
+	_, err := time.Parse(time.RFC3339, timestamp)
+	if err != nil {
+		t.Fatalf("Cannot find timestamp: %v", err)
 	}
 }
