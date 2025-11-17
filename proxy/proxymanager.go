@@ -45,6 +45,11 @@ type ProxyManager struct {
 	// shutdown signaling
 	shutdownCtx    context.Context
 	shutdownCancel context.CancelFunc
+
+	// version info
+	buildDate string
+	commit    string
+	version   string
 }
 
 func New(config config.Config) *ProxyManager {
@@ -122,6 +127,10 @@ func New(config config.Config) *ProxyManager {
 
 		shutdownCtx:    shutdownCtx,
 		shutdownCancel: shutdownCancel,
+
+		buildDate: "unknown",
+		commit:    "abcd1234",
+		version:   "0",
 	}
 
 	// create the process groups
@@ -769,4 +778,12 @@ func (pm *ProxyManager) findGroupByModelName(modelName string) *ProcessGroup {
 		}
 	}
 	return nil
+}
+
+func (pm *ProxyManager) SetVersion(buildDate string, commit string, version string) {
+	pm.Lock()
+	defer pm.Unlock()
+	pm.buildDate = buildDate
+	pm.commit = commit
+	pm.version = version
 }

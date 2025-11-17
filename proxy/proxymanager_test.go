@@ -1147,3 +1147,41 @@ func TestProxyManager_ProxiedStreamingEndpointReturnsNoBufferingHeader(t *testin
 	assert.Equal(t, "no", rec.Header().Get("X-Accel-Buffering"))
 	assert.Contains(t, rec.Header().Get("Content-Type"), "text/event-stream")
 }
+
+func TestProxyManager_ApiGetVersion(t *testing.T) {
+	config := config.AddDefaultGroupToConfig(config.Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]config.ModelConfig{
+			"model1": getTestSimpleResponderConfig("model1"),
+		},
+		LogLevel: "error",
+	})
+
+	// Version test map
+	versionTest := map[string]string{
+		"build_date": "1970-01-01T00:00:00Z",
+		"commit":     "cc915ddb6f04a42d9cd1f524e1d46ec6ed069fdc",
+		"version":    "v001",
+	}
+
+	proxy := New(config)
+	proxy.SetVersion(versionTest["build_date"], versionTest["commit"], versionTest["version"])
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+
+	req := httptest.NewRequest("GET", "/api/version", nil)
+	w := CreateTestResponseRecorder()
+
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Ensure json response
+	assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
+
+	// Check for attributes
+	response := map[string]string{}
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	for key, value := range versionTest {
+		assert.Equal(t, value, response[key], "%s value %s should match response %s", key, value, response[key])
+	}
+}
