@@ -32,7 +32,6 @@ jobs:
 
     # necessary for testing proxy/Process swapping
     - name: Create simple-responder
-      if: steps.restore-simple-responder.outputs.cache-hit != 'true'
       shell: bash
       run: make simple-responder-windows
 
