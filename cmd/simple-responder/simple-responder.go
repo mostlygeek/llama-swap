@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -262,6 +263,32 @@ func main() {
 	r.GET("/health", func(c *gin.Context) {
 		c.Header("Content-Type", "application/json")
 		c.JSON(200, gin.H{"status": "ok"})
+	})
+
+	// Sleep/wake endpoints
+	r.POST("/sleep", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	r.POST("/wake_up", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	r.POST("/wake_up_fail", func(c *gin.Context) {
+		c.Status(http.StatusInternalServerError)
+	})
+
+	r.POST("/collective_rpc", func(c *gin.Context) {
+		body, _ := io.ReadAll(c.Request.Body)
+		if strings.Contains(string(body), "reload_weights") {
+			c.Status(http.StatusOK)
+		} else {
+			c.Status(http.StatusBadRequest)
+		}
+	})
+
+	r.POST("/reset_prefix_cache", func(c *gin.Context) {
+		c.Status(http.StatusOK)
 	})
 
 	r.GET("/", func(c *gin.Context) {

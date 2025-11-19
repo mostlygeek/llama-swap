@@ -29,12 +29,14 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
   - `/ui` - web UI
   - `/upstream/:model_id` - direct access to upstream server ([demo](https://github.com/mostlygeek/llama-swap/pull/31))
   - `/models/unload` - manually unload running models ([#58](https://github.com/mostlygeek/llama-swap/issues/58))
+  - `/models/sleep/:model_id` - put a model to sleep (requires sleep/wake configuration)
   - `/running` - list currently running models ([#61](https://github.com/mostlygeek/llama-swap/issues/61))
   - `/log` - remote log monitoring
   - `/health` - just returns "OK"
 - ✅ Customizable
   - Run multiple models at once with `Groups` ([#107](https://github.com/mostlygeek/llama-swap/issues/107))
   - Automatic unloading of models after timeout by setting a `ttl`
+  - Fast model switching with sleep/wake support (vLLM sleep mode, offload memory instead of full restart)
   - Reliable Docker and Podman support using `cmd` and `cmdStop` together
   - Preload models on startup with `hooks` ([#235](https://github.com/mostlygeek/llama-swap/pull/235))
 

@@ -65,7 +65,8 @@ func (pg *ProcessGroup) ProxyRequest(modelID string, writer http.ResponseWriter,
 
 			// is there something already running?
 			if pg.lastUsedProcess != "" {
-				pg.processes[pg.lastUsedProcess].Stop()
+				lastProcess := pg.processes[pg.lastUsedProcess]
+				lastProcess.MakeIdle()
 			}
 
 			// wait for the request to the new model to be fully handled
@@ -108,6 +109,26 @@ func (pg *ProcessGroup) StopProcess(modelID string, strategy StopStrategy) error
 	default:
 		process.Stop()
 	}
+	return nil
+}
+
+func (pg *ProcessGroup) SleepProcess(modelID string) error {
+	pg.Lock()
+
+	process, exists := pg.processes[modelID]
+	if !exists {
+		pg.Unlock()
+		return fmt.Errorf("process not found for %s", modelID)
+	}
+
+	if !process.isSleepEnabled() {
+		pg.Unlock()
+		return fmt.Errorf("model does not support sleep mode")
+	}
+
+	pg.Unlock()
+
+	process.Sleep()
 	return nil
 }
 

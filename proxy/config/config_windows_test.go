@@ -201,8 +201,10 @@ groups:
 				SendLoadingState: &modelLoadingState,
 			},
 		},
-		HealthCheckTimeout: 15,
-		MetricsMaxInMemory: 1000,
+		HealthCheckTimeout:  15,
+		SleepRequestTimeout: 10,
+		WakeRequestTimeout:  10,
+		MetricsMaxInMemory:  1000,
 		Profiles: map[string][]string{
 			"test": {"model1", "model2"},
 		},

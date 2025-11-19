@@ -103,7 +103,7 @@ func TestProcess_BrokenModelConfig(t *testing.T) {
 	w := httptest.NewRecorder()
 	process.ProxyRequest(w, req)
 	assert.Equal(t, http.StatusBadGateway, w.Code)
-	assert.Contains(t, w.Body.String(), "unable to start process")
+	assert.Contains(t, w.Body.String(), "unable to makeReady process")
 
 	w = httptest.NewRecorder()
 	process.ProxyRequest(w, req)
@@ -260,6 +260,18 @@ func TestProcess_SwapState(t *testing.T) {
 		{"Shutdown to Stopped", StateShutdown, StateShutdown, StateStopped, ErrInvalidStateTransition, StateShutdown},
 		{"Shutdown to Starting", StateShutdown, StateShutdown, StateStarting, ErrInvalidStateTransition, StateShutdown},
 		{"Expected state mismatch", StateStopped, StateStarting, StateStarting, ErrExpectedStateMismatch, StateStopped},
+		// Sleep/wake state transitions
+		{"Ready to SleepPending", StateReady, StateReady, StateSleepPending, nil, StateSleepPending},
+		{"SleepPending to Asleep", StateSleepPending, StateSleepPending, StateAsleep, nil, StateAsleep},
+		{"SleepPending to Stopping", StateSleepPending, StateSleepPending, StateStopping, nil, StateStopping},
+		{"SleepPending to Stopped", StateSleepPending, StateSleepPending, StateStopped, nil, StateStopped},
+		{"Asleep to Waking", StateAsleep, StateAsleep, StateWaking, nil, StateWaking},
+		{"Asleep to Stopping", StateAsleep, StateAsleep, StateStopping, nil, StateStopping},
+		{"Waking to Ready", StateWaking, StateWaking, StateReady, nil, StateReady},
+		{"Waking to Stopping", StateWaking, StateWaking, StateStopping, nil, StateStopping},
+		{"Waking to Stopped", StateWaking, StateWaking, StateStopped, nil, StateStopped},
+		{"Ready to Asleep Invalid", StateReady, StateReady, StateAsleep, ErrInvalidStateTransition, StateReady},
+		{"Asleep to Ready Invalid", StateAsleep, StateAsleep, StateReady, ErrInvalidStateTransition, StateAsleep},
 	}
 
 	for _, test := range tests {
@@ -564,4 +576,129 @@ func (w *panicOnWriteResponseWriter) Write(b []byte) (int, error) {
 		panic(http.ErrAbortHandler)
 	}
 	return w.ResponseRecorder.Write(b)
+}
+
+// TestProcess_SleepAndWakeBasic tests the basic sleep/wake cycle
+func TestProcess_SleepAndWakeBasic(t *testing.T) {
+	expectedMessage := "sleep_wake_test"
+
+	// Get base config and modify sleep/wake fields (like TestProcess_StopCmd modifies CmdStop)
+	cfg := getTestSimpleResponderConfig(expectedMessage)
+	cfg.SleepEndpoints = []config.HTTPEndpoint{
+		{Endpoint: "/sleep", Method: "POST", Timeout: 5},
+	}
+	cfg.WakeEndpoints = []config.HTTPEndpoint{
+		{Endpoint: "/wake_up", Method: "POST", Timeout: 5},
+	}
+
+	process := NewProcess("sleep-wake-basic", 5, cfg, debugLogger, debugLogger)
+	defer process.Stop()
+
+	// Start the process
+	err := process.start()
+	assert.Nil(t, err)
+	assert.Equal(t, StateReady, process.CurrentState())
+
+	// Put it to sleep
+	process.Sleep()
+	assert.Equal(t, StateAsleep, process.CurrentState())
+
+	// Wake it up
+	err = process.wake()
+	assert.Nil(t, err)
+	assert.Equal(t, StateReady, process.CurrentState())
+}
+
+// TestProcess_MultiStepWakeSequence tests multi-step wake sequences like vLLM level 2
+func TestProcess_MultiStepWakeSequence(t *testing.T) {
+	expectedMessage := "multi_step_wake"
+
+	cfg := getTestSimpleResponderConfig(expectedMessage)
+	cfg.SleepEndpoints = []config.HTTPEndpoint{
+		{Endpoint: "/sleep?level=2", Method: "POST", Timeout: 5},
+	}
+	cfg.WakeEndpoints = []config.HTTPEndpoint{
+		{Endpoint: "/wake_up", Method: "POST", Timeout: 5},
+		{Endpoint: "/collective_rpc", Method: "POST", Body: `{"method": "reload_weights"}`, Timeout: 5},
+		{Endpoint: "/reset_prefix_cache", Method: "POST", Timeout: 5},
+	}
+
+	process := NewProcess("multi-step-wake", 5, cfg, debugLogger, debugLogger)
+	defer process.Stop()
+
+	// Start and sleep the process
+	err := process.start()
+	assert.Nil(t, err)
+	process.Sleep()
+	assert.Equal(t, StateAsleep, process.CurrentState())
+
+	// Wake it up - should execute all three steps successfully
+	err = process.wake()
+	assert.Nil(t, err)
+	assert.Equal(t, StateReady, process.CurrentState())
+}
+
+// TestProcess_SleepInsteadOfStopWithSwap tests that sleep is used instead of Stop when swapping models
+func TestProcess_SleepInsteadOfStopWithSwap(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping sleep/wake swap test")
+	}
+
+	expectedMessage := "sleep_swap_test"
+
+	cfg := getTestSimpleResponderConfig(expectedMessage)
+	cfg.SleepEndpoints = []config.HTTPEndpoint{
+		{Endpoint: "/sleep", Method: "POST", Timeout: 5},
+	}
+	cfg.WakeEndpoints = []config.HTTPEndpoint{
+		{Endpoint: "/wake_up", Method: "POST", Timeout: 5},
+	}
+
+	process := NewProcess("sleep-swap", 5, cfg, debugLogger, debugLogger)
+	defer process.Stop()
+
+	// Start the process
+	err := process.start()
+	assert.Nil(t, err)
+	assert.Equal(t, StateReady, process.CurrentState())
+
+	// Call MakeIdle which should use Sleep instead of Stop
+	process.MakeIdle()
+
+	// Process should be asleep, not stopped
+	assert.Equal(t, StateAsleep, process.CurrentState(), "Process should be asleep")
+}
+
+// TestProcess_WakeFailureFallsBackToStart tests that wake failures trigger a full restart
+func TestProcess_WakeFailureFallsBackToStart(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping wake failure test")
+	}
+
+	expectedMessage := "wake_failure_test"
+
+	cfg := getTestSimpleResponderConfig(expectedMessage)
+	cfg.SleepEndpoints = []config.HTTPEndpoint{
+		{Endpoint: "/sleep", Method: "POST", Timeout: 5},
+	}
+	cfg.WakeEndpoints = []config.HTTPEndpoint{
+		{Endpoint: "/wake_up_fail", Method: "POST", Timeout: 5}, // Use failing endpoint
+	}
+
+	process := NewProcess("wake-failure", 5, cfg, debugLogger, debugLogger)
+	defer process.Stop()
+
+	// Start and sleep the process
+	err := process.start()
+	assert.Nil(t, err)
+	process.Sleep()
+	assert.Equal(t, StateAsleep, process.CurrentState())
+
+	// Try to wake - should fail and transition to stopped
+	err = process.wake()
+	assert.NotNil(t, err, "Wake should return error")
+	assert.Contains(t, err.Error(), "wake", "Error should mention wake failure")
+
+	// Process should be stopped after wake failure
+	assert.Equal(t, StateStopped, process.CurrentState())
 }

@@ -133,6 +133,10 @@
     @apply inline-block px-2 py-1 text-xs font-medium rounded-lg;
   }
 
+  .status-badge {
+    @apply inline-block min-w-28;
+  }
+
   .status--ready {
     @apply bg-success/10 text-success;
   }
@@ -146,6 +150,19 @@
     @apply bg-error/10 text-error;
   }
 
+  .status--sleepPending,
+  .status--waking {
+    @apply bg-info/10 text-info;
+  }
+
+  .status--asleep {
+    @apply bg-primary/10 text-primary;
+  }
+
+  .status--shutdown {
+    @apply bg-error/20 text-error;
+  }
+
   /* Buttons */
   .btn {
     @apply bg-surface py-2 px-4 text-sm rounded-md border transition-colors duration-200 border-btn-border;
@@ -157,6 +174,10 @@
 
   .btn--sm {
     @apply px-2 py-0.5 text-xs;
+  }
+
+  .btn--action {
+    @apply min-w-16;
   }
 
   .btn:disabled {

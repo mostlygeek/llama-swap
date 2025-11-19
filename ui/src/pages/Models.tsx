@@ -37,7 +37,7 @@ export default function ModelsPage() {
 }
 
 function ModelsPanel() {
-  const { models, loadModel, unloadAllModels, unloadSingleModel } = useAPI();
+  const { models, loadModel, unloadAllModels, unloadSingleModel, sleepModel } = useAPI();
   const { isNarrow } = useTheme();
   const [isUnloading, setIsUnloading] = useState(false);
   const [showUnlisted, setShowUnlisted] = usePersistentState("showUnlisted", true);
@@ -146,7 +146,7 @@ function ModelsPanel() {
           <thead className="sticky top-0 bg-card z-10">
             <tr className="text-left border-b border-gray-200 dark:border-white/10 bg-surface">
               <th>{showIdorName === "id" ? "Model ID" : "Name"}</th>
-              <th></th>
+              <th>Actions</th>
               <th>State</th>
             </tr>
           </thead>
@@ -164,23 +164,41 @@ function ModelsPanel() {
                     </p>
                   )}
                 </td>
-                <td className="w-12">
-                  {model.state === "stopped" ? (
-                    <button className="btn btn--sm" onClick={() => loadModel(model.id)}>
-                      Load
-                    </button>
-                  ) : (
-                    <button
-                      className="btn btn--sm"
-                      onClick={() => unloadSingleModel(model.id)}
-                      disabled={model.state !== "ready"}
-                    >
-                      Unload
-                    </button>
-                  )}
+                <td className="w-40">
+                  <div className="flex gap-1 min-w-36">
+                    {model.state === "stopped" ? (
+                      <button className="btn btn--sm btn--action" onClick={() => loadModel(model.id)}>
+                        Load
+                      </button>
+                    ) : model.state === "asleep" ? (
+                      <>
+                        <button className="btn btn--sm btn--action" onClick={() => loadModel(model.id)}>
+                          Wake
+                        </button>
+                        <button className="btn btn--sm btn--action" onClick={() => unloadSingleModel(model.id)}>
+                          Unload
+                        </button>
+                      </>
+                    ) : model.state === "ready" ? (
+                      <>
+                        {model.sleepEnabled && (
+                          <button className="btn btn--sm btn--action" onClick={() => sleepModel(model.id)}>
+                            Sleep
+                          </button>
+                        )}
+                        <button className="btn btn--sm btn--action" onClick={() => unloadSingleModel(model.id)}>
+                          Unload
+                        </button>
+                      </>
+                    ) : (
+                      <button className="btn btn--sm btn--action" disabled>
+                        {model.state}
+                      </button>
+                    )}
+                  </div>
                 </td>
-                <td className="w-20">
-                  <span className={`w-16 text-center status status--${model.state}`}>{model.state}</span>
+                <td className="w-32">
+                  <span className={`status-badge text-center status status--${model.state}`}>{model.state}</span>
                 </td>
               </tr>
             ))}

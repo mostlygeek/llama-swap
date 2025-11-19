@@ -72,16 +72,17 @@ models:
 
 llama-swap supports many more features to customize how you want to manage your environment.
 
-| Feature   | Description                                    |
-| --------- | ---------------------------------------------- |
-| `ttl`     | automatic unloading of models after a timeout  |
-| `macros`  | reusable snippets to use in configurations     |
-| `groups`  | run multiple models at a time                  |
-| `hooks`   | event driven functionality                     |
-| `env`     | define environment variables per model         |
-| `aliases` | serve a model with different names             |
-| `filters` | modify requests before sending to the upstream |
-| `...`     | And many more tweaks                           |
+| Feature       | Description                                    |
+| ------------- | ---------------------------------------------- |
+| `ttl`         | automatic unloading of models after a timeout  |
+| `sleep/wake`  | fast model switching with sleep mode support   |
+| `macros`      | reusable snippets to use in configurations     |
+| `groups`      | run multiple models at a time                  |
+| `hooks`       | event driven functionality                     |
+| `env`         | define environment variables per model         |
+| `aliases`     | serve a model with different names             |
+| `filters`     | modify requests before sending to the upstream |
+| `...`         | And many more tweaks                           |
 
 ## Full Configuration Example
 
@@ -119,6 +120,18 @@ logLevel: info
 # - controls how many metrics are stored in memory before older ones are discarded
 # - useful for limiting memory usage when processing large volumes of metrics
 metricsMaxInMemory: 1000
+
+# sleepRequestTimeout: number of seconds to wait for each sleep HTTP request to complete
+# - optional, default: 10
+# - applies globally to all sleep endpoints unless overridden per-endpoint with timeout field
+# - used when putting a model to sleep during model swapping
+sleepRequestTimeout: 20
+
+# wakeRequestTimeout: number of seconds to wait for each wake HTTP request to complete
+# - optional, default: 10
+# - applies globally to all wake endpoints unless overridden per-endpoint with timeout field
+# - used when waking a model from sleep
+wakeRequestTimeout: 20
 
 # startPort: sets the starting port number for the automatic ${PORT} macro.
 # - optional, default: 5800
@@ -304,6 +317,84 @@ models:
     # - on Windows, calls taskkill to stop the process
     # - processes have 5 seconds to shutdown until forceful termination is attempted
     cmdStop: docker stop ${MODEL_ID}
+
+  # vLLM Sleep Mode Example - Level 1:
+  # vLLM supports sleep/wake functionality for fast model switching
+  # See: https://docs.vllm.ai/en/stable/features/sleep_mode.html
+  # Level 1: offload weights to CPU RAM (faster wake, higher RAM usage, single-step wake)
+  "vllm-sleep-level1":
+    cmd: |
+      uv run python -m vllm.entrypoints.openai.api_server
+      --model /path/to/models/my-model
+      --served-model-name ${MODEL_ID}
+      --port ${PORT}
+      --enable-sleep-mode
+    env:
+      # Required to enable sleep mode in vLLM
+      - "VLLM_SERVER_DEV_MODE=1"
+
+    # sleepEndpoints: array of HTTP endpoints to call for putting the model to sleep
+    # - optional, default: []
+    # - if defined along with wakeEndpoints, used instead of cmdStop during model swapping
+    # - HTTP requests are sent to proxy base URL + endpoint
+    # - endpoints are called sequentially in array order
+    # - supports macro substitution: ${PORT}, ${MODEL_ID}
+    # - each endpoint can include query parameters: /sleep?level=1
+    # - vLLM sleep levels:
+    #   - level 1: offload weights to CPU RAM (faster wake, higher RAM usage)
+    #   - level 2: discard weights entirely (slower wake, minimal RAM usage)
+    sleepEndpoints:
+      - endpoint: /sleep?level=1
+        method: POST
+        # body is optional
+        # timeout is optional - overrides global sleepRequestTimeout for this specific endpoint
+
+    # wakeEndpoints: array of HTTP endpoints to call for waking the model
+    # - required if sleepEndpoints is defined
+    # - used when loading a sleeping model
+    # - HTTP requests are sent to proxy base URL + endpoint
+    # - endpoints are called sequentially in array order
+    # - level 1 sleep requires only single wake step
+    wakeEndpoints:
+      - endpoint: /wake_up
+        method: POST
+        # timeout is optional - overrides global wakeRequestTimeout for this specific endpoint
+
+  # vLLM Sleep Mode Example - Level 2:
+  # Level 2: discard weights entirely (slower wake, minimal RAM usage, multi-step wake)
+  # Requires a 3-step wake sequence to fully restore the model
+  "vllm-sleep-level2":
+    cmd: |
+      uv run python -m vllm.entrypoints.openai.api_server
+      --model /path/to/models/my-large-model
+      --served-model-name ${MODEL_ID}
+      --port ${PORT}
+      --enable-sleep-mode
+    env:
+      # Required to enable sleep mode in vLLM
+      - "VLLM_SERVER_DEV_MODE=1"
+
+    # Level 2 sleep endpoint - discards weights for minimal RAM usage
+    sleepEndpoints:
+      - endpoint: /sleep?level=2
+        method: POST
+        # Optional: override global sleepRequestTimeout
+        timeout: 15
+
+    # Level 2 wake requires multi-step sequence to reload weights and reset cache
+    wakeEndpoints:
+      # Step 1: Wake the model
+      - endpoint: /wake_up
+        method: POST
+      # Step 2: Reload weights
+      - endpoint: /collective_rpc
+        method: POST
+        body: '{"method": "reload_weights"}'
+        # Optional: override timeout for this specific endpoint
+        timeout: 12
+      # Step 3: Reset the prefix cache
+      - endpoint: /reset_prefix_cache
+        method: POST
 
 # groups: a dictionary of group settings
 # - optional, default: empty dictionary
