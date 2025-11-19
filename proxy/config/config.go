@@ -193,6 +193,16 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		config.HealthCheckTimeout = 15
 	}
 
+	if config.SleepRequestTimeout < 1 {
+		// set a minimum of 1 second
+		config.SleepRequestTimeout = 1
+	}
+
+	if config.WakeRequestTimeout < 1 {
+		// set a minimum of 1 second
+		config.WakeRequestTimeout = 1
+	}
+
 	if config.StartPort < 1 {
 		return Config{}, fmt.Errorf("startPort must be greater than 1")
 	}
