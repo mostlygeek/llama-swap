@@ -241,8 +241,8 @@ func (p *Process) forceState(newState ProcessState) {
 
 func (p *Process) makeReady() error {
 	currentState := p.CurrentState()
-	// If process is sleeping or sleep pending, wake it instead of starting
-	if currentState == StateSleepPending || currentState == StateAsleep {
+	// If process is sleeping, sleep pending, or already waking, use wake() instead of start()
+	if currentState == StateSleepPending || currentState == StateAsleep || currentState == StateWaking {
 		p.proxyLogger.Debugf("<%s> Process is asleep or sleep pending, waking instead of starting", p.ID)
 		err := p.wake()
 		if err == nil {
