@@ -694,11 +694,10 @@ func TestProcess_WakeFailureFallsBackToStart(t *testing.T) {
 	process.Sleep()
 	assert.Equal(t, StateAsleep, process.CurrentState())
 
-	// Try to wake - should fail and transition to stopped
+	// Try to wake - should fall back to start()
 	err = process.wake()
-	assert.NotNil(t, err, "Wake should return error")
-	assert.Contains(t, err.Error(), "wake", "Error should mention wake failure")
+	assert.Nil(t, err)
 
-	// Process should be stopped after wake failure
-	assert.Equal(t, StateStopped, process.CurrentState())
+	// Process should be ready
+	assert.Equal(t, StateReady, process.CurrentState())
 }

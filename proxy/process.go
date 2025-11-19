@@ -241,18 +241,12 @@ func (p *Process) forceState(newState ProcessState) {
 
 func (p *Process) makeReady() error {
 	currentState := p.CurrentState()
-	// If process is sleeping, sleep pending, or already waking, use wake() instead of start()
 	if currentState == StateSleepPending || currentState == StateAsleep || currentState == StateWaking {
-		p.proxyLogger.Debugf("<%s> Process is asleep or sleep pending, waking instead of starting", p.ID)
-		err := p.wake()
-		if err == nil {
-			return nil
-		} else {
-			p.proxyLogger.Debugf("<%s> Process wake() failed, fall back to process start()", p.ID)
-		}
+		p.proxyLogger.Debugf("<%s> Process is sleeping, sleep pending, or already waking, use wake() instead of start()", p.ID)
+		return p.wake()
+	} else {
+		return p.start()
 	}
-
-	return p.start()
 }
 
 // MakeIdle transitions the process to an idle state, using sleep mode if configured, otherwise stopping.
@@ -596,9 +590,9 @@ func (p *Process) wake() error {
 
 	wakeStartTime := time.Now()
 	if err := p.sendWakeRequests(); err != nil {
-		p.proxyLogger.Errorf("<%s> sendWakeRequests failed, falling back to StopImmediately(): %v", p.ID, err)
+		p.proxyLogger.Errorf("<%s> sendWakeRequests failed, falling back to restarting the process: %v", p.ID, err)
 		p.StopImmediately()
-		return fmt.Errorf("wake command failed: %v", err)
+		return p.start()
 	}
 
 	if curState, err := p.swapState(StateWaking, StateReady); err != nil {
