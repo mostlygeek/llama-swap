@@ -45,11 +45,26 @@ if [[ -z "$LCPP_TAG" ]]; then
     exit 1
 fi
 
-CONTAINER_TAG="ghcr.io/mostlygeek/llama-swap:v${LS_VER}-${ARCH}-${LCPP_TAG}"
-CONTAINER_LATEST="ghcr.io/mostlygeek/llama-swap:${ARCH}"
-echo "Building ${CONTAINER_TAG} $LS_VER"
-docker build -f llama-swap.Containerfile --build-arg BASE_TAG=${BASE_TAG} --build-arg LS_VER=${LS_VER} -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} .
-if [ "$PUSH_IMAGES" == "true" ]; then
-  docker push ${CONTAINER_TAG}
-  docker push ${CONTAINER_LATEST}
-fi
+for CONTAINER_TYPE in non-root root; do
+  CONTAINER_TAG="ghcr.io/mostlygeek/llama-swap:v${LS_VER}-${ARCH}-${LCPP_TAG}"
+  CONTAINER_LATEST="ghcr.io/mostlygeek/llama-swap:${ARCH}"
+  USER_UID=0
+  USER_GID=0
+  USER_HOME=/root
+
+  if [ "$CONTAINER_TYPE" == "non-root" ]; then
+    CONTAINER_TAG="${CONTAINER_TAG}-non-root"
+    CONTAINER_LATEST="${CONTAINER_LATEST}-non-root"
+    USER_UID=10001
+    USER_GID=10001
+    USER_HOME=/app
+  fi
+
+  echo "Building $CONTAINER_TYPE $CONTAINER_TAG $LS_VER"
+  docker build -f llama-swap.Containerfile --build-arg BASE_TAG=${BASE_TAG} --build-arg LS_VER=${LS_VER} --build-arg UID=${USER_UID} \
+    --build-arg GID=${USER_GID} --build-arg USER_HOME=${USER_HOME} -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} .
+  if [ "$PUSH_IMAGES" == "true" ]; then
+    docker push ${CONTAINER_TAG}
+    docker push ${CONTAINER_LATEST}
+  fi
+done
