@@ -256,6 +256,7 @@ func (p *Process) start() error {
 	p.cmd.Env = append(p.cmd.Environ(), p.config.Env...)
 	p.cmd.Cancel = p.cmdStopUpstreamProcess
 	p.cmd.WaitDelay = p.gracefulStopTimeout
+	setProcAttributes(p.cmd)
 
 	p.cmdMutex.Lock()
 	p.cancelUpstream = ctxCancelUpstream
@@ -625,6 +626,7 @@ func (p *Process) cmdStopUpstreamProcess() error {
 		stopCmd := exec.Command(stopArgs[0], stopArgs[1:]...)
 		stopCmd.Stdout = p.processLogger
 		stopCmd.Stderr = p.processLogger
+		setProcAttributes(stopCmd)
 		stopCmd.Env = p.cmd.Env
 
 		if err := stopCmd.Run(); err != nil {
