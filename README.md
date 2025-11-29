@@ -13,7 +13,7 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
 
 - ✅ Easy to deploy and configure: one binary, one configuration file. no external dependencies
 - ✅ On-demand model switching
-- ✅ Use any local OpenAI compatible server (llama.cpp, vllm, tabbyAPI, etc)
+- ✅ Use any local OpenAI compatible server (llama.cpp, vllm, tabbyAPI, etc.)
   - future proof, upgrade your inference servers at any time.
 - ✅ OpenAI API supported endpoints:
   - `v1/completions`
@@ -61,7 +61,7 @@ llama-swap can be installed in multiple ways
 
 ### Docker Install ([download images](https://github.com/mostlygeek/llama-swap/pkgs/container/llama-swap))
 
-Nightly container images with llama-swap and llama-server are built for multiple platforms (cuda, vulkan, intel, etc) including non-root variants.
+Nightly container images with llama-swap and llama-server are built for multiple platforms (cuda, vulkan, intel, etc.) including non-root variants.
 
 ```shell
 $ docker pull ghcr.io/mostlygeek/llama-swap:cuda
