@@ -30,9 +30,9 @@ USER $UID:$GID
 
 WORKDIR /app
 RUN \
-    curl -LO https://github.com/"${LS_REPO}"/releases/download/v"${LS_VER}"/llama-swap_"${LS_VER}"_linux_amd64.tar.gz && \
-    tar -zxf llama-swap_"${LS_VER}"_linux_amd64.tar.gz && \
-    rm llama-swap_"${LS_VER}"_linux_amd64.tar.gz
+    curl -LO "https://github.com/${LS_REPO}/releases/download/v${LS_VER}/llama-swap_${LS_VER}_linux_amd64.tar.gz" && \
+    tar -zxf "llama-swap_${LS_VER}_linux_amd64.tar.gz" && \
+    rm "llama-swap_${LS_VER}_linux_amd64.tar.gz"
 
 COPY --chown=$UID:$GID config.example.yaml /app/config.yaml
 
