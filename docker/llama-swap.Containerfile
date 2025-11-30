@@ -1,8 +1,10 @@
+ARG BASE_IMAGE=ghcr.io/ggml-org/llama.cpp
 ARG BASE_TAG=server-cuda
-FROM ghcr.io/ggml-org/llama.cpp:${BASE_TAG}
+FROM ${BASE_IMAGE}:${BASE_TAG}
 
 # has to be after the FROM
 ARG LS_VER=170
+ARG LS_REPO=mostlygeek/llama-swap
 
 # Set default UID/GID arguments
 ARG UID=10001
@@ -28,9 +30,9 @@ USER $UID:$GID
 
 WORKDIR /app
 RUN \
-    curl -LO https://github.com/mostlygeek/llama-swap/releases/download/v"${LS_VER}"/llama-swap_"${LS_VER}"_linux_amd64.tar.gz && \
-    tar -zxf llama-swap_"${LS_VER}"_linux_amd64.tar.gz && \
-    rm llama-swap_"${LS_VER}"_linux_amd64.tar.gz
+    curl -LO "https://github.com/${LS_REPO}/releases/download/v${LS_VER}/llama-swap_${LS_VER}_linux_amd64.tar.gz" && \
+    tar -zxf "llama-swap_${LS_VER}_linux_amd64.tar.gz" && \
+    rm "llama-swap_${LS_VER}_linux_amd64.tar.gz"
 
 COPY --chown=$UID:$GID config.example.yaml /app/config.yaml
 
