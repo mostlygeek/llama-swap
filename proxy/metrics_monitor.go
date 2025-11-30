@@ -122,11 +122,18 @@ func (mp *metricsMonitor) wrapHandler(
 		}
 	} else {
 		if gjson.ValidBytes(body) {
-			if tm, err := parseMetrics(modelID, recorder.StartTime(), gjson.ParseBytes(body)); err != nil {
-				mp.logger.Warnf("error parsing metrics: %v, path=%s", err, request.URL.Path)
-			} else {
-				mp.addMetrics(tm)
+			parsed := gjson.ParseBytes(body)
+			usage := parsed.Get("usage")
+			timings := parsed.Get("timings")
+
+			if usage.Exists() || timings.Exists() {
+				if tm, err := parseMetrics(modelID, recorder.StartTime(), usage, timings); err != nil {
+					mp.logger.Warnf("error parsing metrics: %v, path=%s", err, request.URL.Path)
+				} else {
+					mp.addMetrics(tm)
+				}
 			}
+
 		} else {
 			mp.logger.Warnf("metrics skipped, invalid JSON in response body path=%s", request.URL.Path)
 		}
@@ -174,19 +181,20 @@ func processStreamingResponse(modelID string, start time.Time, body []byte) (Tok
 		}
 
 		if gjson.ValidBytes(data) {
-			return parseMetrics(modelID, start, gjson.ParseBytes(data))
+			parsed := gjson.ParseBytes(data)
+			usage := parsed.Get("usage")
+			timings := parsed.Get("timings")
+
+			if usage.Exists() || timings.Exists() {
+				return parseMetrics(modelID, start, usage, timings)
+			}
 		}
 	}
 
 	return TokenMetrics{}, fmt.Errorf("no valid JSON data found in stream")
 }
 
-func parseMetrics(modelID string, start time.Time, jsonData gjson.Result) (TokenMetrics, error) {
-	usage := jsonData.Get("usage")
-	timings := jsonData.Get("timings")
-	if !usage.Exists() && !timings.Exists() {
-		return TokenMetrics{}, fmt.Errorf("no usage or timings data found")
-	}
+func parseMetrics(modelID string, start time.Time, usage, timings gjson.Result) (TokenMetrics, error) {
 	// default values
 	cachedTokens := -1 // unknown or missing data
 	outputTokens := 0
@@ -198,19 +206,35 @@ func parseMetrics(modelID string, start time.Time, jsonData gjson.Result) (Token
 	durationMs := int(time.Since(start).Milliseconds())
 
 	if usage.Exists() {
-		outputTokens = int(jsonData.Get("usage.completion_tokens").Int())
-		inputTokens = int(jsonData.Get("usage.prompt_tokens").Int())
+		if pt := usage.Get("prompt_tokens"); pt.Exists() {
+			// v1/chat/completions
+			inputTokens = int(pt.Int())
+		} else if it := usage.Get("input_tokens"); it.Exists() {
+			// v1/messages
+			inputTokens = int(it.Int())
+		}
+
+		if ct := usage.Get("completion_tokens"); ct.Exists() {
+			// v1/chat/completions
+			outputTokens = int(ct.Int())
+		} else if ot := usage.Get("output_tokens"); ot.Exists() {
+			outputTokens = int(ot.Int())
+		}
+
+		if ct := usage.Get("cache_read_input_tokens"); ct.Exists() {
+			cachedTokens = int(ct.Int())
+		}
 	}
 
 	// use llama-server's timing data for tok/sec and duration as it is more accurate
 	if timings.Exists() {
-		inputTokens = int(jsonData.Get("timings.prompt_n").Int())
-		outputTokens = int(jsonData.Get("timings.predicted_n").Int())
-		promptPerSecond = jsonData.Get("timings.prompt_per_second").Float()
-		tokensPerSecond = jsonData.Get("timings.predicted_per_second").Float()
-		durationMs = int(jsonData.Get("timings.prompt_ms").Float() + jsonData.Get("timings.predicted_ms").Float())
+		inputTokens = int(timings.Get("prompt_n").Int())
+		outputTokens = int(timings.Get("predicted_n").Int())
+		promptPerSecond = timings.Get("prompt_per_second").Float()
+		tokensPerSecond = timings.Get("predicted_per_second").Float()
+		durationMs = int(timings.Get("prompt_ms").Float() + timings.Get("predicted_ms").Float())
 
-		if cachedValue := jsonData.Get("timings.cache_n"); cachedValue.Exists() {
+		if cachedValue := timings.Get("cache_n"); cachedValue.Exists() {
 			cachedTokens = int(cachedValue.Int())
 		}
 	}
