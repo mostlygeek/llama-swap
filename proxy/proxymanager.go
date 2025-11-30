@@ -236,27 +236,29 @@ func (pm *ProxyManager) setupGinEngine() {
 	})
 
 	// Set up routes using the Gin engine
-	pm.ginEngine.POST("/v1/chat/completions", pm.proxyOAIHandler)
+	pm.ginEngine.POST("/v1/chat/completions", pm.proxyInferenceHandler)
 	// Support legacy /v1/completions api, see issue #12
-	pm.ginEngine.POST("/v1/completions", pm.proxyOAIHandler)
+	pm.ginEngine.POST("/v1/completions", pm.proxyInferenceHandler)
+	// Support anthropic /v1/messages (added https://github.com/ggml-org/llama.cpp/pull/17570)
+	pm.ginEngine.POST("/v1/messages", pm.proxyInferenceHandler)
 
 	// Support embeddings and reranking
-	pm.ginEngine.POST("/v1/embeddings", pm.proxyOAIHandler)
+	pm.ginEngine.POST("/v1/embeddings", pm.proxyInferenceHandler)
 
 	// llama-server's /reranking endpoint + aliases
-	pm.ginEngine.POST("/reranking", pm.proxyOAIHandler)
-	pm.ginEngine.POST("/rerank", pm.proxyOAIHandler)
-	pm.ginEngine.POST("/v1/rerank", pm.proxyOAIHandler)
-	pm.ginEngine.POST("/v1/reranking", pm.proxyOAIHandler)
+	pm.ginEngine.POST("/reranking", pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/rerank", pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/rerank", pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/reranking", pm.proxyInferenceHandler)
 
 	// llama-server's /infill endpoint for code infilling
-	pm.ginEngine.POST("/infill", pm.proxyOAIHandler)
+	pm.ginEngine.POST("/infill", pm.proxyInferenceHandler)
 
 	// llama-server's /completion endpoint
-	pm.ginEngine.POST("/completion", pm.proxyOAIHandler)
+	pm.ginEngine.POST("/completion", pm.proxyInferenceHandler)
 
 	// Support audio/speech endpoint
-	pm.ginEngine.POST("/v1/audio/speech", pm.proxyOAIHandler)
+	pm.ginEngine.POST("/v1/audio/speech", pm.proxyInferenceHandler)
 	pm.ginEngine.POST("/v1/audio/transcriptions", pm.proxyOAIPostFormHandler)
 
 	pm.ginEngine.GET("/v1/models", pm.listModelsHandler)
@@ -545,7 +547,7 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 	}
 }
 
-func (pm *ProxyManager) proxyOAIHandler(c *gin.Context) {
+func (pm *ProxyManager) proxyInferenceHandler(c *gin.Context) {
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		pm.sendErrorResponse(c, http.StatusBadRequest, "could not ready request body")
