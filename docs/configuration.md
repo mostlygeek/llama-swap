@@ -384,3 +384,14 @@ hooks:
     preload:
       - "llama"
 ```
+
+## Hot Reloading Configuration
+
+Trigger a configuration reload by sending `SIGHUP` to the process:
+
+- **With Docker** (if container is named `llama-swap`):
+  ```bash
+  docker kill -s SIGHUP llama-swap
+  ```
+
+For real-time file system monitoring and automatic restarts on config changes, see [restart-on-config-change](./examples/restart-on-config-change/README.md).
