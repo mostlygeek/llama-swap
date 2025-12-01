@@ -77,7 +77,7 @@ func main() {
 	// Setup channels for server management
 	exitChan := make(chan struct{})
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
 	// Create server with initial handler
 	srv := &http.Server{
@@ -170,23 +170,34 @@ func main() {
 		}()
 	}
 
-	// shutdown on signal
+	// shutdown on SIGINT/SIGTERM
+	// reload config on SIGHUP
 	go func() {
-		sig := <-sigChan
-		fmt.Printf("Received signal %v, shutting down...\n", sig)
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-		defer cancel()
+		for sig := range sigChan {
+			switch sig {
+			case syscall.SIGINT, syscall.SIGTERM:
+				fmt.Printf("Received signal %v, shutting down...\n", sig)
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+				defer cancel()
 
-		if pm, ok := srv.Handler.(*proxy.ProxyManager); ok {
-			pm.Shutdown()
-		} else {
-			fmt.Println("srv.Handler is not of type *proxy.ProxyManager")
-		}
+				if pm, ok := srv.Handler.(*proxy.ProxyManager); ok {
+					pm.Shutdown()
+				} else {
+					fmt.Println("srv.Handler is not of type *proxy.ProxyManager")
+				}
 
-		if err := srv.Shutdown(ctx); err != nil {
-			fmt.Printf("Server shutdown error: %v\n", err)
+				if err := srv.Shutdown(ctx); err != nil {
+					fmt.Printf("Server shutdown error: %v\n", err)
+				}
+				close(exitChan)
+				return
+			case syscall.SIGHUP:
+				fmt.Println("Received SIGHUP. Reloading configuration...")
+				reloadProxyManager()
+			default:
+				log.Printf("Unhandled signal: %v", sig)
+			}
 		}
-		close(exitChan)
 	}()
 
 	// Start server
