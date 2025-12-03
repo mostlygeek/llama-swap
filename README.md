@@ -21,6 +21,8 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
   - `v1/embeddings`
   - `v1/audio/speech` ([#36](https://github.com/mostlygeek/llama-swap/issues/36))
   - `v1/audio/transcriptions` ([docs](https://github.com/mostlygeek/llama-swap/issues/41#issuecomment-2722637867))
+- ✅ Anthropic API supported endpoints:
+  - `v1/messages`
 - ✅ llama-server (llama.cpp) supported endpoints
   - `v1/rerank`, `v1/reranking`, `/rerank`
   - `/infill` - for code infilling
@@ -71,6 +73,14 @@ $ docker run -it --rm --runtime nvidia -p 9292:8080 \
  -v /path/to/models:/models \
  -v /path/to/custom/config.yaml:/app/config.yaml \
  ghcr.io/mostlygeek/llama-swap:cuda
+
+# configuration hot reload supported with a 
+# directory volume mount
+$ docker run -it --rm --runtime nvidia -p 9292:8080 \
+ -v /path/to/models:/models \
+ -v /path/to/custom/config.yaml:/app/config.yaml \
+ -v /path/to/config:/config \
+ ghcr.io/mostlygeek/llama-swap:cuda -config /config/config.yaml -watch-config
 ```
 
 <details>
