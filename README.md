@@ -1,4 +1,4 @@
-![llama-swap header image](header2.png)
+![llama-swap header image](header3.webp)
 ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/mostlygeek/llama-swap/total)
 ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/mostlygeek/llama-swap/go-ci.yml)
 ![GitHub Repo stars](https://img.shields.io/github/stars/mostlygeek/llama-swap)
@@ -46,7 +46,6 @@ llama-swap includes a real time web interface for monitoring logs and controllin
 
 <img width="1164" height="745" alt="image" src="https://github.com/user-attachments/assets/bacf3f9d-819f-430b-9ed2-1bfaa8d54579" />
 
-
 The Activity Page shows recent requests:
 
 <img width="1360" height="963" alt="image" src="https://github.com/user-attachments/assets/5f3edee6-d03a-4ae5-ae06-b20ac1f135bd" />
@@ -74,7 +73,7 @@ $ docker run -it --rm --runtime nvidia -p 9292:8080 \
  -v /path/to/custom/config.yaml:/app/config.yaml \
  ghcr.io/mostlygeek/llama-swap:cuda
 
-# configuration hot reload supported with a 
+# configuration hot reload supported with a
 # directory volume mount
 $ docker run -it --rm --runtime nvidia -p 9292:8080 \
  -v /path/to/models:/models \
