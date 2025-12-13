@@ -1,7 +1,11 @@
 package proxy
 
 import (
+	"os"
+	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/mostlygeek/llama-swap/proxy/config"
 	"github.com/stretchr/testify/assert"
@@ -131,4 +135,47 @@ func TestShouldRestartModel(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestConfigWatcher(t *testing.T) {
+	t.Run("detects file change", func(t *testing.T) {
+		// Create temp config file
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.yaml")
+
+		initialConfig := `
+models:
+  test-model:
+    cmd: echo hello
+    proxy: http://localhost:8080
+`
+		err := os.WriteFile(configPath, []byte(initialConfig), 0644)
+		assert.NoError(t, err)
+
+		// Track reload calls (use atomic for thread-safety)
+		var reloadCount atomic.Int32
+		onReload := func(path string) {
+			reloadCount.Add(1)
+		}
+
+		// Start watcher
+		watcher, err := newConfigWatcher(configPath, 50*time.Millisecond, onReload)
+		assert.NoError(t, err)
+		defer watcher.stop()
+
+		// Modify file
+		time.Sleep(100 * time.Millisecond) // let watcher start
+		newConfig := `
+models:
+  test-model:
+    cmd: echo world
+    proxy: http://localhost:8080
+`
+		err = os.WriteFile(configPath, []byte(newConfig), 0644)
+		assert.NoError(t, err)
+
+		// Wait for debounce + processing
+		time.Sleep(200 * time.Millisecond)
+		assert.Equal(t, int32(1), reloadCount.Load())
+	})
 }

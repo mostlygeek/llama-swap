@@ -2,7 +2,10 @@ package proxy
 
 import (
 	"slices"
+	"sync"
+	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/mostlygeek/llama-swap/proxy/config"
 )
 
@@ -42,4 +45,75 @@ func shouldRestartModel(old, new config.ModelConfig, globalRestart bool) bool {
 	}
 
 	return globalRestart
+}
+
+type configWatcher struct {
+	mu        sync.Mutex
+	watcher   *fsnotify.Watcher
+	debouncer *debouncer
+	stopChan  chan struct{}
+	stopped   bool
+}
+
+func newConfigWatcher(path string, debounceDelay time.Duration, onReload func(path string)) (*configWatcher, error) {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return nil, err
+	}
+
+	cw := &configWatcher{
+		watcher:  watcher,
+		stopChan: make(chan struct{}),
+	}
+
+	cw.debouncer = newDebouncer(debounceDelay, func() {
+		onReload(path)
+	})
+
+	// Start watching
+	go cw.watchLoop()
+
+	if err := watcher.Add(path); err != nil {
+		close(cw.stopChan) // Signal watchLoop to stop
+		cw.debouncer.stop()
+		watcher.Close()
+		return nil, err
+	}
+
+	return cw, nil
+}
+
+func (cw *configWatcher) watchLoop() {
+	for {
+		select {
+		case <-cw.stopChan:
+			return
+		case event, ok := <-cw.watcher.Events:
+			if !ok {
+				return
+			}
+			// Handle Write, Create, and Rename for editors that use atomic writes
+			if event.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename) != 0 {
+				cw.debouncer.trigger()
+			}
+		case _, ok := <-cw.watcher.Errors:
+			if !ok {
+				return
+			}
+			// Log error but continue watching
+		}
+	}
+}
+
+func (cw *configWatcher) stop() {
+	cw.mu.Lock()
+	defer cw.mu.Unlock()
+
+	if cw.stopped {
+		return
+	}
+	cw.stopped = true
+	close(cw.stopChan)
+	cw.debouncer.stop()
+	cw.watcher.Close()
 }
