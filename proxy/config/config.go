@@ -146,6 +146,9 @@ type Config struct {
 
 	// support API keys, see issue #433, #50, #251
 	RequiredAPIKeys []string `yaml:"apiKeys"`
+
+	// Hot-reload settings
+	ReloadRestartModels bool `yaml:"reloadRestartModels"` // default: false
 }
 
 func (c *Config) RealModelName(search string) (string, bool) {

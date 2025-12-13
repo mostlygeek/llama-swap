@@ -38,6 +38,9 @@ type ModelConfig struct {
 
 	// override global setting
 	SendLoadingState *bool `yaml:"sendLoadingState"`
+
+	// Hot-reload: override global reloadRestartModels for this model
+	ForceRestart *bool `yaml:"forceRestart"`
 }
 
 func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
