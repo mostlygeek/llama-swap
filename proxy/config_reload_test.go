@@ -227,3 +227,61 @@ func TestProxyManagerReloadConfig(t *testing.T) {
 		assert.True(t, found)
 	})
 }
+
+func TestProxyManagerConfigWatcher(t *testing.T) {
+	t.Run("watches config file and reloads on change", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.yaml")
+
+		initialConfig := `
+models:
+  model1:
+    cmd: echo hello
+    proxy: http://localhost:8080
+    checkEndpoint: none
+`
+		err := os.WriteFile(configPath, []byte(initialConfig), 0644)
+		assert.NoError(t, err)
+
+		cfg, err := config.LoadConfig(configPath)
+		assert.NoError(t, err)
+
+		pm := New(cfg)
+		defer pm.Shutdown()
+
+		// Start watcher
+		err = pm.StartConfigWatcher(configPath)
+		assert.NoError(t, err)
+
+		// Verify initial state
+		_, found := pm.config.RealModelName("model1")
+		assert.True(t, found)
+		_, found = pm.config.RealModelName("model2")
+		assert.False(t, found)
+
+		// Modify config file
+		time.Sleep(100 * time.Millisecond)
+		newConfig := `
+models:
+  model1:
+    cmd: echo hello
+    proxy: http://localhost:8080
+    checkEndpoint: none
+  model2:
+    cmd: echo world
+    proxy: http://localhost:9090
+    checkEndpoint: none
+`
+		err = os.WriteFile(configPath, []byte(newConfig), 0644)
+		assert.NoError(t, err)
+
+		// Wait for reload (2 second debounce + processing time)
+		time.Sleep(2500 * time.Millisecond)
+
+		// Verify new model is available
+		pm.RLock()
+		_, found = pm.config.RealModelName("model2")
+		pm.RUnlock()
+		assert.True(t, found, "model2 should be available after reload")
+	})
+}

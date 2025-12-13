@@ -46,6 +46,10 @@ type ProxyManager struct {
 	shutdownCtx    context.Context
 	shutdownCancel context.CancelFunc
 
+	// config hot reload
+	configWatcher *configWatcher
+	configPath    string
+
 	// version info
 	buildDate string
 	commit    string
@@ -240,6 +244,32 @@ func (pm *ProxyManager) ReloadConfig(newConfig config.Config) error {
 	return nil
 }
 
+// StartConfigWatcher starts watching the config file for changes
+func (pm *ProxyManager) StartConfigWatcher(configPath string) error {
+	pm.configPath = configPath
+
+	watcher, err := newConfigWatcher(configPath, 2*time.Second, func(path string) {
+		pm.proxyLogger.Info("Config file changed, reloading...")
+
+		newConfig, err := config.LoadConfig(path)
+		if err != nil {
+			pm.proxyLogger.Errorf("Failed to reload config: %v (keeping old config)", err)
+			return
+		}
+
+		if err := pm.ReloadConfig(newConfig); err != nil {
+			pm.proxyLogger.Errorf("Failed to apply new config: %v (keeping old config)", err)
+		}
+	})
+	if err != nil {
+		return err
+	}
+
+	pm.configWatcher = watcher
+	pm.proxyLogger.Infof("Watching config file: %s", configPath)
+	return nil
+}
+
 func (pm *ProxyManager) setupGinEngine() {
 
 	pm.ginEngine.Use(func(c *gin.Context) {
@@ -429,6 +459,13 @@ func (pm *ProxyManager) StopProcesses(strategy StopStrategy) {
 
 // Shutdown stops all processes managed by this ProxyManager
 func (pm *ProxyManager) Shutdown() {
+	// Stop config watcher FIRST, before acquiring lock
+	// The watcher callback calls ReloadConfig() which needs the lock,
+	// so stopping it inside the lock could deadlock
+	if pm.configWatcher != nil {
+		pm.configWatcher.stop()
+	}
+
 	pm.Lock()
 	defer pm.Unlock()
 
