@@ -192,6 +192,54 @@ func New(proxyConfig config.Config) *ProxyManager {
 	return pm
 }
 
+// ReloadConfig atomically replaces the configuration and updates process groups
+func (pm *ProxyManager) ReloadConfig(newConfig config.Config) error {
+	pm.Lock()
+	defer pm.Unlock()
+
+	oldConfig := pm.config
+
+	// Identify models that need restart
+	modelsToRestart := make(map[string]bool)
+	for modelID, newModelCfg := range newConfig.Models {
+		if oldModelCfg, exists := oldConfig.Models[modelID]; exists {
+			if shouldRestartModel(oldModelCfg, newModelCfg, newConfig.ReloadRestartModels) {
+				modelsToRestart[modelID] = true
+			}
+		}
+	}
+
+	// Update config
+	pm.config = newConfig
+
+	// Update process groups
+	for groupID, groupConfig := range newConfig.Groups {
+		if existingGroup, exists := pm.processGroups[groupID]; exists {
+			// Update existing group's config reference
+			existingGroup.Lock()
+			existingGroup.config = newConfig
+			existingGroup.Unlock()
+
+			// Restart models that need it
+			for _, modelID := range groupConfig.Members {
+				if modelsToRestart[modelID] {
+					if process, exists := existingGroup.processes[modelID]; exists {
+						pm.proxyLogger.Infof("Restarting model %s due to config change", modelID)
+						process.Stop() // Graceful stop - waits for in-flight requests
+					}
+				}
+			}
+		} else {
+			// New group - create it
+			processGroup := NewProcessGroup(groupID, newConfig, pm.proxyLogger, pm.upstreamLogger)
+			pm.processGroups[groupID] = processGroup
+		}
+	}
+
+	pm.proxyLogger.Info("Configuration reloaded successfully")
+	return nil
+}
+
 func (pm *ProxyManager) setupGinEngine() {
 
 	pm.ginEngine.Use(func(c *gin.Context) {
