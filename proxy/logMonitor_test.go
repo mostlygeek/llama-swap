@@ -232,7 +232,7 @@ Before (ring.Ring):
 | WithSubscribers (5 subs)        | 355 ns     | 264 B    | 2         |
 | GetHistory (after 1000 writes)  | 145,000 ns | 1.2 MB   | 22        |
 
-After (circularBuffer):
+After (circularBuffer 10KB):
 | Benchmark                       | ns/op      | bytes/op | allocs/op |
 |---------------------------------|------------|----------|-----------|
 | SmallWrite (14B)                | 26 ns      | 16 B     | 1         |
@@ -241,8 +241,17 @@ After (circularBuffer):
 | WithSubscribers (5 subs)        | 325 ns     | 240 B    | 1         |
 | GetHistory (after 1000 writes)  | 1,042 ns   | 10,240 B | 1         |
 
+After (circularBuffer 100KB):
+| Benchmark                       | ns/op      | bytes/op  | allocs/op |
+|---------------------------------|------------|-----------|-----------|
+| SmallWrite (14B)                | 26 ns      | 16 B      | 1         |
+| MediumWrite (241B)              | 66 ns      | 240 B     | 1         |
+| LargeWrite (4KB)                | 753 ns     | 4,096 B   | 1         |
+| WithSubscribers (5 subs)        | 309 ns     | 240 B     | 1         |
+| GetHistory (after 1000 writes)  | 7,788 ns   | 106,496 B | 1         |
+
 Summary:
-- GetHistory: 139x faster, 117x less memory
+- GetHistory: 139x faster (10KB), 18x faster (100KB)
 - Allocations: reduced from 2 to 1 across all operations
 - Small/medium writes: ~1.1-1.6x faster
 */
