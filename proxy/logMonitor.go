@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"container/ring"
 	"context"
 	"fmt"
 	"io"
@@ -11,6 +10,85 @@ import (
 
 	"github.com/mostlygeek/llama-swap/event"
 )
+
+// circularBuffer is a fixed-size circular byte buffer that overwrites
+// oldest data when full. It provides O(1) writes and O(n) reads.
+type circularBuffer struct {
+	data []byte // pre-allocated capacity
+	head int    // next write position
+	size int    // current number of bytes stored (0 to cap)
+}
+
+func newCircularBuffer(capacity int) *circularBuffer {
+	return &circularBuffer{
+		data: make([]byte, capacity),
+		head: 0,
+		size: 0,
+	}
+}
+
+// Write appends bytes to the buffer, overwriting oldest data when full.
+// Data is copied into the internal buffer (not stored by reference).
+func (cb *circularBuffer) Write(p []byte) {
+	if len(p) == 0 {
+		return
+	}
+
+	cap := len(cb.data)
+
+	// If input is larger than capacity, only keep the last cap bytes
+	if len(p) >= cap {
+		copy(cb.data, p[len(p)-cap:])
+		cb.head = 0
+		cb.size = cap
+		return
+	}
+
+	// Calculate how much space is available from head to end of buffer
+	firstPart := cap - cb.head
+	if firstPart >= len(p) {
+		// All data fits without wrapping
+		copy(cb.data[cb.head:], p)
+		cb.head = (cb.head + len(p)) % cap
+	} else {
+		// Data wraps around
+		copy(cb.data[cb.head:], p[:firstPart])
+		copy(cb.data[:len(p)-firstPart], p[firstPart:])
+		cb.head = len(p) - firstPart
+	}
+
+	// Update size
+	cb.size += len(p)
+	if cb.size > cap {
+		cb.size = cap
+	}
+}
+
+// GetHistory returns all buffered data in correct order (oldest to newest).
+// Returns a new slice (copy), not a view into internal buffer.
+func (cb *circularBuffer) GetHistory() []byte {
+	if cb.size == 0 {
+		return nil
+	}
+
+	result := make([]byte, cb.size)
+	cap := len(cb.data)
+
+	// Calculate start position (oldest data)
+	start := (cb.head - cb.size + cap) % cap
+
+	if start+cb.size <= cap {
+		// Data is contiguous, single copy
+		copy(result, cb.data[start:start+cb.size])
+	} else {
+		// Data wraps around, two copies
+		firstPart := cap - start
+		copy(result[:firstPart], cb.data[start:])
+		copy(result[firstPart:], cb.data[:cb.size-firstPart])
+	}
+
+	return result
+}
 
 type LogLevel int
 
@@ -24,7 +102,7 @@ const (
 type LogMonitor struct {
 	eventbus *event.Dispatcher
 	mu       sync.RWMutex
-	buffer   *ring.Ring
+	buffer   *circularBuffer
 	bufferMu sync.RWMutex
 
 	// typically this can be os.Stdout
@@ -45,7 +123,7 @@ func NewLogMonitor() *LogMonitor {
 func NewLogMonitorWriter(stdout io.Writer) *LogMonitor {
 	return &LogMonitor{
 		eventbus:   event.NewDispatcherConfig(1000),
-		buffer:     ring.New(10 * 1024), // keep 10KB of buffered logs
+		buffer:     newCircularBuffer(10 * 1024), // keep 10KB of buffered logs
 		stdout:     stdout,
 		level:      LevelInfo,
 		prefix:     "",
@@ -64,12 +142,12 @@ func (w *LogMonitor) Write(p []byte) (n int, err error) {
 	}
 
 	w.bufferMu.Lock()
-	bufferCopy := make([]byte, len(p))
-	copy(bufferCopy, p)
-	w.buffer.Value = bufferCopy
-	w.buffer = w.buffer.Next()
+	w.buffer.Write(p)
 	w.bufferMu.Unlock()
 
+	// Make a copy for broadcast to preserve immutability
+	bufferCopy := make([]byte, len(p))
+	copy(bufferCopy, p)
 	w.broadcast(bufferCopy)
 	return n, nil
 }
@@ -77,16 +155,7 @@ func (w *LogMonitor) Write(p []byte) (n int, err error) {
 func (w *LogMonitor) GetHistory() []byte {
 	w.bufferMu.RLock()
 	defer w.bufferMu.RUnlock()
-
-	var history []byte
-	w.buffer.Do(func(p any) {
-		if p != nil {
-			if content, ok := p.([]byte); ok {
-				history = append(history, content...)
-			}
-		}
-	})
-	return history
+	return w.buffer.GetHistory()
 }
 
 func (w *LogMonitor) OnLogData(callback func(data []byte)) context.CancelFunc {

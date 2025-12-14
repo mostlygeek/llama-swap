@@ -114,6 +114,57 @@ func TestWrite_LogTimeFormat(t *testing.T) {
 	}
 }
 
+func TestCircularBuffer_WrapAround(t *testing.T) {
+	// Create a small buffer to test wrap-around
+	cb := newCircularBuffer(10)
+
+	// Write "hello" (5 bytes)
+	cb.Write([]byte("hello"))
+	if got := string(cb.GetHistory()); got != "hello" {
+		t.Errorf("Expected 'hello', got %q", got)
+	}
+
+	// Write "world" (5 bytes) - buffer now full
+	cb.Write([]byte("world"))
+	if got := string(cb.GetHistory()); got != "helloworld" {
+		t.Errorf("Expected 'helloworld', got %q", got)
+	}
+
+	// Write "12345" (5 bytes) - should overwrite "hello"
+	cb.Write([]byte("12345"))
+	if got := string(cb.GetHistory()); got != "world12345" {
+		t.Errorf("Expected 'world12345', got %q", got)
+	}
+
+	// Write data larger than buffer capacity
+	cb.Write([]byte("abcdefghijklmnop")) // 16 bytes, only last 10 kept
+	if got := string(cb.GetHistory()); got != "ghijklmnop" {
+		t.Errorf("Expected 'ghijklmnop', got %q", got)
+	}
+}
+
+func TestCircularBuffer_BoundaryConditions(t *testing.T) {
+	// Test empty buffer
+	cb := newCircularBuffer(10)
+	if got := cb.GetHistory(); got != nil {
+		t.Errorf("Expected nil for empty buffer, got %q", got)
+	}
+
+	// Test exact capacity
+	cb.Write([]byte("1234567890"))
+	if got := string(cb.GetHistory()); got != "1234567890" {
+		t.Errorf("Expected '1234567890', got %q", got)
+	}
+
+	// Test write exactly at capacity boundary
+	cb = newCircularBuffer(10)
+	cb.Write([]byte("12345"))
+	cb.Write([]byte("67890"))
+	if got := string(cb.GetHistory()); got != "1234567890" {
+		t.Errorf("Expected '1234567890', got %q", got)
+	}
+}
+
 func BenchmarkLogMonitorWrite(b *testing.B) {
 	// Test data of varying sizes
 	smallMsg := []byte("small message\n")
@@ -170,12 +221,28 @@ func BenchmarkLogMonitorWrite(b *testing.B) {
 }
 
 /*
-Baseline
-| Benchmark | ops/sec | ns/op | bytes/op | allocs/op |
-|-----------|---------|-------|----------|-----------|
-| SmallWrite (14B) | ~27M | 43 ns | 40 B | 2 |
-| MediumWrite (241B) | ~16M | 76 ns | 264 B | 2 |
-| LargeWrite (4KB) | ~2.3M | 504 ns | 4120 B | 2 |
-| WithSubscribers (5 subs) | ~3.3M | 355 ns | 264 B | 2 |
-| GetHistory (after 1000 writes) | ~8K | 145 µs | 1.2 MB | 22 |
+Benchmark Results - MBP M1 Pro
+
+Before (ring.Ring):
+| Benchmark                       | ns/op      | bytes/op | allocs/op |
+|---------------------------------|------------|----------|-----------|
+| SmallWrite (14B)                | 43 ns      | 40 B     | 2         |
+| MediumWrite (241B)              | 76 ns      | 264 B    | 2         |
+| LargeWrite (4KB)                | 504 ns     | 4,120 B  | 2         |
+| WithSubscribers (5 subs)        | 355 ns     | 264 B    | 2         |
+| GetHistory (after 1000 writes)  | 145,000 ns | 1.2 MB   | 22        |
+
+After (circularBuffer):
+| Benchmark                       | ns/op      | bytes/op | allocs/op |
+|---------------------------------|------------|----------|-----------|
+| SmallWrite (14B)                | 26 ns      | 16 B     | 1         |
+| MediumWrite (241B)              | 67 ns      | 240 B    | 1         |
+| LargeWrite (4KB)                | 774 ns     | 4,096 B  | 1         |
+| WithSubscribers (5 subs)        | 325 ns     | 240 B    | 1         |
+| GetHistory (after 1000 writes)  | 1,042 ns   | 10,240 B | 1         |
+
+Summary:
+- GetHistory: 139x faster, 117x less memory
+- Allocations: reduced from 2 to 1 across all operations
+- Small/medium writes: ~1.1-1.6x faster
 */
