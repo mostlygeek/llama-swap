@@ -165,6 +165,65 @@ func TestCircularBuffer_BoundaryConditions(t *testing.T) {
 	}
 }
 
+func TestLogMonitor_LazyInit(t *testing.T) {
+	lm := NewLogMonitorWriter(io.Discard)
+
+	// Buffer should be nil before any writes
+	if lm.buffer != nil {
+		t.Error("Expected buffer to be nil before first write")
+	}
+
+	// GetHistory should return nil when buffer is nil
+	if got := lm.GetHistory(); got != nil {
+		t.Errorf("Expected nil history before first write, got %q", got)
+	}
+
+	// Write should lazily initialize the buffer
+	lm.Write([]byte("test"))
+
+	if lm.buffer == nil {
+		t.Error("Expected buffer to be initialized after write")
+	}
+
+	if got := string(lm.GetHistory()); got != "test" {
+		t.Errorf("Expected 'test', got %q", got)
+	}
+}
+
+func TestLogMonitor_Clear(t *testing.T) {
+	lm := NewLogMonitorWriter(io.Discard)
+
+	// Write some data
+	lm.Write([]byte("hello"))
+	if got := string(lm.GetHistory()); got != "hello" {
+		t.Errorf("Expected 'hello', got %q", got)
+	}
+
+	// Clear should release the buffer
+	lm.Clear()
+
+	if lm.buffer != nil {
+		t.Error("Expected buffer to be nil after Clear")
+	}
+
+	if got := lm.GetHistory(); got != nil {
+		t.Errorf("Expected nil history after Clear, got %q", got)
+	}
+}
+
+func TestLogMonitor_ClearAndReuse(t *testing.T) {
+	lm := NewLogMonitorWriter(io.Discard)
+
+	// Write, clear, then write again
+	lm.Write([]byte("first"))
+	lm.Clear()
+	lm.Write([]byte("second"))
+
+	if got := string(lm.GetHistory()); got != "second" {
+		t.Errorf("Expected 'second' after clear and reuse, got %q", got)
+	}
+}
+
 func BenchmarkLogMonitorWrite(b *testing.B) {
 	// Test data of varying sizes
 	smallMsg := []byte("small message\n")

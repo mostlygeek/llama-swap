@@ -125,7 +125,7 @@ func NewLogMonitor() *LogMonitor {
 func NewLogMonitorWriter(stdout io.Writer) *LogMonitor {
 	return &LogMonitor{
 		eventbus:   event.NewDispatcherConfig(1000),
-		buffer:     newCircularBuffer(LogBufferSize),
+		buffer:     nil, // lazy initialized on first Write
 		stdout:     stdout,
 		level:      LevelInfo,
 		prefix:     "",
@@ -144,6 +144,9 @@ func (w *LogMonitor) Write(p []byte) (n int, err error) {
 	}
 
 	w.bufferMu.Lock()
+	if w.buffer == nil {
+		w.buffer = newCircularBuffer(LogBufferSize)
+	}
 	w.buffer.Write(p)
 	w.bufferMu.Unlock()
 
@@ -157,7 +160,18 @@ func (w *LogMonitor) Write(p []byte) (n int, err error) {
 func (w *LogMonitor) GetHistory() []byte {
 	w.bufferMu.RLock()
 	defer w.bufferMu.RUnlock()
+	if w.buffer == nil {
+		return nil
+	}
 	return w.buffer.GetHistory()
+}
+
+// Clear releases the buffer memory, making it eligible for GC.
+// The buffer will be lazily re-allocated on the next Write.
+func (w *LogMonitor) Clear() {
+	w.bufferMu.Lock()
+	w.buffer = nil
+	w.bufferMu.Unlock()
 }
 
 func (w *LogMonitor) OnLogData(callback func(data []byte)) context.CancelFunc {

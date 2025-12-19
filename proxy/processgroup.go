@@ -46,7 +46,8 @@ func NewProcessGroup(id string, config config.Config, proxyLogger *LogMonitor, u
 	// Create a Process for each member in the group
 	for _, modelID := range groupConfig.Members {
 		modelConfig, modelID, _ := pg.config.FindConfig(modelID)
-		process := NewProcess(modelID, pg.config.HealthCheckTimeout, modelConfig, pg.upstreamLogger, pg.proxyLogger)
+		processLogger := NewLogMonitorWriter(upstreamLogger)
+		process := NewProcess(modelID, pg.config.HealthCheckTimeout, modelConfig, processLogger, pg.proxyLogger)
 		pg.processes[modelID] = process
 	}
 
@@ -86,6 +87,13 @@ func (pg *ProcessGroup) ProxyRequest(modelID string, writer http.ResponseWriter,
 
 func (pg *ProcessGroup) HasMember(modelName string) bool {
 	return slices.Contains(pg.config.Groups[pg.id].Members, modelName)
+}
+
+func (pg *ProcessGroup) GetMember(modelName string) (*Process, bool) {
+	if pg.HasMember(modelName) {
+		return pg.processes[modelName], true
+	}
+	return nil, false
 }
 
 func (pg *ProcessGroup) StopProcess(modelID string, strategy StopStrategy) error {
