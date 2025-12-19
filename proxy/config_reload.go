@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"log"
 	"slices"
 	"sync"
 	"time"
@@ -47,6 +48,8 @@ func shouldRestartModel(old, new config.ModelConfig, globalRestart bool) bool {
 	return globalRestart
 }
 
+// configWatcher monitors a configuration file for changes and triggers
+// a debounced reload callback when modifications are detected.
 type configWatcher struct {
 	mu        sync.Mutex
 	watcher   *fsnotify.Watcher
@@ -55,9 +58,19 @@ type configWatcher struct {
 	stopped   bool
 }
 
+// newConfigWatcher creates a file watcher that monitors path for changes.
+// When changes are detected, onReload is called after debounceDelay has elapsed
+// with no additional changes. This handles editors that perform atomic writes
+// (write to temp file, then rename).
 func newConfigWatcher(path string, debounceDelay time.Duration, onReload func(path string)) (*configWatcher, error) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
+		return nil, err
+	}
+
+	// Add path to watcher before starting goroutine for cleaner error handling
+	if err := watcher.Add(path); err != nil {
+		watcher.Close()
 		return nil, err
 	}
 
@@ -70,19 +83,13 @@ func newConfigWatcher(path string, debounceDelay time.Duration, onReload func(pa
 		onReload(path)
 	})
 
-	// Start watching
+	// Start watching after setup is complete
 	go cw.watchLoop()
-
-	if err := watcher.Add(path); err != nil {
-		close(cw.stopChan) // Signal watchLoop to stop
-		cw.debouncer.stop()
-		watcher.Close()
-		return nil, err
-	}
 
 	return cw, nil
 }
 
+// watchLoop continuously monitors for file system events until stop() is called.
 func (cw *configWatcher) watchLoop() {
 	for {
 		select {
@@ -96,15 +103,16 @@ func (cw *configWatcher) watchLoop() {
 			if event.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename) != 0 {
 				cw.debouncer.trigger()
 			}
-		case _, ok := <-cw.watcher.Errors:
+		case err, ok := <-cw.watcher.Errors:
 			if !ok {
 				return
 			}
-			// Log error but continue watching
+			log.Printf("Config watcher error: %v", err)
 		}
 	}
 }
 
+// stop terminates the file watcher and cancels any pending reload.
 func (cw *configWatcher) stop() {
 	cw.mu.Lock()
 	defer cw.mu.Unlock()

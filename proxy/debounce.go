@@ -5,6 +5,9 @@ import (
 	"time"
 )
 
+// debouncer delays function execution until a quiet period has elapsed.
+// Multiple calls to trigger() within the delay window reset the timer,
+// ensuring the function only executes once after activity stops.
 type debouncer struct {
 	mu      sync.Mutex
 	delay   time.Duration
@@ -13,6 +16,8 @@ type debouncer struct {
 	stopped bool
 }
 
+// newDebouncer creates a debouncer that will call fn after delay has elapsed
+// since the last trigger() call.
 func newDebouncer(delay time.Duration, fn func()) *debouncer {
 	return &debouncer{
 		delay: delay,
@@ -20,6 +25,8 @@ func newDebouncer(delay time.Duration, fn func()) *debouncer {
 	}
 }
 
+// trigger resets the debounce timer. The function will execute after delay
+// has elapsed with no additional trigger() calls.
 func (d *debouncer) trigger() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -43,6 +50,7 @@ func (d *debouncer) trigger() {
 	})
 }
 
+// stop cancels any pending execution and prevents future triggers from firing.
 func (d *debouncer) stop() {
 	d.mu.Lock()
 	defer d.mu.Unlock()

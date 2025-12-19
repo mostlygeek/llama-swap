@@ -222,9 +222,23 @@ func TestProxyManagerReloadConfig(t *testing.T) {
 		pm := New(initialCfg)
 		defer pm.Shutdown()
 
-		// This should work - we test file-based reload separately
+		// Verify initial state
 		_, found := pm.config.RealModelName("model1")
-		assert.True(t, found)
+		assert.True(t, found, "model1 should exist initially")
+
+		// Try to reload with invalid config (empty models, no groups)
+		invalidCfg := config.Config{
+			Models: map[string]config.ModelConfig{},
+			Groups: map[string]config.GroupConfig{},
+		}
+
+		// ReloadConfig should still succeed (empty config is valid),
+		// but model1 should no longer be available
+		err := pm.ReloadConfig(invalidCfg)
+		assert.NoError(t, err)
+
+		_, found = pm.config.RealModelName("model1")
+		assert.False(t, found, "model1 should not exist after reload with empty config")
 	})
 }
 

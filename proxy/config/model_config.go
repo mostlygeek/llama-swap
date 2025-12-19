@@ -39,7 +39,9 @@ type ModelConfig struct {
 	// override global setting
 	SendLoadingState *bool `yaml:"sendLoadingState"`
 
-	// Hot-reload: override global reloadRestartModels for this model
+	// ForceRestart overrides global ReloadRestartModels setting for this model.
+	// When true, model restarts on config change; when false, config changes are
+	// applied without restart. Nil inherits the global setting.
 	ForceRestart *bool `yaml:"forceRestart"`
 }
 
