@@ -203,23 +203,26 @@ As a safeguard, llama-swap also sets `X-Accel-Buffering: no` on SSE responses. H
 
 ## Monitoring Logs on the CLI
 
-```shell
+```sh
 # sends up to the last 10KB of logs
-curl http://host/logs'
+$ curl http://host/logs
 
 # streams combined logs
-curl -Ns 'http://host/logs/stream'
+curl -Ns http://host/logs/stream
 
-# just llama-swap's logs
-curl -Ns 'http://host/logs/stream/proxy'
+# stream llama-swap's proxy status logs
+curl -Ns http://host/logs/stream/proxy
 
-# just upstream's logs
-curl -Ns 'http://host/logs/stream/upstream'
+# stream logs from upstream processes that llama-swap loads
+curl -Ns http://host/logs/stream/upstream
+
+# stream logs only from a specific model
+curl -Ns http://host/logs/stream/{model_id}
 
 # stream and filter logs with linux pipes
 curl -Ns http://host/logs/stream | grep 'eval time'
 
-# skips history and just streams new log entries
+# appending ?no-history will disable sending buffered history first
 curl -Ns 'http://host/logs/stream?no-history'
 ```
 
