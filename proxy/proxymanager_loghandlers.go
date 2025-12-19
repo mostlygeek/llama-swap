@@ -83,18 +83,24 @@ func (pm *ProxyManager) streamLogsHandler(c *gin.Context) {
 
 // getLogger searches for the appropriate logger based on the logMonitorId
 func (pm *ProxyManager) getLogger(logMonitorId string) (*LogMonitor, error) {
-	var logger *LogMonitor
-
-	if logMonitorId == "" {
+	switch logMonitorId {
+	case "":
 		// maintain the default
-		logger = pm.muxLogger
-	} else if logMonitorId == "proxy" {
-		logger = pm.proxyLogger
-	} else if logMonitorId == "upstream" {
-		logger = pm.upstreamLogger
-	} else {
+		return pm.muxLogger, nil
+	case "proxy":
+		return pm.proxyLogger, nil
+	case "upstream":
+		return pm.upstreamLogger, nil
+	default:
+		// search for a models specific logger
+		if name, found := pm.config.RealModelName(logMonitorId); found {
+			for _, group := range pm.processGroups {
+				if process, found := group.GetMember(name); found {
+					return process.Logger(), nil
+				}
+			}
+		}
+
 		return nil, fmt.Errorf("invalid logger. Use 'proxy' or 'upstream'")
 	}
-
-	return logger, nil
 }
