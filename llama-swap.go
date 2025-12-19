@@ -74,7 +74,7 @@ func main() {
 	// Setup channels for server management
 	exitChan := make(chan struct{})
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
 	// Create server with initial handler
 	srv := &http.Server{
@@ -93,19 +93,35 @@ func main() {
 		}
 	}
 
-	// shutdown on signal
+	// Handle signals: SIGHUP reloads config, SIGINT/SIGTERM shutdown
 	go func() {
-		sig := <-sigChan
-		fmt.Printf("Received signal %v, shutting down...\n", sig)
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-		defer cancel()
+		for sig := range sigChan {
+			if sig == syscall.SIGHUP {
+				fmt.Println("Received SIGHUP, reloading configuration...")
+				newConf, err := config.LoadConfig(*configPath)
+				if err != nil {
+					fmt.Printf("Failed to reload config: %v (keeping current config)\n", err)
+					continue
+				}
+				if err := pm.ReloadConfig(newConf); err != nil {
+					fmt.Printf("Failed to apply config: %v (keeping current config)\n", err)
+				}
+				continue
+			}
 
-		pm.Shutdown()
+			// SIGINT or SIGTERM - shutdown
+			fmt.Printf("Received signal %v, shutting down...\n", sig)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+			defer cancel()
 
-		if err := srv.Shutdown(ctx); err != nil {
-			fmt.Printf("Server shutdown error: %v\n", err)
+			pm.Shutdown()
+
+			if err := srv.Shutdown(ctx); err != nil {
+				fmt.Printf("Server shutdown error: %v\n", err)
+			}
+			close(exitChan)
+			return
 		}
-		close(exitChan)
 	}()
 
 	// Start server
