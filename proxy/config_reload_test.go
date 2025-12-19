@@ -279,9 +279,9 @@ models:
 		time.Sleep(2500 * time.Millisecond)
 
 		// Verify new model is available
-		pm.RLock()
+		pm.Lock()
 		_, found = pm.config.RealModelName("model2")
-		pm.RUnlock()
+		pm.Unlock()
 		assert.True(t, found, "model2 should be available after reload")
 	})
 }
