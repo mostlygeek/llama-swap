@@ -15,6 +15,12 @@ import (
 )
 
 const DEFAULT_GROUP_ID = "(default)"
+const (
+	LogToStdoutProxy    = "proxy"
+	LogToStdoutUpstream = "upstream"
+	LogToStdoutBoth     = "both"
+	LogToStdoutNone     = "none"
+)
 
 type MacroEntry struct {
 	Name  string
@@ -114,6 +120,7 @@ type Config struct {
 	LogRequests        bool                   `yaml:"logRequests"`
 	LogLevel           string                 `yaml:"logLevel"`
 	LogTimeFormat      string                 `yaml:"logTimeFormat"`
+	LogToStdout        string                 `yaml:"logToStdout"`
 	MetricsMaxInMemory int                    `yaml:"metricsMaxInMemory"`
 	Models             map[string]ModelConfig `yaml:"models"` /* key is model ID */
 	Profiles           map[string][]string    `yaml:"profiles"`
@@ -177,6 +184,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		StartPort:          5800,
 		LogLevel:           "info",
 		LogTimeFormat:      "",
+		LogToStdout:        LogToStdoutProxy,
 		MetricsMaxInMemory: 1000,
 	}
 	err = yaml.Unmarshal(data, &config)
@@ -191,6 +199,12 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 
 	if config.StartPort < 1 {
 		return Config{}, fmt.Errorf("startPort must be greater than 1")
+	}
+
+	switch config.LogToStdout {
+	case LogToStdoutProxy, LogToStdoutUpstream, LogToStdoutBoth, LogToStdoutNone:
+	default:
+		return Config{}, fmt.Errorf("logToStdout must be one of: proxy, upstream, both, none")
 	}
 
 	// Populate the aliases map
