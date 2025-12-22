@@ -1078,7 +1078,8 @@ func TestProxyManager_StreamingEndpointsReturnNoBufferingHeader(t *testing.T) {
 	config := config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,
 		Models: map[string]config.ModelConfig{
-			"model1": getTestSimpleResponderConfig("model1"),
+			"model1":       getTestSimpleResponderConfig("model1"),
+			"author/model": getTestSimpleResponderConfig("author/model"),
 		},
 		LogLevel: "error",
 	})
@@ -1091,6 +1092,7 @@ func TestProxyManager_StreamingEndpointsReturnNoBufferingHeader(t *testing.T) {
 		"/logs/stream",
 		"/logs/stream/proxy",
 		"/logs/stream/upstream",
+		"/logs/stream/author/model",
 	}
 
 	for _, endpoint := range endpoints {

@@ -266,7 +266,7 @@ func (pm *ProxyManager) setupGinEngine() {
 	// in proxymanager_loghandlers.go
 	pm.ginEngine.GET("/logs", pm.sendLogsHandlers)
 	pm.ginEngine.GET("/logs/stream", pm.streamLogsHandler)
-	pm.ginEngine.GET("/logs/stream/:logMonitorID", pm.streamLogsHandler)
+	pm.ginEngine.GET("/logs/stream/*logMonitorID", pm.streamLogsHandler)
 
 	/**
 	 * User Interface Endpoints
@@ -466,58 +466,58 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 	})
 }
 
-func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
-	upstreamPath := c.Param("upstreamPath")
-
-	// split the upstream path by / and search for the model name
-	parts := strings.Split(strings.TrimSpace(upstreamPath), "/")
-	if len(parts) == 0 {
-		pm.sendErrorResponse(c, http.StatusBadRequest, "model id required in path")
-		return
-	}
-
-	modelFound := false
+// findModelInPath searches for a valid model name in a path with slashes.
+// It iteratively builds up path segments until it finds a matching model.
+// Returns: (searchModelName, realModelName, remainingPath, found)
+// Example: "/author/model/endpoint" with model "author/model" -> ("author/model", "author/model", "/endpoint", true)
+func (pm *ProxyManager) findModelInPath(path string) (searchName string, realName string, remainingPath string, found bool) {
+	parts := strings.Split(strings.TrimSpace(path), "/")
 	searchModelName := ""
-	var modelName, remainingPath string
+
 	for i, part := range parts {
-		if parts[i] == "" {
+		if part == "" {
 			continue
 		}
 
 		if searchModelName == "" {
 			searchModelName = part
 		} else {
-			searchModelName = searchModelName + "/" + parts[i]
+			searchModelName = searchModelName + "/" + part
 		}
 
 		if real, ok := pm.config.RealModelName(searchModelName); ok {
-			modelName = real
-			remainingPath = "/" + strings.Join(parts[i+1:], "/")
-			modelFound = true
-
-			// Check if this is exactly a model name with no additional path
-			// and doesn't end with a trailing slash
-			if remainingPath == "/" && !strings.HasSuffix(upstreamPath, "/") {
-				// Build new URL with query parameters preserved
-				newPath := "/upstream/" + searchModelName + "/"
-				if c.Request.URL.RawQuery != "" {
-					newPath += "?" + c.Request.URL.RawQuery
-				}
-
-				// Use 308 for non-GET/HEAD requests to preserve method
-				if c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead {
-					c.Redirect(http.StatusMovedPermanently, newPath)
-				} else {
-					c.Redirect(http.StatusPermanentRedirect, newPath)
-				}
-				return
-			}
-			break
+			return searchModelName, real, "/" + strings.Join(parts[i+1:], "/"), true
 		}
 	}
 
+	return "", "", "", false
+}
+
+func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
+	upstreamPath := c.Param("upstreamPath")
+
+	searchModelName, modelName, remainingPath, modelFound := pm.findModelInPath(upstreamPath)
+
 	if !modelFound {
 		pm.sendErrorResponse(c, http.StatusBadRequest, "model id required in path")
+		return
+	}
+
+	// Check if this is exactly a model name with no additional path
+	// and doesn't end with a trailing slash
+	if remainingPath == "/" && !strings.HasSuffix(upstreamPath, "/") {
+		// Build new URL with query parameters preserved
+		newPath := "/upstream/" + searchModelName + "/"
+		if c.Request.URL.RawQuery != "" {
+			newPath += "?" + c.Request.URL.RawQuery
+		}
+
+		// Use 308 for non-GET/HEAD requests to preserve method
+		if c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead {
+			c.Redirect(http.StatusMovedPermanently, newPath)
+		} else {
+			c.Redirect(http.StatusPermanentRedirect, newPath)
+		}
 		return
 	}
 

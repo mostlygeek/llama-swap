@@ -31,7 +31,7 @@ func (pm *ProxyManager) streamLogsHandler(c *gin.Context) {
 	// prevent nginx from buffering streamed logs
 	c.Header("X-Accel-Buffering", "no")
 
-	logMonitorId := c.Param("logMonitorID")
+	logMonitorId := strings.TrimPrefix(c.Param("logMonitorID"), "/")
 	logger, err := pm.getLogger(logMonitorId)
 	if err != nil {
 		c.String(http.StatusBadRequest, err.Error())
@@ -92,8 +92,9 @@ func (pm *ProxyManager) getLogger(logMonitorId string) (*LogMonitor, error) {
 	case "upstream":
 		return pm.upstreamLogger, nil
 	default:
-		// search for a models specific logger
-		if name, found := pm.config.RealModelName(logMonitorId); found {
+		// search for a models specific logger using findModelInPath
+		// to handle model names with slashes (e.g., "author/model")
+		if _, name, _, found := pm.findModelInPath("/" + logMonitorId); found {
 			for _, group := range pm.processGroups {
 				if process, found := group.GetMember(name); found {
 					return process.Logger(), nil
@@ -101,6 +102,6 @@ func (pm *ProxyManager) getLogger(logMonitorId string) (*LogMonitor, error) {
 			}
 		}
 
-		return nil, fmt.Errorf("invalid logger. Use 'proxy' or 'upstream'")
+		return nil, fmt.Errorf("invalid logger. Use 'proxy', 'upstream' or a model's ID")
 	}
 }
