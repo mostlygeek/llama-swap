@@ -158,6 +158,7 @@ groups:
 	expected := Config{
 		LogLevel:      "info",
 		LogTimeFormat: "",
+		LogToStdout:   LogToStdoutProxy,
 		StartPort:     5800,
 		Macros: MacroList{
 			{"svr-path", "path/to/server"},
