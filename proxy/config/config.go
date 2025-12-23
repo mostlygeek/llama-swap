@@ -143,6 +143,9 @@ type Config struct {
 
 	// present aliases to /v1/models OpenAI API listing
 	IncludeAliasesInList bool `yaml:"includeAliasesInList"`
+
+	// support API keys, see issue #433, #50, #251
+	RequiredAPIKeys []string `yaml:"apiKeys"`
 }
 
 func (c *Config) RealModelName(search string) (string, bool) {
@@ -416,6 +419,17 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		}
 
 		config.Hooks.OnStartup.Preload = toPreload
+	}
+
+	// check api keys validatity
+	for _, apikey := range config.RequiredAPIKeys {
+		if apikey == "" {
+			return Config{}, fmt.Errorf("empty api key found in apiKeys")
+		}
+
+		if strings.Contains(apikey, " ") {
+			return Config{}, fmt.Errorf("api key cannot contain spaces: `%s`", apikey)
+		}
 	}
 
 	return config, nil

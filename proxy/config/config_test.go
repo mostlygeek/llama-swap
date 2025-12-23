@@ -761,3 +761,51 @@ models:
 		})
 	}
 }
+
+func TestConfig_APIKeys_Invalid(t *testing.T) {
+	tests := []struct {
+		name        string
+		content     string
+		expectedErr string
+	}{
+		{
+			name:        "empty string",
+			content:     `apiKeys: [""]`,
+			expectedErr: "empty api key found in apiKeys",
+		},
+		{
+			name:        "blank spaces only",
+			content:     `apiKeys: ["   "]`,
+			expectedErr: "api key cannot contain spaces: `   `",
+		},
+		{
+			name:        "contains leading space",
+			content:     `apiKeys: [" key123"]`,
+			expectedErr: "api key cannot contain spaces: ` key123`",
+		},
+		{
+			name:        "contains trailing space",
+			content:     `apiKeys: ["key123 "]`,
+			expectedErr: "api key cannot contain spaces: `key123 `",
+		},
+		{
+			name:        "contains middle space",
+			content:     `apiKeys: ["key 123"]`,
+			expectedErr: "api key cannot contain spaces: `key 123`",
+		},
+		{
+			name:        "empty in list with valid keys",
+			content:     `apiKeys: ["valid-key", "", "another-key"]`,
+			expectedErr: "empty api key found in apiKeys",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := LoadConfigFromReader(strings.NewReader(tt.content))
+			if assert.Error(t, err) {
+				assert.Equal(t, tt.expectedErr, err.Error())
+			}
+		})
+	}
+}
