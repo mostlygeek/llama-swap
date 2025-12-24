@@ -161,6 +161,16 @@ sendLoadingState: true
 #   all fields except for Id so chat UIs can use the alias equivalent to the original.
 includeAliasesInList: false
 
+# apiKeys: require an API key when making requests to inference endpoints
+# - optional, default: []
+# - when empty (the default) authorization will not be checked as llama-swap is default-allow
+# - each key is a non-empty string
+apiKeys:
+  - "sk-hunter2"
+  # hint, one liner: printf "sk-%s\n" "$(head -c 48 /dev/urandom | base64 )"
+  - "sk-gyCPiKUcIfPlaM4OSMZekkprgijPx6+OsmQs8Rsg0xZ9qpy6gKWsIKqHOk+cgXVx"
+  - "sk-+QtIn0Zjj4UHjiaZYiZEnru4mrwKM9RzhmJeK5SobNXLl8QMFXxGz1/2lEuvQpkb"
+
 # macros: a dictionary of string substitutions
 # - optional, default: empty dictionary
 # - macros are reusable snippets

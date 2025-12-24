@@ -1187,3 +1187,103 @@ func TestProxyManager_ApiGetVersion(t *testing.T) {
 		assert.Equal(t, value, response[key], "%s value %s should match response %s", key, value, response[key])
 	}
 }
+
+func TestProxyManager_APIKeyAuth(t *testing.T) {
+	testConfig := config.AddDefaultGroupToConfig(config.Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]config.ModelConfig{
+			"model1": getTestSimpleResponderConfig("model1"),
+		},
+		RequiredAPIKeys: []string{"valid-key-1", "valid-key-2"},
+		LogLevel:        "error",
+	})
+
+	proxy := New(testConfig)
+	defer proxy.StopProcesses(StopImmediately)
+
+	t.Run("valid key in x-api-key header", func(t *testing.T) {
+		reqBody := `{"model":"model1"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		req.Header.Set("x-api-key", "valid-key-1")
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("valid key in Authorization Bearer header", func(t *testing.T) {
+		reqBody := `{"model":"model1"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		req.Header.Set("Authorization", "Bearer valid-key-2")
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("both headers with matching keys", func(t *testing.T) {
+		reqBody := `{"model":"model1"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		req.Header.Set("x-api-key", "valid-key-1")
+		req.Header.Set("Authorization", "Bearer valid-key-1")
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("both headers with different keys returns 400", func(t *testing.T) {
+		reqBody := `{"model":"model1"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		req.Header.Set("x-api-key", "valid-key-1")
+		req.Header.Set("Authorization", "Bearer valid-key-2")
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "do not match")
+	})
+
+	t.Run("invalid key returns 401", func(t *testing.T) {
+		reqBody := `{"model":"model1"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		req.Header.Set("x-api-key", "invalid-key")
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Contains(t, w.Body.String(), "unauthorized")
+	})
+
+	t.Run("missing key returns 401", func(t *testing.T) {
+		reqBody := `{"model":"model1"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+}
+
+func TestProxyManager_APIKeyAuth_Disabled(t *testing.T) {
+	// Config without RequiredAPIKeys - auth should be disabled
+	testConfig := config.AddDefaultGroupToConfig(config.Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]config.ModelConfig{
+			"model1": getTestSimpleResponderConfig("model1"),
+		},
+		LogLevel: "error",
+	})
+
+	proxy := New(testConfig)
+	defer proxy.StopProcesses(StopImmediately)
+
+	t.Run("requests pass without API key when not configured", func(t *testing.T) {
+		reqBody := `{"model":"model1"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+}
