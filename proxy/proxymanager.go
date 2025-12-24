@@ -299,9 +299,9 @@ func (pm *ProxyManager) setupGinEngine() {
 	pm.ginEngine.GET("/upstream", func(c *gin.Context) {
 		c.Redirect(http.StatusFound, "/ui/models")
 	})
-	pm.ginEngine.Any("/upstream/*upstreamPath", pm.proxyToUpstream)
-	pm.ginEngine.GET("/unload", pm.unloadAllModelsHandler)
-	pm.ginEngine.GET("/running", pm.listRunningProcessesHandler)
+	pm.ginEngine.Any("/upstream/*upstreamPath", pm.apiKeyAuth(), pm.proxyToUpstream)
+	pm.ginEngine.GET("/unload", pm.apiKeyAuth(), pm.unloadAllModelsHandler)
+	pm.ginEngine.GET("/running", pm.apiKeyAuth(), pm.listRunningProcessesHandler)
 	pm.ginEngine.GET("/health", func(c *gin.Context) {
 		c.String(http.StatusOK, "OK")
 	})
