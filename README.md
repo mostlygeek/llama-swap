@@ -34,6 +34,7 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
   - `/running` - list currently running models ([#61](https://github.com/mostlygeek/llama-swap/issues/61))
   - `/log` - remote log monitoring
   - `/health` - just returns "OK"
+- ✅ API Key support - define keys to restrict access to API endpoints
 - ✅ Customizable
   - Run multiple models at once with `Groups` ([#107](https://github.com/mostlygeek/llama-swap/issues/107))
   - Automatic unloading of models after timeout by setting a `ttl`
