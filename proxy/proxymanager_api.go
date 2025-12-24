@@ -22,7 +22,8 @@ type Model struct {
 
 func addApiHandlers(pm *ProxyManager) {
 	// Add API endpoints for React to consume
-	apiGroup := pm.ginEngine.Group("/api")
+	// Protected with API key authentication
+	apiGroup := pm.ginEngine.Group("/api", pm.apiKeyAuth())
 	{
 		apiGroup.POST("/models/unload", pm.apiUnloadAllModels)
 		apiGroup.POST("/models/unload/*model", pm.apiUnloadSingleModelHandler)
