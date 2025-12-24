@@ -256,37 +256,38 @@ func (pm *ProxyManager) setupGinEngine() {
 	})
 
 	// Set up routes using the Gin engine
-	pm.ginEngine.POST("/v1/chat/completions", pm.proxyInferenceHandler)
+	// Protected routes use pm.apiKeyAuth() middleware
+	pm.ginEngine.POST("/v1/chat/completions", pm.apiKeyAuth(), pm.proxyInferenceHandler)
 	// Support legacy /v1/completions api, see issue #12
-	pm.ginEngine.POST("/v1/completions", pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/completions", pm.apiKeyAuth(), pm.proxyInferenceHandler)
 	// Support anthropic /v1/messages (added https://github.com/ggml-org/llama.cpp/pull/17570)
-	pm.ginEngine.POST("/v1/messages", pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/messages", pm.apiKeyAuth(), pm.proxyInferenceHandler)
 
 	// Support embeddings and reranking
-	pm.ginEngine.POST("/v1/embeddings", pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/embeddings", pm.apiKeyAuth(), pm.proxyInferenceHandler)
 
 	// llama-server's /reranking endpoint + aliases
-	pm.ginEngine.POST("/reranking", pm.proxyInferenceHandler)
-	pm.ginEngine.POST("/rerank", pm.proxyInferenceHandler)
-	pm.ginEngine.POST("/v1/rerank", pm.proxyInferenceHandler)
-	pm.ginEngine.POST("/v1/reranking", pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/reranking", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/rerank", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/rerank", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/reranking", pm.apiKeyAuth(), pm.proxyInferenceHandler)
 
 	// llama-server's /infill endpoint for code infilling
-	pm.ginEngine.POST("/infill", pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/infill", pm.apiKeyAuth(), pm.proxyInferenceHandler)
 
 	// llama-server's /completion endpoint
-	pm.ginEngine.POST("/completion", pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/completion", pm.apiKeyAuth(), pm.proxyInferenceHandler)
 
 	// Support audio/speech endpoint
-	pm.ginEngine.POST("/v1/audio/speech", pm.proxyInferenceHandler)
-	pm.ginEngine.POST("/v1/audio/transcriptions", pm.proxyOAIPostFormHandler)
+	pm.ginEngine.POST("/v1/audio/speech", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/audio/transcriptions", pm.apiKeyAuth(), pm.proxyOAIPostFormHandler)
 
-	pm.ginEngine.GET("/v1/models", pm.listModelsHandler)
+	pm.ginEngine.GET("/v1/models", pm.apiKeyAuth(), pm.listModelsHandler)
 
 	// in proxymanager_loghandlers.go
-	pm.ginEngine.GET("/logs", pm.sendLogsHandlers)
-	pm.ginEngine.GET("/logs/stream", pm.streamLogsHandler)
-	pm.ginEngine.GET("/logs/stream/*logMonitorID", pm.streamLogsHandler)
+	pm.ginEngine.GET("/logs", pm.apiKeyAuth(), pm.sendLogsHandlers)
+	pm.ginEngine.GET("/logs/stream", pm.apiKeyAuth(), pm.streamLogsHandler)
+	pm.ginEngine.GET("/logs/stream/*logMonitorID", pm.apiKeyAuth(), pm.streamLogsHandler)
 
 	/**
 	 * User Interface Endpoints
@@ -762,6 +763,59 @@ func (pm *ProxyManager) sendErrorResponse(c *gin.Context, statusCode int, messag
 		c.JSON(statusCode, gin.H{"error": message})
 	} else {
 		c.String(statusCode, message)
+	}
+}
+
+// apiKeyAuth returns a middleware that validates API keys if configured.
+// Returns a pass-through handler if no API keys are configured.
+func (pm *ProxyManager) apiKeyAuth() gin.HandlerFunc {
+	if len(pm.config.RequiredAPIKeys) == 0 {
+		return func(c *gin.Context) { c.Next() }
+	}
+
+	return func(c *gin.Context) {
+		xApiKey := c.GetHeader("x-api-key")
+
+		var bearerKey string
+		if auth := c.GetHeader("Authorization"); auth != "" {
+			if strings.HasPrefix(auth, "Bearer ") {
+				bearerKey = strings.TrimPrefix(auth, "Bearer ")
+			}
+		}
+
+		// If both headers present, they must match
+		if xApiKey != "" && bearerKey != "" && xApiKey != bearerKey {
+			pm.sendErrorResponse(c, http.StatusBadRequest, "x-api-key and Authorization header values do not match")
+			c.Abort()
+			return
+		}
+
+		// Use x-api-key first, then Authorization
+		providedKey := xApiKey
+		if providedKey == "" {
+			providedKey = bearerKey
+		}
+
+		// Validate key
+		valid := false
+		for _, key := range pm.config.RequiredAPIKeys {
+			if providedKey == key {
+				valid = true
+				break
+			}
+		}
+
+		if !valid {
+			pm.sendErrorResponse(c, http.StatusUnauthorized, "unauthorized: invalid or missing API key")
+			c.Abort()
+			return
+		}
+
+		// Strip auth headers to prevent leakage to upstream
+		c.Request.Header.Del("Authorization")
+		c.Request.Header.Del("x-api-key")
+
+		c.Next()
 	}
 }
 
