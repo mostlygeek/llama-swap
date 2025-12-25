@@ -8,13 +8,10 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/gin-gonic/gin"
-	"github.com/mostlygeek/llama-swap/event"
 	"github.com/mostlygeek/llama-swap/proxy"
 	"github.com/mostlygeek/llama-swap/proxy/config"
 )
@@ -77,116 +74,54 @@ func main() {
 	// Setup channels for server management
 	exitChan := make(chan struct{})
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
 	// Create server with initial handler
 	srv := &http.Server{
 		Addr: *listenStr,
 	}
 
-	// Support for watching config and reloading when it changes
-	reloadProxyManager := func() {
-		if currentPM, ok := srv.Handler.(*proxy.ProxyManager); ok {
-			conf, err = config.LoadConfig(*configPath)
-			if err != nil {
-				fmt.Printf("Warning, unable to reload configuration: %v\n", err)
-				return
-			}
+	// Create and initialize the ProxyManager
+	pm := proxy.New(conf)
+	pm.SetVersion(date, commit, version)
+	srv.Handler = pm
 
-			fmt.Println("Configuration Changed")
-			currentPM.Shutdown()
-			newPM := proxy.New(conf)
-			newPM.SetVersion(date, commit, version)
-			srv.Handler = newPM
-			fmt.Println("Configuration Reloaded")
-
-			// wait a few seconds and tell any UI to reload
-			time.AfterFunc(3*time.Second, func() {
-				event.Emit(proxy.ConfigFileChangedEvent{
-					ReloadingState: proxy.ReloadingStateEnd,
-				})
-			})
-		} else {
-			conf, err = config.LoadConfig(*configPath)
-			if err != nil {
-				fmt.Printf("Error, unable to load configuration: %v\n", err)
-				os.Exit(1)
-			}
-			newPM := proxy.New(conf)
-			newPM.SetVersion(date, commit, version)
-			srv.Handler = newPM
-		}
-	}
-
-	// load the initial proxy manager
-	reloadProxyManager()
-	debouncedReload := debounce(time.Second, reloadProxyManager)
+	// Start config file watcher for hot-reload if enabled
 	if *watchConfig {
-		defer event.On(func(e proxy.ConfigFileChangedEvent) {
-			if e.ReloadingState == proxy.ReloadingStateStart {
-				debouncedReload()
-			}
-		})()
-
-		fmt.Println("Watching Configuration for changes")
-		go func() {
-			absConfigPath, err := filepath.Abs(*configPath)
-			if err != nil {
-				fmt.Printf("Error getting absolute path for watching config file: %v\n", err)
-				return
-			}
-			watcher, err := fsnotify.NewWatcher()
-			if err != nil {
-				fmt.Printf("Error creating file watcher: %v. File watching disabled.\n", err)
-				return
-			}
-
-			configDir := filepath.Dir(absConfigPath)
-			err = watcher.Add(configDir)
-			if err != nil {
-				fmt.Printf("Error adding config path directory (%s) to watcher: %v. File watching disabled.", configDir, err)
-				return
-			}
-
-			defer watcher.Close()
-			for {
-				select {
-				case changeEvent := <-watcher.Events:
-					if changeEvent.Name == absConfigPath && (changeEvent.Has(fsnotify.Write) || changeEvent.Has(fsnotify.Create) || changeEvent.Has(fsnotify.Remove)) {
-						event.Emit(proxy.ConfigFileChangedEvent{
-							ReloadingState: proxy.ReloadingStateStart,
-						})
-					} else if changeEvent.Name == filepath.Join(configDir, "..data") && changeEvent.Has(fsnotify.Create) {
-						// the change for k8s configmap
-						event.Emit(proxy.ConfigFileChangedEvent{
-							ReloadingState: proxy.ReloadingStateStart,
-						})
-					}
-
-				case err := <-watcher.Errors:
-					log.Printf("File watcher error: %v", err)
-				}
-			}
-		}()
+		if err := pm.StartConfigWatcher(*configPath); err != nil {
+			fmt.Printf("Warning: Could not start config watcher: %v\n", err)
+		}
 	}
 
-	// shutdown on signal
+	// Handle signals: SIGHUP reloads config, SIGINT/SIGTERM shutdown
 	go func() {
-		sig := <-sigChan
-		fmt.Printf("Received signal %v, shutting down...\n", sig)
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-		defer cancel()
+		for sig := range sigChan {
+			if sig == syscall.SIGHUP {
+				fmt.Println("Received SIGHUP, reloading configuration...")
+				newConf, err := config.LoadConfig(*configPath)
+				if err != nil {
+					fmt.Printf("Failed to reload config: %v (keeping current config)\n", err)
+					continue
+				}
+				if err := pm.ReloadConfig(newConf); err != nil {
+					fmt.Printf("Failed to apply config: %v (keeping current config)\n", err)
+				}
+				continue
+			}
 
-		if pm, ok := srv.Handler.(*proxy.ProxyManager); ok {
+			// SIGINT or SIGTERM - shutdown
+			fmt.Printf("Received signal %v, shutting down...\n", sig)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+
 			pm.Shutdown()
-		} else {
-			fmt.Println("srv.Handler is not of type *proxy.ProxyManager")
-		}
 
-		if err := srv.Shutdown(ctx); err != nil {
-			fmt.Printf("Server shutdown error: %v\n", err)
+			if err := srv.Shutdown(ctx); err != nil {
+				fmt.Printf("Server shutdown error: %v\n", err)
+			}
+			cancel()
+			close(exitChan)
+			return
 		}
-		close(exitChan)
 	}()
 
 	// Start server
@@ -206,14 +141,4 @@ func main() {
 
 	// Wait for exit signal
 	<-exitChan
-}
-
-func debounce(interval time.Duration, f func()) func() {
-	var timer *time.Timer
-	return func() {
-		if timer != nil {
-			timer.Stop()
-		}
-		timer = time.AfterFunc(interval, f)
-	}
 }

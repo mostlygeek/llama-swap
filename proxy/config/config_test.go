@@ -809,3 +809,54 @@ func TestConfig_APIKeys_Invalid(t *testing.T) {
 		})
 	}
 }
+
+func TestConfigReloadRestartModels(t *testing.T) {
+	yamlData := `
+reloadRestartModels: true
+models:
+  test-model:
+    cmd: echo hello
+    proxy: http://localhost:8080
+`
+	config, err := LoadConfigFromReader(strings.NewReader(yamlData))
+	assert.NoError(t, err)
+	assert.True(t, config.ReloadRestartModels)
+}
+
+func TestConfigReloadRestartModelsDefault(t *testing.T) {
+	yamlData := `
+models:
+  test-model:
+    cmd: echo hello
+    proxy: http://localhost:8080
+`
+	config, err := LoadConfigFromReader(strings.NewReader(yamlData))
+	assert.NoError(t, err)
+	assert.False(t, config.ReloadRestartModels)
+}
+
+func TestModelConfigForceRestart(t *testing.T) {
+	yamlData := `
+models:
+  test-model:
+    cmd: echo hello
+    proxy: http://localhost:8080
+    forceRestart: true
+`
+	config, err := LoadConfigFromReader(strings.NewReader(yamlData))
+	assert.NoError(t, err)
+	assert.NotNil(t, config.Models["test-model"].ForceRestart)
+	assert.True(t, *config.Models["test-model"].ForceRestart)
+}
+
+func TestModelConfigForceRestartDefault(t *testing.T) {
+	yamlData := `
+models:
+  test-model:
+    cmd: echo hello
+    proxy: http://localhost:8080
+`
+	config, err := LoadConfigFromReader(strings.NewReader(yamlData))
+	assert.NoError(t, err)
+	assert.Nil(t, config.Models["test-model"].ForceRestart)
+}

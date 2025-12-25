@@ -46,6 +46,10 @@ type ProxyManager struct {
 	shutdownCtx    context.Context
 	shutdownCancel context.CancelFunc
 
+	// config hot reload
+	configWatcher *configWatcher
+	configPath    string
+
 	// version info
 	buildDate string
 	commit    string
@@ -190,6 +194,80 @@ func New(proxyConfig config.Config) *ProxyManager {
 	}
 
 	return pm
+}
+
+// ReloadConfig atomically replaces the configuration and updates process groups
+func (pm *ProxyManager) ReloadConfig(newConfig config.Config) error {
+	pm.Lock()
+	defer pm.Unlock()
+
+	oldConfig := pm.config
+
+	// Identify models that need restart
+	modelsToRestart := make(map[string]bool)
+	for modelID, newModelCfg := range newConfig.Models {
+		if oldModelCfg, exists := oldConfig.Models[modelID]; exists {
+			if shouldRestartModel(oldModelCfg, newModelCfg, newConfig.ReloadRestartModels) {
+				modelsToRestart[modelID] = true
+			}
+		}
+	}
+
+	// Update config
+	pm.config = newConfig
+
+	// Update process groups
+	for groupID, groupConfig := range newConfig.Groups {
+		if existingGroup, exists := pm.processGroups[groupID]; exists {
+			// Update existing group's config reference
+			existingGroup.Lock()
+			existingGroup.config = newConfig
+			existingGroup.Unlock()
+
+			// Restart models that need it
+			for _, modelID := range groupConfig.Members {
+				if modelsToRestart[modelID] {
+					if process, exists := existingGroup.processes[modelID]; exists {
+						pm.proxyLogger.Infof("Restarting model %s due to config change", modelID)
+						process.Stop() // Graceful stop - waits for in-flight requests
+					}
+				}
+			}
+		} else {
+			// New group - create it
+			processGroup := NewProcessGroup(groupID, newConfig, pm.proxyLogger, pm.upstreamLogger)
+			pm.processGroups[groupID] = processGroup
+		}
+	}
+
+	pm.proxyLogger.Info("Configuration reloaded successfully")
+	return nil
+}
+
+// StartConfigWatcher starts watching the config file for changes
+func (pm *ProxyManager) StartConfigWatcher(configPath string) error {
+	pm.configPath = configPath
+
+	watcher, err := newConfigWatcher(configPath, 2*time.Second, func(path string) {
+		pm.proxyLogger.Info("Config file changed, reloading...")
+
+		newConfig, err := config.LoadConfig(path)
+		if err != nil {
+			pm.proxyLogger.Errorf("Failed to reload config: %v (keeping old config)", err)
+			return
+		}
+
+		if err := pm.ReloadConfig(newConfig); err != nil {
+			pm.proxyLogger.Errorf("Failed to apply new config: %v (keeping old config)", err)
+		}
+	})
+	if err != nil {
+		return err
+	}
+
+	pm.configWatcher = watcher
+	pm.proxyLogger.Infof("Watching config file: %s", configPath)
+	return nil
 }
 
 func (pm *ProxyManager) setupGinEngine() {
@@ -381,6 +459,13 @@ func (pm *ProxyManager) StopProcesses(strategy StopStrategy) {
 
 // Shutdown stops all processes managed by this ProxyManager
 func (pm *ProxyManager) Shutdown() {
+	// Stop config watcher FIRST, before acquiring lock
+	// The watcher callback calls ReloadConfig() which needs the lock,
+	// so stopping it inside the lock could deadlock
+	if pm.configWatcher != nil {
+		pm.configWatcher.stop()
+	}
+
 	pm.Lock()
 	defer pm.Unlock()
 

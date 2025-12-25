@@ -146,6 +146,10 @@ type Config struct {
 
 	// support API keys, see issue #433, #50, #251
 	RequiredAPIKeys []string `yaml:"apiKeys"`
+
+	// ReloadRestartModels controls whether running models are restarted when their
+	// config changes during hot-reload. Per-model ForceRestart overrides this.
+	ReloadRestartModels bool `yaml:"reloadRestartModels"`
 }
 
 func (c *Config) RealModelName(search string) (string, bool) {
