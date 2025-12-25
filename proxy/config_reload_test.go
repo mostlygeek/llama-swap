@@ -211,7 +211,7 @@ func TestProxyManagerReloadConfig(t *testing.T) {
 		assert.True(t, found)
 	})
 
-	t.Run("reload with invalid config keeps old config", func(t *testing.T) {
+	t.Run("reload with empty config removes all models", func(t *testing.T) {
 		initialCfg := config.Config{
 			Models: map[string]config.ModelConfig{
 				"model1": {Cmd: "echo hello", Proxy: "http://localhost:8080", CheckEndpoint: "none"},
@@ -226,15 +226,14 @@ func TestProxyManagerReloadConfig(t *testing.T) {
 		_, found := pm.config.RealModelName("model1")
 		assert.True(t, found, "model1 should exist initially")
 
-		// Try to reload with invalid config (empty models, no groups)
-		invalidCfg := config.Config{
+		// Reload with empty config (no models, no groups)
+		emptyCfg := config.Config{
 			Models: map[string]config.ModelConfig{},
 			Groups: map[string]config.GroupConfig{},
 		}
 
-		// ReloadConfig should still succeed (empty config is valid),
-		// but model1 should no longer be available
-		err := pm.ReloadConfig(invalidCfg)
+		// ReloadConfig should succeed - empty config is valid
+		err := pm.ReloadConfig(emptyCfg)
 		assert.NoError(t, err)
 
 		_, found = pm.config.RealModelName("model1")

@@ -112,13 +112,13 @@ func main() {
 			// SIGINT or SIGTERM - shutdown
 			fmt.Printf("Received signal %v, shutting down...\n", sig)
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-			defer cancel()
 
 			pm.Shutdown()
 
 			if err := srv.Shutdown(ctx); err != nil {
 				fmt.Printf("Server shutdown error: %v\n", err)
 			}
+			cancel()
 			close(exitChan)
 			return
 		}
