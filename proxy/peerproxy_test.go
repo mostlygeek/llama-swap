@@ -12,15 +12,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewPeerManager_EmptyPeers(t *testing.T) {
+func TestNewPeerProxy_EmptyPeers(t *testing.T) {
 	peers := config.PeerDictionaryConfig{}
-	pm, err := NewPeerManager(peers, testLogger)
+	pm, err := NewPeerProxy(peers, testLogger)
 	require.NoError(t, err)
 	assert.NotNil(t, pm)
 	assert.Empty(t, pm.proxyMap)
 }
 
-func TestNewPeerManager_SinglePeer(t *testing.T) {
+func TestNewPeerProxy_SinglePeer(t *testing.T) {
 	proxyURL, _ := url.Parse("http://peer1.example.com:8080")
 	peers := config.PeerDictionaryConfig{
 		"peer1": config.PeerConfig{
@@ -31,7 +31,7 @@ func TestNewPeerManager_SinglePeer(t *testing.T) {
 		},
 	}
 
-	pm, err := NewPeerManager(peers, testLogger)
+	pm, err := NewPeerProxy(peers, testLogger)
 	require.NoError(t, err)
 	assert.Len(t, pm.proxyMap, 2)
 	assert.True(t, pm.HasPeerModel("model-a"))
@@ -39,7 +39,7 @@ func TestNewPeerManager_SinglePeer(t *testing.T) {
 	assert.False(t, pm.HasPeerModel("model-c"))
 }
 
-func TestNewPeerManager_MultiplePeers(t *testing.T) {
+func TestNewPeerProxy_MultiplePeers(t *testing.T) {
 	proxyURL1, _ := url.Parse("http://peer1.example.com:8080")
 	proxyURL2, _ := url.Parse("http://peer2.example.com:8080")
 	peers := config.PeerDictionaryConfig{
@@ -55,7 +55,7 @@ func TestNewPeerManager_MultiplePeers(t *testing.T) {
 		},
 	}
 
-	pm, err := NewPeerManager(peers, testLogger)
+	pm, err := NewPeerProxy(peers, testLogger)
 	require.NoError(t, err)
 	assert.Len(t, pm.proxyMap, 4)
 	assert.True(t, pm.HasPeerModel("model-a"))
@@ -64,7 +64,7 @@ func TestNewPeerManager_MultiplePeers(t *testing.T) {
 	assert.True(t, pm.HasPeerModel("model-d"))
 }
 
-func TestNewPeerManager_DuplicateModelWarning(t *testing.T) {
+func TestNewPeerProxy_DuplicateModelWarning(t *testing.T) {
 	// When the same model is in multiple peers, only the first (lexicographically by peer ID)
 	// should be mapped, and a warning should be logged
 	proxyURL1, _ := url.Parse("http://peer1.example.com:8080")
@@ -82,7 +82,7 @@ func TestNewPeerManager_DuplicateModelWarning(t *testing.T) {
 		},
 	}
 
-	pm, err := NewPeerManager(peers, testLogger)
+	pm, err := NewPeerProxy(peers, testLogger)
 	require.NoError(t, err)
 	// Should only have one entry for the duplicate model
 	assert.Len(t, pm.proxyMap, 1)
@@ -99,7 +99,7 @@ func TestHasPeerModel(t *testing.T) {
 		},
 	}
 
-	pm, err := NewPeerManager(peers, testLogger)
+	pm, err := NewPeerProxy(peers, testLogger)
 	require.NoError(t, err)
 
 	assert.True(t, pm.HasPeerModel("existing-model"))
@@ -108,7 +108,7 @@ func TestHasPeerModel(t *testing.T) {
 
 func TestProxyRequest_ModelNotFound(t *testing.T) {
 	peers := config.PeerDictionaryConfig{}
-	pm, err := NewPeerManager(peers, testLogger)
+	pm, err := NewPeerProxy(peers, testLogger)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
@@ -136,7 +136,7 @@ func TestProxyRequest_Success(t *testing.T) {
 		},
 	}
 
-	pm, err := NewPeerManager(peers, testLogger)
+	pm, err := NewPeerProxy(peers, testLogger)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
@@ -167,7 +167,7 @@ func TestProxyRequest_ApiKeyInjection(t *testing.T) {
 		},
 	}
 
-	pm, err := NewPeerManager(peers, testLogger)
+	pm, err := NewPeerProxy(peers, testLogger)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
@@ -197,7 +197,7 @@ func TestProxyRequest_NoApiKey(t *testing.T) {
 		},
 	}
 
-	pm, err := NewPeerManager(peers, testLogger)
+	pm, err := NewPeerProxy(peers, testLogger)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
@@ -226,7 +226,7 @@ func TestProxyRequest_HostHeaderSet(t *testing.T) {
 		},
 	}
 
-	pm, err := NewPeerManager(peers, testLogger)
+	pm, err := NewPeerProxy(peers, testLogger)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
@@ -255,7 +255,7 @@ func TestProxyRequest_SSEHeaderModification(t *testing.T) {
 		},
 	}
 
-	pm, err := NewPeerManager(peers, testLogger)
+	pm, err := NewPeerProxy(peers, testLogger)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)

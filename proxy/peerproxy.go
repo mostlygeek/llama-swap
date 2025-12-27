@@ -10,19 +10,19 @@ import (
 	"github.com/mostlygeek/llama-swap/proxy/config"
 )
 
-type peerProxy struct {
+type peerProxyMember struct {
 	reverseProxy *httputil.ReverseProxy
 	apiKey       string
 }
 
-type PeerManager struct {
+type PeerProxy struct {
 	peers config.PeerDictionaryConfig
 
-	proxyMap map[string]*peerProxy
+	proxyMap map[string]*peerProxyMember
 }
 
-func NewPeerManager(peers config.PeerDictionaryConfig, proxyLogger *LogMonitor) (*PeerManager, error) {
-	proxyMap := make(map[string]*peerProxy)
+func NewPeerProxy(peers config.PeerDictionaryConfig, proxyLogger *LogMonitor) (*PeerProxy, error) {
+	proxyMap := make(map[string]*peerProxyMember)
 
 	// Sort peer IDs for consistent iteration order
 	peerIDs := make([]string, 0, len(peers))
@@ -51,7 +51,7 @@ func NewPeerManager(peers config.PeerDictionaryConfig, proxyLogger *LogMonitor) 
 			return nil
 		}
 
-		pp := &peerProxy{
+		pp := &peerProxyMember{
 			reverseProxy: reverseProxy,
 			apiKey:       peer.ApiKey,
 		}
@@ -66,18 +66,18 @@ func NewPeerManager(peers config.PeerDictionaryConfig, proxyLogger *LogMonitor) 
 		}
 	}
 
-	return &PeerManager{
+	return &PeerProxy{
 		peers:    peers,
 		proxyMap: proxyMap,
 	}, nil
 }
 
-func (p *PeerManager) HasPeerModel(modelID string) bool {
+func (p *PeerProxy) HasPeerModel(modelID string) bool {
 	_, found := p.proxyMap[modelID]
 	return found
 }
 
-func (p *PeerManager) ProxyRequest(model_id string, writer http.ResponseWriter, request *http.Request) error {
+func (p *PeerProxy) ProxyRequest(model_id string, writer http.ResponseWriter, request *http.Request) error {
 	pp, found := p.proxyMap[model_id]
 	if !found {
 		return fmt.Errorf("no peer proxy found for model %s", model_id)
