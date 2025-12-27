@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httputil"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -49,6 +50,15 @@ func NewPeerProxy(peers config.PeerDictionaryConfig, proxyLogger *LogMonitor) (*
 				resp.Header.Set("X-Accel-Buffering", "no")
 			}
 			return nil
+		}
+
+		reverseProxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+			proxyLogger.Warnf("peer %s: proxy error: %v", peerID, err)
+			errMsg := fmt.Sprintf("peer proxy error: %v", err)
+			if runtime.GOOS == "darwin" && strings.Contains(err.Error(), "connect: no route to host") {
+				errMsg += " (hint: on macOS, check System Settings > Privacy & Security > Local Network permissions)"
+			}
+			http.Error(w, errMsg, http.StatusBadGateway)
 		}
 
 		pp := &peerProxyMember{
