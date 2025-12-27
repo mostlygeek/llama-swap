@@ -439,44 +439,59 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 	data := make([]gin.H, 0, len(pm.config.Models))
 	createdTime := time.Now().Unix()
 
+	newRecord := func(modelId string, modelConfig config.ModelConfig) gin.H {
+		record := gin.H{
+			"id":       modelId,
+			"object":   "model",
+			"created":  createdTime,
+			"owned_by": "llama-swap",
+		}
+
+		if name := strings.TrimSpace(modelConfig.Name); name != "" {
+			record["name"] = name
+		}
+		if desc := strings.TrimSpace(modelConfig.Description); desc != "" {
+			record["description"] = desc
+		}
+
+		// Add metadata if present
+		if len(modelConfig.Metadata) > 0 {
+			record["meta"] = gin.H{
+				"llamaswap": modelConfig.Metadata,
+			}
+		}
+		return record
+	}
+
 	for id, modelConfig := range pm.config.Models {
 		if modelConfig.Unlisted {
 			continue
 		}
 
-		newRecord := func(modelId string) gin.H {
-			record := gin.H{
-				"id":       modelId,
-				"object":   "model",
-				"created":  createdTime,
-				"owned_by": "llama-swap",
-			}
-
-			if name := strings.TrimSpace(modelConfig.Name); name != "" {
-				record["name"] = name
-			}
-			if desc := strings.TrimSpace(modelConfig.Description); desc != "" {
-				record["description"] = desc
-			}
-
-			// Add metadata if present
-			if len(modelConfig.Metadata) > 0 {
-				record["meta"] = gin.H{
-					"llamaswap": modelConfig.Metadata,
-				}
-			}
-			return record
-		}
-
-		data = append(data, newRecord(id))
+		data = append(data, newRecord(id, modelConfig))
 
 		// Include aliases
 		if pm.config.IncludeAliasesInList {
 			for _, alias := range modelConfig.Aliases {
 				if alias := strings.TrimSpace(alias); alias != "" {
-					data = append(data, newRecord(alias))
+					data = append(data, newRecord(alias, modelConfig))
 				}
 			}
+		}
+	}
+
+	for peerID, peer := range pm.config.Peers {
+		// add peer models
+		for _, modelID := range peer.Models {
+			// Skip unlisted models if not showing them
+			record := newRecord(modelID, config.ModelConfig{
+				Name: fmt.Sprintf("%s: %s", peerID, modelID),
+				Metadata: map[string]any{
+					"peerID": peerID,
+				},
+			})
+
+			data = append(data, record)
 		}
 	}
 

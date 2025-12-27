@@ -223,17 +223,23 @@ func TestProxyManager_ListModelsHandler(t *testing.T) {
 	model2Config.Name = "     " // empty whitespace only strings will get ignored
 	model2Config.Description = "  "
 
-	config := config.Config{
+	cfg := config.Config{
 		HealthCheckTimeout: 15,
 		Models: map[string]config.ModelConfig{
 			"model1": model1Config,
 			"model2": model2Config,
 			"model3": getTestSimpleResponderConfig("model3"),
 		},
+		Peers: map[string]config.PeerConfig{
+			"peer1": {
+				Proxy:  "http://peer1:8080",
+				Models: []string{"peer-model-a", "peer-model-b"},
+			},
+		},
 		LogLevel: "error",
 	}
 
-	proxy := New(config)
+	proxy := New(cfg)
 
 	// Create a test request
 	req := httptest.NewRequest("GET", "/v1/models", nil)
@@ -258,14 +264,16 @@ func TestProxyManager_ListModelsHandler(t *testing.T) {
 		t.Fatalf("Failed to parse JSON response: %v", err)
 	}
 
-	// Check the number of models returned
-	assert.Len(t, response.Data, 3)
+	// Check the number of models returned (3 local + 2 peer models)
+	assert.Len(t, response.Data, 5)
 
 	// Check the details of each model
 	expectedModels := map[string]struct{}{
-		"model1": {},
-		"model2": {},
-		"model3": {},
+		"model1":       {},
+		"model2":       {},
+		"model3":       {},
+		"peer-model-a": {},
+		"peer-model-b": {},
 	}
 
 	// make all models
@@ -296,6 +304,19 @@ func TestProxyManager_ListModelsHandler(t *testing.T) {
 			description, ok := model["description"].(string)
 			assert.True(t, ok, "description should be a string")
 			assert.Equal(t, "Model 1 description is used for testing", description)
+		} else if modelID == "peer-model-a" || modelID == "peer-model-b" {
+			// Peer models should have meta.llamaswap.peerID
+			meta, exists := model["meta"]
+			assert.True(t, exists, "peer model should have meta field")
+			metaMap, ok := meta.(map[string]interface{})
+			assert.True(t, ok, "meta should be a map")
+			llamaswap, exists := metaMap["llamaswap"]
+			assert.True(t, exists, "meta should have llamaswap field")
+			llamaswapMap, ok := llamaswap.(map[string]interface{})
+			assert.True(t, ok, "llamaswap should be a map")
+			peerID, exists := llamaswapMap["peerID"]
+			assert.True(t, exists, "llamaswap should have peerID field")
+			assert.Equal(t, "peer1", peerID)
 		} else {
 			_, exists := model["name"]
 			assert.False(t, exists, "unexpected name field for model: %s", modelID)
