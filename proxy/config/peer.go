@@ -5,6 +5,7 @@ import (
 	"net/url"
 )
 
+type PeerDictionaryConfig map[string]PeerConfig
 type PeerConfig struct {
 	Proxy    string   `yaml:"proxy"`
 	ProxyURL *url.URL `yaml:"-"`

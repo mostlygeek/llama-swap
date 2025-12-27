@@ -148,7 +148,7 @@ type Config struct {
 	RequiredAPIKeys []string `yaml:"apiKeys"`
 
 	// support remote peers, see issue #433, #296
-	Peers map[string]PeerConfig `yaml:"peers"`
+	Peers PeerDictionaryConfig `yaml:"peers"`
 }
 
 func (c *Config) RealModelName(search string) (string, bool) {
