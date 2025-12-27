@@ -18,6 +18,7 @@ type Model struct {
 	Description string `json:"description"`
 	State       string `json:"state"`
 	Unlisted    bool   `json:"unlisted"`
+	PeerID      string `json:"peerID"`
 }
 
 func addApiHandlers(pm *ProxyManager) {
@@ -81,6 +82,16 @@ func (pm *ProxyManager) getModelStatus() []Model {
 			State:       state,
 			Unlisted:    pm.config.Models[modelID].Unlisted,
 		})
+	}
+
+	// Iterate over the peer models
+	for peerID, peer := range pm.config.Peers {
+		for _, modelID := range peer.Models {
+			models = append(models, Model{
+				Id:     modelID,
+				PeerID: peerID,
+			})
+		}
 	}
 
 	return models
