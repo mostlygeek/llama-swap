@@ -96,6 +96,7 @@ func (p *PeerProxy) ProxyRequest(model_id string, writer http.ResponseWriter, re
 	// Inject API key if configured for this peer
 	if pp.apiKey != "" {
 		request.Header.Set("Authorization", "Bearer "+pp.apiKey)
+		request.Header.Set("x-api-key", pp.apiKey)
 	}
 
 	pp.reverseProxy.ServeHTTP(writer, request)
