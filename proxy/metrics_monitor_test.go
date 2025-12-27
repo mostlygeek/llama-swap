@@ -1,6 +1,9 @@
 package proxy
 
 import (
+	"bytes"
+	"compress/flate"
+	"compress/gzip"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -291,7 +294,7 @@ data: [DONE]
 		assert.Equal(t, 0, len(metrics))
 	})
 
-	t.Run("empty response body does not record metrics", func(t *testing.T) {
+	t.Run("empty response body records minimal metrics", func(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10)
 
 		nextHandler := func(modelID string, w http.ResponseWriter, r *http.Request) error {
@@ -307,10 +310,13 @@ data: [DONE]
 		assert.NoError(t, err)
 
 		metrics := mm.getMetrics()
-		assert.Equal(t, 0, len(metrics))
+		assert.Equal(t, 1, len(metrics))
+		assert.Equal(t, "test-model", metrics[0].Model)
+		assert.Equal(t, 0, metrics[0].InputTokens)
+		assert.Equal(t, 0, metrics[0].OutputTokens)
 	})
 
-	t.Run("invalid JSON does not record metrics", func(t *testing.T) {
+	t.Run("invalid JSON records minimal metrics", func(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10)
 
 		nextHandler := func(modelID string, w http.ResponseWriter, r *http.Request) error {
@@ -328,7 +334,10 @@ data: [DONE]
 		assert.NoError(t, err) // Errors after response is sent are logged, not returned
 
 		metrics := mm.getMetrics()
-		assert.Equal(t, 0, len(metrics))
+		assert.Equal(t, 1, len(metrics))
+		assert.Equal(t, "test-model", metrics[0].Model)
+		assert.Equal(t, 0, metrics[0].InputTokens)
+		assert.Equal(t, 0, metrics[0].OutputTokens)
 	})
 
 	t.Run("next handler error is propagated", func(t *testing.T) {
@@ -350,7 +359,7 @@ data: [DONE]
 		assert.Equal(t, 0, len(metrics))
 	})
 
-	t.Run("response without usage or timings does not record metrics", func(t *testing.T) {
+	t.Run("response without usage or timings records minimal metrics", func(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10)
 
 		responseBody := `{"result": "ok"}`
@@ -367,10 +376,13 @@ data: [DONE]
 		ginCtx, _ := gin.CreateTestContext(rec)
 
 		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
-		assert.NoError(t, err) // Errors after response is sent are logged, not returned
+		assert.NoError(t, err)
 
 		metrics := mm.getMetrics()
-		assert.Equal(t, 0, len(metrics))
+		assert.Equal(t, 1, len(metrics))
+		assert.Equal(t, "test-model", metrics[0].Model)
+		assert.Equal(t, 0, metrics[0].InputTokens)
+		assert.Equal(t, 0, metrics[0].OutputTokens)
 	})
 }
 
@@ -598,7 +610,7 @@ data: [DONE]
 		assert.Equal(t, 50, metrics[0].OutputTokens)
 	})
 
-	t.Run("handles streaming with no valid JSON", func(t *testing.T) {
+	t.Run("handles streaming with no valid JSON records minimal metrics", func(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10)
 
 		responseBody := `data: not json
@@ -619,13 +631,16 @@ data: [DONE]
 		ginCtx, _ := gin.CreateTestContext(rec)
 
 		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
-		assert.NoError(t, err) // Errors after response is sent are logged, not returned
+		assert.NoError(t, err)
 
 		metrics := mm.getMetrics()
-		assert.Equal(t, 0, len(metrics))
+		assert.Equal(t, 1, len(metrics))
+		assert.Equal(t, "test-model", metrics[0].Model)
+		assert.Equal(t, 0, metrics[0].InputTokens)
+		assert.Equal(t, 0, metrics[0].OutputTokens)
 	})
 
-	t.Run("handles empty streaming response", func(t *testing.T) {
+	t.Run("handles empty streaming response records minimal metrics", func(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10)
 
 		responseBody := ``
@@ -642,11 +657,13 @@ data: [DONE]
 		ginCtx, _ := gin.CreateTestContext(rec)
 
 		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
-		// Empty body should not trigger WrapHandler processing
 		assert.NoError(t, err)
 
 		metrics := mm.getMetrics()
-		assert.Equal(t, 0, len(metrics))
+		assert.Equal(t, 1, len(metrics))
+		assert.Equal(t, "test-model", metrics[0].Model)
+		assert.Equal(t, 0, metrics[0].InputTokens)
+		assert.Equal(t, 0, metrics[0].OutputTokens)
 	})
 }
 
@@ -690,4 +707,128 @@ func BenchmarkMetricsMonitor_AddMetrics_SmallBuffer(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		mm.addMetrics(metric)
 	}
+}
+
+func TestMetricsMonitor_WrapHandler_Compression(t *testing.T) {
+	t.Run("gzip encoded response", func(t *testing.T) {
+		mm := newMetricsMonitor(testLogger, 10)
+
+		responseBody := `{"usage": {"prompt_tokens": 100, "completion_tokens": 50}}`
+
+		// Compress with gzip
+		var buf bytes.Buffer
+		gzWriter := gzip.NewWriter(&buf)
+		gzWriter.Write([]byte(responseBody))
+		gzWriter.Close()
+		compressedBody := buf.Bytes()
+
+		nextHandler := func(modelID string, w http.ResponseWriter, r *http.Request) error {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Encoding", "gzip")
+			w.WriteHeader(http.StatusOK)
+			w.Write(compressedBody)
+			return nil
+		}
+
+		req := httptest.NewRequest("POST", "/test", nil)
+		rec := httptest.NewRecorder()
+		ginCtx, _ := gin.CreateTestContext(rec)
+
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
+		assert.NoError(t, err)
+
+		metrics := mm.getMetrics()
+		assert.Equal(t, 1, len(metrics))
+		assert.Equal(t, "test-model", metrics[0].Model)
+		assert.Equal(t, 100, metrics[0].InputTokens)
+		assert.Equal(t, 50, metrics[0].OutputTokens)
+	})
+
+	t.Run("deflate encoded response", func(t *testing.T) {
+		mm := newMetricsMonitor(testLogger, 10)
+
+		responseBody := `{"usage": {"prompt_tokens": 200, "completion_tokens": 75}}`
+
+		// Compress with deflate
+		var buf bytes.Buffer
+		flateWriter, _ := flate.NewWriter(&buf, flate.DefaultCompression)
+		flateWriter.Write([]byte(responseBody))
+		flateWriter.Close()
+		compressedBody := buf.Bytes()
+
+		nextHandler := func(modelID string, w http.ResponseWriter, r *http.Request) error {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Encoding", "deflate")
+			w.WriteHeader(http.StatusOK)
+			w.Write(compressedBody)
+			return nil
+		}
+
+		req := httptest.NewRequest("POST", "/test", nil)
+		rec := httptest.NewRecorder()
+		ginCtx, _ := gin.CreateTestContext(rec)
+
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
+		assert.NoError(t, err)
+
+		metrics := mm.getMetrics()
+		assert.Equal(t, 1, len(metrics))
+		assert.Equal(t, "test-model", metrics[0].Model)
+		assert.Equal(t, 200, metrics[0].InputTokens)
+		assert.Equal(t, 75, metrics[0].OutputTokens)
+	})
+
+	t.Run("invalid gzip data records minimal metrics", func(t *testing.T) {
+		mm := newMetricsMonitor(testLogger, 10)
+
+		// Invalid compressed data
+		invalidData := []byte("this is not gzip data")
+
+		nextHandler := func(modelID string, w http.ResponseWriter, r *http.Request) error {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Encoding", "gzip")
+			w.WriteHeader(http.StatusOK)
+			w.Write(invalidData)
+			return nil
+		}
+
+		req := httptest.NewRequest("POST", "/test", nil)
+		rec := httptest.NewRecorder()
+		ginCtx, _ := gin.CreateTestContext(rec)
+
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
+		assert.NoError(t, err) // Should not return error, just log warning
+
+		metrics := mm.getMetrics()
+		assert.Equal(t, 1, len(metrics))
+		assert.Equal(t, "test-model", metrics[0].Model)
+		assert.Equal(t, 0, metrics[0].InputTokens)
+		assert.Equal(t, 0, metrics[0].OutputTokens)
+	})
+
+	t.Run("unknown encoding treated as uncompressed", func(t *testing.T) {
+		mm := newMetricsMonitor(testLogger, 10)
+
+		responseBody := `{"usage": {"prompt_tokens": 300, "completion_tokens": 100}}`
+
+		nextHandler := func(modelID string, w http.ResponseWriter, r *http.Request) error {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Encoding", "unknown-encoding")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(responseBody))
+			return nil
+		}
+
+		req := httptest.NewRequest("POST", "/test", nil)
+		rec := httptest.NewRecorder()
+		ginCtx, _ := gin.CreateTestContext(rec)
+
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
+		assert.NoError(t, err)
+
+		metrics := mm.getMetrics()
+		assert.Equal(t, 1, len(metrics))
+		assert.Equal(t, 300, metrics[0].InputTokens)
+		assert.Equal(t, 100, metrics[0].OutputTokens)
+	})
 }
