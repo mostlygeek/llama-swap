@@ -50,6 +50,9 @@ type ProxyManager struct {
 	buildDate string
 	commit    string
 	version   string
+
+	// peer proxy see: #296, #433
+	peerProxy *PeerProxy
 }
 
 func New(proxyConfig config.Config) *ProxyManager {
@@ -133,6 +136,12 @@ func New(proxyConfig config.Config) *ProxyManager {
 		maxMetrics = proxyConfig.MetricsMaxInMemory
 	}
 
+	peerProxy, err := NewPeerProxy(proxyConfig.Peers, proxyLogger)
+	if err != nil {
+		proxyLogger.Errorf("Disabling Peering. Failed to create proxy peers: %v", err)
+		peerProxy = nil
+	}
+
 	pm := &ProxyManager{
 		config:    proxyConfig,
 		ginEngine: gin.New(),
@@ -151,6 +160,8 @@ func New(proxyConfig config.Config) *ProxyManager {
 		buildDate: "unknown",
 		commit:    "abcd1234",
 		version:   "0",
+
+		peerProxy: peerProxy,
 	}
 
 	// create the process groups
@@ -581,41 +592,54 @@ func (pm *ProxyManager) proxyInferenceHandler(c *gin.Context) {
 		return
 	}
 
+	// Look for a matching local model first
+	var nextHandler func(modelID string, w http.ResponseWriter, r *http.Request) error
+
 	modelID, found := pm.config.RealModelName(requestedModel)
-	if !found {
-		pm.sendErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("could not find real modelID for %s", requestedModel))
-		return
-	}
-
-	processGroup, err := pm.swapProcessGroup(modelID)
-	if err != nil {
-		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
-		return
-	}
-
-	// issue #69 allow custom model names to be sent to upstream
-	useModelName := pm.config.Models[modelID].UseModelName
-	if useModelName != "" {
-		bodyBytes, err = sjson.SetBytes(bodyBytes, "model", useModelName)
+	if found {
+		processGroup, err := pm.swapProcessGroup(modelID)
 		if err != nil {
-			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error rewriting model name in JSON: %s", err.Error()))
+			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
 			return
 		}
-	}
 
-	// issue #174 strip parameters from the JSON body
-	stripParams, err := pm.config.Models[modelID].Filters.SanitizedStripParams()
-	if err != nil { // just log it and continue
-		pm.proxyLogger.Errorf("Error sanitizing strip params string: %s, %s", pm.config.Models[modelID].Filters.StripParams, err.Error())
-	} else {
-		for _, param := range stripParams {
-			pm.proxyLogger.Debugf("<%s> stripping param: %s", modelID, param)
-			bodyBytes, err = sjson.DeleteBytes(bodyBytes, param)
+		// issue #69 allow custom model names to be sent to upstream
+		useModelName := pm.config.Models[modelID].UseModelName
+		if useModelName != "" {
+			bodyBytes, err = sjson.SetBytes(bodyBytes, "model", useModelName)
 			if err != nil {
-				pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error deleting parameter %s from request", param))
+				pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error rewriting model name in JSON: %s", err.Error()))
 				return
 			}
 		}
+
+		// issue #174 strip parameters from the JSON body
+		stripParams, err := pm.config.Models[modelID].Filters.SanitizedStripParams()
+		if err != nil { // just log it and continue
+			pm.proxyLogger.Errorf("Error sanitizing strip params string: %s, %s", pm.config.Models[modelID].Filters.StripParams, err.Error())
+		} else {
+			for _, param := range stripParams {
+				pm.proxyLogger.Debugf("<%s> stripping param: %s", modelID, param)
+				bodyBytes, err = sjson.DeleteBytes(bodyBytes, param)
+				if err != nil {
+					pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error deleting parameter %s from request", param))
+					return
+				}
+			}
+		}
+
+		pm.proxyLogger.Debugf("ProxyManager using local Process for model: %s", requestedModel)
+		nextHandler = processGroup.ProxyRequest
+	} else if pm.peerProxy != nil && pm.peerProxy.HasPeerModel(requestedModel) {
+		pm.proxyLogger.Debugf("ProxyManager using ProxyPeer for model: %s", requestedModel)
+		modelID = requestedModel
+		nextHandler = pm.peerProxy.ProxyRequest
+
+	}
+
+	if nextHandler == nil {
+		pm.sendErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("could not find suitable inference handler for %s", requestedModel))
+		return
 	}
 
 	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
@@ -632,15 +656,15 @@ func (pm *ProxyManager) proxyInferenceHandler(c *gin.Context) {
 	c.Request = c.Request.WithContext(ctx)
 
 	if pm.metricsMonitor != nil && c.Request.Method == "POST" {
-		if err := pm.metricsMonitor.wrapHandler(modelID, c.Writer, c.Request, processGroup.ProxyRequest); err != nil {
+		if err := pm.metricsMonitor.wrapHandler(modelID, c.Writer, c.Request, nextHandler); err != nil {
 			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying metrics wrapped request: %s", err.Error()))
-			pm.proxyLogger.Errorf("Error Proxying Metrics Wrapped Request for processGroup %s and model %s", processGroup.id, modelID)
+			pm.proxyLogger.Errorf("Error Proxying Metrics Wrapped Request model %s", modelID)
 			return
 		}
 	} else {
-		if err := processGroup.ProxyRequest(modelID, c.Writer, c.Request); err != nil {
+		if err := nextHandler(modelID, c.Writer, c.Request); err != nil {
 			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
-			pm.proxyLogger.Errorf("Error Proxying Request for processGroup %s and model %s", processGroup.id, modelID)
+			pm.proxyLogger.Errorf("Error Proxying Request for model %s", modelID)
 			return
 		}
 	}
