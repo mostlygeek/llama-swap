@@ -2,23 +2,25 @@ package proxy
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/mostlygeek/llama-swap/proxy/config"
 )
 
 type peerProxyMember struct {
+	peerID       string
 	reverseProxy *httputil.ReverseProxy
 	apiKey       string
 }
 
 type PeerProxy struct {
-	peers config.PeerDictionaryConfig
-
+	peers    config.PeerDictionaryConfig
 	proxyMap map[string]*peerProxyMember
 }
 
@@ -32,10 +34,26 @@ func NewPeerProxy(peers config.PeerDictionaryConfig, proxyLogger *LogMonitor) (*
 	}
 	sort.Strings(peerIDs)
 
+	// Create a shared transport with reasonable timeouts for peer connections
+	// these can be tuned with feedback later
+	peerTransport := &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second, // Connection timeout
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 60 * time.Second, // Time to wait for response headers
+		ExpectContinueTimeout: 1 * time.Second,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   10,
+		IdleConnTimeout:       90 * time.Second,
+	}
+
 	for _, peerID := range peerIDs {
 		peer := peers[peerID]
 		// Create reverse proxy for this peer
 		reverseProxy := httputil.NewSingleHostReverseProxy(peer.ProxyURL)
+		reverseProxy.Transport = peerTransport
 
 		// Wrap Director to set Host header for remote hosts (not localhost)
 		originalDirector := reverseProxy.Director
@@ -62,6 +80,7 @@ func NewPeerProxy(peers config.PeerDictionaryConfig, proxyLogger *LogMonitor) (*
 		}
 
 		pp := &peerProxyMember{
+			peerID:       peerID,
 			reverseProxy: reverseProxy,
 			apiKey:       peer.ApiKey,
 		}
@@ -87,6 +106,10 @@ func (p *PeerProxy) HasPeerModel(modelID string) bool {
 	return found
 }
 
+func (p *PeerProxy) ListPeers() config.PeerDictionaryConfig {
+	return p.peers
+}
+
 func (p *PeerProxy) ProxyRequest(model_id string, writer http.ResponseWriter, request *http.Request) error {
 	pp, found := p.proxyMap[model_id]
 	if !found {
@@ -99,33 +122,6 @@ func (p *PeerProxy) ProxyRequest(model_id string, writer http.ResponseWriter, re
 		request.Header.Set("x-api-key", pp.apiKey)
 	}
 
-	// Filter Accept-Encoding to only include encodings we can decompress for metrics
-	if ae := request.Header.Get("Accept-Encoding"); ae != "" {
-		request.Header.Set("Accept-Encoding", filterAcceptEncoding(ae))
-	}
-
 	pp.reverseProxy.ServeHTTP(writer, request)
 	return nil
-}
-
-// filterAcceptEncoding filters the Accept-Encoding header to only include
-// encodings we can decompress (gzip, deflate). This respects the client's
-// preferences while ensuring we can parse response bodies for metrics.
-func filterAcceptEncoding(acceptEncoding string) string {
-	if acceptEncoding == "" {
-		return ""
-	}
-
-	supported := map[string]bool{"gzip": true, "deflate": true}
-	var filtered []string
-
-	for _, part := range strings.Split(acceptEncoding, ",") {
-		// Parse encoding and optional quality value (e.g., "gzip;q=1.0")
-		encoding := strings.TrimSpace(strings.Split(part, ";")[0])
-		if supported[strings.ToLower(encoding)] {
-			filtered = append(filtered, strings.TrimSpace(part))
-		}
-	}
-
-	return strings.Join(filtered, ", ")
 }

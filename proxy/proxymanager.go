@@ -480,18 +480,20 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 		}
 	}
 
-	for peerID, peer := range pm.config.Peers {
-		// add peer models
-		for _, modelID := range peer.Models {
-			// Skip unlisted models if not showing them
-			record := newRecord(modelID, config.ModelConfig{
-				Name: fmt.Sprintf("%s: %s", peerID, modelID),
-				Metadata: map[string]any{
-					"peerID": peerID,
-				},
-			})
+	if pm.peerProxy != nil {
+		for peerID, peer := range pm.peerProxy.ListPeers() {
+			// add peer models
+			for _, modelID := range peer.Models {
+				// Skip unlisted models if not showing them
+				record := newRecord(modelID, config.ModelConfig{
+					Name: fmt.Sprintf("%s: %s", peerID, modelID),
+					Metadata: map[string]any{
+						"peerID": peerID,
+					},
+				})
 
-			data = append(data, record)
+				data = append(data, record)
+			}
 		}
 	}
 
