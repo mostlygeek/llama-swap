@@ -99,6 +99,33 @@ func (p *PeerProxy) ProxyRequest(model_id string, writer http.ResponseWriter, re
 		request.Header.Set("x-api-key", pp.apiKey)
 	}
 
+	// Filter Accept-Encoding to only include encodings we can decompress for metrics
+	if ae := request.Header.Get("Accept-Encoding"); ae != "" {
+		request.Header.Set("Accept-Encoding", filterAcceptEncoding(ae))
+	}
+
 	pp.reverseProxy.ServeHTTP(writer, request)
 	return nil
+}
+
+// filterAcceptEncoding filters the Accept-Encoding header to only include
+// encodings we can decompress (gzip, deflate). This respects the client's
+// preferences while ensuring we can parse response bodies for metrics.
+func filterAcceptEncoding(acceptEncoding string) string {
+	if acceptEncoding == "" {
+		return ""
+	}
+
+	supported := map[string]bool{"gzip": true, "deflate": true}
+	var filtered []string
+
+	for _, part := range strings.Split(acceptEncoding, ",") {
+		// Parse encoding and optional quality value (e.g., "gzip;q=1.0")
+		encoding := strings.TrimSpace(strings.Split(part, ";")[0])
+		if supported[strings.ToLower(encoding)] {
+			filtered = append(filtered, strings.TrimSpace(part))
+		}
+	}
+
+	return strings.Join(filtered, ", ")
 }
