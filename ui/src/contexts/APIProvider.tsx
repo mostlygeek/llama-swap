@@ -10,6 +10,7 @@ export interface Model {
   name: string;
   description: string;
   unlisted: boolean;
+  peerID: string;
 }
 
 interface APIProviderType {
@@ -70,7 +71,7 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
   const [versionInfo, setVersionInfo] = useState<VersionInfo>({
     build_date: "unknown",
     commit: "unknown",
-    version: "unknown"
+    version: "unknown",
   });
   //const apiEventSource = useRef<EventSource | null>(null);
 
@@ -166,7 +167,7 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
   }, []);
 
   useEffect(() => {
-    // fetch version 
+    // fetch version
     const fetchVersion = async () => {
       try {
         const response = await fetch("/api/version");
@@ -180,7 +181,7 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
       }
     };
 
-    if (connectionStatus === 'connected') {
+    if (connectionStatus === "connected") {
       fetchVersion();
     }
   }, [connectionStatus]);
@@ -265,7 +266,19 @@ export function APIProvider({ children, autoStartAPIEvents = true }: APIProvider
       connectionStatus,
       versionInfo,
     }),
-    [models, listModels, unloadAllModels, unloadSingleModel, loadModel, enableAPIEvents, proxyLogs, upstreamLogs, metrics, connectionStatus, versionInfo]
+    [
+      models,
+      listModels,
+      unloadAllModels,
+      unloadSingleModel,
+      loadModel,
+      enableAPIEvents,
+      proxyLogs,
+      upstreamLogs,
+      metrics,
+      connectionStatus,
+      versionInfo,
+    ]
   );
 
   return <APIContext.Provider value={value}>{children}</APIContext.Provider>;

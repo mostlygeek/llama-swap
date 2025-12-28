@@ -44,8 +44,24 @@ function ModelsPanel() {
   const [showIdorName, setShowIdorName] = usePersistentState<"id" | "name">("showIdorName", "id"); // true = show ID, false = show name
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const filteredModels = useMemo(() => {
-    return models.filter((model) => showUnlisted || !model.unlisted);
+  const { regularModels, peerModelsByPeerId } = useMemo(() => {
+    const filtered = models.filter((model) => showUnlisted || !model.unlisted);
+    const peerModels = filtered.filter((m) => m.peerID);
+
+    // Group peer models by peerID
+    const grouped = peerModels.reduce((acc, model) => {
+      const peerId = model.peerID || "unknown";
+      if (!acc[peerId]) {
+        acc[peerId] = [];
+      }
+      acc[peerId].push(model);
+      return acc;
+    }, {} as Record<string, typeof peerModels>);
+
+    return {
+      regularModels: filtered.filter((m) => !m.peerID),
+      peerModelsByPeerId: grouped,
+    };
   }, [models, showUnlisted]);
 
   const handleUnloadAllModels = useCallback(async () => {
@@ -151,7 +167,7 @@ function ModelsPanel() {
             </tr>
           </thead>
           <tbody>
-            {filteredModels.map((model) => (
+            {regularModels.map((model) => (
               <tr key={model.id} className="border-b hover:bg-secondary-hover border-gray-200">
                 <td className={`${model.unlisted ? "text-txtsecondary" : ""}`}>
                   <a href={`/upstream/${model.id}/`} className="font-semibold" target="_blank">
@@ -186,6 +202,34 @@ function ModelsPanel() {
             ))}
           </tbody>
         </table>
+
+        {Object.keys(peerModelsByPeerId).length > 0 && (
+          <>
+            <h3 className="mt-8 mb-2">Peer Models</h3>
+            {Object.entries(peerModelsByPeerId)
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([peerId, models]) => (
+                <div key={peerId} className="mb-4">
+                  <table className="w-full">
+                    <thead className="sticky top-0 bg-card z-10">
+                      <tr className="text-left border-b border-gray-200 dark:border-white/10 bg-surface">
+                        <th className="font-semibold">{peerId}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {models.map((model) => (
+                        <tr key={model.id} className="border-b hover:bg-secondary-hover border-gray-200">
+                          <td className={`pl-8 ${model.unlisted ? "text-txtsecondary" : ""}`}>
+                            <span>{model.id}</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+          </>
+        )}
       </div>
     </div>
   );
@@ -223,11 +267,7 @@ function TokenHistogram({ data }: { data: HistogramData }) {
 
   return (
     <div className="mt-2 w-full">
-      <svg
-        viewBox={`0 0 ${viewBoxWidth} ${height}`}
-        className="w-full h-auto"
-        preserveAspectRatio="xMidYMid meet"
-      >
+      <svg viewBox={`0 0 ${viewBoxWidth} ${height}`} className="w-full h-auto" preserveAspectRatio="xMidYMid meet">
         {/* Y-axis */}
         <line
           x1={padding.left}
@@ -312,14 +352,7 @@ function TokenHistogram({ data }: { data: HistogramData }) {
         />
 
         {/* X-axis labels */}
-        <text
-          x={padding.left}
-          y={height - 5}
-          fontSize="10"
-          fill="currentColor"
-          opacity="0.6"
-          textAnchor="start"
-        >
+        <text x={padding.left} y={height - 5} fontSize="10" fill="currentColor" opacity="0.6" textAnchor="start">
           {min.toFixed(1)}
         </text>
 
