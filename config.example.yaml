@@ -351,7 +351,7 @@ peers:
   llama-swap-peer:
     # proxy: a valid base URL to proxy requests to
     # - required
-    # - requested path to llama-swap will be appened to the end of the proxy value
+    # - requested path to llama-swap will be appended to the end of the proxy value
     proxy: http://192.168.1.23
     # models: a list of models served by the peer
     # - required
