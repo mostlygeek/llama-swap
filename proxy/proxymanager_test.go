@@ -223,17 +223,23 @@ func TestProxyManager_ListModelsHandler(t *testing.T) {
 	model2Config.Name = "     " // empty whitespace only strings will get ignored
 	model2Config.Description = "  "
 
-	config := config.Config{
+	cfg := config.Config{
 		HealthCheckTimeout: 15,
 		Models: map[string]config.ModelConfig{
 			"model1": model1Config,
 			"model2": model2Config,
 			"model3": getTestSimpleResponderConfig("model3"),
 		},
+		Peers: map[string]config.PeerConfig{
+			"peer1": {
+				Proxy:  "http://peer1:8080",
+				Models: []string{"peer-model-a", "peer-model-b"},
+			},
+		},
 		LogLevel: "error",
 	}
 
-	proxy := New(config)
+	proxy := New(cfg)
 
 	// Create a test request
 	req := httptest.NewRequest("GET", "/v1/models", nil)
@@ -258,14 +264,16 @@ func TestProxyManager_ListModelsHandler(t *testing.T) {
 		t.Fatalf("Failed to parse JSON response: %v", err)
 	}
 
-	// Check the number of models returned
-	assert.Len(t, response.Data, 3)
+	// Check the number of models returned (3 local + 2 peer models)
+	assert.Len(t, response.Data, 5)
 
 	// Check the details of each model
 	expectedModels := map[string]struct{}{
-		"model1": {},
-		"model2": {},
-		"model3": {},
+		"model1":       {},
+		"model2":       {},
+		"model3":       {},
+		"peer-model-a": {},
+		"peer-model-b": {},
 	}
 
 	// make all models
@@ -296,6 +304,19 @@ func TestProxyManager_ListModelsHandler(t *testing.T) {
 			description, ok := model["description"].(string)
 			assert.True(t, ok, "description should be a string")
 			assert.Equal(t, "Model 1 description is used for testing", description)
+		} else if modelID == "peer-model-a" || modelID == "peer-model-b" {
+			// Peer models should have meta.llamaswap.peerID
+			meta, exists := model["meta"]
+			assert.True(t, exists, "peer model should have meta field")
+			metaMap, ok := meta.(map[string]interface{})
+			assert.True(t, ok, "meta should be a map")
+			llamaswap, exists := metaMap["llamaswap"]
+			assert.True(t, exists, "meta should have llamaswap field")
+			llamaswapMap, ok := llamaswap.(map[string]interface{})
+			assert.True(t, ok, "llamaswap should be a map")
+			peerID, exists := llamaswapMap["peerID"]
+			assert.True(t, exists, "llamaswap should have peerID field")
+			assert.Equal(t, "peer1", peerID)
 		} else {
 			_, exists := model["name"]
 			assert.False(t, exists, "unexpected name field for model: %s", modelID)
@@ -1285,5 +1306,217 @@ func TestProxyManager_APIKeyAuth_Disabled(t *testing.T) {
 
 		proxy.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
+	})
+}
+
+// TestProxyManager_PeerProxy_InferenceHandler tests the peerProxy integration
+// in proxyInferenceHandler for issue #433
+func TestProxyManager_PeerProxy_InferenceHandler(t *testing.T) {
+	t.Run("requests to peer models are proxied", func(t *testing.T) {
+		// Create a test server to act as the peer
+		peerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"response":"from-peer","model":"peer-model"}`))
+		}))
+		defer peerServer.Close()
+
+		// Create config with peers but no local model for "peer-model"
+		configStr := fmt.Sprintf(`
+logLevel: error
+peers:
+  test-peer:
+    proxy: %s
+    models:
+      - peer-model
+models:
+  local-model:
+    cmd: %s -port ${PORT} -silent -respond local-model
+`, peerServer.URL, getSimpleResponderPath())
+
+		testConfig, err := config.LoadConfigFromReader(strings.NewReader(configStr))
+		assert.NoError(t, err)
+
+		proxy := New(testConfig)
+		defer proxy.StopProcesses(StopImmediately)
+
+		reqBody := `{"model":"peer-model"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "from-peer")
+	})
+
+	t.Run("local models take precedence over peer models", func(t *testing.T) {
+		// Create a test server to act as the peer - should NOT be called
+		peerCalled := false
+		peerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			peerCalled = true
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"response":"from-peer"}`))
+		}))
+		defer peerServer.Close()
+
+		// Create config where "shared-model" exists both locally and on peer
+		configStr := fmt.Sprintf(`
+logLevel: error
+peers:
+  test-peer:
+    proxy: %s
+    models:
+      - shared-model
+models:
+  shared-model:
+    cmd: %s -port ${PORT} -silent -respond local-response
+`, peerServer.URL, getSimpleResponderPath())
+
+		testConfig, err := config.LoadConfigFromReader(strings.NewReader(configStr))
+		assert.NoError(t, err)
+
+		proxy := New(testConfig)
+		defer proxy.StopProcesses(StopImmediately)
+
+		reqBody := `{"model":"shared-model"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "local-response")
+		assert.False(t, peerCalled, "peer should not be called when local model exists")
+	})
+
+	t.Run("unknown model returns error", func(t *testing.T) {
+		// Create a test server to act as the peer
+		peerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer peerServer.Close()
+
+		configStr := fmt.Sprintf(`
+logLevel: error
+peers:
+  test-peer:
+    proxy: %s
+    models:
+      - peer-model
+models:
+  local-model:
+    cmd: %s -port ${PORT} -silent -respond local-model
+`, peerServer.URL, getSimpleResponderPath())
+
+		testConfig, err := config.LoadConfigFromReader(strings.NewReader(configStr))
+		assert.NoError(t, err)
+
+		proxy := New(testConfig)
+		defer proxy.StopProcesses(StopImmediately)
+
+		reqBody := `{"model":"unknown-model"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "could not find suitable inference handler")
+	})
+
+	t.Run("peer API key is injected into request", func(t *testing.T) {
+		var receivedAuthHeader string
+		peerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			receivedAuthHeader = r.Header.Get("Authorization")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"response":"ok"}`))
+		}))
+		defer peerServer.Close()
+
+		configStr := fmt.Sprintf(`
+logLevel: error
+peers:
+  test-peer:
+    proxy: %s
+    apiKey: secret-peer-key
+    models:
+      - peer-model
+models:
+  local-model:
+    cmd: %s -port ${PORT} -silent -respond local-model
+`, peerServer.URL, getSimpleResponderPath())
+
+		testConfig, err := config.LoadConfigFromReader(strings.NewReader(configStr))
+		assert.NoError(t, err)
+
+		proxy := New(testConfig)
+		defer proxy.StopProcesses(StopImmediately)
+
+		reqBody := `{"model":"peer-model"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "Bearer secret-peer-key", receivedAuthHeader)
+	})
+
+	t.Run("no peers configured - unknown model returns error", func(t *testing.T) {
+		testConfig := config.AddDefaultGroupToConfig(config.Config{
+			HealthCheckTimeout: 15,
+			Models: map[string]config.ModelConfig{
+				"local-model": getTestSimpleResponderConfig("local-model"),
+			},
+			LogLevel: "error",
+		})
+
+		proxy := New(testConfig)
+		defer proxy.StopProcesses(StopImmediately)
+
+		// peerProxy exists but has no peer models configured
+		assert.False(t, proxy.peerProxy.HasPeerModel("unknown-model"))
+
+		reqBody := `{"model":"unknown-model"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "could not find suitable inference handler")
+	})
+
+	t.Run("peer streaming response sets X-Accel-Buffering header", func(t *testing.T) {
+		peerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("data: test\n\n"))
+		}))
+		defer peerServer.Close()
+
+		configStr := fmt.Sprintf(`
+logLevel: error
+peers:
+  test-peer:
+    proxy: %s
+    models:
+      - peer-model
+models:
+  local-model:
+    cmd: %s -port ${PORT} -silent -respond local-model
+`, peerServer.URL, getSimpleResponderPath())
+
+		testConfig, err := config.LoadConfigFromReader(strings.NewReader(configStr))
+		assert.NoError(t, err)
+
+		proxy := New(testConfig)
+		defer proxy.StopProcesses(StopImmediately)
+
+		reqBody := `{"model":"peer-model"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "no", w.Header().Get("X-Accel-Buffering"))
 	})
 }
