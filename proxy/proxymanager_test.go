@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -34,10 +35,6 @@ type TestResponseRecorder struct {
 
 func (r *TestResponseRecorder) CloseNotify() <-chan bool {
 	return r.closeChannel
-}
-
-func (r *TestResponseRecorder) closeClient() {
-	r.closeChannel <- true
 }
 
 func CreateTestResponseRecorder() *TestResponseRecorder {
@@ -1253,18 +1250,6 @@ func TestProxyManager_APIKeyAuth(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 
-	t.Run("both headers with different keys returns 400", func(t *testing.T) {
-		reqBody := `{"model":"model1"}`
-		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
-		req.Header.Set("x-api-key", "valid-key-1")
-		req.Header.Set("Authorization", "Bearer valid-key-2")
-		w := CreateTestResponseRecorder()
-
-		proxy.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "do not match")
-	})
-
 	t.Run("invalid key returns 401", func(t *testing.T) {
 		reqBody := `{"model":"model1"}`
 		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
@@ -1283,6 +1268,52 @@ func TestProxyManager_APIKeyAuth(t *testing.T) {
 
 		proxy.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+
+	t.Run("valid key in Basic Auth header", func(t *testing.T) {
+		reqBody := `{"model":"model1"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		// Basic Auth: base64("anyuser:valid-key-1")
+		credentials := base64.StdEncoding.EncodeToString([]byte("anyuser:valid-key-1"))
+		req.Header.Set("Authorization", "Basic "+credentials)
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("invalid key in Basic Auth header returns 401", func(t *testing.T) {
+		reqBody := `{"model":"model1"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		credentials := base64.StdEncoding.EncodeToString([]byte("anyuser:wrong-key"))
+		req.Header.Set("Authorization", "Basic "+credentials)
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Contains(t, w.Body.String(), "unauthorized")
+	})
+
+	t.Run("x-api-key and Basic Auth with matching keys", func(t *testing.T) {
+		reqBody := `{"model":"model1"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		req.Header.Set("x-api-key", "valid-key-1")
+		credentials := base64.StdEncoding.EncodeToString([]byte("user:valid-key-1"))
+		req.Header.Set("Authorization", "Basic "+credentials)
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("401 response includes WWW-Authenticate header", func(t *testing.T) {
+		reqBody := `{"model":"model1"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Equal(t, `Basic realm="llama-swap"`, w.Header().Get("WWW-Authenticate"))
 	})
 }
 
