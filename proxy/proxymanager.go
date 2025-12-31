@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -825,23 +826,30 @@ func (pm *ProxyManager) apiKeyAuth() gin.HandlerFunc {
 		xApiKey := c.GetHeader("x-api-key")
 
 		var bearerKey string
+		var basicKey string
 		if auth := c.GetHeader("Authorization"); auth != "" {
 			if strings.HasPrefix(auth, "Bearer ") {
 				bearerKey = strings.TrimPrefix(auth, "Bearer ")
+			} else if strings.HasPrefix(auth, "Basic ") {
+				// Basic Auth: base64(username:password), password is the API key
+				encoded := strings.TrimPrefix(auth, "Basic ")
+				if decoded, err := base64.StdEncoding.DecodeString(encoded); err == nil {
+					parts := strings.SplitN(string(decoded), ":", 2)
+					if len(parts) == 2 {
+						basicKey = parts[1] // password is the API key
+					}
+				}
 			}
 		}
 
-		// If both headers present, they must match
-		if xApiKey != "" && bearerKey != "" && xApiKey != bearerKey {
-			pm.sendErrorResponse(c, http.StatusBadRequest, "x-api-key and Authorization header values do not match")
-			c.Abort()
-			return
-		}
-
-		// Use x-api-key first, then Authorization
-		providedKey := xApiKey
-		if providedKey == "" {
+		// Use first key found: Basic, then Bearer, then x-api-key
+		var providedKey string
+		if basicKey != "" {
+			providedKey = basicKey
+		} else if bearerKey != "" {
 			providedKey = bearerKey
+		} else {
+			providedKey = xApiKey
 		}
 
 		// Validate key
@@ -854,6 +862,7 @@ func (pm *ProxyManager) apiKeyAuth() gin.HandlerFunc {
 		}
 
 		if !valid {
+			c.Header("WWW-Authenticate", `Basic realm="llama-swap"`)
 			pm.sendErrorResponse(c, http.StatusUnauthorized, "unauthorized: invalid or missing API key")
 			c.Abort()
 			return
