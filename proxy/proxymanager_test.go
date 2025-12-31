@@ -523,6 +523,10 @@ func TestProxyManager_ListModelsHandler_IncludeAliasesInList(t *testing.T) {
 }
 
 func TestProxyManager_Shutdown(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow test")
+	}
+
 	// make broken model configurations
 	model1Config := getTestSimpleResponderConfigPort("model1", 9991)
 	model1Config.Proxy = "http://localhost:10001/"

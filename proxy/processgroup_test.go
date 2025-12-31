@@ -49,6 +49,10 @@ func TestProcessGroup_HasMember(t *testing.T) {
 // TestProcessGroup_ProxyRequestSwapIsTrueParallel tests that when swap is true
 // and multiple requests are made in parallel, only one process is running at a time.
 func TestProcessGroup_ProxyRequestSwapIsTrueParallel(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow test")
+	}
+
 	var processGroupTestConfig = config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,
 		Models: map[string]config.ModelConfig{
