@@ -11,8 +11,10 @@ llama-swap is a light weight, transparent proxy server that provides automatic m
 
 ## Testing
 
-- `make test-dev` - Use this when making iterative changes. Runs `go test` and `staticcheck`. Fix any static checking errors. Use this only when changes are made to any code under the `proxy/` directory
-- `make test-all` - runs at the end before completing work. Includes long running concurrency tests.
+- Follow test naming conventions like `TestProxyManager_<test name>`, `TestProcessGroup_<test name>`, etc.
+- Use `go test -v -run <name pattern for new tests>` to run any new tests you've written.
+- Use `make test-dev` after running new tests for a quick over all test run. This runs `go test` and `staticcheck`. Fix any static checking errors. Use this only when changes are made to any code under the `proxy/` directory
+- Use `make test-all` before completing work. This includes long running concurrency tests.
 
 ## Workflow Tasks
 
