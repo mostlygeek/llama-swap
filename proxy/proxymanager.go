@@ -277,6 +277,7 @@ func (pm *ProxyManager) setupGinEngine() {
 	// Set up routes using the Gin engine
 	// Protected routes use pm.apiKeyAuth() middleware
 	pm.ginEngine.POST("/v1/chat/completions", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/responses", pm.apiKeyAuth(), pm.proxyInferenceHandler)
 	// Support legacy /v1/completions api, see issue #12
 	pm.ginEngine.POST("/v1/completions", pm.apiKeyAuth(), pm.proxyInferenceHandler)
 	// Support anthropic /v1/messages (added https://github.com/ggml-org/llama.cpp/pull/17570)
