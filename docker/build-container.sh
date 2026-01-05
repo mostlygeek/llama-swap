@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -euo pipefail
+
 cd $(dirname "$0")
 
 ARCH=$1
@@ -23,6 +25,7 @@ fi
 # Set llama.cpp base image, customizable using the BASE_LLAMACPP_IMAGE environment
 # variable, this permits testing with forked llama.cpp repositories
 BASE_IMAGE=${BASE_LLAMACPP_IMAGE:-ghcr.io/ggml-org/llama.cpp}
+SD_IMAGE=${BASE_SDCPP_IMAGE:-ghcr.io/leejet/stable-diffusion.cpp}
 
 # Set llama-swap repository, automatically uses GITHUB_REPOSITORY variable
 # to enable easy container builds on forked repos
@@ -68,10 +71,21 @@ for CONTAINER_TYPE in non-root root; do
     USER_HOME=/app
   fi
 
+  SD_TAG=master-${ARCH}
+
   echo "Building $CONTAINER_TYPE $CONTAINER_TAG $LS_VER"
-  docker build -f llama-swap.Containerfile --build-arg BASE_TAG=${BASE_TAG} --build-arg LS_VER=${LS_VER} --build-arg UID=${USER_UID} \
-    --build-arg LS_REPO=${LS_REPO} --build-arg GID=${USER_GID} --build-arg USER_HOME=${USER_HOME} -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} \
-    --build-arg BASE_IMAGE=${BASE_IMAGE} .
+
+  # stable-diffusion is missing some container architectures
+  case "$ARCH" in
+    "musa" | "vulkan")
+      docker build -f llama-swap-sd.Containerfile --build-arg BASE_TAG=${BASE_TAG} --build-arg LS_VER=${LS_VER} --build-arg UID=${USER_UID} \
+        --build-arg LS_REPO=${LS_REPO} --build-arg GID=${USER_GID} --build-arg USER_HOME=${USER_HOME} -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} \
+        --build-arg BASE_IMAGE=${BASE_IMAGE} --build-arg SD_IMAGE=${SD_IMAGE} --build-arg SD_TAG=${SD_TAG} . ;;
+    *)
+    docker build -f llama-swap.Containerfile --build-arg BASE_TAG=${BASE_TAG} --build-arg LS_VER=${LS_VER} --build-arg UID=${USER_UID} \
+      --build-arg LS_REPO=${LS_REPO} --build-arg GID=${USER_GID} --build-arg USER_HOME=${USER_HOME} -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} \
+      --build-arg BASE_IMAGE=${BASE_IMAGE} . ;;
+  esac
   if [ "$PUSH_IMAGES" == "true" ]; then
     docker push ${CONTAINER_TAG}
     docker push ${CONTAINER_LATEST}
