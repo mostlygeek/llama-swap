@@ -86,6 +86,7 @@ for CONTAINER_TYPE in non-root root; do
       --build-arg LS_REPO=${LS_REPO} --build-arg GID=${USER_GID} --build-arg USER_HOME=${USER_HOME} -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} \
       --build-arg BASE_IMAGE=${BASE_IMAGE} . ;;
   esac
+
   if [ "$PUSH_IMAGES" == "true" ]; then
     docker push ${CONTAINER_TAG}
     docker push ${CONTAINER_LATEST}
