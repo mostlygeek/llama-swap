@@ -5,7 +5,7 @@ llama-swap is a light weight, transparent proxy server that provides automatic m
 ## Tech stack
 
 - golang
-- typescript, vite and react for UI (ui/)
+- typescript, vite and react for UI (located in ui/)
 
 ## Workflow Tasks
 
@@ -13,6 +13,8 @@ llama-swap is a light weight, transparent proxy server that provides automatic m
 - just say "Done." when there is no further action
 - use `gh` to create PRs and load issues
 - do not mention "created by claude" in commit messages
+- keep PR descriptions short and focused on changes.
+  - never include a test plan
 
 ## Testing
 
@@ -39,8 +41,9 @@ fixes #123
 
 - use three levels High, Medium, Low severity
 - label each discovered issue with a label like H1, M2, L3 respectively
-- High severity are must fix issues:
-
-  - security issues
-
-- Medium are recommended improvements
+- High severity are must fix issues (security, race conditions, critical bugs)
+- Medium severity are recommended improvements (coding style, missing functionality, inconsistencies)
+- Low severity are nice to have changes and nits
+- Include a suggestion with each discovered item
+- Limit your code review to three items with the highest priority first
+- Double check your discovered items and recommended remediations
