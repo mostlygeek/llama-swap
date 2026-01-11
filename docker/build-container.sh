@@ -6,21 +6,31 @@ if [ -e .env ]; then
     source .env
 fi
 
+log_debug() {
+    if [ "$LOG_DEBUG" = "1" ]; then
+        echo "[DEBUG] $*"
+    fi
+}
+
+log_info() {
+    echo "[INFO] $*"
+}
+
 ARCH=$1
 PUSH_IMAGES=${2:-false}
 
 # List of allowed architectures
-ALLOWED_ARCHS=("intel" "vulkan" "musa" "cuda" "cpu")
+ALLOWED_ARCHS=("intel" "vulkan" "musa" "cuda" "cpu", "rocm")
 
 # Check if ARCH is in the allowed list
 if [[ ! " ${ALLOWED_ARCHS[@]} " =~ " ${ARCH} " ]]; then
-  echo "Error: ARCH must be one of the following: ${ALLOWED_ARCHS[@]}"
+  log_info "Error: ARCH must be one of the following: ${ALLOWED_ARCHS[@]}"
   exit 1
 fi
 
 # Check if GITHUB_TOKEN is set and not empty
 if [[ -z "$GITHUB_TOKEN" ]]; then
-  echo "Error: GITHUB_TOKEN is not set or is empty."
+  log_info "Error: GITHUB_TOKEN is not set or is empty."
   exit 1
 fi
 
@@ -53,7 +63,7 @@ fi
 
 # Abort if LCPP_TAG is empty.
 if [[ -z "$LCPP_TAG" ]]; then
-    echo "Abort: Could not find llama-server container for arch: $ARCH"
+    log_info "Abort: Could not find llama-server container for arch: $ARCH"
     exit 1
 fi
 
@@ -72,7 +82,7 @@ for CONTAINER_TYPE in non-root root; do
     USER_HOME=/app
   fi
 
-  echo "Building $CONTAINER_TYPE $CONTAINER_TAG $LS_VER"
+  log_info "Building $CONTAINER_TYPE $CONTAINER_TAG $LS_VER"
   docker build -f llama-swap.Containerfile --build-arg BASE_TAG=${BASE_TAG} --build-arg LS_VER=${LS_VER} --build-arg UID=${USER_UID} \
     --build-arg LS_REPO=${LS_REPO} --build-arg GID=${USER_GID} --build-arg USER_HOME=${USER_HOME} -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} \
     --build-arg BASE_IMAGE=${BASE_IMAGE} .
