@@ -10,12 +10,18 @@ on:
   # Allows manual triggering of the workflow
   workflow_dispatch:
 
+  # Run on workflow file changes (without pushing)
+  push:
+    paths:
+      - '.github/workflows/containers.yml'
+      - 'docker/build-container.sh'
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        platform: [intel, cuda, vulkan, cpu, musa]
+        platform: [intel, cuda, vulkan, cpu, musa, rocm]
       fail-fast: false
     steps:
       - name: Checkout code
@@ -31,7 +37,7 @@ jobs:
       - name: Run build-container
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./docker/build-container.sh ${{ matrix.platform }} true
+        run: ./docker/build-container.sh ${{ matrix.platform }} ${{ github.event_name != 'push' }}
 
   # note make sure mostlygeek/llama-swap has admin rights to the llama-swap package
   # see: https://github.com/actions/delete-package-versions/issues/74

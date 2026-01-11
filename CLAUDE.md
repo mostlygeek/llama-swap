@@ -12,7 +12,7 @@ llama-swap is a light weight, transparent proxy server that provides automatic m
 - when summarizing changes only include details that require further action
 - just say "Done." when there is no further action
 - use `gh` to create PRs and load issues
-- do not mention "created by claude" in commit messages
+- do include Co-Authored-By or created by when committing changes or creating PRs
 - keep PR descriptions short and focused on changes.
   - never include a test plan
 
