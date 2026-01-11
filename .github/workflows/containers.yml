@@ -14,6 +14,7 @@ on:
   push:
     paths:
       - '.github/workflows/containers.yml'
+      - 'docker/build-container.sh'
 
 jobs:
   build-and-push:
