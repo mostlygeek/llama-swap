@@ -2,6 +2,10 @@
 
 cd $(dirname "$0")
 
+if [ -e .env ]; then
+    source .env
+fi
+
 ARCH=$1
 PUSH_IMAGES=${2:-false}
 
