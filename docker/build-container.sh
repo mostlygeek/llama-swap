@@ -20,7 +20,7 @@ ARCH=$1
 PUSH_IMAGES=${2:-false}
 
 # List of allowed architectures
-ALLOWED_ARCHS=("intel" "vulkan" "musa" "cuda" "cpu", "rocm")
+ALLOWED_ARCHS=("intel" "vulkan" "musa" "cuda" "cpu" "rocm")
 
 # Check if ARCH is in the allowed list
 if [[ ! " ${ALLOWED_ARCHS[@]} " =~ " ${ARCH} " ]]; then
