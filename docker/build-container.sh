@@ -10,8 +10,8 @@ cd $(dirname "$0")
 # the scopes: gist, read:org, repo, write:packages
 # then: gh auth login (and copy/paste the new token)
 
-LOG_DEBUG=${$LOG_DEBUG:-0}
-DEBUG_ABORT_BUILD=${$DEBUG_ABORT_BUILD:-0}
+LOG_DEBUG=${LOG_DEBUG:-0}
+DEBUG_ABORT_BUILD=${DEBUG_ABORT_BUILD:-0}
 
 log_debug() {
     if [ "$LOG_DEBUG" = "1" ]; then
@@ -111,6 +111,8 @@ else
     BASE_TAG=server-${ARCH}-${LCPP_TAG}
 fi
 
+SD_TAG=master-${ARCH}
+
 # Abort if LCPP_TAG is empty.
 if [[ -z "$LCPP_TAG" ]]; then
     log_info "Abort: Could not find llama-server container for arch: $ARCH"
@@ -138,8 +140,6 @@ for CONTAINER_TYPE in non-root root; do
     USER_GID=10001
     USER_HOME=/app
   fi
-
-  SD_TAG=master-${ARCH}
 
   log_info "Building $CONTAINER_TYPE $CONTAINER_TAG $LS_VER"
 
