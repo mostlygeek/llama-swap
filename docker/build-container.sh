@@ -10,6 +10,9 @@ cd $(dirname "$0")
 # the scopes: gist, read:org, repo, write:packages
 # then: gh auth login (and copy/paste the new token)
 
+LOG_DEBUG=${$LOG_DEBUG:-0}
+DEBUG_ABORT_BUILD=${$DEBUG_ABORT_BUILD:-0}
+
 log_debug() {
     if [ "$LOG_DEBUG" = "1" ]; then
         echo "[DEBUG] $*"
