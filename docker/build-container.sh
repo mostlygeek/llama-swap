@@ -11,7 +11,7 @@ cd $(dirname "$0")
 # then: gh auth login (and copy/paste the new token)
 
 LOG_DEBUG=${LOG_DEBUG:-0}
-DEBUG_ABORT_BUILD=${DEBUG_ABORT_BUILD:-0}
+DEBUG_ABORT_BUILD=${DEBUG_ABORT_BUILD:-}
 
 log_debug() {
     if [ "$LOG_DEBUG" = "1" ]; then
@@ -36,7 +36,7 @@ if [[ ! " ${ALLOWED_ARCHS[@]} " =~ " ${ARCH} " ]]; then
 fi
 
 # Check if GITHUB_TOKEN is set and not empty
-if [[ -z "$GITHUB_TOKEN" ]]; then
+if [[ -z "${GITHUB_TOKEN:-}" ]]; then
   log_info "Error: GITHUB_TOKEN is not set or is empty."
   exit 1
 fi
