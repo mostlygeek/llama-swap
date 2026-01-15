@@ -287,3 +287,105 @@ filters:
 		t.Errorf("expected data_collection deny, got %v", provider["data_collection"])
 	}
 }
+
+func TestPeerFilters_SanitizedStripParams(t *testing.T) {
+	tests := []struct {
+		name        string
+		stripParams string
+		want        []string
+	}{
+		{
+			name:        "empty string",
+			stripParams: "",
+			want:        nil,
+		},
+		{
+			name:        "single param",
+			stripParams: "temperature",
+			want:        []string{"temperature"},
+		},
+		{
+			name:        "multiple params",
+			stripParams: "temperature, top_p, top_k",
+			want:        []string{"temperature", "top_k", "top_p"}, // sorted
+		},
+		{
+			name:        "model param filtered",
+			stripParams: "model, temperature, top_p",
+			want:        []string{"temperature", "top_p"},
+		},
+		{
+			name:        "only model param",
+			stripParams: "model",
+			want:        nil,
+		},
+		{
+			name:        "duplicates removed",
+			stripParams: "temperature, top_p, temperature",
+			want:        []string{"temperature", "top_p"},
+		},
+		{
+			name:        "extra whitespace",
+			stripParams: "  temperature  ,  top_p  ",
+			want:        []string{"temperature", "top_p"},
+		},
+		{
+			name:        "empty values filtered",
+			stripParams: "temperature,,top_p,",
+			want:        []string{"temperature", "top_p"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := PeerFilters{StripParams: tt.stripParams}
+			got := f.SanitizedStripParams()
+
+			if len(got) != len(tt.want) {
+				t.Errorf("length mismatch: got %d, want %d", len(got), len(tt.want))
+				return
+			}
+
+			for i, param := range got {
+				if param != tt.want[i] {
+					t.Errorf("param mismatch at %d: got %s, want %s", i, param, tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestPeerConfig_WithBothFilters(t *testing.T) {
+	yamlData := `
+proxy: https://openrouter.ai/api
+apiKey: sk-test
+models:
+  - model_a
+filters:
+  stripParams: "temperature, top_p"
+  setParams:
+    max_tokens: 1000
+`
+	var config PeerConfig
+	err := yaml.Unmarshal([]byte(yamlData), &config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Check stripParams
+	stripParams := config.Filters.SanitizedStripParams()
+	if len(stripParams) != 2 {
+		t.Errorf("expected 2 strip params, got %d", len(stripParams))
+	}
+	if stripParams[0] != "temperature" || stripParams[1] != "top_p" {
+		t.Errorf("unexpected strip params: %v", stripParams)
+	}
+
+	// Check setParams
+	if config.Filters.SetParams == nil {
+		t.Fatal("Filters.SetParams should not be nil")
+	}
+	if config.Filters.SetParams["max_tokens"] != 1000 {
+		t.Errorf("expected max_tokens 1000, got %v", config.Filters.SetParams["max_tokens"])
+	}
+}

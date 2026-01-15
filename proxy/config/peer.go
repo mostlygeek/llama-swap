@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"slices"
 	"sort"
+	"strings"
 )
 
 // ProtectedPeerParams is a list of parameters that cannot be set via filters.setParams
@@ -13,18 +14,47 @@ var ProtectedPeerParams = []string{"model"}
 
 type PeerDictionaryConfig map[string]PeerConfig
 type PeerConfig struct {
-	Proxy    string   `yaml:"proxy"`
-	ProxyURL *url.URL `yaml:"-"`
-	ApiKey   string   `yaml:"apiKey"`
-	Models   []string `yaml:"models"`
+	Proxy    string      `yaml:"proxy"`
+	ProxyURL *url.URL    `yaml:"-"`
+	ApiKey   string      `yaml:"apiKey"`
+	Models   []string    `yaml:"models"`
 	Filters  PeerFilters `yaml:"filters"`
 }
 
 // PeerFilters contains filter settings for peer requests
 type PeerFilters struct {
+	// StripParams is a comma-separated list of parameters to remove from requests to this peer
+	// The "model" parameter can never be removed
+	StripParams string `yaml:"stripParams"`
+
 	// SetParams is a dictionary of parameters to set/override in requests to this peer
 	// Protected params (like "model") cannot be set
 	SetParams map[string]any `yaml:"setParams"`
+}
+
+// SanitizedStripParams returns a sorted list of parameters to strip,
+// with duplicates, empty strings, and "model" removed
+func (f PeerFilters) SanitizedStripParams() []string {
+	if f.StripParams == "" {
+		return nil
+	}
+
+	params := strings.Split(f.StripParams, ",")
+	cleaned := make([]string, 0, len(params))
+	seen := make(map[string]bool)
+
+	for _, param := range params {
+		trimmed := strings.TrimSpace(param)
+		// Skip model (protected), empty strings, and duplicates
+		if trimmed == "model" || trimmed == "" || seen[trimmed] {
+			continue
+		}
+		seen[trimmed] = true
+		cleaned = append(cleaned, trimmed)
+	}
+
+	slices.Sort(cleaned)
+	return cleaned
 }
 
 // SanitizedSetParams returns a copy of SetParams with protected params removed

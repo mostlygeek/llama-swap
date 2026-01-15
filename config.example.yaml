@@ -375,7 +375,14 @@ peers:
       - minimax/minimax-m2.1
     # filters: a dictionary of filter settings for peer requests
     # - optional, default: empty dictionary
+    # - same capabilities as model filters (stripParams, setParams)
     filters:
+      # stripParams: a comma separated list of parameters to remove from the request
+      # - optional, default: ""
+      # - useful for removing parameters that the peer doesn't support
+      # - the `model` parameter can never be removed
+      stripParams: "temperature, top_p"
+
       # setParams: a dictionary of parameters to set/override in requests to this peer
       # - optional, default: empty dictionary
       # - useful for injecting provider-specific settings like data retention policies

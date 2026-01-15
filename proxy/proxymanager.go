@@ -656,8 +656,21 @@ func (pm *ProxyManager) proxyInferenceHandler(c *gin.Context) {
 		pm.proxyLogger.Debugf("ProxyManager using ProxyPeer for model: %s", requestedModel)
 		modelID = requestedModel
 
-		// issue #453 apply setParams filters for peer requests
+		// issue #453 apply filters for peer requests
 		peerFilters := pm.peerProxy.GetPeerFilters(requestedModel)
+
+		// Apply stripParams - remove specified parameters from request
+		stripParams := peerFilters.SanitizedStripParams()
+		for _, param := range stripParams {
+			pm.proxyLogger.Debugf("<%s> stripping param: %s", requestedModel, param)
+			bodyBytes, err = sjson.DeleteBytes(bodyBytes, param)
+			if err != nil {
+				pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error stripping parameter %s from request", param))
+				return
+			}
+		}
+
+		// Apply setParams - set/override specified parameters in request
 		setParams, setParamKeys := peerFilters.SanitizedSetParams()
 		for _, key := range setParamKeys {
 			pm.proxyLogger.Debugf("<%s> setting param: %s", requestedModel, key)
