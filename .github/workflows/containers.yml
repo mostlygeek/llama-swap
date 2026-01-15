@@ -27,6 +27,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Free up disk space
+        if: matrix.platform == 'rocm'
+        run: |
+          echo "Before cleanup:"
+          df -h
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker system prune -af
+          echo "After cleanup:"
+          df -h
+
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v2
         with:
