@@ -72,3 +72,132 @@ models:
 		assert.True(t, *config.Models["model2"].SendLoadingState)
 	}
 }
+
+func TestModelFilters_SanitizedSetParams(t *testing.T) {
+	tests := []struct {
+		name       string
+		setParams  map[string]any
+		wantParams map[string]any
+		wantKeys   []string
+	}{
+		{
+			name:       "empty setParams",
+			setParams:  nil,
+			wantParams: nil,
+			wantKeys:   nil,
+		},
+		{
+			name:       "empty map",
+			setParams:  map[string]any{},
+			wantParams: nil,
+			wantKeys:   nil,
+		},
+		{
+			name: "normal params",
+			setParams: map[string]any{
+				"temperature": 0.7,
+				"top_p":       0.9,
+			},
+			wantParams: map[string]any{
+				"temperature": 0.7,
+				"top_p":       0.9,
+			},
+			wantKeys: []string{"temperature", "top_p"},
+		},
+		{
+			name: "protected model param filtered",
+			setParams: map[string]any{
+				"model":       "should-be-filtered",
+				"temperature": 0.7,
+			},
+			wantParams: map[string]any{
+				"temperature": 0.7,
+			},
+			wantKeys: []string{"temperature"},
+		},
+		{
+			name: "only protected param",
+			setParams: map[string]any{
+				"model": "should-be-filtered",
+			},
+			wantParams: nil,
+			wantKeys:   nil,
+		},
+		{
+			name: "complex nested values",
+			setParams: map[string]any{
+				"stop": []string{"<|end|>", "<|stop|>"},
+				"options": map[string]any{
+					"num_ctx": 4096,
+				},
+			},
+			wantParams: map[string]any{
+				"stop": []string{"<|end|>", "<|stop|>"},
+				"options": map[string]any{
+					"num_ctx": 4096,
+				},
+			},
+			wantKeys: []string{"options", "stop"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := ModelFilters{SetParams: tt.setParams}
+			gotParams, gotKeys := f.SanitizedSetParams()
+
+			assert.Equal(t, len(tt.wantKeys), len(gotKeys), "keys length mismatch")
+			for i, key := range gotKeys {
+				assert.Equal(t, tt.wantKeys[i], key, "key mismatch at %d", i)
+			}
+
+			if tt.wantParams == nil {
+				assert.Nil(t, gotParams, "expected nil params")
+				return
+			}
+
+			assert.Equal(t, len(tt.wantParams), len(gotParams), "params length mismatch")
+			for key, wantValue := range tt.wantParams {
+				gotValue, exists := gotParams[key]
+				assert.True(t, exists, "missing key: %s", key)
+				// Simple comparison for basic types
+				switch v := wantValue.(type) {
+				case string, int, float64, bool:
+					assert.Equal(t, v, gotValue, "value mismatch for key %s", key)
+				}
+			}
+		})
+	}
+}
+
+func TestConfig_ModelFiltersWithSetParams(t *testing.T) {
+	content := `
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    filters:
+      stripParams: "top_k"
+      setParams:
+        temperature: 0.7
+        top_p: 0.9
+        stop:
+          - "<|end|>"
+          - "<|stop|>"
+`
+	config, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.NoError(t, err)
+
+	modelConfig := config.Models["model1"]
+
+	// Check stripParams
+	stripParams, err := modelConfig.Filters.SanitizedStripParams()
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"top_k"}, stripParams)
+
+	// Check setParams
+	setParams, keys := modelConfig.Filters.SanitizedSetParams()
+	assert.NotNil(t, setParams)
+	assert.Equal(t, []string{"stop", "temperature", "top_p"}, keys)
+	assert.Equal(t, 0.7, setParams["temperature"])
+	assert.Equal(t, 0.9, setParams["top_p"])
+}

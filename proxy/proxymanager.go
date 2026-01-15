@@ -650,6 +650,17 @@ func (pm *ProxyManager) proxyInferenceHandler(c *gin.Context) {
 			}
 		}
 
+		// issue #453 set/override parameters in the JSON body
+		setParams, setParamKeys := pm.config.Models[modelID].Filters.SanitizedSetParams()
+		for _, key := range setParamKeys {
+			pm.proxyLogger.Debugf("<%s> setting param: %s", modelID, key)
+			bodyBytes, err = sjson.SetBytes(bodyBytes, key, setParams[key])
+			if err != nil {
+				pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error setting parameter %s in request", key))
+				return
+			}
+		}
+
 		pm.proxyLogger.Debugf("ProxyManager using local Process for model: %s", requestedModel)
 		nextHandler = processGroup.ProxyRequest
 	} else if pm.peerProxy != nil && pm.peerProxy.HasPeerModel(requestedModel) {
