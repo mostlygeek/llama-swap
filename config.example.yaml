@@ -373,3 +373,16 @@ peers:
       - z-ai/glm-4.7
       - moonshotai/kimi-k2-0905
       - minimax/minimax-m2.1
+    # filters: a dictionary of filter settings for peer requests
+    # - optional, default: empty dictionary
+    filters:
+      # setParams: a dictionary of parameters to set/override in requests to this peer
+      # - optional, default: empty dictionary
+      # - useful for injecting provider-specific settings like data retention policies
+      # - protected params like "model" cannot be overridden
+      # - values can be strings, numbers, booleans, arrays, or objects
+      setParams:
+        # Example: enforce zero-data-retention for OpenRouter
+        provider:
+          data_collection: "deny"
+          allow_fallbacks: false

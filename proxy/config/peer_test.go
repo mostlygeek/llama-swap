@@ -137,3 +137,153 @@ func searchSubstring(s, substr string) bool {
 	}
 	return false
 }
+
+func TestPeerFilters_SanitizedSetParams(t *testing.T) {
+	tests := []struct {
+		name         string
+		setParams    map[string]any
+		wantParams   map[string]any
+		wantKeys     []string
+	}{
+		{
+			name:       "empty setParams",
+			setParams:  nil,
+			wantParams: nil,
+			wantKeys:   nil,
+		},
+		{
+			name:       "empty map",
+			setParams:  map[string]any{},
+			wantParams: nil,
+			wantKeys:   nil,
+		},
+		{
+			name: "normal params",
+			setParams: map[string]any{
+				"temperature": 0.7,
+				"top_p":       0.9,
+			},
+			wantParams: map[string]any{
+				"temperature": 0.7,
+				"top_p":       0.9,
+			},
+			wantKeys: []string{"temperature", "top_p"},
+		},
+		{
+			name: "protected model param filtered",
+			setParams: map[string]any{
+				"model":       "should-be-filtered",
+				"temperature": 0.7,
+			},
+			wantParams: map[string]any{
+				"temperature": 0.7,
+			},
+			wantKeys: []string{"temperature"},
+		},
+		{
+			name: "only protected param",
+			setParams: map[string]any{
+				"model": "should-be-filtered",
+			},
+			wantParams: nil,
+			wantKeys:   nil,
+		},
+		{
+			name: "complex nested values",
+			setParams: map[string]any{
+				"provider": map[string]any{
+					"data_collection": "deny",
+					"allow_fallbacks": false,
+				},
+				"transforms": []string{"middle-out"},
+			},
+			wantParams: map[string]any{
+				"provider": map[string]any{
+					"data_collection": "deny",
+					"allow_fallbacks": false,
+				},
+				"transforms": []string{"middle-out"},
+			},
+			wantKeys: []string{"provider", "transforms"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := PeerFilters{SetParams: tt.setParams}
+			gotParams, gotKeys := f.SanitizedSetParams()
+
+			// Check keys
+			if len(gotKeys) != len(tt.wantKeys) {
+				t.Errorf("keys length mismatch: got %d, want %d", len(gotKeys), len(tt.wantKeys))
+				return
+			}
+			for i, key := range gotKeys {
+				if key != tt.wantKeys[i] {
+					t.Errorf("key mismatch at %d: got %s, want %s", i, key, tt.wantKeys[i])
+				}
+			}
+
+			// Check params
+			if tt.wantParams == nil {
+				if gotParams != nil {
+					t.Errorf("expected nil params, got %v", gotParams)
+				}
+				return
+			}
+
+			if len(gotParams) != len(tt.wantParams) {
+				t.Errorf("params length mismatch: got %d, want %d", len(gotParams), len(tt.wantParams))
+			}
+
+			for key, wantValue := range tt.wantParams {
+				if gotValue, exists := gotParams[key]; !exists {
+					t.Errorf("missing key: %s", key)
+				} else {
+					// Simple comparison for basic types
+					switch v := wantValue.(type) {
+					case string, int, float64, bool:
+						if gotValue != v {
+							t.Errorf("value mismatch for key %s: got %v, want %v", key, gotValue, v)
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestPeerConfig_WithFilters(t *testing.T) {
+	yamlData := `
+proxy: https://openrouter.ai/api
+apiKey: sk-test
+models:
+  - model_a
+filters:
+  setParams:
+    temperature: 0.7
+    provider:
+      data_collection: deny
+`
+	var config PeerConfig
+	err := yaml.Unmarshal([]byte(yamlData), &config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if config.Filters.SetParams == nil {
+		t.Fatal("Filters.SetParams should not be nil")
+	}
+
+	if config.Filters.SetParams["temperature"] != 0.7 {
+		t.Errorf("expected temperature 0.7, got %v", config.Filters.SetParams["temperature"])
+	}
+
+	provider, ok := config.Filters.SetParams["provider"].(map[string]any)
+	if !ok {
+		t.Fatal("provider should be a map")
+	}
+	if provider["data_collection"] != "deny" {
+		t.Errorf("expected data_collection deny, got %v", provider["data_collection"])
+	}
+}

@@ -655,8 +655,20 @@ func (pm *ProxyManager) proxyInferenceHandler(c *gin.Context) {
 	} else if pm.peerProxy != nil && pm.peerProxy.HasPeerModel(requestedModel) {
 		pm.proxyLogger.Debugf("ProxyManager using ProxyPeer for model: %s", requestedModel)
 		modelID = requestedModel
-		nextHandler = pm.peerProxy.ProxyRequest
 
+		// issue #453 apply setParams filters for peer requests
+		peerFilters := pm.peerProxy.GetPeerFilters(requestedModel)
+		setParams, setParamKeys := peerFilters.SanitizedSetParams()
+		for _, key := range setParamKeys {
+			pm.proxyLogger.Debugf("<%s> setting param: %s", requestedModel, key)
+			bodyBytes, err = sjson.SetBytes(bodyBytes, key, setParams[key])
+			if err != nil {
+				pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error setting parameter %s in request", key))
+				return
+			}
+		}
+
+		nextHandler = pm.peerProxy.ProxyRequest
 	}
 
 	if nextHandler == nil {
