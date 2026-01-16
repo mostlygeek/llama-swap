@@ -137,3 +137,73 @@ func searchSubstring(s, substr string) bool {
 	}
 	return false
 }
+
+func TestPeerConfig_WithFilters(t *testing.T) {
+	yamlData := `
+proxy: https://openrouter.ai/api
+apiKey: sk-test
+models:
+  - model_a
+filters:
+  setParams:
+    temperature: 0.7
+    provider:
+      data_collection: deny
+`
+	var config PeerConfig
+	err := yaml.Unmarshal([]byte(yamlData), &config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if config.Filters.SetParams == nil {
+		t.Fatal("Filters.SetParams should not be nil")
+	}
+
+	if config.Filters.SetParams["temperature"] != 0.7 {
+		t.Errorf("expected temperature 0.7, got %v", config.Filters.SetParams["temperature"])
+	}
+
+	provider, ok := config.Filters.SetParams["provider"].(map[string]any)
+	if !ok {
+		t.Fatal("provider should be a map")
+	}
+	if provider["data_collection"] != "deny" {
+		t.Errorf("expected data_collection deny, got %v", provider["data_collection"])
+	}
+}
+
+func TestPeerConfig_WithBothFilters(t *testing.T) {
+	yamlData := `
+proxy: https://openrouter.ai/api
+apiKey: sk-test
+models:
+  - model_a
+filters:
+  stripParams: "temperature, top_p"
+  setParams:
+    max_tokens: 1000
+`
+	var config PeerConfig
+	err := yaml.Unmarshal([]byte(yamlData), &config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Check stripParams
+	stripParams := config.Filters.SanitizedStripParams()
+	if len(stripParams) != 2 {
+		t.Errorf("expected 2 strip params, got %d", len(stripParams))
+	}
+	if stripParams[0] != "temperature" || stripParams[1] != "top_p" {
+		t.Errorf("unexpected strip params: %v", stripParams)
+	}
+
+	// Check setParams
+	if config.Filters.SetParams == nil {
+		t.Fatal("Filters.SetParams should not be nil")
+	}
+	if config.Filters.SetParams["max_tokens"] != 1000 {
+		t.Errorf("expected max_tokens 1000, got %v", config.Filters.SetParams["max_tokens"])
+	}
+}

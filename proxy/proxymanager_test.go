@@ -966,7 +966,9 @@ func TestProxyManager_ChatContentLength(t *testing.T) {
 func TestProxyManager_FiltersStripParams(t *testing.T) {
 	modelConfig := getTestSimpleResponderConfig("model1")
 	modelConfig.Filters = config.ModelFilters{
-		StripParams: "temperature, model, stream",
+		Filters: config.Filters{
+			StripParams: "temperature, model, stream",
+		},
 	}
 
 	config := config.AddDefaultGroupToConfig(config.Config{

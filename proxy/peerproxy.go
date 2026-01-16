@@ -106,6 +106,20 @@ func (p *PeerProxy) HasPeerModel(modelID string) bool {
 	return found
 }
 
+// GetPeerFilters returns the filters for a peer model, or empty filters if not found
+func (p *PeerProxy) GetPeerFilters(modelID string) config.Filters {
+	pp, found := p.proxyMap[modelID]
+	if !found {
+		return config.Filters{}
+	}
+	// Get the peer config using the peerID
+	peer, found := p.peers[pp.peerID]
+	if !found {
+		return config.Filters{}
+	}
+	return peer.Filters
+}
+
 func (p *PeerProxy) ListPeers() config.PeerDictionaryConfig {
 	return p.peers
 }

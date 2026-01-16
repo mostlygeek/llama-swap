@@ -3,8 +3,6 @@ package config
 import (
 	"errors"
 	"runtime"
-	"slices"
-	"strings"
 )
 
 type ModelConfig struct {
@@ -74,16 +72,15 @@ func (m *ModelConfig) SanitizedCommand() ([]string, error) {
 	return SanitizeCommand(m.Cmd)
 }
 
-// ModelFilters see issue #174
+// ModelFilters embeds Filters and adds legacy support for strip_params field
+// See issue #174
 type ModelFilters struct {
-	StripParams string `yaml:"stripParams"`
+	Filters `yaml:",inline"`
 }
 
 func (m *ModelFilters) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	type rawModelFilters ModelFilters
-	defaults := rawModelFilters{
-		StripParams: "",
-	}
+	defaults := rawModelFilters{}
 
 	if err := unmarshal(&defaults); err != nil {
 		return err
@@ -104,25 +101,8 @@ func (m *ModelFilters) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	return nil
 }
 
+// SanitizedStripParams wraps Filters.SanitizedStripParams for backwards compatibility
+// Returns ([]string, error) to match existing API
 func (f ModelFilters) SanitizedStripParams() ([]string, error) {
-	if f.StripParams == "" {
-		return nil, nil
-	}
-
-	params := strings.Split(f.StripParams, ",")
-	cleaned := make([]string, 0, len(params))
-	seen := make(map[string]bool)
-
-	for _, param := range params {
-		trimmed := strings.TrimSpace(param)
-		if trimmed == "model" || trimmed == "" || seen[trimmed] {
-			continue
-		}
-		seen[trimmed] = true
-		cleaned = append(cleaned, trimmed)
-	}
-
-	// sort cleaned
-	slices.Sort(cleaned)
-	return cleaned, nil
+	return f.Filters.SanitizedStripParams(), nil
 }
