@@ -185,7 +185,7 @@ models:
 
     # filters: a dictionary of filter settings
     # - optional, default: empty dictionary
-    # - only stripParams is currently supported
+    # - same capabilities as peer filters (stripParams, setParams)
     filters:
       # stripParams: a comma separated list of parameters to remove from the request
       # - optional, default: ""
@@ -194,6 +194,16 @@ models:
       # - can be any JSON key in the request body
       # - recommended to stick to sampling parameters
       stripParams: "temperature, top_p, top_k"
+
+      # setParams: a dictionary of parameters to set/override in requests
+      # - optional, default: empty dictionary
+      # - useful for enforcing specific parameter values
+      # - protected params like "model" cannot be overridden
+      # - values can be strings, numbers, booleans, arrays, or objects
+      setParams:
+        # Example: enforce specific sampling parameters
+        temperature: 0.7
+        top_p: 0.9
 
     # metadata: a dictionary of arbitrary values that are included in /v1/models
     # - optional, default: empty dictionary
@@ -373,3 +383,23 @@ peers:
       - z-ai/glm-4.7
       - moonshotai/kimi-k2-0905
       - minimax/minimax-m2.1
+    # filters: a dictionary of filter settings for peer requests
+    # - optional, default: empty dictionary
+    # - same capabilities as model filters (stripParams, setParams)
+    filters:
+      # stripParams: a comma separated list of parameters to remove from the request
+      # - optional, default: ""
+      # - useful for removing parameters that the peer doesn't support
+      # - the `model` parameter can never be removed
+      stripParams: "temperature, top_p"
+
+      # setParams: a dictionary of parameters to set/override in requests to this peer
+      # - optional, default: empty dictionary
+      # - useful for injecting provider-specific settings like data retention policies
+      # - protected params like "model" cannot be overridden
+      # - values can be strings, numbers, booleans, arrays, or objects
+      setParams:
+        # Example: enforce zero-data-retention for OpenRouter
+        provider:
+          data_collection: "deny"
+          allow_fallbacks: false

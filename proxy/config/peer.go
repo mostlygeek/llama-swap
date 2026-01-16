@@ -11,14 +11,16 @@ type PeerConfig struct {
 	ProxyURL *url.URL `yaml:"-"`
 	ApiKey   string   `yaml:"apiKey"`
 	Models   []string `yaml:"models"`
+	Filters  Filters  `yaml:"filters"`
 }
 
 func (c *PeerConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	type rawPeerConfig PeerConfig
 	defaults := rawPeerConfig{
-		Proxy:  "",
-		ApiKey: "",
-		Models: []string{},
+		Proxy:   "",
+		ApiKey:  "",
+		Models:  []string{},
+		Filters: Filters{},
 	}
 
 	if err := unmarshal(&defaults); err != nil {

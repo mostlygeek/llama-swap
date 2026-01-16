@@ -72,3 +72,35 @@ models:
 		assert.True(t, *config.Models["model2"].SendLoadingState)
 	}
 }
+
+func TestConfig_ModelFiltersWithSetParams(t *testing.T) {
+	content := `
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    filters:
+      stripParams: "top_k"
+      setParams:
+        temperature: 0.7
+        top_p: 0.9
+        stop:
+          - "<|end|>"
+          - "<|stop|>"
+`
+	config, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.NoError(t, err)
+
+	modelConfig := config.Models["model1"]
+
+	// Check stripParams
+	stripParams, err := modelConfig.Filters.SanitizedStripParams()
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"top_k"}, stripParams)
+
+	// Check setParams
+	setParams, keys := modelConfig.Filters.SanitizedSetParams()
+	assert.NotNil(t, setParams)
+	assert.Equal(t, []string{"stop", "temperature", "top_p"}, keys)
+	assert.Equal(t, 0.7, setParams["temperature"])
+	assert.Equal(t, 0.9, setParams["top_p"])
+}
