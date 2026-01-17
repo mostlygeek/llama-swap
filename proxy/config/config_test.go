@@ -810,6 +810,44 @@ func TestConfig_APIKeys_Invalid(t *testing.T) {
 	}
 }
 
+func TestConfig_APIKeys_EnvMacros(t *testing.T) {
+	t.Run("env substitution in apiKeys", func(t *testing.T) {
+		t.Setenv("TEST_API_KEY", "secret-key-123")
+
+		content := `apiKeys: ["${env.TEST_API_KEY}"]`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"secret-key-123"}, config.RequiredAPIKeys)
+	})
+
+	t.Run("multiple env substitutions in apiKeys", func(t *testing.T) {
+		t.Setenv("TEST_API_KEY_1", "key-one")
+		t.Setenv("TEST_API_KEY_2", "key-two")
+
+		content := `apiKeys: ["${env.TEST_API_KEY_1}", "${env.TEST_API_KEY_2}", "static-key"]`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"key-one", "key-two", "static-key"}, config.RequiredAPIKeys)
+	})
+
+	t.Run("missing env var in apiKeys", func(t *testing.T) {
+		content := `apiKeys: ["${env.NONEXISTENT_API_KEY}"]`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "apiKeys[0]")
+		assert.Contains(t, err.Error(), "NONEXISTENT_API_KEY")
+	})
+
+	t.Run("env substitution results in empty key", func(t *testing.T) {
+		t.Setenv("TEST_EMPTY_KEY", "")
+
+		content := `apiKeys: ["${env.TEST_EMPTY_KEY}"]`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.Error(t, err)
+		assert.Equal(t, "empty api key found in apiKeys", err.Error())
+	})
+}
+
 func TestConfig_EnvMacros(t *testing.T) {
 	t.Run("basic env substitution in cmd", func(t *testing.T) {
 		t.Setenv("TEST_MODEL_PATH", "/opt/models")
