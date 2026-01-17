@@ -485,8 +485,14 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		config.Hooks.OnStartup.Preload = toPreload
 	}
 
-	// check api keys validatity
-	for _, apikey := range config.RequiredAPIKeys {
+	// check api keys validity and substitute env macros
+	for i, apikey := range config.RequiredAPIKeys {
+		apikey, err = substituteEnvMacros(apikey)
+		if err != nil {
+			return Config{}, fmt.Errorf("apiKeys[%d]: %w", i, err)
+		}
+		config.RequiredAPIKeys[i] = apikey
+
 		if apikey == "" {
 			return Config{}, fmt.Errorf("empty api key found in apiKeys")
 		}
