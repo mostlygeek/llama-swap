@@ -1057,3 +1057,73 @@ models:
 		assert.Equal(t, "server --auth admin:secret", config.Models["test"].Cmd)
 	})
 }
+
+func TestConfig_PeerApiKey_EnvMacros(t *testing.T) {
+	t.Run("env substitution in peer apiKey", func(t *testing.T) {
+		t.Setenv("TEST_PEER_API_KEY", "sk-peer-secret-123")
+
+		content := `
+peers:
+  openrouter:
+    proxy: https://openrouter.ai/api
+    apiKey: "${env.TEST_PEER_API_KEY}"
+    models:
+      - llama-3.1-8b
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, "sk-peer-secret-123", config.Peers["openrouter"].ApiKey)
+	})
+
+	t.Run("missing env var in peer apiKey", func(t *testing.T) {
+		content := `
+peers:
+  openrouter:
+    proxy: https://openrouter.ai/api
+    apiKey: "${env.NONEXISTENT_PEER_KEY}"
+    models:
+      - llama-3.1-8b
+`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "peers.openrouter.apiKey")
+		assert.Contains(t, err.Error(), "NONEXISTENT_PEER_KEY")
+	})
+
+	t.Run("static apiKey unchanged", func(t *testing.T) {
+		content := `
+peers:
+  openrouter:
+    proxy: https://openrouter.ai/api
+    apiKey: sk-static-key
+    models:
+      - llama-3.1-8b
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, "sk-static-key", config.Peers["openrouter"].ApiKey)
+	})
+
+	t.Run("multiple peers with env apiKeys", func(t *testing.T) {
+		t.Setenv("TEST_PEER_KEY_1", "key-one")
+		t.Setenv("TEST_PEER_KEY_2", "key-two")
+
+		content := `
+peers:
+  peer1:
+    proxy: https://peer1.example.com
+    apiKey: "${env.TEST_PEER_KEY_1}"
+    models:
+      - model-a
+  peer2:
+    proxy: https://peer2.example.com
+    apiKey: "${env.TEST_PEER_KEY_2}"
+    models:
+      - model-b
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, "key-one", config.Peers["peer1"].ApiKey)
+		assert.Equal(t, "key-two", config.Peers["peer2"].ApiKey)
+	})
+}

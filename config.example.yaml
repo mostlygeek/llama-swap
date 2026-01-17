@@ -386,7 +386,8 @@ peers:
     # - optional, default: ""
     # - if blank, no key will be added to the request
     # - key will be injected into headers: Authorization: Bearer <key> and x-api-key: <key>
-    apiKey: sk-your-openrouter-key
+    # - can be a string or a macro
+    apiKey: ${env.OPENROUTER_API_KEY}
     models:
       - meta-llama/llama-3.1-8b-instruct
       - qwen/qwen3-235b-a22b-2507
@@ -413,4 +414,4 @@ peers:
         # Example: enforce zero-data-retention for OpenRouter
         provider:
           data_collection: "deny"
-          allow_fallbacks: false
+          zdr: true

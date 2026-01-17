@@ -502,6 +502,17 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		}
 	}
 
+	// substitute env macros in peer apiKeys
+	for peerName, peerConfig := range config.Peers {
+		if peerConfig.ApiKey != "" {
+			peerConfig.ApiKey, err = substituteEnvMacros(peerConfig.ApiKey)
+			if err != nil {
+				return Config{}, fmt.Errorf("peers.%s.apiKey: %w", peerName, err)
+			}
+			config.Peers[peerName] = peerConfig
+		}
+	}
+
 	return config, nil
 }
 
