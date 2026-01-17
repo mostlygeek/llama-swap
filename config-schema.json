@@ -188,11 +188,17 @@
                                 "default": "",
                                 "pattern": "^[a-zA-Z0-9_, ]*$",
                                 "description": "Comma separated list of parameters to remove from the request. Used for server-side enforcement of sampling parameters."
+                            },
+                            "setParams": {
+                                "type": "object",
+                                "additionalProperties": true,
+                                "default": {},
+                                "description": "Dictionary of parameters to set/override in requests. Useful for enforcing specific parameter values. Protected params like 'model' cannot be overridden. Values can be strings, numbers, booleans, arrays, or objects."
                             }
                         },
                         "additionalProperties": false,
                         "default": {},
-                        "description": "Dictionary of filter settings. Only stripParams is supported."
+                        "description": "Dictionary of filter settings. Supports stripParams and setParams."
                     },
                     "metadata": {
                         "type": "object",
@@ -320,6 +326,26 @@
                             "minLength": 1
                         },
                         "description": "A list of models served by the peer."
+                    },
+                    "filters": {
+                        "type": "object",
+                        "properties": {
+                            "stripParams": {
+                                "type": "string",
+                                "default": "",
+                                "pattern": "^[a-zA-Z0-9_, ]*$",
+                                "description": "Comma separated list of parameters to remove from the request. Useful for removing parameters that the peer doesn't support."
+                            },
+                            "setParams": {
+                                "type": "object",
+                                "additionalProperties": true,
+                                "default": {},
+                                "description": "Dictionary of parameters to set/override in requests to this peer. Useful for injecting provider-specific settings. Protected params like 'model' cannot be overridden. Values can be strings, numbers, booleans, arrays, or objects."
+                            }
+                        },
+                        "additionalProperties": false,
+                        "default": {},
+                        "description": "Dictionary of filter settings for peer requests. Supports stripParams and setParams."
                     }
                 }
             },

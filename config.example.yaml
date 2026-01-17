@@ -70,16 +70,6 @@ sendLoadingState: true
 #   all fields except for Id so chat UIs can use the alias equivalent to the original.
 includeAliasesInList: false
 
-# apiKeys: require an API key when making requests to inference endpoints
-# - optional, default: []
-# - when empty (the default) authorization will not be checked as llama-swap is default-allow
-# - each key is a non-empty string
-apiKeys:
-  - "sk-hunter2"
-  # hint, one liner: printf "sk-%s\n" "$(head -c 48 /dev/urandom | base64 )"
-  - "sk-gyCPiKUcIfPlaM4OSMZekkprgijPx6+OsmQs8Rsg0xZ9qpy6gKWsIKqHOk+cgXVx"
-  - "sk-+QtIn0Zjj4UHjiaZYiZEnru4mrwKM9RzhmJeK5SobNXLl8QMFXxGz1/2lEuvQpkb"
-
 # macros: a dictionary of string substitutions
 # - optional, default: empty dictionary
 # - macros are reusable snippets
@@ -109,6 +99,19 @@ macros:
   # - ${env.VAR_NAME} pulls the value from the system environment
   # - useful for paths, secrets, or machine-specific configuration
   "models_dir": "${env.HOME}/models"
+
+# apiKeys: require an API key when making requests to inference endpoints
+# - optional, default: []
+# - when empty (the default) authorization will not be checked as llama-swap is default-allow
+# - each key is a non-empty string
+apiKeys:
+  - "sk-hunter2"
+  # tip, one liner: printf "sk-%s\n" "$(head -c 48 /dev/urandom | base64 )"
+  - "sk-gyCPiKUcIfPlaM4OSMZekkprgijPx6+OsmQs8Rsg0xZ9qpy6gKWsIKqHOk+cgXVx"
+
+  # use environment variable macros to keep secrets out of the config
+  - "${env.API_KEY_1}"
+  - "${env.API_KEY_2}"
 
 # models: a dictionary of model configurations
 # - required
