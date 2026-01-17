@@ -1057,3 +1057,191 @@ models:
 		assert.Equal(t, "server --auth admin:secret", config.Models["test"].Cmd)
 	})
 }
+
+func TestConfig_PeerApiKey_EnvMacros(t *testing.T) {
+	t.Run("env substitution in peer apiKey", func(t *testing.T) {
+		t.Setenv("TEST_PEER_API_KEY", "sk-peer-secret-123")
+
+		content := `
+peers:
+  openrouter:
+    proxy: https://openrouter.ai/api
+    apiKey: "${env.TEST_PEER_API_KEY}"
+    models:
+      - llama-3.1-8b
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, "sk-peer-secret-123", config.Peers["openrouter"].ApiKey)
+	})
+
+	t.Run("missing env var in peer apiKey", func(t *testing.T) {
+		content := `
+peers:
+  openrouter:
+    proxy: https://openrouter.ai/api
+    apiKey: "${env.NONEXISTENT_PEER_KEY}"
+    models:
+      - llama-3.1-8b
+`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "peers.openrouter.apiKey")
+		assert.Contains(t, err.Error(), "NONEXISTENT_PEER_KEY")
+	})
+
+	t.Run("static apiKey unchanged", func(t *testing.T) {
+		content := `
+peers:
+  openrouter:
+    proxy: https://openrouter.ai/api
+    apiKey: sk-static-key
+    models:
+      - llama-3.1-8b
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, "sk-static-key", config.Peers["openrouter"].ApiKey)
+	})
+
+	t.Run("multiple peers with env apiKeys", func(t *testing.T) {
+		t.Setenv("TEST_PEER_KEY_1", "key-one")
+		t.Setenv("TEST_PEER_KEY_2", "key-two")
+
+		content := `
+peers:
+  peer1:
+    proxy: https://peer1.example.com
+    apiKey: "${env.TEST_PEER_KEY_1}"
+    models:
+      - model-a
+  peer2:
+    proxy: https://peer2.example.com
+    apiKey: "${env.TEST_PEER_KEY_2}"
+    models:
+      - model-b
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, "key-one", config.Peers["peer1"].ApiKey)
+		assert.Equal(t, "key-two", config.Peers["peer2"].ApiKey)
+	})
+
+	t.Run("global macro substitution in peer apiKey", func(t *testing.T) {
+		content := `
+macros:
+  API_KEY: sk-from-global-macro
+peers:
+  openrouter:
+    proxy: https://openrouter.ai/api
+    apiKey: "${API_KEY}"
+    models:
+      - llama-3.1-8b
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, "sk-from-global-macro", config.Peers["openrouter"].ApiKey)
+	})
+
+	t.Run("global macro in peer filters.stripParams", func(t *testing.T) {
+		content := `
+macros:
+  STRIP_LIST: "temperature, top_p"
+peers:
+  openrouter:
+    proxy: https://openrouter.ai/api
+    models:
+      - llama-3.1-8b
+    filters:
+      stripParams: "${STRIP_LIST}"
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, "temperature, top_p", config.Peers["openrouter"].Filters.StripParams)
+	})
+
+	t.Run("global macro in peer filters.setParams", func(t *testing.T) {
+		content := `
+macros:
+  MAX_TOKENS: 4096
+peers:
+  openrouter:
+    proxy: https://openrouter.ai/api
+    models:
+      - llama-3.1-8b
+    filters:
+      setParams:
+        max_tokens: "${MAX_TOKENS}"
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, 4096, config.Peers["openrouter"].Filters.SetParams["max_tokens"])
+	})
+
+	t.Run("env macro in peer filters.setParams", func(t *testing.T) {
+		t.Setenv("TEST_RETENTION_POLICY", "deny")
+
+		content := `
+peers:
+  openrouter:
+    proxy: https://openrouter.ai/api
+    models:
+      - llama-3.1-8b
+    filters:
+      setParams:
+        data_collection: "${env.TEST_RETENTION_POLICY}"
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, "deny", config.Peers["openrouter"].Filters.SetParams["data_collection"])
+	})
+
+	t.Run("env macro in peer filters.stripParams", func(t *testing.T) {
+		t.Setenv("TEST_STRIP_PARAMS", "frequency_penalty, presence_penalty")
+
+		content := `
+peers:
+  openrouter:
+    proxy: https://openrouter.ai/api
+    models:
+      - llama-3.1-8b
+    filters:
+      stripParams: "${env.TEST_STRIP_PARAMS}"
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, "frequency_penalty, presence_penalty", config.Peers["openrouter"].Filters.StripParams)
+	})
+
+	t.Run("unknown macro in peer apiKey fails", func(t *testing.T) {
+		content := `
+peers:
+  openrouter:
+    proxy: https://openrouter.ai/api
+    apiKey: "${UNDEFINED_MACRO}"
+    models:
+      - llama-3.1-8b
+`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "peers.openrouter.apiKey")
+		assert.Contains(t, err.Error(), "unknown macro")
+	})
+
+	t.Run("unknown macro in peer filters.setParams fails", func(t *testing.T) {
+		content := `
+peers:
+  openrouter:
+    proxy: https://openrouter.ai/api
+    models:
+      - llama-3.1-8b
+    filters:
+      setParams:
+        value: "${UNDEFINED_MACRO}"
+`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "peers.openrouter.filters.setParams")
+		assert.Contains(t, err.Error(), "unknown macro")
+	})
+}
