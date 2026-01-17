@@ -809,3 +809,213 @@ func TestConfig_APIKeys_Invalid(t *testing.T) {
 		})
 	}
 }
+
+func TestConfig_EnvMacros(t *testing.T) {
+	t.Run("basic env substitution in cmd", func(t *testing.T) {
+		t.Setenv("TEST_MODEL_PATH", "/opt/models")
+
+		content := `
+models:
+  test:
+    cmd: "${env.TEST_MODEL_PATH}/llama-server"
+    proxy: "http://localhost:8080"
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, "/opt/models/llama-server", config.Models["test"].Cmd)
+	})
+
+	t.Run("env substitution in multiple fields", func(t *testing.T) {
+		t.Setenv("TEST_HOST", "myserver")
+		t.Setenv("TEST_PORT", "9999")
+
+		content := `
+models:
+  test:
+    cmd: "server --host ${env.TEST_HOST}"
+    proxy: "http://${env.TEST_HOST}:${env.TEST_PORT}"
+    checkEndpoint: "http://${env.TEST_HOST}/health"
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, "server --host myserver", config.Models["test"].Cmd)
+		assert.Equal(t, "http://myserver:9999", config.Models["test"].Proxy)
+		assert.Equal(t, "http://myserver/health", config.Models["test"].CheckEndpoint)
+	})
+
+	t.Run("env in global macro value", func(t *testing.T) {
+		t.Setenv("TEST_BASE_PATH", "/usr/local")
+
+		content := `
+macros:
+  SERVER_PATH: "${env.TEST_BASE_PATH}/bin/server"
+models:
+  test:
+    cmd: "${SERVER_PATH} --port 8080"
+    proxy: "http://localhost:8080"
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, "/usr/local/bin/server --port 8080", config.Models["test"].Cmd)
+	})
+
+	t.Run("env in model-level macro value", func(t *testing.T) {
+		t.Setenv("TEST_MODEL_DIR", "/models/llama")
+
+		content := `
+models:
+  test:
+    macros:
+      MODEL_FILE: "${env.TEST_MODEL_DIR}/model.gguf"
+    cmd: "server --model ${MODEL_FILE}"
+    proxy: "http://localhost:8080"
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, "server --model /models/llama/model.gguf", config.Models["test"].Cmd)
+	})
+
+	t.Run("env in metadata", func(t *testing.T) {
+		t.Setenv("TEST_API_KEY", "secret123")
+
+		content := `
+models:
+  test:
+    cmd: "server"
+    proxy: "http://localhost:8080"
+    metadata:
+      api_key: "${env.TEST_API_KEY}"
+      nested:
+        key: "${env.TEST_API_KEY}"
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, "secret123", config.Models["test"].Metadata["api_key"])
+		nested := config.Models["test"].Metadata["nested"].(map[string]any)
+		assert.Equal(t, "secret123", nested["key"])
+	})
+
+	t.Run("env in filters.stripParams", func(t *testing.T) {
+		t.Setenv("TEST_STRIP_PARAMS", "temperature,top_p")
+
+		content := `
+models:
+  test:
+    cmd: "server"
+    proxy: "http://localhost:8080"
+    filters:
+      stripParams: "${env.TEST_STRIP_PARAMS}"
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, "temperature,top_p", config.Models["test"].Filters.StripParams)
+	})
+
+	t.Run("env in cmdStop", func(t *testing.T) {
+		t.Setenv("TEST_KILL_SIGNAL", "SIGTERM")
+
+		content := `
+models:
+  test:
+    cmd: "server --port ${PORT}"
+    cmdStop: "kill -${env.TEST_KILL_SIGNAL} ${PID}"
+    proxy: "http://localhost:${PORT}"
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Contains(t, config.Models["test"].CmdStop, "-SIGTERM")
+	})
+
+	t.Run("missing env var returns error", func(t *testing.T) {
+		content := `
+models:
+  test:
+    cmd: "${env.UNDEFINED_VAR_12345}/server"
+    proxy: "http://localhost:8080"
+`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		if assert.Error(t, err) {
+			assert.Contains(t, err.Error(), "UNDEFINED_VAR_12345")
+			assert.Contains(t, err.Error(), "not set")
+		}
+	})
+
+	t.Run("missing env var in global macro", func(t *testing.T) {
+		content := `
+macros:
+  PATH: "${env.UNDEFINED_GLOBAL_VAR}"
+models:
+  test:
+    cmd: "server"
+    proxy: "http://localhost:8080"
+`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		if assert.Error(t, err) {
+			assert.Contains(t, err.Error(), "UNDEFINED_GLOBAL_VAR")
+			assert.Contains(t, err.Error(), "not set")
+		}
+	})
+
+	t.Run("missing env var in model macro", func(t *testing.T) {
+		content := `
+models:
+  test:
+    macros:
+      MY_PATH: "${env.UNDEFINED_MODEL_VAR}"
+    cmd: "server"
+    proxy: "http://localhost:8080"
+`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		if assert.Error(t, err) {
+			assert.Contains(t, err.Error(), "UNDEFINED_MODEL_VAR")
+			assert.Contains(t, err.Error(), "not set")
+		}
+	})
+
+	t.Run("missing env var in metadata", func(t *testing.T) {
+		content := `
+models:
+  test:
+    cmd: "server"
+    proxy: "http://localhost:8080"
+    metadata:
+      key: "${env.UNDEFINED_META_VAR}"
+`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		if assert.Error(t, err) {
+			assert.Contains(t, err.Error(), "UNDEFINED_META_VAR")
+			assert.Contains(t, err.Error(), "not set")
+		}
+	})
+
+	t.Run("env combined with regular macros", func(t *testing.T) {
+		t.Setenv("TEST_ROOT", "/data")
+
+		content := `
+macros:
+  MODEL_BASE: "${env.TEST_ROOT}/models"
+models:
+  test:
+    cmd: "server --model ${MODEL_BASE}/${MODEL_ID}.gguf"
+    proxy: "http://localhost:8080"
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, "server --model /data/models/test.gguf", config.Models["test"].Cmd)
+	})
+
+	t.Run("multiple env vars in same string", func(t *testing.T) {
+		t.Setenv("TEST_USER", "admin")
+		t.Setenv("TEST_PASS", "secret")
+
+		content := `
+models:
+  test:
+    cmd: "server --auth ${env.TEST_USER}:${env.TEST_PASS}"
+    proxy: "http://localhost:8080"
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, "server --auth admin:secret", config.Models["test"].Cmd)
+	})
+}

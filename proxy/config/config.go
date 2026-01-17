@@ -87,6 +87,7 @@ type GroupConfig struct {
 var (
 	macroNameRegex    = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 	macroPatternRegex = regexp.MustCompile(`\$\{([a-zA-Z0-9_-]+)\}`)
+	envMacroRegex     = regexp.MustCompile(`\$\{env\.([a-zA-Z_][a-zA-Z0-9_]*)\}`)
 )
 
 // set default values for GroupConfig
@@ -237,6 +238,17 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		}
 	}
 
+	// Process environment variable macros in global macro values first
+	for i, macro := range config.Macros {
+		if strVal, ok := macro.Value.(string); ok {
+			newVal, err := substituteEnvMacros(strVal)
+			if err != nil {
+				return Config{}, fmt.Errorf("global macro '%s': %w", macro.Name, err)
+			}
+			config.Macros[i].Value = newVal
+		}
+	}
+
 	// Get and sort all model IDs first, makes testing more consistent
 	modelIds := make([]string, 0, len(config.Models))
 	for modelId := range config.Models {
@@ -251,6 +263,48 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		// Strip comments from command fields before macro expansion
 		modelConfig.Cmd = StripComments(modelConfig.Cmd)
 		modelConfig.CmdStop = StripComments(modelConfig.CmdStop)
+
+		// Substitute environment variable macros in model fields
+		modelConfig.Cmd, err = substituteEnvMacros(modelConfig.Cmd)
+		if err != nil {
+			return Config{}, fmt.Errorf("model %s cmd: %w", modelId, err)
+		}
+		modelConfig.CmdStop, err = substituteEnvMacros(modelConfig.CmdStop)
+		if err != nil {
+			return Config{}, fmt.Errorf("model %s cmdStop: %w", modelId, err)
+		}
+		modelConfig.Proxy, err = substituteEnvMacros(modelConfig.Proxy)
+		if err != nil {
+			return Config{}, fmt.Errorf("model %s proxy: %w", modelId, err)
+		}
+		modelConfig.CheckEndpoint, err = substituteEnvMacros(modelConfig.CheckEndpoint)
+		if err != nil {
+			return Config{}, fmt.Errorf("model %s checkEndpoint: %w", modelId, err)
+		}
+		modelConfig.Filters.StripParams, err = substituteEnvMacros(modelConfig.Filters.StripParams)
+		if err != nil {
+			return Config{}, fmt.Errorf("model %s filters.stripParams: %w", modelId, err)
+		}
+
+		// Substitute env macros in model-level macro values
+		for i, macro := range modelConfig.Macros {
+			if strVal, ok := macro.Value.(string); ok {
+				newVal, err := substituteEnvMacros(strVal)
+				if err != nil {
+					return Config{}, fmt.Errorf("model %s macro '%s': %w", modelId, macro.Name, err)
+				}
+				modelConfig.Macros[i].Value = newVal
+			}
+		}
+
+		// Substitute env macros in metadata
+		if len(modelConfig.Metadata) > 0 {
+			result, err := substituteEnvMacrosInValue(modelConfig.Metadata)
+			if err != nil {
+				return Config{}, fmt.Errorf("model %s metadata: %w", modelId, err)
+			}
+			modelConfig.Metadata = result.(map[string]any)
+		}
 
 		// validate model macros
 		for _, macro := range modelConfig.Macros {
@@ -361,6 +415,13 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 				}
 				// Any other macro is unknown
 				return Config{}, fmt.Errorf("unknown macro '${%s}' found in %s.%s", macroName, modelId, fieldName)
+			}
+
+			// Check for unsubstituted env macros
+			envMatches := envMacroRegex.FindAllStringSubmatch(fieldValue, -1)
+			for _, match := range envMatches {
+				varName := match[1]
+				return Config{}, fmt.Errorf("environment variable '%s' not set (found in %s.%s)", varName, modelId, fieldName)
 			}
 		}
 
@@ -574,6 +635,12 @@ func validateMetadataForUnknownMacros(value any, modelId string) error {
 			macroName := match[1]
 			return fmt.Errorf("model %s metadata: unknown macro '${%s}'", modelId, macroName)
 		}
+		// Check for unsubstituted env macros
+		envMatches := envMacroRegex.FindAllStringSubmatch(v, -1)
+		for _, match := range envMatches {
+			varName := match[1]
+			return fmt.Errorf("model %s metadata: environment variable '%s' not set", modelId, varName)
+		}
 		return nil
 
 	case map[string]any:
@@ -642,6 +709,57 @@ func substituteMacroInValue(value any, macroName string, macroValue any) (any, e
 
 	default:
 		// Return scalar types as-is
+		return value, nil
+	}
+}
+
+// substituteEnvMacros replaces ${env.VAR_NAME} with environment variable values
+// Returns error if any env var is not set
+func substituteEnvMacros(s string) (string, error) {
+	result := s
+	matches := envMacroRegex.FindAllStringSubmatch(s, -1)
+	for _, match := range matches {
+		fullMatch := match[0] // ${env.VAR_NAME}
+		varName := match[1]   // VAR_NAME
+
+		value, exists := os.LookupEnv(varName)
+		if !exists {
+			return "", fmt.Errorf("environment variable '%s' is not set", varName)
+		}
+		result = strings.ReplaceAll(result, fullMatch, value)
+	}
+	return result, nil
+}
+
+// substituteEnvMacrosInValue recursively substitutes env macros in nested structures
+func substituteEnvMacrosInValue(value any) (any, error) {
+	switch v := value.(type) {
+	case string:
+		return substituteEnvMacros(v)
+
+	case map[string]any:
+		newMap := make(map[string]any)
+		for key, val := range v {
+			newVal, err := substituteEnvMacrosInValue(val)
+			if err != nil {
+				return nil, err
+			}
+			newMap[key] = newVal
+		}
+		return newMap, nil
+
+	case []any:
+		newSlice := make([]any, len(v))
+		for i, val := range v {
+			newVal, err := substituteEnvMacrosInValue(val)
+			if err != nil {
+				return nil, err
+			}
+			newSlice[i] = newVal
+		}
+		return newSlice, nil
+
+	default:
 		return value, nil
 	}
 }
