@@ -427,7 +427,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 
 		// Check for unknown macros in metadata
 		if len(modelConfig.Metadata) > 0 {
-			if err := validateMetadataForUnknownMacros(modelConfig.Metadata, modelId); err != nil {
+			if err := validateNestedForUnknownMacros(modelConfig.Metadata, fmt.Sprintf("model %s metadata", modelId)); err != nil {
 				return Config{}, err
 			}
 		}
@@ -502,15 +502,60 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		}
 	}
 
-	// substitute env macros in peer apiKeys
+	// substitute macros and env macros in peer fields
 	for peerName, peerConfig := range config.Peers {
-		if peerConfig.ApiKey != "" {
-			peerConfig.ApiKey, err = substituteEnvMacros(peerConfig.ApiKey)
-			if err != nil {
-				return Config{}, fmt.Errorf("peers.%s.apiKey: %w", peerName, err)
+		// Substitute global macros first (LIFO order like models)
+		for i := len(config.Macros) - 1; i >= 0; i-- {
+			entry := config.Macros[i]
+			macroSlug := fmt.Sprintf("${%s}", entry.Name)
+			macroStr := fmt.Sprintf("%v", entry.Value)
+
+			peerConfig.ApiKey = strings.ReplaceAll(peerConfig.ApiKey, macroSlug, macroStr)
+			peerConfig.Filters.StripParams = strings.ReplaceAll(peerConfig.Filters.StripParams, macroSlug, macroStr)
+
+			// Substitute in setParams
+			if len(peerConfig.Filters.SetParams) > 0 {
+				result, err := substituteMacroInValue(peerConfig.Filters.SetParams, entry.Name, entry.Value)
+				if err != nil {
+					return Config{}, fmt.Errorf("peers.%s.filters.setParams: %w", peerName, err)
+				}
+				peerConfig.Filters.SetParams = result.(map[string]any)
 			}
-			config.Peers[peerName] = peerConfig
 		}
+
+		// Substitute env macros
+		peerConfig.ApiKey, err = substituteEnvMacros(peerConfig.ApiKey)
+		if err != nil {
+			return Config{}, fmt.Errorf("peers.%s.apiKey: %w", peerName, err)
+		}
+
+		peerConfig.Filters.StripParams, err = substituteEnvMacros(peerConfig.Filters.StripParams)
+		if err != nil {
+			return Config{}, fmt.Errorf("peers.%s.filters.stripParams: %w", peerName, err)
+		}
+
+		if len(peerConfig.Filters.SetParams) > 0 {
+			result, err := substituteEnvMacrosInValue(peerConfig.Filters.SetParams)
+			if err != nil {
+				return Config{}, fmt.Errorf("peers.%s.filters.setParams: %w", peerName, err)
+			}
+			peerConfig.Filters.SetParams = result.(map[string]any)
+		}
+
+		// Validate no unknown macros remain
+		if matches := macroPatternRegex.FindAllStringSubmatch(peerConfig.ApiKey, -1); len(matches) > 0 {
+			return Config{}, fmt.Errorf("peers.%s.apiKey: unknown macro '${%s}'", peerName, matches[0][1])
+		}
+		if matches := macroPatternRegex.FindAllStringSubmatch(peerConfig.Filters.StripParams, -1); len(matches) > 0 {
+			return Config{}, fmt.Errorf("peers.%s.filters.stripParams: unknown macro '${%s}'", peerName, matches[0][1])
+		}
+		if len(peerConfig.Filters.SetParams) > 0 {
+			if err := validateNestedForUnknownMacros(peerConfig.Filters.SetParams, fmt.Sprintf("peers.%s.filters.setParams", peerName)); err != nil {
+				return Config{}, err
+			}
+		}
+
+		config.Peers[peerName] = peerConfig
 	}
 
 	return config, nil
@@ -643,26 +688,26 @@ func validateMacro(name string, value any) error {
 	return nil
 }
 
-// validateMetadataForUnknownMacros recursively checks for any remaining macro references in metadata
-func validateMetadataForUnknownMacros(value any, modelId string) error {
+// validateNestedForUnknownMacros recursively checks for any remaining macro references in nested structures
+func validateNestedForUnknownMacros(value any, context string) error {
 	switch v := value.(type) {
 	case string:
 		matches := macroPatternRegex.FindAllStringSubmatch(v, -1)
 		for _, match := range matches {
 			macroName := match[1]
-			return fmt.Errorf("model %s metadata: unknown macro '${%s}'", modelId, macroName)
+			return fmt.Errorf("%s: unknown macro '${%s}'", context, macroName)
 		}
 		// Check for unsubstituted env macros
 		envMatches := envMacroRegex.FindAllStringSubmatch(v, -1)
 		for _, match := range envMatches {
 			varName := match[1]
-			return fmt.Errorf("model %s metadata: environment variable '%s' not set", modelId, varName)
+			return fmt.Errorf("%s: environment variable '%s' not set", context, varName)
 		}
 		return nil
 
 	case map[string]any:
 		for _, val := range v {
-			if err := validateMetadataForUnknownMacros(val, modelId); err != nil {
+			if err := validateNestedForUnknownMacros(val, context); err != nil {
 				return err
 			}
 		}
@@ -670,7 +715,7 @@ func validateMetadataForUnknownMacros(value any, modelId string) error {
 
 	case []any:
 		for _, val := range v {
-			if err := validateMetadataForUnknownMacros(val, modelId); err != nil {
+			if err := validateNestedForUnknownMacros(val, context); err != nil {
 				return err
 			}
 		}
