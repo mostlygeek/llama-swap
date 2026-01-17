@@ -834,7 +834,7 @@ func TestConfig_APIKeys_EnvMacros(t *testing.T) {
 		content := `apiKeys: ["${env.NONEXISTENT_API_KEY}"]`
 		_, err := LoadConfigFromReader(strings.NewReader(content))
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "apiKeys[0]")
+		// With string-level env substitution, error only includes var name
 		assert.Contains(t, err.Error(), "NONEXISTENT_API_KEY")
 	})
 
@@ -1086,7 +1086,7 @@ peers:
 `
 		_, err := LoadConfigFromReader(strings.NewReader(content))
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "peers.openrouter.apiKey")
+		// With string-level env substitution, error only includes var name
 		assert.Contains(t, err.Error(), "NONEXISTENT_PEER_KEY")
 	})
 
