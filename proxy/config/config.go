@@ -668,7 +668,7 @@ func substituteMacroInValue(value any, macroName string, macroValue any) (any, e
 }
 
 // substituteEnvMacros replaces ${env.VAR_NAME} with environment variable values
-// Returns error if any env var is not set
+// Returns error if any env var is not set or contains invalid characters
 func substituteEnvMacros(s string) (string, error) {
 	result := s
 	matches := envMacroRegex.FindAllStringSubmatch(s, -1)
@@ -680,7 +680,32 @@ func substituteEnvMacros(s string) (string, error) {
 		if !exists {
 			return "", fmt.Errorf("environment variable '%s' is not set", varName)
 		}
+
+		// Sanitize the value for safe YAML substitution
+		value, err := sanitizeEnvValueForYAML(value, varName)
+		if err != nil {
+			return "", err
+		}
+
 		result = strings.ReplaceAll(result, fullMatch, value)
 	}
 	return result, nil
+}
+
+// sanitizeEnvValueForYAML ensures an environment variable value is safe for YAML substitution.
+// It rejects values with characters that break YAML structure and escapes quotes/backslashes
+// for compatibility with double-quoted YAML strings.
+func sanitizeEnvValueForYAML(value, varName string) (string, error) {
+	// Reject values that would break YAML structure regardless of quoting context
+	if strings.ContainsAny(value, "\n\r\x00") {
+		return "", fmt.Errorf("environment variable '%s' contains newlines or null bytes which are not allowed in YAML substitution", varName)
+	}
+
+	// Escape backslashes and double quotes for safe use in double-quoted YAML strings.
+	// In unquoted contexts, these escapes appear literally (harmless for most use cases).
+	// In double-quoted contexts, they are interpreted correctly.
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, `"`, `\"`)
+
+	return value, nil
 }

@@ -1056,6 +1056,70 @@ models:
 		assert.NoError(t, err)
 		assert.Equal(t, "server --auth admin:secret", config.Models["test"].Cmd)
 	})
+
+	t.Run("env value with newline is rejected", func(t *testing.T) {
+		t.Setenv("TEST_MULTILINE", "line1\nline2")
+
+		content := `
+models:
+  test:
+    cmd: "server --config ${env.TEST_MULTILINE}"
+    proxy: "http://localhost:8080"
+`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		if assert.Error(t, err) {
+			assert.Contains(t, err.Error(), "TEST_MULTILINE")
+			assert.Contains(t, err.Error(), "newlines")
+		}
+	})
+
+	t.Run("env value with carriage return is rejected", func(t *testing.T) {
+		t.Setenv("TEST_CR", "line1\rline2")
+
+		content := `
+models:
+  test:
+    cmd: "server --config ${env.TEST_CR}"
+    proxy: "http://localhost:8080"
+`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		if assert.Error(t, err) {
+			assert.Contains(t, err.Error(), "TEST_CR")
+			assert.Contains(t, err.Error(), "newlines")
+		}
+	})
+
+	t.Run("env value with quotes is escaped for YAML", func(t *testing.T) {
+		t.Setenv("TEST_QUOTED", `value with "quotes"`)
+
+		content := `
+models:
+  test:
+    cmd: "server --arg \"${env.TEST_QUOTED}\""
+    proxy: "http://localhost:8080"
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		// Quotes are escaped before YAML parsing, then YAML unescapes them
+		// Final result preserves the original value with quotes
+		assert.Contains(t, config.Models["test"].Cmd, `"quotes"`)
+	})
+
+	t.Run("env value with backslash is escaped for YAML", func(t *testing.T) {
+		t.Setenv("TEST_BACKSLASH", `path\to\file`)
+
+		content := `
+models:
+  test:
+    cmd: "server --path \"${env.TEST_BACKSLASH}\""
+    proxy: "http://localhost:8080"
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		// Backslashes are escaped before YAML parsing, then YAML unescapes them
+		// Final result preserves the original value with backslashes
+		assert.Contains(t, config.Models["test"].Cmd, `path\to\file`)
+	})
 }
 
 func TestConfig_PeerApiKey_EnvMacros(t *testing.T) {
