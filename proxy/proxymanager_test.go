@@ -672,8 +672,13 @@ func TestProxyManager_RunningEndpoint(t *testing.T) {
 	// Define a helper struct to parse the JSON response.
 	type RunningResponse struct {
 		Running []struct {
-			Model string `json:"model"`
-			State string `json:"state"`
+			Model       string `json:"model"`
+			State       string `json:"state"`
+			Cmd         string `json:"cmd"`
+			Proxy       string `json:"proxy"`
+			TTL         int    `json:"ttl"`
+			Name        string `json:"name"`
+			Description string `json:"description"`
 		} `json:"running"`
 	}
 
@@ -721,6 +726,11 @@ func TestProxyManager_RunningEndpoint(t *testing.T) {
 
 		// Is the model loaded?
 		assert.Equal(t, "ready", response.Running[0].State)
+
+		// Verify extended fields are present
+		assert.NotEmpty(t, response.Running[0].Cmd, "cmd should be populated")
+		assert.NotEmpty(t, response.Running[0].Proxy, "proxy should be populated")
+		assert.Equal(t, 0, response.Running[0].TTL, "ttl should default to 0")
 	})
 }
 
