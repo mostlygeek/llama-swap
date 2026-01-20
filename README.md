@@ -27,6 +27,7 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
   - `v1/images/edits`
 - ✅ Anthropic API supported endpoints:
   - `v1/messages`
+  - `v1/messages/count_tokens`
 - ✅ llama-server (llama.cpp) supported endpoints
   - `v1/rerank`, `v1/reranking`, `/rerank`
   - `/infill` - for code infilling
