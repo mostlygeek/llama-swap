@@ -928,8 +928,13 @@ func (pm *ProxyManager) listRunningProcessesHandler(context *gin.Context) {
 		for _, process := range processGroup.processes {
 			if process.CurrentState() == StateReady {
 				runningProcesses = append(runningProcesses, gin.H{
-					"model": process.ID,
-					"state": process.state,
+					"model":       process.ID,
+					"state":       process.state,
+					"cmd":         process.config.Cmd,
+					"proxy":       process.config.Proxy,
+					"ttl":         process.config.UnloadAfter,
+					"name":        process.config.Name,
+					"description": process.config.Description,
 				})
 			}
 		}
