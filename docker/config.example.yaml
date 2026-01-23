@@ -16,3 +16,18 @@ models:
       /app/llama-server
       -hf bartowski/SmolLM2-135M-Instruct-GGUF:Q4_K_M
       --port 9999
+
+  z-image:
+    checkEndpoint: /
+    cmd: |
+      /app/sd-server
+      --listen-port 9999
+      --diffusion-fa
+      --diffusion-model /models/z_image_turbo-Q8_0.gguf
+      --vae /models/ae.safetensors
+      --llm /models/qwen3-4b-instruct-2507-q8_0.gguf
+      --offload-to-cpu
+      --cfg-scale 1.0
+      --height 512 --width 512
+      --steps 8
+    aliases: [gpt-image-1,dall-e-2,dall-e-3,gpt-image-1-mini,gpt-image-1.5]
