@@ -1,10 +1,7 @@
 <script lang="ts">
-  import { link } from "svelte-spa-router";
+  import { link, location } from "svelte-spa-router";
   import { screenWidth, toggleTheme, isDarkMode, appTitle, isNarrow } from "../stores/theme";
   import ConnectionStatus from "./ConnectionStatus.svelte";
-
-  // Get current route for active state
-  import { location } from "svelte-spa-router";
 
   function handleTitleChange(newTitle: string): void {
     const sanitized = newTitle.replace(/\n/g, "").trim().substring(0, 64) || "llama-swap";
@@ -25,9 +22,8 @@
     handleTitleChange(target.textContent || "(set title)");
   }
 
-  function navLinkClass(path: string, currentLocation: string): string {
-    const isActive = path === "/" ? currentLocation === "/" : currentLocation.startsWith(path);
-    return `text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1 ${isActive ? "font-semibold" : ""}`;
+  function isActive(path: string, currentLocation: string): boolean {
+    return path === "/" ? currentLocation === "/" : currentLocation.startsWith(path);
   }
 </script>
 
@@ -48,12 +44,32 @@
   {/if}
 
   <menu class="flex items-center gap-4">
-    <a href="/" use:link class={navLinkClass("/", $location)}>Logs</a>
-    <a href="/models" use:link class={navLinkClass("/models", $location)}>Models</a>
-    <a href="/activity" use:link class={navLinkClass("/activity", $location)}>Activity</a>
-    <button onclick={toggleTheme}>
+    <a
+      href="/"
+      use:link
+      class="text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1"
+      class:font-semibold={isActive("/", $location)}
+    >
+      Logs
+    </a>
+    <a
+      href="/models"
+      use:link
+      class="text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1"
+      class:font-semibold={isActive("/models", $location)}
+    >
+      Models
+    </a>
+    <a
+      href="/activity"
+      use:link
+      class="text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1"
+      class:font-semibold={isActive("/activity", $location)}
+    >
+      Activity
+    </a>
+    <button onclick={toggleTheme} title="Toggle theme">
       {#if $isDarkMode}
-        <!-- Moon icon -->
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
           <path
             fill-rule="evenodd"
@@ -62,7 +78,6 @@
           />
         </svg>
       {:else}
-        <!-- Sun icon -->
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
           <path
             d="M12 2.25a.75.75 0 0 1 .75.75v2.25a.75.75 0 0 1-1.5 0V3a.75.75 0 0 1 .75-.75ZM7.5 12a4.5 4.5 0 1 1 9 0 4.5 4.5 0 0 1-9 0ZM18.894 6.166a.75.75 0 0 0-1.06-1.06l-1.591 1.59a.75.75 0 1 0 1.06 1.061l1.591-1.59ZM21.75 12a.75.75 0 0 1-.75.75h-2.25a.75.75 0 0 1 0-1.5H21a.75.75 0 0 1 .75.75ZM17.834 18.894a.75.75 0 0 0 1.06-1.06l-1.59-1.591a.75.75 0 1 0-1.061 1.06l1.591 1.591ZM12 18a.75.75 0 0 1 .75.75V21a.75.75 0 0 1-1.5 0v-2.25A.75.75 0 0 1 12 18ZM7.758 17.303a.75.75 0 0 0-1.061-1.06l-1.591 1.59a.75.75 0 0 0 1.06 1.061l1.591-1.59ZM6 12a.75.75 0 0 1-.75.75H3a.75.75 0 0 1 0-1.5h2.25A.75.75 0 0 1 6 12ZM6.697 7.757a.75.75 0 0 0 1.06-1.06l-1.59-1.591a.75.75 0 0 0-1.061 1.06l1.59 1.591Z"

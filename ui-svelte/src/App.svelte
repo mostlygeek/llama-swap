@@ -6,7 +6,7 @@
   import Models from "./routes/Models.svelte";
   import Activity from "./routes/Activity.svelte";
   import { enableAPIEvents } from "./stores/api";
-  import { initTheme, syncThemeToDocument, syncTitleToDocument } from "./stores/theme";
+  import { initScreenWidth, isDarkMode, appTitle, connectionState } from "./stores/theme";
 
   const routes = {
     "/": LogViewer,
@@ -15,15 +15,23 @@
     "*": LogViewer,
   };
 
+  // Sync theme to document attribute
+  $effect(() => {
+    document.documentElement.setAttribute("data-theme", $isDarkMode ? "dark" : "light");
+  });
+
+  // Sync title to document
+  $effect(() => {
+    const icon = $connectionState === "connecting" ? "\u{1F7E1}" : $connectionState === "connected" ? "\u{1F7E2}" : "\u{1F534}";
+    document.title = `${icon} ${$appTitle}`;
+  });
+
   onMount(() => {
-    const cleanupTheme = initTheme();
-    syncThemeToDocument();
-    const cleanupTitle = syncTitleToDocument();
+    const cleanupScreenWidth = initScreenWidth();
     enableAPIEvents(true);
 
     return () => {
-      cleanupTheme();
-      cleanupTitle();
+      cleanupScreenWidth();
       enableAPIEvents(false);
     };
   });

@@ -1,4 +1,4 @@
-import { writable, derived, get } from "svelte/store";
+import { writable, derived } from "svelte/store";
 import { persistentStore } from "./persistent";
 import type { ScreenWidth } from "../lib/types";
 
@@ -22,8 +22,6 @@ export function toggleTheme(): void {
 
 // Function to check and update screen width
 export function checkScreenWidth(): void {
-  if (typeof window === "undefined") return;
-
   const innerWidth = window.innerWidth;
   let newWidth: ScreenWidth;
 
@@ -45,47 +43,11 @@ export function checkScreenWidth(): void {
 }
 
 // Initialize screen width and set up resize listener
-export function initTheme(): () => void {
+export function initScreenWidth(): () => void {
   checkScreenWidth();
-
-  if (typeof window !== "undefined") {
-    window.addEventListener("resize", checkScreenWidth);
-  }
-
-  // Return cleanup function
-  return () => {
-    if (typeof window !== "undefined") {
-      window.removeEventListener("resize", checkScreenWidth);
-    }
-  };
-}
-
-// Update document theme attribute when isDarkMode changes
-export function syncThemeToDocument(): void {
-  isDarkMode.subscribe((dark) => {
-    if (typeof document !== "undefined") {
-      document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
-    }
-  });
-}
-
-// Update document title when appTitle or connectionState changes
-export function syncTitleToDocument(): () => void {
-  const unsubTitle = appTitle.subscribe(() => updateDocumentTitle());
-  const unsubConn = connectionState.subscribe(() => updateDocumentTitle());
+  window.addEventListener("resize", checkScreenWidth);
 
   return () => {
-    unsubTitle();
-    unsubConn();
+    window.removeEventListener("resize", checkScreenWidth);
   };
-}
-
-function updateDocumentTitle(): void {
-  const currentTitle = get(appTitle);
-  const currentConnection = get(connectionState);
-
-  if (typeof document !== "undefined") {
-    const connectionIcon = currentConnection === "connecting" ? "\u{1F7E1}" : currentConnection === "connected" ? "\u{1F7E2}" : "\u{1F534}";
-    document.title = connectionIcon + " " + currentTitle;
-  }
 }
