@@ -13,7 +13,8 @@
   let abortController = $state<AbortController | null>(null);
   let messagesContainer: HTMLDivElement | undefined = $state();
 
-  let readyModels = $derived($models.filter((m) => m.state === "ready"));
+  // Show all models (excluding unlisted), backend will auto-load as needed
+  let availableModels = $derived($models.filter((m) => !m.unlisted));
 
   // Auto-scroll when messages change
   $effect(() => {
@@ -102,7 +103,7 @@
       disabled={isStreaming}
     >
       <option value="">Select a model...</option>
-      {#each readyModels as model (model.id)}
+      {#each availableModels as model (model.id)}
         <option value={model.id}>{model.name || model.id}</option>
       {/each}
     </select>
@@ -111,10 +112,10 @@
     </button>
   </div>
 
-  <!-- Empty state for no ready models -->
-  {#if readyModels.length === 0}
+  <!-- Empty state for no models configured -->
+  {#if availableModels.length === 0}
     <div class="flex-1 flex items-center justify-center text-txtsecondary">
-      <p>No models loaded. Load a model from the Models page to start chatting.</p>
+      <p>No models configured. Add models to your configuration to start chatting.</p>
     </div>
   {:else}
     <!-- Messages area -->

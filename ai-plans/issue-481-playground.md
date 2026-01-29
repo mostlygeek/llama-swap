@@ -116,10 +116,10 @@ export interface ChatCompletionRequest {
 5. Clean up: set `isStreaming = false`, `abortController = null`
 
 ### Model Selector
-- Filter models: `$models.filter(m => m.state === 'ready')`
-- Show only loaded models in dropdown
+- Filter models: `$models.filter(m => !m.unlisted)` - show all models except unlisted
+- Backend auto-loads models on demand, no need to filter by ready state
 - Disable selector during streaming
-- Handle empty state (no ready models)
+- Handle empty state (no models configured)
 
 ### Message Flow
 1. User enters message → Add to messages array as user message
