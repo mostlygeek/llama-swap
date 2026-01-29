@@ -1,0 +1,176 @@
+@import "tailwindcss";
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+@theme {
+  --color-background: rgba(252, 252, 249, 1);
+  --color-surface: rgba(255, 255, 253, 1);
+
+  /* text colors */
+  --color-txtmain: rgba(19, 52, 59, 1);
+  --color-txtsecondary: rgba(98, 108, 113, 1);
+  --color-navlink-active: rgba(245, 245, 245, 1);
+
+  --color-primary: rgba(50, 184, 198, 1);
+
+  --color-primary-hover: rgba(29, 116, 128, 1);
+  --color-primary-active: rgba(26, 104, 115, 1);
+  --color-secondary: rgba(94, 82, 64, 0.12);
+  --color-secondary-hover: rgba(94, 82, 64, 0.2);
+  --color-secondary-active: rgba(94, 82, 64, 0.25);
+  --color-border: rgba(94, 82, 64, 0.3);
+  --color-btn-primary-text: rgba(252, 252, 249, 1);
+  --color-card-border: rgba(94, 82, 64, 0.12);
+  --color-card-border-inner: rgba(94, 82, 64, 0.12);
+  --color-error: rgba(192, 21, 47, 1);
+  --color-success: rgba(33, 128, 141, 1);
+  --color-warning: rgb(244, 155, 0);
+  --color-info: rgba(98, 108, 113, 1);
+  --color-focus-ring: rgba(33, 128, 141, 0.4);
+  --color-select-caret: rgba(19, 52, 59, 0.8);
+  --color-btn-border: rgba(94, 82, 64, 0.7);
+}
+
+@layer theme {
+  /* over ride theme for dark mode */
+  [data-theme="dark"] {
+    --color-background: rgba(31, 33, 33, 1);
+    --color-surface: rgba(38, 40, 40, 1);
+    /* text colors */
+    --color-txtmain: rgba(245, 245, 245, 1);
+    --color-txtsecondary: rgba(167, 169, 169, 0.7);
+
+    --color-navlink-active: rgba(245, 245, 245, 1);
+
+    --color-primary: rgba(33, 128, 141, 1);
+    --color-primary-hover: rgba(45, 166, 178, 1);
+    --color-primary-active: rgba(41, 150, 161, 1);
+    --color-secondary: rgba(119, 124, 124, 0.15);
+    --color-secondary-hover: rgba(119, 124, 124, 0.25);
+    --color-secondary-active: rgba(119, 124, 124, 0.3);
+    --color-border: rgba(119, 124, 124, 0.3);
+    --color-error: rgba(255, 84, 89, 1);
+    --color-success: rgba(50, 184, 198, 1);
+    --color-warning: rgb(244, 155, 0);
+    --color-info: rgba(167, 169, 169, 1);
+    --color-focus-ring: rgba(50, 184, 198, 0.4);
+    --color-btn-primary-text: rgba(19, 52, 59, 1);
+    --color-card-border: rgba(119, 124, 124, 0.2);
+    --color-card-border-inner: rgba(119, 124, 124, 0.15);
+    --shadow-inset-sm: inset 0 1px 0 rgba(255, 255, 255, 0.1), inset 0 -1px 0 rgba(0, 0, 0, 0.15);
+    --button-border-secondary: rgba(119, 124, 124, 0.2);
+  }
+}
+
+@layer base {
+  body {
+    /* example of how colors using theme colors*/
+    @apply bg-background text-txtmain;
+  }
+
+  h1 {
+    @apply text-4xl text-txtmain font-bold pb-4;
+  }
+  h2 {
+    @apply text-3xl text-txtmain font-bold pb-4;
+  }
+  h3 {
+    @apply text-2xl text-txtmain font-bold pb-4;
+  }
+  h4 {
+    @apply text-xl text-txtmain font-bold pb-4;
+  }
+  h5 {
+    @apply text-lg text-txtmain font-bold pb-4;
+  }
+  h6 {
+    @apply text-base text-txtmain font-bold pb-4;
+  }
+}
+
+/* define CSS classes here for specific types of components */
+@layer components {
+  .container {
+    @apply px-4;
+  }
+
+  /* Tables */
+  table th {
+    @apply p-2 font-semibold;
+  }
+  table td {
+    @apply p-2;
+  }
+
+  /* Navigation Header */
+
+  .navlink {
+    @apply text-txtsecondary hover:bg-secondary hover:text-txtmain rounded-lg p-2;
+  }
+  .navlink.active {
+    @apply bg-primary text-navlink-active;
+  }
+
+  /* Card component */
+  .card {
+    @apply bg-surface rounded-lg border border-card-border shadow-sm overflow-hidden p-4;
+  }
+
+  .card:hover {
+    @apply shadow-md;
+  }
+
+  .card__body {
+    @apply p-4;
+  }
+
+  .card__header,
+  .card__footer {
+    @apply p-4 border-b border-card-border-inner;
+  }
+
+  /* Status Badges */
+  .status {
+    @apply inline-block px-2 py-1 text-xs font-medium rounded-lg;
+  }
+
+  .status--ready {
+    @apply bg-success/10 text-success;
+  }
+
+  .status--starting,
+  .status--stopping {
+    @apply bg-warning/10 text-warning;
+  }
+
+  .status--stopped {
+    @apply bg-error/10 text-error;
+  }
+
+  /* Buttons */
+  .btn {
+    @apply bg-surface py-2 px-4 text-sm rounded-md border transition-colors duration-200 border-btn-border;
+  }
+
+  .btn:hover {
+    cursor: pointer;
+  }
+
+  .btn--sm {
+    @apply px-2 py-0.5 text-xs;
+  }
+
+  .btn:disabled {
+    @apply opacity-50 cursor-not-allowed;
+  }
+}
+
+@layer utilities {
+  .ml-2 {
+    margin-left: 0.5rem;
+  }
+
+  .my-8 {
+    margin-top: 2rem;
+    margin-bottom: 2rem;
+  }
+}
