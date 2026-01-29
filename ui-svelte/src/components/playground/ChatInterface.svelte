@@ -6,12 +6,15 @@
   import ChatMessageComponent from "./ChatMessage.svelte";
 
   const selectedModelStore = persistentStore<string>("playground-selected-model", "");
+  const systemPromptStore = persistentStore<string>("playground-system-prompt", "");
+  const temperatureStore = persistentStore<number>("playground-temperature", 0.7);
 
   let messages = $state<ChatMessage[]>([]);
   let userInput = $state("");
   let isStreaming = $state(false);
   let abortController = $state<AbortController | null>(null);
   let messagesContainer: HTMLDivElement | undefined = $state();
+  let showSettings = $state(false);
 
   // Show all models (excluding unlisted), backend will auto-load as needed
   let availableModels = $derived($models.filter((m) => !m.unlisted));
@@ -41,10 +44,18 @@
     abortController = new AbortController();
 
     try {
+      // Build messages array with optional system prompt
+      const apiMessages: ChatMessage[] = [];
+      if ($systemPromptStore.trim()) {
+        apiMessages.push({ role: "system", content: $systemPromptStore.trim() });
+      }
+      apiMessages.push(...messages.slice(0, -1)); // Add all messages except the empty assistant one
+
       const stream = streamChatCompletion(
         $selectedModelStore,
-        messages.slice(0, -1), // Send all messages except the empty assistant one
-        abortController.signal
+        apiMessages,
+        abortController.signal,
+        { temperature: $temperatureStore }
       );
 
       for await (const chunk of stream) {
@@ -107,10 +118,55 @@
         <option value={model.id}>{model.name || model.id}</option>
       {/each}
     </select>
+    <button
+      class="btn"
+      onclick={() => (showSettings = !showSettings)}
+      title="Settings"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5">
+        <path fill-rule="evenodd" d="M8.34 1.804A1 1 0 0 1 9.32 1h1.36a1 1 0 0 1 .98.804l.295 1.473c.497.144.971.342 1.416.587l1.25-.834a1 1 0 0 1 1.262.125l.962.962a1 1 0 0 1 .125 1.262l-.834 1.25c.245.445.443.919.587 1.416l1.473.295a1 1 0 0 1 .804.98v1.36a1 1 0 0 1-.804.98l-1.473.295a6.95 6.95 0 0 1-.587 1.416l.834 1.25a1 1 0 0 1-.125 1.262l-.962.962a1 1 0 0 1-1.262.125l-1.25-.834a6.953 6.953 0 0 1-1.416.587l-.295 1.473a1 1 0 0 1-.98.804H9.32a1 1 0 0 1-.98-.804l-.295-1.473a6.957 6.957 0 0 1-1.416-.587l-1.25.834a1 1 0 0 1-1.262-.125l-.962-.962a1 1 0 0 1-.125-1.262l.834-1.25a6.957 6.957 0 0 1-.587-1.416l-1.473-.295A1 1 0 0 1 1 10.68V9.32a1 1 0 0 1 .804-.98l1.473-.295c.144-.497.342-.971.587-1.416l-.834-1.25a1 1 0 0 1 .125-1.262l.962-.962A1 1 0 0 1 5.38 3.03l1.25.834a6.957 6.957 0 0 1 1.416-.587l.294-1.473ZM13 10a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" clip-rule="evenodd" />
+      </svg>
+    </button>
     <button class="btn" onclick={newChat} disabled={messages.length === 0 && !isStreaming}>
       New Chat
     </button>
   </div>
+
+  <!-- Settings panel -->
+  {#if showSettings}
+    <div class="shrink-0 mb-4 p-4 bg-surface border border-gray-200 dark:border-white/10 rounded">
+      <div class="mb-4">
+        <label class="block text-sm font-medium mb-1" for="system-prompt">System Prompt</label>
+        <textarea
+          id="system-prompt"
+          class="w-full px-3 py-2 rounded border border-gray-200 dark:border-white/10 bg-card focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+          placeholder="You are a helpful assistant..."
+          rows="3"
+          bind:value={$systemPromptStore}
+          disabled={isStreaming}
+        ></textarea>
+      </div>
+      <div>
+        <label class="block text-sm font-medium mb-1" for="temperature">
+          Temperature: {$temperatureStore.toFixed(2)}
+        </label>
+        <input
+          id="temperature"
+          type="range"
+          min="0"
+          max="2"
+          step="0.05"
+          class="w-full"
+          bind:value={$temperatureStore}
+          disabled={isStreaming}
+        />
+        <div class="flex justify-between text-xs text-txtsecondary mt-1">
+          <span>Precise (0)</span>
+          <span>Creative (2)</span>
+        </div>
+      </div>
+    </div>
+  {/if}
 
   <!-- Empty state for no models configured -->
   {#if availableModels.length === 0}

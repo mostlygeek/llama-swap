@@ -5,15 +5,21 @@ export interface StreamChunk {
   done: boolean;
 }
 
+export interface ChatOptions {
+  temperature?: number;
+}
+
 export async function* streamChatCompletion(
   model: string,
   messages: ChatMessage[],
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  options?: ChatOptions
 ): AsyncGenerator<StreamChunk> {
   const request: ChatCompletionRequest = {
     model,
     messages,
     stream: true,
+    temperature: options?.temperature,
   };
 
   const response = await fetch("/v1/chat/completions", {
