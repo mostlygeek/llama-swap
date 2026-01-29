@@ -1,6 +1,7 @@
 <script lang="ts">
   import { persistentStore } from "../stores/persistent";
   import ChatInterface from "../components/playground/ChatInterface.svelte";
+  import ImageInterface from "../components/playground/ImageInterface.svelte";
   import PlaceholderTab from "../components/playground/PlaceholderTab.svelte";
 
   type Tab = "chat" | "images" | "audio";
@@ -46,7 +47,7 @@
     {#if $selectedTabStore === "chat"}
       <ChatInterface />
     {:else if $selectedTabStore === "images"}
-      <PlaceholderTab featureName="Image Generation" />
+      <ImageInterface />
     {:else if $selectedTabStore === "audio"}
       <PlaceholderTab featureName="Audio Processing" />
     {/if}

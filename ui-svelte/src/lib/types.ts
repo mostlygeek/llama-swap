@@ -53,3 +53,18 @@ export interface ChatCompletionRequest {
   temperature?: number;
   max_tokens?: number;
 }
+
+export interface ImageGenerationRequest {
+  model: string;
+  prompt: string;
+  n?: number;
+  size?: string;
+}
+
+export interface ImageGenerationResponse {
+  created: number;
+  data: Array<{
+    url?: string;
+    b64_json?: string;
+  }>;
+}
