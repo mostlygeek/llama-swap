@@ -3,13 +3,13 @@ name: goreleaser
 on:
   push:
     tags:
-      - '*'
+      - "*"
 
   # Allows manual triggering of the workflow
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag version to release (e.g. v144)'
+        description: "Tag version to release (e.g. v144)"
         required: true
 
 permissions:
@@ -19,35 +19,30 @@ jobs:
   goreleaser:
     runs-on: ubuntu-latest
     steps:
-      -
-        name: Checkout
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ github.event.inputs.tag || github.ref }}
-      -
-        name: Set up Go
+      - name: Set up Go
         uses: actions/setup-go@v5
-      -
-        name: Set up Node.js
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '23'
-      -
-        name: Install dependencies and build UI
+          node-version: "23"
+      - name: Install dependencies and build UI
         run: |
-          cd ui
+          cd ui-svelte
           npm ci
           npm run build
 
-      -
-        name: Run GoReleaser
+      - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           # either 'goreleaser' (default) or 'goreleaser-pro'
           distribution: goreleaser
           # 'latest', 'nightly', or a semver
-          version: '~> v2'
+          version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
