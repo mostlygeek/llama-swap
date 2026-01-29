@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/event"
+	"github.com/mostlygeek/llama-swap/proxy/config"
 )
 
 type Model struct {
@@ -31,6 +34,8 @@ func addApiHandlers(pm *ProxyManager) {
 		apiGroup.GET("/events", pm.apiSendEvents)
 		apiGroup.GET("/metrics", pm.apiGetMetrics)
 		apiGroup.GET("/version", pm.apiGetVersion)
+		apiGroup.GET("/config", pm.apiGetConfig)
+		apiGroup.POST("/config", pm.apiUpdateConfig)
 	}
 }
 
@@ -171,7 +176,10 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 		sendModels()
 	})()
 	defer event.On(func(e ConfigFileChangedEvent) {
-		sendModels()
+		// Only send models after the config has been reloaded
+		if e.ReloadingState == ReloadingStateEnd {
+			sendModels()
+		}
 	})()
 
 	/**
@@ -248,5 +256,78 @@ func (pm *ProxyManager) apiGetVersion(c *gin.Context) {
 		"version":    pm.version,
 		"commit":     pm.commit,
 		"build_date": pm.buildDate,
+	})
+}
+
+func (pm *ProxyManager) apiGetConfig(c *gin.Context) {
+	pm.Lock()
+	configPath := pm.configPath
+	pm.Unlock()
+
+	if configPath == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "config path not set"})
+		return
+	}
+
+	// Read the config file
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to read config file: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"path":    configPath,
+		"content": string(content),
+	})
+}
+
+func (pm *ProxyManager) apiUpdateConfig(c *gin.Context) {
+	pm.Lock()
+	configPath := pm.configPath
+	pm.Unlock()
+
+	if configPath == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "config path not set"})
+		return
+	}
+
+	var req struct {
+		Content string `json:"content" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	// Validate YAML syntax by attempting to load it
+	_, err := config.LoadConfigFromReader(strings.NewReader(req.Content))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid YAML configuration: %v", err)})
+		return
+	}
+
+	// Get the absolute path of the original config to prevent path traversal
+	absConfigPath, err := filepath.Abs(configPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve config path"})
+		return
+	}
+
+	// Write to the config file
+	err = os.WriteFile(absConfigPath, []byte(req.Content), 0644)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to write config file: %v", err)})
+		return
+	}
+
+	// Emit config file changed event to trigger reload
+	event.Emit(ConfigFileChangedEvent{
+		ReloadingState: ReloadingStateStart,
+	})
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "config updated successfully, reloading...",
 	})
 }

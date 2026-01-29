@@ -31,8 +31,9 @@ type proxyCtxKey string
 type ProxyManager struct {
 	sync.Mutex
 
-	config    config.Config
-	ginEngine *gin.Engine
+	config     config.Config
+	configPath string
+	ginEngine  *gin.Engine
 
 	// logging
 	proxyLogger    *LogMonitor
@@ -965,4 +966,10 @@ func (pm *ProxyManager) SetVersion(buildDate string, commit string, version stri
 	pm.buildDate = buildDate
 	pm.commit = commit
 	pm.version = version
+}
+
+func (pm *ProxyManager) SetConfigPath(configPath string) {
+	pm.Lock()
+	defer pm.Unlock()
+	pm.configPath = configPath
 }

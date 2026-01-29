@@ -143,6 +143,9 @@ Binaries are available on the [release](https://github.com/mostlygeek/llama-swap
 1. `make clean all`
 1. look in the `build/` subdirectory for the llama-swap binary
 
+> [!NOTE]
+> It is recommended to use the --watch-config flag if you plan to edit the configuration through the web ui.
+
 ## Configuration
 
 ```yaml

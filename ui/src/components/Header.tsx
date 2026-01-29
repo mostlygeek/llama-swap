@@ -46,6 +46,9 @@ export function Header() {
         <NavLink to="/activity" className={navLinkClass} type="button">
           Activity
         </NavLink>
+        <NavLink to="/config" className={navLinkClass} type="button">
+          Config
+        </NavLink>
         <button className="" onClick={toggleTheme}>
           {isDarkMode ? <RiMoonFill /> : <RiSunFill />}
         </button>

@@ -4,6 +4,7 @@ import { Header } from "./components/Header";
 import { useAPI } from "./contexts/APIProvider";
 import { useTheme } from "./contexts/ThemeProvider";
 import ActivityPage from "./pages/Activity";
+import ConfigPage from "./pages/Config";
 import LogViewerPage from "./pages/LogViewer";
 import ModelPage from "./pages/Models";
 
@@ -27,6 +28,7 @@ function App() {
             <Route path="/" element={<LogViewerPage />} />
             <Route path="/models" element={<ModelPage />} />
             <Route path="/activity" element={<ActivityPage />} />
+            <Route path="/config" element={<ConfigPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
