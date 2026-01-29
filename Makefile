@@ -36,11 +36,11 @@ test-all: proxy/ui_dist/placeholder.txt
 	go test -race -count=1 ./proxy/...
 
 ui/node_modules:
-	cd ui && npm install
+	cd ui-svelte && npm install
 
 # build react UI
 ui: ui/node_modules
-	cd ui && npm run build
+	cd ui-svelte && npm run build
 
 # Build OSX binary
 mac: ui
