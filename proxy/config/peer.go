@@ -3,24 +3,27 @@ package config
 import (
 	"fmt"
 	"net/url"
+	"strings"
 )
 
 type PeerDictionaryConfig map[string]PeerConfig
 type PeerConfig struct {
-	Proxy    string   `yaml:"proxy"`
-	ProxyURL *url.URL `yaml:"-"`
-	ApiKey   string   `yaml:"apiKey"`
-	Models   []string `yaml:"models"`
-	Filters  Filters  `yaml:"filters"`
+	Proxy       string   `yaml:"proxy"`
+	ProxyURL    *url.URL `yaml:"-"`
+	ApiKey      string   `yaml:"apiKey"`
+	Models      []string `yaml:"models"`
+	Filters     Filters  `yaml:"filters"`
+	PathRewrite string   `yaml:"pathRewrite"`
 }
 
 func (c *PeerConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	type rawPeerConfig PeerConfig
 	defaults := rawPeerConfig{
-		Proxy:   "",
-		ApiKey:  "",
-		Models:  []string{},
-		Filters: Filters{},
+		Proxy:       "",
+		ApiKey:      "",
+		Models:      []string{},
+		Filters:     Filters{},
+		PathRewrite: "",
 	}
 
 	if err := unmarshal(&defaults); err != nil {
@@ -38,6 +41,13 @@ func (c *PeerConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		return fmt.Errorf("invalid peer proxy URL (%s): %w", defaults.Proxy, err)
 	}
 	defaults.ProxyURL = parsedURL
+
+	// Validate pathRewrite format if specified
+	if defaults.PathRewrite != "" {
+		if !strings.HasPrefix(defaults.PathRewrite, "strip:") && !strings.HasPrefix(defaults.PathRewrite, "replace:") {
+			return fmt.Errorf("invalid pathRewrite format: must start with 'strip:' or 'replace:'")
+		}
+	}
 
 	// Validate models is not empty
 	if len(defaults.Models) == 0 {
