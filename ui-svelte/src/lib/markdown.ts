@@ -6,7 +6,7 @@ const marked = new Marked({
   breaks: true,
 });
 
-// Custom renderer for code blocks with syntax highlighting
+// Custom renderer for code blocks with syntax highlighting and HTML sanitization
 marked.use({
   renderer: {
     code({ text, lang }: { text: string; lang?: string }) {
@@ -17,6 +17,10 @@ marked.use({
     // Escape HTML in inline code
     codespan({ text }: { text: string }) {
       return `<code>${escapeHtml(text)}</code>`;
+    },
+    // Escape raw HTML to prevent XSS
+    html({ text }: { text: string }) {
+      return escapeHtml(text);
     },
   },
 });

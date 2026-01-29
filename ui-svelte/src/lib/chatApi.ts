@@ -9,6 +9,26 @@ export interface ChatOptions {
   temperature?: number;
 }
 
+function parseSSELine(line: string): { content: string; done: boolean } | null {
+  const trimmed = line.trim();
+  if (!trimmed || !trimmed.startsWith("data: ")) {
+    return null;
+  }
+
+  const data = trimmed.slice(6);
+  if (data === "[DONE]") {
+    return { content: "", done: true };
+  }
+
+  try {
+    const parsed = JSON.parse(data);
+    const content = parsed.choices?.[0]?.delta?.content || "";
+    return content ? { content, done: false } : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function* streamChatCompletion(
   model: string,
   messages: ChatMessage[],
@@ -57,47 +77,21 @@ export async function* streamChatCompletion(
       buffer = lines.pop() || "";
 
       for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith("data: ")) {
-          continue;
-        }
-
-        const data = trimmed.slice(6);
-
-        if (data === "[DONE]") {
-          yield { content: "", done: true };
+        const result = parseSSELine(line);
+        if (result?.done) {
+          yield result;
           return;
         }
-
-        try {
-          const parsed = JSON.parse(data);
-          const content = parsed.choices?.[0]?.delta?.content || "";
-          if (content) {
-            yield { content, done: false };
-          }
-        } catch {
-          // Skip malformed JSON lines
+        if (result) {
+          yield result;
         }
       }
     }
 
     // Process any remaining buffer
-    if (buffer.trim()) {
-      const trimmed = buffer.trim();
-      if (trimmed.startsWith("data: ")) {
-        const data = trimmed.slice(6);
-        if (data !== "[DONE]") {
-          try {
-            const parsed = JSON.parse(data);
-            const content = parsed.choices?.[0]?.delta?.content || "";
-            if (content) {
-              yield { content, done: false };
-            }
-          } catch {
-            // Skip malformed JSON
-          }
-        }
-      }
+    const result = parseSSELine(buffer);
+    if (result && !result.done) {
+      yield result;
     }
 
     yield { content: "", done: true };
