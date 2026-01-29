@@ -68,6 +68,14 @@
     >
       Logs
     </a>
+    <a
+      href="/playground"
+      use:link
+      class="text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1"
+      class:font-semibold={isActive("/playground", $location)}
+    >
+      Playground
+    </a>
     <button onclick={toggleTheme} title="Toggle theme">
       {#if $isDarkMode}
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">

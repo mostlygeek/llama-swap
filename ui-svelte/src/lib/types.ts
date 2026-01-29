@@ -40,3 +40,16 @@ export interface VersionInfo {
 }
 
 export type ScreenWidth = "xs" | "sm" | "md" | "lg" | "xl" | "2xl";
+
+export interface ChatMessage {
+  role: "user" | "assistant" | "system";
+  content: string;
+}
+
+export interface ChatCompletionRequest {
+  model: string;
+  messages: ChatMessage[];
+  stream: boolean;
+  temperature?: number;
+  max_tokens?: number;
+}
