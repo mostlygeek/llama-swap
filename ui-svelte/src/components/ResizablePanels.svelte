@@ -15,6 +15,7 @@
 
   let containerRef: HTMLDivElement;
   let isDragging = $state(false);
+  // svelte-ignore state_referenced_locally
   let leftSize = $state(defaultSize);
 
   // Load saved size from localStorage
@@ -84,6 +85,25 @@
     document.removeEventListener("touchend", handleTouchEnd);
   }
 
+  function handleKeyDown(e: KeyboardEvent): void {
+    const step = 2; // 2% increment for keyboard navigation
+    const key = e.key;
+
+    if (direction === "horizontal" && (key === "ArrowLeft" || key === "ArrowRight")) {
+      e.preventDefault();
+      const delta = key === "ArrowLeft" ? -step : step;
+      const newSize = Math.max(minSize, Math.min(100 - minSize, leftSize + delta));
+      leftSize = newSize;
+      saveSize();
+    } else if (direction === "vertical" && (key === "ArrowUp" || key === "ArrowDown")) {
+      e.preventDefault();
+      const delta = key === "ArrowUp" ? -step : step;
+      const newSize = Math.max(minSize, Math.min(100 - minSize, leftSize + delta));
+      leftSize = newSize;
+      saveSize();
+    }
+  }
+
   let containerClass = $derived(direction === "horizontal" ? "flex-row" : "flex-col");
 
   let handleClass = $derived(
@@ -110,12 +130,20 @@
     {@render leftPanel()}
   </div>
 
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div
     role="separator"
     tabindex="0"
     class="{handleClass} bg-primary hover:bg-success transition-colors rounded flex-shrink-0"
     onmousedown={handleMouseDown}
     ontouchstart={handleTouchStart}
+    onkeydown={handleKeyDown}
+    aria-label="Resize panels"
+    aria-orientation={direction}
+    aria-valuenow={Math.round(leftSize)}
+    aria-valuemin={minSize}
+    aria-valuemax={100 - minSize}
   ></div>
 
   <div style={rightStyle} class="overflow-hidden">
