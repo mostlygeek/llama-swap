@@ -9,10 +9,10 @@
   import { initScreenWidth, isDarkMode, appTitle, connectionState } from "./stores/theme";
 
   const routes = {
-    "/": LogViewer,
-    "/models": Models,
+    "/": Models,
+    "/logs": LogViewer,
     "/activity": Activity,
-    "*": LogViewer,
+    "*": Models,
   };
 
   // Sync theme to document attribute

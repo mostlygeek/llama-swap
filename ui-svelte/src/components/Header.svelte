@@ -50,14 +50,6 @@
       class="text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1"
       class:font-semibold={isActive("/", $location)}
     >
-      Logs
-    </a>
-    <a
-      href="/models"
-      use:link
-      class="text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1"
-      class:font-semibold={isActive("/models", $location)}
-    >
       Models
     </a>
     <a
@@ -67,6 +59,14 @@
       class:font-semibold={isActive("/activity", $location)}
     >
       Activity
+    </a>
+    <a
+      href="/logs"
+      use:link
+      class="text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1"
+      class:font-semibold={isActive("/logs", $location)}
+    >
+      Logs
     </a>
     <button onclick={toggleTheme} title="Toggle theme">
       {#if $isDarkMode}
