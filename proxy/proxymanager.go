@@ -167,7 +167,7 @@ func New(proxyConfig config.Config) *ProxyManager {
 
 	// create the process groups
 	for groupID := range proxyConfig.Groups {
-		processGroup := NewProcessGroup(groupID, proxyConfig, proxyLogger, upstreamLogger)
+		processGroup := NewProcessGroup(groupID, proxyConfig, proxyLogger, upstreamLogger, shutdownCtx)
 		pm.processGroups[groupID] = processGroup
 	}
 
@@ -475,6 +475,16 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 			continue
 		}
 
+		// Filter models with unhealthy RPC endpoints
+		if processGroup := pm.findGroupByModelName(id); processGroup != nil {
+			if process, ok := processGroup.GetMember(id); ok {
+				if !process.IsRPCHealthy() {
+					pm.proxyLogger.Debugf("<%s> filtered from /v1/models (unhealthy RPC)", id)
+					continue
+				}
+			}
+		}
+
 		data = append(data, newRecord(id, modelConfig))
 
 		// Include aliases
@@ -625,6 +635,15 @@ func (pm *ProxyManager) proxyInferenceHandler(c *gin.Context) {
 		if err != nil {
 			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
 			return
+		}
+
+		// Check RPC health before processing request
+		if process, ok := processGroup.GetMember(modelID); ok {
+			if !process.IsRPCHealthy() {
+				pm.sendErrorResponse(c, http.StatusServiceUnavailable,
+					fmt.Sprintf("model %s unavailable (RPC endpoints unhealthy)", modelID))
+				return
+			}
 		}
 
 		// issue #69 allow custom model names to be sent to upstream

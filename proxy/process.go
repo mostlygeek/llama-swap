@@ -79,18 +79,25 @@ type Process struct {
 
 	// track the number of failed starts
 	failedStartCount int
+
+	// RPC health checking
+	rpcEndpoints    []string
+	rpcHealthy      atomic.Bool
+	rpcHealthTicker *time.Ticker
+	rpcHealthCancel context.CancelFunc
+	shutdownCtx     context.Context // from ProxyManager for graceful shutdown
 }
 
-func NewProcess(ID string, healthCheckTimeout int, config config.ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor) *Process {
+func NewProcess(ID string, healthCheckTimeout int, modelConfig config.ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor, shutdownCtx context.Context) *Process {
 	concurrentLimit := 10
-	if config.ConcurrencyLimit > 0 {
-		concurrentLimit = config.ConcurrencyLimit
+	if modelConfig.ConcurrencyLimit > 0 {
+		concurrentLimit = modelConfig.ConcurrencyLimit
 	}
 
 	// Setup the reverse proxy.
-	proxyURL, err := url.Parse(config.Proxy)
+	proxyURL, err := url.Parse(modelConfig.Proxy)
 	if err != nil {
-		proxyLogger.Errorf("<%s> invalid proxy URL %q: %v", ID, config.Proxy, err)
+		proxyLogger.Errorf("<%s> invalid proxy URL %q: %v", ID, modelConfig.Proxy, err)
 	}
 
 	var reverseProxy *httputil.ReverseProxy
@@ -105,9 +112,9 @@ func NewProcess(ID string, healthCheckTimeout int, config config.ModelConfig, pr
 		}
 	}
 
-	return &Process{
+	p := &Process{
 		ID:                      ID,
-		config:                  config,
+		config:                  modelConfig,
 		cmd:                     nil,
 		reverseProxy:            reverseProxy,
 		cancelUpstream:          nil,
@@ -124,7 +131,23 @@ func NewProcess(ID string, healthCheckTimeout int, config config.ModelConfig, pr
 		// stop timeout
 		gracefulStopTimeout: 10 * time.Second,
 		cmdWaitChan:         make(chan struct{}),
+		shutdownCtx:         shutdownCtx,
 	}
+
+	// Parse RPC endpoints if health checking enabled
+	if modelConfig.RPCHealthCheck {
+		endpoints, err := config.ParseRPCEndpoints(modelConfig.Cmd)
+		if err != nil {
+			proxyLogger.Errorf("<%s> failed to parse RPC endpoints: %v", ID, err)
+		} else if len(endpoints) == 0 {
+			proxyLogger.Warnf("<%s> rpcHealthCheck enabled but no --rpc flag found in cmd", ID)
+		} else {
+			p.rpcEndpoints = endpoints
+			p.rpcHealthy.Store(true) // assume healthy initially
+		}
+	}
+
+	return p
 }
 
 // LogMonitor returns the log monitor associated with the process.
@@ -362,6 +385,7 @@ func (p *Process) start() error {
 		return fmt.Errorf("failed to set Process state to ready: current state: %v, error: %v", curState, err)
 	} else {
 		p.failedStartCount = 0
+		p.startRPCHealthChecker()
 		return nil
 	}
 }
@@ -384,6 +408,8 @@ func (p *Process) StopImmediately() {
 	if !isValidTransition(p.CurrentState(), StateStopping) {
 		return
 	}
+
+	p.stopRPCHealthChecker()
 
 	p.proxyLogger.Debugf("<%s> Stopping process, current state: %s", p.ID, p.CurrentState())
 	if curState, err := p.swapState(StateReady, StateStopping); err != nil {
@@ -876,4 +902,75 @@ func (s *statusResponseWriter) Flush() {
 	if flusher, ok := s.writer.(http.Flusher); ok {
 		flusher.Flush()
 	}
+}
+
+// startRPCHealthChecker launches background goroutine for RPC health monitoring
+func (p *Process) startRPCHealthChecker() {
+	if !p.config.RPCHealthCheck || len(p.rpcEndpoints) == 0 {
+		return
+	}
+
+	ctx, cancel := context.WithCancel(p.shutdownCtx)
+	p.rpcHealthCancel = cancel
+	p.rpcHealthTicker = time.NewTicker(30 * time.Second)
+
+	go func() {
+		defer p.rpcHealthTicker.Stop()
+
+		// Run initial check immediately
+		p.checkRPCHealth()
+
+		for {
+			select {
+			case <-ctx.Done():
+				p.proxyLogger.Debugf("<%s> RPC health checker shutting down", p.ID)
+				return
+			case <-p.rpcHealthTicker.C:
+				if p.CurrentState() != StateReady {
+					return // Process no longer ready, exit
+				}
+				p.checkRPCHealth()
+			}
+		}
+	}()
+}
+
+func (p *Process) checkRPCHealth() {
+	allHealthy := true
+
+	for _, endpoint := range p.rpcEndpoints {
+		dialer := net.Dialer{Timeout: 500 * time.Millisecond}
+		conn, err := dialer.Dial("tcp", endpoint)
+		if err != nil {
+			p.proxyLogger.Warnf("<%s> RPC endpoint %s unhealthy: %v", p.ID, endpoint, err)
+			allHealthy = false
+			break
+		}
+		conn.Close()
+	}
+
+	wasHealthy := p.rpcHealthy.Load()
+	p.rpcHealthy.Store(allHealthy)
+
+	// Log state changes
+	if wasHealthy && !allHealthy {
+		p.proxyLogger.Infof("<%s> RPC endpoints now UNHEALTHY", p.ID)
+	} else if !wasHealthy && allHealthy {
+		p.proxyLogger.Infof("<%s> RPC endpoints now HEALTHY", p.ID)
+	}
+}
+
+func (p *Process) stopRPCHealthChecker() {
+	if p.rpcHealthCancel != nil {
+		p.rpcHealthCancel()
+		p.rpcHealthCancel = nil
+	}
+}
+
+// IsRPCHealthy returns true if RPC health checking is disabled or all endpoints healthy
+func (p *Process) IsRPCHealthy() bool {
+	if !p.config.RPCHealthCheck || len(p.rpcEndpoints) == 0 {
+		return true // not using RPC health checks
+	}
+	return p.rpcHealthy.Load()
 }

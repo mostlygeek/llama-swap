@@ -36,6 +36,9 @@ type ModelConfig struct {
 
 	// override global setting
 	SendLoadingState *bool `yaml:"sendLoadingState"`
+
+	// RPC health checking
+	RPCHealthCheck bool `yaml:"rpcHealthCheck"`
 }
 
 func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
@@ -53,6 +56,7 @@ func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		ConcurrencyLimit: 0,
 		Name:             "",
 		Description:      "",
+		RPCHealthCheck:   false,
 	}
 
 	// the default cmdStop to taskkill /f /t /pid ${PID}
