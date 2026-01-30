@@ -276,9 +276,12 @@ func (pm *ProxyManager) apiGetCurrentConfig(c *gin.Context) {
 }
 
 func (pm *ProxyManager) apiGetExampleConfig(c *gin.Context) {
-	data, err := os.ReadFile("config.example.yaml")
-	if err != nil {
-		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("Failed to read example config: %v", err))
+	pm.Lock()
+	data := pm.configExample
+	pm.Unlock()
+
+	if data == nil {
+		pm.sendErrorResponse(c, http.StatusInternalServerError, "Example config not available")
 		return
 	}
 
