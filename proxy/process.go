@@ -143,7 +143,7 @@ func NewProcess(ID string, healthCheckTimeout int, modelConfig config.ModelConfi
 			proxyLogger.Warnf("<%s> rpcHealthCheck enabled but no --rpc flag found in cmd", ID)
 		} else {
 			p.rpcEndpoints = endpoints
-			p.rpcHealthy.Store(true) // assume healthy initially
+			p.rpcHealthy.Store(false) // start unhealthy until first check passes
 		}
 	}
 
