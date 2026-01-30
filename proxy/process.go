@@ -500,6 +500,32 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		p.inFlightRequests.Done()
 	}()
 
+	// Start timeout monitoring if requestTimeout is configured
+	var timeoutCancel context.CancelFunc
+	if p.config.RequestTimeout > 0 {
+		timeoutCtx, cancel := context.WithCancel(context.Background())
+		timeoutCancel = cancel
+
+		go func() {
+			timeoutDuration := time.Duration(p.config.RequestTimeout) * time.Second
+			timer := time.NewTimer(timeoutDuration)
+			defer timer.Stop()
+
+			select {
+			case <-timer.C:
+				p.proxyLogger.Warnf("<%s> Request timeout exceeded (%v), force stopping process to prevent GPU blocking", p.ID, timeoutDuration)
+				// Force stop the process - this will kill the underlying inference process
+				p.StopImmediately()
+			case <-timeoutCtx.Done():
+				// Request completed normally, cancel timeout
+				return
+			}
+		}()
+
+		// Ensure timeout goroutine is cancelled when request completes
+		defer timeoutCancel()
+	}
+
 	// for #366
 	// - extract streaming param from request context, should have been set by proxymanager
 	var srw *statusResponseWriter
