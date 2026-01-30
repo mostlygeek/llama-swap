@@ -566,9 +566,10 @@ func ParseRPCEndpoints(cmdStr string) ([]string, error) {
 }
 
 func parseEndpointList(s string) []string {
-	// Strip surrounding quotes (both single and double) that may be present
-	// on Windows where single quotes are not handled by the shell parser
 	s = strings.TrimSpace(s)
+
+	// Strip surrounding quotes (both single and double) from the whole string
+	// if they match. This handles cases like: "host:port,host2:port2"
 	if len(s) >= 2 {
 		if (s[0] == '\'' && s[len(s)-1] == '\'') || (s[0] == '"' && s[len(s)-1] == '"') {
 			s = s[1 : len(s)-1]
@@ -578,7 +579,12 @@ func parseEndpointList(s string) []string {
 	parts := strings.Split(s, ",")
 	var result []string
 	for _, p := range parts {
-		if p = strings.TrimSpace(p); p != "" {
+		p = strings.TrimSpace(p)
+		// Strip any remaining leading/trailing quotes from individual parts
+		// This handles Windows where shlex doesn't handle single quotes and
+		// may split 'host:port, host2:port' into "'host:port," and "host2:port'"
+		p = strings.Trim(p, "'\"")
+		if p != "" {
 			result = append(result, p)
 		}
 	}
