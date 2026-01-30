@@ -3,12 +3,14 @@ import type { ImageGenerationRequest, ImageGenerationResponse } from "./types";
 export async function generateImage(
   model: string,
   prompt: string,
+  size: string,
   signal?: AbortSignal
 ): Promise<ImageGenerationResponse> {
   const request: ImageGenerationRequest = {
     model,
     prompt,
     n: 1,
+    size,
   };
 
   const response = await fetch("/v1/images/generations", {

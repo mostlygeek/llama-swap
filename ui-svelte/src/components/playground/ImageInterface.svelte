@@ -4,6 +4,7 @@
   import { generateImage } from "../../lib/imageApi";
 
   const selectedModelStore = persistentStore<string>("playground-image-model", "");
+  const selectedSizeStore = persistentStore<string>("playground-image-size", "1024x1024");
 
   let prompt = $state("");
   let isGenerating = $state(false);
@@ -45,6 +46,7 @@
       const response = await generateImage(
         $selectedModelStore,
         trimmedPrompt,
+        $selectedSizeStore,
         abortController.signal
       );
 
@@ -108,6 +110,14 @@
           {/each}
         </optgroup>
       {/each}
+    </select>
+    <select
+      class="px-3 py-2 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
+      bind:value={$selectedSizeStore}
+      disabled={isGenerating}
+    >
+      <option value="512x512">512x512</option>
+      <option value="1024x1024">1024x1024</option>
     </select>
     <button class="btn" onclick={clearImage} disabled={!generatedImage && !error}>
       Clear
