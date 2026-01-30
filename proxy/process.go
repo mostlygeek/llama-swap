@@ -144,6 +144,8 @@ func NewProcess(ID string, healthCheckTimeout int, modelConfig config.ModelConfi
 		} else {
 			p.rpcEndpoints = endpoints
 			p.rpcHealthy.Store(false) // start unhealthy until first check passes
+			// Start health checker immediately - runs independent of process state
+			p.startRPCHealthChecker()
 		}
 	}
 
@@ -385,7 +387,6 @@ func (p *Process) start() error {
 		return fmt.Errorf("failed to set Process state to ready: current state: %v, error: %v", curState, err)
 	} else {
 		p.failedStartCount = 0
-		p.startRPCHealthChecker()
 		return nil
 	}
 }
@@ -408,8 +409,6 @@ func (p *Process) StopImmediately() {
 	if !isValidTransition(p.CurrentState(), StateStopping) {
 		return
 	}
-
-	p.stopRPCHealthChecker()
 
 	p.proxyLogger.Debugf("<%s> Stopping process, current state: %s", p.ID, p.CurrentState())
 	if curState, err := p.swapState(StateReady, StateStopping); err != nil {
@@ -904,7 +903,9 @@ func (s *statusResponseWriter) Flush() {
 	}
 }
 
-// startRPCHealthChecker launches background goroutine for RPC health monitoring
+// startRPCHealthChecker launches background goroutine for RPC health monitoring.
+// Runs independently of process state - checks RPC endpoints regardless of whether
+// the model is loaded, starting, stopped, etc.
 func (p *Process) startRPCHealthChecker() {
 	if !p.config.RPCHealthCheck || len(p.rpcEndpoints) == 0 {
 		return
@@ -926,9 +927,7 @@ func (p *Process) startRPCHealthChecker() {
 				p.proxyLogger.Debugf("<%s> RPC health checker shutting down", p.ID)
 				return
 			case <-p.rpcHealthTicker.C:
-				if p.CurrentState() != StateReady {
-					return // Process no longer ready, exit
-				}
+				// Check regardless of process state
 				p.checkRPCHealth()
 			}
 		}
@@ -957,13 +956,6 @@ func (p *Process) checkRPCHealth() {
 		p.proxyLogger.Infof("<%s> RPC endpoints now UNHEALTHY", p.ID)
 	} else if !wasHealthy && allHealthy {
 		p.proxyLogger.Infof("<%s> RPC endpoints now HEALTHY", p.ID)
-	}
-}
-
-func (p *Process) stopRPCHealthChecker() {
-	if p.rpcHealthCancel != nil {
-		p.rpcHealthCancel()
-		p.rpcHealthCancel = nil
 	}
 }
 
