@@ -566,6 +566,15 @@ func ParseRPCEndpoints(cmdStr string) ([]string, error) {
 }
 
 func parseEndpointList(s string) []string {
+	// Strip surrounding quotes (both single and double) that may be present
+	// on Windows where single quotes are not handled by the shell parser
+	s = strings.TrimSpace(s)
+	if len(s) >= 2 {
+		if (s[0] == '\'' && s[len(s)-1] == '\'') || (s[0] == '"' && s[len(s)-1] == '"') {
+			s = s[1 : len(s)-1]
+		}
+	}
+
 	parts := strings.Split(s, ",")
 	var result []string
 	for _, p := range parts {
