@@ -19,6 +19,25 @@
   // Show all models (excluding unlisted), backend will auto-load as needed
   let availableModels = $derived($models.filter((m) => !m.unlisted));
 
+  // Group models into local and peer models by provider
+  let groupedModels = $derived.by(() => {
+    const local = availableModels.filter((m) => !m.peerID);
+    const peerModels = availableModels.filter((m) => m.peerID);
+
+    // Group peer models by peerID
+    const peersByProvider = peerModels.reduce(
+      (acc, model) => {
+        const peerId = model.peerID || "unknown";
+        if (!acc[peerId]) acc[peerId] = [];
+        acc[peerId].push(model);
+        return acc;
+      },
+      {} as Record<string, typeof availableModels>
+    );
+
+    return { local, peersByProvider };
+  });
+
   // Auto-scroll when messages change
   $effect(() => {
     if (messages.length > 0 && messagesContainer) {
@@ -114,8 +133,19 @@
       disabled={isStreaming}
     >
       <option value="">Select a model...</option>
-      {#each availableModels as model (model.id)}
-        <option value={model.id}>{model.name || model.id}</option>
+      {#if groupedModels.local.length > 0}
+        <optgroup label="Local">
+          {#each groupedModels.local as model (model.id)}
+            <option value={model.id}>{model.id}</option>
+          {/each}
+        </optgroup>
+      {/if}
+      {#each Object.entries(groupedModels.peersByProvider).sort(([a], [b]) => a.localeCompare(b)) as [peerId, peerModels] (peerId)}
+        <optgroup label="Peer: {peerId}">
+          {#each peerModels as model (model.id)}
+            <option value={model.id}>{model.id}</option>
+          {/each}
+        </optgroup>
       {/each}
     </select>
     <button

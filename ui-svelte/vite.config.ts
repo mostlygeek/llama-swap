@@ -16,6 +16,7 @@ export default defineConfig({
       "/logs": "http://localhost:8080",
       "/upstream": "http://localhost:8080",
       "/unload": "http://localhost:8080",
+      "/v1": "http://localhost:8080",
     },
   },
 });
