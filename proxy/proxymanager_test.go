@@ -850,6 +850,43 @@ func TestProxyManager_UseModelName(t *testing.T) {
 	})
 }
 
+func TestProxyManager_AudioVoicesGETHandler(t *testing.T) {
+	conf := config.AddDefaultGroupToConfig(config.Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]config.ModelConfig{
+			"model1": getTestSimpleResponderConfig("model1"),
+		},
+		LogLevel: "error",
+	})
+
+	proxy := New(conf)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+
+	t.Run("successful GET with model query param", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/v1/audio/voices?model=model1", nil)
+		w := CreateTestResponseRecorder()
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "voice1")
+	})
+
+	t.Run("missing model query param returns 400", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/v1/audio/voices", nil)
+		w := CreateTestResponseRecorder()
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "missing required 'model' query parameter")
+	})
+
+	t.Run("unknown model returns 400", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/v1/audio/voices?model=nonexistent", nil)
+		w := CreateTestResponseRecorder()
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "could not find suitable handler")
+	})
+}
+
 func TestProxyManager_CORSOptionsHandler(t *testing.T) {
 	config := config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,

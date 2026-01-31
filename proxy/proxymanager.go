@@ -303,6 +303,7 @@ func (pm *ProxyManager) setupGinEngine() {
 	// Support audio/speech endpoint
 	pm.ginEngine.POST("/v1/audio/speech", pm.apiKeyAuth(), pm.proxyInferenceHandler)
 	pm.ginEngine.POST("/v1/audio/voices", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.GET("/v1/audio/voices", pm.apiKeyAuth(), pm.proxyGETModelHandler)
 	pm.ginEngine.POST("/v1/audio/transcriptions", pm.apiKeyAuth(), pm.proxyOAIPostFormHandler)
 	pm.ginEngine.POST("/v1/images/generations", pm.apiKeyAuth(), pm.proxyInferenceHandler)
 	pm.ginEngine.POST("/v1/images/edits", pm.apiKeyAuth(), pm.proxyOAIPostFormHandler)
@@ -854,6 +855,43 @@ func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
 	if err := nextHandler(modelID, c.Writer, modifiedReq); err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
 		pm.proxyLogger.Errorf("Error Proxying Request for model %s", modelID)
+		return
+	}
+}
+
+func (pm *ProxyManager) proxyGETModelHandler(c *gin.Context) {
+	requestedModel := c.Query("model")
+	if requestedModel == "" {
+		pm.sendErrorResponse(c, http.StatusBadRequest, "missing required 'model' query parameter")
+		return
+	}
+
+	var nextHandler func(modelID string, w http.ResponseWriter, r *http.Request) error
+	var modelID string
+
+	if realModelID, found := pm.config.RealModelName(requestedModel); found {
+		processGroup, err := pm.swapProcessGroup(realModelID)
+		if err != nil {
+			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
+			return
+		}
+		modelID = realModelID
+		pm.proxyLogger.Debugf("ProxyManager using local Process for model: %s", requestedModel)
+		nextHandler = processGroup.ProxyRequest
+	} else if pm.peerProxy != nil && pm.peerProxy.HasPeerModel(requestedModel) {
+		modelID = requestedModel
+		pm.proxyLogger.Debugf("ProxyManager using ProxyPeer for model: %s", requestedModel)
+		nextHandler = pm.peerProxy.ProxyRequest
+	}
+
+	if nextHandler == nil {
+		pm.sendErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("could not find suitable handler for %s", requestedModel))
+		return
+	}
+
+	if err := nextHandler(modelID, c.Writer, c.Request); err != nil {
+		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
+		pm.proxyLogger.Errorf("Error Proxying GET Request for model %s", modelID)
 		return
 	}
 }
