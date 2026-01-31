@@ -381,13 +381,17 @@ func (p *Process) Stop() {
 // StopImmediately will transition the process to the stopping state and stop the process with a SIGTERM.
 // If the process does not stop within the specified timeout, it will be forcefully stopped with a SIGKILL.
 func (p *Process) StopImmediately() {
-	if !isValidTransition(p.CurrentState(), StateStopping) {
+	currentState := p.CurrentState()
+	if !isValidTransition(currentState, StateStopping) {
 		return
 	}
 
-	p.proxyLogger.Debugf("<%s> Stopping process, current state: %s", p.ID, p.CurrentState())
-	if curState, err := p.swapState(StateReady, StateStopping); err != nil {
-		p.proxyLogger.Infof("<%s> Stop() Ready -> StateStopping err: %v, current state: %v", p.ID, err, curState)
+	p.proxyLogger.Debugf("<%s> Stopping process, current state: %s", p.ID, currentState)
+
+	// Try to transition from current state to StateStopping
+	// Process might be in StateReady or StateStarting when timeout fires
+	if _, err := p.swapState(currentState, StateStopping); err != nil {
+		p.proxyLogger.Infof("<%s> Stop() %s -> StateStopping err: %v", p.ID, currentState, err)
 		return
 	}
 
@@ -499,6 +503,34 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		p.inFlightRequestsCount.Add(-1)
 		p.inFlightRequests.Done()
 	}()
+
+	// Start timeout monitoring if requestTimeout is configured
+	var timeoutCancel context.CancelFunc
+	var requestCtx context.Context = r.Context()
+
+	if p.config.RequestTimeout > 0 {
+		timeoutDuration := time.Duration(p.config.RequestTimeout) * time.Second
+		var cancel context.CancelFunc
+		requestCtx, cancel = context.WithTimeout(r.Context(), timeoutDuration)
+		timeoutCancel = cancel
+
+		go func() {
+			<-requestCtx.Done()
+			if requestCtx.Err() == context.DeadlineExceeded {
+				p.proxyLogger.Warnf("<%s> Request timeout exceeded (%v), force stopping process to prevent GPU blocking", p.ID, timeoutDuration)
+				// Force stop the process - this will kill the underlying inference process
+				p.StopImmediately()
+			}
+		}()
+
+		// Ensure timeout is cancelled when request completes
+		defer timeoutCancel()
+	}
+
+	// Create a new request with the timeout context
+	if requestCtx != r.Context() {
+		r = r.Clone(requestCtx)
+	}
 
 	// for #366
 	// - extract streaming param from request context, should have been set by proxymanager
