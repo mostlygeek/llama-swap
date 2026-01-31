@@ -1,23 +1,47 @@
 <script lang="ts">
   import { renderMarkdown } from "../../lib/markdown";
-  import { Copy, Check, Pencil, X, Save, RefreshCw } from "lucide-svelte";
+  import { Copy, Check, Pencil, X, Save, RefreshCw, ChevronDown, ChevronRight, Brain } from "lucide-svelte";
 
   interface Props {
     role: "user" | "assistant" | "system";
     content: string;
+    reasoning_content?: string;
+    reasoningTimeMs?: number;
     isStreaming?: boolean;
+    isReasoning?: boolean;
     onEdit?: (newContent: string) => void;
     onRegenerate?: () => void;
   }
 
-  let { role, content, isStreaming = false, onEdit, onRegenerate }: Props = $props();
+  let { role, content, reasoning_content = "", reasoningTimeMs = 0, isStreaming = false, isReasoning = false, onEdit, onRegenerate }: Props = $props();
 
   let renderedContent = $derived(
-    role === "assistant" ? renderMarkdown(content) : content
+    role === "assistant" && !isStreaming
+      ? renderMarkdown(content)
+      : escapeHtml(content).replace(/\n/g, '<br>')
   );
   let copied = $state(false);
   let isEditing = $state(false);
   let editContent = $state("");
+  let showReasoning = $state(false);
+
+  function formatDuration(ms: number): string {
+    if (ms < 1000) {
+      return `${ms.toFixed(0)}ms`;
+    }
+    return `${(ms / 1000).toFixed(1)}s`;
+  }
+
+  function escapeHtml(text: string): string {
+    const htmlEntities: Record<string, string> = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    };
+    return text.replace(/[&<>"']/g, (char) => htmlEntities[char]);
+  }
 
   async function copyToClipboard() {
     await navigator.clipboard.writeText(content);
@@ -60,9 +84,39 @@
       : 'bg-surface border border-gray-200 dark:border-white/10'}"
   >
     {#if role === "assistant"}
+      {#if reasoning_content || isReasoning}
+        <div class="mb-3 border border-gray-200 dark:border-white/10 rounded overflow-hidden">
+          <button
+            class="w-full flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-white/5 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors text-sm"
+            onclick={() => showReasoning = !showReasoning}
+          >
+            {#if showReasoning}
+              <ChevronDown class="w-4 h-4" />
+            {:else}
+              <ChevronRight class="w-4 h-4" />
+            {/if}
+            <Brain class="w-4 h-4" />
+            <span class="font-medium">Reasoning</span>
+            <span class="text-txtsecondary ml-2">
+              ({reasoning_content.length} chars{#if !isReasoning && reasoningTimeMs > 0}, {formatDuration(reasoningTimeMs)}{/if})
+            </span>
+            {#if isReasoning}
+              <span class="ml-auto flex items-center gap-1 text-txtsecondary">
+                <span class="w-1.5 h-1.5 bg-primary rounded-full animate-pulse"></span>
+                reasoning...
+              </span>
+            {/if}
+          </button>
+          {#if showReasoning}
+            <div class="px-3 py-2 bg-gray-50/50 dark:bg-white/[0.02] text-sm text-txtsecondary whitespace-pre-wrap font-mono">
+              {reasoning_content}{#if isReasoning}<span class="inline-block w-1.5 h-4 bg-current animate-pulse ml-0.5"></span>{/if}
+            </div>
+          {/if}
+        </div>
+      {/if}
       <div class="prose prose-sm dark:prose-invert max-w-none">
         {@html renderedContent}
-        {#if isStreaming}
+        {#if isStreaming && !isReasoning}
           <span class="inline-block w-2 h-4 bg-current animate-pulse ml-0.5"></span>
         {/if}
       </div>

@@ -13,6 +13,8 @@
   let messages = $state<ChatMessage[]>([]);
   let userInput = $state("");
   let isStreaming = $state(false);
+  let isReasoning = $state(false);
+  let reasoningStartTime = $state<number>(0);
   let abortController = $state<AbortController | null>(null);
   let messagesContainer: HTMLDivElement | undefined = $state();
   let showSettings = $state(false);
@@ -70,6 +72,8 @@
       cancelStreaming();
     }
     messages = [];
+    isReasoning = false;
+    reasoningStartTime = 0;
   }
 
   async function regenerateFromIndex(idx: number) {
@@ -80,6 +84,8 @@
     messages = [...messages, { role: "assistant", content: "" }];
 
     isStreaming = true;
+    isReasoning = false;
+    reasoningStartTime = 0;
     abortController = new AbortController();
 
     try {
@@ -100,16 +106,57 @@
       for await (const chunk of stream) {
         if (chunk.done) break;
 
-        // Update the last message (assistant) with new content
-        messages = messages.map((msg, i) =>
-          i === messages.length - 1
-            ? { ...msg, content: msg.content + chunk.content }
-            : msg
-        );
+        // Handle reasoning content
+        if (chunk.reasoning_content) {
+          // Start timing on first reasoning content
+          if (!isReasoning) {
+            isReasoning = true;
+            reasoningStartTime = Date.now();
+          }
+
+          // Update the last message with reasoning content
+          messages = messages.map((msg, i) =>
+            i === messages.length - 1
+              ? { ...msg, reasoning_content: (msg.reasoning_content || "") + chunk.reasoning_content }
+              : msg
+          );
+        }
+
+        // Handle regular content - end reasoning phase when we get content
+        if (chunk.content) {
+          if (isReasoning) {
+            // Calculate reasoning time
+            const reasoningTimeMs = Date.now() - reasoningStartTime;
+            isReasoning = false;
+
+            // Update message with reasoning time
+            messages = messages.map((msg, i) =>
+              i === messages.length - 1
+                ? { ...msg, reasoningTimeMs }
+                : msg
+            );
+          }
+
+          // Update the last message (assistant) with new content
+          messages = messages.map((msg, i) =>
+            i === messages.length - 1
+              ? { ...msg, content: msg.content + chunk.content }
+              : msg
+          );
+        }
       }
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
         // User cancelled, keep partial response
+        // If we were still reasoning, record the time
+        if (isReasoning && reasoningStartTime > 0) {
+          const reasoningTimeMs = Date.now() - reasoningStartTime;
+          messages = messages.map((msg, i) =>
+            i === messages.length - 1
+              ? { ...msg, reasoningTimeMs }
+              : msg
+          );
+        }
       } else {
         // Show error in the assistant message
         const errorMessage = error instanceof Error ? error.message : "An error occurred";
@@ -121,6 +168,7 @@
       }
     } finally {
       isStreaming = false;
+      isReasoning = false;
       abortController = null;
     }
   }
@@ -239,7 +287,10 @@
           <ChatMessageComponent
             role={message.role}
             content={message.content}
+            reasoning_content={message.reasoning_content}
+            reasoningTimeMs={message.reasoningTimeMs}
             isStreaming={isStreaming && idx === messages.length - 1 && message.role === "assistant"}
+            isReasoning={isReasoning && idx === messages.length - 1 && message.role === "assistant"}
             onEdit={message.role === "user" ? (newContent) => editMessage(idx, newContent) : undefined}
             onRegenerate={message.role === "assistant" && idx > 0 && messages[idx - 1].role === "user"
               ? () => regenerateFromIndex(idx - 1)

@@ -21,8 +21,10 @@
   },
   "dependencies": {
     "highlight.js": "^11.11.1",
+    "katex": "^0.16.28",
     "lucide-svelte": "^0.563.0",
     "marked": "^17.0.1",
+    "marked-katex-extension": "^5.1.6",
     "svelte-spa-router": "^4.0.1"
   }
 }

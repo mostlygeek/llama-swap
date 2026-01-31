@@ -44,6 +44,8 @@ export type ScreenWidth = "xs" | "sm" | "md" | "lg" | "xl" | "2xl";
 export interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
+  reasoning_content?: string;
+  reasoningTimeMs?: number;
 }
 
 export interface ChatCompletionRequest {

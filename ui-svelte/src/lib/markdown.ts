@@ -1,10 +1,19 @@
 import { Marked } from "marked";
 import hljs from "highlight.js";
+import markedKatex from "marked-katex-extension";
 
 const marked = new Marked({
   gfm: true,
   breaks: true,
 });
+
+// Configure KaTeX for math rendering
+marked.use(
+  markedKatex({
+    throwOnError: false,
+    displayMode: false,
+  })
+);
 
 // Custom renderer for code blocks with syntax highlighting and HTML sanitization
 marked.use({
@@ -36,13 +45,24 @@ function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (char) => htmlEntities[char]);
 }
 
+// Convert LaTeX-style math delimiters to KaTeX-style
+function convertLatexDelimiters(content: string): string {
+  // Replace \[ ... \] with $$ ... $$
+  content = content.replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$');
+  // Replace \( ... \) with $ ... $
+  content = content.replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
+  return content;
+}
+
 export function renderMarkdown(content: string): string {
   if (!content) {
     return "";
   }
 
   try {
-    const result = marked.parse(content);
+    // Convert LaTeX delimiters to KaTeX format
+    const convertedContent = convertLatexDelimiters(content);
+    const result = marked.parse(convertedContent);
     // marked.parse can return string or Promise<string>, but with our config it's sync
     return typeof result === "string" ? result : "";
   } catch {

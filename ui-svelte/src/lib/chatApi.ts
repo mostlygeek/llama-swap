@@ -2,6 +2,7 @@ import type { ChatMessage, ChatCompletionRequest } from "./types";
 
 export interface StreamChunk {
   content: string;
+  reasoning_content?: string;
   done: boolean;
 }
 
@@ -9,7 +10,7 @@ export interface ChatOptions {
   temperature?: number;
 }
 
-function parseSSELine(line: string): { content: string; done: boolean } | null {
+function parseSSELine(line: string): StreamChunk | null {
   const trimmed = line.trim();
   if (!trimmed || !trimmed.startsWith("data: ")) {
     return null;
@@ -22,8 +23,14 @@ function parseSSELine(line: string): { content: string; done: boolean } | null {
 
   try {
     const parsed = JSON.parse(data);
-    const content = parsed.choices?.[0]?.delta?.content || "";
-    return content ? { content, done: false } : null;
+    const delta = parsed.choices?.[0]?.delta;
+    const content = delta?.content || "";
+    const reasoning_content = delta?.reasoning_content || "";
+
+    if (content || reasoning_content) {
+      return { content, reasoning_content, done: false };
+    }
+    return null;
   } catch {
     return null;
   }
