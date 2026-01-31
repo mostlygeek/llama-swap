@@ -152,9 +152,6 @@
         <option value="1024x1792">1024x1792 (SDXL)</option>
       </optgroup>
     </select>
-    <button class="btn" onclick={downloadImage} disabled={!generatedImage}>
-      Download
-    </button>
     <button class="btn" onclick={clearImage} disabled={!generatedImage && !error}>
       Clear
     </button>
@@ -179,12 +176,23 @@
           <p class="text-sm mt-1">{error}</p>
         </div>
       {:else if generatedImage}
-        <img
-          src={generatedImage}
-          alt="AI generated content"
-          class="max-w-full max-h-full object-contain cursor-pointer hover:opacity-90 transition-opacity"
-          onclick={openFullscreen}
-        />
+        <div class="relative max-w-full max-h-full flex items-center justify-center">
+          <img
+            src={generatedImage}
+            alt="AI generated content"
+            class="max-w-full max-h-full object-contain cursor-pointer hover:opacity-90 transition-opacity"
+            onclick={openFullscreen}
+          />
+          <button
+            class="absolute bottom-2 right-2 p-2 bg-black/60 hover:bg-black/80 text-white rounded-full transition-colors"
+            onclick={(e) => { e.stopPropagation(); downloadImage(); }}
+            aria-label="Download image"
+          >
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+            </svg>
+          </button>
+        </div>
       {:else}
         <div class="text-center text-txtsecondary">
           <p>Enter a prompt below to generate an image</p>
