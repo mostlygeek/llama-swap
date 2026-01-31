@@ -1309,3 +1309,108 @@ peers:
 		assert.Contains(t, err.Error(), "unknown macro")
 	})
 }
+
+func TestParseRPCEndpoints_ValidFormats(t *testing.T) {
+	tests := []struct {
+		name     string
+		cmd      string
+		expected []string
+	}{
+		{
+			name:     "single endpoint with --rpc",
+			cmd:      "llama-server --rpc localhost:50051 -ngl 99",
+			expected: []string{"localhost:50051"},
+		},
+		{
+			name:     "single endpoint with --rpc=",
+			cmd:      "llama-server --rpc=192.168.1.100:50051 -ngl 99",
+			expected: []string{"192.168.1.100:50051"},
+		},
+		{
+			name:     "single endpoint with -rpc",
+			cmd:      "llama-server -rpc localhost:50051 -ngl 99",
+			expected: []string{"localhost:50051"},
+		},
+		{
+			name:     "single endpoint with -rpc=",
+			cmd:      "llama-server -rpc=localhost:50051 -ngl 99",
+			expected: []string{"localhost:50051"},
+		},
+		{
+			name:     "multiple endpoints comma-separated",
+			cmd:      "llama-server --rpc 192.168.1.10:50051,192.168.1.11:50051 -ngl 99",
+			expected: []string{"192.168.1.10:50051", "192.168.1.11:50051"},
+		},
+		{
+			name:     "multiple endpoints with spaces trimmed",
+			cmd:      "llama-server --rpc '192.168.1.10:50051, 192.168.1.11:50051' -ngl 99",
+			expected: []string{"192.168.1.10:50051", "192.168.1.11:50051"},
+		},
+		{
+			name:     "IPv6 endpoint",
+			cmd:      "llama-server --rpc [::1]:50051 -ngl 99",
+			expected: []string{"[::1]:50051"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			endpoints, err := ParseRPCEndpoints(tt.cmd)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expected, endpoints)
+		})
+	}
+}
+
+func TestParseRPCEndpoints_NoRPCFlag(t *testing.T) {
+	cmd := "llama-server -ngl 99 -m model.gguf"
+	endpoints, err := ParseRPCEndpoints(cmd)
+	assert.NoError(t, err)
+	assert.Empty(t, endpoints)
+}
+
+func TestParseRPCEndpoints_InvalidFormats(t *testing.T) {
+	tests := []struct {
+		name    string
+		cmd     string
+		wantErr string
+	}{
+		{
+			name:    "missing port",
+			cmd:     "llama-server --rpc localhost -ngl 99",
+			wantErr: "invalid RPC endpoint",
+		},
+		{
+			name:    "invalid host:port format",
+			cmd:     "llama-server --rpc not-a-valid-endpoint -ngl 99",
+			wantErr: "invalid RPC endpoint",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseRPCEndpoints(tt.cmd)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
+func TestParseRPCEndpoints_EmptyEndpointsFiltered(t *testing.T) {
+	// Empty strings after commas are filtered out
+	cmd := "llama-server --rpc 'localhost:50051,,' -ngl 99"
+	endpoints, err := ParseRPCEndpoints(cmd)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"localhost:50051"}, endpoints)
+}
+
+func TestParseRPCEndpoints_MultilineCommand(t *testing.T) {
+	cmd := `llama-server \
+		--rpc localhost:50051 \
+		-ngl 99 \
+		-m model.gguf`
+
+	endpoints, err := ParseRPCEndpoints(cmd)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"localhost:50051"}, endpoints)
+}

@@ -226,6 +226,11 @@
                         "type": "boolean",
                         "default": false,
                         "description": "If true the model will not show up in /v1/models responses. It can still be used as normal in API requests."
+                    },
+                    "rpcHealthCheck": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Enable TCP health checks for RPC endpoints specified in cmd. When enabled, parses --rpc host:port[,host:port,...] from cmd and performs health checks every 30 seconds. Models with unhealthy RPC endpoints are filtered from /v1/models and return 503 on inference requests."
                     }
                 }
             }

@@ -46,6 +46,7 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
   - Request timeout protection with `requestTimeout` to prevent runaway inference
   - Reliable Docker and Podman support using `cmd` and `cmdStop` together
   - Preload models on startup with `hooks` ([#235](https://github.com/mostlygeek/llama-swap/pull/235))
+  - RPC health checking for distributed inference - conditionally expose models based on RPC server availability
 
 ### Web UI
 
@@ -175,6 +176,7 @@ Almost all configuration settings are optional and can be added one step at a ti
   - `useModelName` to override model names sent to upstream servers
   - `${PORT}` automatic port variables for dynamic port assignment
   - `filters` rewrite parts of requests before sending to the upstream server
+  - `rpcHealthCheck` monitor RPC server health for distributed inference models
 
 See the [configuration documentation](docs/configuration.md) for all options.
 

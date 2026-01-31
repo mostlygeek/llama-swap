@@ -72,16 +72,17 @@ models:
 
 llama-swap supports many more features to customize how you want to manage your environment.
 
-| Feature   | Description                                    |
-| --------- | ---------------------------------------------- |
-| `ttl`     | automatic unloading of models after a timeout  |
-| `macros`  | reusable snippets to use in configurations     |
-| `groups`  | run multiple models at a time                  |
-| `hooks`   | event driven functionality                     |
-| `env`     | define environment variables per model         |
-| `aliases` | serve a model with different names             |
-| `filters` | modify requests before sending to the upstream |
-| `...`     | And many more tweaks                           |
+| Feature           | Description                                             |
+| ----------------- | ------------------------------------------------------- |
+| `ttl`             | automatic unloading of models after a timeout           |
+| `macros`          | reusable snippets to use in configurations              |
+| `groups`          | run multiple models at a time                           |
+| `hooks`           | event driven functionality                              |
+| `env`             | define environment variables per model                  |
+| `aliases`         | serve a model with different names                      |
+| `filters`         | modify requests before sending to the upstream          |
+| `rpcHealthCheck`  | monitor RPC server health for distributed inference     |
+| `...`             | And many more tweaks                                    |
 
 ## Full Configuration Example
 
