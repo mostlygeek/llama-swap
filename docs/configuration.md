@@ -72,16 +72,17 @@ models:
 
 llama-swap supports many more features to customize how you want to manage your environment.
 
-| Feature   | Description                                    |
-| --------- | ---------------------------------------------- |
-| `ttl`     | automatic unloading of models after a timeout  |
-| `macros`  | reusable snippets to use in configurations     |
-| `groups`  | run multiple models at a time                  |
-| `hooks`   | event driven functionality                     |
-| `env`     | define environment variables per model         |
-| `aliases` | serve a model with different names             |
-| `filters` | modify requests before sending to the upstream |
-| `...`     | And many more tweaks                           |
+| Feature           | Description                                             |
+| ----------------- | ------------------------------------------------------- |
+| `ttl`             | automatic unloading of models after a timeout           |
+| `macros`          | reusable snippets to use in configurations              |
+| `groups`          | run multiple models at a time                           |
+| `hooks`           | event driven functionality                              |
+| `env`             | define environment variables per model                  |
+| `aliases`         | serve a model with different names                      |
+| `filters`         | modify requests before sending to the upstream          |
+| `rpcHealthCheck`  | monitor RPC server health for distributed inference     |
+| `...`             | And many more tweaks                                    |
 
 ## Full Configuration Example
 
@@ -318,6 +319,16 @@ models:
     # - any requests that exceeds the limit will receive an HTTP 429 Too Many Requests response
     # - recommended to be omitted and the default used
     concurrencyLimit: 0
+
+    # requestTimeout: maximum time in seconds for a single request to complete
+    # - optional, default: 0 (no timeout)
+    # - useful for preventing runaway inference processes that never complete
+    # - when exceeded, the model process is forcefully stopped
+    # - protects against GPU overheating and blocking from stuck processes
+    # - the process must be restarted for the next request
+    # - set to 0 to disable timeout
+    # - recommended for models that may have infinite loops or excessive generation
+    requestTimeout: 300  # 5 minutes
 
     # sendLoadingState: overrides the global sendLoadingState setting for this model
     # - optional, default: undefined (use global setting)
