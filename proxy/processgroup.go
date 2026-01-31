@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"slices"
@@ -24,9 +25,11 @@ type ProcessGroup struct {
 	// map of current processes
 	processes       map[string]*Process
 	lastUsedProcess string
+
+	shutdownCtx context.Context
 }
 
-func NewProcessGroup(id string, config config.Config, proxyLogger *LogMonitor, upstreamLogger *LogMonitor) *ProcessGroup {
+func NewProcessGroup(id string, config config.Config, proxyLogger *LogMonitor, upstreamLogger *LogMonitor, shutdownCtx context.Context) *ProcessGroup {
 	groupConfig, ok := config.Groups[id]
 	if !ok {
 		panic("Unable to find configuration for group id: " + id)
@@ -41,13 +44,14 @@ func NewProcessGroup(id string, config config.Config, proxyLogger *LogMonitor, u
 		proxyLogger:    proxyLogger,
 		upstreamLogger: upstreamLogger,
 		processes:      make(map[string]*Process),
+		shutdownCtx:    shutdownCtx,
 	}
 
 	// Create a Process for each member in the group
 	for _, modelID := range groupConfig.Members {
 		modelConfig, modelID, _ := pg.config.FindConfig(modelID)
 		processLogger := NewLogMonitorWriter(upstreamLogger)
-		process := NewProcess(modelID, pg.config.HealthCheckTimeout, modelConfig, processLogger, pg.proxyLogger)
+		process := NewProcess(modelID, pg.config.HealthCheckTimeout, modelConfig, processLogger, pg.proxyLogger, shutdownCtx)
 		pg.processes[modelID] = process
 	}
 

@@ -249,6 +249,16 @@ models:
     # - recommended to be omitted and the default used
     concurrencyLimit: 0
 
+    # requestTimeout: maximum time in seconds for a single request to complete
+    # - optional, default: 0 (no timeout)
+    # - useful for preventing runaway inference processes that never complete
+    # - when exceeded, the model process is forcefully stopped
+    # - protects against GPU overheating and blocking from stuck processes
+    # - the process must be restarted for the next request
+    # - set to 0 to disable timeout
+    # - recommended for models that may have infinite loops or excessive generation
+    requestTimeout: 0  # disabled by default, set to e.g., 300 for 5 minutes
+
     # sendLoadingState: overrides the global sendLoadingState setting for this model
     # - optional, default: undefined (use global setting)
     sendLoadingState: false
@@ -261,6 +271,24 @@ models:
     # - can be requested as normal through all apis
     unlisted: true
     cmd: llama-server --port ${PORT} -m Llama-3.2-1B-Instruct-Q4_K_M.gguf -ngl 0
+
+  # RPC health check example for distributed inference:
+  "qwen-distributed":
+    # rpcHealthCheck: enable TCP health checks for RPC endpoints
+    # - optional, default: false
+    # - when enabled, parses --rpc host:port[,host:port,...] from cmd
+    # - performs TCP connectivity checks every 30 seconds
+    # - model is only listed in /v1/models when ALL RPC endpoints are healthy
+    # - inference requests to unhealthy models return HTTP 503
+    # - useful for distributed inference with llama.cpp's rpc-server
+    rpcHealthCheck: true
+    cmd: |
+      llama-server --port ${PORT}
+      --rpc 192.168.1.10:50051,192.168.1.11:50051
+      -m Qwen2.5-32B-Instruct-Q4_K_M.gguf
+      -ngl 99
+    name: "Qwen 32B (Distributed)"
+    description: "Large model using distributed RPC inference"
 
   # Docker example:
   # container runtimes like Docker and Podman can be used reliably with

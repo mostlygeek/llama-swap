@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -35,12 +36,12 @@ var processGroupTestConfig = config.AddDefaultGroupToConfig(config.Config{
 })
 
 func TestProcessGroup_DefaultHasCorrectModel(t *testing.T) {
-	pg := NewProcessGroup(config.DEFAULT_GROUP_ID, processGroupTestConfig, testLogger, testLogger)
+	pg := NewProcessGroup(config.DEFAULT_GROUP_ID, processGroupTestConfig, testLogger, testLogger, context.Background())
 	assert.True(t, pg.HasMember("model5"))
 }
 
 func TestProcessGroup_HasMember(t *testing.T) {
-	pg := NewProcessGroup("G1", processGroupTestConfig, testLogger, testLogger)
+	pg := NewProcessGroup("G1", processGroupTestConfig, testLogger, testLogger, context.Background())
 	assert.True(t, pg.HasMember("model1"))
 	assert.True(t, pg.HasMember("model2"))
 	assert.False(t, pg.HasMember("model3"))
@@ -74,7 +75,7 @@ func TestProcessGroup_ProxyRequestSwapIsTrueParallel(t *testing.T) {
 		},
 	})
 
-	pg := NewProcessGroup("G1", processGroupTestConfig, testLogger, testLogger)
+	pg := NewProcessGroup("G1", processGroupTestConfig, testLogger, testLogger, context.Background())
 	defer pg.StopProcesses(StopWaitForInflightRequest)
 
 	tests := []string{"model1", "model2", "model3", "model4", "model5"}
@@ -96,7 +97,7 @@ func TestProcessGroup_ProxyRequestSwapIsTrueParallel(t *testing.T) {
 }
 
 func TestProcessGroup_ProxyRequestSwapIsFalse(t *testing.T) {
-	pg := NewProcessGroup("G2", processGroupTestConfig, testLogger, testLogger)
+	pg := NewProcessGroup("G2", processGroupTestConfig, testLogger, testLogger, context.Background())
 	defer pg.StopProcesses(StopWaitForInflightRequest)
 
 	tests := []string{"model3", "model4"}
