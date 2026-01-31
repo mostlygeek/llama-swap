@@ -1308,4 +1308,68 @@ peers:
 		assert.Contains(t, err.Error(), "peers.openrouter.filters.setParams")
 		assert.Contains(t, err.Error(), "unknown macro")
 	})
+
+	t.Run("env macros in comments are ignored", func(t *testing.T) {
+		content := `
+# apiKeys:
+#   - "${env.COMMENTED_OUT_KEY_1}"
+#   - "${env.COMMENTED_OUT_KEY_2}"
+models:
+  test:
+    cmd: "server"
+    proxy: "http://localhost:8080"
+`
+		// These env vars are NOT set, but should not cause an error
+		// because they only appear in comment lines
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Empty(t, config.RequiredAPIKeys)
+	})
+
+	t.Run("env macros in comments ignored while active ones resolve", func(t *testing.T) {
+		t.Setenv("TEST_ACTIVE_KEY", "active-key-value")
+
+		content := `
+# apiKeys: ["${env.COMMENTED_OUT_KEY}"]
+apiKeys: ["${env.TEST_ACTIVE_KEY}"]
+models:
+  test:
+    cmd: "server"
+    proxy: "http://localhost:8080"
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"active-key-value"}, config.RequiredAPIKeys)
+	})
+
+	t.Run("env macros in indented comments are ignored", func(t *testing.T) {
+		content := `
+models:
+  test:
+    cmd: |
+      server
+      --port 8080
+    proxy: "http://localhost:8080"
+    # metadata:
+    #   api_key: "${env.SOME_UNSET_KEY}"
+`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+	})
+
+	t.Run("env macros in inline comments are ignored", func(t *testing.T) {
+		t.Setenv("TEST_INLINE_KEY", "real-value")
+
+		content := `
+apiKeys: ["${env.TEST_INLINE_KEY}"] # TODO: add ${env.FUTURE_KEY} later
+models:
+  test:
+    cmd: "server"
+    proxy: "http://localhost:8080"
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"real-value"}, config.RequiredAPIKeys)
+	})
+
 }

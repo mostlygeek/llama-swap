@@ -667,11 +667,32 @@ func substituteMacroInValue(value any, macroName string, macroValue any) (any, e
 	}
 }
 
-// substituteEnvMacros replaces ${env.VAR_NAME} with environment variable values
-// Returns error if any env var is not set or contains invalid characters
+// substituteEnvMacros replaces ${env.VAR_NAME} with environment variable values.
+// Returns error if any referenced env var is not set or contains invalid characters.
+// Env macros inside YAML comments are ignored by unmarshalling the YAML first
+// (which strips comments) and only checking the comment-free version for macros.
 func substituteEnvMacros(s string) (string, error) {
-	result := s
-	matches := envMacroRegex.FindAllStringSubmatch(s, -1)
+	// Unmarshal and remarshal to strip YAML comments
+	var raw any
+	if err := yaml.Unmarshal([]byte(s), &raw); err != nil {
+		// If YAML is invalid, fall back to scanning the original string
+		// so the user gets the env var error rather than a confusing YAML parse error
+		return substituteEnvMacrosInString(s, s)
+	}
+	clean, err := yaml.Marshal(raw)
+	if err != nil {
+		return substituteEnvMacrosInString(s, s)
+	}
+
+	return substituteEnvMacrosInString(s, string(clean))
+}
+
+// substituteEnvMacrosInString finds ${env.VAR} macros in scanStr and substitutes
+// them in target. This separation allows scanning comment-free YAML while
+// substituting in the original string.
+func substituteEnvMacrosInString(target, scanStr string) (string, error) {
+	result := target
+	matches := envMacroRegex.FindAllStringSubmatch(scanStr, -1)
 	for _, match := range matches {
 		fullMatch := match[0] // ${env.VAR_NAME}
 		varName := match[1]   // VAR_NAME
