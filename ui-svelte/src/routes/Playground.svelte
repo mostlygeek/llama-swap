@@ -38,7 +38,7 @@
         : 'bg-surface hover:bg-secondary-hover border border-gray-200 dark:border-white/10'}"
       onclick={() => selectTab("audio")}
     >
-      Audio
+      Transcription
     </button>
   </div>
 

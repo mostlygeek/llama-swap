@@ -744,15 +744,29 @@ func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
 		return
 	}
 
+	// Look for a matching local model first, then check peers
+	var nextHandler func(modelID string, w http.ResponseWriter, r *http.Request) error
+	var useModelName string
+
 	modelID, found := pm.config.RealModelName(requestedModel)
-	if !found {
-		pm.sendErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("could not find real modelID for %s", requestedModel))
-		return
+	if found {
+		processGroup, err := pm.swapProcessGroup(modelID)
+		if err != nil {
+			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
+			return
+		}
+
+		useModelName = pm.config.Models[modelID].UseModelName
+		pm.proxyLogger.Debugf("ProxyManager using local Process for model: %s", requestedModel)
+		nextHandler = processGroup.ProxyRequest
+	} else if pm.peerProxy != nil && pm.peerProxy.HasPeerModel(requestedModel) {
+		pm.proxyLogger.Debugf("ProxyManager using ProxyPeer for model: %s", requestedModel)
+		modelID = requestedModel
+		nextHandler = pm.peerProxy.ProxyRequest
 	}
 
-	processGroup, err := pm.swapProcessGroup(modelID)
-	if err != nil {
-		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
+	if nextHandler == nil {
+		pm.sendErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("could not find suitable handler for %s", requestedModel))
 		return
 	}
 
@@ -768,8 +782,6 @@ func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
 			// If this is the model field and we have a profile, use just the model name
 			if key == "model" {
 				// # issue #69 allow custom model names to be sent to upstream
-				useModelName := pm.config.Models[modelID].UseModelName
-
 				if useModelName != "" {
 					fieldValue = useModelName
 				} else {
@@ -839,9 +851,9 @@ func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
 	modifiedReq.ContentLength = int64(requestBuffer.Len())
 
 	// Use the modified request for proxying
-	if err := processGroup.ProxyRequest(modelID, c.Writer, modifiedReq); err != nil {
+	if err := nextHandler(modelID, c.Writer, modifiedReq); err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
-		pm.proxyLogger.Errorf("Error Proxying Request for processGroup %s and model %s", processGroup.id, modelID)
+		pm.proxyLogger.Errorf("Error Proxying Request for model %s", modelID)
 		return
 	}
 }

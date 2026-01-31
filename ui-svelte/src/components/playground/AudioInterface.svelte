@@ -12,6 +12,7 @@
   let abortController = $state<AbortController | null>(null);
   let isDragging = $state(false);
   let fileInput = $state<HTMLInputElement | null>(null);
+  let copied = $state(false);
 
   const ACCEPTED_FORMATS = ['.mp3', '.wav'];
   const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB
@@ -141,6 +142,10 @@
   function copyToClipboard() {
     if (transcriptionResult) {
       navigator.clipboard.writeText(transcriptionResult);
+      copied = true;
+      setTimeout(() => {
+        copied = false;
+      }, 2000);
     }
   }
 
@@ -205,9 +210,17 @@
             <button
               class="btn btn-sm"
               onclick={copyToClipboard}
-              title="Copy to clipboard"
+              title={copied ? 'Copied!' : 'Copy to clipboard'}
             >
-              Copy
+              {#if copied}
+                <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                </svg>
+              {:else}
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                </svg>
+              {/if}
             </button>
           </div>
           <div class="flex-1 overflow-auto p-3 rounded border border-gray-200 dark:border-white/10 bg-background whitespace-pre-wrap">
