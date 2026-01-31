@@ -635,9 +635,10 @@ func TestProcess_StopImmediatelyDuringStartup(t *testing.T) {
 
 	// Start the process in a goroutine (it will be in StateStarting)
 	startDone := make(chan struct{})
+	errCh := make(chan error, 1)
 	go func() {
 		err := process.start()
-		assert.Error(t, err) // Should fail due to StopImmediately interrupt
+		errCh <- err
 		close(startDone)
 	}()
 
@@ -669,6 +670,10 @@ func TestProcess_StopImmediatelyDuringStartup(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("start() did not complete after StopImmediately")
 	}
+
+	// Verify start() returned an error due to StopImmediately interrupt
+	err := <-errCh
+	assert.Error(t, err)
 
 	// Process should be in StateStopped or StateStopping
 	finalState := process.CurrentState()

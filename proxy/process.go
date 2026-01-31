@@ -399,18 +399,28 @@ func (p *Process) Stop() {
 // StopImmediately will transition the process to the stopping state and stop the process with a SIGTERM.
 // If the process does not stop within the specified timeout, it will be forcefully stopped with a SIGKILL.
 func (p *Process) StopImmediately() {
-	currentState := p.CurrentState()
-	if !isValidTransition(currentState, StateStopping) {
-		return
-	}
-
-	p.proxyLogger.Debugf("<%s> Stopping process, current state: %s", p.ID, currentState)
-
 	// Try to transition from current state to StateStopping
 	// Process might be in StateReady or StateStarting when timeout fires
-	if _, err := p.swapState(currentState, StateStopping); err != nil {
-		p.proxyLogger.Infof("<%s> Stop() %s -> StateStopping err: %v", p.ID, currentState, err)
-		return
+	// Retry on ErrExpectedStateMismatch to handle transient state changes
+	for {
+		currentState := p.CurrentState()
+		if !isValidTransition(currentState, StateStopping) {
+			return
+		}
+
+		p.proxyLogger.Debugf("<%s> Stopping process, current state: %s", p.ID, currentState)
+
+		if _, err := p.swapState(currentState, StateStopping); err != nil {
+			if err == ErrExpectedStateMismatch {
+				// State changed between CurrentState() and swapState(), retry
+				continue
+			}
+			p.proxyLogger.Infof("<%s> Stop() %s -> StateStopping err: %v", p.ID, currentState, err)
+			return
+		}
+
+		// Successfully transitioned to StateStopping
+		break
 	}
 
 	p.stopCommand()
