@@ -16,7 +16,7 @@
 
 <div class="card h-full flex flex-col">
   <!-- Tab navigation -->
-  <div class="shrink-0 flex gap-2 mb-4">
+  <div class="shrink-0 flex flex-wrap gap-2 mb-4">
     <button
       class="px-4 py-2 rounded font-medium transition-colors {$selectedTabStore === 'chat'
         ? 'bg-primary text-btn-primary-text'

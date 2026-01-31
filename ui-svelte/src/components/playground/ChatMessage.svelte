@@ -121,10 +121,10 @@
         {/if}
       </div>
       {#if !isStreaming}
-        <div class="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-surface/90 dark:bg-surface/90 rounded-lg p-1 shadow-sm border border-gray-200 dark:border-white/10">
+        <div class="flex gap-1 mt-2 pt-1 border-t border-gray-200 dark:border-white/10">
           {#if onRegenerate}
             <button
-              class="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10"
+              class="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 text-txtsecondary"
               onclick={onRegenerate}
               title="Regenerate response"
             >
@@ -132,7 +132,7 @@
             </button>
           {/if}
           <button
-            class="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10"
+            class="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 text-txtsecondary"
             onclick={copyToClipboard}
             title={copied ? "Copied!" : "Copy to clipboard"}
           >
