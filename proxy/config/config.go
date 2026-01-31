@@ -668,28 +668,37 @@ func substituteMacroInValue(value any, macroName string, macroValue any) (any, e
 }
 
 // substituteEnvMacros replaces ${env.VAR_NAME} with environment variable values
-// Returns error if any env var is not set or contains invalid characters
+// Returns error if any env var is not set or contains invalid characters.
+// YAML comment lines (starting with #) are skipped to avoid requiring env vars
+// that only appear in comments.
 func substituteEnvMacros(s string) (string, error) {
-	result := s
-	matches := envMacroRegex.FindAllStringSubmatch(s, -1)
-	for _, match := range matches {
-		fullMatch := match[0] // ${env.VAR_NAME}
-		varName := match[1]   // VAR_NAME
-
-		value, exists := os.LookupEnv(varName)
-		if !exists {
-			return "", fmt.Errorf("environment variable '%s' is not set", varName)
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		// Skip YAML comment lines
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue
 		}
 
-		// Sanitize the value for safe YAML substitution
-		value, err := sanitizeEnvValueForYAML(value, varName)
-		if err != nil {
-			return "", err
-		}
+		matches := envMacroRegex.FindAllStringSubmatch(line, -1)
+		for _, match := range matches {
+			fullMatch := match[0] // ${env.VAR_NAME}
+			varName := match[1]   // VAR_NAME
 
-		result = strings.ReplaceAll(result, fullMatch, value)
+			value, exists := os.LookupEnv(varName)
+			if !exists {
+				return "", fmt.Errorf("environment variable '%s' is not set", varName)
+			}
+
+			// Sanitize the value for safe YAML substitution
+			value, err := sanitizeEnvValueForYAML(value, varName)
+			if err != nil {
+				return "", err
+			}
+
+			lines[i] = strings.ReplaceAll(lines[i], fullMatch, value)
+		}
 	}
-	return result, nil
+	return strings.Join(lines, "\n"), nil
 }
 
 // sanitizeEnvValueForYAML ensures an environment variable value is safe for YAML substitution.
