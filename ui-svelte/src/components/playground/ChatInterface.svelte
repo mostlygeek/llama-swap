@@ -4,6 +4,7 @@
   import { streamChatCompletion } from "../../lib/chatApi";
   import type { ChatMessage } from "../../lib/types";
   import ChatMessageComponent from "./ChatMessage.svelte";
+  import ExpandableTextarea from "./ExpandableTextarea.svelte";
 
   const selectedModelStore = persistentStore<string>("playground-selected-model", "");
   const systemPromptStore = persistentStore<string>("playground-system-prompt", "");
@@ -240,6 +241,9 @@
             content={message.content}
             isStreaming={isStreaming && idx === messages.length - 1 && message.role === "assistant"}
             onEdit={message.role === "user" ? (newContent) => editMessage(idx, newContent) : undefined}
+            onRegenerate={message.role === "assistant" && idx > 0 && messages[idx - 1].role === "user"
+              ? () => regenerateFromIndex(idx - 1)
+              : undefined}
           />
         {/each}
       {/if}
@@ -247,14 +251,13 @@
 
     <!-- Input area -->
     <div class="shrink-0 flex gap-2">
-      <textarea
-        class="flex-1 px-3 py-2 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary resize-none"
-        placeholder="Type a message..."
-        rows="3"
+      <ExpandableTextarea
         bind:value={userInput}
+        placeholder="Type a message..."
+        rows={3}
         onkeydown={handleKeyDown}
         disabled={isStreaming || !$selectedModelStore}
-      ></textarea>
+      />
       <div class="flex flex-col gap-2">
         {#if isStreaming}
           <button class="btn bg-red-500 hover:bg-red-600 text-white" onclick={cancelStreaming}>

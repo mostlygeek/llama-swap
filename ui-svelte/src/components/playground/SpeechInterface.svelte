@@ -2,6 +2,7 @@
   import { models } from "../../stores/api";
   import { persistentStore } from "../../stores/persistent";
   import { generateSpeech } from "../../lib/speechApi";
+  import ExpandableTextarea from "./ExpandableTextarea.svelte";
 
   const selectedModelStore = persistentStore<string>("playground-speech-model", "");
   const selectedVoiceStore = persistentStore<string>("playground-speech-voice", "coral");
@@ -230,14 +231,13 @@
 
     <!-- Text input area -->
     <div class="shrink-0 flex gap-2">
-      <textarea
-        class="flex-1 px-3 py-2 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary resize-none"
-        placeholder="Enter text to convert to speech..."
-        rows="3"
+      <ExpandableTextarea
         bind:value={inputText}
+        placeholder="Enter text to convert to speech..."
+        rows={3}
         onkeydown={handleKeyDown}
         disabled={isGenerating || !$selectedModelStore}
-      ></textarea>
+      />
       <div class="flex flex-col gap-2">
         {#if isGenerating}
           <button class="btn bg-red-500 hover:bg-red-600 text-white" onclick={cancelGeneration}>

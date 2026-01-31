@@ -2,6 +2,7 @@
   import { models } from "../../stores/api";
   import { persistentStore } from "../../stores/persistent";
   import { generateImage } from "../../lib/imageApi";
+  import ExpandableTextarea from "./ExpandableTextarea.svelte";
 
   const selectedModelStore = persistentStore<string>("playground-image-model", "");
   const selectedSizeStore = persistentStore<string>("playground-image-size", "1024x1024");
@@ -157,14 +158,13 @@
 
     <!-- Prompt input area -->
     <div class="shrink-0 flex gap-2">
-      <textarea
-        class="flex-1 px-3 py-2 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary resize-none"
-        placeholder="Describe the image you want to generate..."
-        rows="2"
+      <ExpandableTextarea
         bind:value={prompt}
+        placeholder="Describe the image you want to generate..."
+        rows={2}
         onkeydown={handleKeyDown}
         disabled={isGenerating || !$selectedModelStore}
-      ></textarea>
+      />
       <div class="flex flex-col gap-2">
         {#if isGenerating}
           <button class="btn bg-red-500 hover:bg-red-600 text-white" onclick={cancelGeneration}>

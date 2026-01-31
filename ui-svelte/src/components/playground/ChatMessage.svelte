@@ -1,15 +1,16 @@
 <script lang="ts">
   import { renderMarkdown } from "../../lib/markdown";
-  import { Copy, Check, Pencil, X, Save } from "lucide-svelte";
+  import { Copy, Check, Pencil, X, Save, RefreshCw } from "lucide-svelte";
 
   interface Props {
     role: "user" | "assistant" | "system";
     content: string;
     isStreaming?: boolean;
     onEdit?: (newContent: string) => void;
+    onRegenerate?: () => void;
   }
 
-  let { role, content, isStreaming = false, onEdit }: Props = $props();
+  let { role, content, isStreaming = false, onEdit, onRegenerate }: Props = $props();
 
   let renderedContent = $derived(
     role === "assistant" ? renderMarkdown(content) : content
@@ -66,17 +67,28 @@
         {/if}
       </div>
       {#if !isStreaming}
-        <button
-          class="absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/10 dark:hover:bg-white/10"
-          onclick={copyToClipboard}
-          title={copied ? "Copied!" : "Copy to clipboard"}
-        >
-          {#if copied}
-            <Check class="w-4 h-4 text-green-500" />
-          {:else}
-            <Copy class="w-4 h-4" />
+        <div class="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-surface/90 dark:bg-surface/90 rounded-lg p-1 shadow-sm border border-gray-200 dark:border-white/10">
+          {#if onRegenerate}
+            <button
+              class="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10"
+              onclick={onRegenerate}
+              title="Regenerate response"
+            >
+              <RefreshCw class="w-4 h-4" />
+            </button>
           {/if}
-        </button>
+          <button
+            class="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10"
+            onclick={copyToClipboard}
+            title={copied ? "Copied!" : "Copy to clipboard"}
+          >
+            {#if copied}
+              <Check class="w-4 h-4 text-green-500" />
+            {:else}
+              <Copy class="w-4 h-4" />
+            {/if}
+          </button>
+        </div>
       {/if}
     {:else}
       {#if isEditing}
@@ -107,7 +119,7 @@
       {:else}
         <div class="whitespace-pre-wrap pr-8">{content}</div>
         <button
-          class="absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity hover:bg-white/20"
+          class="absolute top-2 right-2 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity bg-white/20 hover:bg-white/30 shadow-sm"
           onclick={startEdit}
           title="Edit message"
         >

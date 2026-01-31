@@ -52,15 +52,24 @@
   </div>
 
   <!-- Tab content -->
-  <div class="flex-1 overflow-hidden">
-    {#if $selectedTabStore === "chat"}
+  <div class="flex-1 overflow-hidden relative">
+    <div class="h-full" class:hidden={$selectedTabStore !== "chat"}>
       <ChatInterface />
-    {:else if $selectedTabStore === "images"}
+    </div>
+    <div class="h-full" class:hidden={$selectedTabStore !== "images"}>
       <ImageInterface />
-    {:else if $selectedTabStore === "speech"}
+    </div>
+    <div class="h-full" class:hidden={$selectedTabStore !== "speech"}>
       <SpeechInterface />
-    {:else if $selectedTabStore === "audio"}
+    </div>
+    <div class="h-full" class:hidden={$selectedTabStore !== "audio"}>
       <AudioInterface />
-    {/if}
+    </div>
   </div>
 </div>
+
+<style>
+  .hidden {
+    display: none;
+  }
+</style>
