@@ -30,8 +30,8 @@
 <div class="card h-full flex flex-col">
   <!-- Tab navigation -->
   <div class="shrink-0 mb-4">
-    <!-- Mobile: Hamburger menu -->
-    <div class="md:hidden relative">
+    <!-- Mobile: Dropdown menu (hidden on md and up) -->
+    <div class="block md:hidden relative">
       <button
         class="w-full px-4 py-2 rounded font-medium transition-colors flex items-center justify-between bg-surface hover:bg-secondary-hover border border-gray-200 dark:border-white/10"
         onclick={() => (mobileMenuOpen = !mobileMenuOpen)}
@@ -60,7 +60,7 @@
       {/if}
     </div>
 
-    <!-- Desktop: Tab buttons -->
+    <!-- Desktop: Tab buttons (shown on md and up) -->
     <div class="hidden md:flex flex-wrap gap-2">
       {#each tabs as tab (tab.id)}
         <button
@@ -77,23 +77,23 @@
 
   <!-- Tab content -->
   <div class="flex-1 overflow-hidden relative">
-    <div class="h-full" class:hidden={$selectedTabStore !== "chat"}>
+    <div class="h-full" class:tab-hidden={$selectedTabStore !== "chat"}>
       <ChatInterface />
     </div>
-    <div class="h-full" class:hidden={$selectedTabStore !== "images"}>
+    <div class="h-full" class:tab-hidden={$selectedTabStore !== "images"}>
       <ImageInterface />
     </div>
-    <div class="h-full" class:hidden={$selectedTabStore !== "speech"}>
+    <div class="h-full" class:tab-hidden={$selectedTabStore !== "speech"}>
       <SpeechInterface />
     </div>
-    <div class="h-full" class:hidden={$selectedTabStore !== "audio"}>
+    <div class="h-full" class:tab-hidden={$selectedTabStore !== "audio"}>
       <AudioInterface />
     </div>
   </div>
 </div>
 
 <style>
-  .hidden {
+  .tab-hidden {
     display: none;
   }
 </style>
