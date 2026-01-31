@@ -547,31 +547,41 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	// Start timeout monitoring if requestTimeout is configured
+	var requestCancel context.CancelFunc
 	var timeoutCancel context.CancelFunc
-	var requestCtx context.Context = r.Context()
 
 	if p.config.RequestTimeout > 0 {
 		timeoutDuration := time.Duration(p.config.RequestTimeout) * time.Second
-		var cancel context.CancelFunc
-		requestCtx, cancel = context.WithTimeout(r.Context(), timeoutDuration)
+
+		// Add timeout to request context to cancel the request when exceeded
+		requestCtx, cancel := context.WithTimeout(r.Context(), timeoutDuration)
+		requestCancel = cancel
+		r = r.Clone(requestCtx)
+
+		// Create a separate timeout context for monitoring only
+		// Use context.Background() to ensure we detect our configured timeout,
+		// not parent-imposed deadlines that would cause misattribution
+		timeoutCtx, cancel := context.WithTimeout(context.Background(), timeoutDuration)
 		timeoutCancel = cancel
 
 		go func() {
-			<-requestCtx.Done()
-			if requestCtx.Err() == context.DeadlineExceeded {
+			<-timeoutCtx.Done()
+			if timeoutCtx.Err() == context.DeadlineExceeded {
 				p.proxyLogger.Warnf("<%s> Request timeout exceeded (%v), force stopping process to prevent GPU blocking", p.ID, timeoutDuration)
 				// Force stop the process - this will kill the underlying inference process
 				p.StopImmediately()
 			}
 		}()
 
-		// Ensure timeout is cancelled when request completes
-		defer timeoutCancel()
-	}
-
-	// Create a new request with the timeout context
-	if requestCtx != r.Context() {
-		r = r.Clone(requestCtx)
+		// Ensure both timeouts are cancelled when request completes
+		defer func() {
+			if requestCancel != nil {
+				requestCancel()
+			}
+			if timeoutCancel != nil {
+				timeoutCancel()
+			}
+		}()
 	}
 
 	// for #366
