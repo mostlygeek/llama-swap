@@ -12,6 +12,7 @@
   let generatedImage = $state<string | null>(null);
   let error = $state<string | null>(null);
   let abortController = $state<AbortController | null>(null);
+  let showFullscreen = $state(false);
 
   // Show all models (excluding unlisted), backend will auto-load as needed
   let availableModels = $derived($models.filter((m) => !m.unlisted));
@@ -80,6 +81,25 @@
     error = null;
   }
 
+  function downloadImage() {
+    if (!generatedImage) return;
+
+    const link = document.createElement("a");
+    link.href = generatedImage;
+    link.download = `generated-image-${Date.now()}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
+  function openFullscreen() {
+    showFullscreen = true;
+  }
+
+  function closeFullscreen() {
+    showFullscreen = false;
+  }
+
   function handleKeyDown(event: KeyboardEvent) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -117,9 +137,24 @@
       bind:value={$selectedSizeStore}
       disabled={isGenerating}
     >
-      <option value="512x512">512x512</option>
-      <option value="1024x1024">1024x1024</option>
+      <optgroup label="Square">
+        <option value="512x512">512x512</option>
+        <option value="1024x1024">1024x1024</option>
+      </optgroup>
+      <optgroup label="Landscape">
+        <option value="1024x768">1024x768 (4:3)</option>
+        <option value="1280x720">1280x720 (16:9)</option>
+        <option value="1792x1024">1792x1024 (SDXL)</option>
+      </optgroup>
+      <optgroup label="Portrait">
+        <option value="768x1024">768x1024 (3:4)</option>
+        <option value="720x1280">720x1280 (9:16)</option>
+        <option value="1024x1792">1024x1792 (SDXL)</option>
+      </optgroup>
     </select>
+    <button class="btn" onclick={downloadImage} disabled={!generatedImage}>
+      Download
+    </button>
     <button class="btn" onclick={clearImage} disabled={!generatedImage && !error}>
       Clear
     </button>
@@ -147,7 +182,8 @@
         <img
           src={generatedImage}
           alt="AI generated content"
-          class="max-w-full max-h-full object-contain"
+          class="max-w-full max-h-full object-contain cursor-pointer hover:opacity-90 transition-opacity"
+          onclick={openFullscreen}
         />
       {:else}
         <div class="text-center text-txtsecondary">
@@ -157,22 +193,22 @@
     </div>
 
     <!-- Prompt input area -->
-    <div class="shrink-0 flex gap-2">
+    <div class="shrink-0 flex flex-col md:flex-row gap-2">
       <ExpandableTextarea
         bind:value={prompt}
         placeholder="Describe the image you want to generate..."
-        rows={2}
+        rows={3}
         onkeydown={handleKeyDown}
         disabled={isGenerating || !$selectedModelStore}
       />
-      <div class="flex flex-col gap-2">
+      <div class="flex flex-row md:flex-col gap-2">
         {#if isGenerating}
-          <button class="btn bg-red-500 hover:bg-red-600 text-white" onclick={cancelGeneration}>
+          <button class="btn bg-red-500 hover:bg-red-600 text-white flex-1 md:flex-none" onclick={cancelGeneration}>
             Cancel
           </button>
         {:else}
           <button
-            class="btn bg-primary text-btn-primary-text hover:opacity-90"
+            class="btn bg-primary text-btn-primary-text hover:opacity-90 flex-1 md:flex-none"
             onclick={generate}
             disabled={!prompt.trim() || !$selectedModelStore}
           >
@@ -183,3 +219,28 @@
     </div>
   {/if}
 </div>
+
+<!-- Fullscreen dialog -->
+{#if showFullscreen && generatedImage}
+  <div
+    class="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4"
+    onclick={closeFullscreen}
+    onkeydown={(e) => e.key === 'Escape' && closeFullscreen()}
+    role="dialog"
+    aria-modal="true"
+  >
+    <button
+      class="absolute top-4 right-4 text-white hover:text-gray-300 text-2xl w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors"
+      onclick={closeFullscreen}
+      aria-label="Close fullscreen"
+    >
+      ×
+    </button>
+    <img
+      src={generatedImage}
+      alt="AI generated content"
+      class="max-w-full max-h-full object-contain"
+      onclick={(e) => e.stopPropagation()}
+    />
+  </div>
+{/if}
