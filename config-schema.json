@@ -216,6 +216,12 @@
                         "type": "boolean",
                         "description": "Overrides the global sendLoadingState for this model. Ommitting this property will use the global setting."
                     },
+                    "requestTimeout": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 0,
+                        "description": "Maximum time in seconds for a single request to complete before forcefully killing the model process. This prevents runaway inference processes from blocking the GPU indefinitely. 0 disables timeout (default). When exceeded, the process is terminated and must be restarted for the next request."
+                    },
                     "unlisted": {
                         "type": "boolean",
                         "default": false,

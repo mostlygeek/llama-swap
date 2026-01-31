@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 
@@ -31,6 +33,9 @@ func addApiHandlers(pm *ProxyManager) {
 		apiGroup.GET("/events", pm.apiSendEvents)
 		apiGroup.GET("/metrics", pm.apiGetMetrics)
 		apiGroup.GET("/version", pm.apiGetVersion)
+		apiGroup.GET("/config/current", pm.apiGetCurrentConfig)
+		apiGroup.GET("/config/example", pm.apiGetExampleConfig)
+		apiGroup.POST("/config", pm.apiUpdateConfig)
 	}
 }
 
@@ -249,4 +254,66 @@ func (pm *ProxyManager) apiGetVersion(c *gin.Context) {
 		"commit":     pm.commit,
 		"build_date": pm.buildDate,
 	})
+}
+
+func (pm *ProxyManager) apiGetCurrentConfig(c *gin.Context) {
+	pm.Lock()
+	configPath := pm.configPath
+	pm.Unlock()
+
+	if configPath == "" {
+		pm.sendErrorResponse(c, http.StatusNotFound, "Config file path not set")
+		return
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("Failed to read config file: %v", err))
+		return
+	}
+
+	c.Data(http.StatusOK, "text/yaml; charset=utf-8", data)
+}
+
+func (pm *ProxyManager) apiGetExampleConfig(c *gin.Context) {
+	pm.Lock()
+	data := pm.configExample
+	pm.Unlock()
+
+	if data == nil {
+		pm.sendErrorResponse(c, http.StatusInternalServerError, "Example config not available")
+		return
+	}
+
+	c.Data(http.StatusOK, "text/yaml; charset=utf-8", data)
+}
+
+func (pm *ProxyManager) apiUpdateConfig(c *gin.Context) {
+	pm.Lock()
+	configPath := pm.configPath
+	pm.Unlock()
+
+	if configPath == "" {
+		pm.sendErrorResponse(c, http.StatusBadRequest, "Config file path not set")
+		return
+	}
+
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		pm.sendErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("Failed to read request body: %v", err))
+		return
+	}
+
+	// Write to config file
+	if err := os.WriteFile(configPath, body, 0644); err != nil {
+		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("Failed to write config file: %v", err))
+		return
+	}
+
+	// Trigger config reload event
+	event.Emit(ConfigFileChangedEvent{
+		ReloadingState: ReloadingStateStart,
+	})
+
+	c.JSON(http.StatusOK, gin.H{"message": "Config updated successfully. Reloading..."})
 }
