@@ -82,3 +82,43 @@ func TestProcess_RPCHealthCheckNoEndpoints(t *testing.T) {
 	assert.Nil(t, process.rpcHealthTicker, "Health checker should not run without endpoints")
 	assert.Nil(t, process.rpcHealthCancel, "Health checker cancel should be nil")
 }
+
+func TestProcess_RPCHealthCheckTimeoutIgnored(t *testing.T) {
+	testLogger := NewLogMonitorWriter(io.Discard)
+	proxyLogger := NewLogMonitorWriter(io.Discard)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Use an IP address that will timeout (non-routable IP)
+	// 192.0.2.0/24 is reserved for documentation/testing (RFC 5737)
+	modelConfig := config.ModelConfig{
+		Cmd:            "llama-server --rpc 192.0.2.1:50051",
+		Proxy:          "http://localhost:8080",
+		RPCHealthCheck: true,
+	}
+
+	process := NewProcess("test-model", 5, modelConfig, testLogger, proxyLogger, ctx)
+
+	// Verify endpoints were parsed
+	assert.NotEmpty(t, process.rpcEndpoints, "RPC endpoints should be parsed from cmd")
+	assert.Equal(t, []string{"192.0.2.1:50051"}, process.rpcEndpoints)
+
+	// Initially should be unhealthy (false) until first check
+	assert.False(t, process.rpcHealthy.Load(), "RPC health should start as false")
+
+	// Manually run health check - this should timeout but not mark as unhealthy
+	process.checkRPCHealth()
+
+	// After timeout, should remain at initial state (false) but not be marked unhealthy
+	// The key is that timeout doesn't change the state - it's effectively a no-op
+	// To test this properly, let's set it to healthy first, then see if timeout changes it
+	process.rpcHealthy.Store(true)
+	initialState := process.rpcHealthy.Load()
+	assert.True(t, initialState, "Should be healthy before timeout check")
+
+	// Run health check that will timeout
+	process.checkRPCHealth()
+
+	// After timeout, should still be healthy (timeout is ignored)
+	assert.True(t, process.rpcHealthy.Load(), "Should remain healthy after timeout")
+}

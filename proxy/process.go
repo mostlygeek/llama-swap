@@ -973,6 +973,11 @@ func (p *Process) checkRPCHealth() {
 		dialer := net.Dialer{Timeout: 3 * time.Second}
 		conn, err := dialer.Dial("tcp", endpoint)
 		if err != nil {
+			// Ignore I/O timeout errors - don't mark as unhealthy
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				p.proxyLogger.Debugf("<%s> RPC endpoint %s timeout (ignoring): %v", p.ID, endpoint, err)
+				continue
+			}
 			p.proxyLogger.Warnf("<%s> RPC endpoint %s unhealthy: %v", p.ID, endpoint, err)
 			allHealthy = false
 			break
