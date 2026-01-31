@@ -68,3 +68,12 @@ export interface ImageGenerationResponse {
     b64_json?: string;
   }>;
 }
+
+export interface AudioTranscriptionRequest {
+  file: File;
+  model: string;
+}
+
+export interface AudioTranscriptionResponse {
+  text: string;
+}
