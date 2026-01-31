@@ -56,7 +56,26 @@
     messages = [...messages, { role: "user", content: trimmedInput }];
     userInput = "";
 
-    // Add empty assistant message
+    // Generate response from the new user message
+    await regenerateFromIndex(messages.length - 1);
+  }
+
+  function cancelStreaming() {
+    abortController?.abort();
+  }
+
+  function newChat() {
+    if (isStreaming) {
+      cancelStreaming();
+    }
+    messages = [];
+  }
+
+  async function regenerateFromIndex(idx: number) {
+    // Remove all messages after the edited user message
+    messages = messages.slice(0, idx + 1);
+
+    // Add empty assistant message for the new response
     messages = [...messages, { role: "assistant", content: "" }];
 
     isStreaming = true;
@@ -81,8 +100,8 @@
         if (chunk.done) break;
 
         // Update the last message (assistant) with new content
-        messages = messages.map((msg, idx) =>
-          idx === messages.length - 1
+        messages = messages.map((msg, i) =>
+          i === messages.length - 1
             ? { ...msg, content: msg.content + chunk.content }
             : msg
         );
@@ -93,8 +112,8 @@
       } else {
         // Show error in the assistant message
         const errorMessage = error instanceof Error ? error.message : "An error occurred";
-        messages = messages.map((msg, idx) =>
-          idx === messages.length - 1
+        messages = messages.map((msg, i) =>
+          i === messages.length - 1
             ? { ...msg, content: msg.content + `\n\n**Error:** ${errorMessage}` }
             : msg
         );
@@ -105,15 +124,16 @@
     }
   }
 
-  function cancelStreaming() {
-    abortController?.abort();
-  }
+  async function editMessage(idx: number, newContent: string) {
+    if (isStreaming || !$selectedModelStore) return;
 
-  function newChat() {
-    if (isStreaming) {
-      cancelStreaming();
-    }
-    messages = [];
+    // Update the user message at the specified index
+    messages = messages.map((msg, i) =>
+      i === idx ? { ...msg, content: newContent } : msg
+    );
+
+    // Trigger a new chat request with the updated messages
+    await regenerateFromIndex(idx);
   }
 
   function handleKeyDown(event: KeyboardEvent) {
@@ -219,6 +239,7 @@
             role={message.role}
             content={message.content}
             isStreaming={isStreaming && idx === messages.length - 1 && message.role === "assistant"}
+            onEdit={message.role === "user" ? (newContent) => editMessage(idx, newContent) : undefined}
           />
         {/each}
       {/if}

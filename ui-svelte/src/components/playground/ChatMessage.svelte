@@ -1,22 +1,60 @@
 <script lang="ts">
   import { renderMarkdown } from "../../lib/markdown";
+  import { Copy, Check, Pencil, X, Save } from "lucide-svelte";
 
   interface Props {
     role: "user" | "assistant" | "system";
     content: string;
     isStreaming?: boolean;
+    onEdit?: (newContent: string) => void;
   }
 
-  let { role, content, isStreaming = false }: Props = $props();
+  let { role, content, isStreaming = false, onEdit }: Props = $props();
 
   let renderedContent = $derived(
     role === "assistant" ? renderMarkdown(content) : content
   );
+  let copied = $state(false);
+  let isEditing = $state(false);
+  let editContent = $state("");
+
+  async function copyToClipboard() {
+    await navigator.clipboard.writeText(content);
+    copied = true;
+    setTimeout(() => (copied = false), 2000);
+  }
+
+  function startEdit() {
+    editContent = content;
+    isEditing = true;
+  }
+
+  function cancelEdit() {
+    isEditing = false;
+    editContent = "";
+  }
+
+  function saveEdit() {
+    if (onEdit && editContent.trim() !== content) {
+      onEdit(editContent.trim());
+    }
+    isEditing = false;
+    editContent = "";
+  }
+
+  function handleKeyDown(event: KeyboardEvent) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      saveEdit();
+    } else if (event.key === "Escape") {
+      cancelEdit();
+    }
+  }
 </script>
 
 <div class="flex {role === 'user' ? 'justify-end' : 'justify-start'} mb-4">
   <div
-    class="max-w-[85%] rounded-lg px-4 py-2 {role === 'user'
+    class="relative group max-w-[85%] rounded-lg px-4 py-2 {role === 'user'
       ? 'bg-primary text-btn-primary-text'
       : 'bg-surface border border-gray-200 dark:border-white/10'}"
   >
@@ -27,8 +65,55 @@
           <span class="inline-block w-2 h-4 bg-current animate-pulse ml-0.5"></span>
         {/if}
       </div>
+      {#if !isStreaming}
+        <button
+          class="absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/10 dark:hover:bg-white/10"
+          onclick={copyToClipboard}
+          title={copied ? "Copied!" : "Copy to clipboard"}
+        >
+          {#if copied}
+            <Check class="w-4 h-4 text-green-500" />
+          {:else}
+            <Copy class="w-4 h-4" />
+          {/if}
+        </button>
+      {/if}
     {:else}
-      <div class="whitespace-pre-wrap">{content}</div>
+      {#if isEditing}
+        <div class="flex flex-col gap-2 min-w-[300px]">
+          <textarea
+            class="w-full px-3 py-2 rounded border border-gray-200 dark:border-white/10 bg-surface text-txtmain focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+            rows="3"
+            bind:value={editContent}
+            onkeydown={handleKeyDown}
+          ></textarea>
+          <div class="flex justify-end gap-2">
+            <button
+              class="p-1.5 rounded hover:bg-white/20"
+              onclick={cancelEdit}
+              title="Cancel"
+            >
+              <X class="w-4 h-4" />
+            </button>
+            <button
+              class="p-1.5 rounded hover:bg-white/20"
+              onclick={saveEdit}
+              title="Save"
+            >
+              <Save class="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      {:else}
+        <div class="whitespace-pre-wrap pr-8">{content}</div>
+        <button
+          class="absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity hover:bg-white/20"
+          onclick={startEdit}
+          title="Edit message"
+        >
+          <Pencil class="w-4 h-4" />
+        </button>
+      {/if}
     {/if}
   </div>
 </div>
