@@ -216,10 +216,21 @@
                         "type": "boolean",
                         "description": "Overrides the global sendLoadingState for this model. Ommitting this property will use the global setting."
                     },
+                    "requestTimeout": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 0,
+                        "description": "Maximum time in seconds for a single request to complete before forcefully killing the model process. This prevents runaway inference processes from blocking the GPU indefinitely. 0 disables timeout (default). When exceeded, the process is terminated and must be restarted for the next request."
+                    },
                     "unlisted": {
                         "type": "boolean",
                         "default": false,
                         "description": "If true the model will not show up in /v1/models responses. It can still be used as normal in API requests."
+                    },
+                    "rpcHealthCheck": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Enable TCP health checks for RPC endpoints specified in cmd. When enabled, parses --rpc host:port[,host:port,...] from cmd and performs health checks every 30 seconds. Models with unhealthy RPC endpoints are filtered from /v1/models and return 503 on inference requests."
                     }
                 }
             }
