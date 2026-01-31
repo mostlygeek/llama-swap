@@ -1,38 +1,62 @@
-import { Marked } from "marked";
+import { unified } from "unified";
+import remarkParse from "remark-parse";
+import remarkGfm from "remark-gfm";
+import remarkRehype from "remark-rehype";
+import rehypeStringify from "rehype-stringify";
 import hljs from "highlight.js";
-import markedKatex from "marked-katex-extension";
+import { visit } from "unist-util-visit";
+import type { Element, Root } from "hast";
 
-const marked = new Marked({
-  gfm: true,
-  breaks: true,
-});
+// Custom plugin to highlight code blocks with highlight.js
+function rehypeHighlight() {
+  return (tree: Root) => {
+    visit(tree, "element", (node: Element) => {
+      if (node.tagName === "code" && node.properties) {
+        const className = node.properties.className;
+        const classes = Array.isArray(className)
+          ? className.filter((c): c is string => typeof c === "string")
+          : [];
+        const lang = classes
+          .find((c) => c.startsWith("language-"))
+          ?.replace("language-", "");
 
-// Configure KaTeX for math rendering
-marked.use(
-  markedKatex({
-    throwOnError: false,
-    displayMode: false,
-  })
-);
+        const text = node.children
+          .filter((child): child is { type: "text"; value: string } => child.type === "text")
+          .map((child) => child.value)
+          .join("");
 
-// Custom renderer for code blocks with syntax highlighting and HTML sanitization
-marked.use({
-  renderer: {
-    code({ text, lang }: { text: string; lang?: string }) {
-      const language = lang && hljs.getLanguage(lang) ? lang : "plaintext";
-      const highlighted = hljs.highlight(text, { language }).value;
-      return `<pre><code class="hljs language-${language}">${highlighted}</code></pre>`;
-    },
-    // Escape HTML in inline code
-    codespan({ text }: { text: string }) {
-      return `<code>${escapeHtml(text)}</code>`;
-    },
-    // Escape raw HTML to prevent XSS
-    html({ text }: { text: string }) {
-      return escapeHtml(text);
-    },
-  },
-});
+        if (text) {
+          const language = lang && hljs.getLanguage(lang) ? lang : "plaintext";
+          const highlighted = hljs.highlight(text, { language }).value;
+
+          // Replace the text node with raw HTML
+          node.properties.className = [
+            "hljs",
+            `language-${language}`,
+            ...classes.filter((c) => !c.startsWith("language-")),
+          ];
+          // Use type assertion since we're modifying the tree structure
+          (node.children as unknown) = [
+            { type: "raw", value: highlighted },
+          ];
+        }
+      }
+    });
+  };
+}
+
+// Custom plugin to escape raw HTML for XSS protection
+function rehypeEscapeHtml() {
+  return (tree: Root) => {
+    visit(tree, "raw", (node: { type: "raw"; value: string }, _index, parent) => {
+      // Only escape raw nodes that aren't from our highlighting plugin
+      // (highlight.js output is safe)
+      if (parent && "tagName" in parent && parent.tagName !== "code") {
+        node.value = escapeHtml(node.value);
+      }
+    });
+  };
+}
 
 function escapeHtml(text: string): string {
   const htmlEntities: Record<string, string> = {
@@ -45,14 +69,14 @@ function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (char) => htmlEntities[char]);
 }
 
-// Convert LaTeX-style math delimiters to KaTeX-style
-function convertLatexDelimiters(content: string): string {
-  // Replace \[ ... \] with $$ ... $$
-  content = content.replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$');
-  // Replace \( ... \) with $ ... $
-  content = content.replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
-  return content;
-}
+// Create the unified processor
+const processor = unified()
+  .use(remarkParse)
+  .use(remarkGfm)
+  .use(remarkRehype, { allowDangerousHtml: true })
+  .use(rehypeHighlight)
+  .use(rehypeEscapeHtml)
+  .use(rehypeStringify, { allowDangerousHtml: true });
 
 export function renderMarkdown(content: string): string {
   if (!content) {
@@ -60,11 +84,8 @@ export function renderMarkdown(content: string): string {
   }
 
   try {
-    // Convert LaTeX delimiters to KaTeX format
-    const convertedContent = convertLatexDelimiters(content);
-    const result = marked.parse(convertedContent);
-    // marked.parse can return string or Promise<string>, but with our config it's sync
-    return typeof result === "string" ? result : "";
+    const result = processor.processSync(content);
+    return String(result);
   } catch {
     // Fallback to escaped plain text if markdown parsing fails
     return `<p>${escapeHtml(content)}</p>`;
