@@ -667,90 +667,50 @@ func substituteMacroInValue(value any, macroName string, macroValue any) (any, e
 	}
 }
 
-// substituteEnvMacros replaces ${env.VAR_NAME} with environment variable values
-// Returns error if any env var is not set or contains invalid characters.
-// YAML comments (full-line and inline) are skipped to avoid requiring env vars
-// that only appear in comments.
+// substituteEnvMacros replaces ${env.VAR_NAME} with environment variable values.
+// Returns error if any referenced env var is not set or contains invalid characters.
+// Env macros inside YAML comments are ignored by unmarshalling the YAML first
+// (which strips comments) and only checking the comment-free version for macros.
 func substituteEnvMacros(s string) (string, error) {
-	lines := strings.Split(s, "\n")
-	for i, line := range lines {
-		// Find where the YAML comment starts (respecting quoted strings)
-		commentStart := findYAMLCommentStart(line)
-
-		// If the entire line is a comment, skip it
-		if commentStart == 0 {
-			continue
-		}
-
-		// Only search for env macros in the non-comment portion
-		searchPortion := line
-		if commentStart > 0 {
-			searchPortion = line[:commentStart]
-		}
-
-		matches := envMacroRegex.FindAllStringSubmatch(searchPortion, -1)
-		for _, match := range matches {
-			fullMatch := match[0] // ${env.VAR_NAME}
-			varName := match[1]   // VAR_NAME
-
-			value, exists := os.LookupEnv(varName)
-			if !exists {
-				return "", fmt.Errorf("environment variable '%s' is not set", varName)
-			}
-
-			// Sanitize the value for safe YAML substitution
-			value, err := sanitizeEnvValueForYAML(value, varName)
-			if err != nil {
-				return "", err
-			}
-
-			lines[i] = strings.ReplaceAll(lines[i], fullMatch, value)
-		}
+	// Unmarshal and remarshal to strip YAML comments
+	var raw any
+	if err := yaml.Unmarshal([]byte(s), &raw); err != nil {
+		// If YAML is invalid, fall back to scanning the original string
+		// so the user gets the env var error rather than a confusing YAML parse error
+		return substituteEnvMacrosInString(s, s)
 	}
-	return strings.Join(lines, "\n"), nil
+	clean, err := yaml.Marshal(raw)
+	if err != nil {
+		return substituteEnvMacrosInString(s, s)
+	}
+
+	return substituteEnvMacrosInString(s, string(clean))
 }
 
-// findYAMLCommentStart returns the index of the '#' that begins a YAML comment
-// in the given line, or -1 if there is no comment. It respects single-quoted and
-// double-quoted strings (including escape sequences in double-quoted strings).
-// In YAML, '#' starts a comment when preceded by whitespace or at the start of a line.
-func findYAMLCommentStart(line string) int {
-	inSingle := false
-	inDouble := false
-	i := 0
-	for i < len(line) {
-		ch := line[i]
+// substituteEnvMacrosInString finds ${env.VAR} macros in scanStr and substitutes
+// them in target. This separation allows scanning comment-free YAML while
+// substituting in the original string.
+func substituteEnvMacrosInString(target, scanStr string) (string, error) {
+	result := target
+	matches := envMacroRegex.FindAllStringSubmatch(scanStr, -1)
+	for _, match := range matches {
+		fullMatch := match[0] // ${env.VAR_NAME}
+		varName := match[1]   // VAR_NAME
 
-		// In double-quoted strings, skip escaped characters
-		if inDouble && ch == '\\' && i+1 < len(line) {
-			i += 2
-			continue
+		value, exists := os.LookupEnv(varName)
+		if !exists {
+			return "", fmt.Errorf("environment variable '%s' is not set", varName)
 		}
 
-		switch ch {
-		case '\'':
-			if !inDouble {
-				// In YAML single-quoted strings, '' is an escaped single quote
-				if inSingle && i+1 < len(line) && line[i+1] == '\'' {
-					i += 2
-					continue
-				}
-				inSingle = !inSingle
-			}
-		case '"':
-			if !inSingle {
-				inDouble = !inDouble
-			}
-		case '#':
-			if !inSingle && !inDouble {
-				if i == 0 || line[i-1] == ' ' || line[i-1] == '\t' {
-					return i
-				}
-			}
+		// Sanitize the value for safe YAML substitution
+		value, err := sanitizeEnvValueForYAML(value, varName)
+		if err != nil {
+			return "", err
 		}
-		i++
+
+		result = strings.ReplaceAll(result, fullMatch, value)
 	}
-	return -1
+	return result, nil
 }
 
 // sanitizeEnvValueForYAML ensures an environment variable value is safe for YAML substitution.
