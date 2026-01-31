@@ -31,39 +31,39 @@
 
   function getTheme(dark: boolean, readOnly: boolean) {
     return EditorView.theme({
-      "&": { 
+      "&": {
         height: "100%",
-        backgroundColor: dark ? (readOnly ? "#1a1a1a" : "#1f1f1f") : (readOnly ? "#f9fafb" : "#ffffff"),
+        backgroundColor: dark ? (readOnly ? "#1a1a1a" : "#252525") : (readOnly ? "#f9fafb" : "#ffffff"),
       },
-      ".cm-scroller": { 
+      ".cm-scroller": {
         overflow: "auto",
       },
-      ".cm-content": { 
+      ".cm-content": {
         fontFamily: "monospace",
-        color: dark ? "#e0e0e0" : "#1f2937",
+        color: dark ? "#d1d5db" : "#1f2937",
       },
       ".cm-gutters": {
-        backgroundColor: dark ? "#2a2a2a" : "#f3f4f6",
+        backgroundColor: dark ? (readOnly ? "#151515" : "#1f1f1f") : "#f3f4f6",
         color: dark ? "#6b7280" : "#9ca3af",
         border: "none",
       },
       ".cm-activeLineGutter": {
-        backgroundColor: dark ? "#374151" : "#e5e7eb",
+        backgroundColor: dark ? "#2d3748" : "#e5e7eb",
       },
       ".cm-activeLine": {
-        backgroundColor: dark ? "#374151" : "#f3f4f6",
+        backgroundColor: dark ? "#2d3748" : "#f3f4f6",
       },
       ".cm-selectionBackground, ::selection": {
-        backgroundColor: dark ? "#3b82f6" : "#bfdbfe",
+        backgroundColor: dark ? "#2d5a7b" : "#bfdbfe",
       },
       ".cm-cursor": {
-        borderLeftColor: dark ? "#60a5fa" : "#2563eb",
+        borderLeftColor: dark ? "#14b8a6" : "#2563eb",
       },
       // YAML syntax colors
       ".cm-atom": { color: dark ? "#fbbf24" : "#d97706" }, // true/false/null
-      ".cm-number": { color: dark ? "#a78bfa" : "#7c3aed" }, // numbers
-      ".cm-string": { color: dark ? "#34d399" : "#059669" }, // strings
-      ".cm-property": { color: dark ? "#60a5fa" : "#2563eb" }, // keys
+      ".cm-number": { color: dark ? "#c4b5fd" : "#7c3aed" }, // numbers
+      ".cm-string": { color: dark ? "#6ee7b7" : "#059669" }, // strings
+      ".cm-property": { color: dark ? "#7dd3fc" : "#2563eb" }, // keys
       ".cm-comment": { color: dark ? "#6b7280" : "#9ca3af" }, // comments
     }, { dark });
   }
@@ -219,36 +219,50 @@
     if (!loading && editorContainer && !editorView && currentConfig) {
       editorView = createEditor(editorContainer, currentConfig, false);
     }
+
+    return () => {
+      if (editorView) {
+        editorView.destroy();
+        editorView = null;
+      }
+    };
   });
 
   $effect(() => {
     if (!loading && exampleContainer && !exampleView && exampleConfig) {
       exampleView = createEditor(exampleContainer, exampleConfig, true);
     }
+
+    return () => {
+      if (exampleView) {
+        exampleView.destroy();
+        exampleView = null;
+      }
+    };
   });
 </script>
 
 <div class="flex flex-col h-full">
   <div class="mb-4 flex items-center justify-between">
-    <h2 class="text-xl font-semibold">Configuration Editor</h2>
+    <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">Configuration Editor</h2>
     <div class="flex gap-2">
       <button
         onclick={importConfig}
-        class="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded disabled:opacity-50"
+        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-800 text-white rounded disabled:opacity-50"
         disabled={loading || saving}
       >
         Import
       </button>
       <button
         onclick={exportConfig}
-        class="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded disabled:opacity-50"
+        class="px-4 py-2 bg-teal-600 hover:bg-teal-700 dark:bg-teal-700 dark:hover:bg-teal-800 text-white rounded disabled:opacity-50"
         disabled={loading || saving || !currentConfig}
       >
         Export
       </button>
       <button
         onclick={saveConfig}
-        class="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded disabled:opacity-50"
+        class="px-4 py-2 bg-gray-500 hover:bg-gray-600 dark:bg-gray-600 dark:hover:bg-gray-700 text-white rounded disabled:opacity-50"
         disabled={loading || saving || !currentConfig || !!validationError}
       >
         {saving ? "Saving..." : "Save & Reload"}
@@ -257,20 +271,20 @@
   </div>
 
   {#if validationError}
-    <div class="mb-4 p-3 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 rounded">
+    <div class="mb-4 p-3 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-700 text-yellow-900 dark:text-yellow-200 rounded">
       <strong>Validation Error:</strong> {validationError}
     </div>
   {/if}
 
   {#if error}
-    <div class="mb-4 p-3 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded">
+    <div class="mb-4 p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 text-red-900 dark:text-red-200 rounded">
       {error}
     </div>
   {/if}
 
   {#if loading}
     <div class="flex items-center justify-center h-full">
-      <div class="text-gray-500">Loading configuration...</div>
+      <div class="text-gray-500 dark:text-gray-400">Loading configuration...</div>
     </div>
   {:else}
     <div
@@ -280,19 +294,19 @@
     >
       <!-- Left panel: Editable config -->
       <div class="flex-1 flex flex-col min-h-0 min-w-0">
-        <h3 class="text-lg font-semibold mb-2">Current Config (Editable)</h3>
-        <div 
+        <h3 class="text-lg font-semibold mb-2 text-gray-900 dark:text-gray-100">Current Config (Editable)</h3>
+        <div
           bind:this={editorContainer}
-          class="flex-1 w-full border border-gray-300 dark:border-gray-600 rounded overflow-hidden bg-white dark:bg-gray-800"
+          class="flex-1 w-full border border-gray-300 dark:border-gray-700 rounded overflow-hidden bg-white dark:bg-[#252525]"
         ></div>
       </div>
 
       <!-- Right panel: Example config (read-only) -->
       <div class="flex-1 flex flex-col min-h-0 min-w-0">
-        <h3 class="text-lg font-semibold mb-2">Example Config (Reference)</h3>
-        <div 
+        <h3 class="text-lg font-semibold mb-2 text-gray-900 dark:text-gray-100">Example Config (Reference)</h3>
+        <div
           bind:this={exampleContainer}
-          class="flex-1 w-full border border-gray-300 dark:border-gray-600 rounded overflow-hidden bg-gray-50 dark:bg-gray-900"
+          class="flex-1 w-full border border-gray-300 dark:border-gray-700 rounded overflow-hidden bg-gray-50 dark:bg-[#1a1a1a]"
         ></div>
       </div>
     </div>
