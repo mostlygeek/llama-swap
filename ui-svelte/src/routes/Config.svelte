@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { isNarrow, isDarkMode } from "../stores/theme";
   import { EditorView, basicSetup } from "codemirror";
   import { yaml } from "@codemirror/lang-yaml";
@@ -223,8 +223,8 @@
   });
 
   $effect(() => {
-    if (!loading && editorContainer && !editorView && currentConfig) {
-      editorView = createEditor(editorContainer, currentConfig, false, themeCompartment);
+    if (!loading && editorContainer && !editorView) {
+      editorView = createEditor(editorContainer, untrack(() => currentConfig), false, themeCompartment);
     }
 
     return () => {
@@ -236,8 +236,8 @@
   });
 
   $effect(() => {
-    if (!loading && exampleContainer && !exampleView && exampleConfig) {
-      exampleView = createEditor(exampleContainer, exampleConfig, true, exampleThemeCompartment);
+    if (!loading && exampleContainer && !exampleView) {
+      exampleView = createEditor(exampleContainer, untrack(() => exampleConfig), true, exampleThemeCompartment);
     }
 
     return () => {
