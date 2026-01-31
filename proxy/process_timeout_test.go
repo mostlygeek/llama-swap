@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -53,7 +54,7 @@ func TestProcess_RequestTimeout(t *testing.T) {
 		RequestTimeout: 5,      // 5 second timeout
 	}
 
-	p := NewProcess("test-timeout", 30, cfg, processLogger, proxyLogger)
+	p := NewProcess("test-timeout", 30, cfg, processLogger, proxyLogger, context.Background())
 	p.gracefulStopTimeout = 2 * time.Second // shorter for testing
 
 	// Manually set state to ready (skip actual process start)

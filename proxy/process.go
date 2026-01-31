@@ -945,7 +945,7 @@ func (p *Process) startRPCHealthChecker() {
 
 	ctx, cancel := context.WithCancel(p.shutdownCtx)
 	p.rpcHealthCancel = cancel
-	p.rpcHealthTicker = time.NewTicker(30 * time.Second)
+	p.rpcHealthTicker = time.NewTicker(10 * time.Second)
 
 	go func() {
 		defer p.rpcHealthTicker.Stop()
@@ -970,7 +970,7 @@ func (p *Process) checkRPCHealth() {
 	allHealthy := true
 
 	for _, endpoint := range p.rpcEndpoints {
-		dialer := net.Dialer{Timeout: 500 * time.Millisecond}
+		dialer := net.Dialer{Timeout: 3 * time.Second}
 		conn, err := dialer.Dial("tcp", endpoint)
 		if err != nil {
 			p.proxyLogger.Warnf("<%s> RPC endpoint %s unhealthy: %v", p.ID, endpoint, err)

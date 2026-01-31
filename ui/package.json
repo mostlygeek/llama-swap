@@ -10,10 +10,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@codemirror/lang-yaml": "^6.1.1",
-    "@codemirror/state": "^6.4.1",
+    "@codemirror/lang-yaml": "^6.1.2",
+    "@codemirror/state": "^6.5.4",
     "codemirror": "^6.0.1",
-    "js-yaml": "^4.1.0",
+    "js-yaml": "^4.1.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-icons": "^5.5.0",

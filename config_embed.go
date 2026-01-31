@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	_ "embed"
 )
 
@@ -9,5 +10,5 @@ var configExampleYAML []byte
 
 // GetConfigExampleYAML returns the embedded example config file
 func GetConfigExampleYAML() []byte {
-	return configExampleYAML
+	return bytes.Clone(configExampleYAML)
 }
