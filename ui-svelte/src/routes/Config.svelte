@@ -19,6 +19,7 @@
   let editorView: EditorView | null = null;
   let exampleView: EditorView | null = null;
   let themeCompartment = new Compartment();
+  let exampleThemeCompartment = new Compartment();
 
   function validateYAML(text: string): string | null {
     try {
@@ -68,7 +69,7 @@
     }, { dark });
   }
 
-  function createEditor(parent: HTMLElement, content: string, readOnly: boolean) {
+  function createEditor(parent: HTMLElement, content: string, readOnly: boolean, compartment: Compartment) {
     const state = EditorState.create({
       doc: content,
       extensions: [
@@ -76,7 +77,7 @@
         yaml(),
         EditorView.lineWrapping,
         EditorView.editable.of(!readOnly),
-        themeCompartment.of(getTheme($isDarkMode, readOnly)),
+        compartment.of(getTheme($isDarkMode, readOnly)),
         EditorView.updateListener.of((update) => {
           if (!readOnly && update.docChanged) {
             currentConfig = update.state.doc.toString();
@@ -102,7 +103,7 @@
     }
     if (exampleView) {
       exampleView.dispatch({
-        effects: themeCompartment.reconfigure(getTheme($isDarkMode, true))
+        effects: exampleThemeCompartment.reconfigure(getTheme($isDarkMode, true))
       });
     }
   });
@@ -155,8 +156,14 @@
       });
 
       if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || "Failed to save config");
+        let errMsg: string;
+        try {
+          const errData = await res.json();
+          errMsg = errData.error || JSON.stringify(errData);
+        } catch {
+          errMsg = await res.text();
+        }
+        throw new Error(`${res.status} ${res.statusText}: ${errMsg || "Failed to save config"}`);
       }
 
       alert("Config saved successfully! Application is reloading...");
@@ -217,7 +224,7 @@
 
   $effect(() => {
     if (!loading && editorContainer && !editorView && currentConfig) {
-      editorView = createEditor(editorContainer, currentConfig, false);
+      editorView = createEditor(editorContainer, currentConfig, false, themeCompartment);
     }
 
     return () => {
@@ -230,7 +237,7 @@
 
   $effect(() => {
     if (!loading && exampleContainer && !exampleView && exampleConfig) {
-      exampleView = createEditor(exampleContainer, exampleConfig, true);
+      exampleView = createEditor(exampleContainer, exampleConfig, true, exampleThemeCompartment);
     }
 
     return () => {
