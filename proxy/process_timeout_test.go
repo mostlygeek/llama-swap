@@ -13,6 +13,9 @@ import (
 
 // TestProcess_RequestTimeout verifies that requestTimeout actually kills the process
 func TestProcess_RequestTimeout(t *testing.T) {
+	// Create error channel to report handler errors from the mock server goroutine
+	srvErrCh := make(chan error, 1)
+
 	// Create a mock server that simulates a long-running inference
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Logf("Mock server received request")
@@ -23,7 +26,8 @@ func TestProcess_RequestTimeout(t *testing.T) {
 
 		flusher, ok := w.(http.Flusher)
 		if !ok {
-			t.Fatal("Expected http.ResponseWriter to be an http.Flusher")
+			srvErrCh <- fmt.Errorf("Expected http.ResponseWriter to be an http.Flusher")
+			return
 		}
 
 		// Stream data for 60 seconds
@@ -80,9 +84,21 @@ func TestProcess_RequestTimeout(t *testing.T) {
 	}()
 
 	select {
+	case err := <-srvErrCh:
+		// Handler error - fail the test immediately
+		t.Fatalf("Mock server handler error: %v", err)
+
 	case <-done:
 		elapsed := time.Since(start)
 		t.Logf("Request completed after %v", elapsed)
+
+		// Check for any deferred server errors
+		select {
+		case err := <-srvErrCh:
+			t.Fatalf("Mock server handler error: %v", err)
+		default:
+			// No server errors, continue with assertions
+		}
 
 		// Request should complete within timeout + gracefulStopTimeout + some buffer
 		maxExpected := time.Duration(cfg.RequestTimeout+2)*time.Second + 3*time.Second

@@ -270,6 +270,12 @@ func (p *Process) start() error {
 
 	// Set process state to failed
 	if err != nil {
+		// Close cmdWaitChan to prevent stopCommand() from hanging if a timeout
+		// transitions StateStarting -> StateStopping before Start() completes
+		p.cmdMutex.Lock()
+		close(p.cmdWaitChan)
+		p.cmdMutex.Unlock()
+
 		if curState, swapErr := p.swapState(StateStarting, StateStopped); swapErr != nil {
 			p.forceState(StateStopped) // force it into a stopped state
 			return fmt.Errorf(
@@ -426,10 +432,20 @@ func (p *Process) stopCommand() {
 	p.cmdMutex.RLock()
 	cancelUpstream := p.cancelUpstream
 	cmdWaitChan := p.cmdWaitChan
+	cmd := p.cmd
 	p.cmdMutex.RUnlock()
 
 	if cancelUpstream == nil {
 		p.proxyLogger.Errorf("<%s> stopCommand has a nil p.cancelUpstream()", p.ID)
+		return
+	}
+
+	// If cmd is nil or cmd.Process is nil, the process never actually started
+	// (cmd.Start() was never called or failed), so skip waiting on cmdWaitChan
+	// to avoid hanging. This can happen if a timeout transitions StateStarting
+	// to StateStopping before cmd.Start() completes.
+	if cmd == nil || cmd.Process == nil {
+		p.proxyLogger.Debugf("<%s> stopCommand: process never started (cmd.Process is nil), skipping wait", p.ID)
 		return
 	}
 
