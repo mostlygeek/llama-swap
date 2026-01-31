@@ -545,8 +545,15 @@ func ParseRPCEndpoints(cmdStr string) ([]string, error) {
 	var endpoints []string
 	for i, arg := range args {
 		if arg == "--rpc" || arg == "-rpc" {
-			if i+1 < len(args) {
-				endpoints = parseEndpointList(args[i+1])
+			// Collect all non-flag arguments after --rpc
+			// This handles Windows where shlex splits single-quoted strings with spaces
+			var parts []string
+			for j := i + 1; j < len(args) && !strings.HasPrefix(args[j], "-"); j++ {
+				parts = append(parts, args[j])
+			}
+			if len(parts) > 0 {
+				// Join parts with space and parse as a single endpoint list
+				endpoints = parseEndpointList(strings.Join(parts, " "))
 			}
 		} else if strings.HasPrefix(arg, "--rpc=") {
 			endpoints = parseEndpointList(strings.TrimPrefix(arg, "--rpc="))
