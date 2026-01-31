@@ -13,6 +13,10 @@
   let error = $state<string | null>(null);
   let abortController = $state<AbortController | null>(null);
   let audioElement = $state<HTMLAudioElement | null>(null);
+  let availableVoices = $state<string[]>(["coral", "alloy", "echo", "fable", "onyx", "nova", "shimmer"]);
+
+  // Default voices to fall back to if API call fails
+  const defaultVoices = ["coral", "alloy", "echo", "fable", "onyx", "nova", "shimmer"];
 
   // Show all models (excluding unlisted), backend will auto-load as needed
   let availableModels = $derived($models.filter((m) => !m.unlisted));
@@ -36,7 +40,37 @@
     return { local, peersByProvider };
   });
 
-  const voiceOptions = ["coral", "alloy", "echo", "fable", "onyx", "nova", "shimmer"];
+  // Fetch available voices when model changes
+  $effect(() => {
+    const model = $selectedModelStore;
+    if (!model) {
+      availableVoices = defaultVoices;
+      return;
+    }
+
+    // Fetch voices from API
+    fetch(`/v1/audio/voices?model=${encodeURIComponent(model)}`)
+      .then(async (response) => {
+        if (!response.ok) {
+          // Fall back to default voices if API call fails
+          availableVoices = defaultVoices;
+          return;
+        }
+        const data = await response.json();
+        // Expect response to be an array of voice strings or an object with a voices array
+        const voices = Array.isArray(data) ? data : (data.voices || defaultVoices);
+        availableVoices = voices.length > 0 ? voices : defaultVoices;
+
+        // If current voice is not in the new list, reset to first available voice
+        if (!availableVoices.includes($selectedVoiceStore)) {
+          selectedVoiceStore.set(availableVoices[0]);
+        }
+      })
+      .catch(() => {
+        // Fall back to default voices on error
+        availableVoices = defaultVoices;
+      });
+  });
 
   // Auto-play effect when new audio is generated
   $effect(() => {
@@ -96,6 +130,20 @@
     inputText = "";
   }
 
+  function downloadAudio() {
+    if (!generatedAudioUrl) return;
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+    const filename = `speech-${timestamp}.mp3`;
+
+    const a = document.createElement('a');
+    a.href = generatedAudioUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+
   function handleKeyDown(event: KeyboardEvent) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -133,7 +181,7 @@
       bind:value={$selectedVoiceStore}
       disabled={isGenerating}
     >
-      {#each voiceOptions as voice (voice)}
+      {#each availableVoices as voice (voice)}
         <option value={voice}>{voice}</option>
       {/each}
     </select>
@@ -161,10 +209,18 @@
           <p class="text-sm mt-1">{error}</p>
         </div>
       {:else if generatedAudioUrl}
-        <audio bind:this={audioElement} controls class="w-full max-w-md">
-          <source src={generatedAudioUrl} type="audio/mpeg" />
-          Your browser does not support the audio element.
-        </audio>
+        <div class="flex flex-col items-center gap-3 w-full max-w-md">
+          <audio bind:this={audioElement} controls class="w-full">
+            <source src={generatedAudioUrl} type="audio/mpeg" />
+            Your browser does not support the audio element.
+          </audio>
+          <button
+            class="btn bg-primary text-btn-primary-text hover:opacity-90"
+            onclick={downloadAudio}
+          >
+            Download Audio
+          </button>
+        </div>
       {:else}
         <div class="text-center text-txtsecondary">
           <p>Enter text below to convert to speech</p>
