@@ -21,7 +21,8 @@ var (
 // getSleepCommand returns a platform-appropriate command to sleep for the given number of seconds
 func getSleepCommand(seconds int) string {
 	if runtime.GOOS == "windows" {
-		return fmt.Sprintf("timeout /t %d /nobreak", seconds)
+		// Use full path to avoid conflict with GNU coreutils timeout in Git Bash
+		return fmt.Sprintf("C:\\Windows\\System32\\timeout.exe /t %d /nobreak", seconds)
 	}
 	return fmt.Sprintf("sleep %d", seconds)
 }
