@@ -18,6 +18,14 @@ var (
 	debugLogger = NewLogMonitorWriter(os.Stdout)
 )
 
+// getSleepCommand returns a platform-appropriate command to sleep for the given number of seconds
+func getSleepCommand(seconds int) string {
+	if runtime.GOOS == "windows" {
+		return fmt.Sprintf("timeout /t %d /nobreak", seconds)
+	}
+	return fmt.Sprintf("sleep %d", seconds)
+}
+
 func init() {
 	// flip to help with debugging tests
 	if false {
@@ -614,9 +622,10 @@ func TestProcess_StopImmediatelyDuringStartup(t *testing.T) {
 		t.Skip("skipping slow test")
 	}
 
-	// Use a command that takes a while to start (sleep) but won't respond to health checks
+	// Use a platform-appropriate command that takes a while to start but won't respond to health checks
+	cmd := getSleepCommand(10)
 	config := config.ModelConfig{
-		Cmd:           "sleep 10",
+		Cmd:           cmd,
 		Proxy:         "http://127.0.0.1:9999",
 		CheckEndpoint: "/health",
 	}

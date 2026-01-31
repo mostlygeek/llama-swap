@@ -49,6 +49,7 @@ type Process struct {
 	// PR #155 called to cancel the upstream process
 	cmdMutex       sync.RWMutex
 	cancelUpstream context.CancelFunc
+	cmdStarted     bool // tracks if cmd.Start() completed successfully
 
 	// closed when command exits
 	cmdWaitChan chan struct{}
@@ -250,23 +251,34 @@ func (p *Process) start() error {
 	defer p.waitStarting.Done()
 	cmdContext, ctxCancelUpstream := context.WithCancel(context.Background())
 
-	p.cmd = exec.CommandContext(cmdContext, args[0], args[1:]...)
-	p.cmd.Stdout = p.processLogger
-	p.cmd.Stderr = p.processLogger
-	p.cmd.Env = append(p.cmd.Environ(), p.config.Env...)
-	p.cmd.Cancel = p.cmdStopUpstreamProcess
-	p.cmd.WaitDelay = p.gracefulStopTimeout
-	setProcAttributes(p.cmd)
+	cmd := exec.CommandContext(cmdContext, args[0], args[1:]...)
+	cmd.Stdout = p.processLogger
+	cmd.Stderr = p.processLogger
+	cmd.Env = append(cmd.Environ(), p.config.Env...)
+	cmd.Cancel = p.cmdStopUpstreamProcess
+	cmd.WaitDelay = p.gracefulStopTimeout
+	setProcAttributes(cmd)
 
+	p.failedStartCount++ // this will be reset to zero when the process has successfully started
+
+	// Initialize cancelUpstream and cmdWaitChan before Start() so stopCommand() can use them
+	// if called during startup (e.g., due to timeout)
 	p.cmdMutex.Lock()
+	p.cmd = cmd
 	p.cancelUpstream = ctxCancelUpstream
 	p.cmdWaitChan = make(chan struct{})
 	p.cmdMutex.Unlock()
 
-	p.failedStartCount++ // this will be reset to zero when the process has successfully started
-
 	p.proxyLogger.Debugf("<%s> Executing start command: %s, env: %s", p.ID, strings.Join(args, " "), strings.Join(p.config.Env, ", "))
 	err = p.cmd.Start()
+
+	// Set cmdStarted flag under lock after Start() completes
+	// This prevents data race with stopCommand() which checks cmdStarted instead of cmd.Process
+	p.cmdMutex.Lock()
+	if err == nil {
+		p.cmdStarted = true
+	}
+	p.cmdMutex.Unlock()
 
 	// Set process state to failed
 	if err != nil {
@@ -432,24 +444,28 @@ func (p *Process) stopCommand() {
 	p.cmdMutex.RLock()
 	cancelUpstream := p.cancelUpstream
 	cmdWaitChan := p.cmdWaitChan
-	cmd := p.cmd
+	cmdStarted := p.cmdStarted
 	p.cmdMutex.RUnlock()
 
+	// If cancelUpstream is nil, the process was never actually started
+	// (e.g., forceState() was used in tests). Just return silently.
 	if cancelUpstream == nil {
-		p.proxyLogger.Errorf("<%s> stopCommand has a nil p.cancelUpstream()", p.ID)
+		p.proxyLogger.Debugf("<%s> stopCommand: cancelUpstream is nil, process was never started", p.ID)
 		return
 	}
 
-	// If cmd is nil or cmd.Process is nil, the process never actually started
+	// Always cancel the context to stop the command
+	cancelUpstream()
+
+	// If cmdStarted is false, the process never actually started
 	// (cmd.Start() was never called or failed), so skip waiting on cmdWaitChan
 	// to avoid hanging. This can happen if a timeout transitions StateStarting
 	// to StateStopping before cmd.Start() completes.
-	if cmd == nil || cmd.Process == nil {
-		p.proxyLogger.Debugf("<%s> stopCommand: process never started (cmd.Process is nil), skipping wait", p.ID)
+	if !cmdStarted {
+		p.proxyLogger.Debugf("<%s> stopCommand: process never started (cmdStarted is false), skipping wait", p.ID)
 		return
 	}
 
-	cancelUpstream()
 	<-cmdWaitChan
 }
 
@@ -654,6 +670,7 @@ func (p *Process) waitForCmd() {
 
 	p.cmdMutex.Lock()
 	close(p.cmdWaitChan)
+	p.cmdStarted = false
 	p.cmdMutex.Unlock()
 }
 
