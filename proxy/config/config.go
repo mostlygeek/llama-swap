@@ -669,17 +669,26 @@ func substituteMacroInValue(value any, macroName string, macroValue any) (any, e
 
 // substituteEnvMacros replaces ${env.VAR_NAME} with environment variable values
 // Returns error if any env var is not set or contains invalid characters.
-// YAML comment lines (starting with #) are skipped to avoid requiring env vars
+// YAML comments (full-line and inline) are skipped to avoid requiring env vars
 // that only appear in comments.
 func substituteEnvMacros(s string) (string, error) {
 	lines := strings.Split(s, "\n")
 	for i, line := range lines {
-		// Skip YAML comment lines
-		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+		// Find where the YAML comment starts (respecting quoted strings)
+		commentStart := findYAMLCommentStart(line)
+
+		// If the entire line is a comment, skip it
+		if commentStart == 0 {
 			continue
 		}
 
-		matches := envMacroRegex.FindAllStringSubmatch(line, -1)
+		// Only search for env macros in the non-comment portion
+		searchPortion := line
+		if commentStart > 0 {
+			searchPortion = line[:commentStart]
+		}
+
+		matches := envMacroRegex.FindAllStringSubmatch(searchPortion, -1)
 		for _, match := range matches {
 			fullMatch := match[0] // ${env.VAR_NAME}
 			varName := match[1]   // VAR_NAME
@@ -699,6 +708,49 @@ func substituteEnvMacros(s string) (string, error) {
 		}
 	}
 	return strings.Join(lines, "\n"), nil
+}
+
+// findYAMLCommentStart returns the index of the '#' that begins a YAML comment
+// in the given line, or -1 if there is no comment. It respects single-quoted and
+// double-quoted strings (including escape sequences in double-quoted strings).
+// In YAML, '#' starts a comment when preceded by whitespace or at the start of a line.
+func findYAMLCommentStart(line string) int {
+	inSingle := false
+	inDouble := false
+	i := 0
+	for i < len(line) {
+		ch := line[i]
+
+		// In double-quoted strings, skip escaped characters
+		if inDouble && ch == '\\' && i+1 < len(line) {
+			i += 2
+			continue
+		}
+
+		switch ch {
+		case '\'':
+			if !inDouble {
+				// In YAML single-quoted strings, '' is an escaped single quote
+				if inSingle && i+1 < len(line) && line[i+1] == '\'' {
+					i += 2
+					continue
+				}
+				inSingle = !inSingle
+			}
+		case '"':
+			if !inSingle {
+				inDouble = !inDouble
+			}
+		case '#':
+			if !inSingle && !inDouble {
+				if i == 0 || line[i-1] == ' ' || line[i-1] == '\t' {
+					return i
+				}
+			}
+		}
+		i++
+	}
+	return -1
 }
 
 // sanitizeEnvValueForYAML ensures an environment variable value is safe for YAML substitution.

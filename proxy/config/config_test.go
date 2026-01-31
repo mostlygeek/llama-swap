@@ -1356,4 +1356,63 @@ models:
 		_, err := LoadConfigFromReader(strings.NewReader(content))
 		assert.NoError(t, err)
 	})
+
+	t.Run("env macros in inline comments are ignored", func(t *testing.T) {
+		t.Setenv("TEST_INLINE_KEY", "real-value")
+
+		content := `
+apiKeys: ["${env.TEST_INLINE_KEY}"] # TODO: add ${env.FUTURE_KEY} later
+models:
+  test:
+    cmd: "server"
+    proxy: "http://localhost:8080"
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"real-value"}, config.RequiredAPIKeys)
+	})
+
+	t.Run("env macros in inline comments with quoted hash are handled", func(t *testing.T) {
+		t.Setenv("TEST_HASH_KEY", "my-key")
+
+		content := `
+apiKeys: ["${env.TEST_HASH_KEY}"]
+models:
+  test:
+    cmd: "server --tag \"#build\"" # ${env.UNSET_INLINE_VAR}
+    proxy: "http://localhost:8080"
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"my-key"}, config.RequiredAPIKeys)
+	})
+}
+
+func TestFindYAMLCommentStart(t *testing.T) {
+	tests := []struct {
+		name     string
+		line     string
+		expected int
+	}{
+		{"full line comment", "# this is a comment", 0},
+		{"indented comment", "  # indented comment", 2},
+		{"no comment", `key: value`, -1},
+		{"inline comment", `key: value # comment`, 11},
+		{"hash in double quotes", `key: "value # not comment"`, -1},
+		{"hash in single quotes", `key: 'value # not comment'`, -1},
+		{"hash in double quotes then real comment", `key: "val#ue" # comment`, 14},
+		{"hash in single quotes then real comment", `key: 'val#ue' # comment`, 14},
+		{"escaped quote in double quotes", `key: "val\"#" # comment`, 14},
+		{"escaped single in single quotes", `key: 'val''#' # comment`, 14},
+		{"tab before hash", "key: value\t# comment", 11},
+		{"hash without preceding space", `key: value#notcomment`, -1},
+		{"empty line", "", -1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := findYAMLCommentStart(tt.line)
+			assert.Equal(t, tt.expected, result, "line: %q", tt.line)
+		})
+	}
 }
