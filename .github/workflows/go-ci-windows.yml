@@ -28,7 +28,7 @@ jobs:
       uses: actions/cache/restore@v4
       with:
         path: ./build
-        key: ${{ runner.os }}-simple-responder-${{ hashFiles('misc/simple-responder/simple-responder.go') }}
+        key: ${{ runner.os }}-simple-responder-${{ hashFiles('cmd/simple-responder/simple-responder.go') }}
 
     # necessary for testing proxy/Process swapping
     - name: Create simple-responder
@@ -43,7 +43,7 @@ jobs:
       uses: actions/cache/save@v4
       with:
         path: ./build
-        key: ${{ runner.os }}-simple-responder-${{ hashFiles('misc/simple-responder/simple-responder.go') }}
+        key: ${{ runner.os }}-simple-responder-${{ hashFiles('cmd/simple-responder/simple-responder.go') }}
 
     - name: Test all
       shell: bash
