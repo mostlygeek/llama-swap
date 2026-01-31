@@ -11,6 +11,9 @@
   let inputText = $state("");
   let isGenerating = $state(false);
   let generatedAudioUrl = $state<string | null>(null);
+  let generatedText = $state<string | null>(null);
+  let generatedVoice = $state<string | null>(null);
+  let generatedTimestamp = $state<Date | null>(null);
   let error = $state<string | null>(null);
   let abortController = $state<AbortController | null>(null);
   let audioElement = $state<HTMLAudioElement | null>(null);
@@ -104,8 +107,11 @@
         URL.revokeObjectURL(generatedAudioUrl);
       }
 
-      // Create object URL for the audio blob
+      // Create object URL for the audio blob and store metadata
       generatedAudioUrl = URL.createObjectURL(audioBlob);
+      generatedText = trimmedText;
+      generatedVoice = $selectedVoiceStore;
+      generatedTimestamp = new Date();
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
         // User cancelled
@@ -127,15 +133,23 @@
       URL.revokeObjectURL(generatedAudioUrl);
     }
     generatedAudioUrl = null;
+    generatedText = null;
+    generatedVoice = null;
+    generatedTimestamp = null;
     error = null;
+    inputText = "";
+  }
+
+  function clearInput() {
     inputText = "";
   }
 
   function downloadAudio() {
     if (!generatedAudioUrl) return;
 
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-    const filename = `speech-${timestamp}.mp3`;
+    const timestamp = (generatedTimestamp || new Date()).toISOString().replace(/[:.]/g, '-').slice(0, -5);
+    const voice = generatedVoice || 'speech';
+    const filename = `${voice}-${timestamp}.mp3`;
 
     const a = document.createElement('a');
     a.href = generatedAudioUrl;
@@ -143,6 +157,16 @@
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+  }
+
+  function formatTimestamp(date: Date): string {
+    return date.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    });
   }
 
   function handleKeyDown(event: KeyboardEvent) {
@@ -186,9 +210,6 @@
         <option value={voice}>{voice}</option>
       {/each}
     </select>
-    <button class="btn" onclick={clearAudio} disabled={!generatedAudioUrl && !error && !inputText}>
-      Clear
-    </button>
   </div>
 
   <!-- Empty state for no models configured -->
@@ -198,60 +219,104 @@
     </div>
   {:else}
     <!-- Audio display area -->
-    <div class="flex-1 overflow-auto mb-4 flex items-center justify-center bg-surface border border-gray-200 dark:border-white/10 rounded">
+    <div class="shrink-0 mb-4 bg-surface border border-gray-200 dark:border-white/10 rounded p-4 md:p-6">
       {#if isGenerating}
-        <div class="text-center text-txtsecondary">
-          <div class="inline-block w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mb-2"></div>
-          <p>Generating speech...</p>
+        <div class="flex items-center justify-center text-txtsecondary py-8">
+          <div class="text-center">
+            <div class="inline-block w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mb-2"></div>
+            <p>Generating speech...</p>
+          </div>
         </div>
       {:else if error}
-        <div class="text-center text-red-500 p-4">
-          <p class="font-medium">Error</p>
-          <p class="text-sm mt-1">{error}</p>
+        <div class="flex items-center justify-center py-8">
+          <div class="text-center text-red-500">
+            <p class="font-medium">Error</p>
+            <p class="text-sm mt-1">{error}</p>
+          </div>
         </div>
       {:else if generatedAudioUrl}
-        <div class="flex flex-col items-center gap-3 w-full max-w-md">
-          <audio bind:this={audioElement} controls class="w-full">
-            <source src={generatedAudioUrl} type="audio/mpeg" />
-            Your browser does not support the audio element.
-          </audio>
-          <button
-            class="btn bg-primary text-btn-primary-text hover:opacity-90"
-            onclick={downloadAudio}
-          >
-            Download Audio
-          </button>
+        <div class="flex flex-col gap-4">
+          <!-- Header with metadata and download -->
+          <div class="flex items-center justify-between gap-4">
+            <div class="flex flex-wrap gap-3 text-sm text-txtsecondary">
+              {#if generatedVoice}
+                <span class="flex items-center gap-1">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>
+                  </svg>
+                  {generatedVoice}
+                </span>
+              {/if}
+              {#if generatedTimestamp}
+                <span class="flex items-center gap-1">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                  </svg>
+                  {formatTimestamp(generatedTimestamp)}
+                </span>
+              {/if}
+            </div>
+            <button
+              class="btn shrink-0"
+              onclick={downloadAudio}
+              title="Download audio file"
+            >
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+              </svg>
+            </button>
+          </div>
+
+          <!-- Audio player with larger controls -->
+          <div class="w-full">
+            <audio bind:this={audioElement} controls class="w-full h-12 md:h-16">
+              <source src={generatedAudioUrl} type="audio/mpeg" />
+              Your browser does not support the audio element.
+            </audio>
+          </div>
         </div>
       {:else}
-        <div class="text-center text-txtsecondary">
-          <p>Enter text below to convert to speech</p>
+        <div class="flex items-center justify-center text-txtsecondary py-8">
+          <div class="text-center">
+            <svg class="w-12 h-12 md:w-16 md:h-16 mx-auto mb-2 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>
+            </svg>
+            <p>Enter text below to convert to speech</p>
+          </div>
         </div>
       {/if}
     </div>
 
     <!-- Text input area -->
-    <div class="shrink-0 flex gap-2">
+    <div class="flex-1 flex flex-col md:flex-row gap-2 min-h-0">
       <ExpandableTextarea
         bind:value={inputText}
         placeholder="Enter text to convert to speech..."
-        rows={3}
+        rows={8}
         onkeydown={handleKeyDown}
         disabled={isGenerating || !$selectedModelStore}
       />
-      <div class="flex flex-col gap-2">
+      <div class="shrink-0 flex md:flex-col gap-2">
         {#if isGenerating}
-          <button class="btn bg-red-500 hover:bg-red-600 text-white" onclick={cancelGeneration}>
+          <button class="btn bg-red-500 hover:bg-red-600 text-white flex-1 md:flex-none" onclick={cancelGeneration}>
             Cancel
           </button>
         {:else}
           <button
-            class="btn bg-primary text-btn-primary-text hover:opacity-90"
+            class="btn bg-primary text-btn-primary-text hover:opacity-90 flex-1 md:flex-none"
             onclick={generate}
             disabled={!inputText.trim() || !$selectedModelStore}
           >
             Generate
           </button>
-          <label class="flex items-center gap-2 text-sm cursor-pointer">
+          <button
+            class="btn flex-1 md:flex-none"
+            onclick={clearInput}
+            disabled={!inputText.trim()}
+          >
+            Clear
+          </button>
+          <label class="flex items-center justify-center gap-2 text-sm cursor-pointer">
             <input
               type="checkbox"
               bind:checked={$autoPlayStore}
