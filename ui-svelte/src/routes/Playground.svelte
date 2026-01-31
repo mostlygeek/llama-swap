@@ -3,8 +3,9 @@
   import ChatInterface from "../components/playground/ChatInterface.svelte";
   import ImageInterface from "../components/playground/ImageInterface.svelte";
   import AudioInterface from "../components/playground/AudioInterface.svelte";
+  import SpeechInterface from "../components/playground/SpeechInterface.svelte";
 
-  type Tab = "chat" | "images" | "audio";
+  type Tab = "chat" | "images" | "speech" | "audio";
 
   const selectedTabStore = persistentStore<Tab>("playground-selected-tab", "chat");
 
@@ -33,6 +34,14 @@
       Images
     </button>
     <button
+      class="px-4 py-2 rounded font-medium transition-colors {$selectedTabStore === 'speech'
+        ? 'bg-primary text-btn-primary-text'
+        : 'bg-surface hover:bg-secondary-hover border border-gray-200 dark:border-white/10'}"
+      onclick={() => selectTab("speech")}
+    >
+      Speech
+    </button>
+    <button
       class="px-4 py-2 rounded font-medium transition-colors {$selectedTabStore === 'audio'
         ? 'bg-primary text-btn-primary-text'
         : 'bg-surface hover:bg-secondary-hover border border-gray-200 dark:border-white/10'}"
@@ -48,6 +57,8 @@
       <ChatInterface />
     {:else if $selectedTabStore === "images"}
       <ImageInterface />
+    {:else if $selectedTabStore === "speech"}
+      <SpeechInterface />
     {:else if $selectedTabStore === "audio"}
       <AudioInterface />
     {/if}

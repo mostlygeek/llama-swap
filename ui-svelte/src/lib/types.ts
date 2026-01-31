@@ -77,3 +77,9 @@ export interface AudioTranscriptionRequest {
 export interface AudioTranscriptionResponse {
   text: string;
 }
+
+export interface SpeechGenerationRequest {
+  model: string;
+  input: string;
+  voice: string;
+}
