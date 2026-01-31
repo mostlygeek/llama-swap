@@ -41,11 +41,40 @@ export interface VersionInfo {
 
 export type ScreenWidth = "xs" | "sm" | "md" | "lg" | "xl" | "2xl";
 
+export type TextContentPart = {
+  type: "text";
+  text: string;
+};
+
+export type ImageContentPart = {
+  type: "image_url";
+  image_url: { url: string };
+};
+
+export type ContentPart = TextContentPart | ImageContentPart;
+
 export interface ChatMessage {
   role: "user" | "assistant" | "system";
-  content: string;
+  content: string | ContentPart[];
   reasoning_content?: string;
   reasoningTimeMs?: number;
+}
+
+export function getTextContent(content: string | ContentPart[]): string {
+  if (typeof content === "string") {
+    return content;
+  }
+  const textParts = content.filter((part): part is TextContentPart => part.type === "text");
+  return textParts.map((part) => part.text).join("\n");
+}
+
+export function getImageUrls(content: string | ContentPart[]): string[] {
+  if (typeof content === "string") {
+    return [];
+  }
+  return content
+    .filter((part): part is ImageContentPart => part.type === "image_url")
+    .map((part) => part.image_url.url);
 }
 
 export interface ChatCompletionRequest {

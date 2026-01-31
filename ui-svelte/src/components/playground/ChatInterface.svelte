@@ -2,7 +2,7 @@
   import { models } from "../../stores/api";
   import { persistentStore } from "../../stores/persistent";
   import { streamChatCompletion } from "../../lib/chatApi";
-  import type { ChatMessage } from "../../lib/types";
+  import type { ChatMessage, ContentPart } from "../../lib/types";
   import ChatMessageComponent from "./ChatMessage.svelte";
   import ExpandableTextarea from "./ExpandableTextarea.svelte";
 
@@ -18,6 +18,9 @@
   let abortController = $state<AbortController | null>(null);
   let messagesContainer: HTMLDivElement | undefined = $state();
   let showSettings = $state(false);
+  let attachedImages = $state<string[]>([]);
+  let fileInput = $state<HTMLInputElement | null>(null);
+  let imageError = $state<string | null>(null);
 
   // Show all models (excluding unlisted), backend will auto-load as needed
   let availableModels = $derived($models.filter((m) => !m.unlisted));
@@ -53,11 +56,28 @@
 
   async function sendMessage() {
     const trimmedInput = userInput.trim();
-    if (!trimmedInput || !$selectedModelStore || isStreaming) return;
+    if ((!trimmedInput && attachedImages.length === 0) || !$selectedModelStore || isStreaming) return;
+
+    // Build message content (multimodal if images attached)
+    let content: string | ContentPart[];
+    if (attachedImages.length > 0) {
+      const parts: ContentPart[] = [];
+      if (trimmedInput) {
+        parts.push({ type: "text", text: trimmedInput });
+      }
+      for (const url of attachedImages) {
+        parts.push({ type: "image_url", image_url: { url } });
+      }
+      content = parts;
+    } else {
+      content = trimmedInput;
+    }
 
     // Add user message
-    messages = [...messages, { role: "user", content: trimmedInput }];
+    messages = [...messages, { role: "user", content }];
     userInput = "";
+    attachedImages = [];
+    imageError = null;
 
     // Generate response from the new user message
     await regenerateFromIndex(messages.length - 1);
@@ -191,6 +211,67 @@
       sendMessage();
     }
   }
+
+  const ACCEPTED_IMAGE_FORMATS = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+  const MAX_IMAGE_SIZE = 20 * 1024 * 1024; // 20MB
+  const MAX_IMAGES_PER_MESSAGE = 5;
+
+  function validateImageFile(file: File): string | null {
+    if (!ACCEPTED_IMAGE_FORMATS.includes(file.type)) {
+      return `Invalid file type: ${file.type}. Accepted formats: JPG, PNG, GIF, WEBP`;
+    }
+    if (file.size > MAX_IMAGE_SIZE) {
+      return `File too large: ${(file.size / 1024 / 1024).toFixed(1)}MB. Maximum size: 20MB`;
+    }
+    return null;
+  }
+
+  function fileToDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error("Failed to read file"));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function processImageFiles(files: File[]): Promise<void> {
+    imageError = null;
+
+    if (attachedImages.length + files.length > MAX_IMAGES_PER_MESSAGE) {
+      imageError = `Maximum ${MAX_IMAGES_PER_MESSAGE} images per message`;
+      return;
+    }
+
+    for (const file of files) {
+      const error = validateImageFile(file);
+      if (error) {
+        imageError = error;
+        return;
+      }
+    }
+
+    try {
+      const dataUrls = await Promise.all(files.map(fileToDataUrl));
+      attachedImages = [...attachedImages, ...dataUrls];
+    } catch (error) {
+      imageError = error instanceof Error ? error.message : "Failed to process images";
+    }
+  }
+
+  function handleImageSelect(event: Event) {
+    const input = event.target as HTMLInputElement;
+    if (input.files && input.files.length > 0) {
+      processImageFiles(Array.from(input.files));
+    }
+    // Reset the input so the same file can be selected again
+    input.value = "";
+  }
+
+  function removeImage(idx: number) {
+    attachedImages = attachedImages.filter((_, i) => i !== idx);
+    imageError = null;
+  }
 </script>
 
 <div class="flex flex-col h-full">
@@ -303,28 +384,79 @@
     </div>
 
     <!-- Input area -->
-    <div class="shrink-0 flex gap-2">
-      <ExpandableTextarea
-        bind:value={userInput}
-        placeholder="Type a message..."
-        rows={3}
-        onkeydown={handleKeyDown}
-        disabled={isStreaming || !$selectedModelStore}
-      />
-      <div class="flex flex-col gap-2">
-        {#if isStreaming}
-          <button class="btn bg-red-500 hover:bg-red-600 text-white" onclick={cancelStreaming}>
-            Cancel
-          </button>
-        {:else}
-          <button
-            class="btn bg-primary text-btn-primary-text hover:opacity-90"
-            onclick={sendMessage}
-            disabled={!userInput.trim() || !$selectedModelStore}
-          >
-            Send
-          </button>
-        {/if}
+    <div class="shrink-0">
+      <!-- Image preview strip -->
+      {#if attachedImages.length > 0}
+        <div class="mb-2 flex flex-wrap gap-2">
+          {#each attachedImages as imageUrl, idx (idx)}
+            <div class="relative group">
+              <img
+                src={imageUrl}
+                alt="Attached image {idx + 1}"
+                class="w-20 h-20 object-cover rounded border border-gray-200 dark:border-white/10"
+              />
+              <button
+                class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                onclick={() => removeImage(idx)}
+                title="Remove image"
+              >
+                ×
+              </button>
+            </div>
+          {/each}
+        </div>
+      {/if}
+
+      <!-- Error message -->
+      {#if imageError}
+        <div class="mb-2 p-2 bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded text-sm">
+          {imageError}
+        </div>
+      {/if}
+
+      <div class="flex gap-2">
+        <!-- Hidden file input -->
+        <input
+          type="file"
+          accept=".jpg,.jpeg,.png,.gif,.webp"
+          multiple
+          class="hidden"
+          bind:this={fileInput}
+          onchange={handleImageSelect}
+        />
+
+        <ExpandableTextarea
+          bind:value={userInput}
+          placeholder="Type a message..."
+          rows={3}
+          onkeydown={handleKeyDown}
+          disabled={isStreaming || !$selectedModelStore}
+        />
+        <div class="flex flex-col gap-2">
+          {#if isStreaming}
+            <button class="btn bg-red-500 hover:bg-red-600 text-white" onclick={cancelStreaming}>
+              Cancel
+            </button>
+          {:else}
+            <button
+              class="btn"
+              onclick={() => fileInput?.click()}
+              disabled={isStreaming || !$selectedModelStore}
+              title="Attach image"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5">
+                <path fill-rule="evenodd" d="M1 5.25A2.25 2.25 0 0 1 3.25 3h13.5A2.25 2.25 0 0 1 19 5.25v9.5A2.25 2.25 0 0 1 16.75 17H3.25A2.25 2.25 0 0 1 1 14.75v-9.5Zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 0 0 .75-.75v-2.69l-2.22-2.219a.75.75 0 0 0-1.06 0l-1.91 1.909.47.47a.75.75 0 1 1-1.06 1.06L6.53 8.091a.75.75 0 0 0-1.06 0l-2.97 2.97ZM12 7a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z" clip-rule="evenodd" />
+              </svg>
+            </button>
+            <button
+              class="btn bg-primary text-btn-primary-text hover:opacity-90"
+              onclick={sendMessage}
+              disabled={(!userInput.trim() && attachedImages.length === 0) || !$selectedModelStore}
+            >
+              Send
+            </button>
+          {/if}
+        </div>
       </div>
     </div>
   {/if}

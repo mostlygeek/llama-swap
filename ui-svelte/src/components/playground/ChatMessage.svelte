@@ -1,10 +1,12 @@
 <script lang="ts">
   import { renderMarkdown } from "../../lib/markdown";
   import { Copy, Check, Pencil, X, Save, RefreshCw, ChevronDown, ChevronRight, Brain } from "lucide-svelte";
+  import { getTextContent, getImageUrls } from "../../lib/types";
+  import type { ContentPart } from "../../lib/types";
 
   interface Props {
     role: "user" | "assistant" | "system";
-    content: string;
+    content: string | ContentPart[];
     reasoning_content?: string;
     reasoningTimeMs?: number;
     isStreaming?: boolean;
@@ -15,15 +17,21 @@
 
   let { role, content, reasoning_content = "", reasoningTimeMs = 0, isStreaming = false, isReasoning = false, onEdit, onRegenerate }: Props = $props();
 
+  let textContent = $derived(getTextContent(content));
+  let imageUrls = $derived(getImageUrls(content));
+  let hasImages = $derived(imageUrls.length > 0);
+  let canEdit = $derived(onEdit !== undefined && !hasImages);
+
   let renderedContent = $derived(
     role === "assistant" && !isStreaming
-      ? renderMarkdown(content)
-      : escapeHtml(content).replace(/\n/g, '<br>')
+      ? renderMarkdown(textContent)
+      : escapeHtml(textContent).replace(/\n/g, '<br>')
   );
   let copied = $state(false);
   let isEditing = $state(false);
   let editContent = $state("");
   let showReasoning = $state(false);
+  let modalImageUrl = $state<string | null>(null);
 
   function formatDuration(ms: number): string {
     if (ms < 1000) {
@@ -44,13 +52,13 @@
   }
 
   async function copyToClipboard() {
-    await navigator.clipboard.writeText(content);
+    await navigator.clipboard.writeText(textContent);
     copied = true;
     setTimeout(() => (copied = false), 2000);
   }
 
   function startEdit() {
-    editContent = content;
+    editContent = textContent;
     isEditing = true;
   }
 
@@ -60,11 +68,27 @@
   }
 
   function saveEdit() {
-    if (onEdit && editContent.trim() !== content) {
+    if (onEdit && editContent.trim() !== textContent) {
       onEdit(editContent.trim());
     }
     isEditing = false;
     editContent = "";
+  }
+
+  function openModal(imageUrl: string) {
+    modalImageUrl = imageUrl;
+    document.body.style.overflow = "hidden";
+  }
+
+  function closeModal() {
+    modalImageUrl = null;
+    document.body.style.overflow = "";
+  }
+
+  function handleModalKeyDown(event: KeyboardEvent) {
+    if (event.key === "Escape") {
+      closeModal();
+    }
   }
 
   function handleKeyDown(event: KeyboardEvent) {
@@ -112,6 +136,22 @@
               {reasoning_content}{#if isReasoning}<span class="inline-block w-1.5 h-4 bg-current animate-pulse ml-0.5"></span>{/if}
             </div>
           {/if}
+        </div>
+      {/if}
+      {#if hasImages}
+        <div class="mb-3 flex flex-wrap gap-2">
+          {#each imageUrls as imageUrl, idx (idx)}
+            <button
+              onclick={() => openModal(imageUrl)}
+              class="cursor-pointer rounded border border-gray-200 dark:border-white/10 hover:opacity-80 transition-opacity"
+            >
+              <img
+                src={imageUrl}
+                alt="Image {idx + 1}"
+                class="max-h-64 rounded"
+              />
+            </button>
+          {/each}
         </div>
       {/if}
       <div class="prose prose-sm dark:prose-invert max-w-none">
@@ -171,18 +211,61 @@
           </div>
         </div>
       {:else}
-        <div class="whitespace-pre-wrap pr-8">{content}</div>
-        <button
-          class="absolute top-2 right-2 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity bg-white/20 hover:bg-white/30 shadow-sm"
-          onclick={startEdit}
-          title="Edit message"
-        >
-          <Pencil class="w-4 h-4" />
-        </button>
+        {#if hasImages}
+          <div class="mb-2 flex flex-wrap gap-2">
+            {#each imageUrls as imageUrl, idx (idx)}
+              <button
+                onclick={() => openModal(imageUrl)}
+                class="cursor-pointer rounded border border-white/20 hover:opacity-80 transition-opacity"
+              >
+                <img
+                  src={imageUrl}
+                  alt="Image {idx + 1}"
+                  class="max-w-[200px] rounded"
+                />
+              </button>
+            {/each}
+          </div>
+        {/if}
+        <div class="whitespace-pre-wrap pr-8">{textContent}</div>
+        {#if canEdit}
+          <button
+            class="absolute top-2 right-2 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity bg-white/20 hover:bg-white/30 shadow-sm"
+            onclick={startEdit}
+            title="Edit message"
+          >
+            <Pencil class="w-4 h-4" />
+          </button>
+        {/if}
       {/if}
     {/if}
   </div>
 </div>
+
+<!-- Full-size image modal -->
+{#if modalImageUrl}
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+    onclick={closeModal}
+    onkeydown={handleModalKeyDown}
+    role="button"
+    tabindex="-1"
+  >
+    <button
+      class="absolute top-4 right-4 p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"
+      onclick={closeModal}
+      title="Close"
+    >
+      <X class="w-6 h-6" />
+    </button>
+    <img
+      src={modalImageUrl}
+      alt="Full size image"
+      class="max-w-full max-h-full rounded"
+      onclick={(e) => e.stopPropagation()}
+    />
+  </div>
+{/if}
 
 <style>
   .prose :global(pre) {
