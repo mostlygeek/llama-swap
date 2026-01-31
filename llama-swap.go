@@ -97,6 +97,8 @@ func main() {
 			currentPM.Shutdown()
 			newPM := proxy.New(conf)
 			newPM.SetVersion(date, commit, version)
+			newPM.SetConfigPath(*configPath)
+			newPM.SetConfigExample(GetConfigExampleYAML())
 			srv.Handler = newPM
 			fmt.Println("Configuration Reloaded")
 
@@ -114,6 +116,8 @@ func main() {
 			}
 			newPM := proxy.New(conf)
 			newPM.SetVersion(date, commit, version)
+			newPM.SetConfigPath(*configPath)
+			newPM.SetConfigExample(GetConfigExampleYAML())
 			srv.Handler = newPM
 		}
 	}
@@ -121,13 +125,15 @@ func main() {
 	// load the initial proxy manager
 	reloadProxyManager()
 	debouncedReload := debounce(time.Second, reloadProxyManager)
-	if *watchConfig {
-		defer event.On(func(e proxy.ConfigFileChangedEvent) {
-			if e.ReloadingState == proxy.ReloadingStateStart {
-				debouncedReload()
-			}
-		})()
 
+	// Always listen for API-triggered config changes
+	defer event.On(func(e proxy.ConfigFileChangedEvent) {
+		if e.ReloadingState == proxy.ReloadingStateStart {
+			debouncedReload()
+		}
+	})()
+
+	if *watchConfig {
 		fmt.Println("Watching Configuration for changes")
 		go func() {
 			absConfigPath, err := filepath.Abs(*configPath)
