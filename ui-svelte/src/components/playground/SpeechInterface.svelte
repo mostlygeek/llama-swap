@@ -19,43 +19,101 @@
   let abortController = $state<AbortController | null>(null);
   let audioElement = $state<HTMLAudioElement | null>(null);
   let availableVoices = $state<string[]>(["coral", "alloy", "echo", "fable", "onyx", "nova", "shimmer"]);
+  let isLoadingVoices = $state(false);
 
   // Default voices to fall back to if API call fails
   const defaultVoices = ["coral", "alloy", "echo", "fable", "onyx", "nova", "shimmer"];
+  const CACHE_KEY = "playground-speech-voices-cache";
+
+  // Load voices cache from localStorage
+  function getVoicesCache(): Record<string, string[]> {
+    if (typeof window === "undefined") return {};
+    try {
+      const saved = localStorage.getItem(CACHE_KEY);
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  // Save voices cache to localStorage
+  function saveVoicesCache(cache: Record<string, string[]>) {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
+    } catch (e) {
+      console.error("Error saving voices cache", e);
+    }
+  }
 
   let hasModels = $derived($models.some((m) => !m.unlisted));
 
-  // Fetch available voices when model changes
+  // Track if this is the initial page load to avoid fetching on refresh
+  let isInitialLoad = $state(true);
+
+  // On page load, restore cached voices for the selected model if available
   $effect(() => {
     const model = $selectedModelStore;
-    if (!model) {
-      availableVoices = defaultVoices;
-      return;
+
+    if (isInitialLoad) {
+      isInitialLoad = false;
+      // If we have cached voices for this model, use them
+      const cache = getVoicesCache();
+      if (model && cache[model]) {
+        availableVoices = cache[model];
+      }
     }
-
-    // Fetch voices from API
-    fetch(`/v1/audio/voices?model=${encodeURIComponent(model)}`)
-      .then(async (response) => {
-        if (!response.ok) {
-          // Fall back to default voices if API call fails
-          availableVoices = defaultVoices;
-          return;
-        }
-        const data = await response.json();
-        // Expect response to be an array of voice strings or an object with a voices array
-        const voices = Array.isArray(data) ? data : (data.voices || defaultVoices);
-        availableVoices = voices.length > 0 ? voices : defaultVoices;
-
-        // If current voice is not in the new list, reset to first available voice
-        if (!availableVoices.includes($selectedVoiceStore)) {
-          selectedVoiceStore.set(availableVoices[0]);
-        }
-      })
-      .catch(() => {
-        // Fall back to default voices on error
-        availableVoices = defaultVoices;
-      });
   });
+
+  async function refreshVoices() {
+    const model = $selectedModelStore;
+    if (!model || isLoadingVoices) return;
+
+    isLoadingVoices = true;
+
+    try {
+      const response = await fetch(`/v1/audio/voices?model=${encodeURIComponent(model)}`);
+      if (!response.ok) {
+        // Fall back to default voices if API call fails
+        availableVoices = defaultVoices;
+        const cache = getVoicesCache();
+        cache[model] = defaultVoices;
+        saveVoicesCache(cache);
+        selectedVoiceStore.set(defaultVoices[0]);
+        return;
+      }
+      const data = await response.json();
+      // Expect response to be an array of voice strings or an object with a voices array
+      const voices = Array.isArray(data) ? data : (data.voices || defaultVoices);
+      const newVoices = voices.length > 0 ? voices : defaultVoices;
+
+      availableVoices = newVoices;
+      const cache = getVoicesCache();
+      cache[model] = newVoices;
+      saveVoicesCache(cache);
+
+      // Reset to first available voice
+      selectedVoiceStore.set(newVoices[0]);
+    } catch {
+      // Fall back to default voices on error
+      availableVoices = defaultVoices;
+      const cache = getVoicesCache();
+      cache[model] = defaultVoices;
+      saveVoicesCache(cache);
+      selectedVoiceStore.set(defaultVoices[0]);
+    } finally {
+      isLoadingVoices = false;
+    }
+  }
+
+  function handleVoiceChange(event: Event) {
+    const value = (event.target as HTMLSelectElement).value;
+    if (value === "(refresh)") {
+      refreshVoices();
+    } else {
+      selectedVoiceStore.set(value);
+    }
+  }
 
   // Auto-play effect when new audio is generated
   $effect(() => {
@@ -162,15 +220,38 @@
   <!-- Model and voice selectors -->
   <div class="shrink-0 flex gap-2 mb-4">
     <ModelSelector bind:value={$selectedModelStore} placeholder="Select a speech model..." disabled={isGenerating} />
-    <select
-      class="shrink-0 px-3 py-2 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
-      bind:value={$selectedVoiceStore}
-      disabled={isGenerating}
-    >
-      {#each availableVoices as voice (voice)}
-        <option value={voice}>{voice}</option>
-      {/each}
-    </select>
+    <div class="flex gap-2">
+      <select
+        class="shrink-0 px-3 py-2 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
+        value={$selectedVoiceStore}
+        onchange={handleVoiceChange}
+        disabled={isGenerating || isLoadingVoices || !$selectedModelStore}
+      >
+        {#each availableVoices as voice (voice)}
+          <option value={voice}>{voice}</option>
+        {/each}
+        <option value="(refresh)">(refresh)</option>
+      </select>
+      {#if $selectedModelStore && !getVoicesCache()[$selectedModelStore]}
+        <button
+          class="btn shrink-0"
+          onclick={refreshVoices}
+          disabled={isLoadingVoices}
+          title={isLoadingVoices ? "Loading voices..." : "Load voices for this model"}
+        >
+          {#if isLoadingVoices}
+            <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+          {:else}
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+            </svg>
+          {/if}
+        </button>
+      {/if}
+    </div>
   </div>
 
   <!-- Empty state for no models configured -->
