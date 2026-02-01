@@ -10,11 +10,11 @@
   import { initScreenWidth, isDarkMode, appTitle, connectionState } from "./stores/theme";
 
   const routes = {
-    "/": Models,
+    "/": Playground,
+    "/models": Models,
     "/logs": LogViewer,
     "/activity": Activity,
-    "/playground": Playground,
-    "*": Models,
+    "*": Playground,
   };
 
   // Sync theme to document attribute

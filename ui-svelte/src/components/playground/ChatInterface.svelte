@@ -4,6 +4,7 @@
   import { streamChatCompletion } from "../../lib/chatApi";
   import type { ChatMessage, ContentPart } from "../../lib/types";
   import ChatMessageComponent from "./ChatMessage.svelte";
+  import ModelSelector from "./ModelSelector.svelte";
   import ExpandableTextarea from "./ExpandableTextarea.svelte";
 
   const selectedModelStore = persistentStore<string>("playground-selected-model", "");
@@ -22,27 +23,7 @@
   let fileInput = $state<HTMLInputElement | null>(null);
   let imageError = $state<string | null>(null);
 
-  // Show all models (excluding unlisted), backend will auto-load as needed
-  let availableModels = $derived($models.filter((m) => !m.unlisted));
-
-  // Group models into local and peer models by provider
-  let groupedModels = $derived.by(() => {
-    const local = availableModels.filter((m) => !m.peerID);
-    const peerModels = availableModels.filter((m) => m.peerID);
-
-    // Group peer models by peerID
-    const peersByProvider = peerModels.reduce(
-      (acc, model) => {
-        const peerId = model.peerID || "unknown";
-        if (!acc[peerId]) acc[peerId] = [];
-        acc[peerId].push(model);
-        return acc;
-      },
-      {} as Record<string, typeof availableModels>
-    );
-
-    return { local, peersByProvider };
-  });
+  let hasModels = $derived($models.some((m) => !m.unlisted));
 
   // Auto-scroll when messages change
   $effect(() => {
@@ -277,27 +258,7 @@
 <div class="flex flex-col h-full">
   <!-- Model selector and controls -->
   <div class="shrink-0 flex flex-wrap gap-2 mb-4">
-    <select
-      class="min-w-0 flex-1 basis-48 px-3 py-2 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
-      bind:value={$selectedModelStore}
-      disabled={isStreaming}
-    >
-      <option value="">Select a model...</option>
-      {#if groupedModels.local.length > 0}
-        <optgroup label="Local">
-          {#each groupedModels.local as model (model.id)}
-            <option value={model.id}>{model.id}</option>
-          {/each}
-        </optgroup>
-      {/if}
-      {#each Object.entries(groupedModels.peersByProvider).sort(([a], [b]) => a.localeCompare(b)) as [peerId, peerModels] (peerId)}
-        <optgroup label="Peer: {peerId}">
-          {#each peerModels as model (model.id)}
-            <option value={model.id}>{model.id}</option>
-          {/each}
-        </optgroup>
-      {/each}
-    </select>
+    <ModelSelector bind:value={$selectedModelStore} placeholder="Select a model..." disabled={isStreaming} />
     <div class="flex gap-2">
       <button
         class="btn"
@@ -351,7 +312,7 @@
   {/if}
 
   <!-- Empty state for no models configured -->
-  {#if availableModels.length === 0}
+  {#if !hasModels}
     <div class="flex-1 flex items-center justify-center text-txtsecondary">
       <p>No models configured. Add models to your configuration to start chatting.</p>
     </div>

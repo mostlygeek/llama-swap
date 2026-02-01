@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { renderMarkdown } from "../../lib/markdown";
+  import { renderMarkdown, escapeHtml } from "../../lib/markdown";
   import { Copy, Check, Pencil, X, Save, RefreshCw, ChevronDown, ChevronRight, Brain } from "lucide-svelte";
   import { getTextContent, getImageUrls } from "../../lib/types";
   import type { ContentPart } from "../../lib/types";
@@ -38,17 +38,6 @@
       return `${ms.toFixed(0)}ms`;
     }
     return `${(ms / 1000).toFixed(1)}s`;
-  }
-
-  function escapeHtml(text: string): string {
-    const htmlEntities: Record<string, string> = {
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#39;",
-    };
-    return text.replace(/[&<>"']/g, (char) => htmlEntities[char]);
   }
 
   async function copyToClipboard() {

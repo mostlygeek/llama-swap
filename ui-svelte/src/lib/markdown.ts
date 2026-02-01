@@ -49,16 +49,17 @@ function rehypeHighlight() {
 function rehypeEscapeHtml() {
   return (tree: Root) => {
     visit(tree, "raw", (node: { type: "raw"; value: string }, _index, parent) => {
-      // Only escape raw nodes that aren't from our highlighting plugin
+      // Only skip escaping for raw nodes inside <code> elements
       // (highlight.js output is safe)
-      if (parent && "tagName" in parent && parent.tagName !== "code") {
+      const isInsideCode = parent && "tagName" in parent && parent.tagName === "code";
+      if (!isInsideCode) {
         node.value = escapeHtml(node.value);
       }
     });
   };
 }
 
-function escapeHtml(text: string): string {
+export function escapeHtml(text: string): string {
   const htmlEntities: Record<string, string> = {
     "&": "&amp;",
     "<": "&lt;",

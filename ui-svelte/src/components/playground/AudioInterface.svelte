@@ -2,6 +2,7 @@
   import { models } from "../../stores/api";
   import { persistentStore } from "../../stores/persistent";
   import { transcribeAudio } from "../../lib/audioApi";
+  import ModelSelector from "./ModelSelector.svelte";
 
   const selectedModelStore = persistentStore<string>("playground-audio-model", "");
 
@@ -17,27 +18,7 @@
   const ACCEPTED_FORMATS = ['.mp3', '.wav'];
   const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB
 
-  // Show all models (excluding unlisted), backend will auto-load as needed
-  let availableModels = $derived($models.filter((m) => !m.unlisted));
-
-  // Group models into local and peer models by provider
-  let groupedModels = $derived.by(() => {
-    const local = availableModels.filter((m) => !m.peerID);
-    const peerModels = availableModels.filter((m) => m.peerID);
-
-    // Group peer models by peerID
-    const peersByProvider = peerModels.reduce(
-      (acc, model) => {
-        const peerId = model.peerID || "unknown";
-        if (!acc[peerId]) acc[peerId] = [];
-        acc[peerId].push(model);
-        return acc;
-      },
-      {} as Record<string, typeof availableModels>
-    );
-
-    return { local, peersByProvider };
-  });
+  let hasModels = $derived($models.some((m) => !m.unlisted));
 
   let canTranscribe = $derived(selectedFile !== null && $selectedModelStore !== "" && !isTranscribing);
 
@@ -159,34 +140,14 @@
 <div class="flex flex-col h-full">
   <!-- Model selector -->
   <div class="shrink-0 flex flex-wrap gap-2 mb-4">
-    <select
-      class="min-w-0 flex-1 basis-48 px-3 py-2 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
-      bind:value={$selectedModelStore}
-      disabled={isTranscribing}
-    >
-      <option value="">Select an audio model...</option>
-      {#if groupedModels.local.length > 0}
-        <optgroup label="Local">
-          {#each groupedModels.local as model (model.id)}
-            <option value={model.id}>{model.id}</option>
-          {/each}
-        </optgroup>
-      {/if}
-      {#each Object.entries(groupedModels.peersByProvider).sort(([a], [b]) => a.localeCompare(b)) as [peerId, peerModels] (peerId)}
-        <optgroup label="Peer: {peerId}">
-          {#each peerModels as model (model.id)}
-            <option value={model.id}>{model.id}</option>
-          {/each}
-        </optgroup>
-      {/each}
-    </select>
+    <ModelSelector bind:value={$selectedModelStore} placeholder="Select an audio model..." disabled={isTranscribing} />
     <button class="btn" onclick={clearAll} disabled={!selectedFile && !transcriptionResult && !error}>
       Clear
     </button>
   </div>
 
   <!-- Empty state for no models configured -->
-  {#if availableModels.length === 0}
+  {#if !hasModels}
     <div class="flex-1 flex items-center justify-center text-txtsecondary">
       <p>No models configured. Add models to your configuration to transcribe audio.</p>
     </div>

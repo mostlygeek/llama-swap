@@ -43,19 +43,27 @@
     </h1>
   {/if}
 
-  <menu class="flex items-center gap-4">
+  <menu class="flex items-center gap-4 overflow-x-auto">
     <a
       href="/"
       use:link
-      class="text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1"
+      class="text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1 whitespace-nowrap"
       class:font-semibold={isActive("/", $location)}
+    >
+      Playground
+    </a>
+    <a
+      href="/models"
+      use:link
+      class="text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1 whitespace-nowrap"
+      class:font-semibold={isActive("/models", $location)}
     >
       Models
     </a>
     <a
       href="/activity"
       use:link
-      class="text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1"
+      class="text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1 whitespace-nowrap"
       class:font-semibold={isActive("/activity", $location)}
     >
       Activity
@@ -63,18 +71,10 @@
     <a
       href="/logs"
       use:link
-      class="text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1"
+      class="text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1 whitespace-nowrap"
       class:font-semibold={isActive("/logs", $location)}
     >
       Logs
-    </a>
-    <a
-      href="/playground"
-      use:link
-      class="text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1"
-      class:font-semibold={isActive("/playground", $location)}
-    >
-      Playground
     </a>
     <button onclick={toggleTheme} title="Toggle theme">
       {#if $isDarkMode}
