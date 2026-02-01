@@ -45,19 +45,6 @@ function rehypeHighlight() {
   };
 }
 
-// Custom plugin to escape raw HTML for XSS protection
-function rehypeEscapeHtml() {
-  return (tree: Root) => {
-    visit(tree, "raw", (node: { type: "raw"; value: string }, _index, parent) => {
-      // Only skip escaping for raw nodes inside <code> elements
-      // (highlight.js output is safe)
-      const isInsideCode = parent && "tagName" in parent && parent.tagName === "code";
-      if (!isInsideCode) {
-        node.value = escapeHtml(node.value);
-      }
-    });
-  };
-}
 
 export function escapeHtml(text: string): string {
   const htmlEntities: Record<string, string> = {
@@ -76,7 +63,6 @@ const processor = unified()
   .use(remarkGfm)
   .use(remarkRehype, { allowDangerousHtml: true })
   .use(rehypeHighlight)
-  .use(rehypeEscapeHtml)
   .use(rehypeStringify, { allowDangerousHtml: true });
 
 export function renderMarkdown(content: string): string {
