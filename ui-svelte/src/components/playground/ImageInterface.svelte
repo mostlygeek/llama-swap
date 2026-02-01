@@ -60,6 +60,7 @@
   function clearImage() {
     generatedImage = null;
     error = null;
+    prompt = "";
   }
 
   function downloadImage() {
@@ -117,9 +118,6 @@
         <option value="1024x1792">1024x1792 (SDXL)</option>
       </optgroup>
     </select>
-    <button class="btn" onclick={clearImage} disabled={!generatedImage && !error}>
-      Clear
-    </button>
   </div>
 
   <!-- Empty state for no models configured -->
@@ -191,6 +189,13 @@
             disabled={!prompt.trim() || !$selectedModelStore}
           >
             Generate
+          </button>
+          <button
+            class="btn flex-1 md:flex-none"
+            onclick={clearImage}
+            disabled={!generatedImage && !error && !prompt.trim()}
+          >
+            Clear
           </button>
         {/if}
       </div>
