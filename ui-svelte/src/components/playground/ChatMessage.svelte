@@ -42,9 +42,25 @@
   }
 
   async function copyToClipboard() {
-    await navigator.clipboard.writeText(textContent);
-    copied = true;
-    setTimeout(() => (copied = false), 2000);
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(textContent);
+      } else {
+        // Fallback for non-secure contexts (HTTP)
+        const textarea = document.createElement("textarea");
+        textarea.value = textContent;
+        textarea.style.position = "fixed";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+      copied = true;
+      setTimeout(() => (copied = false), 2000);
+    } catch (err) {
+      console.error("Failed to copy:", err);
+    }
   }
 
   function startEdit() {
