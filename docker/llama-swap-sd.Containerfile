@@ -1,8 +1,8 @@
 ARG SD_IMAGE=ghcr.io/leejet/stable-diffusion.cpp
 ARG SD_TAG=master-vulkan
-FROM ${SD_IMAGE}:${SD_TAG} AS sd-source
-
 ARG BASE=llama-swap:latest
+
+FROM ${SD_IMAGE}:${SD_TAG} AS sd-source
 FROM ${BASE}
 
 ARG UID=10001
