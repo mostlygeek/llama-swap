@@ -15,8 +15,7 @@ on:
     paths:
       - '.github/workflows/containers.yml'
       - 'docker/build-container.sh'
-      - 'docker/llama-swap.Containerfile'
-      - 'docker/llama-swap-sd.Containerfile'
+      - 'docker/*.Containerfile'
 
 jobs:
   build-and-push:
