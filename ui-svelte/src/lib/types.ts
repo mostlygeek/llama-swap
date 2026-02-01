@@ -28,8 +28,21 @@ export interface LogData {
   data: string;
 }
 
+export interface RequestLog {
+  id: number;
+  timestamp: string;
+  method: string;
+  path: string;
+  model: string;
+  status: number;
+  duration: number;
+  request_body?: string;
+  response_body?: string;
+  pending: boolean;
+}
+
 export interface APIEventEnvelope {
-  type: "modelStatus" | "logData" | "metrics";
+  type: "modelStatus" | "logData" | "metrics" | "request";
   data: string;
 }
 
@@ -54,22 +67,30 @@ export type ImageContentPart = {
 export type ContentPart = TextContentPart | ImageContentPart;
 
 export interface ChatMessage {
-  role: "user" | "assistant" | "system";
-  content: string | ContentPart[];
+  role: string;
+  content: string | ContentPart[] | null;
   reasoning_content?: string;
+  tool_calls?: any[];
+  tool_call_id?: string;
   reasoningTimeMs?: number;
 }
 
-export function getTextContent(content: string | ContentPart[]): string {
+export function getTextContent(content: string | ContentPart[] | null | undefined): string {
+  if (!content) {
+    return "";
+  }
   if (typeof content === "string") {
     return content;
+  }
+  if (!Array.isArray(content)) {
+    return "";
   }
   const textParts = content.filter((part): part is TextContentPart => part.type === "text");
   return textParts.map((part) => part.text).join("\n");
 }
 
-export function getImageUrls(content: string | ContentPart[]): string[] {
-  if (typeof content === "string") {
+export function getImageUrls(content: string | ContentPart[] | null | undefined): string[] {
+  if (!content || typeof content === "string") {
     return [];
   }
   return content

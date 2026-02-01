@@ -1,5 +1,5 @@
 import { writable } from "svelte/store";
-import type { Model, Metrics, VersionInfo, LogData, APIEventEnvelope } from "../lib/types";
+import type { Model, Metrics, VersionInfo, LogData, APIEventEnvelope, RequestLog } from "../lib/types";
 import { connectionState } from "./theme";
 
 const LOG_LENGTH_LIMIT = 1024 * 100; /* 100KB of log data */
@@ -9,6 +9,7 @@ export const models = writable<Model[]>([]);
 export const proxyLogs = writable<string>("");
 export const upstreamLogs = writable<string>("");
 export const metrics = writable<Metrics[]>([]);
+export const requests = writable<RequestLog[]>([]);
 export const versionInfo = writable<VersionInfo>({
   build_date: "unknown",
   commit: "unknown",
@@ -46,6 +47,7 @@ export function enableAPIEvents(enabled: boolean): void {
       proxyLogs.set("");
       upstreamLogs.set("");
       metrics.set([]);
+      requests.set([]);
       models.set([]);
       retryCount = 0;
       connectionState.set("connected");
@@ -81,6 +83,21 @@ export function enableAPIEvents(enabled: boolean): void {
           case "metrics": {
             const newMetrics = JSON.parse(message.data) as Metrics[];
             metrics.update((prevMetrics) => [...newMetrics, ...prevMetrics]);
+            break;
+          }
+
+          case "request": {
+            const req = JSON.parse(message.data) as RequestLog;
+            requests.update((prev) => {
+              const index = prev.findIndex((r) => r.id === req.id);
+              if (index === -1) {
+                return [req, ...prev];
+              } else {
+                const updated = [...prev];
+                updated[index] = req;
+                return updated;
+              }
+            });
             break;
           }
         }
@@ -169,6 +186,19 @@ export async function loadModel(model: string): Promise<void> {
     }
   } catch (error) {
     console.error("Failed to load model:", error);
+    throw error;
+  }
+}
+
+export async function getRequestDetail(id: number): Promise<RequestLog> {
+  try {
+    const response = await fetch(`/api/requests/${id}`);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    return await response.json();
+  } catch (error) {
+    console.error("Failed to fetch request detail:", error);
     throw error;
   }
 }

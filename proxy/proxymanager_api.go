@@ -30,6 +30,8 @@ func addApiHandlers(pm *ProxyManager) {
 		apiGroup.POST("/models/unload/*model", pm.apiUnloadSingleModelHandler)
 		apiGroup.GET("/events", pm.apiSendEvents)
 		apiGroup.GET("/metrics", pm.apiGetMetrics)
+		apiGroup.GET("/requests", pm.apiGetRequests)
+		apiGroup.GET("/requests/:id", pm.apiGetRequest)
 		apiGroup.GET("/version", pm.apiGetVersion)
 	}
 }
@@ -105,6 +107,7 @@ const (
 	msgTypeModelStatus messageType = "modelStatus"
 	msgTypeLogData     messageType = "logData"
 	msgTypeMetrics     messageType = "metrics"
+	msgTypeRequest     messageType = "request"
 )
 
 type messageEnvelope struct {
@@ -121,7 +124,7 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 	// prevent nginx from buffering SSE
 	c.Header("X-Accel-Buffering", "no")
 
-	sendBuffer := make(chan messageEnvelope, 25)
+	sendBuffer := make(chan messageEnvelope, 100)
 	ctx, cancel := context.WithCancel(c.Request.Context())
 	sendModels := func() {
 		data, err := json.Marshal(pm.getModelStatus())
@@ -164,6 +167,18 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 		}
 	}
 
+	sendRequest := func(req RequestEntry) {
+		jsonData, err := json.Marshal(req)
+		if err == nil {
+			select {
+			case sendBuffer <- messageEnvelope{Type: msgTypeRequest, Data: string(jsonData)}:
+			case <-ctx.Done():
+				return
+			default:
+			}
+		}
+	}
+
 	/**
 	 * Send updated models list
 	 */
@@ -191,11 +206,29 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 		sendMetrics([]TokenMetrics{e.Metrics})
 	})()
 
+	/**
+	 * Send Request data
+	 */
+	defer event.On(func(e RequestEvent) {
+		sendRequest(e.Entry)
+	})()
+
 	// send initial batch of data
 	sendLogData("proxy", pm.proxyLogger.GetHistory())
 	sendLogData("upstream", pm.upstreamLogger.GetHistory())
 	sendModels()
 	sendMetrics(pm.metricsMonitor.getMetrics())
+
+	// Send recent requests (without bodies to keep initial sync light)
+	requests := pm.requestMonitor.GetEntries()
+	if len(requests) > 20 {
+		requests = requests[len(requests)-20:]
+	}
+	for _, r := range requests {
+		r.RequestBody = ""
+		r.ResponseBody = ""
+		sendRequest(r)
+	}
 
 	for {
 		select {
@@ -219,6 +252,33 @@ func (pm *ProxyManager) apiGetMetrics(c *gin.Context) {
 		return
 	}
 	c.Data(http.StatusOK, "application/json", jsonData)
+}
+
+func (pm *ProxyManager) apiGetRequests(c *gin.Context) {
+	entries := pm.requestMonitor.GetEntries()
+	// Strip bodies for list view
+	for i := range entries {
+		entries[i].RequestBody = ""
+		entries[i].ResponseBody = ""
+	}
+	c.JSON(http.StatusOK, entries)
+}
+
+func (pm *ProxyManager) apiGetRequest(c *gin.Context) {
+	idStr := c.Param("id")
+	var id int
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request id"})
+		return
+	}
+
+	entry, found := pm.requestMonitor.GetEntry(id)
+	if !found {
+		c.JSON(http.StatusNotFound, gin.H{"error": "request not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, entry)
 }
 
 func (pm *ProxyManager) apiUnloadSingleModelHandler(c *gin.Context) {

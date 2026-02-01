@@ -97,7 +97,10 @@ func (mp *metricsMonitor) wrapHandler(
 	request *http.Request,
 	next func(modelID string, w http.ResponseWriter, r *http.Request) error,
 ) error {
-	recorder := newBodyCopier(writer)
+	recorder, ok := writer.(*responseBodyCopier)
+	if !ok {
+		recorder = newBodyCopier(writer)
+	}
 
 	// Filter Accept-Encoding to only include encodings we can decompress for metrics
 	if ae := request.Header.Get("Accept-Encoding"); ae != "" {
@@ -301,9 +304,10 @@ func decompressBody(body []byte, encoding string) ([]byte, error) {
 // while also capturing it in a buffer for later processing
 type responseBodyCopier struct {
 	gin.ResponseWriter
-	body  *bytes.Buffer
-	tee   io.Writer
-	start time.Time
+	body    *bytes.Buffer
+	tee     io.Writer
+	start   time.Time
+	onWrite func([]byte)
 }
 
 func newBodyCopier(w gin.ResponseWriter) *responseBodyCopier {
@@ -318,6 +322,10 @@ func newBodyCopier(w gin.ResponseWriter) *responseBodyCopier {
 func (w *responseBodyCopier) Write(b []byte) (int, error) {
 	if w.start.IsZero() {
 		w.start = time.Now()
+	}
+
+	if w.onWrite != nil {
+		w.onWrite(b)
 	}
 
 	// Single write operation that writes to both the response and buffer

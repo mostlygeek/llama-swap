@@ -40,6 +40,7 @@ type ProxyManager struct {
 	muxLogger      *LogMonitor
 
 	metricsMonitor *metricsMonitor
+	requestMonitor *requestMonitor
 
 	processGroups map[string]*ProcessGroup
 
@@ -152,6 +153,7 @@ func New(proxyConfig config.Config) *ProxyManager {
 		upstreamLogger: upstreamLogger,
 
 		metricsMonitor: newMetricsMonitor(proxyLogger, maxMetrics),
+		requestMonitor: newRequestMonitor(maxMetrics),
 
 		processGroups: make(map[string]*ProcessGroup),
 
@@ -598,15 +600,29 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 	originalPath := c.Request.URL.Path
 	c.Request.URL.Path = remainingPath
 
+	var requestBody string
+	if c.Request.ContentLength > 0 && c.Request.ContentLength < 1024*1024 { // Only capture small bodies
+		bodyBytes, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			pm.proxyLogger.Errorf("Error reading request body for recording: %v", err)
+		} else {
+			c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+			requestBody = string(bodyBytes)
+		}
+	}
+
+	recorder, done := pm.recordRequest(c, modelID, requestBody)
+	defer done()
+
 	// attempt to record metrics if it is a POST request
 	if pm.metricsMonitor != nil && c.Request.Method == "POST" {
-		if err := pm.metricsMonitor.wrapHandler(modelID, c.Writer, c.Request, processGroup.ProxyRequest); err != nil {
+		if err := pm.metricsMonitor.wrapHandler(modelID, recorder, c.Request, processGroup.ProxyRequest); err != nil {
 			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying metrics wrapped request: %s", err.Error()))
-			pm.proxyLogger.Errorf("Error proxying wrapped upstream request for model %s, path=%s", modelID, originalPath)
+			pm.proxyLogger.Errorf("Error proxying metrics wrapped request for model %s, path=%s", modelID, originalPath)
 			return
 		}
 	} else {
-		if err := processGroup.ProxyRequest(modelID, c.Writer, c.Request); err != nil {
+		if err := processGroup.ProxyRequest(modelID, recorder, c.Request); err != nil {
 			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
 			pm.proxyLogger.Errorf("Error proxying upstream request for model %s, path=%s", modelID, originalPath)
 			return
@@ -720,6 +736,9 @@ func (pm *ProxyManager) proxyInferenceHandler(c *gin.Context) {
 	c.Request.Header.Set("content-length", strconv.Itoa(len(bodyBytes)))
 	c.Request.ContentLength = int64(len(bodyBytes))
 
+	recorder, done := pm.recordRequest(c, modelID, string(bodyBytes))
+	defer done()
+
 	// issue #366 extract values that downstream handlers may need
 	isStreaming := gjson.GetBytes(bodyBytes, "stream").Bool()
 	ctx := context.WithValue(c.Request.Context(), proxyCtxKey("streaming"), isStreaming)
@@ -727,13 +746,13 @@ func (pm *ProxyManager) proxyInferenceHandler(c *gin.Context) {
 	c.Request = c.Request.WithContext(ctx)
 
 	if pm.metricsMonitor != nil && c.Request.Method == "POST" {
-		if err := pm.metricsMonitor.wrapHandler(modelID, c.Writer, c.Request, nextHandler); err != nil {
+		if err := pm.metricsMonitor.wrapHandler(modelID, recorder, c.Request, nextHandler); err != nil {
 			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying metrics wrapped request: %s", err.Error()))
 			pm.proxyLogger.Errorf("Error Proxying Metrics Wrapped Request model %s", modelID)
 			return
 		}
 	} else {
-		if err := nextHandler(modelID, c.Writer, c.Request); err != nil {
+		if err := nextHandler(modelID, recorder, c.Request); err != nil {
 			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
 			pm.proxyLogger.Errorf("Error Proxying Request for model %s", modelID)
 			return
@@ -862,7 +881,10 @@ func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
 	modifiedReq.ContentLength = int64(requestBuffer.Len())
 
 	// Use the modified request for proxying
-	if err := nextHandler(modelID, c.Writer, modifiedReq); err != nil {
+	recorder, done := pm.recordRequest(c, modelID, "")
+	defer done()
+
+	if err := nextHandler(modelID, recorder, modifiedReq); err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
 		pm.proxyLogger.Errorf("Error Proxying Request for model %s", modelID)
 		return
@@ -899,7 +921,10 @@ func (pm *ProxyManager) proxyGETModelHandler(c *gin.Context) {
 		return
 	}
 
-	if err := nextHandler(modelID, c.Writer, c.Request); err != nil {
+	recorder, done := pm.recordRequest(c, modelID, "")
+	defer done()
+
+	if err := nextHandler(modelID, recorder, c.Request); err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
 		pm.proxyLogger.Errorf("Error Proxying GET Request for model %s", modelID)
 		return
@@ -1025,4 +1050,30 @@ func (pm *ProxyManager) SetVersion(buildDate string, commit string, version stri
 	pm.buildDate = buildDate
 	pm.commit = commit
 	pm.version = version
+}
+
+func (pm *ProxyManager) recordRequest(c *gin.Context, modelID string, requestBody string) (*responseBodyCopier, func()) {
+	startTime := time.Now()
+	requestID := pm.requestMonitor.Add(&RequestEntry{
+		Timestamp:   startTime,
+		Method:      c.Request.Method,
+		Path:        c.Request.URL.Path,
+		Model:       modelID,
+		RequestBody: requestBody,
+	})
+
+	recorder := newBodyCopier(c.Writer)
+	recorder.onWrite = func(b []byte) {
+		pm.requestMonitor.AppendResponse(requestID, string(b))
+	}
+
+	return recorder, func() {
+		duration := time.Since(startTime)
+		respBody := ""
+		isStreaming := strings.Contains(recorder.Header().Get("Content-Type"), "text/event-stream")
+		if !isStreaming {
+			respBody = recorder.body.String()
+		}
+		pm.requestMonitor.Update(requestID, recorder.Status(), duration, respBody)
+	}
 }

@@ -8,6 +8,7 @@ const ConfigFileChangedEventID = 0x03
 const LogDataEventID = 0x04
 const TokenMetricsEventID = 0x05
 const ModelPreloadedEventID = 0x06
+const RequestEventID = 0x07
 
 type ProcessStateChangeEvent struct {
 	ProcessName string

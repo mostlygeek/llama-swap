@@ -1,14 +1,9 @@
 <script lang="ts">
   import { renderMarkdown, escapeHtml } from "../../lib/markdown";
   import { Copy, Check, Pencil, X, Save, RefreshCw, ChevronDown, ChevronRight, Brain, Code } from "lucide-svelte";
-  import { getTextContent, getImageUrls } from "../../lib/types";
-  import type { ContentPart } from "../../lib/types";
+  import { getTextContent, getImageUrls, type ChatMessage } from "../../lib/types";
 
-  interface Props {
-    role: "user" | "assistant" | "system";
-    content: string | ContentPart[];
-    reasoning_content?: string;
-    reasoningTimeMs?: number;
+  interface Props extends ChatMessage {
     isStreaming?: boolean;
     isReasoning?: boolean;
     onEdit?: (newContent: string) => void;
