@@ -5,24 +5,6 @@ import (
 	"strings"
 )
 
-// compressedFileSystem wraps a http.FileSystem to serve pre-compressed files.
-// It checks for .br (brotli) and .gz (gzip) versions of files and serves them
-// with appropriate Content-Encoding headers when the client supports them.
-type compressedFileSystem struct {
-	fs http.FileSystem
-}
-
-// NewCompressedFileSystem creates a new compressed file system wrapper
-func NewCompressedFileSystem(fs http.FileSystem) http.FileSystem {
-	return &compressedFileSystem{fs: fs}
-}
-
-// Open opens a file from the filesystem. If the request has Accept-Encoding
-// headers and a pre-compressed version exists, it returns that instead.
-func (cfs *compressedFileSystem) Open(name string) (http.File, error) {
-	return cfs.fs.Open(name)
-}
-
 // selectEncoding chooses the best encoding based on Accept-Encoding header
 // Returns the encoding ("br", "gzip", or "") and the corresponding file extension
 func selectEncoding(acceptEncoding string) (encoding, ext string) {
@@ -30,14 +12,18 @@ func selectEncoding(acceptEncoding string) (encoding, ext string) {
 		return "", ""
 	}
 
-	// Check for brotli first (preferred for better compression)
-	if strings.Contains(acceptEncoding, "br") {
-		return "br", ".br"
+	for _, part := range strings.Split(acceptEncoding, ",") {
+		enc := strings.TrimSpace(strings.SplitN(part, ";", 2)[0])
+		if enc == "br" {
+			return "br", ".br"
+		}
 	}
 
-	// Fall back to gzip
-	if strings.Contains(acceptEncoding, "gzip") {
-		return "gzip", ".gz"
+	for _, part := range strings.Split(acceptEncoding, ",") {
+		enc := strings.TrimSpace(strings.SplitN(part, ";", 2)[0])
+		if enc == "gzip" {
+			return "gzip", ".gz"
+		}
 	}
 
 	return "", ""

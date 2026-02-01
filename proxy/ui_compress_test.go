@@ -184,6 +184,10 @@ func TestSelectEncoding(t *testing.T) {
 		{"br", "br", ".br"},
 		{"", "", ""},
 		{"deflate", "", ""},
+		{"br;q=1.0, gzip;q=0.5", "br", ".br"},
+		{"gzip;q=1.0, br;q=0.5", "br", ".br"},
+		{"browser", "", ""},
+		{"compress, deflate", "", ""},
 	}
 
 	for _, tt := range tests {
