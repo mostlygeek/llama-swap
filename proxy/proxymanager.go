@@ -303,6 +303,7 @@ func (pm *ProxyManager) setupGinEngine() {
 	// Support audio/speech endpoint
 	pm.ginEngine.POST("/v1/audio/speech", pm.apiKeyAuth(), pm.proxyInferenceHandler)
 	pm.ginEngine.POST("/v1/audio/voices", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.GET("/v1/audio/voices", pm.apiKeyAuth(), pm.proxyGETModelHandler)
 	pm.ginEngine.POST("/v1/audio/transcriptions", pm.apiKeyAuth(), pm.proxyOAIPostFormHandler)
 	pm.ginEngine.POST("/v1/images/generations", pm.apiKeyAuth(), pm.proxyInferenceHandler)
 	pm.ginEngine.POST("/v1/images/edits", pm.apiKeyAuth(), pm.proxyOAIPostFormHandler)
@@ -348,25 +349,35 @@ func (pm *ProxyManager) setupGinEngine() {
 	if err != nil {
 		pm.proxyLogger.Errorf("Failed to load React filesystem: %v", err)
 	} else {
+		// Serve files with compression support under /ui/*
+		// This handler checks for pre-compressed .br and .gz files
+		pm.ginEngine.GET("/ui/*filepath", func(c *gin.Context) {
+			filepath := strings.TrimPrefix(c.Param("filepath"), "/")
+			// Default to index.html for directory-like paths
+			if filepath == "" {
+				filepath = "index.html"
+			}
 
-		// serve files that exist under /ui/*
-		pm.ginEngine.StaticFS("/ui", reactFS)
+			ServeCompressedFile(reactFS, c.Writer, c.Request, filepath)
+		})
 
-		// server SPA for UI under /ui/*
+		// Serve SPA for UI under /ui/* - fallback to index.html for client-side routing
 		pm.ginEngine.NoRoute(func(c *gin.Context) {
 			if !strings.HasPrefix(c.Request.URL.Path, "/ui") {
 				c.AbortWithStatus(http.StatusNotFound)
 				return
 			}
 
-			file, err := reactFS.Open("index.html")
-			if err != nil {
-				c.String(http.StatusInternalServerError, err.Error())
+			// Check if this looks like a file request (has extension)
+			path := c.Request.URL.Path
+			if strings.Contains(path, ".") && !strings.HasSuffix(path, "/") {
+				// This was likely a file request that wasn't found
+				c.AbortWithStatus(http.StatusNotFound)
 				return
 			}
-			defer file.Close()
-			http.ServeContent(c.Writer, c.Request, "index.html", time.Now(), file)
 
+			// Serve index.html for SPA routing
+			ServeCompressedFile(reactFS, c.Writer, c.Request, "index.html")
 		})
 	}
 
@@ -744,15 +755,29 @@ func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
 		return
 	}
 
+	// Look for a matching local model first, then check peers
+	var nextHandler func(modelID string, w http.ResponseWriter, r *http.Request) error
+	var useModelName string
+
 	modelID, found := pm.config.RealModelName(requestedModel)
-	if !found {
-		pm.sendErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("could not find real modelID for %s", requestedModel))
-		return
+	if found {
+		processGroup, err := pm.swapProcessGroup(modelID)
+		if err != nil {
+			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
+			return
+		}
+
+		useModelName = pm.config.Models[modelID].UseModelName
+		pm.proxyLogger.Debugf("ProxyManager using local Process for model: %s", requestedModel)
+		nextHandler = processGroup.ProxyRequest
+	} else if pm.peerProxy != nil && pm.peerProxy.HasPeerModel(requestedModel) {
+		pm.proxyLogger.Debugf("ProxyManager using ProxyPeer for model: %s", requestedModel)
+		modelID = requestedModel
+		nextHandler = pm.peerProxy.ProxyRequest
 	}
 
-	processGroup, err := pm.swapProcessGroup(modelID)
-	if err != nil {
-		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
+	if nextHandler == nil {
+		pm.sendErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("could not find suitable handler for %s", requestedModel))
 		return
 	}
 
@@ -768,8 +793,6 @@ func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
 			// If this is the model field and we have a profile, use just the model name
 			if key == "model" {
 				// # issue #69 allow custom model names to be sent to upstream
-				useModelName := pm.config.Models[modelID].UseModelName
-
 				if useModelName != "" {
 					fieldValue = useModelName
 				} else {
@@ -839,9 +862,46 @@ func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
 	modifiedReq.ContentLength = int64(requestBuffer.Len())
 
 	// Use the modified request for proxying
-	if err := processGroup.ProxyRequest(modelID, c.Writer, modifiedReq); err != nil {
+	if err := nextHandler(modelID, c.Writer, modifiedReq); err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
-		pm.proxyLogger.Errorf("Error Proxying Request for processGroup %s and model %s", processGroup.id, modelID)
+		pm.proxyLogger.Errorf("Error Proxying Request for model %s", modelID)
+		return
+	}
+}
+
+func (pm *ProxyManager) proxyGETModelHandler(c *gin.Context) {
+	requestedModel := c.Query("model")
+	if requestedModel == "" {
+		pm.sendErrorResponse(c, http.StatusBadRequest, "missing required 'model' query parameter")
+		return
+	}
+
+	var nextHandler func(modelID string, w http.ResponseWriter, r *http.Request) error
+	var modelID string
+
+	if realModelID, found := pm.config.RealModelName(requestedModel); found {
+		processGroup, err := pm.swapProcessGroup(realModelID)
+		if err != nil {
+			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
+			return
+		}
+		modelID = realModelID
+		pm.proxyLogger.Debugf("ProxyManager using local Process for model: %s", requestedModel)
+		nextHandler = processGroup.ProxyRequest
+	} else if pm.peerProxy != nil && pm.peerProxy.HasPeerModel(requestedModel) {
+		modelID = requestedModel
+		pm.proxyLogger.Debugf("ProxyManager using ProxyPeer for model: %s", requestedModel)
+		nextHandler = pm.peerProxy.ProxyRequest
+	}
+
+	if nextHandler == nil {
+		pm.sendErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("could not find suitable handler for %s", requestedModel))
+		return
+	}
+
+	if err := nextHandler(modelID, c.Writer, c.Request); err != nil {
+		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
+		pm.proxyLogger.Errorf("Error Proxying GET Request for model %s", modelID)
 		return
 	}
 }

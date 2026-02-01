@@ -7,19 +7,36 @@
     "start": "vite",
     "build": "vite build --emptyOutDir",
     "preview": "vite preview",
-    "check": "svelte-check --tsconfig ./tsconfig.json"
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
     "@tailwindcss/vite": "^4.1.8",
     "@tsconfig/svelte": "^5.0.4",
+    "@types/hast": "^3.0.4",
+    "@types/node": "^25.1.0",
     "svelte": "^5.19.0",
     "svelte-check": "^4.1.4",
     "tailwindcss": "^4.1.8",
     "typescript": "~5.8.3",
-    "vite": "^6.3.5"
+    "vite": "^6.3.5",
+    "vite-plugin-compression2": "^2.4.0",
+    "vitest": "^4.0.18"
   },
   "dependencies": {
-    "svelte-spa-router": "^4.0.1"
+    "highlight.js": "^11.11.1",
+    "katex": "^0.16.28",
+    "lucide-svelte": "^0.563.0",
+    "rehype-katex": "^7.0.1",
+    "rehype-stringify": "^10.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "remark-parse": "^11.0.0",
+    "remark-rehype": "^11.1.2",
+    "svelte-spa-router": "^4.0.1",
+    "unified": "^11.0.5",
+    "unist-util-visit": "^5.1.0"
   }
 }

@@ -210,6 +210,11 @@ func main() {
 		})
 	})
 
+	r.GET("/v1/audio/voices", func(c *gin.Context) {
+		model := c.Query("model")
+		c.JSON(http.StatusOK, gin.H{"voices": []string{"voice1"}, "model": model})
+	})
+
 	r.GET("/slow-respond", func(c *gin.Context) {
 		echo := c.Query("echo")
 		delay := c.Query("delay")
