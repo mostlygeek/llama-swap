@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { Maximize2, X } from "lucide-svelte";
 
   interface Props {
@@ -45,7 +46,8 @@
   $effect(() => {
     if (isExpanded && expandedTextarea) {
       expandedTextarea.focus();
-      expandedTextarea.setSelectionRange(expandedValue.length, expandedValue.length);
+      const len = untrack(() => expandedValue.length);
+      expandedTextarea.setSelectionRange(len, len);
     }
   });
 </script>
@@ -60,7 +62,7 @@
     {disabled}
   ></textarea>
   <button
-    class="absolute top-2 right-2 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity bg-surface/90 hover:bg-surface border border-gray-200 dark:border-white/10 shadow-sm"
+    class="absolute top-2 right-2 p-1.5 rounded-lg opacity-60 md:opacity-0 group-hover:opacity-100 transition-opacity bg-surface/90 hover:bg-surface border border-gray-200 dark:border-white/10 shadow-sm"
     onclick={openExpanded}
     title="Expand to edit"
     type="button"
