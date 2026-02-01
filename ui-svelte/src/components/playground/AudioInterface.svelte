@@ -141,9 +141,6 @@
   <!-- Model selector -->
   <div class="shrink-0 flex flex-wrap gap-2 mb-4">
     <ModelSelector bind:value={$selectedModelStore} placeholder="Select an audio model..." disabled={isTranscribing} />
-    <button class="btn" onclick={clearAll} disabled={!selectedFile && !transcriptionResult && !error}>
-      Clear
-    </button>
   </div>
 
   <!-- Empty state for no models configured -->
@@ -240,6 +237,13 @@
           disabled={!canTranscribe}
         >
           Transcribe
+        </button>
+        <button
+          class="btn"
+          onclick={clearAll}
+          disabled={!selectedFile && !transcriptionResult && !error}
+        >
+          Clear
         </button>
       {/if}
     </div>
