@@ -21,9 +21,9 @@ func TestServeCompressedFile_Brotli(t *testing.T) {
 
 	// Create a test filesystem
 	mapFS := fstest.MapFS{
-		"test.js":     {Data: content, ModTime: time.Now()},
-		"test.js.br":  {Data: brContent, ModTime: time.Now()},
-		"test.js.gz":  {Data: []byte("fake-gzip-data"), ModTime: time.Now()},
+		"test.js":    {Data: content, ModTime: time.Now()},
+		"test.js.br": {Data: brContent, ModTime: time.Now()},
+		"test.js.gz": {Data: []byte("fake-gzip-data"), ModTime: time.Now()},
 	}
 	fs := http.FS(mapFS)
 
@@ -61,8 +61,8 @@ func TestServeCompressedFile_Gzip(t *testing.T) {
 
 	// Create a test filesystem without brotli
 	mapFS := fstest.MapFS{
-		"test.js":     {Data: content, ModTime: time.Now()},
-		"test.js.gz":  {Data: gzContent, ModTime: time.Now()},
+		"test.js":    {Data: content, ModTime: time.Now()},
+		"test.js.gz": {Data: gzContent, ModTime: time.Now()},
 	}
 	fs := http.FS(mapFS)
 
@@ -127,9 +127,9 @@ func TestServeCompressedFile_NoAcceptEncoding(t *testing.T) {
 
 	// Create a test filesystem with compressed versions
 	mapFS := fstest.MapFS{
-		"test.js":     {Data: content, ModTime: time.Now()},
-		"test.js.br":  {Data: []byte("brotli"), ModTime: time.Now()},
-		"test.js.gz":  {Data: []byte("gzip"), ModTime: time.Now()},
+		"test.js":    {Data: content, ModTime: time.Now()},
+		"test.js.br": {Data: []byte("brotli"), ModTime: time.Now()},
+		"test.js.gz": {Data: []byte("gzip"), ModTime: time.Now()},
 	}
 	fs := http.FS(mapFS)
 
