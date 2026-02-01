@@ -5,14 +5,16 @@
   import LogViewer from "./routes/LogViewer.svelte";
   import Models from "./routes/Models.svelte";
   import Activity from "./routes/Activity.svelte";
+  import Playground from "./routes/Playground.svelte";
   import { enableAPIEvents } from "./stores/api";
   import { initScreenWidth, isDarkMode, appTitle, connectionState } from "./stores/theme";
 
   const routes = {
-    "/": Models,
+    "/": Playground,
+    "/models": Models,
     "/logs": LogViewer,
     "/activity": Activity,
-    "*": Models,
+    "*": Playground,
   };
 
   // Sync theme to document attribute
