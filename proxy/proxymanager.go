@@ -349,25 +349,35 @@ func (pm *ProxyManager) setupGinEngine() {
 	if err != nil {
 		pm.proxyLogger.Errorf("Failed to load React filesystem: %v", err)
 	} else {
+		// Serve files with compression support under /ui/*
+		// This handler checks for pre-compressed .br and .gz files
+		pm.ginEngine.GET("/ui/*filepath", func(c *gin.Context) {
+			filepath := strings.TrimPrefix(c.Param("filepath"), "/")
+			// Default to index.html for directory-like paths
+			if filepath == "" {
+				filepath = "index.html"
+			}
 
-		// serve files that exist under /ui/*
-		pm.ginEngine.StaticFS("/ui", reactFS)
+			ServeCompressedFile(reactFS, c.Writer, c.Request, filepath)
+		})
 
-		// server SPA for UI under /ui/*
+		// Serve SPA for UI under /ui/* - fallback to index.html for client-side routing
 		pm.ginEngine.NoRoute(func(c *gin.Context) {
 			if !strings.HasPrefix(c.Request.URL.Path, "/ui") {
 				c.AbortWithStatus(http.StatusNotFound)
 				return
 			}
 
-			file, err := reactFS.Open("index.html")
-			if err != nil {
-				c.String(http.StatusInternalServerError, err.Error())
+			// Check if this looks like a file request (has extension)
+			path := c.Request.URL.Path
+			if strings.Contains(path, ".") && !strings.HasSuffix(path, "/") {
+				// This was likely a file request that wasn't found
+				c.AbortWithStatus(http.StatusNotFound)
 				return
 			}
-			defer file.Close()
-			http.ServeContent(c.Writer, c.Request, "index.html", time.Now(), file)
 
+			// Serve index.html for SPA routing
+			ServeCompressedFile(reactFS, c.Writer, c.Request, "index.html")
 		})
 	}
 

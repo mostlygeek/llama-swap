@@ -21,6 +21,7 @@
     "tailwindcss": "^4.1.8",
     "typescript": "~5.8.3",
     "vite": "^6.3.5",
+    "vite-plugin-compression2": "^2.4.0",
     "vitest": "^4.0.18"
   },
   "dependencies": {
