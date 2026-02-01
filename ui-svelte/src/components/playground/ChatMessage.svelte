@@ -1,6 +1,6 @@
 <script lang="ts">
   import { renderMarkdown, escapeHtml } from "../../lib/markdown";
-  import { Copy, Check, Pencil, X, Save, RefreshCw, ChevronDown, ChevronRight, Brain } from "lucide-svelte";
+  import { Copy, Check, Pencil, X, Save, RefreshCw, ChevronDown, ChevronRight, Brain, Code } from "lucide-svelte";
   import { getTextContent, getImageUrls } from "../../lib/types";
   import type { ContentPart } from "../../lib/types";
 
@@ -28,6 +28,7 @@
       : escapeHtml(textContent).replace(/\n/g, '<br>')
   );
   let copied = $state(false);
+  let showRaw = $state(false);
   let isEditing = $state(false);
   let editContent = $state("");
   let showReasoning = $state(false);
@@ -143,12 +144,16 @@
           {/each}
         </div>
       {/if}
-      <div class="prose prose-sm dark:prose-invert max-w-none">
-        {@html renderedContent}
-        {#if isStreaming && !isReasoning}
-          <span class="inline-block w-2 h-4 bg-current animate-pulse ml-0.5"></span>
-        {/if}
-      </div>
+      {#if showRaw}
+        <div class="whitespace-pre-wrap font-mono text-sm">{textContent}</div>
+      {:else}
+        <div class="prose prose-sm dark:prose-invert max-w-none">
+          {@html renderedContent}
+          {#if isStreaming && !isReasoning}
+            <span class="inline-block w-2 h-4 bg-current animate-pulse ml-0.5"></span>
+          {/if}
+        </div>
+      {/if}
       {#if !isStreaming}
         <div class="flex gap-1 mt-2 pt-1 border-t border-gray-200 dark:border-white/10">
           {#if onRegenerate}
@@ -170,6 +175,13 @@
             {:else}
               <Copy class="w-4 h-4" />
             {/if}
+          </button>
+          <button
+            class="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 {showRaw ? 'text-primary' : 'text-txtsecondary'}"
+            onclick={() => showRaw = !showRaw}
+            title={showRaw ? "Show rendered" : "Show raw"}
+          >
+            <Code class="w-4 h-4" />
           </button>
         </div>
       {/if}
