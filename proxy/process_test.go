@@ -18,6 +18,15 @@ var (
 	debugLogger = NewLogMonitorWriter(os.Stdout)
 )
 
+// getSleepCommand returns a platform-appropriate command to sleep for the given number of seconds
+func getSleepCommand(seconds int) string {
+	if runtime.GOOS == "windows" {
+		// Use full path to avoid conflict with GNU coreutils timeout in Git Bash
+		return fmt.Sprintf("C:\\Windows\\System32\\timeout.exe /t %d /nobreak", seconds)
+	}
+	return fmt.Sprintf("sleep %d", seconds)
+}
+
 func init() {
 	// flip to help with debugging tests
 	if false {
@@ -568,4 +577,107 @@ func (w *panicOnWriteResponseWriter) Write(b []byte) (int, error) {
 		panic(http.ErrAbortHandler)
 	}
 	return w.ResponseRecorder.Write(b)
+}
+
+// TestProcess_StopCommandDoesNotHangWhenStartFails verifies that stopCommand()
+// does not hang when cmd.Start() fails or hasn't completed yet. This can happen
+// when a timeout transitions StateStarting -> StateStopping before cmd.Start()
+// completes.
+func TestProcess_StopCommandDoesNotHangWhenStartFails(t *testing.T) {
+	// Create a process with a command that will fail to start
+	config := config.ModelConfig{
+		Cmd:           "nonexistent-command-that-will-fail",
+		Proxy:         "http://127.0.0.1:9999",
+		CheckEndpoint: "/health",
+	}
+
+	process := NewProcess("fail-test", 1, config, debugLogger, debugLogger)
+
+	// Try to start the process - this will fail
+	err := process.start()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "start() failed for command")
+	assert.Equal(t, StateStopped, process.CurrentState())
+
+	// Now try to stop the process - this should not hang
+	// Create a channel to track if stopCommand completes
+	done := make(chan struct{})
+	go func() {
+		process.stopCommand()
+		close(done)
+	}()
+
+	// Wait for stopCommand to complete with a timeout
+	select {
+	case <-done:
+		// Success - stopCommand completed without hanging
+	case <-time.After(2 * time.Second):
+		t.Fatal("stopCommand() hung when process never started")
+	}
+}
+
+// TestProcess_StopImmediatelyDuringStartup verifies that StopImmediately()
+// can safely interrupt a process during StateStarting without hanging.
+func TestProcess_StopImmediatelyDuringStartup(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow test")
+	}
+
+	// Use a platform-appropriate command that takes a while to start but won't respond to health checks
+	cmd := getSleepCommand(10)
+	config := config.ModelConfig{
+		Cmd:           cmd,
+		Proxy:         "http://127.0.0.1:9999",
+		CheckEndpoint: "/health",
+	}
+
+	process := NewProcess("interrupt-test", 20, config, debugLogger, debugLogger)
+	process.healthCheckLoopInterval = 100 * time.Millisecond
+
+	// Start the process in a goroutine (it will be in StateStarting)
+	startDone := make(chan struct{})
+	errCh := make(chan error, 1)
+	go func() {
+		err := process.start()
+		errCh <- err
+		close(startDone)
+	}()
+
+	// Wait a bit for the process to enter StateStarting
+	<-time.After(200 * time.Millisecond)
+	currentState := process.CurrentState()
+	assert.Equal(t, StateStarting, currentState, "Process should be in StateStarting")
+
+	// Now call StopImmediately while in StateStarting
+	// This simulates a timeout firing during startup
+	stopDone := make(chan struct{})
+	go func() {
+		process.StopImmediately()
+		close(stopDone)
+	}()
+
+	// Verify StopImmediately completes without hanging
+	select {
+	case <-stopDone:
+		// Success - StopImmediately completed
+	case <-time.After(3 * time.Second):
+		t.Fatal("StopImmediately() hung when called during StateStarting")
+	}
+
+	// Wait for start() to complete
+	select {
+	case <-startDone:
+		// Success
+	case <-time.After(2 * time.Second):
+		t.Fatal("start() did not complete after StopImmediately")
+	}
+
+	// Verify start() returned an error due to StopImmediately interrupt
+	err := <-errCh
+	assert.Error(t, err)
+
+	// Process should be in StateStopped or StateStopping
+	finalState := process.CurrentState()
+	assert.True(t, finalState == StateStopped || finalState == StateStopping,
+		"Expected StateStopped or StateStopping, got %s", finalState)
 }

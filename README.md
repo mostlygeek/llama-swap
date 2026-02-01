@@ -42,7 +42,8 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
 - ✅ API Key support - define keys to restrict access to API endpoints
 - ✅ Customizable
   - Run multiple models at once with `Groups` ([#107](https://github.com/mostlygeek/llama-swap/issues/107))
-  - Automatic unloading of models after timeout by setting a `ttl`
+  - Automatic unloading of models after idle timeout by setting a `ttl`
+  - Request timeout protection with `requestTimeout` to prevent runaway inference
   - Reliable Docker and Podman support using `cmd` and `cmdStop` together
   - Preload models on startup with `hooks` ([#235](https://github.com/mostlygeek/llama-swap/pull/235))
 
