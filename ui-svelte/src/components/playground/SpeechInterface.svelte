@@ -12,7 +12,6 @@
   let inputText = $state("");
   let isGenerating = $state(false);
   let generatedAudioUrl = $state<string | null>(null);
-  let generatedText = $state<string | null>(null);
   let generatedVoice = $state<string | null>(null);
   let generatedTimestamp = $state<Date | null>(null);
   let error = $state<string | null>(null);
@@ -148,7 +147,6 @@
 
       // Create object URL for the audio blob and store metadata
       generatedAudioUrl = URL.createObjectURL(audioBlob);
-      generatedText = trimmedText;
       generatedVoice = $selectedVoiceStore;
       generatedTimestamp = new Date();
     } catch (err) {
@@ -165,18 +163,6 @@
 
   function cancelGeneration() {
     abortController?.abort();
-  }
-
-  function clearAudio() {
-    if (generatedAudioUrl) {
-      URL.revokeObjectURL(generatedAudioUrl);
-    }
-    generatedAudioUrl = null;
-    generatedText = null;
-    generatedVoice = null;
-    generatedTimestamp = null;
-    error = null;
-    inputText = "";
   }
 
   function clearInput() {
