@@ -1,7 +1,9 @@
 import { unified } from "unified";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 import remarkRehype from "remark-rehype";
+import rehypeKatex from "rehype-katex";
 import rehypeStringify from "rehype-stringify";
 import hljs from "highlight.js";
 import { visit } from "unist-util-visit";
@@ -61,7 +63,9 @@ export function escapeHtml(text: string): string {
 const processor = unified()
   .use(remarkParse)
   .use(remarkGfm)
+  .use(remarkMath)
   .use(remarkRehype, { allowDangerousHtml: true })
+  .use(rehypeKatex)
   .use(rehypeHighlight)
   .use(rehypeStringify, { allowDangerousHtml: true });
 
