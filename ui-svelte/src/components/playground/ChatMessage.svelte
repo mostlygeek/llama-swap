@@ -70,7 +70,11 @@
     document.body.style.overflow = "hidden";
   }
 
-  function closeModal() {
+  function closeModal(event?: MouseEvent) {
+    // Only close if clicking the background, not the image
+    if (event && event.target !== event.currentTarget) {
+      return;
+    }
     modalImageUrl = null;
     document.body.style.overflow = "";
   }
@@ -247,23 +251,22 @@
 {#if modalImageUrl}
   <div
     class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
-    onclick={closeModal}
+    onclick={(e) => closeModal(e)}
     onkeydown={handleModalKeyDown}
     role="button"
     tabindex="-1"
   >
     <button
       class="absolute top-4 right-4 p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"
-      onclick={closeModal}
+      onclick={() => closeModal()}
       title="Close"
     >
       <X class="w-6 h-6" />
     </button>
     <img
       src={modalImageUrl}
-      alt="Full size image"
-      class="max-w-full max-h-full rounded"
-      onclick={(e) => e.stopPropagation()}
+      alt=""
+      class="max-w-full max-h-full rounded pointer-events-none"
     />
   </div>
 {/if}

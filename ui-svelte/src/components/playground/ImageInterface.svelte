@@ -77,7 +77,11 @@
     showFullscreen = true;
   }
 
-  function closeFullscreen() {
+  function closeFullscreen(event?: MouseEvent) {
+    // Only close if clicking the background, not the image
+    if (event && event.target !== event.currentTarget) {
+      return;
+    }
     showFullscreen = false;
   }
 
@@ -138,12 +142,17 @@
         </div>
       {:else if generatedImage}
         <div class="relative max-w-full max-h-full flex items-center justify-center">
-          <img
-            src={generatedImage}
-            alt="AI generated content"
-            class="max-w-full max-h-full object-contain cursor-pointer hover:opacity-90 transition-opacity"
+          <button
+            class="p-0 border-0 bg-transparent cursor-pointer"
             onclick={openFullscreen}
-          />
+            aria-label="View fullscreen"
+          >
+            <img
+              src={generatedImage}
+              alt="AI generated content"
+              class="max-w-full max-h-full object-contain hover:opacity-90 transition-opacity"
+            />
+          </button>
           <button
             class="absolute bottom-2 right-2 p-2 bg-black/60 hover:bg-black/80 text-white rounded-full transition-colors"
             onclick={(e) => { e.stopPropagation(); downloadImage(); }}
@@ -193,14 +202,15 @@
 {#if showFullscreen && generatedImage}
   <div
     class="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4"
-    onclick={closeFullscreen}
+    onclick={(e) => closeFullscreen(e)}
     onkeydown={(e) => e.key === 'Escape' && closeFullscreen()}
     role="dialog"
     aria-modal="true"
+    tabindex="-1"
   >
     <button
       class="absolute top-4 right-4 text-white hover:text-gray-300 text-2xl w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors"
-      onclick={closeFullscreen}
+      onclick={() => closeFullscreen()}
       aria-label="Close fullscreen"
     >
       ×
@@ -208,8 +218,7 @@
     <img
       src={generatedImage}
       alt="AI generated content"
-      class="max-w-full max-h-full object-contain"
-      onclick={(e) => e.stopPropagation()}
+      class="max-w-full max-h-full object-contain pointer-events-none"
     />
   </div>
 {/if}
