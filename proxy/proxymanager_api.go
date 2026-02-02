@@ -221,6 +221,11 @@ func (pm *ProxyManager) apiGetMetrics(c *gin.Context) {
 	c.Data(http.StatusOK, "application/json", jsonData)
 }
 
+func (pm *ProxyManager) apiGetPrometheusMetrics(c *gin.Context) {
+	data := pm.metricsMonitor.getPrometheusText()
+	c.Data(http.StatusOK, "text/plain; version=0.0.4; charset=utf-8", data)
+}
+
 func (pm *ProxyManager) apiUnloadSingleModelHandler(c *gin.Context) {
 	requestedModel := strings.TrimPrefix(c.Param("model"), "/")
 	realModelName, found := pm.config.RealModelName(requestedModel)
