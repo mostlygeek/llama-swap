@@ -8,5 +8,7 @@ FROM ${BASE}
 ARG UID=10001
 ARG GID=10001
 
-COPY --from=ws-source --chown=${UID}:${GID} /app/build/bin/whisper-server /app/whisper/whisper-server
-COPY --from=ws-source --chown=${UID}:${GID} /app/build/**/*.so* /app/whisper/
+COPY --from=ws-source --chown=${UID}:${GID} /app/build/bin/whisper-server /app/whisper-server
+COPY --from=ws-source --chown=${UID}:${GID} /app/build/src/*.so* /app/
+
+WORKDIR /app

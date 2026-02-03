@@ -20,7 +20,7 @@ models:
   whisper:
     checkEndpoint: /v1/audio/transcriptions/
     cmd: >
-      /app/whisper/whisper-server
+      /app/whisper-server
         --host 127.0.0.1 --port ${PORT}
         -m /models/ggml-large-v3-turbo.bin
         --request-path /v1/audio/transcriptions --inference-path ""
