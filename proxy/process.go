@@ -270,6 +270,10 @@ func (p *Process) start() error {
 
 	// Set process state to failed
 	if err != nil {
+		p.cmdMutex.Lock()
+		close(p.cmdWaitChan)
+		p.cmdMutex.Unlock()
+
 		if curState, swapErr := p.swapState(StateStarting, StateStopped); swapErr != nil {
 			p.forceState(StateStopped) // force it into a stopped state
 			return fmt.Errorf(
@@ -609,7 +613,7 @@ func (p *Process) waitForCmd() {
 	p.cmdMutex.Unlock()
 }
 
-// cmdStopUpstreamProcess attemps to stop the upstream process gracefully
+// cmdStopUpstreamProcess attempts to stop the upstream process gracefully
 func (p *Process) cmdStopUpstreamProcess() error {
 	p.processLogger.Debugf("<%s> cmdStopUpstreamProcess() initiating graceful stop of upstream process", p.ID)
 
