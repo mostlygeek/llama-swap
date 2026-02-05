@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -41,17 +43,28 @@ func (e TokenMetricsEvent) Type() uint32 {
 
 // metricsMonitor parses llama-server output for token statistics
 type metricsMonitor struct {
-	mu         sync.RWMutex
-	metrics    []TokenMetrics
-	maxMetrics int
-	nextID     int
-	logger     *LogMonitor
+	mu            sync.RWMutex
+	metrics       []TokenMetrics
+	maxMetrics    int
+	nextID        int
+	logger        *LogMonitor
+	rollup        metricsRollup
+	rollupByModel map[string]*metricsRollup
+}
+
+// metricsRollup holds aggregated metrics data from prior requests
+type metricsRollup struct {
+	RequestsTotal     uint64
+	InputTokensTotal  uint64
+	OutputTokensTotal uint64
+	CachedTokensTotal uint64
 }
 
 func newMetricsMonitor(logger *LogMonitor, maxMetrics int) *metricsMonitor {
 	mp := &metricsMonitor{
-		logger:     logger,
-		maxMetrics: maxMetrics,
+		logger:        logger,
+		maxMetrics:    maxMetrics,
+		rollupByModel: make(map[string]*metricsRollup),
 	}
 
 	return mp
@@ -68,7 +81,34 @@ func (mp *metricsMonitor) addMetrics(metric TokenMetrics) {
 	if len(mp.metrics) > mp.maxMetrics {
 		mp.metrics = mp.metrics[len(mp.metrics)-mp.maxMetrics:]
 	}
+	mp.updateTokenRollupCounters(metric)
 	event.Emit(TokenMetricsEvent{Metrics: metric})
+}
+
+// update token counters at model level and global level
+func (mp *metricsMonitor) updateTokenRollupCounters(metric TokenMetrics) {
+	updateRollup(&mp.rollup, metric)
+
+	modelRollup, ok := mp.rollupByModel[metric.Model]
+	if !ok {
+		modelRollup = &metricsRollup{}
+		mp.rollupByModel[metric.Model] = modelRollup
+	}
+	updateRollup(modelRollup, metric)
+}
+
+// updateRollup increases counters based on the given metric object
+func updateRollup(rollup *metricsRollup, metric TokenMetrics) {
+	rollup.RequestsTotal++
+	if metric.InputTokens >= 0 {
+		rollup.InputTokensTotal += uint64(metric.InputTokens)
+	}
+	if metric.OutputTokens >= 0 {
+		rollup.OutputTokensTotal += uint64(metric.OutputTokens)
+	}
+	if metric.CachedTokens >= 0 {
+		rollup.CachedTokensTotal += uint64(metric.CachedTokens)
+	}
 }
 
 // getMetrics returns a copy of the current metrics
@@ -86,6 +126,199 @@ func (mp *metricsMonitor) getMetricsJSON() ([]byte, error) {
 	mp.mu.RLock()
 	defer mp.mu.RUnlock()
 	return json.Marshal(mp.metrics)
+}
+
+// getPrometheusText returns the metrics for the current monitor in Prometheus text format
+func (mp *metricsMonitor) getPrometheusText() []byte {
+	mp.mu.RLock()
+	overall := mp.rollup
+	perModel := make(map[string]metricsRollup, len(mp.rollupByModel))
+	for model, rollup := range mp.rollupByModel {
+		if rollup != nil {
+			perModel[model] = *rollup
+		}
+	}
+	metricsCopy := make([]TokenMetrics, len(mp.metrics))
+	copy(metricsCopy, mp.metrics)
+	mp.mu.RUnlock()
+
+	models := make([]string, 0, len(perModel))
+	for model := range perModel {
+		models = append(models, model)
+	}
+	sort.Strings(models)
+
+	var b strings.Builder
+	writeCounterWithModel(&b, "llama_swap_requests_total", "Total number of requests with recorded metrics.", overall.RequestsTotal, models, perModel, func(r metricsRollup) uint64 {
+		return r.RequestsTotal
+	})
+	writeCounterWithModel(&b, "llama_swap_input_tokens_total", "Total input tokens recorded.", overall.InputTokensTotal, models, perModel, func(r metricsRollup) uint64 {
+		return r.InputTokensTotal
+	})
+	writeCounterWithModel(&b, "llama_swap_output_tokens_total", "Total output tokens recorded.", overall.OutputTokensTotal, models, perModel, func(r metricsRollup) uint64 {
+		return r.OutputTokensTotal
+	})
+	writeCounterWithModel(&b, "llama_swap_cached_tokens_total", "Total cached tokens recorded.", overall.CachedTokensTotal, models, perModel, func(r metricsRollup) uint64 {
+		return r.CachedTokensTotal
+	})
+
+	windowSizes := []int{1, 5, 15}
+	overallGen, overallPrompt, perModelGen, perModelPrompt := computeTokensPerSecondLastN(metricsCopy, windowSizes)
+	for _, windowSize := range windowSizes {
+		writeGaugeWithModel(&b, fmt.Sprintf("llama_swap_generate_tokens_per_second_last_%d", windowSize), fmt.Sprintf("Average generation tokens per second over last %d requests.", windowSize), overallGen[windowSize], models, func(model string) float64 {
+			if modelValues, ok := perModelGen[model]; ok {
+				return modelValues[windowSize]
+			}
+			return 0
+		})
+		writeGaugeWithModel(&b, fmt.Sprintf("llama_swap_prompt_tokens_per_second_last_%d", windowSize), fmt.Sprintf("Average prompt tokens per second over last %d requests.", windowSize), overallPrompt[windowSize], models, func(model string) float64 {
+			if modelValues, ok := perModelPrompt[model]; ok {
+				return modelValues[windowSize]
+			}
+			return 0
+		})
+	}
+
+	return []byte(b.String())
+}
+
+// writeCounterWithModel writes a Prometheus counter metric with per-model breakdown
+func writeCounterWithModel(
+	b *strings.Builder,
+	name string,
+	help string,
+	overall uint64,
+	models []string,
+	perModel map[string]metricsRollup,
+	getValue func(metricsRollup) uint64,
+) {
+	fmt.Fprintf(b, "# HELP %s %s\n", name, help)
+	fmt.Fprintf(b, "# TYPE %s counter\n", name)
+	fmt.Fprintf(b, "%s %d\n", name, overall)
+	for _, model := range models {
+		value := getValue(perModel[model])
+		fmt.Fprintf(b, "%s{model=\"%s\"} %d\n", name, promLabelValue(model), value)
+	}
+}
+
+// writeGaugeWithModel writes a Prometheus gauge metric with per-model breakdown
+func writeGaugeWithModel(
+	b *strings.Builder,
+	name string,
+	help string,
+	overall float64,
+	models []string,
+	getValue func(model string) float64,
+) {
+	fmt.Fprintf(b, "# HELP %s %s\n", name, help)
+	fmt.Fprintf(b, "# TYPE %s gauge\n", name)
+	fmt.Fprintf(b, "%s %s\n", name, formatFloat(overall))
+	for _, model := range models {
+		fmt.Fprintf(b, "%s{model=\"%s\"} %s\n", name, promLabelValue(model), formatFloat(getValue(model)))
+	}
+}
+
+// computeTokensPerSecondLastN looks at a window size of the last N metrics and calculates the average tokens per second
+func computeTokensPerSecondLastN(metrics []TokenMetrics, windowSizes []int) (map[int]float64, map[int]float64, map[string]map[int]float64, map[string]map[int]float64) {
+	overallGenSum := make(map[int]float64)
+	overallGenCount := make(map[int]int)
+	overallPromptSum := make(map[int]float64)
+	overallPromptCount := make(map[int]int)
+	overallSeen := make(map[int]int)
+
+	perModelSeen := make(map[string]map[int]int)
+	perModelGenSum := make(map[string]map[int]float64)
+	perModelGenCount := make(map[string]map[int]int)
+	perModelPromptSum := make(map[string]map[int]float64)
+	perModelPromptCount := make(map[string]map[int]int)
+
+	// iterate over metrics in reverse order to get the most recent first
+	for i := len(metrics) - 1; i >= 0; i-- {
+		metric := metrics[i]
+		model := metric.Model
+
+		if _, ok := perModelSeen[model]; !ok {
+			perModelSeen[model] = make(map[int]int)
+			perModelGenSum[model] = make(map[int]float64)
+			perModelGenCount[model] = make(map[int]int)
+			perModelPromptSum[model] = make(map[int]float64)
+			perModelPromptCount[model] = make(map[int]int)
+		}
+
+		// calculate for each window size at the same time
+		for _, windowSize := range windowSizes {
+			if overallSeen[windowSize] < windowSize {
+				overallSeen[windowSize]++
+				if metric.TokensPerSecond >= 0 {
+					overallGenSum[windowSize] += metric.TokensPerSecond
+					overallGenCount[windowSize]++
+				}
+				if metric.PromptPerSecond >= 0 {
+					overallPromptSum[windowSize] += metric.PromptPerSecond
+					overallPromptCount[windowSize]++
+				}
+			}
+
+			if perModelSeen[model][windowSize] < windowSize {
+				perModelSeen[model][windowSize]++
+				if metric.TokensPerSecond >= 0 {
+					perModelGenSum[model][windowSize] += metric.TokensPerSecond
+					perModelGenCount[model][windowSize]++
+				}
+				if metric.PromptPerSecond >= 0 {
+					perModelPromptSum[model][windowSize] += metric.PromptPerSecond
+					perModelPromptCount[model][windowSize]++
+				}
+			}
+		}
+	}
+
+	// calculate averages for each window size
+	overallGen := make(map[int]float64)
+	overallPrompt := make(map[int]float64)
+	perModelGen := make(map[string]map[int]float64)
+	perModelPrompt := make(map[string]map[int]float64)
+
+	for _, windowSize := range windowSizes {
+		if overallGenCount[windowSize] > 0 {
+			overallGen[windowSize] = overallGenSum[windowSize] / float64(overallGenCount[windowSize])
+		} else {
+			overallGen[windowSize] = 0
+		}
+		if overallPromptCount[windowSize] > 0 {
+			overallPrompt[windowSize] = overallPromptSum[windowSize] / float64(overallPromptCount[windowSize])
+		} else {
+			overallPrompt[windowSize] = 0
+		}
+	}
+
+	for model := range perModelSeen {
+		perModelGen[model] = make(map[int]float64)
+		perModelPrompt[model] = make(map[int]float64)
+		for _, windowSize := range windowSizes {
+			if perModelGenCount[model][windowSize] > 0 {
+				perModelGen[model][windowSize] = perModelGenSum[model][windowSize] / float64(perModelGenCount[model][windowSize])
+			} else {
+				perModelGen[model][windowSize] = 0
+			}
+			if perModelPromptCount[model][windowSize] > 0 {
+				perModelPrompt[model][windowSize] = perModelPromptSum[model][windowSize] / float64(perModelPromptCount[model][windowSize])
+			} else {
+				perModelPrompt[model][windowSize] = 0
+			}
+		}
+	}
+
+	return overallGen, overallPrompt, perModelGen, perModelPrompt
+}
+
+func formatFloat(value float64) string {
+	return strconv.FormatFloat(value, 'f', -1, 64)
+}
+
+func promLabelValue(value string) string {
+	replacer := strings.NewReplacer("\\", "\\\\", "\n", "\\n", "\"", "\\\"")
+	return replacer.Replace(value)
 }
 
 // wrapHandler wraps the proxy handler to extract token metrics
