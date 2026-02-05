@@ -123,6 +123,7 @@ type Config struct {
 	LogTimeFormat      string                 `yaml:"logTimeFormat"`
 	LogToStdout        string                 `yaml:"logToStdout"`
 	MetricsMaxInMemory int                    `yaml:"metricsMaxInMemory"`
+	EnableCaptures     bool                   `yaml:"enableCaptures"`
 	Models             map[string]ModelConfig `yaml:"models"` /* key is model ID */
 	Profiles           map[string][]string    `yaml:"profiles"`
 	Groups             map[string]GroupConfig `yaml:"groups"` /* key is group ID */

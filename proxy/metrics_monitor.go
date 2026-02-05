@@ -30,6 +30,26 @@ type TokenMetrics struct {
 	DurationMs      int       `json:"duration_ms"`
 }
 
+type ReqRespCapture struct {
+	ID          int               `json:"id"`
+	ReqHeaders  map[string]string `json:"req_headers"`
+	ReqBody     []byte            `json:"req_body"`
+	RespHeaders map[string]string `json:"resp_headers"`
+	RespBody    []byte            `json:"resp_body"`
+}
+
+// Size returns the approximate memory usage of this capture in bytes
+func (c *ReqRespCapture) Size() int {
+	size := len(c.ReqBody) + len(c.RespBody)
+	for k, v := range c.ReqHeaders {
+		size += len(k) + len(v)
+	}
+	for k, v := range c.RespHeaders {
+		size += len(k) + len(v)
+	}
+	return size
+}
+
 // TokenMetricsEvent represents a token metrics event
 type TokenMetricsEvent struct {
 	Metrics TokenMetrics
@@ -39,6 +59,9 @@ func (e TokenMetricsEvent) Type() uint32 {
 	return TokenMetricsEventID // defined in events.go
 }
 
+// DefaultMaxCaptureSize is the default maximum size in bytes for all captures (5MB)
+const DefaultMaxCaptureSize = 5 * 1024 * 1024
+
 // metricsMonitor parses llama-server output for token statistics
 type metricsMonitor struct {
 	mu         sync.RWMutex
@@ -46,19 +69,30 @@ type metricsMonitor struct {
 	maxMetrics int
 	nextID     int
 	logger     *LogMonitor
+
+	// capture fields
+	enableCaptures bool
+	captures       map[int]ReqRespCapture // map for O(1) lookup by ID
+	captureOrder   []int                  // track insertion order for FIFO eviction
+	captureSize    int                    // current total size in bytes
+	maxCaptureSize int                    // max bytes for captures
 }
 
-func newMetricsMonitor(logger *LogMonitor, maxMetrics int) *metricsMonitor {
-	mp := &metricsMonitor{
-		logger:     logger,
-		maxMetrics: maxMetrics,
+func newMetricsMonitor(logger *LogMonitor, maxMetrics int, enableCaptures bool) *metricsMonitor {
+	return &metricsMonitor{
+		logger:         logger,
+		maxMetrics:     maxMetrics,
+		enableCaptures: enableCaptures,
+		captures:       make(map[int]ReqRespCapture),
+		captureOrder:   make([]int, 0),
+		captureSize:    0,
+		maxCaptureSize: DefaultMaxCaptureSize,
 	}
-
-	return mp
 }
 
-// addMetrics adds a new metric to the collection and publishes an event
-func (mp *metricsMonitor) addMetrics(metric TokenMetrics) {
+// addMetrics adds a new metric to the collection and publishes an event.
+// Returns the assigned metric ID.
+func (mp *metricsMonitor) addMetrics(metric TokenMetrics) int {
 	mp.mu.Lock()
 	defer mp.mu.Unlock()
 
@@ -69,6 +103,49 @@ func (mp *metricsMonitor) addMetrics(metric TokenMetrics) {
 		mp.metrics = mp.metrics[len(mp.metrics)-mp.maxMetrics:]
 	}
 	event.Emit(TokenMetricsEvent{Metrics: metric})
+	return metric.ID
+}
+
+// addCapture adds a new capture to the buffer with size-based eviction.
+// Captures are skipped if enableCaptures is false or if capture exceeds maxCaptureSize.
+func (mp *metricsMonitor) addCapture(capture ReqRespCapture) {
+	if !mp.enableCaptures {
+		return
+	}
+
+	mp.mu.Lock()
+	defer mp.mu.Unlock()
+
+	captureSize := capture.Size()
+	if captureSize > mp.maxCaptureSize {
+		mp.logger.Warnf("capture size %d exceeds max %d, skipping", captureSize, mp.maxCaptureSize)
+		return
+	}
+
+	// Evict oldest (FIFO) until room available
+	for mp.captureSize+captureSize > mp.maxCaptureSize && len(mp.captureOrder) > 0 {
+		oldestID := mp.captureOrder[0]
+		mp.captureOrder = mp.captureOrder[1:]
+		if evicted, exists := mp.captures[oldestID]; exists {
+			mp.captureSize -= evicted.Size()
+			delete(mp.captures, oldestID)
+		}
+	}
+
+	mp.captures[capture.ID] = capture
+	mp.captureOrder = append(mp.captureOrder, capture.ID)
+	mp.captureSize += captureSize
+}
+
+// getCaptureByID returns a capture by its ID, or nil if not found.
+func (mp *metricsMonitor) getCaptureByID(id int) *ReqRespCapture {
+	mp.mu.RLock()
+	defer mp.mu.RUnlock()
+
+	if capture, exists := mp.captures[id]; exists {
+		return &capture
+	}
+	return nil
 }
 
 // getMetrics returns a copy of the current metrics
@@ -97,6 +174,27 @@ func (mp *metricsMonitor) wrapHandler(
 	request *http.Request,
 	next func(modelID string, w http.ResponseWriter, r *http.Request) error,
 ) error {
+	// Capture request body and headers if captures enabled
+	var reqBody []byte
+	var reqHeaders map[string]string
+	if mp.enableCaptures {
+		if request.Body != nil {
+			var err error
+			reqBody, err = io.ReadAll(request.Body)
+			if err != nil {
+				return fmt.Errorf("failed to read request body for capture: %w", err)
+			}
+			request.Body.Close()
+			request.Body = io.NopCloser(bytes.NewBuffer(reqBody))
+		}
+		reqHeaders = make(map[string]string)
+		for key, values := range request.Header {
+			if len(values) > 0 {
+				reqHeaders[key] = values[0]
+			}
+		}
+	}
+
 	recorder := newBodyCopier(writer)
 
 	// Filter Accept-Encoding to only include encodings we can decompress for metrics
@@ -165,7 +263,25 @@ func (mp *metricsMonitor) wrapHandler(
 		}
 	}
 
-	mp.addMetrics(tm)
+	metricID := mp.addMetrics(tm)
+
+	// Store capture if enabled
+	if mp.enableCaptures {
+		respHeaders := make(map[string]string)
+		for key, values := range recorder.Header() {
+			if len(values) > 0 {
+				respHeaders[key] = values[0]
+			}
+		}
+		mp.addCapture(ReqRespCapture{
+			ID:          metricID,
+			ReqHeaders:  reqHeaders,
+			ReqBody:     reqBody,
+			RespHeaders: respHeaders,
+			RespBody:    body,
+		})
+	}
+
 	return nil
 }
 
