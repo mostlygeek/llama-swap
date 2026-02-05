@@ -875,8 +875,8 @@ func TestMetricsMonitor_AddCapture(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10, true)
 
 		capture := ReqRespCapture{
-			ID:      0,
-			ReqBody: []byte("test request"),
+			ID:       0,
+			ReqBody:  []byte("test request"),
 			RespBody: []byte("test response"),
 		}
 		mm.addCapture(capture)
