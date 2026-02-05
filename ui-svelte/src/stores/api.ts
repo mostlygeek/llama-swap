@@ -1,5 +1,5 @@
 import { writable } from "svelte/store";
-import type { Model, Metrics, VersionInfo, LogData, APIEventEnvelope } from "../lib/types";
+import type { Model, Metrics, VersionInfo, LogData, APIEventEnvelope, ReqRespCapture } from "../lib/types";
 import { connectionState } from "./theme";
 
 const LOG_LENGTH_LIMIT = 1024 * 100; /* 100KB of log data */
@@ -170,5 +170,21 @@ export async function loadModel(model: string): Promise<void> {
   } catch (error) {
     console.error("Failed to load model:", error);
     throw error;
+  }
+}
+
+export async function getCapture(id: number): Promise<ReqRespCapture | null> {
+  try {
+    const response = await fetch(`/api/captures/${id}`);
+    if (response.status === 404) {
+      return null;
+    }
+    if (!response.ok) {
+      throw new Error(`Failed to fetch capture: ${response.status}`);
+    }
+    return await response.json();
+  } catch (error) {
+    console.error("Failed to fetch capture:", error);
+    return null;
   }
 }

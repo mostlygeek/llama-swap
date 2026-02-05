@@ -28,6 +28,7 @@ type TokenMetrics struct {
 	PromptPerSecond float64   `json:"prompt_per_second"`
 	TokensPerSecond float64   `json:"tokens_per_second"`
 	DurationMs      int       `json:"duration_ms"`
+	HasCapture      bool      `json:"has_capture"`
 }
 
 type ReqRespCapture struct {
@@ -263,9 +264,8 @@ func (mp *metricsMonitor) wrapHandler(
 		}
 	}
 
-	metricID := mp.addMetrics(tm)
-
-	// Store capture if enabled
+	// Build capture if enabled and determine if it will be stored
+	var capture *ReqRespCapture
 	if mp.enableCaptures {
 		respHeaders := make(map[string]string)
 		for key, values := range recorder.Header() {
@@ -273,13 +273,24 @@ func (mp *metricsMonitor) wrapHandler(
 				respHeaders[key] = values[0]
 			}
 		}
-		mp.addCapture(ReqRespCapture{
-			ID:          metricID,
+		capture = &ReqRespCapture{
 			ReqHeaders:  reqHeaders,
 			ReqBody:     reqBody,
 			RespHeaders: respHeaders,
 			RespBody:    body,
-		})
+		}
+		// Only set HasCapture if the capture will actually be stored (not too large)
+		if capture.Size() <= mp.maxCaptureSize {
+			tm.HasCapture = true
+		}
+	}
+
+	metricID := mp.addMetrics(tm)
+
+	// Store capture if enabled
+	if capture != nil {
+		capture.ID = metricID
+		mp.addCapture(*capture)
 	}
 
 	return nil

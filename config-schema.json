@@ -87,6 +87,11 @@
             "default": 1000,
             "description": "Maximum number of metrics to keep in memory. Controls how many metrics are stored before older ones are discarded."
         },
+        "enableCaptures": {
+            "type": "boolean",
+            "default": false,
+            "description": "Enable request and response captures that can be viewed in the UI. By default 5MB of memory will be allocated."
+        },
         "startPort": {
             "type": "integer",
             "default": 5800,
