@@ -26,7 +26,9 @@
   function decodeBody(body: string | null | undefined): string {
     if (!body) return "";
     try {
-      return atob(body);
+      const binary = atob(body);
+      const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+      return new TextDecoder().decode(bytes);
     } catch {
       return body;
     }
