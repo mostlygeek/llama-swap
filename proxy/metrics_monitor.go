@@ -194,6 +194,7 @@ func (mp *metricsMonitor) wrapHandler(
 				reqHeaders[key] = values[0]
 			}
 		}
+		redactHeaders(reqHeaders)
 	}
 
 	recorder := newBodyCopier(writer)
@@ -273,6 +274,7 @@ func (mp *metricsMonitor) wrapHandler(
 				respHeaders[key] = values[0]
 			}
 		}
+		redactHeaders(respHeaders)
 		capture = &ReqRespCapture{
 			ReqHeaders:  reqHeaders,
 			ReqBody:     reqBody,
@@ -461,6 +463,25 @@ func (w *responseBodyCopier) Header() http.Header {
 
 func (w *responseBodyCopier) StartTime() time.Time {
 	return w.start
+}
+
+// sensitiveHeaders lists headers that should be redacted in captures
+var sensitiveHeaders = map[string]bool{
+	"authorization":       true,
+	"proxy-authorization": true,
+	"cookie":              true,
+	"set-cookie":          true,
+	"x-api-key":           true,
+}
+
+// redactHeaders returns a copy of headers with sensitive values replaced
+func redactHeaders(headers map[string]string) map[string]string {
+	for key := range headers {
+		if sensitiveHeaders[strings.ToLower(key)] {
+			headers[key] = "[REDACTED]"
+		}
+	}
+	return headers
 }
 
 // filterAcceptEncoding filters the Accept-Encoding header to only include

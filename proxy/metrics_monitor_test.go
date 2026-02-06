@@ -941,6 +941,50 @@ func TestMetricsMonitor_GetCaptureByID(t *testing.T) {
 	})
 }
 
+func TestRedactHeaders(t *testing.T) {
+	t.Run("redacts sensitive headers", func(t *testing.T) {
+		headers := map[string]string{
+			"Authorization":       "Bearer secret-token",
+			"Proxy-Authorization": "Basic creds",
+			"Cookie":              "session=abc123",
+			"Set-Cookie":          "session=xyz789",
+			"X-Api-Key":           "sk-12345",
+			"Content-Type":        "application/json",
+			"X-Custom":            "safe-value",
+		}
+
+		redactHeaders(headers)
+
+		assert.Equal(t, "[REDACTED]", headers["Authorization"])
+		assert.Equal(t, "[REDACTED]", headers["Proxy-Authorization"])
+		assert.Equal(t, "[REDACTED]", headers["Cookie"])
+		assert.Equal(t, "[REDACTED]", headers["Set-Cookie"])
+		assert.Equal(t, "[REDACTED]", headers["X-Api-Key"])
+		assert.Equal(t, "application/json", headers["Content-Type"])
+		assert.Equal(t, "safe-value", headers["X-Custom"])
+	})
+
+	t.Run("handles mixed case header names", func(t *testing.T) {
+		headers := map[string]string{
+			"authorization": "Bearer token",
+			"COOKIE":        "session=abc",
+			"x-api-key":     "key123",
+		}
+
+		redactHeaders(headers)
+
+		assert.Equal(t, "[REDACTED]", headers["authorization"])
+		assert.Equal(t, "[REDACTED]", headers["COOKIE"])
+		assert.Equal(t, "[REDACTED]", headers["x-api-key"])
+	})
+
+	t.Run("handles empty headers", func(t *testing.T) {
+		headers := map[string]string{}
+		result := redactHeaders(headers)
+		assert.Empty(t, result)
+	})
+}
+
 func TestMetricsMonitor_WrapHandler_Capture(t *testing.T) {
 	t.Run("captures request and response when enabled", func(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10, true)
@@ -977,7 +1021,7 @@ func TestMetricsMonitor_WrapHandler_Capture(t *testing.T) {
 		assert.Equal(t, []byte(requestBody), capture.ReqBody)
 		assert.Equal(t, []byte(responseBody), capture.RespBody)
 		assert.Equal(t, "application/json", capture.ReqHeaders["Content-Type"])
-		assert.Equal(t, "Bearer secret", capture.ReqHeaders["Authorization"])
+		assert.Equal(t, "[REDACTED]", capture.ReqHeaders["Authorization"])
 		assert.Equal(t, "application/json", capture.RespHeaders["Content-Type"])
 		assert.Equal(t, "header-value", capture.RespHeaders["X-Custom"])
 	})
