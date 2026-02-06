@@ -980,8 +980,8 @@ func TestRedactHeaders(t *testing.T) {
 
 	t.Run("handles empty headers", func(t *testing.T) {
 		headers := map[string]string{}
-		result := redactHeaders(headers)
-		assert.Empty(t, result)
+		redactHeaders(headers)
+		assert.Empty(t, headers)
 	})
 }
 

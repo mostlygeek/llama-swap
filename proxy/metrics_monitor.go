@@ -275,6 +275,7 @@ func (mp *metricsMonitor) wrapHandler(
 			}
 		}
 		redactHeaders(respHeaders)
+		delete(respHeaders, "Content-Encoding")
 		capture = &ReqRespCapture{
 			ReqHeaders:  reqHeaders,
 			ReqBody:     reqBody,
@@ -474,14 +475,13 @@ var sensitiveHeaders = map[string]bool{
 	"x-api-key":           true,
 }
 
-// redactHeaders returns a copy of headers with sensitive values replaced
-func redactHeaders(headers map[string]string) map[string]string {
+// redactHeaders replaces sensitive header values in-place with "[REDACTED]"
+func redactHeaders(headers map[string]string) {
 	for key := range headers {
 		if sensitiveHeaders[strings.ToLower(key)] {
 			headers[key] = "[REDACTED]"
 		}
 	}
-	return headers
 }
 
 // filterAcceptEncoding filters the Accept-Encoding header to only include
