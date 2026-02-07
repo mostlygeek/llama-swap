@@ -26,6 +26,7 @@ export interface Metrics {
 
 export interface ReqRespCapture {
   id: number;
+  req_path: string;
   req_headers: Record<string, string>;
   req_body: string; // base64 encoded bytes
   resp_headers: Record<string, string>;

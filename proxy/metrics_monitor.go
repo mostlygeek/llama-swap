@@ -33,6 +33,7 @@ type TokenMetrics struct {
 
 type ReqRespCapture struct {
 	ID          int               `json:"id"`
+	ReqPath     string            `json:"req_path"`
 	ReqHeaders  map[string]string `json:"req_headers"`
 	ReqBody     []byte            `json:"req_body"`
 	RespHeaders map[string]string `json:"resp_headers"`
@@ -41,7 +42,7 @@ type ReqRespCapture struct {
 
 // Size returns the approximate memory usage of this capture in bytes
 func (c *ReqRespCapture) Size() int {
-	size := len(c.ReqBody) + len(c.RespBody)
+	size := len(c.ReqPath) + len(c.ReqBody) + len(c.RespBody)
 	for k, v := range c.ReqHeaders {
 		size += len(k) + len(v)
 	}
@@ -277,6 +278,7 @@ func (mp *metricsMonitor) wrapHandler(
 		redactHeaders(respHeaders)
 		delete(respHeaders, "Content-Encoding")
 		capture = &ReqRespCapture{
+			ReqPath:     request.URL.Path,
 			ReqHeaders:  reqHeaders,
 			ReqBody:     reqBody,
 			RespHeaders: respHeaders,

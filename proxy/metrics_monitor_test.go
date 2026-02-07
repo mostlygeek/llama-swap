@@ -836,7 +836,8 @@ func TestMetricsMonitor_WrapHandler_Compression(t *testing.T) {
 func TestReqRespCapture_Size(t *testing.T) {
 	t.Run("calculates size correctly", func(t *testing.T) {
 		capture := ReqRespCapture{
-			ID: 1,
+			ID:      1,
+			ReqPath: "/v1/chat/completions", // 20 bytes
 			ReqHeaders: map[string]string{
 				"Content-Type": "application/json", // 12 + 16 = 28
 			},
@@ -847,8 +848,8 @@ func TestReqRespCapture_Size(t *testing.T) {
 			RespBody: []byte("response body"), // 13 bytes
 		}
 
-		// Expected: 12 + 13 + 28 + 11 = 64
-		assert.Equal(t, 64, capture.Size())
+		// Expected: 20 + 12 + 13 + 28 + 11 = 84
+		assert.Equal(t, 84, capture.Size())
 	})
 
 	t.Run("handles empty capture", func(t *testing.T) {
@@ -1020,6 +1021,7 @@ func TestMetricsMonitor_WrapHandler_Capture(t *testing.T) {
 		assert.Equal(t, metricID, capture.ID)
 		assert.Equal(t, []byte(requestBody), capture.ReqBody)
 		assert.Equal(t, []byte(responseBody), capture.RespBody)
+		assert.Equal(t, "/test", capture.ReqPath)
 		assert.Equal(t, "application/json", capture.ReqHeaders["Content-Type"])
 		assert.Equal(t, "[REDACTED]", capture.ReqHeaders["Authorization"])
 		assert.Equal(t, "application/json", capture.RespHeaders["Content-Type"])
