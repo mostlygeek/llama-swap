@@ -21,6 +21,16 @@ export interface Metrics {
   prompt_per_second: number;
   tokens_per_second: number;
   duration_ms: number;
+  has_capture: boolean;
+}
+
+export interface ReqRespCapture {
+  id: number;
+  req_path: string;
+  req_headers: Record<string, string>;
+  req_body: string; // base64 encoded bytes
+  resp_headers: Record<string, string>;
+  resp_body: string; // base64 encoded bytes
 }
 
 export interface LogData {

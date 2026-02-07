@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -31,6 +32,7 @@ func addApiHandlers(pm *ProxyManager) {
 		apiGroup.GET("/events", pm.apiSendEvents)
 		apiGroup.GET("/metrics", pm.apiGetMetrics)
 		apiGroup.GET("/version", pm.apiGetVersion)
+		apiGroup.GET("/captures/:id", pm.apiGetCapture)
 	}
 }
 
@@ -249,4 +251,21 @@ func (pm *ProxyManager) apiGetVersion(c *gin.Context) {
 		"commit":     pm.commit,
 		"build_date": pm.buildDate,
 	})
+}
+
+func (pm *ProxyManager) apiGetCapture(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid capture ID"})
+		return
+	}
+
+	capture := pm.metricsMonitor.getCaptureByID(id)
+	if capture == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "capture not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, capture)
 }

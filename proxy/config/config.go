@@ -123,6 +123,7 @@ type Config struct {
 	LogTimeFormat      string                 `yaml:"logTimeFormat"`
 	LogToStdout        string                 `yaml:"logToStdout"`
 	MetricsMaxInMemory int                    `yaml:"metricsMaxInMemory"`
+	CaptureBuffer      int                    `yaml:"captureBuffer"`
 	Models             map[string]ModelConfig `yaml:"models"` /* key is model ID */
 	Profiles           map[string][]string    `yaml:"profiles"`
 	Groups             map[string]GroupConfig `yaml:"groups"` /* key is group ID */
@@ -201,6 +202,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		LogTimeFormat:      "",
 		LogToStdout:        LogToStdoutProxy,
 		MetricsMaxInMemory: 1000,
+		CaptureBuffer:      5,
 	}
 	if err = yaml.Unmarshal([]byte(yamlStr), &config); err != nil {
 		return Config{}, err
