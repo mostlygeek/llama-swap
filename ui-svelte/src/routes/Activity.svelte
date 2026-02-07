@@ -1,6 +1,8 @@
 <script lang="ts">
-  import { metrics } from "../stores/api";
+  import { metrics, getCapture } from "../stores/api";
   import Tooltip from "../components/Tooltip.svelte";
+  import CaptureDialog from "../components/CaptureDialog.svelte";
+  import type { ReqRespCapture } from "../lib/types";
 
   function formatSpeed(speed: number): string {
     return speed < 0 ? "unknown" : speed.toFixed(2) + " t/s";
@@ -38,6 +40,25 @@
   }
 
   let sortedMetrics = $derived([...$metrics].sort((a, b) => b.id - a.id));
+
+  let selectedCapture = $state<ReqRespCapture | null>(null);
+  let dialogOpen = $state(false);
+  let loadingCaptureId = $state<number | null>(null);
+
+  async function viewCapture(id: number) {
+    loadingCaptureId = id;
+    const capture = await getCapture(id);
+    loadingCaptureId = null;
+    if (capture) {
+      selectedCapture = capture;
+      dialogOpen = true;
+    }
+  }
+
+  function closeDialog() {
+    dialogOpen = false;
+    selectedCapture = null;
+  }
 </script>
 
 <div class="p-2">
@@ -65,6 +86,7 @@
             <th class="px-6 py-3">Prompt Processing</th>
             <th class="px-6 py-3">Generation Speed</th>
             <th class="px-6 py-3">Duration</th>
+            <th class="px-6 py-3">Capture</th>
           </tr>
         </thead>
         <tbody class="divide-y">
@@ -79,6 +101,19 @@
               <td class="px-6 py-4">{formatSpeed(metric.prompt_per_second)}</td>
               <td class="px-6 py-4">{formatSpeed(metric.tokens_per_second)}</td>
               <td class="px-6 py-4">{formatDuration(metric.duration_ms)}</td>
+              <td class="px-6 py-4">
+                {#if metric.has_capture}
+                  <button
+                    onclick={() => viewCapture(metric.id)}
+                    disabled={loadingCaptureId === metric.id}
+                    class="btn btn--sm"
+                  >
+                    {loadingCaptureId === metric.id ? "..." : "View"}
+                  </button>
+                {:else}
+                  <span class="text-txtsecondary">-</span>
+                {/if}
+              </td>
             </tr>
           {/each}
         </tbody>
@@ -86,3 +121,5 @@
     </div>
   {/if}
 </div>
+
+<CaptureDialog capture={selectedCapture} open={dialogOpen} onclose={closeDialog} />
