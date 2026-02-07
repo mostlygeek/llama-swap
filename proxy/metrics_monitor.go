@@ -61,9 +61,6 @@ func (e TokenMetricsEvent) Type() uint32 {
 	return TokenMetricsEventID // defined in events.go
 }
 
-// DefaultMaxCaptureSize is the default maximum size in bytes for all captures (5MB)
-const DefaultMaxCaptureSize = 5 * 1024 * 1024
-
 // metricsMonitor parses llama-server output for token statistics
 type metricsMonitor struct {
 	mu         sync.RWMutex
@@ -80,15 +77,17 @@ type metricsMonitor struct {
 	maxCaptureSize int                    // max bytes for captures
 }
 
-func newMetricsMonitor(logger *LogMonitor, maxMetrics int, enableCaptures bool) *metricsMonitor {
+// newMetricsMonitor creates a new metricsMonitor. captureBufferMB is the
+// capture buffer size in megabytes; 0 disables captures.
+func newMetricsMonitor(logger *LogMonitor, maxMetrics int, captureBufferMB int) *metricsMonitor {
 	return &metricsMonitor{
 		logger:         logger,
 		maxMetrics:     maxMetrics,
-		enableCaptures: enableCaptures,
+		enableCaptures: captureBufferMB > 0,
 		captures:       make(map[int]ReqRespCapture),
 		captureOrder:   make([]int, 0),
 		captureSize:    0,
-		maxCaptureSize: DefaultMaxCaptureSize,
+		maxCaptureSize: captureBufferMB * 1024 * 1024,
 	}
 }
 

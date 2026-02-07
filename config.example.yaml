@@ -50,10 +50,10 @@ logToStdout: "proxy"
 # - useful for limiting memory usage when processing large volumes of metrics
 metricsMaxInMemory: 1000
 
-# enableCaptures: enable request and response captures that can be viewed in the UI
-# - optional, default: false
-# - by default 5MB of memory will be allocated
-enableCaptures: false
+# captureBuffer: how many MBs to allocate for storing request/response captures
+# - optional, default: 10
+# - set to 0 to disable
+captureBuffer: 15
 
 # startPort: sets the starting port number for the automatic ${PORT} macro.
 # - optional, default: 5800
