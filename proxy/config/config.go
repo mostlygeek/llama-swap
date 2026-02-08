@@ -146,6 +146,9 @@ type Config struct {
 	// present aliases to /v1/models OpenAI API listing
 	IncludeAliasesInList bool `yaml:"includeAliasesInList"`
 
+	// default ttl for automatic model unloading
+	TTL int `yaml:"ttl"`
+
 	// support API keys, see issue #433, #50, #251
 	RequiredAPIKeys []string `yaml:"apiKeys"`
 
@@ -366,6 +369,11 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		if modelConfig.SendLoadingState == nil {
 			v := config.SendLoadingState
 			modelConfig.SendLoadingState = &v
+		}
+
+		if modelConfig.UnloadAfter == nil {
+			v := config.TTL
+			modelConfig.UnloadAfter = &v
 		}
 
 		config.Models[modelId] = modelConfig

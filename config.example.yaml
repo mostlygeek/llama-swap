@@ -69,6 +69,13 @@ startPort: 10001
 # - see #366 for more details
 sendLoadingState: true
 
+# ttl: automatically unload models after ttl seconds
+# - optional, default: 0
+# - ttl values must be a value greater than 0
+# - a value of 0 disables automatic unloading of models
+# - model-specific ttl will override this global setting
+ttl: 60
+
 # includeAliasesInList: present aliases within the /v1/models OpenAI API listing
 # - optional, default: false
 # - when true, model aliases will be output to the API model listing duplicating
@@ -188,7 +195,7 @@ models:
     checkEndpoint: /custom-endpoint
 
     # ttl: automatically unload the model after ttl seconds
-    # - optional, default: 0
+    # - optional, defaults to global ttl setting if not specified
     # - ttl values must be a value greater than 0
     # - a value of 0 disables automatic unloading of the model
     ttl: 60

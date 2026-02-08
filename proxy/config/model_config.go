@@ -12,7 +12,7 @@ type ModelConfig struct {
 	Aliases       []string `yaml:"aliases"`
 	Env           []string `yaml:"env"`
 	CheckEndpoint string   `yaml:"checkEndpoint"`
-	UnloadAfter   int      `yaml:"ttl"`
+	UnloadAfter   *int     `yaml:"ttl"`
 	Unlisted      bool     `yaml:"unlisted"`
 	UseModelName  string   `yaml:"useModelName"`
 
@@ -47,7 +47,7 @@ func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		Aliases:          []string{},
 		Env:              []string{},
 		CheckEndpoint:    "/health",
-		UnloadAfter:      0,
+		UnloadAfter:      nil,
 		Unlisted:         false,
 		UseModelName:     "",
 		ConcurrencyLimit: 0,
