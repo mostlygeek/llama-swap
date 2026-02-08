@@ -225,6 +225,10 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		return Config{}, fmt.Errorf("logToStdout must be one of: proxy, upstream, both, none")
 	}
 
+	if config.TTL < 0 {
+		return Config{}, fmt.Errorf("ttl must be non-negative")
+	}
+
 	// Populate the aliases map
 	config.aliases = make(map[string]string)
 	for modelName, modelConfig := range config.Models {
@@ -374,6 +378,10 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		if modelConfig.UnloadAfter == nil {
 			v := config.TTL
 			modelConfig.UnloadAfter = &v
+		}
+
+		if *modelConfig.UnloadAfter < 0 {
+			return Config{}, fmt.Errorf("model %s: ttl must be non-negative", modelId)
 		}
 
 		config.Models[modelId] = modelConfig
