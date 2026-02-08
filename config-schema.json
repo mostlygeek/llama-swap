@@ -105,8 +105,9 @@
         },
         "ttl": {
             "type": "integer",
+            "minimum": 0,
             "default": 0,
-            "description": "Automatically unload models after ttl seconds. 0 disables unloading. Must be >0 to enable. Can be overriden per-model."
+            "description": "Automatically unload models after ttl seconds. 0 disables unloading. Must be >0 to enable. Can be overridden per-model."
         },
         "includeAliasesInList": {
             "type": "boolean",
@@ -184,7 +185,7 @@
                         "type": "integer",
                         "minimum": 0,
                         "default": 0,
-                        "description": "Automatically unload the model after ttl seconds. 0 disables unloading. Must be >0 to enable. Ommitting this property will use the global setting."
+                        "description": "Automatically unload the model after ttl seconds. 0 disables unloading. Must be >0 to enable. Omitting this property will use the global setting."
                     },
                     "useModelName": {
                         "type": "string",
@@ -225,7 +226,7 @@
                     },
                     "sendLoadingState": {
                         "type": "boolean",
-                        "description": "Overrides the global sendLoadingState for this model. Ommitting this property will use the global setting."
+                        "description": "Overrides the global sendLoadingState for this model. Omitting this property will use the global setting."
                     },
                     "unlisted": {
                         "type": "boolean",
