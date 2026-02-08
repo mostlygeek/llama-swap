@@ -319,6 +319,16 @@ models:
     # - recommended to be omitted and the default used
     concurrencyLimit: 0
 
+    # requestTimeout: maximum time in seconds for a single request to complete
+    # - optional, default: 0 (no timeout)
+    # - useful for preventing runaway inference processes that never complete
+    # - when exceeded, the model process is forcefully stopped
+    # - protects against GPU overheating and blocking from stuck processes
+    # - the process must be restarted for the next request
+    # - set to 0 to disable timeout
+    # - recommended for models that may have infinite loops or excessive generation
+    requestTimeout: 300  # 5 minutes
+
     # sendLoadingState: overrides the global sendLoadingState setting for this model
     # - optional, default: undefined (use global setting)
     sendLoadingState: false

@@ -49,6 +49,7 @@ type Process struct {
 	// PR #155 called to cancel the upstream process
 	cmdMutex       sync.RWMutex
 	cancelUpstream context.CancelFunc
+	cmdStarted     bool // tracks if cmd.Start() completed successfully
 
 	// closed when command exits
 	cmdWaitChan chan struct{}
@@ -250,26 +251,43 @@ func (p *Process) start() error {
 	defer p.waitStarting.Done()
 	cmdContext, ctxCancelUpstream := context.WithCancel(context.Background())
 
-	p.cmd = exec.CommandContext(cmdContext, args[0], args[1:]...)
-	p.cmd.Stdout = p.processLogger
-	p.cmd.Stderr = p.processLogger
-	p.cmd.Env = append(p.cmd.Environ(), p.config.Env...)
-	p.cmd.Cancel = p.cmdStopUpstreamProcess
-	p.cmd.WaitDelay = p.gracefulStopTimeout
-	setProcAttributes(p.cmd)
+	cmd := exec.CommandContext(cmdContext, args[0], args[1:]...)
+	cmd.Stdout = p.processLogger
+	cmd.Stderr = p.processLogger
+	cmd.Env = append(cmd.Environ(), p.config.Env...)
+	cmd.Cancel = p.cmdStopUpstreamProcess
+	cmd.WaitDelay = p.gracefulStopTimeout
+	setProcAttributes(cmd)
 
+	p.failedStartCount++ // this will be reset to zero when the process has successfully started
+
+	// Initialize cancelUpstream and cmdWaitChan before Start() so stopCommand() can use them
+	// if called during startup (e.g., due to timeout)
 	p.cmdMutex.Lock()
+	p.cmd = cmd
 	p.cancelUpstream = ctxCancelUpstream
 	p.cmdWaitChan = make(chan struct{})
 	p.cmdMutex.Unlock()
 
-	p.failedStartCount++ // this will be reset to zero when the process has successfully started
-
 	p.proxyLogger.Debugf("<%s> Executing start command: %s, env: %s", p.ID, strings.Join(args, " "), strings.Join(p.config.Env, ", "))
 	err = p.cmd.Start()
 
+	// Set cmdStarted flag under lock after Start() completes
+	// This prevents data race with stopCommand() which checks cmdStarted instead of cmd.Process
+	p.cmdMutex.Lock()
+	if err == nil {
+		p.cmdStarted = true
+	}
+	p.cmdMutex.Unlock()
+
 	// Set process state to failed
 	if err != nil {
+		// Close cmdWaitChan to prevent stopCommand() from hanging if a timeout
+		// transitions StateStarting -> StateStopping before Start() completes
+		p.cmdMutex.Lock()
+		close(p.cmdWaitChan)
+		p.cmdMutex.Unlock()
+
 		if curState, swapErr := p.swapState(StateStarting, StateStopped); swapErr != nil {
 			p.forceState(StateStopped) // force it into a stopped state
 			return fmt.Errorf(
@@ -381,14 +399,28 @@ func (p *Process) Stop() {
 // StopImmediately will transition the process to the stopping state and stop the process with a SIGTERM.
 // If the process does not stop within the specified timeout, it will be forcefully stopped with a SIGKILL.
 func (p *Process) StopImmediately() {
-	if !isValidTransition(p.CurrentState(), StateStopping) {
-		return
-	}
+	// Try to transition from current state to StateStopping
+	// Process might be in StateReady or StateStarting when timeout fires
+	// Retry on ErrExpectedStateMismatch to handle transient state changes
+	for {
+		currentState := p.CurrentState()
+		if !isValidTransition(currentState, StateStopping) {
+			return
+		}
 
-	p.proxyLogger.Debugf("<%s> Stopping process, current state: %s", p.ID, p.CurrentState())
-	if curState, err := p.swapState(StateReady, StateStopping); err != nil {
-		p.proxyLogger.Infof("<%s> Stop() Ready -> StateStopping err: %v, current state: %v", p.ID, err, curState)
-		return
+		p.proxyLogger.Debugf("<%s> Stopping process, current state: %s", p.ID, currentState)
+
+		if _, err := p.swapState(currentState, StateStopping); err != nil {
+			if err == ErrExpectedStateMismatch {
+				// State changed between CurrentState() and swapState(), retry
+				continue
+			}
+			p.proxyLogger.Infof("<%s> Stop() %s -> StateStopping err: %v", p.ID, currentState, err)
+			return
+		}
+
+		// Successfully transitioned to StateStopping
+		break
 	}
 
 	p.stopCommand()
@@ -422,14 +454,28 @@ func (p *Process) stopCommand() {
 	p.cmdMutex.RLock()
 	cancelUpstream := p.cancelUpstream
 	cmdWaitChan := p.cmdWaitChan
+	cmdStarted := p.cmdStarted
 	p.cmdMutex.RUnlock()
 
+	// If cancelUpstream is nil, the process was never actually started
+	// (e.g., forceState() was used in tests). Just return silently.
 	if cancelUpstream == nil {
-		p.proxyLogger.Errorf("<%s> stopCommand has a nil p.cancelUpstream()", p.ID)
+		p.proxyLogger.Debugf("<%s> stopCommand: cancelUpstream is nil, process was never started", p.ID)
 		return
 	}
 
+	// Always cancel the context to stop the command
 	cancelUpstream()
+
+	// If cmdStarted is false, the process never actually started
+	// (cmd.Start() was never called or failed), so skip waiting on cmdWaitChan
+	// to avoid hanging. This can happen if a timeout transitions StateStarting
+	// to StateStopping before cmd.Start() completes.
+	if !cmdStarted {
+		p.proxyLogger.Debugf("<%s> stopCommand: process never started (cmdStarted is false), skipping wait", p.ID)
+		return
+	}
+
 	<-cmdWaitChan
 }
 
@@ -499,6 +545,44 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		p.inFlightRequestsCount.Add(-1)
 		p.inFlightRequests.Done()
 	}()
+
+	// Start timeout monitoring if requestTimeout is configured
+	var requestCancel context.CancelFunc
+	var timeoutCancel context.CancelFunc
+
+	if p.config.RequestTimeout > 0 {
+		timeoutDuration := time.Duration(p.config.RequestTimeout) * time.Second
+
+		// Add timeout to request context to cancel the request when exceeded
+		requestCtx, cancel := context.WithTimeout(r.Context(), timeoutDuration)
+		requestCancel = cancel
+		r = r.Clone(requestCtx)
+
+		// Create a separate timeout context for monitoring only
+		// Use context.Background() to ensure we detect our configured timeout,
+		// not parent-imposed deadlines that would cause misattribution
+		timeoutCtx, cancel := context.WithTimeout(context.Background(), timeoutDuration)
+		timeoutCancel = cancel
+
+		go func() {
+			<-timeoutCtx.Done()
+			if timeoutCtx.Err() == context.DeadlineExceeded {
+				p.proxyLogger.Warnf("<%s> Request timeout exceeded (%v), force stopping process to prevent GPU blocking", p.ID, timeoutDuration)
+				// Force stop the process - this will kill the underlying inference process
+				p.StopImmediately()
+			}
+		}()
+
+		// Ensure both timeouts are cancelled when request completes
+		defer func() {
+			if requestCancel != nil {
+				requestCancel()
+			}
+			if timeoutCancel != nil {
+				timeoutCancel()
+			}
+		}()
+	}
 
 	// for #366
 	// - extract streaming param from request context, should have been set by proxymanager
@@ -606,6 +690,7 @@ func (p *Process) waitForCmd() {
 
 	p.cmdMutex.Lock()
 	close(p.cmdWaitChan)
+	p.cmdStarted = false
 	p.cmdMutex.Unlock()
 }
 
