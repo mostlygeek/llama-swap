@@ -73,17 +73,17 @@ models:
 	model1, exists := config.Models["model1"]
 	assert.True(t, exists, "model1 should exist")
 	if assert.NotNil(t, model1, "model1 should not be nil") {
-	assert.Equal(t, "path/to/cmd --port 5800", model1.Cmd) // has the port replaced
-	assert.Equal(t, "", model1.CmdStop)
-	assert.Equal(t, "http://localhost:5800", model1.Proxy)
-	assert.Equal(t, "/health", model1.CheckEndpoint)
-	assert.Equal(t, []string{}, model1.Aliases)
-	assert.Equal(t, []string{}, model1.Env)
-	assert.NotNil(t, model1.UnloadAfter)
-	assert.Equal(t, 0, *model1.UnloadAfter)
-	assert.Equal(t, false, model1.Unlisted)
-	assert.Equal(t, "", model1.UseModelName)
-	assert.Equal(t, 0, model1.ConcurrencyLimit)
+		assert.Equal(t, "path/to/cmd --port 5800", model1.Cmd) // has the port replaced
+		assert.Equal(t, "", model1.CmdStop)
+		assert.Equal(t, "http://localhost:5800", model1.Proxy)
+		assert.Equal(t, "/health", model1.CheckEndpoint)
+		assert.Equal(t, []string{}, model1.Aliases)
+		assert.Equal(t, []string{}, model1.Env)
+		assert.NotNil(t, model1.UnloadAfter)
+		assert.Equal(t, 0, *model1.UnloadAfter)
+		assert.Equal(t, false, model1.Unlisted)
+		assert.Equal(t, "", model1.UseModelName)
+		assert.Equal(t, 0, model1.ConcurrencyLimit)
 	}
 
 	// default empty filter exists
