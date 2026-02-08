@@ -240,7 +240,6 @@ func (mp *metricsMonitor) wrapHandler(
 			return nil
 		}
 	}
-
 	if strings.Contains(recorder.Header().Get("Content-Type"), "text/event-stream") {
 		if parsed, err := processStreamingResponse(modelID, recorder.StartTime(), body); err != nil {
 			mp.logger.Warnf("error processing streaming response: %v, path=%s, recording minimal metrics", err, request.URL.Path)
@@ -252,6 +251,14 @@ func (mp *metricsMonitor) wrapHandler(
 			parsed := gjson.ParseBytes(body)
 			usage := parsed.Get("usage")
 			timings := parsed.Get("timings")
+
+			// extract timings for infill - response is an array, timings are in the last element
+			// see #463
+			if strings.HasPrefix(request.URL.Path, "/infill") {
+				if arr := parsed.Array(); len(arr) > 0 {
+					timings = arr[len(arr)-1].Get("timings")
+				}
+			}
 
 			if usage.Exists() || timings.Exists() {
 				if parsedMetrics, err := parseMetrics(modelID, recorder.StartTime(), usage, timings); err != nil {
