@@ -13,10 +13,37 @@ import (
 	"github.com/mostlygeek/llama-swap/proxy/config"
 )
 
+func applyPathRewrite(path, rewrite string) string {
+	if rewrite == "" {
+		return path
+	}
+
+	parts := strings.SplitN(rewrite, ":", 2)
+	if len(parts) != 2 {
+		return path
+	}
+
+	action := parts[0]
+	pattern := parts[1]
+
+	switch action {
+	case "strip":
+		return strings.TrimPrefix(path, pattern)
+	case "replace":
+		replaceParts := strings.SplitN(pattern, ":", 2)
+		if len(replaceParts) == 2 {
+			return strings.Replace(path, replaceParts[0], replaceParts[1], 1)
+		}
+	}
+
+	return path
+}
+
 type peerProxyMember struct {
 	peerID       string
 	reverseProxy *httputil.ReverseProxy
 	apiKey       string
+	pathRewrite  string
 }
 
 type PeerProxy struct {
@@ -58,7 +85,20 @@ func NewPeerProxy(peers config.PeerDictionaryConfig, proxyLogger *LogMonitor) (*
 		// Wrap Director to set Host header for remote hosts (not localhost)
 		originalDirector := reverseProxy.Director
 		reverseProxy.Director = func(req *http.Request) {
+			// Apply path rewriting if configured, before originalDirector modifies the URL
+			if peer.PathRewrite != "" {
+				originalPath := req.URL.Path
+				req.URL.Path = applyPathRewrite(req.URL.Path, peer.PathRewrite)
+
+				if originalPath != req.URL.Path {
+					proxyLogger.Debugf("peer %s: rewrote path %s -> %s", peerID, originalPath, req.URL.Path)
+				} else {
+					proxyLogger.Warnf("peer %s: pathRewrite %s did not modify path %s (possible misconfiguration)", peerID, peer.PathRewrite, originalPath)
+				}
+			}
+
 			originalDirector(req)
+
 			// Ensure Host header matches target URL for remote proxying
 			req.Host = req.URL.Host
 		}
@@ -83,6 +123,7 @@ func NewPeerProxy(peers config.PeerDictionaryConfig, proxyLogger *LogMonitor) (*
 			peerID:       peerID,
 			reverseProxy: reverseProxy,
 			apiKey:       peer.ApiKey,
+			pathRewrite:  peer.PathRewrite,
 		}
 
 		// Map each model to this peer's proxy

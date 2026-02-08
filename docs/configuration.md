@@ -464,4 +464,22 @@ peers:
       - z-ai/glm-4.7
       - moonshotai/kimi-k2-0905
       - minimax/minimax-m2.1
+  # Example: z.ai endpoint that doesn't use /v1/ prefix
+  z-ai-provider:
+    proxy: https://api.z.ai/api/coding/paas/v4
+    # pathRewrite: optional path transformation rule
+    # - optional, default: ""
+    # - "strip:/v1" removes the /v1 prefix from requests
+    # - "replace:/v1:/api/v4" replaces /v1 with /api/v4
+    # Example: /v1/chat/completions becomes /chat/completions with "strip:/v1"
+    pathRewrite: "strip:/v1"
+    apiKey: your-zai-token
+    models:
+      - glm-4.7
+  # Example: Replace path prefix instead of stripping
+  custom-api:
+    proxy: https://api.example.com
+    pathRewrite: "replace:/v1:/api/v2"
+    models:
+      - custom-model
 ```
