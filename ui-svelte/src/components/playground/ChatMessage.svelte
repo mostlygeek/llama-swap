@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { renderMarkdown, escapeHtml } from "../../lib/markdown";
+  import { renderMarkdown, renderStreamingMarkdown, escapeHtml } from "../../lib/markdown";
   import { Copy, Check, Pencil, X, Save, RefreshCw, ChevronDown, ChevronRight, Brain, Code } from "lucide-svelte";
   import { getTextContent, getImageUrls } from "../../lib/types";
   import type { ContentPart } from "../../lib/types";
@@ -23,8 +23,10 @@
   let canEdit = $derived(onEdit !== undefined && !hasImages);
 
   let renderedContent = $derived(
-    role === "assistant" && !isStreaming
-      ? renderMarkdown(textContent)
+    role === "assistant"
+      ? isStreaming
+        ? renderStreamingMarkdown(textContent)
+        : renderMarkdown(textContent)
       : escapeHtml(textContent).replace(/\n/g, '<br>')
   );
   let copied = $state(false);
