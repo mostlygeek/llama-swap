@@ -384,6 +384,75 @@ data: [DONE]
 		assert.Equal(t, 0, metrics[0].InputTokens)
 		assert.Equal(t, 0, metrics[0].OutputTokens)
 	})
+
+	t.Run("infill request extracts timings from last array element", func(t *testing.T) {
+		mm := newMetricsMonitor(testLogger, 10, 0)
+
+		// Infill response is an array with timings in the last element
+		responseBody := `[
+			{"content": "first chunk"},
+			{"content": "second chunk"},
+			{"content": "final", "timings": {
+				"prompt_n": 150,
+				"predicted_n": 75,
+				"prompt_per_second": 200.5,
+				"predicted_per_second": 35.5,
+				"prompt_ms": 600.0,
+				"predicted_ms": 1800.0,
+				"cache_n": 30
+			}}
+		]`
+
+		nextHandler := func(modelID string, w http.ResponseWriter, r *http.Request) error {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(responseBody))
+			return nil
+		}
+
+		req := httptest.NewRequest("POST", "/infill", nil)
+		rec := httptest.NewRecorder()
+		ginCtx, _ := gin.CreateTestContext(rec)
+
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
+		assert.NoError(t, err)
+
+		metrics := mm.getMetrics()
+		assert.Equal(t, 1, len(metrics))
+		assert.Equal(t, "test-model", metrics[0].Model)
+		assert.Equal(t, 150, metrics[0].InputTokens)
+		assert.Equal(t, 75, metrics[0].OutputTokens)
+		assert.Equal(t, 30, metrics[0].CachedTokens)
+		assert.Equal(t, 200.5, metrics[0].PromptPerSecond)
+		assert.Equal(t, 35.5, metrics[0].TokensPerSecond)
+		assert.Equal(t, 2400, metrics[0].DurationMs) // 600 + 1800
+	})
+
+	t.Run("infill request with empty array records minimal metrics", func(t *testing.T) {
+		mm := newMetricsMonitor(testLogger, 10, 0)
+
+		responseBody := `[]`
+
+		nextHandler := func(modelID string, w http.ResponseWriter, r *http.Request) error {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(responseBody))
+			return nil
+		}
+
+		req := httptest.NewRequest("POST", "/infill", nil)
+		rec := httptest.NewRecorder()
+		ginCtx, _ := gin.CreateTestContext(rec)
+
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
+		assert.NoError(t, err)
+
+		metrics := mm.getMetrics()
+		assert.Equal(t, 1, len(metrics))
+		assert.Equal(t, "test-model", metrics[0].Model)
+		assert.Equal(t, 0, metrics[0].InputTokens)
+		assert.Equal(t, 0, metrics[0].OutputTokens)
+	})
 }
 
 func TestMetricsMonitor_ResponseBodyCopier(t *testing.T) {
