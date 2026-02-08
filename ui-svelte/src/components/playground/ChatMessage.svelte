@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { renderMarkdown, escapeHtml } from "../../lib/markdown";
+  import { renderMarkdown, escapeHtml, renderStreamingMarkdown } from "../../lib/markdown";
   import { Copy, Check, Pencil, X, Save, RefreshCw, ChevronDown, ChevronRight, Brain, Code } from "lucide-svelte";
   import { getTextContent, getImageUrls } from "../../lib/types";
   import type { ContentPart } from "../../lib/types";
@@ -22,11 +22,17 @@
   let hasImages = $derived(imageUrls.length > 0);
   let canEdit = $derived(onEdit !== undefined && !hasImages);
 
-  let renderedContent = $derived(
-    role === "assistant" && !isStreaming
-      ? renderMarkdown(textContent)
-      : escapeHtml(textContent).replace(/\n/g, '<br>')
-  );
+  let streamingCache = { key: "", html: "" };
+  let renderedContent = $derived.by(() => {
+    if (role !== "assistant") {
+      return escapeHtml(textContent).replace(/\n/g, '<br>');
+    }
+    if (!isStreaming) {
+      streamingCache = { key: "", html: "" };
+      return renderMarkdown(textContent);
+    }
+    return renderStreamingMarkdown(textContent, streamingCache);
+  });
   let copied = $state(false);
   let showRaw = $state(false);
   let isEditing = $state(false);
