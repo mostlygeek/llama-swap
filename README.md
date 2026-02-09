@@ -69,7 +69,7 @@ llama-swap can be installed in multiple ways
 ### Docker Install ([download images](https://github.com/mostlygeek/llama-swap/pkgs/container/llama-swap))
 
 Nightly container images with llama-swap and llama-server are built for multiple platforms (cuda, vulkan, intel, etc.) including [non-root variants with improved security](docs/container-security.md).
-The whisper.cpp server is also included for the cuda and musa platforms.
+The whisper.cpp server is also included for the cuda, musa and vulkan platforms.
 
 ```shell
 $ docker pull ghcr.io/mostlygeek/llama-swap:cuda

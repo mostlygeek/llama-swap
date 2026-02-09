@@ -161,7 +161,7 @@ for CONTAINER_TYPE in non-root root; do
 
   # For architectures with whisper.cpp support, layer whisper-server on top
   case "$ARCH" in
-    "cuda" | "musa")
+    "cuda" | "musa" | "vulkan")
       log_info "Adding whisper-server to $CONTAINER_TAG"
       docker build -f llama-swap-whisper.Containerfile \
         --build-arg BASE=${CONTAINER_TAG} \
