@@ -87,6 +87,12 @@
             "default": 1000,
             "description": "Maximum number of metrics to keep in memory. Controls how many metrics are stored before older ones are discarded."
         },
+        "captureBuffer": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 5,
+            "description": "Size in megabytes of the buffer for storing request/response captures. Set to 0 to disable captures."
+        },
         "startPort": {
             "type": "integer",
             "default": 5800,
