@@ -132,6 +132,10 @@ func (p *Process) LogMonitor() *LogMonitor {
 	return p.processLogger
 }
 
+func (p *Process) InFlightRequests() int32 {
+	return p.inFlightRequestsCount.Load()
+}
+
 // setLastRequestHandled sets the last request handled time in a thread-safe manner.
 func (p *Process) setLastRequestHandled(t time.Time) {
 	p.lastRequestHandledMutex.Lock()
@@ -493,10 +497,12 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p.inFlightRequests.Add(1)
-	p.inFlightRequestsCount.Add(1)
+	newInFlight := p.inFlightRequestsCount.Add(1)
+	event.Emit(InFlightRequestsEvent{ModelID: p.ID, InFlight: newInFlight})
 	defer func() {
 		p.setLastRequestHandled(time.Now())
-		p.inFlightRequestsCount.Add(-1)
+		newInFlight := p.inFlightRequestsCount.Add(-1)
+		event.Emit(InFlightRequestsEvent{ModelID: p.ID, InFlight: newInFlight})
 		p.inFlightRequests.Done()
 	}()
 
