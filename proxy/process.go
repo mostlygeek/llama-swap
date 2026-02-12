@@ -64,10 +64,6 @@ type Process struct {
 	stateMutex sync.RWMutex
 	state      ProcessState
 
-	inFlightRequests      sync.WaitGroup
-	inFlightRequestsCount int
-	inFlightRequestsMutex sync.Mutex
-
 	// used to block on multiple start() calls
 	waitStarting sync.WaitGroup
 
@@ -130,28 +126,6 @@ func NewProcess(ID string, healthCheckTimeout int, config config.ModelConfig, pr
 // LogMonitor returns the log monitor associated with the process.
 func (p *Process) LogMonitor() *LogMonitor {
 	return p.processLogger
-}
-
-func (p *Process) InFlightRequests() int {
-	p.inFlightRequestsMutex.Lock()
-	count := p.inFlightRequestsCount
-	p.inFlightRequestsMutex.Unlock()
-	return count
-}
-
-func (p *Process) incrementInFlight() {
-	p.inFlightRequestsMutex.Lock()
-	p.inFlightRequestsCount++
-	p.inFlightRequestsMutex.Unlock()
-}
-
-// decrementInFlight decrements the counter when a request finishes (never below zero).
-func (p *Process) decrementInFlight() {
-	p.inFlightRequestsMutex.Lock()
-	if p.inFlightRequestsCount > 0 {
-		p.inFlightRequestsCount--
-	}
-	p.inFlightRequestsMutex.Unlock()
 }
 
 // setLastRequestHandled sets the last request handled time in a thread-safe manner.
@@ -366,11 +340,6 @@ func (p *Process) start() error {
 					return
 				}
 
-				// skip the TTL check if there are inflight requests
-				if p.InFlightRequests() != 0 {
-					continue
-				}
-
 				if time.Since(p.getLastRequestHandled()) > maxDuration {
 					p.proxyLogger.Infof("<%s> Unloading model, TTL of %ds reached", p.ID, p.config.UnloadAfter)
 					p.Stop()
@@ -388,15 +357,11 @@ func (p *Process) start() error {
 	}
 }
 
-// Stop will wait for inflight requests to complete before stopping the process.
+// Stop transitions the process to the stopping state and requests a graceful stop.
 func (p *Process) Stop() {
 	if !isValidTransition(p.CurrentState(), StateStopping) {
 		return
 	}
-
-	// wait for any inflight requests before proceeding
-	p.proxyLogger.Debugf("<%s> Stop(): Waiting for inflight requests to complete", p.ID)
-	p.inFlightRequests.Wait()
 	p.StopImmediately()
 }
 
@@ -514,12 +479,30 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p.inFlightRequests.Add(1)
-	p.incrementInFlight()
-	defer func() {
+	var keepaliveStop chan struct{}
+	if p.config.UnloadAfter > 0 {
+		// Keep lastRequestHandled fresh during long-running requests so TTL unload
+		// doesn't terminate active work.
 		p.setLastRequestHandled(time.Now())
-		p.decrementInFlight()
-		p.inFlightRequests.Done()
+		keepaliveStop = make(chan struct{})
+		go func() {
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-keepaliveStop:
+					return
+				case <-ticker.C:
+					p.setLastRequestHandled(time.Now())
+				}
+			}
+		}()
+	}
+	defer func() {
+		if keepaliveStop != nil {
+			close(keepaliveStop)
+		}
+		p.setLastRequestHandled(time.Now())
 	}()
 
 	// for #366
