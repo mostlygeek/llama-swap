@@ -13,7 +13,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -66,7 +65,8 @@ type Process struct {
 	state      ProcessState
 
 	inFlightRequests      sync.WaitGroup
-	inFlightRequestsCount atomic.Int32
+	inFlightRequestsCount int
+	inFlightRequestsMutex sync.Mutex
 
 	// used to block on multiple start() calls
 	waitStarting sync.WaitGroup
@@ -132,8 +132,26 @@ func (p *Process) LogMonitor() *LogMonitor {
 	return p.processLogger
 }
 
-func (p *Process) InFlightRequests() int32 {
-	return p.inFlightRequestsCount.Load()
+func (p *Process) InFlightRequests() int {
+	p.inFlightRequestsMutex.Lock()
+	count := p.inFlightRequestsCount
+	p.inFlightRequestsMutex.Unlock()
+	return count
+}
+
+func (p *Process) incrementInFlight() {
+	p.inFlightRequestsMutex.Lock()
+	p.inFlightRequestsCount++
+	p.inFlightRequestsMutex.Unlock()
+}
+
+// decrementInFlight decrements the counter when a request finishes (never below zero).
+func (p *Process) decrementInFlight() {
+	p.inFlightRequestsMutex.Lock()
+	if p.inFlightRequestsCount > 0 {
+		p.inFlightRequestsCount--
+	}
+	p.inFlightRequestsMutex.Unlock()
 }
 
 // setLastRequestHandled sets the last request handled time in a thread-safe manner.
@@ -349,7 +367,7 @@ func (p *Process) start() error {
 				}
 
 				// skip the TTL check if there are inflight requests
-				if p.inFlightRequestsCount.Load() != 0 {
+				if p.InFlightRequests() != 0 {
 					continue
 				}
 
@@ -497,12 +515,10 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p.inFlightRequests.Add(1)
-	newInFlight := p.inFlightRequestsCount.Add(1)
-	event.Emit(InFlightRequestsEvent{ModelID: p.ID, InFlight: newInFlight})
+	p.incrementInFlight()
 	defer func() {
 		p.setLastRequestHandled(time.Now())
-		newInFlight := p.inFlightRequestsCount.Add(-1)
-		event.Emit(InFlightRequestsEvent{ModelID: p.ID, InFlight: newInFlight})
+		p.decrementInFlight()
 		p.inFlightRequests.Done()
 	}()
 

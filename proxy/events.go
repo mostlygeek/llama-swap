@@ -61,8 +61,7 @@ func (e ModelPreloadedEvent) Type() uint32 {
 }
 
 type InFlightRequestsEvent struct {
-	ModelID  string
-	InFlight int32
+	Total int
 }
 
 func (e InFlightRequestsEvent) Type() uint32 {
