@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -63,6 +64,9 @@ type Process struct {
 
 	stateMutex sync.RWMutex
 	state      ProcessState
+
+	inFlightRequests      sync.WaitGroup
+	inFlightRequestsCount atomic.Int32
 
 	// used to block on multiple start() calls
 	waitStarting sync.WaitGroup
@@ -340,6 +344,11 @@ func (p *Process) start() error {
 					return
 				}
 
+				// skip the TTL check if there are inflight requests
+				if p.inFlightRequestsCount.Load() != 0 {
+					continue
+				}
+
 				if time.Since(p.getLastRequestHandled()) > maxDuration {
 					p.proxyLogger.Infof("<%s> Unloading model, TTL of %ds reached", p.ID, p.config.UnloadAfter)
 					p.Stop()
@@ -357,11 +366,15 @@ func (p *Process) start() error {
 	}
 }
 
-// Stop transitions the process to the stopping state and requests a graceful stop.
+// Stop will wait for inflight requests to complete before stopping the process.
 func (p *Process) Stop() {
 	if !isValidTransition(p.CurrentState(), StateStopping) {
 		return
 	}
+
+	// wait for any inflight requests before proceeding
+	p.proxyLogger.Debugf("<%s> Stop(): Waiting for inflight requests to complete", p.ID)
+	p.inFlightRequests.Wait()
 	p.StopImmediately()
 }
 
@@ -479,30 +492,12 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var keepaliveStop chan struct{}
-	if p.config.UnloadAfter > 0 {
-		// Keep lastRequestHandled fresh during long-running requests so TTL unload
-		// doesn't terminate active work.
-		p.setLastRequestHandled(time.Now())
-		keepaliveStop = make(chan struct{})
-		go func() {
-			ticker := time.NewTicker(time.Second)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-keepaliveStop:
-					return
-				case <-ticker.C:
-					p.setLastRequestHandled(time.Now())
-				}
-			}
-		}()
-	}
+	p.inFlightRequests.Add(1)
+	p.inFlightRequestsCount.Add(1)
 	defer func() {
-		if keepaliveStop != nil {
-			close(keepaliveStop)
-		}
 		p.setLastRequestHandled(time.Now())
+		p.inFlightRequestsCount.Add(-1)
+		p.inFlightRequests.Done()
 	}()
 
 	// for #366
