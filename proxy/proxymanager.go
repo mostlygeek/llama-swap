@@ -28,7 +28,6 @@ const (
 
 type proxyCtxKey string
 
-// InflightCounter tracks the total number of in-flight requests.
 type InflightCounter struct {
 	mu    sync.Mutex
 	total int
@@ -428,6 +427,7 @@ func (pm *ProxyManager) setupGinEngine() {
 	gin.DisableConsoleColor()
 }
 
+// Required for the token stats "Waiting: N" counts.
 func (pm *ProxyManager) currentInFlight() int {
 	return pm.inFlightCounter.Current()
 }

@@ -207,7 +207,7 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 	})()
 
 	/**
-	 * Send in-flight request stats
+	 * Send in-flight request stats related to token stats "Waiting: N" count.
 	 */
 	defer event.On(func(e InFlightRequestsEvent) {
 		sendInFlight(e.Total)
@@ -218,9 +218,8 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 	sendLogData("upstream", pm.upstreamLogger.GetHistory())
 	sendModels()
 	sendMetrics(pm.metricsMonitor.getMetrics())
-	{
-		sendInFlight(pm.currentInFlight())
-	}
+    sendInFlight(pm.currentInFlight())
+	
 
 	for {
 		select {
