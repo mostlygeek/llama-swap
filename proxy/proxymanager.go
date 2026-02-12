@@ -43,6 +43,9 @@ type ProxyManager struct {
 
 	processGroups map[string]*ProcessGroup
 
+	inFlightMu    sync.Mutex
+	inFlightTotal int
+
 	// shutdown signaling
 	shutdownCtx    context.Context
 	shutdownCancel context.CancelFunc
@@ -276,37 +279,37 @@ func (pm *ProxyManager) setupGinEngine() {
 
 	// Set up routes using the Gin engine
 	// Protected routes use pm.apiKeyAuth() middleware
-	pm.ginEngine.POST("/v1/chat/completions", pm.apiKeyAuth(), pm.proxyInferenceHandler)
-	pm.ginEngine.POST("/v1/responses", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/chat/completions", pm.apiKeyAuth(), pm.wrapProxyHandler(pm.proxyInferenceHandler))
+	pm.ginEngine.POST("/v1/responses", pm.apiKeyAuth(), pm.wrapProxyHandler(pm.proxyInferenceHandler))
 	// Support legacy /v1/completions api, see issue #12
-	pm.ginEngine.POST("/v1/completions", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/completions", pm.apiKeyAuth(), pm.wrapProxyHandler(pm.proxyInferenceHandler))
 	// Support anthropic /v1/messages (added https://github.com/ggml-org/llama.cpp/pull/17570)
-	pm.ginEngine.POST("/v1/messages", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/messages", pm.apiKeyAuth(), pm.wrapProxyHandler(pm.proxyInferenceHandler))
 	// Support anthropic count_tokens API (Also added in the above PR)
-	pm.ginEngine.POST("/v1/messages/count_tokens", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/messages/count_tokens", pm.apiKeyAuth(), pm.wrapProxyHandler(pm.proxyInferenceHandler))
 
 	// Support embeddings and reranking
-	pm.ginEngine.POST("/v1/embeddings", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/embeddings", pm.apiKeyAuth(), pm.wrapProxyHandler(pm.proxyInferenceHandler))
 
 	// llama-server's /reranking endpoint + aliases
-	pm.ginEngine.POST("/reranking", pm.apiKeyAuth(), pm.proxyInferenceHandler)
-	pm.ginEngine.POST("/rerank", pm.apiKeyAuth(), pm.proxyInferenceHandler)
-	pm.ginEngine.POST("/v1/rerank", pm.apiKeyAuth(), pm.proxyInferenceHandler)
-	pm.ginEngine.POST("/v1/reranking", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/reranking", pm.apiKeyAuth(), pm.wrapProxyHandler(pm.proxyInferenceHandler))
+	pm.ginEngine.POST("/rerank", pm.apiKeyAuth(), pm.wrapProxyHandler(pm.proxyInferenceHandler))
+	pm.ginEngine.POST("/v1/rerank", pm.apiKeyAuth(), pm.wrapProxyHandler(pm.proxyInferenceHandler))
+	pm.ginEngine.POST("/v1/reranking", pm.apiKeyAuth(), pm.wrapProxyHandler(pm.proxyInferenceHandler))
 
 	// llama-server's /infill endpoint for code infilling
-	pm.ginEngine.POST("/infill", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/infill", pm.apiKeyAuth(), pm.wrapProxyHandler(pm.proxyInferenceHandler))
 
 	// llama-server's /completion endpoint
-	pm.ginEngine.POST("/completion", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/completion", pm.apiKeyAuth(), pm.wrapProxyHandler(pm.proxyInferenceHandler))
 
 	// Support audio/speech endpoint
-	pm.ginEngine.POST("/v1/audio/speech", pm.apiKeyAuth(), pm.proxyInferenceHandler)
-	pm.ginEngine.POST("/v1/audio/voices", pm.apiKeyAuth(), pm.proxyInferenceHandler)
-	pm.ginEngine.GET("/v1/audio/voices", pm.apiKeyAuth(), pm.proxyGETModelHandler)
-	pm.ginEngine.POST("/v1/audio/transcriptions", pm.apiKeyAuth(), pm.proxyOAIPostFormHandler)
-	pm.ginEngine.POST("/v1/images/generations", pm.apiKeyAuth(), pm.proxyInferenceHandler)
-	pm.ginEngine.POST("/v1/images/edits", pm.apiKeyAuth(), pm.proxyOAIPostFormHandler)
+	pm.ginEngine.POST("/v1/audio/speech", pm.apiKeyAuth(), pm.wrapProxyHandler(pm.proxyInferenceHandler))
+	pm.ginEngine.POST("/v1/audio/voices", pm.apiKeyAuth(), pm.wrapProxyHandler(pm.proxyInferenceHandler))
+	pm.ginEngine.GET("/v1/audio/voices", pm.apiKeyAuth(), pm.wrapProxyHandler(pm.proxyGETModelHandler))
+	pm.ginEngine.POST("/v1/audio/transcriptions", pm.apiKeyAuth(), pm.wrapProxyHandler(pm.proxyOAIPostFormHandler))
+	pm.ginEngine.POST("/v1/images/generations", pm.apiKeyAuth(), pm.wrapProxyHandler(pm.proxyInferenceHandler))
+	pm.ginEngine.POST("/v1/images/edits", pm.apiKeyAuth(), pm.wrapProxyHandler(pm.proxyOAIPostFormHandler))
 
 	pm.ginEngine.GET("/v1/models", pm.apiKeyAuth(), pm.listModelsHandler)
 
@@ -325,7 +328,7 @@ func (pm *ProxyManager) setupGinEngine() {
 	pm.ginEngine.GET("/upstream", func(c *gin.Context) {
 		c.Redirect(http.StatusFound, "/ui/models")
 	})
-	pm.ginEngine.Any("/upstream/*upstreamPath", pm.apiKeyAuth(), pm.proxyToUpstream)
+	pm.ginEngine.Any("/upstream/*upstreamPath", pm.apiKeyAuth(), pm.wrapProxyHandler(pm.proxyToUpstream))
 	pm.ginEngine.GET("/unload", pm.apiKeyAuth(), pm.unloadAllModelsHandler)
 	pm.ginEngine.GET("/running", pm.apiKeyAuth(), pm.listRunningProcessesHandler)
 	pm.ginEngine.GET("/health", func(c *gin.Context) {
@@ -387,6 +390,43 @@ func (pm *ProxyManager) setupGinEngine() {
 
 	// Disable console color for testing
 	gin.DisableConsoleColor()
+}
+
+func (pm *ProxyManager) currentInFlight() int {
+	pm.inFlightMu.Lock()
+	total := pm.inFlightTotal
+	pm.inFlightMu.Unlock()
+	return total
+}
+
+func (pm *ProxyManager) incrementInFlight() int {
+	pm.inFlightMu.Lock()
+	pm.inFlightTotal++
+	total := pm.inFlightTotal
+	pm.inFlightMu.Unlock()
+	return total
+}
+
+func (pm *ProxyManager) decrementInFlight() int {
+	pm.inFlightMu.Lock()
+	if pm.inFlightTotal > 0 {
+		pm.inFlightTotal--
+	}
+	total := pm.inFlightTotal
+	pm.inFlightMu.Unlock()
+	return total
+}
+
+func (pm *ProxyManager) wrapProxyHandler(handler gin.HandlerFunc) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		total := pm.incrementInFlight()
+		event.Emit(InFlightRequestsEvent{Total: total})
+		defer func() {
+			total := pm.decrementInFlight()
+			event.Emit(InFlightRequestsEvent{Total: total})
+		}()
+		handler(c)
+	}
 }
 
 // ServeHTTP implements http.Handler interface

@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/event"
@@ -102,20 +101,6 @@ func (pm *ProxyManager) getModelStatus() []Model {
 	return models
 }
 
-func (pm *ProxyManager) getInFlightByModel() map[string]int32 {
-	results := make(map[string]int32)
-	for _, group := range pm.processGroups {
-		group.Lock()
-		for modelID, process := range group.processes {
-			if process != nil {
-				results[modelID] = process.InFlightRequests()
-			}
-		}
-		group.Unlock()
-	}
-	return results
-}
-
 type messageType string
 
 const (
@@ -182,7 +167,7 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 		}
 	}
 
-	sendInFlight := func(total int32) {
+	sendInFlight := func(total int) {
 		jsonData, err := json.Marshal(gin.H{"total": total})
 		if err == nil {
 			select {
@@ -224,17 +209,8 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 	/**
 	 * Send in-flight request stats
 	 */
-	inFlightByModel := map[string]int32{}
-	var inFlightMu sync.Mutex
 	defer event.On(func(e InFlightRequestsEvent) {
-		inFlightMu.Lock()
-		inFlightByModel[e.ModelID] = e.InFlight
-		var total int32
-		for _, count := range inFlightByModel {
-			total += count
-		}
-		inFlightMu.Unlock()
-		sendInFlight(total)
+		sendInFlight(e.Total)
 	})()
 
 	// send initial batch of data
@@ -243,19 +219,7 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 	sendModels()
 	sendMetrics(pm.metricsMonitor.getMetrics())
 	{
-		initial := pm.getInFlightByModel()
-		inFlightMu.Lock()
-		for modelID, count := range initial {
-			if _, exists := inFlightByModel[modelID]; !exists {
-				inFlightByModel[modelID] = count
-			}
-		}
-		var total int32
-		for _, count := range inFlightByModel {
-			total += count
-		}
-		inFlightMu.Unlock()
-		sendInFlight(total)
+		sendInFlight(pm.currentInFlight())
 	}
 
 	for {
