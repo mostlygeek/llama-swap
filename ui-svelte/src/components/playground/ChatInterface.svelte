@@ -52,12 +52,22 @@
     }
   });
 
-  // Persist messages to localStorage
+  // Persist messages to localStorage (throttled to once per 2s)
+  let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastSaveTime = 0;
   $effect(() => {
-    try {
-      localStorage.setItem("playground-messages", JSON.stringify(messages));
-    } catch {
-      // localStorage may be full (e.g. large base64 images)
+    const json = JSON.stringify(messages);
+    const elapsed = Date.now() - lastSaveTime;
+    if (saveTimer) clearTimeout(saveTimer);
+    if (elapsed >= 2000) {
+      try { localStorage.setItem("playground-messages", json); } catch {}
+      lastSaveTime = Date.now();
+    } else {
+      saveTimer = setTimeout(() => {
+        try { localStorage.setItem("playground-messages", json); } catch {}
+        lastSaveTime = Date.now();
+        saveTimer = null;
+      }, 2000 - elapsed);
     }
   });
 
