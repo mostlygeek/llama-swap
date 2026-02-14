@@ -180,28 +180,42 @@ export function closePendingBlock(pending: string): string {
   return pending;
 }
 
+export interface RenderedBlock {
+  id: number;
+  html: string;
+}
+
+export interface StreamingCache {
+  blocks: RenderedBlock[];
+  nextId: number;
+  completeKey: string;
+}
+
+export function createStreamingCache(): StreamingCache {
+  return { blocks: [], nextId: 0, completeKey: "" };
+}
+
 export function renderStreamingMarkdown(
   text: string,
-  cache: { key: string; html: string },
-): { completeHtml: string; pendingHtml: string } {
+  cache: StreamingCache,
+): { blocks: RenderedBlock[]; pendingHtml: string } {
   const { complete, pending } = splitCompleteBlocks(text);
 
-  let completeHtml = "";
   if (complete) {
-    if (cache.key === complete) {
-      // Complete section unchanged — reuse cached HTML
-      completeHtml = cache.html;
-    } else if (complete.startsWith(cache.key) && cache.key.length > 0) {
-      // Complete section grew — only render the new blocks and append
-      const newPart = complete.slice(cache.key.length);
-      completeHtml = cache.html + renderMarkdown(newPart);
-      cache.key = complete;
-      cache.html = completeHtml;
-    } else {
-      completeHtml = renderMarkdown(complete);
-      cache.key = complete;
-      cache.html = completeHtml;
+    if (cache.completeKey !== complete) {
+      if (complete.startsWith(cache.completeKey) && cache.completeKey.length > 0) {
+        // Complete section grew — render only the new part as a new block
+        const newPart = complete.slice(cache.completeKey.length);
+        cache.blocks = [...cache.blocks, { id: cache.nextId++, html: renderMarkdown(newPart) }];
+      } else {
+        // Complete section changed unexpectedly — re-render as single block
+        cache.blocks = [{ id: cache.nextId++, html: renderMarkdown(complete) }];
+      }
+      cache.completeKey = complete;
     }
+  } else if (cache.blocks.length > 0) {
+    cache.blocks = [];
+    cache.completeKey = "";
   }
 
   let pendingHtml = "";
@@ -210,7 +224,7 @@ export function renderStreamingMarkdown(
     pendingHtml = renderMarkdown(closed);
   }
 
-  return { completeHtml, pendingHtml };
+  return { blocks: cache.blocks, pendingHtml };
 }
 
 export function renderMarkdown(content: string): string {

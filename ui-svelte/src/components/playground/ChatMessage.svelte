@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { renderMarkdown, escapeHtml, renderStreamingMarkdown } from "../../lib/markdown";
+  import { renderMarkdown, escapeHtml, renderStreamingMarkdown, createStreamingCache } from "../../lib/markdown";
+  import type { RenderedBlock } from "../../lib/markdown";
   import { Copy, Check, Pencil, X, Save, RefreshCw, ChevronDown, ChevronRight, Brain, Code } from "lucide-svelte";
   import { getTextContent, getImageUrls } from "../../lib/types";
   import type { ContentPart } from "../../lib/types";
@@ -22,14 +23,14 @@
   let hasImages = $derived(imageUrls.length > 0);
   let canEdit = $derived(onEdit !== undefined && !hasImages);
 
-  let streamingCache = { key: "", html: "" };
+  let streamingCache = createStreamingCache();
   let renderedParts = $derived.by(() => {
     if (role !== "assistant") {
-      return { completeHtml: escapeHtml(textContent).replace(/\n/g, '<br>'), pendingHtml: "" };
+      return { blocks: [{ id: -1, html: escapeHtml(textContent).replace(/\n/g, '<br>') }] as RenderedBlock[], pendingHtml: "" };
     }
     if (!isStreaming) {
-      streamingCache = { key: "", html: "" };
-      return { completeHtml: renderMarkdown(textContent), pendingHtml: "" };
+      streamingCache = createStreamingCache();
+      return { blocks: [{ id: -1, html: renderMarkdown(textContent) }] as RenderedBlock[], pendingHtml: "" };
     }
     return renderStreamingMarkdown(textContent, streamingCache);
   });
@@ -174,8 +175,10 @@
         <div class="whitespace-pre-wrap font-mono text-sm">{textContent}</div>
       {:else}
         <div class="prose prose-sm dark:prose-invert max-w-none">
-          {@html renderedParts.completeHtml}
-          {#if renderedParts.pendingHtml}{@html renderedParts.pendingHtml}{/if}
+          {#each renderedParts.blocks as block (block.id)}
+            {@html block.html}
+          {/each}
+          {@html renderedParts.pendingHtml}
           {#if isStreaming && !isReasoning}
             <span class="inline-block w-2 h-4 bg-current animate-pulse ml-0.5"></span>
           {/if}

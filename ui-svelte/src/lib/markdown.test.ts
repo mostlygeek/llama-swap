@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderMarkdown, escapeHtml, splitCompleteBlocks, closePendingBlock, renderStreamingMarkdown } from "./markdown";
+import { renderMarkdown, escapeHtml, splitCompleteBlocks, closePendingBlock, renderStreamingMarkdown, createStreamingCache } from "./markdown";
 
 describe("renderMarkdown", () => {
   describe("basic markdown", () => {
@@ -297,68 +297,64 @@ describe("closePendingBlock", () => {
 });
 
 describe("renderStreamingMarkdown", () => {
-  it("renders complete blocks as markdown and pending as rendered markdown", () => {
-    const cache = { key: "", html: "" };
+  it("renders complete blocks and pending as markdown", () => {
+    const cache = createStreamingCache();
     const text = "# Hello\n\nWorld";
-    const { completeHtml, pendingHtml } = renderStreamingMarkdown(text, cache);
-    expect(completeHtml).toContain("<h1>Hello</h1>");
-    // Pending is now rendered as markdown
+    const { blocks, pendingHtml } = renderStreamingMarkdown(text, cache);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].html).toContain("<h1>Hello</h1>");
     expect(pendingHtml).toContain("World");
     expect(pendingHtml).toContain("<p>");
   });
 
-  it("uses cache when complete portion is unchanged", () => {
-    const cache = { key: "", html: "" };
-    const text1 = "# Hello\n\nWor";
-    renderStreamingMarkdown(text1, cache);
-    const cachedHtml = cache.html;
+  it("preserves existing blocks when complete portion is unchanged", () => {
+    const cache = createStreamingCache();
+    renderStreamingMarkdown("# Hello\n\nWor", cache);
+    const firstBlocks = cache.blocks;
 
-    const text2 = "# Hello\n\nWorld";
-    const { completeHtml } = renderStreamingMarkdown(text2, cache);
-    // Cache key should still be the same complete portion
-    expect(cache.html).toBe(cachedHtml);
-    expect(completeHtml).toBe(cachedHtml);
-    expect(cache.key).toBe("# Hello\n");
+    const { blocks } = renderStreamingMarkdown("# Hello\n\nWorld", cache);
+    // Same block array reference — nothing changed in the complete section
+    expect(blocks).toBe(firstBlocks);
+    expect(cache.completeKey).toBe("# Hello\n");
   });
 
-  it("updates cache when new block completes", () => {
-    const cache = { key: "", html: "" };
-    const text1 = "# Hello\n\nParagraph";
-    renderStreamingMarkdown(text1, cache);
-    const firstKey = cache.key;
-
-    const text2 = "# Hello\n\nParagraph.\n\nMore";
-    renderStreamingMarkdown(text2, cache);
-    expect(cache.key).not.toBe(firstKey);
-    expect(cache.key).toBe("# Hello\n\nParagraph.\n");
-  });
-
-  it("incrementally appends when complete section grows", () => {
-    const cache = { key: "", html: "" };
-
-    // First call: one complete block
+  it("appends a new block when a new section completes", () => {
+    const cache = createStreamingCache();
     renderStreamingMarkdown("# Hello\n\nParagraph", cache);
-    const firstHtml = cache.html;
-    expect(firstHtml).toContain("<h1>Hello</h1>");
+    expect(cache.blocks).toHaveLength(1);
+    const firstBlock = cache.blocks[0];
 
-    // Second call: complete section grew with a new block
     renderStreamingMarkdown("# Hello\n\nParagraph.\n\nMore", cache);
-    // New HTML should start with the old HTML (appended, not re-rendered)
-    expect(cache.html.startsWith(firstHtml)).toBe(true);
-    expect(cache.html).toContain("Paragraph.");
+    expect(cache.blocks).toHaveLength(2);
+    // First block is preserved with the same id and html
+    expect(cache.blocks[0].id).toBe(firstBlock.id);
+    expect(cache.blocks[0].html).toBe(firstBlock.html);
+    // Second block contains the new paragraph
+    expect(cache.blocks[1].html).toContain("Paragraph.");
+  });
+
+  it("assigns unique stable ids to each block", () => {
+    const cache = createStreamingCache();
+    renderStreamingMarkdown("A.\n\nB.\n\nC", cache);
+    expect(cache.blocks).toHaveLength(1);
+    const id0 = cache.blocks[0].id;
+
+    renderStreamingMarkdown("A.\n\nB.\n\nC.\n\nD", cache);
+    expect(cache.blocks).toHaveLength(2);
+    expect(cache.blocks[0].id).toBe(id0);
+    expect(cache.blocks[1].id).toBe(id0 + 1);
   });
 
   it("renders pending code block with syntax highlighting", () => {
-    const cache = { key: "", html: "" };
+    const cache = createStreamingCache();
     const text = "Done.\n\n```python\nprint('hello')";
     const { pendingHtml } = renderStreamingMarkdown(text, cache);
-    // Should be rendered as a code block, not escaped text
     expect(pendingHtml).toContain("<code");
     expect(pendingHtml).toContain("hljs");
   });
 
   it("renders pending table as markdown", () => {
-    const cache = { key: "", html: "" };
+    const cache = createStreamingCache();
     const text = "Done.\n\n| a | b |\n| --- | --- |\n| 1 | 2 |";
     const { pendingHtml } = renderStreamingMarkdown(text, cache);
     expect(pendingHtml).toContain("<table>");
@@ -366,7 +362,7 @@ describe("renderStreamingMarkdown", () => {
   });
 
   it("renders pending portion through markdown pipeline", () => {
-    const cache = { key: "", html: "" };
+    const cache = createStreamingCache();
     const text = "Done.\n\nSome **bold** text";
     const { pendingHtml } = renderStreamingMarkdown(text, cache);
     expect(pendingHtml).toContain("<strong>bold</strong>");
