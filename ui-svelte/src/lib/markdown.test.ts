@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderMarkdown, escapeHtml, splitCompleteBlocks, closePendingBlock, renderStreamingMarkdown, createStreamingCache } from "./markdown";
+import { renderMarkdown, escapeHtml, splitCompleteBlocks, closePendingBlock, normalizeLatexDelimiters, renderStreamingMarkdown, createStreamingCache } from "./markdown";
 
 describe("renderMarkdown", () => {
   describe("basic markdown", () => {
@@ -130,6 +130,35 @@ More text here.
       expect(result).toContain("katex");
       expect(result).toContain("sqrt");
     });
+
+    it("renders \\[...\\] display math", () => {
+      const result = renderMarkdown("\\[\nx^2 + y^2 = z^2\n\\]");
+      expect(result).toContain("katex");
+    });
+
+    it("renders \\(...\\) inline math", () => {
+      const result = renderMarkdown("The equation \\(E = mc^2\\) is famous.");
+      expect(result).toContain("katex");
+    });
+  });
+
+  describe("normalizeLatexDelimiters", () => {
+    it("converts \\[...\\] to $$...$$", () => {
+      expect(normalizeLatexDelimiters("\\[\nx^2\n\\]")).toBe("$$\nx^2\n$$");
+    });
+
+    it("converts \\(...\\) to $...$", () => {
+      expect(normalizeLatexDelimiters("\\(x^2\\)")).toBe("$x^2$");
+    });
+
+    it("leaves $$ and $ delimiters unchanged", () => {
+      const text = "$$x^2$$ and $y$";
+      expect(normalizeLatexDelimiters(text)).toBe(text);
+    });
+
+    it("handles multiple occurrences", () => {
+      expect(normalizeLatexDelimiters("\\(a\\) and \\(b\\)")).toBe("$a$ and $b$");
+    });
   });
 
   describe("escapeHtml", () => {
@@ -234,6 +263,20 @@ describe("splitCompleteBlocks", () => {
     expect(result.pending).toBe("$$\nx^2");
   });
 
+  it("treats closed \\[...\\] math block as complete boundary", () => {
+    const text = "\\[\nx^2\n\\]\nAfter";
+    const result = splitCompleteBlocks(text);
+    expect(result.complete).toBe("\\[\nx^2\n\\]");
+    expect(result.pending).toBe("After");
+  });
+
+  it("treats unclosed \\[ math block as pending", () => {
+    const text = "Before.\n\n\\[\nx^2";
+    const result = splitCompleteBlocks(text);
+    expect(result.complete).toBe("Before.\n");
+    expect(result.pending).toBe("\\[\nx^2");
+  });
+
   it("handles trailing blank line making everything complete", () => {
     const text = "Hello world.\n";
     const result = splitCompleteBlocks(text);
@@ -274,6 +317,16 @@ describe("closePendingBlock", () => {
 
   it("does not modify already-closed math block", () => {
     const text = "$$\nx^2\n$$";
+    expect(closePendingBlock(text)).toBe(text);
+  });
+
+  it("closes an open \\[ math block with \\]", () => {
+    const result = closePendingBlock("\\[\nx^2 + y^2");
+    expect(result).toBe("\\[\nx^2 + y^2\n\\]");
+  });
+
+  it("does not modify already-closed \\[...\\] math block", () => {
+    const text = "\\[\nx^2\n\\]";
     expect(closePendingBlock(text)).toBe(text);
   });
 

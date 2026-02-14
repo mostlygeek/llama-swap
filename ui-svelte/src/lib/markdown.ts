@@ -94,7 +94,7 @@ export function splitCompleteBlocks(text: string): { complete: string; pending: 
     }
 
     if (inMathBlock) {
-      if (trimmed === "$$") {
+      if (trimmed === "$$" || trimmed === "\\]") {
         inMathBlock = false;
         lastCompleteBoundary = i;
       }
@@ -112,7 +112,7 @@ export function splitCompleteBlocks(text: string): { complete: string; pending: 
     }
 
     // Check for opening math block
-    if (trimmed === "$$") {
+    if (trimmed === "$$" || trimmed === "\\[") {
       inMathBlock = true;
       continue;
     }
@@ -143,6 +143,7 @@ export function closePendingBlock(pending: string): string {
   let inFence = false;
   let fenceStr = "";
   let inMathBlock = false;
+  let mathClose = "";
 
   for (const line of lines) {
     const trimmed = line.trimEnd();
@@ -156,8 +157,9 @@ export function closePendingBlock(pending: string): string {
     }
 
     if (inMathBlock) {
-      if (trimmed === "$$") {
+      if (trimmed === "$$" || trimmed === "\\]") {
         inMathBlock = false;
+        mathClose = "";
       }
       continue;
     }
@@ -171,12 +173,19 @@ export function closePendingBlock(pending: string): string {
 
     if (trimmed === "$$") {
       inMathBlock = true;
+      mathClose = "$$";
+      continue;
+    }
+
+    if (trimmed === "\\[") {
+      inMathBlock = true;
+      mathClose = "\\]";
       continue;
     }
   }
 
   if (inFence) return pending + "\n" + fenceStr;
-  if (inMathBlock) return pending + "\n$$";
+  if (inMathBlock) return pending + "\n" + mathClose;
   return pending;
 }
 
@@ -227,13 +236,22 @@ export function renderStreamingMarkdown(
   return { blocks: cache.blocks, pendingHtml };
 }
 
+// Convert \[...\] to $$...$$ and \(...\) to $...$
+export function normalizeLatexDelimiters(text: string): string {
+  // Display math: \[...\] → $$...$$  (may span multiple lines)
+  text = text.replace(/\\\[([\s\S]*?)\\\]/g, (_match, inner) => `$$${inner}$$`);
+  // Inline math: \(...\) → $...$
+  text = text.replace(/\\\(([\s\S]*?)\\\)/g, (_match, inner) => `$${inner}$`);
+  return text;
+}
+
 export function renderMarkdown(content: string): string {
   if (!content) {
     return "";
   }
 
   try {
-    const result = processor.processSync(content);
+    const result = processor.processSync(normalizeLatexDelimiters(content));
     return String(result);
   } catch {
     // Fallback to escaped plain text if markdown parsing fails
