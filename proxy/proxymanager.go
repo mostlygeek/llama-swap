@@ -28,6 +28,10 @@ const (
 
 type proxyCtxKey string
 
+// ctxKeyAPIKey is the gin.Context key where we store the validated API key (if auth is enabled).
+// This is used for internal actions that need to call back into protected endpoints (e.g. benchy).
+const ctxKeyAPIKey = "apiKey"
+
 type ProxyManager struct {
 	sync.Mutex
 
@@ -54,6 +58,11 @@ type ProxyManager struct {
 
 	// peer proxy see: #296, #433
 	peerProxy *PeerProxy
+
+	// Benchy jobs (llama-benchy runner)
+	benchyMu      sync.Mutex
+	benchyJobs    map[string]*BenchyJob
+	benchyCancels map[string]context.CancelFunc
 }
 
 func New(proxyConfig config.Config) *ProxyManager {
@@ -163,6 +172,9 @@ func New(proxyConfig config.Config) *ProxyManager {
 		version:   "0",
 
 		peerProxy: peerProxy,
+
+		benchyJobs:    make(map[string]*BenchyJob),
+		benchyCancels: make(map[string]context.CancelFunc),
 	}
 
 	// create the process groups
@@ -968,6 +980,10 @@ func (pm *ProxyManager) apiKeyAuth() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+
+		// Preserve the validated key for internal use (e.g., benchmarks that call back into /v1).
+		// Headers are stripped below to prevent leakage to upstream servers.
+		c.Set(ctxKeyAPIKey, providedKey)
 
 		// Strip auth headers to prevent leakage to upstream
 		c.Request.Header.Del("Authorization")
