@@ -136,6 +136,50 @@ export function splitCompleteBlocks(text: string): { complete: string; pending: 
   };
 }
 
+export function closePendingBlock(pending: string): string {
+  if (!pending) return "";
+
+  const lines = pending.split("\n");
+  let inFence = false;
+  let fenceStr = "";
+  let inMathBlock = false;
+
+  for (const line of lines) {
+    const trimmed = line.trimEnd();
+
+    if (inFence) {
+      if (new RegExp(`^\\s*${fenceStr[0] === "~" ? "~~~" : "\\`\\`\\`"}\\s*$`).test(trimmed)) {
+        inFence = false;
+        fenceStr = "";
+      }
+      continue;
+    }
+
+    if (inMathBlock) {
+      if (trimmed === "$$") {
+        inMathBlock = false;
+      }
+      continue;
+    }
+
+    const fenceMatch = trimmed.match(/^(\s*)(```|~~~)/);
+    if (fenceMatch) {
+      fenceStr = fenceMatch[2];
+      inFence = true;
+      continue;
+    }
+
+    if (trimmed === "$$") {
+      inMathBlock = true;
+      continue;
+    }
+  }
+
+  if (inFence) return pending + "\n" + fenceStr;
+  if (inMathBlock) return pending + "\n$$";
+  return pending;
+}
+
 export function renderStreamingMarkdown(
   text: string,
   cache: { key: string; html: string },
@@ -162,7 +206,8 @@ export function renderStreamingMarkdown(
 
   let pendingHtml = "";
   if (pending) {
-    pendingHtml = escapeHtml(pending).replace(/\n/g, "<br>");
+    const closed = closePendingBlock(pending);
+    pendingHtml = renderMarkdown(closed);
   }
 
   return { completeHtml, pendingHtml };

@@ -33,10 +33,18 @@
   let imageError = $state<string | null>(null);
 
   let hasModels = $derived($models.some((m) => !m.unlisted));
+  let userScrolledUp = $state(false);
 
-  // Auto-scroll when messages change — snap during streaming, smooth otherwise
+  function handleMessagesScroll() {
+    if (!messagesContainer) return;
+    const { scrollTop, scrollHeight, clientHeight } = messagesContainer;
+    // Consider "at bottom" if within 40px of the bottom
+    userScrolledUp = scrollHeight - scrollTop - clientHeight > 40;
+  }
+
+  // Auto-scroll when messages change — skip if user scrolled up
   $effect(() => {
-    if (messages.length > 0 && messagesContainer) {
+    if (messages.length > 0 && messagesContainer && !userScrolledUp) {
       messagesContainer.scrollTo({
         top: messagesContainer.scrollHeight,
         behavior: isStreaming ? "instant" : "smooth",
@@ -56,6 +64,8 @@
   async function sendMessage() {
     const trimmedInput = userInput.trim();
     if ((!trimmedInput && attachedImages.length === 0) || !$selectedModelStore || isStreaming) return;
+
+    userScrolledUp = false;
 
     // Build message content (multimodal if images attached)
     let content: string | ContentPart[];
@@ -339,6 +349,7 @@
     <div
       class="flex-1 overflow-y-auto mb-4 px-2"
       bind:this={messagesContainer}
+      onscroll={handleMessagesScroll}
     >
       {#if messages.length === 0}
         <div class="h-full flex items-center justify-center text-txtsecondary">

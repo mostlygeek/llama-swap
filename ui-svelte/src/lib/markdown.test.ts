@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderMarkdown, escapeHtml, splitCompleteBlocks, renderStreamingMarkdown } from "./markdown";
+import { renderMarkdown, escapeHtml, splitCompleteBlocks, closePendingBlock, renderStreamingMarkdown } from "./markdown";
 
 describe("renderMarkdown", () => {
   describe("basic markdown", () => {
@@ -243,15 +243,68 @@ describe("splitCompleteBlocks", () => {
   });
 });
 
+describe("closePendingBlock", () => {
+  it("returns empty string for empty input", () => {
+    expect(closePendingBlock("")).toBe("");
+  });
+
+  it("returns plain text unchanged", () => {
+    expect(closePendingBlock("Hello world")).toBe("Hello world");
+  });
+
+  it("closes an open backtick code fence", () => {
+    const result = closePendingBlock("```python\nprint('hi')");
+    expect(result).toBe("```python\nprint('hi')\n```");
+  });
+
+  it("closes an open tilde code fence", () => {
+    const result = closePendingBlock("~~~js\nconst x = 1;");
+    expect(result).toBe("~~~js\nconst x = 1;\n~~~");
+  });
+
+  it("does not modify already-closed code fence", () => {
+    const text = "```py\ncode\n```";
+    expect(closePendingBlock(text)).toBe(text);
+  });
+
+  it("closes an open math block", () => {
+    const result = closePendingBlock("$$\nx^2 + y^2");
+    expect(result).toBe("$$\nx^2 + y^2\n$$");
+  });
+
+  it("does not modify already-closed math block", () => {
+    const text = "$$\nx^2\n$$";
+    expect(closePendingBlock(text)).toBe(text);
+  });
+
+  it("closes code fence when preceded by regular text", () => {
+    const result = closePendingBlock("Some text\n```\ncode");
+    expect(result).toBe("Some text\n```\ncode\n```");
+  });
+
+  it("leaves headers unchanged", () => {
+    expect(closePendingBlock("## Hello")).toBe("## Hello");
+  });
+
+  it("leaves tables unchanged", () => {
+    const table = "| a | b |\n| --- | --- |\n| 1 | 2 |";
+    expect(closePendingBlock(table)).toBe(table);
+  });
+
+  it("leaves lists unchanged", () => {
+    expect(closePendingBlock("- item 1\n- item 2")).toBe("- item 1\n- item 2");
+  });
+});
+
 describe("renderStreamingMarkdown", () => {
-  it("renders complete blocks as markdown and pending as escaped text", () => {
+  it("renders complete blocks as markdown and pending as rendered markdown", () => {
     const cache = { key: "", html: "" };
     const text = "# Hello\n\nWorld";
     const { completeHtml, pendingHtml } = renderStreamingMarkdown(text, cache);
     expect(completeHtml).toContain("<h1>Hello</h1>");
+    // Pending is now rendered as markdown
     expect(pendingHtml).toContain("World");
-    // "World" should be in pending (escaped), not in complete
-    expect(pendingHtml).not.toContain("<p>");
+    expect(pendingHtml).toContain("<p>");
   });
 
   it("uses cache when complete portion is unchanged", () => {
@@ -295,18 +348,27 @@ describe("renderStreamingMarkdown", () => {
     expect(cache.html).toContain("Paragraph.");
   });
 
-  it("escapes HTML in pending portion", () => {
+  it("renders pending code block with syntax highlighting", () => {
     const cache = { key: "", html: "" };
-    const text = "Done.\n\n<script>alert('xss')</script>";
+    const text = "Done.\n\n```python\nprint('hello')";
     const { pendingHtml } = renderStreamingMarkdown(text, cache);
-    expect(pendingHtml).toContain("&lt;script&gt;");
-    expect(pendingHtml).not.toContain("<script>");
+    // Should be rendered as a code block, not escaped text
+    expect(pendingHtml).toContain("<code");
+    expect(pendingHtml).toContain("hljs");
   });
 
-  it("converts newlines to <br> in pending portion", () => {
+  it("renders pending table as markdown", () => {
     const cache = { key: "", html: "" };
-    const text = "Done.\n\nline1\nline2";
+    const text = "Done.\n\n| a | b |\n| --- | --- |\n| 1 | 2 |";
     const { pendingHtml } = renderStreamingMarkdown(text, cache);
-    expect(pendingHtml).toContain("line1<br>line2");
+    expect(pendingHtml).toContain("<table>");
+    expect(pendingHtml).toContain("<td>");
+  });
+
+  it("renders pending portion through markdown pipeline", () => {
+    const cache = { key: "", html: "" };
+    const text = "Done.\n\nSome **bold** text";
+    const { pendingHtml } = renderStreamingMarkdown(text, cache);
+    expect(pendingHtml).toContain("<strong>bold</strong>");
   });
 });
