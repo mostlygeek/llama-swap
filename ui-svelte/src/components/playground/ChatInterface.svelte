@@ -1,12 +1,13 @@
 <script lang="ts">
-  import { models } from "../../stores/api";
+  import { models, loadModel, startBenchy, getBenchyJob, cancelBenchyJob } from "../../stores/api";
   import { persistentStore } from "../../stores/persistent";
   import { streamChatCompletion } from "../../lib/chatApi";
   import { playgroundStores } from "../../stores/playgroundActivity";
-  import type { ChatMessage, ContentPart } from "../../lib/types";
+  import type { BenchyJob, ChatMessage, ContentPart } from "../../lib/types";
   import ChatMessageComponent from "./ChatMessage.svelte";
   import ModelSelector from "./ModelSelector.svelte";
   import ExpandableTextarea from "./ExpandableTextarea.svelte";
+  import BenchyDialog from "../BenchyDialog.svelte";
 
   const selectedModelStore = persistentStore<string>("playground-selected-model", "");
   const systemPromptStore = persistentStore<string>("playground-system-prompt", "");
@@ -36,6 +37,17 @@
   let hasModels = $derived($models.some((m) => !m.unlisted));
   let userScrolledUp = $state(false);
 
+  // Benchy state (single active job in UI)
+  let benchyOpen = $state(false);
+  let benchyStarting = $state(false);
+  let benchyError: string | null = $state(null);
+  let benchyJob: BenchyJob | null = $state(null);
+  let benchyJobId: string | null = $state(null);
+  let benchyPollTimer: ReturnType<typeof setTimeout> | null = null;
+
+  let benchyBusy = $derived.by(() => {
+    return benchyStarting || benchyJob?.status === "running";
+  });
   $effect(() => {
     playgroundStores.chatStreaming.set(isStreaming);
   });
@@ -116,6 +128,102 @@
     messages = [];
     isReasoning = false;
     reasoningStartTime = 0;
+  }
+
+  function clearBenchyPoll(): void {
+    if (benchyPollTimer !== null) {
+      clearTimeout(benchyPollTimer);
+      benchyPollTimer = null;
+    }
+  }
+
+  function closeBenchyDialog(): void {
+    benchyOpen = false;
+    benchyStarting = false;
+    benchyError = null;
+    clearBenchyPoll();
+  }
+
+  async function pollBenchy(jobID: string): Promise<void> {
+    try {
+      const job = await getBenchyJob(jobID);
+      benchyJob = job;
+
+      if (job.status === "running") {
+        benchyPollTimer = setTimeout(() => {
+          void pollBenchy(jobID);
+        }, 1000);
+      } else {
+        clearBenchyPoll();
+      }
+    } catch (e) {
+      benchyError = e instanceof Error ? e.message : String(e);
+      clearBenchyPoll();
+    }
+  }
+
+  function waitForModelReady(modelID: string, timeoutMs = 5 * 60 * 1000): Promise<void> {
+    const current = $models.find((m) => m.id === modelID);
+    if (current?.state === "ready") return Promise.resolve();
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        unsub();
+        reject(new Error(`Timed out waiting for ${modelID} to become ready`));
+      }, timeoutMs);
+
+      const unsub = models.subscribe((list) => {
+        const m = list.find((x) => x.id === modelID);
+        if (m?.state === "ready") {
+          clearTimeout(timer);
+          unsub();
+          resolve();
+        }
+      });
+    });
+  }
+
+  async function runBenchyForSelectedModel(): Promise<void> {
+    if (!$selectedModelStore) return;
+
+    benchyOpen = true;
+    benchyStarting = true;
+    benchyError = null;
+    benchyJob = null;
+    benchyJobId = null;
+    clearBenchyPoll();
+
+    try {
+      const modelID = $selectedModelStore;
+      const m = $models.find((x) => x.id === modelID);
+      if (!m) throw new Error(`Model not found: ${modelID}`);
+      if (m.state === "stopping" || m.state === "shutdown") {
+        throw new Error(`Model is ${m.state}; wait until it is stopped/ready`);
+      }
+
+      if (m.state === "stopped") {
+        await loadModel(modelID);
+      }
+      await waitForModelReady(modelID);
+
+      const id = await startBenchy(modelID);
+      benchyJobId = id;
+      benchyStarting = false;
+      await pollBenchy(id);
+    } catch (e) {
+      benchyStarting = false;
+      benchyError = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  async function cancelBenchy(): Promise<void> {
+    if (!benchyJobId) return;
+    try {
+      await cancelBenchyJob(benchyJobId);
+      await pollBenchy(benchyJobId);
+    } catch (e) {
+      benchyError = e instanceof Error ? e.message : String(e);
+    }
   }
 
   async function regenerateFromIndex(idx: number) {
@@ -303,6 +411,14 @@
     <div class="flex gap-2">
       <button
         class="btn"
+        onclick={runBenchyForSelectedModel}
+        disabled={!$selectedModelStore || benchyBusy || isStreaming}
+        title="Run llama-benchy for the selected model"
+      >
+        Benchy
+      </button>
+      <button
+        class="btn"
         onclick={() => (showSettings = !showSettings)}
         title="Settings"
       >
@@ -464,3 +580,5 @@
     </div>
   {/if}
 </div>
+
+<BenchyDialog job={benchyJob} open={benchyOpen} starting={benchyStarting} error={benchyError} onclose={closeBenchyDialog} oncancel={cancelBenchy} />

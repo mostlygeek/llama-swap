@@ -48,6 +48,9 @@ type BenchyJob struct {
 	PP        []int  `json:"pp"`
 	TG        []int  `json:"tg"`
 	Runs      int    `json:"runs"`
+	// TrustRemoteCode controls whether we auto-accept the HuggingFace "custom code" prompt for some tokenizers.
+	// This only affects local tokenizer loading, not the remote server.
+	TrustRemoteCode bool `json:"trustRemoteCode,omitempty"`
 
 	Status     BenchyJobStatus `json:"status"`
 	StartedAt  time.Time       `json:"startedAt"`
@@ -66,6 +69,8 @@ type benchyStartRequest struct {
 	PP        []int  `json:"pp,omitempty"`
 	TG        []int  `json:"tg,omitempty"`
 	Runs      int    `json:"runs,omitempty"`
+	// TrustRemoteCode (when set) overrides metadata-based defaulting.
+	TrustRemoteCode *bool `json:"trustRemoteCode,omitempty"`
 }
 
 type benchyStartResponse struct {
@@ -126,6 +131,17 @@ func (pm *ProxyManager) apiStartBenchy(c *gin.Context) {
 		tokenizer = pm.defaultBenchyTokenizer(realModelName)
 	}
 
+	// Some HuggingFace tokenizers/models require `trust_remote_code=True` which otherwise prompts interactively.
+	// Default is opt-in via model metadata.
+	trustRemoteCode := false
+	if req.TrustRemoteCode != nil {
+		trustRemoteCode = *req.TrustRemoteCode
+	} else if cfg, ok := pm.config.Models[realModelName]; ok {
+		if v, ok := benchyTrustRemoteCodeFromMetadata(cfg.Metadata); ok {
+			trustRemoteCode = v
+		}
+	}
+
 	// Choose served model name for the target base URL.
 	// For direct upstreams (e.g. vLLM), this must match the model id that /v1 expects.
 	servedModelName := requestedModel
@@ -167,17 +183,18 @@ func (pm *ProxyManager) apiStartBenchy(c *gin.Context) {
 		return
 	}
 
-	job := &BenchyJob{
-		ID:        jobID,
-		Model:     requestedModel,
-		Tokenizer: tokenizer,
-		BaseURL:   baseURL,
-		PP:        append([]int{}, pp...),
-		TG:        append([]int{}, tg...),
-		Runs:      runs,
-		Status:    benchyStatusRunning,
-		StartedAt: time.Now(),
-	}
+		job := &BenchyJob{
+			ID:        jobID,
+			Model:     requestedModel,
+			Tokenizer: tokenizer,
+			BaseURL:   baseURL,
+			PP:        append([]int{}, pp...),
+			TG:        append([]int{}, tg...),
+			Runs:      runs,
+			TrustRemoteCode: trustRemoteCode,
+			Status:    benchyStatusRunning,
+			StartedAt: time.Now(),
+		}
 
 	ctx, cancel := context.WithCancel(pm.shutdownCtx)
 	pm.benchyMu.Lock()
@@ -185,7 +202,7 @@ func (pm *ProxyManager) apiStartBenchy(c *gin.Context) {
 	pm.benchyCancels[jobID] = cancel
 	pm.benchyMu.Unlock()
 
-	go pm.runBenchyJob(ctx, jobID, servedModelName, tokenizer, baseURL, pp, tg, runs, apiKey)
+	go pm.runBenchyJob(ctx, jobID, servedModelName, tokenizer, baseURL, pp, tg, runs, apiKey, trustRemoteCode)
 
 	c.JSON(http.StatusOK, benchyStartResponse{ID: jobID})
 }
@@ -233,7 +250,7 @@ func (pm *ProxyManager) apiCancelBenchyJob(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "canceling"})
 }
 
-func (pm *ProxyManager) runBenchyJob(ctx context.Context, jobID, servedModelName, tokenizer, baseURL string, pp, tg []int, runs int, apiKey string) {
+func (pm *ProxyManager) runBenchyJob(ctx context.Context, jobID, servedModelName, tokenizer, baseURL string, pp, tg []int, runs int, apiKey string, trustRemoteCode bool) {
 	displayModelName := servedModelName
 	// Prefer a human-friendly HF-ish model id for display if we have it as tokenizer.
 	if tokenizer != "" && strings.Contains(tokenizer, "/") && !strings.HasPrefix(tokenizer, "/") {
@@ -268,6 +285,11 @@ func (pm *ProxyManager) runBenchyJob(ctx context.Context, jobID, servedModelName
 	cmd := exec.CommandContext(ctx, benchyCmd, append(benchyArgs, args...)...)
 	cmd.Stdout = benchyJobWriter{pm: pm, jobID: jobID, stream: "stdout"}
 	cmd.Stderr = benchyJobWriter{pm: pm, jobID: jobID, stream: "stderr"}
+	if trustRemoteCode {
+		// llama-benchy currently has no CLI flag to pass `trust_remote_code=True` through to transformers,
+		// so we pre-answer its interactive prompt (if it appears). Provide multiple lines in case it's asked more than once.
+		cmd.Stdin = strings.NewReader("y\ny\ny\ny\ny\ny\ny\ny\n")
+	}
 
 	startErr := cmd.Start()
 	if startErr != nil {
@@ -492,6 +514,66 @@ func benchyTokenizerFromMetadata(meta map[string]any) (string, bool) {
 	}
 
 	return "", false
+}
+
+func benchyTrustRemoteCodeFromMetadata(meta map[string]any) (bool, bool) {
+	if len(meta) == 0 {
+		return false, false
+	}
+
+	// Accept a few common shapes:
+	// metadata:
+	//   benchy_trust_remote_code: true
+	// or
+	// metadata:
+	//   benchy:
+	//     trust_remote_code: true
+	// or (less preferred, but convenient)
+	// metadata:
+	//   trust_remote_code: true
+	if v, ok := meta["benchy_trust_remote_code"]; ok {
+		return parseAnyBool(v)
+	}
+	if v, ok := meta["trust_remote_code"]; ok {
+		return parseAnyBool(v)
+	}
+	if v, ok := meta["benchy"]; ok {
+		if m, ok := v.(map[string]any); ok {
+			if tv, ok := m["trust_remote_code"]; ok {
+				return parseAnyBool(tv)
+			}
+			if tv, ok := m["trustRemoteCode"]; ok {
+				return parseAnyBool(tv)
+			}
+		}
+	}
+
+	return false, false
+}
+
+func parseAnyBool(v any) (bool, bool) {
+	switch t := v.(type) {
+	case bool:
+		return t, true
+	case string:
+		s := strings.TrimSpace(t)
+		if s == "" {
+			return false, false
+		}
+		b, err := strconv.ParseBool(s)
+		if err != nil {
+			return false, false
+		}
+		return b, true
+	case int:
+		return t != 0, true
+	case int64:
+		return t != 0, true
+	case float64:
+		return t != 0, true
+	default:
+		return false, false
+	}
 }
 
 func resolveBenchyCommand() (string, []string, error) {
