@@ -34,12 +34,12 @@
 
   let hasModels = $derived($models.some((m) => !m.unlisted));
 
-  // Auto-scroll when messages change
+  // Auto-scroll when messages change — snap during streaming, smooth otherwise
   $effect(() => {
     if (messages.length > 0 && messagesContainer) {
       messagesContainer.scrollTo({
         top: messagesContainer.scrollHeight,
-        behavior: "smooth",
+        behavior: isStreaming ? "instant" : "smooth",
       });
     }
   });
