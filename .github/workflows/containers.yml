@@ -17,6 +17,13 @@ on:
       - 'docker/build-container.sh'
       - 'docker/*.Containerfile'
 
+# grant permissions on GITHUB_TOKEN to publish packages
+# ref: https://docs.github.com/en/packages/managing-github-packages-using-github-actions-workflows/publishing-and-installing-a-package-with-github-actions#publishing-a-package-using-an-action
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
