@@ -53,22 +53,20 @@
   });
 
   // Persist messages to localStorage (throttled to once per 2s)
-  let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let lastSaveTime = 0;
   $effect(() => {
     const json = JSON.stringify(messages);
     const elapsed = Date.now() - lastSaveTime;
-    if (saveTimer) clearTimeout(saveTimer);
-    if (elapsed >= 2000) {
+    const save = () => {
       try { localStorage.setItem("playground-messages", json); } catch {}
       lastSaveTime = Date.now();
-    } else {
-      saveTimer = setTimeout(() => {
-        try { localStorage.setItem("playground-messages", json); } catch {}
-        lastSaveTime = Date.now();
-        saveTimer = null;
-      }, 2000 - elapsed);
+    };
+    if (elapsed >= 2000) {
+      save();
+      return;
     }
+    const timer = setTimeout(save, 2000 - elapsed);
+    return () => clearTimeout(timer);
   });
 
   async function sendMessage() {
