@@ -247,11 +247,11 @@ describe("renderStreamingMarkdown", () => {
   it("renders complete blocks as markdown and pending as escaped text", () => {
     const cache = { key: "", html: "" };
     const text = "# Hello\n\nWorld";
-    const result = renderStreamingMarkdown(text, cache);
-    expect(result).toContain("<h1>Hello</h1>");
-    expect(result).toContain("World");
-    // "World" should be escaped, not wrapped in <p>
-    expect(result).toMatch(/World(?!<\/p>)/);
+    const { completeHtml, pendingHtml } = renderStreamingMarkdown(text, cache);
+    expect(completeHtml).toContain("<h1>Hello</h1>");
+    expect(pendingHtml).toContain("World");
+    // "World" should be in pending (escaped), not in complete
+    expect(pendingHtml).not.toContain("<p>");
   });
 
   it("uses cache when complete portion is unchanged", () => {
@@ -261,9 +261,10 @@ describe("renderStreamingMarkdown", () => {
     const cachedHtml = cache.html;
 
     const text2 = "# Hello\n\nWorld";
-    renderStreamingMarkdown(text2, cache);
+    const { completeHtml } = renderStreamingMarkdown(text2, cache);
     // Cache key should still be the same complete portion
     expect(cache.html).toBe(cachedHtml);
+    expect(completeHtml).toBe(cachedHtml);
     expect(cache.key).toBe("# Hello\n");
   });
 
@@ -279,18 +280,33 @@ describe("renderStreamingMarkdown", () => {
     expect(cache.key).toBe("# Hello\n\nParagraph.\n");
   });
 
+  it("incrementally appends when complete section grows", () => {
+    const cache = { key: "", html: "" };
+
+    // First call: one complete block
+    renderStreamingMarkdown("# Hello\n\nParagraph", cache);
+    const firstHtml = cache.html;
+    expect(firstHtml).toContain("<h1>Hello</h1>");
+
+    // Second call: complete section grew with a new block
+    renderStreamingMarkdown("# Hello\n\nParagraph.\n\nMore", cache);
+    // New HTML should start with the old HTML (appended, not re-rendered)
+    expect(cache.html.startsWith(firstHtml)).toBe(true);
+    expect(cache.html).toContain("Paragraph.");
+  });
+
   it("escapes HTML in pending portion", () => {
     const cache = { key: "", html: "" };
     const text = "Done.\n\n<script>alert('xss')</script>";
-    const result = renderStreamingMarkdown(text, cache);
-    expect(result).toContain("&lt;script&gt;");
-    expect(result).not.toContain("<script>");
+    const { pendingHtml } = renderStreamingMarkdown(text, cache);
+    expect(pendingHtml).toContain("&lt;script&gt;");
+    expect(pendingHtml).not.toContain("<script>");
   });
 
   it("converts newlines to <br> in pending portion", () => {
     const cache = { key: "", html: "" };
     const text = "Done.\n\nline1\nline2";
-    const result = renderStreamingMarkdown(text, cache);
-    expect(result).toContain("line1<br>line2");
+    const { pendingHtml } = renderStreamingMarkdown(text, cache);
+    expect(pendingHtml).toContain("line1<br>line2");
   });
 });

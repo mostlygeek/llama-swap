@@ -139,13 +139,20 @@ export function splitCompleteBlocks(text: string): { complete: string; pending: 
 export function renderStreamingMarkdown(
   text: string,
   cache: { key: string; html: string },
-): string {
+): { completeHtml: string; pendingHtml: string } {
   const { complete, pending } = splitCompleteBlocks(text);
 
   let completeHtml = "";
   if (complete) {
     if (cache.key === complete) {
+      // Complete section unchanged — reuse cached HTML
       completeHtml = cache.html;
+    } else if (complete.startsWith(cache.key) && cache.key.length > 0) {
+      // Complete section grew — only render the new blocks and append
+      const newPart = complete.slice(cache.key.length);
+      completeHtml = cache.html + renderMarkdown(newPart);
+      cache.key = complete;
+      cache.html = completeHtml;
     } else {
       completeHtml = renderMarkdown(complete);
       cache.key = complete;
@@ -158,7 +165,7 @@ export function renderStreamingMarkdown(
     pendingHtml = escapeHtml(pending).replace(/\n/g, "<br>");
   }
 
-  return completeHtml + pendingHtml;
+  return { completeHtml, pendingHtml };
 }
 
 export function renderMarkdown(content: string): string {

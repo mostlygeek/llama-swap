@@ -23,13 +23,13 @@
   let canEdit = $derived(onEdit !== undefined && !hasImages);
 
   let streamingCache = { key: "", html: "" };
-  let renderedContent = $derived.by(() => {
+  let renderedParts = $derived.by(() => {
     if (role !== "assistant") {
-      return escapeHtml(textContent).replace(/\n/g, '<br>');
+      return { completeHtml: escapeHtml(textContent).replace(/\n/g, '<br>'), pendingHtml: "" };
     }
     if (!isStreaming) {
       streamingCache = { key: "", html: "" };
-      return renderMarkdown(textContent);
+      return { completeHtml: renderMarkdown(textContent), pendingHtml: "" };
     }
     return renderStreamingMarkdown(textContent, streamingCache);
   });
@@ -174,7 +174,8 @@
         <div class="whitespace-pre-wrap font-mono text-sm">{textContent}</div>
       {:else}
         <div class="prose prose-sm dark:prose-invert max-w-none">
-          {@html renderedContent}
+          {@html renderedParts.completeHtml}
+          {#if renderedParts.pendingHtml}{@html renderedParts.pendingHtml}{/if}
           {#if isStreaming && !isReasoning}
             <span class="inline-block w-2 h-4 bg-current animate-pulse ml-0.5"></span>
           {/if}
