@@ -11,7 +11,16 @@
   const systemPromptStore = persistentStore<string>("playground-system-prompt", "");
   const temperatureStore = persistentStore<number>("playground-temperature", 0.7);
 
-  let messages = $state<ChatMessage[]>([]);
+  function loadMessages(): ChatMessage[] {
+    try {
+      const saved = localStorage.getItem("playground-messages");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  let messages = $state<ChatMessage[]>(loadMessages());
   let userInput = $state("");
   let isStreaming = $state(false);
   let isReasoning = $state(false);
@@ -32,6 +41,15 @@
         top: messagesContainer.scrollHeight,
         behavior: "smooth",
       });
+    }
+  });
+
+  // Persist messages to localStorage
+  $effect(() => {
+    try {
+      localStorage.setItem("playground-messages", JSON.stringify(messages));
+    } catch {
+      // localStorage may be full (e.g. large base64 images)
     }
   });
 
