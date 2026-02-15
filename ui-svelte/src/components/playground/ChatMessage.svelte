@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { renderMarkdown, escapeHtml } from "../../lib/markdown";
+  import { renderMarkdown, escapeHtml, renderStreamingMarkdown, createStreamingCache } from "../../lib/markdown";
+  import type { RenderedBlock } from "../../lib/markdown";
   import { Copy, Check, Pencil, X, Save, RefreshCw, ChevronDown, ChevronRight, Brain, Code } from "lucide-svelte";
   import { getTextContent, getImageUrls } from "../../lib/types";
   import type { ContentPart } from "../../lib/types";
@@ -22,11 +23,17 @@
   let hasImages = $derived(imageUrls.length > 0);
   let canEdit = $derived(onEdit !== undefined && !hasImages);
 
-  let renderedContent = $derived(
-    role === "assistant" && !isStreaming
-      ? renderMarkdown(textContent)
-      : escapeHtml(textContent).replace(/\n/g, '<br>')
-  );
+  let streamingCache = createStreamingCache();
+  let renderedParts = $derived.by(() => {
+    if (role !== "assistant") {
+      return { blocks: [{ id: -1, html: escapeHtml(textContent).replace(/\n/g, '<br>') }] as RenderedBlock[], pendingHtml: "" };
+    }
+    if (!isStreaming) {
+      streamingCache = createStreamingCache();
+      return { blocks: [{ id: -1, html: renderMarkdown(textContent) }] as RenderedBlock[], pendingHtml: "" };
+    }
+    return renderStreamingMarkdown(textContent, streamingCache);
+  });
   let copied = $state(false);
   let showRaw = $state(false);
   let isEditing = $state(false);
@@ -113,9 +120,9 @@
 
 <div class="flex {role === 'user' ? 'justify-end' : 'justify-start'} mb-4">
   <div
-    class="relative group max-w-[85%] rounded-lg px-4 py-2 {role === 'user'
-      ? 'bg-primary text-btn-primary-text'
-      : 'bg-surface border border-gray-200 dark:border-white/10'}"
+    class="relative group rounded-lg px-4 py-2 {role === 'user'
+      ? 'max-w-[85%] bg-primary text-btn-primary-text'
+      : 'w-full sm:w-4/5 bg-surface border border-gray-200 dark:border-white/10'}"
   >
     {#if role === "assistant"}
       {#if reasoning_content || isReasoning}
@@ -168,7 +175,10 @@
         <div class="whitespace-pre-wrap font-mono text-sm">{textContent}</div>
       {:else}
         <div class="prose prose-sm dark:prose-invert max-w-none">
-          {@html renderedContent}
+          {#each renderedParts.blocks as block (block.id)}
+            {@html block.html}
+          {/each}
+          {@html renderedParts.pendingHtml}
           {#if isStreaming && !isReasoning}
             <span class="inline-block w-2 h-4 bg-current animate-pulse ml-0.5"></span>
           {/if}

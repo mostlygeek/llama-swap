@@ -11,7 +11,16 @@
   const systemPromptStore = persistentStore<string>("playground-system-prompt", "");
   const temperatureStore = persistentStore<number>("playground-temperature", 0.7);
 
-  let messages = $state<ChatMessage[]>([]);
+  function loadMessages(): ChatMessage[] {
+    try {
+      const saved = localStorage.getItem("playground-messages");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  let messages = $state<ChatMessage[]>(loadMessages());
   let userInput = $state("");
   let isStreaming = $state(false);
   let isReasoning = $state(false);
@@ -24,20 +33,47 @@
   let imageError = $state<string | null>(null);
 
   let hasModels = $derived($models.some((m) => !m.unlisted));
+  let userScrolledUp = $state(false);
 
-  // Auto-scroll when messages change
+  function handleMessagesScroll() {
+    if (!messagesContainer) return;
+    const { scrollTop, scrollHeight, clientHeight } = messagesContainer;
+    // Consider "at bottom" if within 40px of the bottom
+    userScrolledUp = scrollHeight - scrollTop - clientHeight > 40;
+  }
+
+  // Auto-scroll when messages change — skip if user scrolled up
   $effect(() => {
-    if (messages.length > 0 && messagesContainer) {
+    if (messages.length > 0 && messagesContainer && !userScrolledUp) {
       messagesContainer.scrollTo({
         top: messagesContainer.scrollHeight,
-        behavior: "smooth",
+        behavior: isStreaming ? "instant" : "smooth",
       });
     }
+  });
+
+  // Persist messages to localStorage (throttled to once per 2s)
+  let lastSaveTime = 0;
+  $effect(() => {
+    const json = JSON.stringify(messages);
+    const elapsed = Date.now() - lastSaveTime;
+    const save = () => {
+      try { localStorage.setItem("playground-messages", json); } catch {}
+      lastSaveTime = Date.now();
+    };
+    if (elapsed >= 2000) {
+      save();
+      return;
+    }
+    const timer = setTimeout(save, 2000 - elapsed);
+    return () => clearTimeout(timer);
   });
 
   async function sendMessage() {
     const trimmedInput = userInput.trim();
     if ((!trimmedInput && attachedImages.length === 0) || !$selectedModelStore || isStreaming) return;
+
+    userScrolledUp = false;
 
     // Build message content (multimodal if images attached)
     let content: string | ContentPart[];
@@ -321,6 +357,7 @@
     <div
       class="flex-1 overflow-y-auto mb-4 px-2"
       bind:this={messagesContainer}
+      onscroll={handleMessagesScroll}
     >
       {#if messages.length === 0}
         <div class="h-full flex items-center justify-center text-txtsecondary">
