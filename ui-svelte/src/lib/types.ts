@@ -38,8 +38,12 @@ export interface LogData {
   data: string;
 }
 
+export interface InFlightStats {
+  total: number;
+}
+
 export interface APIEventEnvelope {
-  type: "modelStatus" | "logData" | "metrics";
+  type: "modelStatus" | "logData" | "metrics" | "inflight";
   data: string;
 }
 
