@@ -429,13 +429,9 @@ func (pm *ProxyManager) setupGinEngine() {
 
 func (pm *ProxyManager) trackInflight() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		total := pm.inFlightCounter.Increment()
-		event.Emit(InFlightRequestsEvent{Total: total})
-		defer func() {
-			total := pm.inFlightCounter.Decrement()
-			event.Emit(InFlightRequestsEvent{Total: total})
-		}()
+		event.Emit(InFlightRequestsEvent{Total: pm.inFlightCounter.Increment()})
 		c.Next()
+		event.Emit(InFlightRequestsEvent{Total: pm.inFlightCounter.Decrement()})
 	}
 }
 
