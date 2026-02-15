@@ -427,25 +427,12 @@ func (pm *ProxyManager) setupGinEngine() {
 	gin.DisableConsoleColor()
 }
 
-// Required for the token stats "Waiting: N" counts.
-func (pm *ProxyManager) currentInFlight() int {
-	return pm.inFlightCounter.Current()
-}
-
-func (pm *ProxyManager) incrementInFlight() int {
-	return pm.inFlightCounter.Increment()
-}
-
-func (pm *ProxyManager) decrementInFlight() int {
-	return pm.inFlightCounter.Decrement()
-}
-
 func (pm *ProxyManager) trackInflight() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		total := pm.incrementInFlight()
+		total := pm.inFlightCounter.Increment()
 		event.Emit(InFlightRequestsEvent{Total: total})
 		defer func() {
-			total := pm.decrementInFlight()
+			total := pm.inFlightCounter.Decrement()
 			event.Emit(InFlightRequestsEvent{Total: total})
 		}()
 		c.Next()

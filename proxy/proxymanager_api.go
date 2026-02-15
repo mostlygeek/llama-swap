@@ -218,7 +218,7 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 	sendLogData("upstream", pm.upstreamLogger.GetHistory())
 	sendModels()
 	sendMetrics(pm.metricsMonitor.getMetrics())
-	sendInFlight(pm.currentInFlight())
+	sendInFlight(pm.inFlightCounter.Current())
 
 	for {
 		select {
