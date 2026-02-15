@@ -118,9 +118,10 @@ func TestProcess_UnloadAfterTTL(t *testing.T) {
 
 	expectedMessage := "I_sense_imminent_danger"
 	config := getTestSimpleResponderConfig(expectedMessage)
-	assert.Equal(t, 0, config.UnloadAfter)
-	config.UnloadAfter = 3 // seconds
-	assert.Equal(t, 3, config.UnloadAfter)
+	assert.Nil(t, config.UnloadAfter)
+	ttl := 3 // seconds
+	config.UnloadAfter = &ttl
+	assert.Equal(t, 3, *config.UnloadAfter)
 
 	process := NewProcess("ttl_test", 2, config, debugLogger, debugLogger)
 	defer process.Stop()
@@ -160,9 +161,10 @@ func TestProcess_LowTTLValue(t *testing.T) {
 	}
 
 	config := getTestSimpleResponderConfig("fast_ttl")
-	assert.Equal(t, 0, config.UnloadAfter)
-	config.UnloadAfter = 1 // second
-	assert.Equal(t, 1, config.UnloadAfter)
+	assert.Nil(t, config.UnloadAfter)
+	ttl := 1 // second
+	config.UnloadAfter = &ttl
+	assert.Equal(t, 1, *config.UnloadAfter)
 
 	process := NewProcess("ttl", 2, config, debugLogger, debugLogger)
 	defer process.Stop()

@@ -79,7 +79,8 @@ models:
 		assert.Equal(t, "/health", model1.CheckEndpoint)
 		assert.Equal(t, []string{}, model1.Aliases)
 		assert.Equal(t, []string{}, model1.Env)
-		assert.Equal(t, 0, model1.UnloadAfter)
+		assert.NotNil(t, model1.UnloadAfter)
+		assert.Equal(t, 0, *model1.UnloadAfter)
 		assert.Equal(t, false, model1.Unlisted)
 		assert.Equal(t, "", model1.UseModelName)
 		assert.Equal(t, 0, model1.ConcurrencyLimit)
@@ -162,6 +163,7 @@ groups:
 	}
 
 	modelLoadingState := false
+	modelTTL := 0
 
 	expected := Config{
 		LogLevel:      "info",
@@ -186,6 +188,7 @@ groups:
 				CheckEndpoint:    "/health",
 				Name:             "Model 1",
 				Description:      "This is model 1",
+				UnloadAfter:      &modelTTL,
 				SendLoadingState: &modelLoadingState,
 			},
 			"model2": {
@@ -194,6 +197,7 @@ groups:
 				Aliases:          []string{"m2"},
 				Env:              []string{},
 				CheckEndpoint:    "/",
+				UnloadAfter:      &modelTTL,
 				SendLoadingState: &modelLoadingState,
 			},
 			"model3": {
@@ -202,6 +206,7 @@ groups:
 				Aliases:          []string{"mthree"},
 				Env:              []string{},
 				CheckEndpoint:    "/",
+				UnloadAfter:      &modelTTL,
 				SendLoadingState: &modelLoadingState,
 			},
 			"model4": {
@@ -210,6 +215,7 @@ groups:
 				CheckEndpoint:    "/",
 				Aliases:          []string{},
 				Env:              []string{},
+				UnloadAfter:      &modelTTL,
 				SendLoadingState: &modelLoadingState,
 			},
 		},

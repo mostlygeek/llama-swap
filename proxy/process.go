@@ -333,11 +333,11 @@ func (p *Process) start() error {
 		}
 	}
 
-	if p.config.UnloadAfter > 0 {
+	if p.config.UnloadAfter != nil && *p.config.UnloadAfter > 0 {
 		// start a goroutine to check every second if
 		// the process should be stopped
 		go func() {
-			maxDuration := time.Duration(p.config.UnloadAfter) * time.Second
+			maxDuration := time.Duration(*p.config.UnloadAfter) * time.Second
 
 			for range time.Tick(time.Second) {
 				if p.CurrentState() != StateReady {
@@ -350,7 +350,7 @@ func (p *Process) start() error {
 				}
 
 				if time.Since(p.getLastRequestHandled()) > maxDuration {
-					p.proxyLogger.Infof("<%s> Unloading model, TTL of %ds reached", p.ID, p.config.UnloadAfter)
+					p.proxyLogger.Infof("<%s> Unloading model, TTL of %ds reached", p.ID, *p.config.UnloadAfter)
 					p.Stop()
 					return
 				}
