@@ -2,6 +2,7 @@
   import { models } from "../../stores/api";
   import { persistentStore } from "../../stores/persistent";
   import { streamChatCompletion } from "../../lib/chatApi";
+  import { playgroundStores } from "../../stores/playgroundActivity";
   import type { ChatMessage, ContentPart } from "../../lib/types";
   import ChatMessageComponent from "./ChatMessage.svelte";
   import ModelSelector from "./ModelSelector.svelte";
@@ -34,6 +35,10 @@
 
   let hasModels = $derived($models.some((m) => !m.unlisted));
   let userScrolledUp = $state(false);
+
+  $effect(() => {
+    playgroundStores.chatStreaming.set(isStreaming);
+  });
 
   function handleMessagesScroll() {
     if (!messagesContainer) return;

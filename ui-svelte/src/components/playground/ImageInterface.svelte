@@ -2,6 +2,7 @@
   import { models } from "../../stores/api";
   import { persistentStore } from "../../stores/persistent";
   import { generateImage } from "../../lib/imageApi";
+  import { playgroundStores } from "../../stores/playgroundActivity";
   import ModelSelector from "./ModelSelector.svelte";
   import ExpandableTextarea from "./ExpandableTextarea.svelte";
 
@@ -16,6 +17,10 @@
   let showFullscreen = $state(false);
 
   let hasModels = $derived($models.some((m) => !m.unlisted));
+
+  $effect(() => {
+    playgroundStores.imageGenerating.set(isGenerating);
+  });
 
   async function generate() {
     const trimmedPrompt = prompt.trim();

@@ -2,6 +2,7 @@
   import { models } from "../../stores/api";
   import { persistentStore } from "../../stores/persistent";
   import { transcribeAudio } from "../../lib/audioApi";
+  import { playgroundStores } from "../../stores/playgroundActivity";
   import ModelSelector from "./ModelSelector.svelte";
 
   const selectedModelStore = persistentStore<string>("playground-audio-model", "");
@@ -21,6 +22,10 @@
   let hasModels = $derived($models.some((m) => !m.unlisted));
 
   let canTranscribe = $derived(selectedFile !== null && $selectedModelStore !== "" && !isTranscribing);
+
+  $effect(() => {
+    playgroundStores.audioTranscribing.set(isTranscribing);
+  });
 
   function validateFile(file: File): { valid: boolean; error?: string } {
     const ext = '.' + file.name.split('.').pop()?.toLowerCase();

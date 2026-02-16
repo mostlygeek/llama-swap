@@ -8,21 +8,23 @@
   import Playground from "./routes/Playground.svelte";
   import { enableAPIEvents } from "./stores/api";
   import { initScreenWidth, isDarkMode, appTitle, connectionState } from "./stores/theme";
+  import { currentRoute } from "./stores/route";
 
   const routes = {
-    "/": Playground,
     "/models": Models,
     "/logs": LogViewer,
     "/activity": Activity,
-    "*": Playground,
   };
 
-  // Sync theme to document attribute
+  function handleRouteLoaded(event: { detail: { route: string | RegExp } }) {
+    const route = event.detail.route;
+    currentRoute.set(typeof route === "string" ? route : "/");
+  }
+
   $effect(() => {
     document.documentElement.setAttribute("data-theme", $isDarkMode ? "dark" : "light");
   });
 
-  // Sync title to document
   $effect(() => {
     const icon = $connectionState === "connecting" ? "\u{1F7E1}" : $connectionState === "connected" ? "\u{1F7E2}" : "\u{1F534}";
     document.title = `${icon} ${$appTitle}`;
@@ -43,6 +45,11 @@
   <Header />
 
   <main class="flex-1 overflow-auto p-4">
-    <Router {routes} />
+    <div class="h-full" class:hidden={$currentRoute !== "/"}>
+      <Playground />
+    </div>
+    <div class="h-full" class:hidden={$currentRoute === "/"}>
+      <Router {routes} on:routeLoaded={handleRouteLoaded} />
+    </div>
   </main>
 </div>
