@@ -2,17 +2,20 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/proxy/config"
@@ -112,6 +115,19 @@ type setRecipeBackendRequest struct {
 	BackendDir string `json:"backendDir"`
 }
 
+type recipeBackendActionRequest struct {
+	Action string `json:"action"`
+}
+
+type recipeBackendActionResponse struct {
+	Action     string `json:"action"`
+	BackendDir string `json:"backendDir"`
+	Command    string `json:"command"`
+	Message    string `json:"message"`
+	Output     string `json:"output,omitempty"`
+	DurationMs int64  `json:"durationMs"`
+}
+
 func (pm *ProxyManager) apiGetRecipeState(c *gin.Context) {
 	state, err := pm.buildRecipeUIState()
 	if err != nil {
@@ -158,6 +174,100 @@ func (pm *ProxyManager) apiSetRecipeBackend(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, pm.recipeBackendState())
+}
+
+func (pm *ProxyManager) apiRunRecipeBackendAction(c *gin.Context) {
+	var req recipeBackendActionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+		return
+	}
+
+	action := strings.ToLower(strings.TrimSpace(req.Action))
+	backendDir := strings.TrimSpace(recipesBackendDir())
+	if backendDir == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "backend dir is empty"})
+		return
+	}
+	if stat, err := os.Stat(backendDir); err != nil || !stat.IsDir() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("backend dir not found: %s", backendDir)})
+		return
+	}
+
+	var cmd *exec.Cmd
+	var commandText string
+	switch action {
+	case "git_pull":
+		commandText = "git pull --ff-only https://github.com/eugr/spark-vllm-docker main"
+		cmd = exec.CommandContext(
+			c.Request.Context(),
+			"git", "-C", backendDir, "pull", "--ff-only",
+			"https://github.com/eugr/spark-vllm-docker", "main",
+		)
+	case "build_vllm":
+		script := filepath.Join(backendDir, "build-and-copy.sh")
+		if _, err := os.Stat(script); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("build script not found: %s", script)})
+			return
+		}
+		commandText = "./build-and-copy.sh --rebuild-deps --rebuild-vllm -c"
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 8*time.Hour)
+		defer cancel()
+		cmd = exec.CommandContext(ctx, "bash", "./build-and-copy.sh", "--rebuild-deps", "--rebuild-vllm", "-c")
+		cmd.Dir = backendDir
+	case "build_mxfp4":
+		script := filepath.Join(backendDir, "build-and-copy.sh")
+		if _, err := os.Stat(script); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("build script not found: %s", script)})
+			return
+		}
+		commandText = "./build-and-copy.sh -t vllm-node-mxfp4 --rebuild-deps --rebuild-vllm --exp-mxfp4 -c"
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 8*time.Hour)
+		defer cancel()
+		cmd = exec.CommandContext(
+			ctx,
+			"bash",
+			"./build-and-copy.sh",
+			"-t", "vllm-node-mxfp4",
+			"--rebuild-deps",
+			"--rebuild-vllm",
+			"--exp-mxfp4",
+			"-c",
+		)
+		cmd.Dir = backendDir
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported action"})
+		return
+	}
+
+	started := time.Now()
+	output, err := cmd.CombinedOutput()
+	durationMs := time.Since(started).Milliseconds()
+	outputText := strings.TrimSpace(string(output))
+	outputText = tailString(outputText, 120000)
+
+	if err != nil {
+		pm.proxyLogger.Errorf("backend action failed action=%s dir=%s err=%v", action, backendDir, err)
+		c.JSON(http.StatusBadGateway, gin.H{
+			"error":      fmt.Sprintf("action %s failed: %v", action, err),
+			"action":     action,
+			"backendDir": backendDir,
+			"command":    commandText,
+			"output":     outputText,
+			"durationMs": durationMs,
+		})
+		return
+	}
+
+	pm.proxyLogger.Infof("backend action completed action=%s dir=%s durationMs=%d", action, backendDir, durationMs)
+	c.JSON(http.StatusOK, recipeBackendActionResponse{
+		Action:     action,
+		BackendDir: backendDir,
+		Command:    commandText,
+		Message:    fmt.Sprintf("Action %s completed successfully.", action),
+		Output:     outputText,
+		DurationMs: durationMs,
+	})
 }
 
 func (pm *ProxyManager) apiUpsertRecipeModel(c *gin.Context) {
@@ -850,21 +960,21 @@ func ensureRecipeMacros(root map[string]any, configPath string) {
 			backendDir = abs
 		}
 
-		if _, ok := macros["spark_root"]; !ok {
-			macros["spark_root"] = backendDir
-		}
-		if _, ok := macros["recipe_runner"]; !ok {
-			macros["recipe_runner"] = filepath.Join(backendDir, "run-recipe.sh")
-		}
+		// Keep these as concrete paths so config validation is stable regardless
+		// of YAML map key ordering when the file is regenerated.
+		macros["spark_root"] = backendDir
+		macros["recipe_runner"] = filepath.Join(backendDir, "run-recipe.sh")
 	}
 
-	if _, ok := macros["llama_root"]; !ok {
-		cfgPath := strings.TrimSpace(configPath)
-		if cfgPath != "" {
-			macros["llama_root"] = filepath.Dir(cfgPath)
-		} else {
-			macros["llama_root"] = "${user_home}/llama-swap"
+	cfgPath := strings.TrimSpace(configPath)
+	if cfgPath != "" {
+		llamaRoot := filepath.Dir(cfgPath)
+		if abs, err := filepath.Abs(llamaRoot); err == nil {
+			llamaRoot = abs
 		}
+		macros["llama_root"] = llamaRoot
+	} else if _, ok := macros["llama_root"]; !ok {
+		macros["llama_root"] = "${user_home}/llama-swap"
 	}
 
 	root["macros"] = macros
@@ -1087,4 +1197,11 @@ func quoteForCommand(s string) string {
 		return strconv.Quote(s)
 	}
 	return s
+}
+
+func tailString(s string, max int) string {
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	return "...(truncated)\n" + s[len(s)-max:]
 }

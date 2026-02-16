@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { getRecipeBackendState, setRecipeBackend } from "../stores/api";
-  import type { RecipeBackendState } from "../lib/types";
+  import { getRecipeBackendState, runRecipeBackendAction, setRecipeBackend } from "../stores/api";
+  import type { RecipeBackendAction, RecipeBackendState } from "../lib/types";
+  import { collapseHomePath } from "../lib/pathDisplay";
 
   let loading = $state(true);
   let refreshing = $state(false);
@@ -12,6 +13,9 @@
   let selected = $state("");
   let customPath = $state("");
   let useCustom = $state(false);
+  let actionRunning = $state<RecipeBackendAction | "">("");
+  let actionCommand = $state("");
+  let actionOutput = $state("");
   let refreshController: AbortController | null = null;
 
   function sourceLabel(source: RecipeBackendState["backendSource"]): string {
@@ -73,6 +77,8 @@
     saving = true;
     error = null;
     notice = null;
+    actionCommand = "";
+    actionOutput = "";
     try {
       const next = await setRecipeBackend(backendDir);
       state = next;
@@ -82,6 +88,34 @@
       error = e instanceof Error ? e.message : String(e);
     } finally {
       saving = false;
+    }
+  }
+
+  function formatDuration(ms: number): string {
+    if (ms < 1000) return `${ms} ms`;
+    return `${(ms / 1000).toFixed(1)} s`;
+  }
+
+  async function runAction(action: RecipeBackendAction, label: string): Promise<void> {
+    if (actionRunning) return;
+    actionRunning = action;
+    error = null;
+    notice = null;
+    actionCommand = "";
+    actionOutput = "";
+
+    try {
+      const result = await runRecipeBackendAction(action);
+      actionCommand = result.command || "";
+      actionOutput = result.output || "";
+      notice = `${label} completado en ${formatDuration(result.durationMs || 0)}.`;
+      if (action === "git_pull") {
+        await refresh();
+      }
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    } finally {
+      actionRunning = "";
     }
   }
 
@@ -104,7 +138,8 @@
 
     {#if state}
       <div class="mt-2 text-sm text-txtsecondary break-all">
-        Actual: <span class="font-mono text-txtmain">{state.backendDir}</span>
+        Actual:
+        <span class="font-mono text-txtmain" title={state.backendDir}>{collapseHomePath(state.backendDir)}</span>
       </div>
       <div class="text-xs text-txtsecondary">Fuente: {sourceLabel(state.backendSource)}</div>
     {/if}
@@ -137,7 +172,7 @@
                 selected = option;
               }}
             />
-            <span class="font-mono break-all">{option}</span>
+            <span class="font-mono break-all" title={option}>{collapseHomePath(option)}</span>
           </label>
         {/each}
 
@@ -154,7 +189,7 @@
         </label>
         <input
           class="input w-full font-mono text-sm"
-          placeholder="/home/USER/spark-vllm-docker"
+          placeholder="~/spark-vllm-docker"
           bind:value={customPath}
           onfocus={() => {
             useCustom = true;
@@ -166,6 +201,30 @@
         <button class="btn btn--sm" onclick={applySelection} disabled={saving || refreshing}>
           {saving ? "Applying..." : "Apply Backend"}
         </button>
+      </div>
+
+      <div class="mt-4 pt-3 border-t border-card-border">
+        <div class="text-sm text-txtsecondary mb-2">Backend actions</div>
+        <div class="flex flex-wrap gap-2">
+          <button class="btn btn--sm" onclick={() => runAction("git_pull", "Git pull")} disabled={!!actionRunning || saving || refreshing}>
+            {actionRunning === "git_pull" ? "Running git pull..." : "Git Pull (eugr/spark-vllm-docker)"}
+          </button>
+          <button class="btn btn--sm" onclick={() => runAction("build_vllm", "Build vLLM")} disabled={!!actionRunning || saving || refreshing}>
+            {actionRunning === "build_vllm" ? "Building..." : "Build: ./build-and-copy.sh --rebuild-deps --rebuild-vllm -c"}
+          </button>
+          <button class="btn btn--sm" onclick={() => runAction("build_mxfp4", "Build MXFP4")} disabled={!!actionRunning || saving || refreshing}>
+            {actionRunning === "build_mxfp4" ? "Building MXFP4..." : "Build MXFP4 (-t vllm-node-mxfp4 ... --exp-mxfp4 -c)"}
+          </button>
+        </div>
+
+        {#if actionCommand}
+          <div class="mt-2 text-xs text-txtsecondary break-all">
+            Command: <span class="font-mono">{actionCommand}</span>
+          </div>
+        {/if}
+        {#if actionOutput}
+          <pre class="mt-2 p-2 border border-card-border rounded bg-background/60 text-xs font-mono whitespace-pre-wrap break-all max-h-72 overflow-auto">{actionOutput}</pre>
+        {/if}
       </div>
     {:else}
       <div class="text-sm text-txtsecondary">No se pudo cargar el estado del backend.</div>

@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { deleteRecipeModel, getRecipeUIState, upsertRecipeModel } from "../stores/api";
   import type { RecipeManagedModel, RecipeUIState } from "../lib/types";
+  import { collapseHomePath } from "../lib/pathDisplay";
 
   let loading = $state(true);
   let saving = $state(false);
@@ -184,7 +185,11 @@
     <div class="text-sm text-txtsecondary">Loading recipe state...</div>
   {:else}
     <div class="text-xs text-txtsecondary mb-3 break-all">
-      Config: {state?.configPath} | Backend: {state?.backendDir}
+      Config:
+      <span class="font-mono" title={state?.configPath || ""}>{collapseHomePath(state?.configPath || "")}</span>
+      |
+      Backend:
+      <span class="font-mono" title={state?.backendDir || ""}>{collapseHomePath(state?.backendDir || "")}</span>
     </div>
 
     {#if error}

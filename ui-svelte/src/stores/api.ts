@@ -10,6 +10,8 @@ import type {
   BenchyStartResponse,
   BenchyStartOptions,
   RecipeBackendState,
+  RecipeBackendAction,
+  RecipeBackendActionResponse,
   RecipeUIState,
   RecipeUpsertRequest,
   ConfigEditorState,
@@ -296,6 +298,33 @@ export async function setRecipeBackend(backendDir: string): Promise<RecipeBacken
     throw new Error(msg || `Failed to set recipe backend: ${response.status}`);
   }
   return (await response.json()) as RecipeBackendState;
+}
+
+export async function runRecipeBackendAction(action: RecipeBackendAction): Promise<RecipeBackendActionResponse> {
+  const response = await fetch(`/api/recipes/backend/action`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ action }),
+  });
+
+  const responseText = await response.text();
+  let parsed: any = null;
+  try {
+    parsed = responseText ? JSON.parse(responseText) : null;
+  } catch {
+    parsed = null;
+  }
+
+  if (!response.ok) {
+    const baseMessage =
+      parsed?.error || parsed?.message || responseText || `Failed to run backend action: ${response.status}`;
+    const output = parsed?.output ? `\n\n${parsed.output}` : "";
+    throw new Error(`${baseMessage}${output}`);
+  }
+
+  return (parsed || {}) as RecipeBackendActionResponse;
 }
 
 export async function upsertRecipeModel(payload: RecipeUpsertRequest): Promise<RecipeUIState> {

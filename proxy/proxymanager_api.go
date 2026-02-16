@@ -36,6 +36,7 @@ func addApiHandlers(pm *ProxyManager) {
 		apiGroup.GET("/recipes/state", pm.apiGetRecipeState)
 		apiGroup.GET("/recipes/backend", pm.apiGetRecipeBackend)
 		apiGroup.PUT("/recipes/backend", pm.apiSetRecipeBackend)
+		apiGroup.POST("/recipes/backend/action", pm.apiRunRecipeBackendAction)
 		apiGroup.POST("/recipes/models", pm.apiUpsertRecipeModel)
 		apiGroup.DELETE("/recipes/models/:id", pm.apiDeleteRecipeModel)
 		apiGroup.POST("/benchy", pm.apiStartBenchy)

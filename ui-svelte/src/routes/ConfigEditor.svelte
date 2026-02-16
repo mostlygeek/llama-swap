@@ -6,6 +6,7 @@
   import { EditorView, keymap } from "@codemirror/view";
   import { getConfigEditorState, saveConfigEditorContent } from "../stores/api";
   import type { ConfigEditorState } from "../lib/types";
+  import { collapseHomePath } from "../lib/pathDisplay";
 
   let loading = $state(true);
   let saving = $state(false);
@@ -192,7 +193,8 @@
     </div>
 
     <div class="mt-2 text-xs text-txtsecondary break-all">
-      File: {configPath || "unknown"}
+      File:
+      <span class="font-mono" title={configPath || ""}>{collapseHomePath(configPath || "unknown")}</span>
       {#if updatedAt}
         | Updated: {formatUpdatedAt(updatedAt)}
       {/if}

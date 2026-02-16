@@ -170,6 +170,17 @@ export interface RecipeBackendState {
   options: string[];
 }
 
+export type RecipeBackendAction = "git_pull" | "build_vllm" | "build_mxfp4";
+
+export interface RecipeBackendActionResponse {
+  action: RecipeBackendAction | string;
+  backendDir: string;
+  command: string;
+  message: string;
+  output?: string;
+  durationMs: number;
+}
+
 export interface RecipeUpsertRequest {
   modelId: string;
   recipeRef: string;

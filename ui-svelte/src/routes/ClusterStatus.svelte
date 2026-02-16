@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { getClusterStatus } from "../stores/api";
   import type { ClusterStatusState } from "../lib/types";
+  import { collapseHomePath } from "../lib/pathDisplay";
 
   let loading = $state(true);
   let refreshing = $state(false);
@@ -84,10 +85,12 @@
       </div>
       <div class="mt-2 text-sm text-txtsecondary">{state.summary}</div>
       <div class="mt-2 text-xs text-txtsecondary break-all">
-        Backend: {state.backendDir}
+        Backend:
+        <span class="font-mono" title={state.backendDir}>{collapseHomePath(state.backendDir)}</span>
       </div>
       <div class="text-xs text-txtsecondary break-all">
-        autodiscover.sh: {state.autodiscoverPath}
+        autodiscover.sh:
+        <span class="font-mono" title={state.autodiscoverPath}>{collapseHomePath(state.autodiscoverPath)}</span>
       </div>
       <div class="text-xs text-txtsecondary">
         Última comprobación: {formatTime(state.detectedAt)}
