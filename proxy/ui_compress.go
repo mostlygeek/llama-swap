@@ -5,6 +5,21 @@ import (
 	"strings"
 )
 
+func setUICacheHeaders(w http.ResponseWriter, name string) {
+	// Prevent stale shell HTML from pinning old JS bundle names after deploys.
+	if name == "index.html" {
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+		return
+	}
+
+	// Hashed static assets can be safely cached aggressively.
+	if strings.HasPrefix(name, "assets/") {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	}
+}
+
 // selectEncoding chooses the best encoding based on Accept-Encoding header
 // Returns the encoding ("br", "gzip", or "") and the corresponding file extension
 func selectEncoding(acceptEncoding string) (encoding, ext string) {
@@ -40,10 +55,12 @@ func ServeCompressedFile(fs http.FileSystem, w http.ResponseWriter, r *http.Requ
 			defer cf.Close()
 
 			// Verify it's a regular file (not a directory)
-			if stat, err := cf.Stat(); err == nil && !stat.IsDir() {
-				// Set the content encoding header
-				w.Header().Set("Content-Encoding", encoding)
-				w.Header().Add("Vary", "Accept-Encoding")
+				if stat, err := cf.Stat(); err == nil && !stat.IsDir() {
+					setUICacheHeaders(w, name)
+
+					// Set the content encoding header
+					w.Header().Set("Content-Encoding", encoding)
+					w.Header().Add("Vary", "Accept-Encoding")
 
 				// Get original file info for content type detection
 				origFile, err := fs.Open(name)
@@ -77,5 +94,6 @@ func ServeCompressedFile(fs http.FileSystem, w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	setUICacheHeaders(w, name)
 	http.ServeContent(w, r, name, stat.ModTime(), file)
 }
