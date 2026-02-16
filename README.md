@@ -197,6 +197,23 @@ By default, it resolves backend path from:
 - `SPARK_VLLM_DOCKER_DIR`
 - fallback: `../spark-vllm-docker`
 
+## NVMe-oF Canary Toolkit
+
+This fork includes starter scripts to harden NVMe-oF initiator connectivity and network tuning without changing current model paths:
+
+- `scripts/nvmeof-initiator-canary.sh`
+- `scripts/net-tune-canary.sh`
+- `scripts/install-nvmeof-canary-units.sh`
+
+Systemd templates:
+
+- `scripts/systemd/nvmeof-connect@.service`
+- `scripts/systemd/net-tune-canary.service`
+
+These help apply canary settings (`keep-alive`, `ctrl-loss`, reconnect delay, queue size, sysctl snapshot/rollback) and keep reconnect order at boot.
+
+The `Cluster` UI now also shows a storage baseline matrix (per-node path presence) to highlight potential duplicated local caches and track optimization toward a shared read path.
+
 ## Troubleshooting
 
 ### Benchy: `plugin 'swebench_verified' requires allowCodeExec=true`

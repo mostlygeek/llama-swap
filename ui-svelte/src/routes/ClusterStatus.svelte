@@ -37,6 +37,12 @@
     return state.nodes.some((node) => (node.isLocal || node.sshOk) && node.dgx?.supported);
   }
 
+  function storagePresence(ip: string, path: string) {
+    return state?.storage?.nodes
+      .find((n) => n.ip === ip)
+      ?.paths.find((p) => p.path === path);
+  }
+
   function overallClass(overall: ClusterStatusState["overall"]): string {
     switch (overall) {
       case "healthy":
@@ -196,6 +202,57 @@
               <li>{line}</li>
             {/each}
           </ul>
+        </div>
+      {/if}
+
+      {#if state.storage}
+        <div class="mb-3 p-2 border border-card-border rounded bg-background/40">
+          <div class="text-sm font-semibold text-txtmain">Almacenamiento Actual (baseline)</div>
+          <div class="mt-1 text-xs text-txtsecondary">{state.storage.note}</div>
+          {#if state.storage.duplicatePaths && state.storage.duplicatePaths.length > 0}
+            <div class="mt-2 text-xs text-amber-300">
+              Rutas presentes en varios nodos:
+              {state.storage.duplicatePaths.map((p) => collapseHomePath(p)).join(", ")}
+            </div>
+          {/if}
+          {#if state.storage.sharedAllPaths && state.storage.sharedAllPaths.length > 0}
+            <div class="mt-1 text-xs text-sky-300">
+              Rutas presentes en todos los nodos alcanzables:
+              {state.storage.sharedAllPaths.map((p) => collapseHomePath(p)).join(", ")}
+            </div>
+          {/if}
+
+          <div class="mt-2 overflow-auto border border-card-border rounded">
+            <table class="w-full text-xs">
+              <thead class="bg-surface">
+                <tr>
+                  <th class="text-left p-2 border-b border-card-border">Ruta</th>
+                  {#each state.storage.nodes as n}
+                    <th class="text-left p-2 border-b border-card-border">{n.ip}</th>
+                  {/each}
+                </tr>
+              </thead>
+              <tbody>
+                {#each state.storage.paths as path}
+                  <tr>
+                    <td class="p-2 border-b border-card-border font-mono" title={path}>{collapseHomePath(path)}</td>
+                    {#each state.storage.nodes as n}
+                      {@const presence = storagePresence(n.ip, path)}
+                      <td class="p-2 border-b border-card-border">
+                        {#if presence?.error}
+                          <span class="text-error">err</span>
+                        {:else if presence?.exists}
+                          <span class="text-green-300">present</span>
+                        {:else}
+                          <span class="text-txtsecondary">-</span>
+                        {/if}
+                      </td>
+                    {/each}
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
         </div>
       {/if}
 

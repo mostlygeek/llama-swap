@@ -221,6 +221,27 @@ export interface ClusterNodeStatus {
   dgx?: ClusterDGXStatus;
 }
 
+export interface ClusterStoragePathPresence {
+  path: string;
+  exists: boolean;
+  error?: string;
+}
+
+export interface ClusterStorageNodeState {
+  ip: string;
+  isLocal: boolean;
+  presentCount: number;
+  paths: ClusterStoragePathPresence[];
+}
+
+export interface ClusterStorageState {
+  paths: string[];
+  nodes: ClusterStorageNodeState[];
+  duplicatePaths?: string[];
+  sharedAllPaths?: string[];
+  note: string;
+}
+
 export interface ClusterStatusState {
   backendDir: string;
   autodiscoverPath: string;
@@ -236,6 +257,7 @@ export interface ClusterStatusState {
   summary: string;
   errors?: string[];
   nodes: ClusterNodeStatus[];
+  storage?: ClusterStorageState;
 }
 
 export interface ClusterDGXStatus {

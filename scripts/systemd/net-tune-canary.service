@@ -1,0 +1,13 @@
+[Unit]
+Description=Swap Laboratories network canary tuning
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/swap-laboratories/net-tune.env
+ExecStart=/usr/local/sbin/net-tune-canary.sh --apply
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

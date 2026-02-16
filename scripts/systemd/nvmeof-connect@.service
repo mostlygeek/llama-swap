@@ -1,0 +1,14 @@
+[Unit]
+Description=Swap Laboratories NVMe-oF connect (%i)
+After=network-online.target net-tune-canary.service
+Wants=network-online.target net-tune-canary.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/swap-laboratories/nvmeof/%i.env
+ExecStart=/usr/local/sbin/nvmeof-initiator-canary.sh --disconnect-first
+ExecStop=/usr/local/sbin/nvmeof-initiator-canary.sh --disconnect-only
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

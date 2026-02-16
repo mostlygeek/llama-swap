@@ -34,6 +34,25 @@
     </p>
 
     <p class="text-sm text-txtsecondary mt-5">
+      NVMe-oF Canary Toolkit:
+    </p>
+    <p class="text-xs text-txtsecondary mt-1">
+      Este fork incluye scripts para hardening canario y reconnect seguro:
+    </p>
+    <pre class="mt-1 text-xs font-mono bg-card/60 border border-card-border rounded p-2 overflow-x-auto"><code>scripts/nvmeof-initiator-canary.sh
+scripts/net-tune-canary.sh
+scripts/install-nvmeof-canary-units.sh</code></pre>
+    <p class="text-xs text-txtsecondary mt-2">
+      Plantillas systemd:
+      <code class="font-mono">scripts/systemd/nvmeof-connect@.service</code> y
+      <code class="font-mono">scripts/systemd/net-tune-canary.service</code>.
+    </p>
+    <p class="text-xs text-txtsecondary mt-2">
+      En <strong>Cluster</strong> se muestra un baseline de almacenamiento actual por nodo para visualizar
+      rutas duplicadas; no cambia tus rutas actuales, solo ayuda a priorizar migración a lectura compartida.
+    </p>
+
+    <p class="text-sm text-txtsecondary mt-5">
       Troubleshooting (Intelligence / SWE-bench):
     </p>
     <p class="text-xs text-txtsecondary mt-1">

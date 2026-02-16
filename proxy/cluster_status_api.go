@@ -24,13 +24,13 @@ const (
 )
 
 type clusterNodeStatus struct {
-	IP            string `json:"ip"`
-	IsLocal       bool   `json:"isLocal"`
-	Port22Open    bool   `json:"port22Open"`
-	Port22Latency int64  `json:"port22LatencyMs,omitempty"`
-	SSHOK         bool   `json:"sshOk"`
-	SSHLatency    int64  `json:"sshLatencyMs,omitempty"`
-	Error         string `json:"error,omitempty"`
+	IP            string            `json:"ip"`
+	IsLocal       bool              `json:"isLocal"`
+	Port22Open    bool              `json:"port22Open"`
+	Port22Latency int64             `json:"port22LatencyMs,omitempty"`
+	SSHOK         bool              `json:"sshOk"`
+	SSHLatency    int64             `json:"sshLatencyMs,omitempty"`
+	Error         string            `json:"error,omitempty"`
 	DGX           *clusterDGXStatus `json:"dgx,omitempty"`
 }
 
@@ -47,20 +47,42 @@ type clusterDGXStatus struct {
 }
 
 type clusterStatusState struct {
-	BackendDir       string              `json:"backendDir"`
-	AutodiscoverPath string              `json:"autodiscoverPath"`
-	DetectedAt       string              `json:"detectedAt"`
-	LocalIP          string              `json:"localIp"`
-	CIDR             string              `json:"cidr"`
-	EthIF            string              `json:"ethIf"`
-	IbIF             string              `json:"ibIf"`
-	NodeCount        int                 `json:"nodeCount"`
-	RemoteCount      int                 `json:"remoteCount"`
-	ReachableBySSH   int                 `json:"reachableBySsh"`
-	Overall          string              `json:"overall"`
-	Summary          string              `json:"summary"`
-	Errors           []string            `json:"errors,omitempty"`
-	Nodes            []clusterNodeStatus `json:"nodes"`
+	BackendDir       string               `json:"backendDir"`
+	AutodiscoverPath string               `json:"autodiscoverPath"`
+	DetectedAt       string               `json:"detectedAt"`
+	LocalIP          string               `json:"localIp"`
+	CIDR             string               `json:"cidr"`
+	EthIF            string               `json:"ethIf"`
+	IbIF             string               `json:"ibIf"`
+	NodeCount        int                  `json:"nodeCount"`
+	RemoteCount      int                  `json:"remoteCount"`
+	ReachableBySSH   int                  `json:"reachableBySsh"`
+	Overall          string               `json:"overall"`
+	Summary          string               `json:"summary"`
+	Errors           []string             `json:"errors,omitempty"`
+	Nodes            []clusterNodeStatus  `json:"nodes"`
+	Storage          *clusterStorageState `json:"storage,omitempty"`
+}
+
+type clusterStoragePathPresence struct {
+	Path   string `json:"path"`
+	Exists bool   `json:"exists"`
+	Error  string `json:"error,omitempty"`
+}
+
+type clusterStorageNodeState struct {
+	IP           string                       `json:"ip"`
+	IsLocal      bool                         `json:"isLocal"`
+	PresentCount int                          `json:"presentCount"`
+	Paths        []clusterStoragePathPresence `json:"paths"`
+}
+
+type clusterStorageState struct {
+	Paths          []string                  `json:"paths"`
+	Nodes          []clusterStorageNodeState `json:"nodes"`
+	DuplicatePaths []string                  `json:"duplicatePaths,omitempty"`
+	SharedAllPaths []string                  `json:"sharedAllPaths,omitempty"`
+	Note           string                    `json:"note"`
 }
 
 func (pm *ProxyManager) apiGetClusterStatus(c *gin.Context) {
@@ -181,6 +203,7 @@ func (pm *ProxyManager) readClusterStatus(parentCtx context.Context) (clusterSta
 	}
 
 	summary := buildClusterSummary(overall, len(nodeStatuses), remoteCount, reachableBySSH, detectErrors)
+	storage := buildClusterStorageState(ctx, backendDir, nodeStatuses)
 	return clusterStatusState{
 		BackendDir:       backendDir,
 		AutodiscoverPath: autodiscoverPath,
@@ -196,6 +219,7 @@ func (pm *ProxyManager) readClusterStatus(parentCtx context.Context) (clusterSta
 		Summary:          summary,
 		Errors:           detectErrors,
 		Nodes:            nodeStatuses,
+		Storage:          storage,
 	}, nil
 }
 
@@ -361,4 +385,154 @@ func errorsIsContextCanceled(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), "context deadline exceeded") || strings.Contains(err.Error(), "context canceled")
+}
+
+func buildClusterStorageState(parentCtx context.Context, backendDir string, nodes []clusterNodeStatus) *clusterStorageState {
+	paths := clusterStorageCandidatePaths(backendDir)
+	if len(paths) == 0 || len(nodes) == 0 {
+		return nil
+	}
+
+	storageNodes := make([]clusterStorageNodeState, 0, len(nodes))
+	for _, node := range nodes {
+		entry := clusterStorageNodeState{
+			IP:      node.IP,
+			IsLocal: node.IsLocal,
+			Paths:   make([]clusterStoragePathPresence, 0, len(paths)),
+		}
+
+		if !node.IsLocal && !node.SSHOK {
+			for _, path := range paths {
+				entry.Paths = append(entry.Paths, clusterStoragePathPresence{
+					Path:  path,
+					Error: "ssh unavailable",
+				})
+			}
+			storageNodes = append(storageNodes, entry)
+			continue
+		}
+
+		ctx, cancel := context.WithTimeout(parentCtx, 12*time.Second)
+		output, err := runClusterNodeShell(ctx, node.IP, node.IsLocal, clusterStoragePresenceScript(paths))
+		cancel()
+		if err != nil {
+			for _, path := range paths {
+				entry.Paths = append(entry.Paths, clusterStoragePathPresence{
+					Path:  path,
+					Error: err.Error(),
+				})
+			}
+			storageNodes = append(storageNodes, entry)
+			continue
+		}
+
+		seen := make(map[string]bool, len(paths))
+		for _, line := range strings.Split(output, "\n") {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "__SP__|") {
+				continue
+			}
+			parts := strings.SplitN(strings.TrimPrefix(line, "__SP__|"), "|", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			path := strings.TrimSpace(parts[0])
+			exists := strings.TrimSpace(parts[1]) == "1"
+			seen[path] = exists
+		}
+
+		for _, path := range paths {
+			exists := seen[path]
+			if exists {
+				entry.PresentCount++
+			}
+			entry.Paths = append(entry.Paths, clusterStoragePathPresence{
+				Path:   path,
+				Exists: exists,
+			})
+		}
+		storageNodes = append(storageNodes, entry)
+	}
+
+	presence := make(map[string]int, len(paths))
+	reachableNodes := 0
+	for _, node := range storageNodes {
+		nodeReachable := false
+		for _, p := range node.Paths {
+			if p.Error == "" {
+				nodeReachable = true
+				if p.Exists {
+					presence[p.Path]++
+				}
+			}
+		}
+		if nodeReachable {
+			reachableNodes++
+		}
+	}
+
+	duplicatePaths := make([]string, 0, len(paths))
+	sharedAllPaths := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if presence[path] >= 2 {
+			duplicatePaths = append(duplicatePaths, path)
+		}
+		if reachableNodes > 1 && presence[path] == reachableNodes {
+			sharedAllPaths = append(sharedAllPaths, path)
+		}
+	}
+
+	return &clusterStorageState{
+		Paths:          paths,
+		Nodes:          storageNodes,
+		DuplicatePaths: duplicatePaths,
+		SharedAllPaths: sharedAllPaths,
+		Note:           "Se mantienen las rutas actuales por nodo. Si una ruta aparece en varios nodos, existe duplicación local potencial; objetivo NVMe-oF: una sola ruta de lectura compartida.",
+	}
+}
+
+func clusterStorageCandidatePaths(backendDir string) []string {
+	paths := make([]string, 0, 10)
+	if strings.TrimSpace(backendDir) != "" {
+		paths = append(paths, filepath.Clean(backendDir))
+	}
+
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		paths = append(paths,
+			filepath.Join(home, ".cache", "huggingface", "hub"),
+			filepath.Join(home, ".cache", "huggingface", "datasets"),
+			filepath.Join(home, ".cache", "llama-benchy-intelligence"),
+			filepath.Join(home, ".cache", "uv"),
+		)
+	}
+
+	if hfHome := strings.TrimSpace(os.Getenv("HF_HOME")); hfHome != "" {
+		paths = append(paths,
+			filepath.Clean(hfHome),
+			filepath.Join(hfHome, "hub"),
+			filepath.Join(hfHome, "datasets"),
+		)
+	}
+
+	if trCache := strings.TrimSpace(os.Getenv("TRANSFORMERS_CACHE")); trCache != "" {
+		paths = append(paths, filepath.Clean(trCache))
+	}
+
+	return uniqueNonEmptyStrings(paths)
+}
+
+func clusterStoragePresenceScript(paths []string) string {
+	lines := make([]string, 0, len(paths)+2)
+	lines = append(lines, "set +e")
+	for _, path := range paths {
+		lines = append(lines,
+			fmt.Sprintf(
+				"if [ -e %s ]; then printf '__SP__|%%s|1\\n' %s; else printf '__SP__|%%s|0\\n' %s; fi",
+				shellQuote(path),
+				shellQuote(path),
+				shellQuote(path),
+			),
+		)
+	}
+	return strings.Join(lines, "\n")
 }
