@@ -3,6 +3,7 @@
     models,
     loadModel,
     unloadAllModels,
+    stopClusterAndUnload,
     unloadSingleModel,
     startBenchy,
     getBenchyJob,
@@ -15,8 +16,9 @@
   import type { BenchyJob, BenchyStartOptions, Model } from "../lib/types";
 
   let isUnloading = $state(false);
+  let isStoppingCluster = $state(false);
   let menuOpen = $state(false);
-  let showRecipeManager = $state(true);
+  let showRecipeManager = $state(false);
 
   const showUnlistedStore = persistentStore<boolean>("showUnlisted", true);
   const showIdorNameStore = persistentStore<"id" | "name">("showIdorName", "id");
@@ -63,6 +65,17 @@
       console.error(e);
     } finally {
       setTimeout(() => (isUnloading = false), 1000);
+    }
+  }
+
+  async function handleStopCluster(): Promise<void> {
+    isStoppingCluster = true;
+    try {
+      await stopClusterAndUnload();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setTimeout(() => (isStoppingCluster = false), 1000);
     }
   }
 
@@ -229,12 +242,22 @@
               <button
                 class="w-full text-left px-4 py-2 hover:bg-secondary-hover flex items-center gap-2"
                 onclick={() => { handleUnloadAllModels(); menuOpen = false; }}
-                disabled={isUnloading}
+                disabled={isUnloading || isStoppingCluster}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
                   <path fill-rule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25Zm.53 5.47a.75.75 0 0 0-1.06 0l-3 3a.75.75 0 1 0 1.06 1.06l1.72-1.72v5.69a.75.75 0 0 0 1.5 0v-5.69l1.72 1.72a.75.75 0 1 0 1.06-1.06l-3-3Z" clip-rule="evenodd" />
                 </svg>
                 {isUnloading ? "Unloading..." : "Unload All"}
+              </button>
+              <button
+                class="w-full text-left px-4 py-2 hover:bg-secondary-hover flex items-center gap-2"
+                onclick={() => { handleStopCluster(); menuOpen = false; }}
+                disabled={isStoppingCluster || isUnloading}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
+                  <path fill-rule="evenodd" d="M6.75 6A2.25 2.25 0 0 0 4.5 8.25v7.5A2.25 2.25 0 0 0 6.75 18h10.5a2.25 2.25 0 0 0 2.25-2.25v-7.5A2.25 2.25 0 0 0 17.25 6H6.75Zm2.28 2.22a.75.75 0 0 0-1.06 1.06L10.69 12l-2.72 2.72a.75.75 0 1 0 1.06 1.06L11.75 13.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L12.81 12l2.72-2.72a.75.75 0 1 0-1.06-1.06l-2.72 2.72-2.72-2.72Z" clip-rule="evenodd" />
+                </svg>
+                {isStoppingCluster ? "Stopping..." : "Stop Cluster"}
               </button>
               <button
                 class="w-full text-left px-4 py-2 hover:bg-secondary-hover flex items-center gap-2"
@@ -276,12 +299,20 @@
             unlisted
           </button>
         </div>
-        <button class="btn text-base flex items-center gap-2" onclick={handleUnloadAllModels} disabled={isUnloading}>
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
-            <path fill-rule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25Zm.53 5.47a.75.75 0 0 0-1.06 0l-3 3a.75.75 0 1 0 1.06 1.06l1.72-1.72v5.69a.75.75 0 0 0 1.5 0v-5.69l1.72 1.72a.75.75 0 1 0 1.06-1.06l-3-3Z" clip-rule="evenodd" />
-          </svg>
-          {isUnloading ? "Unloading..." : "Unload All"}
-        </button>
+        <div class="flex gap-2">
+          <button class="btn text-base flex items-center gap-2" onclick={handleStopCluster} disabled={isStoppingCluster || isUnloading}>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
+              <path fill-rule="evenodd" d="M6.75 6A2.25 2.25 0 0 0 4.5 8.25v7.5A2.25 2.25 0 0 0 6.75 18h10.5a2.25 2.25 0 0 0 2.25-2.25v-7.5A2.25 2.25 0 0 0 17.25 6H6.75Zm2.28 2.22a.75.75 0 0 0-1.06 1.06L10.69 12l-2.72 2.72a.75.75 0 1 0 1.06 1.06L11.75 13.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L12.81 12l2.72-2.72a.75.75 0 1 0-1.06-1.06l-2.72 2.72-2.72-2.72Z" clip-rule="evenodd" />
+            </svg>
+            {isStoppingCluster ? "Stopping..." : "Stop Cluster"}
+          </button>
+          <button class="btn text-base flex items-center gap-2" onclick={handleUnloadAllModels} disabled={isUnloading || isStoppingCluster}>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
+              <path fill-rule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25Zm.53 5.47a.75.75 0 0 0-1.06 0l-3 3a.75.75 0 1 0 1.06 1.06l1.72-1.72v5.69a.75.75 0 0 0 1.5 0v-5.69l1.72 1.72a.75.75 0 1 0 1.06-1.06l-3-3Z" clip-rule="evenodd" />
+            </svg>
+            {isUnloading ? "Unloading..." : "Unload All"}
+          </button>
+        </div>
       </div>
       <div class="mt-2">
         <button class="btn text-base flex items-center gap-2" onclick={toggleRecipeManager}>

@@ -5,6 +5,7 @@
   import LogViewer from "./routes/LogViewer.svelte";
   import Models from "./routes/Models.svelte";
   import Activity from "./routes/Activity.svelte";
+  import ConfigEditor from "./routes/ConfigEditor.svelte";
   import Playground from "./routes/Playground.svelte";
   import PlaygroundStub from "./routes/PlaygroundStub.svelte";
   import { enableAPIEvents } from "./stores/api";
@@ -15,6 +16,7 @@
     "/": PlaygroundStub,
     "/models": Models,
     "/logs": LogViewer,
+    "/editor": ConfigEditor,
     "/activity": Activity,
     "*": PlaygroundStub,
   };

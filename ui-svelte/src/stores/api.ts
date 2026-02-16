@@ -11,6 +11,7 @@ import type {
   BenchyStartOptions,
   RecipeUIState,
   RecipeUpsertRequest,
+  ConfigEditorState,
 } from "../lib/types";
 import { connectionState } from "./theme";
 
@@ -157,6 +158,21 @@ export async function unloadAllModels(): Promise<void> {
   }
 }
 
+export async function stopClusterAndUnload(): Promise<void> {
+  try {
+    const response = await fetch(`/api/cluster/stop`, {
+      method: "POST",
+    });
+    if (!response.ok) {
+      const msg = await response.text().catch(() => "");
+      throw new Error(msg || `Failed to stop cluster: ${response.status}`);
+    }
+  } catch (error) {
+    console.error("Failed to stop cluster:", error);
+    throw error;
+  }
+}
+
 export async function unloadSingleModel(model: string): Promise<void> {
   try {
     const response = await fetch(`/api/models/unload/${model}`, {
@@ -280,6 +296,30 @@ export async function deleteRecipeModel(modelId: string): Promise<RecipeUIState>
     throw new Error(msg || `Failed to delete recipe model: ${response.status}`);
   }
   return (await response.json()) as RecipeUIState;
+}
+
+export async function getConfigEditorState(signal?: AbortSignal): Promise<ConfigEditorState> {
+  const response = await fetch(`/api/config/editor`, { signal });
+  if (!response.ok) {
+    const msg = await response.text().catch(() => "");
+    throw new Error(msg || `Failed to fetch config editor state: ${response.status}`);
+  }
+  return (await response.json()) as ConfigEditorState;
+}
+
+export async function saveConfigEditorContent(content: string): Promise<ConfigEditorState> {
+  const response = await fetch(`/api/config/editor`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ content }),
+  });
+  if (!response.ok) {
+    const msg = await response.text().catch(() => "");
+    throw new Error(msg || `Failed to save config: ${response.status}`);
+  }
+  return (await response.json()) as ConfigEditorState;
 }
 
 export async function getCapture(id: number): Promise<ReqRespCapture | null> {

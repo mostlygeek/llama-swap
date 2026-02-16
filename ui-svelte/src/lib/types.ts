@@ -178,6 +178,12 @@ export interface RecipeUpsertRequest {
   benchyTrustRemoteCode?: boolean;
 }
 
+export interface ConfigEditorState {
+  path: string;
+  content: string;
+  updatedAt?: string;
+}
+
 export type TextContentPart = {
   type: "text";
   text: string;
