@@ -702,7 +702,8 @@ func toRecipeManagedModel(modelID string, modelMap, groupsMap map[string]any) (R
 	recipeMeta := getMap(metadata, recipeMetadataKey)
 	managed := getBool(recipeMeta, recipeMetadataManagedField)
 
-	if !managed && !strings.Contains(cmd, "run-recipe") {
+	isRecipeModel := recipeRunnerRe.MatchString(cmd)
+	if !managed && !isRecipeModel {
 		return RecipeManagedModel{}, false
 	}
 
