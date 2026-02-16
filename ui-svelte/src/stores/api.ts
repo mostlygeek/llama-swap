@@ -16,6 +16,7 @@ import type {
   RecipeUpsertRequest,
   ConfigEditorState,
   ClusterStatusState,
+  ClusterDGXUpdateResponse,
 } from "../lib/types";
 import { connectionState } from "./theme";
 
@@ -208,6 +209,7 @@ export async function loadModel(model: string): Promise<void> {
 export async function startBenchy(model: string, opts: BenchyStartOptions = {}): Promise<string> {
   const payload = {
     model,
+    queueModels: opts.queueModels,
     baseUrl: opts.baseUrl,
     tokenizer: opts.tokenizer,
     pp: opts.pp,
@@ -400,4 +402,19 @@ export async function getClusterStatus(signal?: AbortSignal): Promise<ClusterSta
     throw new Error(msg || `Failed to fetch cluster status: ${response.status}`);
   }
   return (await response.json()) as ClusterStatusState;
+}
+
+export async function runClusterDGXUpdate(targets?: string[]): Promise<ClusterDGXUpdateResponse> {
+  const response = await fetch(`/api/cluster/dgx/update`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ targets: targets ?? [] }),
+  });
+  if (!response.ok) {
+    const msg = await response.text().catch(() => "");
+    throw new Error(msg || `Failed to execute DGX cluster update: ${response.status}`);
+  }
+  return (await response.json()) as ClusterDGXUpdateResponse;
 }

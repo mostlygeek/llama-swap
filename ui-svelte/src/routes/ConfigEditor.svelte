@@ -209,8 +209,8 @@
     {/if}
   </div>
 
-  <div class="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_22rem] gap-2">
-    <div class="card flex flex-col min-h-0">
+  <div class="flex-1 min-h-0">
+    <div class="card flex flex-col min-h-0 h-full">
       <div class="relative w-full flex-1 min-h-[50vh] rounded border border-card-border bg-background overflow-hidden">
         <div bind:this={editorHost} class="h-full w-full"></div>
         {#if loading}
@@ -220,46 +220,5 @@
         {/if}
       </div>
     </div>
-
-    <aside class="card shrink-0 overflow-y-auto">
-      <h3 class="pb-1">Help</h3>
-      <p class="text-sm text-txtsecondary">
-        Esta configuración usa como backend de recetas:
-      </p>
-      <p class="text-sm break-all">
-        <a class="underline" href="https://github.com/eugr/spark-vllm-docker" target="_blank" rel="noreferrer">
-          eugr/spark-vllm-docker
-        </a>
-      </p>
-
-      <p class="text-sm text-txtsecondary mt-3">
-        Integración de benchmark (Benchy):
-      </p>
-      <p class="text-sm break-all">
-        <a class="underline" href="https://github.com/christopherowen/llama-benchy" target="_blank" rel="noreferrer">
-          christopherowen/llama-benchy
-        </a>
-      </p>
-
-      <p class="text-xs text-txtsecondary mt-3">
-        Tip: puedes sobreescribir rutas con variables de entorno como
-        <code class="font-mono">LLAMA_SWAP_RECIPES_BACKEND_DIR</code> y
-        <code class="font-mono">LLAMA_SWAP_LOCAL_RECIPES_DIR</code>.
-      </p>
-
-      <p class="text-sm text-txtsecondary mt-4">
-        Troubleshooting (Intelligence / SWE-bench):
-      </p>
-      <p class="text-xs text-txtsecondary mt-1">
-        Si aparece <code class="font-mono">PermissionError</code> con locks en
-        <code class="font-mono">~/.cache/huggingface/datasets</code>, corrige permisos del cache existente:
-      </p>
-      <pre class="mt-1 text-xs font-mono bg-card/60 border border-card-border rounded p-2 overflow-x-auto"><code>sudo chown -R $USER:$USER ~/.cache/huggingface/datasets</code></pre>
-      <p class="text-xs text-txtsecondary mt-2">
-        Prueba rápida de carga para validar que el lock no falla:
-      </p>
-      <pre class="mt-1 text-xs font-mono bg-card/60 border border-card-border rounded p-2 overflow-x-auto"><code>uvx --from "llama-benchy[intelligence] @ git+https://github.com/christopherowen/llama-benchy.git@intelligence" \
-python -c "from datasets import load_dataset; ds=load_dataset('SWE-bench/SWE-bench_Verified', split='test[:1]'); print('ok', len(ds))"</code></pre>
-    </aside>
   </div>
 </div>

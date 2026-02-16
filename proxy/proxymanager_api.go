@@ -31,6 +31,7 @@ func addApiHandlers(pm *ProxyManager) {
 		apiGroup.POST("/models/unload/*model", pm.apiUnloadSingleModelHandler)
 		apiGroup.POST("/cluster/stop", pm.apiStopCluster)
 		apiGroup.GET("/cluster/status", pm.apiGetClusterStatus)
+		apiGroup.POST("/cluster/dgx/update", pm.apiRunClusterDGXUpdate)
 		apiGroup.GET("/config/editor", pm.apiGetConfigEditor)
 		apiGroup.PUT("/config/editor", pm.apiSaveConfigEditor)
 		apiGroup.GET("/recipes/state", pm.apiGetRecipeState)

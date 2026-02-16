@@ -31,6 +31,19 @@ type clusterNodeStatus struct {
 	SSHOK         bool   `json:"sshOk"`
 	SSHLatency    int64  `json:"sshLatencyMs,omitempty"`
 	Error         string `json:"error,omitempty"`
+	DGX           *clusterDGXStatus `json:"dgx,omitempty"`
+}
+
+type clusterDGXStatus struct {
+	Supported       bool   `json:"supported"`
+	CheckedAt       string `json:"checkedAt"`
+	UpdateAvailable *bool  `json:"updateAvailable,omitempty"`
+	RebootRunning   *bool  `json:"rebootRunning,omitempty"`
+	UpgradeProgress *int   `json:"upgradeProgress,omitempty"`
+	UpgradeStatus   string `json:"upgradeStatus,omitempty"`
+	CacheProgress   *int   `json:"cacheProgress,omitempty"`
+	CacheStatus     string `json:"cacheStatus,omitempty"`
+	Error           string `json:"error,omitempty"`
 }
 
 type clusterStatusState struct {
@@ -129,6 +142,7 @@ func (pm *ProxyManager) readClusterStatus(parentCtx context.Context) (clusterSta
 		}()
 	}
 	wg.Wait()
+	populateClusterDGXStatus(ctx, nodeStatuses)
 
 	sort.Slice(nodeStatuses, func(i, j int) bool {
 		if nodeStatuses[i].IsLocal != nodeStatuses[j].IsLocal {

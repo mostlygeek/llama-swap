@@ -76,6 +76,10 @@ var benchyPluginsRequireCodeExec = map[string]struct{}{
 type BenchyJob struct {
 	ID                  string   `json:"id"`
 	Model               string   `json:"model"`
+	QueueModels         []string `json:"queueModels,omitempty"`
+	QueueCurrentIndex   int      `json:"queueCurrentIndex,omitempty"`
+	QueueCurrentModel   string   `json:"queueCurrentModel,omitempty"`
+	QueueCompletedCount int      `json:"queueCompletedCount,omitempty"`
 	Tokenizer           string   `json:"tokenizer"`
 	BaseURL             string   `json:"baseUrl"`
 	PP                  []int    `json:"pp"`
@@ -110,6 +114,7 @@ type BenchyJob struct {
 
 type benchyStartRequest struct {
 	Model               string   `json:"model"`
+	QueueModels         []string `json:"queueModels,omitempty"`
 	Tokenizer           string   `json:"tokenizer,omitempty"`
 	BaseURL             string   `json:"baseUrl,omitempty"`
 	PP                  []int    `json:"pp,omitempty"`
@@ -156,6 +161,11 @@ type benchyStartResponse struct {
 	ID string `json:"id"`
 }
 
+type benchyResolvedModel struct {
+	RequestedModel string
+	RealModelName  string
+}
+
 // apiStartBenchy starts a llama-benchy run in the background and returns a job id.
 func (pm *ProxyManager) apiStartBenchy(c *gin.Context) {
 	if v := strings.TrimSpace(os.Getenv(benchyEnvDisableRunner)); v == "1" || strings.EqualFold(v, "true") {
@@ -169,16 +179,23 @@ func (pm *ProxyManager) apiStartBenchy(c *gin.Context) {
 		return
 	}
 
-	requestedModel := strings.TrimSpace(req.Model)
-	if requestedModel == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "model is required"})
+	queueModels, err := normalizeBenchyQueueModels(req.Model, req.QueueModels)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	realModelName, found := pm.config.RealModelName(requestedModel)
-	if !found {
-		c.JSON(http.StatusNotFound, gin.H{"error": "model not found"})
-		return
+	resolvedModels := make([]benchyResolvedModel, 0, len(queueModels))
+	for _, requestedModel := range queueModels {
+		realModelName, found := pm.config.RealModelName(requestedModel)
+		if !found {
+			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("model not found: %s", requestedModel)})
+			return
+		}
+		resolvedModels = append(resolvedModels, benchyResolvedModel{
+			RequestedModel: requestedModel,
+			RealModelName:  realModelName,
+		})
 	}
 
 	baseURLRaw := strings.TrimSpace(req.BaseURL)
@@ -275,22 +292,8 @@ func (pm *ProxyManager) apiStartBenchy(c *gin.Context) {
 		maxConcurrent = &v
 	}
 
-	// Choose tokenizer: request override > metadata > heuristics
-	tokenizer := strings.TrimSpace(req.Tokenizer)
-	if tokenizer == "" {
-		tokenizer = pm.defaultBenchyTokenizer(realModelName)
-	}
+	fixedTokenizer := strings.TrimSpace(req.Tokenizer)
 
-	// Some HuggingFace tokenizers/models require `trust_remote_code=True` which otherwise prompts interactively.
-	// Default is opt-in via model metadata.
-	trustRemoteCode := false
-	if req.TrustRemoteCode != nil {
-		trustRemoteCode = *req.TrustRemoteCode
-	} else if cfg, ok := pm.config.Models[realModelName]; ok {
-		if v, ok := benchyTrustRemoteCodeFromMetadata(cfg.Metadata); ok {
-			trustRemoteCode = v
-		}
-	}
 	var adaptPrompt *bool
 	if req.AdaptPrompt != nil {
 		v := *req.AdaptPrompt
@@ -313,30 +316,6 @@ func (pm *ProxyManager) apiStartBenchy(c *gin.Context) {
 		DatasetCacheDir:     datasetCacheDir,
 		OutputDir:           outputDir,
 		MaxConcurrent:       maxConcurrent,
-		TrustRemoteCode:     trustRemoteCode,
-	}
-
-	// Choose served model name for the target base URL.
-	// For direct upstreams (explicit base URL), this should match that upstream's expected model id.
-	// For llama-swap base URL (default), use requestedModel so normal swap routing resolves correctly.
-	servedModelName := requestedModel
-	if userProvidedBaseURL {
-		if cfg, ok := pm.config.Models[realModelName]; ok {
-			if u := strings.TrimSpace(cfg.UseModelName); u != "" {
-				servedModelName = u
-			} else if tokenizer != "" && strings.Contains(tokenizer, "/") && !strings.HasPrefix(tokenizer, "/") {
-				servedModelName = tokenizer
-			} else {
-				// Fall back to a HF-ish alias if available.
-				for _, a := range cfg.Aliases {
-					a = strings.TrimSpace(a)
-					if a != "" && strings.Contains(a, "/") && !strings.HasPrefix(a, "/") {
-						servedModelName = a
-						break
-					}
-				}
-			}
-		}
 	}
 
 	// If auth is enabled, reuse the validated key from the incoming request.
@@ -360,9 +339,14 @@ func (pm *ProxyManager) apiStartBenchy(c *gin.Context) {
 		return
 	}
 
+	tokenizer := fixedTokenizer
+	if tokenizer == "" {
+		tokenizer = pm.defaultBenchyTokenizer(resolvedModels[0].RealModelName)
+	}
+
 	job := &BenchyJob{
 		ID:                  jobID,
-		Model:               requestedModel,
+		Model:               resolvedModels[0].RequestedModel,
 		Tokenizer:           tokenizer,
 		BaseURL:             baseURL,
 		PP:                  append([]int{}, runOptions.PP...),
@@ -381,9 +365,15 @@ func (pm *ProxyManager) apiStartBenchy(c *gin.Context) {
 		DatasetCacheDir:     runOptions.DatasetCacheDir,
 		OutputDir:           runOptions.OutputDir,
 		MaxConcurrent:       runOptions.MaxConcurrent,
-		TrustRemoteCode:     runOptions.TrustRemoteCode,
+		TrustRemoteCode:     pm.resolveBenchyTrustRemoteCode(resolvedModels[0].RealModelName, req.TrustRemoteCode),
 		Status:              benchyStatusRunning,
 		StartedAt:           time.Now(),
+	}
+	if len(resolvedModels) > 1 {
+		job.QueueModels = append([]string{}, queueModels...)
+		job.QueueCurrentIndex = 0
+		job.QueueCurrentModel = resolvedModels[0].RequestedModel
+		job.QueueCompletedCount = 0
 	}
 
 	ctx, cancel := context.WithCancel(pm.shutdownCtx)
@@ -392,7 +382,20 @@ func (pm *ProxyManager) apiStartBenchy(c *gin.Context) {
 	pm.benchyCancels[jobID] = cancel
 	pm.benchyMu.Unlock()
 
-	go pm.runBenchyJob(ctx, jobID, servedModelName, tokenizer, baseURL, apiKey, runOptions)
+	if len(resolvedModels) > 1 {
+		go pm.runBenchyQueueJob(ctx, jobID, resolvedModels, fixedTokenizer, baseURL, userProvidedBaseURL, apiKey, runOptions, req.TrustRemoteCode)
+	} else {
+		servedModelName := pm.resolveBenchyServedModelName(
+			resolvedModels[0].RequestedModel,
+			resolvedModels[0].RealModelName,
+			tokenizer,
+			userProvidedBaseURL,
+		)
+		displayModelName := benchyDisplayModelName(servedModelName, tokenizer)
+		singleOpts := runOptions
+		singleOpts.TrustRemoteCode = job.TrustRemoteCode
+		go pm.runBenchyJob(ctx, jobID, displayModelName, servedModelName, tokenizer, baseURL, apiKey, singleOpts)
+	}
 
 	c.JSON(http.StatusOK, benchyStartResponse{ID: jobID})
 }
@@ -440,17 +443,118 @@ func (pm *ProxyManager) apiCancelBenchyJob(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "canceling"})
 }
 
-func (pm *ProxyManager) runBenchyJob(ctx context.Context, jobID, servedModelName, tokenizer, baseURL, apiKey string, opts benchyRunOptions) {
-	displayModelName := servedModelName
-	// Prefer a human-friendly HF-ish model id for display if we have it as tokenizer.
-	if tokenizer != "" && strings.Contains(tokenizer, "/") && !strings.HasPrefix(tokenizer, "/") {
-		displayModelName = tokenizer
+func (pm *ProxyManager) runBenchyJob(ctx context.Context, jobID, displayModelName, servedModelName, tokenizer, baseURL, apiKey string, opts benchyRunOptions) {
+	status, exitCode, err := pm.executeBenchyProcess(ctx, jobID, displayModelName, servedModelName, tokenizer, baseURL, apiKey, opts)
+	pm.finishBenchyJob(jobID, status, exitCode, err)
+}
+
+func (pm *ProxyManager) runBenchyQueueJob(
+	ctx context.Context,
+	queueJobID string,
+	models []benchyResolvedModel,
+	fixedTokenizer string,
+	baseURL string,
+	userProvidedBaseURL bool,
+	apiKey string,
+	opts benchyRunOptions,
+	trustRemoteCodeOverride *bool,
+) {
+	total := len(models)
+	if total == 0 {
+		pm.finishBenchyJob(queueJobID, benchyStatusError, nil, errors.New("empty benchy queue"))
+		return
 	}
 
+	for idx, model := range models {
+		if errors.Is(ctx.Err(), context.Canceled) {
+			pm.finishBenchyJob(queueJobID, benchyStatusCanceled, nil, nil)
+			return
+		}
+
+		pm.setBenchyQueueProgress(queueJobID, idx, model.RequestedModel, idx)
+		pm.appendBenchyOutput(
+			queueJobID,
+			"stdout",
+			fmt.Sprintf("\n[queue] (%d/%d) loading model %s\n", idx+1, total, model.RequestedModel),
+		)
+
+		if err := pm.ensureBenchyModelReady(ctx, model.RealModelName); err != nil {
+			pm.stopBenchyModel(model.RealModelName)
+			if errors.Is(err, context.Canceled) {
+				pm.finishBenchyJob(queueJobID, benchyStatusCanceled, nil, nil)
+				return
+			}
+			pm.finishBenchyJob(queueJobID, benchyStatusError, nil, fmt.Errorf("failed to load model %s: %w", model.RequestedModel, err))
+			return
+		}
+
+		tokenizer := fixedTokenizer
+		if tokenizer == "" {
+			tokenizer = pm.defaultBenchyTokenizer(model.RealModelName)
+		}
+
+		servedModelName := pm.resolveBenchyServedModelName(
+			model.RequestedModel,
+			model.RealModelName,
+			tokenizer,
+			userProvidedBaseURL,
+		)
+		displayModelName := benchyDisplayModelName(servedModelName, tokenizer)
+		pm.appendBenchyOutput(
+			queueJobID,
+			"stdout",
+			fmt.Sprintf("[queue] (%d/%d) running benchy for %s\n", idx+1, total, model.RequestedModel),
+		)
+
+		runOpts := opts
+		runOpts.TrustRemoteCode = pm.resolveBenchyTrustRemoteCode(model.RealModelName, trustRemoteCodeOverride)
+
+		status, exitCode, runErr := pm.executeBenchyProcess(
+			ctx,
+			queueJobID,
+			displayModelName,
+			servedModelName,
+			tokenizer,
+			baseURL,
+			apiKey,
+			runOpts,
+		)
+
+		pm.stopBenchyModel(model.RealModelName)
+
+		if status == benchyStatusCanceled {
+			pm.finishBenchyJob(queueJobID, benchyStatusCanceled, exitCode, nil)
+			return
+		}
+		if runErr != nil {
+			pm.finishBenchyJob(
+				queueJobID,
+				benchyStatusError,
+				exitCode,
+				fmt.Errorf("benchy failed for model %s: %w", model.RequestedModel, runErr),
+			)
+			return
+		}
+
+		pm.appendBenchyOutput(
+			queueJobID,
+			"stdout",
+			fmt.Sprintf("[queue] (%d/%d) completed %s\n", idx+1, total, model.RequestedModel),
+		)
+		pm.setBenchyQueueProgress(queueJobID, idx+1, "", idx+1)
+	}
+
+	pm.finishBenchyJob(queueJobID, benchyStatusDone, intPtr(0), nil)
+}
+
+func (pm *ProxyManager) executeBenchyProcess(
+	ctx context.Context,
+	jobID, displayModelName, servedModelName, tokenizer, baseURL, apiKey string,
+	opts benchyRunOptions,
+) (BenchyJobStatus, *int, error) {
 	benchyCmd, benchyArgs, err := resolveBenchyCommand(opts.EnableIntelligence)
 	if err != nil {
-		pm.finishBenchyJob(jobID, benchyStatusError, nil, err)
-		return
+		return benchyStatusError, nil, err
 	}
 
 	args := buildBenchyArgs(baseURL, displayModelName, servedModelName, tokenizer, apiKey, opts)
@@ -473,22 +577,19 @@ func (pm *ProxyManager) runBenchyJob(ctx context.Context, jobID, servedModelName
 
 	startErr := cmd.Start()
 	if startErr != nil {
-		pm.finishBenchyJob(jobID, benchyStatusError, nil, startErr)
-		return
+		return benchyStatusError, nil, startErr
 	}
 
 	waitErr := cmd.Wait()
 	if waitErr != nil {
 		// Context cancellation should map to canceled even if Wait returns an error.
 		if errors.Is(ctx.Err(), context.Canceled) {
-			pm.finishBenchyJob(jobID, benchyStatusCanceled, exitCodeFromErr(waitErr), nil)
-			return
+			return benchyStatusCanceled, exitCodeFromErr(waitErr), nil
 		}
-		pm.finishBenchyJob(jobID, benchyStatusError, exitCodeFromErr(waitErr), waitErr)
-		return
+		return benchyStatusError, exitCodeFromErr(waitErr), waitErr
 	}
 
-	pm.finishBenchyJob(jobID, benchyStatusDone, intPtr(0), nil)
+	return benchyStatusDone, intPtr(0), nil
 }
 
 type benchyJobWriter struct {
@@ -583,6 +684,98 @@ func (pm *ProxyManager) pruneBenchyJobsLocked() {
 	}
 }
 
+func (pm *ProxyManager) setBenchyQueueProgress(jobID string, currentIndex int, currentModel string, completed int) {
+	pm.benchyMu.Lock()
+	defer pm.benchyMu.Unlock()
+
+	job := pm.benchyJobs[jobID]
+	if job == nil {
+		return
+	}
+	if currentIndex >= 0 {
+		job.QueueCurrentIndex = currentIndex
+	}
+	job.QueueCurrentModel = currentModel
+	if completed >= 0 {
+		job.QueueCompletedCount = completed
+	}
+}
+
+func normalizeBenchyQueueModels(primary string, queue []string) ([]string, error) {
+	out := make([]string, 0, len(queue)+1)
+	for _, raw := range queue {
+		s := strings.TrimSpace(raw)
+		if s == "" {
+			continue
+		}
+		out = append(out, s)
+	}
+	if len(out) > 0 {
+		return out, nil
+	}
+
+	s := strings.TrimSpace(primary)
+	if s == "" {
+		return nil, errors.New("model is required")
+	}
+	return []string{s}, nil
+}
+
+func (pm *ProxyManager) ensureBenchyModelReady(ctx context.Context, realModelName string) error {
+	processGroup, err := pm.swapProcessGroup(realModelName)
+	if err != nil {
+		return err
+	}
+	process, ok := processGroup.GetMember(realModelName)
+	if !ok || process == nil {
+		return fmt.Errorf("process not found for model %s", realModelName)
+	}
+
+	if process.CurrentState() == StateReady {
+		return nil
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", "/", nil)
+	if err != nil {
+		return err
+	}
+	discardWriter := &DiscardWriter{}
+	proxyErr := processGroup.ProxyRequest(realModelName, discardWriter, req)
+	if proxyErr != nil && process.CurrentState() != StateReady {
+		return proxyErr
+	}
+
+	readyDeadline := time.Now().Add(time.Duration(pm.config.HealthCheckTimeout+10) * time.Second)
+	for {
+		switch process.CurrentState() {
+		case StateReady:
+			return nil
+		case StateShutdown:
+			return fmt.Errorf("model %s is shutdown", realModelName)
+		case StateStopped:
+			if time.Now().After(readyDeadline) {
+				return fmt.Errorf("model %s did not reach ready state", realModelName)
+			}
+		}
+
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return ctx.Err()
+		}
+		if time.Now().After(readyDeadline) {
+			return fmt.Errorf("timed out waiting for model %s to be ready", realModelName)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+func (pm *ProxyManager) stopBenchyModel(realModelName string) {
+	processGroup := pm.findGroupByModelName(realModelName)
+	if processGroup == nil {
+		return
+	}
+	_ = processGroup.StopProcess(realModelName, StopImmediately)
+}
+
 func defaultBenchyBaseURLFromRequest(c *gin.Context) string {
 	scheme := "http"
 	if xf := strings.TrimSpace(c.GetHeader("X-Forwarded-Proto")); xf != "" {
@@ -643,6 +836,53 @@ func (pm *ProxyManager) defaultBenchyTokenizer(realModelName string) string {
 	}
 
 	return realModelName
+}
+
+func (pm *ProxyManager) resolveBenchyServedModelName(requestedModel, realModelName, tokenizer string, userProvidedBaseURL bool) string {
+	// For llama-swap base URL (default), use requestedModel so normal swap routing resolves correctly.
+	if !userProvidedBaseURL {
+		return requestedModel
+	}
+
+	// For direct upstreams (explicit base URL), this should match that upstream's expected model id.
+	servedModelName := requestedModel
+	if cfg, ok := pm.config.Models[realModelName]; ok {
+		if u := strings.TrimSpace(cfg.UseModelName); u != "" {
+			servedModelName = u
+		} else if tokenizer != "" && strings.Contains(tokenizer, "/") && !strings.HasPrefix(tokenizer, "/") {
+			servedModelName = tokenizer
+		} else {
+			// Fall back to a HF-ish alias if available.
+			for _, a := range cfg.Aliases {
+				a = strings.TrimSpace(a)
+				if a != "" && strings.Contains(a, "/") && !strings.HasPrefix(a, "/") {
+					servedModelName = a
+					break
+				}
+			}
+		}
+	}
+	return servedModelName
+}
+
+func (pm *ProxyManager) resolveBenchyTrustRemoteCode(realModelName string, override *bool) bool {
+	if override != nil {
+		return *override
+	}
+	if cfg, ok := pm.config.Models[realModelName]; ok {
+		if v, ok := benchyTrustRemoteCodeFromMetadata(cfg.Metadata); ok {
+			return v
+		}
+	}
+	return false
+}
+
+func benchyDisplayModelName(servedModelName, tokenizer string) string {
+	// Prefer a human-friendly HF-ish model id for display if we have it as tokenizer.
+	if tokenizer != "" && strings.Contains(tokenizer, "/") && !strings.HasPrefix(tokenizer, "/") {
+		return tokenizer
+	}
+	return servedModelName
 }
 
 func benchyTokenizerFromMetadata(meta map[string]any) (string, bool) {

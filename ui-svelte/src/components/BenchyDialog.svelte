@@ -33,6 +33,8 @@
   const adaptPromptStore = persistentStore<"auto" | "true" | "false">("benchy-options-adapt-prompt", "auto");
   const enablePrefixCachingStore = persistentStore<boolean>("benchy-options-enable-prefix-caching", false);
   const trustRemoteCodeStore = persistentStore<"auto" | "true" | "false">("benchy-options-trust-remote-code", "auto");
+  const enableQueueStore = persistentStore<boolean>("benchy-options-enable-queue", false);
+  const queueModelsStore = persistentStore<string>("benchy-options-queue-models", "");
   const enableIntelligenceStore = persistentStore<boolean>("benchy-options-enable-intelligence", false);
   const intelligencePluginsStore = persistentStore<BenchyIntelligencePlugin[]>("benchy-options-intelligence-plugins", []);
   const allowCodeExecStore = persistentStore<boolean>("benchy-options-allow-code-exec", false);
@@ -57,6 +59,13 @@
     } else if (!open && dialogEl) {
       dialogEl.close();
     }
+  });
+
+  $effect(() => {
+    if (!open || !$enableQueueStore) return;
+    if ($queueModelsStore.trim() !== "") return;
+    if (!model) return;
+    queueModelsStore.set(model);
   });
 
   function handleDialogClose() {
@@ -100,6 +109,13 @@
     return value === "true";
   }
 
+  function parseQueueModels(raw: string): string[] {
+    return raw
+      .split(/[\n,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+
   function intelligencePluginEnabled(plugin: BenchyIntelligencePlugin): boolean {
     return $intelligencePluginsStore.includes(plugin);
   }
@@ -129,6 +145,7 @@
       const concurrency = parseNumberList($concurrencyStore, "concurrency", 1);
       const maxConcurrent = parsePositiveNumber($maxConcurrentStore, "maxConcurrent");
       const selectedPlugins = [...$intelligencePluginsStore];
+      const queueModels = parseQueueModels($queueModelsStore);
 
       if (!$useLlamaSwapBaseUrlStore && baseUrl) opts.baseUrl = baseUrl;
       if (tokenizer) opts.tokenizer = tokenizer;
@@ -150,6 +167,13 @@
       const trustRemoteCode = parseTriState($trustRemoteCodeStore);
       if (trustRemoteCode !== undefined) {
         opts.trustRemoteCode = trustRemoteCode;
+      }
+
+      if ($enableQueueStore) {
+        if (queueModels.length === 0) {
+          throw new Error("Queue mode is enabled but no models were provided");
+        }
+        opts.queueModels = queueModels;
       }
 
       if ($enableIntelligenceStore || selectedPlugins.length > 0) {
@@ -195,6 +219,24 @@
         <div class="text-sm text-txtsecondary">
           Model: <span class="font-mono text-txtmain break-all">{model || "n/a"}</span>
         </div>
+
+        <div class="flex flex-wrap gap-4 text-sm">
+          <label class="flex items-center gap-2">
+            <input type="checkbox" bind:checked={$enableQueueStore} />
+            ejecutar cola secuencial de modelos
+          </label>
+        </div>
+
+        {#if $enableQueueStore}
+          <label class="text-sm block">
+            <div class="text-txtsecondary mb-1">Queue models (orden, uno por línea o separados por coma)</div>
+            <textarea
+              class="w-full min-h-20 px-2 py-1 rounded border border-card-border bg-background font-mono"
+              bind:value={$queueModelsStore}
+              placeholder={(model || "") + "\\nQwen/Qwen3-Coder-Next-FP8\\nMiniMax-M2.5-AWQ-Optimized"}
+            ></textarea>
+          </label>
+        {/if}
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
           <label class="text-sm">
@@ -358,6 +400,17 @@
           <div>
             Model: <span class="font-mono break-all text-txtmain">{job.model}</span>
           </div>
+          {#if job.queueModels?.length}
+            <div>
+              queue: <span class="font-mono text-txtmain">{job.queueModels.length} modelos</span>
+              {#if job.queueCurrentModel}
+                | current:
+                <span class="font-mono break-all text-txtmain">{job.queueCurrentModel}</span>
+              {/if}
+              | completed:
+              <span class="font-mono text-txtmain">{job.queueCompletedCount || 0}</span>
+            </div>
+          {/if}
           <div>
             Tokenizer: <span class="font-mono break-all text-txtmain">{job.tokenizer}</span>
           </div>

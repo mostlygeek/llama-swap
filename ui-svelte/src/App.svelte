@@ -8,6 +8,7 @@
   import ConfigEditor from "./routes/ConfigEditor.svelte";
   import ClusterStatus from "./routes/ClusterStatus.svelte";
   import Backend from "./routes/Backend.svelte";
+  import Help from "./routes/Help.svelte";
   import Playground from "./routes/Playground.svelte";
   import PlaygroundStub from "./routes/PlaygroundStub.svelte";
   import { enableAPIEvents } from "./stores/api";
@@ -21,6 +22,7 @@
     "/cluster": ClusterStatus,
     "/backend": Backend,
     "/editor": ConfigEditor,
+    "/help": Help,
     "/activity": Activity,
     "*": PlaygroundStub,
   };

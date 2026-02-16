@@ -69,6 +69,7 @@ export type BenchyIntelligencePlugin =
   | "swebench_verified";
 
 export interface BenchyStartOptions {
+  queueModels?: string[];
   baseUrl?: string;
   tokenizer?: string;
   pp?: number[];
@@ -93,6 +94,10 @@ export interface BenchyStartOptions {
 export interface BenchyJob {
   id: string;
   model: string;
+  queueModels?: string[];
+  queueCurrentIndex?: number;
+  queueCurrentModel?: string;
+  queueCompletedCount?: number;
   tokenizer: string;
   baseUrl: string;
   pp: number[];
@@ -213,6 +218,7 @@ export interface ClusterNodeStatus {
   sshOk: boolean;
   sshLatencyMs?: number;
   error?: string;
+  dgx?: ClusterDGXStatus;
 }
 
 export interface ClusterStatusState {
@@ -230,6 +236,36 @@ export interface ClusterStatusState {
   summary: string;
   errors?: string[];
   nodes: ClusterNodeStatus[];
+}
+
+export interface ClusterDGXStatus {
+  supported: boolean;
+  checkedAt: string;
+  updateAvailable?: boolean;
+  rebootRunning?: boolean;
+  upgradeProgress?: number;
+  upgradeStatus?: string;
+  cacheProgress?: number;
+  cacheStatus?: string;
+  error?: string;
+}
+
+export interface ClusterDGXUpdateNodeResult {
+  ip: string;
+  isLocal: boolean;
+  ok: boolean;
+  durationMs: number;
+  output?: string;
+  error?: string;
+}
+
+export interface ClusterDGXUpdateResponse {
+  action: string;
+  startedAt: string;
+  completedAt: string;
+  success: number;
+  failed: number;
+  results: ClusterDGXUpdateNodeResult[];
 }
 
 export type TextContentPart = {
