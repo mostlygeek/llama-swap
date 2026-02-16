@@ -35,8 +35,9 @@ const ctxKeyAPIKey = "apiKey"
 type ProxyManager struct {
 	sync.Mutex
 
-	config    config.Config
-	ginEngine *gin.Engine
+	config     config.Config
+	configPath string
+	ginEngine  *gin.Engine
 
 	// logging
 	proxyLogger    *LogMonitor
@@ -66,6 +67,14 @@ type ProxyManager struct {
 }
 
 func New(proxyConfig config.Config) *ProxyManager {
+	return newProxyManager(proxyConfig, "")
+}
+
+func NewWithConfigPath(proxyConfig config.Config, configPath string) *ProxyManager {
+	return newProxyManager(proxyConfig, configPath)
+}
+
+func newProxyManager(proxyConfig config.Config, configPath string) *ProxyManager {
 	// set up loggers
 
 	var muxLogger, upstreamLogger, proxyLogger *LogMonitor
@@ -153,8 +162,9 @@ func New(proxyConfig config.Config) *ProxyManager {
 	}
 
 	pm := &ProxyManager{
-		config:    proxyConfig,
-		ginEngine: gin.New(),
+		config:     proxyConfig,
+		configPath: strings.TrimSpace(configPath),
+		ginEngine:  gin.New(),
 
 		proxyLogger:    proxyLogger,
 		muxLogger:      muxLogger,

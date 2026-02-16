@@ -11,6 +11,7 @@
   import { isNarrow } from "../stores/theme";
   import { persistentStore } from "../stores/persistent";
   import BenchyDialog from "./BenchyDialog.svelte";
+  import RecipeManager from "./RecipeManager.svelte";
   import type { BenchyJob, BenchyStartOptions, Model } from "../lib/types";
 
   let isUnloading = $state(false);
@@ -18,6 +19,7 @@
 
   const showUnlistedStore = persistentStore<boolean>("showUnlisted", true);
   const showIdorNameStore = persistentStore<"id" | "name">("showIdorName", "id");
+  const showRecipeManagerStore = persistentStore<boolean>("showRecipeManager", false);
 
   // Benchy state (single active job in UI)
   let benchyOpen = $state(false);
@@ -70,6 +72,10 @@
 
   function toggleShowUnlisted(): void {
     showUnlistedStore.update((prev) => !prev);
+  }
+
+  function toggleRecipeManager(): void {
+    showRecipeManagerStore.update((prev) => !prev);
   }
 
   function getModelDisplay(model: Model): string {
@@ -230,6 +236,15 @@
                 </svg>
                 {isUnloading ? "Unloading..." : "Unload All"}
               </button>
+              <button
+                class="w-full text-left px-4 py-2 hover:bg-secondary-hover flex items-center gap-2"
+                onclick={() => { toggleRecipeManager(); menuOpen = false; }}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
+                  <path d="M4.5 3.75A2.25 2.25 0 0 0 2.25 6v12A2.25 2.25 0 0 0 4.5 20.25h15A2.25 2.25 0 0 0 21.75 18V6A2.25 2.25 0 0 0 19.5 3.75h-15ZM5.25 7.5a.75.75 0 0 1 .75-.75h12a.75.75 0 0 1 0 1.5H6a.75.75 0 0 1-.75-.75Zm0 4.5A.75.75 0 0 1 6 11.25h12a.75.75 0 0 1 0 1.5H6a.75.75 0 0 1-.75-.75Zm.75 3.75a.75.75 0 0 0 0 1.5h7.5a.75.75 0 0 0 0-1.5H6Z" />
+                </svg>
+                {$showRecipeManagerStore ? "Hide Recipes" : "Manage Recipes"}
+              </button>
             </div>
           {/if}
         </div>
@@ -266,6 +281,14 @@
             <path fill-rule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25Zm.53 5.47a.75.75 0 0 0-1.06 0l-3 3a.75.75 0 1 0 1.06 1.06l1.72-1.72v5.69a.75.75 0 0 0 1.5 0v-5.69l1.72 1.72a.75.75 0 1 0 1.06-1.06l-3-3Z" clip-rule="evenodd" />
           </svg>
           {isUnloading ? "Unloading..." : "Unload All"}
+        </button>
+      </div>
+      <div class="mt-2">
+        <button class="btn text-base flex items-center gap-2" onclick={toggleRecipeManager}>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
+            <path d="M4.5 3.75A2.25 2.25 0 0 0 2.25 6v12A2.25 2.25 0 0 0 4.5 20.25h15A2.25 2.25 0 0 0 21.75 18V6A2.25 2.25 0 0 0 19.5 3.75h-15ZM5.25 7.5a.75.75 0 0 1 .75-.75h12a.75.75 0 0 1 0 1.5H6a.75.75 0 0 1-.75-.75Zm0 4.5A.75.75 0 0 1 6 11.25h12a.75.75 0 0 1 0 1.5H6a.75.75 0 0 1-.75-.75Zm.75 3.75a.75.75 0 0 0 0 1.5h7.5a.75.75 0 0 0 0-1.5H6Z" />
+          </svg>
+          {$showRecipeManagerStore ? "Hide Recipe Manager" : "Manage Recipes"}
         </button>
       </div>
     {/if}
@@ -341,6 +364,9 @@
     {/if}
   </div>
 </div>
+{#if $showRecipeManagerStore}
+  <RecipeManager />
+{/if}
 
 <BenchyDialog
   model={benchyModelID}

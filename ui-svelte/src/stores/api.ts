@@ -1,5 +1,17 @@
 import { writable } from "svelte/store";
-import type { Model, Metrics, VersionInfo, LogData, APIEventEnvelope, ReqRespCapture, BenchyJob, BenchyStartResponse, BenchyStartOptions } from "../lib/types";
+import type {
+  Model,
+  Metrics,
+  VersionInfo,
+  LogData,
+  APIEventEnvelope,
+  ReqRespCapture,
+  BenchyJob,
+  BenchyStartResponse,
+  BenchyStartOptions,
+  RecipeUIState,
+  RecipeUpsertRequest,
+} from "../lib/types";
 import { connectionState } from "./theme";
 
 const LOG_LENGTH_LIMIT = 1024 * 100; /* 100KB of log data */
@@ -227,6 +239,41 @@ export async function cancelBenchyJob(id: string): Promise<void> {
     const msg = await response.text().catch(() => "");
     throw new Error(msg || `Failed to cancel benchy job: ${response.status}`);
   }
+}
+
+export async function getRecipeUIState(): Promise<RecipeUIState> {
+  const response = await fetch(`/api/recipes/state`);
+  if (!response.ok) {
+    const msg = await response.text().catch(() => "");
+    throw new Error(msg || `Failed to fetch recipe state: ${response.status}`);
+  }
+  return (await response.json()) as RecipeUIState;
+}
+
+export async function upsertRecipeModel(payload: RecipeUpsertRequest): Promise<RecipeUIState> {
+  const response = await fetch(`/api/recipes/models`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const msg = await response.text().catch(() => "");
+    throw new Error(msg || `Failed to save recipe model: ${response.status}`);
+  }
+  return (await response.json()) as RecipeUIState;
+}
+
+export async function deleteRecipeModel(modelId: string): Promise<RecipeUIState> {
+  const response = await fetch(`/api/recipes/models/${encodeURIComponent(modelId)}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    const msg = await response.text().catch(() => "");
+    throw new Error(msg || `Failed to delete recipe model: ${response.status}`);
+  }
+  return (await response.json()) as RecipeUIState;
 }
 
 export async function getCapture(id: number): Promise<ReqRespCapture | null> {

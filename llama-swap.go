@@ -95,7 +95,7 @@ func main() {
 
 			fmt.Println("Configuration Changed")
 			currentPM.Shutdown()
-			newPM := proxy.New(conf)
+			newPM := proxy.NewWithConfigPath(conf, *configPath)
 			newPM.SetVersion(date, commit, version)
 			srv.Handler = newPM
 			fmt.Println("Configuration Reloaded")
@@ -112,7 +112,7 @@ func main() {
 				fmt.Printf("Error, unable to load configuration: %v\n", err)
 				os.Exit(1)
 			}
-			newPM := proxy.New(conf)
+			newPM := proxy.NewWithConfigPath(conf, *configPath)
 			newPM.SetVersion(date, commit, version)
 			srv.Handler = newPM
 		}

@@ -98,6 +98,59 @@ export interface BenchyStartResponse {
   id: string;
 }
 
+export interface RecipeCatalogItem {
+  id: string;
+  ref: string;
+  path: string;
+  name: string;
+  description: string;
+  model: string;
+  soloOnly: boolean;
+  clusterOnly: boolean;
+  defaultTensorParallel: number;
+}
+
+export interface RecipeManagedModel {
+  modelId: string;
+  recipeRef: string;
+  name: string;
+  description: string;
+  aliases: string[];
+  useModelName: string;
+  mode: "solo" | "cluster";
+  tensorParallel: number;
+  nodes?: string;
+  extraArgs?: string;
+  group: string;
+  unlisted?: boolean;
+  managed: boolean;
+  benchyTrustRemoteCode?: boolean;
+}
+
+export interface RecipeUIState {
+  configPath: string;
+  backendDir: string;
+  recipes: RecipeCatalogItem[];
+  models: RecipeManagedModel[];
+  groups: string[];
+}
+
+export interface RecipeUpsertRequest {
+  modelId: string;
+  recipeRef: string;
+  name?: string;
+  description?: string;
+  aliases?: string[];
+  useModelName?: string;
+  mode?: "solo" | "cluster";
+  tensorParallel?: number;
+  nodes?: string;
+  extraArgs?: string;
+  group?: string;
+  unlisted?: boolean;
+  benchyTrustRemoteCode?: boolean;
+}
+
 export type TextContentPart = {
   type: "text";
   text: string;
