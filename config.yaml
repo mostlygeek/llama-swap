@@ -16,7 +16,7 @@ groups:
 healthCheckTimeout: 600
 hooks: null
 macros:
-    llama_root: /home/csolutions_ai/llama-swap
+    llama_root: /home/csolutions_ai/Swap-Laboratories
     recipe_runner: /home/csolutions_ai/spark-vllm-docker/run-recipe.sh
     spark_root: /home/csolutions_ai/spark-vllm-docker
     user_home: ${env.HOME}
