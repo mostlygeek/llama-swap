@@ -187,6 +187,8 @@ func newProxyManager(proxyConfig config.Config, configPath string) *ProxyManager
 		benchyCancels: make(map[string]context.CancelFunc),
 	}
 
+	pm.loadRecipesBackendOverride()
+
 	// create the process groups
 	for groupID := range proxyConfig.Groups {
 		processGroup := NewProcessGroup(groupID, proxyConfig, proxyLogger, upstreamLogger)

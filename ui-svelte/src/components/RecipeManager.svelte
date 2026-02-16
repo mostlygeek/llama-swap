@@ -138,7 +138,7 @@
       }
 
       state = await upsertRecipeModel(payload);
-      notice = "Guardado. llama-swap regeneró config.yaml automáticamente.";
+      notice = "Guardado. Swap Laboratories regeneró config.yaml automáticamente.";
       selectedModelID = id;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);

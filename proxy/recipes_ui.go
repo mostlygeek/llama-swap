@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/proxy/config"
@@ -19,19 +20,24 @@ import (
 )
 
 const (
-	recipesBackendDirEnv         = "LLAMA_SWAP_RECIPES_BACKEND_DIR"
-	recipesLocalDirEnv           = "LLAMA_SWAP_LOCAL_RECIPES_DIR"
-	defaultRecipesBackendSubdir  = "spark-vllm-docker"
-	defaultRecipesLocalSubdir    = "llama-swap/recipes"
-	defaultRecipeGroupName       = "managed-recipes"
-	recipeMetadataKey            = "recipe_ui"
-	recipeMetadataManagedField   = "managed"
+	recipesBackendDirEnv           = "LLAMA_SWAP_RECIPES_BACKEND_DIR"
+	recipesBackendOverrideFileEnv  = "LLAMA_SWAP_RECIPES_BACKEND_OVERRIDE_FILE"
+	recipesLocalDirEnv             = "LLAMA_SWAP_LOCAL_RECIPES_DIR"
+	defaultRecipesBackendSubdir    = "spark-vllm-docker"
+	defaultRecipesBackendAltSubdir = "spark-trtllm-docker"
+	defaultRecipesBackendSQLSubdir = "spark-sqlang-docker"
+	defaultRecipesLocalSubdir      = "llama-swap/recipes"
+	defaultRecipeGroupName         = "managed-recipes"
+	recipeMetadataKey              = "recipe_ui"
+	recipeMetadataManagedField     = "managed"
 )
 
 var (
-	recipeRunnerRe = regexp.MustCompile(`(?:^|\s)(?:exec\s+)?(?:\$\{recipe_runner\}|[^\s'"]*run-recipe\.sh)\s+([^\s'"]+)`)
-	recipeTpRe     = regexp.MustCompile(`(?:^|\s)--tp\s+([0-9]+)`)
-	recipeNodesRe  = regexp.MustCompile(`(?:^|\s)-n\s+("?[^"\s]+"?|\$\{[^}]+\}|[^\s]+)`)
+	recipeRunnerRe           = regexp.MustCompile(`(?:^|\s)(?:exec\s+)?(?:\$\{recipe_runner\}|[^\s'"]*run-recipe\.sh)\s+([^\s'"]+)`)
+	recipeTpRe               = regexp.MustCompile(`(?:^|\s)--tp\s+([0-9]+)`)
+	recipeNodesRe            = regexp.MustCompile(`(?:^|\s)-n\s+("?[^"\s]+"?|\$\{[^}]+\}|[^\s]+)`)
+	recipesBackendOverrideMu sync.RWMutex
+	recipesBackendOverride   string
 )
 
 type recipeCatalogMeta struct {
@@ -80,6 +86,12 @@ type RecipeUIState struct {
 	Groups     []string             `json:"groups"`
 }
 
+type RecipeBackendState struct {
+	BackendDir    string   `json:"backendDir"`
+	BackendSource string   `json:"backendSource"`
+	Options       []string `json:"options"`
+}
+
 type upsertRecipeModelRequest struct {
 	ModelID               string   `json:"modelId"`
 	RecipeRef             string   `json:"recipeRef"`
@@ -96,6 +108,10 @@ type upsertRecipeModelRequest struct {
 	BenchyTrustRemoteCode *bool    `json:"benchyTrustRemoteCode,omitempty"`
 }
 
+type setRecipeBackendRequest struct {
+	BackendDir string `json:"backendDir"`
+}
+
 func (pm *ProxyManager) apiGetRecipeState(c *gin.Context) {
 	state, err := pm.buildRecipeUIState()
 	if err != nil {
@@ -103,6 +119,45 @@ func (pm *ProxyManager) apiGetRecipeState(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, state)
+}
+
+func (pm *ProxyManager) apiGetRecipeBackend(c *gin.Context) {
+	c.JSON(http.StatusOK, pm.recipeBackendState())
+}
+
+func (pm *ProxyManager) apiSetRecipeBackend(c *gin.Context) {
+	var req setRecipeBackendRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
+		return
+	}
+
+	desired := expandLeadingTilde(strings.TrimSpace(req.BackendDir))
+	if desired != "" {
+		abs, err := filepath.Abs(desired)
+		if err == nil {
+			desired = abs
+		}
+		if stat, err := os.Stat(desired); err != nil || !stat.IsDir() {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("backend dir not found: %s", desired)})
+			return
+		}
+		if _, err := os.Stat(filepath.Join(desired, "run-recipe.sh")); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("run-recipe.sh not found in backend: %s", desired)})
+			return
+		}
+		if _, err := os.Stat(filepath.Join(desired, "recipes")); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("recipes dir not found in backend: %s", desired)})
+			return
+		}
+	}
+
+	setRecipesBackendOverride(desired)
+	if err := pm.persistRecipesBackendOverride(desired); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, pm.recipeBackendState())
 }
 
 func (pm *ProxyManager) apiUpsertRecipeModel(c *gin.Context) {
@@ -175,6 +230,18 @@ func (pm *ProxyManager) buildRecipeUIState() (RecipeUIState, error) {
 		Models:     models,
 		Groups:     groupNames,
 	}, nil
+}
+
+func (pm *ProxyManager) recipeBackendState() RecipeBackendState {
+	current, source := recipesBackendDirWithSource()
+	options := recommendedRecipesBackendOptions()
+	options = appendUniquePath(options, current)
+	sort.Strings(options)
+	return RecipeBackendState{
+		BackendDir:    current,
+		BackendSource: source,
+		Options:       options,
+	}
 }
 
 func (pm *ProxyManager) upsertRecipeModel(req upsertRecipeModelRequest) (RecipeUIState, error) {
@@ -390,13 +457,21 @@ func (pm *ProxyManager) deleteRecipeModel(modelID string) (RecipeUIState, error)
 }
 
 func recipesBackendDir() string {
+	dir, _ := recipesBackendDirWithSource()
+	return dir
+}
+
+func recipesBackendDirWithSource() (string, string) {
+	if v := strings.TrimSpace(getRecipesBackendOverride()); v != "" {
+		return v, "override"
+	}
 	if v := strings.TrimSpace(os.Getenv(recipesBackendDirEnv)); v != "" {
-		return v
+		return v, "env"
 	}
 	if home := userHomeDir(); home != "" {
-		return filepath.Join(home, defaultRecipesBackendSubdir)
+		return filepath.Join(home, defaultRecipesBackendSubdir), "default"
 	}
-	return defaultRecipesBackendSubdir
+	return defaultRecipesBackendSubdir, "default"
 }
 
 func localRecipesDir() string {
@@ -417,6 +492,133 @@ func userHomeDir() string {
 		return strings.TrimSpace(home)
 	}
 	return ""
+}
+
+func setRecipesBackendOverride(path string) {
+	recipesBackendOverrideMu.Lock()
+	recipesBackendOverride = strings.TrimSpace(path)
+	recipesBackendOverrideMu.Unlock()
+}
+
+func getRecipesBackendOverride() string {
+	recipesBackendOverrideMu.RLock()
+	defer recipesBackendOverrideMu.RUnlock()
+	return recipesBackendOverride
+}
+
+func recommendedRecipesBackendOptions() []string {
+	options := make([]string, 0, 5)
+	if home := userHomeDir(); home != "" {
+		options = append(options,
+			filepath.Join(home, defaultRecipesBackendSubdir),
+			filepath.Join(home, defaultRecipesBackendAltSubdir),
+			filepath.Join(home, defaultRecipesBackendSQLSubdir),
+		)
+	}
+	if v := strings.TrimSpace(os.Getenv(recipesBackendDirEnv)); v != "" {
+		options = append(options, v)
+	}
+	return uniqueExistingDirs(options)
+}
+
+func uniqueExistingDirs(paths []string) []string {
+	seen := make(map[string]struct{}, len(paths))
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		p = expandLeadingTilde(p)
+		abs, err := filepath.Abs(p)
+		if err == nil {
+			p = abs
+		}
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		if stat, err := os.Stat(p); err == nil && stat.IsDir() {
+			seen[p] = struct{}{}
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func appendUniquePath(paths []string, candidate string) []string {
+	candidate = strings.TrimSpace(candidate)
+	if candidate == "" {
+		return paths
+	}
+	absCandidate, err := filepath.Abs(candidate)
+	if err == nil {
+		candidate = absCandidate
+	}
+	for _, p := range paths {
+		if p == candidate {
+			return paths
+		}
+	}
+	return append(paths, candidate)
+}
+
+func (pm *ProxyManager) recipesBackendOverrideFile() string {
+	if v := strings.TrimSpace(os.Getenv(recipesBackendOverrideFileEnv)); v != "" {
+		return expandLeadingTilde(v)
+	}
+	if pm != nil {
+		if cfgPath := strings.TrimSpace(pm.configPath); cfgPath != "" {
+			return filepath.Join(filepath.Dir(cfgPath), ".recipes_backend_dir")
+		}
+	}
+	if home := userHomeDir(); home != "" {
+		return filepath.Join(home, ".config", "llama-swap", "recipes_backend_dir")
+	}
+	return ""
+}
+
+func (pm *ProxyManager) loadRecipesBackendOverride() {
+	path := pm.recipesBackendOverrideFile()
+	if path == "" {
+		return
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	value := expandLeadingTilde(strings.TrimSpace(string(raw)))
+	if value == "" {
+		return
+	}
+	setRecipesBackendOverride(value)
+}
+
+func (pm *ProxyManager) persistRecipesBackendOverride(path string) error {
+	filePath := pm.recipesBackendOverrideFile()
+	if filePath == "" {
+		return nil
+	}
+
+	path = strings.TrimSpace(path)
+	if path == "" {
+		if err := os.Remove(filePath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+
+	parent := filepath.Dir(filePath)
+	if parent != "" {
+		if err := os.MkdirAll(parent, 0755); err != nil {
+			return err
+		}
+	}
+
+	tmp := filePath + ".tmp"
+	if err := os.WriteFile(tmp, []byte(path+"\n"), 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, filePath)
 }
 
 func (pm *ProxyManager) getConfigPath() (string, error) {

@@ -162,6 +162,14 @@ export interface RecipeUIState {
   groups: string[];
 }
 
+export type RecipeBackendSource = "override" | "env" | "default";
+
+export interface RecipeBackendState {
+  backendDir: string;
+  backendSource: RecipeBackendSource;
+  options: string[];
+}
+
 export interface RecipeUpsertRequest {
   modelId: string;
   recipeRef: string;
@@ -182,6 +190,35 @@ export interface ConfigEditorState {
   path: string;
   content: string;
   updatedAt?: string;
+}
+
+export type ClusterOverallStatus = "healthy" | "degraded" | "solo" | "error";
+
+export interface ClusterNodeStatus {
+  ip: string;
+  isLocal: boolean;
+  port22Open: boolean;
+  port22LatencyMs?: number;
+  sshOk: boolean;
+  sshLatencyMs?: number;
+  error?: string;
+}
+
+export interface ClusterStatusState {
+  backendDir: string;
+  autodiscoverPath: string;
+  detectedAt: string;
+  localIp: string;
+  cidr: string;
+  ethIf: string;
+  ibIf: string;
+  nodeCount: number;
+  remoteCount: number;
+  reachableBySsh: number;
+  overall: ClusterOverallStatus;
+  summary: string;
+  errors?: string[];
+  nodes: ClusterNodeStatus[];
 }
 
 export type TextContentPart = {

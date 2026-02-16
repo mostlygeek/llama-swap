@@ -137,7 +137,7 @@ models:
     checkEndpoint: /health
     ttl: 0
 
-    cmd: bash -lc '${vllm_stop_cluster}; exec ${recipe_runner} qwen3-coer-next-fp8 -n ${vllm_nodes} --tp 2 --port ${PORT}'
+    cmd: bash -lc '${vllm_stop_cluster}; exec ${recipe_runner} qwen3-coder-next-fp8 -n ${vllm_nodes} --tp 2 --port ${PORT}'
 
     cmdStop: |
       bash -lc '${vllm_stop_cluster}'

@@ -1,3 +1,9 @@
 Watching Configuration for changes
 llama-swap listening on http://0.0.0.0:8080
-2026/02/14 18:08:21 Fatal server error: listen tcp 0.0.0.0:8080: bind: address already in use
+[INFO] Request 192.168.8.225 "GET /ui/ HTTP/1.1" 200 748 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36" 2.547441ms
+[INFO] Request 192.168.8.225 "GET /ui/assets/index-BmWT5uAx.css HTTP/1.1" 200 16689 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36" 110.513µs
+[INFO] Request 192.168.8.225 "GET /ui/assets/index-DrvK42V5.js HTTP/1.1" 200 640657 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36" 2.951684ms
+[INFO] Request 192.168.8.225 "GET /ui/site.webmanifest HTTP/1.1" 200 441 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36" 30.784µs
+[INFO] Request 192.168.8.225 "GET /ui/favicon.ico HTTP/1.1" 200 15086 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36" 61.312µs
+[INFO] Request 192.168.8.225 "GET /api/version HTTP/1.1" 200 58 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36" 29.456µs
+[INFO] Request 127.0.0.1 "GET /health HTTP/1.1" 200 2 "curl/8.5.0" 15.584µs

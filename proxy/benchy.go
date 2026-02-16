@@ -39,6 +39,8 @@ const (
 	benchyEnvCmd           = "LLAMA_BENCHY_CMD"
 	benchyEnvDisableRunner = "LLAMA_BENCHY_DISABLE"
 	benchyEnvOutputDir     = "LLAMA_BENCHY_OUTPUT_DIR"
+	benchyEnvPyShimDir     = "LLAMA_SWAP_BENCHY_PY_SHIM_DIR"
+	benchyEnvSwebenchShim  = "LLAMA_SWAP_SWEBENCH_TEXT_COMPAT"
 	benchyDefaultOutputDir = "/tmp/llama-benchy-runs"
 )
 
@@ -257,12 +259,12 @@ func (pm *ProxyManager) apiStartBenchy(c *gin.Context) {
 		}
 	}
 
-	outputDir := strings.TrimSpace(req.OutputDir)
+	outputDir := expandLeadingTilde(strings.TrimSpace(req.OutputDir))
 	if enableIntelligence && outputDir == "" {
 		outputDir = defaultBenchyOutputDir()
 	}
 
-	datasetCacheDir := strings.TrimSpace(req.DatasetCacheDir)
+	datasetCacheDir := expandLeadingTilde(strings.TrimSpace(req.DatasetCacheDir))
 	var maxConcurrent *int
 	if req.MaxConcurrent != nil {
 		if *req.MaxConcurrent <= 0 {
@@ -454,6 +456,13 @@ func (pm *ProxyManager) runBenchyJob(ctx context.Context, jobID, servedModelName
 	args := buildBenchyArgs(baseURL, displayModelName, servedModelName, tokenizer, apiKey, opts)
 
 	cmd := exec.CommandContext(ctx, benchyCmd, append(benchyArgs, args...)...)
+	cmd.Env = os.Environ()
+	if opts.EnableIntelligence && containsPlugin(opts.IntelligencePlugins, "swebench_verified") {
+		if shimDir := pm.benchyPythonShimDir(); shimDir != "" {
+			cmd.Env = prependEnvPathList(cmd.Env, "PYTHONPATH", shimDir)
+			cmd.Env = setOrReplaceEnv(cmd.Env, benchyEnvSwebenchShim, "1")
+		}
+	}
 	cmd.Stdout = benchyJobWriter{pm: pm, jobID: jobID, stream: "stdout"}
 	cmd.Stderr = benchyJobWriter{pm: pm, jobID: jobID, stream: "stderr"}
 	if opts.TrustRemoteCode {
@@ -914,6 +923,98 @@ func defaultBenchyOutputDir() string {
 		return v
 	}
 	return benchyDefaultOutputDir
+}
+
+func (pm *ProxyManager) benchyPythonShimDir() string {
+	if v := strings.TrimSpace(os.Getenv(benchyEnvPyShimDir)); v != "" {
+		if hasSiteCustomizeFile(v) {
+			return v
+		}
+		return ""
+	}
+	if pm == nil || strings.TrimSpace(pm.configPath) == "" {
+		return ""
+	}
+	cfgDir := filepath.Dir(pm.configPath)
+	candidate := filepath.Join(cfgDir, "proxy", "pyshim")
+	if hasSiteCustomizeFile(candidate) {
+		return candidate
+	}
+	return ""
+}
+
+func hasSiteCustomizeFile(dir string) bool {
+	if strings.TrimSpace(dir) == "" {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(dir, "sitecustomize.py"))
+	return err == nil && !info.IsDir()
+}
+
+func containsPlugin(items []string, target string) bool {
+	for _, item := range items {
+		if item == target {
+			return true
+		}
+	}
+	return false
+}
+
+func prependEnvPathList(env []string, key, value string) []string {
+	if key == "" || value == "" {
+		return env
+	}
+	sep := string(os.PathListSeparator)
+	prefix := key + "="
+	for i, item := range env {
+		if !strings.HasPrefix(item, prefix) {
+			continue
+		}
+		current := strings.TrimPrefix(item, prefix)
+		if current == "" {
+			env[i] = prefix + value
+			return env
+		}
+		for _, part := range strings.Split(current, sep) {
+			if part == value {
+				return env
+			}
+		}
+		env[i] = prefix + value + sep + current
+		return env
+	}
+	return append(env, prefix+value)
+}
+
+func setOrReplaceEnv(env []string, key, value string) []string {
+	if key == "" {
+		return env
+	}
+	prefix := key + "="
+	for i, item := range env {
+		if strings.HasPrefix(item, prefix) {
+			env[i] = prefix + value
+			return env
+		}
+	}
+	return append(env, prefix+value)
+}
+
+func expandLeadingTilde(path string) string {
+	p := strings.TrimSpace(path)
+	if p == "" {
+		return ""
+	}
+	if p == "~" || strings.HasPrefix(p, "~/") || strings.HasPrefix(p, "~"+string(os.PathSeparator)) {
+		home, err := os.UserHomeDir()
+		if err == nil && strings.TrimSpace(home) != "" {
+			if p == "~" {
+				return home
+			}
+			return filepath.Join(home, p[2:])
+		}
+	}
+	return p
 }
 
 func newBenchyJobID() (string, error) {

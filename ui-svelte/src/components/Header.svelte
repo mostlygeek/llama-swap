@@ -6,7 +6,7 @@
   import ConnectionStatus from "./ConnectionStatus.svelte";
 
   function handleTitleChange(newTitle: string): void {
-    const sanitized = newTitle.replace(/\n/g, "").trim().substring(0, 64) || "llama-swap";
+    const sanitized = newTitle.replace(/\n/g, "").trim().substring(0, 64) || "Swap Laboratories";
     appTitle.set(sanitized);
   }
 
@@ -35,16 +35,34 @@
     ? 'py-1 h-[60px]'
     : 'p-2 h-[75px]'}"
 >
-  {#if $screenWidth !== "xs" && $screenWidth !== "sm"}
-    <h1
-      contenteditable="true"
-      class="p-0 outline-none hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
-      onblur={handleBlur}
-      onkeydown={handleKeyDown}
+  <div class="flex items-center gap-2 min-w-0">
+    <span
+      class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-900 text-cyan-300 dark:bg-cyan-400 dark:text-slate-950"
+      aria-label="Swap Laboratories"
+      title="Swap Laboratories"
     >
-      {$appTitle}
-    </h1>
-  {/if}
+      <svg viewBox="0 0 128 128" class="h-5 w-5" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path
+          d="M18 36a10 10 0 0 1 10-10h44l-7-7a10 10 0 1 1 14-14l24 24-24 24a10 10 0 0 1-14-14l7-7H28a10 10 0 0 1-10-10Z"
+          fill="currentColor"
+        />
+        <path
+          d="M110 92a10 10 0 0 1-10 10H56l7 7a10 10 0 1 1-14 14L25 99l24-24a10 10 0 1 1 14 14l-7 7h44a10 10 0 0 1 10 10Z"
+          fill="currentColor"
+        />
+      </svg>
+    </span>
+    {#if $screenWidth !== "xs" && $screenWidth !== "sm"}
+      <h1
+        contenteditable="true"
+        class="p-0 outline-none hover:bg-gray-100 dark:hover:bg-gray-700 rounded truncate"
+        onblur={handleBlur}
+        onkeydown={handleKeyDown}
+      >
+        {$appTitle}
+      </h1>
+    {/if}
+  </div>
 
   <menu class="flex items-center gap-4 overflow-x-auto">
     <a
@@ -77,6 +95,22 @@
       class:font-semibold={isActive("/logs", $currentRoute)}
     >
       Logs
+    </a>
+    <a
+      href="/cluster"
+      use:link
+      class="text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1 whitespace-nowrap"
+      class:font-semibold={isActive("/cluster", $currentRoute)}
+    >
+      Cluster
+    </a>
+    <a
+      href="/backend"
+      use:link
+      class="text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1 whitespace-nowrap"
+      class:font-semibold={isActive("/backend", $currentRoute)}
+    >
+      Backend
     </a>
     <a
       href="/editor"

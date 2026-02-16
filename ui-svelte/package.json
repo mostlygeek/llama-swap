@@ -26,6 +26,10 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
+    "@codemirror/lang-yaml": "^6.1.2",
+    "@codemirror/state": "^6.5.4",
+    "@codemirror/view": "^6.39.14",
+    "codemirror": "^6.0.2",
     "highlight.js": "^11.11.1",
     "katex": "^0.16.28",
     "lucide-svelte": "^0.563.0",

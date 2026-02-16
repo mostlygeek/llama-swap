@@ -9,9 +9,11 @@ import type {
   BenchyJob,
   BenchyStartResponse,
   BenchyStartOptions,
+  RecipeBackendState,
   RecipeUIState,
   RecipeUpsertRequest,
   ConfigEditorState,
+  ClusterStatusState,
 } from "../lib/types";
 import { connectionState } from "./theme";
 
@@ -272,6 +274,30 @@ export async function getRecipeUIState(signal?: AbortSignal): Promise<RecipeUISt
   return (await response.json()) as RecipeUIState;
 }
 
+export async function getRecipeBackendState(signal?: AbortSignal): Promise<RecipeBackendState> {
+  const response = await fetch(`/api/recipes/backend`, { signal });
+  if (!response.ok) {
+    const msg = await response.text().catch(() => "");
+    throw new Error(msg || `Failed to fetch recipe backend state: ${response.status}`);
+  }
+  return (await response.json()) as RecipeBackendState;
+}
+
+export async function setRecipeBackend(backendDir: string): Promise<RecipeBackendState> {
+  const response = await fetch(`/api/recipes/backend`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ backendDir }),
+  });
+  if (!response.ok) {
+    const msg = await response.text().catch(() => "");
+    throw new Error(msg || `Failed to set recipe backend: ${response.status}`);
+  }
+  return (await response.json()) as RecipeBackendState;
+}
+
 export async function upsertRecipeModel(payload: RecipeUpsertRequest): Promise<RecipeUIState> {
   const response = await fetch(`/api/recipes/models`, {
     method: "POST",
@@ -336,4 +362,13 @@ export async function getCapture(id: number): Promise<ReqRespCapture | null> {
     console.error("Failed to fetch capture:", error);
     return null;
   }
+}
+
+export async function getClusterStatus(signal?: AbortSignal): Promise<ClusterStatusState> {
+  const response = await fetch(`/api/cluster/status`, { signal });
+  if (!response.ok) {
+    const msg = await response.text().catch(() => "");
+    throw new Error(msg || `Failed to fetch cluster status: ${response.status}`);
+  }
+  return (await response.json()) as ClusterStatusState;
 }

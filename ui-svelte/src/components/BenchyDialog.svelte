@@ -260,7 +260,7 @@
         <div class="flex flex-wrap gap-4 text-sm">
           <label class="flex items-center gap-2">
             <input type="checkbox" bind:checked={$useLlamaSwapBaseUrlStore} />
-            usar instancia actual de llama-swap (/v1)
+            usar instancia actual de Swap Laboratories (/v1)
           </label>
           <label class="flex items-center gap-2">
             <input type="checkbox" bind:checked={$noCacheStore} />
