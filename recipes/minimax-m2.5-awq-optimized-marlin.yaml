@@ -1,0 +1,52 @@
+recipe_version: "1"
+
+name: MiniMax-M2.5-AWQ Optimized (marlin-sm12x mods)
+description: MiniMax-M2.5-AWQ with additional runtime mods from flash7777/vllm-marlin-sm12x/build
+
+model: QuantTrio/MiniMax-M2.5-AWQ
+container: vllm-node
+cluster_only: true
+
+mods:
+  - /home/csolutions_ai/llama-swap/mods/vllm-marlin-sm12x-build
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 2
+  gpu_memory_utilization: 0.88
+  max_model_len: 185000
+
+env:
+  SAFETENSORS_FAST_GPU: "1"
+  VLLM_USE_FLASHINFER_MOE_FP16: "1"
+  VLLM_USE_FLASHINFER_SAMPLER: "1"
+  VLLM_MARLIN_USE_ATOMIC_ADD: "1"
+  VLLM_MARLIN_INPUT_DTYPE: "fp8"
+  FLASHINFER_DISABLE_VERSION_CHECK: "1"
+  OMP_NUM_THREADS: "18"
+  TORCH_FLOAT32_MATMUL_PRECISION: "high"
+  VLLM_FLOAT32_MATMUL_PRECISION: "high"
+  TORCH_ALLOW_TF32_CUBLAS_OVERRIDE: "1"
+
+command: |
+  vllm serve QuantTrio/MiniMax-M2.5-AWQ \
+      --trust-remote-code \
+      --port {port} \
+      --host {host} \
+      --gpu-memory-utilization {gpu_memory_utilization} \
+      -tp {tensor_parallel} \
+      --distributed-executor-backend ray \
+      --max-model-len {max_model_len} \
+      --load-format fastsafetensors \
+      --dtype half \
+      --quantization awq_marlin \
+      --swap-space 16 \
+      --max-num-seqs 4 \
+      --max-num-batched-tokens 2048 \
+      --enable-chunked-prefill \
+      --kv-cache-dtype fp8 \
+      --enable-auto-tool-choice \
+      --tool-call-parser minimax_m2 \
+      --served-model-name minimax-m2.5-awq \
+      --reasoning-parser minimax_m2_append_think

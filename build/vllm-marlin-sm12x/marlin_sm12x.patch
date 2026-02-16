@@ -1,0 +1,28 @@
+diff --git a/csrc/quantization/marlin/marlin.cu b/csrc/quantization/marlin/marlin.cu
+index 6282612..59aedbd 100644
+--- a/csrc/quantization/marlin/marlin.cu
++++ b/csrc/quantization/marlin/marlin.cu
+@@ -402,8 +402,8 @@ void marlin_mm(const void* A, const void* B, void* C, void* C_tmp, void* b_bias,
+   if (a_type == vllm::kFE4M3fn) {
+     TORCH_CHECK(
+         major_capability * 10 + minor_capability == 89 ||
+-            major_capability * 10 + minor_capability == 120,
+-        "Marlin W4A8-FP8 only support SM89 or SM120 device (It is slower than "
++            major_capability == 12,
++        "Marlin W4A8-FP8 only support SM89 or SM12x device (It is slower than "
+         "Marlin W4A16 on other devices).");
+   }
+ 
+diff --git a/vllm/model_executor/layers/quantization/utils/marlin_utils.py b/vllm/model_executor/layers/quantization/utils/marlin_utils.py
+index 7fa850c..39509fc 100644
+--- a/vllm/model_executor/layers/quantization/utils/marlin_utils.py
++++ b/vllm/model_executor/layers/quantization/utils/marlin_utils.py
+@@ -497,7 +497,7 @@ def get_marlin_input_dtype(prefix: str | None = None):
+     elif envs.VLLM_MARLIN_INPUT_DTYPE.lower() == "fp8":
+         if not current_platform.is_device_capability(
+             89
+-        ) and not current_platform.is_device_capability(120):
++        ) and not current_platform.is_device_capability_family(120):
+             raise ValueError(
+                 "Marlin W4A8-FP8 only support SM89 or SM120 device "
+                 "(It is slower than Marlin W4A16 on other devices). "

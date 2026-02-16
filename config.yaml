@@ -1,0 +1,162 @@
+#/home/csolutions_ai/spark-vllm-docker/launch-cluster.sh -d --nodes "192.168.200.12,192.168.200.13"
+#/home/csolutions_ai/spark-vllm-docker/launch-cluster.sh -d -t vllm-node-mxfp4 --nodes "192.168.200.12,192.168.200.13"
+healthCheckTimeout: 600
+startPort: 8089
+macros:
+  vllm_nodes: "192.168.200.12,192.168.200.13"
+  recipe_runner: "/home/csolutions_ai/spark-vllm-docker/run-recipe.sh"
+  vllm_iface: "enp1s0f1np1"
+  # vLLM (ray backend) pins its placement group to VLLM_HOST_IP (ray exposes node:<ip>).
+  # If VLLM_HOST_IP isn't set for the `vllm serve` process, it may pick the wrong host IP
+  # (e.g. 192.168.8.x) and Ray will fail to place the bundle.
+  vllm_head_ip: "192.168.200.12"
+  vllm_container: "vllm_node"
+  vllm_marlin_image: "vllm-node-marlin-sm12x"
+  # Workaround: spark-vllm-docker/launch-cluster.sh doesn't copy a new --launch-script
+  # when the container already exists, so switching recipes can run a stale script/model.
+  # Ensure the cluster container is stopped before starting a new recipe.
+  vllm_stop_cluster: >-
+    for n in $(echo "${vllm_nodes}" | tr "," " "); do
+      n="$(echo "$n" | xargs)";
+      if [ -z "$n" ]; then continue; fi;
+      if [ "$n" = "${vllm_head_ip}" ]; then continue; fi;
+      ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no "$n" "docker rm -f ${vllm_container} >/dev/null 2>&1 || true" || true;
+    done;
+    docker rm -f ${vllm_container} >/dev/null 2>&1 || true
+  vllm_exec_env: >-
+    -e VLLM_HOST_IP=${vllm_head_ip}
+    -e RAY_NODE_IP_ADDRESS=${vllm_head_ip}
+    -e RAY_OVERRIDE_NODE_IP_ADDRESS=${vllm_head_ip}
+    -e NCCL_SOCKET_IFNAME=${vllm_iface}
+    -e GLOO_SOCKET_IFNAME=${vllm_iface}
+    -e TP_SOCKET_IFNAME=${vllm_iface}
+
+models:
+  gpt-oss-120b:
+    name: "GPT-OSS 120B"
+    description: "vLLM MXFP4"
+    aliases:
+      - "openai/gpt-oss-120b"
+    # Map llama-swap's model ID to the upstream vLLM served model name.
+    useModelName: "openai/gpt-oss-120b"
+
+    proxy: http://127.0.0.1:${PORT}
+    checkEndpoint: /health
+    ttl: 0
+
+    cmd: bash -lc '${vllm_stop_cluster}; exec ${recipe_runner} openai-gpt-oss-120b -n ${vllm_nodes} --tp 2 --port ${PORT}'
+
+    cmdStop: |
+      bash -lc '${vllm_stop_cluster}'
+
+  MiniMax-M2.5-AWQ:
+    name: "MiniMax-M2.5-AWQ"
+    description: "vLLM QuantTrio--AWQ"
+    aliases:
+      - "QuantTrio/MiniMax-M2.5-AWQ"
+    # Map llama-swap's model ID to the upstream vLLM served model name.
+    useModelName: "minimax-m2.5-awq"
+
+    proxy: http://127.0.0.1:${PORT}
+    checkEndpoint: /health
+    ttl: 0
+
+    cmd: bash -lc '${vllm_stop_cluster}; exec ${recipe_runner} minimax-m2.5-awq -n ${vllm_nodes} --tp 2 --port ${PORT}'
+
+    cmdStop: |
+      bash -lc '${vllm_stop_cluster}'
+
+  MiniMax-M2.5-AWQ-Optimized:
+    name: "MiniMax-M2.5-AWQ-Optimized"
+    description: "vLLM QuantTrio--AWQ (optimized)"
+    aliases:
+      - "QuantTrio/MiniMax-M2.5-AWQ-optimized"
+      - "minimax-m2.5-awq-optimized"
+    # Map llama-swap's model ID to the upstream vLLM served model name.
+    useModelName: "minimax-m2.5-awq"
+
+    proxy: http://127.0.0.1:${PORT}
+    checkEndpoint: /health
+    ttl: 0
+
+    cmd: bash -lc '${vllm_stop_cluster}; export VLLM_SPARK_EXTRA_DOCKER_ARGS="-e FLASHINFER_DISABLE_VERSION_CHECK=1 -e VLLM_MARLIN_INPUT_DTYPE=fp8 -e VLLM_MARLIN_USE_ATOMIC_ADD=1 -e VLLM_USE_FLASHINFER_MOE_FP16=1 -e VLLM_USE_FLASHINFER_SAMPLER=1"; exec ${recipe_runner} /home/csolutions_ai/llama-swap/recipes/minimax-m2.5-awq-optimized-marlin.yaml -t ${vllm_marlin_image} -n ${vllm_nodes} --tp 2 --gpu-mem 0.88 --max-model-len 185000 --port ${PORT}'
+
+    cmdStop: |
+      bash -lc '${vllm_stop_cluster}'
+
+  GLM-4.7-Flash-AWQ-4bit:
+    name: "GLM-4.7-Flash-AWQ-4bit"
+    description: "vLLM cyankiwi--AWQ"
+    aliases:
+      - "cyankiwi/GLM-4.7-Flash-AWQ-4bit"
+      - "glm-4.7-flash"
+    # Map llama-swap's model ID to the upstream vLLM served model name.
+    useModelName: "glm-4.7-flash"
+
+    proxy: http://127.0.0.1:${PORT}
+    checkEndpoint: /health
+    ttl: 0
+
+    cmd: bash -lc '${vllm_stop_cluster}; exec ${recipe_runner} glm-4.7-flash-awq -n ${vllm_nodes} --tp 2 --port ${PORT}'
+
+    cmdStop: |
+      bash -lc '${vllm_stop_cluster}'
+
+  Nemotron-3-Nano-NVFP4:
+    name: "Nemotron-3-Nano-NVFP4 (solo recipe)"
+    description: "vLLM Nemotron nano recipe with custom parser/mods"
+    aliases:
+      - "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4-nano"
+    # Map llama-swap's model ID to the upstream vLLM served model name.
+    useModelName: "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4"
+    metadata:
+      benchy:
+        trust_remote_code: true
+
+    proxy: http://127.0.0.1:${PORT}
+    checkEndpoint: /health
+    ttl: 0
+
+    cmd: bash -lc '${vllm_stop_cluster}; exec ${recipe_runner} nemotron-3-nano-nvfp4 --solo --port ${PORT}'
+
+    cmdStop: |
+      bash -lc '${vllm_stop_cluster}'
+
+  Qwen/Qwen3-Coder-Next-FP8:
+    name: "Qwen/Qwen3-Coder-Next-FP8"
+    description: "vLLM Qwen3 NEXT FP8"
+    aliases:
+      - "Qwen/Qwen3-Coder-Next-FP8"
+    # Map llama-swap's model ID to the upstream vLLM served model name.
+    useModelName: "Qwen/Qwen3-Coder-Next-FP8"
+
+    proxy: http://127.0.0.1:${PORT}
+    checkEndpoint: /health
+    ttl: 0
+
+    cmd: bash -lc '${vllm_stop_cluster}; exec ${recipe_runner} qwen3-coer-next-fp8 -n ${vllm_nodes} --tp 2 --port ${PORT}'
+
+    cmdStop: |
+      bash -lc '${vllm_stop_cluster}'
+
+
+groups:
+  "big-ones":
+    swap: true
+    # Ensure only one model runs across *all* groups (cluster is shared).
+    exclusive: true
+    members:
+      - "gpt-oss-120b"
+      - "MiniMax-M2.5-AWQ"
+      - "MiniMax-M2.5-AWQ-Optimized"
+      - "Qwen/Qwen3-Coder-Next-FP8"
+
+  "medium":
+    swap: true
+    # Ensure only one model runs across *all* groups (cluster is shared).
+    exclusive: true
+    members:
+      - "GLM-4.7-Flash-AWQ-4bit"
+      - "Nemotron-3-Nano-NVFP4"
+
+hooks:
