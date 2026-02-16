@@ -237,7 +237,7 @@
       </label>
       <label class="text-sm">
         <div class="text-txtsecondary mb-1">Nodes (-n)</div>
-        <input class="w-full px-2 py-1 rounded border border-card-border bg-background font-mono" bind:value={nodes} placeholder="${vllm_nodes}" disabled={mode === "solo"} />
+        <input class="w-full px-2 py-1 rounded border border-card-border bg-background font-mono" bind:value={nodes} placeholder={'${vllm_nodes}'} disabled={mode === "solo"} />
       </label>
       <label class="text-sm">
         <div class="text-txtsecondary mb-1">Group</div>
