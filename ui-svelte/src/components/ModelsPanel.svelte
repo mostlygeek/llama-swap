@@ -1,14 +1,35 @@
 <script lang="ts">
-  import { models, loadModel, unloadAllModels, unloadSingleModel } from "../stores/api";
+  import {
+    models,
+    loadModel,
+    unloadAllModels,
+    unloadSingleModel,
+    startBenchy,
+    getBenchyJob,
+    cancelBenchyJob,
+  } from "../stores/api";
   import { isNarrow } from "../stores/theme";
   import { persistentStore } from "../stores/persistent";
-  import type { Model } from "../lib/types";
+  import BenchyDialog from "./BenchyDialog.svelte";
+  import type { BenchyJob, Model } from "../lib/types";
 
   let isUnloading = $state(false);
   let menuOpen = $state(false);
 
   const showUnlistedStore = persistentStore<boolean>("showUnlisted", true);
   const showIdorNameStore = persistentStore<"id" | "name">("showIdorName", "id");
+
+  // Benchy state (single active job in UI)
+  let benchyOpen = $state(false);
+  let benchyStarting = $state(false);
+  let benchyError: string | null = $state(null);
+  let benchyJob: BenchyJob | null = $state(null);
+  let benchyJobId: string | null = $state(null);
+  let benchyPollTimer: ReturnType<typeof setTimeout> | null = null;
+
+  let benchyBusy = $derived.by(() => {
+    return benchyStarting || benchyJob?.status === "running";
+  });
 
   let filteredModels = $derived.by(() => {
     const filtered = $models.filter((model) => $showUnlistedStore || !model.unlisted);
@@ -52,6 +73,101 @@
 
   function getModelDisplay(model: Model): string {
     return $showIdorNameStore === "id" ? model.id : (model.name || model.id);
+  }
+
+  function clearBenchyPoll(): void {
+    if (benchyPollTimer !== null) {
+      clearTimeout(benchyPollTimer);
+      benchyPollTimer = null;
+    }
+  }
+
+  function closeBenchyDialog(): void {
+    benchyOpen = false;
+    benchyStarting = false;
+    benchyError = null;
+    clearBenchyPoll();
+  }
+
+  async function pollBenchy(jobID: string): Promise<void> {
+    try {
+      const job = await getBenchyJob(jobID);
+      benchyJob = job;
+
+      if (job.status === "running") {
+        benchyPollTimer = setTimeout(() => {
+          void pollBenchy(jobID);
+        }, 1000);
+      } else {
+        clearBenchyPoll();
+      }
+    } catch (e) {
+      benchyError = e instanceof Error ? e.message : String(e);
+      clearBenchyPoll();
+    }
+  }
+
+  function waitForModelReady(modelID: string, timeoutMs = 5 * 60 * 1000): Promise<void> {
+    // Resolve immediately if already ready
+    const current = $models.find((m) => m.id === modelID);
+    if (current?.state === "ready") return Promise.resolve();
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        unsub();
+        reject(new Error(`Timed out waiting for ${modelID} to become ready`));
+      }, timeoutMs);
+
+      const unsub = models.subscribe((list) => {
+        const m = list.find((x) => x.id === modelID);
+        if (m?.state === "ready") {
+          clearTimeout(timer);
+          unsub();
+          resolve();
+        }
+      });
+    });
+  }
+
+  async function runBenchyForModel(modelID: string): Promise<void> {
+    // Reset dialog state and show immediately (so errors are visible)
+    benchyOpen = true;
+    benchyStarting = true;
+    benchyError = null;
+    benchyJob = null;
+    benchyJobId = null;
+    clearBenchyPoll();
+
+    try {
+      const m = $models.find((x) => x.id === modelID);
+      if (!m) throw new Error(`Model not found: ${modelID}`);
+      if (m.state === "stopping" || m.state === "shutdown") {
+        throw new Error(`Model is ${m.state}; wait until it is stopped/ready`);
+      }
+
+      if (m.state === "stopped") {
+        await loadModel(modelID);
+      }
+      await waitForModelReady(modelID);
+
+      const id = await startBenchy(modelID);
+      benchyJobId = id;
+      benchyStarting = false;
+      await pollBenchy(id);
+    } catch (e) {
+      benchyStarting = false;
+      benchyError = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  async function cancelBenchy(): Promise<void> {
+    if (!benchyJobId) return;
+    try {
+      await cancelBenchyJob(benchyJobId);
+      await pollBenchy(benchyJobId);
+    } catch (e) {
+      benchyError = e instanceof Error ? e.message : String(e);
+    }
   }
 </script>
 
@@ -166,12 +282,22 @@
                 <p class={model.unlisted ? "text-opacity-70" : ""}><em>{model.description}</em></p>
               {/if}
             </td>
-            <td class="w-12">
-              {#if model.state === "stopped"}
-                <button class="btn btn--sm" onclick={() => loadModel(model.id)}>Load</button>
-              {:else}
-                <button class="btn btn--sm" onclick={() => unloadSingleModel(model.id)} disabled={model.state !== "ready"}>Unload</button>
-              {/if}
+            <td class="w-44">
+              <div class="flex justify-end gap-2">
+                {#if model.state === "stopped"}
+                  <button class="btn btn--sm" onclick={() => loadModel(model.id)} disabled={benchyBusy}>Load</button>
+                {:else}
+                  <button class="btn btn--sm" onclick={() => unloadSingleModel(model.id)} disabled={model.state !== "ready" || benchyBusy}>Unload</button>
+                {/if}
+                <button
+                  class="btn btn--sm"
+                  onclick={() => runBenchyForModel(model.id)}
+                  disabled={benchyBusy || model.state === "stopping" || model.state === "shutdown" || model.state === "unknown"}
+                  title={model.state === "stopped" ? "Load + run llama-benchy" : "Run llama-benchy"}
+                >
+                  Benchy
+                </button>
+              </div>
             </td>
             <td class="w-20">
               <span class="w-16 text-center status status--{model.state}">{model.state}</span>
@@ -206,3 +332,5 @@
     {/if}
   </div>
 </div>
+
+<BenchyDialog job={benchyJob} open={benchyOpen} starting={benchyStarting} error={benchyError} onclose={closeBenchyDialog} oncancel={cancelBenchy} />

@@ -51,6 +51,29 @@ export interface VersionInfo {
 
 export type ScreenWidth = "xs" | "sm" | "md" | "lg" | "xl" | "2xl";
 
+export type BenchyJobStatus = "running" | "done" | "error" | "canceled";
+
+export interface BenchyJob {
+  id: string;
+  model: string;
+  tokenizer: string;
+  baseUrl: string;
+  pp: number[];
+  tg: number[];
+  runs: number;
+  status: BenchyJobStatus;
+  startedAt: string;
+  finishedAt?: string;
+  exitCode?: number;
+  stdout?: string;
+  stderr?: string;
+  error?: string;
+}
+
+export interface BenchyStartResponse {
+  id: string;
+}
+
 export type TextContentPart = {
   type: "text";
   text: string;

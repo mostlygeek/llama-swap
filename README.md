@@ -34,6 +34,7 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
   - `/completion` - for completion endpoint
 - ✅ llama-swap API
   - `/ui` - web UI
+  - `/api/benchy` - run llama-benchy jobs from the UI (benchy-ui branch)
   - `/upstream/:model_id` - direct access to upstream server ([demo](https://github.com/mostlygeek/llama-swap/pull/31))
   - `/models/unload` - manually unload running models ([#58](https://github.com/mostlygeek/llama-swap/issues/58))
   - `/running` - list currently running models ([#61](https://github.com/mostlygeek/llama-swap/issues/61))
@@ -55,6 +56,15 @@ llama-swap includes a real time web interface for monitoring logs and controllin
 The Activity Page shows recent requests:
 
 <img width="1360" height="963" alt="image" src="https://github.com/user-attachments/assets/5f3edee6-d03a-4ae5-ae06-b20ac1f135bd" />
+
+### llama-benchy Integration (benchy-ui branch)
+
+This fork/branch adds `llama-benchy` integration in the Svelte UI and proxy API.
+
+- UI: `Models` and `Playground` include a `Benchy` action that starts a benchmark job for a selected model.
+- API: `POST /api/benchy`, `GET /api/benchy/:id`, and `POST /api/benchy/:id/cancel`.
+- Runner resolution order: `LLAMA_BENCHY_CMD`, then `llama-benchy` in `PATH`, then `uvx llama-benchy`.
+- Model metadata supports benchmark hints: `benchy_tokenizer`, `benchy_trust_remote_code`, and nested `benchy: { trust_remote_code: true }`.
 
 ## Installation
 

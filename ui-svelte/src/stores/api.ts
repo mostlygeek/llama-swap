@@ -1,5 +1,5 @@
 import { writable } from "svelte/store";
-import type { Model, Metrics, VersionInfo, LogData, APIEventEnvelope, ReqRespCapture } from "../lib/types";
+import type { Model, Metrics, VersionInfo, LogData, APIEventEnvelope, ReqRespCapture, BenchyJob, BenchyStartResponse } from "../lib/types";
 import { connectionState } from "./theme";
 
 const LOG_LENGTH_LIMIT = 1024 * 100; /* 100KB of log data */
@@ -170,6 +170,62 @@ export async function loadModel(model: string): Promise<void> {
   } catch (error) {
     console.error("Failed to load model:", error);
     throw error;
+  }
+}
+
+export interface StartBenchyOptions {
+  baseUrl?: string;
+  tokenizer?: string;
+  pp?: number[];
+  tg?: number[];
+  runs?: number;
+}
+
+export async function startBenchy(model: string, opts: StartBenchyOptions = {}): Promise<string> {
+  const payload = {
+    model,
+    baseUrl: opts.baseUrl,
+    tokenizer: opts.tokenizer,
+    pp: opts.pp,
+    tg: opts.tg,
+    runs: opts.runs,
+  };
+
+  const response = await fetch(`/api/benchy`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const msg = await response.text().catch(() => "");
+    throw new Error(msg || `Failed to start benchy: ${response.status}`);
+  }
+
+  const data: BenchyStartResponse = await response.json();
+  if (!data?.id) {
+    throw new Error("Invalid benchy start response");
+  }
+  return data.id;
+}
+
+export async function getBenchyJob(id: string): Promise<BenchyJob> {
+  const response = await fetch(`/api/benchy/${id}`);
+  if (!response.ok) {
+    const msg = await response.text().catch(() => "");
+    throw new Error(msg || `Failed to fetch benchy job: ${response.status}`);
+  }
+  return (await response.json()) as BenchyJob;
+}
+
+export async function cancelBenchyJob(id: string): Promise<void> {
+  const response = await fetch(`/api/benchy/${id}/cancel`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    const msg = await response.text().catch(() => "");
+    throw new Error(msg || `Failed to cancel benchy job: ${response.status}`);
   }
 }
 
