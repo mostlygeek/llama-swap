@@ -106,15 +106,12 @@
 
 <style>
   .activity-link {
-    font-weight: 600;
-    background: linear-gradient(90deg, #f472b6, #c084fc, #60a5fa, #34d399, #fbbf24, #f472b6);
-    background-size: 300% 100%;
+    background: linear-gradient(90deg, #6366f1, #8b5cf6, #a855f7, #8b5cf6, #6366f1);
+    background-size: 200% 100%;
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
-    animation: gradient-shift 3s linear infinite;
-    text-shadow: 0 0 20px rgba(192, 132, 252, 0.5);
-    filter: drop-shadow(0 0 8px rgba(192, 132, 252, 0.4));
+    animation: gradient-shift 2s linear infinite;
   }
 
   @keyframes gradient-shift {
@@ -122,7 +119,7 @@
       background-position: 0% 50%;
     }
     100% {
-      background-position: 300% 50%;
+      background-position: 200% 50%;
     }
   }
 </style>
