@@ -38,23 +38,60 @@ const (
 	benchyMaxJobsInMemory  = 25
 	benchyEnvCmd           = "LLAMA_BENCHY_CMD"
 	benchyEnvDisableRunner = "LLAMA_BENCHY_DISABLE"
+	benchyEnvOutputDir     = "LLAMA_BENCHY_OUTPUT_DIR"
+	benchyDefaultOutputDir = "/tmp/llama-benchy-runs"
 )
 
+const (
+	benchyForkGitRef             = "git+https://github.com/christopherowen/llama-benchy.git@intelligence"
+	benchyForkIntelligenceReqRef = "llama-benchy[intelligence] @ git+https://github.com/christopherowen/llama-benchy.git@intelligence"
+)
+
+var benchyIntelligencePluginChoices = map[string]struct{}{
+	"all":               {},
+	"core6":             {},
+	"mmlu":              {},
+	"arc-c":             {},
+	"hellaswag":         {},
+	"winogrande":        {},
+	"gsm8k":             {},
+	"truthfulqa":        {},
+	"ifeval":            {},
+	"evalplus":          {},
+	"terminal_bench":    {},
+	"aider":             {},
+	"swebench_verified": {},
+}
+
+var benchyPluginsRequireCodeExec = map[string]struct{}{
+	"all":               {},
+	"evalplus":          {},
+	"terminal_bench":    {},
+	"aider":             {},
+	"swebench_verified": {},
+}
+
 type BenchyJob struct {
-	ID                  string `json:"id"`
-	Model               string `json:"model"`
-	Tokenizer           string `json:"tokenizer"`
-	BaseURL             string `json:"baseUrl"`
-	PP                  []int  `json:"pp"`
-	TG                  []int  `json:"tg"`
-	Depth               []int  `json:"depth,omitempty"`
-	Concurrency         []int  `json:"concurrency,omitempty"`
-	Runs                int    `json:"runs"`
-	LatencyMode         string `json:"latencyMode,omitempty"`
-	NoCache             bool   `json:"noCache,omitempty"`
-	NoWarmup            bool   `json:"noWarmup,omitempty"`
-	AdaptPrompt         *bool  `json:"adaptPrompt,omitempty"`
-	EnablePrefixCaching bool   `json:"enablePrefixCaching,omitempty"`
+	ID                  string   `json:"id"`
+	Model               string   `json:"model"`
+	Tokenizer           string   `json:"tokenizer"`
+	BaseURL             string   `json:"baseUrl"`
+	PP                  []int    `json:"pp"`
+	TG                  []int    `json:"tg"`
+	Depth               []int    `json:"depth,omitempty"`
+	Concurrency         []int    `json:"concurrency,omitempty"`
+	Runs                int      `json:"runs"`
+	LatencyMode         string   `json:"latencyMode,omitempty"`
+	NoCache             bool     `json:"noCache,omitempty"`
+	NoWarmup            bool     `json:"noWarmup,omitempty"`
+	AdaptPrompt         *bool    `json:"adaptPrompt,omitempty"`
+	EnablePrefixCaching bool     `json:"enablePrefixCaching,omitempty"`
+	EnableIntelligence  bool     `json:"enableIntelligence,omitempty"`
+	IntelligencePlugins []string `json:"intelligencePlugins,omitempty"`
+	AllowCodeExec       bool     `json:"allowCodeExec,omitempty"`
+	DatasetCacheDir     string   `json:"datasetCacheDir,omitempty"`
+	OutputDir           string   `json:"outputDir,omitempty"`
+	MaxConcurrent       *int     `json:"maxConcurrent,omitempty"`
 	// TrustRemoteCode controls whether we auto-accept the HuggingFace "custom code" prompt for some tokenizers.
 	// This only affects local tokenizer loading, not the remote server.
 	TrustRemoteCode bool `json:"trustRemoteCode,omitempty"`
@@ -70,19 +107,25 @@ type BenchyJob struct {
 }
 
 type benchyStartRequest struct {
-	Model               string `json:"model"`
-	Tokenizer           string `json:"tokenizer,omitempty"`
-	BaseURL             string `json:"baseUrl,omitempty"`
-	PP                  []int  `json:"pp,omitempty"`
-	TG                  []int  `json:"tg,omitempty"`
-	Depth               []int  `json:"depth,omitempty"`
-	Concurrency         []int  `json:"concurrency,omitempty"`
-	Runs                int    `json:"runs,omitempty"`
-	LatencyMode         string `json:"latencyMode,omitempty"`
-	NoCache             bool   `json:"noCache,omitempty"`
-	NoWarmup            bool   `json:"noWarmup,omitempty"`
-	AdaptPrompt         *bool  `json:"adaptPrompt,omitempty"`
-	EnablePrefixCaching bool   `json:"enablePrefixCaching,omitempty"`
+	Model               string   `json:"model"`
+	Tokenizer           string   `json:"tokenizer,omitempty"`
+	BaseURL             string   `json:"baseUrl,omitempty"`
+	PP                  []int    `json:"pp,omitempty"`
+	TG                  []int    `json:"tg,omitempty"`
+	Depth               []int    `json:"depth,omitempty"`
+	Concurrency         []int    `json:"concurrency,omitempty"`
+	Runs                int      `json:"runs,omitempty"`
+	LatencyMode         string   `json:"latencyMode,omitempty"`
+	NoCache             bool     `json:"noCache,omitempty"`
+	NoWarmup            bool     `json:"noWarmup,omitempty"`
+	AdaptPrompt         *bool    `json:"adaptPrompt,omitempty"`
+	EnablePrefixCaching bool     `json:"enablePrefixCaching,omitempty"`
+	EnableIntelligence  bool     `json:"enableIntelligence,omitempty"`
+	IntelligencePlugins []string `json:"intelligencePlugins,omitempty"`
+	AllowCodeExec       bool     `json:"allowCodeExec,omitempty"`
+	DatasetCacheDir     string   `json:"datasetCacheDir,omitempty"`
+	OutputDir           string   `json:"outputDir,omitempty"`
+	MaxConcurrent       *int     `json:"maxConcurrent,omitempty"`
 	// TrustRemoteCode (when set) overrides metadata-based defaulting.
 	TrustRemoteCode *bool `json:"trustRemoteCode,omitempty"`
 }
@@ -98,6 +141,12 @@ type benchyRunOptions struct {
 	NoWarmup            bool
 	AdaptPrompt         *bool
 	EnablePrefixCaching bool
+	EnableIntelligence  bool
+	IntelligencePlugins []string
+	AllowCodeExec       bool
+	DatasetCacheDir     string
+	OutputDir           string
+	MaxConcurrent       *int
 	TrustRemoteCode     bool
 }
 
@@ -191,6 +240,39 @@ func (pm *ProxyManager) apiStartBenchy(c *gin.Context) {
 		return
 	}
 
+	intelligencePlugins, err := normalizeIntelligencePlugins(req.IntelligencePlugins)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	enableIntelligence := req.EnableIntelligence || len(intelligencePlugins) > 0
+	if enableIntelligence && len(intelligencePlugins) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "intelligence mode requires at least one plugin"})
+		return
+	}
+	if enableIntelligence && !req.AllowCodeExec {
+		if plugin, ok := firstPluginThatRequiresCodeExec(intelligencePlugins); ok {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("plugin %q requires allowCodeExec=true", plugin)})
+			return
+		}
+	}
+
+	outputDir := strings.TrimSpace(req.OutputDir)
+	if enableIntelligence && outputDir == "" {
+		outputDir = defaultBenchyOutputDir()
+	}
+
+	datasetCacheDir := strings.TrimSpace(req.DatasetCacheDir)
+	var maxConcurrent *int
+	if req.MaxConcurrent != nil {
+		if *req.MaxConcurrent <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "maxConcurrent must be > 0"})
+			return
+		}
+		v := *req.MaxConcurrent
+		maxConcurrent = &v
+	}
+
 	// Choose tokenizer: request override > metadata > heuristics
 	tokenizer := strings.TrimSpace(req.Tokenizer)
 	if tokenizer == "" {
@@ -223,6 +305,12 @@ func (pm *ProxyManager) apiStartBenchy(c *gin.Context) {
 		NoWarmup:            req.NoWarmup,
 		AdaptPrompt:         adaptPrompt,
 		EnablePrefixCaching: req.EnablePrefixCaching,
+		EnableIntelligence:  enableIntelligence,
+		IntelligencePlugins: intelligencePlugins,
+		AllowCodeExec:       req.AllowCodeExec,
+		DatasetCacheDir:     datasetCacheDir,
+		OutputDir:           outputDir,
+		MaxConcurrent:       maxConcurrent,
 		TrustRemoteCode:     trustRemoteCode,
 	}
 
@@ -285,6 +373,12 @@ func (pm *ProxyManager) apiStartBenchy(c *gin.Context) {
 		NoWarmup:            runOptions.NoWarmup,
 		AdaptPrompt:         runOptions.AdaptPrompt,
 		EnablePrefixCaching: runOptions.EnablePrefixCaching,
+		EnableIntelligence:  runOptions.EnableIntelligence,
+		IntelligencePlugins: append([]string{}, runOptions.IntelligencePlugins...),
+		AllowCodeExec:       runOptions.AllowCodeExec,
+		DatasetCacheDir:     runOptions.DatasetCacheDir,
+		OutputDir:           runOptions.OutputDir,
+		MaxConcurrent:       runOptions.MaxConcurrent,
 		TrustRemoteCode:     runOptions.TrustRemoteCode,
 		Status:              benchyStatusRunning,
 		StartedAt:           time.Now(),
@@ -351,7 +445,7 @@ func (pm *ProxyManager) runBenchyJob(ctx context.Context, jobID, servedModelName
 		displayModelName = tokenizer
 	}
 
-	benchyCmd, benchyArgs, err := resolveBenchyCommand()
+	benchyCmd, benchyArgs, err := resolveBenchyCommand(opts.EnableIntelligence)
 	if err != nil {
 		pm.finishBenchyJob(jobID, benchyStatusError, nil, err)
 		return
@@ -723,11 +817,30 @@ func buildBenchyArgs(baseURL, displayModelName, servedModelName, tokenizer, apiK
 	if opts.EnablePrefixCaching {
 		args = append(args, "--enable-prefix-caching")
 	}
+	if opts.EnableIntelligence {
+		args = append(args, "--enable-intelligence")
+		if opts.OutputDir != "" {
+			args = append(args, "--output-dir", opts.OutputDir)
+		}
+		if len(opts.IntelligencePlugins) > 0 {
+			args = append(args, "--intelligence-plugins")
+			args = append(args, opts.IntelligencePlugins...)
+		}
+		if opts.AllowCodeExec {
+			args = append(args, "--allow-code-exec")
+		}
+		if opts.DatasetCacheDir != "" {
+			args = append(args, "--dataset-cache-dir", opts.DatasetCacheDir)
+		}
+		if opts.MaxConcurrent != nil {
+			args = append(args, "--max-concurrent", strconv.Itoa(*opts.MaxConcurrent))
+		}
+	}
 
 	return args
 }
 
-func resolveBenchyCommand() (string, []string, error) {
+func resolveBenchyCommand(enableIntelligence bool) (string, []string, error) {
 	if raw := strings.TrimSpace(os.Getenv(benchyEnvCmd)); raw != "" {
 		parts := strings.Fields(raw)
 		if len(parts) == 0 {
@@ -736,31 +849,71 @@ func resolveBenchyCommand() (string, []string, error) {
 		return parts[0], parts[1:], nil
 	}
 
+	if path, err := exec.LookPath("uvx"); err == nil && path != "" {
+		if enableIntelligence {
+			return path, []string{"--from", benchyForkIntelligenceReqRef, "llama-benchy"}, nil
+		}
+		return path, []string{"--from", benchyForkGitRef, "llama-benchy"}, nil
+	}
+
+	// Common in systemd services: ~/.local/bin isn't on PATH.
+	// If uvx is installed for the service user, try there too.
+	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
+		if path, err := exec.LookPath(filepath.Join(home, ".local", "bin", "uvx")); err == nil && path != "" {
+			if enableIntelligence {
+				return path, []string{"--from", benchyForkIntelligenceReqRef, "llama-benchy"}, nil
+			}
+			return path, []string{"--from", benchyForkGitRef, "llama-benchy"}, nil
+		}
+	}
+
 	if path, err := exec.LookPath("llama-benchy"); err == nil && path != "" {
 		return path, nil, nil
 	}
 
-	// Common in systemd services: ~/.local/bin isn't on PATH.
-	// If llama-benchy is installed for the service user, try there too.
 	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
 		if path, err := exec.LookPath(filepath.Join(home, ".local", "bin", "llama-benchy")); err == nil && path != "" {
 			return path, nil, nil
 		}
 	}
 
-	if path, err := exec.LookPath("uvx"); err == nil && path != "" {
-		// Uses PyPI; first run may download packages.
-		return path, []string{"llama-benchy"}, nil
-	}
+	return "", nil, errors.New("unable to find llama-benchy runner (install uvx or llama-benchy, or set LLAMA_BENCHY_CMD)")
+}
 
-	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
-		if path, err := exec.LookPath(filepath.Join(home, ".local", "bin", "uvx")); err == nil && path != "" {
-			// Uses PyPI; first run may download packages.
-			return path, []string{"llama-benchy"}, nil
+func normalizeIntelligencePlugins(plugins []string) ([]string, error) {
+	out := make([]string, 0, len(plugins))
+	seen := make(map[string]struct{}, len(plugins))
+	for _, raw := range plugins {
+		p := strings.ToLower(strings.TrimSpace(raw))
+		if p == "" {
+			continue
+		}
+		if _, ok := benchyIntelligencePluginChoices[p]; !ok {
+			return nil, fmt.Errorf("unknown intelligence plugin: %s", p)
+		}
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+func firstPluginThatRequiresCodeExec(plugins []string) (string, bool) {
+	for _, p := range plugins {
+		if _, ok := benchyPluginsRequireCodeExec[p]; ok {
+			return p, true
 		}
 	}
+	return "", false
+}
 
-	return "", nil, errors.New("unable to find llama-benchy runner (install llama-benchy or uvx, or set LLAMA_BENCHY_CMD)")
+func defaultBenchyOutputDir() string {
+	if v := strings.TrimSpace(os.Getenv(benchyEnvOutputDir)); v != "" {
+		return v
+	}
+	return benchyDefaultOutputDir
 }
 
 func newBenchyJobID() (string, error) {

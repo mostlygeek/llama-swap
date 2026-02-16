@@ -201,6 +201,12 @@ export async function startBenchy(model: string, opts: BenchyStartOptions = {}):
     adaptPrompt: opts.adaptPrompt,
     enablePrefixCaching: opts.enablePrefixCaching,
     trustRemoteCode: opts.trustRemoteCode,
+    enableIntelligence: opts.enableIntelligence,
+    intelligencePlugins: opts.intelligencePlugins,
+    allowCodeExec: opts.allowCodeExec,
+    datasetCacheDir: opts.datasetCacheDir,
+    outputDir: opts.outputDir,
+    maxConcurrent: opts.maxConcurrent,
   };
 
   const response = await fetch(`/api/benchy`, {

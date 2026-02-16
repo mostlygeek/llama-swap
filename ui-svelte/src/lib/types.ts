@@ -53,6 +53,21 @@ export type ScreenWidth = "xs" | "sm" | "md" | "lg" | "xl" | "2xl";
 
 export type BenchyJobStatus = "running" | "done" | "error" | "canceled";
 
+export type BenchyIntelligencePlugin =
+  | "all"
+  | "core6"
+  | "mmlu"
+  | "arc-c"
+  | "hellaswag"
+  | "winogrande"
+  | "gsm8k"
+  | "truthfulqa"
+  | "ifeval"
+  | "evalplus"
+  | "terminal_bench"
+  | "aider"
+  | "swebench_verified";
+
 export interface BenchyStartOptions {
   baseUrl?: string;
   tokenizer?: string;
@@ -67,6 +82,12 @@ export interface BenchyStartOptions {
   adaptPrompt?: boolean;
   enablePrefixCaching?: boolean;
   trustRemoteCode?: boolean;
+  enableIntelligence?: boolean;
+  intelligencePlugins?: BenchyIntelligencePlugin[];
+  allowCodeExec?: boolean;
+  datasetCacheDir?: string;
+  outputDir?: string;
+  maxConcurrent?: number;
 }
 
 export interface BenchyJob {
@@ -85,6 +106,12 @@ export interface BenchyJob {
   adaptPrompt?: boolean;
   enablePrefixCaching?: boolean;
   trustRemoteCode?: boolean;
+  enableIntelligence?: boolean;
+  intelligencePlugins?: BenchyIntelligencePlugin[];
+  allowCodeExec?: boolean;
+  datasetCacheDir?: string;
+  outputDir?: string;
+  maxConcurrent?: number;
   status: BenchyJobStatus;
   startedAt: string;
   finishedAt?: string;

@@ -66,3 +66,49 @@ func TestBuildBenchyArgsOptionalFlags(t *testing.T) {
 		t.Fatalf("unexpected args\nwant: %#v\ngot:  %#v", want, got)
 	}
 }
+
+func TestBuildBenchyArgsIntelligenceFlags(t *testing.T) {
+	maxConcurrent := 12
+	opts := benchyRunOptions{
+		PP:                  []int{2048},
+		TG:                  []int{32},
+		Runs:                2,
+		EnableIntelligence:  true,
+		IntelligencePlugins: []string{"mmlu", "arc-c", "gsm8k"},
+		AllowCodeExec:       false,
+		DatasetCacheDir:     "/tmp/bench-cache",
+		OutputDir:           "/tmp/bench-runs",
+		MaxConcurrent:       &maxConcurrent,
+	}
+
+	got := buildBenchyArgs("http://localhost:8080/v1", "model-a", "model-a", "tok-a", "", opts)
+	want := []string{
+		"--base-url", "http://localhost:8080/v1",
+		"--model", "model-a",
+		"--served-model-name", "model-a",
+		"--tokenizer", "tok-a",
+		"--runs", "2",
+		"--pp", "2048",
+		"--tg", "32",
+		"--enable-intelligence",
+		"--output-dir", "/tmp/bench-runs",
+		"--intelligence-plugins", "mmlu", "arc-c", "gsm8k",
+		"--dataset-cache-dir", "/tmp/bench-cache",
+		"--max-concurrent", "12",
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected args\nwant: %#v\ngot:  %#v", want, got)
+	}
+}
+
+func TestNormalizeIntelligencePlugins(t *testing.T) {
+	got, err := normalizeIntelligencePlugins([]string{"MMLU", "gsm8k", " mmlu ", "arc-c"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"mmlu", "gsm8k", "arc-c"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected plugins\nwant: %#v\ngot:  %#v", want, got)
+	}
+}

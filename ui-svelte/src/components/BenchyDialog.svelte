@@ -1,6 +1,6 @@
 <script lang="ts">
   import { persistentStore } from "../stores/persistent";
-  import type { BenchyJob, BenchyStartOptions } from "../lib/types";
+  import type { BenchyIntelligencePlugin, BenchyJob, BenchyStartOptions } from "../lib/types";
 
   interface Props {
     model: string | null;
@@ -33,6 +33,23 @@
   const adaptPromptStore = persistentStore<"auto" | "true" | "false">("benchy-options-adapt-prompt", "auto");
   const enablePrefixCachingStore = persistentStore<boolean>("benchy-options-enable-prefix-caching", false);
   const trustRemoteCodeStore = persistentStore<"auto" | "true" | "false">("benchy-options-trust-remote-code", "auto");
+  const enableIntelligenceStore = persistentStore<boolean>("benchy-options-enable-intelligence", false);
+  const intelligencePluginsStore = persistentStore<BenchyIntelligencePlugin[]>("benchy-options-intelligence-plugins", []);
+  const allowCodeExecStore = persistentStore<boolean>("benchy-options-allow-code-exec", false);
+  const datasetCacheDirStore = persistentStore<string>("benchy-options-dataset-cache-dir", "");
+  const outputDirStore = persistentStore<string>("benchy-options-output-dir", "/tmp/llama-benchy-runs");
+  const maxConcurrentStore = persistentStore<string>("benchy-options-max-concurrent", "");
+
+  const intelligencePluginOptions: Array<{ id: BenchyIntelligencePlugin; label: string }> = [
+    { id: "mmlu", label: "MMLU" },
+    { id: "arc-c", label: "ARC" },
+    { id: "hellaswag", label: "HellaSwag" },
+    { id: "gsm8k", label: "GSM8K" },
+    { id: "truthfulqa", label: "TruthfulQA" },
+    { id: "evalplus", label: "EvalPlus (HumanEval+/MBPP+)" },
+    { id: "swebench_verified", label: "SWE-bench Verified" },
+    { id: "terminal_bench", label: "Terminal-Bench" },
+  ];
 
   $effect(() => {
     if (open && dialogEl) {
@@ -83,6 +100,20 @@
     return value === "true";
   }
 
+  function intelligencePluginEnabled(plugin: BenchyIntelligencePlugin): boolean {
+    return $intelligencePluginsStore.includes(plugin);
+  }
+
+  function toggleIntelligencePlugin(plugin: BenchyIntelligencePlugin): void {
+    intelligencePluginsStore.update((prev) => {
+      const next = prev.includes(plugin) ? prev.filter((p) => p !== plugin) : [...prev, plugin];
+      if (next.length > 0) {
+        enableIntelligenceStore.set(true);
+      }
+      return next;
+    });
+  }
+
   function handleStart(): void {
     if (!canStart || starting || job?.status === "running") return;
     optionsError = null;
@@ -96,6 +127,8 @@
       const tg = parseNumberList($tgStore, "tg", 1);
       const depth = parseNumberList($depthStore, "depth", 0);
       const concurrency = parseNumberList($concurrencyStore, "concurrency", 1);
+      const maxConcurrent = parsePositiveNumber($maxConcurrentStore, "maxConcurrent");
+      const selectedPlugins = [...$intelligencePluginsStore];
 
       if (!$useLlamaSwapBaseUrlStore && baseUrl) opts.baseUrl = baseUrl;
       if (tokenizer) opts.tokenizer = tokenizer;
@@ -117,6 +150,20 @@
       const trustRemoteCode = parseTriState($trustRemoteCodeStore);
       if (trustRemoteCode !== undefined) {
         opts.trustRemoteCode = trustRemoteCode;
+      }
+
+      if ($enableIntelligenceStore || selectedPlugins.length > 0) {
+        if (selectedPlugins.length === 0) {
+          throw new Error("Select at least one intelligence plugin");
+        }
+        opts.enableIntelligence = true;
+        opts.intelligencePlugins = selectedPlugins;
+        if ($allowCodeExecStore) opts.allowCodeExec = true;
+        const outputDir = $outputDirStore.trim();
+        if (outputDir) opts.outputDir = outputDir;
+        const datasetCacheDir = $datasetCacheDirStore.trim();
+        if (datasetCacheDir) opts.datasetCacheDir = datasetCacheDir;
+        if (maxConcurrent !== undefined) opts.maxConcurrent = maxConcurrent;
       }
 
       onstart(opts);
@@ -230,6 +277,66 @@
         </div>
       </div>
 
+      <div class="p-3 border border-card-border rounded bg-background/40 space-y-3">
+        <div class="flex items-center justify-between gap-2">
+          <h3 class="text-base font-semibold pb-0">Intelligence Benchmarks</h3>
+          <label class="flex items-center gap-2 text-sm">
+            <input type="checkbox" bind:checked={$enableIntelligenceStore} />
+            enable intelligence mode
+          </label>
+        </div>
+        <div class="text-xs text-txtsecondary">
+          Plugins: MMLU, ARC, HellaSwag, GSM8K, TruthfulQA, EvalPlus, SWE-bench, Terminal-Bench.
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+          {#each intelligencePluginOptions as plugin}
+            <label class="text-sm flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={intelligencePluginEnabled(plugin.id)}
+                onchange={() => toggleIntelligencePlugin(plugin.id)}
+              />
+              {plugin.label}
+            </label>
+          {/each}
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <label class="text-sm">
+            <div class="text-txtsecondary mb-1">Output dir</div>
+            <input
+              class="w-full px-2 py-1 rounded border border-card-border bg-background disabled:opacity-50"
+              bind:value={$outputDirStore}
+              placeholder="/tmp/llama-benchy-runs"
+              disabled={!$enableIntelligenceStore}
+            />
+          </label>
+          <label class="text-sm">
+            <div class="text-txtsecondary mb-1">Dataset cache dir (optional)</div>
+            <input
+              class="w-full px-2 py-1 rounded border border-card-border bg-background disabled:opacity-50"
+              bind:value={$datasetCacheDirStore}
+              placeholder="~/.cache/llama-benchy-intelligence"
+              disabled={!$enableIntelligenceStore}
+            />
+          </label>
+          <label class="text-sm">
+            <div class="text-txtsecondary mb-1">max concurrent (optional)</div>
+            <input
+              class="w-full px-2 py-1 rounded border border-card-border bg-background font-mono disabled:opacity-50"
+              bind:value={$maxConcurrentStore}
+              placeholder="8"
+              disabled={!$enableIntelligenceStore}
+            />
+          </label>
+          <label class="text-sm flex items-center gap-2 pt-6">
+            <input type="checkbox" bind:checked={$allowCodeExecStore} disabled={!$enableIntelligenceStore} />
+            allow-code-exec (required for EvalPlus / SWE-bench / Terminal-Bench)
+          </label>
+        </div>
+      </div>
+
       {#if starting}
         <div class="text-sm text-txtsecondary">Starting benchmark...</div>
       {/if}
@@ -275,13 +382,33 @@
           <div>
             latency mode: <span class="font-mono text-txtmain">{job.latencyMode || "default"}</span>
           </div>
+          {#if job.enableIntelligence}
+            <div>
+              intelligence plugins:
+              <span class="font-mono text-txtmain">{(job.intelligencePlugins || []).join(" ") || "none"}</span>
+            </div>
+            <div>
+              output dir: <span class="font-mono break-all text-txtmain">{job.outputDir || "/tmp/llama-benchy-runs"}</span>
+            </div>
+            {#if job.datasetCacheDir}
+              <div>
+                dataset cache dir: <span class="font-mono break-all text-txtmain">{job.datasetCacheDir}</span>
+              </div>
+            {/if}
+            {#if job.maxConcurrent}
+              <div>
+                max concurrent: <span class="font-mono text-txtmain">{job.maxConcurrent}</span>
+              </div>
+            {/if}
+          {/if}
           <div>
             flags:
             <span class="font-mono text-txtmain">
               {job.noCache ? " no-cache" : ""}{job.noWarmup ? " no-warmup" : ""}{job.enablePrefixCaching ? " enable-prefix-caching" : ""}
               {job.adaptPrompt === true ? " adapt-prompt" : job.adaptPrompt === false ? " no-adapt-prompt" : ""}
               {job.trustRemoteCode ? " trust-remote-code" : ""}
-              {!(job.noCache || job.noWarmup || job.enablePrefixCaching || job.adaptPrompt !== undefined || job.trustRemoteCode) ? " none" : ""}
+              {job.enableIntelligence ? " enable-intelligence" : ""}{job.allowCodeExec ? " allow-code-exec" : ""}
+              {!(job.noCache || job.noWarmup || job.enablePrefixCaching || job.adaptPrompt !== undefined || job.trustRemoteCode || job.enableIntelligence || job.allowCodeExec) ? " none" : ""}
             </span>
           </div>
           <div>
