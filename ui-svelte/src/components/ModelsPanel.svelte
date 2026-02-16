@@ -11,7 +11,7 @@
   import { isNarrow } from "../stores/theme";
   import { persistentStore } from "../stores/persistent";
   import BenchyDialog from "./BenchyDialog.svelte";
-  import type { BenchyJob, Model } from "../lib/types";
+  import type { BenchyJob, BenchyStartOptions, Model } from "../lib/types";
 
   let isUnloading = $state(false);
   let menuOpen = $state(false);
@@ -25,6 +25,7 @@
   let benchyError: string | null = $state(null);
   let benchyJob: BenchyJob | null = $state(null);
   let benchyJobId: string | null = $state(null);
+  let benchyModelID: string | null = $state(null);
   let benchyPollTimer: ReturnType<typeof setTimeout> | null = null;
 
   let benchyBusy = $derived.by(() => {
@@ -86,6 +87,7 @@
     benchyOpen = false;
     benchyStarting = false;
     benchyError = null;
+    benchyModelID = null;
     clearBenchyPoll();
   }
 
@@ -129,9 +131,16 @@
     });
   }
 
-  async function runBenchyForModel(modelID: string): Promise<void> {
-    // Reset dialog state and show immediately (so errors are visible)
+  function openBenchyForModel(modelID: string): void {
+    benchyModelID = modelID;
     benchyOpen = true;
+    benchyError = null;
+  }
+
+  async function runBenchyForModel(opts: BenchyStartOptions): Promise<void> {
+    if (!benchyModelID) return;
+    const modelID = benchyModelID;
+
     benchyStarting = true;
     benchyError = null;
     benchyJob = null;
@@ -150,7 +159,7 @@
       }
       await waitForModelReady(modelID);
 
-      const id = await startBenchy(modelID);
+      const id = await startBenchy(modelID, opts);
       benchyJobId = id;
       benchyStarting = false;
       await pollBenchy(id);
@@ -291,9 +300,9 @@
                 {/if}
                 <button
                   class="btn btn--sm"
-                  onclick={() => runBenchyForModel(model.id)}
+                  onclick={() => openBenchyForModel(model.id)}
                   disabled={benchyBusy || model.state === "stopping" || model.state === "shutdown" || model.state === "unknown"}
-                  title={model.state === "stopped" ? "Load + run llama-benchy" : "Run llama-benchy"}
+                  title={model.state === "stopped" ? "Load + configure llama-benchy" : "Configure llama-benchy"}
                 >
                   Benchy
                 </button>
@@ -333,4 +342,14 @@
   </div>
 </div>
 
-<BenchyDialog job={benchyJob} open={benchyOpen} starting={benchyStarting} error={benchyError} onclose={closeBenchyDialog} oncancel={cancelBenchy} />
+<BenchyDialog
+  model={benchyModelID}
+  job={benchyJob}
+  open={benchyOpen}
+  canStart={!!benchyModelID && !benchyBusy}
+  starting={benchyStarting}
+  error={benchyError}
+  onstart={runBenchyForModel}
+  onclose={closeBenchyDialog}
+  oncancel={cancelBenchy}
+/>

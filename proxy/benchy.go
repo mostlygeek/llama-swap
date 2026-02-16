@@ -41,13 +41,20 @@ const (
 )
 
 type BenchyJob struct {
-	ID        string `json:"id"`
-	Model     string `json:"model"`
-	Tokenizer string `json:"tokenizer"`
-	BaseURL   string `json:"baseUrl"`
-	PP        []int  `json:"pp"`
-	TG        []int  `json:"tg"`
-	Runs      int    `json:"runs"`
+	ID                  string `json:"id"`
+	Model               string `json:"model"`
+	Tokenizer           string `json:"tokenizer"`
+	BaseURL             string `json:"baseUrl"`
+	PP                  []int  `json:"pp"`
+	TG                  []int  `json:"tg"`
+	Depth               []int  `json:"depth,omitempty"`
+	Concurrency         []int  `json:"concurrency,omitempty"`
+	Runs                int    `json:"runs"`
+	LatencyMode         string `json:"latencyMode,omitempty"`
+	NoCache             bool   `json:"noCache,omitempty"`
+	NoWarmup            bool   `json:"noWarmup,omitempty"`
+	AdaptPrompt         *bool  `json:"adaptPrompt,omitempty"`
+	EnablePrefixCaching bool   `json:"enablePrefixCaching,omitempty"`
 	// TrustRemoteCode controls whether we auto-accept the HuggingFace "custom code" prompt for some tokenizers.
 	// This only affects local tokenizer loading, not the remote server.
 	TrustRemoteCode bool `json:"trustRemoteCode,omitempty"`
@@ -63,14 +70,35 @@ type BenchyJob struct {
 }
 
 type benchyStartRequest struct {
-	Model     string `json:"model"`
-	Tokenizer string `json:"tokenizer,omitempty"`
-	BaseURL   string `json:"baseUrl,omitempty"`
-	PP        []int  `json:"pp,omitempty"`
-	TG        []int  `json:"tg,omitempty"`
-	Runs      int    `json:"runs,omitempty"`
+	Model               string `json:"model"`
+	Tokenizer           string `json:"tokenizer,omitempty"`
+	BaseURL             string `json:"baseUrl,omitempty"`
+	PP                  []int  `json:"pp,omitempty"`
+	TG                  []int  `json:"tg,omitempty"`
+	Depth               []int  `json:"depth,omitempty"`
+	Concurrency         []int  `json:"concurrency,omitempty"`
+	Runs                int    `json:"runs,omitempty"`
+	LatencyMode         string `json:"latencyMode,omitempty"`
+	NoCache             bool   `json:"noCache,omitempty"`
+	NoWarmup            bool   `json:"noWarmup,omitempty"`
+	AdaptPrompt         *bool  `json:"adaptPrompt,omitempty"`
+	EnablePrefixCaching bool   `json:"enablePrefixCaching,omitempty"`
 	// TrustRemoteCode (when set) overrides metadata-based defaulting.
 	TrustRemoteCode *bool `json:"trustRemoteCode,omitempty"`
+}
+
+type benchyRunOptions struct {
+	PP                  []int
+	TG                  []int
+	Depth               []int
+	Concurrency         []int
+	Runs                int
+	LatencyMode         string
+	NoCache             bool
+	NoWarmup            bool
+	AdaptPrompt         *bool
+	EnablePrefixCaching bool
+	TrustRemoteCode     bool
 }
 
 type benchyStartResponse struct {
@@ -112,17 +140,52 @@ func (pm *ProxyManager) apiStartBenchy(c *gin.Context) {
 		return
 	}
 
-	pp := req.PP
+	pp := append([]int{}, req.PP...)
 	if len(pp) == 0 {
-		pp = benchyDefaultPP
+		pp = append([]int{}, benchyDefaultPP...)
 	}
-	tg := req.TG
+	if err := validatePositiveIntSlice("pp", pp); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	tg := append([]int{}, req.TG...)
 	if len(tg) == 0 {
-		tg = benchyDefaultTG
+		tg = append([]int{}, benchyDefaultTG...)
 	}
+	if err := validatePositiveIntSlice("tg", tg); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	depth := append([]int{}, req.Depth...)
+	if len(depth) > 0 {
+		if err := validateNonNegativeIntSlice("depth", depth); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	}
+
+	concurrency := append([]int{}, req.Concurrency...)
+	if len(concurrency) > 0 {
+		if err := validatePositiveIntSlice("concurrency", concurrency); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	}
+
 	runs := req.Runs
 	if runs <= 0 {
 		runs = benchyDefaultRuns
+	}
+	if runs <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "runs must be > 0"})
+		return
+	}
+	latencyMode, err := normalizeBenchyLatencyMode(req.LatencyMode)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
 
 	// Choose tokenizer: request override > metadata > heuristics
@@ -140,6 +203,24 @@ func (pm *ProxyManager) apiStartBenchy(c *gin.Context) {
 		if v, ok := benchyTrustRemoteCodeFromMetadata(cfg.Metadata); ok {
 			trustRemoteCode = v
 		}
+	}
+	var adaptPrompt *bool
+	if req.AdaptPrompt != nil {
+		v := *req.AdaptPrompt
+		adaptPrompt = &v
+	}
+	runOptions := benchyRunOptions{
+		PP:                  pp,
+		TG:                  tg,
+		Depth:               depth,
+		Concurrency:         concurrency,
+		Runs:                runs,
+		LatencyMode:         latencyMode,
+		NoCache:             req.NoCache,
+		NoWarmup:            req.NoWarmup,
+		AdaptPrompt:         adaptPrompt,
+		EnablePrefixCaching: req.EnablePrefixCaching,
+		TrustRemoteCode:     trustRemoteCode,
 	}
 
 	// Choose served model name for the target base URL.
@@ -183,18 +264,25 @@ func (pm *ProxyManager) apiStartBenchy(c *gin.Context) {
 		return
 	}
 
-		job := &BenchyJob{
-			ID:        jobID,
-			Model:     requestedModel,
-			Tokenizer: tokenizer,
-			BaseURL:   baseURL,
-			PP:        append([]int{}, pp...),
-			TG:        append([]int{}, tg...),
-			Runs:      runs,
-			TrustRemoteCode: trustRemoteCode,
-			Status:    benchyStatusRunning,
-			StartedAt: time.Now(),
-		}
+	job := &BenchyJob{
+		ID:                  jobID,
+		Model:               requestedModel,
+		Tokenizer:           tokenizer,
+		BaseURL:             baseURL,
+		PP:                  append([]int{}, runOptions.PP...),
+		TG:                  append([]int{}, runOptions.TG...),
+		Depth:               append([]int{}, runOptions.Depth...),
+		Concurrency:         append([]int{}, runOptions.Concurrency...),
+		Runs:                runOptions.Runs,
+		LatencyMode:         runOptions.LatencyMode,
+		NoCache:             runOptions.NoCache,
+		NoWarmup:            runOptions.NoWarmup,
+		AdaptPrompt:         runOptions.AdaptPrompt,
+		EnablePrefixCaching: runOptions.EnablePrefixCaching,
+		TrustRemoteCode:     runOptions.TrustRemoteCode,
+		Status:              benchyStatusRunning,
+		StartedAt:           time.Now(),
+	}
 
 	ctx, cancel := context.WithCancel(pm.shutdownCtx)
 	pm.benchyMu.Lock()
@@ -202,7 +290,7 @@ func (pm *ProxyManager) apiStartBenchy(c *gin.Context) {
 	pm.benchyCancels[jobID] = cancel
 	pm.benchyMu.Unlock()
 
-	go pm.runBenchyJob(ctx, jobID, servedModelName, tokenizer, baseURL, pp, tg, runs, apiKey, trustRemoteCode)
+	go pm.runBenchyJob(ctx, jobID, servedModelName, tokenizer, baseURL, apiKey, runOptions)
 
 	c.JSON(http.StatusOK, benchyStartResponse{ID: jobID})
 }
@@ -250,7 +338,7 @@ func (pm *ProxyManager) apiCancelBenchyJob(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "canceling"})
 }
 
-func (pm *ProxyManager) runBenchyJob(ctx context.Context, jobID, servedModelName, tokenizer, baseURL string, pp, tg []int, runs int, apiKey string, trustRemoteCode bool) {
+func (pm *ProxyManager) runBenchyJob(ctx context.Context, jobID, servedModelName, tokenizer, baseURL, apiKey string, opts benchyRunOptions) {
 	displayModelName := servedModelName
 	// Prefer a human-friendly HF-ish model id for display if we have it as tokenizer.
 	if tokenizer != "" && strings.Contains(tokenizer, "/") && !strings.HasPrefix(tokenizer, "/") {
@@ -263,29 +351,12 @@ func (pm *ProxyManager) runBenchyJob(ctx context.Context, jobID, servedModelName
 		return
 	}
 
-	args := []string{
-		"--base-url", baseURL,
-		"--model", displayModelName,
-		"--served-model-name", servedModelName,
-		"--tokenizer", tokenizer,
-		"--runs", strconv.Itoa(runs),
-	}
-	if apiKey != "" {
-		args = append(args, "--api-key", apiKey)
-	}
-	args = append(args, "--pp")
-	for _, n := range pp {
-		args = append(args, strconv.Itoa(n))
-	}
-	args = append(args, "--tg")
-	for _, n := range tg {
-		args = append(args, strconv.Itoa(n))
-	}
+	args := buildBenchyArgs(baseURL, displayModelName, servedModelName, tokenizer, apiKey, opts)
 
 	cmd := exec.CommandContext(ctx, benchyCmd, append(benchyArgs, args...)...)
 	cmd.Stdout = benchyJobWriter{pm: pm, jobID: jobID, stream: "stdout"}
 	cmd.Stderr = benchyJobWriter{pm: pm, jobID: jobID, stream: "stderr"}
-	if trustRemoteCode {
+	if opts.TrustRemoteCode {
 		// llama-benchy currently has no CLI flag to pass `trust_remote_code=True` through to transformers,
 		// so we pre-answer its interactive prompt (if it appears). Provide multiple lines in case it's asked more than once.
 		cmd.Stdin = strings.NewReader("y\ny\ny\ny\ny\ny\ny\ny\n")
@@ -574,6 +645,93 @@ func parseAnyBool(v any) (bool, bool) {
 	default:
 		return false, false
 	}
+}
+
+func validatePositiveIntSlice(field string, values []int) error {
+	for i, v := range values {
+		if v <= 0 {
+			return fmt.Errorf("%s[%d] must be > 0", field, i)
+		}
+	}
+	return nil
+}
+
+func validateNonNegativeIntSlice(field string, values []int) error {
+	for i, v := range values {
+		if v < 0 {
+			return fmt.Errorf("%s[%d] must be >= 0", field, i)
+		}
+	}
+	return nil
+}
+
+func normalizeBenchyLatencyMode(raw string) (string, error) {
+	v := strings.ToLower(strings.TrimSpace(raw))
+	switch v {
+	case "", "api", "generation", "none":
+		return v, nil
+	default:
+		return "", errors.New("latencyMode must be one of: api, generation, none")
+	}
+}
+
+func buildBenchyArgs(baseURL, displayModelName, servedModelName, tokenizer, apiKey string, opts benchyRunOptions) []string {
+	args := []string{
+		"--base-url", baseURL,
+		"--model", displayModelName,
+		"--served-model-name", servedModelName,
+		"--tokenizer", tokenizer,
+		"--runs", strconv.Itoa(opts.Runs),
+	}
+	if apiKey != "" {
+		args = append(args, "--api-key", apiKey)
+	}
+
+	args = append(args, "--pp")
+	for _, n := range opts.PP {
+		args = append(args, strconv.Itoa(n))
+	}
+
+	args = append(args, "--tg")
+	for _, n := range opts.TG {
+		args = append(args, strconv.Itoa(n))
+	}
+
+	if len(opts.Depth) > 0 {
+		args = append(args, "--depth")
+		for _, n := range opts.Depth {
+			args = append(args, strconv.Itoa(n))
+		}
+	}
+
+	if len(opts.Concurrency) > 0 {
+		args = append(args, "--concurrency")
+		for _, n := range opts.Concurrency {
+			args = append(args, strconv.Itoa(n))
+		}
+	}
+
+	if opts.LatencyMode != "" {
+		args = append(args, "--latency-mode", opts.LatencyMode)
+	}
+	if opts.NoCache {
+		args = append(args, "--no-cache")
+	}
+	if opts.NoWarmup {
+		args = append(args, "--no-warmup")
+	}
+	if opts.AdaptPrompt != nil {
+		if *opts.AdaptPrompt {
+			args = append(args, "--adapt-prompt")
+		} else {
+			args = append(args, "--no-adapt-prompt")
+		}
+	}
+	if opts.EnablePrefixCaching {
+		args = append(args, "--enable-prefix-caching")
+	}
+
+	return args
 }
 
 func resolveBenchyCommand() (string, []string, error) {

@@ -1,5 +1,5 @@
 import { writable } from "svelte/store";
-import type { Model, Metrics, VersionInfo, LogData, APIEventEnvelope, ReqRespCapture, BenchyJob, BenchyStartResponse } from "../lib/types";
+import type { Model, Metrics, VersionInfo, LogData, APIEventEnvelope, ReqRespCapture, BenchyJob, BenchyStartResponse, BenchyStartOptions } from "../lib/types";
 import { connectionState } from "./theme";
 
 const LOG_LENGTH_LIMIT = 1024 * 100; /* 100KB of log data */
@@ -173,22 +173,22 @@ export async function loadModel(model: string): Promise<void> {
   }
 }
 
-export interface StartBenchyOptions {
-  baseUrl?: string;
-  tokenizer?: string;
-  pp?: number[];
-  tg?: number[];
-  runs?: number;
-}
-
-export async function startBenchy(model: string, opts: StartBenchyOptions = {}): Promise<string> {
+export async function startBenchy(model: string, opts: BenchyStartOptions = {}): Promise<string> {
   const payload = {
     model,
     baseUrl: opts.baseUrl,
     tokenizer: opts.tokenizer,
     pp: opts.pp,
     tg: opts.tg,
+    depth: opts.depth,
+    concurrency: opts.concurrency,
     runs: opts.runs,
+    latencyMode: opts.latencyMode,
+    noCache: opts.noCache,
+    noWarmup: opts.noWarmup,
+    adaptPrompt: opts.adaptPrompt,
+    enablePrefixCaching: opts.enablePrefixCaching,
+    trustRemoteCode: opts.trustRemoteCode,
   };
 
   const response = await fetch(`/api/benchy`, {

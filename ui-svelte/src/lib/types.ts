@@ -53,6 +53,22 @@ export type ScreenWidth = "xs" | "sm" | "md" | "lg" | "xl" | "2xl";
 
 export type BenchyJobStatus = "running" | "done" | "error" | "canceled";
 
+export interface BenchyStartOptions {
+  baseUrl?: string;
+  tokenizer?: string;
+  pp?: number[];
+  tg?: number[];
+  depth?: number[];
+  concurrency?: number[];
+  runs?: number;
+  latencyMode?: "api" | "generation" | "none";
+  noCache?: boolean;
+  noWarmup?: boolean;
+  adaptPrompt?: boolean;
+  enablePrefixCaching?: boolean;
+  trustRemoteCode?: boolean;
+}
+
 export interface BenchyJob {
   id: string;
   model: string;
@@ -60,7 +76,15 @@ export interface BenchyJob {
   baseUrl: string;
   pp: number[];
   tg: number[];
+  depth?: number[];
+  concurrency?: number[];
   runs: number;
+  latencyMode?: "api" | "generation" | "none";
+  noCache?: boolean;
+  noWarmup?: boolean;
+  adaptPrompt?: boolean;
+  enablePrefixCaching?: boolean;
+  trustRemoteCode?: boolean;
   status: BenchyJobStatus;
   startedAt: string;
   finishedAt?: string;

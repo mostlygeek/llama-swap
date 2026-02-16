@@ -3,7 +3,7 @@
   import { persistentStore } from "../../stores/persistent";
   import { streamChatCompletion } from "../../lib/chatApi";
   import { playgroundStores } from "../../stores/playgroundActivity";
-  import type { BenchyJob, ChatMessage, ContentPart } from "../../lib/types";
+  import type { BenchyJob, BenchyStartOptions, ChatMessage, ContentPart } from "../../lib/types";
   import ChatMessageComponent from "./ChatMessage.svelte";
   import ModelSelector from "./ModelSelector.svelte";
   import ExpandableTextarea from "./ExpandableTextarea.svelte";
@@ -43,6 +43,7 @@
   let benchyError: string | null = $state(null);
   let benchyJob: BenchyJob | null = $state(null);
   let benchyJobId: string | null = $state(null);
+  let benchyModelID: string | null = $state(null);
   let benchyPollTimer: ReturnType<typeof setTimeout> | null = null;
 
   let benchyBusy = $derived.by(() => {
@@ -141,6 +142,7 @@
     benchyOpen = false;
     benchyStarting = false;
     benchyError = null;
+    benchyModelID = null;
     clearBenchyPoll();
   }
 
@@ -183,10 +185,17 @@
     });
   }
 
-  async function runBenchyForSelectedModel(): Promise<void> {
+  function openBenchyForSelectedModel(): void {
     if (!$selectedModelStore) return;
-
+    benchyModelID = $selectedModelStore;
     benchyOpen = true;
+    benchyError = null;
+  }
+
+  async function runBenchyForSelectedModel(opts: BenchyStartOptions): Promise<void> {
+    if (!benchyModelID) return;
+    const modelID = benchyModelID;
+
     benchyStarting = true;
     benchyError = null;
     benchyJob = null;
@@ -194,7 +203,6 @@
     clearBenchyPoll();
 
     try {
-      const modelID = $selectedModelStore;
       const m = $models.find((x) => x.id === modelID);
       if (!m) throw new Error(`Model not found: ${modelID}`);
       if (m.state === "stopping" || m.state === "shutdown") {
@@ -206,7 +214,7 @@
       }
       await waitForModelReady(modelID);
 
-      const id = await startBenchy(modelID);
+      const id = await startBenchy(modelID, opts);
       benchyJobId = id;
       benchyStarting = false;
       await pollBenchy(id);
@@ -411,9 +419,9 @@
     <div class="flex gap-2">
       <button
         class="btn"
-        onclick={runBenchyForSelectedModel}
+        onclick={openBenchyForSelectedModel}
         disabled={!$selectedModelStore || benchyBusy || isStreaming}
-        title="Run llama-benchy for the selected model"
+        title="Configure llama-benchy for the selected model"
       >
         Benchy
       </button>
@@ -581,4 +589,14 @@
   {/if}
 </div>
 
-<BenchyDialog job={benchyJob} open={benchyOpen} starting={benchyStarting} error={benchyError} onclose={closeBenchyDialog} oncancel={cancelBenchy} />
+<BenchyDialog
+  model={benchyModelID}
+  job={benchyJob}
+  open={benchyOpen}
+  canStart={!!benchyModelID && !benchyBusy && !isStreaming}
+  starting={benchyStarting}
+  error={benchyError}
+  onstart={runBenchyForSelectedModel}
+  onclose={closeBenchyDialog}
+  oncancel={cancelBenchy}
+/>
