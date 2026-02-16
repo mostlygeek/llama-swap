@@ -6,14 +6,17 @@
   import Models from "./routes/Models.svelte";
   import Activity from "./routes/Activity.svelte";
   import Playground from "./routes/Playground.svelte";
+  import PlaygroundStub from "./routes/PlaygroundStub.svelte";
   import { enableAPIEvents } from "./stores/api";
   import { initScreenWidth, isDarkMode, appTitle, connectionState } from "./stores/theme";
   import { currentRoute } from "./stores/route";
 
   const routes = {
+    "/": PlaygroundStub,
     "/models": Models,
     "/logs": LogViewer,
     "/activity": Activity,
+    "*": PlaygroundStub,
   };
 
   function handleRouteLoaded(event: { detail: { route: string | RegExp } }) {

@@ -28,11 +28,6 @@
     return path === "/" ? current === "/" : current.startsWith(path);
   }
 
-  function goToPlayground(e: MouseEvent) {
-    e.preventDefault();
-    window.history.pushState({}, "", "/");
-    currentRoute.set("/");
-  }
 </script>
 
 <header
@@ -54,7 +49,7 @@
   <menu class="flex items-center gap-4 overflow-x-auto">
     <a
       href="/"
-      onclick={goToPlayground}
+      use:link
       class="p-1 whitespace-nowrap {isActive('/', $currentRoute) ? 'font-semibold' : ''} {$playgroundActivity ? 'activity-link' : 'text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100'}"
     >
       Playground
