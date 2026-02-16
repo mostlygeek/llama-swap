@@ -16,10 +16,10 @@
 
   let isUnloading = $state(false);
   let menuOpen = $state(false);
+  let showRecipeManager = $state(true);
 
   const showUnlistedStore = persistentStore<boolean>("showUnlisted", true);
   const showIdorNameStore = persistentStore<"id" | "name">("showIdorName", "id");
-  const showRecipeManagerStore = persistentStore<boolean>("showRecipeManager", false);
 
   // Benchy state (single active job in UI)
   let benchyOpen = $state(false);
@@ -75,7 +75,7 @@
   }
 
   function toggleRecipeManager(): void {
-    showRecipeManagerStore.update((prev) => !prev);
+    showRecipeManager = !showRecipeManager;
   }
 
   function getModelDisplay(model: Model): string {
@@ -243,7 +243,7 @@
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
                   <path d="M4.5 3.75A2.25 2.25 0 0 0 2.25 6v12A2.25 2.25 0 0 0 4.5 20.25h15A2.25 2.25 0 0 0 21.75 18V6A2.25 2.25 0 0 0 19.5 3.75h-15ZM5.25 7.5a.75.75 0 0 1 .75-.75h12a.75.75 0 0 1 0 1.5H6a.75.75 0 0 1-.75-.75Zm0 4.5A.75.75 0 0 1 6 11.25h12a.75.75 0 0 1 0 1.5H6a.75.75 0 0 1-.75-.75Zm.75 3.75a.75.75 0 0 0 0 1.5h7.5a.75.75 0 0 0 0-1.5H6Z" />
                 </svg>
-                {$showRecipeManagerStore ? "Hide Recipes" : "Manage Recipes"}
+                {showRecipeManager ? "Hide Recipes" : "Manage Recipes"}
               </button>
             </div>
           {/if}
@@ -288,13 +288,13 @@
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
             <path d="M4.5 3.75A2.25 2.25 0 0 0 2.25 6v12A2.25 2.25 0 0 0 4.5 20.25h15A2.25 2.25 0 0 0 21.75 18V6A2.25 2.25 0 0 0 19.5 3.75h-15ZM5.25 7.5a.75.75 0 0 1 .75-.75h12a.75.75 0 0 1 0 1.5H6a.75.75 0 0 1-.75-.75Zm0 4.5A.75.75 0 0 1 6 11.25h12a.75.75 0 0 1 0 1.5H6a.75.75 0 0 1-.75-.75Zm.75 3.75a.75.75 0 0 0 0 1.5h7.5a.75.75 0 0 0 0-1.5H6Z" />
           </svg>
-          {$showRecipeManagerStore ? "Hide Recipe Manager" : "Manage Recipes"}
+          {showRecipeManager ? "Hide Recipe Manager" : "Manage Recipes"}
         </button>
       </div>
     {/if}
   </div>
 
-  {#if $showRecipeManagerStore}
+  {#if showRecipeManager}
     <div class="shrink-0">
       <RecipeManager />
     </div>
