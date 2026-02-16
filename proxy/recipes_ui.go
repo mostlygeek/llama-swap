@@ -19,11 +19,13 @@ import (
 )
 
 const (
-	recipesBackendDirEnv       = "LLAMA_SWAP_RECIPES_BACKEND_DIR"
-	defaultRecipesBackendDir   = "/home/csolutions_ai/spark-vllm-docker"
-	defaultRecipeGroupName     = "managed-recipes"
-	recipeMetadataKey          = "recipe_ui"
-	recipeMetadataManagedField = "managed"
+	recipesBackendDirEnv         = "LLAMA_SWAP_RECIPES_BACKEND_DIR"
+	recipesLocalDirEnv           = "LLAMA_SWAP_LOCAL_RECIPES_DIR"
+	defaultRecipesBackendSubdir  = "spark-vllm-docker"
+	defaultRecipesLocalSubdir    = "llama-swap/recipes"
+	defaultRecipeGroupName       = "managed-recipes"
+	recipeMetadataKey            = "recipe_ui"
+	recipeMetadataManagedField   = "managed"
 )
 
 var (
@@ -391,7 +393,30 @@ func recipesBackendDir() string {
 	if v := strings.TrimSpace(os.Getenv(recipesBackendDirEnv)); v != "" {
 		return v
 	}
-	return defaultRecipesBackendDir
+	if home := userHomeDir(); home != "" {
+		return filepath.Join(home, defaultRecipesBackendSubdir)
+	}
+	return defaultRecipesBackendSubdir
+}
+
+func localRecipesDir() string {
+	if v := strings.TrimSpace(os.Getenv(recipesLocalDirEnv)); v != "" {
+		return v
+	}
+	if home := userHomeDir(); home != "" {
+		return filepath.Join(home, "llama-swap", "recipes")
+	}
+	return filepath.FromSlash(defaultRecipesLocalSubdir)
+}
+
+func userHomeDir() string {
+	if v := strings.TrimSpace(os.Getenv("HOME")); v != "" {
+		return v
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return strings.TrimSpace(home)
+	}
+	return ""
 }
 
 func (pm *ProxyManager) getConfigPath() (string, error) {
@@ -466,14 +491,15 @@ func resolveRecipeRef(recipeRef string, catalogByID map[string]RecipeCatalogItem
 		return item.Ref, item, nil
 	}
 
+	localRecipes := localRecipesDir()
 	candidates := []string{
 		recipeRef,
 		filepath.Join(recipesBackendDir(), "recipes", recipeRef),
 		filepath.Join(recipesBackendDir(), "recipes", recipeRef+".yaml"),
 		filepath.Join(recipesBackendDir(), "recipes", recipeRef+".yml"),
-		filepath.Join("/home/csolutions_ai/llama-swap/recipes", recipeRef),
-		filepath.Join("/home/csolutions_ai/llama-swap/recipes", recipeRef+".yaml"),
-		filepath.Join("/home/csolutions_ai/llama-swap/recipes", recipeRef+".yml"),
+		filepath.Join(localRecipes, recipeRef),
+		filepath.Join(localRecipes, recipeRef+".yaml"),
+		filepath.Join(localRecipes, recipeRef+".yml"),
 	}
 	for _, c := range candidates {
 		if c == "" {

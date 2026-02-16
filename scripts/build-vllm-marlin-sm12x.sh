@@ -7,7 +7,9 @@ VLLM_REF="fd267bc7b7cd3d001ac5a893eacb9e56ff256822"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_DIR="$PROJECT_DIR/build/vllm-marlin-sm12x"
-COPY_SCRIPT="/home/csolutions_ai/spark-vllm-docker/build-and-copy.sh"
+DEFAULT_SPARK_VLLM_DOCKER_DIR="$(cd "$PROJECT_DIR/.." && pwd)/spark-vllm-docker"
+SPARK_VLLM_DOCKER_DIR="${SPARK_VLLM_DOCKER_DIR:-$DEFAULT_SPARK_VLLM_DOCKER_DIR}"
+COPY_SCRIPT="$SPARK_VLLM_DOCKER_DIR/build-and-copy.sh"
 
 usage() {
   cat <<EOF
@@ -20,6 +22,9 @@ Options:
   --tag    Image tag (default: vllm-node-marlin-sm12x)
   --nodes  Comma-separated cluster nodes (e.g. 192.168.200.12,192.168.200.13)
   --vllm-ref  vLLM commit/tag/branch for build (default: fd267bc7b7cd3d001ac5a893eacb9e56ff256822)
+
+Environment:
+  SPARK_VLLM_DOCKER_DIR  Override spark-vllm-docker location
 EOF
 }
 

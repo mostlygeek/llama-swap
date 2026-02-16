@@ -8,7 +8,8 @@ container: vllm-node
 cluster_only: true
 
 mods:
-  - /home/csolutions_ai/llama-swap/mods/vllm-marlin-sm12x-build
+  # Resolved from spark-vllm-docker root when run via run-recipe.py.
+  - ../llama-swap/mods/vllm-marlin-sm12x-build
 
 defaults:
   port: 8000

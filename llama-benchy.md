@@ -3,7 +3,7 @@
 # upstream: https://github.com/mostlygeek/llama-swap
 
 # 1) Update branch with latest upstream main
-cd /home/csolutions_ai/llama-swap
+cd "$HOME/llama-swap"
 git fetch upstream
 git switch benchy-ui
 git rebase upstream/main

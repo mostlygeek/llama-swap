@@ -377,7 +377,7 @@ macros:
 macros:
   "podman-llama": >
     podman run --name ${MODEL_ID}
-    --init --rm -p ${PORT}:8080 -v /home/alex/ai/models:/models:z --gpus=all
+    --init --rm -p ${PORT}:8080 -v ${env.HOME}/ai/models:/models:z --gpus=all
     ghcr.io/ggml-org/llama.cpp:server-cuda
 
   "standard-options": >

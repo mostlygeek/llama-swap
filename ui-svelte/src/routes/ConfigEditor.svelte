@@ -115,17 +115,46 @@
     {/if}
   </div>
 
-  <div class="card flex-1 flex flex-col min-h-0">
-    {#if loading}
-      <div class="text-sm text-txtsecondary">Cargando config.yaml...</div>
-    {:else}
-      <textarea
-        class="w-full flex-1 min-h-[50vh] rounded border border-card-border bg-background p-3 font-mono text-sm leading-5"
-        bind:value={content}
-        onkeydown={handleEditorKeyDown}
-        spellcheck="false"
-        disabled={saving}
-      ></textarea>
-    {/if}
+  <div class="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_22rem] gap-2">
+    <div class="card flex flex-col min-h-0">
+      {#if loading}
+        <div class="text-sm text-txtsecondary">Cargando config.yaml...</div>
+      {:else}
+        <textarea
+          class="w-full flex-1 min-h-[50vh] rounded border border-card-border bg-background p-3 font-mono text-sm leading-5"
+          bind:value={content}
+          onkeydown={handleEditorKeyDown}
+          spellcheck="false"
+          disabled={saving}
+        ></textarea>
+      {/if}
+    </div>
+
+    <aside class="card shrink-0 overflow-y-auto">
+      <h3 class="pb-1">Help</h3>
+      <p class="text-sm text-txtsecondary">
+        Esta configuración usa como backend de recetas:
+      </p>
+      <p class="text-sm break-all">
+        <a class="underline" href="https://github.com/eugr/spark-vllm-docker" target="_blank" rel="noreferrer">
+          eugr/spark-vllm-docker
+        </a>
+      </p>
+
+      <p class="text-sm text-txtsecondary mt-3">
+        Integración de benchmark (Benchy):
+      </p>
+      <p class="text-sm break-all">
+        <a class="underline" href="https://github.com/christopherowen/llama-benchy" target="_blank" rel="noreferrer">
+          christopherowen/llama-benchy
+        </a>
+      </p>
+
+      <p class="text-xs text-txtsecondary mt-3">
+        Tip: puedes sobreescribir rutas con variables de entorno como
+        <code class="font-mono">LLAMA_SWAP_RECIPES_BACKEND_DIR</code> y
+        <code class="font-mono">LLAMA_SWAP_LOCAL_RECIPES_DIR</code>.
+      </p>
+    </aside>
   </div>
 </div>
