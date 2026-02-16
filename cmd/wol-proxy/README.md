@@ -24,4 +24,6 @@ $ ./wol-proxy -mac BA:DC:0F:FE:E0:00 -upstream http://192.168.1.13:8080 \
 
 ## API
 
-`GET /status` - that's it. Everything else is proxied to the upstream server.
+`GET /status` returns wol-proxy health/status information.
+
+When upstream is not ready, requests to `/` and `/ui/*` return a local loading page that polls for readiness; all other paths are proxied to upstream after it becomes ready (or fail with timeout).
