@@ -1,8 +1,3 @@
-![llama-swap header image](docs/assets/hero3.webp)
-![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/mostlygeek/llama-swap/total)
-![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/mostlygeek/llama-swap/go-ci.yml)
-![GitHub Repo stars](https://img.shields.io/github/stars/mostlygeek/llama-swap)
-
 # Swap Laboratories
 
 _Fork based on `llama-swap` by mostlygeek._
@@ -51,13 +46,8 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
 
 ### Web UI
 
-llama-swap includes a real time web interface for monitoring logs and controlling models:
-
-<img width="1164" height="745" alt="image" src="https://github.com/user-attachments/assets/bacf3f9d-819f-430b-9ed2-1bfaa8d54579" />
-
-The Activity Page shows recent requests:
-
-<img width="1360" height="963" alt="image" src="https://github.com/user-attachments/assets/5f3edee6-d03a-4ae5-ae06-b20ac1f135bd" />
+llama-swap includes a real time web interface for monitoring logs and controlling models.
+It includes views for Playground, Models, Activity, Logs, Cluster, Backend, and Editor.
 
 ### llama-benchy Integration (benchy-ui branch)
 
@@ -252,10 +242,3 @@ curl -Ns 'http://host/logs/stream?no-history'
 Any OpenAI compatible server would work. llama-swap was originally designed for llama-server and it is the best supported.
 
 For Python based inference servers like vllm or tabbyAPI it is recommended to run them via podman or docker. This provides clean environment isolation as well as responding correctly to `SIGTERM` signals for proper shutdown.
-
-## Star History
-
-> [!NOTE]
-> ⭐️ Star this project to help others discover it!
-
-[![Star History Chart](https://api.star-history.com/svg?repos=mostlygeek/llama-swap&type=Date)](https://www.star-history.com/#mostlygeek/llama-swap&Date)
