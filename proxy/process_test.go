@@ -392,6 +392,35 @@ func TestProcess_StopImmediately(t *testing.T) {
 	assert.Equal(t, process.CurrentState(), StateStopped)
 }
 
+func TestProcess_StopImmediatelyDuringStarting(t *testing.T) {
+	config := getTestSimpleResponderConfigPort("stop_starting", 9999)
+	config.Proxy = "http://localhost:9998/test"
+
+	process := NewProcess("stop_while_starting", 10, config, debugLogger, debugLogger)
+	defer process.Stop()
+	process.healthCheckLoopInterval = 100 * time.Millisecond
+
+	startErrCh := make(chan error, 1)
+	go func() {
+		startErrCh <- process.start()
+	}()
+
+	deadline := time.After(3 * time.Second)
+	for process.CurrentState() != StateStarting {
+		select {
+		case <-deadline:
+			t.Fatalf("process did not reach starting state, current=%s", process.CurrentState())
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	process.StopImmediately()
+	err := <-startErrCh
+	assert.Error(t, err)
+	assert.Equal(t, StateStopped, process.CurrentState())
+}
+
 // Test that SIGKILL is sent when gracefulStopTimeout is reached and properly terminates
 // the upstream command
 func TestProcess_ForceStopWithKill(t *testing.T) {

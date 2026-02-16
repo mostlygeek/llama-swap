@@ -381,17 +381,29 @@ func (p *Process) Stop() {
 // StopImmediately will transition the process to the stopping state and stop the process with a SIGTERM.
 // If the process does not stop within the specified timeout, it will be forcefully stopped with a SIGKILL.
 func (p *Process) StopImmediately() {
-	if !isValidTransition(p.CurrentState(), StateStopping) {
+	for {
+		currentState := p.CurrentState()
+		if !isValidTransition(currentState, StateStopping) {
+			return
+		}
+
+		p.proxyLogger.Debugf("<%s> Stopping process, current state: %s", p.ID, currentState)
+		curState, err := p.swapState(currentState, StateStopping)
+		if err == nil {
+			p.stopCommand()
+			return
+		}
+
+		if err == ErrExpectedStateMismatch {
+			// Another goroutine moved the state after CurrentState() but before swapState().
+			// Retry and reevaluate whether stop is still valid from the latest state.
+			continue
+		}
+
+		p.proxyLogger.Infof("<%s> StopImmediately() %s -> %s failed: %v (current state: %v)",
+			p.ID, currentState, StateStopping, err, curState)
 		return
 	}
-
-	p.proxyLogger.Debugf("<%s> Stopping process, current state: %s", p.ID, p.CurrentState())
-	if curState, err := p.swapState(StateReady, StateStopping); err != nil {
-		p.proxyLogger.Infof("<%s> Stop() Ready -> StateStopping err: %v, current state: %v", p.ID, err, curState)
-		return
-	}
-
-	p.stopCommand()
 }
 
 // Shutdown is called when llama-swap is shutting down. It will give a little bit
