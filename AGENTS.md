@@ -11,9 +11,11 @@ llama-swap is a light weight, transparent proxy server that provides automatic m
 
 - when summarizing changes only include details that require further action
 - just say "Done." when there is no further action
-- use `gh` to create PRs and load issues
-- keep PR descriptions short and focused on changes.
+- use the github CLI `gh` to create pull requests and work with github
+- Rules for creating pull requests:
+  - keep them short and focused on changes.
   - never include a test plan
+  - write the summary using the same style rules as commit message
 
 ## Testing
 
