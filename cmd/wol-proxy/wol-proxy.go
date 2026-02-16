@@ -245,6 +245,7 @@ func (p *proxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		ticker := time.NewTicker(250 * time.Millisecond)
+		defer ticker.Stop()
 		timeout, cancel := context.WithTimeout(context.Background(), time.Duration(*flagTimeout)*time.Second)
 		defer cancel()
 	loop:
@@ -256,7 +257,6 @@ func (p *proxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			case <-ticker.C:
 				if p.getStatus() == ready {
-					ticker.Stop()
 					break loop
 				}
 			}
