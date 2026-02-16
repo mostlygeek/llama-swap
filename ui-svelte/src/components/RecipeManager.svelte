@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { deleteRecipeModel, getRecipeUIState, upsertRecipeModel } from "../stores/api";
   import type { RecipeManagedModel, RecipeUIState } from "../lib/types";
 
@@ -23,6 +24,7 @@
   let group = $state("managed-recipes");
   let unlisted = $state(false);
   let benchyTrustRemoteCode = $state<"auto" | "true" | "false">("auto");
+  let refreshController: AbortController | null = null;
 
   function clearForm(): void {
     selectedModelID = "";
@@ -65,16 +67,29 @@
   }
 
   async function refreshState(): Promise<void> {
+    refreshController?.abort();
+    const controller = new AbortController();
+    refreshController = controller;
+    const timeout = setTimeout(() => controller.abort(), 10000);
+
     loading = true;
     error = null;
     try {
-      state = await getRecipeUIState();
+      state = await getRecipeUIState(controller.signal);
       if (state.groups.length > 0 && !state.groups.includes(group)) {
         group = state.groups[0];
       }
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      if (controller.signal.aborted) {
+        error = "Timeout al cargar recetas. Pulsa Refresh para reintentar.";
+      } else {
+        error = e instanceof Error ? e.message : String(e);
+      }
     } finally {
+      clearTimeout(timeout);
+      if (refreshController === controller) {
+        refreshController = null;
+      }
       loading = false;
     }
   }
@@ -151,8 +166,11 @@
     }
   }
 
-  $effect(() => {
+  onMount(() => {
     void refreshState();
+    return () => {
+      refreshController?.abort();
+    };
   });
 </script>
 

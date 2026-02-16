@@ -247,8 +247,8 @@ export async function cancelBenchyJob(id: string): Promise<void> {
   }
 }
 
-export async function getRecipeUIState(): Promise<RecipeUIState> {
-  const response = await fetch(`/api/recipes/state`);
+export async function getRecipeUIState(signal?: AbortSignal): Promise<RecipeUIState> {
+  const response = await fetch(`/api/recipes/state`, { signal });
   if (!response.ok) {
     const msg = await response.text().catch(() => "");
     throw new Error(msg || `Failed to fetch recipe state: ${response.status}`);
