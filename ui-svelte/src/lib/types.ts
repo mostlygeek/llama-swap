@@ -175,7 +175,7 @@ export interface RecipeBackendState {
   options: string[];
 }
 
-export type RecipeBackendAction = "git_pull" | "build_vllm" | "build_mxfp4";
+export type RecipeBackendAction = "git_pull" | "git_pull_rebase" | "build_vllm" | "build_mxfp4";
 
 export interface RecipeBackendActionResponse {
   action: RecipeBackendAction | string;

@@ -128,6 +128,8 @@ type recipeBackendActionResponse struct {
 	DurationMs int64  `json:"durationMs"`
 }
 
+const sparkVLLMUpstreamRepo = "https://github.com/eugr/spark-vllm-docker"
+
 func (pm *ProxyManager) apiGetRecipeState(c *gin.Context) {
 	state, err := pm.buildRecipeUIState()
 	if err != nil {
@@ -198,11 +200,18 @@ func (pm *ProxyManager) apiRunRecipeBackendAction(c *gin.Context) {
 	var commandText string
 	switch action {
 	case "git_pull":
-		commandText = "git pull --ff-only https://github.com/eugr/spark-vllm-docker main"
+		commandText = "git pull --ff-only " + sparkVLLMUpstreamRepo + " main"
 		cmd = exec.CommandContext(
 			c.Request.Context(),
 			"git", "-C", backendDir, "pull", "--ff-only",
-			"https://github.com/eugr/spark-vllm-docker", "main",
+			sparkVLLMUpstreamRepo, "main",
+		)
+	case "git_pull_rebase":
+		commandText = "git pull --rebase --autostash " + sparkVLLMUpstreamRepo + " main"
+		cmd = exec.CommandContext(
+			c.Request.Context(),
+			"git", "-C", backendDir, "pull", "--rebase", "--autostash",
+			sparkVLLMUpstreamRepo, "main",
 		)
 	case "build_vllm":
 		script := filepath.Join(backendDir, "build-and-copy.sh")
@@ -248,8 +257,15 @@ func (pm *ProxyManager) apiRunRecipeBackendAction(c *gin.Context) {
 
 	if err != nil {
 		pm.proxyLogger.Errorf("backend action failed action=%s dir=%s err=%v", action, backendDir, err)
+		errMsg := fmt.Sprintf("action %s failed: %v", action, err)
+		if action == "git_pull" {
+			lowerOut := strings.ToLower(outputText)
+			if strings.Contains(lowerOut, "diverging branches") || strings.Contains(lowerOut, "can't be fast-forwarded") {
+				errMsg = "action git_pull failed: backend has diverging history. Use 'Git Pull Rebase' to reconcile local commits with upstream."
+			}
+		}
 		c.JSON(http.StatusBadGateway, gin.H{
-			"error":      fmt.Sprintf("action %s failed: %v", action, err),
+			"error":      errMsg,
 			"action":     action,
 			"backendDir": backendDir,
 			"command":    commandText,

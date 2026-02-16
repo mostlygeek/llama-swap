@@ -109,7 +109,7 @@
       actionCommand = result.command || "";
       actionOutput = result.output || "";
       notice = `${label} completado en ${formatDuration(result.durationMs || 0)}.`;
-      if (action === "git_pull") {
+      if (action === "git_pull" || action === "git_pull_rebase") {
         await refresh();
       }
     } catch (e) {
@@ -208,6 +208,9 @@
         <div class="flex flex-wrap gap-2">
           <button class="btn btn--sm" onclick={() => runAction("git_pull", "Git pull")} disabled={!!actionRunning || saving || refreshing}>
             {actionRunning === "git_pull" ? "Running git pull..." : "Git Pull (eugr/spark-vllm-docker)"}
+          </button>
+          <button class="btn btn--sm" onclick={() => runAction("git_pull_rebase", "Git pull (rebase)")} disabled={!!actionRunning || saving || refreshing}>
+            {actionRunning === "git_pull_rebase" ? "Running rebase pull..." : "Git Pull Rebase (eugr/spark-vllm-docker)"}
           </button>
           <button class="btn btn--sm" onclick={() => runAction("build_vllm", "Build vLLM")} disabled={!!actionRunning || saving || refreshing}>
             {actionRunning === "build_vllm" ? "Building..." : "Build: ./build-and-copy.sh --rebuild-deps --rebuild-vllm -c"}
