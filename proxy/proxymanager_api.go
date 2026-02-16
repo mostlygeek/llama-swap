@@ -107,6 +107,7 @@ const (
 	msgTypeModelStatus messageType = "modelStatus"
 	msgTypeLogData     messageType = "logData"
 	msgTypeMetrics     messageType = "metrics"
+	msgTypeInFlight    messageType = "inflight"
 )
 
 type messageEnvelope struct {
@@ -166,6 +167,18 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 		}
 	}
 
+	sendInFlight := func(total int) {
+		jsonData, err := json.Marshal(gin.H{"total": total})
+		if err == nil {
+			select {
+			case sendBuffer <- messageEnvelope{Type: msgTypeInFlight, Data: string(jsonData)}:
+			case <-ctx.Done():
+				return
+			default:
+			}
+		}
+	}
+
 	/**
 	 * Send updated models list
 	 */
@@ -193,11 +206,19 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 		sendMetrics([]TokenMetrics{e.Metrics})
 	})()
 
+	/**
+	 * Send in-flight request stats related to token stats "Waiting: N" count.
+	 */
+	defer event.On(func(e InFlightRequestsEvent) {
+		sendInFlight(e.Total)
+	})()
+
 	// send initial batch of data
 	sendLogData("proxy", pm.proxyLogger.GetHistory())
 	sendLogData("upstream", pm.upstreamLogger.GetHistory())
 	sendModels()
 	sendMetrics(pm.metricsMonitor.getMetrics())
+	sendInFlight(pm.inFlightCounter.Current())
 
 	for {
 		select {

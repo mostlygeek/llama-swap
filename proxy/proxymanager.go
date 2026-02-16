@@ -28,6 +28,40 @@ const (
 
 type proxyCtxKey string
 
+type InflightCounter struct {
+	mu    sync.Mutex
+	total int
+}
+
+func newInflightCounter() *InflightCounter {
+	return &InflightCounter{}
+}
+
+func (ic *InflightCounter) Current() int {
+	ic.mu.Lock()
+	total := ic.total
+	ic.mu.Unlock()
+	return total
+}
+
+func (ic *InflightCounter) Increment() int {
+	ic.mu.Lock()
+	ic.total++
+	total := ic.total
+	ic.mu.Unlock()
+	return total
+}
+
+func (ic *InflightCounter) Decrement() int {
+	ic.mu.Lock()
+	if ic.total > 0 {
+		ic.total--
+	}
+	total := ic.total
+	ic.mu.Unlock()
+	return total
+}
+
 type ProxyManager struct {
 	sync.Mutex
 
@@ -42,6 +76,8 @@ type ProxyManager struct {
 	metricsMonitor *metricsMonitor
 
 	processGroups map[string]*ProcessGroup
+
+	inFlightCounter *InflightCounter
 
 	// shutdown signaling
 	shutdownCtx    context.Context
@@ -154,6 +190,8 @@ func New(proxyConfig config.Config) *ProxyManager {
 		metricsMonitor: newMetricsMonitor(proxyLogger, maxMetrics, proxyConfig.CaptureBuffer),
 
 		processGroups: make(map[string]*ProcessGroup),
+
+		inFlightCounter: newInflightCounter(),
 
 		shutdownCtx:    shutdownCtx,
 		shutdownCancel: shutdownCancel,
@@ -276,37 +314,37 @@ func (pm *ProxyManager) setupGinEngine() {
 
 	// Set up routes using the Gin engine
 	// Protected routes use pm.apiKeyAuth() middleware
-	pm.ginEngine.POST("/v1/chat/completions", pm.apiKeyAuth(), pm.proxyInferenceHandler)
-	pm.ginEngine.POST("/v1/responses", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/chat/completions", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/responses", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
 	// Support legacy /v1/completions api, see issue #12
-	pm.ginEngine.POST("/v1/completions", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/completions", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
 	// Support anthropic /v1/messages (added https://github.com/ggml-org/llama.cpp/pull/17570)
-	pm.ginEngine.POST("/v1/messages", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/messages", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
 	// Support anthropic count_tokens API (Also added in the above PR)
-	pm.ginEngine.POST("/v1/messages/count_tokens", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/messages/count_tokens", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
 
 	// Support embeddings and reranking
-	pm.ginEngine.POST("/v1/embeddings", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/embeddings", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
 
 	// llama-server's /reranking endpoint + aliases
-	pm.ginEngine.POST("/reranking", pm.apiKeyAuth(), pm.proxyInferenceHandler)
-	pm.ginEngine.POST("/rerank", pm.apiKeyAuth(), pm.proxyInferenceHandler)
-	pm.ginEngine.POST("/v1/rerank", pm.apiKeyAuth(), pm.proxyInferenceHandler)
-	pm.ginEngine.POST("/v1/reranking", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/reranking", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/rerank", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/rerank", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/reranking", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
 
 	// llama-server's /infill endpoint for code infilling
-	pm.ginEngine.POST("/infill", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/infill", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
 
 	// llama-server's /completion endpoint
-	pm.ginEngine.POST("/completion", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/completion", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
 
 	// Support audio/speech endpoint
-	pm.ginEngine.POST("/v1/audio/speech", pm.apiKeyAuth(), pm.proxyInferenceHandler)
-	pm.ginEngine.POST("/v1/audio/voices", pm.apiKeyAuth(), pm.proxyInferenceHandler)
-	pm.ginEngine.GET("/v1/audio/voices", pm.apiKeyAuth(), pm.proxyGETModelHandler)
-	pm.ginEngine.POST("/v1/audio/transcriptions", pm.apiKeyAuth(), pm.proxyOAIPostFormHandler)
-	pm.ginEngine.POST("/v1/images/generations", pm.apiKeyAuth(), pm.proxyInferenceHandler)
-	pm.ginEngine.POST("/v1/images/edits", pm.apiKeyAuth(), pm.proxyOAIPostFormHandler)
+	pm.ginEngine.POST("/v1/audio/speech", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/audio/voices", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
+	pm.ginEngine.GET("/v1/audio/voices", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyGETModelHandler)
+	pm.ginEngine.POST("/v1/audio/transcriptions", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyOAIPostFormHandler)
+	pm.ginEngine.POST("/v1/images/generations", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/images/edits", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyOAIPostFormHandler)
 
 	pm.ginEngine.GET("/v1/models", pm.apiKeyAuth(), pm.listModelsHandler)
 
@@ -325,7 +363,7 @@ func (pm *ProxyManager) setupGinEngine() {
 	pm.ginEngine.GET("/upstream", func(c *gin.Context) {
 		c.Redirect(http.StatusFound, "/ui/models")
 	})
-	pm.ginEngine.Any("/upstream/*upstreamPath", pm.apiKeyAuth(), pm.proxyToUpstream)
+	pm.ginEngine.Any("/upstream/*upstreamPath", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyToUpstream)
 	pm.ginEngine.GET("/unload", pm.apiKeyAuth(), pm.unloadAllModelsHandler)
 	pm.ginEngine.GET("/running", pm.apiKeyAuth(), pm.listRunningProcessesHandler)
 	pm.ginEngine.GET("/health", func(c *gin.Context) {
@@ -387,6 +425,14 @@ func (pm *ProxyManager) setupGinEngine() {
 
 	// Disable console color for testing
 	gin.DisableConsoleColor()
+}
+
+func (pm *ProxyManager) trackInflight() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		event.Emit(InFlightRequestsEvent{Total: pm.inFlightCounter.Increment()})
+		defer event.Emit(InFlightRequestsEvent{Total: pm.inFlightCounter.Decrement()})
+		c.Next()
+	}
 }
 
 // ServeHTTP implements http.Handler interface
