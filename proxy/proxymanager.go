@@ -358,6 +358,20 @@ func (pm *ProxyManager) setupGinEngine() {
 				filepath = "index.html"
 			}
 
+			// For SPA routes like /ui/models, serve index.html unless a real file exists.
+			if !strings.Contains(filepath, ".") {
+				if f, err := reactFS.Open(filepath); err != nil {
+					ServeCompressedFile(reactFS, c.Writer, c.Request, "index.html")
+					return
+				} else {
+					defer f.Close()
+					if stat, err := f.Stat(); err != nil || stat.IsDir() {
+						ServeCompressedFile(reactFS, c.Writer, c.Request, "index.html")
+						return
+					}
+				}
+			}
+
 			ServeCompressedFile(reactFS, c.Writer, c.Request, filepath)
 		})
 
