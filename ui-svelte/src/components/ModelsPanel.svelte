@@ -294,6 +294,12 @@
     {/if}
   </div>
 
+  {#if $showRecipeManagerStore}
+    <div class="shrink-0">
+      <RecipeManager />
+    </div>
+  {/if}
+
   <div class="flex-1 overflow-y-auto">
     <table class="w-full">
       <thead class="sticky top-0 bg-card z-10">
@@ -364,9 +370,6 @@
     {/if}
   </div>
 </div>
-{#if $showRecipeManagerStore}
-  <RecipeManager />
-{/if}
 
 <BenchyDialog
   model={benchyModelID}
