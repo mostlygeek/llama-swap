@@ -300,6 +300,7 @@ func (pm *ProxyManager) upsertRecipeModel(req upsertRecipeModelRequest) (RecipeU
 	if err != nil {
 		return RecipeUIState{}, err
 	}
+	ensureRecipeMacros(root, configPath)
 	modelsMap := getMap(root, "models")
 	groupsMap := getMap(root, "groups")
 
@@ -432,6 +433,7 @@ func (pm *ProxyManager) deleteRecipeModel(modelID string) (RecipeUIState, error)
 	if err != nil {
 		return RecipeUIState{}, err
 	}
+	ensureRecipeMacros(root, configPath)
 
 	modelsMap := getMap(root, "models")
 	if _, ok := modelsMap[modelID]; !ok {
@@ -832,6 +834,40 @@ func hasMacro(root map[string]any, name string) bool {
 	macros := getMap(root, "macros")
 	_, ok := macros[name]
 	return ok
+}
+
+func ensureRecipeMacros(root map[string]any, configPath string) {
+	macros := getMap(root, "macros")
+
+	if _, ok := macros["user_home"]; !ok {
+		macros["user_home"] = "${env.HOME}"
+	}
+
+	backendDir := strings.TrimSpace(recipesBackendDir())
+	if backendDir != "" {
+		backendDir = expandLeadingTilde(backendDir)
+		if abs, err := filepath.Abs(backendDir); err == nil {
+			backendDir = abs
+		}
+
+		if _, ok := macros["spark_root"]; !ok {
+			macros["spark_root"] = backendDir
+		}
+		if _, ok := macros["recipe_runner"]; !ok {
+			macros["recipe_runner"] = filepath.Join(backendDir, "run-recipe.sh")
+		}
+	}
+
+	if _, ok := macros["llama_root"]; !ok {
+		cfgPath := strings.TrimSpace(configPath)
+		if cfgPath != "" {
+			macros["llama_root"] = filepath.Dir(cfgPath)
+		} else {
+			macros["llama_root"] = "${user_home}/llama-swap"
+		}
+	}
+
+	root["macros"] = macros
 }
 
 func groupMembers(group map[string]any) []string {
