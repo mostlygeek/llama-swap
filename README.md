@@ -64,6 +64,7 @@ This fork/branch adds `llama-benchy` integration in the Svelte UI and proxy API.
 - UI: `Models` and `Playground` include a `Benchy` action that starts a benchmark job for a selected model.
 - API: `POST /api/benchy`, `GET /api/benchy/:id`, and `POST /api/benchy/:id/cancel`.
 - Configurable benchmark options include: `tokenizer`, `baseUrl`, `pp`, `tg`, `depth`, `concurrency`, `runs`, `latencyMode`, `noCache`, `noWarmup`, `adaptPrompt`, `enablePrefixCaching`, `trustRemoteCode`.
+- If `baseUrl` is omitted, benchy targets the current llama-swap instance automatically (`/v1`).
 - Runner resolution order: `LLAMA_BENCHY_CMD`, then `llama-benchy` in `PATH`, then `uvx llama-benchy`.
 - Model metadata supports benchmark hints: `benchy_tokenizer`, `benchy_trust_remote_code`, and nested `benchy: { trust_remote_code: true }`.
 

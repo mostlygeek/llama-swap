@@ -131,8 +131,11 @@ func (pm *ProxyManager) apiStartBenchy(c *gin.Context) {
 	}
 
 	baseURLRaw := strings.TrimSpace(req.BaseURL)
+	userProvidedBaseURL := baseURLRaw != ""
 	if baseURLRaw == "" {
-		baseURLRaw = pm.defaultBenchyBaseURLFromModel(realModelName, c)
+		// Default to this llama-swap instance (/v1). This allows benchy runs to use
+		// normal model routing/swap behavior without requiring per-model upstream URLs.
+		baseURLRaw = defaultBenchyBaseURLFromRequest(c)
 	}
 	baseURL, err := normalizeBenchyBaseURL(baseURLRaw)
 	if err != nil {
@@ -224,20 +227,23 @@ func (pm *ProxyManager) apiStartBenchy(c *gin.Context) {
 	}
 
 	// Choose served model name for the target base URL.
-	// For direct upstreams (e.g. vLLM), this must match the model id that /v1 expects.
+	// For direct upstreams (explicit base URL), this should match that upstream's expected model id.
+	// For llama-swap base URL (default), use requestedModel so normal swap routing resolves correctly.
 	servedModelName := requestedModel
-	if cfg, ok := pm.config.Models[realModelName]; ok {
-		if u := strings.TrimSpace(cfg.UseModelName); u != "" {
-			servedModelName = u
-		} else if tokenizer != "" && strings.Contains(tokenizer, "/") && !strings.HasPrefix(tokenizer, "/") {
-			servedModelName = tokenizer
-		} else {
-			// Fall back to a HF-ish alias if available.
-			for _, a := range cfg.Aliases {
-				a = strings.TrimSpace(a)
-				if a != "" && strings.Contains(a, "/") && !strings.HasPrefix(a, "/") {
-					servedModelName = a
-					break
+	if userProvidedBaseURL {
+		if cfg, ok := pm.config.Models[realModelName]; ok {
+			if u := strings.TrimSpace(cfg.UseModelName); u != "" {
+				servedModelName = u
+			} else if tokenizer != "" && strings.Contains(tokenizer, "/") && !strings.HasPrefix(tokenizer, "/") {
+				servedModelName = tokenizer
+			} else {
+				// Fall back to a HF-ish alias if available.
+				for _, a := range cfg.Aliases {
+					a = strings.TrimSpace(a)
+					if a != "" && strings.Contains(a, "/") && !strings.HasPrefix(a, "/") {
+						servedModelName = a
+						break
+					}
 				}
 			}
 		}
@@ -491,19 +497,6 @@ func defaultBenchyBaseURLFromRequest(c *gin.Context) string {
 	}
 
 	return fmt.Sprintf("%s://%s/v1", scheme, host)
-}
-
-func (pm *ProxyManager) defaultBenchyBaseURLFromModel(realModelName string, c *gin.Context) string {
-	if cfg, ok := pm.config.Models[realModelName]; ok {
-		if p := strings.TrimSpace(cfg.Proxy); p != "" {
-			p = strings.TrimRight(p, "/")
-			if strings.HasSuffix(p, "/v1") {
-				return p
-			}
-			return p + "/v1"
-		}
-	}
-	return defaultBenchyBaseURLFromRequest(c)
 }
 
 func normalizeBenchyBaseURL(raw string) (string, error) {

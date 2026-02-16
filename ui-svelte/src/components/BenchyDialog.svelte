@@ -19,6 +19,7 @@
   let dialogEl: HTMLDialogElement | undefined = $state();
   let optionsError: string | null = $state(null);
 
+  const useLlamaSwapBaseUrlStore = persistentStore<boolean>("benchy-options-base-url-auto", true);
   const baseUrlStore = persistentStore<string>("benchy-options-base-url", "");
   const tokenizerStore = persistentStore<string>("benchy-options-tokenizer", "");
   const ppStore = persistentStore<string>("benchy-options-pp", "512, 2048, 8192");
@@ -96,7 +97,7 @@
       const depth = parseNumberList($depthStore, "depth", 0);
       const concurrency = parseNumberList($concurrencyStore, "concurrency", 1);
 
-      if (baseUrl) opts.baseUrl = baseUrl;
+      if (!$useLlamaSwapBaseUrlStore && baseUrl) opts.baseUrl = baseUrl;
       if (tokenizer) opts.tokenizer = tokenizer;
       if (pp?.length) opts.pp = pp;
       if (tg?.length) opts.tg = tg;
@@ -155,7 +156,12 @@
           </label>
           <label class="text-sm">
             <div class="text-txtsecondary mb-1">Base URL (optional)</div>
-            <input class="w-full px-2 py-1 rounded border border-card-border bg-background" bind:value={$baseUrlStore} placeholder="http://127.0.0.1:8000/v1" />
+            <input
+              class="w-full px-2 py-1 rounded border border-card-border bg-background disabled:opacity-50"
+              bind:value={$baseUrlStore}
+              placeholder="http://127.0.0.1:8000/v1"
+              disabled={$useLlamaSwapBaseUrlStore}
+            />
           </label>
           <label class="text-sm">
             <div class="text-txtsecondary mb-1">pp tokens</div>
@@ -205,6 +211,10 @@
         </div>
 
         <div class="flex flex-wrap gap-4 text-sm">
+          <label class="flex items-center gap-2">
+            <input type="checkbox" bind:checked={$useLlamaSwapBaseUrlStore} />
+            usar instancia actual de llama-swap (/v1)
+          </label>
           <label class="flex items-center gap-2">
             <input type="checkbox" bind:checked={$noCacheStore} />
             no-cache
