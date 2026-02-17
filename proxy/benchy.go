@@ -710,15 +710,16 @@ func normalizeBenchyQueueModels(primary string, queue []string) ([]string, error
 		}
 		out = append(out, s)
 	}
-	if len(out) > 0 {
-		return out, nil
-	}
 
 	s := strings.TrimSpace(primary)
 	if s == "" {
-		return nil, errors.New("model is required")
+		if len(out) == 0 {
+			return nil, errors.New("model is required")
+		}
+		return out, nil
 	}
-	return []string{s}, nil
+	// Always place primary as the first model; append any additional queue models after it.
+	return append([]string{s}, out...), nil
 }
 
 func (pm *ProxyManager) ensureBenchyModelReady(ctx context.Context, realModelName string) error {

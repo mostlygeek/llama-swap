@@ -5,6 +5,77 @@ import (
 	"testing"
 )
 
+func TestNormalizeBenchyQueueModels(t *testing.T) {
+	tests := []struct {
+		name    string
+		primary string
+		queue   []string
+		want    []string
+		wantErr bool
+	}{
+		{
+			name:    "primary only, no queue",
+			primary: "model-a",
+			queue:   nil,
+			want:    []string{"model-a"},
+		},
+		{
+			name:    "primary with additional queue models",
+			primary: "model-a",
+			queue:   []string{"model-b", "model-c"},
+			want:    []string{"model-a", "model-b", "model-c"},
+		},
+		{
+			name:    "primary with empty queue",
+			primary: "model-a",
+			queue:   []string{},
+			want:    []string{"model-a"},
+		},
+		{
+			name:    "primary with whitespace-only queue entries",
+			primary: "model-a",
+			queue:   []string{"  model-b  ", "", "  ", "model-c"},
+			want:    []string{"model-a", "model-b", "model-c"},
+		},
+		{
+			name:    "no primary, queue only",
+			primary: "",
+			queue:   []string{"model-b", "model-c"},
+			want:    []string{"model-b", "model-c"},
+		},
+		{
+			name:    "both empty returns error",
+			primary: "",
+			queue:   []string{},
+			wantErr: true,
+		},
+		{
+			name:    "whitespace primary, empty queue returns error",
+			primary: "   ",
+			queue:   []string{},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := normalizeBenchyQueueModels(tt.primary, tt.queue)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("want: %#v, got: %#v", tt.want, got)
+			}
+		})
+	}
+}
+
 func TestBuildBenchyArgsRequired(t *testing.T) {
 	opts := benchyRunOptions{
 		PP:   []int{512, 2048},

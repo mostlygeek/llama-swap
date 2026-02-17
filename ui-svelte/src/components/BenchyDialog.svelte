@@ -61,12 +61,6 @@
     }
   });
 
-  $effect(() => {
-    if (!open || !$enableQueueStore) return;
-    if ($queueModelsStore.trim() !== "") return;
-    if (!model) return;
-    queueModelsStore.set(model);
-  });
 
   function handleDialogClose() {
     optionsError = null;
@@ -169,10 +163,7 @@
         opts.trustRemoteCode = trustRemoteCode;
       }
 
-      if ($enableQueueStore) {
-        if (queueModels.length === 0) {
-          throw new Error("Queue mode is enabled but no models were provided");
-        }
+      if ($enableQueueStore && queueModels.length > 0) {
         opts.queueModels = queueModels;
       }
 
@@ -229,11 +220,14 @@
 
         {#if $enableQueueStore}
           <label class="text-sm block">
-            <div class="text-txtsecondary mb-1">Queue models (orden, uno por línea o separados por coma)</div>
+            <div class="text-txtsecondary mb-1">
+              Additional models to run after <span class="font-mono text-txtmain">{model || "primary"}</span>
+              (one per line or comma-separated)
+            </div>
             <textarea
               class="w-full min-h-20 px-2 py-1 rounded border border-card-border bg-background font-mono"
               bind:value={$queueModelsStore}
-              placeholder={(model || "") + "\\nQwen/Qwen3-Coder-Next-FP8\\nMiniMax-M2.5-AWQ-Optimized"}
+              placeholder={"Qwen/Qwen3-Coder-Next-FP8\nMiniMax-M2.5-AWQ-Optimized"}
             ></textarea>
           </label>
         {/if}
