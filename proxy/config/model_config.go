@@ -36,6 +36,10 @@ type ModelConfig struct {
 
 	// override global setting
 	SendLoadingState *bool `yaml:"sendLoadingState"`
+
+	// Maximum time in seconds for a request to complete before killing the process
+	// 0 means no timeout (default)
+	RequestTimeout int `yaml:"requestTimeout"`
 }
 
 func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
@@ -53,6 +57,7 @@ func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		ConcurrencyLimit: 0,
 		Name:             "",
 		Description:      "",
+		RequestTimeout:   0,
 	}
 
 	// the default cmdStop to taskkill /f /t /pid ${PID}
