@@ -165,6 +165,9 @@
               {#if model.description}
                 <p class={model.unlisted ? "text-opacity-70" : ""}><em>{model.description}</em></p>
               {/if}
+              {#if model.aliases && model.aliases.length > 0}
+                <p class="text-xs text-txtsecondary">Aliases: {model.aliases.join(", ")}</p>
+              {/if}
             </td>
             <td class="w-12">
               {#if model.state === "stopped"}
