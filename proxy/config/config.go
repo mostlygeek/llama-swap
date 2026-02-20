@@ -387,6 +387,24 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			}
 		}
 
+		// Auto-register setParamsByID keys as aliases (skip the model's own ID)
+		for key := range modelConfig.Filters.SetParamsByID {
+			if key == modelId {
+				continue
+			}
+			if _, exists := config.Models[key]; exists {
+				return Config{}, fmt.Errorf("model %s filters.setParamsByID: key '%s' conflicts with an existing model ID", modelId, key)
+			}
+			if existingModel, exists := config.aliases[key]; exists {
+				if existingModel != modelId {
+					return Config{}, fmt.Errorf("duplicate alias '%s' in model %s filters.setParamsByID, already used by model %s", key, modelId, existingModel)
+				}
+				continue // already registered as explicit alias for this model
+			}
+			config.aliases[key] = modelId
+			modelConfig.Aliases = append(modelConfig.Aliases, key)
+		}
+
 		if _, err := url.Parse(modelConfig.Proxy); err != nil {
 			return Config{}, fmt.Errorf("model %s: invalid proxy URL: %w", modelId, err)
 		}

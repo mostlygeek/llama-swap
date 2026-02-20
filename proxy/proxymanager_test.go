@@ -1047,15 +1047,13 @@ func TestProxyManager_FiltersStripParams(t *testing.T) {
 }
 
 func TestProxyManager_FiltersSetParamsByID(t *testing.T) {
+	// no explicit aliases — setParamsByID keys are auto-registered as aliases
 	configStr := strings.Replace(`
 logLevel: error
 models:
   model1:
     cmd: 'SRPATH --port ${PORT} --silent --respond model1'
     proxy: "http://127.0.0.1:${PORT}"
-    aliases:
-      - model1:high
-      - model1:low
     filters:
       setParams:
         reasoning_effort: medium

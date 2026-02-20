@@ -73,6 +73,72 @@ models:
 	}
 }
 
+func TestConfig_SetParamsByIDAutoAlias(t *testing.T) {
+	content := `
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    filters:
+      setParamsByID:
+        "${MODEL_ID}:high":
+          reasoning_effort: high
+        "${MODEL_ID}:low":
+          reasoning_effort: low
+`
+	cfg, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.NoError(t, err)
+
+	// Keys (other than the model's own ID) should be registered as aliases
+	realName, found := cfg.RealModelName("model1:high")
+	assert.True(t, found, "model1:high should be an auto-registered alias")
+	assert.Equal(t, "model1", realName)
+
+	realName, found = cfg.RealModelName("model1:low")
+	assert.True(t, found, "model1:low should be an auto-registered alias")
+	assert.Equal(t, "model1", realName)
+
+	// Auto-aliases should also appear in modelConfig.Aliases
+	aliases := cfg.Models["model1"].Aliases
+	assert.Contains(t, aliases, "model1:high")
+	assert.Contains(t, aliases, "model1:low")
+}
+
+func TestConfig_SetParamsByIDAutoAliasConflictWithModelID(t *testing.T) {
+	content := `
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    filters:
+      setParamsByID:
+        model2:
+          reasoning_effort: high
+  model2:
+    cmd: path/to/cmd --port ${PORT}
+`
+	_, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.ErrorContains(t, err, "conflicts with an existing model ID")
+}
+
+func TestConfig_SetParamsByIDAutoAliasConflictWithOtherModel(t *testing.T) {
+	content := `
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    filters:
+      setParamsByID:
+        "shared-alias":
+          reasoning_effort: high
+  model2:
+    cmd: path/to/cmd --port ${PORT}
+    filters:
+      setParamsByID:
+        "shared-alias":
+          reasoning_effort: low
+`
+	_, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.ErrorContains(t, err, "duplicate alias")
+}
+
 func TestConfig_ModelFiltersWithSetParams(t *testing.T) {
 	content := `
 models:

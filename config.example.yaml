@@ -221,6 +221,7 @@ models:
       # - run after setParams so it will override any settings
       # - protected params like "model" cannot be overridden
       # - values can be strings, numbers, booleans, arrays, or objects
+      # - model aliases will be automatically created for each key
       setParamsByID:
         "${MODEL_ID}":
           chat_template_kwargs:
@@ -238,8 +239,6 @@ models:
     # - useful for impersonating a specific model
     aliases:
       - "gpt-4o-mini"
-      - "${MODEL_ID}:unpredictable"
-      - "${MODEL_ID}:deterministic"
 
     # metadata: a dictionary of arbitrary values that are included in /v1/models
     # - optional, default: empty dictionary
