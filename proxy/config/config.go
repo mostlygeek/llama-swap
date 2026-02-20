@@ -294,6 +294,24 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			modelConfig.CheckEndpoint = strings.ReplaceAll(modelConfig.CheckEndpoint, macroSlug, macroStr)
 			modelConfig.Filters.StripParams = strings.ReplaceAll(modelConfig.Filters.StripParams, macroSlug, macroStr)
 
+			// Substitute macros in SetParamsByID keys and values
+			if len(modelConfig.Filters.SetParamsByID) > 0 {
+				newSetParamsByID := make(map[string]map[string]any, len(modelConfig.Filters.SetParamsByID))
+				for key, paramMap := range modelConfig.Filters.SetParamsByID {
+					newKey := strings.ReplaceAll(key, macroSlug, macroStr)
+					newValAny, err := substituteMacroInValue(any(paramMap), entry.Name, entry.Value)
+					if err != nil {
+						return Config{}, fmt.Errorf("model %s filters.setParamsByID: %s", modelId, err.Error())
+					}
+					newParamMap, ok := newValAny.(map[string]any)
+					if !ok {
+						return Config{}, fmt.Errorf("model %s filters.setParamsByID: unexpected type after macro substitution", modelId)
+					}
+					newSetParamsByID[newKey] = newParamMap
+				}
+				modelConfig.Filters.SetParamsByID = newSetParamsByID
+			}
+
 			// Substitute in metadata (type-preserving)
 			if len(modelConfig.Metadata) > 0 {
 				result, err := substituteMacroInValue(modelConfig.Metadata, entry.Name, entry.Value)
@@ -357,6 +375,34 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			if err := validateNestedForUnknownMacros(modelConfig.Metadata, fmt.Sprintf("model %s metadata", modelId)); err != nil {
 				return Config{}, err
 			}
+		}
+
+		// Validate SetParamsByID keys and values
+		for key, paramMap := range modelConfig.Filters.SetParamsByID {
+			if matches := macroPatternRegex.FindAllStringSubmatch(key, -1); len(matches) > 0 {
+				return Config{}, fmt.Errorf("unknown macro '${%s}' found in model %s filters.setParamsByID key", matches[0][1], modelId)
+			}
+			if err := validateNestedForUnknownMacros(any(paramMap), fmt.Sprintf("model %s filters.setParamsByID[%s]", modelId, key)); err != nil {
+				return Config{}, err
+			}
+		}
+
+		// Auto-register setParamsByID keys as aliases (skip the model's own ID)
+		for key := range modelConfig.Filters.SetParamsByID {
+			if key == modelId {
+				continue
+			}
+			if _, exists := config.Models[key]; exists {
+				return Config{}, fmt.Errorf("model %s filters.setParamsByID: key '%s' conflicts with an existing model ID", modelId, key)
+			}
+			if existingModel, exists := config.aliases[key]; exists {
+				if existingModel != modelId {
+					return Config{}, fmt.Errorf("duplicate alias '%s' in model %s filters.setParamsByID, already used by model %s", key, modelId, existingModel)
+				}
+				continue // already registered as explicit alias for this model
+			}
+			config.aliases[key] = modelId
+			modelConfig.Aliases = append(modelConfig.Aliases, key)
 		}
 
 		if _, err := url.Parse(modelConfig.Proxy); err != nil {
