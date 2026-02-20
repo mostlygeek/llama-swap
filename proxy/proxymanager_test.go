@@ -1046,6 +1046,61 @@ func TestProxyManager_FiltersStripParams(t *testing.T) {
 	// t.Logf("%v", response)
 }
 
+func TestProxyManager_FiltersSetParamsByID(t *testing.T) {
+	// no explicit aliases — setParamsByID keys are auto-registered as aliases
+	configStr := strings.Replace(`
+logLevel: error
+models:
+  model1:
+    cmd: 'SRPATH --port ${PORT} --silent --respond model1'
+    proxy: "http://127.0.0.1:${PORT}"
+    filters:
+      setParams:
+        reasoning_effort: medium
+      setParamsByID:
+        "${MODEL_ID}:high":
+          reasoning_effort: high
+        "${MODEL_ID}:low":
+          reasoning_effort: low
+`, "SRPATH", simpleResponderPath, -1)
+
+	cfg, err := config.LoadConfigFromReader(strings.NewReader(configStr))
+	if !assert.NoError(t, err, "invalid test configuration") {
+		return
+	}
+
+	proxy := New(cfg)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+
+	tests := []struct {
+		requestedModel string
+		wantEffort     string
+	}{
+		// setParams applies, no setParamsByID match
+		{requestedModel: "model1", wantEffort: "medium"},
+		// setParamsByID overrides setParams
+		{requestedModel: "model1:high", wantEffort: "high"},
+		{requestedModel: "model1:low", wantEffort: "low"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.requestedModel, func(t *testing.T) {
+			reqBody := fmt.Sprintf(`{"model":%q}`, tt.requestedModel)
+			req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+			w := CreateTestResponseRecorder()
+			proxy.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+
+			var response map[string]interface{}
+			assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+
+			requestBody, _ := response["request_body"].(string)
+			gotEffort := gjson.Get(requestBody, "reasoning_effort").String()
+			assert.Equal(t, tt.wantEffort, gotEffort, "reasoning_effort mismatch for model %s", tt.requestedModel)
+		})
+	}
+}
+
 func TestProxyManager_HealthEndpoint(t *testing.T) {
 	config := config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,

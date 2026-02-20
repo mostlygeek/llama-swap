@@ -14,12 +14,13 @@ import (
 )
 
 type Model struct {
-	Id          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	State       string `json:"state"`
-	Unlisted    bool   `json:"unlisted"`
-	PeerID      string `json:"peerID"`
+	Id          string   `json:"id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	State       string   `json:"state"`
+	Unlisted    bool     `json:"unlisted"`
+	PeerID      string   `json:"peerID"`
+	Aliases     []string `json:"aliases,omitempty"`
 }
 
 func addApiHandlers(pm *ProxyManager) {
@@ -83,6 +84,7 @@ func (pm *ProxyManager) getModelStatus() []Model {
 			Description: pm.config.Models[modelID].Description,
 			State:       state,
 			Unlisted:    pm.config.Models[modelID].Unlisted,
+			Aliases:     pm.config.Models[modelID].Aliases,
 		})
 	}
 

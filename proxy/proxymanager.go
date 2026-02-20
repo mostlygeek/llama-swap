@@ -720,6 +720,17 @@ func (pm *ProxyManager) proxyInferenceHandler(c *gin.Context) {
 			}
 		}
 
+		// setParamsByID: set params based on the requested model ID (runs after setParams, can override it)
+		setParamsByIDParams, setParamsByIDKeys := pm.config.Models[modelID].Filters.SanitizedSetParamsByID(requestedModel)
+		for _, key := range setParamsByIDKeys {
+			pm.proxyLogger.Debugf("<%s> setting param by id: %s", requestedModel, key)
+			bodyBytes, err = sjson.SetBytes(bodyBytes, key, setParamsByIDParams[key])
+			if err != nil {
+				pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error setting parameter %s in request", key))
+				return
+			}
+		}
+
 		pm.proxyLogger.Debugf("ProxyManager using local Process for model: %s", requestedModel)
 		nextHandler = processGroup.ProxyRequest
 	} else if pm.peerProxy != nil && pm.peerProxy.HasPeerModel(requestedModel) {

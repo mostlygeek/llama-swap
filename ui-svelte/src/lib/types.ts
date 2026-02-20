@@ -9,6 +9,7 @@ export interface Model {
   description: string;
   unlisted: boolean;
   peerID: string;
+  aliases?: string[];
 }
 
 export interface Metrics {

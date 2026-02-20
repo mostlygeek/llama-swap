@@ -200,11 +200,20 @@
                                 "additionalProperties": true,
                                 "default": {},
                                 "description": "Dictionary of parameters to set/override in requests. Useful for enforcing specific parameter values. Protected params like 'model' cannot be overridden. Values can be strings, numbers, booleans, arrays, or objects."
+                            },
+                            "setParamsByID": {
+                                "type": "object",
+                                "additionalProperties": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                },
+                                "default": {},
+                                "description": "Dictionary mapping requested model IDs (or aliases) to parameters to set/override in requests. Applied after setParams and can override those values. Useful with aliases to vary behaviour depending on which alias the client used (e.g. different reasoning_effort per alias). Keys support ${MODEL_ID} macro substitution. Protected params like 'model' cannot be overridden."
                             }
                         },
                         "additionalProperties": false,
                         "default": {},
-                        "description": "Dictionary of filter settings. Supports stripParams and setParams."
+                        "description": "Dictionary of filter settings. Supports stripParams, setParams, and setParamsByID."
                     },
                     "metadata": {
                         "type": "object",

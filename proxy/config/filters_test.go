@@ -162,6 +162,123 @@ func TestFilters_SanitizedSetParams(t *testing.T) {
 	}
 }
 
+func TestFilters_SanitizedSetParamsByID(t *testing.T) {
+	tests := []struct {
+		name             string
+		setParamsByID    map[string]map[string]any
+		requestedModelID string
+		wantParams       map[string]any
+		wantKeys         []string
+	}{
+		{
+			name:             "empty SetParamsByID returns nil",
+			setParamsByID:    nil,
+			requestedModelID: "model1",
+			wantParams:       nil,
+			wantKeys:         nil,
+		},
+		{
+			name:             "empty map returns nil",
+			setParamsByID:    map[string]map[string]any{},
+			requestedModelID: "model1",
+			wantParams:       nil,
+			wantKeys:         nil,
+		},
+		{
+			name: "non-matching model ID returns nil",
+			setParamsByID: map[string]map[string]any{
+				"model2": {"temperature": 0.9},
+			},
+			requestedModelID: "model1",
+			wantParams:       nil,
+			wantKeys:         nil,
+		},
+		{
+			name: "matching model ID returns correct params",
+			setParamsByID: map[string]map[string]any{
+				"model1": {"temperature": 0.7, "top_p": 0.9},
+				"model2": {"temperature": 0.5},
+			},
+			requestedModelID: "model1",
+			wantParams: map[string]any{
+				"temperature": 0.7,
+				"top_p":       0.9,
+			},
+			wantKeys: []string{"temperature", "top_p"},
+		},
+		{
+			name: "protected param model is filtered out",
+			setParamsByID: map[string]map[string]any{
+				"model1": {
+					"model":       "should-be-filtered",
+					"temperature": 0.7,
+				},
+			},
+			requestedModelID: "model1",
+			wantParams: map[string]any{
+				"temperature": 0.7,
+			},
+			wantKeys: []string{"temperature"},
+		},
+		{
+			name: "only protected param returns nil",
+			setParamsByID: map[string]map[string]any{
+				"model1": {
+					"model": "should-be-filtered",
+				},
+			},
+			requestedModelID: "model1",
+			wantParams:       nil,
+			wantKeys:         nil,
+		},
+		{
+			name: "keys are sorted",
+			setParamsByID: map[string]map[string]any{
+				"model1": {
+					"z_param": "z",
+					"a_param": "a",
+					"m_param": "m",
+				},
+			},
+			requestedModelID: "model1",
+			wantParams: map[string]any{
+				"z_param": "z",
+				"a_param": "a",
+				"m_param": "m",
+			},
+			wantKeys: []string{"a_param", "m_param", "z_param"},
+		},
+		{
+			name: "alias style key lookup",
+			setParamsByID: map[string]map[string]any{
+				"model1:high": {"reasoning_effort": "high"},
+				"model1:low":  {"reasoning_effort": "low"},
+			},
+			requestedModelID: "model1:high",
+			wantParams: map[string]any{
+				"reasoning_effort": "high",
+			},
+			wantKeys: []string{"reasoning_effort"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := Filters{SetParamsByID: tt.setParamsByID}
+			gotParams, gotKeys := f.SanitizedSetParamsByID(tt.requestedModelID)
+
+			if tt.wantParams == nil {
+				assert.Nil(t, gotParams)
+				assert.Nil(t, gotKeys)
+				return
+			}
+
+			assert.Equal(t, tt.wantKeys, gotKeys)
+			assert.Equal(t, tt.wantParams, gotParams)
+		})
+	}
+}
+
 func TestProtectedParams(t *testing.T) {
 	// Verify that "model" is protected
 	assert.Contains(t, ProtectedParams, "model")

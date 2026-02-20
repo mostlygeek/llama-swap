@@ -25,6 +25,11 @@
       <optgroup label="Local">
         {#each grouped.local as model (model.id)}
           <option value={model.id}>{model.id}</option>
+          {#if model.aliases}
+            {#each model.aliases as alias (alias)}
+              <option value={alias}>  ↳ {alias}</option>
+            {/each}
+          {/if}
         {/each}
       </optgroup>
     {/if}
