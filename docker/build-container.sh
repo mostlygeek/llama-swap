@@ -45,6 +45,7 @@ fi
 # variable, this permits testing with forked llama.cpp repositories
 BASE_IMAGE=${BASE_LLAMACPP_IMAGE:-ghcr.io/ggml-org/llama.cpp}
 SD_IMAGE=${BASE_SDCPP_IMAGE:-ghcr.io/leejet/stable-diffusion.cpp}
+WH_IMAGE=${BASE_WHISPERCPP_IMAGE:-ghcr.io/ggml-org/whisper.cpp}
 
 # Set llama-swap repository, automatically uses GITHUB_REPOSITORY variable
 # to enable easy container builds on forked repos
@@ -112,6 +113,7 @@ else
 fi
 
 SD_TAG=master-${ARCH}
+WH_TAG=main-${ARCH}
 
 # Abort if LCPP_TAG is empty.
 if [[ -z "$LCPP_TAG" ]]; then
@@ -153,6 +155,17 @@ for CONTAINER_TYPE in non-root root; do
       docker build --provenance=false -f llama-swap-sd.Containerfile \
         --build-arg BASE=${CONTAINER_TAG} \
         --build-arg SD_IMAGE=${SD_IMAGE} --build-arg SD_TAG=${SD_TAG} \
+        --build-arg UID=${USER_UID} --build-arg GID=${USER_GID} \
+        -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} . ;;
+  esac
+
+  # For architectures with whisper.cpp support, layer whisper-server on top
+  case "$ARCH" in
+    "cuda" | "musa" | "vulkan")
+      log_info "Adding whisper-server to $CONTAINER_TAG"
+      docker build -f llama-swap-whisper.Containerfile \
+        --build-arg BASE=${CONTAINER_TAG} \
+        --build-arg WH_IMAGE=${WH_IMAGE} --build-arg WH_TAG=${WH_TAG} \
         --build-arg UID=${USER_UID} --build-arg GID=${USER_GID} \
         -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} . ;;
   esac
