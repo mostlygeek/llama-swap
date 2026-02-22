@@ -146,6 +146,9 @@ type Config struct {
 	// present aliases to /v1/models OpenAI API listing
 	IncludeAliasesInList bool `yaml:"includeAliasesInList"`
 
+	// default ttl for automatic model unloading
+	TTL int `yaml:"ttl"`
+
 	// support API keys, see issue #433, #50, #251
 	RequiredAPIKeys []string `yaml:"apiKeys"`
 
@@ -220,6 +223,10 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	case LogToStdoutProxy, LogToStdoutUpstream, LogToStdoutBoth, LogToStdoutNone:
 	default:
 		return Config{}, fmt.Errorf("logToStdout must be one of: proxy, upstream, both, none")
+	}
+
+	if config.TTL < 0 {
+		return Config{}, fmt.Errorf("ttl must be non-negative")
 	}
 
 	// Populate the aliases map
@@ -412,6 +419,15 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		if modelConfig.SendLoadingState == nil {
 			v := config.SendLoadingState
 			modelConfig.SendLoadingState = &v
+		}
+
+		if modelConfig.UnloadAfter == nil {
+			v := config.TTL
+			modelConfig.UnloadAfter = &v
+		}
+
+		if *modelConfig.UnloadAfter < 0 {
+			return Config{}, fmt.Errorf("model %s: ttl must be non-negative", modelId)
 		}
 
 		config.Models[modelId] = modelConfig

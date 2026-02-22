@@ -103,6 +103,12 @@
             "default": false,
             "description": "Inject loading status updates into the reasoning field. When true, a stream of loading messages will be sent to the client."
         },
+        "ttl": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Automatically unload models after ttl seconds. 0 disables unloading. Must be >0 to enable. Can be overridden per-model."
+        },
         "includeAliasesInList": {
             "type": "boolean",
             "default": false,
@@ -179,7 +185,7 @@
                         "type": "integer",
                         "minimum": 0,
                         "default": 0,
-                        "description": "Automatically unload the model after ttl seconds. 0 disables unloading. Must be >0 to enable."
+                        "description": "Automatically unload the model after ttl seconds. 0 disables unloading. Must be >0 to enable. Omitting this property will use the global setting."
                     },
                     "useModelName": {
                         "type": "string",
@@ -229,7 +235,7 @@
                     },
                     "sendLoadingState": {
                         "type": "boolean",
-                        "description": "Overrides the global sendLoadingState for this model. Ommitting this property will use the global setting."
+                        "description": "Overrides the global sendLoadingState for this model. Omitting this property will use the global setting."
                     },
                     "unlisted": {
                         "type": "boolean",

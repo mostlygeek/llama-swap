@@ -170,3 +170,64 @@ models:
 	assert.Equal(t, 0.7, setParams["temperature"])
 	assert.Equal(t, 0.9, setParams["top_p"])
 }
+
+func TestConfig_ModelTTL(t *testing.T) {
+	content := `
+ttl: 60
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    ttl: 30
+  model2:
+    cmd: path/to/cmd --port ${PORT}
+  model3:
+    cmd: path/to/cmd --port ${PORT}
+    ttl: 0
+`
+	config, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.NoError(t, err)
+	assert.Equal(t, 60, config.TTL)
+
+	// model1 has explicit TTL of 30
+	if assert.NotNil(t, config.Models["model1"].UnloadAfter) {
+		assert.Equal(t, 30, *config.Models["model1"].UnloadAfter)
+	}
+
+	// model2 uses global TTL of 60
+	if assert.NotNil(t, config.Models["model2"].UnloadAfter) {
+		assert.Equal(t, 60, *config.Models["model2"].UnloadAfter)
+	}
+
+	// model3 has explicit TTL of 0 (disabled)
+	if assert.NotNil(t, config.Models["model3"].UnloadAfter) {
+		assert.Equal(t, 0, *config.Models["model3"].UnloadAfter)
+	}
+}
+
+func TestConfig_NegativeTTLRejected(t *testing.T) {
+	t.Run("global negative TTL rejected", func(t *testing.T) {
+		content := `
+ttl: -1
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "ttl must be non-negative")
+	})
+
+	t.Run("per-model negative TTL rejected", func(t *testing.T) {
+		content := `
+ttl: 60
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    ttl: -1
+`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "model1")
+		assert.Contains(t, err.Error(), "ttl must be non-negative")
+	})
+}

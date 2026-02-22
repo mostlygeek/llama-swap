@@ -1046,12 +1046,16 @@ func (pm *ProxyManager) listRunningProcessesHandler(context *gin.Context) {
 	for _, processGroup := range pm.processGroups {
 		for _, process := range processGroup.processes {
 			if process.CurrentState() == StateReady {
+				ttl := 0
+				if process.config.UnloadAfter != nil {
+					ttl = *process.config.UnloadAfter
+				}
 				runningProcesses = append(runningProcesses, gin.H{
 					"model":       process.ID,
 					"state":       process.state,
 					"cmd":         process.config.Cmd,
 					"proxy":       process.config.Proxy,
-					"ttl":         process.config.UnloadAfter,
+					"ttl":         ttl,
 					"name":        process.config.Name,
 					"description": process.config.Description,
 				})
