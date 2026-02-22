@@ -1,4 +1,5 @@
 import type { ChatMessage, ChatCompletionRequest } from "./types";
+import { getAuthHeaders } from "../stores/auth";
 
 export interface StreamChunk {
   content: string;
@@ -53,6 +54,7 @@ export async function* streamChatCompletion(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      ...getAuthHeaders(),
     },
     body: JSON.stringify(request),
     signal,

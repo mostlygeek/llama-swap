@@ -1,6 +1,7 @@
 <script lang="ts">
   import { models } from "../../stores/api";
   import { persistentStore } from "../../stores/persistent";
+  import { apiKey } from "../../stores/auth";
   import { streamChatCompletion } from "../../lib/chatApi";
   import { playgroundStores } from "../../stores/playgroundActivity";
   import type { ChatMessage, ContentPart } from "../../lib/types";
@@ -329,6 +330,26 @@
           bind:value={$systemPromptStore}
           disabled={isStreaming}
         ></textarea>
+      </div>
+      <div class="mb-4">
+        <label class="block text-sm font-medium mb-1" for="api-key">API Key</label>
+        <div class="flex gap-2">
+          <input
+            id="api-key"
+            type="password"
+            class="w-full px-3 py-2 rounded border border-gray-200 dark:border-white/10 bg-card focus:outline-none focus:ring-2 focus:ring-primary"
+            placeholder="sk-..."
+            bind:value={$apiKey}
+            disabled={isStreaming}
+          />
+          <button
+            class="btn"
+            onclick={() => apiKey.set("")}
+            disabled={!$apiKey}
+          >
+            Clear
+          </button>
+        </div>
       </div>
       <div>
         <label class="block text-sm font-medium mb-1" for="temperature">
