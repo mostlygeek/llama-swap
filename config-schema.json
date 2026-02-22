@@ -361,6 +361,11 @@
                         "additionalProperties": false,
                         "default": {},
                         "description": "Dictionary of filter settings for peer requests. Supports stripParams and setParams."
+                    },
+                    "pathRewrite": {
+                        "type": "string",
+                        "default": "",
+                        "description": "Optional path rewriting rule. Formats: 'strip:/v1' removes the /v1 prefix from request paths, 'replace:/v1:/api/v4' replaces /v1 with /api/v4. Useful for API providers that don't follow OpenAI's standard /v1/* path convention."
                     }
                 }
             },

@@ -266,3 +266,155 @@ func TestProxyRequest_SSEHeaderModification(t *testing.T) {
 	// The X-Accel-Buffering header should be set to "no" for SSE
 	assert.Equal(t, "no", w.Header().Get("X-Accel-Buffering"))
 }
+
+func TestApplyPathRewrite_Strip(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     string
+		rewrite  string
+		expected string
+	}{
+		{"strip v1 prefix", "/v1/chat/completions", "strip:/v1", "/chat/completions"},
+		{"strip not present", "/api/chat", "strip:/v1", "/api/chat"},
+		{"empty rewrite", "/v1/chat", "", "/v1/chat"},
+		{"invalid format", "/v1/chat", "invalid", "/v1/chat"},
+		{"strip multiple segments", "/v1/models/list", "strip:/v1", "/models/list"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := applyPathRewrite(tt.path, tt.rewrite)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestApplyPathRewrite_Replace(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     string
+		rewrite  string
+		expected string
+	}{
+		{"replace v1 with v4", "/v1/chat/completions", "replace:/v1:/v4", "/v4/chat/completions"},
+		{"replace with complex path", "/v1/chat", "replace:/v1:/api/coding/v4", "/api/coding/v4/chat"},
+		{"no match", "/api/chat", "replace:/v1:/v4", "/api/chat"},
+		{"replace with empty string", "/v1/chat", "replace:/v1:", "/chat"},
+		{"replace with empty pattern", "/v1/chat", "replace:", "/v1/chat"},
+		{"replace multiple occurrences - first only", "/v1/v1/test", "replace:/v1:/v2", "/v2/v1/test"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := applyPathRewrite(tt.path, tt.rewrite)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestProxyRequest_WithPathRewrite(t *testing.T) {
+	var receivedPath string
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer testServer.Close()
+
+	proxyURL, _ := url.Parse(testServer.URL)
+	peers := config.PeerDictionaryConfig{
+		"peer1": config.PeerConfig{
+			Proxy:       testServer.URL,
+			ProxyURL:    proxyURL,
+			PathRewrite: "strip:/v1",
+			Models:      []string{"test-model"},
+		},
+	}
+	pm, err := NewPeerProxy(peers, testLogger)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	w := httptest.NewRecorder()
+	err = pm.ProxyRequest("test-model", w, req)
+	assert.NoError(t, err)
+	assert.Equal(t, "/chat/completions", receivedPath)
+}
+
+func TestProxyRequest_PathRewriteReplace(t *testing.T) {
+	var receivedPath string
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer testServer.Close()
+
+	proxyURL, _ := url.Parse(testServer.URL)
+	peers := config.PeerDictionaryConfig{
+		"peer1": config.PeerConfig{
+			Proxy:       testServer.URL,
+			ProxyURL:    proxyURL,
+			PathRewrite: "replace:/v1:/api/coding/v4",
+			Models:      []string{"test-model"},
+		},
+	}
+	pm, err := NewPeerProxy(peers, testLogger)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	w := httptest.NewRecorder()
+	err = pm.ProxyRequest("test-model", w, req)
+	assert.NoError(t, err)
+	assert.Equal(t, "/api/coding/v4/chat/completions", receivedPath)
+}
+
+func TestProxyRequest_NoPathRewrite(t *testing.T) {
+	var receivedPath string
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer testServer.Close()
+
+	proxyURL, _ := url.Parse(testServer.URL)
+	peers := config.PeerDictionaryConfig{
+		"peer1": config.PeerConfig{
+			Proxy:    testServer.URL,
+			ProxyURL: proxyURL,
+			Models:   []string{"test-model"},
+		},
+	}
+	pm, err := NewPeerProxy(peers, testLogger)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	w := httptest.NewRecorder()
+	err = pm.ProxyRequest("test-model", w, req)
+	assert.NoError(t, err)
+	assert.Equal(t, "/v1/chat/completions", receivedPath)
+}
+
+func TestProxyRequest_PathRewriteWithInvalidFormat(t *testing.T) {
+	var receivedPath string
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer testServer.Close()
+
+	proxyURL, _ := url.Parse(testServer.URL)
+	peers := config.PeerDictionaryConfig{
+		"peer1": config.PeerConfig{
+			Proxy:       testServer.URL,
+			ProxyURL:    proxyURL,
+			PathRewrite: "invalid-format",
+			Models:      []string{"test-model"},
+		},
+	}
+	pm, err := NewPeerProxy(peers, testLogger)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	w := httptest.NewRecorder()
+	err = pm.ProxyRequest("test-model", w, req)
+	assert.NoError(t, err)
+	assert.Equal(t, "/v1/chat/completions", receivedPath)
+}

@@ -439,3 +439,22 @@ peers:
         provider:
           data_collection: "deny"
           zdr: true
+  # Example: z.ai endpoint that doesn't use /v1/ prefix
+  z-ai-provider:
+    proxy: https://api.z.ai/api/coding/paas/v4
+    # pathRewrite: optional path transformation rule
+    # - optional, default: ""
+    # - "strip:/v1" removes the /v1 prefix from requests
+    # - "replace:/v1:/api/v4" replaces /v1 with /api/v4
+    # Example: /v1/chat/completions becomes /chat/completions with "strip:/v1"
+    pathRewrite: "strip:/v1"
+    apiKey: ${env.ZAI_API_KEY}
+    models:
+      - glm-4.7
+  # Example: Replace path prefix instead of stripping
+  custom-api:
+    proxy: https://api.example.com
+    pathRewrite: "replace:/v1:/api/v2"
+    apiKey: ${env.CUSTOM_API_KEY}
+    models:
+      - custom-model

@@ -73,6 +73,46 @@ models: []
 `,
 			wantErr: "peer models can not be empty",
 		},
+		{
+			name: "valid pathRewrite strip",
+			yaml: `
+proxy: http://localhost:8080
+pathRewrite: strip:/v1
+models:
+  - model_a
+`,
+			wantErr: "",
+		},
+		{
+			name: "valid pathRewrite replace",
+			yaml: `
+proxy: http://localhost:8080
+pathRewrite: replace:/v1:/api
+models:
+  - model_a
+`,
+			wantErr: "",
+		},
+		{
+			name: "invalid pathRewrite format",
+			yaml: `
+proxy: http://localhost:8080
+pathRewrite: invalid-format
+models:
+  - model_a
+`,
+			wantErr: "invalid pathRewrite format",
+		},
+		{
+			name: "invalid pathRewrite unknown action",
+			yaml: `
+proxy: http://localhost:8080
+pathRewrite: delete:/v1
+models:
+  - model_a
+`,
+			wantErr: "invalid pathRewrite format",
+		},
 	}
 
 	for _, tt := range tests {
