@@ -359,23 +359,16 @@
     justify-content: center;
     padding: 0.25rem;
     border-radius: 0.25rem;
-    border: 1px solid transparent;
-    background: transparent;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
     color: var(--color-txtsecondary);
     cursor: pointer;
-    opacity: 0;
-    transition: opacity 0.15s, background-color 0.15s, border-color 0.15s;
+    transition: background-color 0.15s;
     line-height: 0;
   }
 
-  .prose :global(pre:hover .code-copy-btn) {
-    opacity: 1;
-    border-color: var(--color-border);
-    background: var(--color-surface);
-  }
-
   .prose :global(.code-copy-btn:hover) {
-    background: var(--color-secondary) !important;
+    background: var(--color-secondary);
   }
 
   .prose :global(.code-copy-btn.copied) {
