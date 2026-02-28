@@ -62,11 +62,13 @@ Inspect request and responses:
 
 Manually load and unload models: 
 
-<img width="1143" height="741" alt="image" src="https://github.com/user-attachments/assets/cc0183b6-2406-474a-b35b-5c9a27821cfb" />
+<img width="1109" height="719" alt="image" src="https://github.com/user-attachments/assets/02b1e1f2-abd0-4050-84ae-facd66ff01c4" />
+
 
 Real time log streaming: 
 
-<img width="1143" height="741" alt="image" src="https://github.com/user-attachments/assets/fed84c0e-b491-477b-bfd1-d545b9560468" />
+<img width="1107" height="559" alt="image" src="https://github.com/user-attachments/assets/39669a10-cff2-409e-836a-5bad8bd0140c" />
+
 
 ## Installation
 
