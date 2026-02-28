@@ -20,6 +20,32 @@ func TestConfig_ModelConfigSanitizedCommand(t *testing.T) {
 	assert.Equal(t, []string{"python", "model1.py", "--arg1", "value1", "--arg2", "value2"}, args)
 }
 
+func TestModelConfig_ContextSize(t *testing.T) {
+	tests := []struct {
+		name     string
+		cmd      string
+		expected int
+	}{
+		{"long flag", "llama-server --port 8080 --ctx-size 4096 --model foo.gguf", 4096},
+		{"equals syntax", "llama-server --ctx-size=196608 --port 8080", 196608},
+		{"short flag", "llama-server -p 8080 -c 8192 -m foo.gguf", 8192},
+		{"no context size", "llama-server --port 8080 --model foo.gguf", 0},
+		{"short flag non-numeric", "python -c 'print(1)' --ctx-size 2048", 2048},
+		{"last occurrence wins", "llama-server --ctx-size 1024 --ctx-size 2048", 2048},
+		{"empty cmd", "", 0},
+		{"large context", "llama-server -c 131072", 131072},
+		{"vllm max-model-len", "vllm serve model --max-model-len 32768 --port 8080", 32768},
+		{"vllm max-model-len equals", "vllm serve model --max-model-len=65536", 65536},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &ModelConfig{Cmd: tt.cmd}
+			assert.Equal(t, tt.expected, m.ContextSize())
+		})
+	}
+}
+
 func TestConfig_ModelFilters(t *testing.T) {
 	content := `
 macros:

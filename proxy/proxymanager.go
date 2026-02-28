@@ -518,6 +518,10 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 			record["description"] = desc
 		}
 
+		if ctxSize := modelConfig.ContextSize(); ctxSize > 0 {
+			record["context_length"] = ctxSize
+		}
+
 		// Add metadata if present
 		if len(modelConfig.Metadata) > 0 {
 			record["meta"] = gin.H{

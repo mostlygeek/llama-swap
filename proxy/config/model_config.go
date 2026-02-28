@@ -3,6 +3,8 @@ package config
 import (
 	"errors"
 	"runtime"
+	"strconv"
+	"strings"
 )
 
 type ModelConfig struct {
@@ -70,6 +72,44 @@ func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 func (m *ModelConfig) SanitizedCommand() ([]string, error) {
 	return SanitizeCommand(m.Cmd)
+}
+
+// ContextSize extracts the context size from the model's cmd arguments.
+// It looks for --ctx-size / -c (llama.cpp) and --max-model-len (vLLM) flags.
+// Returns 0 if no context size is found or the value is not a valid positive integer.
+// If specified multiple times, the last occurrence wins.
+func (m *ModelConfig) ContextSize() int {
+	args, err := SanitizeCommand(m.Cmd)
+	if err != nil || len(args) == 0 {
+		return 0
+	}
+
+	ctxSize := 0
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+
+		switch {
+		case arg == "--ctx-size" || arg == "-c" || arg == "--max-model-len":
+			if i+1 < len(args) {
+				if n, err := strconv.Atoi(args[i+1]); err == nil && n > 0 {
+					ctxSize = n
+				}
+				i++ // skip the value
+			}
+		case strings.HasPrefix(arg, "--ctx-size="):
+			val := strings.TrimPrefix(arg, "--ctx-size=")
+			if n, err := strconv.Atoi(val); err == nil && n > 0 {
+				ctxSize = n
+			}
+		case strings.HasPrefix(arg, "--max-model-len="):
+			val := strings.TrimPrefix(arg, "--max-model-len=")
+			if n, err := strconv.Atoi(val); err == nil && n > 0 {
+				ctxSize = n
+			}
+		}
+	}
+
+	return ctxSize
 }
 
 // ModelFilters embeds Filters and adds legacy support for strip_params field

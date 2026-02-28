@@ -410,6 +410,45 @@ models:
 	assert.False(t, exists, "model2 should not have llamaswap_meta")
 }
 
+func TestProxyManager_ListModelsHandler_MaxInputTokens(t *testing.T) {
+	configYaml := `
+healthCheckTimeout: 15
+logLevel: error
+startPort: 10100
+models:
+  with-ctx:
+    cmd: llama-server --port ${PORT} --ctx-size 131072 --model foo.gguf
+  with-ctx-short:
+    cmd: llama-server --port ${PORT} -c 4096 --model bar.gguf
+  without-ctx:
+    cmd: llama-server --port ${PORT} --model baz.gguf
+`
+	processedConfig, err := config.LoadConfigFromReader(strings.NewReader(configYaml))
+	assert.NoError(t, err)
+
+	proxy := New(processedConfig)
+
+	req := httptest.NewRequest("GET", "/v1/models", nil)
+	w := CreateTestResponseRecorder()
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	result := gjson.ParseBytes(w.Body.Bytes())
+
+	for _, model := range result.Get("data").Array() {
+		id := model.Get("id").String()
+		switch id {
+		case "with-ctx":
+			assert.Equal(t, int64(131072), model.Get("context_length").Int())
+		case "with-ctx-short":
+			assert.Equal(t, int64(4096), model.Get("context_length").Int())
+		case "without-ctx":
+			assert.False(t, model.Get("context_length").Exists(), "without-ctx should not have context_length")
+		}
+	}
+}
+
 func TestProxyManager_ListModelsHandler_SortedByID(t *testing.T) {
 	// Intentionally add models in non-sorted order and with an unlisted model
 	config := config.Config{
