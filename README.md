@@ -48,13 +48,25 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
 
 ### Web UI
 
-llama-swap includes a real time web interface for monitoring logs and controlling models:
+llama-swap includes a real time web interface with a playground for testing out all sorts of local models: 
 
-<img width="1164" height="745" alt="image" src="https://github.com/user-attachments/assets/bacf3f9d-819f-430b-9ed2-1bfaa8d54579" />
+<img width="1125" height="876" alt="image" src="https://github.com/user-attachments/assets/8ee41947-97af-463d-b0f0-8e9c478fac07" />
 
-The Activity Page shows recent requests:
+View detailed token metrics:
 
-<img width="1360" height="963" alt="image" src="https://github.com/user-attachments/assets/5f3edee6-d03a-4ae5-ae06-b20ac1f135bd" />
+<img width="1111" height="515" alt="image" src="https://github.com/user-attachments/assets/64bfb280-d7a3-4126-971a-a128fd40410c" />
+
+Inspect request and responses:
+
+<img width="1111" height="720" alt="image" src="https://github.com/user-attachments/assets/24fe4aca-1448-4d7c-b9e8-a967589bda6c" />
+
+Manually load and unload models: 
+
+<img width="1143" height="741" alt="image" src="https://github.com/user-attachments/assets/cc0183b6-2406-474a-b35b-5c9a27821cfb" />
+
+Real time log streaming: 
+
+<img width="1143" height="741" alt="image" src="https://github.com/user-attachments/assets/fed84c0e-b491-477b-bfd1-d545b9560468" />
 
 ## Installation
 
