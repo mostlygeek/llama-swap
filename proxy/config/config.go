@@ -208,6 +208,12 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		return Config{}, err
 	}
 
+	// Expand model variants before any other processing
+	// This transforms template models with variants into individual model configs
+	if config.Models != nil {
+		config.Models = ExpandVariants(config.Models)
+	}
+
 	if config.HealthCheckTimeout < 15 {
 		config.HealthCheckTimeout = 15
 	}

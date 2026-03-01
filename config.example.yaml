@@ -277,6 +277,51 @@ models:
     # - optional, default: undefined (use global setting)
     sendLoadingState: false
 
+  # Variants example (issue #549):
+  # Use variants to generate multiple model configurations from a single template.
+  # Each variant key becomes a suffix to the model name (e.g., "Qwen3.5-thinking_normal").
+  # Variant's cmdAdd can override or add command line arguments.
+  "Qwen3.5-35B-A3B":
+    cmd: |
+      llama-server
+      --port ${PORT}
+      --model /models/Qwen3.5-35B-A3B.gguf
+      --temp 0.8
+      --ctx-size 16384
+    name: "Qwen3.5 35B"
+    description: "Qwen3.5 thinking model with multiple parameter variants"
+
+    # variants: generates multiple model configurations from this template
+    # - each key becomes a model name suffix (model-variant)
+    # - cmdAdd: additional/override command line arguments
+    # - name, description, env, aliases, unlisted: override base settings
+    variants:
+      # Generates: Qwen3.5-35B-A3B-thinking_normal
+      thinking_normal:
+        cmdAdd: --temp 1.0
+        name: "Qwen3.5 35B (Thinking, Normal)"
+        description: "For general tasks with thinking enabled"
+
+      # Generates: Qwen3.5-35B-A3B-thinking_coding
+      thinking_coding:
+        cmdAdd: --temp 0.6
+        name: "Qwen3.5 35B (Thinking, Coding)"
+        description: "For coding tasks with thinking enabled"
+
+      # Generates: Qwen3.5-35B-A3B-nothinking_normal
+      nothinking_normal:
+        cmdAdd: "--temp 1.0 --chat-template-kwargs '{\"enable_thinking\": false}'"
+        name: "Qwen3.5 35B (No Thinking, Normal)"
+        description: "For general tasks without thinking"
+
+      # Generates: Qwen3.5-35B-A3B-nothinking_coding
+      nothinking_coding:
+        cmdAdd: "--temp 0.6 --chat-template-kwargs '{\"enable_thinking\": false}'"
+        name: "Qwen3.5 35B (No Thinking, Coding)"
+        description: "For coding tasks without thinking"
+        aliases:
+          - "qwen-code"
+
   # Unlisted model example:
   "qwen-unlisted":
     # unlisted: boolean, true or false

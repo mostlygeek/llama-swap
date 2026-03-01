@@ -36,6 +36,33 @@ type ModelConfig struct {
 
 	// override global setting
 	SendLoadingState *bool `yaml:"sendLoadingState"`
+
+	// Variants: see issue #549
+	// Template-based configuration that generates multiple model variants
+	// Each variant key becomes a suffix to the model name (e.g., "model-variant")
+	// Variant values can override cmd arguments
+	Variants map[string]VariantConfig `yaml:"variants"`
+}
+
+// VariantConfig holds the configuration overrides for a model variant
+type VariantConfig struct {
+	// CmdAdd contains additional command line arguments to append or override
+	CmdAdd string `yaml:"cmdAdd"`
+
+	// Name override for this variant
+	Name string `yaml:"name"`
+
+	// Description override for this variant
+	Description string `yaml:"description"`
+
+	// Env additional environment variables for this variant
+	Env []string `yaml:"env"`
+
+	// Aliases additional aliases for this variant
+	Aliases []string `yaml:"aliases"`
+
+	// Unlisted override for this variant
+	Unlisted *bool `yaml:"unlisted"`
 }
 
 func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {

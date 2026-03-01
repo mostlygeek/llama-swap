@@ -235,6 +235,48 @@
                         "type": "boolean",
                         "default": false,
                         "description": "If true the model will not show up in /v1/models responses. It can still be used as normal in API requests."
+                    },
+                    "variants": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                                "cmdAdd": {
+                                    "type": "string",
+                                    "description": "Additional command line arguments to append or override. Arguments with the same flag name will override the base cmd."
+                                },
+                                "name": {
+                                    "type": "string",
+                                    "description": "Display name override for this variant."
+                                },
+                                "description": {
+                                    "type": "string",
+                                    "description": "Description override for this variant."
+                                },
+                                "env": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string",
+                                        "pattern": "^[A-Z_][A-Z0-9_]*=.*$"
+                                    },
+                                    "description": "Additional environment variables for this variant."
+                                },
+                                "aliases": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string",
+                                        "minLength": 1
+                                    },
+                                    "description": "Additional aliases for this variant."
+                                },
+                                "unlisted": {
+                                    "type": "boolean",
+                                    "description": "Override unlisted setting for this variant."
+                                }
+                            },
+                            "additionalProperties": false
+                        },
+                        "description": "Template-based configuration that generates multiple model variants. Each key becomes a suffix to the model name (e.g., 'model-variant'). Variant values can override cmd arguments and other settings. See issue #549."
                     }
                 }
             }
