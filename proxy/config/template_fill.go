@@ -65,7 +65,7 @@ func expandVariant(base ModelConfig, suffix string, variant VariantConfig) Model
 		Name:             base.Name,
 		Description:      base.Description,
 		ConcurrencyLimit: base.ConcurrencyLimit,
-		Filters:          base.Filters,
+		Filters:          copyFilters(base.Filters),
 		Macros:           copyMacroList(base.Macros),
 		Metadata:         copyMetadata(base.Metadata),
 		SendLoadingState: base.SendLoadingState,
@@ -274,6 +274,31 @@ func isArgument(token string) bool {
 func normalizeFlag(flag string) string {
 	flag = strings.TrimLeft(flag, "-")
 	return strings.ToLower(flag)
+}
+
+// copyFilters creates a deep copy of ModelFilters so expanded variants do not share map references.
+func copyFilters(f ModelFilters) ModelFilters {
+	result := ModelFilters{}
+	result.StripParams = f.StripParams
+	if f.SetParams != nil {
+		result.SetParams = make(map[string]any, len(f.SetParams))
+		for k, v := range f.SetParams {
+			result.SetParams[k] = v
+		}
+	}
+	if f.SetParamsByID != nil {
+		result.SetParamsByID = make(map[string]map[string]any, len(f.SetParamsByID))
+		for k, v := range f.SetParamsByID {
+			if v != nil {
+				copied := make(map[string]any, len(v))
+				for kk, vv := range v {
+					copied[kk] = vv
+				}
+				result.SetParamsByID[k] = copied
+			}
+		}
+	}
+	return result
 }
 
 // copyMacroList creates a copy of MacroList so expanded variants do not share the slice with the base.

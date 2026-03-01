@@ -456,7 +456,7 @@ func extractSnippet(s, substr string, maxLen int) string {
 	if start+maxLen > len(s) {
 		return s[start:]
 	}
-	return s[start : start+maxLen] + "..."
+	return s[start:start+maxLen] + "..."
 }
 
 func TestExpandVariants_TemplateRefSubstitutionInGroups(t *testing.T) {
