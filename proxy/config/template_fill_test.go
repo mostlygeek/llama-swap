@@ -136,10 +136,10 @@ models:
 	v2 := config.Models["test-model-v2"]
 	assert.Equal(t, "Variant 2", v2.Name)
 	assert.Equal(t, "Custom description", v2.Description)
-	assert.Contains(t, v2.Env, "VAR1=value1") // env is inherited
-	assert.Contains(t, v2.Env, "VAR2=value2") // additional env
+	assert.Contains(t, v2.Env, "VAR1=value1")       // env is inherited
+	assert.Contains(t, v2.Env, "VAR2=value2")       // additional env
 	assert.NotContains(t, v2.Aliases, "base-alias") // base aliases not inherited
-	assert.Contains(t, v2.Aliases, "v2-alias") // variant's own alias
+	assert.Contains(t, v2.Aliases, "v2-alias")      // variant's own alias
 	assert.False(t, v2.Unlisted)
 }
 
