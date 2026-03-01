@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -296,6 +297,12 @@ func TestMergeCommands_Basic(t *testing.T) {
 			add:      `--extra '{"key": "value"}'`,
 			expected: `server --arg value --extra '{"key": "value"}'`,
 		},
+		{
+			name:     "override with double-quoted JSON (escaped inner quotes)",
+			base:     "server --temp 0.8 --chat-template-kwargs '{}'",
+			add:      `--chat-template-kwargs "{\"enable_thinking\": false}"`,
+			expected: "server --temp 0.8 --chat-template-kwargs \"{\"enable_thinking\": false}\"",
+		},
 	}
 
 	for _, tt := range tests {
@@ -336,6 +343,21 @@ func TestTokenizeCommand_Parsing(t *testing.T) {
 			name:     "multiline",
 			input:    "server\n--port\n8080",
 			expected: []string{"server", "--port", "8080"},
+		},
+		{
+			name:     "double-quoted with escaped inner quotes",
+			input:    `server --chat-template-kwargs "{\"enable_thinking\": false}"`,
+			expected: []string{"server", "--chat-template-kwargs", `"{"enable_thinking": false}"`},
+		},
+		{
+			name:     "single-quoted JSON (no escape needed)",
+			input:    `server --arg '{"enable_thinking": false}'`,
+			expected: []string{"server", "--arg", `'{"enable_thinking": false}'`},
+		},
+		{
+			name:     "backslash escape sequences in quotes",
+			input:    `server --arg "a\\b\"c"`,
+			expected: []string{"server", "--arg", `"a\b"c"`},
 		},
 	}
 
@@ -386,4 +408,78 @@ groups:
 	group := config.Groups["mygroup"]
 	assert.Contains(t, group.Members, "template-model-v1")
 	assert.Contains(t, group.Members, "template-model-v2")
+}
+
+// TestLoadTestVariantsConfig_FromFile loads the test config from ~/tools (when env
+// TEST_VARIANTS_CONFIG is set) and verifies variant expansion and quoted/escaped
+// args (e.g. --chat-template-kwargs) are handled correctly.
+func TestLoadTestVariantsConfig_FromFile(t *testing.T) {
+	path := os.Getenv("TEST_VARIANTS_CONFIG")
+	if path == "" {
+		t.Skip("set TEST_VARIANTS_CONFIG to run (e.g. $HOME/tools/test-variants-config.yaml)")
+	}
+	cfg, err := LoadConfig(path)
+	assert.NoError(t, err)
+
+	// Expected expanded variant model IDs
+	expectedVariants := []string{
+		"Qwen3.5-35B-A3B-thinking_normal",
+		"Qwen3.5-35B-A3B-thinking_coding",
+		"Qwen3.5-35B-A3B-nothinking_normal",
+		"Qwen3.5-35B-A3B-nothinking_coding",
+	}
+	for _, id := range expectedVariants {
+		_, ok := cfg.Models[id]
+		assert.True(t, ok, "expected model %q after expansion", id)
+	}
+	assert.NotContains(t, cfg.Models, "Qwen3.5-35B-A3B", "template ID should be expanded away")
+
+	// Variants with --chat-template-kwargs: merged Cmd must contain valid JSON and no stale/broken tokens
+	for _, id := range []string{"Qwen3.5-35B-A3B-nothinking_normal", "Qwen3.5-35B-A3B-nothinking_coding"} {
+		m, ok := cfg.Models[id]
+		assert.True(t, ok)
+		cmd := m.Cmd
+		t.Logf("[%s] Cmd snippet (--chat-template-kwargs): %s", id, extractSnippet(cmd, "chat-template-kwargs", 80))
+		assert.Contains(t, cmd, "enable_thinking", "cmd for %s should contain enable_thinking", id)
+		assert.Contains(t, cmd, "false", "cmd for %s should contain false", id)
+		// No leftover value token (e.g. "0.8" or "1.0" standing alone after --temp=0.6)
+		assert.NotRegexp(t, `--temp=[\d.]+[\s]+[\d.]+`, cmd, "cmd for %s should not have stale value after --temp", id)
+	}
+}
+
+func extractSnippet(s, substr string, maxLen int) string {
+	i := strings.Index(s, substr)
+	if i < 0 {
+		return ""
+	}
+	start := i
+	if start+maxLen > len(s) {
+		return s[start:]
+	}
+	return s[start : start+maxLen] + "..."
+}
+
+func TestExpandVariants_TemplateRefSubstitutionInGroups(t *testing.T) {
+	content := `
+models:
+  template-model:
+    cmd: server --port ${PORT}
+    variants:
+      v1:
+        cmdAdd: --v1
+      v2:
+        cmdAdd: --v2
+
+groups:
+  mygroup:
+    members:
+      - template-model
+`
+	config, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.NoError(t, err)
+
+	group := config.Groups["mygroup"]
+	assert.Contains(t, group.Members, "template-model-v1")
+	assert.Contains(t, group.Members, "template-model-v2")
+	assert.NotContains(t, group.Members, "template-model")
 }

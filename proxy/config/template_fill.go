@@ -66,7 +66,7 @@ func expandVariant(base ModelConfig, suffix string, variant VariantConfig) Model
 		Description:      base.Description,
 		ConcurrencyLimit: base.ConcurrencyLimit,
 		Filters:          base.Filters,
-		Macros:           base.Macros,
+		Macros:           copyMacroList(base.Macros),
 		Metadata:         copyMetadata(base.Metadata),
 		SendLoadingState: base.SendLoadingState,
 		Variants:         nil, // variants should not be copied to expanded models
@@ -198,19 +198,41 @@ func mergeCommands(baseCmd, cmdAdd string) string {
 	return result
 }
 
-// tokenizeCommand splits a command string into tokens, handling quoted strings
+// tokenizeCommand splits a command string into tokens, handling quoted strings.
+// Inside single- or double-quoted segments, backslash escape sequences are supported:
+// \\ → \, \" → ", \' → ', \n → newline, \t → tab; any other \X is passed through as X.
+// This allows values like --chat-template-kwargs "{\"enable_thinking\": false}" to parse correctly.
 func tokenizeCommand(cmd string) []string {
+	runes := []rune(cmd)
 	var tokens []string
 	var current strings.Builder
 	inQuote := false
 	quoteChar := rune(0)
 
-	for _, r := range cmd {
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
 		switch {
 		case !inQuote && (r == '"' || r == '\''):
 			inQuote = true
 			quoteChar = r
 			current.WriteRune(r)
+		case inQuote && r == '\\' && i+1 < len(runes):
+			next := runes[i+1]
+			i++
+			switch next {
+			case '\\':
+				current.WriteRune('\\')
+			case '"':
+				current.WriteRune('"')
+			case '\'':
+				current.WriteRune('\'')
+			case 'n':
+				current.WriteRune('\n')
+			case 't':
+				current.WriteRune('\t')
+			default:
+				current.WriteRune(next)
+			}
 		case inQuote && r == quoteChar:
 			inQuote = false
 			current.WriteRune(r)
@@ -252,6 +274,16 @@ func isArgument(token string) bool {
 func normalizeFlag(flag string) string {
 	flag = strings.TrimLeft(flag, "-")
 	return strings.ToLower(flag)
+}
+
+// copyMacroList creates a copy of MacroList so expanded variants do not share the slice with the base.
+func copyMacroList(ml MacroList) MacroList {
+	if ml == nil {
+		return nil
+	}
+	result := make(MacroList, len(ml))
+	copy(result, ml)
+	return result
 }
 
 // copyStringSlice creates a copy of a string slice
