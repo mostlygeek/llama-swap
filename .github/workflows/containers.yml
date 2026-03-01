@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        platform: [intel, cuda, vulkan, cpu, musa, rocm]
+        platform: [intel, cuda, cuda13, vulkan, cpu, musa, rocm]
       fail-fast: false
     steps:
       - name: Checkout code
