@@ -279,6 +279,12 @@ func TestMergeCommands_Basic(t *testing.T) {
 			expected: "server --temp=1.0 --ctx=4096",
 		},
 		{
+			name:     "mixed format override",
+			base:     "server --temp 0.8 --ctx 4096",
+			add:      "--temp=1.0",
+			expected: "server --temp=1.0 --ctx 4096",
+		},
+		{
 			name:     "short flag override",
 			base:     "server -t 0.8 -c 4096",
 			add:      "-t 1.0",
@@ -300,7 +306,7 @@ func TestMergeCommands_Basic(t *testing.T) {
 	}
 }
 
-func TestTokenizeCommand(t *testing.T) {
+func TestTokenizeCommand_Parsing(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string

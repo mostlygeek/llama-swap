@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -8,25 +9,45 @@ import (
 // argPattern matches command line arguments like --arg, -a, or --arg=value
 var argPattern = regexp.MustCompile(`^(-{1,2}[a-zA-Z][a-zA-Z0-9_-]*)(?:=(.*))?$`)
 
+// ExpandVariantsResult holds the expanded models and a map from template ID to generated variant IDs.
+// TemplateToVariants is only set for models that had variants; use it to substitute template IDs in groups/preload.
+type ExpandVariantsResult struct {
+	Models             map[string]ModelConfig
+	TemplateToVariants map[string][]string // template ID -> list of variant model IDs
+}
+
 // ExpandVariants processes all models with variants and expands them into individual model configurations.
-// Returns a new models map with expanded variants and removes the original template models.
-func ExpandVariants(models map[string]ModelConfig) map[string]ModelConfig {
+// Returns a new models map and a mapping from template ID to variant IDs. Fails fast on duplicate model ID.
+func ExpandVariants(models map[string]ModelConfig) (ExpandVariantsResult, error) {
 	result := make(map[string]ModelConfig)
+	templateToVariants := make(map[string][]string)
 
 	for modelID, modelConfig := range models {
 		if len(modelConfig.Variants) == 0 {
+			if _, exists := result[modelID]; exists {
+				return ExpandVariantsResult{}, fmt.Errorf("duplicate model ID after expansion: %s", modelID)
+			}
 			result[modelID] = modelConfig
 			continue
 		}
 
+		var variantIDs []string
 		for variantSuffix, variantConfig := range modelConfig.Variants {
 			expandedModel := expandVariant(modelConfig, variantSuffix, variantConfig)
 			variantModelID := modelID + "-" + variantSuffix
+			if _, exists := result[variantModelID]; exists {
+				return ExpandVariantsResult{}, fmt.Errorf(
+					"variant %q for model %q collides with existing model ID %q",
+					variantSuffix, modelID, variantModelID,
+				)
+			}
 			result[variantModelID] = expandedModel
+			variantIDs = append(variantIDs, variantModelID)
 		}
+		templateToVariants[modelID] = variantIDs
 	}
 
-	return result
+	return ExpandVariantsResult{Models: result, TemplateToVariants: templateToVariants}, nil
 }
 
 // expandVariant creates a new ModelConfig by applying variant overrides to the base model
@@ -124,8 +145,11 @@ func mergeCommands(baseCmd, cmdAdd string) string {
 		if baseIdx, exists := baseArgIndices[normalizedFlag]; exists {
 			// Override existing argument
 			if embeddedValue != "" {
-				// --arg=value format
+				// --arg=value format: replace base token; clear base's separate value if present
 				baseTokens[baseIdx] = token
+				if baseIdx+1 < len(baseTokens) && !isArgument(baseTokens[baseIdx+1]) {
+					baseTokens[baseIdx+1] = ""
+				}
 				i++
 			} else if i+1 < len(addTokens) && !isArgument(addTokens[i+1]) {
 				// --arg value format (separate value)
@@ -159,8 +183,14 @@ func mergeCommands(baseCmd, cmdAdd string) string {
 		}
 	}
 
-	// Reconstruct the command
-	result := strings.Join(baseTokens, " ")
+	// Reconstruct the command: drop empty slots (stale values from overrides) then join
+	compact := make([]string, 0, len(baseTokens))
+	for _, tok := range baseTokens {
+		if tok != "" {
+			compact = append(compact, tok)
+		}
+	}
+	result := strings.Join(compact, " ")
 	if len(appendTokens) > 0 {
 		result += " " + strings.Join(appendTokens, " ")
 	}

@@ -171,6 +171,38 @@ func (c *Config) FindConfig(modelName string) (ModelConfig, string, bool) {
 	}
 }
 
+// substituteTemplateRefsInConfig replaces template model IDs in groups.members and
+// hooks.on_startup.preload with the corresponding expanded variant IDs.
+func substituteTemplateRefsInConfig(c *Config, templateToVariants map[string][]string) {
+	if len(templateToVariants) == 0 {
+		return
+	}
+	for groupID := range c.Groups {
+		group := c.Groups[groupID]
+		var newMembers []string
+		for _, member := range group.Members {
+			if variantIDs, ok := templateToVariants[member]; ok {
+				newMembers = append(newMembers, variantIDs...)
+			} else {
+				newMembers = append(newMembers, member)
+			}
+		}
+		group.Members = newMembers
+		c.Groups[groupID] = group
+	}
+	if len(c.Hooks.OnStartup.Preload) > 0 {
+		var newPreload []string
+		for _, modelID := range c.Hooks.OnStartup.Preload {
+			if variantIDs, ok := templateToVariants[modelID]; ok {
+				newPreload = append(newPreload, variantIDs...)
+			} else {
+				newPreload = append(newPreload, modelID)
+			}
+		}
+		c.Hooks.OnStartup.Preload = newPreload
+	}
+}
+
 func LoadConfig(path string) (Config, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -211,7 +243,13 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	// Expand model variants before any other processing
 	// This transforms template models with variants into individual model configs
 	if config.Models != nil {
-		config.Models = ExpandVariants(config.Models)
+		expanded, err := ExpandVariants(config.Models)
+		if err != nil {
+			return Config{}, err
+		}
+		config.Models = expanded.Models
+		// Substitute template IDs in groups.members and hooks.on_startup.preload with variant IDs
+		substituteTemplateRefsInConfig(&config, expanded.TemplateToVariants)
 	}
 
 	if config.HealthCheckTimeout < 15 {
