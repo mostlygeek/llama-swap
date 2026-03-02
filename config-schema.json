@@ -48,6 +48,12 @@
             "default": 120,
             "description": "Number of seconds to wait for a model to be ready to serve requests."
         },
+        "globalTTL": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Default TTL for all models in seconds, 0 means no TTL and models will never be automatically unloaded"
+        },
         "logLevel": {
             "type": "string",
             "enum": [
@@ -177,9 +183,9 @@
                     },
                     "ttl": {
                         "type": "integer",
-                        "minimum": 0,
-                        "default": 0,
-                        "description": "Automatically unload the model after ttl seconds. 0 disables unloading. Must be >0 to enable."
+                        "minimum": -1,
+                        "default": -1,
+                        "description": "Automatically unload the model after ttl seconds. -1 uses the global TTL value, 0 disables unloading. Must be >0 to enable."
                     },
                     "useModelName": {
                         "type": "string",
