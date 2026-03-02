@@ -266,6 +266,10 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			modelConfig.UnloadAfter = config.GlobalTTL
 		}
 
+		if modelConfig.UnloadAfter < 0 {
+			return Config{}, fmt.Errorf("model %s: invalid TTL value %d", modelId, modelConfig.UnloadAfter)
+		}
+
 		// Validate model macros
 		for _, macro := range modelConfig.Macros {
 			if err = validateMacro(macro.Name, macro.Value); err != nil {

@@ -185,7 +185,7 @@ models:
     checkEndpoint: /custom-endpoint
 
     # ttl: automatically unload the model after ttl seconds
-    # - optional, default: -1 (never unload)
+    # - optional, default: -1 (use global default)
     # - ttl values must be a value greater than or equal to 0
     # - a ttl of -1 will use the global TTL value as the default
     # - a ttl of 0 will mean never unload
