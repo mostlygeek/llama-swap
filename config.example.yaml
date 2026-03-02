@@ -75,6 +75,11 @@ sendLoadingState: true
 #   all fields except for Id so chat UIs can use the alias equivalent to the original.
 includeAliasesInList: false
 
+# globalTTL: the default TTL in seconds before unloading a model
+# - optional, default: 0 (never automatically unload)
+# - must be >= 0
+globalTTL: 0
+
 # macros: a dictionary of string substitutions
 # - optional, default: empty dictionary
 # - macros are reusable snippets
@@ -180,8 +185,10 @@ models:
     checkEndpoint: /custom-endpoint
 
     # ttl: automatically unload the model after ttl seconds
-    # - optional, default: 0
-    # - ttl values must be a value greater than 0
+    # - optional, default: -1 (never unload)
+    # - ttl values must be a value greater than or equal to 0
+    # - a ttl of -1 will use the global TTL value as the default
+    # - a ttl of 0 will mean never unload
     # - a value of 0 disables automatic unloading of the model
     ttl: 60
 

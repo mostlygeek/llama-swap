@@ -730,7 +730,7 @@ func TestProxyManager_RunningEndpoint(t *testing.T) {
 		// Verify extended fields are present
 		assert.NotEmpty(t, response.Running[0].Cmd, "cmd should be populated")
 		assert.NotEmpty(t, response.Running[0].Proxy, "proxy should be populated")
-		assert.Equal(t, 0, response.Running[0].TTL, "ttl should default to 0")
+		assert.Equal(t, -1, response.Running[0].TTL, "ttl should default to -1 (use globalTTL)")
 	})
 }
 
