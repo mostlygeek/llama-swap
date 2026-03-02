@@ -848,6 +848,71 @@ func TestConfig_APIKeys_EnvMacros(t *testing.T) {
 	})
 }
 
+func TestConfig_GlobalTTL(t *testing.T) {
+	t.Run("globalTTL sets default for models", func(t *testing.T) {
+		content := `
+globalTTL: 300
+models:
+  model1:
+    cmd: server --port ${PORT}
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, 300, config.GlobalTTL)
+		assert.Equal(t, 300, config.Models["model1"].UnloadAfter)
+	})
+
+	t.Run("model ttl=0 overrides globalTTL", func(t *testing.T) {
+		content := `
+globalTTL: 300
+models:
+  model1:
+    cmd: server --port ${PORT}
+    ttl: 0
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, 0, config.Models["model1"].UnloadAfter)
+	})
+
+	t.Run("model explicit ttl overrides globalTTL", func(t *testing.T) {
+		content := `
+globalTTL: 300
+models:
+  model1:
+    cmd: server --port ${PORT}
+    ttl: 600
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, 600, config.Models["model1"].UnloadAfter)
+	})
+
+	t.Run("globalTTL defaults to 0", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: server --port ${PORT}
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, 0, config.GlobalTTL)
+		assert.Equal(t, 0, config.Models["model1"].UnloadAfter)
+	})
+
+	t.Run("negative globalTTL rejected", func(t *testing.T) {
+		content := `
+globalTTL: -1
+models:
+  model1:
+    cmd: server --port ${PORT}
+`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "globalTTL must be >= 0")
+	})
+}
+
 func TestConfig_EnvMacros(t *testing.T) {
 	t.Run("basic env substitution in cmd", func(t *testing.T) {
 		t.Setenv("TEST_MODEL_PATH", "/opt/models")

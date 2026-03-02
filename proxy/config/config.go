@@ -124,6 +124,7 @@ type Config struct {
 	LogToStdout        string                 `yaml:"logToStdout"`
 	MetricsMaxInMemory int                    `yaml:"metricsMaxInMemory"`
 	CaptureBuffer      int                    `yaml:"captureBuffer"`
+	GlobalTTL          int                    `yaml:"globalTTL"`
 	Models             map[string]ModelConfig `yaml:"models"` /* key is model ID */
 	Profiles           map[string][]string    `yaml:"profiles"`
 	Groups             map[string]GroupConfig `yaml:"groups"` /* key is group ID */
@@ -203,6 +204,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		LogToStdout:        LogToStdoutProxy,
 		MetricsMaxInMemory: 1000,
 		CaptureBuffer:      5,
+		GlobalTTL:          0,
 	}
 	if err = yaml.Unmarshal([]byte(yamlStr), &config); err != nil {
 		return Config{}, err
@@ -214,6 +216,10 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 
 	if config.StartPort < 1 {
 		return Config{}, fmt.Errorf("startPort must be greater than 1")
+	}
+
+	if config.GlobalTTL < 0 {
+		return Config{}, fmt.Errorf("globalTTL must be >= 0")
 	}
 
 	switch config.LogToStdout {
@@ -254,6 +260,15 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		// Strip comments from command fields
 		modelConfig.Cmd = StripComments(modelConfig.Cmd)
 		modelConfig.CmdStop = StripComments(modelConfig.CmdStop)
+
+		// set model TTL to globalTTL it is the default value
+		if modelConfig.UnloadAfter == MODEL_CONFIG_DEFAULT_TTL {
+			modelConfig.UnloadAfter = config.GlobalTTL
+		}
+
+		if modelConfig.UnloadAfter < 0 {
+			return Config{}, fmt.Errorf("model %s: invalid TTL value %d", modelId, modelConfig.UnloadAfter)
+		}
 
 		// Validate model macros
 		for _, macro := range modelConfig.Macros {

@@ -5,6 +5,10 @@ import (
 	"runtime"
 )
 
+const (
+	MODEL_CONFIG_DEFAULT_TTL = -1
+)
+
 type ModelConfig struct {
 	Cmd           string   `yaml:"cmd"`
 	CmdStop       string   `yaml:"cmdStop"`
@@ -47,7 +51,7 @@ func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		Aliases:          []string{},
 		Env:              []string{},
 		CheckEndpoint:    "/health",
-		UnloadAfter:      0,
+		UnloadAfter:      MODEL_CONFIG_DEFAULT_TTL, // use GlobalTTL
 		Unlisted:         false,
 		UseModelName:     "",
 		ConcurrencyLimit: 0,
