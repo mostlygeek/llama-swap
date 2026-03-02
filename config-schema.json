@@ -183,7 +183,7 @@
                     },
                     "ttl": {
                         "type": "integer",
-                        "minimum": 0,
+                        "minimum": -1,
                         "default": -1,
                         "description": "Automatically unload the model after ttl seconds. -1 uses the global TTL value, 0 disables unloading. Must be >0 to enable."
                     },
