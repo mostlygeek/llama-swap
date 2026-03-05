@@ -90,6 +90,9 @@ type ProxyManager struct {
 
 	// peer proxy see: #296, #433
 	peerProxy *PeerProxy
+
+	// config file path for read/write API
+	configPath string
 }
 
 func New(proxyConfig config.Config) *ProxyManager {
@@ -1082,4 +1085,10 @@ func (pm *ProxyManager) SetVersion(buildDate string, commit string, version stri
 	pm.buildDate = buildDate
 	pm.commit = commit
 	pm.version = version
+}
+
+func (pm *ProxyManager) SetConfigPath(path string) {
+	pm.Lock()
+	defer pm.Unlock()
+	pm.configPath = path
 }

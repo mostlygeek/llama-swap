@@ -181,6 +181,46 @@ export async function loadModel(model: string): Promise<void> {
   }
 }
 
+export interface ConfigModel {
+  cmd?: string;
+  cmdStop?: string;
+  proxy?: string;
+  aliases?: string[];
+  env?: string[];
+  checkEndpoint?: string;
+  ttl?: number;
+  unlisted?: boolean;
+  useModelName?: string;
+  name?: string;
+  description?: string;
+  concurrencyLimit?: number;
+  sendLoadingState?: boolean;
+  macros?: Record<string, unknown>;
+  filters?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+}
+
+export async function getConfigModels(): Promise<Record<string, ConfigModel>> {
+  const response = await fetch("/api/config/models");
+  if (!response.ok) {
+    throw new Error(`Failed to fetch config models: ${response.status}`);
+  }
+  const data = await response.json();
+  return data.models || {};
+}
+
+export async function saveConfigModels(models: Record<string, ConfigModel>): Promise<void> {
+  const response = await fetch("/api/config/models", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ models }),
+  });
+  if (!response.ok) {
+    const data = await response.json();
+    throw new Error(data.error || `Failed to save config: ${response.status}`);
+  }
+}
+
 export async function getCapture(id: number): Promise<ReqRespCapture | null> {
   try {
     const response = await fetch(`/api/captures/${id}`);
