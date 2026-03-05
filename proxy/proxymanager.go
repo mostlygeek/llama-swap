@@ -660,6 +660,25 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 	}
 }
 
+// hasImageContent checks if the request body contains image_url content parts
+// in the OpenAI chat completions message format.
+func hasImageContent(bodyBytes []byte) bool {
+	found := false
+	gjson.GetBytes(bodyBytes, "messages.#.content").ForEach(func(_, value gjson.Result) bool {
+		if value.IsArray() {
+			value.ForEach(func(_, item gjson.Result) bool {
+				if item.Get("type").String() == "image_url" {
+					found = true
+					return false
+				}
+				return true
+			})
+		}
+		return !found
+	})
+	return found
+}
+
 func (pm *ProxyManager) proxyInferenceHandler(c *gin.Context) {
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
@@ -678,6 +697,15 @@ func (pm *ProxyManager) proxyInferenceHandler(c *gin.Context) {
 
 	modelID, found := pm.config.RealModelName(requestedModel)
 	if found {
+		// Content-based vision routing: if the resolved model has a visionModel
+		// configured and this is a chat completions request with images, reroute.
+		if visionTarget := pm.config.Models[modelID].VisionModel; visionTarget != "" {
+			if c.FullPath() == "/v1/chat/completions" && hasImageContent(bodyBytes) {
+				pm.proxyLogger.Infof("<%s> image content detected, routing to vision model: %s", modelID, visionTarget)
+				modelID = visionTarget
+			}
+		}
+
 		processGroup, err := pm.swapProcessGroup(modelID)
 		if err != nil {
 			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))

@@ -284,6 +284,12 @@ models:
     # - optional, default: undefined (use global setting)
     sendLoadingState: false
 
+    # visionModel: automatically route to a vision-capable model when images are detected
+    # - optional, default: "" (disabled)
+    # - only applies to /v1/chat/completions requests
+    # - the target must be a valid model ID defined in the models section
+    # visionModel: "qwen-vision"
+
   # Unlisted model example:
   "qwen-unlisted":
     # unlisted: boolean, true or false
