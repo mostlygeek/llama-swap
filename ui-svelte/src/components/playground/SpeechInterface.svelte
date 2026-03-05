@@ -2,6 +2,7 @@
   import { models } from "../../stores/api";
   import { persistentStore } from "../../stores/persistent";
   import { generateSpeech } from "../../lib/speechApi";
+  import { playgroundStores } from "../../stores/playgroundActivity";
   import ModelSelector from "./ModelSelector.svelte";
   import ExpandableTextarea from "./ExpandableTextarea.svelte";
 
@@ -20,11 +21,9 @@
   let availableVoices = $state<string[]>(["coral", "alloy", "echo", "fable", "onyx", "nova", "shimmer"]);
   let isLoadingVoices = $state(false);
 
-  // Default voices to fall back to if API call fails
   const defaultVoices = ["coral", "alloy", "echo", "fable", "onyx", "nova", "shimmer"];
   const CACHE_KEY = "playground-speech-voices-cache";
 
-  // Load voices cache from localStorage
   function getVoicesCache(): Record<string, string[]> {
     if (typeof window === "undefined") return {};
     try {
@@ -35,7 +34,6 @@
     }
   }
 
-  // Save voices cache to localStorage
   function saveVoicesCache(cache: Record<string, string[]>) {
     if (typeof window === "undefined") return;
     try {
@@ -47,8 +45,11 @@
 
   let hasModels = $derived($models.some((m) => !m.unlisted));
 
-  // Track if this is the initial page load to avoid fetching on refresh
   let isInitialLoad = $state(true);
+
+  $effect(() => {
+    playgroundStores.speechGenerating.set(isGenerating);
+  });
 
   // On page load, restore cached voices for the selected model if available
   $effect(() => {

@@ -1,5 +1,5 @@
 import { writable } from "svelte/store";
-import type { Model, Metrics, VersionInfo, LogData, APIEventEnvelope } from "../lib/types";
+import type { Model, Metrics, VersionInfo, LogData, APIEventEnvelope, ReqRespCapture, InFlightStats } from "../lib/types";
 import { connectionState } from "./theme";
 
 const LOG_LENGTH_LIMIT = 1024 * 100; /* 100KB of log data */
@@ -9,6 +9,7 @@ export const models = writable<Model[]>([]);
 export const proxyLogs = writable<string>("");
 export const upstreamLogs = writable<string>("");
 export const metrics = writable<Metrics[]>([]);
+export const inFlightRequests = writable<number>(0);
 export const versionInfo = writable<VersionInfo>({
   build_date: "unknown",
   commit: "unknown",
@@ -29,6 +30,7 @@ export function enableAPIEvents(enabled: boolean): void {
     apiEventSource?.close();
     apiEventSource = null;
     metrics.set([]);
+    inFlightRequests.set(0);
     return;
   }
 
@@ -46,6 +48,7 @@ export function enableAPIEvents(enabled: boolean): void {
       proxyLogs.set("");
       upstreamLogs.set("");
       metrics.set([]);
+      inFlightRequests.set(0);
       models.set([]);
       retryCount = 0;
       connectionState.set("connected");
@@ -81,6 +84,11 @@ export function enableAPIEvents(enabled: boolean): void {
           case "metrics": {
             const newMetrics = JSON.parse(message.data) as Metrics[];
             metrics.update((prevMetrics) => [...newMetrics, ...prevMetrics]);
+            break;
+          }
+          case "inflight": {
+            const stats = JSON.parse(message.data) as InFlightStats;
+            inFlightRequests.set(stats.total ?? 0);
             break;
           }
         }
@@ -170,5 +178,21 @@ export async function loadModel(model: string): Promise<void> {
   } catch (error) {
     console.error("Failed to load model:", error);
     throw error;
+  }
+}
+
+export async function getCapture(id: number): Promise<ReqRespCapture | null> {
+  try {
+    const response = await fetch(`/api/captures/${id}`);
+    if (response.status === 404) {
+      return null;
+    }
+    if (!response.ok) {
+      throw new Error(`Failed to fetch capture: ${response.status}`);
+    }
+    return await response.json();
+  } catch (error) {
+    console.error("Failed to fetch capture:", error);
+    return null;
   }
 }

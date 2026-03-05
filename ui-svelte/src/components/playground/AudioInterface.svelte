@@ -2,6 +2,7 @@
   import { models } from "../../stores/api";
   import { persistentStore } from "../../stores/persistent";
   import { transcribeAudio } from "../../lib/audioApi";
+  import { playgroundStores } from "../../stores/playgroundActivity";
   import ModelSelector from "./ModelSelector.svelte";
 
   const selectedModelStore = persistentStore<string>("playground-audio-model", "");
@@ -15,18 +16,22 @@
   let fileInput = $state<HTMLInputElement | null>(null);
   let copied = $state(false);
 
-  const ACCEPTED_FORMATS = ['.mp3', '.wav'];
+  const ACCEPTED_FORMATS = ['.mp3', '.wav', '.ogg'];
   const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB
 
   let hasModels = $derived($models.some((m) => !m.unlisted));
 
   let canTranscribe = $derived(selectedFile !== null && $selectedModelStore !== "" && !isTranscribing);
 
+  $effect(() => {
+    playgroundStores.audioTranscribing.set(isTranscribing);
+  });
+
   function validateFile(file: File): { valid: boolean; error?: string } {
     const ext = '.' + file.name.split('.').pop()?.toLowerCase();
 
     if (!ACCEPTED_FORMATS.includes(ext)) {
-      return { valid: false, error: 'Invalid file type. Accepted: MP3, WAV' };
+      return { valid: false, error: 'Invalid file type. Accepted: MP3, WAV, OGG' };
     }
 
     if (file.size > MAX_FILE_SIZE) {
@@ -203,7 +208,7 @@
           <div>
             <p class="mb-2">Drag and drop an audio file here</p>
             <p class="text-sm">or use the Browse button below</p>
-            <p class="text-xs mt-4">Accepted formats: MP3, WAV (max 25MB)</p>
+            <p class="text-xs mt-4">Accepted formats: MP3, WAV, OGG (max 25MB)</p>
           </div>
         </div>
       {/if}
@@ -213,7 +218,7 @@
     <div class="shrink-0 flex gap-2">
       <input
         type="file"
-        accept=".mp3,.wav"
+        accept=".mp3,.wav,.ogg"
         class="hidden"
         onchange={handleFileSelect}
         bind:this={fileInput}

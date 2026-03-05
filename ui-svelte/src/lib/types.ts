@@ -9,6 +9,7 @@ export interface Model {
   description: string;
   unlisted: boolean;
   peerID: string;
+  aliases?: string[];
 }
 
 export interface Metrics {
@@ -21,6 +22,16 @@ export interface Metrics {
   prompt_per_second: number;
   tokens_per_second: number;
   duration_ms: number;
+  has_capture: boolean;
+}
+
+export interface ReqRespCapture {
+  id: number;
+  req_path: string;
+  req_headers: Record<string, string>;
+  req_body: string; // base64 encoded bytes
+  resp_headers: Record<string, string>;
+  resp_body: string; // base64 encoded bytes
 }
 
 export interface LogData {
@@ -28,8 +39,12 @@ export interface LogData {
   data: string;
 }
 
+export interface InFlightStats {
+  total: number;
+}
+
 export interface APIEventEnvelope {
-  type: "modelStatus" | "logData" | "metrics";
+  type: "modelStatus" | "logData" | "metrics" | "inflight";
   data: string;
 }
 

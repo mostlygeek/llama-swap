@@ -127,12 +127,12 @@ func TestProcess_UnloadAfterTTL(t *testing.T) {
 	}
 
 	expectedMessage := "I_sense_imminent_danger"
-	config := getTestSimpleResponderConfig(expectedMessage)
-	assert.Equal(t, 0, config.UnloadAfter)
-	config.UnloadAfter = 3 // seconds
-	assert.Equal(t, 3, config.UnloadAfter)
+	conf := getTestSimpleResponderConfig(expectedMessage)
+	assert.Equal(t, config.MODEL_CONFIG_DEFAULT_TTL, conf.UnloadAfter)
+	conf.UnloadAfter = 3 // seconds
+	assert.Equal(t, 3, conf.UnloadAfter)
 
-	process := NewProcess("ttl_test", 2, config, debugLogger, debugLogger, context.Background())
+	process := NewProcess("ttl_test", 2, conf, debugLogger, debugLogger, context.Background())
 	defer process.Stop()
 
 	// this should take 4 seconds
@@ -169,12 +169,12 @@ func TestProcess_LowTTLValue(t *testing.T) {
 		t.Skip("skipping test, edit process_test.go to run it ")
 	}
 
-	config := getTestSimpleResponderConfig("fast_ttl")
-	assert.Equal(t, 0, config.UnloadAfter)
-	config.UnloadAfter = 1 // second
-	assert.Equal(t, 1, config.UnloadAfter)
+	conf := getTestSimpleResponderConfig("fast_ttl")
+	assert.Equal(t, config.MODEL_CONFIG_DEFAULT_TTL, conf.UnloadAfter)
+	conf.UnloadAfter = 1 // second
+	assert.Equal(t, 1, conf.UnloadAfter)
 
-	process := NewProcess("ttl", 2, config, debugLogger, debugLogger, context.Background())
+	process := NewProcess("ttl", 2, conf, debugLogger, debugLogger, context.Background())
 	defer process.Stop()
 
 	for i := 0; i < 100; i++ {

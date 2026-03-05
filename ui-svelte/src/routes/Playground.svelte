@@ -4,8 +4,9 @@
   import ImageInterface from "../components/playground/ImageInterface.svelte";
   import AudioInterface from "../components/playground/AudioInterface.svelte";
   import SpeechInterface from "../components/playground/SpeechInterface.svelte";
+  import RerankInterface from "../components/playground/RerankInterface.svelte";
 
-  type Tab = "chat" | "images" | "speech" | "audio";
+  type Tab = "chat" | "images" | "speech" | "audio" | "rerank";
 
   const selectedTabStore = persistentStore<Tab>("playground-selected-tab", "chat");
   let mobileMenuOpen = $state(false);
@@ -15,6 +16,7 @@
     { id: "images", label: "Images" },
     { id: "speech", label: "Speech" },
     { id: "audio", label: "Transcription" },
+    { id: "rerank", label: "Rerank" },
   ];
 
   function selectTab(tab: Tab) {
@@ -88,6 +90,9 @@
     </div>
     <div class="h-full" class:tab-hidden={$selectedTabStore !== "audio"}>
       <AudioInterface />
+    </div>
+    <div class="h-full" class:tab-hidden={$selectedTabStore !== "rerank"}>
+      <RerankInterface />
     </div>
   </div>
 </div>
