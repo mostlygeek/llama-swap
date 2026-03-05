@@ -1314,6 +1314,56 @@ func TestProxyManager_ApiGetVersion(t *testing.T) {
 	}
 }
 
+func TestProxyManager_ApiGetModels(t *testing.T) {
+	testConfig := config.AddDefaultGroupToConfig(config.Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]config.ModelConfig{
+			"model1": {
+				Cmd:   "echo test",
+				Proxy: "http://localhost:8080",
+				Name:  "Model One",
+			},
+			"model2": {
+				Cmd:   "echo test",
+				Proxy: "http://localhost:8081",
+				Name:  "Model Two",
+			},
+		},
+		LogLevel: "error",
+	})
+
+	proxy := New(testConfig)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+
+	req := httptest.NewRequest("GET", "/api/models", nil)
+	w := CreateTestResponseRecorder()
+
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
+
+	var response []map[string]string
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Len(t, response, 2)
+
+	// Find model1 and model2 in response
+	modelMap := make(map[string]map[string]string)
+	for _, m := range response {
+		modelMap[m["id"]] = m
+	}
+
+	assert.Contains(t, modelMap, "model1")
+	assert.Contains(t, modelMap, "model2")
+	assert.Equal(t, "Model One", modelMap["model1"]["name"])
+	assert.Equal(t, "Model Two", modelMap["model2"]["name"])
+	assert.Equal(t, "model1", modelMap["model1"]["id"])
+	assert.Equal(t, "model2", modelMap["model2"]["id"])
+	assert.Equal(t, "stopped", modelMap["model1"]["state"])
+	assert.Equal(t, "stopped", modelMap["model2"]["state"])
+}
+
 func TestProxyManager_APIKeyAuth(t *testing.T) {
 	testConfig := config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,

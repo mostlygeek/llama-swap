@@ -30,6 +30,7 @@ func addApiHandlers(pm *ProxyManager) {
 	{
 		apiGroup.POST("/models/unload", pm.apiUnloadAllModels)
 		apiGroup.POST("/models/unload/*model", pm.apiUnloadSingleModelHandler)
+		apiGroup.GET("/models", pm.apiGetModels)
 		apiGroup.GET("/events", pm.apiSendEvents)
 		apiGroup.GET("/metrics", pm.apiGetMetrics)
 		apiGroup.GET("/version", pm.apiGetVersion)
@@ -40,6 +41,25 @@ func addApiHandlers(pm *ProxyManager) {
 func (pm *ProxyManager) apiUnloadAllModels(c *gin.Context) {
 	pm.StopProcesses(StopImmediately)
 	c.JSON(http.StatusOK, gin.H{"msg": "ok"})
+}
+
+type apiModel struct {
+	Name  string `json:"name"`
+	Id    string `json:"id"`
+	State string `json:"state"`
+}
+
+func (pm *ProxyManager) apiGetModels(c *gin.Context) {
+	models := pm.getModelStatus()
+	result := make([]apiModel, len(models))
+	for i, m := range models {
+		result[i] = apiModel{
+			Name:  m.Name,
+			Id:    m.Id,
+			State: m.State,
+		}
+	}
+	c.JSON(http.StatusOK, result)
 }
 
 func (pm *ProxyManager) getModelStatus() []Model {
