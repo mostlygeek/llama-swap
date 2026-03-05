@@ -3,9 +3,25 @@ name: Windows CI
 on:
   push:
     branches: [ "main" ]
+    # only run when backend source changes
+    # cmd/ is excluded because it contains utilities without tests
+    paths:
+      - '**/*.go'
+      - '!cmd/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Makefile'
+      - '.github/workflows/go-ci-windows.yml'
 
   pull_request:
     branches: [ "main" ]
+    paths:
+      - '**/*.go'
+      - '!cmd/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Makefile'
+      - '.github/workflows/go-ci-windows.yml'
 
   # Allows manual triggering of the workflow
   workflow_dispatch:
@@ -28,7 +44,7 @@ jobs:
       uses: actions/cache/restore@v4
       with:
         path: ./build
-        key: ${{ runner.os }}-simple-responder-${{ hashFiles('misc/simple-responder/simple-responder.go') }}
+        key: ${{ runner.os }}-simple-responder-${{ hashFiles('cmd/simple-responder/simple-responder.go') }}
 
     # necessary for testing proxy/Process swapping
     - name: Create simple-responder
@@ -43,7 +59,7 @@ jobs:
       uses: actions/cache/save@v4
       with:
         path: ./build
-        key: ${{ runner.os }}-simple-responder-${{ hashFiles('misc/simple-responder/simple-responder.go') }}
+        key: ${{ runner.os }}-simple-responder-${{ hashFiles('cmd/simple-responder/simple-responder.go') }}
 
     - name: Test all
       shell: bash

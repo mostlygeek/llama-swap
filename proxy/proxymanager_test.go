@@ -730,7 +730,7 @@ func TestProxyManager_RunningEndpoint(t *testing.T) {
 		// Verify extended fields are present
 		assert.NotEmpty(t, response.Running[0].Cmd, "cmd should be populated")
 		assert.NotEmpty(t, response.Running[0].Proxy, "proxy should be populated")
-		assert.Equal(t, 0, response.Running[0].TTL, "ttl should default to 0")
+		assert.Equal(t, -1, response.Running[0].TTL, "ttl should default to -1 (use globalTTL)")
 	})
 }
 
@@ -847,6 +847,43 @@ func TestProxyManager_UseModelName(t *testing.T) {
 		err = json.Unmarshal(rec.Body.Bytes(), &response)
 		assert.NoError(t, err)
 		assert.Equal(t, upstreamModelName, response["model"])
+	})
+}
+
+func TestProxyManager_AudioVoicesGETHandler(t *testing.T) {
+	conf := config.AddDefaultGroupToConfig(config.Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]config.ModelConfig{
+			"model1": getTestSimpleResponderConfig("model1"),
+		},
+		LogLevel: "error",
+	})
+
+	proxy := New(conf)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+
+	t.Run("successful GET with model query param", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/v1/audio/voices?model=model1", nil)
+		w := CreateTestResponseRecorder()
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "voice1")
+	})
+
+	t.Run("missing model query param returns 400", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/v1/audio/voices", nil)
+		w := CreateTestResponseRecorder()
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "missing required 'model' query parameter")
+	})
+
+	t.Run("unknown model returns 400", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/v1/audio/voices?model=nonexistent", nil)
+		w := CreateTestResponseRecorder()
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "could not find suitable handler")
 	})
 }
 
@@ -1007,6 +1044,61 @@ func TestProxyManager_FiltersStripParams(t *testing.T) {
 	// assert.Equal(t, "123", response["x_param"])
 	// assert.Equal(t, "abc", response["y_param"])
 	// t.Logf("%v", response)
+}
+
+func TestProxyManager_FiltersSetParamsByID(t *testing.T) {
+	// no explicit aliases — setParamsByID keys are auto-registered as aliases
+	configStr := strings.Replace(`
+logLevel: error
+models:
+  model1:
+    cmd: 'SRPATH --port ${PORT} --silent --respond model1'
+    proxy: "http://127.0.0.1:${PORT}"
+    filters:
+      setParams:
+        reasoning_effort: medium
+      setParamsByID:
+        "${MODEL_ID}:high":
+          reasoning_effort: high
+        "${MODEL_ID}:low":
+          reasoning_effort: low
+`, "SRPATH", simpleResponderPath, -1)
+
+	cfg, err := config.LoadConfigFromReader(strings.NewReader(configStr))
+	if !assert.NoError(t, err, "invalid test configuration") {
+		return
+	}
+
+	proxy := New(cfg)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+
+	tests := []struct {
+		requestedModel string
+		wantEffort     string
+	}{
+		// setParams applies, no setParamsByID match
+		{requestedModel: "model1", wantEffort: "medium"},
+		// setParamsByID overrides setParams
+		{requestedModel: "model1:high", wantEffort: "high"},
+		{requestedModel: "model1:low", wantEffort: "low"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.requestedModel, func(t *testing.T) {
+			reqBody := fmt.Sprintf(`{"model":%q}`, tt.requestedModel)
+			req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+			w := CreateTestResponseRecorder()
+			proxy.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+
+			var response map[string]interface{}
+			assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+
+			requestBody, _ := response["request_body"].(string)
+			gotEffort := gjson.Get(requestBody, "reasoning_effort").String()
+			assert.Equal(t, tt.wantEffort, gotEffort, "reasoning_effort mismatch for model %s", tt.requestedModel)
+		})
+	}
 }
 
 func TestProxyManager_HealthEndpoint(t *testing.T) {

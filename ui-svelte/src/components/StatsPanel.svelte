@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { metrics } from "../stores/api";
+  import { inFlightRequests, metrics } from "../stores/api";
   import TokenHistogram from "./TokenHistogram.svelte";
 
   interface HistogramData {
@@ -15,7 +15,14 @@
   let stats = $derived.by(() => {
     const totalRequests = $metrics.length;
     if (totalRequests === 0) {
-      return { totalRequests: 0, totalInputTokens: 0, totalOutputTokens: 0, tokenStats: { p99: "0", p95: "0", p50: "0" }, histogramData: null };
+      return {
+        totalRequests: 0,
+        totalInputTokens: 0,
+        totalOutputTokens: 0,
+        inFlightRequests: $inFlightRequests,
+        tokenStats: { p99: "0", p95: "0", p50: "0" },
+        histogramData: null,
+      };
     }
 
     const totalInputTokens = $metrics.reduce((sum, m) => sum + m.input_tokens, 0);
@@ -24,7 +31,14 @@
     // Calculate token statistics using output_tokens and duration_ms
     const validMetrics = $metrics.filter((m) => m.duration_ms > 0 && m.output_tokens > 0);
     if (validMetrics.length === 0) {
-      return { totalRequests, totalInputTokens, totalOutputTokens, tokenStats: { p99: "0", p95: "0", p50: "0" }, histogramData: null };
+      return {
+        totalRequests,
+        totalInputTokens,
+        totalOutputTokens,
+        inFlightRequests: $inFlightRequests,
+        tokenStats: { p99: "0", p95: "0", p50: "0" },
+        histogramData: null,
+      };
     }
 
     // Calculate tokens/second for each valid metric
@@ -63,6 +77,7 @@
       totalRequests,
       totalInputTokens,
       totalOutputTokens,
+      inFlightRequests: $inFlightRequests,
       tokenStats: {
         p99: p99.toFixed(2),
         p95: p95.toFixed(2),
@@ -95,7 +110,12 @@
 
       <tbody class="bg-surface divide-y divide-card-border-inner">
         <tr class="hover:bg-secondary">
-          <td class="px-4 py-4 text-sm font-semibold text-gray-900 dark:text-white">{stats.totalRequests}</td>
+          <td class="px-4 py-4 text-sm font-semibold text-gray-900 dark:text-white">
+            <div class="flex flex-col gap-1">
+              <span class="text-xs font-medium text-gray-500 dark:text-gray-400">Completed: {nf.format(stats.totalRequests)}</span>
+              <span class="text-xs font-medium text-gray-500 dark:text-gray-400">Waiting: {nf.format(stats.inFlightRequests)}</span>
+            </div>
+          </td>
 
           <td class="px-4 py-4 text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-white/10">
             <div class="flex items-center gap-2">

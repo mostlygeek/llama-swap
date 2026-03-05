@@ -3,9 +3,25 @@ name: Linux CI
 on:
   push:
     branches: [ "main" ]
+    # only run when backend source changes
+    # cmd/ is excluded because it contains utilities without tests
+    paths:
+      - '**/*.go'
+      - '!cmd/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Makefile'
+      - '.github/workflows/go-ci.yml'
 
   pull_request:
     branches: [ "main" ]
+    paths:
+      - '**/*.go'
+      - '!cmd/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Makefile'
+      - '.github/workflows/go-ci.yml'
 
   # Allows manual triggering of the workflow
   workflow_dispatch:

@@ -28,6 +28,40 @@ const (
 
 type proxyCtxKey string
 
+type InflightCounter struct {
+	mu    sync.Mutex
+	total int
+}
+
+func newInflightCounter() *InflightCounter {
+	return &InflightCounter{}
+}
+
+func (ic *InflightCounter) Current() int {
+	ic.mu.Lock()
+	total := ic.total
+	ic.mu.Unlock()
+	return total
+}
+
+func (ic *InflightCounter) Increment() int {
+	ic.mu.Lock()
+	ic.total++
+	total := ic.total
+	ic.mu.Unlock()
+	return total
+}
+
+func (ic *InflightCounter) Decrement() int {
+	ic.mu.Lock()
+	if ic.total > 0 {
+		ic.total--
+	}
+	total := ic.total
+	ic.mu.Unlock()
+	return total
+}
+
 type ProxyManager struct {
 	sync.Mutex
 
@@ -42,6 +76,8 @@ type ProxyManager struct {
 	metricsMonitor *metricsMonitor
 
 	processGroups map[string]*ProcessGroup
+
+	inFlightCounter *InflightCounter
 
 	// shutdown signaling
 	shutdownCtx    context.Context
@@ -157,9 +193,11 @@ func New(proxyConfig config.Config) *ProxyManager {
 		muxLogger:      muxLogger,
 		upstreamLogger: upstreamLogger,
 
-		metricsMonitor: newMetricsMonitor(proxyLogger, maxMetrics),
+		metricsMonitor: newMetricsMonitor(proxyLogger, maxMetrics, proxyConfig.CaptureBuffer),
 
 		processGroups: make(map[string]*ProcessGroup),
+
+		inFlightCounter: newInflightCounter(),
 
 		shutdownCtx:    shutdownCtx,
 		shutdownCancel: shutdownCancel,
@@ -282,36 +320,37 @@ func (pm *ProxyManager) setupGinEngine() {
 
 	// Set up routes using the Gin engine
 	// Protected routes use pm.apiKeyAuth() middleware
-	pm.ginEngine.POST("/v1/chat/completions", pm.apiKeyAuth(), pm.proxyInferenceHandler)
-	pm.ginEngine.POST("/v1/responses", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/chat/completions", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/responses", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
 	// Support legacy /v1/completions api, see issue #12
-	pm.ginEngine.POST("/v1/completions", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/completions", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
 	// Support anthropic /v1/messages (added https://github.com/ggml-org/llama.cpp/pull/17570)
-	pm.ginEngine.POST("/v1/messages", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/messages", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
 	// Support anthropic count_tokens API (Also added in the above PR)
-	pm.ginEngine.POST("/v1/messages/count_tokens", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/messages/count_tokens", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
 
 	// Support embeddings and reranking
-	pm.ginEngine.POST("/v1/embeddings", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/embeddings", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
 
 	// llama-server's /reranking endpoint + aliases
-	pm.ginEngine.POST("/reranking", pm.apiKeyAuth(), pm.proxyInferenceHandler)
-	pm.ginEngine.POST("/rerank", pm.apiKeyAuth(), pm.proxyInferenceHandler)
-	pm.ginEngine.POST("/v1/rerank", pm.apiKeyAuth(), pm.proxyInferenceHandler)
-	pm.ginEngine.POST("/v1/reranking", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/reranking", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/rerank", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/rerank", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/reranking", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
 
 	// llama-server's /infill endpoint for code infilling
-	pm.ginEngine.POST("/infill", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/infill", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
 
 	// llama-server's /completion endpoint
-	pm.ginEngine.POST("/completion", pm.apiKeyAuth(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/completion", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
 
 	// Support audio/speech endpoint
-	pm.ginEngine.POST("/v1/audio/speech", pm.apiKeyAuth(), pm.proxyInferenceHandler)
-	pm.ginEngine.POST("/v1/audio/voices", pm.apiKeyAuth(), pm.proxyInferenceHandler)
-	pm.ginEngine.POST("/v1/audio/transcriptions", pm.apiKeyAuth(), pm.proxyOAIPostFormHandler)
-	pm.ginEngine.POST("/v1/images/generations", pm.apiKeyAuth(), pm.proxyInferenceHandler)
-	pm.ginEngine.POST("/v1/images/edits", pm.apiKeyAuth(), pm.proxyOAIPostFormHandler)
+	pm.ginEngine.POST("/v1/audio/speech", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/audio/voices", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
+	pm.ginEngine.GET("/v1/audio/voices", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyGETModelHandler)
+	pm.ginEngine.POST("/v1/audio/transcriptions", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyOAIPostFormHandler)
+	pm.ginEngine.POST("/v1/images/generations", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/v1/images/edits", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyOAIPostFormHandler)
 
 	pm.ginEngine.GET("/v1/models", pm.apiKeyAuth(), pm.listModelsHandler)
 
@@ -330,7 +369,7 @@ func (pm *ProxyManager) setupGinEngine() {
 	pm.ginEngine.GET("/upstream", func(c *gin.Context) {
 		c.Redirect(http.StatusFound, "/ui/models")
 	})
-	pm.ginEngine.Any("/upstream/*upstreamPath", pm.apiKeyAuth(), pm.proxyToUpstream)
+	pm.ginEngine.Any("/upstream/*upstreamPath", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyToUpstream)
 	pm.ginEngine.GET("/unload", pm.apiKeyAuth(), pm.unloadAllModelsHandler)
 	pm.ginEngine.GET("/running", pm.apiKeyAuth(), pm.listRunningProcessesHandler)
 	pm.ginEngine.GET("/health", func(c *gin.Context) {
@@ -354,25 +393,35 @@ func (pm *ProxyManager) setupGinEngine() {
 	if err != nil {
 		pm.proxyLogger.Errorf("Failed to load React filesystem: %v", err)
 	} else {
+		// Serve files with compression support under /ui/*
+		// This handler checks for pre-compressed .br and .gz files
+		pm.ginEngine.GET("/ui/*filepath", func(c *gin.Context) {
+			filepath := strings.TrimPrefix(c.Param("filepath"), "/")
+			// Default to index.html for directory-like paths
+			if filepath == "" {
+				filepath = "index.html"
+			}
 
-		// serve files that exist under /ui/*
-		pm.ginEngine.StaticFS("/ui", reactFS)
+			ServeCompressedFile(reactFS, c.Writer, c.Request, filepath)
+		})
 
-		// server SPA for UI under /ui/*
+		// Serve SPA for UI under /ui/* - fallback to index.html for client-side routing
 		pm.ginEngine.NoRoute(func(c *gin.Context) {
 			if !strings.HasPrefix(c.Request.URL.Path, "/ui") {
 				c.AbortWithStatus(http.StatusNotFound)
 				return
 			}
 
-			file, err := reactFS.Open("index.html")
-			if err != nil {
-				c.String(http.StatusInternalServerError, err.Error())
+			// Check if this looks like a file request (has extension)
+			path := c.Request.URL.Path
+			if strings.Contains(path, ".") && !strings.HasSuffix(path, "/") {
+				// This was likely a file request that wasn't found
+				c.AbortWithStatus(http.StatusNotFound)
 				return
 			}
-			defer file.Close()
-			http.ServeContent(c.Writer, c.Request, "index.html", time.Now(), file)
 
+			// Serve index.html for SPA routing
+			ServeCompressedFile(reactFS, c.Writer, c.Request, "index.html")
 		})
 	}
 
@@ -382,6 +431,14 @@ func (pm *ProxyManager) setupGinEngine() {
 
 	// Disable console color for testing
 	gin.DisableConsoleColor()
+}
+
+func (pm *ProxyManager) trackInflight() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		event.Emit(InFlightRequestsEvent{Total: pm.inFlightCounter.Increment()})
+		defer event.Emit(InFlightRequestsEvent{Total: pm.inFlightCounter.Decrement()})
+		c.Next()
+	}
 }
 
 // ServeHTTP implements http.Handler interface
@@ -688,6 +745,17 @@ func (pm *ProxyManager) proxyInferenceHandler(c *gin.Context) {
 			}
 		}
 
+		// setParamsByID: set params based on the requested model ID (runs after setParams, can override it)
+		setParamsByIDParams, setParamsByIDKeys := pm.config.Models[modelID].Filters.SanitizedSetParamsByID(requestedModel)
+		for _, key := range setParamsByIDKeys {
+			pm.proxyLogger.Debugf("<%s> setting param by id: %s", requestedModel, key)
+			bodyBytes, err = sjson.SetBytes(bodyBytes, key, setParamsByIDParams[key])
+			if err != nil {
+				pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error setting parameter %s in request", key))
+				return
+			}
+		}
+
 		pm.proxyLogger.Debugf("ProxyManager using local Process for model: %s", requestedModel)
 		nextHandler = processGroup.ProxyRequest
 	} else if pm.peerProxy != nil && pm.peerProxy.HasPeerModel(requestedModel) {
@@ -769,15 +837,29 @@ func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
 		return
 	}
 
+	// Look for a matching local model first, then check peers
+	var nextHandler func(modelID string, w http.ResponseWriter, r *http.Request) error
+	var useModelName string
+
 	modelID, found := pm.config.RealModelName(requestedModel)
-	if !found {
-		pm.sendErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("could not find real modelID for %s", requestedModel))
-		return
+	if found {
+		processGroup, err := pm.swapProcessGroup(modelID)
+		if err != nil {
+			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
+			return
+		}
+
+		useModelName = pm.config.Models[modelID].UseModelName
+		pm.proxyLogger.Debugf("ProxyManager using local Process for model: %s", requestedModel)
+		nextHandler = processGroup.ProxyRequest
+	} else if pm.peerProxy != nil && pm.peerProxy.HasPeerModel(requestedModel) {
+		pm.proxyLogger.Debugf("ProxyManager using ProxyPeer for model: %s", requestedModel)
+		modelID = requestedModel
+		nextHandler = pm.peerProxy.ProxyRequest
 	}
 
-	processGroup, err := pm.swapProcessGroup(modelID)
-	if err != nil {
-		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
+	if nextHandler == nil {
+		pm.sendErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("could not find suitable handler for %s", requestedModel))
 		return
 	}
 
@@ -793,8 +875,6 @@ func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
 			// If this is the model field and we have a profile, use just the model name
 			if key == "model" {
 				// # issue #69 allow custom model names to be sent to upstream
-				useModelName := pm.config.Models[modelID].UseModelName
-
 				if useModelName != "" {
 					fieldValue = useModelName
 				} else {
@@ -864,9 +944,46 @@ func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
 	modifiedReq.ContentLength = int64(requestBuffer.Len())
 
 	// Use the modified request for proxying
-	if err := processGroup.ProxyRequest(modelID, c.Writer, modifiedReq); err != nil {
+	if err := nextHandler(modelID, c.Writer, modifiedReq); err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
-		pm.proxyLogger.Errorf("Error Proxying Request for processGroup %s and model %s", processGroup.id, modelID)
+		pm.proxyLogger.Errorf("Error Proxying Request for model %s", modelID)
+		return
+	}
+}
+
+func (pm *ProxyManager) proxyGETModelHandler(c *gin.Context) {
+	requestedModel := c.Query("model")
+	if requestedModel == "" {
+		pm.sendErrorResponse(c, http.StatusBadRequest, "missing required 'model' query parameter")
+		return
+	}
+
+	var nextHandler func(modelID string, w http.ResponseWriter, r *http.Request) error
+	var modelID string
+
+	if realModelID, found := pm.config.RealModelName(requestedModel); found {
+		processGroup, err := pm.swapProcessGroup(realModelID)
+		if err != nil {
+			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
+			return
+		}
+		modelID = realModelID
+		pm.proxyLogger.Debugf("ProxyManager using local Process for model: %s", requestedModel)
+		nextHandler = processGroup.ProxyRequest
+	} else if pm.peerProxy != nil && pm.peerProxy.HasPeerModel(requestedModel) {
+		modelID = requestedModel
+		pm.proxyLogger.Debugf("ProxyManager using ProxyPeer for model: %s", requestedModel)
+		nextHandler = pm.peerProxy.ProxyRequest
+	}
+
+	if nextHandler == nil {
+		pm.sendErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("could not find suitable handler for %s", requestedModel))
+		return
+	}
+
+	if err := nextHandler(modelID, c.Writer, c.Request); err != nil {
+		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
+		pm.proxyLogger.Errorf("Error Proxying GET Request for model %s", modelID)
 		return
 	}
 }

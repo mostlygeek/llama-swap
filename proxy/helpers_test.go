@@ -71,11 +71,15 @@ func getTestSimpleResponderConfig(expectedMessage string) config.ModelConfig {
 }
 
 func getTestSimpleResponderConfigPort(expectedMessage string, port int) config.ModelConfig {
+	// Convert path to forward slashes for cross-platform compatibility
+	// Windows handles forward slashes in paths correctly
+	cmdPath := filepath.ToSlash(simpleResponderPath)
+
 	// Create a YAML string with just the values we want to set
 	yamlStr := fmt.Sprintf(`
 cmd: '%s --port %d --silent --respond %s'
 proxy: "http://127.0.0.1:%d"
-`, simpleResponderPath, port, expectedMessage, port)
+`, cmdPath, port, expectedMessage, port)
 
 	var cfg config.ModelConfig
 	if err := yaml.Unmarshal([]byte(yamlStr), &cfg); err != nil {

@@ -5,7 +5,7 @@
 
 # llama-swap
 
-Run multiple LLM models on your machine and hot-swap between them as needed. llama-swap works with any OpenAI API-compatible server, giving you the flexibility to switch models without restarting your applications.
+Run multiple generative AI models on your machine and hot-swap between them on demand. llama-swap works with any OpenAI and Anthropic API compatible server and is used by thousands of people to power their local AI workflows. 
 
 Built in Go for performance and simplicity, llama-swap has zero dependencies and is incredibly easy to set up. Get started in minutes - just one binary and one configuration file.
 
@@ -13,7 +13,7 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
 
 - ✅ Easy to deploy and configure: one binary, one configuration file. no external dependencies
 - ✅ On-demand model switching
-- ✅ Use any local OpenAI compatible server (llama.cpp, vllm, tabbyAPI, etc.)
+- ✅ Use any local OpenAI compatible server (llama.cpp, vllm, tabbyAPI, stable-diffusion.cpp, etc.)
   - future proof, upgrade your inference servers at any time.
 - ✅ OpenAI API supported endpoints:
   - `v1/completions`
@@ -50,13 +50,27 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
 
 ### Web UI
 
-llama-swap includes a real time web interface for monitoring logs and controlling models:
+llama-swap includes a real time web interface with a playground for testing out all sorts of local models: 
 
-<img width="1164" height="745" alt="image" src="https://github.com/user-attachments/assets/bacf3f9d-819f-430b-9ed2-1bfaa8d54579" />
+<img width="1125" height="876" alt="image" src="https://github.com/user-attachments/assets/8ee41947-97af-463d-b0f0-8e9c478fac07" />
 
-The Activity Page shows recent requests:
+View detailed token metrics:
 
-<img width="1360" height="963" alt="image" src="https://github.com/user-attachments/assets/5f3edee6-d03a-4ae5-ae06-b20ac1f135bd" />
+<img width="1111" height="515" alt="image" src="https://github.com/user-attachments/assets/64bfb280-d7a3-4126-971a-a128fd40410c" />
+
+Inspect request and responses:
+
+<img width="1111" height="720" alt="image" src="https://github.com/user-attachments/assets/24fe4aca-1448-4d7c-b9e8-a967589bda6c" />
+
+Manually load and unload models: 
+
+<img width="1109" height="719" alt="image" src="https://github.com/user-attachments/assets/02b1e1f2-abd0-4050-84ae-facd66ff01c4" />
+
+
+Real time log streaming: 
+
+<img width="1107" height="559" alt="image" src="https://github.com/user-attachments/assets/39669a10-cff2-409e-836a-5bad8bd0140c" />
+
 
 ## Installation
 
@@ -71,6 +85,7 @@ llama-swap can be installed in multiple ways
 ### Docker Install ([download images](https://github.com/mostlygeek/llama-swap/pkgs/container/llama-swap))
 
 Nightly container images with llama-swap and llama-server are built for multiple platforms (cuda, vulkan, intel, etc.) including [non-root variants with improved security](docs/container-security.md).
+The stable-diffusion.cpp server is also included for the musa and vulkan platforms.
 
 ```shell
 $ docker pull ghcr.io/mostlygeek/llama-swap:cuda
