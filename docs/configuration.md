@@ -234,6 +234,14 @@ models:
     # - if not set, it will be omitted in the JSON model record
     description: "A small but capable model used for quick testing"
 
+    # The following fields are automatically detected from cmd and exposed
+    # in the /v1/models response. If not detected, the field is omitted.
+    # Values set via macros (e.g. --ctx-size ${env.LLAMA_ARG_CTX_SIZE}) are supported.
+    #
+    # context_length: parsed from --ctx-size / -c (llama.cpp) or --max-model-len (vLLM)
+    #   divided by --parallel / -np if set (per-slot context)
+    # supports_vision: true when --mmproj is present in cmd (llama.cpp)
+
     # env: define an array of environment variables to inject into cmd's environment
     # - optional, default: empty array
     # - each value is a single string
