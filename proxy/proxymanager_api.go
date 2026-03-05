@@ -53,8 +53,13 @@ func (pm *ProxyManager) apiGetModels(c *gin.Context) {
 	models := pm.getModelStatus()
 	result := make([]apiModel, len(models))
 	for i, m := range models {
+		name := m.Name
+		if name == "" {
+			name = m.Id
+		}
+
 		result[i] = apiModel{
-			Name:  m.Name,
+			Name:  name,
 			Id:    m.Id,
 			State: m.State,
 		}

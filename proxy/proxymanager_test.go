@@ -1328,6 +1328,11 @@ func TestProxyManager_ApiGetModels(t *testing.T) {
 				Proxy: "http://localhost:8081",
 				Name:  "Model Two",
 			},
+			"model3": {
+				Cmd:   "echo test",
+				Proxy: "http://localhost:8082",
+				Name:  "",
+			},
 		},
 		LogLevel: "error",
 	})
@@ -1346,7 +1351,7 @@ func TestProxyManager_ApiGetModels(t *testing.T) {
 	var response []map[string]string
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
-	assert.Len(t, response, 2)
+	assert.Len(t, response, 3)
 
 	// Find model1 and model2 in response
 	modelMap := make(map[string]map[string]string)
@@ -1356,12 +1361,16 @@ func TestProxyManager_ApiGetModels(t *testing.T) {
 
 	assert.Contains(t, modelMap, "model1")
 	assert.Contains(t, modelMap, "model2")
+	assert.Contains(t, modelMap, "model3")
 	assert.Equal(t, "Model One", modelMap["model1"]["name"])
 	assert.Equal(t, "Model Two", modelMap["model2"]["name"])
+	assert.Equal(t, "model3", modelMap["model3"]["name"])
 	assert.Equal(t, "model1", modelMap["model1"]["id"])
 	assert.Equal(t, "model2", modelMap["model2"]["id"])
+	assert.Equal(t, "model3", modelMap["model3"]["id"])
 	assert.Equal(t, "stopped", modelMap["model1"]["state"])
 	assert.Equal(t, "stopped", modelMap["model2"]["state"])
+	assert.Equal(t, "stopped", modelMap["model3"]["state"])
 }
 
 func TestProxyManager_APIKeyAuth(t *testing.T) {
