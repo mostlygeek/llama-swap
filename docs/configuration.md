@@ -5,6 +5,7 @@ llama-swap is designed to be very simple: one binary, one configuration file.
 ## minimal viable config
 
 ```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/mostlygeek/llama-swap/refs/heads/main/config-schema.json
 models:
   model1:
     cmd: llama-server --port ${PORT} --model /path/to/model.gguf
@@ -13,6 +14,7 @@ models:
 This is enough to launch `llama-server` to serve `model1`. Of course, llama-swap is about making it possible to serve many models:
 
 ```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/mostlygeek/llama-swap/refs/heads/main/config-schema.json
 models:
   model1:
     cmd: llama-server --port ${PORT} -m /path/to/model.gguf
@@ -29,6 +31,7 @@ With this configuration models will be hot swapped and loaded on demand. The spe
 llama-swap is also about customizability. You can use any CLI flag available:
 
 ```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/mostlygeek/llama-swap/refs/heads/main/config-schema.json
 models:
   model1:
     cmd: | # support for multi-line
@@ -44,6 +47,7 @@ models:
 llama-swap supports any OpenAI API compatible server. If you can run it on the CLI llama-swap will be able to manage it. Even if it's run in Docker or Podman containers.
 
 ```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/mostlygeek/llama-swap/refs/heads/main/config-schema.json
 models:
   "Q3-30B-CODER-VLLM":
     name: "Qwen3 30B Coder vllm AWQ (Q3-30B-CODER-VLLM)"
@@ -89,7 +93,7 @@ llama-swap supports many more features to customize how you want to manage your 
 > Always check [config.example.yaml](https://github.com/mostlygeek/llama-swap/blob/main/config.example.yaml) for the most up to date reference for all example configurations.
 
 ```yaml
-# add this modeline for validation in vscode
+# keep this comment for autocomplete in your ide
 # yaml-language-server: $schema=https://raw.githubusercontent.com/mostlygeek/llama-swap/refs/heads/main/config-schema.json
 #
 # llama-swap YAML configuration example

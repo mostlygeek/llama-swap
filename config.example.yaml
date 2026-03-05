@@ -1,4 +1,4 @@
-# add this modeline for validation in vscode
+# keep this comment for autocomplete in your ide
 # yaml-language-server: $schema=https://raw.githubusercontent.com/mostlygeek/llama-swap/refs/heads/main/config-schema.json
 #
 # llama-swap YAML configuration example
