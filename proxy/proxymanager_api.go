@@ -1,16 +1,20 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/event"
+	"github.com/mostlygeek/llama-swap/proxy/config"
+	"gopkg.in/yaml.v3"
 )
 
 type Model struct {
@@ -34,6 +38,8 @@ func addApiHandlers(pm *ProxyManager) {
 		apiGroup.GET("/metrics", pm.apiGetMetrics)
 		apiGroup.GET("/version", pm.apiGetVersion)
 		apiGroup.GET("/captures/:id", pm.apiGetCapture)
+		apiGroup.GET("/config/models", pm.apiGetConfigModels)
+		apiGroup.PUT("/config/models", pm.apiPutConfigModels)
 	}
 }
 
@@ -302,4 +308,88 @@ func (pm *ProxyManager) apiGetCapture(c *gin.Context) {
 		return
 	}
 	c.Data(http.StatusOK, "application/json", jsonBytes)
+}
+
+func (pm *ProxyManager) apiGetConfigModels(c *gin.Context) {
+	pm.Lock()
+	configPath := pm.configPath
+	pm.Unlock()
+
+	if configPath == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "config path not set"})
+		return
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to read config: %v", err)})
+		return
+	}
+
+	var raw map[string]interface{}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to parse config: %v", err)})
+		return
+	}
+
+	models, ok := raw["models"]
+	if !ok {
+		models = map[string]interface{}{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"models": models})
+}
+
+func (pm *ProxyManager) apiPutConfigModels(c *gin.Context) {
+	pm.Lock()
+	configPath := pm.configPath
+	pm.Unlock()
+
+	if configPath == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "config path not set"})
+		return
+	}
+
+	var requestBody struct {
+		Models map[string]interface{} `json:"models"`
+	}
+	if err := c.ShouldBindJSON(&requestBody); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid request body: %v", err)})
+		return
+	}
+
+	// Read existing config
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to read config: %v", err)})
+		return
+	}
+
+	var rawConfig map[string]interface{}
+	if err := yaml.Unmarshal(data, &rawConfig); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to parse config: %v", err)})
+		return
+	}
+
+	// Replace models section
+	rawConfig["models"] = requestBody.Models
+
+	newYaml, err := yaml.Marshal(rawConfig)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to marshal config: %v", err)})
+		return
+	}
+
+	// Validate before writing
+	if _, err := config.LoadConfigFromReader(bytes.NewReader(newYaml)); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid configuration: %v", err)})
+		return
+	}
+
+	if err := os.WriteFile(configPath, newYaml, 0644); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to write config: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"msg": "ok"})
 }

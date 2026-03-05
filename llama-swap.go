@@ -109,6 +109,7 @@ func main() {
 			currentPM.Shutdown()
 			newPM := proxy.New(conf)
 			newPM.SetVersion(date, commit, version)
+			newPM.SetConfigPath(*configPath)
 			srv.Handler = newPM
 			fmt.Println("Configuration Reloaded")
 
@@ -126,6 +127,7 @@ func main() {
 			}
 			newPM := proxy.New(conf)
 			newPM.SetVersion(date, commit, version)
+			newPM.SetConfigPath(*configPath)
 			srv.Handler = newPM
 		}
 	}
