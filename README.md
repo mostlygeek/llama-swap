@@ -36,6 +36,7 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
   - `/ui` - web UI
   - `/upstream/:model_id` - direct access to upstream server ([demo](https://github.com/mostlygeek/llama-swap/pull/31))
   - `/api/models/unload` - manually unload running models ([#58](https://github.com/mostlygeek/llama-swap/issues/58))
+  - `/api/models/unload/:model_id` - manually unload a specific model ([#58](https://github.com/mostlygeek/llama-swap/issues/58))
   - `/api/models` - list models and their state ([#569](https://github.com/mostlygeek/llama-swap/pull/569))
   - `/running` - list currently running models ([#61](https://github.com/mostlygeek/llama-swap/issues/61))
   - `/log` - remote log monitoring
