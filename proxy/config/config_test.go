@@ -1438,3 +1438,54 @@ models:
 	})
 
 }
+
+func TestConfig_VisionModelValidation(t *testing.T) {
+	t.Run("valid visionModel reference", func(t *testing.T) {
+		content := `
+models:
+  text-model:
+    cmd: llama-server --port ${PORT} -m model.gguf
+    visionModel: "vision-model"
+  vision-model:
+    cmd: llama-server --port ${PORT} -m model.gguf --mmproj mmproj.gguf
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, "vision-model", config.Models["text-model"].VisionModel)
+	})
+
+	t.Run("visionModel references non-existent model", func(t *testing.T) {
+		content := `
+models:
+  text-model:
+    cmd: llama-server --port ${PORT} -m model.gguf
+    visionModel: "does-not-exist"
+`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "visionModel 'does-not-exist' is not a valid model ID")
+	})
+
+	t.Run("visionModel references itself", func(t *testing.T) {
+		content := `
+models:
+  text-model:
+    cmd: llama-server --port ${PORT} -m model.gguf
+    visionModel: "text-model"
+`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "visionModel cannot reference itself")
+	})
+
+	t.Run("empty visionModel is fine", func(t *testing.T) {
+		content := `
+models:
+  text-model:
+    cmd: llama-server --port ${PORT} -m model.gguf
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, "", config.Models["text-model"].VisionModel)
+	})
+}
