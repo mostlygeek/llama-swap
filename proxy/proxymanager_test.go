@@ -410,7 +410,7 @@ models:
 	assert.False(t, exists, "model2 should not have llamaswap_meta")
 }
 
-func TestProxyManager_ListModelsHandler_MaxInputTokens(t *testing.T) {
+func TestProxyManager_ListModelsHandler_CmdDerivedFields(t *testing.T) {
 	configYaml := `
 healthCheckTimeout: 15
 logLevel: error
@@ -420,7 +420,9 @@ models:
     cmd: llama-server --port ${PORT} --ctx-size 131072 --model foo.gguf
   with-ctx-short:
     cmd: llama-server --port ${PORT} -c 4096 --model bar.gguf
-  without-ctx:
+  vision-model:
+    cmd: llama-server --port ${PORT} -c 8192 --mmproj vision.gguf --model viz.gguf
+  plain-model:
     cmd: llama-server --port ${PORT} --model baz.gguf
 `
 	processedConfig, err := config.LoadConfigFromReader(strings.NewReader(configYaml))
@@ -441,10 +443,16 @@ models:
 		switch id {
 		case "with-ctx":
 			assert.Equal(t, int64(131072), model.Get("context_length").Int())
+			assert.False(t, model.Get("supports_vision").Exists())
 		case "with-ctx-short":
 			assert.Equal(t, int64(4096), model.Get("context_length").Int())
-		case "without-ctx":
-			assert.False(t, model.Get("context_length").Exists(), "without-ctx should not have context_length")
+			assert.False(t, model.Get("supports_vision").Exists())
+		case "vision-model":
+			assert.Equal(t, int64(8192), model.Get("context_length").Int())
+			assert.True(t, model.Get("supports_vision").Bool())
+		case "plain-model":
+			assert.False(t, model.Get("context_length").Exists(), "plain-model should not have context_length")
+			assert.False(t, model.Get("supports_vision").Exists(), "plain-model should not have supports_vision")
 		}
 	}
 }
