@@ -1,6 +1,8 @@
 <script lang="ts">
-  import { link, location } from "svelte-spa-router";
+  import { link } from "svelte-spa-router";
   import { screenWidth, toggleTheme, isDarkMode, appTitle, isNarrow } from "../stores/theme";
+  import { currentRoute } from "../stores/route";
+  import { playgroundActivity } from "../stores/playgroundActivity";
   import ConnectionStatus from "./ConnectionStatus.svelte";
 
   function handleTitleChange(newTitle: string): void {
@@ -22,9 +24,10 @@
     handleTitleChange(target.textContent || "(set title)");
   }
 
-  function isActive(path: string, currentLocation: string): boolean {
-    return path === "/" ? currentLocation === "/" : currentLocation.startsWith(path);
+  function isActive(path: string, current: string): boolean {
+    return path === "/" ? current === "/" : current.startsWith(path);
   }
+
 </script>
 
 <header
@@ -47,8 +50,7 @@
     <a
       href="/"
       use:link
-      class="text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1 whitespace-nowrap"
-      class:font-semibold={isActive("/", $location)}
+      class="p-1 whitespace-nowrap {isActive('/', $currentRoute) ? 'font-semibold' : ''} {$playgroundActivity ? 'activity-link' : 'text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100'}"
     >
       Playground
     </a>
@@ -56,7 +58,7 @@
       href="/models"
       use:link
       class="text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1 whitespace-nowrap"
-      class:font-semibold={isActive("/models", $location)}
+      class:font-semibold={isActive("/models", $currentRoute)}
     >
       Models
     </a>
@@ -64,7 +66,7 @@
       href="/activity"
       use:link
       class="text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1 whitespace-nowrap"
-      class:font-semibold={isActive("/activity", $location)}
+      class:font-semibold={isActive("/activity", $currentRoute)}
     >
       Activity
     </a>
@@ -72,7 +74,7 @@
       href="/logs"
       use:link
       class="text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1 whitespace-nowrap"
-      class:font-semibold={isActive("/logs", $location)}
+      class:font-semibold={isActive("/logs", $currentRoute)}
     >
       Logs
     </a>
@@ -96,3 +98,23 @@
     <ConnectionStatus />
   </menu>
 </header>
+
+<style>
+  .activity-link {
+    background: linear-gradient(90deg, #6366f1, #8b5cf6, #a855f7, #8b5cf6, #6366f1);
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: gradient-shift 2s linear infinite;
+  }
+
+  @keyframes gradient-shift {
+    0% {
+      background-position: 0% 50%;
+    }
+    100% {
+      background-position: 200% 50%;
+    }
+  }
+</style>

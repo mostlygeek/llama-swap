@@ -20,6 +20,12 @@ type Filters struct {
 	// SetParams is a dictionary of parameters to set/override in requests
 	// Protected params (like "model") cannot be set
 	SetParams map[string]any `yaml:"setParams"`
+
+	// SetParamsByID maps requested model IDs to parameters to set/override in requests.
+	// Useful with aliases: a single loaded model can behave differently depending on
+	// which alias the client used. Applied after SetParams, so it can override those values.
+	// Protected params (like "model") cannot be set.
+	SetParamsByID map[string]map[string]any `yaml:"setParamsByID"`
 }
 
 // SanitizedStripParams returns a sorted list of parameters to strip,
@@ -49,6 +55,33 @@ func (f Filters) SanitizedStripParams() []string {
 
 	slices.Sort(cleaned)
 	return cleaned
+}
+
+// SanitizedSetParamsByID returns the params to set for the given requestedModelID,
+// with protected params removed and keys sorted for consistent iteration order.
+// Returns nil if the ID has no entry or all its params are protected.
+func (f Filters) SanitizedSetParamsByID(requestedModelID string) (map[string]any, []string) {
+	if len(f.SetParamsByID) == 0 {
+		return nil, nil
+	}
+	params, found := f.SetParamsByID[requestedModelID]
+	if !found || len(params) == 0 {
+		return nil, nil
+	}
+	result := make(map[string]any, len(params))
+	keys := make([]string, 0, len(params))
+	for key, value := range params {
+		if slices.Contains(ProtectedParams, key) {
+			continue
+		}
+		result[key] = value
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	if len(result) == 0 {
+		return nil, nil
+	}
+	return result, keys
 }
 
 // SanitizedSetParams returns a copy of SetParams with protected params removed

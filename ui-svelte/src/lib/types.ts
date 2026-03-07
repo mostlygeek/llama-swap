@@ -9,6 +9,7 @@ export interface Model {
   description: string;
   unlisted: boolean;
   peerID: string;
+  aliases?: string[];
 }
 
 export interface Metrics {
@@ -38,8 +39,12 @@ export interface LogData {
   data: string;
 }
 
+export interface InFlightStats {
+  total: number;
+}
+
 export interface APIEventEnvelope {
-  type: "modelStatus" | "logData" | "metrics";
+  type: "modelStatus" | "logData" | "metrics" | "inflight";
   data: string;
 }
 

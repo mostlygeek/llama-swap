@@ -75,6 +75,11 @@ sendLoadingState: true
 #   all fields except for Id so chat UIs can use the alias equivalent to the original.
 includeAliasesInList: false
 
+# globalTTL: the default TTL in seconds before unloading a model
+# - optional, default: 0 (never automatically unload)
+# - must be >= 0
+globalTTL: 0
+
 # macros: a dictionary of string substitutions
 # - optional, default: empty dictionary
 # - macros are reusable snippets
@@ -126,7 +131,7 @@ apiKeys:
 # - below are examples of the all the settings a model can have
 models:
   # keys are the model names used in API requests
-  "llama":
+  "gpt-oss-120b":
     # macros: a dictionary of string substitutions specific to this model
     # - optional, default: empty dictionary
     # - macros defined here override macros defined in the global macros section
@@ -143,7 +148,7 @@ models:
     cmd: |
       # ${latest-llama} is a macro that is defined above
       ${latest-llama}
-      --model path/to/llama-8B-Q4_K_M.gguf
+      --model path/to/gpt-oss-120B.gguf
       --ctx-size ${default_ctx}
       --temperature ${temp}
 
@@ -151,13 +156,13 @@ models:
     # - optional, default: empty string
     # - if set, it will be used in the v1/models API response
     # - if not set, it will be omitted in the JSON model record
-    name: "llama 3.1 8B"
+    name: "gpt-oss 120B"
 
     # description: a description for the model
     # - optional, default: empty string
     # - if set, it will be used in the v1/models API response
     # - if not set, it will be omitted in the JSON model record
-    description: "A small but capable model used for quick testing"
+    description: "A thinking model from OpenAI"
 
     # env: define an array of environment variables to inject into cmd's environment
     # - optional, default: empty array
@@ -172,14 +177,6 @@ models:
     # - if you use a custom port in cmd this *must* be set
     proxy: http://127.0.0.1:8999
 
-    # aliases: alternative model names that this model configuration is used for
-    # - optional, default: empty array
-    # - aliases must be unique globally
-    # - useful for impersonating a specific model
-    aliases:
-      - "gpt-4o-mini"
-      - "gpt-3.5-turbo"
-
     # checkEndpoint: URL path to check if the server is ready
     # - optional, default: /health
     # - endpoint is expected to return an HTTP 200 response
@@ -188,8 +185,10 @@ models:
     checkEndpoint: /custom-endpoint
 
     # ttl: automatically unload the model after ttl seconds
-    # - optional, default: 0
-    # - ttl values must be a value greater than 0
+    # - optional, default: -1 (use global default)
+    # - ttl values must be a value greater than or equal to 0
+    # - a ttl of -1 will use the global TTL value as the default
+    # - a ttl of 0 will mean never unload
     # - a value of 0 disables automatic unloading of the model
     ttl: 60
 
@@ -197,7 +196,7 @@ models:
     # - optional, default: ""
     # - useful for when the upstream server expects a specific model name that
     #   is different from the model's ID
-    useModelName: "qwen:qwq"
+    useModelName: "openai/gpt-oss-120B"
 
     # filters: a dictionary of filter settings
     # - optional, default: empty dictionary
@@ -216,10 +215,37 @@ models:
       # - useful for enforcing specific parameter values
       # - protected params like "model" cannot be overridden
       # - values can be strings, numbers, booleans, arrays, or objects
+      # - always runs for the model
       setParams:
         # Example: enforce specific sampling parameters
         temperature: 0.7
         top_p: 0.9
+
+      # setParamsByID: a dictionary of parameters to set based the model ID
+      # - optional, default: empty dictionary
+      # - combine with aliases to create variant behaviour without reloading the model
+      # - parameters are set in the request body JSON
+      # - run after setParams so it will override any settings
+      # - protected params like "model" cannot be overridden
+      # - values can be strings, numbers, booleans, arrays, or objects
+      # - model aliases will be automatically created for each key
+      setParamsByID:
+        "${MODEL_ID}":
+          chat_template_kwargs:
+            reasoning_effort: medium
+        "${MODEL_ID}:high":
+          chat_template_kwargs:
+            reasoning_effort: high
+        "${MODEL_ID}:low":
+          chat_template_kwargs:
+            reasoning_effort: low
+
+    # aliases: alternative model names that this model configuration is used for
+    # - optional, default: empty array
+    # - aliases must be unique globally
+    # - useful for impersonating a specific model
+    aliases:
+      - "gpt-4o-mini"
 
     # metadata: a dictionary of arbitrary values that are included in /v1/models
     # - optional, default: empty dictionary
