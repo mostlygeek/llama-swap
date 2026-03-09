@@ -198,6 +198,74 @@ func TestMetricsMonitor_WrapHandler(t *testing.T) {
 		assert.Equal(t, 50, metrics[0].OutputTokens)
 	})
 
+	t.Run("successful responses request with input and output usage data", func(t *testing.T) {
+		mm := newMetricsMonitor(testLogger, 10, 0)
+
+		responseBody := `{
+			"object": "response",
+			"output": [{
+				"type": "message",
+				"role": "assistant",
+				"content": [{"type": "output_text", "text": "Hello"}]
+			}],
+			"usage": {
+				"input_tokens": 120,
+				"output_tokens": 45
+			}
+		}`
+
+		nextHandler := func(modelID string, w http.ResponseWriter, r *http.Request) error {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(responseBody))
+			time.Sleep(10 * time.Millisecond)
+			return nil
+		}
+
+		req := httptest.NewRequest("POST", "/v1/responses", nil)
+		rec := httptest.NewRecorder()
+		ginCtx, _ := gin.CreateTestContext(rec)
+
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
+		assert.NoError(t, err)
+
+		metrics := mm.getMetrics()
+		assert.Equal(t, 1, len(metrics))
+		assert.Equal(t, "test-model", metrics[0].Model)
+		assert.Equal(t, 120, metrics[0].InputTokens)
+		assert.Equal(t, 45, metrics[0].OutputTokens)
+		assert.Equal(t, -1.0, metrics[0].PromptPerSecond)
+		assert.Equal(t, -1.0, metrics[0].TokensPerSecond)
+	})
+
+	t.Run("chunked non-streaming responses request does not estimate generation speed", func(t *testing.T) {
+		mm := newMetricsMonitor(testLogger, 10, 0)
+
+		nextHandler := func(modelID string, w http.ResponseWriter, r *http.Request) error {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"object":"response","usage":{"input_tokens":120,`))
+			time.Sleep(15 * time.Millisecond)
+			_, _ = w.Write([]byte(`"output_tokens":45,"total_tokens":165},`))
+			time.Sleep(15 * time.Millisecond)
+			_, _ = w.Write([]byte(`"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hello"}]}]}`))
+			return nil
+		}
+
+		req := httptest.NewRequest("POST", "/v1/responses", nil)
+		rec := httptest.NewRecorder()
+		ginCtx, _ := gin.CreateTestContext(rec)
+
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
+		assert.NoError(t, err)
+
+		metrics := mm.getMetrics()
+		assert.Equal(t, 1, len(metrics))
+		assert.Equal(t, 120, metrics[0].InputTokens)
+		assert.Equal(t, 45, metrics[0].OutputTokens)
+		assert.Equal(t, -1.0, metrics[0].TokensPerSecond)
+	})
+
 	t.Run("successful request with timings data", func(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10, 0)
 
@@ -677,6 +745,95 @@ data: [DONE]
 		assert.Equal(t, 1, len(metrics))
 		assert.Equal(t, 100, metrics[0].InputTokens)
 		assert.Equal(t, 50, metrics[0].OutputTokens)
+	})
+
+	t.Run("finds metrics in OpenAI Responses completion event", func(t *testing.T) {
+		mm := newMetricsMonitor(testLogger, 10, 0)
+
+		responseBody := `data: {"event":"response.created","data":{"type":"response.created","response":{"id":"resp_123","object":"response","status":"in_progress"}}}
+
+data: {"event":"response.output_text.delta","data":{"type":"response.output_text.delta","item_id":"msg_123","delta":"Hello"}}
+
+data: {"event":"response.completed","data":{"type":"response.completed","response":{"id":"resp_123","object":"response","status":"completed","usage":{"input_tokens":80,"output_tokens":25,"total_tokens":105}}}}
+
+data: [DONE]
+
+`
+
+		nextHandler := func(modelID string, w http.ResponseWriter, r *http.Request) error {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(responseBody))
+			return nil
+		}
+
+		req := httptest.NewRequest("POST", "/v1/responses", nil)
+		rec := httptest.NewRecorder()
+		ginCtx, _ := gin.CreateTestContext(rec)
+
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
+		assert.NoError(t, err)
+
+		metrics := mm.getMetrics()
+		assert.Equal(t, 1, len(metrics))
+		assert.Equal(t, 80, metrics[0].InputTokens)
+		assert.Equal(t, 25, metrics[0].OutputTokens)
+	})
+
+	t.Run("estimates prompt and generation speed for streamed Responses events", func(t *testing.T) {
+		mm := newMetricsMonitor(testLogger, 10, 0)
+
+		nextHandler := func(modelID string, w http.ResponseWriter, r *http.Request) error {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			time.Sleep(15 * time.Millisecond)
+			_, _ = w.Write([]byte("data: {\"event\":\"response.output_text.delta\",\"data\":{\"type\":\"response.output_text.delta\",\"item_id\":\"msg_123\",\"delta\":\"Hello\"}}\n\n"))
+			time.Sleep(20 * time.Millisecond)
+			_, _ = w.Write([]byte("data: {\"event\":\"response.completed\",\"data\":{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_123\",\"object\":\"response\",\"status\":\"completed\",\"usage\":{\"input_tokens\":80,\"output_tokens\":25,\"total_tokens\":105}}}}\n\n"))
+			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+			return nil
+		}
+
+		req := httptest.NewRequest("POST", "/v1/responses", nil)
+		rec := httptest.NewRecorder()
+		ginCtx, _ := gin.CreateTestContext(rec)
+
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
+		assert.NoError(t, err)
+
+		metrics := mm.getMetrics()
+		assert.Equal(t, 1, len(metrics))
+		assert.Equal(t, 80, metrics[0].InputTokens)
+		assert.Equal(t, 25, metrics[0].OutputTokens)
+		assert.Equal(t, -1.0, metrics[0].PromptPerSecond)
+		assert.Greater(t, metrics[0].TokensPerSecond, 0.0)
+	})
+
+	t.Run("single write fallback leaves generation speed unknown", func(t *testing.T) {
+		mm := newMetricsMonitor(testLogger, 10, 0)
+
+		nextHandler := func(modelID string, w http.ResponseWriter, r *http.Request) error {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			time.Sleep(15 * time.Millisecond)
+			_, _ = w.Write([]byte("data: {\"event\":\"response.completed\",\"data\":{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_123\",\"object\":\"response\",\"status\":\"completed\",\"usage\":{\"input_tokens\":8,\"output_tokens\":1,\"total_tokens\":9}}}}\n\n"))
+			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+			return nil
+		}
+
+		req := httptest.NewRequest("POST", "/v1/responses", nil)
+		rec := httptest.NewRecorder()
+		ginCtx, _ := gin.CreateTestContext(rec)
+
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
+		assert.NoError(t, err)
+
+		metrics := mm.getMetrics()
+		assert.Equal(t, 1, len(metrics))
+		assert.Equal(t, 8, metrics[0].InputTokens)
+		assert.Equal(t, 1, metrics[0].OutputTokens)
+		assert.Equal(t, -1.0, metrics[0].PromptPerSecond)
+		assert.Equal(t, -1.0, metrics[0].TokensPerSecond)
 	})
 
 	t.Run("handles streaming with no valid JSON records minimal metrics", func(t *testing.T) {

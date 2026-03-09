@@ -220,7 +220,7 @@ func (mp *metricsMonitor) wrapHandler(
 	tm := TokenMetrics{
 		Timestamp:  time.Now(),
 		Model:      modelID,
-		DurationMs: int(time.Since(recorder.StartTime()).Milliseconds()),
+		DurationMs: int(recorder.Timings().totalDuration().Milliseconds()),
 	}
 
 	body := recorder.body.Bytes()
@@ -241,7 +241,7 @@ func (mp *metricsMonitor) wrapHandler(
 		}
 	}
 	if strings.Contains(recorder.Header().Get("Content-Type"), "text/event-stream") {
-		if parsed, err := processStreamingResponse(modelID, recorder.StartTime(), body); err != nil {
+		if parsed, err := processStreamingResponse(modelID, request.URL.Path, recorder.Timings(), body); err != nil {
 			mp.logger.Warnf("error processing streaming response: %v, path=%s, recording minimal metrics", err, request.URL.Path)
 		} else {
 			tm = parsed
@@ -249,19 +249,10 @@ func (mp *metricsMonitor) wrapHandler(
 	} else {
 		if gjson.ValidBytes(body) {
 			parsed := gjson.ParseBytes(body)
-			usage := parsed.Get("usage")
-			timings := parsed.Get("timings")
-
-			// extract timings for infill - response is an array, timings are in the last element
-			// see #463
-			if strings.HasPrefix(request.URL.Path, "/infill") {
-				if arr := parsed.Array(); len(arr) > 0 {
-					timings = arr[len(arr)-1].Get("timings")
-				}
-			}
+			usage, timings := findMetricsPayload(parsed, request.URL.Path)
 
 			if usage.Exists() || timings.Exists() {
-				if parsedMetrics, err := parseMetrics(modelID, recorder.StartTime(), usage, timings); err != nil {
+				if parsedMetrics, err := parseMetrics(modelID, recorder.Timings(), usage, timings, false); err != nil {
 					mp.logger.Warnf("error parsing metrics: %v, path=%s, recording minimal metrics", err, request.URL.Path)
 				} else {
 					tm = parsedMetrics
@@ -307,7 +298,7 @@ func (mp *metricsMonitor) wrapHandler(
 	return nil
 }
 
-func processStreamingResponse(modelID string, start time.Time, body []byte) (TokenMetrics, error) {
+func processStreamingResponse(modelID, reqPath string, timingInfo responseTimingInfo, body []byte) (TokenMetrics, error) {
 	// Iterate **backwards** through the body looking for the data payload with
 	// usage data. This avoids allocating a slice of all lines via bytes.Split.
 
@@ -347,11 +338,10 @@ func processStreamingResponse(modelID string, start time.Time, body []byte) (Tok
 
 		if gjson.ValidBytes(data) {
 			parsed := gjson.ParseBytes(data)
-			usage := parsed.Get("usage")
-			timings := parsed.Get("timings")
+			usage, timings := findMetricsPayload(parsed, reqPath)
 
 			if usage.Exists() || timings.Exists() {
-				return parseMetrics(modelID, start, usage, timings)
+				return parseMetrics(modelID, timingInfo, usage, timings, true)
 			}
 		}
 	}
@@ -359,7 +349,40 @@ func processStreamingResponse(modelID string, start time.Time, body []byte) (Tok
 	return TokenMetrics{}, fmt.Errorf("no valid JSON data found in stream")
 }
 
-func parseMetrics(modelID string, start time.Time, usage, timings gjson.Result) (TokenMetrics, error) {
+func findMetricsPayload(parsed gjson.Result, reqPath string) (gjson.Result, gjson.Result) {
+	candidates := []gjson.Result{parsed}
+
+	if data := parsed.Get("data"); data.Exists() {
+		candidates = append(candidates, data)
+	}
+	if response := parsed.Get("response"); response.Exists() {
+		candidates = append(candidates, response)
+	}
+	if response := parsed.Get("data.response"); response.Exists() {
+		candidates = append(candidates, response)
+	}
+
+	for _, candidate := range candidates {
+		usage := candidate.Get("usage")
+		timings := candidate.Get("timings")
+
+		// extract timings for infill - response is an array, timings are in the last element
+		// see #463
+		if strings.HasPrefix(reqPath, "/infill") {
+			if arr := candidate.Array(); len(arr) > 0 {
+				timings = arr[len(arr)-1].Get("timings")
+			}
+		}
+
+		if usage.Exists() || timings.Exists() {
+			return usage, timings
+		}
+	}
+
+	return gjson.Result{}, gjson.Result{}
+}
+
+func parseMetrics(modelID string, timingInfo responseTimingInfo, usage, timings gjson.Result, allowFallback bool) (TokenMetrics, error) {
 	// default values
 	cachedTokens := -1 // unknown or missing data
 	outputTokens := 0
@@ -368,7 +391,7 @@ func parseMetrics(modelID string, start time.Time, usage, timings gjson.Result) 
 	// timings data
 	tokensPerSecond := -1.0
 	promptPerSecond := -1.0
-	durationMs := int(time.Since(start).Milliseconds())
+	durationMs := int(timingInfo.totalDuration().Milliseconds())
 
 	if usage.Exists() {
 		if pt := usage.Get("prompt_tokens"); pt.Exists() {
@@ -401,6 +424,10 @@ func parseMetrics(modelID string, start time.Time, usage, timings gjson.Result) 
 
 		if cachedValue := timings.Get("cache_n"); cachedValue.Exists() {
 			cachedTokens = int(cachedValue.Int())
+		}
+	} else if allowFallback {
+		if generationDuration := timingInfo.generationDuration(); generationDuration > 0 && outputTokens > 1 {
+			tokensPerSecond = float64(outputTokens-1) / generationDuration.Seconds()
 		}
 	}
 
@@ -439,9 +466,11 @@ func decompressBody(body []byte, encoding string) ([]byte, error) {
 // while also capturing it in a buffer for later processing
 type responseBodyCopier struct {
 	gin.ResponseWriter
-	body  *bytes.Buffer
-	tee   io.Writer
-	start time.Time
+	body         *bytes.Buffer
+	tee          io.Writer
+	requestStart time.Time
+	firstWrite   time.Time
+	lastWrite    time.Time
 }
 
 func newBodyCopier(w gin.ResponseWriter) *responseBodyCopier {
@@ -450,13 +479,16 @@ func newBodyCopier(w gin.ResponseWriter) *responseBodyCopier {
 		ResponseWriter: w,
 		body:           bodyBuffer,
 		tee:            io.MultiWriter(w, bodyBuffer),
+		requestStart:   time.Now(),
 	}
 }
 
 func (w *responseBodyCopier) Write(b []byte) (int, error) {
-	if w.start.IsZero() {
-		w.start = time.Now()
+	now := time.Now()
+	if w.firstWrite.IsZero() {
+		w.firstWrite = now
 	}
+	w.lastWrite = now
 
 	// Single write operation that writes to both the response and buffer
 	return w.tee.Write(b)
@@ -471,7 +503,38 @@ func (w *responseBodyCopier) Header() http.Header {
 }
 
 func (w *responseBodyCopier) StartTime() time.Time {
-	return w.start
+	return w.firstWrite
+}
+
+type responseTimingInfo struct {
+	requestStart time.Time
+	firstWrite   time.Time
+	lastWrite    time.Time
+}
+
+func (w *responseBodyCopier) Timings() responseTimingInfo {
+	return responseTimingInfo{
+		requestStart: w.requestStart,
+		firstWrite:   w.firstWrite,
+		lastWrite:    w.lastWrite,
+	}
+}
+
+func (t responseTimingInfo) totalDuration() time.Duration {
+	if !t.requestStart.IsZero() {
+		if !t.lastWrite.IsZero() {
+			return t.lastWrite.Sub(t.requestStart)
+		}
+		return time.Since(t.requestStart)
+	}
+	return 0
+}
+
+func (t responseTimingInfo) generationDuration() time.Duration {
+	if t.firstWrite.IsZero() || t.lastWrite.IsZero() {
+		return 0
+	}
+	return t.lastWrite.Sub(t.firstWrite)
 }
 
 // sensitiveHeaders lists headers that should be redacted in captures
