@@ -41,8 +41,10 @@
       };
     }
 
-    // Calculate tokens/second for each valid metric
-    const tokensPerSecond = validMetrics.map((m) => m.output_tokens / (m.duration_ms / 1000));
+    // Prefer backend-reported generation speed when available.
+    const tokensPerSecond = validMetrics.map((m) =>
+      m.tokens_per_second > 0 ? m.tokens_per_second : m.output_tokens / (m.duration_ms / 1000),
+    );
 
     // Sort for percentile calculation
     const sortedTokensPerSecond = [...tokensPerSecond].sort((a, b) => a - b);

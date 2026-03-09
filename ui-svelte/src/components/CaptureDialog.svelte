@@ -11,7 +11,7 @@
 
   let dialogEl: HTMLDialogElement | undefined = $state();
 
-  type BodyTab = "raw" | "pretty";
+  type BodyTab = "raw" | "pretty" | "chat";
   let reqBodyTab: BodyTab = $state("pretty");
   let respBodyTab: BodyTab = $state("pretty");
   let copiedReq = $state(false);
@@ -31,8 +31,8 @@
       const reqCt = getContentType(capture.req_headers);
       const respCt = getContentType(capture.resp_headers);
       reqBodyTab = reqCt.includes("json") ? "pretty" : "raw";
-      respBodyTab = renderedResponse.reasoning || renderedResponse.content
-        ? "pretty"
+      respBodyTab = isSSE && (renderedResponse.reasoning || renderedResponse.content)
+        ? "chat"
         : respCt.includes("json")
           ? "pretty"
           : "raw";
@@ -61,26 +61,6 @@
     } catch {
       return str;
     }
-  }
-
-  function formatSSE(text: string): string {
-    return text
-      .split("\n")
-      .map((line) => {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith("data:")) return line;
-
-        const data = trimmed.slice(5).trim();
-        if (!data || data === "[DONE]") return trimmed;
-
-        try {
-          const parsed = JSON.parse(data);
-          return `data: ${JSON.stringify(parsed, null, 2)}`;
-        } catch {
-          return line;
-        }
-      })
-      .join("\n");
   }
 
   function getContentType(
@@ -178,14 +158,6 @@
     return next;
   }
 
-  function parseJsonResponse(text: string): RenderedResponse {
-    try {
-      return appendResponseOutput({ reasoning: "", content: "" }, JSON.parse(text));
-    } catch {
-      return { reasoning: "", content: "" };
-    }
-  }
-
   function parseSSEChat(text: string): RenderedResponse {
     const result: RenderedResponse = { reasoning: "", content: "" };
     const seenReasoningDeltaItems = new Set<string>();
@@ -260,7 +232,7 @@
   }
 
   function getCopyText(): string {
-    if (respBodyTab === "pretty" && (renderedResponse.reasoning || renderedResponse.content)) {
+    if (respBodyTab === "chat") {
       let text = "";
       if (renderedResponse.reasoning) text += renderedResponse.reasoning + "\n\n";
       text += renderedResponse.content;
@@ -304,7 +276,6 @@
   });
 
   let responseBodyPretty = $derived.by(() => {
-    if (isSSE) return formatSSE(responseBodyRaw);
     if (!isResponseJson) return responseBodyRaw;
     return formatJson(responseBodyRaw);
   });
@@ -312,12 +283,11 @@
   let renderedResponse = $derived.by(() => {
     if (!responseBodyRaw) return { reasoning: "", content: "" } as RenderedResponse;
     if (isSSE) return parseSSEChat(responseBodyRaw);
-    if (isResponseJson) return parseJsonResponse(responseBodyRaw);
     return { reasoning: "", content: "" } as RenderedResponse;
   });
 
   let displayedResponseBody = $derived.by(() => {
-    if (respBodyTab === "pretty" && !(renderedResponse.reasoning || renderedResponse.content)) {
+    if (respBodyTab === "pretty") {
       return responseBodyPretty;
     }
     return responseBodyRaw;
@@ -468,7 +438,14 @@
           {:else if isSSE || isResponseText}
             <div class="mt-2 flex items-center justify-between">
               <div class="flex gap-1">
-                {#if isResponseJson || isSSE}
+                {#if isSSE && (renderedResponse.reasoning || renderedResponse.content)}
+                  <button
+                    class="tab-btn"
+                    class:tab-btn-active={respBodyTab === "chat"}
+                    onclick={() => (respBodyTab = "chat")}>Chat</button
+                  >
+                {/if}
+                {#if isResponseJson}
                   <button
                     class="tab-btn"
                     class:tab-btn-active={respBodyTab === "pretty"}
@@ -497,7 +474,7 @@
             <div
               class="mt-1 bg-background rounded border border-card-border overflow-auto max-h-96"
             >
-              {#if respBodyTab === "pretty" && (renderedResponse.reasoning || renderedResponse.content)}
+              {#if respBodyTab === "chat"}
                 <div class="p-3 text-sm space-y-3">
                   {#if renderedResponse.reasoning}
                     <div>
