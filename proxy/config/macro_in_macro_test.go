@@ -104,6 +104,62 @@ models:
 	assert.Contains(t, err.Error(), "self-reference")
 }
 
+// Test macro substitution in name and description fields
+func TestConfig_MacroInNameAndDescription(t *testing.T) {
+	content := `
+startPort: 10000
+macros:
+  "VARIANT": "Q4_K_M"
+  "FAMILY": "llama"
+
+models:
+  my-model:
+    cmd: echo ok
+    proxy: http://localhost:8080
+    name: "${FAMILY} ${VARIANT}"
+    description: "A ${FAMILY} model in ${VARIANT} format"
+`
+
+	config, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.NoError(t, err)
+	assert.Equal(t, "llama Q4_K_M", config.Models["my-model"].Name)
+	assert.Equal(t, "A llama model in Q4_K_M format", config.Models["my-model"].Description)
+}
+
+// Test MODEL_ID macro in name and description fields
+func TestConfig_ModelIDInNameAndDescription(t *testing.T) {
+	content := `
+startPort: 10000
+models:
+  llama-3b:
+    cmd: echo ok
+    proxy: http://localhost:8080
+    name: "Model: ${MODEL_ID}"
+    description: "Running ${MODEL_ID}"
+`
+
+	config, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.NoError(t, err)
+	assert.Equal(t, "Model: llama-3b", config.Models["llama-3b"].Name)
+	assert.Equal(t, "Running llama-3b", config.Models["llama-3b"].Description)
+}
+
+// Test unknown macro in name or description returns an error
+func TestConfig_UnknownMacroInNameDescription(t *testing.T) {
+	content := `
+startPort: 10000
+models:
+  test:
+    cmd: echo ok
+    proxy: http://localhost:8080
+    name: "Model ${UNDEFINED}"
+`
+
+	_, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "UNDEFINED")
+}
+
 // Test undefined macro reference error
 func TestConfig_UndefinedMacroReference(t *testing.T) {
 	content := `
