@@ -308,6 +308,8 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			modelConfig.Proxy = strings.ReplaceAll(modelConfig.Proxy, macroSlug, macroStr)
 			modelConfig.CheckEndpoint = strings.ReplaceAll(modelConfig.CheckEndpoint, macroSlug, macroStr)
 			modelConfig.Filters.StripParams = strings.ReplaceAll(modelConfig.Filters.StripParams, macroSlug, macroStr)
+			modelConfig.Name = strings.ReplaceAll(modelConfig.Name, macroSlug, macroStr)
+			modelConfig.Description = strings.ReplaceAll(modelConfig.Description, macroSlug, macroStr)
 
 			// Substitute macros in SetParamsByID keys and values
 			if len(modelConfig.Filters.SetParamsByID) > 0 {
@@ -351,6 +353,8 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			modelConfig.Cmd = strings.ReplaceAll(modelConfig.Cmd, macroSlug, macroStr)
 			modelConfig.CmdStop = strings.ReplaceAll(modelConfig.CmdStop, macroSlug, macroStr)
 			modelConfig.Proxy = strings.ReplaceAll(modelConfig.Proxy, macroSlug, macroStr)
+			modelConfig.Name = strings.ReplaceAll(modelConfig.Name, macroSlug, macroStr)
+			modelConfig.Description = strings.ReplaceAll(modelConfig.Description, macroSlug, macroStr)
 
 			if len(modelConfig.Metadata) > 0 {
 				result, err := substituteMacroInValue(modelConfig.Metadata, "PORT", nextPort)
@@ -370,6 +374,8 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			"proxy":               modelConfig.Proxy,
 			"checkEndpoint":       modelConfig.CheckEndpoint,
 			"filters.stripParams": modelConfig.Filters.StripParams,
+			"name":                modelConfig.Name,
+			"description":         modelConfig.Description,
 		}
 
 		for fieldName, fieldValue := range fieldMap {
