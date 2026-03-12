@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -820,38 +819,18 @@ func (s *statusResponseWriter) sendSseLine(line string) {
 }
 
 func (s *statusResponseWriter) sendSseData(data string) {
-	// Create the proper SSE JSON structure
-	type Delta struct {
-		ReasoningContent string `json:"reasoning_content"`
+	// Send as SSE comments (: prefix on every line) to keep the connection
+	// alive without injecting content into reasoning_content. Previously
+	// this sent data: events with reasoning_content which caused OpenWebUI
+	// to display loading messages in the thinking block.
+	// Each line must be prefixed with ": " per the SSE spec.
+	for _, line := range strings.Split(data, "\n") {
+		_, err := fmt.Fprintf(s.writer, ": %s\n", line)
+		if err != nil {
+			panic(fmt.Sprintf("<%s> Failed to write SSE comment: %v", s.process.ID, err))
+		}
 	}
-	type Choice struct {
-		Delta Delta `json:"delta"`
-	}
-	type SSEMessage struct {
-		Choices []Choice `json:"choices"`
-	}
-
-	msg := SSEMessage{
-		Choices: []Choice{
-			{
-				Delta: Delta{
-					ReasoningContent: data,
-				},
-			},
-		},
-	}
-
-	jsonData, err := json.Marshal(msg)
-	if err != nil {
-		s.process.proxyLogger.Errorf("<%s> Failed to marshal SSE message: %v", s.process.ID, err)
-		return
-	}
-
-	// Write SSE formatted data, panic if not able to write
-	_, err = fmt.Fprintf(s.writer, "data: %s\n\n", jsonData)
-	if err != nil {
-		panic(fmt.Sprintf("<%s> Failed to write SSE data: %v", s.process.ID, err))
-	}
+	fmt.Fprint(s.writer, "\n")
 	s.Flush()
 }
 
