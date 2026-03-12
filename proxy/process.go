@@ -525,7 +525,7 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 			errstr := fmt.Sprintf("unable to start process: %s", err)
 			cancelLoadCtx()
 			if srw != nil {
-				srw.sendData(fmt.Sprintf("Unable to swap model err: %s\n", errstr))
+				srw.sendSseData(fmt.Sprintf("Unable to swap model err: %s\n", errstr))
 				// Wait for statusUpdates goroutine to finish writing its deferred "Done!" messages
 				// before closing the connection. Without this, the connection would close before
 				// the goroutine can write its cleanup messages, causing incomplete SSE output.
@@ -793,7 +793,7 @@ func (s *statusResponseWriter) statusUpdates(ctx context.Context) {
 				// Pick a new random duration for the next remark
 				nextRemarkIn = time.Duration(5+rand.Intn(5)) * time.Second
 			} else {
-				s.sendData(".")
+				s.sendSseData(".")
 			}
 		}
 	}
@@ -816,10 +816,10 @@ func (s *statusResponseWriter) waitForCompletion(timeout time.Duration) bool {
 }
 
 func (s *statusResponseWriter) sendLine(line string) {
-	s.sendData(line + "\n")
+	s.sendSseData(line + "\n")
 }
 
-func (s *statusResponseWriter) sendData(data string) {
+func (s *statusResponseWriter) sendSseData(data string) {
 	// Create the proper SSE JSON structure
 	type Delta struct {
 		ReasoningContent string `json:"reasoning_content"`
