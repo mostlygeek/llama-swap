@@ -736,8 +736,8 @@ func newStatusResponseWriter(p *Process, w http.ResponseWriter) *statusResponseW
 	s.Header().Set("Cache-Control", "no-cache")         // no-cache
 	s.Header().Set("Connection", "keep-alive")          // keep-alive
 	s.WriteHeader(http.StatusOK)                        // send status code 200
-	s.sendLine("━━━━━")
-	s.sendLine(fmt.Sprintf("llama-swap loading model: %s", p.ID))
+	s.sendSseLine("━━━━━")
+	s.sendSseLine(fmt.Sprintf("llama-swap loading model: %s", p.ID))
 	return s
 }
 
@@ -756,9 +756,9 @@ func (s *statusResponseWriter) statusUpdates(ctx context.Context) {
 
 	defer func() {
 		duration := time.Since(s.start)
-		s.sendLine(fmt.Sprintf("\nDone! (%.2fs)", duration.Seconds()))
-		s.sendLine("━━━━━")
-		s.sendLine(" ")
+		s.sendSseLine(fmt.Sprintf("\nDone! (%.2fs)", duration.Seconds()))
+		s.sendSseLine("━━━━━")
+		s.sendSseLine(" ")
 	}()
 
 	// Create a shuffled copy of loadingRemarks
@@ -788,7 +788,7 @@ func (s *statusResponseWriter) statusUpdates(ctx context.Context) {
 			if time.Since(lastRemarkTime) >= nextRemarkIn {
 				remark := remarks[ri%len(remarks)]
 				ri++
-				s.sendLine(fmt.Sprintf("\n%s", remark))
+				s.sendSseLine(fmt.Sprintf("\n%s", remark))
 				lastRemarkTime = time.Now()
 				// Pick a new random duration for the next remark
 				nextRemarkIn = time.Duration(5+rand.Intn(5)) * time.Second
@@ -815,7 +815,7 @@ func (s *statusResponseWriter) waitForCompletion(timeout time.Duration) bool {
 	}
 }
 
-func (s *statusResponseWriter) sendLine(line string) {
+func (s *statusResponseWriter) sendSseLine(line string) {
 	s.sendSseData(line + "\n")
 }
 
