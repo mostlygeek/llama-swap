@@ -12,18 +12,18 @@
     "test:watch": "vitest"
   },
   "devDependencies": {
-    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "@sveltejs/vite-plugin-svelte": "^7.0.0",
     "@tailwindcss/vite": "^4.1.8",
     "@tsconfig/svelte": "^5.0.4",
     "@types/hast": "^3.0.4",
     "@types/node": "^25.1.0",
-    "svelte": "^5.19.0",
+    "svelte": "^5.46.4",
     "svelte-check": "^4.1.4",
     "tailwindcss": "^4.1.8",
     "typescript": "~5.8.3",
-    "vite": "^6.3.5",
-    "vite-plugin-compression2": "^2.4.0",
-    "vitest": "^4.0.18"
+    "vite": "^8.0.0",
+    "vite-plugin-compression2": "^2.5.1",
+    "vitest": "^4.1.0"
   },
   "dependencies": {
     "highlight.js": "^11.11.1",
