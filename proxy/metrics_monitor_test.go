@@ -709,6 +709,35 @@ data: [DONE]
 		assert.Equal(t, 0, metrics[0].OutputTokens)
 	})
 
+	t.Run("v1/responses format with nested response.usage", func(t *testing.T) {
+		mm := newMetricsMonitor(testLogger, 10, 0)
+
+		// v1/responses SSE format: usage is nested under response.usage
+		responseBody := "event: response.completed\n" +
+			`data: {"type":"response.completed","response":{"id":"resp_abc","object":"response","created_at":1773416985,"status":"completed","model":"test-model","output":[],"usage":{"input_tokens":17,"output_tokens":23,"total_tokens":40}}}` +
+			"\n\n"
+
+		nextHandler := func(modelID string, w http.ResponseWriter, r *http.Request) error {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(responseBody))
+			return nil
+		}
+
+		req := httptest.NewRequest("POST", "/v1/responses", nil)
+		rec := httptest.NewRecorder()
+		ginCtx, _ := gin.CreateTestContext(rec)
+
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
+		assert.NoError(t, err)
+
+		metrics := mm.getMetrics()
+		assert.Equal(t, 1, len(metrics))
+		assert.Equal(t, "test-model", metrics[0].Model)
+		assert.Equal(t, 17, metrics[0].InputTokens)
+		assert.Equal(t, 23, metrics[0].OutputTokens)
+	})
+
 	t.Run("handles empty streaming response records minimal metrics", func(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10, 0)
 
