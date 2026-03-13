@@ -438,6 +438,18 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		config.Models[modelId] = modelConfig
 	}
 
+	// Validate visionModel references
+	for modelId, modelConfig := range config.Models {
+		if modelConfig.VisionModel != "" {
+			if _, found := config.Models[modelConfig.VisionModel]; !found {
+				return Config{}, fmt.Errorf("model %s: visionModel '%s' is not a valid model ID", modelId, modelConfig.VisionModel)
+			}
+			if modelConfig.VisionModel == modelId {
+				return Config{}, fmt.Errorf("model %s: visionModel cannot reference itself", modelId)
+			}
+		}
+	}
+
 	config = AddDefaultGroupToConfig(config)
 
 	// Validate group members
