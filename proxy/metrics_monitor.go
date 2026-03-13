@@ -350,6 +350,11 @@ func processStreamingResponse(modelID string, start time.Time, body []byte) (Tok
 			usage := parsed.Get("usage")
 			timings := parsed.Get("timings")
 
+			// v1/responses format nests usage under response.usage
+			if !usage.Exists() {
+				usage = parsed.Get("response.usage")
+			}
+
 			if usage.Exists() || timings.Exists() {
 				return parseMetrics(modelID, start, usage, timings)
 			}
@@ -503,9 +508,9 @@ func filterAcceptEncoding(acceptEncoding string) string {
 	supported := map[string]bool{"gzip": true, "deflate": true}
 	var filtered []string
 
-	for _, part := range strings.Split(acceptEncoding, ",") {
+	for part := range strings.SplitSeq(acceptEncoding, ",") {
 		// Parse encoding and optional quality value (e.g., "gzip;q=1.0")
-		encoding := strings.TrimSpace(strings.Split(part, ";")[0])
+		encoding, _, _ := strings.Cut(strings.TrimSpace(part), ";")
 		if supported[strings.ToLower(encoding)] {
 			filtered = append(filtered, strings.TrimSpace(part))
 		}
