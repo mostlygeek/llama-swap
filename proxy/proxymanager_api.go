@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/event"
@@ -61,7 +60,7 @@ func (pm *ProxyManager) apiGetModels(c *gin.Context) {
 			name = m.Id
 		}
 
-		ttl, ttlRemaining := pm.getModelTTL(m.Id, m.State)
+		ttl, ttlRemaining := pm.getModelTTL(m.Id)
 
 		result[i] = apiModel{
 			Name:         name,
@@ -74,30 +73,18 @@ func (pm *ProxyManager) apiGetModels(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
-func (pm *ProxyManager) getModelTTL(modelID, state string) (*int, *int) {
-	ttlSeconds := pm.config.Models[modelID].UnloadAfter
-	if ttlSeconds <= 0 {
-		return nil, nil
-	}
-
-	if state != "ready" {
-		return &ttlSeconds, new(int)
-	}
-
+func (pm *ProxyManager) getModelTTL(modelID string) (ttl *int, ttlRemaining *int) {
 	processGroup := pm.findGroupByModelName(modelID)
 	if processGroup == nil {
-		return &ttlSeconds, new(int)
+		return nil, nil
 	}
 
 	process := processGroup.processes[modelID]
 	if process == nil {
-		return &ttlSeconds, new(int)
+		return nil, nil
 	}
 
-	remaining := time.Since(process.getLastRequestHandled())
-	ttlRemainingVal := max(0, ttlSeconds-int(remaining.Seconds()))
-
-	return &ttlSeconds, &ttlRemainingVal
+	return process.GetTTL()
 }
 
 func (pm *ProxyManager) getModelStatus() []Model {

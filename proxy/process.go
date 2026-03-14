@@ -146,6 +146,22 @@ func (p *Process) getLastRequestHandled() time.Time {
 	return p.lastRequestHandled
 }
 
+func (p *Process) GetTTL() (ttl *int, ttlRemaining *int) {
+	ttlSeconds := p.config.UnloadAfter
+	if ttlSeconds <= 0 {
+		return nil, nil
+	}
+
+	if p.CurrentState() != StateReady {
+		return &ttlSeconds, nil
+	}
+
+	remaining := time.Since(p.getLastRequestHandled())
+	remainingVal := max(0, ttlSeconds-int(remaining.Seconds()))
+
+	return &ttlSeconds, &remainingVal
+}
+
 // custom error types for swapping state
 var (
 	ErrExpectedStateMismatch  = errors.New("expected state mismatch")
