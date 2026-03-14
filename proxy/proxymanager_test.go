@@ -1348,15 +1348,15 @@ func TestProxyManager_ApiGetModels(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
 
-	var response []map[string]string
+	var response []map[string]interface{}
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
 	assert.Len(t, response, 3)
 
 	// Find model1 and model2 in response
-	modelMap := make(map[string]map[string]string)
+	modelMap := make(map[string]map[string]interface{})
 	for _, m := range response {
-		modelMap[m["id"]] = m
+		modelMap[m["id"].(string)] = m
 	}
 
 	assert.Contains(t, modelMap, "model1")
@@ -1371,6 +1371,56 @@ func TestProxyManager_ApiGetModels(t *testing.T) {
 	assert.Equal(t, "stopped", modelMap["model1"]["state"])
 	assert.Equal(t, "stopped", modelMap["model2"]["state"])
 	assert.Equal(t, "stopped", modelMap["model3"]["state"])
+}
+
+func TestProxyManager_ApiGetModels_WithTTL(t *testing.T) {
+	testConfig := config.AddDefaultGroupToConfig(config.Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]config.ModelConfig{
+			"model1": func() config.ModelConfig {
+				c := getTestSimpleResponderConfig("model1")
+				c.UnloadAfter = 60
+				return c
+			}(),
+			"model2": getTestSimpleResponderConfig("model2"),
+		},
+		LogLevel: "error",
+	})
+
+	proxy := New(testConfig)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+
+	reqBody := `{"model":"model1"}`
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+	w := CreateTestResponseRecorder()
+
+	proxy.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code, "request should succeed")
+
+	time.Sleep(100 * time.Millisecond)
+
+	req = httptest.NewRequest("GET", "/api/models", nil)
+	w = CreateTestResponseRecorder()
+
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response []map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+
+	modelMap := make(map[string]map[string]interface{})
+	for _, m := range response {
+		modelMap[m["id"].(string)] = m
+	}
+
+	assert.Equal(t, float64(60), modelMap["model1"]["ttl"])
+	ttlRemaining1 := modelMap["model1"]["ttlRemaining"].(float64)
+	assert.True(t, ttlRemaining1 > 0 && ttlRemaining1 <= 60)
+
+	assert.Nil(t, modelMap["model2"]["ttl"], "model2 ttl should be null when UnloadAfter is 0")
+	assert.Nil(t, modelMap["model2"]["ttlRemaining"], "model2 ttlRemaining should be null when UnloadAfter is 0")
 }
 
 func TestProxyManager_APIKeyAuth(t *testing.T) {
