@@ -30,6 +30,7 @@ func addApiHandlers(pm *ProxyManager) {
 	{
 		apiGroup.POST("/models/unload", pm.apiUnloadAllModels)
 		apiGroup.POST("/models/unload/*model", pm.apiUnloadSingleModelHandler)
+		apiGroup.GET("/models", pm.apiGetModels)
 		apiGroup.GET("/events", pm.apiSendEvents)
 		apiGroup.GET("/metrics", pm.apiGetMetrics)
 		apiGroup.GET("/version", pm.apiGetVersion)
@@ -40,6 +41,50 @@ func addApiHandlers(pm *ProxyManager) {
 func (pm *ProxyManager) apiUnloadAllModels(c *gin.Context) {
 	pm.StopProcesses(StopImmediately)
 	c.JSON(http.StatusOK, gin.H{"msg": "ok"})
+}
+
+type apiModel struct {
+	Name         string `json:"name"`
+	Id           string `json:"id"`
+	State        string `json:"state"`
+	TTL          *int   `json:"ttl"`
+	TTLRemaining *int   `json:"ttlRemaining"`
+}
+
+func (pm *ProxyManager) apiGetModels(c *gin.Context) {
+	models := pm.getModelStatus()
+	result := make([]apiModel, len(models))
+	for i, m := range models {
+		name := m.Name
+		if name == "" {
+			name = m.Id
+		}
+
+		ttl, ttlRemaining := pm.getModelTTL(m.Id)
+
+		result[i] = apiModel{
+			Name:         name,
+			Id:           m.Id,
+			State:        m.State,
+			TTL:          ttl,
+			TTLRemaining: ttlRemaining,
+		}
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (pm *ProxyManager) getModelTTL(modelID string) (ttl *int, ttlRemaining *int) {
+	processGroup := pm.findGroupByModelName(modelID)
+	if processGroup == nil {
+		return nil, nil
+	}
+
+	process := processGroup.processes[modelID]
+	if process == nil {
+		return nil, nil
+	}
+
+	return process.GetTTL()
 }
 
 func (pm *ProxyManager) getModelStatus() []Model {
@@ -57,6 +102,7 @@ func (pm *ProxyManager) getModelStatus() []Model {
 		// Get process state
 		processGroup := pm.findGroupByModelName(modelID)
 		state := "unknown"
+
 		if processGroup != nil {
 			process := processGroup.processes[modelID]
 			if process != nil {
