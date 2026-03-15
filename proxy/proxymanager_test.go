@@ -1659,3 +1659,82 @@ models:
 		assert.Equal(t, "no", w.Header().Get("X-Accel-Buffering"))
 	})
 }
+
+func TestProxyManager_SdApiTxt2ImgRouting(t *testing.T) {
+	conf := config.AddDefaultGroupToConfig(config.Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]config.ModelConfig{
+			"sd-model": getTestSimpleResponderConfig("sd-model"),
+		},
+		LogLevel: "error",
+	})
+
+	proxy := New(conf)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+
+	t.Run("successful txt2img with model", func(t *testing.T) {
+		reqBody := `{"model":"sd-model","prompt":"a cat"}`
+		req := httptest.NewRequest("POST", "/sdapi/v1/txt2img", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "sd-model")
+	})
+
+	t.Run("successful img2img with model", func(t *testing.T) {
+		reqBody := `{"model":"sd-model","prompt":"a cat","init_images":[]}`
+		req := httptest.NewRequest("POST", "/sdapi/v1/img2img", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "sd-model")
+	})
+
+	t.Run("missing model returns 400", func(t *testing.T) {
+		reqBody := `{"prompt":"a cat"}`
+		req := httptest.NewRequest("POST", "/sdapi/v1/txt2img", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "missing or invalid 'model' key")
+	})
+}
+
+func TestProxyManager_SdApiGetLoras(t *testing.T) {
+	conf := config.AddDefaultGroupToConfig(config.Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]config.ModelConfig{
+			"sd-model": getTestSimpleResponderConfig("sd-model"),
+		},
+		LogLevel: "error",
+	})
+
+	proxy := New(conf)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+
+	t.Run("successful GET loras with model query param", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/sdapi/v1/loras?model=sd-model", nil)
+		w := CreateTestResponseRecorder()
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("missing model query param returns 400", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/sdapi/v1/loras", nil)
+		w := CreateTestResponseRecorder()
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "missing required 'model' query parameter")
+	})
+
+	t.Run("unknown model returns 400", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/sdapi/v1/loras?model=nonexistent", nil)
+		w := CreateTestResponseRecorder()
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "could not find suitable handler")
+	})
+}

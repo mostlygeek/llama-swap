@@ -115,6 +115,41 @@ export interface ImageGenerationResponse {
   }>;
 }
 
+// SDAPI types (stable-diffusion.cpp)
+export type ImageApiMode = "openai" | "sdapi";
+
+export interface SdApiLora {
+  name: string;
+  path: string;
+}
+
+export interface SdApiLoraRef {
+  path: string;
+  multiplier: number;
+}
+
+export interface SdApiTxt2ImgRequest {
+  model?: string;
+  prompt: string;
+  negative_prompt?: string;
+  width?: number;
+  height?: number;
+  steps?: number;
+  cfg_scale?: number;
+  seed?: number;
+  batch_size?: number;
+  clip_skip?: number;
+  sampler_name?: string;
+  scheduler?: string;
+  lora?: SdApiLoraRef[];
+}
+
+export interface SdApiResponse {
+  images: string[];
+  parameters: Record<string, unknown>;
+  info: string;
+}
+
 export interface AudioTranscriptionRequest {
   file: File;
   model: string;
