@@ -24,7 +24,6 @@
 
   let prompt = $state("");
   let isGenerating = $state(false);
-  let isPrimingLoras = $state(false);
   let generatedImages = $state<string[]>([]);
   let error = $state<string | null>(null);
   let abortController = $state<AbortController | null>(null);
@@ -35,7 +34,9 @@
   // SDAPI lora state
   let availableLoras = $state<SdApiLora[]>([]);
   let selectedLoras = $state<SdApiLoraRef[]>([]);
+  let isLoadingLoras = $state(false);
   let lorasLoaded = $state(false);
+  let loraError = $state<string | null>(null);
 
   let hasModels = $derived($models.some((m) => !m.unlisted));
   let isSdapi = $derived($apiModeStore === "sdapi");
@@ -44,48 +45,47 @@
     playgroundStores.imageGenerating.set(isGenerating);
   });
 
-  // Fetch loras when model changes in sdapi mode
-  let prevLoraModel = "";
-  $effect(() => {
-    const model = $selectedModelStore;
-    const mode = $apiModeStore;
-    if (mode === "sdapi" && model && model !== prevLoraModel) {
-      prevLoraModel = model;
-      loadLoras(model);
-    }
-    if (mode !== "sdapi") {
-      availableLoras = [];
-      selectedLoras = [];
-      lorasLoaded = false;
-      prevLoraModel = "";
-    }
-  });
-
-  async function loadLoras(model: string) {
+  async function loadLoras() {
+    if (!$selectedModelStore || isLoadingLoras) return;
+    isLoadingLoras = true;
+    loraError = null;
     try {
-      lorasLoaded = false;
-      const loras = await fetchSdLoras(model);
+      const loras = await fetchSdLoras($selectedModelStore);
       availableLoras = loras;
       lorasLoaded = true;
-    } catch {
+    } catch (err) {
       availableLoras = [];
-      lorasLoaded = true;
+      loraError = err instanceof Error ? err.message : "Failed to load LoRAs";
+      lorasLoaded = false;
+    } finally {
+      isLoadingLoras = false;
     }
   }
 
-  function toggleLora(lora: SdApiLora) {
-    const idx = selectedLoras.findIndex((l) => l.path === lora.path);
-    if (idx >= 0) {
-      selectedLoras = selectedLoras.filter((_, i) => i !== idx);
-    } else {
+  function addLora(event: Event) {
+    const select = event.target as HTMLSelectElement;
+    const path = select.value;
+    if (!path) return;
+
+    const lora = availableLoras.find((l) => l.path === path);
+    if (lora && !selectedLoras.some((l) => l.path === path)) {
       selectedLoras = [...selectedLoras, { path: lora.path, multiplier: 1.0 }];
     }
+    select.value = "";
+  }
+
+  function removeLora(path: string) {
+    selectedLoras = selectedLoras.filter((l) => l.path !== path);
   }
 
   function updateLoraMultiplier(path: string, multiplier: number) {
     selectedLoras = selectedLoras.map((l) =>
       l.path === path ? { ...l, multiplier } : l
     );
+  }
+
+  function getLoraName(path: string): string {
+    return availableLoras.find((l) => l.path === path)?.name ?? path;
   }
 
   async function generate() {
@@ -98,11 +98,6 @@
 
     try {
       if (isSdapi) {
-        // Prime lora cache first
-        isPrimingLoras = true;
-        await fetchSdLoras($selectedModelStore, abortController.signal);
-        isPrimingLoras = false;
-
         const [w, h] = $selectedSizeStore.split("x").map(Number);
         const request = {
           model: $selectedModelStore,
@@ -144,7 +139,6 @@
         }
       }
     } catch (err) {
-      isPrimingLoras = false;
       if (err instanceof Error && err.name === "AbortError") {
         // User cancelled
       } else {
@@ -328,41 +322,60 @@
       </label>
 
       <!-- LoRA Selection -->
-      {#if availableLoras.length > 0}
-        <div>
-          <span class="text-xs text-txtsecondary block mb-1">LoRAs</span>
-          <div class="flex flex-wrap gap-2">
-            {#each availableLoras as lora}
-              {@const selected = selectedLoras.find((l) => l.path === lora.path)}
-              <div class="flex items-center gap-1">
+      <div>
+        <span class="text-xs text-txtsecondary block mb-1">LoRAs</span>
+        <div class="flex items-center gap-2 mb-2">
+          <button
+            class="px-3 py-1.5 text-sm rounded border border-gray-200 dark:border-white/10 bg-surface hover:bg-secondary-hover transition-colors disabled:opacity-50"
+            onclick={loadLoras}
+            disabled={!$selectedModelStore || isLoadingLoras}
+          >
+            {isLoadingLoras ? "Loading..." : lorasLoaded ? "Reload LoRAs" : "Load LoRAs"}
+          </button>
+          {#if lorasLoaded && availableLoras.length > 0}
+            <select
+              class="flex-1 px-2 py-1.5 text-sm rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
+              onchange={addLora}
+            >
+              <option value="">Add a LoRA...</option>
+              {#each availableLoras.filter((l) => !selectedLoras.some((s) => s.path === l.path)) as lora}
+                <option value={lora.path}>{lora.name}</option>
+              {/each}
+            </select>
+          {/if}
+        </div>
+        {#if loraError}
+          <p class="text-xs text-red-500 mb-1">{loraError}</p>
+        {/if}
+        {#if lorasLoaded && availableLoras.length === 0}
+          <p class="text-xs text-txtsecondary">No LoRAs available</p>
+        {/if}
+        {#if selectedLoras.length > 0}
+          <div class="flex flex-col gap-1.5">
+            {#each selectedLoras as lora}
+              <div class="flex items-center gap-2 text-sm">
+                <span class="flex-1 truncate">{getLoraName(lora.path)}</span>
+                <input
+                  type="number"
+                  class="w-20 px-1.5 py-1 text-xs rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-1 focus:ring-primary"
+                  value={lora.multiplier}
+                  oninput={(e) => updateLoraMultiplier(lora.path, parseFloat((e.target as HTMLInputElement).value) || 1)}
+                  min="0"
+                  max="2"
+                  step="0.1"
+                />
                 <button
-                  class="px-2 py-1 text-xs rounded border transition-colors {selected
-                    ? 'bg-primary text-btn-primary-text border-primary'
-                    : 'border-gray-200 dark:border-white/10 bg-surface hover:bg-secondary-hover'}"
-                  onclick={() => toggleLora(lora)}
+                  class="px-1.5 py-0.5 text-xs rounded border border-gray-200 dark:border-white/10 hover:bg-red-500 hover:text-white hover:border-red-500 transition-colors"
+                  onclick={() => removeLora(lora.path)}
+                  aria-label="Remove LoRA"
                 >
-                  {lora.name}
+                  x
                 </button>
-                {#if selected}
-                  <input
-                    type="number"
-                    class="w-16 px-1 py-1 text-xs rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-1 focus:ring-primary"
-                    value={selected.multiplier}
-                    oninput={(e) => updateLoraMultiplier(lora.path, parseFloat((e.target as HTMLInputElement).value) || 1)}
-                    min="0"
-                    max="2"
-                    step="0.1"
-                  />
-                {/if}
               </div>
             {/each}
           </div>
-        </div>
-      {:else if isSdapi && $selectedModelStore && !lorasLoaded}
-        <span class="text-xs text-txtsecondary">Loading LoRAs...</span>
-      {:else if isSdapi && $selectedModelStore && lorasLoaded}
-        <span class="text-xs text-txtsecondary">No LoRAs available</span>
-      {/if}
+        {/if}
+      </div>
     </div>
   {/if}
 
@@ -377,7 +390,7 @@
       {#if isGenerating}
         <div class="text-center text-txtsecondary">
           <div class="inline-block w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mb-2"></div>
-          <p>{isPrimingLoras ? "Loading LoRAs..." : "Generating image..."}</p>
+          <p>Generating image...</p>
         </div>
       {:else if error}
         <div class="text-center text-red-500 p-4">
