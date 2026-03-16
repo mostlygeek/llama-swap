@@ -1,0 +1,235 @@
+# Multi-stage Dockerfile for CUDA-optimized AI inference tools
+# Includes: llama.cpp, whisper.cpp, stable-diffusion.cpp
+#
+# CUDA architectures targeting consumer/prosumer GPUs from Pascal through Blackwell:
+#   sm_60  - Pascal (HPC):      Tesla P100 (GP100) - full FP16 2x throughput, HBM2
+#   sm_61  - Pascal (consumer):  Tesla P40, GTX 1080/1070/1060, Titan Xp (GP102/104/106)
+#   sm_75  - Turing:             RTX 2080/2070/2060, Quadro RTX 6000, Tesla T4 - 2nd gen Tensor Cores, INT8/INT4
+#   sm_86  - Ampere (consumer):  RTX 3090/3080/3070/3060, RTX A6000 - 3rd gen Tensor Cores, BF16/TF32, 128 FP32 cores/SM
+#   sm_89  - Ada Lovelace:       RTX 4090/4080/4070/4060, RTX 6000 Ada - FP8 support, 4th gen Tensor Cores
+#   sm_120 - Blackwell (consumer): RTX 5090/5080/5070 - requires CUDA 12.8+ (not included, base image is 12.4)
+#
+# Build with BuildKit for cache mounts:
+#   DOCKER_BUILDKIT=1 docker build -t llama-swap:latest .
+#
+# Features:
+# - Separate git clone stages for independent caching
+# - ccache support for C++ compilation caching
+# - BuildKit cache mounts for cmake incremental builds
+# - Independent project rebuilds
+
+# ============================================================================
+# Stage 1: Base Builder with Common Dependencies
+# ============================================================================
+FROM nvidia/cuda:12.4.0-devel-ubuntu22.04 AS builder-base
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV CMAKE_CUDA_ARCHITECTURES="60;61;75;86;89"
+ENV CCACHE_DIR=/ccache
+ENV CCACHE_MAXSIZE=2G
+ENV PATH="/usr/lib/ccache:${PATH}"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    git \
+    python3 \
+    python3-pip \
+    libssl-dev \
+    curl \
+    ca-certificates \
+    ccache \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+
+# ============================================================================
+# Stage 2: Source Cloning (Cached Independently)
+# ============================================================================
+
+FROM builder-base AS llama-source
+ARG LLAMA_COMMIT_HASH=master
+RUN git clone --filter=blob:none --no-checkout https://github.com/ggml-org/llama.cpp.git /src/llama.cpp && \
+    cd /src/llama.cpp && \
+    git fetch --depth=1 origin ${LLAMA_COMMIT_HASH} && \
+    git checkout FETCH_HEAD
+
+FROM builder-base AS whisper-source
+ARG WHISPER_COMMIT_HASH=master
+RUN git clone --filter=blob:none --no-checkout https://github.com/ggml-org/whisper.cpp.git /src/whisper.cpp && \
+    cd /src/whisper.cpp && \
+    git fetch --depth=1 origin ${WHISPER_COMMIT_HASH} && \
+    git checkout FETCH_HEAD
+
+FROM builder-base AS sd-source
+ARG SD_COMMIT_HASH=master
+RUN git clone --filter=blob:none --no-checkout https://github.com/leejet/stable-diffusion.cpp.git /src/stable-diffusion.cpp && \
+    cd /src/stable-diffusion.cpp && \
+    git fetch --depth=1 origin ${SD_COMMIT_HASH} && \
+    git checkout FETCH_HEAD && \
+    git submodule update --init --recursive --depth=1
+
+# ============================================================================
+# Stage 3: Individual Project Builds with Cache Mounts
+# ============================================================================
+
+# Build whisper.cpp (first - quick to build)
+FROM builder-base AS whisper-build
+COPY --from=whisper-source /src/whisper.cpp /build/whisper.cpp
+WORKDIR /build/whisper.cpp
+RUN --mount=type=cache,target=/ccache \
+    --mount=type=cache,target=/build/whisper.cpp/build \
+    cmake -B build \
+        -DGGML_NATIVE=OFF \
+        -DGGML_CUDA=ON \
+        -DGGML_VULKAN=OFF \
+        -DCMAKE_CUDA_ARCHITECTURES="60;61;75;86;89" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_CUDA_FLAGS="-allow-unsupported-compiler" \
+        -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda" \
+        -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda" \
+        -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache && \
+    cmake --build build --config Release -j$(nproc) --target whisper-cli whisper-server && \
+    mkdir -p /install/bin /install/lib && \
+    cp -v build/bin/whisper-cli build/bin/whisper-server /install/bin/ 2>/dev/null || true && \
+    find build -name "*.so*" -type f -exec cp -v {} /install/lib/ \;
+
+# Build stable-diffusion.cpp (second - medium build time)
+FROM builder-base AS sd-build
+COPY --from=sd-source /src/stable-diffusion.cpp /build/stable-diffusion.cpp
+WORKDIR /build/stable-diffusion.cpp
+RUN --mount=type=cache,target=/ccache \
+    --mount=type=cache,target=/build/stable-diffusion.cpp/build \
+    set -e && \
+    rm -rf build/CMakeCache.txt build/CMakeFiles 2>/dev/null || true && \
+    cmake -B build \
+        -DSD_CUDA=ON \
+        -DGGML_CUDA=ON \
+        -DGGML_NATIVE=OFF \
+        -DGGML_VULKAN=OFF \
+        -DCMAKE_CUDA_ARCHITECTURES="60;61;75;86;89" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_CUDA_FLAGS="-allow-unsupported-compiler" \
+        -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda" \
+        -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda" \
+        -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache && \
+    cmake --build build --config Release -j$(nproc) --target sd-cli sd-server && \
+    mkdir -p /install/bin /install/lib && \
+    cp -v build/bin/sd-cli build/bin/sd-server /install/bin/ && \
+    find build -name "*.so*" -type f -exec cp -v {} /install/lib/ \;
+
+# Build llama.cpp (last - longest build time)
+FROM builder-base AS llama-build
+COPY --from=llama-source /src/llama.cpp /build/llama.cpp
+WORKDIR /build/llama.cpp
+RUN --mount=type=cache,target=/ccache \
+    --mount=type=cache,target=/build/llama.cpp/build \
+    cmake -B build \
+        -DGGML_NATIVE=OFF \
+        -DGGML_CUDA=ON \
+        -DGGML_VULKAN=OFF \
+        -DCMAKE_CUDA_ARCHITECTURES="60;61;75;86;89" \
+        -DLLAMA_BUILD_TESTS=OFF \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_CUDA_FLAGS="-allow-unsupported-compiler" \
+        -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda" \
+        -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda" \
+        -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache && \
+    cmake --build build --config Release -j$(nproc) --target llama-cli llama-server && \
+    # Copy outputs to install directory for easy extraction
+    mkdir -p /install/bin /install/lib /install/examples && \
+    cp -v build/bin/llama-cli build/bin/llama-server /install/bin/ 2>/dev/null || true && \
+    find build -name "*.so*" -type f -exec cp -v {} /install/lib/ \; && \
+    cp -vr examples/* /install/examples/ 2>/dev/null || true
+
+# ============================================================================
+# Stage 4: Runtime Stage
+# ============================================================================
+FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04 AS runtime
+
+ARG LLAMA_SWAP_VERSION=v198
+ARG LLAMA_COMMIT_HASH=unknown
+ARG WHISPER_COMMIT_HASH=unknown
+ARG SD_COMMIT_HASH=unknown
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PATH="/usr/local/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgomp1 \
+    python3 \
+    python3-pip \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Download and install llama-swap binary
+RUN LLAMA_SWAP_VER_NUM=$(echo "${LLAMA_SWAP_VERSION}" | sed 's/^v//') && \
+    curl -L -o /tmp/llama-swap.tar.gz \
+    "https://github.com/mostlygeek/llama-swap/releases/download/${LLAMA_SWAP_VERSION}/llama-swap_${LLAMA_SWAP_VER_NUM}_linux_amd64.tar.gz" && \
+    tar -xzf /tmp/llama-swap.tar.gz -C /usr/local/bin/ && \
+    rm /tmp/llama-swap.tar.gz && \
+    chmod +x /usr/local/bin/llama-swap
+
+# Copy libcuda stubs for CPU-only testing (not in ldconfig path to avoid conflicts with real drivers)
+# Real NVIDIA drivers will be used when available; stubs are fallback for testing on CPU-only hosts
+COPY --from=builder-base /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/stubs/libcuda.so
+COPY --from=builder-base /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/stubs/libcuda.so.1
+
+# Copy test script for verifying binaries work correctly
+COPY test-binaries.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/test-binaries.sh
+
+RUN pip3 install --no-cache-dir numpy sentencepiece
+
+WORKDIR /app
+
+# Copy specific binaries from each build stage
+# Copy only specific binaries from each build stage
+COPY --from=llama-build /install/bin/llama-server /usr/local/bin/
+COPY --from=llama-build /install/bin/llama-cli /usr/local/bin/
+COPY --from=llama-build /install/lib/ /usr/local/lib/
+COPY --from=llama-build /install/examples/ /opt/llama.cpp/examples/
+
+COPY --from=whisper-build /install/bin/whisper-server /usr/local/bin/
+COPY --from=whisper-build /install/bin/whisper-cli /usr/local/bin/
+COPY --from=whisper-build /install/lib/ /usr/local/lib/
+
+COPY --from=sd-build /install/bin/sd-server /usr/local/bin/
+COPY --from=sd-build /install/bin/sd-cli /usr/local/bin/
+COPY --from=sd-build /install/lib/ /usr/local/lib/
+
+# Update library cache
+RUN ldconfig
+
+# Create symlinks for common command names
+RUN ln -sf /usr/local/bin/llama-cli /usr/local/bin/llama && \
+    ln -sf /usr/local/bin/whisper-cli /usr/local/bin/whisper && \
+    ln -sf /usr/local/bin/sd-cli /usr/local/bin/stable-diffusion
+
+# Verify installation
+RUN echo "=== Installed Binaries ===" && \
+    ls -la /usr/local/bin/llama* /usr/local/bin/whisper* /usr/local/bin/sd* /usr/local/bin/llama-swap 2>/dev/null || true && \
+    echo "" && \
+    echo "=== Library Check ===" && \
+    ldconfig -p | grep -E "(ggml|llama|whisper|sd)" || true && \
+    echo "" && \
+    echo "=== llama-swap Version ===" && \
+    llama-swap --version 2>/dev/null || true && \
+    echo "" && \
+    echo "=== llama-cli Version ===" && \
+    llama-cli --version 2>/dev/null || true
+
+# Write version information to /versions.txt
+RUN echo "llama.cpp: ${LLAMA_COMMIT_HASH}" > /versions.txt && \
+    echo "whisper.cpp: ${WHISPER_COMMIT_HASH}" >> /versions.txt && \
+    echo "stable-diffusion.cpp: ${SD_COMMIT_HASH}" >> /versions.txt && \
+    echo "llama-swap: ${LLAMA_SWAP_VERSION}" >> /versions.txt && \
+    echo "backend: CUDA" >> /versions.txt && \
+    echo "build_timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> /versions.txt
+
+WORKDIR /models
+CMD ["bash"]
