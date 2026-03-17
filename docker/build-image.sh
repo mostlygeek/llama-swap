@@ -9,11 +9,10 @@
 #   LLAMA_COMMIT_HASH=abc123 ./build-image.sh --cuda   # Override llama.cpp commit
 #   WHISPER_COMMIT_HASH=def456 ./build-image.sh --vulkan # Override whisper.cpp commit
 #   SD_COMMIT_HASH=ghi789 ./build-image.sh --cuda      # Override stable-diffusion.cpp commit
-#   LLAMA_SWAP_VERSION=v198 ./build-image.sh --cuda    # Override llama-swap version
 #
 # Features:
 #   - Auto-detects latest commit hashes from git repos
-#   - Auto-detects latest llama-swap release
+#   - Builds llama-swap from local source code
 #   - Allows environment variable overrides for reproducible builds
 #   - Cache-friendly: changing commit hash busts cache appropriately
 #   - Supports both CUDA and Vulkan backends (requires explicit flag)
@@ -37,11 +36,10 @@ if [[ $# -eq 0 ]]; then
     echo "  --help, -h  Show this help message"
     echo ""
     echo "Environment variables:"
-    echo "  DOCKER_IMAGE_TAG     Set custom image tag (default: llama-swap:latest or llama-swap:vulkan)"
+    echo "  DOCKER_IMAGE_TAG     Set custom image tag (default: llama-swap:cuda or llama-swap:vulkan)"
     echo "  LLAMA_COMMIT_HASH    Override llama.cpp commit hash"
     echo "  WHISPER_COMMIT_HASH  Override whisper.cpp commit hash"
     echo "  SD_COMMIT_HASH       Override stable-diffusion.cpp commit hash"
-    echo "  LLAMA_SWAP_VERSION   Override llama-swap version (default: latest, e.g., v198)"
     exit 1
 fi
 
@@ -66,11 +64,10 @@ for arg in "$@"; do
             echo "  --help, -h  Show this help message"
             echo ""
             echo "Environment variables:"
-            echo "  DOCKER_IMAGE_TAG     Set custom image tag (default: llama-swap:latest or llama-swap:vulkan)"
+            echo "  DOCKER_IMAGE_TAG     Set custom image tag (default: llama-swap:cuda or llama-swap:vulkan)"
             echo "  LLAMA_COMMIT_HASH    Override llama.cpp commit hash"
             echo "  WHISPER_COMMIT_HASH  Override whisper.cpp commit hash"
             echo "  SD_COMMIT_HASH       Override stable-diffusion.cpp commit hash"
-            echo "  LLAMA_SWAP_VERSION   Override llama-swap version (default: latest, e.g., v198)"
             exit 0
             ;;
     esac
@@ -106,12 +103,6 @@ fi
 LLAMA_REPO="https://github.com/ggml-org/llama.cpp.git"
 WHISPER_REPO="https://github.com/ggml-org/whisper.cpp.git"
 SD_REPO="https://github.com/leejet/stable-diffusion.cpp.git"
-LLAMA_SWAP_REPO="mostlygeek/llama-swap"
-
-# Function to get the latest llama-swap release version
-get_latest_llama_swap_version() {
-    curl -s "https://api.github.com/repos/${LLAMA_SWAP_REPO}/releases/latest" | grep -oP '"tag_name": "\K[^"]+' || echo ""
-}
 
 # Function to get the latest commit hash from a git repo's default branch
 get_latest_commit() {
@@ -181,33 +172,22 @@ else
     echo "stable-diffusion.cpp: Auto-detected latest commit (${SD_BRANCH}): ${SD_HASH}"
 fi
 
-# Determine llama-swap version - use env var or auto-detect
-if [[ -n "${LLAMA_SWAP_VERSION:-}" ]]; then
-    LLAMA_SWAP_VER="${LLAMA_SWAP_VERSION}"
-    echo "llama-swap: Using provided version: ${LLAMA_SWAP_VER}"
-else
-    LLAMA_SWAP_VER=$(get_latest_llama_swap_version)
-    if [[ -z "${LLAMA_SWAP_VER}" ]]; then
-        echo "ERROR: Could not determine latest llama-swap version" >&2
-        exit 1
-    fi
-    echo "llama-swap: Auto-detected latest version: ${LLAMA_SWAP_VER}"
-fi
-
 echo ""
 echo "=========================================="
 echo "Starting Docker build..."
 echo "=========================================="
 echo ""
 
-# Build the Docker image with commit hashes and llama-swap version as build args
+# Build the Docker image with commit hashes as build args
+# Build context is the repository root (..) so the Dockerfile can access Go source
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BUILD_ARGS=(
     --build-arg "LLAMA_COMMIT_HASH=${LLAMA_HASH}"
     --build-arg "WHISPER_COMMIT_HASH=${WHISPER_HASH}"
     --build-arg "SD_COMMIT_HASH=${SD_HASH}"
-    --build-arg "LLAMA_SWAP_VERSION=${LLAMA_SWAP_VER}"
     -t "${DOCKER_IMAGE_TAG}"
-    -f "${DOCKERFILE}"
+    -f "${SCRIPT_DIR}/${DOCKERFILE}"
 )
 
 if [[ "$NO_CACHE" == true ]]; then
@@ -245,7 +225,8 @@ echo "Using builder: $BUILDER_NAME"
 
 # Use docker buildx build with --load to load the image into Docker
 # The --builder flag ensures we use our custom builder with max-parallelism=1
-docker buildx build --builder "$BUILDER_NAME" --load "${BUILD_ARGS[@]}" .
+# Build context is the repository root so we can access Go source files
+docker buildx build --builder "$BUILDER_NAME" --load "${BUILD_ARGS[@]}" "${REPO_ROOT}"
 
 echo ""
 echo "=========================================="
@@ -286,7 +267,7 @@ echo "Built with:"
 echo "  llama.cpp:           ${LLAMA_HASH}"
 echo "  whisper.cpp:         ${WHISPER_HASH}"
 echo "  stable-diffusion.cpp: ${SD_HASH}"
-echo "  llama-swap:          ${LLAMA_SWAP_VER}"
+echo "  llama-swap:          $(docker run --rm "${DOCKER_IMAGE_TAG}" cat /versions.txt | grep llama-swap | cut -d' ' -f2-)"
 echo ""
 if [[ "$BACKEND" == "vulkan" ]]; then
     echo "Run with:"

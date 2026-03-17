@@ -13,6 +13,32 @@
 # - No architecture targeting needed (Vulkan is portable)
 
 # ============================================================================
+# Stage 0: Build llama-swap from local source
+# ============================================================================
+FROM golang:1.25-alpine AS llama-swap-builder
+WORKDIR /app
+
+# Copy Go module files first for layer caching
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code and build
+COPY . .
+ENV CGO_ENABLED=0 GOOS=linux GOARCH=amd64
+RUN go build -o llama-swap .
+
+# Get version info: git hash + dirty flag, or 'local-build' fallback
+RUN if git rev-parse --git-dir > /dev/null 2>&1; then \
+        VERSION=$(git rev-parse --short HEAD) && \
+        if [ -n "$(git status --porcelain)" ]; then \
+            VERSION="${VERSION}+dirty"; \
+        fi && \
+        echo "$VERSION" > /app/llama-swap-version; \
+    else \
+        echo "local-build" > /app/llama-swap-version; \
+    fi
+
+# ============================================================================
 # Stage 1: Base Builder with Common Dependencies
 # ============================================================================
 FROM ubuntu:22.04 AS builder-base
@@ -157,7 +183,6 @@ RUN --mount=type=cache,target=/ccache \
 # ============================================================================
 FROM ubuntu:22.04 AS runtime
 
-ARG LLAMA_SWAP_VERSION=v198
 ARG LLAMA_COMMIT_HASH=unknown
 ARG WHISPER_COMMIT_HASH=unknown
 ARG SD_COMMIT_HASH=unknown
@@ -176,15 +201,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     curl \
     ca-certificates \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
-# Download and install llama-swap binary
-RUN LLAMA_SWAP_VER_NUM=$(echo "${LLAMA_SWAP_VERSION}" | sed 's/^v//') && \
-    curl -L -o /tmp/llama-swap.tar.gz \
-    "https://github.com/mostlygeek/llama-swap/releases/download/${LLAMA_SWAP_VERSION}/llama-swap_${LLAMA_SWAP_VER_NUM}_linux_amd64.tar.gz" && \
-    tar -xzf /tmp/llama-swap.tar.gz -C /usr/local/bin/ && \
-    rm /tmp/llama-swap.tar.gz && \
-    chmod +x /usr/local/bin/llama-swap
+# Copy llama-swap binary from builder stage
+COPY --from=llama-swap-builder /app/llama-swap /usr/local/bin/
+COPY --from=llama-swap-builder /app/llama-swap-version /tmp/
+
+# Copy test script for verifying binaries work correctly
+COPY docker/test-binaries.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/test-binaries.sh
 
 RUN pip3 install --no-cache-dir numpy sentencepiece
 
@@ -233,7 +259,7 @@ RUN echo "=== Installed Binaries ===" && \
 RUN echo "llama.cpp: ${LLAMA_COMMIT_HASH}" > /versions.txt && \
     echo "whisper.cpp: ${WHISPER_COMMIT_HASH}" >> /versions.txt && \
     echo "stable-diffusion.cpp: ${SD_COMMIT_HASH}" >> /versions.txt && \
-    echo "llama-swap: ${LLAMA_SWAP_VERSION}" >> /versions.txt && \
+    echo "llama-swap: $(cat /tmp/llama-swap-version)" >> /versions.txt && \
     echo "backend: Vulkan" >> /versions.txt && \
     echo "build_timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> /versions.txt
 
