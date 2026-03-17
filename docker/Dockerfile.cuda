@@ -19,35 +19,11 @@
 # - Independent project rebuilds
 
 # ============================================================================
-# Stage 0: Build llama-swap from local source
-# ============================================================================
-FROM golang:1.25-alpine AS llama-swap-builder
-WORKDIR /app
-
-# Copy Go module files first for layer caching
-COPY go.mod go.sum ./
-RUN go mod download
-
-# Copy source code and build
-COPY . .
-ENV CGO_ENABLED=0 GOOS=linux GOARCH=amd64
-RUN go build -o llama-swap .
-
-# Get version info: git hash + dirty flag, or 'local-build' fallback
-RUN if git rev-parse --git-dir > /dev/null 2>&1; then \
-        VERSION=$(git rev-parse --short HEAD) && \
-        if [ -n "$(git status --porcelain)" ]; then \
-            VERSION="${VERSION}+dirty"; \
-        fi && \
-        echo "$VERSION" > /app/llama-swap-version; \
-    else \
-        echo "local-build" > /app/llama-swap-version; \
-    fi
-
-# ============================================================================
-# Stage 1: Base Builder with Common Dependencies
+# Stage 0: Base Builder with Common Dependencies
 # ============================================================================
 FROM nvidia/cuda:12.4.0-devel-ubuntu22.04 AS builder-base
+
+ARG NODE_MAJOR=24
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV CMAKE_CUDA_ARCHITECTURES="60;61;75;86;89"
@@ -65,9 +41,39 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     ccache \
+    make \
+    gnupg \
+    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+       | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" \
+       > /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
+
+# ============================================================================
+# Stage 1: Build llama-swap from local source
+# Uses builder-base for cache efficiency (shares base layers with other builders)
+# ============================================================================
+FROM builder-base AS llama-swap-builder
+
+# Install Go 1.25 (ubuntu22.04 default is older)
+ENV GOLANG_VERSION=1.25.0
+ENV GOPATH=/go
+ENV PATH=/usr/local/go/bin:$GOPATH/bin:$PATH
+RUN curl -fsSL https://go.dev/dl/go${GOLANG_VERSION}.linux-amd64.tar.gz | tar -C /usr/local -xz
+
+WORKDIR /app
+
+# Copy Go module files first for layer caching
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code and build
+COPY . .
+ENV CGO_ENABLED=0 GOOS=linux GOARCH=amd64
+RUN mkdir /install && make linux && cp build/llama-swap-linux-amd64 /install/llama-swap
 
 # ============================================================================
 # Stage 2: Source Cloning (Cached Independently)
@@ -166,19 +172,15 @@ RUN --mount=type=cache,target=/ccache \
         -DCMAKE_CXX_COMPILER_LAUNCHER=ccache && \
     cmake --build build --config Release -j$(nproc) --target llama-cli llama-server && \
     # Copy outputs to install directory for easy extraction
-    mkdir -p /install/bin /install/lib /install/examples && \
+    mkdir -p /install/bin /install/lib && \
     cp -v build/bin/llama-cli build/bin/llama-server /install/bin/ 2>/dev/null || true && \
-    find build -name "*.so*" -type f -exec cp -v {} /install/lib/ \; && \
-    cp -vr examples/* /install/examples/ 2>/dev/null || true
+    find build -name "*.so*" -type f -exec cp -v {} /install/lib/ \;
 
 # ============================================================================
 # Stage 4: Runtime Stage
 # ============================================================================
 FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04 AS runtime
 
-ARG LLAMA_COMMIT_HASH=unknown
-ARG WHISPER_COMMIT_HASH=unknown
-ARG SD_COMMIT_HASH=unknown
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH="/usr/local/bin:${PATH}"
 ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
@@ -214,7 +216,6 @@ WORKDIR /app
 COPY --from=llama-build /install/bin/llama-server /usr/local/bin/
 COPY --from=llama-build /install/bin/llama-cli /usr/local/bin/
 COPY --from=llama-build /install/lib/ /usr/local/lib/
-COPY --from=llama-build /install/examples/ /opt/llama.cpp/examples/
 
 COPY --from=whisper-build /install/bin/whisper-server /usr/local/bin/
 COPY --from=whisper-build /install/bin/whisper-cli /usr/local/bin/
@@ -227,30 +228,11 @@ COPY --from=sd-build /install/lib/ /usr/local/lib/
 # Update library cache
 RUN ldconfig
 
-# Create symlinks for common command names
-RUN ln -sf /usr/local/bin/llama-cli /usr/local/bin/llama && \
-    ln -sf /usr/local/bin/whisper-cli /usr/local/bin/whisper && \
-    ln -sf /usr/local/bin/sd-cli /usr/local/bin/stable-diffusion
-
-# Verify installation
-RUN echo "=== Installed Binaries ===" && \
-    ls -la /usr/local/bin/llama* /usr/local/bin/whisper* /usr/local/bin/sd* /usr/local/bin/llama-swap 2>/dev/null || true && \
-    echo "" && \
-    echo "=== Library Check ===" && \
-    ldconfig -p | grep -E "(ggml|llama|whisper|sd)" || true && \
-    echo "" && \
-    echo "=== llama-swap Version ===" && \
-    llama-swap --version 2>/dev/null || true && \
-    echo "" && \
-    echo "=== llama-cli Version ===" && \
-    llama-cli --version 2>/dev/null || true
-
 # Write version information to /versions.txt
-RUN echo "llama.cpp: ${LLAMA_COMMIT_HASH}" > /versions.txt && \
+RUN echo "llama.cpp: $(/usr/local/bin/llama-server --version 2>&1 | grep version) > /versions.txt && \
     echo "whisper.cpp: ${WHISPER_COMMIT_HASH}" >> /versions.txt && \
-    echo "stable-diffusion.cpp: ${SD_COMMIT_HASH}" >> /versions.txt && \
-    echo "llama-swap: $(cat /tmp/llama-swap-version)" >> /versions.txt && \
-    echo "backend: CUDA" >> /versions.txt && \
+    echo "stable-diffusion.cpp: $(/usr/local/bin/sd-server --version)" >> /versions.txt && \
+    echo "llama-swap: $(/usr/local/bin/llama-swap -version)" >> /versions.txt && \
     echo "build_timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> /versions.txt
 
 WORKDIR /models
