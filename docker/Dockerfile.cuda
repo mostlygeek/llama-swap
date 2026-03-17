@@ -195,8 +195,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy llama-swap binary from builder stage
-COPY --from=llama-swap-builder /app/llama-swap /usr/local/bin/
-COPY --from=llama-swap-builder /app/llama-swap-version /tmp/
+COPY --from=llama-swap-builder /install/llama-swap /usr/local/bin/
 
 # Copy libcuda stubs for CPU-only testing (not in ldconfig path to avoid conflicts with real drivers)
 # Real NVIDIA drivers will be used when available; stubs are fallback for testing on CPU-only hosts
@@ -229,11 +228,11 @@ COPY --from=sd-build /install/lib/ /usr/local/lib/
 RUN ldconfig
 
 # Write version information to /versions.txt
-RUN echo "llama.cpp: $(/usr/local/bin/llama-server --version 2>&1 | grep version) > /versions.txt && \
-    echo "whisper.cpp: ${WHISPER_COMMIT_HASH}" >> /versions.txt && \
-    echo "stable-diffusion.cpp: $(/usr/local/bin/sd-server --version)" >> /versions.txt && \
-    echo "llama-swap: $(/usr/local/bin/llama-swap -version)" >> /versions.txt && \
-    echo "build_timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> /versions.txt
+#RUN echo "llama.cpp: $(/usr/local/bin/llama-server --version 2>&1 | grep version) > /versions.txt && \
+#    echo "whisper.cpp: ${WHISPER_COMMIT_HASH}" >> /versions.txt && \
+#    echo "stable-diffusion.cpp: $(/usr/local/bin/sd-server --version)" >> /versions.txt && \
+#    echo "llama-swap: $(/usr/local/bin/llama-swap -version)" >> /versions.txt && \
+#    echo "build_timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> /versions.txt
 
 WORKDIR /models
 CMD ["bash"]
