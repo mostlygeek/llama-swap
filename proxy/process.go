@@ -358,6 +358,13 @@ func (p *Process) start() error {
 		}()
 	}
 
+	if p.config.AfterHealthy != "" {
+		p.proxyLogger.Debugf("<%s> Running afterHealthy hook: %s", p.ID, p.config.AfterHealthy)
+		if err := p.runHookCommand(p.config.AfterHealthy); err != nil {
+			p.proxyLogger.Warnf("<%s> afterHealthy hook failed: %v", p.ID, err)
+		}
+	}
+
 	if curState, err := p.swapState(StateStarting, StateReady); err != nil {
 		return fmt.Errorf("failed to set Process state to ready: current state: %v, error: %v", curState, err)
 	} else {
@@ -427,6 +434,13 @@ func (p *Process) stopCommand() {
 	if cancelUpstream == nil {
 		p.proxyLogger.Errorf("<%s> stopCommand has a nil p.cancelUpstream()", p.ID)
 		return
+	}
+
+	if p.config.BeforeStop != "" {
+		p.proxyLogger.Debugf("<%s> Running beforeStop hook: %s", p.ID, p.config.BeforeStop)
+		if err := p.runHookCommand(p.config.BeforeStop); err != nil {
+			p.proxyLogger.Warnf("<%s> beforeStop hook failed: %v", p.ID, err)
+		}
 	}
 
 	cancelUpstream()
@@ -652,6 +666,25 @@ func (p *Process) cmdStopUpstreamProcess() error {
 // Logger returns the logger for this process.
 func (p *Process) Logger() *LogMonitor {
 	return p.processLogger
+}
+
+// runHookCommand executes a hook command, logging its output through the
+// process logger. The command inherits the environment of the upstream process.
+func (p *Process) runHookCommand(hookCmd string) error {
+	args, err := config.SanitizeCommand(hookCmd)
+	if err != nil {
+		return fmt.Errorf("failed to sanitize hook command %q: %v", hookCmd, err)
+	}
+
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Stdout = p.processLogger
+	cmd.Stderr = p.processLogger
+	if p.cmd != nil {
+		cmd.Env = p.cmd.Env
+	}
+	setProcAttributes(cmd)
+
+	return cmd.Run()
 }
 
 var loadingRemarks = []string{

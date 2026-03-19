@@ -456,6 +456,54 @@ func TestProcess_ForceStopWithKill(t *testing.T) {
 	<-waitChan
 }
 
+func TestProcess_AfterHealthyHook(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping AfterHealthy hook test on Windows")
+	}
+
+	tmpFile := t.TempDir() + "/after_healthy_ran"
+	conf := getTestSimpleResponderConfig("after_healthy_test")
+	conf.AfterHealthy = fmt.Sprintf("touch %s", tmpFile)
+
+	process := NewProcess("test-after-healthy", 5, conf, debugLogger, debugLogger)
+	defer process.Stop()
+
+	err := process.start()
+	assert.Nil(t, err)
+	assert.Equal(t, StateReady, process.CurrentState())
+
+	// The hook should have created the temp file before the process became ready
+	_, statErr := os.Stat(tmpFile)
+	assert.Nil(t, statErr, "afterHealthy hook should have created temp file")
+}
+
+func TestProcess_BeforeStopHook(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping BeforeStop hook test on Windows")
+	}
+
+	tmpFile := t.TempDir() + "/before_stop_ran"
+	conf := getTestSimpleResponderConfig("before_stop_test")
+	conf.BeforeStop = fmt.Sprintf("touch %s", tmpFile)
+
+	process := NewProcess("test-before-stop", 5, conf, debugLogger, debugLogger)
+
+	err := process.start()
+	assert.Nil(t, err)
+	assert.Equal(t, StateReady, process.CurrentState())
+
+	// Verify hook hasn't run yet
+	_, statErr := os.Stat(tmpFile)
+	assert.True(t, os.IsNotExist(statErr), "beforeStop hook should not have run yet")
+
+	process.Stop()
+	assert.Equal(t, StateStopped, process.CurrentState())
+
+	// The hook should have created the temp file before the process was killed
+	_, statErr = os.Stat(tmpFile)
+	assert.Nil(t, statErr, "beforeStop hook should have created temp file")
+}
+
 func TestProcess_StopCmd(t *testing.T) {
 	conf := getTestSimpleResponderConfig("test_stop_cmd")
 
