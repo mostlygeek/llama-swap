@@ -306,7 +306,7 @@
             class="px-2 py-1 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
             bind:value={$sdSchedulerStore}
           >
-            <option value="">Default</option>
+            <option value="">Auto for model</option>
             <option value="discrete">discrete</option>
             <option value="karras">karras</option>
             <option value="exponential">exponential</option>
