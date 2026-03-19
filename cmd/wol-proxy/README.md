@@ -19,7 +19,9 @@ $ ./wol-proxy -mac BA:DC:0F:FE:E0:00 -upstream http://192.168.1.13:8080 \
     # altenerative listening port
     -listen localhost:9999 \
     # seconds to hold requests waiting for upstream to be ready
-    -timeout 30
+    -timeout 30 \
+    # bind WoL packets to a specific network interface
+    -source-ip 192.168.1.5
 ```
 
 ## API

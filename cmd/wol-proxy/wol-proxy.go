@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	_ "embed"
 	"errors"
@@ -29,6 +30,7 @@ var (
 	flagListen   = flag.String("listen", ":8080", "listen address to listen on")
 	flagLog      = flag.String("log", "info", "log level (debug, info, warn, error)")
 	flagTimeout  = flag.Int("timeout", 60, "seconds requests wait for upstream response before failing")
+	flagSourceIP = flag.String("source-ip", "", "source IPv4 address for WoL packets (binds to specific interface)")
 )
 
 func main() {
@@ -48,7 +50,6 @@ func main() {
 		return
 	}
 
-	// Validate flags
 	if *flagListen == "" {
 		slog.Error("listen address is required")
 		return
@@ -66,10 +67,17 @@ func main() {
 
 	var upstreamURL *url.URL
 	var err error
-	// validate mac address
 	if _, err = net.ParseMAC(*flagMac); err != nil {
 		slog.Error("invalid mac address", "error", err)
 		return
+	}
+
+	if *flagSourceIP != "" {
+		ip := net.ParseIP(*flagSourceIP)
+		if ip == nil || ip.To4() == nil {
+			slog.Error("invalid source IP, must be a valid IPv4 address", "source-ip", *flagSourceIP)
+			return
+		}
 	}
 
 	if *flagUpstream == "" {
@@ -89,7 +97,6 @@ func main() {
 		Handler: proxy,
 	}
 
-	// start the server
 	go func() {
 		slog.Info("server starting on", "address", *flagListen)
 		if err := server.ListenAndServe(); err != nil {
@@ -97,7 +104,6 @@ func main() {
 		}
 	}()
 
-	// graceful shutdown
 	ctx, _ := signal.NotifyContext(context.Background(), os.Interrupt)
 	<-ctx.Done()
 	server.Close()
@@ -112,24 +118,87 @@ const (
 
 type proxyServer struct {
 	upstreamProxy *httputil.ReverseProxy
+	upstreamURL   *url.URL
 	failCount     int
 	statusMutex   sync.RWMutex
 	status        upstreamStatus
+	sseCancel     context.CancelFunc
+}
+
+type proxyResponseWriter struct {
+	http.ResponseWriter
+	written bool
+}
+
+func (w *proxyResponseWriter) WriteHeader(code int) {
+	w.written = true
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *proxyResponseWriter) Write(b []byte) (int, error) {
+	w.written = true
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *proxyResponseWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (w *proxyResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }
 
 func newProxy(url *url.URL) *proxyServer {
 	p := httputil.NewSingleHostReverseProxy(url)
+
+	p.Transport = &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+		MaxIdleConns:          50,
+		MaxIdleConnsPerHost:   10,
+		IdleConnTimeout:       90 * time.Second,
+	}
+
 	proxy := &proxyServer{
 		upstreamProxy: p,
+		upstreamURL:   url,
 		status:        notready,
 		failCount:     0,
 	}
 
-	// start a goroutine to monitor upstream status via SSE
+	p.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		if isClientDisconnect(err) {
+			slog.Debug("client disconnected", "path", r.URL.Path, "error", err)
+			return
+		}
+
+		slog.Warn("upstream error, marking not ready", "path", r.URL.Path, "error", err)
+		proxy.setStatus(notready)
+		proxy.cancelSSE()
+		proxy.incFail(1)
+
+		if wolErr := sendMagicPacket(*flagMac, *flagSourceIP); wolErr != nil {
+			slog.Warn("failed to send magic WoL packet", "error", wolErr)
+		}
+
+		path := r.URL.Path
+		if path == "/" || strings.HasPrefix(path, "/ui/") {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, loadingPageHTML)
+		}
+	}
+
 	go func() {
 		eventsUrl := url.Scheme + "://" + url.Host + "/api/events"
 		client := &http.Client{
-			Timeout: 0, // No timeout for SSE connection
+			Timeout: 0,
 		}
 
 		waitDuration := 10 * time.Second
@@ -137,8 +206,12 @@ func newProxy(url *url.URL) *proxyServer {
 		for {
 			slog.Debug("connecting to SSE endpoint", "url", eventsUrl)
 
-			req, err := http.NewRequest("GET", eventsUrl, nil)
+			ctx, cancel := context.WithCancel(context.Background())
+			proxy.setSSECancel(cancel)
+
+			req, err := http.NewRequestWithContext(ctx, "GET", eventsUrl, nil)
 			if err != nil {
+				cancel()
 				slog.Warn("failed to create SSE request", "error", err)
 				proxy.setStatus(notready)
 				proxy.incFail(1)
@@ -152,6 +225,12 @@ func newProxy(url *url.URL) *proxyServer {
 
 			resp, err := client.Do(req)
 			if err != nil {
+				cancel()
+				if ctx.Err() == context.Canceled {
+					slog.Info("SSE connection canceled, reconnecting")
+					time.Sleep(2 * time.Second)
+					continue
+				}
 				slog.Error("failed to connect to SSE endpoint", "error", err)
 				proxy.setStatus(notready)
 				proxy.incFail(1)
@@ -169,15 +248,11 @@ func newProxy(url *url.URL) *proxyServer {
 				continue
 			}
 
-			// Successfully connected to SSE endpoint
 			slog.Info("connected to SSE endpoint, upstream ready")
 			proxy.setStatus(ready)
 			proxy.resetFailures()
 
-			// Read from the SSE stream to detect disconnection
 			scanner := bufio.NewScanner(resp.Body)
-
-			// use a fairly large buffer to avoid scanner errors when reading large SSE events
 			buf := make([]byte, 0, 1024*1024*2)
 			scanner.Buffer(buf, 1024*1024*2)
 			events := 0
@@ -186,25 +261,29 @@ func newProxy(url *url.URL) *proxyServer {
 			}
 			for scanner.Scan() {
 				if slog.Default().Enabled(context.Background(), slog.LevelDebug) {
-					// Just read the events to keep connection alive
-					// We don't need to process the event data
 					events++
 					fmt.Printf("%d, ", events)
 				}
 			}
 			fmt.Println()
-			if err := scanner.Err(); err != nil {
-				slog.Error("error reading from SSE stream", "error", err)
+			cancel()
+
+			scanErr := scanner.Err()
+			if scanErr != nil && ctx.Err() != context.Canceled {
+				slog.Error("error reading from SSE stream", "error", scanErr)
 			}
 
-			// Connection closed or error occurred
 			_ = resp.Body.Close()
-			slog.Info("SSE connection closed, upstream not ready")
-			proxy.setStatus(notready)
-			proxy.incFail(1)
 
-			// Wait before reconnecting
-			time.Sleep(waitDuration)
+			if ctx.Err() == context.Canceled {
+				slog.Info("SSE connection canceled, reconnecting")
+				time.Sleep(2 * time.Second)
+			} else {
+				slog.Info("SSE connection closed, upstream not ready")
+				proxy.setStatus(notready)
+				proxy.incFail(1)
+				time.Sleep(waitDuration)
+			}
 		}
 	}()
 
@@ -231,12 +310,10 @@ func (p *proxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		slog.Info("upstream not ready, sending magic packet", "req", path, "from", r.RemoteAddr)
-		if err := sendMagicPacket(*flagMac); err != nil {
+		if err := sendMagicPacket(*flagMac, *flagSourceIP); err != nil {
 			slog.Warn("failed to send magic WoL packet", "error", err)
 		}
 
-		// For root or UI path requests, return loading page with status polling
-		// the web page will do the polling and redirect when ready
 		if path == "/" || strings.HasPrefix(path, "/ui/") {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
@@ -263,7 +340,48 @@ func (p *proxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	p.upstreamProxy.ServeHTTP(w, r)
+	const maxBodySize = 10 << 20 // 10MB
+	var bodyBytes []byte
+	if r.Body != nil {
+		var err error
+		bodyBytes, err = io.ReadAll(io.LimitReader(r.Body, maxBodySize))
+		if err != nil {
+			http.Error(w, "failed to read request body", http.StatusBadGateway)
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	}
+
+	pw := &proxyResponseWriter{ResponseWriter: w}
+	p.upstreamProxy.ServeHTTP(pw, r)
+
+	if pw.written {
+		return
+	}
+
+	slog.Info("upstream failed while ready, waiting for recovery", "path", r.URL.Path)
+
+	ticker := time.NewTicker(250 * time.Millisecond)
+	timeout, cancel := context.WithTimeout(context.Background(), time.Duration(*flagTimeout)*time.Second)
+	defer cancel()
+	for {
+		select {
+		case <-timeout.Done():
+			ticker.Stop()
+			slog.Info("timeout waiting for upstream to be ready")
+			http.Error(w, "timeout", http.StatusRequestTimeout)
+			return
+		case <-ticker.C:
+			if p.getStatus() == ready {
+				ticker.Stop()
+				if bodyBytes != nil {
+					r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+				}
+				p.upstreamProxy.ServeHTTP(w, r)
+				return
+			}
+		}
+	}
 }
 
 func (p *proxyServer) getStatus() upstreamStatus {
@@ -296,7 +414,31 @@ func (p *proxyServer) resetFailures() {
 	p.failCount = 0
 }
 
-func sendMagicPacket(macAddr string) error {
+func (p *proxyServer) setSSECancel(cancel context.CancelFunc) {
+	p.statusMutex.Lock()
+	defer p.statusMutex.Unlock()
+	p.sseCancel = cancel
+}
+
+func (p *proxyServer) cancelSSE() {
+	p.statusMutex.RLock()
+	cancel := p.sseCancel
+	p.statusMutex.RUnlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func isClientDisconnect(err error) bool {
+	if errors.Is(err, context.Canceled) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "connection reset by peer")
+}
+
+func sendMagicPacket(macAddr, sourceIP string) error {
 	hwAddr, err := net.ParseMAC(macAddr)
 	if err != nil {
 		return err
@@ -306,23 +448,25 @@ func sendMagicPacket(macAddr string) error {
 		return errors.New("invalid MAC address")
 	}
 
-	// Create the magic packet.
 	packet := make([]byte, 102)
-	// Add 6 bytes of 0xFF.
 	for i := 0; i < 6; i++ {
 		packet[i] = 0xFF
 	}
-	// Repeat the MAC address 16 times.
 	for i := 1; i <= 16; i++ {
 		copy(packet[i*6:], hwAddr)
 	}
 
-	// Send the packet using UDP.
-	addr := net.UDPAddr{
+	dst := &net.UDPAddr{
 		IP:   net.IPv4bcast,
 		Port: 9,
 	}
-	conn, err := net.DialUDP("udp", nil, &addr)
+
+	var src *net.UDPAddr
+	if sourceIP != "" {
+		src = &net.UDPAddr{IP: net.ParseIP(sourceIP)}
+	}
+
+	conn, err := net.DialUDP("udp", src, dst)
 	if err != nil {
 		return err
 	}
