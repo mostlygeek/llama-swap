@@ -32,6 +32,7 @@ export default defineConfig({
       "/upstream": "http://localhost:8080",
       "/unload": "http://localhost:8080",
       "/v1": "http://localhost:8080",
+      "/sdapi": "http://localhost:8080",
     },
   },
 });
