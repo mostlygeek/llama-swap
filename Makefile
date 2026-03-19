@@ -13,7 +13,7 @@ endif
 BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 # Default target: Builds binaries for both OSX and Linux
-all: mac linux simple-responder
+all: ui mac linux simple-responder
 
 # Clean build directory
 clean:
@@ -59,7 +59,7 @@ windows: ui
 	GOOS=windows GOARCH=amd64 go build -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-windows-amd64.exe
 
 # for testing proxy.Process
-simple-responder:
+simple-responder: ui
 	@echo "Building simple responder"
 	GOOS=darwin GOARCH=arm64 go build -o $(BUILD_DIR)/simple-responder_darwin_arm64 cmd/simple-responder/simple-responder.go
 	GOOS=linux GOARCH=amd64 go build -o $(BUILD_DIR)/simple-responder_linux_amd64 cmd/simple-responder/simple-responder.go
