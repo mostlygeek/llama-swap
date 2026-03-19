@@ -215,26 +215,6 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"voices": []string{"voice1"}, "model": model})
 	})
 
-	// sd.cpp endpoints
-	r.POST("/sdapi/v1/txt2img", func(c *gin.Context) {
-		bodyBytes, _ := io.ReadAll(c.Request.Body)
-		c.JSON(http.StatusOK, gin.H{
-			"request_body": string(bodyBytes),
-		})
-	})
-
-	r.POST("/sdapi/v1/img2img", func(c *gin.Context) {
-		bodyBytes, _ := io.ReadAll(c.Request.Body)
-		c.JSON(http.StatusOK, gin.H{
-			"request_body": string(bodyBytes),
-		})
-	})
-
-	r.GET("/sdapi/v1/loras", func(c *gin.Context) {
-		model := c.Query("model")
-		c.JSON(http.StatusOK, gin.H{"loras": []string{}, "model": model})
-	})
-
 	r.GET("/slow-respond", func(c *gin.Context) {
 		echo := c.Query("echo")
 		delay := c.Query("delay")
