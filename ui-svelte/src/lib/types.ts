@@ -138,7 +138,6 @@ export interface SdApiTxt2ImgRequest {
   cfg_scale?: number;
   seed?: number;
   batch_size?: number;
-  clip_skip?: number;
   sampler_name?: string;
   scheduler?: string;
   lora?: SdApiLoraRef[];

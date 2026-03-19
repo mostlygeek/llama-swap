@@ -19,7 +19,6 @@
   const sdSeedStore = persistentStore<number>("playground-sdapi-seed", -1);
   const sdSamplerStore = persistentStore<string>("playground-sdapi-sampler", "");
   const sdSchedulerStore = persistentStore<string>("playground-sdapi-scheduler", "");
-  const sdClipSkipStore = persistentStore<number>("playground-sdapi-clip-skip", 1);
   const sdBatchSizeStore = persistentStore<number>("playground-sdapi-batch-size", 1);
 
   let prompt = $state("");
@@ -109,7 +108,6 @@
           cfg_scale: $sdCfgScaleStore,
           seed: $sdSeedStore,
           batch_size: $sdBatchSizeStore,
-          clip_skip: $sdClipSkipStore,
           sampler_name: $sdSamplerStore || undefined,
           scheduler: $sdSchedulerStore || undefined,
           lora: selectedLoras.length > 0 ? selectedLoras : undefined,
@@ -272,16 +270,6 @@
           />
         </label>
         <label class="flex flex-col gap-1">
-          <span class="text-xs text-txtsecondary">Clip Skip</span>
-          <input
-            type="number"
-            class="px-2 py-1 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
-            bind:value={$sdClipSkipStore}
-            min="1"
-            max="12"
-          />
-        </label>
-        <label class="flex flex-col gap-1">
           <span class="text-xs text-txtsecondary">Batch Size</span>
           <input
             type="number"
@@ -293,21 +281,38 @@
         </label>
         <label class="flex flex-col gap-1">
           <span class="text-xs text-txtsecondary">Sampler</span>
-          <input
-            type="text"
+          <select
             class="px-2 py-1 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
             bind:value={$sdSamplerStore}
-            placeholder="e.g. euler_a"
-          />
+          >
+            <option value="">Default</option>
+            <option value="euler_a">euler_a</option>
+            <option value="euler">euler</option>
+            <option value="heun">heun</option>
+            <option value="dpm2">dpm2</option>
+            <option value="dpmpp2s_a">dpmpp2s_a</option>
+            <option value="dpmpp2m">dpmpp2m</option>
+            <option value="dpmpp2mv2">dpmpp2mv2</option>
+            <option value="ipndm">ipndm</option>
+            <option value="ipndm_v">ipndm_v</option>
+            <option value="lcm">lcm</option>
+            <option value="ddim_trailing">ddim_trailing</option>
+            <option value="tcd">tcd</option>
+          </select>
         </label>
         <label class="flex flex-col gap-1">
           <span class="text-xs text-txtsecondary">Scheduler</span>
-          <input
-            type="text"
+          <select
             class="px-2 py-1 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
             bind:value={$sdSchedulerStore}
-            placeholder="e.g. normal"
-          />
+          >
+            <option value="">Default</option>
+            <option value="discrete">discrete</option>
+            <option value="karras">karras</option>
+            <option value="exponential">exponential</option>
+            <option value="ays">ays</option>
+            <option value="gits">gits</option>
+          </select>
         </label>
       </div>
 
