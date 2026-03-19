@@ -305,7 +305,7 @@ func main() {
 
 		modelName := gjson.GetBytes(body, "model").String()
 		c.JSON(http.StatusOK, gin.H{
-			"model": modelName,
+			"model":  modelName,
 			"images": []string{},
 		})
 	})
@@ -320,7 +320,7 @@ func main() {
 
 		modelName := gjson.GetBytes(body, "model").String()
 		c.JSON(http.StatusOK, gin.H{
-			"model": modelName,
+			"model":  modelName,
 			"images": []string{},
 		})
 	})
