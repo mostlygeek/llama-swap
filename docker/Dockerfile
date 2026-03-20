@@ -13,11 +13,12 @@
 # - Binary validation: build fails if any expected binary is missing
 #
 # Adding a new server project:
-#   1. Add a source clone stage (FROM builder-base AS <project>-source)
-#   2. Add a build stage (FROM builder-base AS <project>-build)
-#   3. Add COPY lines in the runtime stage
-#   4. Add the binary name(s) to the validation RUN step
-#   5. Update build-image.sh with the new repo URL and commit hash
+#   1. Add a case to install.sh with project-specific cmake flags and targets
+#   2. Add a source clone stage (FROM builder-base AS <project>-source)
+#   3. Add a build stage that runs: bash /build/install.sh "$BACKEND" <project>
+#   4. Add COPY lines in the runtime stage
+#   5. Add the binary name(s) to the validation RUN step
+#   6. Update build-image.sh with the new repo URL and commit hash
 
 ARG BACKEND=cuda
 
@@ -156,7 +157,8 @@ RUN git clone --filter=blob:none --no-checkout https://github.com/leejet/stable-
 # ============================================================================
 # Stage 3: Project Builds (ordered by build time: fastest first)
 #
-# Each stage uses a shell conditional on BACKEND to select cmake flags.
+# Each stage copies the install.sh script and runs it with the backend
+# and project name. All cmake logic lives in install.sh.
 # Cache IDs are scoped by backend to prevent cross-contamination.
 # ============================================================================
 
@@ -164,112 +166,31 @@ RUN git clone --filter=blob:none --no-checkout https://github.com/leejet/stable-
 FROM builder-base AS whisper-build
 ARG BACKEND=cuda
 COPY --from=whisper-source /src/whisper.cpp /build/whisper.cpp
+COPY docker/install.sh /build/
 WORKDIR /build/whisper.cpp
 RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
     --mount=type=cache,id=whisper-${BACKEND},target=/build/whisper.cpp/build \
-    set -e && \
-    rm -rf build/CMakeCache.txt build/CMakeFiles 2>/dev/null || true && \
-    if [ "$BACKEND" = "cuda" ]; then \
-        cmake -B build \
-            -DGGML_NATIVE=OFF \
-            -DGGML_CUDA=ON \
-            -DGGML_VULKAN=OFF \
-            -DCMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES}" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_CUDA_FLAGS="-allow-unsupported-compiler" \
-            -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda" \
-            -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda" \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache; \
-    elif [ "$BACKEND" = "vulkan" ]; then \
-        cmake -B build \
-            -DGGML_NATIVE=OFF \
-            -DGGML_VULKAN=ON \
-            -DVulkan_INCLUDE_DIR="${VULKAN_SDK}/include" \
-            -DVulkan_LIBRARY="${VULKAN_SDK}/lib/libvulkan.so" \
-            -DCMAKE_BUILD_TYPE=Release; \
-    fi && \
-    cmake --build build --config Release -j$(nproc) --target whisper-cli whisper-server && \
-    mkdir -p /install/bin /install/lib && \
-    cp build/bin/whisper-cli build/bin/whisper-server /install/bin/ && \
-    test -f /install/bin/whisper-server || { echo "FATAL: whisper-server not built"; exit 1; } && \
-    find build -name "*.so*" -type f -exec cp {} /install/lib/ \;
+    bash /build/install.sh "$BACKEND" whisper
 
 # --- stable-diffusion.cpp (medium: 15-25 min) ---
 FROM builder-base AS sd-build
 ARG BACKEND=cuda
 COPY --from=sd-source /src/stable-diffusion.cpp /build/stable-diffusion.cpp
+COPY docker/install.sh /build/
 WORKDIR /build/stable-diffusion.cpp
 RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
     --mount=type=cache,id=sd-${BACKEND},target=/build/stable-diffusion.cpp/build \
-    set -e && \
-    rm -rf build/CMakeCache.txt build/CMakeFiles 2>/dev/null || true && \
-    if [ "$BACKEND" = "cuda" ]; then \
-        cmake -B build \
-            -DSD_CUDA=ON \
-            -DGGML_CUDA=ON \
-            -DGGML_NATIVE=OFF \
-            -DGGML_VULKAN=OFF \
-            -DCMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES}" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_CUDA_FLAGS="-allow-unsupported-compiler" \
-            -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda" \
-            -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda" \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache; \
-    elif [ "$BACKEND" = "vulkan" ]; then \
-        cmake -B build \
-            -DSD_VULKAN=ON \
-            -DGGML_VULKAN=ON \
-            -DSD_BUILD_EXAMPLES=OFF \
-            -DGGML_NATIVE=OFF \
-            -DVulkan_INCLUDE_DIR="${VULKAN_SDK}/include" \
-            -DVulkan_LIBRARY="${VULKAN_SDK}/lib/libvulkan.so" \
-            -DCMAKE_BUILD_TYPE=Release; \
-    fi && \
-    cmake --build build --config Release -j$(nproc) --target sd-cli sd-server && \
-    mkdir -p /install/bin /install/lib && \
-    cp build/bin/sd-cli build/bin/sd-server /install/bin/ && \
-    test -f /install/bin/sd-server || { echo "FATAL: sd-server not built"; exit 1; } && \
-    find build -name "*.so*" -type f -exec cp {} /install/lib/ \;
+    bash /build/install.sh "$BACKEND" sd
 
 # --- llama.cpp (slow: 60-90 min) ---
 FROM builder-base AS llama-build
 ARG BACKEND=cuda
 COPY --from=llama-source /src/llama.cpp /build/llama.cpp
+COPY docker/install.sh /build/
 WORKDIR /build/llama.cpp
 RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
     --mount=type=cache,id=llama-${BACKEND},target=/build/llama.cpp/build \
-    set -e && \
-    rm -rf build/CMakeCache.txt build/CMakeFiles 2>/dev/null || true && \
-    if [ "$BACKEND" = "cuda" ]; then \
-        cmake -B build \
-            -DGGML_NATIVE=OFF \
-            -DGGML_CUDA=ON \
-            -DGGML_VULKAN=OFF \
-            -DCMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES}" \
-            -DLLAMA_BUILD_TESTS=OFF \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_CUDA_FLAGS="-allow-unsupported-compiler" \
-            -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda" \
-            -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda" \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache; \
-    elif [ "$BACKEND" = "vulkan" ]; then \
-        cmake -B build \
-            -DGGML_NATIVE=OFF \
-            -DGGML_VULKAN=ON \
-            -DGGML_BACKEND_DL=ON \
-            -DVulkan_INCLUDE_DIR="${VULKAN_SDK}/include" \
-            -DVulkan_LIBRARY="${VULKAN_SDK}/lib/libvulkan.so" \
-            -DLLAMA_BUILD_TESTS=OFF \
-            -DCMAKE_BUILD_TYPE=Release; \
-    fi && \
-    cmake --build build --config Release -j$(nproc) --target llama-cli llama-server && \
-    mkdir -p /install/bin /install/lib && \
-    cp build/bin/llama-cli build/bin/llama-server /install/bin/ && \
-    test -f /install/bin/llama-server || { echo "FATAL: llama-server not built"; exit 1; } && \
-    find build -name "*.so*" -type f -exec cp {} /install/lib/ \;
+    bash /build/install.sh "$BACKEND" llama
 
 # ============================================================================
 # Stage 4: Runtime (backend-conditional)
