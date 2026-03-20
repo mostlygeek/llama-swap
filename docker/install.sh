@@ -1,13 +1,5 @@
 #!/bin/bash
-# Build a server project against the selected GPU backend.
-#
-# Usage: ./install.sh <backend> <project>
-#   backend: cuda | vulkan
-#   project: llama | whisper | sd
-#
-# Outputs binaries to /install/bin/ and shared libs to /install/lib/
-# Fails the build if any expected binary is missing.
-
+# Usage: ./install.sh <cuda|vulkan> <llama|whisper|sd>
 set -e
 
 BACKEND="$1"
@@ -17,8 +9,6 @@ if [ -z "$BACKEND" ] || [ -z "$PROJECT" ]; then
     echo "Usage: $0 <cuda|vulkan> <llama|whisper|sd>" >&2
     exit 1
 fi
-
-# --- Common cmake flags by backend ---
 
 COMMON_FLAGS="-DGGML_NATIVE=OFF -DCMAKE_BUILD_TYPE=Release"
 
@@ -46,8 +36,6 @@ case "$BACKEND" in
         ;;
 esac
 
-# --- Per-project cmake flags and targets ---
-
 case "$PROJECT" in
     llama)
         PROJECT_FLAGS="-DLLAMA_BUILD_TESTS=OFF"
@@ -70,21 +58,14 @@ case "$PROJECT" in
         ;;
 esac
 
-# --- Build ---
-
 rm -rf build/CMakeCache.txt build/CMakeFiles 2>/dev/null || true
 
 echo "=== Building $PROJECT for $BACKEND ==="
-echo "Common flags: $COMMON_FLAGS"
-echo "Project flags: $PROJECT_FLAGS"
-echo "Targets: $TARGETS"
 
 # shellcheck disable=SC2086
 cmake -B build $COMMON_FLAGS $PROJECT_FLAGS
 # shellcheck disable=SC2086
 cmake --build build --config Release -j"$(nproc)" --target $TARGETS
-
-# --- Collect artifacts ---
 
 mkdir -p /install/bin /install/lib
 for bin in $TARGETS; do
