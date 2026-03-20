@@ -90,12 +90,11 @@ else
 fi
 DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}"
 
-# Set Dockerfile based on backend
+# Single unified Dockerfile, backend selected via build arg
+DOCKERFILE="Dockerfile"
 if [[ "$BACKEND" == "vulkan" ]]; then
-    DOCKERFILE="Dockerfile.vulkan"
     echo "Building for: Vulkan (AMD GPUs and compatible hardware)"
 else
-    DOCKERFILE="Dockerfile.cuda"
     echo "Building for: CUDA (NVIDIA GPUs)"
 fi
 
@@ -183,6 +182,7 @@ echo ""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BUILD_ARGS=(
+    --build-arg "BACKEND=${BACKEND}"
     --build-arg "LLAMA_COMMIT_HASH=${LLAMA_HASH}"
     --build-arg "WHISPER_COMMIT_HASH=${WHISPER_HASH}"
     --build-arg "SD_COMMIT_HASH=${SD_HASH}"
