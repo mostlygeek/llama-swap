@@ -333,6 +333,13 @@ func (p *Process) start() error {
 		}
 	}
 
+	if p.config.AfterHealthy != "" {
+		p.proxyLogger.Debugf("<%s> Running afterHealthy hook: %s", p.ID, p.config.AfterHealthy)
+		if err := p.runHookCommand(p.config.AfterHealthy); err != nil {
+			p.proxyLogger.Warnf("<%s> afterHealthy hook failed: %v", p.ID, err)
+		}
+	}
+
 	if p.config.UnloadAfter > 0 {
 		// start a goroutine to check every second if
 		// the process should be stopped
@@ -356,13 +363,6 @@ func (p *Process) start() error {
 				}
 			}
 		}()
-	}
-
-	if p.config.AfterHealthy != "" {
-		p.proxyLogger.Debugf("<%s> Running afterHealthy hook: %s", p.ID, p.config.AfterHealthy)
-		if err := p.runHookCommand(p.config.AfterHealthy); err != nil {
-			p.proxyLogger.Warnf("<%s> afterHealthy hook failed: %v", p.ID, err)
-		}
 	}
 
 	if curState, err := p.swapState(StateStarting, StateReady); err != nil {

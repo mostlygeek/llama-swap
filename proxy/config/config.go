@@ -305,6 +305,8 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 
 			modelConfig.Cmd = strings.ReplaceAll(modelConfig.Cmd, macroSlug, macroStr)
 			modelConfig.CmdStop = strings.ReplaceAll(modelConfig.CmdStop, macroSlug, macroStr)
+			modelConfig.AfterHealthy = strings.ReplaceAll(modelConfig.AfterHealthy, macroSlug, macroStr)
+			modelConfig.BeforeStop = strings.ReplaceAll(modelConfig.BeforeStop, macroSlug, macroStr)
 			modelConfig.Proxy = strings.ReplaceAll(modelConfig.Proxy, macroSlug, macroStr)
 			modelConfig.CheckEndpoint = strings.ReplaceAll(modelConfig.CheckEndpoint, macroSlug, macroStr)
 			modelConfig.Filters.StripParams = strings.ReplaceAll(modelConfig.Filters.StripParams, macroSlug, macroStr)
@@ -339,10 +341,12 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			}
 		}
 
-		// Handle PORT macro - only allocate if cmd uses it
+		// Handle PORT macro - only allocate if cmd, afterHealthy, or beforeStop uses it
 		cmdHasPort := strings.Contains(modelConfig.Cmd, "${PORT}")
+		afterHealthyHasPort := strings.Contains(modelConfig.AfterHealthy, "${PORT}")
+		beforeStopHasPort := strings.Contains(modelConfig.BeforeStop, "${PORT}")
 		proxyHasPort := strings.Contains(modelConfig.Proxy, "${PORT}")
-		if cmdHasPort || proxyHasPort {
+		if cmdHasPort || afterHealthyHasPort || beforeStopHasPort || proxyHasPort {
 			if !cmdHasPort && proxyHasPort {
 				return Config{}, fmt.Errorf("model %s: proxy uses ${PORT} but cmd does not - ${PORT} is only available when used in cmd", modelId)
 			}
@@ -352,6 +356,8 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 
 			modelConfig.Cmd = strings.ReplaceAll(modelConfig.Cmd, macroSlug, macroStr)
 			modelConfig.CmdStop = strings.ReplaceAll(modelConfig.CmdStop, macroSlug, macroStr)
+			modelConfig.AfterHealthy = strings.ReplaceAll(modelConfig.AfterHealthy, macroSlug, macroStr)
+			modelConfig.BeforeStop = strings.ReplaceAll(modelConfig.BeforeStop, macroSlug, macroStr)
 			modelConfig.Proxy = strings.ReplaceAll(modelConfig.Proxy, macroSlug, macroStr)
 			modelConfig.Name = strings.ReplaceAll(modelConfig.Name, macroSlug, macroStr)
 			modelConfig.Description = strings.ReplaceAll(modelConfig.Description, macroSlug, macroStr)
@@ -371,6 +377,8 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		fieldMap := map[string]string{
 			"cmd":                 modelConfig.Cmd,
 			"cmdStop":             modelConfig.CmdStop,
+			"afterHealthy":        modelConfig.AfterHealthy,
+			"beforeStop":          modelConfig.BeforeStop,
 			"proxy":               modelConfig.Proxy,
 			"checkEndpoint":       modelConfig.CheckEndpoint,
 			"filters.stripParams": modelConfig.Filters.StripParams,
