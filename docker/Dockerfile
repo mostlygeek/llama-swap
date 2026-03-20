@@ -15,8 +15,8 @@
 
 ARG BACKEND=cuda
 
-# CUDA builder base
-FROM nvidia/cuda:12.4.0-devel-ubuntu22.04 AS builder-base-cuda
+# Builder base: CUDA devel image + Vulkan SDK (supports both backends)
+FROM nvidia/cuda:12.4.0-devel-ubuntu22.04 AS builder-base
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV CMAKE_CUDA_ARCHITECTURES="60;61;75;86;89"
@@ -26,21 +26,7 @@ ENV PATH="/usr/lib/ccache:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake git python3 python3-pip libssl-dev \
-    curl ca-certificates ccache make \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /src
-
-# Vulkan builder base
-FROM ubuntu:22.04 AS builder-base-vulkan
-
-ENV DEBIAN_FRONTEND=noninteractive
-ENV CCACHE_DIR=/ccache
-ENV CCACHE_MAXSIZE=2G
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential cmake git python3 python3-pip libssl-dev \
-    curl ca-certificates ccache wget xz-utils \
+    curl ca-certificates ccache make wget xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
 ARG VULKAN_SDK_VERSION=1.3.275.0
@@ -56,17 +42,7 @@ ENV PATH="${VULKAN_SDK}/bin:${PATH}"
 ENV CMAKE_PREFIX_PATH="${VULKAN_SDK}"
 ENV VULKAN_INCLUDE_DIRS="${VULKAN_SDK}/include"
 
-RUN mkdir -p /usr/lib/ccache && \
-    ln -sf /usr/bin/ccache /usr/lib/ccache/gcc && \
-    ln -sf /usr/bin/ccache /usr/lib/ccache/g++ && \
-    ln -sf /usr/bin/ccache /usr/lib/ccache/cc && \
-    ln -sf /usr/bin/ccache /usr/lib/ccache/c++
-ENV PATH="/usr/lib/ccache:${PATH}"
-
 WORKDIR /src
-
-# Select builder base by BACKEND arg
-FROM builder-base-${BACKEND} AS builder-base
 
 # Build llama-swap from local source
 FROM golang:1.25-alpine AS llama-swap-builder
@@ -147,8 +123,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 python3 python3-pip curl ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder-base-cuda /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/stubs/libcuda.so
-COPY --from=builder-base-cuda /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/stubs/libcuda.so.1
+COPY --from=builder-base /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/stubs/libcuda.so
+COPY --from=builder-base /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/stubs/libcuda.so.1
 
 # Vulkan runtime
 FROM ubuntu:22.04 AS runtime-vulkan
