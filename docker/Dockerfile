@@ -26,7 +26,7 @@ ENV PATH="/usr/lib/ccache:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake git python3 python3-pip libssl-dev \
-    curl ca-certificates ccache make wget xz-utils \
+    curl ca-certificates ccache make wget xz-utils unzip \
     && rm -rf /var/lib/apt/lists/*
 
 ARG VULKAN_SDK_VERSION=1.3.275.0
@@ -97,21 +97,23 @@ RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
 
 FROM builder-base AS sd-build
 ARG BACKEND=cuda
+ARG SD_COMMIT_HASH=master
 COPY --from=sd-source /src/stable-diffusion.cpp /build/stable-diffusion.cpp
 COPY docker/install.sh /build/
 WORKDIR /build/stable-diffusion.cpp
 RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
     --mount=type=cache,id=sd-${BACKEND},target=/build/stable-diffusion.cpp/build \
-    bash /build/install.sh "$BACKEND" sd
+    RELEASE_TAG="${SD_COMMIT_HASH}" bash /build/install.sh "$BACKEND" sd
 
 FROM builder-base AS llama-build
 ARG BACKEND=cuda
+ARG LLAMA_COMMIT_HASH=master
 COPY --from=llama-source /src/llama.cpp /build/llama.cpp
 COPY docker/install.sh /build/
 WORKDIR /build/llama.cpp
 RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
     --mount=type=cache,id=llama-${BACKEND},target=/build/llama.cpp/build \
-    bash /build/install.sh "$BACKEND" llama
+    RELEASE_TAG="${LLAMA_COMMIT_HASH}" bash /build/install.sh "$BACKEND" llama
 
 # CUDA runtime
 FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04 AS runtime-cuda

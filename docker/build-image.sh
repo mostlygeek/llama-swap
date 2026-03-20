@@ -6,9 +6,10 @@
 #   ./build-image.sh --cuda                    # Build CUDA image
 #   ./build-image.sh --vulkan                  # Build Vulkan image
 #   ./build-image.sh --cuda --no-cache         # Build CUDA image without cache
-#   LLAMA_COMMIT_HASH=abc123 ./build-image.sh --cuda   # Override llama.cpp commit
-#   WHISPER_COMMIT_HASH=def456 ./build-image.sh --vulkan # Override whisper.cpp commit
-#   SD_COMMIT_HASH=ghi789 ./build-image.sh --cuda      # Override stable-diffusion.cpp commit
+#   LLAMA_COMMIT_HASH=abc123 ./build-image.sh --cuda      # Override llama.cpp commit
+#   LLAMA_COMMIT_HASH=b8429 ./build-image.sh --vulkan    # Override llama.cpp release tag (vulkan uses prebuilt binaries)
+#   WHISPER_COMMIT_HASH=def456 ./build-image.sh --vulkan  # Override whisper.cpp commit
+#   SD_COMMIT_HASH=ghi789 ./build-image.sh --cuda        # Override stable-diffusion.cpp commit
 #
 # Features:
 #   - Auto-detects latest commit hashes from git repos
@@ -126,15 +127,31 @@ get_default_branch() {
     fi
 }
 
+# Function to get the latest release tag from a GitHub repo
+get_latest_release_tag() {
+    local owner_repo="$1"
+    curl -fsSL "https://api.github.com/repos/${owner_repo}/releases/latest" \
+        | grep '"tag_name"' | head -1 | cut -d'"' -f4
+}
+
 echo "=========================================="
 echo "llama-swap-docker Build Script"
 echo "=========================================="
 echo ""
 
-# Determine commit hashes - use env vars or auto-detect
+# Determine commit hashes / release tags - use env vars or auto-detect
+# For vulkan builds, llama and sd use GitHub release tags (prebuilt binaries).
+# For cuda builds (or whisper on any backend), use git commit hashes.
 if [[ -n "${LLAMA_COMMIT_HASH:-}" ]]; then
     LLAMA_HASH="${LLAMA_COMMIT_HASH}"
-    echo "llama.cpp: Using provided commit hash: ${LLAMA_HASH}"
+    echo "llama.cpp: Using provided version: ${LLAMA_HASH}"
+elif [[ "$BACKEND" == "vulkan" ]]; then
+    LLAMA_HASH=$(get_latest_release_tag "ggml-org/llama.cpp")
+    if [[ -z "${LLAMA_HASH}" ]]; then
+        echo "ERROR: Could not determine latest release tag for llama.cpp" >&2
+        exit 1
+    fi
+    echo "llama.cpp: Auto-detected latest release tag: ${LLAMA_HASH}"
 else
     LLAMA_BRANCH=$(get_default_branch "${LLAMA_REPO}")
     LLAMA_HASH=$(get_latest_commit "${LLAMA_REPO}" "${LLAMA_BRANCH}")
@@ -160,7 +177,14 @@ fi
 
 if [[ -n "${SD_COMMIT_HASH:-}" ]]; then
     SD_HASH="${SD_COMMIT_HASH}"
-    echo "stable-diffusion.cpp: Using provided commit hash: ${SD_HASH}"
+    echo "stable-diffusion.cpp: Using provided version: ${SD_HASH}"
+elif [[ "$BACKEND" == "vulkan" ]]; then
+    SD_HASH=$(get_latest_release_tag "leejet/stable-diffusion.cpp")
+    if [[ -z "${SD_HASH}" ]]; then
+        echo "ERROR: Could not determine latest release tag for stable-diffusion.cpp" >&2
+        exit 1
+    fi
+    echo "stable-diffusion.cpp: Auto-detected latest release tag: ${SD_HASH}"
 else
     SD_BRANCH=$(get_default_branch "${SD_REPO}")
     SD_HASH=$(get_latest_commit "${SD_REPO}" "${SD_BRANCH}")
