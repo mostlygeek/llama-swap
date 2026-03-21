@@ -668,6 +668,8 @@ func (p *Process) Logger() *LogMonitor {
 	return p.processLogger
 }
 
+var hookCommandTimeout = 30 * time.Second
+
 // runHookCommand executes a hook command, logging its output through the
 // process logger. The command inherits the environment of the upstream process.
 func (p *Process) runHookCommand(hookCmd string) error {
@@ -676,7 +678,10 @@ func (p *Process) runHookCommand(hookCmd string) error {
 		return fmt.Errorf("failed to sanitize hook command %q: %v", hookCmd, err)
 	}
 
-	cmd := exec.Command(args[0], args[1:]...)
+	ctx, cancel := context.WithTimeout(context.Background(), hookCommandTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.Stdout = p.processLogger
 	cmd.Stderr = p.processLogger
 	if p.cmd != nil {
@@ -684,7 +689,15 @@ func (p *Process) runHookCommand(hookCmd string) error {
 	}
 	setProcAttributes(cmd)
 
-	return cmd.Run()
+	err = cmd.Run()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("hook command timed out after %v: %w", hookCommandTimeout, err)
+		}
+		return fmt.Errorf("hook command failed: %w", err)
+	}
+
+	return nil
 }
 
 var loadingRemarks = []string{
