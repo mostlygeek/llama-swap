@@ -79,20 +79,28 @@ resolve_ref() {
         fi
     fi
 
-    # Try GitHub API to resolve short commit hash to full SHA
-    if [[ "${repo_url}" =~ github\.com[:/]([^/]+)/([^/.]+)(\.git)?$ ]]; then
+    # Try GitHub API to resolve short commit hash to full SHA (requires 7+ hex chars)
+    if [[ "${ref}" =~ ^[0-9a-f]{7,}$ ]] && \
+       [[ "${repo_url}" =~ github\.com[:/]([^/]+)/([^/.]+)(\.git)?$ ]]; then
         local owner="${BASH_REMATCH[1]}"
         local repo="${BASH_REMATCH[2]}"
         hash=$(curl -sf "https://api.github.com/repos/${owner}/${repo}/commits/${ref}" \
-            | grep -m1 '"sha"' | head -1 | grep -o '"[0-9a-f]\{40\}"' | tr -d '"')
+            | grep '"sha"' | head -1 | grep -o '[0-9a-f]\{40\}')
         if [[ -n "${hash}" ]]; then
             echo "${hash}"
             return
         fi
     fi
 
-    # Could not resolve — pass through and let git fetch try
-    echo "${ref}"
+    # Could not resolve — fail loudly rather than passing an unresolvable ref to Docker
+    echo "ERROR: Could not resolve ref '${ref}' for ${repo_url}" >&2
+    if [[ "${ref}" =~ ^[0-9a-f]+$ && ${#ref} -lt 7 ]]; then
+        echo "  Short hashes must be at least 7 characters (got ${#ref})." >&2
+    else
+        echo "  Tried: tag, branch, git ls-remote prefix match, GitHub API" >&2
+    fi
+    echo "  Use a full 40-char SHA, a tag name, a branch name, or a 7+ char short hash." >&2
+    return 1
 }
 
 get_default_branch() {
@@ -113,7 +121,7 @@ echo ""
 
 # Resolve llama.cpp ref
 if [[ -n "${LLAMA_REF:-}" ]]; then
-    LLAMA_HASH=$(resolve_ref "${LLAMA_REPO}" "${LLAMA_REF}")
+    LLAMA_HASH=$(resolve_ref "${LLAMA_REPO}" "${LLAMA_REF}") || exit 1
     echo "llama.cpp: ${LLAMA_REF} -> ${LLAMA_HASH}"
 else
     LLAMA_BRANCH=$(get_default_branch "${LLAMA_REPO}")
@@ -127,7 +135,7 @@ fi
 
 # Resolve whisper.cpp ref
 if [[ -n "${WHISPER_REF:-}" ]]; then
-    WHISPER_HASH=$(resolve_ref "${WHISPER_REPO}" "${WHISPER_REF}")
+    WHISPER_HASH=$(resolve_ref "${WHISPER_REPO}" "${WHISPER_REF}") || exit 1
     echo "whisper.cpp: ${WHISPER_REF} -> ${WHISPER_HASH}"
 else
     WHISPER_BRANCH=$(get_default_branch "${WHISPER_REPO}")
@@ -141,7 +149,7 @@ fi
 
 # Resolve stable-diffusion.cpp ref
 if [[ -n "${SD_REF:-}" ]]; then
-    SD_HASH=$(resolve_ref "${SD_REPO}" "${SD_REF}")
+    SD_HASH=$(resolve_ref "${SD_REPO}" "${SD_REF}") || exit 1
     echo "stable-diffusion.cpp: ${SD_REF} -> ${SD_HASH}"
 else
     SD_BRANCH=$(get_default_branch "${SD_REPO}")
