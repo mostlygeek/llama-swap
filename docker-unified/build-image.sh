@@ -131,29 +131,7 @@ if [[ "$NO_CACHE" == true ]]; then
     echo "Note: Building without cache"
 fi
 
-# Use docker buildx with max-parallelism=1 to prevent OOM during CUDA compilation
-BUILDER_NAME="llama-swap-unified-builder"
-
-if ! docker buildx inspect "$BUILDER_NAME" >/dev/null 2>&1; then
-    echo "Creating custom buildx builder with max-parallelism=1..."
-
-    cat > "${SCRIPT_DIR}/buildkitd.toml" << 'BUILDKIT_EOF'
-[worker.oci]
-  max-parallelism = 1
-BUILDKIT_EOF
-
-    docker buildx create --name "$BUILDER_NAME" \
-        --driver docker-container \
-        --buildkitd-config "${SCRIPT_DIR}/buildkitd.toml" \
-        --use
-else
-    docker buildx use "$BUILDER_NAME"
-fi
-
-echo "Building with sequential stages (one at a time), each using all CPU cores..."
-echo "Using builder: $BUILDER_NAME"
-
-docker buildx build --builder "$BUILDER_NAME" --load "${BUILD_ARGS[@]}" "${SCRIPT_DIR}"
+DOCKER_BUILDKIT=1 docker buildx build --load "${BUILD_ARGS[@]}" "${SCRIPT_DIR}"
 
 echo ""
 echo "=========================================="
