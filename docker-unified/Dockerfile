@@ -81,9 +81,7 @@ COPY --from=whisper-build /install/bin/whisper-server /usr/local/bin/
 COPY --from=whisper-build /install/bin/whisper-cli /usr/local/bin/
 COPY --from=whisper-build /install/lib/ /usr/local/lib/
 
-# Copy stable-diffusion.cpp binaries and libraries
-COPY --from=sd-build /install/bin/sd-server /usr/local/bin/
-COPY --from=sd-build /install/bin/sd-cli /usr/local/bin/
+# Copy stable-diffusion.cpp libraries
 COPY --from=sd-build /install/lib/ /usr/local/lib/
 
 # Copy llama.cpp binaries and libraries
@@ -99,12 +97,11 @@ RUN ldconfig
 
 # Convenience symlinks
 RUN ln -sf /usr/local/bin/llama-cli /usr/local/bin/llama && \
-    ln -sf /usr/local/bin/whisper-cli /usr/local/bin/whisper && \
-    ln -sf /usr/local/bin/sd-cli /usr/local/bin/stable-diffusion
+    ln -sf /usr/local/bin/whisper-cli /usr/local/bin/whisper
 
 # Validate all binaries exist
 RUN set -e && \
-    for bin in llama-server llama-cli whisper-server whisper-cli sd-server sd-cli llama-swap; do \
+    for bin in llama-server llama-cli whisper-server whisper-cli llama-swap; do \
         test -x /usr/local/bin/$bin || { echo "FATAL: $bin missing from /usr/local/bin"; exit 1; }; \
     done && \
     echo "All binaries validated successfully"

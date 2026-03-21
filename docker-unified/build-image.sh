@@ -70,7 +70,28 @@ resolve_ref() {
         return
     fi
 
-    # Could be a short commit hash — pass through and let git fetch resolve it
+    # Short hash: search all remote refs for a SHA matching this prefix
+    if [[ "${ref}" =~ ^[0-9a-f]+$ ]]; then
+        hash=$(git ls-remote "${repo_url}" 2>/dev/null | grep "^${ref}" | head -1 | cut -f1)
+        if [[ -n "${hash}" ]]; then
+            echo "${hash}"
+            return
+        fi
+    fi
+
+    # Try GitHub API to resolve short commit hash to full SHA
+    if [[ "${repo_url}" =~ github\.com[:/]([^/]+)/([^/.]+)(\.git)?$ ]]; then
+        local owner="${BASH_REMATCH[1]}"
+        local repo="${BASH_REMATCH[2]}"
+        hash=$(curl -sf "https://api.github.com/repos/${owner}/${repo}/commits/${ref}" \
+            | grep -m1 '"sha"' | head -1 | grep -o '"[0-9a-f]\{40\}"' | tr -d '"')
+        if [[ -n "${hash}" ]]; then
+            echo "${hash}"
+            return
+        fi
+    fi
+
+    # Could not resolve — pass through and let git fetch try
     echo "${ref}"
 }
 
@@ -167,7 +188,7 @@ echo "=========================================="
 echo ""
 
 MISSING_BINARIES=()
-for binary in llama-server llama-cli whisper-server whisper-cli sd-server sd-cli llama-swap; do
+for binary in llama-server llama-cli whisper-server whisper-cli llama-swap; do
     if ! docker run --rm "${DOCKER_IMAGE_TAG}" which "${binary}" >/dev/null 2>&1; then
         MISSING_BINARIES+=("${binary}")
     fi
@@ -184,7 +205,7 @@ if [[ ${#MISSING_BINARIES[@]} -gt 0 ]]; then
     exit 1
 fi
 
-echo "All expected binaries verified: llama-server, llama-cli, whisper-server, whisper-cli, sd-server, sd-cli, llama-swap"
+echo "All expected binaries verified: llama-server, llama-cli, whisper-server, whisper-cli, llama-swap"
 
 echo ""
 echo "=========================================="
