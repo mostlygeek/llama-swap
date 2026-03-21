@@ -1,13 +1,15 @@
 #!/bin/bash
 #
-# Build script for unified CUDA container with commit hash pinning
+# Build script for unified CUDA container with version pinning
 #
 # Usage:
 #   ./build-image.sh                               # Build with auto-detected versions
 #   ./build-image.sh --no-cache                    # Build without cache
-#   LLAMA_COMMIT_HASH=abc123 ./build-image.sh      # Override llama.cpp commit
-#   WHISPER_COMMIT_HASH=def456 ./build-image.sh    # Override whisper.cpp commit
-#   SD_COMMIT_HASH=ghi789 ./build-image.sh         # Override stable-diffusion.cpp commit
+#   LLAMA_REF=b1234 ./build-image.sh               # Pin llama.cpp to a commit hash
+#   LLAMA_REF=v1.2.3 ./build-image.sh              # Pin llama.cpp to a tag
+#   LLAMA_REF=my-branch ./build-image.sh           # Pin llama.cpp to a branch
+#   WHISPER_REF=v1.0.0 ./build-image.sh            # Pin whisper.cpp to a tag
+#   SD_REF=master ./build-image.sh                 # Pin stable-diffusion.cpp to a branch
 #   LS_VERSION=170 ./build-image.sh                # Override llama-swap version
 #
 
@@ -25,9 +27,9 @@ for arg in "$@"; do
             echo ""
             echo "Environment variables:"
             echo "  DOCKER_IMAGE_TAG     Set custom image tag (default: llama-swap:unified)"
-            echo "  LLAMA_COMMIT_HASH    Override llama.cpp commit hash"
-            echo "  WHISPER_COMMIT_HASH  Override whisper.cpp commit hash"
-            echo "  SD_COMMIT_HASH       Override stable-diffusion.cpp commit hash"
+            echo "  LLAMA_REF            Pin llama.cpp to a commit, tag, or branch"
+            echo "  WHISPER_REF          Pin whisper.cpp to a commit, tag, or branch"
+            echo "  SD_REF               Pin stable-diffusion.cpp to a commit, tag, or branch"
             echo "  LS_VERSION           Override llama-swap version (e.g., '170' or 'latest')"
             exit 0
             ;;
@@ -41,20 +43,45 @@ LLAMA_REPO="https://github.com/ggml-org/llama.cpp.git"
 WHISPER_REPO="https://github.com/ggml-org/whisper.cpp.git"
 SD_REPO="https://github.com/leejet/stable-diffusion.cpp.git"
 
-get_latest_commit() {
+# Resolve a git ref (commit hash, tag, or branch) to a commit hash.
+# If the ref looks like a full SHA (40 hex chars), use it directly.
+# Otherwise, query the remote for matching tags and branches.
+resolve_ref() {
     local repo_url="$1"
-    local branch="${2:-master}"
-    git ls-remote --heads "${repo_url}" "${branch}" 2>/dev/null | head -1 | cut -f1
+    local ref="$2"
+
+    # Full 40-char SHA — use as-is
+    if [[ "${ref}" =~ ^[0-9a-f]{40}$ ]]; then
+        echo "${ref}"
+        return
+    fi
+
+    # Try tags first (exact match), then branches
+    local hash
+    hash=$(git ls-remote "${repo_url}" "refs/tags/${ref}" 2>/dev/null | head -1 | cut -f1)
+    if [[ -n "${hash}" ]]; then
+        echo "${hash}"
+        return
+    fi
+
+    hash=$(git ls-remote "${repo_url}" "refs/heads/${ref}" 2>/dev/null | head -1 | cut -f1)
+    if [[ -n "${hash}" ]]; then
+        echo "${hash}"
+        return
+    fi
+
+    # Could be a short commit hash — pass through and let git fetch resolve it
+    echo "${ref}"
 }
 
 get_default_branch() {
     local repo_url="$1"
-    if git ls-remote --heads "${repo_url}" master &>/dev/null; then
+    local hash
+    hash=$(git ls-remote --heads "${repo_url}" master 2>/dev/null | head -1 | cut -f1)
+    if [[ -n "${hash}" ]]; then
         echo "master"
-    elif git ls-remote --heads "${repo_url}" main &>/dev/null; then
-        echo "main"
     else
-        echo "master"
+        echo "main"
     fi
 }
 
@@ -63,46 +90,46 @@ echo "llama-swap Unified CUDA Build"
 echo "=========================================="
 echo ""
 
-# Resolve llama.cpp commit
-if [[ -n "${LLAMA_COMMIT_HASH:-}" ]]; then
-    LLAMA_HASH="${LLAMA_COMMIT_HASH}"
-    echo "llama.cpp: Using provided commit: ${LLAMA_HASH}"
+# Resolve llama.cpp ref
+if [[ -n "${LLAMA_REF:-}" ]]; then
+    LLAMA_HASH=$(resolve_ref "${LLAMA_REPO}" "${LLAMA_REF}")
+    echo "llama.cpp: ${LLAMA_REF} -> ${LLAMA_HASH}"
 else
     LLAMA_BRANCH=$(get_default_branch "${LLAMA_REPO}")
-    LLAMA_HASH=$(get_latest_commit "${LLAMA_REPO}" "${LLAMA_BRANCH}")
+    LLAMA_HASH=$(resolve_ref "${LLAMA_REPO}" "${LLAMA_BRANCH}")
     if [[ -z "${LLAMA_HASH}" ]]; then
         echo "ERROR: Could not determine latest commit for llama.cpp" >&2
         exit 1
     fi
-    echo "llama.cpp: Auto-detected latest commit (${LLAMA_BRANCH}): ${LLAMA_HASH}"
+    echo "llama.cpp: latest (${LLAMA_BRANCH}): ${LLAMA_HASH}"
 fi
 
-# Resolve whisper.cpp commit
-if [[ -n "${WHISPER_COMMIT_HASH:-}" ]]; then
-    WHISPER_HASH="${WHISPER_COMMIT_HASH}"
-    echo "whisper.cpp: Using provided commit: ${WHISPER_HASH}"
+# Resolve whisper.cpp ref
+if [[ -n "${WHISPER_REF:-}" ]]; then
+    WHISPER_HASH=$(resolve_ref "${WHISPER_REPO}" "${WHISPER_REF}")
+    echo "whisper.cpp: ${WHISPER_REF} -> ${WHISPER_HASH}"
 else
     WHISPER_BRANCH=$(get_default_branch "${WHISPER_REPO}")
-    WHISPER_HASH=$(get_latest_commit "${WHISPER_REPO}" "${WHISPER_BRANCH}")
+    WHISPER_HASH=$(resolve_ref "${WHISPER_REPO}" "${WHISPER_BRANCH}")
     if [[ -z "${WHISPER_HASH}" ]]; then
         echo "ERROR: Could not determine latest commit for whisper.cpp" >&2
         exit 1
     fi
-    echo "whisper.cpp: Auto-detected latest commit (${WHISPER_BRANCH}): ${WHISPER_HASH}"
+    echo "whisper.cpp: latest (${WHISPER_BRANCH}): ${WHISPER_HASH}"
 fi
 
-# Resolve stable-diffusion.cpp commit
-if [[ -n "${SD_COMMIT_HASH:-}" ]]; then
-    SD_HASH="${SD_COMMIT_HASH}"
-    echo "stable-diffusion.cpp: Using provided commit: ${SD_HASH}"
+# Resolve stable-diffusion.cpp ref
+if [[ -n "${SD_REF:-}" ]]; then
+    SD_HASH=$(resolve_ref "${SD_REPO}" "${SD_REF}")
+    echo "stable-diffusion.cpp: ${SD_REF} -> ${SD_HASH}"
 else
     SD_BRANCH=$(get_default_branch "${SD_REPO}")
-    SD_HASH=$(get_latest_commit "${SD_REPO}" "${SD_BRANCH}")
+    SD_HASH=$(resolve_ref "${SD_REPO}" "${SD_BRANCH}")
     if [[ -z "${SD_HASH}" ]]; then
         echo "ERROR: Could not determine latest commit for stable-diffusion.cpp" >&2
         exit 1
     fi
-    echo "stable-diffusion.cpp: Auto-detected latest commit (${SD_BRANCH}): ${SD_HASH}"
+    echo "stable-diffusion.cpp: latest (${SD_BRANCH}): ${SD_HASH}"
 fi
 
 # Resolve llama-swap version
