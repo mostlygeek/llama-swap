@@ -155,6 +155,12 @@ BUILD_ARGS=(
 if [[ "$NO_CACHE" == true ]]; then
     BUILD_ARGS+=(--no-cache)
     echo "Note: Building without cache"
+elif [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+    BUILD_ARGS+=(
+        --cache-from "type=gha"
+        --cache-to "type=gha,mode=max"
+    )
+    echo "Note: Using GitHub Actions cache"
 fi
 
 DOCKER_BUILDKIT=1 docker buildx build --load "${BUILD_ARGS[@]}" "${SCRIPT_DIR}"
