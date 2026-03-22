@@ -43,9 +43,8 @@ LLAMA_REPO="https://github.com/ggml-org/llama.cpp.git"
 WHISPER_REPO="https://github.com/ggml-org/whisper.cpp.git"
 SD_REPO="https://github.com/leejet/stable-diffusion.cpp.git"
 
-# Resolve a git ref (commit hash, tag, or branch) to a commit hash.
-# If the ref looks like a full SHA (40 hex chars), use it directly.
-# Otherwise, query the remote for matching tags and branches.
+# Resolve a git ref (commit hash, tag, or branch) to a full commit hash.
+# Requires only: git, network access to the remote.
 resolve_ref() {
     local repo_url="$1"
     local ref="$2"
@@ -56,22 +55,16 @@ resolve_ref() {
         return
     fi
 
-    # Try tags first (exact match), then branches
+    # Try tag then branch (exact match)
     local hash
-    hash=$(git ls-remote "${repo_url}" "refs/tags/${ref}" 2>/dev/null | head -1 | cut -f1)
+    hash=$(git ls-remote "${repo_url}" "refs/tags/${ref}" "refs/heads/${ref}" 2>/dev/null | head -1 | cut -f1)
     if [[ -n "${hash}" ]]; then
         echo "${hash}"
         return
     fi
 
-    hash=$(git ls-remote "${repo_url}" "refs/heads/${ref}" 2>/dev/null | head -1 | cut -f1)
-    if [[ -n "${hash}" ]]; then
-        echo "${hash}"
-        return
-    fi
-
-    # Short hash: search all remote refs for a SHA matching this prefix
-    if [[ "${ref}" =~ ^[0-9a-f]+$ ]]; then
+    # Short hash (7+ chars): scan all refs for a SHA with this prefix
+    if [[ "${ref}" =~ ^[0-9a-f]{7,}$ ]]; then
         hash=$(git ls-remote "${repo_url}" 2>/dev/null | grep "^${ref}" | head -1 | cut -f1)
         if [[ -n "${hash}" ]]; then
             echo "${hash}"
@@ -79,39 +72,19 @@ resolve_ref() {
         fi
     fi
 
-    # Try GitHub API to resolve short commit hash to full SHA (requires 7+ hex chars)
-    if [[ "${ref}" =~ ^[0-9a-f]{7,}$ ]] && \
-       [[ "${repo_url}" =~ github\.com[:/]([^/]+)/([^/.]+)(\.git)?$ ]]; then
-        local owner="${BASH_REMATCH[1]}"
-        local repo="${BASH_REMATCH[2]}"
-        hash=$(curl -sf "https://api.github.com/repos/${owner}/${repo}/commits/${ref}" \
-            | grep '"sha"' | head -1 | grep -o '[0-9a-f]\{40\}')
-        if [[ -n "${hash}" ]]; then
-            echo "${hash}"
-            return
-        fi
-    fi
-
-    # Could not resolve — fail loudly rather than passing an unresolvable ref to Docker
     echo "ERROR: Could not resolve ref '${ref}' for ${repo_url}" >&2
     if [[ "${ref}" =~ ^[0-9a-f]+$ && ${#ref} -lt 7 ]]; then
         echo "  Short hashes must be at least 7 characters (got ${#ref})." >&2
     else
-        echo "  Tried: tag, branch, git ls-remote prefix match, GitHub API" >&2
+        echo "  Tried: tag, branch, git ls-remote prefix match" >&2
     fi
     echo "  Use a full 40-char SHA, a tag name, a branch name, or a 7+ char short hash." >&2
     return 1
 }
 
-get_default_branch() {
-    local repo_url="$1"
-    local hash
-    hash=$(git ls-remote --heads "${repo_url}" master 2>/dev/null | head -1 | cut -f1)
-    if [[ -n "${hash}" ]]; then
-        echo "master"
-    else
-        echo "main"
-    fi
+# Resolve HEAD of a repo without needing to know the default branch name.
+get_latest_hash() {
+    git ls-remote "${1}" HEAD 2>/dev/null | head -1 | cut -f1
 }
 
 echo "=========================================="
@@ -124,13 +97,12 @@ if [[ -n "${LLAMA_REF:-}" ]]; then
     LLAMA_HASH=$(resolve_ref "${LLAMA_REPO}" "${LLAMA_REF}") || exit 1
     echo "llama.cpp: ${LLAMA_REF} -> ${LLAMA_HASH}"
 else
-    LLAMA_BRANCH=$(get_default_branch "${LLAMA_REPO}")
-    LLAMA_HASH=$(resolve_ref "${LLAMA_REPO}" "${LLAMA_BRANCH}")
+    LLAMA_HASH=$(get_latest_hash "${LLAMA_REPO}")
     if [[ -z "${LLAMA_HASH}" ]]; then
         echo "ERROR: Could not determine latest commit for llama.cpp" >&2
         exit 1
     fi
-    echo "llama.cpp: latest (${LLAMA_BRANCH}): ${LLAMA_HASH}"
+    echo "llama.cpp: latest HEAD: ${LLAMA_HASH}"
 fi
 
 # Resolve whisper.cpp ref
@@ -138,13 +110,12 @@ if [[ -n "${WHISPER_REF:-}" ]]; then
     WHISPER_HASH=$(resolve_ref "${WHISPER_REPO}" "${WHISPER_REF}") || exit 1
     echo "whisper.cpp: ${WHISPER_REF} -> ${WHISPER_HASH}"
 else
-    WHISPER_BRANCH=$(get_default_branch "${WHISPER_REPO}")
-    WHISPER_HASH=$(resolve_ref "${WHISPER_REPO}" "${WHISPER_BRANCH}")
+    WHISPER_HASH=$(get_latest_hash "${WHISPER_REPO}")
     if [[ -z "${WHISPER_HASH}" ]]; then
         echo "ERROR: Could not determine latest commit for whisper.cpp" >&2
         exit 1
     fi
-    echo "whisper.cpp: latest (${WHISPER_BRANCH}): ${WHISPER_HASH}"
+    echo "whisper.cpp: latest HEAD: ${WHISPER_HASH}"
 fi
 
 # Resolve stable-diffusion.cpp ref
@@ -152,13 +123,12 @@ if [[ -n "${SD_REF:-}" ]]; then
     SD_HASH=$(resolve_ref "${SD_REPO}" "${SD_REF}") || exit 1
     echo "stable-diffusion.cpp: ${SD_REF} -> ${SD_HASH}"
 else
-    SD_BRANCH=$(get_default_branch "${SD_REPO}")
-    SD_HASH=$(resolve_ref "${SD_REPO}" "${SD_BRANCH}")
+    SD_HASH=$(get_latest_hash "${SD_REPO}")
     if [[ -z "${SD_HASH}" ]]; then
         echo "ERROR: Could not determine latest commit for stable-diffusion.cpp" >&2
         exit 1
     fi
-    echo "stable-diffusion.cpp: latest (${SD_BRANCH}): ${SD_HASH}"
+    echo "stable-diffusion.cpp: latest HEAD: ${SD_HASH}"
 fi
 
 # Resolve llama-swap version

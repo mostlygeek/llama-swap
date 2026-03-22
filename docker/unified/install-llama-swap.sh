@@ -5,6 +5,8 @@
 set -e
 
 VERSION="${1:-latest}"
+# Strip leading 'v' prefix so both "198" and "v198" work
+VERSION="${VERSION#v}"
 REPO="mostlygeek/llama-swap"
 
 mkdir -p /install/bin
