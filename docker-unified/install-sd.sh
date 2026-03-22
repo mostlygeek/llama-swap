@@ -1,11 +1,11 @@
 #!/bin/bash
-# Install stable-diffusion.cpp - clone and build the library with CUDA (no examples)
+# Install stable-diffusion.cpp - clone and build with CUDA, install binaries and library
 # Usage: ./install-sd.sh <commit_hash>
 set -e
 
 COMMIT_HASH="${1:-master}"
 
-mkdir -p /install/lib
+mkdir -p /install/bin /install/lib
 
 # Clone and checkout (init-based so cache-mounted /src/stable-diffusion.cpp/build dir doesn't break clone)
 echo "=== Cloning stable-diffusion.cpp at ${COMMIT_HASH} ==="
@@ -31,17 +31,26 @@ CMAKE_FLAGS=(
     "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda"
     -DCMAKE_C_COMPILER_LAUNCHER=ccache
     -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-    -DSD_BUILD_EXAMPLES=OFF
+    -DSD_BUILD_EXAMPLES=ON
     -DSD_CUDA=ON
 )
 
+TARGETS=(stable-diffusion sd-cli sd-server)
+
 rm -rf build/CMakeCache.txt build/CMakeFiles 2>/dev/null || true
 
-echo "=== Building stable-diffusion.cpp library for CUDA ==="
+echo "=== Building stable-diffusion.cpp for CUDA ==="
 cmake -B build "${CMAKE_FLAGS[@]}"
-cmake --build build --config Release -j"$(nproc)" --target stable-diffusion
+cmake --build build --config Release -j"$(nproc)" --target "${TARGETS[@]}"
 
+for bin in sd-cli sd-server; do
+    if [ ! -f "build/bin/$bin" ]; then
+        echo "FATAL: $bin not found in build/bin/" >&2
+        exit 1
+    fi
+    cp "build/bin/$bin" "/install/bin/"
+done
 find build -name "*.so*" -type f -exec cp {} /install/lib/ \;
 
 echo "=== stable-diffusion.cpp build complete ==="
-ls -la /install/lib/
+ls -la /install/bin/ /install/lib/

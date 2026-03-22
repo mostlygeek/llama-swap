@@ -196,7 +196,7 @@ echo "=========================================="
 echo ""
 
 MISSING_BINARIES=()
-for binary in llama-server llama-cli whisper-server whisper-cli llama-swap; do
+for binary in llama-server llama-cli whisper-server whisper-cli sd-server sd-cli llama-swap; do
     if ! docker run --rm "${DOCKER_IMAGE_TAG}" which "${binary}" >/dev/null 2>&1; then
         MISSING_BINARIES+=("${binary}")
     fi
@@ -213,7 +213,7 @@ if [[ ${#MISSING_BINARIES[@]} -gt 0 ]]; then
     exit 1
 fi
 
-echo "All expected binaries verified: llama-server, llama-cli, whisper-server, whisper-cli, llama-swap"
+echo "All expected binaries verified: llama-server, llama-cli, whisper-server, whisper-cli, sd-server, sd-cli, llama-swap"
 
 echo ""
 echo "=========================================="
