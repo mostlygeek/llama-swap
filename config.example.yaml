@@ -321,14 +321,14 @@ models:
     # - blocks the model from becoming ready until it completes
     # - a failure is logged as a warning but does not prevent the model from starting
     # - useful for loading saved prompt cache slots in llama.cpp
-    # afterHealthy: "curl -sf -X POST \"http://localhost:${PORT}/slots/0?action=restore&filename=my-model.cache\""
+    # afterHealthy: "curl -X POST 'http://localhost:${PORT}/slots/0?action=restore' -H 'Content-Type: application/json' -d '{\"filename\": \"slot0.bin\"}'"
 
     # beforeStop: a command to run right before the model process is killed
     # - optional, default: ""
     # - blocks the model shutdown until it completes (or fails)
     # - the model will be stopped regardless of whether this command succeeds
     # - useful for saving prompt cache slots in llama.cpp before unloading
-    # beforeStop: "curl -sf -X POST \"http://localhost:${PORT}/slots/0?action=save&filename=my-model.cache\""
+    # beforeStop: "curl -X POST 'http://localhost:${PORT}/slots/0?action=save' -H 'Content-Type: application/json' -d '{\"filename\": \"slot0.bin\"}'"
 
 # groups: a dictionary of group settings
 # - optional, default: empty dictionary
