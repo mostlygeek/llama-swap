@@ -156,11 +156,12 @@ if [[ "$NO_CACHE" == true ]]; then
     BUILD_ARGS+=(--no-cache)
     echo "Note: Building without cache"
 elif [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+    CACHE_REF="ghcr.io/mostlygeek/llama-swap:unified-cache"
     BUILD_ARGS+=(
-        --cache-from "type=gha"
-        --cache-to "type=gha,mode=max"
+        --cache-from "type=registry,ref=${CACHE_REF}"
+        --cache-to "type=registry,ref=${CACHE_REF},mode=max"
     )
-    echo "Note: Using GitHub Actions cache"
+    echo "Note: Using registry cache (${CACHE_REF})"
 fi
 
 DOCKER_BUILDKIT=1 docker buildx build --load "${BUILD_ARGS[@]}" "${SCRIPT_DIR}"
