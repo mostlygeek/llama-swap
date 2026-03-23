@@ -5,11 +5,26 @@
 set -e
 
 VERSION="${1:-latest}"
-# Strip leading 'v' prefix so both "198" and "v198" work
-VERSION="${VERSION#v}"
 REPO="mostlygeek/llama-swap"
 
 mkdir -p /install/bin
+
+# If a full commit hash is given, find the release tag that points to it
+if echo "${VERSION}" | grep -qE '^[0-9a-f]{40}$'; then
+    echo "=== Resolving commit ${VERSION:0:7} to release tag ==="
+    TAG=$(git ls-remote --tags "https://github.com/${REPO}.git" 2>/dev/null \
+        | grep "^${VERSION}" | sed 's|.*refs/tags/||' | grep -v '\^{}' | head -1)
+    if [ -n "${TAG}" ]; then
+        echo "Resolved to tag: ${TAG}"
+        VERSION="${TAG#v}"
+    else
+        echo "No release tag found for commit ${VERSION:0:7}, using latest"
+        VERSION="latest"
+    fi
+fi
+
+# Strip leading 'v' prefix so both "198" and "v198" work
+VERSION="${VERSION#v}"
 
 # Resolve "latest" to actual version number
 if [ "$VERSION" = "latest" ]; then

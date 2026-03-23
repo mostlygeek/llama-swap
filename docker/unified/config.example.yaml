@@ -1,0 +1,33 @@
+# placeholder example configuration
+healthCheckTimeout: 300
+logRequests: true
+
+models:
+  "llama":
+    cmd: >
+      llama-server
+      -hf bartowski/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M
+      --port ${PORT}
+
+  "whisper":
+    checkEndpoint: /v1/audio/transcriptions/
+    cmd: >
+      whisper-server
+      --port ${PORT}
+      --m /models/whisper.bin
+      --flash-attn
+      --request-path /v1/audio/transcriptions --inference-path ""
+
+  "image":
+    checkEndpoint: /
+    cmd: |
+      /app/sd-server
+      --listen-port 9999
+      --diffusion-fa
+      --diffusion-model /models/z_image_turbo-Q8_0.gguf
+      --vae /models/ae.safetensors
+      --llm /models/qwen3-4b-instruct-2507-q8_0.gguf
+      --offload-to-cpu
+      --cfg-scale 1.0
+      --height 512 --width 512
+      --steps 8
