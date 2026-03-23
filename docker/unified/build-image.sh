@@ -42,6 +42,7 @@ DOCKER_IMAGE_TAG="${DOCKER_IMAGE_TAG:-llama-swap:unified}"
 LLAMA_REPO="https://github.com/ggml-org/llama.cpp.git"
 WHISPER_REPO="https://github.com/ggml-org/whisper.cpp.git"
 SD_REPO="https://github.com/leejet/stable-diffusion.cpp.git"
+LLAMA_SWAP_REPO="https://github.com/mostlygeek/llama-swap.git"
 
 # Resolve a git ref (commit hash, tag, or branch) to a full commit hash.
 # Requires only: git, network access to the remote.
@@ -131,9 +132,18 @@ else
     echo "stable-diffusion.cpp: latest HEAD: ${SD_HASH}"
 fi
 
-# Resolve llama-swap version
-LS_VER="${LS_VERSION:-latest}"
-echo "llama-swap: ${LS_VER}"
+# Resolve llama-swap ref
+if [[ -n "${LS_VERSION:-}" ]]; then
+    LS_HASH=$(resolve_ref "${LLAMA_SWAP_REPO}" "${LS_VERSION}") || exit 1
+    echo "llama-swap: ${LS_VERSION} -> ${LS_HASH}"
+else
+    LS_HASH=$(get_latest_hash "${LLAMA_SWAP_REPO}")
+    if [[ -z "${LS_HASH}" ]]; then
+        echo "ERROR: Could not determine latest commit for llama-swap" >&2
+        exit 1
+    fi
+    echo "llama-swap: latest HEAD: ${LS_HASH}"
+fi
 
 echo ""
 echo "=========================================="
@@ -147,7 +157,7 @@ BUILD_ARGS=(
     --build-arg "LLAMA_COMMIT_HASH=${LLAMA_HASH}"
     --build-arg "WHISPER_COMMIT_HASH=${WHISPER_HASH}"
     --build-arg "SD_COMMIT_HASH=${SD_HASH}"
-    --build-arg "LS_VERSION=${LS_VER}"
+    --build-arg "LS_VERSION=${LS_HASH}"
     -t "${DOCKER_IMAGE_TAG}"
     -f "${SCRIPT_DIR}/Dockerfile"
 )
@@ -155,7 +165,7 @@ BUILD_ARGS=(
 if [[ "$NO_CACHE" == true ]]; then
     BUILD_ARGS+=(--no-cache)
     echo "Note: Building without cache"
-elif [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+elif [[ "${GITHUB_ACTIONS:-}" == "true" && "${ACT:-}" != "true" ]]; then
     CACHE_REF="ghcr.io/mostlygeek/llama-swap:unified-cache"
     BUILD_ARGS+=(
         --cache-from "type=registry,ref=${CACHE_REF}"

@@ -1,24 +1,27 @@
 name: Build Unified Docker Image
 
 on:
+  schedule:
+    - cron: "37 5 * * *"
+
   workflow_dispatch:
     inputs:
       llama_cpp_ref:
         description: "llama.cpp commit hash, tag, or branch"
         required: false
-        default: "b8468"
+        default: "master"
       whisper_ref:
         description: "whisper.cpp commit hash, tag, or branch"
         required: false
-        default: "v1.8.4"
+        default: "master"
       sd_ref:
         description: "stable-diffusion.cpp commit hash, tag, or branch"
         required: false
-        default: "545fac4"
+        default: "master"
       llama_swap_version:
-        description: "llama-swap version (e.g. v198, latest)"
+        description: "llama-swap version (e.g. v198, latest, main)"
         required: false
-        default: "v198"
+        default: "main"
 
 permissions:
   contents: read
@@ -60,10 +63,10 @@ jobs:
 
       - name: Build unified Docker image
         env:
-          LLAMA_REF: ${{ inputs.llama_cpp_ref }}
-          WHISPER_REF: ${{ inputs.whisper_ref }}
-          SD_REF: ${{ inputs.sd_ref }}
-          LS_VERSION: ${{ inputs.llama_swap_version }}
+          LLAMA_REF: ${{ inputs.llama_cpp_ref || 'master' }}
+          WHISPER_REF: ${{ inputs.whisper_ref || 'master' }}
+          SD_REF: ${{ inputs.sd_ref || 'master' }}
+          LS_VERSION: ${{ inputs.llama_swap_version || 'main' }}
           DOCKER_IMAGE_TAG: ghcr.io/mostlygeek/llama-swap:unified
           # When running under act, use the local builder that has warm ccache.
           # On GitHub Actions, BUILDX_BUILDER is unset so docker uses the builder
@@ -73,7 +76,9 @@ jobs:
           chmod +x docker/unified/build-image.sh
           docker/unified/build-image.sh
 
-      # Disabled until ready to publish
       - name: Push to GitHub Container Registry
-        if: false
-        run: docker push ghcr.io/mostlygeek/llama-swap:unified
+        if: ${{ !env.ACT }}
+        run: |
+          docker push ghcr.io/mostlygeek/llama-swap:unified
+          docker tag ghcr.io/mostlygeek/llama-swap:unified ghcr.io/mostlygeek/llama-swap:unified-$(date -u +%Y-%m-%d)
+          docker push ghcr.io/mostlygeek/llama-swap:unified-$(date -u +%Y-%m-%d)
