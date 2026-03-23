@@ -174,7 +174,7 @@ echo ""
 
 MISSING_BINARIES=()
 for binary in llama-server llama-cli whisper-server whisper-cli sd-server sd-cli llama-swap; do
-    if ! docker run --rm "${DOCKER_IMAGE_TAG}" which "${binary}" >/dev/null 2>&1; then
+    if ! docker run --rm --entrypoint which "${DOCKER_IMAGE_TAG}" "${binary}" >/dev/null 2>&1; then
         MISSING_BINARIES+=("${binary}")
     fi
 done
@@ -203,7 +203,7 @@ echo "Built with:"
 echo "  llama.cpp:           ${LLAMA_HASH}"
 echo "  whisper.cpp:         ${WHISPER_HASH}"
 echo "  stable-diffusion.cpp: ${SD_HASH}"
-echo "  llama-swap:          $(docker run --rm "${DOCKER_IMAGE_TAG}" cat /versions.txt | grep llama-swap | cut -d' ' -f2-)"
+echo "  llama-swap:          $(docker run --rm --entrypoint cat "${DOCKER_IMAGE_TAG}" /versions.txt | grep llama-swap | cut -d' ' -f2-)"
 echo ""
 echo "Run with:"
 echo "  docker run -it --rm --gpus all ${DOCKER_IMAGE_TAG}"

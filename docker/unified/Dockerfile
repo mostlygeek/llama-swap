@@ -74,6 +74,11 @@ COPY --from=builder-base /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/
 
 RUN pip3 install --no-cache-dir numpy sentencepiece
 
+# Create llama-swap user and config directory
+RUN useradd --system --no-create-home --shell /sbin/nologin llama-swap && \
+    mkdir -p /etc/llama-swap/config && \
+    chown -R llama-swap:llama-swap /etc/llama-swap
+
 WORKDIR /app
 
 # Copy whisper.cpp binaries and libraries
@@ -97,17 +102,7 @@ COPY --from=llama-swap-download /install/llama-swap-version /tmp/
 
 RUN ldconfig
 
-# Convenience symlinks
-RUN ln -sf /usr/local/bin/llama-cli /usr/local/bin/llama && \
-    ln -sf /usr/local/bin/whisper-cli /usr/local/bin/whisper && \
-    ln -sf /usr/local/bin/sd-cli /usr/local/bin/stable-diffusion
-
-# Validate all binaries exist
-RUN set -e && \
-    for bin in llama-server llama-cli whisper-server whisper-cli sd-server sd-cli llama-swap; do \
-        test -x /usr/local/bin/$bin || { echo "FATAL: $bin missing from /usr/local/bin"; exit 1; }; \
-    done && \
-    echo "All binaries validated successfully"
+COPY config.example.yaml /etc/llama-swap/config/config.yaml
 
 # Version tracking
 RUN echo "llama.cpp: ${LLAMA_COMMIT_HASH}" > /versions.txt && \
@@ -118,4 +113,6 @@ RUN echo "llama.cpp: ${LLAMA_COMMIT_HASH}" > /versions.txt && \
     echo "build_timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> /versions.txt
 
 WORKDIR /models
-CMD ["bash"]
+USER llama-swap
+ENTRYPOINT ["llama-swap"]
+CMD ["-config", "/etc/llama-swap/config/config.yaml", "-listen", "0.0.0.0:8080"]
