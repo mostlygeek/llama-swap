@@ -1,9 +1,10 @@
 #!/bin/bash
-# Install whisper.cpp - clone, build with CUDA, and install binaries
-# Usage: ./install-whisper.sh <commit_hash>
+# Install whisper.cpp - clone, build, and install binaries
+# Usage: BACKEND=cuda|vulkan ./install-whisper.sh <commit_hash>
 set -e
 
 COMMIT_HASH="${1:-master}"
+BACKEND="${BACKEND:-cuda}"
 
 mkdir -p /install/bin /install/lib
 
@@ -18,25 +19,35 @@ fi
 git fetch --depth=1 origin "${COMMIT_HASH}"
 git checkout FETCH_HEAD
 
-# CUDA cmake flags
+# Common cmake flags
 CMAKE_FLAGS=(
     -DGGML_NATIVE=OFF
     -DCMAKE_BUILD_TYPE=Release
-    -DGGML_CUDA=ON
-    -DGGML_VULKAN=OFF
-    "-DCMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES:-60;61;75;86;89}"
-    "-DCMAKE_CUDA_FLAGS=-allow-unsupported-compiler"
-    "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda"
-    "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda"
     -DCMAKE_C_COMPILER_LAUNCHER=ccache
     -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 )
+
+if [ "$BACKEND" = "cuda" ]; then
+    CMAKE_FLAGS+=(
+        -DGGML_CUDA=ON
+        -DGGML_VULKAN=OFF
+        "-DCMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES:-60;61;75;86;89}"
+        "-DCMAKE_CUDA_FLAGS=-allow-unsupported-compiler"
+        "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda"
+        "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda"
+    )
+elif [ "$BACKEND" = "vulkan" ]; then
+    CMAKE_FLAGS+=(
+        -DGGML_CUDA=OFF
+        -DGGML_VULKAN=ON
+    )
+fi
 
 TARGETS=(whisper-cli whisper-server)
 
 rm -rf build/CMakeCache.txt build/CMakeFiles 2>/dev/null || true
 
-echo "=== Building whisper.cpp for CUDA ==="
+echo "=== Building whisper.cpp for ${BACKEND} ==="
 cmake -B build "${CMAKE_FLAGS[@]}"
 cmake --build build --config Release -j"$(nproc)" --target "${TARGETS[@]}"
 
