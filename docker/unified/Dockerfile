@@ -29,7 +29,7 @@ WORKDIR /build
 
 # ──
 
-FROM ubuntu:22.04 AS builder-base-vulkan
+FROM ubuntu:26.04 AS builder-base-vulkan
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV CCACHE_DIR=/ccache
@@ -39,12 +39,7 @@ ENV PATH="/usr/lib/ccache:${PATH}"
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake git python3 python3-pip libssl-dev \
     curl ca-certificates ccache make wget software-properties-common \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install LunarG Vulkan SDK (Ubuntu 22.04 repo headers are too old)
-RUN wget -qO /etc/apt/trusted.gpg.d/lunarg.asc https://packages.lunarg.com/lunarg-signing-key-pub.asc \
-    && echo "deb https://packages.lunarg.com/vulkan jammy main" > /etc/apt/sources.list.d/lunarg-vulkan.list \
-    && apt-get update && apt-get install -y --no-install-recommends vulkan-sdk \
+    libvulkan-dev glslang-tools spirv-tools vulkan-validationlayers glslc \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
@@ -108,7 +103,7 @@ COPY --from=builder-base-cuda /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/
 
 # ──
 
-FROM ubuntu:22.04 AS runtime-vulkan
+FROM ubuntu:26.04 AS runtime-vulkan
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH="/usr/local/bin:${PATH}"
@@ -127,7 +122,7 @@ ARG LLAMA_COMMIT_HASH=unknown
 ARG WHISPER_COMMIT_HASH=unknown
 ARG SD_COMMIT_HASH=unknown
 
-RUN pip3 install --no-cache-dir numpy sentencepiece
+RUN pip3 install --no-cache-dir --break-system-packages numpy sentencepiece
 
 # Create llama-swap user and config directory
 RUN useradd --system --no-create-home --shell /sbin/nologin llama-swap && \
