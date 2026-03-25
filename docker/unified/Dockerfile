@@ -125,7 +125,7 @@ ARG SD_COMMIT_HASH=unknown
 RUN pip3 install --no-cache-dir --break-system-packages numpy sentencepiece
 
 # Create llama-swap user and config directory
-RUN useradd --system --no-create-home --shell /sbin/nologin llama-swap && \
+RUN useradd --system --create-home --shell /sbin/nologin llama-swap && \
     mkdir -p /etc/llama-swap/config && \
     chown -R llama-swap:llama-swap /etc/llama-swap
 
