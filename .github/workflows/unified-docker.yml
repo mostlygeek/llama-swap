@@ -22,6 +22,16 @@ on:
         description: "llama-swap version (e.g. v198, latest, main)"
         required: false
         default: "main"
+      build_cuda:
+        description: "Build CUDA image"
+        type: boolean
+        required: false
+        default: true
+      build_vulkan:
+        description: "Build Vulkan image"
+        type: boolean
+        required: false
+        default: true
 
 permissions:
   contents: read
@@ -33,7 +43,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [cuda, vulkan]
+        backend:
+          - cuda
+          - vulkan
+        exclude:
+          - backend: ${{ inputs.build_cuda == false && 'cuda' || 'none' }}
+          - backend: ${{ inputs.build_vulkan == false && 'vulkan' || 'none' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
