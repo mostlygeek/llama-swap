@@ -6,6 +6,8 @@
 
   let isUnloading = $state(false);
   let menuOpen = $state(false);
+  let loadingGroups = $state<Record<string, boolean>>({});
+  let unloadingGroups = $state<Record<string, boolean>>({});
 
   const showUnlistedStore = persistentStore<boolean>("showUnlisted", true);
   const showIdorNameStore = persistentStore<"id" | "name">("showIdorName", "id");
@@ -31,6 +33,22 @@
     };
   });
 
+  // Group local models by their group field
+  let modelsByGroup = $derived.by(() => {
+    const localModels = filteredModels.regularModels;
+    const groups: Record<string, Model[]> = {};
+    for (const model of localModels) {
+      const groupId = model.group || "(default)";
+      if (!groups[groupId]) groups[groupId] = [];
+      groups[groupId].push(model);
+    }
+    return groups;
+  });
+
+  // Only show groups section when there are multiple groups (not just default)
+  let hasMultipleGroups = $derived(Object.keys(modelsByGroup).length > 1 ||
+    (Object.keys(modelsByGroup).length === 1 && !modelsByGroup["(default)"]));
+
   async function handleUnloadAllModels(): Promise<void> {
     isUnloading = true;
     try {
@@ -39,6 +57,36 @@
       console.error(e);
     } finally {
       setTimeout(() => (isUnloading = false), 1000);
+    }
+  }
+
+  async function handleLoadGroup(groupId: string): Promise<void> {
+    loadingGroups[groupId] = true;
+    try {
+      const groupModels = modelsByGroup[groupId] || [];
+      const stoppedModels = groupModels.filter((m) => m.state === "stopped");
+      for (const model of stoppedModels) {
+        await loadModel(model.id);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setTimeout(() => { loadingGroups[groupId] = false; }, 1000);
+    }
+  }
+
+  async function handleUnloadGroup(groupId: string): Promise<void> {
+    unloadingGroups[groupId] = true;
+    try {
+      const groupModels = modelsByGroup[groupId] || [];
+      const loadedModels = groupModels.filter((m) => m.state === "ready");
+      for (const model of loadedModels) {
+        await unloadSingleModel(model.id);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setTimeout(() => { unloadingGroups[groupId] = false; }, 1000);
     }
   }
 
@@ -183,6 +231,49 @@
         {/each}
       </tbody>
     </table>
+
+    {#if hasMultipleGroups}
+      <h3 class="mt-8 mb-2">Groups</h3>
+      {#each Object.entries(modelsByGroup).sort(([a], [b]) => a.localeCompare(b)) as [groupId, groupModels] (groupId)}
+        <div class="mb-4">
+          <div class="flex items-center justify-between border-b border-gray-200 dark:border-white/10 bg-surface px-1 py-1">
+            <span class="font-semibold">{groupId}</span>
+            <div class="flex gap-1">
+              <button
+                class="btn btn--sm"
+                onclick={() => handleLoadGroup(groupId)}
+                disabled={loadingGroups[groupId] || groupModels.every((m) => m.state !== "stopped")}
+              >
+                {loadingGroups[groupId] ? "Loading..." : "Load All"}
+              </button>
+              <button
+                class="btn btn--sm"
+                onclick={() => handleUnloadGroup(groupId)}
+                disabled={unloadingGroups[groupId] || groupModels.every((m) => m.state === "stopped")}
+              >
+                {unloadingGroups[groupId] ? "Unloading..." : "Unload All"}
+              </button>
+            </div>
+          </div>
+          <table class="w-full">
+            <tbody>
+              {#each groupModels as model (model.id)}
+                <tr class="border-b hover:bg-secondary-hover border-gray-200">
+                  <td class="pl-4 {model.unlisted ? 'text-txtsecondary' : ''}">
+                    <a href="/upstream/{model.id}/" class="font-semibold" target="_blank">
+                      {getModelDisplay(model)}
+                    </a>
+                  </td>
+                  <td class="w-20">
+                    <span class="w-16 text-center status status--{model.state}">{model.state}</span>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/each}
+    {/if}
 
     {#if Object.keys(filteredModels.peerModelsByPeerId).length > 0}
       <h3 class="mt-8 mb-2">Peer Models</h3>

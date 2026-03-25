@@ -21,6 +21,7 @@ type Model struct {
 	Unlisted    bool     `json:"unlisted"`
 	PeerID      string   `json:"peerID"`
 	Aliases     []string `json:"aliases,omitempty"`
+	Group       string   `json:"group"`
 }
 
 func addApiHandlers(pm *ProxyManager) {
@@ -57,7 +58,9 @@ func (pm *ProxyManager) getModelStatus() []Model {
 		// Get process state
 		processGroup := pm.findGroupByModelName(modelID)
 		state := "unknown"
+		groupID := ""
 		if processGroup != nil {
+			groupID = processGroup.id
 			process := processGroup.processes[modelID]
 			if process != nil {
 				var stateStr string
@@ -85,6 +88,7 @@ func (pm *ProxyManager) getModelStatus() []Model {
 			State:       state,
 			Unlisted:    pm.config.Models[modelID].Unlisted,
 			Aliases:     pm.config.Models[modelID].Aliases,
+			Group:       groupID,
 		})
 	}
 
