@@ -43,6 +43,7 @@ elif [ "$BACKEND" = "vulkan" ]; then
     CMAKE_FLAGS+=(
         -DGGML_CUDA=OFF
         -DGGML_VULKAN=ON
+        -DSD_VULKAN=ON
     )
 fi
 
