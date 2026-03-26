@@ -40,6 +40,9 @@ type ModelConfig struct {
 
 	// override global setting
 	SendLoadingState *bool `yaml:"sendLoadingState"`
+
+	// override global setting
+	ProcessingKeepalive *bool `yaml:"processingKeepalive"`
 }
 
 func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {

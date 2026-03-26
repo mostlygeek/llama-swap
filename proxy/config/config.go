@@ -144,6 +144,9 @@ type Config struct {
 	// send loading state in reasoning
 	SendLoadingState bool `yaml:"sendLoadingState"`
 
+	// send SSE keepalive comments during processing to prevent proxy timeouts (e.g., Cloudflare)
+	ProcessingKeepalive bool `yaml:"processingKeepalive"`
+
 	// present aliases to /v1/models OpenAI API listing
 	IncludeAliasesInList bool `yaml:"includeAliasesInList"`
 
@@ -433,6 +436,11 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		if modelConfig.SendLoadingState == nil {
 			v := config.SendLoadingState
 			modelConfig.SendLoadingState = &v
+		}
+
+		if modelConfig.ProcessingKeepalive == nil {
+			v := config.ProcessingKeepalive
+			modelConfig.ProcessingKeepalive = &v
 		}
 
 		config.Models[modelId] = modelConfig

@@ -502,14 +502,13 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 
 	// for #366
 	// - extract streaming param from request context, should have been set by proxymanager
+	isStreaming, _ := r.Context().Value(proxyCtxKey("streaming")).(bool)
 	var srw *statusResponseWriter
 	swapCtx, cancelLoadCtx := context.WithCancel(r.Context())
 	// start the process on demand
 	if p.CurrentState() != StateReady {
 		// start a goroutine to stream loading status messages into the response writer
 		// add a sync so the streaming client only runs when the goroutine has exited
-
-		isStreaming, _ := r.Context().Value(proxyCtxKey("streaming")).(bool)
 
 		// PR #417 (no support for anthropic v1/messages yet)
 		isChatCompletions := strings.HasPrefix(r.URL.Path, "/v1/chat/completions")
@@ -559,10 +558,53 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		if !srw.waitForCompletion(completionTimeout) {
 			p.proxyLogger.Warnf("<%s> status updates goroutine did not complete within %v, proceeding with proxy request", p.ID, completionTimeout)
 		}
-		p.reverseProxy.ServeHTTP(srw, r)
-	} else {
-		p.reverseProxy.ServeHTTP(w, r)
 	}
+
+	// Periodically send SSE keepalive comments while waiting for the upstream to respond,
+	// to prevent intermediate proxies (e.g., Cloudflare) from closing the connection.
+	// ": keepalive\n\n" is a valid SSE comment and is ignored by all clients.
+	proxyTarget := http.ResponseWriter(w)
+	if srw != nil {
+		proxyTarget = srw
+	}
+	if isStreaming && p.config.ProcessingKeepalive != nil && *p.config.ProcessingKeepalive {
+		// Set SSE headers so keepalive comments are framed correctly. If srw already
+		// committed headers, these are no-ops. Do NOT call WriteHeader here — let the
+		// upstream response set the status code.
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+
+		keepaliveCtx, cancelKeepalive := context.WithCancel(context.Background())
+		defer cancelKeepalive()
+
+		// cow cancels the keepalive goroutine on the first upstream write and
+		// serializes all writes via its mutex.
+		cow := &cancelOnWriteWriter{ResponseWriter: w, cancel: cancelKeepalive}
+		proxyTarget = cow
+
+		go func() {
+			ticker := time.NewTicker(15 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-keepaliveCtx.Done():
+					return
+				case <-r.Context().Done():
+					return
+				case <-ticker.C:
+					cow.mu.Lock()
+					fmt.Fprint(w, ": keepalive\n\n")
+					if f, ok := w.(http.Flusher); ok {
+						f.Flush()
+					}
+					cow.mu.Unlock()
+				}
+			}
+		}()
+	}
+
+	p.reverseProxy.ServeHTTP(proxyTarget, r)
 
 	totalTime := time.Since(requestBeginTime)
 	p.proxyLogger.Debugf("<%s> request %s - start: %v, total: %v",
@@ -875,5 +917,35 @@ func (s *statusResponseWriter) WriteHeader(statusCode int) {
 func (s *statusResponseWriter) Flush() {
 	if flusher, ok := s.writer.(http.Flusher); ok {
 		flusher.Flush()
+	}
+}
+
+// cancelOnWriteWriter wraps a ResponseWriter and cancels a keepalive goroutine
+// on the first upstream write. All writes are serialized via mu, which must
+// also be held by the keepalive goroutine when it writes.
+type cancelOnWriteWriter struct {
+	http.ResponseWriter
+	mu         sync.Mutex
+	cancel     func()
+	cancelOnce sync.Once
+}
+
+func (c *cancelOnWriteWriter) Write(b []byte) (int, error) {
+	c.cancelOnce.Do(c.cancel)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.ResponseWriter.Write(b)
+}
+
+func (c *cancelOnWriteWriter) WriteHeader(code int) {
+	c.cancelOnce.Do(c.cancel)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.ResponseWriter.WriteHeader(code)
+}
+
+func (c *cancelOnWriteWriter) Flush() {
+	if f, ok := c.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
 	}
 }
