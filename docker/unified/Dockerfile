@@ -94,7 +94,7 @@ ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
 ENV PATH="/usr/local/bin:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgomp1 python3 python3-pip curl ca-certificates git \
+    libgomp1 python3 curl ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
 
 # CUDA stub drivers for container compatibility
@@ -110,7 +110,7 @@ ENV PATH="/usr/local/bin:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 libvulkan1 mesa-vulkan-drivers \
-    python3 python3-pip curl ca-certificates git \
+    python3 curl ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Select runtime base by BACKEND ────────────────────────────────────
@@ -122,7 +122,9 @@ ARG LLAMA_COMMIT_HASH=unknown
 ARG WHISPER_COMMIT_HASH=unknown
 ARG SD_COMMIT_HASH=unknown
 
-RUN pip3 install --no-cache-dir --break-system-packages numpy sentencepiece
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-numpy python3-sentencepiece \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create llama-swap user and config directory
 RUN useradd --system --create-home --shell /sbin/nologin llama-swap && \
