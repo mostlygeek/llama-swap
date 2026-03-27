@@ -25,12 +25,13 @@ import (
 var loadingPageHTML string
 
 var (
-	flagMac      = flag.String("mac", "", "mac address to send WoL packet to")
-	flagUpstream = flag.String("upstream", "", "upstream proxy address to send requests to")
-	flagListen   = flag.String("listen", ":8080", "listen address to listen on")
-	flagLog      = flag.String("log", "info", "log level (debug, info, warn, error)")
-	flagTimeout  = flag.Int("timeout", 60, "seconds requests wait for upstream response before failing")
-	flagSourceIP = flag.String("source-ip", "", "source IPv4 address for WoL packets (binds to specific interface)")
+	flagMac            = flag.String("mac", "", "mac address to send WoL packet to")
+	flagUpstream       = flag.String("upstream", "", "upstream proxy address to send requests to")
+	flagListen         = flag.String("listen", ":8080", "listen address to listen on")
+	flagLog            = flag.String("log", "info", "log level (debug, info, warn, error)")
+	flagTimeout        = flag.Int("timeout", 60, "seconds requests wait for upstream response before failing")
+	flagUpstreamAPIKey = flag.String("upstream-api-key", "", "optional API key injected into proxied upstream requests")
+	flagSourceIP       = flag.String("source-ip", "", "source IPv4 address for WoL packets (binds to specific interface)")
 )
 
 func main() {
@@ -91,6 +92,24 @@ func main() {
 		}
 	}
 
+	maskedKey := "(not set)"
+	if *flagUpstreamAPIKey != "" {
+		key := *flagUpstreamAPIKey
+		if len(key) > 2 {
+			maskedKey = strings.Repeat("*", len(key)-2) + key[len(key)-2:]
+		} else {
+			maskedKey = strings.Repeat("*", len(key))
+		}
+	}
+	slog.Info("starting wol-proxy",
+		"listen", *flagListen,
+		"upstream", *flagUpstream,
+		"mac", *flagMac,
+		"source-ip", *flagSourceIP,
+		"timeout", *flagTimeout,
+		"upstream-api-key", maskedKey,
+	)
+
 	proxy := newProxy(upstreamURL)
 	server := &http.Server{
 		Addr:    *flagListen,
@@ -117,12 +136,13 @@ const (
 )
 
 type proxyServer struct {
-	upstreamProxy *httputil.ReverseProxy
-	upstreamURL   *url.URL
-	failCount     int
-	statusMutex   sync.RWMutex
-	status        upstreamStatus
-	sseCancel     context.CancelFunc
+	upstreamProxy  *httputil.ReverseProxy
+	upstreamURL    *url.URL
+	upstreamAPIKey string
+	failCount      int
+	statusMutex    sync.RWMutex
+	status         upstreamStatus
+	sseCancel      context.CancelFunc
 }
 
 type proxyResponseWriter struct {
@@ -166,10 +186,23 @@ func newProxy(url *url.URL) *proxyServer {
 	}
 
 	proxy := &proxyServer{
-		upstreamProxy: p,
-		upstreamURL:   url,
-		status:        notready,
-		failCount:     0,
+		upstreamProxy:  p,
+		upstreamURL:    url,
+		upstreamAPIKey: *flagUpstreamAPIKey,
+		status:         notready,
+		failCount:      0,
+	}
+
+	originalDirector := p.Director
+	p.Director = func(req *http.Request) {
+		originalDirector(req)
+
+		if proxy.upstreamAPIKey == "" {
+			return
+		}
+
+		req.Header.Set("Authorization", "Bearer "+proxy.upstreamAPIKey)
+		req.Header.Set("x-api-key", proxy.upstreamAPIKey)
 	}
 
 	p.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
@@ -222,6 +255,10 @@ func newProxy(url *url.URL) *proxyServer {
 			req.Header.Set("Accept", "text/event-stream")
 			req.Header.Set("Cache-Control", "no-cache")
 			req.Header.Set("Connection", "keep-alive")
+			if proxy.upstreamAPIKey != "" {
+				req.Header.Set("Authorization", "Bearer "+proxy.upstreamAPIKey)
+				req.Header.Set("x-api-key", proxy.upstreamAPIKey)
+			}
 
 			resp, err := client.Do(req)
 			if err != nil {
@@ -239,7 +276,16 @@ func newProxy(url *url.URL) *proxyServer {
 			}
 
 			if resp.StatusCode != http.StatusOK {
-				slog.Warn("SSE endpoint returned non-OK status", "status", resp.StatusCode)
+				cancel()
+				if resp.StatusCode == http.StatusUnauthorized {
+					if proxy.upstreamAPIKey == "" {
+						slog.Warn("SSE endpoint returned 401; set -upstream-api-key if the upstream requires authentication")
+					} else {
+						slog.Warn("SSE endpoint returned 401; verify -upstream-api-key matches the upstream apiKeys configuration")
+					}
+				} else {
+					slog.Warn("SSE endpoint returned non-OK status", "status", resp.StatusCode)
+				}
 				_, _ = io.Copy(io.Discard, resp.Body)
 				_ = resp.Body.Close()
 				proxy.setStatus(notready)

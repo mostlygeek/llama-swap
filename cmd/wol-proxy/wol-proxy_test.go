@@ -377,3 +377,99 @@ func TestWolProxy_SSEReconnectsAfterUpstreamFailure(t *testing.T) {
 		t.Fatal("request never completed after upstream restart")
 	}
 }
+
+func TestWolProxy_UpstreamAPIKeyInjection(t *testing.T) {
+	origKey := *flagUpstreamAPIKey
+	*flagUpstreamAPIKey = "secret-api-key"
+	defer func() { *flagUpstreamAPIKey = origKey }()
+
+	type authHeaders struct {
+		authorization string
+		xAPIKey       string
+	}
+
+	sseHeadersCh := make(chan authHeaders, 1)
+	proxyHeadersCh := make(chan authHeaders, 1)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/events", func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case sseHeadersCh <- authHeaders{
+			authorization: r.Header.Get("Authorization"),
+			xAPIKey:       r.Header.Get("x-api-key"),
+		}:
+		default:
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+
+		<-r.Context().Done()
+	})
+
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		proxyHeadersCh <- authHeaders{
+			authorization: r.Header.Get("Authorization"),
+			xAPIKey:       r.Header.Get("x-api-key"),
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "ok")
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	upstreamURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("failed to parse server URL: %v", err)
+	}
+
+	proxy := newProxy(upstreamURL)
+	defer proxy.cancelSSE()
+
+	readyDeadline := time.After(5 * time.Second)
+	for proxy.getStatus() != ready {
+		select {
+		case <-readyDeadline:
+			t.Fatal("proxy never reached ready state")
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+
+	select {
+	case got := <-sseHeadersCh:
+		if got.authorization != "Bearer secret-api-key" {
+			t.Fatalf("expected SSE Authorization header to be injected, got %q", got.authorization)
+		}
+		if got.xAPIKey != "secret-api-key" {
+			t.Fatalf("expected SSE x-api-key header to be injected, got %q", got.xAPIKey)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("did not receive SSE request")
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/v1/models", nil)
+	r.Header.Set("Authorization", "Bearer client-key")
+	r.Header.Set("x-api-key", "client-key")
+	proxy.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d", w.Code)
+	}
+
+	select {
+	case got := <-proxyHeadersCh:
+		if got.authorization != "Bearer secret-api-key" {
+			t.Fatalf("expected proxied Authorization header to be injected, got %q", got.authorization)
+		}
+		if got.xAPIKey != "secret-api-key" {
+			t.Fatalf("expected proxied x-api-key header to be injected, got %q", got.xAPIKey)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("did not receive proxied request")
+	}
+}

@@ -12,12 +12,15 @@ This utility helps conserve energy by allowing GPU-heavy servers to remain suspe
 # minimal
 $ ./wol-proxy -mac BA:DC:0F:FE:E0:00 -upstream http://192.168.1.13:8080
 
+
 # everything
 $ ./wol-proxy -mac BA:DC:0F:FE:E0:00 -upstream http://192.168.1.13:8080 \
     # use debug log level
     -log debug \
     # altenerative listening port
     -listen localhost:9999 \
+    # inject upstream API key into proxied requests
+    -upstream-api-key secret-key \
     # seconds to hold requests waiting for upstream to be ready
     -timeout 30 \
     # bind WoL packets to a specific network interface
