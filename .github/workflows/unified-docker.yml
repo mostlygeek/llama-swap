@@ -40,15 +40,15 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    if: >-
+      (matrix.backend == 'cuda' && (github.event_name != 'workflow_dispatch' || inputs.build_cuda == true)) ||
+      (matrix.backend == 'vulkan' && (github.event_name != 'workflow_dispatch' || inputs.build_vulkan == true))
     strategy:
       fail-fast: false
       matrix:
         backend:
           - cuda
           - vulkan
-        exclude:
-          - backend: ${{ inputs.build_cuda == false && 'cuda' || 'none' }}
-          - backend: ${{ inputs.build_vulkan == false && 'vulkan' || 'none' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
