@@ -38,17 +38,32 @@ permissions:
   packages: write
 
 jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - id: set-matrix
+        run: |
+          backends=()
+          # schedule uses defaults (build both); workflow_dispatch respects inputs
+          if [[ "${{ github.event_name }}" == "schedule" ]] || [[ "${{ inputs.build_cuda }}" == "true" ]]; then
+            backends+=("cuda")
+          fi
+          if [[ "${{ github.event_name }}" == "schedule" ]] || [[ "${{ inputs.build_vulkan }}" == "true" ]]; then
+            backends+=("vulkan")
+          fi
+          matrix=$(printf '%s\n' "${backends[@]}" | jq -R . | jq -sc .)
+          echo "matrix=$matrix" >> $GITHUB_OUTPUT
+
   build:
+    needs: setup
+    if: ${{ needs.setup.outputs.matrix != '[]' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        backend:
-          - cuda
-          - vulkan
-        exclude:
-          - backend: ${{ inputs.build_cuda == false && 'cuda' || 'none' }}
-          - backend: ${{ inputs.build_vulkan == false && 'vulkan' || 'none' }}
+        backend: ${{ fromJSON(needs.setup.outputs.matrix) }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
