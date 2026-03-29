@@ -47,10 +47,10 @@ jobs:
         run: |
           backends=()
           # schedule uses defaults (build both); workflow_dispatch respects inputs
-          if [[ "${{ github.event_name }}" != "workflow_dispatch" ]] || [[ "${{ inputs.build_cuda }}" == "true" ]]; then
+          if [[ "${{ github.event_name }}" == "schedule" ]] || [[ "${{ inputs.build_cuda }}" == "true" ]]; then
             backends+=("cuda")
           fi
-          if [[ "${{ github.event_name }}" != "workflow_dispatch" ]] || [[ "${{ inputs.build_vulkan }}" == "true" ]]; then
+          if [[ "${{ github.event_name }}" == "schedule" ]] || [[ "${{ inputs.build_vulkan }}" == "true" ]]; then
             backends+=("vulkan")
           fi
           matrix=$(printf '%s\n' "${backends[@]}" | jq -R . | jq -sc .)
