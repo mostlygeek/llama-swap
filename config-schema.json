@@ -237,6 +237,18 @@
                         "type": "boolean",
                         "description": "Overrides the global sendLoadingState for this model. Ommitting this property will use the global setting."
                     },
+                    "priority": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 0,
+                        "description": "Controls swap order within a group (swap: true). Higher values are served before lower values. A higher-priority model preempts lower-priority models after their current in-flight request completes. Models with equal priority compete fairly."
+                    },
+                    "unloadDelay": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 0,
+                        "description": "Seconds to keep a model loaded after its last request completes. While active, lower-or-equal-priority models wait before swapping in. A strictly higher-priority model bypasses the delay. Most useful combined with priority. A new request for this model resets the delay."
+                    },
                     "unlisted": {
                         "type": "boolean",
                         "default": false,
