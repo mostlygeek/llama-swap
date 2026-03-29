@@ -27,10 +27,10 @@ type ProcessGroup struct {
 	processes map[string]*Process
 
 	// swap coordination state (only used when swap == true)
-	activeModel     string         // currently loaded model
-	inFlight        int            // in-flight request count for activeModel
-	pendingCount    map[string]int // goroutines waiting to use each model
-	unloadDelayCh   chan struct{}   // non-nil while an unload delay is active; close to cancel
+	activeModel   string         // currently loaded model
+	inFlight      int            // in-flight request count for activeModel
+	pendingCount  map[string]int // goroutines waiting to use each model
+	unloadDelayCh chan struct{}  // non-nil while an unload delay is active; close to cancel
 }
 
 func NewProcessGroup(id string, config config.Config, proxyLogger *LogMonitor, upstreamLogger *LogMonitor) *ProcessGroup {
