@@ -1,32 +1,45 @@
 #!/bin/bash
 #
-# Build script for unified CUDA container with version pinning
+# Build script for unified container with version pinning
 #
 # Usage:
-#   ./build-image.sh                               # Build with auto-detected versions
-#   ./build-image.sh --no-cache                    # Build without cache
-#   LLAMA_REF=b1234 ./build-image.sh               # Pin llama.cpp to a commit hash
-#   LLAMA_REF=v1.2.3 ./build-image.sh              # Pin llama.cpp to a tag
-#   LLAMA_REF=my-branch ./build-image.sh           # Pin llama.cpp to a branch
-#   WHISPER_REF=v1.0.0 ./build-image.sh            # Pin whisper.cpp to a tag
-#   SD_REF=master ./build-image.sh                 # Pin stable-diffusion.cpp to a branch
-#   LS_VERSION=170 ./build-image.sh                # Override llama-swap version
+#   ./build-image.sh --cuda                              # Build CUDA image
+#   ./build-image.sh --vulkan                            # Build Vulkan image
+#   ./build-image.sh --cuda --no-cache                   # Build without cache
+#   LLAMA_REF=b1234 ./build-image.sh --vulkan            # Pin llama.cpp to a commit hash
+#   LLAMA_REF=v1.2.3 ./build-image.sh --cuda             # Pin llama.cpp to a tag
+#   WHISPER_REF=v1.0.0 ./build-image.sh --vulkan         # Pin whisper.cpp to a tag
+#   SD_REF=master ./build-image.sh --cuda                # Pin stable-diffusion.cpp to a branch
+#   LS_VERSION=170 ./build-image.sh --cuda               # Override llama-swap version
 #
 
 set -euo pipefail
 
+BACKEND=""
 NO_CACHE=false
 
 for arg in "$@"; do
     case $arg in
+        --cuda)
+            BACKEND="cuda"
+            ;;
+        --vulkan)
+            BACKEND="vulkan"
+            ;;
         --no-cache)
             NO_CACHE=true
             ;;
         --help|-h)
-            echo "Usage: ./build-image.sh [--no-cache]"
+            echo "Usage: ./build-image.sh --cuda|--vulkan [--no-cache]"
+            echo ""
+            echo "Options:"
+            echo "  --cuda      Build CUDA image (NVIDIA GPUs)"
+            echo "  --vulkan    Build Vulkan image (AMD GPUs and compatible hardware)"
+            echo "  --no-cache  Force rebuild without using Docker cache"
+            echo "  --help, -h  Show this help message"
             echo ""
             echo "Environment variables:"
-            echo "  DOCKER_IMAGE_TAG     Set custom image tag (default: llama-swap:unified)"
+            echo "  DOCKER_IMAGE_TAG     Set custom image tag (default: llama-swap:unified-cuda or llama-swap:unified-vulkan)"
             echo "  LLAMA_REF            Pin llama.cpp to a commit, tag, or branch"
             echo "  WHISPER_REF          Pin whisper.cpp to a commit, tag, or branch"
             echo "  SD_REF               Pin stable-diffusion.cpp to a commit, tag, or branch"
@@ -36,7 +49,14 @@ for arg in "$@"; do
     esac
 done
 
-DOCKER_IMAGE_TAG="${DOCKER_IMAGE_TAG:-llama-swap:unified}"
+if [[ -z "$BACKEND" ]]; then
+    echo "Error: No backend specified. Please use --cuda or --vulkan."
+    echo ""
+    echo "Usage: ./build-image.sh --cuda|--vulkan [--no-cache]"
+    exit 1
+fi
+
+DOCKER_IMAGE_TAG="${DOCKER_IMAGE_TAG:-llama-swap:unified-${BACKEND}}"
 
 # Git repository URLs
 LLAMA_REPO="https://github.com/ggml-org/llama.cpp.git"
@@ -89,7 +109,7 @@ get_latest_hash() {
 }
 
 echo "=========================================="
-echo "llama-swap Unified CUDA Build"
+echo "llama-swap Unified Build (${BACKEND})"
 echo "=========================================="
 echo ""
 
@@ -154,6 +174,7 @@ echo ""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 BUILD_ARGS=(
+    --build-arg "BACKEND=${BACKEND}"
     --build-arg "LLAMA_COMMIT_HASH=${LLAMA_HASH}"
     --build-arg "WHISPER_COMMIT_HASH=${WHISPER_HASH}"
     --build-arg "SD_COMMIT_HASH=${SD_HASH}"
@@ -166,7 +187,7 @@ if [[ "$NO_CACHE" == true ]]; then
     BUILD_ARGS+=(--no-cache)
     echo "Note: Building without cache"
 elif [[ "${GITHUB_ACTIONS:-}" == "true" && "${ACT:-}" != "true" ]]; then
-    CACHE_REF="ghcr.io/mostlygeek/llama-swap:unified-cache"
+    CACHE_REF="ghcr.io/mostlygeek/llama-swap:unified-${BACKEND}-cache"
     BUILD_ARGS+=(
         --cache-from "type=registry,ref=${CACHE_REF}"
         --cache-to "type=registry,ref=${CACHE_REF},mode=max"
@@ -196,7 +217,7 @@ if [[ ${#MISSING_BINARIES[@]} -gt 0 ]]; then
     done
     echo ""
     echo "Try running with --no-cache flag:"
-    echo "  ./build-image.sh --no-cache"
+    echo "  ./build-image.sh --${BACKEND} --no-cache"
     exit 1
 fi
 
@@ -215,5 +236,13 @@ echo "  whisper.cpp:         ${WHISPER_HASH}"
 echo "  stable-diffusion.cpp: ${SD_HASH}"
 echo "  llama-swap:          $(docker run --rm --entrypoint cat "${DOCKER_IMAGE_TAG}" /versions.txt | grep llama-swap | cut -d' ' -f2-)"
 echo ""
-echo "Run with:"
-echo "  docker run -it --rm --gpus all ${DOCKER_IMAGE_TAG}"
+if [[ "$BACKEND" == "vulkan" ]]; then
+    echo "Run with:"
+    echo "  docker run -it --rm --device /dev/dri:/dev/dri ${DOCKER_IMAGE_TAG}"
+    echo ""
+    echo "Note: For AMD GPUs, you may also need:"
+    echo "  docker run -it --rm --device /dev/dri:/dev/dri --group-add video ${DOCKER_IMAGE_TAG}"
+else
+    echo "Run with:"
+    echo "  docker run -it --rm --gpus all ${DOCKER_IMAGE_TAG}"
+fi

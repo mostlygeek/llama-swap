@@ -22,14 +22,48 @@ on:
         description: "llama-swap version (e.g. v198, latest, main)"
         required: false
         default: "main"
+      build_cuda:
+        description: "Build CUDA image"
+        type: boolean
+        required: false
+        default: true
+      build_vulkan:
+        description: "Build Vulkan image"
+        type: boolean
+        required: false
+        default: true
 
 permissions:
   contents: read
   packages: write
 
 jobs:
-  build:
+  setup:
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - id: set-matrix
+        run: |
+          backends=()
+          # schedule uses defaults (build both); workflow_dispatch respects inputs
+          if [[ "${{ github.event_name }}" == "schedule" ]] || [[ "${{ inputs.build_cuda }}" == "true" ]]; then
+            backends+=("cuda")
+          fi
+          if [[ "${{ github.event_name }}" == "schedule" ]] || [[ "${{ inputs.build_vulkan }}" == "true" ]]; then
+            backends+=("vulkan")
+          fi
+          matrix=$(printf '%s\n' "${backends[@]}" | jq -R . | jq -sc .)
+          echo "matrix=$matrix" >> $GITHUB_OUTPUT
+
+  build:
+    needs: setup
+    if: ${{ needs.setup.outputs.matrix != '[]' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: ${{ fromJSON(needs.setup.outputs.matrix) }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -61,24 +95,25 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build unified Docker image
+      - name: Build unified Docker image (${{ matrix.backend }})
         env:
           LLAMA_REF: ${{ inputs.llama_cpp_ref || 'master' }}
           WHISPER_REF: ${{ inputs.whisper_ref || 'master' }}
           SD_REF: ${{ inputs.sd_ref || 'master' }}
           LS_VERSION: ${{ inputs.llama_swap_version || 'main' }}
-          DOCKER_IMAGE_TAG: ghcr.io/mostlygeek/llama-swap:unified
+          DOCKER_IMAGE_TAG: ghcr.io/mostlygeek/llama-swap:unified-${{ matrix.backend }}
           # When running under act, use the local builder that has warm ccache.
           # On GitHub Actions, BUILDX_BUILDER is unset so docker uses the builder
           # created by setup-buildx-action above.
           BUILDX_BUILDER: ${{ env.ACT == 'true' && 'llama-swap-builder' || '' }}
         run: |
           chmod +x docker/unified/build-image.sh
-          docker/unified/build-image.sh
+          docker/unified/build-image.sh --${{ matrix.backend }}
 
       - name: Push to GitHub Container Registry
         if: ${{ !env.ACT }}
         run: |
-          docker push ghcr.io/mostlygeek/llama-swap:unified
-          docker tag ghcr.io/mostlygeek/llama-swap:unified ghcr.io/mostlygeek/llama-swap:unified-$(date -u +%Y-%m-%d)
-          docker push ghcr.io/mostlygeek/llama-swap:unified-$(date -u +%Y-%m-%d)
+          docker push ghcr.io/mostlygeek/llama-swap:unified-${{ matrix.backend }}
+          DATE_TAG=$(date -u +%Y-%m-%d)
+          docker tag ghcr.io/mostlygeek/llama-swap:unified-${{ matrix.backend }} ghcr.io/mostlygeek/llama-swap:unified-${{ matrix.backend }}-${DATE_TAG}
+          docker push ghcr.io/mostlygeek/llama-swap:unified-${{ matrix.backend }}-${DATE_TAG}
