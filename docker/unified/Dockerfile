@@ -143,10 +143,9 @@ COPY --from=sd-build /install/bin/sd-server /usr/local/bin/
 COPY --from=sd-build /install/bin/sd-cli /usr/local/bin/
 COPY --from=sd-build /install/lib/ /usr/local/lib/
 
-# Copy llama.cpp binaries and libraries
+# Copy llama.cpp binaries (statically linked)
 COPY --from=llama-build /install/bin/llama-server /usr/local/bin/
 COPY --from=llama-build /install/bin/llama-cli /usr/local/bin/
-COPY --from=llama-build /install/lib/ /usr/local/lib/
 
 # Copy llama-swap binary
 COPY --from=llama-swap-download /install/bin/llama-swap /usr/local/bin/

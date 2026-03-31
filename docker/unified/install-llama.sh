@@ -6,7 +6,7 @@ set -e
 COMMIT_HASH="${1:-master}"
 BACKEND="${BACKEND:-cuda}"
 
-mkdir -p /install/bin /install/lib
+mkdir -p /install/bin
 
 # Clone and checkout (init-based so cache-mounted /src/llama.cpp/build dir doesn't break clone)
 echo "=== Cloning llama.cpp at ${COMMIT_HASH} ==="
@@ -22,6 +22,7 @@ git checkout FETCH_HEAD
 # Common cmake flags
 CMAKE_FLAGS=(
     -DGGML_NATIVE=OFF
+    -DBUILD_SHARED_LIBS=OFF
     -DCMAKE_BUILD_TYPE=Release
     -DCMAKE_C_COMPILER_LAUNCHER=ccache
     -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
@@ -35,7 +36,6 @@ if [ "$BACKEND" = "cuda" ]; then
         "-DCMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES:-60;61;75;86;89}"
         "-DCMAKE_CUDA_FLAGS=-allow-unsupported-compiler"
         "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda"
-        "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda"
     )
 elif [ "$BACKEND" = "vulkan" ]; then
     CMAKE_FLAGS+=(
@@ -59,7 +59,5 @@ for bin in "${TARGETS[@]}"; do
     fi
     cp "build/bin/$bin" "/install/bin/"
 done
-find build -name "*.so*" -type f -exec cp {} /install/lib/ \;
-
 echo "=== llama.cpp build complete ==="
 ls -la /install/bin/
