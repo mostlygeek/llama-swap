@@ -22,7 +22,7 @@ ENV PATH="/usr/lib/ccache:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake git python3 python3-pip libssl-dev \
-    curl ca-certificates ccache make wget \
+    curl ca-certificates ccache make wget mold \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
