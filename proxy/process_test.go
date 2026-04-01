@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -568,4 +569,36 @@ func (w *panicOnWriteResponseWriter) Write(b []byte) (int, error) {
 		panic(http.ErrAbortHandler)
 	}
 	return w.ResponseRecorder.Write(b)
+}
+
+func TestProcess_CustomHTTPTimeouts(t *testing.T) {
+	config := config.ModelConfig{
+		Cmd:           "echo test",
+		Proxy:         "http://localhost:8080",
+		CheckEndpoint: "/health",
+		HTTPTimeout: config.HTTPTimeoutConfig{
+			ConnectTimeout:        45,
+			ResponseHeaderTimeout: 120,
+		},
+	}
+
+	debugLogger := NewLogMonitorWriter(io.Discard)
+	process := NewProcess("test-model", 30, config, debugLogger, debugLogger)
+
+	// Verify the process was created successfully
+	assert.NotNil(t, process)
+	assert.Equal(t, "test-model", process.ID)
+	assert.NotNil(t, process.reverseProxy)
+	assert.NotNil(t, process.reverseProxy.Transport)
+
+	// Verify it's using http.Transport (not some other type)
+	transport, ok := process.reverseProxy.Transport.(*http.Transport)
+	assert.True(t, ok, "Transport should be *http.Transport")
+	assert.NotNil(t, transport)
+
+	// Verify the timeouts are in the expected range
+	// Note: We can't directly access the DialContext timeout, but we can verify
+	// that the transport was created and is configured
+	assert.NotZero(t, transport.ResponseHeaderTimeout)
+	assert.Equal(t, 120*time.Second, transport.ResponseHeaderTimeout)
 }

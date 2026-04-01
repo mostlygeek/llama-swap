@@ -96,6 +96,22 @@ func NewProcess(ID string, healthCheckTimeout int, config config.ModelConfig, pr
 	var reverseProxy *httputil.ReverseProxy
 	if proxyURL != nil {
 		reverseProxy = httputil.NewSingleHostReverseProxy(proxyURL)
+
+		// Create custom transport with configured timeouts
+		transport := &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   time.Duration(timeoutSecondsOrDefault(config.HTTPTimeout.ConnectTimeout, 30)) * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: time.Duration(timeoutSecondsOrDefault(config.HTTPTimeout.ResponseHeaderTimeout, 60)) * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   10,
+			IdleConnTimeout:       90 * time.Second,
+		}
+		reverseProxy.Transport = transport
+
 		reverseProxy.ModifyResponse = func(resp *http.Response) error {
 			// prevent nginx from buffering streaming responses (e.g., SSE)
 			if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
@@ -196,6 +212,14 @@ func isValidTransition(from, to ProcessState) bool {
 		return false // No transitions allowed from these states
 	}
 	return false
+}
+
+// timeoutSecondsOrDefault returns the timeout in seconds if configured > 0, otherwise returns the default
+func timeoutSecondsOrDefault(configured int, defaultSeconds int) int {
+	if configured > 0 {
+		return configured
+	}
+	return defaultSeconds
 }
 
 func (p *Process) CurrentState() ProcessState {
