@@ -9,6 +9,12 @@ const (
 	MODEL_CONFIG_DEFAULT_TTL = -1
 )
 
+// HTTPTimeoutConfig holds HTTP timeout settings for proxy connections
+type HTTPTimeoutConfig struct {
+	ConnectTimeout        int `yaml:"connectTimeout"`        // seconds, 0 = use proxy default (30s)
+	ResponseHeaderTimeout int `yaml:"responseHeaderTimeout"` // seconds, 0 = use proxy default (60s)
+}
+
 type ModelConfig struct {
 	Cmd           string   `yaml:"cmd"`
 	CmdStop       string   `yaml:"cmdStop"`
@@ -40,6 +46,9 @@ type ModelConfig struct {
 
 	// override global setting
 	SendLoadingState *bool `yaml:"sendLoadingState"`
+
+	// HTTP timeout settings for proxy connections
+	HTTPTimeout HTTPTimeoutConfig `yaml:"httpTimeout"`
 }
 
 func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {

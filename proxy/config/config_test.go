@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestConfig_GroupMemberIsUnique(t *testing.T) {
@@ -1437,4 +1438,63 @@ models:
 		assert.Equal(t, []string{"real-value"}, config.RequiredAPIKeys)
 	})
 
+}
+
+func TestConfig_HTTPTimeoutParsing(t *testing.T) {
+	configYaml := `
+models:
+  model1:
+    cmd: test-server --port ${PORT}
+    httpTimeout:
+      connectTimeout: 45
+      responseHeaderTimeout: 120
+`
+
+	config, err := LoadConfigFromReader(strings.NewReader(configYaml))
+	require.NoError(t, err)
+
+	modelConfig, found := config.Models["model1"]
+	require.True(t, found, "model1 should exist in config")
+
+	assert.Equal(t, 45, modelConfig.HTTPTimeout.ConnectTimeout)
+	assert.Equal(t, 120, modelConfig.HTTPTimeout.ResponseHeaderTimeout)
+}
+
+func TestConfig_HTTPTimeoutDefaults(t *testing.T) {
+	configYaml := `
+models:
+  model1:
+    cmd: test-server --port ${PORT}
+`
+
+	config, err := LoadConfigFromReader(strings.NewReader(configYaml))
+	require.NoError(t, err)
+
+	modelConfig, found := config.Models["model1"]
+	require.True(t, found, "model1 should exist in config")
+
+	// When httpTimeout is not specified, values should be 0 (zero values)
+	assert.Equal(t, 0, modelConfig.HTTPTimeout.ConnectTimeout)
+	assert.Equal(t, 0, modelConfig.HTTPTimeout.ResponseHeaderTimeout)
+}
+
+func TestConfig_PeerHTTPTimeoutParsing(t *testing.T) {
+	configYaml := `
+peers:
+  peer1:
+    proxy: http://example.com
+    models: [model1]
+    httpTimeout:
+      connectTimeout: 45
+      responseHeaderTimeout: 120
+`
+
+	config, err := LoadConfigFromReader(strings.NewReader(configYaml))
+	require.NoError(t, err)
+
+	peerConfig, found := config.Peers["peer1"]
+	require.True(t, found, "peer1 should exist in config")
+
+	assert.Equal(t, 45, peerConfig.HTTPTimeout.ConnectTimeout)
+	assert.Equal(t, 120, peerConfig.HTTPTimeout.ResponseHeaderTimeout)
 }

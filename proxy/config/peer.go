@@ -12,6 +12,9 @@ type PeerConfig struct {
 	ApiKey   string   `yaml:"apiKey"`
 	Models   []string `yaml:"models"`
 	Filters  Filters  `yaml:"filters"`
+
+	// HTTP timeout settings for proxy connections
+	HTTPTimeout HTTPTimeoutConfig `yaml:"httpTimeout"`
 }
 
 func (c *PeerConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
