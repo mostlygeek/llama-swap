@@ -319,6 +319,22 @@ models:
     # - recommended to be omitted and the default used
     concurrencyLimit: 0
 
+    # httpTimeout: configure HTTP timeouts for connections to this model
+    # - optional, default: unset (uses internal defaults)
+    # - when omitted, connectTimeout defaults to 30 seconds
+    # - when omitted, responseHeaderTimeout defaults to 60 seconds
+    # - useful for models on slower hardware that need longer timeouts
+    # - increase responseHeaderTimeout to avoid "timeout awaiting response headers" errors
+    httpTimeout:
+      # connectTimeout: TCP connection timeout in seconds
+      # - optional, default: 30
+      connectTimeout: 30
+
+      # responseHeaderTimeout: time to wait for response headers in seconds
+      # - optional, default: 60
+      # - for slow image generation or large models, consider increasing to 300+ seconds
+      responseHeaderTimeout: 120
+
     # sendLoadingState: overrides the global sendLoadingState setting for this model
     # - optional, default: undefined (use global setting)
     sendLoadingState: false
@@ -444,6 +460,14 @@ peers:
     # - required
     # - requested path to llama-swap will be appended to the end of the proxy value
     proxy: http://192.168.1.23
+
+    # httpTimeout: configure HTTP timeouts for connections to this peer
+    # - optional, default: unset (uses internal defaults)
+    # - useful when the peer runs on slower hardware
+    httpTimeout:
+      connectTimeout: 30
+      responseHeaderTimeout: 600  # 10 minutes for very slow hardware
+
     # models: a list of models served by the peer
     # - required
     models:

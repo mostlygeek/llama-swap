@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mostlygeek/llama-swap/proxy/config"
 	"github.com/stretchr/testify/assert"
@@ -287,4 +288,18 @@ func TestNewPeerProxy_CustomHTTPTimeouts(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, peerProxy)
 	assert.True(t, peerProxy.HasPeerModel("model1"))
+
+	// Verify the timeout values are actually applied to the transport
+	member, found := peerProxy.proxyMap["model1"]
+	require.True(t, found, "model1 should exist in proxyMap")
+	assert.NotNil(t, member.reverseProxy)
+	assert.NotNil(t, member.reverseProxy.Transport)
+
+	transport, ok := member.reverseProxy.Transport.(*http.Transport)
+	require.True(t, ok, "Transport should be *http.Transport")
+
+	// Verify ResponseHeaderTimeout is set to 300 seconds
+	assert.Equal(t, 300*time.Second, transport.ResponseHeaderTimeout)
+	// ForceAttemptHTTP2 should be enabled
+	assert.True(t, transport.ForceAttemptHTTP2)
 }

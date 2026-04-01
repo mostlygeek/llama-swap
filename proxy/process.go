@@ -106,6 +106,7 @@ func NewProcess(ID string, healthCheckTimeout int, config config.ModelConfig, pr
 			TLSHandshakeTimeout:   10 * time.Second,
 			ResponseHeaderTimeout: time.Duration(timeoutSecondsOrDefault(config.HTTPTimeout.ResponseHeaderTimeout, 60)) * time.Second,
 			ExpectContinueTimeout: 1 * time.Second,
+			ForceAttemptHTTP2:     true,
 			MaxIdleConns:          100,
 			MaxIdleConnsPerHost:   10,
 			IdleConnTimeout:       90 * time.Second,

@@ -1498,3 +1498,23 @@ peers:
 	assert.Equal(t, 45, peerConfig.HTTPTimeout.ConnectTimeout)
 	assert.Equal(t, 120, peerConfig.HTTPTimeout.ResponseHeaderTimeout)
 }
+
+func TestConfig_PeerHTTPTimeoutDefaults(t *testing.T) {
+	configYaml := `
+peers:
+  peer1:
+    proxy: http://example.com
+    models: [model1]
+`
+
+	config, err := LoadConfigFromReader(strings.NewReader(configYaml))
+	require.NoError(t, err)
+
+	peerConfig, found := config.Peers["peer1"]
+	require.True(t, found, "peer1 should exist in config")
+
+	// When httpTimeout is not specified, values should be 0 (zero values)
+	// The proxy will apply defaults (30s/60s) when creating the transport
+	assert.Equal(t, 0, peerConfig.HTTPTimeout.ConnectTimeout)
+	assert.Equal(t, 0, peerConfig.HTTPTimeout.ResponseHeaderTimeout)
+}
