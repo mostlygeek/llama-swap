@@ -32,6 +32,10 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
   - `v1/rerank`, `v1/reranking`, `/rerank`
   - `/infill` - for code infilling
   - `/completion` - for completion endpoint
+- ✅ SDAPI via [stable-diffusion.cpp's server](https://github.com/leejet/stable-diffusion.cpp/tree/master/examples/server)
+  - `/sdapi/v1/txt2img`
+  - `/sdapi/v1/img2img`
+  - `/sdapi/v1/loras` - requires `model` in request body to fetch the correct loras
 - ✅ llama-swap API
   - `/ui` - web UI
   - `/upstream/:model_id` - direct access to upstream server ([demo](https://github.com/mostlygeek/llama-swap/pull/31))
