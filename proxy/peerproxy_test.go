@@ -266,3 +266,25 @@ func TestProxyRequest_SSEHeaderModification(t *testing.T) {
 	// The X-Accel-Buffering header should be set to "no" for SSE
 	assert.Equal(t, "no", w.Header().Get("X-Accel-Buffering"))
 }
+
+func TestNewPeerProxy_CustomHTTPTimeouts(t *testing.T) {
+	proxyURL, _ := url.Parse("http://localhost:8080")
+
+	peers := config.PeerDictionaryConfig{
+		"test-peer": config.PeerConfig{
+			Proxy:    "http://localhost:8080",
+			ProxyURL: proxyURL,
+			Models:   []string{"model1"},
+			HTTPTimeout: config.HTTPTimeoutConfig{
+				ConnectTimeout:        45,
+				ResponseHeaderTimeout: 300,
+			},
+		},
+	}
+
+	peerProxy, err := NewPeerProxy(peers, testLogger)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, peerProxy)
+	assert.True(t, peerProxy.HasPeerModel("model1"))
+}
