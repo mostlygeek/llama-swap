@@ -4,7 +4,7 @@
 # Note: CUDA only; always built against builder-base-cuda
 set -e
 
-COMMIT_HASH="${1:-master}"
+COMMIT_HASH="${1:-main}"
 
 mkdir -p /install/bin
 

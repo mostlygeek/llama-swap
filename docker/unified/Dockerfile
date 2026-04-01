@@ -90,7 +90,7 @@ FROM builder-base-vulkan AS ik-llama-vulkan
 RUN mkdir -p /install/bin
 
 FROM builder-base-cuda AS ik-llama-cuda
-ARG IK_LLAMA_COMMIT_HASH=master
+ARG IK_LLAMA_COMMIT_HASH=main
 COPY install-ik-llama.sh /build/
 RUN --mount=type=cache,id=ccache-cuda,target=/ccache \
     --mount=type=cache,id=ik-llama-cuda,target=/src/ik_llama.cpp/build \

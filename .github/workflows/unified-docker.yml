@@ -21,7 +21,7 @@ on:
       ik_llama_ref:
         description: "ik_llama.cpp commit hash, tag, or branch (CUDA only)"
         required: false
-        default: "master"
+        default: "main"
       llama_swap_version:
         description: "llama-swap version (e.g. v198, latest, main)"
         required: false
@@ -104,7 +104,7 @@ jobs:
           LLAMA_REF: ${{ inputs.llama_cpp_ref || 'master' }}
           WHISPER_REF: ${{ inputs.whisper_ref || 'master' }}
           SD_REF: ${{ inputs.sd_ref || 'master' }}
-          IK_LLAMA_REF: ${{ inputs.ik_llama_ref || 'master' }}
+          IK_LLAMA_REF: ${{ inputs.ik_llama_ref || 'main' }}
           LS_VERSION: ${{ inputs.llama_swap_version || 'main' }}
           DOCKER_IMAGE_TAG: ghcr.io/mostlygeek/llama-swap:unified-${{ matrix.backend }}
           # When running under act, use the local builder that has warm ccache.

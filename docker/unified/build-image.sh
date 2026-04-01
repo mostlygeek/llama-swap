@@ -11,7 +11,7 @@
 #   WHISPER_REF=v1.0.0 ./build-image.sh --vulkan         # Pin whisper.cpp to a tag
 #   SD_REF=master ./build-image.sh --cuda                # Pin stable-diffusion.cpp to a branch
 #   LS_VERSION=170 ./build-image.sh --cuda               # Override llama-swap version
-#   IK_LLAMA_REF=main ./build-image.sh --cuda            # Pin ik_llama.cpp to a branch (CUDA only)
+#   IK_LLAMA_REF=main ./build-image.sh --cuda            # Pin ik_llama.cpp to main branch (CUDA only)
 #
 
 set -euo pipefail
