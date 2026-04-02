@@ -30,7 +30,6 @@ func addApiHandlers(pm *ProxyManager) {
 	{
 		apiGroup.POST("/models/unload", pm.apiUnloadAllModels)
 		apiGroup.POST("/models/unload/*model", pm.apiUnloadSingleModelHandler)
-		apiGroup.GET("/models", pm.apiGetModels)
 		apiGroup.GET("/events", pm.apiSendEvents)
 		apiGroup.GET("/metrics", pm.apiGetMetrics)
 		apiGroup.GET("/version", pm.apiGetVersion)
@@ -41,36 +40,6 @@ func addApiHandlers(pm *ProxyManager) {
 func (pm *ProxyManager) apiUnloadAllModels(c *gin.Context) {
 	pm.StopProcesses(StopImmediately)
 	c.JSON(http.StatusOK, gin.H{"msg": "ok"})
-}
-
-type apiModel struct {
-	Name         string `json:"name"`
-	Id           string `json:"id"`
-	State        string `json:"state"`
-	TTL          *int   `json:"ttl"`
-	TTLRemaining *int   `json:"ttlRemaining"`
-}
-
-func (pm *ProxyManager) apiGetModels(c *gin.Context) {
-	models := pm.getModelStatus()
-	result := make([]apiModel, len(models))
-	for i, m := range models {
-		name := m.Name
-		if name == "" {
-			name = m.Id
-		}
-
-		ttl, ttlRemaining := pm.getModelTTL(m.Id)
-
-		result[i] = apiModel{
-			Name:         name,
-			Id:           m.Id,
-			State:        m.State,
-			TTL:          ttl,
-			TTLRemaining: ttlRemaining,
-		}
-	}
-	c.JSON(http.StatusOK, result)
 }
 
 func (pm *ProxyManager) getModelTTL(modelID string) (ttl *int, ttlRemaining *int) {
@@ -87,6 +56,33 @@ func (pm *ProxyManager) getModelTTL(modelID string) (ttl *int, ttlRemaining *int
 	return process.GetTTL()
 }
 
+func (pm *ProxyManager) getModelState(modelID string) string {
+	processGroup := pm.findGroupByModelName(modelID)
+	state := "unknown"
+
+	if processGroup != nil {
+		process := processGroup.processes[modelID]
+		if process != nil {
+			switch process.CurrentState() {
+			case StateReady:
+				state = "ready"
+			case StateStarting:
+				state = "starting"
+			case StateStopping:
+				state = "stopping"
+			case StateShutdown:
+				state = "shutdown"
+			case StateStopped:
+				state = "stopped"
+			default:
+				state = "unknown"
+			}
+		}
+	}
+
+	return state
+}
+
 func (pm *ProxyManager) getModelStatus() []Model {
 	// Extract keys and sort them
 	models := []Model{}
@@ -99,36 +95,11 @@ func (pm *ProxyManager) getModelStatus() []Model {
 
 	// Iterate over sorted keys
 	for _, modelID := range modelIDs {
-		// Get process state
-		processGroup := pm.findGroupByModelName(modelID)
-		state := "unknown"
-
-		if processGroup != nil {
-			process := processGroup.processes[modelID]
-			if process != nil {
-				var stateStr string
-				switch process.CurrentState() {
-				case StateReady:
-					stateStr = "ready"
-				case StateStarting:
-					stateStr = "starting"
-				case StateStopping:
-					stateStr = "stopping"
-				case StateShutdown:
-					stateStr = "shutdown"
-				case StateStopped:
-					stateStr = "stopped"
-				default:
-					stateStr = "unknown"
-				}
-				state = stateStr
-			}
-		}
 		models = append(models, Model{
 			Id:          modelID,
 			Name:        pm.config.Models[modelID].Name,
 			Description: pm.config.Models[modelID].Description,
-			State:       state,
+			State:       pm.getModelState(modelID),
 			Unlisted:    pm.config.Models[modelID].Unlisted,
 			Aliases:     pm.config.Models[modelID].Aliases,
 		})

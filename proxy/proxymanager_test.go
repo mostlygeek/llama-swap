@@ -1340,7 +1340,7 @@ func TestProxyManager_ApiGetModels(t *testing.T) {
 	proxy := New(testConfig)
 	defer proxy.StopProcesses(StopWaitForInflightRequest)
 
-	req := httptest.NewRequest("GET", "/api/models", nil)
+	req := httptest.NewRequest("GET", "/v1/models", nil)
 	w := CreateTestResponseRecorder()
 
 	proxy.ServeHTTP(w, req)
@@ -1348,14 +1348,16 @@ func TestProxyManager_ApiGetModels(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
 
-	var response []map[string]interface{}
+	var response struct {
+		Data []map[string]interface{} `json:"data"`
+	}
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
-	assert.Len(t, response, 3)
+	assert.Len(t, response.Data, 3)
 
 	// Find model1 and model2 in response
 	modelMap := make(map[string]map[string]interface{})
-	for _, m := range response {
+	for _, m := range response.Data {
 		modelMap[m["id"].(string)] = m
 	}
 
@@ -1364,13 +1366,21 @@ func TestProxyManager_ApiGetModels(t *testing.T) {
 	assert.Contains(t, modelMap, "model3")
 	assert.Equal(t, "Model One", modelMap["model1"]["name"])
 	assert.Equal(t, "Model Two", modelMap["model2"]["name"])
-	assert.Equal(t, "model3", modelMap["model3"]["name"])
+	_, hasName := modelMap["model3"]["name"]
+	assert.False(t, hasName, "model3 should not have name field when empty")
 	assert.Equal(t, "model1", modelMap["model1"]["id"])
 	assert.Equal(t, "model2", modelMap["model2"]["id"])
 	assert.Equal(t, "model3", modelMap["model3"]["id"])
-	assert.Equal(t, "stopped", modelMap["model1"]["state"])
-	assert.Equal(t, "stopped", modelMap["model2"]["state"])
-	assert.Equal(t, "stopped", modelMap["model3"]["state"])
+
+	getState := func(m map[string]interface{}) string {
+		meta := m["meta"].(map[string]interface{})
+		llamaSwap := meta["llamaswap"].(map[string]interface{})
+		return llamaSwap["state"].(string)
+	}
+
+	assert.Equal(t, "stopped", getState(modelMap["model1"]))
+	assert.Equal(t, "stopped", getState(modelMap["model2"]))
+	assert.Equal(t, "stopped", getState(modelMap["model3"]))
 }
 
 func TestProxyManager_ApiGetModels_WithTTL(t *testing.T) {
@@ -1399,28 +1409,96 @@ func TestProxyManager_ApiGetModels_WithTTL(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 
-	req = httptest.NewRequest("GET", "/api/models", nil)
+	req = httptest.NewRequest("GET", "/v1/models", nil)
 	w = CreateTestResponseRecorder()
 
 	proxy.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response []map[string]interface{}
+	var response struct {
+		Data []map[string]interface{} `json:"data"`
+	}
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
 
 	modelMap := make(map[string]map[string]interface{})
-	for _, m := range response {
+	for _, m := range response.Data {
 		modelMap[m["id"].(string)] = m
 	}
 
-	assert.Equal(t, float64(60), modelMap["model1"]["ttl"])
-	ttlRemaining1 := modelMap["model1"]["ttlRemaining"].(float64)
-	assert.True(t, ttlRemaining1 > 0 && ttlRemaining1 <= 60)
+	getTTL := func(m map[string]interface{}) (interface{}, interface{}) {
+		meta := m["meta"].(map[string]interface{})
+		llamaSwap := meta["llamaswap"].(map[string]interface{})
+		return llamaSwap["ttl"], llamaSwap["ttlRemaining"]
+	}
 
-	assert.Nil(t, modelMap["model2"]["ttl"], "model2 ttl should be null when UnloadAfter is 0")
-	assert.Nil(t, modelMap["model2"]["ttlRemaining"], "model2 ttlRemaining should be null when UnloadAfter is 0")
+	ttl1, ttlRemaining1 := getTTL(modelMap["model1"])
+	assert.Equal(t, float64(60), ttl1.(float64))
+	assert.True(t, ttlRemaining1.(float64) > 0 && ttlRemaining1.(float64) <= 60)
+
+	ttl2, ttlRemaining2 := getTTL(modelMap["model2"])
+	assert.Nil(t, ttl2, "model2 ttl should be null when UnloadAfter is 0")
+	assert.Nil(t, ttlRemaining2, "model2 ttlRemaining should be null when UnloadAfter is 0")
+}
+
+func TestProxyManager_ListModelsHandler_UserMetadata(t *testing.T) {
+	c := getTestSimpleResponderConfig("model1")
+	c.Metadata = map[string]any{"category": "vision", "version": 1.0}
+
+	testConfig := config.AddDefaultGroupToConfig(config.Config{
+		HealthCheckTimeout: 15,
+		Models:             map[string]config.ModelConfig{"model1": c},
+		LogLevel:           "error",
+	})
+
+	proxy := New(testConfig)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+
+	req := httptest.NewRequest("GET", "/v1/models", nil)
+	w := CreateTestResponseRecorder()
+	proxy.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct{ Data []map[string]any }
+	json.Unmarshal(w.Body.Bytes(), &resp)
+
+	meta := resp.Data[0]["meta"].(map[string]any)["llamaswap"].(map[string]any)
+	assert.Equal(t, "vision", meta["category"])
+	assert.Equal(t, float64(1.0), meta["version"])
+}
+
+func TestProxyManager_ListModelsHandler_RuntimeMetadataOverridesUserMetadata(t *testing.T) {
+	c := getTestSimpleResponderConfig("model1")
+	c.UnloadAfter = 60
+	c.Metadata = map[string]any{"state": "user-state", "ttl": 999}
+
+	testConfig := config.AddDefaultGroupToConfig(config.Config{
+		HealthCheckTimeout: 15,
+		Models:             map[string]config.ModelConfig{"model1": c},
+		LogLevel:           "error",
+	})
+
+	proxy := New(testConfig)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(`{"model":"model1"}`))
+	w := CreateTestResponseRecorder()
+	proxy.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	time.Sleep(100 * time.Millisecond)
+
+	req = httptest.NewRequest("GET", "/v1/models", nil)
+	w = CreateTestResponseRecorder()
+	proxy.ServeHTTP(w, req)
+
+	var resp struct{ Data []map[string]any }
+	json.Unmarshal(w.Body.Bytes(), &resp)
+
+	meta := resp.Data[0]["meta"].(map[string]any)["llamaswap"].(map[string]any)
+	assert.Equal(t, "ready", meta["state"], "runtime state overrides user metadata")
+	assert.Equal(t, float64(60), meta["ttl"], "runtime ttl overrides user metadata")
 }
 
 func TestProxyManager_APIKeyAuth(t *testing.T) {
