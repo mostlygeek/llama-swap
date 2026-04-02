@@ -12,7 +12,7 @@ ARG BACKEND=cuda
 
 # ── Builder bases ──────────────────────────────────────────────────────
 
-FROM nvidia/cuda:12.4.0-devel-ubuntu22.04 AS builder-base-cuda
+FROM nvidia/cuda:12.9.1-devel-ubuntu24.04 AS builder-base-cuda
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV CMAKE_CUDA_ARCHITECTURES="60;61;75;86;89"
@@ -22,14 +22,14 @@ ENV PATH="/usr/lib/ccache:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake git python3 python3-pip libssl-dev \
-    curl ca-certificates ccache make wget mold \
+    curl ca-certificates ccache make wget \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 
 # ──
 
-FROM ubuntu:26.04 AS builder-base-vulkan
+FROM ubuntu:24.04 AS builder-base-vulkan
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV CCACHE_DIR=/ccache
@@ -108,14 +108,14 @@ RUN bash /build/install-llama-swap.sh "${LS_VERSION}"
 
 # ── Runtime bases ─────────────────────────────────────────────────────
 
-FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04 AS runtime-cuda
+FROM nvidia/cuda:12.9.1-runtime-ubuntu24.04 AS runtime-cuda
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
 ENV PATH="/usr/local/bin:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgomp1 python3 curl ca-certificates git \
+    libgomp1 python3 curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # CUDA stub drivers for container compatibility
@@ -124,14 +124,14 @@ COPY --from=builder-base-cuda /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/
 
 # ──
 
-FROM ubuntu:26.04 AS runtime-vulkan
+FROM ubuntu:24.04 AS runtime-vulkan
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH="/usr/local/bin:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 libvulkan1 mesa-vulkan-drivers \
-    python3 curl ca-certificates git \
+    python3 curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Select runtime base by BACKEND ────────────────────────────────────

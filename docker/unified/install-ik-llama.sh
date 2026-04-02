@@ -8,10 +8,6 @@ COMMIT_HASH="${1:-main}"
 
 mkdir -p /install/bin
 
-# ik_llama.cpp main requires CUDA C++20; Ubuntu 22.04 ships CMake 3.22 which
-# lacks the NVCC flag mapping for it. Upgrade cmake before building.
-pip3 install --quiet --upgrade cmake
-
 # Clone and checkout (init-based so cache-mounted build dir doesn't break clone)
 echo "=== Cloning ik_llama.cpp at ${COMMIT_HASH} ==="
 mkdir -p /src/ik_llama.cpp
@@ -31,10 +27,8 @@ CMAKE_FLAGS=(
     -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
     -DGGML_CUDA=ON
     "-DCMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES:-60;61;75;86;89}"
-    "-DCMAKE_C_FLAGS=-mcmodel=large"
-    "-DCMAKE_CXX_FLAGS=-mcmodel=large"
-    "-DCMAKE_CUDA_FLAGS=-allow-unsupported-compiler -Xcompiler=-mcmodel=large"
-    "-DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=mold -Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda -Wl,--allow-shlib-undefined"
+    "-DCMAKE_CUDA_FLAGS=-allow-unsupported-compiler"
+    "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda -Wl,--allow-shlib-undefined"
 )
 
 rm -rf build/CMakeCache.txt build/CMakeFiles 2>/dev/null || true
