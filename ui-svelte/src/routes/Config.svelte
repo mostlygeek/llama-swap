@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { getConfigModels, saveConfigModels, type ConfigModel } from "../stores/api";
+  import { getConfigModels, saveConfigModels, rebootSystem, type ConfigModel } from "../stores/api";
 
   let models = $state<Record<string, ConfigModel>>({});
   let selectedId = $state<string | null>(null);
@@ -110,8 +110,10 @@
     <div class="flex items-center justify-center h-full text-txtsecondary">Loading...</div>
   {:else}
     <div class="flex gap-4 flex-1 min-h-0">
-      <!-- Model list (left) -->
-      <div class="card w-56 shrink-0 flex flex-col">
+      <!-- Left column -->
+      <div class="w-56 shrink-0 flex flex-col gap-4 min-h-0">
+      <!-- Model list -->
+      <div class="card shrink-0 flex flex-col min-h-0 flex-1">
         <div class="shrink-0">
           <div class="flex justify-between items-baseline">
             <h2 class="text-xl">Config</h2>
@@ -174,6 +176,25 @@
             </button>
           {/if}
         </div>
+      </div>
+
+      <!-- Maintenance -->
+      <div class="card shrink-0">
+        <h2 class="text-xl mb-2">Maintenance</h2>
+        <button
+          class="btn text-error w-full"
+          onclick={async () => {
+            if (!confirm("Reboot the host?")) return;
+            try {
+              await rebootSystem();
+            } catch (e: any) {
+              error = e.message;
+            }
+          }}
+        >
+          Reboot
+        </button>
+      </div>
       </div>
 
       <!-- Model form (right) -->

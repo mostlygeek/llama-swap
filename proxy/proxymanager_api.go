@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -40,6 +41,7 @@ func addApiHandlers(pm *ProxyManager) {
 		apiGroup.GET("/captures/:id", pm.apiGetCapture)
 		apiGroup.GET("/config/models", pm.apiGetConfigModels)
 		apiGroup.PUT("/config/models", pm.apiPutConfigModels)
+		apiGroup.POST("/system/reboot", pm.apiSystemReboot)
 	}
 }
 
@@ -392,4 +394,11 @@ func (pm *ProxyManager) apiPutConfigModels(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"msg": "ok"})
+}
+
+func (pm *ProxyManager) apiSystemReboot(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"msg": "rebooting"})
+	go func() {
+		exec.Command("shutdown", "/r", "/t", "5").Run()
+	}()
 }

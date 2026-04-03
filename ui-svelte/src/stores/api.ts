@@ -217,6 +217,13 @@ export async function getConfigModels(): Promise<Record<string, ConfigModel>> {
   return data.models || {};
 }
 
+export async function rebootSystem(): Promise<void> {
+  const response = await fetch("/api/system/reboot", { method: "POST" });
+  if (!response.ok) {
+    throw new Error(`Reboot failed: ${response.status}`);
+  }
+}
+
 export async function saveConfigModels(models: Record<string, ConfigModel>): Promise<void> {
   const response = await fetch("/api/config/models", {
     method: "PUT",
