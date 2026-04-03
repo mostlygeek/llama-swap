@@ -11,6 +11,7 @@
 #   WHISPER_REF=v1.0.0 ./build-image.sh --vulkan         # Pin whisper.cpp to a tag
 #   SD_REF=master ./build-image.sh --cuda                # Pin stable-diffusion.cpp to a branch
 #   LS_VERSION=170 ./build-image.sh --cuda               # Override llama-swap version
+#   IK_LLAMA_REF=main ./build-image.sh --cuda            # Pin ik_llama.cpp to main branch (CUDA only)
 #
 
 set -euo pipefail
@@ -43,6 +44,7 @@ for arg in "$@"; do
             echo "  LLAMA_REF            Pin llama.cpp to a commit, tag, or branch"
             echo "  WHISPER_REF          Pin whisper.cpp to a commit, tag, or branch"
             echo "  SD_REF               Pin stable-diffusion.cpp to a commit, tag, or branch"
+            echo "  IK_LLAMA_REF         Pin ik_llama.cpp to a commit, tag, or branch (CUDA only)"
             echo "  LS_VERSION           Override llama-swap version (e.g., '170' or 'latest')"
             exit 0
             ;;
@@ -63,6 +65,7 @@ LLAMA_REPO="https://github.com/ggml-org/llama.cpp.git"
 WHISPER_REPO="https://github.com/ggml-org/whisper.cpp.git"
 SD_REPO="https://github.com/leejet/stable-diffusion.cpp.git"
 LLAMA_SWAP_REPO="https://github.com/mostlygeek/llama-swap.git"
+IK_LLAMA_REPO="https://github.com/ikawrakow/ik_llama.cpp.git"
 
 # Resolve a git ref (commit hash, tag, or branch) to a full commit hash.
 # Requires only: git, network access to the remote.
@@ -152,6 +155,24 @@ else
     echo "stable-diffusion.cpp: latest HEAD: ${SD_HASH}"
 fi
 
+# Resolve ik_llama.cpp ref (CUDA only)
+if [[ "$BACKEND" == "cuda" ]]; then
+    if [[ -n "${IK_LLAMA_REF:-}" ]]; then
+        IK_LLAMA_HASH=$(resolve_ref "${IK_LLAMA_REPO}" "${IK_LLAMA_REF}") || exit 1
+        echo "ik_llama.cpp: ${IK_LLAMA_REF} -> ${IK_LLAMA_HASH}"
+    else
+        IK_LLAMA_HASH=$(get_latest_hash "${IK_LLAMA_REPO}")
+        if [[ -z "${IK_LLAMA_HASH}" ]]; then
+            echo "ERROR: Could not determine latest commit for ik_llama.cpp" >&2
+            exit 1
+        fi
+        echo "ik_llama.cpp: latest HEAD: ${IK_LLAMA_HASH}"
+    fi
+else
+    IK_LLAMA_HASH="n/a"
+    echo "ik_llama.cpp: skipped (vulkan build)"
+fi
+
 # Resolve llama-swap ref
 if [[ -n "${LS_VERSION:-}" ]]; then
     LS_HASH=$(resolve_ref "${LLAMA_SWAP_REPO}" "${LS_VERSION}") || exit 1
@@ -178,6 +199,7 @@ BUILD_ARGS=(
     --build-arg "LLAMA_COMMIT_HASH=${LLAMA_HASH}"
     --build-arg "WHISPER_COMMIT_HASH=${WHISPER_HASH}"
     --build-arg "SD_COMMIT_HASH=${SD_HASH}"
+    --build-arg "IK_LLAMA_COMMIT_HASH=${IK_LLAMA_HASH}"
     --build-arg "LS_VERSION=${LS_HASH}"
     -t "${DOCKER_IMAGE_TAG}"
     -f "${SCRIPT_DIR}/Dockerfile"
@@ -203,8 +225,13 @@ echo "Verifying build artifacts..."
 echo "=========================================="
 echo ""
 
+EXPECTED_BINARIES=(llama-server llama-cli whisper-server whisper-cli sd-server sd-cli llama-swap)
+if [[ "$BACKEND" == "cuda" ]]; then
+    EXPECTED_BINARIES+=(ik-llama-server)
+fi
+
 MISSING_BINARIES=()
-for binary in llama-server llama-cli whisper-server whisper-cli sd-server sd-cli llama-swap; do
+for binary in "${EXPECTED_BINARIES[@]}"; do
     if ! docker run --rm --entrypoint which "${DOCKER_IMAGE_TAG}" "${binary}" >/dev/null 2>&1; then
         MISSING_BINARIES+=("${binary}")
     fi
@@ -221,7 +248,11 @@ if [[ ${#MISSING_BINARIES[@]} -gt 0 ]]; then
     exit 1
 fi
 
-echo "All expected binaries verified: llama-server, llama-cli, whisper-server, whisper-cli, sd-server, sd-cli, llama-swap"
+VERIFIED_LIST="llama-server, llama-cli, whisper-server, whisper-cli, sd-server, sd-cli, llama-swap"
+if [[ "$BACKEND" == "cuda" ]]; then
+    VERIFIED_LIST="${VERIFIED_LIST}, ik-llama-server"
+fi
+echo "All expected binaries verified: ${VERIFIED_LIST}"
 
 echo ""
 echo "=========================================="
@@ -231,10 +262,13 @@ echo ""
 echo "Image tag: ${DOCKER_IMAGE_TAG}"
 echo ""
 echo "Built with:"
-echo "  llama.cpp:           ${LLAMA_HASH}"
-echo "  whisper.cpp:         ${WHISPER_HASH}"
+echo "  llama.cpp:            ${LLAMA_HASH}"
+echo "  whisper.cpp:          ${WHISPER_HASH}"
 echo "  stable-diffusion.cpp: ${SD_HASH}"
-echo "  llama-swap:          $(docker run --rm --entrypoint cat "${DOCKER_IMAGE_TAG}" /versions.txt | grep llama-swap | cut -d' ' -f2-)"
+if [[ "$BACKEND" == "cuda" ]]; then
+    echo "  ik_llama.cpp:         ${IK_LLAMA_HASH}"
+fi
+echo "  llama-swap:           $(docker run --rm --entrypoint cat "${DOCKER_IMAGE_TAG}" /versions.txt | grep llama-swap | cut -d' ' -f2-)"
 echo ""
 if [[ "$BACKEND" == "vulkan" ]]; then
     echo "Run with:"
