@@ -292,9 +292,10 @@ models:
     #   (increasing this helps avoid 502 errors on slow hardware)
     # - tlsHandshake: TLS handshake timeout in seconds
     # - idleConn: idle connection timeout in seconds
+    # - set any value to 0 to disable that timeout (not recommended)
     timeouts:
       connect: 30
-      responseHeader: 120  # 2 minutes for slower responses
+      responseHeader: 60
       tlsHandshake: 10
       idleConn: 90
 
@@ -443,9 +444,10 @@ peers:
     # timeouts: configure proxy connection timeouts for this peer
     # - optional, defaults shown below
     # - useful when the peer runs on slower hardware
+    # - set any value to 0 to disable that timeout (not recommended)
     timeouts:
       connect: 30
-      responseHeader: 600  # 10 minutes for very slow image generation
+      responseHeader: 60
       tlsHandshake: 10
       idleConn: 90
 

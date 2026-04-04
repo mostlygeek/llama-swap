@@ -323,6 +323,7 @@ models:
     # - optional, defaults shown below
     # - useful for models on slower hardware that need longer timeouts
     # - increase responseHeader to avoid "timeout awaiting response headers" errors
+    # - set any value to 0 to disable that timeout (not recommended)
     timeouts:
       # connect: TCP connection timeout in seconds
       # - default: 30
@@ -331,7 +332,7 @@ models:
       # responseHeader: time to wait for response headers in seconds
       # - default: 60
       # - for slow image generation or large models, consider increasing to 300+ seconds
-      responseHeader: 120
+      responseHeader: 60
 
       # tlsHandshake: TLS handshake timeout in seconds
       # - default: 10
@@ -470,9 +471,10 @@ peers:
     # timeouts: configure proxy connection timeouts for this peer
     # - optional, defaults shown below
     # - useful when the peer runs on slower hardware
+    # - set any value to 0 to disable that timeout (not recommended)
     timeouts:
       connect: 30
-      responseHeader: 600  # 10 minutes for very slow hardware
+      responseHeader: 60
       tlsHandshake: 10
       idleConn: 90
 

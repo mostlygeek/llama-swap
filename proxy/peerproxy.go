@@ -39,6 +39,7 @@ func NewPeerProxy(peers config.PeerDictionaryConfig, proxyLogger *LogMonitor) (*
 
 		// Create a transport with per-peer timeout configuration
 		peerTransport := &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
 			DialContext: (&net.Dialer{
 				Timeout:   time.Duration(peer.Timeouts.Connect) * time.Second,
 				KeepAlive: 30 * time.Second,

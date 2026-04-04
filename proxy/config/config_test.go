@@ -1480,6 +1480,27 @@ models:
 	assert.Equal(t, 90, modelConfig.Timeouts.IdleConn)
 }
 
+func TestConfig_TimeoutsZeroAllowed(t *testing.T) {
+	configYaml := `
+models:
+  model1:
+    cmd: test-server --port ${PORT}
+    timeouts:
+      connect: 0
+      responseHeader: 0
+`
+
+	config, err := LoadConfigFromReader(strings.NewReader(configYaml))
+	require.NoError(t, err)
+
+	modelConfig, found := config.Models["model1"]
+	require.True(t, found, "model1 should exist in config")
+
+	// Explicit 0 should be preserved (disables timeout)
+	assert.Equal(t, 0, modelConfig.Timeouts.Connect)
+	assert.Equal(t, 0, modelConfig.Timeouts.ResponseHeader)
+}
+
 func TestConfig_PeerTimeoutsParsing(t *testing.T) {
 	configYaml := `
 peers:

@@ -99,6 +99,7 @@ func NewProcess(ID string, healthCheckTimeout int, config config.ModelConfig, pr
 
 		// Create custom transport with configured timeouts
 		transport := &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
 			DialContext: (&net.Dialer{
 				Timeout:   time.Duration(config.Timeouts.Connect) * time.Second,
 				KeepAlive: 30 * time.Second,
