@@ -11,10 +11,10 @@ const (
 
 // TimeoutsConfig holds timeout settings for proxy connections
 type TimeoutsConfig struct {
-	Connect             int `yaml:"connect"`             // seconds, 0 = use default (30s)
-	ResponseHeader      int `yaml:"responseHeader"`      // seconds, 0 = use default (60s)
-	TLSHandshake        int `yaml:"tlsHandshake"`        // seconds, 0 = use default (10s)
-	IdleConn            int `yaml:"idleConn"`            // seconds, 0 = use default (90s)
+	Connect        int `yaml:"connect"`        // seconds, 0 = use default (30s)
+	ResponseHeader int `yaml:"responseHeader"` // seconds, 0 = use default (60s)
+	TLSHandshake   int `yaml:"tlsHandshake"`   // seconds, 0 = use default (10s)
+	IdleConn       int `yaml:"idleConn"`       // seconds, 0 = use default (90s)
 }
 
 type ModelConfig struct {
