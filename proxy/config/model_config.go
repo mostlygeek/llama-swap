@@ -11,11 +11,11 @@ const (
 
 // TimeoutsConfig holds timeout settings for proxy connections
 type TimeoutsConfig struct {
-	Connect            int `yaml:"connect"`            // seconds, 0 = no timeout (not recommended)
-	ResponseHeader     int `yaml:"responseHeader"`     // seconds, 0 = no timeout (not recommended)
-	TLSHandshake       int `yaml:"tlsHandshake"`       // seconds, 0 = no timeout (not recommended)
-	ExpectContinue     int `yaml:"expectContinue"`     // seconds, 0 = no timeout (not recommended)
-	IdleConn           int `yaml:"idleConn"`           // seconds, 0 = no timeout (not recommended)
+	Connect        int `yaml:"connect"`        // seconds, 0 = no timeout (not recommended)
+	ResponseHeader int `yaml:"responseHeader"` // seconds, 0 = no timeout (not recommended)
+	TLSHandshake   int `yaml:"tlsHandshake"`   // seconds, 0 = no timeout (not recommended)
+	ExpectContinue int `yaml:"expectContinue"` // seconds, 0 = no timeout (not recommended)
+	IdleConn       int `yaml:"idleConn"`       // seconds, 0 = no timeout (not recommended)
 }
 
 type ModelConfig struct {
