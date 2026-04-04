@@ -571,19 +571,21 @@ func (w *panicOnWriteResponseWriter) Write(b []byte) (int, error) {
 	return w.ResponseRecorder.Write(b)
 }
 
-func TestProcess_CustomHTTPTimeouts(t *testing.T) {
-	config := config.ModelConfig{
+func TestProcess_CustomTimeouts(t *testing.T) {
+	modelConfig := config.ModelConfig{
 		Cmd:           "echo test",
 		Proxy:         "http://localhost:8080",
 		CheckEndpoint: "/health",
-		HTTPTimeout: config.HTTPTimeoutConfig{
-			ConnectTimeout:        45,
-			ResponseHeaderTimeout: 120,
+		Timeouts: config.TimeoutsConfig{
+			Connect:        45,
+			ResponseHeader: 120,
+			TLSHandshake:   15,
+			IdleConn:       120,
 		},
 	}
 
 	debugLogger := NewLogMonitorWriter(io.Discard)
-	process := NewProcess("test-model", 30, config, debugLogger, debugLogger)
+	process := NewProcess("test-model", 30, modelConfig, debugLogger, debugLogger)
 
 	// Verify the process was created successfully
 	assert.NotNil(t, process)
@@ -596,9 +598,9 @@ func TestProcess_CustomHTTPTimeouts(t *testing.T) {
 	assert.True(t, ok, "Transport should be *http.Transport")
 	assert.NotNil(t, transport)
 
-	// Verify the timeouts are in the expected range
-	// Note: We can't directly access the DialContext timeout, but we can verify
-	// that the transport was created and is configured
-	assert.NotZero(t, transport.ResponseHeaderTimeout)
+	// Verify the timeouts are correctly applied
 	assert.Equal(t, 120*time.Second, transport.ResponseHeaderTimeout)
+	assert.Equal(t, 15*time.Second, transport.TLSHandshakeTimeout)
+	assert.Equal(t, 120*time.Second, transport.IdleConnTimeout)
+	assert.True(t, transport.ForceAttemptHTTP2)
 }

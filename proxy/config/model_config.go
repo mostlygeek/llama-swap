@@ -9,10 +9,12 @@ const (
 	MODEL_CONFIG_DEFAULT_TTL = -1
 )
 
-// HTTPTimeoutConfig holds HTTP timeout settings for proxy connections
-type HTTPTimeoutConfig struct {
-	ConnectTimeout        int `yaml:"connectTimeout"`        // seconds, 0 = use proxy default (30s)
-	ResponseHeaderTimeout int `yaml:"responseHeaderTimeout"` // seconds, 0 = use proxy default (60s)
+// TimeoutsConfig holds timeout settings for proxy connections
+type TimeoutsConfig struct {
+	Connect             int `yaml:"connect"`             // seconds, 0 = use default (30s)
+	ResponseHeader      int `yaml:"responseHeader"`      // seconds, 0 = use default (60s)
+	TLSHandshake        int `yaml:"tlsHandshake"`        // seconds, 0 = use default (10s)
+	IdleConn            int `yaml:"idleConn"`            // seconds, 0 = use default (90s)
 }
 
 type ModelConfig struct {
@@ -47,8 +49,8 @@ type ModelConfig struct {
 	// override global setting
 	SendLoadingState *bool `yaml:"sendLoadingState"`
 
-	// HTTP timeout settings for proxy connections
-	HTTPTimeout HTTPTimeoutConfig `yaml:"httpTimeout"`
+	// Timeout settings for proxy connections
+	Timeouts TimeoutsConfig `yaml:"timeouts"`
 }
 
 func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
@@ -66,6 +68,12 @@ func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		ConcurrencyLimit: 0,
 		Name:             "",
 		Description:      "",
+		Timeouts: TimeoutsConfig{
+			Connect:        30,
+			ResponseHeader: 60,
+			TLSHandshake:   10,
+			IdleConn:       90,
+		},
 	}
 
 	// the default cmdStop to taskkill /f /t /pid ${PID}

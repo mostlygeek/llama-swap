@@ -284,15 +284,19 @@ models:
     # - optional, default: undefined (use global setting)
     sendLoadingState: false
 
-    # httpTimeout: configure HTTP timeouts for proxy connections to this model
-    # - optional, default: unset (uses defaults: connectTimeout=30s, responseHeaderTimeout=60s)
+    # timeouts: configure proxy connection timeouts for this model
+    # - optional, defaults shown below
     # - useful for models running on slower hardware that need longer timeouts
-    # - connectTimeout: TCP connection timeout in seconds
-    # - responseHeaderTimeout: time to wait for response headers in seconds
+    # - connect: TCP connection timeout in seconds
+    # - responseHeader: time to wait for response headers in seconds
     #   (increasing this helps avoid 502 errors on slow hardware)
-    httpTimeout:
-      connectTimeout: 30
-      responseHeaderTimeout: 120  # 2 minutes for slower responses
+    # - tlsHandshake: TLS handshake timeout in seconds
+    # - idleConn: idle connection timeout in seconds
+    timeouts:
+      connect: 30
+      responseHeader: 120  # 2 minutes for slower responses
+      tlsHandshake: 10
+      idleConn: 90
 
   # Unlisted model example:
   "qwen-unlisted":
@@ -436,12 +440,14 @@ peers:
       - z-ai/glm-4.7
       - moonshotai/kimi-k2-0905
       - minimax/minimax-m2.1
-    # httpTimeout: configure HTTP timeouts for connections to this peer
-    # - optional, default: unset (uses defaults)
-    # - useful when the peer runs on lower-end hardware
-    httpTimeout:
-      connectTimeout: 30
-      responseHeaderTimeout: 600  # 10 minutes for very slow image generation
+    # timeouts: configure proxy connection timeouts for this peer
+    # - optional, defaults shown below
+    # - useful when the peer runs on slower hardware
+    timeouts:
+      connect: 30
+      responseHeader: 600  # 10 minutes for very slow image generation
+      tlsHandshake: 10
+      idleConn: 90
 
     # filters: a dictionary of filter settings for peer requests
     # - optional, default: empty dictionary

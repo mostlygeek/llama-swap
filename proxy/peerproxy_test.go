@@ -268,7 +268,7 @@ func TestProxyRequest_SSEHeaderModification(t *testing.T) {
 	assert.Equal(t, "no", w.Header().Get("X-Accel-Buffering"))
 }
 
-func TestNewPeerProxy_CustomHTTPTimeouts(t *testing.T) {
+func TestNewPeerProxy_CustomTimeouts(t *testing.T) {
 	proxyURL, _ := url.Parse("http://localhost:8080")
 
 	peers := config.PeerDictionaryConfig{
@@ -276,9 +276,11 @@ func TestNewPeerProxy_CustomHTTPTimeouts(t *testing.T) {
 			Proxy:    "http://localhost:8080",
 			ProxyURL: proxyURL,
 			Models:   []string{"model1"},
-			HTTPTimeout: config.HTTPTimeoutConfig{
-				ConnectTimeout:        45,
-				ResponseHeaderTimeout: 300,
+			Timeouts: config.TimeoutsConfig{
+				Connect:        45,
+				ResponseHeader: 300,
+				TLSHandshake:   15,
+				IdleConn:       120,
 			},
 		},
 	}
@@ -298,8 +300,10 @@ func TestNewPeerProxy_CustomHTTPTimeouts(t *testing.T) {
 	transport, ok := member.reverseProxy.Transport.(*http.Transport)
 	require.True(t, ok, "Transport should be *http.Transport")
 
-	// Verify ResponseHeaderTimeout is set to 300 seconds
+	// Verify all timeout values are correctly applied
 	assert.Equal(t, 300*time.Second, transport.ResponseHeaderTimeout)
+	assert.Equal(t, 15*time.Second, transport.TLSHandshakeTimeout)
+	assert.Equal(t, 120*time.Second, transport.IdleConnTimeout)
 	// ForceAttemptHTTP2 should be enabled
 	assert.True(t, transport.ForceAttemptHTTP2)
 }

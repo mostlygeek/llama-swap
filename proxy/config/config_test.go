@@ -1440,14 +1440,14 @@ models:
 
 }
 
-func TestConfig_HTTPTimeoutParsing(t *testing.T) {
+func TestConfig_TimeoutsParsing(t *testing.T) {
 	configYaml := `
 models:
   model1:
     cmd: test-server --port ${PORT}
-    httpTimeout:
-      connectTimeout: 45
-      responseHeaderTimeout: 120
+    timeouts:
+      connect: 45
+      responseHeader: 120
 `
 
 	config, err := LoadConfigFromReader(strings.NewReader(configYaml))
@@ -1456,11 +1456,11 @@ models:
 	modelConfig, found := config.Models["model1"]
 	require.True(t, found, "model1 should exist in config")
 
-	assert.Equal(t, 45, modelConfig.HTTPTimeout.ConnectTimeout)
-	assert.Equal(t, 120, modelConfig.HTTPTimeout.ResponseHeaderTimeout)
+	assert.Equal(t, 45, modelConfig.Timeouts.Connect)
+	assert.Equal(t, 120, modelConfig.Timeouts.ResponseHeader)
 }
 
-func TestConfig_HTTPTimeoutDefaults(t *testing.T) {
+func TestConfig_TimeoutsDefaults(t *testing.T) {
 	configYaml := `
 models:
   model1:
@@ -1473,20 +1473,22 @@ models:
 	modelConfig, found := config.Models["model1"]
 	require.True(t, found, "model1 should exist in config")
 
-	// When httpTimeout is not specified, values should be 0 (zero values)
-	assert.Equal(t, 0, modelConfig.HTTPTimeout.ConnectTimeout)
-	assert.Equal(t, 0, modelConfig.HTTPTimeout.ResponseHeaderTimeout)
+	// Default values should be set during unmarshaling
+	assert.Equal(t, 30, modelConfig.Timeouts.Connect)
+	assert.Equal(t, 60, modelConfig.Timeouts.ResponseHeader)
+	assert.Equal(t, 10, modelConfig.Timeouts.TLSHandshake)
+	assert.Equal(t, 90, modelConfig.Timeouts.IdleConn)
 }
 
-func TestConfig_PeerHTTPTimeoutParsing(t *testing.T) {
+func TestConfig_PeerTimeoutsParsing(t *testing.T) {
 	configYaml := `
 peers:
   peer1:
     proxy: http://example.com
     models: [model1]
-    httpTimeout:
-      connectTimeout: 45
-      responseHeaderTimeout: 120
+    timeouts:
+      connect: 45
+      responseHeader: 120
 `
 
 	config, err := LoadConfigFromReader(strings.NewReader(configYaml))
@@ -1495,11 +1497,11 @@ peers:
 	peerConfig, found := config.Peers["peer1"]
 	require.True(t, found, "peer1 should exist in config")
 
-	assert.Equal(t, 45, peerConfig.HTTPTimeout.ConnectTimeout)
-	assert.Equal(t, 120, peerConfig.HTTPTimeout.ResponseHeaderTimeout)
+	assert.Equal(t, 45, peerConfig.Timeouts.Connect)
+	assert.Equal(t, 120, peerConfig.Timeouts.ResponseHeader)
 }
 
-func TestConfig_PeerHTTPTimeoutDefaults(t *testing.T) {
+func TestConfig_PeerTimeoutsDefaults(t *testing.T) {
 	configYaml := `
 peers:
   peer1:
@@ -1513,8 +1515,9 @@ peers:
 	peerConfig, found := config.Peers["peer1"]
 	require.True(t, found, "peer1 should exist in config")
 
-	// When httpTimeout is not specified, values should be 0 (zero values)
-	// The proxy will apply defaults (30s/60s) when creating the transport
-	assert.Equal(t, 0, peerConfig.HTTPTimeout.ConnectTimeout)
-	assert.Equal(t, 0, peerConfig.HTTPTimeout.ResponseHeaderTimeout)
+	// Default values should be set during unmarshaling
+	assert.Equal(t, 30, peerConfig.Timeouts.Connect)
+	assert.Equal(t, 60, peerConfig.Timeouts.ResponseHeader)
+	assert.Equal(t, 10, peerConfig.Timeouts.TLSHandshake)
+	assert.Equal(t, 90, peerConfig.Timeouts.IdleConn)
 }

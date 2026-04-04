@@ -241,6 +241,37 @@
                         "type": "boolean",
                         "default": false,
                         "description": "If true the model will not show up in /v1/models responses. It can still be used as normal in API requests."
+                    },
+                    "timeouts": {
+                        "type": "object",
+                        "properties": {
+                            "connect": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "default": 30,
+                                "description": "TCP connection timeout in seconds."
+                            },
+                            "responseHeader": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "default": 60,
+                                "description": "Time to wait for response headers in seconds. Increase this to avoid 'timeout awaiting response headers' errors on slow hardware."
+                            },
+                            "tlsHandshake": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "default": 10,
+                                "description": "TLS handshake timeout in seconds."
+                            },
+                            "idleConn": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "default": 90,
+                                "description": "Idle connection timeout in seconds."
+                            }
+                        },
+                        "additionalProperties": false,
+                        "description": "Timeout settings for proxy connections to this model."
                     }
                 }
             }
@@ -367,6 +398,37 @@
                         "additionalProperties": false,
                         "default": {},
                         "description": "Dictionary of filter settings for peer requests. Supports stripParams and setParams."
+                    },
+                    "timeouts": {
+                        "type": "object",
+                        "properties": {
+                            "connect": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "default": 30,
+                                "description": "TCP connection timeout in seconds."
+                            },
+                            "responseHeader": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "default": 60,
+                                "description": "Time to wait for response headers in seconds."
+                            },
+                            "tlsHandshake": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "default": 10,
+                                "description": "TLS handshake timeout in seconds."
+                            },
+                            "idleConn": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "default": 90,
+                                "description": "Idle connection timeout in seconds."
+                            }
+                        },
+                        "additionalProperties": false,
+                        "description": "Timeout settings for proxy connections to this peer."
                     }
                 }
             },

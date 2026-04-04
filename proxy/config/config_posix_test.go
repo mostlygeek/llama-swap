@@ -187,6 +187,12 @@ groups:
 				Name:             "Model 1",
 				Description:      "This is model 1",
 				SendLoadingState: &modelLoadingState,
+				Timeouts: TimeoutsConfig{
+					Connect:        30,
+					ResponseHeader: 60,
+					TLSHandshake:   10,
+					IdleConn:       90,
+				},
 			},
 			"model2": {
 				Cmd:              "path/to/server --arg1 one",
@@ -195,6 +201,12 @@ groups:
 				Env:              []string{},
 				CheckEndpoint:    "/",
 				SendLoadingState: &modelLoadingState,
+				Timeouts: TimeoutsConfig{
+					Connect:        30,
+					ResponseHeader: 60,
+					TLSHandshake:   10,
+					IdleConn:       90,
+				},
 			},
 			"model3": {
 				Cmd:              "path/to/cmd --arg1 one",
@@ -203,6 +215,12 @@ groups:
 				Env:              []string{},
 				CheckEndpoint:    "/",
 				SendLoadingState: &modelLoadingState,
+				Timeouts: TimeoutsConfig{
+					Connect:        30,
+					ResponseHeader: 60,
+					TLSHandshake:   10,
+					IdleConn:       90,
+				},
 			},
 			"model4": {
 				Cmd:              "path/to/cmd --arg1 one",
@@ -211,6 +229,12 @@ groups:
 				Aliases:          []string{},
 				Env:              []string{},
 				SendLoadingState: &modelLoadingState,
+				Timeouts: TimeoutsConfig{
+					Connect:        30,
+					ResponseHeader: 60,
+					TLSHandshake:   10,
+					IdleConn:       90,
+				},
 			},
 		},
 		HealthCheckTimeout: 15,

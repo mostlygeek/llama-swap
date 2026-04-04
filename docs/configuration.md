@@ -319,21 +319,27 @@ models:
     # - recommended to be omitted and the default used
     concurrencyLimit: 0
 
-    # httpTimeout: configure HTTP timeouts for connections to this model
-    # - optional, default: unset (uses internal defaults)
-    # - when omitted, connectTimeout defaults to 30 seconds
-    # - when omitted, responseHeaderTimeout defaults to 60 seconds
+    # timeouts: configure proxy connection timeouts for this model
+    # - optional, defaults shown below
     # - useful for models on slower hardware that need longer timeouts
-    # - increase responseHeaderTimeout to avoid "timeout awaiting response headers" errors
-    httpTimeout:
-      # connectTimeout: TCP connection timeout in seconds
-      # - optional, default: 30
-      connectTimeout: 30
+    # - increase responseHeader to avoid "timeout awaiting response headers" errors
+    timeouts:
+      # connect: TCP connection timeout in seconds
+      # - default: 30
+      connect: 30
 
-      # responseHeaderTimeout: time to wait for response headers in seconds
-      # - optional, default: 60
+      # responseHeader: time to wait for response headers in seconds
+      # - default: 60
       # - for slow image generation or large models, consider increasing to 300+ seconds
-      responseHeaderTimeout: 120
+      responseHeader: 120
+
+      # tlsHandshake: TLS handshake timeout in seconds
+      # - default: 10
+      tlsHandshake: 10
+
+      # idleConn: idle connection timeout in seconds
+      # - default: 90
+      idleConn: 90
 
     # sendLoadingState: overrides the global sendLoadingState setting for this model
     # - optional, default: undefined (use global setting)
@@ -461,12 +467,14 @@ peers:
     # - requested path to llama-swap will be appended to the end of the proxy value
     proxy: http://192.168.1.23
 
-    # httpTimeout: configure HTTP timeouts for connections to this peer
-    # - optional, default: unset (uses internal defaults)
+    # timeouts: configure proxy connection timeouts for this peer
+    # - optional, defaults shown below
     # - useful when the peer runs on slower hardware
-    httpTimeout:
-      connectTimeout: 30
-      responseHeaderTimeout: 600  # 10 minutes for very slow hardware
+    timeouts:
+      connect: 30
+      responseHeader: 600  # 10 minutes for very slow hardware
+      tlsHandshake: 10
+      idleConn: 90
 
     # models: a list of models served by the peer
     # - required

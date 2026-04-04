@@ -40,16 +40,16 @@ func NewPeerProxy(peers config.PeerDictionaryConfig, proxyLogger *LogMonitor) (*
 		// Create a transport with per-peer timeout configuration
 		peerTransport := &http.Transport{
 			DialContext: (&net.Dialer{
-				Timeout:   time.Duration(timeoutSecondsOrDefault(peer.HTTPTimeout.ConnectTimeout, 30)) * time.Second,
+				Timeout:   time.Duration(peer.Timeouts.Connect) * time.Second,
 				KeepAlive: 30 * time.Second,
 			}).DialContext,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ResponseHeaderTimeout: time.Duration(timeoutSecondsOrDefault(peer.HTTPTimeout.ResponseHeaderTimeout, 60)) * time.Second,
+			TLSHandshakeTimeout:   time.Duration(peer.Timeouts.TLSHandshake) * time.Second,
+			ResponseHeaderTimeout: time.Duration(peer.Timeouts.ResponseHeader) * time.Second,
 			ExpectContinueTimeout: 1 * time.Second,
 			ForceAttemptHTTP2:     true,
 			MaxIdleConns:          100,
 			MaxIdleConnsPerHost:   10,
-			IdleConnTimeout:       90 * time.Second,
+			IdleConnTimeout:       time.Duration(peer.Timeouts.IdleConn) * time.Second,
 		}
 
 		// Create reverse proxy for this peer
