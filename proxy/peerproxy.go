@@ -46,7 +46,7 @@ func NewPeerProxy(peers config.PeerDictionaryConfig, proxyLogger *LogMonitor) (*
 			}).DialContext,
 			TLSHandshakeTimeout:   time.Duration(peer.Timeouts.TLSHandshake) * time.Second,
 			ResponseHeaderTimeout: time.Duration(peer.Timeouts.ResponseHeader) * time.Second,
-			ExpectContinueTimeout: 1 * time.Second,
+			ExpectContinueTimeout: time.Duration(peer.Timeouts.ExpectContinue) * time.Second,
 			ForceAttemptHTTP2:     true,
 			MaxIdleConns:          100,
 			MaxIdleConnsPerHost:   10,

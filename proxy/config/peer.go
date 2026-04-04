@@ -28,6 +28,7 @@ func (c *PeerConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 			Connect:        30,
 			ResponseHeader: 60,
 			TLSHandshake:   10,
+			ExpectContinue: 1,
 			IdleConn:       90,
 		},
 	}

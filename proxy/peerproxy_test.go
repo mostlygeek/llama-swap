@@ -280,6 +280,7 @@ func TestNewPeerProxy_CustomTimeouts(t *testing.T) {
 				Connect:        45,
 				ResponseHeader: 300,
 				TLSHandshake:   15,
+				ExpectContinue: 2,
 				IdleConn:       120,
 			},
 		},
@@ -303,6 +304,7 @@ func TestNewPeerProxy_CustomTimeouts(t *testing.T) {
 	// Verify all timeout values are correctly applied
 	assert.Equal(t, 300*time.Second, transport.ResponseHeaderTimeout)
 	assert.Equal(t, 15*time.Second, transport.TLSHandshakeTimeout)
+	assert.Equal(t, 2*time.Second, transport.ExpectContinueTimeout)
 	assert.Equal(t, 120*time.Second, transport.IdleConnTimeout)
 	// ForceAttemptHTTP2 should be enabled
 	assert.True(t, transport.ForceAttemptHTTP2)

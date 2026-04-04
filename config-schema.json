@@ -61,6 +61,12 @@
                     "default": 10,
                     "description": "TLS handshake timeout in seconds. Set to 0 to disable (not recommended)."
                 },
+                "expectContinue": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 1,
+                    "description": "Expect-Continue timeout in seconds. Set to 0 to disable (not recommended)."
+                },
                 "idleConn": {
                     "type": "integer",
                     "minimum": 0,
