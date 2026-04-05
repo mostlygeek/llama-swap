@@ -323,6 +323,26 @@ models:
     # - optional, default: undefined (use global setting)
     sendLoadingState: false
 
+    # priority: controls swap order within a group when swap is true
+    # - optional, default: 0
+    # - higher values are served before lower values
+    # - when a higher-priority model has pending requests, lower-priority models
+    #   yield after their current in-flight request completes (never aborted)
+    # - models with equal priority compete fairly
+    priority: 0
+
+    # unloadDelay: seconds to keep a model loaded after its last request
+    # - optional, default: 0 (disabled)
+    # - while the delay is active, lower-or-equal-priority models wait before
+    #   swapping in, letting follow-up requests reuse an already-loaded model
+    # - a model with strictly higher priority bypasses the delay immediately
+    #   and this bypass is logged at INFO level
+    # - if a new request for this model arrives while the delay is active, the
+    #   timer resets: the full delay runs again from when that request finishes
+    # - most useful when combined with priority; has little practical effect
+    #   without it, since equal-priority models also wait for the delay
+    unloadDelay: 0
+
   # Unlisted model example:
   "qwen-unlisted":
     # unlisted: boolean, true or false

@@ -40,6 +40,24 @@ type ModelConfig struct {
 
 	// override global setting
 	SendLoadingState *bool `yaml:"sendLoadingState"`
+
+	// Priority controls swap order within a group (swap: true).
+	// Higher values win. Default is 0. A higher-priority model preempts
+	// a lower-priority model after the lower-priority model's current
+	// in-flight request completes.
+	Priority int `yaml:"priority"`
+
+	// UnloadDelay keeps a model loaded for the given number of seconds after
+	// its last in-flight request completes, so that follow-up requests can
+	// reuse the already-loaded model without paying a cold-start penalty.
+	// While the delay is active, lower-or-equal-priority models wait before
+	// swapping in. A model with strictly higher priority bypasses the delay
+	// immediately (logged at INFO level). If a new request for this model
+	// arrives while the delay is active, the timer resets: the full delay
+	// runs again from when that request finishes. Only meaningful in swap
+	// groups with priority set; equal-priority models also wait for the delay.
+	// Default 0 (disabled).
+	UnloadDelay int `yaml:"unloadDelay"`
 }
 
 func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
