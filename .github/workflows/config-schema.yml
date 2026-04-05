@@ -5,12 +5,14 @@ on:
     paths:
       - "config-schema.json"
       - "config.example.yaml"
+      - ".github/workflows/config-schema.yml"
   push:
     branches:
       - main
     paths:
       - "config-schema.json"
       - "config.example.yaml"
+      - ".github/workflows/config-schema.yml"
 
   workflow_dispatch:
 
