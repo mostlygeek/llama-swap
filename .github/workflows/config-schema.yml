@@ -4,11 +4,13 @@ on:
   pull_request:
     paths:
       - "config-schema.json"
+      - "config.example.yaml"
   push:
     branches:
       - main
     paths:
       - "config-schema.json"
+      - "config.example.yaml"
 
   workflow_dispatch:
 
@@ -39,3 +41,14 @@ jobs:
           fi
 
           echo "✓ config-schema.json is valid"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install check-jsonschema
+        run: pip install check-jsonschema
+
+      - name: Validate config.example.yaml against schema
+        run: check-jsonschema --schemafile config-schema.json config.example.yaml
