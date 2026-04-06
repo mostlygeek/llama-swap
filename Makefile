@@ -16,9 +16,15 @@ BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 GOOS ?= $(shell go env GOOS 2>/dev/null || echo linux)
 GOARCH ?= $(shell go env GOARCH 2>/dev/null || echo amd64)
 
-# build on raspi
-ifeq ($(GOARCH),aarch64)
-  GOARCH := arm64
+BUILD_ARCH := $(GOARCH)
+OUTPUT_ARCH := $(GOARCH)
+
+# build on raspi (or arm linux)
+ifeq ($(GOOS),linux)
+  ifeq ($(filter aarch64 arm64,$(GOARCH)),$(GOARCH))
+    BUILD_ARCH := arm64
+    OUTPUT_ARCH := aarch64
+  endif
 endif
 
 # Default target: Builds binaries for both OSX and Linux
@@ -58,8 +64,8 @@ mac: ui
 
 # Build Linux binary
 linux: ui
-	@echo "Building Linux binary for $(GOOS)/$(GOARCH)..."
-	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-$(GOOS)-$(GOARCH)
+	@echo "Building Linux binary for $(GOOS)/$(BUILD_ARCH)..."
+	GOOS=$(GOOS) GOARCH=$(BUILD_ARCH) go build -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-$(GOOS)-$(OUTPUT_ARCH)
 
 # Build Windows binary
 windows: ui
