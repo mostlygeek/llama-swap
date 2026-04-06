@@ -39,6 +39,43 @@
             },
             "default": {},
             "description": "A dictionary of string substitutions. Macros are reusable snippets used in model cmd, cmdStop, proxy, checkEndpoint, filters.stripParams. Macro names must be <64 chars, match ^[a-zA-Z0-9_-]+$, and not be PORT or MODEL_ID. Values can be string, number, or boolean. Macros can reference other macros defined before them."
+        },
+        "timeouts": {
+            "type": "object",
+            "properties": {
+                "connect": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 30,
+                    "description": "TCP connection timeout in seconds. Set to 0 to disable (not recommended)."
+                },
+                "responseHeader": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 60,
+                    "description": "Time to wait for response headers in seconds. Set to 0 to disable (not recommended)."
+                },
+                "tlsHandshake": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 10,
+                    "description": "TLS handshake timeout in seconds. Set to 0 to disable (not recommended)."
+                },
+                "expectContinue": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 1,
+                    "description": "Expect-Continue timeout in seconds. Set to 0 to disable (not recommended)."
+                },
+                "idleConn": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 90,
+                    "description": "Idle connection timeout in seconds. Set to 0 to disable (not recommended)."
+                }
+            },
+            "additionalProperties": false,
+            "description": "Timeout settings for proxy connections."
         }
     },
     "properties": {
@@ -241,6 +278,9 @@
                         "type": "boolean",
                         "default": false,
                         "description": "If true the model will not show up in /v1/models responses. It can still be used as normal in API requests."
+                    },
+                    "timeouts": {
+                        "$ref": "#/definitions/timeouts"
                     }
                 }
             }
@@ -367,6 +407,37 @@
                         "additionalProperties": false,
                         "default": {},
                         "description": "Dictionary of filter settings for peer requests. Supports stripParams and setParams."
+                    },
+                    "timeouts": {
+                        "type": "object",
+                        "properties": {
+                            "connect": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "default": 30,
+                                "description": "TCP connection timeout in seconds."
+                            },
+                            "responseHeader": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "default": 60,
+                                "description": "Time to wait for response headers in seconds."
+                            },
+                            "tlsHandshake": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "default": 10,
+                                "description": "TLS handshake timeout in seconds."
+                            },
+                            "idleConn": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "default": 90,
+                                "description": "Idle connection timeout in seconds."
+                            }
+                        },
+                        "additionalProperties": false,
+                        "description": "Timeout settings for proxy connections to this peer."
                     }
                 }
             },

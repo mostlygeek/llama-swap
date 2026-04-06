@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mostlygeek/llama-swap/proxy/config"
 	"github.com/stretchr/testify/assert"
@@ -265,4 +266,46 @@ func TestProxyRequest_SSEHeaderModification(t *testing.T) {
 	assert.NoError(t, err)
 	// The X-Accel-Buffering header should be set to "no" for SSE
 	assert.Equal(t, "no", w.Header().Get("X-Accel-Buffering"))
+}
+
+func TestNewPeerProxy_CustomTimeouts(t *testing.T) {
+	proxyURL, _ := url.Parse("http://localhost:8080")
+
+	peers := config.PeerDictionaryConfig{
+		"test-peer": config.PeerConfig{
+			Proxy:    "http://localhost:8080",
+			ProxyURL: proxyURL,
+			Models:   []string{"model1"},
+			Timeouts: config.TimeoutsConfig{
+				Connect:        45,
+				ResponseHeader: 300,
+				TLSHandshake:   15,
+				ExpectContinue: 2,
+				IdleConn:       120,
+			},
+		},
+	}
+
+	peerProxy, err := NewPeerProxy(peers, testLogger)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, peerProxy)
+	assert.True(t, peerProxy.HasPeerModel("model1"))
+
+	// Verify the timeout values are actually applied to the transport
+	member, found := peerProxy.proxyMap["model1"]
+	require.True(t, found, "model1 should exist in proxyMap")
+	assert.NotNil(t, member.reverseProxy)
+	assert.NotNil(t, member.reverseProxy.Transport)
+
+	transport, ok := member.reverseProxy.Transport.(*http.Transport)
+	require.True(t, ok, "Transport should be *http.Transport")
+
+	// Verify all timeout values are correctly applied
+	assert.Equal(t, 300*time.Second, transport.ResponseHeaderTimeout)
+	assert.Equal(t, 15*time.Second, transport.TLSHandshakeTimeout)
+	assert.Equal(t, 2*time.Second, transport.ExpectContinueTimeout)
+	assert.Equal(t, 120*time.Second, transport.IdleConnTimeout)
+	// ForceAttemptHTTP2 should be enabled
+	assert.True(t, transport.ForceAttemptHTTP2)
 }

@@ -21,6 +21,7 @@ llama-swap is a light weight, transparent proxy server that provides automatic m
 
 - Follow test naming conventions like `TestProxyManager_<test name>`, `TestProcessGroup_<test name>`, etc.
 - Use `go test -v -run <name pattern for new tests>` to run any new tests you've written.
+- Run `gofmt -l .` before committing to verify formatting. Fix any reported files with `gofmt -w <file>`.
 - Use `make test-dev` after running new tests for a quick over all test run. This runs `go test` and `staticcheck`. Fix any static checking errors. Use this only when changes are made to any code under the `proxy/` directory
 - Use `make test-all` before completing work. This includes long running concurrency tests.
 

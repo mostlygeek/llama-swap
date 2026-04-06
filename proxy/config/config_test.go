@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestConfig_GroupMemberIsUnique(t *testing.T) {
@@ -1437,4 +1438,109 @@ models:
 		assert.Equal(t, []string{"real-value"}, config.RequiredAPIKeys)
 	})
 
+}
+
+func TestConfig_TimeoutsParsing(t *testing.T) {
+	configYaml := `
+models:
+  model1:
+    cmd: test-server --port ${PORT}
+    timeouts:
+      connect: 45
+      responseHeader: 120
+`
+
+	config, err := LoadConfigFromReader(strings.NewReader(configYaml))
+	require.NoError(t, err)
+
+	modelConfig, found := config.Models["model1"]
+	require.True(t, found, "model1 should exist in config")
+
+	assert.Equal(t, 45, modelConfig.Timeouts.Connect)
+	assert.Equal(t, 120, modelConfig.Timeouts.ResponseHeader)
+}
+
+func TestConfig_TimeoutsDefaults(t *testing.T) {
+	configYaml := `
+models:
+  model1:
+    cmd: test-server --port ${PORT}
+`
+
+	config, err := LoadConfigFromReader(strings.NewReader(configYaml))
+	require.NoError(t, err)
+
+	modelConfig, found := config.Models["model1"]
+	require.True(t, found, "model1 should exist in config")
+
+	// Default values should be set during unmarshaling
+	assert.Equal(t, 30, modelConfig.Timeouts.Connect)
+	assert.Equal(t, 60, modelConfig.Timeouts.ResponseHeader)
+	assert.Equal(t, 10, modelConfig.Timeouts.TLSHandshake)
+	assert.Equal(t, 1, modelConfig.Timeouts.ExpectContinue)
+	assert.Equal(t, 90, modelConfig.Timeouts.IdleConn)
+}
+
+func TestConfig_TimeoutsZeroAllowed(t *testing.T) {
+	configYaml := `
+models:
+  model1:
+    cmd: test-server --port ${PORT}
+    timeouts:
+      connect: 0
+      responseHeader: 0
+`
+
+	config, err := LoadConfigFromReader(strings.NewReader(configYaml))
+	require.NoError(t, err)
+
+	modelConfig, found := config.Models["model1"]
+	require.True(t, found, "model1 should exist in config")
+
+	// Explicit 0 should be preserved (disables timeout)
+	assert.Equal(t, 0, modelConfig.Timeouts.Connect)
+	assert.Equal(t, 0, modelConfig.Timeouts.ResponseHeader)
+}
+
+func TestConfig_PeerTimeoutsParsing(t *testing.T) {
+	configYaml := `
+peers:
+  peer1:
+    proxy: http://example.com
+    models: [model1]
+    timeouts:
+      connect: 45
+      responseHeader: 120
+`
+
+	config, err := LoadConfigFromReader(strings.NewReader(configYaml))
+	require.NoError(t, err)
+
+	peerConfig, found := config.Peers["peer1"]
+	require.True(t, found, "peer1 should exist in config")
+
+	assert.Equal(t, 45, peerConfig.Timeouts.Connect)
+	assert.Equal(t, 120, peerConfig.Timeouts.ResponseHeader)
+}
+
+func TestConfig_PeerTimeoutsDefaults(t *testing.T) {
+	configYaml := `
+peers:
+  peer1:
+    proxy: http://example.com
+    models: [model1]
+`
+
+	config, err := LoadConfigFromReader(strings.NewReader(configYaml))
+	require.NoError(t, err)
+
+	peerConfig, found := config.Peers["peer1"]
+	require.True(t, found, "peer1 should exist in config")
+
+	// Default values should be set during unmarshaling
+	assert.Equal(t, 30, peerConfig.Timeouts.Connect)
+	assert.Equal(t, 60, peerConfig.Timeouts.ResponseHeader)
+	assert.Equal(t, 10, peerConfig.Timeouts.TLSHandshake)
+	assert.Equal(t, 1, peerConfig.Timeouts.ExpectContinue)
+	assert.Equal(t, 90, peerConfig.Timeouts.IdleConn)
 }

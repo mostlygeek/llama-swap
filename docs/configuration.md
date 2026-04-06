@@ -319,6 +319,29 @@ models:
     # - recommended to be omitted and the default used
     concurrencyLimit: 0
 
+    # timeouts: configure proxy connection timeouts for this model
+    # - optional, defaults shown below
+    # - useful for models on slower hardware that need longer timeouts
+    # - increase responseHeader to avoid "timeout awaiting response headers" errors
+    # - set any value to 0 to disable that timeout (not recommended)
+    timeouts:
+      # connect: TCP connection timeout in seconds
+      # - default: 30
+      connect: 30
+
+      # responseHeader: time to wait for response headers in seconds
+      # - default: 60
+      # - for slow image generation or large models, consider increasing to 300+ seconds
+      responseHeader: 60
+
+      # tlsHandshake: TLS handshake timeout in seconds
+      # - default: 10
+      tlsHandshake: 10
+
+      # idleConn: idle connection timeout in seconds
+      # - default: 90
+      idleConn: 90
+
     # sendLoadingState: overrides the global sendLoadingState setting for this model
     # - optional, default: undefined (use global setting)
     sendLoadingState: false
@@ -444,6 +467,17 @@ peers:
     # - required
     # - requested path to llama-swap will be appended to the end of the proxy value
     proxy: http://192.168.1.23
+
+    # timeouts: configure proxy connection timeouts for this peer
+    # - optional, defaults shown below
+    # - useful when the peer runs on slower hardware
+    # - set any value to 0 to disable that timeout (not recommended)
+    timeouts:
+      connect: 30
+      responseHeader: 60
+      tlsHandshake: 10
+      idleConn: 90
+
     # models: a list of models served by the peer
     # - required
     models:
