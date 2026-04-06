@@ -16,6 +16,11 @@ BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 GOOS ?= $(shell go env GOOS 2>/dev/null || echo linux)
 GOARCH ?= $(shell go env GOARCH 2>/dev/null || echo amd64)
 
+# build on raspi
+ifeq ($(GOARCH),aarch64)
+  GOARCH := arm64
+endif
+
 # Default target: Builds binaries for both OSX and Linux
 all: ui mac linux simple-responder
 
