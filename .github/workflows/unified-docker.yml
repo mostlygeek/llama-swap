@@ -68,6 +68,13 @@ jobs:
       fail-fast: false
       matrix:
         backend: ${{ fromJSON(needs.setup.outputs.matrix) }}
+        variant:
+          - name: root
+            uid: "0"
+            suffix: ""
+          - name: rootless
+            uid: "10001"
+            suffix: "-rootless"
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -99,14 +106,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build unified Docker image (${{ matrix.backend }})
+      - name: Build unified Docker image (${{ matrix.backend }}, ${{ matrix.variant.name }})
         env:
           LLAMA_REF: ${{ inputs.llama_cpp_ref || 'master' }}
           WHISPER_REF: ${{ inputs.whisper_ref || 'master' }}
           SD_REF: ${{ inputs.sd_ref || 'master' }}
           IK_LLAMA_REF: ${{ inputs.ik_llama_ref || 'main' }}
           LS_VERSION: ${{ inputs.llama_swap_version || 'main' }}
-          DOCKER_IMAGE_TAG: ghcr.io/mostlygeek/llama-swap:unified-${{ matrix.backend }}
+          RUN_UID: ${{ matrix.variant.uid }}
+          DOCKER_IMAGE_TAG: ghcr.io/mostlygeek/llama-swap:unified-${{ matrix.backend }}${{ matrix.variant.suffix }}
           # When running under act, use the local builder that has warm ccache.
           # On GitHub Actions, BUILDX_BUILDER is unset so docker uses the builder
           # created by setup-buildx-action above.
@@ -118,7 +126,8 @@ jobs:
       - name: Push to GitHub Container Registry
         if: ${{ !env.ACT }}
         run: |
-          docker push ghcr.io/mostlygeek/llama-swap:unified-${{ matrix.backend }}
+          TAG="ghcr.io/mostlygeek/llama-swap:unified-${{ matrix.backend }}${{ matrix.variant.suffix }}"
+          docker push "${TAG}"
           DATE_TAG=$(date -u +%Y-%m-%d)
-          docker tag ghcr.io/mostlygeek/llama-swap:unified-${{ matrix.backend }} ghcr.io/mostlygeek/llama-swap:unified-${{ matrix.backend }}-${DATE_TAG}
-          docker push ghcr.io/mostlygeek/llama-swap:unified-${{ matrix.backend }}-${DATE_TAG}
+          docker tag "${TAG}" "${TAG}-${DATE_TAG}"
+          docker push "${TAG}-${DATE_TAG}"
