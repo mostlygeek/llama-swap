@@ -183,6 +183,7 @@ Almost all configuration settings are optional and can be added one step at a ti
 
 - Advanced features
   - `groups` to run multiple models at once
+  - `lazy-config` to automatically resolve and load thousands of models dynamically via Hugging Face API
   - `hooks` to run things on startup
   - `macros` reusable snippets
 - Model customization
@@ -195,6 +196,32 @@ Almost all configuration settings are optional and can be added one step at a ti
   - `filters` rewrite parts of requests before sending to the upstream server
 
 See the [configuration documentation](docs/configuration.md) for all options.
+
+### Lazy Config (Dynamically Load Models)
+
+You can provide a list of base models and have llama-swap automatically fetch all available quantizations (e.g. `Q4_K_M`, `IQ4_XS`) from the Hugging Face API at startup using the `--lazy-config` flag.
+
+```yaml
+# lazy-config.yaml
+proxy: http://127.0.0.1:${PORT}
+
+commands:
+  gguf: llama-server -hf ${model} --port ${PORT}
+
+quant:
+  gguf:
+    - Q4_K_M
+
+models:
+  - "unsloth/Qwen3.5-27B-GGUF"
+```
+
+Start the application with:
+```shell
+llama-swap --config config.yaml --lazy-config lazy-config.yaml
+```
+
+It will dynamically generate and register fully-configured variations like `unsloth/Qwen3.5-27B-GGUF:Q4_K_M`, allowing you to maintain massive model lists effortlessly.
 
 ## How does llama-swap work?
 
