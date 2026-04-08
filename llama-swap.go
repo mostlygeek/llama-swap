@@ -29,6 +29,7 @@ func main() {
 	// Define a command-line flag for the port
 	configPath := flag.String("config", "", "config file name (optional if --lazy-config is used)")
 	lazyConfigPath := flag.String("lazy-config", "", "lazy config file name")
+	lazyConfigDump := flag.Bool("lazy-config-dump", false, "save the dynamically generated config to generated-config.yaml and exit without fully starting")
 	listenStr := flag.String("listen", "", "listen ip/port")
 	certFile := flag.String("tls-cert-file", "", "TLS certificate file")
 	keyFile := flag.String("tls-key-file", "", "TLS key file")
@@ -52,8 +53,17 @@ func main() {
 		}
 	}
 
-	conf, err := config.LoadConfig(*configPath, *lazyConfigPath)
+	dumpPath := ""
+	if *lazyConfigDump {
+		dumpPath = "generated-config.yaml"
+	}
+
+	conf, err := config.LoadConfig(*configPath, *lazyConfigPath, dumpPath)
 	if err != nil {
+		if err.Error() == "DUMP_EXIT" {
+			fmt.Println("Successfully saved generated config to generated-config.yaml")
+			os.Exit(0)
+		}
 		fmt.Printf("Error loading config: %v\n", err)
 		os.Exit(1)
 	}

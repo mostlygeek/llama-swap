@@ -202,7 +202,7 @@ See the [configuration documentation](docs/configuration.md) for all options.
 You can maintain a list of base models and have llama-swap dynamically configure them at startup using the `--lazy-config` flag. This connects to the Hugging Face API and expands your list into hundreds of variations automatically.
 
 ```yaml
-# lazy-config.yaml
+# lazy-config.example.yaml
 proxy: http://127.0.0.1:${PORT}
 
 commands:
@@ -223,7 +223,7 @@ models:
 
 Start the application with:
 ```shell
-llama-swap --config config.yaml --lazy-config lazy-config.yaml
+llama-swap --config config.yaml --lazy-config lazy-config.example.yaml
 ```
 
 It will dynamically generate and register fully-configured variations (e.g., `unsloth/Qwen3.5-27B-GGUF:Q4_K_M`), allowing you to manage massive model lists effortlessly.

@@ -1,0 +1,410 @@
+healthCheckTimeout: 120
+logRequests: false
+logLevel: info
+logTimeFormat: ""
+logToStdout: proxy
+metricsMaxInMemory: 1000
+captureBuffer: 5
+globalTTL: 0
+models:
+  Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2-GGUF:Q4_K_M:
+    cmd: llama-server -hf "Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2-GGUF:Q4_K_M" --port ${PORT}
+    cmdStop: ""
+    proxy: http://127.0.0.1:${PORT}
+    aliases: []
+    env: []
+    checkEndpoint: ""
+    ttl: 0
+    unlisted: false
+    useModelName: ""
+    name: ""
+    description: ""
+    concurrencyLimit: 0
+    filters:
+      stripParams: ""
+      setParams: {}
+      setParamsByID: {}
+    macros: []
+    metadata: {}
+    sendLoadingState: null
+    timeouts:
+      connect: 0
+      responseHeader: 0
+      tlsHandshake: 0
+      expectContinue: 0
+      idleConn: 0
+  Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2-GGUF:Q4_K_S:
+    cmd: llama-server -hf "Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2-GGUF:Q4_K_S" --port ${PORT}
+    cmdStop: ""
+    proxy: http://127.0.0.1:${PORT}
+    aliases: []
+    env: []
+    checkEndpoint: ""
+    ttl: 0
+    unlisted: false
+    useModelName: ""
+    name: ""
+    description: ""
+    concurrencyLimit: 0
+    filters:
+      stripParams: ""
+      setParams: {}
+      setParamsByID: {}
+    macros: []
+    metadata: {}
+    sendLoadingState: null
+    timeouts:
+      connect: 0
+      responseHeader: 0
+      tlsHandshake: 0
+      expectContinue: 0
+      idleConn: 0
+  Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled-v2-GGUF:Q4_K_M:
+    cmd: llama-server -hf "Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled-v2-GGUF:Q4_K_M" --port ${PORT}
+    cmdStop: ""
+    proxy: http://127.0.0.1:${PORT}
+    aliases: []
+    env: []
+    checkEndpoint: ""
+    ttl: 0
+    unlisted: false
+    useModelName: ""
+    name: ""
+    description: ""
+    concurrencyLimit: 0
+    filters:
+      stripParams: ""
+      setParams: {}
+      setParamsByID: {}
+    macros: []
+    metadata: {}
+    sendLoadingState: null
+    timeouts:
+      connect: 0
+      responseHeader: 0
+      tlsHandshake: 0
+      expectContinue: 0
+      idleConn: 0
+  Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled-v2-GGUF:Q4_K_S:
+    cmd: llama-server -hf "Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled-v2-GGUF:Q4_K_S" --port ${PORT}
+    cmdStop: ""
+    proxy: http://127.0.0.1:${PORT}
+    aliases: []
+    env: []
+    checkEndpoint: ""
+    ttl: 0
+    unlisted: false
+    useModelName: ""
+    name: ""
+    description: ""
+    concurrencyLimit: 0
+    filters:
+      stripParams: ""
+      setParams: {}
+      setParamsByID: {}
+    macros: []
+    metadata: {}
+    sendLoadingState: null
+    timeouts:
+      connect: 0
+      responseHeader: 0
+      tlsHandshake: 0
+      expectContinue: 0
+      idleConn: 0
+  cyankiwi/Qwen3.5-35B-A3B-AWQ-4bit:
+    cmd: vllm run_vllm "cyankiwi/Qwen3.5-35B-A3B-AWQ-4bit" false ${PORT}
+    cmdStop: ""
+    proxy: http://127.0.0.1:${PORT}
+    aliases: []
+    env: []
+    checkEndpoint: ""
+    ttl: 0
+    unlisted: false
+    useModelName: ""
+    name: ""
+    description: ""
+    concurrencyLimit: 0
+    filters:
+      stripParams: ""
+      setParams: {}
+      setParamsByID: {}
+    macros: []
+    metadata: {}
+    sendLoadingState: null
+    timeouts:
+      connect: 0
+      responseHeader: 0
+      tlsHandshake: 0
+      expectContinue: 0
+      idleConn: 0
+  unsloth/Qwen3.5-9B-GGUF:Q4_K_M:
+    cmd: llama-server -hf "unsloth/Qwen3.5-9B-GGUF:Q4_K_M" --port ${PORT}
+    cmdStop: ""
+    proxy: http://127.0.0.1:${PORT}
+    aliases: []
+    env: []
+    checkEndpoint: ""
+    ttl: 0
+    unlisted: false
+    useModelName: ""
+    name: ""
+    description: ""
+    concurrencyLimit: 0
+    filters:
+      stripParams: ""
+      setParams: {}
+      setParamsByID: {}
+    macros: []
+    metadata: {}
+    sendLoadingState: null
+    timeouts:
+      connect: 0
+      responseHeader: 0
+      tlsHandshake: 0
+      expectContinue: 0
+      idleConn: 0
+  unsloth/Qwen3.5-9B-GGUF:Q4_K_S:
+    cmd: llama-server -hf "unsloth/Qwen3.5-9B-GGUF:Q4_K_S" --port ${PORT}
+    cmdStop: ""
+    proxy: http://127.0.0.1:${PORT}
+    aliases: []
+    env: []
+    checkEndpoint: ""
+    ttl: 0
+    unlisted: false
+    useModelName: ""
+    name: ""
+    description: ""
+    concurrencyLimit: 0
+    filters:
+      stripParams: ""
+      setParams: {}
+      setParamsByID: {}
+    macros: []
+    metadata: {}
+    sendLoadingState: null
+    timeouts:
+      connect: 0
+      responseHeader: 0
+      tlsHandshake: 0
+      expectContinue: 0
+      idleConn: 0
+  unsloth/Qwen3.5-27B-GGUF:Q4_K_M:
+    cmd: llama-server -hf "unsloth/Qwen3.5-27B-GGUF:Q4_K_M" --port ${PORT}
+    cmdStop: ""
+    proxy: http://127.0.0.1:${PORT}
+    aliases: []
+    env: []
+    checkEndpoint: ""
+    ttl: 0
+    unlisted: false
+    useModelName: ""
+    name: ""
+    description: ""
+    concurrencyLimit: 0
+    filters:
+      stripParams: ""
+      setParams: {}
+      setParamsByID: {}
+    macros: []
+    metadata: {}
+    sendLoadingState: null
+    timeouts:
+      connect: 0
+      responseHeader: 0
+      tlsHandshake: 0
+      expectContinue: 0
+      idleConn: 0
+  unsloth/Qwen3.5-27B-GGUF:Q4_K_S:
+    cmd: llama-server -hf "unsloth/Qwen3.5-27B-GGUF:Q4_K_S" --port ${PORT}
+    cmdStop: ""
+    proxy: http://127.0.0.1:${PORT}
+    aliases: []
+    env: []
+    checkEndpoint: ""
+    ttl: 0
+    unlisted: false
+    useModelName: ""
+    name: ""
+    description: ""
+    concurrencyLimit: 0
+    filters:
+      stripParams: ""
+      setParams: {}
+      setParamsByID: {}
+    macros: []
+    metadata: {}
+    sendLoadingState: null
+    timeouts:
+      connect: 0
+      responseHeader: 0
+      tlsHandshake: 0
+      expectContinue: 0
+      idleConn: 0
+  unsloth/Qwen3.5-35B-A3B-GGUF:Q4_K_M:
+    cmd: llama-server -hf "unsloth/Qwen3.5-35B-A3B-GGUF:Q4_K_M" --port ${PORT}
+    cmdStop: ""
+    proxy: http://127.0.0.1:${PORT}
+    aliases: []
+    env: []
+    checkEndpoint: ""
+    ttl: 0
+    unlisted: false
+    useModelName: ""
+    name: ""
+    description: ""
+    concurrencyLimit: 0
+    filters:
+      stripParams: ""
+      setParams: {}
+      setParamsByID: {}
+    macros: []
+    metadata: {}
+    sendLoadingState: null
+    timeouts:
+      connect: 0
+      responseHeader: 0
+      tlsHandshake: 0
+      expectContinue: 0
+      idleConn: 0
+  unsloth/Qwen3.5-35B-A3B-GGUF:Q4_K_S:
+    cmd: llama-server -hf "unsloth/Qwen3.5-35B-A3B-GGUF:Q4_K_S" --port ${PORT}
+    cmdStop: ""
+    proxy: http://127.0.0.1:${PORT}
+    aliases: []
+    env: []
+    checkEndpoint: ""
+    ttl: 0
+    unlisted: false
+    useModelName: ""
+    name: ""
+    description: ""
+    concurrencyLimit: 0
+    filters:
+      stripParams: ""
+      setParams: {}
+      setParamsByID: {}
+    macros: []
+    metadata: {}
+    sendLoadingState: null
+    timeouts:
+      connect: 0
+      responseHeader: 0
+      tlsHandshake: 0
+      expectContinue: 0
+      idleConn: 0
+  unsloth/gemma-4-26B-A4B-it-GGUF:Q4_K_M:
+    cmd: llama-server -hf "unsloth/gemma-4-26B-A4B-it-GGUF:Q4_K_M" --port ${PORT}
+    cmdStop: ""
+    proxy: http://127.0.0.1:${PORT}
+    aliases: []
+    env: []
+    checkEndpoint: ""
+    ttl: 0
+    unlisted: false
+    useModelName: ""
+    name: ""
+    description: ""
+    concurrencyLimit: 0
+    filters:
+      stripParams: ""
+      setParams: {}
+      setParamsByID: {}
+    macros: []
+    metadata: {}
+    sendLoadingState: null
+    timeouts:
+      connect: 0
+      responseHeader: 0
+      tlsHandshake: 0
+      expectContinue: 0
+      idleConn: 0
+  unsloth/gemma-4-26B-A4B-it-GGUF:Q4_K_S:
+    cmd: llama-server -hf "unsloth/gemma-4-26B-A4B-it-GGUF:Q4_K_S" --port ${PORT}
+    cmdStop: ""
+    proxy: http://127.0.0.1:${PORT}
+    aliases: []
+    env: []
+    checkEndpoint: ""
+    ttl: 0
+    unlisted: false
+    useModelName: ""
+    name: ""
+    description: ""
+    concurrencyLimit: 0
+    filters:
+      stripParams: ""
+      setParams: {}
+      setParamsByID: {}
+    macros: []
+    metadata: {}
+    sendLoadingState: null
+    timeouts:
+      connect: 0
+      responseHeader: 0
+      tlsHandshake: 0
+      expectContinue: 0
+      idleConn: 0
+  unsloth/gemma-4-31B-it-GGUF:Q4_K_M:
+    cmd: llama-server -hf "unsloth/gemma-4-31B-it-GGUF:Q4_K_M" --port ${PORT}
+    cmdStop: ""
+    proxy: http://127.0.0.1:${PORT}
+    aliases: []
+    env: []
+    checkEndpoint: ""
+    ttl: 0
+    unlisted: false
+    useModelName: ""
+    name: ""
+    description: ""
+    concurrencyLimit: 0
+    filters:
+      stripParams: ""
+      setParams: {}
+      setParamsByID: {}
+    macros: []
+    metadata: {}
+    sendLoadingState: null
+    timeouts:
+      connect: 0
+      responseHeader: 0
+      tlsHandshake: 0
+      expectContinue: 0
+      idleConn: 0
+  unsloth/gemma-4-31B-it-GGUF:Q4_K_S:
+    cmd: llama-server -hf "unsloth/gemma-4-31B-it-GGUF:Q4_K_S" --port ${PORT}
+    cmdStop: ""
+    proxy: http://127.0.0.1:${PORT}
+    aliases: []
+    env: []
+    checkEndpoint: ""
+    ttl: 0
+    unlisted: false
+    useModelName: ""
+    name: ""
+    description: ""
+    concurrencyLimit: 0
+    filters:
+      stripParams: ""
+      setParams: {}
+      setParamsByID: {}
+    macros: []
+    metadata: {}
+    sendLoadingState: null
+    timeouts:
+      connect: 0
+      responseHeader: 0
+      tlsHandshake: 0
+      expectContinue: 0
+      idleConn: 0
+profiles: {}
+groups: {}
+macros: []
+startPort: 5800
+hooks:
+  on_startup:
+    preload: []
+sendLoadingState: false
+includeAliasesInList: false
+apiKeys: []
+peers: {}

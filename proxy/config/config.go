@@ -218,6 +218,18 @@ func LoadConfigFromReader(r io.Reader, lazyConfig ...string) (Config, error) {
 		if err := LoadAndMergeLazyConfig(&config, lazyConfig[0]); err != nil {
 			return Config{}, fmt.Errorf("failed to process lazy config: %w", err)
 		}
+
+		if len(lazyConfig) > 1 && lazyConfig[1] != "" {
+			out, err := yaml.Marshal(config)
+			if err != nil {
+				return Config{}, fmt.Errorf("failed to marshal generated config: %w", err)
+			}
+			if err := os.WriteFile(lazyConfig[1], out, 0644); err != nil {
+				return Config{}, fmt.Errorf("failed to write generated config: %w", err)
+			}
+			// Early exit error to let main know we dumped and should stop
+			return Config{}, fmt.Errorf("DUMP_EXIT")
+		}
 	}
 
 	if config.HealthCheckTimeout < 15 {

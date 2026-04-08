@@ -212,8 +212,11 @@ func LoadAndMergeLazyConfig(mainConfig *Config, lazyConfigPath string) error {
 
 	// Merge into main config Models
 	for _, entry := range results {
-		// Overwrite if it already exists or acts as a new model
-		mainConfig.Models[entry.Name] = entry.Config
+		// Only add if it does not already exist,
+		// allowing standard config.yaml to take precedence if both are used.
+		if _, exists := mainConfig.Models[entry.Name]; !exists {
+			mainConfig.Models[entry.Name] = entry.Config
+		}
 	}
 
 	return nil

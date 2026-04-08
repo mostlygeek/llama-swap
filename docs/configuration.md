@@ -68,6 +68,21 @@ models:
         --trust-remote-code
 ```
 
+## Lazy Configuration (Dynamic Model Resolution)
+
+`llama-swap` can load thousands of models automatically at startup without needing point-to-point configurations for each. It does this by using a `lazy-config.yaml` to define model classes, templates, and base model IDs, fetching the available quantizations straight from the Hugging Face API!
+
+Start the application pointing to your template list:
+```shell
+llama-swap --lazy-config lazy-config.example.yaml
+# Can be combined with standard configurations together:
+# llama-swap --config config.yaml --lazy-config lazy-config.example.yaml
+```
+
+The system will connect to HuggingFace, parse the models, expand them based on the `quant` filters you've given it (or **every available quantization** if omitted), and instantly append an expansive library to your standard model configuration tree.
+
+Checkout the fully documented [`lazy-config.example.yaml`](https://github.com/mostlygeek/llama-swap/blob/main/lazy-config.example.yaml) for a complete reference.
+
 ## Many more features..
 
 llama-swap supports many more features to customize how you want to manage your environment.
