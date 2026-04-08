@@ -199,7 +199,7 @@ See the [configuration documentation](docs/configuration.md) for all options.
 
 ### Lazy Config (Dynamically Load Models)
 
-You can provide a list of base models and have llama-swap automatically fetch all available quantizations (e.g. `Q4_K_M`, `IQ4_XS`) from the Hugging Face API at startup using the `--lazy-config` flag.
+You can maintain a list of base models and have llama-swap dynamically configure them at startup using the `--lazy-config` flag. This connects to the Hugging Face API and expands your list into hundreds of variations automatically.
 
 ```yaml
 # lazy-config.yaml
@@ -207,13 +207,18 @@ proxy: http://127.0.0.1:${PORT}
 
 commands:
   gguf: llama-server -hf ${model} --port ${PORT}
+  awq: vllm run_vllm ${model} false ${PORT}
 
+# Optional: Limit to specific quantizations. 
+# If a model type is NOT listed here, llama-swap will automatically 
+# connect to HuggingFace and grab EVERY available quantization it can find!
 quant:
   gguf:
     - Q4_K_M
 
 models:
   - "unsloth/Qwen3.5-27B-GGUF"
+  - "cyankiwi/Qwen3.5-35B-A3B-AWQ-4bit"
 ```
 
 Start the application with:
@@ -221,7 +226,7 @@ Start the application with:
 llama-swap --config config.yaml --lazy-config lazy-config.yaml
 ```
 
-It will dynamically generate and register fully-configured variations like `unsloth/Qwen3.5-27B-GGUF:Q4_K_M`, allowing you to maintain massive model lists effortlessly.
+It will dynamically generate and register fully-configured variations (e.g., `unsloth/Qwen3.5-27B-GGUF:Q4_K_M`), allowing you to manage massive model lists effortlessly.
 
 ## How does llama-swap work?
 
