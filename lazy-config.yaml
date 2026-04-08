@@ -1,0 +1,21 @@
+proxy: http://127.0.0.1:${PORT}
+
+commands:
+  default: vllm run_vllm ${model} false ${PORT}
+  awq: vllm run_vllm ${model} false ${PORT}
+  gguf: llama-server -hf ${model} --port ${PORT}
+
+quant:
+  gguf:
+    - Q4_K_M
+    - Q4_K_S
+
+models:
+  - "unsloth/Qwen3.5-27B-GGUF"
+  - "unsloth/Qwen3.5-35B-A3B-GGUF"
+  - "unsloth/Qwen3.5-9B-GGUF"
+  - "Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled-v2-GGUF"
+  - "Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2-GGUF"
+  - "unsloth/gemma-4-26B-A4B-it-GGUF"
+  - "unsloth/gemma-4-31B-it-GGUF"
+  - "cyankiwi/Qwen3.5-35B-A3B-AWQ-4bit"

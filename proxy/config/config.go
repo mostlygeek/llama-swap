@@ -172,16 +172,16 @@ func (c *Config) FindConfig(modelName string) (ModelConfig, string, bool) {
 	}
 }
 
-func LoadConfig(path string) (Config, error) {
+func LoadConfig(path string, lazyConfig ...string) (Config, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return Config{}, err
 	}
 	defer file.Close()
-	return LoadConfigFromReader(file)
+	return LoadConfigFromReader(file, lazyConfig...)
 }
 
-func LoadConfigFromReader(r io.Reader) (Config, error) {
+func LoadConfigFromReader(r io.Reader, lazyConfig ...string) (Config, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return Config{}, err
@@ -208,6 +208,12 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	}
 	if err = yaml.Unmarshal([]byte(yamlStr), &config); err != nil {
 		return Config{}, err
+	}
+
+	if len(lazyConfig) > 0 && lazyConfig[0] != "" {
+		if err := LoadAndMergeLazyConfig(&config, lazyConfig[0]); err != nil {
+			return Config{}, fmt.Errorf("failed to process lazy config: %w", err)
+		}
 	}
 
 	if config.HealthCheckTimeout < 15 {
