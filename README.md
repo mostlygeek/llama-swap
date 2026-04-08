@@ -207,7 +207,7 @@ proxy: http://127.0.0.1:${PORT}
 
 commands:
   gguf: llama-server -hf ${model} --port ${PORT}
-  awq: vllm run_vllm ${model} false ${PORT}
+  awq: vllm server --model ${model} --port ${PORT}
 
 # Optional: Limit to specific quantizations. 
 # If a model type is NOT listed here, llama-swap will automatically 
