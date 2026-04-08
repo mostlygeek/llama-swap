@@ -27,7 +27,7 @@ var (
 
 func main() {
 	// Define a command-line flag for the port
-	configPath := flag.String("config", "config.yaml", "config file name")
+	configPath := flag.String("config", "", "config file name (optional if --lazy-config is used)")
 	lazyConfigPath := flag.String("lazy-config", "", "lazy config file name")
 	listenStr := flag.String("listen", "", "listen ip/port")
 	certFile := flag.String("tls-cert-file", "", "TLS certificate file")
@@ -40,6 +40,16 @@ func main() {
 	if *showVersion {
 		fmt.Printf("version: %s (%s), built at %s\n", version, commit, date)
 		os.Exit(0)
+	}
+
+	// Resolve config path: default to config.yaml if it exists and no flags were set
+	if *configPath == "" && *lazyConfigPath == "" {
+		if _, err := os.Stat("config.yaml"); err == nil {
+			*configPath = "config.yaml"
+		} else {
+			fmt.Println("Error: provide --config and/or --lazy-config")
+			os.Exit(1)
+		}
 	}
 
 	conf, err := config.LoadConfig(*configPath, *lazyConfigPath)

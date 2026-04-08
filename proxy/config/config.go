@@ -173,13 +173,12 @@ func (c *Config) FindConfig(modelName string) (ModelConfig, string, bool) {
 }
 
 func LoadConfig(path string, lazyConfig ...string) (Config, error) {
+	// Allow loading with no config file if only lazy-config is provided
+	if path == "" {
+		return LoadConfigFromReader(strings.NewReader(""), lazyConfig...)
+	}
 	file, err := os.Open(path)
 	if err != nil {
-		// If the main config doesn't exist but we DO have a lazy-config, 
-		// we can gracefully start by parsing an empty baseline config.
-		if os.IsNotExist(err) && len(lazyConfig) > 0 && lazyConfig[0] != "" {
-			return LoadConfigFromReader(strings.NewReader(""), lazyConfig...)
-		}
 		return Config{}, err
 	}
 	defer file.Close()
