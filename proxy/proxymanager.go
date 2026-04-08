@@ -215,15 +215,15 @@ func New(proxyConfig config.Config) *ProxyManager {
 	if len(proxyConfig.Hooks.OnStartup.Preload) > 0 {
 		// do it in the background, don't block startup
 		go func() {
-			// Group preload models by process group so models in the same
-			// group can be started in parallel (e.g. STT + TTS on the same GPU).
-			// Groups are preloaded sequentially to respect exclusivity.
+			// Batch contiguous same-group models for parallel preload.
+			// Non-contiguous entries for the same group start separate batches,
+			// preserving the original preload sequence and exclusivity semantics.
 			type groupEntry struct {
 				id     string
 				models []string
 			}
 			var groupOrder []groupEntry
-			seen := map[string]int{} // groupID -> index into groupOrder
+			var lastGroupID string
 
 			for _, preloadModelName := range proxyConfig.Hooks.OnStartup.Preload {
 				modelID, ok := proxyConfig.RealModelName(preloadModelName)
@@ -236,11 +236,11 @@ func New(proxyConfig config.Config) *ProxyManager {
 					proxyLogger.Warnf("Preload model %s has no process group", modelID)
 					continue
 				}
-				if idx, exists := seen[pg.id]; exists {
-					groupOrder[idx].models = append(groupOrder[idx].models, modelID)
+				if pg.id == lastGroupID {
+					groupOrder[len(groupOrder)-1].models = append(groupOrder[len(groupOrder)-1].models, modelID)
 				} else {
-					seen[pg.id] = len(groupOrder)
 					groupOrder = append(groupOrder, groupEntry{id: pg.id, models: []string{modelID}})
+					lastGroupID = pg.id
 				}
 			}
 
