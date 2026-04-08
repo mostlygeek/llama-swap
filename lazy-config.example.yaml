@@ -1,0 +1,38 @@
+# ==============================================================
+# llama-swap Lazy Configuration Example
+# ==============================================================
+# Use --lazy-config to automatically resolve and load thousands
+# of HuggingFace models dynamically using templates.
+
+# The global proxy template applied to all dynamically created models.
+# ${PORT} is automatically assigned incrementally to avoid collisions.
+proxy: http://127.0.0.1:${PORT}
+
+# Define command templates based on keywords in the model's name.
+# When a model name contains the key (e.g., "gguf" or "awq"),
+# llama-swap will use the matching command.
+commands:
+  default: vllm run_vllm ${model} false ${PORT}
+  awq: vllm run_vllm ${model} false ${PORT}
+  gguf: llama-server -hf ${model} --port ${PORT}
+
+# Optional: Limit HuggingFace quantization fetching to specific strings.
+# If a model type is NOT listed here, llama-swap will automatically
+# scan the Hugging Face repo and load EVERY SINGLE available quantization!
+quant:
+  gguf:
+    - Q4_K_M
+    - Q4_K_S
+
+# List of HuggingFace repository IDs.
+# llama-swap will iterate through this list, apply the appropriate quantizations,
+# generate the run commands using the templates, and load them into memory.
+models:
+  - "unsloth/Qwen3.5-27B-GGUF"
+  - "unsloth/Qwen3.5-35B-A3B-GGUF"
+  - "unsloth/Qwen3.5-9B-GGUF"
+  - "Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled-v2-GGUF"
+  - "Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2-GGUF"
+  - "unsloth/gemma-4-26B-A4B-it-GGUF"
+  - "unsloth/gemma-4-31B-it-GGUF"
+  - "cyankiwi/Qwen3.5-35B-A3B-AWQ-4bit"
