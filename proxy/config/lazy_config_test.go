@@ -30,7 +30,7 @@ models:
 	}
 
 	mainConf := &Config{}
-	
+
 	err = LoadAndMergeLazyConfig(mainConf, tmpfile.Name())
 	if err != nil {
 		t.Fatalf("LoadAndMergeLazyConfig failed: %v", err)
@@ -40,7 +40,7 @@ models:
 		t.Fatal("Expected merged models from lazy config, got none")
 	}
 
-	// Wait! unsloth/Qwen3.5-27B-GGUF without matching a type uses default. 
+	// Wait! unsloth/Qwen3.5-27B-GGUF without matching a type uses default.
 	// The default in the yaml doesn't match a specific quant type since the type string is empty when matching 'default'.
 	// But it will still attempt to reach out to HuggingFace or use empty quants rule.
 }
