@@ -213,35 +213,63 @@ func New(proxyConfig config.Config) *ProxyManager {
 
 	// run any startup hooks
 	if len(proxyConfig.Hooks.OnStartup.Preload) > 0 {
-		// do it in the background, don't block startup -- not sure if good idea yet
+		// do it in the background, don't block startup
 		go func() {
-			discardWriter := &DiscardWriter{}
+			// Group preload models by process group so models in the same
+			// group can be started in parallel (e.g. STT + TTS on the same GPU).
+			// Groups are preloaded sequentially to respect exclusivity.
+			type groupEntry struct {
+				id     string
+				models []string
+			}
+			var groupOrder []groupEntry
+			seen := map[string]int{} // groupID -> index into groupOrder
+
 			for _, preloadModelName := range proxyConfig.Hooks.OnStartup.Preload {
 				modelID, ok := proxyConfig.RealModelName(preloadModelName)
-
 				if !ok {
 					proxyLogger.Warnf("Preload model %s not found in config", preloadModelName)
 					continue
 				}
-
-				proxyLogger.Infof("Preloading model: %s", modelID)
-				processGroup, err := pm.swapProcessGroup(modelID)
-
-				if err != nil {
-					event.Emit(ModelPreloadedEvent{
-						ModelName: modelID,
-						Success:   false,
-					})
-					proxyLogger.Errorf("Failed to preload model %s: %v", modelID, err)
+				pg := pm.findGroupByModelName(modelID)
+				if pg == nil {
+					proxyLogger.Warnf("Preload model %s has no process group", modelID)
 					continue
-				} else {
-					req, _ := http.NewRequest("GET", "/", nil)
-					processGroup.ProxyRequest(modelID, discardWriter, req)
-					event.Emit(ModelPreloadedEvent{
-						ModelName: modelID,
-						Success:   true,
-					})
 				}
+				if idx, exists := seen[pg.id]; exists {
+					groupOrder[idx].models = append(groupOrder[idx].models, modelID)
+				} else {
+					seen[pg.id] = len(groupOrder)
+					groupOrder = append(groupOrder, groupEntry{id: pg.id, models: []string{modelID}})
+				}
+			}
+
+			for _, ge := range groupOrder {
+				// Swap to this group (handles exclusivity — idles other groups)
+				processGroup, err := pm.swapProcessGroup(ge.models[0])
+				if err != nil {
+					for _, mid := range ge.models {
+						event.Emit(ModelPreloadedEvent{ModelName: mid, Success: false})
+						proxyLogger.Errorf("Failed to preload model %s: %v", mid, err)
+					}
+					continue
+				}
+
+				// Start all models in this group in parallel
+				var wg sync.WaitGroup
+				for _, modelID := range ge.models {
+					wg.Add(1)
+					go func(mid string) {
+						defer wg.Done()
+						proxyLogger.Infof("Preloading model: %s", mid)
+						req, _ := http.NewRequest("GET", "/", nil)
+						processGroup.ProxyRequest(mid, &DiscardWriter{}, req)
+						event.Emit(ModelPreloadedEvent{ModelName: mid, Success: true})
+						proxyLogger.Infof("Preloaded model: %s", mid)
+					}(modelID)
+				}
+				wg.Wait()
+				proxyLogger.Infof("Preloaded group %s (%d models)", ge.id, len(ge.models))
 			}
 		}()
 	}
