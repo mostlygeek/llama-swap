@@ -145,15 +145,20 @@ ARG LLAMA_COMMIT_HASH=unknown
 ARG WHISPER_COMMIT_HASH=unknown
 ARG SD_COMMIT_HASH=unknown
 ARG IK_LLAMA_COMMIT_HASH=unknown
+ARG RUN_UID=0
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-numpy python3-sentencepiece \
     && rm -rf /var/lib/apt/lists/*
 
-# Create llama-swap user and config directory
-RUN useradd --system --create-home --shell /sbin/nologin llama-swap && \
+# Create non-root user when RUN_UID != 0
+RUN if [ "$RUN_UID" != "0" ]; then \
+      groupadd --system --gid $RUN_UID llama-swap && \
+      useradd --system --uid $RUN_UID --gid $RUN_UID \
+        --home /app --shell /sbin/nologin llama-swap; \
+    fi && \
     mkdir -p /etc/llama-swap/config && \
-    chown -R llama-swap:llama-swap /etc/llama-swap
+    chown -R ${RUN_UID}:${RUN_UID} /etc/llama-swap
 
 WORKDIR /app
 
@@ -191,7 +196,8 @@ RUN echo "llama.cpp: ${LLAMA_COMMIT_HASH}" > /versions.txt && \
     echo "backend: ${BACKEND}" >> /versions.txt && \
     echo "build_timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> /versions.txt
 
+RUN mkdir -p /models && chown ${RUN_UID}:${RUN_UID} /models
 WORKDIR /models
-USER llama-swap
+USER ${RUN_UID}
 ENTRYPOINT ["llama-swap"]
 CMD ["-config", "/etc/llama-swap/config/config.yaml", "-listen", "0.0.0.0:8080"]

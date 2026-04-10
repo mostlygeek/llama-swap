@@ -365,6 +365,8 @@ func processStreamingResponse(modelID string, start time.Time, body []byte) (Tok
 }
 
 func parseMetrics(modelID string, start time.Time, usage, timings gjson.Result) (TokenMetrics, error) {
+	wallDurationMs := int(time.Since(start).Milliseconds())
+
 	// default values
 	cachedTokens := -1 // unknown or missing data
 	outputTokens := 0
@@ -373,7 +375,7 @@ func parseMetrics(modelID string, start time.Time, usage, timings gjson.Result) 
 	// timings data
 	tokensPerSecond := -1.0
 	promptPerSecond := -1.0
-	durationMs := int(time.Since(start).Milliseconds())
+	durationMs := wallDurationMs
 
 	if usage.Exists() {
 		if pt := usage.Get("prompt_tokens"); pt.Exists() {
@@ -402,7 +404,10 @@ func parseMetrics(modelID string, start time.Time, usage, timings gjson.Result) 
 		outputTokens = int(timings.Get("predicted_n").Int())
 		promptPerSecond = timings.Get("prompt_per_second").Float()
 		tokensPerSecond = timings.Get("predicted_per_second").Float()
-		durationMs = int(timings.Get("prompt_ms").Float() + timings.Get("predicted_ms").Float())
+		timingsDurationMs := int(timings.Get("prompt_ms").Float() + timings.Get("predicted_ms").Float())
+		if timingsDurationMs > durationMs {
+			durationMs = timingsDurationMs
+		}
 
 		if cachedValue := timings.Get("cache_n"); cachedValue.Exists() {
 			cachedTokens = int(cachedValue.Int())

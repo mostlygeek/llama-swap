@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/event"
 	"github.com/stretchr/testify/assert"
+	"github.com/tidwall/gjson"
 )
 
 func TestMetricsMonitor_AddMetrics(t *testing.T) {
@@ -570,6 +571,27 @@ func TestMetricsMonitor_Concurrent(t *testing.T) {
 }
 
 func TestMetricsMonitor_ParseMetrics(t *testing.T) {
+	t.Run("keeps wall clock duration when timings underreport request time", func(t *testing.T) {
+		start := time.Now().Add(-5 * time.Second)
+		usage := gjson.Parse(`{"prompt_tokens": 5, "completion_tokens": 1}`)
+		timings := gjson.Parse(`{
+			"prompt_n": 5,
+			"predicted_n": 1,
+			"prompt_per_second": 10.0,
+			"predicted_per_second": 2.0,
+			"prompt_ms": 5.0,
+			"predicted_ms": 15.0
+		}`)
+
+		metrics, err := parseMetrics("test-model", start, usage, timings)
+		assert.NoError(t, err)
+		assert.Equal(t, 5, metrics.InputTokens)
+		assert.Equal(t, 1, metrics.OutputTokens)
+		assert.Equal(t, 10.0, metrics.PromptPerSecond)
+		assert.Equal(t, 2.0, metrics.TokensPerSecond)
+		assert.GreaterOrEqual(t, metrics.DurationMs, 5000)
+	})
+
 	t.Run("prefers timings over usage data", func(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10, 0)
 
