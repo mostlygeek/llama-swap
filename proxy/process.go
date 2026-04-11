@@ -164,6 +164,40 @@ func (p *Process) getLastRequestHandled() time.Time {
 	return p.lastRequestHandled
 }
 
+// isInferenceEndpoint returns true if the given path is an inference endpoint
+// that should reset the TTL timer. Only actual inference requests count toward
+// idle timeout; monitoring endpoints like /api/events are excluded.
+func (p *Process) isInferenceEndpoint(path string) bool {
+	// List of inference endpoints that should reset TTL
+	inferencePaths := []string{
+		"/v1/chat/completions",
+		"/v1/completions",
+		"/v1/responses",
+		"/v1/embeddings",
+		"/v1/audio/speech",
+		"/v1/audio/transcriptions",
+		"/v1/images/generations",
+		"/v1/images/edits",
+		"/v1/rerank",
+		"/v1/reranking",
+		"/v1/messages",
+		"/v1/messages/count_tokens",
+		"/rerank",
+		"/reranking",
+		"/infill",
+		"/completion",
+		"/sdapi/v1/txt2img",
+		"/sdapi/v1/img2img",
+	}
+
+	for _, p := range inferencePaths {
+		if strings.HasPrefix(path, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // custom error types for swapping state
 var (
 	ErrExpectedStateMismatch  = errors.New("expected state mismatch")
@@ -351,6 +385,9 @@ func (p *Process) start() error {
 		}
 	}
 
+	// TTL monitoring for automatic model unloading.
+	// Note: Monitoring endpoints like /api/events do NOT reset the TTL timer.
+	// Only actual inference requests (e.g., /v1/chat/completions) count toward idle timeout.
 	if p.config.UnloadAfter > 0 {
 		// start a goroutine to check every second if
 		// the process should be stopped
@@ -513,7 +550,10 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	p.inFlightRequests.Add(1)
 	p.inFlightRequestsCount.Add(1)
 	defer func() {
-		p.setLastRequestHandled(time.Now())
+		// Only reset TTL timer for inference endpoints
+		if p.isInferenceEndpoint(r.URL.Path) {
+			p.setLastRequestHandled(time.Now())
+		}
 		p.inFlightRequestsCount.Add(-1)
 		p.inFlightRequests.Done()
 	}()
