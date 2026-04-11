@@ -201,7 +201,6 @@ BUILD_ARGS=(
     --build-arg "SD_COMMIT_HASH=${SD_HASH}"
     --build-arg "IK_LLAMA_COMMIT_HASH=${IK_LLAMA_HASH}"
     --build-arg "LS_VERSION=${LS_HASH}"
-    --build-arg "RUN_UID=${RUN_UID:-0}"
     -t "${DOCKER_IMAGE_TAG}"
     -f "${SCRIPT_DIR}/Dockerfile"
 )
@@ -257,10 +256,31 @@ echo "All expected binaries verified: ${VERIFIED_LIST}"
 
 echo ""
 echo "=========================================="
+echo "Building rootless image..."
+echo "=========================================="
+echo ""
+
+ROOTLESS_TAG="${DOCKER_IMAGE_TAG}-rootless"
+docker buildx build --load -t "${ROOTLESS_TAG}" - <<EOF
+FROM ${DOCKER_IMAGE_TAG}
+USER root
+RUN groupadd --system --gid 10001 llama-swap && \\
+    useradd --system --uid 10001 --gid 10001 \\
+      --home /app --shell /sbin/nologin llama-swap && \\
+    chown -R 10001:10001 /etc/llama-swap /models
+USER 10001
+EOF
+
+echo "Rootless image built: ${ROOTLESS_TAG}"
+
+echo ""
+echo "=========================================="
 echo "Build complete!"
 echo "=========================================="
 echo ""
-echo "Image tag: ${DOCKER_IMAGE_TAG}"
+echo "Image tags:"
+echo "  ${DOCKER_IMAGE_TAG}"
+echo "  ${ROOTLESS_TAG}"
 echo ""
 echo "Built with:"
 echo "  llama.cpp:            ${LLAMA_HASH}"
