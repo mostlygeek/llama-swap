@@ -850,6 +850,113 @@ func TestProxyManager_UseModelName(t *testing.T) {
 	})
 }
 
+// TestProxyManager_SendRealModelID tests the sendRealModelID config option
+func TestProxyManager_SendRealModelID(t *testing.T) {
+	// Create config YAML with an alias
+	configYAML := fmt.Sprintf(`
+logLevel: error
+healthCheckTimeout: 15
+models:
+  real-model:
+    cmd: %s -port ${PORT} -silent -respond real-model
+    aliases:
+      - my-alias
+`, getSimpleResponderPath())
+
+	conf, err := config.LoadConfigFromReader(strings.NewReader(configYAML))
+	assert.NoError(t, err)
+
+	t.Run("default false does not rewrite alias to real model ID", func(t *testing.T) {
+		conf.SendRealModelID = false
+		proxy := New(conf)
+		defer proxy.StopProcesses(StopWaitForInflightRequest)
+
+		reqBody := `{"model":"my-alias"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		// simple-responder echoes back the model name it received
+		assert.Contains(t, w.Body.String(), "my-alias")
+	})
+
+	t.Run("true rewrites alias to real model ID in JSON body", func(t *testing.T) {
+		conf.SendRealModelID = true
+		proxy := New(conf)
+		defer proxy.StopProcesses(StopWaitForInflightRequest)
+
+		reqBody := `{"model":"my-alias"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		// simple-responder echoes back the model name it received
+		assert.Contains(t, w.Body.String(), "real-model")
+	})
+
+	t.Run("true rewrites alias to real model ID in multipart form", func(t *testing.T) {
+		conf.SendRealModelID = true
+		proxy := New(conf)
+		defer proxy.StopProcesses(StopWaitForInflightRequest)
+
+		// Create multipart form with alias
+		var b bytes.Buffer
+		w := multipart.NewWriter(&b)
+		fw, _ := w.CreateFormField("model")
+		fw.Write([]byte("my-alias"))
+		fw, _ = w.CreateFormFile("file", "test.mp3")
+		fw.Write([]byte("test"))
+		w.Close()
+
+		req := httptest.NewRequest("POST", "/v1/audio/transcriptions", &b)
+		req.Header.Set("Content-Type", w.FormDataContentType())
+		rec := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+
+		var response map[string]string
+		err := json.Unmarshal(rec.Body.Bytes(), &response)
+		assert.NoError(t, err)
+		assert.Equal(t, "real-model", response["model"])
+	})
+
+	t.Run("useModelName takes precedence over sendRealModelID", func(t *testing.T) {
+		// Create config YAML with useModelName set
+		configYAML := fmt.Sprintf(`
+logLevel: error
+healthCheckTimeout: 15
+sendRealModelID: true
+models:
+  real-model:
+    cmd: %s -port ${PORT} -silent -respond real-model
+    aliases:
+      - my-alias
+    useModelName: custom-name
+`, getSimpleResponderPath())
+
+		confWithUseModelName, err := config.LoadConfigFromReader(strings.NewReader(configYAML))
+		assert.NoError(t, err)
+
+		proxy := New(confWithUseModelName)
+		defer proxy.StopProcesses(StopWaitForInflightRequest)
+
+		reqBody := `{"model":"my-alias"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		// useModelName should override
+		assert.Contains(t, w.Body.String(), "custom-name")
+	})
+}
+
 func TestProxyManager_AudioVoicesGETHandler(t *testing.T) {
 	conf := config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,

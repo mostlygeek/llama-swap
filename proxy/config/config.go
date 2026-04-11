@@ -147,6 +147,9 @@ type Config struct {
 	// present aliases to /v1/models OpenAI API listing
 	IncludeAliasesInList bool `yaml:"includeAliasesInList"`
 
+	// send real model ID to upstream when alias is used
+	SendRealModelID bool `yaml:"sendRealModelID"`
+
 	// support API keys, see issue #433, #50, #251
 	RequiredAPIKeys []string `yaml:"apiKeys"`
 
