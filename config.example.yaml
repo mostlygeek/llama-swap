@@ -419,9 +419,9 @@ groups:
 # A model not appearing in any set can only run alone.
 #
 # matrix:
-#   # aliases: short names for models (alphanumeric, 1-8 chars)
-#   # must not collide with model names
-#   aliases:
+#   # map: short names for models (alphanumeric, 1-8 chars)
+#   # must not collide with model names. Required for sets and evict_costs.
+#   map:
 #     g: gemma-model
 #     q: qwen-model
 #     m: mistral-model

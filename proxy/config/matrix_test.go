@@ -20,7 +20,7 @@ func TestValidateMatrix_Basic(t *testing.T) {
 	models := makeModels("gemma", "qwen", "mistral", "voxtral", "llama70B")
 
 	matrix := MatrixConfig{
-		Aliases: map[string]string{
+		Map: map[string]string{
 			"g": "gemma",
 			"q": "qwen",
 			"m": "mistral",
@@ -61,7 +61,7 @@ func TestValidateMatrix_WithRef(t *testing.T) {
 	models := makeModels("gemma", "qwen", "mistral", "voxtral", "reranker")
 
 	matrix := MatrixConfig{
-		Aliases: map[string]string{
+		Map: map[string]string{
 			"g": "gemma",
 			"q": "qwen",
 			"m": "mistral",
@@ -89,20 +89,20 @@ func TestValidateMatrix_WithRef(t *testing.T) {
 	assert.Equal(t, []string{"gemma", "reranker", "voxtral"}, megaEntries[0].Models)
 }
 
-func TestValidateMatrix_RealModelNames(t *testing.T) {
-	// DSL can use real model names directly
+func TestValidateMatrix_MapIDRequired(t *testing.T) {
+	// DSL cannot use real model names directly — must use map IDs
 	models := makeModels("gemma", "voxtral")
 
 	matrix := MatrixConfig{
+		Map: map[string]string{"g": "gemma"},
 		Sets: OrderedSets{
-			{Name: "combo", DSL: "gemma & voxtral"},
+			{Name: "combo", DSL: "g & voxtral"},
 		},
 	}
 
-	expanded, err := ValidateMatrix(matrix, models)
-	require.NoError(t, err)
-	assert.Len(t, expanded, 1)
-	assert.Equal(t, []string{"gemma", "voxtral"}, expanded[0].Models)
+	_, err := ValidateMatrix(matrix, models)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown map ID")
 }
 
 func TestValidateMatrix_InvalidAliasKey(t *testing.T) {
@@ -121,8 +121,8 @@ func TestValidateMatrix_InvalidAliasKey(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			matrix := MatrixConfig{
-				Aliases: map[string]string{tt.alias: "gemma"},
-				Sets:    OrderedSets{{Name: "s", DSL: tt.alias}},
+				Map:  map[string]string{tt.alias: "gemma"},
+				Sets: OrderedSets{{Name: "s", DSL: tt.alias}},
 			}
 			_, err := ValidateMatrix(matrix, models)
 			require.Error(t, err)
@@ -131,25 +131,12 @@ func TestValidateMatrix_InvalidAliasKey(t *testing.T) {
 	}
 }
 
-func TestValidateMatrix_AliasCollidesWithModel(t *testing.T) {
-	models := makeModels("gemma", "qwen")
-
-	matrix := MatrixConfig{
-		Aliases: map[string]string{"gemma": "qwen"}, // alias name = existing model name
-		Sets:    OrderedSets{{Name: "s", DSL: "gemma"}},
-	}
-
-	_, err := ValidateMatrix(matrix, models)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "collides with a model name")
-}
-
 func TestValidateMatrix_AliasReferencesUnknownModel(t *testing.T) {
 	models := makeModels("gemma")
 
 	matrix := MatrixConfig{
-		Aliases: map[string]string{"x": "nonexistent"},
-		Sets:    OrderedSets{{Name: "s", DSL: "x"}},
+		Map:  map[string]string{"x": "nonexistent"},
+		Sets: OrderedSets{{Name: "s", DSL: "x"}},
 	}
 
 	_, err := ValidateMatrix(matrix, models)
@@ -162,7 +149,7 @@ func TestValidateMatrix_EvictCostInvalid(t *testing.T) {
 
 	t.Run("zero cost", func(t *testing.T) {
 		matrix := MatrixConfig{
-			Aliases:    map[string]string{"g": "gemma"},
+			Map:        map[string]string{"g": "gemma"},
 			EvictCosts: map[string]int{"g": 0},
 			Sets:       OrderedSets{{Name: "s", DSL: "g"}},
 		}
@@ -173,7 +160,7 @@ func TestValidateMatrix_EvictCostInvalid(t *testing.T) {
 
 	t.Run("negative cost", func(t *testing.T) {
 		matrix := MatrixConfig{
-			Aliases:    map[string]string{"g": "gemma"},
+			Map:        map[string]string{"g": "gemma"},
 			EvictCosts: map[string]int{"g": -1},
 			Sets:       OrderedSets{{Name: "s", DSL: "g"}},
 		}
@@ -182,14 +169,15 @@ func TestValidateMatrix_EvictCostInvalid(t *testing.T) {
 		assert.Contains(t, err.Error(), "positive integer")
 	})
 
-	t.Run("unknown model in evict_costs", func(t *testing.T) {
+	t.Run("unknown map ID in evict_costs", func(t *testing.T) {
 		matrix := MatrixConfig{
+			Map:        map[string]string{"g": "gemma"},
 			EvictCosts: map[string]int{"unknown": 5},
-			Sets:       OrderedSets{{Name: "s", DSL: "gemma"}},
+			Sets:       OrderedSets{{Name: "s", DSL: "g"}},
 		}
 		_, err := ValidateMatrix(matrix, models)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "unknown model or alias")
+		assert.Contains(t, err.Error(), "unknown map ID")
 	})
 }
 
@@ -197,7 +185,7 @@ func TestValidateMatrix_CycleDetection(t *testing.T) {
 	models := makeModels("gemma")
 
 	matrix := MatrixConfig{
-		Aliases: map[string]string{"g": "gemma"},
+		Map: map[string]string{"g": "gemma"},
 		Sets: OrderedSets{
 			{Name: "a", DSL: "+b"},
 			{Name: "b", DSL: "+a"},
@@ -213,7 +201,7 @@ func TestValidateMatrix_UndefinedRefTarget(t *testing.T) {
 	models := makeModels("gemma")
 
 	matrix := MatrixConfig{
-		Aliases: map[string]string{"g": "gemma"},
+		Map: map[string]string{"g": "gemma"},
 		Sets: OrderedSets{
 			{Name: "a", DSL: "+nonexistent"},
 		},
@@ -230,23 +218,24 @@ func TestValidateMatrix_NoSets(t *testing.T) {
 	assert.Contains(t, err.Error(), "at least one set")
 }
 
-func TestValidateMatrix_UnknownModelInDSL(t *testing.T) {
+func TestValidateMatrix_UnknownMapIDInDSL(t *testing.T) {
 	models := makeModels("gemma")
 
 	matrix := MatrixConfig{
+		Map: map[string]string{"g": "gemma"},
 		Sets: OrderedSets{
-			{Name: "s", DSL: "gemma & nonexistent"},
+			{Name: "s", DSL: "g & nonexistent"},
 		},
 	}
 
 	_, err := ValidateMatrix(matrix, models)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unknown model or alias")
+	assert.Contains(t, err.Error(), "unknown map ID")
 }
 
 func TestValidateMatrix_ResolvedEvictCosts(t *testing.T) {
 	mc := &MatrixConfig{
-		Aliases: map[string]string{
+		Map: map[string]string{
 			"g": "gemma",
 			"L": "llama70B",
 		},
@@ -291,7 +280,7 @@ models:
     cmd: echo qwen
     proxy: http://localhost:8081
 matrix:
-  aliases:
+  map:
     g: gemma
     q: qwen
   sets:

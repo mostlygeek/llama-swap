@@ -8,11 +8,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var aliasKeyPattern = regexp.MustCompile(`^[a-zA-Z0-9]{1,8}$`)
+var mapKeyPattern = regexp.MustCompile(`^[a-zA-Z0-9]{1,8}$`)
 
 // MatrixConfig represents the swap matrix configuration block.
 type MatrixConfig struct {
-	Aliases    map[string]string `yaml:"aliases"`
+	Map        map[string]string `yaml:"map"`
 	EvictCosts map[string]int    `yaml:"evict_costs"`
 	Sets       OrderedSets       `yaml:"sets"`
 }
@@ -65,32 +65,16 @@ func ValidateMatrix(matrix MatrixConfig, models map[string]ModelConfig) ([]Expan
 		return nil, fmt.Errorf("matrix must define at least one set")
 	}
 
-	// Build alias resolver: alias -> real model name
-	aliasToModel := make(map[string]string)
-	if matrix.Aliases != nil {
-		for alias, modelName := range matrix.Aliases {
-			if !aliasKeyPattern.MatchString(alias) {
-				return nil, fmt.Errorf("alias %q must be alphanumeric and 1-8 characters", alias)
-			}
-			if _, exists := models[alias]; exists {
-				return nil, fmt.Errorf("alias %q collides with a model name", alias)
+	// Validate map entries
+	if matrix.Map != nil {
+		for id, modelName := range matrix.Map {
+			if !mapKeyPattern.MatchString(id) {
+				return nil, fmt.Errorf("map key %q must be alphanumeric and 1-8 characters", id)
 			}
 			if _, exists := models[modelName]; !exists {
-				return nil, fmt.Errorf("alias %q references unknown model %q", alias, modelName)
+				return nil, fmt.Errorf("map key %q references unknown model %q", id, modelName)
 			}
-			aliasToModel[alias] = modelName
 		}
-	}
-
-	// resolveIdentifier maps an alias or model name to the real model name
-	resolveIdentifier := func(name string) (string, error) {
-		if realName, ok := aliasToModel[name]; ok {
-			return realName, nil
-		}
-		if _, ok := models[name]; ok {
-			return name, nil
-		}
-		return "", fmt.Errorf("unknown model or alias %q", name)
 	}
 
 	// Validate evict_costs
@@ -99,8 +83,8 @@ func ValidateMatrix(matrix MatrixConfig, models map[string]ModelConfig) ([]Expan
 			if cost <= 0 {
 				return nil, fmt.Errorf("evict_cost for %q must be a positive integer, got %d", key, cost)
 			}
-			if _, err := resolveIdentifier(key); err != nil {
-				return nil, fmt.Errorf("evict_costs: %w", err)
+			if _, ok := matrix.Map[key]; !ok {
+				return nil, fmt.Errorf("evict_costs: unknown map ID %q", key)
 			}
 		}
 	}
@@ -151,13 +135,13 @@ func ValidateMatrix(matrix MatrixConfig, models map[string]ModelConfig) ([]Expan
 
 		resolvedRefs[name] = combos
 
-		// Resolve aliases to real model names
+		// Resolve map IDs to real model names
 		for _, combo := range combos {
 			resolved := make([]string, len(combo))
 			for i, ident := range combo {
-				realName, err := resolveIdentifier(ident)
-				if err != nil {
-					return nil, fmt.Errorf("set %q: %w", name, err)
+				realName, ok := matrix.Map[ident]
+				if !ok {
+					return nil, fmt.Errorf("set %q: unknown map ID %q", name, ident)
 				}
 				resolved[i] = realName
 			}
@@ -218,15 +202,15 @@ func topologicalSort(sets OrderedSets, deps map[string][]string) ([]string, erro
 }
 
 // ResolvedEvictCosts returns a map of real model name -> evict cost,
-// resolving any aliases. Models not listed default to 1.
+// resolving map IDs. Models not listed default to 1.
 func (m *MatrixConfig) ResolvedEvictCosts() map[string]int {
 	costs := make(map[string]int)
 	if m.EvictCosts == nil {
 		return costs
 	}
 	for key, cost := range m.EvictCosts {
-		// Resolve alias if present
-		if realName, ok := m.Aliases[key]; ok {
+		// Resolve map ID if present
+		if realName, ok := m.Map[key]; ok {
 			costs[realName] = cost
 		} else {
 			costs[key] = cost

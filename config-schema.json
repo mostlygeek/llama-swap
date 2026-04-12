@@ -332,9 +332,9 @@
                 "sets"
             ],
             "properties": {
-                "aliases": {
+                "map": {
                     "type": "object",
-                    "description": "Short names for models. Keys must be alphanumeric, 1-8 characters, and must not collide with model names.",
+                    "description": "Short names for models. Keys must be alphanumeric, 1-8 characters, and must not collide with model names. All sets and evict_costs must use these IDs.",
                     "additionalProperties": {
                         "type": "string"
                     },
