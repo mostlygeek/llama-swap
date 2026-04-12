@@ -12,7 +12,7 @@ var varKeyPattern = regexp.MustCompile(`^[a-zA-Z0-9]{1,8}$`)
 
 // MatrixConfig represents the swap matrix configuration block.
 type MatrixConfig struct {
-	Var        map[string]string `yaml:"var"`
+	Var        map[string]string `yaml:"vars"`
 	EvictCosts map[string]int    `yaml:"evict_costs"`
 	Sets       OrderedSets       `yaml:"sets"`
 }

@@ -423,7 +423,7 @@ matrix:
   # - required for sets and evict_costs settings
   # - each entry is a short name to a model ID
   # - used to keep set DSL logic short and easier to read
-  var:
+  vars:
     g: gemma-model
     q: qwen-model
     m: mistral-model

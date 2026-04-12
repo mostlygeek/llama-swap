@@ -280,7 +280,7 @@ models:
     cmd: echo qwen
     proxy: http://localhost:8081
 matrix:
-  var:
+  vars:
     g: gemma
     q: qwen
   sets:
