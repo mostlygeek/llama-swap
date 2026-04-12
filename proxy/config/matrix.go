@@ -66,6 +66,10 @@ func ValidateMatrix(matrix MatrixConfig, models map[string]ModelConfig) ([]Expan
 		return nil, fmt.Errorf("matrix must define at least one set")
 	}
 
+	if len(matrix.Var) == 0 {
+		return nil, fmt.Errorf("matrix must define at least one var")
+	}
+
 	// Validate var entries
 	if matrix.Var != nil {
 		for id, modelName := range matrix.Var {
