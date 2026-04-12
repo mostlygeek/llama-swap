@@ -10,12 +10,14 @@ const (
 )
 
 // TimeoutsConfig holds timeout settings for proxy connections
+// 0 = no timeout
 type TimeoutsConfig struct {
-	Connect        int `yaml:"connect"`        // seconds, 0 = no timeout (not recommended)
-	ResponseHeader int `yaml:"responseHeader"` // seconds, 0 = no timeout (not recommended)
-	TLSHandshake   int `yaml:"tlsHandshake"`   // seconds, 0 = no timeout (not recommended)
-	ExpectContinue int `yaml:"expectContinue"` // seconds, 0 = no timeout (not recommended)
-	IdleConn       int `yaml:"idleConn"`       // seconds, 0 = no timeout (not recommended)
+	Connect        int `yaml:"connect"`
+	KeepAlive      int `yaml:"keepalive"`
+	ResponseHeader int `yaml:"responseHeader"`
+	TLSHandshake   int `yaml:"tlsHandshake"`
+	ExpectContinue int `yaml:"expectContinue"`
+	IdleConn       int `yaml:"idleConn"`
 }
 
 type ModelConfig struct {
@@ -69,9 +71,12 @@ func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		ConcurrencyLimit: 0,
 		Name:             "",
 		Description:      "",
+
+		// matches http.DefaultTransport
 		Timeouts: TimeoutsConfig{
 			Connect:        30,
-			ResponseHeader: 60,
+			KeepAlive:      30,
+			ResponseHeader: 0,
 			TLSHandshake:   10,
 			ExpectContinue: 1,
 			IdleConn:       90,

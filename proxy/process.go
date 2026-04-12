@@ -102,7 +102,7 @@ func NewProcess(ID string, healthCheckTimeout int, config config.ModelConfig, pr
 			Proxy: http.ProxyFromEnvironment,
 			DialContext: (&net.Dialer{
 				Timeout:   time.Duration(config.Timeouts.Connect) * time.Second,
-				KeepAlive: 30 * time.Second,
+				KeepAlive: time.Duration(config.Timeouts.KeepAlive) * time.Second,
 			}).DialContext,
 			TLSHandshakeTimeout:   time.Duration(config.Timeouts.TLSHandshake) * time.Second,
 			ResponseHeaderTimeout: time.Duration(config.Timeouts.ResponseHeader) * time.Second,
