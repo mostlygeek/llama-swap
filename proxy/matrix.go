@@ -38,6 +38,9 @@ func NewMatrixSolver(expandedSets []config.ExpandedSet, evictCosts map[string]in
 type SolveResult struct {
 	Evict     []string // running models that must be stopped
 	TargetSet []string // the chosen set of models (for informational purposes)
+	SetName   string   // name of the chosen set
+	DSL       string   // original DSL expression for the chosen set
+	TotalCost int      // total eviction cost
 }
 
 // Solve determines which models to evict when a model is requested.
@@ -88,17 +91,20 @@ func (s *MatrixSolver) Solve(requestedModel string, runningModels []string) (Sol
 	}
 
 	// Determine which running models to evict
-	chosenSet := s.expandedSets[bestIdx].Models
+	chosen := s.expandedSets[bestIdx]
 	var evict []string
 	for _, running := range runningModels {
-		if !slices.Contains(chosenSet, running) {
+		if !slices.Contains(chosen.Models, running) {
 			evict = append(evict, running)
 		}
 	}
 
 	return SolveResult{
 		Evict:     evict,
-		TargetSet: chosenSet,
+		TargetSet: chosen.Models,
+		SetName:   chosen.SetName,
+		DSL:       chosen.DSL,
+		TotalCost: bestCost,
 	}, nil
 }
 
@@ -155,9 +161,18 @@ func (m *Matrix) ProxyRequest(modelID string, w http.ResponseWriter, r *http.Req
 		return fmt.Errorf("matrix solver error: %w", err)
 	}
 
+	// Log solver decision
+	if len(result.Evict) > 0 {
+		m.proxyLogger.Debugf("Matrix: model=%s set=%s dsl=%q evict=%v target=%v cost=%d",
+			modelID, result.SetName, result.DSL, result.Evict, result.TargetSet, result.TotalCost)
+	} else if len(running) == 0 {
+		m.proxyLogger.Debugf("Matrix: model=%s starting (no models running)", modelID)
+	} else {
+		m.proxyLogger.Debugf("Matrix: model=%s already running in set=%s dsl=%q", modelID, result.SetName, result.DSL)
+	}
+
 	// Evict models that need to be stopped
 	if len(result.Evict) > 0 {
-		m.proxyLogger.Debugf("Matrix: evicting %v to run %s (target set: %v)", result.Evict, modelID, result.TargetSet)
 		var wg sync.WaitGroup
 		for _, evictModel := range result.Evict {
 			if p, exists := m.processes[evictModel]; exists {

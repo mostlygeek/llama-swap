@@ -56,6 +56,7 @@ func (os *OrderedSets) UnmarshalYAML(value *yaml.Node) error {
 // ExpandedSet is one valid combination of concurrent models (real model names).
 type ExpandedSet struct {
 	SetName string
+	DSL     string
 	Models  []string // real model names, sorted
 }
 
@@ -148,6 +149,7 @@ func ValidateMatrix(matrix MatrixConfig, models map[string]ModelConfig) ([]Expan
 			sort.Strings(resolved)
 			allExpanded = append(allExpanded, ExpandedSet{
 				SetName: name,
+				DSL:     dsl,
 				Models:  resolved,
 			})
 		}
