@@ -419,11 +419,11 @@ groups:
 # A model not appearing in any set can only run alone.
 #
 matrix:
-  # map: short names for models (alphanumeric, 1-8 chars)
+  # var: short names for models (alphanumeric, 1-8 chars)
   # - required for sets and evict_costs settings
   # - each entry is a short name to a model ID
   # - used to keep set DSL logic short and easier to read
-  map:
+  var:
     g: gemma-model
     q: qwen-model
     m: mistral-model

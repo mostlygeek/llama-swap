@@ -8,11 +8,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var mapKeyPattern = regexp.MustCompile(`^[a-zA-Z0-9]{1,8}$`)
+var varKeyPattern = regexp.MustCompile(`^[a-zA-Z0-9]{1,8}$`)
 
 // MatrixConfig represents the swap matrix configuration block.
 type MatrixConfig struct {
-	Map        map[string]string `yaml:"map"`
+	Var        map[string]string `yaml:"var"`
 	EvictCosts map[string]int    `yaml:"evict_costs"`
 	Sets       OrderedSets       `yaml:"sets"`
 }
@@ -66,14 +66,14 @@ func ValidateMatrix(matrix MatrixConfig, models map[string]ModelConfig) ([]Expan
 		return nil, fmt.Errorf("matrix must define at least one set")
 	}
 
-	// Validate map entries
-	if matrix.Map != nil {
-		for id, modelName := range matrix.Map {
-			if !mapKeyPattern.MatchString(id) {
-				return nil, fmt.Errorf("map key %q must be alphanumeric and 1-8 characters", id)
+	// Validate var entries
+	if matrix.Var != nil {
+		for id, modelName := range matrix.Var {
+			if !varKeyPattern.MatchString(id) {
+				return nil, fmt.Errorf("var key %q must be alphanumeric and 1-8 characters", id)
 			}
 			if _, exists := models[modelName]; !exists {
-				return nil, fmt.Errorf("map key %q references unknown model %q", id, modelName)
+				return nil, fmt.Errorf("var key %q references unknown model %q", id, modelName)
 			}
 		}
 	}
@@ -84,8 +84,8 @@ func ValidateMatrix(matrix MatrixConfig, models map[string]ModelConfig) ([]Expan
 			if cost <= 0 {
 				return nil, fmt.Errorf("evict_cost for %q must be a positive integer, got %d", key, cost)
 			}
-			if _, ok := matrix.Map[key]; !ok {
-				return nil, fmt.Errorf("evict_costs: unknown map ID %q", key)
+			if _, ok := matrix.Var[key]; !ok {
+				return nil, fmt.Errorf("evict_costs: unknown var ID %q", key)
 			}
 		}
 	}
@@ -136,13 +136,13 @@ func ValidateMatrix(matrix MatrixConfig, models map[string]ModelConfig) ([]Expan
 
 		resolvedRefs[name] = combos
 
-		// Resolve map IDs to real model names
+		// Resolve var IDs to real model names
 		for _, combo := range combos {
 			resolved := make([]string, len(combo))
 			for i, ident := range combo {
-				realName, ok := matrix.Map[ident]
+				realName, ok := matrix.Var[ident]
 				if !ok {
-					return nil, fmt.Errorf("set %q: unknown map ID %q", name, ident)
+					return nil, fmt.Errorf("set %q: unknown var ID %q", name, ident)
 				}
 				resolved[i] = realName
 			}
@@ -204,15 +204,15 @@ func topologicalSort(sets OrderedSets, deps map[string][]string) ([]string, erro
 }
 
 // ResolvedEvictCosts returns a map of real model name -> evict cost,
-// resolving map IDs. Models not listed default to 1.
+// resolving var IDs. Models not listed default to 1.
 func (m *MatrixConfig) ResolvedEvictCosts() map[string]int {
 	costs := make(map[string]int)
 	if m.EvictCosts == nil {
 		return costs
 	}
 	for key, cost := range m.EvictCosts {
-		// Resolve map ID if present
-		if realName, ok := m.Map[key]; ok {
+		// Resolve var ID if present
+		if realName, ok := m.Var[key]; ok {
 			costs[realName] = cost
 		} else {
 			costs[key] = cost

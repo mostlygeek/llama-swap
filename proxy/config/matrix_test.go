@@ -20,7 +20,7 @@ func TestValidateMatrix_Basic(t *testing.T) {
 	models := makeModels("gemma", "qwen", "mistral", "voxtral", "llama70B")
 
 	matrix := MatrixConfig{
-		Map: map[string]string{
+		Var: map[string]string{
 			"g": "gemma",
 			"q": "qwen",
 			"m": "mistral",
@@ -61,7 +61,7 @@ func TestValidateMatrix_WithRef(t *testing.T) {
 	models := makeModels("gemma", "qwen", "mistral", "voxtral", "reranker")
 
 	matrix := MatrixConfig{
-		Map: map[string]string{
+		Var: map[string]string{
 			"g": "gemma",
 			"q": "qwen",
 			"m": "mistral",
@@ -90,11 +90,11 @@ func TestValidateMatrix_WithRef(t *testing.T) {
 }
 
 func TestValidateMatrix_MapIDRequired(t *testing.T) {
-	// DSL cannot use real model names directly — must use map IDs
+	// DSL cannot use real model names directly — must use var IDs
 	models := makeModels("gemma", "voxtral")
 
 	matrix := MatrixConfig{
-		Map: map[string]string{"g": "gemma"},
+		Var: map[string]string{"g": "gemma"},
 		Sets: OrderedSets{
 			{Name: "combo", DSL: "g & voxtral"},
 		},
@@ -102,7 +102,7 @@ func TestValidateMatrix_MapIDRequired(t *testing.T) {
 
 	_, err := ValidateMatrix(matrix, models)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unknown map ID")
+	assert.Contains(t, err.Error(), "unknown var ID")
 }
 
 func TestValidateMatrix_InvalidAliasKey(t *testing.T) {
@@ -121,7 +121,7 @@ func TestValidateMatrix_InvalidAliasKey(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			matrix := MatrixConfig{
-				Map:  map[string]string{tt.alias: "gemma"},
+				Var:  map[string]string{tt.alias: "gemma"},
 				Sets: OrderedSets{{Name: "s", DSL: tt.alias}},
 			}
 			_, err := ValidateMatrix(matrix, models)
@@ -135,7 +135,7 @@ func TestValidateMatrix_AliasReferencesUnknownModel(t *testing.T) {
 	models := makeModels("gemma")
 
 	matrix := MatrixConfig{
-		Map:  map[string]string{"x": "nonexistent"},
+		Var:  map[string]string{"x": "nonexistent"},
 		Sets: OrderedSets{{Name: "s", DSL: "x"}},
 	}
 
@@ -149,7 +149,7 @@ func TestValidateMatrix_EvictCostInvalid(t *testing.T) {
 
 	t.Run("zero cost", func(t *testing.T) {
 		matrix := MatrixConfig{
-			Map:        map[string]string{"g": "gemma"},
+			Var:        map[string]string{"g": "gemma"},
 			EvictCosts: map[string]int{"g": 0},
 			Sets:       OrderedSets{{Name: "s", DSL: "g"}},
 		}
@@ -160,7 +160,7 @@ func TestValidateMatrix_EvictCostInvalid(t *testing.T) {
 
 	t.Run("negative cost", func(t *testing.T) {
 		matrix := MatrixConfig{
-			Map:        map[string]string{"g": "gemma"},
+			Var:        map[string]string{"g": "gemma"},
 			EvictCosts: map[string]int{"g": -1},
 			Sets:       OrderedSets{{Name: "s", DSL: "g"}},
 		}
@@ -169,15 +169,15 @@ func TestValidateMatrix_EvictCostInvalid(t *testing.T) {
 		assert.Contains(t, err.Error(), "positive integer")
 	})
 
-	t.Run("unknown map ID in evict_costs", func(t *testing.T) {
+	t.Run("unknown var ID in evict_costs", func(t *testing.T) {
 		matrix := MatrixConfig{
-			Map:        map[string]string{"g": "gemma"},
+			Var:        map[string]string{"g": "gemma"},
 			EvictCosts: map[string]int{"unknown": 5},
 			Sets:       OrderedSets{{Name: "s", DSL: "g"}},
 		}
 		_, err := ValidateMatrix(matrix, models)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "unknown map ID")
+		assert.Contains(t, err.Error(), "unknown var ID")
 	})
 }
 
@@ -185,7 +185,7 @@ func TestValidateMatrix_CycleDetection(t *testing.T) {
 	models := makeModels("gemma")
 
 	matrix := MatrixConfig{
-		Map: map[string]string{"g": "gemma"},
+		Var: map[string]string{"g": "gemma"},
 		Sets: OrderedSets{
 			{Name: "a", DSL: "+b"},
 			{Name: "b", DSL: "+a"},
@@ -201,7 +201,7 @@ func TestValidateMatrix_UndefinedRefTarget(t *testing.T) {
 	models := makeModels("gemma")
 
 	matrix := MatrixConfig{
-		Map: map[string]string{"g": "gemma"},
+		Var: map[string]string{"g": "gemma"},
 		Sets: OrderedSets{
 			{Name: "a", DSL: "+nonexistent"},
 		},
@@ -222,7 +222,7 @@ func TestValidateMatrix_UnknownMapIDInDSL(t *testing.T) {
 	models := makeModels("gemma")
 
 	matrix := MatrixConfig{
-		Map: map[string]string{"g": "gemma"},
+		Var: map[string]string{"g": "gemma"},
 		Sets: OrderedSets{
 			{Name: "s", DSL: "g & nonexistent"},
 		},
@@ -230,12 +230,12 @@ func TestValidateMatrix_UnknownMapIDInDSL(t *testing.T) {
 
 	_, err := ValidateMatrix(matrix, models)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unknown map ID")
+	assert.Contains(t, err.Error(), "unknown var ID")
 }
 
 func TestValidateMatrix_ResolvedEvictCosts(t *testing.T) {
 	mc := &MatrixConfig{
-		Map: map[string]string{
+		Var: map[string]string{
 			"g": "gemma",
 			"L": "llama70B",
 		},
@@ -280,7 +280,7 @@ models:
     cmd: echo qwen
     proxy: http://localhost:8081
 matrix:
-  map:
+  var:
     g: gemma
     q: qwen
   sets:
