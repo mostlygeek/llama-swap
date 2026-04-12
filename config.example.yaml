@@ -394,6 +394,78 @@ groups:
       - "forever-modelB"
       - "forever-modelc"
 
+# =============================================================================
+# matrix: solver-based alternative to groups
+# =============================================================================
+#
+# A config must use either groups or matrix, not both.
+#
+# The matrix declares valid combinations of models that can run concurrently.
+# When a model is requested, the solver finds the cheapest way to make it
+# available by evicting as few (and least costly) running models as possible.
+#
+# Solver behavior:
+#   1. Request arrives for model X
+#   2. If X is already running, forward immediately. Done.
+#   3. Find all sets containing X
+#   4. For each candidate set, compute cost: sum of evict_costs for
+#      every running model NOT in that set
+#   5. Pick lowest cost candidate. Ties broken by definition order.
+#   6. Evict what needs to stop. Start X. Forward request.
+#
+# Subset semantics: a set [a, b, c] means any subset is valid.
+# Only the requested model is started — others are not preloaded.
+#
+# A model not appearing in any set can only run alone.
+#
+# matrix:
+#   # aliases: short names for models (alphanumeric, 1-8 chars)
+#   # must not collide with model names
+#   aliases:
+#     g: gemma-model
+#     q: qwen-model
+#     m: mistral-model
+#     v: voxtral-model
+#     e: reranker-model
+#     L: llama-70B
+#     sd: stable-diffusion
+#
+#   # evict_costs: relative cost of losing a running model (default: 1)
+#   evict_costs:
+#     v: 50        # vllm backend, slow cold start
+#     L: 30        # 70B weights, slow to load
+#
+#   # sets: named sets of concurrent model combinations
+#   # Values are DSL strings with operators:
+#   #   &     AND (models run together)
+#   #   |     OR  (alternatives)
+#   #   ()    grouping
+#   #   +ref  inline another set's expression
+#   #
+#   # Expansion examples:
+#   #   "L"                  → [L]
+#   #   "a & b"              → [a, b]
+#   #   "a | b"              → [a], [b]
+#   #   "(a | b) & c"        → [a, c], [b, c]
+#   #   "(a | b) & (c | d)"  → [a,c], [a,d], [b,c], [b,d]
+#   #   "+llms & v"          → expands llms inline, then applies & v
+#   sets:
+#     # LLM + TTS: switching between g/q/m won't evict v
+#     # expands to: [g,v], [q,v], [m,v]
+#     standard: "(g | q | m) & v"
+#
+#     # LLM + TTS + reranker
+#     # expands to: [g,v,e], [q,v,e]
+#     with_rerank: "(g | q) & v & e"
+#
+#     # LLM + image generation, no TTS
+#     # expands to: [g,sd], [q,sd]
+#     creative: "(g | q) & sd"
+#
+#     # 70B model uses all GPUs, can only run alone
+#     # expands to: [L]
+#     full: "L"
+
 # hooks: a dictionary of event triggers and actions
 # - optional, default: empty dictionary
 # - the only supported hook is on_startup
