@@ -287,14 +287,15 @@ models:
     # timeouts: configure proxy connection timeouts for this model
     # - optional, defaults shown below
     # - useful for models running on slower hardware that need longer timeouts
-    # - connect: TCP connection timeout in seconds
-    # - responseHeader: time to wait for response headers in seconds
-    #   (increasing this helps avoid 502 errors on slow hardware)
-    # - tlsHandshake: TLS handshake timeout in seconds
-    # - idleConn: idle connection timeout in seconds
+    # - connect: TCP dial connection timeout in seconds, default: 30 seconds
+    # - keepalive: TCP connection keepalive timeout, default: 30 seconds
+    # - responseHeader: time to wait for response headers in seconds, default: 0 (no timeout)
+    # - tlsHandshake: TLS handshake timeout in seconds, default: 10 seconds
+    # - idleConn: idle connection timeout in seconds, default: 90 seconds
     # - set any value to 0 to disable that timeout (not recommended)
     timeouts:
       connect: 30
+      keepalive: 0
       responseHeader: 60
       tlsHandshake: 10
       idleConn: 90
@@ -447,6 +448,7 @@ peers:
     # - set any value to 0 to disable that timeout (not recommended)
     timeouts:
       connect: 30
+      keepalive: 30
       responseHeader: 60
       tlsHandshake: 10
       idleConn: 90

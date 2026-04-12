@@ -42,7 +42,7 @@ func NewPeerProxy(peers config.PeerDictionaryConfig, proxyLogger *LogMonitor) (*
 			Proxy: http.ProxyFromEnvironment,
 			DialContext: (&net.Dialer{
 				Timeout:   time.Duration(peer.Timeouts.Connect) * time.Second,
-				KeepAlive: 30 * time.Second,
+				KeepAlive: time.Duration(peer.Timeouts.KeepAlive) * time.Second,
 			}).DialContext,
 			TLSHandshakeTimeout:   time.Duration(peer.Timeouts.TLSHandshake) * time.Second,
 			ResponseHeaderTimeout: time.Duration(peer.Timeouts.ResponseHeader) * time.Second,

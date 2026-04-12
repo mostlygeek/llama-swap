@@ -47,31 +47,37 @@
                     "type": "integer",
                     "minimum": 0,
                     "default": 30,
-                    "description": "TCP connection timeout in seconds. Set to 0 to disable (not recommended)."
+                    "description": "TCP connection timeout in seconds. Set to 0 to disable."
+                },
+                "keepalive": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 30,
+                    "description": "TCP keepalive timeout in seconds. Set to 0 to disable."
                 },
                 "responseHeader": {
                     "type": "integer",
                     "minimum": 0,
-                    "default": 60,
-                    "description": "Time to wait for response headers in seconds. Set to 0 to disable (not recommended)."
+                    "default": 0,
+                    "description": "Time to wait for response headers in seconds. Set to 0 to disable."
                 },
                 "tlsHandshake": {
                     "type": "integer",
                     "minimum": 0,
                     "default": 10,
-                    "description": "TLS handshake timeout in seconds. Set to 0 to disable (not recommended)."
+                    "description": "TLS handshake timeout in seconds. Set to 0 to disable."
                 },
                 "expectContinue": {
                     "type": "integer",
                     "minimum": 0,
                     "default": 1,
-                    "description": "Expect-Continue timeout in seconds. Set to 0 to disable (not recommended)."
+                    "description": "Expect-Continue timeout in seconds. Set to 0 to disable."
                 },
                 "idleConn": {
                     "type": "integer",
                     "minimum": 0,
                     "default": 90,
-                    "description": "Idle connection timeout in seconds. Set to 0 to disable (not recommended)."
+                    "description": "Idle connection timeout in seconds. Set to 0 to disable."
                 }
             },
             "additionalProperties": false,
@@ -413,25 +419,31 @@
                         "properties": {
                             "connect": {
                                 "type": "integer",
-                                "minimum": 1,
+                                "minimum": 0,
                                 "default": 30,
                                 "description": "TCP connection timeout in seconds."
                             },
+                            "keepalive": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "default": 30,
+                                "description": "TCP keepalive connection timeout in seconds."
+                            },
                             "responseHeader": {
                                 "type": "integer",
-                                "minimum": 1,
-                                "default": 60,
+                                "minimum": 0,
+                                "default": 0,
                                 "description": "Time to wait for response headers in seconds."
                             },
                             "tlsHandshake": {
                                 "type": "integer",
-                                "minimum": 1,
+                                "minimum": 0,
                                 "default": 10,
                                 "description": "TLS handshake timeout in seconds."
                             },
                             "idleConn": {
                                 "type": "integer",
-                                "minimum": 1,
+                                "minimum": 0,
                                 "default": 90,
                                 "description": "Idle connection timeout in seconds."
                             }

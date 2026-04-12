@@ -24,8 +24,12 @@ func (c *PeerConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		ApiKey:  "",
 		Models:  []string{},
 		Filters: Filters{},
+
+		// mostly matches http.DefaultTransport but with a 60s ResponseHeader timeout
+		// to match the pre PR #619 functionality
 		Timeouts: TimeoutsConfig{
 			Connect:        30,
+			KeepAlive:      30,
 			ResponseHeader: 60,
 			TLSHandshake:   10,
 			ExpectContinue: 1,
