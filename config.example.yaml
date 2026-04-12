@@ -331,6 +331,21 @@ models:
     # - processes have 5 seconds to shutdown until forceful termination is attempted
     cmdStop: docker stop ${MODEL_ID}
 
+    # afterHealthy: a command to run once after the model passes its health check
+    # - optional, default: ""
+    # - runs as a one-shot command as soon as the server reports healthy
+    # - blocks the model from becoming ready until it completes
+    # - a failure is logged as a warning but does not prevent the model from starting
+    # - useful for loading saved prompt cache slots in llama.cpp
+    # afterHealthy: "curl -X POST 'http://localhost:${PORT}/slots/0?action=restore' -H 'Content-Type: application/json' -d '{\"filename\": \"slot0.bin\"}'"
+
+    # beforeStop: a command to run right before the model process is killed
+    # - optional, default: ""
+    # - blocks the model shutdown until it completes (or fails)
+    # - the model will be stopped regardless of whether this command succeeds
+    # - useful for saving prompt cache slots in llama.cpp before unloading
+    # beforeStop: "curl -X POST 'http://localhost:${PORT}/slots/0?action=save' -H 'Content-Type: application/json' -d '{\"filename\": \"slot0.bin\"}'"
+
 # groups: a dictionary of group settings
 # - optional, default: empty dictionary
 # - provides advanced controls over model swapping behaviour

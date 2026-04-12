@@ -23,6 +23,8 @@ type TimeoutsConfig struct {
 type ModelConfig struct {
 	Cmd           string   `yaml:"cmd"`
 	CmdStop       string   `yaml:"cmdStop"`
+	AfterHealthy  string   `yaml:"afterHealthy"`
+	BeforeStop    string   `yaml:"beforeStop"`
 	Proxy         string   `yaml:"proxy"`
 	Aliases       []string `yaml:"aliases"`
 	Env           []string `yaml:"env"`

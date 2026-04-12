@@ -351,6 +351,13 @@ func (p *Process) start() error {
 		}
 	}
 
+	if p.config.AfterHealthy != "" {
+		p.proxyLogger.Debugf("<%s> Running afterHealthy hook: %s", p.ID, p.config.AfterHealthy)
+		if err := p.runHookCommand(p.config.AfterHealthy); err != nil {
+			p.proxyLogger.Warnf("<%s> afterHealthy hook failed: %v", p.ID, err)
+		}
+	}
+
 	if p.config.UnloadAfter > 0 {
 		// start a goroutine to check every second if
 		// the process should be stopped
@@ -445,6 +452,13 @@ func (p *Process) stopCommand() {
 	if cancelUpstream == nil {
 		p.proxyLogger.Errorf("<%s> stopCommand has a nil p.cancelUpstream()", p.ID)
 		return
+	}
+
+	if p.config.BeforeStop != "" {
+		p.proxyLogger.Debugf("<%s> Running beforeStop hook: %s", p.ID, p.config.BeforeStop)
+		if err := p.runHookCommand(p.config.BeforeStop); err != nil {
+			p.proxyLogger.Warnf("<%s> beforeStop hook failed: %v", p.ID, err)
+		}
 	}
 
 	cancelUpstream()
@@ -670,6 +684,38 @@ func (p *Process) cmdStopUpstreamProcess() error {
 // Logger returns the logger for this process.
 func (p *Process) Logger() *LogMonitor {
 	return p.processLogger
+}
+
+var hookCommandTimeout = 30 * time.Second
+
+// runHookCommand executes a hook command, logging its output through the
+// process logger. The command inherits the environment of the upstream process.
+func (p *Process) runHookCommand(hookCmd string) error {
+	args, err := config.SanitizeCommand(hookCmd)
+	if err != nil {
+		return fmt.Errorf("failed to sanitize hook command %q: %v", hookCmd, err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), hookCommandTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	cmd.Stdout = p.processLogger
+	cmd.Stderr = p.processLogger
+	if p.cmd != nil {
+		cmd.Env = p.cmd.Env
+	}
+	setProcAttributes(cmd)
+
+	err = cmd.Run()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("hook command timed out after %v: %w", hookCommandTimeout, err)
+		}
+		return fmt.Errorf("hook command failed: %w", err)
+	}
+
+	return nil
 }
 
 var loadingRemarks = []string{
