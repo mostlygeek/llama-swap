@@ -42,6 +42,47 @@ func (pm *ProxyManager) apiUnloadAllModels(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"msg": "ok"})
 }
 
+func (pm *ProxyManager) getModelTTL(modelID string) (ttl *int, ttlRemaining *int) {
+	processGroup := pm.findGroupByModelName(modelID)
+	if processGroup == nil {
+		return nil, nil
+	}
+
+	process := processGroup.processes[modelID]
+	if process == nil {
+		return nil, nil
+	}
+
+	return process.GetTTL()
+}
+
+func (pm *ProxyManager) getModelState(modelID string) string {
+	processGroup := pm.findGroupByModelName(modelID)
+	state := "unknown"
+
+	if processGroup != nil {
+		process := processGroup.processes[modelID]
+		if process != nil {
+			switch process.CurrentState() {
+			case StateReady:
+				state = "ready"
+			case StateStarting:
+				state = "starting"
+			case StateStopping:
+				state = "stopping"
+			case StateShutdown:
+				state = "shutdown"
+			case StateStopped:
+				state = "stopped"
+			default:
+				state = "unknown"
+			}
+		}
+	}
+
+	return state
+}
+
 func (pm *ProxyManager) getModelStatus() []Model {
 	// Extract keys and sort them
 	models := []Model{}
@@ -54,35 +95,11 @@ func (pm *ProxyManager) getModelStatus() []Model {
 
 	// Iterate over sorted keys
 	for _, modelID := range modelIDs {
-		// Get process state
-		processGroup := pm.findGroupByModelName(modelID)
-		state := "unknown"
-		if processGroup != nil {
-			process := processGroup.processes[modelID]
-			if process != nil {
-				var stateStr string
-				switch process.CurrentState() {
-				case StateReady:
-					stateStr = "ready"
-				case StateStarting:
-					stateStr = "starting"
-				case StateStopping:
-					stateStr = "stopping"
-				case StateShutdown:
-					stateStr = "shutdown"
-				case StateStopped:
-					stateStr = "stopped"
-				default:
-					stateStr = "unknown"
-				}
-				state = stateStr
-			}
-		}
 		models = append(models, Model{
 			Id:          modelID,
 			Name:        pm.config.Models[modelID].Name,
 			Description: pm.config.Models[modelID].Description,
-			State:       state,
+			State:       pm.getModelState(modelID),
 			Unlisted:    pm.config.Models[modelID].Unlisted,
 			Aliases:     pm.config.Models[modelID].Aliases,
 		})

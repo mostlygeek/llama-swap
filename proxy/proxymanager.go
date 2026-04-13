@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"maps"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -519,16 +520,35 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 		if name := strings.TrimSpace(modelConfig.Name); name != "" {
 			record["name"] = name
 		}
+
 		if desc := strings.TrimSpace(modelConfig.Description); desc != "" {
 			record["description"] = desc
 		}
 
-		// Add metadata if present
-		if len(modelConfig.Metadata) > 0 {
-			record["meta"] = gin.H{
-				"llamaswap": modelConfig.Metadata,
-			}
+		// Build meta.llamaswap with runtime state and config metadata
+		meta := make(map[string]any)
+
+		// Copy all user provided metadata to the meta map
+		if modelConfig.Metadata != nil {
+			maps.Copy(meta, modelConfig.Metadata)
 		}
+
+		// Handle model state
+		if state := pm.getModelState(modelId); state != "" {
+			meta["state"] = state
+		}
+
+		// Handle model ttl/ttl remaining
+		if ttl, ttlRemaining := pm.getModelTTL(modelId); ttl != nil {
+			meta["ttl"] = ttl
+			meta["ttlRemaining"] = ttlRemaining
+		}
+
+		// Copy the final meta object if it has anything
+		if len(meta) > 0 {
+			record["meta"] = gin.H{"llamaswap": meta}
+		}
+
 		return record
 	}
 
