@@ -632,7 +632,7 @@ func (pm *ProxyManager) findModelInPath(path string) (searchName string, realNam
 			searchModelName = searchModelName + "/" + part
 		}
 
-		if modelID, ok := pm.config.RealModelName(searchModelName); ok {
+		if modelID := pm.resolveAliasRuntime(searchModelName); modelID != "" {
 			return searchModelName, modelID, "/" + strings.Join(parts[i+1:], "/"), true
 		}
 	}
@@ -708,9 +708,10 @@ func (pm *ProxyManager) proxyInferenceHandler(c *gin.Context) {
 
 	// Look for a matching local model first
 	var nextHandler func(modelID string, w http.ResponseWriter, r *http.Request) error
+	var modelID string
 
-	modelID, found := pm.config.RealModelName(requestedModel)
-	if found {
+	modelID = pm.resolveAliasRuntime(requestedModel)
+	if modelID != "" {
 		processGroup, err := pm.swapProcessGroup(modelID)
 		if err != nil {
 			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
@@ -855,9 +856,10 @@ func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
 	// Look for a matching local model first, then check peers
 	var nextHandler func(modelID string, w http.ResponseWriter, r *http.Request) error
 	var useModelName string
+	var modelID string
 
-	modelID, found := pm.config.RealModelName(requestedModel)
-	if found {
+	modelID = pm.resolveAliasRuntime(requestedModel)
+	if modelID != "" {
 		processGroup, err := pm.swapProcessGroup(modelID)
 		if err != nil {
 			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
@@ -977,13 +979,13 @@ func (pm *ProxyManager) proxyGETModelHandler(c *gin.Context) {
 	var nextHandler func(modelID string, w http.ResponseWriter, r *http.Request) error
 	var modelID string
 
-	if realModelID, found := pm.config.RealModelName(requestedModel); found {
-		processGroup, err := pm.swapProcessGroup(realModelID)
+	modelID = pm.resolveAliasRuntime(requestedModel)
+	if modelID != "" {
+		processGroup, err := pm.swapProcessGroup(modelID)
 		if err != nil {
 			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error swapping process group: %s", err.Error()))
 			return
 		}
-		modelID = realModelID
 		pm.proxyLogger.Debugf("ProxyManager using local Process for model: %s", requestedModel)
 		nextHandler = processGroup.ProxyRequest
 	} else if pm.peerProxy != nil && pm.peerProxy.HasPeerModel(requestedModel) {
@@ -1115,6 +1117,28 @@ func (pm *ProxyManager) findGroupByModelName(modelName string) *ProcessGroup {
 		}
 	}
 	return nil
+}
+
+// resolveAliasRuntime resolves an alias at runtime by checking StateReady or StateStarting first,
+// then falling back to the preferred model. Returns the model ID to use, or empty string if not found.
+func (pm *ProxyManager) resolveAliasRuntime(requestedModel string) string {
+	candidates, preferred, found := pm.config.ResolveAlias(requestedModel)
+	if !found {
+		return ""
+	}
+	// Check if any candidate is currently in StateReady or StateStarting
+	for _, candidate := range candidates {
+		if processGroup := pm.findGroupByModelName(candidate); processGroup != nil {
+			for _, proc := range processGroup.processes {
+				state := proc.CurrentState()
+				if state == StateReady || state == StateStarting {
+					return candidate
+				}
+			}
+		}
+	}
+	// Fall back to preferred
+	return preferred
 }
 
 func (pm *ProxyManager) SetVersion(buildDate string, commit string, version string) {

@@ -242,16 +242,17 @@ groups:
 			},
 		},
 		HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 		MetricsMaxInMemory: 1000,
 		CaptureBuffer:      5,
 		Profiles: map[string][]string{
 			"test": {"model1", "model2"},
 		},
-		aliases: map[string]string{
-			"m1":        "model1",
-			"model-one": "model1",
-			"m2":        "model2",
-			"mthree":    "model3",
+		aliases: map[string]AliasEntry{
+			"m1":        {Candidates: []string{"model1"}, Preferred: "model1"},
+			"model-one": {Candidates: []string{"model1"}, Preferred: "model1"},
+			"m2":        {Candidates: []string{"model2"}, Preferred: "model2"},
+			"mthree":    {Candidates: []string{"model3"}, Preferred: "model3"},
 		},
 		Groups: map[string]GroupConfig{
 			DEFAULT_GROUP_ID: {

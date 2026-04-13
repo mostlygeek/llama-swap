@@ -13,6 +13,7 @@ import (
 
 var processGroupTestConfig = config.AddDefaultGroupToConfig(config.Config{
 	HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 	Models: map[string]config.ModelConfig{
 		"model1": getTestSimpleResponderConfig("model1"),
 		"model2": getTestSimpleResponderConfig("model2"),
@@ -55,6 +56,7 @@ func TestProcessGroup_ProxyRequestSwapIsTrueParallel(t *testing.T) {
 
 	var processGroupTestConfig = config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 		Models: map[string]config.ModelConfig{
 			// use the same listening so if a model is already running, it will fail
 			// this is a way to test that swap isolation is working

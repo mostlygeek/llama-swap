@@ -116,8 +116,16 @@ type HookOnStartup struct {
 	Preload []string `yaml:"preload"`
 }
 
+// AliasEntry holds all model IDs that claim an alias and the preferred fallback.
+// Candidates are checked in declaration order for runtime resolution.
+type AliasEntry struct {
+	Candidates []string // all model IDs that registered this alias
+	Preferred  string   // the model to use when nothing is loaded (marked with * in config)
+}
+
 type Config struct {
 	HealthCheckTimeout int                    `yaml:"healthCheckTimeout"`
+	StartupTimeout     int                    `yaml:"startupTimeout"`
 	LogRequests        bool                   `yaml:"logRequests"`
 	LogLevel           string                 `yaml:"logLevel"`
 	LogTimeFormat      string                 `yaml:"logTimeFormat"`
@@ -132,8 +140,8 @@ type Config struct {
 	// for key/value replacements in model's cmd, cmdStop, proxy, checkEndPoint
 	Macros MacroList `yaml:"macros"`
 
-	// map aliases to actual model IDs
-	aliases map[string]string
+	// map aliases to candidate models and preferred fallback
+	aliases map[string]AliasEntry
 
 	// automatic port assignments
 	StartPort int `yaml:"startPort"`
@@ -157,14 +165,24 @@ type Config struct {
 	Peers PeerDictionaryConfig `yaml:"peers"`
 }
 
-func (c *Config) RealModelName(search string) (string, bool) {
-	if _, found := c.Models[search]; found {
-		return search, true
-	} else if name, found := c.aliases[search]; found {
-		return name, found
-	} else {
-		return "", false
+// ResolveAlias returns all candidate model IDs for a given alias or model ID,
+// plus the preferred (fallback) model ID. Use this for runtime resolution.
+func (c *Config) ResolveAlias(search string) (candidates []string, preferred string, found bool) {
+	if _, ok := c.Models[search]; ok {
+		return []string{search}, search, true
 	}
+	if entry, ok := c.aliases[search]; ok {
+		return entry.Candidates, entry.Preferred, true
+	}
+	return nil, "", false
+}
+
+// RealModelName resolves an alias or model ID to a single model ID.
+// Always returns the preferred (starred) model. Use for static resolution
+// (startup preload, config validation) where no process state is available.
+func (c *Config) RealModelName(search string) (string, bool) {
+	_, preferred, found := c.ResolveAlias(search)
+	return preferred, found
 }
 
 func (c *Config) FindConfig(modelName string) (ModelConfig, string, bool) {
@@ -217,6 +235,12 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		config.HealthCheckTimeout = 15
 	}
 
+	// StartupTimeout defaults to 30 minutes (1800s) for vLLM container startup
+	// Minimum 60s to prevent premature timeout during model loading
+	if config.StartupTimeout < 60 {
+		config.StartupTimeout = 1800
+	}
+
 	if config.StartPort < 1 {
 		return Config{}, fmt.Errorf("startPort must be greater than 1")
 	}
@@ -232,13 +256,32 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	}
 
 	// Populate the aliases map
-	config.aliases = make(map[string]string)
+	config.aliases = make(map[string]AliasEntry)
 	for modelName, modelConfig := range config.Models {
-		for _, alias := range modelConfig.Aliases {
-			if _, found := config.aliases[alias]; found {
-				return Config{}, fmt.Errorf("duplicate alias %s found in model: %s", alias, modelName)
+		for _, rawAlias := range modelConfig.Aliases {
+			isPreferred := strings.HasSuffix(rawAlias, "*")
+			alias := strings.TrimSuffix(rawAlias, "*")
+
+			entry := config.aliases[alias]
+			entry.Candidates = append(entry.Candidates, modelName)
+			if isPreferred {
+				if entry.Preferred != "" {
+					return Config{}, fmt.Errorf("alias %s has multiple preferred (*) models: %s and %s", alias, entry.Preferred, modelName)
+				}
+				entry.Preferred = modelName
 			}
-			config.aliases[alias] = modelName
+			config.aliases[alias] = entry
+		}
+	}
+	// Validate: multi-candidate aliases must have exactly one preferred; set implicit preferred for single-candidate aliases
+	for alias, entry := range config.aliases {
+		if len(entry.Candidates) > 1 && entry.Preferred == "" {
+			return Config{}, fmt.Errorf("alias %s has multiple models but no preferred (*) model", alias)
+		}
+		if entry.Preferred == "" {
+			// single-candidate alias — set preferred implicitly
+			entry.Preferred = entry.Candidates[0]
+			config.aliases[alias] = entry
 		}
 	}
 
@@ -419,13 +462,16 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			if _, exists := config.Models[key]; exists {
 				return Config{}, fmt.Errorf("model %s filters.setParamsByID: key '%s' conflicts with an existing model ID", modelId, key)
 			}
-			if existingModel, exists := config.aliases[key]; exists {
-				if existingModel != modelId {
-					return Config{}, fmt.Errorf("duplicate alias '%s' in model %s filters.setParamsByID, already used by model %s", key, modelId, existingModel)
+			if existingEntry, exists := config.aliases[key]; exists {
+				if existingEntry.Preferred != modelId {
+					return Config{}, fmt.Errorf("duplicate alias '%s' in model %s filters.setParamsByID, already used by model %s", key, modelId, existingEntry.Preferred)
 				}
 				continue // already registered as explicit alias for this model
 			}
-			config.aliases[key] = modelId
+			config.aliases[key] = AliasEntry{
+				Candidates: []string{modelId},
+				Preferred:  modelId,
+			}
 			modelConfig.Aliases = append(modelConfig.Aliases, key)
 		}
 

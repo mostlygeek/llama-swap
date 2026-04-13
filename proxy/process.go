@@ -57,6 +57,7 @@ type Process struct {
 	proxyLogger   *LogMonitor
 
 	healthCheckTimeout      int
+	startupTimeout          int
 	healthCheckLoopInterval time.Duration
 
 	lastRequestHandledMutex sync.RWMutex
@@ -81,7 +82,7 @@ type Process struct {
 	failedStartCount int
 }
 
-func NewProcess(ID string, healthCheckTimeout int, config config.ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor) *Process {
+func NewProcess(ID string, healthCheckTimeout int, startupTimeout int, config config.ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor) *Process {
 	concurrentLimit := 10
 	if config.ConcurrencyLimit > 0 {
 		concurrentLimit = config.ConcurrencyLimit
@@ -132,6 +133,7 @@ func NewProcess(ID string, healthCheckTimeout int, config config.ModelConfig, pr
 		processLogger:           processLogger,
 		proxyLogger:             proxyLogger,
 		healthCheckTimeout:      healthCheckTimeout,
+		startupTimeout:          startupTimeout,
 		healthCheckLoopInterval: 5 * time.Second, /* default, can not be set by user - used for testing */
 		state:                   StateStopped,
 
@@ -310,7 +312,7 @@ func (p *Process) start() error {
 	<-time.After(250 * time.Millisecond) // give process a bit of time to start
 
 	checkStartTime := time.Now()
-	maxDuration := time.Second * time.Duration(p.healthCheckTimeout)
+	maxDuration := time.Second * time.Duration(p.startupTimeout)
 	checkEndpoint := strings.TrimSpace(p.config.CheckEndpoint)
 
 	// a "none" means don't check for health ... I could have picked a better word :facepalm:
@@ -615,6 +617,22 @@ func (p *Process) waitForCmd() {
 	case StateStopping:
 		if curState, err := p.swapState(StateStopping, StateStopped); err != nil {
 			p.proxyLogger.Errorf("<%s> Process exited but could not swap to StateStopped. curState=%s, err: %v", p.ID, curState, err)
+			p.forceState(StateStopped)
+		}
+	case StateReady:
+		// Process crashed during runtime - attempt auto-restart
+		const maxRestarts = 5
+		if p.failedStartCount < maxRestarts {
+			p.proxyLogger.Warnf("<%s> Process crashed in StateReady, attempting auto-restart (%d/%d)", p.ID, p.failedStartCount+1, maxRestarts)
+			// Brief sleep to avoid restart loops
+			time.Sleep(30 * time.Second)
+			// Restart the process (this will increment failedStartCount again if it fails)
+			if err := p.start(); err != nil {
+				p.proxyLogger.Errorf("<%s> Auto-restart failed: %v", p.ID, err)
+				p.forceState(StateStopped)
+			}
+		} else {
+			p.proxyLogger.Errorf("<%s> Process crashed in StateReady but max restarts (%d) reached, giving up", p.ID, maxRestarts)
 			p.forceState(StateStopped)
 		}
 	default:

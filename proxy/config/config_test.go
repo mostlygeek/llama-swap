@@ -63,7 +63,7 @@ models:
 
 	// this is a contains because it could be `model1` or `model2` depending on the order
 	// go decided on the order of the map
-	assert.Contains(t, err.Error(), "duplicate alias m1 found in model: model")
+	assert.Contains(t, err.Error(), "alias m1 has multiple models but no preferred")
 }
 
 func TestConfig_FindConfig(t *testing.T) {
@@ -88,10 +88,10 @@ func TestConfig_FindConfig(t *testing.T) {
 			},
 		},
 		HealthCheckTimeout: 10,
-		aliases: map[string]string{
-			"m1":        "model1",
-			"model-one": "model1",
-			"m2":        "model2",
+		aliases: map[string]AliasEntry{
+			"m1":        {Candidates: []string{"model1"}, Preferred: "model1"},
+			"model-one": {Candidates: []string{"model1"}, Preferred: "model1"},
+			"m2":        {Candidates: []string{"model2"}, Preferred: "model2"},
 		},
 	}
 

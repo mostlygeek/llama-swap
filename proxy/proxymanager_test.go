@@ -47,6 +47,7 @@ func CreateTestResponseRecorder() *TestResponseRecorder {
 func TestProxyManager_SwapProcessCorrectly(t *testing.T) {
 	config := config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 		Models: map[string]config.ModelConfig{
 			"model1": getTestSimpleResponderConfig("model1"),
 			"model2": getTestSimpleResponderConfig("model2"),
@@ -70,6 +71,7 @@ func TestProxyManager_SwapProcessCorrectly(t *testing.T) {
 func TestProxyManager_SwapMultiProcess(t *testing.T) {
 	config := config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 		Models: map[string]config.ModelConfig{
 			"model1": getTestSimpleResponderConfig("model1"),
 			"model2": getTestSimpleResponderConfig("model2"),
@@ -115,6 +117,7 @@ func TestProxyManager_SwapMultiProcess(t *testing.T) {
 func TestProxyManager_PersistentGroupsAreNotSwapped(t *testing.T) {
 	config := config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 		Models: map[string]config.ModelConfig{
 			"model1": getTestSimpleResponderConfig("model1"), // goes into the default group
 			"model2": getTestSimpleResponderConfig("model2"),
@@ -159,6 +162,7 @@ func TestProxyManager_SwapMultiProcessParallelRequests(t *testing.T) {
 
 	config := config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 		Models: map[string]config.ModelConfig{
 			"model1": getTestSimpleResponderConfig("model1"),
 			"model2": getTestSimpleResponderConfig("model2"),
@@ -222,6 +226,7 @@ func TestProxyManager_ListModelsHandler(t *testing.T) {
 
 	cfg := config.Config{
 		HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 		Models: map[string]config.ModelConfig{
 			"model1": model1Config,
 			"model2": model2Config,
@@ -414,6 +419,7 @@ func TestProxyManager_ListModelsHandler_SortedByID(t *testing.T) {
 	// Intentionally add models in non-sorted order and with an unlisted model
 	config := config.Config{
 		HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 		Models: map[string]config.ModelConfig{
 			"zeta":  getTestSimpleResponderConfig("zeta"),
 			"alpha": getTestSimpleResponderConfig("alpha"),
@@ -536,6 +542,7 @@ func TestProxyManager_Shutdown(t *testing.T) {
 
 	config := config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 		Models: map[string]config.ModelConfig{
 			"model1": model1Config,
 			"model2": model2Config,
@@ -579,6 +586,7 @@ func TestProxyManager_Shutdown(t *testing.T) {
 func TestProxyManager_Unload(t *testing.T) {
 	conf := config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 		Models: map[string]config.ModelConfig{
 			"model1": getTestSimpleResponderConfig("model1"),
 		},
@@ -611,6 +619,7 @@ func TestProxyManager_UnloadSingleModel(t *testing.T) {
 	const testGroupId = "testGroup"
 	config := config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 		Models: map[string]config.ModelConfig{
 			"model1": getTestSimpleResponderConfig("model1"),
 			"model2": getTestSimpleResponderConfig("model2"),
@@ -662,6 +671,7 @@ func TestProxyManager_RunningEndpoint(t *testing.T) {
 	// Shared configuration
 	config := config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 		Models: map[string]config.ModelConfig{
 			"model1": getTestSimpleResponderConfig("model1"),
 			"model2": getTestSimpleResponderConfig("model2"),
@@ -737,6 +747,7 @@ func TestProxyManager_RunningEndpoint(t *testing.T) {
 func TestProxyManager_AudioTranscriptionHandler(t *testing.T) {
 	config := config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 		Models: map[string]config.ModelConfig{
 			"TheExpectedModel": getTestSimpleResponderConfig("TheExpectedModel"),
 		},
@@ -790,6 +801,7 @@ func TestProxyManager_UseModelName(t *testing.T) {
 
 	conf := config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 		Models: map[string]config.ModelConfig{
 			"model1": modelConfig,
 		},
@@ -960,6 +972,7 @@ models:
 func TestProxyManager_AudioVoicesGETHandler(t *testing.T) {
 	conf := config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 		Models: map[string]config.ModelConfig{
 			"model1": getTestSimpleResponderConfig("model1"),
 		},
@@ -997,6 +1010,7 @@ func TestProxyManager_AudioVoicesGETHandler(t *testing.T) {
 func TestProxyManager_CORSOptionsHandler(t *testing.T) {
 	config := config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 		Models: map[string]config.ModelConfig{
 			"model1": getTestSimpleResponderConfig("model1"),
 		},
@@ -1096,6 +1110,7 @@ models:
 func TestProxyManager_ChatContentLength(t *testing.T) {
 	config := config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 		Models: map[string]config.ModelConfig{
 			"model1": getTestSimpleResponderConfig("model1"),
 		},
@@ -1127,6 +1142,7 @@ func TestProxyManager_FiltersStripParams(t *testing.T) {
 
 	config := config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 		LogLevel:           "error",
 		Models: map[string]config.ModelConfig{
 			"model1": modelConfig,
@@ -1211,6 +1227,7 @@ models:
 func TestProxyManager_HealthEndpoint(t *testing.T) {
 	config := config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 		Models: map[string]config.ModelConfig{
 			"model1": getTestSimpleResponderConfig("model1"),
 		},
@@ -1230,6 +1247,7 @@ func TestProxyManager_HealthEndpoint(t *testing.T) {
 func TestProxyManager_CompletionEndpoint(t *testing.T) {
 	config := config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 		Models: map[string]config.ModelConfig{
 			"model1": getTestSimpleResponderConfig("model1"),
 		},
@@ -1310,6 +1328,7 @@ models:
 func TestProxyManager_StreamingEndpointsReturnNoBufferingHeader(t *testing.T) {
 	config := config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 		Models: map[string]config.ModelConfig{
 			"model1":       getTestSimpleResponderConfig("model1"),
 			"author/model": getTestSimpleResponderConfig("author/model"),
@@ -1361,6 +1380,7 @@ func TestProxyManager_StreamingEndpointsReturnNoBufferingHeader(t *testing.T) {
 func TestProxyManager_ProxiedStreamingEndpointReturnsNoBufferingHeader(t *testing.T) {
 	config := config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 		Models: map[string]config.ModelConfig{
 			"streaming-model": getTestSimpleResponderConfig("streaming-model"),
 		},
@@ -1386,6 +1406,7 @@ func TestProxyManager_ProxiedStreamingEndpointReturnsNoBufferingHeader(t *testin
 func TestProxyManager_ApiGetVersion(t *testing.T) {
 	config := config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 		Models: map[string]config.ModelConfig{
 			"model1": getTestSimpleResponderConfig("model1"),
 		},
@@ -1424,6 +1445,7 @@ func TestProxyManager_ApiGetVersion(t *testing.T) {
 func TestProxyManager_APIKeyAuth(t *testing.T) {
 	testConfig := config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 		Models: map[string]config.ModelConfig{
 			"model1": getTestSimpleResponderConfig("model1"),
 		},
@@ -1536,6 +1558,7 @@ func TestProxyManager_APIKeyAuth_Disabled(t *testing.T) {
 	// Config without RequiredAPIKeys - auth should be disabled
 	testConfig := config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 		Models: map[string]config.ModelConfig{
 			"model1": getTestSimpleResponderConfig("model1"),
 		},
@@ -1710,6 +1733,7 @@ models:
 	t.Run("no peers configured - unknown model returns error", func(t *testing.T) {
 		testConfig := config.AddDefaultGroupToConfig(config.Config{
 			HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 			Models: map[string]config.ModelConfig{
 				"local-model": getTestSimpleResponderConfig("local-model"),
 			},
@@ -1770,6 +1794,7 @@ models:
 func TestProxyManager_SdApiTxt2ImgRouting(t *testing.T) {
 	conf := config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 		Models: map[string]config.ModelConfig{
 			"sd-model": getTestSimpleResponderConfig("sd-model"),
 		},
@@ -1813,6 +1838,7 @@ func TestProxyManager_SdApiTxt2ImgRouting(t *testing.T) {
 func TestProxyManager_SdApiGetLoras(t *testing.T) {
 	conf := config.AddDefaultGroupToConfig(config.Config{
 		HealthCheckTimeout: 15,
+		StartupTimeout:     1800,
 		Models: map[string]config.ModelConfig{
 			"sd-model": getTestSimpleResponderConfig("sd-model"),
 		},
@@ -1844,4 +1870,74 @@ func TestProxyManager_SdApiGetLoras(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assert.Contains(t, w.Body.String(), "could not find suitable handler")
 	})
+}
+
+// TestProxyManager_AliasWithStateStarting prevents regression of the infinite loop bug
+// where requests for an alias would trigger model swaps even when the preferred model
+// was already in StateStarting. The bug occurred because resolveAliasRuntime only
+// checked StateReady, not StateStarting.
+func TestProxyManager_AliasWithStateStarting(t *testing.T) {
+	// Use YAML config to properly test multi-alias with preferred model
+	yamlConfig := `
+healthCheckTimeout: 15
+startPort: 9990
+models:
+  qwen122b:
+    cmd: "sleep 1000"
+    proxy: "http://127.0.0.1:9999"
+    checkEndpoint: "/health"
+    aliases:
+      - "coding*"  # qwen is preferred for coding
+  minimax:
+    cmd: "sleep 1000"
+    proxy: "http://127.0.0.1:9998"
+    checkEndpoint: "/health"
+    aliases:
+      - "coding"   # minimax also claims coding alias
+groups:
+  _default_:
+    swap: true
+    exclusive: true
+    members: ["qwen122b", "minimax"]
+`
+
+	config, err := config.LoadConfigFromReader(strings.NewReader(yamlConfig))
+	assert.NoError(t, err)
+
+	proxy := New(config)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+
+	// Get the process group for qwen122b
+	qwenGroup := proxy.findGroupByModelName("qwen122b")
+	assert.NotNil(t, qwenGroup)
+
+	// Get the process for qwen122b
+	qwenProc := qwenGroup.processes["qwen122b"]
+	assert.NotNil(t, qwenProc)
+
+	// Manually set state to Starting to simulate a model that's loading
+	qwenProc.stateMutex.Lock()
+	qwenProc.state = StateStarting
+	qwenProc.stateMutex.Unlock()
+
+	// Now resolve the "coding" alias - it should return qwen122b (the one in StateStarting)
+	// NOT minimax (the preferred fallback), because qwen122b is already starting
+	result := proxy.resolveAliasRuntime("coding")
+	assert.Equal(t, "qwen122b", result, "Should return the model in StateStarting, not the preferred fallback")
+
+	// Test with StateReady too
+	qwenProc.stateMutex.Lock()
+	qwenProc.state = StateReady
+	qwenProc.stateMutex.Unlock()
+
+	result = proxy.resolveAliasRuntime("coding")
+	assert.Equal(t, "qwen122b", result, "Should return the model in StateReady")
+
+	// Test with both models stopped - should return preferred (qwen122b)
+	qwenProc.stateMutex.Lock()
+	qwenProc.state = StateStopped
+	qwenProc.stateMutex.Unlock()
+
+	result = proxy.resolveAliasRuntime("coding")
+	assert.Equal(t, "qwen122b", result, "Should return preferred when nothing is loaded")
 }
