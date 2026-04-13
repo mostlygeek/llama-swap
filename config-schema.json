@@ -329,6 +329,7 @@
             "type": "object",
             "description": "Solver-based alternative to groups. Declares valid combinations of concurrent models. The solver minimizes eviction cost when swapping. A config must use either groups or matrix, not both.",
             "required": [
+                "vars",
                 "sets"
             ],
             "properties": {
