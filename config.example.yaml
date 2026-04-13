@@ -331,7 +331,15 @@ models:
     # - processes have 5 seconds to shutdown until forceful termination is attempted
     cmdStop: docker stop ${MODEL_ID}
 
-# groups: a dictionary of group settings
+# groups: run multiple models concurrentlly with basic swapping controls
+# =================
+# !!! Important
+#
+# Groups are deprecated in favour using a swap matrix. They will remain available for
+# backwards compatibility but no new features or improvements will be made. Instead everyone
+# is encouraged to configure a matrix for running concurrent models.
+# =================
+#
 # - optional, default: empty dictionary
 # - provides advanced controls over model swapping behaviour
 # - using groups some models can be kept loaded indefinitely, while others are swapped out
@@ -395,10 +403,12 @@ groups:
       - "forever-modelc"
 
 # =============================================================================
-# matrix: solver-based alternative to groups
+# matrix: run concurrent models with a solver-based swap DSL
 # =============================================================================
 #
-# A config must use either groups or matrix, not both.
+# Note:
+# A config must use either groups or matrix not both. A configuration error
+# will happen if both are defined.
 #
 # The matrix declares valid combinations of models that can run concurrently.
 # When a model is requested, the solver finds the cheapest way to make it
@@ -419,10 +429,11 @@ groups:
 # A model not appearing in any set can only run alone.
 #
 matrix:
-  # var: short names for models (alphanumeric, 1-8 chars)
+  # vars: short names for models (alphanumeric, 1-8 chars)
   # - required for sets and evict_costs settings
-  # - each entry is a short name to a model ID
+  # - each entry is a short name to a real model ID. Do not use an alias
   # - used to keep set DSL logic short and easier to read
+  # - sets and evict_costs only use identifiers defined in vars
   vars:
     g: gemma-model
     q: qwen-model
@@ -434,8 +445,8 @@ matrix:
 
   # evict_costs: relative cost of losing a running model (default: 1)
   evict_costs:
-    v: 50        # vllm backend, slow cold start
-    L: 30        # 70B weights, slow to load
+    v: 50 # vllm backend, slow cold start
+    L: 30 # 70B weights, slow to load
 
   # sets: named sets of concurrent model combinations
   # Values are DSL strings with operators:
