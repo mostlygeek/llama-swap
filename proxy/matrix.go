@@ -54,9 +54,14 @@ type SolveResult struct {
 //  5. Pick lowest cost. Ties broken by definition order (index in expandedSets).
 //  6. Return models to evict and the chosen set.
 func (s *MatrixSolver) Solve(requestedModel string, runningModels []string) (SolveResult, error) {
-	// If already running, nothing to do
+	// If already running, nothing to do (but fill in set info for logging)
 	if slices.Contains(runningModels, requestedModel) {
-		return SolveResult{}, nil
+		setName, dsl := s.findMatchingSet(requestedModel, runningModels)
+		return SolveResult{
+			TargetSet: runningModels,
+			SetName:   setName,
+			DSL:       dsl,
+		}, nil
 	}
 
 	candidateIndices := s.modelToSets[requestedModel]
@@ -106,6 +111,25 @@ func (s *MatrixSolver) Solve(requestedModel string, runningModels []string) (Sol
 		DSL:       chosen.DSL,
 		TotalCost: bestCost,
 	}, nil
+}
+
+// findMatchingSet finds the expanded set that contains all running models.
+// Returns the set name and DSL, or empty strings if no match.
+func (s *MatrixSolver) findMatchingSet(requestedModel string, runningModels []string) (string, string) {
+	for _, idx := range s.modelToSets[requestedModel] {
+		set := s.expandedSets[idx]
+		allInSet := true
+		for _, m := range runningModels {
+			if !slices.Contains(set.Models, m) {
+				allInSet = false
+				break
+			}
+		}
+		if allInSet {
+			return set.SetName, set.DSL
+		}
+	}
+	return "", ""
 }
 
 func (s *MatrixSolver) evictCost(model string) int {
@@ -163,10 +187,10 @@ func (m *Matrix) ProxyRequest(modelID string, w http.ResponseWriter, r *http.Req
 
 	// Log solver decision
 	if len(result.Evict) > 0 {
-		m.proxyLogger.Debugf("Matrix: model=%s set=%s dsl=%q evict=%v target=%v cost=%d",
+		m.proxyLogger.Infof("Matrix: model=%s set=%s dsl=%q evict=%v target=%v cost=%d",
 			modelID, result.SetName, result.DSL, result.Evict, result.TargetSet, result.TotalCost)
 	} else if len(running) == 0 {
-		m.proxyLogger.Debugf("Matrix: model=%s starting (no models running)", modelID)
+		m.proxyLogger.Infof("Matrix: model=%s starting (no models running)", modelID)
 	} else {
 		m.proxyLogger.Debugf("Matrix: model=%s already running in set=%s dsl=%q", modelID, result.SetName, result.DSL)
 	}

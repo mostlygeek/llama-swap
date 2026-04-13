@@ -42,7 +42,8 @@ func TestMatrixSolver_AlreadyRunning(t *testing.T) {
 	result, err := solver.Solve("a", []string{"a"})
 	require.NoError(t, err)
 	assert.Empty(t, result.Evict)
-	assert.Nil(t, result.TargetSet)
+	assert.Equal(t, []string{"a"}, result.TargetSet)
+	assert.Equal(t, "s1", result.SetName)
 }
 
 func TestMatrixSolver_NotInAnySet_RunsAlone(t *testing.T) {
