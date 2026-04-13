@@ -287,6 +287,12 @@
                     },
                     "timeouts": {
                         "$ref": "#/definitions/timeouts"
+                    },
+                    "requestHeartbeatInterval": {
+                        "type": "string",
+                        "default": "0",
+                        "pattern": "^(0|[0-9]+(ns|us|µs|ms|s|m|h))$",
+                        "description": "Emit an INFO log line at this cadence while a request is in flight. Zero disables the heartbeat. Accepts Go duration strings e.g. '30s', '1m'."
                     }
                 }
             }

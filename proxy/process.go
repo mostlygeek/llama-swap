@@ -559,6 +559,27 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	// should trigger srw to stop sending loading events ...
 	cancelLoadCtx()
 
+	if interval := p.config.RequestHeartbeatInterval; interval > 0 {
+		heartbeatCtx, cancelHeartbeat := context.WithCancel(r.Context())
+		defer cancelHeartbeat()
+		go func() {
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-heartbeatCtx.Done():
+					return
+				case <-ticker.C:
+					elapsed := time.Since(requestBeginTime).Round(time.Second)
+					p.proxyLogger.Infof(
+						"<%s> request in flight: method=%s path=%s elapsed=%s",
+						p.ID, r.Method, r.URL.Path, elapsed,
+					)
+				}
+			}
+		}()
+	}
+
 	// recover from http.ErrAbortHandler panics that can occur when the client
 	// disconnects before the response is sent
 	defer func() {

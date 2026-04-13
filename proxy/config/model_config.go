@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"runtime"
+	"time"
 )
 
 const (
@@ -54,6 +55,10 @@ type ModelConfig struct {
 
 	// Timeout settings for proxy connections
 	Timeouts TimeoutsConfig `yaml:"timeouts"`
+
+	// RequestHeartbeatInterval emits an INFO log line at this cadence while a
+	// request is in flight against this model. Zero disables the heartbeat.
+	RequestHeartbeatInterval time.Duration `yaml:"requestHeartbeatInterval"`
 }
 
 func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {

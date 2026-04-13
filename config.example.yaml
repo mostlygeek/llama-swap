@@ -300,6 +300,13 @@ models:
       tlsHandshake: 10
       idleConn: 90
 
+    # requestHeartbeatInterval: emit an in-flight heartbeat log line at this cadence
+    # - optional, default: 0 (disabled)
+    # - useful for long-running prefills where the upstream is silent for minutes
+    # - accepts Go duration strings: "30s", "1m", etc.
+    # - heartbeats appear in /logs/stream/proxy
+    # requestHeartbeatInterval: 30s
+
   # Unlisted model example:
   "qwen-unlisted":
     # unlisted: boolean, true or false

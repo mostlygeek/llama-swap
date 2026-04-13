@@ -1,12 +1,14 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -569,6 +571,118 @@ func (w *panicOnWriteResponseWriter) Write(b []byte) (int, error) {
 		panic(http.ErrAbortHandler)
 	}
 	return w.ResponseRecorder.Write(b)
+}
+
+func TestProcess_RequestHeartbeatEmitsWhileInFlight(t *testing.T) {
+	conf := getTestSimpleResponderConfig("heartbeat_test")
+	conf.RequestHeartbeatInterval = 500 * time.Millisecond
+
+	logger := NewLogMonitorWriter(io.Discard)
+	logger.SetLogLevel(LevelInfo)
+
+	var logMu sync.Mutex
+	var logLines []string
+	cancel := logger.OnLogData(func(data []byte) {
+		logMu.Lock()
+		logLines = append(logLines, string(data))
+		logMu.Unlock()
+	})
+	defer cancel()
+
+	process := NewProcess("hb-test", 5, conf, logger, logger)
+	defer process.Stop()
+
+	// slow-respond blocks for 2s, interval is 500ms → expect ≥2 heartbeats
+	req := httptest.NewRequest("GET", "/slow-respond?echo=hb&delay=2s", nil)
+	w := httptest.NewRecorder()
+	process.ProxyRequest(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	logMu.Lock()
+	captured := append([]string(nil), logLines...)
+	logMu.Unlock()
+
+	count := 0
+	for _, line := range captured {
+		if strings.Contains(line, "request in flight:") {
+			count++
+		}
+	}
+	assert.GreaterOrEqual(t, count, 2, "expected at least 2 heartbeat lines, got %d", count)
+}
+
+func TestProcess_RequestHeartbeatDisabledByDefault(t *testing.T) {
+	conf := getTestSimpleResponderConfig("heartbeat_disabled")
+	// RequestHeartbeatInterval is zero by default — no heartbeats expected
+
+	logger := NewLogMonitorWriter(io.Discard)
+	logger.SetLogLevel(LevelInfo)
+
+	var logMu sync.Mutex
+	var logLines []string
+	cancel := logger.OnLogData(func(data []byte) {
+		logMu.Lock()
+		logLines = append(logLines, string(data))
+		logMu.Unlock()
+	})
+	defer cancel()
+
+	process := NewProcess("hb-disabled", 5, conf, logger, logger)
+	defer process.Stop()
+
+	req := httptest.NewRequest("GET", "/slow-respond?echo=hb&delay=1s", nil)
+	w := httptest.NewRecorder()
+	process.ProxyRequest(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	logMu.Lock()
+	captured := append([]string(nil), logLines...)
+	logMu.Unlock()
+
+	for _, line := range captured {
+		assert.NotContains(t, line, "request in flight:")
+	}
+}
+
+func TestProcess_RequestHeartbeatStopsOnClientCancel(t *testing.T) {
+	conf := getTestSimpleResponderConfig("heartbeat_cancel")
+	conf.RequestHeartbeatInterval = 100 * time.Millisecond
+
+	logger := NewLogMonitorWriter(io.Discard)
+	logger.SetLogLevel(LevelInfo)
+
+	process := NewProcess("hb-cancel", 5, conf, logger, logger)
+	defer process.Stop()
+
+	// pre-start so ProxyRequest goes straight to ServeHTTP
+	err := process.start()
+	assert.Nil(t, err)
+
+	goroutinesBefore := runtime.NumGoroutine()
+
+	ctx, clientCancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest("GET", "/slow-respond?echo=hb&delay=5s", nil)
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		process.ProxyRequest(w, req)
+		close(done)
+	}()
+
+	// cancel client after one heartbeat tick
+	time.Sleep(200 * time.Millisecond)
+	clientCancel()
+	<-done
+
+	// allow goroutine scheduler to clean up
+	time.Sleep(200 * time.Millisecond)
+
+	goroutinesAfter := runtime.NumGoroutine()
+	assert.LessOrEqual(t, goroutinesAfter, goroutinesBefore+2,
+		"goroutine count should not grow after client cancel: before=%d after=%d",
+		goroutinesBefore, goroutinesAfter)
 }
 
 func TestProcess_CustomTimeouts(t *testing.T) {
