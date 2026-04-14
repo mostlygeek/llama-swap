@@ -52,6 +52,9 @@ type ModelConfig struct {
 	// override global setting
 	SendLoadingState *bool `yaml:"sendLoadingState"`
 
+	// VisionModel: reroute to this model when images detected in /v1/chat/completions
+	VisionModel string `yaml:"visionModel"`
+  
 	// Timeout settings for proxy connections
 	Timeouts TimeoutsConfig `yaml:"timeouts"`
 }
@@ -71,6 +74,7 @@ func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		ConcurrencyLimit: 0,
 		Name:             "",
 		Description:      "",
+		VisionModel:      "",
 
 		// matches http.DefaultTransport
 		Timeouts: TimeoutsConfig{

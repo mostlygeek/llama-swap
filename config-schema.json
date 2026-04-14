@@ -280,6 +280,11 @@
                         "type": "boolean",
                         "description": "Overrides the global sendLoadingState for this model. Ommitting this property will use the global setting."
                     },
+                    "visionModel": {
+                        "type": "string",
+                        "default": "",
+                        "description": "Reroute to this model when images are detected in /v1/chat/completions requests. Must be a valid model ID."
+                    },
                     "unlisted": {
                         "type": "boolean",
                         "default": false,
