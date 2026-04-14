@@ -1475,7 +1475,7 @@ models:
 
 	// Default values should be set during unmarshaling
 	assert.Equal(t, 30, modelConfig.Timeouts.Connect)
-	assert.Equal(t, 60, modelConfig.Timeouts.ResponseHeader)
+	assert.Equal(t, 0, modelConfig.Timeouts.ResponseHeader)
 	assert.Equal(t, 10, modelConfig.Timeouts.TLSHandshake)
 	assert.Equal(t, 1, modelConfig.Timeouts.ExpectContinue)
 	assert.Equal(t, 90, modelConfig.Timeouts.IdleConn)
