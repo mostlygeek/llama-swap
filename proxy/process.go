@@ -96,6 +96,24 @@ func NewProcess(ID string, healthCheckTimeout int, config config.ModelConfig, pr
 	var reverseProxy *httputil.ReverseProxy
 	if proxyURL != nil {
 		reverseProxy = httputil.NewSingleHostReverseProxy(proxyURL)
+
+		// Create custom transport with configured timeouts
+		transport := &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:   time.Duration(config.Timeouts.Connect) * time.Second,
+				KeepAlive: time.Duration(config.Timeouts.KeepAlive) * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout:   time.Duration(config.Timeouts.TLSHandshake) * time.Second,
+			ResponseHeaderTimeout: time.Duration(config.Timeouts.ResponseHeader) * time.Second,
+			ExpectContinueTimeout: time.Duration(config.Timeouts.ExpectContinue) * time.Second,
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   10,
+			IdleConnTimeout:       time.Duration(config.Timeouts.IdleConn) * time.Second,
+		}
+		reverseProxy.Transport = transport
+
 		reverseProxy.ModifyResponse = func(resp *http.Response) error {
 			// prevent nginx from buffering streaming responses (e.g., SSE)
 			if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {

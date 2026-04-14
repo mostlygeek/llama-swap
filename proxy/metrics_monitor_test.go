@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/event"
 	"github.com/stretchr/testify/assert"
+	"github.com/tidwall/gjson"
 )
 
 func TestMetricsMonitor_AddMetrics(t *testing.T) {
@@ -570,6 +571,27 @@ func TestMetricsMonitor_Concurrent(t *testing.T) {
 }
 
 func TestMetricsMonitor_ParseMetrics(t *testing.T) {
+	t.Run("keeps wall clock duration when timings underreport request time", func(t *testing.T) {
+		start := time.Now().Add(-5 * time.Second)
+		usage := gjson.Parse(`{"prompt_tokens": 5, "completion_tokens": 1}`)
+		timings := gjson.Parse(`{
+			"prompt_n": 5,
+			"predicted_n": 1,
+			"prompt_per_second": 10.0,
+			"predicted_per_second": 2.0,
+			"prompt_ms": 5.0,
+			"predicted_ms": 15.0
+		}`)
+
+		metrics, err := parseMetrics("test-model", start, usage, timings)
+		assert.NoError(t, err)
+		assert.Equal(t, 5, metrics.InputTokens)
+		assert.Equal(t, 1, metrics.OutputTokens)
+		assert.Equal(t, 10.0, metrics.PromptPerSecond)
+		assert.Equal(t, 2.0, metrics.TokensPerSecond)
+		assert.GreaterOrEqual(t, metrics.DurationMs, 5000)
+	})
+
 	t.Run("prefers timings over usage data", func(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10, 0)
 
@@ -707,6 +729,35 @@ data: [DONE]
 		assert.Equal(t, "test-model", metrics[0].Model)
 		assert.Equal(t, 0, metrics[0].InputTokens)
 		assert.Equal(t, 0, metrics[0].OutputTokens)
+	})
+
+	t.Run("v1/responses format with nested response.usage", func(t *testing.T) {
+		mm := newMetricsMonitor(testLogger, 10, 0)
+
+		// v1/responses SSE format: usage is nested under response.usage
+		responseBody := "event: response.completed\n" +
+			`data: {"type":"response.completed","response":{"id":"resp_abc","object":"response","created_at":1773416985,"status":"completed","model":"test-model","output":[],"usage":{"input_tokens":17,"output_tokens":23,"total_tokens":40}}}` +
+			"\n\n"
+
+		nextHandler := func(modelID string, w http.ResponseWriter, r *http.Request) error {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(responseBody))
+			return nil
+		}
+
+		req := httptest.NewRequest("POST", "/v1/responses", nil)
+		rec := httptest.NewRecorder()
+		ginCtx, _ := gin.CreateTestContext(rec)
+
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, nextHandler)
+		assert.NoError(t, err)
+
+		metrics := mm.getMetrics()
+		assert.Equal(t, 1, len(metrics))
+		assert.Equal(t, "test-model", metrics[0].Model)
+		assert.Equal(t, 17, metrics[0].InputTokens)
+		assert.Equal(t, 23, metrics[0].OutputTokens)
 	})
 
 	t.Run("handles empty streaming response records minimal metrics", func(t *testing.T) {

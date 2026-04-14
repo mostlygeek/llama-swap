@@ -350,6 +350,11 @@ func processStreamingResponse(modelID string, start time.Time, body []byte) (Tok
 			usage := parsed.Get("usage")
 			timings := parsed.Get("timings")
 
+			// v1/responses format nests usage under response.usage
+			if !usage.Exists() {
+				usage = parsed.Get("response.usage")
+			}
+
 			if usage.Exists() || timings.Exists() {
 				return parseMetrics(modelID, start, usage, timings)
 			}
@@ -360,6 +365,8 @@ func processStreamingResponse(modelID string, start time.Time, body []byte) (Tok
 }
 
 func parseMetrics(modelID string, start time.Time, usage, timings gjson.Result) (TokenMetrics, error) {
+	wallDurationMs := int(time.Since(start).Milliseconds())
+
 	// default values
 	cachedTokens := -1 // unknown or missing data
 	outputTokens := 0
@@ -368,7 +375,7 @@ func parseMetrics(modelID string, start time.Time, usage, timings gjson.Result) 
 	// timings data
 	tokensPerSecond := -1.0
 	promptPerSecond := -1.0
-	durationMs := int(time.Since(start).Milliseconds())
+	durationMs := wallDurationMs
 
 	if usage.Exists() {
 		if pt := usage.Get("prompt_tokens"); pt.Exists() {
@@ -397,7 +404,10 @@ func parseMetrics(modelID string, start time.Time, usage, timings gjson.Result) 
 		outputTokens = int(timings.Get("predicted_n").Int())
 		promptPerSecond = timings.Get("prompt_per_second").Float()
 		tokensPerSecond = timings.Get("predicted_per_second").Float()
-		durationMs = int(timings.Get("prompt_ms").Float() + timings.Get("predicted_ms").Float())
+		timingsDurationMs := int(timings.Get("prompt_ms").Float() + timings.Get("predicted_ms").Float())
+		if timingsDurationMs > durationMs {
+			durationMs = timingsDurationMs
+		}
 
 		if cachedValue := timings.Get("cache_n"); cachedValue.Exists() {
 			cachedTokens = int(cachedValue.Int())
@@ -503,9 +513,9 @@ func filterAcceptEncoding(acceptEncoding string) string {
 	supported := map[string]bool{"gzip": true, "deflate": true}
 	var filtered []string
 
-	for _, part := range strings.Split(acceptEncoding, ",") {
+	for part := range strings.SplitSeq(acceptEncoding, ",") {
 		// Parse encoding and optional quality value (e.g., "gzip;q=1.0")
-		encoding := strings.TrimSpace(strings.Split(part, ";")[0])
+		encoding, _, _ := strings.Cut(strings.TrimSpace(part), ";")
 		if supported[strings.ToLower(encoding)] {
 			filtered = append(filtered, strings.TrimSpace(part))
 		}

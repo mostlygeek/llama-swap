@@ -284,11 +284,21 @@ models:
     # - optional, default: undefined (use global setting)
     sendLoadingState: false
 
-    # visionModel: automatically route to a vision-capable model when images are detected
-    # - optional, default: "" (disabled)
-    # - only applies to /v1/chat/completions requests
-    # - the target must be a valid model ID defined in the models section
-    # visionModel: "qwen-vision"
+    # timeouts: configure proxy connection timeouts for this model
+    # - optional, defaults shown below
+    # - useful for models running on slower hardware that need longer timeouts
+    # - connect: TCP dial connection timeout in seconds, default: 30 seconds
+    # - keepalive: TCP connection keepalive timeout, default: 30 seconds
+    # - responseHeader: time to wait for response headers in seconds, default: 0 (no timeout)
+    # - tlsHandshake: TLS handshake timeout in seconds, default: 10 seconds
+    # - idleConn: idle connection timeout in seconds, default: 90 seconds
+    # - set any value to 0 to disable that timeout (not recommended)
+    timeouts:
+      connect: 30
+      keepalive: 0
+      responseHeader: 60
+      tlsHandshake: 10
+      idleConn: 90
 
   # Unlisted model example:
   "qwen-unlisted":
@@ -432,6 +442,17 @@ peers:
       - z-ai/glm-4.7
       - moonshotai/kimi-k2-0905
       - minimax/minimax-m2.1
+    # timeouts: configure proxy connection timeouts for this peer
+    # - optional, defaults shown below
+    # - useful when the peer runs on slower hardware
+    # - set any value to 0 to disable that timeout (not recommended)
+    timeouts:
+      connect: 30
+      keepalive: 30
+      responseHeader: 60
+      tlsHandshake: 10
+      idleConn: 90
+
     # filters: a dictionary of filter settings for peer requests
     # - optional, default: empty dictionary
     # - same capabilities as model filters (stripParams, setParams)

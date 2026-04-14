@@ -12,6 +12,9 @@ type PeerConfig struct {
 	ApiKey   string   `yaml:"apiKey"`
 	Models   []string `yaml:"models"`
 	Filters  Filters  `yaml:"filters"`
+
+	// Timeout settings for proxy connections
+	Timeouts TimeoutsConfig `yaml:"timeouts"`
 }
 
 func (c *PeerConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
@@ -21,6 +24,17 @@ func (c *PeerConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		ApiKey:  "",
 		Models:  []string{},
 		Filters: Filters{},
+
+		// mostly matches http.DefaultTransport but with a 60s ResponseHeader timeout
+		// to match the pre PR #619 functionality
+		Timeouts: TimeoutsConfig{
+			Connect:        30,
+			KeepAlive:      30,
+			ResponseHeader: 60,
+			TLSHandshake:   10,
+			ExpectContinue: 1,
+			IdleConn:       90,
+		},
 	}
 
 	if err := unmarshal(&defaults); err != nil {

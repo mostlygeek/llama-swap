@@ -1,0 +1,131 @@
+name: Build Unified Docker Image
+
+on:
+  schedule:
+    - cron: "37 5 * * *"
+
+  workflow_dispatch:
+    inputs:
+      llama_cpp_ref:
+        description: "llama.cpp commit hash, tag, or branch"
+        required: false
+        default: "master"
+      whisper_ref:
+        description: "whisper.cpp commit hash, tag, or branch"
+        required: false
+        default: "master"
+      sd_ref:
+        description: "stable-diffusion.cpp commit hash, tag, or branch"
+        required: false
+        default: "master"
+      ik_llama_ref:
+        description: "ik_llama.cpp commit hash, tag, or branch (CUDA only)"
+        required: false
+        default: "main"
+      llama_swap_version:
+        description: "llama-swap version (e.g. v198, latest, main)"
+        required: false
+        default: "main"
+      build_cuda:
+        description: "Build CUDA image"
+        type: boolean
+        required: false
+        default: true
+      build_vulkan:
+        description: "Build Vulkan image"
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - id: set-matrix
+        run: |
+          backends=()
+          # schedule uses defaults (build both); workflow_dispatch respects inputs
+          if [[ "${{ github.event_name }}" == "schedule" ]] || [[ "${{ inputs.build_cuda }}" == "true" ]]; then
+            backends+=("cuda")
+          fi
+          if [[ "${{ github.event_name }}" == "schedule" ]] || [[ "${{ inputs.build_vulkan }}" == "true" ]]; then
+            backends+=("vulkan")
+          fi
+          matrix=$(printf '%s\n' "${backends[@]}" | jq -R . | jq -sc .)
+          echo "matrix=$matrix" >> $GITHUB_OUTPUT
+
+  build:
+    needs: setup
+    if: ${{ needs.setup.outputs.matrix != '[]' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: ${{ fromJSON(needs.setup.outputs.matrix) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Free up disk space
+        run: |
+          echo "Before cleanup:"
+          df -h
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker system prune -af
+          echo "After cleanup:"
+          df -h
+
+      # On GitHub Actions runners, create a fresh builder.
+      # When running locally under act, skip this and reuse the existing
+      # llama-swap-builder (which has ccache warm) to avoid exhausting disk.
+      - name: Set up Docker Buildx
+        if: ${{ !env.ACT }}
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: ${{ !env.ACT }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build unified Docker image (${{ matrix.backend }})
+        env:
+          LLAMA_REF: ${{ inputs.llama_cpp_ref || 'master' }}
+          WHISPER_REF: ${{ inputs.whisper_ref || 'master' }}
+          SD_REF: ${{ inputs.sd_ref || 'master' }}
+          IK_LLAMA_REF: ${{ inputs.ik_llama_ref || 'main' }}
+          LS_VERSION: ${{ inputs.llama_swap_version || 'main' }}
+          DOCKER_IMAGE_TAG: ghcr.io/mostlygeek/llama-swap:unified-${{ matrix.backend }}
+          # When running under act, use the local builder that has warm ccache.
+          # On GitHub Actions, BUILDX_BUILDER is unset so docker uses the builder
+          # created by setup-buildx-action above.
+          BUILDX_BUILDER: ${{ env.ACT == 'true' && 'llama-swap-builder' || '' }}
+        run: |
+          chmod +x docker/unified/build-image.sh
+          docker/unified/build-image.sh --${{ matrix.backend }}
+
+      - name: Push to GitHub Container Registry
+        if: ${{ !env.ACT }}
+        run: |
+          BASE_TAG="ghcr.io/mostlygeek/llama-swap:unified-${{ matrix.backend }}"
+          DATE_TAG=$(date -u +%Y-%m-%d)
+
+          docker push "${BASE_TAG}"
+          docker tag "${BASE_TAG}" "${BASE_TAG}-${DATE_TAG}"
+          docker push "${BASE_TAG}-${DATE_TAG}"
+
+          ROOTLESS_TAG="${BASE_TAG}-rootless"
+          docker push "${ROOTLESS_TAG}"
+          docker tag "${ROOTLESS_TAG}" "${ROOTLESS_TAG}-${DATE_TAG}"
+          docker push "${ROOTLESS_TAG}-${DATE_TAG}"
