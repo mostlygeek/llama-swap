@@ -180,7 +180,7 @@ That's all you need to get started:
 Almost all configuration settings are optional and can be added one step at a time:
 
 - Advanced features
-  - `groups` to run multiple models at once
+  - `matrix` to run concurrent models with a custom swap logic DSL
   - `hooks` to run things on startup
   - `macros` reusable snippets
 - Model customization
@@ -198,7 +198,7 @@ See the [configuration documentation](docs/configuration.md) for all options.
 
 When a request is made to an OpenAI compatible endpoint, llama-swap will extract the `model` value and load the appropriate server configuration to serve it. If the wrong upstream server is running, it will be replaced with the correct one. This is where the "swap" part comes in. The upstream server is automatically swapped to handle the request correctly.
 
-In the most basic configuration llama-swap handles one model at a time. For more advanced use cases, the `groups` feature allows multiple models to be loaded at the same time. You have complete control over how your system resources are used.
+In the most basic configuration llama-swap handles one model at a time. For more advanced use cases, using a `matrix` allows multiple models to be loaded at the same time. You have complete control over how your system resources are used.
 
 ## Reverse Proxy Configuration (nginx)
 
