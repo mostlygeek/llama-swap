@@ -331,84 +331,14 @@ models:
     # - processes have 5 seconds to shutdown until forceful termination is attempted
     cmdStop: docker stop ${MODEL_ID}
 
-# groups: run multiple models concurrentlly with basic swapping controls
-# =================
-# !!! Important
-#
-# Groups are deprecated in favour using a swap matrix. They will remain available for
-# backwards compatibility but no new features or improvements will be made. Instead everyone
-# is encouraged to configure a matrix for running concurrent models.
-# =================
-#
-# - optional, default: empty dictionary
-# - provides advanced controls over model swapping behaviour
-# - using groups some models can be kept loaded indefinitely, while others are swapped out
-# - model IDs must be defined in the Models section
-# - a model can only be a member of one group
-# - group behaviour is controlled via the `swap`, `exclusive` and `persistent` fields
-# - see issue #109 for details
-#
-# NOTE: the example below uses model names that are not defined above for demonstration purposes
-groups:
-  # group1 works the same as the default behaviour of llama-swap where only one model is allowed
-  # to run a time across the whole llama-swap instance
-  "group1":
-    # swap: controls the model swapping behaviour in within the group
-    # - optional, default: true
-    # - true : only one model is allowed to run at a time
-    # - false: all models can run together, no swapping
-    swap: true
-
-    # exclusive: controls how the group affects other groups
-    # - optional, default: true
-    # - true: causes all other groups to unload when this group runs a model
-    # - false: does not affect other groups
-    exclusive: true
-
-    # members references the models defined above
-    # required
-    members:
-      - "llama"
-      - "qwen-unlisted"
-
-  # Example:
-  # - in group2 all models can run at the same time
-  # - when a different group is loaded it causes all running models in this group to unload
-  "group2":
-    swap: false
-
-    # exclusive: false does not unload other groups when a model in group2 is requested
-    # - the models in group2 will be loaded but will not unload any other groups
-    exclusive: false
-    members:
-      - "docker-llama"
-      - "modelA"
-      - "modelB"
-
-  # Example:
-  # - a persistent group, prevents other groups from unloading it
-  "forever":
-    # persistent: prevents over groups from unloading the models in this group
-    # - optional, default: false
-    # - does not affect individual model behaviour
-    persistent: true
-
-    # set swap/exclusive to false to prevent swapping inside the group
-    # and the unloading of other groups
-    swap: false
-    exclusive: false
-    members:
-      - "forever-modelA"
-      - "forever-modelB"
-      - "forever-modelc"
-
 # =============================================================================
 # matrix: run concurrent models with a solver-based swap DSL
 # =============================================================================
 #
 # Note:
-# A config must use either groups or matrix not both. A configuration error
-# will happen if both are defined.
+# A config must use either a matrix or legacy groups, not both. A configuration error
+# will occur if both are defined. Configuration examples for legacy Groups can be found:
+# https://github.com/mostlygeek/llama-swap/blob/40e39f7/config.example.yaml#L334-L396
 #
 # The matrix declares valid combinations of models that can run concurrently.
 # When a model is requested, the solver finds the cheapest way to make it
