@@ -22,7 +22,7 @@ models:
     cmd: llama-server --port ${PORT} -m /path/to/third_model.gguf
 ```
 
-With this configuration models will be hot swapped and loaded on demand. The special `${PORT}` macro provides a unique port per model. Useful if you want to run multiple models at the same time with the `groups` feature.
+With this configuration models will be hot swapped and loaded on demand. The special `${PORT}` macro provides a unique port per model which is useful if you want to run multiple models at the same time with the `matrix` feature.
 
 ## Advanced control with `cmd`
 
@@ -76,7 +76,7 @@ llama-swap supports many more features to customize how you want to manage your 
 | --------- | ---------------------------------------------- |
 | `ttl`     | automatic unloading of models after a timeout  |
 | `macros`  | reusable snippets to use in configurations     |
-| `groups`  | run multiple models at a time                  |
+| `matrix`  | run multiple models at a time                  |
 | `hooks`   | event driven functionality                     |
 | `env`     | define environment variables per model         |
 | `aliases` | serve a model with different names             |
@@ -141,6 +141,11 @@ logToStdout: "proxy"
 # - useful for limiting memory usage when processing large volumes of metrics
 metricsMaxInMemory: 1000
 
+# captureBuffer: how many MBs to allocate for storing request/response captures
+# - optional, default: 10
+# - set to 0 to disable
+captureBuffer: 15
+
 # startPort: sets the starting port number for the automatic ${PORT} macro.
 # - optional, default: 5800
 # - the ${PORT} macro can be used in model.cmd and model.proxy settings
@@ -161,15 +166,10 @@ sendLoadingState: true
 #   all fields except for Id so chat UIs can use the alias equivalent to the original.
 includeAliasesInList: false
 
-# apiKeys: require an API key when making requests to inference endpoints
-# - optional, default: []
-# - when empty (the default) authorization will not be checked as llama-swap is default-allow
-# - each key is a non-empty string
-apiKeys:
-  - "sk-hunter2"
-  # hint, one liner: printf "sk-%s\n" "$(head -c 48 /dev/urandom | base64 )"
-  - "sk-gyCPiKUcIfPlaM4OSMZekkprgijPx6+OsmQs8Rsg0xZ9qpy6gKWsIKqHOk+cgXVx"
-  - "sk-+QtIn0Zjj4UHjiaZYiZEnru4mrwKM9RzhmJeK5SobNXLl8QMFXxGz1/2lEuvQpkb"
+# globalTTL: the default TTL in seconds before unloading a model
+# - optional, default: 0 (never automatically unload)
+# - must be >= 0
+globalTTL: 0
 
 # macros: a dictionary of string substitutions
 # - optional, default: empty dictionary
@@ -181,6 +181,9 @@ apiKeys:
 # - macro names must not be a reserved name: PORT or MODEL_ID
 # - macro values can be numbers, bools, or strings
 # - macros can contain other macros, but they must be defined before they are used
+# - environment variables can be referenced with ${env.VAR_NAME} syntax
+#   - env macros are substituted first, before regular macros
+#   - if the env var is not set, config loading will fail with an error
 macros:
   # Example of a multi-line macro
   "latest-llama": >
@@ -193,6 +196,24 @@ macros:
   # but they must be previously declared.
   "default_args": "--ctx-size ${default_ctx}"
 
+  # Example of environment variable macros
+  # - ${env.VAR_NAME} pulls the value from the system environment
+  # - useful for paths, secrets, or machine-specific configuration
+  "models_dir": "${env.HOME}/models"
+
+# apiKeys: require an API key when making requests to inference endpoints
+# - optional, default: []
+# - when empty (the default) authorization will not be checked as llama-swap is default-allow
+# - each key is a non-empty string
+apiKeys:
+  - "sk-hunter2"
+  # tip, one liner: printf "sk-%s\n" "$(head -c 48 /dev/urandom | base64 )"
+  - "sk-gyCPiKUcIfPlaM4OSMZekkprgijPx6+OsmQs8Rsg0xZ9qpy6gKWsIKqHOk+cgXVx"
+
+  # use environment variable macros to keep secrets out of the config
+  - "${env.API_KEY_1}"
+  - "${env.API_KEY_2}"
+
 # models: a dictionary of model configurations
 # - required
 # - each key is the model's ID, used in API requests
@@ -201,7 +222,7 @@ macros:
 # - below are examples of the all the settings a model can have
 models:
   # keys are the model names used in API requests
-  "llama":
+  "gpt-oss-120b":
     # macros: a dictionary of string substitutions specific to this model
     # - optional, default: empty dictionary
     # - macros defined here override macros defined in the global macros section
@@ -218,7 +239,7 @@ models:
     cmd: |
       # ${latest-llama} is a macro that is defined above
       ${latest-llama}
-      --model path/to/llama-8B-Q4_K_M.gguf
+      --model path/to/gpt-oss-120B.gguf
       --ctx-size ${default_ctx}
       --temperature ${temp}
 
@@ -226,13 +247,13 @@ models:
     # - optional, default: empty string
     # - if set, it will be used in the v1/models API response
     # - if not set, it will be omitted in the JSON model record
-    name: "llama 3.1 8B"
+    name: "gpt-oss 120B"
 
     # description: a description for the model
     # - optional, default: empty string
     # - if set, it will be used in the v1/models API response
     # - if not set, it will be omitted in the JSON model record
-    description: "A small but capable model used for quick testing"
+    description: "A thinking model from OpenAI"
 
     # env: define an array of environment variables to inject into cmd's environment
     # - optional, default: empty array
@@ -247,14 +268,6 @@ models:
     # - if you use a custom port in cmd this *must* be set
     proxy: http://127.0.0.1:8999
 
-    # aliases: alternative model names that this model configuration is used for
-    # - optional, default: empty array
-    # - aliases must be unique globally
-    # - useful for impersonating a specific model
-    aliases:
-      - "gpt-4o-mini"
-      - "gpt-3.5-turbo"
-
     # checkEndpoint: URL path to check if the server is ready
     # - optional, default: /health
     # - endpoint is expected to return an HTTP 200 response
@@ -263,8 +276,10 @@ models:
     checkEndpoint: /custom-endpoint
 
     # ttl: automatically unload the model after ttl seconds
-    # - optional, default: 0
-    # - ttl values must be a value greater than 0
+    # - optional, default: -1 (use global default)
+    # - ttl values must be a value greater than or equal to 0
+    # - a ttl of -1 will use the global TTL value as the default
+    # - a ttl of 0 will mean never unload
     # - a value of 0 disables automatic unloading of the model
     ttl: 60
 
@@ -272,11 +287,11 @@ models:
     # - optional, default: ""
     # - useful for when the upstream server expects a specific model name that
     #   is different from the model's ID
-    useModelName: "qwen:qwq"
+    useModelName: "openai/gpt-oss-120B"
 
     # filters: a dictionary of filter settings
     # - optional, default: empty dictionary
-    # - only stripParams is currently supported
+    # - same capabilities as peer filters (stripParams, setParams)
     filters:
       # stripParams: a comma separated list of parameters to remove from the request
       # - optional, default: ""
@@ -285,6 +300,43 @@ models:
       # - can be any JSON key in the request body
       # - recommended to stick to sampling parameters
       stripParams: "temperature, top_p, top_k"
+
+      # setParams: a dictionary of parameters to set/override in requests
+      # - optional, default: empty dictionary
+      # - useful for enforcing specific parameter values
+      # - protected params like "model" cannot be overridden
+      # - values can be strings, numbers, booleans, arrays, or objects
+      # - always runs for the model
+      setParams:
+        # Example: enforce specific sampling parameters
+        temperature: 0.7
+        top_p: 0.9
+
+      # setParamsByID: a dictionary of parameters to set based the model ID
+      # - optional, default: empty dictionary
+      # - combine with aliases to create variant behaviour without reloading the model
+      # - parameters are set in the request body JSON
+      # - run after setParams so it will override any settings
+      # - protected params like "model" cannot be overridden
+      # - values can be strings, numbers, booleans, arrays, or objects
+      # - model aliases will be automatically created for each key
+      setParamsByID:
+        "${MODEL_ID}":
+          chat_template_kwargs:
+            reasoning_effort: medium
+        "${MODEL_ID}:high":
+          chat_template_kwargs:
+            reasoning_effort: high
+        "${MODEL_ID}:low":
+          chat_template_kwargs:
+            reasoning_effort: low
+
+    # aliases: alternative model names that this model configuration is used for
+    # - optional, default: empty array
+    # - aliases must be unique globally
+    # - useful for impersonating a specific model
+    aliases:
+      - "gpt-4o-mini"
 
     # metadata: a dictionary of arbitrary values that are included in /v1/models
     # - optional, default: empty dictionary
@@ -319,32 +371,25 @@ models:
     # - recommended to be omitted and the default used
     concurrencyLimit: 0
 
-    # timeouts: configure proxy connection timeouts for this model
-    # - optional, defaults shown below
-    # - useful for models on slower hardware that need longer timeouts
-    # - increase responseHeader to avoid "timeout awaiting response headers" errors
-    # - set any value to 0 to disable that timeout (not recommended)
-    timeouts:
-      # connect: TCP connection timeout in seconds
-      # - default: 30
-      connect: 30
-
-      # responseHeader: time to wait for response headers in seconds
-      # - default: 60
-      # - for slow image generation or large models, consider increasing to 300+ seconds
-      responseHeader: 60
-
-      # tlsHandshake: TLS handshake timeout in seconds
-      # - default: 10
-      tlsHandshake: 10
-
-      # idleConn: idle connection timeout in seconds
-      # - default: 90
-      idleConn: 90
-
     # sendLoadingState: overrides the global sendLoadingState setting for this model
     # - optional, default: undefined (use global setting)
     sendLoadingState: false
+
+    # timeouts: configure proxy connection timeouts for this model
+    # - optional, defaults shown below
+    # - useful for models running on slower hardware that need longer timeouts
+    # - connect: TCP dial connection timeout in seconds, default: 30 seconds
+    # - keepalive: TCP connection keepalive timeout, default: 30 seconds
+    # - responseHeader: time to wait for response headers in seconds, default: 0 (no timeout)
+    # - tlsHandshake: TLS handshake timeout in seconds, default: 10 seconds
+    # - idleConn: idle connection timeout in seconds, default: 90 seconds
+    # - set any value to 0 to disable that timeout (not recommended)
+    timeouts:
+      connect: 30
+      keepalive: 0
+      responseHeader: 60
+      tlsHandshake: 10
+      idleConn: 90
 
   # Unlisted model example:
   "qwen-unlisted":
@@ -377,68 +422,83 @@ models:
     # - processes have 5 seconds to shutdown until forceful termination is attempted
     cmdStop: docker stop ${MODEL_ID}
 
-# groups: a dictionary of group settings
-# - optional, default: empty dictionary
-# - provides advanced controls over model swapping behaviour
-# - using groups some models can be kept loaded indefinitely, while others are swapped out
-# - model IDs must be defined in the Models section
-# - a model can only be a member of one group
-# - group behaviour is controlled via the `swap`, `exclusive` and `persistent` fields
-# - see issue #109 for details
+# =============================================================================
+# matrix: run concurrent models with a solver-based swap DSL
+# =============================================================================
 #
-# NOTE: the example below uses model names that are not defined above for demonstration purposes
-groups:
-  # group1 works the same as the default behaviour of llama-swap where only one model is allowed
-  # to run a time across the whole llama-swap instance
-  "group1":
-    # swap: controls the model swapping behaviour in within the group
-    # - optional, default: true
-    # - true : only one model is allowed to run at a time
-    # - false: all models can run together, no swapping
-    swap: true
+# Note:
+# A config must use either a matrix or legacy groups, not both. A configuration error
+# will occur if both are defined. Configuration examples for legacy Groups can be found:
+# https://github.com/mostlygeek/llama-swap/blob/40e39f7/config.example.yaml#L334-L396
+#
+# The matrix declares valid combinations of models that can run concurrently.
+# When a model is requested, the solver finds the cheapest way to make it
+# available by evicting as few (and least costly) running models as possible.
+#
+# Solver behavior:
+#   1. Request arrives for model X
+#   2. If X is already running, forward immediately. Done.
+#   3. Find all sets containing X
+#   4. For each candidate set, compute cost: sum of evict_costs for
+#      every running model NOT in that set
+#   5. Pick lowest cost candidate. Ties broken by definition order.
+#   6. Evict what needs to stop. Start X. Forward request.
+#
+# Subset semantics: a set [a, b, c] means any subset is valid.
+# Only the requested model is started — others are not preloaded.
+#
+# A model not appearing in any set can only run alone.
+#
+matrix:
+  # vars: short names for models (alphanumeric, 1-8 chars)
+  # - required for sets and evict_costs settings
+  # - each entry is a short name to a real model ID. Do not use an alias
+  # - used to keep set DSL logic short and easier to read
+  # - sets and evict_costs only use identifiers defined in vars
+  vars:
+    g: gemma-model
+    q: qwen-model
+    m: mistral-model
+    v: voxtral-model
+    e: reranker-model
+    L: llama-70B
+    sd: stable-diffusion
 
-    # exclusive: controls how the group affects other groups
-    # - optional, default: true
-    # - true: causes all other groups to unload when this group runs a model
-    # - false: does not affect other groups
-    exclusive: true
+  # evict_costs: relative cost of losing a running model (default: 1)
+  evict_costs:
+    v: 50 # vllm backend, slow cold start
+    L: 30 # 70B weights, slow to load
 
-    # members references the models defined above
-    # required
-    members:
-      - "llama"
-      - "qwen-unlisted"
+  # sets: named sets of concurrent model combinations
+  # Values are DSL strings with operators:
+  #   &     AND (models run together)
+  #   |     OR  (alternatives)
+  #   ()    grouping
+  #   +ref  inline another set's expression
+  #
+  # Expansion examples:
+  #   "L"                  → [L]
+  #   "a & b"              → [a, b]
+  #   "a | b"              → [a], [b]
+  #   "(a | b) & c"        → [a, c], [b, c]
+  #   "(a | b) & (c | d)"  → [a,c], [a,d], [b,c], [b,d]
+  #   "+llms & v"          → expands llms inline, then applies & v
+  sets:
+    # LLM + TTS: switching between g/q/m won't evict v
+    # expands to: [g,v], [q,v], [m,v]
+    standard: "(g | q | m) & v"
 
-  # Example:
-  # - in group2 all models can run at the same time
-  # - when a different group is loaded it causes all running models in this group to unload
-  "group2":
-    swap: false
+    # LLM + TTS + reranker
+    # expands to: [g,v,e], [q,v,e]
+    with_rerank: "(g | q) & v & e"
 
-    # exclusive: false does not unload other groups when a model in group2 is requested
-    # - the models in group2 will be loaded but will not unload any other groups
-    exclusive: false
-    members:
-      - "docker-llama"
-      - "modelA"
-      - "modelB"
+    # LLM + image generation, no TTS
+    # expands to: [g,sd], [q,sd]
+    creative: "(g | q) & sd"
 
-  # Example:
-  # - a persistent group, prevents other groups from unloading it
-  "forever":
-    # persistent: prevents over groups from unloading the models in this group
-    # - optional, default: false
-    # - does not affect individual model behaviour
-    persistent: true
-
-    # set swap/exclusive to false to prevent swapping inside the group
-    # and the unloading of other groups
-    swap: false
-    exclusive: false
-    members:
-      - "forever-modelA"
-      - "forever-modelB"
-      - "forever-modelc"
+    # 70B model uses all GPUs, can only run alone
+    # expands to: [L]
+    full: "L"
 
 # hooks: a dictionary of event triggers and actions
 # - optional, default: empty dictionary
@@ -467,17 +527,6 @@ peers:
     # - required
     # - requested path to llama-swap will be appended to the end of the proxy value
     proxy: http://192.168.1.23
-
-    # timeouts: configure proxy connection timeouts for this peer
-    # - optional, defaults shown below
-    # - useful when the peer runs on slower hardware
-    # - set any value to 0 to disable that timeout (not recommended)
-    timeouts:
-      connect: 30
-      responseHeader: 60
-      tlsHandshake: 10
-      idleConn: 90
-
     # models: a list of models served by the peer
     # - required
     models:
@@ -490,7 +539,8 @@ peers:
     # - optional, default: ""
     # - if blank, no key will be added to the request
     # - key will be injected into headers: Authorization: Bearer <key> and x-api-key: <key>
-    apiKey: sk-your-openrouter-key
+    # - can be a string or a macro
+    apiKey: ${env.OPENROUTER_API_KEY}
     models:
       - meta-llama/llama-3.1-8b-instruct
       - qwen/qwen3-235b-a22b-2507
@@ -498,4 +548,35 @@ peers:
       - z-ai/glm-4.7
       - moonshotai/kimi-k2-0905
       - minimax/minimax-m2.1
+    # timeouts: configure proxy connection timeouts for this peer
+    # - optional, defaults shown below
+    # - useful when the peer runs on slower hardware
+    # - set any value to 0 to disable that timeout (not recommended)
+    timeouts:
+      connect: 30
+      keepalive: 30
+      responseHeader: 60
+      tlsHandshake: 10
+      idleConn: 90
+
+    # filters: a dictionary of filter settings for peer requests
+    # - optional, default: empty dictionary
+    # - same capabilities as model filters (stripParams, setParams)
+    filters:
+      # stripParams: a comma separated list of parameters to remove from the request
+      # - optional, default: ""
+      # - useful for removing parameters that the peer doesn't support
+      # - the `model` parameter can never be removed
+      stripParams: "temperature, top_p"
+
+      # setParams: a dictionary of parameters to set/override in requests to this peer
+      # - optional, default: empty dictionary
+      # - useful for injecting provider-specific settings like data retention policies
+      # - protected params like "model" cannot be overridden
+      # - values can be strings, numbers, booleans, arrays, or objects
+      setParams:
+        # Example: enforce zero-data-retention for OpenRouter
+        provider:
+          data_collection: "deny"
+          zdr: true
 ```
