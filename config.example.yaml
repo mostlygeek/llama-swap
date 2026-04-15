@@ -331,68 +331,83 @@ models:
     # - processes have 5 seconds to shutdown until forceful termination is attempted
     cmdStop: docker stop ${MODEL_ID}
 
-# groups: a dictionary of group settings
-# - optional, default: empty dictionary
-# - provides advanced controls over model swapping behaviour
-# - using groups some models can be kept loaded indefinitely, while others are swapped out
-# - model IDs must be defined in the Models section
-# - a model can only be a member of one group
-# - group behaviour is controlled via the `swap`, `exclusive` and `persistent` fields
-# - see issue #109 for details
+# =============================================================================
+# matrix: run concurrent models with a solver-based swap DSL
+# =============================================================================
 #
-# NOTE: the example below uses model names that are not defined above for demonstration purposes
-groups:
-  # group1 works the same as the default behaviour of llama-swap where only one model is allowed
-  # to run a time across the whole llama-swap instance
-  "group1":
-    # swap: controls the model swapping behaviour in within the group
-    # - optional, default: true
-    # - true : only one model is allowed to run at a time
-    # - false: all models can run together, no swapping
-    swap: true
+# Note:
+# A config must use either a matrix or legacy groups, not both. A configuration error
+# will occur if both are defined. Configuration examples for legacy Groups can be found:
+# https://github.com/mostlygeek/llama-swap/blob/40e39f7/config.example.yaml#L334-L396
+#
+# The matrix declares valid combinations of models that can run concurrently.
+# When a model is requested, the solver finds the cheapest way to make it
+# available by evicting as few (and least costly) running models as possible.
+#
+# Solver behavior:
+#   1. Request arrives for model X
+#   2. If X is already running, forward immediately. Done.
+#   3. Find all sets containing X
+#   4. For each candidate set, compute cost: sum of evict_costs for
+#      every running model NOT in that set
+#   5. Pick lowest cost candidate. Ties broken by definition order.
+#   6. Evict what needs to stop. Start X. Forward request.
+#
+# Subset semantics: a set [a, b, c] means any subset is valid.
+# Only the requested model is started — others are not preloaded.
+#
+# A model not appearing in any set can only run alone.
+#
+matrix:
+  # vars: short names for models (alphanumeric, 1-8 chars)
+  # - required for sets and evict_costs settings
+  # - each entry is a short name to a real model ID. Do not use an alias
+  # - used to keep set DSL logic short and easier to read
+  # - sets and evict_costs only use identifiers defined in vars
+  vars:
+    g: gemma-model
+    q: qwen-model
+    m: mistral-model
+    v: voxtral-model
+    e: reranker-model
+    L: llama-70B
+    sd: stable-diffusion
 
-    # exclusive: controls how the group affects other groups
-    # - optional, default: true
-    # - true: causes all other groups to unload when this group runs a model
-    # - false: does not affect other groups
-    exclusive: true
+  # evict_costs: relative cost of losing a running model (default: 1)
+  evict_costs:
+    v: 50 # vllm backend, slow cold start
+    L: 30 # 70B weights, slow to load
 
-    # members references the models defined above
-    # required
-    members:
-      - "llama"
-      - "qwen-unlisted"
+  # sets: named sets of concurrent model combinations
+  # Values are DSL strings with operators:
+  #   &     AND (models run together)
+  #   |     OR  (alternatives)
+  #   ()    grouping
+  #   +ref  inline another set's expression
+  #
+  # Expansion examples:
+  #   "L"                  → [L]
+  #   "a & b"              → [a, b]
+  #   "a | b"              → [a], [b]
+  #   "(a | b) & c"        → [a, c], [b, c]
+  #   "(a | b) & (c | d)"  → [a,c], [a,d], [b,c], [b,d]
+  #   "+llms & v"          → expands llms inline, then applies & v
+  sets:
+    # LLM + TTS: switching between g/q/m won't evict v
+    # expands to: [g,v], [q,v], [m,v]
+    standard: "(g | q | m) & v"
 
-  # Example:
-  # - in group2 all models can run at the same time
-  # - when a different group is loaded it causes all running models in this group to unload
-  "group2":
-    swap: false
+    # LLM + TTS + reranker
+    # expands to: [g,v,e], [q,v,e]
+    with_rerank: "(g | q) & v & e"
 
-    # exclusive: false does not unload other groups when a model in group2 is requested
-    # - the models in group2 will be loaded but will not unload any other groups
-    exclusive: false
-    members:
-      - "docker-llama"
-      - "modelA"
-      - "modelB"
+    # LLM + image generation, no TTS
+    # expands to: [g,sd], [q,sd]
+    creative: "(g | q) & sd"
 
-  # Example:
-  # - a persistent group, prevents other groups from unloading it
-  "forever":
-    # persistent: prevents over groups from unloading the models in this group
-    # - optional, default: false
-    # - does not affect individual model behaviour
-    persistent: true
-
-    # set swap/exclusive to false to prevent swapping inside the group
-    # and the unloading of other groups
-    swap: false
-    exclusive: false
-    members:
-      - "forever-modelA"
-      - "forever-modelB"
-      - "forever-modelc"
+    # 70B model uses all GPUs, can only run alone
+    # expands to: [L]
+    full: "L"
 
 # hooks: a dictionary of event triggers and actions
 # - optional, default: empty dictionary

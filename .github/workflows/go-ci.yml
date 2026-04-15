@@ -2,69 +2,68 @@ name: Linux CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
     # only run when backend source changes
     # cmd/ is excluded because it contains utilities without tests
     paths:
-      - '**/*.go'
-      - '!cmd/**'
-      - 'go.mod'
-      - 'go.sum'
-      - 'Makefile'
-      - '.github/workflows/go-ci.yml'
+      - "**/*.go"
+      - "!cmd/**"
+      - "go.mod"
+      - "go.sum"
+      - "Makefile"
+      - ".github/workflows/go-ci.yml"
 
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
     paths:
-      - '**/*.go'
-      - '!cmd/**'
-      - 'go.mod'
-      - 'go.sum'
-      - 'Makefile'
-      - '.github/workflows/go-ci.yml'
+      - "**/*.go"
+      - "!cmd/**"
+      - "go.mod"
+      - "go.sum"
+      - "Makefile"
+      - ".github/workflows/go-ci.yml"
 
   # Allows manual triggering of the workflow
   workflow_dispatch:
 
 jobs:
-
   run-tests:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version-file: go.mod
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version-file: go.mod
 
-    # Only run in this linux based runner
-    - name: Check Formatting
-      run: |
-        if [ "$(gofmt -l . | grep -v 'event/.*_test.go' | wc -l)" -gt 0 ]; then
-          gofmt -l . | grep -v 'event/.*_test.go'
-          exit 1
-        fi
-    # cache simple-responder to save the build time
-    - name: Restore Simple Responder
-      id: restore-simple-responder
-      uses: actions/cache/restore@v4
-      with:
-        path: ./build
-        key: ${{ runner.os }}-simple-responder-${{ hashFiles('cmd/simple-responder/simple-responder.go') }}
+      # Only run in this linux based runner
+      - name: Check Formatting
+        run: |
+          if [ "$(gofmt -l . | grep -v 'event/.*_test.go' | wc -l)" -gt 0 ]; then
+            gofmt -l . | grep -v 'event/.*_test.go'
+            exit 1
+          fi
+      # cache simple-responder to save the build time
+      - name: Restore Simple Responder
+        id: restore-simple-responder
+        uses: actions/cache/restore@v4
+        with:
+          path: ./build
+          key: ${{ runner.os }}-simple-responder-${{ hashFiles('cmd/simple-responder/simple-responder.go') }}
 
-    # necessary for testing proxy/Process swapping
-    - name: Create simple-responder
-      run: make simple-responder
+      # necessary for testing proxy/Process swapping
+      - name: Create simple-responder
+        run: make simple-responder
 
-    - name: Save Simple Responder
-      # nothing new to save ... skip this step
-      if: steps.restore-simple-responder.outputs.cache-hit != 'true'
-      id: save-simple-responder
-      uses: actions/cache/save@v4
-      with:
-        path: ./build
-        key: ${{ runner.os }}-simple-responder-${{ hashFiles('misc/simple-responder/simple-responder.go') }}
+      - name: Save Simple Responder
+        # nothing new to save ... skip this step
+        if: steps.restore-simple-responder.outputs.cache-hit != 'true'
+        id: save-simple-responder
+        uses: actions/cache/save@v4
+        with:
+          path: ./build
+          key: ${{ runner.os }}-simple-responder-${{ hashFiles('cmd/simple-responder/simple-responder.go') }}
 
-    - name: Test all
-      run: make test-all
+      - name: Test all
+        run: make test-all
