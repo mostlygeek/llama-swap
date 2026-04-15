@@ -55,27 +55,28 @@ func (pm *ProxyManager) getModelStatus() []Model {
 	// Iterate over sorted keys
 	for _, modelID := range modelIDs {
 		// Get process state
-		processGroup := pm.findGroupByModelName(modelID)
 		state := "unknown"
-		if processGroup != nil {
-			process := processGroup.processes[modelID]
-			if process != nil {
-				var stateStr string
-				switch process.CurrentState() {
-				case StateReady:
-					stateStr = "ready"
-				case StateStarting:
-					stateStr = "starting"
-				case StateStopping:
-					stateStr = "stopping"
-				case StateShutdown:
-					stateStr = "shutdown"
-				case StateStopped:
-					stateStr = "stopped"
-				default:
-					stateStr = "unknown"
-				}
-				state = stateStr
+		var process *Process
+		if pm.matrix != nil {
+			process, _ = pm.matrix.GetProcess(modelID)
+		} else {
+			processGroup := pm.findGroupByModelName(modelID)
+			if processGroup != nil {
+				process = processGroup.processes[modelID]
+			}
+		}
+		if process != nil {
+			switch process.CurrentState() {
+			case StateReady:
+				state = "ready"
+			case StateStarting:
+				state = "starting"
+			case StateStopping:
+				state = "stopping"
+			case StateShutdown:
+				state = "shutdown"
+			case StateStopped:
+				state = "stopped"
 			}
 		}
 		models = append(models, Model{
@@ -254,18 +255,23 @@ func (pm *ProxyManager) apiUnloadSingleModelHandler(c *gin.Context) {
 		return
 	}
 
-	processGroup := pm.findGroupByModelName(realModelName)
-	if processGroup == nil {
-		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("process group not found for model %s", requestedModel))
-		return
+	var stopErr error
+	if pm.matrix != nil {
+		stopErr = pm.matrix.StopProcess(realModelName, StopImmediately)
+	} else {
+		processGroup := pm.findGroupByModelName(realModelName)
+		if processGroup == nil {
+			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("process group not found for model %s", requestedModel))
+			return
+		}
+		stopErr = processGroup.StopProcess(realModelName, StopImmediately)
 	}
 
-	if err := processGroup.StopProcess(realModelName, StopImmediately); err != nil {
-		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error stopping process: %s", err.Error()))
+	if stopErr != nil {
+		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error stopping process: %s", stopErr.Error()))
 		return
-	} else {
-		c.String(http.StatusOK, "OK")
 	}
+	c.String(http.StatusOK, "OK")
 }
 
 func (pm *ProxyManager) apiGetVersion(c *gin.Context) {

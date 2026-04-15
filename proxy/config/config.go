@@ -129,6 +129,12 @@ type Config struct {
 	Profiles           map[string][]string    `yaml:"profiles"`
 	Groups             map[string]GroupConfig `yaml:"groups"` /* key is group ID */
 
+	// swap matrix: solver-based alternative to groups
+	Matrix *MatrixConfig `yaml:"matrix"`
+
+	// populated during validation when matrix is configured
+	ExpandedSets []ExpandedSet `yaml:"-"`
+
 	// for key/value replacements in model's cmd, cmdStop, proxy, checkEndPoint
 	Macros MacroList `yaml:"macros"`
 
@@ -438,22 +444,35 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		config.Models[modelId] = modelConfig
 	}
 
-	config = AddDefaultGroupToConfig(config)
+	// groups XOR matrix
+	if config.Matrix != nil && len(config.Groups) > 0 {
+		return Config{}, fmt.Errorf("config cannot use both 'groups' and 'matrix'")
+	}
 
-	// Validate group members
-	memberUsage := make(map[string]string)
-	for groupID, groupConfig := range config.Groups {
-		prevSet := make(map[string]bool)
-		for _, member := range groupConfig.Members {
-			if _, found := prevSet[member]; found {
-				return Config{}, fmt.Errorf("duplicate model member %s found in group: %s", member, groupID)
-			}
-			prevSet[member] = true
+	if config.Matrix != nil {
+		expandedSets, err := ValidateMatrix(*config.Matrix, config.Models)
+		if err != nil {
+			return Config{}, fmt.Errorf("matrix: %w", err)
+		}
+		config.ExpandedSets = expandedSets
+	} else {
+		config = AddDefaultGroupToConfig(config)
 
-			if existingGroup, exists := memberUsage[member]; exists {
-				return Config{}, fmt.Errorf("model member %s is used in multiple groups: %s and %s", member, existingGroup, groupID)
+		// Validate group members
+		memberUsage := make(map[string]string)
+		for groupID, groupConfig := range config.Groups {
+			prevSet := make(map[string]bool)
+			for _, member := range groupConfig.Members {
+				if _, found := prevSet[member]; found {
+					return Config{}, fmt.Errorf("duplicate model member %s found in group: %s", member, groupID)
+				}
+				prevSet[member] = true
+
+				if existingGroup, exists := memberUsage[member]; exists {
+					return Config{}, fmt.Errorf("model member %s is used in multiple groups: %s and %s", member, existingGroup, groupID)
+				}
+				memberUsage[member] = groupID
 			}
-			memberUsage[member] = groupID
 		}
 	}
 
