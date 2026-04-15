@@ -281,9 +281,9 @@ func expand(node dslNode, resolvedRefs map[string][][]string) ([][]string, error
 			if err != nil {
 				return nil, err
 			}
-			result = cartesianProduct(result, childResult)
-			if len(result) > maxDSLExpansions {
-				return nil, fmt.Errorf("DSL expansion exceeded %d combinations", maxDSLExpansions)
+			result, err = cartesianProduct(result, childResult, maxDSLExpansions)
+			if err != nil {
+				return nil, err
 			}
 		}
 		return result, nil
@@ -294,8 +294,12 @@ func expand(node dslNode, resolvedRefs map[string][][]string) ([][]string, error
 }
 
 // cartesianProduct computes the cartesian product of two sets of combinations.
-func cartesianProduct(left, right [][]string) [][]string {
-	var result [][]string
+// It returns an error if the product would exceed cap.
+func cartesianProduct(left, right [][]string, cap int) ([][]string, error) {
+	if int64(len(left))*int64(len(right)) > int64(cap) {
+		return nil, fmt.Errorf("DSL expansion exceeded %d combinations", cap)
+	}
+	result := make([][]string, 0, len(left)*len(right))
 	for _, l := range left {
 		for _, r := range right {
 			combo := make([]string, 0, len(l)+len(r))
@@ -304,7 +308,7 @@ func cartesianProduct(left, right [][]string) [][]string {
 			result = append(result, combo)
 		}
 	}
-	return result
+	return result, nil
 }
 
 // ParseAndExpandDSL tokenizes, parses, and expands a DSL string.

@@ -336,6 +336,7 @@
                 "vars": {
                     "type": "object",
                     "description": "Short names for models. Keys must be alphanumeric, 1-8 characters. All sets and evict_costs must use these IDs.",
+                    "minProperties": 1,
                     "additionalProperties": {
                         "type": "string"
                     },
@@ -354,6 +355,7 @@
                 "sets": {
                     "type": "object",
                     "description": "Named sets of concurrent model combinations. Values are DSL strings using & (AND), | (OR), () (grouping), and +ref (inline another set). Definition order is used for tie-breaking.",
+                    "minProperties": 1,
                     "additionalProperties": {
                         "type": "string"
                     }
@@ -492,5 +494,27 @@
             "default": {},
             "description": "A dictionary of remote peers and models they provide. Peers can be another llama-swap or any server that provides the /v1/ generative API endpoints supported by llama-swap."
         }
-    }
+    },
+    "allOf": [
+        {
+            "if": {
+                "required": ["groups"]
+            },
+            "then": {
+                "not": {
+                    "required": ["matrix"]
+                }
+            }
+        },
+        {
+            "if": {
+                "required": ["matrix"]
+            },
+            "then": {
+                "not": {
+                    "required": ["groups"]
+                }
+            }
+        }
+    ]
 }
