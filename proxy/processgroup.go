@@ -63,19 +63,29 @@ func (pg *ProcessGroup) ProxyRequest(modelID string, writer http.ResponseWriter,
 	if pg.swap {
 		pg.Lock()
 		if pg.lastUsedProcess != modelID {
-
-			// is there something already running?
-			if pg.lastUsedProcess != "" {
-				pg.processes[pg.lastUsedProcess].Stop()
+			// Record the old process to stop and the new process to use
+			oldProcessID := pg.lastUsedProcess
+			var oldProcess *Process
+			if oldProcessID != "" {
+				oldProcess = pg.processes[oldProcessID]
 			}
+			newProcess := pg.processes[modelID]
 
-			// wait for the request to the new model to be fully handled
-			// and prevent race conditions see issue #277
-			pg.processes[modelID].ProxyRequest(writer, request)
+			// Update lastUsedProcess first to prevent new requests from triggering another swap
+			// This maintains the guarantee that only one process runs in swap mode (see issue #277)
 			pg.lastUsedProcess = modelID
 
-			// short circuit and exit
 			pg.Unlock()
+
+			// Stop the old process outside the lock to avoid blocking other requests
+			// This fixes the race condition where Stop() waits for inflight requests while
+			// holding the lock, which could cause HTTP 400 responses (see issue #635)
+			if oldProcess != nil {
+				oldProcess.Stop()
+			}
+
+			// Proxy the request to the new model
+			newProcess.ProxyRequest(writer, request)
 			return nil
 		}
 		pg.Unlock()
