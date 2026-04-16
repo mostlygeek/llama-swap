@@ -5,11 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/proxy/config"
+	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
 
@@ -64,6 +66,16 @@ func getTestPort() int {
 	nextTestPort++
 
 	return port
+}
+
+// testConfigFromYAML substitutes {{RESPONDER}} with the simple-responder path and
+// loads through the real config pipeline (env vars, macros, port assignment, etc.)
+func testConfigFromYAML(t *testing.T, yamlTmpl string) config.Config {
+	t.Helper()
+	yamlStr := strings.ReplaceAll(yamlTmpl, "{{RESPONDER}}", filepath.ToSlash(simpleResponderPath))
+	cfg, err := config.LoadConfigFromReader(strings.NewReader(yamlStr))
+	require.NoError(t, err)
+	return cfg
 }
 
 func getTestSimpleResponderConfig(expectedMessage string) config.ModelConfig {
