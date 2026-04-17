@@ -251,6 +251,8 @@ models:
     # - optional, default: empty dictionary
     # - while metadata can contains complex types it is recommended to keep it simple
     # - metadata is only passed through in /v1/models responses
+    # - if you set `context_length`, llama-swap also exposes top-level `context_length`
+    #   so clients like Hermes can auto-detect the runtime context
     metadata:
       # port will remain an integer
       port: ${PORT}

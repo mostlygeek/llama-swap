@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -545,6 +546,10 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 			"owned_by": "llama-swap",
 		}
 
+		if contextLength, ok := modelContextLength(modelConfig); ok {
+			record["context_length"] = contextLength
+		}
+
 		if name := strings.TrimSpace(modelConfig.Name); name != "" {
 			record["name"] = name
 		}
@@ -612,6 +617,97 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 		"object": "list",
 		"data":   data,
 	})
+}
+
+var ctxSizePattern = regexp.MustCompile(`(?:^|\s)(?:-c|--ctx-size)(?:=|\s+)(\d+)(?:\s|$)`)
+
+func modelContextLength(modelConfig config.ModelConfig) (int, bool) {
+	if modelConfig.Metadata != nil {
+		for _, key := range []string{"context_length", "max_context_length", "max_model_len"} {
+			if contextLength, ok := scalarToInt(modelConfig.Metadata[key]); ok {
+				return contextLength, true
+			}
+		}
+	}
+
+	if contextLength, ok := contextLengthFromCmd(modelConfig.Cmd); ok {
+		return contextLength, true
+	}
+
+	return 0, false
+}
+
+func contextLengthFromCmd(cmd string) (int, bool) {
+	matches := ctxSizePattern.FindStringSubmatch(cmd)
+	if len(matches) != 2 {
+		return 0, false
+	}
+
+	contextLength, err := strconv.Atoi(matches[1])
+	if err != nil || contextLength <= 0 {
+		return 0, false
+	}
+
+	return contextLength, true
+}
+
+func scalarToInt(value any) (int, bool) {
+	switch v := value.(type) {
+	case int:
+		if v > 0 {
+			return v, true
+		}
+	case int8:
+		if v > 0 {
+			return int(v), true
+		}
+	case int16:
+		if v > 0 {
+			return int(v), true
+		}
+	case int32:
+		if v > 0 {
+			return int(v), true
+		}
+	case int64:
+		if v > 0 {
+			return int(v), true
+		}
+	case uint:
+		if v > 0 {
+			return int(v), true
+		}
+	case uint8:
+		if v > 0 {
+			return int(v), true
+		}
+	case uint16:
+		if v > 0 {
+			return int(v), true
+		}
+	case uint32:
+		if v > 0 {
+			return int(v), true
+		}
+	case uint64:
+		if v > 0 {
+			return int(v), true
+		}
+	case float32:
+		if v > 0 {
+			return int(v), true
+		}
+	case float64:
+		if v > 0 {
+			return int(v), true
+		}
+	case string:
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
+			return n, true
+		}
+	}
+
+	return 0, false
 }
 
 // findModelInPath searches for a valid model name in a path with slashes.

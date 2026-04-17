@@ -410,6 +410,64 @@ models:
 	assert.False(t, exists, "model2 should not have llamaswap_meta")
 }
 
+func TestProxyManager_ListModelsHandler_ContextLength(t *testing.T) {
+	configYaml := `
+healthCheckTimeout: 15
+logLevel: error
+startPort: 10000
+models:
+  model1:
+    cmd: /path/to/server --port ${PORT} -c 98304
+  model2:
+    cmd: /path/to/server --port ${PORT} --ctx-size 32768
+  model3:
+    cmd: /path/to/server --port ${PORT}
+    metadata:
+      context_length: 65536
+`
+
+	processedConfig, err := config.LoadConfigFromReader(strings.NewReader(configYaml))
+	assert.NoError(t, err)
+
+	proxy := New(processedConfig)
+	req := httptest.NewRequest("GET", "/v1/models", nil)
+	w := CreateTestResponseRecorder()
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response struct {
+		Data []map[string]any `json:"data"`
+	}
+	err = json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Len(t, response.Data, 3)
+
+	byID := map[string]map[string]any{}
+	for _, model := range response.Data {
+		id, _ := model["id"].(string)
+		byID[id] = model
+	}
+
+	ctx1, ok := byID["model1"]["context_length"].(float64)
+	if !assert.True(t, ok, "model1 should expose context_length") {
+		t.FailNow()
+	}
+	assert.Equal(t, float64(98304), ctx1)
+
+	ctx2, ok := byID["model2"]["context_length"].(float64)
+	if !assert.True(t, ok, "model2 should expose context_length") {
+		t.FailNow()
+	}
+	assert.Equal(t, float64(32768), ctx2)
+
+	ctx3, ok := byID["model3"]["context_length"].(float64)
+	if !assert.True(t, ok, "model3 should expose context_length") {
+		t.FailNow()
+	}
+	assert.Equal(t, float64(65536), ctx3)
+}
+
 func TestProxyManager_ListModelsHandler_SortedByID(t *testing.T) {
 	// Intentionally add models in non-sorted order and with an unlisted model
 	cfg := testConfigFromYAML(t, `
