@@ -534,6 +534,7 @@ func (pm *ProxyManager) swapProcessGroup(realModelName string) (*ProcessGroup, e
 	return processGroup, nil
 }
 
+// listModelsHandler returns the OpenAI-compatible /v1/models payload.
 func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 	data := make([]gin.H, 0, len(pm.config.Models))
 	createdTime := time.Now().Unix()
@@ -619,8 +620,7 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 	})
 }
 
-var ctxSizePattern = regexp.MustCompile(`(?:^|\s)(?:-c|--ctx-size)(?:=|\s+)(\d+)(?:\s|$)`)
-
+// modelContextLength returns the runtime context length for a model config.
 func modelContextLength(modelConfig config.ModelConfig) (int, bool) {
 	if modelConfig.Metadata != nil {
 		for _, key := range []string{"context_length", "max_context_length", "max_model_len"} {
@@ -637,6 +637,10 @@ func modelContextLength(modelConfig config.ModelConfig) (int, bool) {
 	return 0, false
 }
 
+// ctxSizePattern matches llama.cpp context-size flags in model commands.
+var ctxSizePattern = regexp.MustCompile(`(?:^|\s)(?:-c|--ctx-size)(?:=|\s+)(\d+)(?:\s|$)`)
+
+// contextLengthFromCmd extracts the runtime context length from a command.
 func contextLengthFromCmd(cmd string) (int, bool) {
 	matches := ctxSizePattern.FindStringSubmatch(cmd)
 	if len(matches) != 2 {
@@ -651,6 +655,7 @@ func contextLengthFromCmd(cmd string) (int, bool) {
 	return contextLength, true
 }
 
+// scalarToInt converts supported scalar metadata values to a positive int.
 func scalarToInt(value any) (int, bool) {
 	switch v := value.(type) {
 	case int:
@@ -694,12 +699,12 @@ func scalarToInt(value any) (int, bool) {
 			return int(v), true
 		}
 	case float32:
-		if v > 0 {
-			return int(v), true
+		if n := int(v); n > 0 {
+			return n, true
 		}
 	case float64:
-		if v > 0 {
-			return int(v), true
+		if n := int(v); n > 0 {
+			return n, true
 		}
 	case string:
 		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {

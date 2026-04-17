@@ -424,6 +424,10 @@ models:
     cmd: /path/to/server --port ${PORT}
     metadata:
       context_length: 65536
+  model4:
+    cmd: /path/to/server --port ${PORT}
+  model5:
+    cmd: /path/to/server --port ${PORT} --ctx-size=32768
 `
 
 	processedConfig, err := config.LoadConfigFromReader(strings.NewReader(configYaml))
@@ -441,7 +445,7 @@ models:
 	}
 	err = json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
-	assert.Len(t, response.Data, 3)
+	assert.Len(t, response.Data, 5)
 
 	byID := map[string]map[string]any{}
 	for _, model := range response.Data {
@@ -466,6 +470,15 @@ models:
 		t.FailNow()
 	}
 	assert.Equal(t, float64(65536), ctx3)
+
+	_, ok = byID["model4"]["context_length"]
+	assert.False(t, ok, "model4 should not expose context_length")
+
+	ctx5, ok := byID["model5"]["context_length"].(float64)
+	if !assert.True(t, ok, "model5 should expose context_length") {
+		t.FailNow()
+	}
+	assert.Equal(t, float64(32768), ctx5)
 }
 
 func TestProxyManager_ListModelsHandler_SortedByID(t *testing.T) {
