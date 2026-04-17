@@ -1126,12 +1126,12 @@ func (pm *ProxyManager) resolveAliasRuntime(requestedModel string) string {
 	if !found {
 		return ""
 	}
-	// Check if any candidate is currently in StateReady or StateStarting
+	// Check if any candidate is currently in StateReady, StateStarting, or StateStopping
 	for _, candidate := range candidates {
 		if processGroup := pm.findGroupByModelName(candidate); processGroup != nil {
 			for _, proc := range processGroup.processes {
 				state := proc.CurrentState()
-				if state == StateReady || state == StateStarting {
+				if state == StateReady || state == StateStarting || state == StateStopping {
 					return candidate
 				}
 			}
