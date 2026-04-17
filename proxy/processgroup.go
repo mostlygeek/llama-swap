@@ -12,6 +12,12 @@ import (
 type ProcessGroup struct {
 	sync.Mutex
 
+	// swapMu serializes swap operations end-to-end (stop old + proxy to new).
+	// This prevents concurrent swap requests from racing to start their models
+	// on the same port while also ensuring the current proxy completes before
+	// the next swap kills the underlying process (fixes issue #635).
+	swapMu sync.Mutex
+
 	config     config.Config
 	id         string
 	swap       bool
@@ -61,34 +67,28 @@ func (pg *ProcessGroup) ProxyRequest(modelID string, writer http.ResponseWriter,
 	}
 
 	if pg.swap {
+		// Serialize the entire swap lifecycle: wait for the previous proxy to
+		// finish before stopping the old process and starting the next one.
+		// This prevents concurrent requests from racing to start models on the
+		// same port and ensures Stop() is never called while a request is still
+		// in flight to that process (fixes issue #635, maintains issue #277).
+		pg.swapMu.Lock()
+		defer pg.swapMu.Unlock()
+
 		pg.Lock()
-		if pg.lastUsedProcess != modelID {
-			// Record the old process to stop and the new process to use
-			oldProcessID := pg.lastUsedProcess
-			var oldProcess *Process
-			if oldProcessID != "" {
-				oldProcess = pg.processes[oldProcessID]
-			}
-			newProcess := pg.processes[modelID]
-
-			// Update lastUsedProcess first to prevent new requests from triggering another swap
-			// This maintains the guarantee that only one process runs in swap mode (see issue #277)
+		needSwap := pg.lastUsedProcess != modelID
+		oldProcessID := pg.lastUsedProcess
+		if needSwap {
 			pg.lastUsedProcess = modelID
-
-			pg.Unlock()
-
-			// Stop the old process outside the lock to avoid blocking other requests
-			// This fixes the race condition where Stop() waits for inflight requests while
-			// holding the lock, which could cause HTTP 400 responses (see issue #635)
-			if oldProcess != nil {
-				oldProcess.Stop()
-			}
-
-			// Proxy the request to the new model
-			newProcess.ProxyRequest(writer, request)
-			return nil
 		}
 		pg.Unlock()
+
+		if needSwap && oldProcessID != "" {
+			pg.processes[oldProcessID].Stop()
+		}
+
+		pg.processes[modelID].ProxyRequest(writer, request)
+		return nil
 	}
 
 	pg.processes[modelID].ProxyRequest(writer, request)
