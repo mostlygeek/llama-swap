@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -135,10 +136,16 @@ func TestProcessGroup_ProxyRequestSwapRaceAgainstFastPath(t *testing.T) {
 	require.Equal(t, StateReady, pg.processes["model1"].CurrentState())
 	require.Equal(t, StateStopped, pg.processes["model2"].CurrentState())
 
-	// Simulate the race window: block fast-path requests after pg.Lock is
-	// released but before they call Process.ProxyRequest. This is the exact
-	// window in which Process.inFlightRequests has not yet been incremented.
-	pg.testDelayFastPath = make(chan struct{})
+	// Fast-path hook: signal arrival at the race window, then wait for
+	// release. This parks R2 deterministically at the point where pg.Lock
+	// has been released but Process.inFlightRequests has not yet been
+	// incremented — the exact window the race exploits.
+	r2Reached := make(chan struct{})
+	r2Release := make(chan struct{})
+	pg.testDelayFastPath = func() {
+		close(r2Reached)
+		<-r2Release
+	}
 
 	// R2: fast-path request for model1. Will pause at the test hook.
 	r2Done := make(chan struct{})
@@ -149,8 +156,8 @@ func TestProcessGroup_ProxyRequestSwapRaceAgainstFastPath(t *testing.T) {
 		assert.NoError(t, pg.ProxyRequest("model1", w2, req))
 	}()
 
-	// Give R2 time to reach the hook.
-	time.Sleep(50 * time.Millisecond)
+	// Deterministically wait for R2 to reach the race window.
+	<-r2Reached
 
 	// R3: swap request for model2. Must wait for R2 to finish before touching
 	// model1, otherwise model1 gets killed mid-request.
@@ -162,8 +169,36 @@ func TestProcessGroup_ProxyRequestSwapRaceAgainstFastPath(t *testing.T) {
 		assert.NoError(t, pg.ProxyRequest("model2", w3, req))
 	}()
 
-	// Give R3 time to try to proceed.
-	time.Sleep(100 * time.Millisecond)
+	// Spin until R3 has acquired pg.Lock and entered the swap critical
+	// section. In the fixed code, R3 then blocks on pg.inflight.Wait() while
+	// still holding the lock, so TryLock keeps failing.
+	for pg.TryLock() {
+		pg.Unlock()
+		runtime.Gosched()
+	}
+
+	// Bounded poll: give R3 a chance to demonstrate the bug by mutating
+	// state. In the fixed code, R3 is blocked on pg.inflight.Wait() and
+	// nothing changes, so we wait the full window. In the buggy code, R3
+	// will Stop() model1 and start serving via model2 within microseconds —
+	// we exit early once the mutation is observable.
+	deadline := time.Now().Add(100 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if pg.processes["model1"].CurrentState() != StateReady ||
+			pg.processes["model2"].CurrentState() != StateStopped {
+			break
+		}
+		done := false
+		select {
+		case <-r3Done:
+			done = true
+		default:
+		}
+		if done {
+			break
+		}
+		runtime.Gosched()
+	}
 
 	// Invariant: R3 must be blocked while R2 is still in flight.
 	select {
@@ -177,7 +212,7 @@ func TestProcessGroup_ProxyRequestSwapRaceAgainstFastPath(t *testing.T) {
 		"model2 must not be started until R2 finishes and model1 is swapped out")
 
 	// Release R2 and let both requests finish.
-	close(pg.testDelayFastPath)
+	close(r2Release)
 	<-r2Done
 	<-r3Done
 

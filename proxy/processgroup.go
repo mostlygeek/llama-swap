@@ -34,11 +34,12 @@ type ProcessGroup struct {
 	// killed mid-request.
 	inflight sync.WaitGroup
 
-	// testDelayFastPath is a test-only hook that, when non-nil, blocks in the
-	// fast path after pg.Lock is released but before the request is dispatched
-	// to Process.ProxyRequest. It exists solely to make the fast-path vs swap
-	// race deterministically reproducible in tests.
-	testDelayFastPath chan struct{}
+	// testDelayFastPath is a test-only hook that, when non-nil, is invoked in
+	// the fast path after pg.Lock is released but before the request is
+	// dispatched to Process.ProxyRequest. Tests use it to park a fast-path
+	// request at the exact race window to deterministically reproduce the
+	// fast-path vs swap race.
+	testDelayFastPath func()
 }
 
 func NewProcessGroup(id string, config config.Config, proxyLogger *LogMonitor, upstreamLogger *LogMonitor) *ProcessGroup {
@@ -108,7 +109,7 @@ func (pg *ProcessGroup) ProxyRequest(modelID string, writer http.ResponseWriter,
 		pg.Unlock()
 
 		if pg.testDelayFastPath != nil {
-			<-pg.testDelayFastPath
+			pg.testDelayFastPath()
 		}
 	}
 
