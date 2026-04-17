@@ -257,11 +257,21 @@ func (p *Process) start() error {
 		}
 		defer p.waitStarting.Done()
 
-		// Set no-op cancel and closed channel so Stop()/Shutdown() work cleanly
-		p.cmdMutex.Lock()
-		p.cancelUpstream = func() {}
+		// Mimic the real stop path: cancelUpstream transitions
+		// StateStopping -> StateStopped and closes cmdWaitChan,
+		// matching what waitForCmd does for real subprocesses.
 		ch := make(chan struct{})
-		close(ch)
+		p.cancelUpstream = func() {
+			if curState := p.CurrentState(); curState == StateStopping {
+				if _, err := p.swapState(StateStopping, StateStopped); err != nil {
+					p.forceState(StateStopped)
+				}
+			} else {
+				p.forceState(StateStopped)
+			}
+			close(ch)
+		}
+		p.cmdMutex.Lock()
 		p.cmdWaitChan = ch
 		p.cmdMutex.Unlock()
 
