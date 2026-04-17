@@ -353,9 +353,15 @@ func (p *Process) start() error {
 		}
 	}
 
+	if curState, err := p.swapState(StateStarting, StateReady); err != nil {
+		return fmt.Errorf("failed to set Process state to ready: current state: %v, error: %v", curState, err)
+	}
+	p.failedStartCount = 0
+
+	// Start TTL goroutine AFTER the model is in StateReady.
+	// If started before swapState, the goroutine ticks once, sees StateStarting,
+	// and returns — TTL never actually runs for models that take >1s to load.
 	if p.config.UnloadAfter > 0 {
-		// start a goroutine to check every second if
-		// the process should be stopped
 		go func() {
 			maxDuration := time.Duration(p.config.UnloadAfter) * time.Second
 
@@ -378,12 +384,7 @@ func (p *Process) start() error {
 		}()
 	}
 
-	if curState, err := p.swapState(StateStarting, StateReady); err != nil {
-		return fmt.Errorf("failed to set Process state to ready: current state: %v, error: %v", curState, err)
-	} else {
-		p.failedStartCount = 0
-		return nil
-	}
+	return nil
 }
 
 // Stop will wait for inflight requests to complete before stopping the process.
