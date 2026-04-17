@@ -18,6 +18,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/event"
 	"github.com/mostlygeek/llama-swap/proxy/config"
+	xl "github.com/mostlygeek/llama-swap/proxy/translate"
+	_ "github.com/mostlygeek/llama-swap/proxy/translate/adapters"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -370,6 +372,15 @@ func (pm *ProxyManager) setupGinEngine() {
 	pm.ginEngine.GET("/sdapi/v1/loras", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyGETModelHandler)
 
 	pm.ginEngine.GET("/v1/models", pm.apiKeyAuth(), pm.listModelsHandler)
+
+	// Ollama API surface. Chat endpoints go through the translation pipeline;
+	// tags/show/version are synthesized from llama-swap's own config.
+	pm.ginEngine.POST("/api/chat", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
+	pm.ginEngine.POST("/api/generate", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyInferenceHandler)
+	pm.ginEngine.GET("/api/tags", pm.apiKeyAuth(), pm.listOllamaTagsHandler)
+	pm.ginEngine.POST("/api/show", pm.apiKeyAuth(), pm.showOllamaModelHandler)
+	// /api/version is already served by addApiHandlers with a superset payload
+	// that includes the "version" field Ollama clients expect.
 
 	// in proxymanager_loghandlers.go
 	pm.ginEngine.GET("/logs", pm.apiKeyAuth(), pm.sendLogsHandlers)
@@ -816,6 +827,53 @@ func (pm *ProxyManager) proxyInferenceHandler(c *gin.Context) {
 		return
 	}
 
+	// Protocol translation: if this is a chat-family endpoint and the model
+	// does not natively support the inbound protocol, translate the body and
+	// rewrite the forwarded path. Streaming translation is handled in a
+	// separate step (task #7); for now a 501 is returned when a translated
+	// request also asks for streaming.
+	_, isLocalModel := pm.config.Models[modelID]
+	inboundProto, inboundKind, isChat := xl.DetectInbound(c.Request.Method, c.Request.URL.Path)
+	if isChat && !isLocalModel {
+		// Peer-routed model. v1: we do not translate across peers. If the
+		// inbound protocol is not one the peer is presumed to speak (we
+		// assume [openai, anthropic]) return 501 up-front.
+		if inboundProto == xl.ProtocolOllama {
+			pm.sendErrorResponse(c, http.StatusNotImplemented, "peer proxies do not support ollama translation yet")
+			return
+		}
+	}
+	if isChat && isLocalModel {
+		supported := resolveModelProtocols(pm, modelID)
+		target, needXlate := xl.Choose(inboundProto, supported)
+		if needXlate {
+			translated, err := xl.TranslateRequest(inboundProto, target, inboundKind, bodyBytes)
+			if err != nil {
+				pm.sendErrorResponse(c, http.StatusNotImplemented, fmt.Sprintf("translate request: %s", err.Error()))
+				return
+			}
+			bodyBytes = translated
+			c.Request.URL.Path = xl.CanonicalPath(target, inboundKind)
+			xl.TranslateHeaders(inboundProto, target, c.Request.Header)
+
+			wantStream := gjson.GetBytes(bodyBytes, "stream").Bool()
+			if wantStream {
+				st, err := newStreamTranslator(c.Writer, target, inboundProto)
+				if err != nil {
+					pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("stream translator: %s", err.Error()))
+					return
+				}
+				c.Writer = st
+				defer st.close()
+			} else {
+				origWriter := c.Writer
+				rt := &responseTranslator{ResponseWriter: origWriter, inbound: inboundProto, target: target, logger: pm.proxyLogger}
+				c.Writer = rt
+				defer rt.flushTo(origWriter)
+			}
+		}
+	}
+
 	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
 	// dechunk it as we already have all the body bytes see issue #11
@@ -1018,10 +1076,25 @@ func (pm *ProxyManager) proxyGETModelHandler(c *gin.Context) {
 }
 
 func (pm *ProxyManager) sendErrorResponse(c *gin.Context, statusCode int, message string) {
-	acceptHeader := c.GetHeader("Accept")
-
-	if strings.Contains(acceptHeader, "application/json") {
+	// Shape the error body in the client's protocol so a /v1/messages client
+	// sees an Anthropic-style envelope and an /api/chat client sees an
+	// Ollama-style body.
+	proto, _, _ := xl.DetectInbound(c.Request.Method, c.Request.URL.Path)
+	switch proto {
+	case xl.ProtocolAnthropic:
+		c.JSON(statusCode, gin.H{
+			"type":  "error",
+			"error": gin.H{"type": "api_error", "message": message},
+		})
+		return
+	case xl.ProtocolOllama:
 		c.JSON(statusCode, gin.H{"error": message})
+		return
+	}
+	// Default / OpenAI / non-chat path.
+	acceptHeader := c.GetHeader("Accept")
+	if strings.Contains(acceptHeader, "application/json") {
+		c.JSON(statusCode, gin.H{"error": gin.H{"message": message, "type": "api_error"}})
 	} else {
 		c.String(statusCode, message)
 	}

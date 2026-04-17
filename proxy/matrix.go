@@ -170,6 +170,15 @@ func NewMatrix(cfg config.Config, proxyLogger, upstreamLogger *LogMonitor) *Matr
 	}
 }
 
+// ProtocolsFor returns the declared native protocols for modelID. Matrix
+// models map 1:1 to real models in config, so this is just a direct lookup.
+func (m *Matrix) ProtocolsFor(modelID string) []string {
+	if mc, ok := m.config.Models[modelID]; ok {
+		return mc.Protocols
+	}
+	return nil
+}
+
 // ProxyRequest handles the swap logic and proxies the request to the model.
 func (m *Matrix) ProxyRequest(modelID string, w http.ResponseWriter, r *http.Request) error {
 	process, ok := m.processes[modelID]

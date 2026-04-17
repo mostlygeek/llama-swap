@@ -81,7 +81,52 @@ llama-swap supports many more features to customize how you want to manage your 
 | `env`     | define environment variables per model         |
 | `aliases` | serve a model with different names             |
 | `filters` | modify requests before sending to the upstream |
+| `protocols` | declare supported wire formats; enable OpenAI↔Anthropic↔Ollama translation |
 | `...`     | And many more tweaks                           |
+
+## Protocol translation
+
+llama-swap can translate chat requests and responses between OpenAI, Anthropic,
+and Ollama wire formats so that a single upstream can serve clients that speak
+different protocols.
+
+Each model may declare the wire formats it natively supports:
+
+```yaml
+models:
+  my-openai-only-model:
+    cmd: llama-server --port ${PORT} -m my-model.gguf
+    protocols: [openai]           # only speaks /v1/chat/completions natively
+
+  my-dual-protocol-model:
+    cmd: my-server --port ${PORT}
+    protocols: [openai, anthropic]  # (this is also the default)
+
+  my-ollama-model:
+    cmd: ollama serve --port ${PORT}
+    protocols: [ollama]           # only speaks /api/chat natively
+```
+
+Rules:
+
+- If omitted, `protocols` defaults to `[openai, anthropic]` — the behavior
+  llama-swap shipped with before translation existed.
+- Translation runs only on chat endpoints:
+  `/v1/chat/completions`, `/v1/messages`, `/api/chat`, `/api/generate`.
+  All other routes (embeddings, rerank, audio, images, infill, sdapi) are
+  pass-through regardless of `protocols`.
+- When a request arrives for a model that does not support the request's
+  protocol, llama-swap picks a supported protocol (preferring `openai`) and
+  translates request+response end-to-end.
+- The Ollama API surface (`/api/tags`, `/api/show`, `/api/version`) only
+  lists models whose `protocols` includes `ollama`.
+- Peer-routed models currently only accept their native protocol; cross-peer
+  translation is a known follow-up.
+
+Streaming translation and the full field-fidelity matrix (what is preserved,
+translated, dropped, or returns `501 Not Implemented`) are still being rolled
+out — see the protocol translation plan for details.
+
 
 ## Full Configuration Example
 
