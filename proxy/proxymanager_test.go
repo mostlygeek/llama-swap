@@ -685,6 +685,7 @@ models:
 	// Create proxy once for all tests
 	proxy := New(cfg)
 	defer proxy.StopProcesses(StopWaitForInflightRequest)
+	injectTestHandlers(proxy, nil)
 
 	t.Run("no models loaded", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/running", nil)
@@ -745,6 +746,7 @@ models:
 
 	proxy := New(cfg)
 	defer proxy.StopProcesses(StopWaitForInflightRequest)
+	injectTestHandlers(proxy, nil)
 
 	// Create a buffer with multipart form data
 	var b bytes.Buffer
@@ -797,6 +799,7 @@ models:
 
 	proxy := New(conf)
 	defer proxy.StopProcesses(StopWaitForInflightRequest)
+	injectTestHandlers(proxy, nil)
 
 	requestedModel := "model1"
 
@@ -860,6 +863,7 @@ models:
 
 	proxy := New(conf)
 	defer proxy.StopProcesses(StopWaitForInflightRequest)
+	injectTestHandlers(proxy, nil)
 
 	t.Run("successful GET with model query param", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/v1/audio/voices?model=model1", nil)
@@ -936,6 +940,7 @@ models:
 		t.Run(tt.name, func(t *testing.T) {
 			proxy := New(cfg)
 			defer proxy.StopProcesses(StopWaitForInflightRequest)
+			injectTestHandlers(proxy, nil)
 
 			req := httptest.NewRequest(tt.method, "/v1/chat/completions", nil)
 			for k, v := range tt.requestHeaders {
@@ -965,6 +970,7 @@ models:
 
 	proxy := New(cfg)
 	defer proxy.StopProcesses(StopWaitForInflightRequest)
+	injectTestHandlers(proxy, nil)
 	t.Run("main model name", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/upstream/model1/test", nil)
 		rec := CreateTestResponseRecorder()
@@ -993,6 +999,7 @@ models:
 
 	proxy := New(cfg)
 	defer proxy.StopProcesses(StopWaitForInflightRequest)
+	injectTestHandlers(proxy, nil)
 
 	reqBody := fmt.Sprintf(`{"model":"%s", "x": "this is just some content to push the length out a bit"}`, "model1")
 	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
@@ -1019,6 +1026,7 @@ models:
 
 	proxy := New(cfg)
 	defer proxy.StopProcesses(StopWaitForInflightRequest)
+	injectTestHandlers(proxy, nil)
 	reqBody := `{"model":"model1", "temperature":0.1, "x_param":"123", "y_param":"abc", "stream":true}`
 	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
 	w := CreateTestResponseRecorder()
@@ -1057,6 +1065,7 @@ models:
 
 	proxy := New(cfg)
 	defer proxy.StopProcesses(StopWaitForInflightRequest)
+	injectTestHandlers(proxy, nil)
 
 	tests := []struct {
 		requestedModel string
@@ -1117,6 +1126,7 @@ models:
 
 	proxy := New(cfg)
 	defer proxy.StopProcesses(StopWaitForInflightRequest)
+	injectTestHandlers(proxy, nil)
 
 	reqBody := `{"model":"model1"}`
 	req := httptest.NewRequest("POST", "/completion", bytes.NewBufferString(reqBody))
@@ -1306,6 +1316,7 @@ models:
 
 	proxy := New(testConfig)
 	defer proxy.StopProcesses(StopImmediately)
+	injectTestHandlers(proxy, nil)
 
 	t.Run("valid key in x-api-key header", func(t *testing.T) {
 		reqBody := `{"model":"model1"}`
@@ -1417,6 +1428,7 @@ models:
 
 	proxy := New(testConfig)
 	defer proxy.StopProcesses(StopImmediately)
+	injectTestHandlers(proxy, nil)
 
 	t.Run("requests pass without API key when not configured", func(t *testing.T) {
 		reqBody := `{"model":"model1"}`
@@ -1454,6 +1466,7 @@ models:
 
 		proxy := New(testConfig)
 		defer proxy.StopProcesses(StopImmediately)
+		injectTestHandlers(proxy, nil)
 
 		reqBody := `{"model":"peer-model"}`
 		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
@@ -1489,6 +1502,7 @@ models:
 
 		proxy := New(testConfig)
 		defer proxy.StopProcesses(StopImmediately)
+		injectTestHandlers(proxy, map[string]string{"shared-model": "local-response"})
 
 		reqBody := `{"model":"shared-model"}`
 		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
@@ -1521,6 +1535,7 @@ models:
 
 		proxy := New(testConfig)
 		defer proxy.StopProcesses(StopImmediately)
+		injectTestHandlers(proxy, nil)
 
 		reqBody := `{"model":"unknown-model"}`
 		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
@@ -1556,6 +1571,7 @@ models:
 
 		proxy := New(testConfig)
 		defer proxy.StopProcesses(StopImmediately)
+		injectTestHandlers(proxy, nil)
 
 		reqBody := `{"model":"peer-model"}`
 		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
@@ -1577,6 +1593,7 @@ models:
 
 		proxy := New(testConfig)
 		defer proxy.StopProcesses(StopImmediately)
+		injectTestHandlers(proxy, nil)
 
 		// peerProxy exists but has no peer models configured
 		assert.False(t, proxy.peerProxy.HasPeerModel("unknown-model"))
@@ -1612,6 +1629,7 @@ models:
 
 		proxy := New(testConfig)
 		defer proxy.StopProcesses(StopImmediately)
+		injectTestHandlers(proxy, nil)
 
 		reqBody := `{"model":"peer-model"}`
 		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
@@ -1634,6 +1652,7 @@ models:
 
 	proxy := New(conf)
 	defer proxy.StopProcesses(StopWaitForInflightRequest)
+	injectTestHandlers(proxy, nil)
 
 	t.Run("successful txt2img with model", func(t *testing.T) {
 		reqBody := `{"model":"sd-model","prompt":"a cat"}`
@@ -1677,6 +1696,7 @@ models:
 
 	proxy := New(conf)
 	defer proxy.StopProcesses(StopWaitForInflightRequest)
+	injectTestHandlers(proxy, nil)
 
 	t.Run("successful GET loras with model query param", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/sdapi/v1/loras?model=sd-model", nil)

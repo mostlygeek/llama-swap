@@ -52,36 +52,26 @@ models:
 
 **Scope:** ~20-30 tests in `proxymanager_test.go`, `processgroup_test.go`, `peerproxy_test.go`.
 
-### Stage 2: In-process test server (eliminate simple-responder for routing tests)
+### Stage 2: Injected test handler (eliminate simple-responder for routing tests)
 
-**Goal:** Replace simple-responder subprocess launches with `httptest.Server` for tests that don't specifically test process lifecycle.
+**Goal:** Replace simple-responder subprocess launches with an injected `http.Handler` for tests that don't specifically test process lifecycle.
 
 **Effort:** Medium | **Impact:** 10-100x faster routing tests | **Risk:** Low (additive, no existing code broken)
 
-Two parts:
+Add a `testHandler http.Handler` field to `Process`. When set, `ProxyRequest` delegates directly to this handler instead of going through the reverse proxy. No subprocess, no health checks, no TCP roundtrip.
 
-**2a. Extract simple-responder's handler into a test helper:**
+**2a. Add testHandler to Process:**
 
 ```go
-// newTestUpstreamServer creates an in-process HTTP server that mimics
-// llama.cpp's API (same endpoints as simple-responder).
-func newTestUpstreamServer(respond string) *httptest.Server {
-    mux := http.NewServeMux()
-    mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) { ... })
-    mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) { ... })
-    // ... other endpoints
-    return httptest.NewServer(mux)
-}
+// In Process struct (process.go):
+testHandler http.Handler  // set only in tests; bypasses subprocess and reverse proxy
 ```
 
-**2b. Add "external" process mode to `Process`:**
-
-Allow `cmd` to be empty/omitted when `proxy` is set. This means "connect to an already-running server" (also useful for real configs pointing at external services). In `Process.Start()`:
+In `Process.Start()`, skip subprocess + health check when handler is set:
 
 ```go
-func (p *Process) Start() error {
-    if p.config.Cmd == "" {
-        // No subprocess to manage - just verify the proxy is reachable
+func (p *Process) start() error {
+    if p.testHandler != nil {
         p.setState(StateReady)
         return nil
     }
@@ -89,12 +79,35 @@ func (p *Process) Start() error {
 }
 ```
 
+In `Process.ProxyRequest()`, delegate directly to the handler:
+
+```go
+// Before the reverseProxy.ServeHTTP call:
+if p.testHandler != nil {
+    p.testHandler.ServeHTTP(w, r)
+    return
+}
+```
+
+**2b. Test helper to create the handler:**
+
+```go
+// newTestHandler returns an http.Handler that mimics llama.cpp's API
+// (same endpoints as simple-responder).
+func newTestHandler(respond string) http.Handler {
+    mux := http.NewServeMux()
+    mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) { ... })
+    mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) { ... })
+    // ... other endpoints
+    return mux
+}
+```
+
 Tests for routing/auth/CORS/streaming then become:
 
 ```go
 func TestProxyManager_AuthRequired(t *testing.T) {
-    upstream := newTestUpstreamServer("model1")
-    defer upstream.Close()
+    handler := newTestHandler("model1")
 
     config := testConfigFromYAML(t, `
 healthCheckTimeout: 15
@@ -102,14 +115,17 @@ logLevel: error
 requiredAPIKeys: [test-key]
 models:
   model1:
-    cmd: ""   # no subprocess
-    proxy: `+upstream.URL+`
+    cmd: {{RESPONDER}} --port ${PORT} -silent -respond model1
 `)
-    // proxy requests go directly to httptest.Server, no subprocess needed
+    pm := NewProxyManager(config)
+    // inject handler — skips subprocess, health check, port allocation
+    pm.processGroups["model1"].process.testHandler = handler
 }
 ```
 
-**Why this matters:** The `httptest.Server` is ready instantly. No process spawn, no health check timeout, no port allocation. Routing tests go from ~100ms each (process startup + health check) to ~1ms.
+**Why this matters:** The handler is called directly in-process. No subprocess spawn, no health check timeout, no port allocation, no TCP roundtrip, no reverse proxy overhead. Routing tests go from ~100ms each (process startup + health check) to ~1ms. Unlike an `httptest.Server` approach, there are zero network hops.
+
+**Why not blank-cmd + proxy URL:** A blank `cmd` with a `proxy` field pointing at `httptest.Server` still requires a real TCP roundtrip through the reverse proxy and introduces "external process" semantics to the config schema. Injecting the handler directly keeps it purely a test concern with no config changes.
 
 **Scope:** Most tests in `proxymanager_test.go` (auth, CORS, model listing, streaming, peer proxy), `peerproxy_test.go`, `metrics_monitor_test.go`.
 
@@ -160,7 +176,7 @@ This requires:
 | Stage | Effort | Impact | Risk |
 |-------|--------|--------|------|
 | 1. YAML config helper | Low | Config bugs caught earlier | None |
-| 2. In-process test server | Medium | 10-100x faster routing tests | Low |
+| 2. Injected test handler | Medium | 10-100x faster routing tests | Low |
 | 3. Migrate tests | Medium | Cleaner, more reliable tests | None |
 | 4. Process interface | High | Pure unit tests possible | Medium |
 

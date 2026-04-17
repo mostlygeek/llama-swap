@@ -77,6 +77,9 @@ type Process struct {
 	// used for testing to override the default value
 	gracefulStopTimeout time.Duration
 
+	// used for testing to bypass subprocess and reverse proxy
+	testHandler http.Handler
+
 	// track the number of failed starts
 	failedStartCount int
 }
@@ -235,6 +238,39 @@ func (p *Process) forceState(newState ProcessState) {
 // it is a private method because starting is automatic but stopping can be called
 // at any time.
 func (p *Process) start() error {
+
+	// test-only fast path: skip subprocess, health check, and TTL goroutine
+	if p.testHandler != nil {
+		if curState, err := p.swapState(StateStopped, StateStarting); err != nil {
+			if err == ErrExpectedStateMismatch {
+				if curState == StateStarting {
+					p.waitStarting.Wait()
+					curState = p.CurrentState()
+					if curState == StateReady {
+						return nil
+					}
+					return fmt.Errorf("process was already starting but wound up in state %v", curState)
+				}
+				return fmt.Errorf("process was in state %v when start() was called", curState)
+			}
+			return fmt.Errorf("failed to set Process state to starting: current state: %v, error: %v", curState, err)
+		}
+		defer p.waitStarting.Done()
+
+		// Set no-op cancel and closed channel so Stop()/Shutdown() work cleanly
+		p.cmdMutex.Lock()
+		p.cancelUpstream = func() {}
+		ch := make(chan struct{})
+		close(ch)
+		p.cmdWaitChan = ch
+		p.cmdMutex.Unlock()
+
+		if curState, err := p.swapState(StateStarting, StateReady); err != nil {
+			return fmt.Errorf("failed to set Process state to ready: current state: %v, error: %v", curState, err)
+		}
+		p.failedStartCount = 0
+		return nil
+	}
 
 	if p.config.Proxy == "" {
 		return fmt.Errorf("can not start(), upstream proxy missing")
@@ -577,6 +613,11 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		if !srw.waitForCompletion(completionTimeout) {
 			p.proxyLogger.Warnf("<%s> status updates goroutine did not complete within %v, proceeding with proxy request", p.ID, completionTimeout)
 		}
+	}
+
+	if p.testHandler != nil {
+		p.testHandler.ServeHTTP(w, r)
+	} else if srw != nil {
 		p.reverseProxy.ServeHTTP(srw, r)
 	} else {
 		p.reverseProxy.ServeHTTP(w, r)
