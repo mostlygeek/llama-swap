@@ -168,8 +168,10 @@ func (mp *metricsMonitor) addCapture(capture ReqRespCapture) {
 		oldestID := mp.captureOrder[0]
 		mp.captureOrder = mp.captureOrder[1:]
 		if evicted, exists := mp.captures[oldestID]; exists {
-			mp.captureSize -= len(evicted)
+			l := len(evicted)
+			mp.captureSize -= l
 			delete(mp.captures, oldestID)
+			mp.logger.Debugf("Capture %d evicted to make space: %d bytes", oldestID, l)
 		}
 	}
 
@@ -177,7 +179,7 @@ func (mp *metricsMonitor) addCapture(capture ReqRespCapture) {
 	mp.captureOrder = append(mp.captureOrder, capture.ID)
 	mp.captureSize += captureSize
 
-	mp.logger.Debugf("capture %d: %d bytes -> %d bytes (%.1f%% compression)", capture.ID, uncompressedBytes, len(compressed), compressionRatio)
+	mp.logger.Debugf("Capture %d compressed and saved: %d bytes -> %d bytes (%.1f%% compression)", capture.ID, uncompressedBytes, len(compressed), compressionRatio)
 }
 
 // getCompressedBytes returns the raw compressed bytes for a capture by ID.
