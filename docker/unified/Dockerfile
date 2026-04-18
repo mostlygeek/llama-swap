@@ -42,6 +42,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake git python3 python3-pip libssl-dev \
     curl ca-certificates ccache make wget software-properties-common \
     libvulkan-dev glslang-tools spirv-tools vulkan-validationlayers glslc \
+    spirv-headers \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
