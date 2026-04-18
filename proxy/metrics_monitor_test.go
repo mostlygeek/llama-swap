@@ -5,6 +5,7 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"encoding/json"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -953,28 +954,27 @@ func TestMetricsMonitor_WrapHandler_Compression(t *testing.T) {
 	})
 }
 
-func TestReqRespCapture_Size(t *testing.T) {
-	t.Run("calculates size correctly", func(t *testing.T) {
+func TestReqRespCapture_CompressedSize(t *testing.T) {
+	t.Run("compressed size is smaller than uncompressed", func(t *testing.T) {
 		capture := ReqRespCapture{
-			ID:      1,
-			ReqPath: "/v1/chat/completions", // 20 bytes
-			ReqHeaders: map[string]string{
-				"Content-Type": "application/json", // 12 + 16 = 28
-			},
-			ReqBody: []byte("request body"), // 12 bytes
-			RespHeaders: map[string]string{
-				"X-Test": "value", // 6 + 5 = 11
-			},
-			RespBody: []byte("response body"), // 13 bytes
+			ID:       1,
+			ReqPath:  "/v1/chat/completions",
+			ReqBody:  []byte(`{"model":"test","prompt":"hello world this is a test request body that is reasonably long"}`),
+			RespBody: []byte(`{"id":"resp-123","object":"chat.completion","created":1234567890,"model":"test-model","choices":[{"index":0,"message":{"role":"assistant","content":"This is a test response body with some meaningful content to compress"}},{"index":1,"message":{"role":"user","content":"Another message here"}}]}`),
 		}
 
-		// Expected: 20 + 12 + 13 + 28 + 11 = 84
-		assert.Equal(t, 84, capture.Size())
+		compressed, uncompressed, err := compressCapture(&capture)
+		assert.NoError(t, err)
+		assert.Greater(t, uncompressed, 0)
+		assert.True(t, len(compressed) < uncompressed, "compressed (%d bytes) should be smaller than uncompressed JSON (%d bytes)", len(compressed), uncompressed)
 	})
 
-	t.Run("handles empty capture", func(t *testing.T) {
+	t.Run("empty capture produces compressed output", func(t *testing.T) {
 		capture := ReqRespCapture{}
-		assert.Equal(t, 0, capture.Size())
+		compressed, _, err := compressCapture(&capture)
+		assert.NoError(t, err)
+		assert.NotNil(t, compressed)
+		assert.True(t, len(compressed) > 0)
 	})
 }
 
@@ -989,7 +989,7 @@ func TestMetricsMonitor_AddCapture(t *testing.T) {
 		mm.addCapture(capture)
 
 		// Should not store capture
-		assert.Nil(t, mm.getCaptureByID(0))
+		assert.Nil(t, mm.getCaptureByID(0, false))
 	})
 
 	t.Run("adds capture when enabled", func(t *testing.T) {
@@ -1002,41 +1002,55 @@ func TestMetricsMonitor_AddCapture(t *testing.T) {
 		}
 		mm.addCapture(capture)
 
-		retrieved := mm.getCaptureByID(0)
+		retrieved := mm.getCaptureByID(0, true)
 		assert.NotNil(t, retrieved)
-		assert.Equal(t, 0, retrieved.ID)
-		assert.Equal(t, []byte("test request"), retrieved.ReqBody)
-		assert.Equal(t, []byte("test response"), retrieved.RespBody)
+
+		var decoded ReqRespCapture
+		err := json.Unmarshal(retrieved, &decoded)
+		assert.NoError(t, err)
+		assert.Equal(t, 0, decoded.ID)
+		assert.Equal(t, []byte("test request"), decoded.ReqBody)
+		assert.Equal(t, []byte("test response"), decoded.RespBody)
 	})
 
 	t.Run("evicts oldest when exceeding max size", func(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10, 5)
-		mm.maxCaptureSize = 100 // Set small limit for test
+		// Each full ReqRespCapture with 80 bytes random data compresses to ~185 bytes.
+		// 2 captures = ~370 bytes, 3 captures = ~555 bytes. Set limit so only 2 fit.
+		mm.maxCaptureSize = 450
 
-		// Add captures that will exceed the limit
-		capture1 := ReqRespCapture{ID: 0, ReqBody: make([]byte, 40)}
-		capture2 := ReqRespCapture{ID: 1, ReqBody: make([]byte, 40)}
-		capture3 := ReqRespCapture{ID: 2, ReqBody: make([]byte, 40)}
+		// Use random-looking data that doesn't compress well with zstd
+		rng := rand.New(rand.NewSource(42))
+		capture1 := ReqRespCapture{ID: 0, ReqBody: make([]byte, 80)}
+		rng.Read(capture1.ReqBody)
+		capture2 := ReqRespCapture{ID: 1, ReqBody: make([]byte, 80)}
+		rng.Read(capture2.ReqBody)
+		capture3 := ReqRespCapture{ID: 2, ReqBody: make([]byte, 80)}
+		rng.Read(capture3.ReqBody)
 
 		mm.addCapture(capture1)
 		mm.addCapture(capture2)
 		// Adding capture3 should evict capture1
 		mm.addCapture(capture3)
 
-		assert.Nil(t, mm.getCaptureByID(0), "capture 0 should be evicted")
-		assert.NotNil(t, mm.getCaptureByID(1), "capture 1 should exist")
-		assert.NotNil(t, mm.getCaptureByID(2), "capture 2 should exist")
+		assert.Nil(t, mm.getCaptureByID(0, true), "capture 0 should be evicted")
+		retrieved := mm.getCaptureByID(1, true)
+		assert.NotNil(t, retrieved, "capture 1 should exist")
+		retrieved = mm.getCaptureByID(2, true)
+		assert.NotNil(t, retrieved, "capture 2 should exist")
 	})
 
 	t.Run("skips capture larger than max size", func(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10, 5)
 		mm.maxCaptureSize = 100
 
-		// Add a capture larger than max
-		largeCapture := ReqRespCapture{ID: 0, ReqBody: make([]byte, 200)}
+		// Use random data that doesn't compress well to create an oversized capture
+		rng := rand.New(rand.NewSource(99))
+		largeCapture := ReqRespCapture{ID: 0, ReqBody: make([]byte, 300)}
+		rng.Read(largeCapture.ReqBody)
 		mm.addCapture(largeCapture)
 
-		assert.Nil(t, mm.getCaptureByID(0), "oversized capture should not be stored")
+		assert.Nil(t, mm.getCaptureByID(0, false), "oversized capture should not be stored")
 	})
 }
 
@@ -1044,21 +1058,44 @@ func TestMetricsMonitor_GetCaptureByID(t *testing.T) {
 	t.Run("returns nil for non-existent ID", func(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10, 5)
 
-		assert.Nil(t, mm.getCaptureByID(999))
+		assert.Nil(t, mm.getCaptureByID(999, false))
 	})
 
-	t.Run("returns capture by ID", func(t *testing.T) {
+	t.Run("returns decompressed capture by ID", func(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10, 5)
 
 		capture := ReqRespCapture{
-			ID:      42,
-			ReqBody: []byte("test"),
+			ID:       42,
+			ReqBody:  []byte("test request"),
+			RespBody: []byte("test response"),
 		}
 		mm.addCapture(capture)
 
-		retrieved := mm.getCaptureByID(42)
+		retrieved := mm.getCaptureByID(42, true)
 		assert.NotNil(t, retrieved)
-		assert.Equal(t, 42, retrieved.ID)
+
+		var decoded ReqRespCapture
+		err := json.Unmarshal(retrieved, &decoded)
+		assert.NoError(t, err)
+		assert.Equal(t, 42, decoded.ID)
+		assert.Equal(t, []byte("test request"), decoded.ReqBody)
+		assert.Equal(t, []byte("test response"), decoded.RespBody)
+	})
+
+	t.Run("returns compressed bytes when decompress=false", func(t *testing.T) {
+		mm := newMetricsMonitor(testLogger, 10, 5)
+
+		capture := ReqRespCapture{
+			ID:       42,
+			ReqBody:  []byte("test request body"),
+			RespBody: []byte("test response body"),
+		}
+		mm.addCapture(capture)
+
+		compressed := mm.getCaptureByID(42, false)
+		assert.NotNil(t, compressed)
+		// Compressed data should not be valid JSON (it's zstd-compressed)
+		assert.False(t, gjson.ValidBytes(compressed))
 	})
 }
 
@@ -1135,9 +1172,13 @@ func TestMetricsMonitor_WrapHandler_Capture(t *testing.T) {
 		assert.Equal(t, 1, len(metrics))
 		metricID := metrics[0].ID
 
-		// Check capture was stored with same ID
-		capture := mm.getCaptureByID(metricID)
-		assert.NotNil(t, capture)
+		// Check capture was stored with same ID (decompressed)
+		captureData := mm.getCaptureByID(metricID, true)
+		assert.NotNil(t, captureData)
+
+		var capture ReqRespCapture
+		err = json.Unmarshal(captureData, &capture)
+		assert.NoError(t, err)
 		assert.Equal(t, metricID, capture.ID)
 		assert.Equal(t, []byte(requestBody), capture.ReqBody)
 		assert.Equal(t, []byte(responseBody), capture.RespBody)
@@ -1173,7 +1214,7 @@ func TestMetricsMonitor_WrapHandler_Capture(t *testing.T) {
 		assert.Equal(t, 1, len(metrics))
 
 		// But no capture
-		capture := mm.getCaptureByID(metrics[0].ID)
+		capture := mm.getCaptureByID(metrics[0].ID, false)
 		assert.Nil(t, capture)
 	})
 }
