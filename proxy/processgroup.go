@@ -155,6 +155,10 @@ func (pg *ProcessGroup) StopProcesses(strategy StopStrategy) {
 	pg.Lock()
 	defer pg.Unlock()
 
+	if strategy != StopImmediately {
+		pg.inflight.Wait()
+	}
+
 	if len(pg.processes) == 0 {
 		return
 	}

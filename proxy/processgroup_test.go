@@ -222,6 +222,105 @@ func TestProcessGroup_ProxyRequestSwapRaceAgainstFastPath(t *testing.T) {
 	assert.Contains(t, w3.Body.String(), "model2")
 }
 
+// TestProcessGroup_StopProcessesWaitsForInflight verifies that StopProcesses
+// (called externally, e.g. from ProxyManager.swapProcessGroup) cannot stop a
+// process while a fast-path ProxyRequest is in the [pg.Unlock,
+// Process.inFlightRequests.Add(1)] window. Without pg.inflight.Wait() in
+// StopProcesses, the external caller bypasses the inflight guard and kills the
+// process mid-request.
+func TestProcessGroup_StopProcessesWaitsForInflight(t *testing.T) {
+	cfg := config.AddDefaultGroupToConfig(config.Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]config.ModelConfig{
+			"model1": getTestSimpleResponderConfig("model1"),
+			"model2": getTestSimpleResponderConfig("model2"),
+		},
+		Groups: map[string]config.GroupConfig{
+			"G1": {
+				Swap:    true,
+				Members: []string{"model1", "model2"},
+			},
+		},
+	})
+
+	pg := NewProcessGroup("G1", cfg, testLogger, testLogger)
+	defer pg.StopProcesses(StopImmediately)
+
+	pg.processes["model1"].testHandler = newTestHandler("model1")
+	pg.processes["model2"].testHandler = newTestHandler("model2")
+
+	// Prime: model1 is active so subsequent model1 requests take the fast path.
+	primeReq := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	primeW := httptest.NewRecorder()
+	require.NoError(t, pg.ProxyRequest("model1", primeW, primeReq))
+	require.Equal(t, http.StatusOK, primeW.Code)
+	require.Equal(t, StateReady, pg.processes["model1"].CurrentState())
+
+	// Park a fast-path request at the race window.
+	r2Reached := make(chan struct{})
+	r2Release := make(chan struct{})
+	pg.testDelayFastPath = func() {
+		close(r2Reached)
+		<-r2Release
+	}
+
+	r2Done := make(chan struct{})
+	w2 := httptest.NewRecorder()
+	go func() {
+		defer close(r2Done)
+		req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+		assert.NoError(t, pg.ProxyRequest("model1", w2, req))
+	}()
+
+	<-r2Reached
+
+	// Simulate an external caller (e.g. ProxyManager.swapProcessGroup) stopping
+	// the group while a fast-path request is in flight.
+	r3Done := make(chan struct{})
+	go func() {
+		defer close(r3Done)
+		pg.StopProcesses(StopWaitForInflightRequest)
+	}()
+
+	// Spin until StopProcesses has acquired pg.Lock.
+	for pg.TryLock() {
+		pg.Unlock()
+		runtime.Gosched()
+	}
+
+	// Bounded poll: in the fixed code StopProcesses blocks on pg.inflight.Wait()
+	// and model1 stays Ready. In the buggy code it proceeds immediately and
+	// kills model1.
+	deadline := time.Now().Add(100 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if pg.processes["model1"].CurrentState() != StateReady {
+			break
+		}
+		select {
+		case <-r3Done:
+			goto done
+		default:
+		}
+		runtime.Gosched()
+	}
+done:
+
+	select {
+	case <-r3Done:
+		t.Fatal("StopProcesses completed while a fast-path request was still in flight — race not prevented")
+	default:
+	}
+	assert.Equal(t, StateReady, pg.processes["model1"].CurrentState(),
+		"model1 must stay Ready while a fast-path request is in flight")
+
+	close(r2Release)
+	<-r2Done
+	<-r3Done
+
+	assert.Equal(t, http.StatusOK, w2.Code)
+	assert.Contains(t, w2.Body.String(), "model1")
+}
+
 func TestProcessGroup_ProxyRequestSwapIsFalse(t *testing.T) {
 	pg := NewProcessGroup("G2", processGroupTestConfig, testLogger, testLogger)
 	defer pg.StopProcesses(StopWaitForInflightRequest)
