@@ -147,6 +147,20 @@ type Matrix struct {
 	config         config.Config
 	proxyLogger    *LogMonitor
 	upstreamLogger *LogMonitor
+
+	// inflight tracks ProxyRequest calls that have released m.Lock but may
+	// not yet have incremented Process.inFlightRequests. A concurrent
+	// request that needs to evict models waits for inflight to drain under
+	// m.Lock before stopping anything. Without this, a request that
+	// released m.Lock but has not yet reached Process.inFlightRequests.Add(1)
+	// races with Stop()'s Wait() and can be killed mid-request.
+	inflight sync.WaitGroup
+
+	// testDelayFastPath is a test-only hook invoked in the no-eviction path
+	// after m.Lock is released but before the request is dispatched to
+	// Process.ProxyRequest. Tests use it to park a request at the exact
+	// race window to deterministically reproduce the race.
+	testDelayFastPath func()
 }
 
 // NewMatrix creates a Matrix from config. It creates a Process for every
@@ -197,6 +211,13 @@ func (m *Matrix) ProxyRequest(modelID string, w http.ResponseWriter, r *http.Req
 
 	// Evict models that need to be stopped
 	if len(result.Evict) > 0 {
+		// Wait for any in-flight ProxyRequest calls to register on their
+		// Process before stopping anything. Without this, a request that
+		// released m.Lock but has not yet incremented
+		// Process.inFlightRequests races with Stop() and can be killed
+		// mid-request.
+		m.inflight.Wait()
+
 		var wg sync.WaitGroup
 		for _, evictModel := range result.Evict {
 			if p, exists := m.processes[evictModel]; exists {
@@ -209,7 +230,17 @@ func (m *Matrix) ProxyRequest(modelID string, w http.ResponseWriter, r *http.Req
 		}
 		wg.Wait()
 	}
+
+	// Register this request in inflight before releasing m.Lock so a
+	// concurrent eviction will wait for it to complete.
+	m.inflight.Add(1)
+	defer m.inflight.Done()
+	isFastPath := len(result.Evict) == 0
 	m.Unlock()
+
+	if isFastPath && m.testDelayFastPath != nil {
+		m.testDelayFastPath()
+	}
 
 	// Proxy the request (Process handles on-demand start)
 	process.ProxyRequest(w, r)

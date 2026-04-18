@@ -1,7 +1,11 @@
 package proxy
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"runtime"
 	"testing"
+	"time"
 
 	"github.com/mostlygeek/llama-swap/proxy/config"
 	"github.com/stretchr/testify/assert"
@@ -167,6 +171,124 @@ func TestMatrixSolver_NothingRunning(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, result.Evict)
 	assert.Equal(t, []string{"g", "v"}, result.TargetSet)
+}
+
+// TestMatrix_ProxyRequestSwapRaceAgainstFastPath verifies that an eviction
+// cannot stop a process while an in-flight ProxyRequest for that process is
+// still in the [m.Unlock, Process.inFlightRequests.Add(1)] window. Without
+// matrix-level inflight tracking, the eviction's Stop() races with the
+// pending request and kills it mid-start.
+func TestMatrix_ProxyRequestSwapRaceAgainstFastPath(t *testing.T) {
+	cfg := config.Config{
+		HealthCheckTimeout: 15,
+		Models: map[string]config.ModelConfig{
+			"model1": getTestSimpleResponderConfig("model1"),
+			"model2": getTestSimpleResponderConfig("model2"),
+		},
+		ExpandedSets: []config.ExpandedSet{
+			{SetName: "s1", Models: []string{"model1"}},
+			{SetName: "s2", Models: []string{"model2"}},
+		},
+		Matrix: &config.MatrixConfig{},
+	}
+
+	m := NewMatrix(cfg, testLogger, testLogger)
+	defer m.StopProcesses(StopImmediately)
+
+	// Bypass real subprocesses so the test is fast and deterministic.
+	m.processes["model1"].testHandler = newTestHandler("model1")
+	m.processes["model2"].testHandler = newTestHandler("model2")
+
+	// Prime: run a request through model1 so it reaches StateReady and
+	// subsequent requests take the no-eviction path.
+	primeReq := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	primeW := httptest.NewRecorder()
+	require.NoError(t, m.ProxyRequest("model1", primeW, primeReq))
+	require.Equal(t, http.StatusOK, primeW.Code)
+	require.Equal(t, StateReady, m.processes["model1"].CurrentState())
+	require.Equal(t, StateStopped, m.processes["model2"].CurrentState())
+
+	// Install fast-path hook that signals arrival and waits for release.
+	// This parks R2 at the race window — after m.Lock is released but
+	// before Process.inFlightRequests.Add(1).
+	r2Reached := make(chan struct{})
+	r2Release := make(chan struct{})
+	m.testDelayFastPath = func() {
+		close(r2Reached)
+		<-r2Release
+	}
+
+	// R2: no-eviction request for model1. Will pause at the hook.
+	r2Done := make(chan struct{})
+	w2 := httptest.NewRecorder()
+	go func() {
+		defer close(r2Done)
+		req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+		assert.NoError(t, m.ProxyRequest("model1", w2, req))
+	}()
+
+	// Deterministically wait for R2 to reach the race window.
+	<-r2Reached
+
+	// R3: request for model2 which requires evicting model1. Must wait for
+	// R2 to finish before touching model1.
+	r3Done := make(chan struct{})
+	w3 := httptest.NewRecorder()
+	go func() {
+		defer close(r3Done)
+		req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+		assert.NoError(t, m.ProxyRequest("model2", w3, req))
+	}()
+
+	// Spin until R3 has acquired m.Lock and entered the eviction path. In
+	// the fixed code, R3 then blocks on m.inflight.Wait() while still
+	// holding the lock, so TryLock keeps failing.
+	for m.TryLock() {
+		m.Unlock()
+		runtime.Gosched()
+	}
+
+	// Bounded poll: give R3 a chance to demonstrate the bug by mutating
+	// state. In the fixed code R3 is blocked and nothing changes; in the
+	// buggy code R3 will Stop() model1 and start model2 within microseconds.
+	deadline := time.Now().Add(100 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if m.processes["model1"].CurrentState() != StateReady ||
+			m.processes["model2"].CurrentState() != StateStopped {
+			break
+		}
+		done := false
+		select {
+		case <-r3Done:
+			done = true
+		default:
+		}
+		if done {
+			break
+		}
+		runtime.Gosched()
+	}
+
+	// Invariant: R3 must be blocked while R2 is still in flight.
+	select {
+	case <-r3Done:
+		t.Fatal("eviction completed while in-flight request was still pending — race not prevented")
+	default:
+	}
+	assert.Equal(t, StateReady, m.processes["model1"].CurrentState(),
+		"model1 must stay Ready while an in-flight request is pending")
+	assert.Equal(t, StateStopped, m.processes["model2"].CurrentState(),
+		"model2 must not be started until R2 finishes and model1 is evicted")
+
+	// Release R2 and let both requests finish.
+	close(r2Release)
+	<-r2Done
+	<-r3Done
+
+	assert.Equal(t, http.StatusOK, w2.Code)
+	assert.Contains(t, w2.Body.String(), "model1")
+	assert.Equal(t, http.StatusOK, w3.Code)
+	assert.Contains(t, w3.Body.String(), "model2")
 }
 
 func TestMatrixSolver_FullScenario(t *testing.T) {
