@@ -13,9 +13,53 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/klauspost/compress/zstd"
 	"github.com/mostlygeek/llama-swap/event"
 	"github.com/tidwall/gjson"
 )
+
+// zstdEncOptions are the shared zstd encoder options for maximum compression.
+var zstdEncOptions = []zstd.EOption{
+	zstd.WithEncoderLevel(zstd.SpeedBetterCompression),
+}
+
+// zstdDecOptions are the shared zstd decoder options.
+var zstdDecOptions = []zstd.DOption{}
+
+// zstdEncPool pools zstd.Encoder instances to reduce allocations.
+var zstdEncPool = &sync.Pool{
+	New: func() interface{} {
+		enc, _ := zstd.NewWriter(nil, zstdEncOptions...)
+		return enc
+	},
+}
+
+// zstdDecPool pools zstd.Decoder instances to reduce allocations.
+var zstdDecPool = &sync.Pool{
+	New: func() interface{} {
+		dec, _ := zstd.NewReader(nil, zstdDecOptions...)
+		return dec
+	},
+}
+
+// compressCapture marshals a ReqRespCapture to JSON and compresses it with zstd.
+// Returns compressed bytes and the original JSON byte count for logging.
+func compressCapture(c *ReqRespCapture) ([]byte, int, error) {
+	jsonBytes, err := json.Marshal(c)
+	if err != nil {
+		return nil, 0, fmt.Errorf("marshal capture: %w", err)
+	}
+	enc := zstdEncPool.Get().(*zstd.Encoder)
+	defer zstdEncPool.Put(enc)
+	return enc.EncodeAll(jsonBytes, nil), len(jsonBytes), nil
+}
+
+// decompressCapture decompresses zstd-compressed JSON and returns it.
+func decompressCapture(data []byte) ([]byte, error) {
+	dec := zstdDecPool.Get().(*zstd.Decoder)
+	defer zstdDecPool.Put(dec)
+	return dec.DecodeAll(data, nil)
+}
 
 // TokenMetrics represents parsed token statistics from llama-server logs
 type TokenMetrics struct {
@@ -40,18 +84,6 @@ type ReqRespCapture struct {
 	RespBody    []byte            `json:"resp_body"`
 }
 
-// Size returns the approximate memory usage of this capture in bytes
-func (c *ReqRespCapture) Size() int {
-	size := len(c.ReqPath) + len(c.ReqBody) + len(c.RespBody)
-	for k, v := range c.ReqHeaders {
-		size += len(k) + len(v)
-	}
-	for k, v := range c.RespHeaders {
-		size += len(k) + len(v)
-	}
-	return size
-}
-
 // TokenMetricsEvent represents a token metrics event
 type TokenMetricsEvent struct {
 	Metrics TokenMetrics
@@ -71,10 +103,10 @@ type metricsMonitor struct {
 
 	// capture fields
 	enableCaptures bool
-	captures       map[int]ReqRespCapture // map for O(1) lookup by ID
-	captureOrder   []int                  // track insertion order for FIFO eviction
-	captureSize    int                    // current total size in bytes
-	maxCaptureSize int                    // max bytes for captures
+	captures       map[int][]byte // zstd-compressed JSON of ReqRespCapture
+	captureOrder   []int          // track insertion order for FIFO eviction
+	captureSize    int            // current total compressed size in bytes
+	maxCaptureSize int            // max bytes for captures (uncompressed)
 }
 
 // newMetricsMonitor creates a new metricsMonitor. captureBufferMB is the
@@ -84,7 +116,7 @@ func newMetricsMonitor(logger *LogMonitor, maxMetrics int, captureBufferMB int) 
 		logger:         logger,
 		maxMetrics:     maxMetrics,
 		enableCaptures: captureBufferMB > 0,
-		captures:       make(map[int]ReqRespCapture),
+		captures:       make(map[int][]byte),
 		captureOrder:   make([]int, 0),
 		captureSize:    0,
 		maxCaptureSize: captureBufferMB * 1024 * 1024,
@@ -108,45 +140,80 @@ func (mp *metricsMonitor) addMetrics(metric TokenMetrics) int {
 }
 
 // addCapture adds a new capture to the buffer with size-based eviction.
-// Captures are skipped if enableCaptures is false or if capture exceeds maxCaptureSize.
+// Captures are skipped if enableCaptures is false or if compressed data exceeds maxCaptureSize.
 func (mp *metricsMonitor) addCapture(capture ReqRespCapture) {
 	if !mp.enableCaptures {
 		return
 	}
 
-	mp.mu.Lock()
-	defer mp.mu.Unlock()
-
-	captureSize := capture.Size()
-	if captureSize > mp.maxCaptureSize {
-		mp.logger.Warnf("capture size %d exceeds max %d, skipping", captureSize, mp.maxCaptureSize)
+	compressed, uncompressedBytes, err := compressCapture(&capture)
+	if err != nil {
+		mp.logger.Warnf("failed to compress capture: %v, skipping", err)
 		return
 	}
 
-	// Evict oldest (FIFO) until room available
+	captureSize := len(compressed)
+	if captureSize > mp.maxCaptureSize {
+		mp.logger.Warnf("compressed capture size %d exceeds max %d, skipping", captureSize, mp.maxCaptureSize)
+		return
+	}
+
+	compressionRatio := (1 - float64(captureSize)/float64(uncompressedBytes)) * 100
+
+	mp.mu.Lock()
+	defer mp.mu.Unlock()
+
+	// Evict oldest (FIFO) until room available for the compressed data
 	for mp.captureSize+captureSize > mp.maxCaptureSize && len(mp.captureOrder) > 0 {
 		oldestID := mp.captureOrder[0]
 		mp.captureOrder = mp.captureOrder[1:]
 		if evicted, exists := mp.captures[oldestID]; exists {
-			mp.captureSize -= evicted.Size()
+			l := len(evicted)
+			mp.captureSize -= l
 			delete(mp.captures, oldestID)
+			mp.logger.Debugf("Capture %d evicted to make space: %d bytes", oldestID, l)
 		}
 	}
 
-	mp.captures[capture.ID] = capture
+	mp.captures[capture.ID] = compressed
 	mp.captureOrder = append(mp.captureOrder, capture.ID)
 	mp.captureSize += captureSize
+
+	mp.logger.Debugf("Capture %d compressed and saved: %d bytes -> %d bytes (%.1f%% compression)", capture.ID, uncompressedBytes, len(compressed), compressionRatio)
 }
 
-// getCaptureByID returns a capture by its ID, or nil if not found.
-func (mp *metricsMonitor) getCaptureByID(id int) *ReqRespCapture {
+// getCompressedBytes returns the raw compressed bytes for a capture by ID.
+func (mp *metricsMonitor) getCompressedBytes(id int) ([]byte, bool) {
 	mp.mu.RLock()
 	defer mp.mu.RUnlock()
 
-	if capture, exists := mp.captures[id]; exists {
-		return &capture
+	data, exists := mp.captures[id]
+	return data, exists
+}
+
+// getCaptureByID returns decompressed capture bytes if found and decompress=true.
+// If decompress=false, returns the raw zstd-compressed bytes.
+// Returns nil if the capture is not found.
+func (mp *metricsMonitor) getCaptureByID(id int, decompress bool) []byte {
+	mp.mu.RLock()
+	defer mp.mu.RUnlock()
+
+	data, exists := mp.captures[id]
+	if !exists {
+		return nil
 	}
-	return nil
+
+	if !decompress {
+		return data
+	}
+
+	decompressed, err := decompressCapture(data)
+	if err != nil {
+		mp.logger.Warnf("failed to decompress capture %d: %v", id, err)
+		return nil
+	}
+
+	return decompressed
 }
 
 // getMetrics returns a copy of the current metrics
@@ -290,8 +357,8 @@ func (mp *metricsMonitor) wrapHandler(
 			RespHeaders: respHeaders,
 			RespBody:    body,
 		}
-		// Only set HasCapture if the capture will actually be stored (not too large)
-		if capture.Size() <= mp.maxCaptureSize {
+		compressed, _, err := compressCapture(capture)
+		if err == nil && len(compressed) <= mp.maxCaptureSize {
 			tm.HasCapture = true
 		}
 	}
