@@ -298,34 +298,8 @@ func (pm *ProxyManager) apiGetCapture(c *gin.Context) {
 
 	c.Header("Vary", "Accept-Encoding")
 
-	acceptEnc := strings.ToLower(c.GetHeader("Accept-Encoding"))
-	hasZstd := false
-	for part := range strings.SplitSeq(acceptEnc, ",") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		encoding, params, _ := strings.Cut(part, ";")
-		encoding = strings.TrimSpace(encoding)
-		if encoding != "zstd" {
-			continue
-		}
-		qValue := 1.0
-		if params != "" {
-			for _, param := range strings.Split(params, ";") {
-				param = strings.TrimSpace(param)
-				if kv := strings.SplitN(param, "=", 2); len(kv) == 2 && strings.TrimSpace(kv[0]) == "q" {
-					if q, err := strconv.ParseFloat(strings.TrimSpace(kv[1]), 64); err == nil {
-						qValue = q
-					}
-				}
-			}
-		}
-		if qValue > 0 {
-			hasZstd = true
-			break
-		}
-	}
+	// ¯\_(ツ)_/¯ quality weights are too fancy for us anyway
+	hasZstd := strings.Contains(c.GetHeader("Accept-Encoding"), "zstd")
 
 	if hasZstd {
 		c.Header("Content-Encoding", "zstd")
