@@ -179,7 +179,7 @@ func newProxy(url *url.URL) *proxyServer {
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
 		TLSHandshakeTimeout:   10 * time.Second,
-		ResponseHeaderTimeout: 30 * time.Second,
+		ResponseHeaderTimeout: 0,
 		MaxIdleConns:          50,
 		MaxIdleConnsPerHost:   10,
 		IdleConnTimeout:       90 * time.Second,
