@@ -32,7 +32,7 @@ if [ "$BACKEND" = "cuda" ]; then
         -DGGML_CUDA=ON
         -DGGML_VULKAN=OFF
         "-DCMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES:?CMAKE_CUDA_ARCHITECTURES must be set}"
-        "-DCMAKE_CUDA_FLAGS=-allow-unsupported-compiler"
+        "-DCMAKE_CUDA_FLAGS=-allow-unsupported-compiler -use_fast_math"
         "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda"
         "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda"
     )

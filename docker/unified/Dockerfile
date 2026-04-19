@@ -4,7 +4,7 @@
 # Usage:
 #   docker buildx build --build-arg BACKEND=cuda -t llama-swap:unified-cuda .
 #   docker buildx build --build-arg BACKEND=vulkan -t llama-swap:unified-vulkan .
-#   docker buildx build --build-arg BACKEND=cuda --build-arg CMAKE_CUDA_ARCHITECTURES="86;89" -t llama-swap:unified-cuda .
+#   docker buildx build --build-arg BACKEND=cuda --build-arg CMAKE_CUDA_ARCHITECTURES="86-real;89-real" -t llama-swap:unified-cuda .
 #
 # Each project has its own install script that handles cloning, building,
 # and installing binaries. Build stages are independent for cache efficiency.
@@ -15,7 +15,7 @@ ARG BACKEND=cuda
 
 FROM nvidia/cuda:12.9.1-devel-ubuntu24.04 AS builder-base-cuda
 
-ARG CMAKE_CUDA_ARCHITECTURES="60;61;75;86;89"
+ARG CMAKE_CUDA_ARCHITECTURES="61-virtual;70-virtual;75-virtual;80-virtual;86-real;89-real;120a-real;121a-real"
 ENV DEBIAN_FRONTEND=noninteractive
 ENV CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}
 ENV CCACHE_DIR=/ccache
