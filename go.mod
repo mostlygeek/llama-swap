@@ -4,6 +4,7 @@ go 1.26.1
 
 require (
 	github.com/billziss-gh/golib v0.2.0
+	github.com/coreos/go-systemd/v22 v22.7.0
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/gin-gonic/gin v1.10.0
 	github.com/klauspost/compress v1.18.5

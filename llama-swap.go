@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -12,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/coreos/go-systemd/v22/daemon"
 	"github.com/fsnotify/fsnotify"
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/event"
@@ -77,7 +79,7 @@ func main() {
 	// Setup channels for server management
 	exitChan := make(chan struct{})
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
 	// Create server with initial handler
 	srv := &http.Server{
@@ -85,7 +87,13 @@ func main() {
 	}
 
 	// Support for watching config and reloading when it changes
+	var started bool
 	reloadProxyManager := func() {
+		if started {
+			daemon.SdNotify(false, daemon.SdNotifyReloading+"\n"+daemon.SdNotifyMonotonicUsec())
+			defer daemon.SdNotify(false, daemon.SdNotifyReady)
+		}
+
 		if currentPM, ok := srv.Handler.(*proxy.ProxyManager); ok {
 			conf, err = config.LoadConfig(*configPath)
 			if err != nil {
@@ -120,14 +128,14 @@ func main() {
 
 	// load the initial proxy manager
 	reloadProxyManager()
+	started = true
 	debouncedReload := debounce(time.Second, reloadProxyManager)
+	defer event.On(func(e proxy.ConfigFileChangedEvent) {
+		if e.ReloadingState == proxy.ReloadingStateStart {
+			debouncedReload()
+		}
+	})()
 	if *watchConfig {
-		defer event.On(func(e proxy.ConfigFileChangedEvent) {
-			if e.ReloadingState == proxy.ReloadingStateStart {
-				debouncedReload()
-			}
-		})()
-
 		fmt.Println("Watching Configuration for changes")
 		go func() {
 			absConfigPath, err := filepath.Abs(*configPath)
@@ -172,33 +180,53 @@ func main() {
 
 	// shutdown on signal
 	go func() {
-		sig := <-sigChan
-		fmt.Printf("Received signal %v, shutting down...\n", sig)
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-		defer cancel()
+		for {
+			sig := <-sigChan
+			if sig == syscall.SIGHUP {
+				event.Emit(proxy.ConfigFileChangedEvent{
+					ReloadingState: proxy.ReloadingStateStart,
+				})
+			} else {
+				fmt.Printf("Received signal %v, shutting down...\n", sig)
+				daemon.SdNotify(false, daemon.SdNotifyStopping)
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 
-		if pm, ok := srv.Handler.(*proxy.ProxyManager); ok {
-			pm.Shutdown()
-		} else {
-			fmt.Println("srv.Handler is not of type *proxy.ProxyManager")
-		}
+				if pm, ok := srv.Handler.(*proxy.ProxyManager); ok {
+					pm.Shutdown()
+				} else {
+					fmt.Println("srv.Handler is not of type *proxy.ProxyManager")
+				}
 
-		if err := srv.Shutdown(ctx); err != nil {
-			fmt.Printf("Server shutdown error: %v\n", err)
+				if err := srv.Shutdown(ctx); err != nil {
+					fmt.Printf("Server shutdown error: %v\n", err)
+				}
+				close(exitChan)
+				cancel()
+				return
+			}
 		}
-		close(exitChan)
 	}()
+
+	runServer := func() error {
+		ln, err := net.Listen("tcp", *listenStr)
+		if err != nil {
+			return err
+		}
+
+		daemon.SdNotify(false, daemon.SdNotifyReady)
+
+		if useTLS {
+			fmt.Printf("llama-swap listening with TLS on https://%s\n", *listenStr)
+			return srv.ServeTLS(ln, *certFile, *keyFile)
+		} else {
+			fmt.Printf("llama-swap listening on http://%s\n", *listenStr)
+			return srv.Serve(ln)
+		}
+	}
 
 	// Start server
 	go func() {
-		var err error
-		if useTLS {
-			fmt.Printf("llama-swap listening with TLS on https://%s\n", *listenStr)
-			err = srv.ListenAndServeTLS(*certFile, *keyFile)
-		} else {
-			fmt.Printf("llama-swap listening on http://%s\n", *listenStr)
-			err = srv.ListenAndServe()
-		}
+		err := runServer()
 		if err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Fatal server error: %v\n", err)
 		}
