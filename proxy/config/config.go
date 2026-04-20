@@ -124,7 +124,7 @@ type Config struct {
 	LogToStdout        string                 `yaml:"logToStdout"`
 	MetricsMaxInMemory int                    `yaml:"metricsMaxInMemory"`
 	CaptureBuffer      int                    `yaml:"captureBuffer"`
-	CaptureDirectory  string                 `yaml:"captureDirectory"`
+	CaptureDirectory   string                 `yaml:"captureDirectory"`
 	GlobalTTL          int                    `yaml:"globalTTL"`
 	Models             map[string]ModelConfig `yaml:"models"` /* key is model ID */
 	Profiles           map[string][]string    `yaml:"profiles"`
