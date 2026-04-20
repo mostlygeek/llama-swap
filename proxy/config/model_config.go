@@ -21,15 +21,16 @@ type TimeoutsConfig struct {
 }
 
 type ModelConfig struct {
-	Cmd           string   `yaml:"cmd"`
-	CmdStop       string   `yaml:"cmdStop"`
-	Proxy         string   `yaml:"proxy"`
-	Aliases       []string `yaml:"aliases"`
-	Env           []string `yaml:"env"`
-	CheckEndpoint string   `yaml:"checkEndpoint"`
-	UnloadAfter   int      `yaml:"ttl"`
-	Unlisted      bool     `yaml:"unlisted"`
-	UseModelName  string   `yaml:"useModelName"`
+	Cmd                string   `yaml:"cmd"`
+	CmdStop            string   `yaml:"cmdStop"`
+	Proxy              string   `yaml:"proxy"`
+	Aliases            []string `yaml:"aliases"`
+	Env                []string `yaml:"env"`
+	CheckEndpoint      string   `yaml:"checkEndpoint"`
+	UnloadAfter        int      `yaml:"ttl"`
+	Unlisted           bool     `yaml:"unlisted"`
+	ExcludeFromMetrics bool     `yaml:"excludeFromMetrics"`
+	UseModelName       string   `yaml:"useModelName"`
 
 	// #179 for /v1/models
 	Name        string `yaml:"name"`
@@ -59,18 +60,19 @@ type ModelConfig struct {
 func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	type rawModelConfig ModelConfig
 	defaults := rawModelConfig{
-		Cmd:              "",
-		CmdStop:          "",
-		Proxy:            "http://localhost:${PORT}",
-		Aliases:          []string{},
-		Env:              []string{},
-		CheckEndpoint:    "/health",
-		UnloadAfter:      MODEL_CONFIG_DEFAULT_TTL, // use GlobalTTL
-		Unlisted:         false,
-		UseModelName:     "",
-		ConcurrencyLimit: 0,
-		Name:             "",
-		Description:      "",
+		Cmd:                "",
+		CmdStop:            "",
+		Proxy:              "http://localhost:${PORT}",
+		Aliases:            []string{},
+		Env:                []string{},
+		CheckEndpoint:      "/health",
+		UnloadAfter:        MODEL_CONFIG_DEFAULT_TTL, // use GlobalTTL
+		Unlisted:           false,
+		ExcludeFromMetrics: false,
+		UseModelName:       "",
+		ConcurrencyLimit:   0,
+		Name:               "",
+		Description:        "",
 
 		// matches http.DefaultTransport
 		Timeouts: TimeoutsConfig{
