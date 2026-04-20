@@ -1242,11 +1242,11 @@ func TestMetricsMonitor_WrapHandler_Capture(t *testing.T) {
 		err := mm.wrapHandler("qwen2.5", ginCtx.Writer, req, nextHandler)
 		assert.NoError(t, err)
 
-		time.Sleep(100 * time.Millisecond)
-
-		files, err := os.ReadDir(dir)
-		assert.NoError(t, err)
-		assert.Equal(t, 1, len(files))
+		var files []os.DirEntry
+		assert.Eventually(t, func() bool {
+			files, _ = os.ReadDir(dir)
+			return len(files) == 1
+		}, 2*time.Second, 10*time.Millisecond)
 
 		fileData, err := os.ReadFile(filepath.Join(dir, files[0].Name()))
 		assert.NoError(t, err)
@@ -1274,17 +1274,14 @@ func TestMetricsMonitor_WrapHandler_Capture(t *testing.T) {
 
 		mm.addCapture(capture, "model-name")
 
-		time.Sleep(100 * time.Millisecond)
-
-		_, err := os.Stat(dir)
-		assert.NoError(t, err)
-
-		files, err := os.ReadDir(dir)
-		assert.NoError(t, err)
-		assert.Equal(t, 1, len(files))
+		var files []os.DirEntry
+		assert.Eventually(t, func() bool {
+			files, _ = os.ReadDir(dir)
+			return len(files) == 1
+		}, 2*time.Second, 10*time.Millisecond)
 	})
 
-	t.Run("activity filename includes model and id", func(t *testing.T) {
+	t.Run("capture filename includes model", func(t *testing.T) {
 		dir := t.TempDir()
 		mm := newMetricsMonitor(testLogger, 100, 5, dir)
 
@@ -1297,11 +1294,11 @@ func TestMetricsMonitor_WrapHandler_Capture(t *testing.T) {
 
 		mm.addCapture(capture, "my-org/model-v2")
 
-		time.Sleep(100 * time.Millisecond)
-
-		files, err := os.ReadDir(dir)
-		assert.NoError(t, err)
-		assert.Equal(t, 1, len(files))
+		var files []os.DirEntry
+		assert.Eventually(t, func() bool {
+			files, _ = os.ReadDir(dir)
+			return len(files) == 1
+		}, 2*time.Second, 10*time.Millisecond)
 
 		name := files[0].Name()
 		assert.True(t, strings.Contains(name, "my-org_model-v2"),
@@ -1310,9 +1307,8 @@ func TestMetricsMonitor_WrapHandler_Capture(t *testing.T) {
 	})
 
 	t.Run("capture directory disabled when empty", func(t *testing.T) {
-		dir := t.TempDir()
-
 		mm := newMetricsMonitor(testLogger, 100, 5, "")
+		assert.Equal(t, "", mm.captureDir)
 
 		capture := ReqRespCapture{
 			ID:       1,
@@ -1322,11 +1318,6 @@ func TestMetricsMonitor_WrapHandler_Capture(t *testing.T) {
 		}
 
 		mm.addCapture(capture, "test-model")
-
-		time.Sleep(50 * time.Millisecond)
-
-		files, err := os.ReadDir(dir)
-		assert.NoError(t, err)
-		assert.Equal(t, 0, len(files), "no activity files should be created when directory is empty")
+		assert.Equal(t, "", mm.captureDir, "captureDir should remain empty, no side effects")
 	})
 }

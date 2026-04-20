@@ -183,10 +183,10 @@ func New(proxyConfig config.Config) *ProxyManager {
 	}
 
 	if proxyConfig.CaptureDirectory != "" {
-		if err := os.MkdirAll(proxyConfig.CaptureDirectory, 0755); err != nil {
+		if err := os.MkdirAll(proxyConfig.CaptureDirectory, 0700); err != nil {
 			proxyLogger.Errorf("Failed to create capture directory %s: %v", proxyConfig.CaptureDirectory, err)
 		} else {
-			proxyLogger.Infof("Activity directory initialized: %s", proxyConfig.CaptureDirectory)
+			proxyLogger.Infof("Capture directory initialized: %s", proxyConfig.CaptureDirectory)
 		}
 	}
 

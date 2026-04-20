@@ -233,11 +233,9 @@ func (mp *metricsMonitor) getCaptureByID(id int, decompress bool) []byte {
 
 // writeActivityFile persists a capture to disk as an activity file.
 func (mp *metricsMonitor) writeActivityFile(data []byte, model string) {
-	if _, err := os.Stat(mp.captureDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(mp.captureDir, 0755); err != nil {
-			mp.activityLogger.Warnf("failed to create capture directory %s: %v", mp.captureDir, err)
-			return
-		}
+	if err := os.MkdirAll(mp.captureDir, 0700); err != nil {
+		mp.activityLogger.Warnf("failed to create capture directory %s: %v", mp.captureDir, err)
+		return
 	}
 
 	timestamp := time.Now().UTC().Format("20060102_150405")
@@ -247,7 +245,7 @@ func (mp *metricsMonitor) writeActivityFile(data []byte, model string) {
 	tmpFile := filename + ".tmp"
 	fullPath := filepath.Join(mp.captureDir, tmpFile)
 
-	f, err := os.Create(fullPath)
+	f, err := os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		mp.activityLogger.Warnf("failed to create activity file: %v", err)
 		return
@@ -278,7 +276,9 @@ func (mp *metricsMonitor) writeActivityFile(data []byte, model string) {
 
 func randomSuffix() string {
 	b := make([]byte, 4)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("%08x", time.Now().UnixNano()&0xffffffff)
+	}
 	return hex.EncodeToString(b)
 }
 

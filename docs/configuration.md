@@ -149,7 +149,7 @@ captureBuffer: 15
 # captureDirectory: directory path for persisting captured requests/responses as files
 # - optional, default: empty (disabled)
 # - when set, each capture is written to a file in this directory
-# - filenames use format: {id}_{timestamp}_{model}_{random}.json
+# - filenames use format: {timestamp}_{model}_{random}.json
 captureDirectory: ""
 
 # startPort: sets the starting port number for the automatic ${PORT} macro.

@@ -145,7 +145,7 @@
         "captureDirectory": {
             "type": "string",
             "default": "",
-            "description": "Path to a directory where captured requests/responses will be persisted as files. Empty string disables file persistence. Files are named using format: {id}_{timestamp}_{model}_{random}.json"
+            "description": "Path to a directory where captured requests/responses will be persisted as files. Empty string disables file persistence. Files are named using format: {timestamp}_{model}_{random}.json"
         },
         "startPort": {
             "type": "integer",
