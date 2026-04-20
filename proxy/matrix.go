@@ -297,7 +297,7 @@ func (m *Matrix) Shutdown() {
 	wg.Wait()
 }
 
-// RunningModels returns model names currently in StateReady.
+// RunningModels returns model names currently in an active (non-stopped) state.
 func (m *Matrix) RunningModels() []string {
 	m.Lock()
 	defer m.Unlock()
@@ -308,7 +308,7 @@ func (m *Matrix) RunningModels() []string {
 func (m *Matrix) runningModels() []string {
 	var running []string
 	for id, process := range m.processes {
-		if process.CurrentState() == StateReady {
+		if process.CurrentState() != StateStopped && process.CurrentState() != StateShutdown {
 			running = append(running, id)
 		}
 	}
