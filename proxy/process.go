@@ -432,7 +432,10 @@ func (p *Process) start() error {
 
 // Stop will wait for inflight requests to complete before stopping the process.
 func (p *Process) Stop() {
+
+	// guard to prevent multiple goroutines from stopping
 	if !isValidTransition(p.CurrentState(), StateStopping) {
+		p.proxyLogger.Debugf("<%s> Stop() suppressing invalid transition from %s to StateStopping", p.ID, p.CurrentState())
 		return
 	}
 
@@ -445,13 +448,17 @@ func (p *Process) Stop() {
 // StopImmediately will transition the process to the stopping state and stop the process with a SIGTERM.
 // If the process does not stop within the specified timeout, it will be forcefully stopped with a SIGKILL.
 func (p *Process) StopImmediately() {
-	if !isValidTransition(p.CurrentState(), StateStopping) {
+
+	// guard to prevent multiple goroutines from stopping the process
+	enterState := p.CurrentState()
+	if !isValidTransition(enterState, StateStopping) {
+		p.proxyLogger.Debugf("<%s> StopImmediate() suppressing invalid transition from %s to StateStopping", p.ID, p.CurrentState())
 		return
 	}
 
-	p.proxyLogger.Debugf("<%s> Stopping process, current state: %s", p.ID, p.CurrentState())
-	if curState, err := p.swapState(StateReady, StateStopping); err != nil {
-		p.proxyLogger.Infof("<%s> Stop() Ready -> StateStopping err: %v, current state: %v", p.ID, err, curState)
+	p.proxyLogger.Debugf("<%s> Stopping process, enter state: %s", p.ID, enterState)
+	if curState, err := p.swapState(enterState, StateStopping); err != nil {
+		p.proxyLogger.Infof("<%s> Stop() %s -> StateStopping err: %v, current state: %v", p.ID, enterState, err, curState)
 		return
 	}
 
