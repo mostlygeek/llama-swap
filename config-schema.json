@@ -142,6 +142,11 @@
             "default": 5,
             "description": "Size in megabytes of the buffer for storing request/response captures. Set to 0 to disable captures."
         },
+        "captureDirectory": {
+            "type": "string",
+            "default": "",
+            "description": "Path to a directory where captured requests/responses will be persisted as files. Empty string disables file persistence. Files are named using format: {id}_{timestamp}_{model}_{random}.json"
+        },
         "startPort": {
             "type": "integer",
             "default": 5800,

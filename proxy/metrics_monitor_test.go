@@ -8,6 +8,9 @@ import (
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -20,7 +23,7 @@ import (
 
 func TestMetricsMonitor_AddMetrics(t *testing.T) {
 	t.Run("adds metrics and assigns ID", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 
 		metric := TokenMetrics{
 			Model:        "test-model",
@@ -39,7 +42,7 @@ func TestMetricsMonitor_AddMetrics(t *testing.T) {
 	})
 
 	t.Run("increments ID for each metric", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 
 		for i := 0; i < 5; i++ {
 			mm.addMetrics(TokenMetrics{Model: "model"})
@@ -53,7 +56,7 @@ func TestMetricsMonitor_AddMetrics(t *testing.T) {
 	})
 
 	t.Run("respects max metrics limit", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 3, 0)
+		mm := newMetricsMonitor(testLogger, 3, 0, "")
 
 		// Add 5 metrics
 		for i := 0; i < 5; i++ {
@@ -73,7 +76,7 @@ func TestMetricsMonitor_AddMetrics(t *testing.T) {
 	})
 
 	t.Run("emits TokenMetricsEvent", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 
 		receivedEvent := make(chan TokenMetricsEvent, 1)
 		cancel := event.On(func(e TokenMetricsEvent) {
@@ -103,14 +106,14 @@ func TestMetricsMonitor_AddMetrics(t *testing.T) {
 
 func TestMetricsMonitor_GetMetrics(t *testing.T) {
 	t.Run("returns empty slice when no metrics", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 		metrics := mm.getMetrics()
 		assert.NotNil(t, metrics)
 		assert.Equal(t, 0, len(metrics))
 	})
 
 	t.Run("returns copy of metrics", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 		mm.addMetrics(TokenMetrics{Model: "model1"})
 		mm.addMetrics(TokenMetrics{Model: "model2"})
 
@@ -130,7 +133,7 @@ func TestMetricsMonitor_GetMetrics(t *testing.T) {
 
 func TestMetricsMonitor_GetMetricsJSON(t *testing.T) {
 	t.Run("returns valid JSON for empty metrics", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 		jsonData, err := mm.getMetricsJSON()
 		assert.NoError(t, err)
 		assert.NotNil(t, jsonData)
@@ -142,7 +145,7 @@ func TestMetricsMonitor_GetMetricsJSON(t *testing.T) {
 	})
 
 	t.Run("returns valid JSON with metrics", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 		mm.addMetrics(TokenMetrics{
 			Model:           "model1",
 			InputTokens:     100,
@@ -170,7 +173,7 @@ func TestMetricsMonitor_GetMetricsJSON(t *testing.T) {
 
 func TestMetricsMonitor_WrapHandler(t *testing.T) {
 	t.Run("successful non-streaming request with usage data", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 
 		responseBody := `{
 			"usage": {
@@ -201,7 +204,7 @@ func TestMetricsMonitor_WrapHandler(t *testing.T) {
 	})
 
 	t.Run("successful request with timings data", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 
 		responseBody := `{
 			"timings": {
@@ -241,7 +244,7 @@ func TestMetricsMonitor_WrapHandler(t *testing.T) {
 	})
 
 	t.Run("streaming request with SSE format", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 
 		// Note: SSE format requires proper line breaks - each data line followed by blank line
 		responseBody := `data: {"choices":[{"text":"Hello"}]}
@@ -277,7 +280,7 @@ data: [DONE]
 	})
 
 	t.Run("non-OK status code does not record metrics", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 
 		nextHandler := func(modelID string, w http.ResponseWriter, r *http.Request) error {
 			w.WriteHeader(http.StatusBadRequest)
@@ -297,7 +300,7 @@ data: [DONE]
 	})
 
 	t.Run("empty response body records minimal metrics", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 
 		nextHandler := func(modelID string, w http.ResponseWriter, r *http.Request) error {
 			w.WriteHeader(http.StatusOK)
@@ -319,7 +322,7 @@ data: [DONE]
 	})
 
 	t.Run("invalid JSON records minimal metrics", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 
 		nextHandler := func(modelID string, w http.ResponseWriter, r *http.Request) error {
 			w.Header().Set("Content-Type", "application/json")
@@ -343,7 +346,7 @@ data: [DONE]
 	})
 
 	t.Run("next handler error is propagated", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 
 		expectedErr := assert.AnError
 		nextHandler := func(modelID string, w http.ResponseWriter, r *http.Request) error {
@@ -362,7 +365,7 @@ data: [DONE]
 	})
 
 	t.Run("response without usage or timings records minimal metrics", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 
 		responseBody := `{"result": "ok"}`
 
@@ -388,7 +391,7 @@ data: [DONE]
 	})
 
 	t.Run("infill request extracts timings from last array element", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 
 		// Infill response is an array with timings in the last element
 		responseBody := `[
@@ -431,7 +434,7 @@ data: [DONE]
 	})
 
 	t.Run("infill request with empty array records minimal metrics", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 
 		responseBody := `[]`
 
@@ -508,7 +511,7 @@ func TestMetricsMonitor_ResponseBodyCopier(t *testing.T) {
 
 func TestMetricsMonitor_Concurrent(t *testing.T) {
 	t.Run("concurrent addMetrics is safe", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 1000, 0)
+		mm := newMetricsMonitor(testLogger, 1000, 0, "")
 
 		var wg sync.WaitGroup
 		numGoroutines := 10
@@ -535,7 +538,7 @@ func TestMetricsMonitor_Concurrent(t *testing.T) {
 	})
 
 	t.Run("concurrent reads and writes are safe", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 100, 0)
+		mm := newMetricsMonitor(testLogger, 100, 0, "")
 
 		done := make(chan bool)
 
@@ -594,7 +597,7 @@ func TestMetricsMonitor_ParseMetrics(t *testing.T) {
 	})
 
 	t.Run("prefers timings over usage data", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 
 		// Timings should take precedence over usage
 		responseBody := `{
@@ -634,7 +637,7 @@ func TestMetricsMonitor_ParseMetrics(t *testing.T) {
 	})
 
 	t.Run("handles missing cache_n in timings", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 
 		responseBody := `{
 			"timings": {
@@ -669,7 +672,7 @@ func TestMetricsMonitor_ParseMetrics(t *testing.T) {
 
 func TestMetricsMonitor_StreamingResponse(t *testing.T) {
 	t.Run("finds metrics in last valid SSE data", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 
 		// Metrics should be found in the last data line before [DONE]
 		responseBody := `data: {"choices":[{"text":"First"}]}
@@ -703,7 +706,7 @@ data: [DONE]
 	})
 
 	t.Run("handles streaming with no valid JSON records minimal metrics", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 
 		responseBody := `data: not json
 
@@ -733,7 +736,7 @@ data: [DONE]
 	})
 
 	t.Run("v1/responses format with nested response.usage", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 
 		// v1/responses SSE format: usage is nested under response.usage
 		responseBody := "event: response.completed\n" +
@@ -762,7 +765,7 @@ data: [DONE]
 	})
 
 	t.Run("handles empty streaming response records minimal metrics", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 
 		responseBody := ``
 
@@ -790,7 +793,7 @@ data: [DONE]
 
 // Benchmark tests
 func BenchmarkMetricsMonitor_AddMetrics(b *testing.B) {
-	mm := newMetricsMonitor(testLogger, 1000, 0)
+	mm := newMetricsMonitor(testLogger, 1000, 0, "")
 
 	metric := TokenMetrics{
 		Model:           "test-model",
@@ -811,7 +814,7 @@ func BenchmarkMetricsMonitor_AddMetrics(b *testing.B) {
 
 func BenchmarkMetricsMonitor_AddMetrics_SmallBuffer(b *testing.B) {
 	// Test performance with a smaller buffer where wrapping occurs more frequently
-	mm := newMetricsMonitor(testLogger, 100, 0)
+	mm := newMetricsMonitor(testLogger, 100, 0, "")
 
 	metric := TokenMetrics{
 		Model:           "test-model",
@@ -832,7 +835,7 @@ func BenchmarkMetricsMonitor_AddMetrics_SmallBuffer(b *testing.B) {
 
 func TestMetricsMonitor_WrapHandler_Compression(t *testing.T) {
 	t.Run("gzip encoded response", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 
 		responseBody := `{"usage": {"prompt_tokens": 100, "completion_tokens": 50}}`
 
@@ -866,7 +869,7 @@ func TestMetricsMonitor_WrapHandler_Compression(t *testing.T) {
 	})
 
 	t.Run("deflate encoded response", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 
 		responseBody := `{"usage": {"prompt_tokens": 200, "completion_tokens": 75}}`
 
@@ -900,7 +903,7 @@ func TestMetricsMonitor_WrapHandler_Compression(t *testing.T) {
 	})
 
 	t.Run("invalid gzip data records minimal metrics", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 
 		// Invalid compressed data
 		invalidData := []byte("this is not gzip data")
@@ -928,7 +931,7 @@ func TestMetricsMonitor_WrapHandler_Compression(t *testing.T) {
 	})
 
 	t.Run("unknown encoding treated as uncompressed", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 
 		responseBody := `{"usage": {"prompt_tokens": 300, "completion_tokens": 100}}`
 
@@ -980,27 +983,27 @@ func TestReqRespCapture_CompressedSize(t *testing.T) {
 
 func TestMetricsMonitor_AddCapture(t *testing.T) {
 	t.Run("does nothing when captures disabled", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 
 		capture := ReqRespCapture{
 			ID:      0,
 			ReqBody: []byte("test"),
 		}
-		mm.addCapture(capture)
+		mm.addCapture(capture, "test-model")
 
 		// Should not store capture
 		assert.Nil(t, mm.getCaptureByID(0, false))
 	})
 
 	t.Run("adds capture when enabled", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 5)
+		mm := newMetricsMonitor(testLogger, 10, 5, "")
 
 		capture := ReqRespCapture{
 			ID:       0,
 			ReqBody:  []byte("test request"),
 			RespBody: []byte("test response"),
 		}
-		mm.addCapture(capture)
+		mm.addCapture(capture, "test-model")
 
 		retrieved := mm.getCaptureByID(0, true)
 		assert.NotNil(t, retrieved)
@@ -1014,7 +1017,7 @@ func TestMetricsMonitor_AddCapture(t *testing.T) {
 	})
 
 	t.Run("evicts oldest when exceeding max size", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 5)
+		mm := newMetricsMonitor(testLogger, 10, 5, "")
 		// Each full ReqRespCapture with 80 bytes random data compresses to ~185 bytes.
 		// 2 captures = ~370 bytes, 3 captures = ~555 bytes. Set limit so only 2 fit.
 		mm.maxCaptureSize = 450
@@ -1028,10 +1031,10 @@ func TestMetricsMonitor_AddCapture(t *testing.T) {
 		capture3 := ReqRespCapture{ID: 2, ReqBody: make([]byte, 80)}
 		rng.Read(capture3.ReqBody)
 
-		mm.addCapture(capture1)
-		mm.addCapture(capture2)
+		mm.addCapture(capture1, "test-model")
+		mm.addCapture(capture2, "test-model")
 		// Adding capture3 should evict capture1
-		mm.addCapture(capture3)
+		mm.addCapture(capture3, "test-model")
 
 		assert.Nil(t, mm.getCaptureByID(0, true), "capture 0 should be evicted")
 		retrieved := mm.getCaptureByID(1, true)
@@ -1041,14 +1044,14 @@ func TestMetricsMonitor_AddCapture(t *testing.T) {
 	})
 
 	t.Run("skips capture larger than max size", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 5)
+		mm := newMetricsMonitor(testLogger, 10, 5, "")
 		mm.maxCaptureSize = 100
 
 		// Use random data that doesn't compress well to create an oversized capture
 		rng := rand.New(rand.NewSource(99))
 		largeCapture := ReqRespCapture{ID: 0, ReqBody: make([]byte, 300)}
 		rng.Read(largeCapture.ReqBody)
-		mm.addCapture(largeCapture)
+		mm.addCapture(largeCapture, "test-model")
 
 		assert.Nil(t, mm.getCaptureByID(0, false), "oversized capture should not be stored")
 	})
@@ -1056,20 +1059,20 @@ func TestMetricsMonitor_AddCapture(t *testing.T) {
 
 func TestMetricsMonitor_GetCaptureByID(t *testing.T) {
 	t.Run("returns nil for non-existent ID", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 5)
+		mm := newMetricsMonitor(testLogger, 10, 5, "")
 
 		assert.Nil(t, mm.getCaptureByID(999, false))
 	})
 
 	t.Run("returns decompressed capture by ID", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 5)
+		mm := newMetricsMonitor(testLogger, 10, 5, "")
 
 		capture := ReqRespCapture{
 			ID:       42,
 			ReqBody:  []byte("test request"),
 			RespBody: []byte("test response"),
 		}
-		mm.addCapture(capture)
+		mm.addCapture(capture, "test-model")
 
 		retrieved := mm.getCaptureByID(42, true)
 		assert.NotNil(t, retrieved)
@@ -1083,14 +1086,14 @@ func TestMetricsMonitor_GetCaptureByID(t *testing.T) {
 	})
 
 	t.Run("returns compressed bytes when decompress=false", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 5)
+		mm := newMetricsMonitor(testLogger, 10, 5, "")
 
 		capture := ReqRespCapture{
 			ID:       42,
 			ReqBody:  []byte("test request body"),
 			RespBody: []byte("test response body"),
 		}
-		mm.addCapture(capture)
+		mm.addCapture(capture, "test-model")
 
 		compressed := mm.getCaptureByID(42, false)
 		assert.NotNil(t, compressed)
@@ -1145,7 +1148,7 @@ func TestRedactHeaders(t *testing.T) {
 
 func TestMetricsMonitor_WrapHandler_Capture(t *testing.T) {
 	t.Run("captures request and response when enabled", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 5)
+		mm := newMetricsMonitor(testLogger, 10, 5, "")
 
 		requestBody := `{"model": "test", "prompt": "hello"}`
 		responseBody := `{"usage": {"prompt_tokens": 100, "completion_tokens": 50}}`
@@ -1190,7 +1193,7 @@ func TestMetricsMonitor_WrapHandler_Capture(t *testing.T) {
 	})
 
 	t.Run("does not capture when disabled", func(t *testing.T) {
-		mm := newMetricsMonitor(testLogger, 10, 0)
+		mm := newMetricsMonitor(testLogger, 10, 0, "")
 
 		requestBody := `{"model": "test"}`
 		responseBody := `{"usage": {"prompt_tokens": 100, "completion_tokens": 50}}`
@@ -1216,5 +1219,114 @@ func TestMetricsMonitor_WrapHandler_Capture(t *testing.T) {
 		// But no capture
 		capture := mm.getCaptureByID(metrics[0].ID, false)
 		assert.Nil(t, capture)
+	})
+
+	t.Run("capture directory creates files", func(t *testing.T) {
+		dir := t.TempDir()
+		mm := newMetricsMonitor(testLogger, 100, 5, dir)
+
+		requestBody := `{"model": "test-model", "messages": [{"role": "user", "content": "hello"}]}`
+		responseBody := `{"usage": {"prompt_tokens": 10, "completion_tokens": 5}, "id": "chatcmpl-123"}`
+
+		nextHandler := func(modelID string, w http.ResponseWriter, r *http.Request) error {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(responseBody))
+			return nil
+		}
+
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(requestBody))
+		rec := httptest.NewRecorder()
+		ginCtx, _ := gin.CreateTestContext(rec)
+
+		err := mm.wrapHandler("qwen2.5", ginCtx.Writer, req, nextHandler)
+		assert.NoError(t, err)
+
+		time.Sleep(100 * time.Millisecond)
+
+		files, err := os.ReadDir(dir)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(files))
+
+		fileData, err := os.ReadFile(filepath.Join(dir, files[0].Name()))
+		assert.NoError(t, err)
+
+		decompressed, err := decompressCapture(fileData)
+		assert.NoError(t, err)
+
+		var capture ReqRespCapture
+		err = json.Unmarshal(decompressed, &capture)
+		assert.NoError(t, err)
+		assert.Equal(t, "/v1/chat/completions", capture.ReqPath)
+		assert.Contains(t, strings.ToLower(string(capture.RespBody)), "chatcmpl-123")
+	})
+
+	t.Run("capture directory creates on first write", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "nested", "dir")
+		mm := newMetricsMonitor(testLogger, 100, 5, dir)
+
+		capture := ReqRespCapture{
+			ID:       1,
+			ReqPath:  "/test",
+			ReqBody:  []byte(`{"model": "test"}`),
+			RespBody: []byte(`{"usage": {"prompt_tokens": 10}}`),
+		}
+
+		mm.addCapture(capture, "model-name")
+
+		time.Sleep(100 * time.Millisecond)
+
+		_, err := os.Stat(dir)
+		assert.NoError(t, err)
+
+		files, err := os.ReadDir(dir)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(files))
+	})
+
+	t.Run("activity filename includes model and id", func(t *testing.T) {
+		dir := t.TempDir()
+		mm := newMetricsMonitor(testLogger, 100, 5, dir)
+
+		capture := ReqRespCapture{
+			ID:       42,
+			ReqPath:  "/v1/chat/completions",
+			ReqBody:  []byte(`{"model": "test"}`),
+			RespBody: []byte(`{"usage": {"prompt_tokens": 10}}`),
+		}
+
+		mm.addCapture(capture, "my-org/model-v2")
+
+		time.Sleep(100 * time.Millisecond)
+
+		files, err := os.ReadDir(dir)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(files))
+
+		name := files[0].Name()
+		assert.True(t, strings.HasPrefix(name, "42_") && strings.Contains(name, "my-org_model-v2"),
+			"filename should contain id and model: %s", name)
+		assert.True(t, strings.HasSuffix(name, ".json"), "filename should end with .json: %s", name)
+	})
+
+	t.Run("capture directory disabled when empty", func(t *testing.T) {
+		dir := t.TempDir()
+
+		mm := newMetricsMonitor(testLogger, 100, 5, "")
+
+		capture := ReqRespCapture{
+			ID:       1,
+			ReqPath:  "/test",
+			ReqBody:  []byte(`{"model": "test"}`),
+			RespBody: []byte(`{"usage": {"prompt_tokens": 10}}`),
+		}
+
+		mm.addCapture(capture, "test-model")
+
+		time.Sleep(50 * time.Millisecond)
+
+		files, err := os.ReadDir(dir)
+		assert.NoError(t, err)
+		assert.Equal(t, 0, len(files), "no activity files should be created when directory is empty")
 	})
 }

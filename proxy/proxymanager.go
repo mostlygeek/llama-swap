@@ -182,6 +182,14 @@ func New(proxyConfig config.Config) *ProxyManager {
 		peerProxy = nil
 	}
 
+	if proxyConfig.CaptureDirectory != "" {
+		if err := os.MkdirAll(proxyConfig.CaptureDirectory, 0755); err != nil {
+			proxyLogger.Errorf("Failed to create capture directory %s: %v", proxyConfig.CaptureDirectory, err)
+		} else {
+			proxyLogger.Infof("Activity directory initialized: %s", proxyConfig.CaptureDirectory)
+		}
+	}
+
 	pm := &ProxyManager{
 		config:    proxyConfig,
 		ginEngine: gin.New(),
@@ -190,7 +198,7 @@ func New(proxyConfig config.Config) *ProxyManager {
 		muxLogger:      muxLogger,
 		upstreamLogger: upstreamLogger,
 
-		metricsMonitor: newMetricsMonitor(proxyLogger, maxMetrics, proxyConfig.CaptureBuffer),
+		metricsMonitor: newMetricsMonitor(proxyLogger, maxMetrics, proxyConfig.CaptureBuffer, proxyConfig.CaptureDirectory),
 
 		processGroups: make(map[string]*ProcessGroup),
 

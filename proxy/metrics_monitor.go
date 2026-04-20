@@ -4,10 +4,14 @@ import (
 	"bytes"
 	"compress/flate"
 	"compress/gzip"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -107,11 +111,16 @@ type metricsMonitor struct {
 	captureOrder   []int          // track insertion order for FIFO eviction
 	captureSize    int            // current total compressed size in bytes
 	maxCaptureSize int            // max bytes for captures (uncompressed)
+
+	// activity file persistence fields
+	captureDir     string
+	activityLogger *LogMonitor
 }
 
 // newMetricsMonitor creates a new metricsMonitor. captureBufferMB is the
-// capture buffer size in megabytes; 0 disables captures.
-func newMetricsMonitor(logger *LogMonitor, maxMetrics int, captureBufferMB int) *metricsMonitor {
+// capture buffer size in megabytes; 0 disables captures. captureDir is an
+// optional directory path for persisting captures to files (empty = disabled).
+func newMetricsMonitor(logger *LogMonitor, maxMetrics int, captureBufferMB int, captureDir string) *metricsMonitor {
 	return &metricsMonitor{
 		logger:         logger,
 		maxMetrics:     maxMetrics,
@@ -120,6 +129,8 @@ func newMetricsMonitor(logger *LogMonitor, maxMetrics int, captureBufferMB int) 
 		captureOrder:   make([]int, 0),
 		captureSize:    0,
 		maxCaptureSize: captureBufferMB * 1024 * 1024,
+		captureDir:     captureDir,
+		activityLogger: logger,
 	}
 }
 
@@ -141,7 +152,7 @@ func (mp *metricsMonitor) addMetrics(metric TokenMetrics) int {
 
 // addCapture adds a new capture to the buffer with size-based eviction.
 // Captures are skipped if enableCaptures is false or if compressed data exceeds maxCaptureSize.
-func (mp *metricsMonitor) addCapture(capture ReqRespCapture) {
+func (mp *metricsMonitor) addCapture(capture ReqRespCapture, model string) {
 	if !mp.enableCaptures {
 		return
 	}
@@ -161,7 +172,6 @@ func (mp *metricsMonitor) addCapture(capture ReqRespCapture) {
 	compressionRatio := (1 - float64(captureSize)/float64(uncompressedBytes)) * 100
 
 	mp.mu.Lock()
-	defer mp.mu.Unlock()
 
 	// Evict oldest (FIFO) until room available for the compressed data
 	for mp.captureSize+captureSize > mp.maxCaptureSize && len(mp.captureOrder) > 0 {
@@ -178,8 +188,13 @@ func (mp *metricsMonitor) addCapture(capture ReqRespCapture) {
 	mp.captures[capture.ID] = compressed
 	mp.captureOrder = append(mp.captureOrder, capture.ID)
 	mp.captureSize += captureSize
+	mp.mu.Unlock()
 
 	mp.logger.Debugf("Capture %d compressed and saved: %d bytes -> %d bytes (%.1f%% compression)", capture.ID, uncompressedBytes, len(compressed), compressionRatio)
+
+	if mp.captureDir != "" {
+		go mp.writeActivityFile(compressed, model)
+	}
 }
 
 // getCompressedBytes returns the raw compressed bytes for a capture by ID.
@@ -214,6 +229,63 @@ func (mp *metricsMonitor) getCaptureByID(id int, decompress bool) []byte {
 	}
 
 	return decompressed
+}
+
+// writeActivityFile persists a capture to disk as an activity file.
+func (mp *metricsMonitor) writeActivityFile(data []byte, model string) {
+	if _, err := os.Stat(mp.captureDir); os.IsNotExist(err) {
+		if err := os.MkdirAll(mp.captureDir, 0755); err != nil {
+			mp.activityLogger.Warnf("failed to create capture directory %s: %v", mp.captureDir, err)
+			return
+		}
+	}
+
+	timestamp := time.Now().UTC().Format("20060102_150405")
+	suffix := randomSuffix()
+
+	filename := fmt.Sprintf("%s_%s_%s.json", timestamp, sanitizeFilename(model), suffix)
+	tmpFile := filename + ".tmp"
+	fullPath := filepath.Join(mp.captureDir, tmpFile)
+
+	f, err := os.Create(fullPath)
+	if err != nil {
+		mp.activityLogger.Warnf("failed to create activity file: %v", err)
+		return
+	}
+
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(fullPath)
+		mp.activityLogger.Warnf("failed to write activity file: %v", err)
+		return
+	}
+
+	if err := f.Close(); err != nil {
+		os.Remove(fullPath)
+		mp.activityLogger.Warnf("failed to close activity file: %v", err)
+		return
+	}
+
+	newPath := filepath.Join(mp.captureDir, filename)
+	if err := os.Rename(fullPath, newPath); err != nil {
+		os.Remove(fullPath)
+		mp.activityLogger.Warnf("failed to rename activity file: %v", err)
+		return
+	}
+
+	mp.logger.Debugf("Activity file written: %s", filepath.Base(newPath))
+}
+
+func randomSuffix() string {
+	b := make([]byte, 4)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+func sanitizeFilename(name string) string {
+	name = strings.ReplaceAll(name, "/", "_")
+	name = strings.ReplaceAll(name, "\\", "_")
+	return name
 }
 
 // getMetrics returns a copy of the current metrics
@@ -368,7 +440,7 @@ func (mp *metricsMonitor) wrapHandler(
 	// Store capture if enabled
 	if capture != nil {
 		capture.ID = metricID
-		mp.addCapture(*capture)
+		mp.addCapture(*capture, modelID)
 	}
 
 	return nil

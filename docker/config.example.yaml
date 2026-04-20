@@ -1,6 +1,8 @@
 healthCheckTimeout: 300
 logRequests: true
 metricsMaxInMemory: 1000
+captureBuffer: 5
+captureDirectory: ""
 
 models:
   "qwen2.5":
