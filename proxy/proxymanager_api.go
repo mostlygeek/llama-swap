@@ -162,7 +162,11 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 	}
 
 	sendMetrics := func(metrics []ActivityLogEntry) {
-		jsonData, err := json.Marshal(metrics)
+		filtered := pm.filterExcludedMetrics(metrics)
+		if len(filtered) == 0 {
+			return
+		}
+		jsonData, err := json.Marshal(filtered)
 		if err == nil {
 			select {
 			case sendBuffer <- messageEnvelope{Type: msgTypeMetrics, Data: string(jsonData)}:
@@ -242,7 +246,9 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 }
 
 func (pm *ProxyManager) apiGetMetrics(c *gin.Context) {
-	jsonData, err := pm.metricsMonitor.getMetricsJSON()
+	metrics := pm.metricsMonitor.getMetrics()
+	filtered := pm.filterExcludedMetrics(metrics)
+	jsonData, err := json.Marshal(filtered)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get metrics"})
 		return
@@ -298,6 +304,31 @@ func (pm *ProxyManager) apiGetPerformance(c *gin.Context) {
 		"sys_stats": sysStats,
 		"gpu_stats": gpuStats,
 	})
+}
+
+func (pm *ProxyManager) filterExcludedMetrics(metrics []ActivityLogEntry) []ActivityLogEntry {
+	if len(metrics) == 0 {
+		return metrics
+	}
+
+	excludedModels := make(map[string]bool)
+	for modelID, modelConfig := range pm.config.Models {
+		if modelConfig.ExcludeFromMetrics {
+			excludedModels[modelID] = true
+		}
+	}
+
+	if len(excludedModels) == 0 {
+		return metrics
+	}
+
+	filtered := make([]ActivityLogEntry, 0, len(metrics))
+	for _, m := range metrics {
+		if !excludedModels[m.Model] {
+			filtered = append(filtered, m)
+		}
+	}
+	return filtered
 }
 
 func (pm *ProxyManager) apiUnloadSingleModelHandler(c *gin.Context) {
