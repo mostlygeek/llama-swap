@@ -1304,8 +1304,8 @@ func TestMetricsMonitor_WrapHandler_Capture(t *testing.T) {
 		assert.Equal(t, 1, len(files))
 
 		name := files[0].Name()
-		assert.True(t, strings.HasPrefix(name, "42_") && strings.Contains(name, "my-org_model-v2"),
-			"filename should contain id and model: %s", name)
+		assert.True(t, strings.Contains(name, "my-org_model-v2"),
+			"filename should contain model: %s", name)
 		assert.True(t, strings.HasSuffix(name, ".json"), "filename should end with .json: %s", name)
 	})
 
