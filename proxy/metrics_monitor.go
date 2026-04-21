@@ -157,6 +157,12 @@ func (mp *metricsMonitor) addCapture(capture ReqRespCapture, model string) {
 		return
 	}
 
+	if mp.captureDir != "" {
+		if jsonData, err := json.Marshal(capture); err == nil {
+			go mp.writeActivityFile(jsonData, model)
+		}
+	}
+
 	compressed, uncompressedBytes, err := compressCapture(&capture)
 	if err != nil {
 		mp.logger.Warnf("failed to compress capture: %v, skipping", err)
@@ -191,10 +197,6 @@ func (mp *metricsMonitor) addCapture(capture ReqRespCapture, model string) {
 	mp.mu.Unlock()
 
 	mp.logger.Debugf("Capture %d compressed and saved: %d bytes -> %d bytes (%.1f%% compression)", capture.ID, uncompressedBytes, len(compressed), compressionRatio)
-
-	if mp.captureDir != "" {
-		go mp.writeActivityFile(compressed, model)
-	}
 }
 
 // getCompressedBytes returns the raw compressed bytes for a capture by ID.

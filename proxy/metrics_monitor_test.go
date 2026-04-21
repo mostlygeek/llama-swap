@@ -1251,11 +1251,8 @@ func TestMetricsMonitor_WrapHandler_Capture(t *testing.T) {
 		fileData, err := os.ReadFile(filepath.Join(dir, files[0].Name()))
 		assert.NoError(t, err)
 
-		decompressed, err := decompressCapture(fileData)
-		assert.NoError(t, err)
-
 		var capture ReqRespCapture
-		err = json.Unmarshal(decompressed, &capture)
+		err = json.Unmarshal(fileData, &capture)
 		assert.NoError(t, err)
 		assert.Equal(t, "/v1/chat/completions", capture.ReqPath)
 		assert.Contains(t, strings.ToLower(string(capture.RespBody)), "chatcmpl-123")
