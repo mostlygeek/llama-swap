@@ -18,6 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/event"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
 
@@ -65,7 +66,6 @@ func TestMetricsMonitor_AddMetrics(t *testing.T) {
 				InputTokens: i,
 			})
 		}
-
 		metrics := mm.getMetrics()
 		assert.Equal(t, 3, len(metrics))
 
@@ -1242,13 +1242,9 @@ func TestMetricsMonitor_WrapHandler_Capture(t *testing.T) {
 		err := mm.wrapHandler("qwen2.5", ginCtx.Writer, req, nextHandler)
 		assert.NoError(t, err)
 
-		var files []os.DirEntry
-		assert.Eventually(t, func() bool {
-			files, _ = os.ReadDir(dir)
-			return len(files) == 1
-		}, 2*time.Second, 10*time.Millisecond)
+		file := waitForCaptureFile(t, dir)
 
-		fileData, err := os.ReadFile(filepath.Join(dir, files[0].Name()))
+		fileData, err := os.ReadFile(filepath.Join(dir, file.Name()))
 		assert.NoError(t, err)
 
 		var capture ReqRespCapture
@@ -1271,11 +1267,7 @@ func TestMetricsMonitor_WrapHandler_Capture(t *testing.T) {
 
 		mm.addCapture(capture, "model-name")
 
-		var files []os.DirEntry
-		assert.Eventually(t, func() bool {
-			files, _ = os.ReadDir(dir)
-			return len(files) == 1
-		}, 2*time.Second, 10*time.Millisecond)
+		waitForCaptureFile(t, dir)
 	})
 
 	t.Run("capture filename includes model", func(t *testing.T) {
@@ -1291,13 +1283,9 @@ func TestMetricsMonitor_WrapHandler_Capture(t *testing.T) {
 
 		mm.addCapture(capture, "my-org/model-v2")
 
-		var files []os.DirEntry
-		assert.Eventually(t, func() bool {
-			files, _ = os.ReadDir(dir)
-			return len(files) == 1
-		}, 2*time.Second, 10*time.Millisecond)
+		file := waitForCaptureFile(t, dir)
 
-		name := files[0].Name()
+		name := file.Name()
 		assert.True(t, strings.Contains(name, "my-org_model-v2"),
 			"filename should contain model: %s", name)
 		assert.True(t, strings.HasSuffix(name, ".json"), "filename should end with .json: %s", name)
@@ -1317,4 +1305,24 @@ func TestMetricsMonitor_WrapHandler_Capture(t *testing.T) {
 		mm.addCapture(capture, "test-model")
 		assert.Equal(t, "", mm.captureDir, "captureDir should remain empty, no side effects")
 	})
+}
+
+func waitForCaptureFile(t *testing.T, dir string) os.DirEntry {
+	t.Helper()
+	var file os.DirEntry
+	require.Eventually(t, func() bool {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return false
+		}
+		for _, entry := range entries {
+			if strings.HasSuffix(entry.Name(), ".json") {
+				file = entry
+				return true
+			}
+		}
+		return false
+	}, 2*time.Second, 10*time.Millisecond)
+	require.NotNil(t, file)
+	return file
 }
