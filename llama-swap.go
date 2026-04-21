@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -79,11 +80,12 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Reload signals (SIGHUP on POSIX, none on Windows). Always wired up so
-	// `kill -HUP` works regardless of --watch-config.
+	// Reload signals (SIGHUP on POSIX, none on Windows — Windows does not
+	// deliver SIGHUP). Always wired up so `kill -HUP` works regardless of
+	// --watch-config.
 	reloadChan := make(chan os.Signal, 1)
-	if sigs := reloadSignals(); len(sigs) > 0 {
-		signal.Notify(reloadChan, sigs...)
+	if runtime.GOOS != "windows" {
+		signal.Notify(reloadChan, syscall.SIGHUP)
 	}
 
 	// Context that bounds the lifetime of background watcher goroutines.
