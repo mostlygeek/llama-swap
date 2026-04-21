@@ -149,7 +149,7 @@ ARG IK_LLAMA_COMMIT_HASH=unknown
 ARG RUN_UID=0
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3-numpy python3-sentencepiece \
+    python3-numpy python3-sentencepiece python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user when RUN_UID != 0
@@ -180,6 +180,9 @@ COPY --from=llama-build /install/bin/llama-cli /usr/local/bin/
 # Copy ik-llama-server (CUDA only; empty copy for vulkan)
 COPY --from=ik-llama-build /install/bin/ /usr/local/bin/
 
+# Install uv for running Python tools (e.g. vllm) without baking them into the image
+RUN pip install --break-system-packages uv
+
 # Copy llama-swap binary
 COPY --from=llama-swap-download /install/bin/llama-swap /usr/local/bin/
 COPY --from=llama-swap-download /install/llama-swap-version /tmp/
@@ -194,6 +197,7 @@ RUN echo "llama.cpp: ${LLAMA_COMMIT_HASH}" > /versions.txt && \
     echo "stable-diffusion.cpp: ${SD_COMMIT_HASH}" >> /versions.txt && \
     echo "ik_llama.cpp: ${IK_LLAMA_COMMIT_HASH}" >> /versions.txt && \
     echo "llama-swap: $(cat /tmp/llama-swap-version)" >> /versions.txt && \
+    echo "uv: $(uv --version)" >> /versions.txt && \
     echo "backend: ${BACKEND}" >> /versions.txt && \
     echo "build_timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> /versions.txt
 
