@@ -149,7 +149,7 @@ ARG IK_LLAMA_COMMIT_HASH=unknown
 ARG RUN_UID=0
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3-numpy python3-sentencepiece \
+    python3-numpy python3-sentencepiece python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user when RUN_UID != 0
@@ -179,6 +179,9 @@ COPY --from=llama-build /install/bin/llama-cli /usr/local/bin/
 
 # Copy ik-llama-server (CUDA only; empty copy for vulkan)
 COPY --from=ik-llama-build /install/bin/ /usr/local/bin/
+
+# Install uv
+RUN pip install uv --break-system-packages
 
 # Copy llama-swap binary
 COPY --from=llama-swap-download /install/bin/llama-swap /usr/local/bin/
