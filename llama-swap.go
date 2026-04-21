@@ -12,11 +12,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/event"
 	"github.com/mostlygeek/llama-swap/proxy"
 	"github.com/mostlygeek/llama-swap/proxy/config"
+	"github.com/mostlygeek/llama-swap/proxy/configwatcher"
 )
 
 var (
@@ -79,6 +79,16 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
+	// Reload signals (SIGHUP on POSIX, none on Windows). Always wired up so
+	// `kill -HUP` works regardless of --watch-config.
+	reloadChan := make(chan os.Signal, 1)
+	if sigs := reloadSignals(); len(sigs) > 0 {
+		signal.Notify(reloadChan, sigs...)
+	}
+
+	// Context that bounds the lifetime of background watcher goroutines.
+	watcherCtx, watcherCancel := context.WithCancel(context.Background())
+
 	// Create server with initial handler
 	srv := &http.Server{
 		Addr: *listenStr,
@@ -121,52 +131,45 @@ func main() {
 	// load the initial proxy manager
 	reloadProxyManager()
 	debouncedReload := debounce(time.Second, reloadProxyManager)
-	if *watchConfig {
-		defer event.On(func(e proxy.ConfigFileChangedEvent) {
-			if e.ReloadingState == proxy.ReloadingStateStart {
-				debouncedReload()
-			}
-		})()
 
-		fmt.Println("Watching Configuration for changes")
+	// Listen for ConfigFileChangedEvent unconditionally so SIGHUP and the
+	// poll-based watcher both feed the same debounced reload pipeline. The
+	// UI also listens for the matching ReloadingStateEnd emitted from
+	// reloadProxyManager.
+	defer event.On(func(e proxy.ConfigFileChangedEvent) {
+		if e.ReloadingState == proxy.ReloadingStateStart {
+			debouncedReload()
+		}
+	})()
+
+	// SIGHUP (or platform-equivalent) → reload. Back-to-back signals collapse
+	// to one reload via the debounce window, which is the desired behavior.
+	go func() {
+		for range reloadChan {
+			fmt.Println("Received reload signal, reloading configuration")
+			event.Emit(proxy.ConfigFileChangedEvent{
+				ReloadingState: proxy.ReloadingStateStart,
+			})
+		}
+	}()
+
+	if *watchConfig {
 		go func() {
 			absConfigPath, err := filepath.Abs(*configPath)
 			if err != nil {
 				fmt.Printf("Error getting absolute path for watching config file: %v\n", err)
 				return
 			}
-			watcher, err := fsnotify.NewWatcher()
-			if err != nil {
-				fmt.Printf("Error creating file watcher: %v. File watching disabled.\n", err)
-				return
-			}
-
-			configDir := filepath.Dir(absConfigPath)
-			err = watcher.Add(configDir)
-			if err != nil {
-				fmt.Printf("Error adding config path directory (%s) to watcher: %v. File watching disabled.", configDir, err)
-				return
-			}
-
-			defer watcher.Close()
-			for {
-				select {
-				case changeEvent := <-watcher.Events:
-					if changeEvent.Name == absConfigPath && (changeEvent.Has(fsnotify.Write) || changeEvent.Has(fsnotify.Create) || changeEvent.Has(fsnotify.Remove)) {
-						event.Emit(proxy.ConfigFileChangedEvent{
-							ReloadingState: proxy.ReloadingStateStart,
-						})
-					} else if changeEvent.Name == filepath.Join(configDir, "..data") && changeEvent.Has(fsnotify.Create) {
-						// the change for k8s configmap
-						event.Emit(proxy.ConfigFileChangedEvent{
-							ReloadingState: proxy.ReloadingStateStart,
-						})
-					}
-
-				case err := <-watcher.Errors:
-					log.Printf("File watcher error: %v", err)
-				}
-			}
+			fmt.Println("Watching configuration for changes (poll-based, 2s interval)")
+			(&configwatcher.Watcher{
+				Path:     absConfigPath,
+				Interval: configwatcher.DefaultInterval,
+				OnChange: func() {
+					event.Emit(proxy.ConfigFileChangedEvent{
+						ReloadingState: proxy.ReloadingStateStart,
+					})
+				},
+			}).Run(watcherCtx)
 		}()
 	}
 
@@ -174,6 +177,7 @@ func main() {
 	go func() {
 		sig := <-sigChan
 		fmt.Printf("Received signal %v, shutting down...\n", sig)
+		watcherCancel()
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 		defer cancel()
 
