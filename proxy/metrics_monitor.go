@@ -283,9 +283,20 @@ func randomSuffix() string {
 }
 
 func sanitizeFilename(name string) string {
-	name = strings.ReplaceAll(name, "/", "_")
-	name = strings.ReplaceAll(name, "\\", "_")
-	return name
+	var b strings.Builder
+	for _, r := range name {
+		if r < 0x20 || strings.ContainsRune(`/\:*?"<>|`, r) {
+			b.WriteByte('_')
+		} else {
+			b.WriteRune(r)
+		}
+	}
+
+	sanitized := strings.ReplaceAll(strings.Trim(b.String(), " ._"), "__", "_")
+	if sanitized == "" {
+		return "unknown-model"
+	}
+	return sanitized
 }
 
 // getMetrics returns a copy of the current metrics
