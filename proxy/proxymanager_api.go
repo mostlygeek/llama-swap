@@ -79,13 +79,19 @@ func (pm *ProxyManager) getModelStatus() []Model {
 				state = "stopped"
 			}
 		}
+
+		aliases := make([]string, 0, len(pm.config.Models[modelID].Aliases))
+		for _, alias := range pm.config.Models[modelID].Aliases {
+			aliases = append(aliases, alias.ID)
+		}
+
 		models = append(models, Model{
 			Id:          modelID,
 			Name:        pm.config.Models[modelID].Name,
 			Description: pm.config.Models[modelID].Description,
 			State:       state,
 			Unlisted:    pm.config.Models[modelID].Unlisted,
-			Aliases:     pm.config.Models[modelID].Aliases,
+			Aliases:     aliases,
 		})
 	}
 

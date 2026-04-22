@@ -3,6 +3,8 @@ package config
 import (
 	"errors"
 	"runtime"
+
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -24,7 +26,7 @@ type ModelConfig struct {
 	Cmd           string   `yaml:"cmd"`
 	CmdStop       string   `yaml:"cmdStop"`
 	Proxy         string   `yaml:"proxy"`
-	Aliases       []string `yaml:"aliases"`
+	Aliases       []Alias  `yaml:"aliases"`
 	Env           []string `yaml:"env"`
 	CheckEndpoint string   `yaml:"checkEndpoint"`
 	UnloadAfter   int      `yaml:"ttl"`
@@ -62,7 +64,7 @@ func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		Cmd:              "",
 		CmdStop:          "",
 		Proxy:            "http://localhost:${PORT}",
-		Aliases:          []string{},
+		Aliases:          []Alias{},
 		Env:              []string{},
 		CheckEndpoint:    "/health",
 		UnloadAfter:      MODEL_CONFIG_DEFAULT_TTL, // use GlobalTTL
@@ -133,4 +135,32 @@ func (m *ModelFilters) UnmarshalYAML(unmarshal func(interface{}) error) error {
 // Returns ([]string, error) to match existing API
 func (f ModelFilters) SanitizedStripParams() ([]string, error) {
 	return f.Filters.SanitizedStripParams(), nil
+}
+
+type Alias struct {
+	ID       string `yaml:"id"`
+	Name     string `yaml:"name"`
+	Unlisted bool   `yaml:"unlisted"`
+}
+
+func (a *Alias) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.MappingNode {
+		type rawAlias Alias
+		var alias rawAlias
+
+		if err := value.Decode(&alias); err != nil {
+			return err
+		}
+		*a = Alias(alias)
+		return nil
+	}
+
+	// Old-style definition, only ID could be set
+	var id string
+	if err := value.Decode(&id); err != nil {
+		return err
+	}
+	a.ID = id
+
+	return nil
 }

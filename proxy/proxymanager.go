@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/base64"
 	"fmt"
@@ -537,7 +538,7 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 	data := make([]gin.H, 0, len(pm.config.Models))
 	createdTime := time.Now().Unix()
 
-	newRecord := func(modelId string, modelConfig config.ModelConfig) gin.H {
+	newRecord := func(modelId string, modelConfig config.ModelConfig, aliasName string) gin.H {
 		record := gin.H{
 			"id":       modelId,
 			"object":   "model",
@@ -545,7 +546,7 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 			"owned_by": "llama-swap",
 		}
 
-		if name := strings.TrimSpace(modelConfig.Name); name != "" {
+		if name := cmp.Or(strings.TrimSpace(aliasName), strings.TrimSpace(modelConfig.Name)); name != "" {
 			record["name"] = name
 		}
 		if desc := strings.TrimSpace(modelConfig.Description); desc != "" {
@@ -566,13 +567,17 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 			continue
 		}
 
-		data = append(data, newRecord(id, modelConfig))
+		data = append(data, newRecord(id, modelConfig, ""))
 
 		// Include aliases
 		if pm.config.IncludeAliasesInList {
 			for _, alias := range modelConfig.Aliases {
-				if alias := strings.TrimSpace(alias); alias != "" {
-					data = append(data, newRecord(alias, modelConfig))
+				if alias.Unlisted {
+					continue
+				}
+
+				if id := strings.TrimSpace(alias.ID); id != "" {
+					data = append(data, newRecord(id, modelConfig, alias.Name))
 				}
 			}
 		}
@@ -588,7 +593,7 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 					Metadata: map[string]any{
 						"peerID": peerID,
 					},
-				})
+				}, "")
 
 				data = append(data, record)
 			}

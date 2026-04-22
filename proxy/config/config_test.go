@@ -75,14 +75,14 @@ func TestConfig_FindConfig(t *testing.T) {
 			"model1": {
 				Cmd:           "python model1.py",
 				Proxy:         "http://localhost:8080",
-				Aliases:       []string{"m1", "model-one"},
+				Aliases:       []Alias{Alias{ID: "m1"}, Alias{ID: "model-one"}},
 				Env:           []string{"VAR1=value1", "VAR2=value2"},
 				CheckEndpoint: "/health",
 			},
 			"model2": {
 				Cmd:           "python model2.py",
 				Proxy:         "http://localhost:8081",
-				Aliases:       []string{"m2", "model-two"},
+				Aliases:       []Alias{Alias{ID: "m2"}, Alias{ID: "model-two"}},
 				Env:           []string{"VAR3=value3", "VAR4=value4"},
 				CheckEndpoint: "/status",
 			},

@@ -242,10 +242,12 @@ models:
 
     # aliases: alternative model names that this model configuration is used for
     # - optional, default: empty array
-    # - aliases must be unique globally
+    # - alias IDs must be unique globally
     # - useful for impersonating a specific model
     aliases:
-      - "gpt-4o-mini"
+      - id: "gpt-4o-mini"
+        name: "gpt-4o-mini"
+        unlisted: false
 
     # metadata: a dictionary of arbitrary values that are included in /v1/models
     # - optional, default: empty dictionary

@@ -211,6 +211,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		MetricsMaxInMemory: 1000,
 		CaptureBuffer:      5,
 		GlobalTTL:          0,
+		aliases:            make(map[string]string),
 	}
 	if err = yaml.Unmarshal([]byte(yamlStr), &config); err != nil {
 		return Config{}, err
@@ -232,17 +233,6 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	case LogToStdoutProxy, LogToStdoutUpstream, LogToStdoutBoth, LogToStdoutNone:
 	default:
 		return Config{}, fmt.Errorf("logToStdout must be one of: proxy, upstream, both, none")
-	}
-
-	// Populate the aliases map
-	config.aliases = make(map[string]string)
-	for modelName, modelConfig := range config.Models {
-		for _, alias := range modelConfig.Aliases {
-			if _, found := config.aliases[alias]; found {
-				return Config{}, fmt.Errorf("duplicate alias %s found in model: %s", alias, modelName)
-			}
-			config.aliases[alias] = modelName
-		}
 	}
 
 	// Validate global macros
@@ -335,6 +325,12 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 				modelConfig.Filters.SetParamsByID = newSetParamsByID
 			}
 
+			// Substitute IDs in aliases
+			for i := range modelConfig.Aliases {
+				newID := strings.ReplaceAll(modelConfig.Aliases[i].ID, macroSlug, macroStr)
+				modelConfig.Aliases[i].ID = newID
+			}
+
 			// Substitute in metadata (type-preserving)
 			if len(modelConfig.Metadata) > 0 {
 				result, err := substituteMacroInValue(modelConfig.Metadata, entry.Name, entry.Value)
@@ -414,6 +410,14 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			}
 		}
 
+		// Populate the aliases map
+		for _, alias := range modelConfig.Aliases {
+			if _, found := config.aliases[alias.ID]; found {
+				return Config{}, fmt.Errorf("duplicate alias %s found in model: %s", alias.ID, modelId)
+			}
+			config.aliases[alias.ID] = modelId
+		}
+
 		// Auto-register setParamsByID keys as aliases (skip the model's own ID)
 		for key := range modelConfig.Filters.SetParamsByID {
 			if key == modelId {
@@ -429,7 +433,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 				continue // already registered as explicit alias for this model
 			}
 			config.aliases[key] = modelId
-			modelConfig.Aliases = append(modelConfig.Aliases, key)
+			modelConfig.Aliases = append(modelConfig.Aliases, Alias{ID: key})
 		}
 
 		if _, err := url.Parse(modelConfig.Proxy); err != nil {

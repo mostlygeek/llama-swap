@@ -77,7 +77,7 @@ models:
 		assert.Equal(t, "", model1.CmdStop)
 		assert.Equal(t, "http://localhost:5800", model1.Proxy)
 		assert.Equal(t, "/health", model1.CheckEndpoint)
-		assert.Equal(t, []string{}, model1.Aliases)
+		assert.Equal(t, []Alias{}, model1.Aliases)
 		assert.Equal(t, []string{}, model1.Env)
 		assert.Equal(t, 0, model1.UnloadAfter)
 		assert.Equal(t, false, model1.Unlisted)
@@ -190,7 +190,7 @@ groups:
 			"model1": {
 				Cmd:              "path/to/cmd --arg1 one",
 				Proxy:            "http://localhost:8080",
-				Aliases:          []string{"m1", "model-one"},
+				Aliases:          []Alias{Alias{ID: "m1"}, Alias{ID: "model-one"}},
 				Env:              []string{"VAR1=value1", "VAR2=value2"},
 				CheckEndpoint:    "/health",
 				Name:             "Model 1",
@@ -201,7 +201,7 @@ groups:
 			"model2": {
 				Cmd:              "path/to/server --arg1 one",
 				Proxy:            "http://localhost:8081",
-				Aliases:          []string{"m2"},
+				Aliases:          []Alias{Alias{ID: "m2"}},
 				Env:              []string{},
 				CheckEndpoint:    "/",
 				SendLoadingState: &modelLoadingState,
@@ -210,7 +210,7 @@ groups:
 			"model3": {
 				Cmd:              "path/to/cmd --arg1 one",
 				Proxy:            "http://localhost:8081",
-				Aliases:          []string{"mthree"},
+				Aliases:          []Alias{Alias{ID: "mthree"}},
 				Env:              []string{},
 				CheckEndpoint:    "/",
 				SendLoadingState: &modelLoadingState,
@@ -220,7 +220,7 @@ groups:
 				Cmd:              "path/to/cmd --arg1 one",
 				Proxy:            "http://localhost:8082",
 				CheckEndpoint:    "/",
-				Aliases:          []string{},
+				Aliases:          []Alias{},
 				Env:              []string{},
 				SendLoadingState: &modelLoadingState,
 				Timeouts:         defaultTimeout,
