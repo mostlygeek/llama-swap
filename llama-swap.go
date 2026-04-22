@@ -12,9 +12,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/event"
+	"github.com/mostlygeek/llama-swap/filewatch"
 	"github.com/mostlygeek/llama-swap/proxy"
 	"github.com/mostlygeek/llama-swap/proxy/config"
 )
@@ -77,7 +77,7 @@ func main() {
 	// Setup channels for server management
 	exitChan := make(chan struct{})
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
 	// Create server with initial handler
 	srv := &http.Server{
@@ -87,11 +87,12 @@ func main() {
 	// Support for watching config and reloading when it changes
 	reloadProxyManager := func() {
 		if currentPM, ok := srv.Handler.(*proxy.ProxyManager); ok {
-			conf, err = config.LoadConfig(*configPath)
+			newConf, err := config.LoadConfig(*configPath)
 			if err != nil {
 				fmt.Printf("Warning, unable to reload configuration: %v\n", err)
 				return
 			}
+			conf = newConf
 
 			fmt.Println("Configuration Changed")
 			currentPM.Shutdown()
@@ -107,11 +108,12 @@ func main() {
 				})
 			})
 		} else {
-			conf, err = config.LoadConfig(*configPath)
+			newConf, err := config.LoadConfig(*configPath)
 			if err != nil {
 				fmt.Printf("Error, unable to load configuration: %v\n", err)
 				os.Exit(1)
 			}
+			conf = newConf
 			newPM := proxy.New(conf)
 			newPM.SetVersion(date, commit, version)
 			srv.Handler = newPM
@@ -135,37 +137,14 @@ func main() {
 				fmt.Printf("Error getting absolute path for watching config file: %v\n", err)
 				return
 			}
-			watcher, err := fsnotify.NewWatcher()
-			if err != nil {
-				fmt.Printf("Error creating file watcher: %v. File watching disabled.\n", err)
-				return
-			}
-
-			configDir := filepath.Dir(absConfigPath)
-			err = watcher.Add(configDir)
-			if err != nil {
-				fmt.Printf("Error adding config path directory (%s) to watcher: %v. File watching disabled.", configDir, err)
-				return
-			}
-
+			watcher := filewatch.NewWatcher(absConfigPath, 2*time.Second)
+			changes := watcher.Start()
 			defer watcher.Close()
-			for {
-				select {
-				case changeEvent := <-watcher.Events:
-					if changeEvent.Name == absConfigPath && (changeEvent.Has(fsnotify.Write) || changeEvent.Has(fsnotify.Create) || changeEvent.Has(fsnotify.Remove)) {
-						event.Emit(proxy.ConfigFileChangedEvent{
-							ReloadingState: proxy.ReloadingStateStart,
-						})
-					} else if changeEvent.Name == filepath.Join(configDir, "..data") && changeEvent.Has(fsnotify.Create) {
-						// the change for k8s configmap
-						event.Emit(proxy.ConfigFileChangedEvent{
-							ReloadingState: proxy.ReloadingStateStart,
-						})
-					}
 
-				case err := <-watcher.Errors:
-					log.Printf("File watcher error: %v", err)
-				}
+			for range changes {
+				event.Emit(proxy.ConfigFileChangedEvent{
+					ReloadingState: proxy.ReloadingStateStart,
+				})
 			}
 		}()
 	}
@@ -173,6 +152,11 @@ func main() {
 	// shutdown on signal
 	go func() {
 		sig := <-sigChan
+		if sig == syscall.SIGHUP {
+			fmt.Println("Received SIGHUP, reloading configuration")
+			reloadProxyManager()
+			return
+		}
 		fmt.Printf("Received signal %v, shutting down...\n", sig)
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 		defer cancel()
