@@ -10,6 +10,10 @@
     "definitions": {
     "alias": {
         "type": "object",
+        "required": [
+            "id"
+        ],
+        "additionalProperties": false,
         "properties": {
             "id": {
                 "type": "string",
@@ -232,7 +236,15 @@
                     "aliases": {
                         "type": "array",
                         "items": {
-                            "$ref": "#/definitions/macros"
+                            "oneOf": [
+                                {
+                                    "type": "string",
+                                    "minLength": 1
+                                },
+                                {
+                                    "$ref": "#/definitions/macros"
+                                }
+                            ]
                         },
                         "default": [],
                         "description": "Alternative model names for this configuration. Must be unique globally."
