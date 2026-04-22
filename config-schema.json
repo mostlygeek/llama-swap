@@ -8,7 +8,27 @@
         "models"
     ],
     "definitions": {
-        "macros": {
+    "alias": {
+        "type": "object",
+        "properties": {
+            "id": {
+                "type": "string",
+                "minLength": 1
+            },
+            "name": {
+                "type": "string",
+                "default": "",
+                "maxLength": 128,
+                "description": "Display name for the model alias. Used in v1/models API response."
+            },
+            "unlisted": {
+                "type": "boolean",
+                "default": false,
+                "description": "If true the model alias will not show up in /v1/models responses. It can still be used as normal in API requests."
+            }
+        }
+    },
+    "macros": {
             "type": "object",
             "additionalProperties": {
                 "oneOf": [
@@ -212,8 +232,7 @@
                     "aliases": {
                         "type": "array",
                         "items": {
-                            "type": "string",
-                            "minLength": 1
+                            "$ref": "#/definitions/macros"
                         },
                         "default": [],
                         "description": "Alternative model names for this configuration. Must be unique globally."
