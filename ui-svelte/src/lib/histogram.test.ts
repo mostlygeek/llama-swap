@@ -104,7 +104,7 @@ describe("calculateHistogramData", () => {
     });
 
     it("percentiles are monotonically increasing", () => {
-      const values = Array.from({ length: 200 }, (_, i) => Math.random() * 100);
+      const values = Array.from({ length: 200 }, () => Math.random() * 100);
       const result = calculateHistogramData(values);
       expect(result).not.toBeNull();
       expect(result!.p50).toBeLessThanOrEqual(result!.p95);

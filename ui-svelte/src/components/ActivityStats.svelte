@@ -2,7 +2,6 @@
   import { inFlightRequests, metrics } from "../stores/api";
   import { persistentStore } from "../stores/persistent";
   import { calculateHistogramData } from "../lib/histogram";
-  import type { HistogramData } from "../lib/types";
   import TokenHistogram from "./TokenHistogram.svelte";
 
   const nf = new Intl.NumberFormat();
