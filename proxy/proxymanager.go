@@ -781,7 +781,19 @@ func (pm *ProxyManager) proxyInferenceHandler(c *gin.Context) {
 		nextHandler = localHandler
 	} else if pm.peerProxy != nil && pm.peerProxy.HasPeerModel(requestedModel) {
 		pm.proxyLogger.Debugf("ProxyManager using ProxyPeer for model: %s", requestedModel)
-		modelID = requestedModel
+
+		// Resolve alias to base model ID (e.g. "model_a:nothink" → "model_a")
+		realPeerModelID, _ := pm.peerProxy.RealPeerModelName(requestedModel)
+		modelID = realPeerModelID
+
+		// Rewrite model field to base model ID so the peer server receives the correct name
+		if realPeerModelID != requestedModel {
+			bodyBytes, err = sjson.SetBytes(bodyBytes, "model", realPeerModelID)
+			if err != nil {
+				pm.sendErrorResponse(c, http.StatusInternalServerError, "error rewriting model name in JSON")
+				return
+			}
+		}
 
 		// issue #453 apply filters for peer requests
 		peerFilters := pm.peerProxy.GetPeerFilters(requestedModel)
@@ -802,6 +814,17 @@ func (pm *ProxyManager) proxyInferenceHandler(c *gin.Context) {
 		for _, key := range setParamKeys {
 			pm.proxyLogger.Debugf("<%s> setting param: %s", requestedModel, key)
 			bodyBytes, err = sjson.SetBytes(bodyBytes, key, setParams[key])
+			if err != nil {
+				pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error setting parameter %s in request", key))
+				return
+			}
+		}
+
+		// setParamsByID: set params based on the requested model ID (runs after setParams, can override it)
+		setParamsByIDParams, setParamsByIDKeys := peerFilters.SanitizedSetParamsByID(requestedModel)
+		for _, key := range setParamsByIDKeys {
+			pm.proxyLogger.Debugf("<%s> setting param by id: %s", requestedModel, key)
+			bodyBytes, err = sjson.SetBytes(bodyBytes, key, setParamsByIDParams[key])
 			if err != nil {
 				pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error setting parameter %s in request", key))
 				return
@@ -879,7 +902,11 @@ func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
 		pm.proxyLogger.Debugf("ProxyManager using local Process for model: %s", requestedModel)
 	} else if pm.peerProxy != nil && pm.peerProxy.HasPeerModel(requestedModel) {
 		pm.proxyLogger.Debugf("ProxyManager using ProxyPeer for model: %s", requestedModel)
-		modelID = requestedModel
+		realPeerModelID, _ := pm.peerProxy.RealPeerModelName(requestedModel)
+		modelID = realPeerModelID
+		if realPeerModelID != requestedModel {
+			useModelName = realPeerModelID // rewrite model field in reconstructed form
+		}
 		nextHandler = pm.peerProxy.ProxyRequest
 	}
 
@@ -1000,7 +1027,8 @@ func (pm *ProxyManager) proxyGETModelHandler(c *gin.Context) {
 		}
 		pm.proxyLogger.Debugf("ProxyManager using local Process for model: %s", requestedModel)
 	} else if pm.peerProxy != nil && pm.peerProxy.HasPeerModel(requestedModel) {
-		modelID = requestedModel
+		realPeerModelID, _ := pm.peerProxy.RealPeerModelName(requestedModel)
+		modelID = realPeerModelID
 		pm.proxyLogger.Debugf("ProxyManager using ProxyPeer for model: %s", requestedModel)
 		nextHandler = pm.peerProxy.ProxyRequest
 	}

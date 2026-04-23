@@ -309,3 +309,124 @@ func TestNewPeerProxy_CustomTimeouts(t *testing.T) {
 	// ForceAttemptHTTP2 should be enabled
 	assert.True(t, transport.ForceAttemptHTTP2)
 }
+
+func TestPeerProxy_SetParamsByID_AliasRegistration(t *testing.T) {
+	proxyURL, _ := url.Parse("http://peer1.example.com:8080")
+	peers := config.PeerDictionaryConfig{
+		"peer1": config.PeerConfig{
+			Proxy:    "http://peer1.example.com:8080",
+			ProxyURL: proxyURL,
+			Models:   []string{"model-a", "model-b"},
+			Filters: config.Filters{
+				SetParamsByID: map[string]map[string]any{
+					"model-a:nothink": {"enable_thinking": false},
+					"model-a:high":    {"reasoning_effort": "high"},
+				},
+			},
+		},
+	}
+
+	pp, err := NewPeerProxy(peers, testLogger)
+	require.NoError(t, err)
+
+	// Base models accessible directly
+	assert.True(t, pp.HasPeerModel("model-a"))
+	assert.True(t, pp.HasPeerModel("model-b"))
+
+	// Aliases accessible via HasPeerModel
+	assert.True(t, pp.HasPeerModel("model-a:nothink"))
+	assert.True(t, pp.HasPeerModel("model-a:high"))
+
+	// Non-existent alias
+	assert.False(t, pp.HasPeerModel("model-a:unknown"))
+}
+
+func TestPeerProxy_SetParamsByID_ModelIDMacroExpansion(t *testing.T) {
+	proxyURL, _ := url.Parse("http://peer1.example.com:8080")
+	peers := config.PeerDictionaryConfig{
+		"peer1": config.PeerConfig{
+			Proxy:    "http://peer1.example.com:8080",
+			ProxyURL: proxyURL,
+			Models:   []string{"model-a", "model-b"},
+			Filters: config.Filters{
+				SetParamsByID: map[string]map[string]any{
+					"${MODEL_ID}:nothink": {"enable_thinking": false},
+					"${MODEL_ID}:high":    {"reasoning_effort": "high"},
+				},
+			},
+		},
+	}
+
+	pp, err := NewPeerProxy(peers, testLogger)
+	require.NoError(t, err)
+
+	// ${MODEL_ID} expanded to "model-a"
+	assert.True(t, pp.HasPeerModel("model-a:nothink"))
+	assert.True(t, pp.HasPeerModel("model-a:high"))
+
+	// ${MODEL_ID} expanded to "model-b"
+	assert.True(t, pp.HasPeerModel("model-b:nothink"))
+	assert.True(t, pp.HasPeerModel("model-b:high"))
+}
+
+func TestPeerProxy_RealPeerModelName(t *testing.T) {
+	proxyURL, _ := url.Parse("http://peer1.example.com:8080")
+	peers := config.PeerDictionaryConfig{
+		"peer1": config.PeerConfig{
+			Proxy:    "http://peer1.example.com:8080",
+			ProxyURL: proxyURL,
+			Models:   []string{"model-a"},
+			Filters: config.Filters{
+				SetParamsByID: map[string]map[string]any{
+					"${MODEL_ID}:nothink": {"enable_thinking": false},
+				},
+			},
+		},
+	}
+
+	pp, err := NewPeerProxy(peers, testLogger)
+	require.NoError(t, err)
+
+	// Base model resolves to itself
+	realID, found := pp.RealPeerModelName("model-a")
+	assert.True(t, found)
+	assert.Equal(t, "model-a", realID)
+
+	// Alias resolves to base model
+	realID, found = pp.RealPeerModelName("model-a:nothink")
+	assert.True(t, found)
+	assert.Equal(t, "model-a", realID)
+
+	// Unknown model
+	_, found = pp.RealPeerModelName("unknown")
+	assert.False(t, found)
+}
+
+func TestPeerProxy_GetPeerFilters_WithAlias(t *testing.T) {
+	proxyURL, _ := url.Parse("http://peer1.example.com:8080")
+	peers := config.PeerDictionaryConfig{
+		"peer1": config.PeerConfig{
+			Proxy:    "http://peer1.example.com:8080",
+			ProxyURL: proxyURL,
+			Models:   []string{"model-a"},
+			Filters: config.Filters{
+				SetParams: map[string]any{"temperature": 0.7},
+				SetParamsByID: map[string]map[string]any{
+					"${MODEL_ID}:nothink": {"enable_thinking": false},
+				},
+			},
+		},
+	}
+
+	pp, err := NewPeerProxy(peers, testLogger)
+	require.NoError(t, err)
+
+	// Filters for base model
+	filters := pp.GetPeerFilters("model-a")
+	assert.Equal(t, map[string]any{"temperature": 0.7}, filters.SetParams)
+	assert.Contains(t, filters.SetParamsByID, "model-a:nothink")
+
+	// Filters for alias point to same expanded config
+	filtersAlias := pp.GetPeerFilters("model-a:nothink")
+	assert.Equal(t, filters, filtersAlias)
+}

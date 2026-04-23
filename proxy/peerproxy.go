@@ -20,8 +20,10 @@ type peerProxyMember struct {
 }
 
 type PeerProxy struct {
-	peers    config.PeerDictionaryConfig
-	proxyMap map[string]*peerProxyMember
+	peers        config.PeerDictionaryConfig
+	proxyMap     map[string]*peerProxyMember
+	peerAliases  map[string]string         // alias → base model ID (from setParamsByID keys)
+	modelFilters map[string]config.Filters // base model ID → filters with ${MODEL_ID} expanded
 }
 
 func NewPeerProxy(peers config.PeerDictionaryConfig, proxyLogger *LogMonitor) (*PeerProxy, error) {
@@ -97,29 +99,94 @@ func NewPeerProxy(peers config.PeerDictionaryConfig, proxyLogger *LogMonitor) (*
 		}
 	}
 
+	// Build per-model expanded filters and alias map from setParamsByID keys
+	peerAliases := make(map[string]string)
+	modelFilters := make(map[string]config.Filters)
+
+	for _, peerID := range peerIDs {
+		peer := peers[peerID]
+		for _, modelID := range peer.Models {
+			if _, found := proxyMap[modelID]; !found {
+				continue // model was skipped as duplicate
+			}
+			expanded := expandPeerFiltersForModel(peer.Filters, modelID)
+			modelFilters[modelID] = expanded
+
+			for key := range expanded.SetParamsByID {
+				if key == modelID {
+					continue
+				}
+				if _, exists := proxyMap[key]; exists {
+					proxyLogger.Warnf("peer %s: setParamsByID key '%s' conflicts with an existing model, skipping alias", peerID, key)
+					continue
+				}
+				if existingModel, exists := peerAliases[key]; exists {
+					if existingModel != modelID {
+						proxyLogger.Warnf("peer %s: duplicate setParamsByID alias '%s' already registered for model %s, skipping", peerID, key, existingModel)
+					}
+					continue
+				}
+				peerAliases[key] = modelID
+			}
+		}
+	}
+
 	return &PeerProxy{
-		peers:    peers,
-		proxyMap: proxyMap,
+		peers:        peers,
+		proxyMap:     proxyMap,
+		peerAliases:  peerAliases,
+		modelFilters: modelFilters,
 	}, nil
 }
 
+// expandPeerFiltersForModel returns a copy of f with ${MODEL_ID} replaced by modelID in setParamsByID keys.
+func expandPeerFiltersForModel(f config.Filters, modelID string) config.Filters {
+	if len(f.SetParamsByID) == 0 {
+		return f
+	}
+	expanded := config.Filters{
+		StripParams: f.StripParams,
+		SetParams:   f.SetParams,
+	}
+	expanded.SetParamsByID = make(map[string]map[string]any, len(f.SetParamsByID))
+	const modelIDMacro = "${MODEL_ID}"
+	for key, params := range f.SetParamsByID {
+		newKey := strings.ReplaceAll(key, modelIDMacro, modelID)
+		expanded.SetParamsByID[newKey] = params
+	}
+	return expanded
+}
+
 func (p *PeerProxy) HasPeerModel(modelID string) bool {
-	_, found := p.proxyMap[modelID]
+	if _, found := p.proxyMap[modelID]; found {
+		return true
+	}
+	_, found := p.peerAliases[modelID]
 	return found
 }
 
-// GetPeerFilters returns the filters for a peer model, or empty filters if not found
+// RealPeerModelName resolves an alias or model ID to the base model ID.
+func (p *PeerProxy) RealPeerModelName(modelID string) (string, bool) {
+	if _, found := p.proxyMap[modelID]; found {
+		return modelID, true
+	}
+	if realID, found := p.peerAliases[modelID]; found {
+		return realID, true
+	}
+	return "", false
+}
+
+// GetPeerFilters returns the expanded filters for the given model ID (or alias).
 func (p *PeerProxy) GetPeerFilters(modelID string) config.Filters {
-	pp, found := p.proxyMap[modelID]
+	realID, found := p.RealPeerModelName(modelID)
 	if !found {
 		return config.Filters{}
 	}
-	// Get the peer config using the peerID
-	peer, found := p.peers[pp.peerID]
-	if !found {
+	filters, ok := p.modelFilters[realID]
+	if !ok {
 		return config.Filters{}
 	}
-	return peer.Filters
+	return filters
 }
 
 func (p *PeerProxy) ListPeers() config.PeerDictionaryConfig {

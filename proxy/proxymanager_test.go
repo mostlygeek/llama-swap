@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand"
 	"mime/multipart"
 	"net/http"
@@ -1638,6 +1639,118 @@ models:
 		proxy.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, "no", w.Header().Get("X-Accel-Buffering"))
+	})
+}
+
+func TestProxyManager_PeerProxy_SetParamsByID(t *testing.T) {
+	t.Run("setParamsByID alias routes to peer and applies params", func(t *testing.T) {
+		var receivedBody string
+		peerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			receivedBody = string(body)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"response":"ok"}`))
+		}))
+		defer peerServer.Close()
+
+		testConfig := testConfigFromYAML(t, fmt.Sprintf(`
+logLevel: error
+peers:
+  test-peer:
+    proxy: %s
+    models:
+      - peer-model
+    filters:
+      setParams:
+        temperature: 0.5
+      setParamsByID:
+        "${MODEL_ID}:nothink":
+          enable_thinking: false
+        "${MODEL_ID}:high":
+          reasoning_effort: high
+models:
+  local-model:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond local-model
+`, peerServer.URL))
+
+		proxy := New(testConfig)
+		defer proxy.StopProcesses(StopImmediately)
+		injectTestHandlers(proxy, nil)
+
+		tests := []struct {
+			requestedModel  string
+			wantModel       string
+			wantThinking    string
+			wantEffort      string
+			wantTemperature string
+		}{
+			// base model: only setParams applied
+			{requestedModel: "peer-model", wantModel: "peer-model", wantTemperature: "0.5", wantThinking: "", wantEffort: ""},
+			// alias: setParams + setParamsByID[nothink] applied, model rewritten
+			{requestedModel: "peer-model:nothink", wantModel: "peer-model", wantTemperature: "0.5", wantThinking: "false", wantEffort: ""},
+			// alias: setParams + setParamsByID[high] applied, model rewritten
+			{requestedModel: "peer-model:high", wantModel: "peer-model", wantTemperature: "0.5", wantThinking: "", wantEffort: "high"},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.requestedModel, func(t *testing.T) {
+				receivedBody = ""
+				reqBody := fmt.Sprintf(`{"model":%q}`, tt.requestedModel)
+				req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+				w := CreateTestResponseRecorder()
+				proxy.ServeHTTP(w, req)
+				assert.Equal(t, http.StatusOK, w.Code)
+
+				gotModel := gjson.Get(receivedBody, "model").String()
+				assert.Equal(t, tt.wantModel, gotModel, "model field mismatch")
+
+				gotTemperature := gjson.Get(receivedBody, "temperature").String()
+				assert.Equal(t, tt.wantTemperature, gotTemperature, "temperature mismatch")
+
+				gotThinking := gjson.Get(receivedBody, "enable_thinking").String()
+				assert.Equal(t, tt.wantThinking, gotThinking, "enable_thinking mismatch")
+
+				gotEffort := gjson.Get(receivedBody, "reasoning_effort").String()
+				assert.Equal(t, tt.wantEffort, gotEffort, "reasoning_effort mismatch")
+			})
+		}
+	})
+
+	t.Run("peer alias not accessible as local model alias", func(t *testing.T) {
+		peerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"response":"ok"}`))
+		}))
+		defer peerServer.Close()
+
+		testConfig := testConfigFromYAML(t, fmt.Sprintf(`
+logLevel: error
+peers:
+  test-peer:
+    proxy: %s
+    models:
+      - peer-model
+    filters:
+      setParamsByID:
+        "peer-model:nothink":
+          enable_thinking: false
+models:
+  local-model:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond local-model
+`, peerServer.URL))
+
+		proxy := New(testConfig)
+		defer proxy.StopProcesses(StopImmediately)
+		injectTestHandlers(proxy, nil)
+
+		// The peer alias should work
+		reqBody := `{"model":"peer-model:nothink"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
 	})
 }
 

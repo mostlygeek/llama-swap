@@ -521,6 +521,25 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 				}
 				peerConfig.Filters.SetParams = result.(map[string]any)
 			}
+
+			// Substitute in setParamsByID keys and values (type-preserving)
+			// Note: ${MODEL_ID} in keys is intentional and will be expanded per-model later
+			if len(peerConfig.Filters.SetParamsByID) > 0 {
+				newSetParamsByID := make(map[string]map[string]any, len(peerConfig.Filters.SetParamsByID))
+				for key, paramMap := range peerConfig.Filters.SetParamsByID {
+					newKey := strings.ReplaceAll(key, macroSlug, macroStr)
+					newValAny, err := substituteMacroInValue(any(paramMap), entry.Name, entry.Value)
+					if err != nil {
+						return Config{}, fmt.Errorf("peers.%s.filters.setParamsByID: %w", peerName, err)
+					}
+					newParamMap, ok := newValAny.(map[string]any)
+					if !ok {
+						return Config{}, fmt.Errorf("peers.%s.filters.setParamsByID: unexpected type after macro substitution", peerName)
+					}
+					newSetParamsByID[newKey] = newParamMap
+				}
+				peerConfig.Filters.SetParamsByID = newSetParamsByID
+			}
 		}
 
 		// Validate no unknown macros remain
@@ -532,6 +551,19 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		}
 		if len(peerConfig.Filters.SetParams) > 0 {
 			if err := validateNestedForUnknownMacros(peerConfig.Filters.SetParams, fmt.Sprintf("peers.%s.filters.setParams", peerName)); err != nil {
+				return Config{}, err
+			}
+		}
+		// Validate setParamsByID: values must have no unknown macros; keys may contain ${MODEL_ID}
+		for key, paramMap := range peerConfig.Filters.SetParamsByID {
+			if matches := macroPatternRegex.FindAllStringSubmatch(key, -1); len(matches) > 0 {
+				for _, match := range matches {
+					if match[1] != "MODEL_ID" {
+						return Config{}, fmt.Errorf("peers.%s.filters.setParamsByID: unknown macro '${%s}' in key", peerName, match[1])
+					}
+				}
+			}
+			if err := validateNestedForUnknownMacros(any(paramMap), fmt.Sprintf("peers.%s.filters.setParamsByID[%s]", peerName, key)); err != nil {
 				return Config{}, err
 			}
 		}
