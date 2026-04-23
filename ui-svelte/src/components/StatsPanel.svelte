@@ -1,16 +1,7 @@
 <script lang="ts">
   import { inFlightRequests, metrics } from "../stores/api";
   import TokenHistogram from "./TokenHistogram.svelte";
-
-  interface HistogramData {
-    bins: number[];
-    min: number;
-    max: number;
-    binSize: number;
-    p99: number;
-    p95: number;
-    p50: number;
-  }
+  import { buildHistogramData } from "../lib/histogram";
 
   let stats = $derived.by(() => {
     const totalRequests = $metrics.length;
@@ -28,9 +19,8 @@
     const totalInputTokens = $metrics.reduce((sum, m) => sum + m.input_tokens, 0);
     const totalOutputTokens = $metrics.reduce((sum, m) => sum + m.output_tokens, 0);
 
-    // Calculate token statistics using output_tokens and duration_ms
-    const validMetrics = $metrics.filter((m) => m.duration_ms > 0 && m.output_tokens > 0);
-    if (validMetrics.length === 0) {
+    const histogramData = buildHistogramData($metrics);
+    if (histogramData === null) {
       return {
         totalRequests,
         totalInputTokens,
@@ -41,47 +31,15 @@
       };
     }
 
-    // Calculate tokens/second for each valid metric
-    const tokensPerSecond = validMetrics.map((m) => m.output_tokens / (m.duration_ms / 1000));
-
-    // Sort for percentile calculation
-    const sortedTokensPerSecond = [...tokensPerSecond].sort((a, b) => a - b);
-
-    const p99 = sortedTokensPerSecond[Math.floor(sortedTokensPerSecond.length * 0.99)];
-    const p95 = sortedTokensPerSecond[Math.floor(sortedTokensPerSecond.length * 0.95)];
-    const p50 = sortedTokensPerSecond[Math.floor(sortedTokensPerSecond.length * 0.5)];
-
-    // Create histogram data
-    const min = Math.min(...tokensPerSecond);
-    const max = Math.max(...tokensPerSecond);
-    const binCount = Math.min(30, Math.max(10, Math.floor(tokensPerSecond.length / 5)));
-    const binSize = (max - min) / binCount;
-
-    const bins = Array(binCount).fill(0);
-    tokensPerSecond.forEach((value) => {
-      const binIndex = Math.min(Math.floor((value - min) / binSize), binCount - 1);
-      bins[binIndex]++;
-    });
-
-    const histogramData: HistogramData = {
-      bins,
-      min,
-      max,
-      binSize,
-      p99,
-      p95,
-      p50,
-    };
-
     return {
       totalRequests,
       totalInputTokens,
       totalOutputTokens,
       inFlightRequests: $inFlightRequests,
       tokenStats: {
-        p99: p99.toFixed(2),
-        p95: p95.toFixed(2),
-        p50: p50.toFixed(2),
+        p99: histogramData.p99.toFixed(2),
+        p95: histogramData.p95.toFixed(2),
+        p50: histogramData.p50.toFixed(2),
       },
       histogramData,
     };

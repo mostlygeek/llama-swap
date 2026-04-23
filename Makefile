@@ -30,6 +30,7 @@ test-dev: proxy/ui_dist/placeholder.txt
 
 test: proxy/ui_dist/placeholder.txt
 	go test -short -count=1 ./proxy/...
+	cd ui-svelte && npm install --silent && npm run test
 
 # for CI - full test (takes longer)
 test-all: proxy/ui_dist/placeholder.txt
