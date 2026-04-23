@@ -48,6 +48,16 @@ export interface APIEventEnvelope {
   data: string;
 }
 
+export interface HistogramData {
+  bins: number[];
+  min: number;
+  max: number;
+  binSize: number;
+  p99: number;
+  p95: number;
+  p50: number;
+}
+
 export interface VersionInfo {
   build_date: string;
   commit: string;

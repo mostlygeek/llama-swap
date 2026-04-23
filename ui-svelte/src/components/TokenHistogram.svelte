@@ -1,19 +1,7 @@
 <script lang="ts">
-  interface HistogramData {
-    bins: number[];
-    min: number;
-    max: number;
-    binSize: number;
-    p99: number;
-    p95: number;
-    p50: number;
-  }
+  import type { HistogramData } from "../lib/types";
 
-  interface Props {
-    data: HistogramData;
-  }
-
-  let { data }: Props = $props();
+  let { data }: { data: HistogramData } = $props();
 
   const height = 120;
   const padding = { top: 10, right: 15, bottom: 25, left: 45 };
