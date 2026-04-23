@@ -64,7 +64,7 @@
 
 <div class="p-2">
   <h1 class="text-2xl font-bold">Activity</h1>
-  <div class="mt-4">
+  <div class="mt-4 mb-4">
     <ActivityStats />
   </div>
 

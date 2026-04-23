@@ -3,8 +3,8 @@
 
   let { data }: { data: HistogramData } = $props();
 
-  const height = 60;
-  const padding = { top: 5, right: 15, bottom: 20, left: 45 };
+  const height = 55;
+  const padding = { top: 5, right: 45, bottom: 15, left: 45 };
   const viewBoxWidth = 1200;
   const chartWidth = viewBoxWidth - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
@@ -109,9 +109,5 @@
       {data.max.toFixed(1)}
     </text>
 
-    <!-- X-axis label -->
-    <text x={padding.left + chartWidth / 2} y={height - 2} font-size="10" fill="currentColor" opacity="0.6" text-anchor="middle">
-      Tokens/Second Distribution
-    </text>
   </svg>
 </div>
