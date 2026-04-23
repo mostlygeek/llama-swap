@@ -24,6 +24,7 @@ llama-swap is a light weight, transparent proxy server that provides automatic m
 - Run `gofmt -l .` before committing to verify formatting. Fix any reported files with `gofmt -w <file>`.
 - Use `make test-dev` after running new tests for a quick over all test run. This runs `go test` and `staticcheck`. Fix any static checking errors. Use this only when changes are made to any code under the `proxy/` directory
 - Use `make test-all` before completing work. This includes long running concurrency tests.
+- Use `make test-ui` after making changes to the UI in ui-svelte/
 
 ### Commit message example format:
 
