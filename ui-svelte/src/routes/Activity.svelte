@@ -68,32 +68,34 @@
     <ActivityStats />
   </div>
 
-  {#if $metrics.length === 0}
-    <div class="text-center py-8">
-      <p class="text-gray-600">No metrics data available</p>
-    </div>
-  {:else}
-    <div class="card overflow-auto">
-      <table class="min-w-full divide-y">
-        <thead class="border-gray-200 dark:border-white/10">
-          <tr class="text-left text-xs uppercase tracking-wider">
-            <th class="px-6 py-3">ID</th>
-            <th class="px-6 py-3">Time</th>
-            <th class="px-6 py-3">Model</th>
-            <th class="px-6 py-3">
-              Cached <Tooltip content="prompt tokens from cache" />
-            </th>
-            <th class="px-6 py-3">
-              Prompt <Tooltip content="new prompt tokens processed" />
-            </th>
-            <th class="px-6 py-3">Generated</th>
-            <th class="px-6 py-3">Prompt Processing</th>
-            <th class="px-6 py-3">Generation Speed</th>
-            <th class="px-6 py-3">Duration</th>
-            <th class="px-6 py-3">Capture</th>
+  <div class="card overflow-auto">
+    <table class="min-w-full divide-y">
+      <thead class="border-gray-200 dark:border-white/10">
+        <tr class="text-left text-xs uppercase tracking-wider">
+          <th class="px-6 py-3">ID</th>
+          <th class="px-6 py-3">Time</th>
+          <th class="px-6 py-3">Model</th>
+          <th class="px-6 py-3">
+            Cached <Tooltip content="prompt tokens from cache" />
+          </th>
+          <th class="px-6 py-3">
+            Prompt <Tooltip content="new prompt tokens processed" />
+          </th>
+          <th class="px-6 py-3">Generated</th>
+          <th class="px-6 py-3">Prompt Processing</th>
+          <th class="px-6 py-3">Generation Speed</th>
+          <th class="px-6 py-3">Duration</th>
+          <th class="px-6 py-3">Capture</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y">
+        {#if sortedMetrics.length === 0}
+          <tr>
+            <td colspan="10" class="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+              No activity recorded
+            </td>
           </tr>
-        </thead>
-        <tbody class="divide-y">
+        {:else}
           {#each sortedMetrics as metric (metric.id)}
             <tr class="whitespace-nowrap text-sm border-gray-200 dark:border-white/10">
               <td class="px-4 py-4">{metric.id + 1}</td>
@@ -120,10 +122,10 @@
               </td>
             </tr>
           {/each}
-        </tbody>
-      </table>
-    </div>
-  {/if}
+        {/if}
+      </tbody>
+    </table>
+  </div>
 </div>
 
 <CaptureDialog capture={selectedCapture} open={dialogOpen} onclose={closeDialog} />
