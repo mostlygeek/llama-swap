@@ -3,9 +3,9 @@
 
   let { data }: { data: HistogramData } = $props();
 
-  const height = 120;
-  const padding = { top: 10, right: 15, bottom: 25, left: 45 };
-  const viewBoxWidth = 600;
+  const height = 60;
+  const padding = { top: 5, right: 15, bottom: 20, left: 45 };
+  const viewBoxWidth = 1200;
   const chartWidth = viewBoxWidth - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
 
