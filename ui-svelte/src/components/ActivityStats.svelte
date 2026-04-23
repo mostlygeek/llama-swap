@@ -47,7 +47,9 @@
       </svg>
       Tokens/sec Distribution
     </button>
-    {!$histogramCollapsed && <TokenHistogram data={stats.histogramData} />}
+    {#if !$histogramCollapsed}
+      <TokenHistogram data={stats.histogramData} />
+    {/if}
   {/if}
   <div class="flex flex-wrap items-center gap-x-6 gap-y-1 px-4 pb-3 text-sm text-gray-700 dark:text-gray-300">
     <span>
