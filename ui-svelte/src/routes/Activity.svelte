@@ -1,5 +1,6 @@
 <script lang="ts">
   import { metrics, getCapture } from "../stores/api";
+  import ActivityStats from "../components/ActivityStats.svelte";
   import Tooltip from "../components/Tooltip.svelte";
   import CaptureDialog from "../components/CaptureDialog.svelte";
   import type { ReqRespCapture } from "../lib/types";
@@ -63,6 +64,9 @@
 
 <div class="p-2">
   <h1 class="text-2xl font-bold">Activity</h1>
+  <div class="mt-4">
+    <ActivityStats />
+  </div>
 
   {#if $metrics.length === 0}
     <div class="text-center py-8">
