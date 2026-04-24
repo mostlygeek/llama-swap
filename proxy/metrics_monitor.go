@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/mostlygeek/llama-swap/proxy/config"
 	"github.com/klauspost/compress/zstd"
 	"github.com/mostlygeek/llama-swap/event"
 	"github.com/tidwall/gjson"
@@ -95,6 +96,7 @@ func (e TokenMetricsEvent) Type() uint32 {
 
 // metricsMonitor parses llama-server output for token statistics
 type metricsMonitor struct {
+	config   config.Config
 	mu         sync.RWMutex
 	metrics    []TokenMetrics
 	maxMetrics int
@@ -111,8 +113,9 @@ type metricsMonitor struct {
 
 // newMetricsMonitor creates a new metricsMonitor. captureBufferMB is the
 // capture buffer size in megabytes; 0 disables captures.
-func newMetricsMonitor(logger *LogMonitor, maxMetrics int, captureBufferMB int) *metricsMonitor {
+func newMetricsMonitor(cfg config.Config, logger *LogMonitor, maxMetrics int, captureBufferMB int) *metricsMonitor {
 	return &metricsMonitor{
+		config:     cfg,
 		logger:         logger,
 		maxMetrics:     maxMetrics,
 		enableCaptures: captureBufferMB > 0,
@@ -130,6 +133,10 @@ func (mp *metricsMonitor) addMetrics(metric TokenMetrics) int {
 	defer mp.mu.Unlock()
 
 	metric.ID = mp.nextID
+	// Resolve modelID to display name (first alias or modelID itself)
+	if modelConfig, exists := mp.config.Models[metric.Model]; exists && len(modelConfig.Aliases) > 0 {
+		metric.Model = modelConfig.Aliases[0]
+	}
 	mp.nextID++
 	mp.metrics = append(mp.metrics, metric)
 	if len(mp.metrics) > mp.maxMetrics {
