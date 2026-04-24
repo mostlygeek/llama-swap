@@ -38,8 +38,16 @@ if [ "$VERSION" = "latest" ]; then
     echo "Latest version: ${VERSION}"
 fi
 
+
+ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64) ARCH="amd64" ;;
+    aarch64|arm64) ARCH="arm64" ;;
+    *) echo "FATAL: Unsupported architecture: $ARCH" >&2; exit 1 ;;
+esac
+
 # Download and extract
-URL="https://github.com/${REPO}/releases/download/v${VERSION}/llama-swap_${VERSION}_linux_amd64.tar.gz"
+URL="https://github.com/${REPO}/releases/download/v${VERSION}/llama-swap_${VERSION}_linux_${ARCH}.tar.gz"
 echo "=== Downloading llama-swap v${VERSION} ==="
 echo "URL: $URL"
 curl -fSL -o /tmp/llama-swap.tar.gz "$URL"
