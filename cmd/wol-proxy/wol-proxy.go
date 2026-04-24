@@ -173,11 +173,16 @@ func (w *proxyResponseWriter) Unwrap() http.ResponseWriter {
 func newProxy(url *url.URL) *proxyServer {
 	p := httputil.NewSingleHostReverseProxy(url)
 
+	dialer := &net.Dialer{
+		Timeout:   10 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+	if *flagSourceIP != "" {
+		dialer.LocalAddr = &net.TCPAddr{IP: net.ParseIP(*flagSourceIP)}
+	}
+
 	p.Transport = &http.Transport{
-		DialContext: (&net.Dialer{
-			Timeout:   10 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
+		DialContext:           dialer.DialContext,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 0,
 		MaxIdleConns:          50,
@@ -232,6 +237,12 @@ func newProxy(url *url.URL) *proxyServer {
 		eventsUrl := url.Scheme + "://" + url.Host + "/api/events"
 		client := &http.Client{
 			Timeout: 0,
+			Transport: &http.Transport{
+				DialContext:           dialer.DialContext,
+				TLSHandshakeTimeout:   10 * time.Second,
+				ResponseHeaderTimeout: 0,
+				IdleConnTimeout:       90 * time.Second,
+			},
 		}
 
 		waitDuration := 10 * time.Second
