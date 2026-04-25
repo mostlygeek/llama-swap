@@ -52,14 +52,14 @@ describe("calculateHistogramData", () => {
       const values = Array.from({ length: 100 }, (_, i) => i);
       const result = calculateHistogramData(values);
       expect(result).not.toBeNull();
-      expect(result!.bins.length).toBe(20);
+      expect(result!.bins.length).toBe(8);
       const binSum = result!.bins.reduce((s, b) => s + b, 0);
       expect(binSum).toBe(100);
     });
 
     it("places values in correct bins", () => {
       const values = [1, 1, 1, 5, 5, 9, 9, 9];
-      const result = calculateHistogramData(values, { minBins: 3, maxBins: 3, binScaling: 1 });
+      const result = calculateHistogramData(values, { minBins: 3, maxBins: 3 });
       expect(result).not.toBeNull();
       expect(result!.bins.length).toBe(3);
       expect(result!.bins.reduce((s, b) => s + b, 0)).toBe(8);
@@ -114,27 +114,31 @@ describe("calculateHistogramData", () => {
 
   describe("bin count adaptation", () => {
     it("uses minimum bins for small datasets", () => {
-      const values = Array.from({ length: 20 }, (_, i) => i);
+      // n=8: sturges=4, clamped up to minBins=5
+      const values = Array.from({ length: 8 }, (_, i) => i);
       const result = calculateHistogramData(values);
-      expect(result!.bins.length).toBe(10);
+      expect(result!.bins.length).toBe(5);
     });
 
     it("scales bins with dataset size", () => {
+      // n=100: sturges=8
       const values = Array.from({ length: 100 }, (_, i) => i);
       const result = calculateHistogramData(values);
-      expect(result!.bins.length).toBe(20);
+      expect(result!.bins.length).toBe(8);
     });
 
     it("caps bins at maximum", () => {
-      const values = Array.from({ length: 200 }, (_, i) => i);
-      const result = calculateHistogramData(values);
-      expect(result!.bins.length).toBe(30);
+      // n=1000: sturges=11, clamped down to maxBins=10
+      const values = Array.from({ length: 1000 }, (_, i) => i);
+      const result = calculateHistogramData(values, { minBins: 5, maxBins: 10 });
+      expect(result!.bins.length).toBe(10);
     });
 
     it("respects custom options", () => {
+      // n=100: sturges=8, within [minBins=5, maxBins=10]
       const values = Array.from({ length: 100 }, (_, i) => i);
-      const result = calculateHistogramData(values, { minBins: 5, maxBins: 10, binScaling: 2 });
-      expect(result!.bins.length).toBe(10);
+      const result = calculateHistogramData(values, { minBins: 5, maxBins: 10 });
+      expect(result!.bins.length).toBe(8);
     });
   });
 
