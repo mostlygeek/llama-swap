@@ -57,7 +57,7 @@
   {#if !$histogramCollapsed}
     <div class="flex gap-4 px-4 pb-2">
       <div class="flex-1 min-w-0">
-        <div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Prompt Processing</div>
+        <div class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Prompt Processing</div>
         {#if stats.promptHistogramData}
           <TokenHistogram
             data={stats.promptHistogramData}
@@ -71,7 +71,7 @@
         {/if}
       </div>
       <div class="flex-1 min-w-0">
-        <div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Token Generation</div>
+        <div class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Token Generation</div>
         {#if stats.genHistogramData}
           <TokenHistogram
             data={stats.genHistogramData}
@@ -84,20 +84,20 @@
         {/if}
       </div>
     </div>
+    <div class="grid grid-cols-3 gap-x-6 gap-y-1 px-4 pb-3 text-sm">
+      <div class="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">Requests</div>
+      <div class="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">Processed</div>
+      <div class="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">Generated</div>
+      <div class="text-sm text-gray-700 dark:text-gray-300">
+        <span class="font-semibold">{nf.format(stats.totalRequests)}</span> completed,
+        <span class="font-semibold">{nf.format(stats.inFlightRequests)}</span> waiting
+      </div>
+      <div class="text-sm text-gray-700 dark:text-gray-300">
+        <span class="font-semibold">{nf.format(stats.totalInputTokens)}</span> tokens
+      </div>
+      <div class="text-sm text-gray-700 dark:text-gray-300">
+        <span class="font-semibold">{nf.format(stats.totalOutputTokens)}</span> tokens
+      </div>
+    </div>
   {/if}
-  <div class="grid grid-cols-3 gap-x-6 gap-y-1 px-4 pb-3 text-sm">
-    <div class="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">Requests</div>
-    <div class="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">Processed</div>
-    <div class="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">Generated</div>
-    <div class="text-sm text-gray-700 dark:text-gray-300">
-      <span class="font-semibold">{nf.format(stats.totalRequests)}</span> completed,
-      <span class="font-semibold">{nf.format(stats.inFlightRequests)}</span> waiting
-    </div>
-    <div class="text-sm text-gray-700 dark:text-gray-300">
-      <span class="font-semibold">{nf.format(stats.totalInputTokens)}</span> tokens
-    </div>
-    <div class="text-sm text-gray-700 dark:text-gray-300">
-      <span class="font-semibold">{nf.format(stats.totalOutputTokens)}</span> tokens
-    </div>
-  </div>
 </div>
