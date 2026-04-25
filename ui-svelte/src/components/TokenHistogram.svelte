@@ -1,7 +1,11 @@
 <script lang="ts">
   import type { HistogramData } from "../lib/types";
 
-  let { data }: { data: HistogramData } = $props();
+  let { data, unit = "tokens/sec", colorClass = "text-blue-500 dark:text-blue-400" }: {
+    data: HistogramData;
+    unit?: string;
+    colorClass?: string;
+  } = $props();
 
   const height = 55;
   const padding = { top: 5, right: 45, bottom: 15, left: 45 };
@@ -57,9 +61,9 @@
           height={barHeight}
           fill="currentColor"
           opacity="0.6"
-          class="text-blue-500 dark:text-blue-400 hover:opacity-90 transition-opacity cursor-pointer"
+          class="{colorClass} hover:opacity-90 transition-opacity cursor-pointer"
         />
-        <title>{`${binStart.toFixed(1)} - ${binEnd.toFixed(1)} tokens/sec\nCount: ${count}`}</title>
+        <title>{`${binStart.toFixed(1)} - ${binEnd.toFixed(1)} ${unit}\nCount: ${count}`}</title>
       </g>
     {/each}
 

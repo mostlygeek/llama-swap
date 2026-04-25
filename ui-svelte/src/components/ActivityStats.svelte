@@ -12,11 +12,19 @@
     const totalInputTokens = $metrics.reduce((sum, m) => sum + m.input_tokens, 0);
     const totalOutputTokens = $metrics.reduce((sum, m) => sum + m.output_tokens, 0);
 
+    const promptPerSecond = $metrics
+      .filter((m) => m.prompt_per_second > 0)
+      .map((m) => m.prompt_per_second);
+
     const tokensPerSecond = $metrics
       .filter((m) => m.tokens_per_second > 0)
       .map((m) => m.tokens_per_second);
 
-    const histogramData = tokensPerSecond.length > 0
+    const promptHistogramData = promptPerSecond.length > 0
+      ? calculateHistogramData(promptPerSecond, { minBins: 20, maxBins: 80, binScaling: 3 })
+      : null;
+
+    const genHistogramData = tokensPerSecond.length > 0
       ? calculateHistogramData(tokensPerSecond, { minBins: 20, maxBins: 80, binScaling: 3 })
       : null;
 
@@ -25,7 +33,8 @@
       totalInputTokens,
       totalOutputTokens,
       inFlightRequests: $inFlightRequests,
-      histogramData,
+      promptHistogramData,
+      genHistogramData,
     };
   });
 </script>
@@ -43,16 +52,38 @@
     >
       <path d="M4.5 6l3.5 4 3.5-4H4.5z" />
     </svg>
-    Tokens/sec Distribution
+    Speed Distribution
   </button>
   {#if !$histogramCollapsed}
-    {#if stats.histogramData}
-      <TokenHistogram data={stats.histogramData} />
-    {:else}
-      <div class="px-4 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
-        No token speed data yet
+    <div class="flex gap-4 px-4 pb-2">
+      <div class="flex-1 min-w-0">
+        <div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Prompt Processing</div>
+        {#if stats.promptHistogramData}
+          <TokenHistogram
+            data={stats.promptHistogramData}
+            unit="prompt tokens/sec"
+            colorClass="text-amber-500 dark:text-amber-400"
+          />
+        {:else}
+          <div class="py-6 text-center text-sm text-gray-500 dark:text-gray-400">
+            No prompt speed data yet
+          </div>
+        {/if}
       </div>
-    {/if}
+      <div class="flex-1 min-w-0">
+        <div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Token Generation</div>
+        {#if stats.genHistogramData}
+          <TokenHistogram
+            data={stats.genHistogramData}
+            unit="tokens/sec"
+          />
+        {:else}
+          <div class="py-6 text-center text-sm text-gray-500 dark:text-gray-400">
+            No generation speed data yet
+          </div>
+        {/if}
+      </div>
+    </div>
   {/if}
   <div class="grid grid-cols-3 gap-x-6 gap-y-1 px-4 pb-3 text-sm">
     <div class="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">Requests</div>
