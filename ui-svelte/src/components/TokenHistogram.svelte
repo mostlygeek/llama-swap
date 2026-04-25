@@ -12,7 +12,7 @@
   } = $props();
 
   const height = 250;
-  const padding = { top: 5, right: 45, bottom: 15, left: 45 };
+  const padding = { top: 30, right: 20, bottom: 40, left: 75 };
   const viewBoxWidth = 1200;
   const chartWidth = viewBoxWidth - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
@@ -38,6 +38,24 @@
       stroke-width="1"
       opacity="0.3"
     />
+
+    <!-- Y-axis ticks and labels -->
+    {#each [0, 0.5, 1] as fraction}
+      {@const tickCount = Math.round(maxCount * fraction)}
+      {@const tickY = height - padding.bottom - fraction * chartHeight}
+      <line
+        x1={padding.left - 8}
+        y1={tickY}
+        x2={padding.left}
+        y2={tickY}
+        stroke="currentColor"
+        stroke-width="1"
+        opacity="0.4"
+      />
+      <text x={padding.left - 10} y={tickY + 10} font-size="26" fill="currentColor" opacity="0.8" text-anchor="end">
+        {tickCount}
+      </text>
+    {/each}
 
     <!-- X-axis -->
     <line
@@ -109,16 +127,16 @@
     />
 
     <!-- X-axis labels -->
-    <text x={padding.left} y={height - 5} font-size="10" fill="currentColor" opacity="0.6" text-anchor="start">
+    <text x={padding.left} y={height - 8} font-size="26" fill="currentColor" opacity="0.8" text-anchor="start">
       {data.min.toFixed(1)}
     </text>
 
     <text
       x={viewBoxWidth - padding.right}
-      y={height - 5}
-      font-size="10"
+      y={height - 8}
+      font-size="26"
       fill="currentColor"
-      opacity="0.6"
+      opacity="0.8"
       text-anchor="end"
     >
       {data.max.toFixed(1)}

@@ -3,13 +3,11 @@ import type { HistogramData } from "./types";
 export interface HistogramOptions {
   minBins?: number;
   maxBins?: number;
-  binScaling?: number;
 }
 
 const DEFAULT_OPTIONS: HistogramOptions = {
-  minBins: 10,
-  maxBins: 30,
-  binScaling: 5,
+  minBins: 5,
+  maxBins: 20,
 };
 
 function percentile(sorted: number[], p: number): number {
@@ -50,8 +48,9 @@ export function calculateHistogramData(
     };
   }
 
-  const { minBins = 10, maxBins = 30, binScaling = 5 } = options;
-  const binCount = Math.min(maxBins, Math.max(minBins, Math.floor(values.length / binScaling)));
+  const { minBins = 5, maxBins = 20 } = options;
+  const sturges = Math.ceil(Math.log2(values.length)) + 1;
+  const binCount = Math.min(maxBins, Math.max(minBins, sturges));
   const binSize = (max - min) / binCount;
 
   const bins = new Array(binCount).fill(0);
