@@ -50,7 +50,7 @@
     <a
       href="/"
       use:link
-      class="p-1 whitespace-nowrap {isActive('/', $currentRoute) ? 'font-semibold' : ''} {$playgroundActivity ? 'activity-link' : 'text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100'}"
+      class="p-1 whitespace-nowrap {isActive('/', $currentRoute) ? 'font-semibold underline underline-offset-4' : ''} {$playgroundActivity ? 'activity-link' : 'text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100'}"
     >
       Playground
     </a>
@@ -59,6 +59,8 @@
       use:link
       class="text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1 whitespace-nowrap"
       class:font-semibold={isActive("/models", $currentRoute)}
+      class:underline={isActive("/models", $currentRoute)}
+      class:underline-offset-4={isActive("/models", $currentRoute)}
     >
       Models
     </a>
@@ -67,6 +69,8 @@
       use:link
       class="text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1 whitespace-nowrap"
       class:font-semibold={isActive("/activity", $currentRoute)}
+      class:underline={isActive("/activity", $currentRoute)}
+      class:underline-offset-4={isActive("/activity", $currentRoute)}
     >
       Activity
     </a>
@@ -75,6 +79,8 @@
       use:link
       class="text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1 whitespace-nowrap"
       class:font-semibold={isActive("/logs", $currentRoute)}
+      class:underline={isActive("/logs", $currentRoute)}
+      class:underline-offset-4={isActive("/logs", $currentRoute)}
     >
       Logs
     </a>
