@@ -1,13 +1,17 @@
 <script lang="ts">
   import type { HistogramData } from "../lib/types";
 
-  let { data, unit = "tokens/sec", colorClass = "text-blue-500 dark:text-blue-400" }: {
+  let {
+    data,
+    unit = "tokens/sec",
+    colorClass = "text-blue-500 dark:text-blue-400",
+  }: {
     data: HistogramData;
     unit?: string;
     colorClass?: string;
   } = $props();
 
-  const height = 55;
+  const height = 250;
   const padding = { top: 5, right: 45, bottom: 15, left: 45 };
   const viewBoxWidth = 1200;
   const chartWidth = viewBoxWidth - padding.left - padding.right;
@@ -109,9 +113,15 @@
       {data.min.toFixed(1)}
     </text>
 
-    <text x={viewBoxWidth - padding.right} y={height - 5} font-size="10" fill="currentColor" opacity="0.6" text-anchor="end">
+    <text
+      x={viewBoxWidth - padding.right}
+      y={height - 5}
+      font-size="10"
+      fill="currentColor"
+      opacity="0.6"
+      text-anchor="end"
+    >
       {data.max.toFixed(1)}
     </text>
-
   </svg>
 </div>
