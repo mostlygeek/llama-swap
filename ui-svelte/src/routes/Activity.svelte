@@ -4,6 +4,7 @@
   import Tooltip from "../components/Tooltip.svelte";
   import CaptureDialog from "../components/CaptureDialog.svelte";
   import { persistentStore } from "../stores/persistent";
+  import { onMount } from "svelte";
   import type { ReqRespCapture } from "../lib/types";
 
   type ColumnKey =
@@ -51,6 +52,16 @@
   );
 
   let columnsMenuOpen = $state(false);
+
+  onMount(() => {
+    function handleKeydown(e: KeyboardEvent) {
+      if (e.key === "Escape" && columnsMenuOpen) {
+        columnsMenuOpen = false;
+      }
+    }
+    document.addEventListener("keydown", handleKeydown);
+    return () => document.removeEventListener("keydown", handleKeydown);
+  });
 
   function toggleColumn(key: ColumnKey) {
     const current = $visibleColumns;
@@ -125,7 +136,7 @@
     <ActivityStats />
   </div>
 
-  <div class="card overflow-auto relative">
+  <div class="card overflow-auto relative min-h-[30rem]">
     <div class="flex justify-end px-4">
       <div class="relative">
         <button
