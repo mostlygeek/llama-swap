@@ -245,19 +245,37 @@ func (mp *metricsMonitor) getMetricsJSON() ([]byte, error) {
 	return json.Marshal(mp.metrics)
 }
 
-// wrapHandler wraps the proxy handler to extract token metrics
+// Capture field flags for controlling what is saved in ReqRespCapture.
+type captureFields uint
+
+const (
+	captureReqHeaders captureFields = 1 << iota
+	captureReqBody
+	captureRespHeaders
+	captureRespBody
+)
+
+const (
+	captureReqAll  = captureReqHeaders | captureReqBody
+	captureRespAll = captureRespHeaders | captureRespBody
+	captureAll     = captureReqAll | captureRespAll
+)
+
+// wrapHandler wraps the proxy handler to extract token metrics.
+// captureFields controls what is saved in the ReqRespCapture using bitwise flags.
 // if wrapHandler returns an error it is safe to assume that no
 // data was sent to the client
 func (mp *metricsMonitor) wrapHandler(
 	modelID string,
 	writer gin.ResponseWriter,
 	request *http.Request,
+	captureFields captureFields,
 	next func(modelID string, w http.ResponseWriter, r *http.Request) error,
 ) error {
 	// Capture request body and headers if captures enabled
 	var reqBody []byte
 	var reqHeaders map[string]string
-	if mp.enableCaptures {
+	if mp.enableCaptures && (captureFields&captureReqBody) != 0 {
 		if request.Body != nil {
 			var err error
 			reqBody, err = io.ReadAll(request.Body)
@@ -267,6 +285,8 @@ func (mp *metricsMonitor) wrapHandler(
 			request.Body.Close()
 			request.Body = io.NopCloser(bytes.NewBuffer(reqBody))
 		}
+	}
+	if mp.enableCaptures && (captureFields&captureReqHeaders) != 0 {
 		reqHeaders = make(map[string]string)
 		for key, values := range request.Header {
 			if len(values) > 0 {
@@ -360,20 +380,27 @@ func (mp *metricsMonitor) wrapHandler(
 	// Build capture if enabled and determine if it will be stored
 	var capture *ReqRespCapture
 	if mp.enableCaptures {
-		respHeaders := make(map[string]string)
-		for key, values := range recorder.Header() {
-			if len(values) > 0 {
-				respHeaders[key] = values[0]
+		var respHeaders map[string]string
+		var respBody []byte
+		if (captureFields & captureRespHeaders) != 0 {
+			respHeaders = make(map[string]string)
+			for key, values := range recorder.Header() {
+				if len(values) > 0 {
+					respHeaders[key] = values[0]
+				}
 			}
+			redactHeaders(respHeaders)
+			delete(respHeaders, "Content-Encoding")
 		}
-		redactHeaders(respHeaders)
-		delete(respHeaders, "Content-Encoding")
+		if (captureFields & captureRespBody) != 0 {
+			respBody = body
+		}
 		capture = &ReqRespCapture{
 			ReqPath:     request.URL.Path,
 			ReqHeaders:  reqHeaders,
 			ReqBody:     reqBody,
 			RespHeaders: respHeaders,
-			RespBody:    body,
+			RespBody:    respBody,
 		}
 		compressed, _, err := compressCapture(capture)
 		if err == nil && len(compressed) <= mp.maxCaptureSize {
