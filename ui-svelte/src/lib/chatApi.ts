@@ -25,7 +25,7 @@ function parseSSELine(line: string): StreamChunk | null {
     const parsed = JSON.parse(data);
     const delta = parsed.choices?.[0]?.delta;
     const content = delta?.content || "";
-    const reasoning_content = delta?.reasoning_content || "";
+    const reasoning_content = delta?.reasoning_content || delta?.reasoning || "";
 
     if (content || reasoning_content) {
       return { content, reasoning_content, done: false };
