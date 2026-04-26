@@ -106,6 +106,7 @@
         const delta = parsed.choices?.[0]?.delta;
         if (delta?.content) result.content += delta.content;
         if (delta?.reasoning_content) result.reasoning += delta.reasoning_content;
+        if (delta?.reasoning) result.reasoning += delta.reasoning;
       } catch {
         // skip unparseable lines
       }
