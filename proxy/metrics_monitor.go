@@ -70,21 +70,26 @@ func decompressCapture(data []byte) (*ReqRespCapture, error) {
 	return &capture, nil
 }
 
+// TokenMetrics holds token usage and performance metrics
+type TokenMetrics struct {
+	CachedTokens    int     `json:"cache_tokens"`
+	InputTokens     int     `json:"input_tokens"`
+	OutputTokens    int     `json:"output_tokens"`
+	PromptPerSecond float64 `json:"prompt_per_second"`
+	TokensPerSecond float64 `json:"tokens_per_second"`
+}
+
 // ActivityLogEntry represents parsed token statistics from llama-server logs
 type ActivityLogEntry struct {
-	ID              int       `json:"id"`
-	Timestamp       time.Time `json:"timestamp"`
-	Model           string    `json:"model"`
-	ReqPath         string    `json:"req_path"`
-	RespContentType string    `json:"resp_content_type"`
-	RespStatusCode  int       `json:"resp_status_code"`
-	CachedTokens    int       `json:"cache_tokens"`
-	InputTokens     int       `json:"input_tokens"`
-	OutputTokens    int       `json:"output_tokens"`
-	PromptPerSecond float64   `json:"prompt_per_second"`
-	TokensPerSecond float64   `json:"tokens_per_second"`
-	DurationMs      int       `json:"duration_ms"`
-	HasCapture      bool      `json:"has_capture"`
+	ID              int          `json:"id"`
+	Timestamp       time.Time    `json:"timestamp"`
+	Model           string       `json:"model"`
+	ReqPath         string       `json:"req_path"`
+	RespContentType string       `json:"resp_content_type"`
+	RespStatusCode  int          `json:"resp_status_code"`
+	Tokens          TokenMetrics `json:"tokens"`
+	DurationMs      int          `json:"duration_ms"`
+	HasCapture      bool         `json:"has_capture"`
 }
 
 type ReqRespCapture struct {
@@ -492,14 +497,16 @@ func parseMetrics(modelID string, start time.Time, usage, timings gjson.Result) 
 	}
 
 	return ActivityLogEntry{
-		Timestamp:       time.Now(),
-		Model:           modelID,
-		CachedTokens:    cachedTokens,
-		InputTokens:     inputTokens,
-		OutputTokens:    outputTokens,
-		PromptPerSecond: promptPerSecond,
-		TokensPerSecond: tokensPerSecond,
-		DurationMs:      durationMs,
+		Timestamp: time.Now(),
+		Model:     modelID,
+		Tokens: TokenMetrics{
+			CachedTokens:    cachedTokens,
+			InputTokens:     inputTokens,
+			OutputTokens:    outputTokens,
+			PromptPerSecond: promptPerSecond,
+			TokensPerSecond: tokensPerSecond,
+		},
+		DurationMs: durationMs,
 	}, nil
 }
 

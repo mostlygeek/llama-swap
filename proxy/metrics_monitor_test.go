@@ -24,9 +24,11 @@ func TestMetricsMonitor_AddMetrics(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10, 0)
 
 		metric := ActivityLogEntry{
-			Model:        "test-model",
-			InputTokens:  100,
-			OutputTokens: 50,
+			Model: "test-model",
+			Tokens: TokenMetrics{
+				InputTokens:  100,
+				OutputTokens: 50,
+			},
 		}
 
 		mm.addMetrics(metric)
@@ -35,8 +37,8 @@ func TestMetricsMonitor_AddMetrics(t *testing.T) {
 		assert.Equal(t, 1, len(metrics))
 		assert.Equal(t, 0, metrics[0].ID)
 		assert.Equal(t, "test-model", metrics[0].Model)
-		assert.Equal(t, 100, metrics[0].InputTokens)
-		assert.Equal(t, 50, metrics[0].OutputTokens)
+		assert.Equal(t, 100, metrics[0].Tokens.InputTokens)
+		assert.Equal(t, 50, metrics[0].Tokens.OutputTokens)
 	})
 
 	t.Run("increments ID for each metric", func(t *testing.T) {
@@ -59,8 +61,10 @@ func TestMetricsMonitor_AddMetrics(t *testing.T) {
 		// Add 5 metrics
 		for i := 0; i < 5; i++ {
 			mm.addMetrics(ActivityLogEntry{
-				Model:       "model",
-				InputTokens: i,
+				Model: "model",
+				Tokens: TokenMetrics{
+					InputTokens: i,
+				},
 			})
 		}
 
@@ -83,9 +87,11 @@ func TestMetricsMonitor_AddMetrics(t *testing.T) {
 		defer cancel()
 
 		metric := ActivityLogEntry{
-			Model:        "test-model",
-			InputTokens:  100,
-			OutputTokens: 50,
+			Model: "test-model",
+			Tokens: TokenMetrics{
+				InputTokens:  100,
+				OutputTokens: 50,
+			},
 		}
 
 		mm.addMetrics(metric)
@@ -94,8 +100,8 @@ func TestMetricsMonitor_AddMetrics(t *testing.T) {
 		case evt := <-receivedEvent:
 			assert.Equal(t, 0, evt.Metrics.ID)
 			assert.Equal(t, "test-model", evt.Metrics.Model)
-			assert.Equal(t, 100, evt.Metrics.InputTokens)
-			assert.Equal(t, 50, evt.Metrics.OutputTokens)
+			assert.Equal(t, 100, evt.Metrics.Tokens.InputTokens)
+			assert.Equal(t, 50, evt.Metrics.Tokens.OutputTokens)
 		case <-time.After(1 * time.Second):
 			t.Fatal("timeout waiting for event")
 		}
@@ -145,16 +151,20 @@ func TestMetricsMonitor_GetMetricsJSON(t *testing.T) {
 	t.Run("returns valid JSON with metrics", func(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10, 0)
 		mm.addMetrics(ActivityLogEntry{
-			Model:           "model1",
-			InputTokens:     100,
-			OutputTokens:    50,
-			TokensPerSecond: 25.5,
+			Model: "model1",
+			Tokens: TokenMetrics{
+				InputTokens:     100,
+				OutputTokens:    50,
+				TokensPerSecond: 25.5,
+			},
 		})
 		mm.addMetrics(ActivityLogEntry{
-			Model:           "model2",
-			InputTokens:     200,
-			OutputTokens:    100,
-			TokensPerSecond: 30.0,
+			Model: "model2",
+			Tokens: TokenMetrics{
+				InputTokens:     200,
+				OutputTokens:    100,
+				TokensPerSecond: 30.0,
+			},
 		})
 
 		jsonData, err := mm.getMetricsJSON()
@@ -197,8 +207,8 @@ func TestMetricsMonitor_WrapHandler(t *testing.T) {
 		metrics := mm.getMetrics()
 		assert.Equal(t, 1, len(metrics))
 		assert.Equal(t, "test-model", metrics[0].Model)
-		assert.Equal(t, 100, metrics[0].InputTokens)
-		assert.Equal(t, 50, metrics[0].OutputTokens)
+		assert.Equal(t, 100, metrics[0].Tokens.InputTokens)
+		assert.Equal(t, 50, metrics[0].Tokens.OutputTokens)
 	})
 
 	t.Run("successful request with timings data", func(t *testing.T) {
@@ -233,11 +243,11 @@ func TestMetricsMonitor_WrapHandler(t *testing.T) {
 		metrics := mm.getMetrics()
 		assert.Equal(t, 1, len(metrics))
 		assert.Equal(t, "test-model", metrics[0].Model)
-		assert.Equal(t, 100, metrics[0].InputTokens)
-		assert.Equal(t, 50, metrics[0].OutputTokens)
-		assert.Equal(t, 20, metrics[0].CachedTokens)
-		assert.Equal(t, 150.5, metrics[0].PromptPerSecond)
-		assert.Equal(t, 25.5, metrics[0].TokensPerSecond)
+		assert.Equal(t, 100, metrics[0].Tokens.InputTokens)
+		assert.Equal(t, 50, metrics[0].Tokens.OutputTokens)
+		assert.Equal(t, 20, metrics[0].Tokens.CachedTokens)
+		assert.Equal(t, 150.5, metrics[0].Tokens.PromptPerSecond)
+		assert.Equal(t, 25.5, metrics[0].Tokens.TokensPerSecond)
 		assert.Equal(t, 2000, metrics[0].DurationMs) // 500 + 1500
 	})
 
@@ -273,8 +283,8 @@ data: [DONE]
 		assert.Equal(t, 1, len(metrics))
 		assert.Equal(t, "test-model", metrics[0].Model)
 		// When timings data is present, it takes precedence
-		assert.Equal(t, 10, metrics[0].InputTokens)
-		assert.Equal(t, 20, metrics[0].OutputTokens)
+		assert.Equal(t, 10, metrics[0].Tokens.InputTokens)
+		assert.Equal(t, 20, metrics[0].Tokens.OutputTokens)
 	})
 
 	t.Run("non-OK status code does not record metrics", func(t *testing.T) {
@@ -315,8 +325,8 @@ data: [DONE]
 		metrics := mm.getMetrics()
 		assert.Equal(t, 1, len(metrics))
 		assert.Equal(t, "test-model", metrics[0].Model)
-		assert.Equal(t, 0, metrics[0].InputTokens)
-		assert.Equal(t, 0, metrics[0].OutputTokens)
+		assert.Equal(t, 0, metrics[0].Tokens.InputTokens)
+		assert.Equal(t, 0, metrics[0].Tokens.OutputTokens)
 	})
 
 	t.Run("invalid JSON records minimal metrics", func(t *testing.T) {
@@ -339,8 +349,8 @@ data: [DONE]
 		metrics := mm.getMetrics()
 		assert.Equal(t, 1, len(metrics))
 		assert.Equal(t, "test-model", metrics[0].Model)
-		assert.Equal(t, 0, metrics[0].InputTokens)
-		assert.Equal(t, 0, metrics[0].OutputTokens)
+		assert.Equal(t, 0, metrics[0].Tokens.InputTokens)
+		assert.Equal(t, 0, metrics[0].Tokens.OutputTokens)
 	})
 
 	t.Run("next handler error is propagated", func(t *testing.T) {
@@ -384,8 +394,8 @@ data: [DONE]
 		metrics := mm.getMetrics()
 		assert.Equal(t, 1, len(metrics))
 		assert.Equal(t, "test-model", metrics[0].Model)
-		assert.Equal(t, 0, metrics[0].InputTokens)
-		assert.Equal(t, 0, metrics[0].OutputTokens)
+		assert.Equal(t, 0, metrics[0].Tokens.InputTokens)
+		assert.Equal(t, 0, metrics[0].Tokens.OutputTokens)
 	})
 
 	t.Run("infill request extracts timings from last array element", func(t *testing.T) {
@@ -423,11 +433,11 @@ data: [DONE]
 		metrics := mm.getMetrics()
 		assert.Equal(t, 1, len(metrics))
 		assert.Equal(t, "test-model", metrics[0].Model)
-		assert.Equal(t, 150, metrics[0].InputTokens)
-		assert.Equal(t, 75, metrics[0].OutputTokens)
-		assert.Equal(t, 30, metrics[0].CachedTokens)
-		assert.Equal(t, 200.5, metrics[0].PromptPerSecond)
-		assert.Equal(t, 35.5, metrics[0].TokensPerSecond)
+		assert.Equal(t, 150, metrics[0].Tokens.InputTokens)
+		assert.Equal(t, 75, metrics[0].Tokens.OutputTokens)
+		assert.Equal(t, 30, metrics[0].Tokens.CachedTokens)
+		assert.Equal(t, 200.5, metrics[0].Tokens.PromptPerSecond)
+		assert.Equal(t, 35.5, metrics[0].Tokens.TokensPerSecond)
 		assert.Equal(t, 2400, metrics[0].DurationMs) // 600 + 1800
 	})
 
@@ -453,8 +463,8 @@ data: [DONE]
 		metrics := mm.getMetrics()
 		assert.Equal(t, 1, len(metrics))
 		assert.Equal(t, "test-model", metrics[0].Model)
-		assert.Equal(t, 0, metrics[0].InputTokens)
-		assert.Equal(t, 0, metrics[0].OutputTokens)
+		assert.Equal(t, 0, metrics[0].Tokens.InputTokens)
+		assert.Equal(t, 0, metrics[0].Tokens.OutputTokens)
 	})
 }
 
@@ -521,9 +531,11 @@ func TestMetricsMonitor_Concurrent(t *testing.T) {
 				defer wg.Done()
 				for j := 0; j < metricsPerGoroutine; j++ {
 					mm.addMetrics(ActivityLogEntry{
-						Model:        "test-model",
-						InputTokens:  id*1000 + j,
-						OutputTokens: j,
+						Model: "test-model",
+						Tokens: TokenMetrics{
+							InputTokens:  id*1000 + j,
+							OutputTokens: j,
+						},
 					})
 				}
 			}(i)
@@ -587,10 +599,10 @@ func TestMetricsMonitor_ParseMetrics(t *testing.T) {
 
 		metrics, err := parseMetrics("test-model", start, usage, timings)
 		assert.NoError(t, err)
-		assert.Equal(t, 5, metrics.InputTokens)
-		assert.Equal(t, 1, metrics.OutputTokens)
-		assert.Equal(t, 10.0, metrics.PromptPerSecond)
-		assert.Equal(t, 2.0, metrics.TokensPerSecond)
+		assert.Equal(t, 5, metrics.Tokens.InputTokens)
+		assert.Equal(t, 1, metrics.Tokens.OutputTokens)
+		assert.Equal(t, 10.0, metrics.Tokens.PromptPerSecond)
+		assert.Equal(t, 2.0, metrics.Tokens.TokensPerSecond)
 		assert.GreaterOrEqual(t, metrics.DurationMs, 5000)
 	})
 
@@ -630,8 +642,8 @@ func TestMetricsMonitor_ParseMetrics(t *testing.T) {
 		metrics := mm.getMetrics()
 		assert.Equal(t, 1, len(metrics))
 		// Should use timings values, not usage values
-		assert.Equal(t, 100, metrics[0].InputTokens)
-		assert.Equal(t, 50, metrics[0].OutputTokens)
+		assert.Equal(t, 100, metrics[0].Tokens.InputTokens)
+		assert.Equal(t, 50, metrics[0].Tokens.OutputTokens)
 	})
 
 	t.Run("handles missing cache_n in timings", func(t *testing.T) {
@@ -664,7 +676,7 @@ func TestMetricsMonitor_ParseMetrics(t *testing.T) {
 
 		metrics := mm.getMetrics()
 		assert.Equal(t, 1, len(metrics))
-		assert.Equal(t, -1, metrics[0].CachedTokens) // Default value when not present
+		assert.Equal(t, -1, metrics[0].Tokens.CachedTokens) // Default value when not present
 	})
 }
 
@@ -699,8 +711,8 @@ data: [DONE]
 
 		metrics := mm.getMetrics()
 		assert.Equal(t, 1, len(metrics))
-		assert.Equal(t, 100, metrics[0].InputTokens)
-		assert.Equal(t, 50, metrics[0].OutputTokens)
+		assert.Equal(t, 100, metrics[0].Tokens.InputTokens)
+		assert.Equal(t, 50, metrics[0].Tokens.OutputTokens)
 	})
 
 	t.Run("handles streaming with no valid JSON records minimal metrics", func(t *testing.T) {
@@ -729,8 +741,8 @@ data: [DONE]
 		metrics := mm.getMetrics()
 		assert.Equal(t, 1, len(metrics))
 		assert.Equal(t, "test-model", metrics[0].Model)
-		assert.Equal(t, 0, metrics[0].InputTokens)
-		assert.Equal(t, 0, metrics[0].OutputTokens)
+		assert.Equal(t, 0, metrics[0].Tokens.InputTokens)
+		assert.Equal(t, 0, metrics[0].Tokens.OutputTokens)
 	})
 
 	t.Run("v1/responses format with nested response.usage", func(t *testing.T) {
@@ -758,8 +770,8 @@ data: [DONE]
 		metrics := mm.getMetrics()
 		assert.Equal(t, 1, len(metrics))
 		assert.Equal(t, "test-model", metrics[0].Model)
-		assert.Equal(t, 17, metrics[0].InputTokens)
-		assert.Equal(t, 23, metrics[0].OutputTokens)
+		assert.Equal(t, 17, metrics[0].Tokens.InputTokens)
+		assert.Equal(t, 23, metrics[0].Tokens.OutputTokens)
 	})
 
 	t.Run("handles empty streaming response records minimal metrics", func(t *testing.T) {
@@ -784,8 +796,8 @@ data: [DONE]
 		metrics := mm.getMetrics()
 		assert.Equal(t, 1, len(metrics))
 		assert.Equal(t, "test-model", metrics[0].Model)
-		assert.Equal(t, 0, metrics[0].InputTokens)
-		assert.Equal(t, 0, metrics[0].OutputTokens)
+		assert.Equal(t, 0, metrics[0].Tokens.InputTokens)
+		assert.Equal(t, 0, metrics[0].Tokens.OutputTokens)
 	})
 }
 
@@ -794,14 +806,16 @@ func BenchmarkMetricsMonitor_AddMetrics(b *testing.B) {
 	mm := newMetricsMonitor(testLogger, 1000, 0)
 
 	metric := ActivityLogEntry{
-		Model:           "test-model",
-		CachedTokens:    100,
-		InputTokens:     500,
-		OutputTokens:    250,
-		PromptPerSecond: 1200.5,
-		TokensPerSecond: 45.8,
-		DurationMs:      5000,
-		Timestamp:       time.Now(),
+		Model: "test-model",
+		Tokens: TokenMetrics{
+			CachedTokens:    100,
+			InputTokens:     500,
+			OutputTokens:    250,
+			PromptPerSecond: 1200.5,
+			TokensPerSecond: 45.8,
+		},
+		DurationMs: 5000,
+		Timestamp:  time.Now(),
 	}
 
 	b.ResetTimer()
@@ -815,14 +829,16 @@ func BenchmarkMetricsMonitor_AddMetrics_SmallBuffer(b *testing.B) {
 	mm := newMetricsMonitor(testLogger, 100, 0)
 
 	metric := ActivityLogEntry{
-		Model:           "test-model",
-		CachedTokens:    100,
-		InputTokens:     500,
-		OutputTokens:    250,
-		PromptPerSecond: 1200.5,
-		TokensPerSecond: 45.8,
-		DurationMs:      5000,
-		Timestamp:       time.Now(),
+		Model: "test-model",
+		Tokens: TokenMetrics{
+			CachedTokens:    100,
+			InputTokens:     500,
+			OutputTokens:    250,
+			PromptPerSecond: 1200.5,
+			TokensPerSecond: 45.8,
+		},
+		DurationMs: 5000,
+		Timestamp:  time.Now(),
 	}
 
 	b.ResetTimer()
@@ -862,8 +878,8 @@ func TestMetricsMonitor_WrapHandler_Compression(t *testing.T) {
 		metrics := mm.getMetrics()
 		assert.Equal(t, 1, len(metrics))
 		assert.Equal(t, "test-model", metrics[0].Model)
-		assert.Equal(t, 100, metrics[0].InputTokens)
-		assert.Equal(t, 50, metrics[0].OutputTokens)
+		assert.Equal(t, 100, metrics[0].Tokens.InputTokens)
+		assert.Equal(t, 50, metrics[0].Tokens.OutputTokens)
 	})
 
 	t.Run("deflate encoded response", func(t *testing.T) {
@@ -896,8 +912,8 @@ func TestMetricsMonitor_WrapHandler_Compression(t *testing.T) {
 		metrics := mm.getMetrics()
 		assert.Equal(t, 1, len(metrics))
 		assert.Equal(t, "test-model", metrics[0].Model)
-		assert.Equal(t, 200, metrics[0].InputTokens)
-		assert.Equal(t, 75, metrics[0].OutputTokens)
+		assert.Equal(t, 200, metrics[0].Tokens.InputTokens)
+		assert.Equal(t, 75, metrics[0].Tokens.OutputTokens)
 	})
 
 	t.Run("invalid gzip data records minimal metrics", func(t *testing.T) {
@@ -924,8 +940,8 @@ func TestMetricsMonitor_WrapHandler_Compression(t *testing.T) {
 		metrics := mm.getMetrics()
 		assert.Equal(t, 1, len(metrics))
 		assert.Equal(t, "test-model", metrics[0].Model)
-		assert.Equal(t, 0, metrics[0].InputTokens)
-		assert.Equal(t, 0, metrics[0].OutputTokens)
+		assert.Equal(t, 0, metrics[0].Tokens.InputTokens)
+		assert.Equal(t, 0, metrics[0].Tokens.OutputTokens)
 	})
 
 	t.Run("unknown encoding treated as uncompressed", func(t *testing.T) {
@@ -950,8 +966,8 @@ func TestMetricsMonitor_WrapHandler_Compression(t *testing.T) {
 
 		metrics := mm.getMetrics()
 		assert.Equal(t, 1, len(metrics))
-		assert.Equal(t, 300, metrics[0].InputTokens)
-		assert.Equal(t, 100, metrics[0].OutputTokens)
+		assert.Equal(t, 300, metrics[0].Tokens.InputTokens)
+		assert.Equal(t, 100, metrics[0].Tokens.OutputTokens)
 	})
 }
 

@@ -100,11 +100,11 @@
               <td class="px-4 py-4">{metric.id + 1}</td>
               <td class="px-6 py-4">{formatRelativeTime(metric.timestamp)}</td>
               <td class="px-6 py-4">{metric.model}</td>
-              <td class="px-6 py-4">{metric.cache_tokens > 0 ? metric.cache_tokens.toLocaleString() : "-"}</td>
-              <td class="px-6 py-4">{metric.input_tokens.toLocaleString()}</td>
-              <td class="px-6 py-4">{metric.output_tokens.toLocaleString()}</td>
-              <td class="px-6 py-4">{formatSpeed(metric.prompt_per_second)}</td>
-              <td class="px-6 py-4">{formatSpeed(metric.tokens_per_second)}</td>
+              <td class="px-6 py-4">{metric.tokens.cache_tokens > 0 ? metric.tokens.cache_tokens.toLocaleString() : "-"}</td>
+              <td class="px-6 py-4">{metric.tokens.input_tokens.toLocaleString()}</td>
+              <td class="px-6 py-4">{metric.tokens.output_tokens.toLocaleString()}</td>
+              <td class="px-6 py-4">{formatSpeed(metric.tokens.prompt_per_second)}</td>
+              <td class="px-6 py-4">{formatSpeed(metric.tokens.tokens_per_second)}</td>
               <td class="px-6 py-4">{formatDuration(metric.duration_ms)}</td>
               <td class="px-6 py-4">
                 {#if metric.has_capture}
