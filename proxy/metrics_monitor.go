@@ -290,16 +290,20 @@ func (mp *metricsMonitor) wrapHandler(
 	// after this point we have to assume that data was sent to the client
 	// and we can only log errors but not send them to clients
 
-	if recorder.Status() != http.StatusOK {
-		mp.logger.Warnf("metrics skipped, HTTP status=%d, path=%s", recorder.Status(), request.URL.Path)
-		return nil
+	// Initialize default metrics - recorded for every request
+	tm := ActivityLogEntry{
+		Timestamp:       time.Now(),
+		Model:           modelID,
+		ReqPath:         request.URL.Path,
+		RespContentType: recorder.Header().Get("Content-Type"),
+		RespStatusCode:  recorder.Status(),
+		DurationMs:      int(time.Since(recorder.StartTime()).Milliseconds()),
 	}
 
-	// Initialize default metrics - these will always be recorded
-	tm := ActivityLogEntry{
-		Timestamp:  time.Now(),
-		Model:      modelID,
-		DurationMs: int(time.Since(recorder.StartTime()).Milliseconds()),
+	if recorder.Status() != http.StatusOK {
+		mp.logger.Warnf("non-200 response, recording partial metrics: status=%d, path=%s", recorder.Status(), request.URL.Path)
+		mp.addMetrics(tm)
+		return nil
 	}
 
 	body := recorder.body.Bytes()
@@ -323,7 +327,8 @@ func (mp *metricsMonitor) wrapHandler(
 		if parsed, err := processStreamingResponse(modelID, recorder.StartTime(), body); err != nil {
 			mp.logger.Warnf("error processing streaming response: %v, path=%s, recording minimal metrics", err, request.URL.Path)
 		} else {
-			tm = parsed
+			tm.Tokens = parsed.Tokens
+			tm.DurationMs = parsed.DurationMs
 		}
 	} else {
 		if gjson.ValidBytes(body) {
@@ -343,7 +348,8 @@ func (mp *metricsMonitor) wrapHandler(
 				if parsedMetrics, err := parseMetrics(modelID, recorder.StartTime(), usage, timings); err != nil {
 					mp.logger.Warnf("error parsing metrics: %v, path=%s, recording minimal metrics", err, request.URL.Path)
 				} else {
-					tm = parsedMetrics
+					tm.Tokens = parsedMetrics.Tokens
+					tm.DurationMs = parsedMetrics.DurationMs
 				}
 			}
 		} else {
@@ -375,9 +381,6 @@ func (mp *metricsMonitor) wrapHandler(
 		}
 	}
 
-	tm.ReqPath = request.URL.Path
-	tm.RespContentType = recorder.Header().Get("Content-Type")
-	tm.RespStatusCode = recorder.Status()
 	metricID := mp.addMetrics(tm)
 
 	// Store capture if enabled

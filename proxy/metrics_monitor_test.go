@@ -287,7 +287,7 @@ data: [DONE]
 		assert.Equal(t, 20, metrics[0].Tokens.OutputTokens)
 	})
 
-	t.Run("non-OK status code does not record metrics", func(t *testing.T) {
+	t.Run("non-OK status code records partial metrics", func(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10, 0)
 
 		nextHandler := func(modelID string, w http.ResponseWriter, r *http.Request) error {
@@ -304,7 +304,12 @@ data: [DONE]
 		assert.NoError(t, err)
 
 		metrics := mm.getMetrics()
-		assert.Equal(t, 0, len(metrics))
+		assert.Equal(t, 1, len(metrics))
+		assert.Equal(t, "test-model", metrics[0].Model)
+		assert.Equal(t, "/test", metrics[0].ReqPath)
+		assert.Equal(t, http.StatusBadRequest, metrics[0].RespStatusCode)
+		assert.Equal(t, 0, metrics[0].Tokens.InputTokens)
+		assert.Equal(t, 0, metrics[0].Tokens.OutputTokens)
 	})
 
 	t.Run("empty response body records minimal metrics", func(t *testing.T) {
