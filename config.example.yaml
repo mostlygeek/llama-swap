@@ -280,6 +280,21 @@ models:
     # - recommended to be omitted and the default used
     concurrencyLimit: 0
 
+    # protocols: which wire-format(s) the model natively supports
+    # - optional, default: [openai, anthropic]
+    #   (preserves pre-translation behavior: /v1/messages and
+    #    /v1/chat/completions both pass through unchanged.)
+    # - valid values: openai, anthropic, ollama
+    # - when a client hits a chat endpoint whose protocol is NOT in this list,
+    #   llama-swap translates request+response between protocols so the client
+    #   sees a correct response in its own protocol.
+    # - only chat endpoints translate: /v1/chat/completions, /v1/messages,
+    #   /api/chat, /api/generate. Embeddings / audio / images / rerank pass
+    #   through as before.
+    # Example: Ollama-only model, reachable via /v1/chat/completions and /v1/messages
+    # via automatic translation.
+    # protocols: [ollama]
+
     # sendLoadingState: overrides the global sendLoadingState setting for this model
     # - optional, default: undefined (use global setting)
     sendLoadingState: false

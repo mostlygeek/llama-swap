@@ -183,6 +183,7 @@ groups:
 				CheckEndpoint:    "/health",
 				SendLoadingState: &modelLoadingState,
 				Timeouts:         defaultTimeout,
+				Protocols:        []string{"openai", "anthropic"},
 			},
 			"model2": {
 				Cmd:              "path/to/server --arg1 one",
@@ -193,6 +194,7 @@ groups:
 				CheckEndpoint:    "/",
 				SendLoadingState: &modelLoadingState,
 				Timeouts:         defaultTimeout,
+				Protocols:        []string{"openai", "anthropic"},
 			},
 			"model3": {
 				Cmd:              "path/to/cmd --arg1 one",
@@ -203,6 +205,7 @@ groups:
 				CheckEndpoint:    "/",
 				SendLoadingState: &modelLoadingState,
 				Timeouts:         defaultTimeout,
+				Protocols:        []string{"openai", "anthropic"},
 			},
 			"model4": {
 				Cmd:              "path/to/cmd --arg1 one",
@@ -213,6 +216,7 @@ groups:
 				Env:              []string{},
 				SendLoadingState: &modelLoadingState,
 				Timeouts:         defaultTimeout,
+				Protocols:        []string{"openai", "anthropic"},
 			},
 		},
 		HealthCheckTimeout: 15,

@@ -54,6 +54,12 @@ type ModelConfig struct {
 
 	// Timeout settings for proxy connections
 	Timeouts TimeoutsConfig `yaml:"timeouts"`
+
+	// Protocols declares which wire formats this model natively supports.
+	// Accepted values: openai, anthropic, ollama.
+	// Default: [openai, anthropic] — preserves pre-translation behavior where
+	// /v1/messages and /v1/chat/completions both pass-through unchanged.
+	Protocols []string `yaml:"protocols"`
 }
 
 func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
@@ -71,6 +77,7 @@ func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		ConcurrencyLimit: 0,
 		Name:             "",
 		Description:      "",
+		Protocols:        []string{"openai", "anthropic"},
 
 		// matches http.DefaultTransport
 		Timeouts: TimeoutsConfig{
