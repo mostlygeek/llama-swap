@@ -23,7 +23,7 @@ func TestMetricsMonitor_AddMetrics(t *testing.T) {
 	t.Run("adds metrics and assigns ID", func(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10, 0)
 
-		metric := TokenMetrics{
+		metric := ActivityLogEntry{
 			Model:        "test-model",
 			InputTokens:  100,
 			OutputTokens: 50,
@@ -43,7 +43,7 @@ func TestMetricsMonitor_AddMetrics(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10, 0)
 
 		for i := 0; i < 5; i++ {
-			mm.addMetrics(TokenMetrics{Model: "model"})
+			mm.addMetrics(ActivityLogEntry{Model: "model"})
 		}
 
 		metrics := mm.getMetrics()
@@ -58,7 +58,7 @@ func TestMetricsMonitor_AddMetrics(t *testing.T) {
 
 		// Add 5 metrics
 		for i := 0; i < 5; i++ {
-			mm.addMetrics(TokenMetrics{
+			mm.addMetrics(ActivityLogEntry{
 				Model:       "model",
 				InputTokens: i,
 			})
@@ -73,16 +73,16 @@ func TestMetricsMonitor_AddMetrics(t *testing.T) {
 		assert.Equal(t, 4, metrics[2].ID)
 	})
 
-	t.Run("emits TokenMetricsEvent", func(t *testing.T) {
+	t.Run("emits ActivityLogEvent", func(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10, 0)
 
-		receivedEvent := make(chan TokenMetricsEvent, 1)
-		cancel := event.On(func(e TokenMetricsEvent) {
+		receivedEvent := make(chan ActivityLogEvent, 1)
+		cancel := event.On(func(e ActivityLogEvent) {
 			receivedEvent <- e
 		})
 		defer cancel()
 
-		metric := TokenMetrics{
+		metric := ActivityLogEntry{
 			Model:        "test-model",
 			InputTokens:  100,
 			OutputTokens: 50,
@@ -112,8 +112,8 @@ func TestMetricsMonitor_GetMetrics(t *testing.T) {
 
 	t.Run("returns copy of metrics", func(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10, 0)
-		mm.addMetrics(TokenMetrics{Model: "model1"})
-		mm.addMetrics(TokenMetrics{Model: "model2"})
+		mm.addMetrics(ActivityLogEntry{Model: "model1"})
+		mm.addMetrics(ActivityLogEntry{Model: "model2"})
 
 		metrics1 := mm.getMetrics()
 		metrics2 := mm.getMetrics()
@@ -136,7 +136,7 @@ func TestMetricsMonitor_GetMetricsJSON(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, jsonData)
 
-		var metrics []TokenMetrics
+		var metrics []ActivityLogEntry
 		err = json.Unmarshal(jsonData, &metrics)
 		assert.NoError(t, err)
 		assert.Equal(t, 0, len(metrics))
@@ -144,13 +144,13 @@ func TestMetricsMonitor_GetMetricsJSON(t *testing.T) {
 
 	t.Run("returns valid JSON with metrics", func(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10, 0)
-		mm.addMetrics(TokenMetrics{
+		mm.addMetrics(ActivityLogEntry{
 			Model:           "model1",
 			InputTokens:     100,
 			OutputTokens:    50,
 			TokensPerSecond: 25.5,
 		})
-		mm.addMetrics(TokenMetrics{
+		mm.addMetrics(ActivityLogEntry{
 			Model:           "model2",
 			InputTokens:     200,
 			OutputTokens:    100,
@@ -160,7 +160,7 @@ func TestMetricsMonitor_GetMetricsJSON(t *testing.T) {
 		jsonData, err := mm.getMetricsJSON()
 		assert.NoError(t, err)
 
-		var metrics []TokenMetrics
+		var metrics []ActivityLogEntry
 		err = json.Unmarshal(jsonData, &metrics)
 		assert.NoError(t, err)
 		assert.Equal(t, 2, len(metrics))
@@ -520,7 +520,7 @@ func TestMetricsMonitor_Concurrent(t *testing.T) {
 			go func(id int) {
 				defer wg.Done()
 				for j := 0; j < metricsPerGoroutine; j++ {
-					mm.addMetrics(TokenMetrics{
+					mm.addMetrics(ActivityLogEntry{
 						Model:        "test-model",
 						InputTokens:  id*1000 + j,
 						OutputTokens: j,
@@ -543,7 +543,7 @@ func TestMetricsMonitor_Concurrent(t *testing.T) {
 		// Writer goroutine
 		go func() {
 			for i := 0; i < 50; i++ {
-				mm.addMetrics(TokenMetrics{Model: "test-model"})
+				mm.addMetrics(ActivityLogEntry{Model: "test-model"})
 				time.Sleep(1 * time.Millisecond)
 			}
 			done <- true
@@ -793,7 +793,7 @@ data: [DONE]
 func BenchmarkMetricsMonitor_AddMetrics(b *testing.B) {
 	mm := newMetricsMonitor(testLogger, 1000, 0)
 
-	metric := TokenMetrics{
+	metric := ActivityLogEntry{
 		Model:           "test-model",
 		CachedTokens:    100,
 		InputTokens:     500,
@@ -814,7 +814,7 @@ func BenchmarkMetricsMonitor_AddMetrics_SmallBuffer(b *testing.B) {
 	// Test performance with a smaller buffer where wrapping occurs more frequently
 	mm := newMetricsMonitor(testLogger, 100, 0)
 
-	metric := TokenMetrics{
+	metric := ActivityLogEntry{
 		Model:           "test-model",
 		CachedTokens:    100,
 		InputTokens:     500,

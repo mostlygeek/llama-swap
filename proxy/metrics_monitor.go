@@ -70,8 +70,8 @@ func decompressCapture(data []byte) (*ReqRespCapture, error) {
 	return &capture, nil
 }
 
-// TokenMetrics represents parsed token statistics from llama-server logs
-type TokenMetrics struct {
+// ActivityLogEntry represents parsed token statistics from llama-server logs
+type ActivityLogEntry struct {
 	ID              int       `json:"id"`
 	Timestamp       time.Time `json:"timestamp"`
 	Model           string    `json:"model"`
@@ -93,19 +93,19 @@ type ReqRespCapture struct {
 	RespBody    []byte            `json:"resp_body"`
 }
 
-// TokenMetricsEvent represents a token metrics event
-type TokenMetricsEvent struct {
-	Metrics TokenMetrics
+// ActivityLogEvent represents a token metrics event
+type ActivityLogEvent struct {
+	Metrics ActivityLogEntry
 }
 
-func (e TokenMetricsEvent) Type() uint32 {
-	return TokenMetricsEventID // defined in events.go
+func (e ActivityLogEvent) Type() uint32 {
+	return ActivityLogEventID // defined in events.go
 }
 
 // metricsMonitor parses llama-server output for token statistics
 type metricsMonitor struct {
 	mu         sync.RWMutex
-	metrics    []TokenMetrics
+	metrics    []ActivityLogEntry
 	maxMetrics int
 	nextID     int
 	logger     *LogMonitor
@@ -134,7 +134,7 @@ func newMetricsMonitor(logger *LogMonitor, maxMetrics int, captureBufferMB int) 
 
 // addMetrics adds a new metric to the collection and publishes an event.
 // Returns the assigned metric ID.
-func (mp *metricsMonitor) addMetrics(metric TokenMetrics) int {
+func (mp *metricsMonitor) addMetrics(metric ActivityLogEntry) int {
 	mp.mu.Lock()
 	defer mp.mu.Unlock()
 
@@ -144,7 +144,7 @@ func (mp *metricsMonitor) addMetrics(metric TokenMetrics) int {
 	if len(mp.metrics) > mp.maxMetrics {
 		mp.metrics = mp.metrics[len(mp.metrics)-mp.maxMetrics:]
 	}
-	event.Emit(TokenMetricsEvent{Metrics: metric})
+	event.Emit(ActivityLogEvent{Metrics: metric})
 	return metric.ID
 }
 
@@ -221,11 +221,11 @@ func (mp *metricsMonitor) getCaptureByID(id int) *ReqRespCapture {
 }
 
 // getMetrics returns a copy of the current metrics
-func (mp *metricsMonitor) getMetrics() []TokenMetrics {
+func (mp *metricsMonitor) getMetrics() []ActivityLogEntry {
 	mp.mu.RLock()
 	defer mp.mu.RUnlock()
 
-	result := make([]TokenMetrics, len(mp.metrics))
+	result := make([]ActivityLogEntry, len(mp.metrics))
 	copy(result, mp.metrics)
 	return result
 }
@@ -288,7 +288,7 @@ func (mp *metricsMonitor) wrapHandler(
 	}
 
 	// Initialize default metrics - these will always be recorded
-	tm := TokenMetrics{
+	tm := ActivityLogEntry{
 		Timestamp:  time.Now(),
 		Model:      modelID,
 		DurationMs: int(time.Since(recorder.StartTime()).Milliseconds()),
@@ -378,7 +378,7 @@ func (mp *metricsMonitor) wrapHandler(
 	return nil
 }
 
-func processStreamingResponse(modelID string, start time.Time, body []byte) (TokenMetrics, error) {
+func processStreamingResponse(modelID string, start time.Time, body []byte) (ActivityLogEntry, error) {
 	// Iterate **backwards** through the body looking for the data payload with
 	// usage data. This avoids allocating a slice of all lines via bytes.Split.
 
@@ -432,10 +432,10 @@ func processStreamingResponse(modelID string, start time.Time, body []byte) (Tok
 		}
 	}
 
-	return TokenMetrics{}, fmt.Errorf("no valid JSON data found in stream")
+	return ActivityLogEntry{}, fmt.Errorf("no valid JSON data found in stream")
 }
 
-func parseMetrics(modelID string, start time.Time, usage, timings gjson.Result) (TokenMetrics, error) {
+func parseMetrics(modelID string, start time.Time, usage, timings gjson.Result) (ActivityLogEntry, error) {
 	wallDurationMs := int(time.Since(start).Milliseconds())
 
 	// default values
@@ -485,7 +485,7 @@ func parseMetrics(modelID string, start time.Time, usage, timings gjson.Result) 
 		}
 	}
 
-	return TokenMetrics{
+	return ActivityLogEntry{
 		Timestamp:       time.Now(),
 		Model:           modelID,
 		CachedTokens:    cachedTokens,

@@ -158,7 +158,7 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 		}
 	}
 
-	sendMetrics := func(metrics []TokenMetrics) {
+	sendMetrics := func(metrics []ActivityLogEntry) {
 		jsonData, err := json.Marshal(metrics)
 		if err == nil {
 			select {
@@ -205,8 +205,8 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 	/**
 	 * Send Metrics data
 	 */
-	defer event.On(func(e TokenMetricsEvent) {
-		sendMetrics([]TokenMetrics{e.Metrics})
+	defer event.On(func(e ActivityLogEvent) {
+		sendMetrics([]ActivityLogEntry{e.Metrics})
 	})()
 
 	/**
