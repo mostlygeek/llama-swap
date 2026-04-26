@@ -136,8 +136,8 @@
     <ActivityStats />
   </div>
 
-  <div class="card overflow-auto relative min-h-[30rem]">
-    <div class="flex justify-end px-4">
+  <div class="card overflow-auto relative min-h-[30rem]" onclick={() => (columnsMenuOpen = false)}>
+    <div class="flex justify-end px-4" onclick={(e) => e.stopPropagation()}>
       <div class="relative">
         <button
           class="w-8 h-8 flex items-center justify-center rounded hover:bg-secondary-hover transition-colors"
