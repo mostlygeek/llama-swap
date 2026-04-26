@@ -290,26 +290,16 @@ func (pm *ProxyManager) apiGetCapture(c *gin.Context) {
 		return
 	}
 
-	data, exists := pm.metricsMonitor.getCompressedBytes(id)
-	if !exists {
+	capture := pm.metricsMonitor.getCaptureByID(id)
+	if capture == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "capture not found"})
 		return
 	}
 
-	c.Header("Vary", "Accept-Encoding")
-
-	// ¯\_(ツ)_/¯ quality weights are too fancy for us anyway
-	hasZstd := strings.Contains(c.GetHeader("Accept-Encoding"), "zstd")
-
-	if hasZstd {
-		c.Header("Content-Encoding", "zstd")
-		c.Data(http.StatusOK, "application/json", data)
-	} else {
-		decompressed, err := decompressCapture(data)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to decompress capture"})
-			return
-		}
-		c.Data(http.StatusOK, "application/json", decompressed)
+	jsonBytes, err := json.Marshal(capture)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to marshal capture"})
+		return
 	}
+	c.Data(http.StatusOK, "application/json", jsonBytes)
 }

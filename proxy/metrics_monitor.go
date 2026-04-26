@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/klauspost/compress/zstd"
 	"github.com/mostlygeek/llama-swap/event"
@@ -42,23 +43,31 @@ var zstdDecPool = &sync.Pool{
 	},
 }
 
-// compressCapture marshals a ReqRespCapture to JSON and compresses it with zstd.
-// Returns compressed bytes and the original JSON byte count for logging.
+// compressCapture marshals a ReqRespCapture to CBOR and compresses it with zstd.
+// Returns compressed bytes and the original CBOR byte count for logging.
 func compressCapture(c *ReqRespCapture) ([]byte, int, error) {
-	jsonBytes, err := json.Marshal(c)
+	cborBytes, err := cbor.Marshal(c)
 	if err != nil {
 		return nil, 0, fmt.Errorf("marshal capture: %w", err)
 	}
-	enc := zstdEncPool.Get().(*zstd.Encoder)
-	defer zstdEncPool.Put(enc)
-	return enc.EncodeAll(jsonBytes, nil), len(jsonBytes), nil
+	zenc := zstdEncPool.Get().(*zstd.Encoder)
+	defer zstdEncPool.Put(zenc)
+	return zenc.EncodeAll(cborBytes, nil), len(cborBytes), nil
 }
 
-// decompressCapture decompresses zstd-compressed JSON and returns it.
-func decompressCapture(data []byte) ([]byte, error) {
+// decompressCapture decompresses zstd-compressed CBOR and unmarshals it into a ReqRespCapture.
+func decompressCapture(data []byte) (*ReqRespCapture, error) {
 	dec := zstdDecPool.Get().(*zstd.Decoder)
 	defer zstdDecPool.Put(dec)
-	return dec.DecodeAll(data, nil)
+	cborBytes, err := dec.DecodeAll(data, nil)
+	if err != nil {
+		return nil, fmt.Errorf("decompress capture: %w", err)
+	}
+	var capture ReqRespCapture
+	if err := cbor.Unmarshal(cborBytes, &capture); err != nil {
+		return nil, fmt.Errorf("unmarshal capture: %w", err)
+	}
+	return &capture, nil
 }
 
 // TokenMetrics represents parsed token statistics from llama-server logs
@@ -103,7 +112,7 @@ type metricsMonitor struct {
 
 	// capture fields
 	enableCaptures bool
-	captures       map[int][]byte // zstd-compressed JSON of ReqRespCapture
+	captures       map[int][]byte // zstd-compressed CBOR of ReqRespCapture
 	captureOrder   []int          // track insertion order for FIFO eviction
 	captureSize    int            // current total compressed size in bytes
 	maxCaptureSize int            // max bytes for captures (uncompressed)
@@ -191,10 +200,9 @@ func (mp *metricsMonitor) getCompressedBytes(id int) ([]byte, bool) {
 	return data, exists
 }
 
-// getCaptureByID returns decompressed capture bytes if found and decompress=true.
-// If decompress=false, returns the raw zstd-compressed bytes.
-// Returns nil if the capture is not found.
-func (mp *metricsMonitor) getCaptureByID(id int, decompress bool) []byte {
+// getCaptureByID decompresses and unmarshals a capture by ID.
+// Returns nil if the capture is not found or decompression fails.
+func (mp *metricsMonitor) getCaptureByID(id int) *ReqRespCapture {
 	mp.mu.RLock()
 	defer mp.mu.RUnlock()
 
@@ -203,17 +211,13 @@ func (mp *metricsMonitor) getCaptureByID(id int, decompress bool) []byte {
 		return nil
 	}
 
-	if !decompress {
-		return data
-	}
-
-	decompressed, err := decompressCapture(data)
+	capture, err := decompressCapture(data)
 	if err != nil {
 		mp.logger.Warnf("failed to decompress capture %d: %v", id, err)
 		return nil
 	}
 
-	return decompressed
+	return capture
 }
 
 // getMetrics returns a copy of the current metrics

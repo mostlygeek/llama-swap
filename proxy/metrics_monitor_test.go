@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/event"
 	"github.com/stretchr/testify/assert"
@@ -989,7 +990,7 @@ func TestMetricsMonitor_AddCapture(t *testing.T) {
 		mm.addCapture(capture)
 
 		// Should not store capture
-		assert.Nil(t, mm.getCaptureByID(0, false))
+		assert.Nil(t, mm.getCaptureByID(0))
 	})
 
 	t.Run("adds capture when enabled", func(t *testing.T) {
@@ -1002,15 +1003,11 @@ func TestMetricsMonitor_AddCapture(t *testing.T) {
 		}
 		mm.addCapture(capture)
 
-		retrieved := mm.getCaptureByID(0, true)
-		assert.NotNil(t, retrieved)
-
-		var decoded ReqRespCapture
-		err := json.Unmarshal(retrieved, &decoded)
-		assert.NoError(t, err)
-		assert.Equal(t, 0, decoded.ID)
-		assert.Equal(t, []byte("test request"), decoded.ReqBody)
-		assert.Equal(t, []byte("test response"), decoded.RespBody)
+		captured := mm.getCaptureByID(0)
+		assert.NotNil(t, captured)
+		assert.Equal(t, 0, captured.ID)
+		assert.Equal(t, []byte("test request"), captured.ReqBody)
+		assert.Equal(t, []byte("test response"), captured.RespBody)
 	})
 
 	t.Run("evicts oldest when exceeding max size", func(t *testing.T) {
@@ -1033,11 +1030,9 @@ func TestMetricsMonitor_AddCapture(t *testing.T) {
 		// Adding capture3 should evict capture1
 		mm.addCapture(capture3)
 
-		assert.Nil(t, mm.getCaptureByID(0, true), "capture 0 should be evicted")
-		retrieved := mm.getCaptureByID(1, true)
-		assert.NotNil(t, retrieved, "capture 1 should exist")
-		retrieved = mm.getCaptureByID(2, true)
-		assert.NotNil(t, retrieved, "capture 2 should exist")
+		assert.Nil(t, mm.getCaptureByID(0), "capture 0 should be evicted")
+		assert.NotNil(t, mm.getCaptureByID(1), "capture 1 should exist")
+		assert.NotNil(t, mm.getCaptureByID(2), "capture 2 should exist")
 	})
 
 	t.Run("skips capture larger than max size", func(t *testing.T) {
@@ -1050,7 +1045,7 @@ func TestMetricsMonitor_AddCapture(t *testing.T) {
 		rng.Read(largeCapture.ReqBody)
 		mm.addCapture(largeCapture)
 
-		assert.Nil(t, mm.getCaptureByID(0, false), "oversized capture should not be stored")
+		assert.Nil(t, mm.getCaptureByID(0), "oversized capture should not be stored")
 	})
 }
 
@@ -1058,7 +1053,7 @@ func TestMetricsMonitor_GetCaptureByID(t *testing.T) {
 	t.Run("returns nil for non-existent ID", func(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10, 5)
 
-		assert.Nil(t, mm.getCaptureByID(999, false))
+		assert.Nil(t, mm.getCaptureByID(999))
 	})
 
 	t.Run("returns decompressed capture by ID", func(t *testing.T) {
@@ -1071,18 +1066,14 @@ func TestMetricsMonitor_GetCaptureByID(t *testing.T) {
 		}
 		mm.addCapture(capture)
 
-		retrieved := mm.getCaptureByID(42, true)
-		assert.NotNil(t, retrieved)
-
-		var decoded ReqRespCapture
-		err := json.Unmarshal(retrieved, &decoded)
-		assert.NoError(t, err)
-		assert.Equal(t, 42, decoded.ID)
-		assert.Equal(t, []byte("test request"), decoded.ReqBody)
-		assert.Equal(t, []byte("test response"), decoded.RespBody)
+		captured := mm.getCaptureByID(42)
+		assert.NotNil(t, captured)
+		assert.Equal(t, 42, captured.ID)
+		assert.Equal(t, []byte("test request"), captured.ReqBody)
+		assert.Equal(t, []byte("test response"), captured.RespBody)
 	})
 
-	t.Run("returns compressed bytes when decompress=false", func(t *testing.T) {
+	t.Run("stores data as compressed bytes", func(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10, 5)
 
 		capture := ReqRespCapture{
@@ -1092,10 +1083,12 @@ func TestMetricsMonitor_GetCaptureByID(t *testing.T) {
 		}
 		mm.addCapture(capture)
 
-		compressed := mm.getCaptureByID(42, false)
+		compressed, exists := mm.getCompressedBytes(42)
+		assert.True(t, exists)
 		assert.NotNil(t, compressed)
-		// Compressed data should not be valid JSON (it's zstd-compressed)
-		assert.False(t, gjson.ValidBytes(compressed))
+		// Compressed data should not be valid CBOR (it's zstd-compressed)
+		var decoded ReqRespCapture
+		assert.Error(t, cbor.Unmarshal(compressed, &decoded))
 	})
 }
 
@@ -1173,12 +1166,8 @@ func TestMetricsMonitor_WrapHandler_Capture(t *testing.T) {
 		metricID := metrics[0].ID
 
 		// Check capture was stored with same ID (decompressed)
-		captureData := mm.getCaptureByID(metricID, true)
-		assert.NotNil(t, captureData)
-
-		var capture ReqRespCapture
-		err = json.Unmarshal(captureData, &capture)
-		assert.NoError(t, err)
+		capture := mm.getCaptureByID(metricID)
+		assert.NotNil(t, capture)
 		assert.Equal(t, metricID, capture.ID)
 		assert.Equal(t, []byte(requestBody), capture.ReqBody)
 		assert.Equal(t, []byte(responseBody), capture.RespBody)
@@ -1214,7 +1203,6 @@ func TestMetricsMonitor_WrapHandler_Capture(t *testing.T) {
 		assert.Equal(t, 1, len(metrics))
 
 		// But no capture
-		capture := mm.getCaptureByID(metrics[0].ID, false)
-		assert.Nil(t, capture)
+		assert.Nil(t, mm.getCaptureByID(metrics[0].ID))
 	})
 }
