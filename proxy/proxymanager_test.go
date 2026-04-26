@@ -1721,3 +1721,61 @@ models:
 		assert.Contains(t, w.Body.String(), "could not find suitable handler")
 	})
 }
+
+func TestProxyManager_AudioTranscriptionCapture(t *testing.T) {
+	cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+captureBuffer: 5
+models:
+  TheExpectedModel:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond TheExpectedModel
+`)
+
+	proxy := New(cfg)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+	injectTestHandlers(proxy, nil)
+
+	var b bytes.Buffer
+	w := multipart.NewWriter(&b)
+
+	fw, err := w.CreateFormField("model")
+	assert.NoError(t, err)
+	_, err = fw.Write([]byte("TheExpectedModel"))
+	assert.NoError(t, err)
+
+	fw, err = w.CreateFormFile("file", "test.mp3")
+	assert.NoError(t, err)
+	_, err = fw.Write([]byte("test audio content"))
+	assert.NoError(t, err)
+	w.Close()
+
+	req := httptest.NewRequest("POST", "/v1/audio/transcriptions", &b)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer mysecret")
+	req.Header.Set("X-Custom-Req", "req-value")
+	rec := CreateTestResponseRecorder()
+	proxy.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	// Verify capture exists
+	metrics := proxy.metricsMonitor.getMetrics()
+	assert.Equal(t, 1, len(metrics))
+	assert.True(t, metrics[0].HasCapture)
+
+	capture := proxy.metricsMonitor.getCaptureByID(metrics[0].ID)
+	assert.NotNil(t, capture)
+
+	// Should capture request headers (sensitive ones redacted)
+	assert.NotEmpty(t, capture.ReqHeaders)
+	assert.Equal(t, "[REDACTED]", capture.ReqHeaders["Authorization"])
+	assert.Equal(t, "req-value", capture.ReqHeaders["X-Custom-Req"])
+
+	// Should capture response headers
+	assert.NotNil(t, capture.RespHeaders)
+
+	// Should NOT capture bodies (too large for form endpoints)
+	assert.Nil(t, capture.ReqBody)
+	assert.Nil(t, capture.RespBody)
+}

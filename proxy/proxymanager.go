@@ -969,10 +969,18 @@ func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
 	modifiedReq.ContentLength = int64(requestBuffer.Len())
 
 	// Use the modified request for proxying
-	if err := nextHandler(modelID, c.Writer, modifiedReq); err != nil {
-		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
-		pm.proxyLogger.Errorf("Error Proxying Request for model %s", modelID)
-		return
+	if pm.metricsMonitor != nil {
+		if err := pm.metricsMonitor.wrapHandler(modelID, c.Writer, modifiedReq, captureReqHeaders|captureRespHeaders, nextHandler); err != nil {
+			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
+			pm.proxyLogger.Errorf("Error Proxying Request for model %s", modelID)
+			return
+		}
+	} else {
+		if err := nextHandler(modelID, c.Writer, modifiedReq); err != nil {
+			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
+			pm.proxyLogger.Errorf("Error Proxying Request for model %s", modelID)
+			return
+		}
 	}
 }
 
