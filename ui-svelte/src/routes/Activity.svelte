@@ -52,6 +52,7 @@
   );
 
   let columnsMenuOpen = $state(false);
+  let dropdownContainer: HTMLDivElement | null = null;
 
   onMount(() => {
     function handleKeydown(e: KeyboardEvent) {
@@ -59,8 +60,17 @@
         columnsMenuOpen = false;
       }
     }
+    function handleClick(e: MouseEvent) {
+      if (columnsMenuOpen && dropdownContainer && !dropdownContainer.contains(e.target as Node)) {
+        columnsMenuOpen = false;
+      }
+    }
     document.addEventListener("keydown", handleKeydown);
-    return () => document.removeEventListener("keydown", handleKeydown);
+    document.addEventListener("click", handleClick);
+    return () => {
+      document.removeEventListener("keydown", handleKeydown);
+      document.removeEventListener("click", handleClick);
+    };
   });
 
   function toggleColumn(key: ColumnKey) {
@@ -136,8 +146,8 @@
     <ActivityStats />
   </div>
 
-  <div class="card overflow-auto relative min-h-[30rem]" onclick={() => (columnsMenuOpen = false)}>
-    <div class="flex justify-end px-4" onclick={(e) => e.stopPropagation()}>
+  <div class="card overflow-auto relative min-h-[30rem]">
+    <div class="flex justify-end px-4" bind:this={dropdownContainer}>
       <div class="relative">
         <button
           class="w-8 h-8 flex items-center justify-center rounded hover:bg-secondary-hover transition-colors"
