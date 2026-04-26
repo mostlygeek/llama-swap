@@ -77,6 +77,7 @@ type ActivityLogEntry struct {
 	Model           string    `json:"model"`
 	ReqPath         string    `json:"req_path"`
 	RespContentType string    `json:"resp_content_type"`
+	RespStatusCode  int       `json:"resp_status_code"`
 	CachedTokens    int       `json:"cache_tokens"`
 	InputTokens     int       `json:"input_tokens"`
 	OutputTokens    int       `json:"output_tokens"`
@@ -371,6 +372,7 @@ func (mp *metricsMonitor) wrapHandler(
 
 	tm.ReqPath = request.URL.Path
 	tm.RespContentType = recorder.Header().Get("Content-Type")
+	tm.RespStatusCode = recorder.Status()
 	metricID := mp.addMetrics(tm)
 
 	// Store capture if enabled
