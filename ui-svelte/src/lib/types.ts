@@ -20,7 +20,7 @@ export interface TokenMetrics {
   tokens_per_second: number;
 }
 
-export interface Metrics {
+export interface ActivityLogEntry {
   id: number;
   timestamp: string;
   model: string;
