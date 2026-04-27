@@ -26,6 +26,10 @@ export default defineConfig({
     assetsDir: "assets",
   },
   server: {
+    // yes very insecure but who's running this thing
+    // on the public internet for dev?! haha.
+    host: "0.0.0.0",
+    allowedHosts: true,
     proxy: {
       "/api": "http://localhost:8080", // Proxy API calls to Go backend during development
       "/logs": "http://localhost:8080",
