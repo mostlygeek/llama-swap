@@ -3,7 +3,8 @@ import { persistentStore } from "./persistent";
 import type { ScreenWidth } from "../lib/types";
 
 // Persistent stores
-export const isDarkMode = persistentStore<boolean>("theme", false);
+const systemDark = typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches;
+export const isDarkMode = persistentStore<boolean>("theme", systemDark);
 export const appTitle = persistentStore<string>("app-title", "llama-swap");
 
 // Non-persistent stores
