@@ -249,7 +249,8 @@ func (mp *metricsMonitor) getMetricsJSON() ([]byte, error) {
 type captureFields uint
 
 const (
-	captureReqHeaders captureFields = 1 << iota
+	captureNone captureFields = 1 << iota
+	captureReqHeaders
 	captureReqBody
 	captureRespHeaders
 	captureRespBody

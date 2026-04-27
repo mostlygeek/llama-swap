@@ -1775,7 +1775,7 @@ models:
 	// Should capture response headers
 	assert.NotNil(t, capture.RespHeaders)
 
-	// Should NOT capture bodies (too large for form endpoints)
+	// Should NOT capture request bodies but get response bodies (text
 	assert.Nil(t, capture.ReqBody)
-	assert.Nil(t, capture.RespBody)
+	assert.NotNil(t, capture.RespBody)
 }
