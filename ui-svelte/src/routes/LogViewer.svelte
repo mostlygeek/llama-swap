@@ -12,47 +12,33 @@
   let direction = $derived<"horizontal" | "vertical">(
     $screenWidth === "xs" || $screenWidth === "sm" ? "vertical" : "horizontal"
   );
-
-  function cycleViewMode(): void {
-    const modes: ViewMode[] = ["panels", "proxy", "upstream"];
-    const currentIndex = modes.indexOf($viewModeStore);
-    const nextIndex = (currentIndex + 1) % modes.length;
-    viewModeStore.set(modes[nextIndex]);
-  }
-
-  function getViewModeIcon(mode: ViewMode): string {
-    switch (mode) {
-      case "proxy":
-        return "P";
-      case "upstream":
-        return "U";
-      case "panels":
-        return "⊞";
-    }
-  }
-
-  function getViewModeLabel(mode: ViewMode): string {
-    switch (mode) {
-      case "proxy":
-        return "Proxy";
-      case "upstream":
-        return "Upstream";
-      case "panels":
-        return "Panels";
-    }
-  }
 </script>
 
 <div class="flex flex-col h-full w-full gap-2">
-  <div class="flex items-center gap-2">
+  <div class="flex items-center gap-1">
     <button
-      onclick={cycleViewMode}
-      class="btn flex items-center gap-2 text-sm"
-      title="Toggle view mode"
-      aria-label="Toggle view mode: {getViewModeLabel($viewModeStore)}"
+      onclick={() => viewModeStore.set("panels")}
+      class:btn={true}
+      class:bg-primary={$viewModeStore === "panels"}
+      class:text-btn-primary-text={$viewModeStore === "panels"}
     >
-      <span class="font-mono font-bold">{getViewModeIcon($viewModeStore)}</span>
-      <span>{getViewModeLabel($viewModeStore)}</span>
+      Both
+    </button>
+    <button
+      onclick={() => viewModeStore.set("proxy")}
+      class:btn={true}
+      class:bg-primary={$viewModeStore === "proxy"}
+      class:text-btn-primary-text={$viewModeStore === "proxy"}
+    >
+      Panel
+    </button>
+    <button
+      onclick={() => viewModeStore.set("upstream")}
+      class:btn={true}
+      class:bg-primary={$viewModeStore === "upstream"}
+      class:text-btn-primary-text={$viewModeStore === "upstream"}
+    >
+      Upstream
     </button>
   </div>
 
