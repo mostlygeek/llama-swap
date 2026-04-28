@@ -400,6 +400,15 @@ models:
     unlisted: true
     cmd: llama-server --port ${PORT} -m Llama-3.2-1B-Instruct-Q4_K_M.gguf -ngl 0
 
+  # Exclude model from metrics example:
+  "qwen-hidden-metrics":
+    # excludeFromMetrics: boolean, true or false
+    # - optional, default: false
+    # - when true, requests to this model will not appear in /ui/#/activity
+    # - useful for hiding test or internal models from usage statistics
+    excludeFromMetrics: true
+    cmd: llama-server --port ${PORT} -m Qwen3-4B-Q4_K_M.gguf -ngl 0
+
   # Docker example:
   # container runtimes like Docker and Podman can be used reliably with
   # a combination of cmd, cmdStop, and ${MODEL_ID}
