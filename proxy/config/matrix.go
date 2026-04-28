@@ -146,6 +146,9 @@ func validateMatrixVars(matrix MatrixConfig, models map[string]ModelConfig) erro
 		if !varKeyPattern.MatchString(id) {
 			return fmt.Errorf("var key %q must be alphanumeric and 1-8 characters", id)
 		}
+		if _, exists := models[id]; exists {
+			return fmt.Errorf("var key %q conflicts with model id %q", id, id)
+		}
 		if _, exists := models[modelName]; !exists {
 			return fmt.Errorf("var key %q references unknown model %q", id, modelName)
 		}
