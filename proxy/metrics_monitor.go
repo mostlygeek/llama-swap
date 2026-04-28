@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/klauspost/compress/zstd"
 	"github.com/mostlygeek/llama-swap/event"
+	"github.com/mostlygeek/llama-swap/proxy/config"
 	"github.com/tidwall/gjson"
 )
 
@@ -95,6 +96,7 @@ func (e TokenMetricsEvent) Type() uint32 {
 
 // metricsMonitor parses llama-server output for token statistics
 type metricsMonitor struct {
+	config     config.Config
 	mu         sync.RWMutex
 	metrics    []TokenMetrics
 	maxMetrics int
@@ -111,8 +113,9 @@ type metricsMonitor struct {
 
 // newMetricsMonitor creates a new metricsMonitor. captureBufferMB is the
 // capture buffer size in megabytes; 0 disables captures.
-func newMetricsMonitor(logger *LogMonitor, maxMetrics int, captureBufferMB int) *metricsMonitor {
+func newMetricsMonitor(cfg config.Config, logger *LogMonitor, maxMetrics int, captureBufferMB int) *metricsMonitor {
 	return &metricsMonitor{
+		config:         cfg,
 		logger:         logger,
 		maxMetrics:     maxMetrics,
 		enableCaptures: captureBufferMB > 0,
@@ -130,6 +133,10 @@ func (mp *metricsMonitor) addMetrics(metric TokenMetrics) int {
 	defer mp.mu.Unlock()
 
 	metric.ID = mp.nextID
+	// Resolve modelID to display name (first alias or modelID itself)
+	if modelConfig, exists := mp.config.Models[metric.Model]; exists && len(modelConfig.Aliases) > 0 {
+		metric.Model = modelConfig.Aliases[0]
+	}
 	mp.nextID++
 	mp.metrics = append(mp.metrics, metric)
 	if len(mp.metrics) > mp.maxMetrics {
@@ -271,6 +278,9 @@ func (mp *metricsMonitor) wrapHandler(
 		request.Header.Set("Accept-Encoding", filterAcceptEncoding(ae))
 	}
 
+	// Capture wall clock time before proxying the request
+	requestStart := time.Now()
+
 	if err := next(modelID, recorder, request); err != nil {
 		return err
 	}
@@ -287,7 +297,7 @@ func (mp *metricsMonitor) wrapHandler(
 	tm := TokenMetrics{
 		Timestamp:  time.Now(),
 		Model:      modelID,
-		DurationMs: int(time.Since(recorder.StartTime()).Milliseconds()),
+		DurationMs: int(time.Since(requestStart).Milliseconds()),
 	}
 
 	body := recorder.body.Bytes()
@@ -308,7 +318,7 @@ func (mp *metricsMonitor) wrapHandler(
 		}
 	}
 	if strings.Contains(recorder.Header().Get("Content-Type"), "text/event-stream") {
-		if parsed, err := processStreamingResponse(modelID, recorder.StartTime(), body); err != nil {
+		if parsed, err := processStreamingResponse(modelID, requestStart, body); err != nil {
 			mp.logger.Warnf("error processing streaming response: %v, path=%s, recording minimal metrics", err, request.URL.Path)
 		} else {
 			tm = parsed
@@ -328,7 +338,7 @@ func (mp *metricsMonitor) wrapHandler(
 			}
 
 			if usage.Exists() || timings.Exists() {
-				if parsedMetrics, err := parseMetrics(modelID, recorder.StartTime(), usage, timings); err != nil {
+				if parsedMetrics, err := parseMetrics(modelID, requestStart, usage, timings); err != nil {
 					mp.logger.Warnf("error parsing metrics: %v, path=%s, recording minimal metrics", err, request.URL.Path)
 				} else {
 					tm = parsedMetrics
@@ -478,6 +488,17 @@ func parseMetrics(modelID string, start time.Time, usage, timings gjson.Result) 
 
 		if cachedValue := timings.Get("cache_n"); cachedValue.Exists() {
 			cachedTokens = int(cachedValue.Int())
+		}
+	}
+
+	// Fallback: estimate speeds from wall clock when timings unavailable (e.g., vLLM)
+	if !timings.Exists() && wallDurationMs > 0 {
+		durationSec := float64(wallDurationMs) / 1000.0
+		if inputTokens > 0 {
+			promptPerSecond = float64(inputTokens) / durationSec
+		}
+		if outputTokens > 0 {
+			tokensPerSecond = float64(outputTokens) / durationSec
 		}
 	}
 

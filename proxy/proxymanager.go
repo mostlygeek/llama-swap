@@ -190,7 +190,7 @@ func New(proxyConfig config.Config) *ProxyManager {
 		muxLogger:      muxLogger,
 		upstreamLogger: upstreamLogger,
 
-		metricsMonitor: newMetricsMonitor(proxyLogger, maxMetrics, proxyConfig.CaptureBuffer),
+		metricsMonitor: newMetricsMonitor(proxyConfig, proxyLogger, maxMetrics, proxyConfig.CaptureBuffer),
 
 		processGroups: make(map[string]*ProcessGroup),
 
