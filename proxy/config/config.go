@@ -646,9 +646,6 @@ func validateMacro(name string, value any) error {
 	// Validate that value is a scalar type
 	switch v := value.(type) {
 	case string:
-		if len(v) >= 1024 {
-			return fmt.Errorf("macro value for '%s' exceeds maximum length of 1024 characters", name)
-		}
 		// Check for self-reference
 		macroSlug := fmt.Sprintf("${%s}", name)
 		if strings.Contains(v, macroSlug) {
