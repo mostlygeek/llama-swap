@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/klauspost/compress/zstd"
 	"github.com/mostlygeek/llama-swap/event"
+	"github.com/mostlygeek/llama-swap/proxy/cache"
 	"github.com/tidwall/gjson"
 )
 
@@ -120,29 +121,26 @@ type metricsMonitor struct {
 
 	// capture fields
 	enableCaptures bool
-	captures       map[int][]byte // zstd-compressed CBOR of ReqRespCapture
-	captureOrder   []int          // track insertion order for FIFO eviction
-	captureSize    int            // current total compressed size in bytes
-	maxCaptureSize int            // max bytes for captures (uncompressed)
+	captureCache   *cache.Cache // zstd-compressed CBOR of ReqRespCapture
 }
 
 // newMetricsMonitor creates a new metricsMonitor. captureBufferMB is the
 // capture buffer size in megabytes; 0 disables captures.
 func newMetricsMonitor(logger *LogMonitor, maxMetrics int, captureBufferMB int) *metricsMonitor {
-	return &metricsMonitor{
+	mm := &metricsMonitor{
 		logger:         logger,
 		maxMetrics:     maxMetrics,
 		enableCaptures: captureBufferMB > 0,
-		captures:       make(map[int][]byte),
-		captureOrder:   make([]int, 0),
-		captureSize:    0,
-		maxCaptureSize: captureBufferMB * 1024 * 1024,
 	}
+	if captureBufferMB > 0 {
+		mm.captureCache = cache.New(captureBufferMB * 1024 * 1024)
+	}
+	return mm
 }
 
-// addMetrics adds a new metric to the collection and publishes an event.
-// Returns the assigned metric ID.
-func (mp *metricsMonitor) addMetrics(metric ActivityLogEntry) int {
+// queueMetrics adds a new metric to the collection without emitting an event.
+// Returns the assigned metric ID. Call emitMetric after capture setup.
+func (mp *metricsMonitor) queueMetrics(metric ActivityLogEntry) int {
 	mp.mu.Lock()
 	defer mp.mu.Unlock()
 
@@ -152,69 +150,56 @@ func (mp *metricsMonitor) addMetrics(metric ActivityLogEntry) int {
 	if len(mp.metrics) > mp.maxMetrics {
 		mp.metrics = mp.metrics[len(mp.metrics)-mp.maxMetrics:]
 	}
-	event.Emit(ActivityLogEvent{Metrics: metric})
 	return metric.ID
 }
 
-// addCapture adds a new capture to the buffer with size-based eviction.
-// Captures are skipped if enableCaptures is false or if compressed data exceeds maxCaptureSize.
-func (mp *metricsMonitor) addCapture(capture ReqRespCapture) {
+// emitMetric publishes an ActivityLogEvent for the given metric.
+func (mp *metricsMonitor) emitMetric(metric ActivityLogEntry) {
+	event.Emit(ActivityLogEvent{Metrics: metric})
+}
+
+// addCapture compresses and stores a capture in the cache.
+// Returns true if the capture was stored, false otherwise.
+func (mp *metricsMonitor) addCapture(capture ReqRespCapture) bool {
 	if !mp.enableCaptures {
-		return
+		return false
 	}
 
 	compressed, uncompressedBytes, err := compressCapture(&capture)
 	if err != nil {
 		mp.logger.Warnf("failed to compress capture: %v, skipping", err)
-		return
+		return false
 	}
 
-	captureSize := len(compressed)
-	if captureSize > mp.maxCaptureSize {
-		mp.logger.Warnf("compressed capture size %d exceeds max %d, skipping", captureSize, mp.maxCaptureSize)
-		return
+	if err := mp.captureCache.Add(capture.ID, compressed); err != nil {
+		mp.logger.Warnf("capture %d too large (%d bytes), skipping: %v", capture.ID, len(compressed), err)
+		return false
 	}
 
-	compressionRatio := (1 - float64(captureSize)/float64(uncompressedBytes)) * 100
-
-	mp.mu.Lock()
-	defer mp.mu.Unlock()
-
-	// Evict oldest (FIFO) until room available for the compressed data
-	for mp.captureSize+captureSize > mp.maxCaptureSize && len(mp.captureOrder) > 0 {
-		oldestID := mp.captureOrder[0]
-		mp.captureOrder = mp.captureOrder[1:]
-		if evicted, exists := mp.captures[oldestID]; exists {
-			l := len(evicted)
-			mp.captureSize -= l
-			delete(mp.captures, oldestID)
-			mp.logger.Debugf("Capture %d evicted to make space: %d bytes", oldestID, l)
-		}
-	}
-
-	mp.captures[capture.ID] = compressed
-	mp.captureOrder = append(mp.captureOrder, capture.ID)
-	mp.captureSize += captureSize
-
+	compressionRatio := (1 - float64(len(compressed))/float64(uncompressedBytes)) * 100
 	mp.logger.Debugf("Capture %d compressed and saved: %d bytes -> %d bytes (%.1f%% compression)", capture.ID, uncompressedBytes, len(compressed), compressionRatio)
+	return true
 }
 
 // getCompressedBytes returns the raw compressed bytes for a capture by ID.
 func (mp *metricsMonitor) getCompressedBytes(id int) ([]byte, bool) {
-	mp.mu.RLock()
-	defer mp.mu.RUnlock()
-
-	data, exists := mp.captures[id]
-	return data, exists
+	if mp.captureCache == nil {
+		return nil, false
+	}
+	data, err := mp.captureCache.Get(id)
+	if err != nil {
+		return nil, false
+	}
+	return data, true
 }
 
 // getCaptureByID decompresses and unmarshals a capture by ID.
 // Returns nil if the capture is not found or decompression fails.
 func (mp *metricsMonitor) getCaptureByID(id int) *ReqRespCapture {
-	mp.mu.RLock()
-	defer mp.mu.RUnlock()
-
-	data, exists := mp.captures[id]
+	if mp.captureCache == nil {
+		return nil
+	}
+	data, exists := mp.getCompressedBytes(id)
 	if !exists {
 		return nil
 	}
@@ -323,14 +308,16 @@ func (mp *metricsMonitor) wrapHandler(
 
 	if recorder.Status() != http.StatusOK {
 		mp.logger.Warnf("non-200 response, recording partial metrics: status=%d, path=%s", recorder.Status(), request.URL.Path)
-		mp.addMetrics(tm)
+		tm.ID = mp.queueMetrics(tm)
+		mp.emitMetric(tm)
 		return nil
 	}
 
 	body := recorder.body.Bytes()
 	if len(body) == 0 {
 		mp.logger.Warn("metrics: empty body, recording minimal metrics")
-		mp.addMetrics(tm)
+		tm.ID = mp.queueMetrics(tm)
+		mp.emitMetric(tm)
 		return nil
 	}
 
@@ -340,7 +327,8 @@ func (mp *metricsMonitor) wrapHandler(
 		body, err = decompressBody(body, encoding)
 		if err != nil {
 			mp.logger.Warnf("metrics: decompression failed: %v, path=%s, recording minimal metrics", err, request.URL.Path)
-			mp.addMetrics(tm)
+			tm.ID = mp.queueMetrics(tm)
+			mp.emitMetric(tm)
 			return nil
 		}
 	}
@@ -403,19 +391,23 @@ func (mp *metricsMonitor) wrapHandler(
 			RespHeaders: respHeaders,
 			RespBody:    respBody,
 		}
-		compressed, _, err := compressCapture(capture)
-		if err == nil && len(compressed) <= mp.maxCaptureSize {
-			tm.HasCapture = true
-		}
 	}
 
-	metricID := mp.addMetrics(tm)
+	metricID := mp.queueMetrics(tm)
+	tm.ID = metricID
 
 	// Store capture if enabled
 	if capture != nil {
 		capture.ID = metricID
-		mp.addCapture(*capture)
+		if mp.addCapture(*capture) {
+			tm.HasCapture = true
+			mp.mu.Lock()
+			mp.metrics[len(mp.metrics)-1].HasCapture = true
+			mp.mu.Unlock()
+		}
 	}
+
+	mp.emitMetric(tm)
 
 	return nil
 }

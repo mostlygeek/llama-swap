@@ -15,6 +15,7 @@ import (
 	"github.com/fxamacker/cbor/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/event"
+	"github.com/mostlygeek/llama-swap/proxy/cache"
 	"github.com/stretchr/testify/assert"
 	"github.com/tidwall/gjson"
 )
@@ -31,7 +32,7 @@ func TestMetricsMonitor_AddMetrics(t *testing.T) {
 			},
 		}
 
-		mm.addMetrics(metric)
+		mm.queueMetrics(metric)
 
 		metrics := mm.getMetrics()
 		assert.Equal(t, 1, len(metrics))
@@ -45,7 +46,7 @@ func TestMetricsMonitor_AddMetrics(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10, 0)
 
 		for i := 0; i < 5; i++ {
-			mm.addMetrics(ActivityLogEntry{Model: "model"})
+			mm.queueMetrics(ActivityLogEntry{Model: "model"})
 		}
 
 		metrics := mm.getMetrics()
@@ -60,7 +61,7 @@ func TestMetricsMonitor_AddMetrics(t *testing.T) {
 
 		// Add 5 metrics
 		for i := 0; i < 5; i++ {
-			mm.addMetrics(ActivityLogEntry{
+			mm.queueMetrics(ActivityLogEntry{
 				Model: "model",
 				Tokens: TokenMetrics{
 					InputTokens: i,
@@ -94,7 +95,8 @@ func TestMetricsMonitor_AddMetrics(t *testing.T) {
 			},
 		}
 
-		mm.addMetrics(metric)
+		mm.queueMetrics(metric)
+		mm.emitMetric(metric)
 
 		select {
 		case evt := <-receivedEvent:
@@ -118,8 +120,8 @@ func TestMetricsMonitor_GetMetrics(t *testing.T) {
 
 	t.Run("returns copy of metrics", func(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10, 0)
-		mm.addMetrics(ActivityLogEntry{Model: "model1"})
-		mm.addMetrics(ActivityLogEntry{Model: "model2"})
+		mm.queueMetrics(ActivityLogEntry{Model: "model1"})
+		mm.queueMetrics(ActivityLogEntry{Model: "model2"})
 
 		metrics1 := mm.getMetrics()
 		metrics2 := mm.getMetrics()
@@ -150,7 +152,7 @@ func TestMetricsMonitor_GetMetricsJSON(t *testing.T) {
 
 	t.Run("returns valid JSON with metrics", func(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10, 0)
-		mm.addMetrics(ActivityLogEntry{
+		mm.queueMetrics(ActivityLogEntry{
 			Model: "model1",
 			Tokens: TokenMetrics{
 				InputTokens:     100,
@@ -158,7 +160,7 @@ func TestMetricsMonitor_GetMetricsJSON(t *testing.T) {
 				TokensPerSecond: 25.5,
 			},
 		})
-		mm.addMetrics(ActivityLogEntry{
+		mm.queueMetrics(ActivityLogEntry{
 			Model: "model2",
 			Tokens: TokenMetrics{
 				InputTokens:     200,
@@ -523,7 +525,7 @@ func TestMetricsMonitor_ResponseBodyCopier(t *testing.T) {
 }
 
 func TestMetricsMonitor_Concurrent(t *testing.T) {
-	t.Run("concurrent addMetrics is safe", func(t *testing.T) {
+	t.Run("concurrent queueMetrics is safe", func(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 1000, 0)
 
 		var wg sync.WaitGroup
@@ -535,7 +537,7 @@ func TestMetricsMonitor_Concurrent(t *testing.T) {
 			go func(id int) {
 				defer wg.Done()
 				for j := 0; j < metricsPerGoroutine; j++ {
-					mm.addMetrics(ActivityLogEntry{
+					mm.queueMetrics(ActivityLogEntry{
 						Model: "test-model",
 						Tokens: TokenMetrics{
 							InputTokens:  id*1000 + j,
@@ -560,7 +562,7 @@ func TestMetricsMonitor_Concurrent(t *testing.T) {
 		// Writer goroutine
 		go func() {
 			for i := 0; i < 50; i++ {
-				mm.addMetrics(ActivityLogEntry{Model: "test-model"})
+				mm.queueMetrics(ActivityLogEntry{Model: "test-model"})
 				time.Sleep(1 * time.Millisecond)
 			}
 			done <- true
@@ -825,7 +827,7 @@ func BenchmarkMetricsMonitor_AddMetrics(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		mm.addMetrics(metric)
+		mm.queueMetrics(metric)
 	}
 }
 
@@ -848,7 +850,7 @@ func BenchmarkMetricsMonitor_AddMetrics_SmallBuffer(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		mm.addMetrics(metric)
+		mm.queueMetrics(metric)
 	}
 }
 
@@ -1035,7 +1037,7 @@ func TestMetricsMonitor_AddCapture(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10, 5)
 		// Each full ReqRespCapture with 80 bytes random data compresses to ~185 bytes.
 		// 2 captures = ~370 bytes, 3 captures = ~555 bytes. Set limit so only 2 fit.
-		mm.maxCaptureSize = 450
+		mm.captureCache = cache.New(450)
 
 		// Use random-looking data that doesn't compress well with zstd
 		rng := rand.New(rand.NewSource(42))
@@ -1058,7 +1060,7 @@ func TestMetricsMonitor_AddCapture(t *testing.T) {
 
 	t.Run("skips capture larger than max size", func(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10, 5)
-		mm.maxCaptureSize = 100
+		mm.captureCache = cache.New(100)
 
 		// Use random data that doesn't compress well to create an oversized capture
 		rng := rand.New(rand.NewSource(99))
