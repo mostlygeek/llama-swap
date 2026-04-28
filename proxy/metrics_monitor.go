@@ -227,7 +227,18 @@ func (mp *metricsMonitor) getMetrics() []ActivityLogEntry {
 func (mp *metricsMonitor) getMetricsJSON() ([]byte, error) {
 	mp.mu.RLock()
 	defer mp.mu.RUnlock()
-	return json.Marshal(mp.metrics)
+
+	if mp.captureCache == nil {
+		return json.Marshal(mp.metrics)
+	}
+
+	// Make a copy with up-to-date has_capture from cache
+	result := make([]ActivityLogEntry, len(mp.metrics))
+	for i, m := range mp.metrics {
+		m.HasCapture = mp.captureCache.Has(m.ID)
+		result[i] = m
+	}
+	return json.Marshal(result)
 }
 
 // Capture field flags for controlling what is saved in ReqRespCapture.
