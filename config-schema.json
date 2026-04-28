@@ -157,6 +157,11 @@
             "default": false,
             "description": "Present aliases within the /v1/models OpenAI API listing. when true, model aliases will be output to the API model listing duplicating all fields except for Id so chat UIs can use the alias equivalent to the original."
         },
+        "sendRealModelID": {
+            "type": "boolean",
+            "default": false,
+            "description": "Send the real model ID to the upstream server when an alias is used. When false (default), the alias name is forwarded as-is. When true, the resolved real model ID is sent to the backend."
+        },
         "macros": {
             "$ref": "#/definitions/macros"
         },
