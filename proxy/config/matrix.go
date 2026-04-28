@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"regexp"
-	"sort"
 
 	"gopkg.in/yaml.v3"
 )
@@ -66,32 +65,12 @@ func ValidateMatrix(matrix MatrixConfig, models map[string]ModelConfig) ([]Expan
 		return nil, fmt.Errorf("matrix must define at least one set")
 	}
 
-	if len(matrix.Var) == 0 {
-		return nil, fmt.Errorf("matrix must define at least one var")
+	if err := validateMatrixVars(matrix, models); err != nil {
+		return nil, err
 	}
 
-	// Validate var entries
-	if matrix.Var != nil {
-		for id, modelName := range matrix.Var {
-			if !varKeyPattern.MatchString(id) {
-				return nil, fmt.Errorf("var key %q must be alphanumeric and 1-8 characters", id)
-			}
-			if _, exists := models[modelName]; !exists {
-				return nil, fmt.Errorf("var key %q references unknown model %q", id, modelName)
-			}
-		}
-	}
-
-	// Validate evict_costs
-	if matrix.EvictCosts != nil {
-		for key, cost := range matrix.EvictCosts {
-			if cost <= 0 {
-				return nil, fmt.Errorf("evict_cost for %q must be a positive integer, got %d", key, cost)
-			}
-			if _, ok := matrix.Var[key]; !ok {
-				return nil, fmt.Errorf("evict_costs: unknown var ID %q", key)
-			}
-		}
+	if err := validateEvictCosts(matrix, models); err != nil {
+		return nil, err
 	}
 
 	// Build dependency graph for +ref topological sort
@@ -121,7 +100,7 @@ func ValidateMatrix(matrix MatrixConfig, models map[string]ModelConfig) ([]Expan
 	}
 
 	// Expand sets in topological order
-	resolvedRefs := make(map[string][][]string) // set name -> expanded alias-level combos
+	resolvedRefs := make(map[string][][]string) // set name -> expanded identifier combos
 	var allExpanded []ExpandedSet
 	totalCombinations := 0
 
@@ -140,17 +119,12 @@ func ValidateMatrix(matrix MatrixConfig, models map[string]ModelConfig) ([]Expan
 
 		resolvedRefs[name] = combos
 
-		// Resolve var IDs to real model names
+		// Resolve identifiers to real model names
 		for _, combo := range combos {
-			resolved := make([]string, len(combo))
-			for i, ident := range combo {
-				realName, ok := matrix.Var[ident]
-				if !ok {
-					return nil, fmt.Errorf("set %q: unknown var ID %q", name, ident)
-				}
-				resolved[i] = realName
+			resolved, err := resolveMatrixCombo(matrix, models, combo)
+			if err != nil {
+				return nil, fmt.Errorf("set %q: %w", name, err)
 			}
-			sort.Strings(resolved)
 			allExpanded = append(allExpanded, ExpandedSet{
 				SetName: name,
 				DSL:     dsl,
@@ -165,6 +139,65 @@ func ValidateMatrix(matrix MatrixConfig, models map[string]ModelConfig) ([]Expan
 	}
 
 	return allExpanded, nil
+}
+
+func validateMatrixVars(matrix MatrixConfig, models map[string]ModelConfig) error {
+	for id, modelName := range matrix.Var {
+		if !varKeyPattern.MatchString(id) {
+			return fmt.Errorf("var key %q must be alphanumeric and 1-8 characters", id)
+		}
+		if _, exists := models[id]; exists {
+			return fmt.Errorf("var key %q conflicts with model id %q", id, id)
+		}
+		if _, exists := models[modelName]; !exists {
+			return fmt.Errorf("var key %q references unknown model %q", id, modelName)
+		}
+	}
+	return nil
+}
+
+func resolveMatrixCombo(matrix MatrixConfig, models map[string]ModelConfig, combo []string) ([]string, error) {
+	resolved := make([]string, len(combo))
+	for i, ident := range combo {
+		realName, ok := resolveMatrixIdent(matrix, models, ident)
+		if !ok {
+			return nil, fmt.Errorf("unknown model ID %q", ident)
+		}
+		resolved[i] = realName
+	}
+	return dedupAndSort(resolved), nil
+}
+
+func resolveMatrixIdent(matrix MatrixConfig, models map[string]ModelConfig, ident string) (string, bool) {
+	if realName, ok := matrix.Var[ident]; ok {
+		return realName, true
+	}
+	if _, ok := models[ident]; ok {
+		return ident, true
+	}
+	return "", false
+}
+
+func validateEvictCosts(matrix MatrixConfig, models map[string]ModelConfig) error {
+	if matrix.EvictCosts == nil {
+		return nil
+	}
+
+	sources := make(map[string]string, len(matrix.EvictCosts))
+	for key, cost := range matrix.EvictCosts {
+		if cost <= 0 {
+			return fmt.Errorf("evict_cost for %q must be a positive integer, got %d", key, cost)
+		}
+		realName, ok := resolveMatrixIdent(matrix, models, key)
+		if !ok {
+			return fmt.Errorf("evict_costs: unknown model ID %q", key)
+		}
+		if previous, exists := sources[realName]; exists {
+			return fmt.Errorf("evict_costs: %q and %q both resolve to model %q", previous, key, realName)
+		}
+		sources[realName] = key
+	}
+	return nil
 }
 
 // topologicalSort returns set names in dependency order.
@@ -215,7 +248,6 @@ func (m *MatrixConfig) ResolvedEvictCosts() map[string]int {
 		return costs
 	}
 	for key, cost := range m.EvictCosts {
-		// Resolve var ID if present
 		if realName, ok := m.Var[key]; ok {
 			costs[realName] = cost
 		} else {

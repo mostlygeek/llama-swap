@@ -89,8 +89,7 @@ func TestValidateMatrix_WithRef(t *testing.T) {
 	assert.Equal(t, []string{"gemma", "reranker", "voxtral"}, megaEntries[0].Models)
 }
 
-func TestValidateMatrix_MapIDRequired(t *testing.T) {
-	// DSL cannot use real model names directly — must use var IDs
+func TestValidateMatrix_DirectModelIDs(t *testing.T) {
 	models := makeModels("gemma", "voxtral")
 
 	matrix := MatrixConfig{
@@ -100,17 +99,49 @@ func TestValidateMatrix_MapIDRequired(t *testing.T) {
 		},
 	}
 
-	_, err := ValidateMatrix(matrix, models)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unknown var ID")
+	expanded, err := ValidateMatrix(matrix, models)
+	require.NoError(t, err)
+	require.Len(t, expanded, 1)
+	assert.Equal(t, []string{"gemma", "voxtral"}, expanded[0].Models)
 }
 
-func TestValidateMatrix_InvalidAliasKey(t *testing.T) {
+func TestValidateMatrix_DirectModelIDsWithSpecialCharacters(t *testing.T) {
+	models := makeModels("author/model:F16", "openai/gpt-4.1-mini")
+
+	matrix := MatrixConfig{
+		Sets: OrderedSets{
+			{Name: "combo", DSL: "author/model:F16 & openai/gpt-4.1-mini"},
+		},
+	}
+
+	expanded, err := ValidateMatrix(matrix, models)
+	require.NoError(t, err)
+	require.Len(t, expanded, 1)
+	assert.Equal(t, []string{"author/model:F16", "openai/gpt-4.1-mini"}, expanded[0].Models)
+}
+
+func TestValidateMatrix_DedupAfterResolution(t *testing.T) {
+	models := makeModels("gemma")
+
+	matrix := MatrixConfig{
+		Var: map[string]string{"g": "gemma"},
+		Sets: OrderedSets{
+			{Name: "combo", DSL: "g & gemma"},
+		},
+	}
+
+	expanded, err := ValidateMatrix(matrix, models)
+	require.NoError(t, err)
+	require.Len(t, expanded, 1)
+	assert.Equal(t, []string{"gemma"}, expanded[0].Models)
+}
+
+func TestValidateMatrix_InvalidVarKey(t *testing.T) {
 	models := makeModels("gemma")
 
 	tests := []struct {
 		name   string
-		alias  string
+		varID  string
 		errMsg string
 	}{
 		{"too long", "abcdefghi", "alphanumeric and 1-8 characters"},
@@ -121,8 +152,8 @@ func TestValidateMatrix_InvalidAliasKey(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			matrix := MatrixConfig{
-				Var:  map[string]string{tt.alias: "gemma"},
-				Sets: OrderedSets{{Name: "s", DSL: tt.alias}},
+				Var:  map[string]string{tt.varID: "gemma"},
+				Sets: OrderedSets{{Name: "s", DSL: tt.varID}},
 			}
 			_, err := ValidateMatrix(matrix, models)
 			require.Error(t, err)
@@ -131,7 +162,7 @@ func TestValidateMatrix_InvalidAliasKey(t *testing.T) {
 	}
 }
 
-func TestValidateMatrix_AliasReferencesUnknownModel(t *testing.T) {
+func TestValidateMatrix_VarReferencesUnknownModel(t *testing.T) {
 	models := makeModels("gemma")
 
 	matrix := MatrixConfig{
@@ -169,7 +200,7 @@ func TestValidateMatrix_EvictCostInvalid(t *testing.T) {
 		assert.Contains(t, err.Error(), "positive integer")
 	})
 
-	t.Run("unknown var ID in evict_costs", func(t *testing.T) {
+	t.Run("unknown model ID in evict_costs", func(t *testing.T) {
 		matrix := MatrixConfig{
 			Var:        map[string]string{"g": "gemma"},
 			EvictCosts: map[string]int{"unknown": 5},
@@ -177,7 +208,18 @@ func TestValidateMatrix_EvictCostInvalid(t *testing.T) {
 		}
 		_, err := ValidateMatrix(matrix, models)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "unknown var ID")
+		assert.Contains(t, err.Error(), "unknown model ID")
+	})
+
+	t.Run("duplicate resolved model in evict_costs", func(t *testing.T) {
+		matrix := MatrixConfig{
+			Var:        map[string]string{"g": "gemma"},
+			EvictCosts: map[string]int{"g": 5, "gemma": 10},
+			Sets:       OrderedSets{{Name: "s", DSL: "g"}},
+		}
+		_, err := ValidateMatrix(matrix, models)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "both resolve to model")
 	})
 }
 
@@ -230,18 +272,58 @@ func TestValidateMatrix_UnknownMapIDInDSL(t *testing.T) {
 
 	_, err := ValidateMatrix(matrix, models)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unknown var ID")
+	assert.Contains(t, err.Error(), "unknown model ID")
+}
+
+func TestValidateMatrix_ConfigMatrixDoesNotUseAliases(t *testing.T) {
+	t.Run("set DSL", func(t *testing.T) {
+		yaml := `
+models:
+  gemma:
+    cmd: echo gemma
+    proxy: http://localhost:8080
+    aliases:
+      - gpt-4o-mini
+  author/model:F16:
+    cmd: echo model
+    proxy: http://localhost:8081
+matrix:
+  sets:
+    combo: "gpt-4o-mini & author/model:F16"
+`
+		_, err := LoadConfigFromReader(strings.NewReader(yaml))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown model ID")
+	})
+
+	t.Run("evict_costs", func(t *testing.T) {
+		yaml := `
+models:
+  gemma:
+    cmd: echo gemma
+    proxy: http://localhost:8080
+    aliases:
+      - gpt-4o-mini
+matrix:
+  evict_costs:
+    gpt-4o-mini: 5
+  sets:
+    combo: "gemma"
+`
+		_, err := LoadConfigFromReader(strings.NewReader(yaml))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown model ID")
+	})
 }
 
 func TestValidateMatrix_ResolvedEvictCosts(t *testing.T) {
 	mc := &MatrixConfig{
 		Var: map[string]string{
 			"g": "gemma",
-			"L": "llama70B",
 		},
 		EvictCosts: map[string]int{
-			"L": 30,
-			"g": 5,
+			"llama70B": 30,
+			"g":        5,
 		},
 	}
 
