@@ -9,13 +9,13 @@
 
   let stats = $derived.by(() => {
     const totalRequests = $metrics.length;
-    const totalInputTokens = $metrics.reduce((sum, m) => sum + m.input_tokens, 0);
-    const totalOutputTokens = $metrics.reduce((sum, m) => sum + m.output_tokens, 0);
-    const totalCacheTokens = $metrics.reduce((sum, m) => sum + m.cache_tokens, 0);
+    const totalInputTokens = $metrics.reduce((sum, m) => sum + m.tokens.input_tokens, 0);
+    const totalOutputTokens = $metrics.reduce((sum, m) => sum + m.tokens.output_tokens, 0);
+    const totalCacheTokens = $metrics.reduce((sum, m) => sum + m.tokens.cache_tokens, 0);
 
-    const promptPerSecond = $metrics.filter((m) => m.prompt_per_second > 0).map((m) => m.prompt_per_second);
+    const promptPerSecond = $metrics.filter((m) => m.tokens.prompt_per_second > 0).map((m) => m.tokens.prompt_per_second);
 
-    const tokensPerSecond = $metrics.filter((m) => m.tokens_per_second > 0).map((m) => m.tokens_per_second);
+    const tokensPerSecond = $metrics.filter((m) => m.tokens.tokens_per_second > 0).map((m) => m.tokens.tokens_per_second);
 
     const promptHistogramData =
       promptPerSecond.length > 0 ? calculateHistogramData(promptPerSecond) : null;
