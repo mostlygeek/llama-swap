@@ -4,6 +4,7 @@ go 1.26.1
 
 require (
 	github.com/billziss-gh/golib v0.2.0
+	github.com/fxamacker/cbor/v2 v2.9.1
 	github.com/gin-gonic/gin v1.10.0
 	github.com/klauspost/compress v1.18.5
 	github.com/stretchr/testify v1.9.0
@@ -36,6 +37,7 @@ require (
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.2.12 // indirect
+	github.com/x448/float16 v0.8.4 // indirect
 	golang.org/x/arch v0.8.0 // indirect
 	golang.org/x/crypto v0.45.0 // indirect
 	golang.org/x/net v0.47.0 // indirect

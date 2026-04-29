@@ -6,7 +6,7 @@ const ProcessStateChangeEventID = 0x01
 const ChatCompletionStatsEventID = 0x02
 const ConfigFileChangedEventID = 0x03
 const LogDataEventID = 0x04
-const TokenMetricsEventID = 0x05
+const ActivityLogEventID = 0x05
 const ModelPreloadedEventID = 0x06
 const InFlightRequestsEventID = 0x07
 

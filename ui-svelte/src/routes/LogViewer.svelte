@@ -10,7 +10,7 @@
   const viewModeStore = persistentStore<ViewMode>("logviewer-view-mode", "panels");
 
   let direction = $derived<"horizontal" | "vertical">(
-    $screenWidth === "xs" || $screenWidth === "sm" ? "vertical" : "horizontal"
+    $screenWidth === "xs" || $screenWidth === "sm" ? "vertical" : "horizontal",
   );
 </script>
 
@@ -30,7 +30,7 @@
       class:bg-primary={$viewModeStore === "proxy"}
       class:text-btn-primary-text={$viewModeStore === "proxy"}
     >
-      Panel
+      Proxy
     </button>
     <button
       onclick={() => viewModeStore.set("upstream")}

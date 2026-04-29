@@ -12,9 +12,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/klauspost/compress/zstd"
 	"github.com/mostlygeek/llama-swap/event"
+	"github.com/mostlygeek/llama-swap/proxy/cache"
 	"github.com/tidwall/gjson"
 )
 
@@ -42,37 +44,53 @@ var zstdDecPool = &sync.Pool{
 	},
 }
 
-// compressCapture marshals a ReqRespCapture to JSON and compresses it with zstd.
-// Returns compressed bytes and the original JSON byte count for logging.
+// compressCapture marshals a ReqRespCapture to CBOR and compresses it with zstd.
+// Returns compressed bytes and the original CBOR byte count for logging.
 func compressCapture(c *ReqRespCapture) ([]byte, int, error) {
-	jsonBytes, err := json.Marshal(c)
+	cborBytes, err := cbor.Marshal(c)
 	if err != nil {
 		return nil, 0, fmt.Errorf("marshal capture: %w", err)
 	}
-	enc := zstdEncPool.Get().(*zstd.Encoder)
-	defer zstdEncPool.Put(enc)
-	return enc.EncodeAll(jsonBytes, nil), len(jsonBytes), nil
+	zenc := zstdEncPool.Get().(*zstd.Encoder)
+	defer zstdEncPool.Put(zenc)
+	return zenc.EncodeAll(cborBytes, nil), len(cborBytes), nil
 }
 
-// decompressCapture decompresses zstd-compressed JSON and returns it.
-func decompressCapture(data []byte) ([]byte, error) {
+// decompressCapture decompresses zstd-compressed CBOR and unmarshals it into a ReqRespCapture.
+func decompressCapture(data []byte) (*ReqRespCapture, error) {
 	dec := zstdDecPool.Get().(*zstd.Decoder)
 	defer zstdDecPool.Put(dec)
-	return dec.DecodeAll(data, nil)
+	cborBytes, err := dec.DecodeAll(data, nil)
+	if err != nil {
+		return nil, fmt.Errorf("decompress capture: %w", err)
+	}
+	var capture ReqRespCapture
+	if err := cbor.Unmarshal(cborBytes, &capture); err != nil {
+		return nil, fmt.Errorf("unmarshal capture: %w", err)
+	}
+	return &capture, nil
 }
 
-// TokenMetrics represents parsed token statistics from llama-server logs
+// TokenMetrics holds token usage and performance metrics
 type TokenMetrics struct {
-	ID              int       `json:"id"`
-	Timestamp       time.Time `json:"timestamp"`
-	Model           string    `json:"model"`
-	CachedTokens    int       `json:"cache_tokens"`
-	InputTokens     int       `json:"input_tokens"`
-	OutputTokens    int       `json:"output_tokens"`
-	PromptPerSecond float64   `json:"prompt_per_second"`
-	TokensPerSecond float64   `json:"tokens_per_second"`
-	DurationMs      int       `json:"duration_ms"`
-	HasCapture      bool      `json:"has_capture"`
+	CachedTokens    int     `json:"cache_tokens"`
+	InputTokens     int     `json:"input_tokens"`
+	OutputTokens    int     `json:"output_tokens"`
+	PromptPerSecond float64 `json:"prompt_per_second"`
+	TokensPerSecond float64 `json:"tokens_per_second"`
+}
+
+// ActivityLogEntry represents parsed token statistics from llama-server logs
+type ActivityLogEntry struct {
+	ID              int          `json:"id"`
+	Timestamp       time.Time    `json:"timestamp"`
+	Model           string       `json:"model"`
+	ReqPath         string       `json:"req_path"`
+	RespContentType string       `json:"resp_content_type"`
+	RespStatusCode  int          `json:"resp_status_code"`
+	Tokens          TokenMetrics `json:"tokens"`
+	DurationMs      int          `json:"duration_ms"`
+	HasCapture      bool         `json:"has_capture"`
 }
 
 type ReqRespCapture struct {
@@ -84,48 +102,45 @@ type ReqRespCapture struct {
 	RespBody    []byte            `json:"resp_body"`
 }
 
-// TokenMetricsEvent represents a token metrics event
-type TokenMetricsEvent struct {
-	Metrics TokenMetrics
+// ActivityLogEvent represents a token metrics event
+type ActivityLogEvent struct {
+	Metrics ActivityLogEntry
 }
 
-func (e TokenMetricsEvent) Type() uint32 {
-	return TokenMetricsEventID // defined in events.go
+func (e ActivityLogEvent) Type() uint32 {
+	return ActivityLogEventID // defined in events.go
 }
 
 // metricsMonitor parses llama-server output for token statistics
 type metricsMonitor struct {
 	mu         sync.RWMutex
-	metrics    []TokenMetrics
+	metrics    []ActivityLogEntry
 	maxMetrics int
 	nextID     int
 	logger     *LogMonitor
 
 	// capture fields
 	enableCaptures bool
-	captures       map[int][]byte // zstd-compressed JSON of ReqRespCapture
-	captureOrder   []int          // track insertion order for FIFO eviction
-	captureSize    int            // current total compressed size in bytes
-	maxCaptureSize int            // max bytes for captures (uncompressed)
+	captureCache   *cache.Cache // zstd-compressed CBOR of ReqRespCapture
 }
 
 // newMetricsMonitor creates a new metricsMonitor. captureBufferMB is the
 // capture buffer size in megabytes; 0 disables captures.
 func newMetricsMonitor(logger *LogMonitor, maxMetrics int, captureBufferMB int) *metricsMonitor {
-	return &metricsMonitor{
+	mm := &metricsMonitor{
 		logger:         logger,
 		maxMetrics:     maxMetrics,
 		enableCaptures: captureBufferMB > 0,
-		captures:       make(map[int][]byte),
-		captureOrder:   make([]int, 0),
-		captureSize:    0,
-		maxCaptureSize: captureBufferMB * 1024 * 1024,
 	}
+	if captureBufferMB > 0 {
+		mm.captureCache = cache.New(captureBufferMB * 1024 * 1024)
+	}
+	return mm
 }
 
-// addMetrics adds a new metric to the collection and publishes an event.
-// Returns the assigned metric ID.
-func (mp *metricsMonitor) addMetrics(metric TokenMetrics) int {
+// queueMetrics adds a new metric to the collection without emitting an event.
+// Returns the assigned metric ID. Call emitMetric after capture setup.
+func (mp *metricsMonitor) queueMetrics(metric ActivityLogEntry) int {
 	mp.mu.Lock()
 	defer mp.mu.Unlock()
 
@@ -135,93 +150,75 @@ func (mp *metricsMonitor) addMetrics(metric TokenMetrics) int {
 	if len(mp.metrics) > mp.maxMetrics {
 		mp.metrics = mp.metrics[len(mp.metrics)-mp.maxMetrics:]
 	}
-	event.Emit(TokenMetricsEvent{Metrics: metric})
 	return metric.ID
 }
 
-// addCapture adds a new capture to the buffer with size-based eviction.
-// Captures are skipped if enableCaptures is false or if compressed data exceeds maxCaptureSize.
-func (mp *metricsMonitor) addCapture(capture ReqRespCapture) {
+// emitMetric publishes an ActivityLogEvent for the given metric.
+func (mp *metricsMonitor) emitMetric(metric ActivityLogEntry) {
+	event.Emit(ActivityLogEvent{Metrics: metric})
+}
+
+// addCapture compresses and stores a capture in the cache.
+// Returns true if the capture was stored, false otherwise.
+func (mp *metricsMonitor) addCapture(capture ReqRespCapture) bool {
 	if !mp.enableCaptures {
-		return
+		return false
 	}
 
 	compressed, uncompressedBytes, err := compressCapture(&capture)
 	if err != nil {
 		mp.logger.Warnf("failed to compress capture: %v, skipping", err)
-		return
+		return false
 	}
 
-	captureSize := len(compressed)
-	if captureSize > mp.maxCaptureSize {
-		mp.logger.Warnf("compressed capture size %d exceeds max %d, skipping", captureSize, mp.maxCaptureSize)
-		return
+	if err := mp.captureCache.Add(capture.ID, compressed); err != nil {
+		mp.logger.Warnf("capture %d too large (%d bytes), skipping: %v", capture.ID, len(compressed), err)
+		return false
 	}
 
-	compressionRatio := (1 - float64(captureSize)/float64(uncompressedBytes)) * 100
-
-	mp.mu.Lock()
-	defer mp.mu.Unlock()
-
-	// Evict oldest (FIFO) until room available for the compressed data
-	for mp.captureSize+captureSize > mp.maxCaptureSize && len(mp.captureOrder) > 0 {
-		oldestID := mp.captureOrder[0]
-		mp.captureOrder = mp.captureOrder[1:]
-		if evicted, exists := mp.captures[oldestID]; exists {
-			l := len(evicted)
-			mp.captureSize -= l
-			delete(mp.captures, oldestID)
-			mp.logger.Debugf("Capture %d evicted to make space: %d bytes", oldestID, l)
-		}
-	}
-
-	mp.captures[capture.ID] = compressed
-	mp.captureOrder = append(mp.captureOrder, capture.ID)
-	mp.captureSize += captureSize
-
+	compressionRatio := (1 - float64(len(compressed))/float64(uncompressedBytes)) * 100
 	mp.logger.Debugf("Capture %d compressed and saved: %d bytes -> %d bytes (%.1f%% compression)", capture.ID, uncompressedBytes, len(compressed), compressionRatio)
+	return true
 }
 
 // getCompressedBytes returns the raw compressed bytes for a capture by ID.
 func (mp *metricsMonitor) getCompressedBytes(id int) ([]byte, bool) {
-	mp.mu.RLock()
-	defer mp.mu.RUnlock()
-
-	data, exists := mp.captures[id]
-	return data, exists
+	if mp.captureCache == nil {
+		return nil, false
+	}
+	data, err := mp.captureCache.Get(id)
+	if err != nil {
+		return nil, false
+	}
+	return data, true
 }
 
-// getCaptureByID returns decompressed capture bytes if found and decompress=true.
-// If decompress=false, returns the raw zstd-compressed bytes.
-// Returns nil if the capture is not found.
-func (mp *metricsMonitor) getCaptureByID(id int, decompress bool) []byte {
-	mp.mu.RLock()
-	defer mp.mu.RUnlock()
-
-	data, exists := mp.captures[id]
+// getCaptureByID decompresses and unmarshals a capture by ID.
+// Returns nil if the capture is not found or decompression fails.
+func (mp *metricsMonitor) getCaptureByID(id int) *ReqRespCapture {
+	if mp.captureCache == nil {
+		return nil
+	}
+	data, exists := mp.getCompressedBytes(id)
 	if !exists {
 		return nil
 	}
 
-	if !decompress {
-		return data
-	}
-
-	decompressed, err := decompressCapture(data)
+	capture, err := decompressCapture(data)
 	if err != nil {
 		mp.logger.Warnf("failed to decompress capture %d: %v", id, err)
 		return nil
 	}
 
-	return decompressed
+	return capture
 }
 
 // getMetrics returns a copy of the current metrics
-func (mp *metricsMonitor) getMetrics() []TokenMetrics {
+func (mp *metricsMonitor) getMetrics() []ActivityLogEntry {
 	mp.mu.RLock()
 	defer mp.mu.RUnlock()
 
-	result := make([]TokenMetrics, len(mp.metrics))
+	result := make([]ActivityLogEntry, len(mp.metrics))
 	copy(result, mp.metrics)
 	return result
 }
@@ -230,22 +227,52 @@ func (mp *metricsMonitor) getMetrics() []TokenMetrics {
 func (mp *metricsMonitor) getMetricsJSON() ([]byte, error) {
 	mp.mu.RLock()
 	defer mp.mu.RUnlock()
-	return json.Marshal(mp.metrics)
+
+	if mp.captureCache == nil {
+		return json.Marshal(mp.metrics)
+	}
+
+	// Make a copy with up-to-date has_capture from cache
+	result := make([]ActivityLogEntry, len(mp.metrics))
+	for i, m := range mp.metrics {
+		m.HasCapture = mp.captureCache.Has(m.ID)
+		result[i] = m
+	}
+	return json.Marshal(result)
 }
 
-// wrapHandler wraps the proxy handler to extract token metrics
+// Capture field flags for controlling what is saved in ReqRespCapture.
+type captureFields uint
+
+const (
+	captureNone captureFields = 1 << iota
+	captureReqHeaders
+	captureReqBody
+	captureRespHeaders
+	captureRespBody
+)
+
+const (
+	captureReqAll  = captureReqHeaders | captureReqBody
+	captureRespAll = captureRespHeaders | captureRespBody
+	captureAll     = captureReqAll | captureRespAll
+)
+
+// wrapHandler wraps the proxy handler to extract token metrics.
+// captureFields controls what is saved in the ReqRespCapture using bitwise flags.
 // if wrapHandler returns an error it is safe to assume that no
 // data was sent to the client
 func (mp *metricsMonitor) wrapHandler(
 	modelID string,
 	writer gin.ResponseWriter,
 	request *http.Request,
+	captureFields captureFields,
 	next func(modelID string, w http.ResponseWriter, r *http.Request) error,
 ) error {
 	// Capture request body and headers if captures enabled
 	var reqBody []byte
 	var reqHeaders map[string]string
-	if mp.enableCaptures {
+	if mp.enableCaptures && (captureFields&captureReqBody) != 0 {
 		if request.Body != nil {
 			var err error
 			reqBody, err = io.ReadAll(request.Body)
@@ -255,6 +282,8 @@ func (mp *metricsMonitor) wrapHandler(
 			request.Body.Close()
 			request.Body = io.NopCloser(bytes.NewBuffer(reqBody))
 		}
+	}
+	if mp.enableCaptures && (captureFields&captureReqHeaders) != 0 {
 		reqHeaders = make(map[string]string)
 		for key, values := range request.Header {
 			if len(values) > 0 {
@@ -278,22 +307,28 @@ func (mp *metricsMonitor) wrapHandler(
 	// after this point we have to assume that data was sent to the client
 	// and we can only log errors but not send them to clients
 
-	if recorder.Status() != http.StatusOK {
-		mp.logger.Warnf("metrics skipped, HTTP status=%d, path=%s", recorder.Status(), request.URL.Path)
-		return nil
+	// Initialize default metrics - recorded for every request
+	tm := ActivityLogEntry{
+		Timestamp:       time.Now(),
+		Model:           modelID,
+		ReqPath:         request.URL.Path,
+		RespContentType: recorder.Header().Get("Content-Type"),
+		RespStatusCode:  recorder.Status(),
+		DurationMs:      int(time.Since(recorder.StartTime()).Milliseconds()),
 	}
 
-	// Initialize default metrics - these will always be recorded
-	tm := TokenMetrics{
-		Timestamp:  time.Now(),
-		Model:      modelID,
-		DurationMs: int(time.Since(recorder.StartTime()).Milliseconds()),
+	if recorder.Status() != http.StatusOK {
+		mp.logger.Warnf("non-200 response, recording partial metrics: status=%d, path=%s", recorder.Status(), request.URL.Path)
+		tm.ID = mp.queueMetrics(tm)
+		mp.emitMetric(tm)
+		return nil
 	}
 
 	body := recorder.body.Bytes()
 	if len(body) == 0 {
 		mp.logger.Warn("metrics: empty body, recording minimal metrics")
-		mp.addMetrics(tm)
+		tm.ID = mp.queueMetrics(tm)
+		mp.emitMetric(tm)
 		return nil
 	}
 
@@ -303,7 +338,8 @@ func (mp *metricsMonitor) wrapHandler(
 		body, err = decompressBody(body, encoding)
 		if err != nil {
 			mp.logger.Warnf("metrics: decompression failed: %v, path=%s, recording minimal metrics", err, request.URL.Path)
-			mp.addMetrics(tm)
+			tm.ID = mp.queueMetrics(tm)
+			mp.emitMetric(tm)
 			return nil
 		}
 	}
@@ -311,7 +347,8 @@ func (mp *metricsMonitor) wrapHandler(
 		if parsed, err := processStreamingResponse(modelID, recorder.StartTime(), body); err != nil {
 			mp.logger.Warnf("error processing streaming response: %v, path=%s, recording minimal metrics", err, request.URL.Path)
 		} else {
-			tm = parsed
+			tm.Tokens = parsed.Tokens
+			tm.DurationMs = parsed.DurationMs
 		}
 	} else {
 		if gjson.ValidBytes(body) {
@@ -331,7 +368,8 @@ func (mp *metricsMonitor) wrapHandler(
 				if parsedMetrics, err := parseMetrics(modelID, recorder.StartTime(), usage, timings); err != nil {
 					mp.logger.Warnf("error parsing metrics: %v, path=%s, recording minimal metrics", err, request.URL.Path)
 				} else {
-					tm = parsedMetrics
+					tm.Tokens = parsedMetrics.Tokens
+					tm.DurationMs = parsedMetrics.DurationMs
 				}
 			}
 		} else {
@@ -342,39 +380,50 @@ func (mp *metricsMonitor) wrapHandler(
 	// Build capture if enabled and determine if it will be stored
 	var capture *ReqRespCapture
 	if mp.enableCaptures {
-		respHeaders := make(map[string]string)
-		for key, values := range recorder.Header() {
-			if len(values) > 0 {
-				respHeaders[key] = values[0]
+		var respHeaders map[string]string
+		var respBody []byte
+		if (captureFields & captureRespHeaders) != 0 {
+			respHeaders = make(map[string]string)
+			for key, values := range recorder.Header() {
+				if len(values) > 0 {
+					respHeaders[key] = values[0]
+				}
 			}
+			redactHeaders(respHeaders)
+			delete(respHeaders, "Content-Encoding")
 		}
-		redactHeaders(respHeaders)
-		delete(respHeaders, "Content-Encoding")
+		if (captureFields & captureRespBody) != 0 {
+			respBody = body
+		}
 		capture = &ReqRespCapture{
 			ReqPath:     request.URL.Path,
 			ReqHeaders:  reqHeaders,
 			ReqBody:     reqBody,
 			RespHeaders: respHeaders,
-			RespBody:    body,
-		}
-		compressed, _, err := compressCapture(capture)
-		if err == nil && len(compressed) <= mp.maxCaptureSize {
-			tm.HasCapture = true
+			RespBody:    respBody,
 		}
 	}
 
-	metricID := mp.addMetrics(tm)
+	metricID := mp.queueMetrics(tm)
+	tm.ID = metricID
 
 	// Store capture if enabled
 	if capture != nil {
 		capture.ID = metricID
-		mp.addCapture(*capture)
+		if mp.addCapture(*capture) {
+			tm.HasCapture = true
+			mp.mu.Lock()
+			mp.metrics[len(mp.metrics)-1].HasCapture = true
+			mp.mu.Unlock()
+		}
 	}
+
+	mp.emitMetric(tm)
 
 	return nil
 }
 
-func processStreamingResponse(modelID string, start time.Time, body []byte) (TokenMetrics, error) {
+func processStreamingResponse(modelID string, start time.Time, body []byte) (ActivityLogEntry, error) {
 	// Iterate **backwards** through the body looking for the data payload with
 	// usage data. This avoids allocating a slice of all lines via bytes.Split.
 
@@ -428,10 +477,10 @@ func processStreamingResponse(modelID string, start time.Time, body []byte) (Tok
 		}
 	}
 
-	return TokenMetrics{}, fmt.Errorf("no valid JSON data found in stream")
+	return ActivityLogEntry{}, fmt.Errorf("no valid JSON data found in stream")
 }
 
-func parseMetrics(modelID string, start time.Time, usage, timings gjson.Result) (TokenMetrics, error) {
+func parseMetrics(modelID string, start time.Time, usage, timings gjson.Result) (ActivityLogEntry, error) {
 	wallDurationMs := int(time.Since(start).Milliseconds())
 
 	// default values
@@ -481,15 +530,17 @@ func parseMetrics(modelID string, start time.Time, usage, timings gjson.Result) 
 		}
 	}
 
-	return TokenMetrics{
-		Timestamp:       time.Now(),
-		Model:           modelID,
-		CachedTokens:    cachedTokens,
-		InputTokens:     inputTokens,
-		OutputTokens:    outputTokens,
-		PromptPerSecond: promptPerSecond,
-		TokensPerSecond: tokensPerSecond,
-		DurationMs:      durationMs,
+	return ActivityLogEntry{
+		Timestamp: time.Now(),
+		Model:     modelID,
+		Tokens: TokenMetrics{
+			CachedTokens:    cachedTokens,
+			InputTokens:     inputTokens,
+			OutputTokens:    outputTokens,
+			PromptPerSecond: promptPerSecond,
+			TokensPerSecond: tokensPerSecond,
+		},
+		DurationMs: durationMs,
 	}, nil
 }
 
