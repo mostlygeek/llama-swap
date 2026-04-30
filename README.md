@@ -41,7 +41,14 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
   - `/upstream/:model_id` - direct access to upstream server ([demo](https://github.com/mostlygeek/llama-swap/pull/31))
   - `/models/unload` - manually unload running models ([#58](https://github.com/mostlygeek/llama-swap/issues/58))
   - `/running` - list currently running models ([#61](https://github.com/mostlygeek/llama-swap/issues/61))
-  - `/log` - remote log monitoring
+  - `/logs` - remote log monitoring
+    - `GET /logs` returns buffered plain text logs.
+      - If `Accept: text/html` is sent, `/logs` redirects to `/ui/`.
+    - `GET /logs/stream` keeps the connection open for live log streaming.
+      - Stream endpoints send buffered history first by default; add `?no-history` to stream only new lines.
+    - `GET /logs/stream/proxy` streams proxy logs only.
+    - `GET /logs/stream/upstream` streams upstream process logs only.
+    - `GET /logs/stream/{model_id}` streams logs for one model (including IDs with slashes, like `author/model`).
   - `/health` - just returns "OK"
 - ✅ API Key support - define keys to restrict access to API endpoints
 - ✅ Customizable
