@@ -32,6 +32,13 @@ func (pm *ProxyManager) streamLogsHandler(c *gin.Context) {
 	c.Header("X-Accel-Buffering", "no")
 
 	logMonitorId := strings.TrimPrefix(c.Param("logMonitorID"), "/")
+
+	// Handle case where query string might be included in the parameter
+	// (can happen with catch-all routes on some versions/setups)
+	if idx := strings.Index(logMonitorId, "?"); idx != -1 {
+		logMonitorId = logMonitorId[:idx]
+	}
+
 	logger, err := pm.getLogger(logMonitorId)
 	if err != nil {
 		c.String(http.StatusBadRequest, err.Error())
