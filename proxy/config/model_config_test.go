@@ -20,6 +20,71 @@ func TestConfig_ModelConfigSanitizedCommand(t *testing.T) {
 	assert.Equal(t, []string{"python", "model1.py", "--arg1", "value1", "--arg2", "value2"}, args)
 }
 
+func TestModelConfig_ContextSize(t *testing.T) {
+	tests := []struct {
+		name     string
+		cmd      string
+		expected int
+	}{
+		{"long flag", "llama-server --port 8080 --ctx-size 4096 --model foo.gguf", 4096},
+		{"equals syntax", "llama-server --ctx-size=196608 --port 8080", 196608},
+		{"short flag", "llama-server -p 8080 -c 8192 -m foo.gguf", 8192},
+		{"no context size", "llama-server --port 8080 --model foo.gguf", 0},
+		{"short flag non-numeric", "python -c 'print(1)' --ctx-size 2048", 2048},
+		{"last occurrence wins", "llama-server --ctx-size 1024 --ctx-size 2048", 2048},
+		{"empty cmd", "", 0},
+		{"large context", "llama-server -c 131072", 131072},
+		{"vllm max-model-len", "vllm serve model --max-model-len 32768 --port 8080", 32768},
+		{"vllm max-model-len equals", "vllm serve model --max-model-len=65536", 65536},
+		{"shell var not resolved", "llama-server --ctx-size $CTX_SIZE", 0},
+		{"parallel divides context", "llama-server --ctx-size 128000 --parallel 4", 32000},
+		{"parallel short flag", "llama-server -c 128000 -np 4", 32000},
+		{"parallel equals syntax", "llama-server --ctx-size=64000 --parallel=2", 32000},
+		{"parallel 1 no division", "llama-server --ctx-size 128000 --parallel 1", 128000},
+		{"parallel without ctx", "llama-server --parallel 4", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &ModelConfig{Cmd: tt.cmd}
+			assert.Equal(t, tt.expected, m.ContextSize())
+		})
+	}
+}
+
+func TestModelConfig_ContextSize_EnvMacro(t *testing.T) {
+	t.Setenv("LLAMA_ARG_CTX_SIZE", "65536")
+	configYaml := `
+models:
+  model1:
+    cmd: llama-server --port ${PORT} --ctx-size ${env.LLAMA_ARG_CTX_SIZE}
+`
+	cfg, err := LoadConfigFromReader(strings.NewReader(configYaml))
+	assert.NoError(t, err)
+	model1 := cfg.Models["model1"]
+	assert.Equal(t, 65536, model1.ContextSize())
+}
+
+func TestModelConfig_SupportsVision(t *testing.T) {
+	tests := []struct {
+		name     string
+		cmd      string
+		expected bool
+	}{
+		{"with mmproj", "llama-server --port 8080 --mmproj vision.gguf --model foo.gguf", true},
+		{"with mmproj equals", "llama-server --mmproj=vision.gguf --port 8080", true},
+		{"without mmproj", "llama-server --port 8080 --model foo.gguf", false},
+		{"empty cmd", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &ModelConfig{Cmd: tt.cmd}
+			assert.Equal(t, tt.expected, m.SupportsVision())
+		})
+	}
+}
+
 func TestConfig_ModelFilters(t *testing.T) {
 	content := `
 macros:

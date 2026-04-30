@@ -3,6 +3,8 @@ package config
 import (
 	"errors"
 	"runtime"
+	"strconv"
+	"strings"
 )
 
 const (
@@ -98,6 +100,78 @@ func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 func (m *ModelConfig) SanitizedCommand() ([]string, error) {
 	return SanitizeCommand(m.Cmd)
+}
+
+// ContextSize extracts the effective per-request context size from the model's cmd arguments.
+// It looks for --ctx-size / -c (llama.cpp) and --max-model-len (vLLM) flags.
+// If --parallel / -np is also set, the context is divided by the parallel count
+// since llama.cpp splits the KV cache across slots.
+// Returns 0 if no context size is found or the value is not a valid positive integer.
+// If specified multiple times, the last occurrence wins.
+func (m *ModelConfig) ContextSize() int {
+	args, err := SanitizeCommand(m.Cmd)
+	if err != nil || len(args) == 0 {
+		return 0
+	}
+
+	ctxSize := 0
+	parallel := 0
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+
+		switch {
+		case arg == "--ctx-size" || arg == "-c" || arg == "--max-model-len":
+			if i+1 < len(args) {
+				if n, err := strconv.Atoi(args[i+1]); err == nil && n > 0 {
+					ctxSize = n
+				}
+				i++
+			}
+		case arg == "--parallel" || arg == "-np":
+			if i+1 < len(args) {
+				if n, err := strconv.Atoi(args[i+1]); err == nil && n > 1 {
+					parallel = n
+				}
+				i++
+			}
+		case strings.HasPrefix(arg, "--ctx-size="):
+			val := strings.TrimPrefix(arg, "--ctx-size=")
+			if n, err := strconv.Atoi(val); err == nil && n > 0 {
+				ctxSize = n
+			}
+		case strings.HasPrefix(arg, "--max-model-len="):
+			val := strings.TrimPrefix(arg, "--max-model-len=")
+			if n, err := strconv.Atoi(val); err == nil && n > 0 {
+				ctxSize = n
+			}
+		case strings.HasPrefix(arg, "--parallel="):
+			val := strings.TrimPrefix(arg, "--parallel=")
+			if n, err := strconv.Atoi(val); err == nil && n > 1 {
+				parallel = n
+			}
+		}
+	}
+
+	if ctxSize > 0 && parallel > 1 {
+		ctxSize = ctxSize / parallel
+	}
+
+	return ctxSize
+}
+
+// SupportsVision checks if the model's cmd includes a multimodal projector flag.
+// Returns true if --mmproj is found in the command arguments (llama.cpp vision support).
+func (m *ModelConfig) SupportsVision() bool {
+	args, err := SanitizeCommand(m.Cmd)
+	if err != nil {
+		return false
+	}
+	for _, arg := range args {
+		if arg == "--mmproj" || strings.HasPrefix(arg, "--mmproj=") {
+			return true
+		}
+	}
+	return false
 }
 
 // ModelFilters embeds Filters and adds legacy support for strip_params field
