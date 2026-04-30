@@ -47,4 +47,3 @@ func TestLogMonitorIdQueryParameterStripping(t *testing.T) {
 		})
 	}
 }
-
