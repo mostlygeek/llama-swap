@@ -683,7 +683,7 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 	searchModelName, modelID, remainingPath, modelFound := pm.findModelInPath(upstreamPath)
 
 	if !modelFound {
-		pm.sendErrorResponse(c, http.StatusBadRequest, "model id required in path")
+		pm.sendErrorResponse(c, http.StatusNotFound, "model not found")
 		return
 	}
 
