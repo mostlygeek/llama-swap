@@ -107,6 +107,12 @@ func (pm *ProxyManager) getLogger(logMonitorId string) (*LogMonitor, error) {
 					return process.Logger(), nil
 				}
 			}
+			// also check the matrix when processGroups doesn't contain the model
+			if pm.matrix != nil {
+				if process, found := pm.matrix.GetProcess(name); found {
+					return process.Logger(), nil
+				}
+			}
 		}
 
 		return nil, fmt.Errorf("invalid logger. Use 'proxy', 'upstream' or a model's ID")
