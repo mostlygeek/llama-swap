@@ -578,15 +578,11 @@ func newBodyCopier(w gin.ResponseWriter) *responseBodyCopier {
 		ResponseWriter: w,
 		body:           bodyBuffer,
 		tee:            io.MultiWriter(w, bodyBuffer),
+		start:          time.Now(),
 	}
 }
 
 func (w *responseBodyCopier) Write(b []byte) (int, error) {
-	if w.start.IsZero() {
-		w.start = time.Now()
-	}
-
-	// Single write operation that writes to both the response and buffer
 	return w.tee.Write(b)
 }
 

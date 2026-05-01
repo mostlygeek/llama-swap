@@ -490,14 +490,10 @@ func TestMetricsMonitor_ResponseBodyCopier(t *testing.T) {
 		assert.Equal(t, string(testData), rec.Body.String())
 	})
 
-	t.Run("sets start time on first write", func(t *testing.T) {
+	t.Run("sets start time on creation", func(t *testing.T) {
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
 		copier := newBodyCopier(ginCtx.Writer)
-
-		assert.True(t, copier.StartTime().IsZero())
-
-		copier.Write([]byte("test"))
 
 		assert.False(t, copier.StartTime().IsZero())
 	})
