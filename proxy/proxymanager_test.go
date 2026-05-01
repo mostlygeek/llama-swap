@@ -410,6 +410,372 @@ models:
 	assert.False(t, exists, "model2 should not have llamaswap_meta")
 }
 
+func TestProxyManager_ListModelsHandler_MetadataPathModes(t *testing.T) {
+	// Test 1: Default path (backward compatible)
+	t.Run("default path", func(t *testing.T) {
+		configYaml := `
+healthCheckTimeout: 15
+logLevel: error
+startPort: 10000
+models:
+  model1:
+    cmd: /path/to/server -p ${PORT}
+    metadata:
+      port: 10001
+      vendor: "test"
+`
+		processedConfig, err := config.LoadConfigFromReader(strings.NewReader(configYaml))
+		assert.NoError(t, err)
+		proxy := New(processedConfig)
+
+		req := httptest.NewRequest("GET", "/v1/models", nil)
+		w := CreateTestResponseRecorder()
+		proxy.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var response struct {
+			Data []map[string]any `json:"data"`
+		}
+		err = json.Unmarshal(w.Body.Bytes(), &response)
+		assert.NoError(t, err)
+		assert.Len(t, response.Data, 1)
+
+		model1 := response.Data[0]
+		assert.Equal(t, "model1", model1["id"])
+
+		// Verify metadata at meta.llamaswap
+		meta := model1["meta"].(map[string]any)
+		lsmeta := meta["llamaswap"].(map[string]any)
+		assert.Equal(t, float64(10001), lsmeta["port"])
+		assert.Equal(t, "test", lsmeta["vendor"])
+	})
+
+	// Test 2: Root path ("/")
+	t.Run("root path", func(t *testing.T) {
+		configYaml := `
+healthCheckTimeout: 15
+logLevel: error
+startPort: 10000
+models:
+  model1:
+    cmd: /path/to/server -p ${PORT}
+    metadataPath: "/"
+    metadata:
+      port: 10001
+      vendor: "test"
+`
+		processedConfig, err := config.LoadConfigFromReader(strings.NewReader(configYaml))
+		assert.NoError(t, err)
+		proxy := New(processedConfig)
+
+		req := httptest.NewRequest("GET", "/v1/models", nil)
+		w := CreateTestResponseRecorder()
+		proxy.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var response struct {
+			Data []map[string]any `json:"data"`
+		}
+		err = json.Unmarshal(w.Body.Bytes(), &response)
+		assert.NoError(t, err)
+		assert.Len(t, response.Data, 1)
+
+		model1 := response.Data[0]
+		assert.Equal(t, "model1", model1["id"])
+
+		// Verify metadata at root level
+		assert.Equal(t, float64(10001), model1["port"])
+		assert.Equal(t, "test", model1["vendor"])
+		// Verify meta key does NOT exist
+		_, hasMeta := model1["meta"]
+		assert.False(t, hasMeta, "root path should not create meta key")
+	})
+
+	// Test 3: Custom path ("/vendor/custom")
+	t.Run("custom path", func(t *testing.T) {
+		configYaml := `
+healthCheckTimeout: 15
+logLevel: error
+startPort: 10000
+models:
+  model1:
+    cmd: /path/to/server -p ${PORT}
+    metadataPath: "/vendor/custom"
+    metadata:
+      port: 10001
+      vendor: "test"
+`
+		processedConfig, err := config.LoadConfigFromReader(strings.NewReader(configYaml))
+		assert.NoError(t, err)
+		proxy := New(processedConfig)
+
+		req := httptest.NewRequest("GET", "/v1/models", nil)
+		w := CreateTestResponseRecorder()
+		proxy.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var response struct {
+			Data []map[string]any `json:"data"`
+		}
+		err = json.Unmarshal(w.Body.Bytes(), &response)
+		assert.NoError(t, err)
+		assert.Len(t, response.Data, 1)
+
+		model1 := response.Data[0]
+		assert.Equal(t, "model1", model1["id"])
+
+		// Verify metadata at vendor.custom
+		vendor := model1["vendor"].(map[string]any)
+		custom := vendor["custom"].(map[string]any)
+		assert.Equal(t, float64(10001), custom["port"])
+		assert.Equal(t, "test", custom["vendor"])
+	})
+
+	// Test 4: Reserved key collision
+	t.Run("reserved key collision", func(t *testing.T) {
+		configYaml := `
+healthCheckTimeout: 15
+logLevel: error
+startPort: 10000
+models:
+  model1:
+    cmd: /path/to/server -p ${PORT}
+    metadataPath: "/"
+    metadata:
+      id: "should-be-skipped"
+      object: "should-be-skipped"
+      custom_key: "should-appear"
+`
+		processedConfig, err := config.LoadConfigFromReader(strings.NewReader(configYaml))
+		assert.NoError(t, err)
+		proxy := New(processedConfig)
+
+		req := httptest.NewRequest("GET", "/v1/models", nil)
+		w := CreateTestResponseRecorder()
+		proxy.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var response struct {
+			Data []map[string]any `json:"data"`
+		}
+		err = json.Unmarshal(w.Body.Bytes(), &response)
+		assert.NoError(t, err)
+		assert.Len(t, response.Data, 1)
+
+		model1 := response.Data[0]
+		// Reserved keys should NOT be overwritten
+		assert.Equal(t, "model1", model1["id"], "reserved 'id' should not be overwritten")
+		assert.Equal(t, "model", model1["object"], "reserved 'object' should not be overwritten")
+		// Custom key should appear
+		assert.Equal(t, "should-appear", model1["custom_key"])
+	})
+
+	// Test 5: Macro in path
+	t.Run("macro in path", func(t *testing.T) {
+		configYaml := `
+healthCheckTimeout: 15
+logLevel: error
+startPort: 10000
+models:
+  model1:
+    cmd: /path/to/server -p ${PORT}
+    metadataPath: "/info/${MODEL_ID}"
+    metadata:
+      port: 10001
+`
+		processedConfig, err := config.LoadConfigFromReader(strings.NewReader(configYaml))
+		assert.NoError(t, err)
+		proxy := New(processedConfig)
+
+		req := httptest.NewRequest("GET", "/v1/models", nil)
+		w := CreateTestResponseRecorder()
+		proxy.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var response struct {
+			Data []map[string]any `json:"data"`
+		}
+		err = json.Unmarshal(w.Body.Bytes(), &response)
+		assert.NoError(t, err)
+		assert.Len(t, response.Data, 1)
+
+		model1 := response.Data[0]
+		assert.Equal(t, "model1", model1["id"])
+
+		// Verify metadata at info.model1
+		info := model1["info"].(map[string]any)
+		model1info := info["model1"].(map[string]any)
+		assert.Equal(t, float64(10001), model1info["port"])
+	})
+}
+
+func TestProxyManager_ListModelsHandler_MetadataArrays(t *testing.T) {
+	// Test 1: YAML arrays serialize as JSON arrays
+	t.Run("yaml arrays to json arrays", func(t *testing.T) {
+		configYaml := `
+healthCheckTimeout: 15
+logLevel: error
+startPort: 10000
+models:
+  model1:
+    cmd: /path/to/server -p ${PORT}
+    metadata:
+      architecture:
+        input_modalities:
+          - text
+          - image
+        output_modalities:
+          - text
+      tags:
+        - fast
+        - experimental
+`
+		processedConfig, err := config.LoadConfigFromReader(strings.NewReader(configYaml))
+		assert.NoError(t, err)
+		proxy := New(processedConfig)
+
+		req := httptest.NewRequest("GET", "/v1/models", nil)
+		w := CreateTestResponseRecorder()
+		proxy.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var response struct {
+			Data []map[string]any `json:"data"`
+		}
+		err = json.Unmarshal(w.Body.Bytes(), &response)
+		assert.NoError(t, err)
+		assert.Len(t, response.Data, 1)
+
+		model1 := response.Data[0]
+		assert.Equal(t, "model1", model1["id"])
+
+		// Navigate to metadata
+		meta := model1["meta"].(map[string]any)
+		lsmeta := meta["llamaswap"].(map[string]any)
+
+		// Verify architecture.input_modalities is a JSON array
+		arch := lsmeta["architecture"].(map[string]any)
+		inputModalities := arch["input_modalities"].([]any)
+		assert.Len(t, inputModalities, 2)
+		assert.Equal(t, "text", inputModalities[0])
+		assert.Equal(t, "image", inputModalities[1])
+
+		// Verify architecture.output_modalities is a JSON array
+		outputModalities := arch["output_modalities"].([]any)
+		assert.Len(t, outputModalities, 1)
+		assert.Equal(t, "text", outputModalities[0])
+
+		// Verify tags is a JSON array
+		tags := lsmeta["tags"].([]any)
+		assert.Len(t, tags, 2)
+		assert.Equal(t, "fast", tags[0])
+		assert.Equal(t, "experimental", tags[1])
+	})
+
+	// Test 2: Macros inside arrays resolve correctly
+	t.Run("macros inside arrays", func(t *testing.T) {
+		configYaml := `
+healthCheckTimeout: 15
+logLevel: error
+startPort: 10000
+models:
+  model1:
+    cmd: /path/to/server -p ${PORT}
+    macros:
+      FORMAT_1: "json"
+      FORMAT_2: "xml"
+    metadata:
+      supported_formats:
+        - ${FORMAT_1}
+        - ${FORMAT_2}
+`
+		processedConfig, err := config.LoadConfigFromReader(strings.NewReader(configYaml))
+		assert.NoError(t, err)
+		proxy := New(processedConfig)
+
+		req := httptest.NewRequest("GET", "/v1/models", nil)
+		w := CreateTestResponseRecorder()
+		proxy.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var response struct {
+			Data []map[string]any `json:"data"`
+		}
+		err = json.Unmarshal(w.Body.Bytes(), &response)
+		assert.NoError(t, err)
+		assert.Len(t, response.Data, 1)
+
+		model1 := response.Data[0]
+
+		// Navigate to metadata
+		meta := model1["meta"].(map[string]any)
+		lsmeta := meta["llamaswap"].(map[string]any)
+
+		// Verify macros resolved inside the array
+		formats := lsmeta["supported_formats"].([]any)
+		assert.Len(t, formats, 2)
+		assert.Equal(t, "json", formats[0])
+		assert.Equal(t, "xml", formats[1])
+	})
+
+	// Test 3: Arrays with root metadataPath
+	t.Run("arrays with root metadataPath", func(t *testing.T) {
+		configYaml := `
+healthCheckTimeout: 15
+logLevel: error
+startPort: 10000
+models:
+  model1:
+    cmd: /path/to/server -p ${PORT}
+    metadataPath: "/"
+    metadata:
+      architecture:
+        input_modalities:
+          - text
+          - image
+        output_modalities:
+          - text
+`
+		processedConfig, err := config.LoadConfigFromReader(strings.NewReader(configYaml))
+		assert.NoError(t, err)
+		proxy := New(processedConfig)
+
+		req := httptest.NewRequest("GET", "/v1/models", nil)
+		w := CreateTestResponseRecorder()
+		proxy.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var response struct {
+			Data []map[string]any `json:"data"`
+		}
+		err = json.Unmarshal(w.Body.Bytes(), &response)
+		assert.NoError(t, err)
+		assert.Len(t, response.Data, 1)
+
+		model1 := response.Data[0]
+		assert.Equal(t, "model1", model1["id"])
+
+		// With root path, architecture is at top level
+		arch := model1["architecture"].(map[string]any)
+		inputModalities := arch["input_modalities"].([]any)
+		assert.Len(t, inputModalities, 2)
+		assert.Equal(t, "text", inputModalities[0])
+		assert.Equal(t, "image", inputModalities[1])
+
+		outputModalities := arch["output_modalities"].([]any)
+		assert.Len(t, outputModalities, 1)
+		assert.Equal(t, "text", outputModalities[0])
+	})
+}
+
 func TestProxyManager_ListModelsHandler_SortedByID(t *testing.T) {
 	// Intentionally add models in non-sorted order and with an unlisted model
 	cfg := testConfigFromYAML(t, `

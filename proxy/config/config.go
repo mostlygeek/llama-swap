@@ -326,6 +326,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			modelConfig.Filters.StripParams = strings.ReplaceAll(modelConfig.Filters.StripParams, macroSlug, macroStr)
 			modelConfig.Name = strings.ReplaceAll(modelConfig.Name, macroSlug, macroStr)
 			modelConfig.Description = strings.ReplaceAll(modelConfig.Description, macroSlug, macroStr)
+			modelConfig.MetadataPath = strings.ReplaceAll(modelConfig.MetadataPath, macroSlug, macroStr)
 
 			// Substitute macros in SetParamsByID keys and values
 			if len(modelConfig.Filters.SetParamsByID) > 0 {
@@ -392,6 +393,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			"filters.stripParams": modelConfig.Filters.StripParams,
 			"name":                modelConfig.Name,
 			"description":         modelConfig.Description,
+			"metadataPath":        modelConfig.MetadataPath,
 		}
 
 		for fieldName, fieldValue := range fieldMap {
@@ -411,6 +413,19 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		if len(modelConfig.Metadata) > 0 {
 			if err := validateNestedForUnknownMacros(modelConfig.Metadata, fmt.Sprintf("model %s metadata", modelId)); err != nil {
 				return Config{}, err
+			}
+		}
+
+		// Validate metadataPath format
+		if modelConfig.MetadataPath != "" && !strings.HasPrefix(modelConfig.MetadataPath, "/") {
+			return Config{}, fmt.Errorf("model %s: metadataPath must start with '/'", modelId)
+		}
+		// Check for valid path characters (alphanumeric, underscore, hyphen, slash)
+		if modelConfig.MetadataPath != "" {
+			for _, r := range modelConfig.MetadataPath {
+				if r != '/' && r != '_' && r != '-' && !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
+					return Config{}, fmt.Errorf("model %s: metadataPath contains invalid character '%c'", modelId, r)
+				}
 			}
 		}
 

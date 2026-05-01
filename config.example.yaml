@@ -283,6 +283,26 @@ models:
         # becomes: c: [0.7, false, "model: llama"]
         c: [ "${temp}", false, "model: ${MODEL_ID}" ]
 
+    # metadataPath: controls where metadata appears in /v1/models response
+    # - optional, default: "/meta/llamaswap"
+    # - use "/" for top-level placement (same level as id, created, etc.)
+    # - use any path like "/vendor/custom" for custom nesting
+    # - macros like ${MODEL_ID} are supported in the path
+    # - metadata values can include nested objects and arrays
+    # metadataPath: "/"
+    #
+    # Example with nested metadata (YAML arrays become JSON arrays):
+    # metadata:
+    #   architecture:
+    #     input_modalities:
+    #       - text
+    #       - image
+    #     output_modalities:
+    #       - text
+    #   tags:
+    #     - fast
+    #     - experimental
+
     # concurrencyLimit: overrides the allowed number of active parallel requests to a model
     # - optional, default: 0
     # - useful for limiting the number of active parallel requests a model can process
