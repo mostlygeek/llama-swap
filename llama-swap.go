@@ -199,6 +199,7 @@ func main() {
 					mainLogger.Errorf("Server shutdown: %v", err)
 				}
 				close(exitChan)
+				return
 			default:
 				// do nothing on other signals
 			}
