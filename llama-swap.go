@@ -9,7 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
+	"sync"
 	"syscall"
 	"time"
 
@@ -78,15 +78,7 @@ func main() {
 	// Setup channels for server management
 	exitChan := make(chan struct{})
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	// Reload signals (SIGHUP on POSIX, none on Windows — Windows does not
-	// deliver SIGHUP). Always wired up so `kill -HUP` works regardless of
-	// --watch-config.
-	reloadChan := make(chan os.Signal, 1)
-	if runtime.GOOS != "windows" {
-		signal.Notify(reloadChan, syscall.SIGHUP)
-	}
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
 	// Context that bounds the lifetime of background watcher goroutines.
 	watcherCtx, watcherCancel := context.WithCancel(context.Background())
@@ -97,7 +89,23 @@ func main() {
 	}
 
 	// Support for watching config and reloading when it changes
+	reloading := false
+	var reloadMutex sync.Mutex
 	reloadProxyManager := func() {
+		reloadMutex.Lock()
+		if reloading {
+			reloadMutex.Unlock()
+			return
+		}
+		reloading = true
+		reloadMutex.Unlock()
+		defer func() {
+			reloadMutex.Lock()
+			reloading = false
+			reloadMutex.Unlock()
+		}()
+
+		fmt.Println("Reloading Configuration")
 		if currentPM, ok := srv.Handler.(*proxy.ProxyManager); ok {
 			conf, err = config.LoadConfig(*configPath)
 			if err != nil {
@@ -132,28 +140,6 @@ func main() {
 
 	// load the initial proxy manager
 	reloadProxyManager()
-	debouncedReload := debounce(time.Second, reloadProxyManager)
-
-	// Listen for ConfigFileChangedEvent unconditionally so SIGHUP and the
-	// poll-based watcher both feed the same debounced reload pipeline. The
-	// UI also listens for the matching ReloadingStateEnd emitted from
-	// reloadProxyManager.
-	defer event.On(func(e proxy.ConfigFileChangedEvent) {
-		if e.ReloadingState == proxy.ReloadingStateStart {
-			debouncedReload()
-		}
-	})()
-
-	// SIGHUP (or platform-equivalent) → reload. Back-to-back signals collapse
-	// to one reload via the debounce window, which is the desired behavior.
-	go func() {
-		for range reloadChan {
-			fmt.Println("Received reload signal, reloading configuration")
-			event.Emit(proxy.ConfigFileChangedEvent{
-				ReloadingState: proxy.ReloadingStateStart,
-			})
-		}
-	}()
 
 	if *watchConfig {
 		go func() {
@@ -167,32 +153,42 @@ func main() {
 				Path:     absConfigPath,
 				Interval: configwatcher.DefaultInterval,
 				OnChange: func() {
-					event.Emit(proxy.ConfigFileChangedEvent{
-						ReloadingState: proxy.ReloadingStateStart,
-					})
+					reloadProxyManager()
 				},
 			}).Run(watcherCtx)
 		}()
 	}
 
 	// shutdown on signal
+	// print the pid
+	fmt.Printf("PID: %d\n", os.Getpid())
 	go func() {
-		sig := <-sigChan
-		fmt.Printf("Received signal %v, shutting down...\n", sig)
-		watcherCancel()
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-		defer cancel()
+		for {
+			sig := <-sigChan
+			switch sig {
+			case syscall.SIGHUP:
+				fmt.Println("Received reload signal, reloading configuration")
+				reloadProxyManager()
+			case syscall.SIGINT, syscall.SIGTERM:
+				fmt.Printf("Received signal %v, shutting down...\n", sig)
+				watcherCancel()
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+				defer cancel()
 
-		if pm, ok := srv.Handler.(*proxy.ProxyManager); ok {
-			pm.Shutdown()
-		} else {
-			fmt.Println("srv.Handler is not of type *proxy.ProxyManager")
-		}
+				if pm, ok := srv.Handler.(*proxy.ProxyManager); ok {
+					pm.Shutdown()
+				} else {
+					fmt.Println("srv.Handler is not of type *proxy.ProxyManager")
+				}
 
-		if err := srv.Shutdown(ctx); err != nil {
-			fmt.Printf("Server shutdown error: %v\n", err)
+				if err := srv.Shutdown(ctx); err != nil {
+					fmt.Printf("Server shutdown error: %v\n", err)
+				}
+				close(exitChan)
+			default:
+				// do nothing on other signals
+			}
 		}
-		close(exitChan)
 	}()
 
 	// Start server
@@ -212,14 +208,4 @@ func main() {
 
 	// Wait for exit signal
 	<-exitChan
-}
-
-func debounce(interval time.Duration, f func()) func() {
-	var timer *time.Timer
-	return func() {
-		if timer != nil {
-			timer.Stop()
-		}
-		timer = time.AfterFunc(interval, f)
-	}
 }
