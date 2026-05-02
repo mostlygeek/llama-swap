@@ -4,11 +4,11 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -34,23 +34,39 @@ func main() {
 	keyFile := flag.String("tls-key-file", "", "TLS key file")
 	showVersion := flag.Bool("version", false, "show version of build")
 	watchConfig := flag.Bool("watch-config", false, "Automatically reload config file on change")
+	mainLogger := proxy.NewLogMonitor()
 
 	flag.Parse() // Parse the command-line flags
 
 	if *showVersion {
-		fmt.Printf("version: %s (%s), built at %s\n", version, commit, date)
+		fmt.Printf("version: %s (%s), built at %s", version, commit, date)
 		os.Exit(0)
 	}
 
 	conf, err := config.LoadConfig(*configPath)
 	if err != nil {
-		fmt.Printf("Error loading config: %v\n", err)
+		mainLogger.Errorf("Error loading config: %", err)
 		os.Exit(1)
 	}
 
 	if len(conf.Profiles) > 0 {
-		fmt.Println("WARNING: Profile functionality has been removed in favor of Groups. See the README for more information.")
+		mainLogger.Warn("Profile functionality has been removed in favor of Groups. See the README for more information.")
 	}
+
+	switch strings.ToLower(strings.TrimSpace(conf.LogLevel)) {
+	case "debug":
+		mainLogger.SetLogLevel(proxy.LevelDebug)
+	case "info":
+		mainLogger.SetLogLevel(proxy.LevelInfo)
+	case "warn":
+		mainLogger.SetLogLevel(proxy.LevelWarn)
+	case "error":
+		mainLogger.SetLogLevel(proxy.LevelError)
+	default:
+		mainLogger.SetLogLevel(proxy.LevelInfo)
+	}
+
+	mainLogger.Debugf("PID: %d", os.Getpid())
 
 	if mode := os.Getenv("GIN_MODE"); mode != "" {
 		gin.SetMode(mode)
@@ -105,20 +121,20 @@ func main() {
 			reloadMutex.Unlock()
 		}()
 
-		fmt.Println("Reloading Configuration")
+		mainLogger.Info("Reloading Configuration")
 		if currentPM, ok := srv.Handler.(*proxy.ProxyManager); ok {
 			conf, err = config.LoadConfig(*configPath)
 			if err != nil {
-				fmt.Printf("Warning, unable to reload configuration: %v\n", err)
+				mainLogger.Warnf("Unable to reload configuration: %v", err)
 				return
 			}
 
-			fmt.Println("Configuration Changed")
+			mainLogger.Debug("Configuration Changed")
 			currentPM.Shutdown()
 			newPM := proxy.New(conf)
 			newPM.SetVersion(date, commit, version)
 			srv.Handler = newPM
-			fmt.Println("Configuration Reloaded")
+			mainLogger.Debug("Configuration Reloaded")
 
 			// wait a few seconds and tell any UI to reload
 			time.AfterFunc(3*time.Second, func() {
@@ -129,7 +145,7 @@ func main() {
 		} else {
 			conf, err = config.LoadConfig(*configPath)
 			if err != nil {
-				fmt.Printf("Error, unable to load configuration: %v\n", err)
+				mainLogger.Errorf("Unable to load configuration: %v", err)
 				os.Exit(1)
 			}
 			newPM := proxy.New(conf)
@@ -145,10 +161,10 @@ func main() {
 		go func() {
 			absConfigPath, err := filepath.Abs(*configPath)
 			if err != nil {
-				fmt.Printf("Error getting absolute path for watching config file: %v\n", err)
+				mainLogger.Errorf("watch-config unable to determine absolute path for watching config file: %v", err)
 				return
 			}
-			fmt.Println("Watching configuration for changes (poll-based, 2s interval)")
+			mainLogger.Info("Watching configuration for changes (poll-based, 2s interval)")
 			(&configwatcher.Watcher{
 				Path:     absConfigPath,
 				Interval: configwatcher.DefaultInterval,
@@ -159,18 +175,16 @@ func main() {
 		}()
 	}
 
-	// shutdown on signal
-	// print the pid
-	fmt.Printf("PID: %d\n", os.Getpid())
+	// Signal handling
 	go func() {
 		for {
 			sig := <-sigChan
 			switch sig {
 			case syscall.SIGHUP:
-				fmt.Println("Received reload signal, reloading configuration")
+				mainLogger.Debug("Received SIGHUP")
 				reloadProxyManager()
 			case syscall.SIGINT, syscall.SIGTERM:
-				fmt.Printf("Received signal %v, shutting down...\n", sig)
+				mainLogger.Debugf("Received signal %v, shutting down...", sig)
 				watcherCancel()
 				ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 				defer cancel()
@@ -178,11 +192,11 @@ func main() {
 				if pm, ok := srv.Handler.(*proxy.ProxyManager); ok {
 					pm.Shutdown()
 				} else {
-					fmt.Println("srv.Handler is not of type *proxy.ProxyManager")
+					mainLogger.Error("srv.Handler is not of type *proxy.ProxyManager")
 				}
 
 				if err := srv.Shutdown(ctx); err != nil {
-					fmt.Printf("Server shutdown error: %v\n", err)
+					mainLogger.Errorf("Server shutdown: %v", err)
 				}
 				close(exitChan)
 			default:
@@ -195,14 +209,15 @@ func main() {
 	go func() {
 		var err error
 		if useTLS {
-			fmt.Printf("llama-swap listening with TLS on https://%s\n", *listenStr)
+			mainLogger.Infof("llama-swap listening with TLS on https://%s", *listenStr)
 			err = srv.ListenAndServeTLS(*certFile, *keyFile)
 		} else {
-			fmt.Printf("llama-swap listening on http://%s\n", *listenStr)
+			mainLogger.Infof("llama-swap listening on http://%s", *listenStr)
 			err = srv.ListenAndServe()
 		}
 		if err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Fatal server error: %v\n", err)
+			mainLogger.Errorf("Fatal server error: %v", err)
+			os.Exit(1)
 		}
 	}()
 
