@@ -351,6 +351,16 @@ func (pm *ProxyManager) setupGinEngine() {
 	pm.ginEngine.POST("/v1/rerank", pm.apiKeyAuth(), pm.trackInflight(), llmHandler)
 	pm.ginEngine.POST("/v1/reranking", pm.apiKeyAuth(), pm.trackInflight(), llmHandler)
 
+	// Unversioned API endpoints, see issue #728
+	pm.ginEngine.POST("/v/chat/completions", pm.apiKeyAuth(), pm.trackInflight(), llmHandler)
+	pm.ginEngine.POST("/v/responses", pm.apiKeyAuth(), pm.trackInflight(), llmHandler)
+	pm.ginEngine.POST("/v/completions", pm.apiKeyAuth(), pm.trackInflight(), llmHandler)
+	pm.ginEngine.POST("/v/messages", pm.apiKeyAuth(), pm.trackInflight(), llmHandler)
+	pm.ginEngine.POST("/v/messages/count_tokens", pm.apiKeyAuth(), pm.trackInflight(), llmHandler)
+	pm.ginEngine.POST("/v/embeddings", pm.apiKeyAuth(), pm.trackInflight(), llmHandler)
+	pm.ginEngine.POST("/v/rerank", pm.apiKeyAuth(), pm.trackInflight(), llmHandler)
+	pm.ginEngine.POST("/v/reranking", pm.apiKeyAuth(), pm.trackInflight(), llmHandler)
+
 	// llama-server's /infill endpoint for code infilling
 	pm.ginEngine.POST("/infill", pm.apiKeyAuth(), pm.trackInflight(), llmHandler)
 
@@ -859,6 +869,11 @@ func (pm *ProxyManager) mkProxyJSONHandler(cf captureFields) func(*gin.Context) 
 		c.Request.Header.Del("transfer-encoding")
 		c.Request.Header.Set("content-length", strconv.Itoa(len(bodyBytes)))
 		c.Request.ContentLength = int64(len(bodyBytes))
+
+		// issue #728 support versionless API requests
+		if strings.HasPrefix(c.Request.URL.Path, "/v/") {
+			c.Request.URL.Path = strings.TrimPrefix(c.Request.URL.Path, "/v")
+		}
 
 		// issue #366 extract values that downstream handlers may need
 		isStreaming := gjson.GetBytes(bodyBytes, "stream").Bool()
