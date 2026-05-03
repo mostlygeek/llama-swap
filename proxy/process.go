@@ -77,6 +77,10 @@ type Process struct {
 	// used for testing to override the default value
 	gracefulStopTimeout time.Duration
 
+	// ackTimeout to send HTTP 200 to the client when upstream is waiting too long (0 = disabled)
+	ackTimeout  time.Duration
+	ackSentFlag uint32
+
 	// used for testing to bypass subprocess and reverse proxy
 	testHandler http.Handler
 
@@ -144,6 +148,7 @@ func NewProcess(ID string, healthCheckTimeout int, config config.ModelConfig, pr
 		// To be removed when migration over exec.CommandContext is complete
 		// stop timeout
 		gracefulStopTimeout: 10 * time.Second,
+		ackTimeout:          time.Duration(config.AckTimeout) * time.Second,
 		cmdWaitChan:         make(chan struct{}),
 	}
 }
@@ -630,6 +635,32 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		if !srw.waitForCompletion(completionTimeout) {
 			p.proxyLogger.Warnf("<%s> status updates goroutine did not complete within %v, proceeding with proxy request", p.ID, completionTimeout)
 		}
+	}
+
+	// for #726 ackTimeout - background goroutine sends ACK if upstream is slow.
+	if p.ackTimeout > 0 {
+		go func() {
+			timer := time.NewTimer(p.ackTimeout)
+			defer timer.Stop()
+			select {
+			case <-r.Context().Done():
+				return
+			case <-timer.C:
+				if atomic.CompareAndSwapUint32(&p.ackSentFlag, 0, 1) {
+					totalTimeAfterStart := time.Since(requestBeginTime)
+					p.proxyLogger.Debugf("<%s> - Sent keep-alive heartbeat for request %s - after start: %v", p.ID, r.RequestURI, totalTimeAfterStart)
+					// Set headers and send keep-alive
+					w.Header().Set("Content-Type", "text/event-stream")
+					w.Header().Set("Cache-Control", "no-cache")
+					w.Header().Set("Connection", "keep-alive")
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprintf(w, ": heart-beat\n\n")
+					if f, ok := w.(http.Flusher); ok {
+						f.Flush()
+					}
+				}
+			}
+		}()
 	}
 
 	if p.testHandler != nil {

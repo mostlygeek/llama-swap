@@ -31,6 +31,10 @@ type ModelConfig struct {
 	Unlisted      bool     `yaml:"unlisted"`
 	UseModelName  string   `yaml:"useModelName"`
 
+	// see #726
+	// After this seconds, send keep-alive packet back to client,  0 = disable (default)
+	AckTimeout int `yaml:"ackTimeout"`
+
 	// #179 for /v1/models
 	Name        string `yaml:"name"`
 	Description string `yaml:"description"`

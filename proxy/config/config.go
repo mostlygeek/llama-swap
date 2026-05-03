@@ -276,6 +276,10 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			return Config{}, fmt.Errorf("model %s: invalid TTL value %d", modelId, modelConfig.UnloadAfter)
 		}
 
+		if modelConfig.AckTimeout < 0 {
+			return Config{}, fmt.Errorf("model %s: ackTimeout must be >= 0", modelId)
+		}
+
 		// Validate model macros
 		for _, macro := range modelConfig.Macros {
 			if err = validateMacro(macro.Name, macro.Value); err != nil {

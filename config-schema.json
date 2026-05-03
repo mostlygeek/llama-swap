@@ -224,6 +224,12 @@
                         "pattern": "^/.*$|^none$",
                         "description": "URL path to check if the server is ready. Use 'none' to skip health checking."
                     },
+                    "ackTimeout": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 0,
+                        "description": "Timeout in seconds before sending a keep-alive heartbeat to the client when upstream is unresponsive. Set to 0 to disable."
+                    },
                     "ttl": {
                         "type": "integer",
                         "minimum": -1,
