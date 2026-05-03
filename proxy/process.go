@@ -78,8 +78,7 @@ type Process struct {
 	gracefulStopTimeout time.Duration
 
 	// ackTimeout to send HTTP 200 to the client when upstream is waiting too long (0 = disabled)
-	ackTimeout  time.Duration
-	ackSentFlag uint32
+	ackTimeout time.Duration
 
 	// used for testing to bypass subprocess and reverse proxy
 	testHandler http.Handler
@@ -637,19 +636,26 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// for #726 ackTimeout - background goroutine sends ACK if upstream is slow.
+	// #726: ackTimeout goroutine — sends periodic keep-alive heartbeats
+	// when upstream is unresponsive, preventing client timeouts during long
+	// prompt processing or generation sessions.
+
 	if p.ackTimeout > 0 {
+		tickInterval := p.ackTimeout / 2
 		go func() {
-			timer := time.NewTimer(p.ackTimeout)
-			defer timer.Stop()
-			select {
-			case <-r.Context().Done():
-				return
-			case <-timer.C:
-				if atomic.CompareAndSwapUint32(&p.ackSentFlag, 0, 1) {
-					totalTimeAfterStart := time.Since(requestBeginTime)
-					p.proxyLogger.Debugf("<%s> - Sent keep-alive heartbeat for request %s - after start: %v", p.ID, r.RequestURI, totalTimeAfterStart)
-					// Set headers and send keep-alive
+			ticker := time.NewTicker(tickInterval)
+			defer ticker.Stop()
+
+			for range ticker.C {
+				select {
+				case <-r.Context().Done():
+					p.proxyLogger.Debugf("<%s> - Cancel sent keep-alive for %s after %v",
+						p.ID, r.RequestURI, time.Since(requestBeginTime))
+					return // client cancelled — stop sending heartbeats
+				default:
+					p.proxyLogger.Debugf("<%s> - Sent keep-alive heartbeat for %s after %v",
+						p.ID, r.RequestURI, time.Since(requestBeginTime))
+
 					w.Header().Set("Content-Type", "text/event-stream")
 					w.Header().Set("Cache-Control", "no-cache")
 					w.Header().Set("Connection", "keep-alive")
