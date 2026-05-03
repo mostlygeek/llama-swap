@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -125,6 +126,22 @@ func injectTestHandlers(pm *ProxyManager, modelResponses map[string]string) {
 // newTestHandler returns an http.Handler that mimics simple-responder's API.
 // It supports the endpoints that routing tests depend on, without launching
 // any subprocess or binding any port.
+func respondJSON(w http.ResponseWriter, respond string, bodyBytes []byte) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"responseMessage":  respond,
+		"h_content_length": strconv.Itoa(len(bodyBytes)),
+		"request_body":     string(bodyBytes),
+		"usage": map[string]any{
+			"completion_tokens": 10, "prompt_tokens": 25, "total_tokens": 35,
+		},
+		"timings": map[string]any{
+			"prompt_n": 25, "prompt_ms": 13, "predicted_n": 10,
+			"predicted_ms": 17, "predicted_per_second": 10,
+		},
+	})
+}
+
 func newTestHandler(respond string) http.Handler {
 	mux := http.NewServeMux()
 
@@ -170,19 +187,7 @@ func newTestHandler(respond string) http.Handler {
 			fmt.Fprintf(w, "event: message\ndata: [DONE]\n\n")
 			flusher.Flush()
 		} else {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{
-				"responseMessage":  respond,
-				"h_content_length": r.Header.Get("Content-Length"),
-				"request_body":     string(bodyBytes),
-				"usage": map[string]any{
-					"completion_tokens": 10, "prompt_tokens": 25, "total_tokens": 35,
-				},
-				"timings": map[string]any{
-					"prompt_n": 25, "prompt_ms": 13, "predicted_n": 10,
-					"predicted_ms": 17, "predicted_per_second": 10,
-				},
-			})
+			respondJSON(w, respond, bodyBytes)
 		}
 	})
 
@@ -198,14 +203,20 @@ func newTestHandler(respond string) http.Handler {
 	})
 
 	mux.HandleFunc("/v1/completions", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
-			"responseMessage": respond,
-			"usage": map[string]any{
-				"completion_tokens": 10, "prompt_tokens": 25, "total_tokens": 35,
-			},
-		})
+		bodyBytes, _ := io.ReadAll(r.Body)
+		respondJSON(w, respond, bodyBytes)
 	})
+
+	for _, path := range []string{
+		"/chat/completions", "/completions",
+		"/responses", "/messages", "/messages/count_tokens",
+		"/embeddings", "/rerank", "/reranking",
+	} {
+		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+			bodyBytes, _ := io.ReadAll(r.Body)
+			respondJSON(w, respond, bodyBytes)
+		})
+	}
 
 	mux.HandleFunc("/completion", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
