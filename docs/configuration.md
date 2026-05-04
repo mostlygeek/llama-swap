@@ -451,10 +451,10 @@ models:
 #
 matrix:
   # vars: short names for models (alphanumeric, 1-8 chars)
-  # - required for sets and evict_costs settings
-  # - each entry is a short name to a real model ID. Do not use an alias
+  # - optional for sets and evict_costs settings
+  # - each entry is a short name to a real model ID
   # - used to keep set DSL logic short and easier to read
-  # - sets and evict_costs only use identifiers defined in vars
+  # - sets and evict_costs can use vars or real model IDs
   vars:
     g: gemma-model
     q: qwen-model

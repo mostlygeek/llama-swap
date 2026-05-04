@@ -84,7 +84,7 @@ func tokenize(input string) ([]token, error) {
 }
 
 func isIdentChar(ch rune) bool {
-	return unicode.IsLetter(ch) || unicode.IsDigit(ch) || ch == '_' || ch == '-' || ch == '.'
+	return unicode.IsLetter(ch) || unicode.IsDigit(ch) || strings.ContainsRune("_-./:", ch)
 }
 
 // AST node types

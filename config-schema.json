@@ -329,13 +329,12 @@
             "type": "object",
             "description": "Solver-based alternative to groups. Declares valid combinations of concurrent models. The solver minimizes eviction cost when swapping. A config must use either groups or matrix, not both.",
             "required": [
-                "vars",
                 "sets"
             ],
             "properties": {
                 "vars": {
                     "type": "object",
-                    "description": "Short names for models. Keys must be alphanumeric, 1-8 characters. All sets and evict_costs must use these IDs.",
+                    "description": "Optional short names for models. Keys must be alphanumeric, 1-8 characters. Sets and evict_costs can use vars or real model IDs.",
                     "minProperties": 1,
                     "additionalProperties": {
                         "type": "string"
