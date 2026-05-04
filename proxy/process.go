@@ -650,20 +650,20 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 			ticker := time.NewTicker(tickInterval)
 			defer ticker.Stop()
 
-	for range ticker.C {
-			select {
-			case <-prw.firstWriteCh:
-				p.proxyLogger.Debugf("<%s> - Cancel sent keep-alive for %s after %v",
+			for range ticker.C {
+				select {
+				case <-prw.firstWriteCh:
+					p.proxyLogger.Debugf("<%s> - Cancel sent keep-alive for %s after %v",
+						p.ID, r.RequestURI, time.Since(requestBeginTime))
+					return // upstream started writing — stop sending heartbeats
+				case <-r.Context().Done():
+					p.proxyLogger.Debugf("<%s> - Cancel sent keep-alive for %s after %v",
+						p.ID, r.RequestURI, time.Since(requestBeginTime))
+					return // client cancelled — stop sending heartbeats
+				default:
+				}
+				p.proxyLogger.Debugf("<%s> - Sent keep-alive heartbeat for %s after %v",
 					p.ID, r.RequestURI, time.Since(requestBeginTime))
-				return // upstream started writing — stop sending heartbeats
-			case <-r.Context().Done():
-				p.proxyLogger.Debugf("<%s> - Cancel sent keep-alive for %s after %v",
-					p.ID, r.RequestURI, time.Since(requestBeginTime))
-				return // client cancelled — stop sending heartbeats
-			default:
-			}
-			p.proxyLogger.Debugf("<%s> - Sent keep-alive heartbeat for %s after %v",
-				p.ID, r.RequestURI, time.Since(requestBeginTime))
 
 				prw.Header().Set("Content-Type", "text/event-stream")
 				prw.Header().Set("Cache-Control", "no-cache")
