@@ -567,6 +567,10 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Create a synchronized proxyResponseWriter to prevent concurrent writes
+	// between heartbeat goroutine and reverseProxy.
+	prw := newProxyResponseWriter(w)
+
 	p.inFlightRequests.Add(1)
 	p.inFlightRequestsCount.Add(1)
 	defer func() {
@@ -589,7 +593,7 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		// PR #417 (no support for anthropic v1/messages yet)
 		isChatCompletions := strings.HasPrefix(r.URL.Path, "/v1/chat/completions")
 		if p.config.SendLoadingState != nil && *p.config.SendLoadingState && isStreaming && isChatCompletions {
-			srw = newStatusResponseWriter(p, w)
+			srw = newStatusResponseWriter(p, prw)
 			go srw.statusUpdates(swapCtx)
 		} else {
 			p.proxyLogger.Debugf("<%s> SendLoadingState is nil or false, not streaming loading state", p.ID)
@@ -646,35 +650,37 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 			ticker := time.NewTicker(tickInterval)
 			defer ticker.Stop()
 
-			for range ticker.C {
-				select {
-				case <-r.Context().Done():
-					p.proxyLogger.Debugf("<%s> - Cancel sent keep-alive for %s after %v",
-						p.ID, r.RequestURI, time.Since(requestBeginTime))
-					return // client cancelled — stop sending heartbeats
-				default:
-					p.proxyLogger.Debugf("<%s> - Sent keep-alive heartbeat for %s after %v",
-						p.ID, r.RequestURI, time.Since(requestBeginTime))
+	for range ticker.C {
+			select {
+			case <-prw.firstWriteCh:
+				p.proxyLogger.Debugf("<%s> - Cancel sent keep-alive for %s after %v",
+					p.ID, r.RequestURI, time.Since(requestBeginTime))
+				return // upstream started writing — stop sending heartbeats
+			case <-r.Context().Done():
+				p.proxyLogger.Debugf("<%s> - Cancel sent keep-alive for %s after %v",
+					p.ID, r.RequestURI, time.Since(requestBeginTime))
+				return // client cancelled — stop sending heartbeats
+			default:
+			}
+			p.proxyLogger.Debugf("<%s> - Sent keep-alive heartbeat for %s after %v",
+				p.ID, r.RequestURI, time.Since(requestBeginTime))
 
-					w.Header().Set("Content-Type", "text/event-stream")
-					w.Header().Set("Cache-Control", "no-cache")
-					w.Header().Set("Connection", "keep-alive")
-					w.WriteHeader(http.StatusOK)
-					fmt.Fprintf(w, ": heart-beat\n\n")
-					if f, ok := w.(http.Flusher); ok {
-						f.Flush()
-					}
-				}
+				prw.Header().Set("Content-Type", "text/event-stream")
+				prw.Header().Set("Cache-Control", "no-cache")
+				prw.Header().Set("Connection", "keep-alive")
+				prw.WriteHeader(http.StatusOK)
+				fmt.Fprintf(prw, ": heart-beat\n\n")
+				prw.Flush()
 			}
 		}()
 	}
 
 	if p.testHandler != nil {
-		p.testHandler.ServeHTTP(w, r)
+		p.testHandler.ServeHTTP(prw, r)
 	} else if srw != nil {
 		p.reverseProxy.ServeHTTP(srw, r)
 	} else {
-		p.reverseProxy.ServeHTTP(w, r)
+		p.reverseProxy.ServeHTTP(prw, r)
 	}
 
 	totalTime := time.Since(requestBeginTime)
@@ -765,6 +771,57 @@ func (p *Process) cmdStopUpstreamProcess() error {
 // Logger returns the logger for this process.
 func (p *Process) Logger() *LogMonitor {
 	return p.processLogger
+}
+
+// proxyResponseWriter wraps http.ResponseWriter to synchronize concurrent writes
+// from the reverseProxy and heartbeat goroutine, preventing data races and
+// premature response commits.
+type proxyResponseWriter struct {
+	mu           sync.RWMutex
+	writer       http.ResponseWriter
+	firstWriteCh chan struct{}
+	firstWritten bool
+}
+
+func newProxyResponseWriter(w http.ResponseWriter) *proxyResponseWriter {
+	return &proxyResponseWriter{
+		writer:       w,
+		firstWriteCh: make(chan struct{}),
+	}
+}
+
+func (p *proxyResponseWriter) Header() http.Header {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.writer.Header()
+}
+
+func (p *proxyResponseWriter) WriteHeader(code int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.firstWritten {
+		p.firstWritten = true
+		close(p.firstWriteCh)
+	}
+	p.writer.WriteHeader(code)
+}
+
+func (p *proxyResponseWriter) Write(data []byte) (int, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.firstWritten {
+		p.firstWritten = true
+		close(p.firstWriteCh)
+	}
+	return p.writer.Write(data)
+}
+
+func (p *proxyResponseWriter) Flush() {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if flusher, ok := p.writer.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
 
 var loadingRemarks = []string{
