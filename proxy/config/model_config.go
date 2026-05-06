@@ -33,7 +33,7 @@ type ModelConfig struct {
 
 	// see #726
 	// After this seconds, send keep-alive packet back to client,  0 = disable (default)
-	AckTimeout int `yaml:"ackTimeout"`
+	HeartbeatInterval int `yaml:"heartbeatInterval"`
 
 	// #179 for /v1/models
 	Name        string `yaml:"name"`
