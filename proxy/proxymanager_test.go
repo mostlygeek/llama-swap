@@ -1641,8 +1641,151 @@ models:
 	})
 }
 
+func TestProxyManager_DisabledModels(t *testing.T) {
+	cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+models:
+  enabled-model:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond enabled-model
+  disabled-model:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond disabled-model
+    disabled: true
+  disabled-with-aliases:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond disabled-with-aliases
+    disabled: true
+    aliases:
+      - disabled-alias
+`)
+
+	proxy := New(cfg)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+	injectTestHandlers(proxy, nil)
+
+	t.Run("disabled model returns 404 on chat completions", func(t *testing.T) {
+		reqBody := `{"model":"disabled-model"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "model not found")
+	})
+
+	t.Run("disabled model alias returns 404", func(t *testing.T) {
+		reqBody := `{"model":"disabled-alias"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "model not found")
+	})
+
+	t.Run("enabled model works normally", func(t *testing.T) {
+		reqBody := `{"model":"enabled-model"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "enabled-model")
+	})
+
+	t.Run("disabled model returns 404 on upstream", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/upstream/disabled-model/test", nil)
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "model not found")
+	})
+
+	t.Run("disabled model returns 404 on audio transcription", func(t *testing.T) {
+		var b bytes.Buffer
+		w := multipart.NewWriter(&b)
+		fw, _ := w.CreateFormField("model")
+		fw.Write([]byte("disabled-model"))
+		w.Close()
+
+		req := httptest.NewRequest("POST", "/v1/audio/transcriptions", &b)
+		req.Header.Set("Content-Type", w.FormDataContentType())
+		rec := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+		assert.Contains(t, rec.Body.String(), "model not found")
+	})
+
+	t.Run("disabled model returns 404 on GET voices", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/v1/audio/voices?model=disabled-model", nil)
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "model not found")
+	})
+
+	t.Run("disabled model appears in API list with disabled flag", func(t *testing.T) {
+		models := proxy.getModelStatus()
+		assert.Len(t, models, 3)
+
+		var enabledFound, disabledFound, disabledAliasFound bool
+		for _, model := range models {
+			if model.Id == "enabled-model" {
+				enabledFound = true
+				assert.False(t, model.Disabled)
+			} else if model.Id == "disabled-model" {
+				disabledFound = true
+				assert.True(t, model.Disabled)
+			} else if model.Id == "disabled-with-aliases" {
+				disabledAliasFound = true
+				assert.True(t, model.Disabled)
+				assert.Contains(t, model.Aliases, "disabled-alias")
+			}
+		}
+
+		assert.True(t, enabledFound, "enabled-model should be in list")
+		assert.True(t, disabledFound, "disabled-model should be in list")
+		assert.True(t, disabledAliasFound, "disabled-with-aliases should be in list")
+	})
+
+	t.Run("disabled model does not interfere with loaded models", func(t *testing.T) {
+		// Load the enabled model
+		reqBody := `{"model":"enabled-model"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		// Verify model is loaded
+		runningReq := httptest.NewRequest("GET", "/running", nil)
+		runningRec := CreateTestResponseRecorder()
+		proxy.ServeHTTP(runningRec, runningReq)
+
+		assert.Equal(t, http.StatusOK, runningRec.Code)
+		assert.Contains(t, runningRec.Body.String(), "enabled-model")
+		assert.NotContains(t, runningRec.Body.String(), "disabled-model")
+
+		// Try to request disabled model - should not affect loaded model
+		disabledReq := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(`{"model":"disabled-model"}`))
+		disabledRec := CreateTestResponseRecorder()
+		proxy.ServeHTTP(disabledRec, disabledReq)
+		assert.Equal(t, http.StatusNotFound, disabledRec.Code)
+
+		// Verify enabled model is still loaded
+		runningReq2 := httptest.NewRequest("GET", "/running", nil)
+		runningRec2 := CreateTestResponseRecorder()
+		proxy.ServeHTTP(runningRec2, runningReq2)
+
+		assert.Equal(t, http.StatusOK, runningRec2.Code)
+		assert.Contains(t, runningRec2.Body.String(), "enabled-model")
+	})
+}
+
 func TestProxyManager_SdApiTxt2ImgRouting(t *testing.T) {
-	conf := testConfigFromYAML(t, `
+	cfg := testConfigFromYAML(t, `
 healthCheckTimeout: 15
 logLevel: error
 models:
@@ -1650,13 +1793,23 @@ models:
     cmd: {{RESPONDER}} --port ${PORT} --silent --respond sd-model
 `)
 
-	proxy := New(conf)
+	proxy := New(cfg)
 	defer proxy.StopProcesses(StopWaitForInflightRequest)
 	injectTestHandlers(proxy, nil)
 
 	t.Run("successful txt2img with model", func(t *testing.T) {
 		reqBody := `{"model":"sd-model","prompt":"a cat"}`
 		req := httptest.NewRequest("POST", "/sdapi/v1/txt2img", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "sd-model")
+	})
+
+	t.Run("successful img2img with model", func(t *testing.T) {
+		reqBody := `{"model":"sd-model","prompt":"a cat","init_images":[]}`
+		req := httptest.NewRequest("POST", "/sdapi/v1/img2img", bytes.NewBufferString(reqBody))
 		w := CreateTestResponseRecorder()
 
 		proxy.ServeHTTP(w, req)

@@ -21,6 +21,7 @@ type Model struct {
 	Description string   `json:"description"`
 	State       string   `json:"state"`
 	Unlisted    bool     `json:"unlisted"`
+	Disabled    bool     `json:"disabled"`
 	PeerID      string   `json:"peerID"`
 	Aliases     []string `json:"aliases,omitempty"`
 }
@@ -88,6 +89,7 @@ func (pm *ProxyManager) getModelStatus() []Model {
 			Description: pm.config.Models[modelID].Description,
 			State:       state,
 			Unlisted:    pm.config.Models[modelID].Unlisted,
+			Disabled:    pm.config.Models[modelID].Disabled,
 			Aliases:     pm.config.Models[modelID].Aliases,
 		})
 	}

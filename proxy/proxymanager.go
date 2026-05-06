@@ -703,6 +703,11 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 		return
 	}
 
+	if pm.config.Models[modelID].Disabled {
+		pm.sendErrorResponse(c, http.StatusNotFound, "model not found")
+		return
+	}
+
 	// Redirect /upstream/modelname to /upstream/modelname/ for URL consistency.
 	// This ensures relative URLs in upstream responses resolve correctly and
 	// provides canonical URL form. Uses 308 for POST/PUT/etc to preserve the
@@ -771,6 +776,11 @@ func (pm *ProxyManager) mkProxyJSONHandler(cf captureFields) func(*gin.Context) 
 
 		modelID, found := pm.config.RealModelName(requestedModel)
 		if found {
+			if pm.config.Models[modelID].Disabled {
+				pm.sendErrorResponse(c, http.StatusNotFound, "model not found")
+				return
+			}
+
 			var localHandler func(string, http.ResponseWriter, *http.Request) error
 			if pm.matrix != nil {
 				localHandler = pm.matrix.ProxyRequest
@@ -926,6 +936,11 @@ func (pm *ProxyManager) mkPostFormHandler(cf captureFields) func(*gin.Context) {
 
 		modelID, found := pm.config.RealModelName(requestedModel)
 		if found {
+			if pm.config.Models[modelID].Disabled {
+				pm.sendErrorResponse(c, http.StatusNotFound, "model not found")
+				return
+			}
+
 			if pm.matrix != nil {
 				nextHandler = pm.matrix.ProxyRequest
 			} else {
@@ -1058,6 +1073,11 @@ func (pm *ProxyManager) proxyGETModelHandler(c *gin.Context) {
 	var modelID string
 
 	if realModelID, found := pm.config.RealModelName(requestedModel); found {
+		if pm.config.Models[realModelID].Disabled {
+			pm.sendErrorResponse(c, http.StatusNotFound, "model not found")
+			return
+		}
+
 		modelID = realModelID
 		if pm.matrix != nil {
 			nextHandler = pm.matrix.ProxyRequest

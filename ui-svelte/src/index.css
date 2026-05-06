@@ -147,6 +147,10 @@
     @apply bg-error/10 text-error;
   }
 
+  .status--disabled {
+    @apply bg-gray-300 text-gray-500 dark:bg-gray-700 dark:text-gray-400;
+  }
+
   /* Buttons */
   .btn {
     @apply bg-surface py-2 px-4 text-sm rounded-md border transition-colors duration-200 border-btn-border;
