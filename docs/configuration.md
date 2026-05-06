@@ -398,7 +398,7 @@ models:
     # - unlisted models do not show up in /v1/models api requests
     # - can be requested as normal through all apis
     unlisted: true
-    cmd: llama-server --port ${PORT} -m Llama-3.2-1B-Instruct-Q4_K_M.gguf
+    cmd: llama-server --port ${PORT} -m Llama-3.2-1B-Instruct-Q4_K_M.gguf -ngl 0
 
   # Disabled model example:
   "disabled-model":
