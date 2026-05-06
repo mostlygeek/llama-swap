@@ -258,7 +258,7 @@ func (pm *ProxyManager) apiUnloadSingleModelHandler(c *gin.Context) {
 	}
 
 	if pm.config.Models[realModelName].Disabled {
-		pm.sendErrorResponse(c, http.StatusNotFound, "Model is disabled")
+		pm.sendErrorResponse(c, http.StatusNotFound, "model is disabled")
 		return
 	}
 

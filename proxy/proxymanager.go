@@ -613,7 +613,7 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 	}
 
 	for id, modelConfig := range pm.config.Models {
-		if modelConfig.Unlisted {
+		if modelConfig.Unlisted || modelConfig.Disabled {
 			continue
 		}
 
@@ -695,7 +695,7 @@ func (pm *ProxyManager) findModelInPath(path string) (searchName string, realNam
 func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 	upstreamPath := c.Param("upstreamPath")
 
-	searchModelName, modelID, remainingPath, modelFound := pm.findModelInPath(upstreamPath)
+	_, modelID, remainingPath, modelFound := pm.findModelInPath(upstreamPath)
 
 	if !modelFound {
 		pm.sendErrorResponse(c, http.StatusNotFound, "model not found")
@@ -703,24 +703,7 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 	}
 
 	if pm.config.Models[modelID].Disabled {
-		pm.sendErrorResponse(c, http.StatusNotFound, "model not found")
-		return
-	}
-
-	// Redirect /upstream/modelname to /upstream/modelname/ for URL consistency.
-	// This ensures relative URLs in upstream responses resolve correctly and
-	// provides canonical URL form. Uses 308 for POST/PUT/etc to preserve the
-	// HTTP method (301 would downgrade to GET).
-	if remainingPath == "/" && !strings.HasSuffix(upstreamPath, "/") {
-		newPath := "/upstream/" + searchModelName + "/"
-		if c.Request.URL.RawQuery != "" {
-			newPath += "?" + c.Request.URL.RawQuery
-		}
-		if c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead {
-			c.Redirect(http.StatusMovedPermanently, newPath)
-		} else {
-			c.Redirect(http.StatusPermanentRedirect, newPath)
-		}
+		pm.sendErrorResponse(c, http.StatusNotFound, "model is disabled")
 		return
 	}
 
@@ -776,7 +759,7 @@ func (pm *ProxyManager) mkProxyJSONHandler(cf captureFields) func(*gin.Context) 
 		modelID, found := pm.config.RealModelName(requestedModel)
 		if found {
 			if pm.config.Models[modelID].Disabled {
-				pm.sendErrorResponse(c, http.StatusNotFound, "model not found")
+				pm.sendErrorResponse(c, http.StatusNotFound, "model is disabled")
 				return
 			}
 
@@ -936,7 +919,7 @@ func (pm *ProxyManager) mkPostFormHandler(cf captureFields) func(*gin.Context) {
 		modelID, found := pm.config.RealModelName(requestedModel)
 		if found {
 			if pm.config.Models[modelID].Disabled {
-				pm.sendErrorResponse(c, http.StatusNotFound, "model not found")
+				pm.sendErrorResponse(c, http.StatusNotFound, "model is disabled")
 				return
 			}
 
@@ -1073,7 +1056,7 @@ func (pm *ProxyManager) proxyGETModelHandler(c *gin.Context) {
 
 	if realModelID, found := pm.config.RealModelName(requestedModel); found {
 		if pm.config.Models[realModelID].Disabled {
-			pm.sendErrorResponse(c, http.StatusNotFound, "model not found")
+			pm.sendErrorResponse(c, http.StatusNotFound, "model is disabled")
 			return
 		}
 
