@@ -613,7 +613,7 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 	}
 
 	for id, modelConfig := range pm.config.Models {
-		// Skip unlisted models - they are not meant to be publicly visible
+		// Skip unlisted and disabled models - they are not meant to be publicly visible
 		if modelConfig.Unlisted || modelConfig.Disabled {
 			continue
 		}

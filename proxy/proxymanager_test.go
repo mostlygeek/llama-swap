@@ -1842,14 +1842,19 @@ models:
 		}
 		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 
-		var disabledFound bool
+		disallowed := map[string]bool{
+			"disabled-model":        false,
+			"disabled-with-aliases": false,
+			"disabled-alias":        false,
+		}
 		for _, model := range response.Data {
-			if model.Id == "disabled-model" {
-				disabledFound = true
+			if _, ok := disallowed[model.Id]; ok {
+				disallowed[model.Id] = true
 			}
 		}
-
-		assert.False(t, disabledFound, "disabled-model should NOT be in /v1/models list")
+		for id, found := range disallowed {
+			assert.False(t, found, "%s should NOT be in /v1/models list", id)
+		}
 	})
 
 	t.Run("disabled models are not preloaded on startup", func(t *testing.T) {
@@ -1887,6 +1892,14 @@ models:
 			assert.True(t, e.Success, "preload should succeed")
 		case <-time.After(5 * time.Second):
 			t.Fatal("timed out waiting for preload event")
+		}
+
+		// Ensure no preload event is ever emitted for the disabled model
+		select {
+		case e := <-preloadChan:
+			t.Fatalf("unexpected preload event for %s", e.ModelName)
+		case <-time.After(200 * time.Millisecond):
+			// good — disabled model was skipped without emitting an event
 		}
 
 		// Check the running endpoint to see what's actually loaded
