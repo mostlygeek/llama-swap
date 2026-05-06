@@ -231,6 +231,11 @@ func New(proxyConfig config.Config) *ProxyManager {
 					continue
 				}
 
+				if proxyConfig.Models[modelID].Disabled {
+					proxyLogger.Warnf("Preload model %s is disabled, skipping", modelID)
+					continue
+				}
+
 				proxyLogger.Infof("Preloading model: %s", modelID)
 
 				var preloadErr error

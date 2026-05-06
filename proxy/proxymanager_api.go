@@ -257,13 +257,18 @@ func (pm *ProxyManager) apiUnloadSingleModelHandler(c *gin.Context) {
 		return
 	}
 
+	if pm.config.Models[realModelName].Disabled {
+		pm.sendErrorResponse(c, http.StatusNotFound, "Model is disabled")
+		return
+	}
+
 	var stopErr error
 	if pm.matrix != nil {
 		stopErr = pm.matrix.StopProcess(realModelName, StopImmediately)
 	} else {
 		processGroup := pm.findGroupByModelName(realModelName)
 		if processGroup == nil {
-			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("process group not found for model %s", requestedModel))
+			pm.sendErrorResponse(c, http.StatusNotFound, fmt.Sprintf("Model %s is not loaded", requestedModel))
 			return
 		}
 		stopErr = processGroup.StopProcess(realModelName, StopImmediately)

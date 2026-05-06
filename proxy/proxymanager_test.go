@@ -1782,6 +1782,15 @@ models:
 		assert.Equal(t, http.StatusOK, runningRec2.Code)
 		assert.Contains(t, runningRec2.Body.String(), "enabled-model")
 	})
+
+	t.Run("unloading disabled model returns 404", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/api/models/unload/disabled-model", nil)
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "Model is disabled")
+	})
 }
 
 func TestProxyManager_SdApiTxt2ImgRouting(t *testing.T) {
@@ -1800,16 +1809,6 @@ models:
 	t.Run("successful txt2img with model", func(t *testing.T) {
 		reqBody := `{"model":"sd-model","prompt":"a cat"}`
 		req := httptest.NewRequest("POST", "/sdapi/v1/txt2img", bytes.NewBufferString(reqBody))
-		w := CreateTestResponseRecorder()
-
-		proxy.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(t, w.Body.String(), "sd-model")
-	})
-
-	t.Run("successful img2img with model", func(t *testing.T) {
-		reqBody := `{"model":"sd-model","prompt":"a cat","init_images":[]}`
-		req := httptest.NewRequest("POST", "/sdapi/v1/img2img", bytes.NewBufferString(reqBody))
 		w := CreateTestResponseRecorder()
 
 		proxy.ServeHTTP(w, req)

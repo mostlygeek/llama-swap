@@ -163,7 +163,7 @@
                 {getModelDisplay(model)}
               </a>
               {#if model.description}
-                <p class={model.unlisted || model.disabled ? "text-opacity-70" : ""}><em>{model.description}</em></p>
+                <p class={model.unlisted || model.disabled ? "text-txtsecondary/70" : ""}><em>{model.description}</em></p>
               {/if}
               {#if model.aliases && model.aliases.length > 0}
                 <p class="text-xs text-txtsecondary">Aliases: {model.aliases.join(", ")}</p>
