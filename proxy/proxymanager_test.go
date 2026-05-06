@@ -1775,6 +1775,83 @@ models:
 		assert.Equal(t, http.StatusNotFound, w.Code)
 		assert.Contains(t, w.Body.String(), "model is disabled")
 	})
+
+	t.Run("disabled model returns 404 on multipart form POST", func(t *testing.T) {
+		var b bytes.Buffer
+		w := multipart.NewWriter(&b)
+		fw, err := w.CreateFormField("model")
+		assert.NoError(t, err)
+		_, err = fw.Write([]byte("disabled-model"))
+		assert.NoError(t, err)
+		assert.NoError(t, w.Close())
+
+		req := httptest.NewRequest("POST", "/v1/audio/transcriptions", &b)
+		req.Header.Set("Content-Type", w.FormDataContentType())
+		rec := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+		assert.Contains(t, rec.Body.String(), "model is disabled")
+	})
+
+	t.Run("/v1/models endpoint excludes disabled models", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/v1/models", nil)
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var response struct {
+			Data []struct {
+				Id       string `json:"id"`
+				Disabled bool   `json:"disabled"`
+			} `json:"data"`
+		}
+		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+
+		var disabledFound bool
+		for _, model := range response.Data {
+			if model.Id == "disabled-model" {
+				disabledFound = true
+			}
+		}
+
+		assert.False(t, disabledFound, "disabled-model should NOT be in /v1/models list")
+	})
+
+	t.Run("disabled models are not preloaded on startup", func(t *testing.T) {
+		cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+hooks:
+  on_startup:
+    preload:
+      - preload-enabled-model
+      - preload-disabled-model
+models:
+  preload-enabled-model:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond preload-enabled-model
+  preload-disabled-model:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond preload-disabled-model
+    disabled: true
+`)
+
+		testProxy := New(cfg)
+		defer testProxy.StopProcesses(StopWaitForInflightRequest)
+
+		// Give the preload goroutine time to complete
+		time.Sleep(500 * time.Millisecond)
+
+		// Check the running endpoint to see what's actually loaded
+		runningReq := httptest.NewRequest("GET", "/running", nil)
+		runningRec := CreateTestResponseRecorder()
+		testProxy.ServeHTTP(runningRec, runningReq)
+
+		assert.Equal(t, http.StatusOK, runningRec.Code)
+		body := runningRec.Body.String()
+		assert.Contains(t, body, "preload-enabled-model", "enabled model should be preloaded")
+		assert.NotContains(t, body, "preload-disabled-model", "disabled model should not be preloaded")
+	})
 }
 
 func TestProxyManager_SdApiTxt2ImgRouting(t *testing.T) {
