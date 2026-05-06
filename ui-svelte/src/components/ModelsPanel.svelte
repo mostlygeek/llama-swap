@@ -158,26 +158,32 @@
       <tbody>
         {#each filteredModels.regularModels as model (model.id)}
           <tr class="border-b hover:bg-secondary-hover border-gray-200">
-            <td class={model.unlisted ? "text-txtsecondary" : ""}>
+            <td class={model.unlisted || model.disabled ? "text-txtsecondary" : ""}>
               <a href="/upstream/{model.id}/" class="font-semibold" target="_blank">
                 {getModelDisplay(model)}
               </a>
               {#if model.description}
-                <p class={model.unlisted ? "text-opacity-70" : ""}><em>{model.description}</em></p>
+                <p class={model.unlisted || model.disabled ? "text-opacity-70" : ""}><em>{model.description}</em></p>
               {/if}
               {#if model.aliases && model.aliases.length > 0}
                 <p class="text-xs text-txtsecondary">Aliases: {model.aliases.join(", ")}</p>
               {/if}
             </td>
             <td class="w-12">
-              {#if model.state === "stopped"}
-                <button class="btn btn--sm" onclick={() => loadModel(model.id)}>Load</button>
-              {:else}
-                <button class="btn btn--sm" onclick={() => unloadSingleModel(model.id)} disabled={model.state !== "ready"}>Unload</button>
+              {#if !model.disabled}
+                {#if model.state === "stopped"}
+                  <button class="btn btn--sm" onclick={() => loadModel(model.id)}>Load</button>
+                {:else}
+                  <button class="btn btn--sm" onclick={() => unloadSingleModel(model.id)} disabled={model.state !== "ready"}>Unload</button>
+                {/if}
               {/if}
             </td>
             <td class="w-20">
-              <span class="w-16 text-center status status--{model.state}">{model.state}</span>
+              {#if model.disabled}
+                <span class="w-16 text-center status status--disabled">disabled</span>
+              {:else}
+                <span class="w-16 text-center status status--{model.state}">{model.state}</span>
+              {/if}
             </td>
           </tr>
         {/each}

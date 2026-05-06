@@ -29,6 +29,7 @@ type ModelConfig struct {
 	CheckEndpoint string   `yaml:"checkEndpoint"`
 	UnloadAfter   int      `yaml:"ttl"`
 	Unlisted      bool     `yaml:"unlisted"`
+	Disabled      bool     `yaml:"disabled"`
 	UseModelName  string   `yaml:"useModelName"`
 
 	// #179 for /v1/models
@@ -67,6 +68,7 @@ func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		CheckEndpoint:    "/health",
 		UnloadAfter:      MODEL_CONFIG_DEFAULT_TTL, // use GlobalTTL
 		Unlisted:         false,
+		Disabled:         false,
 		UseModelName:     "",
 		ConcurrencyLimit: 0,
 		Name:             "",
