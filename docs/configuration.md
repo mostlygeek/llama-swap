@@ -400,6 +400,18 @@ models:
     unlisted: true
     cmd: llama-server --port ${PORT} -m Llama-3.2-1B-Instruct-Q4_K_M.gguf -ngl 0
 
+  # Disabled model example:
+  "disabled-model":
+    # disabled: boolean, true or false
+    # - optional, default: false
+    # - disabled models cannot be loaded or requested
+    # - they remain in the configuration but act as if they don't exist
+    # - useful for temporarily disabling models without removing config
+    # - disabled models appear in /api/models list with disabled: true flag
+    # - disabled models show as "disabled" in the UI with grey styling
+    disabled: true
+    cmd: llama-server --port ${PORT} -m some-model.gguf -ngl 0
+
   # Docker example:
   # container runtimes like Docker and Podman can be used reliably with
   # a combination of cmd, cmdStop, and ${MODEL_ID}

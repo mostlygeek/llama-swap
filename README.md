@@ -58,6 +58,7 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
   - Automatic unloading of models after timeout by setting a `ttl`
   - Reliable Docker and Podman support using `cmd` and `cmdStop` together
   - Preload models on startup with `hooks` ([#235](https://github.com/mostlygeek/llama-swap/pull/235))
+  - Temporarily disable models with `disabled` flag
 
 ### Web UI
 

@@ -1641,8 +1641,298 @@ models:
 	})
 }
 
+func TestProxyManager_DisabledModels(t *testing.T) {
+	cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+models:
+  enabled-model:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond enabled-model
+  disabled-model:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond disabled-model
+    disabled: true
+  disabled-with-aliases:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond disabled-with-aliases
+    disabled: true
+    aliases:
+      - disabled-alias
+`)
+
+	proxy := New(cfg)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+	injectTestHandlers(proxy, nil)
+
+	t.Run("disabled model returns 404 on chat completions", func(t *testing.T) {
+		reqBody := `{"model":"disabled-model"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "model is disabled")
+	})
+
+	t.Run("disabled model alias returns 404", func(t *testing.T) {
+		reqBody := `{"model":"disabled-alias"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "model is disabled")
+	})
+
+	t.Run("enabled model works normally", func(t *testing.T) {
+		reqBody := `{"model":"enabled-model"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "enabled-model")
+	})
+
+	t.Run("disabled model returns 404 on upstream", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/upstream/disabled-model/test", nil)
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "model is disabled")
+	})
+
+	t.Run("disabled model returns 404 on GET voices", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/v1/audio/voices?model=disabled-model", nil)
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "model is disabled")
+	})
+
+	t.Run("disabled model appears in API list with disabled flag", func(t *testing.T) {
+		models := proxy.getModelStatus()
+		assert.Len(t, models, 3)
+
+		var enabledFound, disabledFound, disabledAliasFound bool
+		for _, model := range models {
+			if model.Id == "enabled-model" {
+				enabledFound = true
+				assert.False(t, model.Disabled)
+			} else if model.Id == "disabled-model" {
+				disabledFound = true
+				assert.True(t, model.Disabled)
+			} else if model.Id == "disabled-with-aliases" {
+				disabledAliasFound = true
+				assert.True(t, model.Disabled)
+				assert.Contains(t, model.Aliases, "disabled-alias")
+			}
+		}
+
+		assert.True(t, enabledFound, "enabled-model should be in list")
+		assert.True(t, disabledFound, "disabled-model should be in list")
+		assert.True(t, disabledAliasFound, "disabled-with-aliases should be in list")
+	})
+
+	t.Run("disabled model does not interfere with loaded models", func(t *testing.T) {
+		// Load the enabled model
+		reqBody := `{"model":"enabled-model"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		// Verify model is loaded
+		runningReq := httptest.NewRequest("GET", "/running", nil)
+		runningRec := CreateTestResponseRecorder()
+		proxy.ServeHTTP(runningRec, runningReq)
+
+		assert.Equal(t, http.StatusOK, runningRec.Code)
+
+		// Parse the running models response and check model field
+		var runningData struct {
+			Running []struct {
+				Model string `json:"model"`
+			} `json:"running"`
+		}
+		assert.NoError(t, json.Unmarshal(runningRec.Body.Bytes(), &runningData))
+
+		var foundEnabled, foundDisabled bool
+		for _, entry := range runningData.Running {
+			if entry.Model == "enabled-model" {
+				foundEnabled = true
+			} else if entry.Model == "disabled-model" {
+				foundDisabled = true
+			}
+		}
+
+		assert.True(t, foundEnabled, "enabled-model should be in running list")
+		assert.False(t, foundDisabled, "disabled-model should not be in running list")
+
+		// Try to request disabled model - should not affect loaded model
+		disabledReq := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(`{"model":"disabled-model"}`))
+		disabledRec := CreateTestResponseRecorder()
+		proxy.ServeHTTP(disabledRec, disabledReq)
+		assert.Equal(t, http.StatusNotFound, disabledRec.Code)
+
+		// Verify enabled model is still loaded
+		runningReq2 := httptest.NewRequest("GET", "/running", nil)
+		runningRec2 := CreateTestResponseRecorder()
+		proxy.ServeHTTP(runningRec2, runningReq2)
+
+		assert.Equal(t, http.StatusOK, runningRec2.Code)
+
+		// Parse second running response
+		var runningData2 struct {
+			Running []struct {
+				Model string `json:"model"`
+			} `json:"running"`
+		}
+		assert.NoError(t, json.Unmarshal(runningRec2.Body.Bytes(), &runningData2))
+
+		var foundEnabled2 bool
+		for _, entry := range runningData2.Running {
+			if entry.Model == "enabled-model" {
+				foundEnabled2 = true
+			}
+		}
+		assert.True(t, foundEnabled2, "enabled-model should still be in running list")
+	})
+
+	t.Run("unloading disabled model returns 404", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/api/models/unload/disabled-model", nil)
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "model is disabled")
+	})
+
+	t.Run("disabled model returns 404 on multipart form POST", func(t *testing.T) {
+		var b bytes.Buffer
+		w := multipart.NewWriter(&b)
+		fw, err := w.CreateFormField("model")
+		assert.NoError(t, err)
+		_, err = fw.Write([]byte("disabled-model"))
+		assert.NoError(t, err)
+		assert.NoError(t, w.Close())
+
+		req := httptest.NewRequest("POST", "/v1/audio/transcriptions", &b)
+		req.Header.Set("Content-Type", w.FormDataContentType())
+		rec := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+		assert.Contains(t, rec.Body.String(), "model is disabled")
+	})
+
+	t.Run("/v1/models endpoint excludes disabled models", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/v1/models", nil)
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var response struct {
+			Data []struct {
+				Id       string `json:"id"`
+				Disabled bool   `json:"disabled"`
+			} `json:"data"`
+		}
+		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+
+		disallowed := map[string]bool{
+			"disabled-model":        false,
+			"disabled-with-aliases": false,
+			"disabled-alias":        false,
+		}
+		for _, model := range response.Data {
+			if _, ok := disallowed[model.Id]; ok {
+				disallowed[model.Id] = true
+			}
+		}
+		for id, found := range disallowed {
+			assert.False(t, found, "%s should NOT be in /v1/models list", id)
+		}
+	})
+
+	t.Run("disabled models are not preloaded on startup", func(t *testing.T) {
+		cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+hooks:
+  on_startup:
+    preload:
+      - preload-enabled-model
+      - preload-disabled-model
+models:
+  preload-enabled-model:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond preload-enabled-model
+  preload-disabled-model:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond preload-disabled-model
+    disabled: true
+`)
+
+		// Set up event listener to wait for preload completion
+		preloadChan := make(chan ModelPreloadedEvent, 1)
+		unsub := event.On(func(e ModelPreloadedEvent) {
+			preloadChan <- e
+		})
+		defer unsub()
+
+		testProxy := New(cfg)
+		defer testProxy.StopProcesses(StopWaitForInflightRequest)
+
+		// Wait for the enabled model to finish preloading
+		// The disabled model is skipped synchronously and emits no event
+		select {
+		case e := <-preloadChan:
+			assert.Equal(t, "preload-enabled-model", e.ModelName)
+			assert.True(t, e.Success, "preload should succeed")
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for preload event")
+		}
+
+		// Ensure no preload event is ever emitted for the disabled model
+		select {
+		case e := <-preloadChan:
+			t.Fatalf("unexpected preload event for %s", e.ModelName)
+		case <-time.After(200 * time.Millisecond):
+			// good — disabled model was skipped without emitting an event
+		}
+
+		// Check the running endpoint to see what's actually loaded
+		runningReq := httptest.NewRequest("GET", "/running", nil)
+		runningRec := CreateTestResponseRecorder()
+		testProxy.ServeHTTP(runningRec, runningReq)
+
+		assert.Equal(t, http.StatusOK, runningRec.Code)
+
+		// Parse the running models response and check model field
+		var runningData struct {
+			Running []struct {
+				Model string `json:"model"`
+			} `json:"running"`
+		}
+		assert.NoError(t, json.Unmarshal(runningRec.Body.Bytes(), &runningData))
+
+		var foundEnabled, foundDisabled bool
+		for _, entry := range runningData.Running {
+			if entry.Model == "preload-enabled-model" {
+				foundEnabled = true
+			} else if entry.Model == "preload-disabled-model" {
+				foundDisabled = true
+			}
+		}
+
+		assert.True(t, foundEnabled, "preload-enabled-model should be in running list")
+		assert.False(t, foundDisabled, "preload-disabled-model should not be in running list")
+	})
+}
+
 func TestProxyManager_SdApiTxt2ImgRouting(t *testing.T) {
-	conf := testConfigFromYAML(t, `
+	cfg := testConfigFromYAML(t, `
 healthCheckTimeout: 15
 logLevel: error
 models:
@@ -1650,7 +1940,7 @@ models:
     cmd: {{RESPONDER}} --port ${PORT} --silent --respond sd-model
 `)
 
-	proxy := New(conf)
+	proxy := New(cfg)
 	defer proxy.StopProcesses(StopWaitForInflightRequest)
 	injectTestHandlers(proxy, nil)
 

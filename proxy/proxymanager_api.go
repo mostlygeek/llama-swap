@@ -19,6 +19,7 @@ type Model struct {
 	Description string   `json:"description"`
 	State       string   `json:"state"`
 	Unlisted    bool     `json:"unlisted"`
+	Disabled    bool     `json:"disabled"`
 	PeerID      string   `json:"peerID"`
 	Aliases     []string `json:"aliases,omitempty"`
 }
@@ -85,6 +86,7 @@ func (pm *ProxyManager) getModelStatus() []Model {
 			Description: pm.config.Models[modelID].Description,
 			State:       state,
 			Unlisted:    pm.config.Models[modelID].Unlisted,
+			Disabled:    pm.config.Models[modelID].Disabled,
 			Aliases:     pm.config.Models[modelID].Aliases,
 		})
 	}
@@ -255,13 +257,17 @@ func (pm *ProxyManager) apiUnloadSingleModelHandler(c *gin.Context) {
 		return
 	}
 
+	if pm.rejectIfModelDisabled(c, realModelName) {
+		return
+	}
+
 	var stopErr error
 	if pm.matrix != nil {
 		stopErr = pm.matrix.StopProcess(realModelName, StopImmediately)
 	} else {
 		processGroup := pm.findGroupByModelName(realModelName)
 		if processGroup == nil {
-			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("process group not found for model %s", requestedModel))
+			pm.sendErrorResponse(c, http.StatusNotFound, fmt.Sprintf("Model %s is not loaded", requestedModel))
 			return
 		}
 		stopErr = processGroup.StopProcess(realModelName, StopImmediately)

@@ -231,6 +231,11 @@ func New(proxyConfig config.Config) *ProxyManager {
 					continue
 				}
 
+				if proxyConfig.Models[modelID].Disabled {
+					proxyLogger.Warnf("Preload model %s is disabled, skipping", modelID)
+					continue
+				}
+
 				proxyLogger.Infof("Preloading model: %s", modelID)
 
 				var preloadErr error
@@ -608,7 +613,8 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 	}
 
 	for id, modelConfig := range pm.config.Models {
-		if modelConfig.Unlisted {
+		// Skip unlisted and disabled models - they are not meant to be publicly visible
+		if modelConfig.Unlisted || modelConfig.Disabled {
 			continue
 		}
 
@@ -624,6 +630,9 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 		}
 	}
 
+	// Note: Disabled models are intentionally excluded from /v1/models (OpenAI-compatible API)
+	// but remain visible via /api/models/status for UI management. This allows the UI to show
+	// disabled models in grey while preventing external OpenAI clients from seeing them.
 	if pm.peerProxy != nil {
 		for peerID, peer := range pm.peerProxy.ListPeers() {
 			// add peer models
@@ -690,27 +699,14 @@ func (pm *ProxyManager) findModelInPath(path string) (searchName string, realNam
 func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 	upstreamPath := c.Param("upstreamPath")
 
-	searchModelName, modelID, remainingPath, modelFound := pm.findModelInPath(upstreamPath)
+	_, modelID, remainingPath, modelFound := pm.findModelInPath(upstreamPath)
 
 	if !modelFound {
 		pm.sendErrorResponse(c, http.StatusNotFound, "model not found")
 		return
 	}
 
-	// Redirect /upstream/modelname to /upstream/modelname/ for URL consistency.
-	// This ensures relative URLs in upstream responses resolve correctly and
-	// provides canonical URL form. Uses 308 for POST/PUT/etc to preserve the
-	// HTTP method (301 would downgrade to GET).
-	if remainingPath == "/" && !strings.HasSuffix(upstreamPath, "/") {
-		newPath := "/upstream/" + searchModelName + "/"
-		if c.Request.URL.RawQuery != "" {
-			newPath += "?" + c.Request.URL.RawQuery
-		}
-		if c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead {
-			c.Redirect(http.StatusMovedPermanently, newPath)
-		} else {
-			c.Redirect(http.StatusPermanentRedirect, newPath)
-		}
+	if pm.rejectIfModelDisabled(c, modelID) {
 		return
 	}
 
@@ -765,6 +761,10 @@ func (pm *ProxyManager) mkProxyJSONHandler(cf captureFields) func(*gin.Context) 
 
 		modelID, found := pm.config.RealModelName(requestedModel)
 		if found {
+			if pm.rejectIfModelDisabled(c, modelID) {
+				return
+			}
+
 			var localHandler func(string, http.ResponseWriter, *http.Request) error
 			if pm.matrix != nil {
 				localHandler = pm.matrix.ProxyRequest
@@ -920,6 +920,10 @@ func (pm *ProxyManager) mkPostFormHandler(cf captureFields) func(*gin.Context) {
 
 		modelID, found := pm.config.RealModelName(requestedModel)
 		if found {
+			if pm.rejectIfModelDisabled(c, modelID) {
+				return
+			}
+
 			if pm.matrix != nil {
 				nextHandler = pm.matrix.ProxyRequest
 			} else {
@@ -1052,6 +1056,10 @@ func (pm *ProxyManager) proxyGETModelHandler(c *gin.Context) {
 	var modelID string
 
 	if realModelID, found := pm.config.RealModelName(requestedModel); found {
+		if pm.rejectIfModelDisabled(c, realModelID) {
+			return
+		}
+
 		modelID = realModelID
 		if pm.matrix != nil {
 			nextHandler = pm.matrix.ProxyRequest
@@ -1080,6 +1088,14 @@ func (pm *ProxyManager) proxyGETModelHandler(c *gin.Context) {
 		pm.proxyLogger.Errorf("Error Proxying GET Request for model %s", modelID)
 		return
 	}
+}
+
+func (pm *ProxyManager) rejectIfModelDisabled(c *gin.Context, modelID string) bool {
+	if pm.config.Models[modelID].Disabled {
+		pm.sendErrorResponse(c, http.StatusNotFound, "model is disabled")
+		return true
+	}
+	return false
 }
 
 func (pm *ProxyManager) sendErrorResponse(c *gin.Context, statusCode int, message string) {
