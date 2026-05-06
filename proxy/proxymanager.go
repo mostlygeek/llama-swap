@@ -613,6 +613,7 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 	}
 
 	for id, modelConfig := range pm.config.Models {
+		// Skip unlisted models - they are not meant to be publicly visible
 		if modelConfig.Unlisted || modelConfig.Disabled {
 			continue
 		}
@@ -629,6 +630,9 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 		}
 	}
 
+	// Note: Disabled models are intentionally excluded from /v1/models (OpenAI-compatible API)
+	// but remain visible via /api/models/status for UI management. This allows the UI to show
+	// disabled models in grey while preventing external OpenAI clients from seeing them.
 	if pm.peerProxy != nil {
 		for peerID, peer := range pm.peerProxy.ListPeers() {
 			// add peer models

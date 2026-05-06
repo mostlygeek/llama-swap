@@ -1749,8 +1749,26 @@ models:
 		proxy.ServeHTTP(runningRec, runningReq)
 
 		assert.Equal(t, http.StatusOK, runningRec.Code)
-		assert.Contains(t, runningRec.Body.String(), "enabled-model")
-		assert.NotContains(t, runningRec.Body.String(), "disabled-model")
+
+		// Parse the running models response and check model field
+		var runningData struct {
+			Running []struct {
+				Model string `json:"model"`
+			} `json:"running"`
+		}
+		assert.NoError(t, json.Unmarshal(runningRec.Body.Bytes(), &runningData))
+
+		var foundEnabled, foundDisabled bool
+		for _, entry := range runningData.Running {
+			if entry.Model == "enabled-model" {
+				foundEnabled = true
+			} else if entry.Model == "disabled-model" {
+				foundDisabled = true
+			}
+		}
+
+		assert.True(t, foundEnabled, "enabled-model should be in running list")
+		assert.False(t, foundDisabled, "disabled-model should not be in running list")
 
 		// Try to request disabled model - should not affect loaded model
 		disabledReq := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(`{"model":"disabled-model"}`))
@@ -1764,7 +1782,22 @@ models:
 		proxy.ServeHTTP(runningRec2, runningReq2)
 
 		assert.Equal(t, http.StatusOK, runningRec2.Code)
-		assert.Contains(t, runningRec2.Body.String(), "enabled-model")
+
+		// Parse second running response
+		var runningData2 struct {
+			Running []struct {
+				Model string `json:"model"`
+			} `json:"running"`
+		}
+		assert.NoError(t, json.Unmarshal(runningRec2.Body.Bytes(), &runningData2))
+
+		var foundEnabled2 bool
+		for _, entry := range runningData2.Running {
+			if entry.Model == "enabled-model" {
+				foundEnabled2 = true
+			}
+		}
+		assert.True(t, foundEnabled2, "enabled-model should still be in running list")
 	})
 
 	t.Run("unloading disabled model returns 404", func(t *testing.T) {
@@ -1836,11 +1869,25 @@ models:
     disabled: true
 `)
 
+		// Set up event listener to wait for preload completion
+		preloadChan := make(chan ModelPreloadedEvent, 1)
+		unsub := event.On(func(e ModelPreloadedEvent) {
+			preloadChan <- e
+		})
+		defer unsub()
+
 		testProxy := New(cfg)
 		defer testProxy.StopProcesses(StopWaitForInflightRequest)
 
-		// Give the preload goroutine time to complete
-		time.Sleep(500 * time.Millisecond)
+		// Wait for the enabled model to finish preloading
+		// The disabled model is skipped synchronously and emits no event
+		select {
+		case e := <-preloadChan:
+			assert.Equal(t, "preload-enabled-model", e.ModelName)
+			assert.True(t, e.Success, "preload should succeed")
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for preload event")
+		}
 
 		// Check the running endpoint to see what's actually loaded
 		runningReq := httptest.NewRequest("GET", "/running", nil)
