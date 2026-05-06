@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -30,6 +32,13 @@ type TelemetryManager struct {
 	captureOutput   bool
 	maxContentBytes int
 	enabled         bool
+}
+
+type parsedToolCall struct {
+	ID        string
+	Name      string
+	Type      string
+	Arguments string
 }
 
 func NewTelemetryManager(cfg config.TelemetryConfig) (*TelemetryManager, error) {
@@ -142,7 +151,7 @@ func (tm *TelemetryManager) RecordActivity(
 	if route == "" && request != nil {
 		route = request.URL.Path
 	}
-	responseModel := responseModelFromBody(metric.RespContentType, respBody)
+	responseModel, toolCalls := responseDetailsFromBody(metric.RespContentType, respBody)
 
 	spanName := "llama-swap " + route
 	startTime := metric.Timestamp
@@ -153,7 +162,7 @@ func (tm *TelemetryManager) RecordActivity(
 		startTime = startTime.Add(-time.Duration(metric.DurationMs) * time.Millisecond)
 	}
 
-	_, span := tm.tracer.Start(
+	spanCtx, span := tm.tracer.Start(
 		ctx,
 		spanName,
 		trace.WithSpanKind(trace.SpanKindServer),
@@ -211,7 +220,9 @@ func (tm *TelemetryManager) RecordActivity(
 	}
 
 	if tm.captureInput && len(reqBody) > 0 && request != nil && isTextualContentType(request.Header.Get("Content-Type")) {
-		if text := truncateText(reqBody, tm.maxContentBytes); text != "" {
+		if input, ok := structuredChatInputFromBody(reqBody); ok {
+			span.SetAttributes(attribute.String("langfuse.observation.input", input))
+		} else if text := truncateText(reqBody, tm.maxContentBytes); text != "" {
 			span.SetAttributes(attribute.String("gen_ai.prompt", text))
 		}
 	}
@@ -220,6 +231,10 @@ func (tm *TelemetryManager) RecordActivity(
 		if text, _ := responseTextFromBody(metric.RespContentType, respBody); text != "" {
 			span.SetAttributes(attribute.String("gen_ai.completion", truncateText([]byte(text), tm.maxContentBytes)))
 		}
+	}
+
+	if len(toolCalls) > 0 {
+		tm.recordToolCalls(spanCtx, metric, toolCalls, startTime)
 	}
 }
 
@@ -230,69 +245,24 @@ func metricTimestampOrNow(ts time.Time) time.Time {
 	return ts
 }
 
-func responseModelFromBody(contentType string, body []byte) string {
+func responseDetailsFromBody(contentType string, body []byte) (string, []parsedToolCall) {
 	if len(body) == 0 {
-		return ""
+		return "", nil
 	}
 
 	ct := strings.ToLower(strings.TrimSpace(contentType))
 	if strings.Contains(ct, "event-stream") {
-		return responseModelFromStreamingBody(body)
+		model := responseModelFromStreamingBody(body)
+		_, toolCalls := responseDetailsFromStreamingBody(body)
+		return model, toolCalls
 	}
 
 	if !gjson.ValidBytes(body) {
-		return ""
+		return "", nil
 	}
 
 	parsed := gjson.ParseBytes(body)
-	if model := parsed.Get("model"); model.Exists() {
-		return model.String()
-	}
-	if model := parsed.Get("response.model"); model.Exists() {
-		return model.String()
-	}
-	return ""
-}
-
-func responseModelFromStreamingBody(body []byte) string {
-	pos := len(body)
-	for pos > 0 {
-		lineStart := bytes.LastIndexByte(body[:pos], '\n')
-		if lineStart == -1 {
-			lineStart = 0
-		} else {
-			lineStart++
-		}
-
-		line := bytes.TrimSpace(body[lineStart:pos])
-		pos = lineStart - 1
-
-		if len(line) == 0 {
-			continue
-		}
-
-		prefix := []byte("data:")
-		if !bytes.HasPrefix(line, prefix) {
-			continue
-		}
-		data := bytes.TrimSpace(line[len(prefix):])
-		if len(data) == 0 || bytes.Equal(data, []byte("[DONE]")) {
-			continue
-		}
-		if !gjson.ValidBytes(data) {
-			continue
-		}
-
-		parsed := gjson.ParseBytes(data)
-		if model := parsed.Get("model"); model.Exists() {
-			return model.String()
-		}
-		if model := parsed.Get("response.model"); model.Exists() {
-			return model.String()
-		}
-	}
-
-	return ""
+	return responseModelFromJSON(parsed), toolCallsFromJSON(parsed)
 }
 
 func responseTextFromBody(contentType string, body []byte) (string, string) {
@@ -314,18 +284,8 @@ func responseTextFromStreamingBody(body []byte) (string, string) {
 	var contentBuilder strings.Builder
 	var reasoningBuilder strings.Builder
 
-	pos := len(body)
-	for pos > 0 {
-		lineStart := bytes.LastIndexByte(body[:pos], '\n')
-		if lineStart == -1 {
-			lineStart = 0
-		} else {
-			lineStart++
-		}
-
-		line := bytes.TrimSpace(body[lineStart:pos])
-		pos = lineStart - 1
-
+	for _, rawLine := range bytes.Split(body, []byte("\n")) {
+		line := bytes.TrimSpace(rawLine)
 		if len(line) == 0 {
 			continue
 		}
@@ -345,19 +305,42 @@ func responseTextFromStreamingBody(body []byte) (string, string) {
 		parsed := gjson.ParseBytes(data)
 		text, reasoning := extractTextFromJSON(parsed)
 		if text != "" {
-			// reverse scan, prepend to preserve stream order
 			contentBuilder.WriteString(text)
-			contentBuilder.WriteString("\u0000")
 		}
 		if reasoning != "" {
 			reasoningBuilder.WriteString(reasoning)
-			reasoningBuilder.WriteString("\u0000")
 		}
 	}
 
-	content := reverseNullSeparated(contentBuilder.String())
-	reasoning := reverseNullSeparated(reasoningBuilder.String())
-	return content, reasoning
+	return contentBuilder.String(), reasoningBuilder.String()
+}
+
+func responseModelFromStreamingBody(body []byte) string {
+	for _, rawLine := range bytes.Split(body, []byte("\n")) {
+		line := bytes.TrimSpace(rawLine)
+		if len(line) == 0 {
+			continue
+		}
+
+		prefix := []byte("data:")
+		if !bytes.HasPrefix(line, prefix) {
+			continue
+		}
+		data := bytes.TrimSpace(line[len(prefix):])
+		if len(data) == 0 || bytes.Equal(data, []byte("[DONE]")) {
+			continue
+		}
+		if !gjson.ValidBytes(data) {
+			continue
+		}
+
+		parsed := gjson.ParseBytes(data)
+		if model := responseModelFromJSON(parsed); model != "" {
+			return model
+		}
+	}
+
+	return ""
 }
 
 func extractTextFromJSON(parsed gjson.Result) (string, string) {
@@ -395,6 +378,237 @@ func extractTextFromJSON(parsed gjson.Result) (string, string) {
 	return "", reasoning
 }
 
+func responseModelFromJSON(parsed gjson.Result) string {
+	if model := parsed.Get("model"); model.Exists() {
+		return model.String()
+	}
+	if model := parsed.Get("response.model"); model.Exists() {
+		return model.String()
+	}
+	return ""
+}
+
+func responseDetailsFromStreamingBody(body []byte) (string, []parsedToolCall) {
+	var contentBuilder strings.Builder
+	builders := make(map[int]*parsedToolCall)
+
+	for _, rawLine := range bytes.Split(body, []byte("\n")) {
+		line := bytes.TrimSpace(rawLine)
+		if len(line) == 0 {
+			continue
+		}
+
+		prefix := []byte("data:")
+		if !bytes.HasPrefix(line, prefix) {
+			continue
+		}
+		data := bytes.TrimSpace(line[len(prefix):])
+		if len(data) == 0 || bytes.Equal(data, []byte("[DONE]")) {
+			continue
+		}
+		if !gjson.ValidBytes(data) {
+			continue
+		}
+
+		parsed := gjson.ParseBytes(data)
+		if text, _ := extractTextFromJSON(parsed); text != "" {
+			contentBuilder.WriteString(text)
+		}
+		mergeToolCallsFromJSON(parsed, builders)
+	}
+
+	return contentBuilder.String(), sortedToolCalls(builders)
+}
+
+func toolCallsFromJSON(parsed gjson.Result) []parsedToolCall {
+	builders := make(map[int]*parsedToolCall)
+	mergeToolCallsFromJSON(parsed, builders)
+	return sortedToolCalls(builders)
+}
+
+func mergeToolCallsFromJSON(parsed gjson.Result, builders map[int]*parsedToolCall) {
+	for _, path := range []string{"choices.0.delta.tool_calls", "choices.0.message.tool_calls"} {
+		arr := parsed.Get(path)
+		if !arr.Exists() || !arr.IsArray() {
+			continue
+		}
+
+		arr.ForEach(func(_, item gjson.Result) bool {
+			index := int(item.Get("index").Int())
+			if index < 0 {
+				index = 0
+			}
+
+			builder := builders[index]
+			if builder == nil {
+				builder = &parsedToolCall{}
+				builders[index] = builder
+			}
+
+			if id := item.Get("id").String(); id != "" {
+				builder.ID = id
+			}
+			if toolType := item.Get("type").String(); toolType != "" {
+				builder.Type = toolType
+			}
+			if name := item.Get("function.name").String(); name != "" {
+				builder.Name = name
+			}
+			if args := item.Get("function.arguments").String(); args != "" {
+				builder.Arguments += args
+			}
+			return true
+		})
+	}
+}
+
+func sortedToolCalls(builders map[int]*parsedToolCall) []parsedToolCall {
+	if len(builders) == 0 {
+		return nil
+	}
+
+	indexes := make([]int, 0, len(builders))
+	for index := range builders {
+		indexes = append(indexes, index)
+	}
+	sort.Ints(indexes)
+
+	calls := make([]parsedToolCall, 0, len(indexes))
+	for _, index := range indexes {
+		if builder := builders[index]; builder != nil {
+			calls = append(calls, *builder)
+		}
+	}
+	return calls
+}
+
+func structuredChatInputFromBody(body []byte) (string, bool) {
+	if !gjson.ValidBytes(body) {
+		return "", false
+	}
+
+	parsed := gjson.ParseBytes(body)
+	messages := parsed.Get("messages")
+	if !messages.Exists() || !messages.IsArray() {
+		return "", false
+	}
+
+	structured := make(map[string]any)
+	var systemMessages []string
+	var userMessages []string
+	var assistantMessages []string
+	var toolMessages []string
+	var allMessages []map[string]string
+
+	messages.ForEach(func(_, message gjson.Result) bool {
+		role := strings.TrimSpace(message.Get("role").String())
+		content := messageContentFromJSON(message.Get("content"))
+		if role == "" && content == "" {
+			return true
+		}
+
+		if content != "" {
+			switch role {
+			case "system":
+				systemMessages = append(systemMessages, content)
+			case "user":
+				userMessages = append(userMessages, content)
+			case "assistant":
+				assistantMessages = append(assistantMessages, content)
+			case "tool":
+				toolMessages = append(toolMessages, content)
+			}
+		}
+
+		entry := make(map[string]string, 2)
+		if role != "" {
+			entry["role"] = role
+		}
+		if content != "" {
+			entry["content"] = content
+		}
+		if len(entry) > 0 {
+			allMessages = append(allMessages, entry)
+		}
+		return true
+	})
+
+	if len(systemMessages) == 0 && len(userMessages) == 0 && len(assistantMessages) == 0 && len(toolMessages) == 0 {
+		return "", false
+	}
+
+	if len(systemMessages) > 0 {
+		structured["system"] = systemMessages
+	}
+	if len(userMessages) > 0 {
+		structured["user"] = userMessages
+	}
+	if len(assistantMessages) > 0 {
+		structured["assistant"] = assistantMessages
+	}
+	if len(toolMessages) > 0 {
+		structured["tool"] = toolMessages
+	}
+	structured["messages"] = allMessages
+
+	payload, err := json.Marshal(structured)
+	if err != nil {
+		return "", false
+	}
+	return string(payload), true
+}
+
+func messageContentFromJSON(content gjson.Result) string {
+	if !content.Exists() {
+		return ""
+	}
+	if content.Type == gjson.String {
+		return content.String()
+	}
+	if content.Raw != "" {
+		return strings.TrimSpace(content.Raw)
+	}
+	return strings.TrimSpace(content.String())
+}
+
+func (tm *TelemetryManager) recordToolCalls(ctx context.Context, metric ActivityLogEntry, toolCalls []parsedToolCall, startTime time.Time) {
+	for _, toolCall := range toolCalls {
+		name := "execute_tool"
+		if toolCall.Name != "" {
+			name += " " + toolCall.Name
+		}
+
+		_, span := tm.tracer.Start(
+			ctx,
+			name,
+			trace.WithSpanKind(trace.SpanKindInternal),
+			trace.WithTimestamp(startTime),
+		)
+		span.SetAttributes(
+			attribute.String("langfuse.observation.type", "tool"),
+			attribute.String("gen_ai.operation.name", "execute_tool"),
+			attribute.String("gen_ai.tool.name", toolCall.Name),
+			attribute.String("gen_ai.tool.type", firstNonEmptyString(toolCall.Type, "function")),
+			attribute.String("gen_ai.tool.call.id", toolCall.ID),
+			attribute.String("gen_ai.tool.call.arguments", normalizeToolArguments(toolCall.Arguments)),
+			attribute.String("langfuse.observation.metadata.route", metric.ReqPath),
+			attribute.Int("langfuse.observation.metadata.activity_id", metric.ID),
+		)
+		span.End(trace.WithTimestamp(startTime))
+	}
+}
+
+func normalizeToolArguments(arguments string) string {
+	arguments = strings.TrimSpace(arguments)
+	if arguments == "" {
+		return ""
+	}
+	if json.Valid([]byte(arguments)) {
+		return arguments
+	}
+	return arguments
+}
+
 func firstNonEmptyString(values ...string) string {
 	for _, value := range values {
 		if value != "" {
@@ -402,25 +616,6 @@ func firstNonEmptyString(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func reverseNullSeparated(s string) string {
-	if s == "" {
-		return ""
-	}
-	parts := strings.Split(s, "\u0000")
-	if len(parts) == 0 {
-		return ""
-	}
-	var out strings.Builder
-	for i := len(parts) - 1; i >= 0; i-- {
-		part := parts[i]
-		if part == "" {
-			continue
-		}
-		out.WriteString(part)
-	}
-	return out.String()
 }
 
 func truncateText(body []byte, maxBytes int) string {

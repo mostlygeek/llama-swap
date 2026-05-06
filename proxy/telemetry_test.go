@@ -33,7 +33,7 @@ func TestTelemetryManager_RecordActivity(t *testing.T) {
 		enabled:         true,
 	}
 
-	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"hello"}]}`))
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"messages":[{"role":"system","content":"You are a helpful assistant"},{"role":"user","content":"hello"}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), proxyCtxKey("streaming"), true))
 
@@ -53,7 +53,7 @@ func TestTelemetryManager_RecordActivity(t *testing.T) {
 		HasCapture: true,
 	}
 
-	reqBody := []byte(`{"messages":[{"role":"user","content":"hello"}]}`)
+	reqBody := []byte(`{"messages":[{"role":"system","content":"You are a helpful assistant"},{"role":"user","content":"hello"}]}`)
 	respBody := []byte(`{"model":"test-model","choices":[{"message":{"content":"hi"}}]}`)
 	tm.RecordActivity(req.Context(), metric, req, reqBody, respBody)
 
@@ -71,7 +71,8 @@ func TestTelemetryManager_RecordActivity(t *testing.T) {
 	assert.Equal(t, "test-model", attrString(span.Attributes, "gen_ai.response.model"))
 	assert.Equal(t, "test-model", attrString(span.Attributes, "langfuse.observation.model.name"))
 	assert.Equal(t, "true", attrString(span.Attributes, "langfuse.observation.metadata.streaming"))
-	assert.Contains(t, attrString(span.Attributes, "gen_ai.prompt"), "hello")
+	assert.Contains(t, attrString(span.Attributes, "langfuse.observation.input"), "\"system\":[\"You are a helpful assistant\"]")
+	assert.Contains(t, attrString(span.Attributes, "langfuse.observation.input"), "\"user\":[\"hello\"]")
 	assert.Equal(t, "hi", attrString(span.Attributes, "gen_ai.completion"))
 	assert.Equal(t, "local", attrString(span.Attributes, "langfuse.environment"))
 	assert.Equal(t, int64(7), attrInt(span.Attributes, "langfuse.observation.metadata.activity_id"))
@@ -125,6 +126,82 @@ data: [DONE]
 	assert.Equal(t, "gemma-4-E2B-it-Q4_K_M.gguf", attrString(span.Attributes, "langfuse.observation.model.name"))
 	assert.Equal(t, "2", attrString(span.Attributes, "gen_ai.completion"))
 	assert.Equal(t, 10*time.Millisecond, span.EndTime.Sub(span.StartTime))
+}
+
+func TestTelemetryManager_RecordsToolCalls(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	t.Cleanup(func() {
+		require.NoError(t, tp.Shutdown(context.Background()))
+	})
+
+	tm := &TelemetryManager{
+		tp:              tp,
+		tracer:          tp.Tracer("test"),
+		captureInput:    true,
+		captureOutput:   true,
+		maxContentBytes: 4096,
+		enabled:         true,
+	}
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"messages":[{"role":"system","content":"You are a coding assistant"},{"role":"user","content":"List files"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	metric := ActivityLogEntry{
+		ID:              9,
+		Timestamp:       time.Date(2026, 5, 6, 4, 11, 57, 808000000, time.UTC),
+		Model:           "request-model",
+		ReqPath:         req.URL.Path,
+		RespContentType: "text/event-stream",
+		RespStatusCode:  200,
+		DurationMs:      11,
+	}
+
+	respBody := []byte(`data: {"choices":[{"finish_reason":null,"index":0,"delta":{"role":"assistant","content":null}}],"created":1778043718,"id":"chatcmpl-J4PxaspvW75bqv12589jM3yVWBGeFrLC","model":"gemma-4-31B-it-UD-Q5_K_XL.gguf","system_fingerprint":"b8981-d77599234","object":"chat.completion.chunk"}
+data: {"choices":[{"finish_reason":null,"index":0,"delta":{"tool_calls":[{"index":0,"id":"NGxrCcDpxOlNRTiVxV9suR85PGonBmJ5","type":"function","function":{"name":"bash","arguments":"{"}}]}}],"created":1778043718,"id":"chatcmpl-J4PxaspvW75bqv12589jM3yVWBGeFrLC","model":"gemma-4-31B-it-UD-Q5_K_XL.gguf","system_fingerprint":"b8981-d77599234","object":"chat.completion.chunk"}
+data: {"choices":[{"finish_reason":null,"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"command"}}]}}],"created":1778043718,"id":"chatcmpl-J4PxaspvW75bqv12589jM3yVWBGeFrLC","model":"gemma-4-31B-it-UD-Q5_K_XL.gguf","system_fingerprint":"b8981-d77599234","object":"chat.completion.chunk"}
+data: {"choices":[{"finish_reason":null,"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\":"}}]}}],"created":1778043718,"id":"chatcmpl-J4PxaspvW75bqv12589jM3yVWBGeFrLC","model":"gemma-4-31B-it-UD-Q5_K_XL.gguf","system_fingerprint":"b8981-d77599234","object":"chat.completion.chunk"}
+data: {"choices":[{"finish_reason":null,"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\""}}]}}],"created":1778043718,"id":"chatcmpl-J4PxaspvW75bqv12589jM3yVWBGeFrLC","model":"gemma-4-31B-it-UD-Q5_K_XL.gguf","system_fingerprint":"b8981-d77599234","object":"chat.completion.chunk"}
+data: {"choices":[{"finish_reason":null,"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"ls"}}]}}],"created":1778043718,"id":"chatcmpl-J4PxaspvW75bqv12589jM3yVWBGeFrLC","model":"gemma-4-31B-it-UD-Q5_K_XL.gguf","system_fingerprint":"b8981-d77599234","object":"chat.completion.chunk"}
+data: {"choices":[{"finish_reason":null,"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":" -"}}]}}],"created":1778043718,"id":"chatcmpl-J4PxaspvW75bqv12589jM3yVWBGeFrLC","model":"gemma-4-31B-it-UD-Q5_K_XL.gguf","system_fingerprint":"b8981-d77599234","object":"chat.completion.chunk"}
+data: {"choices":[{"finish_reason":null,"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"F"}}]}}],"created":1778043718,"id":"chatcmpl-J4PxaspvW75bqv12589jM3yVWBGeFrLC","model":"gemma-4-31B-it-UD-Q5_K_XL.gguf","system_fingerprint":"b8981-d77599234","object":"chat.completion.chunk"}
+data: {"choices":[{"finish_reason":null,"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\""}}]}}],"created":1778043718,"id":"chatcmpl-J4PxaspvW75bqv12589jM3yVWBGeFrLC","model":"gemma-4-31B-it-UD-Q5_K_XL.gguf","system_fingerprint":"b8981-d77599234","object":"chat.completion.chunk"}
+data: {"choices":[{"finish_reason":null,"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"}"}}]}}],"created":1778043718,"id":"chatcmpl-J4PxaspvW75bqv12589jM3yVWBGeFrLC","model":"gemma-4-31B-it-UD-Q5_K_XL.gguf","system_fingerprint":"b8981-d77599234","object":"chat.completion.chunk"}
+data: {"choices":[{"finish_reason":"tool_calls","index":0,"delta":{}}],"created":1778043718,"id":"chatcmpl-J4PxaspvW75bqv12589jM3yVWBGeFrLC","model":"gemma-4-31B-it-UD-Q5_K_XL.gguf","system_fingerprint":"b8981-d77599234","object":"chat.completion.chunk"}
+data: {"choices":[],"created":1778043718,"id":"chatcmpl-J4PxaspvW75bqv12589jM3yVWBGeFrLC","model":"gemma-4-31B-it-UD-Q5_K_XL.gguf","system_fingerprint":"b8981-d77599234","object":"chat.completion.chunk","usage":{"completion_tokens":19,"prompt_tokens":16114,"total_tokens":16133,"prompt_tokens_details":{"cached_tokens":3026}},"timings":{"cache_n":3026,"prompt_n":13088,"prompt_ms":5438.255,"prompt_per_token_ms":0.4155145935207824,"prompt_per_second":2406.654340408826,"predicted_n":19,"predicted_ms":344.464,"predicted_per_token_ms":18.129684210526317,"predicted_per_second":55.158158762599285}}
+data: [DONE]`)
+
+	tm.RecordActivity(req.Context(), metric, req, []byte(`{"messages":[{"role":"system","content":"You are a coding assistant"},{"role":"user","content":"List files"}]}`), respBody)
+
+	require.NoError(t, tp.ForceFlush(context.Background()))
+
+	spans := exporter.GetSpans()
+	require.Len(t, spans, 2)
+
+	var root, tool tracetest.SpanStub
+	var rootFound, toolFound bool
+	for _, span := range spans {
+		if span.Name == "llama-swap /v1/chat/completions" {
+			root = span
+			rootFound = true
+		}
+		if strings.HasPrefix(span.Name, "execute_tool ") {
+			tool = span
+			toolFound = true
+		}
+	}
+
+	require.True(t, rootFound)
+	require.True(t, toolFound)
+	assert.Contains(t, attrString(root.Attributes, "langfuse.observation.input"), "\"system\":[\"You are a coding assistant\"]")
+	assert.Contains(t, attrString(root.Attributes, "langfuse.observation.input"), "\"user\":[\"List files\"]")
+	assert.Equal(t, "execute_tool bash", tool.Name)
+	assert.Equal(t, "tool", attrString(tool.Attributes, "langfuse.observation.type"))
+	assert.Equal(t, "execute_tool", attrString(tool.Attributes, "gen_ai.operation.name"))
+	assert.Equal(t, "bash", attrString(tool.Attributes, "gen_ai.tool.name"))
+	assert.Equal(t, "function", attrString(tool.Attributes, "gen_ai.tool.type"))
+	assert.Equal(t, "NGxrCcDpxOlNRTiVxV9suR85PGonBmJ5", attrString(tool.Attributes, "gen_ai.tool.call.id"))
+	assert.Equal(t, `{"command":"ls -F"}`, attrString(tool.Attributes, "gen_ai.tool.call.arguments"))
 }
 
 func TestTelemetryManager_SkipsBinaryOutput(t *testing.T) {
