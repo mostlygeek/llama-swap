@@ -9,6 +9,7 @@ import type {
   InFlightStats,
 } from "../lib/types";
 import { connectionState } from "./theme";
+import { getAuthHeaders } from "./auth";
 
 const LOG_LENGTH_LIMIT = 1024 * 100; /* 100KB of log data */
 
@@ -121,7 +122,9 @@ export function enableAPIEvents(enabled: boolean): void {
 connectionState.subscribe(async (status) => {
   if (status === "connected") {
     try {
-      const response = await fetch("/api/version");
+      const response = await fetch("/api/version", {
+        headers: { ...getAuthHeaders() },
+      });
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -135,7 +138,9 @@ connectionState.subscribe(async (status) => {
 
 export async function listModels(): Promise<Model[]> {
   try {
-    const response = await fetch("/api/models/");
+    const response = await fetch("/api/models/", {
+      headers: { ...getAuthHeaders() },
+    });
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
@@ -151,6 +156,7 @@ export async function unloadAllModels(): Promise<void> {
   try {
     const response = await fetch(`/api/models/unload`, {
       method: "POST",
+      headers: { ...getAuthHeaders() },
     });
     if (!response.ok) {
       throw new Error(`Failed to unload models: ${response.status}`);
@@ -165,6 +171,7 @@ export async function unloadSingleModel(model: string): Promise<void> {
   try {
     const response = await fetch(`/api/models/unload/${model}`, {
       method: "POST",
+      headers: { ...getAuthHeaders() },
     });
     if (!response.ok) {
       throw new Error(`Failed to unload model: ${response.status}`);
@@ -179,6 +186,7 @@ export async function loadModel(model: string): Promise<void> {
   try {
     const response = await fetch(`/upstream/${model}/`, {
       method: "GET",
+      headers: { ...getAuthHeaders() },
     });
     if (!response.ok) {
       throw new Error(`Failed to load model: ${response.status}`);
@@ -191,7 +199,9 @@ export async function loadModel(model: string): Promise<void> {
 
 export async function getCapture(id: number): Promise<ReqRespCapture | null> {
   try {
-    const response = await fetch(`/api/captures/${id}`);
+    const response = await fetch(`/api/captures/${id}`, {
+      headers: { ...getAuthHeaders() },
+    });
     if (response.status === 404) {
       return null;
     }
