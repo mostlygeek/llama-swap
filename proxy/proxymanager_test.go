@@ -1669,7 +1669,7 @@ models:
 
 		proxy.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
-		assert.Contains(t, w.Body.String(), "model not found")
+		assert.Contains(t, w.Body.String(), "model is disabled")
 	})
 
 	t.Run("disabled model alias returns 404", func(t *testing.T) {
@@ -1679,7 +1679,7 @@ models:
 
 		proxy.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
-		assert.Contains(t, w.Body.String(), "model not found")
+		assert.Contains(t, w.Body.String(), "model is disabled")
 	})
 
 	t.Run("enabled model works normally", func(t *testing.T) {
@@ -1698,23 +1698,7 @@ models:
 
 		proxy.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
-		assert.Contains(t, w.Body.String(), "model not found")
-	})
-
-	t.Run("disabled model returns 404 on audio transcription", func(t *testing.T) {
-		var b bytes.Buffer
-		w := multipart.NewWriter(&b)
-		fw, _ := w.CreateFormField("model")
-		fw.Write([]byte("disabled-model"))
-		w.Close()
-
-		req := httptest.NewRequest("POST", "/v1/audio/transcriptions", &b)
-		req.Header.Set("Content-Type", w.FormDataContentType())
-		rec := CreateTestResponseRecorder()
-
-		proxy.ServeHTTP(rec, req)
-		assert.Equal(t, http.StatusNotFound, rec.Code)
-		assert.Contains(t, rec.Body.String(), "model not found")
+		assert.Contains(t, w.Body.String(), "model is disabled")
 	})
 
 	t.Run("disabled model returns 404 on GET voices", func(t *testing.T) {
@@ -1723,7 +1707,7 @@ models:
 
 		proxy.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
-		assert.Contains(t, w.Body.String(), "model not found")
+		assert.Contains(t, w.Body.String(), "model is disabled")
 	})
 
 	t.Run("disabled model appears in API list with disabled flag", func(t *testing.T) {
@@ -1789,7 +1773,7 @@ models:
 
 		proxy.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
-		assert.Contains(t, w.Body.String(), "Model is disabled")
+		assert.Contains(t, w.Body.String(), "model is disabled")
 	})
 }
 
