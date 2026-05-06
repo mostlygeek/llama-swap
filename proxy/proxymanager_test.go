@@ -1895,9 +1895,26 @@ models:
 		testProxy.ServeHTTP(runningRec, runningReq)
 
 		assert.Equal(t, http.StatusOK, runningRec.Code)
-		body := runningRec.Body.String()
-		assert.Contains(t, body, "preload-enabled-model", "enabled model should be preloaded")
-		assert.NotContains(t, body, "preload-disabled-model", "disabled model should not be preloaded")
+
+		// Parse the running models response and check model field
+		var runningData struct {
+			Running []struct {
+				Model string `json:"model"`
+			} `json:"running"`
+		}
+		assert.NoError(t, json.Unmarshal(runningRec.Body.Bytes(), &runningData))
+
+		var foundEnabled, foundDisabled bool
+		for _, entry := range runningData.Running {
+			if entry.Model == "preload-enabled-model" {
+				foundEnabled = true
+			} else if entry.Model == "preload-disabled-model" {
+				foundDisabled = true
+			}
+		}
+
+		assert.True(t, foundEnabled, "preload-enabled-model should be in running list")
+		assert.False(t, foundDisabled, "preload-disabled-model should not be in running list")
 	})
 }
 
