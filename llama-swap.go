@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -40,6 +42,11 @@ func main() {
 	if *showVersion {
 		fmt.Printf("version: %s (%s), built at %s\n", version, commit, date)
 		os.Exit(0)
+	}
+
+	if err := loadEnvFiles(*configPath); err != nil {
+		fmt.Printf("Error loading environment variables: %v\n", err)
+		os.Exit(1)
 	}
 
 	conf, err := config.LoadConfig(*configPath)
@@ -98,6 +105,11 @@ func main() {
 
 	// Support for watching config and reloading when it changes
 	reloadProxyManager := func() {
+		if err := loadEnvFiles(*configPath); err != nil {
+			fmt.Printf("Warning, unable to load environment variables: %v\n", err)
+			return
+		}
+
 		if currentPM, ok := srv.Handler.(*proxy.ProxyManager); ok {
 			conf, err = config.LoadConfig(*configPath)
 			if err != nil {
@@ -224,4 +236,85 @@ func debounce(interval time.Duration, f func()) func() {
 		}
 		timer = time.AfterFunc(interval, f)
 	}
+}
+
+func loadEnvFiles(configPath string) error {
+	paths := []string{}
+
+	if configPath != "" {
+		if absConfigPath, err := filepath.Abs(configPath); err == nil {
+			paths = append(paths, filepath.Join(filepath.Dir(absConfigPath), ".env"))
+		}
+	}
+
+	if cwd, err := os.Getwd(); err == nil {
+		paths = append(paths, filepath.Join(cwd, ".env"))
+	}
+
+	seen := make(map[string]struct{})
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+
+		if err := loadDotEnvFile(path); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func loadDotEnvFile(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "export ") {
+			line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+		}
+
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			return fmt.Errorf("invalid dotenv line in %s: %q", path, line)
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" {
+			return fmt.Errorf("invalid dotenv line in %s: %q", path, line)
+		}
+
+		if len(value) >= 2 {
+			if (strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"")) ||
+				(strings.HasPrefix(value, "'") && strings.HasSuffix(value, "'")) {
+				value = value[1 : len(value)-1]
+			}
+		}
+
+		if _, ok := os.LookupEnv(key); !ok {
+			if err := os.Setenv(key, value); err != nil {
+				return err
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	return nil
 }

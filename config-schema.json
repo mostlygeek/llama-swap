@@ -142,6 +142,95 @@
             "default": 5,
             "description": "Size in megabytes of the buffer for storing request/response captures. Set to 0 to disable captures."
         },
+        "telemetry": {
+            "type": "object",
+            "default": {
+                "enabled": false,
+                "serviceName": "llama-swap",
+                "sampleRatio": 1,
+                "maxContentBytes": 32768,
+                "otlp": {
+                    "headers": {}
+                }
+            },
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Enable exporting inference activity to an OpenTelemetry backend such as Langfuse."
+                },
+                "serviceName": {
+                    "type": "string",
+                    "default": "llama-swap",
+                    "description": "OpenTelemetry service.name used for exported spans."
+                },
+                "environment": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Deployment environment for exported spans."
+                },
+                "sampleRatio": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "default": 1,
+                    "description": "Sampling ratio for telemetry spans. 1 means export all spans."
+                },
+                "captureInput": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Capture request bodies for text endpoints and export them as span input."
+                },
+                "captureOutput": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Capture response bodies for text endpoints and export them as span output."
+                },
+                "maxContentBytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 32768,
+                    "description": "Maximum number of bytes to include from request or response bodies in telemetry spans."
+                },
+                "otlp": {
+                    "type": "object",
+                    "properties": {
+                        "endpoint": {
+                            "type": "string",
+                            "default": "http://localhost:3000/api/public/otel/v1/traces",
+                            "description": "OTLP/HTTP endpoint for Langfuse or another collector."
+                        },
+                        "insecure": {
+                            "type": "boolean",
+                            "default": true,
+                            "description": "Use HTTP instead of HTTPS when exporting spans."
+                        },
+                        "headers": {
+                            "type": "object",
+                            "default": {},
+                            "additionalProperties": {
+                                "type": "string"
+                            },
+                            "description": "Additional headers sent with OTLP export requests."
+                        },
+                        "publicKey": {
+                            "type": "string",
+                            "default": "",
+                            "description": "Langfuse public key used to construct the Authorization header."
+                        },
+                        "secretKey": {
+                            "type": "string",
+                            "default": "",
+                            "description": "Langfuse secret key used to construct the Authorization header."
+                        }
+                    },
+                    "additionalProperties": false,
+                    "description": "OTLP/HTTP settings for exporting telemetry."
+                }
+            },
+            "additionalProperties": false,
+            "description": "Telemetry settings for exporting inference activity to OpenTelemetry-compatible backends."
+        },
         "startPort": {
             "type": "integer",
             "default": 5800,

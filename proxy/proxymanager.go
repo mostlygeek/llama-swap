@@ -74,6 +74,7 @@ type ProxyManager struct {
 	muxLogger      *LogMonitor
 
 	metricsMonitor *metricsMonitor
+	telemetry      *TelemetryManager
 
 	processGroups map[string]*ProcessGroup
 
@@ -185,6 +186,12 @@ func New(proxyConfig config.Config) *ProxyManager {
 		peerProxy = nil
 	}
 
+	telemetry, err := NewTelemetryManager(proxyConfig.Telemetry)
+	if err != nil {
+		proxyLogger.Errorf("Disabling telemetry: %v", err)
+		telemetry = nil
+	}
+
 	pm := &ProxyManager{
 		config:    proxyConfig,
 		ginEngine: gin.New(),
@@ -194,6 +201,7 @@ func New(proxyConfig config.Config) *ProxyManager {
 		upstreamLogger: upstreamLogger,
 
 		metricsMonitor: newMetricsMonitor(proxyLogger, maxMetrics, proxyConfig.CaptureBuffer),
+		telemetry:      telemetry,
 
 		processGroups: make(map[string]*ProcessGroup),
 
@@ -208,6 +216,7 @@ func New(proxyConfig config.Config) *ProxyManager {
 
 		peerProxy: peerProxy,
 	}
+	pm.metricsMonitor.telemetry = telemetry
 
 	// create either matrix or process groups (mutually exclusive)
 	if proxyConfig.Matrix != nil {
@@ -537,20 +546,27 @@ func (pm *ProxyManager) Shutdown() {
 
 	if pm.matrix != nil {
 		pm.matrix.Shutdown()
-		pm.shutdownCancel()
-		return
+	} else {
+		var wg sync.WaitGroup
+		// Send shutdown signal to all process in groups
+		for _, processGroup := range pm.processGroups {
+			wg.Add(1)
+			go func(processGroup *ProcessGroup) {
+				defer wg.Done()
+				processGroup.Shutdown()
+			}(processGroup)
+		}
+		wg.Wait()
 	}
 
-	var wg sync.WaitGroup
-	// Send shutdown signal to all process in groups
-	for _, processGroup := range pm.processGroups {
-		wg.Add(1)
-		go func(processGroup *ProcessGroup) {
-			defer wg.Done()
-			processGroup.Shutdown()
-		}(processGroup)
+	if pm.telemetry != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := pm.telemetry.Shutdown(ctx); err != nil {
+			pm.proxyLogger.Warnf("telemetry shutdown failed: %v", err)
+		}
+		cancel()
 	}
-	wg.Wait()
+
 	pm.shutdownCancel()
 }
 

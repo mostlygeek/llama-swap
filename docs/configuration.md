@@ -146,6 +146,26 @@ metricsMaxInMemory: 1000
 # - set to 0 to disable
 captureBuffer: 15
 
+# telemetry: export inference activity to OpenTelemetry-compatible backends
+# - optional, default: disabled
+# - useful for sending Activity statistics to Langfuse over OTLP/HTTP
+# - publicKey and secretKey can be loaded from the environment using ${env.*}
+telemetry:
+  enabled: false
+  serviceName: llama-swap
+  environment: local
+  sampleRatio: 1
+  captureInput: true
+  captureOutput: true
+  maxContentBytes: 32768
+  otlp:
+    endpoint: http://localhost:3000/api/public/otel/v1/traces
+    insecure: true
+    headers:
+      x-langfuse-ingestion-version: "4"
+    publicKey: ${env.LANGFUSE_PUBLIC_KEY}
+    secretKey: ${env.LANGFUSE_SECRET_KEY}
+
 # startPort: sets the starting port number for the automatic ${PORT} macro.
 # - optional, default: 5800
 # - the ${PORT} macro can be used in model.cmd and model.proxy settings
@@ -184,6 +204,8 @@ globalTTL: 0
 # - environment variables can be referenced with ${env.VAR_NAME} syntax
 #   - env macros are substituted first, before regular macros
 #   - if the env var is not set, config loading will fail with an error
+# - llama-swap also loads a local `.env` file from the config directory or
+#   current working directory before reading config.yaml
 macros:
   # Example of a multi-line macro
   "latest-llama": >

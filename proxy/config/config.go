@@ -116,6 +116,25 @@ type HookOnStartup struct {
 	Preload []string `yaml:"preload"`
 }
 
+type TelemetryConfig struct {
+	Enabled         bool                `yaml:"enabled"`
+	ServiceName     string              `yaml:"serviceName"`
+	Environment     string              `yaml:"environment"`
+	SampleRatio     float64             `yaml:"sampleRatio"`
+	CaptureInput    bool                `yaml:"captureInput"`
+	CaptureOutput   bool                `yaml:"captureOutput"`
+	MaxContentBytes int                 `yaml:"maxContentBytes"`
+	OTLP            TelemetryOTLPConfig `yaml:"otlp"`
+}
+
+type TelemetryOTLPConfig struct {
+	Endpoint  string            `yaml:"endpoint"`
+	Insecure  bool              `yaml:"insecure"`
+	Headers   map[string]string `yaml:"headers"`
+	PublicKey string            `yaml:"publicKey"`
+	SecretKey string            `yaml:"secretKey"`
+}
+
 type Config struct {
 	HealthCheckTimeout int                    `yaml:"healthCheckTimeout"`
 	LogRequests        bool                   `yaml:"logRequests"`
@@ -158,6 +177,9 @@ type Config struct {
 
 	// support remote peers, see issue #433, #296
 	Peers PeerDictionaryConfig `yaml:"peers"`
+
+	// telemetry exports inference activity to OpenTelemetry backends
+	Telemetry TelemetryConfig `yaml:"telemetry"`
 }
 
 func (c *Config) RealModelName(search string) (string, bool) {
@@ -226,6 +248,13 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 
 	if config.GlobalTTL < 0 {
 		return Config{}, fmt.Errorf("globalTTL must be >= 0")
+	}
+
+	if config.Telemetry.SampleRatio < 0 || config.Telemetry.SampleRatio > 1 {
+		return Config{}, fmt.Errorf("telemetry.sampleRatio must be between 0 and 1")
+	}
+	if config.Telemetry.MaxContentBytes < 0 {
+		return Config{}, fmt.Errorf("telemetry.maxContentBytes must be >= 0")
 	}
 
 	switch config.LogToStdout {

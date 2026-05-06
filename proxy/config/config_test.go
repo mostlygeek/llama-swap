@@ -1544,3 +1544,60 @@ peers:
 	assert.Equal(t, 1, peerConfig.Timeouts.ExpectContinue)
 	assert.Equal(t, 90, peerConfig.Timeouts.IdleConn)
 }
+
+func TestConfig_TelemetryConfig(t *testing.T) {
+	t.Setenv("LANGFUSE_PUBLIC_KEY", "pk-test")
+	t.Setenv("LANGFUSE_SECRET_KEY", "sk-test")
+
+	content := `
+models:
+  model1:
+    cmd: path/to/cmd --arg1 one
+    proxy: http://localhost:8080
+telemetry:
+  enabled: true
+  serviceName: llama-swap-test
+  environment: local
+  sampleRatio: 0.5
+  captureInput: true
+  captureOutput: false
+  maxContentBytes: 2048
+  otlp:
+    endpoint: http://localhost:3000/api/public/otel/v1/traces
+    insecure: true
+    headers:
+      x-langfuse-ingestion-version: "4"
+    publicKey: "${env.LANGFUSE_PUBLIC_KEY}"
+    secretKey: "${env.LANGFUSE_SECRET_KEY}"
+`
+
+	cfg, err := LoadConfigFromReader(strings.NewReader(content))
+	require.NoError(t, err)
+
+	assert.True(t, cfg.Telemetry.Enabled)
+	assert.Equal(t, "llama-swap-test", cfg.Telemetry.ServiceName)
+	assert.Equal(t, "local", cfg.Telemetry.Environment)
+	assert.Equal(t, 0.5, cfg.Telemetry.SampleRatio)
+	assert.True(t, cfg.Telemetry.CaptureInput)
+	assert.False(t, cfg.Telemetry.CaptureOutput)
+	assert.Equal(t, 2048, cfg.Telemetry.MaxContentBytes)
+	assert.Equal(t, "http://localhost:3000/api/public/otel/v1/traces", cfg.Telemetry.OTLP.Endpoint)
+	assert.True(t, cfg.Telemetry.OTLP.Insecure)
+	assert.Equal(t, "4", cfg.Telemetry.OTLP.Headers["x-langfuse-ingestion-version"])
+	assert.Equal(t, "pk-test", cfg.Telemetry.OTLP.PublicKey)
+	assert.Equal(t, "sk-test", cfg.Telemetry.OTLP.SecretKey)
+}
+
+func TestConfig_TelemetrySampleRatioValidation(t *testing.T) {
+	content := `
+models:
+  model1:
+    cmd: path/to/cmd --arg1 one
+telemetry:
+  sampleRatio: 1.5
+`
+
+	_, err := LoadConfigFromReader(strings.NewReader(content))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "telemetry.sampleRatio")
+}

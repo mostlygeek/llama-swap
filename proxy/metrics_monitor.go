@@ -122,6 +122,7 @@ type metricsMonitor struct {
 	// capture fields
 	enableCaptures bool
 	captureCache   *cache.Cache // zstd-compressed CBOR of ReqRespCapture
+	telemetry      *TelemetryManager
 }
 
 // newMetricsMonitor creates a new metricsMonitor. captureBufferMB is the
@@ -272,7 +273,11 @@ func (mp *metricsMonitor) wrapHandler(
 	// Capture request body and headers if captures enabled
 	var reqBody []byte
 	var reqHeaders map[string]string
-	if mp.enableCaptures && (captureFields&captureReqBody) != 0 {
+	shouldCaptureReqBody := mp.enableCaptures && (captureFields&captureReqBody) != 0
+	if !shouldCaptureReqBody && mp.telemetry != nil && mp.telemetry.captureInput && request != nil {
+		shouldCaptureReqBody = isTextualContentType(request.Header.Get("Content-Type"))
+	}
+	if shouldCaptureReqBody {
 		if request.Body != nil {
 			var err error
 			reqBody, err = io.ReadAll(request.Body)
@@ -316,19 +321,17 @@ func (mp *metricsMonitor) wrapHandler(
 		RespStatusCode:  recorder.Status(),
 		DurationMs:      int(time.Since(recorder.StartTime()).Milliseconds()),
 	}
+	body := recorder.body.Bytes()
 
 	if recorder.Status() != http.StatusOK {
 		mp.logger.Warnf("non-200 response, recording partial metrics: status=%d, path=%s", recorder.Status(), request.URL.Path)
-		tm.ID = mp.queueMetrics(tm)
-		mp.emitMetric(tm)
+		mp.finalizeMetric(&tm, request, reqBody, body, nil)
 		return nil
 	}
 
-	body := recorder.body.Bytes()
 	if len(body) == 0 {
 		mp.logger.Warn("metrics: empty body, recording minimal metrics")
-		tm.ID = mp.queueMetrics(tm)
-		mp.emitMetric(tm)
+		mp.finalizeMetric(&tm, request, reqBody, body, nil)
 		return nil
 	}
 
@@ -338,8 +341,7 @@ func (mp *metricsMonitor) wrapHandler(
 		body, err = decompressBody(body, encoding)
 		if err != nil {
 			mp.logger.Warnf("metrics: decompression failed: %v, path=%s, recording minimal metrics", err, request.URL.Path)
-			tm.ID = mp.queueMetrics(tm)
-			mp.emitMetric(tm)
+			mp.finalizeMetric(&tm, request, reqBody, nil, nil)
 			return nil
 		}
 	}
@@ -404,10 +406,21 @@ func (mp *metricsMonitor) wrapHandler(
 		}
 	}
 
-	metricID := mp.queueMetrics(tm)
+	mp.finalizeMetric(&tm, request, reqBody, body, capture)
+
+	return nil
+}
+
+func (mp *metricsMonitor) finalizeMetric(
+	tm *ActivityLogEntry,
+	request *http.Request,
+	reqBody []byte,
+	respBody []byte,
+	capture *ReqRespCapture,
+) {
+	metricID := mp.queueMetrics(*tm)
 	tm.ID = metricID
 
-	// Store capture if enabled
 	if capture != nil {
 		capture.ID = metricID
 		if mp.addCapture(*capture) {
@@ -418,9 +431,11 @@ func (mp *metricsMonitor) wrapHandler(
 		}
 	}
 
-	mp.emitMetric(tm)
+	if mp.telemetry != nil {
+		mp.telemetry.RecordActivity(request.Context(), *tm, request, reqBody, respBody)
+	}
 
-	return nil
+	mp.emitMetric(*tm)
 }
 
 func processStreamingResponse(modelID string, start time.Time, body []byte) (ActivityLogEntry, error) {
