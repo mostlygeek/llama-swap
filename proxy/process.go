@@ -77,6 +77,9 @@ type Process struct {
 	// used for testing to override the default value
 	gracefulStopTimeout time.Duration
 
+	// keepAliveInterval to send HTTP 200 to the client when upstream is waiting too long (0 = disabled)
+	heartbeatInterval time.Duration
+
 	// used for testing to bypass subprocess and reverse proxy
 	testHandler http.Handler
 
@@ -144,6 +147,7 @@ func NewProcess(ID string, healthCheckTimeout int, config config.ModelConfig, pr
 		// To be removed when migration over exec.CommandContext is complete
 		// stop timeout
 		gracefulStopTimeout: 10 * time.Second,
+		heartbeatInterval:   time.Duration(config.HeartbeatInterval) * time.Second,
 		cmdWaitChan:         make(chan struct{}),
 	}
 }
@@ -573,14 +577,14 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 
 	// for #366
 	// - extract streaming param from request context, should have been set by proxymanager
+	isStreaming, _ := r.Context().Value(proxyCtxKey("streaming")).(bool)
+
 	var srw *statusResponseWriter
 	swapCtx, cancelLoadCtx := context.WithCancel(r.Context())
 	// start the process on demand
 	if p.CurrentState() != StateReady {
 		// start a goroutine to stream loading status messages into the response writer
 		// add a sync so the streaming client only runs when the goroutine has exited
-
-		isStreaming, _ := r.Context().Value(proxyCtxKey("streaming")).(bool)
 
 		// PR #417 (no support for anthropic v1/messages yet)
 		isChatCompletions := strings.HasPrefix(r.URL.Path, "/v1/chat/completions")
@@ -632,12 +636,69 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if p.testHandler != nil {
-		p.testHandler.ServeHTTP(w, r)
+	var proxyW http.ResponseWriter
+
+	if p.heartbeatInterval > 0 && isStreaming {
+		// #726: heartbeatInterval goroutine — sends periodic keep-alive heartbeats
+		// when upstream is unresponsive, preventing client timeouts during long
+		// prompt processing or generation sessions. Only active for streaming requests.
+		tickInterval := p.heartbeatInterval
+
+		var prw *responseSyncer
+
+		if srw != nil {
+			// SendLoadingState=true + streaming: wrap statusResponseWriter (already has headers)
+			prw = newResponseSyncer(srw)
+		} else {
+			// Streaming request with no loading state — pass-through wrapper.
+			// SSE headers ensure the connection remains open as text/event-stream.
+			prw = newResponseSyncer(w)
+
+			prw.Header().Set("Content-Type", "text/event-stream")
+			prw.Header().Set("Cache-Control", "no-cache")
+			prw.Header().Set("Connection", "keep-alive")
+		}
+
+		go func() {
+			ticker := time.NewTicker(tickInterval)
+			defer ticker.Stop()
+
+			for range ticker.C {
+				select {
+				case <-r.Context().Done():
+					p.proxyLogger.Debugf("<%s> - Cancel send keep-alive message for %s after %v",
+						p.ID, r.RequestURI, time.Since(requestBeginTime))
+					return
+				case <-prw.closeCh:
+					// upstream started streaming, stop heartbeats to avoid interleaving
+					p.proxyLogger.Debugf("<%s> upstream started streaming, stopping heartbeats for %s",
+						p.ID, r.RequestURI)
+					return
+				default:
+					prw.mu.Lock()
+					shouldSend := !prw.upstreamStarted.Load() // read under lock
+					prw.mu.Unlock()
+
+					if shouldSend {
+						p.proxyLogger.Debugf("<%s> Send 200-OK keep-alive for %s - start: %v",
+							p.ID, r.RequestURI, time.Since(requestBeginTime))
+						prw.WriteHeartbeat([]byte(": heart-beat\n\n"))
+					}
+				}
+			}
+		}()
+
+		proxyW = prw
 	} else if srw != nil {
-		p.reverseProxy.ServeHTTP(srw, r)
+		proxyW = srw
 	} else {
-		p.reverseProxy.ServeHTTP(w, r)
+		proxyW = w
+	}
+
+	if p.testHandler != nil {
+		p.testHandler.ServeHTTP(proxyW, r)
+	} else {
+		p.reverseProxy.ServeHTTP(proxyW, r)
 	}
 
 	totalTime := time.Since(requestBeginTime)
@@ -952,4 +1013,67 @@ func (s *statusResponseWriter) Flush() {
 	if flusher, ok := s.writer.(http.Flusher); ok {
 		flusher.Flush()
 	}
+}
+
+// responseSyncer synchronizes concurrent writes from the heartbeat goroutine
+// and the upstream reverse proxy to prevent data races. It does not implement
+// WriteHeader — headers are set before the proxy goroutine starts, so heartbeat
+// only needs to write body data safely through this wrapper.
+type responseSyncer struct {
+	mu              sync.Mutex
+	writer          http.ResponseWriter
+	upstreamStarted atomic.Bool // true once reverseProxy has written
+	closeCh         chan struct{}
+}
+
+func newResponseSyncer(w http.ResponseWriter) *responseSyncer {
+	return &responseSyncer{
+		writer:  w,
+		closeCh: make(chan struct{}),
+	}
+}
+
+func (p *responseSyncer) Header() http.Header {
+	return p.writer.Header()
+}
+
+// WriteHeartbeat check again stream started
+func (p *responseSyncer) WriteHeartbeat(data []byte) {
+	p.mu.Lock()
+	shouldSend := !p.upstreamStarted.Load()
+	p.mu.Unlock()
+
+	if shouldSend {
+		_, _ = p.writer.Write(data) // пишем напрямую, bypass mutex
+		FlushUnlocked(p.writer)     // flush без захвата lock
+	}
+}
+
+func (p *responseSyncer) Write(data []byte) (int, error) {
+	p.mu.Lock()
+	n, err := p.writer.Write(data)
+	if !p.upstreamStarted.Swap(true) {
+		close(p.closeCh)
+	}
+	p.mu.Unlock() // освобождаем lock ПЕРЕД flush
+
+	FlushUnlocked(p.writer) // flush вне mutex
+	return n, err
+}
+
+// FlushUnlocked calls Flush without acquiring the mutex.
+// It must be called by goroutines that do NOT hold p.mu (e.g., after Unlock).
+func FlushUnlocked(w http.ResponseWriter) {
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func (p *responseSyncer) WriteHeader(statusCode int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.upstreamStarted.Swap(true) {
+		close(p.closeCh)
+	}
+	p.writer.WriteHeader(statusCode)
 }

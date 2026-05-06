@@ -276,6 +276,13 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			return Config{}, fmt.Errorf("model %s: invalid TTL value %d", modelId, modelConfig.UnloadAfter)
 		}
 
+		// for #726
+		if modelConfig.HeartbeatInterval < 0 {
+			return Config{}, fmt.Errorf("model %s: heartbeatInterval must be >= 0", modelId)
+		} else if modelConfig.HeartbeatInterval > 0 && modelConfig.HeartbeatInterval < 10 {
+			modelConfig.HeartbeatInterval = 10
+		}
+
 		// Validate model macros
 		for _, macro := range modelConfig.Macros {
 			if err = validateMacro(macro.Name, macro.Value); err != nil {
