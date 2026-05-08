@@ -24,10 +24,18 @@ function getInitialThemeMode(): ThemeMode {
 export const themeMode = persistentStore<ThemeMode>("theme-mode", getInitialThemeMode());
 export const appTitle = persistentStore<string>("app-title", "llama-swap");
 
+const prefersDarkQuery = "(prefers-color-scheme: dark)";
+
+function getSystemPrefersDark(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia(prefersDarkQuery).matches
+  );
+}
+
 // Internal store for the raw OS dark preference
-const systemPrefersDark = writable(
-  typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches
-);
+const systemPrefersDark = writable(getSystemPrefersDark());
 
 // Derived store for actual dark mode state
 export const isDarkMode = derived(
@@ -92,16 +100,14 @@ export function initScreenWidth(): () => void {
 
 // Initialize system theme listener
 export function initSystemThemeListener(): () => void {
-  if (typeof window === "undefined") return () => {};
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return () => {};
 
-  const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+  const mediaQuery = window.matchMedia(prefersDarkQuery);
+  systemPrefersDark.set(mediaQuery.matches);
   const handleChange = (e: MediaQueryListEvent) => {
     systemPrefersDark.set(e.matches);
   };
 
   mediaQuery.addEventListener("change", handleChange);
-
-  return () => {
-    mediaQuery.removeEventListener("change", handleChange);
-  };
+  return () => mediaQuery.removeEventListener("change", handleChange);
 }
