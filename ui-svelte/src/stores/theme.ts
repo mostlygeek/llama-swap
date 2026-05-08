@@ -2,10 +2,35 @@ import { writable, derived } from "svelte/store";
 import { persistentStore } from "./persistent";
 import type { ScreenWidth } from "../lib/types";
 
+export type ThemeMode = "light" | "dark" | "system";
+
+function getInitialThemeMode(): ThemeMode {
+  if (typeof window !== "undefined") {
+    try {
+      const saved = localStorage.getItem("theme");
+      if (saved !== null) {
+        const oldTheme = JSON.parse(saved);
+        localStorage.removeItem("theme");
+        return oldTheme ? "dark" : "light";
+      }
+    } catch (e) {
+      console.error("Error parsing stored theme", e);
+    }
+  }
+  return "system";
+}
+
 // Persistent stores
-const systemDark = typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches;
-export const isDarkMode = persistentStore<boolean>("theme", systemDark);
+export const themeMode = persistentStore<ThemeMode>("theme-mode", getInitialThemeMode());
 export const appTitle = persistentStore<string>("app-title", "llama-swap");
+
+// Derived store for actual dark mode state
+export const isDarkMode = derived(themeMode, ($themeMode) => {
+  if ($themeMode === "system") {
+    return typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  }
+  return $themeMode === "dark";
+});
 
 // Non-persistent stores
 export const screenWidth = writable<ScreenWidth>("md");
@@ -18,8 +43,14 @@ export const isNarrow = derived(screenWidth, ($screenWidth) => {
 
 // Function to toggle theme
 export function toggleTheme(): void {
-  isDarkMode.update((current) => !current);
+  themeMode.update((current) => {
+    if (current === "system") return "light";
+    if (current === "light") return "dark";
+    return "system";
+  });
 }
+
+
 
 // Function to check and update screen width
 export function checkScreenWidth(): void {
@@ -50,5 +81,26 @@ export function initScreenWidth(): () => void {
 
   return () => {
     window.removeEventListener("resize", checkScreenWidth);
+  };
+}
+
+// Initialize system theme listener
+export function initSystemThemeListener(): () => void {
+  if (typeof window === "undefined") return () => {};
+
+  const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+  const handleChange = () => {
+    themeMode.update((current) => {
+      if (current === "system") {
+        return "system";
+      }
+      return current;
+    });
+  };
+
+  mediaQuery.addEventListener("change", handleChange);
+
+  return () => {
+    mediaQuery.removeEventListener("change", handleChange);
   };
 }
