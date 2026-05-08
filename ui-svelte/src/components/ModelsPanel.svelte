@@ -11,7 +11,7 @@
   const showIdorNameStore = persistentStore<"id" | "name">("showIdorName", "id");
 
   let filteredModels = $derived.by(() => {
-    const filtered = $models.filter((model) => $showUnlistedStore || !model.unlisted);
+    const filtered = $models.filter((model) => $showUnlistedStore || (!model.unlisted && !model.disabled));
     const peerModels = filtered.filter((m) => m.peerID);
 
     // Group peer models by peerID
