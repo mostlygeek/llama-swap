@@ -8,7 +8,7 @@
   import Playground from "./routes/Playground.svelte";
   import PlaygroundStub from "./routes/PlaygroundStub.svelte";
   import { enableAPIEvents } from "./stores/api";
-  import { initScreenWidth, isDarkMode, appTitle, connectionState } from "./stores/theme";
+  import { initScreenWidth, initSystemThemeListener, isDarkMode, appTitle, connectionState } from "./stores/theme";
   import { currentRoute } from "./stores/route";
 
   const routes = {
@@ -35,10 +35,12 @@
 
   onMount(() => {
     const cleanupScreenWidth = initScreenWidth();
+    const cleanupSystemTheme = initSystemThemeListener();
     enableAPIEvents(true);
 
     return () => {
       cleanupScreenWidth();
+      cleanupSystemTheme();
       enableAPIEvents(false);
     };
   });

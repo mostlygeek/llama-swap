@@ -2,10 +2,49 @@ import { writable, derived } from "svelte/store";
 import { persistentStore } from "./persistent";
 import type { ScreenWidth } from "../lib/types";
 
+export type ThemeMode = "light" | "dark" | "system";
+
+function getInitialThemeMode(): ThemeMode {
+  if (typeof window !== "undefined") {
+    try {
+      const saved = localStorage.getItem("theme");
+      if (saved !== null) {
+        const oldTheme = JSON.parse(saved);
+        localStorage.removeItem("theme");
+        return oldTheme ? "dark" : "light";
+      }
+    } catch (e) {
+      console.error("Error parsing stored theme", e);
+    }
+  }
+  return "system";
+}
+
 // Persistent stores
-const systemDark = typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches;
-export const isDarkMode = persistentStore<boolean>("theme", systemDark);
+export const themeMode = persistentStore<ThemeMode>("theme-mode", getInitialThemeMode());
 export const appTitle = persistentStore<string>("app-title", "llama-swap");
+
+const prefersDarkQuery = "(prefers-color-scheme: dark)";
+
+function getSystemPrefersDark(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia(prefersDarkQuery).matches
+  );
+}
+
+// Internal store for the raw OS dark preference
+const systemPrefersDark = writable(getSystemPrefersDark());
+
+// Derived store for actual dark mode state
+export const isDarkMode = derived(
+  [themeMode, systemPrefersDark],
+  ([$themeMode, $systemPrefersDark]) => {
+    if ($themeMode === "system") return $systemPrefersDark;
+    return $themeMode === "dark";
+  }
+);
 
 // Non-persistent stores
 export const screenWidth = writable<ScreenWidth>("md");
@@ -18,8 +57,14 @@ export const isNarrow = derived(screenWidth, ($screenWidth) => {
 
 // Function to toggle theme
 export function toggleTheme(): void {
-  isDarkMode.update((current) => !current);
+  themeMode.update((current) => {
+    if (current === "system") return "light";
+    if (current === "light") return "dark";
+    return "system";
+  });
 }
+
+
 
 // Function to check and update screen width
 export function checkScreenWidth(): void {
@@ -51,4 +96,18 @@ export function initScreenWidth(): () => void {
   return () => {
     window.removeEventListener("resize", checkScreenWidth);
   };
+}
+
+// Initialize system theme listener
+export function initSystemThemeListener(): () => void {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return () => {};
+
+  const mediaQuery = window.matchMedia(prefersDarkQuery);
+  systemPrefersDark.set(mediaQuery.matches);
+  const handleChange = (e: MediaQueryListEvent) => {
+    systemPrefersDark.set(e.matches);
+  };
+
+  mediaQuery.addEventListener("change", handleChange);
+  return () => mediaQuery.removeEventListener("change", handleChange);
 }
