@@ -24,13 +24,19 @@ function getInitialThemeMode(): ThemeMode {
 export const themeMode = persistentStore<ThemeMode>("theme-mode", getInitialThemeMode());
 export const appTitle = persistentStore<string>("app-title", "llama-swap");
 
+// Internal store for the raw OS dark preference
+const systemPrefersDark = writable(
+  typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches
+);
+
 // Derived store for actual dark mode state
-export const isDarkMode = derived(themeMode, ($themeMode) => {
-  if ($themeMode === "system") {
-    return typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches;
+export const isDarkMode = derived(
+  [themeMode, systemPrefersDark],
+  ([$themeMode, $systemPrefersDark]) => {
+    if ($themeMode === "system") return $systemPrefersDark;
+    return $themeMode === "dark";
   }
-  return $themeMode === "dark";
-});
+);
 
 // Non-persistent stores
 export const screenWidth = writable<ScreenWidth>("md");
@@ -89,13 +95,8 @@ export function initSystemThemeListener(): () => void {
   if (typeof window === "undefined") return () => {};
 
   const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-  const handleChange = () => {
-    themeMode.update((current) => {
-      if (current === "system") {
-        return "system";
-      }
-      return current;
-    });
+  const handleChange = (e: MediaQueryListEvent) => {
+    systemPrefersDark.set(e.matches);
   };
 
   mediaQuery.addEventListener("change", handleChange);
