@@ -17,6 +17,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/event"
+	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/proxy/config"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -69,11 +71,12 @@ type ProxyManager struct {
 	ginEngine *gin.Engine
 
 	// logging
-	proxyLogger    *LogMonitor
-	upstreamLogger *LogMonitor
-	muxLogger      *LogMonitor
+	proxyLogger    *logmon.Monitor
+	upstreamLogger *logmon.Monitor
+	muxLogger      *logmon.Monitor
 
 	metricsMonitor *metricsMonitor
+	perfMonitor    *perf.Monitor
 
 	processGroups map[string]*ProcessGroup
 
@@ -98,27 +101,27 @@ type ProxyManager struct {
 func New(proxyConfig config.Config) *ProxyManager {
 	// set up loggers
 
-	var muxLogger, upstreamLogger, proxyLogger *LogMonitor
+	var muxLogger, upstreamLogger, proxyLogger *logmon.Monitor
 	switch proxyConfig.LogToStdout {
 	case config.LogToStdoutNone:
-		muxLogger = NewLogMonitorWriter(io.Discard)
-		upstreamLogger = NewLogMonitorWriter(io.Discard)
-		proxyLogger = NewLogMonitorWriter(io.Discard)
+		muxLogger = logmon.NewWriter(io.Discard)
+		upstreamLogger = logmon.NewWriter(io.Discard)
+		proxyLogger = logmon.NewWriter(io.Discard)
 	case config.LogToStdoutBoth:
-		muxLogger = NewLogMonitorWriter(os.Stdout)
-		upstreamLogger = NewLogMonitorWriter(muxLogger)
-		proxyLogger = NewLogMonitorWriter(muxLogger)
+		muxLogger = logmon.NewWriter(os.Stdout)
+		upstreamLogger = logmon.NewWriter(muxLogger)
+		proxyLogger = logmon.NewWriter(muxLogger)
 	case config.LogToStdoutUpstream:
-		muxLogger = NewLogMonitorWriter(os.Stdout)
-		upstreamLogger = NewLogMonitorWriter(muxLogger)
-		proxyLogger = NewLogMonitorWriter(io.Discard)
+		muxLogger = logmon.NewWriter(os.Stdout)
+		upstreamLogger = logmon.NewWriter(muxLogger)
+		proxyLogger = logmon.NewWriter(io.Discard)
 	default:
 		// same as config.LogToStdoutProxy
 		// helpful because some old tests create a config.Config directly and it
 		// may not have LogToStdout set explicitly
-		muxLogger = NewLogMonitorWriter(os.Stdout)
-		upstreamLogger = NewLogMonitorWriter(io.Discard)
-		proxyLogger = NewLogMonitorWriter(muxLogger)
+		muxLogger = logmon.NewWriter(os.Stdout)
+		upstreamLogger = logmon.NewWriter(io.Discard)
+		proxyLogger = logmon.NewWriter(muxLogger)
 	}
 
 	if proxyConfig.LogRequests {
@@ -127,20 +130,20 @@ func New(proxyConfig config.Config) *ProxyManager {
 
 	switch strings.ToLower(strings.TrimSpace(proxyConfig.LogLevel)) {
 	case "debug":
-		proxyLogger.SetLogLevel(LevelDebug)
-		upstreamLogger.SetLogLevel(LevelDebug)
+		proxyLogger.SetLogLevel(logmon.LevelDebug)
+		upstreamLogger.SetLogLevel(logmon.LevelDebug)
 	case "info":
-		proxyLogger.SetLogLevel(LevelInfo)
-		upstreamLogger.SetLogLevel(LevelInfo)
+		proxyLogger.SetLogLevel(logmon.LevelInfo)
+		upstreamLogger.SetLogLevel(logmon.LevelInfo)
 	case "warn":
-		proxyLogger.SetLogLevel(LevelWarn)
-		upstreamLogger.SetLogLevel(LevelWarn)
+		proxyLogger.SetLogLevel(logmon.LevelWarn)
+		upstreamLogger.SetLogLevel(logmon.LevelWarn)
 	case "error":
-		proxyLogger.SetLogLevel(LevelError)
-		upstreamLogger.SetLogLevel(LevelError)
+		proxyLogger.SetLogLevel(logmon.LevelError)
+		upstreamLogger.SetLogLevel(logmon.LevelError)
 	default:
-		proxyLogger.SetLogLevel(LevelInfo)
-		upstreamLogger.SetLogLevel(LevelInfo)
+		proxyLogger.SetLogLevel(logmon.LevelInfo)
+		upstreamLogger.SetLogLevel(logmon.LevelInfo)
 	}
 
 	// see: https://go.dev/src/time/format.go
@@ -271,13 +274,17 @@ func (pm *ProxyManager) setupGinEngine() {
 
 	pm.ginEngine.Use(func(c *gin.Context) {
 
-		// don't log the Wake on Lan proxy health check
-		if c.Request.URL.Path == "/wol-health" {
-			c.Next()
-			return
+		for _, prefix := range []string{
+			"/wol-health",
+			"/api/performance",
+			"/metrics",
+		} {
+			if strings.HasPrefix(c.Request.URL.Path, prefix) {
+				c.Next()
+				return
+			}
 		}
 
-		// Start timer
 		start := time.Now()
 
 		// capture these because /upstream/:model rewrites them in c.Next()
@@ -285,12 +292,9 @@ func (pm *ProxyManager) setupGinEngine() {
 		method := c.Request.Method
 		path := c.Request.URL.Path
 
-		// Process request
 		c.Next()
 
-		// Stop timer
 		duration := time.Since(start)
-
 		statusCode := c.Writer.Status()
 		bodySize := c.Writer.Size()
 
@@ -438,6 +442,8 @@ func (pm *ProxyManager) setupGinEngine() {
 	pm.ginEngine.GET("/health", func(c *gin.Context) {
 		c.String(http.StatusOK, "OK")
 	})
+
+	pm.ginEngine.GET("/metrics", pm.prometheusMetricsHandler)
 
 	// see cmd/wol-proxy/wol-proxy.go, not logged
 	pm.ginEngine.GET("/wol-health", func(c *gin.Context) {
@@ -1217,4 +1223,10 @@ func (pm *ProxyManager) SetVersion(buildDate string, commit string, version stri
 	pm.buildDate = buildDate
 	pm.commit = commit
 	pm.version = version
+}
+
+func (pm *ProxyManager) SetPerfMonitor(m *perf.Monitor) {
+	pm.Lock()
+	defer pm.Unlock()
+	pm.perfMonitor = m
 }

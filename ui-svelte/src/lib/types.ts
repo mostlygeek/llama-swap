@@ -50,8 +50,48 @@ export interface InFlightStats {
   total: number;
 }
 
+export interface NetIOStat {
+  name: string;
+  bytes_recv: number;
+  bytes_sent: number;
+}
+
+export interface SysStat {
+  timestamp: string;
+  cpu_util_per_core: number[];
+  mem_total_mb: number;
+  mem_used_mb: number;
+  mem_free_mb: number;
+  swap_total_mb: number;
+  swap_used_mb: number;
+  load_avg_1: number;
+  load_avg_5: number;
+  load_avg_15: number;
+  net_io: NetIOStat[];
+}
+
+export interface GpuStat {
+  timestamp: string;
+  id: number;
+  name: string;
+  uuid: string;
+  temp_c: number;
+  vram_temp_c: number;
+  gpu_util_pct: number;
+  mem_util_pct: number;
+  mem_used_mb: number;
+  mem_total_mb: number;
+  fan_speed_pct: number;
+  power_draw_w: number;
+}
+
+export interface PerformanceResponse {
+  sys_stats: SysStat[];
+  gpu_stats: GpuStat[];
+}
+
 export interface APIEventEnvelope {
-  type: "modelStatus" | "logData" | "metrics" | "inflight";
+  type: "modelStatus" | "logData" | "metrics" | "inflight" | "perfsys" | "perfgpu";
   data: string;
 }
 

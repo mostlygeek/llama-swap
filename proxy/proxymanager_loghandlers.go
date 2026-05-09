@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/mostlygeek/llama-swap/internal/logmon"
 )
 
 func (pm *ProxyManager) sendLogsHandlers(c *gin.Context) {
@@ -89,7 +90,7 @@ func (pm *ProxyManager) streamLogsHandler(c *gin.Context) {
 }
 
 // getLogger searches for the appropriate logger based on the logMonitorId
-func (pm *ProxyManager) getLogger(logMonitorId string) (*LogMonitor, error) {
+func (pm *ProxyManager) getLogger(logMonitorId string) (*logmon.Monitor, error) {
 	switch logMonitorId {
 	case "":
 		// maintain the default

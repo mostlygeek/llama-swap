@@ -129,10 +129,8 @@
     loadingCaptureId = id;
     const capture = await getCapture(id);
     loadingCaptureId = null;
-    if (capture) {
-      selectedCapture = capture;
-      dialogOpen = true;
-    }
+    selectedCapture = capture;
+    dialogOpen = true;
   }
 
   function closeDialog() {
