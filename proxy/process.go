@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/mostlygeek/llama-swap/event"
+	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/proxy/config"
 )
 
@@ -53,8 +54,8 @@ type Process struct {
 	// closed when command exits
 	cmdWaitChan chan struct{}
 
-	processLogger *LogMonitor
-	proxyLogger   *LogMonitor
+	processLogger *logmon.Monitor
+	proxyLogger   *logmon.Monitor
 
 	healthCheckTimeout      int
 	healthCheckLoopInterval time.Duration
@@ -84,7 +85,7 @@ type Process struct {
 	failedStartCount int
 }
 
-func NewProcess(ID string, healthCheckTimeout int, config config.ModelConfig, processLogger *LogMonitor, proxyLogger *LogMonitor) *Process {
+func NewProcess(ID string, healthCheckTimeout int, config config.ModelConfig, processLogger *logmon.Monitor, proxyLogger *logmon.Monitor) *Process {
 	concurrentLimit := 10
 	if config.ConcurrencyLimit > 0 {
 		concurrentLimit = config.ConcurrencyLimit
@@ -149,7 +150,7 @@ func NewProcess(ID string, healthCheckTimeout int, config config.ModelConfig, pr
 }
 
 // LogMonitor returns the log monitor associated with the process.
-func (p *Process) LogMonitor() *LogMonitor {
+func (p *Process) LogMonitor() *logmon.Monitor {
 	return p.processLogger
 }
 
@@ -726,7 +727,7 @@ func (p *Process) cmdStopUpstreamProcess() error {
 }
 
 // Logger returns the logger for this process.
-func (p *Process) Logger() *LogMonitor {
+func (p *Process) Logger() *logmon.Monitor {
 	return p.processLogger
 }
 
