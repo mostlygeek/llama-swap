@@ -142,6 +142,37 @@
             "default": 5,
             "description": "Size in megabytes of the buffer for storing request/response captures. Set to 0 to disable captures."
         },
+        "performance": {
+            "type": "object",
+            "properties": {
+                "enable": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable or disable system performance monitoring."
+                },
+                "every": {
+                    "type": "string",
+                    "pattern": "^[-+]?(\\d+(\\.\\d+)?(ns|us|ms|s|m|h))+$",
+                    "default": "15s",
+                    "description": "Delay between polling for new performance statistics. Minimum duration is 1s. Lower values use more RAM as stats are kept in memory."
+                },
+                "maxAge": {
+                    "type": "string",
+                    "pattern": "^[-+]?(\\d+(\\.\\d+)?(ns|us|ms|s|m|h))+$",
+                    "default": "1h",
+                    "description": "Maximum age of performance statistics before they are eligible for garbage collection."
+                },
+                "gc": {
+                    "type": "string",
+                    "pattern": "^[-+]?(\\d+(\\.\\d+)?(ns|us|ms|s|m|h))+$",
+                    "default": "5m",
+                    "description": "Garbage collection frequency for clearing old performance statistics."
+                }
+            },
+            "additionalProperties": false,
+            "default": {},
+            "description": "Configuration for system monitoring statistics. Timing values are duration strings like 1s, 1h30m, 90m, 2h10s."
+        },
         "startPort": {
             "type": "integer",
             "default": 5800,

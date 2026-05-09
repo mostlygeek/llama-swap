@@ -11,20 +11,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/proxy/config"
 	"github.com/stretchr/testify/assert"
 )
 
 var (
-	debugLogger = NewLogMonitorWriter(os.Stdout)
+	debugLogger = logmon.NewWriter(os.Stdout)
 )
 
 func init() {
 	// flip to help with debugging tests
 	if false {
-		debugLogger.SetLogLevel(LevelDebug)
+		debugLogger.SetLogLevel(logmon.LevelDebug)
 	} else {
-		debugLogger.SetLogLevel(LevelError)
+		debugLogger.SetLogLevel(logmon.LevelError)
 	}
 }
 
@@ -585,7 +586,7 @@ func TestProcess_CustomTimeouts(t *testing.T) {
 		},
 	}
 
-	debugLogger := NewLogMonitorWriter(io.Discard)
+	debugLogger := logmon.NewWriter(io.Discard)
 	process := NewProcess("test-model", 30, modelConfig, debugLogger, debugLogger)
 
 	// Verify the process was created successfully

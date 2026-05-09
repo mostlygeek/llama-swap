@@ -16,6 +16,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/klauspost/compress/zstd"
 	"github.com/mostlygeek/llama-swap/event"
+	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/ring"
 	"github.com/mostlygeek/llama-swap/proxy/cache"
 	"github.com/tidwall/gjson"
 )
@@ -113,11 +115,10 @@ func (e ActivityLogEvent) Type() uint32 {
 
 // metricsMonitor parses llama-server output for token statistics
 type metricsMonitor struct {
-	mu         sync.RWMutex
-	metrics    []ActivityLogEntry
-	maxMetrics int
-	nextID     int
-	logger     *LogMonitor
+	mu      sync.RWMutex
+	metrics ring.Buffer[ActivityLogEntry]
+	nextID  int
+	logger  *logmon.Monitor
 
 	// capture fields
 	enableCaptures bool
@@ -126,10 +127,10 @@ type metricsMonitor struct {
 
 // newMetricsMonitor creates a new metricsMonitor. captureBufferMB is the
 // capture buffer size in megabytes; 0 disables captures.
-func newMetricsMonitor(logger *LogMonitor, maxMetrics int, captureBufferMB int) *metricsMonitor {
+func newMetricsMonitor(logger *logmon.Monitor, maxMetrics int, captureBufferMB int) *metricsMonitor {
 	mm := &metricsMonitor{
 		logger:         logger,
-		maxMetrics:     maxMetrics,
+		metrics:        ring.NewBuffer[ActivityLogEntry](maxMetrics),
 		enableCaptures: captureBufferMB > 0,
 	}
 	if captureBufferMB > 0 {
@@ -146,10 +147,7 @@ func (mp *metricsMonitor) queueMetrics(metric ActivityLogEntry) int {
 
 	metric.ID = mp.nextID
 	mp.nextID++
-	mp.metrics = append(mp.metrics, metric)
-	if len(mp.metrics) > mp.maxMetrics {
-		mp.metrics = mp.metrics[len(mp.metrics)-mp.maxMetrics:]
-	}
+	mp.metrics.Push(metric)
 	return metric.ID
 }
 
@@ -213,30 +211,36 @@ func (mp *metricsMonitor) getCaptureByID(id int) *ReqRespCapture {
 	return capture
 }
 
-// getMetrics returns a copy of the current metrics
+// getMetrics returns a copy of the current metrics with HasCapture resolved from cache.
 func (mp *metricsMonitor) getMetrics() []ActivityLogEntry {
 	mp.mu.RLock()
 	defer mp.mu.RUnlock()
 
-	result := make([]ActivityLogEntry, len(mp.metrics))
-	copy(result, mp.metrics)
+	result := mp.metrics.Slice()
+	if result == nil {
+		return []ActivityLogEntry{}
+	}
+	if mp.captureCache != nil {
+		for i := range result {
+			result[i].HasCapture = mp.captureCache.Has(result[i].ID)
+		}
+	}
 	return result
 }
 
-// getMetricsJSON returns metrics as JSON
+// getMetricsJSON returns metrics as JSON with HasCapture resolved from cache.
 func (mp *metricsMonitor) getMetricsJSON() ([]byte, error) {
 	mp.mu.RLock()
 	defer mp.mu.RUnlock()
 
-	if mp.captureCache == nil {
-		return json.Marshal(mp.metrics)
+	result := mp.metrics.Slice()
+	if result == nil {
+		return json.Marshal([]ActivityLogEntry{})
 	}
-
-	// Make a copy with up-to-date has_capture from cache
-	result := make([]ActivityLogEntry, len(mp.metrics))
-	for i, m := range mp.metrics {
-		m.HasCapture = mp.captureCache.Has(m.ID)
-		result[i] = m
+	if mp.captureCache != nil {
+		for i := range result {
+			result[i].HasCapture = mp.captureCache.Has(result[i].ID)
+		}
 	}
 	return json.Marshal(result)
 }
@@ -412,9 +416,6 @@ func (mp *metricsMonitor) wrapHandler(
 		capture.ID = metricID
 		if mp.addCapture(*capture) {
 			tm.HasCapture = true
-			mp.mu.Lock()
-			mp.metrics[len(mp.metrics)-1].HasCapture = true
-			mp.mu.Unlock()
 		}
 	}
 

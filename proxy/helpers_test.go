@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/proxy/config"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -23,7 +24,7 @@ import (
 var (
 	nextTestPort        int = 12000
 	portMutex           sync.Mutex
-	testLogger          = NewLogMonitorWriter(os.Stdout)
+	testLogger          = logmon.NewWriter(os.Stdout)
 	simpleResponderPath = getSimpleResponderPath()
 )
 
@@ -39,13 +40,13 @@ func TestMain(m *testing.M) {
 
 	switch os.Getenv("LOG_LEVEL") {
 	case "debug":
-		testLogger.SetLogLevel(LevelDebug)
+		testLogger.SetLogLevel(logmon.LevelDebug)
 	case "warn":
-		testLogger.SetLogLevel(LevelWarn)
+		testLogger.SetLogLevel(logmon.LevelWarn)
 	case "info":
-		testLogger.SetLogLevel(LevelInfo)
+		testLogger.SetLogLevel(logmon.LevelInfo)
 	default:
-		testLogger.SetLogLevel(LevelWarn)
+		testLogger.SetLogLevel(logmon.LevelWarn)
 	}
 
 	m.Run()
