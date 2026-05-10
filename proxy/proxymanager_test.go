@@ -1662,7 +1662,7 @@ models:
 	defer proxy.StopProcesses(StopWaitForInflightRequest)
 	injectTestHandlers(proxy, nil)
 
-	t.Run("disabled model returns 404 on chat completions", func(t *testing.T) {
+	t.Run("disabled model returns 403 on chat completions", func(t *testing.T) {
 		reqBody := `{"model":"disabled-model"}`
 		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
 		w := CreateTestResponseRecorder()
@@ -1672,7 +1672,7 @@ models:
 		assert.Contains(t, w.Body.String(), "model is disabled")
 	})
 
-	t.Run("disabled model alias returns 404", func(t *testing.T) {
+	t.Run("disabled model alias returns 403", func(t *testing.T) {
 		reqBody := `{"model":"disabled-alias"}`
 		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
 		w := CreateTestResponseRecorder()
@@ -1692,7 +1692,7 @@ models:
 		assert.Contains(t, w.Body.String(), "enabled-model")
 	})
 
-	t.Run("disabled model returns 404 on upstream", func(t *testing.T) {
+	t.Run("disabled model returns 403 on upstream", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/upstream/disabled-model/test", nil)
 		w := CreateTestResponseRecorder()
 
@@ -1701,7 +1701,7 @@ models:
 		assert.Contains(t, w.Body.String(), "model is disabled")
 	})
 
-	t.Run("disabled model returns 404 on GET voices", func(t *testing.T) {
+	t.Run("disabled model returns 403 on GET voices", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/v1/audio/voices?model=disabled-model", nil)
 		w := CreateTestResponseRecorder()
 
@@ -1800,7 +1800,7 @@ models:
 		assert.True(t, foundEnabled2, "enabled-model should still be in running list")
 	})
 
-	t.Run("unloading disabled model returns 404", func(t *testing.T) {
+	t.Run("unloading disabled model returns 403", func(t *testing.T) {
 		req := httptest.NewRequest("POST", "/api/models/unload/disabled-model", nil)
 		w := CreateTestResponseRecorder()
 
@@ -1809,7 +1809,7 @@ models:
 		assert.Contains(t, w.Body.String(), "model is disabled")
 	})
 
-	t.Run("disabled model returns 404 on multipart form POST", func(t *testing.T) {
+	t.Run("disabled model returns 403 on multipart form POST", func(t *testing.T) {
 		var b bytes.Buffer
 		w := multipart.NewWriter(&b)
 		fw, err := w.CreateFormField("model")
