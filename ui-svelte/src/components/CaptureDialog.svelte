@@ -427,6 +427,14 @@
         <button onclick={() => dialogEl?.close()} class="btn"> Close </button>
       </div>
     </div>
+  {:else}
+    <div class="flex flex-col items-center justify-center p-12">
+      <p class="text-lg text-txtsecondary">Capture not found</p>
+      <p class="text-sm text-txtsecondary mt-1">The capture may have expired or was never recorded.</p>
+      <div class="mt-4">
+        <button onclick={() => dialogEl?.close()} class="btn">Close</button>
+      </div>
+    </div>
   {/if}
 </dialog>
 

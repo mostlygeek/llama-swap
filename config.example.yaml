@@ -55,6 +55,28 @@ metricsMaxInMemory: 1000
 # - set to 0 to disable
 captureBuffer: 15
 
+# performance: configuration for system monitoring statistics
+# - timing values are duration strings like 1s, 1h30m, 90m, 2h10s, etc.
+performance:
+  # enabled: boolean
+  # - default: true
+  enable: true
+
+  # every: delay between polling for new performance statistics
+  # - default: 15s
+  # - minimum duration 1s
+  # - note: setting this very low will use up more RAM as stats are kept in memory.
+  every: 15s
+
+  # maxAge: maximum age of a performance statistics before it is eligible for garbage collection
+  # - default: 1h
+  maxAge: 12h
+
+  # gc: garbage collection frequency in seconds
+  # - how many seconds the garbage collector runs to clear old stats
+  # - default 5m
+  gc: 5m
+
 # startPort: sets the starting port number for the automatic ${PORT} macro.
 # - optional, default: 5800
 # - the ${PORT} macro can be used in model.cmd and model.proxy settings

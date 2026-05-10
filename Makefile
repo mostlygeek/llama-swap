@@ -25,15 +25,15 @@ proxy/ui_dist/placeholder.txt:
 
 # use cached test results while developing
 test-dev: proxy/ui_dist/placeholder.txt
-	go test -short ./proxy/...
-	staticcheck ./proxy/... || true
+	go test -short ./proxy/... ./internal/...
+	staticcheck ./proxy/... ./internal/... || true
 
 test: proxy/ui_dist/placeholder.txt
-	go test -short -count=1 ./proxy/...
+	go test -short -count=1 ./proxy/... ./internal/...
 
 # for CI - full test (takes longer)
 test-all: proxy/ui_dist/placeholder.txt
-	go test -race -count=1 ./proxy/...
+	go test -race -count=1 ./proxy/... ./internal/...
 
 ui/node_modules:
 	cd ui-svelte && npm install

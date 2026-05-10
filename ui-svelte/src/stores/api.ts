@@ -7,6 +7,7 @@ import type {
   APIEventEnvelope,
   ReqRespCapture,
   InFlightStats,
+  PerformanceResponse,
 } from "../lib/types";
 import { connectionState } from "./theme";
 
@@ -201,6 +202,20 @@ export async function getCapture(id: number): Promise<ReqRespCapture | null> {
     return await response.json();
   } catch (error) {
     console.error("Failed to fetch capture:", error);
+    return null;
+  }
+}
+
+export async function fetchPerformance(after?: string): Promise<PerformanceResponse | null> {
+  try {
+    const url = after ? `/api/performance?after=${encodeURIComponent(after)}` : "/api/performance";
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    return await response.json();
+  } catch (error) {
+    console.error("Failed to fetch performance data:", error);
     return null;
   }
 }

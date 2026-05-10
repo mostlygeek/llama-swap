@@ -6,6 +6,7 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/proxy/config"
 )
 
@@ -18,8 +19,8 @@ type ProcessGroup struct {
 	exclusive  bool
 	persistent bool
 
-	proxyLogger    *LogMonitor
-	upstreamLogger *LogMonitor
+	proxyLogger    *logmon.Monitor
+	upstreamLogger *logmon.Monitor
 
 	// map of current processes
 	processes       map[string]*Process
@@ -42,7 +43,7 @@ type ProcessGroup struct {
 	testDelayFastPath func()
 }
 
-func NewProcessGroup(id string, config config.Config, proxyLogger *LogMonitor, upstreamLogger *LogMonitor) *ProcessGroup {
+func NewProcessGroup(id string, config config.Config, proxyLogger *logmon.Monitor, upstreamLogger *logmon.Monitor) *ProcessGroup {
 	groupConfig, ok := config.Groups[id]
 	if !ok {
 		panic("Unable to find configuration for group id: " + id)
@@ -62,7 +63,7 @@ func NewProcessGroup(id string, config config.Config, proxyLogger *LogMonitor, u
 	// Create a Process for each member in the group
 	for _, modelID := range groupConfig.Members {
 		modelConfig, modelID, _ := pg.config.FindConfig(modelID)
-		processLogger := NewLogMonitorWriter(upstreamLogger)
+		processLogger := logmon.NewWriter(upstreamLogger)
 		process := NewProcess(modelID, pg.config.HealthCheckTimeout, modelConfig, processLogger, pg.proxyLogger)
 		pg.processes[modelID] = process
 	}
