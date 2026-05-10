@@ -29,6 +29,7 @@ const (
 	StateStarting ProcessState = ProcessState("starting")
 	StateReady    ProcessState = ProcessState("ready")
 	StateStopping ProcessState = ProcessState("stopping")
+	StateDisabled ProcessState = ProcessState("disabled")
 
 	// process is shutdown and will not be restarted
 	StateShutdown ProcessState = ProcessState("shutdown")
@@ -127,6 +128,12 @@ func NewProcess(ID string, healthCheckTimeout int, config config.ModelConfig, pr
 		}
 	}
 
+	// Set initial state based on whether the model is disabled
+	initialState := StateStopped
+	if config.Disabled {
+		initialState = StateDisabled
+	}
+
 	return &Process{
 		ID:                      ID,
 		config:                  config,
@@ -137,7 +144,7 @@ func NewProcess(ID string, healthCheckTimeout int, config config.ModelConfig, pr
 		proxyLogger:             proxyLogger,
 		healthCheckTimeout:      healthCheckTimeout,
 		healthCheckLoopInterval: 5 * time.Second, /* default, can not be set by user - used for testing */
-		state:                   StateStopped,
+		state:                   initialState,
 
 		// concurrency limit
 		concurrencyLimitSemaphore: make(chan struct{}, concurrentLimit),
@@ -213,6 +220,8 @@ func isValidTransition(from, to ProcessState) bool {
 	case StateReady:
 		return to == StateStopping
 	case StateStopping:
+		return to == StateStopped || to == StateShutdown
+	case StateDisabled:
 		return to == StateStopped || to == StateShutdown
 	case StateShutdown:
 		return false // No transitions allowed from these states
@@ -548,6 +557,12 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 
 	requestBeginTime := time.Now()
 	var startDuration time.Duration
+
+	// Check if model is disabled before processing any request
+	if p.config.Disabled {
+		p.respondWithError(w, r, http.StatusForbidden, "model is disabled")
+		return
+	}
 
 	// prevent new requests from being made while stopping or irrecoverable
 	currentState := p.CurrentState()
@@ -952,5 +967,21 @@ func (s *statusResponseWriter) WriteHeader(statusCode int) {
 func (s *statusResponseWriter) Flush() {
 	if flusher, ok := s.writer.(http.Flusher); ok {
 		flusher.Flush()
+	}
+}
+
+// respondWithError writes an error response with content negotiation based on Accept header
+func (p *Process) respondWithError(w http.ResponseWriter, r *http.Request, statusCode int, message string) {
+	acceptHeader := r.Header.Get("Accept")
+
+	if strings.Contains(acceptHeader, "application/json") {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(statusCode)
+		json.NewEncoder(w).Encode(map[string]string{"error": message})
+	} else if strings.Contains(acceptHeader, "text/html") {
+		http.Error(w, message, statusCode)
+	} else {
+		// Default to plain text
+		http.Error(w, message, statusCode)
 	}
 }

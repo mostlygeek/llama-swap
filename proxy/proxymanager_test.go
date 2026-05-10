@@ -932,7 +932,7 @@ models:
 		{
 			name:           "Non-OPTIONS request",
 			method:         "GET",
-			expectedStatus: http.StatusNotFound, // Since we don't have a GET route defined
+			expectedStatus: http.StatusNotFound, // Route exists but model not found in request
 		},
 	}
 
@@ -1668,7 +1668,7 @@ models:
 		w := CreateTestResponseRecorder()
 
 		proxy.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Equal(t, http.StatusForbidden, w.Code)
 		assert.Contains(t, w.Body.String(), "model is disabled")
 	})
 
@@ -1678,7 +1678,7 @@ models:
 		w := CreateTestResponseRecorder()
 
 		proxy.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Equal(t, http.StatusForbidden, w.Code)
 		assert.Contains(t, w.Body.String(), "model is disabled")
 	})
 
@@ -1697,7 +1697,7 @@ models:
 		w := CreateTestResponseRecorder()
 
 		proxy.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Equal(t, http.StatusForbidden, w.Code)
 		assert.Contains(t, w.Body.String(), "model is disabled")
 	})
 
@@ -1706,7 +1706,7 @@ models:
 		w := CreateTestResponseRecorder()
 
 		proxy.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Equal(t, http.StatusForbidden, w.Code)
 		assert.Contains(t, w.Body.String(), "model is disabled")
 	})
 
@@ -1774,7 +1774,7 @@ models:
 		disabledReq := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(`{"model":"disabled-model"}`))
 		disabledRec := CreateTestResponseRecorder()
 		proxy.ServeHTTP(disabledRec, disabledReq)
-		assert.Equal(t, http.StatusNotFound, disabledRec.Code)
+		assert.Equal(t, http.StatusForbidden, disabledRec.Code)
 
 		// Verify enabled model is still loaded
 		runningReq2 := httptest.NewRequest("GET", "/running", nil)
@@ -1805,7 +1805,7 @@ models:
 		w := CreateTestResponseRecorder()
 
 		proxy.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Equal(t, http.StatusForbidden, w.Code)
 		assert.Contains(t, w.Body.String(), "model is disabled")
 	})
 
@@ -1823,7 +1823,7 @@ models:
 		rec := CreateTestResponseRecorder()
 
 		proxy.ServeHTTP(rec, req)
-		assert.Equal(t, http.StatusNotFound, rec.Code)
+		assert.Equal(t, http.StatusForbidden, rec.Code)
 		assert.Contains(t, rec.Body.String(), "model is disabled")
 	})
 

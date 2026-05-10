@@ -712,10 +712,6 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 		return
 	}
 
-	if pm.rejectIfModelDisabled(c, modelID) {
-		return
-	}
-
 	var handler func(string, http.ResponseWriter, *http.Request) error
 	if pm.matrix != nil {
 		handler = pm.matrix.ProxyRequest
@@ -767,10 +763,6 @@ func (pm *ProxyManager) mkProxyJSONHandler(cf captureFields) func(*gin.Context) 
 
 		modelID, found := pm.config.RealModelName(requestedModel)
 		if found {
-			if pm.rejectIfModelDisabled(c, modelID) {
-				return
-			}
-
 			var localHandler func(string, http.ResponseWriter, *http.Request) error
 			if pm.matrix != nil {
 				localHandler = pm.matrix.ProxyRequest
@@ -926,10 +918,6 @@ func (pm *ProxyManager) mkPostFormHandler(cf captureFields) func(*gin.Context) {
 
 		modelID, found := pm.config.RealModelName(requestedModel)
 		if found {
-			if pm.rejectIfModelDisabled(c, modelID) {
-				return
-			}
-
 			if pm.matrix != nil {
 				nextHandler = pm.matrix.ProxyRequest
 			} else {
@@ -1062,10 +1050,6 @@ func (pm *ProxyManager) proxyGETModelHandler(c *gin.Context) {
 	var modelID string
 
 	if realModelID, found := pm.config.RealModelName(requestedModel); found {
-		if pm.rejectIfModelDisabled(c, realModelID) {
-			return
-		}
-
 		modelID = realModelID
 		if pm.matrix != nil {
 			nextHandler = pm.matrix.ProxyRequest
@@ -1094,14 +1078,6 @@ func (pm *ProxyManager) proxyGETModelHandler(c *gin.Context) {
 		pm.proxyLogger.Errorf("Error Proxying GET Request for model %s", modelID)
 		return
 	}
-}
-
-func (pm *ProxyManager) rejectIfModelDisabled(c *gin.Context, modelID string) bool {
-	if pm.config.Models[modelID].Disabled {
-		pm.sendErrorResponse(c, http.StatusNotFound, "model is disabled")
-		return true
-	}
-	return false
 }
 
 func (pm *ProxyManager) sendErrorResponse(c *gin.Context, statusCode int, message string) {
