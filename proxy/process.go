@@ -304,7 +304,7 @@ func (p *Process) start() error {
 					return fmt.Errorf("process was already starting but wound up in state %v", state)
 				}
 			} else {
-				return fmt.Errorf("processes was in state %v when start() was called", curState)
+				return fmt.Errorf("process was in state %v when start() was called", curState)
 			}
 		} else {
 			return fmt.Errorf("failed to set Process state to starting: current state: %v, error: %v", curState, err)
