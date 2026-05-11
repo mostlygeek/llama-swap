@@ -1173,7 +1173,7 @@ func (pm *ProxyManager) listRunningProcessesHandler(context *gin.Context) {
 			if process, ok := pm.matrix.GetProcess(modelID); ok {
 				runningProcesses = append(runningProcesses, gin.H{
 					"model":       process.ID,
-					"state":       process.state,
+					"state":       process.CurrentState(),
 					"cmd":         process.config.Cmd,
 					"proxy":       process.config.Proxy,
 					"ttl":         process.config.UnloadAfter,
@@ -1188,7 +1188,7 @@ func (pm *ProxyManager) listRunningProcessesHandler(context *gin.Context) {
 				if process.CurrentState() == StateReady {
 					runningProcesses = append(runningProcesses, gin.H{
 						"model":       process.ID,
-						"state":       process.state,
+						"state":       process.CurrentState(),
 						"cmd":         process.config.Cmd,
 						"proxy":       process.config.Proxy,
 						"ttl":         process.config.UnloadAfter,
