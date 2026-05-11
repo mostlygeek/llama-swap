@@ -59,8 +59,18 @@ LS_REPO=${GITHUB_REPOSITORY:-mostlygeek/llama-swap}
 LS_BINARY_REPO=${LS_BINARY_REPO:-mostlygeek/llama-swap}
 
 # the most recent llama-swap tag
-# have to strip out the 'v' due to .tar.gz file naming
-LS_VER=$(curl -s https://api.github.com/repos/${LS_BINARY_REPO}/releases/latest | jq -r .tag_name | sed 's/v//')
+# have to strip out the 'v' due to .tar.gz file naming.
+# Authenticated request — unauth'd github.com API is 60/hr per IP and GHA
+# runners share IPs, so the call regularly returns rate-limit JSON and
+# `.tag_name` then resolves to "null", producing a bogus `vnull` URL below.
+LS_VER=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+    "https://api.github.com/repos/${LS_BINARY_REPO}/releases/latest" \
+    | jq -r .tag_name | sed 's/v//')
+
+if [[ -z "$LS_VER" || "$LS_VER" == "null" ]]; then
+    log_info "Error: could not resolve latest llama-swap release tag from ${LS_BINARY_REPO}"
+    exit 1
+fi
 
 # Fetches the most recent llama.cpp tag matching the given prefix
 # Handles pagination to search beyond the first 100 results
