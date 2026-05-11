@@ -48,6 +48,16 @@ jobs:
           echo "After cleanup:"
           df -h
 
+      # QEMU enables arm64 cross-builds on the amd64 GitHub runner.
+      # Currently only the cpu backend goes multi-arch; the action is a
+      # no-op for amd64-only builds, so leaving it on for every matrix
+      # entry keeps the workflow simple.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v2
         with:
@@ -64,6 +74,9 @@ jobs:
   # see: https://github.com/actions/delete-package-versions/issues/74
   delete-untagged-containers:
     needs: build-and-push
+    # Skip on forks — the delete API requires package-admin on the
+    # upstream account and would otherwise red-x every fork CI run.
+    if: github.repository == 'mostlygeek/llama-swap'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/delete-package-versions@v5

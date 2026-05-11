@@ -46,13 +46,21 @@ fi
 BASE_IMAGE=${BASE_LLAMACPP_IMAGE:-ghcr.io/ggml-org/llama.cpp}
 SD_IMAGE=${BASE_SDCPP_IMAGE:-ghcr.io/leejet/stable-diffusion.cpp}
 
-# Set llama-swap repository, automatically uses GITHUB_REPOSITORY variable
-# to enable easy container builds on forked repos
+# LS_REPO is the destination of the built container image — defaults to the
+# current GitHub repository so forked CI builds publish to the fork's own
+# ghcr.io namespace without code changes.
 LS_REPO=${GITHUB_REPOSITORY:-mostlygeek/llama-swap}
+
+# LS_BINARY_REPO is where the llama-swap release tarball is downloaded
+# from. Decoupled from LS_REPO so forks (which usually have no releases of
+# their own) can still build a container by pulling the canonical binary
+# from upstream. Override via the LS_BINARY_REPO env var when you maintain
+# fork-side releases.
+LS_BINARY_REPO=${LS_BINARY_REPO:-mostlygeek/llama-swap}
 
 # the most recent llama-swap tag
 # have to strip out the 'v' due to .tar.gz file naming
-LS_VER=$(curl -s https://api.github.com/repos/${LS_REPO}/releases/latest | jq -r .tag_name | sed 's/v//')
+LS_VER=$(curl -s https://api.github.com/repos/${LS_BINARY_REPO}/releases/latest | jq -r .tag_name | sed 's/v//')
 
 # Fetches the most recent llama.cpp tag matching the given prefix
 # Handles pagination to search beyond the first 100 results
@@ -126,6 +134,27 @@ if [[ ! -z "$DEBUG_ABORT_BUILD" ]]; then
     exit 0
 fi
 
+# Determine target platforms. cpu is the only backend with a multi-arch
+# upstream base image (ghcr.io/ggml-org/llama.cpp:server-bXXXX ships both
+# amd64 and arm64); all GPU backends are amd64-only.
+if [ "$ARCH" == "cpu" ]; then
+    PLATFORMS="linux/amd64,linux/arm64"
+else
+    PLATFORMS="linux/amd64"
+fi
+
+# Output mode: --push lets buildx assemble a multi-arch manifest in the
+# registry in one shot (no equivalent for --load, which only takes a
+# single platform). Smoke builds (PUSH_IMAGES=false) fall back to --load
+# on the host arch so the resulting image is usable in the local daemon
+# (and so the sd-server layer below can FROM it).
+if [ "$PUSH_IMAGES" == "true" ]; then
+    OUTPUT_FLAG="--push"
+else
+    OUTPUT_FLAG="--load"
+    PLATFORMS="linux/amd64"
+fi
+
 for CONTAINER_TYPE in non-root root; do
   CONTAINER_TAG="ghcr.io/${LS_REPO}:v${LS_VER}-${ARCH}-${LCPP_TAG}"
   CONTAINER_LATEST="ghcr.io/${LS_REPO}:${ARCH}"
@@ -141,24 +170,26 @@ for CONTAINER_TYPE in non-root root; do
     USER_HOME=/app
   fi
 
-  log_info "Building $CONTAINER_TYPE $CONTAINER_TAG $LS_VER"
-  docker build --provenance=false -f llama-swap.Containerfile --build-arg BASE_TAG=${BASE_TAG} --build-arg LS_VER=${LS_VER} --build-arg UID=${USER_UID} \
-    --build-arg LS_REPO=${LS_REPO} --build-arg GID=${USER_GID} --build-arg USER_HOME=${USER_HOME} -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} \
-    --build-arg BASE_IMAGE=${BASE_IMAGE} .
+  log_info "Building $CONTAINER_TYPE $CONTAINER_TAG $LS_VER (platforms: $PLATFORMS)"
+  docker buildx build $OUTPUT_FLAG --platform "${PLATFORMS}" --provenance=false \
+    -f llama-swap.Containerfile \
+    --build-arg BASE_TAG=${BASE_TAG} --build-arg LS_VER=${LS_VER} --build-arg UID=${USER_UID} \
+    --build-arg LS_REPO=${LS_BINARY_REPO} --build-arg GID=${USER_GID} --build-arg USER_HOME=${USER_HOME} \
+    --build-arg BASE_IMAGE=${BASE_IMAGE} \
+    -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} .
 
-  # For architectures with stable-diffusion.cpp support, layer sd-server on top
+  # For architectures with stable-diffusion.cpp support, layer sd-server on top.
+  # Only musa/vulkan, both amd64-only, so single-platform is fine.
   case "$ARCH" in
     "musa" | "vulkan")
       log_info "Adding sd-server to $CONTAINER_TAG"
-      docker build --provenance=false -f llama-swap-sd.Containerfile \
+      docker buildx build $OUTPUT_FLAG --platform "${PLATFORMS}" --provenance=false \
+        -f llama-swap-sd.Containerfile \
         --build-arg BASE=${CONTAINER_TAG} \
         --build-arg SD_IMAGE=${SD_IMAGE} --build-arg SD_TAG=${SD_TAG} \
         --build-arg UID=${USER_UID} --build-arg GID=${USER_GID} \
         -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} . ;;
   esac
 
-  if [ "$PUSH_IMAGES" == "true" ]; then
-    docker push ${CONTAINER_TAG}
-    docker push ${CONTAINER_LATEST}
-  fi
+  # No separate docker push step — buildx --push handled it inline above.
 done
