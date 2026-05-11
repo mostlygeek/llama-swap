@@ -154,9 +154,12 @@ if [ "$ARCH" == "cpu" ]; then
     if [ "$PUSH_IMAGES" == "true" ]; then
         BUILDX_FLAGS="--push --platform linux/amd64,linux/arm64"
     else
-        # Smoke build: single-arch --load into dockerd. Multi-arch can't
-        # be --loaded; arm64 cross-builds are only exercised when pushing.
-        BUILDX_FLAGS="--load --platform linux/amd64"
+        # Smoke build: validate both platforms but emit no output. buildx
+        # on the docker-container driver defaults to cacheonly when
+        # neither --push nor --load is given, so each arch fully builds
+        # and a regression in either fails CI — without materializing the
+        # image or needing to --load (which is multi-arch-incompatible).
+        BUILDX_FLAGS="--platform linux/amd64,linux/arm64"
     fi
 fi
 
