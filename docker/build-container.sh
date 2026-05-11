@@ -144,25 +144,20 @@ if [[ ! -z "$DEBUG_ABORT_BUILD" ]]; then
     exit 0
 fi
 
-# Determine target platforms. cpu is the only backend with a multi-arch
-# upstream base image (ghcr.io/ggml-org/llama.cpp:server-bXXXX ships both
-# amd64 and arm64); all GPU backends are amd64-only.
+# cpu is the only backend with a multi-arch upstream base
+# (ghcr.io/ggml-org/llama.cpp:server-bXXXX ships amd64+arm64); GPU backends
+# are amd64-only and stay on the original `docker build` path so the
+# sd-server layer can still FROM the just-built image via the local
+# dockerd image store (buildx's container driver has a separate store
+# that doesn't share with dockerd, which breaks the sd build).
 if [ "$ARCH" == "cpu" ]; then
-    PLATFORMS="linux/amd64,linux/arm64"
-else
-    PLATFORMS="linux/amd64"
-fi
-
-# Output mode: --push lets buildx assemble a multi-arch manifest in the
-# registry in one shot (no equivalent for --load, which only takes a
-# single platform). Smoke builds (PUSH_IMAGES=false) fall back to --load
-# on the host arch so the resulting image is usable in the local daemon
-# (and so the sd-server layer below can FROM it).
-if [ "$PUSH_IMAGES" == "true" ]; then
-    OUTPUT_FLAG="--push"
-else
-    OUTPUT_FLAG="--load"
-    PLATFORMS="linux/amd64"
+    if [ "$PUSH_IMAGES" == "true" ]; then
+        BUILDX_FLAGS="--push --platform linux/amd64,linux/arm64"
+    else
+        # Smoke build: single-arch --load into dockerd. Multi-arch can't
+        # be --loaded; arm64 cross-builds are only exercised when pushing.
+        BUILDX_FLAGS="--load --platform linux/amd64"
+    fi
 fi
 
 for CONTAINER_TYPE in non-root root; do
@@ -180,26 +175,37 @@ for CONTAINER_TYPE in non-root root; do
     USER_HOME=/app
   fi
 
-  log_info "Building $CONTAINER_TYPE $CONTAINER_TAG $LS_VER (platforms: $PLATFORMS)"
-  docker buildx build $OUTPUT_FLAG --platform "${PLATFORMS}" --provenance=false \
-    -f llama-swap.Containerfile \
-    --build-arg BASE_TAG=${BASE_TAG} --build-arg LS_VER=${LS_VER} --build-arg UID=${USER_UID} \
-    --build-arg LS_REPO=${LS_BINARY_REPO} --build-arg GID=${USER_GID} --build-arg USER_HOME=${USER_HOME} \
-    --build-arg BASE_IMAGE=${BASE_IMAGE} \
-    -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} .
+  log_info "Building $CONTAINER_TYPE $CONTAINER_TAG $LS_VER"
+  if [ "$ARCH" == "cpu" ]; then
+    docker buildx build $BUILDX_FLAGS --provenance=false \
+      -f llama-swap.Containerfile \
+      --build-arg BASE_TAG=${BASE_TAG} --build-arg LS_VER=${LS_VER} --build-arg UID=${USER_UID} \
+      --build-arg LS_REPO=${LS_BINARY_REPO} --build-arg GID=${USER_GID} --build-arg USER_HOME=${USER_HOME} \
+      --build-arg BASE_IMAGE=${BASE_IMAGE} \
+      -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} .
+  else
+    docker build --provenance=false -f llama-swap.Containerfile \
+      --build-arg BASE_TAG=${BASE_TAG} --build-arg LS_VER=${LS_VER} --build-arg UID=${USER_UID} \
+      --build-arg LS_REPO=${LS_BINARY_REPO} --build-arg GID=${USER_GID} --build-arg USER_HOME=${USER_HOME} \
+      -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} \
+      --build-arg BASE_IMAGE=${BASE_IMAGE} .
+  fi
 
   # For architectures with stable-diffusion.cpp support, layer sd-server on top.
-  # Only musa/vulkan, both amd64-only, so single-platform is fine.
+  # Stays on `docker build` so the base resolves from local dockerd.
   case "$ARCH" in
     "musa" | "vulkan")
       log_info "Adding sd-server to $CONTAINER_TAG"
-      docker buildx build $OUTPUT_FLAG --platform "${PLATFORMS}" --provenance=false \
-        -f llama-swap-sd.Containerfile \
+      docker build --provenance=false -f llama-swap-sd.Containerfile \
         --build-arg BASE=${CONTAINER_TAG} \
         --build-arg SD_IMAGE=${SD_IMAGE} --build-arg SD_TAG=${SD_TAG} \
         --build-arg UID=${USER_UID} --build-arg GID=${USER_GID} \
         -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} . ;;
   esac
 
-  # No separate docker push step — buildx --push handled it inline above.
+  # cpu builds push inline via buildx --push; all other archs push here.
+  if [ "$ARCH" != "cpu" ] && [ "$PUSH_IMAGES" == "true" ]; then
+    docker push ${CONTAINER_TAG}
+    docker push ${CONTAINER_LATEST}
+  fi
 done
