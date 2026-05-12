@@ -322,7 +322,7 @@ func (pm *ProxyManager) apiUnloadSingleModelHandler(c *gin.Context) {
 	} else {
 		processGroup := pm.findGroupByModelName(realModelName)
 		if processGroup == nil {
-			pm.sendErrorResponse(c, http.StatusNotFound, fmt.Sprintf("Model %s is not loaded", requestedModel))
+			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("process group not found for model %s", requestedModel))
 			return
 		}
 		stopErr = processGroup.StopProcess(realModelName, StopImmediately)

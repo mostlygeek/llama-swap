@@ -705,10 +705,27 @@ func (pm *ProxyManager) findModelInPath(path string) (searchName string, realNam
 func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 	upstreamPath := c.Param("upstreamPath")
 
-	_, modelID, remainingPath, modelFound := pm.findModelInPath(upstreamPath)
+	searchModelName, modelID, remainingPath, modelFound := pm.findModelInPath(upstreamPath)
 
 	if !modelFound {
 		pm.sendErrorResponse(c, http.StatusNotFound, "model not found")
+		return
+	}
+
+	// Redirect /upstream/modelname to /upstream/modelname/ for URL consistency.
+	// This ensures relative URLs in upstream responses resolve correctly and
+	// provides canonical URL form. Uses 308 for POST/PUT/etc to preserve the
+	// HTTP method (301 would downgrade to GET).
+	if remainingPath == "/" && !strings.HasSuffix(upstreamPath, "/") {
+		newPath := "/upstream/" + searchModelName + "/"
+		if c.Request.URL.RawQuery != "" {
+			newPath += "?" + c.Request.URL.RawQuery
+		}
+		if c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead {
+			c.Redirect(http.StatusMovedPermanently, newPath)
+		} else {
+			c.Redirect(http.StatusPermanentRedirect, newPath)
+		}
 		return
 	}
 

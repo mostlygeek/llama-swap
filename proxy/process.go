@@ -555,14 +555,13 @@ func (p *Process) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	requestBeginTime := time.Now()
-	var startDuration time.Duration
-
-	// Check if model is disabled before processing any request
 	if p.config.Disabled {
 		p.respondWithError(w, r, http.StatusForbidden, "model is disabled")
 		return
 	}
+
+	requestBeginTime := time.Now()
+	var startDuration time.Duration
 
 	// prevent new requests from being made while stopping or irrecoverable
 	currentState := p.CurrentState()
