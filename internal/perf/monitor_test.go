@@ -24,26 +24,19 @@ func TestNew_DefaultConfig(t *testing.T) {
 	require.NotNil(t, m)
 
 	assert.Equal(t, 100*time.Millisecond, m.conf.Every)
-	assert.Equal(t, 1*time.Second, m.conf.GC)
-	assert.Equal(t, 1*time.Minute, m.conf.MaxAge)
 }
 
 func TestNew_CustomConfig(t *testing.T) {
 	logger := newTestLogger()
 
 	cfg := config.PerformanceConfig{
-		Enable: true,
 		Every:  500 * time.Millisecond,
-		GC:     5 * time.Second,
-		MaxAge: 10 * time.Minute,
 	}
 
 	m, err := New(cfg, logger)
 	require.NoError(t, err)
 
 	assert.Equal(t, 500*time.Millisecond, m.conf.Every)
-	assert.Equal(t, 5*time.Second, m.conf.GC)
-	assert.Equal(t, 10*time.Minute, m.conf.MaxAge)
 }
 
 func TestNew_NilLogger(t *testing.T) {
@@ -56,18 +49,13 @@ func TestNew_BelowMinimumConfig(t *testing.T) {
 	logger := newTestLogger()
 
 	cfg := config.PerformanceConfig{
-		Enable: true,
 		Every:  1 * time.Millisecond,
-		GC:     100 * time.Millisecond,
-		MaxAge: 1 * time.Second,
 	}
 
 	m, err := New(cfg, logger)
 	require.NoError(t, err)
 
 	assert.Equal(t, 100*time.Millisecond, m.conf.Every)
-	assert.Equal(t, 1*time.Second, m.conf.GC)
-	assert.Equal(t, 1*time.Minute, m.conf.MaxAge)
 }
 
 func TestSubscribe_ReturnsChannels(t *testing.T) {

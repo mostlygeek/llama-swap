@@ -31,7 +31,7 @@ type Monitor struct {
 }
 
 func ringCapacity(c config.PerformanceConfig) int {
-	n := int(c.MaxAge / c.Every)
+	n := int(time.Hour / c.Every)
 	if n < 1 {
 		n = 1
 	}
@@ -42,12 +42,6 @@ func New(c config.PerformanceConfig, logger *logmon.Monitor) (*Monitor, error) {
 
 	if c.Every < 100*time.Millisecond {
 		c.Every = 100 * time.Millisecond
-	}
-	if c.GC < 1*time.Second {
-		c.GC = 1 * time.Second
-	}
-	if c.MaxAge < 1*time.Minute {
-		c.MaxAge = 1 * time.Minute
 	}
 
 	if logger == nil {
@@ -92,7 +86,9 @@ func (m *Monitor) UpdateConfig(newConf config.PerformanceConfig) {
 	m.sysRing = ring.NewBuffer[SysStat](capacity)
 	m.gpuRing = ring.NewBuffer[[]GpuStat](capacity)
 	m.mutex.Unlock()
-	m.Start()
+	if !newConf.Disabled {
+		m.Start()
+	}
 }
 
 // Subscribe returns channels to listen to system and GPU stats.

@@ -220,10 +220,7 @@ groups:
 		MetricsMaxInMemory: 1000,
 		CaptureBuffer:      5,
 		Performance: PerformanceConfig{
-			Enable: true,
-			Every:  15 * time.Second,
-			MaxAge: 1 * time.Hour,
-			GC:     5 * time.Minute,
+			Every: 5 * time.Second,
 		},
 		Profiles: map[string][]string{
 			"test": {"model1", "model2"},

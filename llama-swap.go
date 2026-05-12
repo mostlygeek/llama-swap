@@ -93,12 +93,17 @@ func main() {
 		listenStr = &defaultPort
 	}
 
-	mon, err := perf.New(conf.Performance, mainLogger)
-	if err != nil {
-		mainLogger.Errorf("failed to create monitor: %s", err.Error())
-		os.Exit(1)
+	var mon *perf.Monitor
+	if !conf.Performance.Disabled {
+		mon, err = perf.New(conf.Performance, mainLogger)
+		if err != nil {
+			mainLogger.Errorf("failed to create monitor: %s", err.Error())
+			os.Exit(1)
+		}
+		mon.Start()
+	} else {
+		mainLogger.Info("performance monitoring is disabled")
 	}
-	mon.Start()
 
 	// Setup channels for server management
 	exitChan := make(chan struct{})
@@ -108,7 +113,7 @@ func main() {
 	// Context that bounds the lifetime of background watcher goroutines.
 	watcherCtx, watcherCancel := context.WithCancel(context.Background())
 
-	// Create server with initial handler
+	// Create server with initial handlergit
 	srv := &http.Server{
 		Addr: *listenStr,
 	}
@@ -140,7 +145,9 @@ func main() {
 
 			mainLogger.Debug("Configuration Changed")
 			currentPM.Shutdown()
-			mon.UpdateConfig(conf.Performance)
+			if mon != nil {
+				mon.UpdateConfig(conf.Performance)
+			}
 			newPM := proxy.New(conf)
 			newPM.SetVersion(date, commit, version)
 			newPM.SetPerfMonitor(mon)
@@ -197,7 +204,9 @@ func main() {
 				reloadProxyManager()
 			case syscall.SIGINT, syscall.SIGTERM:
 				mainLogger.Debugf("Received signal %v, shutting down...", sig)
-				mon.Stop()
+				if mon != nil {
+					mon.Stop()
+				}
 				watcherCancel()
 				ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 				defer cancel()
