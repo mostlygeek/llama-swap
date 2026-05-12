@@ -9,6 +9,11 @@ on:
 
   # Allows manual triggering of the workflow
   workflow_dispatch:
+    inputs:
+      dryrun:
+        description: "Run cleanup step in dry-run mode (log what would be deleted, delete nothing)"
+        type: boolean
+        default: false
 
   # Run on workflow file changes (without pushing)
   push:
@@ -89,3 +94,4 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           package: llama-swap
           delete-untagged: true
+          dry-run: ${{ inputs.dryrun || false }}
