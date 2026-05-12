@@ -70,8 +70,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./docker/build-container.sh ${{ matrix.platform }} ${{ github.event_name != 'push' }}
 
-  # note make sure mostlygeek/llama-swap has admin rights to the llama-swap package
-  # see: https://github.com/actions/delete-package-versions/issues/74
+  # actions/delete-package-versions can't see manifest lists: pushing
+  # a multi-arch image with `docker buildx --push` creates a tagged OCI
+  # index plus one untagged per-platform manifest per arch, and
+  # `delete-only-untagged-versions: true` then nukes the per-platform
+  # children, leaving the index dangling — `docker pull :cpu` 404s on
+  # the referenced digest. dataaxiom/ghcr-cleanup-action walks tagged
+  # manifest lists and excludes their children from deletion.
   delete-untagged-containers:
     needs: build-and-push
     # Skip on forks — the delete API requires package-admin on the
@@ -79,8 +84,8 @@ jobs:
     if: github.repository == 'mostlygeek/llama-swap'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/delete-package-versions@v5
+      - uses: dataaxiom/ghcr-cleanup-action@cd0cdb900b5dbf3a6f2cc869f0dbb0b8211f50c4 # v1.0.16
         with:
-          package-name: 'llama-swap'
-          package-type: 'container'
-          delete-only-untagged-versions: 'true'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          package: llama-swap
+          delete-untagged: true
