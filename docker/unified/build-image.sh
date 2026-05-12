@@ -58,7 +58,16 @@ if [[ -z "$BACKEND" ]]; then
     exit 1
 fi
 
-DOCKER_IMAGE_TAG="${DOCKER_IMAGE_TAG:-llama-swap:unified-${BACKEND}}"
+ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64) ARCH="amd64" ;;
+    aarch64|arm64) ARCH="arm64" ;;
+    *) echo "FATAL: Unsupported architecture: $ARCH" >&2; exit 1 ;;
+esac
+
+DOCKER_IMAGE_TAG="${DOCKER_IMAGE_TAG:-llama-swap:unified-${BACKEND}-${ARCH}}"
+GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-mostlygeek/llama-swap}"
+
 
 # Git repository URLs
 LLAMA_REPO="https://github.com/ggml-org/llama.cpp.git"
@@ -209,7 +218,7 @@ if [[ "$NO_CACHE" == true ]]; then
     BUILD_ARGS+=(--no-cache)
     echo "Note: Building without cache"
 elif [[ "${GITHUB_ACTIONS:-}" == "true" && "${ACT:-}" != "true" ]]; then
-    CACHE_REF="ghcr.io/mostlygeek/llama-swap:unified-${BACKEND}-cache"
+    CACHE_REF="ghcr.io/${GITHUB_REPOSITORY}:unified-${BACKEND}-cache-${ARCH}"
     BUILD_ARGS+=(
         --cache-from "type=registry,ref=${CACHE_REF}"
         --cache-to "type=registry,ref=${CACHE_REF},mode=max"
@@ -256,31 +265,11 @@ echo "All expected binaries verified: ${VERIFIED_LIST}"
 
 echo ""
 echo "=========================================="
-echo "Building rootless image..."
-echo "=========================================="
-echo ""
-
-ROOTLESS_TAG="${DOCKER_IMAGE_TAG}-rootless"
-docker buildx build --load -t "${ROOTLESS_TAG}" - <<EOF
-FROM ${DOCKER_IMAGE_TAG}
-USER root
-RUN groupadd --system --gid 10001 llama-swap && \\
-    useradd --system --uid 10001 --gid 10001 \\
-      --home /app --shell /sbin/nologin llama-swap && \\
-    chown -R 10001:10001 /etc/llama-swap /models
-USER 10001
-EOF
-
-echo "Rootless image built: ${ROOTLESS_TAG}"
-
-echo ""
-echo "=========================================="
 echo "Build complete!"
 echo "=========================================="
 echo ""
 echo "Image tags:"
 echo "  ${DOCKER_IMAGE_TAG}"
-echo "  ${ROOTLESS_TAG}"
 echo ""
 echo "Built with:"
 echo "  llama.cpp:            ${LLAMA_HASH}"
