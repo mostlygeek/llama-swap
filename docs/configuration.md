@@ -149,24 +149,14 @@ captureBuffer: 15
 # performance: configuration for system monitoring statistics
 # - timing values are duration strings like 1s, 1h30m, 90m, 2h10s, etc.
 performance:
-  # enabled: boolean
-  # - default: true
+  # disabled: boolean
+  # - default: false
   enable: true
 
   # every: delay between polling for new performance statistics
-  # - default: 15s
-  # - minimum duration 1s
-  # - note: setting this very low will use up more RAM as stats are kept in memory.
-  every: 15s
-
-  # maxAge: maximum age of a performance statistics before it is eligible for garbage collection
-  # - default: 1h
-  maxAge: 12h
-
-  # gc: garbage collection frequency in seconds
-  # - how many seconds the garbage collector runs to clear old stats
-  # - default 5m
-  gc: 5m
+  # - default: 5s
+  # - minimum duration 5s
+  every: 5s
 
 # startPort: sets the starting port number for the automatic ${PORT} macro.
 # - optional, default: 5800
@@ -209,8 +199,7 @@ globalTTL: 0
 macros:
   # Example of a multi-line macro
   "latest-llama": >
-    /path/to/llama-server/llama-server-ec9e0301
-    --port ${PORT}
+    /path/to/llama-server/llama-server-ec9e0301 --port ${PORT}
 
   "default_ctx": 4096
 
@@ -370,7 +359,8 @@ models:
 
       # the ${temp} macro will remain a float
       temperature: ${temp}
-      note: "The ${MODEL_ID} is running on port ${PORT} temp=${temp}, context=${default_ctx}"
+      note: "The ${MODEL_ID} is running on port ${PORT} temp=${temp},
+        context=${default_ctx}"
 
       a_list:
         - 1
