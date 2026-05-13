@@ -18,6 +18,7 @@ set -euo pipefail
 
 BACKEND=""
 NO_CACHE=false
+CMAKE_CUDA_ARCHITECTURES=""
 
 for arg in "$@"; do
     case $arg in
@@ -30,13 +31,17 @@ for arg in "$@"; do
         --no-cache)
             NO_CACHE=true
             ;;
+        --cuda-arch=*)
+            CMAKE_CUDA_ARCHITECTURES="${arg#*=}"
+            ;;
         --help|-h)
-            echo "Usage: ./build-image.sh --cuda|--vulkan [--no-cache]"
+            echo "Usage: ./build-image.sh --cuda|--vulkan [--no-cache] [--cuda-arch=...]"
             echo ""
             echo "Options:"
             echo "  --cuda      Build CUDA image (NVIDIA GPUs)"
             echo "  --vulkan    Build Vulkan image (AMD GPUs and compatible hardware)"
             echo "  --no-cache  Force rebuild without using Docker cache"
+            echo "  --cuda-arch Specify CUDA architectures (e.g., '86;89' for sm_86, sm_89)"
             echo "  --help, -h  Show this help message"
             echo ""
             echo "Environment variables:"
@@ -46,6 +51,11 @@ for arg in "$@"; do
             echo "  SD_REF               Pin stable-diffusion.cpp to a commit, tag, or branch"
             echo "  IK_LLAMA_REF         Pin ik_llama.cpp to a commit, tag, or branch (CUDA only)"
             echo "  LS_VERSION           Override llama-swap version (e.g., '170' or 'latest')"
+            echo "  CMAKE_CUDA_ARCHITECTURES  Override CUDA architectures (default: 75;86;89;120;121)"
+            echo ""
+            echo "Examples:"
+            echo "  ./build-image.sh --cuda --cuda-arch=86        # Build for sm_86 only"
+            echo "  ./build-image.sh --cuda --cuda-arch=86;89   # Build for sm_86 and sm_89"
             exit 0
             ;;
     esac
@@ -56,6 +66,16 @@ if [[ -z "$BACKEND" ]]; then
     echo ""
     echo "Usage: ./build-image.sh --cuda|--vulkan [--no-cache]"
     exit 1
+fi
+
+# Use CMAKE_CUDA_ARCHITECTURES env var if set, otherwise use CLI argument
+if [[ -z "${CMAKE_CUDA_ARCHITECTURES:-}" && -n "${CMAKE_CUDA_ARCHITECTURES:-}" ]]; then
+    CMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES}"
+fi
+
+# Default CUDA architectures for CUDA 12+
+if [[ -z "${CMAKE_CUDA_ARCHITECTURES:-}" ]]; then
+    CMAKE_CUDA_ARCHITECTURES="75;86;89;120;121"
 fi
 
 ARCH=$(uname -m)
@@ -210,6 +230,7 @@ BUILD_ARGS=(
     --build-arg "SD_COMMIT_HASH=${SD_HASH}"
     --build-arg "IK_LLAMA_COMMIT_HASH=${IK_LLAMA_HASH}"
     --build-arg "LS_VERSION=${LS_HASH}"
+    --build-arg "CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}"
     -t "${DOCKER_IMAGE_TAG}"
     -f "${SCRIPT_DIR}/Dockerfile"
 )

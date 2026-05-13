@@ -165,17 +165,21 @@ jobs:
     needs:
       - setup
       - build
-    if: ${{ needs.setup.outputs.matrix != '[]' && (github.event_name == 'schedule' || inputs.push_to_ghcr == true) }}
+    if: ${{ always() && needs.build.result != 'cancelled' && (github.event_name == 'schedule' || inputs.push_to_ghcr == true) }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         backend: ${{ fromJSON(needs.setup.outputs.matrix) }}
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
 
     steps:
-      - name: Set date tag
-        run: echo "DATE_TAG=$(date -u +%Y-%m-%d)" >> $GITHUB_ENV
-
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -183,8 +187,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set date tag
+        run: echo "DATE_TAG=$(date -u +%Y-%m-%d)" >> $GITHUB_ENV
+
       - name: Create and push multi-arch manifest
-        if: ${{ needs.setup.outputs.matrix != '[]' && !env.ACT && (github.event_name == 'schedule' || inputs.push_to_ghcr == true) }}
+        if: ${{ !env.ACT }}
         run: |
           BASE_TAG="ghcr.io/${{ github.repository }}:unified-${{ matrix.backend }}"
           BASE_TAG_DATE="${BASE_TAG}-${DATE_TAG}"
