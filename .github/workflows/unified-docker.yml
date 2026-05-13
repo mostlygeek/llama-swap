@@ -179,6 +179,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create and push multi-arch manifest
+        if: ${{ needs.setup.outputs.matrix != '[]' && !env.ACT && (github.event_name == 'schedule' || inputs.push_to_ghcr == true) }}
         run: |
           BASE_TAG="ghcr.io/${{ github.repository }}:unified-${{ matrix.backend }}"
           BASE_TAG_DATE="${BASE_TAG}-${DATE_TAG}"

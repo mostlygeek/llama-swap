@@ -19,7 +19,7 @@ ARG UBUNTU_VERSION=24.04
 
 FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION} AS builder-base-cuda
 
-ARG CMAKE_CUDA_ARCHITECTURES="75;86;89;121"
+ARG CMAKE_CUDA_ARCHITECTURES="75;86;89;120;121"
 ENV DEBIAN_FRONTEND=noninteractive
 ENV CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}
 ENV CCACHE_DIR=/ccache
@@ -31,7 +31,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates ccache make wget nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 
-# RUN bash wget -qO- https://get.pnpm.io/install.sh | sh -
 RUN npm install -g pnpm@latest-10
 
 WORKDIR /build
@@ -47,10 +46,13 @@ ENV PATH="/usr/lib/ccache:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake git python3 python3-pip libssl-dev \
-    curl ca-certificates ccache make wget software-properties-common \
+    curl ca-certificates ccache make wget nodejs npm \
+    software-properties-common \
     libvulkan-dev glslang-tools spirv-tools vulkan-validationlayers glslc \
     spirv-headers \
     && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g pnpm@latest-10
 
 WORKDIR /build
 

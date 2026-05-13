@@ -39,7 +39,10 @@ case "$ARCH" in
 esac
 
 if [ "$ARCH" = "arm64" ]; then
-    CMAKE_FLAGS+=(-DGGML_ARCH_FLAGS="-march=armv9.2-a+dotprod+fp16")
+    # Only use armv9.2+ flags if the host actually supports dotprod and fp16
+    if grep -q 'dotprod' /proc/cpuinfo && grep -q 'fp16' /proc/cpuinfo; then
+        CMAKE_FLAGS+=(-DGGML_ARCH_FLAGS="-march=armv9.2-a+dotprod+fp16")
+    fi
 fi
 
 rm -rf build/CMakeCache.txt build/CMakeFiles 2>/dev/null || true

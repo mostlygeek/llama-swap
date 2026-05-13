@@ -36,6 +36,7 @@ for arg in "$@"; do
             echo "Options:"
             echo "  --cuda      Build CUDA image (NVIDIA GPUs)"
             echo "  --vulkan    Build Vulkan image (AMD GPUs and compatible hardware)"
+            echo "  --no-cache  Force rebuild without using Docker cache"
             echo "  --help, -h  Show this help message"
             echo ""
             echo "Environment variables:"
@@ -68,7 +69,11 @@ echo "=========================================="
 echo ""
 
 ROOTLESS_TAG="${DOCKER_IMAGE_TAG}-rootless"
-docker buildx build --load -t "${ROOTLESS_TAG}" - <<EOF
+BUILD_ARGS=()
+if [[ "$NO_CACHE" == "true" ]]; then
+    BUILD_ARGS+=(--no-cache)
+fi
+docker buildx build "${BUILD_ARGS[@]}" --load -t "${ROOTLESS_TAG}" - <<EOF
 FROM ${DOCKER_IMAGE_TAG}
 USER root
 RUN groupadd --system --gid 10001 llama-swap && \\
