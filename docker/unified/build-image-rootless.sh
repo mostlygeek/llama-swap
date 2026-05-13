@@ -24,6 +24,9 @@ for arg in "$@"; do
         --cuda)
             BACKEND="cuda"
             ;;
+        --cuda13)
+            BACKEND="cuda13"
+            ;;
         --vulkan)
             BACKEND="vulkan"
             ;;
@@ -35,6 +38,7 @@ for arg in "$@"; do
             echo ""
             echo "Options:"
             echo "  --cuda      Build CUDA image (NVIDIA GPUs)"
+            echo "  --cuda13    Build CUDA 13 image (NVIDIA GPUs)"
             echo "  --vulkan    Build Vulkan image (AMD GPUs and compatible hardware)"
             echo "  --no-cache  Force rebuild without using Docker cache"
             echo "  --help, -h  Show this help message"
@@ -47,9 +51,9 @@ for arg in "$@"; do
 done
 
 if [[ -z "$BACKEND" ]]; then
-    echo "Error: No backend specified. Please use --cuda or --vulkan."
+    echo "Error: No backend specified. Please use --cuda, --cuda13, or --vulkan."
     echo ""
-    echo "Usage: ./build-image-rootless.sh --cuda|--vulkan"
+    echo "Usage: ./build-image-rootless.sh --cuda|--cuda13|--vulkan"
     exit 1
 fi
 

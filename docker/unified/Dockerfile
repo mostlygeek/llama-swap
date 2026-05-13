@@ -10,16 +10,14 @@
 # and installing binaries. Build stages are independent for cache efficiency.
 
 ARG BACKEND=cuda
-# ARG CUDA_VERSION=12.9.1
-ARG CUDA_VERSION=13.2.0
-# ARG CUDA_VERSION=13.0.1
+ARG CUDA_VERSION=12.9.1
 ARG UBUNTU_VERSION=24.04
 
 # ── Builder bases ──────────────────────────────────────────────────────
 
 FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION} AS builder-base-cuda
 
-ARG CMAKE_CUDA_ARCHITECTURES="75;86;89;120;121"
+ARG CMAKE_CUDA_ARCHITECTURES="60;61;75;86;89"
 ENV DEBIAN_FRONTEND=noninteractive
 ENV CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}
 ENV CCACHE_DIR=/ccache
@@ -34,6 +32,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN npm install -g pnpm@latest-10
 
 WORKDIR /build
+
+FROM builder-base-cuda AS builder-base-cuda13
 
 # ──
 
@@ -108,6 +108,8 @@ RUN --mount=type=cache,id=ccache-cuda,target=${CCACHE_DIR} \
     --mount=type=cache,id=ik-llama-cuda,target=/src/ik_llama.cpp/build \
     bash /build/install-ik-llama.sh "${IK_LLAMA_COMMIT_HASH}"
 
+FROM ik-llama-cuda AS ik-llama-cuda13
+
 ARG BACKEND=cuda
 FROM ik-llama-${BACKEND} AS ik-llama-build
 
@@ -133,6 +135,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # CUDA stub drivers for container compatibility
 COPY --from=builder-base-cuda /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/stubs/libcuda.so
 COPY --from=builder-base-cuda /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/stubs/libcuda.so.1
+
+FROM runtime-cuda AS runtime-cuda13
 
 # ──
 

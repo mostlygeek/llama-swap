@@ -31,6 +31,11 @@ on:
         type: boolean
         required: false
         default: true
+      build_cuda13:
+        description: "Build CUDA 13 image"
+        type: boolean
+        required: false
+        default: true
       build_vulkan:
         description: "Build Vulkan image"
         type: boolean
@@ -59,6 +64,9 @@ jobs:
           if [[ "${{ github.event_name }}" == "schedule" ]] || [[ "${{ inputs.build_cuda }}" == "true" ]]; then
             backends+=("cuda")
           fi
+          if [[ "${{ github.event_name }}" == "schedule" ]] || [[ "${{ inputs.build_cuda13 }}" == "true" ]]; then
+            backends+=("cuda13")
+          fi
           if [[ "${{ github.event_name }}" == "schedule" ]] || [[ "${{ inputs.build_vulkan }}" == "true" ]]; then
             backends+=("vulkan")
           fi
@@ -73,6 +81,7 @@ jobs:
       fail-fast: false
       matrix:
         backend: ${{ fromJSON(needs.setup.outputs.matrix) }}
+        platform: ["linux/amd64", "linux/arm64"]
         include:
           - platform: linux/amd64
             arch: amd64
