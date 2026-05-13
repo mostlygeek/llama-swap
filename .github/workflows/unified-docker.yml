@@ -70,6 +70,7 @@ jobs:
     if: ${{ needs.setup.outputs.matrix != '[]' }}
     runs-on: ${{ matrix.runner }}
     strategy:
+      max-parallel: 2
       fail-fast: false
       matrix:
         backend: ${{ fromJSON(needs.setup.outputs.matrix) }}
