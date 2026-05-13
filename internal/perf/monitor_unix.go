@@ -106,6 +106,9 @@ func tryLACT(ctx context.Context, every time.Duration, logger *logmon.Monitor) (
 					if err != nil {
 						continue
 					}
+					if stat.MemTotalMB == 0 {
+						continue
+					}
 					stats = append(stats, stat)
 				}
 				conn.Close()
