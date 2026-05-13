@@ -1,4 +1,5 @@
 import type { ImageGenerationRequest, ImageGenerationResponse } from "./types";
+import { getAuthHeaders } from "../stores/auth";
 
 export async function generateImage(
   model: string,
@@ -17,6 +18,7 @@ export async function generateImage(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      ...getAuthHeaders(),
     },
     body: JSON.stringify(request),
     signal,

@@ -1,4 +1,5 @@
 import type { AudioTranscriptionResponse } from "./types";
+import { getAuthHeaders } from "../stores/auth";
 
 export async function transcribeAudio(
   model: string,
@@ -11,6 +12,9 @@ export async function transcribeAudio(
 
   const response = await fetch("/v1/audio/transcriptions", {
     method: "POST",
+    headers: {
+      ...getAuthHeaders(),
+    },
     body: formData,
     signal,
   });
