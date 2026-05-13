@@ -18,7 +18,7 @@ set -euo pipefail
 
 BACKEND=""
 NO_CACHE=false
-CMAKE_CUDA_ARCHITECTURES=""
+# Note: CMAKE_CUDA_ARCHITECTURES is not initialized here so environment values are preserved
 
 for arg in "$@"; do
     case $arg in
@@ -68,15 +68,9 @@ if [[ -z "$BACKEND" ]]; then
     exit 1
 fi
 
-# Use CMAKE_CUDA_ARCHITECTURES env var if set, otherwise use CLI argument
-if [[ -z "${CMAKE_CUDA_ARCHITECTURES:-}" && -n "${CMAKE_CUDA_ARCHITECTURES:-}" ]]; then
-    CMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES}"
-fi
-
-# Default CUDA architectures for CUDA 12+
-if [[ -z "${CMAKE_CUDA_ARCHITECTURES:-}" ]]; then
-    CMAKE_CUDA_ARCHITECTURES="75;86;89;120;121"
-fi
+# Resolve CUDA architectures: CLI flag overrides env var, env var overrides default
+# Precedence: CLI flag > environment variable > default list
+CMAKE_CUDA_ARCHITECTURES="${CLI_CUDA_ARCHITECTURES:-${CMAKE_CUDA_ARCHITECTURES:-75;86;89;120;121}}"
 
 ARCH=$(uname -m)
 case "$ARCH" in

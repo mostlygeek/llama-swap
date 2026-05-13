@@ -165,7 +165,7 @@ jobs:
     needs:
       - setup
       - build
-    if: ${{ always() && needs.build.result != 'cancelled' && (github.event_name == 'schedule' || inputs.push_to_ghcr == true) }}
+    if: ${{ github.event_name == 'schedule' || inputs.push_to_ghcr == true }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
