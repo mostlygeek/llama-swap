@@ -68,14 +68,18 @@ jobs:
   build:
     needs: setup
     if: ${{ needs.setup.outputs.matrix != '[]' }}
-    runs-on: ${{ matrix.platform == 'linux/amd64' && 'ubuntu-latest' || matrix.platform == 'linux/arm64' && 'ubuntu-24.04-arm' }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        platform: 
-          - linux/amd64
-          - linux/arm64
         backend: ${{ fromJSON(needs.setup.outputs.matrix) }}
+        include:
+          - platform: linux/amd64
+            arch: amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            arch: arm64
+            runner: ubuntu-24.04-arm
 
     steps:
       - name: Checkout code
@@ -115,7 +119,7 @@ jobs:
           SD_REF: ${{ inputs.sd_ref || 'master' }}
           IK_LLAMA_REF: ${{ inputs.ik_llama_ref || 'main' }}
           LS_VERSION: ${{ inputs.llama_swap_version || 'main' }}
-          DOCKER_IMAGE_TAG: ghcr.io/${{ github.repository }}:unified-${{ matrix.backend }}-${{ matrix.platform == 'linux/amd64' && 'amd64' || matrix.platform == 'linux/arm64' && 'arm64' }}
+          DOCKER_IMAGE_TAG: ghcr.io/${{ github.repository }}:unified-${{ matrix.backend }}-${{ matrix.arch }}
           # When running under act, use the local builder that has warm ccache.
           # On GitHub Actions, BUILDX_BUILDER is unset so docker uses the builder
           # created by setup-buildx-action above.
@@ -127,7 +131,7 @@ jobs:
       - name: Push to GitHub Container Registry
         if: ${{ !env.ACT && (github.event_name == 'schedule' || inputs.push_to_ghcr == true) }}
         run: |
-          BASE_TAG="ghcr.io/${{ github.repository }}:unified-${{ matrix.backend }}-${{ matrix.platform == 'linux/amd64' && 'amd64' || matrix.platform == 'linux/arm64' && 'arm64' }}"
+          BASE_TAG="ghcr.io/${{ github.repository }}:unified-${{ matrix.backend }}-${{ matrix.arch }}"
           DATE_TAG=$(date -u +%Y-%m-%d)
 
           docker push "${BASE_TAG}"
@@ -136,7 +140,7 @@ jobs:
 
       - name: Build unified Rootless Docker image (${{ matrix.backend }} - ${{ matrix.platform }})
         env:
-          DOCKER_IMAGE_TAG: ghcr.io/${{ github.repository }}:unified-${{ matrix.backend }}-${{ matrix.platform == 'linux/amd64' && 'amd64' || matrix.platform == 'linux/arm64' && 'arm64' }}
+          DOCKER_IMAGE_TAG: ghcr.io/${{ github.repository }}:unified-${{ matrix.backend }}-${{ matrix.arch }}
           # When running under act, use the local builder that has warm ccache.
           # On GitHub Actions, BUILDX_BUILDER is unset so docker uses the builder
           # created by setup-buildx-action above.
@@ -148,7 +152,7 @@ jobs:
       - name: Push Rootless to GitHub Container Registry
         if: ${{ !env.ACT && (github.event_name == 'schedule' || inputs.push_to_ghcr == true) }}
         run: |
-          BASE_TAG="ghcr.io/${{ github.repository }}:unified-${{ matrix.backend }}-${{ matrix.platform == 'linux/amd64' && 'amd64' || matrix.platform == 'linux/arm64' && 'arm64' }}"
+          BASE_TAG="ghcr.io/${{ github.repository }}:unified-${{ matrix.backend }}-${{ matrix.arch }}"
           DATE_TAG=$(date -u +%Y-%m-%d)
 
           ROOTLESS_TAG="${BASE_TAG}-rootless"
