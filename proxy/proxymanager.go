@@ -585,16 +585,47 @@ func (pm *ProxyManager) swapProcessGroup(realModelName string) (*ProcessGroup, e
 	return processGroup, nil
 }
 
+// modelProcessState returns the current state string for a model ID.
+// Returns "stopped" if the model has no running process.
+func (pm *ProxyManager) modelProcessState(modelID string) (state string, loaded bool) {
+	var process *Process
+	if pm.matrix != nil {
+		process, _ = pm.matrix.GetProcess(modelID)
+	} else {
+		if pg := pm.findGroupByModelName(modelID); pg != nil {
+			process = pg.processes[modelID]
+		}
+	}
+	if process == nil {
+		return "stopped", false
+	}
+	switch process.CurrentState() {
+	case StateReady:
+		return "ready", true
+	case StateStarting:
+		return "starting", false
+	case StateStopping:
+		return "stopping", false
+	case StateShutdown:
+		return "shutdown", false
+	default:
+		return "stopped", false
+	}
+}
+
 func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 	data := make([]gin.H, 0, len(pm.config.Models))
 	createdTime := time.Now().Unix()
 
 	newRecord := func(modelId string, modelConfig config.ModelConfig) gin.H {
+		state, loaded := pm.modelProcessState(modelId)
 		record := gin.H{
 			"id":       modelId,
 			"object":   "model",
 			"created":  createdTime,
 			"owned_by": "llama-swap",
+			"state":    state,
+			"loaded":   loaded,
 		}
 
 		if name := strings.TrimSpace(modelConfig.Name); name != "" {

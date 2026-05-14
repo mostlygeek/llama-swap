@@ -32,6 +32,7 @@ func addApiHandlers(pm *ProxyManager) {
 	{
 		apiGroup.POST("/models/unload", pm.apiUnloadAllModels)
 		apiGroup.POST("/models/unload/*model", pm.apiUnloadSingleModelHandler)
+		apiGroup.POST("/models/load/*model", pm.apiLoadSingleModelHandler)
 		apiGroup.GET("/events", pm.apiSendEvents)
 		apiGroup.GET("/metrics", pm.apiGetMetrics)
 		apiGroup.GET("/performance", pm.apiGetPerformance)
@@ -322,6 +323,48 @@ func (pm *ProxyManager) apiUnloadSingleModelHandler(c *gin.Context) {
 
 	if stopErr != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error stopping process: %s", stopErr.Error()))
+		return
+	}
+	c.String(http.StatusOK, "OK")
+}
+
+// apiLoadSingleModelHandler warms a model by routing a minimal request through
+// the proxy, causing llama-swap to start the backing process and load weights.
+// POST /api/models/load/*model — symmetric counterpart to /api/models/unload/*model.
+func (pm *ProxyManager) apiLoadSingleModelHandler(c *gin.Context) {
+	requestedModel := strings.TrimPrefix(c.Param("model"), "/")
+	realModelName, found := pm.config.RealModelName(requestedModel)
+	if !found {
+		pm.sendErrorResponse(c, http.StatusNotFound, "Model not found")
+		return
+	}
+
+	body := fmt.Sprintf(
+		`{"model":%q,"messages":[{"role":"user","content":"hi"}],"max_tokens":1,"stream":false}`,
+		realModelName,
+	)
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost,
+		"/v1/chat/completions", strings.NewReader(body))
+	if err != nil {
+		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("failed to build load request: %s", err.Error()))
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	dw := &DiscardWriter{}
+	var loadErr error
+	if pm.matrix != nil {
+		loadErr = pm.matrix.ProxyRequest(realModelName, dw, req)
+	} else {
+		processGroup := pm.findGroupByModelName(realModelName)
+		if processGroup == nil {
+			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("process group not found for model %s", requestedModel))
+			return
+		}
+		loadErr = processGroup.ProxyRequest(realModelName, dw, req)
+	}
+	if loadErr != nil {
+		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error loading model: %s", loadErr.Error()))
 		return
 	}
 	c.String(http.StatusOK, "OK")
