@@ -26,6 +26,8 @@ jobs:
           ref: ${{ github.event.inputs.tag || github.ref }}
       - name: Set up Go
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c #6.4.0
+        with:
+          go-version-file: go.mod
       - name: Set up Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # 6.4.0
         with:
