@@ -60,12 +60,12 @@ captureBuffer: 15
 performance:
   # disabled: boolean
   # - default: false
-  enable: true
+  disabled: false
 
   # every: delay between polling for new performance statistics
   # - default: 5s
   # - minimum duration 5s
-  every: 5s
+  every: 15s
 
 # startPort: sets the starting port number for the automatic ${PORT} macro.
 # - optional, default: 5800
