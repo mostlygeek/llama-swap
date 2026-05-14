@@ -33,6 +33,8 @@ func addApiHandlers(pm *ProxyManager) {
 		apiGroup.POST("/models/unload", pm.apiUnloadAllModels)
 		apiGroup.POST("/models/unload/*model", pm.apiUnloadSingleModelHandler)
 		apiGroup.POST("/models/load/*model", pm.apiLoadSingleModelHandler)
+		apiGroup.GET("/models/:model", pm.apiGetModelHandler)
+		apiGroup.GET("/ps", pm.apiPSHandler)
 		apiGroup.GET("/events", pm.apiSendEvents)
 		apiGroup.GET("/metrics", pm.apiGetMetrics)
 		apiGroup.GET("/performance", pm.apiGetPerformance)
@@ -368,6 +370,64 @@ func (pm *ProxyManager) apiLoadSingleModelHandler(c *gin.Context) {
 		return
 	}
 	c.String(http.StatusOK, "OK")
+}
+
+// apiGetModelHandler implements GET /api/models/:model.
+// Returns the model's configuration and current runtime state.
+// Useful for polling a specific model's state without fetching all models.
+func (pm *ProxyManager) apiGetModelHandler(c *gin.Context) {
+	requestedModel := c.Param("model")
+	realModelName, found := pm.config.RealModelName(requestedModel)
+	if !found {
+		pm.sendErrorResponse(c, http.StatusNotFound, "Model not found")
+		return
+	}
+	modelConfig := pm.config.Models[realModelName]
+	state, loaded := pm.modelProcessState(realModelName)
+
+	record := gin.H{
+		"id":     realModelName,
+		"object": "model",
+		"state":  state,
+		"loaded": loaded,
+	}
+	if name := strings.TrimSpace(modelConfig.Name); name != "" {
+		record["name"] = name
+	}
+	if desc := strings.TrimSpace(modelConfig.Description); desc != "" {
+		record["description"] = desc
+	}
+	if len(modelConfig.Metadata) > 0 {
+		record["meta"] = gin.H{"llamaswap": modelConfig.Metadata}
+	}
+	c.JSON(http.StatusOK, record)
+}
+
+// apiPSHandler implements GET /api/ps.
+// Returns only the models that are currently loaded (state == ready),
+// using an Ollama-compatible response envelope: {"models": [...]}.
+// This allows clients to see which models occupy VRAM at a glance.
+func (pm *ProxyManager) apiPSHandler(c *gin.Context) {
+	running := make([]gin.H, 0)
+	for id, modelConfig := range pm.config.Models {
+		state, loaded := pm.modelProcessState(id)
+		if !loaded {
+			continue
+		}
+		name := strings.TrimSpace(modelConfig.Name)
+		if name == "" {
+			name = id
+		}
+		running = append(running, gin.H{
+			"name":  name,
+			"model": id,
+			"state": state,
+		})
+	}
+	sort.Slice(running, func(i, j int) bool {
+		return running[i]["model"].(string) < running[j]["model"].(string)
+	})
+	c.JSON(http.StatusOK, gin.H{"models": running})
 }
 
 func (pm *ProxyManager) apiGetVersion(c *gin.Context) {

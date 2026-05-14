@@ -1879,3 +1879,183 @@ models:
 		assert.Contains(t, w.Body.String(), "/messages")
 	})
 }
+
+// TestProxyManager_ListModels_IncludesState verifies that GET /v1/models
+// returns a "state" and "loaded" field for each model entry.
+// Models that have never been started should report state "stopped" and loaded false.
+func TestProxyManager_ListModels_IncludesState(t *testing.T) {
+	cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+models:
+  model-a:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model-a
+  model-b:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model-b
+`)
+	proxy := New(cfg)
+	defer proxy.StopProcesses(StopImmediately)
+
+	req := httptest.NewRequest("GET", "/v1/models", nil)
+	w := CreateTestResponseRecorder()
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.Bytes()
+
+	// Every entry must have state and loaded fields.
+	data := gjson.GetBytes(body, "data").Array()
+	assert.Len(t, data, 2)
+	for _, m := range data {
+		assert.True(t, m.Get("state").Exists(), "model %s: missing state field", m.Get("id").String())
+		assert.True(t, m.Get("loaded").Exists(), "model %s: missing loaded field", m.Get("id").String())
+		// No process started yet — expect stopped and not loaded.
+		assert.Equal(t, "stopped", m.Get("state").String(), "model %s: unexpected state", m.Get("id").String())
+		assert.False(t, m.Get("loaded").Bool(), "model %s: expected loaded=false", m.Get("id").String())
+	}
+}
+
+// TestProxyManager_ListModels_StateReady verifies that a model reports
+// state "ready" and loaded true after it has handled a request.
+func TestProxyManager_ListModels_StateReady(t *testing.T) {
+	cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+models:
+  hot-model:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond hot-model
+`)
+	pm := New(cfg)
+	defer pm.StopProcesses(StopImmediately)
+
+	// Warm the model by routing a request through it.
+	req := httptest.NewRequest("POST", "/v1/chat/completions",
+		bytes.NewBufferString(`{"model":"hot-model","messages":[]}`))
+	pm.ServeHTTP(CreateTestResponseRecorder(), req)
+
+	req = httptest.NewRequest("GET", "/v1/models", nil)
+	w := CreateTestResponseRecorder()
+	pm.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	models := gjson.GetBytes(w.Body.Bytes(), "data").Array()
+	assert.Len(t, models, 1)
+	assert.Equal(t, "ready", models[0].Get("state").String())
+	assert.True(t, models[0].Get("loaded").Bool())
+}
+
+// TestProxyManager_LoadSingleModel verifies that POST /api/models/load/*model
+// starts the model process (state transitions from stopped → ready).
+func TestProxyManager_LoadSingleModel(t *testing.T) {
+	cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+models:
+  model1:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model1
+  model2:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model2
+`)
+	pm := New(cfg)
+	defer pm.StopProcesses(StopImmediately)
+
+	// Confirm model1 is stopped before load.
+	assert.Equal(t, StateStopped, pm.processGroups[config.DEFAULT_GROUP_ID].processes["model1"].CurrentState())
+
+	req := httptest.NewRequest("POST", "/api/models/load/model1", nil)
+	w := CreateTestResponseRecorder()
+	pm.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "OK", w.Body.String())
+	assert.Equal(t, StateReady, pm.processGroups[config.DEFAULT_GROUP_ID].processes["model1"].CurrentState())
+	// model2 must remain stopped — load is targeted.
+	assert.Equal(t, StateStopped, pm.processGroups[config.DEFAULT_GROUP_ID].processes["model2"].CurrentState())
+}
+
+// TestProxyManager_LoadSingleModel_NotFound verifies that loading an unknown
+// model returns 404.
+func TestProxyManager_LoadSingleModel_NotFound(t *testing.T) {
+	cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+models:
+  model1:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model1
+`)
+	pm := New(cfg)
+	defer pm.StopProcesses(StopImmediately)
+
+	req := httptest.NewRequest("POST", "/api/models/load/does-not-exist", nil)
+	w := CreateTestResponseRecorder()
+	pm.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// TestProxyManager_PS verifies that GET /api/ps returns only running models
+// in Ollama-compatible format.
+func TestProxyManager_PS(t *testing.T) {
+	cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+models:
+  model-running:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model-running
+  model-stopped:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model-stopped
+`)
+	pm := New(cfg)
+	defer pm.StopProcesses(StopImmediately)
+
+	// Start model-running via a request.
+	pm.ServeHTTP(CreateTestResponseRecorder(),
+		httptest.NewRequest("POST", "/v1/chat/completions",
+			bytes.NewBufferString(`{"model":"model-running","messages":[]}`)))
+
+	req := httptest.NewRequest("GET", "/api/ps", nil)
+	w := CreateTestResponseRecorder()
+	pm.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.Bytes()
+
+	models := gjson.GetBytes(body, "models").Array()
+	assert.Len(t, models, 1, "only running models should appear in /api/ps")
+	assert.Equal(t, "model-running", models[0].Get("model").String())
+	assert.Equal(t, "model-running", models[0].Get("name").String())
+	assert.Equal(t, "ready", models[0].Get("state").String())
+}
+
+// TestProxyManager_ModelDetail verifies GET /api/models/:model returns config
+// and runtime state for a known model, and 404 for unknown ones.
+func TestProxyManager_ModelDetail(t *testing.T) {
+	cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+models:
+  detail-model:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond detail-model
+    name: "Detail Model"
+    description: "for testing"
+`)
+	pm := New(cfg)
+	defer pm.StopProcesses(StopImmediately)
+
+	req := httptest.NewRequest("GET", "/api/models/detail-model", nil)
+	w := CreateTestResponseRecorder()
+	pm.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.Bytes()
+	assert.Equal(t, "detail-model", gjson.GetBytes(body, "id").String())
+	assert.Equal(t, "Detail Model", gjson.GetBytes(body, "name").String())
+	assert.Equal(t, "for testing", gjson.GetBytes(body, "description").String())
+	assert.Equal(t, "stopped", gjson.GetBytes(body, "state").String())
+	assert.False(t, gjson.GetBytes(body, "loaded").Bool())
+
+	// Unknown model → 404.
+	req = httptest.NewRequest("GET", "/api/models/no-such-model", nil)
+	w = CreateTestResponseRecorder()
+	pm.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
