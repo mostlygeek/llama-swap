@@ -98,7 +98,7 @@ llama-swap can be installed in multiple ways
 Two types of container images are built nightly for llama-swap:
 
 1. A unified container with llama-server, ik-llama-server, stable-diffusion.cpp, whisper.cpp and llama-swap built from source. This is only available for cuda and vulkan but has more capabilities. This one is recommended for use.
-2. A legacy image that is based off of llama.cpp's images and llama-swap copied into the container. Use this one if you prefer to stay close to llama.cpp's container images.
+2. A legacy image that is based on llama.cpp's images and llama-swap copied into the container. Use this one if you prefer to stay close to llama.cpp's container images.
 
 #### Unified container (Recommended)
 
