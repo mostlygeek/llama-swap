@@ -189,6 +189,46 @@ func TestAPIPullModel(t *testing.T) {
 	}
 }
 
+// TestAPIPullModelSubdir verifies files land in the requested subdirectory.
+func TestAPIPullModelSubdir(t *testing.T) {
+	fileContent := strings.Repeat("Y", 512)
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(fileContent))
+	}))
+	defer origin.Close()
+
+	dir := t.TempDir()
+	pm := New(config.Config{
+		ModelsDir: dir,
+		Models: map[string]config.ModelConfig{
+			"stub": {Cmd: "echo", Proxy: "http://localhost:${PORT}"},
+		},
+	})
+	defer pm.StopProcesses(StopImmediately)
+
+	body := strings.NewReader(`{"model":"` + origin.URL + `/model.gguf","subdir":"my-model","stream":false}`)
+	w := CreateTestResponseRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/models/pull", body)
+	req.Header.Set("Content-Type", "application/json")
+	pm.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST /api/models/pull with subdir: %d %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	expectedPath := dir + "/my-model/model.gguf"
+	if resp["path"] != expectedPath {
+		t.Errorf("path = %v, want %q", resp["path"], expectedPath)
+	}
+	if data, err := os.ReadFile(expectedPath); err != nil || string(data) != fileContent {
+		t.Errorf("file not found or content mismatch at %q", expectedPath)
+	}
+}
+
 // TestAPIPullModelGated verifies a 401 from HF propagates as an error response.
 func TestAPIPullModelGated(t *testing.T) {
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

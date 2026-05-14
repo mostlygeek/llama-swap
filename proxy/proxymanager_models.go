@@ -107,6 +107,10 @@ type pullRequest struct {
 	Token string `json:"token"`
 	// Stream progress updates (default true).
 	Stream *bool `json:"stream"`
+	// Subdir within modelsDir to write the file into.
+	// E.g. "mistral-small-3.1-24b" → modelsDir/mistral-small-3.1-24b/filename.gguf
+	// Created automatically if it does not exist.
+	Subdir string `json:"subdir"`
 }
 
 // resolveHFSource parses a model identifier into a download URL and destination filename.
@@ -161,12 +165,26 @@ func (pm *ProxyManager) apiPullModel(c *gin.Context) {
 		return
 	}
 
-	dir := pm.modelsDir()
-	if dir == "" {
+	baseDir := pm.modelsDir()
+	if baseDir == "" {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
 			"error": "models directory unknown; set modelsDir in config",
 		})
 		return
+	}
+	dir := baseDir
+	if req.Subdir != "" {
+		// Sanitize: reject any path traversal attempts.
+		clean := filepath.Clean(req.Subdir)
+		if strings.Contains(clean, "..") || filepath.IsAbs(clean) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid subdir: path traversal detected"})
+			return
+		}
+		dir = filepath.Join(baseDir, clean)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("create subdir: %v", err)})
+			return
+		}
 	}
 
 	downloadURL, filename, err := resolveHFSource(req.Model)
