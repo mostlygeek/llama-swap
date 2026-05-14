@@ -96,7 +96,20 @@ type ProxyManager struct {
 
 	// peer proxy see: #296, #433
 	peerProxy *PeerProxy
+
+	// config file management — set via SetConfigFile / SetReloadFn
+	configFile string
+	configMu   sync.Mutex // guards config file writes
+	reloadFn   func()     // called after config file changes; nil if not wired
 }
+
+// SetConfigFile stores the path to the on-disk config YAML so that the
+// management API can write model entries back to it.
+func (pm *ProxyManager) SetConfigFile(path string) { pm.configFile = path }
+
+// SetReloadFn injects the reload callback from main so that
+// POST /api/config/reload (and auto-reload after writes) can trigger it.
+func (pm *ProxyManager) SetReloadFn(fn func()) { pm.reloadFn = fn }
 
 func New(proxyConfig config.Config) *ProxyManager {
 	// set up loggers

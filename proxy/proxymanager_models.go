@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/gin-gonic/gin"
+	"github.com/mostlygeek/llama-swap/proxy/config"
 )
 
 // parseModelPath extracts the local file path from a model's cmd string by
@@ -111,6 +112,25 @@ type pullRequest struct {
 	// E.g. "mistral-small-3.1-24b" → modelsDir/mistral-small-3.1-24b/filename.gguf
 	// Created automatically if it does not exist.
 	Subdir string `json:"subdir"`
+	// Register, if set, adds the downloaded model to the config after pull completes.
+	// The server reloads automatically so the model is immediately available.
+	Register *pullRegister `json:"register"`
+}
+
+// pullRegister describes the config entry to create after a successful pull.
+type pullRegister struct {
+	// Model ID as it will appear in the config and API. Defaults to the GGUF filename without extension.
+	ID string `json:"id"`
+	// Optional display name.
+	Name string `json:"name"`
+	// Optional description.
+	Description string `json:"description"`
+	// Extra llama-server flags appended after --model <path>.
+	// E.g. "--ctx-size 32768 --n-gpu-layers 99 --threads 8"
+	// If empty, flags are inherited from an existing model's cmd as a template.
+	Flags string `json:"flags"`
+	// TTL in seconds; 0 = use global, -1 = never unload.
+	TTL *int `json:"ttl"`
 }
 
 // resolveHFSource parses a model identifier into a download URL and destination filename.
@@ -326,6 +346,38 @@ func (pm *ProxyManager) apiPullModel(c *gin.Context) {
 	}
 
 	sendJSON(pullProgress{Status: "success", Filename: filename, Path: dest})
+
+	// Auto-register the model in the config if requested.
+	if req.Register != nil && pm.configFile != "" {
+		reg := req.Register
+		id := reg.ID
+		if id == "" {
+			// Default to filename without extension.
+			base := filename
+			if i := len(base) - len(".gguf"); i > 0 && strings.HasSuffix(base, ".gguf") {
+				base = base[:i]
+			}
+			id = strings.ToLower(base)
+		}
+		cmd := pm.buildCmd(dest, reg.Flags)
+		mc := config.ModelConfig{
+			Cmd:         cmd,
+			Proxy:       "http://localhost:${PORT}",
+			Name:        reg.Name,
+			Description: reg.Description,
+			UnloadAfter: config.MODEL_CONFIG_DEFAULT_TTL,
+		}
+		if reg.TTL != nil {
+			mc.UnloadAfter = *reg.TTL
+		}
+		if writeErr := pm.writeModelToConfig(id, &mc); writeErr == nil {
+			sendJSON(pullProgress{Status: "registered", Filename: id, Path: dest})
+			pm.triggerReload()
+		} else {
+			sendJSON(pullProgress{Status: "register_failed", Error: writeErr.Error()})
+		}
+	}
+
 	if !stream {
 		c.JSON(http.StatusOK, gin.H{"status": "success", "filename": filename, "path": dest})
 	}
