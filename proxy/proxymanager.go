@@ -661,6 +661,7 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 		if desc := strings.TrimSpace(modelConfig.Description); desc != "" {
 			record["description"] = desc
 		}
+		addModelRuntimeHints(record, modelConfig)
 
 		// Add metadata if present
 		if len(modelConfig.Metadata) > 0 {
@@ -722,6 +723,41 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 		"object": "list",
 		"data":   data,
 	})
+}
+
+func addModelRuntimeHints(record gin.H, modelConfig config.ModelConfig) {
+	args, err := modelConfig.SanitizedCommand()
+	if err != nil {
+		return
+	}
+	if ctxSize, ok := commandFlagInt(args, "--ctx-size", "-c"); ok {
+		record["context_length"] = ctxSize
+	}
+	if maxTokens, ok := commandFlagInt(args, "--n-predict", "-n"); ok {
+		record["max_output_tokens"] = maxTokens
+	}
+}
+
+func commandFlagInt(args []string, names ...string) (int, bool) {
+	for i, arg := range args {
+		for _, name := range names {
+			if arg == name && i+1 < len(args) {
+				return parsePositiveInt(args[i+1])
+			}
+			if value, ok := strings.CutPrefix(arg, name+"="); ok {
+				return parsePositiveInt(value)
+			}
+		}
+	}
+	return 0, false
+}
+
+func parsePositiveInt(value string) (int, bool) {
+	parsed, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || parsed <= 0 {
+		return 0, false
+	}
+	return parsed, true
 }
 
 // findModelInPath searches for a valid model name in a path with slashes.

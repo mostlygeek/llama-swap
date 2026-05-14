@@ -411,6 +411,7 @@ func (pm *ProxyManager) apiGetModelHandler(c *gin.Context) {
 	if desc := strings.TrimSpace(modelConfig.Description); desc != "" {
 		record["description"] = desc
 	}
+	addModelRuntimeHints(record, modelConfig)
 	if len(modelConfig.Metadata) > 0 {
 		record["meta"] = gin.H{"llamaswap": modelConfig.Metadata}
 	}

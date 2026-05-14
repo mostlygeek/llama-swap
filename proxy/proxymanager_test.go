@@ -410,6 +410,40 @@ models:
 	assert.False(t, exists, "model2 should not have llamaswap_meta")
 }
 
+func TestProxyManager_ListModelsHandler_WithRuntimeHints(t *testing.T) {
+	cfg := testConfigFromYAML(t, `
+logLevel: error
+models:
+  model1:
+    cmd: llama-server --port ${PORT} --model /models/a.gguf --ctx-size 65536 --n-predict=4096
+  model2:
+    cmd: llama-server --port ${PORT} --model /models/b.gguf -c 32768 -n 2048
+`)
+	proxy := New(cfg)
+
+	req := httptest.NewRequest("GET", "/v1/models", nil)
+	w := CreateTestResponseRecorder()
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response struct {
+		Data []map[string]any `json:"data"`
+	}
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+
+	models := map[string]map[string]any{}
+	for _, model := range response.Data {
+		models[model["id"].(string)] = model
+	}
+
+	assert.Equal(t, float64(65536), models["model1"]["context_length"])
+	assert.Equal(t, float64(4096), models["model1"]["max_output_tokens"])
+	assert.Equal(t, float64(32768), models["model2"]["context_length"])
+	assert.Equal(t, float64(2048), models["model2"]["max_output_tokens"])
+}
+
 func TestProxyManager_ListModelsHandler_SortedByID(t *testing.T) {
 	// Intentionally add models in non-sorted order and with an unlisted model
 	cfg := testConfigFromYAML(t, `
@@ -2034,7 +2068,7 @@ healthCheckTimeout: 15
 logLevel: error
 models:
   detail-model:
-    cmd: {{RESPONDER}} --port ${PORT} --silent --respond detail-model
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond detail-model --ctx-size 49152 --n-predict 3072
     name: "Detail Model"
     description: "for testing"
 `)
@@ -2050,6 +2084,8 @@ models:
 	assert.Equal(t, "detail-model", gjson.GetBytes(body, "id").String())
 	assert.Equal(t, "Detail Model", gjson.GetBytes(body, "name").String())
 	assert.Equal(t, "for testing", gjson.GetBytes(body, "description").String())
+	assert.Equal(t, int64(49152), gjson.GetBytes(body, "context_length").Int())
+	assert.Equal(t, int64(3072), gjson.GetBytes(body, "max_output_tokens").Int())
 	assert.Equal(t, "stopped", gjson.GetBytes(body, "state").String())
 	assert.False(t, gjson.GetBytes(body, "loaded").Bool())
 
