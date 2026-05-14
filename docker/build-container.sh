@@ -26,43 +26,34 @@ log_info() {
 ARCH=$1
 PUSH_IMAGES=${2:-false}
 
-# List of allowed architectures
 ALLOWED_ARCHS=("intel" "vulkan" "musa" "cuda" "cuda13" "cpu" "rocm")
-
-# Check if ARCH is in the allowed list
 if [[ ! " ${ALLOWED_ARCHS[@]} " =~ " ${ARCH} " ]]; then
   log_info "Error: ARCH must be one of the following: ${ALLOWED_ARCHS[@]}"
   exit 1
 fi
 
-# Check if GITHUB_TOKEN is set and not empty
 if [[ -z "${GITHUB_TOKEN:-}" ]]; then
   log_info "Error: GITHUB_TOKEN is not set or is empty."
   exit 1
 fi
 
-# Set llama.cpp base image, customizable using the BASE_LLAMACPP_IMAGE environment
-# variable, this permits testing with forked llama.cpp repositories
+# llama.cpp + stable-diffusion.cpp upstream base images. Override via
+# BASE_LLAMACPP_IMAGE / BASE_SDCPP_IMAGE to test against forks.
 BASE_IMAGE=${BASE_LLAMACPP_IMAGE:-ghcr.io/ggml-org/llama.cpp}
 SD_IMAGE=${BASE_SDCPP_IMAGE:-ghcr.io/leejet/stable-diffusion.cpp}
 
-# LS_REPO is the destination of the built container image — defaults to the
-# current GitHub repository so forked CI builds publish to the fork's own
-# ghcr.io namespace without code changes.
+# Destination namespace — defaults to the current GitHub repo so fork
+# CI publishes to its own ghcr.io.
 LS_REPO=${GITHUB_REPOSITORY:-mostlygeek/llama-swap}
 
-# LS_BINARY_REPO is where the llama-swap release tarball is downloaded
-# from. Decoupled from LS_REPO so forks (which usually have no releases of
-# their own) can still build a container by pulling the canonical binary
-# from upstream. Override via the LS_BINARY_REPO env var when you maintain
-# fork-side releases.
+# Where to pull the llama-swap release tarball from. Decoupled from
+# LS_REPO so forks (which usually have no releases) still build against
+# the upstream binary unless they override this.
 LS_BINARY_REPO=${LS_BINARY_REPO:-mostlygeek/llama-swap}
 
-# the most recent llama-swap tag
-# have to strip out the 'v' due to .tar.gz file naming.
-# Authenticated request — unauth'd github.com API is 60/hr per IP and GHA
-# runners share IPs, so the call regularly returns rate-limit JSON and
-# `.tag_name` then resolves to "null", producing a bogus `vnull` URL below.
+# Authenticated request — unauth'd github.com API is 60/hr per IP and
+# GHA runners share IPs, so the call regularly returns rate-limit JSON
+# and `.tag_name` then resolves to "null", producing a bogus `vnull`.
 LS_VER=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
     "https://api.github.com/repos/${LS_BINARY_REPO}/releases/latest" \
     | jq -r .tag_name | sed 's/v//')
@@ -72,10 +63,8 @@ if [[ -z "$LS_VER" || "$LS_VER" == "null" ]]; then
     exit 1
 fi
 
-# Fetches the most recent llama.cpp tag matching the given prefix
-# Handles pagination to search beyond the first 100 results
-# $1 - tag_prefix (e.g., "server" or "server-vulkan")
-# Returns: the version number extracted from the tag
+# Walks llama.cpp package versions paginated to find the newest tag
+# matching a prefix (e.g. "server" for cpu, "server-cuda" for cuda).
 fetch_llama_tag() {
     local tag_prefix=$1
     local page=1
@@ -87,20 +76,17 @@ fetch_llama_tag() {
         local response=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
             "https://api.github.com/users/ggml-org/packages/container/llama.cpp/versions?per_page=${per_page}&page=${page}")
 
-        # Check for API errors
         if echo "$response" | jq -e '.message' > /dev/null 2>&1; then
             local error_msg=$(echo "$response" | jq -r '.message')
             log_info "GitHub API error: $error_msg"
             return 1
         fi
 
-        # Check if response is empty array (no more pages)
         if [ "$(echo "$response" | jq 'length')" -eq 0 ]; then
             log_debug "No more pages (empty response)"
             return 1
         fi
 
-        # Extract matching tag from this page
         local found_tag=$(echo "$response" | jq -r \
             ".[] | select(.metadata.container.tags[]? | startswith(\"$tag_prefix\")) | .metadata.container.tags[] | select(startswith(\"$tag_prefix\"))" \
             | sort -r | head -n1)
@@ -112,8 +98,6 @@ fetch_llama_tag() {
         fi
 
         page=$((page + 1))
-
-        # Safety limit to prevent infinite loops
         if [ $page -gt 50 ]; then
             log_info "Reached pagination safety limit (50 pages)"
             return 1
@@ -131,84 +115,95 @@ fi
 
 SD_TAG=master-${ARCH}
 
-# Abort if LCPP_TAG is empty.
 if [[ -z "$LCPP_TAG" ]]; then
     log_info "Abort: Could not find llama-server container for arch: $ARCH"
     exit 1
-else
-    log_info "LCPP_TAG: $LCPP_TAG"
 fi
+log_info "LCPP_TAG: $LCPP_TAG"
 
 if [[ ! -z "$DEBUG_ABORT_BUILD" ]]; then
     log_info "Abort: DEBUG_ABORT_BUILD set"
     exit 0
 fi
 
-# cpu is the only backend with a multi-arch upstream base
-# (ghcr.io/ggml-org/llama.cpp:server-bXXXX ships amd64+arm64); GPU backends
-# are amd64-only and stay on the original `docker build` path so the
-# sd-server layer can still FROM the just-built image via the local
-# dockerd image store (buildx's container driver has a separate store
-# that doesn't share with dockerd, which breaks the sd build).
-if [ "$ARCH" == "cpu" ]; then
-    if [ "$PUSH_IMAGES" == "true" ]; then
-        BUILDX_FLAGS="--push --platform linux/amd64,linux/arm64"
-    else
-        # Smoke build: validate both platforms but emit no output. buildx
-        # on the docker-container driver defaults to cacheonly when
-        # neither --push nor --load is given, so each arch fully builds
-        # and a regression in either fails CI — without materializing the
-        # image or needing to --load (which is multi-arch-incompatible).
-        BUILDX_FLAGS="--platform linux/amd64,linux/arm64"
-    fi
+# Platforms to build for. Driven by the workflow's per-backend matrix
+# entry (e.g. `linux/amd64,linux/arm64` for cpu). Default keeps a bare
+# `./build-container.sh <arch>` invocation working locally.
+PLATFORMS=${PLATFORMS:-linux/amd64}
+MULTI_ARCH=0
+case ",${PLATFORMS}," in
+    *,*,*) MULTI_ARCH=1 ;;
+esac
+
+# buildx output mode:
+#   --push    publish a tagged manifest list directly.
+#   --load    smoke, single arch — into local dockerd so sd-server can FROM.
+#   (none)    smoke, multi-arch — cacheonly; buildx can't --load an index.
+if [ "$PUSH_IMAGES" == "true" ]; then
+    BUILDX_OUTPUT="--push"
+elif [ "$MULTI_ARCH" -eq 1 ]; then
+    BUILDX_OUTPUT=""
+else
+    BUILDX_OUTPUT="--load"
 fi
 
+# GHA layer cache, scoped per backend+arch+container-type to keep
+# amd64/arm64 caches disjoint. Skipped outside GHA — `type=gha` needs
+# ACTIONS_RUNTIME_TOKEN.
+buildx_cache_flags() {
+    local scope=$1
+    if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+        echo "--cache-from type=gha,scope=${scope} --cache-to type=gha,mode=max,scope=${scope}"
+    fi
+}
+
+PLATFORM_SLUG=$(echo "$PLATFORMS" | tr ',/' '--')
+
 for CONTAINER_TYPE in non-root root; do
-  CONTAINER_TAG="ghcr.io/${LS_REPO}:v${LS_VER}-${ARCH}-${LCPP_TAG}"
-  CONTAINER_LATEST="ghcr.io/${LS_REPO}:${ARCH}"
-  USER_UID=0
-  USER_GID=0
-  USER_HOME=/root
+    CONTAINER_TAG="ghcr.io/${LS_REPO}:v${LS_VER}-${ARCH}-${LCPP_TAG}"
+    CONTAINER_LATEST="ghcr.io/${LS_REPO}:${ARCH}"
+    USER_UID=0
+    USER_GID=0
+    USER_HOME=/root
 
-  if [ "$CONTAINER_TYPE" == "non-root" ]; then
-    CONTAINER_TAG="${CONTAINER_TAG}-non-root"
-    CONTAINER_LATEST="${CONTAINER_LATEST}-non-root"
-    USER_UID=10001
-    USER_GID=10001
-    USER_HOME=/app
-  fi
+    if [ "$CONTAINER_TYPE" == "non-root" ]; then
+        CONTAINER_TAG="${CONTAINER_TAG}-non-root"
+        CONTAINER_LATEST="${CONTAINER_LATEST}-non-root"
+        USER_UID=10001
+        USER_GID=10001
+        USER_HOME=/app
+    fi
 
-  log_info "Building $CONTAINER_TYPE $CONTAINER_TAG $LS_VER"
-  if [ "$ARCH" == "cpu" ]; then
-    docker buildx build $BUILDX_FLAGS --provenance=false \
-      -f llama-swap.Containerfile \
-      --build-arg BASE_TAG=${BASE_TAG} --build-arg LS_VER=${LS_VER} --build-arg UID=${USER_UID} \
-      --build-arg LS_REPO=${LS_BINARY_REPO} --build-arg GID=${USER_GID} --build-arg USER_HOME=${USER_HOME} \
-      --build-arg BASE_IMAGE=${BASE_IMAGE} \
-      -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} .
-  else
-    docker build --provenance=false -f llama-swap.Containerfile \
-      --build-arg BASE_TAG=${BASE_TAG} --build-arg LS_VER=${LS_VER} --build-arg UID=${USER_UID} \
-      --build-arg LS_REPO=${LS_BINARY_REPO} --build-arg GID=${USER_GID} --build-arg USER_HOME=${USER_HOME} \
-      -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} \
-      --build-arg BASE_IMAGE=${BASE_IMAGE} .
-  fi
+    CACHE_FLAGS=$(buildx_cache_flags "${ARCH}-${PLATFORM_SLUG}-${CONTAINER_TYPE}")
 
-  # For architectures with stable-diffusion.cpp support, layer sd-server on top.
-  # Stays on `docker build` so the base resolves from local dockerd.
-  case "$ARCH" in
-    "musa" | "vulkan")
-      log_info "Adding sd-server to $CONTAINER_TAG"
-      docker build --provenance=false -f llama-swap-sd.Containerfile \
-        --build-arg BASE=${CONTAINER_TAG} \
-        --build-arg SD_IMAGE=${SD_IMAGE} --build-arg SD_TAG=${SD_TAG} \
-        --build-arg UID=${USER_UID} --build-arg GID=${USER_GID} \
-        -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} . ;;
-  esac
+    log_info "Building $CONTAINER_TYPE $CONTAINER_TAG $LS_VER on $PLATFORMS"
+    docker buildx build $BUILDX_OUTPUT $CACHE_FLAGS --provenance=false \
+        --platform "$PLATFORMS" \
+        -f llama-swap.Containerfile \
+        --build-arg BASE_IMAGE=${BASE_IMAGE} --build-arg BASE_TAG=${BASE_TAG} \
+        --build-arg LS_VER=${LS_VER} --build-arg LS_REPO=${LS_BINARY_REPO} \
+        --build-arg UID=${USER_UID} --build-arg GID=${USER_GID} --build-arg USER_HOME=${USER_HOME} \
+        -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} .
 
-  # cpu builds push inline via buildx --push; all other archs push here.
-  if [ "$ARCH" != "cpu" ] && [ "$PUSH_IMAGES" == "true" ]; then
-    docker push ${CONTAINER_TAG}
-    docker push ${CONTAINER_LATEST}
-  fi
+    # sd-server layer for backends that bundle stable-diffusion.cpp.
+    # Only run on the push path: buildx then pulls FROM the just-pushed
+    # base via the registry. The docker-container buildx driver has its
+    # own image store separate from dockerd, so a `--load`'d base from
+    # the smoke path isn't visible here — skipped to avoid 404 on FROM.
+    case "$ARCH" in
+        "musa" | "vulkan")
+            if [ "$PUSH_IMAGES" != "true" ]; then
+                log_info "Skipping sd-server layer for $ARCH (smoke build, base not in registry)"
+            else
+                log_info "Adding sd-server to $CONTAINER_TAG"
+                SD_CACHE=$(buildx_cache_flags "${ARCH}-${PLATFORM_SLUG}-${CONTAINER_TYPE}-sd")
+                docker buildx build $BUILDX_OUTPUT $SD_CACHE --provenance=false \
+                    --platform "$PLATFORMS" \
+                    -f llama-swap-sd.Containerfile \
+                    --build-arg BASE=${CONTAINER_TAG} \
+                    --build-arg SD_IMAGE=${SD_IMAGE} --build-arg SD_TAG=${SD_TAG} \
+                    --build-arg UID=${USER_UID} --build-arg GID=${USER_GID} \
+                    -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} .
+            fi ;;
+    esac
 done
