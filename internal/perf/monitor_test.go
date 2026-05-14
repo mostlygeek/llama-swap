@@ -30,7 +30,7 @@ func TestNew_CustomConfig(t *testing.T) {
 	logger := newTestLogger()
 
 	cfg := config.PerformanceConfig{
-		Every:  500 * time.Millisecond,
+		Every: 500 * time.Millisecond,
 	}
 
 	m, err := New(cfg, logger)
@@ -49,7 +49,7 @@ func TestNew_BelowMinimumConfig(t *testing.T) {
 	logger := newTestLogger()
 
 	cfg := config.PerformanceConfig{
-		Every:  1 * time.Millisecond,
+		Every: 1 * time.Millisecond,
 	}
 
 	m, err := New(cfg, logger)
