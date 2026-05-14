@@ -122,6 +122,9 @@ func resolveHFSource(model string) (downloadURL, filename string, err error) {
 			clean = clean[:idx]
 		}
 		filename = filepath.Base(clean)
+		if filename == "" || filename == "." || filename == ".." || strings.ContainsAny(filename, `/\`) {
+			return "", "", fmt.Errorf("cannot derive filename from URL %q", model)
+		}
 		downloadURL = model
 		return
 	}
@@ -233,11 +236,21 @@ func (pm *ProxyManager) apiPullModel(c *gin.Context) {
 		c.Header("X-Accel-Buffering", "no")
 	}
 
+	writeOk := true
 	sendJSON := func(v pullProgress) {
+		if !writeOk {
+			return
+		}
 		b, _ := json.Marshal(v)
 		if stream {
-			c.Writer.Write(b)
-			c.Writer.Write([]byte("\n"))
+			if _, err := c.Writer.Write(b); err != nil {
+				writeOk = false
+				return
+			}
+			if _, err := c.Writer.Write([]byte("\n")); err != nil {
+				writeOk = false
+				return
+			}
 			c.Writer.Flush()
 		}
 	}
@@ -266,6 +279,11 @@ func (pm *ProxyManager) apiPullModel(c *gin.Context) {
 	sendJSON(pullProgress{Status: "downloading", Filename: filename, Total: total, Completed: 0})
 
 	for {
+		if !writeOk || c.Request.Context().Err() != nil {
+			f.Close()
+			os.Remove(tmp)
+			return
+		}
 		n, readErr := resp.Body.Read(buf)
 		if n > 0 {
 			if _, writeErr := f.Write(buf[:n]); writeErr != nil {
@@ -320,32 +338,36 @@ func (pm *ProxyManager) apiPullModel(c *gin.Context) {
 	sendJSON(pullProgress{Status: "success", Filename: filename, Path: dest})
 
 	// Auto-register the model in the config if requested.
-	if req.Register != nil && pm.configFile != "" {
-		reg := req.Register
-		id := reg.ID
-		if id == "" {
-			base := filename
-			if i := len(base) - len(".gguf"); i > 0 && strings.HasSuffix(base, ".gguf") {
-				base = base[:i]
-			}
-			id = strings.ToLower(base)
-		}
-		cmd := pm.buildCmd(dest, reg.Flags)
-		mc := config.ModelConfig{
-			Cmd:         cmd,
-			Proxy:       "http://localhost:${PORT}",
-			Name:        reg.Name,
-			Description: reg.Description,
-			UnloadAfter: config.MODEL_CONFIG_DEFAULT_TTL,
-		}
-		if reg.TTL != nil {
-			mc.UnloadAfter = *reg.TTL
-		}
-		if writeErr := pm.writeModelToConfig(id, &mc); writeErr == nil {
-			sendJSON(pullProgress{Status: "registered", Filename: id, Path: dest})
-			pm.triggerReload()
+	if req.Register != nil {
+		if pm.configFile == "" {
+			sendJSON(pullProgress{Status: "register_failed", Error: "config file path not set; cannot auto-register"})
 		} else {
-			sendJSON(pullProgress{Status: "register_failed", Error: writeErr.Error()})
+			reg := req.Register
+			id := reg.ID
+			if id == "" {
+				base := filename
+				if i := len(base) - len(".gguf"); i > 0 && strings.HasSuffix(base, ".gguf") {
+					base = base[:i]
+				}
+				id = strings.ToLower(base)
+			}
+			cmd := pm.buildCmd(dest, reg.Flags)
+			mc := config.ModelConfig{
+				Cmd:         cmd,
+				Proxy:       "http://localhost:${PORT}",
+				Name:        reg.Name,
+				Description: reg.Description,
+				UnloadAfter: config.MODEL_CONFIG_DEFAULT_TTL,
+			}
+			if reg.TTL != nil {
+				mc.UnloadAfter = *reg.TTL
+			}
+			if writeErr := pm.writeModelToConfig(id, &mc); writeErr == nil {
+				sendJSON(pullProgress{Status: "registered", Filename: id, Path: dest})
+				pm.triggerReload()
+			} else {
+				sendJSON(pullProgress{Status: "register_failed", Error: writeErr.Error()})
+			}
 		}
 	}
 
@@ -375,11 +397,19 @@ func (pm *ProxyManager) apiDeleteModel(c *gin.Context) {
 	}
 
 	// Unload first so the process releases the file.
+	// "not found" means already stopped — safe to proceed; any other error aborts.
+	isStopNotFound := func(err error) bool { return err != nil && strings.Contains(err.Error(), "not found") }
 	if pm.matrix != nil {
-		_ = pm.matrix.StopProcess(realModelName, StopImmediately)
+		if err := pm.matrix.StopProcess(realModelName, StopImmediately); err != nil && !isStopNotFound(err) {
+			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("unload failed: %v", err))
+			return
+		}
 	} else {
 		if pg := pm.findGroupByModelName(realModelName); pg != nil {
-			_ = pg.StopProcess(realModelName, StopImmediately)
+			if err := pg.StopProcess(realModelName, StopImmediately); err != nil && !isStopNotFound(err) {
+				pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("unload failed: %v", err))
+				return
+			}
 		}
 	}
 

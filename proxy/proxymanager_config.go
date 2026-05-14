@@ -77,6 +77,10 @@ func (pm *ProxyManager) apiConfigAddModel(c *gin.Context) {
 		pm.sendErrorResponse(c, http.StatusBadRequest, err.Error())
 		return
 	}
+	if !isValidModelID(req.ID) {
+		pm.sendErrorResponse(c, http.StatusBadRequest, "model ID contains invalid characters; use A-Za-z0-9 . _ : / -")
+		return
+	}
 	if pm.configFile == "" {
 		pm.sendErrorResponse(c, http.StatusUnprocessableEntity, "config file path not set; restart llama-swap with --config flag")
 		return
@@ -135,7 +139,8 @@ func (pm *ProxyManager) apiConfigPatchModel(c *gin.Context) {
 // Removes the model entry from the config YAML without touching the file on disk.
 func (pm *ProxyManager) apiConfigRemoveModel(c *gin.Context) {
 	id := c.Param("id")
-	if _, found := pm.config.RealModelName(id); !found {
+	realID, found := pm.config.RealModelName(id)
+	if !found {
 		pm.sendErrorResponse(c, http.StatusNotFound, "model not found in config")
 		return
 	}
@@ -143,12 +148,12 @@ func (pm *ProxyManager) apiConfigRemoveModel(c *gin.Context) {
 		pm.sendErrorResponse(c, http.StatusUnprocessableEntity, "config file path not set")
 		return
 	}
-	if err := pm.removeModelFromConfig(id); err != nil {
+	if err := pm.removeModelFromConfig(realID); err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("write config: %v", err))
 		return
 	}
 	pm.triggerReload()
-	c.JSON(http.StatusOK, gin.H{"id": id, "status": "removed"})
+	c.JSON(http.StatusOK, gin.H{"id": realID, "status": "removed"})
 }
 
 // apiConfigReload implements POST /api/config/reload.
@@ -217,7 +222,7 @@ func (pm *ProxyManager) writeModelToConfig(id string, mc *config.ModelConfig) er
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}
-	return os.WriteFile(pm.configFile, out, 0o644)
+	return atomicWriteFile(pm.configFile, out, 0o644)
 }
 
 // patchModelInConfig reads the config YAML, applies a partial model update, and
@@ -290,7 +295,7 @@ func (pm *ProxyManager) patchModelInConfig(id string, req configModelPatchReques
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}
-	return os.WriteFile(pm.configFile, out, 0o644)
+	return atomicWriteFile(pm.configFile, out, 0o644)
 }
 
 func patchCommandFlags(cmd string, flags map[string]string) (string, error) {
@@ -339,6 +344,20 @@ func normalizeCmdFlag(flag string) string {
 	return "--" + strings.ReplaceAll(flag, "_", "-")
 }
 
+// isValidModelID rejects IDs with characters that would break YAML keys or route matching.
+func isValidModelID(id string) bool {
+	if len(id) == 0 {
+		return false
+	}
+	for _, c := range id {
+		if !('A' <= c && c <= 'Z') && !('a' <= c && c <= 'z') && !('0' <= c && c <= '9') &&
+			c != '.' && c != '_' && c != ':' && c != '/' && c != '-' {
+			return false
+		}
+	}
+	return true
+}
+
 func flagValueString(v any) string {
 	switch x := v.(type) {
 	case string:
@@ -376,7 +395,7 @@ func (pm *ProxyManager) removeModelFromConfig(id string) error {
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}
-	return os.WriteFile(pm.configFile, out, 0o644)
+	return atomicWriteFile(pm.configFile, out, 0o644)
 }
 
 // buildCmd constructs a llama-server command for modelPath.
@@ -422,4 +441,14 @@ func (pm *ProxyManager) buildCmd(modelPath, extraFlags string) string {
 		}
 	}
 	return fmt.Sprintf("llama-server --port ${PORT} --model %s --n-gpu-layers 99", modelPath)
+}
+
+// atomicWriteFile writes data to path via a temp file + rename so a crash or
+// disk-full between truncate and write cannot leave the target file empty.
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, perm); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
