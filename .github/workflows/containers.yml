@@ -92,7 +92,9 @@ jobs:
       || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - uses: dataaxiom/ghcr-cleanup-action@cd0cdb900b5dbf3a6f2cc869f0dbb0b8211f50c4 # v1.0.16
+      # Pinned past v1.0.16 to pick up the node20 → node24 runtime bump
+      # (#105, 2026-05-11). Drop the SHA back to a tag once v1.0.17 cuts.
+      - uses: dataaxiom/ghcr-cleanup-action@aa3ef78ce6e21c2820a185de1c6c59aafc41b2e7 # main, post-v1.0.16
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           package: llama-swap
