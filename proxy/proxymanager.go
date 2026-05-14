@@ -101,6 +101,9 @@ type ProxyManager struct {
 	configFile string
 	configMu   sync.Mutex // guards config file writes
 	reloadFn   func()     // called after config file changes; nil if not wired
+
+	// mDNS — set via SetListenAddr before calling RegisterMDNS
+	listenAddr string
 }
 
 // SetConfigFile stores the path to the on-disk config YAML so that the
@@ -110,6 +113,10 @@ func (pm *ProxyManager) SetConfigFile(path string) { pm.configFile = path }
 // SetReloadFn injects the reload callback from main so that
 // POST /api/config/reload (and auto-reload after writes) can trigger it.
 func (pm *ProxyManager) SetReloadFn(fn func()) { pm.reloadFn = fn }
+
+// SetListenAddr stores the HTTP listen address (e.g. "0.0.0.0:11435") so that
+// RegisterMDNS can advertise the correct port.
+func (pm *ProxyManager) SetListenAddr(addr string) { pm.listenAddr = addr }
 
 func New(proxyConfig config.Config) *ProxyManager {
 	// set up loggers

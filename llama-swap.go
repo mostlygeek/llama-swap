@@ -147,6 +147,8 @@ func main() {
 			newPM.SetPerfMonitor(mon)
 			newPM.SetConfigFile(*configPath)
 			newPM.SetReloadFn(reloadProxyManager)
+			newPM.SetListenAddr(*listenStr)
+			newPM.RegisterMDNS()
 			srv.Handler = newPM
 			mainLogger.Debug("Configuration Reloaded")
 
@@ -167,6 +169,8 @@ func main() {
 			newPM.SetPerfMonitor(mon)
 			newPM.SetConfigFile(*configPath)
 			newPM.SetReloadFn(reloadProxyManager)
+			newPM.SetListenAddr(*listenStr)
+			newPM.RegisterMDNS()
 			srv.Handler = newPM
 		}
 	}
