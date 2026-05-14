@@ -47,6 +47,12 @@ func addApiHandlers(pm *ProxyManager) {
 		apiGroup.GET("/performance", pm.apiGetPerformance)
 		apiGroup.GET("/version", pm.apiGetVersion)
 		apiGroup.GET("/captures/:id", pm.apiGetCapture)
+		// Ollama-compatible endpoints (enables Open WebUI, Chatbox, Msty, etc.)
+		apiGroup.GET("/tags", pm.apiOllamaTags)
+		apiGroup.POST("/show", pm.apiOllamaShow)
+		apiGroup.DELETE("/delete", pm.apiOllamaDelete)
+		// Unified resource snapshot (disk + memory + GPU)
+		apiGroup.GET("/resources", pm.apiGetResources)
 	}
 }
 
