@@ -30,7 +30,7 @@ CMAKE_FLAGS=(
     -DSD_SERVER_BUILD_FRONTEND=ON
 )
 
-if [ "$BACKEND" = "cuda" ]; then
+if [[ "$BACKEND" = "cuda" || "$BACKEND" == "cuda13" ]]; then
     CMAKE_FLAGS+=(
         -DGGML_CUDA=ON
         -DGGML_VULKAN=OFF

@@ -27,7 +27,7 @@ CMAKE_FLAGS=(
     -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 )
 
-if [ "$BACKEND" = "cuda" ]; then
+if [[ "$BACKEND" = "cuda" || "$BACKEND" == "cuda13" ]]; then
     CMAKE_FLAGS+=(
         -DGGML_CUDA=ON
         -DGGML_VULKAN=OFF
