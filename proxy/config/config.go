@@ -160,6 +160,10 @@ type Config struct {
 
 	// support remote peers, see issue #433, #296
 	Peers PeerDictionaryConfig `yaml:"peers"`
+
+	// directory where model files are stored; used by the pull and storage APIs.
+	// If unset, llama-swap tries to infer it from the first model with a --model flag.
+	ModelsDir string `yaml:"modelsDir"`
 }
 
 func (c *Config) RealModelName(search string) (string, bool) {
