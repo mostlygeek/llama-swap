@@ -10,24 +10,35 @@
 # then 404s on the referenced digest even though the tag still exists.
 #
 # Inputs (env):
-#   REPO       — ghcr.io/<owner>/<repo>
-#   TAG        — backend tag (cpu, intel, cuda, ...)
-#   PLATFORMS  — comma-separated list of platforms the index must serve
-#                (e.g. linux/amd64,linux/arm64)
+#   REPO          — ghcr.io/<owner>/<repo>
+#   TAG           — backend tag (cpu, intel, cuda, ...)
+#   PLATFORMS     — comma-separated list of platforms the index must serve
+#                   (e.g. linux/amd64,linux/arm64)
+#   EXPECTED_DIR  — optional. Directory containing <tag>.digest files
+#                   produced by build-container.sh on the push build.
+#                   When set, asserts the tag still resolves to the
+#                   digest we pushed this run — catches cleanup
+#                   replacing the index, not just pruning its children.
 #
-# Exits non-zero on any missing platform or unreachable child manifest.
+# Exits non-zero on:
+#   - top-level manifest unreachable
+#   - identity mismatch (registry digest != EXPECTED_DIR/<tag>.digest)
+#   - declared platform missing
+#   - any child manifest unreachable
 
 set -uo pipefail
 
 : "${REPO:?REPO is required}"
 : "${TAG:?TAG is required}"
 : "${PLATFORMS:?PLATFORMS is required}"
+EXPECTED_DIR=${EXPECTED_DIR:-}
 
 IFS=',' read -ra want_archs <<< "${PLATFORMS}"
 rc=0
 
 for suffix in "" "-non-root"; do
     full="${REPO}:${TAG}${suffix}"
+    name="${TAG}${suffix}"
     echo "::group::${full}"
 
     if ! raw=$(docker buildx imagetools inspect --raw "${full}" 2>&1); then
@@ -36,6 +47,27 @@ for suffix in "" "-non-root"; do
         rc=1
         echo "::endgroup::"
         continue
+    fi
+
+    # Identity check: tag's current index digest must equal the digest
+    # build-container.sh recorded when it pushed. Catches cleanup
+    # replacing or repointing the tag between push and verify.
+    if [ -n "${EXPECTED_DIR}" ] && [ -f "${EXPECTED_DIR}/${name}.digest" ]; then
+        expected=$(cat "${EXPECTED_DIR}/${name}.digest")
+        if ! actual=$(docker buildx imagetools inspect "${full}" \
+                --format '{{.Manifest.Digest}}' 2>&1); then
+            echo "FAIL: could not resolve current digest"
+            echo "${actual}"
+            rc=1
+        elif [ "${actual}" != "${expected}" ]; then
+            echo "FAIL: digest drift — expected ${expected}, got ${actual}"
+            rc=1
+        else
+            echo "Identity: ${actual} matches expected"
+        fi
+    elif [ -n "${EXPECTED_DIR}" ]; then
+        echo "FAIL: no expected digest at ${EXPECTED_DIR}/${name}.digest"
+        rc=1
     fi
 
     if echo "${raw}" | jq -e '.manifests' >/dev/null 2>&1; then

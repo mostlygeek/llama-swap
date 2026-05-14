@@ -77,7 +77,21 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PLATFORMS: ${{ matrix.platforms }}
+          # Recorded only when actually pushing; verify-pull consumes
+          # these to assert the registry still serves the digest this
+          # run produced.
+          DIGEST_DIR: ${{ runner.temp }}/digests
         run: ./docker/build-container.sh ${{ matrix.tag }} ${{ github.event_name != 'push' }}
+
+      # Smoke (push event) doesn't push → no digests → no upload.
+      - name: Upload pushed-digest manifest
+        if: github.event_name != 'push'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: digests-${{ matrix.tag }}
+          path: ${{ runner.temp }}/digests/
+          if-no-files-found: error
+          retention-days: 1
 
   # dataaxiom action walks tagged manifest lists and excludes their
   # per-platform children from deletion, so pruning untagged versions
@@ -131,9 +145,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Download expected digests
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: digests-${{ matrix.tag }}
+          path: ${{ runner.temp }}/digests/
+
       - name: Verify ${{ matrix.tag }} manifest on ${{ matrix.platforms }}
         env:
           REPO: ghcr.io/${{ github.repository }}
           TAG: ${{ matrix.tag }}
           PLATFORMS: ${{ matrix.platforms }}
+          EXPECTED_DIR: ${{ runner.temp }}/digests
         run: ./docker/verify-pull.sh

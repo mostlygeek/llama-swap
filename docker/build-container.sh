@@ -26,6 +26,13 @@ log_info() {
 ARCH=$1
 PUSH_IMAGES=${2:-false}
 
+# When set, each pushed tag's manifest/index digest is written to
+# $DIGEST_DIR/<tag>.digest. verify-pull.sh reads these to assert the
+# registry still serves the digest this run pushed (catches cleanup
+# replacing or pruning a tag's index after the build). No-op unless we
+# actually push — non-push builds wouldn't be on the registry to verify.
+DIGEST_DIR=${DIGEST_DIR:-}
+
 ALLOWED_ARCHS=("intel" "vulkan" "musa" "cuda" "cuda13" "cpu" "rocm")
 if [[ ! " ${ALLOWED_ARCHS[@]} " =~ " ${ARCH} " ]]; then
   log_info "Error: ARCH must be one of the following: ${ALLOWED_ARCHS[@]}"
@@ -159,6 +166,33 @@ buildx_cache_flags() {
 
 PLATFORM_SLUG=$(echo "$PLATFORMS" | tr ',/' '--')
 
+# Wraps `docker buildx build` and, when DIGEST_DIR is set on a push
+# build, extracts the pushed manifest digest from the buildx metadata
+# file into $DIGEST_DIR/<digest_name>.digest. For backends that re-tag
+# in a second buildx pass (sd-server layer for musa/vulkan), passing
+# the same digest_name overwrites the base build's digest — which is
+# correct, since the second push is what the tag resolves to.
+buildx_run() {
+    local digest_name="$1"; shift
+    if [ -n "$DIGEST_DIR" ] && [ "$PUSH_IMAGES" = "true" ]; then
+        mkdir -p "$DIGEST_DIR"
+        local meta
+        meta=$(mktemp)
+        docker buildx build --metadata-file "$meta" "$@"
+        local digest
+        digest=$(jq -r '."containerimage.digest" // empty' "$meta")
+        rm -f "$meta"
+        if [ -z "$digest" ]; then
+            log_info "Error: no containerimage.digest in buildx metadata for ${digest_name}"
+            return 1
+        fi
+        echo "$digest" > "$DIGEST_DIR/${digest_name}.digest"
+        log_info "Recorded digest ${digest} -> ${DIGEST_DIR}/${digest_name}.digest"
+    else
+        docker buildx build "$@"
+    fi
+}
+
 for CONTAINER_TYPE in non-root root; do
     CONTAINER_TAG="ghcr.io/${LS_REPO}:v${LS_VER}-${ARCH}-${LCPP_TAG}"
     CONTAINER_LATEST="ghcr.io/${LS_REPO}:${ARCH}"
@@ -176,8 +210,13 @@ for CONTAINER_TYPE in non-root root; do
 
     CACHE_FLAGS=$(buildx_cache_flags "${ARCH}-${PLATFORM_SLUG}-${CONTAINER_TYPE}")
 
+    # Digest filename mirrors verify-pull.sh's tag-suffix loop:
+    # `<arch>` for root, `<arch>-non-root` for non-root.
+    DIGEST_NAME="${ARCH}"
+    [ "$CONTAINER_TYPE" = "non-root" ] && DIGEST_NAME="${ARCH}-non-root"
+
     log_info "Building $CONTAINER_TYPE $CONTAINER_TAG $LS_VER on $PLATFORMS"
-    docker buildx build $BUILDX_OUTPUT $CACHE_FLAGS --provenance=false \
+    buildx_run "$DIGEST_NAME" $BUILDX_OUTPUT $CACHE_FLAGS --provenance=false \
         --platform "$PLATFORMS" \
         -f llama-swap.Containerfile \
         --build-arg BASE_IMAGE=${BASE_IMAGE} --build-arg BASE_TAG=${BASE_TAG} \
@@ -197,7 +236,7 @@ for CONTAINER_TYPE in non-root root; do
             else
                 log_info "Adding sd-server to $CONTAINER_TAG"
                 SD_CACHE=$(buildx_cache_flags "${ARCH}-${PLATFORM_SLUG}-${CONTAINER_TYPE}-sd")
-                docker buildx build $BUILDX_OUTPUT $SD_CACHE --provenance=false \
+                buildx_run "$DIGEST_NAME" $BUILDX_OUTPUT $SD_CACHE --provenance=false \
                     --platform "$PLATFORMS" \
                     -f llama-swap-sd.Containerfile \
                     --build-arg BASE=${CONTAINER_TAG} \
