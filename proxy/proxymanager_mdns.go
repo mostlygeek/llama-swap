@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"fmt"
 	"net"
 	"os"
 	"strconv"
@@ -34,8 +33,8 @@ func (pm *ProxyManager) RegisterMDNS() {
 
 	hostname, _ := os.Hostname()
 	// Instance name must be unique per service type on the network.
-	// Using hostname:port distinguishes multiple instances on one machine.
-	instanceName := fmt.Sprintf("%s:%d", hostname, port)
+	// Using hostname distinguishes instances; port is already in the mDNS record.
+	instanceName := hostname
 
 	txt := []string{
 		"version=" + pm.version,
