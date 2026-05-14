@@ -111,6 +111,61 @@ export interface VersionInfo {
   version: string;
 }
 
+// --- Management API types ---
+
+export interface ResourceStorage {
+  models_dir: string;
+  total_bytes: number;
+  available_bytes: number;
+  used_bytes: number;
+}
+
+export interface ResourceMemory {
+  total_mb: number;
+  used_mb: number;
+  free_mb: number;
+  type: "unified" | "system";
+  load_avg1: number;
+}
+
+export interface ResourceGpu {
+  id: number;
+  name: string;
+  vram_total_mb: number;
+  vram_used_mb: number;
+  utilization_pct: number;
+  temp_c: number;
+  power_draw_w: number;
+}
+
+export interface ResourcesResponse {
+  storage?: ResourceStorage;
+  memory?: ResourceMemory;
+  gpu?: ResourceGpu[];
+}
+
+export interface ModelFileInfo {
+  id: string;
+  file_path: string;
+  file_exists: boolean;
+}
+
+export interface ConfigInfo {
+  config_file: string;
+  models_dir: string;
+  model_count: number;
+  models: ModelFileInfo[];
+}
+
+export interface PullProgress {
+  status: "resolving" | "downloading" | "success" | "registered" | "error" | "register_failed";
+  filename?: string;
+  total?: number;
+  completed?: number;
+  path?: string;
+  error?: string;
+}
+
 export type ScreenWidth = "xs" | "sm" | "md" | "lg" | "xl" | "2xl";
 
 export type TextContentPart = {

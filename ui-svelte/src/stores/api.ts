@@ -8,6 +8,9 @@ import type {
   ReqRespCapture,
   InFlightStats,
   PerformanceResponse,
+  ResourcesResponse,
+  ConfigInfo,
+  PullProgress,
 } from "../lib/types";
 import { connectionState } from "./theme";
 
@@ -217,5 +220,88 @@ export async function fetchPerformance(after?: string): Promise<PerformanceRespo
   } catch (error) {
     console.error("Failed to fetch performance data:", error);
     return null;
+  }
+}
+
+export async function fetchResources(): Promise<ResourcesResponse | null> {
+  try {
+    const response = await fetch("/api/resources");
+    if (!response.ok) return null;
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchConfigInfo(): Promise<ConfigInfo | null> {
+  try {
+    const response = await fetch("/api/config/info");
+    if (!response.ok) return null;
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteModelFile(id: string): Promise<void> {
+  const response = await fetch(`/api/models/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error((body as { error?: string }).error ?? `HTTP ${response.status}`);
+  }
+}
+
+export async function removeModelFromConfig(id: string): Promise<void> {
+  const response = await fetch(`/api/config/models/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error((body as { error?: string }).error ?? `HTTP ${response.status}`);
+  }
+}
+
+// pullModel streams ndjson progress from POST /api/models/pull.
+// onProgress is called for each event line. Returns when the stream ends.
+// Throws on HTTP error or if any progress event has status "error".
+export async function pullModel(
+  model: string,
+  options: { subdir?: string; register?: { id?: string; name?: string; flags?: string } },
+  onProgress: (ev: PullProgress) => void
+): Promise<void> {
+  const body: Record<string, unknown> = { model, stream: true };
+  if (options.subdir) body.subdir = options.subdir;
+  if (options.register) body.register = options.register;
+
+  const response = await fetch("/api/models/pull", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`HTTP ${response.status}: ${text}`);
+  }
+
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop() ?? "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const ev = JSON.parse(trimmed) as PullProgress;
+        onProgress(ev);
+        if (ev.status === "error") throw new Error(ev.error ?? "pull failed");
+      } catch (e) {
+        if (e instanceof SyntaxError) continue;
+        throw e;
+      }
+    }
   }
 }
