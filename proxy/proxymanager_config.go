@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -24,6 +25,20 @@ type configModelRequest struct {
 	Aliases     []string `json:"aliases"`
 	// TTL in seconds; 0 = use global TTL, -1 = never unload.
 	TTL *int `json:"ttl"`
+}
+
+// configModelPatchRequest is the body for PATCH /api/config/models/:id.
+type configModelPatchRequest struct {
+	Cmd         *string        `json:"cmd"`
+	Name        *string        `json:"name"`
+	Description *string        `json:"description"`
+	Aliases     *[]string      `json:"aliases"`
+	TTL         *int           `json:"ttl"`
+	CtxSize     *int           `json:"ctx_size"`
+	CtxSizeDash *int           `json:"ctx-size"`
+	NGPULayers  *int           `json:"n_gpu_layers"`
+	NGPUDash    *int           `json:"n-gpu-layers"`
+	Flags       map[string]any `json:"flags"`
 }
 
 // apiConfigInfo implements GET /api/config/info.
@@ -86,6 +101,34 @@ func (pm *ProxyManager) apiConfigAddModel(c *gin.Context) {
 
 	pm.triggerReload()
 	c.JSON(http.StatusOK, gin.H{"id": req.ID, "status": "added"})
+}
+
+// apiConfigPatchModel implements PATCH /api/config/models/:id.
+// It updates selected config fields and common llama-server flags without
+// requiring callers to reconstruct the whole command string.
+func (pm *ProxyManager) apiConfigPatchModel(c *gin.Context) {
+	id := c.Param("id")
+	realID, found := pm.config.RealModelName(id)
+	if !found {
+		pm.sendErrorResponse(c, http.StatusNotFound, "model not found in config")
+		return
+	}
+	if pm.configFile == "" {
+		pm.sendErrorResponse(c, http.StatusUnprocessableEntity, "config file path not set")
+		return
+	}
+
+	var req configModelPatchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		pm.sendErrorResponse(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := pm.patchModelInConfig(realID, req); err != nil {
+		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("write config: %v", err))
+		return
+	}
+	pm.triggerReload()
+	c.JSON(http.StatusOK, gin.H{"id": realID, "status": "updated"})
 }
 
 // apiConfigRemoveModel implements DELETE /api/config/models/:id.
@@ -177,6 +220,141 @@ func (pm *ProxyManager) writeModelToConfig(id string, mc *config.ModelConfig) er
 	return os.WriteFile(pm.configFile, out, 0o644)
 }
 
+// patchModelInConfig reads the config YAML, applies a partial model update, and
+// writes the result back while preserving unrelated top-level config keys.
+func (pm *ProxyManager) patchModelInConfig(id string, req configModelPatchRequest) error {
+	pm.configMu.Lock()
+	defer pm.configMu.Unlock()
+
+	raw, err := os.ReadFile(pm.configFile)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", pm.configFile, err)
+	}
+	var root map[string]any
+	if err := yaml.Unmarshal(raw, &root); err != nil {
+		return fmt.Errorf("parse %s: %w", pm.configFile, err)
+	}
+	models, _ := root["models"].(map[string]any)
+	if models == nil {
+		return fmt.Errorf("models section missing")
+	}
+	entry, _ := models[id].(map[string]any)
+	if entry == nil {
+		return fmt.Errorf("model %q not found", id)
+	}
+
+	if req.Cmd != nil {
+		entry["cmd"] = *req.Cmd
+	}
+	if req.Name != nil {
+		entry["name"] = *req.Name
+	}
+	if req.Description != nil {
+		entry["description"] = *req.Description
+	}
+	if req.Aliases != nil {
+		entry["aliases"] = *req.Aliases
+	}
+	if req.TTL != nil {
+		entry["ttl"] = *req.TTL
+	}
+
+	flags := make(map[string]string, len(req.Flags)+2)
+	for k, v := range req.Flags {
+		flags[normalizeCmdFlag(k)] = flagValueString(v)
+	}
+	if req.CtxSize != nil {
+		flags["--ctx-size"] = fmt.Sprint(*req.CtxSize)
+	}
+	if req.CtxSizeDash != nil {
+		flags["--ctx-size"] = fmt.Sprint(*req.CtxSizeDash)
+	}
+	if req.NGPULayers != nil {
+		flags["--n-gpu-layers"] = fmt.Sprint(*req.NGPULayers)
+	}
+	if req.NGPUDash != nil {
+		flags["--n-gpu-layers"] = fmt.Sprint(*req.NGPUDash)
+	}
+	if len(flags) > 0 {
+		cmd, _ := entry["cmd"].(string)
+		patched, err := patchCommandFlags(cmd, flags)
+		if err != nil {
+			return err
+		}
+		entry["cmd"] = patched
+	}
+
+	models[id] = entry
+	root["models"] = models
+	out, err := yaml.Marshal(root)
+	if err != nil {
+		return fmt.Errorf("marshal: %w", err)
+	}
+	return os.WriteFile(pm.configFile, out, 0o644)
+}
+
+func patchCommandFlags(cmd string, flags map[string]string) (string, error) {
+	parts, err := config.SanitizeCommand(cmd)
+	if err != nil {
+		return "", err
+	}
+	if len(parts) == 0 {
+		return "", fmt.Errorf("cmd is empty")
+	}
+
+	keys := make([]string, 0, len(flags))
+	for k := range flags {
+		keys = append(keys, normalizeCmdFlag(k))
+	}
+	sort.Strings(keys)
+
+	for _, flag := range keys {
+		value := strings.TrimSpace(flags[flag])
+		if value == "" {
+			continue
+		}
+		found := false
+		for i := 0; i < len(parts); i++ {
+			if parts[i] == flag && i+1 < len(parts) {
+				parts[i+1] = value
+				found = true
+				break
+			}
+			if strings.HasPrefix(parts[i], flag+"=") {
+				parts[i] = flag + "=" + value
+				found = true
+				break
+			}
+		}
+		if !found {
+			parts = append(parts, flag, value)
+		}
+	}
+	return strings.Join(parts, " "), nil
+}
+
+func normalizeCmdFlag(flag string) string {
+	flag = strings.TrimSpace(flag)
+	flag = strings.TrimPrefix(flag, "--")
+	return "--" + strings.ReplaceAll(flag, "_", "-")
+}
+
+func flagValueString(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case float64:
+		return fmt.Sprintf("%g", x)
+	case bool:
+		if x {
+			return "true"
+		}
+		return "false"
+	default:
+		return fmt.Sprint(x)
+	}
+}
+
 // removeModelFromConfig reads the config YAML, deletes models[id], and writes it back.
 func (pm *ProxyManager) removeModelFromConfig(id string) error {
 	pm.configMu.Lock()
@@ -212,7 +390,7 @@ func (pm *ProxyManager) buildCmd(modelPath, extraFlags string) string {
 	// Use the first model's cmd as a structural template: keep everything up
 	// to (and including) --model, replace the path, drop the old path value.
 	for _, mc := range pm.config.Models {
-		parts, err := sanitizeCommand(mc.Cmd)
+		parts, err := config.SanitizeCommand(mc.Cmd)
 		if err != nil || len(parts) == 0 {
 			continue
 		}

@@ -33,13 +33,14 @@ func addApiHandlers(pm *ProxyManager) {
 		apiGroup.POST("/models/unload", pm.apiUnloadAllModels)
 		apiGroup.POST("/models/unload/*model", pm.apiUnloadSingleModelHandler)
 		apiGroup.POST("/models/load/*model", pm.apiLoadSingleModelHandler)
-		apiGroup.GET("/models/:model", pm.apiGetModelHandler)
-		apiGroup.DELETE("/models/:model", pm.apiDeleteModel)
+		apiGroup.GET("/models/*model", pm.apiGetModelHandler)
+		apiGroup.DELETE("/models/*model", pm.apiDeleteModel)
 		apiGroup.POST("/models/pull", pm.apiPullModel)
 		apiGroup.GET("/ps", pm.apiPSHandler)
 		apiGroup.GET("/storage", pm.apiGetStorage)
 		apiGroup.GET("/config/info", pm.apiConfigInfo)
 		apiGroup.POST("/config/models", pm.apiConfigAddModel)
+		apiGroup.PATCH("/config/models/:id", pm.apiConfigPatchModel)
 		apiGroup.DELETE("/config/models/:id", pm.apiConfigRemoveModel)
 		apiGroup.POST("/config/reload", pm.apiConfigReload)
 		apiGroup.GET("/events", pm.apiSendEvents)
@@ -371,9 +372,9 @@ func (pm *ProxyManager) apiLoadSingleModelHandler(c *gin.Context) {
 	if pm.matrix != nil {
 		loadErr = pm.matrix.ProxyRequest(realModelName, dw, req)
 	} else {
-		processGroup := pm.findGroupByModelName(realModelName)
-		if processGroup == nil {
-			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("process group not found for model %s", requestedModel))
+		processGroup, swapErr := pm.swapProcessGroup(realModelName)
+		if swapErr != nil {
+			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error loading model: %s", swapErr.Error()))
 			return
 		}
 		loadErr = processGroup.ProxyRequest(realModelName, dw, req)
@@ -389,7 +390,7 @@ func (pm *ProxyManager) apiLoadSingleModelHandler(c *gin.Context) {
 // Returns the model's configuration and current runtime state.
 // Useful for polling a specific model's state without fetching all models.
 func (pm *ProxyManager) apiGetModelHandler(c *gin.Context) {
-	requestedModel := c.Param("model")
+	requestedModel := strings.TrimPrefix(c.Param("model"), "/")
 	realModelName, found := pm.config.RealModelName(requestedModel)
 	if !found {
 		pm.sendErrorResponse(c, http.StatusNotFound, "Model not found")

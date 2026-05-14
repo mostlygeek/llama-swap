@@ -12,8 +12,8 @@ import (
 	"github.com/mostlygeek/llama-swap/proxy/config"
 )
 
-// TestParseModelPath verifies extraction of the model file path from a cmd string.
-func TestParseModelPath(t *testing.T) {
+// TestProxyManager_parseModelPath verifies extraction of the model file path from a cmd string.
+func TestProxyManager_parseModelPath(t *testing.T) {
 	cases := []struct {
 		cmd  string
 		want string
@@ -34,8 +34,8 @@ func TestParseModelPath(t *testing.T) {
 	}
 }
 
-// TestResolveHFSource verifies URL and filename parsing for HuggingFace model identifiers.
-func TestResolveHFSource(t *testing.T) {
+// TestProxyManager_resolveHFSource verifies URL and filename parsing for HuggingFace model identifiers.
+func TestProxyManager_resolveHFSource(t *testing.T) {
 	cases := []struct {
 		model    string
 		wantURL  string
@@ -52,13 +52,29 @@ func TestResolveHFSource(t *testing.T) {
 			wantURL:  "https://huggingface.co/owner/repo/resolve/main/model.gguf",
 			wantFile: "model.gguf",
 		},
+		// localhost HTTP is allowed (tests / local servers)
+		{
+			model:    "http://127.0.0.1:8080/model.gguf",
+			wantURL:  "http://127.0.0.1:8080/model.gguf",
+			wantFile: "model.gguf",
+		},
 		{
 			model:   "bad-format",
 			wantErr: true,
 		},
+		// SSRF: non-HuggingFace remote host rejected
+		{
+			model:   "https://evil.example.com/model.gguf",
+			wantErr: true,
+		},
+		// Plain HTTP to remote host rejected
+		{
+			model:   "http://huggingface.co/owner/repo/resolve/main/model.gguf",
+			wantErr: true,
+		},
 	}
 	for _, tc := range cases {
-		url, file, err := resolveHFSource(tc.model)
+		gotURL, file, err := resolveHFSource(tc.model)
 		if tc.wantErr {
 			if err == nil {
 				t.Errorf("resolveHFSource(%q) expected error, got nil", tc.model)
@@ -68,8 +84,8 @@ func TestResolveHFSource(t *testing.T) {
 		if err != nil {
 			t.Fatalf("resolveHFSource(%q) unexpected error: %v", tc.model, err)
 		}
-		if url != tc.wantURL {
-			t.Errorf("url = %q, want %q", url, tc.wantURL)
+		if gotURL != tc.wantURL {
+			t.Errorf("url = %q, want %q", gotURL, tc.wantURL)
 		}
 		if file != tc.wantFile {
 			t.Errorf("filename = %q, want %q", file, tc.wantFile)
@@ -77,8 +93,8 @@ func TestResolveHFSource(t *testing.T) {
 	}
 }
 
-// TestAPIGetStorage verifies disk info is returned for the configured models dir.
-func TestAPIGetStorage(t *testing.T) {
+// TestProxyManager_apiGetStorage verifies disk info is returned for the configured models dir.
+func TestProxyManager_apiGetStorage(t *testing.T) {
 	dir := t.TempDir()
 	pm := New(config.Config{
 		ModelsDir: dir,
@@ -111,7 +127,7 @@ func TestAPIGetStorage(t *testing.T) {
 }
 
 // TestAPIGetStorageInferred verifies the models dir is inferred from cmd when not configured.
-func TestAPIGetStorageInferred(t *testing.T) {
+func TestProxyManager_apiGetStorageInferred(t *testing.T) {
 	dir := t.TempDir()
 	modelFile := filepath.Join(dir, "model.gguf")
 	pm := New(config.Config{
@@ -141,7 +157,7 @@ func TestAPIGetStorageInferred(t *testing.T) {
 }
 
 // TestAPIPullModel verifies streaming download against a local test server.
-func TestAPIPullModel(t *testing.T) {
+func TestProxyManager_apiPullModel(t *testing.T) {
 	fileContent := strings.Repeat("X", 1024)
 
 	// Fake HuggingFace origin server.
@@ -190,7 +206,7 @@ func TestAPIPullModel(t *testing.T) {
 }
 
 // TestAPIPullModelSubdir verifies files land in the requested subdirectory.
-func TestAPIPullModelSubdir(t *testing.T) {
+func TestProxyManager_apiPullModelSubdir(t *testing.T) {
 	fileContent := strings.Repeat("Y", 512)
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -229,8 +245,9 @@ func TestAPIPullModelSubdir(t *testing.T) {
 	}
 }
 
-// TestAPIPullModelGated verifies a 401 from HF propagates as an error response.
-func TestAPIPullModelGated(t *testing.T) {
+// TestProxyManager_apiPullModelGated verifies a 401 from HF propagates as an error response
+// with the correct status code and a gated-token hint in the body.
+func TestProxyManager_apiPullModelGated(t *testing.T) {
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
@@ -255,10 +272,80 @@ func TestAPIPullModelGated(t *testing.T) {
 	if w.Code != http.StatusUnauthorized && w.Code != http.StatusForbidden {
 		t.Errorf("expected 401 or 403, got %d: %s", w.Code, w.Body.String())
 	}
+	var errResp map[string]any
+	if jsonErr := json.NewDecoder(w.Body).Decode(&errResp); jsonErr != nil {
+		t.Fatalf("response body is not valid JSON: %v", jsonErr)
+	}
+	errMsg, _ := errResp["error"].(string)
+	if !strings.Contains(errMsg, "gated") && !strings.Contains(errMsg, "token") {
+		t.Errorf("error body %q should mention gated/token hint", errMsg)
+	}
+}
+
+// TestProxyManager_apiPullModelStreaming verifies ndjson streaming emits downloading + success events.
+func TestProxyManager_apiPullModelStreaming(t *testing.T) {
+	fileContent := strings.Repeat("Z", 2048)
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Length", "2048")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(fileContent))
+	}))
+	defer origin.Close()
+
+	dir := t.TempDir()
+	pm := New(config.Config{
+		ModelsDir: dir,
+		Models: map[string]config.ModelConfig{
+			"stub": {Cmd: "echo", Proxy: "http://localhost:${PORT}"},
+		},
+	})
+	defer pm.StopProcesses(StopImmediately)
+
+	modelURL := origin.URL + "/stream.gguf"
+	// Omit "stream" field so it defaults to true.
+	body := strings.NewReader(`{"model":"` + modelURL + `"}`)
+	w := CreateTestResponseRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/models/pull", body)
+	req.Header.Set("Content-Type", "application/json")
+	pm.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST /api/models/pull (stream): %d %s", w.Code, w.Body.String())
+	}
+
+	// Parse ndjson lines.
+	var events []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(w.Body.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var ev map[string]any
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Fatalf("invalid ndjson line %q: %v", line, err)
+		}
+		events = append(events, ev)
+	}
+
+	var sawDownloading, sawSuccess bool
+	for _, ev := range events {
+		switch ev["status"] {
+		case "downloading":
+			sawDownloading = true
+		case "success":
+			sawSuccess = true
+		}
+	}
+	if !sawDownloading {
+		t.Error("no 'downloading' event in ndjson stream")
+	}
+	if !sawSuccess {
+		t.Error("no 'success' event in ndjson stream")
+	}
 }
 
 // TestAPIDeleteModel verifies the model file is deleted from disk.
-func TestAPIDeleteModel(t *testing.T) {
+func TestProxyManager_apiDeleteModel(t *testing.T) {
 	dir := t.TempDir()
 	modelFile := filepath.Join(dir, "model.gguf")
 	if err := os.WriteFile(modelFile, []byte("fake weights"), 0o644); err != nil {
@@ -295,7 +382,7 @@ func TestAPIDeleteModel(t *testing.T) {
 }
 
 // TestAPIDeleteModelNotFound verifies 404 for an unknown model ID.
-func TestAPIDeleteModelNotFound(t *testing.T) {
+func TestProxyManager_apiDeleteModelNotFound(t *testing.T) {
 	pm := New(config.Config{
 		Models: map[string]config.ModelConfig{
 			"stub": {Cmd: "echo", Proxy: "http://localhost:${PORT}"},

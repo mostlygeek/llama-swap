@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
-	"syscall"
 
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/proxy/config"
@@ -17,7 +18,7 @@ import (
 // parseModelPath extracts the local file path from a model's cmd string by
 // finding the argument after -m or --model. Returns "" if none found.
 func parseModelPath(cmd string) string {
-	parts, err := sanitizeCommand(cmd)
+	parts, err := config.SanitizeCommand(cmd)
 	if err != nil || len(parts) == 0 {
 		return ""
 	}
@@ -33,76 +34,29 @@ func parseModelPath(cmd string) string {
 	return ""
 }
 
-// sanitizeCommand splits a shell-like command string into args, respecting quotes.
-func sanitizeCommand(cmd string) ([]string, error) {
-	var args []string
-	var current strings.Builder
-	inSingle, inDouble := false, false
-
-	for _, r := range cmd {
-		switch {
-		case r == '\'' && !inDouble:
-			inSingle = !inSingle
-		case r == '"' && !inSingle:
-			inDouble = !inDouble
-		case (r == ' ' || r == '\t' || r == '\n' || r == '\r') && !inSingle && !inDouble:
-			if current.Len() > 0 {
-				args = append(args, current.String())
-				current.Reset()
-			}
-		default:
-			current.WriteRune(r)
-		}
-	}
-	if current.Len() > 0 {
-		args = append(args, current.String())
-	}
-	return args, nil
-}
-
 // modelsDir returns the configured models directory, or infers it from model cmds.
+// Keys are iterated in sorted order for deterministic results.
 func (pm *ProxyManager) modelsDir() string {
 	if pm.config.ModelsDir != "" {
 		return pm.config.ModelsDir
 	}
-	// Infer from the first model that has a resolvable path.
-	for _, mc := range pm.config.Models {
-		if p := parseModelPath(mc.Cmd); p != "" {
+	// Infer from the first model (sorted) that has a resolvable path.
+	ids := make([]string, 0, len(pm.config.Models))
+	for id := range pm.config.Models {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		if p := parseModelPath(pm.config.Models[id].Cmd); p != "" {
 			return filepath.Dir(p)
 		}
 	}
 	return ""
 }
 
-// apiGetStorage implements GET /api/storage.
-// Returns disk space for the models directory (configured or inferred).
-func (pm *ProxyManager) apiGetStorage(c *gin.Context) {
-	dir := pm.modelsDir()
-	if dir == "" {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"error": "models directory unknown; set modelsDir in config or use --models-dir flag",
-		})
-		return
-	}
-
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(dir, &stat); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("statfs %s: %v", dir, err)})
-		return
-	}
-
-	blockSize := uint64(stat.Bsize)
-	c.JSON(http.StatusOK, gin.H{
-		"models_dir":      dir,
-		"total_bytes":     stat.Blocks * blockSize,
-		"available_bytes": stat.Bavail * blockSize,
-		"used_bytes":      (stat.Blocks - stat.Bfree) * blockSize,
-	})
-}
-
 // pullRequest is the body for POST /api/models/pull.
 type pullRequest struct {
-	// Model identifier: "owner/repo/filename.gguf" or a full HuggingFace URL.
+	// Model identifier: "owner/repo/filename.gguf" or a full HuggingFace HTTPS URL.
 	Model string `json:"model" binding:"required"`
 	// HF bearer token; overrides the HF_TOKEN environment variable.
 	Token string `json:"token"`
@@ -133,12 +87,35 @@ type pullRegister struct {
 	TTL *int `json:"ttl"`
 }
 
+// isHuggingFaceHost returns true if host is huggingface.co or a subdomain.
+func isHuggingFaceHost(host string) bool {
+	h := strings.ToLower(host)
+	return h == "huggingface.co" || strings.HasSuffix(h, ".huggingface.co")
+}
+
 // resolveHFSource parses a model identifier into a download URL and destination filename.
 // Accepts:
-//   - full URL:  https://huggingface.co/owner/repo/resolve/main/file.gguf
-//   - short:     owner/repo/file.gguf  (resolve/main inferred)
+//   - full HTTPS URL: https://huggingface.co/owner/repo/resolve/main/file.gguf
+//   - short form:     owner/repo/file.gguf  (resolve/main inferred)
+//
+// For full URLs, the host must be huggingface.co or a subdomain (prevents SSRF),
+// with an exception for localhost/127.0.0.1 (used in tests and local servers).
 func resolveHFSource(model string) (downloadURL, filename string, err error) {
 	if strings.HasPrefix(model, "https://") || strings.HasPrefix(model, "http://") {
+		u, parseErr := url.Parse(model)
+		if parseErr != nil {
+			return "", "", fmt.Errorf("invalid URL: %v", parseErr)
+		}
+		host := strings.ToLower(u.Hostname())
+		isLoopback := host == "localhost" || host == "127.0.0.1" || host == "::1"
+		if !isLoopback {
+			if u.Scheme != "https" {
+				return "", "", fmt.Errorf("only HTTPS URLs are supported for remote downloads")
+			}
+			if !isHuggingFaceHost(host) {
+				return "", "", fmt.Errorf("URL host %q is not allowed; only huggingface.co domains are supported", host)
+			}
+		}
 		// strip query string for filename detection
 		clean := model
 		if idx := strings.Index(clean, "?"); idx != -1 {
@@ -151,7 +128,7 @@ func resolveHFSource(model string) (downloadURL, filename string, err error) {
 	// Expect owner/repo/filename.gguf
 	parts := strings.SplitN(model, "/", 3)
 	if len(parts) != 3 {
-		return "", "", fmt.Errorf("model must be 'owner/repo/filename.gguf' or a full HuggingFace URL, got %q", model)
+		return "", "", fmt.Errorf("model must be 'owner/repo/filename.gguf' or a full HuggingFace HTTPS URL, got %q", model)
 	}
 	owner, repo, file := parts[0], parts[1], parts[2]
 	filename = filepath.Base(file)
@@ -178,6 +155,7 @@ type pullProgress struct {
 
 // apiPullModel implements POST /api/models/pull.
 // Downloads a model from HuggingFace to the models directory, streaming progress.
+// HTTP status is determined before streaming begins so errors always carry the correct code.
 func (pm *ProxyManager) apiPullModel(c *gin.Context) {
 	var req pullRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -194,7 +172,6 @@ func (pm *ProxyManager) apiPullModel(c *gin.Context) {
 	}
 	dir := baseDir
 	if req.Subdir != "" {
-		// Sanitize: reject any path traversal attempts.
 		clean := filepath.Clean(req.Subdir)
 		if strings.Contains(clean, "..") || filepath.IsAbs(clean) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid subdir: path traversal detected"})
@@ -210,6 +187,41 @@ func (pm *ProxyManager) apiPullModel(c *gin.Context) {
 	downloadURL, filename, err := resolveHFSource(req.Model)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Only attach the bearer token to HuggingFace hosts to avoid leaking credentials.
+	token := ""
+	if u, parseErr := url.Parse(downloadURL); parseErr == nil && isHuggingFaceHost(u.Hostname()) {
+		token = hfToken(req.Token)
+	}
+
+	hreq, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, downloadURL, nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if token != "" {
+		hreq.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	resp, err := http.DefaultClient.Do(hreq)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	// Verify upstream status before committing to a stream response.
+	// This ensures errors always carry the correct HTTP status code.
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		msg := fmt.Sprintf("HuggingFace returned %d — model may be gated; provide a token", resp.StatusCode)
+		c.JSON(resp.StatusCode, gin.H{"error": msg})
+		return
+	}
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(b))})
 		return
 	}
 
@@ -230,57 +242,11 @@ func (pm *ProxyManager) apiPullModel(c *gin.Context) {
 		}
 	}
 
-	sendJSON(pullProgress{Status: "resolving", Filename: filename})
-
-	token := hfToken(req.Token)
-	hreq, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, downloadURL, nil)
-	if err != nil {
-		sendJSON(pullProgress{Status: "error", Error: err.Error()})
-		if !stream {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
-		return
-	}
-	if token != "" {
-		hreq.Header.Set("Authorization", "Bearer "+token)
-	}
-
-	resp, err := http.DefaultClient.Do(hreq)
-	if err != nil {
-		sendJSON(pullProgress{Status: "error", Error: err.Error()})
-		if !stream {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		msg := fmt.Sprintf("HuggingFace returned %d — model may be gated; provide a token", resp.StatusCode)
-		sendJSON(pullProgress{Status: "error", Error: msg})
-		if !stream {
-			c.JSON(resp.StatusCode, gin.H{"error": msg})
-		}
-		return
-	}
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		msg := fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(b))
-		sendJSON(pullProgress{Status: "error", Error: msg})
-		if !stream {
-			c.JSON(http.StatusBadGateway, gin.H{"error": msg})
-		}
-		return
-	}
-
 	dest := filepath.Join(dir, filename)
-	// Prevent path traversal.
-	if !strings.HasPrefix(filepath.Clean(dest), filepath.Clean(dir)) {
-		msg := "invalid filename: path traversal detected"
-		sendJSON(pullProgress{Status: "error", Error: msg})
-		if !stream {
-			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
-		}
+	// Prevent path traversal via filename using Rel-based check.
+	rel, relErr := filepath.Rel(filepath.Clean(dir), filepath.Clean(dest))
+	if relErr != nil || strings.HasPrefix(rel, "..") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid filename: path traversal detected"})
 		return
 	}
 
@@ -288,10 +254,7 @@ func (pm *ProxyManager) apiPullModel(c *gin.Context) {
 	tmp := dest + ".part"
 	f, err := os.Create(tmp)
 	if err != nil {
-		sendJSON(pullProgress{Status: "error", Error: err.Error()})
-		if !stream {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -334,7 +297,16 @@ func (pm *ProxyManager) apiPullModel(c *gin.Context) {
 			return
 		}
 	}
-	f.Close()
+
+	// Check close error before rename to avoid promoting a truncated file.
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		sendJSON(pullProgress{Status: "error", Error: err.Error()})
+		if !stream {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
 
 	if err := os.Rename(tmp, dest); err != nil {
 		os.Remove(tmp)
@@ -352,7 +324,6 @@ func (pm *ProxyManager) apiPullModel(c *gin.Context) {
 		reg := req.Register
 		id := reg.ID
 		if id == "" {
-			// Default to filename without extension.
 			base := filename
 			if i := len(base) - len(".gguf"); i > 0 && strings.HasSuffix(base, ".gguf") {
 				base = base[:i]
@@ -383,7 +354,7 @@ func (pm *ProxyManager) apiPullModel(c *gin.Context) {
 	}
 }
 
-// apiDeleteModel implements DELETE /api/models/:model.
+// apiDeleteModel implements DELETE /api/models/*model.
 // Unloads the model (if running) then deletes its weight file from disk.
 // The config entry is preserved — the model will fail to start until the file
 // is restored or the config entry is removed.

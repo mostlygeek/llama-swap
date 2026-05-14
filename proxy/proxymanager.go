@@ -599,8 +599,13 @@ func (pm *ProxyManager) swapProcessGroup(realModelName string) (*ProcessGroup, e
 }
 
 // modelProcessState returns the current state string for a model ID.
+// Resolves aliases to their canonical ID before lookup.
 // Returns "stopped" if the model has no running process.
 func (pm *ProxyManager) modelProcessState(modelID string) (state string, loaded bool) {
+	// Resolve alias to canonical ID so alias rows report correct runtime state.
+	if canonical, found := pm.config.RealModelName(modelID); found {
+		modelID = canonical
+	}
 	var process *Process
 	if pm.matrix != nil {
 		process, _ = pm.matrix.GetProcess(modelID)
@@ -619,10 +624,12 @@ func (pm *ProxyManager) modelProcessState(modelID string) (state string, loaded 
 		return "starting", false
 	case StateStopping:
 		return "stopping", false
+	case StateStopped:
+		return "stopped", false
 	case StateShutdown:
 		return "shutdown", false
 	default:
-		return "stopped", false
+		return "unknown", false
 	}
 }
 
