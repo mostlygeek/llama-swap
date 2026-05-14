@@ -21,6 +21,8 @@ func TestParseModelPath(t *testing.T) {
 		{"llama-server --port 8080 --model /mnt/models/foo.gguf --host 127.0.0.1", "/mnt/models/foo.gguf"},
 		{"llama-server -m /mnt/models/bar.gguf --port ${PORT}", "/mnt/models/bar.gguf"},
 		{"llama-server --model=/mnt/models/baz.gguf --port 8080", "/mnt/models/baz.gguf"},
+		// multiline YAML block scalar (| style) embeds \n between arguments
+		{"llama-server --port ${PORT}\n  --model /mnt/models/foo.gguf\n  --ctx-size 16384", "/mnt/models/foo.gguf"},
 		{"llama-server --port 8080 --host 127.0.0.1", ""},
 		{"", ""},
 	}

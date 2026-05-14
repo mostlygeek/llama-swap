@@ -44,7 +44,7 @@ func sanitizeCommand(cmd string) ([]string, error) {
 			inSingle = !inSingle
 		case r == '"' && !inSingle:
 			inDouble = !inDouble
-		case (r == ' ' || r == '\t') && !inSingle && !inDouble:
+		case (r == ' ' || r == '\t' || r == '\n' || r == '\r') && !inSingle && !inDouble:
 			if current.Len() > 0 {
 				args = append(args, current.String())
 				current.Reset()
