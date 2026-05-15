@@ -777,6 +777,124 @@ data: [DONE]
 		assert.Equal(t, 23, metrics[0].Tokens.OutputTokens)
 	})
 
+	t.Run("v1/responses full stream with deltas, output, and cached tokens", func(t *testing.T) {
+		mm := newMetricsMonitor(testLogger, 10, 0)
+
+		// Realistic v1/responses stream: multiple delta events followed by
+		// done/completed events. Usage lives on response.completed and includes
+		// the OpenAI Responses cached-token shape (input_tokens_details.cached_tokens).
+		responseBody := "event: response.created\n" +
+			`data: {"type":"response.created","response":{"id":"resp_1","status":"in_progress"}}` + "\n\n" +
+			"event: response.output_item.added\n" +
+			`data: {"type":"response.output_item.added","item":{"id":"msg_1","role":"assistant","status":"in_progress","type":"message"}}` + "\n\n" +
+			"event: response.content_part.added\n" +
+			`data: {"type":"response.content_part.added","item_id":"msg_1","part":{"type":"output_text","text":""}}` + "\n\n" +
+			"event: response.output_text.delta\n" +
+			`data: {"type":"response.output_text.delta","item_id":"msg_1","delta":"Hello"}` + "\n\n" +
+			"event: response.output_text.delta\n" +
+			`data: {"type":"response.output_text.delta","item_id":"msg_1","delta":" world"}` + "\n\n" +
+			"event: response.output_text.done\n" +
+			`data: {"type":"response.output_text.done","item_id":"msg_1","text":"Hello world"}` + "\n\n" +
+			"event: response.content_part.done\n" +
+			`data: {"type":"response.content_part.done","item_id":"msg_1","part":{"type":"output_text","text":"Hello world"}}` + "\n\n" +
+			"event: response.output_item.done\n" +
+			`data: {"type":"response.output_item.done","item":{"type":"message","status":"completed","id":"msg_1","content":[{"type":"output_text","text":"Hello world"}],"role":"assistant"}}` + "\n\n" +
+			"event: response.completed\n" +
+			`data: {"type":"response.completed","response":{"id":"resp_1","object":"response","status":"completed","model":"test-model","output":[{"type":"message","status":"completed","id":"msg_1","content":[{"type":"output_text","text":"Hello world"}],"role":"assistant"}],"usage":{"input_tokens":14,"output_tokens":24,"total_tokens":38,"input_tokens_details":{"cached_tokens":13}}}}` + "\n\n"
+
+		nextHandler := func(modelID string, w http.ResponseWriter, r *http.Request) error {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(responseBody))
+			return nil
+		}
+
+		req := httptest.NewRequest("POST", "/v1/responses", nil)
+		rec := httptest.NewRecorder()
+		ginCtx, _ := gin.CreateTestContext(rec)
+
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, captureAll, nextHandler)
+		assert.NoError(t, err)
+
+		metrics := mm.getMetrics()
+		assert.Equal(t, 1, len(metrics))
+		assert.Equal(t, "test-model", metrics[0].Model)
+		assert.Equal(t, 14, metrics[0].Tokens.InputTokens)
+		assert.Equal(t, 24, metrics[0].Tokens.OutputTokens)
+		assert.Equal(t, 13, metrics[0].Tokens.CachedTokens)
+	})
+
+	t.Run("v1/messages merges usage from message_start and message_delta", func(t *testing.T) {
+		mm := newMetricsMonitor(testLogger, 10, 0)
+
+		// v1/messages splits usage across two events:
+		//   message_start.message.usage has input_tokens + cache_read_input_tokens
+		//   message_delta.usage has the final output_tokens
+		// Without merging, output_tokens (last seen) would clobber the input fields.
+		responseBody := "event: message_start\n" +
+			`data: {"type":"message_start","message":{"id":"m1","type":"message","role":"assistant","content":[],"model":"test-model","usage":{"cache_read_input_tokens":5,"input_tokens":9,"output_tokens":0}}}` + "\n\n" +
+			"event: content_block_start\n" +
+			`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}` + "\n\n" +
+			"event: content_block_delta\n" +
+			`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}` + "\n\n" +
+			"event: content_block_delta\n" +
+			`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" there"}}` + "\n\n" +
+			"event: content_block_stop\n" +
+			`data: {"type":"content_block_stop","index":0}` + "\n\n" +
+			"event: message_delta\n" +
+			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":24}}` + "\n\n" +
+			"event: message_stop\n" +
+			`data: {"type":"message_stop"}` + "\n\n"
+
+		nextHandler := func(modelID string, w http.ResponseWriter, r *http.Request) error {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(responseBody))
+			return nil
+		}
+
+		req := httptest.NewRequest("POST", "/v1/messages", nil)
+		rec := httptest.NewRecorder()
+		ginCtx, _ := gin.CreateTestContext(rec)
+
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, captureAll, nextHandler)
+		assert.NoError(t, err)
+
+		metrics := mm.getMetrics()
+		assert.Equal(t, 1, len(metrics))
+		assert.Equal(t, 9, metrics[0].Tokens.InputTokens)
+		assert.Equal(t, 24, metrics[0].Tokens.OutputTokens)
+		assert.Equal(t, 5, metrics[0].Tokens.CachedTokens)
+	})
+
+	t.Run("v1/chat/completions OpenAI prompt_tokens_details.cached_tokens", func(t *testing.T) {
+		mm := newMetricsMonitor(testLogger, 10, 0)
+
+		responseBody := `data: {"choices":[{"delta":{"content":"hi"}}]}` + "\n\n" +
+			`data: {"choices":[{"delta":{}}],"usage":{"prompt_tokens":50,"completion_tokens":12,"prompt_tokens_details":{"cached_tokens":42}}}` + "\n\n" +
+			"data: [DONE]\n\n"
+
+		nextHandler := func(modelID string, w http.ResponseWriter, r *http.Request) error {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(responseBody))
+			return nil
+		}
+
+		req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+		rec := httptest.NewRecorder()
+		ginCtx, _ := gin.CreateTestContext(rec)
+
+		err := mm.wrapHandler("test-model", ginCtx.Writer, req, captureAll, nextHandler)
+		assert.NoError(t, err)
+
+		metrics := mm.getMetrics()
+		assert.Equal(t, 1, len(metrics))
+		assert.Equal(t, 50, metrics[0].Tokens.InputTokens)
+		assert.Equal(t, 12, metrics[0].Tokens.OutputTokens)
+		assert.Equal(t, 42, metrics[0].Tokens.CachedTokens)
+	})
+
 	t.Run("handles empty streaming response records minimal metrics", func(t *testing.T) {
 		mm := newMetricsMonitor(testLogger, 10, 0)
 
