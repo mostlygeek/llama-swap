@@ -85,8 +85,8 @@ fi
 if [[ "$BACKEND" == "cuda" ]]; then
     CUDA_VERSION="12.9.1"
     if [[ -z "$CLI_CUDA_ARCHITECTURES" ]]; then
-        # For CUDA 12, default to a broader set of architectures including some older ones
-        CMAKE_CUDA_ARCHITECTURES="60;61;75;86;89;120;121"
+        # For CUDA 12, default to older set of architectures
+        CMAKE_CUDA_ARCHITECTURES="60;61;75;86;89"
     fi
 fi
 
