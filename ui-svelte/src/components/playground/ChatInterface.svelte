@@ -1,7 +1,7 @@
 <script lang="ts">
   import { models } from "../../stores/api";
   import { persistentStore } from "../../stores/persistent";
-  import { streamChatCompletion } from "../../lib/chatApi";
+  import { streamChatCompletion, type Endpoint } from "../../lib/chatApi";
   import { playgroundStores } from "../../stores/playgroundActivity";
   import type { ChatMessage, ContentPart } from "../../lib/types";
   import ChatMessageComponent from "./ChatMessage.svelte";
@@ -11,6 +11,8 @@
   const selectedModelStore = persistentStore<string>("playground-selected-model", "");
   const systemPromptStore = persistentStore<string>("playground-system-prompt", "");
   const temperatureStore = persistentStore<number>("playground-temperature", 0.7);
+  const endpointStore = persistentStore<Endpoint>("playground-endpoint", "v1/chat/completions");
+  const maxTokensStore = persistentStore<number>("playground-max-tokens", 4096);
 
   function loadMessages(): ChatMessage[] {
     try {
@@ -142,7 +144,7 @@
         $selectedModelStore,
         apiMessages,
         abortController.signal,
-        { temperature: $temperatureStore }
+        { temperature: $temperatureStore, endpoint: $endpointStore, max_tokens: $maxTokensStore }
       );
 
       for await (const chunk of stream) {
@@ -320,6 +322,19 @@
   {#if showSettings}
     <div class="shrink-0 mb-4 p-4 bg-surface border border-gray-200 dark:border-white/10 rounded">
       <div class="mb-4">
+        <label class="block text-sm font-medium mb-1" for="endpoint">Endpoint</label>
+        <select
+          id="endpoint"
+          class="w-full px-3 py-2 rounded border border-gray-200 dark:border-white/10 bg-card focus:outline-none focus:ring-2 focus:ring-primary"
+          bind:value={$endpointStore}
+          disabled={isStreaming}
+        >
+          <option value="v1/chat/completions">/v1/chat/completions</option>
+          <option value="v1/messages">/v1/messages</option>
+          <option value="v1/responses">/v1/responses</option>
+        </select>
+      </div>
+      <div class="mb-4">
         <label class="block text-sm font-medium mb-1" for="system-prompt">System Prompt</label>
         <textarea
           id="system-prompt"
@@ -330,7 +345,7 @@
           disabled={isStreaming}
         ></textarea>
       </div>
-      <div>
+      <div class="mb-4">
         <label class="block text-sm font-medium mb-1" for="temperature">
           Temperature: {$temperatureStore.toFixed(2)}
         </label>
@@ -348,6 +363,18 @@
           <span>Precise (0)</span>
           <span>Creative (2)</span>
         </div>
+      </div>
+      <div>
+        <label class="block text-sm font-medium mb-1" for="max-tokens">Max Tokens</label>
+        <input
+          id="max-tokens"
+          type="number"
+          min="1"
+          class="w-full px-3 py-2 rounded border border-gray-200 dark:border-white/10 bg-card focus:outline-none focus:ring-2 focus:ring-primary"
+          bind:value={$maxTokensStore}
+          disabled={isStreaming}
+        />
+        <p class="text-xs text-txtsecondary mt-1">Required for /v1/messages.</p>
       </div>
     </div>
   {/if}
