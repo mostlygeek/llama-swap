@@ -8,7 +8,6 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -233,15 +232,9 @@ func (pm *ProxyManager) apiGetResources(c *gin.Context) {
 
 	// Storage
 	if dir := pm.modelsDir(); dir != "" {
-		var st syscall.Statfs_t
-		if err := syscall.Statfs(dir, &st); err == nil {
-			bs := uint64(st.Bsize)
-			resp["storage"] = gin.H{
-				"models_dir":      dir,
-				"total_bytes":     st.Blocks * bs,
-				"available_bytes": st.Bavail * bs,
-				"used_bytes":      (st.Blocks - st.Bfree) * bs,
-			}
+		if stats, ok := diskStorageStats(dir); ok {
+			stats["models_dir"] = dir
+			resp["storage"] = stats
 		}
 	}
 

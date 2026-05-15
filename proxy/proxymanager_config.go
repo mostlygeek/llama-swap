@@ -175,93 +175,85 @@ func (pm *ProxyManager) triggerReload() {
 }
 
 // writeModelToConfig reads the config YAML, sets models[id] = mc, and writes it back.
+// Uses yaml.Node to preserve comments, key ordering, and node styles in the rest of the file.
 func (pm *ProxyManager) writeModelToConfig(id string, mc *config.ModelConfig) error {
 	pm.configMu.Lock()
 	defer pm.configMu.Unlock()
 
-	raw, err := os.ReadFile(pm.configFile)
+	root, err := readYAMLRoot(pm.configFile)
 	if err != nil {
-		return fmt.Errorf("read %s: %w", pm.configFile, err)
+		return err
 	}
 
-	// Unmarshal into a generic map to preserve all top-level keys.
-	var root map[string]any
-	if err := yaml.Unmarshal(raw, &root); err != nil {
-		return fmt.Errorf("parse %s: %w", pm.configFile, err)
-	}
-	if root == nil {
-		root = make(map[string]any)
+	modelsNode := yamlMapGet(root, "models")
+	if modelsNode == nil {
+		modelsNode = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		yamlMapSet(root, "models", modelsNode)
 	}
 
-	models, _ := root["models"].(map[string]any)
-	if models == nil {
-		models = make(map[string]any)
-	}
-
-	entry := map[string]any{
-		"cmd":   mc.Cmd,
-		"proxy": mc.Proxy,
+	entry := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	yamlMapSet(entry, "cmd", yamlScalar(mc.Cmd))
+	if mc.Proxy != "" {
+		yamlMapSet(entry, "proxy", yamlScalar(mc.Proxy))
 	}
 	if mc.Name != "" {
-		entry["name"] = mc.Name
+		yamlMapSet(entry, "name", yamlScalar(mc.Name))
 	}
 	if mc.Description != "" {
-		entry["description"] = mc.Description
+		yamlMapSet(entry, "description", yamlScalar(mc.Description))
 	}
 	if len(mc.Aliases) > 0 {
-		entry["aliases"] = mc.Aliases
+		seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+		for _, a := range mc.Aliases {
+			seq.Content = append(seq.Content, yamlScalar(a))
+		}
+		yamlMapSet(entry, "aliases", seq)
 	}
 	if mc.UnloadAfter != config.MODEL_CONFIG_DEFAULT_TTL {
-		entry["ttl"] = mc.UnloadAfter
+		yamlMapSet(entry, "ttl", yamlInt(mc.UnloadAfter))
 	}
+	yamlMapSet(modelsNode, id, entry)
 
-	models[id] = entry
-	root["models"] = models
-
-	out, err := yaml.Marshal(root)
-	if err != nil {
-		return fmt.Errorf("marshal: %w", err)
-	}
-	return atomicWriteFile(pm.configFile, out, 0o644)
+	return writeYAMLRoot(pm.configFile, root, 0o644)
 }
 
 // patchModelInConfig reads the config YAML, applies a partial model update, and
-// writes the result back while preserving unrelated top-level config keys.
+// writes the result back while preserving unrelated fields and comments.
 func (pm *ProxyManager) patchModelInConfig(id string, req configModelPatchRequest) error {
 	pm.configMu.Lock()
 	defer pm.configMu.Unlock()
 
-	raw, err := os.ReadFile(pm.configFile)
+	root, err := readYAMLRoot(pm.configFile)
 	if err != nil {
-		return fmt.Errorf("read %s: %w", pm.configFile, err)
+		return err
 	}
-	var root map[string]any
-	if err := yaml.Unmarshal(raw, &root); err != nil {
-		return fmt.Errorf("parse %s: %w", pm.configFile, err)
-	}
-	models, _ := root["models"].(map[string]any)
-	if models == nil {
+	modelsNode := yamlMapGet(root, "models")
+	if modelsNode == nil {
 		return fmt.Errorf("models section missing")
 	}
-	entry, _ := models[id].(map[string]any)
-	if entry == nil {
+	entryNode := yamlMapGet(modelsNode, id)
+	if entryNode == nil || entryNode.Kind != yaml.MappingNode {
 		return fmt.Errorf("model %q not found", id)
 	}
 
 	if req.Cmd != nil {
-		entry["cmd"] = *req.Cmd
+		yamlMapSet(entryNode, "cmd", yamlScalar(*req.Cmd))
 	}
 	if req.Name != nil {
-		entry["name"] = *req.Name
+		yamlMapSet(entryNode, "name", yamlScalar(*req.Name))
 	}
 	if req.Description != nil {
-		entry["description"] = *req.Description
+		yamlMapSet(entryNode, "description", yamlScalar(*req.Description))
 	}
 	if req.Aliases != nil {
-		entry["aliases"] = *req.Aliases
+		seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+		for _, a := range *req.Aliases {
+			seq.Content = append(seq.Content, yamlScalar(a))
+		}
+		yamlMapSet(entryNode, "aliases", seq)
 	}
 	if req.TTL != nil {
-		entry["ttl"] = *req.TTL
+		yamlMapSet(entryNode, "ttl", yamlInt(*req.TTL))
 	}
 
 	flags := make(map[string]string, len(req.Flags)+2)
@@ -281,21 +273,18 @@ func (pm *ProxyManager) patchModelInConfig(id string, req configModelPatchReques
 		flags["--n-gpu-layers"] = fmt.Sprint(*req.NGPUDash)
 	}
 	if len(flags) > 0 {
-		cmd, _ := entry["cmd"].(string)
+		cmd := ""
+		if n := yamlMapGet(entryNode, "cmd"); n != nil {
+			cmd = n.Value
+		}
 		patched, err := patchCommandFlags(cmd, flags)
 		if err != nil {
 			return err
 		}
-		entry["cmd"] = patched
+		yamlMapSet(entryNode, "cmd", yamlScalar(patched))
 	}
 
-	models[id] = entry
-	root["models"] = models
-	out, err := yaml.Marshal(root)
-	if err != nil {
-		return fmt.Errorf("marshal: %w", err)
-	}
-	return atomicWriteFile(pm.configFile, out, 0o644)
+	return writeYAMLRoot(pm.configFile, root, 0o644)
 }
 
 func patchCommandFlags(cmd string, flags map[string]string) (string, error) {
@@ -375,27 +364,19 @@ func flagValueString(v any) string {
 }
 
 // removeModelFromConfig reads the config YAML, deletes models[id], and writes it back.
+// Uses yaml.Node to preserve comments and ordering of all other entries.
 func (pm *ProxyManager) removeModelFromConfig(id string) error {
 	pm.configMu.Lock()
 	defer pm.configMu.Unlock()
 
-	raw, err := os.ReadFile(pm.configFile)
+	root, err := readYAMLRoot(pm.configFile)
 	if err != nil {
-		return fmt.Errorf("read %s: %w", pm.configFile, err)
+		return err
 	}
-	var root map[string]any
-	if err := yaml.Unmarshal(raw, &root); err != nil {
-		return fmt.Errorf("parse: %w", err)
+	if modelsNode := yamlMapGet(root, "models"); modelsNode != nil {
+		yamlMapDelete(modelsNode, id)
 	}
-	if models, ok := root["models"].(map[string]any); ok {
-		delete(models, id)
-		root["models"] = models
-	}
-	out, err := yaml.Marshal(root)
-	if err != nil {
-		return fmt.Errorf("marshal: %w", err)
-	}
-	return atomicWriteFile(pm.configFile, out, 0o644)
+	return writeYAMLRoot(pm.configFile, root, 0o644)
 }
 
 // buildCmd constructs a llama-server command for modelPath.
@@ -408,7 +389,14 @@ func (pm *ProxyManager) buildCmd(modelPath, extraFlags string) string {
 	}
 	// Use the first model's cmd as a structural template: keep everything up
 	// to (and including) --model, replace the path, drop the old path value.
-	for _, mc := range pm.config.Models {
+	// Sort IDs so template selection is deterministic across calls.
+	ids := make([]string, 0, len(pm.config.Models))
+	for id := range pm.config.Models {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		mc := pm.config.Models[id]
 		parts, err := config.SanitizeCommand(mc.Cmd)
 		if err != nil || len(parts) == 0 {
 			continue
@@ -451,4 +439,77 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// readYAMLRoot parses path and returns the root mapping node.
+// Comments, key ordering, and node styles are fully preserved.
+func readYAMLRoot(path string) (*yaml.Node, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	if doc.Kind == 0 || len(doc.Content) == 0 {
+		return &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}, nil
+	}
+	root := doc.Content[0]
+	if root.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("expected mapping at root of %s", path)
+	}
+	return root, nil
+}
+
+// writeYAMLRoot wraps root in a document node and atomically writes YAML.
+func writeYAMLRoot(path string, root *yaml.Node, perm os.FileMode) error {
+	doc := &yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{root}}
+	out, err := yaml.Marshal(doc)
+	if err != nil {
+		return fmt.Errorf("marshal: %w", err)
+	}
+	return atomicWriteFile(path, out, perm)
+}
+
+// yamlMapGet returns the value node for key in a mapping node, or nil.
+func yamlMapGet(m *yaml.Node, key string) *yaml.Node {
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			return m.Content[i+1]
+		}
+	}
+	return nil
+}
+
+// yamlMapSet sets key=val in a mapping node, appending if the key is absent.
+func yamlMapSet(m *yaml.Node, key string, val *yaml.Node) {
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			m.Content[i+1] = val
+			return
+		}
+	}
+	m.Content = append(m.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Value: key, Tag: "!!str"},
+		val,
+	)
+}
+
+// yamlMapDelete removes key from a mapping node.
+func yamlMapDelete(m *yaml.Node, key string) {
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			m.Content = append(m.Content[:i], m.Content[i+2:]...)
+			return
+		}
+	}
+}
+
+func yamlScalar(s string) *yaml.Node {
+	return &yaml.Node{Kind: yaml.ScalarNode, Value: s, Tag: "!!str"}
+}
+
+func yamlInt(n int) *yaml.Node {
+	return &yaml.Node{Kind: yaml.ScalarNode, Value: fmt.Sprint(n), Tag: "!!int"}
 }
