@@ -11,7 +11,7 @@
     const totalRequests = $metrics.length;
     const totalInputTokens = $metrics.reduce((sum, m) => sum + m.tokens.input_tokens, 0);
     const totalOutputTokens = $metrics.reduce((sum, m) => sum + m.tokens.output_tokens, 0);
-    const totalCacheTokens = $metrics.reduce((sum, m) => sum + m.tokens.cache_tokens, 0);
+    const totalCacheTokens = $metrics.reduce((sum, m) => sum + Math.max(0, m.tokens.cache_tokens), 0);
 
     const promptPerSecond = $metrics.filter((m) => m.tokens.prompt_per_second > 0).map((m) => m.tokens.prompt_per_second);
 
