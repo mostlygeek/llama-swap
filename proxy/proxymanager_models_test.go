@@ -236,7 +236,7 @@ func TestProxyManager_apiPullModelSubdir(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}
-	expectedPath := dir + "/my-model/model.gguf"
+	expectedPath := filepath.Join(dir, "my-model", "model.gguf")
 	if resp["path"] != expectedPath {
 		t.Errorf("path = %v, want %q", resp["path"], expectedPath)
 	}
