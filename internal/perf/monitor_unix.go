@@ -38,6 +38,13 @@ func getGpuStats(ctx context.Context, every time.Duration, logger *logmon.Monito
 		logger.Debugf("nvidia-smi: %s", err.Error())
 	}
 
+	if ch, err := tryRocmSmi(ctx, every, logger); err == nil {
+		logger.Info("using rocm-smi for GPU monitoring")
+		return ch, nil
+	} else {
+		logger.Debugf("rocm-smi: %s", err.Error())
+	}
+
 	if ch, err := trySysfs(ctx, every, logger); err == nil {
 		logger.Info("using sysfs for GPU monitoring")
 		return ch, nil
@@ -210,6 +217,85 @@ func parseNvidiaSmiLine(line string) *GpuStat {
 		MemTotalMB:  memTotal,
 		FanSpeedPct: fanSpeed,
 		PowerDrawW:  powerDraw,
+	}
+}
+
+func tryRocmSmi(ctx context.Context, every time.Duration, logger *logmon.Monitor) (chan []GpuStat, error) {
+	if _, err := exec.LookPath("rocm-smi"); err != nil {
+		return nil, ErrNoGpuTool
+	}
+	if every < time.Second {
+		every = time.Second
+	}
+
+	ch := make(chan []GpuStat, 1)
+
+	go func() {
+		defer close(ch)
+		ticker := time.NewTicker(every)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				cmd := exec.CommandContext(ctx, "rocm-smi", "-P", "-t", "-u", "--showmemuse", "--csv")
+				out, err := cmd.Output()
+				if err != nil {
+					continue
+				}
+
+				stats := make([]GpuStat, 0)
+				scanner := bufio.NewScanner(strings.NewReader(string(out)))
+				for scanner.Scan() {
+					line := strings.TrimSpace(scanner.Text())
+					if line == "" || strings.HasPrefix(line, "device,") {
+						continue
+					}
+
+					stat := parseRocmSmiLine(line)
+					if stat != nil {
+						stats = append(stats, *stat)
+					}
+				}
+
+				if len(stats) > 0 {
+					select {
+					case ch <- stats:
+					default:
+					}
+				}
+			}
+		}
+	}()
+
+	return ch, nil
+}
+
+func parseRocmSmiLine(line string) *GpuStat {
+	fields := strings.Split(line, ",")
+	if len(fields) < 9 {
+		return nil
+	}
+
+	device := strings.TrimSpace(fields[0])
+	id, _ := strconv.Atoi(strings.TrimPrefix(device, "card"))
+	tempC, _ := strconv.ParseFloat(strings.TrimSpace(fields[1]), 64)
+	vramTempC, _ := strconv.ParseFloat(strings.TrimSpace(fields[3]), 64)
+	powerDraw, _ := strconv.ParseFloat(strings.TrimSpace(fields[4]), 64)
+	gpuUtil, _ := strconv.ParseFloat(strings.TrimSpace(fields[5]), 64)
+	memUtil, _ := strconv.ParseFloat(strings.TrimSpace(fields[6]), 64)
+
+	return &GpuStat{
+		Timestamp:  time.Now(),
+		ID:         id,
+		Name:       device,
+		TempC:      int(tempC),
+		VramTempC:  int(vramTempC),
+		GpuUtilPct: gpuUtil,
+		MemUtilPct: memUtil,
+		PowerDrawW: powerDraw,
 	}
 }
 
