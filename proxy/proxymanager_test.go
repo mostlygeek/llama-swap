@@ -1221,6 +1221,94 @@ models:
 	assert.Equal(t, StateReady, proxy.processGroups["preloadTestGroup"].processes["model2"].CurrentState())
 }
 
+// Test that autoUnload unloads sibling models when a new model is loaded in swap mode
+func TestProxyManager_AutoUnload(t *testing.T) {
+	const testGroupId = "swapGroup"
+	cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+models:
+  model1:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model1
+  model2:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model2
+groups:
+  swapGroup:
+    swap: true
+    autoUnload: true
+    members:
+      - model1
+      - model2
+`)
+
+	proxy := New(cfg)
+	defer proxy.StopProcesses(StopImmediately)
+
+	// Load model1
+	reqBody := `{"model":"model1"}`
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+	w := CreateTestResponseRecorder()
+	proxy.ServeHTTP(w, req)
+	assert.Equal(t, StateReady, proxy.processGroups[testGroupId].processes["model1"].CurrentState())
+
+	// Load model2 - should auto-unload model1
+	reqBody = `{"model":"model2"}`
+	req = httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+	w = CreateTestResponseRecorder()
+	proxy.ServeHTTP(w, req)
+
+	select {
+	case <-proxy.processGroups[testGroupId].processes["model1"].cmdWaitChan:
+		// good, model1 was stopped
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for model1 to be auto-unloaded")
+	}
+
+	assert.Equal(t, StateStopped, proxy.processGroups[testGroupId].processes["model1"].CurrentState())
+	assert.Equal(t, StateReady, proxy.processGroups[testGroupId].processes["model2"].CurrentState())
+}
+
+// Test that autoUnload is disabled when swap is false
+func TestProxyManager_AutoUnloadDisabledWhenSwapFalse(t *testing.T) {
+	const testGroupId = "parallelGroup"
+	cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+models:
+  model1:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model1
+  model2:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model2
+groups:
+  parallelGroup:
+    swap: false
+    autoUnload: true
+    members:
+      - model1
+      - model2
+`)
+
+	proxy := New(cfg)
+	defer proxy.StopProcesses(StopImmediately)
+
+	// Load model1
+	reqBody := `{"model":"model1"}`
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+	w := CreateTestResponseRecorder()
+	proxy.ServeHTTP(w, req)
+	assert.Equal(t, StateReady, proxy.processGroups[testGroupId].processes["model1"].CurrentState())
+
+	// Load model2 - should NOT auto-unload model1 because swap is false
+	reqBody = `{"model":"model2"}`
+	req = httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+	w = CreateTestResponseRecorder()
+	proxy.ServeHTTP(w, req)
+
+	// Both should still be ready
+	assert.Equal(t, StateReady, proxy.processGroups[testGroupId].processes["model1"].CurrentState())
+	assert.Equal(t, StateReady, proxy.processGroups[testGroupId].processes["model2"].CurrentState())
+}
+
 func TestProxyManager_StreamingEndpointsReturnNoBufferingHeader(t *testing.T) {
 	cfg := testConfigFromYAML(t, `
 healthCheckTimeout: 15

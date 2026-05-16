@@ -42,6 +42,7 @@ func addApiHandlers(pm *ProxyManager) {
 		apiGroup.POST("/config/models", pm.apiConfigAddModel)
 		apiGroup.PATCH("/config/models/:id", pm.apiConfigPatchModel)
 		apiGroup.DELETE("/config/models/:id", pm.apiConfigRemoveModel)
+		apiGroup.PATCH("/config/groups/:id", pm.apiConfigPatchGroup)
 		apiGroup.POST("/config/reload", pm.apiConfigReload)
 		apiGroup.GET("/events", pm.apiSendEvents)
 		apiGroup.GET("/metrics", pm.apiGetMetrics)

@@ -593,7 +593,21 @@ func (pm *ProxyManager) swapProcessGroup(realModelName string) (*ProcessGroup, e
 		return nil, fmt.Errorf("could not find process group for model %s", realModelName)
 	}
 
-	if processGroup.exclusive {
+	groupConfig := pm.config.Groups[processGroup.id]
+
+	if groupConfig.AutoUnload && groupConfig.Swap {
+		pm.proxyLogger.Debugf("Auto-unload mode for group %s, stopping non-persistent siblings", processGroup.id)
+		for _, member := range groupConfig.Members {
+			if member != realModelName && processGroup.processes[member] != nil {
+				if !groupConfig.Persistent {
+					pm.proxyLogger.Debugf("Auto-unloading sibling model %s in group %s", member, processGroup.id)
+					processGroup.StopProcess(member, StopWaitForInflightRequest)
+				}
+			}
+		}
+	}
+
+	if groupConfig.Exclusive {
 		pm.proxyLogger.Debugf("Exclusive mode for group %s, stopping other process groups", processGroup.id)
 		for groupId, otherGroup := range pm.processGroups {
 			if groupId != processGroup.id && !otherGroup.persistent {

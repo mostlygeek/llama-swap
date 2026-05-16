@@ -41,6 +41,13 @@ type configModelPatchRequest struct {
 	Flags       map[string]any `json:"flags"`
 }
 
+// configGroupPatchRequest is the body for PATCH /api/config/groups/:id.
+type configGroupPatchRequest struct {
+	AutoUnload *bool `json:"autoUnload"`
+	Exclusive  *bool `json:"exclusive"`
+	Swap       *bool `json:"swap"`
+}
+
 // apiConfigInfo implements GET /api/config/info.
 // Returns the config file path, models directory, and per-model file-existence check.
 func (pm *ProxyManager) apiConfigInfo(c *gin.Context) {
@@ -154,6 +161,33 @@ func (pm *ProxyManager) apiConfigRemoveModel(c *gin.Context) {
 	}
 	pm.triggerReload()
 	c.JSON(http.StatusOK, gin.H{"id": realID, "status": "removed"})
+}
+
+// apiConfigPatchGroup implements PATCH /api/config/groups/:id.
+// Updates selected group config fields (autoUnload, exclusive, swap) without
+// requiring callers to reconstruct the whole group configuration.
+func (pm *ProxyManager) apiConfigPatchGroup(c *gin.Context) {
+	id := c.Param("id")
+	if _, found := pm.config.Groups[id]; !found {
+		pm.sendErrorResponse(c, http.StatusNotFound, "group not found in config")
+		return
+	}
+	if pm.configFile == "" {
+		pm.sendErrorResponse(c, http.StatusUnprocessableEntity, "config file path not set")
+		return
+	}
+
+	var req configGroupPatchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		pm.sendErrorResponse(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := pm.patchGroupInConfig(id, req); err != nil {
+		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("write config: %v", err))
+		return
+	}
+	pm.triggerReload()
+	c.JSON(http.StatusOK, gin.H{"id": id, "status": "updated"})
 }
 
 // apiConfigReload implements POST /api/config/reload.
@@ -325,6 +359,38 @@ func patchCommandFlags(cmd string, flags map[string]string) (string, error) {
 		}
 	}
 	return strings.Join(parts, " "), nil
+}
+
+// patchGroupInConfig reads the config YAML, applies a partial group update, and
+// writes the result back while preserving unrelated fields and comments.
+func (pm *ProxyManager) patchGroupInConfig(id string, req configGroupPatchRequest) error {
+	pm.configMu.Lock()
+	defer pm.configMu.Unlock()
+
+	root, err := readYAMLRoot(pm.configFile)
+	if err != nil {
+		return err
+	}
+	groupsNode := yamlMapGet(root, "groups")
+	if groupsNode == nil {
+		return fmt.Errorf("groups section missing")
+	}
+	entryNode := yamlMapGet(groupsNode, id)
+	if entryNode == nil || entryNode.Kind != yaml.MappingNode {
+		return fmt.Errorf("group %q not found", id)
+	}
+
+	if req.AutoUnload != nil {
+		yamlMapSet(entryNode, "autoUnload", yamlBool(*req.AutoUnload))
+	}
+	if req.Exclusive != nil {
+		yamlMapSet(entryNode, "exclusive", yamlBool(*req.Exclusive))
+	}
+	if req.Swap != nil {
+		yamlMapSet(entryNode, "swap", yamlBool(*req.Swap))
+	}
+
+	return writeYAMLRoot(pm.configFile, root, 0o644)
 }
 
 func normalizeCmdFlag(flag string) string {
@@ -512,4 +578,8 @@ func yamlScalar(s string) *yaml.Node {
 
 func yamlInt(n int) *yaml.Node {
 	return &yaml.Node{Kind: yaml.ScalarNode, Value: fmt.Sprint(n), Tag: "!!int"}
+}
+
+func yamlBool(b bool) *yaml.Node {
+	return &yaml.Node{Kind: yaml.ScalarNode, Value: fmt.Sprint(b), Tag: "!!bool"}
 }

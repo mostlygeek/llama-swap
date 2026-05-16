@@ -82,6 +82,7 @@ type GroupConfig struct {
 	Swap       bool     `yaml:"swap"`
 	Exclusive  bool     `yaml:"exclusive"`
 	Persistent bool     `yaml:"persistent"`
+	AutoUnload bool     `yaml:"autoUnload"`
 	Members    []string `yaml:"members"`
 }
 
@@ -98,6 +99,7 @@ func (c *GroupConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		Swap:       true,
 		Exclusive:  true,
 		Persistent: false,
+		AutoUnload: true,
 		Members:    []string{},
 	}
 
@@ -566,9 +568,10 @@ func AddDefaultGroupToConfig(config Config) Config {
 	}
 
 	defaultGroup := GroupConfig{
-		Swap:      true,
-		Exclusive: true,
-		Members:   []string{},
+		Swap:       true,
+		Exclusive:  true,
+		AutoUnload: true,
+		Members:    []string{},
 	}
 	// if groups is empty, create a default group and put
 	// all models into it
