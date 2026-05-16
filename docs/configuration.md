@@ -424,6 +424,40 @@ models:
     disabled: true
     cmd: llama-server --port ${PORT} -m some-model.gguf -ngl 0
 
+## Disabled Models with Matrix Configuration
+
+Disabled models work seamlessly with matrix configurations. When a model is marked as `disabled: true`:
+
+- The model cannot be loaded or requested (returns HTTP 403 Forbidden)
+- It does not participate in swap calculations
+- It is excluded from the "running models" list
+- It can be defined in matrix sets without causing issues
+
+Example configuration:
+
+```yaml
+matrix:
+  vars:
+    a: model-a
+    b: model-b
+    c: model-c
+  sets:
+    standard: "a | b | c"
+models:
+  model-a:
+    cmd: llama-server --port ${PORT} -m model-a.gguf
+  model-b:
+    cmd: llama-server --port ${PORT} -m model-b.gguf
+    disabled: true  # This model won't interfere with swaps
+  model-c:
+    cmd: llama-server --port ${PORT} -m model-c.gguf
+```
+
+In this example, if `model-b` is disabled:
+- Requests to `model-b` return 403 Forbidden
+- Requests to `model-a` or `model-c` work normally
+- The swap solver treats `model-b` as if it doesn't exist
+
   # Docker example:
   # container runtimes like Docker and Podman can be used reliably with
   # a combination of cmd, cmdStop, and ${MODEL_ID}

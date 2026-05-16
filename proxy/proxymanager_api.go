@@ -81,6 +81,8 @@ func (pm *ProxyManager) getModelStatus() []Model {
 				state = "shutdown"
 			case StateStopped:
 				state = "stopped"
+			case StateDisabled:
+				state = "disabled"
 			}
 		}
 		models = append(models, Model{

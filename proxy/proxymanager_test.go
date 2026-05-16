@@ -1709,12 +1709,15 @@ models:
 			if model.Id == "enabled-model" {
 				enabledFound = true
 				assert.False(t, model.Disabled)
+				assert.Equal(t, "stopped", model.State)
 			} else if model.Id == "disabled-model" {
 				disabledFound = true
 				assert.True(t, model.Disabled)
+				assert.Equal(t, "disabled", model.State)
 			} else if model.Id == "disabled-with-aliases" {
 				disabledAliasFound = true
 				assert.True(t, model.Disabled)
+				assert.Equal(t, "disabled", model.State)
 				assert.Contains(t, model.Aliases, "disabled-alias")
 			}
 		}
@@ -1911,6 +1914,182 @@ models:
 
 		assert.True(t, foundEnabled, "preload-enabled-model should be in running list")
 		assert.False(t, foundDisabled, "preload-disabled-model should not be in running list")
+	})
+}
+
+func TestMatrix_DisabledModels(t *testing.T) {
+	cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+matrix:
+  vars:
+    a: model-a
+    b: model-b
+    c: model-c
+  sets:
+    set1: "a | b | c"
+models:
+  model-a:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model-a
+  model-b:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model-b
+    disabled: true
+  model-c:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model-c
+`)
+
+	proxy := New(cfg)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+	injectTestHandlers(proxy, nil)
+
+	t.Run("disabled model in matrix returns 403 on chat completions", func(t *testing.T) {
+		reqBody := `{"model":"model-b"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Contains(t, w.Body.String(), "model is disabled")
+	})
+
+	t.Run("disabled model in matrix returns 403 on upstream", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/upstream/model-b/test", nil)
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Contains(t, w.Body.String(), "model is disabled")
+	})
+
+	t.Run("enabled model in matrix swaps correctly with disabled model present", func(t *testing.T) {
+		// Request enabled model
+		reqBody := `{"model":"model-a"}`
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+
+		proxy.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "model-a")
+
+		// Verify model-a is loaded
+		runningReq := httptest.NewRequest("GET", "/running", nil)
+		runningRec := CreateTestResponseRecorder()
+		proxy.ServeHTTP(runningRec, runningReq)
+
+		assert.Equal(t, http.StatusOK, runningRec.Code)
+
+		var runningData struct {
+			Running []struct {
+				Model string `json:"model"`
+			} `json:"running"`
+		}
+		assert.NoError(t, json.Unmarshal(runningRec.Body.Bytes(), &runningData))
+
+		var foundModelA, foundModelB bool
+		for _, entry := range runningData.Running {
+			if entry.Model == "model-a" {
+				foundModelA = true
+			} else if entry.Model == "model-b" {
+				foundModelB = true
+			}
+		}
+
+		assert.True(t, foundModelA, "model-a should be in running list")
+		assert.False(t, foundModelB, "disabled model-b should not be in running list")
+	})
+
+	t.Run("disabled model does not appear in RunningModels", func(t *testing.T) {
+		runningReq := httptest.NewRequest("GET", "/running", nil)
+		runningRec := CreateTestResponseRecorder()
+		proxy.ServeHTTP(runningRec, runningReq)
+
+		assert.Equal(t, http.StatusOK, runningRec.Code)
+
+		var runningData struct {
+			Running []struct {
+				Model string `json:"model"`
+			} `json:"running"`
+		}
+		assert.NoError(t, json.Unmarshal(runningRec.Body.Bytes(), &runningData))
+
+		for _, entry := range runningData.Running {
+			assert.NotEqual(t, "model-b", entry.Model, "disabled model-b should not be in running list")
+		}
+	})
+
+	t.Run("disabled model in matrix does not interfere with preload", func(t *testing.T) {
+		cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+matrix:
+  vars:
+    enabled: preload-enabled
+    disabled: preload-disabled
+  sets:
+    set1: "enabled | disabled"
+hooks:
+  on_startup:
+    preload:
+      - preload-enabled
+      - preload-disabled
+models:
+  preload-enabled:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond preload-enabled
+  preload-disabled:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond preload-disabled
+    disabled: true
+`)
+
+		preloadChan := make(chan ModelPreloadedEvent, 1)
+		unsub := event.On(func(e ModelPreloadedEvent) {
+			preloadChan <- e
+		})
+		defer unsub()
+
+		testProxy := New(cfg)
+		defer testProxy.StopProcesses(StopWaitForInflightRequest)
+
+		// Wait for preload event
+		select {
+		case e := <-preloadChan:
+			assert.Equal(t, "preload-enabled", e.ModelName)
+			assert.True(t, e.Success, "preload should succeed")
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for preload event")
+		}
+
+		// Should not receive another preload event for disabled model
+		select {
+		case e := <-preloadChan:
+			t.Fatalf("unexpected preload event for %s", e.ModelName)
+		case <-time.After(200 * time.Millisecond):
+		}
+
+		// Verify only enabled model is loaded
+		runningReq := httptest.NewRequest("GET", "/running", nil)
+		runningRec := CreateTestResponseRecorder()
+		testProxy.ServeHTTP(runningRec, runningReq)
+
+		assert.Equal(t, http.StatusOK, runningRec.Code)
+
+		var runningData struct {
+			Running []struct {
+				Model string `json:"model"`
+			} `json:"running"`
+		}
+		assert.NoError(t, json.Unmarshal(runningRec.Body.Bytes(), &runningData))
+
+		var foundEnabled, foundDisabled bool
+		for _, entry := range runningData.Running {
+			if entry.Model == "preload-enabled" {
+				foundEnabled = true
+			} else if entry.Model == "preload-disabled" {
+				foundDisabled = true
+			}
+		}
+
+		assert.True(t, foundEnabled, "preload-enabled should be in running list")
+		assert.False(t, foundDisabled, "preload-disabled should not be in running list")
 	})
 }
 

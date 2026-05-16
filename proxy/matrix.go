@@ -192,6 +192,12 @@ func (m *Matrix) ProxyRequest(modelID string, w http.ResponseWriter, r *http.Req
 		return fmt.Errorf("model %s not found in matrix", modelID)
 	}
 
+	// Check if model is disabled
+	if process.config.Disabled {
+		process.respondWithError(w, r, http.StatusForbidden, "model is disabled")
+		return nil
+	}
+
 	m.Lock()
 	running := m.runningModels()
 	result, err := m.solver.Solve(modelID, running)
@@ -309,7 +315,9 @@ func (m *Matrix) RunningModels() []string {
 func (m *Matrix) runningModels() []string {
 	var running []string
 	for id, process := range m.processes {
-		if process.CurrentState() != StateStopped && process.CurrentState() != StateShutdown {
+		if process.CurrentState() != StateStopped &&
+			process.CurrentState() != StateShutdown &&
+			!process.config.Disabled {
 			running = append(running, id)
 		}
 	}

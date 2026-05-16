@@ -333,6 +333,12 @@ models:
     disabled: true
     cmd: llama-server --port ${PORT} -m some-model.gguf
 
+  # Disabled model with matrix example:
+  # Disabled models in matrix configurations don't interfere with swap calculations
+  "matrix-disabled":
+    cmd: llama-server --port ${PORT} -m disabled-in-matrix.gguf
+    disabled: true
+
   # Docker example:
   # container runtimes like Docker and Podman can be used reliably with
   # a combination of cmd, cmdStop, and ${MODEL_ID}
@@ -432,6 +438,11 @@ matrix:
     # 70B model uses all GPUs, can only run alone
     # expands to: [L]
     full: "L"
+
+    # Example with disabled model: disabled models are ignored by the solver
+    # If 'disabled-model' is requested, it returns 403 Forbidden
+    # If other models are requested, disabled-model is not considered in swap logic
+    # standard_with_disabled: "(g | q) & disabled-model"
 
 # hooks: a dictionary of event triggers and actions
 # - optional, default: empty dictionary
