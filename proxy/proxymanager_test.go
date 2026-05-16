@@ -68,6 +68,198 @@ models:
 		assert.Contains(t, w.Body.String(), modelName)
 	}
 }
+
+func TestProxyManager_OpenAIProviderPrefixedRoutesNormalizeUpstreamPath(t *testing.T) {
+	cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+models:
+  model1:
+    cmd: test --port ${PORT}
+`)
+
+	proxy := New(cfg)
+	injectTestHandlers(proxy, nil)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+
+	tests := []struct {
+		name         string
+		method       string
+		path         string
+		body         string
+		expectedPath string
+	}{
+		{
+			name:         "chat completions",
+			method:       http.MethodPost,
+			path:         "/openai/v1/chat/completions",
+			body:         `{"model":"model1"}`,
+			expectedPath: "/v1/chat/completions",
+		},
+		{
+			name:         "responses",
+			method:       http.MethodPost,
+			path:         "/openai/v1/responses",
+			body:         `{"model":"model1"}`,
+			expectedPath: "/v1/responses",
+		},
+		{
+			name:         "embeddings",
+			method:       http.MethodPost,
+			path:         "/openai/v1/embeddings",
+			body:         `{"model":"model1"}`,
+			expectedPath: "/v1/embeddings",
+		},
+		{
+			name:         "audio voices get",
+			method:       http.MethodGet,
+			path:         "/openai/v1/audio/voices?model=model1",
+			expectedPath: "/v1/audio/voices",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
+			w := CreateTestResponseRecorder()
+
+			proxy.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(t, tt.expectedPath, gjson.Get(w.Body.String(), "h_path").String())
+		})
+	}
+}
+
+func TestProxyManager_OpenAIProviderPrefixedFormRoutesNormalizeUpstreamPath(t *testing.T) {
+	cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+models:
+  model1:
+    cmd: test --port ${PORT}
+`)
+
+	proxy := New(cfg)
+	injectTestHandlers(proxy, nil)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+
+	tests := []struct {
+		name         string
+		path         string
+		expectedPath string
+	}{
+		{
+			name:         "audio transcriptions",
+			path:         "/openai/v1/audio/transcriptions",
+			expectedPath: "/v1/audio/transcriptions",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var b bytes.Buffer
+			form := multipart.NewWriter(&b)
+			fw, err := form.CreateFormField("model")
+			assert.NoError(t, err)
+			_, err = fw.Write([]byte("model1"))
+			assert.NoError(t, err)
+			fw, err = form.CreateFormFile("file", "test.dat")
+			assert.NoError(t, err)
+			_, err = fw.Write([]byte("test"))
+			assert.NoError(t, err)
+			assert.NoError(t, form.Close())
+
+			req := httptest.NewRequest(http.MethodPost, tt.path, &b)
+			req.Header.Set("Content-Type", form.FormDataContentType())
+			w := CreateTestResponseRecorder()
+
+			proxy.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(t, tt.expectedPath, gjson.Get(w.Body.String(), "h_path").String())
+		})
+	}
+}
+
+func TestProxyManager_AnthropicProviderPrefixedRoutesNormalizeUpstreamPath(t *testing.T) {
+	cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+models:
+  model1:
+    cmd: test --port ${PORT}
+`)
+
+	proxy := New(cfg)
+	injectTestHandlers(proxy, nil)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+
+	tests := []struct {
+		name         string
+		path         string
+		expectedPath string
+	}{
+		{
+			name:         "messages",
+			path:         "/anthropic/v1/messages",
+			expectedPath: "/v1/messages",
+		},
+		{
+			name:         "count tokens",
+			path:         "/anthropic/v1/messages/count_tokens",
+			expectedPath: "/v1/messages/count_tokens",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, tt.path, strings.NewReader(`{"model":"model1"}`))
+			w := CreateTestResponseRecorder()
+
+			proxy.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(t, tt.expectedPath, gjson.Get(w.Body.String(), "h_path").String())
+		})
+	}
+}
+
+func TestProxyManager_ProviderPrefixedRoutesDoNotCrossRegisterSchemas(t *testing.T) {
+	cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+models:
+  model1:
+    cmd: test --port ${PORT}
+`)
+
+	proxy := New(cfg)
+	injectTestHandlers(proxy, nil)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+
+	tests := []struct {
+		name string
+		path string
+	}{
+		{name: "openai messages is not registered", path: "/openai/v1/messages"},
+		{name: "openai audio translations is not registered", path: "/openai/v1/audio/translations"},
+		{name: "openai image variations is not registered", path: "/openai/v1/images/variations"},
+		{name: "anthropic chat completions is not registered", path: "/anthropic/v1/chat/completions"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, tt.path, strings.NewReader(`{"model":"model1"}`))
+			w := CreateTestResponseRecorder()
+
+			proxy.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusNotFound, w.Code)
+		})
+	}
+}
+
 func TestProxyManager_SwapMultiProcess(t *testing.T) {
 	cfg := testConfigFromYAML(t, `
 healthCheckTimeout: 15

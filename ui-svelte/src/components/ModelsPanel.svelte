@@ -53,6 +53,14 @@
   function getModelDisplay(model: Model): string {
     return $showIdorNameStore === "id" ? model.id : (model.name || model.id);
   }
+
+  function apiBase(path: string): string {
+    return `${window.location.origin}${path}`;
+  }
+
+  async function copyText(value: string): Promise<void> {
+    await navigator.clipboard?.writeText(value);
+  }
 </script>
 
 <div class="card h-full flex flex-col">
@@ -147,6 +155,26 @@
   </div>
 
   <div class="flex-1 overflow-y-auto">
+    <div class="my-4 grid grid-cols-1 gap-2 text-sm xl:grid-cols-2">
+      <div class="rounded border border-gray-200 dark:border-white/10 bg-surface p-3">
+        <div class="flex items-center justify-between gap-2">
+          <span class="font-semibold">OpenAI-compatible</span>
+          <button class="btn btn--sm" onclick={() => copyText(apiBase("/openai/v1"))}>Copy</button>
+        </div>
+        <code class="mt-2 block break-all text-xs">{apiBase("/openai/v1")}</code>
+        <code class="mt-1 block break-all text-xs text-txtsecondary">curl {apiBase("/openai/v1")}/models</code>
+      </div>
+      <div class="rounded border border-gray-200 dark:border-white/10 bg-surface p-3">
+        <div class="flex items-center justify-between gap-2">
+          <span class="font-semibold">Anthropic-compatible</span>
+          <button class="btn btn--sm" onclick={() => copyText(apiBase("/anthropic/v1"))}>Copy</button>
+        </div>
+        <code class="mt-2 block break-all text-xs">{apiBase("/anthropic/v1")}</code>
+        <code class="mt-1 block break-all text-xs text-txtsecondary">curl {apiBase("/anthropic/v1")}/messages</code>
+      </div>
+      <p class="text-xs text-txtsecondary xl:col-span-2">Shared /v1 paths remain available for existing clients.</p>
+    </div>
+
     <table class="w-full">
       <thead class="sticky top-0 bg-card z-10">
         <tr class="text-left border-b border-gray-200 dark:border-white/10 bg-surface">

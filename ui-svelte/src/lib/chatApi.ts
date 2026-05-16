@@ -1,6 +1,6 @@
 import type { ChatMessage, ContentPart } from "./types";
 
-export type Endpoint = "v1/chat/completions" | "v1/messages" | "v1/responses";
+export type Endpoint = "openai/v1/chat/completions" | "anthropic/v1/messages" | "openai/v1/responses";
 
 export interface StreamChunk {
   content: string;
@@ -119,11 +119,11 @@ function buildRequest(
 ): { url: string; body: object } {
   const url = "/" + endpoint;
   switch (endpoint) {
-    case "v1/messages":
+    case "anthropic/v1/messages":
       return { url, body: buildMessagesBody(model, messages, options) };
-    case "v1/responses":
+    case "openai/v1/responses":
       return { url, body: buildResponsesBody(model, messages, options) };
-    case "v1/chat/completions":
+    case "openai/v1/chat/completions":
     default:
       return { url, body: buildChatCompletionsBody(model, messages, options) };
   }
@@ -282,11 +282,11 @@ function parseStream(
   reader: ReadableStreamDefaultReader<Uint8Array>
 ): AsyncGenerator<StreamChunk> {
   switch (endpoint) {
-    case "v1/messages":
+    case "anthropic/v1/messages":
       return parseMessagesStream(reader);
-    case "v1/responses":
+    case "openai/v1/responses":
       return parseResponsesStream(reader);
-    case "v1/chat/completions":
+    case "openai/v1/chat/completions":
     default:
       return parseChatCompletionsStream(reader);
   }
@@ -298,7 +298,7 @@ export async function* streamChatCompletion(
   signal?: AbortSignal,
   options?: ChatOptions
 ): AsyncGenerator<StreamChunk> {
-  const endpoint = options?.endpoint ?? "v1/chat/completions";
+  const endpoint = options?.endpoint ?? "openai/v1/chat/completions";
   const { url, body } = buildRequest(endpoint, model, messages, options);
 
   const response = await fetch(url, {

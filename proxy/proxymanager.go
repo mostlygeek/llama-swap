@@ -338,16 +338,22 @@ func (pm *ProxyManager) setupGinEngine() {
 	// Protected routes use pm.apiKeyAuth() middleware
 	llmHandler := pm.mkProxyJSONHandler(captureAll)
 	pm.ginEngine.POST("/v1/chat/completions", pm.apiKeyAuth(), pm.trackInflight(), llmHandler)
+	pm.ginEngine.POST("/openai/v1/chat/completions", pm.apiKeyAuth(), pm.trackInflight(), llmHandler)
 	pm.ginEngine.POST("/v1/responses", pm.apiKeyAuth(), pm.trackInflight(), llmHandler)
+	pm.ginEngine.POST("/openai/v1/responses", pm.apiKeyAuth(), pm.trackInflight(), llmHandler)
 	// Support legacy /v1/completions api, see issue #12
 	pm.ginEngine.POST("/v1/completions", pm.apiKeyAuth(), pm.trackInflight(), llmHandler)
+	pm.ginEngine.POST("/openai/v1/completions", pm.apiKeyAuth(), pm.trackInflight(), llmHandler)
 	// Support anthropic /v1/messages (added https://github.com/ggml-org/llama.cpp/pull/17570)
 	pm.ginEngine.POST("/v1/messages", pm.apiKeyAuth(), pm.trackInflight(), llmHandler)
+	pm.ginEngine.POST("/anthropic/v1/messages", pm.apiKeyAuth(), pm.trackInflight(), llmHandler)
 	// Support anthropic count_tokens API (Also added in the above PR)
 	pm.ginEngine.POST("/v1/messages/count_tokens", pm.apiKeyAuth(), pm.trackInflight(), llmHandler)
+	pm.ginEngine.POST("/anthropic/v1/messages/count_tokens", pm.apiKeyAuth(), pm.trackInflight(), llmHandler)
 
 	// Support embeddings and reranking
 	pm.ginEngine.POST("/v1/embeddings", pm.apiKeyAuth(), pm.trackInflight(), llmHandler)
+	pm.ginEngine.POST("/openai/v1/embeddings", pm.apiKeyAuth(), pm.trackInflight(), llmHandler)
 
 	// llama-server's /reranking endpoint + aliases
 	pm.ginEngine.POST("/reranking", pm.apiKeyAuth(), pm.trackInflight(), llmHandler)
@@ -379,15 +385,34 @@ func (pm *ProxyManager) setupGinEngine() {
 		pm.mkProxyJSONHandler(captureReqAll|captureRespHeaders),
 	)
 	pm.ginEngine.POST(
+		"/openai/v1/audio/speech",
+		pm.apiKeyAuth(),
+		pm.trackInflight(),
+		pm.mkProxyJSONHandler(captureReqAll|captureRespHeaders),
+	)
+	pm.ginEngine.POST(
 		"/v1/audio/voices",
 		pm.apiKeyAuth(),
 		pm.trackInflight(),
 		pm.mkProxyJSONHandler(captureReqHeaders|captureRespAll),
 	)
+	pm.ginEngine.POST(
+		"/openai/v1/audio/voices",
+		pm.apiKeyAuth(),
+		pm.trackInflight(),
+		pm.mkProxyJSONHandler(captureReqHeaders|captureRespAll),
+	)
 	pm.ginEngine.GET("/v1/audio/voices", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyGETModelHandler)
+	pm.ginEngine.GET("/openai/v1/audio/voices", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyGETModelHandler)
 
 	pm.ginEngine.POST(
 		"/v1/audio/transcriptions",
+		pm.apiKeyAuth(),
+		pm.trackInflight(),
+		pm.mkPostFormHandler(captureReqHeaders|captureRespHeaders|captureRespBody),
+	)
+	pm.ginEngine.POST(
+		"/openai/v1/audio/transcriptions",
 		pm.apiKeyAuth(),
 		pm.trackInflight(),
 		pm.mkPostFormHandler(captureReqHeaders|captureRespHeaders|captureRespBody),
@@ -398,9 +423,21 @@ func (pm *ProxyManager) setupGinEngine() {
 		pm.trackInflight(),
 		pm.mkProxyJSONHandler(captureReqAll|captureRespHeaders),
 	)
+	pm.ginEngine.POST(
+		"/openai/v1/images/generations",
+		pm.apiKeyAuth(),
+		pm.trackInflight(),
+		pm.mkProxyJSONHandler(captureReqAll|captureRespHeaders),
+	)
 
 	pm.ginEngine.POST(
 		"/v1/images/edits",
+		pm.apiKeyAuth(),
+		pm.trackInflight(),
+		pm.mkPostFormHandler(captureReqHeaders|captureRespHeaders),
+	)
+	pm.ginEngine.POST(
+		"/openai/v1/images/edits",
 		pm.apiKeyAuth(),
 		pm.trackInflight(),
 		pm.mkPostFormHandler(captureReqHeaders|captureRespHeaders),
@@ -420,6 +457,7 @@ func (pm *ProxyManager) setupGinEngine() {
 	pm.ginEngine.GET("/sdapi/v1/loras", pm.apiKeyAuth(), pm.trackInflight(), pm.proxyGETModelHandler)
 
 	pm.ginEngine.GET("/v1/models", pm.apiKeyAuth(), pm.listModelsHandler)
+	pm.ginEngine.GET("/openai/v1/models", pm.apiKeyAuth(), pm.listModelsHandler)
 
 	// in proxymanager_loghandlers.go
 	pm.ginEngine.GET("/logs", pm.apiKeyAuth(), pm.sendLogsHandlers)
@@ -513,6 +551,17 @@ func (pm *ProxyManager) trackInflight() gin.HandlerFunc {
 // ServeHTTP implements http.Handler interface
 func (pm *ProxyManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	pm.ginEngine.ServeHTTP(w, r)
+}
+
+func normalizeProviderPrefixedPath(path string) string {
+	switch {
+	case strings.HasPrefix(path, "/openai/v1/"):
+		return strings.TrimPrefix(path, "/openai")
+	case strings.HasPrefix(path, "/anthropic/v1/"):
+		return strings.TrimPrefix(path, "/anthropic")
+	default:
+		return path
+	}
 }
 
 // StopProcesses acquires a lock and stops all running upstream processes.
@@ -880,6 +929,7 @@ func (pm *ProxyManager) mkProxyJSONHandler(cf captureFields) func(*gin.Context) 
 		if strings.HasPrefix(c.Request.URL.Path, "/v/") {
 			c.Request.URL.Path = strings.TrimPrefix(c.Request.URL.Path, "/v")
 		}
+		c.Request.URL.Path = normalizeProviderPrefixedPath(c.Request.URL.Path)
 
 		// issue #366 extract values that downstream handlers may need
 		isStreaming := gjson.GetBytes(bodyBytes, "stream").Bool()
@@ -1029,6 +1079,7 @@ func (pm *ProxyManager) mkPostFormHandler(cf captureFields) func(*gin.Context) {
 		// set the content length of the body
 		modifiedReq.Header.Set("Content-Length", strconv.Itoa(requestBuffer.Len()))
 		modifiedReq.ContentLength = int64(requestBuffer.Len())
+		modifiedReq.URL.Path = normalizeProviderPrefixedPath(modifiedReq.URL.Path)
 
 		// Use the modified request for proxying
 		if pm.metricsMonitor != nil {
@@ -1080,6 +1131,8 @@ func (pm *ProxyManager) proxyGETModelHandler(c *gin.Context) {
 		pm.sendErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("could not find suitable handler for %s", requestedModel))
 		return
 	}
+
+	c.Request.URL.Path = normalizeProviderPrefixedPath(c.Request.URL.Path)
 
 	if err := nextHandler(modelID, c.Writer, c.Request); err != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
