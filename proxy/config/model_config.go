@@ -54,6 +54,9 @@ type ModelConfig struct {
 
 	// Timeout settings for proxy connections
 	Timeouts TimeoutsConfig `yaml:"timeouts"`
+
+	// Copy of HealthCheckTimeout from global config
+	HealthCheckTimeout int `yaml:"healthCheckTimeout"`
 }
 
 func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
