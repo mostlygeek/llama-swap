@@ -1,6 +1,6 @@
 //go:build !windows
 
-package proxy
+package process
 
 import (
 	"os/exec"
