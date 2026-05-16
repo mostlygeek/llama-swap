@@ -240,7 +240,7 @@ func tryRocmSmi(ctx context.Context, every time.Duration, logger *logmon.Monitor
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				cmd := exec.CommandContext(ctx, "rocm-smi", "-P", "-t", "-u", "--showmemuse", "--csv")
+				cmd := exec.CommandContext(ctx, "rocm-smi", "-i", "-P", "-t", "-f", "-u", "--showmemuse", "--showmeminfo", "vram", "--showproductname", "--csv")
 				out, err := cmd.Output()
 				if err != nil {
 					continue
@@ -275,27 +275,45 @@ func tryRocmSmi(ctx context.Context, every time.Duration, logger *logmon.Monitor
 
 func parseRocmSmiLine(line string) *GpuStat {
 	fields := strings.Split(line, ",")
-	if len(fields) < 9 {
+	if len(fields) < 16 {
 		return nil
 	}
 
 	device := strings.TrimSpace(fields[0])
-	id, _ := strconv.Atoi(strings.TrimPrefix(device, "card"))
-	tempC, _ := strconv.ParseFloat(strings.TrimSpace(fields[1]), 64)
-	vramTempC, _ := strconv.ParseFloat(strings.TrimSpace(fields[3]), 64)
-	powerDraw, _ := strconv.ParseFloat(strings.TrimSpace(fields[4]), 64)
-	gpuUtil, _ := strconv.ParseFloat(strings.TrimSpace(fields[5]), 64)
-	memUtil, _ := strconv.ParseFloat(strings.TrimSpace(fields[6]), 64)
+	id, err := strconv.Atoi(strings.TrimPrefix(device, "card"))
+	if err != nil {
+		return nil
+	}
+	uuid := strings.TrimSpace(fields[1])
+	tempC, _ := strconv.ParseFloat(strings.TrimSpace(fields[2]), 64)
+	vramTempC, _ := strconv.ParseFloat(strings.TrimSpace(fields[4]), 64)
+	fanSpeed, _ := strconv.ParseFloat(strings.TrimSpace(fields[6]), 64)
+	powerDraw, _ := strconv.ParseFloat(strings.TrimSpace(fields[8]), 64)
+	gpuUtil, _ := strconv.ParseFloat(strings.TrimSpace(fields[9]), 64)
+	memUtil, _ := strconv.ParseFloat(strings.TrimSpace(fields[10]), 64)
+	memTotal, _ := strconv.ParseUint(strings.TrimSpace(fields[13]), 10, 64)
+	memUsed, _ := strconv.ParseUint(strings.TrimSpace(fields[14]), 10, 64)
+	cardSeries := strings.TrimSpace(fields[15])
+	name := device
+	if cardSeries != "" {
+		name = cardSeries + " " + device
+	}
+
+	const toMB = 1024 * 1024
 
 	return &GpuStat{
-		Timestamp:  time.Now(),
-		ID:         id,
-		Name:       device,
-		TempC:      int(tempC),
-		VramTempC:  int(vramTempC),
-		GpuUtilPct: gpuUtil,
-		MemUtilPct: memUtil,
-		PowerDrawW: powerDraw,
+		Timestamp:   time.Now(),
+		ID:          id,
+		Name:        name,
+		UUID:        uuid,
+		TempC:       int(tempC),
+		VramTempC:   int(vramTempC),
+		GpuUtilPct:  gpuUtil,
+		MemUtilPct:  memUtil,
+		MemUsedMB:   int(memUsed / toMB),
+		MemTotalMB:  int(memTotal / toMB),
+		FanSpeedPct: fanSpeed,
+		PowerDrawW:  powerDraw,
 	}
 }
 
