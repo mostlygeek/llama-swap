@@ -4,40 +4,14 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/proxy/config"
 )
-
-var simpleResponderPath string
-
-func TestMain(m *testing.M) {
-	goos := runtime.GOOS
-	goarch := runtime.GOARCH
-	if goos == "windows" {
-		simpleResponderPath = filepath.Join("..", "..", "build", "simple-responder.exe")
-	} else {
-		simpleResponderPath = filepath.Join("..", "..", "build", fmt.Sprintf("simple-responder_%s_%s", goos, goarch))
-	}
-	m.Run()
-}
-
-func getFreePort(t *testing.T) int {
-	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("getFreePort: %v", err)
-	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port
-}
 
 func TestProcess_StartStop(t *testing.T) {
 	// Real HTTP server: health check client dials it directly.
@@ -99,11 +73,9 @@ func TestProcess_SimpleResponder_StartStop(t *testing.T) {
 		t.Skipf("simple-responder not found at %s, run `make simple-responder`", simpleResponderPath)
 	}
 
-	port := getFreePort(t)
-	cmdPath := filepath.ToSlash(simpleResponderPath)
-
+	cmd, port := simpleResponderCmd(t, "-silent", "-respond hello")
 	conf := config.ModelConfig{
-		Cmd:                fmt.Sprintf("%s --port %d --silent --respond hello", cmdPath, port),
+		Cmd:                cmd,
 		Proxy:              fmt.Sprintf("http://127.0.0.1:%d", port),
 		CheckEndpoint:      "/health",
 		HealthCheckTimeout: 10,

@@ -242,6 +242,9 @@ func (p *Process) start(startCtx context.Context) error {
 		} else {
 			p.cmd = cmd
 		}
+
+		// TODO: need a go func for cmd.Wait() ... and when it exits it will send an unexpected
+		// exit error to the process loop, which will update the state to stopped
 	}
 
 	checkEndpoint := strings.TrimSpace(p.config.CheckEndpoint)
@@ -324,6 +327,14 @@ func (p *Process) StopImmediate(ctx context.Context) error {
 }
 
 func (p *Process) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+
+	// in here we can have a race condition where the process
+	// is stopping or whatever. ask for a request handler
+	// and then execute it. It can still error but we
+	// want to see what happens when it races with a stop
+	// in run() it can send back a handler function that returns a
+	// an error
+
 	if p.handlerFn == nil {
 		http.Error(w, fmt.Sprintf("[%s] no handler function available", p.id), http.StatusInternalServerError)
 		return
