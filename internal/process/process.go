@@ -61,10 +61,10 @@ type Process struct {
 	parentCtx context.Context
 	cmd       *exec.Cmd
 
-	// createHandler allows injection of a custom http handler function
+	// createTestHandler allows injection of a custom http handler function
 	// to be used for testing
-	createHandler func() (http.HandlerFunc, error)
-	handlerFn     http.HandlerFunc
+	createTestHandler func() (http.HandlerFunc, error)
+	handlerFn         http.HandlerFunc
 
 	processLogger *logmon.Monitor
 	proxyLogger   *logmon.Monitor
@@ -172,6 +172,11 @@ func (p *Process) run() {
 				p.state = StateStarting
 				cmdCtx, cancelCmd = context.WithCancel(cmd.ctx)
 				err := p.start(cmdCtx)
+				if err != nil {
+					p.state = StateStopped
+				} else {
+					p.state = StateReady
+				}
 				cmd.send(err)
 			} else {
 				cmd.send(fmt.Errorf("[%s] could not be started in %s state", p.id, p.state))
@@ -211,8 +216,8 @@ func (p *Process) start(startCtx context.Context) error {
 		return fmt.Errorf("unable to get sanitized command: %w", err)
 	}
 
-	if p.createHandler != nil {
-		handler, err := p.createHandler()
+	if p.createTestHandler != nil {
+		handler, err := p.createTestHandler()
 		if err != nil {
 			return fmt.Errorf("[%s] failed to create custom handler: %w", p.id, err)
 		} else {
@@ -229,8 +234,8 @@ func (p *Process) start(startCtx context.Context) error {
 		cmd := exec.CommandContext(startCtx, args[0], args[1:]...)
 		cmd.Stdout = p.processLogger
 		cmd.Stderr = p.processLogger
-		cmd.Env = append(p.cmd.Environ(), p.config.Env...)
-		setProcAttributes(p.cmd) // apply platform specific implementations
+		cmd.Env = append(cmd.Environ(), p.config.Env...)
+		setProcAttributes(cmd)
 
 		if err := cmd.Start(); err != nil {
 			return fmt.Errorf("[%s] start() failed for command '%s': %w", p.id, strings.Join(args, " "), err)
@@ -250,7 +255,11 @@ func (p *Process) start(startCtx context.Context) error {
 			return fmt.Errorf("failed to create health check URL proxy=%s and checkEndpoint=%s", proxyTo, checkEndpoint)
 		}
 
-		time.Sleep(250 * time.Millisecond) // give process a bit of time to start
+		if p.createTestHandler == nil {
+			// give real processes a bit of time to start
+			time.Sleep(250 * time.Millisecond)
+		}
+
 		healthCh := make(chan error, 1)
 		maxDuration := time.Second * time.Duration(p.config.HealthCheckTimeout)
 		checkCtx, _ := context.WithTimeout(startCtx, maxDuration)
@@ -315,7 +324,16 @@ func (p *Process) StopImmediate(ctx context.Context) error {
 }
 
 func (p *Process) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
+	if p.handlerFn == nil {
+		http.Error(w, fmt.Sprintf("[%s] no handler function available", p.id), http.StatusInternalServerError)
+		return
+	}
+
+	p.inFlightRequestsCount.Add(1)
+	defer p.inFlightRequests.Add(-1)
+	p.sem.Acquire(r.Context(), 1)
+	defer p.sem.Release(1)
+	p.handlerFn(w, r)
 }
 
 var healthcheckFailedError = errors.New("healthcheck status not OK")
