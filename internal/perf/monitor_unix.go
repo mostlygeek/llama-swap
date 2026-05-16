@@ -139,7 +139,7 @@ func tryNvidiaSmi(ctx context.Context, every time.Duration, logger *logmon.Monit
 	cmd := exec.CommandContext(ctx, "nvidia-smi",
 		"--query-gpu=index,name,uuid,temperature.gpu,utilization.gpu,memory.used,memory.total,fan.speed,power.draw",
 		"--format=csv,noheader,nounits",
-		"-loop", fmt.Sprintf("%d", sec),
+		"--loop", fmt.Sprintf("%d", sec),
 	)
 
 	stdout, err := cmd.StdoutPipe()
