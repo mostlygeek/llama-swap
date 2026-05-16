@@ -275,7 +275,7 @@ func tryRocmSmi(ctx context.Context, every time.Duration, logger *logmon.Monitor
 
 func parseRocmSmiLine(line string) *GpuStat {
 	fields := strings.Split(line, ",")
-	if len(fields) < 16 {
+	if len(fields) < 20 {
 		return nil
 	}
 
@@ -284,19 +284,22 @@ func parseRocmSmiLine(line string) *GpuStat {
 	if err != nil {
 		return nil
 	}
-	uuid := strings.TrimSpace(fields[1])
-	tempC, _ := strconv.ParseFloat(strings.TrimSpace(fields[2]), 64)
-	vramTempC, _ := strconv.ParseFloat(strings.TrimSpace(fields[4]), 64)
-	fanSpeed, _ := strconv.ParseFloat(strings.TrimSpace(fields[6]), 64)
-	powerDraw, _ := strconv.ParseFloat(strings.TrimSpace(fields[8]), 64)
-	gpuUtil, _ := strconv.ParseFloat(strings.TrimSpace(fields[9]), 64)
-	memUtil, _ := strconv.ParseFloat(strings.TrimSpace(fields[10]), 64)
-	memTotal, _ := strconv.ParseUint(strings.TrimSpace(fields[13]), 10, 64)
-	memUsed, _ := strconv.ParseUint(strings.TrimSpace(fields[14]), 10, 64)
-	cardSeries := strings.TrimSpace(fields[15])
+	deviceName := strings.TrimSpace(fields[1])
+	uuid := strings.TrimSpace(fields[5])
+	tempC, _ := strconv.ParseFloat(strings.TrimSpace(fields[6]), 64)
+	vramTempC, _ := strconv.ParseFloat(strings.TrimSpace(fields[8]), 64)
+	fanSpeed, _ := strconv.ParseFloat(strings.TrimSpace(fields[10]), 64)
+	powerDraw, _ := strconv.ParseFloat(strings.TrimSpace(fields[12]), 64)
+	gpuUtil, _ := strconv.ParseFloat(strings.TrimSpace(fields[13]), 64)
+	memUtil, _ := strconv.ParseFloat(strings.TrimSpace(fields[14]), 64)
+	memTotal, _ := strconv.ParseUint(strings.TrimSpace(fields[17]), 10, 64)
+	memUsed, _ := strconv.ParseUint(strings.TrimSpace(fields[18]), 10, 64)
+	cardSeries := strings.TrimSpace(fields[19])
 	name := device
 	if cardSeries != "" {
 		name = cardSeries + " " + device
+	} else if deviceName != "" {
+		name = deviceName + " " + device
 	}
 
 	const toMB = 1024 * 1024
