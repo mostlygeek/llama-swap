@@ -372,6 +372,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			modelConfig.Proxy = strings.ReplaceAll(modelConfig.Proxy, macroSlug, macroStr)
 			modelConfig.Name = strings.ReplaceAll(modelConfig.Name, macroSlug, macroStr)
 			modelConfig.Description = strings.ReplaceAll(modelConfig.Description, macroSlug, macroStr)
+			modelConfig.MetadataPath = strings.ReplaceAll(modelConfig.MetadataPath, macroSlug, macroStr)
 
 			if len(modelConfig.Metadata) > 0 {
 				result, err := substituteMacroInValue(modelConfig.Metadata, "PORT", nextPort)
