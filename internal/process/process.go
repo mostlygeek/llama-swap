@@ -53,10 +53,6 @@ type stopReq struct {
 	respond  chan error
 }
 
-type stateReq struct {
-	respond chan ProcessState
-}
-
 type waitReadyReq struct {
 	respond chan error
 }
@@ -82,8 +78,10 @@ type ProcessCommand struct {
 
 	runCh       chan runReq
 	stopCh      chan stopReq
-	stateCh     chan stateReq
 	waitReadyCh chan waitReadyReq
+
+	// current ProcessState. Written only by run(); read by State() via atomic load.
+	state atomic.Value
 
 	// stores the active reverse-proxy handler when the process is running.
 	// Written only by run(); read by ServeHTTP via atomic load.
@@ -114,9 +112,9 @@ func New(
 
 		runCh:       make(chan runReq),
 		stopCh:      make(chan stopReq),
-		stateCh:     make(chan stateReq),
 		waitReadyCh: make(chan waitReadyReq),
 	}
+	p.state.Store(StateStopped)
 
 	go p.run()
 	return p, nil
@@ -168,10 +166,6 @@ func (p *ProcessCommand) run() {
 			state = StateShutdown
 			notifyWaiters(fmt.Errorf("[%s] shutdown", p.id))
 			return
-
-		// State query: cheap, just echoes the current state back to the caller.
-		case req := <-p.stateCh:
-			req.respond <- state
 
 		// WaitReady: if we're already in a terminal-for-this-question state,
 		// respond immediately; otherwise queue the caller and let a future
@@ -473,13 +467,10 @@ func (p *ProcessCommand) Stop(cooldown time.Duration, timeout time.Duration) err
 }
 
 func (p *ProcessCommand) State() ProcessState {
-	req := stateReq{respond: make(chan ProcessState, 1)}
-	select {
-	case p.stateCh <- req:
-	case <-p.parentCtx.Done():
-		return StateShutdown
+	if s, ok := p.state.Load().(*ProcessState); ok {
+		return *s
 	}
-	return <-req.respond
+	return StateStopped
 }
 
 func (p *ProcessCommand) ServeHTTP(w http.ResponseWriter, r *http.Request) {
