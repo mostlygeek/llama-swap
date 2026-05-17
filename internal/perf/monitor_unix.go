@@ -227,6 +227,7 @@ func tryRocmSmi(ctx context.Context, every time.Duration, logger *logmon.Monitor
 	if every < time.Second {
 		every = time.Second
 	}
+	const pollTimeout = 5 * time.Second
 
 	ch := make(chan []GpuStat, 1)
 
@@ -240,9 +241,15 @@ func tryRocmSmi(ctx context.Context, every time.Duration, logger *logmon.Monitor
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				cmd := exec.CommandContext(ctx, "rocm-smi", "-i", "-P", "-t", "-f", "-u", "--showmemuse", "--showmeminfo", "vram", "--showproductname", "--csv")
+				pollCtx, cancel := context.WithTimeout(ctx, pollTimeout)
+				cmd := exec.CommandContext(pollCtx, "rocm-smi", "-i", "-P", "-t", "-f", "-u", "--showmemuse", "--showmeminfo", "vram", "--showproductname", "--csv")
 				out, err := cmd.Output()
+				timedOut := pollCtx.Err() == context.DeadlineExceeded
+				cancel()
 				if err != nil {
+					if timedOut {
+						logger.Debug("rocm-smi timed out")
+					}
 					continue
 				}
 
