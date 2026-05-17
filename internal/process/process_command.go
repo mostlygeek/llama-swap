@@ -10,37 +10,15 @@ import (
 	"net/url"
 	"os/exec"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/proxy/config"
-	"golang.org/x/sync/semaphore"
 )
 
-var ErrAbort = fmt.Errorf("aborted")
-
-type ProcessState string
-
-const (
-	StateStopped  ProcessState = ProcessState("stopped")
-	StateStarting ProcessState = ProcessState("starting")
-	StateReady    ProcessState = ProcessState("ready")
-	StateCooldown ProcessState = ProcessState("cooldown")
-	StateStopping ProcessState = ProcessState("stopping")
-
-	// process is shutdown and will not be restarted
-	StateShutdown ProcessState = ProcessState("shutdown")
-)
-
-type Process interface {
-	Run(timeout time.Duration) error
-	WaitReady(context.Context) error
-	Stop(cooldown time.Duration, timeout time.Duration) error
-	State() ProcessState
-}
+var ErrStartAborted = fmt.Errorf("aborted")
 
 type runReq struct {
 	timeout time.Duration
@@ -72,10 +50,6 @@ type ProcessCommand struct {
 	processLogger *logmon.Monitor
 	proxyLogger   *logmon.Monitor
 
-	inFlightRequests      sync.WaitGroup
-	inFlightRequestsCount atomic.Int32
-	sem                   *semaphore.Weighted
-
 	runCh       chan runReq
 	stopCh      chan stopReq
 	waitReadyCh chan waitReadyReq
@@ -97,18 +71,12 @@ func New(
 	processLogger *logmon.Monitor,
 	proxyLogger *logmon.Monitor,
 ) (*ProcessCommand, error) {
-	concurrentLimit := 10
-	if conf.ConcurrencyLimit > 0 {
-		concurrentLimit = conf.ConcurrencyLimit
-	}
-
 	p := &ProcessCommand{
 		id:            id,
 		config:        conf,
 		parentCtx:     parentCtx,
 		processLogger: processLogger,
 		proxyLogger:   proxyLogger,
-		sem:           semaphore.NewWeighted(int64(concurrentLimit)),
 
 		runCh:       make(chan runReq),
 		stopCh:      make(chan stopReq),
@@ -233,8 +201,8 @@ func (p *ProcessCommand) run() {
 					p.killProcess(res.cmd, res.cmdDone, stop.timeout)
 				}
 				state = StateStopped
-				notifyWaiters(ErrAbort)
-				req.respond <- ErrAbort
+				notifyWaiters(ErrStartAborted)
+				req.respond <- ErrStartAborted
 				pendingStop = &stop
 			}
 			// cancelStart is idempotent; calling it again here ensures the
@@ -310,7 +278,22 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 		}
 		return nil
 	}
-	handlerFn := http.HandlerFunc(reverseProxy.ServeHTTP)
+	// httputil.ReverseProxy panics with http.ErrAbortHandler when the upstream
+	// disconnects after response headers have been sent. Recover here so the
+	// streaming termination is treated as a normal client/upstream disconnect.
+	// see: https://github.com/golang/go/issues/23643
+	handlerFn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				if rec == http.ErrAbortHandler {
+					p.proxyLogger.Infof("<%s> recovered from upstream disconnection during streaming", p.id)
+				} else {
+					p.proxyLogger.Warnf("<%s> recovered from panic: %v", p.id, rec)
+				}
+			}
+		}()
+		reverseProxy.ServeHTTP(w, r)
+	})
 
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Stderr = p.processLogger
@@ -330,7 +313,7 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 
 	if startCtx.Err() != nil {
 		p.killProcess(cmd, cmdDone, 5*time.Second)
-		return startResult{err: ErrAbort}
+		return startResult{err: ErrStartAborted}
 	}
 
 	checkEndpoint := strings.TrimSpace(p.config.CheckEndpoint)
@@ -338,10 +321,11 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 		return startResult{cmd: cmd, cmdDone: cmdDone, handlerFn: handlerFn}
 	}
 
+	// Wait 250ms for the command to start up before health checking
 	select {
 	case <-startCtx.Done():
 		p.killProcess(cmd, cmdDone, 5*time.Second)
-		return startResult{err: ErrAbort}
+		return startResult{err: ErrStartAborted}
 	case <-time.After(250 * time.Millisecond):
 	}
 
@@ -350,7 +334,7 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 		select {
 		case <-startCtx.Done():
 			p.killProcess(cmd, cmdDone, 5*time.Second)
-			return startResult{err: ErrAbort}
+			return startResult{err: ErrStartAborted}
 		case <-cmdDone:
 			return startResult{err: fmt.Errorf("upstream command exited prematurely")}
 		default:
@@ -370,13 +354,13 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 			break
 		} else if startCtx.Err() != nil {
 			p.killProcess(cmd, cmdDone, 5*time.Second)
-			return startResult{err: ErrAbort}
+			return startResult{err: ErrStartAborted}
 		}
 
 		select {
 		case <-startCtx.Done():
 			p.killProcess(cmd, cmdDone, 5*time.Second)
-			return startResult{err: ErrAbort}
+			return startResult{err: ErrStartAborted}
 		case <-cmdDone:
 			return startResult{err: fmt.Errorf("upstream command exited prematurely")}
 		case <-time.After(time.Second):
@@ -474,12 +458,6 @@ func (p *ProcessCommand) State() ProcessState {
 }
 
 func (p *ProcessCommand) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	p.inFlightRequests.Add(1)
-	p.inFlightRequestsCount.Add(1)
-	defer p.inFlightRequests.Done()
-	p.sem.Acquire(r.Context(), 1)
-	defer p.sem.Release(1)
-
 	fn := p.handler.Load()
 	if fn == nil {
 		http.Error(w, "no handler available", http.StatusInternalServerError)
