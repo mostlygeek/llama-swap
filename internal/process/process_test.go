@@ -2,114 +2,236 @@ package process
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/proxy/config"
 )
 
-func TestProcess_StartStop(t *testing.T) {
-	// Real HTTP server: health check client dials it directly.
-	healthCheckCalled := make(chan struct{}, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/health" {
-			select {
-			case healthCheckCalled <- struct{}{}:
-			default:
-			}
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
-	conf := config.ModelConfig{
-		Proxy:              server.URL,
-		Cmd:                "echo hello", // SanitizedCommand() is called before createTestHandler branch
-		CheckEndpoint:      "/health",
-		HealthCheckTimeout: 5,
-	}
-
+func newProcessCommand(t *testing.T, conf config.ModelConfig) *ProcessCommand {
+	t.Helper()
 	logger := logmon.NewWriter(io.Discard)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	p, err := New(ctx, "test-model", conf, logger, logger)
+	p, err := New(context.Background(), t.Name(), conf, logger, logger)
 	if err != nil {
-		t.Fatalf("New() error: %v", err)
+		t.Fatalf("New: %v", err)
 	}
-
-	p.createTestHandler = func() (http.HandlerFunc, error) {
-		return func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-		}, nil
-	}
-
-	if err := p.Start(context.Background()); err != nil {
-		t.Fatalf("Start() error: %v", err)
-	}
-
-	select {
-	case <-healthCheckCalled:
-	default:
-		t.Error("expected health check to be called during Start()")
-	}
-
-	if err := p.Stop(context.Background()); err != nil {
-		t.Fatalf("Stop() error: %v", err)
-	}
-
-	if p.state != StateStopped {
-		t.Errorf("expected state %s after Stop(), got %s", StateStopped, p.state)
-	}
+	return p
 }
 
-func TestProcess_SimpleResponder_StartStop(t *testing.T) {
-	if _, err := os.Stat(simpleResponderPath); os.IsNotExist(err) {
-		t.Skipf("simple-responder not found at %s, run `make simple-responder`", simpleResponderPath)
-	}
+func TestProcessCommand_StartStop(t *testing.T) {
+	skipIfNoSimpleResponder(t)
 
 	cmd, port := simpleResponderCmd(t, "-silent", "-respond hello")
-	conf := config.ModelConfig{
+	p := newProcessCommand(t, config.ModelConfig{
 		Cmd:                cmd,
 		Proxy:              fmt.Sprintf("http://127.0.0.1:%d", port),
 		CheckEndpoint:      "/health",
 		HealthCheckTimeout: 10,
+	})
+	t.Cleanup(func() { p.Stop(0, 5*time.Second) })
+
+	req := httptest.NewRequest("GET", "/test", nil)
+
+	// before start: no handler
+	rr := httptest.NewRecorder()
+	p.ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("before start: expected 500, got %d", rr.Code)
 	}
 
-	logger := logmon.NewWriter(io.Discard)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	p, err := New(ctx, "simple-responder", conf, logger, logger)
-	if err != nil {
-		t.Fatalf("New() error: %v", err)
+	if err := p.Run(10 * time.Second); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+	if got := p.State(); got != StateReady {
+		t.Errorf("after Run: expected state %s, got %s", StateReady, got)
 	}
 
-	if err := p.Start(context.Background()); err != nil {
-		t.Fatalf("Start() error: %v", err)
+	rr = httptest.NewRecorder()
+	p.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("after Run: expected 200, got %d", rr.Code)
+	}
+	if body := rr.Body.String(); body != "hello" {
+		t.Errorf("expected body %q, got %q", "hello", body)
 	}
 
-	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/test", port))
-	if err != nil {
-		t.Fatalf("GET /test error: %v", err)
+	if err := p.Stop(0, 5*time.Second); err != nil {
+		t.Fatalf("Stop() error: %v", err)
 	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	if string(body) != "hello" {
-		t.Errorf("expected body %q, got %q", "hello", string(body))
+	if got := p.State(); got != StateStopped {
+		t.Errorf("after Stop: expected state %s, got %s", StateStopped, got)
 	}
 
-	if err := p.Stop(context.Background()); err != nil {
+	// after stop: handler cleared
+	rr = httptest.NewRecorder()
+	p.ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("after stop: expected 500, got %d", rr.Code)
+	}
+}
+
+func TestProcessCommand_Run_Idempotent(t *testing.T) {
+	skipIfNoSimpleResponder(t)
+
+	cmd, port := simpleResponderCmd(t, "-silent")
+	p := newProcessCommand(t, config.ModelConfig{
+		Cmd:                cmd,
+		Proxy:              fmt.Sprintf("http://127.0.0.1:%d", port),
+		CheckEndpoint:      "/health",
+		HealthCheckTimeout: 10,
+	})
+	t.Cleanup(func() { p.Stop(0, 5*time.Second) })
+
+	if err := p.Run(10 * time.Second); err != nil {
+		t.Fatalf("first Run() error: %v", err)
+	}
+
+	if err := p.Run(10 * time.Second); err == nil {
+		t.Error("second Run() while running: expected error, got nil")
+	}
+}
+
+func TestProcessCommand_Stop_Idempotent(t *testing.T) {
+	skipIfNoSimpleResponder(t)
+
+	cmd, port := simpleResponderCmd(t, "-silent")
+	p := newProcessCommand(t, config.ModelConfig{
+		Cmd:                cmd,
+		Proxy:              fmt.Sprintf("http://127.0.0.1:%d", port),
+		CheckEndpoint:      "/health",
+		HealthCheckTimeout: 10,
+	})
+
+	if err := p.Stop(0, 5*time.Second); err != nil {
+		t.Fatalf("Stop() before Run(): %v", err)
+	}
+
+	if err := p.Run(10 * time.Second); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	if err := p.Stop(0, 5*time.Second); err != nil {
+		t.Fatalf("first Stop() error: %v", err)
+	}
+
+	if err := p.Stop(0, 5*time.Second); err != nil {
+		t.Fatalf("second Stop() error: %v", err)
+	}
+}
+
+// TestProcessCommand_StopCancelsRun verifies that a Stop sent while Run is
+// executing its health-check loop returns ErrAbort to the Run caller.
+//
+// A blocking mock HTTP server is used as the proxy so the test can deterministically
+// know when doStart is inside the health-check loop before issuing Stop.
+func TestProcessCommand_StopCancelsRun(t *testing.T) {
+	skipIfNoSimpleResponder(t)
+
+	healthCheckStarted := make(chan struct{}, 1)
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Signal that a health check is in-flight, then block until the client
+		// cancels (which happens when Stop cancels the start context).
+		select {
+		case healthCheckStarted <- struct{}{}:
+		default:
+		}
+		<-r.Context().Done()
+		http.Error(w, "cancelled", http.StatusServiceUnavailable)
+	}))
+	defer mock.Close()
+
+	// simple-responder is the real process; health checks go to the blocking mock.
+	cmd, _ := simpleResponderCmd(t, "-silent")
+	p := newProcessCommand(t, config.ModelConfig{
+		Cmd:                cmd,
+		Proxy:              mock.URL,
+		CheckEndpoint:      "/health",
+		HealthCheckTimeout: 30,
+	})
+
+	runErrCh := make(chan error, 1)
+	go func() {
+		runErrCh <- p.Run(30 * time.Second)
+	}()
+
+	// Block until doStart is actually performing a health check, guaranteeing
+	// that Run is in-flight when Stop is called.
+	<-healthCheckStarted
+
+	if err := p.Stop(0, 5*time.Second); err != nil {
 		t.Fatalf("Stop() error: %v", err)
 	}
 
-	if p.state != StateStopped {
-		t.Errorf("expected state %s after Stop(), got %s", StateStopped, p.state)
+	if err := <-runErrCh; !errors.Is(err, ErrAbort) {
+		t.Errorf("expected ErrAbort from Run, got %v", err)
+	}
+}
+
+// TestProcessCommand_RunStopCycle runs several sequential start/stop pairs on
+// fresh processes to confirm they are reusable.
+func TestProcessCommand_RunStopCycle(t *testing.T) {
+	skipIfNoSimpleResponder(t)
+
+	for i := range 3 {
+		cmd, port := simpleResponderCmd(t, "-silent")
+		p := newProcessCommand(t, config.ModelConfig{
+			Cmd:                cmd,
+			Proxy:              fmt.Sprintf("http://127.0.0.1:%d", port),
+			CheckEndpoint:      "/health",
+			HealthCheckTimeout: 10,
+		})
+
+		if err := p.Run(10 * time.Second); err != nil {
+			t.Fatalf("cycle %d Run() error: %v", i, err)
+		}
+
+		req := httptest.NewRequest("GET", "/health", nil)
+		rr := httptest.NewRecorder()
+		p.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Errorf("cycle %d: expected 200 from /health, got %d", i, rr.Code)
+		}
+
+		if err := p.Stop(0, 5*time.Second); err != nil {
+			t.Fatalf("cycle %d Stop() error: %v", i, err)
+		}
+	}
+}
+
+// TestProcessCommand_ConcurrentRunStop launches many concurrent run/stop racing
+// pairs to exercise the race detector and verify no deadlocks occur.
+func TestProcessCommand_ConcurrentRunStop(t *testing.T) {
+	skipIfNoSimpleResponder(t)
+
+	var wg sync.WaitGroup
+	for range 10 {
+		cmd, port := simpleResponderCmd(t, "-silent")
+		p := newProcessCommand(t, config.ModelConfig{
+			Cmd:                cmd,
+			Proxy:              fmt.Sprintf("http://127.0.0.1:%d", port),
+			CheckEndpoint:      "/health",
+			HealthCheckTimeout: 10,
+		})
+
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			p.Run(10 * time.Second) //nolint: errcheck — one goroutine wins the race
+		}()
+		go func() {
+			defer wg.Done()
+			p.Stop(0, 5*time.Second) //nolint: errcheck
+		}()
+		wg.Wait()
+
+		// ensure clean state regardless of race outcome
+		p.Stop(0, 5*time.Second) //nolint: errcheck
 	}
 }
