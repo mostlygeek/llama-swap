@@ -98,11 +98,22 @@ func New(
 func (p *ProcessCommand) run() {
 	// Mutable state — only read/written from this goroutine. ServeHTTP reads
 	// p.handler concurrently, which is why handler is an atomic.Pointer.
+	// p.state mirrors `state` so State() can observe transitions; setState
+	// writes both.
 	state := StateStopped
+	setState := func(s ProcessState) {
+		state = s
+		p.state.Store(s)
+	}
 	var (
 		cmd          *exec.Cmd
 		cmdDone      <-chan struct{}
 		readyWaiters []waitReadyReq
+		// runResp parks the in-flight Run caller's response channel. The
+		// interface contract is that Run blocks until the process is
+		// terminated, so we hold this until Stop, parentCtx, or an
+		// upstream exit unblocks it via respondRun.
+		runResp chan<- error
 	)
 
 	// notifyWaiters wakes every blocked WaitReady caller with the given result.
@@ -118,6 +129,14 @@ func (p *ProcessCommand) run() {
 		readyWaiters = nil
 	}
 
+	// respondRun delivers the final Run result, if a Run caller is parked.
+	respondRun := func(err error) {
+		if runResp != nil {
+			runResp <- err
+			runResp = nil
+		}
+	}
+
 	for {
 		select {
 		// Shutdown: parent context cancelled. Tear down any running process,
@@ -131,9 +150,21 @@ func (p *ProcessCommand) run() {
 				cmdDone = nil
 				p.handler.Store(nil)
 			}
-			state = StateShutdown
+			setState(StateShutdown)
 			notifyWaiters(fmt.Errorf("[%s] shutdown", p.id))
+			respondRun(fmt.Errorf("[%s] shutdown", p.id))
 			return
+
+		// Upstream exited on its own (not via Stop). Drop handler state,
+		// transition to Stopped, and unblock the parked Run caller.
+		// cmdDone is nil while no process is running, so this case is
+		// dormant outside of StateReady.
+		case <-cmdDone:
+			cmd = nil
+			cmdDone = nil
+			p.handler.Store(nil)
+			setState(StateStopped)
+			respondRun(fmt.Errorf("[%s] upstream exited unexpectedly", p.id))
 
 		// WaitReady: if we're already in a terminal-for-this-question state,
 		// respond immediately; otherwise queue the caller and let a future
@@ -158,7 +189,7 @@ func (p *ProcessCommand) run() {
 				req.respond <- fmt.Errorf("[%s] could not be started in %s state", p.id, state)
 				continue
 			}
-			state = StateStarting
+			setState(StateStarting)
 
 			startCtx, cancelStart := context.WithCancel(context.Background())
 			resultCh := make(chan startResult, 1)
@@ -180,13 +211,17 @@ func (p *ProcessCommand) run() {
 					cmdDone = res.cmdDone
 					fn := res.handlerFn
 					p.handler.Store(&fn)
-					state = StateReady
+					setState(StateReady)
 					notifyWaiters(nil)
+					// Park the Run response — Run blocks until the process
+					// terminates, so we only fire this when Stop, parentCtx,
+					// or the upstream exit takes the process down.
+					runResp = req.respond
 				} else {
-					state = StateStopped
+					setState(StateStopped)
 					notifyWaiters(res.err)
+					req.respond <- res.err
 				}
-				req.respond <- res.err
 
 			// Stop arrived while doStart was still running. Cancel the
 			// start context to abort it, then wait for doStart to return.
@@ -200,7 +235,7 @@ func (p *ProcessCommand) run() {
 				if res.cmd != nil {
 					p.killProcess(res.cmd, res.cmdDone, stop.timeout)
 				}
-				state = StateStopped
+				setState(StateStopped)
 				notifyWaiters(ErrStartAborted)
 				req.respond <- ErrStartAborted
 				pendingStop = &stop
@@ -220,7 +255,7 @@ func (p *ProcessCommand) run() {
 		case stop := <-p.stopCh:
 			if cmd != nil {
 				if stop.cooldown > 0 {
-					state = StateCooldown
+					setState(StateCooldown)
 					timer := time.NewTimer(stop.cooldown)
 					select {
 					case <-timer.C:
@@ -228,7 +263,7 @@ func (p *ProcessCommand) run() {
 					}
 					timer.Stop()
 				}
-				state = StateStopping
+				setState(StateStopping)
 				p.killProcess(cmd, cmdDone, stop.timeout)
 				cmd = nil
 				cmdDone = nil
@@ -236,7 +271,8 @@ func (p *ProcessCommand) run() {
 			}
 			// Stop is a no-op (and not an error) when already Stopped — this
 			// is what makes it idempotent for callers that don't track state.
-			state = StateStopped
+			setState(StateStopped)
+			respondRun(nil)
 			stop.respond <- nil
 		}
 	}
@@ -416,7 +452,12 @@ func (p *ProcessCommand) Run(timeout time.Duration) error {
 	case <-p.parentCtx.Done():
 		return fmt.Errorf("[%s] shutdown", p.id)
 	}
-	return <-req.respond
+	select {
+	case err := <-req.respond:
+		return err
+	case <-p.parentCtx.Done():
+		return fmt.Errorf("[%s] shutdown", p.id)
+	}
 }
 
 func (p *ProcessCommand) WaitReady(ctx context.Context) error {
@@ -451,8 +492,8 @@ func (p *ProcessCommand) Stop(cooldown time.Duration, timeout time.Duration) err
 }
 
 func (p *ProcessCommand) State() ProcessState {
-	if s, ok := p.state.Load().(*ProcessState); ok {
-		return *s
+	if s, ok := p.state.Load().(ProcessState); ok {
+		return s
 	}
 	return StateStopped
 }
@@ -460,7 +501,7 @@ func (p *ProcessCommand) State() ProcessState {
 func (p *ProcessCommand) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	fn := p.handler.Load()
 	if fn == nil {
-		http.Error(w, "no handler available", http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("llama-swap-error: [%s] process is not ready", p.id), http.StatusServiceUnavailable)
 		return
 	}
 	(*fn)(w, r)
