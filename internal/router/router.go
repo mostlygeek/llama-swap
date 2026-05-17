@@ -115,11 +115,11 @@ func ExtractModel(r *http.Request) (string, error) {
 
 func SendError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
-	case errors.Is(ErrNoModelInContext, err):
+	case errors.Is(err, ErrNoModelInContext):
 		SendResponse(w, r, http.StatusNotFound, "no model id could be identified")
-	case errors.Is(ErrNoPeerModelFound, err):
+	case errors.Is(err, ErrNoPeerModelFound):
 		SendResponse(w, r, http.StatusNotFound, "no peer found for requested model")
-	case errors.Is(ErrNoLocalModelFound, err):
+	case errors.Is(err, ErrNoLocalModelFound):
 		SendResponse(w, r, http.StatusNotFound, "no local server found for requested model")
 	default:
 		SendResponse(w, r, http.StatusInternalServerError, fmt.Sprintf("unspecific error: %v", err))
