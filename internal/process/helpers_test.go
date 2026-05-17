@@ -3,6 +3,7 @@ package process
 import (
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -10,6 +11,13 @@ import (
 )
 
 var simpleResponderPath string
+
+func skipIfNoSimpleResponder(t *testing.T) {
+	t.Helper()
+	if _, err := os.Stat(simpleResponderPath); os.IsNotExist(err) {
+		t.Skipf("simple-responder not found at %s, run `make simple-responder`", simpleResponderPath)
+	}
+}
 
 func TestMain(m *testing.M) {
 	goos := runtime.GOOS
