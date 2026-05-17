@@ -1,8 +1,28 @@
 package router
 
 import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"time"
+
+	"github.com/tidwall/gjson"
+)
+
+type contextkey struct {
+	name string
+}
+
+var (
+	ErrorNoModelInContext = fmt.Errorf("no model in request context")
+
+	// Context keys use to store information info in the request's context
+	ModelKey   = &contextkey{"model"}    // the model value in the request
+	ModelIDKey = &contextkey{"model-id"} // The model ID in the configuration
 )
 
 type Router interface {
@@ -16,4 +36,109 @@ type Router interface {
 	// ServeHTTP implements the http.Handler and requests coming in will
 	// trigger any model swapping and routing logic.
 	ServeHTTP(http.ResponseWriter, *http.Request)
+}
+
+// ExtractAndSetModel extracts the model from the request and stores it on the
+// request's context. The request is left unchanged if there is an error.
+func ExtractAndSetModel(r *http.Request) error {
+	model, err := ExtractModel(r)
+	if err != nil {
+		return err
+	}
+	*r = *r.WithContext(SetModel(r.Context(), model))
+	return nil
+}
+
+func SetModel(ctx context.Context, model string) context.Context {
+	return context.WithValue(ctx, ModelKey, model)
+}
+
+func GetModel(ctx context.Context) (string, bool) {
+	model, ok := ctx.Value(ModelKey).(string)
+	return model, ok
+}
+
+// ExtractModel pulls the model name from an HTTP request without consuming the
+// body. For GET requests it reads the "model" query parameter. For POST
+// requests it inspects Content-Type and parses JSON, multipart/form-data, or
+// application/x-www-form-urlencoded bodies. The request body is always restored
+// before returning so downstream handlers — including reverse proxies that
+// forward raw bytes upstream — can still read it.
+func ExtractModel(r *http.Request) (string, error) {
+	if r.Method == http.MethodGet {
+		if model := r.URL.Query().Get("model"); model != "" {
+			return model, nil
+		}
+		return "", fmt.Errorf("missing 'model' query parameter")
+	}
+
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		return "", fmt.Errorf("error reading request body: %w", err)
+	}
+	defer func() {
+		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	}()
+
+	contentType := r.Header.Get("Content-Type")
+
+	if strings.Contains(contentType, "application/json") {
+		model := gjson.GetBytes(bodyBytes, "model").String()
+		if model == "" {
+			return "", fmt.Errorf("missing or empty 'model' in JSON body")
+		}
+		return model, nil
+	}
+
+	// Form parsers read from r.Body, so feed them a fresh reader over the
+	// buffered bytes. The deferred restore above will reset r.Body again
+	// after parsing.
+	r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	if strings.Contains(contentType, "multipart/form-data") {
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			return "", fmt.Errorf("error parsing multipart form: %w", err)
+		}
+	} else {
+		if err := r.ParseForm(); err != nil {
+			return "", fmt.Errorf("error parsing form: %w", err)
+		}
+	}
+
+	if model := r.FormValue("model"); model != "" {
+		return model, nil
+	}
+
+	return "", fmt.Errorf("missing 'model' parameter")
+}
+
+func SendErrorError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(ErrorNoModelInContext, err):
+		SendResponse(w, r, http.StatusNotFound, "no model available")
+	default:
+		SendResponse(w, r, http.StatusInternalServerError, fmt.Sprintf("unspecific error: %v", err))
+	}
+}
+
+// SendResponse detects what content type the client prefers and returns an error response in that format.
+func SendResponse(w http.ResponseWriter, r *http.Request, status int, message string) {
+	// Check Accept header for preferred response format
+	acceptHeader := r.Header.Get("Accept")
+	if strings.Contains(acceptHeader, "text/plain") {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(status)
+		w.Write([]byte(fmt.Sprintf("llama-swap: %s", message)))
+		return
+	}
+
+	if strings.Contains(acceptHeader, "text/html") {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(status)
+		w.Write([]byte(fmt.Sprintf(`<html><body><h1>llama-swap</h1><p>%s</p></body></html>`, message)))
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	w.Write([]byte(fmt.Sprintf(`{"src":"llama-swap", "error": "%s"}`, message)))
 }
