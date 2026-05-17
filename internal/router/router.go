@@ -18,7 +18,9 @@ type contextkey struct {
 }
 
 var (
-	ErrorNoModelInContext = fmt.Errorf("no model in request context")
+	ErrNoModelInContext  = fmt.Errorf("no model in request context")
+	ErrNoPeerModelFound  = fmt.Errorf("peer model not found")
+	ErrNoLocalModelFound = fmt.Errorf("local model not found")
 
 	// Context keys use to store information info in the request's context
 	ModelKey   = &contextkey{"model"}    // the model value in the request
@@ -111,10 +113,14 @@ func ExtractModel(r *http.Request) (string, error) {
 	return "", fmt.Errorf("missing 'model' parameter")
 }
 
-func SendErrorError(w http.ResponseWriter, r *http.Request, err error) {
+func SendError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
-	case errors.Is(ErrorNoModelInContext, err):
-		SendResponse(w, r, http.StatusNotFound, "no model available")
+	case errors.Is(ErrNoModelInContext, err):
+		SendResponse(w, r, http.StatusNotFound, "no model id could be identified")
+	case errors.Is(ErrNoPeerModelFound, err):
+		SendResponse(w, r, http.StatusNotFound, "no peer found for requested model")
+	case errors.Is(ErrNoLocalModelFound, err):
+		SendResponse(w, r, http.StatusNotFound, "no local server found for requested model")
 	default:
 		SendResponse(w, r, http.StatusInternalServerError, fmt.Sprintf("unspecific error: %v", err))
 	}
