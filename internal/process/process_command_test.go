@@ -1,12 +1,14 @@
 package process
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -143,7 +145,7 @@ func TestProcessCommand_StopCancelsRun(t *testing.T) {
 		default:
 		}
 		<-r.Context().Done()
-		http.Error(w, "cancelled", http.StatusServiceUnavailable)
+		http.Error(w, "mock cancelled", http.StatusServiceUnavailable)
 	}))
 	defer mock.Close()
 
@@ -169,8 +171,8 @@ func TestProcessCommand_StopCancelsRun(t *testing.T) {
 		t.Fatalf("Stop() error: %v", err)
 	}
 
-	if err := <-runErrCh; !errors.Is(err, ErrAbort) {
-		t.Errorf("expected ErrAbort from Run, got %v", err)
+	if err := <-runErrCh; !errors.Is(err, ErrStartAborted) {
+		t.Errorf("expected ErrStartAborted from Run, got %v", err)
 	}
 }
 
@@ -203,6 +205,105 @@ func TestProcessCommand_RunStopCycle(t *testing.T) {
 			t.Fatalf("cycle %d Stop() error: %v", i, err)
 		}
 	}
+}
+
+// TestProcessCommand_ReverseProxyPanicIsRecovered drives the full proxy path:
+// the upstream responds healthy on /health (so Run completes), then on the
+// actual proxied request it hijacks the connection and closes it mid-body.
+// That upstream EOF makes httputil.ReverseProxy.copyResponse return an error,
+// which panics with http.ErrAbortHandler — the wrapped handlerFn must recover
+// and log the disconnect.
+//
+// Requests are issued through an httptest.NewServer wrapping the process so
+// the panic actually fires (httputil only panics on copy errors when the
+// request carries http.ServerContextKey, which a real server sets).
+//
+// see: https://github.com/golang/go/issues/23643
+func TestProcessCommand_ReverseProxyPanicIsRecovered(t *testing.T) {
+	skipIfNoSimpleResponder(t)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		// Send a Content-Length that promises 100 bytes, deliver only a few,
+		// then slam the connection shut. The reverse proxy will see EOF
+		// before the body is fully copied and panic with ErrAbortHandler.
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Errorf("upstream: hijack not supported")
+			return
+		}
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			t.Errorf("upstream: hijack: %v", err)
+			return
+		}
+		_, _ = conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 100\r\nContent-Type: text/plain\r\n\r\npartial"))
+		_ = conn.Close()
+	}))
+	t.Cleanup(upstream.Close)
+
+	// Capture proxy log output so we can assert the recover message was
+	// emitted by handlerFn.
+	logBuf := &syncBuffer{}
+	proxyLogger := logmon.NewWriter(logBuf)
+	procLogger := logmon.NewWriter(io.Discard)
+
+	cmd, _ := simpleResponderCmd(t, "-silent")
+	p, err := New(context.Background(), t.Name(), config.ModelConfig{
+		Cmd:                cmd,
+		Proxy:              upstream.URL,
+		CheckEndpoint:      "/health",
+		HealthCheckTimeout: 10,
+	}, procLogger, proxyLogger)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { p.Stop(0, 5*time.Second) })
+
+	if err := p.Run(10 * time.Second); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	// Wrap p in an httptest server so requests get http.ServerContextKey
+	// automatically — that is what makes httputil.ReverseProxy raise the panic.
+	front := httptest.NewServer(p)
+	t.Cleanup(front.Close)
+
+	resp, err := http.Get(front.URL + "/disconnect")
+	if err == nil {
+		resp.Body.Close()
+	}
+
+	const want = "recovered from upstream disconnection"
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(logBuf.String(), want) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Errorf("expected proxy log to contain %q; got:\n%s", want, logBuf.String())
+}
+
+// syncBuffer is a concurrent-safe bytes.Buffer for capturing logmon output.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 // TestProcessCommand_ConcurrentRunStop launches many concurrent run/stop racing
