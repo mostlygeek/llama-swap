@@ -17,6 +17,14 @@ import (
 	"github.com/mostlygeek/llama-swap/proxy/config"
 )
 
+const (
+	testStartTimeout    = 3 * time.Second
+	testStopTimeout     = 2 * time.Second
+	testReturnTimeout   = 1 * time.Second
+	testPollInterval    = 20 * time.Millisecond
+	testLogPollInterval = 10 * time.Millisecond
+)
+
 func newProcessCommand(t *testing.T, conf config.ModelConfig) *ProcessCommand {
 	t.Helper()
 	logger := logmon.NewWriter(io.Discard)
@@ -33,8 +41,8 @@ func newProcessCommand(t *testing.T, conf config.ModelConfig) *ProcessCommand {
 func runAsync(t *testing.T, p *ProcessCommand) <-chan error {
 	t.Helper()
 	ch := make(chan error, 1)
-	go func() { ch <- p.Run(10 * time.Second) }()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	go func() { ch <- p.Run(testStartTimeout) }()
+	ctx, cancel := context.WithTimeout(context.Background(), testStartTimeout)
 	defer cancel()
 	if err := p.WaitReady(ctx); err != nil {
 		t.Fatalf("WaitReady: %v", err)
@@ -52,7 +60,7 @@ func TestProcessCommand_StartStop(t *testing.T) {
 		CheckEndpoint:      "/health",
 		HealthCheckTimeout: 10,
 	})
-	t.Cleanup(func() { p.Stop(0, 5*time.Second) })
+	t.Cleanup(func() { p.Stop(0, testStopTimeout) })
 
 	req := httptest.NewRequest("GET", "/test", nil)
 
@@ -80,7 +88,7 @@ func TestProcessCommand_StartStop(t *testing.T) {
 		t.Errorf("expected body %q, got %q", "hello", body)
 	}
 
-	if err := p.Stop(0, 5*time.Second); err != nil {
+	if err := p.Stop(0, testStopTimeout); err != nil {
 		t.Fatalf("Stop() error: %v", err)
 	}
 	if got := p.State(); got != StateStopped {
@@ -91,7 +99,7 @@ func TestProcessCommand_StartStop(t *testing.T) {
 		if err != nil {
 			t.Errorf("Run() after Stop: expected nil, got %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(testReturnTimeout):
 		t.Fatal("Run() did not return after Stop")
 	}
 
@@ -116,20 +124,20 @@ func TestProcessCommand_Run_Idempotent(t *testing.T) {
 		CheckEndpoint:      "/health",
 		HealthCheckTimeout: 10,
 	})
-	t.Cleanup(func() { p.Stop(0, 5*time.Second) })
+	t.Cleanup(func() { p.Stop(0, testStopTimeout) })
 
 	runErr := runAsync(t, p)
 
-	if err := p.Run(10 * time.Second); err == nil {
+	if err := p.Run(testStartTimeout); err == nil {
 		t.Error("second Run() while running: expected error, got nil")
 	}
 
-	if err := p.Stop(0, 5*time.Second); err != nil {
+	if err := p.Stop(0, testStopTimeout); err != nil {
 		t.Fatalf("Stop() error: %v", err)
 	}
 	select {
 	case <-runErr:
-	case <-time.After(2 * time.Second):
+	case <-time.After(testReturnTimeout):
 		t.Fatal("Run() did not return after Stop")
 	}
 }
@@ -145,22 +153,22 @@ func TestProcessCommand_Stop_Idempotent(t *testing.T) {
 		HealthCheckTimeout: 10,
 	})
 
-	if err := p.Stop(0, 5*time.Second); err != nil {
+	if err := p.Stop(0, testStopTimeout); err != nil {
 		t.Fatalf("Stop() before Run(): %v", err)
 	}
 
 	runErr := runAsync(t, p)
 
-	if err := p.Stop(0, 5*time.Second); err != nil {
+	if err := p.Stop(0, testStopTimeout); err != nil {
 		t.Fatalf("first Stop() error: %v", err)
 	}
 	select {
 	case <-runErr:
-	case <-time.After(2 * time.Second):
+	case <-time.After(testReturnTimeout):
 		t.Fatal("Run() did not return after Stop")
 	}
 
-	if err := p.Stop(0, 5*time.Second); err != nil {
+	if err := p.Stop(0, testStopTimeout); err != nil {
 		t.Fatalf("second Stop() error: %v", err)
 	}
 }
@@ -197,14 +205,14 @@ func TestProcessCommand_StopCancelsRun(t *testing.T) {
 
 	runErrCh := make(chan error, 1)
 	go func() {
-		runErrCh <- p.Run(30 * time.Second)
+		runErrCh <- p.Run(testStartTimeout)
 	}()
 
 	// Block until doStart is actually performing a health check, guaranteeing
 	// that Run is in-flight when Stop is called.
 	<-healthCheckStarted
 
-	if err := p.Stop(0, 5*time.Second); err != nil {
+	if err := p.Stop(0, testStopTimeout); err != nil {
 		t.Fatalf("Stop() error: %v", err)
 	}
 
@@ -236,12 +244,12 @@ func TestProcessCommand_RunStopCycle(t *testing.T) {
 			t.Errorf("cycle %d: expected 200 from /health, got %d", i, rr.Code)
 		}
 
-		if err := p.Stop(0, 5*time.Second); err != nil {
+		if err := p.Stop(0, testStopTimeout); err != nil {
 			t.Fatalf("cycle %d Stop() error: %v", i, err)
 		}
 		select {
 		case <-runErr:
-		case <-time.After(2 * time.Second):
+		case <-time.After(testReturnTimeout):
 			t.Fatalf("cycle %d: Run() did not return after Stop", i)
 		}
 	}
@@ -301,7 +309,7 @@ func TestProcessCommand_ReverseProxyPanicIsRecovered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	t.Cleanup(func() { p.Stop(0, 5*time.Second) })
+	t.Cleanup(func() { p.Stop(0, testStopTimeout) })
 
 	_ = runAsync(t, p)
 
@@ -316,12 +324,12 @@ func TestProcessCommand_ReverseProxyPanicIsRecovered(t *testing.T) {
 	}
 
 	const want = "recovered from upstream disconnection"
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(testReturnTimeout)
 	for time.Now().Before(deadline) {
 		if strings.Contains(logBuf.String(), want) {
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(testLogPollInterval)
 	}
 	t.Errorf("expected proxy log to contain %q; got:\n%s", want, logBuf.String())
 }
@@ -361,23 +369,23 @@ func TestProcessCommand_ConcurrentRunStop(t *testing.T) {
 		runDone := make(chan struct{})
 		go func() {
 			defer close(runDone)
-			p.Run(10 * time.Second) //nolint: errcheck — one goroutine wins the race
+			p.Run(testStartTimeout) //nolint: errcheck — one goroutine wins the race
 		}()
 		go func() {
-			p.Stop(0, 5*time.Second) //nolint: errcheck
+			p.Stop(0, testStopTimeout) //nolint: errcheck
 		}()
 
 		// Backstop: the racing Stop may have arrived before Run got on the
 		// channel (making it a no-op), so keep stopping until Run unblocks.
-		deadline := time.After(10 * time.Second)
+		deadline := time.After(testStartTimeout)
 		for done := false; !done; {
 			select {
 			case <-runDone:
 				done = true
 			case <-deadline:
 				t.Fatal("Run did not return")
-			case <-time.After(20 * time.Millisecond):
-				p.Stop(0, 5*time.Second) //nolint: errcheck
+			case <-time.After(testPollInterval):
+				p.Stop(0, testStopTimeout) //nolint: errcheck
 			}
 		}
 	}
