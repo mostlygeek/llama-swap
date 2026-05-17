@@ -303,9 +303,9 @@ func parseRocmSmiLine(line string) *GpuStat {
 	memUsed, _ := strconv.ParseUint(strings.TrimSpace(fields[18]), 10, 64)
 	cardSeries := strings.TrimSpace(fields[19])
 	name := device
-	if cardSeries != "" {
+	if cardSeries != "" && cardSeries != "N/A" {
 		name = cardSeries + " " + device
-	} else if deviceName != "" {
+	} else if deviceName != "" && deviceName != "N/A" {
 		name = deviceName + " " + device
 	}
 
