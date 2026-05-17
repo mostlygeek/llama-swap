@@ -281,7 +281,7 @@ models:
         b: 2
         # objects can contain complex types with macro substitution
         # becomes: c: [0.7, false, "model: llama"]
-        c: [ "${temp}", false, "model: ${MODEL_ID}" ]
+        c: ["${temp}", false, "model: ${MODEL_ID}"]
 
     # concurrencyLimit: overrides the allowed number of active parallel requests to a model
     # - optional, default: 0
@@ -347,10 +347,19 @@ models:
 # matrix: run concurrent models with a solver-based swap DSL
 # =============================================================================
 #
-# Note:
-# A config must use either a matrix or legacy groups, not both. A configuration error
-# will occur if both are defined. Configuration examples for legacy Groups can be found:
+# Matrix or Groups?
+#
+# Groups are available and fully supported. The syntax may be easier to use
+# for simple use cases.
+#
+# Documentation can be found here:
 # https://github.com/mostlygeek/llama-swap/blob/40e39f7/config.example.yaml#L334-L396
+#
+# A config can only use a matrix (recommended) or groups. A configuration error
+# will occur if both are defined. Groups is legacy but is fully supported with
+# no plans to deprecate it.
+#
+# ~~~~~
 #
 # The matrix declares valid combinations of models that can run concurrently.
 # When a model is requested, the solver finds the cheapest way to make it
