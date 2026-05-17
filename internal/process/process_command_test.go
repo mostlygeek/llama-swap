@@ -27,6 +27,21 @@ func newProcessCommand(t *testing.T, conf config.ModelConfig) *ProcessCommand {
 	return p
 }
 
+// runAsync starts Run in a goroutine and waits until the process is ready,
+// matching the new interface contract where Run blocks until the process is
+// terminated. Returns a channel that delivers Run's eventual error.
+func runAsync(t *testing.T, p *ProcessCommand) <-chan error {
+	t.Helper()
+	ch := make(chan error, 1)
+	go func() { ch <- p.Run(10 * time.Second) }()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := p.WaitReady(ctx); err != nil {
+		t.Fatalf("WaitReady: %v", err)
+	}
+	return ch
+}
+
 func TestProcessCommand_StartStop(t *testing.T) {
 	skipIfNoSimpleResponder(t)
 
@@ -44,13 +59,14 @@ func TestProcessCommand_StartStop(t *testing.T) {
 	// before start: no handler
 	rr := httptest.NewRecorder()
 	p.ServeHTTP(rr, req)
-	if rr.Code != http.StatusInternalServerError {
-		t.Errorf("before start: expected 500, got %d", rr.Code)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("before start: expected 503, got %d", rr.Code)
+	}
+	if body := rr.Body.String(); !strings.Contains(body, "llama-swap-error") {
+		t.Errorf("before start: expected body to contain %q, got %q", "llama-swap-error", body)
 	}
 
-	if err := p.Run(10 * time.Second); err != nil {
-		t.Fatalf("Run() error: %v", err)
-	}
+	runErr := runAsync(t, p)
 	if got := p.State(); got != StateReady {
 		t.Errorf("after Run: expected state %s, got %s", StateReady, got)
 	}
@@ -70,12 +86,23 @@ func TestProcessCommand_StartStop(t *testing.T) {
 	if got := p.State(); got != StateStopped {
 		t.Errorf("after Stop: expected state %s, got %s", StateStopped, got)
 	}
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Errorf("Run() after Stop: expected nil, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run() did not return after Stop")
+	}
 
 	// after stop: handler cleared
 	rr = httptest.NewRecorder()
 	p.ServeHTTP(rr, req)
-	if rr.Code != http.StatusInternalServerError {
-		t.Errorf("after stop: expected 500, got %d", rr.Code)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("after stop: expected 503, got %d", rr.Code)
+	}
+	if body := rr.Body.String(); !strings.Contains(body, "llama-swap-error") {
+		t.Errorf("after stop: expected body to contain %q, got %q", "llama-swap-error", body)
 	}
 }
 
@@ -91,12 +118,19 @@ func TestProcessCommand_Run_Idempotent(t *testing.T) {
 	})
 	t.Cleanup(func() { p.Stop(0, 5*time.Second) })
 
-	if err := p.Run(10 * time.Second); err != nil {
-		t.Fatalf("first Run() error: %v", err)
-	}
+	runErr := runAsync(t, p)
 
 	if err := p.Run(10 * time.Second); err == nil {
 		t.Error("second Run() while running: expected error, got nil")
+	}
+
+	if err := p.Stop(0, 5*time.Second); err != nil {
+		t.Fatalf("Stop() error: %v", err)
+	}
+	select {
+	case <-runErr:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run() did not return after Stop")
 	}
 }
 
@@ -115,12 +149,15 @@ func TestProcessCommand_Stop_Idempotent(t *testing.T) {
 		t.Fatalf("Stop() before Run(): %v", err)
 	}
 
-	if err := p.Run(10 * time.Second); err != nil {
-		t.Fatalf("Run() error: %v", err)
-	}
+	runErr := runAsync(t, p)
 
 	if err := p.Stop(0, 5*time.Second); err != nil {
 		t.Fatalf("first Stop() error: %v", err)
+	}
+	select {
+	case <-runErr:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run() did not return after Stop")
 	}
 
 	if err := p.Stop(0, 5*time.Second); err != nil {
@@ -190,9 +227,7 @@ func TestProcessCommand_RunStopCycle(t *testing.T) {
 			HealthCheckTimeout: 10,
 		})
 
-		if err := p.Run(10 * time.Second); err != nil {
-			t.Fatalf("cycle %d Run() error: %v", i, err)
-		}
+		runErr := runAsync(t, p)
 
 		req := httptest.NewRequest("GET", "/health", nil)
 		rr := httptest.NewRecorder()
@@ -203,6 +238,11 @@ func TestProcessCommand_RunStopCycle(t *testing.T) {
 
 		if err := p.Stop(0, 5*time.Second); err != nil {
 			t.Fatalf("cycle %d Stop() error: %v", i, err)
+		}
+		select {
+		case <-runErr:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("cycle %d: Run() did not return after Stop", i)
 		}
 	}
 }
@@ -263,9 +303,7 @@ func TestProcessCommand_ReverseProxyPanicIsRecovered(t *testing.T) {
 	}
 	t.Cleanup(func() { p.Stop(0, 5*time.Second) })
 
-	if err := p.Run(10 * time.Second); err != nil {
-		t.Fatalf("Run() error: %v", err)
-	}
+	_ = runAsync(t, p)
 
 	// Wrap p in an httptest server so requests get http.ServerContextKey
 	// automatically — that is what makes httputil.ReverseProxy raise the panic.
@@ -311,7 +349,6 @@ func (b *syncBuffer) String() string {
 func TestProcessCommand_ConcurrentRunStop(t *testing.T) {
 	skipIfNoSimpleResponder(t)
 
-	var wg sync.WaitGroup
 	for range 10 {
 		cmd, port := simpleResponderCmd(t, "-silent")
 		p := newProcessCommand(t, config.ModelConfig{
@@ -321,18 +358,27 @@ func TestProcessCommand_ConcurrentRunStop(t *testing.T) {
 			HealthCheckTimeout: 10,
 		})
 
-		wg.Add(2)
+		runDone := make(chan struct{})
 		go func() {
-			defer wg.Done()
+			defer close(runDone)
 			p.Run(10 * time.Second) //nolint: errcheck — one goroutine wins the race
 		}()
 		go func() {
-			defer wg.Done()
 			p.Stop(0, 5*time.Second) //nolint: errcheck
 		}()
-		wg.Wait()
 
-		// ensure clean state regardless of race outcome
-		p.Stop(0, 5*time.Second) //nolint: errcheck
+		// Backstop: the racing Stop may have arrived before Run got on the
+		// channel (making it a no-op), so keep stopping until Run unblocks.
+		deadline := time.After(10 * time.Second)
+		for done := false; !done; {
+			select {
+			case <-runDone:
+				done = true
+			case <-deadline:
+				t.Fatal("Run did not return")
+			case <-time.After(20 * time.Millisecond):
+				p.Stop(0, 5*time.Second) //nolint: errcheck
+			}
+		}
 	}
 }
