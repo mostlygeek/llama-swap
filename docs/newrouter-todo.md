@@ -24,22 +24,17 @@ Everything below is missing or only partially implemented.
 
 Goal: move shared infrastructure packages out from under `proxy/` so the new router does not depend on the legacy proxy tree. This is a prerequisite for retiring `proxy/` in Phase 9.
 
-- [ ] Move `proxy/config` → `internal/config`
-- [ ] Move `proxy/configwatcher` → `internal/watcher`
-- [ ] Update import paths everywhere the packages are used. Current importers (run `grep -rn "mostlygeek/llama-swap/proxy/config\|mostlygeek/llama-swap/proxy/configwatcher" --include="*.go"` to refresh the list):
-  - `cmd/newrouter/main.go`, `cmd/monitor-test/main.go`
-  - `llama-swap.go`
-  - `proxy/` (proxymanager, processgroup, matrix, peerproxy, process, and their tests)
-  - `internal/perf/` (monitor + tests)
-  - `internal/process/` (process_command + test)
-  - `internal/router/` (base, group, matrix, peer, router, server, matrix_solver, and tests)
-- [ ] Verify `make test-all` still passes after the move
-- [ ] No behavior change in this phase — pure relocation + import rewrite
+- [x] Move `proxy/config` → `internal/config`
+- [x] Move `proxy/configwatcher` → `internal/watcher`
+- [x] Update import paths everywhere the packages are used (33 files across `cmd/`, `proxy/`, `internal/`, and `llama-swap.go`)
+- [x] Verify `make test-all` still passes after the move
+- [x] No behavior change in this phase — pure relocation + import rewrite
 
 Notes:
 
 - Both packages already have no proxy-specific dependencies, so the move is mechanical.
 - Doing this first lets later phases write `internal/config` / `internal/watcher` imports directly without a follow-up rename pass.
+- Fixed pre-existing data race in `internal/router/server.go` (`wg.Wait()` was deferred after `errors.Join` read the results slice).
 
 ---
 

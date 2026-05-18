@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/logmon"
-	"github.com/mostlygeek/llama-swap/proxy/config"
+	"github.com/mostlygeek/llama-swap/internal/config"
 )
 
 // Server implement http.Handler to route requests to the appropriate router
@@ -56,7 +56,6 @@ func (s *Server) Handles(model string) bool {
 
 func (s *Server) Shutdown(timeout time.Duration) error {
 	var wg sync.WaitGroup
-	defer wg.Wait()
 
 	var errmu sync.Mutex
 	var errs []error
@@ -76,6 +75,7 @@ func (s *Server) Shutdown(timeout time.Duration) error {
 		}(r)
 	}
 
+	wg.Wait()
 	return errors.Join(errs...)
 }
 

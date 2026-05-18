@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mostlygeek/llama-swap/proxy/config"
+	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/tidwall/gjson"
 )
 
