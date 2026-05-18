@@ -224,3 +224,43 @@ func TestCurrent_ConcurrentAccess(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestParseNvidiaSmiLine_ValidLine(t *testing.T) {
+	line := "0, NVIDIA GeForce RTX 3080, GPU-12345678-1234-1234-1234-123456789abc, 65, 80, 8192, 10240, 75, 250"
+
+	stat := ParseNvidiaSmiLine(line)
+	require.NotNil(t, stat)
+
+	assert.Equal(t, 0, stat.ID)
+	assert.Equal(t, "NVIDIA GeForce RTX 3080", stat.Name)
+	assert.Equal(t, "GPU-12345678-1234-1234-1234-123456789abc", stat.UUID)
+	assert.Equal(t, 65, stat.TempC)
+	assert.Equal(t, 80.0, stat.GpuUtilPct)
+	assert.Equal(t, 8192, stat.MemUsedMB)
+	assert.Equal(t, 10240, stat.MemTotalMB)
+	assert.Equal(t, 75.0, stat.FanSpeedPct)
+	assert.Equal(t, 250.0, stat.PowerDrawW)
+	assert.InDelta(t, 80.0, stat.MemUtilPct, 0.01)
+}
+
+func TestParseNvidiaSmiLine_ShortLine(t *testing.T) {
+	line := "0, NVIDIA GPU, GPU-123"
+
+	stat := ParseNvidiaSmiLine(line)
+	assert.Nil(t, stat)
+}
+
+func TestParseNvidiaSmiLine_MissingFields(t *testing.T) {
+	line := "0, NVIDIA GPU, GPU-123, 65, 80, 8192, 10240, 75"
+
+	stat := ParseNvidiaSmiLine(line)
+	assert.Nil(t, stat)
+}
+
+func TestParseNvidiaSmiLine_ZeroMemoryTotal(t *testing.T) {
+	line := "0, NVIDIA GPU, GPU-123, 65, 80, 0, 0, 75, 250"
+
+	stat := ParseNvidiaSmiLine(line)
+	require.NotNil(t, stat)
+	assert.Equal(t, 0.0, stat.MemUtilPct)
+}
