@@ -25,6 +25,9 @@ func getGpuStats(ctx context.Context, every time.Duration, logger *logmon.Monito
 	return nil, ErrNoGpuTool
 }
 
+// tryNvidiaSmiWindows starts nvidia-smi in loop mode on Windows and returns
+// a channel receiving GPU stat snapshots. Returns ErrNoGpuTool if nvidia-smi
+// is not available.
 func tryNvidiaSmiWindows(ctx context.Context, every time.Duration, logger *logmon.Monitor) (chan []GpuStat, error) {
 	if _, err := exec.LookPath("nvidia-smi"); err != nil {
 		return nil, ErrNoGpuTool
