@@ -50,12 +50,8 @@ type Router interface {
 // store the model in the context for downstream handlers. An error
 // will be returned when model can not be fetch from either location.
 func FetchModel(r *http.Request, cfg config.Config) (string, string, error) {
-	model, ok := GetModel(r.Context())
+	model, realName, ok := GetModel(r.Context())
 	if ok {
-		realName, _ := cfg.RealModelName(model)
-		if realName == "" {
-			realName = model
-		}
 		return model, realName, nil
 	}
 
@@ -77,14 +73,10 @@ func SetModel(ctx context.Context, requested, real string) context.Context {
 	return ctx
 }
 
-func GetModel(ctx context.Context) (string, bool) {
-	model, ok := ctx.Value(ModelKey).(string)
-	return model, ok
-}
-
-func GetModelID(ctx context.Context) (string, bool) {
-	model, ok := ctx.Value(ModelIDKey).(string)
-	return model, ok
+func GetModel(ctx context.Context) (string, string, bool) {
+	requested, ok := ctx.Value(ModelKey).(string)
+	real, _ := ctx.Value(ModelIDKey).(string)
+	return requested, real, ok
 }
 
 // ExtractModel pulls the model name from an HTTP request without consuming the
