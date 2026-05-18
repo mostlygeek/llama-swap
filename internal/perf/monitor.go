@@ -8,7 +8,7 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/ring"
-	"github.com/mostlygeek/llama-swap/proxy/config"
+	"github.com/mostlygeek/llama-swap/internal/config"
 )
 
 var (

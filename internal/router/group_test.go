@@ -9,7 +9,7 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
-	"github.com/mostlygeek/llama-swap/proxy/config"
+	"github.com/mostlygeek/llama-swap/internal/config"
 )
 
 // newTestGroup builds a Group directly from the supplied processes and config,

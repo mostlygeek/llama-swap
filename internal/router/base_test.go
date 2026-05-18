@@ -11,7 +11,7 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
-	"github.com/mostlygeek/llama-swap/proxy/config"
+	"github.com/mostlygeek/llama-swap/internal/config"
 )
 
 // stubPlanner is a swapPlanner that returns a fixed eviction list per target

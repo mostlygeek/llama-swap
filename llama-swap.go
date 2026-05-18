@@ -18,8 +18,8 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/proxy"
-	"github.com/mostlygeek/llama-swap/proxy/config"
-	"github.com/mostlygeek/llama-swap/proxy/configwatcher"
+	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/watcher"
 )
 
 var (

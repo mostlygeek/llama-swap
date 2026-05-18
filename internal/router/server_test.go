@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mostlygeek/llama-swap/proxy/config"
+	"github.com/mostlygeek/llama-swap/internal/config"
 )
 
 // stubRouter is a minimal Router implementation for Server routing tests.
