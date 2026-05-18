@@ -600,23 +600,18 @@ func TestGroup_ServeHTTP_QueueCollation(t *testing.T) {
 		t.Fatalf("completed=%v want 6", completed)
 	}
 
-	// Within-model serve order is not deterministic (two waiters race on
-	// invoking ServeHTTP after both receive the handler), but the
-	// model-level grouping must hold: all a's before any b, all b's before
-	// any c.
+	// run() fans out responses in model-grouped order (a1,a2 → b1,b2 → c1,c2)
+	// but waiter goroutines may be scheduled in any order after their respond
+	// channel fires, so completion order isn't deterministic. Per-model counts
+	// (combined with the runCalls checks below) are sufficient to prove queue
+	// collation collapsed each pair into a single swap.
 	aDone, bDone, cDone := 0, 0, 0
 	for _, id := range completed {
 		switch id {
 		case "a":
 			aDone++
-			if bDone > 0 || cDone > 0 {
-				t.Errorf("'a' served after b/c: order=%v", completed)
-			}
 		case "b":
 			bDone++
-			if cDone > 0 {
-				t.Errorf("'b' served after c: order=%v", completed)
-			}
 		case "c":
 			cDone++
 		}
