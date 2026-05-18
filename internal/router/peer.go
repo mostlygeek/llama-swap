@@ -24,7 +24,7 @@ type peerMember struct {
 }
 
 type PeerRouter struct {
-	config config.PeerDictionaryConfig
+	cfg    config.Config
 	logger *logmon.Monitor
 	peers  map[string]*peerMember
 
@@ -34,7 +34,8 @@ type PeerRouter struct {
 	inflight     sync.WaitGroup
 }
 
-func NewPeer(peers config.PeerDictionaryConfig, logger *logmon.Monitor) (*PeerRouter, error) {
+func NewPeer(cfg config.Config, logger *logmon.Monitor) (*PeerRouter, error) {
+	peers := cfg.Peers
 	modelMap := make(map[string]*peerMember)
 
 	peerIDs := make([]string, 0, len(peers))
@@ -104,7 +105,7 @@ func NewPeer(peers config.PeerDictionaryConfig, logger *logmon.Monitor) (*PeerRo
 	shutdownCtx, shutdownFn := context.WithCancel(context.Background())
 
 	return &PeerRouter{
-		config:      peers,
+		cfg:         cfg,
 		logger:      logger,
 		peers:       modelMap,
 		shutdownCtx: shutdownCtx,
@@ -147,15 +148,15 @@ func (r *PeerRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r.inflight.Add(1)
 	defer r.inflight.Done()
 
-	model, err := FetchModel(req)
+	_, realModel, err := FetchModel(req, r.cfg)
 	if err != nil {
 		SendError(w, req, err)
 		return
 	}
 
-	pp, found := r.peers[model]
+	pp, found := r.peers[realModel]
 	if !found {
-		r.logger.Warnf("peer model not found: %s", model)
+		r.logger.Warnf("peer model not found: %s", realModel)
 		SendError(w, req, ErrNoPeerModelFound)
 		return
 	}

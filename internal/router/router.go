@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/proxy/config"
 	"github.com/tidwall/gjson"
 )
 
@@ -44,26 +45,41 @@ type Router interface {
 // from the model body. If it extracts the model from the body it will
 // store the model in the context for downstream handlers. An error
 // will be returned when model can not be fetch from either location.
-func FetchModel(r *http.Request) (string, error) {
+func FetchModel(r *http.Request, cfg config.Config) (string, string, error) {
 	model, ok := GetModel(r.Context())
 	if ok {
-		return model, nil
+		realName, _ := cfg.RealModelName(model)
+		if realName == "" {
+			realName = model
+		}
+		return model, realName, nil
 	}
 
 	if model, err := ExtractModel(r); err == nil {
-		*r = *r.WithContext(SetModel(r.Context(), model))
-		return model, nil
+		realName, _ := cfg.RealModelName(model)
+		if realName == "" {
+			realName = model
+		}
+		*r = *r.WithContext(SetModel(r.Context(), model, realName))
+		return model, realName, nil
 	}
 
-	return "", ErrNoModelInContext
+	return "", "", ErrNoModelInContext
 }
 
-func SetModel(ctx context.Context, model string) context.Context {
-	return context.WithValue(ctx, ModelKey, model)
+func SetModel(ctx context.Context, requested, real string) context.Context {
+	ctx = context.WithValue(ctx, ModelKey, requested)
+	ctx = context.WithValue(ctx, ModelIDKey, real)
+	return ctx
 }
 
 func GetModel(ctx context.Context) (string, bool) {
 	model, ok := ctx.Value(ModelKey).(string)
+	return model, ok
+}
+
+func GetModelID(ctx context.Context) (string, bool) {
+	model, ok := ctx.Value(ModelIDKey).(string)
 	return model, ok
 }
 

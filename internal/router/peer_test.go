@@ -21,7 +21,7 @@ func init() {
 }
 
 func TestNewPeer_EmptyPeers(t *testing.T) {
-	pr, err := NewPeer(config.PeerDictionaryConfig{}, testLogger)
+	pr, err := NewPeer(config.Config{}, testLogger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestNewPeer_SinglePeer(t *testing.T) {
 		},
 	}
 
-	pr, err := NewPeer(peers, testLogger)
+	pr, err := NewPeer(config.Config{Peers: peers}, testLogger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestNewPeer_MultiplePeers(t *testing.T) {
 		},
 	}
 
-	pr, err := NewPeer(peers, testLogger)
+	pr, err := NewPeer(config.Config{Peers: peers}, testLogger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestNewPeer_DuplicateModel(t *testing.T) {
 		},
 	}
 
-	pr, err := NewPeer(peers, testLogger)
+	pr, err := NewPeer(config.Config{Peers: peers}, testLogger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,13 +136,13 @@ func TestPeerRouter_ServeHTTP_Success(t *testing.T) {
 		},
 	}
 
-	pr, err := NewPeer(peers, testLogger)
+	pr, err := NewPeer(config.Config{Peers: peers}, testLogger)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	*req = *req.WithContext(SetModel(req.Context(), "test-model"))
+	*req = *req.WithContext(SetModel(req.Context(), "test-model", "test-model"))
 	w := httptest.NewRecorder()
 
 	pr.ServeHTTP(w, req)
@@ -156,7 +156,7 @@ func TestPeerRouter_ServeHTTP_Success(t *testing.T) {
 }
 
 func TestPeerRouter_ServeHTTP_ModelNotFoundInContext(t *testing.T) {
-	pr, err := NewPeer(config.PeerDictionaryConfig{}, testLogger)
+	pr, err := NewPeer(config.Config{}, testLogger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,13 +172,13 @@ func TestPeerRouter_ServeHTTP_ModelNotFoundInContext(t *testing.T) {
 }
 
 func TestPeerRouter_ServeHTTP_PeerModelNotFound(t *testing.T) {
-	pr, err := NewPeer(config.PeerDictionaryConfig{}, testLogger)
+	pr, err := NewPeer(config.Config{}, testLogger)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	*req = *req.WithContext(SetModel(req.Context(), "nonexistent-model"))
+	*req = *req.WithContext(SetModel(req.Context(), "nonexistent-model", "nonexistent-model"))
 	w := httptest.NewRecorder()
 
 	pr.ServeHTTP(w, req)
@@ -206,13 +206,13 @@ func TestPeerRouter_ServeHTTP_ApiKeyInjection(t *testing.T) {
 		},
 	}
 
-	pr, err := NewPeer(peers, testLogger)
+	pr, err := NewPeer(config.Config{Peers: peers}, testLogger)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	*req = *req.WithContext(SetModel(req.Context(), "test-model"))
+	*req = *req.WithContext(SetModel(req.Context(), "test-model", "test-model"))
 	w := httptest.NewRecorder()
 
 	pr.ServeHTTP(w, req)
@@ -240,13 +240,13 @@ func TestPeerRouter_ServeHTTP_NoApiKey(t *testing.T) {
 		},
 	}
 
-	pr, err := NewPeer(peers, testLogger)
+	pr, err := NewPeer(config.Config{Peers: peers}, testLogger)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	*req = *req.WithContext(SetModel(req.Context(), "test-model"))
+	*req = *req.WithContext(SetModel(req.Context(), "test-model", "test-model"))
 	w := httptest.NewRecorder()
 
 	pr.ServeHTTP(w, req)
@@ -273,13 +273,13 @@ func TestPeerRouter_ServeHTTP_HostHeaderSet(t *testing.T) {
 		},
 	}
 
-	pr, err := NewPeer(peers, testLogger)
+	pr, err := NewPeer(config.Config{Peers: peers}, testLogger)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	*req = *req.WithContext(SetModel(req.Context(), "test-model"))
+	*req = *req.WithContext(SetModel(req.Context(), "test-model", "test-model"))
 	w := httptest.NewRecorder()
 
 	pr.ServeHTTP(w, req)
@@ -305,13 +305,13 @@ func TestPeerRouter_ServeHTTP_SSEHeaderModification(t *testing.T) {
 		},
 	}
 
-	pr, err := NewPeer(peers, testLogger)
+	pr, err := NewPeer(config.Config{Peers: peers}, testLogger)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	*req = *req.WithContext(SetModel(req.Context(), "test-model"))
+	*req = *req.WithContext(SetModel(req.Context(), "test-model", "test-model"))
 	w := httptest.NewRecorder()
 
 	pr.ServeHTTP(w, req)
@@ -336,7 +336,7 @@ func TestPeerRouter_ServeHTTP_ShutdownRejectsNewRequests(t *testing.T) {
 		},
 	}
 
-	pr, err := NewPeer(peers, testLogger)
+	pr, err := NewPeer(config.Config{Peers: peers}, testLogger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +347,7 @@ func TestPeerRouter_ServeHTTP_ShutdownRejectsNewRequests(t *testing.T) {
 	}
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	*req = *req.WithContext(SetModel(req.Context(), "test-model"))
+	*req = *req.WithContext(SetModel(req.Context(), "test-model", "test-model"))
 	w := httptest.NewRecorder()
 
 	pr.ServeHTTP(w, req)
@@ -379,13 +379,13 @@ func TestPeerRouter_ServeHTTP_WaitsForInflightDuringShutdown(t *testing.T) {
 		},
 	}
 
-	pr, err := NewPeer(peers, testLogger)
+	pr, err := NewPeer(config.Config{Peers: peers}, testLogger)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	*req = *req.WithContext(SetModel(req.Context(), "test-model"))
+	*req = *req.WithContext(SetModel(req.Context(), "test-model", "test-model"))
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -442,13 +442,13 @@ func TestPeerRouter_ServeHTTP_ShutdownTimeoutCancelsInflight(t *testing.T) {
 		},
 	}
 
-	pr, err := NewPeer(peers, testLogger)
+	pr, err := NewPeer(config.Config{Peers: peers}, testLogger)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	*req = *req.WithContext(SetModel(req.Context(), "test-model"))
+	*req = *req.WithContext(SetModel(req.Context(), "test-model", "test-model"))
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -470,7 +470,7 @@ func TestPeerRouter_ServeHTTP_ShutdownTimeoutCancelsInflight(t *testing.T) {
 }
 
 func TestPeerRouter_ShutdownMultiple(t *testing.T) {
-	pr, err := NewPeer(config.PeerDictionaryConfig{}, testLogger)
+	pr, err := NewPeer(config.Config{}, testLogger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -505,7 +505,7 @@ func TestPeerRouter_ServeHTTP_ModelExtractedFromBody(t *testing.T) {
 		},
 	}
 
-	pr, err := NewPeer(peers, testLogger)
+	pr, err := NewPeer(config.Config{Peers: peers}, testLogger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -543,7 +543,7 @@ func TestPeerRouter_ServeHTTP_ContextOverridesBodyModel(t *testing.T) {
 		},
 	}
 
-	pr, err := NewPeer(peers, testLogger)
+	pr, err := NewPeer(config.Config{Peers: peers}, testLogger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -551,7 +551,7 @@ func TestPeerRouter_ServeHTTP_ContextOverridesBodyModel(t *testing.T) {
 	body := strings.NewReader(`{"model":"body-model","prompt":"hello"}`)
 	req := httptest.NewRequest("POST", "/v1/chat/completions", body)
 	req.Header.Set("Content-Type", "application/json")
-	*req = *req.WithContext(SetModel(req.Context(), "context-model"))
+	*req = *req.WithContext(SetModel(req.Context(), "context-model", "context-model"))
 	w := httptest.NewRecorder()
 
 	pr.ServeHTTP(w, req)
@@ -578,7 +578,7 @@ func TestNewPeer_CustomTimeouts(t *testing.T) {
 		},
 	}
 
-	pr, err := NewPeer(peers, testLogger)
+	pr, err := NewPeer(config.Config{Peers: peers}, testLogger)
 	if err != nil {
 		t.Fatal(err)
 	}

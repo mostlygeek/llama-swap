@@ -335,14 +335,14 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	model, err := FetchModel(req)
+	_, realModel, err := FetchModel(req, b.config)
 	if err != nil {
 		SendError(w, req, err)
 		return
 	}
 
 	hr := handlerReq{
-		model:   model,
+		model:   realModel,
 		ctx:     req.Context(),
 		respond: make(chan handlerResp, 1),
 	}
