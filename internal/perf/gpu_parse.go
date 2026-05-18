@@ -9,7 +9,7 @@ import (
 // ParseNvidiaSmiLine parses a single line from nvidia-smi CSV output.
 // Format: index,name,uuid,temperature.gpu,utilization.gpu,memory.used,memory.total,fan.speed,power.draw
 func ParseNvidiaSmiLine(line string) *GpuStat {
-	fields := strings.Split(line, ", ")
+	fields := strings.Split(line, ",")
 	if len(fields) < 9 {
 		return nil
 	}

@@ -1,4 +1,4 @@
-﻿//go:build unix && !darwin
+//go:build unix && !darwin
 
 package perf
 
