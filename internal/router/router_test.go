@@ -194,7 +194,7 @@ func TestExtractModel_URLEncodedBodyRestored(t *testing.T) {
 }
 
 func TestSetModel(t *testing.T) {
-	ctx := SetModel(context.Background(), "llama3")
+	ctx := SetModel(context.Background(), "llama3", "llama3")
 	v, ok := ctx.Value(ModelKey).(string)
 	if !ok {
 		t.Fatalf("ModelKey not set or wrong type")
@@ -202,11 +202,30 @@ func TestSetModel(t *testing.T) {
 	if v != "llama3" {
 		t.Errorf("want %q got %q", "llama3", v)
 	}
+	id, ok := ctx.Value(ModelIDKey).(string)
+	if !ok {
+		t.Fatalf("ModelIDKey not set or wrong type")
+	}
+	if id != "llama3" {
+		t.Errorf("want %q got %q", "llama3", id)
+	}
+}
+
+func TestSetModel_WithAlias(t *testing.T) {
+	ctx := SetModel(context.Background(), "llama", "llama3")
+	req, _ := ctx.Value(ModelKey).(string)
+	real, _ := ctx.Value(ModelIDKey).(string)
+	if req != "llama" {
+		t.Errorf("want requested %q got %q", "llama", req)
+	}
+	if real != "llama3" {
+		t.Errorf("want real %q got %q", "llama3", real)
+	}
 }
 
 func TestSetModel_DoesNotMutateParent(t *testing.T) {
 	parent := context.Background()
-	_ = SetModel(parent, "llama3")
+	_ = SetModel(parent, "llama3", "llama3")
 	if v := parent.Value(ModelKey); v != nil {
 		t.Errorf("parent context was mutated: %v", v)
 	}
@@ -221,7 +240,7 @@ func TestGetModel(t *testing.T) {
 	}{
 		{
 			name:     "model present",
-			ctx:      SetModel(context.Background(), "llama3"),
+			ctx:      SetModel(context.Background(), "llama3", "llama3"),
 			wantStr:  "llama3",
 			wantBool: true,
 		},
@@ -233,7 +252,7 @@ func TestGetModel(t *testing.T) {
 		},
 		{
 			name:     "model is empty string",
-			ctx:      SetModel(context.Background(), ""),
+			ctx:      SetModel(context.Background(), "", ""),
 			wantStr:  "",
 			wantBool: true,
 		},
@@ -242,6 +261,37 @@ func TestGetModel(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, ok := GetModel(tt.ctx)
+			if got != tt.wantStr || ok != tt.wantBool {
+				t.Errorf("want (%q, %v) got (%q, %v)", tt.wantStr, tt.wantBool, got, ok)
+			}
+		})
+	}
+}
+
+func TestGetModelID(t *testing.T) {
+	tests := []struct {
+		name     string
+		ctx      context.Context
+		wantStr  string
+		wantBool bool
+	}{
+		{
+			name:     "model id present",
+			ctx:      SetModel(context.Background(), "llama", "llama3"),
+			wantStr:  "llama3",
+			wantBool: true,
+		},
+		{
+			name:     "model id absent",
+			ctx:      context.Background(),
+			wantStr:  "",
+			wantBool: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := GetModelID(tt.ctx)
 			if got != tt.wantStr || ok != tt.wantBool {
 				t.Errorf("want (%q, %v) got (%q, %v)", tt.wantStr, tt.wantBool, got, ok)
 			}
