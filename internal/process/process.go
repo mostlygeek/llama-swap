@@ -12,7 +12,6 @@ const (
 	StateStopped  ProcessState = ProcessState("stopped")
 	StateStarting ProcessState = ProcessState("starting")
 	StateReady    ProcessState = ProcessState("ready")
-	StateCooldown ProcessState = ProcessState("cooldown")
 	StateStopping ProcessState = ProcessState("stopping")
 
 	// process is shutdown and will not be restarted
@@ -31,7 +30,7 @@ type Process interface {
 
 	// Stop blocks until the process has terminated. It returns nil when
 	// the process terminated as expected (exit 0)
-	Stop(cooldown time.Duration, timeout time.Duration) error
+	Stop(timeout time.Duration) error
 
 	// State returns the current state of the process
 	// Note: this is a snapshot of the state at the time of the call

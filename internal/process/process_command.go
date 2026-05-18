@@ -26,9 +26,8 @@ type runReq struct {
 }
 
 type stopReq struct {
-	cooldown time.Duration
-	timeout  time.Duration
-	respond  chan error
+	timeout time.Duration
+	respond chan error
 }
 
 type waitReadyReq struct {
@@ -247,22 +246,9 @@ func (p *ProcessCommand) run() {
 				pendingStop.respond <- nil
 			}
 
-		// Stop: tear down a running process. If cooldown > 0, hold the
-		// process in StateCooldown for that duration before killing — used
-		// to let in-flight requests drain. The cooldown wait is inline,
-		// so other channels (Run, State, WaitReady) won't be serviced
-		// during it; queued requests resume after Stop completes.
+		// Stop: tear down a running process.
 		case stop := <-p.stopCh:
 			if cmd != nil {
-				if stop.cooldown > 0 {
-					setState(StateCooldown)
-					timer := time.NewTimer(stop.cooldown)
-					select {
-					case <-timer.C:
-					case <-p.parentCtx.Done():
-					}
-					timer.Stop()
-				}
 				setState(StateStopping)
 				p.killProcess(cmd, cmdDone, stop.timeout)
 				cmd = nil
@@ -477,11 +463,10 @@ func (p *ProcessCommand) WaitReady(ctx context.Context) error {
 	}
 }
 
-func (p *ProcessCommand) Stop(cooldown time.Duration, timeout time.Duration) error {
+func (p *ProcessCommand) Stop(timeout time.Duration) error {
 	req := stopReq{
-		cooldown: cooldown,
-		timeout:  timeout,
-		respond:  make(chan error, 1),
+		timeout: timeout,
+		respond: make(chan error, 1),
 	}
 	select {
 	case p.stopCh <- req:
