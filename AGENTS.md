@@ -22,7 +22,7 @@ docs/                          # Project-scoped documentation
     └── TASKS.md               # Actionable checklist
 ```
 
-- Folder names: lowercase, hyphenated -- e.g. `user-auth`, `payment-v2`, `PROJ-142`
+- Folder names: lowercase, hyphenated -- e.g. `user-auth`, `payment-v2`, `issue-142`
 - Create a docs task folder only when the work needs durable task-scoped documentation such as `PRD.md`, `SPEC.md`, `ARCHITECTURE.md`, or `DESIGN.md`
 - Small task checklists and completed implementation notes belong in `.agents/memory/YYYY-MM-DD.md`
 
