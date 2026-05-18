@@ -1,0 +1,46 @@
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'  # every Monday 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run — fetch and check for conflicts without pushing'
+        type: boolean
+        default: false
+
+jobs:
+  rebase:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/model-state-and-lifecycle-api
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/mostlygeek/llama-swap.git
+          git fetch upstream main
+
+      - name: Show incoming changes
+        run: |
+          echo "=== Commits in upstream/main not yet in our branch ==="
+          git log HEAD..upstream/main --oneline || true
+
+      - name: Rebase on upstream/main
+        run: git rebase upstream/main
+
+      - name: Push
+        if: ${{ !inputs.dry_run }}
+        run: git push --force-with-lease origin feat/model-state-and-lifecycle-api
