@@ -20,6 +20,7 @@ type contextkey struct {
 
 var (
 	ErrNoModelInContext  = fmt.Errorf("no model in request context")
+	ErrNoRouterFound     = fmt.Errorf("no router found for model")
 	ErrNoPeerModelFound  = fmt.Errorf("peer model not found")
 	ErrNoLocalModelFound = fmt.Errorf("local model not found")
 
@@ -39,6 +40,9 @@ type Router interface {
 	// ServeHTTP implements the http.Handler and requests coming in will
 	// trigger any model swapping and routing logic.
 	ServeHTTP(http.ResponseWriter, *http.Request)
+
+	// Handles reports whether this router can serve requests for the given model.
+	Handles(model string) bool
 }
 
 // FetchModel will attempt to get the model id from the context then
@@ -144,6 +148,8 @@ func SendError(w http.ResponseWriter, r *http.Request, err error) {
 		SendResponse(w, r, http.StatusNotFound, "no peer found for requested model")
 	case errors.Is(err, ErrNoLocalModelFound):
 		SendResponse(w, r, http.StatusNotFound, "no local server found for requested model")
+	case errors.Is(err, ErrNoRouterFound):
+		SendResponse(w, r, http.StatusNotFound, "no router for requested model")
 	default:
 		SendResponse(w, r, http.StatusInternalServerError, fmt.Sprintf("unspecific error: %v", err))
 	}

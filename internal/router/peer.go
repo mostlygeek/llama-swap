@@ -23,7 +23,7 @@ type peerMember struct {
 	apiKey       string
 }
 
-type PeerRouter struct {
+type Peer struct {
 	cfg    config.Config
 	logger *logmon.Monitor
 	peers  map[string]*peerMember
@@ -34,7 +34,7 @@ type PeerRouter struct {
 	inflight     sync.WaitGroup
 }
 
-func NewPeer(cfg config.Config, logger *logmon.Monitor) (*PeerRouter, error) {
+func NewPeer(cfg config.Config, logger *logmon.Monitor) (*Peer, error) {
 	peers := cfg.Peers
 	modelMap := make(map[string]*peerMember)
 
@@ -104,7 +104,7 @@ func NewPeer(cfg config.Config, logger *logmon.Monitor) (*PeerRouter, error) {
 
 	shutdownCtx, shutdownFn := context.WithCancel(context.Background())
 
-	return &PeerRouter{
+	return &Peer{
 		cfg:         cfg,
 		logger:      logger,
 		peers:       modelMap,
@@ -113,7 +113,12 @@ func NewPeer(cfg config.Config, logger *logmon.Monitor) (*PeerRouter, error) {
 	}, nil
 }
 
-func (r *PeerRouter) Shutdown(timeout time.Duration) error {
+func (r *Peer) Handles(model string) bool {
+	_, ok := r.peers[model]
+	return ok
+}
+
+func (r *Peer) Shutdown(timeout time.Duration) error {
 	if !r.shuttingDown.CompareAndSwap(false, true) {
 		return fmt.Errorf("shutdown already in progress")
 	}
@@ -136,11 +141,11 @@ func (r *PeerRouter) Shutdown(timeout time.Duration) error {
 	case <-time.After(timeout):
 		r.shutdownFn()
 		r.inflight.Wait()
-		return fmt.Errorf("shutdown timed out after %v", timeout)
+		return fmt.Errorf("peer shutdown timed out after %v", timeout)
 	}
 }
 
-func (r *PeerRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+func (r *Peer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if r.shuttingDown.Load() {
 		SendError(w, req, fmt.Errorf("peer proxy is shutting down"))
 		return

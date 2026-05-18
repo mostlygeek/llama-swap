@@ -9,11 +9,11 @@ import (
 	"github.com/mostlygeek/llama-swap/proxy/config"
 )
 
-type MatrixRouter struct {
+type Matrix struct {
 	*baseRouter
 }
 
-func NewMatrix(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*MatrixRouter, error) {
+func NewMatrix(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Matrix, error) {
 	if conf.Matrix == nil {
 		return nil, fmt.Errorf("matrix router requires a matrix configuration")
 	}
@@ -39,7 +39,7 @@ func NewMatrix(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Matr
 		processes[mid] = p
 	}
 
-	r := &MatrixRouter{baseRouter: base}
+	r := &Matrix{baseRouter: base}
 	go base.run()
 	return r, nil
 }

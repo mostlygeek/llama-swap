@@ -26,7 +26,7 @@ func TestNewPeer_EmptyPeers(t *testing.T) {
 		t.Fatal(err)
 	}
 	if pr == nil {
-		t.Fatal("expected non-nil PeerRouter")
+		t.Fatal("expected non-nil Peer")
 	}
 	if len(pr.peers) != 0 {
 		t.Fatalf("expected empty peers map, got %d entries", len(pr.peers))
@@ -120,7 +120,7 @@ func TestNewPeer_DuplicateModel(t *testing.T) {
 	}
 }
 
-func TestPeerRouter_ServeHTTP_Success(t *testing.T) {
+func TestPeer_ServeHTTP_Success(t *testing.T) {
 	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("response from peer"))
@@ -155,7 +155,7 @@ func TestPeerRouter_ServeHTTP_Success(t *testing.T) {
 	}
 }
 
-func TestPeerRouter_ServeHTTP_ModelNotFoundInContext(t *testing.T) {
+func TestPeer_ServeHTTP_ModelNotFoundInContext(t *testing.T) {
 	pr, err := NewPeer(config.Config{}, testLogger)
 	if err != nil {
 		t.Fatal(err)
@@ -171,7 +171,7 @@ func TestPeerRouter_ServeHTTP_ModelNotFoundInContext(t *testing.T) {
 	}
 }
 
-func TestPeerRouter_ServeHTTP_PeerModelNotFound(t *testing.T) {
+func TestPeer_ServeHTTP_PeerModelNotFound(t *testing.T) {
 	pr, err := NewPeer(config.Config{}, testLogger)
 	if err != nil {
 		t.Fatal(err)
@@ -188,7 +188,7 @@ func TestPeerRouter_ServeHTTP_PeerModelNotFound(t *testing.T) {
 	}
 }
 
-func TestPeerRouter_ServeHTTP_ApiKeyInjection(t *testing.T) {
+func TestPeer_ServeHTTP_ApiKeyInjection(t *testing.T) {
 	var receivedAuthHeader string
 	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedAuthHeader = r.Header.Get("Authorization")
@@ -222,7 +222,7 @@ func TestPeerRouter_ServeHTTP_ApiKeyInjection(t *testing.T) {
 	}
 }
 
-func TestPeerRouter_ServeHTTP_NoApiKey(t *testing.T) {
+func TestPeer_ServeHTTP_NoApiKey(t *testing.T) {
 	var receivedAuthHeader string
 	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedAuthHeader = r.Header.Get("Authorization")
@@ -256,7 +256,7 @@ func TestPeerRouter_ServeHTTP_NoApiKey(t *testing.T) {
 	}
 }
 
-func TestPeerRouter_ServeHTTP_HostHeaderSet(t *testing.T) {
+func TestPeer_ServeHTTP_HostHeaderSet(t *testing.T) {
 	var receivedHost string
 	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedHost = r.Host
@@ -289,7 +289,7 @@ func TestPeerRouter_ServeHTTP_HostHeaderSet(t *testing.T) {
 	}
 }
 
-func TestPeerRouter_ServeHTTP_SSEHeaderModification(t *testing.T) {
+func TestPeer_ServeHTTP_SSEHeaderModification(t *testing.T) {
 	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
@@ -321,7 +321,7 @@ func TestPeerRouter_ServeHTTP_SSEHeaderModification(t *testing.T) {
 	}
 }
 
-func TestPeerRouter_ServeHTTP_ShutdownRejectsNewRequests(t *testing.T) {
+func TestPeer_ServeHTTP_ShutdownRejectsNewRequests(t *testing.T) {
 	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -360,7 +360,7 @@ func TestPeerRouter_ServeHTTP_ShutdownRejectsNewRequests(t *testing.T) {
 	}
 }
 
-func TestPeerRouter_ServeHTTP_WaitsForInflightDuringShutdown(t *testing.T) {
+func TestPeer_ServeHTTP_WaitsForInflightDuringShutdown(t *testing.T) {
 	started := make(chan struct{})
 	released := make(chan struct{})
 	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -423,7 +423,7 @@ func TestPeerRouter_ServeHTTP_WaitsForInflightDuringShutdown(t *testing.T) {
 	}
 }
 
-func TestPeerRouter_ServeHTTP_ShutdownTimeoutCancelsInflight(t *testing.T) {
+func TestPeer_ServeHTTP_ShutdownTimeoutCancelsInflight(t *testing.T) {
 	started := make(chan struct{})
 	released := make(chan struct{})
 	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -469,7 +469,7 @@ func TestPeerRouter_ServeHTTP_ShutdownTimeoutCancelsInflight(t *testing.T) {
 	wg.Wait()
 }
 
-func TestPeerRouter_ShutdownMultiple(t *testing.T) {
+func TestPeer_ShutdownMultiple(t *testing.T) {
 	pr, err := NewPeer(config.Config{}, testLogger)
 	if err != nil {
 		t.Fatal(err)
@@ -489,7 +489,7 @@ func TestPeerRouter_ShutdownMultiple(t *testing.T) {
 	}
 }
 
-func TestPeerRouter_ServeHTTP_ModelExtractedFromBody(t *testing.T) {
+func TestPeer_ServeHTTP_ModelExtractedFromBody(t *testing.T) {
 	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
@@ -522,7 +522,7 @@ func TestPeerRouter_ServeHTTP_ModelExtractedFromBody(t *testing.T) {
 	}
 }
 
-func TestPeerRouter_ServeHTTP_ContextOverridesBodyModel(t *testing.T) {
+func TestPeer_ServeHTTP_ContextOverridesBodyModel(t *testing.T) {
 	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
