@@ -233,67 +233,47 @@ func TestSetModel_DoesNotMutateParent(t *testing.T) {
 
 func TestGetModel(t *testing.T) {
 	tests := []struct {
-		name     string
-		ctx      context.Context
-		wantStr  string
-		wantBool bool
+		name      string
+		ctx       context.Context
+		wantReq   string
+		wantReal  string
+		wantBool  bool
 	}{
 		{
-			name:     "model present",
+			name:     "model present, same name",
 			ctx:      SetModel(context.Background(), "llama3", "llama3"),
-			wantStr:  "llama3",
+			wantReq:  "llama3",
+			wantReal: "llama3",
+			wantBool: true,
+		},
+		{
+			name:     "model present, aliased",
+			ctx:      SetModel(context.Background(), "llama", "llama3"),
+			wantReq:  "llama",
+			wantReal: "llama3",
 			wantBool: true,
 		},
 		{
 			name:     "model absent",
 			ctx:      context.Background(),
-			wantStr:  "",
+			wantReq:  "",
+			wantReal: "",
 			wantBool: false,
 		},
 		{
 			name:     "model is empty string",
 			ctx:      SetModel(context.Background(), "", ""),
-			wantStr:  "",
+			wantReq:  "",
+			wantReal: "",
 			wantBool: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok := GetModel(tt.ctx)
-			if got != tt.wantStr || ok != tt.wantBool {
-				t.Errorf("want (%q, %v) got (%q, %v)", tt.wantStr, tt.wantBool, got, ok)
-			}
-		})
-	}
-}
-
-func TestGetModelID(t *testing.T) {
-	tests := []struct {
-		name     string
-		ctx      context.Context
-		wantStr  string
-		wantBool bool
-	}{
-		{
-			name:     "model id present",
-			ctx:      SetModel(context.Background(), "llama", "llama3"),
-			wantStr:  "llama3",
-			wantBool: true,
-		},
-		{
-			name:     "model id absent",
-			ctx:      context.Background(),
-			wantStr:  "",
-			wantBool: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, ok := GetModelID(tt.ctx)
-			if got != tt.wantStr || ok != tt.wantBool {
-				t.Errorf("want (%q, %v) got (%q, %v)", tt.wantStr, tt.wantBool, got, ok)
+			gotReq, gotReal, ok := GetModel(tt.ctx)
+			if gotReq != tt.wantReq || gotReal != tt.wantReal || ok != tt.wantBool {
+				t.Errorf("want (%q, %q, %v) got (%q, %q, %v)", tt.wantReq, tt.wantReal, tt.wantBool, gotReq, gotReal, ok)
 			}
 		})
 	}
