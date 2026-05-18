@@ -147,18 +147,10 @@ func (r *PeerRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r.inflight.Add(1)
 	defer r.inflight.Done()
 
-	model, ok := GetModel(req.Context())
-	if !ok {
-		r.logger.Warnf("router.Peer model not found in request context, attempting extraction from body")
-		if err := ExtractAndSetModel(req); err != nil {
-			SendError(w, req, fmt.Errorf("%w: %v", ErrNoModelInContext, err))
-			return
-		}
-		model, ok = GetModel(req.Context())
-		if !ok {
-			SendError(w, req, ErrNoModelInContext)
-			return
-		}
+	model, err := FetchModel(req)
+	if err != nil {
+		SendError(w, req, err)
+		return
 	}
 
 	pp, found := r.peers[model]
