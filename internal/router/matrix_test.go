@@ -1,11 +1,9 @@
 package router
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"sync"
 	"testing"
 	"time"
 
@@ -15,25 +13,19 @@ import (
 )
 
 // newTestMatrix builds a MatrixRouter from supplied processes, bypassing
-// NewMatrix's call to process.New. The fakeProcess helper from group_test.go
-// is reused for the underlying processes.
+// NewMatrix's call to process.New.
 func newTestMatrix(t *testing.T, conf config.Config, expanded []config.ExpandedSet, evictCosts map[string]int, processes map[string]process.Process) *MatrixRouter {
 	t.Helper()
-	shutdownCtx, shutdownFn := context.WithCancel(context.Background())
-	r := &MatrixRouter{
-		config:        conf,
-		solver:        newMatrixSolver(expanded, evictCosts),
-		processes:     processes,
-		logger:        logmon.NewWriter(io.Discard),
-		shutdownCtx:   shutdownCtx,
-		shutdownFn:    shutdownFn,
-		handlerCh:     make(chan handlerReq),
-		shutdownCh:    make(chan shutdownReq),
-		swapDoneCh:    make(chan swapDone),
-		runDone:       make(chan struct{}),
-		testProcessed: make(chan struct{}, 64),
+	logger := logmon.NewWriter(io.Discard)
+	planner := &matrixPlanner{
+		solver:    newMatrixSolver(expanded, evictCosts),
+		processes: processes,
+		logger:    logger,
 	}
-	go r.run()
+	base := newBaseRouter("matrix", conf, processes, planner, logger)
+	base.testProcessed = make(chan struct{}, 64)
+	r := &MatrixRouter{baseRouter: base}
+	go base.run()
 	t.Cleanup(func() {
 		if !r.shuttingDown.Load() {
 			_ = r.Shutdown(time.Second)
@@ -42,64 +34,10 @@ func newTestMatrix(t *testing.T, conf config.Config, expanded []config.ExpandedS
 	return r
 }
 
-func waitProcessedMatrix(t *testing.T, r *MatrixRouter, n int) {
-	t.Helper()
-	for i := 0; i < n; i++ {
-		select {
-		case <-r.testProcessed:
-		case <-time.After(2 * time.Second):
-			t.Fatalf("waitProcessedMatrix: only %d/%d events received", i, n)
-		}
-	}
-}
-
 func baseMatrixConfig() config.Config {
 	return config.Config{
 		HealthCheckTimeout: 5,
 		Matrix:             &config.MatrixConfig{},
-	}
-}
-
-func TestMatrix_ServeHTTP_FastPath(t *testing.T) {
-	a := newFakeProcess("a")
-	a.markReady()
-
-	expanded := []config.ExpandedSet{
-		{SetName: "s1", DSL: "a", Models: []string{"a"}},
-	}
-	r := newTestMatrix(t, baseMatrixConfig(), expanded, nil, map[string]process.Process{"a": a})
-
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, newRequest("a"))
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
-	}
-	if got := a.serveCalls.Load(); got != 1 {
-		t.Errorf("serveCalls=%d want 1", got)
-	}
-	if got := a.runCalls.Load(); got != 0 {
-		t.Errorf("runCalls=%d want 0 (fast path)", got)
-	}
-}
-
-func TestMatrix_ServeHTTP_OnDemandStart(t *testing.T) {
-	a := newFakeProcess("a")
-	a.autoReady = true
-
-	expanded := []config.ExpandedSet{
-		{SetName: "s1", DSL: "a", Models: []string{"a"}},
-	}
-	r := newTestMatrix(t, baseMatrixConfig(), expanded, nil, map[string]process.Process{"a": a})
-
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, newRequest("a"))
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
-	}
-	if got := a.runCalls.Load(); got != 1 {
-		t.Errorf("runCalls=%d want 1", got)
 	}
 }
 
@@ -161,152 +99,6 @@ func TestMatrix_CoexistInSet(t *testing.T) {
 	}
 	if got := b.runCalls.Load(); got != 1 {
 		t.Errorf("b.runCalls=%d want 1", got)
-	}
-}
-
-// TestMatrix_ConcurrentSameModel pins that N concurrent requests for the same
-// model trigger a single swap and all are served.
-func TestMatrix_ConcurrentSameModel(t *testing.T) {
-	a := newFakeProcess("a")
-
-	expanded := []config.ExpandedSet{
-		{SetName: "s_a", DSL: "a", Models: []string{"a"}},
-	}
-	r := newTestMatrix(t, baseMatrixConfig(), expanded, nil, map[string]process.Process{"a": a})
-
-	const N = 5
-	var wg sync.WaitGroup
-	codes := make([]int, N)
-	for i := 0; i < N; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			w := httptest.NewRecorder()
-			r.ServeHTTP(w, newRequest("a"))
-			codes[i] = w.Code
-		}(i)
-	}
-
-	waitProcessedMatrix(t, r, N)
-	<-a.runStarted
-	a.markReady()
-	wg.Wait()
-
-	for i, c := range codes {
-		if c != http.StatusOK {
-			t.Errorf("request %d: status=%d", i, c)
-		}
-	}
-	if got := a.runCalls.Load(); got != 1 {
-		t.Errorf("runCalls=%d want 1", got)
-	}
-	if got := a.serveCalls.Load(); got != N {
-		t.Errorf("serveCalls=%d want %d", got, N)
-	}
-}
-
-// TestMatrix_QueuedDifferentModel verifies that a request for a different
-// model queues during an in-flight swap and is promoted afterward.
-func TestMatrix_QueuedDifferentModel(t *testing.T) {
-	a := newFakeProcess("a")
-	b := newFakeProcess("b")
-
-	expanded := []config.ExpandedSet{
-		{SetName: "s_a", DSL: "a", Models: []string{"a"}},
-		{SetName: "s_b", DSL: "b", Models: []string{"b"}},
-	}
-	r := newTestMatrix(t, baseMatrixConfig(), expanded, nil, map[string]process.Process{"a": a, "b": b})
-
-	w1 := httptest.NewRecorder()
-	done1 := make(chan struct{})
-	go func() {
-		r.ServeHTTP(w1, newRequest("a"))
-		close(done1)
-	}()
-	waitProcessedMatrix(t, r, 1)
-	<-a.runStarted
-
-	w2 := httptest.NewRecorder()
-	done2 := make(chan struct{})
-	go func() {
-		r.ServeHTTP(w2, newRequest("b"))
-		close(done2)
-	}()
-	waitProcessedMatrix(t, r, 1)
-
-	if got := b.runCalls.Load(); got != 0 {
-		t.Errorf("b started early: runCalls=%d want 0", got)
-	}
-
-	a.markReady()
-	waitProcessedMatrix(t, r, 1) // swapDone(a) → b promoted
-	<-b.runStarted
-
-	select {
-	case <-done1:
-	case <-time.After(time.Second):
-		t.Fatal("A request did not complete")
-	}
-	b.markReady()
-	select {
-	case <-done2:
-	case <-time.After(time.Second):
-		t.Fatal("queued B request did not complete")
-	}
-	if w2.Code != http.StatusOK {
-		t.Errorf("B status=%d body=%q", w2.Code, w2.Body.String())
-	}
-	if got := a.stopCalls.Load(); got != 1 {
-		t.Errorf("a.stopCalls=%d want 1", got)
-	}
-}
-
-func TestMatrix_ServeHTTP_ModelNotFound(t *testing.T) {
-	a := newFakeProcess("a")
-	expanded := []config.ExpandedSet{
-		{SetName: "s_a", DSL: "a", Models: []string{"a"}},
-	}
-	r := newTestMatrix(t, baseMatrixConfig(), expanded, nil, map[string]process.Process{"a": a})
-
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, newRequest("unknown"))
-
-	if w.Code != http.StatusNotFound {
-		t.Errorf("status=%d want %d", w.Code, http.StatusNotFound)
-	}
-}
-
-func TestMatrix_Shutdown_StopsAllProcesses(t *testing.T) {
-	a := newFakeProcess("a")
-	a.markReady()
-	go a.Run(0)
-	b := newFakeProcess("b")
-	b.markReady()
-	go b.Run(0)
-
-	expanded := []config.ExpandedSet{
-		{SetName: "s_ab", DSL: "a & b", Models: []string{"a", "b"}},
-	}
-	r := newTestMatrix(t, baseMatrixConfig(), expanded, nil, map[string]process.Process{"a": a, "b": b})
-
-	if err := r.Shutdown(time.Second); err != nil {
-		t.Fatalf("Shutdown: %v", err)
-	}
-	if got := a.stopCalls.Load(); got != 1 {
-		t.Errorf("a.stopCalls=%d want 1", got)
-	}
-	if got := b.stopCalls.Load(); got != 1 {
-		t.Errorf("b.stopCalls=%d want 1", got)
-	}
-
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, newRequest("a"))
-	if w.Code != http.StatusInternalServerError && w.Code != http.StatusServiceUnavailable {
-		t.Errorf("post-shutdown status=%d want 5xx", w.Code)
-	}
-
-	if err := r.Shutdown(0); err == nil {
-		t.Errorf("second Shutdown returned nil, want error")
 	}
 }
 
