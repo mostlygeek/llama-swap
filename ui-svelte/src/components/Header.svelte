@@ -3,6 +3,7 @@
   import { screenWidth, toggleTheme, themeMode, appTitle, isNarrow } from "../stores/theme";
   import { currentRoute } from "../stores/route";
   import { playgroundActivity } from "../stores/playgroundActivity";
+  import { activeProfile, fetchProfiles, profiles, setActiveProfile } from "../stores/api";
   import ConnectionStatus from "./ConnectionStatus.svelte";
 
   function handleTitleChange(newTitle: string): void {
@@ -26,6 +27,15 @@
 
   function isActive(path: string, current: string): boolean {
     return path === "/" ? current === "/" : current.startsWith(path);
+  }
+
+  async function handleProfileChange(e: Event): Promise<void> {
+    const target = e.currentTarget as HTMLSelectElement;
+    try {
+      await setActiveProfile(target.value);
+    } catch {
+      void fetchProfiles();
+    }
   }
 
 </script>
@@ -94,6 +104,19 @@
     >
       Performance
     </a>
+    {#if $profiles.length > 0}
+      <select
+        value={$activeProfile}
+        onchange={handleProfileChange}
+        aria-label="Active profile"
+        class="bg-surface border-0 rounded p-1 whitespace-nowrap text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary align-middle leading-6 font-[inherit] -translate-y-px"
+      >
+        <option value="">(no profile)</option>
+        {#each $profiles as profile}
+          <option value={profile.name} title={profile.description ?? ""}>{profile.name}</option>
+        {/each}
+      </select>
+    {/if}
     <button onclick={toggleTheme} title="Toggle theme (current: {$themeMode})">
       {#if $themeMode === "system"}
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">

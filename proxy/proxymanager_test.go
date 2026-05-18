@@ -517,6 +517,148 @@ models:
 	assert.Equal(t, name1, name2)
 }
 
+func TestProxyManager_Profile_ListModelsHandler_IncludeAliasesInList(t *testing.T) {
+	cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+includeAliasesInList: true
+models:
+  model1:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model1
+    name: "Model 1"
+    aliases:
+      - assistant
+      - static-only
+  model2:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model2
+    name: "Model 2"
+profiles:
+  coding:
+    aliases:
+      assistant: model2
+      new-alias: model2
+      disabled: ""
+`)
+
+	proxy := New(cfg)
+	assert.NoError(t, proxy.SetActiveProfile("coding"))
+
+	req := httptest.NewRequest("GET", "/v1/models", nil)
+	w := CreateTestResponseRecorder()
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response struct {
+		Data []map[string]interface{} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Failed to parse JSON response: %v", err)
+	}
+
+	byID := map[string]map[string]interface{}{}
+	for _, model := range response.Data {
+		id, _ := model["id"].(string)
+		byID[id] = model
+	}
+
+	assert.Contains(t, byID, "model1")
+	assert.Contains(t, byID, "model2")
+	assert.Contains(t, byID, "static-only")
+	assert.Contains(t, byID, "assistant")
+	assert.Contains(t, byID, "new-alias")
+	assert.NotContains(t, byID, "disabled")
+	assert.Equal(t, "Model 1", byID["static-only"]["name"])
+	assert.Equal(t, "Model 2", byID["assistant"]["name"])
+	assert.Equal(t, "Model 2", byID["new-alias"]["name"])
+}
+
+func TestProxyManager_Profile_ActiveSelectionResolution(t *testing.T) {
+	cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+models:
+  model1:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model1
+    aliases:
+      - assistant
+  model2:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model2
+profiles:
+  coding:
+    aliases:
+      assistant: model2
+`)
+
+	proxy := New(cfg)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+	assert.NoError(t, proxy.SetActiveProfile("coding"))
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(`{"model":"assistant"}`))
+	w := CreateTestResponseRecorder()
+
+	proxy.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "model2")
+}
+
+func TestProxyManager_Profile_API_ListAndSetActive(t *testing.T) {
+	cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+models:
+  model1:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model1
+profiles:
+  coding:
+    description: Coding profile
+    aliases:
+      assistant: model1
+`)
+
+	proxy := New(cfg)
+
+	req := httptest.NewRequest("GET", "/api/profiles", nil)
+	w := CreateTestResponseRecorder()
+	proxy.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response struct {
+		Active   string `json:"active"`
+		Profiles []struct {
+			Name        string            `json:"name"`
+			Description string            `json:"description"`
+			Aliases     map[string]string `json:"aliases"`
+		} `json:"profiles"`
+	}
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	assert.Equal(t, "", response.Active)
+	if assert.Len(t, response.Profiles, 1) {
+		assert.Equal(t, "coding", response.Profiles[0].Name)
+		assert.Equal(t, "Coding profile", response.Profiles[0].Description)
+		assert.Equal(t, "model1", response.Profiles[0].Aliases["assistant"])
+	}
+
+	req = httptest.NewRequest("POST", "/api/profiles/activate/coding", nil)
+	w = CreateTestResponseRecorder()
+	proxy.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	activeName, _ := proxy.ActiveProfile()
+	assert.Equal(t, "coding", activeName)
+
+	req = httptest.NewRequest("POST", "/api/profiles/activate/missing", nil)
+	w = CreateTestResponseRecorder()
+	proxy.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+
+	req = httptest.NewRequest("POST", "/api/profiles/activate/", nil)
+	w = CreateTestResponseRecorder()
+	proxy.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	activeName, _ = proxy.ActiveProfile()
+	assert.Equal(t, "", activeName)
+}
+
 func TestProxyManager_Shutdown(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping slow test")
@@ -1094,6 +1236,43 @@ models:
 			assert.Equal(t, tt.wantEffort, gotEffort, "reasoning_effort mismatch for model %s", tt.requestedModel)
 		})
 	}
+}
+
+func TestProxyManager_Profile_SetParamsByIDViaChainedAlias(t *testing.T) {
+	cfg := testConfigFromYAML(t, `
+logLevel: error
+models:
+  model1:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model1
+    proxy: "http://127.0.0.1:${PORT}"
+    filters:
+      setParamsByID:
+        "${MODEL_ID}:nothink":
+          reasoning_effort: minimal
+profiles:
+  fast:
+    aliases:
+      llm-task: model1:nothink
+`)
+
+	proxy := New(cfg)
+	defer proxy.StopProcesses(StopWaitForInflightRequest)
+	injectTestHandlers(proxy, nil)
+
+	assert.NoError(t, proxy.SetActiveProfile("fast"))
+
+	reqBody := `{"model":"llm-task"}`
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+	w := CreateTestResponseRecorder()
+	proxy.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response map[string]interface{}
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+
+	requestBody, _ := response["request_body"].(string)
+	gotEffort := gjson.Get(requestBody, "reasoning_effort").String()
+	assert.Equal(t, "minimal", gotEffort)
 }
 
 func TestProxyManager_HealthEndpoint(t *testing.T) {

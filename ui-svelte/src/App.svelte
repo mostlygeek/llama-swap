@@ -28,6 +28,7 @@
 
   $effect(() => {
     document.documentElement.setAttribute("data-theme", $isDarkMode ? "dark" : "light");
+    document.documentElement.style.setProperty("color-scheme", $isDarkMode ? "dark" : "light");
   });
 
   $effect(() => {

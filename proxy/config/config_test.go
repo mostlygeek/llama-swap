@@ -114,6 +114,205 @@ func TestConfig_FindConfig(t *testing.T) {
 	assert.Equal(t, ModelConfig{}, modelConfig)
 }
 
+func TestConfig_Profiles_Valid(t *testing.T) {
+	content := `
+models:
+  model1:
+    cmd: path/to/cmd --arg1 one
+    proxy: "http://localhost:8080"
+  model2:
+    cmd: path/to/cmd --arg1 one
+    proxy: "http://localhost:8081"
+profiles:
+  coding:
+    description: Coding profile
+    aliases:
+      assistant: model2
+      disabled: ~
+`
+	cfg, err := LoadConfigFromReader(strings.NewReader(content))
+	require.NoError(t, err)
+	require.Contains(t, cfg.Profiles, "coding")
+	assert.Equal(t, "Coding profile", cfg.Profiles["coding"].Description)
+	assert.Equal(t, "model2", cfg.Profiles["coding"].Aliases["assistant"])
+	assert.Equal(t, "", cfg.Profiles["coding"].Aliases["disabled"])
+}
+
+func TestConfig_Profiles_EmptyAliases(t *testing.T) {
+	content := `
+models:
+  model1:
+    cmd: path/to/cmd --arg1 one
+    proxy: "http://localhost:8080"
+profiles:
+  coding:
+    aliases: {}
+`
+	_, err := LoadConfigFromReader(strings.NewReader(content))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "profile coding: aliases map cannot be empty")
+}
+
+func TestConfig_Profiles_EmptyAliasKey(t *testing.T) {
+	content := `
+models:
+  model1:
+    cmd: path/to/cmd --arg1 one
+    proxy: "http://localhost:8080"
+profiles:
+  coding:
+    aliases:
+      "": model1
+`
+	_, err := LoadConfigFromReader(strings.NewReader(content))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "profile coding: alias name cannot be empty")
+}
+
+func TestConfig_Profiles_LegacyShapeRejected(t *testing.T) {
+	content := `
+models:
+  model1:
+    cmd: path/to/cmd --arg1 one
+    proxy: "http://localhost:8080"
+profiles:
+  test:
+    - model1
+`
+	_, err := LoadConfigFromReader(strings.NewReader(content))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "legacy profiles format removed")
+}
+
+func TestConfig_Profiles_Resolution(t *testing.T) {
+	cfg := &Config{
+		Models: map[string]ModelConfig{
+			"model1": {Aliases: []string{"assistant", "static-only", "model1:nothink", "helper"}},
+			"model2": {},
+		},
+		aliases: map[string]string{
+			"assistant":      "model1",
+			"static-only":    "model1",
+			"model1:nothink": "model1",
+			"helper":         "model1",
+		},
+	}
+	profileAliases := map[string]string{
+		"model1":    "model2",
+		"assistant": "model2",
+		"helper":    "",
+		"new-alias": "model2",
+		"disabled":  "",
+		"unknown":   "missing-model",
+		"llm-task":  "model1:nothink",
+	}
+
+	realName, found := cfg.RealModelNameWithProfile("model1", profileAliases)
+	assert.True(t, found)
+	assert.Equal(t, "model1", realName)
+
+	realName, found = cfg.RealModelNameWithProfile("assistant", profileAliases)
+	assert.True(t, found)
+	assert.Equal(t, "model2", realName)
+
+	realName, found = cfg.RealModelNameWithProfile("static-only", profileAliases)
+	assert.True(t, found)
+	assert.Equal(t, "model1", realName)
+
+	realName, found = cfg.RealModelNameWithProfile("llm-task", profileAliases)
+	assert.True(t, found)
+	assert.Equal(t, "model1", realName)
+
+	_, found = cfg.RealModelNameWithProfile("disabled", profileAliases)
+	assert.False(t, found)
+	_, found = cfg.RealModelNameWithProfile("unknown", profileAliases)
+	assert.False(t, found)
+
+	assert.Equal(t, []string{"static-only", "model1:nothink", "llm-task"}, cfg.EffectiveAliasesFor("model1", profileAliases))
+	assert.Equal(t, []string{"assistant", "new-alias"}, cfg.EffectiveAliasesFor("model2", profileAliases))
+}
+
+func TestConfig_Profiles_UnknownTarget(t *testing.T) {
+	content := `
+models:
+  model1:
+    cmd: path/to/cmd --arg1 one
+    proxy: "http://localhost:8080"
+profiles:
+  coding:
+    aliases:
+      ghost: not-a-thing
+`
+	_, err := LoadConfigFromReader(strings.NewReader(content))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `profile coding: alias "ghost" target "not-a-thing" is not a known model or alias`)
+}
+
+func TestConfig_Profiles_AliasConflictsWithModelID(t *testing.T) {
+	content := `
+models:
+  model1:
+    cmd: path/to/cmd --arg1 one
+    proxy: "http://localhost:8080"
+  model2:
+    cmd: path/to/cmd --arg1 two
+    proxy: "http://localhost:8081"
+profiles:
+  coding:
+    aliases:
+      model1: model2
+`
+	_, err := LoadConfigFromReader(strings.NewReader(content))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `profile coding: alias "model1" conflicts with model ID`)
+}
+
+func TestConfig_Profiles_TargetIsSetParamsByIDKey(t *testing.T) {
+	content := `
+models:
+  model1:
+    cmd: path/to/cmd --arg1 one
+    proxy: "http://localhost:8080"
+    filters:
+      setParamsByID:
+        "${MODEL_ID}:nothink":
+          reasoning_effort: minimal
+profiles:
+  fast:
+    aliases:
+      llm-task: model1:nothink
+`
+	cfg, err := LoadConfigFromReader(strings.NewReader(content))
+	require.NoError(t, err)
+
+	realName, found := cfg.RealModelNameWithProfile("llm-task", cfg.Profiles["fast"].Aliases)
+	assert.True(t, found)
+	assert.Equal(t, "model1", realName)
+
+	aliases := cfg.EffectiveAliasesFor("model1", cfg.Profiles["fast"].Aliases)
+	assert.Contains(t, aliases, "model1:nothink")
+	assert.Contains(t, aliases, "llm-task")
+}
+
+func TestConfig_Profiles_TargetIsAnotherProfileAlias_Rejected(t *testing.T) {
+	content := `
+models:
+  model1:
+    cmd: path/to/cmd --arg1 one
+    proxy: "http://localhost:8080"
+profiles:
+  a:
+    aliases:
+      from-a: model1
+  b:
+    aliases:
+      from-b: from-a
+`
+	_, err := LoadConfigFromReader(strings.NewReader(content))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `profile b: alias "from-b" target "from-a" is not a known model or alias`)
+}
+
 func TestConfig_AutomaticPortAssignments(t *testing.T) {
 
 	t.Run("Default Port Ranges", func(t *testing.T) {

@@ -137,9 +137,7 @@ models:
 
 healthCheckTimeout: 15
 profiles:
-  test:
-    - model1
-    - model2
+  test: {aliases: {test-model: model1}}
 groups:
   group1:
     swap: true
@@ -233,8 +231,8 @@ groups:
 		Performance: PerformanceConfig{
 			Every: 5 * time.Second,
 		},
-		Profiles: map[string][]string{
-			"test": {"model1", "model2"},
+		Profiles: map[string]ProfileConfig{
+			"test": {Aliases: map[string]string{"test-model": "model1"}},
 		},
 		aliases: map[string]string{
 			"m1":        "model1",

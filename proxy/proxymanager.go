@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"maps"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -22,10 +23,6 @@ import (
 	"github.com/mostlygeek/llama-swap/proxy/config"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
-)
-
-const (
-	PROFILE_SPLIT_CHAR = ":"
 )
 
 type proxyCtxKey string
@@ -96,6 +93,40 @@ type ProxyManager struct {
 
 	// peer proxy see: #296, #433
 	peerProxy *PeerProxy
+
+	activeProfileMu   sync.RWMutex
+	activeProfileName string
+}
+
+func (pm *ProxyManager) ActiveProfile() (string, map[string]string) {
+	pm.activeProfileMu.RLock()
+	defer pm.activeProfileMu.RUnlock()
+	if pm.activeProfileName == "" {
+		return "", nil
+	}
+	profile, found := pm.config.Profiles[pm.activeProfileName]
+	if !found {
+		return "", nil
+	}
+	return pm.activeProfileName, maps.Clone(profile.Aliases)
+}
+
+func (pm *ProxyManager) SetActiveProfile(name string) error {
+	pm.activeProfileMu.Lock()
+	if name != "" {
+		if _, found := pm.config.Profiles[name]; !found {
+			pm.activeProfileMu.Unlock()
+			return fmt.Errorf("profile not found: %s", name)
+		}
+	}
+	changed := pm.activeProfileName != name
+	pm.activeProfileName = name
+	pm.activeProfileMu.Unlock()
+
+	if changed {
+		event.Emit(ProfileChangedEvent{ActiveProfileName: name})
+	}
+	return nil
 }
 
 func New(proxyConfig config.Config) *ProxyManager {
@@ -613,6 +644,7 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 		return record
 	}
 
+	_, profileAliases := pm.ActiveProfile()
 	for id, modelConfig := range pm.config.Models {
 		if modelConfig.Unlisted {
 			continue
@@ -622,7 +654,7 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 
 		// Include aliases
 		if pm.config.IncludeAliasesInList {
-			for _, alias := range modelConfig.Aliases {
+			for _, alias := range pm.config.EffectiveAliasesFor(id, profileAliases) {
 				if alias := strings.TrimSpace(alias); alias != "" {
 					data = append(data, newRecord(alias, modelConfig))
 				}
@@ -673,6 +705,7 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 func (pm *ProxyManager) findModelInPath(path string) (searchName string, realName string, remainingPath string, found bool) {
 	parts := strings.Split(strings.TrimSpace(path), "/")
 	searchModelName := ""
+	_, profileAliases := pm.ActiveProfile()
 
 	for i, part := range parts {
 		if part == "" {
@@ -685,7 +718,7 @@ func (pm *ProxyManager) findModelInPath(path string) (searchName string, realNam
 			searchModelName = searchModelName + "/" + part
 		}
 
-		if modelID, ok := pm.config.RealModelName(searchModelName); ok {
+		if modelID, ok := pm.config.RealModelNameWithProfile(searchModelName, profileAliases); ok {
 			return searchModelName, modelID, "/" + strings.Join(parts[i+1:], "/"), true
 		}
 	}
@@ -769,7 +802,8 @@ func (pm *ProxyManager) mkProxyJSONHandler(cf captureFields) func(*gin.Context) 
 		// Look for a matching local model first
 		var nextHandler func(modelID string, w http.ResponseWriter, r *http.Request) error
 
-		modelID, found := pm.config.RealModelName(requestedModel)
+		_, profileAliases := pm.ActiveProfile()
+		modelID, found := pm.config.RealModelNameWithProfile(requestedModel, profileAliases)
 		if found {
 			var localHandler func(string, http.ResponseWriter, *http.Request) error
 			if pm.matrix != nil {
@@ -819,8 +853,9 @@ func (pm *ProxyManager) mkProxyJSONHandler(cf captureFields) func(*gin.Context) 
 				}
 			}
 
-			// setParamsByID: set params based on the requested model ID (runs after setParams, can override it)
-			setParamsByIDParams, setParamsByIDKeys := pm.config.Models[modelID].Filters.SanitizedSetParamsByID(requestedModel)
+			// setParamsByID uses the profile-rewritten request name.
+			effectiveModel := pm.config.EffectiveRequestName(requestedModel, profileAliases)
+			setParamsByIDParams, setParamsByIDKeys := pm.config.Models[modelID].Filters.SanitizedSetParamsByID(effectiveModel)
 			for _, key := range setParamsByIDKeys {
 				pm.proxyLogger.Debugf("<%s> setting param by id: %s", requestedModel, key)
 				bodyBytes, err = sjson.SetBytes(bodyBytes, key, setParamsByIDParams[key])
@@ -924,7 +959,8 @@ func (pm *ProxyManager) mkPostFormHandler(cf captureFields) func(*gin.Context) {
 		var nextHandler func(modelID string, w http.ResponseWriter, r *http.Request) error
 		var useModelName string
 
-		modelID, found := pm.config.RealModelName(requestedModel)
+		_, profileAliases := pm.ActiveProfile()
+		modelID, found := pm.config.RealModelNameWithProfile(requestedModel, profileAliases)
 		if found {
 			if pm.matrix != nil {
 				nextHandler = pm.matrix.ProxyRequest
@@ -1057,7 +1093,8 @@ func (pm *ProxyManager) proxyGETModelHandler(c *gin.Context) {
 	var nextHandler func(modelID string, w http.ResponseWriter, r *http.Request) error
 	var modelID string
 
-	if realModelID, found := pm.config.RealModelName(requestedModel); found {
+	_, profileAliases := pm.ActiveProfile()
+	if realModelID, found := pm.config.RealModelNameWithProfile(requestedModel, profileAliases); found {
 		modelID = realModelID
 		if pm.matrix != nil {
 			nextHandler = pm.matrix.ProxyRequest

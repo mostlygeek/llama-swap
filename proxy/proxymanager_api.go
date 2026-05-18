@@ -32,6 +32,8 @@ func addApiHandlers(pm *ProxyManager) {
 	{
 		apiGroup.POST("/models/unload", pm.apiUnloadAllModels)
 		apiGroup.POST("/models/unload/*model", pm.apiUnloadSingleModelHandler)
+		apiGroup.GET("/profiles", pm.apiListProfiles)
+		apiGroup.POST("/profiles/activate/*name", pm.apiActivateProfile)
 		apiGroup.GET("/events", pm.apiSendEvents)
 		apiGroup.GET("/metrics", pm.apiGetMetrics)
 		apiGroup.GET("/performance", pm.apiGetPerformance)
@@ -48,6 +50,7 @@ func (pm *ProxyManager) apiUnloadAllModels(c *gin.Context) {
 func (pm *ProxyManager) getModelStatus() []Model {
 	// Extract keys and sort them
 	models := []Model{}
+	_, profileAliases := pm.ActiveProfile()
 
 	modelIDs := make([]string, 0, len(pm.config.Models))
 	for modelID := range pm.config.Models {
@@ -88,7 +91,7 @@ func (pm *ProxyManager) getModelStatus() []Model {
 			Description: pm.config.Models[modelID].Description,
 			State:       state,
 			Unlisted:    pm.config.Models[modelID].Unlisted,
-			Aliases:     pm.config.Models[modelID].Aliases,
+			Aliases:     pm.config.EffectiveAliasesFor(modelID, profileAliases),
 		})
 	}
 
@@ -114,6 +117,7 @@ const (
 	msgTypeLogData     messageType = "logData"
 	msgTypeMetrics     messageType = "metrics"
 	msgTypeInFlight    messageType = "inflight"
+	msgTypeProfile     messageType = "profileChanged"
 )
 
 type messageEnvelope struct {
@@ -185,6 +189,18 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 		}
 	}
 
+	sendActiveProfile := func(name string) {
+		jsonData, err := json.Marshal(gin.H{"activeProfile": name})
+		if err == nil {
+			select {
+			case sendBuffer <- messageEnvelope{Type: msgTypeProfile, Data: string(jsonData)}:
+			case <-ctx.Done():
+				return
+			default:
+			}
+		}
+	}
+
 	/**
 	 * Send updated models list
 	 */
@@ -192,6 +208,10 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 		sendModels()
 	})()
 	defer event.On(func(e ConfigFileChangedEvent) {
+		sendModels()
+	})()
+	defer event.On(func(e ProfileChangedEvent) {
+		sendActiveProfile(e.ActiveProfileName)
 		sendModels()
 	})()
 
@@ -225,6 +245,8 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 	sendModels()
 	sendMetrics(pm.metricsMonitor.getMetrics())
 	sendInFlight(pm.inFlightCounter.Current())
+	currentName, _ := pm.ActiveProfile()
+	sendActiveProfile(currentName)
 
 	for {
 		select {
@@ -302,7 +324,8 @@ func (pm *ProxyManager) apiGetPerformance(c *gin.Context) {
 
 func (pm *ProxyManager) apiUnloadSingleModelHandler(c *gin.Context) {
 	requestedModel := strings.TrimPrefix(c.Param("model"), "/")
-	realModelName, found := pm.config.RealModelName(requestedModel)
+	_, profileAliases := pm.ActiveProfile()
+	realModelName, found := pm.config.RealModelNameWithProfile(requestedModel, profileAliases)
 	if !found {
 		pm.sendErrorResponse(c, http.StatusNotFound, "Model not found")
 		return
@@ -322,6 +345,39 @@ func (pm *ProxyManager) apiUnloadSingleModelHandler(c *gin.Context) {
 
 	if stopErr != nil {
 		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error stopping process: %s", stopErr.Error()))
+		return
+	}
+	c.String(http.StatusOK, "OK")
+}
+
+func (pm *ProxyManager) apiListProfiles(c *gin.Context) {
+	profileNames := make([]string, 0, len(pm.config.Profiles))
+	for name := range pm.config.Profiles {
+		profileNames = append(profileNames, name)
+	}
+	sort.Strings(profileNames)
+
+	profiles := make([]gin.H, 0, len(profileNames))
+	for _, name := range profileNames {
+		profile := pm.config.Profiles[name]
+		profiles = append(profiles, gin.H{
+			"name":        name,
+			"description": profile.Description,
+			"aliases":     profile.Aliases,
+		})
+	}
+
+	activeName, _ := pm.ActiveProfile()
+	c.JSON(http.StatusOK, gin.H{
+		"active":   activeName,
+		"profiles": profiles,
+	})
+}
+
+func (pm *ProxyManager) apiActivateProfile(c *gin.Context) {
+	name := strings.TrimPrefix(c.Param("name"), "/")
+	if err := pm.SetActiveProfile(name); err != nil {
+		pm.sendErrorResponse(c, http.StatusNotFound, "profile not found")
 		return
 	}
 	c.String(http.StatusOK, "OK")
