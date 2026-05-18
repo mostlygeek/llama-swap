@@ -15,7 +15,7 @@ import (
 	"github.com/fxamacker/cbor/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/klauspost/compress/zstd"
-	"github.com/mostlygeek/llama-swap/event"
+	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/ring"
 	"github.com/mostlygeek/llama-swap/proxy/cache"
