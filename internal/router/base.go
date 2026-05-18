@@ -263,7 +263,7 @@ func (b *baseRouter) doSwap(modelID string, toStop []string) {
 }
 
 func (b *baseRouter) handleShutdown(req shutdownReq, active *activeSwap, queued []handlerReq) {
-	shutdownErr := fmt.Errorf("%s router is shutting down", b.name)
+	shutdownErr := fmt.Errorf("%s is shutting down", b.name)
 	if active != nil {
 		for _, w := range active.waiters {
 			w.respond <- handlerResp{err: shutdownErr}
@@ -279,12 +279,14 @@ func (b *baseRouter) handleShutdown(req shutdownReq, active *activeSwap, queued 
 	}
 
 	var wg sync.WaitGroup
-	for _, p := range b.processes {
+	for i, p := range b.processes {
 		wg.Add(1)
-		go func(p process.Process) {
+		go func(id string, p process.Process) {
 			defer wg.Done()
-			_ = p.Stop(stopTimeout)
-		}(p)
+			if err := p.Stop(stopTimeout); err != nil {
+				b.logger.Warnf("%s failed to stop process %s: %v", b.name, id, err)
+			}
+		}(i, p)
 	}
 
 	done := make(chan struct{})
@@ -316,9 +318,14 @@ func (b *baseRouter) healthCheckTimeout() time.Duration {
 	return t
 }
 
+func (b *baseRouter) Handles(model string) bool {
+	_, ok := b.processes[model]
+	return ok
+}
+
 func (b *baseRouter) Shutdown(timeout time.Duration) error {
 	if !b.shuttingDown.CompareAndSwap(false, true) {
-		return fmt.Errorf("shutdown already in progress")
+		return fmt.Errorf("%s shutdown already in progress", b.name)
 	}
 	req := shutdownReq{timeout: timeout, respond: make(chan error, 1)}
 	select {
@@ -331,7 +338,7 @@ func (b *baseRouter) Shutdown(timeout time.Duration) error {
 
 func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if b.shuttingDown.Load() {
-		SendError(w, req, fmt.Errorf("%s router is shutting down", b.name))
+		SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
 		return
 	}
 
@@ -352,7 +359,7 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	case <-req.Context().Done():
 		return
 	case <-b.shutdownCtx.Done():
-		SendError(w, req, fmt.Errorf("%s router is shutting down", b.name))
+		SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
 		return
 	}
 
@@ -366,7 +373,7 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	case <-req.Context().Done():
 		return
 	case <-b.shutdownCtx.Done():
-		SendError(w, req, fmt.Errorf("%s router is shutting down", b.name))
+		SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
 		return
 	}
 }

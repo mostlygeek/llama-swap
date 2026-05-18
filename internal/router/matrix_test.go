@@ -12,9 +12,9 @@ import (
 	"github.com/mostlygeek/llama-swap/proxy/config"
 )
 
-// newTestMatrix builds a MatrixRouter from supplied processes, bypassing
+// newTestMatrix builds a Matrix router from supplied processes, bypassing
 // NewMatrix's call to process.New.
-func newTestMatrix(t *testing.T, conf config.Config, expanded []config.ExpandedSet, evictCosts map[string]int, processes map[string]process.Process) *MatrixRouter {
+func newTestMatrix(t *testing.T, conf config.Config, expanded []config.ExpandedSet, evictCosts map[string]int, processes map[string]process.Process) *Matrix {
 	t.Helper()
 	logger := logmon.NewWriter(io.Discard)
 	planner := &matrixPlanner{
@@ -24,7 +24,7 @@ func newTestMatrix(t *testing.T, conf config.Config, expanded []config.ExpandedS
 	}
 	base := newBaseRouter("matrix", conf, processes, planner, logger)
 	base.testProcessed = make(chan struct{}, 64)
-	r := &MatrixRouter{baseRouter: base}
+	r := &Matrix{baseRouter: base}
 	go base.run()
 	t.Cleanup(func() {
 		if !r.shuttingDown.Load() {
