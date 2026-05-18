@@ -40,15 +40,22 @@ type Router interface {
 	ServeHTTP(http.ResponseWriter, *http.Request)
 }
 
-// ExtractAndSetModel extracts the model from the request and stores it on the
-// request's context. The request is left unchanged if there is an error.
-func ExtractAndSetModel(r *http.Request) error {
-	model, err := ExtractModel(r)
-	if err != nil {
-		return err
+// FetchModel will attempt to get the model id from the context then
+// from the model body. If it extracts the model from the body it will
+// store the model in the context for downstream handlers. An error
+// will be returned when model can not be fetch from either location.
+func FetchModel(r *http.Request) (string, error) {
+	model, ok := GetModel(r.Context())
+	if ok {
+		return model, nil
 	}
-	*r = *r.WithContext(SetModel(r.Context(), model))
-	return nil
+
+	if model, err := ExtractModel(r); err == nil {
+		*r = *r.WithContext(SetModel(r.Context(), model))
+		return model, nil
+	}
+
+	return "", ErrNoModelInContext
 }
 
 func SetModel(ctx context.Context, model string) context.Context {
