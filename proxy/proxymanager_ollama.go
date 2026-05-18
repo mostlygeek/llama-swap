@@ -238,7 +238,7 @@ func (pm *ProxyManager) apiGetResources(c *gin.Context) {
 		}
 	}
 
-	// Memory and GPU from perf monitor
+	// Memory, CPU and GPU from perf monitor
 	if pm.perfMonitor != nil {
 		sysStats, gpuStats := pm.perfMonitor.Current()
 		if len(sysStats) > 0 {
@@ -248,11 +248,32 @@ func (pm *ProxyManager) apiGetResources(c *gin.Context) {
 				memType = "unified"
 			}
 			resp["memory"] = gin.H{
-				"total_mb":  s.MemTotalMB,
-				"used_mb":   s.MemUsedMB,
-				"free_mb":   s.MemFreeMB,
-				"type":      memType,
-				"load_avg1": s.LoadAvg1,
+				"total_mb":   s.MemTotalMB,
+				"used_mb":    s.MemUsedMB,
+				"free_mb":    s.MemFreeMB,
+				"swap_total": s.SwapTotalMB,
+				"swap_used":  s.SwapUsedMB,
+				"type":       memType,
+				"load_avg1":  s.LoadAvg1,
+				"load_avg5":  s.LoadAvg5,
+				"load_avg15": s.LoadAvg15,
+			}
+
+			// CPU: average utilization across all cores.
+			var cpuAvg float64
+			for _, u := range s.CpuUtilPerCore {
+				cpuAvg += u
+			}
+			if n := len(s.CpuUtilPerCore); n > 0 {
+				cpuAvg /= float64(n)
+			}
+			resp["cpu"] = gin.H{
+				"cores":        len(s.CpuUtilPerCore),
+				"util_avg_pct": cpuAvg,
+				"util_per_core": s.CpuUtilPerCore,
+				"load_avg1":    s.LoadAvg1,
+				"load_avg5":    s.LoadAvg5,
+				"load_avg15":   s.LoadAvg15,
 			}
 		}
 
@@ -282,6 +303,7 @@ func (pm *ProxyManager) apiGetResources(c *gin.Context) {
 		}
 		sort.Ints(ids)
 		gpuList := make([]gin.H, 0, len(ids))
+		var vramTotalMB, vramUsedMB int
 		for _, id := range ids {
 			g := latest[id]
 			gpuList = append(gpuList, gin.H{
@@ -289,12 +311,21 @@ func (pm *ProxyManager) apiGetResources(c *gin.Context) {
 				"name":            g.Name,
 				"vram_total_mb":   g.MemTotalMB,
 				"vram_used_mb":    g.MemUsedMB,
+				"vram_free_mb":    g.MemTotalMB - g.MemUsedMB,
 				"utilization_pct": g.GpuUtilPct,
 				"temp_c":          g.TempC,
 				"power_draw_w":    g.PowerDrawW,
 			})
+			vramTotalMB += g.MemTotalMB
+			vramUsedMB += g.MemUsedMB
 		}
-		resp["gpu"] = gpuList
+		resp["gpus"] = gpuList
+		// Aggregate across all GPUs — convenient for single-value scheduling decisions.
+		resp["vram"] = gin.H{
+			"total_mb": vramTotalMB,
+			"used_mb":  vramUsedMB,
+			"free_mb":  vramTotalMB - vramUsedMB,
+		}
 	}
 
 	c.JSON(http.StatusOK, resp)

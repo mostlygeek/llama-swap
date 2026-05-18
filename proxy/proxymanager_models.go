@@ -35,23 +35,52 @@ func parseModelPath(cmd string) string {
 }
 
 // modelsDir returns the configured models directory, or infers it from model cmds.
-// Keys are iterated in sorted order for deterministic results.
+// When not configured, it finds the common ancestor directory of all model file paths,
+// which handles both flat layouts (/models/file.gguf) and per-model subdirs (/models/name/file.gguf).
 func (pm *ProxyManager) modelsDir() string {
 	if pm.config.ModelsDir != "" {
 		return pm.config.ModelsDir
 	}
-	// Infer from the first model (sorted) that has a resolvable path.
 	ids := make([]string, 0, len(pm.config.Models))
 	for id := range pm.config.Models {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
+	var dirs []string
 	for _, id := range ids {
 		if p := parseModelPath(pm.config.Models[id].Cmd); p != "" {
-			return filepath.Dir(p)
+			dirs = append(dirs, filepath.Dir(p))
 		}
 	}
-	return ""
+	if len(dirs) == 0 {
+		return ""
+	}
+	common := dirs[0]
+	for _, d := range dirs[1:] {
+		common = commonDirAncestor(common, d)
+	}
+	return common
+}
+
+// commonDirAncestor returns the longest common directory prefix of two absolute paths.
+func commonDirAncestor(a, b string) string {
+	aParts := strings.Split(filepath.Clean(a), string(filepath.Separator))
+	bParts := strings.Split(filepath.Clean(b), string(filepath.Separator))
+	n := len(aParts)
+	if len(bParts) < n {
+		n = len(bParts)
+	}
+	common := 0
+	for i := 0; i < n; i++ {
+		if aParts[i] != bParts[i] {
+			break
+		}
+		common = i + 1
+	}
+	if common == 0 {
+		return string(filepath.Separator)
+	}
+	return string(filepath.Separator) + filepath.Join(aParts[1:common]...)
 }
 
 // pullRequest is the body for POST /api/models/pull.
