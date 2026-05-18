@@ -38,6 +38,13 @@ func getGpuStats(ctx context.Context, every time.Duration, logger *logmon.Monito
 		logger.Debugf("nvidia-smi: %s", err.Error())
 	}
 
+	if ch, err := tryRocmSmi(ctx, every, logger); err == nil {
+		logger.Info("using rocm-smi for GPU monitoring")
+		return ch, nil
+	} else {
+		logger.Debugf("rocm-smi: %s", err.Error())
+	}
+
 	if ch, err := trySysfs(ctx, every, logger); err == nil {
 		logger.Info("using sysfs for GPU monitoring")
 		return ch, nil
@@ -208,6 +215,113 @@ func parseNvidiaSmiLine(line string) *GpuStat {
 		MemUtilPct:  memUtil,
 		MemUsedMB:   memUsed,
 		MemTotalMB:  memTotal,
+		FanSpeedPct: fanSpeed,
+		PowerDrawW:  powerDraw,
+	}
+}
+
+func tryRocmSmi(ctx context.Context, every time.Duration, logger *logmon.Monitor) (chan []GpuStat, error) {
+	if _, err := exec.LookPath("rocm-smi"); err != nil {
+		return nil, ErrNoGpuTool
+	}
+	if every < time.Second {
+		every = time.Second
+	}
+	const pollTimeout = 5 * time.Second
+
+	ch := make(chan []GpuStat, 1)
+
+	go func() {
+		defer close(ch)
+		ticker := time.NewTicker(every)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				pollCtx, cancel := context.WithTimeout(ctx, pollTimeout)
+				cmd := exec.CommandContext(pollCtx, "rocm-smi", "-i", "-P", "-t", "-f", "-u", "--showmemuse", "--showmeminfo", "vram", "--showproductname", "--csv")
+				out, err := cmd.Output()
+				timedOut := pollCtx.Err() == context.DeadlineExceeded
+				cancel()
+				if err != nil {
+					if timedOut {
+						logger.Debug("rocm-smi timed out")
+					}
+					continue
+				}
+
+				stats := make([]GpuStat, 0)
+				scanner := bufio.NewScanner(strings.NewReader(string(out)))
+				for scanner.Scan() {
+					line := strings.TrimSpace(scanner.Text())
+					if line == "" || strings.HasPrefix(line, "device,") {
+						continue
+					}
+
+					stat := parseRocmSmiLine(line)
+					if stat != nil {
+						stats = append(stats, *stat)
+					}
+				}
+
+				if len(stats) > 0 {
+					select {
+					case ch <- stats:
+					default:
+					}
+				}
+			}
+		}
+	}()
+
+	return ch, nil
+}
+
+func parseRocmSmiLine(line string) *GpuStat {
+	fields := strings.Split(line, ",")
+	if len(fields) < 20 {
+		return nil
+	}
+
+	device := strings.TrimSpace(fields[0])
+	id, err := strconv.Atoi(strings.TrimPrefix(device, "card"))
+	if err != nil {
+		return nil
+	}
+	deviceName := strings.TrimSpace(fields[1])
+	uuid := strings.TrimSpace(fields[5])
+	tempC, _ := strconv.ParseFloat(strings.TrimSpace(fields[6]), 64)
+	vramTempC, _ := strconv.ParseFloat(strings.TrimSpace(fields[8]), 64)
+	fanSpeed, _ := strconv.ParseFloat(strings.TrimSpace(fields[10]), 64)
+	powerDraw, _ := strconv.ParseFloat(strings.TrimSpace(fields[12]), 64)
+	gpuUtil, _ := strconv.ParseFloat(strings.TrimSpace(fields[13]), 64)
+	memUtil, _ := strconv.ParseFloat(strings.TrimSpace(fields[14]), 64)
+	memTotal, _ := strconv.ParseUint(strings.TrimSpace(fields[17]), 10, 64)
+	memUsed, _ := strconv.ParseUint(strings.TrimSpace(fields[18]), 10, 64)
+	cardSeries := strings.TrimSpace(fields[19])
+	name := device
+	if cardSeries != "" && cardSeries != "N/A" {
+		name = cardSeries + " " + device
+	} else if deviceName != "" && deviceName != "N/A" {
+		name = deviceName + " " + device
+	}
+
+	const toMB = 1024 * 1024
+
+	return &GpuStat{
+		Timestamp:   time.Now(),
+		ID:          id,
+		Name:        name,
+		UUID:        uuid,
+		TempC:       int(tempC),
+		VramTempC:   int(vramTempC),
+		GpuUtilPct:  gpuUtil,
+		MemUtilPct:  memUtil,
+		MemUsedMB:   int(memUsed / toMB),
+		MemTotalMB:  int(memTotal / toMB),
 		FanSpeedPct: fanSpeed,
 		PowerDrawW:  powerDraw,
 	}
