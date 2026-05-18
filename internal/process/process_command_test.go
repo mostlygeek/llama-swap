@@ -60,7 +60,7 @@ func TestProcessCommand_StartStop(t *testing.T) {
 		CheckEndpoint:      "/health",
 		HealthCheckTimeout: 10,
 	})
-	t.Cleanup(func() { p.Stop(0, testStopTimeout) })
+	t.Cleanup(func() { p.Stop(testStopTimeout) })
 
 	req := httptest.NewRequest("GET", "/test", nil)
 
@@ -88,7 +88,7 @@ func TestProcessCommand_StartStop(t *testing.T) {
 		t.Errorf("expected body %q, got %q", "hello", body)
 	}
 
-	if err := p.Stop(0, testStopTimeout); err != nil {
+	if err := p.Stop(testStopTimeout); err != nil {
 		t.Fatalf("Stop() error: %v", err)
 	}
 	if got := p.State(); got != StateStopped {
@@ -124,7 +124,7 @@ func TestProcessCommand_Run_Idempotent(t *testing.T) {
 		CheckEndpoint:      "/health",
 		HealthCheckTimeout: 10,
 	})
-	t.Cleanup(func() { p.Stop(0, testStopTimeout) })
+	t.Cleanup(func() { p.Stop(testStopTimeout) })
 
 	runErr := runAsync(t, p)
 
@@ -132,7 +132,7 @@ func TestProcessCommand_Run_Idempotent(t *testing.T) {
 		t.Error("second Run() while running: expected error, got nil")
 	}
 
-	if err := p.Stop(0, testStopTimeout); err != nil {
+	if err := p.Stop(testStopTimeout); err != nil {
 		t.Fatalf("Stop() error: %v", err)
 	}
 	select {
@@ -153,13 +153,13 @@ func TestProcessCommand_Stop_Idempotent(t *testing.T) {
 		HealthCheckTimeout: 10,
 	})
 
-	if err := p.Stop(0, testStopTimeout); err != nil {
+	if err := p.Stop(testStopTimeout); err != nil {
 		t.Fatalf("Stop() before Run(): %v", err)
 	}
 
 	runErr := runAsync(t, p)
 
-	if err := p.Stop(0, testStopTimeout); err != nil {
+	if err := p.Stop(testStopTimeout); err != nil {
 		t.Fatalf("first Stop() error: %v", err)
 	}
 	select {
@@ -168,7 +168,7 @@ func TestProcessCommand_Stop_Idempotent(t *testing.T) {
 		t.Fatal("Run() did not return after Stop")
 	}
 
-	if err := p.Stop(0, testStopTimeout); err != nil {
+	if err := p.Stop(testStopTimeout); err != nil {
 		t.Fatalf("second Stop() error: %v", err)
 	}
 }
@@ -212,7 +212,7 @@ func TestProcessCommand_StopCancelsRun(t *testing.T) {
 	// that Run is in-flight when Stop is called.
 	<-healthCheckStarted
 
-	if err := p.Stop(0, testStopTimeout); err != nil {
+	if err := p.Stop(testStopTimeout); err != nil {
 		t.Fatalf("Stop() error: %v", err)
 	}
 
@@ -244,7 +244,7 @@ func TestProcessCommand_RunStopCycle(t *testing.T) {
 			t.Errorf("cycle %d: expected 200 from /health, got %d", i, rr.Code)
 		}
 
-		if err := p.Stop(0, testStopTimeout); err != nil {
+		if err := p.Stop(testStopTimeout); err != nil {
 			t.Fatalf("cycle %d Stop() error: %v", i, err)
 		}
 		select {
@@ -309,7 +309,7 @@ func TestProcessCommand_ReverseProxyPanicIsRecovered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	t.Cleanup(func() { p.Stop(0, testStopTimeout) })
+	t.Cleanup(func() { p.Stop(testStopTimeout) })
 
 	_ = runAsync(t, p)
 
@@ -372,7 +372,7 @@ func TestProcessCommand_ConcurrentRunStop(t *testing.T) {
 			p.Run(testStartTimeout) //nolint: errcheck — one goroutine wins the race
 		}()
 		go func() {
-			p.Stop(0, testStopTimeout) //nolint: errcheck
+			p.Stop(testStopTimeout) //nolint: errcheck
 		}()
 
 		// Backstop: the racing Stop may have arrived before Run got on the
@@ -385,7 +385,7 @@ func TestProcessCommand_ConcurrentRunStop(t *testing.T) {
 			case <-deadline:
 				t.Fatal("Run did not return")
 			case <-time.After(testPollInterval):
-				p.Stop(0, testStopTimeout) //nolint: errcheck
+				p.Stop(testStopTimeout) //nolint: errcheck
 			}
 		}
 	}
