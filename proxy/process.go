@@ -17,7 +17,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mostlygeek/llama-swap/event"
+	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/config"
 )
