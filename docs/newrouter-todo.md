@@ -20,94 +20,81 @@ Everything below is missing or only partially implemented.
 
 ---
 
-## Phase 1 — Package relocation
+## Phase 1 — Package relocation -- Completed.
 
-Goal: move shared infrastructure packages out from under `proxy/` so the new router does not depend on the legacy proxy tree. This is a prerequisite for retiring `proxy/` in Phase 9.
-
-- [x] Move `proxy/config` → `internal/config`
-- [x] Move `proxy/configwatcher` → `internal/watcher`
-- [x] Update import paths everywhere the packages are used (33 files across `cmd/`, `proxy/`, `internal/`, and `llama-swap.go`)
-- [x] Verify `make test-all` still passes after the move
-- [x] No behavior change in this phase — pure relocation + import rewrite
-
-Notes:
-
-- Both packages already have no proxy-specific dependencies, so the move is mechanical.
-- Doing this first lets later phases write `internal/config` / `internal/watcher` imports directly without a follow-up rename pass.
-- Fixed pre-existing data race in `internal/router/server.go` (`wg.Wait()` was deferred after `errors.Join` read the results slice).
+Goal: move shared infrastructure packages out from under `proxy/` so the new router does not depend on the legacy proxy tree. This is a prerequisite for retiring `proxy/` in Phase 10.
 
 ---
 
-## Phase 2 — Server lifecycle parity
+## Phase 2 — Server lifecycle parity -- Completed.
 
 Goal: make `cmd/newrouter` a drop-in replacement for the legacy binary's process model, _without_ yet adding any extra HTTP endpoints.
 
-- [x] CLI flags
-  - `-tls-cert-file` / `-tls-key-file` with mutual-requirement validation
-  - `-version` print + exit (wire up `version` / `commit` / `date` ldflags vars)
-  - `-watch-config` to enable file-change reloads
-  - Default listen address `:8080` (HTTP) or `:8443` (HTTPS) when `-listen` is empty
-- [x] `SIGHUP` triggers config reload
-- [x] events are defined in proxy/events.go. Do not attempt to share with proxy and instead create a new set at internal/shared/events.go to avoid circular dependencies
-- [x] Config file watcher (poll-based, `internal/watcher` after Phase 1) wired to reload when `-watch-config` is set
-- [x] Hot reload semantics:
-  - Build a new `router.Server`, swap into `http.Server.Handler`, then shut down the old one
-  - Guarded by a "reload in progress" mutex so overlapping signals collapse
-  - Emit `ConfigFileChangedEvent` with `ReloadingState` after a short delay so UIs can refresh
-- [x] Profiles deprecation warning (matches [llama-swap.go:54](../llama-swap.go#L54))
-- [x] Skip `GIN_MODE` as the new router will only use the go standard http library
 ---
 
-## Phase 3 — Logging parity
+## Phase 3 — `internal/chain` package -- Completed.
 
-Goal: match the legacy three-logger model so the UI log stream and stdout behavior are identical.
-
-- [ ] Mux logger (`muxLogger`) plus separate `proxyLogger` and `upstreamLogger`
-- [ ] Implement `config.LogToStdout` modes: `none`, `proxy`, `upstream`, `both` (currently newrouter always writes proxy+upstream to stdout)
-- [ ] `LogTimeFormat` parsing (RFC3339, kitchen, etc. — see [llama-swap.go:150](../llama-swap.go#L150) or [proxy/proxymanager.go:150](../proxy/proxymanager.go#L150))
-- [ ] Deprecation warning for `LogRequests` config key
-- [ ] Per-request access log middleware (`Request <ip> "<method> <path> <proto>" <status> <bytes> "<ua>" <duration>`)
-- [ ] Log buffer history exposed via `OnLogData` callback and `GetHistory()` — required by Phase 7's SSE stream
+API: `chain.New(mws...).Then(final)` for ServeMux registration; `Append` returns an extended Chain without mutating the receiver, so a base stack (auth/CORS) can be reused across many routes with per-route additions.
 
 ---
 
-## Phase 4 — Core HTTP endpoints
+## Phase 4 — `internal/server.Server` scaffolding (ProxyManager replacement)
 
-Goal: serve real LLM traffic. This phase adds the endpoint surface that `proxymanager.setupGinEngine()` defines.
+Goal: build the structural shell of [internal/server/server.go](../internal/server/server.go) so it can stand in for [proxy.ProxyManager](../proxy/proxymanager.go#L67). This phase intentionally adds no new endpoints — it wires the dependencies and lifecycle that later phases (endpoints, metrics, SSE, UI) plug into. After this phase, `cmd/newrouter/main.go` constructs a `server.Server` instead of a bare `router.Server`, and behavior is unchanged.
 
-The current newrouter `Server.ServeHTTP` accepts any path and routes by model. That works for `POST /v1/chat/completions`-style requests, but several endpoints need bespoke handling. Decide early whether to keep a path-agnostic dispatcher or introduce a router (chi/gorilla/std `http.ServeMux`).
+The legacy `ProxyManager` collapses three concerns into one struct: the HTTP mux, the model→process router, and the cross-cutting services (loggers, metrics, perf, inflight counter, version). The new layout keeps `internal/router.Server` focused on model dispatch and lets `internal/server.Server` own everything else.
 
-- [ ] OpenAI-compatible POST endpoints (JSON body, model in body):
-  - `/v1/chat/completions`, `/v1/responses`, `/v1/completions`
-  - `/v1/messages`, `/v1/messages/count_tokens` (Anthropic)
-  - `/v1/embeddings`
-  - `/reranking`, `/rerank`, `/v1/rerank`, `/v1/reranking`
-  - llama.cpp `/infill`, `/completion`
-- [ ] Versionless aliases under `/v/...` (issue #728) — strip the `/v` prefix before forwarding
-- [ ] Audio endpoints:
-  - `POST /v1/audio/speech` (JSON)
-  - `POST /v1/audio/voices` (JSON), `GET /v1/audio/voices` (model in query)
-  - `POST /v1/audio/transcriptions` (multipart form)
-- [ ] Image endpoints:
-  - `POST /v1/images/generations` (JSON)
-  - `POST /v1/images/edits` (multipart form)
-- [ ] sd.cpp endpoints: `/sdapi/v1/txt2img`, `/sdapi/v1/img2img` (JSON), `GET /sdapi/v1/loras` (query)
+- [ ] Define the `Server` struct in [internal/server/server.go](../internal/server/server.go) with fields for:
+  - `cfg config.Config`
+  - `router *router.Server` (embedded model dispatcher from Phase 1/2)
+  - `proxyLogger`, `upstreamLogger *logmon.Monitor` (passed in from `cmd/newrouter/main.go`)
+  - `metricsMonitor *metricsMonitor` and `perfMonitor *perf.Monitor` (populated in Phase 8)
+  - `inFlightCounter` (populated in Phase 8)
+  - `shutdownCtx context.Context` + `shutdownCancel context.CancelFunc`
+  - `buildDate`, `commit`, `version string`
+- [ ] `New(cfg config.Config, proxyLog, upstreamLog *logmon.Monitor) (*Server, error)` constructor that:
+  - Builds the inner `router.Server` via the existing `router.NewServer`
+  - Creates `shutdownCtx` / `shutdownCancel`
+  - Returns a ready-to-serve `*Server`
+- [ ] HTTP mux foundation: pick the routing primitive (`http.ServeMux` from stdlib is preferred — `gin` stays only in [proxy/](../proxy/) and is removed in Phase 10). Wire a single `*http.ServeMux` field on `Server` that subsequent phases register handlers against.
+- [ ] `ServeHTTP(w, r)` delegates to the mux. Register the actual model-dispatched routes against `router.Server.ServeHTTP` (no catch-all) so unknown paths return 404 instead of being silently routed:
+  - OpenAI-compatible POST: `/v1/chat/completions`, `/v1/responses`, `/v1/completions`, `/v1/messages`, `/v1/messages/count_tokens`, `/v1/embeddings`, `/reranking`, `/rerank`, `/v1/rerank`, `/v1/reranking`, `/infill`, `/completion`
+  - Versionless aliases under `/v/...` (issue #728) — strip the `/v` prefix before forwarding
+  - Audio: `POST /v1/audio/speech`, `POST /v1/audio/voices`, `GET /v1/audio/voices`, `POST /v1/audio/transcriptions`
+  - Image: `POST /v1/images/generations`, `POST /v1/images/edits`
+  - sd.cpp: `POST /sdapi/v1/txt2img`, `POST /sdapi/v1/img2img`, `GET /sdapi/v1/loras`
+- [ ] `Shutdown(timeout time.Duration) error` that cancels `shutdownCtx` and delegates to `router.Server.Shutdown` — keep the inflight-drain ordering documented in the cross-cutting concerns section.
+- [ ] `SetVersion(buildDate, commit, version string)` setter mirroring [proxymanager.go:1220](../proxy/proxymanager.go#L1220) so [cmd/newrouter/main.go](../cmd/newrouter/main.go) can stamp build info before `ListenAndServe`.
+- [ ] Hot-reload story: confirm `server.Server` can be constructed and shut down repeatedly so the existing reload path in [main.go:126](../cmd/newrouter/main.go#L126) keeps working when it swaps the active server.
+- [ ] Update [cmd/newrouter/main.go](../cmd/newrouter/main.go) to construct `server.New(cfg, proxyLog, upstreamLog)` instead of `router.NewServer(...)`.
+- [ ] Tests in `internal/server/server_test.go`:
+  - Construction succeeds for matrix and group configs
+  - `ServeHTTP` round-trips to the inner router for a known model
+  - `Shutdown` returns within timeout and is idempotent
+
+---
+
+## Phase 5 — Custom HTTP endpoints
+
+Goal: add the non-model-dispatched endpoints. `router.Server` (Phase 1/2) already handles all model-routed traffic via the explicit routes registered in Phase 4. This phase only adds endpoints that need bespoke handlers outside that dispatch.
+
 - [ ] `GET /v1/models` listing — local models + peer models, with aliases and metadata (see [proxymanager.go:588](../proxy/proxymanager.go#L588))
 - [ ] `GET /health` and `GET /wol-health`
 - [ ] `GET /favicon.ico`
 - [ ] `GET /` → redirect to `/ui`
-- [ ] Multipart form re-encoding for upstream forwarding (see [proxymanager.go:908](../proxy/proxymanager.go#L908))
 
-### Phase 4a — Request-body filters
+### Phase 5a — Request-body filters
 
-Tied to the JSON handler; pulls config out of `ModelConfig.Filters`:
+These run on JSON requests before `router.Server` forwards them upstream — they belong as a middleware (use `internal/chain` from Phase 3) wrapping the model-dispatched routes registered in Phase 4, not as new endpoints. Config comes from `ModelConfig.Filters`:
 
 - [ ] `UseModelName` rewrite (issue #69)
 - [ ] `StripParams` removal (issue #174)
 - [ ] `SetParams` injection (issue #453)
 - [ ] `SetParamsByID` per-alias overrides
 
-### Phase 4b — Auth & CORS
+### Phase 5b — Auth & CORS
+
+Cross-cutting middleware (use `internal/chain` from Phase 3) applied at the `server.Server` mux level so it covers both the custom endpoints above and the router-dispatched traffic:
 
 - [ ] API key middleware accepting `Authorization: Bearer`, `Authorization: Basic`, and `x-api-key`; strip these headers before upstream
 - [ ] OPTIONS preflight handler with `SanitizeAccessControlRequestHeaderValues` (see [proxy/sanitize_cors.go](../proxy/sanitize_cors.go))
@@ -115,7 +102,7 @@ Tied to the JSON handler; pulls config out of `ModelConfig.Filters`:
 
 ---
 
-## Phase 5 — Upstream passthrough
+## Phase 6 — Upstream passthrough
 
 - [ ] `GET /upstream` → redirect to `/ui/models`
 - [ ] `ANY /upstream/<model>/<path>` proxy with multi-segment model name resolution (see `findModelInPath` at [proxymanager.go:673](../proxy/proxymanager.go#L673))
@@ -124,7 +111,7 @@ Tied to the JSON handler; pulls config out of `ModelConfig.Filters`:
 
 ---
 
-## Phase 6 — Operations endpoints
+## Phase 7 — Operations endpoints
 
 - [ ] `GET /unload` — stop all processes (`StopImmediately`)
 - [ ] `GET /running` — JSON list of ready processes with `model`, `state`, `cmd`, `proxy`, `ttl`, `name`, `description`. Matrix and group implementations differ — see [proxymanager.go:1167](../proxy/proxymanager.go#L1167)
@@ -133,7 +120,7 @@ Tied to the JSON handler; pulls config out of `ModelConfig.Filters`:
 
 ---
 
-## Phase 7 — Metrics, perf, and SSE
+## Phase 8 — Metrics, perf, and SSE
 
 - [ ] Wire `perf.Monitor` based on `config.Performance`; start/stop it with the server lifecycle
 - [ ] `GET /metrics` — Prometheus output from `perf.Monitor.MetricsHandler()`
@@ -153,7 +140,7 @@ Tied to the JSON handler; pulls config out of `ModelConfig.Filters`:
 
 ---
 
-## Phase 8 — UI serving
+## Phase 9 — UI serving
 
 - [ ] Embed the React/Svelte build (see `proxy/ui_embed.go` / `proxy/ui_compress.go`)
 - [ ] `GET /ui/*filepath` with brotli/gzip-aware `ServeCompressedFile`
@@ -161,7 +148,7 @@ Tied to the JSON handler; pulls config out of `ModelConfig.Filters`:
 
 ---
 
-## Phase 9 — Cutover
+## Phase 10 — Cutover
 
 - [ ] Swap `llama-swap.go` to delegate to `cmd/newrouter` (or rename newrouter to be the primary entrypoint)
 - [ ] Update `Makefile` build targets
@@ -173,7 +160,7 @@ Tied to the JSON handler; pulls config out of `ModelConfig.Filters`:
 
 ## Cross-cutting concerns to keep in mind
 
-- **Single body read**: legacy and newrouter both buffer the request body once. When adding filters (Phase 4a), make sure the buffered bytes flow through `Content-Length` / `transfer-encoding` cleanup as in [proxymanager.go:872](../proxy/proxymanager.go#L872).
+- **Single body read**: legacy and newrouter both buffer the request body once. When adding filters (Phase 5a), make sure the buffered bytes flow through `Content-Length` / `transfer-encoding` cleanup as in [proxymanager.go:872](../proxy/proxymanager.go#L872).
 - **Streaming flag in context**: legacy stashes `streaming` and `model` under `proxyCtxKey`. The new router uses `ModelKey` / `ModelIDKey` — pick one set of keys and use them consistently for metrics + log handlers.
 - **Matrix vs Group divergence**: any handler that calls `swapProcessGroup` or `findGroupByModelName` in the legacy needs a matrix branch too. The new router's `Router` interface already abstracts this — preserve that abstraction rather than reintroducing the branch in every handler.
 - **Shutdown ordering**: `httpServer.Shutdown` must drain inflight requests _before_ `Server.Shutdown` tears down processes, otherwise inflight requests 502. Current newrouter ordering at [main.go:87](../cmd/newrouter/main.go#L87) is correct — keep it.
