@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/billziss-gh/golib/shlex"
 	"gopkg.in/yaml.v3"
@@ -124,6 +125,7 @@ type Config struct {
 	LogToStdout        string                 `yaml:"logToStdout"`
 	MetricsMaxInMemory int                    `yaml:"metricsMaxInMemory"`
 	CaptureBuffer      int                    `yaml:"captureBuffer"`
+	Performance        PerformanceConfig      `yaml:"performance"`
 	GlobalTTL          int                    `yaml:"globalTTL"`
 	Models             map[string]ModelConfig `yaml:"models"` /* key is model ID */
 	Profiles           map[string][]string    `yaml:"profiles"`
@@ -218,6 +220,14 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 
 	if config.HealthCheckTimeout < 15 {
 		config.HealthCheckTimeout = 15
+	}
+
+	// Apply defaults for performance config when section is missing
+	if config.Performance.Every == 0 {
+		config.Performance.Every = 5 * time.Second
+	}
+	if err = config.Performance.Validate(); err != nil {
+		return Config{}, fmt.Errorf("performance: %w", err)
 	}
 
 	if config.StartPort < 1 {

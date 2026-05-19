@@ -7,6 +7,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/proxy/config"
 )
 
@@ -145,8 +146,8 @@ type Matrix struct {
 	solver         *MatrixSolver
 	processes      map[string]*Process // all processes keyed by real model name
 	config         config.Config
-	proxyLogger    *LogMonitor
-	upstreamLogger *LogMonitor
+	proxyLogger    *logmon.Monitor
+	upstreamLogger *logmon.Monitor
 
 	// inflight tracks ProxyRequest calls that have released m.Lock but may
 	// not yet have incremented Process.inFlightRequests. A concurrent
@@ -165,10 +166,10 @@ type Matrix struct {
 
 // NewMatrix creates a Matrix from config. It creates a Process for every
 // model defined in the config (any model can run alone even if not in a set).
-func NewMatrix(cfg config.Config, proxyLogger, upstreamLogger *LogMonitor) *Matrix {
+func NewMatrix(cfg config.Config, proxyLogger, upstreamLogger *logmon.Monitor) *Matrix {
 	processes := make(map[string]*Process)
 	for modelID, modelConfig := range cfg.Models {
-		processLogger := NewLogMonitorWriter(upstreamLogger)
+		processLogger := logmon.NewWriter(upstreamLogger)
 		process := NewProcess(modelID, cfg.HealthCheckTimeout, modelConfig, processLogger, proxyLogger)
 		processes[modelID] = process
 	}

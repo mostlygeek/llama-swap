@@ -52,12 +52,14 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
     - `GET /logs/stream/upstream` streams upstream process logs only.
     - `GET /logs/stream/{model_id}` streams logs for one model (including IDs with slashes, like `author/model`).
   - `/health` - just returns "OK"
+  - `/metrics` - system and GPU metrics for prometheus
 - ✅ API Key support - define keys to restrict access to API endpoints
 - ✅ Customizable
   - Run concurrent models with a custom DSL swap matrix ([#643](https://github.com/mostlygeek/llama-swap/issues/643))
   - Automatic unloading of models after timeout by setting a `ttl`
-  - Reliable Docker and Podman support using `cmd` and `cmdStop` together
+  - Docker and Podman support using `cmd` and `cmdStop` together
   - Preload models on startup with `hooks` ([#235](https://github.com/mostlygeek/llama-swap/pull/235))
+  - Apply filters to requests to control inference with `stripParams`, `setParams` and `setParamsByID`
 
 ### Web UI
 
@@ -93,8 +95,24 @@ llama-swap can be installed in multiple ways
 
 ### Docker Install ([download images](https://github.com/mostlygeek/llama-swap/pkgs/container/llama-swap))
 
-Nightly container images with llama-swap and llama-server are built for multiple platforms (cuda, vulkan, intel, etc.) including [non-root variants with improved security](docs/container-security.md).
-The stable-diffusion.cpp server is also included for the musa and vulkan platforms.
+Two types of container images are built nightly for llama-swap:
+
+1. A unified container with llama-server, ik-llama-server, stable-diffusion.cpp, whisper.cpp and llama-swap built from source. This is only available for cuda and vulkan but has more capabilities. This one is recommended for use.
+2. A legacy image that is based on llama.cpp's images and llama-swap copied into the container. Use this one if you prefer to stay close to llama.cpp's container images.
+
+#### Unified container (Recommended)
+
+```shell
+$ docker pull ghcr.io/mostlygeek/llama-swap:unified-cuda
+
+# run with a custom configuration and models directory
+$ docker run -it --rm --runtime nvidia -p 9292:8080 \
+ -v /path/to/models:/models \
+ -v /path/to/custom/config.yaml:/etc/llama-swap/config/config.yaml \
+ ghcr.io/mostlygeek/llama-swap:unified-cuda
+```
+
+#### Legacy container
 
 ```shell
 $ docker pull ghcr.io/mostlygeek/llama-swap:cuda
@@ -104,14 +122,6 @@ $ docker run -it --rm --runtime nvidia -p 9292:8080 \
  -v /path/to/models:/models \
  -v /path/to/custom/config.yaml:/app/config.yaml \
  ghcr.io/mostlygeek/llama-swap:cuda
-
-# configuration hot reload supported with a
-# directory volume mount
-$ docker run -it --rm --runtime nvidia -p 9292:8080 \
- -v /path/to/models:/models \
- -v /path/to/custom/config.yaml:/app/config.yaml \
- -v /path/to/config:/config \
- ghcr.io/mostlygeek/llama-swap:cuda -config /config/config.yaml -watch-config
 ```
 
 <details>
@@ -267,6 +277,6 @@ For Python based inference servers like vllm or tabbyAPI it is recommended to ru
 ## Star History
 
 > [!NOTE]
-> ⭐️ Star this project to help others discover it!
+> Thank you to everyone who has given this project a ⭐️!
 
 [![Star History Chart](https://api.star-history.com/svg?repos=mostlygeek/llama-swap&type=Date)](https://www.star-history.com/#mostlygeek/llama-swap&Date)
