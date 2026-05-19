@@ -15,6 +15,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/mostlygeek/llama-swap/event"
+	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/proxy"
 	"github.com/mostlygeek/llama-swap/proxy/config"
 	"github.com/mostlygeek/llama-swap/proxy/configwatcher"
@@ -34,7 +36,7 @@ func main() {
 	keyFile := flag.String("tls-key-file", "", "TLS key file")
 	showVersion := flag.Bool("version", false, "show version of build")
 	watchConfig := flag.Bool("watch-config", false, "Automatically reload config file on change")
-	mainLogger := proxy.NewLogMonitor()
+	mainLogger := logmon.New()
 
 	flag.Parse() // Parse the command-line flags
 
@@ -45,7 +47,7 @@ func main() {
 
 	conf, err := config.LoadConfig(*configPath)
 	if err != nil {
-		mainLogger.Errorf("Error loading config: %", err)
+		mainLogger.Errorf("Error loading config: %v", err)
 		os.Exit(1)
 	}
 
@@ -55,15 +57,15 @@ func main() {
 
 	switch strings.ToLower(strings.TrimSpace(conf.LogLevel)) {
 	case "debug":
-		mainLogger.SetLogLevel(proxy.LevelDebug)
+		mainLogger.SetLogLevel(logmon.LevelDebug)
 	case "info":
-		mainLogger.SetLogLevel(proxy.LevelInfo)
+		mainLogger.SetLogLevel(logmon.LevelInfo)
 	case "warn":
-		mainLogger.SetLogLevel(proxy.LevelWarn)
+		mainLogger.SetLogLevel(logmon.LevelWarn)
 	case "error":
-		mainLogger.SetLogLevel(proxy.LevelError)
+		mainLogger.SetLogLevel(logmon.LevelError)
 	default:
-		mainLogger.SetLogLevel(proxy.LevelInfo)
+		mainLogger.SetLogLevel(logmon.LevelInfo)
 	}
 
 	mainLogger.Debugf("PID: %d", os.Getpid())
@@ -91,6 +93,18 @@ func main() {
 		listenStr = &defaultPort
 	}
 
+	var mon *perf.Monitor
+	if !conf.Performance.Disabled {
+		mon, err = perf.New(conf.Performance, mainLogger)
+		if err != nil {
+			mainLogger.Errorf("failed to create monitor: %s", err.Error())
+			os.Exit(1)
+		}
+		mon.Start()
+	} else {
+		mainLogger.Info("performance monitoring is disabled")
+	}
+
 	// Setup channels for server management
 	exitChan := make(chan struct{})
 	sigChan := make(chan os.Signal, 1)
@@ -99,7 +113,7 @@ func main() {
 	// Context that bounds the lifetime of background watcher goroutines.
 	watcherCtx, watcherCancel := context.WithCancel(context.Background())
 
-	// Create server with initial handler
+	// Create server with initial handlergit
 	srv := &http.Server{
 		Addr: *listenStr,
 	}
@@ -121,8 +135,8 @@ func main() {
 			reloadMutex.Unlock()
 		}()
 
-		mainLogger.Info("Reloading Configuration")
 		if currentPM, ok := srv.Handler.(*proxy.ProxyManager); ok {
+			mainLogger.Info("Reloading Configuration")
 			conf, err = config.LoadConfig(*configPath)
 			if err != nil {
 				mainLogger.Warnf("Unable to reload configuration: %v", err)
@@ -131,8 +145,12 @@ func main() {
 
 			mainLogger.Debug("Configuration Changed")
 			currentPM.Shutdown()
+			if mon != nil {
+				mon.UpdateConfig(conf.Performance)
+			}
 			newPM := proxy.New(conf)
 			newPM.SetVersion(date, commit, version)
+			newPM.SetPerfMonitor(mon)
 			srv.Handler = newPM
 			mainLogger.Debug("Configuration Reloaded")
 
@@ -150,6 +168,7 @@ func main() {
 			}
 			newPM := proxy.New(conf)
 			newPM.SetVersion(date, commit, version)
+			newPM.SetPerfMonitor(mon)
 			srv.Handler = newPM
 		}
 	}
@@ -185,6 +204,9 @@ func main() {
 				reloadProxyManager()
 			case syscall.SIGINT, syscall.SIGTERM:
 				mainLogger.Debugf("Received signal %v, shutting down...", sig)
+				if mon != nil {
+					mon.Stop()
+				}
 				watcherCancel()
 				ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 				defer cancel()

@@ -9,6 +9,11 @@ on:
 
   # Allows manual triggering of the workflow
   workflow_dispatch:
+    inputs:
+      dryrun:
+        description: "Run cleanup step in dry-run mode (log what would be deleted, delete nothing)"
+        type: boolean
+        default: false
 
   # Run on workflow file changes (without pushing)
   push:
@@ -33,7 +38,7 @@ jobs:
       fail-fast: false
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
 
       - name: Free up disk space
         if: matrix.platform == 'rocm'
@@ -48,8 +53,18 @@ jobs:
           echo "After cleanup:"
           df -h
 
+      # QEMU enables arm64 cross-builds on the amd64 GitHub runner.
+      # Currently only the cpu backend goes multi-arch; the action is a
+      # no-op for amd64-only builds, so leaving it on for every matrix
+      # entry keeps the workflow simple.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a #v4.0.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd #v4.0.0
+
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v2
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -60,14 +75,23 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./docker/build-container.sh ${{ matrix.platform }} ${{ github.event_name != 'push' }}
 
-  # note make sure mostlygeek/llama-swap has admin rights to the llama-swap package
-  # see: https://github.com/actions/delete-package-versions/issues/74
+  # actions/delete-package-versions can't see manifest lists: pushing
+  # a multi-arch image with `docker buildx --push` creates a tagged OCI
+  # index plus one untagged per-platform manifest per arch, and
+  # `delete-only-untagged-versions: true` then nukes the per-platform
+  # children, leaving the index dangling — `docker pull :cpu` 404s on
+  # the referenced digest. dataaxiom/ghcr-cleanup-action walks tagged
+  # manifest lists and excludes their children from deletion.
   delete-untagged-containers:
     needs: build-and-push
+    # Skip on forks — the delete API requires package-admin on the
+    # upstream account and would otherwise red-x every fork CI run.
+    if: github.repository == 'mostlygeek/llama-swap'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/delete-package-versions@v5
+      - uses: dataaxiom/ghcr-cleanup-action@cd0cdb900b5dbf3a6f2cc869f0dbb0b8211f50c4 # v1.0.16
         with:
-          package-name: 'llama-swap'
-          package-type: 'container'
-          delete-only-untagged-versions: 'true'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          package: llama-swap
+          delete-untagged: true
+          dry-run: ${{ inputs.dryrun || false }}

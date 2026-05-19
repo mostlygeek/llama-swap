@@ -55,6 +55,18 @@ metricsMaxInMemory: 1000
 # - set to 0 to disable
 captureBuffer: 15
 
+# performance: configuration for system monitoring statistics
+# - timing values are duration strings like 1s, 1h30m, 90m, 2h10s, etc.
+performance:
+  # disabled: boolean
+  # - default: false
+  disabled: false
+
+  # every: delay between polling for new performance statistics
+  # - default: 5s
+  # - minimum duration 5s
+  every: 15s
+
 # startPort: sets the starting port number for the automatic ${PORT} macro.
 # - optional, default: 5800
 # - the ${PORT} macro can be used in model.cmd and model.proxy settings
@@ -96,8 +108,7 @@ globalTTL: 0
 macros:
   # Example of a multi-line macro
   "latest-llama": >
-    /path/to/llama-server/llama-server-ec9e0301
-    --port ${PORT}
+    /path/to/llama-server/llama-server-ec9e0301 --port ${PORT}
 
   "default_ctx": 4096
 
@@ -257,7 +268,8 @@ models:
 
       # the ${temp} macro will remain a float
       temperature: ${temp}
-      note: "The ${MODEL_ID} is running on port ${PORT} temp=${temp}, context=${default_ctx}"
+      note: "The ${MODEL_ID} is running on port ${PORT} temp=${temp},
+        context=${default_ctx}"
 
       a_list:
         - 1
@@ -335,10 +347,19 @@ models:
 # matrix: run concurrent models with a solver-based swap DSL
 # =============================================================================
 #
-# Note:
-# A config must use either a matrix or legacy groups, not both. A configuration error
-# will occur if both are defined. Configuration examples for legacy Groups can be found:
+# Matrix or Groups?
+#
+# Groups are available and fully supported. The syntax may be easier to use
+# for simple use cases.
+#
+# Documentation can be found here:
 # https://github.com/mostlygeek/llama-swap/blob/40e39f7/config.example.yaml#L334-L396
+#
+# A config can only use a matrix (recommended) or groups. A configuration error
+# will occur if both are defined. Groups is legacy but is fully supported with
+# no plans to deprecate it.
+#
+# ~~~~~
 #
 # The matrix declares valid combinations of models that can run concurrently.
 # When a model is requested, the solver finds the cheapest way to make it

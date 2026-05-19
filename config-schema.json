@@ -142,6 +142,25 @@
             "default": 5,
             "description": "Size in megabytes of the buffer for storing request/response captures. Set to 0 to disable captures."
         },
+        "performance": {
+            "type": "object",
+            "properties": {
+                "disabled": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Disable system performance monitoring."
+                },
+                "every": {
+                    "type": "string",
+                    "pattern": "^[-+]?(\\d+(\\.\\d+)?(ns|us|ms|s|m|h))+$",
+                    "default": "15s",
+                    "description": "Delay between polling for new performance statistics. Minimum duration is 1s. Lower values use more RAM as stats are kept in memory."
+                }
+            },
+            "additionalProperties": false,
+            "default": {},
+            "description": "Configuration for CPU, RAM and GPU monitoring statistics."
+        },
         "startPort": {
             "type": "integer",
             "default": 5800,

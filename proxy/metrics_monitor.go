@@ -18,6 +18,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/klauspost/compress/zstd"
 	"github.com/mostlygeek/llama-swap/event"
+	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/ring"
 	"github.com/mostlygeek/llama-swap/proxy/cache"
 	"github.com/tidwall/gjson"
 )
@@ -116,10 +118,9 @@ func (e ActivityLogEvent) Type() uint32 {
 // metricsMonitor parses llama-server output for token statistics
 type metricsMonitor struct {
 	mu            sync.RWMutex
-	metrics       []ActivityLogEntry
-	maxMetrics    int
+	metrics       ring.Buffer[ActivityLogEntry]
 	nextID        int
-	logger        *LogMonitor
+	logger        *logmon.Monitor
 	rollup        metricsRollup
 	rollupByModel map[string]*metricsRollup
 
@@ -138,10 +139,10 @@ type metricsRollup struct {
 
 // newMetricsMonitor creates a new metricsMonitor. captureBufferMB is the
 // capture buffer size in megabytes; 0 disables captures.
-func newMetricsMonitor(logger *LogMonitor, maxMetrics int, captureBufferMB int) *metricsMonitor {
+func newMetricsMonitor(logger *logmon.Monitor, maxMetrics int, captureBufferMB int) *metricsMonitor {
 	mm := &metricsMonitor{
 		logger:         logger,
-		maxMetrics:     maxMetrics,
+		metrics:        ring.NewBuffer[ActivityLogEntry](maxMetrics),
 		rollupByModel:  make(map[string]*metricsRollup),
 		enableCaptures: captureBufferMB > 0,
 	}
@@ -159,10 +160,7 @@ func (mp *metricsMonitor) queueMetrics(metric ActivityLogEntry) int {
 
 	metric.ID = mp.nextID
 	mp.nextID++
-	mp.metrics = append(mp.metrics, metric)
-	if len(mp.metrics) > mp.maxMetrics {
-		mp.metrics = mp.metrics[len(mp.metrics)-mp.maxMetrics:]
-	}
+	mp.metrics.Push(metric)
 	mp.updateTokenRollupCounters(metric)
 	return metric.ID
 }
@@ -227,30 +225,36 @@ func (mp *metricsMonitor) getCaptureByID(id int) *ReqRespCapture {
 	return capture
 }
 
-// getMetrics returns a copy of the current metrics
+// getMetrics returns a copy of the current metrics with HasCapture resolved from cache.
 func (mp *metricsMonitor) getMetrics() []ActivityLogEntry {
 	mp.mu.RLock()
 	defer mp.mu.RUnlock()
 
-	result := make([]ActivityLogEntry, len(mp.metrics))
-	copy(result, mp.metrics)
+	result := mp.metrics.Slice()
+	if result == nil {
+		return []ActivityLogEntry{}
+	}
+	if mp.captureCache != nil {
+		for i := range result {
+			result[i].HasCapture = mp.captureCache.Has(result[i].ID)
+		}
+	}
 	return result
 }
 
-// getMetricsJSON returns metrics as JSON
+// getMetricsJSON returns metrics as JSON with HasCapture resolved from cache.
 func (mp *metricsMonitor) getMetricsJSON() ([]byte, error) {
 	mp.mu.RLock()
 	defer mp.mu.RUnlock()
 
-	if mp.captureCache == nil {
-		return json.Marshal(mp.metrics)
+	result := mp.metrics.Slice()
+	if result == nil {
+		return json.Marshal([]ActivityLogEntry{})
 	}
-
-	// Make a copy with up-to-date has_capture from cache
-	result := make([]ActivityLogEntry, len(mp.metrics))
-	for i, m := range mp.metrics {
-		m.HasCapture = mp.captureCache.Has(m.ID)
-		result[i] = m
+	if mp.captureCache != nil {
+		for i := range result {
+			result[i].HasCapture = mp.captureCache.Has(result[i].ID)
+		}
 	}
 	return json.Marshal(result)
 }
@@ -309,8 +313,7 @@ func (mp *metricsMonitor) getPrometheusText() []byte {
 			perModel[model] = *rollup
 		}
 	}
-	metricsCopy := make([]ActivityLogEntry, len(mp.metrics))
-	copy(metricsCopy, mp.metrics)
+	metricsCopy := mp.metrics.Slice()
 	mp.mu.RUnlock()
 
 	models := make([]string, 0, len(perModel))
@@ -646,9 +649,6 @@ func (mp *metricsMonitor) wrapHandler(
 		capture.ID = metricID
 		if mp.addCapture(*capture) {
 			tm.HasCapture = true
-			mp.mu.Lock()
-			mp.metrics[len(mp.metrics)-1].HasCapture = true
-			mp.mu.Unlock()
 		}
 	}
 
@@ -657,110 +657,159 @@ func (mp *metricsMonitor) wrapHandler(
 	return nil
 }
 
+// usagePaths lists the JSON paths where a per-event usage object can live.
+// v1/chat/completions puts it at top-level "usage"; v1/responses nests under
+// "response.usage"; v1/messages emits it at "message.usage" on message_start
+// and at "usage" on message_delta.
+var usagePaths = []string{"usage", "response.usage", "message.usage"}
+
+// extractUsageTokens reads input/output/cached token counts from a usage
+// gjson.Result, handling the field-name differences across endpoints.
+// cached returns -1 when the field is absent. ok is true when at least one
+// field was present.
+func extractUsageTokens(usage gjson.Result) (input, output, cached int64, ok bool) {
+	cached = -1
+	if !usage.Exists() {
+		return
+	}
+
+	if v := usage.Get("prompt_tokens"); v.Exists() {
+		// v1/chat/completions
+		input = v.Int()
+		ok = true
+	} else if v := usage.Get("input_tokens"); v.Exists() {
+		// v1/messages, v1/responses
+		input = v.Int()
+		ok = true
+	}
+
+	if v := usage.Get("completion_tokens"); v.Exists() {
+		// v1/chat/completions
+		output = v.Int()
+		ok = true
+	} else if v := usage.Get("output_tokens"); v.Exists() {
+		// v1/messages, v1/responses
+		output = v.Int()
+		ok = true
+	}
+
+	if v := usage.Get("cache_read_input_tokens"); v.Exists() {
+		// v1/messages (Anthropic)
+		cached = v.Int()
+		ok = true
+	} else if v := usage.Get("input_tokens_details.cached_tokens"); v.Exists() {
+		// v1/responses (OpenAI Responses API)
+		cached = v.Int()
+		ok = true
+	} else if v := usage.Get("prompt_tokens_details.cached_tokens"); v.Exists() {
+		// v1/chat/completions (OpenAI cache hits)
+		cached = v.Int()
+		ok = true
+	}
+	return
+}
+
 func processStreamingResponse(modelID string, start time.Time, body []byte) (ActivityLogEntry, error) {
-	// Iterate **backwards** through the body looking for the data payload with
-	// usage data. This avoids allocating a slice of all lines via bytes.Split.
+	// Walk SSE "data:" lines forward, merging usage info from every event.
+	// Different endpoints split usage across events:
+	//   - v1/chat/completions: usage on the final chunk before [DONE]
+	//   - v1/responses:        usage on response.completed (response.usage)
+	//   - v1/messages:         input + cache on message_start (message.usage),
+	//                          output_tokens on message_delta (usage)
+	// We take the latest informative value per field so all three are covered.
 
-	// Start from the end of the body and scan backwards for newlines
-	pos := len(body)
-	for pos > 0 {
-		// Find the previous newline (or start of body)
-		lineStart := bytes.LastIndexByte(body[:pos], '\n')
-		if lineStart == -1 {
-			lineStart = 0
+	var (
+		inputTokens, outputTokens int64
+		cachedTokens              int64 = -1
+		hasAny                    bool
+		timings                   gjson.Result
+	)
+
+	prefix := []byte("data:")
+	for offset := 0; offset < len(body); {
+		nl := bytes.IndexByte(body[offset:], '\n')
+		var line []byte
+		if nl == -1 {
+			line = body[offset:]
+			offset = len(body)
 		} else {
-			lineStart++ // Move past the newline
+			line = body[offset : offset+nl]
+			offset += nl + 1
 		}
 
-		line := bytes.TrimSpace(body[lineStart:pos])
-		pos = lineStart - 1 // Move position before the newline for next iteration
-
-		if len(line) == 0 {
-			continue
-		}
-
-		// SSE payload always follows "data:"
-		prefix := []byte("data:")
-		if !bytes.HasPrefix(line, prefix) {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 || !bytes.HasPrefix(line, prefix) {
 			continue
 		}
 		data := bytes.TrimSpace(line[len(prefix):])
-
-		if len(data) == 0 {
+		if len(data) == 0 || bytes.Equal(data, []byte("[DONE]")) {
 			continue
 		}
-
-		if bytes.Equal(data, []byte("[DONE]")) {
-			// [DONE] line itself contains nothing of interest.
+		if !gjson.ValidBytes(data) {
 			continue
 		}
+		parsed := gjson.ParseBytes(data)
 
-		if gjson.ValidBytes(data) {
-			parsed := gjson.ParseBytes(data)
-			usage := parsed.Get("usage")
-			timings := parsed.Get("timings")
-
-			// v1/responses format nests usage under response.usage
-			if !usage.Exists() {
-				usage = parsed.Get("response.usage")
+		for _, path := range usagePaths {
+			u := parsed.Get(path)
+			if !u.Exists() {
+				continue
 			}
-
-			if usage.Exists() || timings.Exists() {
-				return parseMetrics(modelID, start, usage, timings)
+			i, o, c, ok := extractUsageTokens(u)
+			if !ok {
+				continue
 			}
+			hasAny = true
+			// Take the latest non-zero value so message_start's input_tokens
+			// is preserved when message_delta's usage omits it, and vice versa
+			// for output_tokens.
+			if i > 0 {
+				inputTokens = i
+			}
+			if o > 0 {
+				outputTokens = o
+			}
+			if c >= 0 {
+				cachedTokens = c
+			}
+		}
+		if t := parsed.Get("timings"); t.Exists() {
+			timings = t
+			hasAny = true
 		}
 	}
 
-	return ActivityLogEntry{}, fmt.Errorf("no valid JSON data found in stream")
+	if !hasAny {
+		return ActivityLogEntry{}, fmt.Errorf("no valid JSON data found in stream")
+	}
+
+	return buildMetrics(modelID, start, inputTokens, outputTokens, cachedTokens, timings), nil
 }
 
 func parseMetrics(modelID string, start time.Time, usage, timings gjson.Result) (ActivityLogEntry, error) {
+	input, output, cached, _ := extractUsageTokens(usage)
+	return buildMetrics(modelID, start, input, output, cached, timings), nil
+}
+
+// buildMetrics composes an ActivityLogEntry from accumulated token counts and
+// optional llama-server timings (which override input/output and provide rates).
+func buildMetrics(modelID string, start time.Time, inputTokens, outputTokens, cachedTokens int64, timings gjson.Result) ActivityLogEntry {
 	wallDurationMs := int(time.Since(start).Milliseconds())
-
-	// default values
-	cachedTokens := -1 // unknown or missing data
-	outputTokens := 0
-	inputTokens := 0
-
-	// timings data
+	durationMs := wallDurationMs
 	tokensPerSecond := -1.0
 	promptPerSecond := -1.0
-	durationMs := wallDurationMs
 
-	if usage.Exists() {
-		if pt := usage.Get("prompt_tokens"); pt.Exists() {
-			// v1/chat/completions
-			inputTokens = int(pt.Int())
-		} else if it := usage.Get("input_tokens"); it.Exists() {
-			// v1/messages
-			inputTokens = int(it.Int())
-		}
-
-		if ct := usage.Get("completion_tokens"); ct.Exists() {
-			// v1/chat/completions
-			outputTokens = int(ct.Int())
-		} else if ot := usage.Get("output_tokens"); ot.Exists() {
-			outputTokens = int(ot.Int())
-		}
-
-		if ct := usage.Get("cache_read_input_tokens"); ct.Exists() {
-			cachedTokens = int(ct.Int())
-		}
-	}
-
-	// use llama-server's timing data for tok/sec and duration as it is more accurate
 	if timings.Exists() {
-		inputTokens = int(timings.Get("prompt_n").Int())
-		outputTokens = int(timings.Get("predicted_n").Int())
+		inputTokens = timings.Get("prompt_n").Int()
+		outputTokens = timings.Get("predicted_n").Int()
 		promptPerSecond = timings.Get("prompt_per_second").Float()
 		tokensPerSecond = timings.Get("predicted_per_second").Float()
 		timingsDurationMs := int(timings.Get("prompt_ms").Float() + timings.Get("predicted_ms").Float())
 		if timingsDurationMs > durationMs {
 			durationMs = timingsDurationMs
 		}
-
 		if cachedValue := timings.Get("cache_n"); cachedValue.Exists() {
-			cachedTokens = int(cachedValue.Int())
+			cachedTokens = cachedValue.Int()
 		}
 	}
 
@@ -768,14 +817,14 @@ func parseMetrics(modelID string, start time.Time, usage, timings gjson.Result) 
 		Timestamp: time.Now(),
 		Model:     modelID,
 		Tokens: TokenMetrics{
-			CachedTokens:    cachedTokens,
-			InputTokens:     inputTokens,
-			OutputTokens:    outputTokens,
+			CachedTokens:    int(cachedTokens),
+			InputTokens:     int(inputTokens),
+			OutputTokens:    int(outputTokens),
 			PromptPerSecond: promptPerSecond,
 			TokensPerSecond: tokensPerSecond,
 		},
 		DurationMs: durationMs,
-	}, nil
+	}
 }
 
 // decompressBody decompresses the body based on Content-Encoding header

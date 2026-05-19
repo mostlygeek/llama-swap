@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -218,6 +219,9 @@ groups:
 		HealthCheckTimeout: 15,
 		MetricsMaxInMemory: 1000,
 		CaptureBuffer:      5,
+		Performance: PerformanceConfig{
+			Every: 5 * time.Second,
+		},
 		Profiles: map[string][]string{
 			"test": {"model1", "model2"},
 		},
