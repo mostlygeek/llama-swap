@@ -48,6 +48,7 @@ Goal: make `cmd/newrouter` a drop-in replacement for the legacy binary's process
   - `-watch-config` to enable file-change reloads
   - Default listen address `:8080` (HTTP) or `:8443` (HTTPS) when `-listen` is empty
 - [ ] `SIGHUP` triggers config reload
+- [ ] events are defined in proxy/events.go. Do not attempt to share with proxy and instead create a new set at internal/shared/events.go to avoid circular dependencies
 - [ ] Config file watcher (poll-based, `internal/watcher` after Phase 1) wired to reload when `-watch-config` is set
 - [ ] Hot reload semantics:
   - Build a new `router.Server`, swap into `http.Server.Handler`, then shut down the old one
@@ -55,7 +56,6 @@ Goal: make `cmd/newrouter` a drop-in replacement for the legacy binary's process
   - Emit `ConfigFileChangedEvent` with `ReloadingState` after a short delay so UIs can refresh
 - [ ] Profiles deprecation warning (matches [llama-swap.go:54](../llama-swap.go#L54))
 - [ ] Skip `GIN_MODE` as the new router will only use the go standard http library
-
 ---
 
 ## Phase 3 — Logging parity
