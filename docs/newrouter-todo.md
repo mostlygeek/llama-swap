@@ -42,20 +42,20 @@ Notes:
 
 Goal: make `cmd/newrouter` a drop-in replacement for the legacy binary's process model, _without_ yet adding any extra HTTP endpoints.
 
-- [ ] CLI flags
+- [x] CLI flags
   - `-tls-cert-file` / `-tls-key-file` with mutual-requirement validation
   - `-version` print + exit (wire up `version` / `commit` / `date` ldflags vars)
   - `-watch-config` to enable file-change reloads
   - Default listen address `:8080` (HTTP) or `:8443` (HTTPS) when `-listen` is empty
-- [ ] `SIGHUP` triggers config reload
-- [ ] events are defined in proxy/events.go. Do not attempt to share with proxy and instead create a new set at internal/shared/events.go to avoid circular dependencies
-- [ ] Config file watcher (poll-based, `internal/watcher` after Phase 1) wired to reload when `-watch-config` is set
-- [ ] Hot reload semantics:
+- [x] `SIGHUP` triggers config reload
+- [x] events are defined in proxy/events.go. Do not attempt to share with proxy and instead create a new set at internal/shared/events.go to avoid circular dependencies
+- [x] Config file watcher (poll-based, `internal/watcher` after Phase 1) wired to reload when `-watch-config` is set
+- [x] Hot reload semantics:
   - Build a new `router.Server`, swap into `http.Server.Handler`, then shut down the old one
   - Guarded by a "reload in progress" mutex so overlapping signals collapse
   - Emit `ConfigFileChangedEvent` with `ReloadingState` after a short delay so UIs can refresh
-- [ ] Profiles deprecation warning (matches [llama-swap.go:54](../llama-swap.go#L54))
-- [ ] Skip `GIN_MODE` as the new router will only use the go standard http library
+- [x] Profiles deprecation warning (matches [llama-swap.go:54](../llama-swap.go#L54))
+- [x] Skip `GIN_MODE` as the new router will only use the go standard http library
 ---
 
 ## Phase 3 — Logging parity
