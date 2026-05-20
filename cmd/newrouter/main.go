@@ -18,7 +18,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
-	"github.com/mostlygeek/llama-swap/internal/router"
+	"github.com/mostlygeek/llama-swap/internal/server"
 	"github.com/mostlygeek/llama-swap/internal/shared"
 	"github.com/mostlygeek/llama-swap/internal/watcher"
 )
@@ -32,11 +32,11 @@ var (
 const shutdownTimeout = 30 * time.Second
 
 func main() {
-	flagConfig      := flag.String("config", "", "path to config file (required)")
-	flagListen      := flag.String("listen", "", "listen address (default :8080 or :8443 for TLS)")
-	flagCertFile    := flag.String("tls-cert-file", "", "TLS certificate file")
-	flagKeyFile     := flag.String("tls-key-file", "", "TLS key file")
-	flagVersion     := flag.Bool("version", false, "show version and exit")
+	flagConfig := flag.String("config", "", "path to config file (required)")
+	flagListen := flag.String("listen", "", "listen address (default :8080 or :8443 for TLS)")
+	flagCertFile := flag.String("tls-cert-file", "", "TLS certificate file")
+	flagKeyFile := flag.String("tls-key-file", "", "TLS key file")
+	flagVersion := flag.Bool("version", false, "show version and exit")
 	flagWatchConfig := flag.Bool("watch-config", false, "reload config on file change")
 	flag.Parse()
 
@@ -98,9 +98,9 @@ func main() {
 
 	applyLogLevel(cfg)
 
-	initialSrv, err := router.NewServer(cfg, proxyLog, upstreamLog)
+	initialSrv, err := server.New(cfg, proxyLog, upstreamLog)
 	if err != nil {
-		slog.Error("failed to create router server", "error", err)
+		slog.Error("failed to create server", "error", err)
 		os.Exit(1)
 	}
 
@@ -149,7 +149,7 @@ func main() {
 			proxyLog.Warn("Profile functionality has been removed in favor of Groups. See the README for more information.")
 		}
 
-		newSrv, err := router.NewServer(newCfg, proxyLog, upstreamLog)
+		newSrv, err := server.New(newCfg, proxyLog, upstreamLog)
 		if err != nil {
 			proxyLog.Warnf("failed to build new server during reload: %v", err)
 			return
