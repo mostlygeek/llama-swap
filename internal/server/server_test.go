@@ -49,11 +49,14 @@ func (s *stubRouter) Unload(_ time.Duration, _ ...string)            { s.unloadC
 // newTestServer wires a Server with stub routers and a built mux.
 func newTestServer(local router.LocalRouter, peer router.Router) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
+	proxylog := logmon.NewWriter(io.Discard)
 	s := &Server{
 		cfg:         config.Config{},
 		muxlog:      logmon.NewWriter(io.Discard),
-		proxylog:    logmon.NewWriter(io.Discard),
+		proxylog:    proxylog,
 		upstreamlog: logmon.NewWriter(io.Discard),
+		inflight:    &inflightCounter{},
+		metrics:     newMetricsMonitor(proxylog, 0),
 		local:       local,
 		peer:        peer,
 		shutdownCtx: ctx,
@@ -72,7 +75,7 @@ func chatRequest(model string) *http.Request {
 
 func TestServer_New_GroupConfig(t *testing.T) {
 	discard := logmon.NewWriter(io.Discard)
-	s, err := New(config.Config{HealthCheckTimeout: 15}, discard, discard)
+	s, err := New(config.Config{HealthCheckTimeout: 15}, discard, discard, nil, BuildInfo{})
 	if err != nil {
 		t.Fatalf("New (group): %v", err)
 	}
@@ -84,7 +87,7 @@ func TestServer_New_GroupConfig(t *testing.T) {
 func TestServer_New_MatrixConfig(t *testing.T) {
 	discard := logmon.NewWriter(io.Discard)
 	cfg := config.Config{HealthCheckTimeout: 15, Matrix: &config.MatrixConfig{}}
-	s, err := New(cfg, discard, discard)
+	s, err := New(cfg, discard, discard, nil, BuildInfo{})
 	if err != nil {
 		t.Fatalf("New (matrix): %v", err)
 	}

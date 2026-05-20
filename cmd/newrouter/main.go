@@ -18,6 +18,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/internal/server"
 	"github.com/mostlygeek/llama-swap/internal/shared"
 	"github.com/mostlygeek/llama-swap/internal/watcher"
@@ -98,7 +99,22 @@ func main() {
 
 	applyLogLevel(cfg)
 
-	initialSrv, err := server.New(cfg, proxyLog, upstreamLog)
+	// perfMon outlives config reloads; its config is updated in place.
+	var perfMon *perf.Monitor
+	if !cfg.Performance.Disabled {
+		perfMon, err = perf.New(cfg.Performance, proxyLog)
+		if err != nil {
+			slog.Error("failed to create performance monitor", "error", err)
+			os.Exit(1)
+		}
+		perfMon.Start()
+	} else {
+		proxyLog.Info("performance monitoring is disabled")
+	}
+
+	buildInfo := server.BuildInfo{Version: version, Commit: commit, Date: date}
+
+	initialSrv, err := server.New(cfg, proxyLog, upstreamLog, perfMon, buildInfo)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)
 		os.Exit(1)
@@ -149,7 +165,11 @@ func main() {
 			proxyLog.Warn("Profile functionality has been removed in favor of Groups. See the README for more information.")
 		}
 
-		newSrv, err := server.New(newCfg, proxyLog, upstreamLog)
+		if perfMon != nil {
+			perfMon.UpdateConfig(newCfg.Performance)
+		}
+
+		newSrv, err := server.New(newCfg, proxyLog, upstreamLog, perfMon, buildInfo)
 		if err != nil {
 			proxyLog.Warnf("failed to build new server during reload: %v", err)
 			return
@@ -235,6 +255,10 @@ func main() {
 				activeMu.RUnlock()
 				if err := srv.Shutdown(shutdownTimeout); err != nil {
 					proxyLog.Warnf("router shutdown error: %v", err)
+				}
+
+				if perfMon != nil {
+					perfMon.Stop()
 				}
 
 				close(exitChan)
