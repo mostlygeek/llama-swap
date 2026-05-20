@@ -26,7 +26,7 @@ type Server struct {
 	proxylog    *logmon.Monitor
 	upstreamlog *logmon.Monitor
 
-	local router.Router
+	local router.LocalRouter
 	peer  router.Router
 
 	mux     *http.ServeMux
@@ -85,7 +85,7 @@ var modelGetRoutes = []string{
 }
 
 func New(cfg config.Config, proxylog *logmon.Monitor, upstreamlog *logmon.Monitor) (*Server, error) {
-	var local router.Router
+	var local router.LocalRouter
 	var err error
 
 	if cfg.Matrix != nil {
@@ -122,6 +122,7 @@ func New(cfg config.Config, proxylog *logmon.Monitor, upstreamlog *logmon.Monito
 		shutdownFn:  shutdownFn,
 	}
 	s.routes()
+	s.startPreload()
 	return s, nil
 }
 
@@ -190,6 +191,10 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /health", handleHealth)
 	mux.HandleFunc("GET /wol-health", handleHealth)
 	mux.HandleFunc("GET /{$}", handleRootRedirect)
+
+	// Operations endpoints.
+	mux.Handle("GET /unload", apiChain.ThenFunc(s.handleUnload))
+	mux.Handle("GET /running", apiChain.ThenFunc(s.handleRunning))
 
 	// Upstream passthrough.
 	mux.HandleFunc("GET /upstream", handleUpstreamRedirect)

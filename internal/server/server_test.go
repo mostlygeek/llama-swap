@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,15 +12,20 @@ import (
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/router"
+	"github.com/mostlygeek/llama-swap/internal/shared"
 )
 
-// stubRouter is a minimal router.Router for Server dispatch tests.
+// stubRouter is a minimal router.LocalRouter for Server dispatch tests.
 type stubRouter struct {
 	models        map[string]bool
 	response      string
 	shutdownCalls atomic.Int32
+	running       map[string]process.ProcessState
+	unloadCalls   atomic.Int32
 }
 
 func newStubRouter(models []string, response string) *stubRouter {
@@ -37,8 +43,11 @@ func (s *stubRouter) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	w.Write([]byte(s.response))
 }
 
+func (s *stubRouter) RunningModels() map[string]process.ProcessState { return s.running }
+func (s *stubRouter) Unload(_ time.Duration, _ ...string)            { s.unloadCalls.Add(1) }
+
 // newTestServer wires a Server with stub routers and a built mux.
-func newTestServer(local, peer router.Router) *Server {
+func newTestServer(local router.LocalRouter, peer router.Router) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
 		cfg:         config.Config{},
@@ -167,6 +176,88 @@ func TestServer_CORSPreflight(t *testing.T) {
 	}
 	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "*" {
 		t.Errorf("Access-Control-Allow-Origin=%q want *", got)
+	}
+}
+
+func TestServer_Unload(t *testing.T) {
+	local := newStubRouter([]string{"m1"}, "")
+	s := newTestServer(local, newStubRouter(nil, ""))
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/unload", nil))
+
+	if w.Code != http.StatusOK || w.Body.String() != "OK" {
+		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
+	}
+	if got := local.unloadCalls.Load(); got != 1 {
+		t.Errorf("unloadCalls=%d want 1", got)
+	}
+}
+
+func TestServer_Running(t *testing.T) {
+	local := newStubRouter([]string{"m1"}, "")
+	local.running = map[string]process.ProcessState{"m1": process.StateReady}
+	s := newTestServer(local, newStubRouter(nil, ""))
+	s.cfg = config.Config{Models: map[string]config.ModelConfig{
+		"m1": {
+			Cmd:         "llama-server",
+			Proxy:       "http://localhost:9999",
+			UnloadAfter: 300,
+			Name:        "Model One",
+			Description: "the first model",
+		},
+	}}
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/running", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Running []runningModel `json:"running"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v body=%q", err, w.Body.String())
+	}
+	if len(resp.Running) != 1 {
+		t.Fatalf("running=%v want 1 entry", resp.Running)
+	}
+	want := runningModel{
+		Model:       "m1",
+		State:       "ready",
+		Cmd:         "llama-server",
+		Proxy:       "http://localhost:9999",
+		TTL:         300,
+		Name:        "Model One",
+		Description: "the first model",
+	}
+	if resp.Running[0] != want {
+		t.Errorf("got %+v want %+v", resp.Running[0], want)
+	}
+}
+
+func TestServer_Preload(t *testing.T) {
+	local := newStubRouter([]string{"m1"}, "ok")
+	s := newTestServer(local, newStubRouter(nil, ""))
+	s.cfg = config.Config{Hooks: config.HooksConfig{
+		OnStartup: config.HookOnStartup{Preload: []string{"m1"}},
+	}}
+
+	got := make(chan shared.ModelPreloadedEvent, 1)
+	cancel := event.On(func(e shared.ModelPreloadedEvent) { got <- e })
+	defer cancel()
+
+	s.startPreload()
+
+	select {
+	case e := <-got:
+		if e.ModelName != "m1" || !e.Success {
+			t.Errorf("event=%+v want {ModelName:m1 Success:true}", e)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("preload event not received")
 	}
 }
 

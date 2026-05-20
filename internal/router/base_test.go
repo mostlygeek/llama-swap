@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
-	"github.com/mostlygeek/llama-swap/internal/config"
 )
 
 // stubPlanner is a swapPlanner that returns a fixed eviction list per target
@@ -42,6 +42,63 @@ func newTestBase(t *testing.T, processes map[string]process.Process, planner swa
 		}
 	})
 	return b
+}
+
+func TestBaseRouter_RunningModels(t *testing.T) {
+	ready := newFakeProcess("ready")
+	ready.markReady()
+	starting := newFakeProcess("starting")
+	starting.setState(process.StateStarting)
+	stopped := newFakeProcess("stopped")
+
+	b := newTestBase(t, map[string]process.Process{
+		"ready": ready, "starting": starting, "stopped": stopped,
+	}, &stubPlanner{})
+
+	running := b.RunningModels()
+	if len(running) != 2 {
+		t.Fatalf("running=%v want 2 entries", running)
+	}
+	if running["ready"] != process.StateReady {
+		t.Errorf("ready state=%q want ready", running["ready"])
+	}
+	if running["starting"] != process.StateStarting {
+		t.Errorf("starting state=%q want starting", running["starting"])
+	}
+	if _, ok := running["stopped"]; ok {
+		t.Errorf("stopped process should be excluded from RunningModels")
+	}
+}
+
+func TestBaseRouter_UnloadAll(t *testing.T) {
+	a := newFakeProcess("a")
+	a.markReady()
+	c := newFakeProcess("c")
+	c.markReady()
+
+	b := newTestBase(t, map[string]process.Process{"a": a, "c": c}, &stubPlanner{})
+	b.Unload(time.Second)
+
+	if a.State() != process.StateStopped || c.State() != process.StateStopped {
+		t.Fatalf("Unload() should stop every process: a=%q c=%q", a.State(), c.State())
+	}
+}
+
+func TestBaseRouter_UnloadSpecificModel(t *testing.T) {
+	a := newFakeProcess("a")
+	a.markReady()
+	c := newFakeProcess("c")
+	c.markReady()
+
+	b := newTestBase(t, map[string]process.Process{"a": a, "c": c}, &stubPlanner{})
+	b.Unload(time.Second, "a")
+
+	if a.State() != process.StateStopped {
+		t.Errorf("a should be stopped, got %q", a.State())
+	}
+	if c.State() != process.StateReady {
+		t.Errorf("c should remain ready, got %q", c.State())
+	}
 }
 
 func TestBaseRouter_FastPath(t *testing.T) {
