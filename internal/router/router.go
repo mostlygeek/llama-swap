@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/tidwall/gjson"
 )
 
@@ -43,6 +44,21 @@ type Router interface {
 
 	// Handles reports whether this router can serve requests for the given model.
 	Handles(model string) bool
+}
+
+// LocalRouter is a Router backed by local processes whose state can be
+// inspected and which can be individually stopped. Peer routers, which only
+// forward to remote hosts, do not implement it.
+type LocalRouter interface {
+	Router
+
+	// RunningModels returns the current state of every process that is not
+	// stopped or shut down, keyed by model ID.
+	RunningModels() map[string]process.ProcessState
+
+	// Unload stops the named models, or every running model when none are
+	// named. It blocks until each targeted process has stopped.
+	Unload(timeout time.Duration, models ...string)
 }
 
 // FetchModel will attempt to get the model id from the context then

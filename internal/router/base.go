@@ -8,9 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
-	"github.com/mostlygeek/llama-swap/internal/config"
 )
 
 type shutdownReq struct {
@@ -321,6 +321,50 @@ func (b *baseRouter) healthCheckTimeout() time.Duration {
 func (b *baseRouter) Handles(model string) bool {
 	_, ok := b.processes[model]
 	return ok
+}
+
+// RunningModels returns the current state of every process that is not stopped
+// or shut down. The processes map keys are fixed at construction and State()
+// is a snapshot, so this is safe to call without the run loop.
+func (b *baseRouter) RunningModels() map[string]process.ProcessState {
+	running := make(map[string]process.ProcessState)
+	for id, p := range b.processes {
+		st := p.State()
+		if st == process.StateStopped || st == process.StateShutdown {
+			continue
+		}
+		running[id] = st
+	}
+	return running
+}
+
+// Unload stops the named models, or every running model when none are named.
+// It blocks until each targeted process has stopped. An in-flight swap whose
+// target is stopped resolves to an error for its waiters, who may retry.
+func (b *baseRouter) Unload(timeout time.Duration, models ...string) {
+	targets := models
+	if len(targets) == 0 {
+		targets = make([]string, 0, len(b.processes))
+		for id := range b.processes {
+			targets = append(targets, id)
+		}
+	}
+
+	var wg sync.WaitGroup
+	for _, id := range targets {
+		p, ok := b.processes[id]
+		if !ok {
+			continue
+		}
+		wg.Add(1)
+		go func(id string, p process.Process) {
+			defer wg.Done()
+			if err := p.Stop(timeout); err != nil {
+				b.logger.Warnf("%s: unloading %s failed: %v", b.name, id, err)
+			}
+		}(id, p)
+	}
+	wg.Wait()
 }
 
 func (b *baseRouter) Shutdown(timeout time.Duration) error {

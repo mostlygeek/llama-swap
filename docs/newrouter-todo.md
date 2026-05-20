@@ -101,11 +101,19 @@ resolved model with multi-segment name resolution, canonical-form redirect
 
 ---
 
-## Phase 5 — Operations endpoints
+## Phase 5 — Operations endpoints -- Completed.
 
-- [ ] `GET /unload` — stop all processes (`StopImmediately`)
-- [ ] `GET /running` — JSON list of ready processes with `model`, `state`, `cmd`, `proxy`, `ttl`, `name`, `description`. Matrix and group implementations differ — see [proxymanager.go:1167](../proxy/proxymanager.go#L1167)
-- [ ] Startup preload hook (`Hooks.OnStartup.Preload`) — fires `GET /` against each model in the background; emits `ModelPreloadedEvent`
+A new `router.LocalRouter` interface embeds `Router` and adds `RunningModels()`
+and `Unload(timeout, models...)`, both implemented once on `baseRouter` so
+`Group` and `Matrix` share them — the legacy matrix/group divergence at
+[proxymanager.go:1167](../proxy/proxymanager.go#L1167) collapses since
+`baseRouter` already unifies process storage. `Peer` does not implement it;
+`Server.local` is typed `LocalRouter`, `Server.peer` stays `Router`.
+
+`GET /unload` stops every local process; `GET /running` lists non-stopped
+processes joined against config for `cmd`/`proxy`/`ttl`/`name`/`description`.
+`startPreload` fires a background `GET /` at each `Hooks.OnStartup.Preload`
+model and emits `shared.ModelPreloadedEvent`.
 
 ---
 

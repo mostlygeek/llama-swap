@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/router"
+	"github.com/mostlygeek/llama-swap/internal/shared"
 )
 
 // modelRecord is one entry in the OpenAI-compatible /v1/models listing.
@@ -76,6 +78,100 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 		"object": "list",
 		"data":   data,
 	})
+}
+
+// runningModel is one entry in the /running listing.
+type runningModel struct {
+	Model       string `json:"model"`
+	State       string `json:"state"`
+	Cmd         string `json:"cmd"`
+	Proxy       string `json:"proxy"`
+	TTL         int    `json:"ttl"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// handleUnload stops every running local process. Peer models are remote and
+// unaffected.
+func (s *Server) handleUnload(w http.ResponseWriter, r *http.Request) {
+	s.local.Unload(0)
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("OK"))
+}
+
+// handleRunning lists local processes that are not stopped, joining each model
+// ID against its config for the cmd/proxy/ttl/name/description metadata.
+func (s *Server) handleRunning(w http.ResponseWriter, r *http.Request) {
+	states := s.local.RunningModels()
+	list := make([]runningModel, 0, len(states))
+	for id, state := range states {
+		mc := s.cfg.Models[id]
+		list = append(list, runningModel{
+			Model:       id,
+			State:       string(state),
+			Cmd:         mc.Cmd,
+			Proxy:       mc.Proxy,
+			TTL:         mc.UnloadAfter,
+			Name:        mc.Name,
+			Description: mc.Description,
+		})
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].Model < list[j].Model })
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"running": list})
+}
+
+// discardResponseWriter satisfies http.ResponseWriter for preload requests,
+// dropping the body while capturing the status code.
+type discardResponseWriter struct {
+	header http.Header
+	status int
+}
+
+func (d *discardResponseWriter) Header() http.Header {
+	if d.header == nil {
+		d.header = make(http.Header)
+	}
+	return d.header
+}
+
+func (d *discardResponseWriter) Write(p []byte) (int, error) { return len(p), nil }
+
+func (d *discardResponseWriter) WriteHeader(status int) { d.status = status }
+
+// startPreload fires a background GET / at every model named in
+// Hooks.OnStartup.Preload so they are warm before the first real request.
+// Preload names are already resolved to real model IDs by config loading.
+func (s *Server) startPreload() {
+	models := s.cfg.Hooks.OnStartup.Preload
+	if len(models) == 0 {
+		return
+	}
+	go func() {
+		for _, modelID := range models {
+			if !s.local.Handles(modelID) {
+				s.proxylog.Warnf("preload: model %s is not a local model, skipping", modelID)
+				continue
+			}
+			s.proxylog.Infof("preloading model: %s", modelID)
+
+			req, err := http.NewRequestWithContext(s.shutdownCtx, http.MethodGet, "/", nil)
+			if err != nil {
+				continue
+			}
+			req = req.WithContext(router.SetModel(req.Context(), modelID, modelID))
+
+			dw := &discardResponseWriter{status: http.StatusOK}
+			s.local.ServeHTTP(dw, req)
+
+			success := dw.status < http.StatusBadRequest
+			if !success {
+				s.proxylog.Errorf("failed to preload model %s: status %d", modelID, dw.status)
+			}
+			event.Emit(shared.ModelPreloadedEvent{ModelName: modelID, Success: success})
+		}
+	}()
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
