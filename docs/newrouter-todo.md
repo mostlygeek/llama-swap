@@ -117,23 +117,30 @@ model and emits `shared.ModelPreloadedEvent`.
 
 ---
 
-## Phase 6 — Metrics, perf, and SSE
+## Phase 6 — Metrics, perf, and SSE -- Completed (captures deferred to 6f).
 
-- [ ] Wire `perf.Monitor` based on `config.Performance`; start/stop it with the server lifecycle
-- [ ] `GET /metrics` — Prometheus output from `perf.Monitor.MetricsHandler()`
-- [ ] `metricsMonitor` (activity log) integration:
-  - Wrap proxy handlers with `wrapHandler(modelID, ..., captureFields, next)` to capture request/response bytes per endpoint
-  - Per-endpoint `captureFields` configuration matches the legacy table in [proxymanager.go:339](../proxy/proxymanager.go#L339)
-- [ ] In-flight request counter + `InFlightRequestsEvent` emission
-- [ ] `/api` group (API-key protected):
-  - `POST /api/models/unload`
-  - `POST /api/models/unload/*model`
-  - `GET /api/events` — SSE stream of `modelStatus` / `logData` / `metrics` / `inflight` envelopes
-  - `GET /api/metrics`
-  - `GET /api/performance` (with `?after=` RFC3339 filter)
-  - `GET /api/version`
-  - `GET /api/captures/:id`
-- [ ] Event subscriptions for the SSE handler: `ProcessStateChangeEvent`, `ConfigFileChangedEvent`, `ActivityLogEvent`, `InFlightRequestsEvent`, log-data callbacks
+`perf.Monitor` is created and started in `cmd/newrouter/main.go` (it outlives
+config reloads via `UpdateConfig`) and passed into `server.New`. `GET /metrics`
+serves `perf.Monitor.MetricsHandler()` output, 503 when disabled.
+
+`internal/process` emits `shared.ProcessStateChangeEvent` from `setState`.
+`server.inflightCounter` (atomic) + `CreateInflightMiddleware` track
+model-dispatched requests and emit `InFlightRequestsEvent`. `metricsMonitor`
+(in `metrics.go`) parses token usage from upstream responses via
+`CreateMetricsMiddleware`; request/response captures are **deferred to Phase 6f**.
+
+The `/api` group (API-key protected) is registered: `POST /api/models/unload`,
+`POST /api/models/unload/{model...}`, `GET /api/events` (SSE: `modelStatus` /
+`logData` / `metrics` / `inflight`), `GET /api/metrics`, `GET /api/performance`
+(`?after=` RFC3339 filter), `GET /api/version`. `GET /api/captures/{id}`
+returns 501 until 6f.
+
+### Phase 6f — Request/response captures (deferred)
+
+- [ ] Move `proxy/cache` → `internal/cache`
+- [ ] Restore the zstd+CBOR capture path in `metricsMonitor`
+- [ ] Per-route `captureFields` table (legacy [proxymanager.go:339](../proxy/proxymanager.go#L339))
+- [ ] Implement `GET /api/captures/{id}`
 
 ---
 

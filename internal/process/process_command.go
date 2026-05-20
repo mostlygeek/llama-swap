@@ -14,8 +14,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/event"
+	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/shared"
 )
 
 var ErrStartAborted = fmt.Errorf("aborted")
@@ -101,8 +103,16 @@ func (p *ProcessCommand) run() {
 	// writes both.
 	state := StateStopped
 	setState := func(s ProcessState) {
+		old := state
 		state = s
 		p.state.Store(s)
+		if old != s {
+			event.Emit(shared.ProcessStateChangeEvent{
+				ProcessName: p.id,
+				OldState:    string(old),
+				NewState:    string(s),
+			})
+		}
 	}
 	var (
 		cmd          *exec.Cmd

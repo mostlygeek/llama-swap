@@ -13,6 +13,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/internal/router"
 )
 
@@ -25,6 +26,11 @@ type Server struct {
 	muxlog      *logmon.Monitor
 	proxylog    *logmon.Monitor
 	upstreamlog *logmon.Monitor
+
+	perf     *perf.Monitor
+	inflight *inflightCounter
+	metrics  *metricsMonitor
+	build    BuildInfo
 
 	local router.LocalRouter
 	peer  router.Router
@@ -84,7 +90,14 @@ var modelGetRoutes = []string{
 	"/sdapi/v1/loras",
 }
 
-func New(cfg config.Config, proxylog *logmon.Monitor, upstreamlog *logmon.Monitor) (*Server, error) {
+// BuildInfo carries version metadata surfaced by GET /api/version.
+type BuildInfo struct {
+	Version string
+	Commit  string
+	Date    string
+}
+
+func New(cfg config.Config, proxylog *logmon.Monitor, upstreamlog *logmon.Monitor, perfMon *perf.Monitor, build BuildInfo) (*Server, error) {
 	var local router.LocalRouter
 	var err error
 
@@ -116,6 +129,10 @@ func New(cfg config.Config, proxylog *logmon.Monitor, upstreamlog *logmon.Monito
 		muxlog:      ml,
 		proxylog:    proxylog,
 		upstreamlog: upstreamlog,
+		perf:        perfMon,
+		inflight:    &inflightCounter{},
+		metrics:     newMetricsMonitor(proxylog, cfg.MetricsMaxInMemory),
+		build:       build,
 		local:       local,
 		peer:        peer,
 		shutdownCtx: shutdownCtx,
@@ -161,8 +178,14 @@ func (s *Server) routes() {
 	authMW := CreateAuthMiddleware(s.cfg)
 	filterMW := CreateFilterMiddleware(s.cfg)
 
-	// Model-dispatched routes get auth + body filters.
-	modelChain := chain.New(authMW, filterMW)
+	// Model-dispatched routes get auth + body filters + in-flight tracking +
+	// token metrics.
+	modelChain := chain.New(
+		authMW,
+		filterMW,
+		CreateInflightMiddleware(s.inflight),
+		CreateMetricsMiddleware(s.metrics, s.cfg),
+	)
 	// Custom endpoints only need auth.
 	apiChain := chain.New(authMW)
 
@@ -192,6 +215,9 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /wol-health", handleHealth)
 	mux.HandleFunc("GET /{$}", handleRootRedirect)
 
+	// Prometheus metrics (no auth, matches the legacy endpoint).
+	mux.HandleFunc("GET /metrics", s.handleMetrics)
+
 	// Operations endpoints.
 	mux.Handle("GET /unload", apiChain.ThenFunc(s.handleUnload))
 	mux.Handle("GET /running", apiChain.ThenFunc(s.handleRunning))
@@ -199,6 +225,15 @@ func (s *Server) routes() {
 	// Upstream passthrough.
 	mux.HandleFunc("GET /upstream", handleUpstreamRedirect)
 	mux.Handle("/upstream/{upstreamPath...}", apiChain.ThenFunc(s.handleUpstream))
+
+	// API group (API-key protected) consumed by the UI.
+	mux.Handle("POST /api/models/unload", apiChain.ThenFunc(s.handleAPIUnloadAll))
+	mux.Handle("POST /api/models/unload/{model...}", apiChain.ThenFunc(s.handleAPIUnloadModel))
+	mux.Handle("GET /api/events", apiChain.ThenFunc(s.handleAPIEvents))
+	mux.Handle("GET /api/metrics", apiChain.ThenFunc(s.handleAPIMetrics))
+	mux.Handle("GET /api/performance", apiChain.ThenFunc(s.handleAPIPerformance))
+	mux.Handle("GET /api/version", apiChain.ThenFunc(s.handleAPIVersion))
+	mux.Handle("GET /api/captures/{id}", apiChain.ThenFunc(s.handleAPICapture))
 
 	s.mux = mux
 	s.handler = chain.New(CreateCORSMiddleware()).Then(mux)
