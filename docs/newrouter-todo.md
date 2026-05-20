@@ -22,7 +22,7 @@ Everything below is missing or only partially implemented.
 
 ## Phase 1 — Package relocation -- Completed.
 
-Goal: move shared infrastructure packages out from under `proxy/` so the new router does not depend on the legacy proxy tree. This is a prerequisite for retiring `proxy/` in Phase 10.
+Goal: move shared infrastructure packages out from under `proxy/` so the new router does not depend on the legacy proxy tree. This is a prerequisite for retiring `proxy/` in Phase 8.
 
 ---
 
@@ -38,89 +38,78 @@ API: `chain.New(mws...).Then(final)` for ServeMux registration; `Append` returns
 
 ---
 
-## Phase 4 — `internal/server.Server` scaffolding (ProxyManager replacement)
+## Phase 4 — `internal/server` package scaffolding (ProxyManager replacement) -- Completed.
 
-Goal: build the structural shell of [internal/server/server.go](../internal/server/server.go) so it can stand in for [proxy.ProxyManager](../proxy/proxymanager.go#L67). This phase intentionally adds no new endpoints — it wires the dependencies and lifecycle that later phases (endpoints, metrics, SSE, UI) plug into. After this phase, `cmd/newrouter/main.go` constructs a `server.Server` instead of a bare `router.Server`, and behavior is unchanged.
+Goal: build the [internal/server](../internal/server/) package so it can stand in for [proxy.ProxyManager](../proxy/proxymanager.go#L67) — the mux, lifecycle, model dispatch, custom endpoints, request filters, auth/CORS, and upstream passthrough. After this phase, `cmd/newrouter/main.go` constructs a `server.Server` instead of a bare `router.Server`.
 
-The legacy `ProxyManager` collapses three concerns into one struct: the HTTP mux, the model→process router, and the cross-cutting services (loggers, metrics, perf, inflight counter, version). The new layout keeps `internal/router.Server` focused on model dispatch and lets `internal/server.Server` own everything else.
+The legacy `ProxyManager` collapses three concerns into one struct: the HTTP mux, the model→process router, and the cross-cutting services (loggers, metrics, perf, inflight counter, version). The new layout keeps the `router.Router` implementations focused on model dispatch and lets `internal/server.Server` own the mux and all cross-cutting middleware. `server.Server` builds the `local` and `peer` routers directly and dispatches between them itself, so it fully **supersedes `internal/router.Server`** — see the cleanup item below.
 
-- [ ] Define the `Server` struct in [internal/server/server.go](../internal/server/server.go) with fields for:
-  - `cfg config.Config`
-  - `router *router.Server` (embedded model dispatcher from Phase 1/2)
-  - `proxyLogger`, `upstreamLogger *logmon.Monitor` (passed in from `cmd/newrouter/main.go`)
-  - `metricsMonitor *metricsMonitor` and `perfMonitor *perf.Monitor` (populated in Phase 8)
-  - `inFlightCounter` (populated in Phase 8)
-  - `shutdownCtx context.Context` + `shutdownCancel context.CancelFunc`
-  - `buildDate`, `commit`, `version string`
-- [ ] `New(cfg config.Config, proxyLog, upstreamLog *logmon.Monitor) (*Server, error)` constructor that:
-  - Builds the inner `router.Server` via the existing `router.NewServer`
-  - Creates `shutdownCtx` / `shutdownCancel`
-  - Returns a ready-to-serve `*Server`
-- [ ] HTTP mux foundation: pick the routing primitive (`http.ServeMux` from stdlib is preferred — `gin` stays only in [proxy/](../proxy/) and is removed in Phase 10). Wire a single `*http.ServeMux` field on `Server` that subsequent phases register handlers against.
-- [ ] `ServeHTTP(w, r)` delegates to the mux. Register the actual model-dispatched routes against `router.Server.ServeHTTP` (no catch-all) so unknown paths return 404 instead of being silently routed:
-  - OpenAI-compatible POST: `/v1/chat/completions`, `/v1/responses`, `/v1/completions`, `/v1/messages`, `/v1/messages/count_tokens`, `/v1/embeddings`, `/reranking`, `/rerank`, `/v1/rerank`, `/v1/reranking`, `/infill`, `/completion`
-  - Versionless aliases under `/v/...` (issue #728) — strip the `/v` prefix before forwarding
-  - Audio: `POST /v1/audio/speech`, `POST /v1/audio/voices`, `GET /v1/audio/voices`, `POST /v1/audio/transcriptions`
-  - Image: `POST /v1/images/generations`, `POST /v1/images/edits`
-  - sd.cpp: `POST /sdapi/v1/txt2img`, `POST /sdapi/v1/img2img`, `GET /sdapi/v1/loras`
-- [ ] `Shutdown(timeout time.Duration) error` that cancels `shutdownCtx` and delegates to `router.Server.Shutdown` — keep the inflight-drain ordering documented in the cross-cutting concerns section.
-- [ ] `SetVersion(buildDate, commit, version string)` setter mirroring [proxymanager.go:1220](../proxy/proxymanager.go#L1220) so [cmd/newrouter/main.go](../cmd/newrouter/main.go) can stamp build info before `ListenAndServe`.
-- [ ] Hot-reload story: confirm `server.Server` can be constructed and shut down repeatedly so the existing reload path in [main.go:126](../cmd/newrouter/main.go#L126) keeps working when it swaps the active server.
-- [ ] Update [cmd/newrouter/main.go](../cmd/newrouter/main.go) to construct `server.New(cfg, proxyLog, upstreamLog)` instead of `router.NewServer(...)`.
-- [ ] Tests in `internal/server/server_test.go`:
-  - Construction succeeds for matrix and group configs
-  - `ServeHTTP` round-trips to the inner router for a known model
-  - `Shutdown` returns within timeout and is idempotent
+The phase is split into sub-phases that can land and be tested independently:
 
----
+| Sub-phase | Scope |
+| --- | --- |
+| 4a | package scaffolding — struct, `New`, `ServeHTTP`, `Shutdown`, model routes |
+| 4b | custom (non-model-dispatched) HTTP endpoints |
+| 4c | request-body filter middleware |
+| 4d | auth & CORS middleware |
+| 4e | upstream passthrough |
 
-## Phase 5 — Custom HTTP endpoints
+The package is split by concern across stub files already in place:
 
-Goal: add the non-model-dispatched endpoints. `router.Server` (Phase 1/2) already handles all model-routed traffic via the explicit routes registered in Phase 4. This phase only adds endpoints that need bespoke handlers outside that dispatch.
+| File | Responsibility | Filled in by |
+| --- | --- | --- |
+| `server.go` | `Server` struct, `New`, `ServeHTTP`, `Shutdown` | 4a |
+| `log.go` | `muxlog` combined logger; `/logs` handlers | 4a |
+| `auth.go` | `CreateAuthMiddleware` | 4d |
+| `filters.go` | request-body filter middleware | 4c |
+| `api.go` | llama-swap-specific API handlers | 4b / Phase 5 / Phase 6 |
+| `ui.go` | embedded UI serving | Phase 7 |
 
-- [ ] `GET /v1/models` listing — local models + peer models, with aliases and metadata (see [proxymanager.go:588](../proxy/proxymanager.go#L588))
-- [ ] `GET /health` and `GET /wol-health`
-- [ ] `GET /favicon.ico`
-- [ ] `GET /` → redirect to `/ui`
+### Phase 4a — package scaffolding -- Completed.
 
-### Phase 5a — Request-body filters
+`server.Server` owns the mux, the `local`/`peer` routers, `muxlog`, and a
+shutdown context. `New` builds the routers, registers all model-dispatched
+routes on a stdlib `http.ServeMux`, and wraps the mux with the global CORS
+middleware. `localPeerHandler` resolves the model once via `router.FetchModel`
+and dispatches to `local` or `peer`. `Shutdown` stops both routers in parallel
+and is idempotent. `cmd/newrouter/main.go` now constructs `server.New(...)`;
+`internal/router/server.go` and `server_test.go` were removed as dead code.
 
-These run on JSON requests before `router.Server` forwards them upstream — they belong as a middleware (use `internal/chain` from Phase 3) wrapping the model-dispatched routes registered in Phase 4, not as new endpoints. Config comes from `ModelConfig.Filters`:
+### Phase 4b — Custom HTTP endpoints -- Completed.
 
-- [ ] `UseModelName` rewrite (issue #69)
-- [ ] `StripParams` removal (issue #174)
-- [ ] `SetParams` injection (issue #453)
-- [ ] `SetParamsByID` per-alias overrides
+`GET /v1/models` (local + peer models, aliases, metadata), `GET /health`,
+`GET /wol-health`, and `GET /` → `/ui` are registered. `GET /favicon.ico` is
+deferred to Phase 7 since it requires the embedded UI filesystem.
 
-### Phase 5b — Auth & CORS
+### Phase 4c — Request-body filters -- Completed.
 
-Cross-cutting middleware (use `internal/chain` from Phase 3) applied at the `server.Server` mux level so it covers both the custom endpoints above and the router-dispatched traffic:
+`CreateFilterMiddleware` (in `filters.go`) applies `UseModelName`,
+`StripParams`, `SetParams`, and `SetParamsByID` to JSON requests, then
+re-attaches the body with `Content-Length` / `Transfer-Encoding` cleanup.
 
-- [ ] API key middleware accepting `Authorization: Bearer`, `Authorization: Basic`, and `x-api-key`; strip these headers before upstream
-- [ ] OPTIONS preflight handler with `SanitizeAccessControlRequestHeaderValues` (see [proxy/sanitize_cors.go](../proxy/sanitize_cors.go))
-- [ ] `Access-Control-Allow-Origin` echo on `/v1/models` when `Origin` is set
+### Phase 4d — Auth & CORS -- Completed.
 
----
+`CreateAuthMiddleware` validates API keys (Bearer / Basic / `x-api-key`) and
+strips the headers before upstream. `CreateCORSMiddleware` answers OPTIONS
+preflight; `/v1/models` echoes the `Origin`.
 
-## Phase 6 — Upstream passthrough
+### Phase 4e — Upstream passthrough -- Completed.
 
-- [ ] `GET /upstream` → redirect to `/ui/models`
-- [ ] `ANY /upstream/<model>/<path>` proxy with multi-segment model name resolution (see `findModelInPath` at [proxymanager.go:673](../proxy/proxymanager.go#L673))
-- [ ] Canonical-form redirect: `/upstream/model` → `/upstream/model/` using 301 (GET/HEAD) or 308 (other methods) to preserve method
-- [ ] Path rewrite before forwarding (strip `/upstream/<model>` prefix)
+`GET /upstream` → `/ui/models`, and `/upstream/<model>/<path>` proxies to the
+resolved model with multi-segment name resolution, canonical-form redirect
+(301/308), and prefix stripping.
 
 ---
 
-## Phase 7 — Operations endpoints
+## Phase 5 — Operations endpoints
 
 - [ ] `GET /unload` — stop all processes (`StopImmediately`)
 - [ ] `GET /running` — JSON list of ready processes with `model`, `state`, `cmd`, `proxy`, `ttl`, `name`, `description`. Matrix and group implementations differ — see [proxymanager.go:1167](../proxy/proxymanager.go#L1167)
-- [ ] `GET /logs` and `GET /logs/stream[/:logMonitorID]` — historical + live tail of proxy/upstream logs (handlers in [proxy/proxymanager_loghandlers.go](../proxy/proxymanager_loghandlers.go))
 - [ ] Startup preload hook (`Hooks.OnStartup.Preload`) — fires `GET /` against each model in the background; emits `ModelPreloadedEvent`
 
 ---
 
-## Phase 8 — Metrics, perf, and SSE
+## Phase 6 — Metrics, perf, and SSE
 
 - [ ] Wire `perf.Monitor` based on `config.Performance`; start/stop it with the server lifecycle
 - [ ] `GET /metrics` — Prometheus output from `perf.Monitor.MetricsHandler()`
@@ -140,7 +129,7 @@ Cross-cutting middleware (use `internal/chain` from Phase 3) applied at the `ser
 
 ---
 
-## Phase 9 — UI serving
+## Phase 7 — UI serving
 
 - [ ] Embed the React/Svelte build (see `proxy/ui_embed.go` / `proxy/ui_compress.go`)
 - [ ] `GET /ui/*filepath` with brotli/gzip-aware `ServeCompressedFile`
@@ -148,7 +137,7 @@ Cross-cutting middleware (use `internal/chain` from Phase 3) applied at the `ser
 
 ---
 
-## Phase 10 — Cutover
+## Phase 8 — Cutover
 
 - [ ] Swap `llama-swap.go` to delegate to `cmd/newrouter` (or rename newrouter to be the primary entrypoint)
 - [ ] Update `Makefile` build targets
@@ -160,7 +149,7 @@ Cross-cutting middleware (use `internal/chain` from Phase 3) applied at the `ser
 
 ## Cross-cutting concerns to keep in mind
 
-- **Single body read**: legacy and newrouter both buffer the request body once. When adding filters (Phase 5a), make sure the buffered bytes flow through `Content-Length` / `transfer-encoding` cleanup as in [proxymanager.go:872](../proxy/proxymanager.go#L872).
+- **Single body read**: legacy and newrouter both buffer the request body once. When adding filters (Phase 4c), make sure the buffered bytes flow through `Content-Length` / `transfer-encoding` cleanup as in [proxymanager.go:872](../proxy/proxymanager.go#L872).
 - **Streaming flag in context**: legacy stashes `streaming` and `model` under `proxyCtxKey`. The new router uses `ModelKey` / `ModelIDKey` — pick one set of keys and use them consistently for metrics + log handlers.
 - **Matrix vs Group divergence**: any handler that calls `swapProcessGroup` or `findGroupByModelName` in the legacy needs a matrix branch too. The new router's `Router` interface already abstracts this — preserve that abstraction rather than reintroducing the branch in every handler.
 - **Shutdown ordering**: `httpServer.Shutdown` must drain inflight requests _before_ `Server.Shutdown` tears down processes, otherwise inflight requests 502. Current newrouter ordering at [main.go:87](../cmd/newrouter/main.go#L87) is correct — keep it.
