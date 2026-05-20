@@ -101,9 +101,10 @@ fetch_llama_tag() {
         fi
 
         # Extract matching tag from this page
-        local found_tag=$(echo "$response" | jq -r --arg prefix "$tag_prefix" \
+        local found_tag
+        found_tag=$(echo "$response" | jq -r --arg prefix "$tag_prefix" \
             '.[] | .metadata.container.tags[]? | select(test("^" + $prefix + "-b[0-9]+$"))' \
-            | sort -V | tail -n1)
+            | sort -V | tail -n1) || return 1
 
         if [ -n "$found_tag" ]; then
             log_debug "Found tag: $found_tag on page $page"
