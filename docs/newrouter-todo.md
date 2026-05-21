@@ -147,11 +147,14 @@ to `captureAll`. `GET /api/captures/{id}` decompresses and returns the capture;
 
 ---
 
-## Phase 7 — UI serving
+## Phase 7 — UI serving -- Completed.
 
-- [ ] Embed the React/Svelte build (see `proxy/ui_embed.go` / `proxy/ui_compress.go`)
-- [ ] `GET /ui/*filepath` with brotli/gzip-aware `ServeCompressedFile`
-- [ ] SPA fallback to `index.html` for non-file paths under `/ui`
+`internal/server/ui.go` embeds `ui_dist` and serves it. `GET /ui/` is
+brotli/gzip-aware via `serveCompressedFile`; unknown paths without a file
+extension fall back to `index.html` for SPA routing. `GET /favicon.ico` serves
+from the same embedded FS. The Makefile `ui` target copies the vite build into
+`internal/server/ui_dist`; a committed `placeholder.txt` keeps the embed valid
+before a build runs.
 
 ---
 
