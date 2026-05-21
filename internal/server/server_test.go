@@ -56,7 +56,7 @@ func newTestServer(local router.LocalRouter, peer router.Router) *Server {
 		proxylog:    proxylog,
 		upstreamlog: logmon.NewWriter(io.Discard),
 		inflight:    &inflightCounter{},
-		metrics:     newMetricsMonitor(proxylog, 0),
+		metrics:     newMetricsMonitor(proxylog, 0, 0),
 		local:       local,
 		peer:        peer,
 		shutdownCtx: ctx,

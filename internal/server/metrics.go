@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/internal/cache"
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/ring"
@@ -50,25 +51,34 @@ func (e ActivityLogEvent) Type() uint32 {
 	return shared.ActivityLogEventID
 }
 
-// metricsMonitor parses upstream responses for token statistics and keeps a
-// bounded in-memory ring of recent activity. Request/response captures are not
-// implemented yet (deferred to Phase 6f).
+// metricsMonitor parses upstream responses for token statistics, keeps a
+// bounded in-memory ring of recent activity, and (when captures are enabled)
+// stores zstd+CBOR-compressed request/response captures in a sized cache.
 type metricsMonitor struct {
 	mu      sync.RWMutex
 	metrics ring.Buffer[ActivityLogEntry]
 	nextID  int
 	logger  *logmon.Monitor
+
+	enableCaptures bool
+	captureCache   *cache.Cache // zstd-compressed CBOR of ReqRespCapture
 }
 
 // newMetricsMonitor creates a metricsMonitor retaining up to maxMetrics entries.
-func newMetricsMonitor(logger *logmon.Monitor, maxMetrics int) *metricsMonitor {
+// captureBufferMB is the capture buffer size in megabytes; 0 disables captures.
+func newMetricsMonitor(logger *logmon.Monitor, maxMetrics int, captureBufferMB int) *metricsMonitor {
 	if maxMetrics <= 0 {
 		maxMetrics = 1000
 	}
-	return &metricsMonitor{
-		logger:  logger,
-		metrics: ring.NewBuffer[ActivityLogEntry](maxMetrics),
+	mm := &metricsMonitor{
+		logger:         logger,
+		metrics:        ring.NewBuffer[ActivityLogEntry](maxMetrics),
+		enableCaptures: captureBufferMB > 0,
 	}
+	if captureBufferMB > 0 {
+		mm.captureCache = cache.New(captureBufferMB * 1024 * 1024)
+	}
+	return mm
 }
 
 // queueMetrics adds a metric to the ring and returns its assigned ID.
@@ -96,6 +106,11 @@ func (mp *metricsMonitor) getMetrics() []ActivityLogEntry {
 	if result == nil {
 		return []ActivityLogEntry{}
 	}
+	if mp.captureCache != nil {
+		for i := range result {
+			result[i].HasCapture = mp.captureCache.Has(result[i].ID)
+		}
+	}
 	return result
 }
 
@@ -105,7 +120,10 @@ func (mp *metricsMonitor) getMetricsJSON() ([]byte, error) {
 }
 
 // record parses a completed response body and stores/emits an activity entry.
-func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *responseBodyCopier) {
+// When captures are enabled, a zstd+CBOR capture is stored for successful
+// requests, with cf controlling which request/response parts are retained.
+// reqBody and reqHeaders are the request data buffered before dispatch.
+func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *responseBodyCopier, cf captureFields, reqBody []byte, reqHeaders map[string]string) {
 	tm := ActivityLogEntry{
 		Timestamp:       time.Now(),
 		Model:           modelID,
@@ -174,7 +192,29 @@ func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *resp
 		mp.logger.Warnf("metrics: invalid JSON in response body path=%s, recording minimal metrics", r.URL.Path)
 	}
 
-	queueAndEmit()
+	tm.ID = mp.queueMetrics(tm)
+	if mp.enableCaptures {
+		capture := ReqRespCapture{
+			ID:         tm.ID,
+			ReqPath:    r.URL.Path,
+			ReqHeaders: reqHeaders,
+		}
+		if cf&captureReqBody != 0 {
+			capture.ReqBody = reqBody
+		}
+		if cf&captureRespHeaders != 0 {
+			capture.RespHeaders = headerMap(recorder.Header())
+			redactHeaders(capture.RespHeaders)
+			delete(capture.RespHeaders, "Content-Encoding")
+		}
+		if cf&captureRespBody != 0 {
+			capture.RespBody = body
+		}
+		if mp.addCapture(capture) {
+			tm.HasCapture = true
+		}
+	}
+	mp.emitMetric(tm)
 }
 
 // usagePaths lists the JSON paths where a per-event usage object can live.

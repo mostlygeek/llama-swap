@@ -18,7 +18,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/ring"
-	"github.com/mostlygeek/llama-swap/proxy/cache"
+	"github.com/mostlygeek/llama-swap/internal/cache"
 	"github.com/tidwall/gjson"
 )
 

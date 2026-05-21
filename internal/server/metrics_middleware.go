@@ -1,6 +1,8 @@
 package server
 
 import (
+	"bytes"
+	"io"
 	"net/http"
 
 	"github.com/mostlygeek/llama-swap/internal/chain"
@@ -27,6 +29,25 @@ func CreateMetricsMiddleware(mm *metricsMonitor, cfg config.Config) chain.Middle
 				return
 			}
 
+			// Buffer the request body/headers for capture before dispatch
+			// consumes them.
+			cf := captureFieldsFor(r.URL.Path)
+			var reqBody []byte
+			var reqHeaders map[string]string
+			if mm.enableCaptures {
+				if cf&captureReqBody != 0 && r.Body != nil {
+					if buffered, err := io.ReadAll(r.Body); err == nil {
+						reqBody = buffered
+						r.Body.Close()
+						r.Body = io.NopCloser(bytes.NewReader(reqBody))
+					}
+				}
+				if cf&captureReqHeaders != 0 {
+					reqHeaders = headerMap(r.Header)
+					redactHeaders(reqHeaders)
+				}
+			}
+
 			// Restrict Accept-Encoding to encodings we can decompress so the
 			// buffered response body stays parseable.
 			if ae := r.Header.Get("Accept-Encoding"); ae != "" {
@@ -35,7 +56,7 @@ func CreateMetricsMiddleware(mm *metricsMonitor, cfg config.Config) chain.Middle
 
 			recorder := newBodyCopier(w)
 			next.ServeHTTP(recorder, r)
-			mm.record(modelID, r, recorder)
+			mm.record(modelID, r, recorder, cf, reqBody, reqHeaders)
 		})
 	}
 }

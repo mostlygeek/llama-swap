@@ -149,14 +149,27 @@ func (s *Server) handleAPIVersion(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleAPICapture is a placeholder until request/response captures land in
-// Phase 6f.
+// handleAPICapture returns the stored request/response capture for a metric ID.
 func (s *Server) handleAPICapture(w http.ResponseWriter, r *http.Request) {
-	if _, err := strconv.Atoi(r.PathValue("id")); err != nil {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
 		router.SendResponse(w, r, http.StatusBadRequest, "invalid capture ID")
 		return
 	}
-	router.SendResponse(w, r, http.StatusNotImplemented, "captures are not implemented")
+
+	capture := s.metrics.getCaptureByID(id)
+	if capture == nil {
+		router.SendResponse(w, r, http.StatusNotFound, "capture not found")
+		return
+	}
+
+	jsonBytes, err := json.Marshal(capture)
+	if err != nil {
+		router.SendResponse(w, r, http.StatusInternalServerError, "failed to marshal capture")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(jsonBytes)
 }
 
 type messageType string

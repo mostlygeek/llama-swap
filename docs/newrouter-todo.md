@@ -117,7 +117,7 @@ model and emits `shared.ModelPreloadedEvent`.
 
 ---
 
-## Phase 6 — Metrics, perf, and SSE -- Completed (captures deferred to 6f).
+## Phase 6 — Metrics, perf, and SSE -- Completed.
 
 `perf.Monitor` is created and started in `cmd/newrouter/main.go` (it outlives
 config reloads via `UpdateConfig`) and passed into `server.New`. `GET /metrics`
@@ -127,7 +127,7 @@ serves `perf.Monitor.MetricsHandler()` output, 503 when disabled.
 `server.inflightCounter` (atomic) + `CreateInflightMiddleware` track
 model-dispatched requests and emit `InFlightRequestsEvent`. `metricsMonitor`
 (in `metrics.go`) parses token usage from upstream responses via
-`CreateMetricsMiddleware`; request/response captures are **deferred to Phase 6f**.
+`CreateMetricsMiddleware`.
 
 The `/api` group (API-key protected) is registered: `POST /api/models/unload`,
 `POST /api/models/unload/{model...}`, `GET /api/events` (SSE: `modelStatus` /
@@ -135,12 +135,15 @@ The `/api` group (API-key protected) is registered: `POST /api/models/unload`,
 (`?after=` RFC3339 filter), `GET /api/version`. `GET /api/captures/{id}`
 returns 501 until 6f.
 
-### Phase 6f — Request/response captures (deferred)
+### Phase 6f — Request/response captures -- Completed.
 
-- [ ] Move `proxy/cache` → `internal/cache`
-- [ ] Restore the zstd+CBOR capture path in `metricsMonitor`
-- [ ] Per-route `captureFields` table (legacy [proxymanager.go:339](../proxy/proxymanager.go#L339))
-- [ ] Implement `GET /api/captures/{id}`
+`proxy/cache` moved to `internal/cache`. `metricsMonitor` stores zstd+CBOR
+`ReqRespCapture` records in a sized `cache.Cache` (`captureBuffer` MB, 0
+disables). `CreateMetricsMiddleware` buffers request body/headers before
+dispatch; `record` builds the capture per a `captureFieldsByPath` table
+(`captures.go`) that trims large audio/image payloads, defaulting JSON routes
+to `captureAll`. `GET /api/captures/{id}` decompresses and returns the capture;
+`getMetrics` resolves `HasCapture` against the cache.
 
 ---
 
