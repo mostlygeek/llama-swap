@@ -131,7 +131,7 @@ func New(cfg config.Config, proxylog *logmon.Monitor, upstreamlog *logmon.Monito
 		upstreamlog: upstreamlog,
 		perf:        perfMon,
 		inflight:    &inflightCounter{},
-		metrics:     newMetricsMonitor(proxylog, cfg.MetricsMaxInMemory),
+		metrics:     newMetricsMonitor(proxylog, cfg.MetricsMaxInMemory, cfg.CaptureBuffer),
 		build:       build,
 		local:       local,
 		peer:        peer,
