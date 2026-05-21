@@ -244,15 +244,20 @@ func main() {
 				proxyLog.Infof("received signal %v, shutting down", sig)
 				watcherCancel()
 
+				activeMu.RLock()
+				srv := activeSrv
+				activeMu.RUnlock()
+
+				// Close long-lived SSE streams first so httpServer.Shutdown can
+				// drain without blocking on them for the full timeout.
+				srv.CloseStreams()
+
 				shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 				defer cancel()
 				if err := httpServer.Shutdown(shutdownCtx); err != nil {
 					proxyLog.Warnf("http server shutdown error: %v", err)
 				}
 
-				activeMu.RLock()
-				srv := activeSrv
-				activeMu.RUnlock()
 				if err := srv.Shutdown(shutdownTimeout); err != nil {
 					proxyLog.Warnf("router shutdown error: %v", err)
 				}

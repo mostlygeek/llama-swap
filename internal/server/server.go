@@ -247,12 +247,20 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
 }
 
+// CloseStreams cancels long-lived response streams (Server-Sent Events) so a
+// graceful httpServer.Shutdown can drain without blocking on them. It does not
+// tear down routers; call Shutdown for that. Safe to call repeatedly.
+func (s *Server) CloseStreams() {
+	s.shutdownFn()
+}
+
 // Shutdown stops the local and peer routers in parallel. It is idempotent;
 // repeated calls return nil without re-running shutdown.
 //
 // Callers must drain inflight HTTP requests (httpServer.Shutdown) before
 // calling this, otherwise inflight requests 502 when their processes are torn
-// down.
+// down. Call CloseStreams before httpServer.Shutdown so SSE streams do not
+// block the drain.
 func (s *Server) Shutdown(timeout time.Duration) error {
 	if !s.shuttingDown.CompareAndSwap(false, true) {
 		return nil
