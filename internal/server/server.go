@@ -174,12 +174,15 @@ func (s *Server) routes() {
 	filterMW := CreateFilterMiddleware(s.cfg)
 	formFilterMW := CreateFormFilterMiddleware(s.cfg)
 
-	// Model-dispatched routes get auth + body filters + in-flight tracking +
-	// token metrics. filterMW rewrites JSON bodies and formFilterMW rewrites
-	// multipart bodies; each is a no-op for the other's Content-Type. Both run
-	// before the metrics middleware so it buffers the rewritten body.
+	// Model-dispatched routes get auth + per-model concurrency limiting + body
+	// filters + in-flight tracking + token metrics. concurrencyMW rejects with
+	// 429 before the body filters do any rewrite work. filterMW rewrites JSON
+	// bodies and formFilterMW rewrites multipart bodies; each is a no-op for the
+	// other's Content-Type. Both run before the metrics middleware so it buffers
+	// the rewritten body.
 	modelChain := chain.New(
 		authMW,
+		CreateConcurrencyMiddleware(s.cfg),
 		filterMW,
 		formFilterMW,
 		CreateInflightMiddleware(s.inflight),
