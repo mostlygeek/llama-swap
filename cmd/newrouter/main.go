@@ -32,6 +32,26 @@ var (
 
 const shutdownTimeout = 30 * time.Second
 
+// logTimeFormats maps the cfg.LogTimeFormat value to a Go time layout. An
+// unset or unrecognised value yields "" — no timestamp prefix.
+var logTimeFormats = map[string]string{
+	"ansic":       time.ANSIC,
+	"unixdate":    time.UnixDate,
+	"rubydate":    time.RubyDate,
+	"rfc822":      time.RFC822,
+	"rfc822z":     time.RFC822Z,
+	"rfc850":      time.RFC850,
+	"rfc1123":     time.RFC1123,
+	"rfc1123z":    time.RFC1123Z,
+	"rfc3339":     time.RFC3339,
+	"rfc3339nano": time.RFC3339Nano,
+	"kitchen":     time.Kitchen,
+	"stamp":       time.Stamp,
+	"stampmilli":  time.StampMilli,
+	"stampmicro":  time.StampMicro,
+	"stampnano":   time.StampNano,
+}
+
 func main() {
 	flagConfig := flag.String("config", "", "path to config file (required)")
 	flagListen := flag.String("listen", "", "listen address (default :8080 or :8443 for TLS)")
@@ -66,9 +86,6 @@ func main() {
 		}
 	}
 
-	proxyLog := logmon.NewWriter(os.Stdout)
-	upstreamLog := logmon.NewWriter(os.Stdout)
-
 	configPath := *flagConfig
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
@@ -76,28 +93,34 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Loggers are wired per cfg.LogToStdout: proxy/upstream feed muxLog, which
+	// owns the combined history served by /logs. They outlive config reloads,
+	// so a LogToStdout change requires a restart to take effect.
+	muxLog, proxyLog, upstreamLog := server.NewLoggers(cfg.LogToStdout)
+
 	if len(cfg.Profiles) > 0 {
 		proxyLog.Warn("Profile functionality has been removed in favor of Groups. See the README for more information.")
 	}
 
-	applyLogLevel := func(cfg config.Config) {
+	applyLogSettings := func(cfg config.Config) {
+		level := logmon.LevelInfo
 		switch strings.ToLower(strings.TrimSpace(cfg.LogLevel)) {
 		case "debug":
-			proxyLog.SetLogLevel(logmon.LevelDebug)
-			upstreamLog.SetLogLevel(logmon.LevelDebug)
+			level = logmon.LevelDebug
 		case "warn":
-			proxyLog.SetLogLevel(logmon.LevelWarn)
-			upstreamLog.SetLogLevel(logmon.LevelWarn)
+			level = logmon.LevelWarn
 		case "error":
-			proxyLog.SetLogLevel(logmon.LevelError)
-			upstreamLog.SetLogLevel(logmon.LevelError)
-		default:
-			proxyLog.SetLogLevel(logmon.LevelInfo)
-			upstreamLog.SetLogLevel(logmon.LevelInfo)
+			level = logmon.LevelError
+		}
+		timeFormat := logTimeFormats[strings.ToLower(strings.TrimSpace(cfg.LogTimeFormat))]
+		for _, lg := range []*logmon.Monitor{proxyLog, upstreamLog} {
+			lg.SetLogLevel(level)
+			lg.SetLogTimeFormat(timeFormat)
 		}
 	}
 
-	applyLogLevel(cfg)
+	applyLogSettings(cfg)
+	proxyLog.Debugf("PID: %d", os.Getpid())
 
 	// perfMon outlives config reloads; its config is updated in place.
 	var perfMon *perf.Monitor
@@ -114,7 +137,7 @@ func main() {
 
 	buildInfo := server.BuildInfo{Version: version, Commit: commit, Date: date}
 
-	initialSrv, err := server.New(cfg, proxyLog, upstreamLog, perfMon, buildInfo)
+	initialSrv, err := server.New(cfg, muxLog, proxyLog, upstreamLog, perfMon, buildInfo)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)
 		os.Exit(1)
@@ -169,7 +192,7 @@ func main() {
 			perfMon.UpdateConfig(newCfg.Performance)
 		}
 
-		newSrv, err := server.New(newCfg, proxyLog, upstreamLog, perfMon, buildInfo)
+		newSrv, err := server.New(newCfg, muxLog, proxyLog, upstreamLog, perfMon, buildInfo)
 		if err != nil {
 			proxyLog.Warnf("failed to build new server during reload: %v", err)
 			return
@@ -180,7 +203,7 @@ func main() {
 		activeSrv = newSrv
 		activeMu.Unlock()
 
-		applyLogLevel(newCfg)
+		applyLogSettings(newCfg)
 
 		if err := old.Shutdown(shutdownTimeout); err != nil {
 			proxyLog.Warnf("error shutting down old server during reload: %v", err)

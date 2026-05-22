@@ -7,8 +7,43 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 )
+
+func TestServer_NewLoggers(t *testing.T) {
+	t.Run("proxy mode routes proxy into muxlog, discards upstream", func(t *testing.T) {
+		mux, proxy, upstream := NewLoggers(config.LogToStdoutProxy)
+		proxy.Info("PROXYLINE")
+		upstream.Info("UPSTREAMLINE")
+		h := string(mux.GetHistory())
+		if !strings.Contains(h, "PROXYLINE") {
+			t.Errorf("muxlog missing proxy line: %q", h)
+		}
+		if strings.Contains(h, "UPSTREAMLINE") {
+			t.Errorf("muxlog should not contain upstream line: %q", h)
+		}
+	})
+
+	t.Run("both mode routes proxy and upstream into muxlog", func(t *testing.T) {
+		mux, proxy, upstream := NewLoggers(config.LogToStdoutBoth)
+		proxy.Info("PROXYLINE")
+		upstream.Info("UPSTREAMLINE")
+		h := string(mux.GetHistory())
+		if !strings.Contains(h, "PROXYLINE") || !strings.Contains(h, "UPSTREAMLINE") {
+			t.Errorf("muxlog history = %q", h)
+		}
+	})
+
+	t.Run("none mode discards everything from muxlog", func(t *testing.T) {
+		mux, proxy, upstream := NewLoggers(config.LogToStdoutNone)
+		proxy.Info("PROXYLINE")
+		upstream.Info("UPSTREAMLINE")
+		if len(mux.GetHistory()) != 0 {
+			t.Errorf("muxlog should be empty, got %q", mux.GetHistory())
+		}
+	})
+}
 
 func TestServer_HandleLogs_Plain(t *testing.T) {
 	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))

@@ -97,7 +97,7 @@ type BuildInfo struct {
 	Date    string
 }
 
-func New(cfg config.Config, proxylog *logmon.Monitor, upstreamlog *logmon.Monitor, perfMon *perf.Monitor, build BuildInfo) (*Server, error) {
+func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, upstreamlog *logmon.Monitor, perfMon *perf.Monitor, build BuildInfo) (*Server, error) {
 	var local router.LocalRouter
 	var err error
 
@@ -118,15 +118,10 @@ func New(cfg config.Config, proxylog *logmon.Monitor, upstreamlog *logmon.Monito
 		return nil, fmt.Errorf("creating peer router: %w", err)
 	}
 
-	ml, err := muxlog(cfg, proxylog, upstreamlog)
-	if err != nil {
-		return nil, fmt.Errorf("creating muxlog: %w", err)
-	}
-
 	shutdownCtx, shutdownFn := context.WithCancel(context.Background())
 	s := &Server{
 		cfg:         cfg,
-		muxlog:      ml,
+		muxlog:      muxlog,
 		proxylog:    proxylog,
 		upstreamlog: upstreamlog,
 		perf:        perfMon,
