@@ -36,8 +36,7 @@ func CreateFilterMiddleware(cfg config.Config) chain.Middleware {
 
 			requested, _, err := router.FetchModel(r, cfg)
 			if err != nil {
-				// Let the dispatcher report the missing-model error.
-				next.ServeHTTP(w, r)
+				router.SendError(w, r, router.ErrNoModelInContext)
 				return
 			}
 
