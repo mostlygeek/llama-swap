@@ -84,7 +84,7 @@ func chatRequest(model string) *http.Request {
 
 func TestServer_New_GroupConfig(t *testing.T) {
 	discard := logmon.NewWriter(io.Discard)
-	s, err := New(config.Config{HealthCheckTimeout: 15}, discard, discard, nil, BuildInfo{})
+	s, err := New(config.Config{HealthCheckTimeout: 15}, discard, discard, discard, nil, BuildInfo{})
 	if err != nil {
 		t.Fatalf("New (group): %v", err)
 	}
@@ -96,7 +96,7 @@ func TestServer_New_GroupConfig(t *testing.T) {
 func TestServer_New_MatrixConfig(t *testing.T) {
 	discard := logmon.NewWriter(io.Discard)
 	cfg := config.Config{HealthCheckTimeout: 15, Matrix: &config.MatrixConfig{}}
-	s, err := New(cfg, discard, discard, nil, BuildInfo{})
+	s, err := New(cfg, discard, discard, discard, nil, BuildInfo{})
 	if err != nil {
 		t.Fatalf("New (matrix): %v", err)
 	}

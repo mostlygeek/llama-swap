@@ -208,6 +208,44 @@ The functions previously at 0 % (`handleListModels`, `handleMetrics`,
 - [x] **`UseModelName` rewrite for multipart endpoints** — `CreateFormFilterMiddleware` parses `multipart/form-data`, rewrites the `model` field according to `UseModelName`, reconstructs the body, and updates `Content-Type` / `Content-Length`. It is wired into `modelChain` after the JSON filter.
 - [x] **Raise test coverage to ≥ 74 %** — `internal/server` now at 76.1%; tests added for every 0 % function across `auth_test.go`, `api_test.go`, `filters_test.go`, `log_test.go`, and `extras_test.go`.
 
+---
+
+## Phase 8c - Review Part II (entrypoint comparison)
+
+A second pass comparing [cmd/newrouter/main.go](../cmd/newrouter/main.go) against
+the legacy [llama-swap.go](../llama-swap.go) + [proxy.New](../proxy/proxymanager.go#L104)
+surfaced four more gaps, all in logger setup.
+
+**Gap 4 — `LogToStdout` config ignored -- Resolved.**
+
+`cmd/newrouter/main.go` previously hardcoded `proxyLog` / `upstreamLog` to
+`os.Stdout`, and the old `muxlog()` helper built a Monitor that nothing wrote
+into — so `logToStdout` had no effect and `/logs` (combined history) was always
+empty. `server.NewLoggers` ([log.go](../internal/server/log.go)) now replicates
+the legacy switch: `proxy` / `upstream` monitors feed `muxLog` (or `io.Discard`)
+per `none` / `both` / `upstream` / `proxy`, so `muxLog` accumulates the combined
+history. `server.New` takes `muxlog` as a parameter. The loggers outlive config
+reloads, so a `LogToStdout` change requires a restart to take effect.
+
+**Gap 5 — `LogTimeFormat` config ignored -- Resolved.**
+
+`cmd/newrouter/main.go` now maps `cfg.LogTimeFormat` to a Go time layout via the
+`logTimeFormats` table and applies it (alongside log level) to the proxy and
+upstream monitors in `applyLogSettings`, re-applied on config reload.
+
+**Gap 6 — `LogRequests` deprecation warning missing.**
+
+The legacy [proxymanager.go:127](../proxy/proxymanager.go#L127) warns when the
+deprecated `logRequests` config key is set. `cmd/newrouter` does not. Low
+priority — left open.
+
+**Gap 7 — PID debug log missing -- Resolved.**
+
+`cmd/newrouter/main.go` now logs `PID: %d` at debug level after `applyLogSettings`,
+matching [llama-swap.go:71](../llama-swap.go#L71).
+
+---
+
 ## Phase X (tbd) — Cutover
 
 - [ ] Swap `llama-swap.go` to delegate to `cmd/newrouter` (or rename newrouter to be the primary entrypoint)

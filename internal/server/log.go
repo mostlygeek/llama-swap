@@ -16,25 +16,41 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/router"
 )
 
-// muxlog creates a combined log for logging to stdout depending the configuration
-// mostly for backwards compatibility with the /log endpoints
-func muxlog(proxyConfig config.Config, proxylog *logmon.Monitor, upstreamlog *logmon.Monitor) (*logmon.Monitor, error) {
-	var muxlog *logmon.Monitor
-	switch proxyConfig.LogToStdout {
+// NewLoggers builds the proxy, upstream, and combined (mux) log monitors,
+// wiring each one's output per the logToStdout config value. The proxy and
+// upstream monitors write into muxlog (rather than os.Stdout directly) so
+// muxlog accumulates a combined history for the /logs endpoints, while each
+// monitor keeps its own per-source history and event subscribers.
+//
+// Behaviour matches the legacy ProxyManager:
+//
+//   - none:     everything discarded
+//   - both:     proxy + upstream both routed to muxlog -> stdout
+//   - upstream: only upstream routed to muxlog -> stdout; proxy discarded
+//   - proxy:    only proxy routed to muxlog -> stdout; upstream discarded
+//
+// An empty or unrecognised value behaves like "proxy".
+func NewLoggers(logToStdout string) (muxlog, proxylog, upstreamlog *logmon.Monitor) {
+	switch logToStdout {
 	case config.LogToStdoutNone:
 		muxlog = logmon.NewWriter(io.Discard)
+		proxylog = logmon.NewWriter(io.Discard)
+		upstreamlog = logmon.NewWriter(io.Discard)
 	case config.LogToStdoutBoth:
 		muxlog = logmon.NewWriter(os.Stdout)
+		proxylog = logmon.NewWriter(muxlog)
+		upstreamlog = logmon.NewWriter(muxlog)
 	case config.LogToStdoutUpstream:
 		muxlog = logmon.NewWriter(os.Stdout)
+		proxylog = logmon.NewWriter(io.Discard)
+		upstreamlog = logmon.NewWriter(muxlog)
 	default:
-		// same as config.LogToStdoutProxy
-		// helpful because some old tests create a config.Config directly and it
-		// may not have LogToStdout set explicitly
+		// config.LogToStdoutProxy, and the fallback for an unset value.
 		muxlog = logmon.NewWriter(os.Stdout)
+		proxylog = logmon.NewWriter(muxlog)
+		upstreamlog = logmon.NewWriter(io.Discard)
 	}
-
-	return muxlog, nil
+	return muxlog, proxylog, upstreamlog
 }
 
 // handleLogs serves the historical proxy/upstream log. HTML clients are
