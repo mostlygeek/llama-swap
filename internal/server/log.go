@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/router"
@@ -122,5 +125,82 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) {
 			w.Write(data)
 			flusher.Flush()
 		}
+	}
+}
+
+// requestLogPathSkips lists path prefixes excluded from the access log because
+// they are polled frequently and would drown out useful entries.
+var requestLogPathSkips = []string{"/wol-health", "/api/performance", "/metrics"}
+
+// statusRecorder wraps an http.ResponseWriter to capture the response status
+// code and the number of body bytes written, so the access log can report
+// them. Flush is forwarded so streaming handlers (SSE) still work.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+	size   int
+}
+
+func (sr *statusRecorder) WriteHeader(code int) {
+	sr.status = code
+	sr.ResponseWriter.WriteHeader(code)
+}
+
+func (sr *statusRecorder) Write(b []byte) (int, error) {
+	n, err := sr.ResponseWriter.Write(b)
+	sr.size += n
+	return n, err
+}
+
+func (sr *statusRecorder) Flush() {
+	if f, ok := sr.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// clientIP resolves the originating client address, preferring proxy headers
+// over the raw connection address.
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if first, _, found := strings.Cut(xff, ","); found {
+			return strings.TrimSpace(first)
+		}
+		return strings.TrimSpace(xff)
+	}
+	if xr := r.Header.Get("X-Real-IP"); xr != "" {
+		return strings.TrimSpace(xr)
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
+
+// CreateRequestLogMiddleware returns middleware that records one access-log
+// line per request to proxylog, in the legacy format:
+//
+//	clientIP "METHOD PATH PROTO" status bodySize "UA" duration
+//
+// Frequently-polled health/metrics paths are skipped. The path is captured
+// before next runs because /upstream rewrites the request URL in place.
+func CreateRequestLogMiddleware(proxylog *logmon.Monitor) chain.Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			for _, prefix := range requestLogPathSkips {
+				if strings.HasPrefix(r.URL.Path, prefix) {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+
+			start := time.Now()
+			ip, method, path, proto, ua := clientIP(r), r.Method, r.URL.Path, r.Proto, r.UserAgent()
+
+			rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+			next.ServeHTTP(rec, r)
+
+			proxylog.Infof("Request %s \"%s %s %s\" %d %d \"%s\" %v",
+				ip, method, path, proto, rec.status, rec.size, ua, time.Since(start))
+		})
 	}
 }

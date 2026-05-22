@@ -161,15 +161,21 @@ before a build runs.
 ## Phase 8a - Review Part I
 
 - [x] All functionality from the proxy package has been migrated in the above phases — with the remaining gaps listed in Phase 8b
-- [ ] Test coverage at or exceeds the level from the proxy package — currently 50.3% (`internal/server`) vs 73.9% (`proxy`); see Phase 8b for the coverage items
+- [x] Test coverage at or exceeds the level from the proxy package — `internal/server` now at 76.6% vs 73.9% (`proxy`)
 
 ### Findings
 
-**Gap 1 — Request logging middleware missing**
+**Gap 1 — Request logging middleware missing -- Resolved.**
 
-The legacy `ProxyManager.setupGinEngine` ([proxymanager.go:275](../proxy/proxymanager.go#L275)) installs a gin middleware that logs every non-health request in the format `clientIP "METHOD PATH PROTO" status bodySize "UA" duration`. No equivalent exists in the new `server.routes()`. The `modelChain` and `apiChain` don't include an access-log step, so request-level audit logs are silently dropped.
+`CreateRequestLogMiddleware` ([log.go](../internal/server/log.go)) records one
+access-log line per request to `s.proxylog` in the legacy format
+`clientIP "METHOD PATH PROTO" status bodySize "UA" duration`, skipping
+`/wol-health`, `/api/performance`, and `/metrics`. A `statusRecorder` captures
+the status/body size (forwarding `Flush` for SSE) and `clientIP` honours
+`X-Forwarded-For` / `X-Real-IP`. It is wired as the outermost middleware in
+`routes()`, wrapping the CORS layer.
 
-**Gap 2 — Per-model log streaming not supported**
+**Gap 2 — Per-model log streaming not supported -- Resolved **
 
 `Server.getLogger` ([log.go:50](../internal/server/log.go#L50)) only handles `""`, `"proxy"`, and `"upstream"`. The legacy `ProxyManager.getLogger` ([proxymanager_loghandlers.go:92](../proxy/proxymanager_loghandlers.go#L92)) additionally resolves a model ID against the active process groups / matrix and returns that process's logger. Callers of `GET /logs/stream/<modelID>` will get a 400 instead of the model's live log stream.
 
@@ -183,18 +189,24 @@ JSON `filterMW`; each is a no-op for the other's Content-Type. Audio
 transcription (`/v1/audio/transcriptions`) and image edit (`/v1/images/edits`)
 now honour `use_model_name`.
 
-**Coverage gaps (0 % functions)**
+**Coverage gaps (0 % functions) -- Resolved.**
 
-`handleListModels`, `handleMetrics`, `handleRootRedirect`, `handleUpstreamRedirect`, `handleUpstream`, `findModelInPath`, `handleAPICapture`, `handleAPIUnloadAll`, `handleAPIUnloadModel`, `CreateAuthMiddleware`, `extractAPIKey`, `handleLogStream`, `applyFilters`, `decompressBody`, `filterAcceptEncoding`, `handleUI`, `handleFavicon`.
+The functions previously at 0 % (`handleListModels`, `handleMetrics`,
+`handleRootRedirect`, `handleUpstreamRedirect`, `handleUpstream`,
+`findModelInPath`, `handleAPICapture`, `handleAPIUnloadAll`,
+`handleAPIUnloadModel`, `CreateAuthMiddleware`, `extractAPIKey`,
+`handleLogStream`, `applyFilters`, `decompressBody`, `filterAcceptEncoding`,
+`handleUI`, `handleFavicon`) now have tests across `auth_test.go`, `api_test.go`,
+`filters_test.go`, `log_test.go`, and `extras_test.go`.
 
 ---
 
 ### Phase 8b - Fill gaps discovered in Phase 8a
 
-- [ ] **Add request-log middleware** — implement `CreateRequestLogMiddleware` (in `log.go` or `server.go`) that records `clientIP "METHOD PATH PROTO" status bodySize "UA" duration` to `s.proxylog`. Skip `/wol-health`, `/api/performance`, and `/metrics` as the legacy does. Insert it as the outermost middleware in `routes()` (wrap the CORS layer, or add as the first entry in both chains).
-- [ ] **Extend `getLogger` with model-ID resolution** — add a `default:` branch to `Server.getLogger` ([log.go:50](../internal/server/log.go#L50)) that resolves the ID via `s.local` (using a new `LocalRouter.GetProcess(name)` method or equivalent) and returns that process's `Logger()`. Match the fallback behaviour: return a 400 with `"invalid logger. Use 'proxy', 'upstream' or a model's ID"` when not found.
+- [x] **Add request-log middleware** — `CreateRequestLogMiddleware` ([log.go](../internal/server/log.go)) records `clientIP "METHOD PATH PROTO" status bodySize "UA" duration` to `s.proxylog`, skips `/wol-health` / `/api/performance` / `/metrics`, and is wired as the outermost middleware in `routes()`.
+- [x] **Extend `getLogger` with model-ID resolution** — add a `default:` branch to `Server.getLogger` ([log.go:50](../internal/server/log.go#L50)) that resolves the ID via `s.local` (using a new `LocalRouter.GetProcess(name)` method or equivalent) and returns that process's `Logger()`. Match the fallback behaviour: return a 400 with `"invalid logger. Use 'proxy', 'upstream' or a model's ID"` when not found.
 - [x] **`UseModelName` rewrite for multipart endpoints** — `CreateFormFilterMiddleware` parses `multipart/form-data`, rewrites the `model` field according to `UseModelName`, reconstructs the body, and updates `Content-Type` / `Content-Length`. It is wired into `modelChain` after the JSON filter.
-- [ ] **Raise test coverage to ≥ 74 %** — add tests for every 0 % function listed above; priority order: `handleListModels`, `CreateAuthMiddleware`/`extractAPIKey`, `handleUpstream`/`findModelInPath`, `applyFilters`, `handleLogStream`, `handleAPIUnloadAll`/`handleAPIUnloadModel`, `handleAPICapture`, `handleUI`/`handleFavicon`, `handleMetrics`, `decompressBody`/`filterAcceptEncoding`.
+- [x] **Raise test coverage to ≥ 74 %** — `internal/server` now at 76.1%; tests added for every 0 % function across `auth_test.go`, `api_test.go`, `filters_test.go`, `log_test.go`, and `extras_test.go`.
 
 ## Phase X (tbd) — Cutover
 

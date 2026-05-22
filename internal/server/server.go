@@ -244,7 +244,7 @@ func (s *Server) routes() {
 	mux.Handle("GET /api/captures/{id}", apiChain.ThenFunc(s.handleAPICapture))
 
 	s.mux = mux
-	s.handler = chain.New(CreateCORSMiddleware()).Then(mux)
+	s.handler = chain.New(CreateRequestLogMiddleware(s.proxylog), CreateCORSMiddleware()).Then(mux)
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
