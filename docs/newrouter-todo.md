@@ -160,7 +160,7 @@ before a build runs.
 
 ## Phase 8a - Review Part I
 
-- [x] All functionality from the proxy package has been migrated in the above phases — with three gaps listed in Phase 8b
+- [x] All functionality from the proxy package has been migrated in the above phases — with the remaining gaps listed in Phase 8b
 - [ ] Test coverage at or exceeds the level from the proxy package — currently 50.3% (`internal/server`) vs 73.9% (`proxy`); see Phase 8b for the coverage items
 
 ### Findings
@@ -173,9 +173,15 @@ The legacy `ProxyManager.setupGinEngine` ([proxymanager.go:275](../proxy/proxyma
 
 `Server.getLogger` ([log.go:50](../internal/server/log.go#L50)) only handles `""`, `"proxy"`, and `"upstream"`. The legacy `ProxyManager.getLogger` ([proxymanager_loghandlers.go:92](../proxy/proxymanager_loghandlers.go#L92)) additionally resolves a model ID against the active process groups / matrix and returns that process's logger. Callers of `GET /logs/stream/<modelID>` will get a 400 instead of the model's live log stream.
 
-**Gap 3 — `UseModelName` not applied to multipart form endpoints**
+**Gap 3 — `UseModelName` not applied to multipart form endpoints -- Resolved.**
 
-`CreateFilterMiddleware` ([filters.go:31](../internal/server/filters.go#L31)) short-circuits on any non-`application/json` Content-Type. The legacy `mkPostFormHandler` ([proxymanager.go:906](../proxy/proxymanager.go#L906)) reconstructs the multipart body and rewrites the `model` field with `UseModelName` before forwarding. Audio transcription (`/v1/audio/transcriptions`) and image edit (`/v1/images/edits`) requests in the new server therefore ignore the `use_model_name` config option.
+`CreateFormFilterMiddleware` ([filters.go](../internal/server/filters.go)) parses
+`multipart/form-data` requests, rewrites the `model` field with `UseModelName`,
+reconstructs the body via `rewriteMultipartModel`, and re-attaches it with
+`Content-Type` / `Content-Length` cleanup. It runs in `modelChain` after the
+JSON `filterMW`; each is a no-op for the other's Content-Type. Audio
+transcription (`/v1/audio/transcriptions`) and image edit (`/v1/images/edits`)
+now honour `use_model_name`.
 
 **Coverage gaps (0 % functions)**
 
@@ -187,7 +193,7 @@ The legacy `ProxyManager.setupGinEngine` ([proxymanager.go:275](../proxy/proxyma
 
 - [ ] **Add request-log middleware** — implement `CreateRequestLogMiddleware` (in `log.go` or `server.go`) that records `clientIP "METHOD PATH PROTO" status bodySize "UA" duration` to `s.proxylog`. Skip `/wol-health`, `/api/performance`, and `/metrics` as the legacy does. Insert it as the outermost middleware in `routes()` (wrap the CORS layer, or add as the first entry in both chains).
 - [ ] **Extend `getLogger` with model-ID resolution** — add a `default:` branch to `Server.getLogger` ([log.go:50](../internal/server/log.go#L50)) that resolves the ID via `s.local` (using a new `LocalRouter.GetProcess(name)` method or equivalent) and returns that process's `Logger()`. Match the fallback behaviour: return a 400 with `"invalid logger. Use 'proxy', 'upstream' or a model's ID"` when not found.
-- [ ] **`UseModelName` rewrite for multipart endpoints** — add a `CreateFormFilterMiddleware` (or extend the existing filter) that parses `multipart/form-data`, rewrites the `model` field according to `UseModelName`, reconstructs the body, and updates `Content-Type` / `Content-Length`. Apply it in the `modelChain` for `modelPostFormRoutes` (audio, images).
+- [x] **`UseModelName` rewrite for multipart endpoints** — `CreateFormFilterMiddleware` parses `multipart/form-data`, rewrites the `model` field according to `UseModelName`, reconstructs the body, and updates `Content-Type` / `Content-Length`. It is wired into `modelChain` after the JSON filter.
 - [ ] **Raise test coverage to ≥ 74 %** — add tests for every 0 % function listed above; priority order: `handleListModels`, `CreateAuthMiddleware`/`extractAPIKey`, `handleUpstream`/`findModelInPath`, `applyFilters`, `handleLogStream`, `handleAPIUnloadAll`/`handleAPIUnloadModel`, `handleAPICapture`, `handleUI`/`handleFavicon`, `handleMetrics`, `decompressBody`/`filterAcceptEncoding`.
 
 ## Phase X (tbd) — Cutover

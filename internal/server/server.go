@@ -177,12 +177,16 @@ func stripVersionPrefix(r *http.Request) {
 func (s *Server) routes() {
 	authMW := CreateAuthMiddleware(s.cfg)
 	filterMW := CreateFilterMiddleware(s.cfg)
+	formFilterMW := CreateFormFilterMiddleware(s.cfg)
 
 	// Model-dispatched routes get auth + body filters + in-flight tracking +
-	// token metrics.
+	// token metrics. filterMW rewrites JSON bodies and formFilterMW rewrites
+	// multipart bodies; each is a no-op for the other's Content-Type. Both run
+	// before the metrics middleware so it buffers the rewritten body.
 	modelChain := chain.New(
 		authMW,
 		filterMW,
+		formFilterMW,
 		CreateInflightMiddleware(s.inflight),
 		CreateMetricsMiddleware(s.metrics, s.cfg),
 	)
