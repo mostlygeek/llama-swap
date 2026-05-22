@@ -56,7 +56,12 @@ func (s *Server) getLogger(logMonitorID string) (*logmon.Monitor, error) {
 	case "upstream":
 		return s.upstreamlog, nil
 	default:
-		return nil, fmt.Errorf("invalid logger. Use 'proxy' or 'upstream'")
+		if _, modelID, _, found := findModelInPath(s.cfg, "/"+logMonitorID); found {
+			if log, ok := s.local.ProcessLogger(modelID); ok {
+				return log, nil
+			}
+		}
+		return nil, fmt.Errorf("invalid logger. Use 'proxy', 'upstream' or a model's ID")
 	}
 }
 

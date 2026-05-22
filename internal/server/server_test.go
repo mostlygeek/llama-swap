@@ -26,6 +26,7 @@ type stubRouter struct {
 	shutdownCalls atomic.Int32
 	running       map[string]process.ProcessState
 	unloadCalls   atomic.Int32
+	loggers       map[string]*logmon.Monitor
 }
 
 func newStubRouter(models []string, response string) *stubRouter {
@@ -45,6 +46,14 @@ func (s *stubRouter) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 
 func (s *stubRouter) RunningModels() map[string]process.ProcessState { return s.running }
 func (s *stubRouter) Unload(_ time.Duration, _ ...string)            { s.unloadCalls.Add(1) }
+func (s *stubRouter) ProcessLogger(modelID string) (*logmon.Monitor, bool) {
+	if s.loggers != nil {
+		if lg, ok := s.loggers[modelID]; ok {
+			return lg, true
+		}
+	}
+	return nil, false
+}
 
 // newTestServer wires a Server with stub routers and a built mux.
 func newTestServer(local router.LocalRouter, peer router.Router) *Server {
@@ -280,5 +289,43 @@ func TestServer_Shutdown_StopsRoutersAndIsIdempotent(t *testing.T) {
 	}
 	if got := peer.shutdownCalls.Load(); got != 1 {
 		t.Errorf("peer shutdownCalls=%d want 1", got)
+	}
+}
+
+func TestServer_LogStream_ModelID(t *testing.T) {
+	buf := logmon.NewWriter(io.Discard)
+	buf.Write([]byte("hello from model"))
+
+	local := newStubRouter([]string{"mymodel"}, "")
+	local.loggers = map[string]*logmon.Monitor{"mymodel": buf}
+
+	s := newTestServer(local, newStubRouter(nil, ""))
+	s.cfg = config.Config{Models: map[string]config.ModelConfig{"mymodel": {}}}
+
+	// Pre-cancel the context so the streaming loop exits immediately after
+	// flushing history.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	req := httptest.NewRequest(http.MethodGet, "/logs/stream/mymodel", nil).WithContext(ctx)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
+	}
+	if got := w.Body.String(); got != "hello from model" {
+		t.Errorf("body=%q want %q", got, "hello from model")
+	}
+}
+
+func TestServer_LogStream_UnknownID_Returns400(t *testing.T) {
+	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/logs/stream/no-such-model", nil))
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status=%d want 400", w.Code)
 	}
 }

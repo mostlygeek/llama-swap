@@ -323,6 +323,13 @@ func (b *baseRouter) Handles(model string) bool {
 	return ok
 }
 
+func (b *baseRouter) ProcessLogger(modelID string) (*logmon.Monitor, bool) {
+	if p, ok := b.processes[modelID]; ok {
+		return p.Logger(), true
+	}
+	return nil, false
+}
+
 // RunningModels returns the current state of every process that is not stopped
 // or shut down. The processes map keys are fixed at construction and State()
 // is a snapshot, so this is safe to call without the run loop.

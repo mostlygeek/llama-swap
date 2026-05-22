@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/tidwall/gjson"
 )
@@ -59,6 +60,11 @@ type LocalRouter interface {
 	// Unload stops the named models, or every running model when none are
 	// named. It blocks until each targeted process has stopped.
 	Unload(timeout time.Duration, models ...string)
+
+	// ProcessLogger returns the log monitor for the named model's process.
+	// modelID must be a real (non-alias) config key. Returns false when the
+	// model is not known to this router.
+	ProcessLogger(modelID string) (*logmon.Monitor, bool)
 }
 
 // FetchModel will attempt to get the model id from the context then

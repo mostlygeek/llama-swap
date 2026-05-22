@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
 )
 
@@ -118,6 +120,8 @@ func (f *fakeProcess) WaitReady(ctx context.Context) error {
 		return ctx.Err()
 	}
 }
+
+func (f *fakeProcess) Logger() *logmon.Monitor { return logmon.NewWriter(io.Discard) }
 
 func (f *fakeProcess) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	f.serveCalls.Add(1)

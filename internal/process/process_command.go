@@ -89,6 +89,8 @@ func New(
 	return p, nil
 }
 
+func (p *ProcessCommand) Logger() *logmon.Monitor { return p.processLogger }
+
 // run is the single-writer goroutine that owns all mutable lifecycle state
 // (current ProcessState, the running *exec.Cmd, the active reverse-proxy
 // handler, and the list of WaitReady subscribers). Every public method
