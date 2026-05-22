@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"strconv"
 	"strings"
@@ -66,6 +67,103 @@ func CreateFilterMiddleware(cfg config.Config) chain.Middleware {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// CreateFormFilterMiddleware returns middleware that applies the UseModelName
+// rewrite (issue #69) to multipart/form-data requests before they are forwarded
+// upstream. JSON-body filters (StripParams, SetParams) do not apply to form
+// endpoints; only the "model" field is rewritten.
+//
+// Non-multipart requests pass through untouched. When a rewrite is needed the
+// form is reconstructed and re-attached with Content-Type / Content-Length
+// cleanup so the downstream reverse proxy forwards the correct bytes.
+func CreateFormFilterMiddleware(cfg config.Config) chain.Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !strings.Contains(r.Header.Get("Content-Type"), "multipart/form-data") {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			requested, _, err := router.FetchModel(r, cfg)
+			if err != nil {
+				router.SendError(w, r, router.ErrNoModelInContext)
+				return
+			}
+
+			useModelName, _, ok := resolveFilters(cfg, requested)
+			if !ok || useModelName == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			if err := r.ParseMultipartForm(32 << 20); err != nil {
+				router.SendResponse(w, r, http.StatusBadRequest, fmt.Sprintf("error parsing multipart form: %s", err.Error()))
+				return
+			}
+
+			body, contentType, err := rewriteMultipartModel(r.MultipartForm, useModelName)
+			if err != nil {
+				router.SendResponse(w, r, http.StatusInternalServerError, err.Error())
+				return
+			}
+
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			r.MultipartForm = nil
+			r.Header.Del("Transfer-Encoding")
+			r.Header.Set("Content-Type", contentType)
+			r.Header.Set("Content-Length", strconv.Itoa(len(body)))
+			r.ContentLength = int64(len(body))
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// rewriteMultipartModel reconstructs a multipart form, replacing the "model"
+// field value with useModelName. It returns the encoded body and the matching
+// Content-Type header (which carries the generated boundary).
+func rewriteMultipartModel(form *multipart.Form, useModelName string) ([]byte, string, error) {
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+
+	for key, values := range form.Value {
+		for _, value := range values {
+			if key == "model" {
+				value = useModelName
+			}
+			field, err := mw.CreateFormField(key)
+			if err != nil {
+				return nil, "", fmt.Errorf("error recreating form field %s: %w", key, err)
+			}
+			if _, err := field.Write([]byte(value)); err != nil {
+				return nil, "", fmt.Errorf("error writing form field %s: %w", key, err)
+			}
+		}
+	}
+
+	for key, headers := range form.File {
+		for _, fh := range headers {
+			part, err := mw.CreateFormFile(key, fh.Filename)
+			if err != nil {
+				return nil, "", fmt.Errorf("error recreating form file %s: %w", key, err)
+			}
+			file, err := fh.Open()
+			if err != nil {
+				return nil, "", fmt.Errorf("error opening uploaded file %s: %w", key, err)
+			}
+			if _, err := io.Copy(part, file); err != nil {
+				file.Close()
+				return nil, "", fmt.Errorf("error copying file data %s: %w", key, err)
+			}
+			file.Close()
+		}
+	}
+
+	if err := mw.Close(); err != nil {
+		return nil, "", fmt.Errorf("error finalizing multipart form: %w", err)
+	}
+	return buf.Bytes(), mw.FormDataContentType(), nil
 }
 
 // resolveFilters returns the filter settings for a requested model. UseModelName
