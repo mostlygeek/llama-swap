@@ -43,7 +43,7 @@ type Server struct {
 	shuttingDown atomic.Bool
 }
 
-// modelPostJSONRoutes are OpenAI-compatible JSON endpoints dispatched by model.
+// modelPostJSONRoutes are endpoints with a model id in the JSON request body.
 var modelPostJSONRoutes = []string{
 	"/v1/chat/completions",
 	"/v1/responses",
@@ -62,11 +62,9 @@ var modelPostJSONRoutes = []string{
 	"/v1/images/generations",
 	"/sdapi/v1/txt2img",
 	"/sdapi/v1/img2img",
-}
 
-// modelVersionlessRoutes are versionless aliases (issue #728). The /v prefix is
-// stripped before the request is forwarded upstream.
-var modelVersionlessRoutes = []string{
+	// versionless routes, the /v/ is stripped before the request is forwarded upstream
+	// see issue #728
 	"/v/chat/completions",
 	"/v/responses",
 	"/v/completions",
@@ -77,7 +75,7 @@ var modelVersionlessRoutes = []string{
 	"/v/reranking",
 }
 
-// modelPostFormRoutes are multipart/form-data endpoints dispatched by model.
+// modelPostFormRoutes are multipart/form-data endpoints with a model id in the form data
 var modelPostFormRoutes = []string{
 	"/v1/audio/transcriptions",
 	"/v1/images/edits",
@@ -197,9 +195,6 @@ func (s *Server) routes() {
 	dispatch := http.HandlerFunc(s.localPeerHandler)
 
 	for _, path := range modelPostJSONRoutes {
-		mux.Handle("POST "+path, modelChain.Then(dispatch))
-	}
-	for _, path := range modelVersionlessRoutes {
 		mux.Handle("POST "+path, modelChain.Then(dispatch))
 	}
 	for _, path := range modelPostFormRoutes {
