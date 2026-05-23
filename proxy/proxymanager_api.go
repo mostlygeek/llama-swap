@@ -180,7 +180,6 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 			case sendBuffer <- messageEnvelope{Type: msgTypeInFlight, Data: string(jsonData)}:
 			case <-ctx.Done():
 				return
-			default:
 			}
 		}
 	}
@@ -213,7 +212,7 @@ func (pm *ProxyManager) apiSendEvents(c *gin.Context) {
 	})()
 
 	/**
-	 * Send in-flight request stats related to token stats "Waiting: N" count.
+	 * Send queued request stats for the Activity Dashboard "Waiting: N" count.
 	 */
 	defer event.On(func(e InFlightRequestsEvent) {
 		sendInFlight(e.Total)

@@ -41,16 +41,24 @@ func newInflightCounter() *InflightCounter {
 
 func (ic *InflightCounter) Current() int {
 	ic.mu.Lock()
-	total := ic.total
+	total := ic.waitingTotal()
 	ic.mu.Unlock()
 	return total
+}
+
+func (ic *InflightCounter) waitingTotal() int {
+	if ic.total <= 0 {
+		return 0
+	}
+	return ic.total - 1
 }
 
 func (ic *InflightCounter) Increment() int {
 	ic.mu.Lock()
 	ic.total++
-	total := ic.total
+	total := ic.waitingTotal()
 	ic.mu.Unlock()
+	event.Emit(InFlightRequestsEvent{Total: total})
 	return total
 }
 
@@ -59,8 +67,9 @@ func (ic *InflightCounter) Decrement() int {
 	if ic.total > 0 {
 		ic.total--
 	}
-	total := ic.total
+	total := ic.waitingTotal()
 	ic.mu.Unlock()
+	event.Emit(InFlightRequestsEvent{Total: total})
 	return total
 }
 
@@ -504,8 +513,8 @@ func (pm *ProxyManager) setupGinEngine() {
 
 func (pm *ProxyManager) trackInflight() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		event.Emit(InFlightRequestsEvent{Total: pm.inFlightCounter.Increment()})
-		defer event.Emit(InFlightRequestsEvent{Total: pm.inFlightCounter.Decrement()})
+		pm.inFlightCounter.Increment()
+		defer pm.inFlightCounter.Decrement()
 		c.Next()
 	}
 }

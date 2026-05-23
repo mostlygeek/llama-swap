@@ -2,6 +2,8 @@ package proxy
 
 import (
 	"bytes"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
@@ -47,6 +49,99 @@ func TestProcessGroup_HasMember(t *testing.T) {
 	assert.True(t, pg.HasMember("model1"))
 	assert.True(t, pg.HasMember("model2"))
 	assert.False(t, pg.HasMember("model3"))
+}
+
+func TestProcessGroup_WaitingCountTracksQueuedRequests(t *testing.T) {
+	const totalRequests = 10
+
+	models := make(map[string]config.ModelConfig, totalRequests)
+	members := make([]string, 0, totalRequests)
+	for i := 0; i < totalRequests; i++ {
+		modelID := fmt.Sprintf("model%d", i)
+		models[modelID] = getTestSimpleResponderConfig(modelID)
+		members = append(members, modelID)
+	}
+
+	cfg := config.AddDefaultGroupToConfig(config.Config{
+		HealthCheckTimeout: 15,
+		Models:             models,
+		Groups: map[string]config.GroupConfig{
+			"G1": {
+				Swap:    true,
+				Members: members,
+			},
+		},
+	})
+
+	pm := New(cfg)
+	defer pm.StopProcesses(StopImmediately)
+
+	type activeRequest struct {
+		release chan struct{}
+	}
+
+	active := make(chan activeRequest, totalRequests)
+	done := make(chan struct{}, totalRequests)
+	for _, pg := range pm.processGroups {
+		for modelID, process := range pg.processes {
+			modelID := modelID
+			process.testHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				release := make(chan struct{})
+				active <- activeRequest{release: release}
+				<-release
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(modelID))
+			})
+		}
+	}
+
+	sendRequest := func(modelID string) {
+		reqBody := fmt.Sprintf(`{"model":%q}`, modelID)
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+		pm.ServeHTTP(w, req)
+		_, _ = io.Copy(io.Discard, w.Body)
+		assert.Equal(t, http.StatusOK, w.Code)
+		done <- struct{}{}
+	}
+
+	require.Equal(t, 0, pm.inFlightCounter.Current())
+
+	go sendRequest(members[0])
+	current := <-active
+
+	var wg sync.WaitGroup
+	wg.Add(totalRequests - 1)
+	for _, modelID := range members[1:] {
+		modelID := modelID
+		go func() {
+			defer wg.Done()
+			sendRequest(modelID)
+		}()
+	}
+
+	requireInflightCounterEventually(t, pm.inFlightCounter, totalRequests-1)
+
+	for completed := 0; completed < totalRequests; completed++ {
+		close(current.release)
+		<-done
+
+		wantWaiting := totalRequests - completed - 2
+		if wantWaiting < 0 {
+			wantWaiting = 0
+		}
+		requireInflightCounterEventually(t, pm.inFlightCounter, wantWaiting)
+
+		if completed == totalRequests-1 {
+			break
+		}
+
+		current = <-active
+	}
+
+	wg.Wait()
+
+	requireInflightCounterEventually(t, pm.inFlightCounter, 0)
 }
 
 // TestProcessGroup_ProxyRequestSwapIsTrueParallel tests that when swap is true

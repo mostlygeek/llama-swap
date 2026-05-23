@@ -75,6 +75,22 @@ func getTestPort() int {
 	return port
 }
 
+func requireInflightCounterEventually(t *testing.T, counter *InflightCounter, want int) {
+	t.Helper()
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	got := counter.Current()
+	for time.Now().Before(deadline) {
+		got = counter.Current()
+		if got == want {
+			return
+		}
+		runtime.Gosched()
+		time.Sleep(time.Millisecond)
+	}
+	require.Equal(t, want, got)
+}
+
 // testConfigFromYAML substitutes {{RESPONDER}} with the simple-responder path and
 // loads through the real config pipeline (env vars, macros, port assignment, etc.)
 func testConfigFromYAML(t *testing.T, yamlTmpl string) config.Config {

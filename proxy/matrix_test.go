@@ -1,9 +1,13 @@
 package proxy
 
 import (
+	"bytes"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -171,6 +175,95 @@ func TestMatrixSolver_NothingRunning(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, result.Evict)
 	assert.Equal(t, []string{"g", "v"}, result.TargetSet)
+}
+
+func TestMatrix_WaitingCountTracksQueuedRequests(t *testing.T) {
+	const totalRequests = 5
+
+	models := make(map[string]config.ModelConfig, totalRequests)
+	sets := make([]struct {
+		name   string
+		models []string
+	}, 0, totalRequests)
+	for i := 0; i < totalRequests; i++ {
+		modelID := fmt.Sprintf("model%d", i)
+		models[modelID] = getTestSimpleResponderConfig(modelID)
+		sets = append(sets, es(fmt.Sprintf("s%d", i), modelID))
+	}
+
+	cfg := config.Config{
+		HealthCheckTimeout: 15,
+		Models:             models,
+		ExpandedSets:       makeExpandedSets(sets...),
+		Matrix:             &config.MatrixConfig{},
+	}
+
+	pm := New(cfg)
+	defer pm.StopProcesses(StopImmediately)
+
+	type activeRequest struct {
+		release chan struct{}
+	}
+
+	active := make(chan activeRequest, totalRequests)
+	done := make(chan struct{}, totalRequests)
+	for modelID, process := range pm.matrix.processes {
+		modelID := modelID
+		process.testHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			release := make(chan struct{})
+			active <- activeRequest{release: release}
+			<-release
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(modelID))
+		})
+	}
+
+	sendRequest := func(modelID string) {
+		reqBody := fmt.Sprintf(`{"model":%q}`, modelID)
+		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+		w := CreateTestResponseRecorder()
+		pm.ServeHTTP(w, req)
+		_, _ = io.Copy(io.Discard, w.Body)
+		assert.Equal(t, http.StatusOK, w.Code)
+		done <- struct{}{}
+	}
+
+	require.Equal(t, 0, pm.inFlightCounter.Current())
+
+	go sendRequest("model0")
+	current := <-active
+
+	var wg sync.WaitGroup
+	wg.Add(totalRequests - 1)
+	for i := 1; i < totalRequests; i++ {
+		modelID := fmt.Sprintf("model%d", i)
+		go func() {
+			defer wg.Done()
+			sendRequest(modelID)
+		}()
+	}
+
+	requireInflightCounterEventually(t, pm.inFlightCounter, totalRequests-1)
+
+	for completed := 0; completed < totalRequests; completed++ {
+		close(current.release)
+		<-done
+
+		wantWaiting := totalRequests - completed - 2
+		if wantWaiting < 0 {
+			wantWaiting = 0
+		}
+		requireInflightCounterEventually(t, pm.inFlightCounter, wantWaiting)
+
+		if completed == totalRequests-1 {
+			break
+		}
+
+		current = <-active
+	}
+
+	wg.Wait()
+	requireInflightCounterEventually(t, pm.inFlightCounter, 0)
 }
 
 // TestMatrix_ProxyRequestSwapRaceAgainstFastPath verifies that an eviction
