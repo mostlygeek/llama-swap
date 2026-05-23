@@ -21,7 +21,7 @@ var (
 	procCloseAdapter        *windows.LazyProc
 	procQueryAdapterInfo    *windows.LazyProc
 	procQueryStatistics     *windows.LazyProc
-	d3dkmtInitOnce         sync.Once
+	d3dkmtInitOnce          sync.Once
 	d3dkmtInitErr           error
 )
 
@@ -103,6 +103,20 @@ func d3dkmGetAdapterPerfData(hAdapter uint32) (*D3DKMT_ADAPTER_PERFDATA, error) 
 	}
 	if err := ntstatusCall(procQueryAdapterInfo, unsafe.Pointer(&req)); err != nil {
 		return nil, fmt.Errorf("QueryAdapterInfo(ADAPTERPERFDATA): %w", err)
+	}
+	return &data, nil
+}
+
+func d3dkmGetAdapterPerfDataCaps(hAdapter uint32) (*D3DKMT_ADAPTER_PERFDATACAPS, error) {
+	var data D3DKMT_ADAPTER_PERFDATACAPS
+	req := D3DKMT_QUERYADAPTERINFO{
+		hAdapter:              hAdapter,
+		Type:                  KMTQAITYPE_ADAPTERPERFDATA_CAPS,
+		pPrivateDriverData:    uintptr(unsafe.Pointer(&data)),
+		PrivateDriverDataSize: uint32(unsafe.Sizeof(data)),
+	}
+	if err := ntstatusCall(procQueryAdapterInfo, unsafe.Pointer(&req)); err != nil {
+		return nil, fmt.Errorf("QueryAdapterInfo(ADAPTERPERFDATACAPS): %w", err)
 	}
 	return &data, nil
 }
@@ -206,6 +220,7 @@ type d3dkmtAdapterState struct {
 	hAdapter   uint32
 	nbSegments uint32
 	nodeCount  uint32
+	maxFanRPM  uint32
 	prevNodeRT map[uint32]nodeRunningTimes
 	prevTime   time.Time
 }
@@ -224,6 +239,7 @@ func tryD3DKMT(ctx context.Context, every time.Duration, logger *logmon.Monitor)
 		luid       LUID
 		nbSegments uint32
 		nodeCount  uint32
+		maxFanRPM  uint32
 	}
 
 	var metaList []adapterMeta
@@ -242,13 +258,25 @@ func tryD3DKMT(ctx context.Context, every time.Duration, logger *logmon.Monitor)
 			continue
 		}
 
+		caps, err := d3dkmGetAdapterPerfDataCaps(hAdapter)
+		if err != nil {
+			logger.Debugf("adapter %d: perf caps failed: %s", i, err.Error())
+		}
+
 		d3dkmCloseAdapter(hAdapter)
+
+		var maxFanRPM uint32
+		if caps != nil {
+			maxFanRPM = caps.MaxFanRPM
+		}
+
 		metaList = append(metaList, adapterMeta{
 			luid:       ai.AdapterLuid,
 			nbSegments: nbSegments,
 			nodeCount:  nodeCount,
+			maxFanRPM:  maxFanRPM,
 		})
-		logger.Debugf("adapter %d: segments=%d nodes=%d luid=%d:%d", i, nbSegments, nodeCount, ai.AdapterLuid.HighPart, ai.AdapterLuid.LowPart)
+		logger.Debugf("adapter %d: segments=%d nodes=%d fan_max=%d luid=%d:%d", i, nbSegments, nodeCount, maxFanRPM, ai.AdapterLuid.HighPart, ai.AdapterLuid.LowPart)
 	}
 
 	if len(metaList) == 0 {
@@ -282,6 +310,7 @@ func tryD3DKMT(ctx context.Context, every time.Duration, logger *logmon.Monitor)
 				hAdapter:   hAdapter,
 				nbSegments: m.nbSegments,
 				nodeCount:  m.nodeCount,
+				maxFanRPM:  m.maxFanRPM,
 				prevNodeRT: make(map[uint32]nodeRunningTimes),
 			})
 		}
@@ -398,8 +427,8 @@ func tryD3DKMT(ctx context.Context, every time.Duration, logger *logmon.Monitor)
 					tempC := int(perfData.Temperature / 10)
 
 					var fanSpeedPct float64
-					if perfData.FanRPM > 0 {
-						fanSpeedPct = float64(perfData.FanRPM)
+					if a.maxFanRPM > 0 && perfData.FanRPM > 0 {
+						fanSpeedPct = float64(perfData.FanRPM) / float64(a.maxFanRPM) * 100.0
 					}
 
 					var powerDrawW float64

@@ -74,6 +74,15 @@ const (
 	D3DKMT_QUERYSTATISTICS_PROCESS_VIDPNSOURCE D3DKMT_QUERYSTATISTICS_TYPE = 8
 )
 
+type D3DKMT_ADAPTER_PERFDATACAPS struct {
+	PhysicalAdapterIndex uint32
+	MaxMemoryBandwidth   uint64
+	MaxPCIEBandwidth     uint64
+	MaxFanRPM            uint32
+	TemperatureMax       uint32
+	TemperatureWarning   uint32
+}
+
 type D3DKMT_QUERYSTATISTICS_QUERY_SEGMENT struct {
 	SegmentId uint32
 }
