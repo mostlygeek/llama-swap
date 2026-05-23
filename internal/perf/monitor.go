@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/ring"
-	"github.com/mostlygeek/llama-swap/internal/config"
 )
 
 var (

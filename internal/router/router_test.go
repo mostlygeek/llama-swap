@@ -233,11 +233,11 @@ func TestSetModel_DoesNotMutateParent(t *testing.T) {
 
 func TestGetModel(t *testing.T) {
 	tests := []struct {
-		name      string
-		ctx       context.Context
-		wantReq   string
-		wantReal  string
-		wantBool  bool
+		name     string
+		ctx      context.Context
+		wantReq  string
+		wantReal string
+		wantBool bool
 	}{
 		{
 			name:     "model present, same name",
