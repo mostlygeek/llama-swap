@@ -363,6 +363,10 @@ func tryD3DKMT(ctx context.Context, every time.Duration, logger *logmon.Monitor)
 							}
 
 							if prevRT, ok := a.prevNodeRT[node]; ok {
+								if globalRT < prevRT.Global || systemRT < prevRT.System {
+									a.prevNodeRT[node] = nodeRunningTimes{Global: globalRT, System: systemRT}
+									continue
+								}
 								gd := globalRT - prevRT.Global
 								sd := systemRT - prevRT.System
 
