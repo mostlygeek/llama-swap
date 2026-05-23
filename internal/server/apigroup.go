@@ -211,6 +211,7 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 		case sendBuffer <- msg:
 		case <-ctx.Done():
 		default:
+			s.proxylog.Warn("handleAPIEvents sendBuffer full, dropped message")
 		}
 	}
 	sendModels := func() {
