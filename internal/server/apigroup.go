@@ -202,7 +202,9 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sendBuffer := make(chan messageEnvelope, 25)
+	// internal/event already has a 50K event buffer
+	// a 1K message buffer should be enough, watch the logs for the warning that the sendBuffer is full
+	sendBuffer := make(chan messageEnvelope, 1024)
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
@@ -210,6 +212,7 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 		select {
 		case sendBuffer <- msg:
 		case <-ctx.Done():
+			s.proxylog.Warn("handleAPIEvents send suppressed due to context done")
 		default:
 			s.proxylog.Warn("handleAPIEvents sendBuffer full, dropped message")
 		}
