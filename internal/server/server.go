@@ -151,8 +151,10 @@ func (s *Server) localPeerHandler(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case s.local.Handles(model):
+		s.proxylog.Debugf("dispatch: using local process for model: %s", model)
 		s.local.ServeHTTP(w, r)
 	case s.peer.Handles(model):
+		s.proxylog.Debugf("dispatch: using peer for model: %s", model)
 		s.peer.ServeHTTP(w, r)
 	default:
 		router.SendError(w, r, router.ErrNoRouterFound)

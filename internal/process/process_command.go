@@ -335,13 +335,22 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 	cmd.Env = append(cmd.Environ(), p.config.Env...)
 	setProcAttributes(cmd)
 
+	p.proxyLogger.Debugf("<%s> Executing start command: %s, env: %s", p.id, strings.Join(args, " "), strings.Join(p.config.Env, ", "))
+
 	cmdDone := make(chan struct{})
 	if err := cmd.Start(); err != nil {
 		return startResult{err: fmt.Errorf("failed to start command '%s': %w", strings.Join(args, " "), err)}
 	}
 
 	go func() {
-		cmd.Wait()
+		waitErr := cmd.Wait()
+		if exitErr, ok := waitErr.(*exec.ExitError); ok {
+			p.proxyLogger.Debugf("<%s> process exited: code=%d, err=%v", p.id, exitErr.ExitCode(), waitErr)
+		} else if waitErr != nil {
+			p.proxyLogger.Debugf("<%s> process exited with error: %v", p.id, waitErr)
+		} else {
+			p.proxyLogger.Debugf("<%s> process exited cleanly", p.id)
+		}
 		close(cmdDone)
 	}()
 
@@ -385,6 +394,7 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 		resp := rr.Result()
 		resp.Body.Close()
 		if resp.StatusCode == http.StatusOK {
+			p.proxyLogger.Infof("<%s> Health check passed on %s%s", p.id, p.config.Proxy, p.config.CheckEndpoint)
 			break
 		} else if startCtx.Err() != nil {
 			p.killProcess(cmd, cmdDone, 5*time.Second)

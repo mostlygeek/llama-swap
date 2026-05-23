@@ -13,8 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/logmon"
 )
 
 type peerMember struct {
@@ -165,6 +165,8 @@ func (r *Peer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		SendError(w, req, ErrNoPeerModelFound)
 		return
 	}
+
+	r.logger.Debugf("peer: routing model %s to peer %s", realModel, pp.peerID)
 
 	if pp.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+pp.apiKey)

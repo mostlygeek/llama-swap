@@ -147,12 +147,14 @@ func (b *baseRouter) handleRequest(req handlerReq, active map[string]*activeSwap
 	// (1) Unknown model.
 	p, ok := b.processes[req.model]
 	if !ok {
+		b.logger.Debugf("%s: model %s not handled by this router", b.name, req.model)
 		req.respond <- handlerResp{err: ErrNoLocalModelFound}
 		return
 	}
 
 	// (2) Join an in-flight swap for the same model.
 	if s, ok := active[req.model]; ok {
+		b.logger.Debugf("%s: joining in-flight swap for model %s (%d waiters)", b.name, req.model, len(s.waiters)+1)
 		s.waiters = append(s.waiters, req)
 		return
 	}
@@ -161,17 +163,20 @@ func (b *baseRouter) handleRequest(req handlerReq, active map[string]*activeSwap
 
 	// (3) Fast path: ready, nothing to evict, and nobody is evicting us.
 	if p.State() == process.StateReady && len(evict) == 0 && !collidesWith(req.model, evict, active) {
+		b.logger.Debugf("%s: fast-path serving model %s (already ready)", b.name, req.model)
 		req.respond <- handlerResp{handleFunc: p.ServeHTTP}
 		return
 	}
 
 	// (4) Collision with an in-flight swap — queue.
 	if collidesWith(req.model, evict, active) {
+		b.logger.Debugf("%s: queuing request for model %s (collides with in-flight swap)", b.name, req.model)
 		*queued = append(*queued, req)
 		return
 	}
 
 	// (5) Start a new (possibly parallel) swap.
+	b.logger.Debugf("%s: starting swap for model %s, evicting %v", b.name, req.model, evict)
 	s := b.startSwap(req, evict)
 	active[s.modelID] = s
 }
@@ -217,11 +222,13 @@ func (b *baseRouter) drainQueue(active map[string]*activeSwap, queued *[]handler
 			continue
 		}
 		if s, ok := active[req.model]; ok {
+			b.logger.Debugf("%s: queued request for model %s now joining in-flight swap", b.name, req.model)
 			s.waiters = append(s.waiters, req)
 			continue
 		}
 		evict := b.planner.EvictionFor(req.model, activeTargets(active, req.model))
 		if p.State() == process.StateReady && len(evict) == 0 && !collidesWith(req.model, evict, active) {
+			b.logger.Debugf("%s: queued request for model %s now served fast-path", b.name, req.model)
 			req.respond <- handlerResp{handleFunc: p.ServeHTTP}
 			continue
 		}
@@ -229,6 +236,7 @@ func (b *baseRouter) drainQueue(active map[string]*activeSwap, queued *[]handler
 			remaining = append(remaining, req)
 			continue
 		}
+		b.logger.Debugf("%s: queued request for model %s now starting swap, evicting %v", b.name, req.model, evict)
 		s := b.startSwap(req, evict)
 		active[s.modelID] = s
 	}
