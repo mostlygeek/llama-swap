@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
-	"github.com/mostlygeek/llama-swap/internal/config"
 )
 
 type Matrix struct {
@@ -52,8 +52,8 @@ type matrixPlanner struct {
 	logger    *logmon.Monitor
 }
 
-func (p *matrixPlanner) EvictionFor(target string) []string {
-	return p.solver.Solve(target, p.runningModels()).Evict
+func (p *matrixPlanner) EvictionFor(target string, alsoRunning []string) []string {
+	return p.solver.Solve(target, p.runningSet(alsoRunning)).Evict
 }
 
 func (p *matrixPlanner) OnSwapStart(target string) {
@@ -71,12 +71,28 @@ func (p *matrixPlanner) OnSwapStart(target string) {
 }
 
 func (p *matrixPlanner) runningModels() []string {
+	return p.runningSet(nil)
+}
+
+// runningSet returns the union of live processes (State != Stopped/Shutdown)
+// and any extra IDs the baseRouter has already committed to loading but which
+// the process state machine has not yet reflected.
+func (p *matrixPlanner) runningSet(alsoRunning []string) []string {
+	seen := make(map[string]struct{}, len(p.processes))
 	var running []string
 	for id, proc := range p.processes {
 		st := proc.State()
 		if st == process.StateStopped || st == process.StateShutdown {
 			continue
 		}
+		seen[id] = struct{}{}
+		running = append(running, id)
+	}
+	for _, id := range alsoRunning {
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
 		running = append(running, id)
 	}
 	sort.Strings(running)

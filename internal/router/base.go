@@ -36,6 +36,7 @@ type swapDone struct {
 
 type activeSwap struct {
 	modelID string
+	evict   []string
 	waiters []handlerReq
 }
 
@@ -43,8 +44,10 @@ type activeSwap struct {
 // routers. baseRouter never inspects its internals.
 type swapPlanner interface {
 	// EvictionFor returns running model IDs that must be stopped before
-	// target can serve. Pure decision; must not log.
-	EvictionFor(target string) []string
+	// target can serve. alsoRunning lists models the baseRouter has already
+	// committed to loading (in-flight swaps) which the planner cannot see
+	// via process.State() yet. Pure decision; must not log.
+	EvictionFor(target string, alsoRunning []string) []string
 
 	// OnSwapStart runs once at the start of every swap. Planners may log
 	// their decision here at whatever verbosity they choose.
@@ -103,7 +106,7 @@ func (b *baseRouter) notifyProcessed() {
 func (b *baseRouter) run() {
 	defer close(b.runDone)
 
-	var active *activeSwap
+	active := make(map[string]*activeSwap)
 	var queued []handlerReq
 
 	for {
@@ -113,11 +116,11 @@ func (b *baseRouter) run() {
 			return
 
 		case req := <-b.handlerCh:
-			active = b.handleRequest(req, active, &queued)
+			b.handleRequest(req, active, &queued)
 			b.notifyProcessed()
 
 		case ev := <-b.swapDoneCh:
-			active = b.handleSwapDone(ev, active, &queued)
+			b.handleSwapDone(ev, active, &queued)
 			b.notifyProcessed()
 		}
 	}
@@ -131,62 +134,61 @@ func (b *baseRouter) run() {
 // The decision tree, in order:
 //
 //  1. Unknown model — respond with ErrNoLocalModelFound and move on.
-//  2. Fast path — the target process is already ready and the planner says
-//     nothing else needs to be stopped. Hand back its ServeHTTP immediately.
-//  3. A swap to the same model is already in flight — attach this waiter to
-//     it so one swap serves all callers that asked for the same model.
-//  4. A swap to a different model is in flight — park this request in the
-//     queue. handleSwapDone() will promote it once the current swap finishes.
-//  5. Nothing in flight — kick off a new swap for this model.
-func (b *baseRouter) handleRequest(req handlerReq, active *activeSwap, queued *[]handlerReq) *activeSwap {
+//  2. A swap to the same model is already in flight — attach this waiter so
+//     one swap serves all callers that asked for the same model.
+//  3. Fast path — the target process is already ready, the planner sees
+//     nothing to evict, and no in-flight swap is evicting it. Hand back its
+//     ServeHTTP immediately.
+//  4. Would collide with an in-flight swap (we'd stop their target, or they're
+//     stopping us) — park in the queue for handleSwapDone to drain.
+//  5. Otherwise — start a new swap. This may run in parallel with other
+//     active swaps when their evict sets don't intersect.
+func (b *baseRouter) handleRequest(req handlerReq, active map[string]*activeSwap, queued *[]handlerReq) {
 	// (1) Unknown model.
 	p, ok := b.processes[req.model]
 	if !ok {
 		req.respond <- handlerResp{err: ErrNoLocalModelFound}
-		return active
+		return
 	}
 
-	// (2) Fast path: ready and the planner sees nothing to evict.
-	if active == nil && p.State() == process.StateReady && len(b.planner.EvictionFor(req.model)) == 0 {
+	// (2) Join an in-flight swap for the same model.
+	if s, ok := active[req.model]; ok {
+		s.waiters = append(s.waiters, req)
+		return
+	}
+
+	evict := b.planner.EvictionFor(req.model, activeTargets(active, req.model))
+
+	// (3) Fast path: ready, nothing to evict, and nobody is evicting us.
+	if p.State() == process.StateReady && len(evict) == 0 && !collidesWith(req.model, evict, active) {
 		req.respond <- handlerResp{handleFunc: p.ServeHTTP}
-		return active
+		return
 	}
 
-	// (3) Join an in-flight swap for the same model.
-	if active != nil && active.modelID == req.model {
-		active.waiters = append(active.waiters, req)
-		return active
-	}
-
-	// (4) Different model is being swapped in — queue for the next round.
-	if active != nil {
+	// (4) Collision with an in-flight swap — queue.
+	if collidesWith(req.model, evict, active) {
 		*queued = append(*queued, req)
-		return active
+		return
 	}
 
-	// (5) Nothing in flight — start a new swap for this request.
-	return b.startSwap(req)
+	// (5) Start a new (possibly parallel) swap.
+	s := b.startSwap(req, evict)
+	active[s.modelID] = s
 }
 
 // handleSwapDone is called from run() when a swap goroutine reports that it
-// has finished (target is ready, or it failed/was cancelled). It does two
-// things:
-//
-//  1. Fan out the result to every waiter that joined this swap. On success
-//     they get the target's ServeHTTP; on failure they get the error.
-//  2. Promote one queued request — if any — into a new swap. The first item
-//     in the queue chooses the next target; any other queued requests for
-//     that same model are pulled in as additional waiters so they all ride
-//     the same swap. Requests for other models stay queued for later rounds.
-//
-// Returns the new active swap (or nil if the queue was empty).
-func (b *baseRouter) handleSwapDone(ev swapDone, active *activeSwap, queued *[]handlerReq) *activeSwap {
-	if active == nil {
-		return nil
+// has finished. It fans out the result to every waiter that joined this swap,
+// removes the swap from the active map, and then walks the queue once,
+// promoting any items that no longer collide with the remaining active set.
+// FIFO order is preserved: items still blocked stay in place.
+func (b *baseRouter) handleSwapDone(ev swapDone, active map[string]*activeSwap, queued *[]handlerReq) {
+	s, ok := active[ev.modelID]
+	if !ok {
+		return
 	}
+	delete(active, ev.modelID)
 
-	// (1) Notify everyone who was waiting on this swap.
-	for _, w := range active.waiters {
+	for _, w := range s.waiters {
 		if ev.err != nil {
 			w.respond <- handlerResp{err: ev.err}
 		} else {
@@ -195,39 +197,98 @@ func (b *baseRouter) handleSwapDone(ev swapDone, active *activeSwap, queued *[]h
 		}
 	}
 
-	// Nothing queued — go back to idle.
-	if len(*queued) == 0 {
-		return nil
-	}
-
-	// (2) Promote the head of the queue into a new swap.
-	next := (*queued)[0]
-	remaining := (*queued)[1:]
-	newSwap := b.startSwap(next)
-
-	// Pull in any other queued requests asking for the same model; leave
-	// requests for other models in the queue for the next swapDone.
-	var leftover []handlerReq
-	for _, r := range remaining {
-		if r.model == newSwap.modelID {
-			newSwap.waiters = append(newSwap.waiters, r)
-		} else {
-			leftover = append(leftover, r)
-		}
-	}
-	*queued = leftover
-	return newSwap
+	b.drainQueue(active, queued)
 }
 
-func (b *baseRouter) startSwap(initial handlerReq) *activeSwap {
+// drainQueue walks the queued requests in order, re-running the handleRequest
+// decision tree against the (now smaller) active set. Items that can now start
+// or join become satisfied; items still blocked remain queued in original
+// order so they get another chance on the next swap completion.
+func (b *baseRouter) drainQueue(active map[string]*activeSwap, queued *[]handlerReq) {
+	if len(*queued) == 0 {
+		return
+	}
+	pending := *queued
+	var remaining []handlerReq
+	for _, req := range pending {
+		p, ok := b.processes[req.model]
+		if !ok {
+			req.respond <- handlerResp{err: ErrNoLocalModelFound}
+			continue
+		}
+		if s, ok := active[req.model]; ok {
+			s.waiters = append(s.waiters, req)
+			continue
+		}
+		evict := b.planner.EvictionFor(req.model, activeTargets(active, req.model))
+		if p.State() == process.StateReady && len(evict) == 0 && !collidesWith(req.model, evict, active) {
+			req.respond <- handlerResp{handleFunc: p.ServeHTTP}
+			continue
+		}
+		if collidesWith(req.model, evict, active) {
+			remaining = append(remaining, req)
+			continue
+		}
+		s := b.startSwap(req, evict)
+		active[s.modelID] = s
+	}
+	*queued = remaining
+}
+
+func (b *baseRouter) startSwap(initial handlerReq, evict []string) *activeSwap {
 	swap := &activeSwap{
 		modelID: initial.model,
+		evict:   evict,
 		waiters: []handlerReq{initial},
 	}
-	toStop := b.planner.EvictionFor(initial.model)
 	b.planner.OnSwapStart(initial.model)
-	go b.doSwap(initial.model, toStop)
+	go b.doSwap(initial.model, evict)
 	return swap
+}
+
+// activeTargets returns the IDs of every in-flight swap target except exclude.
+// baseRouter passes this to the planner so eviction decisions account for
+// models that have been committed to but have not yet transitioned to
+// StateStarting in their process state machine.
+func activeTargets(active map[string]*activeSwap, exclude string) []string {
+	if len(active) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(active))
+	for id := range active {
+		if id == exclude {
+			continue
+		}
+		out = append(out, id)
+	}
+	return out
+}
+
+// collidesWith reports whether a new swap with this target and evict set can
+// safely run alongside the currently active swaps. Same-target callers should
+// JOIN (handled before this) — they do not collide with themselves.
+func collidesWith(target string, evict []string, active map[string]*activeSwap) bool {
+	for id, s := range active {
+		if id == target {
+			continue
+		}
+		if containsString(evict, id) {
+			return true
+		}
+		if containsString(s.evict, target) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsString(xs []string, s string) bool {
+	for _, x := range xs {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *baseRouter) doSwap(modelID string, toStop []string) {
@@ -262,10 +323,10 @@ func (b *baseRouter) doSwap(modelID string, toStop []string) {
 	}
 }
 
-func (b *baseRouter) handleShutdown(req shutdownReq, active *activeSwap, queued []handlerReq) {
+func (b *baseRouter) handleShutdown(req shutdownReq, active map[string]*activeSwap, queued []handlerReq) {
 	shutdownErr := fmt.Errorf("%s is shutting down", b.name)
-	if active != nil {
-		for _, w := range active.waiters {
+	for _, s := range active {
+		for _, w := range s.waiters {
 			w.respond <- handlerResp{err: shutdownErr}
 		}
 	}

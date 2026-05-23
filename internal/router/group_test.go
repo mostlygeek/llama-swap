@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
-	"github.com/mostlygeek/llama-swap/internal/config"
 )
 
 // newTestGroup builds a Group directly from the supplied processes and config,
@@ -142,6 +142,117 @@ func TestGroup_CrossGroupExclusive(t *testing.T) {
 	}
 	if got := a.stopCalls.Load(); got != 1 {
 		t.Errorf("a.stopCalls=%d want 1 (cross-group exclusive must stop)", got)
+	}
+}
+
+// TestGroup_CrossGroupNonExclusiveParallel verifies that two requests for
+// models in distinct non-exclusive groups load in parallel rather than
+// serializing through the router's run loop.
+func TestGroup_CrossGroupNonExclusiveParallel(t *testing.T) {
+	a := newFakeProcess("a")
+	pb := newFakeProcess("b")
+
+	conf := config.Config{
+		HealthCheckTimeout: 5,
+		Groups: map[string]config.GroupConfig{
+			"g1": {Swap: true, Exclusive: false, Members: []string{"a"}},
+			"g2": {Swap: true, Exclusive: false, Members: []string{"b"}},
+		},
+	}
+	g := newTestGroup(t, conf, map[string]process.Process{"a": a, "b": pb})
+
+	w1 := httptest.NewRecorder()
+	done1 := make(chan struct{})
+	go func() {
+		g.ServeHTTP(w1, newRequest("a"))
+		close(done1)
+	}()
+	waitProcessed(t, g.testProcessed, 1)
+
+	w2 := httptest.NewRecorder()
+	done2 := make(chan struct{})
+	go func() {
+		g.ServeHTTP(w2, newRequest("b"))
+		close(done2)
+	}()
+	waitProcessed(t, g.testProcessed, 1)
+
+	// Both groups load concurrently — both must reach Run() before either is
+	// marked ready. If the router still serialised, only one would proceed.
+	<-a.runStarted
+	<-pb.runStarted
+
+	a.markReady()
+	pb.markReady()
+
+	for i, ch := range []chan struct{}{done1, done2} {
+		select {
+		case <-ch:
+		case <-time.After(time.Second):
+			t.Fatalf("request %d did not complete", i)
+		}
+	}
+	if got := a.stopCalls.Load(); got != 0 {
+		t.Errorf("a.stopCalls=%d want 0 (parallel groups don't evict each other)", got)
+	}
+	if got := pb.stopCalls.Load(); got != 0 {
+		t.Errorf("b.stopCalls=%d want 0 (parallel groups don't evict each other)", got)
+	}
+}
+
+// TestGroup_SameGroupSwapSerialises verifies that two same-group requests
+// (Swap=true) serialise even when both arrive while neither has reached
+// StateStarting yet — the alsoRunning hint to the planner closes that race.
+func TestGroup_SameGroupSwapSerialises(t *testing.T) {
+	a := newFakeProcess("a")
+	pb := newFakeProcess("b")
+
+	conf := config.Config{
+		HealthCheckTimeout: 5,
+		Groups: map[string]config.GroupConfig{
+			"g": {Swap: true, Exclusive: false, Members: []string{"a", "b"}},
+		},
+	}
+	g := newTestGroup(t, conf, map[string]process.Process{"a": a, "b": pb})
+
+	w1 := httptest.NewRecorder()
+	done1 := make(chan struct{})
+	go func() {
+		g.ServeHTTP(w1, newRequest("a"))
+		close(done1)
+	}()
+	waitProcessed(t, g.testProcessed, 1)
+
+	// Request B arrives before A transitions to StateStarting in the process
+	// state machine. Without the alsoRunning hint, the planner would not see
+	// A as running, and B would start in parallel, violating Swap=true.
+	w2 := httptest.NewRecorder()
+	done2 := make(chan struct{})
+	go func() {
+		g.ServeHTTP(w2, newRequest("b"))
+		close(done2)
+	}()
+	waitProcessed(t, g.testProcessed, 1)
+
+	if got := pb.runCalls.Load(); got != 0 {
+		t.Errorf("b started in parallel: runCalls=%d want 0", got)
+	}
+
+	<-a.runStarted
+	a.markReady()
+	waitProcessed(t, g.testProcessed, 1) // swapDone(a) → b promoted
+	<-pb.runStarted
+	pb.markReady()
+
+	for i, ch := range []chan struct{}{done1, done2} {
+		select {
+		case <-ch:
+		case <-time.After(time.Second):
+			t.Fatalf("request %d did not complete", i)
+		}
+	}
+	if got := a.stopCalls.Load(); got != 1 {
+		t.Errorf("a.stopCalls=%d want 1 (b's swap must stop a)", got)
 	}
 }
 

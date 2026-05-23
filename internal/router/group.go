@@ -3,9 +3,9 @@ package router
 import (
 	"fmt"
 
+	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
-	"github.com/mostlygeek/llama-swap/internal/config"
 )
 
 type Group struct {
@@ -64,32 +64,43 @@ type groupPlanner struct {
 	processes    map[string]process.Process
 }
 
-func (p *groupPlanner) EvictionFor(target string) []string {
+func (p *groupPlanner) EvictionFor(target string, alsoRunning []string) []string {
 	tg := p.modelToGroup[target]
 	tgCfg := p.config.Groups[tg]
 
+	seen := make(map[string]struct{})
 	var result []string
-	for mID, proc := range p.processes {
+	consider := func(mID string) {
 		if mID == target {
-			continue
+			return
 		}
-		st := proc.State()
-		if st == process.StateStopped || st == process.StateShutdown {
-			continue
+		if _, dup := seen[mID]; dup {
+			return
 		}
 		og := p.modelToGroup[mID]
-
 		switch {
 		case og == tg && tgCfg.Swap:
+			seen[mID] = struct{}{}
 			result = append(result, mID)
-
 		// the previous ProcessGroup behaviour did not unload exclusive groups
 		// when loading a non-exclusive model. This maintains that gotcha
 		// for backwards compatibility. The newer swap matrix approach does not
 		// have this issue.
 		case og != tg && tgCfg.Exclusive:
+			seen[mID] = struct{}{}
 			result = append(result, mID)
 		}
+	}
+
+	for mID, proc := range p.processes {
+		st := proc.State()
+		if st == process.StateStopped || st == process.StateShutdown {
+			continue
+		}
+		consider(mID)
+	}
+	for _, mID := range alsoRunning {
+		consider(mID)
 	}
 	return result
 }

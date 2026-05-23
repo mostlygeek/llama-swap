@@ -21,7 +21,7 @@ type stubPlanner struct {
 	evict map[string][]string
 }
 
-func (s *stubPlanner) EvictionFor(target string) []string {
+func (s *stubPlanner) EvictionFor(target string, _ []string) []string {
 	if s.evict == nil {
 		return nil
 	}
@@ -372,6 +372,200 @@ func TestBaseRouter_QueueCollation(t *testing.T) {
 	}
 	if got := pc.runCalls.Load(); got != 1 {
 		t.Errorf("c.runCalls=%d want 1", got)
+	}
+}
+
+// TestBaseRouter_ConcurrentDisjointSwaps verifies that two requests with
+// non-conflicting evict sets are loaded in parallel: both Run() calls happen
+// before either process is marked ready.
+func TestBaseRouter_ConcurrentDisjointSwaps(t *testing.T) {
+	a := newFakeProcess("a")
+	pb := newFakeProcess("b")
+
+	// Empty evict sets for both: they can load in parallel.
+	b := newTestBase(t, map[string]process.Process{"a": a, "b": pb}, &stubPlanner{})
+
+	w1 := httptest.NewRecorder()
+	done1 := make(chan struct{})
+	go func() {
+		b.ServeHTTP(w1, newRequest("a"))
+		close(done1)
+	}()
+	waitProcessed(t, b.testProcessed, 1)
+
+	w2 := httptest.NewRecorder()
+	done2 := make(chan struct{})
+	go func() {
+		b.ServeHTTP(w2, newRequest("b"))
+		close(done2)
+	}()
+	waitProcessed(t, b.testProcessed, 1)
+
+	// Both swaps must have reached Run() before either is marked ready —
+	// proves they ran in parallel rather than serializing.
+	<-a.runStarted
+	<-pb.runStarted
+
+	a.markReady()
+	pb.markReady()
+
+	select {
+	case <-done1:
+	case <-time.After(time.Second):
+		t.Fatal("request A did not complete")
+	}
+	select {
+	case <-done2:
+	case <-time.After(time.Second):
+		t.Fatal("request B did not complete")
+	}
+
+	if w1.Code != http.StatusOK {
+		t.Errorf("A status=%d body=%q", w1.Code, w1.Body.String())
+	}
+	if w2.Code != http.StatusOK {
+		t.Errorf("B status=%d body=%q", w2.Code, w2.Body.String())
+	}
+	if got := a.stopCalls.Load(); got != 0 {
+		t.Errorf("a.stopCalls=%d want 0 (parallel swap, no eviction)", got)
+	}
+	if got := pb.stopCalls.Load(); got != 0 {
+		t.Errorf("b.stopCalls=%d want 0 (parallel swap, no eviction)", got)
+	}
+}
+
+// TestBaseRouter_QueueDrainPromotesMultiple verifies that completing one swap
+// unblocks every queued request that no longer collides — they all start in
+// parallel rather than one-per-completion.
+func TestBaseRouter_QueueDrainPromotesMultiple(t *testing.T) {
+	a := newFakeProcess("a")
+	pb := newFakeProcess("b")
+	pc := newFakeProcess("c")
+
+	// A's swap evicts both B and C, so B and C must queue. Once A finishes
+	// B and C themselves have empty evict sets, so they can start together.
+	planner := &stubPlanner{evict: map[string][]string{
+		"a": {"b", "c"},
+	}}
+	b := newTestBase(t, map[string]process.Process{"a": a, "b": pb, "c": pc}, planner)
+
+	w1 := httptest.NewRecorder()
+	done1 := make(chan struct{})
+	go func() {
+		b.ServeHTTP(w1, newRequest("a"))
+		close(done1)
+	}()
+	waitProcessed(t, b.testProcessed, 1)
+	<-a.runStarted
+
+	// B and C arrive while A is loading. evict_b and evict_c are empty,
+	// but collidesWith returns true because they appear in A's evict set.
+	w2 := httptest.NewRecorder()
+	done2 := make(chan struct{})
+	go func() {
+		b.ServeHTTP(w2, newRequest("b"))
+		close(done2)
+	}()
+	waitProcessed(t, b.testProcessed, 1)
+
+	w3 := httptest.NewRecorder()
+	done3 := make(chan struct{})
+	go func() {
+		b.ServeHTTP(w3, newRequest("c"))
+		close(done3)
+	}()
+	waitProcessed(t, b.testProcessed, 1)
+
+	if got := pb.runCalls.Load(); got != 0 {
+		t.Errorf("b started early: runCalls=%d", got)
+	}
+	if got := pc.runCalls.Load(); got != 0 {
+		t.Errorf("c started early: runCalls=%d", got)
+	}
+
+	// Release A. The swapDone handler should drain the queue and start
+	// both B and C in parallel.
+	a.markReady()
+	waitProcessed(t, b.testProcessed, 1) // swapDone(A) → drainQueue starts B and C
+	<-pb.runStarted
+	<-pc.runStarted
+
+	pb.markReady()
+	pc.markReady()
+
+	for i, ch := range []chan struct{}{done1, done2, done3} {
+		select {
+		case <-ch:
+		case <-time.After(time.Second):
+			t.Fatalf("request %d did not complete", i)
+		}
+	}
+}
+
+// TestBaseRouter_Shutdown_FailsAllInFlight verifies that shutdown returns
+// the shutdown error to every waiter on every active swap AND to every
+// queued request.
+func TestBaseRouter_Shutdown_FailsAllInFlight(t *testing.T) {
+	a := newFakeProcess("a")
+	pb := newFakeProcess("b")
+	pc := newFakeProcess("c")
+
+	// a and b load in parallel (empty evicts). c collides with both.
+	planner := &stubPlanner{evict: map[string][]string{
+		"c": {"a", "b"},
+	}}
+	b := newTestBase(t, map[string]process.Process{"a": a, "b": pb, "c": pc}, planner)
+
+	const waitersPer = 2
+	var wg sync.WaitGroup
+	codes := make([]int, 0, 2*waitersPer+1)
+	var codesMu sync.Mutex
+	record := func(code int) {
+		codesMu.Lock()
+		codes = append(codes, code)
+		codesMu.Unlock()
+	}
+
+	launch := func(model string) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			w := httptest.NewRecorder()
+			b.ServeHTTP(w, newRequest(model))
+			record(w.Code)
+		}()
+	}
+
+	// Active swaps for a and b, each with 2 waiters.
+	for i := 0; i < waitersPer; i++ {
+		launch("a")
+		waitProcessed(t, b.testProcessed, 1)
+	}
+	for i := 0; i < waitersPer; i++ {
+		launch("b")
+		waitProcessed(t, b.testProcessed, 1)
+	}
+	// c collides with both → queues.
+	launch("c")
+	waitProcessed(t, b.testProcessed, 1)
+
+	<-a.runStarted
+	<-pb.runStarted
+
+	if err := b.Shutdown(time.Second); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	wg.Wait()
+
+	codesMu.Lock()
+	defer codesMu.Unlock()
+	if len(codes) != 2*waitersPer+1 {
+		t.Fatalf("got %d responses, want %d", len(codes), 2*waitersPer+1)
+	}
+	for i, c := range codes {
+		if c == http.StatusOK {
+			t.Errorf("response %d: status=%d, want non-200 (shutdown)", i, c)
+		}
 	}
 }
 
