@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
-	"github.com/mostlygeek/llama-swap/internal/config"
 )
 
 // newTestMatrix builds a Matrix router from supplied processes, bypassing
@@ -99,6 +99,109 @@ func TestMatrix_CoexistInSet(t *testing.T) {
 	}
 	if got := b.runCalls.Load(); got != 1 {
 		t.Errorf("b.runCalls=%d want 1", got)
+	}
+}
+
+// TestMatrix_CoexistingSetParallel verifies that two models that share an
+// expanded set load in parallel — the solver returns empty Evict for both,
+// the collision predicate clears them, and both swaps run together.
+func TestMatrix_CoexistingSetParallel(t *testing.T) {
+	a := newFakeProcess("a")
+	pb := newFakeProcess("b")
+
+	expanded := []config.ExpandedSet{
+		{SetName: "s_ab", DSL: "a & b", Models: []string{"a", "b"}},
+	}
+	r := newTestMatrix(t, baseMatrixConfig(), expanded, nil, map[string]process.Process{"a": a, "b": pb})
+
+	w1 := httptest.NewRecorder()
+	done1 := make(chan struct{})
+	go func() {
+		r.ServeHTTP(w1, newRequest("a"))
+		close(done1)
+	}()
+	waitProcessed(t, r.testProcessed, 1)
+
+	w2 := httptest.NewRecorder()
+	done2 := make(chan struct{})
+	go func() {
+		r.ServeHTTP(w2, newRequest("b"))
+		close(done2)
+	}()
+	waitProcessed(t, r.testProcessed, 1)
+
+	<-a.runStarted
+	<-pb.runStarted
+
+	a.markReady()
+	pb.markReady()
+
+	for i, ch := range []chan struct{}{done1, done2} {
+		select {
+		case <-ch:
+		case <-time.After(time.Second):
+			t.Fatalf("request %d did not complete", i)
+		}
+	}
+	if got := a.stopCalls.Load(); got != 0 {
+		t.Errorf("a.stopCalls=%d want 0 (coexists with b)", got)
+	}
+	if got := pb.stopCalls.Load(); got != 0 {
+		t.Errorf("b.stopCalls=%d want 0 (coexists with a)", got)
+	}
+}
+
+// TestMatrix_IncompatibleQueues verifies that the second request for a model
+// that cannot coexist with the in-flight first model queues until the first
+// completes, and then evicts it. This exercises the alsoRunning hint via the
+// matrix solver's union into runningSet.
+func TestMatrix_IncompatibleQueues(t *testing.T) {
+	a := newFakeProcess("a")
+	pb := newFakeProcess("b")
+
+	expanded := []config.ExpandedSet{
+		{SetName: "s_a", DSL: "a", Models: []string{"a"}},
+		{SetName: "s_b", DSL: "b", Models: []string{"b"}},
+	}
+	r := newTestMatrix(t, baseMatrixConfig(), expanded, nil, map[string]process.Process{"a": a, "b": pb})
+
+	w1 := httptest.NewRecorder()
+	done1 := make(chan struct{})
+	go func() {
+		r.ServeHTTP(w1, newRequest("a"))
+		close(done1)
+	}()
+	waitProcessed(t, r.testProcessed, 1)
+
+	// B arrives before A transitions to StateStarting. The solver sees A via
+	// alsoRunning and returns evict=[a], so collidesWith forces B to queue.
+	w2 := httptest.NewRecorder()
+	done2 := make(chan struct{})
+	go func() {
+		r.ServeHTTP(w2, newRequest("b"))
+		close(done2)
+	}()
+	waitProcessed(t, r.testProcessed, 1)
+
+	if got := pb.runCalls.Load(); got != 0 {
+		t.Errorf("b started in parallel: runCalls=%d want 0", got)
+	}
+
+	<-a.runStarted
+	a.markReady()
+	waitProcessed(t, r.testProcessed, 1) // swapDone(a) → b promoted, evicts a
+	<-pb.runStarted
+	pb.markReady()
+
+	for i, ch := range []chan struct{}{done1, done2} {
+		select {
+		case <-ch:
+		case <-time.After(time.Second):
+			t.Fatalf("request %d did not complete", i)
+		}
+	}
+	if got := a.stopCalls.Load(); got != 1 {
+		t.Errorf("a.stopCalls=%d want 1 (b's swap must stop a)", got)
 	}
 }
 
