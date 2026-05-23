@@ -25,6 +25,8 @@ var (
 	d3dkmtInitErr           error
 )
 
+// initD3DKMT lazily loads gdi32.dll and resolves D3DKMT function pointers.
+// Safe for concurrent use via sync.Once.
 func initD3DKMT() error {
 	d3dkmtInitOnce.Do(func() {
 		d3dkmDLL = windows.NewLazySystemDLL("gdi32.dll")
@@ -51,6 +53,8 @@ func initD3DKMT() error {
 	return d3dkmtInitErr
 }
 
+// ntstatusCall invokes a D3DKMT function and returns a non-nil error if the
+// NTSTATUS result is not STATUS_SUCCESS (0).
 func ntstatusCall(proc *windows.LazyProc, arg unsafe.Pointer) error {
 	ret, _, _ := proc.Call(uintptr(arg))
 	if ret != 0 {
@@ -59,6 +63,8 @@ func ntstatusCall(proc *windows.LazyProc, arg unsafe.Pointer) error {
 	return nil
 }
 
+// d3dkmEnumerateAdapters enumerates all available graphics adapters via
+// D3DKMTEnumAdapters2.
 func d3dkmEnumerateAdapters() ([]D3DKMT_ADAPTERINFO, error) {
 	var adapters [maxEnumAdapters]D3DKMT_ADAPTERINFO
 	enum := D3DKMT_ENUMADAPTERS2{
@@ -78,6 +84,7 @@ func d3dkmEnumerateAdapters() ([]D3DKMT_ADAPTERINFO, error) {
 	return result, nil
 }
 
+// d3dkmOpenAdapter opens a D3DKMT adapter handle for the given LUID.
 func d3dkmOpenAdapter(luid LUID) (uint32, error) {
 	req := D3DKMT_OPENADAPTERFROMLUID{
 		AdapterLuid: luid,
@@ -88,11 +95,14 @@ func d3dkmOpenAdapter(luid LUID) (uint32, error) {
 	return req.hAdapter, nil
 }
 
+// d3dkmCloseAdapter closes a previously opened D3DKMT adapter handle.
 func d3dkmCloseAdapter(hAdapter uint32) error {
 	req := D3DKMT_CLOSEADAPTER{hAdapter: hAdapter}
 	return ntstatusCall(procCloseAdapter, unsafe.Pointer(&req))
 }
 
+// d3dkmGetAdapterPerfData queries per-adapter performance data (temperature,
+// fan RPM, power, bandwidth) via KMTQAITYPE_ADAPTERPERFDATA.
 func d3dkmGetAdapterPerfData(hAdapter uint32) (*D3DKMT_ADAPTER_PERFDATA, error) {
 	var data D3DKMT_ADAPTER_PERFDATA
 	req := D3DKMT_QUERYADAPTERINFO{
@@ -107,6 +117,8 @@ func d3dkmGetAdapterPerfData(hAdapter uint32) (*D3DKMT_ADAPTER_PERFDATA, error) 
 	return &data, nil
 }
 
+// d3dkmGetAdapterPerfDataCaps queries static adapter performance capabilities
+// (max fan RPM, temperature limits, max bandwidth) via KMTQAITYPE_ADAPTERPERFDATA_CAPS.
 func d3dkmGetAdapterPerfDataCaps(hAdapter uint32) (*D3DKMT_ADAPTER_PERFDATACAPS, error) {
 	var data D3DKMT_ADAPTER_PERFDATACAPS
 	req := D3DKMT_QUERYADAPTERINFO{
@@ -176,6 +188,8 @@ const (
 	qsoffsetSystemRunningTime = 272
 )
 
+// d3dkmQueryAdapterStats returns the number of memory segments and compute
+// nodes for the adapter identified by luid.
 func d3dkmQueryAdapterStats(luid LUID) (nbSegments uint32, nodeCount uint32, err error) {
 	buf := queryStatsBuffer{
 		Type:        int32(D3DKMT_QUERYSTATISTICS_ADAPTER),
@@ -189,6 +203,8 @@ func d3dkmQueryAdapterStats(luid LUID) (nbSegments uint32, nodeCount uint32, err
 	return nbSegments, nodeCount, nil
 }
 
+// d3dkmQuerySegmentStats returns the commit limit (total) and resident
+// (used) bytes for the given memory segment of an adapter.
 func d3dkmQuerySegmentStats(luid LUID, segmentID uint32) (commitLimit uint64, bytesResident uint64, err error) {
 	buf := queryStatsBuffer{
 		Type:        int32(D3DKMT_QUERYSTATISTICS_SEGMENT),
@@ -206,6 +222,8 @@ func d3dkmQuerySegmentStats(luid LUID, segmentID uint32) (commitLimit uint64, by
 	return commitLimit, bytesResident, nil
 }
 
+// d3dkmQueryNodeStats returns the global and system running time counters
+// (in 100ns units) for the given compute node of an adapter.
 func d3dkmQueryNodeStats(luid LUID, nodeID uint32) (runningTime uint64, systemRunningTime uint64, err error) {
 	buf := queryStatsBuffer{
 		Type:        int32(D3DKMT_QUERYSTATISTICS_NODE),
@@ -225,6 +243,8 @@ type nodeRunningTimes struct {
 	System uint64
 }
 
+// d3dkmtNodeUtil computes GPU node utilization as a percentage from running
+// time deltas. Returns -1 if counters went backwards (wrap/reset), 0 if idle.
 func d3dkmtNodeUtil(prevRT, curRT nodeRunningTimes, elapsed100ns int64) float64 {
 	if curRT.Global < prevRT.Global || curRT.System < prevRT.System {
 		return -1
@@ -248,6 +268,8 @@ func d3dkmtNodeUtil(prevRT, curRT nodeRunningTimes, elapsed100ns int64) float64 
 	return 0
 }
 
+// d3dkmtFanPct returns fan speed as a percentage of maxFanRPM, clamped to
+// 100%. Returns 0 if maxFanRPM is unavailable or fan is not spinning.
 func d3dkmtFanPct(fanRPM, maxFanRPM uint32) float64 {
 	if maxFanRPM > 0 && fanRPM > 0 {
 		pct := float64(fanRPM) / float64(maxFanRPM) * 100.0
@@ -259,6 +281,8 @@ func d3dkmtFanPct(fanRPM, maxFanRPM uint32) float64 {
 	return 0
 }
 
+// d3dkmtPowerW converts power from deci-watts (as reported by D3DKMT) to
+// watts. Returns 0 if the power value is zero.
 func d3dkmtPowerW(power uint32) float64 {
 	if power > 0 {
 		return float64(power) / 10.0
@@ -266,6 +290,8 @@ func d3dkmtPowerW(power uint32) float64 {
 	return 0
 }
 
+// d3dkmtTempC converts temperature from deci-Celsius (as reported by D3DKMT)
+// to degrees Celsius.
 func d3dkmtTempC(tempDeciC uint32) int {
 	return int(tempDeciC / 10)
 }
@@ -280,6 +306,9 @@ type d3dkmtAdapterState struct {
 	prevTime   time.Time
 }
 
+// tryD3DKMT attempts to start GPU monitoring using D3DKMT and optional PDH
+// counters. It returns a channel of GpuStat snapshots or an error if no
+// usable adapters are found.
 func tryD3DKMT(ctx context.Context, every time.Duration, logger *logmon.Monitor) (chan []GpuStat, error) {
 	if err := initD3DKMT(); err != nil {
 		return nil, err

@@ -48,6 +48,8 @@ type pdhGpuUtil struct {
 	counter uintptr
 }
 
+// initPdhGpuUtil creates a PDH query for the GPU Engine utilization counter.
+// Returns nil with an error if PDH or the counter is unavailable.
 func initPdhGpuUtil() (*pdhGpuUtil, error) {
 	var query uintptr
 	if ret, _, _ := procPdhOpenQuery.Call(0, 0, uintptr(unsafe.Pointer(&query))); ret != 0 {
@@ -68,6 +70,7 @@ func initPdhGpuUtil() (*pdhGpuUtil, error) {
 	return &pdhGpuUtil{query: query, counter: counter}, nil
 }
 
+// close releases the PDH query handle.
 func (p *pdhGpuUtil) close() {
 	if p.query != 0 {
 		procPdhCloseQuery.Call(p.query)
@@ -75,6 +78,9 @@ func (p *pdhGpuUtil) close() {
 	}
 }
 
+// collect reads the PDH counter and returns a map of adapter LUID to
+// aggregated GPU utilization percentage, summed across all engine instances
+// per adapter and clamped to 100%.
 func (p *pdhGpuUtil) collect() map[LUID]float64 {
 	ret, _, _ := procPdhCollectQueryData.Call(p.query)
 	if ret != 0 && ret != pdhNoData {
@@ -128,6 +134,8 @@ func (p *pdhGpuUtil) collect() map[LUID]float64 {
 	return result
 }
 
+// parsePdhLuid extracts the adapter LUID (high and low parts) from a PDH
+// GPU Engine instance name (e.g. "pid_1234_luid_0x00000000_0x000148BF_phys_0_eng_2_engtype_Compute").
 func parsePdhLuid(name string) (LUID, bool) {
 	idx := strings.Index(name, "luid_0x")
 	if idx < 0 {
