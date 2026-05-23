@@ -154,6 +154,16 @@ func init() {
 	if unsafe.Offsetof(buf.QueryId) != 804 {
 		panic(fmt.Sprintf("queryStatsBuffer.QueryId offset %d != expected 804 (C anonymous union offset)", unsafe.Offsetof(buf.QueryId)))
 	}
+
+	var perfData D3DKMT_ADAPTER_PERFDATA
+	if unsafe.Sizeof(perfData) != 64 {
+		panic(fmt.Sprintf("D3DKMT_ADAPTER_PERFDATA size %d != expected 64 on x64", unsafe.Sizeof(perfData)))
+	}
+
+	var caps D3DKMT_ADAPTER_PERFDATACAPS
+	if unsafe.Sizeof(caps) != 40 {
+		panic(fmt.Sprintf("D3DKMT_ADAPTER_PERFDATACAPS size %d != expected 40 on x64", unsafe.Sizeof(caps)))
+	}
 }
 
 const (
@@ -213,6 +223,51 @@ func d3dkmQueryNodeStats(luid LUID, nodeID uint32) (runningTime uint64, systemRu
 type nodeRunningTimes struct {
 	Global uint64
 	System uint64
+}
+
+func d3dkmtNodeUtil(prevRT, curRT nodeRunningTimes, elapsed100ns int64) float64 {
+	if curRT.Global < prevRT.Global || curRT.System < prevRT.System {
+		return -1
+	}
+	gd := curRT.Global - prevRT.Global
+	sd := curRT.System - prevRT.System
+
+	if gd > 0 && sd > 0 {
+		util := float64(gd) / float64(sd)
+		if util > 1.0 {
+			util = 1.0
+		}
+		return util * 100.0
+	} else if gd > 0 && elapsed100ns > 0 {
+		util := float64(gd) / float64(elapsed100ns) * 100.0
+		if util > 100.0 {
+			util = 100.0
+		}
+		return util
+	}
+	return 0
+}
+
+func d3dkmtFanPct(fanRPM, maxFanRPM uint32) float64 {
+	if maxFanRPM > 0 && fanRPM > 0 {
+		pct := float64(fanRPM) / float64(maxFanRPM) * 100.0
+		if pct > 100.0 {
+			pct = 100.0
+		}
+		return pct
+	}
+	return 0
+}
+
+func d3dkmtPowerW(power uint32) float64 {
+	if power > 0 {
+		return float64(power) / 10.0
+	}
+	return 0
+}
+
+func d3dkmtTempC(tempDeciC uint32) int {
+	return int(tempDeciC / 10)
 }
 
 type d3dkmtAdapterState struct {
@@ -396,26 +451,9 @@ func tryD3DKMT(ctx context.Context, every time.Duration, logger *logmon.Monitor)
 									a.prevNodeRT[node] = nodeRunningTimes{Global: globalRT, System: systemRT}
 									continue
 								}
-								gd := globalRT - prevRT.Global
-								sd := systemRT - prevRT.System
-
-								if gd > 0 && sd > 0 {
-									nodeUtil := float64(gd) / float64(sd)
-									if nodeUtil > 1.0 {
-										nodeUtil = 1.0
-									}
-									nodeUtil *= 100.0
-									if nodeUtil > gpuUtil {
-										gpuUtil = nodeUtil
-									}
-								} else if gd > 0 && elapsed100ns > 0 {
-									nodeUtil := float64(gd) / float64(elapsed100ns) * 100.0
-									if nodeUtil > 100.0 {
-										nodeUtil = 100.0
-									}
-									if nodeUtil > gpuUtil {
-										gpuUtil = nodeUtil
-									}
+								nodeUtil := d3dkmtNodeUtil(prevRT, nodeRunningTimes{Global: globalRT, System: systemRT}, elapsed100ns)
+								if nodeUtil > gpuUtil {
+									gpuUtil = nodeUtil
 								}
 							}
 							a.prevNodeRT[node] = nodeRunningTimes{Global: globalRT, System: systemRT}
@@ -424,17 +462,10 @@ func tryD3DKMT(ctx context.Context, every time.Duration, logger *logmon.Monitor)
 						a.prevTime = now
 					}
 
-					tempC := int(perfData.Temperature / 10)
+					tempC := d3dkmtTempC(perfData.Temperature)
 
-					var fanSpeedPct float64
-					if a.maxFanRPM > 0 && perfData.FanRPM > 0 {
-						fanSpeedPct = float64(perfData.FanRPM) / float64(a.maxFanRPM) * 100.0
-					}
-
-					var powerDrawW float64
-					if perfData.Power > 0 {
-						powerDrawW = float64(perfData.Power) / 10.0
-					}
+					fanSpeedPct := d3dkmtFanPct(perfData.FanRPM, a.maxFanRPM)
+					powerDrawW := d3dkmtPowerW(perfData.Power)
 
 					var memUtilPct float64
 					if memTotalMB > 0 {
