@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -20,37 +21,34 @@ var (
 	procCloseAdapter        *windows.LazyProc
 	procQueryAdapterInfo    *windows.LazyProc
 	procQueryStatistics     *windows.LazyProc
-	d3dkmtInitialized       bool
+	d3dkmtInitOnce         sync.Once
 	d3dkmtInitErr           error
 )
 
 func initD3DKMT() error {
-	if d3dkmtInitialized {
-		return d3dkmtInitErr
-	}
-	d3dkmtInitialized = true
+	d3dkmtInitOnce.Do(func() {
+		d3dkmDLL = windows.NewLazySystemDLL("gdi32.dll")
 
-	d3dkmDLL = windows.NewLazySystemDLL("gdi32.dll")
+		procEnumAdapters2 = d3dkmDLL.NewProc("D3DKMTEnumAdapters2")
+		procOpenAdapterFromLuid = d3dkmDLL.NewProc("D3DKMTOpenAdapterFromLuid")
+		procCloseAdapter = d3dkmDLL.NewProc("D3DKMTCloseAdapter")
+		procQueryAdapterInfo = d3dkmDLL.NewProc("D3DKMTQueryAdapterInfo")
+		procQueryStatistics = d3dkmDLL.NewProc("D3DKMTQueryStatistics")
 
-	procEnumAdapters2 = d3dkmDLL.NewProc("D3DKMTEnumAdapters2")
-	procOpenAdapterFromLuid = d3dkmDLL.NewProc("D3DKMTOpenAdapterFromLuid")
-	procCloseAdapter = d3dkmDLL.NewProc("D3DKMTCloseAdapter")
-	procQueryAdapterInfo = d3dkmDLL.NewProc("D3DKMTQueryAdapterInfo")
-	procQueryStatistics = d3dkmDLL.NewProc("D3DKMTQueryStatistics")
-
-	for name, p := range map[string]*windows.LazyProc{
-		"D3DKMTEnumAdapters2":       procEnumAdapters2,
-		"D3DKMTOpenAdapterFromLuid": procOpenAdapterFromLuid,
-		"D3DKMTCloseAdapter":        procCloseAdapter,
-		"D3DKMTQueryAdapterInfo":    procQueryAdapterInfo,
-		"D3DKMTQueryStatistics":     procQueryStatistics,
-	} {
-		if err := p.Find(); err != nil {
-			d3dkmtInitErr = fmt.Errorf("D3DKMT %s not found: %w", name, err)
-			return d3dkmtInitErr
+		for name, p := range map[string]*windows.LazyProc{
+			"D3DKMTEnumAdapters2":       procEnumAdapters2,
+			"D3DKMTOpenAdapterFromLuid": procOpenAdapterFromLuid,
+			"D3DKMTCloseAdapter":        procCloseAdapter,
+			"D3DKMTQueryAdapterInfo":    procQueryAdapterInfo,
+			"D3DKMTQueryStatistics":     procQueryStatistics,
+		} {
+			if err := p.Find(); err != nil {
+				d3dkmtInitErr = fmt.Errorf("D3DKMT %s not found: %w", name, err)
+				return
+			}
 		}
-	}
-	return nil
+	})
+	return d3dkmtInitErr
 }
 
 func ntstatusCall(proc *windows.LazyProc, arg unsafe.Pointer) error {
