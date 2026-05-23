@@ -25,7 +25,7 @@ func CreateMetricsMiddleware(mm *metricsMonitor, cfg config.Config) chain.Middle
 			// fast path; FetchModel restores the request body.
 			_, modelID, err := router.FetchModel(r, cfg)
 			if err != nil {
-				next.ServeHTTP(w, r)
+				router.SendError(w, r, router.ErrNoModelInContext)
 				return
 			}
 

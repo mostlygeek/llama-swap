@@ -34,9 +34,11 @@ func CreateConcurrencyMiddleware(cfg config.Config) chain.Middleware {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, modelID, err := router.FetchModel(r, cfg)
 			if err != nil {
-				next.ServeHTTP(w, r)
+				router.SendError(w, r, router.ErrNoModelInContext)
 				return
 			}
+
+			// fall through for peer models
 			sem, ok := semaphores[modelID]
 			if !ok {
 				next.ServeHTTP(w, r)
