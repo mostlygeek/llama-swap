@@ -153,11 +153,13 @@ func (f *fakeProcess) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	f.serveCalls.Add(1)
 	f.inFlightServe.Add(1)
 	defer f.inFlightServe.Add(-1)
+	f.mu.Lock()
 	select {
 	case <-f.serveStarted:
 	default:
 		close(f.serveStarted)
 	}
+	f.mu.Unlock()
 	if f.serveBlock != nil {
 		<-f.serveBlock
 	}
