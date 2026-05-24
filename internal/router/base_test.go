@@ -627,20 +627,8 @@ func TestBaseRouter_NoSwapWhileServing(t *testing.T) {
 	}()
 	waitProcessed(t, b.testProcessed, 1)
 
-	// Synchronize on r2's swap goroutine actually calling A.Stop before
-	// releasing r1. Without this sync the doSwap goroutine may not get
-	// scheduled until after close(a.serveBlock), making the test pass by
-	// accident even when the router is violating the property. fakeProcess
-	// records inFlightServe at Stop time, so the violation is detected
-	// at the moment Stop runs while r1 is still pinned.
-	//
-	// NOTE: A future "don't stop while busy" implementation will need to
-	// remove this synchronization (correct code would never call A.Stop
-	// here, so the wait would hang). For the current router this is the
-	// deterministic point where the bug is observable.
-	<-a.stopStarted
-
-	// Release r1 (and any other ServeHTTP currently pinned on A).
+	// Release r1 (and r3 if it is fast-pathed onto the still-loaded A).
+	// The router must hold off B's swap until A has drained.
 	close(a.serveBlock)
 
 	select {
