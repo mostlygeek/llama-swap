@@ -21,26 +21,44 @@ import (
 type fakeProcess struct {
 	id string
 
-	mu         sync.Mutex
-	state      process.ProcessState
-	readyCh    chan struct{}
-	stopCh     chan struct{}
-	runStarted chan struct{} // closed on the first Run call
+	mu          sync.Mutex
+	state       process.ProcessState
+	readyCh     chan struct{}
+	stopCh      chan struct{}
+	runStarted  chan struct{} // closed on the first Run call
+	stopStarted chan struct{} // closed on the first Stop call
 
 	autoReady bool
+
+	// serveBlock, when non-nil, makes ServeHTTP receive from it before
+	// writing its response. Tests use this to hold a request in-flight.
+	// Closing the channel releases every blocked ServeHTTP caller.
+	serveBlock chan struct{}
+	// serveStarted is closed on the first ServeHTTP entry, letting tests
+	// wait deterministically for the handler to begin executing.
+	serveStarted chan struct{}
 
 	runCalls   atomic.Int32
 	stopCalls  atomic.Int32
 	serveCalls atomic.Int32
+
+	// inFlightServe counts ServeHTTP calls currently inside the handler.
+	// stoppedWhileServing flips true if Stop is ever called while that
+	// counter is non-zero — a direct, race-free observation of the
+	// "swap mid-request" anti-property.
+	inFlightServe       atomic.Int32
+	stoppedWhileServing atomic.Bool
 }
 
 func newFakeProcess(id string) *fakeProcess {
 	return &fakeProcess{
-		id:         id,
-		state:      process.StateStopped,
-		readyCh:    make(chan struct{}),
-		stopCh:     make(chan struct{}),
-		runStarted: make(chan struct{}),
+		id:           id,
+		state:        process.StateStopped,
+		readyCh:      make(chan struct{}),
+		stopCh:       make(chan struct{}),
+		runStarted:   make(chan struct{}),
+		stopStarted:  make(chan struct{}),
+		serveStarted: make(chan struct{}),
 	}
 }
 
@@ -91,7 +109,15 @@ func (f *fakeProcess) Run(_ time.Duration) error {
 
 func (f *fakeProcess) Stop(_ time.Duration) error {
 	f.stopCalls.Add(1)
+	if f.inFlightServe.Load() > 0 {
+		f.stoppedWhileServing.Store(true)
+	}
 	f.mu.Lock()
+	select {
+	case <-f.stopStarted:
+	default:
+		close(f.stopStarted)
+	}
 	defer f.mu.Unlock()
 	if f.state == process.StateStopped {
 		return nil
@@ -125,6 +151,16 @@ func (f *fakeProcess) Logger() *logmon.Monitor { return logmon.NewWriter(io.Disc
 
 func (f *fakeProcess) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	f.serveCalls.Add(1)
+	f.inFlightServe.Add(1)
+	defer f.inFlightServe.Add(-1)
+	select {
+	case <-f.serveStarted:
+	default:
+		close(f.serveStarted)
+	}
+	if f.serveBlock != nil {
+		<-f.serveBlock
+	}
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "ok:%s", f.id)
 }

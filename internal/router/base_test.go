@@ -569,6 +569,122 @@ func TestBaseRouter_Shutdown_FailsAllInFlight(t *testing.T) {
 	}
 }
 
+// TestBaseRouter_NoSwapWhileServing verifies that an already-loaded model
+// is not stopped to satisfy another model's swap while it is still handling
+// a request.
+//
+// Sequence:
+//  1. r1 (A) — A loads; ServeHTTP enters and is pinned via serveBlock.
+//  2. r2 (B, planner: B evicts A) — must NOT cause A.Stop while r1 is live.
+//  3. r3 (A) — arrives next; the existing code queues it because B's swap
+//     intent collides with A.
+//  4. r1 released — A finishes r1, then r3 is served by A.
+//  5. B's swap then proceeds; r2 is served by B.
+//
+// fakeProcess.stoppedWhileServing flips true if Stop is ever called while
+// a ServeHTTP is in flight — a direct, race-free signal of the violation.
+func TestBaseRouter_NoSwapWhileServing(t *testing.T) {
+	a := newFakeProcess("a")
+	// autoReady left false: we markReady manually after observing runStarted,
+	// so autoReady's setState(Ready) cannot race with a later Stop and leave
+	// A in Ready, masking the bug.
+	a.serveBlock = make(chan struct{})
+	pb := newFakeProcess("b")
+	// Same reasoning for B: park its swap on WaitReady until we choose.
+
+	planner := &stubPlanner{evict: map[string][]string{"b": {"a"}}}
+	b := newTestBase(t, map[string]process.Process{"a": a, "b": pb}, planner)
+
+	// r1 — load A and enter its ServeHTTP (which blocks on serveBlock).
+	w1 := httptest.NewRecorder()
+	done1 := make(chan struct{})
+	go func() {
+		b.ServeHTTP(w1, newRequest("a"))
+		close(done1)
+	}()
+	waitProcessed(t, b.testProcessed, 1) // handlerReq for r1
+	<-a.runStarted
+	a.markReady()
+	waitProcessed(t, b.testProcessed, 1) // swapDone for A
+	<-a.serveStarted
+
+	// r2 — would evict A. A must not be stopped while r1 is in flight.
+	w2 := httptest.NewRecorder()
+	done2 := make(chan struct{})
+	go func() {
+		b.ServeHTTP(w2, newRequest("b"))
+		close(done2)
+	}()
+	waitProcessed(t, b.testProcessed, 1)
+
+	// r3 — another request for A, arrives behind r2 and queues because
+	// B's swap intent (which evicts A) is recorded as active.
+	w3 := httptest.NewRecorder()
+	done3 := make(chan struct{})
+	go func() {
+		b.ServeHTTP(w3, newRequest("a"))
+		close(done3)
+	}()
+	waitProcessed(t, b.testProcessed, 1)
+
+	// Synchronize on r2's swap goroutine actually calling A.Stop before
+	// releasing r1. Without this sync the doSwap goroutine may not get
+	// scheduled until after close(a.serveBlock), making the test pass by
+	// accident even when the router is violating the property. fakeProcess
+	// records inFlightServe at Stop time, so the violation is detected
+	// at the moment Stop runs while r1 is still pinned.
+	//
+	// NOTE: A future "don't stop while busy" implementation will need to
+	// remove this synchronization (correct code would never call A.Stop
+	// here, so the wait would hang). For the current router this is the
+	// deterministic point where the bug is observable.
+	<-a.stopStarted
+
+	// Release r1 (and any other ServeHTTP currently pinned on A).
+	close(a.serveBlock)
+
+	select {
+	case <-done1:
+	case <-time.After(2 * time.Second):
+		t.Fatal("r1 did not complete after serveBlock release")
+	}
+
+	// Wait for B.Run before marking it ready: markReady before Run would
+	// skip the Run path entirely and leave pb.runCalls at 0. In a correct
+	// implementation B's swap only starts after A has drained; in the
+	// current implementation it has already started — either way runStarted
+	// fires.
+	<-pb.runStarted
+	pb.markReady()
+
+	select {
+	case <-done2:
+	case <-time.After(2 * time.Second):
+		t.Fatal("r2 did not complete after B marked ready")
+	}
+	select {
+	case <-done3:
+	case <-time.After(2 * time.Second):
+		t.Fatal("r3 did not complete")
+	}
+
+	if w1.Code != http.StatusOK || w2.Code != http.StatusOK || w3.Code != http.StatusOK {
+		t.Fatalf("statuses: w1=%d w2=%d w3=%d", w1.Code, w2.Code, w3.Code)
+	}
+	if w1.Body.String() != "ok:a" {
+		t.Errorf("r1 body=%q want ok:a", w1.Body.String())
+	}
+	if w3.Body.String() != "ok:a" {
+		t.Errorf("r3 body=%q want ok:a (r3 must be served by A)", w3.Body.String())
+	}
+	if w2.Body.String() != "ok:b" {
+		t.Errorf("r2 body=%q want ok:b", w2.Body.String())
+	}
+	if a.stoppedWhileServing.Load() {
+		t.Errorf("A.Stop was called while A was still handling a request — the router swapped out a busy process")
+	}
+}
+
 func TestBaseRouter_ModelNotFound(t *testing.T) {
 	a := newFakeProcess("a")
 	b := newTestBase(t, map[string]process.Process{"a": a}, &stubPlanner{})
