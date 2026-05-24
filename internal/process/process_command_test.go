@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -359,12 +360,18 @@ func TestProcessCommand_ConcurrentRunStop(t *testing.T) {
 
 	for range 10 {
 		cmd, port := simpleResponderCmd(t, "-silent")
-		p := newProcessCommand(t, config.ModelConfig{
+		cfg := config.ModelConfig{
 			Cmd:                cmd,
 			Proxy:              fmt.Sprintf("http://127.0.0.1:%d", port),
 			CheckEndpoint:      "/health",
 			HealthCheckTimeout: 10,
-		})
+		}
+
+		if runtime.GOOS == "windows" {
+			cfg.CmdStop = "taskkill /f /t /pid ${PID}"
+		}
+
+		p := newProcessCommand(t, cfg)
 
 		runDone := make(chan struct{})
 		go func() {
