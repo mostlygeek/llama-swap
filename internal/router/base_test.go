@@ -101,6 +101,150 @@ func TestBaseRouter_UnloadSpecificModel(t *testing.T) {
 	}
 }
 
+// TestBaseRouter_Unload_StopsInParallel verifies that Unload fans out its
+// Stop calls concurrently rather than stopping each process serially. Each
+// fakeProcess.Stop is pinned via stopBlock; the test only releases them
+// after observing every stopStarted, proving all three Stops were in
+// flight simultaneously.
+func TestBaseRouter_Unload_StopsInParallel(t *testing.T) {
+	a := newFakeProcess("a")
+	a.markReady()
+	a.stopBlock = make(chan struct{})
+	pb := newFakeProcess("b")
+	pb.markReady()
+	pb.stopBlock = make(chan struct{})
+	pc := newFakeProcess("c")
+	pc.markReady()
+	pc.stopBlock = make(chan struct{})
+
+	b := newTestBase(t, map[string]process.Process{"a": a, "b": pb, "c": pc}, &stubPlanner{})
+
+	unloadDone := make(chan struct{})
+	go func() {
+		b.Unload(time.Second, "a", "b", "c")
+		close(unloadDone)
+	}()
+
+	// All three Stop calls must start before any of them are allowed to
+	// complete. If Unload was serial, only one stopStarted would fire
+	// until we released its stopBlock, and this would deadlock.
+	for _, p := range []*fakeProcess{a, pb, pc} {
+		select {
+		case <-p.stopStarted:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("Stop on %s never started — Unload is not parallel", p.id)
+		}
+	}
+
+	// Release them; Unload should now return.
+	close(a.stopBlock)
+	close(pb.stopBlock)
+	close(pc.stopBlock)
+
+	select {
+	case <-unloadDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Unload did not return after stops released")
+	}
+
+	for _, p := range []*fakeProcess{a, pb, pc} {
+		if p.State() != process.StateStopped {
+			t.Errorf("%s state=%q want stopped", p.id, p.State())
+		}
+		if got := p.stopCalls.Load(); got != 1 {
+			t.Errorf("%s stopCalls=%d want 1", p.id, got)
+		}
+	}
+}
+
+// TestBaseRouter_Unload_ReleasesActiveSwapWaiters verifies that Unload
+// rejoins router state: a request whose swap to the unloaded model is
+// still in progress receives an error, instead of being abandoned
+// against a process that's about to vanish.
+func TestBaseRouter_Unload_ReleasesActiveSwapWaiters(t *testing.T) {
+	a := newFakeProcess("a")
+	// autoReady=false: the swap parks on WaitReady so we can interrupt
+	// it with Unload before it completes.
+
+	b := newTestBase(t, map[string]process.Process{"a": a}, &stubPlanner{})
+
+	w := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		b.ServeHTTP(w, newRequest("a"))
+		close(done)
+	}()
+	waitProcessed(t, b.testProcessed, 1) // handlerReq absorbed; swap started
+	<-a.runStarted
+
+	b.Unload(time.Second, "a")
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ServeHTTP did not return after Unload")
+	}
+	if w.Code == http.StatusOK {
+		t.Errorf("expected non-OK status after Unload, got %d body=%q", w.Code, w.Body.String())
+	}
+	if a.State() != process.StateStopped {
+		t.Errorf("a state=%q want stopped", a.State())
+	}
+}
+
+// TestBaseRouter_Unload_DropsQueuedRequests verifies that queued requests
+// for an unloaded model receive an error rather than sitting forever in
+// the queue against state the router no longer maintains.
+func TestBaseRouter_Unload_DropsQueuedRequests(t *testing.T) {
+	a := newFakeProcess("a")
+	pb := newFakeProcess("b")
+	// Loading B evicts A — so a request for B while A is loading queues.
+	planner := &stubPlanner{evict: map[string][]string{"b": {"a"}}}
+	b := newTestBase(t, map[string]process.Process{"a": a, "b": pb}, planner)
+
+	// r1 starts the swap to A and parks on WaitReady (autoReady=false).
+	w1 := httptest.NewRecorder()
+	done1 := make(chan struct{})
+	go func() {
+		b.ServeHTTP(w1, newRequest("a"))
+		close(done1)
+	}()
+	waitProcessed(t, b.testProcessed, 1)
+	<-a.runStarted
+
+	// r2 for B collides with A's in-flight swap and queues.
+	w2 := httptest.NewRecorder()
+	done2 := make(chan struct{})
+	go func() {
+		b.ServeHTTP(w2, newRequest("b"))
+		close(done2)
+	}()
+	waitProcessed(t, b.testProcessed, 1)
+
+	// Unload B — r2 (queued, targeting B) must be released with an error.
+	b.Unload(time.Second, "b")
+
+	select {
+	case <-done2:
+	case <-time.After(2 * time.Second):
+		t.Fatal("queued B request did not return after Unload(b)")
+	}
+	if w2.Code == http.StatusOK {
+		t.Errorf("queued B request: expected non-OK status, got %d", w2.Code)
+	}
+	if got := pb.runCalls.Load(); got != 0 {
+		t.Errorf("b.runCalls=%d want 0 (B should never have been started)", got)
+	}
+
+	// Release r1 so the test cleans up cleanly.
+	a.markReady()
+	select {
+	case <-done1:
+	case <-time.After(2 * time.Second):
+		t.Fatal("r1 did not complete after a.markReady")
+	}
+}
+
 func TestBaseRouter_FastPath(t *testing.T) {
 	a := newFakeProcess("a")
 	a.markReady()

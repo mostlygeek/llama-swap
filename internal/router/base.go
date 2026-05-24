@@ -18,6 +18,12 @@ type shutdownReq struct {
 	respond chan error
 }
 
+type unloadReq struct {
+	targets []string
+	timeout time.Duration
+	respond chan struct{}
+}
+
 type handlerReq struct {
 	model   string
 	ctx     context.Context
@@ -74,6 +80,7 @@ type baseRouter struct {
 
 	handlerCh   chan handlerReq
 	shutdownCh  chan shutdownReq
+	unloadCh    chan unloadReq
 	swapDoneCh  chan swapDone
 	serveDoneCh chan serveDoneEvent
 
@@ -99,6 +106,7 @@ func newBaseRouter(name string, conf config.Config, processes map[string]process
 		shutdownFn:  shutdownFn,
 		handlerCh:   make(chan handlerReq),
 		shutdownCh:  make(chan shutdownReq),
+		unloadCh:    make(chan unloadReq),
 		swapDoneCh:  make(chan swapDone),
 		serveDoneCh: make(chan serveDoneEvent),
 		runDone:     make(chan struct{}),
@@ -126,6 +134,10 @@ func (b *baseRouter) run() {
 
 		case req := <-b.handlerCh:
 			b.handleRequest(req, active, inFlight, &queued)
+			b.notifyProcessed()
+
+		case req := <-b.unloadCh:
+			b.handleUnload(req, active, inFlight, &queued)
 			b.notifyProcessed()
 
 		case ev := <-b.swapDoneCh:
@@ -537,8 +549,18 @@ func (b *baseRouter) RunningModels() map[string]process.ProcessState {
 }
 
 // Unload stops the named models, or every running model when none are named.
-// It blocks until each targeted process has stopped. An in-flight swap whose
-// target is stopped resolves to an error for its waiters, who may retry.
+// It blocks until each targeted process has stopped.
+//
+// The request is funneled through the run loop so eviction is coordinated
+// with the rest of the router's state: pending swap waiters for an
+// unloaded model are released with an error, queued requests for unloaded
+// models are dropped, and any deferred swaps that were waiting on those
+// models become eligible to start.
+//
+// In-flight requests being served by an unloaded process are not waited
+// for — Stop kills the upstream, those callers see whatever error the
+// reverse proxy surfaces and may retry. Their trackedServe defers fire
+// normally and decrement inFlight as the dying handlers return.
 func (b *baseRouter) Unload(timeout time.Duration, models ...string) {
 	targets := models
 	if len(targets) == 0 {
@@ -547,9 +569,67 @@ func (b *baseRouter) Unload(timeout time.Duration, models ...string) {
 			targets = append(targets, id)
 		}
 	}
+	if len(targets) == 0 {
+		return
+	}
 
+	req := unloadReq{targets: targets, timeout: timeout, respond: make(chan struct{})}
+	select {
+	case b.unloadCh <- req:
+	case <-b.runDone:
+		return
+	}
+	<-req.respond
+}
+
+// handleUnload runs on the run loop in response to an Unload call. It
+// reconciles router-owned state with the impending Stop, then performs
+// the Stop synchronously so callers of Unload remain blocked until each
+// targeted process has actually exited.
+func (b *baseRouter) handleUnload(req unloadReq, active map[string]*activeSwap, inFlight map[string]int, queued *[]handlerReq) {
+	unloadErr := fmt.Errorf("%s: model unloaded", b.name)
+
+	targetSet := make(map[string]bool, len(req.targets))
+	for _, id := range req.targets {
+		targetSet[id] = true
+	}
+
+	// Release waiters of any in-flight swap whose target is being
+	// unloaded. The swap goroutine itself is left to finish on its own;
+	// when its swapDone arrives, handleSwapDone will find no entry in
+	// active and silently drop it.
+	for id := range targetSet {
+		s, ok := active[id]
+		if !ok {
+			continue
+		}
+		for _, w := range s.waiters {
+			b.grant(w, handlerResp{err: unloadErr})
+		}
+		delete(active, id)
+	}
+
+	// Drop queued requests addressed to unloaded models. Requests for
+	// other models stay queued and may benefit from drainQueue at the end.
+	if len(*queued) > 0 {
+		kept := (*queued)[:0]
+		for _, w := range *queued {
+			if targetSet[w.model] {
+				b.grant(w, handlerResp{err: unloadErr})
+				continue
+			}
+			kept = append(kept, w)
+		}
+		*queued = kept
+	}
+
+	// Stop the targeted processes. Done synchronously so Unload's caller
+	// can rely on "after Unload returns, the process is stopped". inFlight
+	// is intentionally NOT cleared here: each dying handler will fire its
+	// trackedServe defer and reach handleServeDone in the normal way once
+	// the run loop is free again.
 	var wg sync.WaitGroup
-	for _, id := range targets {
+	for id := range targetSet {
 		p, ok := b.processes[id]
 		if !ok {
 			continue
@@ -557,12 +637,18 @@ func (b *baseRouter) Unload(timeout time.Duration, models ...string) {
 		wg.Add(1)
 		go func(id string, p process.Process) {
 			defer wg.Done()
-			if err := p.Stop(timeout); err != nil {
+			if err := p.Stop(req.timeout); err != nil {
 				b.logger.Warnf("%s: unloading %s failed: %v", b.name, id, err)
 			}
 		}(id, p)
 	}
 	wg.Wait()
+
+	// Removing entries from active above may have unblocked queued
+	// requests that previously collided with the now-cancelled swaps.
+	b.drainQueue(active, inFlight, queued)
+
+	close(req.respond)
 }
 
 func (b *baseRouter) Shutdown(timeout time.Duration) error {
