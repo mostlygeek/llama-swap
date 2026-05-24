@@ -37,6 +37,10 @@ type fakeProcess struct {
 	// serveStarted is closed on the first ServeHTTP entry, letting tests
 	// wait deterministically for the handler to begin executing.
 	serveStarted chan struct{}
+	// stopBlock, when non-nil, makes Stop receive from it (after signalling
+	// stopStarted) before completing. Tests use this to prove that several
+	// Stop calls can be in flight simultaneously.
+	stopBlock chan struct{}
 
 	runCalls   atomic.Int32
 	stopCalls  atomic.Int32
@@ -118,6 +122,15 @@ func (f *fakeProcess) Stop(_ time.Duration) error {
 	default:
 		close(f.stopStarted)
 	}
+	f.mu.Unlock()
+
+	// Test hook: hold Stop here so the test can prove multiple Stops are
+	// in flight at the same time before any of them complete.
+	if f.stopBlock != nil {
+		<-f.stopBlock
+	}
+
+	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.state == process.StateStopped {
 		return nil
