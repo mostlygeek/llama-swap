@@ -85,6 +85,27 @@ type GroupConfig struct {
 	Members    []string `yaml:"members"`
 }
 
+type ProfileConfig struct {
+	Description string            `yaml:"description"`
+	Aliases     map[string]string `yaml:"aliases"`
+}
+
+// UnmarshalYAML provides a targeted error for the removed legacy profiles shape.
+func (p *ProfileConfig) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.SequenceNode {
+		return fmt.Errorf("legacy profiles format removed: use profiles.<name>.aliases map; see docs/configuration.md and use groups for concurrent model loading")
+	}
+
+	type rawProfileConfig ProfileConfig
+	var raw rawProfileConfig
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+
+	*p = ProfileConfig(raw)
+	return nil
+}
+
 var (
 	macroNameRegex    = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 	macroPatternRegex = regexp.MustCompile(`\$\{([a-zA-Z0-9_-]+)\}`)
@@ -118,18 +139,18 @@ type HookOnStartup struct {
 }
 
 type Config struct {
-	HealthCheckTimeout int                    `yaml:"healthCheckTimeout"`
-	LogRequests        bool                   `yaml:"logRequests"`
-	LogLevel           string                 `yaml:"logLevel"`
-	LogTimeFormat      string                 `yaml:"logTimeFormat"`
-	LogToStdout        string                 `yaml:"logToStdout"`
-	MetricsMaxInMemory int                    `yaml:"metricsMaxInMemory"`
-	CaptureBuffer      int                    `yaml:"captureBuffer"`
-	Performance        PerformanceConfig      `yaml:"performance"`
-	GlobalTTL          int                    `yaml:"globalTTL"`
-	Models             map[string]ModelConfig `yaml:"models"` /* key is model ID */
-	Profiles           map[string][]string    `yaml:"profiles"`
-	Groups             map[string]GroupConfig `yaml:"groups"` /* key is group ID */
+	HealthCheckTimeout int                      `yaml:"healthCheckTimeout"`
+	LogRequests        bool                     `yaml:"logRequests"`
+	LogLevel           string                   `yaml:"logLevel"`
+	LogTimeFormat      string                   `yaml:"logTimeFormat"`
+	LogToStdout        string                   `yaml:"logToStdout"`
+	MetricsMaxInMemory int                      `yaml:"metricsMaxInMemory"`
+	CaptureBuffer      int                      `yaml:"captureBuffer"`
+	Performance        PerformanceConfig        `yaml:"performance"`
+	GlobalTTL          int                      `yaml:"globalTTL"`
+	Models             map[string]ModelConfig   `yaml:"models"` /* key is model ID */
+	Profiles           map[string]ProfileConfig `yaml:"profiles"`
+	Groups             map[string]GroupConfig   `yaml:"groups"` /* key is group ID */
 
 	// swap matrix: solver-based alternative to groups
 	Matrix *MatrixConfig `yaml:"matrix"`
@@ -162,14 +183,75 @@ type Config struct {
 	Peers PeerDictionaryConfig `yaml:"peers"`
 }
 
-func (c *Config) RealModelName(search string) (string, bool) {
+// EffectiveRequestName applies active profile aliases without shadowing model IDs.
+func (c *Config) EffectiveRequestName(search string, profileAliases map[string]string) string {
 	if _, found := c.Models[search]; found {
-		return search, true
-	} else if name, found := c.aliases[search]; found {
-		return name, found
-	} else {
+		return search
+	}
+	if target, ok := profileAliases[search]; ok {
+		return target
+	}
+	return search
+}
+
+func (c *Config) RealModelName(search string) (string, bool) {
+	return c.RealModelNameWithProfile(search, nil)
+}
+
+// RealModelNameWithProfile resolves search to a model ID with profile aliases applied.
+func (c *Config) RealModelNameWithProfile(search string, profileAliases map[string]string) (string, bool) {
+	effective := c.EffectiveRequestName(search, profileAliases)
+	if effective == "" {
 		return "", false
 	}
+	if _, found := c.Models[effective]; found {
+		return effective, true
+	}
+	name, found := c.aliases[effective]
+	return name, found
+}
+
+// EffectiveAliasesFor returns aliases that resolve to modelID under the profile overlay.
+func (c *Config) EffectiveAliasesFor(modelID string, profileAliases map[string]string) []string {
+	static := c.Models[modelID].Aliases
+	if len(profileAliases) == 0 {
+		return static
+	}
+
+	seen := make(map[string]struct{}, len(static))
+	out := make([]string, 0, len(static))
+	for _, alias := range static {
+		if target, overridden := profileAliases[alias]; overridden {
+			resolved, _ := c.RealModelName(target)
+			if resolved != modelID {
+				continue
+			}
+		}
+		if _, found := seen[alias]; found {
+			continue
+		}
+		seen[alias] = struct{}{}
+		out = append(out, alias)
+	}
+
+	added := make([]string, 0)
+	for alias, target := range profileAliases {
+		if _, found := c.Models[alias]; found {
+			continue
+		}
+		resolved, _ := c.RealModelName(target)
+		if resolved != modelID {
+			continue
+		}
+		if _, found := seen[alias]; found {
+			continue
+		}
+		seen[alias] = struct{}{}
+		added = append(added, alias)
+	}
+	sort.Strings(added)
+	out = append(out, added...)
+	return out
 }
 
 func (c *Config) FindConfig(modelName string) (ModelConfig, string, bool) {
@@ -252,6 +334,23 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 				return Config{}, fmt.Errorf("duplicate alias %s found in model: %s", alias, modelName)
 			}
 			config.aliases[alias] = modelName
+		}
+	}
+
+	for profileName, profile := range config.Profiles {
+		if profileName == "" {
+			return Config{}, fmt.Errorf("profile name cannot be empty")
+		}
+		if len(profile.Aliases) == 0 {
+			return Config{}, fmt.Errorf("profile %s: aliases map cannot be empty", profileName)
+		}
+		for alias := range profile.Aliases {
+			if alias == "" {
+				return Config{}, fmt.Errorf("profile %s: alias name cannot be empty", profileName)
+			}
+			if _, found := config.Models[alias]; found {
+				return Config{}, fmt.Errorf("profile %s: alias %q conflicts with model ID", profileName, alias)
+			}
 		}
 	}
 
@@ -452,6 +551,22 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		}
 
 		config.Models[modelId] = modelConfig
+	}
+
+	// Validate profile alias targets after all aliases are registered.
+	for profileName, profile := range config.Profiles {
+		for alias, target := range profile.Aliases {
+			if target == "" {
+				continue
+			}
+			if _, ok := config.Models[target]; ok {
+				continue
+			}
+			if _, ok := config.aliases[target]; ok {
+				continue
+			}
+			return Config{}, fmt.Errorf("profile %s: alias %q target %q is not a known model or alias", profileName, alias, target)
+		}
 	}
 
 	// groups XOR matrix

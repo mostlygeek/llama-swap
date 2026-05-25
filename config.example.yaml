@@ -343,6 +343,23 @@ models:
     # - processes have 5 seconds to shutdown until forceful termination is attempted
     cmdStop: docker stop ${MODEL_ID}
 
+# profiles: runtime-switchable alias overlays
+# - optional, default: empty
+# - remap aliases to different model IDs at runtime, switched via the UI
+#   dropdown or POST /api/profiles/activate/<name>
+# - the active profile is runtime state and does not persist across restarts
+# - target must resolve in a single step: a model ID, a static model
+#   alias, or a setParamsByID variant key. Profile aliases never chain
+#   to other profile aliases (including within the same profile) and
+#   cannot shadow a model ID; both are rejected at load time.
+# - use null (~) to disable an alias while the profile is active
+# profiles:
+#   plan-smarter:
+#     description: "Use the smarter model for planning; disable image gen"
+#     aliases:
+#       llm-plan: "glm-5.1"
+#       image-gen: ~
+
 # =============================================================================
 # matrix: run concurrent models with a solver-based swap DSL
 # =============================================================================

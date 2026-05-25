@@ -51,10 +51,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	if len(conf.Profiles) > 0 {
-		mainLogger.Warn("Profile functionality has been removed in favor of Groups. See the README for more information.")
-	}
-
 	switch strings.ToLower(strings.TrimSpace(conf.LogLevel)) {
 	case "debug":
 		mainLogger.SetLogLevel(logmon.LevelDebug)
