@@ -96,7 +96,27 @@ type ProxyManager struct {
 
 	// peer proxy see: #296, #433
 	peerProxy *PeerProxy
+
+	// config file management — set via SetConfigFile / SetReloadFn
+	configFile string
+	configMu   sync.Mutex // guards config file writes
+	reloadFn   func()     // called after config file changes; nil if not wired
+
+	// mDNS — set via SetListenAddr before calling RegisterMDNS
+	listenAddr string
 }
+
+// SetConfigFile stores the path to the on-disk config YAML so that the
+// management API can write model entries back to it.
+func (pm *ProxyManager) SetConfigFile(path string) { pm.configFile = path }
+
+// SetReloadFn injects the reload callback from main so that
+// POST /api/config/reload (and auto-reload after writes) can trigger it.
+func (pm *ProxyManager) SetReloadFn(fn func()) { pm.reloadFn = fn }
+
+// SetListenAddr stores the HTTP listen address (e.g. "0.0.0.0:11435") so that
+// RegisterMDNS can advertise the correct port.
+func (pm *ProxyManager) SetListenAddr(addr string) { pm.listenAddr = addr }
 
 func New(proxyConfig config.Config) *ProxyManager {
 	// set up loggers
@@ -573,7 +593,21 @@ func (pm *ProxyManager) swapProcessGroup(realModelName string) (*ProcessGroup, e
 		return nil, fmt.Errorf("could not find process group for model %s", realModelName)
 	}
 
-	if processGroup.exclusive {
+	groupConfig := pm.config.Groups[processGroup.id]
+
+	if groupConfig.AutoUnload && groupConfig.Swap {
+		pm.proxyLogger.Debugf("Auto-unload mode for group %s, stopping non-persistent siblings", processGroup.id)
+		for _, member := range groupConfig.Members {
+			if member != realModelName && processGroup.processes[member] != nil {
+				if !groupConfig.Persistent {
+					pm.proxyLogger.Debugf("Auto-unloading sibling model %s in group %s", member, processGroup.id)
+					processGroup.StopProcess(member, StopWaitForInflightRequest)
+				}
+			}
+		}
+	}
+
+	if groupConfig.Exclusive {
 		pm.proxyLogger.Debugf("Exclusive mode for group %s, stopping other process groups", processGroup.id)
 		for groupId, otherGroup := range pm.processGroups {
 			if groupId != processGroup.id && !otherGroup.persistent {
@@ -585,16 +619,54 @@ func (pm *ProxyManager) swapProcessGroup(realModelName string) (*ProcessGroup, e
 	return processGroup, nil
 }
 
+// modelProcessState returns the current state string for a model ID.
+// Resolves aliases to their canonical ID before lookup.
+// Returns "stopped" if the model has no running process.
+func (pm *ProxyManager) modelProcessState(modelID string) (state string, loaded bool) {
+	// Resolve alias to canonical ID so alias rows report correct runtime state.
+	if canonical, found := pm.config.RealModelName(modelID); found {
+		modelID = canonical
+	}
+	var process *Process
+	if pm.matrix != nil {
+		process, _ = pm.matrix.GetProcess(modelID)
+	} else {
+		if pg := pm.findGroupByModelName(modelID); pg != nil {
+			process = pg.processes[modelID]
+		}
+	}
+	if process == nil {
+		return "stopped", false
+	}
+	switch process.CurrentState() {
+	case StateReady:
+		return "ready", true
+	case StateStarting:
+		return "starting", false
+	case StateStopping:
+		return "stopping", false
+	case StateStopped:
+		return "stopped", false
+	case StateShutdown:
+		return "shutdown", false
+	default:
+		return "unknown", false
+	}
+}
+
 func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 	data := make([]gin.H, 0, len(pm.config.Models))
 	createdTime := time.Now().Unix()
 
 	newRecord := func(modelId string, modelConfig config.ModelConfig) gin.H {
+		state, loaded := pm.modelProcessState(modelId)
 		record := gin.H{
 			"id":       modelId,
 			"object":   "model",
 			"created":  createdTime,
 			"owned_by": "llama-swap",
+			"state":    state,
+			"loaded":   loaded,
 		}
 
 		if name := strings.TrimSpace(modelConfig.Name); name != "" {
@@ -603,6 +675,7 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 		if desc := strings.TrimSpace(modelConfig.Description); desc != "" {
 			record["description"] = desc
 		}
+		addModelRuntimeHints(record, modelConfig)
 
 		// Add metadata if present
 		if len(modelConfig.Metadata) > 0 {
@@ -664,6 +737,41 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 		"object": "list",
 		"data":   data,
 	})
+}
+
+func addModelRuntimeHints(record gin.H, modelConfig config.ModelConfig) {
+	args, err := modelConfig.SanitizedCommand()
+	if err != nil {
+		return
+	}
+	if ctxSize, ok := commandFlagInt(args, "--ctx-size", "-c"); ok {
+		record["context_length"] = ctxSize
+	}
+	if maxTokens, ok := commandFlagInt(args, "--n-predict", "-n"); ok {
+		record["max_output_tokens"] = maxTokens
+	}
+}
+
+func commandFlagInt(args []string, names ...string) (int, bool) {
+	for i, arg := range args {
+		for _, name := range names {
+			if arg == name && i+1 < len(args) {
+				return parsePositiveInt(args[i+1])
+			}
+			if value, ok := strings.CutPrefix(arg, name+"="); ok {
+				return parsePositiveInt(value)
+			}
+		}
+	}
+	return 0, false
+}
+
+func parsePositiveInt(value string) (int, bool) {
+	parsed, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || parsed <= 0 {
+		return 0, false
+	}
+	return parsed, true
 }
 
 // findModelInPath searches for a valid model name in a path with slashes.

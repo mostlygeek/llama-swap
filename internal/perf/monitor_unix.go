@@ -31,6 +31,13 @@ func getGpuStats(ctx context.Context, every time.Duration, logger *logmon.Monito
 		logger.Debugf("LACT: %s", err.Error())
 	}
 
+	if ch, err := tryROCmSmi(ctx, every, logger); err == nil {
+		logger.Info("using rocm-smi for GPU monitoring")
+		return ch, nil
+	} else {
+		logger.Debugf("rocm-smi: %s", err.Error())
+	}
+
 	if ch, err := tryNvidiaSmi(ctx, every, logger); err == nil {
 		logger.Info("using nvidia-smi for GPU monitoring")
 		return ch, nil
@@ -131,6 +138,251 @@ func tryLACT(ctx context.Context, every time.Duration, logger *logmon.Monitor) (
 	}()
 
 	return ch, nil
+}
+
+func tryROCmSmi(ctx context.Context, every time.Duration, logger *logmon.Monitor) (chan []GpuStat, error) {
+	if _, err := exec.LookPath("rocm-smi"); err != nil {
+		return nil, ErrNoGpuTool
+	}
+
+	// First check if rocm-smi can see any GPUs
+	checkCmd := exec.CommandContext(ctx, "rocm-smi", "--alldevices")
+	checkCmd.Env = append(os.Environ(), "HSA_OVERRIDE_GFX_VERSION=12.0.1")
+	if out, err := checkCmd.CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("rocm-smi check failed: %s: %w", string(out), err)
+	}
+
+	sec := int(every.Seconds())
+	if sec < 2 {
+		sec = 2
+	}
+
+	ch := make(chan []GpuStat, 1)
+
+	go func() {
+		defer close(ch)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			// rocm-smi doesn't support combining flags in one call, so query each metric separately
+			// and merge the results.
+			var stats []GpuStat
+
+			// VRAM
+			if out, err := exec.CommandContext(ctx, "rocm-smi", "--showmeminfo=vram", "--json").Output(); err == nil {
+				stats = mergeROCmStats(stats, parseROCmSmiJSON(out))
+			}
+
+			// Temperature
+			if out, err := exec.CommandContext(ctx, "rocm-smi", "--showtemp", "--json").Output(); err == nil {
+				stats = mergeROCmStats(stats, parseROCmSmiJSON(out))
+			}
+
+			// Power
+			if out, err := exec.CommandContext(ctx, "rocm-smi", "--showpower", "--json").Output(); err == nil {
+				stats = mergeROCmStats(stats, parseROCmSmiJSON(out))
+			}
+
+			// GPU utilization
+			if out, err := exec.CommandContext(ctx, "rocm-smi", "--showuse", "--json").Output(); err == nil {
+				stats = mergeROCmStats(stats, parseROCmSmiJSON(out))
+			}
+
+			if len(stats) > 0 {
+				select {
+				case ch <- stats:
+				default:
+				}
+			}
+
+			timer := time.NewTimer(time.Duration(sec) * time.Second)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+		}
+	}()
+
+	return ch, nil
+}
+
+func parseROCmSmiJSON(out []byte) []GpuStat {
+	// rocm-smi --json returns flat key-value pairs per card:
+	// {"card0": {"VRAM Total Memory (B)": "34208743424", "VRAM Total Used Memory (B)": "31978942464"}}
+	// Keys vary by version; parse as raw map for flexibility.
+	var raw map[string]map[string]string
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return nil
+	}
+
+	if len(raw) == 0 {
+		return nil
+	}
+
+	// Collect all card indices and their key-value maps.
+	type cardData struct {
+		idx   int
+		keys  map[string]string
+		total uint64
+		used  uint64
+		temp  float64
+		power float64
+		util  float64
+	}
+	cards := make(map[int]*cardData)
+
+	for cardKey, kv := range raw {
+		// Extract card index from "card0", "card1", etc.
+		idx := 0
+		fmt.Sscanf(cardKey, "card%d", &idx)
+
+		cd, ok := cards[idx]
+		if !ok {
+			cd = &cardData{idx: idx, keys: kv}
+			cards[idx] = cd
+		}
+
+		for key, val := range kv {
+			// Clean up the value string (remove quotes if present)
+			val = strings.Trim(val, "\"")
+			var num float64
+			fmt.Sscanf(val, "%f", &num)
+
+			switch {
+			case strings.Contains(key, "VRAM") && strings.Contains(key, "Total Memory") && !strings.Contains(key, "Used"):
+				cd.total = uint64(num)
+			case strings.Contains(key, "VRAM") && strings.Contains(key, "Used Memory"):
+				cd.used = uint64(num)
+			case strings.Contains(key, "Temperature") && strings.Contains(key, "edge"):
+				// Prefer edge sensor (die edge); always overwrite.
+				cd.temp = num
+			case strings.Contains(key, "Temperature") && cd.temp == 0:
+				// Fall back to any temperature sensor if edge isn't reported.
+				cd.temp = num
+			case strings.Contains(key, "GPU use") || (strings.Contains(key, "GPU") && strings.Contains(key, "use")):
+				cd.util = num
+			case strings.Contains(key, "Power") && strings.Contains(key, "W"):
+				cd.power = num
+			}
+		}
+	}
+
+	var stats []GpuStat
+	for _, cd := range cards {
+		memTotalMB := int(cd.total / 1024 / 1024)
+		memUsedMB := int(cd.used / 1024 / 1024)
+		var memUtilPct float64
+		if memTotalMB > 0 {
+			memUtilPct = float64(memUsedMB) / float64(memTotalMB) * 100
+		}
+		gpuUtil := cd.util
+		if gpuUtil == 0 && memTotalMB > 0 {
+			gpuUtil = memUtilPct // fallback: approximate GPU util from VRAM utilization
+		}
+		stats = append(stats, GpuStat{
+			ID:         cd.idx,
+			Name:       fmt.Sprintf("AMD GPU [%d]", cd.idx),
+			TempC:      int(cd.temp),
+			GpuUtilPct: gpuUtil,
+			MemUtilPct: memUtilPct,
+			MemUsedMB:  memUsedMB,
+			MemTotalMB: memTotalMB,
+			PowerDrawW: cd.power,
+		})
+	}
+
+	return stats
+}
+
+func mergeROCmStats(existing []GpuStat, newStats []GpuStat) []GpuStat {
+	if len(newStats) == 0 {
+		return existing
+	}
+	if len(existing) == 0 {
+		return newStats
+	}
+	newMap := make(map[int]GpuStat)
+	for _, s := range newStats {
+		newMap[s.ID] = s
+	}
+	for i, s := range existing {
+		ns, ok := newMap[s.ID]
+		if !ok {
+			continue
+		}
+		if ns.TempC != 0 {
+			existing[i].TempC = ns.TempC
+		}
+		if ns.PowerDrawW != 0 {
+			existing[i].PowerDrawW = ns.PowerDrawW
+		}
+		if ns.GpuUtilPct != 0 {
+			existing[i].GpuUtilPct = ns.GpuUtilPct
+		}
+		if ns.MemTotalMB != 0 {
+			existing[i].MemTotalMB = ns.MemTotalMB
+		}
+		if ns.MemUsedMB != 0 {
+			existing[i].MemUsedMB = ns.MemUsedMB
+		}
+	}
+	return existing
+}
+
+func parseROCmSmiCSV(out []byte) []GpuStat {
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) < 2 {
+		return nil
+	}
+
+	var stats []GpuStat
+	// Parse: GPU[0] : VRAM Total Memory (B): 34208743424
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if !strings.Contains(line, "VRAM") {
+			continue
+		}
+
+		// Extract GPU index
+		gpuIdx := 0
+		if idx := strings.Index(line, "GPU["); idx >= 0 {
+			end := strings.Index(line[idx:], "]")
+			if end > 0 {
+				fmt.Sscanf(line[idx+4:end], "%d", &gpuIdx)
+			}
+		}
+
+		// Extract value
+		parts := strings.Split(line, ":")
+		if len(parts) < 2 {
+			continue
+		}
+		valStr := strings.TrimSpace(parts[len(parts)-1])
+		var bytes uint64
+		fmt.Sscanf(valStr, "%d", &bytes)
+
+		memTotalMB := int(bytes / 1024 / 1024)
+		if len(stats) <= gpuIdx {
+			stats = append(stats, GpuStat{ID: gpuIdx, MemTotalMB: memTotalMB})
+		} else {
+			stats[gpuIdx].MemUsedMB = int(bytes / 1024 / 1024)
+		}
+	}
+
+	// Second pass: if we got total and used on separate lines, compute utilization
+	for i := range stats {
+		if stats[i].MemTotalMB > 0 && stats[i].MemUsedMB > 0 {
+			stats[i].MemUtilPct = float64(stats[i].MemUsedMB) / float64(stats[i].MemTotalMB) * 100
+		}
+	}
+
+	return stats
 }
 
 func tryNvidiaSmi(ctx context.Context, every time.Duration, logger *logmon.Monitor) (chan []GpuStat, error) {

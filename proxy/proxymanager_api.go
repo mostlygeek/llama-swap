@@ -32,11 +32,29 @@ func addApiHandlers(pm *ProxyManager) {
 	{
 		apiGroup.POST("/models/unload", pm.apiUnloadAllModels)
 		apiGroup.POST("/models/unload/*model", pm.apiUnloadSingleModelHandler)
+		apiGroup.POST("/models/load/*model", pm.apiLoadSingleModelHandler)
+		apiGroup.GET("/models/*model", pm.apiGetModelHandler)
+		apiGroup.DELETE("/models/*model", pm.apiDeleteModel)
+		apiGroup.POST("/models/pull", pm.apiPullModel)
+		apiGroup.GET("/ps", pm.apiPSHandler)
+		apiGroup.GET("/storage", pm.apiGetStorage)
+		apiGroup.GET("/config/info", pm.apiConfigInfo)
+		apiGroup.POST("/config/models", pm.apiConfigAddModel)
+		apiGroup.PATCH("/config/models/:id", pm.apiConfigPatchModel)
+		apiGroup.DELETE("/config/models/:id", pm.apiConfigRemoveModel)
+		apiGroup.PATCH("/config/groups/:id", pm.apiConfigPatchGroup)
+		apiGroup.POST("/config/reload", pm.apiConfigReload)
 		apiGroup.GET("/events", pm.apiSendEvents)
 		apiGroup.GET("/metrics", pm.apiGetMetrics)
 		apiGroup.GET("/performance", pm.apiGetPerformance)
 		apiGroup.GET("/version", pm.apiGetVersion)
 		apiGroup.GET("/captures/:id", pm.apiGetCapture)
+		// Ollama-compatible endpoints (enables Open WebUI, Chatbox, Msty, etc.)
+		apiGroup.GET("/tags", pm.apiOllamaTags)
+		apiGroup.POST("/show", pm.apiOllamaShow)
+		apiGroup.DELETE("/delete", pm.apiOllamaDelete)
+		// Unified resource snapshot (disk + memory + GPU)
+		apiGroup.GET("/resources", pm.apiGetResources)
 	}
 }
 
@@ -325,6 +343,107 @@ func (pm *ProxyManager) apiUnloadSingleModelHandler(c *gin.Context) {
 		return
 	}
 	c.String(http.StatusOK, "OK")
+}
+
+// apiLoadSingleModelHandler warms a model by routing a minimal request through
+// the proxy, causing llama-swap to start the backing process and load weights.
+// POST /api/models/load/*model — symmetric counterpart to /api/models/unload/*model.
+func (pm *ProxyManager) apiLoadSingleModelHandler(c *gin.Context) {
+	requestedModel := strings.TrimPrefix(c.Param("model"), "/")
+	realModelName, found := pm.config.RealModelName(requestedModel)
+	if !found {
+		pm.sendErrorResponse(c, http.StatusNotFound, "Model not found")
+		return
+	}
+
+	body := fmt.Sprintf(
+		`{"model":%q,"messages":[{"role":"user","content":"hi"}],"max_tokens":1,"stream":false}`,
+		realModelName,
+	)
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost,
+		"/v1/chat/completions", strings.NewReader(body))
+	if err != nil {
+		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("failed to build load request: %s", err.Error()))
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	dw := &DiscardWriter{}
+	var loadErr error
+	if pm.matrix != nil {
+		loadErr = pm.matrix.ProxyRequest(realModelName, dw, req)
+	} else {
+		processGroup, swapErr := pm.swapProcessGroup(realModelName)
+		if swapErr != nil {
+			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error loading model: %s", swapErr.Error()))
+			return
+		}
+		loadErr = processGroup.ProxyRequest(realModelName, dw, req)
+	}
+	if loadErr != nil {
+		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error loading model: %s", loadErr.Error()))
+		return
+	}
+	c.String(http.StatusOK, "OK")
+}
+
+// apiGetModelHandler implements GET /api/models/:model.
+// Returns the model's configuration and current runtime state.
+// Useful for polling a specific model's state without fetching all models.
+func (pm *ProxyManager) apiGetModelHandler(c *gin.Context) {
+	requestedModel := strings.TrimPrefix(c.Param("model"), "/")
+	realModelName, found := pm.config.RealModelName(requestedModel)
+	if !found {
+		pm.sendErrorResponse(c, http.StatusNotFound, "Model not found")
+		return
+	}
+	modelConfig := pm.config.Models[realModelName]
+	state, loaded := pm.modelProcessState(realModelName)
+
+	record := gin.H{
+		"id":     realModelName,
+		"object": "model",
+		"state":  state,
+		"loaded": loaded,
+	}
+	if name := strings.TrimSpace(modelConfig.Name); name != "" {
+		record["name"] = name
+	}
+	if desc := strings.TrimSpace(modelConfig.Description); desc != "" {
+		record["description"] = desc
+	}
+	addModelRuntimeHints(record, modelConfig)
+	if len(modelConfig.Metadata) > 0 {
+		record["meta"] = gin.H{"llamaswap": modelConfig.Metadata}
+	}
+	c.JSON(http.StatusOK, record)
+}
+
+// apiPSHandler implements GET /api/ps.
+// Returns only the models that are currently loaded (state == ready),
+// using an Ollama-compatible response envelope: {"models": [...]}.
+// This allows clients to see which models occupy VRAM at a glance.
+func (pm *ProxyManager) apiPSHandler(c *gin.Context) {
+	running := make([]gin.H, 0)
+	for id, modelConfig := range pm.config.Models {
+		state, loaded := pm.modelProcessState(id)
+		if !loaded {
+			continue
+		}
+		name := strings.TrimSpace(modelConfig.Name)
+		if name == "" {
+			name = id
+		}
+		running = append(running, gin.H{
+			"name":  name,
+			"model": id,
+			"state": state,
+		})
+	}
+	sort.Slice(running, func(i, j int) bool {
+		return running[i]["model"].(string) < running[j]["model"].(string)
+	})
+	c.JSON(http.StatusOK, gin.H{"models": running})
 }
 
 func (pm *ProxyManager) apiGetVersion(c *gin.Context) {

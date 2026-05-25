@@ -82,6 +82,7 @@ type GroupConfig struct {
 	Swap       bool     `yaml:"swap"`
 	Exclusive  bool     `yaml:"exclusive"`
 	Persistent bool     `yaml:"persistent"`
+	AutoUnload bool     `yaml:"autoUnload"`
 	Members    []string `yaml:"members"`
 }
 
@@ -98,6 +99,7 @@ func (c *GroupConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		Swap:       true,
 		Exclusive:  true,
 		Persistent: false,
+		AutoUnload: true,
 		Members:    []string{},
 	}
 
@@ -160,6 +162,10 @@ type Config struct {
 
 	// support remote peers, see issue #433, #296
 	Peers PeerDictionaryConfig `yaml:"peers"`
+
+	// directory where model files are stored; used by the pull and storage APIs.
+	// If unset, llama-swap tries to infer it from the first model with a --model flag.
+	ModelsDir string `yaml:"modelsDir"`
 }
 
 func (c *Config) RealModelName(search string) (string, bool) {
@@ -559,9 +565,10 @@ func AddDefaultGroupToConfig(config Config) Config {
 	}
 
 	defaultGroup := GroupConfig{
-		Swap:      true,
-		Exclusive: true,
-		Members:   []string{},
+		Swap:       true,
+		Exclusive:  true,
+		AutoUnload: true,
+		Members:    []string{},
 	}
 	// if groups is empty, create a default group and put
 	// all models into it

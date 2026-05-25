@@ -121,7 +121,8 @@ func main() {
 	// Support for watching config and reloading when it changes
 	reloading := false
 	var reloadMutex sync.Mutex
-	reloadProxyManager := func() {
+	var reloadProxyManager func()
+	reloadProxyManager = func() {
 		reloadMutex.Lock()
 		if reloading {
 			reloadMutex.Unlock()
@@ -151,6 +152,10 @@ func main() {
 			newPM := proxy.New(conf)
 			newPM.SetVersion(date, commit, version)
 			newPM.SetPerfMonitor(mon)
+			newPM.SetConfigFile(*configPath)
+			newPM.SetReloadFn(reloadProxyManager)
+			newPM.SetListenAddr(*listenStr)
+			newPM.RegisterMDNS()
 			srv.Handler = newPM
 			mainLogger.Debug("Configuration Reloaded")
 
@@ -169,6 +174,10 @@ func main() {
 			newPM := proxy.New(conf)
 			newPM.SetVersion(date, commit, version)
 			newPM.SetPerfMonitor(mon)
+			newPM.SetConfigFile(*configPath)
+			newPM.SetReloadFn(reloadProxyManager)
+			newPM.SetListenAddr(*listenStr)
+			newPM.RegisterMDNS()
 			srv.Handler = newPM
 		}
 	}

@@ -244,19 +244,22 @@ groups:
 		},
 		Groups: map[string]GroupConfig{
 			DEFAULT_GROUP_ID: {
-				Swap:      true,
-				Exclusive: true,
-				Members:   []string{"model1", "model3"},
+				Swap:       true,
+				Exclusive:  true,
+				AutoUnload: true,
+				Members:    []string{"model1", "model3"},
 			},
 			"group1": {
-				Swap:      true,
-				Exclusive: false,
-				Members:   []string{"model2"},
+				Swap:       true,
+				Exclusive:  false,
+				AutoUnload: true,
+				Members:    []string{"model2"},
 			},
 			"forever": {
 				Swap:       true,
 				Exclusive:  false,
 				Persistent: true,
+				AutoUnload: true,
 				Members:    []string{"model4"},
 			},
 		},

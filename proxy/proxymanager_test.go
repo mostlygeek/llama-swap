@@ -410,6 +410,40 @@ models:
 	assert.False(t, exists, "model2 should not have llamaswap_meta")
 }
 
+func TestProxyManager_ListModelsHandler_WithRuntimeHints(t *testing.T) {
+	cfg := testConfigFromYAML(t, `
+logLevel: error
+models:
+  model1:
+    cmd: llama-server --port ${PORT} --model /models/a.gguf --ctx-size 65536 --n-predict=4096
+  model2:
+    cmd: llama-server --port ${PORT} --model /models/b.gguf -c 32768 -n 2048
+`)
+	proxy := New(cfg)
+
+	req := httptest.NewRequest("GET", "/v1/models", nil)
+	w := CreateTestResponseRecorder()
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response struct {
+		Data []map[string]any `json:"data"`
+	}
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
+
+	models := map[string]map[string]any{}
+	for _, model := range response.Data {
+		models[model["id"].(string)] = model
+	}
+
+	assert.Equal(t, float64(65536), models["model1"]["context_length"])
+	assert.Equal(t, float64(4096), models["model1"]["max_output_tokens"])
+	assert.Equal(t, float64(32768), models["model2"]["context_length"])
+	assert.Equal(t, float64(2048), models["model2"]["max_output_tokens"])
+}
+
 func TestProxyManager_ListModelsHandler_SortedByID(t *testing.T) {
 	// Intentionally add models in non-sorted order and with an unlisted model
 	cfg := testConfigFromYAML(t, `
@@ -1187,6 +1221,94 @@ models:
 	assert.Equal(t, StateReady, proxy.processGroups["preloadTestGroup"].processes["model2"].CurrentState())
 }
 
+// Test that autoUnload unloads sibling models when a new model is loaded in swap mode
+func TestProxyManager_AutoUnload(t *testing.T) {
+	const testGroupId = "swapGroup"
+	cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+models:
+  model1:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model1
+  model2:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model2
+groups:
+  swapGroup:
+    swap: true
+    autoUnload: true
+    members:
+      - model1
+      - model2
+`)
+
+	proxy := New(cfg)
+	defer proxy.StopProcesses(StopImmediately)
+
+	// Load model1
+	reqBody := `{"model":"model1"}`
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+	w := CreateTestResponseRecorder()
+	proxy.ServeHTTP(w, req)
+	assert.Equal(t, StateReady, proxy.processGroups[testGroupId].processes["model1"].CurrentState())
+
+	// Load model2 - should auto-unload model1
+	reqBody = `{"model":"model2"}`
+	req = httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+	w = CreateTestResponseRecorder()
+	proxy.ServeHTTP(w, req)
+
+	select {
+	case <-proxy.processGroups[testGroupId].processes["model1"].cmdWaitChan:
+		// good, model1 was stopped
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for model1 to be auto-unloaded")
+	}
+
+	assert.Equal(t, StateStopped, proxy.processGroups[testGroupId].processes["model1"].CurrentState())
+	assert.Equal(t, StateReady, proxy.processGroups[testGroupId].processes["model2"].CurrentState())
+}
+
+// Test that autoUnload is disabled when swap is false
+func TestProxyManager_AutoUnloadDisabledWhenSwapFalse(t *testing.T) {
+	const testGroupId = "parallelGroup"
+	cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+models:
+  model1:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model1
+  model2:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model2
+groups:
+  parallelGroup:
+    swap: false
+    autoUnload: true
+    members:
+      - model1
+      - model2
+`)
+
+	proxy := New(cfg)
+	defer proxy.StopProcesses(StopImmediately)
+
+	// Load model1
+	reqBody := `{"model":"model1"}`
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+	w := CreateTestResponseRecorder()
+	proxy.ServeHTTP(w, req)
+	assert.Equal(t, StateReady, proxy.processGroups[testGroupId].processes["model1"].CurrentState())
+
+	// Load model2 - should NOT auto-unload model1 because swap is false
+	reqBody = `{"model":"model2"}`
+	req = httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewBufferString(reqBody))
+	w = CreateTestResponseRecorder()
+	proxy.ServeHTTP(w, req)
+
+	// Both should still be ready
+	assert.Equal(t, StateReady, proxy.processGroups[testGroupId].processes["model1"].CurrentState())
+	assert.Equal(t, StateReady, proxy.processGroups[testGroupId].processes["model2"].CurrentState())
+}
+
 func TestProxyManager_StreamingEndpointsReturnNoBufferingHeader(t *testing.T) {
 	cfg := testConfigFromYAML(t, `
 healthCheckTimeout: 15
@@ -1878,4 +2000,186 @@ models:
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Body.String(), "/messages")
 	})
+}
+
+// TestProxyManager_ListModels_IncludesState verifies that GET /v1/models
+// returns a "state" and "loaded" field for each model entry.
+// Models that have never been started should report state "stopped" and loaded false.
+func TestProxyManager_ListModels_IncludesState(t *testing.T) {
+	cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+models:
+  model-a:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model-a
+  model-b:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model-b
+`)
+	proxy := New(cfg)
+	defer proxy.StopProcesses(StopImmediately)
+
+	req := httptest.NewRequest("GET", "/v1/models", nil)
+	w := CreateTestResponseRecorder()
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.Bytes()
+
+	// Every entry must have state and loaded fields.
+	data := gjson.GetBytes(body, "data").Array()
+	assert.Len(t, data, 2)
+	for _, m := range data {
+		assert.True(t, m.Get("state").Exists(), "model %s: missing state field", m.Get("id").String())
+		assert.True(t, m.Get("loaded").Exists(), "model %s: missing loaded field", m.Get("id").String())
+		// No process started yet — expect stopped and not loaded.
+		assert.Equal(t, "stopped", m.Get("state").String(), "model %s: unexpected state", m.Get("id").String())
+		assert.False(t, m.Get("loaded").Bool(), "model %s: expected loaded=false", m.Get("id").String())
+	}
+}
+
+// TestProxyManager_ListModels_StateReady verifies that a model reports
+// state "ready" and loaded true after it has handled a request.
+func TestProxyManager_ListModels_StateReady(t *testing.T) {
+	cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+models:
+  hot-model:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond hot-model
+`)
+	pm := New(cfg)
+	defer pm.StopProcesses(StopImmediately)
+
+	// Warm the model by routing a request through it.
+	req := httptest.NewRequest("POST", "/v1/chat/completions",
+		bytes.NewBufferString(`{"model":"hot-model","messages":[]}`))
+	pm.ServeHTTP(CreateTestResponseRecorder(), req)
+
+	req = httptest.NewRequest("GET", "/v1/models", nil)
+	w := CreateTestResponseRecorder()
+	pm.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	models := gjson.GetBytes(w.Body.Bytes(), "data").Array()
+	assert.Len(t, models, 1)
+	assert.Equal(t, "ready", models[0].Get("state").String())
+	assert.True(t, models[0].Get("loaded").Bool())
+}
+
+// TestProxyManager_LoadSingleModel verifies that POST /api/models/load/*model
+// starts the model process (state transitions from stopped → ready).
+func TestProxyManager_LoadSingleModel(t *testing.T) {
+	cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+models:
+  model1:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model1
+  model2:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model2
+`)
+	pm := New(cfg)
+	defer pm.StopProcesses(StopImmediately)
+
+	// Confirm model1 is stopped before load.
+	assert.Equal(t, StateStopped, pm.processGroups[config.DEFAULT_GROUP_ID].processes["model1"].CurrentState())
+
+	req := httptest.NewRequest("POST", "/api/models/load/model1", nil)
+	w := CreateTestResponseRecorder()
+	pm.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "OK", w.Body.String())
+	assert.Equal(t, StateReady, pm.processGroups[config.DEFAULT_GROUP_ID].processes["model1"].CurrentState())
+	// model2 must remain stopped — load is targeted.
+	assert.Equal(t, StateStopped, pm.processGroups[config.DEFAULT_GROUP_ID].processes["model2"].CurrentState())
+}
+
+// TestProxyManager_LoadSingleModel_NotFound verifies that loading an unknown
+// model returns 404.
+func TestProxyManager_LoadSingleModel_NotFound(t *testing.T) {
+	cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+models:
+  model1:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model1
+`)
+	pm := New(cfg)
+	defer pm.StopProcesses(StopImmediately)
+
+	req := httptest.NewRequest("POST", "/api/models/load/does-not-exist", nil)
+	w := CreateTestResponseRecorder()
+	pm.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// TestProxyManager_PS verifies that GET /api/ps returns only running models
+// in Ollama-compatible format.
+func TestProxyManager_PS(t *testing.T) {
+	cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+models:
+  model-running:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model-running
+  model-stopped:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond model-stopped
+`)
+	pm := New(cfg)
+	defer pm.StopProcesses(StopImmediately)
+
+	// Start model-running via a request.
+	pm.ServeHTTP(CreateTestResponseRecorder(),
+		httptest.NewRequest("POST", "/v1/chat/completions",
+			bytes.NewBufferString(`{"model":"model-running","messages":[]}`)))
+
+	req := httptest.NewRequest("GET", "/api/ps", nil)
+	w := CreateTestResponseRecorder()
+	pm.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.Bytes()
+
+	models := gjson.GetBytes(body, "models").Array()
+	assert.Len(t, models, 1, "only running models should appear in /api/ps")
+	assert.Equal(t, "model-running", models[0].Get("model").String())
+	assert.Equal(t, "model-running", models[0].Get("name").String())
+	assert.Equal(t, "ready", models[0].Get("state").String())
+}
+
+// TestProxyManager_ModelDetail verifies GET /api/models/:model returns config
+// and runtime state for a known model, and 404 for unknown ones.
+func TestProxyManager_ModelDetail(t *testing.T) {
+	cfg := testConfigFromYAML(t, `
+healthCheckTimeout: 15
+logLevel: error
+models:
+  detail-model:
+    cmd: {{RESPONDER}} --port ${PORT} --silent --respond detail-model --ctx-size 49152 --n-predict 3072
+    name: "Detail Model"
+    description: "for testing"
+`)
+	pm := New(cfg)
+	defer pm.StopProcesses(StopImmediately)
+
+	req := httptest.NewRequest("GET", "/api/models/detail-model", nil)
+	w := CreateTestResponseRecorder()
+	pm.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.Bytes()
+	assert.Equal(t, "detail-model", gjson.GetBytes(body, "id").String())
+	assert.Equal(t, "Detail Model", gjson.GetBytes(body, "name").String())
+	assert.Equal(t, "for testing", gjson.GetBytes(body, "description").String())
+	assert.Equal(t, int64(49152), gjson.GetBytes(body, "context_length").Int())
+	assert.Equal(t, int64(3072), gjson.GetBytes(body, "max_output_tokens").Int())
+	assert.Equal(t, "stopped", gjson.GetBytes(body, "state").String())
+	assert.False(t, gjson.GetBytes(body, "loaded").Bool())
+
+	// Unknown model → 404.
+	req = httptest.NewRequest("GET", "/api/models/no-such-model", nil)
+	w = CreateTestResponseRecorder()
+	pm.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
