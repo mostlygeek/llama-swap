@@ -585,6 +585,64 @@ func (pm *ProxyManager) swapProcessGroup(realModelName string) (*ProcessGroup, e
 	return processGroup, nil
 }
 
+// insertMetadataAtPath places metadata keys at the specified JSON path within the record.
+// Path "/" means top-level. Path "/a/b" means record["a"]["b"][key] = value.
+// Reserved keys at root level are skipped.
+func insertMetadataAtPath(record gin.H, metadata map[string]any, path string) {
+	reserved := map[string]bool{
+		"id": true, "object": true, "created": true,
+		"owned_by": true, "name": true, "description": true,
+	}
+
+	// Parse path segments, filtering empty strings from leading/trailing slashes
+	segments := strings.Split(path, "/")
+	var filtered []string
+	for _, s := range segments {
+		if s != "" {
+			filtered = append(filtered, s)
+		}
+	}
+
+	// Root level insertion
+	if len(filtered) == 0 {
+		for k, v := range metadata {
+			if !reserved[k] {
+				record[k] = v
+			}
+		}
+		return
+	}
+
+	// Navigate/create nested structure
+	current := record
+	for _, seg := range filtered[:len(filtered)-1] {
+		if _, exists := current[seg]; !exists {
+			current[seg] = gin.H{}
+		}
+		next, ok := current[seg].(gin.H)
+		if !ok {
+			next = gin.H{}
+			current[seg] = next
+		}
+		current = next
+	}
+
+	// Insert metadata at the final segment
+	finalKey := filtered[len(filtered)-1]
+	if _, exists := current[finalKey]; !exists {
+		current[finalKey] = gin.H{}
+	}
+	target, ok := current[finalKey].(gin.H)
+	if !ok {
+		target = gin.H{}
+		current[finalKey] = target
+	}
+
+	for k, v := range metadata {
+		target[k] = v
+	}
+}
+
 func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 	data := make([]gin.H, 0, len(pm.config.Models))
 	createdTime := time.Now().Unix()
@@ -604,11 +662,13 @@ func (pm *ProxyManager) listModelsHandler(c *gin.Context) {
 			record["description"] = desc
 		}
 
-		// Add metadata if present
+		// Add metadata if present - use configured metadataPath
 		if len(modelConfig.Metadata) > 0 {
-			record["meta"] = gin.H{
-				"llamaswap": modelConfig.Metadata,
+			metadataPath := modelConfig.MetadataPath
+			if metadataPath == "" {
+				metadataPath = "/meta/llamaswap"
 			}
+			insertMetadataAtPath(record, modelConfig.Metadata, metadataPath)
 		}
 		return record
 	}

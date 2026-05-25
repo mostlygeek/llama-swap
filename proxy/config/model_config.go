@@ -49,6 +49,10 @@ type ModelConfig struct {
 	// Arbitrary metadata that can be exposed through the API
 	Metadata map[string]any `yaml:"metadata"`
 
+	// MetadataPath: see #264
+	// JSON path where metadata keys are placed in the /v1/models response
+	MetadataPath string `yaml:"metadataPath"`
+
 	// override global setting
 	SendLoadingState *bool `yaml:"sendLoadingState"`
 
@@ -71,6 +75,7 @@ func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		ConcurrencyLimit: 0,
 		Name:             "",
 		Description:      "",
+		MetadataPath:     "/meta/llamaswap",
 
 		// matches http.DefaultTransport
 		Timeouts: TimeoutsConfig{

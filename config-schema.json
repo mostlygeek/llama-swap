@@ -289,6 +289,12 @@
                         "default": {},
                         "description": "Dictionary of arbitrary values included in /v1/models. Can contain complex types. Only passed through in /v1/models responses."
                     },
+                    "metadataPath": {
+                        "type": "string",
+                        "default": "/meta/llamaswap",
+                        "pattern": "^/([a-zA-Z0-9_\\-]+|\\$\\{[a-zA-Z0-9_\\-]+\\})?(/([a-zA-Z0-9_\\-]+|\\$\\{[a-zA-Z0-9_\\-]+\\}))*$",
+                        "description": "JSON path where metadata keys are placed in /v1/models response. Default '/meta/llamaswap' preserves existing behavior. Use '/' for top-level placement, or '/custom/path' for custom nesting."
+                    },
                     "concurrencyLimit": {
                         "type": "integer",
                         "minimum": 0,
