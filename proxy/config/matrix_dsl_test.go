@@ -99,6 +99,14 @@ func TestDSL_Tokenize(t *testing.T) {
 			input:  "a @ b",
 			errMsg: "unexpected character",
 		},
+		{
+			name:  "identifier with slash and colon",
+			input: "author/model:F16",
+			expect: []token{
+				{tokIdent, "author/model:F16"},
+				{tokEOF, ""},
+			},
+		},
 	}
 
 	for _, tt := range tests {
