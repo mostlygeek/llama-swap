@@ -20,15 +20,18 @@ type contextkey struct {
 	name string
 }
 
+type ReqContextData struct {
+	Model   string
+	ModelID string
+}
+
 var (
 	ErrNoModelInContext  = fmt.Errorf("no model in request context")
 	ErrNoRouterFound     = fmt.Errorf("no router found for model")
 	ErrNoPeerModelFound  = fmt.Errorf("peer model not found")
 	ErrNoLocalModelFound = fmt.Errorf("local model not found")
 
-	// Context keys use to store information info in the request's context
-	ModelKey   = &contextkey{"model"}    // the model value in the request
-	ModelIDKey = &contextkey{"model-id"} // The model ID in the configuration
+	ContextKey = &contextkey{"context"}
 )
 
 type Router interface {
@@ -67,57 +70,55 @@ type LocalRouter interface {
 	ProcessLogger(modelID string) (*logmon.Monitor, bool)
 }
 
-// FetchModel will attempt to get the model id from the context then
+// FetchContext will attempt to get the model id from the context then
 // from the model body. If it extracts the model from the body it will
 // store the model in the context for downstream handlers. An error
 // will be returned when model can not be fetch from either location.
-func FetchModel(r *http.Request, cfg config.Config) (string, string, error) {
-	model, realName, ok := GetModel(r.Context())
+func FetchContext(r *http.Request, cfg config.Config) (ReqContextData, error) {
+	data, ok := ReadContext(r.Context())
 	if ok {
-		return model, realName, nil
+		return data, nil
 	}
 
-	if model, err := ExtractModel(r); err == nil {
-		realName, _ := cfg.RealModelName(model)
+	if data, err := ExtractContext(r); err == nil {
+		realName, _ := cfg.RealModelName(data.Model)
 		if realName == "" {
-			realName = model
+			realName = data.Model
 		}
-		*r = *r.WithContext(SetModel(r.Context(), model, realName))
-		return model, realName, nil
+		data.ModelID = realName
+		*r = *r.WithContext(SetContext(r.Context(), data))
+		return data, nil
 	}
 
-	return "", "", ErrNoModelInContext
+	return ReqContextData{}, ErrNoModelInContext
 }
 
-func SetModel(ctx context.Context, requested, real string) context.Context {
-	ctx = context.WithValue(ctx, ModelKey, requested)
-	ctx = context.WithValue(ctx, ModelIDKey, real)
-	return ctx
+func SetContext(ctx context.Context, data ReqContextData) context.Context {
+	return context.WithValue(ctx, ContextKey, data)
 }
 
-func GetModel(ctx context.Context) (string, string, bool) {
-	requested, ok := ctx.Value(ModelKey).(string)
-	real, _ := ctx.Value(ModelIDKey).(string)
-	return requested, real, ok
+func ReadContext(ctx context.Context) (ReqContextData, bool) {
+	data, ok := ctx.Value(ContextKey).(ReqContextData)
+	return data, ok
 }
 
-// ExtractModel pulls the model name from an HTTP request without consuming the
+// ExtractContext pulls the model name from an HTTP request without consuming the
 // body. For GET requests it reads the "model" query parameter. For POST
 // requests it inspects Content-Type and parses JSON, multipart/form-data, or
 // application/x-www-form-urlencoded bodies. The request body is always restored
 // before returning so downstream handlers — including reverse proxies that
 // forward raw bytes upstream — can still read it.
-func ExtractModel(r *http.Request) (string, error) {
+func ExtractContext(r *http.Request) (ReqContextData, error) {
 	if r.Method == http.MethodGet {
 		if model := r.URL.Query().Get("model"); model != "" {
-			return model, nil
+			return ReqContextData{Model: model}, nil
 		}
-		return "", fmt.Errorf("missing 'model' query parameter")
+		return ReqContextData{}, fmt.Errorf("missing 'model' query parameter")
 	}
 
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		return "", fmt.Errorf("error reading request body: %w", err)
+		return ReqContextData{}, fmt.Errorf("error reading request body: %w", err)
 	}
 	defer func() {
 		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
@@ -128,9 +129,9 @@ func ExtractModel(r *http.Request) (string, error) {
 	if strings.Contains(contentType, "application/json") {
 		model := gjson.GetBytes(bodyBytes, "model").String()
 		if model == "" {
-			return "", fmt.Errorf("missing or empty 'model' in JSON body")
+			return ReqContextData{}, fmt.Errorf("missing or empty 'model' in JSON body")
 		}
-		return model, nil
+		return ReqContextData{Model: model}, nil
 	}
 
 	// Form parsers read from r.Body, so feed them a fresh reader over the
@@ -139,19 +140,19 @@ func ExtractModel(r *http.Request) (string, error) {
 	r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	if strings.Contains(contentType, "multipart/form-data") {
 		if err := r.ParseMultipartForm(32 << 20); err != nil {
-			return "", fmt.Errorf("error parsing multipart form: %w", err)
+			return ReqContextData{}, fmt.Errorf("error parsing multipart form: %w", err)
 		}
 	} else {
 		if err := r.ParseForm(); err != nil {
-			return "", fmt.Errorf("error parsing form: %w", err)
+			return ReqContextData{}, fmt.Errorf("error parsing form: %w", err)
 		}
 	}
 
 	if model := r.FormValue("model"); model != "" {
-		return model, nil
+		return ReqContextData{Model: model}, nil
 	}
 
-	return "", fmt.Errorf("missing 'model' parameter")
+	return ReqContextData{}, fmt.Errorf("missing 'model' parameter")
 }
 
 func SendError(w http.ResponseWriter, r *http.Request, err error) {
