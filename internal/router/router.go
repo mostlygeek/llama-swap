@@ -21,8 +21,10 @@ type contextkey struct {
 }
 
 type ReqContextData struct {
-	Model   string
-	ModelID string
+	Model            string
+	ModelID          string
+	Streaming        bool
+	SendLoadingState bool
 }
 
 var (
@@ -86,6 +88,9 @@ func FetchContext(r *http.Request, cfg config.Config) (ReqContextData, error) {
 			realName = data.Model
 		}
 		data.ModelID = realName
+		if mc, ok := cfg.Models[realName]; ok {
+			data.SendLoadingState = mc.SendLoadingState != nil && *mc.SendLoadingState
+		}
 		*r = *r.WithContext(SetContext(r.Context(), data))
 		return data, nil
 	}
@@ -111,7 +116,7 @@ func ReadContext(ctx context.Context) (ReqContextData, bool) {
 func ExtractContext(r *http.Request) (ReqContextData, error) {
 	if r.Method == http.MethodGet {
 		if model := r.URL.Query().Get("model"); model != "" {
-			return ReqContextData{Model: model}, nil
+			return ReqContextData{Model: model, Streaming: r.URL.Query().Get("stream") == "true"}, nil
 		}
 		return ReqContextData{}, fmt.Errorf("missing 'model' query parameter")
 	}
@@ -131,7 +136,7 @@ func ExtractContext(r *http.Request) (ReqContextData, error) {
 		if model == "" {
 			return ReqContextData{}, fmt.Errorf("missing or empty 'model' in JSON body")
 		}
-		return ReqContextData{Model: model}, nil
+		return ReqContextData{Model: model, Streaming: gjson.GetBytes(bodyBytes, "stream").Bool()}, nil
 	}
 
 	// Form parsers read from r.Body, so feed them a fresh reader over the
@@ -149,7 +154,7 @@ func ExtractContext(r *http.Request) (ReqContextData, error) {
 	}
 
 	if model := r.FormValue("model"); model != "" {
-		return ReqContextData{Model: model}, nil
+		return ReqContextData{Model: model, Streaming: r.FormValue("stream") == "true"}, nil
 	}
 
 	return ReqContextData{}, fmt.Errorf("missing 'model' parameter")
