@@ -256,6 +256,43 @@ func TestGroup_SameGroupSwapSerialises(t *testing.T) {
 	}
 }
 
+// TestGroup_PersistentNotEvicted verifies that a group with persistent=true
+// is never evicted when another exclusive group starts loading. The running
+// model in the persistent group stays alive alongside the new one.
+func TestGroup_PersistentNotEvicted(t *testing.T) {
+	a := newFakeProcess("a")
+	a.markReady()
+	go a.Run(0)
+
+	b := newFakeProcess("b")
+	b.autoReady = true
+
+	conf := config.Config{
+		HealthCheckTimeout: 5,
+		Groups: map[string]config.GroupConfig{
+			"persist": {Swap: true, Exclusive: false, Persistent: true, Members: []string{"a"}},
+			"other":   {Swap: true, Exclusive: true, Members: []string{"b"}},
+		},
+	}
+	g := newTestGroup(t, conf, map[string]process.Process{"a": a, "b": b})
+
+	w := httptest.NewRecorder()
+	g.ServeHTTP(w, newRequest("b"))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
+	}
+	if got := a.stopCalls.Load(); got != 0 {
+		t.Errorf("a.stopCalls=%d want 0 (persistent group must not be evicted)", got)
+	}
+	if a.State() != process.StateStarting && a.State() != process.StateReady {
+		t.Errorf("a state=%s want still running", a.State())
+	}
+	if got := b.runCalls.Load(); got != 1 {
+		t.Errorf("b.runCalls=%d want 1", got)
+	}
+}
+
 // TestGroup_NonExclusiveDoesNotUnloadExclusive pins a backwards-compatible
 // gotcha from the original ProcessGroup: when a model in a non-exclusive group
 // is loaded, any running exclusive group keeps running. The two coexist.

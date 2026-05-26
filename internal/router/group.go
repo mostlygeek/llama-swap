@@ -87,8 +87,10 @@ func (p *groupPlanner) EvictionFor(target string, alsoRunning []string) []string
 		// for backwards compatibility. The newer swap matrix approach does not
 		// have this issue.
 		case og != tg && tgCfg.Exclusive:
-			seen[mID] = struct{}{}
-			result = append(result, mID)
+			if ogCfg := p.config.Groups[og]; !ogCfg.Persistent {
+				seen[mID] = struct{}{}
+				result = append(result, mID)
+			}
 		}
 	}
 
