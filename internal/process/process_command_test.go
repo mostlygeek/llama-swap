@@ -353,6 +353,181 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
+// TestProcessCommand_TTL_StopsAfterIdle verifies that a process with a TTL
+// automatically stops itself after the idle timeout has elapsed following its
+// last request.
+func TestProcessCommand_TTL_StopsAfterIdle(t *testing.T) {
+	skipIfNoSimpleResponder(t)
+
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(mock.Close)
+
+	cmd, _ := simpleResponderCmd(t, "-silent")
+	p := newProcessCommand(t, config.ModelConfig{
+		Cmd:                cmd,
+		Proxy:              mock.URL,
+		CheckEndpoint:      "/health",
+		HealthCheckTimeout: 10,
+		UnloadAfter:        1, // 1-second TTL
+	})
+
+	runErr := runAsync(t, p)
+	defer func() {
+		if p.State() == StateReady {
+			p.Stop(testStopTimeout)
+		}
+	}()
+
+	if got := p.State(); got != StateReady {
+		t.Fatalf("expected StateReady, got %s", got)
+	}
+
+	// Make one request to prime the last-use timestamp.
+	req := httptest.NewRequest("GET", "/", nil)
+	rr := httptest.NewRecorder()
+	p.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200 after request, got %d", rr.Code)
+	}
+
+	// Wait for the TTL goroutine to fire; poll state until it becomes Stopped
+	// or we time out.
+	deadline := time.Now().Add(5 * time.Second)
+	for p.State() == StateReady && time.Now().Before(deadline) {
+		time.Sleep(testPollInterval)
+	}
+
+	if got := p.State(); got != StateStopped {
+		t.Fatalf("TTL did not stop process; state is %s (expected %s)", got, StateStopped)
+	}
+
+	// Run() should have returned nil (clean stop from TTL).
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Errorf("Run() after TTL stop: expected nil, got %v", err)
+		}
+	case <-time.After(testReturnTimeout):
+		t.Fatal("Run() did not return after TTL-induced stop")
+	}
+}
+
+// TestProcessCommand_TTL_ResetsOnRequest verifies that inflight requests
+// prevent the TTL goroutine from stopping the process, and that the TTL timer
+// resets after each request completes.
+func TestProcessCommand_TTL_ResetsOnRequest(t *testing.T) {
+	skipIfNoSimpleResponder(t)
+
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(mock.Close)
+
+	cmd, _ := simpleResponderCmd(t, "-silent")
+	p := newProcessCommand(t, config.ModelConfig{
+		Cmd:                cmd,
+		Proxy:              mock.URL,
+		CheckEndpoint:      "/health",
+		HealthCheckTimeout: 10,
+		UnloadAfter:        1, // 1-second TTL
+	})
+
+	runErr := runAsync(t, p)
+	defer func() {
+		if p.State() == StateReady {
+			p.Stop(testStopTimeout)
+		}
+	}()
+
+	// Keep sending requests for 1.5s — past the 1s TTL — and verify
+	// the process never stops while traffic is flowing.
+	stopAt := time.Now().Add(1500 * time.Millisecond)
+	for time.Now().Before(stopAt) {
+		req := httptest.NewRequest("GET", "/", nil)
+		rr := httptest.NewRecorder()
+		p.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Errorf("expected 200, got %d", rr.Code)
+		}
+		if p.State() != StateReady {
+			t.Fatalf("process was stopped during active traffic (state=%s)", p.State())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if got := p.State(); got != StateReady {
+		t.Fatalf("expected StateReady while traffic was active, got %s", got)
+	}
+
+	// Now stop manually to clean up.
+	if err := p.Stop(testStopTimeout); err != nil {
+		t.Fatalf("Stop() error: %v", err)
+	}
+	select {
+	case <-runErr:
+	case <-time.After(testReturnTimeout):
+		t.Fatal("Run() did not return after Stop")
+	}
+}
+
+// TestProcessCommand_TTL_ZeroDisables verifies that UnloadAfter=0 does not
+// spawn a TTL goroutine — the process stays ready until explicitly stopped.
+func TestProcessCommand_TTL_ZeroDisables(t *testing.T) {
+	skipIfNoSimpleResponder(t)
+
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(mock.Close)
+
+	cmd, _ := simpleResponderCmd(t, "-silent")
+	p := newProcessCommand(t, config.ModelConfig{
+		Cmd:                cmd,
+		Proxy:              mock.URL,
+		CheckEndpoint:      "/health",
+		HealthCheckTimeout: 10,
+		UnloadAfter:        0, // disabled
+	})
+
+	runErr := runAsync(t, p)
+	defer func() {
+		if p.State() == StateReady {
+			p.Stop(testStopTimeout)
+		}
+	}()
+
+	if got := p.State(); got != StateReady {
+		t.Fatalf("expected StateReady, got %s", got)
+	}
+
+	req := httptest.NewRequest("GET", "/", nil)
+	rr := httptest.NewRecorder()
+	p.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200 after request, got %d", rr.Code)
+	}
+
+	// No TTL goroutine is spawned when UnloadAfter=0, so a brief sleep is
+	// enough to confirm the process remains ready.
+	time.Sleep(100 * time.Millisecond)
+
+	if got := p.State(); got != StateReady {
+		t.Fatalf("process was stopped unexpectedly (state=%s) with TTL=0", got)
+	}
+
+	// Cleanly stop.
+	if err := p.Stop(testStopTimeout); err != nil {
+		t.Fatalf("Stop() error: %v", err)
+	}
+	select {
+	case <-runErr:
+	case <-time.After(testReturnTimeout):
+		t.Fatal("Run() did not return after Stop")
+	}
+}
+
 // TestProcessCommand_ConcurrentRunStop launches many concurrent run/stop racing
 // pairs to exercise the race detector and verify no deadlocks occur.
 func TestProcessCommand_ConcurrentRunStop(t *testing.T) {
