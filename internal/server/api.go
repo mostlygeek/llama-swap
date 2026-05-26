@@ -160,7 +160,7 @@ func (s *Server) startPreload() {
 			if err != nil {
 				continue
 			}
-			req = req.WithContext(router.SetModel(req.Context(), modelID, modelID))
+			req = req.WithContext(router.SetContext(req.Context(), router.ReqContextData{Model: modelID, ModelID: modelID}))
 
 			dw := &discardResponseWriter{status: http.StatusOK}
 			s.local.ServeHTTP(dw, req)
@@ -227,7 +227,7 @@ func (s *Server) handleUpstream(w http.ResponseWriter, r *http.Request) {
 	// Strip the /upstream/<model> prefix before forwarding.
 	r.URL.Path = remainingPath
 	// Pin the resolved model so the router skips body/query extraction.
-	*r = *r.WithContext(router.SetModel(r.Context(), searchName, modelID))
+	*r = *r.WithContext(router.SetContext(r.Context(), router.ReqContextData{Model: searchName, ModelID: modelID}))
 
 	switch {
 	case s.local.Handles(modelID):

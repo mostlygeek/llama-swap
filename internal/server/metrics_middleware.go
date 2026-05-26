@@ -22,8 +22,8 @@ func CreateMetricsMiddleware(mm *metricsMonitor, cfg config.Config) chain.Middle
 			}
 
 			// Resolve the model now so downstream dispatch hits the context
-			// fast path; FetchModel restores the request body.
-			_, modelID, err := router.FetchModel(r, cfg)
+			// fast path; FetchContext restores the request body.
+			data, err := router.FetchContext(r, cfg)
 			if err != nil {
 				router.SendError(w, r, router.ErrNoModelInContext)
 				return
@@ -56,7 +56,7 @@ func CreateMetricsMiddleware(mm *metricsMonitor, cfg config.Config) chain.Middle
 
 			recorder := newBodyCopier(w)
 			next.ServeHTTP(recorder, r)
-			mm.record(modelID, r, recorder, cf, reqBody, reqHeaders)
+			mm.record(data.ModelID, r, recorder, cf, reqBody, reqHeaders)
 		})
 	}
 }

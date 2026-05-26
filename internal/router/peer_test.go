@@ -142,7 +142,7 @@ func TestPeer_ServeHTTP_Success(t *testing.T) {
 	}
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	*req = *req.WithContext(SetModel(req.Context(), "test-model", "test-model"))
+	*req = *req.WithContext(SetContext(req.Context(), ReqContextData{Model: "test-model", ModelID: "test-model"}))
 	w := httptest.NewRecorder()
 
 	pr.ServeHTTP(w, req)
@@ -178,7 +178,7 @@ func TestPeer_ServeHTTP_PeerModelNotFound(t *testing.T) {
 	}
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	*req = *req.WithContext(SetModel(req.Context(), "nonexistent-model", "nonexistent-model"))
+	*req = *req.WithContext(SetContext(req.Context(), ReqContextData{Model: "nonexistent-model", ModelID: "nonexistent-model"}))
 	w := httptest.NewRecorder()
 
 	pr.ServeHTTP(w, req)
@@ -212,7 +212,7 @@ func TestPeer_ServeHTTP_ApiKeyInjection(t *testing.T) {
 	}
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	*req = *req.WithContext(SetModel(req.Context(), "test-model", "test-model"))
+	*req = *req.WithContext(SetContext(req.Context(), ReqContextData{Model: "test-model", ModelID: "test-model"}))
 	w := httptest.NewRecorder()
 
 	pr.ServeHTTP(w, req)
@@ -246,7 +246,7 @@ func TestPeer_ServeHTTP_NoApiKey(t *testing.T) {
 	}
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	*req = *req.WithContext(SetModel(req.Context(), "test-model", "test-model"))
+	*req = *req.WithContext(SetContext(req.Context(), ReqContextData{Model: "test-model", ModelID: "test-model"}))
 	w := httptest.NewRecorder()
 
 	pr.ServeHTTP(w, req)
@@ -279,7 +279,7 @@ func TestPeer_ServeHTTP_HostHeaderSet(t *testing.T) {
 	}
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	*req = *req.WithContext(SetModel(req.Context(), "test-model", "test-model"))
+	*req = *req.WithContext(SetContext(req.Context(), ReqContextData{Model: "test-model", ModelID: "test-model"}))
 	w := httptest.NewRecorder()
 
 	pr.ServeHTTP(w, req)
@@ -311,7 +311,7 @@ func TestPeer_ServeHTTP_SSEHeaderModification(t *testing.T) {
 	}
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	*req = *req.WithContext(SetModel(req.Context(), "test-model", "test-model"))
+	*req = *req.WithContext(SetContext(req.Context(), ReqContextData{Model: "test-model", ModelID: "test-model"}))
 	w := httptest.NewRecorder()
 
 	pr.ServeHTTP(w, req)
@@ -347,7 +347,7 @@ func TestPeer_ServeHTTP_ShutdownRejectsNewRequests(t *testing.T) {
 	}
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	*req = *req.WithContext(SetModel(req.Context(), "test-model", "test-model"))
+	*req = *req.WithContext(SetContext(req.Context(), ReqContextData{Model: "test-model", ModelID: "test-model"}))
 	w := httptest.NewRecorder()
 
 	pr.ServeHTTP(w, req)
@@ -385,7 +385,7 @@ func TestPeer_ServeHTTP_WaitsForInflightDuringShutdown(t *testing.T) {
 	}
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	*req = *req.WithContext(SetModel(req.Context(), "test-model", "test-model"))
+	*req = *req.WithContext(SetContext(req.Context(), ReqContextData{Model: "test-model", ModelID: "test-model"}))
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -448,7 +448,7 @@ func TestPeer_ServeHTTP_ShutdownTimeoutCancelsInflight(t *testing.T) {
 	}
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	*req = *req.WithContext(SetModel(req.Context(), "test-model", "test-model"))
+	*req = *req.WithContext(SetContext(req.Context(), ReqContextData{Model: "test-model", ModelID: "test-model"}))
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -551,7 +551,7 @@ func TestPeer_ServeHTTP_ContextOverridesBodyModel(t *testing.T) {
 	body := strings.NewReader(`{"model":"body-model","prompt":"hello"}`)
 	req := httptest.NewRequest("POST", "/v1/chat/completions", body)
 	req.Header.Set("Content-Type", "application/json")
-	*req = *req.WithContext(SetModel(req.Context(), "context-model", "context-model"))
+	*req = *req.WithContext(SetContext(req.Context(), ReqContextData{Model: "context-model", ModelID: "context-model"}))
 	w := httptest.NewRecorder()
 
 	pr.ServeHTTP(w, req)

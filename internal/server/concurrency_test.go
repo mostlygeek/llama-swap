@@ -12,7 +12,7 @@ import (
 
 func concurrencyTestReq(model string) *http.Request {
 	r := httptest.NewRequest("GET", "/v1/chat/completions", nil)
-	return r.WithContext(router.SetModel(r.Context(), model, model))
+	return r.WithContext(router.SetContext(r.Context(), router.ReqContextData{Model: model, ModelID: model}))
 }
 
 func TestServer_ConcurrencyMiddleware_RejectsOverLimit(t *testing.T) {

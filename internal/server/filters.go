@@ -34,13 +34,13 @@ func CreateFilterMiddleware(cfg config.Config) chain.Middleware {
 				return
 			}
 
-			requested, _, err := router.FetchModel(r, cfg)
+			data, err := router.FetchContext(r, cfg)
 			if err != nil {
 				router.SendError(w, r, router.ErrNoModelInContext)
 				return
 			}
 
-			useModelName, filters, ok := resolveFilters(cfg, requested)
+			useModelName, filters, ok := resolveFilters(cfg, data.Model)
 			if !ok {
 				next.ServeHTTP(w, r)
 				return
@@ -52,7 +52,7 @@ func CreateFilterMiddleware(cfg config.Config) chain.Middleware {
 				return
 			}
 
-			body, err = applyFilters(body, requested, useModelName, filters)
+			body, err = applyFilters(body, data.Model, useModelName, filters)
 			if err != nil {
 				router.SendResponse(w, r, http.StatusInternalServerError, err.Error())
 				return
@@ -84,13 +84,13 @@ func CreateFormFilterMiddleware(cfg config.Config) chain.Middleware {
 				return
 			}
 
-			requested, _, err := router.FetchModel(r, cfg)
+			data, err := router.FetchContext(r, cfg)
 			if err != nil {
 				router.SendError(w, r, router.ErrNoModelInContext)
 				return
 			}
 
-			useModelName, _, ok := resolveFilters(cfg, requested)
+			useModelName, _, ok := resolveFilters(cfg, data.Model)
 			if !ok || useModelName == "" {
 				next.ServeHTTP(w, r)
 				return

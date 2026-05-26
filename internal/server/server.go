@@ -137,22 +137,22 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 }
 
 // localPeerHandler dispatches a model-routed request to the local or peer
-// router. The model is resolved once via router.FetchModel.
+// router. The model is resolved once via router.FetchContext.
 func (s *Server) localPeerHandler(w http.ResponseWriter, r *http.Request) {
 	stripVersionPrefix(r)
 
-	_, model, err := router.FetchModel(r, s.cfg)
+	data, err := router.FetchContext(r, s.cfg)
 	if err != nil {
 		router.SendError(w, r, router.ErrNoModelInContext)
 		return
 	}
 
 	switch {
-	case s.local.Handles(model):
-		s.proxylog.Debugf("dispatch: using local process for model: %s", model)
+	case s.local.Handles(data.ModelID):
+		s.proxylog.Debugf("dispatch: using local process for model: %s", data.ModelID)
 		s.local.ServeHTTP(w, r)
-	case s.peer.Handles(model):
-		s.proxylog.Debugf("dispatch: using peer for model: %s", model)
+	case s.peer.Handles(data.ModelID):
+		s.proxylog.Debugf("dispatch: using peer for model: %s", data.ModelID)
 		s.peer.ServeHTTP(w, r)
 	default:
 		router.SendError(w, r, router.ErrNoRouterFound)

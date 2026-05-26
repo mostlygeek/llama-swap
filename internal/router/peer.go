@@ -153,20 +153,20 @@ func (r *Peer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r.inflight.Add(1)
 	defer r.inflight.Done()
 
-	_, realModel, err := FetchModel(req, r.cfg)
+	data, err := FetchContext(req, r.cfg)
 	if err != nil {
 		SendError(w, req, err)
 		return
 	}
 
-	pp, found := r.peers[realModel]
+	pp, found := r.peers[data.ModelID]
 	if !found {
-		r.logger.Warnf("peer model not found: %s", realModel)
+		r.logger.Warnf("peer model not found: %s", data.ModelID)
 		SendError(w, req, ErrNoPeerModelFound)
 		return
 	}
 
-	r.logger.Debugf("peer: routing model %s to peer %s", realModel, pp.peerID)
+	r.logger.Debugf("peer: routing model %s to peer %s", data.ModelID, pp.peerID)
 
 	if pp.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+pp.apiKey)

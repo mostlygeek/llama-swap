@@ -670,14 +670,14 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	_, realModel, err := FetchModel(req, b.config)
+	data, err := FetchContext(req, b.config)
 	if err != nil {
 		SendError(w, req, err)
 		return
 	}
 
 	hr := handlerReq{
-		model: realModel,
+		model: data.ModelID,
 		ctx:   req.Context(),
 		// Unbuffered: a successful send on respond proves the waiter is
 		// alive and consuming. grant() relies on this to avoid handing a
