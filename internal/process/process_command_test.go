@@ -365,13 +365,19 @@ func TestProcessCommand_TTL_StopsAfterIdle(t *testing.T) {
 	t.Cleanup(mock.Close)
 
 	cmd, _ := simpleResponderCmd(t, "-silent")
-	p := newProcessCommand(t, config.ModelConfig{
+
+	cfg := config.ModelConfig{
 		Cmd:                cmd,
 		Proxy:              mock.URL,
 		CheckEndpoint:      "/health",
 		HealthCheckTimeout: 10,
 		UnloadAfter:        1, // 1-second TTL
-	})
+	}
+	if runtime.GOOS == "windows" {
+		cfg.CmdStop = "taskkill /f /t /pid ${PID}"
+	}
+
+	p := newProcessCommand(t, cfg)
 
 	runErr := runAsync(t, p)
 	defer func() {
