@@ -61,6 +61,9 @@ type ProcessCommand struct {
 	// stores the active reverse-proxy handler when the process is running.
 	// Written only by run(); read by ServeHTTP via atomic load.
 	handler atomic.Pointer[http.HandlerFunc]
+
+	lastUse  atomic.Int64 // unix nano timestamp of last ServeHTTP completion
+	inflight atomic.Int64 // current in-flight ServeHTTP calls
 }
 
 var _ Process = (*ProcessCommand)(nil)
@@ -228,6 +231,29 @@ func (p *ProcessCommand) run() {
 					// terminates, so we only fire this when Stop, parentCtx,
 					// or the upstream exit takes the process down.
 					runResp = req.respond
+
+					// Start TTL goroutine if configured — self-terminates
+					// when state leaves StateReady.
+					if p.config.UnloadAfter > 0 {
+						ttlDuration := time.Duration(p.config.UnloadAfter) * time.Second
+						go func() {
+							ticker := time.NewTicker(time.Second)
+							defer ticker.Stop()
+							for range ticker.C {
+								if p.State() != StateReady {
+									return
+								}
+								if p.inflight.Load() != 0 {
+									continue
+								}
+								if time.Since(time.Unix(0, p.lastUse.Load())) > ttlDuration {
+									p.proxyLogger.Infof("<%s> Unloading model, TTL of %ds reached", p.id, p.config.UnloadAfter)
+									p.Stop(10 * time.Second)
+									return
+								}
+							}
+						}()
+					}
 				} else {
 					setState(StateStopped)
 					notifyWaiters(res.err)
@@ -511,5 +537,10 @@ func (p *ProcessCommand) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("llama-swap-error: [%s] process is not ready", p.id), http.StatusServiceUnavailable)
 		return
 	}
+	p.inflight.Add(1)
+	defer func() {
+		p.lastUse.Store(time.Now().UnixNano())
+		p.inflight.Add(-1)
+	}()
 	(*fn)(w, r)
 }
