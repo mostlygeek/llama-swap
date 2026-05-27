@@ -222,6 +222,71 @@ func TestProcessCommand_StopCancelsRun(t *testing.T) {
 	}
 }
 
+// TestProcessCommand_ParentCtxCancelDuringStart verifies that cancelling the
+// parent context while doStart is health-checking causes the process to
+// transition to StateShutdown promptly, not wait for the health-check timeout.
+//
+// This is the config-reload race: Stop() returns early when parentCtx is
+// already done and never writes to stopCh, so without a parentCtx.Done()
+// case in the inner select, the process would keep loading indefinitely.
+func TestProcessCommand_ParentCtxCancelDuringStart(t *testing.T) {
+	skipIfNoSimpleResponder(t)
+
+	healthCheckStarted := make(chan struct{}, 1)
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case healthCheckStarted <- struct{}{}:
+		default:
+		}
+		<-r.Context().Done()
+		http.Error(w, "mock cancelled", http.StatusServiceUnavailable)
+	}))
+	defer mock.Close()
+
+	parentCtx, cancelParent := context.WithCancel(context.Background())
+	logger := logmon.NewWriter(io.Discard)
+	cmd, _ := simpleResponderCmd(t, "-silent")
+	p, err := New(parentCtx, t.Name(), config.ModelConfig{
+		Cmd:                cmd,
+		Proxy:              mock.URL,
+		CheckEndpoint:      "/health",
+		HealthCheckTimeout: 60,
+	}, logger, logger)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	runErrCh := make(chan error, 1)
+	go func() { runErrCh <- p.Run(60 * time.Second) }()
+
+	<-healthCheckStarted
+
+	// Cancel parent context to simulate a config reload tearing down the old server.
+	cancelParent()
+
+	select {
+	case err := <-runErrCh:
+		if !strings.Contains(err.Error(), "shutdown") {
+			t.Errorf("Run error = %v, want shutdown error", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("process did not shut down within 5s after parent context cancel during start")
+	}
+
+	// Run() may return before the run() goroutine writes StateShutdown;
+	// poll briefly to avoid a spurious race in the assertion.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if p.State() == StateShutdown {
+			break
+		}
+		time.Sleep(testPollInterval)
+	}
+	if got := p.State(); got != StateShutdown {
+		t.Errorf("after cancel: expected StateShutdown, got %s", got)
+	}
+}
+
 // TestProcessCommand_RunStopCycle runs several sequential start/stop pairs on
 // fresh processes to confirm they are reusable.
 func TestProcessCommand_RunStopCycle(t *testing.T) {
@@ -398,10 +463,11 @@ func TestProcessCommand_TTL_StopsAfterIdle(t *testing.T) {
 		t.Errorf("expected 200 after request, got %d", rr.Code)
 	}
 
-	// Wait for the TTL goroutine to fire; poll state until it becomes Stopped
-	// or we time out.
+	// Wait for the TTL goroutine to fire and the process to fully stop.
+	// Poll for StateStopped directly to avoid racing the StateStopping
+	// intermediate state that sits between StateReady and StateStopped.
 	deadline := time.Now().Add(5 * time.Second)
-	for p.State() == StateReady && time.Now().Before(deadline) {
+	for p.State() != StateStopped && time.Now().Before(deadline) {
 		time.Sleep(testPollInterval)
 	}
 

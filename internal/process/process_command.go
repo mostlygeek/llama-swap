@@ -276,6 +276,21 @@ func (p *ProcessCommand) run() {
 				notifyWaiters(ErrStartAborted)
 				req.respond <- ErrStartAborted
 				pendingStop = &stop
+
+			// Parent context cancelled (e.g. config reload) while doStart
+			// was still running. Stop() returns early when parentCtx is
+			// done and never sends on stopCh, so we must handle shutdown
+			// here to avoid leaving doStart running indefinitely.
+			case <-p.parentCtx.Done():
+				cancelStart()
+				res := <-resultCh
+				if res.cmd != nil {
+					p.killProcess(res.cmd, res.cmdDone, 100*time.Millisecond)
+				}
+				setState(StateShutdown)
+				notifyWaiters(fmt.Errorf("[%s] shutdown", p.id))
+				respondRun(fmt.Errorf("[%s] shutdown", p.id))
+				return
 			}
 			// cancelStart is idempotent; calling it again here ensures the
 			// context is released even on the success path (govet leak check).
