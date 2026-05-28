@@ -25,9 +25,10 @@ type unloadReq struct {
 }
 
 type handlerReq struct {
-	model   string
-	ctx     context.Context
-	respond chan handlerResp
+	model      string
+	ctx        context.Context
+	respond    chan handlerResp
+	positionCh chan int
 }
 
 type handlerResp struct {
@@ -265,6 +266,7 @@ func (b *baseRouter) handleRequest(req handlerReq, active map[string]*activeSwap
 	if collidesWith(req.model, evict, active) {
 		b.logger.Debugf("%s: queuing request for model %s (collides with in-flight swap)", b.name, req.model)
 		*queued = append(*queued, req)
+		b.broadcastQueuePositions(*queued)
 		return
 	}
 
@@ -272,6 +274,7 @@ func (b *baseRouter) handleRequest(req handlerReq, active map[string]*activeSwap
 	if conflictsWithInFlight(evict, inFlight) {
 		b.logger.Debugf("%s: queuing request for model %s (would evict in-flight process)", b.name, req.model)
 		*queued = append(*queued, req)
+		b.broadcastQueuePositions(*queued)
 		return
 	}
 
@@ -357,6 +360,28 @@ func (b *baseRouter) drainQueue(active map[string]*activeSwap, inFlight map[stri
 		active[s.modelID] = s
 	}
 	*queued = remaining
+	b.broadcastQueuePositions(*queued)
+}
+
+// broadcastQueuePositions sends each queued request its current 1-indexed
+// position. Sends are non-blocking: if the channel is full, the old value is
+// drained first so the consumer always sees the latest position.
+func (b *baseRouter) broadcastQueuePositions(queued []handlerReq) {
+	for i, req := range queued {
+		pos := i + 1
+		select {
+		case req.positionCh <- pos:
+		default:
+			select {
+			case <-req.positionCh:
+			default:
+			}
+			select {
+			case req.positionCh <- pos:
+			default:
+			}
+		}
+	}
 }
 
 func (b *baseRouter) startSwap(initial handlerReq, evict []string) *activeSwap {
@@ -682,7 +707,8 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		// Unbuffered: a successful send on respond proves the waiter is
 		// alive and consuming. grant() relies on this to avoid handing a
 		// handleFunc to a cancelled waiter and leaking the inFlight count.
-		respond: make(chan handlerResp),
+		respond:    make(chan handlerResp),
+		positionCh: make(chan int, 1),
 	}
 
 	select {
@@ -707,6 +733,16 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		swapCtx, cancelLoad = context.WithCancel(req.Context())
 		lw = newLoadingWriter(b.logger, data.ModelID, w, req)
 		go lw.start(swapCtx)
+		go func() {
+			for {
+				select {
+				case pos := <-hr.positionCh:
+					lw.setUpdate(fmt.Sprintf("Queue position: #%d", pos))
+				case <-swapCtx.Done():
+					return
+				}
+			}
+		}()
 	}
 
 	var resp handlerResp
