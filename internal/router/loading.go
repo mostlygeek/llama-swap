@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/logmon"
@@ -32,12 +33,15 @@ type loadingWriter struct {
 	ctx        context.Context
 	logger     *logmon.Monitor
 	modelName  string
-	start      time.Time
+	startTime  time.Time
 
-	// closed by statusUpdates when the goroutine finishes (after cleanup messages)
+	pendingMu     sync.Mutex
+	pendingUpdate string
+
+	// closed by start when the goroutine finishes (after cleanup messages)
 	done chan struct{}
 
-	// test-only: closed when statusUpdates enters its loop
+	// test-only: closed when start enters its loop
 	loopStarted chan struct{}
 	// test-only: override the 1s tick interval
 	tickDuration time.Duration
@@ -52,7 +56,7 @@ func newLoadingWriter(logger *logmon.Monitor, modelName string, w http.ResponseW
 		ctx:           req.Context(),
 		logger:        logger,
 		modelName:     modelName,
-		start:         time.Now(),
+		startTime:     time.Now(),
 		tickDuration:  750 * time.Millisecond,
 		charPerSecond: 75,
 	}
@@ -66,12 +70,18 @@ func newLoadingWriter(logger *logmon.Monitor, modelName string, w http.ResponseW
 	return s
 }
 
-func (s *loadingWriter) statusUpdates(ctx context.Context, ready <-chan struct{}) {
+func (s *loadingWriter) setUpdate(msg string) {
+	s.pendingMu.Lock()
+	s.pendingUpdate = msg
+	s.pendingMu.Unlock()
+}
+
+func (s *loadingWriter) start(ctx context.Context) {
 	s.done = make(chan struct{})
 	defer close(s.done)
 
 	defer func() {
-		duration := time.Since(s.start)
+		duration := time.Since(s.startTime)
 		s.sendData("\n")
 		s.sendLine(fmt.Sprintf("Done! (%.2fs)", duration.Seconds()))
 		s.sendLine("━━━━━")
@@ -99,10 +109,19 @@ func (s *loadingWriter) statusUpdates(ctx context.Context, ready <-chan struct{}
 		select {
 		case <-ctx.Done():
 			return
-		case <-ready:
-			return
 		case <-ticker.C:
-			if time.Since(lastRemarkTime) >= nextRemarkIn {
+			s.pendingMu.Lock()
+			update := s.pendingUpdate
+			s.pendingUpdate = ""
+			s.pendingMu.Unlock()
+
+			if update != "" {
+				s.sendData("\n")
+				s.sendInline(update)
+				s.sendData(" ")
+				lastRemarkTime = time.Now()
+				nextRemarkIn = time.Duration(5+rand.Intn(5)) * time.Second
+			} else if time.Since(lastRemarkTime) >= nextRemarkIn {
 				remark := remarks[ri%len(remarks)]
 				ri++
 				s.sendData("\n")
@@ -222,8 +241,4 @@ func (s *loadingWriter) Flush() {
 	if flusher, ok := s.writer.(http.Flusher); ok {
 		flusher.Flush()
 	}
-}
-
-func (s *loadingWriter) sendError(err error) {
-	s.sendData(fmt.Sprintf("Error: %v", err))
 }

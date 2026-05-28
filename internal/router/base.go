@@ -700,58 +700,34 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	shouldShowLoading := data.Streaming && data.SendLoadingState && isLoadingPath(req.URL.Path) && !isModelReady
 
+	var lw *loadingWriter
+	cancelLoad := func() {}
 	if shouldShowLoading {
-		lw := newLoadingWriter(b.logger, data.ModelID, w, req)
-		swapCtx, cancel := context.WithCancel(req.Context())
-		// WaitReady blocks until the process reaches StateReady or swapCtx
-		// is cancelled. Closing readyCh signals the loading goroutine to stop
-		// sending status messages and emit its "Done!" line.
-		readyCh := make(chan struct{})
-		go func() {
-			p, ok := b.processes[data.ModelID]
-			if !ok {
-				b.logger.Errorf("loadingWriter: model %q disappeared from processes, treating as ready to prevent polling forever", data.ModelID)
-				close(readyCh)
-				return
-			}
-			p.WaitReady(swapCtx)
-			close(readyCh)
-		}()
-		go lw.statusUpdates(swapCtx, readyCh)
-
-		var resp handlerResp
-		select {
-		case resp = <-hr.respond:
-		case <-req.Context().Done():
-			cancel()
-			return
-		case <-b.shutdownCtx.Done():
-			cancel()
-			SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
-			return
-		}
-		cancel()
-		lw.waitForCompletion(1 * time.Second)
-
-		if resp.err != nil {
-			lw.sendError(resp.err)
-			return
-		}
-		resp.handleFunc(lw, req)
-		return
+		var swapCtx context.Context
+		swapCtx, cancelLoad = context.WithCancel(req.Context())
+		lw = newLoadingWriter(b.logger, data.ModelID, w, req)
+		go lw.start(swapCtx)
 	}
 
+	var resp handlerResp
 	select {
-	case resp := <-hr.respond:
-		if resp.err != nil {
-			SendError(w, req, resp.err)
-			return
+	case resp = <-hr.respond:
+		cancelLoad()
+		if lw != nil {
+			lw.waitForCompletion(1 * time.Second)
 		}
-		resp.handleFunc(w, req)
 	case <-req.Context().Done():
+		cancelLoad()
 		return
 	case <-b.shutdownCtx.Done():
+		cancelLoad()
 		SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
 		return
 	}
+
+	if resp.err != nil {
+		SendError(w, req, resp.err)
+		return
+	}
+	resp.handleFunc(w, req)
 }

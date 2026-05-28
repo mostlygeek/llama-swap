@@ -4,8 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"fmt"
-	"io"
+"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -74,7 +73,7 @@ func TestLoadingWriter_WritePassthrough(t *testing.T) {
 	}
 }
 
-func TestLoadingWriter_StatusUpdatesStopsOnReady(t *testing.T) {
+func TestLoadingWriter_StartStopsOnCancel(t *testing.T) {
 	logger := logmon.NewWriter(io.Discard)
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -83,36 +82,9 @@ func TestLoadingWriter_StatusUpdatesStopsOnReady(t *testing.T) {
 	lw.tickDuration = 10 * time.Millisecond
 	lw.loopStarted = make(chan struct{})
 
-	readyCh := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
-	go lw.statusUpdates(ctx, readyCh)
-	<-lw.loopStarted
-	close(readyCh)
-
-	if !lw.waitForCompletion(time.Second) {
-		t.Fatal("waitForCompletion timed out")
-	}
-
-	body := w.Body.String()
-	if !strings.Contains(body, "Done!") {
-		t.Errorf("expected Done! message, body: %s", body)
-	}
-}
-
-func TestLoadingWriter_StatusUpdatesStopsOnCancel(t *testing.T) {
-	logger := logmon.NewWriter(io.Discard)
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-
-	lw := newLoadingWriter(logger, "test-model", w, req)
-	lw.tickDuration = 10 * time.Millisecond
-	lw.loopStarted = make(chan struct{})
-
-	readyCh := make(chan struct{})
-	ctx, cancel := context.WithCancel(context.Background())
-	go lw.statusUpdates(ctx, readyCh)
+	go lw.start(ctx)
 	<-lw.loopStarted
 	cancel()
 
@@ -126,19 +98,35 @@ func TestLoadingWriter_StatusUpdatesStopsOnCancel(t *testing.T) {
 	}
 }
 
-func TestLoadingWriter_SendError(t *testing.T) {
+func TestLoadingWriter_StartShowsSetUpdate(t *testing.T) {
 	logger := logmon.NewWriter(io.Discard)
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 
 	lw := newLoadingWriter(logger, "test-model", w, req)
-	lw.sendError(fmt.Errorf("test error"))
+	lw.tickDuration = 10 * time.Millisecond
+	lw.charPerSecond = 0
+	lw.loopStarted = make(chan struct{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go lw.start(ctx)
+	<-lw.loopStarted
+
+	lw.setUpdate("custom status message")
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	if !lw.waitForCompletion(time.Second) {
+		t.Fatal("waitForCompletion timed out")
+	}
 
 	body := w.Body.String()
-	if !strings.Contains(body, "Error: test error") {
-		t.Errorf("expected error message, body: %s", body)
+	content := extractStreamedContent(body)
+	if !strings.Contains(content, "custom status message") {
+		t.Errorf("expected setUpdate message in output, got: %q", content)
 	}
 }
+
 
 func TestLoadingWriter_SendDataFormat(t *testing.T) {
 	logger := logmon.NewWriter(io.Discard)
@@ -187,11 +175,10 @@ func TestLoadingWriter_FlushesPeriodicallyDuringStatusUpdates(t *testing.T) {
 	lw.charPerSecond = 0
 	lw.loopStarted = make(chan struct{})
 
-	readyCh := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		lw.statusUpdates(ctx, readyCh)
+		lw.start(ctx)
 		close(done)
 	}()
 
