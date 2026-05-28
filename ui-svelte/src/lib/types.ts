@@ -8,6 +8,7 @@ export interface Model {
   name: string;
   description: string;
   unlisted: boolean;
+  disabled: boolean;
   peerID: string;
   aliases?: string[];
 }

@@ -80,6 +80,12 @@ func (pg *ProcessGroup) ProxyRequest(modelID string, writer http.ResponseWriter,
 	if pg.swap {
 		pg.Lock()
 		if pg.lastUsedProcess != modelID {
+			// Check if the requested model is disabled before swapping
+			if pg.processes[modelID].config.Disabled {
+				pg.Unlock()
+				pg.processes[modelID].ProxyRequest(writer, request)
+				return nil
+			}
 
 			// Wait for in-flight fast-path requests to drain before stopping
 			// the previous process. Without this, a fast-path request that has

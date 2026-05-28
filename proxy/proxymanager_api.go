@@ -21,6 +21,7 @@ type Model struct {
 	Description string   `json:"description"`
 	State       string   `json:"state"`
 	Unlisted    bool     `json:"unlisted"`
+	Disabled    bool     `json:"disabled"`
 	PeerID      string   `json:"peerID"`
 	Aliases     []string `json:"aliases,omitempty"`
 }
@@ -80,6 +81,8 @@ func (pm *ProxyManager) getModelStatus() []Model {
 				state = "shutdown"
 			case StateStopped:
 				state = "stopped"
+			case StateDisabled:
+				state = "disabled"
 			}
 		}
 		models = append(models, Model{
@@ -88,6 +91,7 @@ func (pm *ProxyManager) getModelStatus() []Model {
 			Description: pm.config.Models[modelID].Description,
 			State:       state,
 			Unlisted:    pm.config.Models[modelID].Unlisted,
+			Disabled:    pm.config.Models[modelID].Disabled,
 			Aliases:     pm.config.Models[modelID].Aliases,
 		})
 	}
@@ -305,6 +309,12 @@ func (pm *ProxyManager) apiUnloadSingleModelHandler(c *gin.Context) {
 	realModelName, found := pm.config.RealModelName(requestedModel)
 	if !found {
 		pm.sendErrorResponse(c, http.StatusNotFound, "Model not found")
+		return
+	}
+
+	// Check if model is disabled
+	if pm.config.Models[realModelName].Disabled {
+		pm.sendErrorResponse(c, http.StatusForbidden, "model is disabled")
 		return
 	}
 
