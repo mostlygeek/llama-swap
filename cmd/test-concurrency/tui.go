@@ -142,6 +142,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		p.status = msg.status
 		p.elapsed = msg.elapsed
 		p.err = msg.err
+		if msg.err != nil {
+			errTxt := lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render("\n" + msg.err.Error())
+			p.buf.WriteString(errTxt)
+			if msg.idx == m.focused {
+				m.refreshViewport(false)
+				m.vp.GotoBottom()
+			}
+		}
 		return m, nil
 	}
 

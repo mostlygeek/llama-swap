@@ -158,13 +158,16 @@ func (p *ProcessCommand) run() {
 		// goroutine permanently. Subsequent public-method calls will fail
 		// because parentCtx.Done() unblocks their send-side selects.
 		case <-p.parentCtx.Done():
+			// Mark shutdown before killProcess so concurrent State() readers
+			// stop treating this process as ready while the (possibly slow)
+			// teardown is in progress.
+			setState(StateShutdown)
 			if cmd != nil {
+				p.handler.Store(nil)
 				p.killProcess(cmd, cmdDone, 100*time.Millisecond)
 				cmd = nil
 				cmdDone = nil
-				p.handler.Store(nil)
 			}
-			setState(StateShutdown)
 			notifyWaiters(fmt.Errorf("[%s] shutdown", p.id))
 			respondRun(fmt.Errorf("[%s] shutdown", p.id))
 			return
@@ -283,11 +286,15 @@ func (p *ProcessCommand) run() {
 			// here to avoid leaving doStart running indefinitely.
 			case <-p.parentCtx.Done():
 				cancelStart()
+				// Mark shutdown before tearing the process down: killProcess
+				// may block (e.g. taskkill on Windows is slow to spawn), and
+				// callers observing State() should see StateShutdown promptly
+				// rather than a stale StateStarting.
+				setState(StateShutdown)
 				res := <-resultCh
 				if res.cmd != nil {
 					p.killProcess(res.cmd, res.cmdDone, 100*time.Millisecond)
 				}
-				setState(StateShutdown)
 				notifyWaiters(fmt.Errorf("[%s] shutdown", p.id))
 				respondRun(fmt.Errorf("[%s] shutdown", p.id))
 				return

@@ -754,9 +754,15 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 	case <-req.Context().Done():
 		cancelLoad()
+		if lw != nil {
+			lw.waitForCompletion(1 * time.Second)
+		}
 		return
 	case <-b.shutdownCtx.Done():
 		cancelLoad()
+		if lw != nil {
+			lw.waitForCompletion(1 * time.Second)
+		}
 		SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
 		return
 	}

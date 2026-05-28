@@ -81,6 +81,11 @@ func (s *loadingWriter) start(ctx context.Context) {
 	defer close(s.done)
 
 	defer func() {
+		// Skip cleanup writes if the client disconnected — the connection
+		// is being torn down and flushing against it will panic.
+		if s.ctx.Err() != nil {
+			return
+		}
 		duration := time.Since(s.startTime)
 		s.sendData("\n")
 		s.sendLine(fmt.Sprintf("Done! (%.2fs)", duration.Seconds()))

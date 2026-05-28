@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-"io"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -126,7 +126,6 @@ func TestLoadingWriter_StartShowsSetUpdate(t *testing.T) {
 		t.Errorf("expected setUpdate message in output, got: %q", content)
 	}
 }
-
 
 func TestLoadingWriter_SendDataFormat(t *testing.T) {
 	logger := logmon.NewWriter(io.Discard)
