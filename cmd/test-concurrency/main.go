@@ -1,25 +1,36 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
+	"flag"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"sync"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func main() {
-	if len(os.Args) < 3 {
-		fmt.Fprintf(os.Stderr, "Usage: %s <base-url> <model> [model...]\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "Example: %s http://localhost:8080 A B C D A B C D\n", os.Args[0])
+	prompt := flag.String("prompt", "Write a few sentences about the history of computing.", "user message sent to each model")
+	maxTokens := flag.Int("max-tokens", 256, "max_tokens per request")
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: %s [flags] <base-url> <model> [model...]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Example: %s -max-tokens 400 http://localhost:8080 A B C D\n\n", os.Args[0])
+		flag.PrintDefaults()
+	}
+	flag.Parse()
+
+	args := flag.Args()
+	if len(args) < 2 {
+		flag.Usage()
 		os.Exit(1)
 	}
 
-	baseURL := os.Args[1]
-	models := os.Args[2:]
+	baseURL := args[0]
+	models := args[1:]
+
+	m := newModel(models)
+	prog := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 	// Chain of triggers ensures requests are sent in the order provided.
 	triggers := make([]chan struct{}, len(models))
@@ -31,61 +42,55 @@ func main() {
 	var wg sync.WaitGroup
 	start := time.Now()
 
-	for i, model := range models {
+	for i, name := range models {
 		wg.Add(1)
-		go func(idx int, m string) {
+		go func(idx int, mdl string) {
 			defer wg.Done()
 
 			<-triggers[idx]
 
 			reqStart := time.Now()
-			fmt.Printf("[%d] starting  model=%s\n", idx, m)
+			prog.Send(statusMsg{idx: idx, status: statusStreaming})
 
 			if idx+1 < len(triggers) {
 				triggers[idx+1] <- struct{}{}
 			}
 
-			err := sendRequest(baseURL, m)
-			elapsed := time.Since(reqStart)
-			total := time.Since(start)
+			err := sendRequest(baseURL, mdl, *prompt, *maxTokens, idx, func(i int, text string) {
+				prog.Send(deltaMsg{idx: i, text: text})
+			})
 
+			elapsed := time.Since(reqStart)
 			if err != nil {
-				fmt.Printf("[%d] ERROR     model=%s elapsed=%s total=%s err=%v\n", idx, m, elapsed.Round(time.Millisecond), total.Round(time.Millisecond), err)
+				prog.Send(statusMsg{idx: idx, status: statusError, elapsed: elapsed, err: err})
 			} else {
-				fmt.Printf("[%d] completed model=%s elapsed=%s total=%s\n", idx, m, elapsed.Round(time.Millisecond), total.Round(time.Millisecond))
+				prog.Send(statusMsg{idx: idx, status: statusDone, elapsed: elapsed})
 			}
-		}(i, model)
+		}(i, name)
+	}
+
+	if _, err := prog.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
 	}
 
 	wg.Wait()
-	fmt.Printf("all done in %s\n", time.Since(start).Round(time.Millisecond))
+	printSummary(m, start)
 }
 
-func sendRequest(baseURL, model string) error {
-	payload := map[string]any{
-		"model": model,
-		"messages": []map[string]string{
-			{"role": "user", "content": "Say hello in one word."},
-		},
-		"max_tokens": 16,
+func printSummary(m *model, start time.Time) {
+	fmt.Println("Summary:")
+	for _, p := range m.panels {
+		switch p.status {
+		case statusError:
+			fmt.Printf("  [%d] %-20s ERROR   elapsed=%s err=%v\n",
+				p.idx, p.model, p.elapsed.Round(time.Millisecond), p.err)
+		case statusDone:
+			fmt.Printf("  [%d] %-20s done    elapsed=%s\n",
+				p.idx, p.model, p.elapsed.Round(time.Millisecond))
+		default:
+			fmt.Printf("  [%d] %-20s %s\n", p.idx, p.model, p.status)
+		}
 	}
-
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-
-	resp, err := http.Post(baseURL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("status %d: %s", resp.StatusCode, string(b))
-	}
-
-	io.Copy(io.Discard, resp.Body)
-	return nil
+	fmt.Printf("all done in %s\n", time.Since(start).Round(time.Millisecond))
 }
