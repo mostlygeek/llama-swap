@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"golang.org/x/sync/semaphore"
@@ -45,7 +46,11 @@ func CreateConcurrencyMiddleware(cfg config.Config) chain.Middleware {
 				return
 			}
 			if !sem.TryAcquire(1) {
-				http.Error(w, "Too many requests", http.StatusTooManyRequests)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusTooManyRequests)
+				json.NewEncoder(w).Encode(map[string]string{
+					"error": "Too many requests",
+				})
 				return
 			}
 			defer sem.Release(1)
