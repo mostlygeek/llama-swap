@@ -6,8 +6,8 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
-	"github.com/mostlygeek/llama-swap/proxy/config"
 )
 
 type ProcessGroup struct {
