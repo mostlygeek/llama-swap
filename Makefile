@@ -41,8 +41,7 @@ ui/node_modules:
 # build react UI
 ui: ui/node_modules
 	cd ui-svelte && npm run build
-	mkdir -p internal/server/ui_dist
-	cp -R proxy/ui_dist/. internal/server/ui_dist/
+	touch internal/server/ui_dist/placeholder.txt
 
 # Build OSX binary
 mac: ui
