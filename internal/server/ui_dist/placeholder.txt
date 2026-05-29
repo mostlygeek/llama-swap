@@ -1,0 +1,1 @@
+placeholder so //go:embed ui_dist succeeds before the UI is built

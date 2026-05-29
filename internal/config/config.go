@@ -272,6 +272,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	nextPort := config.StartPort
 	for _, modelId := range modelIds {
 		modelConfig := config.Models[modelId]
+		modelConfig.HealthCheckTimeout = config.HealthCheckTimeout
 
 		// Strip comments from command fields
 		modelConfig.Cmd = StripComments(modelConfig.Cmd)

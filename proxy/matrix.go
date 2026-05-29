@@ -7,8 +7,8 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
-	"github.com/mostlygeek/llama-swap/proxy/config"
 )
 
 // MatrixSolver contains pure swap-decision logic with no Process dependencies.
