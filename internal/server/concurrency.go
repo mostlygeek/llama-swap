@@ -45,7 +45,9 @@ func CreateConcurrencyMiddleware(cfg config.Config) chain.Middleware {
 				return
 			}
 			if !sem.TryAcquire(1) {
-				http.Error(w, "Too many requests", http.StatusTooManyRequests)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusTooManyRequests)
+				w.Write([]byte(`{"error":"Too many requests"}`))
 				return
 			}
 			defer sem.Release(1)
