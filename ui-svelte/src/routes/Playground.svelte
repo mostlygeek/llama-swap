@@ -5,8 +5,9 @@
   import AudioInterface from "../components/playground/AudioInterface.svelte";
   import SpeechInterface from "../components/playground/SpeechInterface.svelte";
   import RerankInterface from "../components/playground/RerankInterface.svelte";
+  import ConcurrencyInterface from "../components/playground/ConcurrencyInterface.svelte";
 
-  type Tab = "chat" | "images" | "speech" | "audio" | "rerank";
+  type Tab = "chat" | "images" | "speech" | "audio" | "rerank" | "concurrency";
 
   const selectedTabStore = persistentStore<Tab>("playground-selected-tab", "chat");
   let mobileMenuOpen = $state(false);
@@ -17,6 +18,7 @@
     { id: "speech", label: "Speech" },
     { id: "audio", label: "Transcription" },
     { id: "rerank", label: "Rerank" },
+    { id: "concurrency", label: "Load Test" },
   ];
 
   function selectTab(tab: Tab) {
@@ -25,7 +27,7 @@
   }
 
   function getTabLabel(tabId: Tab): string {
-    return tabs.find(t => t.id === tabId)?.label || "";
+    return tabs.find((t) => t.id === tabId)?.label || "";
   }
 </script>
 
@@ -49,10 +51,15 @@
         </svg>
       </button>
       {#if mobileMenuOpen}
-        <div class="absolute top-full left-0 right-0 mt-1 bg-surface border border-gray-200 dark:border-white/10 rounded shadow-lg z-10">
+        <div
+          class="absolute top-full left-0 right-0 mt-1 bg-surface border border-gray-200 dark:border-white/10 rounded shadow-lg z-10"
+        >
           {#each tabs as tab (tab.id)}
             <button
-              class="w-full px-4 py-2 text-left hover:bg-secondary-hover transition-colors first:rounded-t last:rounded-b {$selectedTabStore === tab.id ? 'bg-primary/10 font-medium' : ''}"
+              class="w-full px-4 py-2 text-left hover:bg-secondary-hover transition-colors first:rounded-t last:rounded-b {$selectedTabStore ===
+              tab.id
+                ? 'bg-primary/10 font-medium'
+                : ''}"
               onclick={() => selectTab(tab.id)}
             >
               {tab.label}
@@ -93,6 +100,9 @@
     </div>
     <div class="h-full" class:tab-hidden={$selectedTabStore !== "rerank"}>
       <RerankInterface />
+    </div>
+    <div class="h-full" class:tab-hidden={$selectedTabStore !== "concurrency"}>
+      <ConcurrencyInterface />
     </div>
   </div>
 </div>
