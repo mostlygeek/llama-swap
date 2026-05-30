@@ -4,13 +4,14 @@
   import { streamChatCompletion } from "../../lib/chatApi";
 
   type Status = "waiting" | "streaming" | "done" | "error";
-  type Phase = "idle" | "loading" | "reasoning" | "content";
+  type Phase = "waiting" | "loading" | "reasoning" | "content";
   type RunState = {
     status: Status;
     loadingText: string;
     reasoningContent: string;
     content: string;
     loadingDone: boolean;
+    waitingMs: number;
     loadingMs: number;
     reasoningMs: number;
     contentMs: number;
@@ -113,10 +114,11 @@
       reasoningContent: "",
       content: "",
       loadingDone: false,
+      waitingMs: 0,
       loadingMs: 0,
       reasoningMs: 0,
       contentMs: 0,
-      phase: "idle",
+      phase: "waiting",
       elapsedMs: 0,
     };
   }
@@ -173,7 +175,7 @@
       loadingText: loadingPart,
       reasoningContent: prev.reasoningContent + remainder,
       loadingDone: true,
-      nowPhase: remainder ? "reasoning" : "idle",
+      nowPhase: remainder ? "reasoning" : "waiting",
     };
   }
 
@@ -182,9 +184,18 @@
     let phaseStart = start;
     runs[entry.id] = { ...emptyRun(), status: "streaming" };
 
-    const accrue = (prev: RunState, now: number): { loadingMs: number; reasoningMs: number; contentMs: number } => {
+    const accrue = (
+      prev: RunState,
+      now: number
+    ): { waitingMs: number; loadingMs: number; reasoningMs: number; contentMs: number } => {
       const delta = now - phaseStart;
-      const base = { loadingMs: prev.loadingMs, reasoningMs: prev.reasoningMs, contentMs: prev.contentMs };
+      const base = {
+        waitingMs: prev.waitingMs,
+        loadingMs: prev.loadingMs,
+        reasoningMs: prev.reasoningMs,
+        contentMs: prev.contentMs,
+      };
+      if (prev.phase === "waiting") return { ...base, waitingMs: base.waitingMs + delta };
       if (prev.phase === "loading") return { ...base, loadingMs: base.loadingMs + delta };
       if (prev.phase === "reasoning") return { ...base, reasoningMs: base.reasoningMs + delta };
       if (prev.phase === "content") return { ...base, contentMs: base.contentMs + delta };
@@ -281,6 +292,11 @@
 
   function stop() {
     abortController?.abort();
+  }
+
+  function waitingBarClass(run: RunState): string {
+    if (run.status === "error" && run.phase === "waiting") return "bg-red-500";
+    return "bg-slate-200 dark:bg-white/10";
   }
 
   function loadingBarClass(run: RunState): string {
@@ -465,6 +481,7 @@
             <span>Timeline</span>
             {#if !$timelineCollapsedStore}
               <span class="flex items-center gap-3 text-[10px] text-txtsecondary font-normal ml-3" aria-hidden="true">
+                <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-slate-200 dark:bg-white/10 border border-gray-300 dark:border-white/10"></span>waiting</span>
                 <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-slate-400 dark:bg-slate-500"></span>loading</span>
                 <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-purple-500"></span>reasoning</span>
                 <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-amber-400 dark:bg-amber-500"></span>streaming</span>
@@ -497,6 +514,7 @@
               <div class="flex flex-col gap-1 mt-1">
                 {#each $testListStore as entry, i (entry.id)}
                   {@const run = runs[entry.id]}
+                  {@const waitingPct = run ? (run.waitingMs / timelineMaxMs) * 100 : 0}
                   {@const loadingPct = run ? (run.loadingMs / timelineMaxMs) * 100 : 0}
                   {@const reasoningPct = run ? (run.reasoningMs / timelineMaxMs) * 100 : 0}
                   {@const contentPct = run ? (run.contentMs / timelineMaxMs) * 100 : 0}
@@ -513,24 +531,31 @@
                           aria-hidden="true"
                         ></div>
                       {/each}
+                      {#if run && run.waitingMs > 0}
+                        <div
+                          class="absolute top-0.5 bottom-0.5 rounded-l-sm transition-all {waitingBarClass(run)}"
+                          style="left: 0; width: {waitingPct}%;"
+                          title="waiting {formatElapsed(run.waitingMs)}"
+                        ></div>
+                      {/if}
                       {#if run && run.loadingMs > 0}
                         <div
-                          class="absolute top-0.5 bottom-0.5 rounded-l-sm transition-all {loadingBarClass(run)}"
-                          style="left: 0; width: {loadingPct}%;"
+                          class="absolute top-0.5 bottom-0.5 transition-all {loadingBarClass(run)} {run.waitingMs === 0 ? 'rounded-l-sm' : ''}"
+                          style="left: {waitingPct}%; width: {loadingPct}%;"
                           title="loading {formatElapsed(run.loadingMs)}"
                         ></div>
                       {/if}
                       {#if run && run.reasoningMs > 0}
                         <div
-                          class="absolute top-0.5 bottom-0.5 transition-all {reasoningBarClass(run)} {run.loadingMs === 0 ? 'rounded-l-sm' : ''}"
-                          style="left: {loadingPct}%; width: {reasoningPct}%;"
+                          class="absolute top-0.5 bottom-0.5 transition-all {reasoningBarClass(run)} {run.waitingMs === 0 && run.loadingMs === 0 ? 'rounded-l-sm' : ''}"
+                          style="left: {waitingPct + loadingPct}%; width: {reasoningPct}%;"
                           title="reasoning {formatElapsed(run.reasoningMs)}"
                         ></div>
                       {/if}
                       {#if run && run.contentMs > 0}
                         <div
-                          class="absolute top-0.5 bottom-0.5 transition-all {contentBarClass(run)} {run.loadingMs === 0 && run.reasoningMs === 0 ? 'rounded-l-sm' : ''} {run.status === 'done' || run.status === 'error' ? 'rounded-r-sm' : ''}"
-                          style="left: {loadingPct + reasoningPct}%; width: {contentPct}%;"
+                          class="absolute top-0.5 bottom-0.5 transition-all {contentBarClass(run)} {run.waitingMs === 0 && run.loadingMs === 0 && run.reasoningMs === 0 ? 'rounded-l-sm' : ''} {run.status === 'done' || run.status === 'error' ? 'rounded-r-sm' : ''}"
+                          style="left: {waitingPct + loadingPct + reasoningPct}%; width: {contentPct}%;"
                           title="content {formatElapsed(run.contentMs)}"
                         ></div>
                       {/if}
