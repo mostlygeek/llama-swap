@@ -11,7 +11,7 @@
   const selectedModelStore = persistentStore<string>("playground-selected-model", "");
   const systemPromptStore = persistentStore<string>("playground-system-prompt", "");
   const temperatureStore = persistentStore<number>("playground-temperature", 0.7);
-  const endpointStore = persistentStore<Endpoint>("playground-endpoint", "v1/chat/completions");
+  const endpointStore = persistentStore<Endpoint>("playground-endpoint", "openai/v1/chat/completions");
   const maxTokensStore = persistentStore<number>("playground-max-tokens", 4096);
 
   function loadMessages(): ChatMessage[] {
@@ -37,6 +37,16 @@
 
   let hasModels = $derived($models.some((m) => !m.unlisted));
   let userScrolledUp = $state(false);
+
+  $effect(() => {
+    const obsoleteEndpoints: Record<string, Endpoint> = {
+      "v1/chat/completions": "openai/v1/chat/completions",
+      "v1/messages": "anthropic/v1/messages",
+      "v1/responses": "openai/v1/responses",
+    };
+    const canonicalEndpoint = obsoleteEndpoints[$endpointStore as string];
+    if (canonicalEndpoint) endpointStore.set(canonicalEndpoint);
+  });
 
   $effect(() => {
     playgroundStores.chatStreaming.set(isStreaming);
@@ -329,9 +339,9 @@
           bind:value={$endpointStore}
           disabled={isStreaming}
         >
-          <option value="v1/chat/completions">/v1/chat/completions</option>
-          <option value="v1/messages">/v1/messages</option>
-          <option value="v1/responses">/v1/responses</option>
+          <option value="openai/v1/chat/completions">/openai/v1/chat/completions</option>
+          <option value="anthropic/v1/messages">/anthropic/v1/messages</option>
+          <option value="openai/v1/responses">/openai/v1/responses</option>
         </select>
       </div>
       <div class="mb-4">
@@ -374,7 +384,7 @@
           bind:value={$maxTokensStore}
           disabled={isStreaming}
         />
-        <p class="text-xs text-txtsecondary mt-1">Required for /v1/messages.</p>
+        <p class="text-xs text-txtsecondary mt-1">Required for /anthropic/v1/messages.</p>
       </div>
     </div>
   {/if}

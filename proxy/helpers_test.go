@@ -127,11 +127,12 @@ func injectTestHandlers(pm *ProxyManager, modelResponses map[string]string) {
 // newTestHandler returns an http.Handler that mimics simple-responder's API.
 // It supports the endpoints that routing tests depend on, without launching
 // any subprocess or binding any port.
-func respondJSON(w http.ResponseWriter, respond string, bodyBytes []byte) {
+func respondJSON(w http.ResponseWriter, r *http.Request, respond string, bodyBytes []byte) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
 		"responseMessage":  respond,
 		"h_content_length": strconv.Itoa(len(bodyBytes)),
+		"h_path":           r.URL.Path,
 		"request_body":     string(bodyBytes),
 		"usage": map[string]any{
 			"completion_tokens": 10, "prompt_tokens": 25, "total_tokens": 35,
@@ -188,7 +189,7 @@ func newTestHandler(respond string) http.Handler {
 			fmt.Fprintf(w, "event: message\ndata: [DONE]\n\n")
 			flusher.Flush()
 		} else {
-			respondJSON(w, respond, bodyBytes)
+			respondJSON(w, r, respond, bodyBytes)
 		}
 	})
 
@@ -205,17 +206,19 @@ func newTestHandler(respond string) http.Handler {
 
 	mux.HandleFunc("/v1/completions", func(w http.ResponseWriter, r *http.Request) {
 		bodyBytes, _ := io.ReadAll(r.Body)
-		respondJSON(w, respond, bodyBytes)
+		respondJSON(w, r, respond, bodyBytes)
 	})
 
 	for _, path := range []string{
 		"/chat/completions", "/completions",
 		"/responses", "/messages", "/messages/count_tokens",
 		"/embeddings", "/rerank", "/reranking",
+		"/v1/responses", "/v1/messages", "/v1/messages/count_tokens",
+		"/v1/embeddings", "/v1/images/generations", "/v1/images/edits",
 	} {
 		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 			bodyBytes, _ := io.ReadAll(r.Body)
-			respondJSON(w, respond, bodyBytes)
+			respondJSON(w, r, respond, bodyBytes)
 		})
 	}
 
@@ -229,38 +232,43 @@ func newTestHandler(respond string) http.Handler {
 		})
 	})
 
-	mux.HandleFunc("/v1/audio/transcriptions", func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseMultipartForm(10 << 20); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Error parsing multipart form: %s", err)})
-			return
-		}
-		model := r.FormValue("model")
-		if model == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"error": "Missing model parameter"})
-			return
-		}
-		file, _, err := r.FormFile("file")
-		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Error getting file: %s", err)})
-			return
-		}
-		fileBytes, _ := io.ReadAll(file)
-		file.Close()
-		json.NewEncoder(w).Encode(map[string]any{
-			"text":             fmt.Sprintf("The length of the file is %d bytes", len(fileBytes)),
-			"model":            model,
-			"h_content_type":   r.Header.Get("Content-Type"),
-			"h_content_length": r.Header.Get("Content-Length"),
+	for _, path := range []string{
+		"/v1/audio/transcriptions",
+	} {
+		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+			if err := r.ParseMultipartForm(10 << 20); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Error parsing multipart form: %s", err)})
+				return
+			}
+			model := r.FormValue("model")
+			if model == "" {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "Missing model parameter"})
+				return
+			}
+			file, _, err := r.FormFile("file")
+			if err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Error getting file: %s", err)})
+				return
+			}
+			fileBytes, _ := io.ReadAll(file)
+			file.Close()
+			json.NewEncoder(w).Encode(map[string]any{
+				"text":             fmt.Sprintf("The length of the file is %d bytes", len(fileBytes)),
+				"model":            model,
+				"h_content_type":   r.Header.Get("Content-Type"),
+				"h_content_length": r.Header.Get("Content-Length"),
+				"h_path":           r.URL.Path,
+			})
 		})
-	})
+	}
 
 	mux.HandleFunc("/v1/audio/voices", func(w http.ResponseWriter, r *http.Request) {
 		model := r.URL.Query().Get("model")
 		json.NewEncoder(w).Encode(map[string]any{
-			"voices": []string{"voice1"}, "model": model,
+			"voices": []string{"voice1"}, "model": model, "h_path": r.URL.Path,
 		})
 	})
 
