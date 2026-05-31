@@ -38,6 +38,13 @@ type loadingWriter struct {
 	pendingMu     sync.Mutex
 	pendingUpdate string
 
+	// writeMu serializes writes to the underlying writer and guards released.
+	// Once released is set, the streaming goroutine must not touch the writer
+	// again — ServeHTTP has reclaimed it (to run the real handler or to return)
+	// and writing/flushing a finalized response panics.
+	writeMu  sync.Mutex
+	released bool
+
 	// closed by start when the goroutine finishes (after cleanup messages)
 	done chan struct{}
 
@@ -217,12 +224,33 @@ func (s *loadingWriter) sendData(data string) {
 		return
 	}
 
-	_, err = fmt.Fprintf(s.writer, "data: %s\n\n", jsonData)
-	if err != nil {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	// Once ServeHTTP has reclaimed the writer (release), writing/flushing it
+	// races the real handler or panics on a finalized response. Stop here.
+	if s.released {
+		return
+	}
+
+	if _, err = fmt.Fprintf(s.writer, "data: %s\n\n", jsonData); err != nil {
 		s.logger.Debugf("<%s> Failed to write SSE data (client likely disconnected): %v", s.modelName, err)
 		return
 	}
-	s.Flush()
+	if flusher, ok := s.writer.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+// release fences the loadingWriter off from the underlying ResponseWriter.
+// After it returns, the streaming goroutine will not write to or flush the
+// writer again: any in-flight write completes under writeMu first, and later
+// writes short-circuit on released. The caller can then safely hand the writer
+// to the real handler or let ServeHTTP return without racing a finalized
+// response (a use-after-return Flush panics on the recycled *bufio.Writer).
+func (s *loadingWriter) release() {
+	s.writeMu.Lock()
+	s.released = true
+	s.writeMu.Unlock()
 }
 
 func (s *loadingWriter) Header() http.Header {

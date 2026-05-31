@@ -745,24 +745,28 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}()
 	}
 
+	// finishLoading stops the loading stream and fences its goroutine off from
+	// the ResponseWriter before the real handler (or ServeHTTP's return)
+	// reclaims it. release() must run even when waitForCompletion times out:
+	// otherwise a still-streaming goroutine flushes a finalized response and
+	// panics on the recycled *bufio.Writer.
+	finishLoading := func() {
+		cancelLoad()
+		if lw != nil {
+			lw.waitForCompletion(1 * time.Second)
+			lw.release()
+		}
+	}
+
 	var resp handlerResp
 	select {
 	case resp = <-hr.respond:
-		cancelLoad()
-		if lw != nil {
-			lw.waitForCompletion(1 * time.Second)
-		}
+		finishLoading()
 	case <-req.Context().Done():
-		cancelLoad()
-		if lw != nil {
-			lw.waitForCompletion(1 * time.Second)
-		}
+		finishLoading()
 		return
 	case <-b.shutdownCtx.Done():
-		cancelLoad()
-		if lw != nil {
-			lw.waitForCompletion(1 * time.Second)
-		}
+		finishLoading()
 		SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
 		return
 	}
