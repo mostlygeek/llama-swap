@@ -18,6 +18,7 @@ set -euo pipefail
 
 BACKEND=""
 NO_CACHE=false
+WHISPER_FFMPEG="${WHISPER_FFMPEG:-yes}"
 
 for arg in "$@"; do
     case $arg in
@@ -46,6 +47,7 @@ for arg in "$@"; do
             echo "  SD_REF               Pin stable-diffusion.cpp to a commit, tag, or branch"
             echo "  IK_LLAMA_REF         Pin ik_llama.cpp to a commit, tag, or branch (CUDA only)"
             echo "  LS_VERSION           Override llama-swap version (e.g., '170' or 'latest')"
+            echo "  WHISPER_FFMPEG       Enable whisper.cpp FFmpeg support (default: yes)"
             exit 0
             ;;
     esac
@@ -201,6 +203,7 @@ BUILD_ARGS=(
     --build-arg "SD_COMMIT_HASH=${SD_HASH}"
     --build-arg "IK_LLAMA_COMMIT_HASH=${IK_LLAMA_HASH}"
     --build-arg "LS_VERSION=${LS_HASH}"
+    --build-arg "WHISPER_FFMPEG=${WHISPER_FFMPEG}"
     -t "${DOCKER_IMAGE_TAG}"
     -f "${SCRIPT_DIR}/Dockerfile"
 )
