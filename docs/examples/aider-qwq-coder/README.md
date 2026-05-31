@@ -95,21 +95,23 @@ models:
 
 ## Advanced, Dual GPU Configuration
 
-If you have _dual 24GB GPUs_ you can use llama-swap profiles to avoid swapping between QwQ and Qwen Coder.
+If you have _dual 24GB GPUs_ you can use llama-swap groups to keep QwQ and Qwen Coder resident at the same time.
 
 In llama-swap's configuration file:
 
-1. add a `profiles` section with `aider` as the profile name
-2. using the `env` field to specify the GPU IDs for each model
+1. add a `groups` section with `swap: false` so requests do not evict the other coding model
+2. use the `env` field to pin each model to a GPU
 
 ```yaml
 # config.yaml
 
-# Add a profile for aider
-profiles:
+# Keep both coding models loaded on separate GPUs
+groups:
   aider:
-    - qwen-coder-32B
-    - QwQ
+    swap: false
+    members:
+      - qwen-coder-32B
+      - QwQ
 
 models:
   "qwen-coder-32B":
@@ -127,25 +129,27 @@ models:
     cmd: /path/to/llama-server ...
 ```
 
-Append the profile tag, `aider:`, to the model names in the model settings file
+With groups, the model names in aider stay the same. You can keep using the same model IDs:
 
 ```yaml
 # aider.model.settings.yml
-- name: "openai/aider:QwQ"
-  weak_model_name: "openai/aider:qwen-coder-32B-aider"
-  editor_model_name: "openai/aider:qwen-coder-32B-aider"
+- name: "openai/QwQ"
+  weak_model_name: "openai/qwen-coder-32B"
+  editor_model_name: "openai/qwen-coder-32B"
 
-- name: "openai/aider:qwen-coder-32B"
-  editor_model_name: "openai/aider:qwen-coder-32B-aider"
+- name: "openai/qwen-coder-32B"
+  editor_model_name: "openai/qwen-coder-32B"
 ```
+
+If you also need helper models to stay resident, put them in their own group and add `persistent: true`.
 
 Run aider with:
 
 ```sh
 $ aider --architect \
     --no-show-model-warnings \
-    --model openai/aider:QwQ \
-    --editor-model openai/aider:qwen-coder-32B \
+    --model openai/QwQ \
+    --editor-model openai/qwen-coder-32B \
     --config aider.conf.yml \
     --model-settings-file aider.model.settings.yml
     --openai-api-key "sk-na" \
