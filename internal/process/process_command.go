@@ -30,6 +30,13 @@ var ErrStartAborted = fmt.Errorf("aborted")
 // the stop request, and stays independent of the caller's graceful timeout.
 const cmdWaitDelay = 10 * time.Second
 
+// parentCancelGraceTimeout is the graceful timeout used when the process is
+// torn down because parentCtx was cancelled (final router teardown or app
+// shutdown). In the normal flow the process has already been stopped via
+// Stop() by this point, so killProcess is a no-op kill; the short grace just
+// bounds the rare case where a process is still alive when its context is cut.
+const parentCancelGraceTimeout = time.Second
+
 type runReq struct {
 	timeout time.Duration
 	respond chan error
@@ -180,7 +187,7 @@ func (p *ProcessCommand) run() {
 			setState(StateShutdown)
 			if cmd != nil {
 				p.handler.Store(nil)
-				p.killProcess(cmd, cmdCancel, cmdDone, 100*time.Millisecond)
+				p.killProcess(cmd, cmdCancel, cmdDone, parentCancelGraceTimeout)
 				cmd = nil
 				cmdDone = nil
 				cmdCancel = nil
@@ -315,7 +322,7 @@ func (p *ProcessCommand) run() {
 				setState(StateShutdown)
 				res := <-resultCh
 				if res.cmd != nil {
-					p.killProcess(res.cmd, res.cancel, res.cmdDone, 100*time.Millisecond)
+					p.killProcess(res.cmd, res.cancel, res.cmdDone, parentCancelGraceTimeout)
 				}
 				notifyWaiters(fmt.Errorf("[%s] shutdown", p.id))
 				respondRun(fmt.Errorf("[%s] shutdown", p.id))
@@ -425,12 +432,20 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 
 	go func() {
 		waitErr := cmd.Wait()
-		if exitErr, ok := waitErr.(*exec.ExitError); ok {
-			p.proxyLogger.Debugf("<%s> process exited: code=%d, err=%v", p.id, exitErr.ExitCode(), waitErr)
-		} else if waitErr != nil {
-			p.proxyLogger.Debugf("<%s> process exited with error: %v", p.id, waitErr)
-		} else {
+		switch st := p.State(); {
+		case waitErr == nil:
 			p.proxyLogger.Debugf("<%s> process exited cleanly", p.id)
+		case st == StateStopping || st == StateShutdown:
+			// Expected: we force-terminated the process. A forced kill exits
+			// the child with a non-zero code (e.g. taskkill /f on Windows
+			// yields exit status 1), so this is not an error.
+			p.proxyLogger.Debugf("<%s> process stopped by llama-swap: %v", p.id, waitErr)
+		default:
+			if exitErr, ok := waitErr.(*exec.ExitError); ok {
+				p.proxyLogger.Debugf("<%s> process exited: code=%d, err=%v", p.id, exitErr.ExitCode(), waitErr)
+			} else {
+				p.proxyLogger.Debugf("<%s> process exited with error: %v", p.id, waitErr)
+			}
 		}
 		close(cmdDone)
 	}()
