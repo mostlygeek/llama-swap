@@ -503,24 +503,40 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 // cmd's context is cancelled.
 func (p *ProcessCommand) sendStopSignal(cmd *exec.Cmd) error {
 	if cmd == nil || cmd.Process == nil {
+		p.processLogger.Debugf("<%s> sendStopSignal() called with nil cmd or process, nothing to stop", p.id)
 		return nil
 	}
+	pid := cmd.Process.Pid
 	if p.config.CmdStop != "" {
+		p.processLogger.Debugf("<%s> sendStopSignal() using CmdStop %q for pid %d", p.id, p.config.CmdStop, pid)
 		stopArgs, err := config.SanitizeCommand(
-			strings.ReplaceAll(p.config.CmdStop, "${PID}", fmt.Sprintf("%d", cmd.Process.Pid)),
+			strings.ReplaceAll(p.config.CmdStop, "${PID}", fmt.Sprintf("%d", pid)),
 		)
 		if err == nil {
+			p.processLogger.Debugf("<%s> sendStopSignal() running stop command: %s", p.id, strings.Join(stopArgs, " "))
 			stopCmd := exec.Command(stopArgs[0], stopArgs[1:]...)
 			stopCmd.Env = cmd.Env
 			setProcAttributes(stopCmd)
-			return stopCmd.Run()
+			runErr := stopCmd.Run()
+			if runErr != nil {
+				p.processLogger.Errorf("<%s> sendStopSignal() stop command failed: %v", p.id, runErr)
+			} else {
+				p.processLogger.Debugf("<%s> sendStopSignal() stop command completed for pid %d", p.id, pid)
+			}
+			return runErr
 		}
 		// fall through to SIGTERM if sanitize failed
+		p.processLogger.Errorf("<%s> sendStopSignal() failed to sanitize CmdStop %q: %v, falling back to terminateProcessTree", p.id, p.config.CmdStop, err)
 	}
 	// On Unix this SIGTERMs the whole process group so a forked grandchild
 	// (e.g. a shell wrapper that backgrounds the real binary) is taken down
 	// with the parent rather than orphaned.
-	return terminateProcessTree(cmd)
+	p.processLogger.Debugf("<%s> sendStopSignal() no CmdStop configured, calling terminateProcessTree for pid %d", p.id, pid)
+	termErr := terminateProcessTree(cmd)
+	if termErr != nil {
+		p.processLogger.Errorf("<%s> sendStopSignal() terminateProcessTree failed for pid %d: %v", p.id, pid, termErr)
+	}
+	return termErr
 }
 
 // killProcess terminates the upstream process. The flow:
