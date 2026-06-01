@@ -30,6 +30,13 @@ var ErrStartAborted = fmt.Errorf("aborted")
 // the stop request, and stays independent of the caller's graceful timeout.
 const cmdWaitDelay = 10 * time.Second
 
+// parentCancelGraceTimeout is the graceful timeout used when the process is
+// torn down because parentCtx was cancelled (final router teardown or app
+// shutdown). In the normal flow the process has already been stopped via
+// Stop() by this point, so killProcess is a no-op kill; the short grace just
+// bounds the rare case where a process is still alive when its context is cut.
+const parentCancelGraceTimeout = time.Second
+
 type runReq struct {
 	timeout time.Duration
 	respond chan error
@@ -180,7 +187,7 @@ func (p *ProcessCommand) run() {
 			setState(StateShutdown)
 			if cmd != nil {
 				p.handler.Store(nil)
-				p.killProcess(cmd, cmdCancel, cmdDone, 100*time.Millisecond)
+				p.killProcess(cmd, cmdCancel, cmdDone, parentCancelGraceTimeout)
 				cmd = nil
 				cmdDone = nil
 				cmdCancel = nil
@@ -315,7 +322,7 @@ func (p *ProcessCommand) run() {
 				setState(StateShutdown)
 				res := <-resultCh
 				if res.cmd != nil {
-					p.killProcess(res.cmd, res.cancel, res.cmdDone, 100*time.Millisecond)
+					p.killProcess(res.cmd, res.cancel, res.cmdDone, parentCancelGraceTimeout)
 				}
 				notifyWaiters(fmt.Errorf("[%s] shutdown", p.id))
 				respondRun(fmt.Errorf("[%s] shutdown", p.id))
@@ -425,12 +432,20 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 
 	go func() {
 		waitErr := cmd.Wait()
-		if exitErr, ok := waitErr.(*exec.ExitError); ok {
-			p.proxyLogger.Debugf("<%s> process exited: code=%d, err=%v", p.id, exitErr.ExitCode(), waitErr)
-		} else if waitErr != nil {
-			p.proxyLogger.Debugf("<%s> process exited with error: %v", p.id, waitErr)
-		} else {
+		switch st := p.State(); {
+		case waitErr == nil:
 			p.proxyLogger.Debugf("<%s> process exited cleanly", p.id)
+		case st == StateStopping || st == StateShutdown:
+			// Expected: we force-terminated the process. A forced kill exits
+			// the child with a non-zero code (e.g. taskkill /f on Windows
+			// yields exit status 1), so this is not an error.
+			p.proxyLogger.Debugf("<%s> process stopped by llama-swap: %v", p.id, waitErr)
+		default:
+			if exitErr, ok := waitErr.(*exec.ExitError); ok {
+				p.proxyLogger.Debugf("<%s> process exited: code=%d, err=%v", p.id, exitErr.ExitCode(), waitErr)
+			} else {
+				p.proxyLogger.Debugf("<%s> process exited with error: %v", p.id, waitErr)
+			}
 		}
 		close(cmdDone)
 	}()
@@ -503,24 +518,40 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 // cmd's context is cancelled.
 func (p *ProcessCommand) sendStopSignal(cmd *exec.Cmd) error {
 	if cmd == nil || cmd.Process == nil {
+		p.processLogger.Debugf("<%s> sendStopSignal() called with nil cmd or process, nothing to stop", p.id)
 		return nil
 	}
+	pid := cmd.Process.Pid
 	if p.config.CmdStop != "" {
+		p.processLogger.Debugf("<%s> sendStopSignal() using CmdStop %q for pid %d", p.id, p.config.CmdStop, pid)
 		stopArgs, err := config.SanitizeCommand(
-			strings.ReplaceAll(p.config.CmdStop, "${PID}", fmt.Sprintf("%d", cmd.Process.Pid)),
+			strings.ReplaceAll(p.config.CmdStop, "${PID}", fmt.Sprintf("%d", pid)),
 		)
 		if err == nil {
+			p.processLogger.Debugf("<%s> sendStopSignal() running stop command: %s", p.id, strings.Join(stopArgs, " "))
 			stopCmd := exec.Command(stopArgs[0], stopArgs[1:]...)
 			stopCmd.Env = cmd.Env
 			setProcAttributes(stopCmd)
-			return stopCmd.Run()
+			runErr := stopCmd.Run()
+			if runErr != nil {
+				p.processLogger.Errorf("<%s> sendStopSignal() stop command failed: %v", p.id, runErr)
+			} else {
+				p.processLogger.Debugf("<%s> sendStopSignal() stop command completed for pid %d", p.id, pid)
+			}
+			return runErr
 		}
 		// fall through to SIGTERM if sanitize failed
+		p.processLogger.Errorf("<%s> sendStopSignal() failed to sanitize CmdStop %q: %v, falling back to terminateProcessTree", p.id, p.config.CmdStop, err)
 	}
 	// On Unix this SIGTERMs the whole process group so a forked grandchild
 	// (e.g. a shell wrapper that backgrounds the real binary) is taken down
 	// with the parent rather than orphaned.
-	return terminateProcessTree(cmd)
+	p.processLogger.Debugf("<%s> sendStopSignal() no CmdStop configured, calling terminateProcessTree for pid %d", p.id, pid)
+	termErr := terminateProcessTree(cmd)
+	if termErr != nil {
+		p.processLogger.Errorf("<%s> sendStopSignal() terminateProcessTree failed for pid %d: %v", p.id, pid, termErr)
+	}
+	return termErr
 }
 
 // killProcess terminates the upstream process. The flow:
