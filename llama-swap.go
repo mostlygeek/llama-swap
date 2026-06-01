@@ -302,7 +302,14 @@ func main() {
 					proxyLog.Warnf("http server shutdown error: %v", err)
 				}
 
-				if err := srv.Shutdown(time.Until(deadline)); err != nil {
+				// Clamp the remaining budget to a small positive value: a
+				// non-positive timeout makes the router fall back to its own
+				// healthCheckTimeout, which would defeat the shared deadline.
+				remaining := time.Until(deadline)
+				if remaining <= 0 {
+					remaining = time.Millisecond
+				}
+				if err := srv.Shutdown(remaining); err != nil {
 					proxyLog.Warnf("router shutdown error: %v", err)
 				}
 
