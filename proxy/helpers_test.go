@@ -75,11 +75,36 @@ func getTestPort() int {
 	return port
 }
 
+// testStartPortBlock reserves a contiguous range of ports per config so that
+// auto-assigned model ports (startPort, startPort+1, ...) never overlap between
+// concurrently running test configs. 100 is far above any test's model count.
+const testStartPortBlock = 100
+
+// getTestStartPort reserves a fresh block of ports from the shared monotonic
+// allocator. It draws from the same nextTestPort counter as getTestPort, so
+// single-port and block allocations never collide.
+func getTestStartPort() int {
+	portMutex.Lock()
+	defer portMutex.Unlock()
+
+	port := nextTestPort
+	nextTestPort += testStartPortBlock
+
+	return port
+}
+
 // testConfigFromYAML substitutes {{RESPONDER}} with the simple-responder path and
-// loads through the real config pipeline (env vars, macros, port assignment, etc.)
+// loads through the real config pipeline (env vars, macros, port assignment, etc.).
+//
+// Unless the YAML sets startPort explicitly, an ephemeral high startPort is
+// injected so auto-assigned ${PORT} values (which otherwise default to 5800) do
+// not collide with the well-known default port range or with other tests.
 func testConfigFromYAML(t *testing.T, yamlTmpl string) config.Config {
 	t.Helper()
 	yamlStr := strings.ReplaceAll(yamlTmpl, "{{RESPONDER}}", filepath.ToSlash(simpleResponderPath))
+	if !strings.Contains(yamlStr, "startPort") {
+		yamlStr = fmt.Sprintf("startPort: %d\n%s", getTestStartPort(), yamlStr)
+	}
 	cfg, err := config.LoadConfigFromReader(strings.NewReader(yamlStr))
 	require.NoError(t, err)
 	return cfg
