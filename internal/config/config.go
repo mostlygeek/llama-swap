@@ -160,6 +160,10 @@ type Config struct {
 
 	// support remote peers, see issue #433, #296
 	Peers PeerDictionaryConfig `yaml:"peers"`
+
+	// optional priority-aware fair scheduling in front of per-model concurrency
+	// limits. Opt-in: absent section preserves legacy instant-429 behavior.
+	Scheduling SchedulingConfig `yaml:"scheduling"`
 }
 
 func (c *Config) RealModelName(search string) (string, bool) {
@@ -228,6 +232,10 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	}
 	if err = config.Performance.Validate(); err != nil {
 		return Config{}, fmt.Errorf("performance: %w", err)
+	}
+
+	if err = config.Scheduling.Validate(); err != nil {
+		return Config{}, fmt.Errorf("scheduling: %w", err)
 	}
 
 	if config.StartPort < 1 {

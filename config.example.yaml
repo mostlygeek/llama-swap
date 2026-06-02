@@ -509,3 +509,42 @@ peers:
         provider:
           data_collection: "deny"
           zdr: true
+
+# scheduling: optional priority-aware fair admission in front of per-model
+# concurrency limits.
+# - optional, default: disabled (omit this section)
+# - When ABSENT, llama-swap keeps its original behavior: a request that cannot
+#   immediately acquire a model's concurrency slot is rejected with a bare 429.
+# - When PRESENT, requests that cannot immediately acquire a slot are held in a
+#   per-model queue and admitted by caller priority (highest first; FIFO within
+#   a priority) as slots free. A request is rejected with 429 + Retry-After only
+#   when the queue is full (maxQueueDepth) or its estimated wait exceeds maxWait.
+#   The Retry-After value is derived from a measured EWMA of the model's service
+#   time, so clients get an accurate backoff hint under real load.
+# - The caller id is the API key presented on the request (Authorization Bearer,
+#   Authorization Basic password field, or x-api-key). Callers not listed in
+#   `priorities` use `defaultPriority`.
+scheduling:
+  # priorities: map of caller id (API key) to priority. Higher is served first
+  # under contention.
+  # - optional, default: empty (every caller uses defaultPriority)
+  priorities:
+    # an interactive front-end key gets served ahead of a bulk indexer
+    sk-interactive-frontend: 10
+    sk-bulk-indexer: 1
+
+  # defaultPriority: priority for callers not listed in `priorities`
+  # - optional, default: 1
+  defaultPriority: 5
+
+  # maxWait: how long a queued request may wait for a slot before it is rejected
+  # with 429 + Retry-After. A request whose estimated wait already exceeds this
+  # at arrival is rejected immediately.
+  # - optional, default: 30s
+  # - accepts Go durations: "500ms", "10s", "1m"
+  maxWait: 30s
+
+  # maxQueueDepth: maximum number of waiters per model before arrivals are
+  # rejected with 429 + Retry-After.
+  # - optional, default: 0 (unlimited; only maxWait bounds the queue)
+  maxQueueDepth: 16
