@@ -61,9 +61,9 @@ func callerFromContext(ctx context.Context) string {
 // request that cannot immediately acquire a slot is rejected with a bare 429.
 //
 // Models without a local config entry (e.g. peer-routed models) are not limited.
-func CreateConcurrencyMiddleware(cfg config.Config, sched *scheduler, logger *logmon.Monitor) chain.Middleware {
+func CreateConcurrencyMiddleware(cfg config.Config, sched *scheduler, logger *logmon.Monitor, mm *metricsMonitor) chain.Middleware {
 	if cfg.Scheduling.Enabled() && sched != nil {
-		return createSchedulingMiddleware(cfg, sched, logger)
+		return createSchedulingMiddleware(cfg, sched, logger, mm)
 	}
 
 	semaphores := make(map[string]*semaphore.Weighted, len(cfg.Models))
@@ -102,7 +102,7 @@ func CreateConcurrencyMiddleware(cfg config.Config, sched *scheduler, logger *lo
 }
 
 // createSchedulingMiddleware is the priority-aware admission path.
-func createSchedulingMiddleware(cfg config.Config, sched *scheduler, logger *logmon.Monitor) chain.Middleware {
+func createSchedulingMiddleware(cfg config.Config, sched *scheduler, logger *logmon.Monitor, mm *metricsMonitor) chain.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			data, err := router.FetchContext(r, cfg)
@@ -133,7 +133,12 @@ func createSchedulingMiddleware(cfg config.Config, sched *scheduler, logger *log
 					logger.Warnf("scheduler 429 model=%s caller=%s reason=%s concurrency=%d inflight=%d waiting=%d retry_after=%ds",
 						data.ModelID, who, a.reason, a.concurrency, a.inflight, a.waiting, retryAfterSecs(a.retryAfter))
 				}
+				// Surface the rejection in the activity/trace stream too — a
+				// scheduler 429 never reaches the metrics middleware, so this is
+				// the only point it can be recorded (no double-count). The hint
+				// headers+body double as the capture's response side.
 				headers, body := backpressureResponse(data.ModelID, a)
+				mm.recordRejection(data.ModelID, callerID, r.URL.Path, http.StatusTooManyRequests, headers, body)
 				writeBackpressure(w, headers, body)
 				return
 			}

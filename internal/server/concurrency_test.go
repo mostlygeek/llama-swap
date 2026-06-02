@@ -32,7 +32,7 @@ func TestServer_ConcurrencyMiddleware_RejectsOverLimit(t *testing.T) {
 		<-release
 		w.WriteHeader(http.StatusOK)
 	})
-	h := CreateConcurrencyMiddleware(cfg, nil, nil)(final)
+	h := CreateConcurrencyMiddleware(cfg, nil, nil, nil)(final)
 
 	// First request occupies the only slot.
 	done := make(chan struct{})
@@ -67,7 +67,7 @@ func TestServer_ConcurrencyMiddleware_UnconfiguredModelPassesThrough(t *testing.
 		called++
 		w.WriteHeader(http.StatusOK)
 	})
-	h := CreateConcurrencyMiddleware(cfg, nil, nil)(final)
+	h := CreateConcurrencyMiddleware(cfg, nil, nil, nil)(final)
 
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, concurrencyTestReq("peer-model"))

@@ -183,11 +183,12 @@ func (s *Server) routes() {
 	// other's Content-Type. Both run before the metrics middleware so it buffers
 	// the rewritten body.
 	// callerMW captures the caller id (API key) into the context before authMW
-	// strips the auth headers, so the scheduler can resolve caller priority.
+	// strips the auth headers, so the scheduler can resolve caller priority and
+	// the activity log can attribute the request.
 	modelChain := chain.New(
 		CreateCallerMiddleware(),
 		authMW,
-		CreateConcurrencyMiddleware(s.cfg, s.sched, s.proxylog),
+		CreateConcurrencyMiddleware(s.cfg, s.sched, s.proxylog, s.metrics),
 		filterMW,
 		formFilterMW,
 		CreateInflightMiddleware(s.inflight),

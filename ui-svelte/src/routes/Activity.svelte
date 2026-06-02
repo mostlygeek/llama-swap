@@ -11,6 +11,7 @@
     | "id"
     | "time"
     | "model"
+    | "caller"
     | "req_path"
     | "resp_status_code"
     | "resp_content_type"
@@ -32,6 +33,7 @@
     { key: "id", label: "ID", defaultVisible: true },
     { key: "time", label: "Time", defaultVisible: true },
     { key: "model", label: "Model", defaultVisible: true },
+    { key: "caller", label: "Caller", defaultVisible: true },
     { key: "req_path", label: "Path", defaultVisible: false },
     { key: "resp_status_code", label: "Status", defaultVisible: false },
     { key: "resp_content_type", label: "Content-Type", defaultVisible: false },
@@ -191,6 +193,9 @@
           {#if $visibleColumns.includes("model")}
             <th class="px-6 py-3">Model</th>
           {/if}
+          {#if $visibleColumns.includes("caller")}
+            <th class="px-6 py-3">Caller</th>
+          {/if}
           {#if $visibleColumns.includes("req_path")}
             <th class="px-6 py-3">Path</th>
           {/if}
@@ -245,6 +250,9 @@
               {/if}
               {#if $visibleColumns.includes("model")}
                 <td class="px-6 py-4">{metric.model}</td>
+              {/if}
+              {#if $visibleColumns.includes("caller")}
+                <td class="px-6 py-4">{metric.caller || "-"}</td>
               {/if}
               {#if $visibleColumns.includes("req_path")}
                 <td class="px-6 py-4">{metric.req_path || "-"}</td>

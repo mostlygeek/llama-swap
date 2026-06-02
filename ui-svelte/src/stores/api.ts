@@ -13,6 +13,12 @@ import { connectionState } from "./theme";
 
 const LOG_LENGTH_LIMIT = 1024 * 100; /* 100KB of log data */
 
+// ACTIVITY_LIMIT bounds the in-memory activity list so the pane can't grow
+// without limit (newest are prepended on every metrics event). Mirrors the
+// server's default metricsMaxInMemory ring so the UI retains the same window
+// the server keeps; older entries drop off the tail.
+const ACTIVITY_LIMIT = 1000;
+
 // Stores
 export const models = writable<Model[]>([]);
 export const proxyLogs = writable<string>("");
@@ -92,7 +98,9 @@ export function enableAPIEvents(enabled: boolean): void {
 
           case "metrics": {
             const newMetrics = JSON.parse(message.data) as ActivityLogEntry[];
-            metrics.update((prevMetrics) => [...newMetrics, ...prevMetrics]);
+            metrics.update((prevMetrics) =>
+              [...newMetrics, ...prevMetrics].slice(0, ACTIVITY_LIMIT)
+            );
             break;
           }
           case "inflight": {

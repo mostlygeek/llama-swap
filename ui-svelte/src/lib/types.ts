@@ -24,6 +24,7 @@ export interface ActivityLogEntry {
   id: number;
   timestamp: string;
   model: string;
+  caller: string;
   req_path: string;
   resp_content_type: string;
   resp_status_code: number;

@@ -31,9 +31,12 @@ type TokenMetrics struct {
 
 // ActivityLogEntry represents parsed token statistics from llama-server logs.
 type ActivityLogEntry struct {
-	ID              int          `json:"id"`
-	Timestamp       time.Time    `json:"timestamp"`
-	Model           string       `json:"model"`
+	ID        int       `json:"id"`
+	Timestamp time.Time `json:"timestamp"`
+	Model     string    `json:"model"`
+	// Caller is the masked API key that made the request ("anonymous"
+	// for unkeyed traffic). Masked, never the raw secret — see maskCaller.
+	Caller          string       `json:"caller"`
 	ReqPath         string       `json:"req_path"`
 	RespContentType string       `json:"resp_content_type"`
 	RespStatusCode  int          `json:"resp_status_code"`
@@ -119,14 +122,65 @@ func (mp *metricsMonitor) getMetricsJSON() ([]byte, error) {
 	return json.Marshal(mp.getMetrics())
 }
 
+// maskCaller renders an API key for display without exposing the secret:
+// "anonymous" for unkeyed traffic, otherwise a readable prefix plus the
+// key's length (e.g. "sk-ra…9") so distinct callers stay distinguishable
+// while the full key never reaches the UI or the in-memory log ring.
+func maskCaller(caller string) string {
+	if caller == "" {
+		return "anonymous"
+	}
+	const prefix = 5
+	if len(caller) <= prefix {
+		return caller // already short enough to not be a usable secret
+	}
+	return fmt.Sprintf("%s…%d", caller[:prefix], len(caller))
+}
+
+// recordRejection stores/emits an activity entry for a request the scheduler
+// rejected (429) before it could reach the normal record path. Keeps rejected
+// traffic visible in the activity/trace stream rather than silently dropped.
+//
+// When captures are enabled it also stores a hint-only capture: the rejection's
+// response headers + JSON body (the X-RateLimit-* / max_concurrency hint), so
+// clicking the 429 row in the activity pane shows WHY it was shed. The request
+// body is intentionally omitted — under a 429 storm, buffering every shed
+// prompt would amplify memory exactly when load is highest.
+func (mp *metricsMonitor) recordRejection(modelID, caller, reqPath string, status int, respHeaders map[string]string, respBody []byte) {
+	if mp == nil {
+		return
+	}
+	tm := ActivityLogEntry{
+		Timestamp:      time.Now(),
+		Model:          modelID,
+		Caller:         maskCaller(caller),
+		ReqPath:        reqPath,
+		RespStatusCode: status,
+	}
+	tm.ID = mp.queueMetrics(tm)
+	if mp.enableCaptures {
+		capture := ReqRespCapture{
+			ID:          tm.ID,
+			ReqPath:     reqPath,
+			RespHeaders: respHeaders,
+			RespBody:    respBody,
+		}
+		if mp.addCapture(capture) {
+			tm.HasCapture = true
+		}
+	}
+	mp.emitMetric(tm)
+}
+
 // record parses a completed response body and stores/emits an activity entry.
 // When captures are enabled, a zstd+CBOR capture is stored for successful
 // requests, with cf controlling which request/response parts are retained.
 // reqBody and reqHeaders are the request data buffered before dispatch.
-func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *responseBodyCopier, cf captureFields, reqBody []byte, reqHeaders map[string]string) {
+func (mp *metricsMonitor) record(modelID, caller string, r *http.Request, recorder *responseBodyCopier, cf captureFields, reqBody []byte, reqHeaders map[string]string) {
 	tm := ActivityLogEntry{
 		Timestamp:       time.Now(),
 		Model:           modelID,
+		Caller:          maskCaller(caller),
 		ReqPath:         r.URL.Path,
 		RespContentType: recorder.Header().Get("Content-Type"),
 		RespStatusCode:  recorder.Status(),
