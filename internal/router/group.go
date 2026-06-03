@@ -36,12 +36,14 @@ func NewGroup(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Group
 		modelCfg, _, ok := conf.FindConfig(mid)
 		if !ok {
 			base.shutdownFn()
+			base.procCancel()
 			return nil, fmt.Errorf("no model config for %q", mid)
 		}
 		procLog := logmon.NewWriter(upstreamlog)
-		p, err := process.New(base.shutdownCtx, mid, modelCfg, procLog, proxylog)
+		p, err := process.New(base.procCtx, mid, modelCfg, procLog, proxylog)
 		if err != nil {
 			base.shutdownFn()
+			base.procCancel()
 			return nil, fmt.Errorf("creating process for %q: %w", mid, err)
 		}
 		processes[mid] = p

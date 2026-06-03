@@ -75,9 +75,20 @@ type baseRouter struct {
 	logger    *logmon.Monitor
 	planner   swapPlanner
 
+	// shutdownCtx governs the request machinery: cancelling it tells grant()
+	// and ServeHTTP to stop granting and reject callers. It is deliberately
+	// separate from procCtx — see procCtx below.
 	shutdownCtx  context.Context
 	shutdownFn   context.CancelFunc
 	shuttingDown atomic.Bool
+
+	// procCtx is the parent context for every managed process and governs
+	// process lifetime only. handleShutdown stops processes gracefully via
+	// Stop() and cancels procCtx afterwards, so teardown is never a context
+	// cancel racing the graceful path (which collapsed the grace to 100ms and
+	// let the caller return before children were reaped — see process run loop).
+	procCtx    context.Context
+	procCancel context.CancelFunc
 
 	handlerCh   chan handlerReq
 	shutdownCh  chan shutdownReq
@@ -97,6 +108,7 @@ type baseRouter struct {
 
 func newBaseRouter(name string, conf config.Config, processes map[string]process.Process, planner swapPlanner, logger *logmon.Monitor) *baseRouter {
 	shutdownCtx, shutdownFn := context.WithCancel(context.Background())
+	procCtx, procCancel := context.WithCancel(context.Background())
 	return &baseRouter{
 		name:        name,
 		config:      conf,
@@ -105,6 +117,8 @@ func newBaseRouter(name string, conf config.Config, processes map[string]process
 		planner:     planner,
 		shutdownCtx: shutdownCtx,
 		shutdownFn:  shutdownFn,
+		procCtx:     procCtx,
+		procCancel:  procCancel,
 		handlerCh:   make(chan handlerReq),
 		shutdownCh:  make(chan shutdownReq),
 		unloadCh:    make(chan unloadReq),
@@ -492,6 +506,8 @@ func (b *baseRouter) handleShutdown(req shutdownReq, active map[string]*activeSw
 	// The grant calls below then either land (waiter happened to receive
 	// before noticing shutdown) or fall through immediately via grant's
 	// shutdownCtx case — either way the waiter sees a non-OK response.
+	// This does NOT touch processes: their lifetime is procCtx, cancelled
+	// only after the graceful Stop() calls below have reaped them.
 	b.shutdownFn()
 
 	for _, s := range active {
@@ -534,6 +550,11 @@ func (b *baseRouter) handleShutdown(req shutdownReq, active map[string]*activeSw
 	} else {
 		<-done
 	}
+
+	// Every process is stopped (children reaped via Stop()). Cancel procCtx so
+	// the process run-loop goroutines exit; they are already StateStopped, so
+	// this is a clean no-op kill rather than a forced teardown.
+	b.procCancel()
 
 	req.respond <- nil
 }
