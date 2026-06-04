@@ -264,3 +264,50 @@ func TestParseNvidiaSmiLine_ZeroMemoryTotal(t *testing.T) {
 	require.NotNil(t, stat)
 	assert.Equal(t, 0.0, stat.MemUtilPct)
 }
+
+const ioregSample = `+-o AGXAcceleratorG13X  <class AGXAcceleratorG13X, id 0x1000009a1, registered, matched, active, busy 0 (39191 ms), retain 108>
+    {
+      "model" = "Apple M1 Pro"
+      "gpu-core-count" = 16
+      "PerformanceStatistics" = {"In use system memory (driver)"=0,"Alloc system memory"=14511046656,"Tiler Utilization %"=34,"recoveryCount"=0,"Renderer Utilization %"=34,"Device Utilization %"=34,"In use system memory"=7688503296}
+      "IOClass" = "AGXAcceleratorG13X"
+    }`
+
+func TestParseIoregOutput_ValidOutput(t *testing.T) {
+	const memTotalMB = 32768
+
+	stat := ParseIoregOutput([]byte(ioregSample), memTotalMB)
+	require.NotNil(t, stat)
+
+	assert.Equal(t, 0, stat.ID)
+	assert.Equal(t, "Apple M1 Pro (16-core GPU)", stat.Name)
+	assert.Equal(t, 34.0, stat.GpuUtilPct)
+	assert.Equal(t, 7688503296/(1024*1024), stat.MemUsedMB)
+	assert.Equal(t, memTotalMB, stat.MemTotalMB)
+	assert.InDelta(t, float64(stat.MemUsedMB)/memTotalMB*100, stat.MemUtilPct, 0.01)
+	// Not exposed by ioreg.
+	assert.Equal(t, 0, stat.TempC)
+	assert.Equal(t, 0.0, stat.PowerDrawW)
+	assert.Equal(t, 0.0, stat.FanSpeedPct)
+}
+
+func TestParseIoregOutput_NoGpuDevice(t *testing.T) {
+	stat := ParseIoregOutput([]byte("no gpu here"), 32768)
+	assert.Nil(t, stat)
+}
+
+func TestParseIoregOutput_ZeroMemTotal(t *testing.T) {
+	stat := ParseIoregOutput([]byte(ioregSample), 0)
+	require.NotNil(t, stat)
+	assert.Equal(t, 0.0, stat.MemUtilPct)
+}
+
+func TestParseIoregOutput_MissingModel(t *testing.T) {
+	const out = `"Device Utilization %"=50,"In use system memory"=1048576`
+
+	stat := ParseIoregOutput([]byte(out), 1024)
+	require.NotNil(t, stat)
+	assert.Equal(t, "Apple GPU", stat.Name)
+	assert.Equal(t, 50.0, stat.GpuUtilPct)
+	assert.Equal(t, 1, stat.MemUsedMB)
+}
