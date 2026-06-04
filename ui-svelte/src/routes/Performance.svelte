@@ -402,7 +402,7 @@
   <p class="text-sm text-txtsecondary">
     This is an experimental feature. Please use <a
       class="underline hover:text-txtmain"
-      href="https://github.com/mostlygeek/llama-swap/discussions/771">discussion #711</a
+      href="https://github.com/mostlygeek/llama-swap/discussions/771">discussion #771</a
     > for instructions and to share feedback.
   </p>
 
