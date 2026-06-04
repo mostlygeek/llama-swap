@@ -2,10 +2,6 @@ ARG BASE_IMAGE=ghcr.io/ggml-org/llama.cpp
 ARG BASE_TAG=server-cuda
 FROM ${BASE_IMAGE}:${BASE_TAG}
 
-# has to be after the FROM
-# TARGETARCH is auto-set by `docker buildx build --platform …` (amd64/arm64);
-# falls back to amd64 when an older `docker build` runs without buildx.
-ARG TARGETARCH=amd64
 ARG LS_VER=170
 ARG LS_REPO=mostlygeek/llama-swap
 
@@ -37,9 +33,15 @@ WORKDIR /app
 ENV PATH="/app:${PATH}"
 
 RUN \
-    curl -LO "https://github.com/${LS_REPO}/releases/download/v${LS_VER}/llama-swap_${LS_VER}_linux_${TARGETARCH}.tar.gz" && \
-    tar -zxf "llama-swap_${LS_VER}_linux_${TARGETARCH}.tar.gz" && \
-    rm "llama-swap_${LS_VER}_linux_${TARGETARCH}.tar.gz"
+    set -eux; \
+    case "$(uname -m)" in \
+        x86_64)  ARCH=amd64 ;; \
+        aarch64) ARCH=arm64 ;; \
+        *) echo "unsupported arch: $(uname -m)" >&2; exit 1 ;; \
+    esac; \
+    curl --fail -LO "https://github.com/${LS_REPO}/releases/download/v${LS_VER}/llama-swap_${LS_VER}_linux_${ARCH}.tar.gz" && \
+    tar -zxf "llama-swap_${LS_VER}_linux_${ARCH}.tar.gz" && \
+    rm "llama-swap_${LS_VER}_linux_${ARCH}.tar.gz"
 
 COPY --chown=$UID:$GID config.example.yaml /app/config.yaml
 
