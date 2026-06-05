@@ -11,11 +11,41 @@ import (
 // cannot immediately acquire a concurrency slot is rejected with a bare 429).
 //
 // When enabled, a request that cannot immediately acquire a slot is held in a
-// per-model queue and admitted by caller priority (highest first, FIFO within a
-// priority) as slots free. A request is rejected with 429 + Retry-After only
-// when the queue is full or its estimated wait would exceed MaxWait. The
-// Retry-After value is derived from a measured EWMA of the model's service time.
+// per-model queue and admitted as slots free according to Mode: "absolute"
+// (highest priority first, FIFO within a priority) or "proportion" (priority as
+// a weight, weighted fair queuing). PriorityIncreasePerSecondWaiting optionally
+// ages a waiter's effective priority up over time in either mode. A request is
+// rejected with 429 + Retry-After only when the queue is full or its estimated
+// wait would exceed MaxWait; the Retry-After is a measured EWMA of service time.
+// SchedulingMode selects how the priority number is interpreted under
+// contention.
+type SchedulingMode string
+
+const (
+	// ModeAbsolute serves the highest-priority waiter first (FIFO within a
+	// priority). This is the default and matches the original behavior. With
+	// PriorityIncreasePerSecondWaiting > 0 it becomes starvation-free: a
+	// waiter's effective priority climbs the longer it waits.
+	ModeAbsolute SchedulingMode = "absolute"
+
+	// ModeProportion treats the priority number as a weight and admits callers
+	// in proportion to their weights (weighted fair queuing). A weight-10 caller
+	// gets ~10x the throughput of a weight-1 caller under contention; an idle
+	// class never holds back a busy one (work-conserving).
+	ModeProportion SchedulingMode = "proportion"
+)
+
 type SchedulingConfig struct {
+	// Mode selects how the priority number is interpreted: "absolute" (highest
+	// first) or "proportion" (weighted shares). Defaults to "absolute".
+	Mode SchedulingMode `yaml:"mode"`
+
+	// PriorityIncreasePerSecondWaiting adds to a waiter's effective priority for
+	// every second it has waited, composing with either mode. 0 (default)
+	// disables aging. In absolute mode it prevents starvation (low priority
+	// eventually overtakes); in proportion mode it grows a long-waiter's share.
+	PriorityIncreasePerSecondWaiting float64 `yaml:"priorityIncreasePerSecondWaiting"`
+
 	// Priorities maps a caller id to a priority. The caller id is the API key
 	// presented on the request (Authorization Bearer/Basic password, or
 	// x-api-key). Higher priority is admitted first under contention.
@@ -73,6 +103,14 @@ func (s *SchedulingConfig) Enabled() bool {
 	return s != nil && s.enabled
 }
 
+// ResolvedMode returns the configured mode, defaulting to ModeAbsolute.
+func (s *SchedulingConfig) ResolvedMode() SchedulingMode {
+	if s.Mode == ModeProportion {
+		return ModeProportion
+	}
+	return ModeAbsolute
+}
+
 // PriorityFor returns the priority for a request. An explicitly listed caller
 // wins (operator intent), then the model's default, then DefaultPriority.
 func (s *SchedulingConfig) PriorityFor(callerID, modelID string) int {
@@ -95,6 +133,12 @@ func (s *SchedulingConfig) Validate() error {
 	}
 	if s.MaxQueueDepth < 0 {
 		return fmt.Errorf("maxQueueDepth must be >= 0, got %d", s.MaxQueueDepth)
+	}
+	if s.Mode != "" && s.Mode != ModeAbsolute && s.Mode != ModeProportion {
+		return fmt.Errorf("mode must be %q or %q, got %q", ModeAbsolute, ModeProportion, s.Mode)
+	}
+	if s.PriorityIncreasePerSecondWaiting < 0 {
+		return fmt.Errorf("priorityIncreasePerSecondWaiting must be >= 0, got %v", s.PriorityIncreasePerSecondWaiting)
 	}
 	return nil
 }

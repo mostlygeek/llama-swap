@@ -525,6 +525,23 @@ peers:
 #   Authorization Basic password field, or x-api-key). Callers not listed in
 #   `priorities` use `defaultPriority`.
 scheduling:
+  # mode: how the priority number is interpreted under contention.
+  # - "absolute" (default): highest priority served first, FIFO within a priority.
+  # - "proportion": priority is a weight; callers are admitted in proportion to
+  #   their weights (weighted fair queuing). A weight-10 caller gets ~10x the
+  #   throughput of a weight-1 caller under load; an idle caller never holds back
+  #   a busy one.
+  # - optional, default: absolute
+  mode: absolute
+
+  # priorityIncreasePerSecondWaiting: aging. Adds to a waiter's effective
+  # priority for every second it waits, composing with either mode.
+  # - in absolute mode: prevents starvation — a long-waiting low priority
+  #   eventually overtakes freshly arriving higher-priority requests.
+  # - in proportion mode: grows a long-waiter's share.
+  # - optional, default: 0 (no aging)
+  priorityIncreasePerSecondWaiting: 0
+
   # priorities: map of caller id (API key) to priority. Higher is served first
   # under contention.
   # - optional, default: empty (every caller uses defaultPriority)

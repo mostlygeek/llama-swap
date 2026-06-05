@@ -517,6 +517,18 @@
             "type": "object",
             "description": "Optional priority-aware fair admission in front of per-model concurrency limits. When omitted, llama-swap rejects over-limit requests with a bare 429. When present, over-limit requests are queued and admitted by caller priority, and rejected with 429 + Retry-After only when the queue is full or the estimated wait exceeds maxWait. The caller id is the API key presented on the request.",
             "properties": {
+                "mode": {
+                    "type": "string",
+                    "enum": ["absolute", "proportion"],
+                    "default": "absolute",
+                    "description": "How the priority number is interpreted under contention. 'absolute': highest priority served first (FIFO within a priority). 'proportion': priority is a weight and callers are admitted in proportion to their weights (weighted fair queuing)."
+                },
+                "priorityIncreasePerSecondWaiting": {
+                    "type": "number",
+                    "minimum": 0,
+                    "default": 0,
+                    "description": "Amount added to a waiter's effective priority for every second it has waited, composing with either mode. 0 disables aging. In absolute mode it prevents starvation (a long-waiting low priority eventually overtakes); in proportion mode it grows a long-waiter's share."
+                },
                 "priorities": {
                     "type": "object",
                     "additionalProperties": {

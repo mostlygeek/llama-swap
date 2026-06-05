@@ -134,7 +134,7 @@ func createSchedulingMiddleware(cfg config.Config, sched *scheduler, logger *log
 				stopWait = router.StreamQueueWait(logger, data.ModelID, w, r, posCh)
 			}
 
-			a := sched.enqueue(r.Context(), data.ModelID, priority, posCh)
+			a := sched.enqueue(r.Context(), data.ModelID, callerID, priority, posCh)
 			if stopWait != nil {
 				stopWait()
 			}
