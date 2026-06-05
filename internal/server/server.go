@@ -41,6 +41,9 @@ type Server struct {
 	mux     *http.ServeMux
 	handler http.Handler
 
+	activeProfileMu   sync.RWMutex
+	activeProfileName string
+
 	shutdownCtx  context.Context
 	shutdownFn   context.CancelFunc
 	shuttingDown atomic.Bool
@@ -206,6 +209,7 @@ func (s *Server) routes() {
 	modelChain := chain.New(
 		authMW,
 		CreateRequestContextMiddleware(s.cfg),
+		s.CreateProfileMiddleware(),
 		CreateInflightMiddleware(s.inflight),
 		CreateFilterMiddleware(s.cfg),
 		CreateFormFilterMiddleware(s.cfg),
@@ -260,6 +264,8 @@ func (s *Server) routes() {
 	// API group (API-key protected) consumed by the UI.
 	mux.Handle("POST /api/models/unload", apiChain.ThenFunc(s.handleAPIUnloadAll))
 	mux.Handle("POST /api/models/unload/{model...}", apiChain.ThenFunc(s.handleAPIUnloadModel))
+	mux.Handle("GET /api/profiles", apiChain.ThenFunc(s.handleAPIListProfiles))
+	mux.Handle("POST /api/profiles/activate/{name...}", apiChain.ThenFunc(s.handleAPIActivateProfile))
 	mux.Handle("POST /api/inflight/{id}/cancel", apiChain.ThenFunc(s.handleAPICancelInflight))
 	mux.Handle("GET /api/events", apiChain.ThenFunc(s.handleAPIEvents))
 	mux.Handle("GET /api/metrics/activity", apiChain.ThenFunc(s.handleAPIActivity))

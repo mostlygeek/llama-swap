@@ -140,8 +140,9 @@ models:
 healthCheckTimeout: 15
 profiles:
   test:
-    - model1
-    - model2
+    description: "remap m1 to model2"
+    aliases:
+      m1: model2
 groups:
   group1:
     swap: true
@@ -267,8 +268,11 @@ groups:
 		Performance: PerformanceConfig{
 			Every: 5 * time.Second,
 		},
-		Profiles: map[string][]string{
-			"test": {"model1", "model2"},
+		Profiles: map[string]ProfileConfig{
+			"test": {
+				Description: "remap m1 to model2",
+				Aliases:     map[string]string{"m1": "model2"},
+			},
 		},
 		aliases: map[string]string{
 			"m1":        "model1",

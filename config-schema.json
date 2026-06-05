@@ -494,6 +494,38 @@
         "matrix": {
             "$ref": "#/definitions/matrixConfig"
         },
+        "profiles": {
+            "type": "object",
+            "description": "Runtime-switchable alias overlays. When a profile is active, its alias map overrides default alias resolution. Switch via the UI dropdown or POST /api/profiles/activate/<name>. Selection does not persist across restarts.",
+            "propertyNames": {
+                "minLength": 1
+            },
+            "additionalProperties": {
+                "type": "object",
+                "required": [
+                    "aliases"
+                ],
+                "properties": {
+                    "description": {
+                        "type": "string"
+                    },
+                    "aliases": {
+                        "type": "object",
+                        "minProperties": 1,
+                        "propertyNames": {
+                            "minLength": 1
+                        },
+                        "additionalProperties": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
+                        "description": "Map of alias name to target. The target may be any model ID, static alias, or setParamsByID variant key; unknown targets are rejected at load time. An empty string or YAML null (~) disables the local alias while this profile is active."
+                    }
+                }
+            }
+        },
         "hooks": {
             "type": "object",
             "properties": {

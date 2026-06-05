@@ -103,6 +103,25 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		}
 	}
 
+	// Validate profile names and alias names (targets are validated after all
+	// aliases, including setParamsByID keys, are registered below).
+	for profileName, profile := range config.Profiles {
+		if profileName == "" {
+			return Config{}, fmt.Errorf("profile name cannot be empty")
+		}
+		if len(profile.Aliases) == 0 {
+			return Config{}, fmt.Errorf("profile %s: aliases map cannot be empty", profileName)
+		}
+		for alias := range profile.Aliases {
+			if alias == "" {
+				return Config{}, fmt.Errorf("profile %s: alias name cannot be empty", profileName)
+			}
+			if _, found := config.Models[alias]; found {
+				return Config{}, fmt.Errorf("profile %s: alias %q conflicts with model ID", profileName, alias)
+			}
+		}
+	}
+
 	// Validate global macros
 	for _, macro := range config.Macros {
 		if err = validateMacro(macro.Name, macro.Value); err != nil {
@@ -315,6 +334,22 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		}
 
 		config.Models[modelId] = modelConfig
+	}
+
+	// Validate profile alias targets after all aliases are registered.
+	for profileName, profile := range config.Profiles {
+		for alias, target := range profile.Aliases {
+			if target == "" {
+				continue
+			}
+			if _, ok := config.Models[target]; ok {
+				continue
+			}
+			if _, ok := config.aliases[target]; ok {
+				continue
+			}
+			return Config{}, fmt.Errorf("profile %s: alias %q target %q is not a known model or alias", profileName, alias, target)
+		}
 	}
 
 	// Normalize routing config. The legacy top-level `matrix`/`groups` keys and

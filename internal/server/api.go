@@ -137,6 +137,7 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	created := time.Now().Unix()
 	data := make([]modelRecord, 0, len(s.cfg.Models))
 	running := s.local.RunningModels()
+	_, profileAliases := s.ActiveProfile()
 
 	modelStatus := func(id string) string {
 		if _, ok := running[id]; ok {
@@ -173,7 +174,7 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 		data = append(data, newRecord(id, mc.Name, mc.Description, mc.Metadata, mc.Capabilities, status))
 
 		if s.cfg.IncludeAliasesInList {
-			for _, alias := range mc.Aliases {
+			for _, alias := range s.cfg.EffectiveAliasesFor(id, profileAliases) {
 				if alias := strings.TrimSpace(alias); alias != "" {
 					data = append(data, newRecord(alias, mc.Name, mc.Description, mc.Metadata, mc.Capabilities, status))
 				}
