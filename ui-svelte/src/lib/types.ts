@@ -12,6 +12,12 @@ export interface Model {
   aliases?: string[];
 }
 
+export interface Profile {
+  name: string;
+  description?: string;
+  aliases: Record<string, string>;
+}
+
 export interface TokenMetrics {
   cache_tokens: number;
   input_tokens: number;
@@ -91,7 +97,7 @@ export interface PerformanceResponse {
 }
 
 export interface APIEventEnvelope {
-  type: "modelStatus" | "logData" | "metrics" | "inflight" | "perfsys" | "perfgpu";
+  type: "modelStatus" | "logData" | "metrics" | "inflight" | "perfsys" | "perfgpu" | "profileChanged";
   data: string;
 }
 

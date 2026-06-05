@@ -38,6 +38,9 @@ type Server struct {
 	mux     *http.ServeMux
 	handler http.Handler
 
+	activeProfileMu   sync.RWMutex
+	activeProfileName string
+
 	shutdownCtx  context.Context
 	shutdownFn   context.CancelFunc
 	shuttingDown atomic.Bool
@@ -182,6 +185,7 @@ func (s *Server) routes() {
 	// the rewritten body.
 	modelChain := chain.New(
 		authMW,
+		s.CreateProfileMiddleware(),
 		CreateConcurrencyMiddleware(s.cfg),
 		filterMW,
 		formFilterMW,
@@ -232,6 +236,8 @@ func (s *Server) routes() {
 	// API group (API-key protected) consumed by the UI.
 	mux.Handle("POST /api/models/unload", apiChain.ThenFunc(s.handleAPIUnloadAll))
 	mux.Handle("POST /api/models/unload/{model...}", apiChain.ThenFunc(s.handleAPIUnloadModel))
+	mux.Handle("GET /api/profiles", apiChain.ThenFunc(s.handleAPIListProfiles))
+	mux.Handle("POST /api/profiles/activate/{name...}", apiChain.ThenFunc(s.handleAPIActivateProfile))
 	mux.Handle("GET /api/events", apiChain.ThenFunc(s.handleAPIEvents))
 	mux.Handle("GET /api/metrics", apiChain.ThenFunc(s.handleAPIMetrics))
 	mux.Handle("GET /api/performance", apiChain.ThenFunc(s.handleAPIPerformance))

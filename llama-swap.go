@@ -99,10 +99,6 @@ func main() {
 	// so a LogToStdout change requires a restart to take effect.
 	muxLog, proxyLog, upstreamLog := server.NewLoggers(cfg.LogToStdout)
 
-	if len(cfg.Profiles) > 0 {
-		proxyLog.Warn("Profile functionality has been removed in favor of Groups. See the README for more information.")
-	}
-
 	applyLogSettings := func(cfg config.Config) {
 		level := logmon.LevelInfo
 		switch strings.ToLower(strings.TrimSpace(cfg.LogLevel)) {
@@ -190,10 +186,6 @@ func main() {
 		if err != nil {
 			proxyLog.Warnf("failed to reload config: %v", err)
 			return
-		}
-
-		if len(newCfg.Profiles) > 0 {
-			proxyLog.Warn("Profile functionality has been removed in favor of Groups. See the README for more information.")
 		}
 
 		if perfMon != nil {

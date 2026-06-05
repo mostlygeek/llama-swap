@@ -8,6 +8,7 @@ import type {
   ReqRespCapture,
   InFlightStats,
   PerformanceResponse,
+  Profile,
 } from "../lib/types";
 import { connectionState } from "./theme";
 
@@ -19,6 +20,8 @@ export const proxyLogs = writable<string>("");
 export const upstreamLogs = writable<string>("");
 export const metrics = writable<ActivityLogEntry[]>([]);
 export const inFlightRequests = writable<number>(0);
+export const profiles = writable<Profile[]>([]);
+export const activeProfile = writable<string>("");
 export const versionInfo = writable<VersionInfo>({
   build_date: "unknown",
   commit: "unknown",
@@ -40,6 +43,8 @@ export function enableAPIEvents(enabled: boolean): void {
     apiEventSource = null;
     metrics.set([]);
     inFlightRequests.set(0);
+    profiles.set([]);
+    activeProfile.set("");
     return;
   }
 
@@ -58,9 +63,11 @@ export function enableAPIEvents(enabled: boolean): void {
       upstreamLogs.set("");
       metrics.set([]);
       inFlightRequests.set(0);
+      activeProfile.set("");
       models.set([]);
       retryCount = 0;
       connectionState.set("connected");
+      void fetchProfiles();
     };
 
     apiEventSource.onmessage = (e: MessageEvent) => {
@@ -98,6 +105,12 @@ export function enableAPIEvents(enabled: boolean): void {
           case "inflight": {
             const stats = JSON.parse(message.data) as InFlightStats;
             inFlightRequests.set(stats.total ?? 0);
+            break;
+          }
+
+          case "profileChanged": {
+            const data = JSON.parse(message.data) as { activeProfile: string };
+            activeProfile.set(data.activeProfile ?? "");
             break;
           }
         }
@@ -145,6 +158,35 @@ export async function listModels(): Promise<Model[]> {
   } catch (error) {
     console.error("Failed to fetch models:", error);
     return [];
+  }
+}
+
+export async function fetchProfiles(): Promise<void> {
+  try {
+    const response = await fetch("/api/profiles");
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const data = (await response.json()) as { active: string; profiles: Profile[] };
+    profiles.set(data.profiles || []);
+    activeProfile.set(data.active || "");
+  } catch (error) {
+    console.error("Failed to fetch profiles:", error);
+  }
+}
+
+export async function setActiveProfile(name: string): Promise<void> {
+  try {
+    const response = await fetch(`/api/profiles/activate/${encodeURIComponent(name)}`, {
+      method: "POST",
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to activate profile: ${response.status}`);
+    }
+    activeProfile.set(name);
+  } catch (error) {
+    console.error("Failed to activate profile:", error);
+    throw error;
   }
 }
 
