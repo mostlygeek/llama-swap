@@ -3,6 +3,7 @@ package server
 import (
 	"container/heap"
 	"context"
+	"sort"
 	"sync"
 	"time"
 
@@ -68,14 +69,22 @@ type admission struct {
 // enqueue admits the request immediately, blocks until a slot frees, or rejects
 // it with a Retry-After estimate. priority is the caller's configured priority
 // (higher served first).
-func (s *scheduler) enqueue(ctx context.Context, modelID string, priority int) admission {
+//
+// posCh, when non-nil, receives the request's live 1-indexed queue position
+// while it waits — the scheduler's analog of the swap queue's position display.
+// Supplying it also opts the request out of the late maxWait timer: once a
+// streaming caller is shown a position it is committed to a 200 response, so it
+// waits until admitted or the client disconnects rather than being 429'd
+// mid-stream. The entry-time rejections (queue full, hopeless estimate) still
+// apply, before any position is sent.
+func (s *scheduler) enqueue(ctx context.Context, modelID string, priority int, posCh chan int) admission {
 	q := s.queues[modelID]
 	if q == nil {
 		// Unmanaged model: admit without limiting, matching the legacy
 		// middleware's pass-through for peer models.
 		return admission{admitted: true, release: func() {}}
 	}
-	return q.acquire(ctx, priority, s.cfg.MaxWait, s.cfg.MaxQueueDepth)
+	return q.acquire(ctx, priority, s.cfg.MaxWait, s.cfg.MaxQueueDepth, posCh)
 }
 
 // modelQueue is a bounded priority admission queue for a single model.
@@ -100,9 +109,10 @@ type waiter struct {
 	ready    chan struct{} // closed when admitted
 	index    int           // heap index, -1 once removed
 	canceled bool
+	posCh    chan int // non-nil to receive live position updates; nil otherwise
 }
 
-func (q *modelQueue) acquire(ctx context.Context, priority int, maxWait time.Duration, maxDepth int) admission {
+func (q *modelQueue) acquire(ctx context.Context, priority int, maxWait time.Duration, maxDepth int, posCh chan int) admission {
 	q.mu.Lock()
 
 	// Fast path: a slot is free and nobody is waiting.
@@ -133,14 +143,19 @@ func (q *modelQueue) acquire(ctx context.Context, priority int, maxWait time.Dur
 		return rej
 	}
 
-	w := &waiter{priority: priority, seq: q.seq, ready: make(chan struct{})}
+	w := &waiter{priority: priority, seq: q.seq, ready: make(chan struct{}), posCh: posCh}
 	q.seq++
 	heap.Push(&q.waiters, w)
+	q.broadcastPositionsLocked()
 	q.mu.Unlock()
 
 	var timer *time.Timer
 	var timeout <-chan time.Time
-	if maxWait > 0 {
+	// A position-streaming waiter has committed to a 200 response and cannot be
+	// 429'd mid-stream, so it skips the late maxWait timer and waits until
+	// admitted or the client disconnects. The entry estimate gate above still
+	// rejected it earlier if the wait looked hopeless.
+	if posCh == nil && maxWait > 0 {
 		timer = time.NewTimer(maxWait)
 		timeout = timer.C
 		defer timer.Stop()
@@ -174,6 +189,7 @@ func (q *modelQueue) abandon(w *waiter) admission {
 	defer q.mu.Unlock()
 	if w.index >= 0 {
 		heap.Remove(&q.waiters, w.index)
+		q.broadcastPositionsLocked()
 		return admission{retryAfter: q.estimateWait(1)}
 	}
 	// Already admitted (ready closed) but we lost the select race; honor the slot.
@@ -195,6 +211,7 @@ func (q *modelQueue) release() {
 }
 
 func (q *modelQueue) tryAdmitLocked() {
+	admitted := false
 	for q.inflight < q.concurrency && q.waiters.Len() > 0 {
 		w := heap.Pop(&q.waiters).(*waiter)
 		if w.canceled {
@@ -202,6 +219,52 @@ func (q *modelQueue) tryAdmitLocked() {
 		}
 		q.inflight++
 		close(w.ready)
+		admitted = true
+	}
+	if admitted {
+		// Front of the queue moved up; refresh everyone still waiting.
+		q.broadcastPositionsLocked()
+	}
+}
+
+// broadcastPositionsLocked sends every waiter that asked for live updates its
+// current 1-indexed position in service order (priority desc, then FIFO).
+// Callers hold q.mu. Sends are non-blocking and latest-wins so a slow consumer
+// never stalls the scheduler.
+func (q *modelQueue) broadcastPositionsLocked() {
+	n := q.waiters.Len()
+	if n == 0 {
+		return
+	}
+	ordered := make([]*waiter, n)
+	copy(ordered, q.waiters)
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].priority != ordered[j].priority {
+			return ordered[i].priority > ordered[j].priority
+		}
+		return ordered[i].seq < ordered[j].seq
+	})
+	for i, w := range ordered {
+		if w.posCh != nil {
+			sendPosition(w.posCh, i+1)
+		}
+	}
+}
+
+// sendPosition does a non-blocking latest-wins send: a full channel is drained
+// and the newest value queued, so the scheduler never blocks on a consumer.
+func sendPosition(ch chan int, pos int) {
+	select {
+	case ch <- pos:
+	default:
+		select {
+		case <-ch:
+		default:
+		}
+		select {
+		case ch <- pos:
+		default:
+		}
 	}
 }
 

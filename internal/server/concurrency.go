@@ -119,7 +119,25 @@ func createSchedulingMiddleware(cfg config.Config, sched *scheduler, logger *log
 
 			callerID := callerFromContext(r.Context())
 			priority := cfg.Scheduling.PriorityFor(callerID)
-			a := sched.enqueue(r.Context(), data.ModelID, priority)
+
+			// For streaming chat requests with loading-state enabled, surface the
+			// live queue position in the reasoning ("thinking") stream while the
+			// request waits for a slot — the admission-queue analog of the swap
+			// queue's position display. The stream is created lazily on the first
+			// position, so a request admitted immediately (or rejected at entry,
+			// before it parks) emits nothing and the normal response / 429 path is
+			// preserved.
+			var posCh chan int
+			var stopWait func()
+			if data.Streaming && data.SendLoadingState && router.IsLoadingPath(r.URL.Path) {
+				posCh = make(chan int, 1)
+				stopWait = router.StreamQueueWait(logger, data.ModelID, w, r, posCh)
+			}
+
+			a := sched.enqueue(r.Context(), data.ModelID, priority, posCh)
+			if stopWait != nil {
+				stopWait()
+			}
 			if !a.admitted {
 				if logger != nil {
 					who := callerID

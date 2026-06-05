@@ -26,6 +26,11 @@ func isLoadingPath(path string) bool {
 	return false
 }
 
+// IsLoadingPath reports whether path is one the loading/thinking stream applies
+// to. Exported for the scheduler admission layer, which streams queue position
+// on the same paths while a request waits for a slot.
+func IsLoadingPath(path string) bool { return isLoadingPath(path) }
+
 type loadingWriter struct {
 	hasWritten bool
 	writer     http.ResponseWriter
@@ -56,7 +61,9 @@ type loadingWriter struct {
 	charPerSecond float64
 }
 
-func newLoadingWriter(logger *logmon.Monitor, modelName string, w http.ResponseWriter, req *http.Request) *loadingWriter {
+// newStreamWriter sets up the SSE response and returns a loadingWriter with no
+// banner emitted. Callers add their own headline (loading vs queued).
+func newStreamWriter(logger *logmon.Monitor, modelName string, w http.ResponseWriter, req *http.Request) *loadingWriter {
 	s := &loadingWriter{
 		writer:        w,
 		req:           req,
@@ -72,9 +79,60 @@ func newLoadingWriter(logger *logmon.Monitor, modelName string, w http.ResponseW
 	s.Header().Set("Cache-Control", "no-cache")
 	s.Header().Set("Connection", "keep-alive")
 	s.WriteHeader(http.StatusOK)
+	return s
+}
+
+func newLoadingWriter(logger *logmon.Monitor, modelName string, w http.ResponseWriter, req *http.Request) *loadingWriter {
+	s := newStreamWriter(logger, modelName, w, req)
 	s.sendLine("━━━━━")
 	s.sendLine(fmt.Sprintf("llama-swap loading model: %s", modelName))
 	return s
+}
+
+func newWaitWriter(logger *logmon.Monitor, modelName string, w http.ResponseWriter, req *http.Request) *loadingWriter {
+	s := newStreamWriter(logger, modelName, w, req)
+	s.sendLine("━━━━━")
+	s.sendLine(fmt.Sprintf("llama-swap queued: %s", modelName))
+	return s
+}
+
+// StreamQueueWait streams a "queued" thinking block to a streaming client while
+// it waits for a scheduler slot, updating it with the live queue position read
+// from positions. The stream is created lazily on the first position received —
+// so a request admitted immediately (no position ever sent) emits nothing and
+// the caller's normal response or 429 path is preserved. The returned stop func
+// ends the stream and fences the writer off the ResponseWriter; call it once the
+// wait resolves, before the real handler reclaims the writer.
+func StreamQueueWait(logger *logmon.Monitor, modelName string, w http.ResponseWriter, req *http.Request, positions <-chan int) (stop func()) {
+	ctx, cancel := context.WithCancel(req.Context())
+	done := make(chan struct{})
+	var lw *loadingWriter
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case pos, ok := <-positions:
+				if !ok {
+					return
+				}
+				if lw == nil {
+					lw = newWaitWriter(logger, modelName, w, req)
+					go lw.start(ctx)
+				}
+				lw.setUpdate(fmt.Sprintf("Queue position: #%d", pos))
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return func() {
+		cancel()
+		<-done // pump goroutine has exited; lw is now safe to read
+		if lw != nil {
+			lw.waitForCompletion(1 * time.Second)
+			lw.release()
+		}
+	}
 }
 
 func (s *loadingWriter) setUpdate(msg string) {
