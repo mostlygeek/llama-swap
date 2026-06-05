@@ -533,7 +533,17 @@ scheduling:
     sk-interactive-frontend: 10
     sk-bulk-indexer: 1
 
-  # defaultPriority: priority for callers not listed in `priorities`
+  # modelPriorities: map of model id to that model's default priority. Applies to
+  # callers not listed in `priorities` — useful for a single client (e.g. Open
+  # WebUI) that can't be told apart by API key, so priority follows the model
+  # being requested. An explicitly listed caller in `priorities` still wins.
+  # - optional, default: empty (models fall back to defaultPriority)
+  modelPriorities:
+    chat-model: 10      # latency-sensitive, served first
+    bulk-embeddings: 1  # batch work, yields under load
+
+  # defaultPriority: priority for callers not listed in `priorities` and models
+  # not listed in `modelPriorities`
   # - optional, default: 1
   defaultPriority: 5
 

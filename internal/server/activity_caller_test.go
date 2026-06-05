@@ -98,7 +98,7 @@ func TestCallerMiddleware_ResolvesPriorityFromBearer(t *testing.T) {
 
 	var gotPriority int
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPriority = cfg.Scheduling.PriorityFor(callerFromContext(r.Context()))
+		gotPriority = cfg.Scheduling.PriorityFor(callerFromContext(r.Context()), "")
 	})
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)

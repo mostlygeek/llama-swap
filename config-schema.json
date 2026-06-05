@@ -525,10 +525,18 @@
                     "default": {},
                     "description": "Map of caller id (API key) to priority. Higher priority is served first under contention."
                 },
+                "modelPriorities": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    },
+                    "default": {},
+                    "description": "Map of model id to the default priority for that model. Applies to callers not listed in priorities (e.g. a single client that can't be told apart by API key), so priority can be driven by which model is requested. Models absent here use defaultPriority."
+                },
                 "defaultPriority": {
                     "type": "integer",
                     "default": 1,
-                    "description": "Priority assigned to callers not listed in priorities."
+                    "description": "Priority assigned to callers not listed in priorities and models not listed in modelPriorities."
                 },
                 "maxWait": {
                     "type": "string",

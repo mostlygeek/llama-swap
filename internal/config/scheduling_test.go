@@ -39,11 +39,46 @@ scheduling:
 	if got := cfg.Scheduling.MaxWait; got != 30*time.Second {
 		t.Fatalf("default maxWait = %v, want 30s", got)
 	}
-	if got := cfg.Scheduling.PriorityFor("interactive"); got != 10 {
+	if got := cfg.Scheduling.PriorityFor("interactive", "m1"); got != 10 {
 		t.Fatalf("PriorityFor(interactive) = %d, want 10", got)
 	}
-	if got := cfg.Scheduling.PriorityFor("unknown"); got != defaultSchedulingPriority {
+	if got := cfg.Scheduling.PriorityFor("unknown", "m1"); got != defaultSchedulingPriority {
 		t.Fatalf("PriorityFor(unknown) = %d, want default %d", got, defaultSchedulingPriority)
+	}
+}
+
+func TestScheduling_ModelPriorities(t *testing.T) {
+	cfg, err := LoadConfigFromReader(strings.NewReader(`
+models:
+  chat:
+    cmd: echo ${PORT}
+  embeddings:
+    cmd: echo ${PORT}
+scheduling:
+  defaultPriority: 5
+  priorities:
+    bulk: 1
+  modelPriorities:
+    chat: 10
+    embeddings: 2
+`))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	// Unlisted caller falls to the per-model default.
+	if got := cfg.Scheduling.PriorityFor("", "chat"); got != 10 {
+		t.Fatalf("PriorityFor(anon, chat) = %d, want 10", got)
+	}
+	if got := cfg.Scheduling.PriorityFor("", "embeddings"); got != 2 {
+		t.Fatalf("PriorityFor(anon, embeddings) = %d, want 2", got)
+	}
+	// A model without a per-model entry falls to defaultPriority.
+	if got := cfg.Scheduling.PriorityFor("", "other"); got != 5 {
+		t.Fatalf("PriorityFor(anon, other) = %d, want 5", got)
+	}
+	// An explicitly listed caller wins over the per-model default.
+	if got := cfg.Scheduling.PriorityFor("bulk", "chat"); got != 1 {
+		t.Fatalf("PriorityFor(bulk, chat) = %d, want 1 (caller wins)", got)
 	}
 }
 

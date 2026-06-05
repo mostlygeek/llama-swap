@@ -118,7 +118,7 @@ func createSchedulingMiddleware(cfg config.Config, sched *scheduler, logger *log
 			}
 
 			callerID := callerFromContext(r.Context())
-			priority := cfg.Scheduling.PriorityFor(callerID)
+			priority := cfg.Scheduling.PriorityFor(callerID, data.ModelID)
 
 			// For streaming chat requests with loading-state enabled, surface the
 			// live queue position in the reasoning ("thinking") stream while the

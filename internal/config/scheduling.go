@@ -21,8 +21,16 @@ type SchedulingConfig struct {
 	// x-api-key). Higher priority is admitted first under contention.
 	Priorities map[string]int `yaml:"priorities"`
 
-	// DefaultPriority is assigned to callers absent from Priorities (including
-	// unauthenticated callers when no API keys are configured).
+	// ModelPriorities maps a model id to the default priority for that model.
+	// It applies to callers absent from Priorities (e.g. a single client like
+	// Open WebUI that can't be distinguished by API key), letting priority be
+	// driven by which model is requested. Models absent here fall back to
+	// DefaultPriority.
+	ModelPriorities map[string]int `yaml:"modelPriorities"`
+
+	// DefaultPriority is assigned to callers absent from both Priorities and
+	// ModelPriorities (including unauthenticated callers when no API keys are
+	// configured).
 	DefaultPriority int `yaml:"defaultPriority"`
 
 	// MaxWait bounds how long a queued request may wait for a slot before it is
@@ -65,10 +73,13 @@ func (s *SchedulingConfig) Enabled() bool {
 	return s != nil && s.enabled
 }
 
-// PriorityFor returns the configured priority for a caller id, or
-// DefaultPriority when the caller is not listed.
-func (s *SchedulingConfig) PriorityFor(callerID string) int {
+// PriorityFor returns the priority for a request. An explicitly listed caller
+// wins (operator intent), then the model's default, then DefaultPriority.
+func (s *SchedulingConfig) PriorityFor(callerID, modelID string) int {
 	if p, ok := s.Priorities[callerID]; ok {
+		return p
+	}
+	if p, ok := s.ModelPriorities[modelID]; ok {
 		return p
 	}
 	return s.DefaultPriority
