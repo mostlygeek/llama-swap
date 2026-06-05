@@ -15,20 +15,21 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
 - ✅ On-demand model switching
 - ✅ Use any local OpenAI compatible server (llama.cpp, vllm, tabbyAPI, stable-diffusion.cpp, etc.)
   - future proof, upgrade your inference servers at any time.
-- ✅ OpenAI API supported endpoints:
-  - `v1/completions`
-  - `v1/chat/completions`
-  - `v1/responses`
-  - `v1/embeddings`
-  - `v1/models` - list available models
-  - `v1/audio/speech` ([#36](https://github.com/mostlygeek/llama-swap/issues/36))
-  - `v1/audio/transcriptions` ([docs](https://github.com/mostlygeek/llama-swap/issues/41#issuecomment-2722637867))
-  - `v1/audio/voices`
-  - `v1/images/generations`
-  - `v1/images/edits`
-- ✅ Anthropic API supported endpoints:
-  - `v1/messages`
-  - `v1/messages/count_tokens`
+- ✅ OpenAI API supported endpoints under canonical base path `/openai/v1`:
+  - `/completions`
+  - `/chat/completions`
+  - `/responses`
+  - `/embeddings`
+  - `/models` - list available models
+  - `/audio/speech` ([#36](https://github.com/mostlygeek/llama-swap/issues/36))
+  - `/audio/transcriptions` ([docs](https://github.com/mostlygeek/llama-swap/issues/41#issuecomment-2722637867))
+  - `/audio/voices`
+  - `/images/generations`
+  - `/images/edits`
+- ✅ Anthropic API supported endpoints under canonical base path `/anthropic/v1`:
+  - `/messages`
+  - `/messages/count_tokens`
+  - Shared `/v1/...` paths remain available for existing clients.
 - ✅ llama-server (llama.cpp) supported endpoints
   - `v1/rerank`, `v1/reranking`, `/rerank`
   - `/infill` - for code infilling
@@ -215,7 +216,7 @@ See the [configuration documentation](docs/configuration.md) for all options.
 
 ## How does llama-swap work?
 
-When a request is made to an OpenAI compatible endpoint, llama-swap will extract the `model` value and load the appropriate server configuration to serve it. If the wrong upstream server is running, it will be replaced with the correct one. This is where the "swap" part comes in. The upstream server is automatically swapped to handle the request correctly.
+When a request is made to an OpenAI-compatible endpoint such as `/openai/v1/chat/completions`, or an Anthropic-compatible endpoint such as `/anthropic/v1/messages`, llama-swap will extract the `model` value and load the appropriate server configuration to serve it. If the wrong upstream server is running, it will be replaced with the correct one. This is where the "swap" part comes in. The upstream server is automatically swapped to handle the request correctly. Older shared `/v1/...` routes still work for existing clients.
 
 In the most basic configuration llama-swap handles one model at a time. For more advanced use cases, using a `matrix` allows multiple models to be loaded at the same time. You have complete control over how your system resources are used.
 
@@ -234,7 +235,7 @@ location /api/events {
 }
 
 # Streaming chat completions (stream=true)
-location /v1/chat/completions {
+location /openai/v1/chat/completions {
     proxy_pass http://your-llama-swap-backend;
     proxy_buffering off;
     proxy_cache off;
