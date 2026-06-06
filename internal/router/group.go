@@ -34,7 +34,6 @@ func NewGroup(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Group
 		func(name string, logger *logmon.Monitor, eff scheduler.Effects) scheduler.Scheduler {
 			return scheduler.NewFIFO(name, logger, planner, eff)
 		})
-	planner.processes = processes
 
 	for mid := range modelToGroup {
 		modelCfg, _, ok := conf.FindConfig(mid)
@@ -67,10 +66,9 @@ func NewGroup(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Group
 type groupPlanner struct {
 	config       config.Config
 	modelToGroup map[string]string
-	processes    map[string]process.Process
 }
 
-func (p *groupPlanner) EvictionFor(target string, alsoRunning []string) []string {
+func (p *groupPlanner) EvictionFor(target string, running []string) []string {
 	tg := p.modelToGroup[target]
 	tgCfg := p.config.Groups[tg]
 
@@ -100,17 +98,10 @@ func (p *groupPlanner) EvictionFor(target string, alsoRunning []string) []string
 		}
 	}
 
-	for mID, proc := range p.processes {
-		st := proc.State()
-		if st == process.StateStopped || st == process.StateShutdown {
-			continue
-		}
-		consider(mID)
-	}
-	for _, mID := range alsoRunning {
+	for _, mID := range running {
 		consider(mID)
 	}
 	return result
 }
 
-func (p *groupPlanner) OnSwapStart(target string) {}
+func (p *groupPlanner) OnSwapStart(target string, running []string) {}

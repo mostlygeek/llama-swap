@@ -26,7 +26,6 @@ func newTestGroup(t *testing.T, conf config.Config, processes map[string]process
 	planner := &groupPlanner{
 		config:       conf,
 		modelToGroup: modelToGroup,
-		processes:    processes,
 	}
 	base := newBaseRouter("group", conf, processes, logmon.NewWriter(io.Discard),
 		func(name string, logger *logmon.Monitor, eff scheduler.Effects) scheduler.Scheduler {
@@ -206,7 +205,8 @@ func TestGroup_CrossGroupNonExclusiveParallel(t *testing.T) {
 
 // TestGroup_SameGroupSwapSerialises verifies that two same-group requests
 // (Swap=true) serialise even when both arrive while neither has reached
-// StateStarting yet — the alsoRunning hint to the planner closes that race.
+// StateStarting yet — the in-flight swap target the scheduler folds into the
+// running set closes that race.
 func TestGroup_SameGroupSwapSerialises(t *testing.T) {
 	a := newFakeProcess("a")
 	pb := newFakeProcess("b")
@@ -228,8 +228,9 @@ func TestGroup_SameGroupSwapSerialises(t *testing.T) {
 	waitProcessed(t, g.testProcessed, 1)
 
 	// Request B arrives before A transitions to StateStarting in the process
-	// state machine. Without the alsoRunning hint, the planner would not see
-	// A as running, and B would start in parallel, violating Swap=true.
+	// state machine. Without folding the in-flight swap target into the running
+	// set, the planner would not see A as running, and B would start in
+	// parallel, violating Swap=true.
 	w2 := httptest.NewRecorder()
 	done2 := make(chan struct{})
 	go func() {

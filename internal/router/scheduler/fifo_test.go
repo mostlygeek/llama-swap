@@ -28,7 +28,7 @@ func (s *stubPlanner) EvictionFor(target string, _ []string) []string {
 	return s.evict[target]
 }
 
-func (s *stubPlanner) OnSwapStart(string) {}
+func (s *stubPlanner) OnSwapStart(string, []string) {}
 
 // grantRec is one GrantError / GrantServe call. err!=nil marks an error grant;
 // otherwise it is a serve grant and serve reports whether the caller received it.
@@ -69,6 +69,17 @@ func newFakeEffects() *fakeEffects {
 func (f *fakeEffects) ModelState(modelID string) (process.ProcessState, bool) {
 	st, ok := f.states[modelID]
 	return st, ok
+}
+
+func (f *fakeEffects) RunningModels() map[string]process.ProcessState {
+	out := make(map[string]process.ProcessState)
+	for id, st := range f.states {
+		if st == process.StateStopped || st == process.StateShutdown {
+			continue
+		}
+		out[id] = st
+	}
+	return out
 }
 
 func (f *fakeEffects) StartSwap(modelID string, evict []string) {

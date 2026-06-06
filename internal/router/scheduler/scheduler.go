@@ -28,14 +28,17 @@ var ErrModelNotFound = fmt.Errorf("local model not found")
 // strategy — any Scheduler works with any Swapper.
 type Swapper interface {
 	// EvictionFor returns running model IDs that must be stopped before
-	// target can serve. alsoRunning lists models the scheduler has already
-	// committed to loading (in-flight swaps) which the planner cannot see
-	// via process state yet. Pure decision; must not log.
-	EvictionFor(target string, alsoRunning []string) []string
+	// target can serve. running is the complete set the scheduler considers
+	// live: every process that is not stopped, unioned with the targets of
+	// in-flight swaps the scheduler has already committed to (which are not yet
+	// visible in process state). The planner does not inspect process state
+	// itself. Pure decision; must not log.
+	EvictionFor(target string, running []string) []string
 
-	// OnSwapStart runs once at the start of every swap. Planners may log
-	// their decision here at whatever verbosity they choose.
-	OnSwapStart(target string)
+	// OnSwapStart runs once at the start of every swap, with the same running
+	// set EvictionFor was given for this decision. Planners may log their
+	// decision here at whatever verbosity they choose.
+	OnSwapStart(target string, running []string)
 }
 
 // Scheduler decides what happens to each event the router's run loop receives.
@@ -65,6 +68,10 @@ type Effects interface {
 	// ModelState returns the current state of a model's process. ok is false
 	// when the model is not handled by this router.
 	ModelState(modelID string) (process.ProcessState, bool)
+	// RunningModels returns the state of every process that is not stopped or
+	// shut down, keyed by model ID. The scheduler uses it to build the running
+	// set it hands the Swapper.
+	RunningModels() map[string]process.ProcessState
 	// StartSwap launches the swap goroutine for modelID, stopping evict first.
 	StartSwap(modelID string, evict []string)
 	// GrantError responds to a caller with an error.

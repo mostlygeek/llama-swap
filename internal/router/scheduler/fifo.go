@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/logmon"
@@ -78,7 +79,8 @@ func (s *FIFO) OnRequest(req HandlerReq) {
 		return
 	}
 
-	evict := s.planner.EvictionFor(req.Model, activeTargets(s.active, req.Model))
+	running := s.runningSet(req.Model)
+	evict := s.planner.EvictionFor(req.Model, running)
 
 	// (3) Fast path: ready, nothing to evict, and nobody is evicting us.
 	if state == process.StateReady && len(evict) == 0 && !collidesWith(req.Model, evict, s.active) {
@@ -105,7 +107,7 @@ func (s *FIFO) OnRequest(req HandlerReq) {
 
 	// (6) Start a new (possibly parallel) swap.
 	s.logger.Debugf("%s: starting swap for model %s, evicting %v", s.name, req.Model, evict)
-	s.startSwap(req, evict)
+	s.startSwap(req, evict, running)
 }
 
 // OnSwapDone fans the result out to every waiter that joined this swap, removes
@@ -212,14 +214,16 @@ func (s *FIFO) grantHandler(req HandlerReq, modelID string) {
 	}
 }
 
-// startSwap records the swap as active and launches it via Effects.
-func (s *FIFO) startSwap(initial HandlerReq, evict []string) {
+// startSwap records the swap as active and launches it via Effects. running is
+// the set EvictionFor saw, forwarded to OnSwapStart so the planner logs against
+// the same picture it decided on.
+func (s *FIFO) startSwap(initial HandlerReq, evict, running []string) {
 	s.active[initial.Model] = &activeSwap{
 		modelID: initial.Model,
 		evict:   evict,
 		waiters: []HandlerReq{initial},
 	}
-	s.planner.OnSwapStart(initial.Model)
+	s.planner.OnSwapStart(initial.Model, running)
 	s.effects.StartSwap(initial.Model, evict)
 }
 
@@ -244,7 +248,8 @@ func (s *FIFO) drainQueue() {
 			sw.waiters = append(sw.waiters, req)
 			continue
 		}
-		evict := s.planner.EvictionFor(req.Model, activeTargets(s.active, req.Model))
+		running := s.runningSet(req.Model)
+		evict := s.planner.EvictionFor(req.Model, running)
 		if state == process.StateReady && len(evict) == 0 && !collidesWith(req.Model, evict, s.active) {
 			s.logger.Debugf("%s: queued request for model %s now served fast-path", s.name, req.Model)
 			s.grantHandler(req, req.Model)
@@ -259,10 +264,35 @@ func (s *FIFO) drainQueue() {
 			continue
 		}
 		s.logger.Debugf("%s: queued request for model %s now starting swap, evicting %v", s.name, req.Model, evict)
-		s.startSwap(req, evict)
+		s.startSwap(req, evict, running)
 	}
 	s.queued = remaining
 	broadcastQueuePositions(s.queued)
+}
+
+// runningSet is the live model set handed to the Swapper: every process the
+// baseRouter reports as running, unioned with the targets of in-flight swaps
+// (excluding excludeActive, the model whose own swap is being decided — its
+// in-flight entry must not count as "already running"). The result is sorted so
+// eviction decisions derived from it are deterministic.
+func (s *FIFO) runningSet(excludeActive string) []string {
+	seen := make(map[string]struct{})
+	var out []string
+	add := func(id string) {
+		if _, dup := seen[id]; dup {
+			return
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	for id := range s.effects.RunningModels() {
+		add(id)
+	}
+	for _, id := range activeTargets(s.active, excludeActive) {
+		add(id)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // activeTargets returns the IDs of every in-flight swap target except exclude.
