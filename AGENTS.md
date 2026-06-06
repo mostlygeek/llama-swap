@@ -1,53 +1,52 @@
-## Project Description:
+## Project
 
-llama-swap is a light weight, transparent proxy server that provides automatic model swapping to llama.cpp's server.
+llama-swap is a lightweight, transparent proxy server that provides automatic model swapping for llama.cpp's server.
 
-## Tech stack
+## Tech Stack
 
-- golang
-- typescript, vite and svelt5 for UI (located in ui/)
+- Go (proxy server, CLI)
+- TypeScript, Vite, Svelte 5, Tailwind (UI in `ui-svelte/`)
 
-## Workflow Tasks
+## Architecture
 
-- when summarizing changes only include details that require further action
-- just say "Done." when there is no further action
-- use the github CLI `gh` to create pull requests and work with github
-- Rules for creating pull requests:
-  - keep them short and focused on changes.
-  - never include a test plan
-  - write the summary using the same style rules as commit message
+```
+llama-swap.go          # entry point, flag parsing, server startup
+proxy/                 # core proxy logic: process management, routing, metrics, UI embed
+internal/              # supporting packages: config, server, process, cache, router, events
+cmd/                   # auxiliary tools: simple-responder (testing), wol-proxy, monitor-test
+ui-svelte/             # Svelte 5 frontend, builds into internal/server/ui_dist/
+config.example.yaml    # annotated example config
+config-schema.json     # JSON schema for config validation
+```
+
+## Prerequisites
+
+`go`, `npm`, `staticcheck`
+
+## Running Locally
+
+```bash
+go run . -config config.example.yaml
+```
 
 ## Testing
 
-- Follow test naming conventions like `TestProxyManager_<test name>`, `TestProcessGroup_<test name>`, etc.
-- Use `go test -v -run <name pattern for new tests>` to run any new tests you've written.
-- Run `gofmt -w <file>` before committing to fix any formatting
-- Build go binaries into the ./build/ subdirectory
-- Use `make test-dev` after running new tests for a quick over all test run. This runs `go test` and `staticcheck`. Fix any static checking errors. Use this only when changes are made to any code under the `proxy/` directory
-- Use `make test-all` before completing work. This includes long running concurrency tests.
-- Use `make test-ui` after making changes to the UI in ui-svelte/
+- Test naming: `TestProxyManager_<name>`, `TestProcessGroup_<name>`, etc.
+- Run new tests: `go test -v -run <pattern> ./proxy/... ./internal/...`
+- Run `gofmt -w <file>` before committing
+- `make test-dev` — quick check after code changes in `proxy/` or `internal/` (runs `go test` + `staticcheck`)
+- `make test-all` — full suite including race detection; run before completing work
+- `make test-ui` — after UI changes in `ui-svelte/`
+- Build binaries into `./build/`
 
-### Commit message example format:
+## Workflow
 
-```
-proxy: add new feature
+- When summarizing changes only include details that require further action
+- Just say "Done." when there is no further action
+- Use the GitHub CLI `gh` to create pull requests and work with GitHub
 
-Add new feature that implements functionality X and Y.
+See [docs/commit-format.md](docs/commit-format.md) and [docs/code-review.md](docs/code-review.md).
 
-- key change 1
-- key change 2
-- key change 3
+## Contributing to This File
 
-fixes #123
-```
-
-## Code Reviews
-
-- use three levels High, Medium, Low severity
-- label each discovered issue with a label like H1, M2, L3 respectively
-- High severity are must fix issues (security, race conditions, critical bugs)
-- Medium severity are recommended improvements (coding style, missing functionality, inconsistencies)
-- Low severity are nice to have changes and nits
-- Include a suggestion with each discovered item
-- Limit your code review to three items with the highest priority first
-- Double check your discovered items and recommended remediations
+Keep AGENTS.md lean — it is loaded into every agent context window. When adding new guidelines, create a file in `docs/` and link it from here rather than inlining. Update AGENTS.md only for high-frequency instructions that every session needs.
