@@ -51,9 +51,9 @@ type activeSwap struct {
 	waiters []handlerReq
 }
 
-// swapPlanner is the only piece of behaviour that differs between concrete
+// SwapPlanner is the only piece of behaviour that differs between concrete
 // routers. baseRouter never inspects its internals.
-type swapPlanner interface {
+type SwapPlanner interface {
 	// EvictionFor returns running model IDs that must be stopped before
 	// target can serve. alsoRunning lists models the baseRouter has already
 	// committed to loading (in-flight swaps) which the planner cannot see
@@ -67,13 +67,13 @@ type swapPlanner interface {
 
 // baseRouter owns the channels, run-loop, and orchestration code shared by
 // every concrete router. Concrete routers embed *baseRouter and supply a
-// swapPlanner that captures how their eviction set is decided.
+// SwapPlanner that captures how their eviction set is decided.
 type baseRouter struct {
 	name      string
 	config    config.Config
 	processes map[string]process.Process
 	logger    *logmon.Monitor
-	planner   swapPlanner
+	planner   SwapPlanner
 
 	// shutdownCtx governs the request machinery: cancelling it tells grant()
 	// and ServeHTTP to stop granting and reject callers. It is deliberately
@@ -106,7 +106,7 @@ type baseRouter struct {
 	testProcessed chan struct{}
 }
 
-func newBaseRouter(name string, conf config.Config, processes map[string]process.Process, planner swapPlanner, logger *logmon.Monitor) *baseRouter {
+func newBaseRouter(name string, conf config.Config, processes map[string]process.Process, planner SwapPlanner, logger *logmon.Monitor) *baseRouter {
 	shutdownCtx, shutdownFn := context.WithCancel(context.Background())
 	procCtx, procCancel := context.WithCancel(context.Background())
 	return &baseRouter{

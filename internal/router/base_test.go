@@ -30,7 +30,7 @@ func (s *stubPlanner) EvictionFor(target string, _ []string) []string {
 
 func (s *stubPlanner) OnSwapStart(string) {}
 
-func newTestBase(t *testing.T, processes map[string]process.Process, planner swapPlanner) *baseRouter {
+func newTestBase(t *testing.T, processes map[string]process.Process, planner SwapPlanner) *baseRouter {
 	t.Helper()
 	conf := config.Config{HealthCheckTimeout: 5}
 	b := newBaseRouter("test", conf, processes, planner, logmon.NewWriter(io.Discard))
