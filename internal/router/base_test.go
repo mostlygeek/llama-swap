@@ -26,7 +26,7 @@ type stubPlanner struct{}
 func (s *stubPlanner) EvictionFor(string, []string) []string { return nil }
 func (s *stubPlanner) OnSwapStart(string)                    {}
 
-func newTestBase(t *testing.T, processes map[string]process.Process, planner scheduler.SwapPlanner) *baseRouter {
+func newTestBase(t *testing.T, processes map[string]process.Process, planner scheduler.Swapper) *baseRouter {
 	t.Helper()
 	conf := config.Config{HealthCheckTimeout: 5}
 	b := newBaseRouter("test", conf, processes, logmon.NewWriter(io.Discard),

@@ -27,7 +27,7 @@ type unloadReq struct {
 
 // baseRouter owns the channels, run-loop, and process machinery shared by every
 // concrete router. Concrete routers embed *baseRouter and supply a
-// scheduler.Factory (which captures their scheduler.SwapPlanner) describing how
+// scheduler.Factory (which captures their scheduler.Swapper) describing how
 // requests are scheduled and how their eviction set is decided. baseRouter
 // implements scheduler.Effects so the scheduler can call back for side-effects.
 type baseRouter struct {

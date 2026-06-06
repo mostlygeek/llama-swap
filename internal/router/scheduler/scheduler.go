@@ -6,7 +6,7 @@
 //
 // Splitting these apart lets the scheduling strategy be swapped out
 // independently of both the process machinery (baseRouter) and the eviction
-// policy (SwapPlanner). FIFO is the first and currently only implementation.
+// policy (Swapper). FIFO is the first and currently only implementation.
 package scheduler
 
 import (
@@ -23,10 +23,10 @@ import (
 // router. The router package aliases it so SendError can match it.
 var ErrModelNotFound = fmt.Errorf("local model not found")
 
-// SwapPlanner is the eviction policy: it decides which running models must be
+// Swapper is the eviction policy: it decides which running models must be
 // stopped before a target can serve. It is orthogonal to the scheduling
-// strategy — any Scheduler works with any SwapPlanner.
-type SwapPlanner interface {
+// strategy — any Scheduler works with any Swapper.
+type Swapper interface {
 	// EvictionFor returns running model IDs that must be stopped before
 	// target can serve. alsoRunning lists models the scheduler has already
 	// committed to loading (in-flight swaps) which the planner cannot see
@@ -79,7 +79,7 @@ type Effects interface {
 }
 
 // Factory builds a Scheduler bound to a baseRouter's Effects. The concrete
-// router captures its SwapPlanner in the closure it passes as a Factory.
+// router captures its Swapper in the closure it passes as a Factory.
 type Factory func(name string, logger *logmon.Monitor, eff Effects) Scheduler
 
 // HandlerReq is one in-flight ServeHTTP request waiting for a routing decision.

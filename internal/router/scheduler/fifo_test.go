@@ -125,7 +125,7 @@ func (f *fakeEffects) startsFor(modelID string) int {
 	return n
 }
 
-func newFIFO(planner SwapPlanner, eff Effects) *FIFO {
+func newFIFO(planner Swapper, eff Effects) *FIFO {
 	return NewFIFO("test", logmon.NewWriter(io.Discard), planner, eff)
 }
 

@@ -22,7 +22,7 @@ type activeSwap struct {
 type FIFO struct {
 	name    string
 	logger  *logmon.Monitor
-	planner SwapPlanner
+	planner Swapper
 	effects Effects
 
 	active   map[string]*activeSwap
@@ -32,7 +32,7 @@ type FIFO struct {
 
 // NewFIFO builds a FIFO scheduler. It matches scheduler.Factory once a planner
 // is captured in a closure.
-func NewFIFO(name string, logger *logmon.Monitor, planner SwapPlanner, eff Effects) *FIFO {
+func NewFIFO(name string, logger *logmon.Monitor, planner Swapper, eff Effects) *FIFO {
 	return &FIFO{
 		name:     name,
 		logger:   logger,
