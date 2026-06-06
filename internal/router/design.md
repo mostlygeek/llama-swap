@@ -18,7 +18,7 @@ used to live tangled together in one type:
 3. **Eviction policy** — given a model we want to load, which currently-running
    models have to be stopped to make room?
 
-This branch pulls those three apart into separate, independently replaceable
+The design pulls those three apart into separate, independently replaceable
 pieces:
 
 | Concern             | Type                           | Lives in                        |
@@ -59,10 +59,10 @@ for {
 
 Every `Scheduler` method runs on this one goroutine. That is the single most
 important fact about the design: **the scheduler never needs a mutex for its own
-state**. The `active`, `inFlight`, and `queued` collections inside `FIFO` are
-touched only from these callbacks, which are serialized by the run loop. If you
-write a new scheduler, you get the same guarantee for free — and you must not
-break it by spinning up goroutines that mutate scheduler state.
+state**. All scheduler state is touched only from these callbacks, which are
+serialized by the run loop. If you write a new scheduler, you get the same
+guarantee for free — and you must not break it by spinning up goroutines that
+mutate scheduler state.
 
 ### Events flow in, side-effects flow out
 
@@ -173,9 +173,9 @@ The eviction policy. `EvictionFor` is a **pure decision** — given the target a
 the complete `running` set, return the running model IDs that must stop. It must
 not log or mutate anything, and it does **not** inspect process state itself:
 the scheduler hands it `running` already assembled (every non-stopped process,
-unioned with the targets of in-flight swaps the scheduler has committed to but
-that aren't visible in process state yet — see `FIFO.runningSet`). That keeps
-the swapper a pure function of its inputs, with no reference to processes.
+unioned with the targets of in-flight swaps already committed but not yet
+visible in process state). That keeps the swapper a pure function of its inputs,
+with no reference to processes.
 
 The reason it must not log is that it is a _speculative_ query — "what would we
 evict if we started this swap right now?" — called far more often than swaps
@@ -187,10 +187,10 @@ duplicate lines for a request that simply sits in the queue, and lines for
 decisions that never happen — the log would stop meaning "a swap occurred".
 
 `OnSwapStart` is the one place a Swapper may log, because it is called exactly
-once, at the moment a swap is actually committed (from `FIFO.startSwap`). One log
-line there equals one real swap, with the evict set that is genuinely being
-applied — which is why `matrixSwapper` re-solves and logs the full decision (set,
-DSL, cost) in `OnSwapStart` rather than in `EvictionFor`.
+once, at the moment a swap is committed. One log line there equals one real swap,
+with the evict set that is genuinely being applied — which is why `matrixSwapper`
+re-solves and logs the full decision (set, DSL, cost) in `OnSwapStart` rather
+than in `EvictionFor`.
 
 ### `Effects`
 
@@ -284,8 +284,7 @@ Method by method, as implemented in `base.go`:
 - **`RunningModels()`** — the state of every process that isn't stopped or shut
   down. The scheduler unions its keys with its own in-flight swap targets to
   build the `running` set it hands the `Swapper`, so the swapper never has to
-  touch process state itself. (`baseRouter` already exposed this for
-  `LocalRouter`; the scheduler split reuses it.)
+  touch process state itself.
 
 - **`StartSwap(modelID, evict)`** — fire-and-forget. `baseRouter` launches the
   `doSwap` goroutine and returns immediately; the result comes back later as a
@@ -297,9 +296,9 @@ Method by method, as implemented in `base.go`:
 
 - **`GrantServe(req, modelID) bool`** — hand a caller the tracked handler for a
   ready model, returning whether the caller was still there to receive it. The
-  scheduler increments `inFlight` **only on a true return** (see the in-flight
-  contract above). This is the one `Effects` method whose return value carries
-  state-machine significance.
+  scheduler increments the in-flight count **only on a true return** (see the
+  in-flight contract above). This is the one `Effects` method whose return value
+  carries state-machine significance.
 
 - **`StopProcesses(timeout, ids)`** — stop processes in parallel and **block**
   until all have stopped. Used by `OnUnload` so an admin `Unload` call can
@@ -314,16 +313,7 @@ goroutines, channels, and processes.
 
 ## How to implement a new `Swapper`
 
-The job of a `Swapper` is to decide what to evict before loading the requested model.
-
-A `Swapper` is the easiest thing to add — it's a pure function plus a logging
-hook. Use it when you want a new policy for _which models to evict_ while keeping
-FIFO scheduling.
-
-The swapper is its **own type**, separate from any concrete router. You do not
-add methods to `Group` or `Matrix`; you write a standalone swapper struct and
-hand it to `NewFIFO` through the factory closure (see the `Factory` section
-above). The concrete router _has-a_ `Swapper`; it is not one.
+A `Swapper` is a pure decision function plus a logging hook — the easiest of the three pieces to replace.
 
 1. **Write the swapper type** and give it whatever config it needs to make a
    decision. It does **not** need the process map — the scheduler supplies the
@@ -340,18 +330,16 @@ above). The concrete router _has-a_ `Swapper`; it is not one.
    - `running` is the complete live set, already assembled for you: every
      non-stopped process unioned with the targets of in-flight swaps the
      scheduler has committed to. You don't filter process state or fold in
-     in-flight targets yourself — that's the scheduler's job now
-     (`FIFO.runningSet`). Just decide against the slice you're handed.
+     in-flight targets yourself, that's the scheduler's job. Just decide against the slice you're handed.
    - Return the list of model IDs in `running` that must stop for `target` to
      run. Return `nil`/empty when nothing needs evicting.
-   - Do **not** log and do **not** mutate state here. It can be called multiple
-     times per request (once in `OnRequest`, again on every `drainQueue` pass).
+   - Do **not** mutate state here.
+   - Do **not** log here. It can be called multiple times per request. Since it is pure function have tests verify the expected behaviour.
 
 3. **Implement `OnSwapStart(target, running)`** — called once when a swap
-   actually begins, with the same `running` set `EvictionFor` saw for this
-   decision. This is your place to log at whatever verbosity you like.
-   `matrixSwapper` re-solves against `running` and logs the chosen set and cost;
-   `groupSwapper` logs nothing.
+   actually begins, with the same `running` set `EvictionFor` saw. This is the
+   right place to log: one call equals one real swap. `matrixSwapper` re-solves
+   and logs the chosen set and cost here; `groupSwapper` logs nothing.
 
 4. **Wire it in** by instantiating the swapper in your router's constructor and
    capturing it in the `Factory` closure passed to `newBaseRouter` — exactly as
@@ -363,63 +351,31 @@ and `matrixSwapper` (cost-based set solver) in `matrix.go`.
 
 ## How to implement a new `Scheduler`
 
-Replacing the scheduler is the bigger job — you're taking over the queue and the
-entire decision tree. Read `scheduler/fifo.go` end to end first; it is the
-reference and the contract is easiest to learn by example.
+Replacing the scheduler means taking over the queue and the entire decision tree. Read `scheduler/fifo.go` end to end first — it is the reference implementation and the rules below are easiest to understand in context.
 
 The rules you must honour:
 
-- **Single goroutine.** Every method runs on the run loop. Keep your state in
-  plain maps/slices and never read or write it from another goroutine. If you
-  need slow work done, hand it to `Effects.StartSwap` and react to the resulting
-  `SwapDone` — do not block a method waiting for it.
+- **Single goroutine.** Every method runs on the `baseRouter.run()` goroutine. Keep your state in plain maps/slices and never read or write it from another goroutine. If you need slow work done, hand it to `Effects.StartSwap` and react to the resulting `SwapDone` — do not block a method waiting for it.
 
-- **Never block the run loop indefinitely.** `OnRequest`, `OnSwapDone`, and
-  `OnServeDone` should make a decision and return. The one method allowed to
-  block is `OnUnload`, and only because it must wait on the synchronous
-  `StopProcesses` so the admin caller's guarantee holds.
+- **Never block the run loop.** `OnRequest`, `OnSwapDone`, and `OnServeDone` must make a decision and return. The one method allowed to block is `OnUnload`, and only because it must wait on the synchronous `StopProcesses` so the admin caller's guarantee holds.
 
-- **Respect the `GrantServe` boolean.** Only count a request as in-flight when
-  `GrantServe` returns true (see the in-flight contract above). Route this
-  through one helper like `FIFO.grantHandler` so you can't forget it.
+- **Respect the `GrantServe` boolean.** Only count a request as in-flight when `GrantServe` returns true (see the in-flight contract above). A false return means the caller is gone; no `ServeDoneEvent` will ever arrive, so incrementing on false permanently strands the counter.
 
-- **Account for in-flight swaps in your decisions.** The `Swapper` decides
-  against the running set _you_ build, so it must include not just live
-  processes (`Effects.RunningModels`) but also the targets of swaps you've
-  already started yet that aren't visible in process state — otherwise the
-  swapper contradicts decisions already in motion. `FIFO.runningSet` unions both
-  (via `activeTargets`) and hands the result to `EvictionFor`/`OnSwapStart`.
+- **Account for in-flight swaps in your running set.** When you call `Swapper.EvictionFor`, the running set you pass must include not just live processes (`Effects.RunningModels`) but also the targets of swaps you've already started that aren't yet visible in process state — otherwise the swapper contradicts decisions already in motion.
 
 What each method must do:
 
-- **`OnRequest(req)`** — the decision tree. FIFO's order is: reject unknown
-  models; join an in-flight swap for the same model; fast-path a ready model
-  with nothing to evict; otherwise queue (if it would collide with an active
-  swap or evict a busy process) or start a swap. Yours can differ, but it must
-  resolve every request to exactly one of: granted, errored, joined, queued, or
-  swap-started.
+- **`OnRequest(req)`** — every request must resolve to exactly one of: granted, errored, joined (piggybacks an in-flight swap), queued, or swap-started. No request may be silently dropped.
 
-- **`OnSwapDone(ev)`** — fan the result out to every waiter that joined this
-  swap (grant on success, error on `ev.Err`), drop the swap from your active
-  set, then re-examine anything you had queued — a finished swap may have
-  unblocked it.
+- **`OnSwapDone(ev)`** — deliver the result to every waiter that joined this swap (grant on success, error on `ev.Err`), drop the swap from active tracking, then re-examine anything queued — a finished swap may have unblocked it.
 
-- **`OnServeDone(ev)`** — decrement the model's in-flight count; when it reaches
-  zero, re-examine the queue, since a swap you deferred because it would evict
-  that (now idle) model may now be able to start.
+- **`OnServeDone(ev)`** — decrement the model's in-flight count; when it hits zero, re-examine the queue. Do **not** clear in-flight counts by hand; the handlers post their own `ServeDoneEvent`s on return.
 
-- **`OnUnload(targets, timeout)`** — release any waiters/queued requests aimed at
-  the unloaded models with an error, call `Effects.StopProcesses` (synchronously
-  — Unload's caller relies on the process being dead afterwards), then
-  re-examine the queue. Do **not** clear in-flight counts by hand; the dying
-  handlers will fire their own `ServeDoneEvent`s.
+- **`OnUnload(targets, timeout)`** — error out any waiters or queued requests for the unloaded models, call `Effects.StopProcesses` (synchronously — the admin caller relies on the process being dead afterwards), then re-examine the queue.
 
-- **`OnShutdown(err)`** — grant `err` to every waiter you still hold (active swap
-  waiters and queued requests). Don't touch processes; teardown is
-  `baseRouter`'s job (`handleShutdown`).
+- **`OnShutdown(err)`** — error out every waiter you still hold (active swap waiters and queued requests). Don't touch processes; teardown is `baseRouter`'s job.
 
-Finally, expose a constructor matching the `Factory` shape and capture a
-`Swapper` so your concrete router can wire it the same way FIFO is wired:
+Expose a constructor matching the `Factory` shape:
 
 ```go
 func NewMyScheduler(name string, logger *logmon.Monitor, swapper Swapper, eff Effects) *MyScheduler {
@@ -438,10 +394,11 @@ base := newBaseRouter(name, conf, processes, proxylog,
 - **Schedulers** are tested as pure state machines in the `scheduler` package:
   drive the `On*` methods directly against a `fakeEffects` and assert on the
   recorded grants/starts/stops. No goroutines, no sleeps. See
-  `scheduler/fifo_test.go` and follow the `TestFIFO_<name>` convention.
+  `scheduler/fifo_test.go` as the reference; follow the `TestSchedulerName_<scenario>`
+  naming convention.
 - **`baseRouter` mechanism** (run loop, `grant`/`ServeHTTP`, `Unload`,
   `Shutdown`) is tested in `base_test.go`. The run loop exposes a
   `testProcessed` channel so tests can wait for an event to be fully processed
   instead of sleeping.
-- Run new tests with `go test -v -run TestFIFO_... ./internal/router/scheduler/`,
+- Run new tests with `go test -v -run TestMyScheduler_... ./internal/router/scheduler/`,
   then `make test-dev` for a quick `go test` + `staticcheck` pass over `proxy/`.
