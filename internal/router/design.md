@@ -25,7 +25,7 @@ pieces:
 | ------------------- | ------------------------------ | ------------------------------- |
 | Process machinery   | `baseRouter`                   | `internal/router/base.go`       |
 | Scheduling strategy | `scheduler.Scheduler` (`FIFO`) | `internal/router/scheduler/`    |
-| Eviction policy     | `scheduler.Swapper`            | `groupPlanner`, `matrixPlanner` |
+| Eviction policy     | `scheduler.Swapper`            | `groupSwapper`, `matrixSwapper` |
 
 `baseRouter` keeps the channels, run loop, process lifecycle, and shutdown
 teardown, and exposes the side-effects a scheduler needs through the
@@ -37,7 +37,7 @@ to evict", and knows nothing about queues, channels, or processes.
 Because the seams are interfaces, you can replace the scheduling strategy
 without touching process management, or write a new eviction policy without
 touching either. `FIFO` is the first and currently only `Scheduler`;
-`groupPlanner` and `matrixPlanner` are the two `Swapper`s.
+`groupSwapper` and `matrixSwapper` are the two `Swapper`s.
 
 ## Key concepts
 
@@ -175,7 +175,7 @@ not log or mutate anything, and it does **not** inspect process state itself:
 the scheduler hands it `running` already assembled (every non-stopped process,
 unioned with the targets of in-flight swaps the scheduler has committed to but
 that aren't visible in process state yet — see `FIFO.runningSet`). That keeps
-the planner a pure function of its inputs, with no reference to processes.
+the swapper a pure function of its inputs, with no reference to processes.
 
 The reason it must not log is that it is a _speculative_ query — "what would we
 evict if we started this swap right now?" — called far more often than swaps
@@ -189,7 +189,7 @@ decisions that never happen — the log would stop meaning "a swap occurred".
 `OnSwapStart` is the one place a Swapper may log, because it is called exactly
 once, at the moment a swap is actually committed (from `FIFO.startSwap`). One log
 line there equals one real swap, with the evict set that is genuinely being
-applied — which is why `matrixPlanner` re-solves and logs the full decision (set,
+applied — which is why `matrixSwapper` re-solves and logs the full decision (set,
 DSL, cost) in `OnSwapStart` rather than in `EvictionFor`.
 
 ### `Effects`
@@ -215,23 +215,23 @@ deep-dive below.
 type Factory func(name string, logger *logmon.Monitor, eff Effects) Scheduler
 ```
 
-`baseRouter` doesn't know which scheduler or planner it has — it is handed a
+`baseRouter` doesn't know which scheduler or swapper it has — it is handed a
 `Factory` at construction and calls it once, passing itself as the `Effects`.
 The concrete router captures its `Swapper` in the closure. From `group.go`:
 
 ```go
-planner := &groupPlanner{ /* ... */ }
+swapper := &groupSwapper{ /* ... */ }
 base := newBaseRouter("group", conf, processes, proxylog,
     func(name string, logger *logmon.Monitor, eff scheduler.Effects) scheduler.Scheduler {
-        return scheduler.NewFIFO(name, logger, planner, eff)
+        return scheduler.NewFIFO(name, logger, swapper, eff)
     })
 ```
 
 This closure is the single point where the three pieces meet: it binds a
-specific `Swapper` (`planner`) and a specific `Scheduler` (`FIFO`) to the
+specific `Swapper` (`swapper`) and a specific `Scheduler` (`FIFO`) to the
 `baseRouter`'s `Effects` (`eff`).
 
-**The planner is a separate type from the concrete router.** There are currently two router implementations router.Group and router.Matrix. Each of these has a custom planner that implements scheduler.Swapper for custom eviction logic. This decoupling of responsibilities makes it easy to implement custom swapping strategies.
+**The swapper is a separate type from the concrete router.** There are currently two router implementations router.Group and router.Matrix. Each of these has a custom swapper that implements scheduler.Swapper for custom eviction logic. This decoupling of responsibilities makes it easy to implement custom swapping strategies.
 
 ### The events
 
@@ -283,7 +283,7 @@ Method by method, as implemented in `base.go`:
 
 - **`RunningModels()`** — the state of every process that isn't stopped or shut
   down. The scheduler unions its keys with its own in-flight swap targets to
-  build the `running` set it hands the `Swapper`, so the planner never has to
+  build the `running` set it hands the `Swapper`, so the swapper never has to
   touch process state itself. (`baseRouter` already exposed this for
   `LocalRouter`; the scheduler split reuses it.)
 
@@ -320,18 +320,18 @@ A `Swapper` is the easiest thing to add — it's a pure function plus a logging
 hook. Use it when you want a new policy for _which models to evict_ while keeping
 FIFO scheduling.
 
-The planner is its **own type**, separate from any concrete router. You do not
-add methods to `Group` or `Matrix`; you write a standalone planner struct and
+The swapper is its **own type**, separate from any concrete router. You do not
+add methods to `Group` or `Matrix`; you write a standalone swapper struct and
 hand it to `NewFIFO` through the factory closure (see the `Factory` section
 above). The concrete router _has-a_ `Swapper`; it is not one.
 
-1. **Write the planner type** and give it whatever config it needs to make a
+1. **Write the swapper type** and give it whatever config it needs to make a
    decision. It does **not** need the process map — the scheduler supplies the
-   running set as an argument. `groupPlanner` holds only its group config;
-   `matrixPlanner` holds only its solver and logger:
+   running set as an argument. `groupSwapper` holds only its group config;
+   `matrixSwapper` holds only its solver and logger:
 
    ```go
-   type myPlanner struct {
+   type mySwapper struct {
        config config.Config
    }
    ```
@@ -350,16 +350,16 @@ above). The concrete router _has-a_ `Swapper`; it is not one.
 3. **Implement `OnSwapStart(target, running)`** — called once when a swap
    actually begins, with the same `running` set `EvictionFor` saw for this
    decision. This is your place to log at whatever verbosity you like.
-   `matrixPlanner` re-solves against `running` and logs the chosen set and cost;
-   `groupPlanner` logs nothing.
+   `matrixSwapper` re-solves against `running` and logs the chosen set and cost;
+   `groupSwapper` logs nothing.
 
-4. **Wire it in** by instantiating the planner in your router's constructor and
+4. **Wire it in** by instantiating the swapper in your router's constructor and
    capturing it in the `Factory` closure passed to `newBaseRouter` — exactly as
    `NewGroup` and `NewMatrix` do. The router struct itself only ever embeds
-   `*baseRouter`; the planner reaches the scheduler solely through that closure.
+   `*baseRouter`; the swapper reaches the scheduler solely through that closure.
 
-Reference implementations: `groupPlanner` (static group config) in `group.go`
-and `matrixPlanner` (cost-based set solver) in `matrix.go`.
+Reference implementations: `groupSwapper` (static group config) in `group.go`
+and `matrixSwapper` (cost-based set solver) in `matrix.go`.
 
 ## How to implement a new `Scheduler`
 
@@ -387,7 +387,7 @@ The rules you must honour:
   against the running set _you_ build, so it must include not just live
   processes (`Effects.RunningModels`) but also the targets of swaps you've
   already started yet that aren't visible in process state — otherwise the
-  planner contradicts decisions already in motion. `FIFO.runningSet` unions both
+  swapper contradicts decisions already in motion. `FIFO.runningSet` unions both
   (via `activeTargets`) and hands the result to `EvictionFor`/`OnSwapStart`.
 
 What each method must do:
@@ -422,14 +422,14 @@ Finally, expose a constructor matching the `Factory` shape and capture a
 `Swapper` so your concrete router can wire it the same way FIFO is wired:
 
 ```go
-func NewMyScheduler(name string, logger *logmon.Monitor, planner Swapper, eff Effects) *MyScheduler {
+func NewMyScheduler(name string, logger *logmon.Monitor, swapper Swapper, eff Effects) *MyScheduler {
     // ...
 }
 
 // in the concrete router:
 base := newBaseRouter(name, conf, processes, proxylog,
     func(name string, logger *logmon.Monitor, eff scheduler.Effects) scheduler.Scheduler {
-        return scheduler.NewMyScheduler(name, logger, planner, eff)
+        return scheduler.NewMyScheduler(name, logger, swapper, eff)
     })
 ```
 

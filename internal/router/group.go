@@ -24,7 +24,7 @@ func NewGroup(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Group
 		}
 	}
 
-	planner := &groupPlanner{
+	swapper := &groupSwapper{
 		config:       conf,
 		modelToGroup: modelToGroup,
 	}
@@ -32,7 +32,7 @@ func NewGroup(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Group
 	processes := make(map[string]process.Process, len(modelToGroup))
 	base := newBaseRouter("group", conf, processes, proxylog,
 		func(name string, logger *logmon.Monitor, eff scheduler.Effects) scheduler.Scheduler {
-			return scheduler.NewFIFO(name, logger, planner, eff)
+			return scheduler.NewFIFO(name, logger, swapper, eff)
 		})
 
 	for mid := range modelToGroup {
@@ -57,18 +57,18 @@ func NewGroup(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Group
 	return g, nil
 }
 
-// groupPlanner decides evictions from static group configuration.
+// groupSwapper decides evictions from static group configuration.
 //
 // Same-group siblings are stopped when the group has swap=true. Cross-group
 // members are stopped only when the target's group is exclusive; loading a
 // model from a non-exclusive group leaves running exclusive groups alone,
 // matching the gotcha in the original ProcessGroup behaviour.
-type groupPlanner struct {
+type groupSwapper struct {
 	config       config.Config
 	modelToGroup map[string]string
 }
 
-func (p *groupPlanner) EvictionFor(target string, running []string) []string {
+func (p *groupSwapper) EvictionFor(target string, running []string) []string {
 	tg := p.modelToGroup[target]
 	tgCfg := p.config.Groups[tg]
 
@@ -104,4 +104,4 @@ func (p *groupPlanner) EvictionFor(target string, running []string) []string {
 	return result
 }
 
-func (p *groupPlanner) OnSwapStart(target string, running []string) {}
+func (p *groupSwapper) OnSwapStart(target string, running []string) {}

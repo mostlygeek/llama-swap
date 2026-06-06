@@ -23,13 +23,13 @@ func newTestGroup(t *testing.T, conf config.Config, processes map[string]process
 			modelToGroup[mid] = gid
 		}
 	}
-	planner := &groupPlanner{
+	swapper := &groupSwapper{
 		config:       conf,
 		modelToGroup: modelToGroup,
 	}
 	base := newBaseRouter("group", conf, processes, logmon.NewWriter(io.Discard),
 		func(name string, logger *logmon.Monitor, eff scheduler.Effects) scheduler.Scheduler {
-			return scheduler.NewFIFO(name, logger, planner, eff)
+			return scheduler.NewFIFO(name, logger, swapper, eff)
 		})
 	base.testProcessed = make(chan struct{}, 64)
 	g := &Group{baseRouter: base}
@@ -229,7 +229,7 @@ func TestGroup_SameGroupSwapSerialises(t *testing.T) {
 
 	// Request B arrives before A transitions to StateStarting in the process
 	// state machine. Without folding the in-flight swap target into the running
-	// set, the planner would not see A as running, and B would start in
+	// set, the swapper would not see A as running, and B would start in
 	// parallel, violating Swap=true.
 	w2 := httptest.NewRecorder()
 	done2 := make(chan struct{})

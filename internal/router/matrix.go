@@ -18,7 +18,7 @@ func NewMatrix(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Matr
 		return nil, fmt.Errorf("matrix router requires a matrix configuration")
 	}
 
-	planner := &matrixPlanner{
+	swapper := &matrixSwapper{
 		solver: newMatrixSolver(conf.ExpandedSets, conf.Matrix.ResolvedEvictCosts()),
 		logger: proxylog,
 	}
@@ -28,7 +28,7 @@ func NewMatrix(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Matr
 	processes := make(map[string]process.Process, len(conf.Models))
 	base := newBaseRouter("matrix", conf, processes, proxylog,
 		func(name string, logger *logmon.Monitor, eff scheduler.Effects) scheduler.Scheduler {
-			return scheduler.NewFIFO(name, logger, planner, eff)
+			return scheduler.NewFIFO(name, logger, swapper, eff)
 		})
 
 	for mid, modelCfg := range conf.Models {
@@ -47,18 +47,18 @@ func NewMatrix(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Matr
 	return r, nil
 }
 
-// matrixPlanner decides evictions by asking the matrix solver against the
+// matrixSwapper decides evictions by asking the matrix solver against the
 // running set the scheduler hands it.
-type matrixPlanner struct {
+type matrixSwapper struct {
 	solver *matrixSolver
 	logger *logmon.Monitor
 }
 
-func (p *matrixPlanner) EvictionFor(target string, running []string) []string {
+func (p *matrixSwapper) EvictionFor(target string, running []string) []string {
 	return p.solver.Solve(target, running).Evict
 }
 
-func (p *matrixPlanner) OnSwapStart(target string, running []string) {
+func (p *matrixSwapper) OnSwapStart(target string, running []string) {
 	result := p.solver.Solve(target, running)
 	switch {
 	case len(result.Evict) > 0:

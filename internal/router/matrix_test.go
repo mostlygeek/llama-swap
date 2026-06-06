@@ -18,13 +18,13 @@ import (
 func newTestMatrix(t *testing.T, conf config.Config, expanded []config.ExpandedSet, evictCosts map[string]int, processes map[string]process.Process) *Matrix {
 	t.Helper()
 	logger := logmon.NewWriter(io.Discard)
-	planner := &matrixPlanner{
+	swapper := &matrixSwapper{
 		solver: newMatrixSolver(expanded, evictCosts),
 		logger: logger,
 	}
 	base := newBaseRouter("matrix", conf, processes, logger,
 		func(name string, l *logmon.Monitor, eff scheduler.Effects) scheduler.Scheduler {
-			return scheduler.NewFIFO(name, l, planner, eff)
+			return scheduler.NewFIFO(name, l, swapper, eff)
 		})
 	base.testProcessed = make(chan struct{}, 64)
 	r := &Matrix{baseRouter: base}
@@ -157,7 +157,7 @@ func TestMatrix_CoexistingSetParallel(t *testing.T) {
 // TestMatrix_IncompatibleQueues verifies that the second request for a model
 // that cannot coexist with the in-flight first model queues until the first
 // completes, and then evicts it. This exercises the scheduler folding in-flight
-// swap targets into the running set it hands the planner.
+// swap targets into the running set it hands the swapper.
 func TestMatrix_IncompatibleQueues(t *testing.T) {
 	a := newFakeProcess("a")
 	pb := newFakeProcess("b")
