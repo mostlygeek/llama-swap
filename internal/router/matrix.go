@@ -7,6 +7,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
+	"github.com/mostlygeek/llama-swap/internal/router/scheduler"
 )
 
 type Matrix struct {
@@ -26,7 +27,10 @@ func NewMatrix(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Matr
 	// Build a process for every model in the config. Any model can run alone
 	// even if it is not part of a set; this mirrors proxy.NewMatrix.
 	processes := make(map[string]process.Process, len(conf.Models))
-	base := newBaseRouter("matrix", conf, processes, planner, proxylog)
+	base := newBaseRouter("matrix", conf, processes, proxylog,
+		func(name string, logger *logmon.Monitor, eff scheduler.Effects) scheduler.Scheduler {
+			return scheduler.NewFIFO(name, logger, planner, eff)
+		})
 	planner.processes = processes
 
 	for mid, modelCfg := range conf.Models {

@@ -10,6 +10,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
+	"github.com/mostlygeek/llama-swap/internal/router/scheduler"
 )
 
 // newTestMatrix builds a Matrix router from supplied processes, bypassing
@@ -22,7 +23,10 @@ func newTestMatrix(t *testing.T, conf config.Config, expanded []config.ExpandedS
 		processes: processes,
 		logger:    logger,
 	}
-	base := newBaseRouter("matrix", conf, processes, planner, logger)
+	base := newBaseRouter("matrix", conf, processes, logger,
+		func(name string, l *logmon.Monitor, eff scheduler.Effects) scheduler.Scheduler {
+			return scheduler.NewFIFO(name, l, planner, eff)
+		})
 	base.testProcessed = make(chan struct{}, 64)
 	r := &Matrix{baseRouter: base}
 	go base.run()

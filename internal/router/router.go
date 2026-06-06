@@ -13,6 +13,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
+	"github.com/mostlygeek/llama-swap/internal/router/scheduler"
 	"github.com/tidwall/gjson"
 )
 
@@ -31,7 +32,7 @@ var (
 	ErrNoModelInContext  = fmt.Errorf("no model in request context")
 	ErrNoRouterFound     = fmt.Errorf("no router found for model")
 	ErrNoPeerModelFound  = fmt.Errorf("peer model not found")
-	ErrNoLocalModelFound = fmt.Errorf("local model not found")
+	ErrNoLocalModelFound = scheduler.ErrModelNotFound
 
 	ContextKey = &contextkey{"context"}
 )
