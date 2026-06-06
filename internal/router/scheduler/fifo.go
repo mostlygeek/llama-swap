@@ -16,10 +16,15 @@ type activeSwap struct {
 	waiters []HandlerReq
 }
 
-// FIFO is the default scheduling strategy. Queued requests are kept in arrival
-// order and drained in that order: a request still blocked stays in place so it
-// gets another chance on the next swap completion, and never jumps ahead of an
-// earlier one.
+// FIFO is the default scheduler. Requests are handled in a first-in, first-out order.
+// To reduce swapping requests for a model that is already running will be handled
+// immediately by the running process.
+//
+// Requests into this schedule are handled like this:
+//
+// A B C A B C --> A A B B C C
+//
+// The strategy is simple and reduces the number of swaps required.
 type FIFO struct {
 	name    string
 	logger  *logmon.Monitor
