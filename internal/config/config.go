@@ -499,10 +499,9 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	}
 
 	if !hasTopLevel {
+		// Both groups and matrix may be defined under routing.router.settings;
+		// routing.router.use selects which one is active, so there is no conflict.
 		rs := config.Routing.Router.Settings
-		if rs.Matrix != nil && len(rs.Groups) > 0 {
-			return Config{}, fmt.Errorf("routing.router.settings cannot set both 'groups' and 'matrix'")
-		}
 		switch config.Routing.Router.Use {
 		case "matrix":
 			if rs.Matrix == nil {

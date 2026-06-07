@@ -1654,10 +1654,13 @@ routing:
 	assert.Contains(t, err.Error(), "routing.router.settings.matrix is not set")
 }
 
+// Both groups and matrix may be defined under routing.router.settings;
+// routing.router.use selects which one is active.
 func TestConfig_Routing_RouterSettingsBothGroupsAndMatrix(t *testing.T) {
 	yaml := twoModels + `
 routing:
   router:
+    use: group
     settings:
       groups:
         g1:
@@ -1666,9 +1669,12 @@ routing:
         sets:
           s: "gemma"
 `
-	_, err := LoadConfigFromReader(strings.NewReader(yaml))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "cannot set both")
+	config, err := LoadConfigFromReader(strings.NewReader(yaml))
+	require.NoError(t, err)
+	// use: group means groups are active and matrix is ignored
+	assert.Equal(t, "group", config.Routing.Router.Use)
+	assert.Nil(t, config.Matrix)
+	assert.Contains(t, config.Groups, "g1")
 }
 
 func TestConfig_Routing_UnknownRouter(t *testing.T) {
