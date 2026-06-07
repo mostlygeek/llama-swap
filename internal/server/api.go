@@ -29,6 +29,7 @@ type modelRecord struct {
 func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	created := time.Now().Unix()
 	data := make([]modelRecord, 0, len(s.cfg.Models))
+	_, profileAliases := s.ActiveProfile()
 
 	newRecord := func(id, name, description string, metadata map[string]any) modelRecord {
 		rec := modelRecord{
@@ -52,7 +53,7 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 		data = append(data, newRecord(id, mc.Name, mc.Description, mc.Metadata))
 
 		if s.cfg.IncludeAliasesInList {
-			for _, alias := range mc.Aliases {
+			for _, alias := range s.cfg.EffectiveAliasesFor(id, profileAliases) {
 				if alias := strings.TrimSpace(alias); alias != "" {
 					data = append(data, newRecord(alias, mc.Name, mc.Description, mc.Metadata))
 				}

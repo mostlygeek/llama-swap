@@ -72,16 +72,17 @@ models:
 
 llama-swap supports many more features to customize how you want to manage your environment.
 
-| Feature   | Description                                    |
-| --------- | ---------------------------------------------- |
-| `ttl`     | automatic unloading of models after a timeout  |
-| `macros`  | reusable snippets to use in configurations     |
-| `matrix`  | run multiple models at a time                  |
-| `hooks`   | event driven functionality                     |
-| `env`     | define environment variables per model         |
-| `aliases` | serve a model with different names             |
-| `filters` | modify requests before sending to the upstream |
-| `...`     | And many more tweaks                           |
+| Feature    | Description                                    |
+| ---------- | ---------------------------------------------- |
+| `ttl`      | automatic unloading of models after a timeout  |
+| `macros`   | reusable snippets to use in configurations     |
+| `matrix`   | run multiple models at a time                  |
+| `hooks`    | event driven functionality                     |
+| `env`      | define environment variables per model         |
+| `aliases`  | serve a model with different names             |
+| `profiles` | switch alias mappings at runtime               |
+| `filters`  | modify requests before sending to the upstream |
+| `...`      | And many more tweaks                           |
 
 ## Full Configuration Example
 
@@ -433,6 +434,23 @@ models:
     # - on Windows, calls taskkill to stop the process
     # - processes have 5 seconds to shutdown until forceful termination is attempted
     cmdStop: docker stop ${MODEL_ID}
+
+# profiles: runtime-switchable alias overlays
+# - optional, default: empty
+# - remap aliases to different model IDs at runtime, switched via the UI
+#   dropdown or POST /api/profiles/activate/<name>
+# - the active profile is runtime state and does not persist across restarts
+# - target must resolve in a single step: a model ID, a static model
+#   alias, or a setParamsByID variant key. Profile aliases never chain
+#   to other profile aliases (including within the same profile) and
+#   cannot shadow a model ID; both are rejected at load time.
+# - use null (~) to disable an alias while the profile is active
+# profiles:
+#   plan-smarter:
+#     description: "Use the smarter model for planning; disable image gen"
+#     aliases:
+#       llm-plan: "glm-5.1"
+#       image-gen: ~
 
 # =============================================================================
 # matrix: run concurrent models with a solver-based swap DSL

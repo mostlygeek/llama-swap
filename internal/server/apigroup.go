@@ -31,6 +31,7 @@ type apiModel struct {
 // state (defaulting to "stopped"), followed by peer models.
 func (s *Server) modelStatus() []apiModel {
 	running := s.local.RunningModels()
+	_, profileAliases := s.ActiveProfile()
 
 	ids := make([]string, 0, len(s.cfg.Models))
 	for id := range s.cfg.Models {
@@ -51,7 +52,7 @@ func (s *Server) modelStatus() []apiModel {
 			Description: mc.Description,
 			State:       state,
 			Unlisted:    mc.Unlisted,
-			Aliases:     mc.Aliases,
+			Aliases:     s.cfg.EffectiveAliasesFor(id, profileAliases),
 		})
 	}
 
@@ -74,7 +75,8 @@ func (s *Server) handleAPIUnloadAll(w http.ResponseWriter, r *http.Request) {
 // handleAPIUnloadModel stops a single named local process.
 func (s *Server) handleAPIUnloadModel(w http.ResponseWriter, r *http.Request) {
 	requested := strings.TrimPrefix(r.PathValue("model"), "/")
-	realName, found := s.cfg.RealModelName(requested)
+	_, profileAliases := s.ActiveProfile()
+	realName, found := s.cfg.RealModelNameWithProfile(requested, profileAliases)
 	if !found {
 		router.SendResponse(w, r, http.StatusNotFound, "model not found")
 		return
@@ -179,6 +181,7 @@ const (
 	msgTypeLogData     messageType = "logData"
 	msgTypeMetrics     messageType = "metrics"
 	msgTypeInFlight    messageType = "inflight"
+	msgTypeProfile     messageType = "profileChanged"
 )
 
 type messageEnvelope struct {
@@ -237,6 +240,11 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 			send(messageEnvelope{Type: msgTypeInFlight, Data: string(j)})
 		}
 	}
+	sendActiveProfile := func(name string) {
+		if j, err := json.Marshal(map[string]string{"activeProfile": name}); err == nil {
+			send(messageEnvelope{Type: msgTypeProfile, Data: string(j)})
+		}
+	}
 
 	defer event.On(func(e shared.ProcessStateChangeEvent) { sendModels() })()
 	defer event.On(func(e shared.ConfigFileChangedEvent) { sendModels() })()
@@ -244,6 +252,10 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 	defer s.upstreamlog.OnLogData(func(data []byte) { sendLogData("upstream", data) })()
 	defer event.On(func(e ActivityLogEvent) { sendMetrics([]ActivityLogEntry{e.Metrics}) })()
 	defer event.On(func(e shared.InFlightRequestsEvent) { sendInFlight(e.Total) })()
+	defer event.On(func(e shared.ProfileChangedEvent) {
+		sendActiveProfile(e.ActiveProfileName)
+		sendModels()
+	})()
 
 	// initial payload
 	sendLogData("proxy", s.proxylog.GetHistory())
@@ -251,6 +263,8 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 	sendModels()
 	sendMetrics(s.metrics.getMetrics())
 	sendInFlight(int(s.inflight.Current()))
+	activeProfile, _ := s.ActiveProfile()
+	sendActiveProfile(activeProfile)
 
 	for {
 		select {
