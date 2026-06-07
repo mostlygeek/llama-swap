@@ -15,6 +15,9 @@ type MatrixConfig struct {
 	Var        map[string]string `yaml:"vars"`
 	EvictCosts map[string]int    `yaml:"evict_costs"`
 	Sets       OrderedSets       `yaml:"sets"`
+
+	// populated by ValidateMatrix; not settable from yaml
+	ExpandedSets []ExpandedSet `yaml:"-"`
 }
 
 // SetEntry is a single named set with its DSL expression.

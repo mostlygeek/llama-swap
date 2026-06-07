@@ -165,6 +165,25 @@ groups:
 		IdleConn:       90,
 	}
 
+	expectedGroups := map[string]GroupConfig{
+		DEFAULT_GROUP_ID: {
+			Swap:      true,
+			Exclusive: true,
+			Members:   []string{"model1", "model3"},
+		},
+		"group1": {
+			Swap:      true,
+			Exclusive: false,
+			Members:   []string{"model2"},
+		},
+		"forever": {
+			Swap:       true,
+			Exclusive:  false,
+			Persistent: true,
+			Members:    []string{"model4"},
+		},
+	}
+
 	expected := Config{
 		LogLevel:      "info",
 		LogTimeFormat: "",
@@ -235,22 +254,16 @@ groups:
 			"m2":        "model2",
 			"mthree":    "model3",
 		},
-		Groups: map[string]GroupConfig{
-			DEFAULT_GROUP_ID: {
-				Swap:      true,
-				Exclusive: true,
-				Members:   []string{"model1", "model3"},
+		Groups: expectedGroups,
+		Routing: RoutingConfig{
+			Router: RouterConfig{
+				Use: "group",
+				Settings: RouterSettings{
+					Groups: expectedGroups,
+				},
 			},
-			"group1": {
-				Swap:      true,
-				Exclusive: false,
-				Members:   []string{"model2"},
-			},
-			"forever": {
-				Swap:       true,
-				Exclusive:  false,
-				Persistent: true,
-				Members:    []string{"model4"},
+			Scheduler: SchedulerConfig{
+				Use: "fifo",
 			},
 		},
 	}

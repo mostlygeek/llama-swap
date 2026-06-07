@@ -14,12 +14,13 @@ type Matrix struct {
 }
 
 func NewMatrix(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Matrix, error) {
-	if conf.Matrix == nil {
+	mtx := conf.Routing.Router.Settings.Matrix
+	if mtx == nil {
 		return nil, fmt.Errorf("matrix router requires a matrix configuration")
 	}
 
 	swapper := &matrixSwapper{
-		solver: newMatrixSolver(conf.ExpandedSets, conf.Matrix.ResolvedEvictCosts()),
+		solver: newMatrixSolver(mtx.ExpandedSets, mtx.ResolvedEvictCosts()),
 		logger: proxylog,
 	}
 

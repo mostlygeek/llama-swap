@@ -18,7 +18,7 @@ import (
 func newTestGroup(t *testing.T, conf config.Config, processes map[string]process.Process) *Group {
 	t.Helper()
 	modelToGroup := make(map[string]string)
-	for gid, gcfg := range conf.Groups {
+	for gid, gcfg := range conf.Routing.Router.Settings.Groups {
 		for _, mid := range gcfg.Members {
 			modelToGroup[mid] = gid
 		}
@@ -44,10 +44,10 @@ func newTestGroup(t *testing.T, conf config.Config, processes map[string]process
 
 func TestGroup_NewGroup_DuplicateMembership(t *testing.T) {
 	conf := config.Config{
-		Groups: map[string]config.GroupConfig{
+		Routing: groupRouting(map[string]config.GroupConfig{
 			"g1": {Swap: true, Members: []string{"a"}},
 			"g2": {Swap: true, Members: []string{"a"}},
-		},
+		}),
 		Models: map[string]config.ModelConfig{
 			"a": {},
 		},
@@ -68,9 +68,9 @@ func TestGroup_ServeHTTP_SwapStopsPrevious(t *testing.T) {
 
 	conf := config.Config{
 		HealthCheckTimeout: 5,
-		Groups: map[string]config.GroupConfig{
+		Routing: groupRouting(map[string]config.GroupConfig{
 			"g": {Swap: true, Exclusive: true, Members: []string{"a", "b"}},
-		},
+		}),
 	}
 	g := newTestGroup(t, conf, map[string]process.Process{"a": a, "b": b})
 
@@ -100,9 +100,9 @@ func TestGroup_NonSwapGroup_NoStop(t *testing.T) {
 
 	conf := config.Config{
 		HealthCheckTimeout: 5,
-		Groups: map[string]config.GroupConfig{
+		Routing: groupRouting(map[string]config.GroupConfig{
 			"g": {Swap: false, Exclusive: false, Members: []string{"a", "b"}},
-		},
+		}),
 	}
 	g := newTestGroup(t, conf, map[string]process.Process{"a": a, "b": b})
 
@@ -130,10 +130,10 @@ func TestGroup_CrossGroupExclusive(t *testing.T) {
 
 	conf := config.Config{
 		HealthCheckTimeout: 5,
-		Groups: map[string]config.GroupConfig{
+		Routing: groupRouting(map[string]config.GroupConfig{
 			"g1": {Swap: true, Exclusive: true, Members: []string{"a"}},
 			"g2": {Swap: true, Exclusive: true, Members: []string{"b"}},
-		},
+		}),
 	}
 	g := newTestGroup(t, conf, map[string]process.Process{"a": a, "b": b})
 
@@ -157,10 +157,10 @@ func TestGroup_CrossGroupNonExclusiveParallel(t *testing.T) {
 
 	conf := config.Config{
 		HealthCheckTimeout: 5,
-		Groups: map[string]config.GroupConfig{
+		Routing: groupRouting(map[string]config.GroupConfig{
 			"g1": {Swap: true, Exclusive: false, Members: []string{"a"}},
 			"g2": {Swap: true, Exclusive: false, Members: []string{"b"}},
-		},
+		}),
 	}
 	g := newTestGroup(t, conf, map[string]process.Process{"a": a, "b": pb})
 
@@ -213,9 +213,9 @@ func TestGroup_SameGroupSwapSerialises(t *testing.T) {
 
 	conf := config.Config{
 		HealthCheckTimeout: 5,
-		Groups: map[string]config.GroupConfig{
+		Routing: groupRouting(map[string]config.GroupConfig{
 			"g": {Swap: true, Exclusive: false, Members: []string{"a", "b"}},
-		},
+		}),
 	}
 	g := newTestGroup(t, conf, map[string]process.Process{"a": a, "b": pb})
 
@@ -274,10 +274,10 @@ func TestGroup_PersistentNotEvicted(t *testing.T) {
 
 	conf := config.Config{
 		HealthCheckTimeout: 5,
-		Groups: map[string]config.GroupConfig{
+		Routing: groupRouting(map[string]config.GroupConfig{
 			"persist": {Swap: true, Exclusive: false, Persistent: true, Members: []string{"a"}},
 			"other":   {Swap: true, Exclusive: true, Members: []string{"b"}},
-		},
+		}),
 	}
 	g := newTestGroup(t, conf, map[string]process.Process{"a": a, "b": b})
 
@@ -311,10 +311,10 @@ func TestGroup_NonExclusiveDoesNotUnloadExclusive(t *testing.T) {
 
 	conf := config.Config{
 		HealthCheckTimeout: 5,
-		Groups: map[string]config.GroupConfig{
+		Routing: groupRouting(map[string]config.GroupConfig{
 			"g1": {Swap: true, Exclusive: true, Members: []string{"a"}},
 			"g2": {Swap: true, Exclusive: false, Members: []string{"b"}},
-		},
+		}),
 	}
 	g := newTestGroup(t, conf, map[string]process.Process{"a": a, "b": b})
 

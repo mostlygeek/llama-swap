@@ -84,9 +84,14 @@ func chatRequest(model string) *http.Request {
 
 func TestServer_New_GroupConfig(t *testing.T) {
 	discard := logmon.NewWriter(io.Discard)
-	s, err := New(config.Config{HealthCheckTimeout: 15}, discard, discard, discard, nil, BuildInfo{})
+	cfg := config.Config{HealthCheckTimeout: 15}
+	cfg.Routing.Router.Use = "group"
+	s, err := New(cfg, discard, discard, discard, nil, BuildInfo{})
 	if err != nil {
 		t.Fatalf("New (group): %v", err)
+	}
+	if _, ok := s.local.(*router.Group); !ok {
+		t.Fatalf("localRouter=%T want *router.Group", s.local)
 	}
 	if err := s.Shutdown(time.Second); err != nil {
 		t.Fatalf("Shutdown: %v", err)
@@ -95,10 +100,15 @@ func TestServer_New_GroupConfig(t *testing.T) {
 
 func TestServer_New_MatrixConfig(t *testing.T) {
 	discard := logmon.NewWriter(io.Discard)
-	cfg := config.Config{HealthCheckTimeout: 15, Matrix: &config.MatrixConfig{}}
+	cfg := config.Config{HealthCheckTimeout: 15}
+	cfg.Routing.Router.Use = "matrix"
+	cfg.Routing.Router.Settings.Matrix = &config.MatrixConfig{}
 	s, err := New(cfg, discard, discard, discard, nil, BuildInfo{})
 	if err != nil {
 		t.Fatalf("New (matrix): %v", err)
+	}
+	if _, ok := s.local.(*router.Matrix); !ok {
+		t.Fatalf("localRouter=%T want *router.Matrix", s.local)
 	}
 	if err := s.Shutdown(time.Second); err != nil {
 		t.Fatalf("Shutdown: %v", err)

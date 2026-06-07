@@ -129,13 +129,16 @@ type Config struct {
 	GlobalTTL          int                    `yaml:"globalTTL"`
 	Models             map[string]ModelConfig `yaml:"models"` /* key is model ID */
 	Profiles           map[string][]string    `yaml:"profiles"`
-	Groups             map[string]GroupConfig `yaml:"groups"` /* key is group ID */
 
-	// swap matrix: solver-based alternative to groups
-	Matrix *MatrixConfig `yaml:"matrix"`
+	// routing is the canonical source for swap/scheduling configuration.
+	// New code must read Routing, never the backwards-compat fields below.
+	Routing RoutingConfig `yaml:"routing"`
 
-	// populated during validation when matrix is configured
-	ExpandedSets []ExpandedSet `yaml:"-"`
+	// Groups and Matrix are permanent backwards-compat input fields for the
+	// legacy top-level `groups:`/`matrix:` keys. They are normalized into
+	// Routing by LoadConfigFromReader. New code must not read them directly.
+	Groups map[string]GroupConfig `yaml:"groups"` /* key is group ID */
+	Matrix *MatrixConfig          `yaml:"matrix"`
 
 	// for key/value replacements in model's cmd, cmdStop, proxy, checkEndPoint
 	Macros MacroList `yaml:"macros"`
@@ -160,6 +163,35 @@ type Config struct {
 
 	// support remote peers, see issue #433, #296
 	Peers PeerDictionaryConfig `yaml:"peers"`
+}
+
+// RoutingConfig is the canonical, normalized routing/scheduling configuration.
+type RoutingConfig struct {
+	Scheduler SchedulerConfig `yaml:"scheduler"`
+	Router    RouterConfig    `yaml:"router"`
+}
+
+type SchedulerConfig struct {
+	Use      string            `yaml:"use"` // default "fifo"
+	Settings SchedulerSettings `yaml:"settings"`
+}
+
+type SchedulerSettings struct {
+	Fifo FifoConfig `yaml:"fifo"`
+}
+
+type FifoConfig struct {
+	Priority map[string]int `yaml:"priority"` // model ID -> priority, default 0
+}
+
+type RouterConfig struct {
+	Use      string         `yaml:"use"` // "group" (default) | "matrix"
+	Settings RouterSettings `yaml:"settings"`
+}
+
+type RouterSettings struct {
+	Groups map[string]GroupConfig `yaml:"groups"`
+	Matrix *MatrixConfig          `yaml:"matrix"`
 }
 
 func (c *Config) RealModelName(search string) (string, bool) {
@@ -455,6 +487,35 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		config.Models[modelId] = modelConfig
 	}
 
+	// Normalize routing config. The legacy top-level `matrix`/`groups` keys and
+	// the new `routing.router` block are mutually exclusive: a config may use
+	// either style, never both.
+	hasTopLevel := config.Matrix != nil || len(config.Groups) > 0
+	rtr := config.Routing.Router
+	hasRouting := rtr.Use != "" || rtr.Settings.Matrix != nil || len(rtr.Settings.Groups) > 0
+
+	if hasTopLevel && hasRouting {
+		return Config{}, fmt.Errorf("config uses both the legacy top-level 'matrix'/'groups' keys and the new 'routing.router' block; please migrate the top-level keys into 'routing.router' and remove them")
+	}
+
+	if !hasTopLevel {
+		rs := config.Routing.Router.Settings
+		if rs.Matrix != nil && len(rs.Groups) > 0 {
+			return Config{}, fmt.Errorf("routing.router.settings cannot set both 'groups' and 'matrix'")
+		}
+		switch config.Routing.Router.Use {
+		case "matrix":
+			if rs.Matrix == nil {
+				return Config{}, fmt.Errorf("routing.router.use is 'matrix' but routing.router.settings.matrix is not set")
+			}
+			config.Matrix = rs.Matrix
+		case "group", "":
+			config.Groups = rs.Groups
+		default:
+			return Config{}, fmt.Errorf("routing.router.use: unknown router %q (valid: group, matrix)", config.Routing.Router.Use)
+		}
+	}
+
 	// groups XOR matrix
 	if config.Matrix != nil && len(config.Groups) > 0 {
 		return Config{}, fmt.Errorf("config cannot use both 'groups' and 'matrix'")
@@ -465,7 +526,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		if err != nil {
 			return Config{}, fmt.Errorf("matrix: %w", err)
 		}
-		config.ExpandedSets = expandedSets
+		config.Matrix.ExpandedSets = expandedSets
 	} else {
 		config = AddDefaultGroupToConfig(config)
 
@@ -484,6 +545,29 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 				}
 				memberUsage[member] = groupID
 			}
+		}
+	}
+
+	// Build the canonical Config.Routing from the effective result. Both legacy
+	// and new-style configs converge here. The Matrix pointer is shared so
+	// ExpandedSets stays in one place.
+	if config.Matrix != nil {
+		config.Routing.Router.Use = "matrix"
+	} else {
+		config.Routing.Router.Use = "group"
+	}
+	config.Routing.Router.Settings.Matrix = config.Matrix
+	config.Routing.Router.Settings.Groups = config.Groups
+
+	if config.Routing.Scheduler.Use == "" {
+		config.Routing.Scheduler.Use = "fifo"
+	}
+	if config.Routing.Scheduler.Use != "fifo" {
+		return Config{}, fmt.Errorf("routing.scheduler.use: unknown scheduler %q (valid: fifo)", config.Routing.Scheduler.Use)
+	}
+	for modelID := range config.Routing.Scheduler.Settings.Fifo.Priority {
+		if _, found := config.RealModelName(modelID); !found {
+			return Config{}, fmt.Errorf("routing.scheduler.settings.fifo.priority references unknown model %q", modelID)
 		}
 	}
 

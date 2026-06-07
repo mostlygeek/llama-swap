@@ -15,7 +15,7 @@ type Group struct {
 
 func NewGroup(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Group, error) {
 	modelToGroup := make(map[string]string)
-	for gid, gcfg := range conf.Groups {
+	for gid, gcfg := range conf.Routing.Router.Settings.Groups {
 		for _, mid := range gcfg.Members {
 			if existing, dup := modelToGroup[mid]; dup {
 				return nil, fmt.Errorf("model %q is in multiple groups: %q and %q", mid, existing, gid)
@@ -70,7 +70,7 @@ type groupSwapper struct {
 
 func (p *groupSwapper) EvictionFor(target string, running []string) []string {
 	tg := p.modelToGroup[target]
-	tgCfg := p.config.Groups[tg]
+	tgCfg := p.config.Routing.Router.Settings.Groups[tg]
 
 	seen := make(map[string]struct{})
 	var result []string
@@ -91,7 +91,7 @@ func (p *groupSwapper) EvictionFor(target string, running []string) []string {
 		// for backwards compatibility. The newer swap matrix approach does not
 		// have this issue.
 		case og != tg && tgCfg.Exclusive:
-			if ogCfg := p.config.Groups[og]; !ogCfg.Persistent {
+			if ogCfg := p.config.Routing.Router.Settings.Groups[og]; !ogCfg.Persistent {
 				seen[mID] = struct{}{}
 				result = append(result, mID)
 			}

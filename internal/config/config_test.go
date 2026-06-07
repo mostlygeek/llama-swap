@@ -1544,3 +1544,168 @@ peers:
 	assert.Equal(t, 1, peerConfig.Timeouts.ExpectContinue)
 	assert.Equal(t, 90, peerConfig.Timeouts.IdleConn)
 }
+
+// twoModels is a minimal models block reused by the routing tests below.
+const twoModels = `
+models:
+  gemma:
+    cmd: echo gemma
+    proxy: http://localhost:8080
+  qwen:
+    cmd: echo qwen
+    proxy: http://localhost:8081
+`
+
+func TestConfig_Routing_LegacyTopLevelGroups(t *testing.T) {
+	yaml := twoModels + `
+groups:
+  g1:
+    members: [gemma, qwen]
+`
+	cfg, err := LoadConfigFromReader(strings.NewReader(yaml))
+	require.NoError(t, err)
+	assert.Equal(t, "group", cfg.Routing.Router.Use)
+	// default group injected for orphaned models (none here) still leaves g1
+	assert.Contains(t, cfg.Routing.Router.Settings.Groups, "g1")
+	assert.Equal(t, "fifo", cfg.Routing.Scheduler.Use)
+}
+
+func TestConfig_Routing_LegacyTopLevelMatrix(t *testing.T) {
+	yaml := twoModels + `
+matrix:
+  vars:
+    g: gemma
+    q: qwen
+  sets:
+    combo: "g | q"
+`
+	cfg, err := LoadConfigFromReader(strings.NewReader(yaml))
+	require.NoError(t, err)
+	assert.Equal(t, "matrix", cfg.Routing.Router.Use)
+	require.NotNil(t, cfg.Routing.Router.Settings.Matrix)
+	assert.Len(t, cfg.Routing.Router.Settings.Matrix.ExpandedSets, 2)
+}
+
+func TestConfig_Routing_RouterUseMatrix(t *testing.T) {
+	yaml := twoModels + `
+routing:
+  router:
+    use: matrix
+    settings:
+      matrix:
+        vars:
+          g: gemma
+          q: qwen
+        sets:
+          combo: "g | q"
+`
+	cfg, err := LoadConfigFromReader(strings.NewReader(yaml))
+	require.NoError(t, err)
+	assert.Equal(t, "matrix", cfg.Routing.Router.Use)
+	require.NotNil(t, cfg.Routing.Router.Settings.Matrix)
+	assert.Len(t, cfg.Routing.Router.Settings.Matrix.ExpandedSets, 2)
+}
+
+func TestConfig_Routing_RouterUseGroup(t *testing.T) {
+	yaml := twoModels + `
+routing:
+  router:
+    use: group
+    settings:
+      groups:
+        g1:
+          members: [gemma, qwen]
+`
+	cfg, err := LoadConfigFromReader(strings.NewReader(yaml))
+	require.NoError(t, err)
+	assert.Equal(t, "group", cfg.Routing.Router.Use)
+	assert.Contains(t, cfg.Routing.Router.Settings.Groups, "g1")
+}
+
+func TestConfig_Routing_DefaultsToGroup(t *testing.T) {
+	cfg, err := LoadConfigFromReader(strings.NewReader(twoModels))
+	require.NoError(t, err)
+	assert.Equal(t, "group", cfg.Routing.Router.Use)
+	assert.Equal(t, "fifo", cfg.Routing.Scheduler.Use)
+}
+
+func TestConfig_Routing_LegacyAndRoutingConflict(t *testing.T) {
+	yaml := twoModels + `
+groups:
+  g1:
+    members: [gemma, qwen]
+routing:
+  router:
+    use: group
+`
+	_, err := LoadConfigFromReader(strings.NewReader(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "migrate")
+}
+
+func TestConfig_Routing_RouterUseMatrixWithoutSettings(t *testing.T) {
+	yaml := twoModels + `
+routing:
+  router:
+    use: matrix
+`
+	_, err := LoadConfigFromReader(strings.NewReader(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "routing.router.settings.matrix is not set")
+}
+
+func TestConfig_Routing_RouterSettingsBothGroupsAndMatrix(t *testing.T) {
+	yaml := twoModels + `
+routing:
+  router:
+    settings:
+      groups:
+        g1:
+          members: [gemma, qwen]
+      matrix:
+        sets:
+          s: "gemma"
+`
+	_, err := LoadConfigFromReader(strings.NewReader(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot set both")
+}
+
+func TestConfig_Routing_UnknownRouter(t *testing.T) {
+	yaml := twoModels + `
+routing:
+  router:
+    use: bogus
+`
+	_, err := LoadConfigFromReader(strings.NewReader(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown router")
+}
+
+func TestConfig_Routing_FifoPriorityUnknownModel(t *testing.T) {
+	yaml := twoModels + `
+routing:
+  scheduler:
+    settings:
+      fifo:
+        priority:
+          nope: 5
+`
+	_, err := LoadConfigFromReader(strings.NewReader(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown model")
+}
+
+func TestConfig_Routing_FifoPriorityKnownModel(t *testing.T) {
+	yaml := twoModels + `
+routing:
+  scheduler:
+    settings:
+      fifo:
+        priority:
+          gemma: 5
+`
+	cfg, err := LoadConfigFromReader(strings.NewReader(yaml))
+	require.NoError(t, err)
+	assert.Equal(t, 5, cfg.Routing.Scheduler.Settings.Fifo.Priority["gemma"])
+}
