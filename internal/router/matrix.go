@@ -29,7 +29,7 @@ func NewMatrix(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Matr
 	processes := make(map[string]process.Process, len(conf.Models))
 	base := newBaseRouter("matrix", conf, processes, proxylog,
 		func(name string, logger *logmon.Monitor, eff scheduler.Effects) scheduler.Scheduler {
-			return scheduler.NewFIFO(name, logger, swapper, eff)
+			return scheduler.NewFIFO(name, logger, swapper, conf.Routing.Scheduler.Settings.Fifo, eff)
 		})
 
 	for mid, modelCfg := range conf.Models {

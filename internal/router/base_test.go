@@ -31,7 +31,7 @@ func newTestBase(t *testing.T, processes map[string]process.Process, planner sch
 	conf := config.Config{HealthCheckTimeout: 5}
 	b := newBaseRouter("test", conf, processes, logmon.NewWriter(io.Discard),
 		func(name string, logger *logmon.Monitor, eff scheduler.Effects) scheduler.Scheduler {
-			return scheduler.NewFIFO(name, logger, planner, eff)
+			return scheduler.NewFIFO(name, logger, planner, conf.Routing.Scheduler.Settings.Fifo, eff)
 		})
 	b.testProcessed = make(chan struct{}, 64)
 	go b.run()

@@ -24,7 +24,7 @@ func newTestMatrix(t *testing.T, conf config.Config, expanded []config.ExpandedS
 	}
 	base := newBaseRouter("matrix", conf, processes, logger,
 		func(name string, l *logmon.Monitor, eff scheduler.Effects) scheduler.Scheduler {
-			return scheduler.NewFIFO(name, l, swapper, eff)
+			return scheduler.NewFIFO(name, l, swapper, conf.Routing.Scheduler.Settings.Fifo, eff)
 		})
 	base.testProcessed = make(chan struct{}, 64)
 	r := &Matrix{baseRouter: base}

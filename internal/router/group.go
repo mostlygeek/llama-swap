@@ -32,7 +32,7 @@ func NewGroup(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Group
 	processes := make(map[string]process.Process, len(modelToGroup))
 	base := newBaseRouter("group", conf, processes, proxylog,
 		func(name string, logger *logmon.Monitor, eff scheduler.Effects) scheduler.Scheduler {
-			return scheduler.NewFIFO(name, logger, swapper, eff)
+			return scheduler.NewFIFO(name, logger, swapper, conf.Routing.Scheduler.Settings.Fifo, eff)
 		})
 
 	for mid := range modelToGroup {

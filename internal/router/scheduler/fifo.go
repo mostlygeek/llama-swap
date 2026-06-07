@@ -5,6 +5,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
 )
@@ -29,6 +30,7 @@ type FIFO struct {
 	name    string
 	logger  *logmon.Monitor
 	planner Swapper
+	cfg     config.FifoConfig
 	effects Effects
 
 	active   map[string]*activeSwap
@@ -38,11 +40,12 @@ type FIFO struct {
 
 // NewFIFO builds a FIFO scheduler. It matches scheduler.Factory once a planner
 // is captured in a closure.
-func NewFIFO(name string, logger *logmon.Monitor, planner Swapper, eff Effects) *FIFO {
+func NewFIFO(name string, logger *logmon.Monitor, planner Swapper, cfg config.FifoConfig, eff Effects) *FIFO {
 	return &FIFO{
 		name:     name,
 		logger:   logger,
 		planner:  planner,
+		cfg:      cfg,
 		effects:  eff,
 		active:   make(map[string]*activeSwap),
 		inFlight: make(map[string]int),
@@ -97,16 +100,14 @@ func (s *FIFO) OnRequest(req HandlerReq) {
 	// (4) Collision with an in-flight swap — queue.
 	if collidesWith(req.Model, evict, s.active) {
 		s.logger.Debugf("%s: queuing request for model %s (collides with in-flight swap)", s.name, req.Model)
-		s.queued = append(s.queued, req)
-		broadcastQueuePositions(s.queued)
+		s.enqueue(req)
 		return
 	}
 
 	// (5) Would evict a busy process — queue until it drains.
 	if conflictsWithInFlight(evict, s.inFlight) {
 		s.logger.Debugf("%s: queuing request for model %s (would evict in-flight process)", s.name, req.Model)
-		s.queued = append(s.queued, req)
-		broadcastQueuePositions(s.queued)
+		s.enqueue(req)
 		return
 	}
 
@@ -230,6 +231,25 @@ func (s *FIFO) startSwap(initial HandlerReq, evict, running []string) {
 	}
 	s.planner.OnSwapStart(initial.Model, running)
 	s.effects.StartSwap(initial.Model, evict)
+}
+
+// enqueue inserts req into the queue in priority order: it goes just before the
+// first queued item whose priority is strictly lower, so higher-priority models
+// are serviced first while equal-priority requests keep their arrival (FIFO)
+// order. Priorities come from the FifoConfig; unlisted models default to 0.
+func (s *FIFO) enqueue(req HandlerReq) {
+	p := s.cfg.Priority[req.Model]
+	i := len(s.queued)
+	for j, q := range s.queued {
+		if s.cfg.Priority[q.Model] < p {
+			i = j
+			break
+		}
+	}
+	s.queued = append(s.queued, HandlerReq{})
+	copy(s.queued[i+1:], s.queued[i:])
+	s.queued[i] = req
+	broadcastQueuePositions(s.queued)
 }
 
 // drainQueue walks the queued requests in order, re-running the OnRequest

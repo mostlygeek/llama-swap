@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
 )
@@ -137,7 +138,7 @@ func (f *fakeEffects) startsFor(modelID string) int {
 }
 
 func newFIFO(planner Swapper, eff Effects) *FIFO {
-	return NewFIFO("test", logmon.NewWriter(io.Discard), planner, eff)
+	return NewFIFO("test", logmon.NewWriter(io.Discard), planner, config.FifoConfig{}, eff)
 }
 
 func req(model string) HandlerReq { return HandlerReq{Model: model} }
@@ -466,5 +467,40 @@ func TestFIFO_OnUnload_DropsQueuedRequests(t *testing.T) {
 	// a's swap is untouched: its waiter is neither served nor errored yet.
 	if eff.served("a") != 0 || eff.errored("a") != 0 {
 		t.Errorf("a swap should be untouched: served=%d errored=%d", eff.served("a"), eff.errored("a"))
+	}
+}
+
+// TestFIFO_PriorityQueueOrder verifies queued requests are ordered by descending
+// priority, with arrival (FIFO) order preserved among equal-priority models.
+func TestFIFO_PriorityQueueOrder(t *testing.T) {
+	eff := newFakeEffects()
+	for _, m := range []string{"z", "A", "B", "C", "D"} {
+		eff.states[m] = process.StateStopped
+	}
+	// z's swap evicts every other model, so any request that arrives while z is
+	// loading collides with z's in-flight swap and parks in the queue.
+	planner := &stubPlanner{evict: map[string][]string{"z": {"A", "B", "C", "D"}}}
+	cfg := config.FifoConfig{Priority: map[string]int{"A": 10, "B": 5, "C": 5, "D": 1}}
+	s := NewFIFO("test", logmon.NewWriter(io.Discard), planner, cfg, eff)
+
+	s.OnRequest(req("z")) // StartSwap(z, [A,B,C,D])
+
+	// Arrive out of priority order; B before C exercises FIFO tie-breaking.
+	for _, m := range []string{"B", "D", "C", "A"} {
+		s.OnRequest(req(m))
+	}
+
+	got := make([]string, len(s.queued))
+	for i, q := range s.queued {
+		got[i] = q.Model
+	}
+	want := []string{"A", "B", "C", "D"}
+	if len(got) != len(want) {
+		t.Fatalf("queue=%v want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("queue=%v want %v", got, want)
+		}
 	}
 }
