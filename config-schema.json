@@ -580,37 +580,7 @@
                                     "$ref": "#/definitions/matrixConfig"
                                 }
                             },
-                            "additionalProperties": false,
-                            "allOf": [
-                                {
-                                    "if": {
-                                        "required": [
-                                            "groups"
-                                        ]
-                                    },
-                                    "then": {
-                                        "not": {
-                                            "required": [
-                                                "matrix"
-                                            ]
-                                        }
-                                    }
-                                },
-                                {
-                                    "if": {
-                                        "required": [
-                                            "matrix"
-                                        ]
-                                    },
-                                    "then": {
-                                        "not": {
-                                            "required": [
-                                                "groups"
-                                            ]
-                                        }
-                                    }
-                                }
-                            ]
+                            "additionalProperties": false
                         }
                     },
                     "additionalProperties": false
