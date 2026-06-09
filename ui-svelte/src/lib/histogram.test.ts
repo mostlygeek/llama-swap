@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { calculateHistogramData } from "./histogram";
+import { calculateHistogramData, calculateStackedHistogramData } from "./histogram";
 
 describe("calculateHistogramData", () => {
   describe("edge cases", () => {
@@ -162,6 +162,163 @@ describe("calculateHistogramData", () => {
       const result = calculateHistogramData(values);
       expect(result!.min).toBe(0.5);
       expect(result!.max).toBe(4.99);
+    });
+  });
+});
+
+describe("calculateStackedHistogramData", () => {
+  describe("edge cases", () => {
+    it("returns null for empty input", () => {
+      expect(calculateStackedHistogramData([])).toBeNull();
+    });
+
+    it("handles single model", () => {
+      const entries = [
+        { model: "alpha", value: 10 },
+        { model: "alpha", value: 20 },
+        { model: "alpha", value: 30 },
+      ];
+      const result = calculateStackedHistogramData(entries);
+      expect(result).not.toBeNull();
+      expect(result!.models).toEqual(["alpha"]);
+      const totalSegments = result!.bins.reduce((s, b) => s + b.totalCount, 0);
+      expect(totalSegments).toBe(3);
+    });
+
+    it("handles single value per model", () => {
+      const entries = [
+        { model: "alpha", value: 42 },
+        { model: "beta", value: 42 },
+      ];
+      const result = calculateStackedHistogramData(entries);
+      expect(result).not.toBeNull();
+      expect(result!.min).toBe(42);
+      expect(result!.max).toBe(42);
+      expect(result!.bins.length).toBe(1);
+      expect(result!.bins[0].totalCount).toBe(2);
+    });
+  });
+
+  describe("multi-model stacking", () => {
+    it("groups values by model into segments", () => {
+      const entries = [
+        { model: "alpha", value: 10 },
+        { model: "alpha", value: 15 },
+        { model: "beta", value: 20 },
+        { model: "beta", value: 25 },
+        { model: "beta", value: 30 },
+      ];
+      const result = calculateStackedHistogramData(entries);
+      expect(result).not.toBeNull();
+      expect(result!.models).toEqual(["alpha", "beta"]);
+      const totalSegments = result!.bins.reduce((s, b) => s + b.totalCount, 0);
+      expect(totalSegments).toBe(5);
+    });
+
+    it("segment counts sum to total entries", () => {
+      const entries = [
+        { model: "a", value: 1 },
+        { model: "a", value: 2 },
+        { model: "b", value: 3 },
+        { model: "b", value: 4 },
+        { model: "c", value: 5 },
+      ];
+      const result = calculateStackedHistogramData(entries);
+      expect(result).not.toBeNull();
+      const totalSegments = result!.bins.reduce((s, b) => s + b.totalCount, 0);
+      expect(totalSegments).toBe(5);
+    });
+
+    it("models are sorted alphabetically", () => {
+      const entries = [
+        { model: "zebra", value: 10 },
+        { model: "alpha", value: 20 },
+        { model: "middle", value: 30 },
+      ];
+      const result = calculateStackedHistogramData(entries);
+      expect(result!.models).toEqual(["alpha", "middle", "zebra"]);
+    });
+
+    it("segments within bins are sorted by model", () => {
+      const entries = [
+        { model: "beta", value: 10 },
+        { model: "alpha", value: 10 },
+      ];
+      const result = calculateStackedHistogramData(entries);
+      const firstBin = result!.bins[0];
+      const modelNames = firstBin.segments.map((s) => s.model);
+      expect(modelNames).toEqual(["alpha", "beta"]);
+    });
+
+    it("omits zero-count segments from bins", () => {
+      const entries = [
+        { model: "alpha", value: 1 },
+        { model: "beta", value: 100 },
+      ];
+      const result = calculateStackedHistogramData(entries, { minBins: 3, maxBins: 3 });
+      expect(result).not.toBeNull();
+      // The first bin should only contain alpha (value=1)
+      const firstBin = result!.bins[0];
+      const modelsInFirstBin = firstBin.segments.map((s) => s.model);
+      expect(modelsInFirstBin).toEqual(["alpha"]);
+      // The last bin should only contain beta (value=100)
+      const lastBin = result!.bins[2];
+      const modelsInLastBin = lastBin.segments.map((s) => s.model);
+      expect(modelsInLastBin).toEqual(["beta"]);
+    });
+  });
+
+  describe("bin properties", () => {
+    it("each bin has correct start and end", () => {
+      const entries = [
+        { model: "a", value: 0 },
+        { model: "a", value: 10 },
+      ];
+      const result = calculateStackedHistogramData(entries, { minBins: 2, maxBins: 2 });
+      expect(result!.bins.length).toBe(2);
+      expect(result!.bins[0].binStart).toBe(0);
+      expect(result!.bins[0].binEnd).toBeCloseTo(5);
+      expect(result!.bins[1].binStart).toBeCloseTo(5);
+      expect(result!.bins[1].binEnd).toBe(10);
+    });
+
+    it("totalCount equals sum of segment counts", () => {
+      const entries = [
+        { model: "a", value: 1 },
+        { model: "a", value: 2 },
+        { model: "b", value: 3 },
+        { model: "b", value: 4 },
+        { model: "b", value: 5 },
+      ];
+      const result = calculateStackedHistogramData(entries);
+      for (const bin of result!.bins) {
+        const segmentSum = bin.segments.reduce((s, seg) => s + seg.count, 0);
+        expect(bin.totalCount).toBe(segmentSum);
+      }
+    });
+  });
+
+  describe("percentiles", () => {
+    it("computes percentiles from combined distribution", () => {
+      const entries = [
+        { model: "a", value: 1 },
+        { model: "a", value: 2 },
+        { model: "b", value: 3 },
+        { model: "b", value: 4 },
+      ];
+      const result = calculateStackedHistogramData(entries);
+      // Same as flat histogram of [1,2,3,4]
+      expect(result!.p50).toBe(2.5);
+    });
+
+    it("percentiles are monotonically increasing", () => {
+      const entries: { model: string; value: number }[] = [];
+      for (let i = 0; i < 100; i++) {
+        entries.push({ model: i % 2 === 0 ? "a" : "b", value: Math.random() * 100 });
+      }
+      const result = calculateStackedHistogramData(entries);
+      expect(result!.p50).toBeLessThanOrEqual(result!.p95);
+      expect(result!.p95).toBeLessThanOrEqual(result!.p99);
     });
   });
 });
