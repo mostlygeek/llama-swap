@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -150,7 +151,8 @@ var requestLogPathSkips = []string{"/wol-health", "/api/performance", "/metrics"
 
 // statusRecorder wraps an http.ResponseWriter to capture the response status
 // code and the number of body bytes written, so the access log can report
-// them. Flush is forwarded so streaming handlers (SSE) still work.
+// them. Flush is forwarded so streaming handlers (SSE) still work, and Hijack
+// is forwarded so httputil.ReverseProxy can upgrade websocket connections.
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
@@ -172,6 +174,15 @@ func (sr *statusRecorder) Flush() {
 	if f, ok := sr.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
+}
+
+// Hijack forwards to the underlying ResponseWriter so httputil.ReverseProxy can
+// take over the connection for websocket upgrades.
+func (sr *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := sr.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, fmt.Errorf("underlying ResponseWriter does not support hijacking")
 }
 
 // clientIP resolves the originating client address, preferring proxy headers

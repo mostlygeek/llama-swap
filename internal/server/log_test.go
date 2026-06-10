@@ -1,11 +1,16 @@
 package server
 
 import (
+	"bufio"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
@@ -133,5 +138,105 @@ func TestServer_RequestLogMiddleware(t *testing.T) {
 				t.Errorf("%s should not be logged; got %q", path, skipLog.GetHistory())
 			}
 		})
+	}
+}
+
+// TestServer_RequestLogMiddleware_WebSocketUpgrade verifies that the access-log
+// middleware (which wraps responses in statusRecorder) does not break websocket
+// upgrades proxied through httputil.ReverseProxy. ReverseProxy requires the
+// ResponseWriter to implement http.Hijacker to take over the connection; if
+// statusRecorder does not forward Hijack, the upgrade is refused with 502.
+func TestServer_RequestLogMiddleware_WebSocketUpgrade(t *testing.T) {
+	// Upstream: complete the upgrade handshake then echo bytes back. This
+	// stands in for an upstream that speaks websocket; ReverseProxy only cares
+	// about the 101 response and then copies raw bytes both ways.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Errorf("upstream ResponseWriter is not an http.Hijacker")
+			return
+		}
+		conn, brw, err := hj.Hijack()
+		if err != nil {
+			t.Errorf("upstream hijack: %v", err)
+			return
+		}
+		defer conn.Close()
+		brw.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n")
+		brw.Flush()
+		// Echo whatever the client sends.
+		buf := make([]byte, 64)
+		n, err := brw.Read(buf)
+		if err != nil {
+			return
+		}
+		brw.Write(buf[:n])
+		brw.Flush()
+	}))
+	defer upstream.Close()
+
+	upstreamURL, err := url.Parse(upstream.URL)
+	if err != nil {
+		t.Fatalf("parse upstream URL: %v", err)
+	}
+
+	// Front server: ReverseProxy wrapped in the access-log middleware, which is
+	// the production statusRecorder-wrapped path.
+	proxy := httputil.NewSingleHostReverseProxy(upstreamURL)
+	mw := CreateRequestLogMiddleware(logmon.NewWriter(io.Discard))
+	front := httptest.NewServer(mw(proxy))
+	defer front.Close()
+
+	frontURL, err := url.Parse(front.URL)
+	if err != nil {
+		t.Fatalf("parse front URL: %v", err)
+	}
+
+	conn, err := net.DialTimeout("tcp", frontURL.Host, 5*time.Second)
+	if err != nil {
+		t.Fatalf("dial front: %v", err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+
+	req := "GET / HTTP/1.1\r\n" +
+		"Host: " + frontURL.Host + "\r\n" +
+		"Connection: Upgrade\r\n" +
+		"Upgrade: websocket\r\n" +
+		"\r\n"
+	if _, err := conn.Write([]byte(req)); err != nil {
+		t.Fatalf("write upgrade request: %v", err)
+	}
+
+	br := bufio.NewReader(conn)
+	statusLine, err := br.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read status line: %v", err)
+	}
+	if !strings.Contains(statusLine, "101") {
+		t.Fatalf("websocket upgrade failed: status line = %q, want 101 Switching Protocols", strings.TrimSpace(statusLine))
+	}
+
+	// Drain the rest of the response headers.
+	for {
+		line, err := br.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read headers: %v", err)
+		}
+		if strings.TrimSpace(line) == "" {
+			break
+		}
+	}
+
+	// Verify bytes flow through the hijacked connection.
+	if _, err := conn.Write([]byte("ping")); err != nil {
+		t.Fatalf("write payload: %v", err)
+	}
+	echo := make([]byte, 4)
+	if _, err := io.ReadFull(br, echo); err != nil {
+		t.Fatalf("read echo: %v", err)
+	}
+	if string(echo) != "ping" {
+		t.Errorf("echo = %q, want %q", echo, "ping")
 	}
 }
