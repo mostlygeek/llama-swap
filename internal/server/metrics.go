@@ -1,12 +1,14 @@
 package server
 
 import (
+	"bufio"
 	"bytes"
 	"compress/flate"
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -427,6 +429,12 @@ func (w *responseBodyCopier) Write(b []byte) (int, error) {
 	if !w.wroteHeader {
 		w.WriteHeader(http.StatusOK)
 	}
+	// On a protocol upgrade (e.g. websocket) the body is raw framed data, not a
+	// metrics-parseable response, so write straight to the client without
+	// buffering a copy we can't use.
+	if w.status == http.StatusSwitchingProtocols {
+		return w.ResponseWriter.Write(b)
+	}
 	return w.tee.Write(b)
 }
 
@@ -444,6 +452,15 @@ func (w *responseBodyCopier) Flush() {
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
+}
+
+// Hijack forwards to the underlying writer so httputil.ReverseProxy can take
+// over the connection for websocket upgrades.
+func (w *responseBodyCopier) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := w.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, fmt.Errorf("underlying ResponseWriter does not support hijacking")
 }
 
 func (w *responseBodyCopier) Status() int          { return w.status }
