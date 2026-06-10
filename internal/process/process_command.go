@@ -585,7 +585,12 @@ func (p *ProcessCommand) killProcess(cmd *exec.Cmd, cancel context.CancelFunc, c
 	// cannot block the run() goroutine; the gracefulTimeout + Process.Kill
 	// path below still guarantees teardown.
 	if cmd != nil {
-		go func() { _ = p.sendStopSignal(cmd) }()
+		go func() {
+			p.proxyLogger.Debugf("[%s] sending stop signal with timeout %v", p.id, gracefulTimeout)
+			if err := p.sendStopSignal(cmd); err != nil {
+				p.proxyLogger.Warnf("[%s] stop signal failed: %v", p.id, err)
+			}
+		}()
 	}
 
 	timer := time.NewTimer(gracefulTimeout)
