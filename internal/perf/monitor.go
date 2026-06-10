@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	ErrNotImplemented = errors.New("Not Implemented")
+	ErrNotImplemented = errors.New("not implemented")
 	ErrNoGpuTool      = errors.New("no GPU monitoring tool available")
 )
 

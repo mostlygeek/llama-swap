@@ -21,8 +21,8 @@ clean:
 
 # use cached test results while developing
 test-dev:
-	go test -short ./internal/...
-	staticcheck ./internal/... || true
+	go test -short ./...
+	staticcheck ./... || true
 
 test:
 	go test -short -count=1 ./internal/...
