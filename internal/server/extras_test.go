@@ -1,10 +1,12 @@
 package server
 
 import (
+	"bufio"
 	"bytes"
 	"compress/flate"
 	"compress/gzip"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -72,6 +74,55 @@ func TestServer_BodyCopier_Flush(t *testing.T) {
 	bc.Flush()
 	if bc.Status() != http.StatusOK {
 		t.Errorf("status = %d, want 200", bc.Status())
+	}
+}
+
+// hijackRecorder is an httptest.ResponseRecorder that also implements
+// http.Hijacker, returning a pipe so Hijack forwarding can be exercised.
+type hijackRecorder struct {
+	*httptest.ResponseRecorder
+	conn net.Conn
+}
+
+func (h *hijackRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return h.conn, bufio.NewReadWriter(bufio.NewReader(h.conn), bufio.NewWriter(h.conn)), nil
+}
+
+func TestServer_BodyCopier_Hijack(t *testing.T) {
+	t.Run("forwards to underlying hijacker", func(t *testing.T) {
+		client, server := net.Pipe()
+		defer client.Close()
+		defer server.Close()
+
+		bc := newBodyCopier(&hijackRecorder{httptest.NewRecorder(), server})
+		conn, _, err := bc.Hijack()
+		if err != nil {
+			t.Fatalf("Hijack: %v", err)
+		}
+		if conn != server {
+			t.Errorf("Hijack returned unexpected conn")
+		}
+	})
+
+	t.Run("errors when underlying writer is not a hijacker", func(t *testing.T) {
+		bc := newBodyCopier(httptest.NewRecorder())
+		if _, _, err := bc.Hijack(); err == nil {
+			t.Error("expected error hijacking a non-Hijacker ResponseWriter")
+		}
+	})
+}
+
+func TestServer_BodyCopier_SkipsBufferingOnUpgrade(t *testing.T) {
+	rec := httptest.NewRecorder()
+	bc := newBodyCopier(rec)
+	bc.WriteHeader(http.StatusSwitchingProtocols)
+	bc.Write([]byte("websocket frame bytes"))
+
+	if bc.body.Len() != 0 {
+		t.Errorf("upgrade body buffered = %q, want empty", bc.body.Bytes())
+	}
+	if got := rec.Body.String(); got != "websocket frame bytes" {
+		t.Errorf("client body = %q, want %q", got, "websocket frame bytes")
 	}
 }
 
