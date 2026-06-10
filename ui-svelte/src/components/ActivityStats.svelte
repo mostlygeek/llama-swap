@@ -44,6 +44,8 @@
     <button
       class="w-6 h-6 flex items-center justify-center rounded-full border border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:border-gray-400 dark:hover:border-gray-400 transition-colors"
       onclick={() => ($histogramStacked = !$histogramStacked)}
+      aria-label={$histogramStacked ? "Switch to flat histogram" : "Switch to stacked histogram"}
+      aria-pressed={$histogramStacked}
       title={$histogramStacked ? "Show flat histogram" : "Show stacked by model"}
     >
       {#if $histogramStacked}
@@ -61,6 +63,8 @@
     <button
       class="w-6 h-6 flex items-center justify-center rounded-full border border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:border-gray-400 dark:hover:border-gray-400 transition-colors"
       onclick={() => ($histogramCollapsed = !$histogramCollapsed)}
+      aria-label={$histogramCollapsed ? "Expand histograms" : "Collapse histograms"}
+      aria-pressed={!$histogramCollapsed}
       title={$histogramCollapsed ? "Show histograms" : "Hide histograms"}
     >
       {#if $histogramCollapsed}

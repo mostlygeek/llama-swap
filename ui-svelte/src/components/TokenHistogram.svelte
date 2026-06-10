@@ -108,11 +108,12 @@
         <g>
           {#each bin.segments as seg, j}
             {@const segFraction = bin.totalCount > 0 ? seg.count / bin.totalCount : 0}
-            {@const segHeight = Math.max(segFraction * barHeight, seg.count > 0 ? 2 : 0)}
-            {@const segY = height - padding.bottom - barHeight + barHeight - segHeight - bin.segments.slice(j + 1).reduce((acc, s) => {
+            {@const segHeight = segFraction * barHeight}
+            {@const stackedBelow = bin.segments.slice(0, j).reduce((acc, s) => {
               const frac = bin.totalCount > 0 ? s.count / bin.totalCount : 0;
-              return acc + Math.max(frac * barHeight, s.count > 0 ? 2 : 0);
+              return acc + frac * barHeight;
             }, 0)}
+            {@const segY = height - padding.bottom - stackedBelow - segHeight}
             {@const segColor = getModelColor(seg.model)}
             <rect
               {x}
