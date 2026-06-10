@@ -351,6 +351,19 @@ func collidesWith(target string, evict []string, active map[string]*activeSwap) 
 		if containsString(sw.evict, target) {
 			return true
 		}
+		if slicesOverlap(evict, sw.evict) {
+			return true
+		}
+	}
+	return false
+}
+
+// slicesOverlap reports whether xs and ys share any common element.
+func slicesOverlap(xs, ys []string) bool {
+	for _, x := range xs {
+		if containsString(ys, x) {
+			return true
+		}
 	}
 	return false
 }

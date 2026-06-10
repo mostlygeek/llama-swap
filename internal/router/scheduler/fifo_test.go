@@ -285,6 +285,37 @@ func TestFIFO_DisjointSwapsRunInParallel(t *testing.T) {
 	}
 }
 
+// TestFIFO_OverlappingEvictSetsDoNotRunInParallel verifies two swaps with
+// different targets that evict the *same* model do not run concurrently: the
+// second must queue rather than double-evict the shared model. Neither target is
+// in the other's evict set, so this is only caught by the evict-set overlap
+// check in collidesWith.
+func TestFIFO_OverlappingEvictSetsDoNotRunInParallel(t *testing.T) {
+	eff := newFakeEffects()
+	eff.states["a"] = process.StateStopped
+	eff.states["b"] = process.StateStopped
+	eff.states["x"] = process.StateReady // shared eviction target, running
+	// Loading a or b both require evicting x.
+	s := newFIFO(&stubPlanner{evict: map[string][]string{"a": {"x"}, "b": {"x"}}}, eff)
+
+	s.OnRequest(req("a")) // StartSwap(a, [x])
+	s.OnRequest(req("b")) // overlaps a's evict set ([x]) -> queue
+	if eff.startsFor("a") != 1 {
+		t.Fatalf("StartSwap(a)=%d want 1", eff.startsFor("a"))
+	}
+	if got := eff.startsFor("b"); got != 0 {
+		t.Fatalf("b started in parallel while a evicts x: StartSwap(b)=%d want 0", got)
+	}
+
+	// a's swap completes and x is gone; b can now evict nothing and start.
+	eff.states["a"] = process.StateReady
+	eff.states["x"] = process.StateStopped
+	s.OnSwapDone(SwapDone{ModelID: "a"})
+	if got := eff.startsFor("b"); got != 1 {
+		t.Fatalf("StartSwap(b)=%d want 1 after a's swap drained", got)
+	}
+}
+
 // TestFIFO_QueueDrainPromotesMultiple verifies completing one swap unblocks
 // every queued request that no longer collides — they all start together.
 func TestFIFO_QueueDrainPromotesMultiple(t *testing.T) {
