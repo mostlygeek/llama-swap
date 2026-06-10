@@ -19,6 +19,7 @@ export const proxyLogs = writable<string>("");
 export const upstreamLogs = writable<string>("");
 export const metrics = writable<ActivityLogEntry[]>([]);
 export const inFlightRequests = writable<number>(0);
+export const performanceEnabled = writable<boolean>(false);
 export const versionInfo = writable<VersionInfo>({
   build_date: "unknown",
   commit: "unknown",
@@ -203,6 +204,20 @@ export async function getCapture(id: number): Promise<ReqRespCapture | null> {
   } catch (error) {
     console.error("Failed to fetch capture:", error);
     return null;
+  }
+}
+
+export async function checkPerformanceEnabled(): Promise<void> {
+  try {
+    const response = await fetch("/api/performance?status");
+    if (!response.ok) {
+      performanceEnabled.set(false);
+      return;
+    }
+    const data = await response.json();
+    performanceEnabled.set(data.enabled === true);
+  } catch {
+    performanceEnabled.set(false);
   }
 }
 

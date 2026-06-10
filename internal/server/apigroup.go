@@ -102,6 +102,12 @@ func (s *Server) handleAPIMetrics(w http.ResponseWriter, r *http.Request) {
 // handleAPIPerformance serves the buffered system/GPU stats, optionally
 // filtered to samples after the ?after=<RFC3339> timestamp.
 func (s *Server) handleAPIPerformance(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Has("status") {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"enabled": s.perf != nil})
+		return
+	}
+
 	if s.perf == nil {
 		router.SendResponse(w, r, http.StatusServiceUnavailable, "performance monitor not available")
 		return
