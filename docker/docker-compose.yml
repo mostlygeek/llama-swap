@@ -1,6 +1,6 @@
 services:
   llama-swap:
-    image: ghcr.io/mostlygeek/llama-swap:unified-cuda
+    image: llama-swap:unified-cuda
     runtime: nvidia
     ports:
       - "9292:8080"
