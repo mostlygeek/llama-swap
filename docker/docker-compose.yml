@@ -1,0 +1,15 @@
+services:
+  llama-swap:
+    image: ghcr.io/mostlygeek/llama-swap:unified-cuda
+    runtime: nvidia
+    ports:
+      - "9292:8080"
+    volumes:
+      - /mnt/storage/lm_storage/models/gguf:/models:ro
+      - /mnt/storage/lm_storage/backends:/backends:ro
+      - /mnt/storage/lm_storage/configs/config.yaml:/etc/llama-swap/config/config.yaml:ro
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      LD_LIBRARY_PATH: /usr/local/cuda/lib64:/usr/lib/x86_64-linux-gnu
+    restart: unless-stopped

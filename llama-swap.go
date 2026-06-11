@@ -93,6 +93,17 @@ func main() {
 		slog.Error("failed to load config", "path", configPath, "error", err)
 		os.Exit(1)
 	}
+	// Set runtime paths for Mantle management
+	cfg.ConfigPath = configPath
+	if cfg.ModelsDir == "" {
+		cfg.ModelsDir = filepath.Join(filepath.Dir(configPath), "models")
+	}
+	if cfg.BackendsDir == "" {
+		cfg.BackendsDir = filepath.Join(filepath.Dir(configPath), "backends")
+	}
+	if cfg.BuildScript == "" {
+		cfg.BuildScript = filepath.Join(filepath.Dir(configPath), "build-llamacpp.sh")
+	}
 
 	// Loggers are wired per cfg.LogToStdout: proxy/upstream feed muxLog, which
 	// owns the combined history served by /logs. They outlive config reloads,
@@ -191,6 +202,11 @@ func main() {
 			proxyLog.Warnf("failed to reload config: %v", err)
 			return
 		}
+		// Re-apply runtime paths on reload
+		newCfg.ConfigPath = configPath
+		newCfg.ModelsDir = cfg.ModelsDir
+		newCfg.BackendsDir = cfg.BackendsDir
+		newCfg.BuildScript = cfg.BuildScript
 
 		if len(newCfg.Profiles) > 0 {
 			proxyLog.Warn("Profile functionality has been removed in favor of Groups. See the README for more information.")

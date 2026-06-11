@@ -216,7 +216,58 @@ export interface AudioTranscriptionResponse {
 }
 
 export interface SpeechGenerationRequest {
-  model: string;
-  input: string;
-  voice: string;
+	model: string;
+	input: string;
+	voice: string;
+}
+
+// --- Mantle management types ---
+
+export type TaskState = "running" | "completed" | "failed" | "cancelled";
+
+export interface MantleTask {
+	id: string;
+	type: "download" | "build";
+	state: TaskState;
+	message: string;
+	pct: number;
+	createdAt: string;
+	updatedAt: string;
+	repo?: string;
+	branch?: string;
+	modelID?: string;
+}
+
+export interface HFModel {
+	id: string;
+	name: string;
+	description: string;
+	downloads: number;
+	likes: number;
+	updatedAt: string;
+	tags: string[];
+	gguf: boolean;
+}
+
+export interface LocalModel {
+	name: string;
+	path: string;
+	size: number;
+}
+
+export interface BackendEntry {
+	name: string;
+	path: string;
+	size: number;
+	taskID?: string;
+}
+
+export interface BuildRequest {
+	repo: string;
+	branch?: string;
+}
+
+export interface DownloadRequest {
+	modelID: string;
+	filename: string;
 }

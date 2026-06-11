@@ -94,6 +94,36 @@
     >
       Performance
     </a>
+    <a
+      href="/models/hub"
+      use:link
+      class="text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1 whitespace-nowrap"
+      class:font-semibold={isActive("/models/hub", $currentRoute)}
+      class:underline={isActive("/models/hub", $currentRoute)}
+      class:underline-offset-4={isActive("/models/hub", $currentRoute)}
+    >
+      Hub
+    </a>
+    <a
+      href="/backends"
+      use:link
+      class="text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1 whitespace-nowrap"
+      class:font-semibold={isActive("/backends", $currentRoute)}
+      class:underline={isActive("/backends", $currentRoute)}
+      class:underline-offset-4={isActive("/backends", $currentRoute)}
+    >
+      Backends
+    </a>
+    <a
+      href="/config"
+      use:link
+      class="text-gray-600 hover:text-black dark:text-gray-300 dark:hover:text-gray-100 p-1 whitespace-nowrap"
+      class:font-semibold={isActive("/config", $currentRoute)}
+      class:underline={isActive("/config", $currentRoute)}
+      class:underline-offset-4={isActive("/config", $currentRoute)}
+    >
+      Config
+    </a>
     <button onclick={toggleTheme} title="Toggle theme (current: {$themeMode})">
       {#if $themeMode === "system"}
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">

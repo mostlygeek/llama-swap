@@ -163,6 +163,12 @@ type Config struct {
 
 	// support remote peers, see issue #433, #296
 	Peers PeerDictionaryConfig `yaml:"peers"`
+
+	// Runtime paths for Mantle management (not from YAML config)
+	ConfigPath  string `yaml:"-"`
+	ModelsDir   string `yaml:"-"`
+	BackendsDir string `yaml:"-"`
+	BuildScript string `yaml:"-"`
 }
 
 // RoutingConfig is the canonical, normalized routing/scheduling configuration.

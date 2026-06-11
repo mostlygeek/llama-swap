@@ -1,0 +1,11 @@
+healthCheckTimeout: 120
+logLevel: info
+
+models:
+  qwen3-1.7B:
+    cmd: >-
+      llama-server
+      --port ${PORT}
+      -m MaziyarPanahi_Qwen3-1.7B-GGUF/Qwen3-1.7B.Q4_K_M.gguf
+    proxy: http://127.0.0.1:${PORT}
+    ttl: 300
