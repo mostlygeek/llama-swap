@@ -12,9 +12,22 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
 )
+
+// groupRouting builds a normalized RoutingConfig for the group router, mirroring
+// what config.LoadConfigFromReader produces. Tests use it to populate
+// config.Config.Routing without going through LoadConfig.
+func groupRouting(groups map[string]config.GroupConfig) config.RoutingConfig {
+	return config.RoutingConfig{
+		Router: config.RouterConfig{
+			Use:      "group",
+			Settings: config.RouterSettings{Groups: groups},
+		},
+	}
+}
 
 // fakeProcess is an in-memory implementation of process.Process used to drive
 // the routers through their state machine without spawning real upstreams.

@@ -10,6 +10,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
+	"github.com/mostlygeek/llama-swap/internal/router/scheduler"
 )
 
 // newTestMatrix builds a Matrix router from supplied processes, bypassing
@@ -17,12 +18,14 @@ import (
 func newTestMatrix(t *testing.T, conf config.Config, expanded []config.ExpandedSet, evictCosts map[string]int, processes map[string]process.Process) *Matrix {
 	t.Helper()
 	logger := logmon.NewWriter(io.Discard)
-	planner := &matrixPlanner{
-		solver:    newMatrixSolver(expanded, evictCosts),
-		processes: processes,
-		logger:    logger,
+	swapper := &matrixSwapper{
+		solver: newMatrixSolver(expanded, evictCosts),
+		logger: logger,
 	}
-	base := newBaseRouter("matrix", conf, processes, planner, logger)
+	base := newBaseRouter("matrix", conf, processes, logger,
+		func(name string, l *logmon.Monitor, eff scheduler.Effects) scheduler.Scheduler {
+			return scheduler.NewFIFO(name, l, swapper, conf.Routing.Scheduler.Settings.Fifo, eff)
+		})
 	base.testProcessed = make(chan struct{}, 64)
 	r := &Matrix{baseRouter: base}
 	go base.run()
@@ -153,8 +156,8 @@ func TestMatrix_CoexistingSetParallel(t *testing.T) {
 
 // TestMatrix_IncompatibleQueues verifies that the second request for a model
 // that cannot coexist with the in-flight first model queues until the first
-// completes, and then evicts it. This exercises the alsoRunning hint via the
-// matrix solver's union into runningSet.
+// completes, and then evicts it. This exercises the scheduler folding in-flight
+// swap targets into the running set it hands the swapper.
 func TestMatrix_IncompatibleQueues(t *testing.T) {
 	a := newFakeProcess("a")
 	pb := newFakeProcess("b")
@@ -173,8 +176,9 @@ func TestMatrix_IncompatibleQueues(t *testing.T) {
 	}()
 	waitProcessed(t, r.testProcessed, 1)
 
-	// B arrives before A transitions to StateStarting. The solver sees A via
-	// alsoRunning and returns evict=[a], so collidesWith forces B to queue.
+	// B arrives before A transitions to StateStarting. The running set the
+	// scheduler builds includes A (an in-flight swap target), so the solver
+	// returns evict=[a] and collidesWith forces B to queue.
 	w2 := httptest.NewRecorder()
 	done2 := make(chan struct{})
 	go func() {

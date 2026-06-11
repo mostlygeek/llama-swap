@@ -99,12 +99,13 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 	var local router.LocalRouter
 	var err error
 
-	if cfg.Matrix != nil {
+	switch cfg.Routing.Router.Use {
+	case "matrix":
 		local, err = router.NewMatrix(cfg, proxylog, upstreamlog)
 		if err != nil {
 			return nil, fmt.Errorf("creating matrix router: %w", err)
 		}
-	} else {
+	default: // "group"
 		local, err = router.NewGroup(cfg, proxylog, upstreamlog)
 		if err != nil {
 			return nil, fmt.Errorf("creating group router: %w", err)

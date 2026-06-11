@@ -6,6 +6,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
+	"github.com/mostlygeek/llama-swap/internal/router/scheduler"
 )
 
 type Group struct {
@@ -14,7 +15,7 @@ type Group struct {
 
 func NewGroup(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Group, error) {
 	modelToGroup := make(map[string]string)
-	for gid, gcfg := range conf.Groups {
+	for gid, gcfg := range conf.Routing.Router.Settings.Groups {
 		for _, mid := range gcfg.Members {
 			if existing, dup := modelToGroup[mid]; dup {
 				return nil, fmt.Errorf("model %q is in multiple groups: %q and %q", mid, existing, gid)
@@ -23,14 +24,16 @@ func NewGroup(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Group
 		}
 	}
 
-	planner := &groupPlanner{
+	swapper := &groupSwapper{
 		config:       conf,
 		modelToGroup: modelToGroup,
 	}
 
 	processes := make(map[string]process.Process, len(modelToGroup))
-	base := newBaseRouter("group", conf, processes, planner, proxylog)
-	planner.processes = processes
+	base := newBaseRouter("group", conf, processes, proxylog,
+		func(name string, logger *logmon.Monitor, eff scheduler.Effects) scheduler.Scheduler {
+			return scheduler.NewFIFO(name, logger, swapper, conf.Routing.Scheduler.Settings.Fifo, eff)
+		})
 
 	for mid := range modelToGroup {
 		modelCfg, _, ok := conf.FindConfig(mid)
@@ -54,21 +57,20 @@ func NewGroup(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Group
 	return g, nil
 }
 
-// groupPlanner decides evictions from static group configuration.
+// groupSwapper decides evictions from static group configuration.
 //
 // Same-group siblings are stopped when the group has swap=true. Cross-group
 // members are stopped only when the target's group is exclusive; loading a
 // model from a non-exclusive group leaves running exclusive groups alone,
 // matching the gotcha in the original ProcessGroup behaviour.
-type groupPlanner struct {
+type groupSwapper struct {
 	config       config.Config
 	modelToGroup map[string]string
-	processes    map[string]process.Process
 }
 
-func (p *groupPlanner) EvictionFor(target string, alsoRunning []string) []string {
+func (p *groupSwapper) EvictionFor(target string, running []string) []string {
 	tg := p.modelToGroup[target]
-	tgCfg := p.config.Groups[tg]
+	tgCfg := p.config.Routing.Router.Settings.Groups[tg]
 
 	seen := make(map[string]struct{})
 	var result []string
@@ -89,24 +91,17 @@ func (p *groupPlanner) EvictionFor(target string, alsoRunning []string) []string
 		// for backwards compatibility. The newer swap matrix approach does not
 		// have this issue.
 		case og != tg && tgCfg.Exclusive:
-			if ogCfg := p.config.Groups[og]; !ogCfg.Persistent {
+			if ogCfg := p.config.Routing.Router.Settings.Groups[og]; !ogCfg.Persistent {
 				seen[mID] = struct{}{}
 				result = append(result, mID)
 			}
 		}
 	}
 
-	for mID, proc := range p.processes {
-		st := proc.State()
-		if st == process.StateStopped || st == process.StateShutdown {
-			continue
-		}
-		consider(mID)
-	}
-	for _, mID := range alsoRunning {
+	for _, mID := range running {
 		consider(mID)
 	}
 	return result
 }
 
-func (p *groupPlanner) OnSwapStart(target string) {}
+func (p *groupSwapper) OnSwapStart(target string, running []string) {}
