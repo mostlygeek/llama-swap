@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { startBuild, cancelBuild, listBackends, deleteBackend } from "../lib/mantleApi";
   import type { BackendEntry } from "../lib/types";
   import { activeBuilds, trackBuild, removeBuild, syncTasks } from "../stores/tasks";
@@ -49,7 +50,12 @@
     return parts.slice(0, 2).join("/");
   }
 
-  $effect(() => { refreshBackends(); syncTasks(); });
+  onMount(() => {
+    refreshBackends();
+    syncTasks();
+    const interval = window.setInterval(syncTasks, 5000);
+    return () => window.clearInterval(interval);
+  });
 </script>
 
 <div class="card h-full flex flex-col p-4">

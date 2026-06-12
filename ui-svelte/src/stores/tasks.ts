@@ -4,6 +4,7 @@ import { streamDownloadProgress, streamBuildProgress, listTasks, startDownload }
 
 type DownloadEntry = { task: MantleTask; cleanup: () => void; filename?: string };
 type BuildEntry    = { task: MantleTask; cleanup: () => void };
+type ProgressData = Partial<MantleTask> & { taskID?: string };
 
 export const activeDownloads = writable<Map<string, DownloadEntry>>(new Map());
 export const activeBuilds    = writable<Map<string, BuildEntry>>(new Map());
@@ -11,12 +12,14 @@ export const activeBuilds    = writable<Map<string, BuildEntry>>(new Map());
 function updateTask(
   store: typeof activeDownloads | typeof activeBuilds,
   taskID: string,
-  data: Partial<MantleTask>
+  data: ProgressData
 ) {
   store.update((map) => {
-    const entry = map.get(taskID);
+    const id = data.id ?? data.taskID ?? taskID;
+    const entry = map.get(id);
     if (entry) {
-      entry.task = { ...entry.task, ...data };
+      const { taskID: _taskID, ...taskData } = data;
+      entry.task = { ...entry.task, ...taskData, id };
       return new Map(map);
     }
     return map;
@@ -24,6 +27,11 @@ function updateTask(
 }
 
 export function trackDownload(task: MantleTask, filename?: string) {
+  const existing = get(activeDownloads).get(task.id);
+  if (existing) {
+    updateTask(activeDownloads, task.id, task);
+    return;
+  }
   const cleanup = streamDownloadProgress(task.id, (data) =>
     updateTask(activeDownloads, task.id, data)
   );
@@ -31,6 +39,11 @@ export function trackDownload(task: MantleTask, filename?: string) {
 }
 
 export function trackBuild(task: MantleTask) {
+  const existing = get(activeBuilds).get(task.id);
+  if (existing) {
+    updateTask(activeBuilds, task.id, task);
+    return;
+  }
   const cleanup = streamBuildProgress(task.id, (data) =>
     updateTask(activeBuilds, task.id, data)
   );
@@ -68,17 +81,15 @@ export async function syncTasks() {
   syncing = true;
   try {
     const tasks = await listTasks();
-    const downloads = get(activeDownloads);
-    const builds = get(activeBuilds);
     for (const task of tasks) {
       if (task.type === "download") {
-        if (task.state === "running" && !downloads.has(task.id)) {
+        if (task.state === "running") {
           trackDownload(task);
         } else {
           updateTask(activeDownloads, task.id, task);
         }
       } else if (task.type === "build") {
-        if (task.state === "running" && !builds.has(task.id)) {
+        if (task.state === "running") {
           trackBuild(task);
         } else {
           updateTask(activeBuilds, task.id, task);
