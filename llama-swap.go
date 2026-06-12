@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -52,6 +53,7 @@ var logTimeFormats = map[string]string{
 	"stampmicro":  time.StampMicro,
 	"stampnano":   time.StampNano,
 }
+
 
 func main() {
 	flagConfig := flag.String("config", "", "path to config file (required)")
@@ -261,6 +263,11 @@ func main() {
 			os.Exit(1)
 		}
 	}()
+
+	if !shared.IsLoopbackAddr(listenAddr) {
+		_, port, _ := net.SplitHostPort(listenAddr)
+		proxyLog.Infof("llama-swap is reachable by all hosts on the network, use -listen localhost:%s to restrict to loopback only", port)
+	}
 
 	exitChan := make(chan struct{})
 
