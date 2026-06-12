@@ -22,6 +22,7 @@ ARG SD_REF=master
 ARG IK_LLAMA_REF=main
 ARG CMAKE_CUDA_ARCHITECTURES="75;86;89"
 ARG MAX_BUILD_JOBS=4
+ARG BUILD_WHISPER=false
 
 # ── Builder bases ─────────────────────────────────────────────────────
 
@@ -65,15 +66,21 @@ WORKDIR /build
 
 FROM builder-base-${BACKEND} AS builder-base
 
-# ── whisper.cpp ───────────────────────────────────────────────────────
+# ── whisper.cpp (optional, BUILD_WHISPER=true to enable) ─────────────
 
-FROM builder-base AS whisper-build
+FROM ubuntu:24.04 AS whisper-false
+RUN mkdir -p /install/bin /install/lib
+
+FROM builder-base AS whisper-true
 ARG BACKEND=cuda
 ARG WHISPER_REF=master
 COPY docker/install-whisper.sh /build/
 RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
     --mount=type=cache,id=whisper-${BACKEND},target=/src/whisper.cpp/build \
     BACKEND=${BACKEND} bash /build/install-whisper.sh "${WHISPER_REF}"
+
+ARG BUILD_WHISPER=false
+FROM whisper-${BUILD_WHISPER} AS whisper-build
 
 # ── stable-diffusion.cpp ──────────────────────────────────────────────
 
@@ -159,8 +166,7 @@ RUN mkdir -p /etc/llama-swap/config
 
 WORKDIR /app
 
-COPY --from=whisper-build /install/bin/whisper-server /usr/local/bin/
-COPY --from=whisper-build /install/bin/whisper-cli /usr/local/bin/
+COPY --from=whisper-build /install/bin/ /usr/local/bin/
 COPY --from=whisper-build /install/lib/ /usr/local/lib/
 
 COPY --from=sd-build /install/bin/sd-server /usr/local/bin/

@@ -10,6 +10,7 @@
 # and installing binaries. Build stages are independent for cache efficiency.
 
 ARG BACKEND=cuda
+ARG BUILD_WHISPER=false
 
 # ── Builder bases ──────────────────────────────────────────────────────
 
@@ -55,15 +56,21 @@ WORKDIR /build
 
 FROM builder-base-${BACKEND} AS builder-base
 
-# ── Build whisper.cpp (fastest build, run first) ──────────────────────
+# ── Build whisper.cpp (optional, BUILD_WHISPER=true to enable) ────────
 
-FROM builder-base AS whisper-build
+FROM ubuntu:24.04 AS whisper-false
+RUN mkdir -p /install/bin /install/lib
+
+FROM builder-base AS whisper-true
 ARG BACKEND=cuda
 ARG WHISPER_COMMIT_HASH=master
 COPY docker/install-whisper.sh /build/
 RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
     --mount=type=cache,id=whisper-${BACKEND},target=/src/whisper.cpp/build \
     BACKEND=${BACKEND} bash /build/install-whisper.sh "${WHISPER_COMMIT_HASH}"
+
+ARG BUILD_WHISPER=false
+FROM whisper-${BUILD_WHISPER} AS whisper-build
 
 # ── Build stable-diffusion.cpp ────────────────────────────────────────
 
@@ -178,9 +185,8 @@ RUN if [ "$RUN_UID" != "0" ]; then \
 
 WORKDIR /app
 
-# Copy whisper.cpp binaries and libraries
-COPY --from=whisper-build /install/bin/whisper-server /usr/local/bin/
-COPY --from=whisper-build /install/bin/whisper-cli /usr/local/bin/
+# Copy whisper.cpp binaries and libraries (empty copy when BUILD_WHISPER=false)
+COPY --from=whisper-build /install/bin/ /usr/local/bin/
 COPY --from=whisper-build /install/lib/ /usr/local/lib/
 
 # Copy stable-diffusion.cpp binaries and libraries

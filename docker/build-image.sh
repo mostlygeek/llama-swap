@@ -46,8 +46,9 @@ for arg in "$@"; do
             echo "  WHISPER_REF          Pin whisper.cpp to a commit, tag, or branch"
             echo "  SD_REF               Pin stable-diffusion.cpp to a commit, tag, or branch"
             echo "  IK_LLAMA_REF         Pin ik_llama.cpp to a commit, tag, or branch (CUDA only)"
-            echo "  LS_VERSION           Override llama-swap version (e.g., '170' or 'latest')
-  MAX_BUILD_JOBS       Parallel compile jobs per build stage (default: 4; raise on high-RAM hosts)"
+            echo "  LS_VERSION           Override llama-swap version (e.g., '170' or 'latest')"
+            echo "  MAX_BUILD_JOBS       Parallel compile jobs per build stage (default: 4; raise on high-RAM hosts)"
+            echo "  BUILD_WHISPER        Build whisper.cpp (default: false; set to true to enable)"
             exit 0
             ;;
     esac
@@ -205,6 +206,7 @@ BUILD_ARGS=(
     --build-arg "IK_LLAMA_COMMIT_HASH=${IK_LLAMA_HASH}"
     --build-arg "LS_VERSION=${LS_HASH}"
     --build-arg "MAX_BUILD_JOBS=${MAX_BUILD_JOBS:-4}"
+    --build-arg "BUILD_WHISPER=${BUILD_WHISPER:-false}"
     -t "${DOCKER_IMAGE_TAG}"
     -f "${SCRIPT_DIR}/Dockerfile"
 )
