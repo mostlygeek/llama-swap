@@ -53,6 +53,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/mantle/models/local", h.handleListLocalModels)
 	mux.HandleFunc("DELETE /api/mantle/models/local/{name...}", h.handleDeleteLocalModel)
 
+	// Size estimates (weights + KV cache) for configured models
+	mux.HandleFunc("GET /api/mantle/models/estimates", h.handleModelEstimates)
+
 	// Config management
 	mux.HandleFunc("GET /api/mantle/config", h.handleGetConfig)
 	mux.HandleFunc("PUT /api/mantle/config", h.handlePutConfig)
@@ -91,7 +94,8 @@ func (h *Handler) handleSearchModels(w http.ResponseWriter, r *http.Request) {
 	if l := r.URL.Query().Get("limit"); l != "" {
 		fmt.Sscanf(l, "%d", &limit)
 	}
-	models, err := SearchHFModels(query, limit)
+	sort := r.URL.Query().Get("sort")
+	models, err := SearchHFModels(query, limit, sort)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -162,6 +166,21 @@ func (h *Handler) handleListLocalModels(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	jsonResponse(w, http.StatusOK, models)
+}
+
+// handleModelEstimates returns weight + KV-cache size estimates for every
+// configured model, keyed by model ID. Models whose GGUF cannot be read are
+// omitted rather than failing the whole response.
+func (h *Handler) handleModelEstimates(w http.ResponseWriter, r *http.Request) {
+	estimates := make(map[string]*ModelEstimate)
+	for id, mc := range h.cfg.Models {
+		est, err := EstimateModel(mc.Cmd, h.modelsDir)
+		if err != nil {
+			continue
+		}
+		estimates[id] = est
+	}
+	jsonResponse(w, http.StatusOK, estimates)
 }
 
 func (h *Handler) handleDeleteLocalModel(w http.ResponseWriter, r *http.Request) {

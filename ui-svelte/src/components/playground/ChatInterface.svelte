@@ -132,6 +132,20 @@
     reasoningStartTime = 0;
     abortController = new AbortController();
 
+    // Generation stats tracking
+    let firstTokenAt = 0;
+    let tokenCount = 0; // fallback: count of streamed deltas
+    let serverTokens: number | undefined;
+
+    const updateStats = () => {
+      if (!firstTokenAt) return;
+      const tokens = serverTokens ?? tokenCount;
+      const genMs = Date.now() - firstTokenAt;
+      messages = messages.map((msg, i) =>
+        i === messages.length - 1 ? { ...msg, genTokens: tokens, genMs } : msg
+      );
+    };
+
     try {
       // Build messages array with optional system prompt
       const apiMessages: ChatMessage[] = [];
@@ -148,7 +162,13 @@
       );
 
       for await (const chunk of stream) {
+        if (chunk.completionTokens !== undefined) serverTokens = chunk.completionTokens;
         if (chunk.done) break;
+
+        if (chunk.content || chunk.reasoning_content) {
+          if (!firstTokenAt) firstTokenAt = Date.now();
+          tokenCount++;
+        }
 
         // Handle reasoning content
         if (chunk.reasoning_content) {
@@ -188,6 +208,8 @@
               : msg
           );
         }
+
+        updateStats();
       }
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
@@ -211,6 +233,7 @@
         );
       }
     } finally {
+      updateStats();
       isStreaming = false;
       isReasoning = false;
       abortController = null;
@@ -402,6 +425,8 @@
             content={message.content}
             reasoning_content={message.reasoning_content}
             reasoningTimeMs={message.reasoningTimeMs}
+            genTokens={message.genTokens}
+            genMs={message.genMs}
             isStreaming={isStreaming && idx === messages.length - 1 && message.role === "assistant"}
             isReasoning={isReasoning && idx === messages.length - 1 && message.role === "assistant"}
             onEdit={message.role === "user" ? (newContent) => editMessage(idx, newContent) : undefined}

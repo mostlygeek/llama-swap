@@ -1,8 +1,17 @@
 <script lang="ts">
-  import { models, loadModel, unloadAllModels, unloadSingleModel } from "../stores/api";
+  import { onMount } from "svelte";
+  import { models, modelEstimates, fetchModelEstimates, loadModel, unloadAllModels, unloadSingleModel } from "../stores/api";
   import { isNarrow } from "../stores/theme";
   import { persistentStore } from "../stores/persistent";
   import type { Model } from "../lib/types";
+
+  onMount(() => {
+    fetchModelEstimates();
+  });
+
+  function formatGB(bytes: number): string {
+    return (bytes / 1024 ** 3).toFixed(1) + " GB";
+  }
 
   let isUnloading = $state(false);
   let menuOpen = $state(false);
@@ -167,6 +176,15 @@
               {/if}
               {#if model.aliases && model.aliases.length > 0}
                 <p class="text-xs text-txtsecondary">Aliases: {model.aliases.join(", ")}</p>
+              {/if}
+              {#if $modelEstimates[model.id]}
+                {@const est = $modelEstimates[model.id]}
+                <p
+                  class="text-xs text-txtsecondary"
+                  title="Context: {est.nCtx} tokens · {est.nLayers} layers · KV cache type K/V: {est.cacheTypeK}/{est.cacheTypeV}"
+                >
+                  Weights: {formatGB(est.weightsBytes)} · KV Cache: {formatGB(est.kvCacheBytes)} · TOT: {formatGB(est.totalBytes)}
+                </p>
               {/if}
             </td>
             <td class="w-12">

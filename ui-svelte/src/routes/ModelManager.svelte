@@ -1,7 +1,8 @@
 <script lang="ts">
   import {
     searchHFModels, listHFFiles, startDownload, cancelDownload,
-    listLocalModels, deleteLocalModel, listBackends, getConfig, putConfig
+    listLocalModels, deleteLocalModel, listBackends, getConfig, putConfig,
+    type HFSort
   } from "../lib/mantleApi";
   import type { HFModel, LocalModel, BackendEntry } from "../lib/types";
   import { activeDownloads, trackDownload, removeDownload, retryDownload, syncTasks } from "../stores/tasks";
@@ -9,6 +10,7 @@
   let searchQuery   = $state("");
   let searchResults = $state<HFModel[]>([]);
   let searching     = $state(false);
+  let sortBy        = $state<HFSort>("downloads");
   let selectedModel = $state<HFModel | null>(null);
   let modelFiles    = $state<string[]>([]);
   let loadingFiles  = $state(false);
@@ -60,8 +62,13 @@
   async function doSearch() {
     if (!searchQuery.trim()) return;
     searching = true;
-    searchResults = await searchHFModels(searchQuery.trim());
+    searchResults = await searchHFModels(searchQuery.trim(), 20, sortBy);
     searching = false;
+  }
+
+  function changeSort(value: HFSort) {
+    sortBy = value;
+    if (searchQuery.trim()) doSearch();
   }
 
   async function selectModel(m: HFModel) {
@@ -178,6 +185,19 @@
       bind:value={searchQuery}
       onkeydown={(e) => e.key === "Enter" && doSearch()}
     />
+    <select
+      class="input px-2 py-2 border rounded bg-surface text-sm"
+      value={sortBy}
+      onchange={(e) => changeSort(e.currentTarget.value as HFSort)}
+      title="Sort results"
+    >
+      <option value="relevance">Relevant</option>
+      <option value="trending">Trending</option>
+      <option value="downloads">Most downloads</option>
+      <option value="likes">Most likes</option>
+      <option value="created">Newest</option>
+      <option value="modified">Recently updated</option>
+    </select>
     <button class="btn px-4 py-2 text-sm" onclick={doSearch} disabled={searching}>
       {searching ? "Searching…" : "Search"}
     </button>
@@ -196,7 +216,7 @@
               <span class="text-xs ml-2 px-1.5 py-0.5 rounded bg-yellow-100 dark:bg-yellow-900">no GGUF</span>
             {/if}
           </div>
-          <span class="text-xs text-txtsecondary">{model.downloads.toLocaleString()} dl</span>
+          <span class="text-xs text-txtsecondary shrink-0">{model.downloads.toLocaleString()} dl · {model.likes.toLocaleString()} ♥</span>
         </div>
       {/each}
       {#if searchResults.length === 0 && !searching}

@@ -2,9 +2,11 @@ import type { MantleTask, HFModel, LocalModel, BackendEntry } from "../lib/types
 
 // --- HF Model search ---
 
-export async function searchHFModels(query: string, limit = 20): Promise<HFModel[]> {
+export type HFSort = "relevance" | "trending" | "downloads" | "likes" | "created" | "modified";
+
+export async function searchHFModels(query: string, limit = 20, sort: HFSort = "downloads"): Promise<HFModel[]> {
   try {
-    const res = await fetch(`/api/mantle/models/search?q=${encodeURIComponent(query)}&limit=${limit}`);
+    const res = await fetch(`/api/mantle/models/search?q=${encodeURIComponent(query)}&limit=${limit}&sort=${sort}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (e) {

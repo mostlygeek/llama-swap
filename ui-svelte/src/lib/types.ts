@@ -12,6 +12,16 @@ export interface Model {
   aliases?: string[];
 }
 
+export interface ModelEstimate {
+  weightsBytes: number;
+  kvCacheBytes: number;
+  totalBytes: number;
+  nCtx: number;
+  nLayers: number;
+  cacheTypeK: string;
+  cacheTypeV: string;
+}
+
 export interface TokenMetrics {
   cache_tokens: number;
   input_tokens: number;
@@ -130,6 +140,9 @@ export interface ChatMessage {
   content: string | ContentPart[];
   reasoning_content?: string;
   reasoningTimeMs?: number;
+  // Generation stats for assistant messages
+  genTokens?: number;
+  genMs?: number;
 }
 
 export function getTextContent(content: string | ContentPart[]): string {

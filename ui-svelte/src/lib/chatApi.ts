@@ -6,6 +6,8 @@ export interface StreamChunk {
   content: string;
   reasoning_content?: string;
   done: boolean;
+  // Completion (output) token count reported by the server, when available.
+  completionTokens?: number;
 }
 
 export interface ChatOptions {
@@ -49,6 +51,7 @@ function buildChatCompletionsBody(model: string, messages: ChatMessage[], option
       content: m.content,
     })),
     stream: true,
+    stream_options: { include_usage: true },
     temperature: options?.temperature,
     ...(options?.max_tokens ? { max_tokens: options.max_tokens } : {}),
   };
@@ -145,9 +148,10 @@ function parseChatCompletionsLine(line: string): StreamChunk | null {
     const delta = parsed.choices?.[0]?.delta;
     const content = delta?.content || "";
     const reasoning_content = delta?.reasoning_content || delta?.reasoning || "";
+    const completionTokens = parsed.usage?.completion_tokens;
 
-    if (content || reasoning_content) {
-      return { content, reasoning_content, done: false };
+    if (content || reasoning_content || completionTokens !== undefined) {
+      return { content, reasoning_content, done: false, completionTokens };
     }
     return null;
   } catch {
@@ -224,6 +228,18 @@ async function* parseMessagesStream(
         yield { content: "", done: true };
         return;
       }
+      if (parsed.event === "message_delta" && parsed.data) {
+        try {
+          const json = JSON.parse(parsed.data);
+          const outputTokens = json.usage?.output_tokens;
+          if (outputTokens !== undefined) {
+            yield { content: "", done: false, completionTokens: outputTokens };
+          }
+        } catch {
+          // ignore malformed event
+        }
+        continue;
+      }
       if (parsed.event !== "content_block_delta" || !parsed.data) continue;
       try {
         const json = JSON.parse(parsed.data);
@@ -259,7 +275,14 @@ async function* parseResponsesStream(
       const parsed = parseSSEEventBlock(block);
       if (!parsed) continue;
       if (parsed.event === "response.completed") {
-        yield { content: "", done: true };
+        let completionTokens: number | undefined;
+        try {
+          const json = JSON.parse(parsed.data);
+          completionTokens = json.response?.usage?.output_tokens;
+        } catch {
+          // ignore malformed event
+        }
+        yield { content: "", done: true, completionTokens };
         return;
       }
       if (!parsed.data) continue;

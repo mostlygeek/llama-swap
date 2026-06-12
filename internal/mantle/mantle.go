@@ -37,9 +37,9 @@ type Task struct {
 	Branch  string `json:"branch,omitempty"`
 	ModelID string `json:"modelID,omitempty"`
 
-	cancel  context.CancelFunc
+	cancel   context.CancelFunc
 	cancelCh chan struct{}
-	mu      sync.Mutex
+	mu       sync.Mutex
 }
 
 // Done returns a channel that's closed when the task is cancelled.
@@ -179,12 +179,37 @@ type HFModel struct {
 	GGUF        bool     `json:"gguf"`
 }
 
+// hfSortParam maps a UI sort key to the HuggingFace API sort field. An empty
+// field means "relevance" (let the search ranking decide the order).
+func hfSortParam(sort string) string {
+	switch sort {
+	case "relevance":
+		return ""
+	case "trending":
+		return "trendingScore"
+	case "likes":
+		return "likes"
+	case "created":
+		return "createdAt"
+	case "modified":
+		return "lastModified"
+	case "downloads":
+		return "downloads"
+	default:
+		return "downloads"
+	}
+}
+
 // SearchHFModels queries the HuggingFace model hub for GGUF models.
-func SearchHFModels(query string, limit int) ([]HFModel, error) {
+// sort is one of: relevance, trending, downloads, likes, created, modified.
+func SearchHFModels(query string, limit int, sort string) ([]HFModel, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
-	url := fmt.Sprintf("https://huggingface.co/api/models?search=%s&sort=downloads&direction=-1&limit=%d", query, limit)
+	url := fmt.Sprintf("https://huggingface.co/api/models?search=%s&limit=%d", query, limit)
+	if field := hfSortParam(sort); field != "" {
+		url += fmt.Sprintf("&sort=%s&direction=-1", field)
+	}
 	resp, err := http.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("HF API request failed: %w", err)
@@ -219,13 +244,13 @@ func SearchHFModels(query string, limit int) ([]HFModel, error) {
 			}
 		}
 		results = append(results, HFModel{
-			ID:          m.ID,
-			Name:        m.ID,
-			Downloads:   m.Downloads,
-			Likes:       m.Likes,
-			UpdatedAt:   m.LastUpdated,
-			Tags:        m.Tags,
-			GGUF:        hasGGUF,
+			ID:        m.ID,
+			Name:      m.ID,
+			Downloads: m.Downloads,
+			Likes:     m.Likes,
+			UpdatedAt: m.LastUpdated,
+			Tags:      m.Tags,
+			GGUF:      hasGGUF,
 		})
 	}
 	return results, nil
