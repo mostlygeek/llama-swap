@@ -23,6 +23,7 @@ ARG IK_LLAMA_REF=main
 ARG CMAKE_CUDA_ARCHITECTURES="75;86;89"
 ARG MAX_BUILD_JOBS=4
 ARG BUILD_WHISPER=false
+ARG BUILD_IK_LLAMA=true
 
 # ── Builder bases ─────────────────────────────────────────────────────
 
@@ -102,20 +103,20 @@ RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
     --mount=type=cache,id=llama-${BACKEND},target=/src/llama.cpp/build \
     BACKEND=${BACKEND} bash /build/install-llama.sh "${LLAMA_REF}"
 
-# ── ik_llama.cpp (CUDA only) ──────────────────────────────────────────
+# ── ik_llama.cpp (optional, BUILD_IK_LLAMA=true to enable) ───────────
 
-FROM builder-base-vulkan AS ik-llama-vulkan
+FROM ubuntu:24.04 AS ik-llama-false
 RUN mkdir -p /install/bin
 
-FROM builder-base-cuda AS ik-llama-cuda
+FROM builder-base-cuda AS ik-llama-true
 ARG IK_LLAMA_REF=main
 COPY docker/install-ik-llama.sh /build/
 RUN --mount=type=cache,id=ccache-cuda,target=/ccache \
     --mount=type=cache,id=ik-llama-cuda,target=/src/ik_llama.cpp/build \
     bash /build/install-ik-llama.sh "${IK_LLAMA_REF}"
 
-ARG BACKEND=cuda
-FROM ik-llama-${BACKEND} AS ik-llama-build
+ARG BUILD_IK_LLAMA=true
+FROM ik-llama-${BUILD_IK_LLAMA} AS ik-llama-build
 
 # ── llama-swap (from local source) ───────────────────────────────────
 

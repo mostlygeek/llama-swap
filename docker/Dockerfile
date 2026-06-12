@@ -11,6 +11,7 @@
 
 ARG BACKEND=cuda
 ARG BUILD_WHISPER=false
+ARG BUILD_IK_LLAMA=true
 
 # ── Builder bases ──────────────────────────────────────────────────────
 
@@ -92,26 +93,24 @@ RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
     --mount=type=cache,id=llama-${BACKEND},target=/src/llama.cpp/build \
     BACKEND=${BACKEND} bash /build/install-llama.sh "${LLAMA_COMMIT_HASH}"
 
-# ── Build ik_llama.cpp (CUDA only) ────────────────────────────────────
+# ── Build ik_llama.cpp (optional, BUILD_IK_LLAMA=true to enable) ──────
 #
-# Two named stages allow ARG BACKEND to select at build time:
-#   - ik-llama-cuda  : real build (from builder-base-cuda)
-#   - ik-llama-vulkan: no-op (empty /install/bin, skips CUDA pull entirely)
-# BuildKit only evaluates the selected branch, so vulkan builds never
-# pull nvidia/cuda:*-devel or compile ik_llama.cpp.
+# BuildKit only evaluates the selected branch, so when BUILD_IK_LLAMA=false
+# the ik-llama-true stage (FROM builder-base-cuda) is never pulled or built.
+# build-image.sh forces false for vulkan builds automatically.
 
-FROM builder-base-vulkan AS ik-llama-vulkan
+FROM ubuntu:24.04 AS ik-llama-false
 RUN mkdir -p /install/bin
 
-FROM builder-base-cuda AS ik-llama-cuda
+FROM builder-base-cuda AS ik-llama-true
 ARG IK_LLAMA_COMMIT_HASH=main
 COPY docker/install-ik-llama.sh /build/
 RUN --mount=type=cache,id=ccache-cuda,target=/ccache \
     --mount=type=cache,id=ik-llama-cuda,target=/src/ik_llama.cpp/build \
     bash /build/install-ik-llama.sh "${IK_LLAMA_COMMIT_HASH}"
 
-ARG BACKEND=cuda
-FROM ik-llama-${BACKEND} AS ik-llama-build
+ARG BUILD_IK_LLAMA=true
+FROM ik-llama-${BUILD_IK_LLAMA} AS ik-llama-build
 
 # ── Download llama-swap release binary ────────────────────────────────
 
