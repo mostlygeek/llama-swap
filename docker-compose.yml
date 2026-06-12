@@ -6,17 +6,18 @@ services:
       dockerfile: docker/Dockerfile.simplified
       args:
         BACKEND: cuda
-        MAX_BUILD_JOBS: 3
+        MAX_BUILD_JOBS: ${nproc}
     runtime: nvidia
     ports:
       - "9292:8080"
     volumes:
-      - /mnt/storage/lm_storage/models/gguf:/models
-      - /mnt/storage/lm_storage/backends:/backends
-      - /mnt/storage/lm_storage/configs/config.yaml:/etc/llama-swap/config/config.yaml
-      # - /mnt/c/Users/sross/.lmstudio/models:/models
-      # - ./backends/:/backends/
-      # - ./config.yaml:/etc/llama-swap/config/config.yaml
+      # - /mnt/storage/lm_storage/models/gguf:/models
+      # - /mnt/storage/lm_storage/backends:/backends
+      # - /mnt/storage/lm_storage/configs/config.yaml:/etc/llama-swap/config/config.yaml
+      - /mnt/c/Users/sross/.lmstudio/models:/models
+      - /mnt/c/Users/sross/.ollama/models/blobs:/mnt/c/Users/sross/.ollama/models/blobs
+      - ./backends/:/backends/
+      - ./config.yaml:/etc/llama-swap/config/config.yaml
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
