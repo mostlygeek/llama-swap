@@ -1,6 +1,9 @@
 .aider*
 .env
 build/
+backends/
+models/
+.gocache/
 dist/
 .vscode
 .DS_Store

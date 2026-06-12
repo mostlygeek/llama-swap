@@ -113,6 +113,16 @@ RUN --mount=type=cache,id=ccache-cuda,target=/ccache \
 ARG BACKEND=cuda
 FROM ik-llama-${BACKEND} AS ik-llama-build
 
+# ── UI ────────────────────────────────────────────────────────────────
+
+FROM node:22-bookworm AS ui-build
+WORKDIR /src/ui-svelte
+COPY ui-svelte/package*.json ./
+COPY ui-svelte/.npmrc ./
+RUN npm ci
+COPY ui-svelte/ ./
+RUN npm run build
+
 # ── Download llama-swap release binary ────────────────────────────────
 
 FROM builder-base AS llama-swap-download
@@ -127,6 +137,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+COPY --from=ui-build /src/internal/server/ui_dist ./internal/server/ui_dist
 RUN mkdir -p /install/bin && \
     CGO_ENABLED=0 GOOS=linux go build -o /install/bin/llama-swap . && \
     echo "local" > /install/llama-swap-version
