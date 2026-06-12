@@ -193,6 +193,7 @@ echo "=========================================="
 echo ""
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 BUILD_ARGS=(
     --build-arg "BACKEND=${BACKEND}"
@@ -217,7 +218,7 @@ elif [[ "${GITHUB_ACTIONS:-}" == "true" && "${ACT:-}" != "true" ]]; then
     echo "Note: Using registry cache (${CACHE_REF})"
 fi
 
-DOCKER_BUILDKIT=1 docker buildx build --load "${BUILD_ARGS[@]}" "${SCRIPT_DIR}"
+DOCKER_BUILDKIT=1 docker buildx build --load "${BUILD_ARGS[@]}" "${REPO_ROOT}"
 
 echo ""
 echo "=========================================="

@@ -56,7 +56,7 @@ FROM builder-base-${BACKEND} AS builder-base
 FROM builder-base AS whisper-build
 ARG BACKEND=cuda
 ARG WHISPER_COMMIT_HASH=master
-COPY install-whisper.sh /build/
+COPY docker/unified/install-whisper.sh /build/
 RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
     --mount=type=cache,id=whisper-${BACKEND},target=/src/whisper.cpp/build \
     BACKEND=${BACKEND} bash /build/install-whisper.sh "${WHISPER_COMMIT_HASH}"
@@ -66,7 +66,7 @@ RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
 FROM builder-base AS sd-build
 ARG BACKEND=cuda
 ARG SD_COMMIT_HASH=master
-COPY install-sd.sh /build/
+COPY docker/unified/install-sd.sh /build/
 RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
     --mount=type=cache,id=sd-${BACKEND},target=/src/stable-diffusion.cpp/build \
     BACKEND=${BACKEND} bash /build/install-sd.sh "${SD_COMMIT_HASH}"
@@ -76,7 +76,7 @@ RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
 FROM builder-base AS llama-build
 ARG BACKEND=cuda
 ARG LLAMA_COMMIT_HASH=master
-COPY install-llama.sh /build/
+COPY docker/unified/install-llama.sh /build/
 RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
     --mount=type=cache,id=llama-${BACKEND},target=/src/llama.cpp/build \
     BACKEND=${BACKEND} bash /build/install-llama.sh "${LLAMA_COMMIT_HASH}"
@@ -94,7 +94,7 @@ RUN mkdir -p /install/bin
 
 FROM builder-base-cuda AS ik-llama-cuda
 ARG IK_LLAMA_COMMIT_HASH=main
-COPY install-ik-llama.sh /build/
+COPY docker/unified/install-ik-llama.sh /build/
 RUN --mount=type=cache,id=ccache-cuda,target=/ccache \
     --mount=type=cache,id=ik-llama-cuda,target=/src/ik_llama.cpp/build \
     bash /build/install-ik-llama.sh "${IK_LLAMA_COMMIT_HASH}"
@@ -106,8 +106,19 @@ FROM ik-llama-${BACKEND} AS ik-llama-build
 
 FROM builder-base AS llama-swap-download
 ARG LS_VERSION=latest
-COPY install-llama-swap.sh /build/
+COPY docker/unified/install-llama-swap.sh /build/
 RUN bash /build/install-llama-swap.sh "${LS_VERSION}"
+
+# ── Build llama-swap from local source ────────────────────────────────
+
+FROM golang:1.26 AS llama-swap-local
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN mkdir -p /install/bin && \
+    CGO_ENABLED=0 GOOS=linux go build -o /install/bin/llama-swap . && \
+    echo "local" > /install/llama-swap-version
 
 # ── Runtime bases ─────────────────────────────────────────────────────
 
@@ -184,12 +195,12 @@ COPY --from=ik-llama-build /install/bin/ /usr/local/bin/
 RUN pip install uv --break-system-packages
 
 # Copy llama-swap binary
-COPY --from=llama-swap-download /install/bin/llama-swap /usr/local/bin/
-COPY --from=llama-swap-download /install/llama-swap-version /tmp/
+COPY --from=llama-swap-local /install/bin/llama-swap /usr/local/bin/
+COPY --from=llama-swap-local /install/llama-swap-version /tmp/
 
 RUN ldconfig
 
-COPY config.example.yaml /etc/llama-swap/config/config.yaml
+COPY docker/unified/config.example.yaml /etc/llama-swap/config/config.yaml
 
 # Version tracking
 RUN echo "llama.cpp: ${LLAMA_COMMIT_HASH}" > /versions.txt && \
