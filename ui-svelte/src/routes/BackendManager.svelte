@@ -4,6 +4,7 @@
   import type { BackendEntry } from "../lib/types";
   import { activeBuilds, trackBuild, removeBuild, syncTasks } from "../stores/tasks";
 
+  let backendName = $state("");
   let repo = $state("https://github.com/danielhanchen/llama.cpp");
   let branch = $state("main");
   let cmakeFlags = $state("");
@@ -13,9 +14,9 @@
   let loadingBackends = $state(false);
 
   async function doBuild() {
-    if (!repo.trim()) return;
+    if (!repo.trim() || !backendName.trim()) return;
     building = true;
-    const task = await startBuild(repo.trim(), branch.trim() || "main", cmakeFlags.trim());
+    const task = await startBuild(repo.trim(), branch.trim() || "main", cmakeFlags.trim(), backendName.trim());
     building = false;
     if (!task) return;
     trackBuild(task);
@@ -66,6 +67,15 @@
     <h3 class="text-sm font-semibold mb-3">Build llama.cpp Fork</h3>
     <div class="flex flex-col gap-2">
       <div class="flex gap-2 items-center">
+        <label class="text-sm text-txtsecondary w-12">Name:</label>
+        <input
+          type="text"
+          class="input flex-1 px-3 py-1.5 border rounded bg-surface text-sm"
+          placeholder="beellama-cuda"
+          bind:value={backendName}
+        />
+      </div>
+      <div class="flex gap-2 items-center">
         <label class="text-sm text-txtsecondary w-12">Repo:</label>
         <input
           type="text"
@@ -92,7 +102,7 @@
           bind:value={cmakeFlags}
         />
       </div>
-      <button class="btn px-4 py-1.5 self-end" onclick={doBuild} disabled={building || !repo.trim()}>
+      <button class="btn px-4 py-1.5 self-end" onclick={doBuild} disabled={building || !repo.trim() || !backendName.trim()}>
         {building ? "Starting..." : "Build"}
       </button>
     </div>

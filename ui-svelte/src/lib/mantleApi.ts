@@ -100,12 +100,12 @@ export async function putConfig(yaml: string): Promise<boolean> {
 
 // --- Backend builds ---
 
-export async function startBuild(repo: string, branch: string, cmakeFlags = ""): Promise<MantleTask | null> {
+export async function startBuild(repo: string, branch: string, cmakeFlags = "", backendName = ""): Promise<MantleTask | null> {
   try {
     const res = await fetch("/api/mantle/backends/build", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ repo, branch, cmakeFlags }),
+      body: JSON.stringify({ repo, branch, cmakeFlags, backendName }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();

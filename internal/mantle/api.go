@@ -226,10 +226,11 @@ func (h *Handler) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 // --- Backend Builds ---
 
 type buildRequest struct {
-	Repo       string   `json:"repo"`
-	Branch     string   `json:"branch"`
-	CMakeArgs  []string `json:"cmakeArgs"`
-	CMakeFlags string   `json:"cmakeFlags"`
+	BackendName string   `json:"backendName"`
+	Repo        string   `json:"repo"`
+	Branch      string   `json:"branch"`
+	CMakeArgs   []string `json:"cmakeArgs"`
+	CMakeFlags  string   `json:"cmakeFlags"`
 }
 
 func (h *Handler) handleStartBuild(w http.ResponseWriter, r *http.Request) {
@@ -240,6 +241,10 @@ func (h *Handler) handleStartBuild(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Repo == "" {
 		jsonError(w, http.StatusBadRequest, "repo is required")
+		return
+	}
+	if req.BackendName != "" && !isSafeBackendName(req.BackendName) {
+		jsonError(w, http.StatusBadRequest, "backendName may only contain letters, numbers, dot, underscore, and hyphen")
 		return
 	}
 	cmakeArgs := req.CMakeArgs
@@ -256,7 +261,7 @@ func (h *Handler) handleStartBuild(w http.ResponseWriter, r *http.Request) {
 		}
 		cmakeArgs = append(cmakeArgs, parsed...)
 	}
-	task := h.tm.StartBuild(req.Repo, req.Branch, h.buildScript, h.backendsDir, cmakeArgs)
+	task := h.tm.StartBuild(req.Repo, req.Branch, req.BackendName, h.buildScript, h.backendsDir, cmakeArgs)
 	jsonResponse(w, http.StatusAccepted, task)
 }
 

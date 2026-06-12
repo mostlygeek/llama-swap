@@ -263,6 +263,7 @@ export interface BackendEntry {
 }
 
 export interface BuildRequest {
+	backendName?: string;
 	repo: string;
 	branch?: string;
 	cmakeFlags?: string;

@@ -11,7 +11,7 @@ import (
 
 // StartBuild kicks off a container-local build of a llama.cpp fork.
 // Runs as a goroutine, emitting progress events via the task.
-func (tm *TaskManager) StartBuild(repo, branch, buildScript, backendsDir string, cmakeArgs []string) *Task {
+func (tm *TaskManager) StartBuild(repo, branch, backendName, buildScript, backendsDir string, cmakeArgs []string) *Task {
 	task := tm.CreateTask("build", repo, branch, "")
 
 	go func() {
@@ -20,7 +20,17 @@ func (tm *TaskManager) StartBuild(repo, branch, buildScript, backendsDir string,
 		if branch == "" {
 			branch = "main"
 		}
-		outDir := filepath.Join(backendsDir, "build-"+task.ID)
+		if backendName == "" {
+			backendName = "build-" + task.ID
+		}
+		outDir := filepath.Join(backendsDir, backendName)
+		if _, err := os.Stat(outDir); err == nil {
+			task.UpdateProgress(TaskFailed, fmt.Sprintf("Backend %q already exists", backendName), 0)
+			return
+		} else if !os.IsNotExist(err) {
+			task.UpdateProgress(TaskFailed, fmt.Sprintf("Failed to check output dir: %v", err), 0)
+			return
+		}
 		if err := os.MkdirAll(outDir, 0755); err != nil {
 			task.UpdateProgress(TaskFailed, fmt.Sprintf("Failed to create output dir: %v", err), 0)
 			return

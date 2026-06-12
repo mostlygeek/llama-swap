@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 )
 
 // ListBackends returns the directories in the backends folder.
@@ -122,4 +123,22 @@ func extractTaskID(name string) string {
 		return name[6:]
 	}
 	return ""
+}
+
+func isSafeBackendName(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	for _, r := range name {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			continue
+		}
+		switch r {
+		case '.', '_', '-':
+			continue
+		default:
+			return false
+		}
+	}
+	return true
 }
