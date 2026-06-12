@@ -13,7 +13,7 @@ reviews:
     docstrings:
       enabled: false
   auto_review:
-    enabled: true
+    enabled: false
     drafts: false
 chat:
   auto_reply: true

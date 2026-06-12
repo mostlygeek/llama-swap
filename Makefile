@@ -19,21 +19,17 @@ all: mac linux simple-responder
 clean:
 	rm -rf $(BUILD_DIR)
 
-proxy/ui_dist/placeholder.txt:
-	mkdir -p proxy/ui_dist
-	touch $@
-
 # use cached test results while developing
-test-dev: proxy/ui_dist/placeholder.txt
-	go test -short ./proxy/... ./internal/...
-	staticcheck ./proxy/... ./internal/... || true
+test-dev:
+	go test -short ./...
+	staticcheck ./... || true
 
-test: proxy/ui_dist/placeholder.txt
-	go test -short -count=1 ./proxy/... ./internal/...
+test:
+	go test -short -count=1 ./internal/...
 
 # for CI - full test (takes longer)
-test-all: proxy/ui_dist/placeholder.txt
-	go test -race -count=1 ./proxy/... ./internal/...
+test-all:
+	go test -race -count=1 ./internal/...
 
 ui/node_modules:
 	cd ui-svelte && npm install
@@ -41,6 +37,7 @@ ui/node_modules:
 # build react UI
 ui: ui/node_modules
 	cd ui-svelte && npm run build
+	touch internal/server/ui_dist/placeholder.txt
 
 # Build OSX binary
 mac: ui
@@ -63,7 +60,7 @@ windows: ui
 	@echo "Building Windows binary..."
 	GOOS=windows GOARCH=amd64 go build -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-windows-amd64.exe
 
-# for testing proxy.Process
+# for testing with real external processes
 simple-responder:
 	@echo "Building simple responder"
 	GOOS=darwin GOARCH=arm64 go build -o $(BUILD_DIR)/simple-responder_darwin_arm64 cmd/simple-responder/simple-responder.go

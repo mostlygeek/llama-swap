@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/perf"
-	"github.com/mostlygeek/llama-swap/proxy/config"
 )
 
 func printSysStat(s perf.SysStat) {
@@ -75,7 +75,7 @@ func main() {
 	}
 
 	if *stream {
-		m, _ := perf.New(config.PerformanceConfig{Enable: true, Every: every}, l)
+		m, _ := perf.New(config.PerformanceConfig{Every: every}, l)
 		m.Start()
 		defer m.Stop()
 		sysCh, gpuCh, unsub := m.Subscribe()

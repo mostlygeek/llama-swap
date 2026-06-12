@@ -5,3 +5,6 @@ dist/
 .vscode
 .DS_Store
 .dev/
+
+# UI build output; placeholder.txt is kept so the go:embed succeeds.
+internal/server/ui_dist/*

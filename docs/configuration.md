@@ -146,6 +146,18 @@ metricsMaxInMemory: 1000
 # - set to 0 to disable
 captureBuffer: 15
 
+# performance: configuration for system monitoring statistics
+# - timing values are duration strings like 1s, 1h30m, 90m, 2h10s, etc.
+performance:
+  # disabled: boolean
+  # - default: false
+  enable: true
+
+  # every: delay between polling for new performance statistics
+  # - default: 5s
+  # - minimum duration 5s
+  every: 5s
+
 # startPort: sets the starting port number for the automatic ${PORT} macro.
 # - optional, default: 5800
 # - the ${PORT} macro can be used in model.cmd and model.proxy settings
@@ -187,8 +199,7 @@ globalTTL: 0
 macros:
   # Example of a multi-line macro
   "latest-llama": >
-    /path/to/llama-server/llama-server-ec9e0301
-    --port ${PORT}
+    /path/to/llama-server/llama-server-ec9e0301 --port ${PORT}
 
   "default_ctx": 4096
 
@@ -348,7 +359,8 @@ models:
 
       # the ${temp} macro will remain a float
       temperature: ${temp}
-      note: "The ${MODEL_ID} is running on port ${PORT} temp=${temp}, context=${default_ctx}"
+      note: "The ${MODEL_ID} is running on port ${PORT} temp=${temp},
+        context=${default_ctx}"
 
       a_list:
         - 1

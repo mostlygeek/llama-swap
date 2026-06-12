@@ -30,37 +30,38 @@ jobs:
   run-tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c #6.4.0
         with:
           go-version-file: go.mod
 
       # Only run in this linux based runner
       - name: Check Formatting
         run: |
-          if [ "$(gofmt -l . | grep -v 'event/.*_test.go' | wc -l)" -gt 0 ]; then
-            gofmt -l . | grep -v 'event/.*_test.go'
+          if [ "$(gofmt -l . | wc -l)" -gt 0 ]; then
+            gofmt -l .
             exit 1
           fi
       # cache simple-responder to save the build time
       - name: Restore Simple Responder
         id: restore-simple-responder
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae #v5.0.5
         with:
           path: ./build
           key: ${{ runner.os }}-simple-responder-${{ hashFiles('cmd/simple-responder/simple-responder.go') }}
 
       # necessary for testing proxy/Process swapping
       - name: Create simple-responder
+        if: steps.restore-simple-responder.outputs.cache-hit != 'true'
         run: make simple-responder
 
       - name: Save Simple Responder
         # nothing new to save ... skip this step
         if: steps.restore-simple-responder.outputs.cache-hit != 'true'
         id: save-simple-responder
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae #v5.0.5
         with:
           path: ./build
           key: ${{ runner.os }}-simple-responder-${{ hashFiles('cmd/simple-responder/simple-responder.go') }}
