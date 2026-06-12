@@ -9,9 +9,9 @@ import (
 	"strings"
 )
 
-// StartBuild kicks off a Docker container build of a llama.cpp fork.
+// StartBuild kicks off a container-local build of a llama.cpp fork.
 // Runs as a goroutine, emitting progress events via the task.
-func (tm *TaskManager) StartBuild(repo, branch, buildScript, backendsDir string) *Task {
+func (tm *TaskManager) StartBuild(repo, branch, buildScript, backendsDir string, cmakeArgs []string) *Task {
 	task := tm.CreateTask("build", repo, branch, "")
 
 	go func() {
@@ -26,11 +26,16 @@ func (tm *TaskManager) StartBuild(repo, branch, buildScript, backendsDir string)
 			return
 		}
 
-		cmd := exec.Command("bash", buildScript,
+		args := []string{
+			buildScript,
 			"--repo", repo,
 			"--branch", branch,
 			"--out", outDir,
-		)
+		}
+		for _, arg := range cmakeArgs {
+			args = append(args, "--cmake-arg", arg)
+		}
+		cmd := exec.Command("bash", args...)
 
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
@@ -61,7 +66,7 @@ func (tm *TaskManager) StartBuild(repo, branch, buildScript, backendsDir string)
 			}
 		}()
 
-		// Read stderr (Docker build output goes here)
+		// Read stderr for build diagnostics.
 		go func() {
 			scanner := bufio.NewScanner(stderr)
 			for scanner.Scan() {

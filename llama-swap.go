@@ -62,6 +62,7 @@ func main() {
 	flagWatchConfig := flag.Bool("watch-config", false, "reload config on file change")
 	flagModelsDir := flag.String("models-dir", "", "directory for downloaded models (default: <config-dir>/models)")
 	flagBackendsDir := flag.String("backends-dir", "", "directory for compiled backends (default: <config-dir>/backends)")
+	flagBuildScript := flag.String("build-script", "", "path to backend build script")
 	flag.Parse()
 
 	if *flagVersion {
@@ -107,8 +108,10 @@ func main() {
 	} else if cfg.BackendsDir == "" {
 		cfg.BackendsDir = filepath.Join(filepath.Dir(configPath), "backends")
 	}
-	if cfg.BuildScript == "" {
-		cfg.BuildScript = filepath.Join(filepath.Dir(configPath), "build-llamacpp.sh")
+	if *flagBuildScript != "" {
+		cfg.BuildScript = *flagBuildScript
+	} else if cfg.BuildScript == "" {
+		cfg.BuildScript = "/usr/local/bin/build-llamacpp.sh"
 	}
 
 	// Loggers are wired per cfg.LogToStdout: proxy/upstream feed muxLog, which

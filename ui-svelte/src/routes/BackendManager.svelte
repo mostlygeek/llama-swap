@@ -5,6 +5,7 @@
 
   let repo = $state("https://github.com/danielhanchen/llama.cpp");
   let branch = $state("main");
+  let cmakeFlags = $state("");
   let building = $state(false);
 
   let backends = $state<BackendEntry[]>([]);
@@ -13,7 +14,7 @@
   async function doBuild() {
     if (!repo.trim()) return;
     building = true;
-    const task = await startBuild(repo.trim(), branch.trim() || "main");
+    const task = await startBuild(repo.trim(), branch.trim() || "main", cmakeFlags.trim());
     building = false;
     if (!task) return;
     trackBuild(task);
@@ -74,6 +75,15 @@
           class="input flex-1 px-3 py-1.5 border rounded bg-surface text-sm"
           placeholder="main"
           bind:value={branch}
+        />
+      </div>
+      <div class="flex gap-2 items-center">
+        <label class="text-sm text-txtsecondary w-12">CMake:</label>
+        <input
+          type="text"
+          class="input flex-1 px-3 py-1.5 border rounded bg-surface text-sm"
+          placeholder='-DGGML_CUDA_FORCE_MMQ=ON -DLLAMA_CURL=OFF'
+          bind:value={cmakeFlags}
         />
       </div>
       <button class="btn px-4 py-1.5 self-end" onclick={doBuild} disabled={building || !repo.trim()}>

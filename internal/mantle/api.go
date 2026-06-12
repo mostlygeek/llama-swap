@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"runtime"
 
+	"github.com/billziss-gh/golib/shlex"
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/shared"
@@ -16,12 +18,12 @@ import (
 
 // Handler bundles all mantle API handlers with their dependencies.
 type Handler struct {
-	tm           *TaskManager
-	cfg          *config.Config
-	configPath   string
-	modelsDir    string
-	backendsDir  string
-	buildScript  string
+	tm          *TaskManager
+	cfg         *config.Config
+	configPath  string
+	modelsDir   string
+	backendsDir string
+	buildScript string
 }
 
 // NewHandler creates a new mantle API handler.
@@ -224,8 +226,10 @@ func (h *Handler) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 // --- Backend Builds ---
 
 type buildRequest struct {
-	Repo   string `json:"repo"`
-	Branch string `json:"branch"`
+	Repo       string   `json:"repo"`
+	Branch     string   `json:"branch"`
+	CMakeArgs  []string `json:"cmakeArgs"`
+	CMakeFlags string   `json:"cmakeFlags"`
 }
 
 func (h *Handler) handleStartBuild(w http.ResponseWriter, r *http.Request) {
@@ -238,7 +242,21 @@ func (h *Handler) handleStartBuild(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "repo is required")
 		return
 	}
-	task := h.tm.StartBuild(req.Repo, req.Branch, h.buildScript, h.backendsDir)
+	cmakeArgs := req.CMakeArgs
+	if req.CMakeFlags != "" {
+		var parsed []string
+		if runtime.GOOS == "windows" {
+			parsed = shlex.Windows.Split(req.CMakeFlags)
+		} else {
+			parsed = shlex.Posix.Split(req.CMakeFlags)
+		}
+		if parsed == nil {
+			jsonError(w, http.StatusBadRequest, "invalid CMake flags")
+			return
+		}
+		cmakeArgs = append(cmakeArgs, parsed...)
+	}
+	task := h.tm.StartBuild(req.Repo, req.Branch, h.buildScript, h.backendsDir, cmakeArgs)
 	jsonResponse(w, http.StatusAccepted, task)
 }
 

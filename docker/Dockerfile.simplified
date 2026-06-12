@@ -129,13 +129,14 @@ RUN mkdir -p /install/bin && \
 
 # ── Runtime bases ─────────────────────────────────────────────────────
 
-FROM nvidia/cuda:12.9.1-runtime-ubuntu24.04 AS runtime-cuda
+FROM nvidia/cuda:12.9.1-devel-ubuntu24.04 AS runtime-cuda
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
 ENV PATH="/usr/local/bin:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential cmake git ninja-build ccache make wget libssl-dev \
     libgomp1 python3 curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
@@ -150,6 +151,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH="/usr/local/bin:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential cmake git ninja-build ccache make wget libssl-dev \
     libgomp1 libvulkan1 mesa-vulkan-drivers \
     python3 curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
@@ -157,6 +159,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ── Runtime ───────────────────────────────────────────────────────────
 
 FROM runtime-${BACKEND} AS runtime
+
+ARG BACKEND=cuda
+ARG CMAKE_CUDA_ARCHITECTURES="75;86;89"
+ARG MAX_BUILD_JOBS=4
+ENV BACKEND=${BACKEND}
+ENV CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}
+ENV MAX_BUILD_JOBS=${MAX_BUILD_JOBS}
+ENV CCACHE_DIR=/tmp/ccache
+ENV CCACHE_MAXSIZE=2G
+ENV PATH="/usr/lib/ccache:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-numpy python3-sentencepiece python3-pip \
@@ -181,6 +193,8 @@ COPY --from=ik-llama-build /install/bin/ /usr/local/bin/
 RUN pip install uv --break-system-packages
 
 COPY --from=llama-swap-build /install/bin/llama-swap /usr/local/bin/
+COPY docker/build-llamacpp.sh /usr/local/bin/build-llamacpp.sh
+RUN chmod +x /usr/local/bin/build-llamacpp.sh
 
 RUN ldconfig
 
