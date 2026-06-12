@@ -60,6 +60,8 @@ func main() {
 	flagKeyFile := flag.String("tls-key-file", "", "TLS key file")
 	flagVersion := flag.Bool("version", false, "show version and exit")
 	flagWatchConfig := flag.Bool("watch-config", false, "reload config on file change")
+	flagModelsDir := flag.String("models-dir", "", "directory for downloaded models (default: <config-dir>/models)")
+	flagBackendsDir := flag.String("backends-dir", "", "directory for compiled backends (default: <config-dir>/backends)")
 	flag.Parse()
 
 	if *flagVersion {
@@ -95,10 +97,14 @@ func main() {
 	}
 	// Set runtime paths for Mantle management
 	cfg.ConfigPath = configPath
-	if cfg.ModelsDir == "" {
+	if *flagModelsDir != "" {
+		cfg.ModelsDir = *flagModelsDir
+	} else if cfg.ModelsDir == "" {
 		cfg.ModelsDir = filepath.Join(filepath.Dir(configPath), "models")
 	}
-	if cfg.BackendsDir == "" {
+	if *flagBackendsDir != "" {
+		cfg.BackendsDir = *flagBackendsDir
+	} else if cfg.BackendsDir == "" {
 		cfg.BackendsDir = filepath.Join(filepath.Dir(configPath), "backends")
 	}
 	if cfg.BuildScript == "" {

@@ -3,6 +3,7 @@ package mantle
 import (
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // ListBackends returns the directories in the backends folder.
@@ -11,12 +12,12 @@ func ListBackends(backendsDir string) ([]BackendEntry, error) {
 	entries, err := os.ReadDir(backendsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return []BackendEntry{}, nil
 		}
 		return nil, err
 	}
 
-	var backends []BackendEntry
+	backends := []BackendEntry{}
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
@@ -27,9 +28,9 @@ func ListBackends(backendsDir string) ([]BackendEntry, error) {
 		}
 		fi, _ := os.Stat(binPath)
 		entry := BackendEntry{
-			Name:    e.Name(),
-			Path:    binPath,
-			TaskID:  extractTaskID(e.Name()),
+			Name:   e.Name(),
+			Path:   binPath,
+			TaskID: extractTaskID(e.Name()),
 		}
 		if fi != nil {
 			entry.Size = fi.Size()
@@ -41,10 +42,10 @@ func ListBackends(backendsDir string) ([]BackendEntry, error) {
 
 // BackendEntry describes a compiled backend.
 type BackendEntry struct {
-	Name    string `json:"name"`
-	Path    string `json:"path"`
-	Size    int64  `json:"size"`
-	TaskID  string `json:"taskID,omitempty"`
+	Name   string `json:"name"`
+	Path   string `json:"path"`
+	Size   int64  `json:"size"`
+	TaskID string `json:"taskID,omitempty"`
 }
 
 // DeleteBackend removes a compiled backend directory.
@@ -53,49 +54,54 @@ func DeleteBackend(backendsDir, name string) error {
 	return os.RemoveAll(path)
 }
 
-// ListLocalModels returns the .gguf files in the models directory.
+// ListLocalModels returns .gguf files up to 3 levels deep in modelsDir.
+// This covers flat layouts (file.gguf), HuggingFace-style (repo/file.gguf),
+// and LMStudio-style (publisher/model-folder/file.gguf).
 func ListLocalModels(modelsDir string) ([]LocalModel, error) {
-	entries, err := os.ReadDir(modelsDir)
-	if err != nil {
+	models := []LocalModel{}
+	if err := walkGGUF(modelsDir, "", 0, &models); err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return models, nil
 		}
 		return nil, err
 	}
+	return models, nil
+}
 
-	var models []LocalModel
+func walkGGUF(base, rel string, depth int, out *[]LocalModel) error {
+	if depth > 2 {
+		return nil
+	}
+	dir := base
+	if rel != "" {
+		dir = filepath.Join(base, rel)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
 	for _, e := range entries {
-		if !e.IsDir() {
-			if len(e.Name()) > 5 && e.Name()[len(e.Name())-5:] == ".gguf" {
-				fi, _ := e.Info()
-				m := LocalModel{
-					Name: e.Name(),
-					Path: filepath.Join(modelsDir, e.Name()),
-				}
-				if fi != nil {
-					m.Size = fi.Size()
-				}
-				models = append(models, m)
-			}
-			continue
+		var entryRel string
+		if rel == "" {
+			entryRel = e.Name()
+		} else {
+			entryRel = rel + "/" + e.Name()
 		}
-		// Check inside subdirectory
-		subEntries, _ := os.ReadDir(filepath.Join(modelsDir, e.Name()))
-		for _, se := range subEntries {
-			if !se.IsDir() && len(se.Name()) > 5 && se.Name()[len(se.Name())-5:] == ".gguf" {
-				fi, _ := se.Info()
-				m := LocalModel{
-					Name: e.Name() + "/" + se.Name(),
-					Path: filepath.Join(modelsDir, e.Name(), se.Name()),
-				}
-				if fi != nil {
-					m.Size = fi.Size()
-				}
-				models = append(models, m)
+		if e.IsDir() {
+			walkGGUF(base, entryRel, depth+1, out)
+		} else if strings.HasSuffix(strings.ToLower(e.Name()), ".gguf") {
+			fi, _ := e.Info()
+			m := LocalModel{
+				Name: entryRel,
+				Path: filepath.Join(base, entryRel),
 			}
+			if fi != nil {
+				m.Size = fi.Size()
+			}
+			*out = append(*out, m)
 		}
 	}
-	return models, nil
+	return nil
 }
 
 // LocalModel describes a downloaded GGUF file on disk.

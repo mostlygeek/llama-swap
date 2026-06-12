@@ -20,7 +20,7 @@ func (tm *TaskManager) StartBuild(repo, branch, buildScript, backendsDir string)
 		if branch == "" {
 			branch = "main"
 		}
-		outDir := filepath.Join(backendsDir, "build-"+task.ID[:8])
+		outDir := filepath.Join(backendsDir, "build-"+task.ID)
 		if err := os.MkdirAll(outDir, 0755); err != nil {
 			task.UpdateProgress(TaskFailed, fmt.Sprintf("Failed to create output dir: %v", err), 0)
 			return

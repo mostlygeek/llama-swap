@@ -6,10 +6,17 @@ services:
       dockerfile: docker/Dockerfile.simplified
       args:
         BACKEND: cuda
-        MAX_BUILD_JOBS: ${nproc}
+        MAX_BUILD_JOBS: 4
     runtime: nvidia
     ports:
       - "9292:8080"
+    command:
+      - -config
+      - /etc/llama-swap/config/config.yaml
+      - -models-dir
+      - /models
+      - -backends-dir
+      - /backends
     volumes:
       # - /mnt/storage/lm_storage/models/gguf:/models
       # - /mnt/storage/lm_storage/backends:/backends
