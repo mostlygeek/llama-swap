@@ -48,7 +48,8 @@ for arg in "$@"; do
             echo "  IK_LLAMA_REF         Pin ik_llama.cpp to a commit, tag, or branch (CUDA only)"
             echo "  LS_VERSION           Override llama-swap version (e.g., '170' or 'latest')"
             echo "  MAX_BUILD_JOBS       Parallel compile jobs per build stage (default: 4; raise on high-RAM hosts)"
-            echo "  BUILD_WHISPER        Build whisper.cpp (default: false; set to true to enable)"
+            echo "  BUILD_WHISPER        Build whisper.cpp (default: false; set to true to enable)
+  BUILD_IK_LLAMA       Build ik_llama.cpp (default: true for cuda, always false for vulkan)"
             exit 0
             ;;
     esac
@@ -158,8 +159,12 @@ else
     echo "stable-diffusion.cpp: latest HEAD: ${SD_HASH}"
 fi
 
-# Resolve ik_llama.cpp ref (CUDA only)
-if [[ "$BACKEND" == "cuda" ]]; then
+# Resolve ik_llama.cpp ref (CUDA only, skipped when BUILD_IK_LLAMA=false)
+_BUILD_IK_LLAMA="${BUILD_IK_LLAMA:-true}"
+if [[ "$BACKEND" == "vulkan" ]]; then
+    _BUILD_IK_LLAMA="false"
+fi
+if [[ "${_BUILD_IK_LLAMA}" == "true" ]]; then
     if [[ -n "${IK_LLAMA_REF:-}" ]]; then
         IK_LLAMA_HASH=$(resolve_ref "${IK_LLAMA_REPO}" "${IK_LLAMA_REF}") || exit 1
         echo "ik_llama.cpp: ${IK_LLAMA_REF} -> ${IK_LLAMA_HASH}"
@@ -173,7 +178,7 @@ if [[ "$BACKEND" == "cuda" ]]; then
     fi
 else
     IK_LLAMA_HASH="n/a"
-    echo "ik_llama.cpp: skipped (vulkan build)"
+    echo "ik_llama.cpp: skipped (BUILD_IK_LLAMA=false)"
 fi
 
 # Resolve llama-swap ref
@@ -207,6 +212,7 @@ BUILD_ARGS=(
     --build-arg "LS_VERSION=${LS_HASH}"
     --build-arg "MAX_BUILD_JOBS=${MAX_BUILD_JOBS:-4}"
     --build-arg "BUILD_WHISPER=${BUILD_WHISPER:-false}"
+    --build-arg "BUILD_IK_LLAMA=${_BUILD_IK_LLAMA}"
     -t "${DOCKER_IMAGE_TAG}"
     -f "${SCRIPT_DIR}/Dockerfile"
 )
