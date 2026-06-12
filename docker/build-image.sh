@@ -12,6 +12,7 @@
 #   SD_REF=master ./build-image.sh --cuda                # Pin stable-diffusion.cpp to a branch
 #   LS_VERSION=170 ./build-image.sh --cuda               # Override llama-swap version
 #   IK_LLAMA_REF=main ./build-image.sh --cuda            # Pin ik_llama.cpp to main branch (CUDA only)
+#   MAX_BUILD_JOBS=8 ./build-image.sh --cuda             # Parallel compile jobs (default: 4; raise on high-RAM hosts)
 #
 
 set -euo pipefail
@@ -45,7 +46,8 @@ for arg in "$@"; do
             echo "  WHISPER_REF          Pin whisper.cpp to a commit, tag, or branch"
             echo "  SD_REF               Pin stable-diffusion.cpp to a commit, tag, or branch"
             echo "  IK_LLAMA_REF         Pin ik_llama.cpp to a commit, tag, or branch (CUDA only)"
-            echo "  LS_VERSION           Override llama-swap version (e.g., '170' or 'latest')"
+            echo "  LS_VERSION           Override llama-swap version (e.g., '170' or 'latest')
+  MAX_BUILD_JOBS       Parallel compile jobs per build stage (default: 4; raise on high-RAM hosts)"
             exit 0
             ;;
     esac
@@ -202,6 +204,7 @@ BUILD_ARGS=(
     --build-arg "SD_COMMIT_HASH=${SD_HASH}"
     --build-arg "IK_LLAMA_COMMIT_HASH=${IK_LLAMA_HASH}"
     --build-arg "LS_VERSION=${LS_HASH}"
+    --build-arg "MAX_BUILD_JOBS=${MAX_BUILD_JOBS:-4}"
     -t "${DOCKER_IMAGE_TAG}"
     -f "${SCRIPT_DIR}/Dockerfile"
 )
