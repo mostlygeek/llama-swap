@@ -54,7 +54,6 @@ var logTimeFormats = map[string]string{
 	"stampnano":   time.StampNano,
 }
 
-
 func main() {
 	flagConfig := flag.String("config", "", "path to config file (required)")
 	flagListen := flag.String("listen", "", "listen address (default :8080 or :8443 for TLS)")
