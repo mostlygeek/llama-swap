@@ -215,4 +215,4 @@ COPY docker/config.example.yaml /etc/llama-swap/config/config.yaml
 RUN mkdir -p /models
 WORKDIR /models
 ENTRYPOINT ["llama-swap"]
-CMD ["-config", "/etc/llama-swap/config/config.yaml", "-listen", "0.0.0.0:8080"]
+CMD ["-config", "/etc/llama-swap/config/config.yaml", "-listen", "0.0.0.0:8080", "-watch-config"]
