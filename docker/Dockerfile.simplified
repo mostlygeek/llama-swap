@@ -10,6 +10,7 @@
 #   --build-arg SD_REF=master            pin stable-diffusion.cpp
 #   --build-arg IK_LLAMA_REF=main        pin ik_llama.cpp (CUDA only)
 #   --build-arg CMAKE_CUDA_ARCHITECTURES="86;89"
+#   --build-arg MAX_BUILD_JOBS=8              parallel compile jobs (default: 4)
 
 ARG BACKEND=cuda
 
@@ -20,14 +21,17 @@ ARG WHISPER_REF=master
 ARG SD_REF=master
 ARG IK_LLAMA_REF=main
 ARG CMAKE_CUDA_ARCHITECTURES="75;86;89"
+ARG MAX_BUILD_JOBS=4
 
 # ── Builder bases ─────────────────────────────────────────────────────
 
 FROM nvidia/cuda:12.9.1-devel-ubuntu24.04 AS builder-base-cuda
 
 ARG CMAKE_CUDA_ARCHITECTURES="75;86;89"
+ARG MAX_BUILD_JOBS=4
 ENV DEBIAN_FRONTEND=noninteractive
 ENV CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}
+ENV MAX_BUILD_JOBS=${MAX_BUILD_JOBS}
 ENV CCACHE_DIR=/ccache
 ENV CCACHE_MAXSIZE=2G
 ENV PATH="/usr/lib/ccache:${PATH}"
@@ -43,7 +47,9 @@ WORKDIR /build
 
 FROM ubuntu:24.04 AS builder-base-vulkan
 
+ARG MAX_BUILD_JOBS=4
 ENV DEBIAN_FRONTEND=noninteractive
+ENV MAX_BUILD_JOBS=${MAX_BUILD_JOBS}
 ENV CCACHE_DIR=/ccache
 ENV CCACHE_MAXSIZE=2G
 ENV PATH="/usr/lib/ccache:${PATH}"
