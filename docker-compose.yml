@@ -19,6 +19,7 @@ services:
       - /models
       - -backends-dir
       - /backends
+      - -watch-config
     volumes:
       - /mnt/storage/lm_storage/models/gguf:/models
       - /mnt/storage/lm_storage/backends:/backends
