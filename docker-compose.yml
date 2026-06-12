@@ -6,9 +6,9 @@ services:
       dockerfile: docker/Dockerfile.simplified
       args:
         BACKEND: cuda
-        MAX_BUILD_JOBS: 1
-        BUILD_WHISPER: "false"
-        BUILD_IK_LLAMA: "false"
+        MAX_BUILD_JOBS: 6
+        BUILD_WHISPER: "true"
+        BUILD_IK_LLAMA: "true"
     runtime: nvidia
     ports:
       - "9292:8080"
@@ -19,14 +19,15 @@ services:
       - /models
       - -backends-dir
       - /backends
+      - -watch-config
     volumes:
-      - /mnt/storage/lm_storage/models/gguf:/models
-      - /mnt/storage/lm_storage/backends:/backends
-      - /mnt/storage/lm_storage/configs/config.yaml:/etc/llama-swap/config/config.yaml
-      # - /mnt/c/Users/sross/.lmstudio/models:/models
-      # - /mnt/c/Users/sross/.ollama/models/blobs:/mnt/c/Users/sross/.ollama/models/blobs
-      # - ./backends/:/backends/
-      # - ./config.yaml:/etc/llama-swap/config/config.yaml
+      # - /mnt/storage/lm_storage/models/gguf:/models
+      # - /mnt/storage/lm_storage/backends:/backends
+      # - /mnt/storage/lm_storage/configs/config.yaml:/etc/llama-swap/config/config.yaml
+      - /mnt/c/Users/sross/.lmstudio/models:/models
+      - /mnt/c/Users/sross/.ollama/models/blobs:/mnt/c/Users/sross/.ollama/models/blobs
+      - ./backends/:/backends/
+      - ./config.yaml:/etc/llama-swap/config/config.yaml
       - ./docker/build-llamacpp.sh:/etc/llama-swap/config/build-llamacpp.sh:ro
     environment:
       NVIDIA_VISIBLE_DEVICES: all
