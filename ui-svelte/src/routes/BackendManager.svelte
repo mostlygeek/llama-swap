@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
-  import { startBuild, cancelBuild, listBackends, deleteBackend, streamBuildProgress } from "../lib/mantleApi";
-  import type { BackendEntry, MantleTask } from "../lib/types";
+  import { startBuild, cancelBuild, listBackends, deleteBackend } from "../lib/mantleApi";
+  import type { BackendEntry } from "../lib/types";
+  import { activeBuilds, trackBuild, removeBuild, syncTasks } from "../stores/tasks";
 
   let repo = $state("https://github.com/danielhanchen/llama.cpp");
   let branch = $state("main");
@@ -10,36 +10,18 @@
   let backends = $state<BackendEntry[]>([]);
   let loadingBackends = $state(false);
 
-  let activeBuilds = $state<Map<string, { task: MantleTask; cleanup: () => void }>>(new Map());
-
   async function doBuild() {
     if (!repo.trim()) return;
     building = true;
     const task = await startBuild(repo.trim(), branch.trim() || "main");
     building = false;
     if (!task) return;
-
-    const cleanup = streamBuildProgress(task.id, (data) => {
-      const existing = activeBuilds.get(task.id);
-      if (existing) {
-        existing.task = { ...existing.task, ...data };
-        activeBuilds.set(task.id, existing);
-        activeBuilds = new Map(activeBuilds);
-      }
-    });
-
-    activeBuilds.set(task.id, { task, cleanup });
-    activeBuilds = new Map(activeBuilds);
+    trackBuild(task);
   }
 
   async function doCancelBuild(taskID: string) {
     await cancelBuild(taskID);
-    const entry = activeBuilds.get(taskID);
-    if (entry) {
-      entry.cleanup();
-      activeBuilds.delete(taskID);
-      activeBuilds = new Map(activeBuilds);
-    }
+    removeBuild(taskID);
   }
 
   async function refreshBackends() {
@@ -66,10 +48,7 @@
     return parts.slice(0, 2).join("/");
   }
 
-  $effect(() => { refreshBackends(); });
-  onDestroy(() => {
-    activeBuilds.forEach((e) => e.cleanup());
-  });
+  $effect(() => { refreshBackends(); syncTasks(); });
 </script>
 
 <div class="card h-full flex flex-col p-4">
@@ -104,10 +83,10 @@
   </div>
 
   <!-- Active builds -->
-  {#if activeBuilds.size > 0}
+  {#if $activeBuilds.size > 0}
     <div class="mb-4">
       <h3 class="text-sm font-semibold mb-2">Active Builds</h3>
-      {#each [...activeBuilds.entries()] as [id, entry]}
+      {#each [...$activeBuilds.entries()] as [id, entry]}
         <div class="flex items-center gap-3 mb-2 text-sm p-2 border border-border rounded">
           <div class="flex-1 min-w-0">
             <div class="flex justify-between">

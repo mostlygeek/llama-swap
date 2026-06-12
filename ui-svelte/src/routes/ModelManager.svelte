@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
-  import { searchHFModels, listHFFiles, startDownload, cancelDownload, listLocalModels, deleteLocalModel, streamDownloadProgress } from "../lib/mantleApi";
-  import type { HFModel, LocalModel, MantleTask } from "../lib/types";
+  import { searchHFModels, listHFFiles, startDownload, cancelDownload, listLocalModels, deleteLocalModel } from "../lib/mantleApi";
+  import type { HFModel, LocalModel } from "../lib/types";
+  import { activeDownloads, trackDownload, removeDownload, syncTasks } from "../stores/tasks";
 
   let searchQuery = $state("");
   let searchResults = $state<HFModel[]>([]);
@@ -13,8 +13,6 @@
   let selectedModel = $state<HFModel | null>(null);
   let modelFiles = $state<string[]>([]);
   let loadingFiles = $state(false);
-
-  let activeDownloads = $state<Map<string, { task: MantleTask; cleanup: () => void }>>(new Map());
 
   async function doSearch() {
     if (!searchQuery.trim()) return;
@@ -34,28 +32,12 @@
     if (!selectedModel) return;
     const task = await startDownload(selectedModel.id, filename);
     if (!task) return;
-
-    const cleanup = streamDownloadProgress(task.id, (data) => {
-      const existing = activeDownloads.get(task.id);
-      if (existing) {
-        existing.task = { ...existing.task, ...data };
-        activeDownloads.set(task.id, existing);
-        activeDownloads = new Map(activeDownloads);
-      }
-    });
-
-    activeDownloads.set(task.id, { task, cleanup });
-    activeDownloads = new Map(activeDownloads);
+    trackDownload(task);
   }
 
   async function doCancelDownload(taskID: string) {
     await cancelDownload(taskID);
-    const entry = activeDownloads.get(taskID);
-    if (entry) {
-      entry.cleanup();
-      activeDownloads.delete(taskID);
-      activeDownloads = new Map(activeDownloads);
-    }
+    removeDownload(taskID);
   }
 
   async function refreshLocal() {
@@ -77,11 +59,7 @@
     return (bytes / Math.pow(1024, i)).toFixed(1) + " " + units[i];
   }
 
-  // Refresh local models on mount
-  $effect(() => { refreshLocal(); });
-  onDestroy(() => {
-    activeDownloads.forEach((e) => e.cleanup());
-  });
+  $effect(() => { refreshLocal(); syncTasks(); });
 </script>
 
 <div class="card h-full flex flex-col p-4">
@@ -154,10 +132,10 @@
   {/if}
 
   <!-- Active downloads -->
-  {#if activeDownloads.size > 0}
+  {#if $activeDownloads.size > 0}
     <div class="mt-4 border-t border-border pt-3">
       <h4 class="text-sm font-medium mb-2">Downloads</h4>
-      {#each [...activeDownloads.entries()] as [id, entry]}
+      {#each [...$activeDownloads.entries()] as [id, entry]}
         <div class="flex items-center gap-3 mb-2 text-sm">
           <div class="flex-1">
             <div class="flex justify-between">
