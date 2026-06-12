@@ -1,52 +1,33 @@
-# llama-swap config
-# Docs: https://github.com/mostlygeek/llama-swap
-#
-# Models: /models  →  /mnt/storage/lm_storage/models/gguf (host)
-# Backends: /backends → ./backends (host) — put compiled binaries here per fork
-#
-# Built-in binaries (from the unified-cuda image):
-#   llama-server, ik-llama-server, sd-server, whisper-server
-#
-# Custom fork layout example:
-#   ./backends/
-#     llama-cpp-b5000/llama-server   ← stock llama.cpp build
-#     llamafile/llamafile            ← another fork
-#     custom-fork/llama-server       ← your own build
-
-healthCheckTimeout: 60
-healthCheckInterval: 5
+# placeholder example configuration
+healthCheckTimeout: 300
+logRequests: true
 
 models:
-
-  # --- Built-in llama-server (ships with the image) ---
-  my-model:
-    cmd: >-
+  "llama":
+    cmd: >
       llama-server
+      -hf bartowski/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M
       --port ${PORT}
-      --model /models/my-model.gguf
-      -ngl 99
-      -c 4096
-    proxy: http://127.0.0.1:${PORT}
-    ttl: 300
 
-  # --- ik-llama-server (also ships with image, CUDA only) ---
-  my-model-ik:
-    cmd: >-
-      ik-llama-server
+  "whisper":
+    checkEndpoint: /v1/audio/transcriptions/
+    cmd: >
+      whisper-server
       --port ${PORT}
-      --model /models/my-model.gguf
-      -ngl 99
-      -c 4096
-    proxy: http://127.0.0.1:${PORT}
-    ttl: 300
+      --m /models/whisper.bin
+      --flash-attn
+      --request-path /v1/audio/transcriptions --inference-path ""
 
-  # --- Custom fork from ./backends bind-mount ---
-  my-model-custom:
-    cmd: >-
-      /backends/my-fork/llama-server
-      --port ${PORT}
-      --model /models/my-model.gguf
-      -ngl 99
-      -c 4096
-    proxy: http://127.0.0.1:${PORT}
-    ttl: 300
+  "image":
+    checkEndpoint: /
+    cmd: |
+      /app/sd-server
+      --listen-port 9999
+      --diffusion-fa
+      --diffusion-model /models/z_image_turbo-Q8_0.gguf
+      --vae /models/ae.safetensors
+      --llm /models/qwen3-4b-instruct-2507-q8_0.gguf
+      --offload-to-cpu
+      --cfg-scale 1.0
+      --height 512 --width 512
+      --steps 8

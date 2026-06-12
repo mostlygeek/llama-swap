@@ -1,6 +1,11 @@
 services:
   llama-swap:
     image: llama-swap:unified-cuda
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.simplified
+      args:
+        BACKEND: cuda
     runtime: nvidia
     ports:
       - "9292:8080"

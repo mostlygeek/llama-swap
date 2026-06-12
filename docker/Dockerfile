@@ -56,7 +56,7 @@ FROM builder-base-${BACKEND} AS builder-base
 FROM builder-base AS whisper-build
 ARG BACKEND=cuda
 ARG WHISPER_COMMIT_HASH=master
-COPY docker/unified/install-whisper.sh /build/
+COPY docker/install-whisper.sh /build/
 RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
     --mount=type=cache,id=whisper-${BACKEND},target=/src/whisper.cpp/build \
     BACKEND=${BACKEND} bash /build/install-whisper.sh "${WHISPER_COMMIT_HASH}"
@@ -66,7 +66,7 @@ RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
 FROM builder-base AS sd-build
 ARG BACKEND=cuda
 ARG SD_COMMIT_HASH=master
-COPY docker/unified/install-sd.sh /build/
+COPY docker/install-sd.sh /build/
 RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
     --mount=type=cache,id=sd-${BACKEND},target=/src/stable-diffusion.cpp/build \
     BACKEND=${BACKEND} bash /build/install-sd.sh "${SD_COMMIT_HASH}"
@@ -76,7 +76,7 @@ RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
 FROM builder-base AS llama-build
 ARG BACKEND=cuda
 ARG LLAMA_COMMIT_HASH=master
-COPY docker/unified/install-llama.sh /build/
+COPY docker/install-llama.sh /build/
 RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
     --mount=type=cache,id=llama-${BACKEND},target=/src/llama.cpp/build \
     BACKEND=${BACKEND} bash /build/install-llama.sh "${LLAMA_COMMIT_HASH}"
@@ -94,7 +94,7 @@ RUN mkdir -p /install/bin
 
 FROM builder-base-cuda AS ik-llama-cuda
 ARG IK_LLAMA_COMMIT_HASH=main
-COPY docker/unified/install-ik-llama.sh /build/
+COPY docker/install-ik-llama.sh /build/
 RUN --mount=type=cache,id=ccache-cuda,target=/ccache \
     --mount=type=cache,id=ik-llama-cuda,target=/src/ik_llama.cpp/build \
     bash /build/install-ik-llama.sh "${IK_LLAMA_COMMIT_HASH}"
@@ -106,7 +106,7 @@ FROM ik-llama-${BACKEND} AS ik-llama-build
 
 FROM builder-base AS llama-swap-download
 ARG LS_VERSION=latest
-COPY docker/unified/install-llama-swap.sh /build/
+COPY docker/install-llama-swap.sh /build/
 RUN bash /build/install-llama-swap.sh "${LS_VERSION}"
 
 # ── Build llama-swap from local source ────────────────────────────────
@@ -200,7 +200,7 @@ COPY --from=llama-swap-local /install/llama-swap-version /tmp/
 
 RUN ldconfig
 
-COPY docker/unified/config.example.yaml /etc/llama-swap/config/config.yaml
+COPY docker/config.example.yaml /etc/llama-swap/config/config.yaml
 
 # Version tracking
 RUN echo "llama.cpp: ${LLAMA_COMMIT_HASH}" > /versions.txt && \
