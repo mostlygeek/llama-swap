@@ -265,6 +265,8 @@ export interface BackendEntry {
 export interface BuildRequest {
 	repo: string;
 	branch?: string;
+	cmakeFlags?: string;
+	cmakeArgs?: string[];
 }
 
 export interface DownloadRequest {
