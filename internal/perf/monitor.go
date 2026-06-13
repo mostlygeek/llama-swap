@@ -6,13 +6,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/ring"
-	"github.com/mostlygeek/llama-swap/proxy/config"
 )
 
 var (
-	ErrNotImplemented = errors.New("Not Implemented")
+	ErrNotImplemented = errors.New("not implemented")
 	ErrNoGpuTool      = errors.New("no GPU monitoring tool available")
 )
 

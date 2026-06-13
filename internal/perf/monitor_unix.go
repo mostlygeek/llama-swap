@@ -281,51 +281,40 @@ func parseRocmSmiLine(header string, line string) *GpuStat {
 				return nil
 			}
 			result.ID = id
-			break
 		case "Device Name":
 			deviceName = val
-			break
 		case "GUID":
 			result.UUID = val
-			break
 		case "Temperature (Sensor edge) (C)":
 			tempC, _ := strconv.ParseFloat(val, 64)
 			result.TempC = int(tempC)
-			break
 		case "Temperature (Sensor memory) (C)":
 			vramTempC, _ := strconv.ParseFloat(val, 64)
 			result.VramTempC = int(vramTempC)
-			break
 		case "Fan speed (%)":
 			fanSpeed, _ := strconv.ParseFloat(val, 64)
 			result.FanSpeedPct = fanSpeed
-			break
 		case "Current Socket Graphics Package Power (W)":
+			fallthrough
+		case "Average Graphics Package Power (W)":
 			powerDraw, _ := strconv.ParseFloat(val, 64)
 			result.PowerDrawW = powerDraw
-			break
 		case "GPU use (%)":
 			gpuUtil, _ := strconv.ParseFloat(val, 64)
 			result.GpuUtilPct = gpuUtil
-			break
 		case "GPU Memory Allocated (VRAM%)":
 			memUtil, _ := strconv.ParseFloat(val, 64)
 			result.MemUtilPct = memUtil
-			break
 		case "VRAM Total Memory (B)":
 			memTotal, _ := strconv.ParseUint(val, 10, 64)
 			result.MemTotalMB = int(memTotal / toMB)
-			break
 		case "VRAM Total Used Memory (B)":
 			memUsed, _ := strconv.ParseUint(val, 10, 64)
 			result.MemUsedMB = int(memUsed / toMB)
-			break
 		case "Card Series":
 			cardSeries = val
-			break
 		case "GFX Version":
 			gfxVersion = val
-			break
 		}
 	}
 

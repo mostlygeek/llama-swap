@@ -22,7 +22,7 @@ export default defineConfig({
   ],
   base: "/ui/",
   build: {
-    outDir: "../proxy/ui_dist",
+    outDir: "../internal/server/ui_dist",
     assetsDir: "assets",
   },
   server: {

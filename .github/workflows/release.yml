@@ -32,11 +32,9 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # 6.4.0
         with:
           node-version: "24"
-      - name: Install dependencies and build UI
+      - name: Build UI
         run: |
-          cd ui-svelte
-          npm ci
-          npm run build
+          make ui
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@1a80836c5c9d9e5755a25cb59ec6f45a3b5f41a8 #7.2.1

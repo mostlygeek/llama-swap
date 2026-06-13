@@ -343,93 +343,6 @@ models:
     # - processes have 5 seconds to shutdown until forceful termination is attempted
     cmdStop: docker stop ${MODEL_ID}
 
-# =============================================================================
-# matrix: run concurrent models with a solver-based swap DSL
-# =============================================================================
-#
-# Matrix or Groups?
-#
-# Groups are available and fully supported. The syntax may be easier to use
-# for simple use cases.
-#
-# Documentation can be found here:
-# https://github.com/mostlygeek/llama-swap/blob/40e39f7/config.example.yaml#L334-L396
-#
-# A config can only use a matrix (recommended) or groups. A configuration error
-# will occur if both are defined. Groups is legacy but is fully supported with
-# no plans to deprecate it.
-#
-# ~~~~~
-#
-# The matrix declares valid combinations of models that can run concurrently.
-# When a model is requested, the solver finds the cheapest way to make it
-# available by evicting as few (and least costly) running models as possible.
-#
-# Solver behavior:
-#   1. Request arrives for model X
-#   2. If X is already running, forward immediately. Done.
-#   3. Find all sets containing X
-#   4. For each candidate set, compute cost: sum of evict_costs for
-#      every running model NOT in that set
-#   5. Pick lowest cost candidate. Ties broken by definition order.
-#   6. Evict what needs to stop. Start X. Forward request.
-#
-# Subset semantics: a set [a, b, c] means any subset is valid.
-# Only the requested model is started — others are not preloaded.
-#
-# A model not appearing in any set can only run alone.
-#
-matrix:
-  # vars: short names for models (alphanumeric, 1-8 chars)
-  # - required for sets and evict_costs settings
-  # - each entry is a short name to a real model ID. Do not use an alias
-  # - used to keep set DSL logic short and easier to read
-  # - sets and evict_costs only use identifiers defined in vars
-  vars:
-    g: gemma-model
-    q: qwen-model
-    m: mistral-model
-    v: voxtral-model
-    e: reranker-model
-    L: llama-70B
-    sd: stable-diffusion
-
-  # evict_costs: relative cost of losing a running model (default: 1)
-  evict_costs:
-    v: 50 # vllm backend, slow cold start
-    L: 30 # 70B weights, slow to load
-
-  # sets: named sets of concurrent model combinations
-  # Values are DSL strings with operators:
-  #   &     AND (models run together)
-  #   |     OR  (alternatives)
-  #   ()    grouping
-  #   +ref  inline another set's expression
-  #
-  # Expansion examples:
-  #   "L"                  → [L]
-  #   "a & b"              → [a, b]
-  #   "a | b"              → [a], [b]
-  #   "(a | b) & c"        → [a, c], [b, c]
-  #   "(a | b) & (c | d)"  → [a,c], [a,d], [b,c], [b,d]
-  #   "+llms & v"          → expands llms inline, then applies & v
-  sets:
-    # LLM + TTS: switching between g/q/m won't evict v
-    # expands to: [g,v], [q,v], [m,v]
-    standard: "(g | q | m) & v"
-
-    # LLM + TTS + reranker
-    # expands to: [g,v,e], [q,v,e]
-    with_rerank: "(g | q) & v & e"
-
-    # LLM + image generation, no TTS
-    # expands to: [g,sd], [q,sd]
-    creative: "(g | q) & sd"
-
-    # 70B model uses all GPUs, can only run alone
-    # expands to: [L]
-    full: "L"
-
 # hooks: a dictionary of event triggers and actions
 # - optional, default: empty dictionary
 # - the only supported hook is on_startup
@@ -445,6 +358,176 @@ hooks:
     #   otherwise models will be loaded and swapped out
     preload:
       - "llama"
+
+# routing:
+# Controls how llama-swap decides which models can run at the same time and
+# which get swapped out. Choose one of two swap engines:
+#
+# - group:  the default engine. Simpler to configure. You define groups of
+#           models that run together, and loading one group typically unloads
+#           the others.
+#
+# - matrix: the newer engine. More involved to configure, but far more
+#           flexible. It uses a small expression language to describe which
+#           model combinations are allowed to run concurrently, enabling
+#           setups that groups cannot express.
+#
+# The routing section is optional.
+routing:
+  router:
+    # use: a string defining which engine to use
+    # - optional, default: "group"
+    # - valid values: group, matrix
+    use: group
+
+    # settings: a dictionary of settings for the specific engines
+    settings:
+      # groups: a dictionary of named groups
+      # - optional, default: empty dictionary
+      # - lets you keep some models loaded while others swap out
+      # - every member must be a model ID defined in the models section
+      # - a model can belong to only one group
+      # - behaviour is set per group with the `swap`, `exclusive` and
+      #   `persistent` fields
+      # - see issue #109 for details
+      #
+      # NOTE: the model names below are illustrative and are not defined above.
+      groups:
+        # group1 reproduces llama-swap's default behaviour: only one model
+        # runs at a time across the entire instance.
+        "group1":
+          # swap: how members of this group swap among themselves
+          # - optional, default: true
+          # - true:  only one member runs at a time
+          # - false: all members can run together, no swapping
+          swap: true
+
+          # exclusive: how this group affects other groups
+          # - optional, default: true
+          # - true:  running a member unloads every other group
+          # - false: running a member leaves other groups untouched
+          exclusive: true
+
+          # members: the model IDs in this group
+          # required
+          members:
+            - "llama"
+            - "qwen-unlisted"
+
+        # group2: members all run together, but loading any other group
+        # unloads them.
+        "group2":
+          # swap: false lets all members stay loaded at once
+          swap: false
+
+          # exclusive: false means requesting a member loads it without
+          # unloading any other group
+          exclusive: false
+          members:
+            - "docker-llama"
+            - "modelA"
+            - "modelB"
+
+        # forever: a persistent group that other groups can never unload.
+        "forever":
+          # persistent: other groups cannot unload this group's members
+          # - optional, default: false
+          # - has no effect on swapping within the group
+          persistent: true
+
+          # swap/exclusive: false keeps all members loaded and avoids
+          # unloading other groups
+          swap: false
+          exclusive: false
+          members:
+            - "forever-modelA"
+            - "forever-modelB"
+            - "forever-modelc"
+
+      # The matrix lists the model combinations that are allowed to run
+      # concurrently. When a model is requested, the solver makes room for it
+      # by evicting as few running models as possible, preferring to keep the
+      # costliest ones loaded.
+      #
+      # Solver behaviour:
+      #   1. A request arrives for model X.
+      #   2. If X is already running, forward the request. Done.
+      #   3. Collect every set that contains X.
+      #   4. For each set, add up the evict_costs of the running models that
+      #      are NOT in that set — that is the set's cost.
+      #   5. Choose the lowest-cost set. Break ties by definition order.
+      #   6. Evict the models outside that set, start X, forward the request.
+      #
+      # Subset semantics: a set [a, b, c] also permits any subset of itself.
+      # Only the requested model is started; the others are not preloaded.
+      #
+      # A model that appears in no set can only run on its own.
+      #
+      matrix:
+        # vars: short aliases for model IDs (alphanumeric, 1-8 chars)
+        # - required: sets and evict_costs reference these names, not model IDs
+        # - map each short name to a real model ID (not a model alias)
+        # - keeps the set expressions short and readable
+        vars:
+          g: gemma-model
+          q: qwen-model
+          m: mistral-model
+          v: voxtral-model
+          e: reranker-model
+          L: llama-70B
+          sd: stable-diffusion
+
+        # evict_costs: relative cost of losing a running model (default: 1)
+        evict_costs:
+          v: 50 # vllm backend, slow cold start
+          L: 30 # 70B weights, slow to load
+
+        # sets: named combinations of models that may run together.
+        # Each value is an expression built from these operators:
+        #   &     AND   (models run together)
+        #   |     OR    (alternatives)
+        #   ()    grouping
+        #   +ref  inline the expression of another set
+        #
+        # Each expression expands into one or more concrete sets:
+        #   "L"                  → [L]
+        #   "a & b"              → [a, b]
+        #   "a | b"              → [a], [b]
+        #   "(a | b) & c"        → [a, c], [b, c]
+        #   "(a | b) & (c | d)"  → [a,c], [a,d], [b,c], [b,d]
+        #   "+llms & v"          → inline the llms set, then AND with v
+        sets:
+          # An LLM plus TTS. Switching between g/q/m keeps v loaded.
+          # expands to: [g,v], [q,v], [m,v]
+          standard: "(g | q | m) & v"
+
+          # An LLM plus TTS plus reranker.
+          # expands to: [g,v,e], [q,v,e]
+          with_rerank: "(g | q) & v & e"
+
+          # An LLM plus image generation, no TTS.
+          # expands to: [g,sd], [q,sd]
+          creative: "(g | q) & sd"
+
+          # The 70B model uses every GPU, so it can only run alone.
+          # expands to: [L]
+          full: "L"
+
+  # scheduler: how queued requests are ordered.
+  # The default and only valid scheduler is "fifo"
+  scheduler:
+    use: fifo
+    settings:
+      fifo:
+        # priority: a dictionary of model ID -> priority
+        # - optional, default: empty dictionary
+        # - models default to priority 0
+        # - higher priority requests are serviced first in the queue
+        priority:
+          A: 10
+          B: 5
+          C: 5
+          D: 1
 
 # peers: a dictionary of remote peers and models they provide
 # - optional, default empty dictionary

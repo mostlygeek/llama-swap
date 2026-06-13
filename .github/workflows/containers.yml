@@ -2,10 +2,10 @@ name: Build Containers
 
 on:
   # time has no specific meaning, trying to time it after
-  # the llama.cpp daily packages are published
+  # the llama.cpp daily packages have time to build and publish (~8hr after llama.cpp project's cron)
   # https://github.com/ggml-org/llama.cpp/blob/master/.github/workflows/docker.yml
   schedule:
-    - cron: "37 5 * * *"
+    - cron: "00 12,18 * * *"
 
   # Allows manual triggering of the workflow
   workflow_dispatch:
