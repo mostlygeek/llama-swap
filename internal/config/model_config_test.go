@@ -152,7 +152,7 @@ models:
         stop:
           - "<|end|>"
           - "<|stop|>"
-`
+ `
 	config, err := LoadConfigFromReader(strings.NewReader(content))
 	assert.NoError(t, err)
 
@@ -169,4 +169,137 @@ models:
 	assert.Equal(t, []string{"stop", "temperature", "top_p"}, keys)
 	assert.Equal(t, 0.7, setParams["temperature"])
 	assert.Equal(t, 0.9, setParams["top_p"])
+}
+
+func TestConfig_ModelCapabilities(t *testing.T) {
+	t.Run("all fields", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    capabilities:
+      in:
+        - text
+        - audio
+        - image
+      out:
+        - text
+        - audio
+        - image
+      tools: true
+      context: 32000
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+
+		mc := config.Models["model1"]
+		assert.False(t, mc.Capabilities.Empty())
+		assert.Equal(t, []string{"text", "audio", "image"}, mc.Capabilities.In)
+		assert.Equal(t, []string{"text", "audio", "image"}, mc.Capabilities.Out)
+		assert.True(t, mc.Capabilities.Tools)
+		assert.Equal(t, 32000, mc.Capabilities.Context)
+	})
+
+	t.Run("partial fields", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    capabilities:
+      tools: true
+      context: 8192
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+
+		mc := config.Models["model1"]
+		assert.False(t, mc.Capabilities.Empty())
+		assert.Nil(t, mc.Capabilities.In)
+		assert.Nil(t, mc.Capabilities.Out)
+		assert.True(t, mc.Capabilities.Tools)
+		assert.Equal(t, 8192, mc.Capabilities.Context)
+	})
+
+	t.Run("not set", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+
+		mc := config.Models["model1"]
+		assert.True(t, mc.Capabilities.Empty())
+	})
+
+	t.Run("tools false is empty", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    capabilities:
+      tools: false
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+
+		mc := config.Models["model1"]
+		assert.True(t, mc.Capabilities.Empty())
+	})
+}
+
+func TestConfig_ModelCapabilities_Validate(t *testing.T) {
+	t.Run("valid_modalities", func(t *testing.T) {
+		caps := ModelCapConfig{
+			In:      []string{"text", "image"},
+			Out:     []string{"text", "audio"},
+			Tools:   true,
+			Context: 100000,
+		}
+		assert.NoError(t, caps.Validate())
+	})
+
+	t.Run("empty_is_valid", func(t *testing.T) {
+		caps := ModelCapConfig{}
+		assert.NoError(t, caps.Validate())
+	})
+
+	t.Run("invalid_in_modality", func(t *testing.T) {
+		caps := ModelCapConfig{In: []string{"video"}}
+		err := caps.Validate()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "capabilities.in")
+		assert.Contains(t, err.Error(), "video")
+	})
+
+	t.Run("invalid_out_modality", func(t *testing.T) {
+		caps := ModelCapConfig{Out: []string{"video"}}
+		err := caps.Validate()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "capabilities.out")
+		assert.Contains(t, err.Error(), "video")
+	})
+
+	t.Run("negative_context", func(t *testing.T) {
+		caps := ModelCapConfig{Context: -1}
+		err := caps.Validate()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "capabilities.context")
+	})
+
+	t.Run("rejects_invalid_at_load", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    capabilities:
+      in:
+        - text
+        - video
+`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "video")
+	})
 }

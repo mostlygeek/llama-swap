@@ -2,12 +2,53 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"runtime"
 )
 
 const (
 	MODEL_CONFIG_DEFAULT_TTL = -1
 )
+
+var validModalities = map[string]struct{}{
+	"text":  {},
+	"audio": {},
+	"image": {},
+}
+
+// ModelCapConfig defines what modalities and features a model supports.
+// Used in /v1/models to inform clients. An empty block (all zero values) is
+// treated as not configured.
+type ModelCapConfig struct {
+	In      []string `yaml:"in"`
+	Out     []string `yaml:"out"`
+	Tools   bool     `yaml:"tools"`
+	Context int      `yaml:"context"`
+}
+
+// Empty returns true when all fields are at their zero values.
+func (c ModelCapConfig) Empty() bool {
+	return len(c.In) == 0 && len(c.Out) == 0 && !c.Tools && c.Context == 0
+}
+
+// Validate checks that all modality values are recognized and context is
+// non-negative. Returns an error if any value is invalid.
+func (c ModelCapConfig) Validate() error {
+	for _, m := range c.In {
+		if _, ok := validModalities[m]; !ok {
+			return fmt.Errorf("capabilities.in: invalid modality %q, must be one of: text, audio, image", m)
+		}
+	}
+	for _, m := range c.Out {
+		if _, ok := validModalities[m]; !ok {
+			return fmt.Errorf("capabilities.out: invalid modality %q, must be one of: text, audio, image", m)
+		}
+	}
+	if c.Context < 0 {
+		return errors.New("capabilities.context: must be >= 0")
+	}
+	return nil
+}
 
 // TimeoutsConfig holds timeout settings for proxy connections
 // 0 = no timeout
@@ -54,6 +95,9 @@ type ModelConfig struct {
 
 	// Timeout settings for proxy connections
 	Timeouts TimeoutsConfig `yaml:"timeouts"`
+
+	// Capabilities defines what modalities and features the model supports.
+	Capabilities ModelCapConfig `yaml:"capabilities"`
 
 	// Copy of HealthCheckTimeout from global config
 	HealthCheckTimeout int `yaml:"healthCheckTimeout"`
