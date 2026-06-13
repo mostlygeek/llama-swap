@@ -20,6 +20,7 @@ export interface ModelEstimate {
   nLayers: number;
   cacheTypeK: string;
   cacheTypeV: string;
+  slidingWindow: number;
 }
 
 export interface TokenMetrics {
@@ -262,10 +263,18 @@ export interface HFModel {
 	gguf: boolean;
 }
 
+export interface HFFile {
+	path: string;
+	size: number;
+}
+
+export type LocalModelKind = "gguf" | "safetensors" | "whisper" | "repo";
+
 export interface LocalModel {
 	name: string;
 	path: string;
 	size: number;
+	kind: LocalModelKind;
 }
 
 export interface BackendEntry {

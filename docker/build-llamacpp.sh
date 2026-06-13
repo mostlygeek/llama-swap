@@ -134,12 +134,20 @@ cmake -B build -G Ninja "${cmake_flags[@]}" "${extra_cmake_args[@]}"
 echo "=== Building llama-server ==="
 cmake --build build --config Release -j"${MAX_BUILD_JOBS:-4}" --target llama-server
 
-for target in llama-cli llama-diffusion-cli; do
+optional_targets=(
+  llama-cli
+  llama-diffusion-cli
+  llama-diffusion-server
+  llama-diffusion-gemma-cli
+  llama-diffusion-gemma-server
+)
+
+for target in "${optional_targets[@]}"; do
   echo "=== Building optional target ${target} ==="
   cmake --build build --config Release -j"${MAX_BUILD_JOBS:-4}" --target "$target" || true
 done
 
-for bin in llama-server llama-cli llama-diffusion-cli; do
+for bin in llama-server "${optional_targets[@]}"; do
   if [[ -f "build/bin/${bin}" ]]; then
     cp "build/bin/${bin}" "$dest/"
     chmod +x "$dest/${bin}"

@@ -83,6 +83,63 @@ func TestEstimateModel_KVCacheFormula(t *testing.T) {
 	}
 }
 
+// makeTestGGUFSWA writes a minimal gemma3-style GGUF with sliding-window
+// attention metadata.
+func makeTestGGUFSWA(t *testing.T, path string) {
+	t.Helper()
+
+	var meta bytes.Buffer
+	writeGGUFKVString(&meta, "general.architecture", "gemma3")
+	writeGGUFKVUint32(&meta, "gemma3.block_count", 12)
+	writeGGUFKVUint32(&meta, "gemma3.embedding_length", 64)
+	writeGGUFKVUint32(&meta, "gemma3.attention.head_count", 8)
+	writeGGUFKVUint32(&meta, "gemma3.attention.head_count_kv", 2)
+	writeGGUFKVUint32(&meta, "gemma3.attention.sliding_window", 1024)
+
+	var buf bytes.Buffer
+	binary.Write(&buf, binary.LittleEndian, ggufMagic)
+	binary.Write(&buf, binary.LittleEndian, uint32(3)) // version
+	binary.Write(&buf, binary.LittleEndian, uint64(0)) // tensor_count
+	binary.Write(&buf, binary.LittleEndian, uint64(6)) // metadata_kv_count
+	buf.Write(meta.Bytes())
+
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatalf("write gguf: %v", err)
+	}
+}
+
+func TestEstimateModel_SlidingWindow(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "model.gguf")
+	makeTestGGUFSWA(t, path)
+
+	// head_dim = embedding_length(64) / head_count(8) = 8
+	// n_embd_k_gqa = n_embd_v_gqa = head_dim(8) * head_count_kv(2) = 16
+	// f16 cache: perLayerPerToken = 16*2 + 16*2 = 64 bytes
+	// pattern 6 over 12 layers: global = 12/6 = 2, swa = 10
+	// ctx 8192, window 1024 -> cacheTokens = 2*8192 + 10*1024 = 26624
+	// kv = 26624 * 64 = 1703936
+	cmd := "llama-server -m " + path + " -c 8192"
+	est, err := EstimateModel(cmd, dir)
+	if err != nil {
+		t.Fatalf("EstimateModel: %v", err)
+	}
+
+	if est.SlidingWindow != 1024 {
+		t.Errorf("SlidingWindow = %d, want 1024", est.SlidingWindow)
+	}
+	const wantKV = 1703936
+	if est.KVCacheBytes != wantKV {
+		t.Errorf("KVCacheBytes = %d, want %d", est.KVCacheBytes, wantKV)
+	}
+
+	// Without SWA handling the naive formula would be 12*8192*64 = 6291456,
+	// so the windowed estimate must be substantially smaller.
+	if est.KVCacheBytes >= 12*8192*64 {
+		t.Errorf("KVCacheBytes = %d not reduced by sliding window", est.KVCacheBytes)
+	}
+}
+
 func TestEstimateModel_DefaultCtxAndCacheType(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "model.gguf")

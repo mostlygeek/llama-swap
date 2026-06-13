@@ -15,13 +15,32 @@ import (
 // ModelEstimate holds memory-size estimates derived from a model's GGUF
 // metadata and its launch command.
 type ModelEstimate struct {
-	WeightsBytes int64  `json:"weightsBytes"`
-	KVCacheBytes int64  `json:"kvCacheBytes"`
-	TotalBytes   int64  `json:"totalBytes"`
-	NCtx         int    `json:"nCtx"`
-	NLayers      int    `json:"nLayers"`
-	CacheTypeK   string `json:"cacheTypeK"`
-	CacheTypeV   string `json:"cacheTypeV"`
+	WeightsBytes  int64  `json:"weightsBytes"`
+	KVCacheBytes  int64  `json:"kvCacheBytes"`
+	TotalBytes    int64  `json:"totalBytes"`
+	NCtx          int    `json:"nCtx"`
+	NLayers       int    `json:"nLayers"`
+	CacheTypeK    string `json:"cacheTypeK"`
+	CacheTypeV    string `json:"cacheTypeV"`
+	SlidingWindow int    `json:"slidingWindow"` // 0 when the model uses full attention
+}
+
+// swaPattern returns the period of the sliding-window-attention layer pattern
+// for architectures known to interleave local (windowed) and global (full)
+// attention layers. A return of N means 1 in every N layers uses full
+// attention; the remaining N-1 only cache a sliding window. A return of 0 means
+// the architecture uses full attention on every layer.
+func swaPattern(arch string) int {
+	switch strings.ToLower(arch) {
+	case "gemma2":
+		return 2 // alternating local / global
+	case "gemma3", "gemma3n", "gemma3_text":
+		return 6 // 5 local : 1 global
+	case "cohere2":
+		return 4 // 3 local : 1 global
+	default:
+		return 0
+	}
 }
 
 // bytesPerElement maps a GGUF/llama.cpp KV cache type to its average storage
@@ -227,13 +246,34 @@ func EstimateModel(cmd, modelsDir string) (*ModelEstimate, error) {
 	bytesK := bytesPerElement(params.cacheTypeK)
 	bytesV := bytesPerElement(params.cacheTypeV)
 
-	kvBytes := float64(nLayers) * float64(params.nCtx) *
-		(float64(nEmbdKGqa)*bytesK + float64(nEmbdVGqa)*bytesV)
+	perLayerPerToken := float64(nEmbdKGqa)*bytesK + float64(nEmbdVGqa)*bytesV
+
+	// Account for sliding-window attention. Models like Gemma 2/3 only cache a
+	// fixed-size window on most layers, so the naive n_layers*n_ctx formula
+	// massively overestimates their KV cache. This mirrors llama.cpp's default
+	// allocation (windowed unless --swa-full is passed).
+	slidingWindow, hasSWA := meta.uint(arch + ".attention.sliding_window")
+	pattern := swaPattern(arch)
+
+	var cacheTokens float64
+	if hasSWA && slidingWindow > 0 && pattern > 0 {
+		globalLayers := nLayers / uint64(pattern)
+		swaLayers := nLayers - globalLayers
+		effCtxSWA := uint64(params.nCtx)
+		if slidingWindow < effCtxSWA {
+			effCtxSWA = slidingWindow
+		}
+		cacheTokens = float64(globalLayers*uint64(params.nCtx) + swaLayers*effCtxSWA)
+	} else {
+		cacheTokens = float64(nLayers) * float64(params.nCtx)
+	}
+
+	kvBytes := cacheTokens * perLayerPerToken
 
 	weights := weightsBytes(path)
 	kv := int64(kvBytes)
 
-	return &ModelEstimate{
+	est := &ModelEstimate{
 		WeightsBytes: weights,
 		KVCacheBytes: kv,
 		TotalBytes:   weights + kv,
@@ -241,5 +281,9 @@ func EstimateModel(cmd, modelsDir string) (*ModelEstimate, error) {
 		NLayers:      int(nLayers),
 		CacheTypeK:   params.cacheTypeK,
 		CacheTypeV:   params.cacheTypeV,
-	}, nil
+	}
+	if hasSWA && pattern > 0 {
+		est.SlidingWindow = int(slidingWindow)
+	}
+	return est, nil
 }

@@ -1,18 +1,21 @@
 <script lang="ts">
   import {
-    searchHFModels, listHFFiles, startDownload, cancelDownload,
+    searchHFModels, listHFFiles, startDownload, startRepoDownload, cancelDownload,
     listLocalModels, deleteLocalModel, listBackends, getConfig, putConfig,
-    type HFSort
+    type HFSort, type HFKind
   } from "../lib/mantleApi";
-  import type { HFModel, LocalModel, BackendEntry } from "../lib/types";
+  import type { HFModel, HFFile, LocalModel, LocalModelKind, BackendEntry } from "../lib/types";
   import { activeDownloads, trackDownload, removeDownload, retryDownload, syncTasks } from "../stores/tasks";
+
+  type ConfigType = "text" | "image" | "transcription" | "tts";
 
   let searchQuery   = $state("");
   let searchResults = $state<HFModel[]>([]);
   let searching     = $state(false);
   let sortBy        = $state<HFSort>("downloads");
+  let kind          = $state<HFKind>("text");
   let selectedModel = $state<HFModel | null>(null);
-  let modelFiles    = $state<string[]>([]);
+  let modelFiles    = $state<HFFile[]>([]);
   let loadingFiles  = $state(false);
 
   let localModels    = $state<LocalModel[]>([]);
@@ -24,10 +27,13 @@
   // per-model add-to-config form; key = model path
   let addConfigFor   = $state<string | null>(null);
   let formModelId    = $state("");
+  let formModelPath  = $state("");
+  let formType       = $state<ConfigType>("text");
   let formBackend    = $state("llama-server");
   let formGpuLayers  = $state(99);
   let formMmproj     = $state("");
   let formTtl        = $state(300);
+  let formYaml       = $state("");
   let savingConfig   = $state(false);
 
   // ── helpers ──────────────────────────────────────────────────────────────
@@ -40,21 +46,64 @@
   }
 
   function suggestModelId(path: string): string {
-    const file = path.split("/").pop() ?? path;
-    return file.replace(/\.gguf$/i, "").toLowerCase().replace(/[_\s]+/g, "-");
+    const file = path.replace(/\/+$/, "").split("/").pop() ?? path;
+    return file.replace(/\.(gguf|safetensors|bin)$/i, "").toLowerCase().replace(/[_\s]+/g, "-");
   }
 
-  function generateYaml(modelPath: string): string {
+  // Default config template type for a downloaded local model.
+  function defaultType(k: LocalModelKind): ConfigType {
+    switch (k) {
+      case "whisper": return "transcription";
+      case "safetensors": return "image";
+      default: return "text"; // gguf | repo
+    }
+  }
+
+  // Per-type launch command, modeled on docker/config.example.yaml. The result
+  // is shown in an editable textarea so the user can tweak it before saving.
+  function generateYaml(): string {
+    const id = formModelId;
+    const path = formModelPath;
+    const proxy = `    proxy: http://127.0.0.1:\${PORT}\n`;
+    const ttl = `    ttl: ${formTtl}\n`;
+
+    if (formType === "image") {
+      return (
+        `\n  ${id}:\n` +
+        `    checkEndpoint: /\n` +
+        `    cmd: >-\n` +
+        `      sd-server --listen-port \${PORT}\n` +
+        `      --diffusion-model ${path}\n` +
+        `      --diffusion-fa\n` +
+        proxy + ttl
+      );
+    }
+    if (formType === "transcription") {
+      return (
+        `\n  ${id}:\n` +
+        `    checkEndpoint: /v1/audio/transcriptions/\n` +
+        `    cmd: >-\n` +
+        `      whisper-server --port \${PORT}\n` +
+        `      -m ${path}\n` +
+        `      --flash-attn\n` +
+        `      --request-path /v1/audio/transcriptions --inference-path ""\n` +
+        proxy + ttl
+      );
+    }
+    // text + tts share the llama-server shape
     const mmline = formMmproj.trim() ? `\n      --mmproj ${formMmproj.trim()}` : "";
     return (
-      `\n  ${formModelId}:\n` +
+      `\n  ${id}:\n` +
       `    cmd: >-\n` +
       `      ${formBackend} --port \${PORT}\n` +
-      `      -m ${modelPath}${mmline}\n` +
+      `      -m ${path}${mmline}\n` +
       `      -ngl ${formGpuLayers}\n` +
-      `    proxy: http://127.0.0.1:\${PORT}\n` +
-      `    ttl: ${formTtl}\n`
+      proxy + ttl
     );
+  }
+
+  function regenerateYaml() {
+    formYaml = generateYaml();
   }
 
   // ── HF browse ────────────────────────────────────────────────────────────
@@ -62,12 +111,17 @@
   async function doSearch() {
     if (!searchQuery.trim()) return;
     searching = true;
-    searchResults = await searchHFModels(searchQuery.trim(), 20, sortBy);
+    searchResults = await searchHFModels(searchQuery.trim(), 20, sortBy, kind);
     searching = false;
   }
 
   function changeSort(value: HFSort) {
     sortBy = value;
+    if (searchQuery.trim()) doSearch();
+  }
+
+  function changeKind(value: HFKind) {
+    kind = value;
     if (searchQuery.trim()) doSearch();
   }
 
@@ -83,6 +137,13 @@
     const task = await startDownload(selectedModel.id, filename);
     if (!task) return;
     trackDownload(task, filename);
+  }
+
+  async function doRepoDownload() {
+    if (!selectedModel) return;
+    const task = await startRepoDownload(selectedModel.id);
+    if (!task) return;
+    trackDownload(task);
   }
 
   async function doCancelDownload(taskID: string) {
@@ -104,18 +165,26 @@
   function openAddConfig(model: LocalModel) {
     addConfigFor  = model.path;
     formModelId   = suggestModelId(model.path);
+    formModelPath = model.path;
+    formType      = defaultType(model.kind);
     formBackend   = "llama-server";
     formGpuLayers = 99;
     formMmproj    = "";
     formTtl       = 300;
+    regenerateYaml();
   }
 
-  async function doAddToConfig(model: LocalModel) {
-    if (!formModelId.trim()) return;
+  function changeType(t: ConfigType) {
+    formType = t;
+    regenerateYaml();
+  }
+
+  async function doAddToConfig() {
+    if (!formModelId.trim() || !formYaml.trim()) return;
     savingConfig = true;
     const current = await getConfig();
     if (current !== null) {
-      await putConfig(current + generateYaml(model.path));
+      await putConfig(current + formYaml);
     }
     savingConfig = false;
     addConfigFor = null;
@@ -187,6 +256,17 @@
     />
     <select
       class="input px-2 py-2 border rounded bg-surface text-sm"
+      value={kind}
+      onchange={(e) => changeKind(e.currentTarget.value as HFKind)}
+      title="Model type"
+    >
+      <option value="text">Text / LLM</option>
+      <option value="image">Image</option>
+      <option value="transcription">Transcription</option>
+      <option value="tts">Text-to-speech</option>
+    </select>
+    <select
+      class="input px-2 py-2 border rounded bg-surface text-sm"
       value={sortBy}
       onchange={(e) => changeSort(e.currentTarget.value as HFSort)}
       title="Sort results"
@@ -212,7 +292,7 @@
         >
           <div>
             <span class="font-medium text-sm">{model.id}</span>
-            {#if !model.gguf}
+            {#if kind === "text" && !model.gguf}
               <span class="text-xs ml-2 px-1.5 py-0.5 rounded bg-yellow-100 dark:bg-yellow-900">no GGUF</span>
             {/if}
           </div>
@@ -225,20 +305,30 @@
     </div>
   {:else}
     <div class="flex-1 overflow-y-auto min-h-0">
-      <button class="btn text-sm mb-3" onclick={() => { selectedModel = null; modelFiles = []; }}>← Back</button>
+      <div class="flex items-center justify-between mb-3 gap-2">
+        <button class="btn text-sm" onclick={() => { selectedModel = null; modelFiles = []; }}>← Back</button>
+        {#if modelFiles.length > 0}
+          <button class="btn btn--sm shrink-0" onclick={doRepoDownload} title="Download every file in this repo into one folder">
+            Download all ({formatSize(modelFiles.reduce((s, f) => s + f.size, 0))})
+          </button>
+        {/if}
+      </div>
       <h3 class="font-semibold mb-2">{selectedModel.id}</h3>
       {#if loadingFiles}
         <p class="text-txtsecondary text-sm">Loading files…</p>
       {:else}
-        <p class="text-xs text-txtsecondary mb-2">GGUF files</p>
+        <p class="text-xs text-txtsecondary mb-2">Files</p>
         {#each modelFiles as file}
-          <div class="flex items-center justify-between p-2 border-b border-border">
-            <span class="text-sm truncate mr-2">{file}</span>
-            <button class="btn btn--sm shrink-0" onclick={() => doDownload(file)}>Download</button>
+          <div class="flex items-center justify-between p-2 border-b border-border gap-2">
+            <span class="text-sm truncate mr-2">{file.path}</span>
+            <div class="flex items-center gap-2 shrink-0">
+              <span class="text-xs text-txtsecondary">{formatSize(file.size)}</span>
+              <button class="btn btn--sm" onclick={() => doDownload(file.path)}>Download</button>
+            </div>
           </div>
         {/each}
         {#if modelFiles.length === 0}
-          <p class="text-txtsecondary text-sm">No GGUF files found</p>
+          <p class="text-txtsecondary text-sm">No files found</p>
         {/if}
       {/if}
     </div>
@@ -298,7 +388,12 @@
           {#each localModels as model (model.path)}
             <div class="border border-border rounded p-2 text-sm">
               <div class="flex items-center justify-between gap-2">
-                <span class="truncate font-medium text-xs">{model.name}</span>
+                <span class="truncate font-medium text-xs flex items-center gap-1">
+                  {#if model.kind && model.kind !== "gguf"}
+                    <span class="px-1 py-0.5 rounded bg-blue-100 dark:bg-blue-900 text-[10px] uppercase shrink-0">{model.kind}</span>
+                  {/if}
+                  <span class="truncate">{model.name}</span>
+                </span>
                 <div class="flex items-center gap-1 shrink-0">
                   <span class="text-txtsecondary text-xs">{formatSize(model.size)}</span>
                   <button
@@ -315,37 +410,55 @@
                 <div class="mt-2 pt-2 border-t border-border flex flex-col gap-1.5 text-xs">
                   <div class="flex gap-2 items-center">
                     <label class="w-20 text-txtsecondary">Model ID</label>
-                    <input class="input flex-1 px-2 py-1 border rounded bg-surface text-xs" bind:value={formModelId} />
+                    <input class="input flex-1 px-2 py-1 border rounded bg-surface text-xs" bind:value={formModelId} onblur={regenerateYaml} />
                   </div>
                   <div class="flex gap-2 items-center">
-                    <label class="w-20 text-txtsecondary">Backend</label>
-                    <select class="input flex-1 px-2 py-1 border rounded bg-surface text-xs" bind:value={formBackend}>
-                      <option value="llama-server">llama-server (default)</option>
-                      <option value="ik-llama-server">ik-llama-server (bundled)</option>
-                      {#each backends as be}
-                        <option value={be.path}>{be.name}</option>
-                      {/each}
+                    <label class="w-20 text-txtsecondary">Type</label>
+                    <select class="input flex-1 px-2 py-1 border rounded bg-surface text-xs" value={formType} onchange={(e) => changeType(e.currentTarget.value as ConfigType)}>
+                      <option value="text">Text / LLM (llama-server)</option>
+                      <option value="image">Image (sd-server)</option>
+                      <option value="transcription">Transcription (whisper-server)</option>
+                      <option value="tts">Text-to-speech (llama-server)</option>
                     </select>
                   </div>
-                  <div class="flex gap-2 items-center">
-                    <label class="w-20 text-txtsecondary">GPU Layers</label>
-                    <input class="input w-16 px-2 py-1 border rounded bg-surface text-xs" type="number" bind:value={formGpuLayers} />
-                  </div>
-                  <div class="flex gap-2 items-center">
-                    <label class="w-20 text-txtsecondary">MMProj</label>
-                    <input class="input flex-1 px-2 py-1 border rounded bg-surface text-xs" placeholder="optional path" bind:value={formMmproj} />
-                  </div>
+                  {#if formType === "text" || formType === "tts"}
+                    <div class="flex gap-2 items-center">
+                      <label class="w-20 text-txtsecondary">Backend</label>
+                      <select class="input flex-1 px-2 py-1 border rounded bg-surface text-xs" bind:value={formBackend} onchange={regenerateYaml}>
+                        <option value="llama-server">llama-server (default)</option>
+                        <option value="ik-llama-server">ik-llama-server (bundled)</option>
+                        {#each backends as be}
+                          <option value={be.path}>{be.name}</option>
+                        {/each}
+                      </select>
+                    </div>
+                    <div class="flex gap-2 items-center">
+                      <label class="w-20 text-txtsecondary">GPU Layers</label>
+                      <input class="input w-16 px-2 py-1 border rounded bg-surface text-xs" type="number" bind:value={formGpuLayers} onblur={regenerateYaml} />
+                    </div>
+                    <div class="flex gap-2 items-center">
+                      <label class="w-20 text-txtsecondary">MMProj</label>
+                      <input class="input flex-1 px-2 py-1 border rounded bg-surface text-xs" placeholder="optional path" bind:value={formMmproj} onblur={regenerateYaml} />
+                    </div>
+                  {/if}
                   <div class="flex gap-2 items-center">
                     <label class="w-20 text-txtsecondary">TTL (s)</label>
-                    <input class="input w-20 px-2 py-1 border rounded bg-surface text-xs" type="number" bind:value={formTtl} />
+                    <input class="input w-20 px-2 py-1 border rounded bg-surface text-xs" type="number" bind:value={formTtl} onblur={regenerateYaml} />
                   </div>
-                  <button
-                    class="btn btn--sm self-end mt-1"
-                    onclick={() => doAddToConfig(model)}
-                    disabled={savingConfig || !formModelId.trim()}
-                  >
-                    {savingConfig ? "Saving…" : "Save to Config"}
-                  </button>
+                  <div class="flex gap-2 items-start">
+                    <label class="w-20 text-txtsecondary pt-1">YAML</label>
+                    <textarea class="input flex-1 px-2 py-1 border rounded bg-surface text-xs font-mono" rows="9" bind:value={formYaml} spellcheck="false"></textarea>
+                  </div>
+                  <div class="flex gap-2 self-end mt-1">
+                    <button class="btn btn--sm" onclick={regenerateYaml} title="Rebuild YAML from the fields above">↻ Regenerate</button>
+                    <button
+                      class="btn btn--sm"
+                      onclick={doAddToConfig}
+                      disabled={savingConfig || !formModelId.trim() || !formYaml.trim()}
+                    >
+                      {savingConfig ? "Saving…" : "Save to Config"}
+                    </button>
+                  </div>
                 </div>
               {/if}
             </div>

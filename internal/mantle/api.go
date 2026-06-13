@@ -46,6 +46,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 	// Download management
 	mux.HandleFunc("POST /api/mantle/models/download", h.handleStartDownload)
+	mux.HandleFunc("POST /api/mantle/models/download/repo", h.handleStartRepoDownload)
 	mux.HandleFunc("DELETE /api/mantle/models/download/{id}", h.handleCancelDownload)
 	mux.HandleFunc("GET /api/mantle/models/download/{id}/stream", h.handleDownloadProgress)
 
@@ -95,7 +96,8 @@ func (h *Handler) handleSearchModels(w http.ResponseWriter, r *http.Request) {
 		fmt.Sscanf(l, "%d", &limit)
 	}
 	sort := r.URL.Query().Get("sort")
-	models, err := SearchHFModels(query, limit, sort)
+	kind := r.URL.Query().Get("kind")
+	models, err := SearchHFModels(query, limit, sort, kind)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -135,6 +137,24 @@ func (h *Handler) handleStartDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	task := h.tm.StartDownload(req.ModelID, req.Filename, h.modelsDir)
+	jsonResponse(w, http.StatusAccepted, task)
+}
+
+type repoDownloadRequest struct {
+	ModelID string `json:"modelID"`
+}
+
+func (h *Handler) handleStartRepoDownload(w http.ResponseWriter, r *http.Request) {
+	var req repoDownloadRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.ModelID == "" {
+		jsonError(w, http.StatusBadRequest, "modelID is required")
+		return
+	}
+	task := h.tm.StartRepoDownload(req.ModelID, h.modelsDir)
 	jsonResponse(w, http.StatusAccepted, task)
 }
 

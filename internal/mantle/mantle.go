@@ -200,15 +200,34 @@ func hfSortParam(sort string) string {
 	}
 }
 
-// SearchHFModels queries the HuggingFace model hub for GGUF models.
+// hfPipelineTag maps a UI model-type "kind" to the HuggingFace pipeline_tag
+// filter. An empty result means no pipeline filter (text/LLM models).
+func hfPipelineTag(kind string) string {
+	switch kind {
+	case "image":
+		return "text-to-image"
+	case "transcription":
+		return "automatic-speech-recognition"
+	case "tts":
+		return "text-to-speech"
+	default:
+		return ""
+	}
+}
+
+// SearchHFModels queries the HuggingFace model hub.
 // sort is one of: relevance, trending, downloads, likes, created, modified.
-func SearchHFModels(query string, limit int, sort string) ([]HFModel, error) {
+// kind filters by model type: "" / "text" (LLMs), "image", "transcription", "tts".
+func SearchHFModels(query string, limit int, sort, kind string) ([]HFModel, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
 	url := fmt.Sprintf("https://huggingface.co/api/models?search=%s&limit=%d", query, limit)
 	if field := hfSortParam(sort); field != "" {
 		url += fmt.Sprintf("&sort=%s&direction=-1", field)
+	}
+	if tag := hfPipelineTag(kind); tag != "" {
+		url += fmt.Sprintf("&pipeline_tag=%s", tag)
 	}
 	resp, err := http.Get(url)
 	if err != nil {
@@ -256,9 +275,17 @@ func SearchHFModels(query string, limit int, sort string) ([]HFModel, error) {
 	return results, nil
 }
 
-// ListHFFiles lists GGUF files in a HF model repo.
-func ListHFFiles(modelID string) ([]string, error) {
-	url := fmt.Sprintf("https://huggingface.co/api/models/%s", modelID)
+// HFFile is a single downloadable file in a HF model repo.
+type HFFile struct {
+	Path string `json:"path"`
+	Size int64  `json:"size"`
+}
+
+// ListHFFiles lists every file in a HF model repo with its size, using the
+// tree API (the basic models endpoint does not report file sizes). LFS-backed
+// files (model weights) report their real size under lfs.size.
+func ListHFFiles(modelID string) ([]HFFile, error) {
+	url := fmt.Sprintf("https://huggingface.co/api/models/%s/tree/main?recursive=true", modelID)
 	resp, err := http.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("HF API request failed: %w", err)
@@ -269,21 +296,28 @@ func ListHFFiles(modelID string) ([]string, error) {
 		return nil, fmt.Errorf("HF API returned status %d for model %s", resp.StatusCode, modelID)
 	}
 
-	var raw struct {
-		Siblings []struct {
-			Rfilename string `json:"rfilename"`
-			Size      int64  `json:"size"`
-		} `json:"siblings"`
+	var raw []struct {
+		Type string `json:"type"`
+		Path string `json:"path"`
+		Size int64  `json:"size"`
+		LFS  *struct {
+			Size int64 `json:"size"`
+		} `json:"lfs"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
 		return nil, fmt.Errorf("HF API decode failed: %w", err)
 	}
 
-	var files []string
-	for _, s := range raw.Siblings {
-		if len(s.Rfilename) > 5 && s.Rfilename[len(s.Rfilename)-5:] == ".gguf" {
-			files = append(files, s.Rfilename)
+	files := make([]HFFile, 0, len(raw))
+	for _, e := range raw {
+		if e.Type == "directory" {
+			continue
 		}
+		size := e.Size
+		if e.LFS != nil && e.LFS.Size > 0 {
+			size = e.LFS.Size
+		}
+		files = append(files, HFFile{Path: e.Path, Size: size})
 	}
 	return files, nil
 }

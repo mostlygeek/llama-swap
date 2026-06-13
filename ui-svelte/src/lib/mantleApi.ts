@@ -1,12 +1,13 @@
-import type { MantleTask, HFModel, LocalModel, BackendEntry } from "../lib/types";
+import type { MantleTask, HFModel, HFFile, LocalModel, BackendEntry } from "../lib/types";
 
 // --- HF Model search ---
 
 export type HFSort = "relevance" | "trending" | "downloads" | "likes" | "created" | "modified";
+export type HFKind = "text" | "image" | "transcription" | "tts";
 
-export async function searchHFModels(query: string, limit = 20, sort: HFSort = "downloads"): Promise<HFModel[]> {
+export async function searchHFModels(query: string, limit = 20, sort: HFSort = "downloads", kind: HFKind = "text"): Promise<HFModel[]> {
   try {
-    const res = await fetch(`/api/mantle/models/search?q=${encodeURIComponent(query)}&limit=${limit}&sort=${sort}`);
+    const res = await fetch(`/api/mantle/models/search?q=${encodeURIComponent(query)}&limit=${limit}&sort=${sort}&kind=${kind}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (e) {
@@ -15,7 +16,7 @@ export async function searchHFModels(query: string, limit = 20, sort: HFSort = "
   }
 }
 
-export async function listHFFiles(modelID: string): Promise<string[]> {
+export async function listHFFiles(modelID: string): Promise<HFFile[]> {
   try {
     const res = await fetch(`/api/mantle/models/files?model=${encodeURIComponent(modelID)}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -39,6 +40,21 @@ export async function startDownload(modelID: string, filename: string): Promise<
     return await res.json();
   } catch (e) {
     console.error("Start download failed:", e);
+    return null;
+  }
+}
+
+export async function startRepoDownload(modelID: string): Promise<MantleTask | null> {
+  try {
+    const res = await fetch("/api/mantle/models/download/repo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ modelID }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (e) {
+    console.error("Start repo download failed:", e);
     return null;
   }
 }

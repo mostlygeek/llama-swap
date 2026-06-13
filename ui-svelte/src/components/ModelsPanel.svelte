@@ -181,7 +181,7 @@
                 {@const est = $modelEstimates[model.id]}
                 <p
                   class="text-xs text-txtsecondary"
-                  title="Context: {est.nCtx} tokens · {est.nLayers} layers · KV cache type K/V: {est.cacheTypeK}/{est.cacheTypeV}"
+                  title="Context: {est.nCtx} tokens · {est.nLayers} layers · KV cache type K/V: {est.cacheTypeK}/{est.cacheTypeV}{est.slidingWindow ? ` · Sliding window: ${est.slidingWindow} tokens` : ''}"
                 >
                   Weights: {formatGB(est.weightsBytes)} · KV Cache: {formatGB(est.kvCacheBytes)} · TOT: {formatGB(est.totalBytes)}
                 </p>
