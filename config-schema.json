@@ -471,6 +471,15 @@
                                 "additionalProperties": true,
                                 "default": {},
                                 "description": "Dictionary of parameters to set/override in requests to this peer. Useful for injecting provider-specific settings. Protected params like 'model' cannot be overridden. Values can be strings, numbers, booleans, arrays, or objects."
+                            },
+                            "setParamsByID": {
+                                "type": "object",
+                                "additionalProperties": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                },
+                                "default": {},
+                                "description": "Dictionary mapping requested model IDs to parameters to set/override in requests to this peer. Applied after setParams and can override those values. Useful for varying behaviour per model alias (e.g. different reasoning_effort per alias). Protected params like 'model' cannot be overridden."
                             }
                         },
                         "additionalProperties": false,

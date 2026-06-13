@@ -574,7 +574,7 @@ peers:
 
     # filters: a dictionary of filter settings for peer requests
     # - optional, default: empty dictionary
-    # - same capabilities as model filters (stripParams, setParams)
+    # - same capabilities as model filters (stripParams, setParams, setParamsByID)
     filters:
       # stripParams: a comma separated list of parameters to remove from the request
       # - optional, default: ""
@@ -592,3 +592,13 @@ peers:
         provider:
           data_collection: "deny"
           zdr: true
+
+      # setParamsByID: a dictionary of parameters to set based on the requested model ID
+      # - optional, default: empty dictionary
+      # - applied after setParams so it can override any settings
+      # - useful when a peer serves multiple virtual aliases via a single model
+      # - protected params like "model" cannot be overridden
+      # setParamsByID:
+      #   "some-model:thinking":
+      #     chat_template_kwargs:
+      #       thinking: true

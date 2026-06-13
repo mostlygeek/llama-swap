@@ -63,8 +63,16 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for peerID, peer := range s.cfg.Peers {
+		known := make(map[string]bool, len(peer.Models))
 		for _, modelID := range peer.Models {
+			known[modelID] = true
 			data = append(data, newRecord(modelID, peerID+": "+modelID, "", map[string]any{"peerID": peerID}))
+		}
+		for virtualID := range peer.Filters.SetParamsByID {
+			if known[virtualID] {
+				continue
+			}
+			data = append(data, newRecord(virtualID, peerID+": "+virtualID, "", map[string]any{"peerID": peerID}))
 		}
 	}
 

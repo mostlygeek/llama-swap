@@ -6,11 +6,13 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/router"
 	"github.com/mostlygeek/llama-swap/internal/shared"
 	"github.com/tidwall/sjson"
 )
@@ -166,18 +168,29 @@ func rewriteMultipartModel(form *multipart.Form, useModelName string) ([]byte, s
 }
 
 // resolveFilters returns the filter settings for a requested model. UseModelName
-// only applies to local models; peers carry filters but no name rewrite.
+// rewrites the model field for local models and peer virtual sub-IDs.
 func resolveFilters(cfg config.Config, requested string) (useModelName string, filters config.Filters, ok bool) {
 	if realName, found := cfg.RealModelName(requested); found {
 		mc := cfg.Models[realName]
 		return mc.UseModelName, mc.Filters.Filters, true
 	}
-	for _, peer := range cfg.Peers {
+	peerIDs := make([]string, 0, len(cfg.Peers))
+	for peerID := range cfg.Peers {
+		peerIDs = append(peerIDs, peerID)
+	}
+	sort.Strings(peerIDs)
+
+	for _, peerID := range peerIDs {
+		peer := cfg.Peers[peerID]
 		for _, m := range peer.Models {
 			if m == requested {
 				return "", peer.Filters, true
 			}
 		}
+	}
+	// Also check setParamsByID keys for virtual sub-ID requests
+	if p, baseModel, found := router.ResolveVirtualSubID(cfg, requested); found {
+		return baseModel, p.Filters, true
 	}
 	return "", config.Filters{}, false
 }
