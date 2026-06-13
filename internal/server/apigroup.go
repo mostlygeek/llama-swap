@@ -12,7 +12,6 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/perf"
-	"github.com/mostlygeek/llama-swap/internal/router"
 	"github.com/mostlygeek/llama-swap/internal/shared"
 )
 
@@ -76,11 +75,11 @@ func (s *Server) handleAPIUnloadModel(w http.ResponseWriter, r *http.Request) {
 	requested := strings.TrimPrefix(r.PathValue("model"), "/")
 	realName, found := s.cfg.RealModelName(requested)
 	if !found {
-		router.SendResponse(w, r, http.StatusNotFound, "model not found")
+		shared.SendResponse(w, r, http.StatusNotFound, "model not found")
 		return
 	}
 	if !s.local.Handles(realName) {
-		router.SendResponse(w, r, http.StatusNotFound, "no local server found for requested model")
+		shared.SendResponse(w, r, http.StatusNotFound, "no local server found for requested model")
 		return
 	}
 	s.local.Unload(apiUnloadTimeout, realName)
@@ -92,7 +91,7 @@ func (s *Server) handleAPIUnloadModel(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPIMetrics(w http.ResponseWriter, r *http.Request) {
 	data, err := s.metrics.getMetricsJSON()
 	if err != nil {
-		router.SendResponse(w, r, http.StatusInternalServerError, "failed to get metrics")
+		shared.SendResponse(w, r, http.StatusInternalServerError, "failed to get metrics")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -103,7 +102,7 @@ func (s *Server) handleAPIMetrics(w http.ResponseWriter, r *http.Request) {
 // filtered to samples after the ?after=<RFC3339> timestamp.
 func (s *Server) handleAPIPerformance(w http.ResponseWriter, r *http.Request) {
 	if s.perf == nil {
-		router.SendResponse(w, r, http.StatusServiceUnavailable, "performance monitor not available")
+		shared.SendResponse(w, r, http.StatusServiceUnavailable, "performance monitor not available")
 		return
 	}
 
@@ -112,7 +111,7 @@ func (s *Server) handleAPIPerformance(w http.ResponseWriter, r *http.Request) {
 	if afterStr := r.URL.Query().Get("after"); afterStr != "" {
 		after, err := time.Parse(time.RFC3339, afterStr)
 		if err != nil {
-			router.SendResponse(w, r, http.StatusBadRequest, "invalid 'after' timestamp, use RFC3339 format")
+			shared.SendResponse(w, r, http.StatusBadRequest, "invalid 'after' timestamp, use RFC3339 format")
 			return
 		}
 		filteredSys := make([]perf.SysStat, 0, len(sysStats))
@@ -153,19 +152,19 @@ func (s *Server) handleAPIVersion(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPICapture(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
-		router.SendResponse(w, r, http.StatusBadRequest, "invalid capture ID")
+		shared.SendResponse(w, r, http.StatusBadRequest, "invalid capture ID")
 		return
 	}
 
 	capture := s.metrics.getCaptureByID(id)
 	if capture == nil {
-		router.SendResponse(w, r, http.StatusNotFound, "capture not found")
+		shared.SendResponse(w, r, http.StatusNotFound, "capture not found")
 		return
 	}
 
 	jsonBytes, err := json.Marshal(capture)
 	if err != nil {
-		router.SendResponse(w, r, http.StatusInternalServerError, "failed to marshal capture")
+		shared.SendResponse(w, r, http.StatusInternalServerError, "failed to marshal capture")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -198,7 +197,7 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		router.SendResponse(w, r, http.StatusInternalServerError, "streaming unsupported")
+		shared.SendResponse(w, r, http.StatusInternalServerError, "streaming unsupported")
 		return
 	}
 

@@ -226,69 +226,6 @@ func TestIsLoadingPath(t *testing.T) {
 	}
 }
 
-func TestExtractContext_Streaming_GET(t *testing.T) {
-	tests := []struct {
-		name          string
-		query         string
-		wantStreaming bool
-	}{
-		{"streaming true", "model=llama3&stream=true", true},
-		{"streaming false", "model=llama3&stream=false", false},
-		{"no stream param", "model=llama3", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			r, _ := http.NewRequest(http.MethodGet, "/?"+tt.query, nil)
-			got, err := ExtractContext(r)
-			if err != nil {
-				t.Fatalf("ExtractContext: %v", err)
-			}
-			if got.Streaming != tt.wantStreaming {
-				t.Errorf("Streaming: want %v, got %v", tt.wantStreaming, got.Streaming)
-			}
-		})
-	}
-}
-
-func TestExtractContext_Streaming_JSON(t *testing.T) {
-	tests := []struct {
-		name          string
-		body          string
-		wantStreaming bool
-	}{
-		{"streaming true", `{"model":"llama3","stream":true}`, true},
-		{"streaming false", `{"model":"llama3","stream":false}`, false},
-		{"no stream param", `{"model":"llama3"}`, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			r, _ := http.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(tt.body))
-			r.Header.Set("Content-Type", "application/json")
-			got, err := ExtractContext(r)
-			if err != nil {
-				t.Fatalf("ExtractContext: %v", err)
-			}
-			if got.Streaming != tt.wantStreaming {
-				t.Errorf("Streaming: want %v, got %v", tt.wantStreaming, got.Streaming)
-			}
-		})
-	}
-}
-
-func TestExtractContext_Streaming_URLEncodedForm(t *testing.T) {
-	r, _ := http.NewRequest(http.MethodPost, "/v1/audio/transcriptions", strings.NewReader("model=whisper-1&stream=true"))
-	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	got, err := ExtractContext(r)
-	if err != nil {
-		t.Fatalf("ExtractContext: %v", err)
-	}
-	if !got.Streaming {
-		t.Error("Streaming should be true")
-	}
-}
-
 func countSSEMessages(s string) int {
 	scanner := bufio.NewScanner(strings.NewReader(s))
 	count := 0

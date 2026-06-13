@@ -14,7 +14,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
-	"github.com/mostlygeek/llama-swap/internal/router"
+	"github.com/mostlygeek/llama-swap/internal/shared"
 )
 
 // NewLoggers builds the proxy, upstream, and combined (mux) log monitors,
@@ -102,13 +102,13 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) {
 
 	logger, err := s.getLogger(logMonitorID)
 	if err != nil {
-		router.SendResponse(w, r, http.StatusBadRequest, err.Error())
+		shared.SendResponse(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		router.SendResponse(w, r, http.StatusInternalServerError, "streaming unsupported")
+		shared.SendResponse(w, r, http.StatusInternalServerError, "streaming unsupported")
 		return
 	}
 

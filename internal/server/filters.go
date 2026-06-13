@@ -11,7 +11,7 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
-	"github.com/mostlygeek/llama-swap/internal/router"
+	"github.com/mostlygeek/llama-swap/internal/shared"
 	"github.com/tidwall/sjson"
 )
 
@@ -34,9 +34,9 @@ func CreateFilterMiddleware(cfg config.Config) chain.Middleware {
 				return
 			}
 
-			data, err := router.FetchContext(r, cfg)
+			data, err := shared.FetchContext(r, cfg)
 			if err != nil {
-				router.SendError(w, r, router.ErrNoModelInContext)
+				shared.SendError(w, r, shared.ErrNoModelInContext)
 				return
 			}
 
@@ -48,13 +48,13 @@ func CreateFilterMiddleware(cfg config.Config) chain.Middleware {
 
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
-				router.SendResponse(w, r, http.StatusBadRequest, "could not read request body")
+				shared.SendResponse(w, r, http.StatusBadRequest, "could not read request body")
 				return
 			}
 
 			body, err = applyFilters(body, data.Model, useModelName, filters)
 			if err != nil {
-				router.SendResponse(w, r, http.StatusInternalServerError, err.Error())
+				shared.SendResponse(w, r, http.StatusInternalServerError, err.Error())
 				return
 			}
 
@@ -84,9 +84,9 @@ func CreateFormFilterMiddleware(cfg config.Config) chain.Middleware {
 				return
 			}
 
-			data, err := router.FetchContext(r, cfg)
+			data, err := shared.FetchContext(r, cfg)
 			if err != nil {
-				router.SendError(w, r, router.ErrNoModelInContext)
+				shared.SendError(w, r, shared.ErrNoModelInContext)
 				return
 			}
 
@@ -97,13 +97,13 @@ func CreateFormFilterMiddleware(cfg config.Config) chain.Middleware {
 			}
 
 			if err := r.ParseMultipartForm(32 << 20); err != nil {
-				router.SendResponse(w, r, http.StatusBadRequest, fmt.Sprintf("error parsing multipart form: %s", err.Error()))
+				shared.SendResponse(w, r, http.StatusBadRequest, fmt.Sprintf("error parsing multipart form: %s", err.Error()))
 				return
 			}
 
 			body, contentType, err := rewriteMultipartModel(r.MultipartForm, useModelName)
 			if err != nil {
-				router.SendResponse(w, r, http.StatusInternalServerError, err.Error())
+				shared.SendResponse(w, r, http.StatusInternalServerError, err.Error())
 				return
 			}
 
