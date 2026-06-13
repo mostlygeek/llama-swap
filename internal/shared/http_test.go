@@ -404,6 +404,10 @@ func TestServer_ExtractAPIKey(t *testing.T) {
 		{"basic beats bearer", basicHeader("u", "bk"), "", "bk"},
 		{"bearer beats x-api-key", "Bearer btok", "xkey", "btok"},
 		{"malformed basic falls back to x-api-key", "Basic !!!notbase64", "xkey", "xkey"},
+		{"lowercase bearer", "bearer tok123", "", "tok123"},
+		{"lowercase basic", "basic " + base64.StdEncoding.EncodeToString([]byte("user:pw-key")), "", "pw-key"},
+		{"mixed case BEARER", "BEARER tok456", "", "tok456"},
+		{"mixed case bAsIc", "bAsIc " + base64.StdEncoding.EncodeToString([]byte("u:bk")), "", "bk"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

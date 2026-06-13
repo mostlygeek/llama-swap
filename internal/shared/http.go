@@ -29,10 +29,10 @@ type ReqContextData struct {
 }
 
 var (
-	ReqContextKey       = &contextkey{"context"}
-	ErrNoModelInContext = fmt.Errorf("no model in request context")
-	ErrNoRouterFound    = fmt.Errorf("no router found for model")
-	ErrNoPeerModelFound = fmt.Errorf("peer model not found")
+	ReqContextKey        = &contextkey{"context"}
+	ErrNoModelInContext  = fmt.Errorf("no model in request context")
+	ErrNoRouterFound     = fmt.Errorf("no router found for model")
+	ErrNoPeerModelFound  = fmt.Errorf("peer model not found")
 	ErrNoLocalModelFound = fmt.Errorf("local model not found")
 )
 
@@ -176,13 +176,16 @@ func extractContext(r *http.Request) (ReqContextData, error) {
 func ExtractAPIKey(r *http.Request) string {
 	var bearerKey, basicKey string
 	if auth := r.Header.Get("Authorization"); auth != "" {
-		if strings.HasPrefix(auth, "Bearer ") {
-			bearerKey = strings.TrimPrefix(auth, "Bearer ")
-		} else if strings.HasPrefix(auth, "Basic ") {
-			encoded := strings.TrimPrefix(auth, "Basic ")
-			if decoded, err := base64.StdEncoding.DecodeString(encoded); err == nil {
-				if parts := strings.SplitN(string(decoded), ":", 2); len(parts) == 2 {
-					basicKey = parts[1] // password field is the API key
+		scheme, credentials, ok := strings.Cut(auth, " ")
+		if ok {
+			switch strings.ToLower(scheme) {
+			case "bearer":
+				bearerKey = credentials
+			case "basic":
+				if decoded, err := base64.StdEncoding.DecodeString(credentials); err == nil {
+					if parts := strings.SplitN(string(decoded), ":", 2); len(parts) == 2 {
+						basicKey = parts[1] // password field is the API key
+					}
 				}
 			}
 		}
