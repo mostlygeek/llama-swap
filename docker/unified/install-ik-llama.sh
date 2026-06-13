@@ -32,7 +32,7 @@ case "$BACKEND" in
     cuda)
         CMAKE_FLAGS+=(
             -DGGML_CUDA=ON
-            "-DCMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES:-80}"
+            "-DCMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES:?CMAKE_CUDA_ARCHITECTURES must be set}"
             "-DCMAKE_CUDA_FLAGS=-allow-unsupported-compiler"
             "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda -Wl,--allow-shlib-undefined"
         )
