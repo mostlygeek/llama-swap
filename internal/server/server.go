@@ -15,6 +15,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/internal/router"
+	"github.com/mostlygeek/llama-swap/internal/shared"
 )
 
 // Server owns the HTTP mux, cross-cutting middleware, and the local/peer model
@@ -142,9 +143,9 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 func (s *Server) localPeerHandler(w http.ResponseWriter, r *http.Request) {
 	stripVersionPrefix(r)
 
-	data, err := router.FetchContext(r, s.cfg)
+	data, err := shared.FetchContext(r, s.cfg)
 	if err != nil {
-		router.SendError(w, r, router.ErrNoModelInContext)
+		shared.SendError(w, r, shared.ErrNoModelInContext)
 		return
 	}
 
@@ -156,7 +157,7 @@ func (s *Server) localPeerHandler(w http.ResponseWriter, r *http.Request) {
 		s.proxylog.Debugf("dispatch: using peer for model: %s", data.ModelID)
 		s.peer.ServeHTTP(w, r)
 	default:
-		router.SendError(w, r, router.ErrNoRouterFound)
+		shared.SendError(w, r, router.ErrNoRouterFound)
 	}
 }
 
@@ -171,21 +172,14 @@ func stripVersionPrefix(r *http.Request) {
 // routes builds the mux, registers every route, and wraps the mux with the
 // global CORS middleware.
 func (s *Server) routes() {
-	authMW := CreateAuthMiddleware(s.cfg)
-	filterMW := CreateFilterMiddleware(s.cfg)
-	formFilterMW := CreateFormFilterMiddleware(s.cfg)
 
-	// Model-dispatched routes get auth + per-model concurrency limiting + body
-	// filters + in-flight tracking + token metrics. concurrencyMW rejects with
-	// 429 before the body filters do any rewrite work. filterMW rewrites JSON
-	// bodies and formFilterMW rewrites multipart bodies; each is a no-op for the
-	// other's Content-Type. Both run before the metrics middleware so it buffers
-	// the rewritten body.
+	authMW := CreateAuthMiddleware(s.cfg)
 	modelChain := chain.New(
 		authMW,
+		CreateRequestContextMiddleware(s.cfg),
 		CreateConcurrencyMiddleware(s.cfg),
-		filterMW,
-		formFilterMW,
+		CreateFilterMiddleware(s.cfg),
+		CreateFormFilterMiddleware(s.cfg),
 		CreateInflightMiddleware(s.inflight),
 		CreateMetricsMiddleware(s.metrics, s.cfg),
 	)
@@ -216,11 +210,11 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /{$}", handleRootRedirect)
 
 	// Embedded UI.
-	mux.HandleFunc("GET /ui/", s.handleUI)
+	mux.Handle("GET /ui/", chain.New(authMW).ThenFunc(s.handleUI))
 	mux.HandleFunc("GET /favicon.ico", s.handleFavicon)
 
 	// Prometheus metrics (no auth, matches the legacy endpoint).
-	mux.HandleFunc("GET /metrics", s.handleMetrics)
+	mux.Handle("GET /metrics", apiChain.ThenFunc(s.handleMetrics))
 
 	// Operations endpoints.
 	mux.Handle("GET /unload", apiChain.ThenFunc(s.handleUnload))
