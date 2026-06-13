@@ -7,7 +7,7 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
-	"github.com/mostlygeek/llama-swap/internal/router"
+	"github.com/mostlygeek/llama-swap/internal/shared"
 )
 
 // CreateMetricsMiddleware returns middleware that records token metrics for
@@ -23,9 +23,9 @@ func CreateMetricsMiddleware(mm *metricsMonitor, cfg config.Config) chain.Middle
 
 			// Resolve the model now so downstream dispatch hits the context
 			// fast path; FetchContext restores the request body.
-			data, err := router.FetchContext(r, cfg)
+			data, err := shared.FetchContext(r, cfg)
 			if err != nil {
-				router.SendError(w, r, router.ErrNoModelInContext)
+				shared.SendError(w, r, shared.ErrNoModelInContext)
 				return
 			}
 

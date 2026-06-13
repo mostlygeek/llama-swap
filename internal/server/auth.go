@@ -1,19 +1,17 @@
 package server
 
 import (
-	"encoding/base64"
 	"net/http"
 	"strings"
 
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
-	"github.com/mostlygeek/llama-swap/internal/router"
+	"github.com/mostlygeek/llama-swap/internal/shared"
 )
 
 // CreateAuthMiddleware returns middleware that validates API keys when the
 // config declares any. It accepts the key via Authorization: Bearer,
-// Authorization: Basic (password field), or x-api-key. On success the auth
-// headers are stripped so they never leak to upstream. When no keys are
+// Authorization: Basic (password field), or x-api-key. When no keys are
 // configured the middleware is a pass-through.
 func CreateAuthMiddleware(cfg config.Config) chain.Middleware {
 	keys := cfg.RequiredAPIKeys
@@ -22,7 +20,7 @@ func CreateAuthMiddleware(cfg config.Config) chain.Middleware {
 			return next
 		}
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			provided := extractAPIKey(r)
+			provided := shared.ExtractAPIKey(r)
 
 			valid := false
 			for _, key := range keys {
@@ -33,41 +31,29 @@ func CreateAuthMiddleware(cfg config.Config) chain.Middleware {
 			}
 			if !valid {
 				w.Header().Set("WWW-Authenticate", `Basic realm="llama-swap"`)
-				router.SendResponse(w, r, http.StatusUnauthorized, "unauthorized: invalid or missing API key")
+				shared.SendResponse(w, r, http.StatusUnauthorized, "unauthorized: invalid or missing API key")
 				return
 			}
 
-			r.Header.Del("Authorization")
-			r.Header.Del("x-api-key")
 			next.ServeHTTP(w, r)
 		})
 	}
 }
 
-// extractAPIKey pulls a candidate API key from the request, preferring Basic,
-// then Bearer, then x-api-key.
-func extractAPIKey(r *http.Request) string {
-	var bearerKey, basicKey string
-	if auth := r.Header.Get("Authorization"); auth != "" {
-		if strings.HasPrefix(auth, "Bearer ") {
-			bearerKey = strings.TrimPrefix(auth, "Bearer ")
-		} else if strings.HasPrefix(auth, "Basic ") {
-			encoded := strings.TrimPrefix(auth, "Basic ")
-			if decoded, err := base64.StdEncoding.DecodeString(encoded); err == nil {
-				if parts := strings.SplitN(string(decoded), ":", 2); len(parts) == 2 {
-					basicKey = parts[1] // password field is the API key
-				}
+// CreateRequestContextMiddleware returns middleware that extracts model and
+// auth info from the request into the context. Requests where no model can be
+// identified are rejected with a 404.
+func CreateRequestContextMiddleware(cfg config.Config) chain.Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			data, err := shared.FetchContext(r, cfg)
+			if err != nil {
+				shared.SendError(w, r, shared.ErrNoModelInContext)
+				return
 			}
-		}
-	}
-
-	switch {
-	case basicKey != "":
-		return basicKey
-	case bearerKey != "":
-		return bearerKey
-	default:
-		return r.Header.Get("x-api-key")
+			_ = data
+			next.ServeHTTP(w, r)
+		})
 	}
 }
 

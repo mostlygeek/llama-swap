@@ -9,7 +9,6 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/event"
-	"github.com/mostlygeek/llama-swap/internal/router"
 	"github.com/mostlygeek/llama-swap/internal/shared"
 )
 
@@ -163,7 +162,7 @@ func (s *Server) startPreload() {
 			if err != nil {
 				continue
 			}
-			req = req.WithContext(router.SetContext(req.Context(), router.ReqContextData{Model: modelID, ModelID: modelID}))
+			req = req.WithContext(shared.SetContext(req.Context(), shared.ReqContextData{Model: modelID, ModelID: modelID}))
 
 			dw := &discardResponseWriter{status: http.StatusOK}
 			s.local.ServeHTTP(dw, req)
@@ -208,7 +207,7 @@ func (s *Server) handleUpstream(w http.ResponseWriter, r *http.Request) {
 
 	searchName, modelID, remainingPath, found := findModelInPath(s.cfg, "/"+upstreamPath)
 	if !found {
-		router.SendResponse(w, r, http.StatusNotFound, "model not found")
+		shared.SendResponse(w, r, http.StatusNotFound, "model not found")
 		return
 	}
 
@@ -230,7 +229,7 @@ func (s *Server) handleUpstream(w http.ResponseWriter, r *http.Request) {
 	// Strip the /upstream/<model> prefix before forwarding.
 	r.URL.Path = remainingPath
 	// Pin the resolved model so the router skips body/query extraction.
-	*r = *r.WithContext(router.SetContext(r.Context(), router.ReqContextData{Model: searchName, ModelID: modelID}))
+	*r = *r.WithContext(shared.SetContext(r.Context(), shared.ReqContextData{Model: searchName, ModelID: modelID}))
 
 	switch {
 	case s.local.Handles(modelID):
@@ -238,7 +237,7 @@ func (s *Server) handleUpstream(w http.ResponseWriter, r *http.Request) {
 	case s.peer.Handles(modelID):
 		s.peer.ServeHTTP(w, r)
 	default:
-		router.SendResponse(w, r, http.StatusNotFound, "no router for model "+modelID)
+		shared.SendResponse(w, r, http.StatusNotFound, "no router for model "+modelID)
 	}
 }
 

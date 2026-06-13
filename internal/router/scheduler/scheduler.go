@@ -11,17 +11,17 @@ package scheduler
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
+	"github.com/mostlygeek/llama-swap/internal/shared"
 )
 
 // ErrModelNotFound is granted to callers whose model is not handled by this
-// router. The router package aliases it so SendError can match it.
-var ErrModelNotFound = fmt.Errorf("local model not found")
+// router. It is an alias for shared.ErrNoLocalModelFound.
+var ErrModelNotFound = shared.ErrNoLocalModelFound
 
 // Swapper is the eviction policy: it decides which running models must be
 // stopped before a target can serve. It is orthogonal to the scheduling

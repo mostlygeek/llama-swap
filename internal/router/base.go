@@ -12,6 +12,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/router/scheduler"
+	"github.com/mostlygeek/llama-swap/internal/shared"
 )
 
 type shutdownReq struct {
@@ -399,13 +400,13 @@ func (b *baseRouter) Shutdown(timeout time.Duration) error {
 
 func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if b.shuttingDown.Load() {
-		SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
+		shared.SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
 		return
 	}
 
-	data, err := FetchContext(req, b.config)
+	data, err := shared.FetchContext(req, b.config)
 	if err != nil {
-		SendError(w, req, err)
+		shared.SendError(w, req, err)
 		return
 	}
 
@@ -424,7 +425,7 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	case <-req.Context().Done():
 		return
 	case <-b.shutdownCtx.Done():
-		SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
+		shared.SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
 		return
 	}
 
@@ -475,12 +476,12 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	case <-b.shutdownCtx.Done():
 		finishLoading()
-		SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
+		shared.SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
 		return
 	}
 
 	if resp.Err != nil {
-		SendError(w, req, resp.Err)
+		shared.SendError(w, req, resp.Err)
 		return
 	}
 	resp.HandleFunc(w, req)
