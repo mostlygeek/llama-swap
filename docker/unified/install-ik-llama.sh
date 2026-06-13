@@ -1,10 +1,11 @@
 #!/bin/bash
 # Install ik_llama.cpp - clone, build, and install binaries
-# Usage: ./install-ik-llama.sh <commit_hash>
-# Note: CUDA only; always built against builder-base-cuda
+# Usage: BACKEND=cuda|vulkan ./install-ik-llama.sh <commit_hash>
+# Supports CUDA, Vulkan, and CPU-only builds
 set -e
 
 COMMIT_HASH="${1:-main}"
+BACKEND="${BACKEND:-cpu}"
 
 mkdir -p /install/bin
 
@@ -25,11 +26,24 @@ CMAKE_FLAGS=(
     -DCMAKE_BUILD_TYPE=Release
     -DCMAKE_C_COMPILER_LAUNCHER=ccache
     -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-    -DGGML_CUDA=ON
-    "-DCMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES:?CMAKE_CUDA_ARCHITECTURES must be set}"
-    "-DCMAKE_CUDA_FLAGS=-allow-unsupported-compiler"
-    "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda -Wl,--allow-shlib-undefined"
 )
+
+case "$BACKEND" in
+    cuda)
+        CMAKE_FLAGS+=(
+            -DGGML_CUDA=ON
+            "-DCMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES:-80}"
+            "-DCMAKE_CUDA_FLAGS=-allow-unsupported-compiler"
+            "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-rpath-link,/usr/local/cuda/lib64/stubs -lcuda -Wl,--allow-shlib-undefined"
+        )
+        ;;
+    vulkan)
+        CMAKE_FLAGS+=(-DGGML_VULKAN=ON)
+        ;;
+    *)
+        echo "INFO: Building ik_llama.cpp CPU-only (BACKEND=${BACKEND})" >&2
+        ;;
+esac
 
 rm -rf build/CMakeCache.txt build/CMakeFiles 2>/dev/null || true
 

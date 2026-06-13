@@ -81,26 +81,24 @@ RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
     --mount=type=cache,id=llama-${BACKEND},target=/src/llama.cpp/build \
     BACKEND=${BACKEND} bash /build/install-llama.sh "${LLAMA_COMMIT_HASH}"
 
-# ── Build ik_llama.cpp (CUDA only) ────────────────────────────────────
+# ── Build ik_llama.cpp (CPU + CUDA + Vulkan) ──────────────────────────
 #
-# Two named stages allow ARG BACKEND to select at build time:
-#   - ik-llama-cuda  : real build (from builder-base-cuda)
-#   - ik-llama-vulkan: no-op (empty /install/bin, skips CUDA pull entirely)
-# BuildKit only evaluates the selected branch, so vulkan builds never
-# pull nvidia/cuda:*-devel or compile ik_llama.cpp.
+# ik_llama.cpp builds from the same builder-base stage selected by BACKEND.
+# The install script uses BACKEND to select the appropriate GPU backend:
+#   - CUDA backend : ik_llama.cpp with GGML_CUDA=ON
+#   - Vulkan backend: ik_llama.cpp with GGML_VULKAN=ON
+#   - CPU fallback : if nvcc/glslc not found, builds CPU-only with a warning
+#
+# This avoids pulling nvidia/cuda:*-devel for vulkan builds while still
+# producing a functional ik-llama-server binary with Vulkan GPU support.
 
-FROM builder-base-vulkan AS ik-llama-vulkan
-RUN mkdir -p /install/bin
-
-FROM builder-base-cuda AS ik-llama-cuda
+FROM builder-base AS ik-llama-build
+ARG BACKEND=cuda
 ARG IK_LLAMA_COMMIT_HASH=main
 COPY install-ik-llama.sh /build/
-RUN --mount=type=cache,id=ccache-cuda,target=/ccache \
-    --mount=type=cache,id=ik-llama-cuda,target=/src/ik_llama.cpp/build \
-    bash /build/install-ik-llama.sh "${IK_LLAMA_COMMIT_HASH}"
-
-ARG BACKEND=cuda
-FROM ik-llama-${BACKEND} AS ik-llama-build
+RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
+    --mount=type=cache,id=ik-llama-${BACKEND},target=/src/ik_llama.cpp/build \
+    BACKEND=${BACKEND} bash /build/install-ik-llama.sh "${IK_LLAMA_COMMIT_HASH}"
 
 # ── Download llama-swap release binary ────────────────────────────────
 
