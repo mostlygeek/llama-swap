@@ -139,7 +139,7 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 }
 
 // localPeerHandler dispatches a model-routed request to the local or peer
-// router. The model is resolved once via router.FetchContext.
+// router. The model is resolved once via shared.FetchContext.
 func (s *Server) localPeerHandler(w http.ResponseWriter, r *http.Request) {
 	stripVersionPrefix(r)
 
@@ -213,7 +213,7 @@ func (s *Server) routes() {
 	mux.Handle("GET /ui/", chain.New(authMW).ThenFunc(s.handleUI))
 	mux.HandleFunc("GET /favicon.ico", s.handleFavicon)
 
-	// Prometheus metrics (no auth, matches the legacy endpoint).
+	// Prometheus metrics (wrapped by apiChain, matches the legacy endpoint).
 	mux.Handle("GET /metrics", apiChain.ThenFunc(s.handleMetrics))
 
 	// Operations endpoints.
