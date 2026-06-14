@@ -54,6 +54,7 @@ type baseRouter struct {
 	procCancel context.CancelFunc
 
 	handlerCh   chan scheduler.HandlerReq
+	cancelCh    chan scheduler.HandlerReq
 	shutdownCh  chan shutdownReq
 	unloadCh    chan unloadReq
 	swapDoneCh  chan scheduler.SwapDone
@@ -88,6 +89,7 @@ func newBaseRouter(
 		procCtx:     procCtx,
 		procCancel:  procCancel,
 		handlerCh:   make(chan scheduler.HandlerReq),
+		cancelCh:    make(chan scheduler.HandlerReq),
 		shutdownCh:  make(chan shutdownReq),
 		unloadCh:    make(chan unloadReq),
 		swapDoneCh:  make(chan scheduler.SwapDone),
@@ -115,6 +117,10 @@ func (b *baseRouter) run() {
 
 		case req := <-b.handlerCh:
 			b.schedule.OnRequest(req)
+			b.notifyProcessed()
+
+		case req := <-b.cancelCh:
+			b.schedule.OnCancel(req)
 			b.notifyProcessed()
 
 		case req := <-b.unloadCh:
@@ -473,6 +479,14 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		finishLoading()
 	case <-req.Context().Done():
 		finishLoading()
+		// Notify the scheduler so it can prune this request from its queue
+		// and swap waiters. Without this, a queued request whose client left
+		// would sit in the scheduler until drainQueue eventually starts a
+		// wasted model load for it.
+		select {
+		case b.cancelCh <- hr:
+		case <-b.shutdownCtx.Done():
+		}
 		return
 	case <-b.shutdownCtx.Done():
 		finishLoading()
