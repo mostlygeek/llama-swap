@@ -424,7 +424,7 @@
                             },
                             "context": {
                                 "type": "integer",
-                                "minimum": 1,
+                                "minimum": 0,
                                 "default": 0,
                                 "description": "Maximum token context length supported by the model."
                             }
