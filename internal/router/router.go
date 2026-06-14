@@ -87,13 +87,4 @@ func ResolveVirtualSubID(cfg config.Config, search string) (peer *config.PeerCon
 	return nil, "", false
 }
 
-// resolvePeerBaseModel checks whether search is a virtual sub-ID (a key in any
-// peer's SetParamsByID) and returns the peer's base model name. Peers are
-// visited in sorted order (first-wins for duplicates). Returns the raw search
-// string when no match is found.
-func resolvePeerBaseModel(cfg config.Config, search string) string {
-	if _, baseModel, found := ResolveVirtualSubID(cfg, search); found && baseModel != "" {
-		return baseModel
-	}
-	return search
-}
+
