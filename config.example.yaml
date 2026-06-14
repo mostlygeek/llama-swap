@@ -334,6 +334,10 @@ models:
       # - default: false
       tools: true
 
+      # reranker: the model supports the /v1/rerank endpoint
+      # - default: false
+      reranker: false
+
       # context: the maximum token context length supported
       # - default: 0
       # - must be an integer > 0

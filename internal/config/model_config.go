@@ -20,15 +20,16 @@ var validModalities = map[string]struct{}{
 // Used in /v1/models to inform clients. An empty block (all zero values) is
 // treated as not configured.
 type ModelCapConfig struct {
-	In      []string `yaml:"in"`
-	Out     []string `yaml:"out"`
-	Tools   bool     `yaml:"tools"`
-	Context int      `yaml:"context"`
+	In       []string `yaml:"in"`
+	Out      []string `yaml:"out"`
+	Tools    bool     `yaml:"tools"`
+	Reranker bool     `yaml:"reranker"`
+	Context  int      `yaml:"context"`
 }
 
 // Empty returns true when all fields are at their zero values.
 func (c ModelCapConfig) Empty() bool {
-	return len(c.In) == 0 && len(c.Out) == 0 && !c.Tools && c.Context == 0
+	return len(c.In) == 0 && len(c.Out) == 0 && !c.Tools && !c.Reranker && c.Context == 0
 }
 
 // Validate checks that all modality values are recognized and context is

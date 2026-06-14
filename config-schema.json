@@ -417,6 +417,11 @@
                                 "default": false,
                                 "description": "Whether the model supports function calling."
                             },
+                            "reranker": {
+                                "type": "boolean",
+                                "default": false,
+                                "description": "Whether the model supports the /v1/rerank endpoint."
+                            },
                             "context": {
                                 "type": "integer",
                                 "minimum": 1,

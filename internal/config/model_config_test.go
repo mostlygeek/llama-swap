@@ -247,6 +247,37 @@ models:
 		mc := config.Models["model1"]
 		assert.True(t, mc.Capabilities.Empty())
 	})
+
+	t.Run("reranker true is not empty", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    capabilities:
+      reranker: true
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+
+		mc := config.Models["model1"]
+		assert.False(t, mc.Capabilities.Empty())
+		assert.True(t, mc.Capabilities.Reranker)
+	})
+
+	t.Run("reranker false is empty", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    capabilities:
+      reranker: false
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+
+		mc := config.Models["model1"]
+		assert.True(t, mc.Capabilities.Empty())
+	})
 }
 
 func TestConfig_ModelCapabilities_Validate(t *testing.T) {
