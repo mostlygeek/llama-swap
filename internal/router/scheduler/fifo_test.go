@@ -143,6 +143,15 @@ func newFIFO(planner Swapper, eff Effects) *FIFO {
 
 func req(model string) HandlerReq { return HandlerReq{Model: model} }
 
+// reqCh creates a HandlerReq with a unique Respond channel so OnCancel can
+// identify it among queued requests and swap waiters.
+func reqCh(model string) HandlerReq {
+	return HandlerReq{
+		Model:   model,
+		Respond: make(chan HandlerResp, 1),
+	}
+}
+
 func TestFIFO_FastPath(t *testing.T) {
 	eff := newFakeEffects()
 	eff.states["a"] = process.StateReady
@@ -533,5 +542,92 @@ func TestFIFO_PriorityQueueOrder(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("queue=%v want %v", got, want)
 		}
+	}
+}
+
+// TestFIFO_OnCancel_QueuedRequest verifies that cancelling a queued request
+// prevents drainQueue from ever starting a model load for it. Without OnCancel
+// the dead request would sit in the queue until a drain triggers a wasted swap.
+func TestFIFO_OnCancel_QueuedRequest(t *testing.T) {
+	eff := newFakeEffects()
+	eff.states["a"] = process.StateStopped
+	eff.states["b"] = process.StateStopped
+	// b evicts a, so a request for b queues while a is loading.
+	s := newFIFO(&stubPlanner{evict: map[string][]string{"b": {"a"}}}, eff)
+
+	s.OnRequest(req("a")) // StartSwap(a)
+
+	cancelledReq := reqCh("b")
+	s.OnRequest(cancelledReq) // queued (collides with a's in-flight swap)
+	if len(s.queued) != 1 {
+		t.Fatalf("queue len=%d want 1 before cancel", len(s.queued))
+	}
+
+	// Client disconnects.
+	s.OnCancel(cancelledReq)
+
+	if len(s.queued) != 0 {
+		t.Fatalf("queue len=%d want 0 after cancel", len(s.queued))
+	}
+
+	// a's swap finishes; drainQueue runs but b is gone — no swap for b.
+	eff.states["a"] = process.StateReady
+	s.OnSwapDone(SwapDone{ModelID: "a"})
+
+	if got := eff.startsFor("b"); got != 0 {
+		t.Errorf("StartSwap(b)=%d want 0 (cancelled request should not trigger a load)", got)
+	}
+}
+
+// TestFIFO_OnCancel_SwapWaiter verifies that cancelling a request that joined an
+// in-flight swap removes it from the waiter list. When the swap completes, the
+// cancelled waiter receives no grant and does not bump the in-flight count.
+func TestFIFO_OnCancel_SwapWaiter(t *testing.T) {
+	eff := newFakeEffects()
+	eff.states["a"] = process.StateStopped
+	s := newFIFO(&stubPlanner{}, eff)
+
+	liveReq := reqCh("a")
+	cancelledReq := reqCh("a")
+	s.OnRequest(liveReq)      // starts swap
+	s.OnRequest(cancelledReq) // joins
+
+	if sw := s.active["a"]; len(sw.waiters) != 2 {
+		t.Fatalf("waiters=%d want 2", len(sw.waiters))
+	}
+
+	s.OnCancel(cancelledReq)
+
+	if sw := s.active["a"]; len(sw.waiters) != 1 {
+		t.Fatalf("waiters=%d want 1 after cancel", len(sw.waiters))
+	}
+
+	// Swap finishes: only the live waiter is granted.
+	eff.states["a"] = process.StateReady
+	s.OnSwapDone(SwapDone{ModelID: "a"})
+
+	if got := eff.served("a"); got != 1 {
+		t.Errorf("served(a)=%d want 1 (only the non-cancelled waiter)", got)
+	}
+}
+
+// TestFIFO_OnCancel_NotPresent is a no-op: cancelling a request that was already
+// granted (and is no longer queued or waiting) must not affect anything.
+func TestFIFO_OnCancel_NotPresent(t *testing.T) {
+	eff := newFakeEffects()
+	eff.states["a"] = process.StateReady
+	s := newFIFO(&stubPlanner{}, eff)
+
+	r := reqCh("a")
+	s.OnRequest(r) // fast-path served immediately
+
+	// Cancel after grant — should be a harmless no-op.
+	s.OnCancel(r)
+
+	if got := eff.served("a"); got != 1 {
+		t.Errorf("served(a)=%d want 1 (cancel of granted request is a no-op)", got)
+	}
+	if len(s.queued) != 0 {
+		t.Errorf("queue should be empty, len=%d", len(s.queued))
 	}
 }
