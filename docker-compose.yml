@@ -21,16 +21,14 @@ services:
       - /backends
       - -watch-config
     volumes:
-      - /mnt/storage/lm_storage/models/gguf:/models
-      - /mnt/storage/lm_storage/backends:/backends
-      - /mnt/storage/lm_storage/configs/config.yaml:/etc/llama-swap/config/config.yaml
-      - /mnt/storage/ComfyUI/models:/ComfyUI-Models
-      - ./docker/build-llamacpp.sh:/usr/local/bin/build-llamacpp.sh
-      # - /mnt/c/Users/sross/.lmstudio/models:/models
-
-      - /mnt/storage/lm_storage/backends:/backends      # - /mnt/c/Users/sross/.ollama/models/blobs:/mnt/c/Users/sross/.ollama/models/blobs
-      # - ./backends/:/backends/
-      # - ./config.yaml:/etc/llama-swap/config/config.yaml
+      # - /mnt/storage/lm_storage/models/gguf:/models
+      # - /mnt/storage/lm_storage/backends:/backends
+      # - /mnt/storage/lm_storage/configs/config.yaml:/etc/llama-swap/config/config.yaml
+      # - /mnt/storage/ComfyUI/models:/ComfyUI-Models
+      - /mnt/c/Users/sross/.lmstudio/models:/models
+      - /mnt/c/Users/sross/.ollama/models/blobs:/mnt/c/Users/sross/.ollama/models/blobs
+      - ./backends/:/backends/
+      - ./config.yaml:/etc/llama-swap/config/config.yaml
       - ./docker/build-llamacpp.sh:/etc/llama-swap/config/build-llamacpp.sh
       - ./scripts/pipe-wrap.py:/usr/local/bin/pipe-wrap.py
     environment:
