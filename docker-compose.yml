@@ -32,6 +32,7 @@ services:
       # - ./backends/:/backends/
       # - ./config.yaml:/etc/llama-swap/config/config.yaml
       - ./docker/build-llamacpp.sh:/etc/llama-swap/config/build-llamacpp.sh
+      - ./scripts/pipe-wrap.py:/usr/local/bin/pipe-wrap.py
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
