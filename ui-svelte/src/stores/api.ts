@@ -176,15 +176,19 @@ export async function unloadSingleModel(model: string): Promise<void> {
   }
 }
 
-export async function loadModel(model: string): Promise<void> {
+export async function loadModel(model: string, signal?: AbortSignal): Promise<void> {
   try {
     const response = await fetch(`/upstream/${model}/`, {
       method: "GET",
+      signal,
     });
     if (!response.ok) {
       throw new Error(`Failed to load model: ${response.status}`);
     }
   } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      return;
+    }
     console.error("Failed to load model:", error);
     throw error;
   }
