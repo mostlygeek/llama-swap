@@ -178,7 +178,7 @@ export async function unloadSingleModel(model: string): Promise<void> {
 
 export async function loadModel(model: string, signal?: AbortSignal): Promise<void> {
   try {
-    const response = await fetch(`/upstream/${model}/`, {
+    const response = await fetch(`/upstream/${model}/?_=${Date.now()}`, {
       method: "GET",
       signal,
     });
