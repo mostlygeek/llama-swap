@@ -86,5 +86,3 @@ func ResolveVirtualSubID(cfg config.Config, search string) (peer *config.PeerCon
 	}
 	return nil, "", false
 }
-
-
