@@ -17,13 +17,14 @@ import (
 
 // apiModel is one entry in the /api/events modelStatus payload.
 type apiModel struct {
-	Id          string   `json:"id"`
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	State       string   `json:"state"`
-	Unlisted    bool     `json:"unlisted"`
-	PeerID      string   `json:"peerID"`
-	Aliases     []string `json:"aliases,omitempty"`
+	Id           string         `json:"id"`
+	Name         string         `json:"name"`
+	Description  string         `json:"description"`
+	State        string         `json:"state"`
+	Unlisted     bool           `json:"unlisted"`
+	PeerID       string         `json:"peerID"`
+	Aliases      []string       `json:"aliases,omitempty"`
+	Capabilities map[string]any `json:"capabilities,omitempty"`
 }
 
 // modelStatus returns every configured model joined with its current process
@@ -44,13 +45,15 @@ func (s *Server) modelStatus() []apiModel {
 		if st, ok := running[id]; ok {
 			state = string(st)
 		}
+		_, capsMap, _, _ := renderCapabilities(mc.Capabilities)
 		models = append(models, apiModel{
-			Id:          id,
-			Name:        mc.Name,
-			Description: mc.Description,
-			State:       state,
-			Unlisted:    mc.Unlisted,
-			Aliases:     mc.Aliases,
+			Id:           id,
+			Name:         mc.Name,
+			Description:  mc.Description,
+			State:        state,
+			Unlisted:     mc.Unlisted,
+			Aliases:      mc.Aliases,
+			Capabilities: capsMap,
 		})
 	}
 
