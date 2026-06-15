@@ -11,17 +11,17 @@ package scheduler
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
+	"github.com/mostlygeek/llama-swap/internal/shared"
 )
 
 // ErrModelNotFound is granted to callers whose model is not handled by this
-// router. The router package aliases it so SendError can match it.
-var ErrModelNotFound = fmt.Errorf("local model not found")
+// router. It is an alias for shared.ErrNoLocalModelFound.
+var ErrModelNotFound = shared.ErrNoLocalModelFound
 
 // Swapper is the eviction policy: it decides which running models must be
 // stopped before a target can serve. It is orthogonal to the scheduling
@@ -47,6 +47,11 @@ type Swapper interface {
 type Scheduler interface {
 	// OnRequest handles one incoming ServeHTTP request.
 	OnRequest(req HandlerReq)
+	// OnCancel handles a request whose client has disconnected before it was
+	// granted. The scheduler must remove the request from its queue and from
+	// any in-flight swap's waiters so it never triggers a model load or grant
+	// for a caller that is no longer there.
+	OnCancel(req HandlerReq)
 	// OnSwapDone handles a swap goroutine reporting completion.
 	OnSwapDone(ev SwapDone)
 	// OnServeDone handles a tracked ServeHTTP finishing (in-flight decrement).

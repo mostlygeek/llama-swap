@@ -7,12 +7,12 @@ import (
 	"testing"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
-	"github.com/mostlygeek/llama-swap/internal/router"
+	"github.com/mostlygeek/llama-swap/internal/shared"
 )
 
 func concurrencyTestReq(model string) *http.Request {
 	r := httptest.NewRequest("GET", "/v1/chat/completions", nil)
-	return r.WithContext(router.SetContext(r.Context(), router.ReqContextData{Model: model, ModelID: model}))
+	return r.WithContext(shared.SetContext(r.Context(), shared.ReqContextData{Model: model, ModelID: model}))
 }
 
 func TestServer_ConcurrencyMiddleware_RejectsOverLimit(t *testing.T) {

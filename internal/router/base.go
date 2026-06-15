@@ -12,6 +12,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/router/scheduler"
+	"github.com/mostlygeek/llama-swap/internal/shared"
 )
 
 type shutdownReq struct {
@@ -53,6 +54,7 @@ type baseRouter struct {
 	procCancel context.CancelFunc
 
 	handlerCh   chan scheduler.HandlerReq
+	cancelCh    chan scheduler.HandlerReq
 	shutdownCh  chan shutdownReq
 	unloadCh    chan unloadReq
 	swapDoneCh  chan scheduler.SwapDone
@@ -87,6 +89,7 @@ func newBaseRouter(
 		procCtx:     procCtx,
 		procCancel:  procCancel,
 		handlerCh:   make(chan scheduler.HandlerReq),
+		cancelCh:    make(chan scheduler.HandlerReq),
 		shutdownCh:  make(chan shutdownReq),
 		unloadCh:    make(chan unloadReq),
 		swapDoneCh:  make(chan scheduler.SwapDone),
@@ -114,6 +117,10 @@ func (b *baseRouter) run() {
 
 		case req := <-b.handlerCh:
 			b.schedule.OnRequest(req)
+			b.notifyProcessed()
+
+		case req := <-b.cancelCh:
+			b.schedule.OnCancel(req)
 			b.notifyProcessed()
 
 		case req := <-b.unloadCh:
@@ -399,13 +406,13 @@ func (b *baseRouter) Shutdown(timeout time.Duration) error {
 
 func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if b.shuttingDown.Load() {
-		SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
+		shared.SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
 		return
 	}
 
-	data, err := FetchContext(req, b.config)
+	data, err := shared.FetchContext(req, b.config)
 	if err != nil {
-		SendError(w, req, err)
+		shared.SendError(w, req, err)
 		return
 	}
 
@@ -424,7 +431,7 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	case <-req.Context().Done():
 		return
 	case <-b.shutdownCtx.Done():
-		SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
+		shared.SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
 		return
 	}
 
@@ -472,15 +479,23 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		finishLoading()
 	case <-req.Context().Done():
 		finishLoading()
+		// Notify the scheduler so it can prune this request from its queue
+		// and swap waiters. Without this, a queued request whose client left
+		// would sit in the scheduler until drainQueue eventually starts a
+		// wasted model load for it.
+		select {
+		case b.cancelCh <- hr:
+		case <-b.shutdownCtx.Done():
+		}
 		return
 	case <-b.shutdownCtx.Done():
 		finishLoading()
-		SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
+		shared.SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
 		return
 	}
 
 	if resp.Err != nil {
-		SendError(w, req, resp.Err)
+		shared.SendError(w, req, resp.Err)
 		return
 	}
 	resp.HandleFunc(w, req)

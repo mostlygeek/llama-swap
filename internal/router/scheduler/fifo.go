@@ -116,6 +116,46 @@ func (s *FIFO) OnRequest(req HandlerReq) {
 	s.startSwap(req, evict, running)
 }
 
+// OnCancel removes a request whose client has disconnected from the queue and
+// from every in-flight swap's waiters. If the request was the sole waiter of an
+// active swap, the swap goroutine is left to complete on its own — OnSwapDone
+// will find no waiters and simply clean up. This prevents drainQueue from ever
+// starting a model load for a caller that is no longer there.
+func (s *FIFO) OnCancel(req HandlerReq) {
+	removed := false
+
+	// Prune from the queue.
+	if len(s.queued) > 0 {
+		kept := s.queued[:0]
+		for _, q := range s.queued {
+			if q.Respond == req.Respond {
+				removed = true
+				continue
+			}
+			kept = append(kept, q)
+		}
+		s.queued = kept
+	}
+
+	// Prune from any active swap's waiters.
+	for _, sw := range s.active {
+		filtered := sw.waiters[:0]
+		for _, w := range sw.waiters {
+			if w.Respond == req.Respond {
+				removed = true
+				continue
+			}
+			filtered = append(filtered, w)
+		}
+		sw.waiters = filtered
+	}
+
+	if removed {
+		s.logger.Debugf("%s: cancelled request for model %s pruned from scheduler", s.name, req.Model)
+		broadcastQueuePositions(s.queued)
+	}
+}
+
 // OnSwapDone fans the result out to every waiter that joined this swap, removes
 // the swap from the active map, then walks the queue once, promoting any items
 // that no longer collide with the remaining active set. FIFO order is preserved:

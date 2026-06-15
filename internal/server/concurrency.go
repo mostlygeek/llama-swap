@@ -7,7 +7,7 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
-	"github.com/mostlygeek/llama-swap/internal/router"
+	"github.com/mostlygeek/llama-swap/internal/shared"
 )
 
 // defaultConcurrencyLimit caps simultaneous in-flight requests per model when
@@ -32,9 +32,9 @@ func CreateConcurrencyMiddleware(cfg config.Config) chain.Middleware {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			data, err := router.FetchContext(r, cfg)
+			data, err := shared.FetchContext(r, cfg)
 			if err != nil {
-				router.SendError(w, r, router.ErrNoModelInContext)
+				shared.SendError(w, r, shared.ErrNoModelInContext)
 				return
 			}
 

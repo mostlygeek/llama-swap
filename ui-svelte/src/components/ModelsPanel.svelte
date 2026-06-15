@@ -6,6 +6,8 @@
 
   let isUnloading = $state(false);
   let menuOpen = $state(false);
+  let pendingLoads = $state<Record<string, boolean>>({});
+  const loadControllers = new Map<string, AbortController>();
 
   const showUnlistedStore = persistentStore<boolean>("showUnlisted", true);
   const showIdorNameStore = persistentStore<"id" | "name">("showIdorName", "id");
@@ -40,6 +42,25 @@
     } finally {
       setTimeout(() => (isUnloading = false), 1000);
     }
+  }
+
+  async function handleLoadModel(modelId: string): Promise<void> {
+    if (pendingLoads[modelId]) return;
+    const controller = new AbortController();
+    loadControllers.set(modelId, controller);
+    pendingLoads[modelId] = true;
+    try {
+      await loadModel(modelId, controller.signal);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      loadControllers.delete(modelId);
+      delete pendingLoads[modelId];
+    }
+  }
+
+  function cancelLoad(modelId: string): void {
+    loadControllers.get(modelId)?.abort();
   }
 
   function toggleIdorName(): void {
@@ -170,14 +191,20 @@
               {/if}
             </td>
             <td class="w-12">
-              {#if model.state === "stopped"}
-                <button class="btn btn--sm" onclick={() => loadModel(model.id)}>Load</button>
+              {#if model.state === "stopped" && pendingLoads[model.id]}
+                <button class="btn btn--sm" onclick={() => cancelLoad(model.id)}>Cancel</button>
+              {:else if model.state === "stopped"}
+                <button class="btn btn--sm" onclick={() => handleLoadModel(model.id)}>Load</button>
               {:else}
                 <button class="btn btn--sm" onclick={() => unloadSingleModel(model.id)} disabled={model.state !== "ready"}>Unload</button>
               {/if}
             </td>
             <td class="w-20">
-              <span class="w-16 text-center status status--{model.state}">{model.state}</span>
+              {#if model.state === "stopped" && pendingLoads[model.id]}
+                <span class="w-16 text-center status status--queued">queued</span>
+              {:else}
+                <span class="w-16 text-center status status--{model.state}">{model.state}</span>
+              {/if}
             </td>
           </tr>
         {/each}
