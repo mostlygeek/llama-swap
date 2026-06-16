@@ -157,3 +157,262 @@ func TestServer_Redirects(t *testing.T) {
 		}
 	}
 }
+
+func TestServer_HandleListModels_Capabilities(t *testing.T) {
+	newServer := func(mc config.ModelConfig) *Server {
+		s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
+		s.cfg = config.Config{Models: map[string]config.ModelConfig{"m": mc}}
+		return s
+	}
+	getModel := func(t *testing.T, s *Server) modelRecord {
+		t.Helper()
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
+		var resp struct {
+			Data []modelRecord `json:"data"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(resp.Data) != 1 {
+			t.Fatalf("expected 1 model, got %d", len(resp.Data))
+		}
+		return resp.Data[0]
+	}
+
+	t.Run("all_fields", func(t *testing.T) {
+		m := getModel(t, newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{
+				In:      []string{"text", "image"},
+				Out:     []string{"text", "audio"},
+				Tools:   true,
+				Context: 100000,
+			},
+		}))
+		if m.Architecture == nil {
+			t.Fatal("architecture is nil")
+		}
+		if !anySliceStrEqual(m.Architecture["input_modalities"], []string{"text", "image"}) {
+			t.Errorf("input_modalities = %v", m.Architecture["input_modalities"])
+		}
+		if !anySliceStrEqual(m.Architecture["output_modalities"], []string{"text", "audio"}) {
+			t.Errorf("output_modalities = %v", m.Architecture["output_modalities"])
+		}
+		if m.Architecture["modality"] != "text+image->text+audio" {
+			t.Errorf("modality = %v", m.Architecture["modality"])
+		}
+		if m.Capabilities == nil || m.Capabilities["vision"] != true {
+			t.Errorf("vision = %v", m.Capabilities)
+		}
+		if m.Capabilities["audio_speech"] != true {
+			t.Errorf("audio_speech = %v", m.Capabilities["audio_speech"])
+		}
+		if m.Capabilities["function_calling"] != true {
+			t.Errorf("function_calling = %v", m.Capabilities["function_calling"])
+		}
+		if !stringSliceEqual(m.SupportedParameters, []string{"tools", "tool_choice"}) {
+			t.Errorf("supported_parameters = %v", m.SupportedParameters)
+		}
+		if m.ContextLength != 100000 {
+			t.Errorf("context_length = %d", m.ContextLength)
+		}
+	})
+
+	t.Run("in_only", func(t *testing.T) {
+		m := getModel(t, newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{In: []string{"text", "image"}},
+		}))
+		if m.Architecture == nil {
+			t.Fatal("architecture is nil")
+		}
+		if _, ok := m.Architecture["output_modalities"]; ok {
+			t.Error("should not have output_modalities")
+		}
+		if _, ok := m.Architecture["modality"]; ok {
+			t.Error("should not have modality")
+		}
+		if m.Capabilities == nil || m.Capabilities["vision"] != true {
+			t.Error("expected vision: true")
+		}
+		if m.SupportedParameters != nil {
+			t.Error("should not have supported_parameters")
+		}
+		if m.ContextLength != 0 {
+			t.Error("should not have context_length")
+		}
+	})
+
+	t.Run("out_only", func(t *testing.T) {
+		m := getModel(t, newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{Out: []string{"audio"}},
+		}))
+		if m.Architecture == nil {
+			t.Fatal("architecture is nil")
+		}
+		if _, ok := m.Architecture["input_modalities"]; ok {
+			t.Error("should not have input_modalities")
+		}
+		if len(m.Capabilities) > 0 {
+			t.Errorf("expected no capabilities, got %v", m.Capabilities)
+		}
+	})
+
+	t.Run("tools", func(t *testing.T) {
+		m := getModel(t, newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{Tools: true},
+		}))
+		if m.Capabilities == nil || m.Capabilities["function_calling"] != true {
+			t.Error("expected function_calling: true")
+		}
+		if !stringSliceEqual(m.SupportedParameters, []string{"tools", "tool_choice"}) {
+			t.Errorf("supported_parameters = %v", m.SupportedParameters)
+		}
+		if m.Architecture != nil {
+			t.Error("should not have architecture")
+		}
+	})
+
+	t.Run("reranker", func(t *testing.T) {
+		m := getModel(t, newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{Reranker: true},
+		}))
+		if m.Capabilities == nil || m.Capabilities["reranker"] != true {
+			t.Error("expected reranker: true")
+		}
+		if m.Architecture != nil {
+			t.Error("should not have architecture")
+		}
+	})
+
+	t.Run("context", func(t *testing.T) {
+		m := getModel(t, newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{Context: 32768},
+		}))
+		if m.ContextLength != 32768 {
+			t.Errorf("context_length = %d", m.ContextLength)
+		}
+		if m.Architecture != nil {
+			t.Error("should not have architecture")
+		}
+	})
+
+	t.Run("audio_transcriptions", func(t *testing.T) {
+		m := getModel(t, newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{In: []string{"audio"}, Out: []string{"text"}},
+		}))
+		if m.Capabilities == nil || m.Capabilities["audio_transcriptions"] != true {
+			t.Error("expected audio_transcriptions: true")
+		}
+	})
+
+	t.Run("image_generation", func(t *testing.T) {
+		m := getModel(t, newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{In: []string{"text"}, Out: []string{"image"}},
+		}))
+		if m.Capabilities == nil || m.Capabilities["image_generation"] != true {
+			t.Error("expected image_generation: true")
+		}
+	})
+
+	t.Run("image_to_image", func(t *testing.T) {
+		m := getModel(t, newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{In: []string{"image"}, Out: []string{"image"}},
+		}))
+		if m.Capabilities == nil || m.Capabilities["image_to_image"] != true {
+			t.Error("expected image_to_image: true")
+		}
+	})
+
+	t.Run("empty_skip", func(t *testing.T) {
+		m := getModel(t, newServer(config.ModelConfig{}))
+		if m.Architecture != nil {
+			t.Error("should not have architecture")
+		}
+		if m.Capabilities != nil {
+			t.Error("should not have capabilities")
+		}
+		if m.SupportedParameters != nil {
+			t.Error("should not have supported_parameters")
+		}
+		if m.ContextLength != 0 {
+			t.Error("should not have context_length")
+		}
+	})
+
+	t.Run("metadata_precedence", func(t *testing.T) {
+		m := getModel(t, newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{In: []string{"text"}},
+			Metadata: map[string]any{
+				"architecture":   "should-be-dropped",
+				"custom_field":   "should-remain",
+				"capabilities":   "also-dropped",
+				"other_metadata": "also-remain",
+			},
+		}))
+		if m.Architecture == nil || m.Architecture["input_modalities"] == nil {
+			t.Fatal("architecture should be rendered, not from metadata")
+		}
+		if m.Meta == nil || m.Meta["llamaswap"] == nil {
+			t.Fatal("meta.llamaswap should exist")
+		}
+		meta := m.Meta["llamaswap"].(map[string]any)
+		if _, ok := meta["architecture"]; ok {
+			t.Error("architecture should be filtered from metadata")
+		}
+		if _, ok := meta["custom_field"]; !ok {
+			t.Error("custom_field should remain in metadata")
+		}
+	})
+
+	t.Run("metadata_passthrough_no_caps", func(t *testing.T) {
+		m := getModel(t, newServer(config.ModelConfig{
+			Metadata: map[string]any{
+				"architecture":   "preserved",
+				"context_length": 4096,
+				"capabilities":   "preserved",
+				"custom_field":   "preserved",
+			},
+		}))
+		if m.Architecture != nil {
+			t.Error("should not have architecture when caps is empty")
+		}
+		if m.Meta == nil || m.Meta["llamaswap"] == nil {
+			t.Fatal("meta.llamaswap should exist")
+		}
+		meta := m.Meta["llamaswap"].(map[string]any)
+		if _, ok := meta["architecture"]; !ok {
+			t.Error("architecture should be preserved in metadata when caps is empty")
+		}
+		if _, ok := meta["context_length"]; !ok {
+			t.Error("context_length should be preserved in metadata when caps is empty")
+		}
+	})
+}
+
+func stringSliceEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func anySliceStrEqual(v any, want []string) bool {
+	arr, ok := v.([]any)
+	if !ok {
+		return false
+	}
+	if len(arr) != len(want) {
+		return false
+	}
+	for i := range arr {
+		if s, ok := arr[i].(string); !ok || s != want[i] {
+			return false
+		}
+	}
+	return true
+}

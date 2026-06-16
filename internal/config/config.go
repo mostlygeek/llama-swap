@@ -453,6 +453,10 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			}
 		}
 
+		if err = modelConfig.Capabilities.Validate(); err != nil {
+			return Config{}, fmt.Errorf("model %s: %w", modelId, err)
+		}
+
 		// Validate SetParamsByID keys and values
 		for key, paramMap := range modelConfig.Filters.SetParamsByID {
 			if matches := macroPatternRegex.FindAllStringSubmatch(key, -1); len(matches) > 0 {
