@@ -142,9 +142,12 @@
 
   $effect(() => {
     const staticKeys = new Set(columns.map((c) => c.key));
-    const cleaned = $columnOrder.filter((k) => staticKeys.has(k));
-    if (cleaned.length !== $columnOrder.length) {
-      columnOrder.set(cleaned);
+    const order = $columnOrder;
+    const hasStale = order.some((k) => !staticKeys.has(k));
+    const missing = columns.filter((c) => !order.includes(c.key)).map((c) => c.key);
+    if (hasStale || missing.length > 0) {
+      const cleaned = order.filter((k) => staticKeys.has(k));
+      columnOrder.set([...cleaned, ...missing]);
     }
   });
 
