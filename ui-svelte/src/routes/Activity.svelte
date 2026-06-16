@@ -2,14 +2,13 @@
   import { metrics, getCapture } from "../stores/api";
   import ActivityStats from "../components/ActivityStats.svelte";
   import Tooltip from "../components/Tooltip.svelte";
+  import MetadataTooltip from "../components/MetadataTooltip.svelte";
   import CaptureDialog from "../components/CaptureDialog.svelte";
   import { persistentStore } from "../stores/persistent";
   import { onMount } from "svelte";
   import type { ReqRespCapture } from "../lib/types";
 
   type ColumnKey = string;
-
-  const META_PREFIX = "meta:";
 
   interface ColumnDef {
     key: ColumnKey;
@@ -31,12 +30,12 @@
     { key: "gen_speed", label: "Gen Speed", defaultVisible: true },
     { key: "duration", label: "Duration", defaultVisible: true },
     { key: "capture", label: "Capture", defaultVisible: true },
+    { key: "meta", label: "Meta", defaultVisible: false },
   ];
 
   const defaultVisibleKeys = columns.filter((c) => c.defaultVisible).map((c) => c.key);
 
   const visibleColumns = persistentStore<ColumnKey[]>("activity-columns", defaultVisibleKeys);
-  const hiddenMetadataColumns = persistentStore<ColumnKey[]>("activity-hidden-metadata", []);
   const columnOrder = persistentStore<ColumnKey[]>(
     "activity-column-order",
     columns.map((c) => c.key)
@@ -66,29 +65,7 @@
     };
   });
 
-  function isMetaKey(key: ColumnKey): boolean {
-    return key.startsWith(META_PREFIX);
-  }
-
-  function metaKey(name: string): ColumnKey {
-    return META_PREFIX + name;
-  }
-
-  function metaLabel(key: ColumnKey): string {
-    return key.slice(META_PREFIX.length);
-  }
-
   function toggleColumn(key: ColumnKey) {
-    if (isMetaKey(key)) {
-      hiddenMetadataColumns.update((hidden) => {
-        if (hidden.includes(key)) {
-          return hidden.filter((k) => k !== key);
-        }
-        return [...hidden, key];
-      });
-      return;
-    }
-
     const current = $visibleColumns;
     if (current.includes(key)) {
       if (current.length > 1) {
@@ -100,9 +77,6 @@
   }
 
   function isColumnVisible(key: ColumnKey): boolean {
-    if (isMetaKey(key)) {
-      return !$hiddenMetadataColumns.includes(key);
-    }
     return $visibleColumns.includes(key);
   }
 
@@ -139,32 +113,38 @@
     dragOverKey = null;
   }
 
-  let metadataKeys = $derived(
-    Array.from(new Set($metrics.flatMap((m) => Object.keys(m.metadata || {})))).sort()
-  );
-
-  let metadataColumns = $derived(
-    metadataKeys.map((k) => ({ key: metaKey(k), label: k, defaultVisible: true }))
-  );
-
-  let allColumns = $derived([...columns, ...metadataColumns]);
-
   let orderedColumns = $derived(
-    $columnOrder
-      .map((key) => allColumns.find((c) => c.key === key))
-      .filter((c): c is ColumnDef => c !== undefined)
+    columns.slice().sort((a, b) => {
+      const aIndex = $columnOrder.indexOf(a.key);
+      const bIndex = $columnOrder.indexOf(b.key);
+      if (aIndex === -1 && bIndex === -1) return 0;
+      if (aIndex === -1) return 1;
+      if (bIndex === -1) return -1;
+      return aIndex - bIndex;
+    })
   );
 
-  let activeVisibleColumns = $derived($columnOrder.filter((key) => isColumnVisible(key)));
+  let activeVisibleColumns = $derived(
+    columns
+      .filter((c) => isColumnVisible(c.key))
+      .sort((a, b) => {
+        const aIndex = $columnOrder.indexOf(a.key);
+        const bIndex = $columnOrder.indexOf(b.key);
+        if (aIndex === -1 && bIndex === -1) return 0;
+        if (aIndex === -1) return 1;
+        if (bIndex === -1) return -1;
+        return aIndex - bIndex;
+      })
+      .map((c) => c.key)
+  );
 
-  let columnLabelMap = $derived(Object.fromEntries(allColumns.map((c) => [c.key, c.label])));
+  let columnLabelMap = $derived(Object.fromEntries(columns.map((c) => [c.key, c.label])));
 
   $effect(() => {
-    const order = $columnOrder;
-    const metaKeys = metadataColumns.map((c) => c.key);
-    const newKeys = metaKeys.filter((k) => !order.includes(k));
-    if (newKeys.length > 0) {
-      columnOrder.set([...order, ...newKeys]);
+    const staticKeys = new Set(columns.map((c) => c.key));
+    const cleaned = $columnOrder.filter((k) => staticKeys.has(k));
+    if (cleaned.length !== $columnOrder.length) {
+      columnOrder.set(cleaned);
     }
   });
 
@@ -342,8 +322,14 @@
                     {:else}
                       <span class="text-txtsecondary">-</span>
                     {/if}
-                  {:else if isMetaKey(key)}
-                    {metric.metadata?.[metaLabel(key)] ?? "-"}
+                  {:else if key === "meta"}
+                    {#if Object.keys(metric.metadata || {}).length > 0}
+                      <MetadataTooltip metadata={metric.metadata}>
+                        <span class="cursor-help text-txtsecondary hover:text-txtmain">...</span>
+                      </MetadataTooltip>
+                    {:else}
+                      <span class="text-txtsecondary">-</span>
+                    {/if}
                   {:else}
                     -
                   {/if}
