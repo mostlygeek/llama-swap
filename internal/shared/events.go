@@ -65,12 +65,12 @@ const (
 
 // BackendBuildProgressEvent is emitted during a llama.cpp backend build.
 type BackendBuildProgressEvent struct {
-	TaskID  string       `json:"taskID"`
-	Repo    string       `json:"repo"`
-	Branch  string       `json:"branch"`
+	TaskID  string        `json:"taskID"`
+	Repo    string        `json:"repo"`
+	Branch  string        `json:"branch"`
 	State   ProgressState `json:"state"`
-	Message string       `json:"message"`
-	Pct     int          `json:"pct"`
+	Message string        `json:"message"`
+	Pct     int           `json:"pct"`
 }
 
 func (e BackendBuildProgressEvent) Type() uint32 {
@@ -79,12 +79,12 @@ func (e BackendBuildProgressEvent) Type() uint32 {
 
 // ModelDownloadProgressEvent is emitted during a HuggingFace model download.
 type ModelDownloadProgressEvent struct {
-	TaskID   string       `json:"taskID"`
-	ModelID  string       `json:"modelID"`
-	Filename string       `json:"filename"`
+	TaskID   string        `json:"taskID"`
+	ModelID  string        `json:"modelID"`
+	Filename string        `json:"filename"`
 	State    ProgressState `json:"state"`
-	Message  string       `json:"message"`
-	Pct      int          `json:"pct"`
+	Message  string        `json:"message"`
+	Pct      int           `json:"pct"`
 }
 
 func (e ModelDownloadProgressEvent) Type() uint32 {
