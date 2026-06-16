@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(wsl -e bash -c \"cd /mnt/w/llama-mantle && go build ./... 2>&1\")"
-    ]
-  }
-}
