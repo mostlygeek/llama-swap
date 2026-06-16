@@ -28,8 +28,7 @@ type unloadReq struct {
 
 // baseRouter owns the channels, run-loop, and process machinery shared by every
 // concrete router. Concrete routers embed *baseRouter and supply a
-// scheduler.Factory (which captures their scheduler.Swapper) describing how
-// requests are scheduled and how their eviction set is decided. baseRouter
+// scheduler.Swapper describing how eviction sets are decided. baseRouter
 // implements scheduler.Effects so the scheduler can call back for side-effects.
 type baseRouter struct {
 	name      string
@@ -75,8 +74,8 @@ func newBaseRouter(
 	conf config.Config,
 	processes map[string]process.Process,
 	logger *logmon.Monitor,
-	newSched scheduler.Factory,
-) *baseRouter {
+	planner scheduler.Swapper,
+) (*baseRouter, error) {
 	shutdownCtx, shutdownFn := context.WithCancel(context.Background())
 	procCtx, procCancel := context.WithCancel(context.Background())
 	b := &baseRouter{
@@ -96,8 +95,12 @@ func newBaseRouter(
 		serveDoneCh: make(chan scheduler.ServeDoneEvent),
 		runDone:     make(chan struct{}),
 	}
-	b.schedule = newSched(name, logger, b)
-	return b
+	sched, err := scheduler.New(conf, name, logger, planner, b)
+	if err != nil {
+		return nil, err
+	}
+	b.schedule = sched
+	return b, nil
 }
 
 func (b *baseRouter) notifyProcessed() {

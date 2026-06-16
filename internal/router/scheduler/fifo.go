@@ -8,7 +8,12 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
+	"github.com/mostlygeek/llama-swap/internal/shared"
 )
+
+// defaultConcurrencyLimit caps simultaneous in-flight requests per model when
+// the model config leaves concurrencyLimit unset.
+const defaultConcurrencyLimit = 10
 
 // activeSwap tracks one in-flight swap and the callers waiting on it.
 type activeSwap struct {
@@ -33,20 +38,32 @@ type FIFO struct {
 	cfg     config.FifoConfig
 	effects Effects
 
+	limits   map[string]int
 	active   map[string]*activeSwap
 	inFlight map[string]int
 	queued   []HandlerReq
 }
 
-// NewFIFO builds a FIFO scheduler. It matches scheduler.Factory once a planner
-// is captured in a closure.
-func NewFIFO(name string, logger *logmon.Monitor, planner Swapper, cfg config.FifoConfig, eff Effects) *FIFO {
+// NewFIFO builds a FIFO scheduler. Per-model concurrency limits are derived
+// from models: each model's ConcurrencyLimit overrides defaultConcurrencyLimit
+// when set to a value greater than zero.
+func NewFIFO(name string, logger *logmon.Monitor, planner Swapper, cfg config.FifoConfig, models map[string]config.ModelConfig, eff Effects) *FIFO {
+	limits := make(map[string]int, len(models))
+	for id, mc := range models {
+		limit := defaultConcurrencyLimit
+		if mc.ConcurrencyLimit > 0 {
+			limit = mc.ConcurrencyLimit
+		}
+		limits[id] = limit
+	}
+
 	return &FIFO{
 		name:     name,
 		logger:   logger,
 		planner:  planner,
 		cfg:      cfg,
 		effects:  eff,
+		limits:   limits,
 		active:   make(map[string]*activeSwap),
 		inFlight: make(map[string]int),
 	}
@@ -254,10 +271,25 @@ func (s *FIFO) OnShutdown(err error) {
 // grantHandler hands the caller a tracked handler for modelID and, only if the
 // caller was still there to receive it, bumps the in-flight count. Incrementing
 // when the grant failed would strand the counter and block future evictions.
+// Requests that would exceed the model's concurrency limit are rejected with a
+// shared.NewConcurrencyLimitError (HTTP 429 with Retry-After).
 func (s *FIFO) grantHandler(req HandlerReq, modelID string) {
+	if s.inFlight[modelID] >= s.limit(modelID) {
+		s.effects.GrantError(req, shared.ConcurrencyLimitError{})
+		return
+	}
 	if s.effects.GrantServe(req, modelID) {
 		s.inFlight[modelID]++
 	}
+}
+
+// limit returns the per-model concurrency cap, defaulting to
+// defaultConcurrencyLimit when the model has no explicit entry.
+func (s *FIFO) limit(modelID string) int {
+	if l, ok := s.limits[modelID]; ok {
+		return l
+	}
+	return defaultConcurrencyLimit
 }
 
 // startSwap records the swap as active and launches it via Effects. running is
