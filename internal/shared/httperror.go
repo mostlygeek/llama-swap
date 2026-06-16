@@ -1,6 +1,7 @@
 package shared
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 )
@@ -37,12 +38,14 @@ func (e ConcurrencyLimitError) StatusCode() int { return http.StatusTooManyReque
 
 func (e ConcurrencyLimitError) Header() http.Header {
 	h := http.Header{}
+	h.Set("Content-Type", "application/json")
 	h.Set("Retry-After", e.retryAfter())
 	return h
 }
 
 func (e ConcurrencyLimitError) Body() []byte {
-	return []byte(`{"error":"` + e.message() + `"}`)
+	b, _ := json.Marshal(map[string]string{"error": e.message()})
+	return b
 }
 
 func (e ConcurrencyLimitError) retryAfter() string {
