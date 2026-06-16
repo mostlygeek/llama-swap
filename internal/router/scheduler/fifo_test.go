@@ -3,6 +3,7 @@ package scheduler
 import (
 	"errors"
 	"io"
+	"net/http"
 	"testing"
 	"time"
 
@@ -658,13 +659,20 @@ func TestFIFO_ConcurrencyLimit_RejectsOverLimit(t *testing.T) {
 		t.Fatalf("served(a)=%d want 1", got)
 	}
 
-	// Second request while slot is occupied: rejected.
+	// Second request while slot is occupied: rejected with HTTPError 429.
 	s.OnRequest(req("a"))
 	if got := eff.errored("a"); got != 1 {
 		t.Fatalf("errored(a)=%d want 1 (over-limit)", got)
 	}
-	if !errors.Is(eff.grants[len(eff.grants)-1].err, shared.ErrConcurrencyLimit) {
-		t.Fatalf("err=%v want ErrConcurrencyLimit", eff.grants[len(eff.grants)-1].err)
+	var httpErr shared.HTTPError
+	if !errors.As(eff.grants[len(eff.grants)-1].err, &httpErr) {
+		t.Fatalf("err=%v want HTTPError", eff.grants[len(eff.grants)-1].err)
+	}
+	if httpErr.StatusCode() != http.StatusTooManyRequests {
+		t.Fatalf("StatusCode()=%d want 429", httpErr.StatusCode())
+	}
+	if httpErr.Header().Get("Retry-After") == "" {
+		t.Fatal("missing Retry-After header")
 	}
 
 	// After the in-flight request finishes, a new request succeeds.

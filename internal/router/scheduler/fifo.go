@@ -271,11 +271,11 @@ func (s *FIFO) OnShutdown(err error) {
 // grantHandler hands the caller a tracked handler for modelID and, only if the
 // caller was still there to receive it, bumps the in-flight count. Incrementing
 // when the grant failed would strand the counter and block future evictions.
-// Requests that would exceed the model's concurrency limit are rejected with
-// shared.ErrConcurrencyLimit instead of being served.
+// Requests that would exceed the model's concurrency limit are rejected with a
+// shared.NewConcurrencyLimitError (HTTP 429 with Retry-After).
 func (s *FIFO) grantHandler(req HandlerReq, modelID string) {
 	if s.inFlight[modelID] >= s.limit(modelID) {
-		s.effects.GrantError(req, shared.ErrConcurrencyLimit)
+		s.effects.GrantError(req, shared.ConcurrencyLimitError{})
 		return
 	}
 	if s.effects.GrantServe(req, modelID) {
