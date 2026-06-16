@@ -163,9 +163,8 @@
     const order = $columnOrder;
     const metaKeys = metadataColumns.map((c) => c.key);
     const newKeys = metaKeys.filter((k) => !order.includes(k));
-    const removedKeys = order.filter((k) => isMetaKey(k) && !metaKeys.includes(k));
-    if (newKeys.length > 0 || removedKeys.length > 0) {
-      columnOrder.set([...order.filter((k) => !removedKeys.includes(k)), ...newKeys]);
+    if (newKeys.length > 0) {
+      columnOrder.set([...order, ...newKeys]);
     }
   });
 
