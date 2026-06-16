@@ -15,6 +15,7 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/shared"
 )
 
 type peerMember struct {
@@ -146,22 +147,22 @@ func (r *Peer) Shutdown(timeout time.Duration) error {
 
 func (r *Peer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if r.shuttingDown.Load() {
-		SendError(w, req, fmt.Errorf("peer proxy is shutting down"))
+		shared.SendError(w, req, fmt.Errorf("peer proxy is shutting down"))
 		return
 	}
 	r.inflight.Add(1)
 	defer r.inflight.Done()
 
-	data, err := FetchContext(req, r.cfg)
+	data, err := shared.FetchContext(req, r.cfg)
 	if err != nil {
-		SendError(w, req, err)
+		shared.SendError(w, req, err)
 		return
 	}
 
 	pp, found := r.peers[data.ModelID]
 	if !found {
 		r.logger.Warnf("peer model not found: %s", data.ModelID)
-		SendError(w, req, ErrNoPeerModelFound)
+		shared.SendError(w, req, ErrNoPeerModelFound)
 		return
 	}
 

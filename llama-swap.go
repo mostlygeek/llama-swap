@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -286,6 +287,11 @@ func main() {
 			os.Exit(1)
 		}
 	}()
+
+	if !shared.IsLoopbackAddr(listenAddr) {
+		_, port, _ := net.SplitHostPort(listenAddr)
+		proxyLog.Infof("llama-swap is reachable by all hosts on the network, use -listen localhost:%s to restrict to loopback only", port)
+	}
 
 	exitChan := make(chan struct{})
 

@@ -139,7 +139,8 @@
   }
 
   .status--starting,
-  .status--stopping {
+  .status--stopping,
+  .status--queued {
     @apply bg-warning/10 text-warning;
   }
 

@@ -8,7 +8,12 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
+	"github.com/mostlygeek/llama-swap/internal/shared"
 )
+
+// defaultConcurrencyLimit caps simultaneous in-flight requests per model when
+// the model config leaves concurrencyLimit unset.
+const defaultConcurrencyLimit = 10
 
 // activeSwap tracks one in-flight swap and the callers waiting on it.
 type activeSwap struct {
@@ -33,20 +38,32 @@ type FIFO struct {
 	cfg     config.FifoConfig
 	effects Effects
 
+	limits   map[string]int
 	active   map[string]*activeSwap
 	inFlight map[string]int
 	queued   []HandlerReq
 }
 
-// NewFIFO builds a FIFO scheduler. It matches scheduler.Factory once a planner
-// is captured in a closure.
-func NewFIFO(name string, logger *logmon.Monitor, planner Swapper, cfg config.FifoConfig, eff Effects) *FIFO {
+// NewFIFO builds a FIFO scheduler. Per-model concurrency limits are derived
+// from models: each model's ConcurrencyLimit overrides defaultConcurrencyLimit
+// when set to a value greater than zero.
+func NewFIFO(name string, logger *logmon.Monitor, planner Swapper, cfg config.FifoConfig, models map[string]config.ModelConfig, eff Effects) *FIFO {
+	limits := make(map[string]int, len(models))
+	for id, mc := range models {
+		limit := defaultConcurrencyLimit
+		if mc.ConcurrencyLimit > 0 {
+			limit = mc.ConcurrencyLimit
+		}
+		limits[id] = limit
+	}
+
 	return &FIFO{
 		name:     name,
 		logger:   logger,
 		planner:  planner,
 		cfg:      cfg,
 		effects:  eff,
+		limits:   limits,
 		active:   make(map[string]*activeSwap),
 		inFlight: make(map[string]int),
 	}
@@ -114,6 +131,46 @@ func (s *FIFO) OnRequest(req HandlerReq) {
 	// (6) Start a new (possibly parallel) swap.
 	s.logger.Debugf("%s: starting swap for model %s, evicting %v", s.name, req.Model, evict)
 	s.startSwap(req, evict, running)
+}
+
+// OnCancel removes a request whose client has disconnected from the queue and
+// from every in-flight swap's waiters. If the request was the sole waiter of an
+// active swap, the swap goroutine is left to complete on its own — OnSwapDone
+// will find no waiters and simply clean up. This prevents drainQueue from ever
+// starting a model load for a caller that is no longer there.
+func (s *FIFO) OnCancel(req HandlerReq) {
+	removed := false
+
+	// Prune from the queue.
+	if len(s.queued) > 0 {
+		kept := s.queued[:0]
+		for _, q := range s.queued {
+			if q.Respond == req.Respond {
+				removed = true
+				continue
+			}
+			kept = append(kept, q)
+		}
+		s.queued = kept
+	}
+
+	// Prune from any active swap's waiters.
+	for _, sw := range s.active {
+		filtered := sw.waiters[:0]
+		for _, w := range sw.waiters {
+			if w.Respond == req.Respond {
+				removed = true
+				continue
+			}
+			filtered = append(filtered, w)
+		}
+		sw.waiters = filtered
+	}
+
+	if removed {
+		s.logger.Debugf("%s: cancelled request for model %s pruned from scheduler", s.name, req.Model)
+		broadcastQueuePositions(s.queued)
+	}
 }
 
 // OnSwapDone fans the result out to every waiter that joined this swap, removes
@@ -214,10 +271,25 @@ func (s *FIFO) OnShutdown(err error) {
 // grantHandler hands the caller a tracked handler for modelID and, only if the
 // caller was still there to receive it, bumps the in-flight count. Incrementing
 // when the grant failed would strand the counter and block future evictions.
+// Requests that would exceed the model's concurrency limit are rejected with a
+// shared.NewConcurrencyLimitError (HTTP 429 with Retry-After).
 func (s *FIFO) grantHandler(req HandlerReq, modelID string) {
+	if s.inFlight[modelID] >= s.limit(modelID) {
+		s.effects.GrantError(req, shared.ConcurrencyLimitError{})
+		return
+	}
 	if s.effects.GrantServe(req, modelID) {
 		s.inFlight[modelID]++
 	}
+}
+
+// limit returns the per-model concurrency cap, defaulting to
+// defaultConcurrencyLimit when the model has no explicit entry.
+func (s *FIFO) limit(modelID string) int {
+	if l, ok := s.limits[modelID]; ok {
+		return l
+	}
+	return defaultConcurrencyLimit
 }
 
 // startSwap records the swap as active and launches it via Effects. running is
