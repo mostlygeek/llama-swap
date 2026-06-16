@@ -1,5 +1,6 @@
 <script lang="ts">
   import { models } from "../../stores/api";
+  import { connectionState } from "../../stores/theme";
   import { persistentStore } from "../../stores/persistent";
   import { streamChatCompletion } from "../../lib/chatApi";
 
@@ -392,7 +393,9 @@
         Models <span class="text-[10px] font-normal">— click to queue (add the same model more than once to test parallel requests)</span>
       </div>
       <div class="flex-1 border border-gray-200 dark:border-white/10 rounded overflow-y-auto min-h-0">
-        {#if !hasModels}
+        {#if $connectionState !== "connected"}
+          <div class="p-3 text-sm text-txtsecondary text-center">Connecting…</div>
+        {:else if !hasModels}
           <div class="p-3 text-sm text-txtsecondary text-center">No models configured.</div>
         {:else}
           <ul class="divide-y divide-gray-100 dark:divide-white/5">

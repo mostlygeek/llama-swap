@@ -59,6 +59,9 @@ func (s *Server) modelStatus() []apiModel {
 
 	for peerID, peer := range s.cfg.Peers {
 		for _, modelID := range peer.Models {
+			if _, local := s.cfg.Models[modelID]; local {
+				continue // local model takes precedence; skip peer duplicate
+			}
 			models = append(models, apiModel{Id: modelID, PeerID: peerID})
 		}
 	}
