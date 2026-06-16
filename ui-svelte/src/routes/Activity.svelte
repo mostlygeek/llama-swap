@@ -37,9 +37,15 @@
 
   const visibleColumns = persistentStore<ColumnKey[]>("activity-columns", defaultVisibleKeys);
   const hiddenMetadataColumns = persistentStore<ColumnKey[]>("activity-hidden-metadata", []);
+  const columnOrder = persistentStore<ColumnKey[]>(
+    "activity-column-order",
+    columns.map((c) => c.key)
+  );
 
   let columnsMenuOpen = $state(false);
   let dropdownContainer: HTMLDivElement | null = null;
+  let dragKey: ColumnKey | null = $state(null);
+  let dragOverKey: ColumnKey | null = $state(null);
 
   onMount(() => {
     function handleKeydown(e: KeyboardEvent) {
@@ -100,6 +106,39 @@
     return $visibleColumns.includes(key);
   }
 
+  function handleDragStart(e: DragEvent, key: ColumnKey) {
+    dragKey = key;
+    e.dataTransfer?.setData("text/plain", key);
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "move";
+    }
+  }
+
+  function handleDragOver(e: DragEvent, key: ColumnKey) {
+    e.preventDefault();
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = "move";
+    }
+    dragOverKey = key;
+  }
+
+  function handleDrop(e: DragEvent, targetKey: ColumnKey) {
+    e.preventDefault();
+    if (!dragKey || dragKey === targetKey) return;
+    const order = [...$columnOrder];
+    const fromIndex = order.indexOf(dragKey);
+    const toIndex = order.indexOf(targetKey);
+    if (fromIndex === -1 || toIndex === -1) return;
+    order.splice(fromIndex, 1);
+    order.splice(toIndex, 0, dragKey);
+    columnOrder.set(order);
+  }
+
+  function handleDragEnd() {
+    dragKey = null;
+    dragOverKey = null;
+  }
+
   let metadataKeys = $derived(
     Array.from(new Set($metrics.flatMap((m) => Object.keys(m.metadata || {})))).sort()
   );
@@ -110,12 +149,25 @@
 
   let allColumns = $derived([...columns, ...metadataColumns]);
 
-  let activeVisibleColumns = $derived([
-    ...$visibleColumns.filter((k) => !isMetaKey(k)),
-    ...metadataColumns.filter((c) => !$hiddenMetadataColumns.includes(c.key)).map((c) => c.key),
-  ]);
+  let orderedColumns = $derived(
+    $columnOrder
+      .map((key) => allColumns.find((c) => c.key === key))
+      .filter((c): c is ColumnDef => c !== undefined)
+  );
+
+  let activeVisibleColumns = $derived($columnOrder.filter((key) => isColumnVisible(key)));
 
   let columnLabelMap = $derived(Object.fromEntries(allColumns.map((c) => [c.key, c.label])));
+
+  $effect(() => {
+    const order = $columnOrder;
+    const metaKeys = metadataColumns.map((c) => c.key);
+    const newKeys = metaKeys.filter((k) => !order.includes(k));
+    const removedKeys = order.filter((k) => isMetaKey(k) && !metaKeys.includes(k));
+    if (newKeys.length > 0 || removedKeys.length > 0) {
+      columnOrder.set([...order.filter((k) => !removedKeys.includes(k)), ...newKeys]);
+    }
+  });
 
   function formatSpeed(speed: number): string {
     return speed < 0 ? "unknown" : speed.toFixed(2) + " t/s";
@@ -190,41 +242,38 @@
           </svg>
         </button>
         {#if columnsMenuOpen}
-          <div class="absolute right-0 top-full mt-1 bg-surface border border-gray-200 dark:border-white/10 rounded shadow-lg z-10 py-1 min-w-[16rem]">
-            <div class="px-3 py-2 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-white/10">
+          <div class="absolute right-0 top-full mt-1 bg-surface border border-gray-200 dark:border-white/10 rounded shadow-lg z-10 py-1 min-w-[16rem]" role="list">
+            <div class="px-3 py-2 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-white/10" role="presentation">
               Columns
             </div>
-            {#each columns as col (col.key)}
-              <label
-                class="flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-secondary-hover transition-colors"
+            {#each orderedColumns as col (col.key)}
+              {@const key = col.key}
+              <div
+                class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-secondary-hover transition-colors {dragOverKey === key && dragKey !== key ? 'bg-primary/10 ring-1 ring-primary/40' : ''} {dragKey === key ? 'opacity-40' : ''}"
+                role="listitem"
+                ondragover={(e) => handleDragOver(e, key)}
+                ondrop={(e) => handleDrop(e, key)}
               >
-                <input
-                  type="checkbox"
-                  checked={isColumnVisible(col.key)}
-                  onchange={() => toggleColumn(col.key)}
-                  class="rounded"
-                />
-                {col.label}
-              </label>
-            {/each}
-            {#if metadataColumns.length > 0}
-              <div class="px-3 py-2 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 border-t border-b border-gray-200 dark:border-white/10">
-                Metadata
-              </div>
-              {#each metadataColumns as col (col.key)}
-                <label
-                  class="flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-secondary-hover transition-colors"
-                >
+                <span
+                  class="text-txtsecondary select-none cursor-grab"
+                  draggable={true}
+                  role="button"
+                  tabindex="-1"
+                  aria-label="Drag to reorder {col.label}"
+                  ondragstart={(e) => handleDragStart(e, key)}
+                  ondragend={handleDragEnd}
+                >⋮⋮</span>
+                <label class="flex items-center gap-2 flex-1 cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={isColumnVisible(col.key)}
-                    onchange={() => toggleColumn(col.key)}
+                    checked={isColumnVisible(key)}
+                    onchange={() => toggleColumn(key)}
                     class="rounded"
                   />
                   {col.label}
                 </label>
-              {/each}
-            {/if}
+              </div>
+            {/each}
           </div>
         {/if}
       </div>
