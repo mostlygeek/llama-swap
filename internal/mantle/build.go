@@ -2,6 +2,7 @@ package mantle
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -118,6 +119,13 @@ func (tm *TaskManager) StartBuild(repo, branch, backendName, buildScript, backen
 		if len(bins) == 0 {
 			task.UpdateProgress(TaskFailed, "Build completed but no binaries found", 0)
 			return
+		}
+
+		if meta, err := json.Marshal(struct {
+			Repo   string `json:"repo"`
+			Branch string `json:"branch"`
+		}{Repo: repo, Branch: branch}); err == nil {
+			os.WriteFile(filepath.Join(outDir, "meta.json"), meta, 0644)
 		}
 
 		task.UpdateProgress(TaskCompleted,

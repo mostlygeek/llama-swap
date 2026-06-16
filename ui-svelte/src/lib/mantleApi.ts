@@ -164,6 +164,17 @@ export async function deleteBackend(name: string): Promise<boolean> {
   }
 }
 
+export async function updateBackend(name: string): Promise<MantleTask | null> {
+  try {
+    const res = await fetch(`/api/mantle/backends/${encodeURIComponent(name)}/update`, { method: "POST" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (e) {
+    console.error("Update backend failed:", e);
+    return null;
+  }
+}
+
 // --- Tasks ---
 
 export async function listTasks(): Promise<MantleTask[]> {

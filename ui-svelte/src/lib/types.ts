@@ -282,6 +282,8 @@ export interface BackendEntry {
 	path: string;
 	size: number;
 	taskID?: string;
+	repo?: string;
+	branch?: string;
 }
 
 export interface BuildRequest {

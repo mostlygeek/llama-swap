@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 
 	"github.com/billziss-gh/golib/shlex"
@@ -66,6 +67,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/mantle/backends/build/{id}", h.handleCancelBuild)
 	mux.HandleFunc("GET /api/mantle/backends/build/{id}/stream", h.handleBuildProgress)
 	mux.HandleFunc("GET /api/mantle/backends", h.handleListBackends)
+	mux.HandleFunc("POST /api/mantle/backends/{name}/update", h.handleUpdateBackend)
 	mux.HandleFunc("DELETE /api/mantle/backends/{name...}", h.handleDeleteBackend)
 
 	// Task status
@@ -345,6 +347,33 @@ func (h *Handler) handleDeleteBackend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonResponse(w, http.StatusOK, map[string]string{"msg": "deleted"})
+}
+
+func (h *Handler) handleUpdateBackend(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		jsonError(w, http.StatusBadRequest, "backend name is required")
+		return
+	}
+	metaData, err := os.ReadFile(filepath.Join(h.backendsDir, name, "meta.json"))
+	if err != nil {
+		jsonError(w, http.StatusNotFound, "backend not found or missing build metadata")
+		return
+	}
+	var meta struct {
+		Repo   string `json:"repo"`
+		Branch string `json:"branch"`
+	}
+	if err := json.Unmarshal(metaData, &meta); err != nil || meta.Repo == "" {
+		jsonError(w, http.StatusInternalServerError, "failed to read build metadata")
+		return
+	}
+	if err := DeleteBackend(h.backendsDir, name); err != nil {
+		jsonError(w, http.StatusInternalServerError, fmt.Sprintf("failed to remove old backend: %v", err))
+		return
+	}
+	task := h.tm.StartBuild(meta.Repo, meta.Branch, name, h.buildScript, h.backendsDir, nil)
+	jsonResponse(w, http.StatusAccepted, task)
 }
 
 // --- Task listing ---

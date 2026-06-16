@@ -1,6 +1,7 @@
 package mantle
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,6 +37,16 @@ func ListBackends(backendsDir string) ([]BackendEntry, error) {
 		if fi != nil {
 			entry.Size = fi.Size()
 		}
+		if metaData, err := os.ReadFile(filepath.Join(backendsDir, e.Name(), "meta.json")); err == nil {
+			var meta struct {
+				Repo   string `json:"repo"`
+				Branch string `json:"branch"`
+			}
+			if json.Unmarshal(metaData, &meta) == nil {
+				entry.Repo = meta.Repo
+				entry.Branch = meta.Branch
+			}
+		}
 		backends = append(backends, entry)
 	}
 	return backends, nil
@@ -47,6 +58,8 @@ type BackendEntry struct {
 	Path   string `json:"path"`
 	Size   int64  `json:"size"`
 	TaskID string `json:"taskID,omitempty"`
+	Repo   string `json:"repo,omitempty"`
+	Branch string `json:"branch,omitempty"`
 }
 
 // DeleteBackend removes a compiled backend directory.

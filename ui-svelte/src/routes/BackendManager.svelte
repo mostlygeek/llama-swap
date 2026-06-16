@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { startBuild, cancelBuild, listBackends, deleteBackend } from "../lib/mantleApi";
+  import { startBuild, cancelBuild, listBackends, deleteBackend, updateBackend } from "../lib/mantleApi";
   import type { BackendEntry } from "../lib/types";
   import { activeBuilds, trackBuild, removeBuild, syncTasks } from "../stores/tasks";
 
@@ -36,6 +36,15 @@
   async function doDeleteBackend(name: string) {
     if (!confirm(`Delete backend "${name}"?`)) return;
     await deleteBackend(name);
+    await refreshBackends();
+  }
+
+  async function doUpdateBackend(be: BackendEntry) {
+    const label = `${shortRepo(be.repo || "")}@${be.branch || "main"}`;
+    if (!confirm(`Rebuild "${be.name}" from ${label}? The existing backend will be replaced.`)) return;
+    const task = await updateBackend(be.name);
+    if (!task) return;
+    trackBuild(task);
     await refreshBackends();
   }
 
@@ -150,11 +159,19 @@
           <div class="flex items-center justify-between py-2 px-2 border-b border-border hover:bg-secondary-hover text-sm">
             <div class="flex-1 min-w-0">
               <span class="font-medium">{be.name}</span>
+              {#if be.repo}
+                <span class="text-txtsecondary text-xs ml-2">{shortRepo(be.repo)}@{be.branch || "main"}</span>
+              {/if}
               {#if be.size}
-                <span class="text-txtsecondary ml-2">{formatSize(be.size)} (llama-server)</span>
+                <span class="text-txtsecondary ml-2">{formatSize(be.size)}</span>
               {/if}
             </div>
-            <button class="btn btn--sm text-red-500 shrink-0 ml-2" onclick={() => doDeleteBackend(be.name)}>Delete</button>
+            <div class="flex items-center gap-1 shrink-0 ml-2">
+              {#if be.repo}
+                <button class="btn btn--sm" onclick={() => doUpdateBackend(be)}>Update</button>
+              {/if}
+              <button class="btn btn--sm text-red-500" onclick={() => doDeleteBackend(be.name)}>Delete</button>
+            </div>
           </div>
         {/each}
       </div>
