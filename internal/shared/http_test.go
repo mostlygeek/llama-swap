@@ -387,6 +387,38 @@ func TestExtractContext_ApiKey(t *testing.T) {
 	}
 }
 
+func TestSetReqData(t *testing.T) {
+	ctx := SetContext(context.Background(), ReqContextData{Model: "llama3", ModelID: "llama3", Metadata: make(map[string]string)})
+
+	if err := SetReqData(ctx, "client", "web"); err != nil {
+		t.Fatalf("SetReqData: %v", err)
+	}
+	if err := SetReqData(ctx, "trace", "abc123"); err != nil {
+		t.Fatalf("SetReqData: %v", err)
+	}
+
+	data, ok := ReadContext(ctx)
+	if !ok {
+		t.Fatal("context data missing")
+	}
+	if data.Metadata["client"] != "web" {
+		t.Errorf("client = %q, want %q", data.Metadata["client"], "web")
+	}
+	if data.Metadata["trace"] != "abc123" {
+		t.Errorf("trace = %q, want %q", data.Metadata["trace"], "abc123")
+	}
+}
+
+func TestSetReqData_Errors(t *testing.T) {
+	if err := SetReqData(context.Background(), "k", "v"); err == nil {
+		t.Error("expected error when no request context data exists")
+	}
+	ctx := SetContext(context.Background(), ReqContextData{Model: "llama3", ModelID: "llama3"})
+	if err := SetReqData(ctx, "k", "v"); err == nil {
+		t.Error("expected error when metadata map is missing")
+	}
+}
+
 func TestServer_ExtractAPIKey(t *testing.T) {
 	basicHeader := func(user, pass string) string {
 		return "Basic " + base64.StdEncoding.EncodeToString([]byte(user+":"+pass))

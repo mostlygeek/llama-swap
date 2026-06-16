@@ -7,20 +7,9 @@
   import { onMount } from "svelte";
   import type { ReqRespCapture } from "../lib/types";
 
-  type ColumnKey =
-    | "id"
-    | "time"
-    | "model"
-    | "req_path"
-    | "resp_status_code"
-    | "resp_content_type"
-    | "cached"
-    | "prompt"
-    | "generated"
-    | "prompt_speed"
-    | "gen_speed"
-    | "duration"
-    | "capture";
+  type ColumnKey = string;
+
+  const META_PREFIX = "meta:";
 
   interface ColumnDef {
     key: ColumnKey;
@@ -46,10 +35,8 @@
 
   const defaultVisibleKeys = columns.filter((c) => c.defaultVisible).map((c) => c.key);
 
-  const visibleColumns = persistentStore<ColumnKey[]>(
-    "activity-columns",
-    defaultVisibleKeys
-  );
+  const visibleColumns = persistentStore<ColumnKey[]>("activity-columns", defaultVisibleKeys);
+  const hiddenMetadataColumns = persistentStore<ColumnKey[]>("activity-hidden-metadata", []);
 
   let columnsMenuOpen = $state(false);
   let dropdownContainer: HTMLDivElement | null = null;
@@ -73,7 +60,29 @@
     };
   });
 
+  function isMetaKey(key: ColumnKey): boolean {
+    return key.startsWith(META_PREFIX);
+  }
+
+  function metaKey(name: string): ColumnKey {
+    return META_PREFIX + name;
+  }
+
+  function metaLabel(key: ColumnKey): string {
+    return key.slice(META_PREFIX.length);
+  }
+
   function toggleColumn(key: ColumnKey) {
+    if (isMetaKey(key)) {
+      hiddenMetadataColumns.update((hidden) => {
+        if (hidden.includes(key)) {
+          return hidden.filter((k) => k !== key);
+        }
+        return [...hidden, key];
+      });
+      return;
+    }
+
     const current = $visibleColumns;
     if (current.includes(key)) {
       if (current.length > 1) {
@@ -83,6 +92,30 @@
       visibleColumns.set([...current, key]);
     }
   }
+
+  function isColumnVisible(key: ColumnKey): boolean {
+    if (isMetaKey(key)) {
+      return !$hiddenMetadataColumns.includes(key);
+    }
+    return $visibleColumns.includes(key);
+  }
+
+  let metadataKeys = $derived(
+    Array.from(new Set($metrics.flatMap((m) => Object.keys(m.metadata || {})))).sort()
+  );
+
+  let metadataColumns = $derived(
+    metadataKeys.map((k) => ({ key: metaKey(k), label: k, defaultVisible: true }))
+  );
+
+  let allColumns = $derived([...columns, ...metadataColumns]);
+
+  let activeVisibleColumns = $derived([
+    ...$visibleColumns.filter((k) => !isMetaKey(k)),
+    ...metadataColumns.filter((c) => !$hiddenMetadataColumns.includes(c.key)).map((c) => c.key),
+  ]);
+
+  let columnLabelMap = $derived(Object.fromEntries(allColumns.map((c) => [c.key, c.label])));
 
   function formatSpeed(speed: number): string {
     return speed < 0 ? "unknown" : speed.toFixed(2) + " t/s";
@@ -167,13 +200,31 @@
               >
                 <input
                   type="checkbox"
-                  checked={$visibleColumns.includes(col.key)}
+                  checked={isColumnVisible(col.key)}
                   onchange={() => toggleColumn(col.key)}
                   class="rounded"
                 />
                 {col.label}
               </label>
             {/each}
+            {#if metadataColumns.length > 0}
+              <div class="px-3 py-2 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 border-t border-b border-gray-200 dark:border-white/10">
+                Metadata
+              </div>
+              {#each metadataColumns as col (col.key)}
+                <label
+                  class="flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-secondary-hover transition-colors"
+                >
+                  <input
+                    type="checkbox"
+                    checked={isColumnVisible(col.key)}
+                    onchange={() => toggleColumn(col.key)}
+                    class="rounded"
+                  />
+                  {col.label}
+                </label>
+              {/each}
+            {/if}
           </div>
         {/if}
       </div>
@@ -182,112 +233,74 @@
     <table class="min-w-full divide-y">
       <thead class="border-gray-200 dark:border-white/10">
         <tr class="text-left text-xs uppercase tracking-wider">
-          {#if $visibleColumns.includes("id")}
-            <th class="px-6 py-3">ID</th>
-          {/if}
-          {#if $visibleColumns.includes("time")}
-            <th class="px-6 py-3">Time</th>
-          {/if}
-          {#if $visibleColumns.includes("model")}
-            <th class="px-6 py-3">Model</th>
-          {/if}
-          {#if $visibleColumns.includes("req_path")}
-            <th class="px-6 py-3">Path</th>
-          {/if}
-          {#if $visibleColumns.includes("resp_status_code")}
-            <th class="px-6 py-3">Status</th>
-          {/if}
-          {#if $visibleColumns.includes("resp_content_type")}
-            <th class="px-6 py-3">Content-Type</th>
-          {/if}
-          {#if $visibleColumns.includes("cached")}
+          {#each activeVisibleColumns as key (key)}
             <th class="px-6 py-3">
-              Cached <Tooltip content="prompt tokens from cache" />
+              {#if key === "cached"}
+                Cached <Tooltip content="prompt tokens from cache" />
+              {:else if key === "prompt"}
+                Prompt <Tooltip content="new prompt tokens processed" />
+              {:else}
+                {columnLabelMap[key] ?? key}
+              {/if}
             </th>
-          {/if}
-          {#if $visibleColumns.includes("prompt")}
-            <th class="px-6 py-3">
-              Prompt <Tooltip content="new prompt tokens processed" />
-            </th>
-          {/if}
-          {#if $visibleColumns.includes("generated")}
-            <th class="px-6 py-3">Generated</th>
-          {/if}
-          {#if $visibleColumns.includes("prompt_speed")}
-            <th class="px-6 py-3">Prompt Speed</th>
-          {/if}
-          {#if $visibleColumns.includes("gen_speed")}
-            <th class="px-6 py-3">Gen Speed</th>
-          {/if}
-          {#if $visibleColumns.includes("duration")}
-            <th class="px-6 py-3">Duration</th>
-          {/if}
-          {#if $visibleColumns.includes("capture")}
-            <th class="px-6 py-3">Capture</th>
-          {/if}
+          {/each}
         </tr>
       </thead>
       <tbody class="divide-y">
         {#if sortedMetrics.length === 0}
           <tr>
-            <td colspan={$visibleColumns.length} class="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+            <td colspan={activeVisibleColumns.length} class="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
               No activity recorded
             </td>
           </tr>
         {:else}
           {#each sortedMetrics as metric (metric.id)}
             <tr class="whitespace-nowrap text-sm border-gray-200 dark:border-white/10">
-              {#if $visibleColumns.includes("id")}
-                <td class="px-4 py-4">{metric.id + 1}</td>
-              {/if}
-              {#if $visibleColumns.includes("time")}
-                <td class="px-6 py-4">{formatRelativeTime(metric.timestamp)}</td>
-              {/if}
-              {#if $visibleColumns.includes("model")}
-                <td class="px-6 py-4">{metric.model}</td>
-              {/if}
-              {#if $visibleColumns.includes("req_path")}
-                <td class="px-6 py-4">{metric.req_path || "-"}</td>
-              {/if}
-              {#if $visibleColumns.includes("resp_status_code")}
-                <td class="px-6 py-4">{metric.resp_status_code || "-"}</td>
-              {/if}
-              {#if $visibleColumns.includes("resp_content_type")}
-                <td class="px-6 py-4">{metric.resp_content_type || "-"}</td>
-              {/if}
-              {#if $visibleColumns.includes("cached")}
-                <td class="px-6 py-4">{metric.tokens.cache_tokens > 0 ? metric.tokens.cache_tokens.toLocaleString() : "-"}</td>
-              {/if}
-              {#if $visibleColumns.includes("prompt")}
-                <td class="px-6 py-4">{metric.tokens.input_tokens.toLocaleString()}</td>
-              {/if}
-              {#if $visibleColumns.includes("generated")}
-                <td class="px-6 py-4">{metric.tokens.output_tokens.toLocaleString()}</td>
-              {/if}
-              {#if $visibleColumns.includes("prompt_speed")}
-                <td class="px-6 py-4">{formatSpeed(metric.tokens.prompt_per_second)}</td>
-              {/if}
-              {#if $visibleColumns.includes("gen_speed")}
-                <td class="px-6 py-4">{formatSpeed(metric.tokens.tokens_per_second)}</td>
-              {/if}
-              {#if $visibleColumns.includes("duration")}
-                <td class="px-6 py-4">{formatDuration(metric.duration_ms)}</td>
-              {/if}
-              {#if $visibleColumns.includes("capture")}
+              {#each activeVisibleColumns as key (key)}
                 <td class="px-6 py-4">
-                  {#if metric.has_capture}
-                    <button
-                      onclick={() => viewCapture(metric.id)}
-                      disabled={loadingCaptureId === metric.id}
-                      class="btn btn--sm"
-                    >
-                      {loadingCaptureId === metric.id ? "..." : "View"}
-                    </button>
+                  {#if key === "id"}
+                    {metric.id + 1}
+                  {:else if key === "time"}
+                    {formatRelativeTime(metric.timestamp)}
+                  {:else if key === "model"}
+                    {metric.model}
+                  {:else if key === "req_path"}
+                    {metric.req_path || "-"}
+                  {:else if key === "resp_status_code"}
+                    {metric.resp_status_code || "-"}
+                  {:else if key === "resp_content_type"}
+                    {metric.resp_content_type || "-"}
+                  {:else if key === "cached"}
+                    {metric.tokens.cache_tokens > 0 ? metric.tokens.cache_tokens.toLocaleString() : "-"}
+                  {:else if key === "prompt"}
+                    {metric.tokens.input_tokens.toLocaleString()}
+                  {:else if key === "generated"}
+                    {metric.tokens.output_tokens.toLocaleString()}
+                  {:else if key === "prompt_speed"}
+                    {formatSpeed(metric.tokens.prompt_per_second)}
+                  {:else if key === "gen_speed"}
+                    {formatSpeed(metric.tokens.tokens_per_second)}
+                  {:else if key === "duration"}
+                    {formatDuration(metric.duration_ms)}
+                  {:else if key === "capture"}
+                    {#if metric.has_capture}
+                      <button
+                        onclick={() => viewCapture(metric.id)}
+                        disabled={loadingCaptureId === metric.id}
+                        class="btn btn--sm"
+                      >
+                        {loadingCaptureId === metric.id ? "..." : "View"}
+                      </button>
+                    {:else}
+                      <span class="text-txtsecondary">-</span>
+                    {/if}
+                  {:else if isMetaKey(key)}
+                    {metric.metadata?.[metaLabel(key)] ?? "-"}
                   {:else}
-                    <span class="text-txtsecondary">-</span>
+                    -
                   {/if}
                 </td>
-              {/if}
+              {/each}
             </tr>
           {/each}
         {/if}
