@@ -1,9 +1,13 @@
 package server
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/internal/shared"
 	"github.com/tidwall/gjson"
 )
 
@@ -53,6 +57,109 @@ func TestServer_ProcessStreamingResponse(t *testing.T) {
 func TestServer_ProcessStreamingResponse_NoData(t *testing.T) {
 	if _, err := processStreamingResponse("m", time.Now(), []byte("data: [DONE]\n\n")); err == nil {
 		t.Fatal("expected error for stream with no usage data")
+	}
+}
+
+func TestMetricsMonitor_RecordMetadata(t *testing.T) {
+	mm := newMetricsMonitor(nil, 10, 0)
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"usage":{}}`))
+	r = r.WithContext(shared.SetContext(r.Context(), shared.ReqContextData{
+		ModelID:  "m",
+		Metadata: map[string]string{"client": "web", "trace": "abc"},
+	}))
+
+	w := httptest.NewRecorder()
+	copier := newBodyCopier(w)
+	copier.WriteHeader(http.StatusOK)
+	copier.Write([]byte(`{"usage":{"prompt_tokens":1,"completion_tokens":2}}`))
+
+	mm.record("m", r, copier, 0, nil, nil)
+
+	entries := mm.getMetrics()
+	if len(entries) != 1 {
+		t.Fatalf("want 1 entry, got %d", len(entries))
+	}
+	if entries[0].Metadata["client"] != "web" {
+		t.Errorf("client = %q, want web", entries[0].Metadata["client"])
+	}
+	if entries[0].Metadata["trace"] != "abc" {
+		t.Errorf("trace = %q, want abc", entries[0].Metadata["trace"])
+	}
+}
+
+func TestMetricsMonitor_RecordMetadata_EmptyMap(t *testing.T) {
+	// An empty Metadata map in context must NOT set tm.Metadata (omitempty semantics).
+	mm := newMetricsMonitor(nil, 10, 0)
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{}`))
+	r = r.WithContext(shared.SetContext(r.Context(), shared.ReqContextData{
+		ModelID:  "m",
+		Metadata: map[string]string{}, // empty, not nil
+	}))
+
+	w := httptest.NewRecorder()
+	copier := newBodyCopier(w)
+	copier.WriteHeader(http.StatusOK)
+	copier.Write([]byte(`{"usage":{"prompt_tokens":1,"completion_tokens":2}}`))
+
+	mm.record("m", r, copier, 0, nil, nil)
+
+	entries := mm.getMetrics()
+	if len(entries) != 1 {
+		t.Fatalf("want 1 entry, got %d", len(entries))
+	}
+	if entries[0].Metadata != nil {
+		t.Errorf("Metadata should be nil for empty context metadata, got %v", entries[0].Metadata)
+	}
+}
+
+func TestMetricsMonitor_RecordMetadata_NoContextData(t *testing.T) {
+	// A request with no ReqContextData in context should produce nil Metadata.
+	mm := newMetricsMonitor(nil, 10, 0)
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{}`))
+	// No shared.SetContext call — no ReqContextData in context.
+
+	w := httptest.NewRecorder()
+	copier := newBodyCopier(w)
+	copier.WriteHeader(http.StatusOK)
+	copier.Write([]byte(`{"usage":{"prompt_tokens":3,"completion_tokens":4}}`))
+
+	mm.record("m", r, copier, 0, nil, nil)
+
+	entries := mm.getMetrics()
+	if len(entries) != 1 {
+		t.Fatalf("want 1 entry, got %d", len(entries))
+	}
+	if entries[0].Metadata != nil {
+		t.Errorf("Metadata should be nil when no context data, got %v", entries[0].Metadata)
+	}
+}
+
+func TestMetricsMonitor_RecordMetadata_DeepCopy(t *testing.T) {
+	// Mutating the original context metadata after record() must not affect the stored entry.
+	mm := newMetricsMonitor(nil, 10, 0)
+	original := map[string]string{"key": "before"}
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{}`))
+	r = r.WithContext(shared.SetContext(r.Context(), shared.ReqContextData{
+		ModelID:  "m",
+		Metadata: original,
+	}))
+
+	w := httptest.NewRecorder()
+	copier := newBodyCopier(w)
+	copier.WriteHeader(http.StatusOK)
+	copier.Write([]byte(`{"usage":{"prompt_tokens":1,"completion_tokens":2}}`))
+
+	mm.record("m", r, copier, 0, nil, nil)
+
+	// Mutate the original map after record.
+	original["key"] = "after"
+
+	entries := mm.getMetrics()
+	if len(entries) != 1 {
+		t.Fatalf("want 1 entry, got %d", len(entries))
+	}
+	if entries[0].Metadata["key"] != "before" {
+		t.Errorf("Metadata[key] = %q, want %q (deep copy expected)", entries[0].Metadata["key"], "before")
 	}
 }
 

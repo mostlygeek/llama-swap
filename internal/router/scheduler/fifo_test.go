@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -54,8 +55,9 @@ type stopRec struct {
 // fakeEffects is an in-memory scheduler.Effects. Tests program process states
 // and GrantServe outcomes, then assert on the recorded calls.
 type fakeEffects struct {
-	states      map[string]process.ProcessState // model -> state; missing => not handled
-	serveResult map[string]bool                 // GrantServe return per model (default true)
+	states       map[string]process.ProcessState // model -> state; missing => not handled
+	serveResult  map[string]bool                 // GrantServe return per model (default true)
+	lastServeReq HandlerReq
 
 	starts []startRec
 	grants []grantRec
@@ -98,6 +100,7 @@ func (f *fakeEffects) GrantServe(req HandlerReq, modelID string) bool {
 	if v, set := f.serveResult[modelID]; set {
 		ok = v
 	}
+	f.lastServeReq = req
 	f.grants = append(f.grants, grantRec{model: modelID, serve: ok})
 	return ok
 }
@@ -166,6 +169,99 @@ func TestFIFO_FastPath(t *testing.T) {
 	}
 	if got := eff.served("a"); got != 1 {
 		t.Errorf("served(a)=%d want 1", got)
+	}
+}
+
+func TestFIFO_GrantSetsPriorityMetadata(t *testing.T) {
+	eff := newFakeEffects()
+	eff.states["a"] = process.StateReady
+	cfg := config.FifoConfig{Priority: map[string]int{"a": 7}}
+	s := NewFIFO("test", logmon.NewWriter(io.Discard), &stubPlanner{}, cfg, nil, eff)
+
+	ctx := shared.SetContext(context.Background(), shared.ReqContextData{ModelID: "a", Metadata: make(map[string]string)})
+	s.OnRequest(HandlerReq{Model: "a", Ctx: ctx})
+
+	if got := eff.served("a"); got != 1 {
+		t.Fatalf("served(a)=%d want 1", got)
+	}
+	data, ok := shared.ReadContext(eff.lastServeReq.Ctx)
+	if !ok {
+		t.Fatal("context data missing from granted request")
+	}
+	if data.Metadata["fifo_priority"] != "7" {
+		t.Errorf("fifo_priority = %q, want 7", data.Metadata["fifo_priority"])
+	}
+}
+
+func TestFIFO_GrantSetsPriorityMetadata_DefaultZero(t *testing.T) {
+	// A model that is not listed in the Priority map should get fifo_priority="0".
+	eff := newFakeEffects()
+	eff.states["unlisted"] = process.StateReady
+	cfg := config.FifoConfig{Priority: map[string]int{"other": 5}} // "unlisted" absent
+	s := NewFIFO("test", logmon.NewWriter(io.Discard), &stubPlanner{}, cfg, nil, eff)
+
+	ctx := shared.SetContext(context.Background(), shared.ReqContextData{ModelID: "unlisted", Metadata: make(map[string]string)})
+	s.OnRequest(HandlerReq{Model: "unlisted", Ctx: ctx})
+
+	if got := eff.served("unlisted"); got != 1 {
+		t.Fatalf("served(unlisted)=%d want 1", got)
+	}
+	data, ok := shared.ReadContext(eff.lastServeReq.Ctx)
+	if !ok {
+		t.Fatal("context data missing from granted request")
+	}
+	if data.Metadata["fifo_priority"] != "0" {
+		t.Errorf("fifo_priority = %q, want %q", data.Metadata["fifo_priority"], "0")
+	}
+}
+
+func TestFIFO_GrantSetsPriorityMetadata_NoMetadataMap(t *testing.T) {
+	// When the request context has no Metadata map, grantHandler must not crash.
+	// It should log a debug message and still grant the request.
+	eff := newFakeEffects()
+	eff.states["a"] = process.StateReady
+	cfg := config.FifoConfig{Priority: map[string]int{"a": 3}}
+	s := NewFIFO("test", logmon.NewWriter(io.Discard), &stubPlanner{}, cfg, nil, eff)
+
+	// No Metadata map in the context data — SetReqData will return an error.
+	ctx := shared.SetContext(context.Background(), shared.ReqContextData{ModelID: "a"})
+	s.OnRequest(HandlerReq{Model: "a", Ctx: ctx})
+
+	// The grant must still succeed despite the missing metadata map.
+	if got := eff.served("a"); got != 1 {
+		t.Fatalf("served(a)=%d want 1 (metadata error must not prevent grant)", got)
+	}
+}
+
+func TestFIFO_GrantSetsPriorityMetadata_AfterSwapCompletion(t *testing.T) {
+	// Priority metadata must be set for waiters granted via OnSwapDone, not just
+	// requests that hit the fast path.
+	eff := newFakeEffects()
+	eff.states["a"] = process.StateStopped // forces a swap
+	cfg := config.FifoConfig{Priority: map[string]int{"a": 9}}
+	s := NewFIFO("test", logmon.NewWriter(io.Discard), &stubPlanner{}, cfg, nil, eff)
+
+	ctx := shared.SetContext(context.Background(), shared.ReqContextData{ModelID: "a", Metadata: make(map[string]string)})
+	s.OnRequest(HandlerReq{Model: "a", Ctx: ctx})
+
+	// Swap is in flight; no grant yet.
+	if got := eff.served("a"); got != 0 {
+		t.Fatalf("served(a)=%d want 0 before swap done", got)
+	}
+
+	// Complete the swap.
+	eff.states["a"] = process.StateReady
+	s.OnSwapDone(SwapDone{ModelID: "a"})
+
+	if got := eff.served("a"); got != 1 {
+		t.Fatalf("served(a)=%d want 1 after swap done", got)
+	}
+	data, ok := shared.ReadContext(eff.lastServeReq.Ctx)
+	if !ok {
+		t.Fatal("context data missing from granted request after swap")
+	}
+	if data.Metadata["fifo_priority"] != "9" {
+		t.Errorf("fifo_priority = %q, want %q", data.Metadata["fifo_priority"], "9")
 	}
 }
 

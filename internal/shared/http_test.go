@@ -387,6 +387,105 @@ func TestExtractContext_ApiKey(t *testing.T) {
 	}
 }
 
+func TestSetReqData(t *testing.T) {
+	ctx := SetContext(context.Background(), ReqContextData{Model: "llama3", ModelID: "llama3", Metadata: make(map[string]string)})
+
+	if err := SetReqData(ctx, "client", "web"); err != nil {
+		t.Fatalf("SetReqData: %v", err)
+	}
+	if err := SetReqData(ctx, "trace", "abc123"); err != nil {
+		t.Fatalf("SetReqData: %v", err)
+	}
+
+	data, ok := ReadContext(ctx)
+	if !ok {
+		t.Fatal("context data missing")
+	}
+	if data.Metadata["client"] != "web" {
+		t.Errorf("client = %q, want %q", data.Metadata["client"], "web")
+	}
+	if data.Metadata["trace"] != "abc123" {
+		t.Errorf("trace = %q, want %q", data.Metadata["trace"], "abc123")
+	}
+}
+
+func TestSetReqData_Errors(t *testing.T) {
+	if err := SetReqData(context.Background(), "k", "v"); err == nil {
+		t.Error("expected error when no request context data exists")
+	}
+	ctx := SetContext(context.Background(), ReqContextData{Model: "llama3", ModelID: "llama3"})
+	if err := SetReqData(ctx, "k", "v"); err == nil {
+		t.Error("expected error when metadata map is missing")
+	}
+}
+
+func TestSetReqData_NilContext(t *testing.T) {
+	// nil context must return an error without panicking.
+	err := SetReqData(nil, "k", "v")
+	if err == nil {
+		t.Error("expected error for nil context, got nil")
+	}
+}
+
+func TestSetReqData_OverwritesExistingKey(t *testing.T) {
+	ctx := SetContext(context.Background(), ReqContextData{
+		Model:    "m",
+		Metadata: map[string]string{"key": "old"},
+	})
+	if err := SetReqData(ctx, "key", "new"); err != nil {
+		t.Fatalf("SetReqData: %v", err)
+	}
+	data, _ := ReadContext(ctx)
+	if data.Metadata["key"] != "new" {
+		t.Errorf("key = %q, want %q", data.Metadata["key"], "new")
+	}
+}
+
+func TestExtractContext_MetadataInitialized_GET(t *testing.T) {
+	r, _ := http.NewRequest(http.MethodGet, "/?model=llama3", nil)
+	got, err := extractContext(r)
+	if err != nil {
+		t.Fatalf("extractContext: %v", err)
+	}
+	if got.Metadata == nil {
+		t.Error("Metadata should be initialized (not nil) for GET requests")
+	}
+}
+
+func TestExtractContext_MetadataInitialized_JSON(t *testing.T) {
+	r, _ := http.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"llama3"}`))
+	r.Header.Set("Content-Type", "application/json")
+	got, err := extractContext(r)
+	if err != nil {
+		t.Fatalf("extractContext: %v", err)
+	}
+	if got.Metadata == nil {
+		t.Error("Metadata should be initialized (not nil) for JSON POST requests")
+	}
+}
+
+func TestExtractContext_MetadataInitialized_Form(t *testing.T) {
+	r, _ := http.NewRequest(http.MethodPost, "/v1/audio/transcriptions", strings.NewReader("model=whisper-1"))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	got, err := extractContext(r)
+	if err != nil {
+		t.Fatalf("extractContext: %v", err)
+	}
+	if got.Metadata == nil {
+		t.Error("Metadata should be initialized (not nil) for form POST requests")
+	}
+}
+
+func TestExtractContext_MetadataIsWritable(t *testing.T) {
+	// Verify the initialized map is writable — i.e. SetReqData can use it.
+	r, _ := http.NewRequest(http.MethodGet, "/?model=llama3", nil)
+	got, _ := extractContext(r)
+	ctx := SetContext(context.Background(), got)
+	if err := SetReqData(ctx, "x", "y"); err != nil {
+		t.Fatalf("SetReqData on extractContext Metadata: %v", err)
+	}
+}
+
 func TestServer_ExtractAPIKey(t *testing.T) {
 	basicHeader := func(user, pass string) string {
 		return "Basic " + base64.StdEncoding.EncodeToString([]byte(user+":"+pass))
