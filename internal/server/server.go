@@ -177,7 +177,6 @@ func (s *Server) routes() {
 	modelChain := chain.New(
 		authMW,
 		CreateRequestContextMiddleware(s.cfg),
-		CreateConcurrencyMiddleware(s.cfg),
 		CreateFilterMiddleware(s.cfg),
 		CreateFormFilterMiddleware(s.cfg),
 		CreateInflightMiddleware(s.inflight),
