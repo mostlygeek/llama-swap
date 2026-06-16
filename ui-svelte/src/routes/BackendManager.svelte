@@ -5,7 +5,7 @@
   import { activeBuilds, trackBuild, removeBuild, syncTasks } from "../stores/tasks";
 
   let backendName = $state("");
-  let repo = $state("https://github.com/danielhanchen/llama.cpp");
+  let repo = $state("https://github.com/ggerganov/llama.cpp");
   let branch = $state("main");
   let cmakeFlags = $state("");
   let building = $state(false);
