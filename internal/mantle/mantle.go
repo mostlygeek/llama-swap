@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -222,14 +223,18 @@ func SearchHFModels(query string, limit int, sort, kind string) ([]HFModel, erro
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
-	url := fmt.Sprintf("https://huggingface.co/api/models?search=%s&limit=%d", query, limit)
+	params := url.Values{}
+	params.Set("search", query)
+	params.Set("limit", fmt.Sprintf("%d", limit))
 	if field := hfSortParam(sort); field != "" {
-		url += fmt.Sprintf("&sort=%s&direction=-1", field)
+		params.Set("sort", field)
+		params.Set("direction", "-1")
 	}
 	if tag := hfPipelineTag(kind); tag != "" {
-		url += fmt.Sprintf("&pipeline_tag=%s", tag)
+		params.Set("pipeline_tag", tag)
 	}
-	resp, err := http.Get(url)
+	apiURL := "https://huggingface.co/api/models?" + params.Encode()
+	resp, err := http.Get(apiURL)
 	if err != nil {
 		return nil, fmt.Errorf("HF API request failed: %w", err)
 	}

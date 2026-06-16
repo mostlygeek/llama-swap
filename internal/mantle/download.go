@@ -9,6 +9,15 @@ import (
 	"strings"
 )
 
+// withinDir reports whether candidate resolves to a path inside base.
+func withinDir(base, candidate string) bool {
+	rel, err := filepath.Rel(filepath.Clean(base), filepath.Clean(candidate))
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
 // errCancelled signals that a download was aborted via task cancellation.
 var errCancelled = fmt.Errorf("download cancelled")
 
@@ -115,8 +124,16 @@ func (tm *TaskManager) StartDownload(modelID, filename, modelsDir string) *Task 
 	task := tm.CreateTask("download", "", "", modelID)
 
 	go func() {
+		if strings.ContainsAny(filename, "/\\") || filename == ".." || filename == "." {
+			task.UpdateProgress(TaskFailed, "invalid filename", 0)
+			return
+		}
 		url := fmt.Sprintf("https://huggingface.co/%s/resolve/main/%s", modelID, filename)
 		localPath := filepath.Join(modelsDir, strings.ReplaceAll(modelID, "/", "_"), filename)
+		if !withinDir(modelsDir, localPath) {
+			task.UpdateProgress(TaskFailed, "invalid filename: path escapes models directory", 0)
+			return
+		}
 
 		task.UpdateProgress(TaskRunning, fmt.Sprintf("Downloading %s/%s...", modelID, filename), 0)
 
@@ -181,6 +198,10 @@ func (tm *TaskManager) StartRepoDownload(modelID, modelsDir string) *Task {
 
 		for i, fl := range files {
 			localPath := filepath.Join(repoDir, filepath.FromSlash(fl.Path))
+			if !withinDir(repoDir, localPath) {
+				task.UpdateProgress(TaskFailed, fmt.Sprintf("%s: path traversal detected", fl.Path), 0)
+				return
+			}
 
 			// Skip files already downloaded at the expected size.
 			if fi, statErr := os.Stat(localPath); statErr == nil && (fl.Size <= 0 || fi.Size() == fl.Size) {

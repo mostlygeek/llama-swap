@@ -342,6 +342,10 @@ func (h *Handler) handleDeleteBackend(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "backend name is required")
 		return
 	}
+	if !isSafeBackendName(name) {
+		jsonError(w, http.StatusBadRequest, "invalid backend name")
+		return
+	}
 	if err := DeleteBackend(h.backendsDir, name); err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -353,6 +357,10 @@ func (h *Handler) handleUpdateBackend(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
 		jsonError(w, http.StatusBadRequest, "backend name is required")
+		return
+	}
+	if !isSafeBackendName(name) {
+		jsonError(w, http.StatusBadRequest, "invalid backend name")
 		return
 	}
 	metaData, err := os.ReadFile(filepath.Join(h.backendsDir, name, "meta.json"))
