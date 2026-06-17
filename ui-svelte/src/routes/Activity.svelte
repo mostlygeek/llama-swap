@@ -101,9 +101,12 @@
     if (!dragKey || dragKey === targetKey) return;
     const order = [...$columnOrder];
     const fromIndex = order.indexOf(dragKey);
-    const toIndex = order.indexOf(targetKey);
+    let toIndex = order.indexOf(targetKey);
     if (fromIndex === -1 || toIndex === -1) return;
     order.splice(fromIndex, 1);
+    if (fromIndex < toIndex) {
+      toIndex -= 1;
+    }
     order.splice(toIndex, 0, dragKey);
     columnOrder.set(order);
   }
