@@ -26,6 +26,9 @@ type ReqContextData struct {
 	ModelID          string
 	Streaming        bool
 	SendLoadingState bool
+	// Metadata is a request-scoped key/value bag that handlers may mutate
+	// while processing. The metrics middleware copies it into ActivityLogEntry.
+	Metadata map[string]string
 }
 
 var (
@@ -123,6 +126,25 @@ func ReadContext(ctx context.Context) (ReqContextData, bool) {
 	return data, ok
 }
 
+// SetReqData attaches a key/value pair to the request context's metadata map.
+// The metadata map must already exist in the context's ReqContextData; callers
+// should ensure FetchContext has run or initialize the map themselves.
+// It returns an error for nil contexts or contexts without request data.
+func SetReqData(ctx context.Context, key, value string) error {
+	if ctx == nil {
+		return fmt.Errorf("cannot set request metadata on nil context")
+	}
+	data, ok := ReadContext(ctx)
+	if !ok {
+		return fmt.Errorf("no request context data found")
+	}
+	if data.Metadata == nil {
+		return fmt.Errorf("no metadata map in request context")
+	}
+	data.Metadata[key] = value
+	return nil
+}
+
 // extractContext pulls fields from an HTTP request into a ReqContextData,
 // returning whatever is available. For GET requests it reads query parameters.
 // For POST requests it inspects Content-Type and parses JSON,
@@ -139,6 +161,7 @@ func extractContext(r *http.Request) (ReqContextData, error) {
 			Model:     q.Get("model"),
 			Streaming: q.Get("stream") == "true",
 			ApiKey:    apiKey,
+			Metadata:  make(map[string]string),
 		}, nil
 	}
 
@@ -157,6 +180,7 @@ func extractContext(r *http.Request) (ReqContextData, error) {
 			Model:     gjson.GetBytes(bodyBytes, "model").String(),
 			Streaming: gjson.GetBytes(bodyBytes, "stream").Bool(),
 			ApiKey:    apiKey,
+			Metadata:  make(map[string]string),
 		}, nil
 	}
 
@@ -178,6 +202,7 @@ func extractContext(r *http.Request) (ReqContextData, error) {
 		Model:     r.FormValue("model"),
 		Streaming: r.FormValue("stream") == "true",
 		ApiKey:    apiKey,
+		Metadata:  make(map[string]string),
 	}, nil
 }
 

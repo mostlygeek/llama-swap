@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -54,8 +55,9 @@ type stopRec struct {
 // fakeEffects is an in-memory scheduler.Effects. Tests program process states
 // and GrantServe outcomes, then assert on the recorded calls.
 type fakeEffects struct {
-	states      map[string]process.ProcessState // model -> state; missing => not handled
-	serveResult map[string]bool                 // GrantServe return per model (default true)
+	states       map[string]process.ProcessState // model -> state; missing => not handled
+	serveResult  map[string]bool                 // GrantServe return per model (default true)
+	lastServeReq HandlerReq
 
 	starts []startRec
 	grants []grantRec
@@ -98,6 +100,7 @@ func (f *fakeEffects) GrantServe(req HandlerReq, modelID string) bool {
 	if v, set := f.serveResult[modelID]; set {
 		ok = v
 	}
+	f.lastServeReq = req
 	f.grants = append(f.grants, grantRec{model: modelID, serve: ok})
 	return ok
 }
@@ -166,6 +169,27 @@ func TestFIFO_FastPath(t *testing.T) {
 	}
 	if got := eff.served("a"); got != 1 {
 		t.Errorf("served(a)=%d want 1", got)
+	}
+}
+
+func TestFIFO_GrantSetsPriorityMetadata(t *testing.T) {
+	eff := newFakeEffects()
+	eff.states["a"] = process.StateReady
+	cfg := config.FifoConfig{Priority: map[string]int{"a": 7}}
+	s := NewFIFO("test", logmon.NewWriter(io.Discard), &stubPlanner{}, cfg, nil, eff)
+
+	ctx := shared.SetContext(context.Background(), shared.ReqContextData{ModelID: "a", Metadata: make(map[string]string)})
+	s.OnRequest(HandlerReq{Model: "a", Ctx: ctx})
+
+	if got := eff.served("a"); got != 1 {
+		t.Fatalf("served(a)=%d want 1", got)
+	}
+	data, ok := shared.ReadContext(eff.lastServeReq.Ctx)
+	if !ok {
+		t.Fatal("context data missing from granted request")
+	}
+	if data.Metadata["fifo_priority"] != "7" {
+		t.Errorf("fifo_priority = %q, want 7", data.Metadata["fifo_priority"])
 	}
 }
 
