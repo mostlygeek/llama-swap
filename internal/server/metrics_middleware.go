@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
@@ -21,8 +22,27 @@ func CreateMetricsMiddleware(mm *metricsMonitor, cfg config.Config) chain.Middle
 				return
 			}
 
+			// Determine the model-routed endpoint path. Regular routes are
+			// already meterable; /upstream/<model>/<path> is metered only when
+			// the remaining path matches a model-dispatched endpoint.
+			checkPath := r.URL.Path
+			if strings.HasPrefix(r.URL.Path, "/upstream/") {
+				var found bool
+				_, _, checkPath, found = shared.FindModelInPath(cfg, strings.TrimPrefix(r.URL.Path, "/upstream"))
+				if !found {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+
+			if !isMetricsRecordPath(checkPath) {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			// Resolve the model now so downstream dispatch hits the context
-			// fast path; FetchContext restores the request body.
+			// fast path; FetchContext restores the request body for regular
+			// routes and extracts the model from the URL for /upstream routes.
 			data, err := shared.FetchContext(r, cfg)
 			if err != nil {
 				shared.SendError(w, r, shared.ErrNoModelInContext)
