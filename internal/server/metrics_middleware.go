@@ -51,7 +51,7 @@ func CreateMetricsMiddleware(mm *metricsMonitor, cfg config.Config) chain.Middle
 
 			// Buffer the request body/headers for capture before dispatch
 			// consumes them.
-			cf := captureFieldsFor(r.URL.Path)
+			cf := captureFieldsFor(checkPath)
 			var reqBody []byte
 			var reqHeaders map[string]string
 			if mm.enableCaptures {

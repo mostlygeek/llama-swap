@@ -82,6 +82,7 @@ func TestServer_HandleListModels_Aliases(t *testing.T) {
 
 func TestServer_FindModelInPath(t *testing.T) {
 	cfg := config.Config{Models: map[string]config.ModelConfig{
+		"author":       {},
 		"author/model": {},
 		"simple":       {},
 	}}
@@ -95,6 +96,7 @@ func TestServer_FindModelInPath(t *testing.T) {
 		{"/simple/v1/chat", "simple", "/v1/chat", true},
 		{"/author/model/v1/chat", "author/model", "/v1/chat", true},
 		{"/author/model", "author/model", "/", true},
+		{"/author/v1/chat", "author", "/v1/chat", true},
 		{"/missing/v1", "", "", false},
 		{"/", "", "", false},
 	}

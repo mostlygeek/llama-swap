@@ -168,11 +168,14 @@ func FindModelInPath(cfg config.Config, path string) (searchName, realName, rema
 		}
 
 		if modelID, ok := cfg.RealModelName(name); ok {
-			return name, modelID, "/" + strings.Join(parts[i+1:], "/"), true
+			searchName = name
+			realName = modelID
+			remainingPath = "/" + strings.Join(parts[i+1:], "/")
+			found = true
 		}
 	}
 
-	return "", "", "", false
+	return
 }
 
 func SetContext(ctx context.Context, data ReqContextData) context.Context {
