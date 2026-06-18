@@ -26,6 +26,7 @@
     { key: "cached", label: "Cached", defaultVisible: true },
     { key: "prompt", label: "Prompt", defaultVisible: true },
     { key: "generated", label: "Generated", defaultVisible: true },
+    { key: "drafted", label: "Drafted", defaultVisible: false },
     { key: "prompt_speed", label: "Prompt Speed", defaultVisible: true },
     { key: "gen_speed", label: "Gen Speed", defaultVisible: true },
     { key: "duration", label: "Duration", defaultVisible: true },
@@ -158,6 +159,10 @@
     return speed < 0 ? "unknown" : speed.toFixed(2) + " t/s";
   }
 
+  function formatDrafted(drafted: number, accepted: number): string {
+    return drafted > 0 ? (accepted * 100 / drafted).toFixed(1) + "% (" + accepted + "/" + drafted + ")" : "-";
+  }
+
   function formatDuration(ms: number): string {
     return (ms / 1000).toFixed(2) + "s";
   }
@@ -273,6 +278,8 @@
                 Cached <Tooltip content="prompt tokens from cache" />
               {:else if key === "prompt"}
                 Prompt <Tooltip content="new prompt tokens processed" />
+              {:else if key === "drafted"}
+                Drafted <Tooltip content="acceptance rate (accepted/drafted)" />
               {:else}
                 {columnLabelMap[key] ?? key}
               {/if}
@@ -310,6 +317,8 @@
                     {metric.tokens.input_tokens.toLocaleString()}
                   {:else if key === "generated"}
                     {metric.tokens.output_tokens.toLocaleString()}
+                  {:else if key === "drafted"}
+                    {formatDrafted(metric.tokens.draft_tokens, metric.tokens.draft_acc_tokens)}
                   {:else if key === "prompt_speed"}
                     {formatSpeed(metric.tokens.prompt_per_second)}
                   {:else if key === "gen_speed"}
