@@ -92,6 +92,27 @@ var modelGetRoutes = []string{
 	"/sdapi/v1/loras",
 }
 
+// isMetricsRecordPath reports whether path is one of the model-dispatched
+// endpoints that the metrics middleware records in the activity log.
+func isMetricsRecordPath(path string) bool {
+	for _, p := range modelPostJSONRoutes {
+		if p == path {
+			return true
+		}
+	}
+	for _, p := range modelPostFormRoutes {
+		if p == path {
+			return true
+		}
+	}
+	for _, p := range modelGetRoutes {
+		if p == path {
+			return true
+		}
+	}
+	return false
+}
+
 // BuildInfo carries version metadata surfaced by GET /api/version.
 type BuildInfo struct {
 	Version string
@@ -224,9 +245,11 @@ func (s *Server) routes() {
 	mux.Handle("GET /unload", apiChain.ThenFunc(s.handleUnload))
 	mux.Handle("GET /running", apiChain.ThenFunc(s.handleRunning))
 
-	// Upstream passthrough.
+	// Upstream passthrough. Meter only the model-dispatched endpoints that can
+	// produce token usage/timings.
+	upstreamChain := apiChain.Append(CreateMetricsMiddleware(s.metrics, s.cfg))
 	mux.HandleFunc("GET /upstream", handleUpstreamRedirect)
-	mux.Handle("/upstream/{upstreamPath...}", apiChain.ThenFunc(s.handleUpstream))
+	mux.Handle("/upstream/{upstreamPath...}", upstreamChain.ThenFunc(s.handleUpstream))
 
 	// API group (API-key protected) consumed by the UI.
 	mux.Handle("POST /api/models/unload", apiChain.ThenFunc(s.handleAPIUnloadAll))

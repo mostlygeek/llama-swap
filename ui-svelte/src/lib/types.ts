@@ -52,6 +52,7 @@ export interface ActivityLogEntry {
   tokens: TokenMetrics;
   duration_ms: number;
   has_capture: boolean;
+  metadata?: Record<string, string>;
 }
 
 export interface ReqRespCapture {
