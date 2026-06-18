@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/mostlygeek/llama-swap/internal/config"
 )
 
 func TestExtractContext_GET(t *testing.T) {
@@ -454,5 +456,70 @@ func TestServer_ExtractAPIKey(t *testing.T) {
 				t.Errorf("extractAPIKey() = %q, want %q", got, c.want)
 			}
 		})
+	}
+}
+
+func TestFetchContext_UpstreamPath(t *testing.T) {
+	cfg := config.Config{
+		Models: map[string]config.ModelConfig{
+			"m1":           {},
+			"author/model": {},
+			"real":         {Aliases: []string{"nick"}},
+		},
+	}
+
+	cases := []struct {
+		name        string
+		path        string
+		wantModel   string
+		wantModelID string
+		wantErr     bool
+	}{
+		{"known model", "/upstream/m1/v1/chat/completions", "m1", "m1", false},
+		{"model with slash", "/upstream/author/model/v1/chat", "author/model", "author/model", false},
+		{"unknown model", "/upstream/nope/v1/chat/completions", "", "", true},
+		{"bare model path", "/upstream/m1/", "m1", "m1", false},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, c.path, strings.NewReader(`{}`))
+			data, err := FetchContext(r, cfg)
+			if (err != nil) != c.wantErr {
+				t.Fatalf("wantErr=%v got err=%v", c.wantErr, err)
+			}
+			if c.wantErr {
+				return
+			}
+			if data.Model != c.wantModel {
+				t.Errorf("model = %q, want %q", data.Model, c.wantModel)
+			}
+			if data.ModelID != c.wantModelID {
+				t.Errorf("modelID = %q, want %q", data.ModelID, c.wantModelID)
+			}
+			if data.Metadata == nil {
+				t.Error("metadata map not initialized")
+			}
+		})
+	}
+}
+
+func TestFetchContext_UpstreamPath_DoesNotReadBody(t *testing.T) {
+	cfg := config.Config{Models: map[string]config.ModelConfig{"m1": {}}}
+	body := `{"model":"should-not-matter"}`
+	r := httptest.NewRequest(http.MethodPost, "/upstream/m1/v1/chat/completions", strings.NewReader(body))
+
+	_, err := FetchContext(r, cfg)
+	if err != nil {
+		t.Fatalf("FetchContext: %v", err)
+	}
+
+	// The body should be untouched so the upstream handler can still read it.
+	got, err := io.ReadAll(r.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if string(got) != body {
+		t.Errorf("body was consumed: %q", string(got))
 	}
 }

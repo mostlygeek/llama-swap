@@ -1,12 +1,15 @@
 package server
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/shared"
 	"github.com/tidwall/gjson"
 )
@@ -101,5 +104,42 @@ func TestServer_ParseMetrics_Infill(t *testing.T) {
 	}
 	if entry.Tokens.InputTokens != 5 || entry.Tokens.OutputTokens != 9 {
 		t.Fatalf("tokens = %+v", entry.Tokens)
+	}
+}
+
+// TestServer_MetricsMiddleware_UpstreamAudioCaptureSkipsRespBody verifies that
+// an /upstream/<model>/v1/audio/speech request uses the path-specific capture
+// mask (headers only) rather than falling back to captureAll.
+func TestServer_MetricsMiddleware_UpstreamAudioCaptureSkipsRespBody(t *testing.T) {
+	mm := newMetricsMonitor(logmon.NewWriter(io.Discard), 100, 5)
+	cfg := config.Config{Models: map[string]config.ModelConfig{"m1": {}}}
+
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "audio/mpeg")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("BINARY-AUDIO-DATA"))
+	})
+	handler := CreateMetricsMiddleware(mm, cfg)(inner)
+
+	req := httptest.NewRequest(http.MethodPost, "/upstream/m1/v1/audio/speech", strings.NewReader(`{"model":"m1"}`))
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	entries := mm.getMetrics()
+	if len(entries) == 0 {
+		t.Fatal("no metrics recorded")
+	}
+	last := entries[len(entries)-1]
+	if !last.HasCapture {
+		t.Fatal("expected capture to be stored")
+	}
+	cap := mm.getCaptureByID(last.ID)
+	if cap == nil {
+		t.Fatal("capture not found")
+	}
+	if len(cap.RespBody) != 0 {
+		t.Errorf("RespBody stored for /upstream audio route (len=%d); want path-specific mask to skip body", len(cap.RespBody))
+	}
+	if len(cap.RespHeaders) == 0 {
+		t.Error("RespHeaders not stored; want captureRespHeaders mask")
 	}
 }
