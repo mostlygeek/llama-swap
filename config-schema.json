@@ -583,10 +583,11 @@
                         "use": {
                             "type": "string",
                             "enum": [
-                                "fifo"
+                                "fifo",
+                                "fairshare"
                             ],
                             "default": "fifo",
-                            "description": "Scheduler to use. Only 'fifo' is currently supported."
+                            "description": "Scheduler to use: 'fifo' (first-in-first-out with per-model priority) or 'fairshare' (priority-aware fair admission against each model's concurrencyLimit)."
                         },
                         "settings": {
                             "type": "object",
@@ -600,6 +601,56 @@
                                             "additionalProperties": {
                                                 "type": "integer"
                                             }
+                                        }
+                                    },
+                                    "additionalProperties": false
+                                },
+                                "fairshare": {
+                                    "type": "object",
+                                    "description": "Settings for the 'fairshare' scheduler. Over-limit requests to a ready model are queued and admitted by priority as concurrency slots free.",
+                                    "properties": {
+                                        "mode": {
+                                            "type": "string",
+                                            "enum": [
+                                                "absolute",
+                                                "proportion"
+                                            ],
+                                            "default": "absolute",
+                                            "description": "How the priority number is interpreted: 'absolute' (rank, highest first) or 'proportion' (weight, weighted fair queuing)."
+                                        },
+                                        "priorityIncreasePerSecondWaiting": {
+                                            "type": "number",
+                                            "default": 0,
+                                            "description": "Aging: effective priority gained per second waited. 0 disables aging."
+                                        },
+                                        "priorities": {
+                                            "type": "object",
+                                            "description": "Caller id (API key) -> priority. An explicitly listed caller always wins.",
+                                            "additionalProperties": {
+                                                "type": "integer"
+                                            }
+                                        },
+                                        "modelPriorities": {
+                                            "type": "object",
+                                            "description": "Model id -> priority for callers not listed in 'priorities'. Falls back to defaultPriority.",
+                                            "additionalProperties": {
+                                                "type": "integer"
+                                            }
+                                        },
+                                        "defaultPriority": {
+                                            "type": "integer",
+                                            "default": 1,
+                                            "description": "Priority for callers/models not listed above (including anonymous callers)."
+                                        },
+                                        "maxWait": {
+                                            "type": "string",
+                                            "default": "30s",
+                                            "description": "Hold a queued request up to this long (Go duration) before rejecting with 429. 0 disables the wait bound."
+                                        },
+                                        "maxQueueDepth": {
+                                            "type": "integer",
+                                            "default": 0,
+                                            "description": "Max waiters per model before rejecting with 429. 0 means unlimited."
                                         }
                                     },
                                     "additionalProperties": false

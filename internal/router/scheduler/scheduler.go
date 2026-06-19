@@ -93,8 +93,8 @@ type Effects interface {
 }
 
 // New returns a Scheduler selected by conf.Routing.Scheduler.Use, configured
-// from conf and bound to the given planner and effects. Currently only "fifo"
-// (the default) is supported.
+// from conf and bound to the given planner and effects. "fifo" (the default)
+// and "fairshare" are supported.
 func New(conf config.Config, name string, logger *logmon.Monitor, planner Swapper, eff Effects) (Scheduler, error) {
 	use := conf.Routing.Scheduler.Use
 	if use == "" {
@@ -103,6 +103,12 @@ func New(conf config.Config, name string, logger *logmon.Monitor, planner Swappe
 	switch use {
 	case "fifo":
 		return NewFIFO(name, logger, planner, conf.Routing.Scheduler.Settings.Fifo, conf.Models, eff), nil
+	case "fairshare":
+		limits := make(map[string]int, len(conf.Models))
+		for id, mc := range conf.Models {
+			limits[id] = mc.ConcurrencyLimit // 0 -> fairshare default
+		}
+		return NewFairShare(name, logger, planner, conf.Routing.Scheduler.Settings.FairShare, limits, eff), nil
 	default:
 		return nil, fmt.Errorf("unsupported scheduler type: %q", use)
 	}

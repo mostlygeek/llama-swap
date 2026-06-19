@@ -545,7 +545,7 @@ routing:
           full: "L"
 
   # scheduler: how queued requests are ordered.
-  # The default and only valid scheduler is "fifo"
+  # Valid schedulers are "fifo" (default) and "fairshare".
   scheduler:
     use: fifo
     settings:
@@ -559,6 +559,52 @@ routing:
           B: 5
           C: 5
           D: 1
+
+      # fairshare: priority-aware fair admission in front of each model's
+      # concurrencyLimit. When a ready model is at its limit, over-limit
+      # requests are queued and admitted by priority as slots free, rather than
+      # rejected with a bare 429. Used only when `use: fairshare`.
+      fairshare:
+        # mode: how the priority number is interpreted under contention.
+        # - "absolute" (default): rank — highest effective priority served first
+        #   (FIFO within a rank).
+        # - "proportion": weight — callers admitted in proportion to their
+        #   weight (weighted fair queuing); a weight-10 caller gets ~10x the
+        #   throughput of a weight-1 caller, and an idle class never holds back a
+        #   busy one.
+        mode: absolute
+
+        # priorityIncreasePerSecondWaiting: aging. Adds to a waiter's effective
+        # priority for every second it has waited, composing with either mode.
+        # 0 (default) disables aging. In absolute mode a positive value makes
+        # scheduling starvation-free.
+        priorityIncreasePerSecondWaiting: 0
+
+        # priorities: caller id (API key on the request) -> priority. An
+        # explicitly listed caller always wins (operator intent).
+        priorities:
+          sk-interactive: 10
+          sk-bulk-indexer: 1
+
+        # modelPriorities: model id -> priority, for callers not listed in
+        # `priorities` (e.g. a single client like Open WebUI that can't be told
+        # apart by API key). Falls back to defaultPriority.
+        modelPriorities:
+          A: 10
+          D: 1
+
+        # defaultPriority: callers/models not listed above (and anonymous
+        # callers). Default: 1.
+        defaultPriority: 5
+
+        # maxWait: hold a queued request up to this long before rejecting it with
+        # 429 + Retry-After. A request whose estimated wait already exceeds this
+        # at arrival is rejected immediately. Default: 30s. 0 disables.
+        maxWait: 30s
+
+        # maxQueueDepth: max waiters per model before rejecting with 429.
+        # Default: 0 (unlimited; only maxWait bounds the queue).
+        maxQueueDepth: 16
 
 # peers: a dictionary of remote peers and models they provide
 # - optional, default empty dictionary

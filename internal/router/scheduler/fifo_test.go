@@ -37,9 +37,10 @@ func (s *stubPlanner) OnSwapStart(string, []string) {}
 // grantRec is one GrantError / GrantServe call. err!=nil marks an error grant;
 // otherwise it is a serve grant and serve reports whether the caller received it.
 type grantRec struct {
-	model string
-	err   error
-	serve bool
+	model  string
+	caller string
+	err    error
+	serve  bool
 }
 
 type startRec struct {
@@ -92,7 +93,7 @@ func (f *fakeEffects) StartSwap(modelID string, evict []string) {
 }
 
 func (f *fakeEffects) GrantError(req HandlerReq, err error) {
-	f.grants = append(f.grants, grantRec{model: req.Model, err: err})
+	f.grants = append(f.grants, grantRec{model: req.Model, caller: callerOf(req), err: err})
 }
 
 func (f *fakeEffects) GrantServe(req HandlerReq, modelID string) bool {
@@ -101,7 +102,7 @@ func (f *fakeEffects) GrantServe(req HandlerReq, modelID string) bool {
 		ok = v
 	}
 	f.lastServeReq = req
-	f.grants = append(f.grants, grantRec{model: modelID, serve: ok})
+	f.grants = append(f.grants, grantRec{model: modelID, caller: callerOf(req), serve: ok})
 	return ok
 }
 

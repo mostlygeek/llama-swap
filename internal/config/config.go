@@ -177,7 +177,8 @@ type SchedulerConfig struct {
 }
 
 type SchedulerSettings struct {
-	Fifo FifoConfig `yaml:"fifo"`
+	Fifo      FifoConfig      `yaml:"fifo"`
+	FairShare FairShareConfig `yaml:"fairshare"`
 }
 
 type FifoConfig struct {
@@ -565,13 +566,26 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	if config.Routing.Scheduler.Use == "" {
 		config.Routing.Scheduler.Use = "fifo"
 	}
-	if config.Routing.Scheduler.Use != "fifo" {
-		return Config{}, fmt.Errorf("routing.scheduler.use: unknown scheduler %q (valid: fifo)", config.Routing.Scheduler.Use)
-	}
-	for modelID := range config.Routing.Scheduler.Settings.Fifo.Priority {
-		if _, found := config.RealModelName(modelID); !found {
-			return Config{}, fmt.Errorf("routing.scheduler.settings.fifo.priority references unknown model %q", modelID)
+	switch config.Routing.Scheduler.Use {
+	case "fifo":
+		for modelID := range config.Routing.Scheduler.Settings.Fifo.Priority {
+			if _, found := config.RealModelName(modelID); !found {
+				return Config{}, fmt.Errorf("routing.scheduler.settings.fifo.priority references unknown model %q", modelID)
+			}
 		}
+	case "fairshare":
+		fs := &config.Routing.Scheduler.Settings.FairShare
+		fs.applyDefaults()
+		if err := fs.Validate(); err != nil {
+			return Config{}, fmt.Errorf("routing.scheduler.settings.fairshare: %w", err)
+		}
+		for modelID := range fs.ModelPriorities {
+			if _, found := config.RealModelName(modelID); !found {
+				return Config{}, fmt.Errorf("routing.scheduler.settings.fairshare.modelPriorities references unknown model %q", modelID)
+			}
+		}
+	default:
+		return Config{}, fmt.Errorf("routing.scheduler.use: unknown scheduler %q (valid: fifo, fairshare)", config.Routing.Scheduler.Use)
 	}
 
 	// Clean up hooks preload
