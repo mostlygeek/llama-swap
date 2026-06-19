@@ -21,7 +21,7 @@
     { key: "time", label: "Time", defaultVisible: true },
     { key: "model", label: "Model", defaultVisible: true },
     { key: "req_path", label: "Path", defaultVisible: false },
-    { key: "resp_status_code", label: "Status", defaultVisible: false },
+    { key: "resp_status_code", label: "Status", defaultVisible: true },
     { key: "resp_content_type", label: "Content-Type", defaultVisible: false },
     { key: "cached", label: "Cached", defaultVisible: true },
     { key: "prompt", label: "Prompt", defaultVisible: true },
@@ -308,7 +308,13 @@
                   {:else if key === "req_path"}
                     {metric.req_path || "-"}
                   {:else if key === "resp_status_code"}
-                    {metric.resp_status_code || "-"}
+                    {#if metric.error_msg}
+                      <span class="text-red-500 dark:text-red-400 cursor-help" title={metric.error_msg}>
+                        {metric.resp_status_code || "-"}
+                      </span>
+                    {:else}
+                      {metric.resp_status_code || "-"}
+                    {/if}
                   {:else if key === "resp_content_type"}
                     {metric.resp_content_type || "-"}
                   {:else if key === "cached"}
