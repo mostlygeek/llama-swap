@@ -12,6 +12,7 @@ import type {
 import { connectionState } from "./theme";
 
 const LOG_LENGTH_LIMIT = 1024 * 100; /* 100KB of log data */
+const ACTIVITY_LIMIT = 1000; /* cap in-memory activity entries; matches the server metrics ring */
 
 // Stores
 export const models = writable<Model[]>([]);
@@ -92,7 +93,7 @@ export function enableAPIEvents(enabled: boolean): void {
 
           case "metrics": {
             const newMetrics = JSON.parse(message.data) as ActivityLogEntry[];
-            metrics.update((prevMetrics) => [...newMetrics, ...prevMetrics]);
+            metrics.update((prevMetrics) => [...newMetrics, ...prevMetrics].slice(0, ACTIVITY_LIMIT));
             break;
           }
           case "inflight": {

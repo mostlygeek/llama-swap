@@ -176,6 +176,22 @@ type SchedulerConfig struct {
 	Settings SchedulerSettings `yaml:"settings"`
 }
 
+// ActivityPriorityFor returns the configured priority for a request and a label
+// for how that number is interpreted: "priority" (fairshare absolute mode),
+// "weight" (fairshare proportion mode), or "" when the active scheduler does
+// not prioritize. Used by the activity log to surface scheduler intent.
+func (s SchedulerConfig) ActivityPriorityFor(callerID, modelID string) (int, string) {
+	if s.Use != "fairshare" {
+		return 0, ""
+	}
+	fs := s.Settings.FairShare
+	mode := "priority"
+	if fs.ResolvedMode() == ModeProportion {
+		mode = "weight"
+	}
+	return fs.PriorityFor(callerID, modelID), mode
+}
+
 type SchedulerSettings struct {
 	Fifo      FifoConfig      `yaml:"fifo"`
 	FairShare FairShareConfig `yaml:"fairshare"`

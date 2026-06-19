@@ -74,9 +74,11 @@ func CreateMetricsMiddleware(mm *metricsMonitor, cfg config.Config) chain.Middle
 				r.Header.Set("Accept-Encoding", filterAcceptEncoding(ae))
 			}
 
+			priority, priorityMode := cfg.Routing.Scheduler.ActivityPriorityFor(data.ApiKey, data.ModelID)
+
 			recorder := newBodyCopier(w)
 			next.ServeHTTP(recorder, r)
-			mm.record(data.ModelID, r, recorder, cf, reqBody, reqHeaders)
+			mm.record(data.ModelID, data.ApiKey, priority, priorityMode, r, recorder, cf, reqBody, reqHeaders)
 		})
 	}
 }

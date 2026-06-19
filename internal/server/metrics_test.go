@@ -76,7 +76,7 @@ func TestMetricsMonitor_RecordMetadata(t *testing.T) {
 	copier.WriteHeader(http.StatusOK)
 	copier.Write([]byte(`{"usage":{"prompt_tokens":1,"completion_tokens":2}}`))
 
-	mm.record("m", r, copier, 0, nil, nil)
+	mm.record("m", "", 0, "", r, copier, 0, nil, nil)
 
 	entries := mm.getMetrics()
 	if len(entries) != 1 {
@@ -141,5 +141,18 @@ func TestServer_MetricsMiddleware_UpstreamAudioCaptureSkipsRespBody(t *testing.T
 	}
 	if len(cap.RespHeaders) == 0 {
 		t.Error("RespHeaders not stored; want captureRespHeaders mask")
+	}
+}
+
+func TestServer_MaskCaller(t *testing.T) {
+	cases := map[string]string{
+		"":          "anonymous",
+		"abc":       "abc",     // too short to be a secret
+		"sk-ragtag": "sk-ra…9", // prefix + length
+	}
+	for in, want := range cases {
+		if got := maskCaller(in); got != want {
+			t.Errorf("maskCaller(%q)=%q want %q", in, got, want)
+		}
 	}
 }

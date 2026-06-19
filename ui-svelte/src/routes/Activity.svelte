@@ -20,6 +20,7 @@
     { key: "id", label: "ID", defaultVisible: true },
     { key: "time", label: "Time", defaultVisible: true },
     { key: "model", label: "Model", defaultVisible: true },
+    { key: "caller", label: "Caller", defaultVisible: false },
     { key: "req_path", label: "Path", defaultVisible: false },
     { key: "resp_status_code", label: "Status", defaultVisible: false },
     { key: "resp_content_type", label: "Content-Type", defaultVisible: false },
@@ -29,6 +30,7 @@
     { key: "drafted", label: "Drafted", defaultVisible: false },
     { key: "prompt_speed", label: "Prompt Speed", defaultVisible: true },
     { key: "gen_speed", label: "Gen Speed", defaultVisible: true },
+    { key: "priority", label: "Priority", defaultVisible: false },
     { key: "duration", label: "Duration", defaultVisible: true },
     { key: "capture", label: "Capture", defaultVisible: true },
     { key: "meta", label: "Meta", defaultVisible: false },
@@ -196,6 +198,12 @@
 
   let sortedMetrics = $derived([...$metrics].sort((a, b) => b.id - a.id));
 
+  // Header label follows the active scheduler mode: "Weight" in proportion mode,
+  // "Priority" otherwise (and when no metric carries a mode yet).
+  let priorityLabel = $derived(
+    sortedMetrics.find((m) => m.priority_mode)?.priority_mode === "weight" ? "Weight" : "Priority"
+  );
+
   let selectedCapture = $state<ReqRespCapture | null>(null);
   let dialogOpen = $state(false);
   let loadingCaptureId = $state<number | null>(null);
@@ -260,7 +268,7 @@
                     onchange={() => toggleColumn(key)}
                     class="rounded"
                   />
-                  {col.label}
+                  {key === "priority" ? priorityLabel : col.label}
                 </label>
               </div>
             {/each}
@@ -280,6 +288,11 @@
                 Prompt <Tooltip content="new prompt tokens processed" />
               {:else if key === "drafted"}
                 Drafted <Tooltip content="acceptance rate (accepted/drafted)" />
+              {:else if key === "caller"}
+                Caller <Tooltip content="masked API key of the request's caller" />
+              {:else if key === "priority"}
+                {priorityLabel}
+                <Tooltip content="configured scheduler priority/weight for this request (before wait-time aging)" />
               {:else}
                 {columnLabelMap[key] ?? key}
               {/if}
@@ -305,6 +318,8 @@
                     {formatRelativeTime(metric.timestamp)}
                   {:else if key === "model"}
                     {metric.model}
+                  {:else if key === "caller"}
+                    {metric.caller || "-"}
                   {:else if key === "req_path"}
                     {metric.req_path || "-"}
                   {:else if key === "resp_status_code"}
@@ -323,6 +338,8 @@
                     {formatSpeed(metric.tokens.prompt_per_second)}
                   {:else if key === "gen_speed"}
                     {formatSpeed(metric.tokens.tokens_per_second)}
+                  {:else if key === "priority"}
+                    {metric.priority_mode ? metric.priority : "-"}
                   {:else if key === "duration"}
                     {formatDuration(metric.duration_ms)}
                   {:else if key === "capture"}

@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +39,7 @@ type ActivityLogEntry struct {
 	ID              int               `json:"id"`
 	Timestamp       time.Time         `json:"timestamp"`
 	Model           string            `json:"model"`
+	Caller          string            `json:"caller"`
 	ReqPath         string            `json:"req_path"`
 	RespContentType string            `json:"resp_content_type"`
 	RespStatusCode  int               `json:"resp_status_code"`
@@ -45,6 +47,11 @@ type ActivityLogEntry struct {
 	DurationMs      int               `json:"duration_ms"`
 	HasCapture      bool              `json:"has_capture"`
 	Metadata        map[string]string `json:"metadata,omitempty"`
+	// Priority is the scheduler's configured priority/weight for this request;
+	// PriorityMode names it ("priority", "weight", or "" when the scheduler does
+	// not prioritize). Both come from the active scheduler config.
+	Priority     int    `json:"priority"`
+	PriorityMode string `json:"priority_mode"`
 }
 
 // ActivityLogEvent carries a single activity log entry to event subscribers.
@@ -128,10 +135,29 @@ func (mp *metricsMonitor) getMetricsJSON() ([]byte, error) {
 // When captures are enabled, a zstd+CBOR capture is stored for successful
 // requests, with cf controlling which request/response parts are retained.
 // reqBody and reqHeaders are the request data buffered before dispatch.
-func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *responseBodyCopier, cf captureFields, reqBody []byte, reqHeaders map[string]string) {
+//
+// maskCaller renders a caller id for the activity log without leaking the raw
+// API key: "" becomes "anonymous", a short value passes through (too short to
+// be a secret), and anything longer is reduced to a 5-char prefix plus its
+// length (e.g. "sk-ragtag" -> "sk-ra…9") so distinct callers stay
+// distinguishable without exposing the key.
+func maskCaller(caller string) string {
+	if caller == "" {
+		return "anonymous"
+	}
+	if len(caller) <= 5 {
+		return caller
+	}
+	return caller[:5] + "…" + strconv.Itoa(len(caller))
+}
+
+func (mp *metricsMonitor) record(modelID, caller string, priority int, priorityMode string, r *http.Request, recorder *responseBodyCopier, cf captureFields, reqBody []byte, reqHeaders map[string]string) {
 	tm := ActivityLogEntry{
 		Timestamp:       time.Now(),
 		Model:           modelID,
+		Caller:          maskCaller(caller),
+		Priority:        priority,
+		PriorityMode:    priorityMode,
 		ReqPath:         r.URL.Path,
 		RespContentType: recorder.Header().Get("Content-Type"),
 		RespStatusCode:  recorder.Status(),
