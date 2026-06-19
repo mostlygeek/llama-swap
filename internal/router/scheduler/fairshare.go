@@ -185,6 +185,15 @@ func (s *FairShare) OnRequest(req HandlerReq) {
 	evict := s.planner.EvictionFor(req.Model, running)
 
 	if state == process.StateReady && len(evict) == 0 && !collidesWith(req.Model, evict, s.active) {
+		// Ungated (non-inference) request to a ready model: serve immediately
+		// without consuming a concurrency slot or queueing behind inference, so
+		// the model's web UI and other lightweight endpoints stay reachable
+		// while it is saturated. Cold-model ungated requests fall through to the
+		// normal path below (they load the model and count once).
+		if !s.cfg.Gated(req.Path) {
+			s.effects.GrantServeUntracked(req, req.Model)
+			return
+		}
 		// Ready and nothing to evict — gate on the concurrency limit.
 		if s.inFlight[req.Model] < s.limit(req.Model) && s.countWaiters(req.Model) == 0 {
 			s.grantHandler(req, req.Model)
@@ -446,6 +455,30 @@ func (s *FairShare) admissionOrderForModel(modelID string) []*fairWaiter {
 			ws = append(ws, w)
 		}
 	}
+	if len(ws) <= 1 {
+		return ws
+	}
+	// Hard interactive tier: every interactive waiter is admitted before any
+	// non-interactive one, with the configured mode ordering applied within each
+	// tier. When only one tier is present, order the whole set directly.
+	var interactive, batch []*fairWaiter
+	for _, w := range ws {
+		if w.req.Interactive {
+			interactive = append(interactive, w)
+		} else {
+			batch = append(batch, w)
+		}
+	}
+	if len(interactive) > 0 && len(batch) > 0 {
+		order := s.orderTier(modelID, interactive)
+		return append(order, s.orderTier(modelID, batch)...)
+	}
+	return s.orderTier(modelID, ws)
+}
+
+// orderTier returns the admission order for a single tier of waiters using the
+// configured mode (absolute priority+aging, or proportional weighted-fair).
+func (s *FairShare) orderTier(modelID string, ws []*fairWaiter) []*fairWaiter {
 	if len(ws) <= 1 {
 		return ws
 	}

@@ -192,6 +192,17 @@ func (s SchedulerConfig) ActivityPriorityFor(callerID, modelID string) (int, str
 	return fs.PriorityFor(callerID, modelID), mode
 }
 
+// InteractiveRequest reports whether a request with the given Sec-Fetch-Mode and
+// Origin header values should be treated as interactive (admitted ahead of batch
+// traffic). Only the fairshare scheduler distinguishes interactive requests;
+// other schedulers always return false.
+func (s SchedulerConfig) InteractiveRequest(secFetchMode, origin string) bool {
+	if s.Use != "fairshare" {
+		return false
+	}
+	return s.Settings.FairShare.Interactive(secFetchMode, origin)
+}
+
 type SchedulerSettings struct {
 	Fifo      FifoConfig      `yaml:"fifo"`
 	FairShare FairShareConfig `yaml:"fairshare"`

@@ -651,6 +651,14 @@
                                             "type": "integer",
                                             "default": 0,
                                             "description": "Max waiters per model before rejecting with 429. 0 means unlimited."
+                                        },
+                                        "gatedPaths": {
+                                            "type": "string",
+                                            "description": "Regex matched against a request's model-relative path. Only matching requests consume a fairshare slot; non-matching requests proxied under /upstream/<model>/ (web UI, /props, static assets) pass through without throttling. Empty uses a default matching the inference endpoints (/v1, /v, /completion, /infill, /rerank, /sdapi image routes)."
+                                        },
+                                        "interactiveOrigins": {
+                                            "type": "string",
+                                            "description": "Regex matched against a request's Origin header. A request is interactive when it is browser-initiated (carries a Sec-Fetch-Mode header) AND its Origin matches this regex; interactive requests are admitted ahead of all batch/API requests for the same model. Empty matches any Origin (any browser-initiated request counts)."
                                         }
                                     },
                                     "additionalProperties": false

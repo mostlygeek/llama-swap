@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"regexp"
 	"time"
 )
 
@@ -28,6 +29,16 @@ const (
 	defaultFairSharePriority = 1
 	defaultFairShareMaxWait  = 30 * time.Second
 )
+
+// defaultGatedPaths matches the inference endpoints that should consume a
+// fairshare slot: the OpenAI-compatible /v1 (and versionless /v) generation
+// routes, the native llama.cpp /completion and /infill, bare /rerank[ing], and
+// the stable-diffusion image routes. Everything else proxied under
+// /upstream/<model>/ (the model's web UI, /props, static assets, favicon, model
+// listings) is ungated so a busy model stays reachable.
+const defaultGatedPaths = `^/(v1|v)/(chat/completions|responses|completions|messages|embeddings|rerank|reranking|audio|images)` +
+	`|^/(completion|infill|reranking|rerank)\b` +
+	`|^/sdapi/v1/(txt2img|img2img)`
 
 // FairShareConfig configures the "fairshare" scheduler (routing.scheduler.use:
 // fairshare). It adds priority-aware fair admission in front of each model's
@@ -73,6 +84,33 @@ type FairShareConfig struct {
 	// are rejected with 429 + Retry-After. 0 (default) means unlimited depth
 	// (only MaxWait bounds the queue).
 	MaxQueueDepth int `yaml:"maxQueueDepth"`
+
+	// GatedPaths is a regex matched against a request's model-relative path
+	// (e.g. "/v1/chat/completions"). Only matching requests are subject to
+	// fairshare admission (concurrency limit, queueing, 429 backpressure);
+	// non-matching requests proxied under /upstream/<model>/ pass through
+	// without consuming a slot, so a model's web UI and other lightweight
+	// endpoints stay reachable while it is saturated with inference. Empty
+	// (the default) compiles to defaultGatedPaths.
+	GatedPaths string `yaml:"gatedPaths"`
+
+	// gatedRe is the compiled GatedPaths, set by Validate. A nil value gates
+	// every request (the pre-regex behavior), which is the safe default for a
+	// config built directly in tests without going through LoadConfigFromReader.
+	gatedRe *regexp.Regexp
+
+	// InteractiveOrigins is a regex matched against a request's Origin header to
+	// identify requests from an interactive browser UI. A request is treated as
+	// interactive when it carries a Sec-Fetch-Mode header (browser-initiated; a
+	// forbidden header that scripts cannot forge) AND its Origin matches this
+	// regex. Empty (the default) matches any Origin, so any browser-initiated
+	// request counts. Interactive requests are admitted ahead of all
+	// non-interactive (batch/API) requests for the same model — a hard tier on
+	// top of the priority/weight ordering.
+	InteractiveOrigins string `yaml:"interactiveOrigins"`
+
+	// interactiveRe is the compiled InteractiveOrigins, set by Validate.
+	interactiveRe *regexp.Regexp
 }
 
 // applyDefaults fills unset fields with their defaults. Called by
@@ -86,6 +124,9 @@ func (s *FairShareConfig) applyDefaults() {
 	}
 	if s.Mode == "" {
 		s.Mode = ModeAbsolute
+	}
+	if s.GatedPaths == "" {
+		s.GatedPaths = defaultGatedPaths
 	}
 }
 
@@ -123,5 +164,40 @@ func (s *FairShareConfig) Validate() error {
 	if s.PriorityIncreasePerSecondWaiting < 0 {
 		return fmt.Errorf("priorityIncreasePerSecondWaiting must be >= 0, got %v", s.PriorityIncreasePerSecondWaiting)
 	}
+	re, err := regexp.Compile(s.GatedPaths)
+	if err != nil {
+		return fmt.Errorf("gatedPaths is not a valid regex: %w", err)
+	}
+	s.gatedRe = re
+	ire, err := regexp.Compile(s.InteractiveOrigins)
+	if err != nil {
+		return fmt.Errorf("interactiveOrigins is not a valid regex: %w", err)
+	}
+	s.interactiveRe = ire
 	return nil
+}
+
+// Gated reports whether a request to the given model-relative path is subject to
+// fairshare admission. A nil compiled regex (config not run through Validate,
+// e.g. in tests) gates everything, preserving the pre-regex behavior.
+func (s *FairShareConfig) Gated(path string) bool {
+	if s.gatedRe == nil {
+		return true
+	}
+	return s.gatedRe.MatchString(path)
+}
+
+// Interactive reports whether a request from an interactive browser UI should be
+// admitted ahead of batch/API traffic. secFetchMode and origin are the request's
+// Sec-Fetch-Mode and Origin header values. A request qualifies only when it is
+// browser-initiated (Sec-Fetch-Mode present) and its Origin matches the
+// configured InteractiveOrigins regex (empty regex matches any Origin).
+func (s *FairShareConfig) Interactive(secFetchMode, origin string) bool {
+	if secFetchMode == "" {
+		return false
+	}
+	if s.interactiveRe == nil {
+		return true
+	}
+	return s.interactiveRe.MatchString(origin)
 }

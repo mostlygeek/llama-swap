@@ -89,3 +89,56 @@ routing:
 	_, err := LoadConfigFromReader(strings.NewReader(content))
 	assert.Error(t, err)
 }
+
+func TestFairShareConfig_GatedPaths(t *testing.T) {
+	cfg := FairShareConfig{}
+	cfg.applyDefaults()
+	assert.NoError(t, cfg.Validate())
+
+	gated := []string{
+		"/v1/chat/completions", "/v1/completions", "/v1/embeddings",
+		"/v1/messages", "/v/chat/completions", "/completion", "/infill",
+		"/rerank", "/reranking", "/v1/audio/speech", "/v1/images/generations",
+		"/sdapi/v1/txt2img",
+	}
+	for _, p := range gated {
+		assert.Truef(t, cfg.Gated(p), "Gated(%q) should be true", p)
+	}
+
+	ungated := []string{
+		"/", "/index.html", "/props", "/health", "/v1/models",
+		"/favicon.ico", "/assets/app.js", "/slots",
+	}
+	for _, p := range ungated {
+		assert.Falsef(t, cfg.Gated(p), "Gated(%q) should be false", p)
+	}
+
+	// A zero-value config (not run through Validate) gates everything, preserving
+	// the pre-regex behavior.
+	assert.True(t, (&FairShareConfig{}).Gated("/anything"))
+
+	// An invalid regex is a config error.
+	assert.Error(t, (&FairShareConfig{GatedPaths: "("}).Validate())
+}
+
+func TestFairShareConfig_Interactive(t *testing.T) {
+	// Empty origins => any browser-initiated (Sec-Fetch-Mode present) request.
+	anyOrigin := FairShareConfig{}
+	assert.NoError(t, anyOrigin.Validate())
+	assert.True(t, anyOrigin.Interactive("cors", "https://anything"))
+	assert.True(t, anyOrigin.Interactive("navigate", ""))
+	assert.False(t, anyOrigin.Interactive("", "https://anything")) // no Sec-Fetch => not a browser
+
+	// Origin allowlist => only matching origins count.
+	scoped := FairShareConfig{InteractiveOrigins: `^https://llm\.iodesystems\.com$`}
+	assert.NoError(t, scoped.Validate())
+	assert.True(t, scoped.Interactive("cors", "https://llm.iodesystems.com"))
+	assert.False(t, scoped.Interactive("cors", "https://evil.example"))
+	assert.False(t, scoped.Interactive("", "https://llm.iodesystems.com")) // not browser-initiated
+
+	// Unvalidated config (nil regex) treats any browser request as interactive.
+	assert.True(t, (&FairShareConfig{}).Interactive("cors", "x"))
+
+	// Invalid regex is a config error.
+	assert.Error(t, (&FairShareConfig{InteractiveOrigins: "("}).Validate())
+}

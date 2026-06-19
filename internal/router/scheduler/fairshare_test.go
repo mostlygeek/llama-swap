@@ -382,3 +382,77 @@ func indexOf(s, sub string) int {
 	}
 	return -1
 }
+
+// Ungated (non-inference) requests bypass the concurrency limit: at a saturated
+// model they are served untracked (no slot consumed) instead of queueing, so the
+// model's web UI stays reachable. The queued inference request is unaffected.
+func TestFairShare_UngatedBypassesConcurrency(t *testing.T) {
+	eff := newFakeEffects()
+	eff.states["a"] = process.StateReady
+	cfg := config.FairShareConfig{GatedPaths: `^/v1/`}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	s := newFair(&stubPlanner{}, eff, cfg, map[string]int{"a": 1})
+
+	gated := func(caller string) HandlerReq {
+		r := reqC("a", caller)
+		r.Path = "/v1/chat/completions"
+		return r
+	}
+
+	s.OnRequest(gated("first"))  // fills the only slot
+	s.OnRequest(gated("queued")) // over limit -> queued
+	if got := eff.trackedServed("a"); got != 1 {
+		t.Fatalf("trackedServed(a)=%d want 1 (second gated request must queue)", got)
+	}
+
+	// UI request arrives while the model is saturated.
+	ui := reqC("a", "ui")
+	ui.Path = "/"
+	s.OnRequest(ui)
+
+	if got := eff.untrackedServed("a"); got != 1 {
+		t.Fatalf("untrackedServed(a)=%d want 1 (UI request served without a slot)", got)
+	}
+	if got := eff.trackedServed("a"); got != 1 {
+		t.Errorf("trackedServed(a)=%d want 1 (UI must not consume a slot or admit the waiter)", got)
+	}
+
+	s.OnServeDone(ServeDoneEvent{ModelID: "a"}) // first finishes -> admit queued
+	if got := eff.trackedServed("a"); got != 2 {
+		t.Errorf("trackedServed(a)=%d want 2 after slot frees", got)
+	}
+}
+
+// Interactive requests form a hard tier: an interactive waiter is admitted ahead
+// of a non-interactive one even when the batch request has far higher priority.
+func TestFairShare_InteractiveTier(t *testing.T) {
+	eff := newFakeEffects()
+	eff.states["a"] = process.StateReady
+	cfg := config.FairShareConfig{
+		Mode:       config.ModeAbsolute,
+		Priorities: map[string]int{"batch": 100, "ui": 1},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	s := newFair(&stubPlanner{}, eff, cfg, map[string]int{"a": 1})
+
+	s.OnRequest(reqC("a", "blocker")) // occupies the only slot
+
+	batch := reqC("a", "batch") // priority 100, not interactive
+	s.OnRequest(batch)
+
+	ui := reqC("a", "ui") // priority 1, interactive
+	ui.Interactive = true
+	s.OnRequest(ui)
+
+	s.OnServeDone(ServeDoneEvent{ModelID: "a"}) // admit interactive 'ui' first...
+	s.OnServeDone(ServeDoneEvent{ModelID: "a"}) // ...then high-priority batch
+
+	order := eff.servedCallers("blocker")
+	if len(order) != 2 || order[0] != "ui" || order[1] != "batch" {
+		t.Errorf("served order=%v want [ui batch] (interactive tier beats higher priority)", order)
+	}
+}

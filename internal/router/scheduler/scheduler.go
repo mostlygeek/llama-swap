@@ -87,6 +87,11 @@ type Effects interface {
 	// whether the caller was still there to receive it. The scheduler bumps
 	// its in-flight count only when this returns true.
 	GrantServe(req HandlerReq, modelID string) bool
+	// GrantServeUntracked hands a caller the handler for modelID without the
+	// in-flight tracking wrapper, so the request does not count against the
+	// model's concurrency limit or service-time stats. Used for ungated
+	// (non-inference) requests. Reports whether the caller received it.
+	GrantServeUntracked(req HandlerReq, modelID string) bool
 	// StopProcesses stops the named processes in parallel and blocks until all
 	// have stopped. Unknown IDs are skipped.
 	StopProcesses(timeout time.Duration, ids []string)
@@ -116,10 +121,19 @@ func New(conf config.Config, name string, logger *logmon.Monitor, planner Swappe
 
 // HandlerReq is one in-flight ServeHTTP request waiting for a routing decision.
 type HandlerReq struct {
-	Model      string
-	Ctx        context.Context
-	Respond    chan HandlerResp
-	PositionCh chan int
+	Model string
+	// Path is the request's model-relative URL path (e.g. "/v1/chat/completions"
+	// or, for an /upstream/<model>/ request, the path after the prefix strip).
+	// The fairshare scheduler matches it against its gatedPaths regex to decide
+	// whether the request consumes a concurrency slot.
+	Path string
+	// Interactive marks a request from an interactive browser UI. The fairshare
+	// scheduler admits interactive requests ahead of all non-interactive ones for
+	// the same model (a hard tier above the priority/weight ordering).
+	Interactive bool
+	Ctx         context.Context
+	Respond     chan HandlerResp
+	PositionCh  chan int
 }
 
 // HandlerResp is the routing decision returned to a HandlerReq's caller: either

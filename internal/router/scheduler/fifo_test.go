@@ -37,10 +37,11 @@ func (s *stubPlanner) OnSwapStart(string, []string) {}
 // grantRec is one GrantError / GrantServe call. err!=nil marks an error grant;
 // otherwise it is a serve grant and serve reports whether the caller received it.
 type grantRec struct {
-	model  string
-	caller string
-	err    error
-	serve  bool
+	model     string
+	caller    string
+	err       error
+	serve     bool
+	untracked bool
 }
 
 type startRec struct {
@@ -106,6 +107,16 @@ func (f *fakeEffects) GrantServe(req HandlerReq, modelID string) bool {
 	return ok
 }
 
+func (f *fakeEffects) GrantServeUntracked(req HandlerReq, modelID string) bool {
+	ok := true
+	if v, set := f.serveResult[modelID]; set {
+		ok = v
+	}
+	f.lastServeReq = req
+	f.grants = append(f.grants, grantRec{model: modelID, caller: callerOf(req), serve: ok, untracked: true})
+	return ok
+}
+
 func (f *fakeEffects) StopProcesses(timeout time.Duration, ids []string) {
 	f.stops = append(f.stops, stopRec{timeout: timeout, ids: ids})
 }
@@ -115,6 +126,28 @@ func (f *fakeEffects) served(modelID string) int {
 	n := 0
 	for _, g := range f.grants {
 		if g.err == nil && g.serve && g.model == modelID {
+			n++
+		}
+	}
+	return n
+}
+
+// trackedServed counts slot-consuming serve grants for modelID (GrantServe).
+func (f *fakeEffects) trackedServed(modelID string) int {
+	n := 0
+	for _, g := range f.grants {
+		if g.err == nil && g.serve && !g.untracked && g.model == modelID {
+			n++
+		}
+	}
+	return n
+}
+
+// untrackedServed counts ungated serve grants for modelID (GrantServeUntracked).
+func (f *fakeEffects) untrackedServed(modelID string) int {
+	n := 0
+	for _, g := range f.grants {
+		if g.err == nil && g.serve && g.untracked && g.model == modelID {
 			n++
 		}
 	}

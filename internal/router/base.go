@@ -197,6 +197,17 @@ func (b *baseRouter) GrantServe(req scheduler.HandlerReq, modelID string) bool {
 	return b.grant(req, scheduler.HandlerResp{HandleFunc: b.trackedServe(modelID, p)})
 }
 
+// GrantServeUntracked implements scheduler.Effects. Unlike GrantServe it hands
+// the caller p.ServeHTTP directly, with no trackedServe wrapper: the request
+// never fires serveDoneCh, so the scheduler does not count it against the
+// model's in-flight total or fold it into the service-time EWMA. The scheduler
+// uses this for ungated (non-inference) requests so they neither consume a
+// concurrency slot nor queue behind inference.
+func (b *baseRouter) GrantServeUntracked(req scheduler.HandlerReq, modelID string) bool {
+	p := b.processes[modelID]
+	return b.grant(req, scheduler.HandlerResp{HandleFunc: p.ServeHTTP})
+}
+
 // StopProcesses implements scheduler.Effects, stopping the named processes in
 // parallel and blocking until all have stopped.
 func (b *baseRouter) StopProcesses(timeout time.Duration, ids []string) {
@@ -420,8 +431,10 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	hr := scheduler.HandlerReq{
-		Model: data.ModelID,
-		Ctx:   req.Context(),
+		Model:       data.ModelID,
+		Path:        req.URL.Path,
+		Interactive: b.config.Routing.Scheduler.InteractiveRequest(req.Header.Get("Sec-Fetch-Mode"), req.Header.Get("Origin")),
+		Ctx:         req.Context(),
 		// Unbuffered: a successful send on Respond proves the waiter is
 		// alive and consuming. grant() relies on this to avoid handing a
 		// handleFunc to a cancelled waiter and leaking the inFlight count.

@@ -606,6 +606,22 @@ routing:
         # Default: 0 (unlimited; only maxWait bounds the queue).
         maxQueueDepth: 16
 
+        # gatedPaths: regex matched against a request's model-relative path.
+        # Only matching requests consume a fairshare slot; everything else
+        # proxied under /upstream/<model>/ (the model's web UI, /props, static
+        # assets) passes through untouched, so a saturated model stays
+        # reachable. Default (empty) matches the inference endpoints (/v1, /v,
+        # /completion, /infill, /rerank, /sdapi image routes).
+        # gatedPaths: '^/v1/'
+
+        # interactiveOrigins: regex matched against a request's Origin header.
+        # A request is treated as interactive when it is browser-initiated
+        # (carries a Sec-Fetch-Mode header, which scripts cannot forge) AND its
+        # Origin matches this regex. Interactive requests are admitted ahead of
+        # all batch/API requests for the same model. Empty (default) matches any
+        # Origin, so any browser-initiated request counts.
+        # interactiveOrigins: '^https://llm\.example\.com$'
+
 # peers: a dictionary of remote peers and models they provide
 # - optional, default empty dictionary
 # - peers can be another llama-swap
