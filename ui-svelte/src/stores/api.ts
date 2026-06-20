@@ -8,6 +8,7 @@ import type {
   ReqRespCapture,
   InFlightStats,
   PerformanceResponse,
+  ModelEstimate,
 } from "../lib/types";
 import { connectionState } from "./theme";
 
@@ -15,6 +16,7 @@ const LOG_LENGTH_LIMIT = 1024 * 100; /* 100KB of log data */
 
 // Stores
 export const models = writable<Model[]>([]);
+export const modelEstimates = writable<Record<string, ModelEstimate>>({});
 export const proxyLogs = writable<string>("");
 export const upstreamLogs = writable<string>("");
 export const metrics = writable<ActivityLogEntry[]>([]);
@@ -191,6 +193,18 @@ export async function loadModel(model: string, signal?: AbortSignal): Promise<vo
     }
     console.error("Failed to load model:", error);
     throw error;
+  }
+}
+
+export async function fetchModelEstimates(): Promise<void> {
+  try {
+    const response = await fetch("/api/mantle/models/estimates");
+    if (!response.ok) {
+      throw new Error(`Failed to fetch model estimates: ${response.status}`);
+    }
+    modelEstimates.set(await response.json());
+  } catch (error) {
+    console.error("Failed to fetch model estimates:", error);
   }
 }
 

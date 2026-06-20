@@ -53,7 +53,7 @@ rm -rf build/CMakeCache.txt build/CMakeFiles 2>/dev/null || true
 
 echo "=== Building stable-diffusion.cpp for ${BACKEND} ==="
 cmake -B build "${CMAKE_FLAGS[@]}"
-cmake --build build --config Release -j"$(nproc)" --target "${TARGETS[@]}"
+cmake --build build --config Release -j"${MAX_BUILD_JOBS:-4}" --target "${TARGETS[@]}"
 
 for bin in sd-cli sd-server; do
     if [ ! -f "build/bin/$bin" ]; then

@@ -8,6 +8,9 @@
   import Performance from "./routes/Performance.svelte";
   import Playground from "./routes/Playground.svelte";
   import PlaygroundStub from "./routes/PlaygroundStub.svelte";
+  import ModelManager from "./routes/ModelManager.svelte";
+  import ConfigEditor from "./routes/ConfigEditor.svelte";
+  import BackendManager from "./routes/BackendManager.svelte";
   import { enableAPIEvents } from "./stores/api";
   import { initScreenWidth, initSystemThemeListener, isDarkMode, appTitle, connectionState } from "./stores/theme";
   import { currentRoute } from "./stores/route";
@@ -18,6 +21,9 @@
     "/logs": LogViewer,
     "/activity": Activity,
     "/performance": Performance,
+    "/models/hub": ModelManager,
+    "/config": ConfigEditor,
+    "/backends": BackendManager,
     "*": PlaygroundStub,
   };
 

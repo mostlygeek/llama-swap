@@ -61,6 +61,9 @@ func main() {
 	flagKeyFile := flag.String("tls-key-file", "", "TLS key file")
 	flagVersion := flag.Bool("version", false, "show version and exit")
 	flagWatchConfig := flag.Bool("watch-config", false, "reload config on file change")
+	flagModelsDir := flag.String("models-dir", "", "directory for downloaded models (default: <config-dir>/models)")
+	flagBackendsDir := flag.String("backends-dir", "", "directory for compiled backends (default: <config-dir>/backends)")
+	flagBuildScript := flag.String("build-script", "", "path to backend build script")
 	flag.Parse()
 
 	if *flagVersion {
@@ -93,6 +96,23 @@ func main() {
 	if err != nil {
 		slog.Error("failed to load config", "path", configPath, "error", err)
 		os.Exit(1)
+	}
+	// Set runtime paths for Mantle management
+	cfg.ConfigPath = configPath
+	if *flagModelsDir != "" {
+		cfg.ModelsDir = *flagModelsDir
+	} else if cfg.ModelsDir == "" {
+		cfg.ModelsDir = filepath.Join(filepath.Dir(configPath), "models")
+	}
+	if *flagBackendsDir != "" {
+		cfg.BackendsDir = *flagBackendsDir
+	} else if cfg.BackendsDir == "" {
+		cfg.BackendsDir = filepath.Join(filepath.Dir(configPath), "backends")
+	}
+	if *flagBuildScript != "" {
+		cfg.BuildScript = *flagBuildScript
+	} else if cfg.BuildScript == "" {
+		cfg.BuildScript = "/usr/local/bin/build-llamacpp.sh"
 	}
 
 	// Loggers are wired per cfg.LogToStdout: proxy/upstream feed muxLog, which
@@ -192,6 +212,11 @@ func main() {
 			proxyLog.Warnf("failed to reload config: %v", err)
 			return
 		}
+		// Re-apply runtime paths on reload
+		newCfg.ConfigPath = configPath
+		newCfg.ModelsDir = cfg.ModelsDir
+		newCfg.BackendsDir = cfg.BackendsDir
+		newCfg.BuildScript = cfg.BuildScript
 
 		if len(newCfg.Profiles) > 0 {
 			proxyLog.Warn("Profile functionality has been removed in favor of Groups. See the README for more information.")

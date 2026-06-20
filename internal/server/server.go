@@ -13,6 +13,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/mantle"
 	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/internal/router"
 	"github.com/mostlygeek/llama-swap/internal/shared"
@@ -38,6 +39,8 @@ type Server struct {
 
 	mux     *http.ServeMux
 	handler http.Handler
+
+	mantle *mantle.Handler
 
 	shutdownCtx  context.Context
 	shutdownFn   context.CancelFunc
@@ -154,6 +157,8 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 		shutdownCtx: shutdownCtx,
 		shutdownFn:  shutdownFn,
 	}
+	s.mantle = mantle.NewHandler(&s.cfg, cfg.ConfigPath,
+		cfg.ModelsDir, cfg.BackendsDir, cfg.BuildScript)
 	s.routes()
 	s.startPreload()
 	return s, nil
@@ -254,6 +259,9 @@ func (s *Server) routes() {
 	mux.Handle("GET /api/performance", apiChain.ThenFunc(s.handleAPIPerformance))
 	mux.Handle("GET /api/version", apiChain.ThenFunc(s.handleAPIVersion))
 	mux.Handle("GET /api/captures/{id}", apiChain.ThenFunc(s.handleAPICapture))
+
+	// Mantle management API (model download, build, config)
+	s.mantle.RegisterRoutes(mux)
 
 	s.mux = mux
 	s.handler = chain.New(CreateRequestLogMiddleware(s.proxylog), CreateCORSMiddleware()).Then(mux)
