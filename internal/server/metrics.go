@@ -44,6 +44,7 @@ type ActivityLogEntry struct {
 	Tokens          TokenMetrics      `json:"tokens"`
 	DurationMs      int               `json:"duration_ms"`
 	HasCapture      bool              `json:"has_capture"`
+	ErrorMsg        string            `json:"error_msg,omitempty"`
 	Metadata        map[string]string `json:"metadata,omitempty"`
 }
 
@@ -125,9 +126,11 @@ func (mp *metricsMonitor) getMetricsJSON() ([]byte, error) {
 }
 
 // record parses a completed response body and stores/emits an activity entry.
-// When captures are enabled, a zstd+CBOR capture is stored for successful
-// requests, with cf controlling which request/response parts are retained.
-// reqBody and reqHeaders are the request data buffered before dispatch.
+// Successful requests store a zstd+CBOR capture (when enabled) with cf
+// controlling which parts are retained. Failed (non-200) requests capture the
+// request only and set ErrorMsg to a description of the failure, so the error
+// can be inspected without storing unreadable raw response bytes. reqBody and
+// reqHeaders are the request data buffered before dispatch.
 func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *responseBodyCopier, cf captureFields, reqBody []byte, reqHeaders map[string]string) {
 	tm := ActivityLogEntry{
 		Timestamp:       time.Now(),
@@ -152,7 +155,13 @@ func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *resp
 
 	if recorder.Status() != http.StatusOK {
 		mp.logger.Warnf("non-200 response, recording partial metrics: status=%d, path=%s", recorder.Status(), r.URL.Path)
-		queueAndEmit()
+		decoded, decErr := mp.decodeResponseBody(recorder, r.URL.Path)
+		tm.ErrorMsg = failedErrorMessage(recorder.Status(), decoded, decErr)
+		tm.ID = mp.queueMetrics(tm)
+		// Capture the request only; the failure is surfaced via ErrorMsg
+		// rather than storing the (possibly undisplayable) response body.
+		tm.HasCapture = mp.storeCapture(tm.ID, r, recorder, cf&^captureRespBody, reqBody, reqHeaders, nil)
+		mp.emitMetric(tm)
 		return
 	}
 
@@ -167,6 +176,7 @@ func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *resp
 		decoded, err := decompressBody(body, encoding)
 		if err != nil {
 			mp.logger.Warnf("metrics: decompression failed: %v, path=%s, recording minimal metrics", err, r.URL.Path)
+			tm.ErrorMsg = fmt.Sprintf("response decompression failed: %v", err)
 			queueAndEmit()
 			return
 		}
@@ -205,28 +215,99 @@ func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *resp
 	}
 
 	tm.ID = mp.queueMetrics(tm)
-	if mp.enableCaptures {
-		capture := ReqRespCapture{
-			ID:         tm.ID,
-			ReqPath:    r.URL.Path,
-			ReqHeaders: reqHeaders,
-		}
-		if cf&captureReqBody != 0 {
-			capture.ReqBody = reqBody
-		}
-		if cf&captureRespHeaders != 0 {
-			capture.RespHeaders = headerMap(recorder.Header())
-			redactHeaders(capture.RespHeaders)
-			delete(capture.RespHeaders, "Content-Encoding")
-		}
-		if cf&captureRespBody != 0 {
-			capture.RespBody = body
-		}
-		if mp.addCapture(capture) {
-			tm.HasCapture = true
+	tm.HasCapture = mp.storeCapture(tm.ID, r, recorder, cf, reqBody, reqHeaders, body)
+	mp.emitMetric(tm)
+}
+
+// storeCapture assembles a ReqRespCapture for id, honoring the captureFields
+// mask, and stores it when captures are enabled. body is the response body to
+// capture (already decompressed by the caller); pass nil to omit it. Returns
+// true if a capture was stored.
+func (mp *metricsMonitor) storeCapture(id int, r *http.Request, recorder *responseBodyCopier, cf captureFields, reqBody []byte, reqHeaders map[string]string, body []byte) bool {
+	if !mp.enableCaptures {
+		return false
+	}
+	capture := ReqRespCapture{
+		ID:         id,
+		ReqPath:    r.URL.Path,
+		ReqHeaders: reqHeaders,
+	}
+	if cf&captureReqBody != 0 {
+		capture.ReqBody = reqBody
+	}
+	if cf&captureRespHeaders != 0 {
+		capture.RespHeaders = headerMap(recorder.Header())
+		redactHeaders(capture.RespHeaders)
+		delete(capture.RespHeaders, "Content-Encoding")
+	}
+	if cf&captureRespBody != 0 {
+		capture.RespBody = body
+	}
+	return mp.addCapture(capture)
+}
+
+// decodeResponseBody returns the buffered response body, decompressing it when
+// the upstream set a Content-Encoding we recognize. On decompression failure it
+// logs a warning and returns an error so the caller can record a description
+// (via ErrorMsg) instead of storing unreadable raw bytes.
+func (mp *metricsMonitor) decodeResponseBody(recorder *responseBodyCopier, path string) ([]byte, error) {
+	body := recorder.body.Bytes()
+	if len(body) == 0 {
+		return nil, nil
+	}
+	encoding := recorder.Header().Get("Content-Encoding")
+	if encoding == "" {
+		return body, nil
+	}
+	decoded, err := decompressBody(body, encoding)
+	if err != nil {
+		mp.logger.Warnf("metrics: response decompression failed: %v, path=%s", err, path)
+		return nil, err
+	}
+	return decoded, nil
+}
+
+// errorMessagePaths lists JSON paths where a human-readable error message can
+// live across OpenAI- and llama.cpp-style error responses.
+var errorMessagePaths = []string{"error.message", "error", "message", "detail"}
+
+// extractErrorMessage pulls a human-readable error string from a JSON error
+// response. Returns "" if no message is found or the body is not valid JSON.
+func extractErrorMessage(body []byte) string {
+	if !gjson.ValidBytes(body) {
+		return ""
+	}
+	parsed := gjson.ParseBytes(body)
+	for _, path := range errorMessagePaths {
+		v := parsed.Get(path)
+		if v.Exists() && v.Type == gjson.String {
+			if s := strings.TrimSpace(v.String()); s != "" {
+				return s
+			}
 		}
 	}
-	mp.emitMetric(tm)
+	return ""
+}
+
+// failedErrorMessage builds a human-readable description for a non-200 response.
+// It prefers an error message parsed from the (decompressed) body and falls back
+// to the HTTP status text. A non-nil decErr indicates the body could not be
+// decoded, in which case the decode error is described instead.
+func failedErrorMessage(status int, body []byte, decErr error) string {
+	const maxLen = 500
+	if decErr != nil {
+		return fmt.Sprintf("response decode failed: %v", decErr)
+	}
+	if msg := extractErrorMessage(body); msg != "" {
+		if len(msg) > maxLen {
+			msg = msg[:maxLen] + "..."
+		}
+		return msg
+	}
+	if text := http.StatusText(status); text != "" {
+		return fmt.Sprintf("%d %s", status, text)
+	}
+	return fmt.Sprintf("HTTP %d", status)
 }
 
 // usagePaths lists the JSON paths where a per-event usage object can live.
