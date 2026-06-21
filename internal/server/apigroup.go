@@ -105,7 +105,9 @@ func (s *Server) handleAPIMetrics(w http.ResponseWriter, r *http.Request) {
 // filtered to samples after the ?after=<RFC3339> timestamp.
 func (s *Server) handleAPIPerformance(w http.ResponseWriter, r *http.Request) {
 	if s.perf == nil {
-		shared.SendResponse(w, r, http.StatusServiceUnavailable, "performance monitor not available")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]bool{"enabled": false})
 		return
 	}
 
@@ -136,6 +138,7 @@ func (s *Server) handleAPIPerformance(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
+		"enabled":   true,
 		"sys_stats": sysStats,
 		"gpu_stats": gpuStats,
 	})
