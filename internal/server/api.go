@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/event"
+	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/shared"
 )
 
@@ -339,6 +341,28 @@ func (s *Server) handleUpstream(w http.ResponseWriter, r *http.Request) {
 	r.URL.Path = remainingPath
 	// Pin the resolved model so the router skips body/query extraction.
 	*r = *r.WithContext(shared.SetContext(r.Context(), shared.ReqContextData{Model: searchName, ModelID: modelID, Metadata: make(map[string]string)}))
+
+	// If the path matches an upstream.ignorePatterns entry and the model is
+	// not already loaded, refuse the request without triggering a swap. The
+	// server was not able to process the response because the model was not
+	// already loaded.
+	for _, re := range s.cfg.Upstream.IgnorePaths {
+		if !re.MatchString(remainingPath) {
+			continue
+		}
+		if s.local.Handles(modelID) {
+			state, ok := s.local.RunningModels()[modelID]
+			if !ok || state != process.StateReady {
+				shared.SendResponse(w, r, http.StatusConflict,
+					fmt.Sprintf("model %s is not loaded; path matches upstream.ignorePaths", modelID))
+				return
+			}
+		}
+		// Either the model is already loaded (no swap would be triggered)
+		// or this is a peer model (peer proxying never swaps). Fall through
+		// to normal dispatch.
+		break
+	}
 
 	switch {
 	case s.local.Handles(modelID):

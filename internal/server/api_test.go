@@ -5,11 +5,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/shared"
 )
 
@@ -154,6 +156,91 @@ func upstreamMetricsServer(response string) *Server {
 	}
 	s.routes()
 	return s
+}
+
+func TestServer_HandleUpstream_IgnorePaths(t *testing.T) {
+	// Compile a pattern that matches static asset suffixes.
+	pattern := regexp.MustCompile(`.*\.(js|json|css|png|gif|jpg|jpeg|txt)$`)
+
+	t.Run("matched path, model not loaded, returns 409", func(t *testing.T) {
+		local := newStubRouter([]string{"m1"}, "upstream-body")
+		// running is nil/empty: model is not in RunningModels() => not loaded.
+		s := newTestServer(local, newStubRouter(nil, ""))
+		s.cfg = config.Config{
+			Models: map[string]config.ModelConfig{"m1": {}},
+			Upstream: config.UpstreamConfig{
+				IgnorePaths: []*regexp.Regexp{pattern},
+			},
+		}
+
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/upstream/m1/foo.js", nil))
+
+		if w.Code != http.StatusConflict {
+			t.Fatalf("status = %d, want %d (body=%q)", w.Code, http.StatusConflict, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "not loaded") {
+			t.Errorf("body = %q, want it to contain 'not loaded'", w.Body.String())
+		}
+	})
+
+	t.Run("matched path, model already loaded, serves normally", func(t *testing.T) {
+		local := newStubRouter([]string{"m1"}, "upstream-body")
+		local.running = map[string]process.ProcessState{"m1": process.StateReady}
+		s := newTestServer(local, newStubRouter(nil, ""))
+		s.cfg = config.Config{
+			Models: map[string]config.ModelConfig{"m1": {}},
+			Upstream: config.UpstreamConfig{
+				IgnorePaths: []*regexp.Regexp{pattern},
+			},
+		}
+
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/upstream/m1/foo.js", nil))
+
+		if w.Code != http.StatusOK || w.Body.String() != "upstream-body" {
+			t.Fatalf("status=%d body=%q, want 200 'upstream-body'", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("non-matched path, model not loaded, serves normally", func(t *testing.T) {
+		local := newStubRouter([]string{"m1"}, "upstream-body")
+		s := newTestServer(local, newStubRouter(nil, ""))
+		s.cfg = config.Config{
+			Models: map[string]config.ModelConfig{"m1": {}},
+			Upstream: config.UpstreamConfig{
+				IgnorePaths: []*regexp.Regexp{pattern},
+			},
+		}
+
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/upstream/m1/v1/chat/completions", nil))
+
+		if w.Code != http.StatusOK || w.Body.String() != "upstream-body" {
+			t.Fatalf("status=%d body=%q, want 200 'upstream-body'", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("matched path, peer model, serves normally", func(t *testing.T) {
+		// Peer routers do not appear via RunningModels on the local router;
+		// they should fall through to normal dispatch without 409.
+		local := newStubRouter(nil, "")
+		peer := newStubRouter([]string{"m1"}, "peer-body")
+		s := newTestServer(local, peer)
+		s.cfg = config.Config{
+			Models: map[string]config.ModelConfig{"m1": {}},
+			Upstream: config.UpstreamConfig{
+				IgnorePaths: []*regexp.Regexp{pattern},
+			},
+		}
+
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/upstream/m1/foo.js", nil))
+
+		if w.Code != http.StatusOK || w.Body.String() != "peer-body" {
+			t.Fatalf("status=%d body=%q, want 200 'peer-body'", w.Code, w.Body.String())
+		}
+	})
 }
 
 func TestServer_HandleUpstream_MetricsRecordsSupportedPath(t *testing.T) {

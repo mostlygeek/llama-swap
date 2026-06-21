@@ -572,6 +572,24 @@
             "default": {},
             "description": "A dictionary of remote peers and models they provide. Peers can be another llama-swap or any server that provides the /v1/ generative API endpoints supported by llama-swap."
         },
+        "upstream": {
+            "type": "object",
+            "description": "Controls behaviour of the /upstream passthrough endpoint. Recommended to only use in special use cases; leaving it as the default will typically be the best experience.",
+            "properties": {
+                "ignorePaths": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "default": [
+                        ".*\\.(js|json|css|png|gif|jpg|jpeg|ico|txt)$"
+                    ],
+                    "description": "List of RE2 compatible regular expressions. Any request to a path matching any of the regular expressions will be ignored and not trigger a swap. When not specified, defaults to a pattern matching common static-asset suffixes (.js, .json, .css, .png, .gif, .jpg, .jpeg, .ico, .txt)."
+                }
+            },
+            "additionalProperties": false,
+            "default": {}
+        },
         "routing": {
             "type": "object",
             "description": "Canonical routing/scheduling configuration. Alternative to the legacy top-level 'groups'/'matrix' keys; a config must not use both styles.",
