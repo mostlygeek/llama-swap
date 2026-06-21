@@ -2,7 +2,6 @@ package router
 
 import (
 	"fmt"
-	"sort"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
@@ -14,20 +13,23 @@ type Matrix struct {
 }
 
 func NewMatrix(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Matrix, error) {
-	if conf.Matrix == nil {
+	mtx := conf.Routing.Router.Settings.Matrix
+	if mtx == nil {
 		return nil, fmt.Errorf("matrix router requires a matrix configuration")
 	}
 
-	planner := &matrixPlanner{
-		solver: newMatrixSolver(conf.ExpandedSets, conf.Matrix.ResolvedEvictCosts()),
+	swapper := &matrixSwapper{
+		solver: newMatrixSolver(mtx.ExpandedSets, mtx.ResolvedEvictCosts()),
 		logger: proxylog,
 	}
 
 	// Build a process for every model in the config. Any model can run alone
 	// even if it is not part of a set; this mirrors proxy.NewMatrix.
 	processes := make(map[string]process.Process, len(conf.Models))
-	base := newBaseRouter("matrix", conf, processes, planner, proxylog)
-	planner.processes = processes
+	base, err := newBaseRouter("matrix", conf, processes, proxylog, swapper)
+	if err != nil {
+		return nil, fmt.Errorf("creating base router: %w", err)
+	}
 
 	for mid, modelCfg := range conf.Models {
 		procLog := logmon.NewWriter(upstreamlog)
@@ -45,20 +47,18 @@ func NewMatrix(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Matr
 	return r, nil
 }
 
-// matrixPlanner decides evictions by asking the matrix solver against the
-// current running set.
-type matrixPlanner struct {
-	solver    *matrixSolver
-	processes map[string]process.Process
-	logger    *logmon.Monitor
+// matrixSwapper decides evictions by asking the matrix solver against the
+// running set the scheduler hands it.
+type matrixSwapper struct {
+	solver *matrixSolver
+	logger *logmon.Monitor
 }
 
-func (p *matrixPlanner) EvictionFor(target string, alsoRunning []string) []string {
-	return p.solver.Solve(target, p.runningSet(alsoRunning)).Evict
+func (p *matrixSwapper) EvictionFor(target string, running []string) []string {
+	return p.solver.Solve(target, running).Evict
 }
 
-func (p *matrixPlanner) OnSwapStart(target string) {
-	running := p.runningModels()
+func (p *matrixSwapper) OnSwapStart(target string, running []string) {
 	result := p.solver.Solve(target, running)
 	switch {
 	case len(result.Evict) > 0:
@@ -69,33 +69,4 @@ func (p *matrixPlanner) OnSwapStart(target string) {
 	default:
 		p.logger.Debugf("matrix: model=%s already running in set=%s dsl=%q", target, result.SetName, result.DSL)
 	}
-}
-
-func (p *matrixPlanner) runningModels() []string {
-	return p.runningSet(nil)
-}
-
-// runningSet returns the union of live processes (State != Stopped/Shutdown)
-// and any extra IDs the baseRouter has already committed to loading but which
-// the process state machine has not yet reflected.
-func (p *matrixPlanner) runningSet(alsoRunning []string) []string {
-	seen := make(map[string]struct{}, len(p.processes))
-	var running []string
-	for id, proc := range p.processes {
-		st := proc.State()
-		if st == process.StateStopped || st == process.StateShutdown {
-			continue
-		}
-		seen[id] = struct{}{}
-		running = append(running, id)
-	}
-	for _, id := range alsoRunning {
-		if _, dup := seen[id]; dup {
-			continue
-		}
-		seen[id] = struct{}{}
-		running = append(running, id)
-	}
-	sort.Strings(running)
-	return running
 }

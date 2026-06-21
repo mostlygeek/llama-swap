@@ -6,12 +6,15 @@
     value: string;
     placeholder?: string;
     disabled?: boolean;
+    capabilities?: string[];
+    matchAny?: boolean;
   }
 
-  let { value = $bindable(), placeholder = "Select a model...", disabled = false }: Props = $props();
+  let { value = $bindable(), placeholder = "Select a model...", disabled = false, capabilities, matchAny = false }: Props = $props();
 
-  let grouped = $derived(groupModels($models));
-  let hasModels = $derived(grouped.local.length > 0 || Object.keys(grouped.peersByProvider).length > 0);
+  let grouped = $derived(groupModels($models, capabilities, matchAny));
+  let hasMatching = $derived(grouped.localMatching.length > 0);
+  let hasModels = $derived(hasMatching || grouped.local.length > 0 || Object.keys(grouped.peersByProvider).length > 0);
 </script>
 
 {#if hasModels}
@@ -21,6 +24,18 @@
     {disabled}
   >
     <option value="">{placeholder}</option>
+    {#if hasMatching}
+      <optgroup label="Matching Capabilities">
+        {#each grouped.localMatching as model (model.id)}
+          <option value={model.id}>{model.id}</option>
+          {#if model.aliases}
+            {#each model.aliases as alias (alias)}
+              <option value={alias}>  ↳ {alias}</option>
+            {/each}
+          {/if}
+        {/each}
+      </optgroup>
+    {/if}
     {#if grouped.local.length > 0}
       <optgroup label="Local">
         {#each grouped.local as model (model.id)}

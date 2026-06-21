@@ -2,6 +2,16 @@ export type ConnectionState = "connected" | "connecting" | "disconnected";
 
 export type ModelStatus = "ready" | "starting" | "stopping" | "stopped" | "shutdown" | "unknown";
 
+export interface ModelCapabilities {
+  vision?: boolean;
+  audio_transcriptions?: boolean;
+  audio_speech?: boolean;
+  image_generation?: boolean;
+  image_to_image?: boolean;
+  function_calling?: boolean;
+  reranker?: boolean;
+}
+
 export interface Model {
   id: string;
   state: ModelStatus;
@@ -10,10 +20,13 @@ export interface Model {
   unlisted: boolean;
   peerID: string;
   aliases?: string[];
+  capabilities?: ModelCapabilities;
 }
 
 export interface TokenMetrics {
   cache_tokens: number;
+  draft_tokens: number;
+  draft_acc_tokens: number;
   input_tokens: number;
   output_tokens: number;
   prompt_per_second: number;
@@ -30,6 +43,8 @@ export interface ActivityLogEntry {
   tokens: TokenMetrics;
   duration_ms: number;
   has_capture: boolean;
+  error_msg?: string;
+  metadata?: Record<string, string>;
 }
 
 export interface ReqRespCapture {

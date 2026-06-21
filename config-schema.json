@@ -82,6 +82,78 @@
             },
             "additionalProperties": false,
             "description": "Timeout settings for proxy connections."
+        },
+        "groupsConfig": {
+            "type": "object",
+            "additionalProperties": {
+                "type": "object",
+                "required": [
+                    "members"
+                ],
+                "properties": {
+                    "swap": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Controls model swapping behaviour within the group. True: only one model runs at a time. False: all models can run together."
+                    },
+                    "exclusive": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Controls how the group affects other groups. True: causes all other groups to unload when this group runs a model. False: does not affect other groups."
+                    },
+                    "persistent": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Prevents other groups from unloading the models in this group. Does not affect individual model behaviour."
+                    },
+                    "members": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Array of model IDs that are members of this group. Model IDs must be defined in models."
+                    }
+                }
+            },
+            "description": "A dictionary of group settings. Provides advanced controls over model swapping behaviour. Model IDs must be defined in models. A model can only be a member of one group. Behaviour controlled via swap, exclusive, persistent."
+        },
+        "matrixConfig": {
+            "type": "object",
+            "description": "Solver-based alternative to groups. Declares valid combinations of concurrent models. The solver minimizes eviction cost when swapping. A config must use either groups or matrix, not both.",
+            "required": [
+                "vars",
+                "sets"
+            ],
+            "properties": {
+                "vars": {
+                    "type": "object",
+                    "description": "Short names for models. Keys must be alphanumeric, 1-8 characters. All sets and evict_costs must use these IDs.",
+                    "minProperties": 1,
+                    "additionalProperties": {
+                        "type": "string"
+                    },
+                    "propertyNames": {
+                        "pattern": "^[a-zA-Z0-9]{1,8}$"
+                    }
+                },
+                "evict_costs": {
+                    "type": "object",
+                    "description": "Relative cost of evicting a running model. Models not listed default to 1. Values must be positive integers.",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "minimum": 1
+                    }
+                },
+                "sets": {
+                    "type": "object",
+                    "description": "Named sets of concurrent model combinations. Values are DSL strings using & (AND), | (OR), () (grouping), and +ref (inline another set). Definition order is used for tie-breaking.",
+                    "minProperties": 1,
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                }
+            },
+            "additionalProperties": false
         }
     },
     "properties": {
@@ -306,81 +378,68 @@
                     },
                     "timeouts": {
                         "$ref": "#/definitions/timeouts"
+                    },
+                    "capabilities": {
+                        "type": "object",
+                        "properties": {
+                            "in": {
+                                "type": "array",
+                                "minItems": 1,
+                                "uniqueItems": true,
+                                "default": [],
+                                "items": {
+                                    "type": "string",
+                                    "enum": [
+                                        "text",
+                                        "audio",
+                                        "image"
+                                    ]
+                                },
+                                "description": "List of input modalities understood by the model."
+                            },
+                            "out": {
+                                "type": "array",
+                                "minItems": 1,
+                                "uniqueItems": true,
+                                "default": [],
+                                "items": {
+                                    "type": "string",
+                                    "enum": [
+                                        "text",
+                                        "audio",
+                                        "image"
+                                    ]
+                                },
+                                "description": "List of output modalities generated by the model."
+                            },
+                            "tools": {
+                                "type": "boolean",
+                                "default": false,
+                                "description": "Whether the model supports function calling."
+                            },
+                            "reranker": {
+                                "type": "boolean",
+                                "default": false,
+                                "description": "Whether the model supports the /v1/rerank endpoint."
+                            },
+                            "context": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "default": 0,
+                                "description": "Maximum token context length supported by the model."
+                            }
+                        },
+                        "additionalProperties": false,
+                        "description": "Defines what the model accepts for input, output and other metadata. Used in v1/models to inform clients what the model can do. An empty capabilities block (all zero values) is treated as not configured."
                     }
                 }
             }
         },
         "groups": {
-            "type": "object",
-            "additionalProperties": {
-                "type": "object",
-                "required": [
-                    "members"
-                ],
-                "properties": {
-                    "swap": {
-                        "type": "boolean",
-                        "default": true,
-                        "description": "Controls model swapping behaviour within the group. True: only one model runs at a time. False: all models can run together."
-                    },
-                    "exclusive": {
-                        "type": "boolean",
-                        "default": true,
-                        "description": "Controls how the group affects other groups. True: causes all other groups to unload when this group runs a model. False: does not affect other groups."
-                    },
-                    "persistent": {
-                        "type": "boolean",
-                        "default": false,
-                        "description": "Prevents other groups from unloading the models in this group. Does not affect individual model behaviour."
-                    },
-                    "members": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "description": "Array of model IDs that are members of this group. Model IDs must be defined in models."
-                    }
-                }
-            },
-            "description": "A dictionary of group settings. Provides advanced controls over model swapping behaviour. Model IDs must be defined in models. A model can only be a member of one group. Behaviour controlled via swap, exclusive, persistent."
+            "$ref": "#/definitions/groupsConfig"
         },
         "matrix": {
-            "type": "object",
-            "description": "Solver-based alternative to groups. Declares valid combinations of concurrent models. The solver minimizes eviction cost when swapping. A config must use either groups or matrix, not both.",
-            "required": [
-                "vars",
-                "sets"
-            ],
-            "properties": {
-                "vars": {
-                    "type": "object",
-                    "description": "Short names for models. Keys must be alphanumeric, 1-8 characters. All sets and evict_costs must use these IDs.",
-                    "minProperties": 1,
-                    "additionalProperties": {
-                        "type": "string"
-                    },
-                    "propertyNames": {
-                        "pattern": "^[a-zA-Z0-9]{1,8}$"
-                    }
-                },
-                "evict_costs": {
-                    "type": "object",
-                    "description": "Relative cost of evicting a running model. Models not listed default to 1. Values must be positive integers.",
-                    "additionalProperties": {
-                        "type": "integer",
-                        "minimum": 1
-                    }
-                },
-                "sets": {
-                    "type": "object",
-                    "description": "Named sets of concurrent model combinations. Values are DSL strings using & (AND), | (OR), () (grouping), and +ref (inline another set). Definition order is used for tie-breaking.",
-                    "minProperties": 1,
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                }
-            },
-            "additionalProperties": false
+            "$ref": "#/definitions/matrixConfig"
         },
         "hooks": {
             "type": "object",
@@ -512,26 +571,103 @@
             },
             "default": {},
             "description": "A dictionary of remote peers and models they provide. Peers can be another llama-swap or any server that provides the /v1/ generative API endpoints supported by llama-swap."
+        },
+        "routing": {
+            "type": "object",
+            "description": "Canonical routing/scheduling configuration. Alternative to the legacy top-level 'groups'/'matrix' keys; a config must not use both styles.",
+            "properties": {
+                "scheduler": {
+                    "type": "object",
+                    "description": "Scheduler configuration. Decides the order in which queued requests are serviced.",
+                    "properties": {
+                        "use": {
+                            "type": "string",
+                            "enum": [
+                                "fifo"
+                            ],
+                            "default": "fifo",
+                            "description": "Scheduler to use. Only 'fifo' is currently supported."
+                        },
+                        "settings": {
+                            "type": "object",
+                            "properties": {
+                                "fifo": {
+                                    "type": "object",
+                                    "properties": {
+                                        "priority": {
+                                            "type": "object",
+                                            "description": "Per-model priority. Keys are model IDs, values are integers (default 0). Higher values are serviced first.",
+                                            "additionalProperties": {
+                                                "type": "integer"
+                                            }
+                                        }
+                                    },
+                                    "additionalProperties": false
+                                }
+                            },
+                            "additionalProperties": false
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                "router": {
+                    "type": "object",
+                    "description": "Router configuration. Selects between the group and matrix swapping strategies.",
+                    "properties": {
+                        "use": {
+                            "type": "string",
+                            "enum": [
+                                "group",
+                                "matrix"
+                            ],
+                            "default": "group",
+                            "description": "Router to use. 'group' uses static groups, 'matrix' uses the solver-based swap matrix."
+                        },
+                        "settings": {
+                            "type": "object",
+                            "properties": {
+                                "groups": {
+                                    "$ref": "#/definitions/groupsConfig"
+                                },
+                                "matrix": {
+                                    "$ref": "#/definitions/matrixConfig"
+                                }
+                            },
+                            "additionalProperties": false
+                        }
+                    },
+                    "additionalProperties": false
+                }
+            },
+            "additionalProperties": false
         }
     },
     "allOf": [
         {
             "if": {
-                "required": ["groups"]
+                "required": [
+                    "groups"
+                ]
             },
             "then": {
                 "not": {
-                    "required": ["matrix"]
+                    "required": [
+                        "matrix"
+                    ]
                 }
             }
         },
         {
             "if": {
-                "required": ["matrix"]
+                "required": [
+                    "matrix"
+                ]
             },
             "then": {
                 "not": {
-                    "required": ["groups"]
+                    "required": [
+                        "groups"
+                    ]
                 }
             }
         }

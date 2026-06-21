@@ -15,6 +15,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/internal/router"
+	"github.com/mostlygeek/llama-swap/internal/shared"
 )
 
 // Server owns the HTTP mux, cross-cutting middleware, and the local/peer model
@@ -88,6 +89,27 @@ var modelGetRoutes = []string{
 	"/sdapi/v1/loras",
 }
 
+// isMetricsRecordPath reports whether path is one of the model-dispatched
+// endpoints that the metrics middleware records in the activity log.
+func isMetricsRecordPath(path string) bool {
+	for _, p := range modelPostJSONRoutes {
+		if p == path {
+			return true
+		}
+	}
+	for _, p := range modelPostFormRoutes {
+		if p == path {
+			return true
+		}
+	}
+	for _, p := range modelGetRoutes {
+		if p == path {
+			return true
+		}
+	}
+	return false
+}
+
 // BuildInfo carries version metadata surfaced by GET /api/version.
 type BuildInfo struct {
 	Version string
@@ -99,12 +121,13 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 	var local router.LocalRouter
 	var err error
 
-	if cfg.Matrix != nil {
+	switch cfg.Routing.Router.Use {
+	case "matrix":
 		local, err = router.NewMatrix(cfg, proxylog, upstreamlog)
 		if err != nil {
 			return nil, fmt.Errorf("creating matrix router: %w", err)
 		}
-	} else {
+	default: // "group"
 		local, err = router.NewGroup(cfg, proxylog, upstreamlog)
 		if err != nil {
 			return nil, fmt.Errorf("creating group router: %w", err)
@@ -137,13 +160,13 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 }
 
 // localPeerHandler dispatches a model-routed request to the local or peer
-// router. The model is resolved once via router.FetchContext.
+// router. The model is resolved once via shared.FetchContext.
 func (s *Server) localPeerHandler(w http.ResponseWriter, r *http.Request) {
 	stripVersionPrefix(r)
 
-	data, err := router.FetchContext(r, s.cfg)
+	data, err := shared.FetchContext(r, s.cfg)
 	if err != nil {
-		router.SendError(w, r, router.ErrNoModelInContext)
+		shared.SendError(w, r, shared.ErrNoModelInContext)
 		return
 	}
 
@@ -155,7 +178,7 @@ func (s *Server) localPeerHandler(w http.ResponseWriter, r *http.Request) {
 		s.proxylog.Debugf("dispatch: using peer for model: %s", data.ModelID)
 		s.peer.ServeHTTP(w, r)
 	default:
-		router.SendError(w, r, router.ErrNoRouterFound)
+		shared.SendError(w, r, router.ErrNoRouterFound)
 	}
 }
 
@@ -170,21 +193,13 @@ func stripVersionPrefix(r *http.Request) {
 // routes builds the mux, registers every route, and wraps the mux with the
 // global CORS middleware.
 func (s *Server) routes() {
-	authMW := CreateAuthMiddleware(s.cfg)
-	filterMW := CreateFilterMiddleware(s.cfg)
-	formFilterMW := CreateFormFilterMiddleware(s.cfg)
 
-	// Model-dispatched routes get auth + per-model concurrency limiting + body
-	// filters + in-flight tracking + token metrics. concurrencyMW rejects with
-	// 429 before the body filters do any rewrite work. filterMW rewrites JSON
-	// bodies and formFilterMW rewrites multipart bodies; each is a no-op for the
-	// other's Content-Type. Both run before the metrics middleware so it buffers
-	// the rewritten body.
+	authMW := CreateAuthMiddleware(s.cfg)
 	modelChain := chain.New(
 		authMW,
-		CreateConcurrencyMiddleware(s.cfg),
-		filterMW,
-		formFilterMW,
+		CreateRequestContextMiddleware(s.cfg),
+		CreateFilterMiddleware(s.cfg),
+		CreateFormFilterMiddleware(s.cfg),
 		CreateInflightMiddleware(s.inflight),
 		CreateMetricsMiddleware(s.metrics, s.cfg),
 	)
@@ -215,19 +230,21 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /{$}", handleRootRedirect)
 
 	// Embedded UI.
-	mux.HandleFunc("GET /ui/", s.handleUI)
+	mux.Handle("GET /ui/", chain.New(authMW).ThenFunc(s.handleUI))
 	mux.HandleFunc("GET /favicon.ico", s.handleFavicon)
 
-	// Prometheus metrics (no auth, matches the legacy endpoint).
-	mux.HandleFunc("GET /metrics", s.handleMetrics)
+	// Prometheus metrics (wrapped by apiChain, matches the legacy endpoint).
+	mux.Handle("GET /metrics", apiChain.ThenFunc(s.handleMetrics))
 
 	// Operations endpoints.
 	mux.Handle("GET /unload", apiChain.ThenFunc(s.handleUnload))
 	mux.Handle("GET /running", apiChain.ThenFunc(s.handleRunning))
 
-	// Upstream passthrough.
+	// Upstream passthrough. Meter only the model-dispatched endpoints that can
+	// produce token usage/timings.
+	upstreamChain := apiChain.Append(CreateMetricsMiddleware(s.metrics, s.cfg))
 	mux.HandleFunc("GET /upstream", handleUpstreamRedirect)
-	mux.Handle("/upstream/{upstreamPath...}", apiChain.ThenFunc(s.handleUpstream))
+	mux.Handle("/upstream/{upstreamPath...}", upstreamChain.ThenFunc(s.handleUpstream))
 
 	// API group (API-key protected) consumed by the UI.
 	mux.Handle("POST /api/models/unload", apiChain.ThenFunc(s.handleAPIUnloadAll))

@@ -9,6 +9,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/fxamacker/cbor/v2 v2.9.1
 	github.com/gin-gonic/gin v1.10.0
+	github.com/google/jsonschema-go v0.4.3
 	github.com/klauspost/compress v1.18.5
 	github.com/shirou/gopsutil/v4 v4.26.4
 	github.com/stretchr/testify v1.11.1

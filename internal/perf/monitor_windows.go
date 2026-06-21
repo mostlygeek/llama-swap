@@ -22,6 +22,13 @@ func getGpuStats(ctx context.Context, every time.Duration, logger *logmon.Monito
 		logger.Debugf("nvidia-smi: %s", err.Error())
 	}
 
+	if ch, err := tryD3DKMT(ctx, every, logger); err == nil {
+		logger.Info("using D3DKMT for GPU monitoring")
+		return ch, nil
+	} else {
+		logger.Debugf("D3DKMT: %s", err.Error())
+	}
+
 	return nil, ErrNoGpuTool
 }
 

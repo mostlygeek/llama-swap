@@ -88,10 +88,11 @@ Real time log streaming:
 llama-swap can be installed in multiple ways
 
 1. Docker
-2. Homebrew (OSX and Linux)
-3. WinGet
-4. From release binaries
-5. From source
+2. Homebrew (macOS and Linux)
+3. MacPorts (macOS)
+4. WinGet
+5. From release binaries
+6. From source
 
 ### Docker Install ([download images](https://github.com/mostlygeek/llama-swap/pkgs/container/llama-swap))
 
@@ -152,6 +153,16 @@ docker pull ghcr.io/mostlygeek/llama-swap:cuda-non-root
 ```shell
 brew tap mostlygeek/llama-swap
 brew install llama-swap
+llama-swap --config path/to/config.yaml --listen localhost:8080
+```
+
+### MacPorts (macOS)
+
+> [!NOTE]
+> Maintained by MacPorts community - [llama-swap port](https://ports.macports.org/port/llama-swap). It is not an official part of llama-swap.
+
+```shell
+sudo port install llama-swap
 llama-swap --config path/to/config.yaml --listen localhost:8080
 ```
 

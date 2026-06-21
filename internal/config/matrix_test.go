@@ -289,7 +289,9 @@ matrix:
 	cfg, err := LoadConfigFromReader(strings.NewReader(yaml))
 	require.NoError(t, err)
 	assert.NotNil(t, cfg.Matrix)
-	assert.Len(t, cfg.ExpandedSets, 2)
+	assert.Len(t, cfg.Matrix.ExpandedSets, 2)
+	assert.Equal(t, "matrix", cfg.Routing.Router.Use)
+	assert.Len(t, cfg.Routing.Router.Settings.Matrix.ExpandedSets, 2)
 	// Groups should be empty when matrix is used
 	assert.Empty(t, cfg.Groups)
 }

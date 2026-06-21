@@ -17,17 +17,19 @@ import (
 func newTestGroup(t *testing.T, conf config.Config, processes map[string]process.Process) *Group {
 	t.Helper()
 	modelToGroup := make(map[string]string)
-	for gid, gcfg := range conf.Groups {
+	for gid, gcfg := range conf.Routing.Router.Settings.Groups {
 		for _, mid := range gcfg.Members {
 			modelToGroup[mid] = gid
 		}
 	}
-	planner := &groupPlanner{
+	swapper := &groupSwapper{
 		config:       conf,
 		modelToGroup: modelToGroup,
-		processes:    processes,
 	}
-	base := newBaseRouter("group", conf, processes, planner, logmon.NewWriter(io.Discard))
+	base, err := newBaseRouter("group", conf, processes, logmon.NewWriter(io.Discard), swapper)
+	if err != nil {
+		t.Fatalf("newBaseRouter: %v", err)
+	}
 	base.testProcessed = make(chan struct{}, 64)
 	g := &Group{baseRouter: base}
 	go base.run()
@@ -41,10 +43,10 @@ func newTestGroup(t *testing.T, conf config.Config, processes map[string]process
 
 func TestGroup_NewGroup_DuplicateMembership(t *testing.T) {
 	conf := config.Config{
-		Groups: map[string]config.GroupConfig{
+		Routing: groupRouting(map[string]config.GroupConfig{
 			"g1": {Swap: true, Members: []string{"a"}},
 			"g2": {Swap: true, Members: []string{"a"}},
-		},
+		}),
 		Models: map[string]config.ModelConfig{
 			"a": {},
 		},
@@ -65,9 +67,9 @@ func TestGroup_ServeHTTP_SwapStopsPrevious(t *testing.T) {
 
 	conf := config.Config{
 		HealthCheckTimeout: 5,
-		Groups: map[string]config.GroupConfig{
+		Routing: groupRouting(map[string]config.GroupConfig{
 			"g": {Swap: true, Exclusive: true, Members: []string{"a", "b"}},
-		},
+		}),
 	}
 	g := newTestGroup(t, conf, map[string]process.Process{"a": a, "b": b})
 
@@ -97,9 +99,9 @@ func TestGroup_NonSwapGroup_NoStop(t *testing.T) {
 
 	conf := config.Config{
 		HealthCheckTimeout: 5,
-		Groups: map[string]config.GroupConfig{
+		Routing: groupRouting(map[string]config.GroupConfig{
 			"g": {Swap: false, Exclusive: false, Members: []string{"a", "b"}},
-		},
+		}),
 	}
 	g := newTestGroup(t, conf, map[string]process.Process{"a": a, "b": b})
 
@@ -127,10 +129,10 @@ func TestGroup_CrossGroupExclusive(t *testing.T) {
 
 	conf := config.Config{
 		HealthCheckTimeout: 5,
-		Groups: map[string]config.GroupConfig{
+		Routing: groupRouting(map[string]config.GroupConfig{
 			"g1": {Swap: true, Exclusive: true, Members: []string{"a"}},
 			"g2": {Swap: true, Exclusive: true, Members: []string{"b"}},
-		},
+		}),
 	}
 	g := newTestGroup(t, conf, map[string]process.Process{"a": a, "b": b})
 
@@ -154,10 +156,10 @@ func TestGroup_CrossGroupNonExclusiveParallel(t *testing.T) {
 
 	conf := config.Config{
 		HealthCheckTimeout: 5,
-		Groups: map[string]config.GroupConfig{
+		Routing: groupRouting(map[string]config.GroupConfig{
 			"g1": {Swap: true, Exclusive: false, Members: []string{"a"}},
 			"g2": {Swap: true, Exclusive: false, Members: []string{"b"}},
-		},
+		}),
 	}
 	g := newTestGroup(t, conf, map[string]process.Process{"a": a, "b": pb})
 
@@ -202,16 +204,17 @@ func TestGroup_CrossGroupNonExclusiveParallel(t *testing.T) {
 
 // TestGroup_SameGroupSwapSerialises verifies that two same-group requests
 // (Swap=true) serialise even when both arrive while neither has reached
-// StateStarting yet — the alsoRunning hint to the planner closes that race.
+// StateStarting yet — the in-flight swap target the scheduler folds into the
+// running set closes that race.
 func TestGroup_SameGroupSwapSerialises(t *testing.T) {
 	a := newFakeProcess("a")
 	pb := newFakeProcess("b")
 
 	conf := config.Config{
 		HealthCheckTimeout: 5,
-		Groups: map[string]config.GroupConfig{
+		Routing: groupRouting(map[string]config.GroupConfig{
 			"g": {Swap: true, Exclusive: false, Members: []string{"a", "b"}},
-		},
+		}),
 	}
 	g := newTestGroup(t, conf, map[string]process.Process{"a": a, "b": pb})
 
@@ -224,8 +227,9 @@ func TestGroup_SameGroupSwapSerialises(t *testing.T) {
 	waitProcessed(t, g.testProcessed, 1)
 
 	// Request B arrives before A transitions to StateStarting in the process
-	// state machine. Without the alsoRunning hint, the planner would not see
-	// A as running, and B would start in parallel, violating Swap=true.
+	// state machine. Without folding the in-flight swap target into the running
+	// set, the swapper would not see A as running, and B would start in
+	// parallel, violating Swap=true.
 	w2 := httptest.NewRecorder()
 	done2 := make(chan struct{})
 	go func() {
@@ -269,10 +273,10 @@ func TestGroup_PersistentNotEvicted(t *testing.T) {
 
 	conf := config.Config{
 		HealthCheckTimeout: 5,
-		Groups: map[string]config.GroupConfig{
+		Routing: groupRouting(map[string]config.GroupConfig{
 			"persist": {Swap: true, Exclusive: false, Persistent: true, Members: []string{"a"}},
 			"other":   {Swap: true, Exclusive: true, Members: []string{"b"}},
-		},
+		}),
 	}
 	g := newTestGroup(t, conf, map[string]process.Process{"a": a, "b": b})
 
@@ -306,10 +310,10 @@ func TestGroup_NonExclusiveDoesNotUnloadExclusive(t *testing.T) {
 
 	conf := config.Config{
 		HealthCheckTimeout: 5,
-		Groups: map[string]config.GroupConfig{
+		Routing: groupRouting(map[string]config.GroupConfig{
 			"g1": {Swap: true, Exclusive: true, Members: []string{"a"}},
 			"g2": {Swap: true, Exclusive: false, Members: []string{"b"}},
-		},
+		}),
 	}
 	g := newTestGroup(t, conf, map[string]process.Process{"a": a, "b": b})
 
