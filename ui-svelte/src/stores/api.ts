@@ -209,7 +209,7 @@ export async function getCapture(id: number): Promise<ReqRespCapture | null> {
 
 export async function checkPerformanceEnabled(): Promise<void> {
   try {
-    const response = await fetch("/api/performance?status");
+    const response = await fetch("/api/performance");
     if (!response.ok) {
       performanceEnabled.set(false);
       return;
