@@ -106,6 +106,7 @@ func (s *Server) handleAPIMetrics(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPIPerformance(w http.ResponseWriter, r *http.Request) {
 	if s.perf == nil {
 		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
 		json.NewEncoder(w).Encode(map[string]bool{"enabled": false})
 		return
 	}
