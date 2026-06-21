@@ -266,6 +266,9 @@ groups:
 			"mthree":    "model3",
 		},
 		Groups: expectedGroups,
+		Upstream: UpstreamConfig{
+			IgnorePaths: DefaultUpstreamIgnorePaths(),
+		},
 		Routing: RoutingConfig{
 			Router: RouterConfig{
 				Use: "group",
