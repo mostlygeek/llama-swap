@@ -215,7 +215,7 @@ export async function checkPerformanceEnabled(): Promise<void> {
       return;
     }
     const data = await response.json();
-    performanceEnabled.set(data.enabled === true);
+    performanceEnabled.set(data.enabled);
   } catch {
     performanceEnabled.set(false);
   }
