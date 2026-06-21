@@ -342,7 +342,7 @@ func (s *Server) handleUpstream(w http.ResponseWriter, r *http.Request) {
 	// Pin the resolved model so the router skips body/query extraction.
 	*r = *r.WithContext(shared.SetContext(r.Context(), shared.ReqContextData{Model: searchName, ModelID: modelID, Metadata: make(map[string]string)}))
 
-	// If the path matches an upstream.ignorePatterns entry and the model is
+	// If the path matches an upstream.ignorePaths entry and the model is
 	// not already loaded, refuse the request without triggering a swap. The
 	// server was not able to process the response because the model was not
 	// already loaded.
