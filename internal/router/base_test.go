@@ -28,7 +28,14 @@ func (s *stubPlanner) OnSwapStart(string, []string)          {}
 
 func newTestBase(t *testing.T, processes map[string]process.Process, planner scheduler.Swapper) *baseRouter {
 	t.Helper()
-	conf := config.Config{HealthCheckTimeout: 5}
+	return newTestBaseWithConfig(t, config.Config{HealthCheckTimeout: 5}, processes, planner)
+}
+
+func newTestBaseWithConfig(t *testing.T, conf config.Config, processes map[string]process.Process, planner scheduler.Swapper) *baseRouter {
+	t.Helper()
+	if conf.HealthCheckTimeout == 0 {
+		conf.HealthCheckTimeout = 5
+	}
 	b, err := newBaseRouter("test", conf, processes, logmon.NewWriter(io.Discard), planner)
 	if err != nil {
 		t.Fatalf("newBaseRouter: %v", err)
@@ -97,6 +104,56 @@ func TestBaseRouter_UnloadSpecificModel(t *testing.T) {
 	}
 	if c.State() != process.StateReady {
 		t.Errorf("c should remain ready, got %q", c.State())
+	}
+}
+
+func TestBaseRouter_UnloadSpecificModelUsesConfiguredTimeout(t *testing.T) {
+	a := newFakeProcess("a")
+	a.markReady()
+	c := newFakeProcess("c")
+	c.markReady()
+
+	conf := config.Config{
+		HealthCheckTimeout: 5,
+		UnloadTimeout:      25,
+		Models: map[string]config.ModelConfig{
+			"a": {UnloadTimeout: 45},
+			"c": {UnloadTimeout: 25},
+		},
+	}
+	b := newTestBaseWithConfig(t, conf, map[string]process.Process{"a": a, "c": c}, &stubPlanner{})
+	b.Unload(0, "a")
+
+	if a.lastStopTimeout() != 45*time.Second {
+		t.Errorf("a stop timeout=%v want 45s", a.lastStopTimeout())
+	}
+	if got := c.stopCalls.Load(); got != 0 {
+		t.Errorf("c stopCalls=%d want 0", got)
+	}
+}
+
+func TestBaseRouter_UnloadAllUsesConfiguredTimeouts(t *testing.T) {
+	a := newFakeProcess("a")
+	a.markReady()
+	c := newFakeProcess("c")
+	c.markReady()
+
+	conf := config.Config{
+		HealthCheckTimeout: 5,
+		UnloadTimeout:      25,
+		Models: map[string]config.ModelConfig{
+			"a": {UnloadTimeout: 45},
+			"c": {UnloadTimeout: 25},
+		},
+	}
+	b := newTestBaseWithConfig(t, conf, map[string]process.Process{"a": a, "c": c}, &stubPlanner{})
+	b.Unload(0)
+
+	if a.lastStopTimeout() != 45*time.Second {
+		t.Errorf("a stop timeout=%v want 45s", a.lastStopTimeout())
+	}
+	if c.lastStopTimeout() != 25*time.Second {
+		t.Errorf("c stop timeout=%v want 25s", c.lastStopTimeout())
 	}
 }
 

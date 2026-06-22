@@ -42,7 +42,8 @@ type LocalRouter interface {
 	RunningModels() map[string]process.ProcessState
 
 	// Unload stops the named models, or every running model when none are
-	// named. It blocks until each targeted process has stopped.
+	// named. It blocks until each targeted process has stopped. A non-positive
+	// timeout uses the configured unloadTimeout for each targeted model.
 	Unload(timeout time.Duration, models ...string)
 
 	// ProcessLogger returns the log monitor for the named model's process.

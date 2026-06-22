@@ -209,7 +209,11 @@ func (b *baseRouter) StopProcesses(timeout time.Duration, ids []string) {
 		wg.Add(1)
 		go func(id string, p process.Process) {
 			defer wg.Done()
-			if err := p.Stop(timeout); err != nil {
+			stopTimeout := timeout
+			if stopTimeout <= 0 {
+				stopTimeout = b.unloadTimeout(id)
+			}
+			if err := p.Stop(stopTimeout); err != nil {
 				b.logger.Warnf("%s: stopping %s failed: %v", b.name, id, err)
 			}
 		}(id, p)
@@ -333,6 +337,17 @@ func (b *baseRouter) healthCheckTimeout() time.Duration {
 	return t
 }
 
+func (b *baseRouter) unloadTimeout(modelID string) time.Duration {
+	seconds := b.config.UnloadTimeout
+	if mc, ok := b.config.Models[modelID]; ok && mc.UnloadTimeout > 0 {
+		seconds = mc.UnloadTimeout
+	}
+	if seconds <= 0 {
+		seconds = config.DEFAULT_UNLOAD_TIMEOUT
+	}
+	return time.Duration(seconds) * time.Second
+}
+
 func (b *baseRouter) Handles(model string) bool {
 	_, ok := b.processes[model]
 	return ok
@@ -373,6 +388,8 @@ func (b *baseRouter) RunningModels() map[string]process.ProcessState {
 // for — Stop kills the upstream, those callers see whatever error the
 // reverse proxy surfaces and may retry. Their trackedServe defers fire
 // normally and decrement inFlight as the dying handlers return.
+// A non-positive timeout uses the configured unloadTimeout for each targeted
+// model, falling back to the global unloadTimeout.
 func (b *baseRouter) Unload(timeout time.Duration, models ...string) {
 	targets := models
 	if len(targets) == 0 {

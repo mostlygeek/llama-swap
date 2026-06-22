@@ -16,6 +16,7 @@ import (
 )
 
 const DEFAULT_GROUP_ID = "(default)"
+const DEFAULT_UNLOAD_TIMEOUT = 10
 const (
 	LogToStdoutProxy    = "proxy"
 	LogToStdoutUpstream = "upstream"
@@ -127,6 +128,7 @@ type Config struct {
 	CaptureBuffer      int                    `yaml:"captureBuffer"`
 	Performance        PerformanceConfig      `yaml:"performance"`
 	GlobalTTL          int                    `yaml:"globalTTL"`
+	UnloadTimeout      int                    `yaml:"unloadTimeout"`
 	Models             map[string]ModelConfig `yaml:"models"` /* key is model ID */
 	Profiles           map[string][]string    `yaml:"profiles"`
 
@@ -248,6 +250,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		MetricsMaxInMemory: 1000,
 		CaptureBuffer:      5,
 		GlobalTTL:          0,
+		UnloadTimeout:      DEFAULT_UNLOAD_TIMEOUT,
 	}
 	if err = yaml.Unmarshal([]byte(yamlStr), &config); err != nil {
 		return Config{}, err
@@ -271,6 +274,12 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 
 	if config.GlobalTTL < 0 {
 		return Config{}, fmt.Errorf("globalTTL must be >= 0")
+	}
+	if config.UnloadTimeout < 0 {
+		return Config{}, fmt.Errorf("unloadTimeout must be >= 0")
+	}
+	if config.UnloadTimeout == 0 {
+		config.UnloadTimeout = DEFAULT_UNLOAD_TIMEOUT
 	}
 
 	// Apply default for upstream.ignorePaths when not specified. The default
@@ -314,6 +323,12 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	for _, modelId := range modelIds {
 		modelConfig := config.Models[modelId]
 		modelConfig.HealthCheckTimeout = config.HealthCheckTimeout
+		if modelConfig.UnloadTimeout < 0 {
+			return Config{}, fmt.Errorf("model %s: invalid unloadTimeout value %d", modelId, modelConfig.UnloadTimeout)
+		}
+		if modelConfig.UnloadTimeout == 0 {
+			modelConfig.UnloadTimeout = config.UnloadTimeout
+		}
 
 		// Strip comments from command fields
 		modelConfig.Cmd = StripComments(modelConfig.Cmd)
