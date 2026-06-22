@@ -165,6 +165,9 @@ type Config struct {
 
 	// support remote peers, see issue #433, #296
 	Peers PeerDictionaryConfig `yaml:"peers"`
+
+	// upstream controls behaviour of the /upstream passthrough endpoint
+	Upstream UpstreamConfig `yaml:"upstream"`
 }
 
 // RoutingConfig is the canonical, normalized routing/scheduling configuration.
@@ -277,6 +280,12 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	}
 	if config.UnloadTimeout == 0 {
 		config.UnloadTimeout = DEFAULT_UNLOAD_TIMEOUT
+	}
+
+	// Apply default for upstream.ignorePaths when not specified. The default
+	// matches common static-asset suffixes so they do not trigger a swap.
+	if len(config.Upstream.IgnorePaths) == 0 {
+		config.Upstream.IgnorePaths = DefaultUpstreamIgnorePaths()
 	}
 
 	switch config.LogToStdout {

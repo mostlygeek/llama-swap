@@ -8,7 +8,7 @@
   import Performance from "./routes/Performance.svelte";
   import Playground from "./routes/Playground.svelte";
   import PlaygroundStub from "./routes/PlaygroundStub.svelte";
-  import { enableAPIEvents } from "./stores/api";
+  import { enableAPIEvents, checkPerformanceEnabled } from "./stores/api";
   import { initScreenWidth, initSystemThemeListener, isDarkMode, appTitle, connectionState } from "./stores/theme";
   import { currentRoute } from "./stores/route";
 
@@ -39,6 +39,7 @@
     const cleanupScreenWidth = initScreenWidth();
     const cleanupSystemTheme = initSystemThemeListener();
     enableAPIEvents(true);
+    checkPerformanceEnabled();
 
     return () => {
       cleanupScreenWidth();

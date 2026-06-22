@@ -43,6 +43,7 @@ export interface ActivityLogEntry {
   tokens: TokenMetrics;
   duration_ms: number;
   has_capture: boolean;
+  error_msg?: string;
   metadata?: Record<string, string>;
 }
 

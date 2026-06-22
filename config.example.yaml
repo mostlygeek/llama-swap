@@ -140,6 +140,18 @@ apiKeys:
   - "${env.API_KEY_1}"
   - "${env.API_KEY_2}"
 
+# upstream: controls behaviour of the /upstream passthrough endpoint
+# - optional, default: empty dictionary
+# - recommended to only use in special use cases. Leaving it as the
+#   default will typically be the best experience
+upstream:
+  # ignorePaths: list of RE2 compatible regular expressions
+  # - default: (see below)
+  # - any request to a path matching any of the regular expressions
+  #   will be ignored and not trigger a swap
+  ignorePaths:
+    - '.*\.(js|json|css|png|gif|jpg|jpeg|ico|txt)$'
+
 # models: a dictionary of model configurations
 # - required
 # - each key is the model's ID, used in API requests
