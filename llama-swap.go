@@ -55,7 +55,8 @@ var logTimeFormats = map[string]string{
 }
 
 func main() {
-	flagConfig := flag.String("config", "", "path to config file (required)")
+	flagConfig := flag.String("config", "", "path to config file")
+	flagConfigDir := flag.String("config-dir", "", "directory of *.yml/*.yaml config files (additive to -config)")
 	flagListen := flag.String("listen", "", "listen address (default :8080 or :8443 for TLS)")
 	flagCertFile := flag.String("tls-cert-file", "", "TLS certificate file")
 	flagKeyFile := flag.String("tls-key-file", "", "TLS key file")
@@ -68,8 +69,8 @@ func main() {
 		os.Exit(0)
 	}
 
-	if *flagConfig == "" {
-		slog.Error("-config is required")
+	if *flagConfig == "" && *flagConfigDir == "" {
+		slog.Error("at least one of -config or -config-dir must be provided")
 		os.Exit(1)
 	}
 
@@ -88,10 +89,9 @@ func main() {
 		}
 	}
 
-	configPath := *flagConfig
-	cfg, err := config.LoadConfig(configPath)
+	cfg, err := config.LoadConfigSources(*flagConfig, *flagConfigDir)
 	if err != nil {
-		slog.Error("failed to load config", "path", configPath, "error", err)
+		slog.Error("failed to load config", "config", *flagConfig, "config-dir", *flagConfigDir, "error", err)
 		os.Exit(1)
 	}
 
@@ -187,7 +187,7 @@ func main() {
 
 		proxyLog.Info("reloading configuration")
 
-		newCfg, err := config.LoadConfig(configPath)
+		newCfg, err := config.LoadConfigSources(*flagConfig, *flagConfigDir)
 		if err != nil {
 			proxyLog.Warnf("failed to reload config: %v", err)
 			return
@@ -230,19 +230,37 @@ func main() {
 	defer watcherCancel()
 
 	if *flagWatchConfig {
-		absConfigPath, err := filepath.Abs(configPath)
-		if err != nil {
-			slog.Error("watch-config: failed to resolve config path", "error", err)
-			os.Exit(1)
-		}
 		proxyLog.Info("watching configuration for changes (poll-based, 2s interval)")
-		go func() {
-			(&configwatcher.Watcher{
-				Path:     absConfigPath,
-				Interval: configwatcher.DefaultInterval,
-				OnChange: reload,
-			}).Run(watcherCtx)
-		}()
+
+		if *flagConfig != "" {
+			absConfigPath, err := filepath.Abs(*flagConfig)
+			if err != nil {
+				slog.Error("watch-config: failed to resolve config path", "error", err)
+				os.Exit(1)
+			}
+			go func() {
+				(&configwatcher.Watcher{
+					Path:     absConfigPath,
+					Interval: configwatcher.DefaultInterval,
+					OnChange: reload,
+				}).Run(watcherCtx)
+			}()
+		}
+
+		if *flagConfigDir != "" {
+			absConfigDir, err := filepath.Abs(*flagConfigDir)
+			if err != nil {
+				slog.Error("watch-config: failed to resolve config-dir path", "error", err)
+				os.Exit(1)
+			}
+			go func() {
+				(&configwatcher.DirWatcher{
+					Path:     absConfigDir,
+					Interval: configwatcher.DefaultInterval,
+					OnChange: reload,
+				}).Run(watcherCtx)
+			}()
+		}
 	}
 
 	sigChan := make(chan os.Signal, 1)
