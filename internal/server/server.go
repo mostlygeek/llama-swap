@@ -1,9 +1,12 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -14,6 +17,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/perf"
+	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/router"
 	"github.com/mostlygeek/llama-swap/internal/shared"
 )
@@ -240,6 +244,10 @@ func (s *Server) routes() {
 	mux.Handle("GET /unload", apiChain.ThenFunc(s.handleUnload))
 	mux.Handle("GET /running", apiChain.ThenFunc(s.handleRunning))
 
+	// /props endpoint (llama.cpp router-compatible)
+	mux.Handle("GET /props", apiChain.ThenFunc(s.handleProps))
+	mux.Handle("POST /props", apiChain.ThenFunc(s.handlePropsPost))
+
 	// Upstream passthrough. Meter only the model-dispatched endpoints that can
 	// produce token usage/timings.
 	upstreamChain := apiChain.Append(CreateMetricsMiddleware(s.metrics, s.cfg))
@@ -304,4 +312,140 @@ func (s *Server) Shutdown(timeout time.Duration) error {
 
 	wg.Wait()
 	return errors.Join(errs...)
+}
+
+// handleProps serves GET /props. When no model query parameter is given it
+// returns router metadata matching llama.cpp's router /props response. With a
+// model parameter it proxies to the backend's /props endpoint, respecting the
+// autoload query parameter.
+func (s *Server) handleProps(w http.ResponseWriter, r *http.Request) {
+	model := r.URL.Query().Get("model")
+
+	if model == "" {
+		buildInfo := fmt.Sprintf("%s (%s, %s)", s.build.Version, s.build.Commit, s.build.Date)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"role":            "router",
+			"models_autoload": true,
+			// TODO: llama.cpp router switching logic caps number of concurrent models using
+			// max_instances. llama-swap has much more complex logic for determining what
+			// models can run conncurently which does not map cleanly to a single number.
+			// omit this max_instances field for now and revist a potential implementation
+			// later if ommision introduces compatibility issues.
+			// "max_instances": 0,
+			"model_alias": "llama-swap",
+			"model_path":  "none",
+			"default_generation_settings": map[string]any{
+				"params": map[string]any{},
+				"n_ctx":  0,
+			},
+			"build_info": buildInfo,
+		})
+		return
+	}
+
+	autoloadStr := r.URL.Query().Get("autoload")
+	autoload := autoloadStr == "" || autoloadStr == "true" || autoloadStr == "1"
+
+	realModelID, found := s.cfg.RealModelName(model)
+	if !found && s.local.Handles(model) {
+		realModelID = model
+		found = true
+	}
+	if !found && s.peer.Handles(model) {
+		realModelID = model
+		found = true
+	}
+
+	if !found {
+		shared.SendResponse(w, r, http.StatusNotFound, fmt.Sprintf("could not find suitable handler for %s", model))
+		return
+	}
+
+	if !autoload {
+		ready := s.peer.Handles(realModelID)
+		if !ready {
+			if st, ok := s.local.RunningModels()[realModelID]; ok && st == process.StateReady {
+				ready = true
+			}
+		}
+		if !ready {
+			shared.SendResponse(w, r, http.StatusBadRequest, "model is not loaded")
+			return
+		}
+	}
+
+	r.URL.Path = "/props"
+	*r = *r.WithContext(shared.SetContext(r.Context(), shared.ReqContextData{
+		Model:    model,
+		ModelID:  realModelID,
+		Metadata: make(map[string]string),
+	}))
+
+	switch {
+	case s.local.Handles(realModelID):
+		s.proxylog.Debugf("/props: using local process for model: %s", realModelID)
+		s.local.ServeHTTP(w, r)
+	case s.peer.Handles(realModelID):
+		s.proxylog.Debugf("/props: using peer for model: %s", realModelID)
+		s.peer.ServeHTTP(w, r)
+	default:
+		shared.SendResponse(w, r, http.StatusNotFound, fmt.Sprintf("no router for model %s", realModelID))
+	}
+}
+
+// handlePropsPost serves POST /props. It reads the model from the JSON request
+// body and proxies the request to the backend's /props endpoint.
+func (s *Server) handlePropsPost(w http.ResponseWriter, r *http.Request) {
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		shared.SendResponse(w, r, http.StatusBadRequest, "could not read request body")
+		return
+	}
+	defer func() { r.Body = io.NopCloser(bytes.NewReader(bodyBytes)) }()
+
+	var body struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal(bodyBytes, &body); err != nil {
+		shared.SendResponse(w, r, http.StatusBadRequest, "could not parse request body")
+		return
+	}
+	if body.Model == "" {
+		shared.SendResponse(w, r, http.StatusBadRequest, "missing 'model' key in request body")
+		return
+	}
+
+	realModelID, found := s.cfg.RealModelName(body.Model)
+	if !found && s.local.Handles(body.Model) {
+		realModelID = body.Model
+		found = true
+	}
+	if !found && s.peer.Handles(body.Model) {
+		realModelID = body.Model
+		found = true
+	}
+
+	if !found {
+		shared.SendResponse(w, r, http.StatusNotFound, fmt.Sprintf("could not find suitable handler for %s", body.Model))
+		return
+	}
+
+	r.URL.Path = "/props"
+	*r = *r.WithContext(shared.SetContext(r.Context(), shared.ReqContextData{
+		Model:    body.Model,
+		ModelID:  realModelID,
+		Metadata: make(map[string]string),
+	}))
+
+	switch {
+	case s.local.Handles(realModelID):
+		s.proxylog.Debugf("/props: using local process for model: %s", realModelID)
+		s.local.ServeHTTP(w, r)
+	case s.peer.Handles(realModelID):
+		s.proxylog.Debugf("/props: using peer for model: %s", realModelID)
+		s.peer.ServeHTTP(w, r)
+	default:
+		shared.SendResponse(w, r, http.StatusNotFound, fmt.Sprintf("no router for model %s", realModelID))
+	}
 }

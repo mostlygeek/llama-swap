@@ -339,3 +339,116 @@ func TestServer_LogStream_UnknownID_Returns400(t *testing.T) {
 		t.Errorf("status=%d want 400", w.Code)
 	}
 }
+
+func TestServer_PropsHandler_NoModel(t *testing.T) {
+	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
+	s.build = BuildInfo{Version: "v1", Commit: "abc123", Date: "2024-01-01"}
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/props", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v body=%q", err, w.Body.String())
+	}
+	if got, ok := resp["role"].(string); !ok || got != "router" {
+		t.Errorf("role=%v want router", resp["role"])
+	}
+	if got, ok := resp["models_autoload"].(bool); !ok || got != true {
+		t.Errorf("models_autoload=%v want true", resp["models_autoload"])
+	}
+	if got, ok := resp["build_info"].(string); !ok || got != "v1 (abc123, 2024-01-01)" {
+		t.Errorf("build_info=%v want v1 (abc123, 2024-01-01)", resp["build_info"])
+	}
+}
+
+func TestServer_PropsHandler_LocalModel(t *testing.T) {
+	s := newTestServer(newStubRouter([]string{"local-model"}, "local props"), newStubRouter(nil, ""))
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/props?model=local-model", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
+	}
+	if w.Body.String() != "local props" {
+		t.Errorf("body=%q want local props", w.Body.String())
+	}
+}
+
+func TestServer_PropsHandler_PeerModel(t *testing.T) {
+	s := newTestServer(newStubRouter(nil, ""), newStubRouter([]string{"peer-model"}, "peer props"))
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/props?model=peer-model", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
+	}
+	if w.Body.String() != "peer props" {
+		t.Errorf("body=%q want peer props", w.Body.String())
+	}
+}
+
+func TestServer_PropsHandler_AutoloadFalse_NotRunning(t *testing.T) {
+	s := newTestServer(newStubRouter([]string{"m1"}, ""), newStubRouter(nil, ""))
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/props?model=m1&autoload=false", nil))
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "model is not loaded") {
+		t.Errorf("body=%q should contain 'model is not loaded'", w.Body.String())
+	}
+}
+
+func TestServer_PropsHandler_AutoloadFalse_Running(t *testing.T) {
+	local := newStubRouter([]string{"m1"}, "m1 props")
+	local.running = map[string]process.ProcessState{"m1": process.StateReady}
+	s := newTestServer(local, newStubRouter(nil, ""))
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/props?model=m1&autoload=false", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
+	}
+	if w.Body.String() != "m1 props" {
+		t.Errorf("body=%q want m1 props", w.Body.String())
+	}
+}
+
+func TestServer_PropsHandler_UnknownModel(t *testing.T) {
+	s := newTestServer(newStubRouter([]string{"m1"}, ""), newStubRouter(nil, ""))
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/props?model=unknown", nil))
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "could not find suitable handler") {
+		t.Errorf("body=%q should contain suitable handler message", w.Body.String())
+	}
+}
+
+func TestServer_PropsPostHandler(t *testing.T) {
+	s := newTestServer(newStubRouter([]string{"local-model"}, "post props"), newStubRouter(nil, ""))
+
+	body := strings.NewReader(`{"model":"local-model"}`)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/props", body))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
+	}
+	if w.Body.String() != "post props" {
+		t.Errorf("body=%q want post props", w.Body.String())
+	}
+}
