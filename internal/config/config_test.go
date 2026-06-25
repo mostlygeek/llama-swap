@@ -777,22 +777,27 @@ func TestConfig_APIKeys_Invalid(t *testing.T) {
 		{
 			name:        "blank spaces only",
 			content:     `apiKeys: ["   "]`,
-			expectedErr: "api key cannot contain spaces: `   `",
+			expectedErr: "apiKeys[0]: api key cannot contain spaces",
 		},
 		{
 			name:        "contains leading space",
 			content:     `apiKeys: [" key123"]`,
-			expectedErr: "api key cannot contain spaces: ` key123`",
+			expectedErr: "apiKeys[0]: api key cannot contain spaces",
 		},
 		{
 			name:        "contains trailing space",
 			content:     `apiKeys: ["key123 "]`,
-			expectedErr: "api key cannot contain spaces: `key123 `",
+			expectedErr: "apiKeys[0]: api key cannot contain spaces",
 		},
 		{
 			name:        "contains middle space",
 			content:     `apiKeys: ["key 123"]`,
-			expectedErr: "api key cannot contain spaces: `key 123`",
+			expectedErr: "apiKeys[0]: api key cannot contain spaces",
+		},
+		{
+			name:        "space in second key reports correct index",
+			content:     `apiKeys: ["valid-key", "bad key"]`,
+			expectedErr: "apiKeys[1]: api key cannot contain spaces",
 		},
 		{
 			name:        "empty in list with valid keys",

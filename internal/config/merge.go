@@ -125,13 +125,21 @@ func listYAMLFiles(dir string) ([]string, error) {
 // parseSource reads and parses one YAML config file into a root mapping node.
 // Returns a nil node (no error) when the file is empty or contains only
 // comments.
+//
+// Env macros (${env.VAR}) are substituted at the string level before YAML
+// parsing so that flow-style constructs like [${env.API_KEY}] parse
+// correctly — the brace would otherwise be interpreted as a flow mapping.
 func parseSource(path string) (*yaml.Node, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config %s: %w", path, err)
 	}
+	yamlStr, err := substituteEnvMacros(string(data))
+	if err != nil {
+		return nil, fmt.Errorf("config %s: %w", path, err)
+	}
 	var doc yaml.Node
-	if err := yaml.Unmarshal(data, &doc); err != nil {
+	if err := yaml.Unmarshal([]byte(yamlStr), &doc); err != nil {
 		return nil, fmt.Errorf("failed to parse config %s: %w", path, err)
 	}
 	// yaml.Unmarshal into a yaml.Node yields a DocumentNode whose Content[0]

@@ -213,6 +213,20 @@ func TestLoadConfigSources_EnvMacrosSubstituted(t *testing.T) {
 	assert.NotContains(t, m.Proxy, "${PORT}", "PORT macro should have been substituted in proxy")
 }
 
+func TestLoadConfigSources_EnvMacroInFlowStyleList(t *testing.T) {
+	// Regression: flow-style lists with ${env.*} must parse. Previously
+	// parseSource unmarshalled before env substitution, so the brace in
+	// [${env.API_KEY}] was misread as a flow mapping and parsing failed.
+	dir := t.TempDir()
+	writeYAML(t, dir, "a.yaml", "models:\n  m1:\n    cmd: echo hi\n    proxy: \"http://localhost:9999\"\n")
+	writeYAML(t, dir, "keys.yaml", "apiKeys: [${env.TEST_API_KEY}]\nmodels:\n  m2:\n    cmd: echo hi\n    proxy: \"http://localhost:9998\"\n")
+
+	t.Setenv("TEST_API_KEY", "secret123")
+	cfg, err := LoadConfigSources("", dir)
+	require.NoError(t, err)
+	assert.Contains(t, cfg.RequiredAPIKeys, "secret123")
+}
+
 func TestLoadConfigSources_SortedOrderDeterministic(t *testing.T) {
 	// Two files defining distinct models, scanned in z..a order by filename.
 	// Determine merged result is the same regardless of how the FS returns them.

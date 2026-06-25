@@ -85,12 +85,14 @@ func (w *DirWatcher) Run(ctx context.Context) {
 			return
 		case <-ticker.C:
 			cur := scanDir(w.Path)
-			// Present → missing: stay quiet (likely a transient rename/write).
-			if prev.exists && !cur.exists {
-				prev = cur
-				continue
-			}
-			if !prev.equal(cur) && w.OnChange != nil {
+			// Suppress transitions involving an empty or missing directory —
+			// these are treated as transient rename-style writes, mirroring
+			// the single-file Watcher. Only present-with-content →
+			// present-with-content (changed) or no-content →
+			// present-with-content fires OnChange.
+			prevHasContent := prev.exists && len(prev.names) > 0
+			curHasContent := cur.exists && len(cur.names) > 0
+			if curHasContent && (!prevHasContent || !prev.equal(cur)) && w.OnChange != nil {
 				w.OnChange()
 			}
 			prev = cur
@@ -117,20 +119,19 @@ func scanDir(dir string) dirSnapshot {
 		if !strings.HasSuffix(name, ".yml") && !strings.HasSuffix(name, ".yaml") {
 			continue
 		}
-		snap.names = append(snap.names, name)
-	}
-	sort.Strings(snap.names)
-	for _, name := range snap.names {
 		fi, err := os.Stat(filepath.Join(dir, name))
 		if err != nil {
-			snap.states[name] = snapshot{}
+			// File disappeared between ReadDir and Stat; skip it — the
+			// next poll will observe the removal cleanly.
 			continue
 		}
+		snap.names = append(snap.names, name)
 		snap.states[name] = snapshot{
 			exists:  true,
 			modTime: fi.ModTime(),
 			size:    fi.Size(),
 		}
 	}
+	sort.Strings(snap.names)
 	return snap
 }

@@ -154,6 +154,32 @@ func TestDirWatcher_MissingDirRecovers(t *testing.T) {
 	require.True(t, waitForCount(t, &n, 1, time.Second), "callback should fire when dir returns with content")
 }
 
+func TestDirWatcher_EmptyDirSuppressedThenRecovers(t *testing.T) {
+	// Present-with-content → empty (all YAML removed, dir still exists)
+	// must stay quiet — treated as transient per the documented policy.
+	// The transition back to content fires.
+	dir := t.TempDir()
+	writeYAMLInDir(t, dir, "a.yaml", "a")
+
+	var n int64
+	stop := startDirWatcher(t, &DirWatcher{
+		Path:     dir,
+		Interval: testInterval,
+		OnChange: func() { atomic.AddInt64(&n, 1) },
+	})
+	defer stop()
+	time.Sleep(testInterval * 2)
+
+	// Remove the only YAML file. Dir still exists but is empty of YAML.
+	require.NoError(t, os.Remove(filepath.Join(dir, "a.yaml")))
+	time.Sleep(testInterval * 4)
+	require.Equal(t, int64(0), atomic.LoadInt64(&n), "emptying the directory must not fire")
+
+	// Add a YAML file back; transition to present-with-content fires.
+	writeYAMLInDir(t, dir, "c.yaml", "c")
+	require.True(t, waitForCount(t, &n, 1, time.Second), "callback should fire when content returns")
+}
+
 func TestDirWatcher_ContextCancelStopsRun(t *testing.T) {
 	dir := t.TempDir()
 	writeYAMLInDir(t, dir, "a.yaml", "a")
