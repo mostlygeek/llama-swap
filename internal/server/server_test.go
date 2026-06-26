@@ -39,7 +39,11 @@ func newStubRouter(models []string, response string) *stubRouter {
 
 func (s *stubRouter) Handles(model string) bool      { return s.models[model] }
 func (s *stubRouter) Shutdown(_ time.Duration) error { s.shutdownCalls.Add(1); return nil }
-func (s *stubRouter) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
+func (s *stubRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Read (and discard) body to exercise body-forwarding code paths
+	if r.Body != nil {
+		io.ReadAll(r.Body)
+	}
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(s.response))
 }
@@ -424,6 +428,20 @@ func TestServer_PropsHandler_AutoloadFalse_Running(t *testing.T) {
 	}
 }
 
+func TestServer_PropsHandler_AutoloadFalse_PeerModel(t *testing.T) {
+	s := newTestServer(newStubRouter(nil, ""), newStubRouter([]string{"peer-model"}, "peer props"))
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/props?model=peer-model&autoload=false", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
+	}
+	if w.Body.String() != "peer props" {
+		t.Errorf("body=%q want peer props", w.Body.String())
+	}
+}
+
 func TestServer_PropsHandler_UnknownModel(t *testing.T) {
 	s := newTestServer(newStubRouter([]string{"m1"}, ""), newStubRouter(nil, ""))
 
@@ -442,8 +460,10 @@ func TestServer_PropsPostHandler(t *testing.T) {
 	s := newTestServer(newStubRouter([]string{"local-model"}, "post props"), newStubRouter(nil, ""))
 
 	body := strings.NewReader(`{"model":"local-model"}`)
+	req := httptest.NewRequest(http.MethodPost, "/props", body)
+	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	s.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/props", body))
+	s.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())

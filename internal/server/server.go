@@ -1,12 +1,10 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -319,9 +317,8 @@ func (s *Server) Shutdown(timeout time.Duration) error {
 // model parameter it proxies to the backend's /props endpoint, respecting the
 // autoload query parameter.
 func (s *Server) handleProps(w http.ResponseWriter, r *http.Request) {
-	model := r.URL.Query().Get("model")
-
-	if model == "" {
+	data, err := shared.FetchContext(r, s.cfg)
+	if err != nil {
 		buildInfo := fmt.Sprintf("%s (%s, %s)", s.build.Version, s.build.Commit, s.build.Date)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
@@ -344,108 +341,71 @@ func (s *Server) handleProps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	model := data.Model
 	autoloadStr := r.URL.Query().Get("autoload")
 	autoload := autoloadStr == "" || autoloadStr == "true" || autoloadStr == "1"
 
-	realModelID, found := s.cfg.RealModelName(model)
-	if !found && s.local.Handles(model) {
-		realModelID = model
-		found = true
-	}
-	if !found && s.peer.Handles(model) {
-		realModelID = model
-		found = true
-	}
-
-	if !found {
-		shared.SendResponse(w, r, http.StatusNotFound, fmt.Sprintf("could not find suitable handler for %s", model))
-		return
-	}
+	modelID := data.ModelID
 
 	if !autoload {
-		ready := s.peer.Handles(realModelID)
-		if !ready {
-			if st, ok := s.local.RunningModels()[realModelID]; ok && st == process.StateReady {
-				ready = true
+		if s.local.Handles(modelID) {
+			if st, ok := s.local.RunningModels()[modelID]; !ok || st != process.StateReady {
+				shared.SendResponse(w, r, http.StatusBadRequest, "model is not loaded")
+				return
 			}
-		}
-		if !ready {
-			shared.SendResponse(w, r, http.StatusBadRequest, "model is not loaded")
-			return
 		}
 	}
 
 	r.URL.Path = "/props"
 	*r = *r.WithContext(shared.SetContext(r.Context(), shared.ReqContextData{
 		Model:    model,
-		ModelID:  realModelID,
+		ModelID:  modelID,
 		Metadata: make(map[string]string),
 	}))
 
 	switch {
-	case s.local.Handles(realModelID):
-		s.proxylog.Debugf("/props: using local process for model: %s", realModelID)
+	case s.local.Handles(modelID):
+		s.proxylog.Debugf("/props: using local process for model: %s", modelID)
 		s.local.ServeHTTP(w, r)
-	case s.peer.Handles(realModelID):
-		s.proxylog.Debugf("/props: using peer for model: %s", realModelID)
+	case s.peer.Handles(modelID):
+		s.proxylog.Debugf("/props: using peer for model: %s", modelID)
 		s.peer.ServeHTTP(w, r)
 	default:
-		shared.SendResponse(w, r, http.StatusNotFound, fmt.Sprintf("no router for model %s", realModelID))
+		shared.SendResponse(w, r, http.StatusNotFound, fmt.Sprintf("could not find suitable handler for %s", model))
 	}
 }
 
 // handlePropsPost serves POST /props. It reads the model from the JSON request
 // body and proxies the request to the backend's /props endpoint.
 func (s *Server) handlePropsPost(w http.ResponseWriter, r *http.Request) {
-	bodyBytes, err := io.ReadAll(r.Body)
+	data, err := shared.FetchContext(r, s.cfg)
 	if err != nil {
-		shared.SendResponse(w, r, http.StatusBadRequest, "could not read request body")
-		return
-	}
-	defer func() { r.Body = io.NopCloser(bytes.NewReader(bodyBytes)) }()
-
-	var body struct {
-		Model string `json:"model"`
-	}
-	if err := json.Unmarshal(bodyBytes, &body); err != nil {
-		shared.SendResponse(w, r, http.StatusBadRequest, "could not parse request body")
-		return
-	}
-	if body.Model == "" {
-		shared.SendResponse(w, r, http.StatusBadRequest, "missing 'model' key in request body")
+		if errors.Is(err, shared.ErrNoModelInContext) {
+			shared.SendResponse(w, r, http.StatusBadRequest, "missing 'model' key in request body")
+		} else {
+			shared.SendResponse(w, r, http.StatusBadRequest, "could not read request body")
+		}
 		return
 	}
 
-	realModelID, found := s.cfg.RealModelName(body.Model)
-	if !found && s.local.Handles(body.Model) {
-		realModelID = body.Model
-		found = true
-	}
-	if !found && s.peer.Handles(body.Model) {
-		realModelID = body.Model
-		found = true
-	}
-
-	if !found {
-		shared.SendResponse(w, r, http.StatusNotFound, fmt.Sprintf("could not find suitable handler for %s", body.Model))
-		return
-	}
+	model := data.Model
+	modelID := data.ModelID
 
 	r.URL.Path = "/props"
 	*r = *r.WithContext(shared.SetContext(r.Context(), shared.ReqContextData{
-		Model:    body.Model,
-		ModelID:  realModelID,
+		Model:    model,
+		ModelID:  modelID,
 		Metadata: make(map[string]string),
 	}))
 
 	switch {
-	case s.local.Handles(realModelID):
-		s.proxylog.Debugf("/props: using local process for model: %s", realModelID)
+	case s.local.Handles(modelID):
+		s.proxylog.Debugf("/props: using local process for model: %s", modelID)
 		s.local.ServeHTTP(w, r)
-	case s.peer.Handles(realModelID):
-		s.proxylog.Debugf("/props: using peer for model: %s", realModelID)
+	case s.peer.Handles(modelID):
+		s.proxylog.Debugf("/props: using peer for model: %s", modelID)
 		s.peer.ServeHTTP(w, r)
 	default:
-		shared.SendResponse(w, r, http.StatusNotFound, fmt.Sprintf("no router for model %s", realModelID))
+		shared.SendResponse(w, r, http.StatusNotFound, fmt.Sprintf("could not find suitable handler for %s", model))
 	}
 }
