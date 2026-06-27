@@ -1,3 +1,8 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Aditya Aggarwal <aditya@cybersapien.xyz>
+Date: Fri, 27 Jun 2026 12:00:00 +0530
+Subject: [PATCH] fix(llama.cpp): read 3 rope_dimension_sections for Qwen3.5
+
 Qwen3.5 and Qwen3.5-MoE GGUFs encode exactly 3 entries in the
 qwen35.rope.dimension_sections metadata field.  The loaders for
 both architectures pass n=4 to get_key_or_arr(), which validates
@@ -11,9 +16,17 @@ pre-zeroed before any metadata is read, so reading 3 elements
 and leaving index 3 at zero is the correct behaviour: ggml_rope_multi
 treats a zero-length section as "no rotation in that dimension".
 
+---
+ src/models/qwen35.cpp    | 2 +-
+ src/models/qwen35moe.cpp | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/models/qwen35.cpp b/src/models/qwen35.cpp
+index d8ffe43..ac09a30 100644
 --- a/src/models/qwen35.cpp
 +++ b/src/models/qwen35.cpp
 @@ -3,7 +3,7 @@
+
  void llama_model_qwen35::load_arch_hparams(llama_model_loader & ml) {
      ml.get_key(LLM_KV_ATTENTION_LAYERNORM_RMS_EPS,       hparams.f_norm_rms_eps);
 -    ml.get_key_or_arr(LLM_KV_ROPE_DIMENSION_SECTIONS,    hparams.rope_sections, 4, true);
@@ -21,9 +34,12 @@ treats a zero-length section as "no rotation in that dimension".
 
      // Load linear attention (gated delta net) parameters
      ml.get_key(LLM_KV_SSM_CONV_KERNEL,    hparams.ssm_d_conv);
+diff --git a/src/models/qwen35moe.cpp b/src/models/qwen35moe.cpp
+index 7b0876c..d4f9fcf 100644
 --- a/src/models/qwen35moe.cpp
 +++ b/src/models/qwen35moe.cpp
-@@ -6,7 +6,7 @@
+@@ -6,7 +6,7 @@ void llama_model_qwen35moe::load_arch_hparams(llama_model_loader & ml) {
+     ml.get_key(LLM_KV_EXPERT_SHARED_FEED_FORWARD_LENGTH, hparams.n_ff_shexp, false);
      ml.get_key(LLM_KV_ATTENTION_LAYERNORM_RMS_EPS,       hparams.f_norm_rms_eps);
 
 -    ml.get_key_or_arr(LLM_KV_ROPE_DIMENSION_SECTIONS,    hparams.rope_sections, 4, true);
@@ -31,3 +47,5 @@ treats a zero-length section as "no rotation in that dimension".
 
      // Load linear attention (gated delta net) parameters
      ml.get_key(LLM_KV_SSM_CONV_KERNEL,    hparams.ssm_d_conv);
+--
+2.53.0
