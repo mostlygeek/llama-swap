@@ -6,11 +6,12 @@
   import SpeechInterface from "../components/playground/SpeechInterface.svelte";
   import RerankInterface from "../components/playground/RerankInterface.svelte";
   import ConcurrencyInterface from "../components/playground/ConcurrencyInterface.svelte";
+  import * as Card from "$lib/components/ui/card/index.js";
+  import * as Tabs from "$lib/components/ui/tabs/index.js";
 
   type Tab = "chat" | "images" | "speech" | "audio" | "rerank" | "concurrency";
 
   const selectedTabStore = persistentStore<Tab>("playground-selected-tab", "chat");
-  let mobileMenuOpen = $state(false);
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "chat", label: "Chat" },
@@ -20,95 +21,39 @@
     { id: "rerank", label: "Rerank" },
     { id: "concurrency", label: "Load Test" },
   ];
-
-  function selectTab(tab: Tab) {
-    selectedTabStore.set(tab);
-    mobileMenuOpen = false;
-  }
-
-  function getTabLabel(tabId: Tab): string {
-    return tabs.find((t) => t.id === tabId)?.label || "";
-  }
 </script>
 
-<div class="card h-full flex flex-col">
-  <!-- Tab navigation -->
-  <div class="shrink-0 mb-4">
-    <!-- Mobile: Dropdown menu (hidden on md and up) -->
-    <div class="block md:hidden relative">
-      <button
-        class="w-full px-4 py-2 rounded font-medium transition-colors flex items-center justify-between bg-surface hover:bg-secondary-hover border border-gray-200 dark:border-white/10"
-        onclick={() => (mobileMenuOpen = !mobileMenuOpen)}
-      >
-        <span>{getTabLabel($selectedTabStore)}</span>
-        <svg
-          class="w-5 h-5 transition-transform {mobileMenuOpen ? 'rotate-180' : ''}"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-        </svg>
-      </button>
-      {#if mobileMenuOpen}
-        <div
-          class="absolute top-full left-0 right-0 mt-1 bg-surface border border-gray-200 dark:border-white/10 rounded shadow-lg z-10"
-        >
-          {#each tabs as tab (tab.id)}
-            <button
-              class="w-full px-4 py-2 text-left hover:bg-secondary-hover transition-colors first:rounded-t last:rounded-b {$selectedTabStore ===
-              tab.id
-                ? 'bg-primary/10 font-medium'
-                : ''}"
-              onclick={() => selectTab(tab.id)}
-            >
-              {tab.label}
-            </button>
-          {/each}
-        </div>
-      {/if}
-    </div>
-
-    <!-- Desktop: Tab buttons (shown on md and up) -->
-    <div class="hidden md:flex flex-wrap gap-2">
-      {#each tabs as tab (tab.id)}
-        <button
-          class="px-4 py-2 rounded font-medium transition-colors {$selectedTabStore === tab.id
-            ? 'bg-primary text-btn-primary-text'
-            : 'bg-surface hover:bg-secondary-hover border border-gray-200 dark:border-white/10'}"
-          onclick={() => selectTab(tab.id)}
-        >
-          {tab.label}
-        </button>
-      {/each}
-    </div>
+<Card.Root class="flex h-full flex-col gap-0 overflow-hidden p-4">
+  <!-- Tab navigation: triggers update the store; content stays mounted to preserve state -->
+  <div class="mb-4 shrink-0">
+    <Tabs.Root bind:value={() => $selectedTabStore, (v) => selectedTabStore.set(v as Tab)}>
+      <Tabs.List class="h-auto flex-wrap">
+        {#each tabs as tab (tab.id)}
+          <Tabs.Trigger value={tab.id}>{tab.label}</Tabs.Trigger>
+        {/each}
+      </Tabs.List>
+    </Tabs.Root>
   </div>
 
-  <!-- Tab content -->
-  <div class="flex-1 overflow-hidden relative">
-    <div class="h-full" class:tab-hidden={$selectedTabStore !== "chat"}>
+  <!-- Tab content (all interfaces stay mounted) -->
+  <div class="relative flex-1 overflow-hidden">
+    <div class="h-full" class:hidden={$selectedTabStore !== "chat"}>
       <ChatInterface />
     </div>
-    <div class="h-full" class:tab-hidden={$selectedTabStore !== "images"}>
+    <div class="h-full" class:hidden={$selectedTabStore !== "images"}>
       <ImageInterface />
     </div>
-    <div class="h-full" class:tab-hidden={$selectedTabStore !== "speech"}>
+    <div class="h-full" class:hidden={$selectedTabStore !== "speech"}>
       <SpeechInterface />
     </div>
-    <div class="h-full" class:tab-hidden={$selectedTabStore !== "audio"}>
+    <div class="h-full" class:hidden={$selectedTabStore !== "audio"}>
       <AudioInterface />
     </div>
-    <div class="h-full" class:tab-hidden={$selectedTabStore !== "rerank"}>
+    <div class="h-full" class:hidden={$selectedTabStore !== "rerank"}>
       <RerankInterface />
     </div>
-    <div class="h-full" class:tab-hidden={$selectedTabStore !== "concurrency"}>
+    <div class="h-full" class:hidden={$selectedTabStore !== "concurrency"}>
       <ConcurrencyInterface />
     </div>
   </div>
-</div>
-
-<style>
-  .tab-hidden {
-    display: none;
-  }
-</style>
+</Card.Root>
