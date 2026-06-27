@@ -4,6 +4,8 @@
   import { transcribeAudio } from "../../lib/audioApi";
   import { playgroundStores } from "../../stores/playgroundActivity";
   import ModelSelector from "./ModelSelector.svelte";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Copy, Check } from "@lucide/svelte";
 
   const selectedModelStore = persistentStore<string>("playground-audio-model", "");
 
@@ -169,22 +171,19 @@
       {:else if transcriptionResult}
         <div class="w-full h-full flex flex-col p-4">
           <div class="flex justify-between items-center mb-2">
-            <h3 class="font-medium">Transcription Result</h3>
-            <button
-              class="btn btn-sm"
+            <h3 class="pb-0 font-medium">Transcription Result</h3>
+            <Button
+              variant="outline"
+              size="icon-sm"
               onclick={copyToClipboard}
               title={copied ? 'Copied!' : 'Copy to clipboard'}
             >
               {#if copied}
-                <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                </svg>
+                <Check class="text-success" />
               {:else}
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
-                </svg>
+                <Copy />
               {/if}
-            </button>
+            </Button>
           </div>
           <div class="flex-1 overflow-auto p-3 rounded border border-border bg-background whitespace-pre-wrap">
             {transcriptionResult}
@@ -223,33 +222,21 @@
         onchange={handleFileSelect}
         bind:this={fileInput}
       />
-      <button
-        class="btn"
-        onclick={() => fileInput?.click()}
-        disabled={isTranscribing}
-      >
+      <Button variant="outline" onclick={() => fileInput?.click()} disabled={isTranscribing}>
         Browse Files
-      </button>
+      </Button>
       <div class="flex-1"></div>
       {#if isTranscribing}
-        <button class="btn bg-red-500 hover:bg-red-600 text-white" onclick={cancelTranscription}>
-          Cancel
-        </button>
+        <Button variant="destructive" onclick={cancelTranscription}>Cancel</Button>
       {:else}
-        <button
-          class="btn bg-primary text-primary-foreground hover:opacity-90"
-          onclick={transcribe}
-          disabled={!canTranscribe}
-        >
-          Transcribe
-        </button>
-        <button
-          class="btn"
+        <Button onclick={transcribe} disabled={!canTranscribe}>Transcribe</Button>
+        <Button
+          variant="outline"
           onclick={clearAll}
           disabled={!selectedFile && !transcriptionResult && !error}
         >
           Clear
-        </button>
+        </Button>
       {/if}
     </div>
   {/if}

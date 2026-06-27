@@ -7,6 +7,7 @@
   import ModelSelector from "./ModelSelector.svelte";
   import ExpandableTextarea from "./ExpandableTextarea.svelte";
   import type { ImageApiMode, SdApiLora, SdApiLoraRef } from "../../lib/types";
+  import { Button } from "$lib/components/ui/button/index.js";
 
   const selectedModelStore = persistentStore<string>("playground-image-model", "");
   const selectedSizeStore = persistentStore<string>("playground-image-size", "1024x1024");
@@ -226,12 +227,9 @@
     </select>
 
     {#if isSdapi}
-      <button
-        class="px-3 py-2 rounded border border-border bg-background hover:bg-accent transition-colors"
-        onclick={() => showSettings = !showSettings}
-      >
+      <Button variant="outline" onclick={() => showSettings = !showSettings}>
         {showSettings ? "Hide Settings" : "Settings"}
-      </button>
+      </Button>
     {/if}
   </div>
 
@@ -330,13 +328,14 @@
       <div>
         <span class="text-xs text-muted-foreground block mb-1">LoRAs</span>
         <div class="flex items-center gap-2 mb-2">
-          <button
-            class="px-3 py-1.5 text-sm rounded border border-border bg-background hover:bg-accent transition-colors disabled:opacity-50"
+          <Button
+            variant="outline"
+            size="sm"
             onclick={loadLoras}
             disabled={!$selectedModelStore || isLoadingLoras}
           >
             {isLoadingLoras ? "Loading..." : lorasLoaded ? "Reload LoRAs" : "Load LoRAs"}
-          </button>
+          </Button>
           {#if lorasLoaded && availableLoras.length > 0}
             <select
               class="flex-1 px-2 py-1.5 text-sm rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary"
@@ -471,24 +470,25 @@
       />
       <div class="flex flex-row md:flex-col gap-2">
         {#if isGenerating}
-          <button class="btn bg-red-500 hover:bg-red-600 text-white flex-1 md:flex-none" onclick={cancelGeneration}>
+          <Button variant="destructive" class="flex-1 md:flex-none" onclick={cancelGeneration}>
             Cancel
-          </button>
+          </Button>
         {:else}
-          <button
-            class="btn bg-primary text-primary-foreground hover:opacity-90 flex-1 md:flex-none"
+          <Button
+            class="flex-1 md:flex-none"
             onclick={generate}
             disabled={!prompt.trim() || !$selectedModelStore}
           >
             Generate
-          </button>
-          <button
-            class="btn flex-1 md:flex-none"
+          </Button>
+          <Button
+            variant="outline"
+            class="flex-1 md:flex-none"
             onclick={clearImage}
             disabled={generatedImages.length === 0 && !error && !prompt.trim()}
           >
             Clear
-          </button>
+          </Button>
         {/if}
       </div>
     </div>
