@@ -1,13 +1,15 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import Router from "svelte-spa-router";
-  import Header from "./components/Header.svelte";
+  import AppSidebar from "./components/AppSidebar.svelte";
   import LogViewer from "./routes/LogViewer.svelte";
   import Models from "./routes/Models.svelte";
   import Activity from "./routes/Activity.svelte";
   import Performance from "./routes/Performance.svelte";
   import Playground from "./routes/Playground.svelte";
   import PlaygroundStub from "./routes/PlaygroundStub.svelte";
+  import * as Sidebar from "$lib/components/ui/sidebar/index.js";
+  import { Separator } from "$lib/components/ui/separator/index.js";
   import { enableAPIEvents, checkPerformanceEnabled } from "./stores/api";
   import { initScreenWidth, initSystemThemeListener, isDarkMode, appTitle, connectionState } from "./stores/theme";
   import { currentRoute } from "./stores/route";
@@ -20,6 +22,16 @@
     "/performance": Performance,
     "*": PlaygroundStub,
   };
+
+  const routeTitles: Record<string, string> = {
+    "/": "Playground",
+    "/models": "Models",
+    "/activity": "Activity",
+    "/logs": "Logs",
+    "/performance": "Performance",
+  };
+
+  let sectionTitle = $derived(routeTitles[$currentRoute] ?? "Playground");
 
   function handleRouteLoaded(event: { detail: { route: string | RegExp } }) {
     const route = event.detail.route;
@@ -49,15 +61,24 @@
   });
 </script>
 
-<div class="flex flex-col h-screen">
-  <Header />
+<Sidebar.Provider>
+  <AppSidebar />
+  <Sidebar.Inset class="h-screen min-w-0 overflow-hidden">
+    <header
+      class="bg-background sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b px-4"
+    >
+      <Sidebar.Trigger class="-ml-1" />
+      <Separator orientation="vertical" class="mr-2 !h-4" />
+      <h2 class="truncate pb-0 text-sm font-semibold">{sectionTitle}</h2>
+    </header>
 
-  <main class="flex-1 overflow-auto p-4">
-    <div class="h-full" class:hidden={$currentRoute !== "/"}>
-      <Playground />
-    </div>
-    <div class="h-full" class:hidden={$currentRoute === "/"}>
-      <Router {routes} on:routeLoaded={handleRouteLoaded} />
-    </div>
-  </main>
-</div>
+    <main class="min-h-0 flex-1 overflow-auto p-4">
+      <div class="h-full" class:hidden={$currentRoute !== "/"}>
+        <Playground />
+      </div>
+      <div class="h-full" class:hidden={$currentRoute === "/"}>
+        <Router {routes} on:routeLoaded={handleRouteLoaded} />
+      </div>
+    </main>
+  </Sidebar.Inset>
+</Sidebar.Provider>
