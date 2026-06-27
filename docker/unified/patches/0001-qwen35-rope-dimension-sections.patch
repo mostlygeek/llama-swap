@@ -1,0 +1,33 @@
+Qwen3.5 and Qwen3.5-MoE GGUFs encode exactly 3 entries in the
+qwen35.rope.dimension_sections metadata field.  The loaders for
+both architectures pass n=4 to get_key_or_arr(), which validates
+the length strictly and throws at model load time:
+
+    key qwen35.rope.dimension_sections has wrong array length;
+    expected 4, got 3
+
+hparams.rope_sections is declared as std::array<int,4> and is
+pre-zeroed before any metadata is read, so reading 3 elements
+and leaving index 3 at zero is the correct behaviour: ggml_rope_multi
+treats a zero-length section as "no rotation in that dimension".
+
+--- a/src/models/qwen35.cpp
++++ b/src/models/qwen35.cpp
+@@ -3,7 +3,7 @@
+ void llama_model_qwen35::load_arch_hparams(llama_model_loader & ml) {
+     ml.get_key(LLM_KV_ATTENTION_LAYERNORM_RMS_EPS,       hparams.f_norm_rms_eps);
+-    ml.get_key_or_arr(LLM_KV_ROPE_DIMENSION_SECTIONS,    hparams.rope_sections, 4, true);
++    ml.get_key_or_arr(LLM_KV_ROPE_DIMENSION_SECTIONS,    hparams.rope_sections, 3, true);
+
+     // Load linear attention (gated delta net) parameters
+     ml.get_key(LLM_KV_SSM_CONV_KERNEL,    hparams.ssm_d_conv);
+--- a/src/models/qwen35moe.cpp
++++ b/src/models/qwen35moe.cpp
+@@ -6,7 +6,7 @@
+     ml.get_key(LLM_KV_ATTENTION_LAYERNORM_RMS_EPS,       hparams.f_norm_rms_eps);
+
+-    ml.get_key_or_arr(LLM_KV_ROPE_DIMENSION_SECTIONS,    hparams.rope_sections, 4, true);
++    ml.get_key_or_arr(LLM_KV_ROPE_DIMENSION_SECTIONS,    hparams.rope_sections, 3, true);
+
+     // Load linear attention (gated delta net) parameters
+     ml.get_key(LLM_KV_SSM_CONV_KERNEL,    hparams.ssm_d_conv);

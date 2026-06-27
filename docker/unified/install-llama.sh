@@ -19,6 +19,23 @@ fi
 git fetch --depth=1 origin "${COMMIT_HASH}"
 git checkout FETCH_HEAD
 
+# Apply local patches to llama.cpp before building.
+# Each patch is tried with --check first; if upstream has already merged the
+# fix the patch won't apply cleanly and we skip it rather than failing the build.
+PATCH_DIR="/build/patches"
+if [ -d "${PATCH_DIR}" ]; then
+    for patch in "${PATCH_DIR}"/*.patch; do
+        [ -f "${patch}" ] || continue
+        echo "=== Checking patch: $(basename "${patch}") ==="
+        if git apply --check "${patch}" 2>/dev/null; then
+            git apply "${patch}"
+            echo "    Applied."
+        else
+            echo "    Already merged upstream or does not apply — skipping."
+        fi
+    done
+fi
+
 # Common cmake flags
 CMAKE_FLAGS=(
     -DGGML_NATIVE=OFF
