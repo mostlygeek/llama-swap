@@ -143,6 +143,6 @@
   });
 </script>
 
-<div class="card p-4 h-[300px]">
+<div class="bg-card text-card-foreground h-[300px] rounded-xl border p-4 shadow-sm">
   <canvas bind:this={canvas}></canvas>
 </div>

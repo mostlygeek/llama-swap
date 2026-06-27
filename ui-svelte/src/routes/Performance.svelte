@@ -4,6 +4,8 @@
   import { persistentStore } from "../stores/persistent";
   import type { SysStat, GpuStat } from "../lib/types";
   import PerformanceChart from "../components/PerformanceChart.svelte";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { RefreshCw } from "@lucide/svelte";
 
   const COLORS = [
     "#3b82f6",
@@ -356,47 +358,30 @@
     <div class="flex items-center gap-4">
       <div class="flex items-center gap-1">
         {#each WINDOWS as win, i}
-          <button
-            class="btn btn--sm"
-            class:bg-primary={$selectedWindow === i}
-            class:text-primary-foreground={$selectedWindow === i}
+          <Button
+            variant={$selectedWindow === i ? "default" : "outline"}
+            size="sm"
             onclick={() => ($selectedWindow = i)}
           >
             {win.label}
-          </button>
+          </Button>
         {/each}
       </div>
       <div class="flex items-center gap-1">
         <span class="text-xs text-muted-foreground mr-1">Refresh:</span>
         {#each INTERVALS as intv, i}
-          <button
-            class="btn btn--sm"
-            class:bg-primary={$selectedInterval === i}
-            class:text-primary-foreground={$selectedInterval === i}
+          <Button
+            variant={$selectedInterval === i ? "default" : "outline"}
+            size="sm"
             onclick={() => handleIntervalChange(i)}
           >
             {intv.label}
-          </button>
+          </Button>
         {/each}
       </div>
-      <button class="btn btn--sm p-1" title="Refresh" onclick={manualRefresh} disabled={refreshing}>
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          class="w-4 h-4"
-          class:animate-spin={refreshing}
-        >
-          <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-          <path d="M3 3v5h5" />
-          <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
-          <path d="M16 16h5v5" />
-        </svg>
-      </button>
+      <Button variant="outline" size="icon-sm" title="Refresh" onclick={manualRefresh} disabled={refreshing}>
+        <RefreshCw class={refreshing ? "animate-spin" : ""} />
+      </Button>
     </div>
   </div>
   <p class="text-sm text-muted-foreground">
@@ -410,7 +395,7 @@
   <section class="space-y-4">
     <h3 class="text-lg font-medium text-foreground">GPU</h3>
     {#if !hasGpuData}
-      <p class="text-muted-foreground card p-4">No GPU data available</p>
+      <p class="text-muted-foreground bg-card rounded-xl border p-4 shadow-sm">No GPU data available</p>
     {:else}
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <PerformanceChart

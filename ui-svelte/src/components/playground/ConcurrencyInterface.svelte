@@ -2,6 +2,7 @@
   import { models } from "../../stores/api";
   import { persistentStore } from "../../stores/persistent";
   import { streamChatCompletion } from "../../lib/chatApi";
+  import { Button } from "$lib/components/ui/button/index.js";
 
   type Status = "waiting" | "streaming" | "done" | "error";
   type Phase = "waiting" | "loading" | "reasoning" | "content";
@@ -366,22 +367,21 @@
     <!-- Run controls -->
     <div class="flex items-center gap-2">
       {#if isRunning}
-        <button class="btn bg-red-500 hover:bg-red-600 text-white border-red-500" onclick={stop}>
-          <span class="inline-block w-3 h-3 bg-white align-middle mr-2"></span>Stop
-        </button>
+        <Button variant="destructive" onclick={stop}>
+          <span class="mr-1 inline-block h-3 w-3 bg-current align-middle"></span>Stop
+        </Button>
       {:else}
-        <button
-          class="btn bg-primary text-primary-foreground hover:opacity-90"
+        <Button
           onclick={run}
           disabled={!canRun}
           title={$testListStore.length === 0 ? "Add models from the list below" : "Run concurrent requests"}
         >
-          <span class="inline-block align-middle mr-2" aria-hidden="true">▶</span>Go
-        </button>
+          <span class="mr-1 inline-block align-middle" aria-hidden="true">▶</span>Go
+        </Button>
       {/if}
-      <button class="btn btn--sm" onclick={clearAll} disabled={isRunning || $testListStore.length === 0}>
+      <Button variant="outline" size="sm" onclick={clearAll} disabled={isRunning || $testListStore.length === 0}>
         Clear ({$testListStore.length})
-      </button>
+      </Button>
     </div>
 
     <!-- Available models -->

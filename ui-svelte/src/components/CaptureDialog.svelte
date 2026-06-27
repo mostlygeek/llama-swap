@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ReqRespCapture } from "../lib/types";
+  import { Button } from "$lib/components/ui/button/index.js";
 
   interface Props {
     capture: ReqRespCapture | null;
@@ -198,7 +199,7 @@
   {#if capture}
     <div class="flex flex-col max-h-[90vh]">
       <div
-        class="flex justify-between items-center p-4 border-b border-card-border"
+        class="flex justify-between items-center p-4 border-b border-border"
       >
         <h2 class="text-xl font-bold pb-0">Capture #{capture.id + 1}{#if capture.req_path} <span class="text-base font-mono font-normal text-muted-foreground">{capture.req_path}</span>{/if}</h2>
         <button
@@ -218,12 +219,12 @@
             Request Headers
           </summary>
           <div
-            class="mt-2 bg-background rounded border border-card-border overflow-auto max-h-48"
+            class="mt-2 bg-background rounded border border-border overflow-auto max-h-48"
           >
             <table class="w-full text-sm">
               <tbody>
                 {#each Object.entries(capture.req_headers || {}) as [key, value]}
-                  <tr class="border-b border-card-border-inner last:border-0">
+                  <tr class="border-b border-border last:border-0">
                     <td class="px-3 py-1 font-mono text-primary whitespace-nowrap"
                       >{key}</td
                     >
@@ -271,14 +272,14 @@
               </button>
             </div>
             <div
-              class="mt-1 bg-background rounded border border-card-border overflow-auto max-h-96"
+              class="mt-1 bg-background rounded border border-border overflow-auto max-h-96"
             >
               <pre
                 class="p-3 text-sm font-mono whitespace-pre-wrap break-all">{displayedRequestBody}</pre>
             </div>
           {:else}
             <div
-              class="mt-2 bg-background rounded border border-card-border overflow-auto max-h-96"
+              class="mt-2 bg-background rounded border border-border overflow-auto max-h-96"
             >
               <pre class="p-3 text-sm font-mono whitespace-pre-wrap break-all"
                 >(empty)</pre
@@ -295,12 +296,12 @@
             Response Headers
           </summary>
           <div
-            class="mt-2 bg-background rounded border border-card-border overflow-auto max-h-48"
+            class="mt-2 bg-background rounded border border-border overflow-auto max-h-48"
           >
             <table class="w-full text-sm">
               <tbody>
                 {#each Object.entries(capture.resp_headers || {}) as [key, value]}
-                  <tr class="border-b border-card-border-inner last:border-0">
+                  <tr class="border-b border-border last:border-0">
                     <td class="px-3 py-1 font-mono text-primary whitespace-nowrap"
                       >{key}</td
                     >
@@ -321,7 +322,7 @@
           </summary>
           {#if isResponseImage && capture.resp_body}
             <div
-              class="mt-2 bg-background rounded border border-card-border overflow-auto max-h-96"
+              class="mt-2 bg-background rounded border border-border overflow-auto max-h-96"
             >
               <div class="p-3 flex justify-center">
                 <img
@@ -368,7 +369,7 @@
               </button>
             </div>
             <div
-              class="mt-1 bg-background rounded border border-card-border overflow-auto max-h-96"
+              class="mt-1 bg-background rounded border border-border overflow-auto max-h-96"
             >
               {#if respBodyTab === "chat"}
                 <div class="p-3 text-sm space-y-3">
@@ -407,7 +408,7 @@
             </div>
           {:else if responseBodyRaw}
             <div
-              class="mt-2 bg-background rounded border border-card-border overflow-auto max-h-96"
+              class="mt-2 bg-background rounded border border-border overflow-auto max-h-96"
             >
               <div class="p-3 text-sm text-muted-foreground italic">
                 (binary data - {responseContentType || "unknown content type"})
@@ -415,7 +416,7 @@
             </div>
           {:else}
             <div
-              class="mt-2 bg-background rounded border border-card-border overflow-auto max-h-96"
+              class="mt-2 bg-background rounded border border-border overflow-auto max-h-96"
             >
               <pre class="p-3 text-sm font-mono">(empty)</pre>
             </div>
@@ -423,8 +424,8 @@
         </details>
       </div>
 
-      <div class="p-4 border-t border-card-border flex justify-end">
-        <button onclick={() => dialogEl?.close()} class="btn"> Close </button>
+      <div class="p-4 border-t border-border flex justify-end">
+        <Button variant="outline" onclick={() => dialogEl?.close()}>Close</Button>
       </div>
     </div>
   {:else}
@@ -432,7 +433,7 @@
       <p class="text-lg text-muted-foreground">Capture not found</p>
       <p class="text-sm text-muted-foreground mt-1">The capture may have expired or was never recorded.</p>
       <div class="mt-4">
-        <button onclick={() => dialogEl?.close()} class="btn">Close</button>
+        <Button variant="outline" onclick={() => dialogEl?.close()}>Close</Button>
       </div>
     </div>
   {/if}
@@ -443,19 +444,19 @@
     padding: 2px 10px;
     font-size: 0.75rem;
     border-radius: 4px;
-    color: var(--color-txtsecondary);
+    color: var(--muted-foreground);
     cursor: pointer;
     border: 1px solid transparent;
     background: transparent;
     transition: all 0.15s;
   }
   .tab-btn:hover {
-    color: var(--color-txtmain);
-    background: var(--color-secondary);
+    color: var(--foreground);
+    background: var(--accent);
   }
   .tab-btn-active {
-    color: var(--color-primary);
-    background: color-mix(in srgb, var(--color-primary) 12%, transparent);
-    border-color: color-mix(in srgb, var(--color-primary) 25%, transparent);
+    color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
+    border-color: color-mix(in srgb, var(--primary) 25%, transparent);
   }
 </style>
