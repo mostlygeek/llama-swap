@@ -196,7 +196,7 @@
     <ModelSelector bind:value={$selectedModelStore} placeholder="Select an image model..." disabled={isGenerating} capabilities={["image_generation", "image_to_image"]} matchAny={true} />
 
     <select
-      class="px-3 py-2 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
+      class="px-3 py-2 rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary"
       bind:value={$apiModeStore}
       disabled={isGenerating}
     >
@@ -205,7 +205,7 @@
     </select>
 
     <select
-      class="px-3 py-2 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
+      class="px-3 py-2 rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary"
       bind:value={$selectedSizeStore}
       disabled={isGenerating}
     >
@@ -227,7 +227,7 @@
 
     {#if isSdapi}
       <button
-        class="px-3 py-2 rounded border border-gray-200 dark:border-white/10 bg-surface hover:bg-secondary-hover transition-colors"
+        class="px-3 py-2 rounded border border-border bg-background hover:bg-accent transition-colors"
         onclick={() => showSettings = !showSettings}
       >
         {showSettings ? "Hide Settings" : "Settings"}
@@ -237,23 +237,23 @@
 
   <!-- SDAPI Settings Panel -->
   {#if isSdapi && showSettings}
-    <div class="shrink-0 mb-4 p-4 rounded border border-gray-200 dark:border-white/10 bg-surface">
+    <div class="shrink-0 mb-4 p-4 rounded border border-border bg-background">
       <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
         <label class="flex flex-col gap-1">
-          <span class="text-xs text-txtsecondary">Steps</span>
+          <span class="text-xs text-muted-foreground">Steps</span>
           <input
             type="number"
-            class="px-2 py-1 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
+            class="px-2 py-1 rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary"
             bind:value={$sdStepsStore}
             min="1"
             max="150"
           />
         </label>
         <label class="flex flex-col gap-1">
-          <span class="text-xs text-txtsecondary">CFG Scale</span>
+          <span class="text-xs text-muted-foreground">CFG Scale</span>
           <input
             type="number"
-            class="px-2 py-1 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
+            class="px-2 py-1 rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary"
             bind:value={$sdCfgScaleStore}
             min="1"
             max="30"
@@ -261,28 +261,28 @@
           />
         </label>
         <label class="flex flex-col gap-1">
-          <span class="text-xs text-txtsecondary">Seed (-1 = random)</span>
+          <span class="text-xs text-muted-foreground">Seed (-1 = random)</span>
           <input
             type="number"
-            class="px-2 py-1 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
+            class="px-2 py-1 rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary"
             bind:value={$sdSeedStore}
             min="-1"
           />
         </label>
         <label class="flex flex-col gap-1">
-          <span class="text-xs text-txtsecondary">Batch Size</span>
+          <span class="text-xs text-muted-foreground">Batch Size</span>
           <input
             type="number"
-            class="px-2 py-1 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
+            class="px-2 py-1 rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary"
             bind:value={$sdBatchSizeStore}
             min="1"
             max="8"
           />
         </label>
         <label class="flex flex-col gap-1">
-          <span class="text-xs text-txtsecondary">Sampler</span>
+          <span class="text-xs text-muted-foreground">Sampler</span>
           <select
-            class="px-2 py-1 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
+            class="px-2 py-1 rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary"
             bind:value={$sdSamplerStore}
           >
             <option value="">Default</option>
@@ -301,9 +301,9 @@
           </select>
         </label>
         <label class="flex flex-col gap-1">
-          <span class="text-xs text-txtsecondary">Scheduler</span>
+          <span class="text-xs text-muted-foreground">Scheduler</span>
           <select
-            class="px-2 py-1 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
+            class="px-2 py-1 rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary"
             bind:value={$sdSchedulerStore}
           >
             <option value="">Auto for model</option>
@@ -317,9 +317,9 @@
       </div>
 
       <label class="flex flex-col gap-1 mb-3">
-        <span class="text-xs text-txtsecondary">Negative Prompt</span>
+        <span class="text-xs text-muted-foreground">Negative Prompt</span>
         <textarea
-          class="px-2 py-1 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary resize-y text-sm"
+          class="px-2 py-1 rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary resize-y text-sm"
           bind:value={$sdNegativePromptStore}
           rows="2"
           placeholder="Elements to avoid..."
@@ -328,10 +328,10 @@
 
       <!-- LoRA Selection -->
       <div>
-        <span class="text-xs text-txtsecondary block mb-1">LoRAs</span>
+        <span class="text-xs text-muted-foreground block mb-1">LoRAs</span>
         <div class="flex items-center gap-2 mb-2">
           <button
-            class="px-3 py-1.5 text-sm rounded border border-gray-200 dark:border-white/10 bg-surface hover:bg-secondary-hover transition-colors disabled:opacity-50"
+            class="px-3 py-1.5 text-sm rounded border border-border bg-background hover:bg-accent transition-colors disabled:opacity-50"
             onclick={loadLoras}
             disabled={!$selectedModelStore || isLoadingLoras}
           >
@@ -339,7 +339,7 @@
           </button>
           {#if lorasLoaded && availableLoras.length > 0}
             <select
-              class="flex-1 px-2 py-1.5 text-sm rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
+              class="flex-1 px-2 py-1.5 text-sm rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary"
               onchange={addLora}
             >
               <option value="">Add a LoRA...</option>
@@ -353,7 +353,7 @@
           <p class="text-xs text-red-500 mb-1">{loraError}</p>
         {/if}
         {#if lorasLoaded && availableLoras.length === 0}
-          <p class="text-xs text-txtsecondary">No LoRAs available</p>
+          <p class="text-xs text-muted-foreground">No LoRAs available</p>
         {/if}
         {#if selectedLoras.length > 0}
           <div class="flex flex-col gap-1.5">
@@ -362,7 +362,7 @@
                 <span class="flex-1 truncate">{getLoraName(lora.path)}</span>
                 <input
                   type="number"
-                  class="w-20 px-1.5 py-1 text-xs rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-1 focus:ring-primary"
+                  class="w-20 px-1.5 py-1 text-xs rounded border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
                   value={lora.multiplier}
                   oninput={(e) => updateLoraMultiplier(lora.path, parseFloat((e.target as HTMLInputElement).value) || 1)}
                   min="0"
@@ -370,7 +370,7 @@
                   step="0.1"
                 />
                 <button
-                  class="px-1.5 py-0.5 text-xs rounded border border-gray-200 dark:border-white/10 hover:bg-red-500 hover:text-white hover:border-red-500 transition-colors"
+                  class="px-1.5 py-0.5 text-xs rounded border border-border hover:bg-red-500 hover:text-white hover:border-red-500 transition-colors"
                   onclick={() => removeLora(lora.path)}
                   aria-label="Remove LoRA"
                 >
@@ -386,14 +386,14 @@
 
   <!-- Empty state for no models configured -->
   {#if !hasModels}
-    <div class="flex-1 flex items-center justify-center text-txtsecondary">
+    <div class="flex-1 flex items-center justify-center text-muted-foreground">
       <p>No models configured. Add models to your configuration to generate images.</p>
     </div>
   {:else}
     <!-- Image display area -->
-    <div class="flex-1 overflow-auto mb-4 flex items-center justify-center bg-surface border border-gray-200 dark:border-white/10 rounded">
+    <div class="flex-1 overflow-auto mb-4 flex items-center justify-center bg-background border border-border rounded">
       {#if isGenerating}
-        <div class="text-center text-txtsecondary">
+        <div class="text-center text-muted-foreground">
           <div class="inline-block w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mb-2"></div>
           <p>Generating image...</p>
         </div>
@@ -454,7 +454,7 @@
           </button>
         </div>
       {:else}
-        <div class="text-center text-txtsecondary">
+        <div class="text-center text-muted-foreground">
           <p>Enter a prompt below to generate an image</p>
         </div>
       {/if}
@@ -476,7 +476,7 @@
           </button>
         {:else}
           <button
-            class="btn bg-primary text-btn-primary-text hover:opacity-90 flex-1 md:flex-none"
+            class="btn bg-primary text-primary-foreground hover:opacity-90 flex-1 md:flex-none"
             onclick={generate}
             disabled={!prompt.trim() || !$selectedModelStore}
           >

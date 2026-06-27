@@ -150,14 +150,14 @@
 
   <!-- Empty state for no models configured -->
   {#if !hasModels}
-    <div class="flex-1 flex items-center justify-center text-txtsecondary">
+    <div class="flex-1 flex items-center justify-center text-muted-foreground">
       <p>No models configured. Add models to your configuration to transcribe audio.</p>
     </div>
   {:else}
     <!-- File upload / Result display area -->
-    <div class="flex-1 overflow-auto mb-4 flex items-center justify-center bg-surface border border-gray-200 dark:border-white/10 rounded">
+    <div class="flex-1 overflow-auto mb-4 flex items-center justify-center bg-background border border-border rounded">
       {#if isTranscribing}
-        <div class="text-center text-txtsecondary">
+        <div class="text-center text-muted-foreground">
           <div class="inline-block w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mb-2"></div>
           <p>Transcribing audio...</p>
         </div>
@@ -186,12 +186,12 @@
               {/if}
             </button>
           </div>
-          <div class="flex-1 overflow-auto p-3 rounded border border-gray-200 dark:border-white/10 bg-background whitespace-pre-wrap">
+          <div class="flex-1 overflow-auto p-3 rounded border border-border bg-background whitespace-pre-wrap">
             {transcriptionResult}
           </div>
         </div>
       {:else if selectedFile}
-        <div class="text-center text-txtsecondary p-4">
+        <div class="text-center text-muted-foreground p-4">
           <p class="font-medium mb-2">File Selected</p>
           <p class="text-sm">{selectedFile.name}</p>
           <p class="text-xs mt-1">{formatFileSize(selectedFile.size)}</p>
@@ -200,7 +200,7 @@
         <div
           role="region"
           aria-label="Audio file drop zone"
-          class="w-full h-full flex items-center justify-center text-center text-txtsecondary p-8 {isDragging ? 'bg-primary/10' : ''}"
+          class="w-full h-full flex items-center justify-center text-center text-muted-foreground p-8 {isDragging ? 'bg-primary/10' : ''}"
           ondragover={handleDragOver}
           ondragleave={handleDragLeave}
           ondrop={handleDrop}
@@ -237,7 +237,7 @@
         </button>
       {:else}
         <button
-          class="btn bg-primary text-btn-primary-text hover:opacity-90"
+          class="btn bg-primary text-primary-foreground hover:opacity-90"
           onclick={transcribe}
           disabled={!canTranscribe}
         >

@@ -209,7 +209,7 @@
     <ModelSelector bind:value={$selectedModelStore} placeholder="Select a speech model..." disabled={isGenerating} capabilities={["audio_speech"]} />
     <div class="flex gap-2">
       <select
-        class="shrink-0 px-3 py-2 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
+        class="shrink-0 px-3 py-2 rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary"
         value={$selectedVoiceStore}
         onchange={handleVoiceChange}
         disabled={isGenerating || isLoadingVoices || !$selectedModelStore}
@@ -243,14 +243,14 @@
 
   <!-- Empty state for no models configured -->
   {#if !hasModels}
-    <div class="flex-1 flex items-center justify-center text-txtsecondary">
+    <div class="flex-1 flex items-center justify-center text-muted-foreground">
       <p>No models configured. Add models to your configuration to generate speech.</p>
     </div>
   {:else}
     <!-- Audio display area -->
-    <div class="shrink-0 mb-4 bg-surface border border-gray-200 dark:border-white/10 rounded p-4 md:p-6">
+    <div class="shrink-0 mb-4 bg-background border border-border rounded p-4 md:p-6">
       {#if isGenerating}
-        <div class="flex items-center justify-center text-txtsecondary py-8">
+        <div class="flex items-center justify-center text-muted-foreground py-8">
           <div class="text-center">
             <div class="inline-block w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mb-2"></div>
             <p>Generating speech...</p>
@@ -267,7 +267,7 @@
         <div class="flex flex-col gap-4">
           <!-- Header with metadata and download -->
           <div class="flex items-center justify-between gap-4">
-            <div class="flex flex-wrap gap-3 text-sm text-txtsecondary">
+            <div class="flex flex-wrap gap-3 text-sm text-muted-foreground">
               {#if generatedVoice}
                 <span class="flex items-center gap-1">
                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -305,7 +305,7 @@
           </div>
         </div>
       {:else}
-        <div class="flex items-center justify-center text-txtsecondary py-8">
+        <div class="flex items-center justify-center text-muted-foreground py-8">
           <div class="text-center">
             <svg class="w-12 h-12 md:w-16 md:h-16 mx-auto mb-2 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>
@@ -332,7 +332,7 @@
           </button>
         {:else}
           <button
-            class="btn bg-primary text-btn-primary-text hover:opacity-90 flex-1 md:flex-none"
+            class="btn bg-primary text-primary-foreground hover:opacity-90 flex-1 md:flex-none"
             onclick={generate}
             disabled={!inputText.trim() || !$selectedModelStore}
           >

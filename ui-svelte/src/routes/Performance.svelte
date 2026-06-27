@@ -352,14 +352,14 @@
 
 <div class="space-y-6">
   <div class="flex items-center justify-between">
-    <h2 class="text-xl font-semibold text-txtmain">Performance (Experimental)</h2>
+    <h2 class="text-xl font-semibold text-foreground">Performance (Experimental)</h2>
     <div class="flex items-center gap-4">
       <div class="flex items-center gap-1">
         {#each WINDOWS as win, i}
           <button
             class="btn btn--sm"
             class:bg-primary={$selectedWindow === i}
-            class:text-btn-primary-text={$selectedWindow === i}
+            class:text-primary-foreground={$selectedWindow === i}
             onclick={() => ($selectedWindow = i)}
           >
             {win.label}
@@ -367,12 +367,12 @@
         {/each}
       </div>
       <div class="flex items-center gap-1">
-        <span class="text-xs text-txtsecondary mr-1">Refresh:</span>
+        <span class="text-xs text-muted-foreground mr-1">Refresh:</span>
         {#each INTERVALS as intv, i}
           <button
             class="btn btn--sm"
             class:bg-primary={$selectedInterval === i}
-            class:text-btn-primary-text={$selectedInterval === i}
+            class:text-primary-foreground={$selectedInterval === i}
             onclick={() => handleIntervalChange(i)}
           >
             {intv.label}
@@ -399,18 +399,18 @@
       </button>
     </div>
   </div>
-  <p class="text-sm text-txtsecondary">
+  <p class="text-sm text-muted-foreground">
     This is an experimental feature. Please use <a
-      class="underline hover:text-txtmain"
+      class="underline hover:text-foreground"
       href="https://github.com/mostlygeek/llama-swap/discussions/771">discussion #771</a
     > for instructions and to share feedback.
   </p>
 
   <!-- GPU Section -->
   <section class="space-y-4">
-    <h3 class="text-lg font-medium text-txtmain">GPU</h3>
+    <h3 class="text-lg font-medium text-foreground">GPU</h3>
     {#if !hasGpuData}
-      <p class="text-txtsecondary card p-4">No GPU data available</p>
+      <p class="text-muted-foreground card p-4">No GPU data available</p>
     {:else}
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <PerformanceChart
@@ -458,7 +458,7 @@
 
   <!-- System Section -->
   <section class="space-y-4">
-    <h3 class="text-lg font-medium text-txtmain">System</h3>
+    <h3 class="text-lg font-medium text-foreground">System</h3>
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <PerformanceChart
         title="CPU Utilization (%)"
@@ -479,15 +479,15 @@
           yLabel="%"
         />
         {#if latestMemSwap}
-          <div class="flex items-center justify-center gap-4 text-xs text-txtsecondary mt-1 px-4">
+          <div class="flex items-center justify-center gap-4 text-xs text-muted-foreground mt-1 px-4">
             <span
-              >Mem: <span class="text-txtmain font-medium"
+              >Mem: <span class="text-foreground font-medium"
                 >{latestMemSwap.mem_used_mb.toLocaleString()} / {latestMemSwap.mem_total_mb.toLocaleString()} MB ({latestMemSwap.mem_used_pct}%)</span
               ></span
             >
             {#if latestMemSwap.swap_used_pct !== null}
               <span
-                >Swap: <span class="text-txtmain font-medium"
+                >Swap: <span class="text-foreground font-medium"
                   >{latestMemSwap.swap_used_mb.toLocaleString()} / {latestMemSwap.swap_total_mb.toLocaleString()} MB ({latestMemSwap.swap_used_pct}%)</span
                 ></span
               >

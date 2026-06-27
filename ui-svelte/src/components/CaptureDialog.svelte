@@ -193,17 +193,17 @@
 <dialog
   bind:this={dialogEl}
   onclose={handleDialogClose}
-  class="bg-surface text-txtmain rounded-lg shadow-xl max-w-[80%] w-full max-h-[90vh] p-0 backdrop:bg-black/50 m-auto"
+  class="bg-background text-foreground rounded-lg shadow-xl max-w-[80%] w-full max-h-[90vh] p-0 backdrop:bg-black/50 m-auto"
 >
   {#if capture}
     <div class="flex flex-col max-h-[90vh]">
       <div
         class="flex justify-between items-center p-4 border-b border-card-border"
       >
-        <h2 class="text-xl font-bold pb-0">Capture #{capture.id + 1}{#if capture.req_path} <span class="text-base font-mono font-normal text-txtsecondary">{capture.req_path}</span>{/if}</h2>
+        <h2 class="text-xl font-bold pb-0">Capture #{capture.id + 1}{#if capture.req_path} <span class="text-base font-mono font-normal text-muted-foreground">{capture.req_path}</span>{/if}</h2>
         <button
           onclick={() => dialogEl?.close()}
-          class="text-txtsecondary hover:text-txtmain text-2xl leading-none"
+          class="text-muted-foreground hover:text-foreground text-2xl leading-none"
         >
           &times;
         </button>
@@ -213,7 +213,7 @@
         <!-- Request Headers -->
         <details class="group" open>
           <summary
-            class="cursor-pointer font-semibold text-sm uppercase tracking-wider text-txtsecondary hover:text-txtmain"
+            class="cursor-pointer font-semibold text-sm uppercase tracking-wider text-muted-foreground hover:text-foreground"
           >
             Request Headers
           </summary>
@@ -238,7 +238,7 @@
         <!-- Request Body -->
         <details class="group" open>
           <summary
-            class="cursor-pointer font-semibold text-sm uppercase tracking-wider text-txtsecondary hover:text-txtmain"
+            class="cursor-pointer font-semibold text-sm uppercase tracking-wider text-muted-foreground hover:text-foreground"
           >
             Request Body
           </summary>
@@ -290,7 +290,7 @@
         <!-- Response Headers -->
         <details class="group" open>
           <summary
-            class="cursor-pointer font-semibold text-sm uppercase tracking-wider text-txtsecondary hover:text-txtmain"
+            class="cursor-pointer font-semibold text-sm uppercase tracking-wider text-muted-foreground hover:text-foreground"
           >
             Response Headers
           </summary>
@@ -315,7 +315,7 @@
         <!-- Response Body -->
         <details class="group" open>
           <summary
-            class="cursor-pointer font-semibold text-sm uppercase tracking-wider text-txtsecondary hover:text-txtmain"
+            class="cursor-pointer font-semibold text-sm uppercase tracking-wider text-muted-foreground hover:text-foreground"
           >
             Response Body
           </summary>
@@ -375,19 +375,19 @@
                   {#if sseChat.reasoning}
                     <div>
                       <div
-                        class="text-xs font-semibold uppercase tracking-wider text-txtsecondary mb-1"
+                        class="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1"
                       >
                         Reasoning
                       </div>
                       <pre
-                        class="font-mono whitespace-pre-wrap break-all text-txtsecondary">{sseChat.reasoning}</pre>
+                        class="font-mono whitespace-pre-wrap break-all text-muted-foreground">{sseChat.reasoning}</pre>
                     </div>
                   {/if}
                   {#if sseChat.content}
                     <div>
                       {#if sseChat.reasoning}
                         <div
-                          class="text-xs font-semibold uppercase tracking-wider text-txtsecondary mb-1"
+                          class="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1"
                         >
                           Response
                         </div>
@@ -409,7 +409,7 @@
             <div
               class="mt-2 bg-background rounded border border-card-border overflow-auto max-h-96"
             >
-              <div class="p-3 text-sm text-txtsecondary italic">
+              <div class="p-3 text-sm text-muted-foreground italic">
                 (binary data - {responseContentType || "unknown content type"})
               </div>
             </div>
@@ -429,8 +429,8 @@
     </div>
   {:else}
     <div class="flex flex-col items-center justify-center p-12">
-      <p class="text-lg text-txtsecondary">Capture not found</p>
-      <p class="text-sm text-txtsecondary mt-1">The capture may have expired or was never recorded.</p>
+      <p class="text-lg text-muted-foreground">Capture not found</p>
+      <p class="text-sm text-muted-foreground mt-1">The capture may have expired or was never recorded.</p>
       <div class="mt-4">
         <button onclick={() => dialogEl?.close()} class="btn">Close</button>
       </div>
