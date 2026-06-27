@@ -4,6 +4,7 @@
   import { persistentStore } from "../stores/persistent";
   import LogPanel from "../components/LogPanel.svelte";
   import ResizablePanels from "../components/ResizablePanels.svelte";
+  import * as ToggleGroup from "$lib/components/ui/toggle-group/index.js";
 
   type ViewMode = "proxy" | "upstream" | "panels";
 
@@ -15,32 +16,17 @@
 </script>
 
 <div class="flex flex-col h-full w-full gap-2">
-  <div class="flex items-center gap-1">
-    <button
-      onclick={() => viewModeStore.set("panels")}
-      class:btn={true}
-      class:bg-primary={$viewModeStore === "panels"}
-      class:text-btn-primary-text={$viewModeStore === "panels"}
-    >
-      Both
-    </button>
-    <button
-      onclick={() => viewModeStore.set("proxy")}
-      class:btn={true}
-      class:bg-primary={$viewModeStore === "proxy"}
-      class:text-btn-primary-text={$viewModeStore === "proxy"}
-    >
-      Proxy
-    </button>
-    <button
-      onclick={() => viewModeStore.set("upstream")}
-      class:btn={true}
-      class:bg-primary={$viewModeStore === "upstream"}
-      class:text-btn-primary-text={$viewModeStore === "upstream"}
-    >
-      Upstream
-    </button>
-  </div>
+  <ToggleGroup.Root
+    type="single"
+    variant="outline"
+    value={$viewModeStore}
+    onValueChange={(v) => v && viewModeStore.set(v as ViewMode)}
+    class="justify-start"
+  >
+    <ToggleGroup.Item value="panels">Both</ToggleGroup.Item>
+    <ToggleGroup.Item value="proxy">Proxy</ToggleGroup.Item>
+    <ToggleGroup.Item value="upstream">Upstream</ToggleGroup.Item>
+  </ToggleGroup.Root>
 
   <div class="flex-1 w-full overflow-hidden">
     {#if $viewModeStore === "panels"}

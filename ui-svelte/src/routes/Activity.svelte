@@ -7,6 +7,9 @@
   import { persistentStore } from "../stores/persistent";
   import { onMount } from "svelte";
   import type { ReqRespCapture } from "../lib/types";
+  import { Columns3, GripVertical } from "@lucide/svelte";
+  import * as Card from "$lib/components/ui/card/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
 
   type ColumnKey = string;
 
@@ -219,46 +222,56 @@
     <ActivityStats />
   </div>
 
-  <div class="card overflow-auto relative min-h-[30rem]">
-    <div class="flex justify-end px-4" bind:this={dropdownContainer}>
+  <Card.Root class="relative min-h-[30rem] gap-0 overflow-auto py-2">
+    <div class="flex justify-end px-2" bind:this={dropdownContainer}>
       <div class="relative">
-        <button
-          class="w-8 h-8 flex items-center justify-center rounded hover:bg-secondary-hover transition-colors"
+        <Button
+          variant="ghost"
+          size="icon-sm"
           onclick={() => (columnsMenuOpen = !columnsMenuOpen)}
           title="Select columns"
         >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path>
-          </svg>
-        </button>
+          <Columns3 />
+        </Button>
         {#if columnsMenuOpen}
-          <div class="absolute right-0 top-full mt-1 bg-surface border border-gray-200 dark:border-white/10 rounded shadow-lg z-10 py-1 min-w-[16rem]" role="list">
-            <div class="px-3 py-2 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-white/10" role="presentation">
+          <div
+            class="bg-popover text-popover-foreground absolute right-0 top-full z-20 mt-1 min-w-[16rem] rounded-md border py-1 shadow-md"
+            role="list"
+          >
+            <div
+              class="text-muted-foreground border-b px-3 py-2 text-xs font-medium uppercase tracking-wider"
+              role="presentation"
+            >
               Columns
             </div>
             {#each orderedColumns as col (col.key)}
               {@const key = col.key}
               <div
-                class="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-secondary-hover transition-colors {dragOverKey === key && dragKey !== key ? 'bg-primary/10 ring-1 ring-primary/40' : ''} {dragKey === key ? 'opacity-40' : ''}"
+                class="hover:bg-accent flex items-center gap-2 px-3 py-1.5 text-sm transition-colors {dragOverKey ===
+                  key && dragKey !== key
+                  ? 'bg-primary/10 ring-primary/40 ring-1'
+                  : ''} {dragKey === key ? 'opacity-40' : ''}"
                 role="listitem"
                 ondragover={(e) => handleDragOver(e, key)}
                 ondrop={(e) => handleDrop(e, key)}
               >
                 <span
-                  class="text-txtsecondary select-none cursor-grab"
+                  class="text-muted-foreground flex cursor-grab select-none"
                   draggable={true}
                   role="button"
                   tabindex="-1"
                   aria-label="Drag to reorder {col.label}"
                   ondragstart={(e) => handleDragStart(e, key)}
                   ondragend={handleDragEnd}
-                >⋮⋮</span>
-                <label class="flex items-center gap-2 flex-1 cursor-pointer">
+                >
+                  <GripVertical class="size-4" />
+                </span>
+                <label class="flex flex-1 cursor-pointer items-center gap-2">
                   <input
                     type="checkbox"
                     checked={isColumnVisible(key)}
                     onchange={() => toggleColumn(key)}
-                    class="rounded"
+                    class="accent-primary rounded"
                   />
                   {col.label}
                 </label>
@@ -269,11 +282,11 @@
       </div>
     </div>
 
-    <table class="min-w-full divide-y">
-      <thead class="border-gray-200 dark:border-white/10">
-        <tr class="text-left text-xs uppercase tracking-wider">
+    <table class="min-w-full">
+      <thead>
+        <tr class="text-muted-foreground border-b text-left text-xs uppercase tracking-wider">
           {#each activeVisibleColumns as key (key)}
-            <th class="px-6 py-3">
+            <th class="px-6 py-3 font-medium">
               {#if key === "cached"}
                 Cached <Tooltip content="prompt tokens from cache" />
               {:else if key === "prompt"}
@@ -287,16 +300,16 @@
           {/each}
         </tr>
       </thead>
-      <tbody class="divide-y">
+      <tbody>
         {#if sortedMetrics.length === 0}
           <tr>
-            <td colspan={activeVisibleColumns.length} class="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+            <td colspan={activeVisibleColumns.length} class="text-muted-foreground px-6 py-8 text-center text-sm">
               No activity recorded
             </td>
           </tr>
         {:else}
           {#each sortedMetrics as metric (metric.id)}
-            <tr class="whitespace-nowrap text-sm border-gray-200 dark:border-white/10">
+            <tr class="hover:bg-muted/50 whitespace-nowrap border-b text-sm transition-colors">
               {#each activeVisibleColumns as key (key)}
                 <td class="px-6 py-4">
                   {#if key === "id"}
@@ -309,7 +322,7 @@
                     {metric.req_path || "-"}
                   {:else if key === "resp_status_code"}
                     {#if metric.error_msg}
-                      <span class="text-red-500 dark:text-red-400 cursor-help" title={metric.error_msg}>
+                      <span class="text-destructive cursor-help" title={metric.error_msg}>
                         {metric.resp_status_code || "-"}
                       </span>
                     {:else}
@@ -333,23 +346,24 @@
                     {formatDuration(metric.duration_ms)}
                   {:else if key === "capture"}
                     {#if metric.has_capture}
-                      <button
+                      <Button
+                        variant="outline"
+                        size="xs"
                         onclick={() => viewCapture(metric.id)}
                         disabled={loadingCaptureId === metric.id}
-                        class="btn btn--sm"
                       >
                         {loadingCaptureId === metric.id ? "..." : "View"}
-                      </button>
+                      </Button>
                     {:else}
-                      <span class="text-txtsecondary">-</span>
+                      <span class="text-muted-foreground">-</span>
                     {/if}
                   {:else if key === "meta"}
                     {#if Object.keys(metric.metadata || {}).length > 0}
                       <MetadataTooltip metadata={metric.metadata}>
-                        <span class="cursor-help text-txtsecondary hover:text-txtmain">...</span>
+                        <span class="text-muted-foreground hover:text-foreground cursor-help">...</span>
                       </MetadataTooltip>
                     {:else}
-                      <span class="text-txtsecondary">-</span>
+                      <span class="text-muted-foreground">-</span>
                     {/if}
                   {:else}
                     -
@@ -361,7 +375,7 @@
         {/if}
       </tbody>
     </table>
-  </div>
+  </Card.Root>
 </div>
 
 <CaptureDialog capture={selectedCapture} open={dialogOpen} onclose={closeDialog} />
