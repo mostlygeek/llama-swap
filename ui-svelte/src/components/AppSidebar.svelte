@@ -1,12 +1,14 @@
 <script lang="ts">
   import { link } from "svelte-spa-router";
-  import { House, Boxes, Activity, ScrollText, Gauge, Sun, Moon, Monitor } from "@lucide/svelte";
+  import { House, Boxes, Activity, ScrollText, Gauge, Sun, Moon, Monitor, ChevronRight } from "@lucide/svelte";
   import * as Sidebar from "$lib/components/ui/sidebar/index.js";
+  import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { toggleTheme, themeMode, appTitle } from "../stores/theme";
   import { currentRoute } from "../stores/route";
   import { playgroundActivity } from "../stores/playgroundActivity";
   import { performanceEnabled } from "../stores/api";
+  import { selectedPlaygroundTab, playgroundTabs, playgroundMenuOpen } from "../stores/playground";
   import ConnectionStatus from "./ConnectionStatus.svelte";
 
   function handleTitleChange(newTitle: string): void {
@@ -55,16 +57,51 @@
   <Sidebar.Content>
     <Sidebar.Group>
       <Sidebar.GroupContent>
-        <Sidebar.Menu>
+        <Sidebar.Menu class="gap-1">
           <Sidebar.MenuItem>
-            <Sidebar.MenuButton isActive={isActive("/", $currentRoute)} tooltipContent="Playground">
-              {#snippet child({ props })}
-                <a href="/" use:link {...props}>
-                  <House />
-                  <span class={$playgroundActivity ? "activity-link" : ""}>Playground</span>
-                </a>
-              {/snippet}
-            </Sidebar.MenuButton>
+            <Collapsible.Root
+              open={$playgroundMenuOpen}
+              onOpenChange={(v) => playgroundMenuOpen.set(v)}
+              class="gap-0"
+            >
+              <Collapsible.Trigger>
+                {#snippet child({ props })}
+                  <Sidebar.MenuButton
+                    {...props}
+                    isActive={isActive("/", $currentRoute)}
+                    tooltipContent="Playground"
+                  >
+                    <House />
+                    <span class={$playgroundActivity ? "activity-link" : ""}>Playground</span>
+                    <ChevronRight
+                      class="ml-auto transition-transform duration-200 {$playgroundMenuOpen ? 'rotate-90' : ''}"
+                    />
+                  </Sidebar.MenuButton>
+                {/snippet}
+              </Collapsible.Trigger>
+              <Collapsible.Content>
+                <Sidebar.MenuSub>
+                  {#each playgroundTabs as tab (tab.id)}
+                    <Sidebar.MenuSubItem>
+                      <Sidebar.MenuSubButton
+                        isActive={isActive("/", $currentRoute) && $selectedPlaygroundTab === tab.id}
+                      >
+                        {#snippet child({ props })}
+                          <a
+                            href="/"
+                            use:link
+                            {...props}
+                            onclick={() => selectedPlaygroundTab.set(tab.id)}
+                          >
+                            <span>{tab.label}</span>
+                          </a>
+                        {/snippet}
+                      </Sidebar.MenuSubButton>
+                    </Sidebar.MenuSubItem>
+                  {/each}
+                </Sidebar.MenuSub>
+              </Collapsible.Content>
+            </Collapsible.Root>
           </Sidebar.MenuItem>
 
           <Sidebar.MenuItem>

@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { persistentStore } from "../stores/persistent";
   import ChatInterface from "../components/playground/ChatInterface.svelte";
   import ImageInterface from "../components/playground/ImageInterface.svelte";
   import AudioInterface from "../components/playground/AudioInterface.svelte";
@@ -7,52 +6,28 @@
   import RerankInterface from "../components/playground/RerankInterface.svelte";
   import ConcurrencyInterface from "../components/playground/ConcurrencyInterface.svelte";
   import * as Card from "$lib/components/ui/card/index.js";
-  import * as Tabs from "$lib/components/ui/tabs/index.js";
-
-  type Tab = "chat" | "images" | "speech" | "audio" | "rerank" | "concurrency";
-
-  const selectedTabStore = persistentStore<Tab>("playground-selected-tab", "chat");
-
-  const tabs: { id: Tab; label: string }[] = [
-    { id: "chat", label: "Chat" },
-    { id: "images", label: "Images" },
-    { id: "speech", label: "Speech" },
-    { id: "audio", label: "Transcription" },
-    { id: "rerank", label: "Rerank" },
-    { id: "concurrency", label: "Load Test" },
-  ];
+  import { selectedPlaygroundTab } from "../stores/playground";
 </script>
 
 <Card.Root class="flex h-full flex-col gap-0 overflow-hidden p-4">
-  <!-- Tab navigation: triggers update the store; content stays mounted to preserve state -->
-  <div class="mb-4 shrink-0">
-    <Tabs.Root bind:value={() => $selectedTabStore, (v) => selectedTabStore.set(v as Tab)}>
-      <Tabs.List class="h-auto flex-wrap">
-        {#each tabs as tab (tab.id)}
-          <Tabs.Trigger value={tab.id}>{tab.label}</Tabs.Trigger>
-        {/each}
-      </Tabs.List>
-    </Tabs.Root>
-  </div>
-
-  <!-- Tab content (all interfaces stay mounted) -->
+  <!-- Tab content (all interfaces stay mounted); navigation via the sidebar -->
   <div class="relative flex-1 overflow-hidden">
-    <div class="h-full" class:hidden={$selectedTabStore !== "chat"}>
+    <div class="h-full" class:hidden={$selectedPlaygroundTab !== "chat"}>
       <ChatInterface />
     </div>
-    <div class="h-full" class:hidden={$selectedTabStore !== "images"}>
+    <div class="h-full" class:hidden={$selectedPlaygroundTab !== "images"}>
       <ImageInterface />
     </div>
-    <div class="h-full" class:hidden={$selectedTabStore !== "speech"}>
+    <div class="h-full" class:hidden={$selectedPlaygroundTab !== "speech"}>
       <SpeechInterface />
     </div>
-    <div class="h-full" class:hidden={$selectedTabStore !== "audio"}>
+    <div class="h-full" class:hidden={$selectedPlaygroundTab !== "audio"}>
       <AudioInterface />
     </div>
-    <div class="h-full" class:hidden={$selectedTabStore !== "rerank"}>
+    <div class="h-full" class:hidden={$selectedPlaygroundTab !== "rerank"}>
       <RerankInterface />
     </div>
-    <div class="h-full" class:hidden={$selectedTabStore !== "concurrency"}>
+    <div class="h-full" class:hidden={$selectedPlaygroundTab !== "concurrency"}>
       <ConcurrencyInterface />
     </div>
   </div>

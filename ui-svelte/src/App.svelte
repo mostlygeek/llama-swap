@@ -13,6 +13,7 @@
   import { enableAPIEvents, checkPerformanceEnabled } from "./stores/api";
   import { initScreenWidth, initSystemThemeListener, isDarkMode, appTitle, connectionState } from "./stores/theme";
   import { currentRoute } from "./stores/route";
+  import { selectedPlaygroundTab, playgroundTabs } from "./stores/playground";
 
   const routes = {
     "/": PlaygroundStub,
@@ -31,7 +32,13 @@
     "/performance": "Performance",
   };
 
-  let sectionTitle = $derived(routeTitles[$currentRoute] ?? "Playground");
+  let sectionTitle = $derived.by(() => {
+    if ($currentRoute === "/") {
+      const tab = playgroundTabs.find((t) => t.id === $selectedPlaygroundTab);
+      return `Playground / ${tab?.label ?? ""}`;
+    }
+    return routeTitles[$currentRoute] ?? "Playground";
+  });
 
   function handleRouteLoaded(event: { detail: { route: string | RegExp } }) {
     const route = event.detail.route;
