@@ -1,100 +1,184 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 @import "katex/dist/katex.min.css";
-@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
 
-@theme {
-  --color-background: rgba(252, 252, 249, 1);
-  --color-surface: rgba(255, 255, 253, 1);
+@custom-variant dark (&:is(.dark *));
 
-  /* text colors */
-  --color-txtmain: rgba(19, 52, 59, 1);
-  --color-txtsecondary: rgba(98, 108, 113, 1);
-  --color-navlink-active: rgba(245, 245, 245, 1);
+:root {
+  --radius: 0.625rem;
 
-  --color-primary: rgba(50, 184, 198, 1);
+  /* shadcn base palette (zinc) */
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.141 0.005 285.823);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.141 0.005 285.823);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.141 0.005 285.823);
 
-  --color-primary-hover: rgba(29, 116, 128, 1);
-  --color-primary-active: rgba(26, 104, 115, 1);
-  --color-secondary: rgba(94, 82, 64, 0.12);
-  --color-secondary-hover: rgba(94, 82, 64, 0.2);
-  --color-secondary-active: rgba(94, 82, 64, 0.25);
-  --color-border: rgba(94, 82, 64, 0.3);
-  --color-btn-primary-text: rgba(252, 252, 249, 1);
-  --color-card-border: rgba(94, 82, 64, 0.12);
-  --color-card-border-inner: rgba(94, 82, 64, 0.12);
-  --color-error: rgba(192, 21, 47, 1);
-  --color-success: rgba(33, 128, 141, 1);
-  --color-warning: rgb(244, 155, 0);
-  --color-info: rgba(98, 108, 113, 1);
-  --color-focus-ring: rgba(33, 128, 141, 0.4);
-  --color-select-caret: rgba(19, 52, 59, 0.8);
-  --color-btn-border: rgba(94, 82, 64, 0.7);
+  /* brand accent: llama-swap teal */
+  --primary: rgb(50 184 198);
+  --primary-foreground: oklch(0.985 0 0);
+
+  --secondary: oklch(0.967 0.001 286.375);
+  --secondary-foreground: oklch(0.21 0.006 285.885);
+  --muted: oklch(0.967 0.001 286.375);
+  --muted-foreground: oklch(0.552 0.016 285.938);
+  --accent: oklch(0.967 0.001 286.375);
+  --accent-foreground: oklch(0.21 0.006 285.885);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.92 0.004 286.32);
+  --input: oklch(0.92 0.004 286.32);
+  --ring: rgb(50 184 198);
+
+  --chart-1: rgb(50 184 198);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.141 0.005 285.823);
+  --sidebar-primary: rgb(50 184 198);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.967 0.001 286.375);
+  --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
+  --sidebar-border: oklch(0.92 0.004 286.32);
+  --sidebar-ring: rgb(50 184 198);
+
+  /* semantic status colors (shared light/dark-aware below) */
+  --success: oklch(0.6 0.118 184.704);
+  --warning: oklch(0.769 0.17 70.08);
+  --info: oklch(0.552 0.016 285.938);
 }
 
-@layer theme {
-  /* over ride theme for dark mode */
-  [data-theme="dark"] {
-    --color-background: rgba(31, 33, 33, 1);
-    --color-surface: rgba(38, 40, 40, 1);
-    /* text colors */
-    --color-txtmain: rgba(245, 245, 245, 1);
-    --color-txtsecondary: rgba(167, 169, 169, 0.7);
+.dark {
+  --background: oklch(0.141 0.005 285.823);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.21 0.006 285.885);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.21 0.006 285.885);
+  --popover-foreground: oklch(0.985 0 0);
 
-    --color-navlink-active: rgba(245, 245, 245, 1);
+  /* brand accent: deeper teal for dark surfaces */
+  --primary: rgb(45 166 178);
+  --primary-foreground: oklch(0.141 0.005 285.823);
 
-    --color-primary: rgba(33, 128, 141, 1);
-    --color-primary-hover: rgba(45, 166, 178, 1);
-    --color-primary-active: rgba(41, 150, 161, 1);
-    --color-secondary: rgba(119, 124, 124, 0.15);
-    --color-secondary-hover: rgba(119, 124, 124, 0.25);
-    --color-secondary-active: rgba(119, 124, 124, 0.3);
-    --color-border: rgba(119, 124, 124, 0.3);
-    --color-error: rgba(255, 84, 89, 1);
-    --color-success: rgba(50, 184, 198, 1);
-    --color-warning: rgb(244, 155, 0);
-    --color-info: rgba(167, 169, 169, 1);
-    --color-focus-ring: rgba(50, 184, 198, 0.4);
-    --color-btn-primary-text: rgba(19, 52, 59, 1);
-    --color-card-border: rgba(119, 124, 124, 0.2);
-    --color-card-border-inner: rgba(119, 124, 124, 0.15);
-    --shadow-inset-sm: inset 0 1px 0 rgba(255, 255, 255, 0.1), inset 0 -1px 0 rgba(0, 0, 0, 0.15);
-    --button-border-secondary: rgba(119, 124, 124, 0.2);
-  }
+  --secondary: oklch(0.274 0.006 286.033);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.274 0.006 286.033);
+  --muted-foreground: oklch(0.705 0.015 286.067);
+  --accent: oklch(0.274 0.006 286.033);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: rgb(50 184 198);
+
+  --chart-1: rgb(50 184 198);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+
+  --sidebar: oklch(0.21 0.006 285.885);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: rgb(50 184 198);
+  --sidebar-primary-foreground: oklch(0.141 0.005 285.823);
+  --sidebar-accent: oklch(0.274 0.006 286.033);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: rgb(50 184 198);
+
+  --success: oklch(0.696 0.17 162.48);
+  --warning: oklch(0.769 0.17 70.08);
+  --info: oklch(0.705 0.015 286.067);
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-error: var(--destructive);
+
+  /* legacy aliases (transitional — removed as views migrate) */
+  --color-surface: var(--card);
+  --color-txtmain: var(--foreground);
+  --color-txtsecondary: var(--muted-foreground);
+  --color-navlink-active: var(--primary-foreground);
+  --color-card-border: var(--border);
+  --color-card-border-inner: var(--border);
+  --color-btn-border: var(--border);
+  --color-btn-primary-text: var(--primary-foreground);
 }
 
 @layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
   body {
-    /* example of how colors using theme colors*/
-    @apply bg-background text-txtmain;
+    @apply bg-background text-foreground;
   }
 
   h1 {
-    @apply text-4xl text-txtmain font-bold pb-4;
+    @apply text-3xl font-bold tracking-tight pb-4;
   }
   h2 {
-    @apply text-3xl text-txtmain font-bold pb-4;
+    @apply text-2xl font-bold tracking-tight pb-4;
   }
   h3 {
-    @apply text-2xl text-txtmain font-bold pb-4;
+    @apply text-xl font-semibold tracking-tight pb-4;
   }
   h4 {
-    @apply text-xl text-txtmain font-bold pb-4;
+    @apply text-lg font-semibold pb-4;
   }
   h5 {
-    @apply text-lg text-txtmain font-bold pb-4;
+    @apply text-base font-semibold pb-4;
   }
   h6 {
-    @apply text-base text-txtmain font-bold pb-4;
+    @apply text-sm font-semibold pb-4;
   }
 }
 
-/* define CSS classes here for specific types of components */
+/* Transitional component classes — kept until all views move to shadcn primitives. */
 @layer components {
-  .container {
-    @apply px-4;
-  }
-
-  /* Tables */
   table th {
     @apply p-2 font-semibold;
   }
@@ -102,77 +186,67 @@
     @apply p-2;
   }
 
-  /* Navigation Header */
-
   .navlink {
-    @apply text-txtsecondary hover:bg-secondary hover:text-txtmain rounded-lg p-2;
+    @apply text-muted-foreground hover:bg-accent hover:text-foreground rounded-lg p-2;
   }
   .navlink.active {
-    @apply bg-primary text-navlink-active;
+    @apply bg-primary text-primary-foreground;
   }
 
-  /* Card component */
   .card {
-    @apply bg-surface rounded-lg border border-card-border shadow-sm overflow-hidden p-4;
+    @apply bg-card text-card-foreground rounded-xl border shadow-sm overflow-hidden p-4;
   }
-
-  .card:hover {
-    @apply shadow-md;
-  }
-
   .card__body {
     @apply p-4;
   }
-
   .card__header,
   .card__footer {
-    @apply p-4 border-b border-card-border-inner;
+    @apply p-4 border-b;
   }
 
-  /* Status Badges */
   .status {
-    @apply inline-block px-2 py-1 text-xs font-medium rounded-lg;
+    @apply inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md;
   }
-
   .status--ready {
     @apply bg-success/10 text-success;
   }
-
   .status--starting,
   .status--stopping,
   .status--queued {
     @apply bg-warning/10 text-warning;
   }
-
   .status--stopped {
-    @apply bg-error/10 text-error;
+    @apply bg-destructive/10 text-destructive;
   }
 
-  /* Buttons */
   .btn {
-    @apply bg-surface py-2 px-4 text-sm rounded-md border transition-colors duration-200 border-btn-border;
+    @apply bg-background py-2 px-4 text-sm rounded-md border transition-colors duration-200;
   }
-
   .btn:hover {
-    cursor: pointer;
+    @apply bg-muted cursor-pointer;
   }
-
   .btn--sm {
     @apply px-2 py-0.5 text-xs;
   }
-
   .btn:disabled {
     @apply opacity-50 cursor-not-allowed;
   }
 }
 
-@layer utilities {
-  .ml-2 {
-    margin-left: 0.5rem;
-  }
+@utility activity-link {
+  background: linear-gradient(90deg, #6366f1, #8b5cf6, #a855f7, #8b5cf6, #6366f1);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: gradient-shift 2s linear infinite;
+}
 
-  .my-8 {
-    margin-top: 2rem;
-    margin-bottom: 2rem;
+@keyframes gradient-shift {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
   }
 }

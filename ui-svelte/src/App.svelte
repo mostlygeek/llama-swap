@@ -27,7 +27,7 @@
   }
 
   $effect(() => {
-    document.documentElement.setAttribute("data-theme", $isDarkMode ? "dark" : "light");
+    document.documentElement.classList.toggle("dark", $isDarkMode);
   });
 
   $effect(() => {
