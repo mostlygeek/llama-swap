@@ -19,7 +19,7 @@
 
 {#if hasModels}
   <select
-    class="min-w-0 flex-1 basis-48 px-3 py-2 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
+    class="border-input bg-background focus-visible:border-ring focus-visible:ring-ring/50 dark:bg-input/30 min-w-0 flex-1 basis-48 rounded-md border px-3 py-2 text-sm shadow-xs transition-[color,box-shadow] outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50"
     bind:value
     {disabled}
   >
