@@ -20,18 +20,26 @@ git fetch --depth=1 origin "${COMMIT_HASH}"
 git checkout FETCH_HEAD
 
 # Apply local patches to llama.cpp before building.
-# Each patch is tried with --check first; if upstream has already merged the
-# fix the patch won't apply cleanly and we skip it rather than failing the build.
+# Each patch undergoes a two-stage check:
+#   1. Forward check passes  → apply the patch; abort if the apply itself fails.
+#   2. Forward check fails + reverse check passes → fix is already in source; skip safely.
+#   3. Both checks fail      → patch is malformed or context-mismatched; abort visibly.
+# stderr from the forward check is shown in the build log to aid diagnosis.
 PATCH_DIR="/build/patches"
 if [ -d "${PATCH_DIR}" ]; then
     for patch in "${PATCH_DIR}"/*.patch; do
         [ -f "${patch}" ] || continue
-        echo "=== Checking patch: $(basename "${patch}") ==="
-        if git apply --check "${patch}" 2>/dev/null; then
-            git apply "${patch}"
+        name=$(basename "${patch}")
+        echo "=== Checking patch: ${name} ==="
+        if git apply --check "${patch}" 2>&1; then
+            git apply "${patch}" || { echo "FATAL: ${name} failed to apply" >&2; exit 1; }
             echo "    Applied."
+        elif git apply --check --reverse "${patch}" 2>/dev/null; then
+            echo "    Fix already present upstream — skipping safely."
         else
-            echo "    Already merged upstream or does not apply — skipping."
+            echo "FATAL: ${name} did not apply and cannot be confirmed as already merged." >&2
+            echo "       The patch is likely malformed or mismatched against this llama.cpp commit." >&2
+            exit 1
         fi
     done
 fi
