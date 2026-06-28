@@ -76,9 +76,9 @@
       <Sidebar.GroupContent>
         <Sidebar.Menu class="gap-1">
           <Sidebar.MenuItem>
-            <Sidebar.MenuButton isActive={isActive("/activity", $currentRoute)} tooltipContent="Activity">
+            <Sidebar.MenuButton isActive={$currentRoute === "/" || isActive("/activity", $currentRoute)} tooltipContent="Activity">
               {#snippet child({ props })}
-                <a href="/activity" use:link {...props}>
+                <a href="/" use:link {...props}>
                   <Activity />
                   <span>Activity</span>
                 </a>
@@ -87,9 +87,9 @@
           </Sidebar.MenuItem>
 
           <Sidebar.MenuItem>
-            <Sidebar.MenuButton isActive={isActive("/", $currentRoute)} tooltipContent="Playground">
+            <Sidebar.MenuButton isActive={isActive("/playground", $currentRoute)} tooltipContent="Playground">
               {#snippet child({ props })}
-                <a href="/" use:link {...props}>
+                <a href="/playground" use:link {...props}>
                   <FerrisWheel />
                   <span class={$playgroundActivity ? "activity-link" : ""}>Playground</span>
                 </a>

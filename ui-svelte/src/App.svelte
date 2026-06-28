@@ -19,18 +19,20 @@
   import { selectedPlaygroundTab, playgroundTabs } from "./stores/playground";
 
   const routes = {
-    "/": PlaygroundStub,
+    "/": Activity,
+    "/playground": PlaygroundStub,
     "/models": ModelsDash,
     "/models/:id": ModelDetail,
     "/logs": LogViewer,
     "/activity": Activity,
     "/settings": Settings,
     "/performance": Performance,
-    "*": PlaygroundStub,
+    "*": Activity,
   };
 
   const routeTitles: Record<string, string> = {
-    "/": "Playground",
+    "/": "Activity",
+    "/playground": "Playground",
     "/models": "Models",
     "/activity": "Activity",
     "/logs": "Logs",
@@ -39,7 +41,7 @@
   };
 
   let sectionTitle = $derived.by(() => {
-    if ($currentRoute === "/") {
+    if ($currentRoute === "/playground") {
       const tab = playgroundTabs.find((t) => t.id === $selectedPlaygroundTab);
       return `Playground / ${tab?.label ?? ""}`;
     }
@@ -50,7 +52,7 @@
     if ($currentRoute === "/models") {
       return "Models";
     }
-    return routeTitles[$currentRoute] ?? "Playground";
+    return routeTitles[$currentRoute] ?? "Activity";
   });
 
   function handleRouteLoaded(event: { detail: { route: string | RegExp; location?: string } }) {
@@ -97,10 +99,10 @@
       </header>
 
       <main class="min-h-0 flex-1 overflow-auto p-4">
-        <div class="h-full" class:hidden={$currentRoute !== "/"}>
+        <div class="h-full" class:hidden={$currentRoute !== "/playground"}>
           <Playground />
         </div>
-        <div class="h-full" class:hidden={$currentRoute === "/"}>
+        <div class="h-full" class:hidden={$currentRoute === "/playground"}>
           <Router {routes} on:routeLoaded={handleRouteLoaded} />
         </div>
       </main>
