@@ -1,20 +1,17 @@
 <script lang="ts">
   import { link } from "svelte-spa-router";
-  import { House, Boxes, Activity, ScrollText, Gauge, Sun, Moon, Monitor, ChevronRight, Play, PowerOff, Loader2 } from "@lucide/svelte";
+  import { House, Boxes, Activity, ScrollText, Gauge, Sun, Moon, Monitor, ChevronRight } from "@lucide/svelte";
   import * as Sidebar from "$lib/components/ui/sidebar/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { toggleTheme, themeMode, appTitle } from "../stores/theme";
   import { currentRoute } from "../stores/route";
   import { playgroundActivity } from "../stores/playgroundActivity";
-  import { performanceEnabled, models, loadModel, unloadSingleModel } from "../stores/api";
+  import { performanceEnabled, models } from "../stores/api";
   import { selectedPlaygroundTab, playgroundTabs, playgroundMenuOpen } from "../stores/playground";
   import { modelsMenuOpen } from "../stores/sidebar";
   import type { Model } from "../lib/types";
   import ConnectionStatus from "./ConnectionStatus.svelte";
-
-  let pendingLoads = $state<Record<string, boolean>>({});
-  const loadControllers = new Map<string, AbortController>();
 
   function handleTitleChange(newTitle: string): void {
     const sanitized = newTitle.replace(/\n/g, "").trim().substring(0, 64) || "llama-swap";
@@ -41,7 +38,6 @@
 
   type DotColor = "grey" | "yellow" | "green";
   function statusDotColor(model: Model): DotColor {
-    if (pendingLoads[model.id] && model.state === "stopped") return "yellow";
     if (model.state === "ready") return "green";
     if (model.state === "starting" || model.state === "stopping") return "yellow";
     return "grey";
@@ -52,37 +48,6 @@
     yellow: "bg-warning",
     green: "bg-success",
   };
-
-  async function handleLoadModel(modelId: string): Promise<void> {
-    if (pendingLoads[modelId]) return;
-    const controller = new AbortController();
-    loadControllers.set(modelId, controller);
-    pendingLoads[modelId] = true;
-    try {
-      await loadModel(modelId, controller.signal);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      loadControllers.delete(modelId);
-      delete pendingLoads[modelId];
-    }
-  }
-
-  function cancelLoad(modelId: string): void {
-    loadControllers.get(modelId)?.abort();
-  }
-
-  function onToggleLoad(e: MouseEvent, model: Model): void {
-    e.preventDefault();
-    e.stopPropagation();
-    if (model.state === "stopped" && pendingLoads[model.id]) {
-      cancelLoad(model.id);
-    } else if (model.state === "stopped") {
-      handleLoadModel(model.id);
-    } else if (model.state === "ready") {
-      unloadSingleModel(model.id);
-    }
-  }
 </script>
 
 <Sidebar.Root collapsible="icon">
@@ -118,7 +83,7 @@
                 {#snippet child({ props })}
                   <Sidebar.MenuButton
                     {...props}
-                    isActive={isActive("/models", $currentRoute)}
+                    isActive={$currentRoute.startsWith("/models")}
                     tooltipContent="Models"
                   >
                     <Boxes />
@@ -134,30 +99,12 @@
                   {#each $models as model (model.id)}
                     <Sidebar.MenuSubItem>
                       <Sidebar.MenuSubButton
-                        isActive={isActive("/models", $currentRoute)}
+                        isActive={$currentRoute === `/models/${encodeURIComponent(model.id)}`}
                       >
                         {#snippet child({ props })}
-                          <a href="/models" use:link {...props}>
+                          <a href="/models/{encodeURIComponent(model.id)}" use:link {...props}>
                             <span class={`size-2 shrink-0 rounded-full ${dotClass[statusDotColor(model)]}`}></span>
                             <span class="flex-1 truncate">{model.id}</span>
-                            <button
-                              type="button"
-                              class="flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground disabled:opacity-50"
-                              title={model.state === "ready" ? "Unload" : pendingLoads[model.id] ? "Cancel" : "Load"}
-                              aria-label={model.state === "ready" ? "Unload model" : "Load model"}
-                              disabled={model.state === "starting" || model.state === "stopping"}
-                              onclick={(e) => onToggleLoad(e, model)}
-                            >
-                              {#if pendingLoads[model.id] && model.state === "stopped"}
-                                <Loader2 class="size-3.5 animate-spin" />
-                              {:else if model.state === "ready"}
-                                <PowerOff class="size-3.5" />
-                              {:else if model.state === "starting" || model.state === "stopping"}
-                                <Loader2 class="size-3.5 animate-spin" />
-                              {:else}
-                                <Play class="size-3.5" />
-                              {/if}
-                            </button>
                           </a>
                         {/snippet}
                       </Sidebar.MenuSubButton>

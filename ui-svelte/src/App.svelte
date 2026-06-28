@@ -3,7 +3,7 @@
   import Router from "svelte-spa-router";
   import AppSidebar from "./components/AppSidebar.svelte";
   import LogViewer from "./routes/LogViewer.svelte";
-  import Models from "./routes/Models.svelte";
+  import ModelDetail from "./routes/ModelDetail.svelte";
   import Activity from "./routes/Activity.svelte";
   import Performance from "./routes/Performance.svelte";
   import Playground from "./routes/Playground.svelte";
@@ -17,7 +17,7 @@
 
   const routes = {
     "/": PlaygroundStub,
-    "/models": Models,
+    "/models/:id": ModelDetail,
     "/logs": LogViewer,
     "/activity": Activity,
     "/performance": Performance,
@@ -26,7 +26,6 @@
 
   const routeTitles: Record<string, string> = {
     "/": "Playground",
-    "/models": "Models",
     "/activity": "Activity",
     "/logs": "Logs",
     "/performance": "Performance",
@@ -37,12 +36,19 @@
       const tab = playgroundTabs.find((t) => t.id === $selectedPlaygroundTab);
       return `Playground / ${tab?.label ?? ""}`;
     }
+    if ($currentRoute.startsWith("/models/")) {
+      const id = $currentRoute.slice("/models/".length);
+      return id ? `Models / ${decodeURIComponent(id)}` : "Models";
+    }
     return routeTitles[$currentRoute] ?? "Playground";
   });
 
-  function handleRouteLoaded(event: { detail: { route: string | RegExp } }) {
+  function handleRouteLoaded(event: { detail: { route: string | RegExp; location?: string } }) {
     const route = event.detail.route;
-    currentRoute.set(typeof route === "string" ? route : "/");
+    // Prefer the actual URL path so parameterised routes (e.g. /models/:id)
+    // are reflected accurately in currentRoute for sidebar highlighting.
+    const loc = event.detail.location;
+    currentRoute.set(loc ?? (typeof route === "string" ? route : "/"));
   }
 
   $effect(() => {

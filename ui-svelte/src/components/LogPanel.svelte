@@ -3,6 +3,7 @@
   import { Type, WrapText, Search, SearchX, CircleX } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
+  import * as Card from "$lib/components/ui/card/index.js";
 
   interface Props {
     id: string;
@@ -84,11 +85,10 @@
   });
 </script>
 
-<div class="bg-muted/50 flex h-full w-full flex-col overflow-hidden rounded-xl border p-1">
-  <div class="p-3">
-    <div class="flex items-center justify-between">
-      <h3 class="m-0 p-0 text-lg">{title}</h3>
-
+<Card.Root class="bg-muted/30 h-full w-full gap-0 overflow-hidden rounded-none py-0">
+  <Card.Header class="border-b px-4 py-2">
+    <Card.Title class="text-sm font-semibold">{title}</Card.Title>
+    <Card.Action>
       <div class="flex items-center gap-1">
         <Button variant="ghost" size="icon-sm" onclick={toggleFontSize} title="Change font size">
           <Type />
@@ -100,18 +100,17 @@
           {#if $showFilterStore}<SearchX />{:else}<Search />{/if}
         </Button>
       </div>
-    </div>
-
+    </Card.Action>
     {#if $showFilterStore}
-      <div class="mt-2 flex w-full items-center gap-2">
+      <div class="flex w-full items-center gap-2 pt-2">
         <Input type="text" class="h-8" placeholder="Filter logs (regex)..." bind:value={filterRegex} />
         <Button variant="ghost" size="icon-sm" onclick={() => (filterRegex = "")} aria-label="Clear filter">
           <CircleX />
         </Button>
       </div>
     {/if}
-  </div>
-  <div class="bg-background flex-1 overflow-hidden rounded-lg font-mono text-sm">
+  </Card.Header>
+  <Card.Content class="bg-background min-h-0 flex-1 p-0 font-mono text-sm">
     <pre bind:this={preElement} onscroll={handleScroll} class="{textWrapClass} {fontSizeClass} h-full overflow-auto p-4">{filteredLogs}</pre>
-  </div>
-</div>
+  </Card.Content>
+</Card.Root>
