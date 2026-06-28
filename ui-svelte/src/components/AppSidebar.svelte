@@ -1,6 +1,6 @@
 <script lang="ts">
   import { link } from "svelte-spa-router";
-  import { House, Boxes, Activity, ScrollText, Gauge, Sun, Moon, Monitor, ChevronRight } from "@lucide/svelte";
+  import { House, Boxes, Activity, ScrollText, Gauge, Sun, Moon, Monitor, ChevronRight, Settings } from "@lucide/svelte";
   import * as Sidebar from "$lib/components/ui/sidebar/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -53,10 +53,8 @@
 <Sidebar.Root collapsible="icon">
   <Sidebar.Header>
     <div class="flex items-center gap-2 px-2 py-1.5">
-      <div
-        class="bg-primary text-primary-foreground flex aspect-square size-8 shrink-0 items-center justify-center rounded-lg font-bold"
-      >
-        ll
+      <div class="flex shrink-0 items-center justify-center">
+        <ConnectionStatus />
       </div>
       <h1
         contenteditable="true"
@@ -74,61 +72,14 @@
       <Sidebar.GroupContent>
         <Sidebar.Menu class="gap-1">
           <Sidebar.MenuItem>
-            <Collapsible.Root
-              open={$modelsMenuOpen}
-              onOpenChange={(v) => modelsMenuOpen.set(v)}
-              class="gap-0"
-            >
-              <Sidebar.MenuButton
-                isActive={$currentRoute.startsWith("/models")}
-                tooltipContent="Models"
-              >
-                {#snippet child({ props })}
-                  <a href="/models" use:link {...props}>
-                    <Boxes />
-                    <span>Models</span>
-                    <span
-                      class="ml-auto transition-transform duration-200 {$modelsMenuOpen ? 'rotate-90' : ''}"
-                      role="button"
-                      tabindex="0"
-                      aria-label="Toggle models section"
-                      onclick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        modelsMenuOpen.update((v) => !v);
-                      }}
-                      onkeydown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          modelsMenuOpen.update((v) => !v);
-                        }
-                      }}
-                    >
-                      <ChevronRight />
-                    </span>
-                  </a>
-                {/snippet}
-              </Sidebar.MenuButton>
-              <Collapsible.Content>
-                <Sidebar.MenuSub>
-                  {#each $models as model (model.id)}
-                    <Sidebar.MenuSubItem>
-                      <Sidebar.MenuSubButton
-                        isActive={$currentRoute === `/models/${encodeURIComponent(model.id)}`}
-                      >
-                        {#snippet child({ props })}
-                          <a href="/models/{encodeURIComponent(model.id)}" use:link {...props}>
-                            <span class={`size-2 shrink-0 rounded-full ${dotClass[statusDotColor(model)]}`}></span>
-                            <span class="flex-1 truncate">{model.id}</span>
-                          </a>
-                        {/snippet}
-                      </Sidebar.MenuSubButton>
-                    </Sidebar.MenuSubItem>
-                  {/each}
-                </Sidebar.MenuSub>
-              </Collapsible.Content>
-            </Collapsible.Root>
+            <Sidebar.MenuButton isActive={isActive("/activity", $currentRoute)} tooltipContent="Activity">
+              {#snippet child({ props })}
+                <a href="/activity" use:link {...props}>
+                  <Activity />
+                  <span>Activity</span>
+                </a>
+              {/snippet}
+            </Sidebar.MenuButton>
           </Sidebar.MenuItem>
 
           <Sidebar.MenuItem>
@@ -194,14 +145,61 @@
           </Sidebar.MenuItem>
 
           <Sidebar.MenuItem>
-            <Sidebar.MenuButton isActive={isActive("/activity", $currentRoute)} tooltipContent="Activity">
-              {#snippet child({ props })}
-                <a href="/activity" use:link {...props}>
-                  <Activity />
-                  <span>Activity</span>
-                </a>
-              {/snippet}
-            </Sidebar.MenuButton>
+            <Collapsible.Root
+              open={$modelsMenuOpen}
+              onOpenChange={(v) => modelsMenuOpen.set(v)}
+              class="gap-0"
+            >
+              <Sidebar.MenuButton
+                isActive={$currentRoute.startsWith("/models")}
+                tooltipContent="Models"
+              >
+                {#snippet child({ props })}
+                  <a href="/models" use:link {...props}>
+                    <Boxes />
+                    <span>Models</span>
+                    <span
+                      class="ml-auto transition-transform duration-200 {$modelsMenuOpen ? 'rotate-90' : ''}"
+                      role="button"
+                      tabindex="0"
+                      aria-label="Toggle models section"
+                      onclick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        modelsMenuOpen.update((v) => !v);
+                      }}
+                      onkeydown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          modelsMenuOpen.update((v) => !v);
+                        }
+                      }}
+                    >
+                      <ChevronRight />
+                    </span>
+                  </a>
+                {/snippet}
+              </Sidebar.MenuButton>
+              <Collapsible.Content>
+                <Sidebar.MenuSub>
+                  {#each $models as model (model.id)}
+                    <Sidebar.MenuSubItem>
+                      <Sidebar.MenuSubButton
+                        isActive={$currentRoute === `/models/${encodeURIComponent(model.id)}`}
+                      >
+                        {#snippet child({ props })}
+                          <a href="/models/{encodeURIComponent(model.id)}" use:link {...props}>
+                            <span class={`size-2 shrink-0 rounded-full ${dotClass[statusDotColor(model)]}`}></span>
+                            <span class="flex-1 truncate">{model.id}</span>
+                          </a>
+                        {/snippet}
+                      </Sidebar.MenuSubButton>
+                    </Sidebar.MenuSubItem>
+                  {/each}
+                </Sidebar.MenuSub>
+              </Collapsible.Content>
+            </Collapsible.Root>
           </Sidebar.MenuItem>
 
           <Sidebar.MenuItem>
@@ -236,9 +234,17 @@
     <div
       class="flex items-center justify-between gap-2 px-1 group-data-[collapsible=icon]:flex-col-reverse"
     >
-      <div class="flex items-center gap-2 px-1">
-        <ConnectionStatus />
-      </div>
+      <Sidebar.MenuButton
+        isActive={isActive("/settings", $currentRoute)}
+        tooltipContent="Settings"
+      >
+        {#snippet child({ props })}
+          <a href="/settings" use:link {...props}>
+            <Settings />
+            <span>Settings</span>
+          </a>
+        {/snippet}
+      </Sidebar.MenuButton>
       <Button
         variant="ghost"
         size="icon"

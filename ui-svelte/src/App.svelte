@@ -9,6 +9,7 @@
   import Performance from "./routes/Performance.svelte";
   import Playground from "./routes/Playground.svelte";
   import PlaygroundStub from "./routes/PlaygroundStub.svelte";
+  import Settings from "./routes/Settings.svelte";
   import * as Sidebar from "$lib/components/ui/sidebar/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { Separator } from "$lib/components/ui/separator/index.js";
@@ -23,6 +24,7 @@
     "/models/:id": ModelDetail,
     "/logs": LogViewer,
     "/activity": Activity,
+    "/settings": Settings,
     "/performance": Performance,
     "*": PlaygroundStub,
   };
@@ -32,6 +34,7 @@
     "/models": "Models",
     "/activity": "Activity",
     "/logs": "Logs",
+    "/settings": "Settings",
     "/performance": "Performance",
   };
 
