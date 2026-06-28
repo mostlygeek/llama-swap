@@ -13,6 +13,7 @@
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { X } from "@lucide/svelte";
 
   const selectedModelStore = persistentStore<string>("playground-selected-model", "");
@@ -319,7 +320,7 @@
   <div class="shrink-0 flex flex-wrap gap-2 mb-4">
     <ModelSelector bind:value={$selectedModelStore} placeholder="Select a model..." disabled={isStreaming} />
     <div class="flex gap-2">
-      <Button variant="outline" size="icon" onclick={() => (showSettings = !showSettings)} title="Settings">
+      <Button variant="outline" size="icon" onclick={() => (showSettings = true)} title="Settings">
         <Settings />
       </Button>
       <Button variant="outline" onclick={newChat} disabled={messages.length === 0 && !isStreaming}>
@@ -328,61 +329,71 @@
     </div>
   </div>
 
-  <!-- Settings panel -->
-  {#if showSettings}
-    <div class="bg-muted/40 mb-4 shrink-0 rounded-lg border p-4">
-      <div class="mb-4">
-        <Label class="mb-1" for="endpoint">Endpoint</Label>
-        <Select.Root
-          type="single"
-          value={$endpointStore}
-          onValueChange={(v) => v && endpointStore.set(v as Endpoint)}
-        >
-          <Select.Trigger class="w-full">/{$endpointStore}</Select.Trigger>
-          <Select.Content>
-            <Select.Item value="v1/chat/completions">/v1/chat/completions</Select.Item>
-            <Select.Item value="v1/messages">/v1/messages</Select.Item>
-            <Select.Item value="v1/responses">/v1/responses</Select.Item>
-          </Select.Content>
-        </Select.Root>
-      </div>
-      <div class="mb-4">
-        <Label class="mb-1" for="system-prompt">System Prompt</Label>
-        <Textarea
-          id="system-prompt"
-          class="resize-none"
-          placeholder="You are a helpful assistant..."
-          rows={3}
-          bind:value={$systemPromptStore}
-          disabled={isStreaming}
-        />
-      </div>
-      <div class="mb-4">
-        <Label class="mb-1" for="temperature">
-          Temperature: {$temperatureStore.toFixed(2)}
-        </Label>
-        <input
-          id="temperature"
-          type="range"
-          min="0"
-          max="2"
-          step="0.05"
-          class="accent-primary w-full"
-          bind:value={$temperatureStore}
-          disabled={isStreaming}
-        />
-        <div class="text-muted-foreground mt-1 flex justify-between text-xs">
-          <span>Precise (0)</span>
-          <span>Creative (2)</span>
+  <!-- Settings dialog -->
+  <Dialog.Root bind:open={showSettings}>
+    <Dialog.Content class="max-w-xl">
+      <Dialog.Header>
+        <Dialog.Title>Chat Settings</Dialog.Title>
+      </Dialog.Header>
+
+      <div class="space-y-4">
+        <div>
+          <Label class="mb-1" for="endpoint">Endpoint</Label>
+          <Select.Root
+            type="single"
+            value={$endpointStore}
+            onValueChange={(v) => v && endpointStore.set(v as Endpoint)}
+          >
+            <Select.Trigger class="w-full">/{$endpointStore}</Select.Trigger>
+            <Select.Content>
+              <Select.Item value="v1/chat/completions">/v1/chat/completions</Select.Item>
+              <Select.Item value="v1/messages">/v1/messages</Select.Item>
+              <Select.Item value="v1/responses">/v1/responses</Select.Item>
+            </Select.Content>
+          </Select.Root>
+        </div>
+        <div>
+          <Label class="mb-1" for="system-prompt">System Prompt</Label>
+          <Textarea
+            id="system-prompt"
+            class="resize-none"
+            placeholder="You are a helpful assistant..."
+            rows={3}
+            bind:value={$systemPromptStore}
+            disabled={isStreaming}
+          />
+        </div>
+        <div>
+          <Label class="mb-1" for="temperature">
+            Temperature: {$temperatureStore.toFixed(2)}
+          </Label>
+          <input
+            id="temperature"
+            type="range"
+            min="0"
+            max="2"
+            step="0.05"
+            class="accent-primary w-full"
+            bind:value={$temperatureStore}
+            disabled={isStreaming}
+          />
+          <div class="text-muted-foreground mt-1 flex justify-between text-xs">
+            <span>Precise (0)</span>
+            <span>Creative (2)</span>
+          </div>
+        </div>
+        <div>
+          <Label class="mb-1" for="max-tokens">Max Tokens</Label>
+          <Input id="max-tokens" type="number" min="1" bind:value={$maxTokensStore} disabled={isStreaming} />
+          <p class="text-muted-foreground mt-1 text-xs">Required for /v1/messages.</p>
         </div>
       </div>
-      <div>
-        <Label class="mb-1" for="max-tokens">Max Tokens</Label>
-        <Input id="max-tokens" type="number" min="1" bind:value={$maxTokensStore} disabled={isStreaming} />
-        <p class="text-muted-foreground mt-1 text-xs">Required for /v1/messages.</p>
-      </div>
-    </div>
-  {/if}
+
+      <Dialog.Footer>
+        <Button variant="outline" onclick={() => (showSettings = false)}>Done</Button>
+      </Dialog.Footer>
+    </Dialog.Content>
+  </Dialog.Root>
 
   <!-- Empty state for no models configured -->
   {#if !hasModels}
