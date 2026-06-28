@@ -21,6 +21,6 @@
   });
 </script>
 
-<div class="h-80">
+<div class="h-full">
   <LogPanel id={`model-${modelId}`} title="Model Logs" {logData} />
 </div>

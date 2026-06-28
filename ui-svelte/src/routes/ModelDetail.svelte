@@ -82,7 +82,7 @@
       </Tabs.Content>
 
       <!-- Logs -->
-      <Tabs.Content value="logs">
+      <Tabs.Content value="logs" class="min-h-0 flex-1">
         <ModelLogsTab modelId={modelId} />
       </Tabs.Content>
 

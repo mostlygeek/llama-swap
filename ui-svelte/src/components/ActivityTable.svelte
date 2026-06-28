@@ -354,6 +354,7 @@
               <DropdownMenu.CheckboxItem
                 checked={column.getIsVisible()}
                 onCheckedChange={(v) => column.toggleVisibility(!!v)}
+                closeOnSelect={false}
               >
                 {columnLabelMap[column.id] ?? column.id}
               </DropdownMenu.CheckboxItem>
