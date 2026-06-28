@@ -499,6 +499,71 @@
   --sidebar-ring: #94a3b8;
 }
 
+/* Sunset — warm orange daylight fading into a purple twilight (dark) */
+[data-theme="sunset"] {
+  --background: oklch(0.99 0.015 55);
+  --foreground: oklch(0.26 0.06 35);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.26 0.06 35);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.26 0.06 35);
+
+  --primary: #f97316;
+  --primary-foreground: oklch(0.985 0 0);
+
+  --secondary: oklch(0.95 0.03 50);
+  --secondary-foreground: oklch(0.34 0.06 35);
+  --muted: oklch(0.95 0.03 50);
+  --muted-foreground: oklch(0.54 0.06 35);
+  --accent: oklch(0.92 0.05 30);
+  --accent-foreground: oklch(0.34 0.06 35);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.9 0.03 45);
+  --input: oklch(0.9 0.03 45);
+  --ring: #f97316;
+
+  --sidebar: oklch(0.97 0.03 45);
+  --sidebar-foreground: oklch(0.26 0.06 35);
+  --sidebar-primary: #f97316;
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.92 0.05 30);
+  --sidebar-accent-foreground: oklch(0.34 0.06 35);
+  --sidebar-border: oklch(0.9 0.03 45);
+  --sidebar-ring: #f97316;
+}
+
+[data-theme="sunset"].dark {
+  --background: oklch(0.2 0.045 320);
+  --foreground: oklch(0.96 0.02 50);
+  --card: oklch(0.25 0.05 320);
+  --card-foreground: oklch(0.96 0.02 50);
+  --popover: oklch(0.25 0.05 320);
+  --popover-foreground: oklch(0.96 0.02 50);
+
+  --primary: #fb923c;
+  --primary-foreground: oklch(0.2 0.045 320);
+
+  --secondary: oklch(0.31 0.05 320);
+  --secondary-foreground: oklch(0.96 0.02 50);
+  --muted: oklch(0.31 0.05 320);
+  --muted-foreground: oklch(0.74 0.04 40);
+  --accent: oklch(0.36 0.08 350);
+  --accent-foreground: oklch(0.96 0.02 50);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: #fb923c;
+
+  --sidebar: oklch(0.25 0.05 320);
+  --sidebar-foreground: oklch(0.96 0.02 50);
+  --sidebar-primary: #fb923c;
+  --sidebar-primary-foreground: oklch(0.2 0.045 320);
+  --sidebar-accent: oklch(0.36 0.08 350);
+  --sidebar-accent-foreground: oklch(0.96 0.02 50);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: #fb923c;
+}
+
 /* Green Terminal — classic phosphor CRT */
 [data-theme="terminal"] {
   --background: #e8f5e9;

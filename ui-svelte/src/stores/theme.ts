@@ -15,6 +15,7 @@ export type ThemeName =
   | "rose"
   | "amber"
   | "slate"
+  | "sunset"
   | "terminal"
   | "mc"
   | "solarized";
@@ -28,6 +29,7 @@ export const themes: { value: ThemeName; label: string }[] = [
   { value: "rose", label: "Rose" },
   { value: "amber", label: "Amber" },
   { value: "slate", label: "Slate" },
+  { value: "sunset", label: "Sunset" },
   // classic
   { value: "terminal", label: "Green Terminal" },
   { value: "mc", label: "Midnight Commander" },
