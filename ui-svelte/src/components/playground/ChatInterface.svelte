@@ -37,6 +37,7 @@
   let reasoningStartTime = $state<number>(0);
   let abortController = $state<AbortController | null>(null);
   let messagesContainer: HTMLDivElement | undefined = $state();
+  let inputRef: HTMLTextAreaElement | null = $state(null);
   let showSettings = $state(false);
   let attachedImages = $state<string[]>([]);
   let fileInput = $state<HTMLInputElement | null>(null);
@@ -47,6 +48,14 @@
 
   $effect(() => {
     playgroundStores.chatStreaming.set(isStreaming);
+  });
+
+  let wasStreaming = $state(false);
+  $effect(() => {
+    if (wasStreaming && !isStreaming) {
+      inputRef?.focus();
+    }
+    wasStreaming = isStreaming;
   });
 
   function handleMessagesScroll() {
@@ -454,6 +463,7 @@
         />
 
         <ExpandableTextarea
+          bind:ref={inputRef}
           bind:value={userInput}
           placeholder="Type a message..."
           rows={3}

@@ -6,6 +6,7 @@
 
   interface Props {
     value: string;
+    ref?: HTMLTextAreaElement | null;
     placeholder?: string;
     rows?: number;
     disabled?: boolean;
@@ -14,6 +15,7 @@
 
   let {
     value = $bindable(),
+    ref = $bindable(null),
     placeholder = "",
     rows = 3,
     disabled = false,
@@ -57,6 +59,7 @@
 <div class="group relative flex min-h-0 flex-1 items-stretch">
   <Textarea
     class="resize-none pr-10"
+    bind:ref
     {placeholder}
     {rows}
     bind:value
