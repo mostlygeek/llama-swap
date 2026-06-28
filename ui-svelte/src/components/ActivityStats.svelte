@@ -1,11 +1,12 @@
 <script lang="ts">
   import { inFlightRequests, metrics } from "../stores/api";
   import { persistentStore } from "../stores/persistent";
-  import { calculateHistogramData } from "../lib/histogram";
+  import { calculateHistogramData, calculateStackedHistogramData, type StackedMetric } from "../lib/histogram";
   import TokenHistogram from "./TokenHistogram.svelte";
 
   const nf = new Intl.NumberFormat();
   const histogramCollapsed = persistentStore<boolean>("activity-histogram-collapsed", false);
+  const histogramStacked = persistentStore<boolean>("activity-histogram-stacked", true);
 
   let stats = $derived.by(() => {
     const totalRequests = $metrics.length;
@@ -13,15 +14,16 @@
     const totalOutputTokens = $metrics.reduce((sum, m) => sum + m.tokens.output_tokens, 0);
     const totalCacheTokens = $metrics.reduce((sum, m) => sum + Math.max(0, m.tokens.cache_tokens), 0);
 
-    const promptPerSecond = $metrics.filter((m) => m.tokens.prompt_per_second > 0).map((m) => m.tokens.prompt_per_second);
+    const promptValues = $metrics.filter((m) => m.tokens.prompt_per_second > 0).map((m) => m.tokens.prompt_per_second);
+    const genValues = $metrics.filter((m) => m.tokens.tokens_per_second > 0).map((m) => m.tokens.tokens_per_second);
 
-    const tokensPerSecond = $metrics.filter((m) => m.tokens.tokens_per_second > 0).map((m) => m.tokens.tokens_per_second);
+    const promptEntries: StackedMetric[] = $metrics
+      .filter((m) => m.tokens.prompt_per_second > 0)
+      .map((m) => ({ model: m.model, value: m.tokens.prompt_per_second }));
 
-    const promptHistogramData =
-      promptPerSecond.length > 0 ? calculateHistogramData(promptPerSecond) : null;
-
-    const genHistogramData =
-      tokensPerSecond.length > 0 ? calculateHistogramData(tokensPerSecond) : null;
+    const genEntries: StackedMetric[] = $metrics
+      .filter((m) => m.tokens.tokens_per_second > 0)
+      .map((m) => ({ model: m.model, value: m.tokens.tokens_per_second }));
 
     return {
       totalRequests,
@@ -29,48 +31,85 @@
       totalOutputTokens,
       totalCacheTokens,
       inFlightRequests: $inFlightRequests,
-      promptHistogramData,
-      genHistogramData,
+      promptFlat: promptValues.length > 0 ? calculateHistogramData(promptValues) : null,
+      genFlat: genValues.length > 0 ? calculateHistogramData(genValues) : null,
+      promptStacked: promptEntries.length > 0 ? calculateStackedHistogramData(promptEntries) : null,
+      genStacked: genEntries.length > 0 ? calculateStackedHistogramData(genEntries) : null,
     };
   });
 </script>
 
 <div class="card relative p-3">
-  <button
-    class="absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded-full border border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:border-gray-400 dark:hover:border-gray-400 transition-colors"
-    onclick={() => ($histogramCollapsed = !$histogramCollapsed)}
-    title={$histogramCollapsed ? "Show histograms" : "Hide histograms"}
-  >
-    {#if $histogramCollapsed}
-      <svg class="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
-        <path d="M4.5 6l3.5 4 3.5-4H4.5z" />
-      </svg>
-    {:else}
-      <svg class="w-3 h-3" viewBox="0 0 16 16" fill="currentColor">
-        <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none" />
-      </svg>
-    {/if}
-  </button>
+  <div class="absolute top-2 right-2 flex gap-1">
+    <button
+      class="w-6 h-6 flex items-center justify-center rounded-full border border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:border-gray-400 dark:hover:border-gray-400 transition-colors"
+      onclick={() => ($histogramStacked = !$histogramStacked)}
+      aria-label={$histogramStacked ? "Switch to flat histogram" : "Switch to stacked histogram"}
+      aria-pressed={$histogramStacked}
+      title={$histogramStacked ? "Show flat histogram" : "Show stacked by model"}
+    >
+      {#if $histogramStacked}
+        <svg class="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
+          <rect y="2" width="16" height="3" rx="1" />
+          <rect y="6.5" width="16" height="3" rx="1" />
+          <rect y="11" width="16" height="3" rx="1" />
+        </svg>
+      {:else}
+        <svg class="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
+          <rect y="2" width="16" height="12" rx="1" />
+        </svg>
+      {/if}
+    </button>
+    <button
+      class="w-6 h-6 flex items-center justify-center rounded-full border border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:border-gray-400 dark:hover:border-gray-400 transition-colors"
+      onclick={() => ($histogramCollapsed = !$histogramCollapsed)}
+      aria-label={$histogramCollapsed ? "Expand histograms" : "Collapse histograms"}
+      aria-pressed={!$histogramCollapsed}
+      title={$histogramCollapsed ? "Show histograms" : "Hide histograms"}
+    >
+      {#if $histogramCollapsed}
+        <svg class="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M4.5 6l3.5 4 3.5-4H4.5z" />
+        </svg>
+      {:else}
+        <svg class="w-3 h-3" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none" />
+        </svg>
+      {/if}
+    </button>
+  </div>
   {#if !$histogramCollapsed}
     <div class="flex flex-col sm:flex-row gap-6 mb-3">
       <div class="w-full sm:w-1/2 min-w-0">
         <div class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Prompt Processing</div>
-        {#if stats.promptHistogramData}
-          <TokenHistogram
-            data={stats.promptHistogramData}
-            unit="prompt tokens/sec"
-            colorClass="text-amber-500 dark:text-amber-400"
-          />
+        {#if $histogramStacked}
+          {#if stats.promptStacked}
+            <TokenHistogram data={stats.promptStacked} unit="prompt tokens/sec" stacked={true} />
+          {:else}
+            <div class="py-6 text-center text-sm text-gray-500 dark:text-gray-400">No prompt speed data yet</div>
+          {/if}
         {:else}
-          <div class="py-6 text-center text-sm text-gray-500 dark:text-gray-400">No prompt speed data yet</div>
+          {#if stats.promptFlat}
+            <TokenHistogram data={stats.promptFlat} unit="prompt tokens/sec" colorClass="text-amber-500 dark:text-amber-400" stacked={false} />
+          {:else}
+            <div class="py-6 text-center text-sm text-gray-500 dark:text-gray-400">No prompt speed data yet</div>
+          {/if}
         {/if}
       </div>
       <div class="w-full sm:w-1/2 min-w-0">
         <div class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Token Generation</div>
-        {#if stats.genHistogramData}
-          <TokenHistogram data={stats.genHistogramData} unit="tokens/sec" />
+        {#if $histogramStacked}
+          {#if stats.genStacked}
+            <TokenHistogram data={stats.genStacked} unit="tokens/sec" stacked={true} />
+          {:else}
+            <div class="py-6 text-center text-sm text-gray-500 dark:text-gray-400">No generation speed data yet</div>
+          {/if}
         {:else}
-          <div class="py-6 text-center text-sm text-gray-500 dark:text-gray-400">No generation speed data yet</div>
+          {#if stats.genFlat}
+            <TokenHistogram data={stats.genFlat} unit="tokens/sec" stacked={false} />
+          {:else}
+            <div class="py-6 text-center text-sm text-gray-500 dark:text-gray-400">No generation speed data yet</div>
+          {/if}
         {/if}
       </div>
     </div>

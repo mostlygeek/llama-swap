@@ -120,6 +120,29 @@ export interface HistogramData {
   p50: number;
 }
 
+export interface StackedSegment {
+  model: string;
+  count: number;
+}
+
+export interface StackedBin {
+  binStart: number;
+  binEnd: number;
+  segments: StackedSegment[];
+  totalCount: number;
+}
+
+export interface StackedHistogramData {
+  bins: StackedBin[];
+  min: number;
+  max: number;
+  binSize: number;
+  p99: number;
+  p95: number;
+  p50: number;
+  models: string[];
+}
+
 export interface VersionInfo {
   build_date: string;
   commit: string;
