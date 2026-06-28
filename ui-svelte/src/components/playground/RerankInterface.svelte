@@ -335,9 +335,9 @@
           {#each displayRows as { row, i } (i)}
             <tr class="border-b last:border-0">
               <td class="px-3 py-1.5">
-                <input
+                <Input
                   type="text"
-                  class="focus:ring-ring w-full rounded bg-transparent px-1 py-0.5 outline-none focus:ring-1"
+                  class="border-0 focus-visible:ring-1 h-7 px-1 py-0.5 bg-transparent"
                   placeholder={i === rows.length - 1 ? "Add document..." : "Document text..."}
                   value={row.doc}
                   oninput={(e) => updateDoc(i, (e.target as HTMLInputElement).value)}
@@ -353,15 +353,17 @@
                 {/if}
               </td>
               <td class="px-2 py-1.5 text-center">
-                <button
-                  class="text-muted-foreground hover:text-destructive flex h-7 w-7 items-center justify-center rounded transition-colors disabled:cursor-not-allowed disabled:opacity-30"
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  class="h-7 w-7 text-muted-foreground hover:text-destructive"
                   onclick={() => deleteRow(i)}
                   disabled={rows.length <= 1}
-                  tabindex="-1"
+                  tabindex={-1}
                   aria-label="Remove row"
                 >
                   ×
-                </button>
+                </Button>
               </td>
             </tr>
           {/each}

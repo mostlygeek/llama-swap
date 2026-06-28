@@ -1,6 +1,7 @@
 <script lang="ts">
   import { models } from "../../stores/api";
   import { groupModels } from "../../lib/modelUtils";
+  import * as Select from "$lib/components/ui/select/index.js";
 
   interface Props {
     value: string;
@@ -18,42 +19,51 @@
 </script>
 
 {#if hasModels}
-  <select
-    class="border-input bg-background focus-visible:border-ring focus-visible:ring-ring/50 dark:bg-input/30 min-w-0 flex-1 basis-48 rounded-md border px-3 py-2 text-sm shadow-xs transition-[color,box-shadow] outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50"
-    bind:value
+  <Select.Root
+    type="single"
+    {value}
+    onValueChange={(v) => v !== undefined && (value = v)}
     {disabled}
   >
-    <option value="">{placeholder}</option>
-    {#if hasMatching}
-      <optgroup label="Matching Capabilities">
-        {#each grouped.localMatching as model (model.id)}
-          <option value={model.id}>{model.id}</option>
-          {#if model.aliases}
-            {#each model.aliases as alias (alias)}
-              <option value={alias}>  ↳ {alias}</option>
-            {/each}
-          {/if}
-        {/each}
-      </optgroup>
-    {/if}
-    {#if grouped.local.length > 0}
-      <optgroup label="Local">
-        {#each grouped.local as model (model.id)}
-          <option value={model.id}>{model.id}</option>
-          {#if model.aliases}
-            {#each model.aliases as alias (alias)}
-              <option value={alias}>  ↳ {alias}</option>
-            {/each}
-          {/if}
-        {/each}
-      </optgroup>
-    {/if}
-    {#each Object.entries(grouped.peersByProvider).sort(([a], [b]) => a.localeCompare(b)) as [peerId, peerModels] (peerId)}
-      <optgroup label="Peer: {peerId}">
-        {#each peerModels as model (model.id)}
-          <option value={model.id}>{model.id}</option>
-        {/each}
-      </optgroup>
-    {/each}
-  </select>
+    <Select.Trigger class="min-w-0 flex-1 basis-48">{value || placeholder}</Select.Trigger>
+    <Select.Content>
+      <Select.Item value="">{placeholder}</Select.Item>
+      {#if hasMatching}
+        <Select.Group>
+          <Select.Label>Matching Capabilities</Select.Label>
+          {#each grouped.localMatching as model (model.id)}
+            <Select.Item value={model.id}>{model.id}</Select.Item>
+            {#if model.aliases}
+              {#each model.aliases as alias (alias)}
+                <Select.Item value={alias}>↳ {alias}</Select.Item>
+              {/each}
+            {/if}
+          {/each}
+        </Select.Group>
+        <Select.Separator />
+      {/if}
+      {#if grouped.local.length > 0}
+        <Select.Group>
+          <Select.Label>Local</Select.Label>
+          {#each grouped.local as model (model.id)}
+            <Select.Item value={model.id}>{model.id}</Select.Item>
+            {#if model.aliases}
+              {#each model.aliases as alias (alias)}
+                <Select.Item value={alias}>↳ {alias}</Select.Item>
+              {/each}
+            {/if}
+          {/each}
+        </Select.Group>
+        <Select.Separator />
+      {/if}
+      {#each Object.entries(grouped.peersByProvider).sort(([a], [b]) => a.localeCompare(b)) as [peerId, peerModels] (peerId)}
+        <Select.Group>
+          <Select.Label>Peer: {peerId}</Select.Label>
+          {#each peerModels as model (model.id)}
+            <Select.Item value={model.id}>{model.id}</Select.Item>
+          {/each}
+        </Select.Group>
+      {/each}
+    </Select.Content>
+  </Select.Root>
 {/if}

@@ -271,7 +271,7 @@
                     type="checkbox"
                     checked={isColumnVisible(key)}
                     onchange={() => toggleColumn(key)}
-                    class="accent-primary rounded"
+                    class="accent-primary rounded-none"
                   />
                   {col.label}
                 </label>

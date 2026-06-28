@@ -12,6 +12,8 @@
   import { Input } from "$lib/components/ui/input/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
+  import { X } from "@lucide/svelte";
 
   const selectedModelStore = persistentStore<string>("playground-selected-model", "");
   const systemPromptStore = persistentStore<string>("playground-system-prompt", "");
@@ -322,16 +324,18 @@
     <div class="bg-muted/40 mb-4 shrink-0 rounded-lg border p-4">
       <div class="mb-4">
         <Label class="mb-1" for="endpoint">Endpoint</Label>
-        <select
-          id="endpoint"
-          class="border-input bg-background focus-visible:border-ring focus-visible:ring-ring/50 dark:bg-input/30 w-full rounded-md border px-3 py-2 text-sm shadow-xs outline-none focus-visible:ring-[3px] disabled:opacity-50"
-          bind:value={$endpointStore}
-          disabled={isStreaming}
+        <Select.Root
+          type="single"
+          value={$endpointStore}
+          onValueChange={(v) => v && endpointStore.set(v as Endpoint)}
         >
-          <option value="v1/chat/completions">/v1/chat/completions</option>
-          <option value="v1/messages">/v1/messages</option>
-          <option value="v1/responses">/v1/responses</option>
-        </select>
+          <Select.Trigger class="w-full">/{$endpointStore}</Select.Trigger>
+          <Select.Content>
+            <Select.Item value="v1/chat/completions">/v1/chat/completions</Select.Item>
+            <Select.Item value="v1/messages">/v1/messages</Select.Item>
+            <Select.Item value="v1/responses">/v1/responses</Select.Item>
+          </Select.Content>
+        </Select.Root>
       </div>
       <div class="mb-4">
         <Label class="mb-1" for="system-prompt">System Prompt</Label>
@@ -415,15 +419,17 @@
               <img
                 src={imageUrl}
                 alt="Attached image {idx + 1}"
-                class="h-20 w-20 rounded border object-cover"
+                class="h-20 w-20 rounded-md border object-cover"
               />
-              <button
-                class="bg-destructive text-destructive-foreground absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full opacity-0 transition-opacity group-hover:opacity-100"
+              <Button
+                variant="destructive"
+                size="icon-sm"
+                class="absolute -right-2 -top-2 h-6 w-6 rounded-full opacity-0 transition-opacity group-hover:opacity-100"
                 onclick={() => removeImage(idx)}
                 title="Remove image"
               >
-                ×
-              </button>
+                <X class="size-3" />
+              </Button>
             </div>
           {/each}
         </div>
@@ -431,7 +437,7 @@
 
       <!-- Error message -->
       {#if imageError}
-        <div class="bg-destructive/10 text-destructive mb-2 rounded p-2 text-sm">
+        <div class="bg-destructive/10 text-destructive mb-2 rounded-md p-2 text-sm">
           {imageError}
         </div>
       {/if}

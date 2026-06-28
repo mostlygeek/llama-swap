@@ -157,7 +157,7 @@
     </div>
   {:else}
     <!-- File upload / Result display area -->
-    <div class="flex-1 overflow-auto mb-4 flex items-center justify-center bg-background border border-border rounded">
+    <div class="flex-1 overflow-auto mb-4 flex items-center justify-center bg-background border border-border rounded-md">
       {#if isTranscribing}
         <div class="text-center text-muted-foreground">
           <div class="inline-block w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mb-2"></div>
@@ -185,7 +185,7 @@
               {/if}
             </Button>
           </div>
-          <div class="flex-1 overflow-auto p-3 rounded border border-border bg-background whitespace-pre-wrap">
+          <div class="flex-1 overflow-auto p-3 rounded-md border border-border bg-background whitespace-pre-wrap">
             {transcriptionResult}
           </div>
         </div>

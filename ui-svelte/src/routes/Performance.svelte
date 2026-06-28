@@ -4,6 +4,7 @@
   import { persistentStore } from "../stores/persistent";
   import type { SysStat, GpuStat } from "../lib/types";
   import PerformanceChart from "../components/PerformanceChart.svelte";
+  import * as Card from "$lib/components/ui/card/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { RefreshCw } from "@lucide/svelte";
 
@@ -395,7 +396,11 @@
   <section class="space-y-4">
     <h3 class="text-lg font-medium text-foreground">GPU</h3>
     {#if !hasGpuData}
-      <p class="text-muted-foreground bg-card rounded-xl border p-4 shadow-sm">No GPU data available</p>
+      <Card.Root class="py-0">
+        <Card.Content class="p-4">
+          <p class="text-muted-foreground">No GPU data available</p>
+        </Card.Content>
+      </Card.Root>
     {:else}
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <PerformanceChart

@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ReqRespCapture } from "../lib/types";
   import { Button } from "$lib/components/ui/button/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
 
   interface Props {
     capture: ReqRespCapture | null;
@@ -10,21 +11,11 @@
 
   let { capture, open, onclose }: Props = $props();
 
-  let dialogEl: HTMLDialogElement | undefined = $state();
-
   type BodyTab = "raw" | "pretty" | "chat";
   let reqBodyTab: BodyTab = $state("pretty");
   let respBodyTab: BodyTab = $state("pretty");
   let copiedReq = $state(false);
   let copiedResp = $state(false);
-
-  $effect(() => {
-    if (open && dialogEl) {
-      dialogEl.showModal();
-    } else if (!open && dialogEl) {
-      dialogEl.close();
-    }
-  });
 
   // Reset tabs when capture changes
   $effect(() => {
@@ -39,10 +30,6 @@
           : "raw";
     }
   });
-
-  function handleDialogClose() {
-    onclose();
-  }
 
   function decodeBody(body: string | null | undefined): string {
     if (!body) return "";
@@ -191,26 +178,22 @@
   });
 </script>
 
-<dialog
-  bind:this={dialogEl}
-  onclose={handleDialogClose}
-  class="bg-background text-foreground rounded-lg shadow-xl max-w-[80%] w-full max-h-[90vh] p-0 backdrop:bg-black/50 m-auto"
+<Dialog.Root
+  {open}
+  onOpenChange={(v) => {
+    if (!v) onclose();
+  }}
 >
-  {#if capture}
-    <div class="flex flex-col max-h-[90vh]">
-      <div
-        class="flex justify-between items-center p-4 border-b border-border"
-      >
-        <h2 class="text-xl font-bold pb-0">Capture #{capture.id + 1}{#if capture.req_path} <span class="text-base font-mono font-normal text-muted-foreground">{capture.req_path}</span>{/if}</h2>
-        <button
-          onclick={() => dialogEl?.close()}
-          class="text-muted-foreground hover:text-foreground text-2xl leading-none"
-        >
-          &times;
-        </button>
-      </div>
+  <Dialog.Content class="max-h-[90vh] w-full max-w-[80%] gap-0 p-0">
+    {#if capture}
+      <Dialog.Header class="border-b border-border px-4 py-3">
+        <Dialog.Title class="text-lg font-bold">
+          Capture #{capture.id + 1}{#if capture.req_path}
+            <span class="font-mono text-base font-normal text-muted-foreground">{capture.req_path}</span>{/if}
+        </Dialog.Title>
+      </Dialog.Header>
 
-      <div class="overflow-y-auto flex-1 p-4 space-y-4">
+      <div class="overflow-y-auto flex-1 space-y-4 p-4">
         <!-- Request Headers -->
         <details class="group" open>
           <summary
@@ -219,7 +202,7 @@
             Request Headers
           </summary>
           <div
-            class="mt-2 bg-background rounded border border-border overflow-auto max-h-48"
+            class="mt-2 bg-background rounded-md border border-border overflow-auto max-h-48"
           >
             <table class="w-full text-sm">
               <tbody>
@@ -272,14 +255,14 @@
               </button>
             </div>
             <div
-              class="mt-1 bg-background rounded border border-border overflow-auto max-h-96"
+              class="mt-1 bg-background rounded-md border border-border overflow-auto max-h-96"
             >
               <pre
                 class="p-3 text-sm font-mono whitespace-pre-wrap break-all">{displayedRequestBody}</pre>
             </div>
           {:else}
             <div
-              class="mt-2 bg-background rounded border border-border overflow-auto max-h-96"
+              class="mt-2 bg-background rounded-md border border-border overflow-auto max-h-96"
             >
               <pre class="p-3 text-sm font-mono whitespace-pre-wrap break-all"
                 >(empty)</pre
@@ -296,7 +279,7 @@
             Response Headers
           </summary>
           <div
-            class="mt-2 bg-background rounded border border-border overflow-auto max-h-48"
+            class="mt-2 bg-background rounded-md border border-border overflow-auto max-h-48"
           >
             <table class="w-full text-sm">
               <tbody>
@@ -322,7 +305,7 @@
           </summary>
           {#if isResponseImage && capture.resp_body}
             <div
-              class="mt-2 bg-background rounded border border-border overflow-auto max-h-96"
+              class="mt-2 bg-background rounded-md border border-border overflow-auto max-h-96"
             >
               <div class="p-3 flex justify-center">
                 <img
@@ -369,7 +352,7 @@
               </button>
             </div>
             <div
-              class="mt-1 bg-background rounded border border-border overflow-auto max-h-96"
+              class="mt-1 bg-background rounded-md border border-border overflow-auto max-h-96"
             >
               {#if respBodyTab === "chat"}
                 <div class="p-3 text-sm space-y-3">
@@ -408,7 +391,7 @@
             </div>
           {:else if responseBodyRaw}
             <div
-              class="mt-2 bg-background rounded border border-border overflow-auto max-h-96"
+              class="mt-2 bg-background rounded-md border border-border overflow-auto max-h-96"
             >
               <div class="p-3 text-sm text-muted-foreground italic">
                 (binary data - {responseContentType || "unknown content type"})
@@ -416,7 +399,7 @@
             </div>
           {:else}
             <div
-              class="mt-2 bg-background rounded border border-border overflow-auto max-h-96"
+              class="mt-2 bg-background rounded-md border border-border overflow-auto max-h-96"
             >
               <pre class="p-3 text-sm font-mono">(empty)</pre>
             </div>
@@ -424,26 +407,26 @@
         </details>
       </div>
 
-      <div class="p-4 border-t border-border flex justify-end">
-        <Button variant="outline" onclick={() => dialogEl?.close()}>Close</Button>
+      <Dialog.Footer class="border-t border-border px-4 py-3 sm:justify-end">
+        <Button variant="outline" onclick={onclose}>Close</Button>
+      </Dialog.Footer>
+    {:else}
+      <div class="flex flex-col items-center justify-center p-12">
+        <p class="text-lg text-muted-foreground">Capture not found</p>
+        <p class="text-sm text-muted-foreground mt-1">The capture may have expired or was never recorded.</p>
+        <div class="mt-4">
+          <Button variant="outline" onclick={onclose}>Close</Button>
+        </div>
       </div>
-    </div>
-  {:else}
-    <div class="flex flex-col items-center justify-center p-12">
-      <p class="text-lg text-muted-foreground">Capture not found</p>
-      <p class="text-sm text-muted-foreground mt-1">The capture may have expired or was never recorded.</p>
-      <div class="mt-4">
-        <Button variant="outline" onclick={() => dialogEl?.close()}>Close</Button>
-      </div>
-    </div>
-  {/if}
-</dialog>
+    {/if}
+  </Dialog.Content>
+</Dialog.Root>
 
 <style>
   .tab-btn {
     padding: 2px 10px;
     font-size: 0.75rem;
-    border-radius: 4px;
+    border-radius: 0;
     color: var(--muted-foreground);
     cursor: pointer;
     border: 1px solid transparent;

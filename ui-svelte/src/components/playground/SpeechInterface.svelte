@@ -6,6 +6,7 @@
   import ModelSelector from "./ModelSelector.svelte";
   import ExpandableTextarea from "./ExpandableTextarea.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
   import { RefreshCw, Download } from "@lucide/svelte";
 
   const selectedModelStore = persistentStore<string>("playground-speech-model", "");
@@ -108,8 +109,7 @@
     }
   }
 
-  function handleVoiceChange(event: Event) {
-    const value = (event.target as HTMLSelectElement).value;
+  function handleVoiceChange(value: string) {
     if (value === "(refresh)") {
       refreshVoices();
     } else {
@@ -210,17 +210,19 @@
   <div class="shrink-0 flex gap-2 mb-4">
     <ModelSelector bind:value={$selectedModelStore} placeholder="Select a speech model..." disabled={isGenerating} capabilities={["audio_speech"]} />
     <div class="flex gap-2">
-      <select
-        class="shrink-0 px-3 py-2 rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary"
+      <Select.Root
+        type="single"
         value={$selectedVoiceStore}
-        onchange={handleVoiceChange}
-        disabled={isGenerating || isLoadingVoices || !$selectedModelStore}
+        onValueChange={(v) => v && handleVoiceChange(v)}
       >
-        {#each availableVoices as voice (voice)}
-          <option value={voice}>{voice}</option>
-        {/each}
-        <option value="(refresh)">(refresh)</option>
-      </select>
+        <Select.Trigger class="h-9 w-40">{$selectedVoiceStore}</Select.Trigger>
+        <Select.Content>
+          {#each availableVoices as voice (voice)}
+            <Select.Item value={voice}>{voice}</Select.Item>
+          {/each}
+          <Select.Item value="(refresh)">(refresh)</Select.Item>
+        </Select.Content>
+      </Select.Root>
       {#if $selectedModelStore && !getVoicesCache()[$selectedModelStore]}
         <Button
           variant="outline"
@@ -243,7 +245,7 @@
     </div>
   {:else}
     <!-- Audio display area -->
-    <div class="shrink-0 mb-4 bg-background border border-border rounded p-4 md:p-6">
+    <div class="shrink-0 mb-4 bg-background border border-border rounded-md p-4 md:p-6">
       {#if isGenerating}
         <div class="flex items-center justify-center text-muted-foreground py-8">
           <div class="text-center">

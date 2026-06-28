@@ -169,7 +169,7 @@
   >
     {#if role === "assistant"}
       {#if reasoning_content || isReasoning}
-        <div class="mb-3 overflow-hidden rounded border">
+        <div class="mb-3 overflow-hidden rounded-md border">
           <button
             class="bg-muted/50 hover:bg-muted flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors"
             onclick={() => showReasoning = !showReasoning}
@@ -203,12 +203,12 @@
           {#each imageUrls as imageUrl, idx (idx)}
             <button
               onclick={() => openModal(imageUrl)}
-              class="cursor-pointer rounded border transition-opacity hover:opacity-80"
+              class="cursor-pointer rounded-md border transition-opacity hover:opacity-80"
             >
               <img
                 src={imageUrl}
                 alt="Image {idx + 1}"
-                class="max-h-64 rounded"
+                class="max-h-64 rounded-md"
               />
             </button>
           {/each}
@@ -277,12 +277,12 @@
             {#each imageUrls as imageUrl, idx (idx)}
               <button
                 onclick={() => openModal(imageUrl)}
-                class="cursor-pointer rounded border border-white/20 transition-opacity hover:opacity-80"
+                class="cursor-pointer rounded-md border border-white/20 transition-opacity hover:opacity-80"
               >
                 <img
                   src={imageUrl}
                   alt="Image {idx + 1}"
-                  class="max-w-[200px] rounded"
+                  class="max-w-[200px] rounded-md"
                 />
               </button>
             {/each}
@@ -322,7 +322,7 @@
     <img
       src={modalImageUrl}
       alt=""
-      class="max-w-full max-h-full rounded pointer-events-none"
+      class="max-w-full max-h-full rounded-md pointer-events-none"
     />
   </div>
 {/if}

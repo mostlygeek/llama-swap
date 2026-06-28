@@ -85,7 +85,7 @@
   });
 </script>
 
-<Card.Root class="bg-muted/30 h-full w-full gap-0 overflow-hidden rounded-none py-0">
+<Card.Root class="bg-muted/30 h-full w-full gap-0 overflow-hidden py-0">
   <Card.Header class="border-b px-4 py-2">
     <Card.Title class="text-sm font-semibold">{title}</Card.Title>
     <Card.Action>

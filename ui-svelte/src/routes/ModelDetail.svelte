@@ -303,7 +303,7 @@
       <a href="/" class="text-primary hover:underline">Back to Playground</a>
     </Card.Root>
    {:else}
-    <Card.Root class="shrink-0 gap-0 overflow-hidden rounded-none py-0">
+    <Card.Root class="shrink-0 gap-0 overflow-hidden py-0">
       <Card.Header class="shrink-0 gap-2 border-b px-4 py-3">
         <div class="flex items-center gap-2">
           <span class={`size-2.5 shrink-0 rounded-full ${statusDotColor(model)}`}></span>
@@ -352,9 +352,9 @@
 
     <Tabs.Root value="activity" class="min-h-0 flex-1">
       <Tabs.List>
-        <Tabs.Trigger value="activity">Activity</Tabs.Trigger>
-        <Tabs.Trigger value="logs">Logs</Tabs.Trigger>
-        <Tabs.Trigger value="details">Details</Tabs.Trigger>
+        <Tabs.Trigger value="activity" class="data-active:bg-primary/15 data-active:text-primary border border-b-2 data-active:border-primary rounded-none shadow-none">Activity</Tabs.Trigger>
+        <Tabs.Trigger value="logs" class="data-active:bg-primary/15 data-active:text-primary border border-b-2 data-active:border-primary rounded-none shadow-none">Logs</Tabs.Trigger>
+        <Tabs.Trigger value="details" class="data-active:bg-primary/15 data-active:text-primary border border-b-2 data-active:border-primary rounded-none shadow-none">Details</Tabs.Trigger>
       </Tabs.List>
 
       <!-- Activity -->
@@ -427,7 +427,7 @@
                               type="checkbox"
                               checked={isColumnVisible(key)}
                               onchange={() => toggleColumn(key)}
-                              class="accent-primary rounded"
+                              class="accent-primary rounded-none"
                             />
                             {col.label}
                           </label>

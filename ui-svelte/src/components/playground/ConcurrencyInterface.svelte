@@ -3,6 +3,9 @@
   import { persistentStore } from "../../stores/persistent";
   import { streamChatCompletion } from "../../lib/chatApi";
   import { Button } from "$lib/components/ui/button/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
+  import { X } from "@lucide/svelte";
 
   type Status = "waiting" | "streaming" | "done" | "error";
   type Phase = "waiting" | "loading" | "reasoning" | "content";
@@ -389,22 +392,23 @@
       <div class="text-xs font-medium text-muted-foreground mb-1">
         Models <span class="text-[10px] font-normal">— click to queue (add the same model more than once to test parallel requests)</span>
       </div>
-      <div class="flex-1 border border-border rounded overflow-y-auto min-h-0">
+      <div class="flex-1 border border-border rounded-md overflow-y-auto min-h-0">
         {#if !hasModels}
           <div class="p-3 text-sm text-muted-foreground text-center">No models configured.</div>
         {:else}
           <ul class="divide-y divide-gray-100 dark:divide-white/5">
             {#each availableModels as m (m.id)}
               <li>
-                <button
-                  class="w-full text-left px-2 py-1.5 text-sm hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                <Button
+                  variant="ghost"
+                  class="w-full justify-start px-2 py-1.5 text-sm h-auto font-normal"
                   onclick={() => addModel(m.id)}
                   disabled={isRunning}
                   title="Add {m.id}"
                 >
                   <span class="text-primary" aria-hidden="true">+</span>
                   <span class="truncate flex-1">{m.id}</span>
-                </button>
+                </Button>
               </li>
             {/each}
           </ul>
@@ -416,27 +420,29 @@
     <div class="flex flex-col gap-2 border-t border-border pt-3">
       <div class="flex items-center justify-between">
         <label for="concurrency-prompt" class="text-xs font-medium text-muted-foreground">Prompt</label>
-        <button
-          class="text-[10px] text-muted-foreground hover:text-foreground underline"
+        <Button
+          variant="link"
+          size="sm"
+          class="h-auto p-0 text-[10px]"
           onclick={resetDefaults}
           disabled={isRunning}
         >
           reset defaults
-        </button>
+        </Button>
       </div>
-      <textarea
+      <Textarea
         id="concurrency-prompt"
-        class="w-full px-2 py-1.5 text-sm rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary resize-none"
-        rows="3"
+        class="resize-none text-sm"
+        rows={3}
         bind:value={$promptStore}
         disabled={isRunning}
-      ></textarea>
+      ></Textarea>
       <label for="concurrency-max-tokens" class="text-xs font-medium text-muted-foreground">max_tokens</label>
-      <input
+      <Input
         id="concurrency-max-tokens"
         type="number"
         min="1"
-        class="w-full px-2 py-1.5 text-sm rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary"
+        class="h-8 text-sm"
         bind:value={$maxTokensStore}
         disabled={isRunning}
       />
@@ -463,9 +469,9 @@
       </div>
     {:else}
       <!-- Gantt-style timeline -->
-      <div class="mb-3 border border-border rounded">
+      <div class="mb-3 border border-border rounded-md">
           <button
-            class="w-full flex items-center gap-2 px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent transition-colors {$timelineCollapsedStore ? 'rounded' : 'rounded-t border-b border-border'}"
+            class="w-full flex items-center gap-2 px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent transition-colors {$timelineCollapsedStore ? 'rounded-md' : 'rounded-t border-b border-border'}"
             onclick={() => timelineCollapsedStore.update((v) => !v)}
             aria-expanded={!$timelineCollapsedStore}
           >
@@ -574,7 +580,7 @@
           {@const run = runs[entry.id]}
           {@const status = run?.status ?? "waiting"}
           <div
-            class="border rounded flex flex-col min-h-0 transition-colors {dragOverIndex === i && dragIndex !== i
+            class="border rounded-md flex flex-col min-h-0 transition-colors {dragOverIndex === i && dragIndex !== i
               ? 'border-primary ring-2 ring-primary/40'
               : 'border-border'} {dragIndex === i ? 'opacity-40' : ''}"
             style="height: 280px;"
@@ -600,19 +606,21 @@
                 {run ? formatElapsed(run.elapsedMs) : "—"}
               </span>
               <span class="status text-[10px] {statusBadgeClass(status)}">{status}</span>
-              <button
-                class="w-5 h-5 flex items-center justify-center text-muted-foreground hover:text-red-500 transition-colors rounded disabled:opacity-30 disabled:cursor-not-allowed"
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                class="h-5 w-5 text-muted-foreground hover:text-red-500"
                 onclick={() => removeEntry(entry.id)}
                 disabled={isRunning}
                 aria-label="Remove"
-                tabindex="-1"
+                tabindex={-1}
               >
-                ×
-              </button>
+                <X class="size-3" />
+              </Button>
             </div>
             <div class="flex-1 min-h-0 overflow-y-auto font-mono text-xs px-2 py-1.5">
               {#if run?.loadingText}
-                <div class="bg-secondary/40 dark:bg-white/5 text-muted-foreground rounded px-2 py-1 mb-2 whitespace-pre-wrap">{run.loadingText.trim()}</div>
+                <div class="bg-secondary/40 dark:bg-white/5 text-muted-foreground rounded-md px-2 py-1 mb-2 whitespace-pre-wrap">{run.loadingText.trim()}</div>
               {/if}
               {#if run?.reasoningContent}
                 <div class="text-purple-700 dark:text-purple-300 whitespace-pre-wrap">{run.reasoningContent}</div>

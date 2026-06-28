@@ -60,7 +60,7 @@
       </div>
       <h1
         contenteditable="true"
-        class="truncate pb-0 text-base font-semibold outline-none rounded px-1 hover:bg-sidebar-accent group-data-[collapsible=icon]:hidden"
+        class="truncate pb-0 text-base font-semibold outline-none rounded-md px-1 hover:bg-sidebar-accent group-data-[collapsible=icon]:hidden"
         onblur={handleBlur}
         onkeydown={handleKeyDown}
       >
