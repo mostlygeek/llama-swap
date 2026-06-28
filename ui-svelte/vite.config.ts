@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import tailwindcss from "@tailwindcss/vite";
 import { compression } from "vite-plugin-compression2";
+import path from "node:path";
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -21,6 +22,11 @@ export default defineConfig({
     }),
   ],
   base: "/ui/",
+  resolve: {
+    alias: {
+      $lib: path.resolve(__dirname, "./src/lib"),
+    },
+  },
   build: {
     outDir: "../internal/server/ui_dist",
     assetsDir: "assets",

@@ -1,5 +1,8 @@
 <script lang="ts">
   import type { ReqRespCapture } from "../lib/types";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import { copyText } from "../lib/clipboard";
 
   interface Props {
     capture: ReqRespCapture | null;
@@ -9,21 +12,11 @@
 
   let { capture, open, onclose }: Props = $props();
 
-  let dialogEl: HTMLDialogElement | undefined = $state();
-
   type BodyTab = "raw" | "pretty" | "chat";
   let reqBodyTab: BodyTab = $state("pretty");
   let respBodyTab: BodyTab = $state("pretty");
   let copiedReq = $state(false);
   let copiedResp = $state(false);
-
-  $effect(() => {
-    if (open && dialogEl) {
-      dialogEl.showModal();
-    } else if (!open && dialogEl) {
-      dialogEl.close();
-    }
-  });
 
   // Reset tabs when capture changes
   $effect(() => {
@@ -38,10 +31,6 @@
           : "raw";
     }
   });
-
-  function handleDialogClose() {
-    onclose();
-  }
 
   function decodeBody(body: string | null | undefined): string {
     if (!body) return "";
@@ -115,17 +104,13 @@
   }
 
   async function copyToClipboard(text: string, type: "req" | "resp") {
-    try {
-      await navigator.clipboard.writeText(text);
-      if (type === "req") {
-        copiedReq = true;
-        setTimeout(() => (copiedReq = false), 1500);
-      } else {
-        copiedResp = true;
-        setTimeout(() => (copiedResp = false), 1500);
-      }
-    } catch {
-      // ignore
+    if (!(await copyText(text))) return;
+    if (type === "req") {
+      copiedReq = true;
+      setTimeout(() => (copiedReq = false), 1500);
+    } else {
+      copiedResp = true;
+      setTimeout(() => (copiedResp = false), 1500);
     }
   }
 
@@ -190,40 +175,36 @@
   });
 </script>
 
-<dialog
-  bind:this={dialogEl}
-  onclose={handleDialogClose}
-  class="bg-surface text-txtmain rounded-lg shadow-xl max-w-[80%] w-full max-h-[90vh] p-0 backdrop:bg-black/50 m-auto"
+<Dialog.Root
+  {open}
+  onOpenChange={(v) => {
+    if (!v) onclose();
+  }}
 >
-  {#if capture}
-    <div class="flex flex-col max-h-[90vh]">
-      <div
-        class="flex justify-between items-center p-4 border-b border-card-border"
-      >
-        <h2 class="text-xl font-bold pb-0">Capture #{capture.id + 1}{#if capture.req_path} <span class="text-base font-mono font-normal text-txtsecondary">{capture.req_path}</span>{/if}</h2>
-        <button
-          onclick={() => dialogEl?.close()}
-          class="text-txtsecondary hover:text-txtmain text-2xl leading-none"
-        >
-          &times;
-        </button>
-      </div>
+  <Dialog.Content class="flex max-h-[90vh] w-[90%] sm:max-w-[90%] flex-col gap-0 p-0">
+    {#if capture}
+      <Dialog.Header class="border-b border-border px-4 py-3">
+        <Dialog.Title class="text-lg font-bold">
+          Capture #{capture.id + 1}{#if capture.req_path}
+            <span class="font-mono text-base font-normal text-muted-foreground">{capture.req_path}</span>{/if}
+        </Dialog.Title>
+      </Dialog.Header>
 
-      <div class="overflow-y-auto flex-1 p-4 space-y-4">
+      <div class="min-h-0 flex-1 overflow-y-auto space-y-4 p-4">
         <!-- Request Headers -->
         <details class="group" open>
           <summary
-            class="cursor-pointer font-semibold text-sm uppercase tracking-wider text-txtsecondary hover:text-txtmain"
+            class="cursor-pointer font-semibold text-sm uppercase tracking-wider text-muted-foreground hover:text-foreground"
           >
             Request Headers
           </summary>
           <div
-            class="mt-2 bg-background rounded border border-card-border overflow-auto max-h-48"
+            class="mt-2 bg-background rounded-md border border-border overflow-auto max-h-48"
           >
             <table class="w-full text-sm">
               <tbody>
                 {#each Object.entries(capture.req_headers || {}) as [key, value]}
-                  <tr class="border-b border-card-border-inner last:border-0">
+                  <tr class="border-b border-border last:border-0">
                     <td class="px-3 py-1 font-mono text-primary whitespace-nowrap"
                       >{key}</td
                     >
@@ -238,7 +219,7 @@
         <!-- Request Body -->
         <details class="group" open>
           <summary
-            class="cursor-pointer font-semibold text-sm uppercase tracking-wider text-txtsecondary hover:text-txtmain"
+            class="cursor-pointer font-semibold text-sm uppercase tracking-wider text-muted-foreground hover:text-foreground"
           >
             Request Body
           </summary>
@@ -271,14 +252,14 @@
               </button>
             </div>
             <div
-              class="mt-1 bg-background rounded border border-card-border overflow-auto max-h-96"
+              class="mt-1 bg-background rounded-md border border-border overflow-auto max-h-96"
             >
               <pre
                 class="p-3 text-sm font-mono whitespace-pre-wrap break-all">{displayedRequestBody}</pre>
             </div>
           {:else}
             <div
-              class="mt-2 bg-background rounded border border-card-border overflow-auto max-h-96"
+              class="mt-2 bg-background rounded-md border border-border overflow-auto max-h-96"
             >
               <pre class="p-3 text-sm font-mono whitespace-pre-wrap break-all"
                 >(empty)</pre
@@ -290,17 +271,17 @@
         <!-- Response Headers -->
         <details class="group" open>
           <summary
-            class="cursor-pointer font-semibold text-sm uppercase tracking-wider text-txtsecondary hover:text-txtmain"
+            class="cursor-pointer font-semibold text-sm uppercase tracking-wider text-muted-foreground hover:text-foreground"
           >
             Response Headers
           </summary>
           <div
-            class="mt-2 bg-background rounded border border-card-border overflow-auto max-h-48"
+            class="mt-2 bg-background rounded-md border border-border overflow-auto max-h-48"
           >
             <table class="w-full text-sm">
               <tbody>
                 {#each Object.entries(capture.resp_headers || {}) as [key, value]}
-                  <tr class="border-b border-card-border-inner last:border-0">
+                  <tr class="border-b border-border last:border-0">
                     <td class="px-3 py-1 font-mono text-primary whitespace-nowrap"
                       >{key}</td
                     >
@@ -315,13 +296,13 @@
         <!-- Response Body -->
         <details class="group" open>
           <summary
-            class="cursor-pointer font-semibold text-sm uppercase tracking-wider text-txtsecondary hover:text-txtmain"
+            class="cursor-pointer font-semibold text-sm uppercase tracking-wider text-muted-foreground hover:text-foreground"
           >
             Response Body
           </summary>
           {#if isResponseImage && capture.resp_body}
             <div
-              class="mt-2 bg-background rounded border border-card-border overflow-auto max-h-96"
+              class="mt-2 bg-background rounded-md border border-border overflow-auto max-h-96"
             >
               <div class="p-3 flex justify-center">
                 <img
@@ -368,26 +349,26 @@
               </button>
             </div>
             <div
-              class="mt-1 bg-background rounded border border-card-border overflow-auto max-h-96"
+              class="mt-1 bg-background rounded-md border border-border overflow-auto max-h-96"
             >
               {#if respBodyTab === "chat"}
                 <div class="p-3 text-sm space-y-3">
                   {#if sseChat.reasoning}
                     <div>
                       <div
-                        class="text-xs font-semibold uppercase tracking-wider text-txtsecondary mb-1"
+                        class="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1"
                       >
                         Reasoning
                       </div>
                       <pre
-                        class="font-mono whitespace-pre-wrap break-all text-txtsecondary">{sseChat.reasoning}</pre>
+                        class="font-mono whitespace-pre-wrap break-all text-muted-foreground">{sseChat.reasoning}</pre>
                     </div>
                   {/if}
                   {#if sseChat.content}
                     <div>
                       {#if sseChat.reasoning}
                         <div
-                          class="text-xs font-semibold uppercase tracking-wider text-txtsecondary mb-1"
+                          class="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1"
                         >
                           Response
                         </div>
@@ -407,15 +388,15 @@
             </div>
           {:else if responseBodyRaw}
             <div
-              class="mt-2 bg-background rounded border border-card-border overflow-auto max-h-96"
+              class="mt-2 bg-background rounded-md border border-border overflow-auto max-h-96"
             >
-              <div class="p-3 text-sm text-txtsecondary italic">
+              <div class="p-3 text-sm text-muted-foreground italic">
                 (binary data - {responseContentType || "unknown content type"})
               </div>
             </div>
           {:else}
             <div
-              class="mt-2 bg-background rounded border border-card-border overflow-auto max-h-96"
+              class="mt-2 bg-background rounded-md border border-border overflow-auto max-h-96"
             >
               <pre class="p-3 text-sm font-mono">(empty)</pre>
             </div>
@@ -423,39 +404,39 @@
         </details>
       </div>
 
-      <div class="p-4 border-t border-card-border flex justify-end">
-        <button onclick={() => dialogEl?.close()} class="btn"> Close </button>
+      <Dialog.Footer class="border-t border-border px-4 py-3 sm:justify-end">
+        <Button variant="outline" onclick={onclose}>Close</Button>
+      </Dialog.Footer>
+    {:else}
+      <div class="flex flex-col items-center justify-center p-12">
+        <p class="text-lg text-muted-foreground">Capture not found</p>
+        <p class="text-sm text-muted-foreground mt-1">The capture may have expired or was never recorded.</p>
+        <div class="mt-4">
+          <Button variant="outline" onclick={onclose}>Close</Button>
+        </div>
       </div>
-    </div>
-  {:else}
-    <div class="flex flex-col items-center justify-center p-12">
-      <p class="text-lg text-txtsecondary">Capture not found</p>
-      <p class="text-sm text-txtsecondary mt-1">The capture may have expired or was never recorded.</p>
-      <div class="mt-4">
-        <button onclick={() => dialogEl?.close()} class="btn">Close</button>
-      </div>
-    </div>
-  {/if}
-</dialog>
+    {/if}
+  </Dialog.Content>
+</Dialog.Root>
 
 <style>
   .tab-btn {
     padding: 2px 10px;
     font-size: 0.75rem;
-    border-radius: 4px;
-    color: var(--color-txtsecondary);
+    border-radius: 0;
+    color: var(--muted-foreground);
     cursor: pointer;
     border: 1px solid transparent;
     background: transparent;
     transition: all 0.15s;
   }
   .tab-btn:hover {
-    color: var(--color-txtmain);
-    background: var(--color-secondary);
+    color: var(--foreground);
+    background: var(--accent);
   }
   .tab-btn-active {
-    color: var(--color-primary);
-    background: color-mix(in srgb, var(--color-primary) 12%, transparent);
-    border-color: color-mix(in srgb, var(--color-primary) 25%, transparent);
+    color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
+    border-color: color-mix(in srgb, var(--primary) 25%, transparent);
   }
 </style>

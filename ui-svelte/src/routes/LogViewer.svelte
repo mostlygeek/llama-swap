@@ -4,6 +4,7 @@
   import { persistentStore } from "../stores/persistent";
   import LogPanel from "../components/LogPanel.svelte";
   import ResizablePanels from "../components/ResizablePanels.svelte";
+  import { Tabs, TabsList, TabsTrigger, TabsContent } from "$lib/components/ui/tabs/index.js";
 
   type ViewMode = "proxy" | "upstream" | "panels";
 
@@ -15,47 +16,36 @@
 </script>
 
 <div class="flex flex-col h-full w-full gap-2">
-  <div class="flex items-center gap-1">
-    <button
-      onclick={() => viewModeStore.set("panels")}
-      class:btn={true}
-      class:bg-primary={$viewModeStore === "panels"}
-      class:text-btn-primary-text={$viewModeStore === "panels"}
-    >
-      Both
-    </button>
-    <button
-      onclick={() => viewModeStore.set("proxy")}
-      class:btn={true}
-      class:bg-primary={$viewModeStore === "proxy"}
-      class:text-btn-primary-text={$viewModeStore === "proxy"}
-    >
-      Proxy
-    </button>
-    <button
-      onclick={() => viewModeStore.set("upstream")}
-      class:btn={true}
-      class:bg-primary={$viewModeStore === "upstream"}
-      class:text-btn-primary-text={$viewModeStore === "upstream"}
-    >
-      Upstream
-    </button>
-  </div>
+  <Tabs
+    value={$viewModeStore}
+    onValueChange={(v) => v && viewModeStore.set(v as ViewMode)}
+    class="flex flex-1 w-full flex-col gap-2 overflow-hidden"
+  >
+    <TabsList variant="line">
+      <TabsTrigger value="panels">Both</TabsTrigger>
+      <TabsTrigger value="proxy">Proxy</TabsTrigger>
+      <TabsTrigger value="upstream">Upstream</TabsTrigger>
+    </TabsList>
 
-  <div class="flex-1 w-full overflow-hidden">
-    {#if $viewModeStore === "panels"}
-      <ResizablePanels {direction} storageKey="logviewer-panel-group">
-        {#snippet leftPanel()}
-          <LogPanel id="proxy" title="Proxy Logs" logData={$proxyLogs} />
-        {/snippet}
-        {#snippet rightPanel()}
-          <LogPanel id="upstream" title="Upstream Logs" logData={$upstreamLogs} />
-        {/snippet}
-      </ResizablePanels>
-    {:else if $viewModeStore === "proxy"}
-      <LogPanel id="proxy" title="Proxy Logs" logData={$proxyLogs} />
-    {:else}
-      <LogPanel id="upstream" title="Upstream Logs" logData={$upstreamLogs} />
-    {/if}
-  </div>
+    <div class="flex-1 w-full overflow-hidden">
+      <TabsContent value="panels" class="h-full">
+        <ResizablePanels {direction} storageKey="logviewer-panel-group">
+          {#snippet leftPanel()}
+            <LogPanel id="proxy" title="Proxy Logs" logData={$proxyLogs} />
+          {/snippet}
+          {#snippet rightPanel()}
+            <LogPanel id="upstream" title="Upstream Logs" logData={$upstreamLogs} />
+          {/snippet}
+        </ResizablePanels>
+      </TabsContent>
+
+      <TabsContent value="proxy" class="h-full">
+        <LogPanel id="proxy" title="Proxy Logs" logData={$proxyLogs} />
+      </TabsContent>
+
+      <TabsContent value="upstream" class="h-full">
+        <LogPanel id="upstream" title="Upstream Logs" logData={$upstreamLogs} />
+      </TabsContent>
+    </div>
+  </Tabs>
 </div>

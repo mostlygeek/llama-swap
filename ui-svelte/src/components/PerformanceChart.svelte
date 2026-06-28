@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { Chart, registerables } from "chart.js";
   import { isDarkMode } from "../stores/theme";
+  import * as Card from "$lib/components/ui/card/index.js";
 
   Chart.register(...registerables);
 
@@ -143,6 +144,8 @@
   });
 </script>
 
-<div class="card p-4 h-[300px]">
-  <canvas bind:this={canvas}></canvas>
-</div>
+<Card.Root class="h-[300px] py-0">
+  <Card.Content class="h-full p-4">
+    <canvas bind:this={canvas}></canvas>
+  </Card.Content>
+</Card.Root>

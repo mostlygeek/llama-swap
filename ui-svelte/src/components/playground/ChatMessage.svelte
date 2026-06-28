@@ -1,9 +1,13 @@
 <script lang="ts">
   import { renderMarkdown, escapeHtml, renderStreamingMarkdown, createStreamingCache } from "../../lib/markdown";
   import type { RenderedBlock } from "../../lib/markdown";
-  import { Copy, Check, Pencil, X, Save, RefreshCw, ChevronDown, ChevronRight, Brain, Code } from "lucide-svelte";
+  import { Copy, Check, Pencil, X, Save, RefreshCw, ChevronDown, ChevronRight, Brain, Code } from "@lucide/svelte";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { getTextContent, getImageUrls } from "../../lib/types";
   import type { ContentPart } from "../../lib/types";
+  import { formatDuration } from "../../lib/format";
+  import { copyText } from "../../lib/clipboard";
 
   interface Props {
     role: "user" | "assistant" | "system";
@@ -41,32 +45,10 @@
   let showReasoning = $state(false);
   let modalImageUrl = $state<string | null>(null);
 
-  function formatDuration(ms: number): string {
-    if (ms < 1000) {
-      return `${ms.toFixed(0)}ms`;
-    }
-    return `${(ms / 1000).toFixed(1)}s`;
-  }
-
   async function copyToClipboard() {
-    try {
-      if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(textContent);
-      } else {
-        // Fallback for non-secure contexts (HTTP)
-        const textarea = document.createElement("textarea");
-        textarea.value = textContent;
-        textarea.style.position = "fixed";
-        textarea.style.left = "-9999px";
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textarea);
-      }
+    if (await copyText(textContent)) {
       copied = true;
       setTimeout(() => (copied = false), 2000);
-    } catch (err) {
-      console.error("Failed to copy:", err);
     }
   }
 
@@ -130,23 +112,10 @@
         btn.innerHTML = COPY_SVG;
         btn.addEventListener('click', async () => {
           const text = pre.querySelector('code')?.textContent ?? pre.textContent ?? '';
-          try {
-            if (navigator.clipboard && window.isSecureContext) {
-              await navigator.clipboard.writeText(text);
-            } else {
-              const ta = document.createElement('textarea');
-              ta.value = text;
-              ta.style.cssText = 'position:fixed;left:-9999px';
-              document.body.appendChild(ta);
-              ta.select();
-              document.execCommand('copy');
-              document.body.removeChild(ta);
-            }
+          if (await copyText(text)) {
             btn.innerHTML = CHECK_SVG;
             btn.classList.add('copied');
             setTimeout(() => { btn.innerHTML = COPY_SVG; btn.classList.remove('copied'); }, 2000);
-          } catch (e) {
-            console.error('copy failed', e);
           }
         });
         pre.appendChild(btn);
@@ -161,37 +130,37 @@
 
 <div class="flex {role === 'user' ? 'justify-end' : 'justify-start'} mb-4">
   <div
-    class="relative group rounded-lg px-4 py-2 {role === 'user'
-      ? 'max-w-[85%] bg-primary text-btn-primary-text'
-      : 'w-full sm:w-4/5 bg-surface border border-gray-200 dark:border-white/10'}"
+    class="group relative rounded-lg px-4 py-2 {role === 'user'
+      ? 'bg-primary text-primary-foreground max-w-[85%]'
+      : 'bg-card w-full border sm:w-4/5'}"
   >
     {#if role === "assistant"}
       {#if reasoning_content || isReasoning}
-        <div class="mb-3 border border-gray-200 dark:border-white/10 rounded overflow-hidden">
+        <div class="mb-3 overflow-hidden rounded-md border">
           <button
-            class="w-full flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-white/5 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors text-sm"
+            class="bg-muted/50 hover:bg-muted flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors"
             onclick={() => showReasoning = !showReasoning}
           >
             {#if showReasoning}
-              <ChevronDown class="w-4 h-4" />
+              <ChevronDown class="size-4" />
             {:else}
-              <ChevronRight class="w-4 h-4" />
+              <ChevronRight class="size-4" />
             {/if}
-            <Brain class="w-4 h-4" />
+            <Brain class="size-4" />
             <span class="font-medium">Reasoning</span>
-            <span class="text-txtsecondary ml-2">
-              ({reasoning_content.length} chars{#if !isReasoning && reasoningTimeMs > 0}, {formatDuration(reasoningTimeMs)}{/if})
+            <span class="text-muted-foreground ml-2">
+              ({reasoning_content.length} chars{#if !isReasoning && reasoningTimeMs > 0}, {formatDuration(reasoningTimeMs, { precision: 1, subSecondMs: true })}{/if})
             </span>
             {#if isReasoning}
-              <span class="ml-auto flex items-center gap-1 text-txtsecondary">
-                <span class="w-1.5 h-1.5 bg-primary rounded-full animate-pulse"></span>
+              <span class="text-muted-foreground ml-auto flex items-center gap-1">
+                <span class="bg-primary h-1.5 w-1.5 animate-pulse rounded-full"></span>
                 reasoning...
               </span>
             {/if}
           </button>
           {#if showReasoning}
-            <div class="px-3 py-2 bg-gray-50/50 dark:bg-white/[0.02] text-sm text-txtsecondary whitespace-pre-wrap font-mono">
-              {reasoning_content}{#if isReasoning}<span class="inline-block w-1.5 h-4 bg-current animate-pulse ml-0.5"></span>{/if}
+            <div class="bg-muted/30 text-muted-foreground whitespace-pre-wrap px-3 py-2 font-mono text-sm">
+              {reasoning_content}{#if isReasoning}<span class="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-current"></span>{/if}
             </div>
           {/if}
         </div>
@@ -201,12 +170,12 @@
           {#each imageUrls as imageUrl, idx (idx)}
             <button
               onclick={() => openModal(imageUrl)}
-              class="cursor-pointer rounded border border-gray-200 dark:border-white/10 hover:opacity-80 transition-opacity"
+              class="cursor-pointer rounded-md border transition-opacity hover:opacity-80"
             >
               <img
                 src={imageUrl}
                 alt="Image {idx + 1}"
-                class="max-h-64 rounded"
+                class="max-h-64 rounded-md"
               />
             </button>
           {/each}
@@ -226,60 +195,47 @@
         </div>
       {/if}
       {#if !isStreaming}
-        <div class="flex gap-1 mt-2 pt-1 border-t border-gray-200 dark:border-white/10">
+        <div class="mt-2 flex gap-1 border-t pt-1">
           {#if onRegenerate}
-            <button
-              class="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 text-txtsecondary"
-              onclick={onRegenerate}
-              title="Regenerate response"
-            >
-              <RefreshCw class="w-4 h-4" />
-            </button>
+            <Button variant="ghost" size="icon-xs" class="text-muted-foreground" onclick={onRegenerate} title="Regenerate response">
+              <RefreshCw />
+            </Button>
           {/if}
-          <button
-            class="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 text-txtsecondary"
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            class="text-muted-foreground"
             onclick={copyToClipboard}
             title={copied ? "Copied!" : "Copy to clipboard"}
           >
             {#if copied}
-              <Check class="w-4 h-4 text-green-500" />
+              <Check class="text-success" />
             {:else}
-              <Copy class="w-4 h-4" />
+              <Copy />
             {/if}
-          </button>
-          <button
-            class="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 {showRaw ? 'text-primary' : 'text-txtsecondary'}"
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            class={showRaw ? "text-primary" : "text-muted-foreground"}
             onclick={() => showRaw = !showRaw}
             title={showRaw ? "Show rendered" : "Show raw"}
           >
-            <Code class="w-4 h-4" />
-          </button>
+            <Code />
+          </Button>
         </div>
       {/if}
     {:else}
       {#if isEditing}
-        <div class="flex flex-col gap-2 min-w-[300px]">
-          <textarea
-            class="w-full px-3 py-2 rounded border border-gray-200 dark:border-white/10 bg-surface text-txtmain focus:outline-none focus:ring-2 focus:ring-primary resize-none"
-            rows="3"
-            bind:value={editContent}
-            onkeydown={handleKeyDown}
-          ></textarea>
+        <div class="flex min-w-[300px] flex-col gap-2">
+          <Textarea class="resize-none" rows={3} bind:value={editContent} onkeydown={handleKeyDown} />
           <div class="flex justify-end gap-2">
-            <button
-              class="p-1.5 rounded hover:bg-white/20"
-              onclick={cancelEdit}
-              title="Cancel"
-            >
-              <X class="w-4 h-4" />
-            </button>
-            <button
-              class="p-1.5 rounded hover:bg-white/20"
-              onclick={saveEdit}
-              title="Save"
-            >
-              <Save class="w-4 h-4" />
-            </button>
+            <Button variant="ghost" size="icon-sm" onclick={cancelEdit} title="Cancel">
+              <X />
+            </Button>
+            <Button variant="ghost" size="icon-sm" onclick={saveEdit} title="Save">
+              <Save />
+            </Button>
           </div>
         </div>
       {:else}
@@ -288,12 +244,12 @@
             {#each imageUrls as imageUrl, idx (idx)}
               <button
                 onclick={() => openModal(imageUrl)}
-                class="cursor-pointer rounded border border-white/20 hover:opacity-80 transition-opacity"
+                class="cursor-pointer rounded-md border border-white/20 transition-opacity hover:opacity-80"
               >
                 <img
                   src={imageUrl}
                   alt="Image {idx + 1}"
-                  class="max-w-[200px] rounded"
+                  class="max-w-[200px] rounded-md"
                 />
               </button>
             {/each}
@@ -302,11 +258,11 @@
         <div class="whitespace-pre-wrap pr-8">{textContent}</div>
         {#if canEdit}
           <button
-            class="absolute top-2 right-2 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity bg-white/20 hover:bg-white/30 shadow-sm"
+            class="absolute right-2 top-2 rounded-lg bg-white/20 p-1.5 opacity-0 shadow-sm transition-opacity hover:bg-white/30 group-hover:opacity-100"
             onclick={startEdit}
             title="Edit message"
           >
-            <Pencil class="w-4 h-4" />
+            <Pencil class="size-4" />
           </button>
         {/if}
       {/if}
@@ -324,16 +280,16 @@
     tabindex="-1"
   >
     <button
-      class="absolute top-4 right-4 p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"
+      class="absolute right-4 top-4 rounded-lg bg-white/10 p-2 text-white transition-colors hover:bg-white/20"
       onclick={() => closeModal()}
       title="Close"
     >
-      <X class="w-6 h-6" />
+      <X class="size-6" />
     </button>
     <img
       src={modalImageUrl}
       alt=""
-      class="max-w-full max-h-full rounded pointer-events-none"
+      class="max-w-full max-h-full rounded-md pointer-events-none"
     />
   </div>
 {/if}
@@ -341,8 +297,8 @@
 <style>
   .prose :global(pre) {
     position: relative;
-    background-color: var(--color-surface);
-    border: 1px solid var(--color-border, rgba(128, 128, 128, 0.2));
+    background-color: var(--muted);
+    border: 1px solid var(--border);
     border-radius: 0.375rem;
     padding: 0.75rem;
     padding-right: 2.5rem;
@@ -359,20 +315,20 @@
     justify-content: center;
     padding: 0.25rem;
     border-radius: 0.25rem;
-    border: 1px solid var(--color-border);
-    background: var(--color-surface);
-    color: var(--color-txtsecondary);
+    border: 1px solid var(--border);
+    background: var(--muted);
+    color: var(--muted-foreground);
     cursor: pointer;
     transition: background-color 0.15s;
     line-height: 0;
   }
 
   .prose :global(.code-copy-btn:hover) {
-    background: var(--color-secondary);
+    background: var(--accent);
   }
 
   .prose :global(.code-copy-btn.copied) {
-    color: var(--color-success);
+    color: var(--success);
     opacity: 1;
   }
 
@@ -387,10 +343,10 @@
   }
 
   .prose :global(code:not(pre code)) {
-    background-color: var(--color-surface);
+    background-color: var(--muted);
     padding: 0.125rem 0.25rem;
     border-radius: 0.25rem;
-    border: 1px solid var(--color-border, rgba(128, 128, 128, 0.2));
+    border: 1px solid var(--border);
   }
 
   .prose :global(p) {
@@ -431,14 +387,14 @@
   }
 
   .prose :global(blockquote) {
-    border-left: 3px solid var(--color-primary);
+    border-left: 3px solid var(--primary);
     padding-left: 1rem;
     margin: 0.5rem 0;
     font-style: italic;
   }
 
   .prose :global(a) {
-    color: var(--color-primary);
+    color: var(--primary);
     text-decoration: underline;
   }
 
@@ -450,13 +406,13 @@
 
   .prose :global(th),
   .prose :global(td) {
-    border: 1px solid var(--color-border, rgba(128, 128, 128, 0.2));
+    border: 1px solid var(--border);
     padding: 0.5rem;
     text-align: left;
   }
 
   .prose :global(th) {
-    background-color: var(--color-surface);
+    background-color: var(--muted);
     font-weight: 600;
   }
 

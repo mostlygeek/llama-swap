@@ -4,6 +4,10 @@
   import { persistentStore } from "../stores/persistent";
   import type { SysStat, GpuStat } from "../lib/types";
   import PerformanceChart from "../components/PerformanceChart.svelte";
+  import SegmentedControl from "../components/SegmentedControl.svelte";
+  import * as Card from "$lib/components/ui/card/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { RefreshCw } from "@lucide/svelte";
 
   const COLORS = [
     "#3b82f6",
@@ -352,65 +356,36 @@
 
 <div class="space-y-6">
   <div class="flex items-center justify-between">
-    <h2 class="text-xl font-semibold text-txtmain">Performance (Experimental)</h2>
+    <h2 class="text-xl font-semibold text-foreground">Performance (Experimental)</h2>
     <div class="flex items-center gap-4">
-      <div class="flex items-center gap-1">
-        {#each WINDOWS as win, i}
-          <button
-            class="btn btn--sm"
-            class:bg-primary={$selectedWindow === i}
-            class:text-btn-primary-text={$selectedWindow === i}
-            onclick={() => ($selectedWindow = i)}
-          >
-            {win.label}
-          </button>
-        {/each}
-      </div>
-      <div class="flex items-center gap-1">
-        <span class="text-xs text-txtsecondary mr-1">Refresh:</span>
-        {#each INTERVALS as intv, i}
-          <button
-            class="btn btn--sm"
-            class:bg-primary={$selectedInterval === i}
-            class:text-btn-primary-text={$selectedInterval === i}
-            onclick={() => handleIntervalChange(i)}
-          >
-            {intv.label}
-          </button>
-        {/each}
-      </div>
-      <button class="btn btn--sm p-1" title="Refresh" onclick={manualRefresh} disabled={refreshing}>
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          class="w-4 h-4"
-          class:animate-spin={refreshing}
-        >
-          <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-          <path d="M3 3v5h5" />
-          <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
-          <path d="M16 16h5v5" />
-        </svg>
-      </button>
+      <SegmentedControl items={WINDOWS} selected={$selectedWindow} onSelect={(i) => ($selectedWindow = i)} />
+      <SegmentedControl
+        items={INTERVALS}
+        selected={$selectedInterval}
+        onSelect={handleIntervalChange}
+        label="Refresh:"
+      />
+      <Button variant="outline" size="icon-sm" title="Refresh" onclick={manualRefresh} disabled={refreshing}>
+        <RefreshCw class={refreshing ? "animate-spin" : ""} />
+      </Button>
     </div>
   </div>
-  <p class="text-sm text-txtsecondary">
+  <p class="text-sm text-muted-foreground">
     This is an experimental feature. Please use <a
-      class="underline hover:text-txtmain"
+      class="underline hover:text-foreground"
       href="https://github.com/mostlygeek/llama-swap/discussions/771">discussion #771</a
     > for instructions and to share feedback.
   </p>
 
   <!-- GPU Section -->
   <section class="space-y-4">
-    <h3 class="text-lg font-medium text-txtmain">GPU</h3>
+    <h3 class="text-lg font-medium text-foreground">GPU</h3>
     {#if !hasGpuData}
-      <p class="text-txtsecondary card p-4">No GPU data available</p>
+      <Card.Root class="py-0">
+        <Card.Content class="p-4">
+          <p class="text-muted-foreground">No GPU data available</p>
+        </Card.Content>
+      </Card.Root>
     {:else}
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <PerformanceChart
@@ -458,7 +433,7 @@
 
   <!-- System Section -->
   <section class="space-y-4">
-    <h3 class="text-lg font-medium text-txtmain">System</h3>
+    <h3 class="text-lg font-medium text-foreground">System</h3>
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <PerformanceChart
         title="CPU Utilization (%)"
@@ -479,15 +454,15 @@
           yLabel="%"
         />
         {#if latestMemSwap}
-          <div class="flex items-center justify-center gap-4 text-xs text-txtsecondary mt-1 px-4">
+          <div class="flex items-center justify-center gap-4 text-xs text-muted-foreground mt-1 px-4">
             <span
-              >Mem: <span class="text-txtmain font-medium"
+              >Mem: <span class="text-foreground font-medium"
                 >{latestMemSwap.mem_used_mb.toLocaleString()} / {latestMemSwap.mem_total_mb.toLocaleString()} MB ({latestMemSwap.mem_used_pct}%)</span
               ></span
             >
             {#if latestMemSwap.swap_used_pct !== null}
               <span
-                >Swap: <span class="text-txtmain font-medium"
+                >Swap: <span class="text-foreground font-medium"
                   >{latestMemSwap.swap_used_mb.toLocaleString()} / {latestMemSwap.swap_total_mb.toLocaleString()} MB ({latestMemSwap.swap_used_pct}%)</span
                 ></span
               >
