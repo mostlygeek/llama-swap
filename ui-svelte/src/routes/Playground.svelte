@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Component } from "svelte";
   import ChatInterface from "../components/playground/ChatInterface.svelte";
   import ImageInterface from "../components/playground/ImageInterface.svelte";
   import AudioInterface from "../components/playground/AudioInterface.svelte";
@@ -8,6 +9,15 @@
   import * as Card from "$lib/components/ui/card/index.js";
   import { Tabs, TabsList, TabsTrigger } from "$lib/components/ui/tabs/index.js";
   import { selectedPlaygroundTab, playgroundTabs, type PlaygroundTab } from "../stores/playground";
+
+  const tabComponents: Record<PlaygroundTab, Component> = {
+    chat: ChatInterface,
+    images: ImageInterface,
+    speech: SpeechInterface,
+    audio: AudioInterface,
+    rerank: RerankInterface,
+    concurrency: ConcurrencyInterface,
+  };
 </script>
 
 <Card.Root class="flex h-full flex-col gap-0 overflow-hidden p-4">
@@ -23,24 +33,12 @@
     </TabsList>
 
     <div class="relative flex-1 overflow-hidden">
-      <div class="h-full" class:hidden={$selectedPlaygroundTab !== "chat"}>
-        <ChatInterface />
-      </div>
-      <div class="h-full" class:hidden={$selectedPlaygroundTab !== "images"}>
-        <ImageInterface />
-      </div>
-      <div class="h-full" class:hidden={$selectedPlaygroundTab !== "speech"}>
-        <SpeechInterface />
-      </div>
-      <div class="h-full" class:hidden={$selectedPlaygroundTab !== "audio"}>
-        <AudioInterface />
-      </div>
-      <div class="h-full" class:hidden={$selectedPlaygroundTab !== "rerank"}>
-        <RerankInterface />
-      </div>
-      <div class="h-full" class:hidden={$selectedPlaygroundTab !== "concurrency"}>
-        <ConcurrencyInterface />
-      </div>
+      {#each playgroundTabs as tab (tab.id)}
+        {@const TabComponent = tabComponents[tab.id]}
+        <div class="h-full" class:hidden={$selectedPlaygroundTab !== tab.id}>
+          <TabComponent />
+        </div>
+      {/each}
     </div>
   </Tabs>
 </Card.Root>

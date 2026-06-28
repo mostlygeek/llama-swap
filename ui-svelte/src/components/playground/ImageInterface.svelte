@@ -1,11 +1,13 @@
 <script lang="ts">
-  import { models } from "../../stores/api";
+  import { hasListedModels } from "../../stores/api";
   import { persistentStore } from "../../stores/persistent";
+  import { createPlaygroundInterface } from "../../lib/playgroundInterface";
   import { generateImage } from "../../lib/imageApi";
   import { generateSdImage, fetchSdLoras } from "../../lib/sdApi";
   import { playgroundStores } from "../../stores/playgroundActivity";
   import ModelSelector from "./ModelSelector.svelte";
   import ExpandableTextarea from "./ExpandableTextarea.svelte";
+  import EmptyState from "../EmptyState.svelte";
   import type { ImageApiMode, SdApiLora, SdApiLoraRef } from "../../lib/types";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -13,7 +15,10 @@
   import * as Select from "$lib/components/ui/select/index.js";
   import { Download, X } from "@lucide/svelte";
 
-  const selectedModelStore = persistentStore<string>("playground-image-model", "");
+  const iface = createPlaygroundInterface("playground-image-model", playgroundStores.imageGenerating);
+  const selectedModelStore = iface.selectedModel;
+  const busyStore = iface.busy;
+  const error = iface.error;
   const selectedSizeStore = persistentStore<string>("playground-image-size", "1024x1024");
   const apiModeStore = persistentStore<ImageApiMode>("playground-image-api-mode", "openai");
 
@@ -27,10 +32,8 @@
   const sdBatchSizeStore = persistentStore<number>("playground-sdapi-batch-size", 1);
 
   let prompt = $state("");
-  let isGenerating = $state(false);
+  let isGenerating = $derived($busyStore);
   let generatedImages = $state<string[]>([]);
-  let error = $state<string | null>(null);
-  let abortController = $state<AbortController | null>(null);
   let showFullscreen = $state(false);
   let fullscreenIndex = $state(0);
   let showSettings = $state(false);
@@ -42,12 +45,7 @@
   let lorasLoaded = $state(false);
   let loraError = $state<string | null>(null);
 
-  let hasModels = $derived($models.some((m) => !m.unlisted));
   let isSdapi = $derived($apiModeStore === "sdapi");
-
-  $effect(() => {
-    playgroundStores.imageGenerating.set(isGenerating);
-  });
 
   async function loadLoras() {
     if (!$selectedModelStore || isLoadingLoras) return;
@@ -84,11 +82,7 @@
     const trimmedPrompt = prompt.trim();
     if (!trimmedPrompt || !$selectedModelStore || isGenerating) return;
 
-    isGenerating = true;
-    error = null;
-    abortController = new AbortController();
-
-    try {
+    await iface.run(async (signal) => {
       if (isSdapi) {
         const [w, h] = $selectedSizeStore.split("x").map(Number);
         const request = {
@@ -106,7 +100,7 @@
           lora: selectedLoras.length > 0 ? selectedLoras : undefined,
         };
 
-        const response = await generateSdImage(request, abortController.signal);
+        const response = await generateSdImage(request, signal);
         if (response.images && response.images.length > 0) {
           generatedImages = response.images.map(
             (img) => `data:image/png;base64,${img}`
@@ -117,7 +111,7 @@
           $selectedModelStore,
           trimmedPrompt,
           $selectedSizeStore,
-          abortController.signal
+          signal
         );
 
         if (response.data && response.data.length > 0) {
@@ -129,25 +123,16 @@
           }
         }
       }
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
-        // User cancelled
-      } else {
-        error = err instanceof Error ? err.message : "An error occurred";
-      }
-    } finally {
-      isGenerating = false;
-      abortController = null;
-    }
+    });
   }
 
   function cancelGeneration() {
-    abortController?.abort();
+    iface.cancel();
   }
 
   function clearImage() {
     generatedImages = [];
-    error = null;
+    $error = null;
     prompt = "";
   }
 
@@ -406,10 +391,8 @@
   {/if}
 
   <!-- Empty state for no models configured -->
-  {#if !hasModels}
-    <div class="flex-1 flex items-center justify-center text-muted-foreground">
-      <p>No models configured. Add models to your configuration to generate images.</p>
-    </div>
+  {#if !$hasListedModels}
+    <EmptyState message="No models configured. Add models to your configuration to generate images." />
   {:else}
     <!-- Image display area -->
     <div class="flex-1 overflow-auto mb-4 flex items-center justify-center bg-background border border-border rounded-md">
@@ -418,10 +401,10 @@
           <div class="inline-block w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mb-2"></div>
           <p>Generating image...</p>
         </div>
-      {:else if error}
+      {:else if $error}
         <div class="text-center text-red-500 p-4">
           <p class="font-medium">Error</p>
-          <p class="text-sm mt-1">{error}</p>
+          <p class="text-sm mt-1">{$error}</p>
         </div>
       {:else if generatedImages.length > 1}
         <div class="grid grid-cols-2 gap-2 p-2 w-full h-full overflow-auto">
@@ -506,7 +489,7 @@
             variant="outline"
             class="flex-1 md:flex-none"
             onclick={clearImage}
-            disabled={generatedImages.length === 0 && !error && !prompt.trim()}
+            disabled={generatedImages.length === 0 && !$error && !prompt.trim()}
           >
             Clear
           </Button>

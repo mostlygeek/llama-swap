@@ -6,6 +6,8 @@
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { getTextContent, getImageUrls } from "../../lib/types";
   import type { ContentPart } from "../../lib/types";
+  import { formatDuration } from "../../lib/format";
+  import { copyText } from "../../lib/clipboard";
 
   interface Props {
     role: "user" | "assistant" | "system";
@@ -43,32 +45,10 @@
   let showReasoning = $state(false);
   let modalImageUrl = $state<string | null>(null);
 
-  function formatDuration(ms: number): string {
-    if (ms < 1000) {
-      return `${ms.toFixed(0)}ms`;
-    }
-    return `${(ms / 1000).toFixed(1)}s`;
-  }
-
   async function copyToClipboard() {
-    try {
-      if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(textContent);
-      } else {
-        // Fallback for non-secure contexts (HTTP)
-        const textarea = document.createElement("textarea");
-        textarea.value = textContent;
-        textarea.style.position = "fixed";
-        textarea.style.left = "-9999px";
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textarea);
-      }
+    if (await copyText(textContent)) {
       copied = true;
       setTimeout(() => (copied = false), 2000);
-    } catch (err) {
-      console.error("Failed to copy:", err);
     }
   }
 
@@ -132,23 +112,10 @@
         btn.innerHTML = COPY_SVG;
         btn.addEventListener('click', async () => {
           const text = pre.querySelector('code')?.textContent ?? pre.textContent ?? '';
-          try {
-            if (navigator.clipboard && window.isSecureContext) {
-              await navigator.clipboard.writeText(text);
-            } else {
-              const ta = document.createElement('textarea');
-              ta.value = text;
-              ta.style.cssText = 'position:fixed;left:-9999px';
-              document.body.appendChild(ta);
-              ta.select();
-              document.execCommand('copy');
-              document.body.removeChild(ta);
-            }
+          if (await copyText(text)) {
             btn.innerHTML = CHECK_SVG;
             btn.classList.add('copied');
             setTimeout(() => { btn.innerHTML = COPY_SVG; btn.classList.remove('copied'); }, 2000);
-          } catch (e) {
-            console.error('copy failed', e);
           }
         });
         pre.appendChild(btn);
@@ -182,7 +149,7 @@
             <Brain class="size-4" />
             <span class="font-medium">Reasoning</span>
             <span class="text-muted-foreground ml-2">
-              ({reasoning_content.length} chars{#if !isReasoning && reasoningTimeMs > 0}, {formatDuration(reasoningTimeMs)}{/if})
+              ({reasoning_content.length} chars{#if !isReasoning && reasoningTimeMs > 0}, {formatDuration(reasoningTimeMs, { precision: 1, subSecondMs: true })}{/if})
             </span>
             {#if isReasoning}
               <span class="text-muted-foreground ml-auto flex items-center gap-1">

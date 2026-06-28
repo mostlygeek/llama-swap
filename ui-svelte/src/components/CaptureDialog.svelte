@@ -2,6 +2,7 @@
   import type { ReqRespCapture } from "../lib/types";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import { copyText } from "../lib/clipboard";
 
   interface Props {
     capture: ReqRespCapture | null;
@@ -103,17 +104,13 @@
   }
 
   async function copyToClipboard(text: string, type: "req" | "resp") {
-    try {
-      await navigator.clipboard.writeText(text);
-      if (type === "req") {
-        copiedReq = true;
-        setTimeout(() => (copiedReq = false), 1500);
-      } else {
-        copiedResp = true;
-        setTimeout(() => (copiedResp = false), 1500);
-      }
-    } catch {
-      // ignore
+    if (!(await copyText(text))) return;
+    if (type === "req") {
+      copiedReq = true;
+      setTimeout(() => (copiedReq = false), 1500);
+    } else {
+      copiedResp = true;
+      setTimeout(() => (copiedResp = false), 1500);
     }
   }
 

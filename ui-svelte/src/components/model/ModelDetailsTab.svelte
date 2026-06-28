@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Model } from "../../lib/types";
   import * as Card from "$lib/components/ui/card/index.js";
+  import Tag from "../Tag.svelte";
 
   interface Props {
     model: Model;
@@ -34,9 +35,7 @@
     {:else}
       <div class="flex flex-wrap gap-1.5">
         {#each capabilities as [key] (key)}
-          <span class="bg-muted text-muted-foreground rounded-md px-2 py-0.5 text-xs font-medium">
-            {capabilityLabels[key] ?? key}
-          </span>
+          <Tag>{capabilityLabels[key] ?? key}</Tag>
         {/each}
       </div>
     {/if}

@@ -4,6 +4,7 @@
   import { persistentStore } from "../stores/persistent";
   import type { SysStat, GpuStat } from "../lib/types";
   import PerformanceChart from "../components/PerformanceChart.svelte";
+  import SegmentedControl from "../components/SegmentedControl.svelte";
   import * as Card from "$lib/components/ui/card/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { RefreshCw } from "@lucide/svelte";
@@ -357,29 +358,13 @@
   <div class="flex items-center justify-between">
     <h2 class="text-xl font-semibold text-foreground">Performance (Experimental)</h2>
     <div class="flex items-center gap-4">
-      <div class="flex items-center gap-1">
-        {#each WINDOWS as win, i}
-          <Button
-            variant={$selectedWindow === i ? "default" : "outline"}
-            size="sm"
-            onclick={() => ($selectedWindow = i)}
-          >
-            {win.label}
-          </Button>
-        {/each}
-      </div>
-      <div class="flex items-center gap-1">
-        <span class="text-xs text-muted-foreground mr-1">Refresh:</span>
-        {#each INTERVALS as intv, i}
-          <Button
-            variant={$selectedInterval === i ? "default" : "outline"}
-            size="sm"
-            onclick={() => handleIntervalChange(i)}
-          >
-            {intv.label}
-          </Button>
-        {/each}
-      </div>
+      <SegmentedControl items={WINDOWS} selected={$selectedWindow} onSelect={(i) => ($selectedWindow = i)} />
+      <SegmentedControl
+        items={INTERVALS}
+        selected={$selectedInterval}
+        onSelect={handleIntervalChange}
+        label="Refresh:"
+      />
       <Button variant="outline" size="icon-sm" title="Refresh" onclick={manualRefresh} disabled={refreshing}>
         <RefreshCw class={refreshing ? "animate-spin" : ""} />
       </Button>

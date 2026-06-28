@@ -1,11 +1,12 @@
 <script lang="ts">
   import { params } from "svelte-spa-router";
   import { models } from "../stores/api";
-  import { pendingLoads, onToggleLoad, statusDotColor } from "../stores/modelLoad";
+  import { statusDotColor } from "../stores/modelLoad";
   import type { Model } from "../lib/types";
+  import ModelLoadButton from "../components/ModelLoadButton.svelte";
   import * as Card from "$lib/components/ui/card/index.js";
   import { Tabs, TabsList, TabsTrigger, TabsContent } from "$lib/components/ui/tabs/index.js";
-  import { Play, PowerOff, Loader2, ExternalLink } from "@lucide/svelte";
+  import { ExternalLink } from "@lucide/svelte";
   import ModelActivityTab from "../components/model/ModelActivityTab.svelte";
   import ModelLogsTab from "../components/model/ModelLogsTab.svelte";
   import ModelDetailsTab from "../components/model/ModelDetailsTab.svelte";
@@ -40,24 +41,7 @@
             >
               <ExternalLink class="size-4" />
             </a>
-            <button
-              type="button"
-              class="flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
-              title={model.state === "ready" ? "Unload" : $pendingLoads[model.id] ? "Cancel" : "Load"}
-              aria-label={model.state === "ready" ? "Unload model" : "Load model"}
-              disabled={model.state === "starting" || model.state === "stopping"}
-              onclick={() => onToggleLoad(model)}
-            >
-              {#if $pendingLoads[model.id] && model.state === "stopped"}
-                <Loader2 class="size-3.5 animate-spin" />
-              {:else if model.state === "ready"}
-                <PowerOff class="size-3.5" />
-              {:else if model.state === "starting" || model.state === "stopping"}
-                <Loader2 class="size-3.5 animate-spin" />
-              {:else}
-                <Play class="size-3.5" />
-              {/if}
-            </button>
+            <ModelLoadButton {model} size="sm" />
           </div>
         </div>
         {#if model.description}

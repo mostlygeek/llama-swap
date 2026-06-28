@@ -37,6 +37,7 @@
   import HeaderLabel from "./activity-table/HeaderLabel.svelte";
   import ViewCaptureButton from "./activity-table/ViewCaptureButton.svelte";
   import MetaCell from "./activity-table/MetaCell.svelte";
+  import { formatDuration, formatSpeed, formatRelativeTime } from "../lib/format";
 
   interface Props {
     metrics: ActivityLogEntry[];
@@ -59,27 +60,6 @@
     emptyMessage = "No activity recorded",
     cardClass = "",
   }: Props = $props();
-
-  function formatSpeed(speed: number): string {
-    return speed < 0 ? "unknown" : speed.toFixed(2) + " t/s";
-  }
-
-  function formatDuration(ms: number): string {
-    return (ms / 1000).toFixed(2) + "s";
-  }
-
-  function formatRelativeTime(timestamp: string): string {
-    const now = new Date();
-    const date = new Date(timestamp);
-    const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
-    if (diffInSeconds < 5) return "now";
-    if (diffInSeconds < 60) return `${diffInSeconds}s ago`;
-    const diffInMinutes = Math.floor(diffInSeconds / 60);
-    if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
-    const diffInHours = Math.floor(diffInMinutes / 60);
-    if (diffInHours < 24) return `${diffInHours}h ago`;
-    return "a while ago";
-  }
 
   function formatDrafted(drafted: number, accepted: number): string {
     return drafted > 0

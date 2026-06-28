@@ -1,25 +1,29 @@
 <script lang="ts">
-  import { models } from "../../stores/api";
+  import { hasListedModels } from "../../stores/api";
   import { persistentStore } from "../../stores/persistent";
+  import { createPlaygroundInterface } from "../../lib/playgroundInterface";
   import { generateSpeech } from "../../lib/speechApi";
   import { playgroundStores } from "../../stores/playgroundActivity";
   import ModelSelector from "./ModelSelector.svelte";
   import ExpandableTextarea from "./ExpandableTextarea.svelte";
+  import EmptyState from "../EmptyState.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { RefreshCw, Download } from "@lucide/svelte";
 
-  const selectedModelStore = persistentStore<string>("playground-speech-model", "");
+  const iface = createPlaygroundInterface("playground-speech-model", playgroundStores.speechGenerating);
+  const selectedModelStore = iface.selectedModel;
+  const busyStore = iface.busy;
+  const errorStore = iface.error;
   const selectedVoiceStore = persistentStore<string>("playground-speech-voice", "coral");
   const autoPlayStore = persistentStore<boolean>("playground-speech-autoplay", false);
 
   let inputText = $state("");
-  let isGenerating = $state(false);
+  let isGenerating = $derived($busyStore);
+  let error = $derived($errorStore);
   let generatedAudioUrl = $state<string | null>(null);
   let generatedVoice = $state<string | null>(null);
   let generatedTimestamp = $state<Date | null>(null);
-  let error = $state<string | null>(null);
-  let abortController = $state<AbortController | null>(null);
   let audioElement = $state<HTMLAudioElement | null>(null);
   let availableVoices = $state<string[]>(["coral", "alloy", "echo", "fable", "onyx", "nova", "shimmer"]);
   let isLoadingVoices = $state(false);
@@ -46,13 +50,8 @@
     }
   }
 
-  let hasModels = $derived($models.some((m) => !m.unlisted));
 
   let isInitialLoad = $state(true);
-
-  $effect(() => {
-    playgroundStores.speechGenerating.set(isGenerating);
-  });
 
   // On page load, restore cached voices for the selected model if available
   $effect(() => {
@@ -131,16 +130,12 @@
     const trimmedText = inputText.trim();
     if (!trimmedText || !$selectedModelStore || isGenerating) return;
 
-    isGenerating = true;
-    error = null;
-    abortController = new AbortController();
-
-    try {
+    await iface.run(async (signal) => {
       const audioBlob = await generateSpeech(
         $selectedModelStore,
         trimmedText,
         $selectedVoiceStore,
-        abortController.signal
+        signal
       );
 
       // Revoke previous URL to prevent memory leaks
@@ -152,20 +147,11 @@
       generatedAudioUrl = URL.createObjectURL(audioBlob);
       generatedVoice = $selectedVoiceStore;
       generatedTimestamp = new Date();
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
-        // User cancelled
-      } else {
-        error = err instanceof Error ? err.message : "An error occurred";
-      }
-    } finally {
-      isGenerating = false;
-      abortController = null;
-    }
+    });
   }
 
   function cancelGeneration() {
-    abortController?.abort();
+    iface.cancel();
   }
 
   function clearInput() {
@@ -239,10 +225,8 @@
   </div>
 
   <!-- Empty state for no models configured -->
-  {#if !hasModels}
-    <div class="flex-1 flex items-center justify-center text-muted-foreground">
-      <p>No models configured. Add models to your configuration to generate speech.</p>
-    </div>
+  {#if !$hasListedModels}
+    <EmptyState message="No models configured. Add models to your configuration to generate speech." />
   {:else}
     <!-- Audio display area -->
     <div class="shrink-0 mb-4 bg-background border border-border rounded-md p-4 md:p-6">

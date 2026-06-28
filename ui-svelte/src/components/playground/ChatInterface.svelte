@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { models } from "../../stores/api";
+  import { hasListedModels } from "../../stores/api";
   import { persistentStore } from "../../stores/persistent";
   import { streamChatCompletion, type Endpoint } from "../../lib/chatApi";
   import { playgroundStores } from "../../stores/playgroundActivity";
@@ -7,6 +7,7 @@
   import ChatMessageComponent from "./ChatMessage.svelte";
   import ModelSelector from "./ModelSelector.svelte";
   import ExpandableTextarea from "./ExpandableTextarea.svelte";
+  import EmptyState from "../EmptyState.svelte";
   import { Settings, Paperclip } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -44,7 +45,6 @@
   let fileInput = $state<HTMLInputElement | null>(null);
   let imageError = $state<string | null>(null);
 
-  let hasModels = $derived($models.some((m) => !m.unlisted));
   let userScrolledUp = $state(false);
 
   $effect(() => {
@@ -396,10 +396,8 @@
   </Dialog.Root>
 
   <!-- Empty state for no models configured -->
-  {#if !hasModels}
-    <div class="text-muted-foreground flex flex-1 items-center justify-center">
-      <p>No models configured. Add models to your configuration to start chatting.</p>
-    </div>
+  {#if !$hasListedModels}
+    <EmptyState message="No models configured. Add models to your configuration to start chatting." />
   {:else}
     <!-- Messages area -->
     <div
@@ -408,9 +406,7 @@
       onscroll={handleMessagesScroll}
     >
       {#if messages.length === 0}
-        <div class="text-muted-foreground flex h-full items-center justify-center">
-          <p>Start a conversation by typing a message below.</p>
-        </div>
+        <EmptyState full message="Start a conversation by typing a message below." />
       {:else}
         {#each messages as message, idx (idx)}
           <ChatMessageComponent

@@ -1,13 +1,15 @@
 <script lang="ts">
   import { link } from "svelte-spa-router";
   import { models, unloadAllModels } from "../stores/api";
-  import { pendingLoads, onToggleLoad, statusDotColor } from "../stores/modelLoad";
+  import { statusDotColor } from "../stores/modelLoad";
   import { showUnlistedModels as showUnlisted } from "../stores/modelDisplay";
+  import ModelLoadButton from "../components/ModelLoadButton.svelte";
+  import Tag from "../components/Tag.svelte";
   import * as Card from "$lib/components/ui/card/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Switch from "$lib/components/ui/switch/index.js";
   import * as Label from "$lib/components/ui/label/index.js";
-  import { Play, PowerOff, Loader2, ExternalLink, SquareStack, Eye } from "@lucide/svelte";
+  import { PowerOff, Loader2, ExternalLink, SquareStack, Eye } from "@lucide/svelte";
 
   let unloadingAll = $state(false);
 
@@ -103,9 +105,7 @@
                 {model.state}
               </span>
               {#if model.unlisted}
-                <span class="bg-muted text-muted-foreground rounded-md px-1.5 py-0.5 text-[0.625rem] font-medium uppercase">
-                  unlisted
-                </span>
+                <Tag class="px-1.5 text-[0.625rem] uppercase">unlisted</Tag>
               {/if}
               <a
                 href="/upstream/{encodeURIComponent(model.id)}/"
@@ -117,24 +117,7 @@
               >
                 <ExternalLink class="size-4" />
               </a>
-              <button
-                type="button"
-                class="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
-                title={model.state === "ready" ? "Unload" : $pendingLoads[model.id] ? "Cancel" : "Load"}
-                aria-label={model.state === "ready" ? "Unload model" : "Load model"}
-                disabled={model.state === "starting" || model.state === "stopping"}
-                onclick={() => onToggleLoad(model)}
-              >
-                {#if $pendingLoads[model.id] && model.state === "stopped"}
-                  <Loader2 class="size-4 animate-spin" />
-                {:else if model.state === "ready"}
-                  <PowerOff class="size-4" />
-                {:else if model.state === "starting" || model.state === "stopping"}
-                  <Loader2 class="size-4 animate-spin" />
-                {:else}
-                  <Play class="size-4" />
-                {/if}
-              </button>
+              <ModelLoadButton {model} />
             </div>
           {/each}
         </div>

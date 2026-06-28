@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { models } from "../../stores/api";
-  import { persistentStore } from "../../stores/persistent";
+  import { hasListedModels } from "../../stores/api";
+  import { createPlaygroundInterface } from "../../lib/playgroundInterface";
   import { rerank } from "../../lib/rerankApi";
   import { playgroundStores } from "../../stores/playgroundActivity";
   import ModelSelector from "./ModelSelector.svelte";
+  import EmptyState from "../EmptyState.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
@@ -13,7 +14,10 @@
   type SortOrder = "none" | "asc" | "desc";
   type EditorMode = "table" | "json";
 
-  const selectedModelStore = persistentStore<string>("playground-rerank-model", "");
+  const iface = createPlaygroundInterface("playground-rerank-model", playgroundStores.rerankLoading);
+  const selectedModelStore = iface.selectedModel;
+  const loadingStore = iface.busy;
+  const error = iface.error;
 
   const defaultQuery = "How do LLM's work?";
   const defaultDocs = [
@@ -33,16 +37,13 @@
     ...defaultDocs.map((doc) => ({ doc, score: null })),
     { doc: "", score: null },
   ]);
-  let isLoading = $state(false);
-  let error = $state<string | null>(null);
+  let isLoading = $derived($loadingStore);
   let usage = $state<{ prompt_tokens: number; total_tokens: number } | null>(null);
-  let abortController: AbortController | null = null;
   let sortOrder = $state<SortOrder>("desc");
   let editorMode = $state<EditorMode>("table");
   let jsonText = $state("");
   let jsonError = $state<string | null>(null);
 
-  let hasModels = $derived($models.some((m) => !m.unlisted));
 
   let canSubmit = $derived((() => {
     if (!$selectedModelStore || isLoading) return false;
@@ -83,11 +84,6 @@
     if (editorMode === "table" && rows[rows.length - 1]?.doc.trim() !== "") {
       rows = [...rows, { doc: "", score: null }];
     }
-  });
-
-  // Sync loading state to activity store
-  $effect(() => {
-    playgroundStores.rerankLoading.set(isLoading);
   });
 
   function switchToJson() {
@@ -159,7 +155,7 @@
         query = submitQuery;
         editorMode = "table";
       } catch {
-        error = "Invalid JSON — fix before submitting";
+        $error = "Invalid JSON — fix before submitting";
         return;
       }
       nonEmptyEntries = rows
@@ -172,21 +168,17 @@
         .filter((e) => e.doc.trim() !== "");
     }
 
-    isLoading = true;
-    error = null;
     usage = null;
 
     // Clear previous scores
     rows = rows.map((r) => ({ ...r, score: null }));
 
-    abortController = new AbortController();
-
-    try {
+    await iface.run(async (signal) => {
       const response = await rerank(
         $selectedModelStore,
         submitQuery,
         nonEmptyEntries.map((e) => e.doc),
-        abortController.signal
+        signal
       );
 
       usage = response.usage;
@@ -200,26 +192,17 @@
         }
       }
       rows = updated;
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
-        // User cancelled
-      } else {
-        error = err instanceof Error ? err.message : "An error occurred";
-      }
-    } finally {
-      isLoading = false;
-      abortController = null;
-    }
+    });
   }
 
   function cancel() {
-    abortController?.abort();
+    iface.cancel();
   }
 
   function clear() {
     query = defaultQuery;
     rows = [...defaultDocs.map((doc) => ({ doc, score: null })), { doc: "", score: null }];
-    error = null;
+    $error = null;
     usage = null;
     sortOrder = "desc";
     jsonText = "";
@@ -260,7 +243,7 @@
     rows.every((r, i) => r.score === null && r.doc === (defaultDocs[i] ?? "")) &&
     rows.length === defaultDocs.length + 1 &&
     !jsonText.trim() &&
-    !error &&
+    !$error &&
     !usage
   );
 </script>
@@ -292,10 +275,8 @@
     </ToggleGroup.Root>
   </div>
 
-  {#if !hasModels}
-    <div class="text-muted-foreground flex flex-1 items-center justify-center">
-      <p>No models configured. Add models to your configuration to use reranking.</p>
-    </div>
+  {#if !$hasListedModels}
+    <EmptyState message="No models configured. Add models to your configuration to use reranking." />
   {:else if editorMode === "json"}
     <!-- JSON editor -->
     <div class="mb-4 flex min-h-0 flex-1 flex-col">
@@ -373,7 +354,7 @@
   {/if}
 
   <!-- Bottom toolbar -->
-  {#if hasModels}
+  {#if $hasListedModels}
     <div class="flex shrink-0 flex-wrap items-center gap-2">
       {#if isLoading}
         <Button variant="destructive" onclick={cancel}>Cancel</Button>
@@ -382,8 +363,8 @@
         <Button variant="outline" onclick={clear} disabled={isCleared}>Clear</Button>
       {/if}
 
-      {#if error}
-        <span class="text-destructive ml-2 text-sm">{error}</span>
+      {#if $error}
+        <span class="text-destructive ml-2 text-sm">{$error}</span>
       {:else if usage}
         <span class="text-muted-foreground ml-2 text-sm">{usage.total_tokens} tokens</span>
       {/if}

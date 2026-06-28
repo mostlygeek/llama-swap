@@ -1,19 +1,23 @@
 <script lang="ts">
-  import { models } from "../../stores/api";
-  import { persistentStore } from "../../stores/persistent";
+  import { hasListedModels } from "../../stores/api";
+  import { createPlaygroundInterface } from "../../lib/playgroundInterface";
   import { transcribeAudio } from "../../lib/audioApi";
   import { playgroundStores } from "../../stores/playgroundActivity";
   import ModelSelector from "./ModelSelector.svelte";
+  import EmptyState from "../EmptyState.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Copy, Check } from "@lucide/svelte";
+  import { formatFileSize } from "../../lib/format";
+  import { copyText } from "../../lib/clipboard";
 
-  const selectedModelStore = persistentStore<string>("playground-audio-model", "");
+  const iface = createPlaygroundInterface("playground-audio-model", playgroundStores.audioTranscribing);
+  const selectedModelStore = iface.selectedModel;
+  const transcribing = iface.busy;
+  const error = iface.error;
+  let isTranscribing = $derived($transcribing);
 
   let selectedFile = $state<File | null>(null);
-  let isTranscribing = $state(false);
   let transcriptionResult = $state<string | null>(null);
-  let error = $state<string | null>(null);
-  let abortController = $state<AbortController | null>(null);
   let isDragging = $state(false);
   let fileInput = $state<HTMLInputElement | null>(null);
   let copied = $state(false);
@@ -21,13 +25,7 @@
   const ACCEPTED_FORMATS = ['.mp3', '.wav', '.ogg'];
   const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB
 
-  let hasModels = $derived($models.some((m) => !m.unlisted));
-
   let canTranscribe = $derived(selectedFile !== null && $selectedModelStore !== "" && !isTranscribing);
-
-  $effect(() => {
-    playgroundStores.audioTranscribing.set(isTranscribing);
-  });
 
   function validateFile(file: File): { valid: boolean; error?: string } {
     const ext = '.' + file.name.split('.').pop()?.toLowerCase();
@@ -50,10 +48,10 @@
       const validation = validateFile(file);
       if (validation.valid) {
         selectedFile = file;
-        error = null;
+        $error = null;
         transcriptionResult = null;
       } else {
-        error = validation.error || "Invalid file";
+        $error = validation.error || "Invalid file";
         selectedFile = null;
       }
     }
@@ -77,70 +75,46 @@
       const validation = validateFile(file);
       if (validation.valid) {
         selectedFile = file;
-        error = null;
+        $error = null;
         transcriptionResult = null;
       } else {
-        error = validation.error || "Invalid file";
+        $error = validation.error || "Invalid file";
         selectedFile = null;
       }
     }
   }
 
   async function transcribe() {
-    if (!selectedFile || !$selectedModelStore || isTranscribing) return;
+    const file = selectedFile;
+    if (!file || !$selectedModelStore || isTranscribing) return;
 
-    isTranscribing = true;
-    error = null;
     transcriptionResult = null;
-    abortController = new AbortController();
-
-    try {
-      const response = await transcribeAudio(
-        $selectedModelStore,
-        selectedFile,
-        abortController.signal
-      );
-
+    await iface.run(async (signal) => {
+      const response = await transcribeAudio($selectedModelStore, file, signal);
       transcriptionResult = response.text;
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
-        // User cancelled
-      } else {
-        error = err instanceof Error ? err.message : "An error occurred";
-      }
-    } finally {
-      isTranscribing = false;
-      abortController = null;
-    }
+    });
   }
 
   function cancelTranscription() {
-    abortController?.abort();
+    iface.cancel();
   }
 
   function clearAll() {
     selectedFile = null;
     transcriptionResult = null;
-    error = null;
+    $error = null;
     if (fileInput) {
       fileInput.value = '';
     }
   }
 
-  function copyToClipboard() {
-    if (transcriptionResult) {
-      navigator.clipboard.writeText(transcriptionResult);
+  async function copyToClipboard() {
+    if (transcriptionResult && (await copyText(transcriptionResult))) {
       copied = true;
       setTimeout(() => {
         copied = false;
       }, 2000);
     }
-  }
-
-  function formatFileSize(bytes: number): string {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   }
 </script>
 
@@ -151,10 +125,8 @@
   </div>
 
   <!-- Empty state for no models configured -->
-  {#if !hasModels}
-    <div class="flex-1 flex items-center justify-center text-muted-foreground">
-      <p>No models configured. Add models to your configuration to transcribe audio.</p>
-    </div>
+  {#if !$hasListedModels}
+    <EmptyState message="No models configured. Add models to your configuration to transcribe audio." />
   {:else}
     <!-- File upload / Result display area -->
     <div class="flex-1 overflow-auto mb-4 flex items-center justify-center bg-background border border-border rounded-md">
@@ -163,10 +135,10 @@
           <div class="inline-block w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mb-2"></div>
           <p>Transcribing audio...</p>
         </div>
-      {:else if error}
+      {:else if $error}
         <div class="text-center text-red-500 p-4">
           <p class="font-medium">Error</p>
-          <p class="text-sm mt-1">{error}</p>
+          <p class="text-sm mt-1">{$error}</p>
         </div>
       {:else if transcriptionResult}
         <div class="w-full h-full flex flex-col p-4">
@@ -233,7 +205,7 @@
         <Button
           variant="outline"
           onclick={clearAll}
-          disabled={!selectedFile && !transcriptionResult && !error}
+          disabled={!selectedFile && !transcriptionResult && !$error}
         >
           Clear
         </Button>

@@ -1,4 +1,4 @@
-import { writable } from "svelte/store";
+import { writable, derived } from "svelte/store";
 import type {
   Model,
   ActivityLogEntry,
@@ -15,6 +15,9 @@ const LOG_LENGTH_LIMIT = 1024 * 100; /* 100KB of log data */
 
 // Stores
 export const models = writable<Model[]>([]);
+
+// True when at least one listed (non-unlisted) model is configured.
+export const hasListedModels = derived(models, ($models) => $models.some((m) => !m.unlisted));
 export const proxyLogs = writable<string>("");
 export const upstreamLogs = writable<string>("");
 export const metrics = writable<ActivityLogEntry[]>([]);
