@@ -3,6 +3,7 @@
 @import "katex/dist/katex.min.css";
 
 @custom-variant dark (&:is(.dark *));
+@custom-variant data-active (&:is([data-state="active"]));
 
 :root {
   --radius: 0;

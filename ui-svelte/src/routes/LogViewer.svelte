@@ -4,7 +4,7 @@
   import { persistentStore } from "../stores/persistent";
   import LogPanel from "../components/LogPanel.svelte";
   import ResizablePanels from "../components/ResizablePanels.svelte";
-  import * as ToggleGroup from "$lib/components/ui/toggle-group/index.js";
+  import { Tabs, TabsList, TabsTrigger, TabsContent } from "$lib/components/ui/tabs/index.js";
 
   type ViewMode = "proxy" | "upstream" | "panels";
 
@@ -16,32 +16,36 @@
 </script>
 
 <div class="flex flex-col h-full w-full gap-2">
-  <ToggleGroup.Root
-    type="single"
-    variant="outline"
+  <Tabs
     value={$viewModeStore}
     onValueChange={(v) => v && viewModeStore.set(v as ViewMode)}
-    class="justify-start"
+    class="flex flex-1 w-full flex-col gap-2 overflow-hidden"
   >
-    <ToggleGroup.Item value="panels">Both</ToggleGroup.Item>
-    <ToggleGroup.Item value="proxy">Proxy</ToggleGroup.Item>
-    <ToggleGroup.Item value="upstream">Upstream</ToggleGroup.Item>
-  </ToggleGroup.Root>
+    <TabsList variant="line">
+      <TabsTrigger value="panels">Both</TabsTrigger>
+      <TabsTrigger value="proxy">Proxy</TabsTrigger>
+      <TabsTrigger value="upstream">Upstream</TabsTrigger>
+    </TabsList>
 
-  <div class="flex-1 w-full overflow-hidden">
-    {#if $viewModeStore === "panels"}
-      <ResizablePanels {direction} storageKey="logviewer-panel-group">
-        {#snippet leftPanel()}
-          <LogPanel id="proxy" title="Proxy Logs" logData={$proxyLogs} />
-        {/snippet}
-        {#snippet rightPanel()}
-          <LogPanel id="upstream" title="Upstream Logs" logData={$upstreamLogs} />
-        {/snippet}
-      </ResizablePanels>
-    {:else if $viewModeStore === "proxy"}
-      <LogPanel id="proxy" title="Proxy Logs" logData={$proxyLogs} />
-    {:else}
-      <LogPanel id="upstream" title="Upstream Logs" logData={$upstreamLogs} />
-    {/if}
-  </div>
+    <div class="flex-1 w-full overflow-hidden">
+      <TabsContent value="panels" class="h-full">
+        <ResizablePanels {direction} storageKey="logviewer-panel-group">
+          {#snippet leftPanel()}
+            <LogPanel id="proxy" title="Proxy Logs" logData={$proxyLogs} />
+          {/snippet}
+          {#snippet rightPanel()}
+            <LogPanel id="upstream" title="Upstream Logs" logData={$upstreamLogs} />
+          {/snippet}
+        </ResizablePanels>
+      </TabsContent>
+
+      <TabsContent value="proxy" class="h-full">
+        <LogPanel id="proxy" title="Proxy Logs" logData={$proxyLogs} />
+      </TabsContent>
+
+      <TabsContent value="upstream" class="h-full">
+        <LogPanel id="upstream" title="Upstream Logs" logData={$upstreamLogs} />
+      </TabsContent>
+    </div>
+  </Tabs>
 </div>

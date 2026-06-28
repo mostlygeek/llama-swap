@@ -4,7 +4,7 @@
   import { pendingLoads, onToggleLoad, statusDotColor } from "../stores/modelLoad";
   import type { Model } from "../lib/types";
   import * as Card from "$lib/components/ui/card/index.js";
-  import * as Tabs from "$lib/components/ui/tabs/index.js";
+  import { Tabs, TabsList, TabsTrigger, TabsContent } from "$lib/components/ui/tabs/index.js";
   import { Play, PowerOff, Loader2, ExternalLink } from "@lucide/svelte";
   import ModelActivityTab from "../components/model/ModelActivityTab.svelte";
   import ModelLogsTab from "../components/model/ModelLogsTab.svelte";
@@ -69,27 +69,27 @@
       </Card.Header>
     </Card.Root>
 
-    <Tabs.Root value="activity" class="min-h-0 flex-1">
-      <Tabs.List>
-        <Tabs.Trigger value="activity" class="data-active:bg-primary/15 data-active:text-primary border border-b-2 data-active:border-primary rounded-none shadow-none">Activity</Tabs.Trigger>
-        <Tabs.Trigger value="logs" class="data-active:bg-primary/15 data-active:text-primary border border-b-2 data-active:border-primary rounded-none shadow-none">Logs</Tabs.Trigger>
-        <Tabs.Trigger value="details" class="data-active:bg-primary/15 data-active:text-primary border border-b-2 data-active:border-primary rounded-none shadow-none">Details</Tabs.Trigger>
-      </Tabs.List>
+    <Tabs value="activity" class="min-h-0 flex-1">
+      <TabsList variant="line">
+        <TabsTrigger value="activity">Activity</TabsTrigger>
+        <TabsTrigger value="logs">Logs</TabsTrigger>
+        <TabsTrigger value="details">Details</TabsTrigger>
+      </TabsList>
 
       <!-- Activity -->
-      <Tabs.Content value="activity">
+      <TabsContent value="activity">
         <ModelActivityTab modelId={modelId} />
-      </Tabs.Content>
+      </TabsContent>
 
       <!-- Logs -->
-      <Tabs.Content value="logs" class="min-h-0 flex-1">
+      <TabsContent value="logs" class="min-h-0 flex-1">
         <ModelLogsTab modelId={modelId} />
-      </Tabs.Content>
+      </TabsContent>
 
       <!-- Details -->
-      <Tabs.Content value="details">
+      <TabsContent value="details">
         <ModelDetailsTab model={model} />
-      </Tabs.Content>
-    </Tabs.Root>
+      </TabsContent>
+    </Tabs>
   {/if}
 </div>
