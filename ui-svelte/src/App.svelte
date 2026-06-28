@@ -4,6 +4,7 @@
   import AppSidebar from "./components/AppSidebar.svelte";
   import LogViewer from "./routes/LogViewer.svelte";
   import ModelDetail from "./routes/ModelDetail.svelte";
+  import ModelsDash from "./routes/ModelsDash.svelte";
   import Activity from "./routes/Activity.svelte";
   import Performance from "./routes/Performance.svelte";
   import Playground from "./routes/Playground.svelte";
@@ -17,6 +18,7 @@
 
   const routes = {
     "/": PlaygroundStub,
+    "/models": ModelsDash,
     "/models/:id": ModelDetail,
     "/logs": LogViewer,
     "/activity": Activity,
@@ -26,6 +28,7 @@
 
   const routeTitles: Record<string, string> = {
     "/": "Playground",
+    "/models": "Models",
     "/activity": "Activity",
     "/logs": "Logs",
     "/performance": "Performance",
@@ -39,6 +42,9 @@
     if ($currentRoute.startsWith("/models/")) {
       const id = $currentRoute.slice("/models/".length);
       return id ? `Models / ${decodeURIComponent(id)}` : "Models";
+    }
+    if ($currentRoute === "/models") {
+      return "Models";
     }
     return routeTitles[$currentRoute] ?? "Playground";
   });

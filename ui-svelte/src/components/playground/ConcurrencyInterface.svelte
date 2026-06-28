@@ -396,22 +396,20 @@
         {#if !hasModels}
           <div class="p-3 text-sm text-muted-foreground text-center">No models configured.</div>
         {:else}
-          <ul class="divide-y divide-gray-100 dark:divide-white/5">
+          <div class="divide-y divide-gray-100 dark:divide-white/5">
             {#each availableModels as m (m.id)}
-              <li>
-                <Button
-                  variant="ghost"
-                  class="w-full justify-start px-2 py-1.5 text-sm h-auto font-normal"
-                  onclick={() => addModel(m.id)}
-                  disabled={isRunning}
-                  title="Add {m.id}"
-                >
-                  <span class="text-primary" aria-hidden="true">+</span>
-                  <span class="truncate flex-1">{m.id}</span>
-                </Button>
-              </li>
+              <button
+                type="button"
+                class="hover:bg-accent hover:text-foreground flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-sm font-normal transition-colors disabled:pointer-events-none disabled:opacity-50"
+                onclick={() => addModel(m.id)}
+                disabled={isRunning}
+                title="Add {m.id}"
+              >
+                <span class="text-primary" aria-hidden="true">+</span>
+                <span class="truncate flex-1">{m.id}</span>
+              </button>
             {/each}
-          </ul>
+          </div>
         {/if}
       </div>
     </div>

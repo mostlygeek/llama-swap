@@ -1,6 +1,7 @@
 <script lang="ts">
   import { params } from "svelte-spa-router";
-  import { models, loadModel, unloadSingleModel } from "../stores/api";
+  import { models } from "../stores/api";
+  import { pendingLoads, onToggleLoad, statusDotColor } from "../stores/modelLoad";
   import type { Model } from "../lib/types";
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Tabs from "$lib/components/ui/tabs/index.js";
@@ -12,48 +13,6 @@
   let modelId = $derived($params?.id ?? "");
 
   let model = $derived<Model | undefined>($models.find((m) => m.id === modelId));
-
-  // Load / unload orchestration (ported from AppSidebar.svelte)
-  let pendingLoads = $state<Record<string, boolean>>({});
-  const loadControllers = new Map<string, AbortController>();
-
-  async function handleLoadModel(id: string): Promise<void> {
-    if (pendingLoads[id]) return;
-    const controller = new AbortController();
-    loadControllers.set(id, controller);
-    pendingLoads[id] = true;
-    try {
-      await loadModel(id, controller.signal);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      loadControllers.delete(id);
-      delete pendingLoads[id];
-    }
-  }
-
-  function cancelLoad(id: string): void {
-    loadControllers.get(id)?.abort();
-  }
-
-  function onToggleLoad(e: MouseEvent, m: Model): void {
-    e.preventDefault();
-    e.stopPropagation();
-    if (m.state === "stopped" && pendingLoads[m.id]) {
-      cancelLoad(m.id);
-    } else if (m.state === "stopped") {
-      handleLoadModel(m.id);
-    } else if (m.state === "ready") {
-      unloadSingleModel(m.id);
-    }
-  }
-
-  function statusDotColor(m: Model | undefined): string {
-    if (!m) return "bg-muted-foreground/40";
-    if (m.state === "ready") return "bg-success";
-    if (m.state === "starting" || m.state === "stopping") return "bg-warning";
-    return "bg-muted-foreground/40";
-  }
 </script>
 
 <div class="flex h-full flex-col gap-4 overflow-y-auto p-2">
@@ -84,12 +43,12 @@
             <button
               type="button"
               class="flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
-              title={model.state === "ready" ? "Unload" : pendingLoads[model.id] ? "Cancel" : "Load"}
+              title={model.state === "ready" ? "Unload" : $pendingLoads[model.id] ? "Cancel" : "Load"}
               aria-label={model.state === "ready" ? "Unload model" : "Load model"}
               disabled={model.state === "starting" || model.state === "stopping"}
-              onclick={(e) => onToggleLoad(e, model)}
+              onclick={() => onToggleLoad(model)}
             >
-              {#if pendingLoads[model.id] && model.state === "stopped"}
+              {#if $pendingLoads[model.id] && model.state === "stopped"}
                 <Loader2 class="size-3.5 animate-spin" />
               {:else if model.state === "ready"}
                 <PowerOff class="size-3.5" />

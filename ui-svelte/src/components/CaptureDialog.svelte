@@ -184,7 +184,7 @@
     if (!v) onclose();
   }}
 >
-  <Dialog.Content class="max-h-[90vh] w-full max-w-[80%] gap-0 p-0">
+  <Dialog.Content class="flex max-h-[90vh] w-[90%] sm:max-w-[90%] flex-col gap-0 p-0">
     {#if capture}
       <Dialog.Header class="border-b border-border px-4 py-3">
         <Dialog.Title class="text-lg font-bold">
@@ -193,7 +193,7 @@
         </Dialog.Title>
       </Dialog.Header>
 
-      <div class="overflow-y-auto flex-1 space-y-4 p-4">
+      <div class="min-h-0 flex-1 overflow-y-auto space-y-4 p-4">
         <!-- Request Headers -->
         <details class="group" open>
           <summary

@@ -79,21 +79,37 @@
               onOpenChange={(v) => modelsMenuOpen.set(v)}
               class="gap-0"
             >
-              <Collapsible.Trigger>
+              <Sidebar.MenuButton
+                isActive={$currentRoute.startsWith("/models")}
+                tooltipContent="Models"
+              >
                 {#snippet child({ props })}
-                  <Sidebar.MenuButton
-                    {...props}
-                    isActive={$currentRoute.startsWith("/models")}
-                    tooltipContent="Models"
-                  >
+                  <a href="/models" use:link {...props}>
                     <Boxes />
                     <span>Models</span>
-                    <ChevronRight
+                    <span
                       class="ml-auto transition-transform duration-200 {$modelsMenuOpen ? 'rotate-90' : ''}"
-                    />
-                  </Sidebar.MenuButton>
+                      role="button"
+                      tabindex="0"
+                      aria-label="Toggle models section"
+                      onclick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        modelsMenuOpen.update((v) => !v);
+                      }}
+                      onkeydown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          modelsMenuOpen.update((v) => !v);
+                        }
+                      }}
+                    >
+                      <ChevronRight />
+                    </span>
+                  </a>
                 {/snippet}
-              </Collapsible.Trigger>
+              </Sidebar.MenuButton>
               <Collapsible.Content>
                 <Sidebar.MenuSub>
                   {#each $models as model (model.id)}
@@ -121,21 +137,37 @@
               onOpenChange={(v) => playgroundMenuOpen.set(v)}
               class="gap-0"
             >
-              <Collapsible.Trigger>
+              <Sidebar.MenuButton
+                isActive={isActive("/", $currentRoute)}
+                tooltipContent="Playground"
+              >
                 {#snippet child({ props })}
-                  <Sidebar.MenuButton
-                    {...props}
-                    isActive={isActive("/", $currentRoute)}
-                    tooltipContent="Playground"
-                  >
+                  <a href="/" use:link {...props}>
                     <House />
                     <span class={$playgroundActivity ? "activity-link" : ""}>Playground</span>
-                    <ChevronRight
+                    <span
                       class="ml-auto transition-transform duration-200 {$playgroundMenuOpen ? 'rotate-90' : ''}"
-                    />
-                  </Sidebar.MenuButton>
+                      role="button"
+                      tabindex="0"
+                      aria-label="Toggle playground section"
+                      onclick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        playgroundMenuOpen.update((v) => !v);
+                      }}
+                      onkeydown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          playgroundMenuOpen.update((v) => !v);
+                        }
+                      }}
+                    >
+                      <ChevronRight />
+                    </span>
+                  </a>
                 {/snippet}
-              </Collapsible.Trigger>
+              </Sidebar.MenuButton>
               <Collapsible.Content>
                 <Sidebar.MenuSub>
                   {#each playgroundTabs as tab (tab.id)}
