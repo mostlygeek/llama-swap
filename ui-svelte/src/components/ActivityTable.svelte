@@ -7,9 +7,11 @@
   import {
     type ColumnDef,
     type PaginationState,
+    type SortingState,
     type VisibilityState,
     getCoreRowModel,
     getPaginationRowModel,
+    getSortedRowModel,
   } from "@tanstack/table-core";
   import {
     FlexRender,
@@ -27,6 +29,10 @@
     ChevronRight,
     ChevronsLeft,
     ChevronsRight,
+    ArrowUp,
+    ArrowDown,
+    ArrowUpDown,
+    GripVertical,
   } from "@lucide/svelte";
   import HeaderLabel from "./activity-table/HeaderLabel.svelte";
   import ViewCaptureButton from "./activity-table/ViewCaptureButton.svelte";
@@ -134,6 +140,30 @@
   );
 
   // svelte-ignore state_referenced_locally
+  const storedColumnOrder = persistentStore<string[]>(`${storagePrefix}-column-order`, []);
+
+  let defaultColumnOrder = $derived(columnMeta.map((c) => c.id));
+
+  // svelte-ignore state_referenced_locally
+  let columnOrder = $state<string[]>(
+    $storedColumnOrder.length > 0 ? $storedColumnOrder : defaultColumnOrder
+  );
+
+  // Reconcile stored order against the current column set: drop stale ids
+  // and append any new ones so all columns are always represented.
+  $effect(() => {
+    const known = new Set(columnMeta.map((c) => c.id));
+    const order = columnOrder;
+    const hasStale = order.some((k) => !known.has(k));
+    const missing = columnMeta.filter((c) => !order.includes(c.id)).map((c) => c.id);
+    if (hasStale || missing.length > 0) {
+      const cleaned = order.filter((k) => known.has(k));
+      columnOrder = [...cleaned, ...missing];
+      storedColumnOrder.set(columnOrder);
+    }
+  });
+
+  // svelte-ignore state_referenced_locally
   const storedPageSize = persistentStore<number>(`${storagePrefix}-page-size`, 10);
 
   // When not paginating, use a large page size so all rows render in one page.
@@ -142,6 +172,9 @@
     pageIndex: 0,
     pageSize: showPagination ? $storedPageSize : Number.MAX_SAFE_INTEGER,
   });
+
+  // svelte-ignore state_referenced_locally
+  let sorting = $state<SortingState>([]);
 
   // Reset to the first page when the data source changes. We deliberately do
   // NOT track pagination here — page-size changes reset pageIndex inside
@@ -174,11 +207,13 @@
     const cols: ColumnDef<ActivityLogEntry>[] = [
       {
         id: "id",
+        accessorKey: "id",
         header: "ID",
         cell: ({ row }) => String(row.original.id + 1),
       },
       {
         id: "time",
+        accessorKey: "timestamp",
         header: "Time",
         cell: ({ row }) => formatRelativeTime(row.original.timestamp),
       },
@@ -187,6 +222,7 @@
     if (withModel) {
       cols.push({
         id: "model",
+        accessorKey: "model",
         header: "Model",
         cell: ({ row }) => row.original.model ?? "-",
       });
@@ -195,21 +231,25 @@
     cols.push(
       {
         id: "req_path",
+        accessorKey: "req_path",
         header: "Path",
         cell: ({ row }) => row.original.req_path || "-",
       },
       {
         id: "resp_status_code",
+        accessorKey: "resp_status_code",
         header: "Status",
         cell: ({ row }) => String(row.original.resp_status_code || "-"),
       },
       {
         id: "resp_content_type",
+        accessorKey: "resp_content_type",
         header: "Content-Type",
         cell: ({ row }) => row.original.resp_content_type || "-",
       },
       {
         id: "cached",
+        accessorFn: (row) => row.tokens.cache_tokens,
         header: () => renderComponent(HeaderLabel, { label: "Cached", tooltip: "prompt tokens from cache" }),
         cell: ({ row }) =>
           row.original.tokens.cache_tokens > 0
@@ -218,38 +258,45 @@
       },
       {
         id: "prompt",
+        accessorFn: (row) => row.tokens.input_tokens,
         header: () => renderComponent(HeaderLabel, { label: "Prompt", tooltip: "new prompt tokens processed" }),
         cell: ({ row }) => row.original.tokens.input_tokens.toLocaleString(),
       },
       {
         id: "generated",
+        accessorFn: (row) => row.tokens.output_tokens,
         header: "Generated",
         cell: ({ row }) => row.original.tokens.output_tokens.toLocaleString(),
       },
       {
         id: "drafted",
+        accessorFn: (row) => row.tokens.draft_tokens,
         header: () => renderComponent(HeaderLabel, { label: "Drafted", tooltip: "acceptance rate (accepted/drafted)" }),
         cell: ({ row }) =>
           formatDrafted(row.original.tokens.draft_tokens, row.original.tokens.draft_acc_tokens),
       },
       {
         id: "prompt_speed",
+        accessorFn: (row) => row.tokens.prompt_per_second,
         header: "Prompt Speed",
         cell: ({ row }) => formatSpeed(row.original.tokens.prompt_per_second),
       },
       {
         id: "gen_speed",
+        accessorFn: (row) => row.tokens.tokens_per_second,
         header: "Gen Speed",
         cell: ({ row }) => formatSpeed(row.original.tokens.tokens_per_second),
       },
       {
         id: "duration",
+        accessorKey: "duration_ms",
         header: "Duration",
         cell: ({ row }) => formatDuration(row.original.duration_ms),
       },
       {
         id: "capture",
         header: "Capture",
+        enableSorting: false,
         cell: ({ row }) =>
           renderComponent(ViewCaptureButton, {
             hasCapture: row.original.has_capture,
@@ -260,6 +307,7 @@
       {
         id: "meta",
         header: "Meta",
+        enableSorting: false,
         cell: ({ row }) =>
           renderComponent(MetaCell, { metadata: row.original.metadata }),
       }
@@ -283,6 +331,21 @@
       get columnVisibility() {
         return columnVisibility;
       },
+      get sorting() {
+        return sorting;
+      },
+      get columnOrder() {
+        return columnOrder;
+      },
+    },
+    onSortingChange: (updater) => {
+      sorting =
+        typeof updater === "function" ? updater(sorting) : updater;
+    },
+    onColumnOrderChange: (updater) => {
+      columnOrder =
+        typeof updater === "function" ? updater(columnOrder) : updater;
+      storedColumnOrder.set(columnOrder);
     },
     onPaginationChange: (updater) => {
       const prev = pagination;
@@ -304,10 +367,56 @@
     },
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
+    getSortedRowModel: getSortedRowModel(),
   });
 
   let thClass = $derived(compact ? "px-4 py-2 h-9" : "px-6 py-3 h-12");
   let tdClass = $derived(compact ? "px-4 py-2" : "px-6 py-4");
+
+  function sortIcon(state: false | "asc" | "desc") {
+    if (state === "asc") return ArrowUp;
+    if (state === "desc") return ArrowDown;
+    return ArrowUpDown;
+  }
+
+  let dragColId: string | null = $state(null);
+  let dragOverColId: string | null = $state(null);
+
+  function handleColDragStart(e: DragEvent, colId: string) {
+    dragColId = colId;
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", colId);
+    }
+  }
+
+  function handleColDragOver(e: DragEvent, colId: string) {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    if (dragOverColId !== colId) dragOverColId = colId;
+  }
+
+  function handleColDrop(e: DragEvent, targetId: string) {
+    e.preventDefault();
+    const sourceId = dragColId;
+    dragColId = null;
+    dragOverColId = null;
+    if (!sourceId || sourceId === targetId) return;
+    const order = [...columnOrder];
+    const fromIndex = order.indexOf(sourceId);
+    let toIndex = order.indexOf(targetId);
+    if (fromIndex === -1 || toIndex === -1) return;
+    order.splice(fromIndex, 1);
+    if (fromIndex < toIndex) toIndex -= 1;
+    order.splice(toIndex, 0, sourceId);
+    columnOrder = order;
+    storedColumnOrder.set(order);
+  }
+
+  function handleColDragEnd() {
+    dragColId = null;
+    dragOverColId = null;
+  }
 </script>
 
 <Card.Root class="shrink-0 gap-0 overflow-hidden py-0 {cardClass}">
@@ -345,18 +454,26 @@
         >
           <Columns3 class="size-4" />
         </DropdownMenu.Trigger>
-        <DropdownMenu.Content align="end" class="min-w-[16rem] p-0">
+        <DropdownMenu.Content align="end" class="min-w-[18rem] max-h-[60vh] overflow-y-auto p-0">
           <DropdownMenu.Label class="text-muted-foreground border-b px-3 py-2 text-xs font-medium uppercase tracking-wider">
-            Columns
+            Columns <span class="text-[10px] normal-case tracking-normal">(drag to reorder)</span>
           </DropdownMenu.Label>
           {#each table.getAllColumns() as column (column.id)}
             {#if column.getCanHide()}
+              {@const isDragOver = dragOverColId === column.id && dragColId !== column.id}
               <DropdownMenu.CheckboxItem
                 checked={column.getIsVisible()}
                 onCheckedChange={(v) => column.toggleVisibility(!!v)}
                 closeOnSelect={false}
+                draggable="true"
+                ondragstart={(e) => handleColDragStart(e, column.id)}
+                ondragover={(e) => handleColDragOver(e, column.id)}
+                ondrop={(e) => handleColDrop(e, column.id)}
+                ondragend={handleColDragEnd}
+                class={isDragOver ? "bg-accent" : ""}
               >
-                {columnLabelMap[column.id] ?? column.id}
+                <GripVertical class="text-muted-foreground/50 size-4 cursor-grab active:cursor-grabbing" />
+                <span class="flex-1">{columnLabelMap[column.id] ?? column.id}</span>
               </DropdownMenu.CheckboxItem>
             {/if}
           {/each}
@@ -372,7 +489,20 @@
             {#each headerGroup.headers as header (header.id)}
               <Table.Head class={thClass} colspan={header.colSpan}>
                 {#if !header.isPlaceholder}
-                  <FlexRender content={header.column.columnDef.header} context={header.getContext()} />
+                  {#if header.column.getCanSort()}
+                    {@const sorted = header.column.getIsSorted()}
+                    {@const Icon = sortIcon(sorted)}
+                    <button
+                      type="button"
+                      class="text-muted-foreground hover:text-foreground -mx-1 inline-flex items-center gap-1 text-left"
+                      onclick={() => header.column.toggleSorting(sorted === "asc")}
+                    >
+                      <FlexRender content={header.column.columnDef.header} context={header.getContext()} />
+                      <Icon class={`size-3 ${sorted ? "text-foreground" : "opacity-50"}`} />
+                    </button>
+                  {:else}
+                    <FlexRender content={header.column.columnDef.header} context={header.getContext()} />
+                  {/if}
                 {/if}
               </Table.Head>
             {/each}
