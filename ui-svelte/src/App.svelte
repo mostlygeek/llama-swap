@@ -10,6 +10,7 @@
   import Playground from "./routes/Playground.svelte";
   import PlaygroundStub from "./routes/PlaygroundStub.svelte";
   import * as Sidebar from "$lib/components/ui/sidebar/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { Separator } from "$lib/components/ui/separator/index.js";
   import { enableAPIEvents, checkPerformanceEnabled } from "./stores/api";
   import { initScreenWidth, initSystemThemeListener, isDarkMode, appTitle, connectionState } from "./stores/theme";
@@ -80,24 +81,26 @@
   });
 </script>
 
-<Sidebar.Provider>
-  <AppSidebar />
-  <Sidebar.Inset class="h-screen min-w-0 overflow-hidden">
-    <header
-      class="bg-background sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b px-4"
-    >
-      <Sidebar.Trigger class="-ml-1" />
-      <Separator orientation="vertical" class="mr-2 !h-4" />
-      <h2 class="truncate pb-0 text-sm font-semibold">{sectionTitle}</h2>
-    </header>
+<Tooltip.Provider>
+  <Sidebar.Provider>
+    <AppSidebar />
+    <Sidebar.Inset class="h-screen min-w-0 overflow-hidden">
+      <header
+        class="bg-background sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b px-4"
+      >
+        <Sidebar.Trigger class="-ml-1" />
+        <Separator orientation="vertical" class="mr-2 !h-4" />
+        <h2 class="truncate pb-0 text-sm font-semibold">{sectionTitle}</h2>
+      </header>
 
-    <main class="min-h-0 flex-1 overflow-auto p-4">
-      <div class="h-full" class:hidden={$currentRoute !== "/"}>
-        <Playground />
-      </div>
-      <div class="h-full" class:hidden={$currentRoute === "/"}>
-        <Router {routes} on:routeLoaded={handleRouteLoaded} />
-      </div>
-    </main>
-  </Sidebar.Inset>
-</Sidebar.Provider>
+      <main class="min-h-0 flex-1 overflow-auto p-4">
+        <div class="h-full" class:hidden={$currentRoute !== "/"}>
+          <Playground />
+        </div>
+        <div class="h-full" class:hidden={$currentRoute === "/"}>
+          <Router {routes} on:routeLoaded={handleRouteLoaded} />
+        </div>
+      </main>
+    </Sidebar.Inset>
+  </Sidebar.Provider>
+</Tooltip.Provider>

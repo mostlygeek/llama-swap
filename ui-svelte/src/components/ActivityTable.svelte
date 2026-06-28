@@ -2,22 +2,34 @@
   import type { ActivityLogEntry, ReqRespCapture } from "../lib/types";
   import { getCapture } from "../stores/api";
   import { persistentStore } from "../stores/persistent";
-  import { onMount } from "svelte";
-  import Tooltip from "./Tooltip.svelte";
-  import MetadataTooltip from "./MetadataTooltip.svelte";
   import CaptureDialog from "./CaptureDialog.svelte";
-  import { Columns3, GripVertical } from "@lucide/svelte";
+  import {
+    type ColumnDef,
+    type PaginationState,
+    type VisibilityState,
+    getCoreRowModel,
+    getPaginationRowModel,
+  } from "@tanstack/table-core";
+  import {
+    FlexRender,
+    createSvelteTable,
+    renderComponent,
+  } from "$lib/components/ui/data-table/index.js";
+  import * as Table from "$lib/components/ui/table/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-
-  type ColumnKey = string;
-
-  interface ColumnDef {
-    key: ColumnKey;
-    label: string;
-    defaultVisible: boolean;
-  }
+  import {
+    Columns3,
+    ChevronLeft,
+    ChevronRight,
+    ChevronsLeft,
+    ChevronsRight,
+  } from "@lucide/svelte";
+  import HeaderLabel from "./activity-table/HeaderLabel.svelte";
+  import ViewCaptureButton from "./activity-table/ViewCaptureButton.svelte";
+  import MetaCell from "./activity-table/MetaCell.svelte";
 
   interface Props {
     metrics: ActivityLogEntry[];
@@ -40,150 +52,6 @@
     emptyMessage = "No activity recorded",
     cardClass = "",
   }: Props = $props();
-
-  function buildColumns(withModel: boolean): ColumnDef[] {
-    const cols: ColumnDef[] = [
-      { key: "id", label: "ID", defaultVisible: true },
-      { key: "time", label: "Time", defaultVisible: true },
-    ];
-    if (withModel) cols.push({ key: "model", label: "Model", defaultVisible: true });
-    cols.push(
-      { key: "req_path", label: "Path", defaultVisible: false },
-      { key: "resp_status_code", label: "Status", defaultVisible: true },
-      { key: "resp_content_type", label: "Content-Type", defaultVisible: false },
-      { key: "cached", label: "Cached", defaultVisible: true },
-      { key: "prompt", label: "Prompt", defaultVisible: true },
-      { key: "generated", label: "Generated", defaultVisible: true },
-      { key: "drafted", label: "Drafted", defaultVisible: false },
-      { key: "prompt_speed", label: "Prompt Speed", defaultVisible: true },
-      { key: "gen_speed", label: "Gen Speed", defaultVisible: true },
-      { key: "duration", label: "Duration", defaultVisible: true },
-      { key: "capture", label: "Capture", defaultVisible: true },
-      { key: "meta", label: "Meta", defaultVisible: false }
-    );
-    return cols;
-  }
-
-  // svelte-ignore state_referenced_locally
-  const columns: ColumnDef[] = buildColumns(showModelColumn);
-  const defaultVisibleKeys = columns.filter((c) => c.defaultVisible).map((c) => c.key);
-
-  // svelte-ignore state_referenced_locally
-  const visibleColumns = persistentStore<ColumnKey[]>(`${storagePrefix}-columns`, defaultVisibleKeys);
-  // svelte-ignore state_referenced_locally
-  const columnOrder = persistentStore<ColumnKey[]>(
-    `${storagePrefix}-column-order`,
-    columns.map((c) => c.key)
-  );
-  // svelte-ignore state_referenced_locally
-  const pageSizeStore = persistentStore<number>(`${storagePrefix}-page-size`, 10);
-
-  let page = $state(0);
-  let totalPages = $derived(Math.max(1, Math.ceil(metrics.length / $pageSizeStore)));
-  let pageMetrics = $derived(metrics.slice(page * $pageSizeStore, (page + 1) * $pageSizeStore));
-  let displayMetrics = $derived(showPagination ? pageMetrics : metrics);
-
-  // Reset page when data source or page size changes
-  $effect(() => {
-    metrics;
-    $pageSizeStore;
-    page = 0;
-  });
-
-  let columnsMenuOpen = $state(false);
-  let dropdownContainer: HTMLDivElement | null = $state(null);
-  let dragKey: ColumnKey | null = $state(null);
-  let dragOverKey: ColumnKey | null = $state(null);
-
-  onMount(() => {
-    function handleKeydown(e: KeyboardEvent) {
-      if (e.key === "Escape" && columnsMenuOpen) columnsMenuOpen = false;
-    }
-    function handleClick(e: MouseEvent) {
-      if (columnsMenuOpen && dropdownContainer && !dropdownContainer.contains(e.target as Node)) {
-        columnsMenuOpen = false;
-      }
-    }
-    document.addEventListener("keydown", handleKeydown);
-    document.addEventListener("click", handleClick);
-    return () => {
-      document.removeEventListener("keydown", handleKeydown);
-      document.removeEventListener("click", handleClick);
-    };
-  });
-
-  function toggleColumn(key: ColumnKey) {
-    const current = $visibleColumns;
-    if (current.includes(key)) {
-      if (current.length > 1) visibleColumns.set(current.filter((k) => k !== key));
-    } else {
-      visibleColumns.set([...current, key]);
-    }
-  }
-
-  function isColumnVisible(key: ColumnKey): boolean {
-    return $visibleColumns.includes(key);
-  }
-
-  function handleDragStart(e: DragEvent, key: ColumnKey) {
-    dragKey = key;
-    e.dataTransfer?.setData("text/plain", key);
-    if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
-  }
-
-  function handleDragOver(e: DragEvent, key: ColumnKey) {
-    e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-    dragOverKey = key;
-  }
-
-  function handleDrop(e: DragEvent, targetKey: ColumnKey) {
-    e.preventDefault();
-    if (!dragKey || dragKey === targetKey) return;
-    const order = [...$columnOrder];
-    const fromIndex = order.indexOf(dragKey);
-    let toIndex = order.indexOf(targetKey);
-    if (fromIndex === -1 || toIndex === -1) return;
-    order.splice(fromIndex, 1);
-    if (fromIndex < toIndex) toIndex -= 1;
-    order.splice(toIndex, 0, dragKey);
-    columnOrder.set(order);
-  }
-
-  function handleDragEnd() {
-    dragKey = null;
-    dragOverKey = null;
-  }
-
-  function orderByColumnOrder<T extends { key: ColumnKey }>(cols: T[]): T[] {
-    return cols.slice().sort((a, b) => {
-      const aIndex = $columnOrder.indexOf(a.key);
-      const bIndex = $columnOrder.indexOf(b.key);
-      if (aIndex === -1 && bIndex === -1) return 0;
-      if (aIndex === -1) return 1;
-      if (bIndex === -1) return -1;
-      return aIndex - bIndex;
-    });
-  }
-
-  let orderedColumns = $derived(orderByColumnOrder(columns));
-
-  let activeVisibleColumns = $derived(
-    orderByColumnOrder(columns.filter((c) => isColumnVisible(c.key))).map((c) => c.key)
-  );
-
-  let columnLabelMap = $derived(Object.fromEntries(columns.map((c) => [c.key, c.label])));
-
-  $effect(() => {
-    const staticKeys = new Set(columns.map((c) => c.key));
-    const order = $columnOrder;
-    const hasStale = order.some((k) => !staticKeys.has(k));
-    const missing = columns.filter((c) => !order.includes(c.key)).map((c) => c.key);
-    if (hasStale || missing.length > 0) {
-      const cleaned = order.filter((k) => staticKeys.has(k));
-      columnOrder.set([...cleaned, ...missing]);
-    }
-  });
 
   function formatSpeed(speed: number): string {
     return speed < 0 ? "unknown" : speed.toFixed(2) + " t/s";
@@ -212,6 +80,80 @@
       : "-";
   }
 
+  interface ColMeta {
+    id: string;
+    label: string;
+    defaultVisible: boolean;
+  }
+
+  function buildColumnMeta(withModel: boolean): ColMeta[] {
+    const cols: ColMeta[] = [
+      { id: "id", label: "ID", defaultVisible: true },
+      { id: "time", label: "Time", defaultVisible: true },
+    ];
+    if (withModel) cols.push({ id: "model", label: "Model", defaultVisible: true });
+    cols.push(
+      { id: "req_path", label: "Path", defaultVisible: false },
+      { id: "resp_status_code", label: "Status", defaultVisible: true },
+      { id: "resp_content_type", label: "Content-Type", defaultVisible: false },
+      { id: "cached", label: "Cached", defaultVisible: true },
+      { id: "prompt", label: "Prompt", defaultVisible: true },
+      { id: "generated", label: "Generated", defaultVisible: true },
+      { id: "drafted", label: "Drafted", defaultVisible: false },
+      { id: "prompt_speed", label: "Prompt Speed", defaultVisible: true },
+      { id: "gen_speed", label: "Gen Speed", defaultVisible: true },
+      { id: "duration", label: "Duration", defaultVisible: true },
+      { id: "capture", label: "Capture", defaultVisible: true },
+      { id: "meta", label: "Meta", defaultVisible: false }
+    );
+    return cols;
+  }
+
+  let columnMeta = $derived(buildColumnMeta(showModelColumn));
+
+  let columnLabelMap = $derived(
+    Object.fromEntries(columnMeta.map((c) => [c.id, c.label])) as Record<string, string>
+  );
+
+  let defaultVisibility = $derived.by(() => {
+    const v: VisibilityState = {};
+    for (const c of columnMeta) v[c.id] = c.defaultVisible;
+    return v;
+  });
+
+  // svelte-ignore state_referenced_locally
+  const storedVisibility = persistentStore<VisibilityState>(
+    `${storagePrefix}-columns`,
+    {}
+  );
+
+  // svelte-ignore state_referenced_locally
+  let columnVisibility = $state<VisibilityState>(
+    Object.keys($storedVisibility).length > 0 ? $storedVisibility : defaultVisibility
+  );
+
+  // svelte-ignore state_referenced_locally
+  const storedPageSize = persistentStore<number>(`${storagePrefix}-page-size`, 10);
+
+  // svelte-ignore state_referenced_locally
+  let pagination = $state<PaginationState>({
+    pageIndex: 0,
+    pageSize: showPagination ? $storedPageSize : 1,
+  });
+
+  // When not paginating, show every row; reset page on data/pageSize change.
+  $effect(() => {
+    if (!showPagination) {
+      pagination.pageSize = metrics.length || 1;
+    }
+  });
+
+  $effect(() => {
+    metrics;
+    pagination.pageSize;
+    pagination.pageIndex = 0;
+  });
+
   let selectedCapture = $state<ReqRespCapture | null>(null);
   let dialogOpen = $state(false);
   let loadingCaptureId = $state<number | null>(null);
@@ -229,13 +171,136 @@
     selectedCapture = null;
   }
 
-  let thClass = $derived(compact ? "px-4 py-2 font-medium" : "px-6 py-3 font-medium");
+  function buildColumns(withModel: boolean): ColumnDef<ActivityLogEntry>[] {
+    const cols: ColumnDef<ActivityLogEntry>[] = [
+      {
+        id: "id",
+        header: "ID",
+        cell: ({ row }) => String(row.original.id + 1),
+      },
+      {
+        id: "time",
+        header: "Time",
+        cell: ({ row }) => formatRelativeTime(row.original.timestamp),
+      },
+    ];
+
+    if (withModel) {
+      cols.push({
+        id: "model",
+        header: "Model",
+        cell: ({ row }) => row.original.model ?? "-",
+      });
+    }
+
+    cols.push(
+      {
+        id: "req_path",
+        header: "Path",
+        cell: ({ row }) => row.original.req_path || "-",
+      },
+      {
+        id: "resp_status_code",
+        header: "Status",
+        cell: ({ row }) => String(row.original.resp_status_code || "-"),
+      },
+      {
+        id: "resp_content_type",
+        header: "Content-Type",
+        cell: ({ row }) => row.original.resp_content_type || "-",
+      },
+      {
+        id: "cached",
+        header: () => renderComponent(HeaderLabel, { label: "Cached", tooltip: "prompt tokens from cache" }),
+        cell: ({ row }) =>
+          row.original.tokens.cache_tokens > 0
+            ? row.original.tokens.cache_tokens.toLocaleString()
+            : "-",
+      },
+      {
+        id: "prompt",
+        header: () => renderComponent(HeaderLabel, { label: "Prompt", tooltip: "new prompt tokens processed" }),
+        cell: ({ row }) => row.original.tokens.input_tokens.toLocaleString(),
+      },
+      {
+        id: "generated",
+        header: "Generated",
+        cell: ({ row }) => row.original.tokens.output_tokens.toLocaleString(),
+      },
+      {
+        id: "drafted",
+        header: () => renderComponent(HeaderLabel, { label: "Drafted", tooltip: "acceptance rate (accepted/drafted)" }),
+        cell: ({ row }) =>
+          formatDrafted(row.original.tokens.draft_tokens, row.original.tokens.draft_acc_tokens),
+      },
+      {
+        id: "prompt_speed",
+        header: "Prompt Speed",
+        cell: ({ row }) => formatSpeed(row.original.tokens.prompt_per_second),
+      },
+      {
+        id: "gen_speed",
+        header: "Gen Speed",
+        cell: ({ row }) => formatSpeed(row.original.tokens.tokens_per_second),
+      },
+      {
+        id: "duration",
+        header: "Duration",
+        cell: ({ row }) => formatDuration(row.original.duration_ms),
+      },
+      {
+        id: "capture",
+        header: "Capture",
+        cell: ({ row }) =>
+          renderComponent(ViewCaptureButton, {
+            hasCapture: row.original.has_capture,
+            loading: loadingCaptureId === row.original.id,
+            onclick: () => viewCapture(row.original.id),
+          }),
+      },
+      {
+        id: "meta",
+        header: "Meta",
+        cell: ({ row }) =>
+          renderComponent(MetaCell, { metadata: row.original.metadata }),
+      }
+    );
+    return cols;
+  }
+
+  let columns = $derived(buildColumns(showModelColumn));
+
+  const table = createSvelteTable({
+    get data() {
+      return metrics;
+    },
+    get columns() {
+      return columns;
+    },
+    state: {
+      get pagination() {
+        return pagination;
+      },
+      get columnVisibility() {
+        return columnVisibility;
+      },
+    },
+    onPaginationChange: (updater) => {
+      pagination =
+        typeof updater === "function" ? updater(pagination) : updater;
+      if (showPagination) storedPageSize.set(pagination.pageSize);
+    },
+    onColumnVisibilityChange: (updater) => {
+      columnVisibility =
+        typeof updater === "function" ? updater(columnVisibility) : updater;
+      storedVisibility.set(columnVisibility);
+    },
+    getCoreRowModel: getCoreRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+  });
+
+  let thClass = $derived(compact ? "px-4 py-2 h-9" : "px-6 py-3 h-12");
   let tdClass = $derived(compact ? "px-4 py-2" : "px-6 py-4");
-  let rowClass = $derived(
-    compact
-      ? "hover:bg-muted/50 whitespace-nowrap border-b"
-      : "hover:bg-muted/50 whitespace-nowrap border-b text-sm transition-colors"
-  );
 </script>
 
 <Card.Root class="shrink-0 gap-0 overflow-hidden py-0 {cardClass}">
@@ -250,13 +315,15 @@
     </div>
     <div class="flex items-center gap-2">
       {#if showPagination}
-        <span class="text-muted-foreground text-xs">Per page</span>
+        <span class="text-muted-foreground text-xs">Rows</span>
         <Select.Root
           type="single"
-          value={String($pageSizeStore)}
-          onValueChange={(v) => pageSizeStore.set(Number(v))}
+          value={String(pagination.pageSize)}
+          onValueChange={(v) => table.setPageSize(Number(v))}
         >
-          <Select.Trigger class="h-7 w-16 text-xs">{$pageSizeStore}</Select.Trigger>
+          <Select.Trigger size="sm" class="h-7 w-[4.5rem] text-xs">
+            {pagination.pageSize}
+          </Select.Trigger>
           <Select.Content>
             {#each [5, 10, 25, 50] as size (size)}
               <Select.Item value={String(size)}>{size}</Select.Item>
@@ -264,193 +331,106 @@
           </Select.Content>
         </Select.Root>
       {/if}
-      <div bind:this={dropdownContainer}>
-        <div class="relative">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onclick={() => (columnsMenuOpen = !columnsMenuOpen)}
-            title="Select columns"
-          >
-            <Columns3 />
-          </Button>
-          {#if columnsMenuOpen}
-            <div
-              class="bg-popover text-popover-foreground absolute right-0 top-full z-20 mt-1 min-w-[16rem] rounded-md border py-1 shadow-md"
-              role="list"
-            >
-              <div
-                class="text-muted-foreground border-b px-3 py-2 text-xs font-medium uppercase tracking-wider"
-                role="presentation"
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger
+          class="hover:bg-muted inline-flex size-7 items-center justify-center rounded-[min(var(--radius-md),12px)]"
+          title="Select columns"
+        >
+          <Columns3 class="size-4" />
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Content align="end" class="min-w-[16rem] p-0">
+          <DropdownMenu.Label class="text-muted-foreground border-b px-3 py-2 text-xs font-medium uppercase tracking-wider">
+            Columns
+          </DropdownMenu.Label>
+          {#each table.getAllColumns() as column (column.id)}
+            {#if column.getCanHide()}
+              <DropdownMenu.CheckboxItem
+                checked={column.getIsVisible()}
+                onCheckedChange={(v) => column.toggleVisibility(!!v)}
               >
-                Columns
-              </div>
-              {#each orderedColumns as col (col.key)}
-                {@const key = col.key}
-                <div
-                  class="hover:bg-accent flex items-center gap-2 px-3 py-1.5 text-sm transition-colors {dragOverKey ===
-                    key && dragKey !== key
-                    ? 'bg-primary/10 ring-primary/40 ring-1'
-                    : ''} {dragKey === key ? 'opacity-40' : ''}"
-                  role="listitem"
-                  ondragover={(e) => handleDragOver(e, key)}
-                  ondrop={(e) => handleDrop(e, key)}
-                >
-                  <span
-                    class="text-muted-foreground flex cursor-grab select-none"
-                    draggable={true}
-                    role="button"
-                    tabindex="-1"
-                    aria-label="Drag to reorder {col.label}"
-                    ondragstart={(e) => handleDragStart(e, key)}
-                    ondragend={handleDragEnd}
-                  >
-                    <GripVertical class="size-4" />
-                  </span>
-                  <label class="flex flex-1 cursor-pointer items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={isColumnVisible(key)}
-                      onchange={() => toggleColumn(key)}
-                      class="accent-primary rounded-none"
-                    />
-                    {col.label}
-                  </label>
-                </div>
-              {/each}
-            </div>
-          {/if}
-        </div>
-      </div>
+                {columnLabelMap[column.id] ?? column.id}
+              </DropdownMenu.CheckboxItem>
+            {/if}
+          {/each}
+        </DropdownMenu.Content>
+      </DropdownMenu.Root>
     </div>
   </Card.Header>
   <Card.Content class="overflow-x-auto p-0">
-    <table class="min-w-full text-sm">
-      <thead class="text-muted-foreground border-b text-left text-xs uppercase tracking-wider">
-        <tr>
-          {#each activeVisibleColumns as key (key)}
-            <th class={thClass}>
-              {#if key === "cached"}
-                Cached <Tooltip content="prompt tokens from cache" />
-              {:else if key === "prompt"}
-                Prompt <Tooltip content="new prompt tokens processed" />
-              {:else if key === "drafted"}
-                Drafted <Tooltip content="acceptance rate (accepted/drafted)" />
-              {:else}
-                {columnLabelMap[key] ?? key}
-              {/if}
-            </th>
-          {/each}
-        </tr>
-      </thead>
-      <tbody>
-        {#if displayMetrics.length === 0}
-          <tr>
-            <td colspan={activeVisibleColumns.length} class="text-muted-foreground px-4 py-6 text-center text-sm">
-              {emptyMessage}
-            </td>
-          </tr>
+    <Table.Root class="min-w-full">
+      <Table.Header>
+        {#each table.getHeaderGroups() as headerGroup (headerGroup.id)}
+          <Table.Row>
+            {#each headerGroup.headers as header (header.id)}
+              <Table.Head class={thClass} colspan={header.colSpan}>
+                {#if !header.isPlaceholder}
+                  <FlexRender content={header.column.columnDef.header} context={header.getContext()} />
+                {/if}
+              </Table.Head>
+            {/each}
+          </Table.Row>
+        {/each}
+      </Table.Header>
+      <Table.Body>
+        {#each table.getRowModel().rows as row (row.id)}
+          <Table.Row>
+            {#each row.getVisibleCells() as cell (cell.id)}
+              <Table.Cell class={tdClass}>
+                <FlexRender content={cell.column.columnDef.cell} context={cell.getContext()} />
+              </Table.Cell>
+            {/each}
+          </Table.Row>
         {:else}
-          {#each displayMetrics as metric (metric.id)}
-            <tr class={rowClass}>
-              {#each activeVisibleColumns as key (key)}
-                <td class={tdClass}>
-                  {#if key === "id"}
-                    {metric.id + 1}
-                  {:else if key === "time"}
-                    {formatRelativeTime(metric.timestamp)}
-                  {:else if key === "model"}
-                    {metric.model}
-                  {:else if key === "req_path"}
-                    {metric.req_path || "-"}
-                  {:else if key === "resp_status_code"}
-                    {#if metric.error_msg}
-                      <span class="text-destructive cursor-help" title={metric.error_msg}>
-                        {metric.resp_status_code || "-"}
-                      </span>
-                    {:else}
-                      {metric.resp_status_code || "-"}
-                    {/if}
-                  {:else if key === "resp_content_type"}
-                    {metric.resp_content_type || "-"}
-                  {:else if key === "cached"}
-                    {metric.tokens.cache_tokens > 0 ? metric.tokens.cache_tokens.toLocaleString() : "-"}
-                  {:else if key === "prompt"}
-                    {metric.tokens.input_tokens.toLocaleString()}
-                  {:else if key === "generated"}
-                    {metric.tokens.output_tokens.toLocaleString()}
-                  {:else if key === "drafted"}
-                    {formatDrafted(metric.tokens.draft_tokens, metric.tokens.draft_acc_tokens)}
-                  {:else if key === "prompt_speed"}
-                    {formatSpeed(metric.tokens.prompt_per_second)}
-                  {:else if key === "gen_speed"}
-                    {formatSpeed(metric.tokens.tokens_per_second)}
-                  {:else if key === "duration"}
-                    {formatDuration(metric.duration_ms)}
-                  {:else if key === "capture"}
-                    {#if metric.has_capture}
-                      <Button
-                        variant="outline"
-                        size="xs"
-                        onclick={() => viewCapture(metric.id)}
-                        disabled={loadingCaptureId === metric.id}
-                      >
-                        {loadingCaptureId === metric.id ? "..." : "View"}
-                      </Button>
-                    {:else}
-                      <span class="text-muted-foreground">-</span>
-                    {/if}
-                  {:else if key === "meta"}
-                    {#if Object.keys(metric.metadata || {}).length > 0}
-                      <MetadataTooltip metadata={metric.metadata}>
-                        <span class="text-muted-foreground hover:text-foreground cursor-help">...</span>
-                      </MetadataTooltip>
-                    {:else}
-                      <span class="text-muted-foreground">-</span>
-                    {/if}
-                  {:else}
-                    -
-                  {/if}
-                </td>
-              {/each}
-            </tr>
-          {/each}
-        {/if}
-      </tbody>
-    </table>
+          <Table.Row>
+            <Table.Cell colspan={columns.length} class="text-muted-foreground py-6 text-center text-sm">
+              {emptyMessage}
+            </Table.Cell>
+          </Table.Row>
+        {/each}
+      </Table.Body>
+    </Table.Root>
 
     {#if showPagination && metrics.length > 0}
       <div class="flex items-center justify-between gap-2 border-t px-4 py-2 text-sm">
         <span class="text-muted-foreground text-xs">
-          Page {page + 1} of {totalPages} · {metrics.length} total
+          Page {pagination.pageIndex + 1} of {table.getPageCount()} · {metrics.length} total
         </span>
-        <div class="flex gap-1">
-          <Button variant="outline" size="sm" onclick={() => (page = 0)} disabled={page === 0}>
-            First
+        <div class="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onclick={() => table.setPageIndex(0)}
+            disabled={!table.getCanPreviousPage()}
+            title="First page"
+          >
+            <ChevronsLeft />
           </Button>
           <Button
-            variant="outline"
-            size="sm"
-            onclick={() => (page = Math.max(0, page - 1))}
-            disabled={page === 0}
+            variant="ghost"
+            size="icon-sm"
+            onclick={() => table.previousPage()}
+            disabled={!table.getCanPreviousPage()}
+            title="Previous page"
           >
-            Prev
+            <ChevronLeft />
           </Button>
           <Button
-            variant="outline"
-            size="sm"
-            onclick={() => (page = Math.min(totalPages - 1, page + 1))}
-            disabled={page >= totalPages - 1}
+            variant="ghost"
+            size="icon-sm"
+            onclick={() => table.nextPage()}
+            disabled={!table.getCanNextPage()}
+            title="Next page"
           >
-            Next
+            <ChevronRight />
           </Button>
           <Button
-            variant="outline"
-            size="sm"
-            onclick={() => (page = totalPages - 1)}
-            disabled={page >= totalPages - 1}
+            variant="ghost"
+            size="icon-sm"
+            onclick={() => table.setPageIndex(table.getPageCount() - 1)}
+            disabled={!table.getCanNextPage()}
+            title="Last page"
           >
-            Last
+            <ChevronsRight />
           </Button>
         </div>
       </div>

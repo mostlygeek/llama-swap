@@ -34,6 +34,7 @@
     "vitest": "^4.1.0"
   },
   "dependencies": {
+    "@tanstack/table-core": "^8.21.3",
     "chart.js": "4.5.1",
     "highlight.js": "^11.11.1",
     "katex": "^0.16.28",
