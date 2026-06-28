@@ -2,19 +2,17 @@
   import { link } from "svelte-spa-router";
   import { models, unloadAllModels } from "../stores/api";
   import { pendingLoads, onToggleLoad, statusDotColor } from "../stores/modelLoad";
-  import { persistentStore } from "../stores/persistent";
+  import { showUnlistedModels as showUnlisted } from "../stores/modelDisplay";
   import * as Card from "$lib/components/ui/card/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Switch from "$lib/components/ui/switch/index.js";
   import * as Label from "$lib/components/ui/label/index.js";
   import { Play, PowerOff, Loader2, ExternalLink, SquareStack, Eye } from "@lucide/svelte";
 
-  const showUnlisted = persistentStore<boolean>("models-dash-show-unlisted", false);
-
   let unloadingAll = $state(false);
 
   let visibleModels = $derived(
-    showUnlisted ? $models : $models.filter((m) => !m.unlisted)
+    $showUnlisted ? $models : $models.filter((m) => !m.unlisted)
   );
 
   let readyCount = $derived($models.filter((m) => m.state === "ready").length);

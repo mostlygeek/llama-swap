@@ -8,6 +8,7 @@
   import { currentRoute } from "../stores/route";
   import { playgroundActivity } from "../stores/playgroundActivity";
   import { performanceEnabled, models } from "../stores/api";
+  import { showUnlistedModels } from "../stores/modelDisplay";
   import { selectedPlaygroundTab, playgroundTabs, playgroundMenuOpen } from "../stores/playground";
   import { modelsMenuOpen } from "../stores/sidebar";
   import type { Model } from "../lib/types";
@@ -35,6 +36,10 @@
   function isActive(path: string, current: string): boolean {
     return path === "/" ? current === "/" : current.startsWith(path);
   }
+
+  let visibleModels = $derived(
+    $showUnlistedModels ? $models : $models.filter((m) => !m.unlisted),
+  );
 
   type DotColor = "grey" | "yellow" | "green";
   function statusDotColor(model: Model): DotColor {
@@ -183,7 +188,7 @@
               </Sidebar.MenuButton>
               <Collapsible.Content>
                 <Sidebar.MenuSub>
-                  {#each $models as model (model.id)}
+                  {#each visibleModels as model (model.id)}
                     <Sidebar.MenuSubItem>
                       <Sidebar.MenuSubButton
                         isActive={$currentRoute === `/models/${encodeURIComponent(model.id)}`}
