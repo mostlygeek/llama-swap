@@ -1,6 +1,6 @@
 <script lang="ts">
   import { link } from "svelte-spa-router";
-  import { House, Boxes, Activity, ScrollText, Gauge, Sun, Moon, Monitor, ChevronRight, Settings } from "@lucide/svelte";
+  import { FerrisWheel, Boxes, Activity, ScrollText, Gauge, Sun, Moon, Monitor, ChevronRight, Settings } from "@lucide/svelte";
   import * as Sidebar from "$lib/components/ui/sidebar/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -9,7 +9,6 @@
   import { playgroundActivity } from "../stores/playgroundActivity";
   import { performanceEnabled, models } from "../stores/api";
   import { showUnlistedModels } from "../stores/modelDisplay";
-  import { selectedPlaygroundTab, playgroundTabs, playgroundMenuOpen } from "../stores/playground";
   import { modelsMenuOpen } from "../stores/sidebar";
   import type { Model } from "../lib/types";
   import ConnectionStatus from "./ConnectionStatus.svelte";
@@ -88,65 +87,14 @@
           </Sidebar.MenuItem>
 
           <Sidebar.MenuItem>
-            <Collapsible.Root
-              open={$playgroundMenuOpen}
-              onOpenChange={(v) => playgroundMenuOpen.set(v)}
-              class="gap-0"
-            >
-              <Sidebar.MenuButton
-                isActive={isActive("/", $currentRoute)}
-                tooltipContent="Playground"
-              >
-                {#snippet child({ props })}
-                  <a href="/" use:link {...props}>
-                    <House />
-                    <span class={$playgroundActivity ? "activity-link" : ""}>Playground</span>
-                    <span
-                      class="ml-auto transition-transform duration-200 {$playgroundMenuOpen ? 'rotate-90' : ''}"
-                      role="button"
-                      tabindex="0"
-                      aria-label="Toggle playground section"
-                      onclick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        playgroundMenuOpen.update((v) => !v);
-                      }}
-                      onkeydown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          playgroundMenuOpen.update((v) => !v);
-                        }
-                      }}
-                    >
-                      <ChevronRight />
-                    </span>
-                  </a>
-                {/snippet}
-              </Sidebar.MenuButton>
-              <Collapsible.Content>
-                <Sidebar.MenuSub>
-                  {#each playgroundTabs as tab (tab.id)}
-                    <Sidebar.MenuSubItem>
-                      <Sidebar.MenuSubButton
-                        isActive={isActive("/", $currentRoute) && $selectedPlaygroundTab === tab.id}
-                      >
-                        {#snippet child({ props })}
-                          <a
-                            href="/"
-                            use:link
-                            {...props}
-                            onclick={() => selectedPlaygroundTab.set(tab.id)}
-                          >
-                            <span>{tab.label}</span>
-                          </a>
-                        {/snippet}
-                      </Sidebar.MenuSubButton>
-                    </Sidebar.MenuSubItem>
-                  {/each}
-                </Sidebar.MenuSub>
-              </Collapsible.Content>
-            </Collapsible.Root>
+            <Sidebar.MenuButton isActive={isActive("/", $currentRoute)} tooltipContent="Playground">
+              {#snippet child({ props })}
+                <a href="/" use:link {...props}>
+                  <FerrisWheel />
+                  <span class={$playgroundActivity ? "activity-link" : ""}>Playground</span>
+                </a>
+              {/snippet}
+            </Sidebar.MenuButton>
           </Sidebar.MenuItem>
 
           <Sidebar.MenuItem>

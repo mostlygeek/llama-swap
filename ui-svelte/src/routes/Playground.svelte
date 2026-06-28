@@ -6,29 +6,41 @@
   import RerankInterface from "../components/playground/RerankInterface.svelte";
   import ConcurrencyInterface from "../components/playground/ConcurrencyInterface.svelte";
   import * as Card from "$lib/components/ui/card/index.js";
-  import { selectedPlaygroundTab } from "../stores/playground";
+  import { Tabs, TabsList, TabsTrigger } from "$lib/components/ui/tabs/index.js";
+  import { selectedPlaygroundTab, playgroundTabs, type PlaygroundTab } from "../stores/playground";
 </script>
 
 <Card.Root class="flex h-full flex-col gap-0 overflow-hidden p-4">
-  <!-- Tab content (all interfaces stay mounted); navigation via the sidebar -->
-  <div class="relative flex-1 overflow-hidden">
-    <div class="h-full" class:hidden={$selectedPlaygroundTab !== "chat"}>
-      <ChatInterface />
+  <Tabs
+    value={$selectedPlaygroundTab}
+    onValueChange={(v: string) => v && selectedPlaygroundTab.set(v as PlaygroundTab)}
+    class="flex flex-1 w-full flex-col gap-2 overflow-hidden"
+  >
+    <TabsList variant="line">
+      {#each playgroundTabs as tab (tab.id)}
+        <TabsTrigger value={tab.id}>{tab.label}</TabsTrigger>
+      {/each}
+    </TabsList>
+
+    <div class="relative flex-1 overflow-hidden">
+      <div class="h-full" class:hidden={$selectedPlaygroundTab !== "chat"}>
+        <ChatInterface />
+      </div>
+      <div class="h-full" class:hidden={$selectedPlaygroundTab !== "images"}>
+        <ImageInterface />
+      </div>
+      <div class="h-full" class:hidden={$selectedPlaygroundTab !== "speech"}>
+        <SpeechInterface />
+      </div>
+      <div class="h-full" class:hidden={$selectedPlaygroundTab !== "audio"}>
+        <AudioInterface />
+      </div>
+      <div class="h-full" class:hidden={$selectedPlaygroundTab !== "rerank"}>
+        <RerankInterface />
+      </div>
+      <div class="h-full" class:hidden={$selectedPlaygroundTab !== "concurrency"}>
+        <ConcurrencyInterface />
+      </div>
     </div>
-    <div class="h-full" class:hidden={$selectedPlaygroundTab !== "images"}>
-      <ImageInterface />
-    </div>
-    <div class="h-full" class:hidden={$selectedPlaygroundTab !== "speech"}>
-      <SpeechInterface />
-    </div>
-    <div class="h-full" class:hidden={$selectedPlaygroundTab !== "audio"}>
-      <AudioInterface />
-    </div>
-    <div class="h-full" class:hidden={$selectedPlaygroundTab !== "rerank"}>
-      <RerankInterface />
-    </div>
-    <div class="h-full" class:hidden={$selectedPlaygroundTab !== "concurrency"}>
-      <ConcurrencyInterface />
-    </div>
-  </div>
+  </Tabs>
 </Card.Root>

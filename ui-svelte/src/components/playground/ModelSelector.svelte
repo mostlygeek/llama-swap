@@ -26,7 +26,7 @@
     {disabled}
   >
     <Select.Trigger class="min-w-0 flex-1 basis-48">{value || placeholder}</Select.Trigger>
-    <Select.Content>
+    <Select.Content class="max-h-[60vh]">
       <Select.Item value="">{placeholder}</Select.Item>
       {#if hasMatching}
         <Select.Group>

@@ -12,5 +12,3 @@ export const playgroundTabs: { id: PlaygroundTab; label: string }[] = [
 ];
 
 export const selectedPlaygroundTab = persistentStore<PlaygroundTab>("playground-selected-tab", "chat");
-
-export const playgroundMenuOpen = persistentStore<boolean>("playground-menu-open", true);
