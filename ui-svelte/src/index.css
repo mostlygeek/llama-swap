@@ -4,6 +4,12 @@
 
 @custom-variant dark (&:is(.dark *));
 @custom-variant data-active (&:is([data-state="active"]));
+@custom-variant data-checked (&:is([data-state="checked"]));
+@custom-variant data-unchecked (&:is([data-state="unchecked"]));
+@custom-variant data-open (&:is([data-state="open"]));
+@custom-variant data-closed (&:is([data-state="closed"]));
+@custom-variant data-on (&:is([data-state="on"]));
+@custom-variant data-off (&:is([data-state="off"]));
 
 :root {
   --radius: 0;
