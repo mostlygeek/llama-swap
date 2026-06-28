@@ -4,6 +4,36 @@ import type { ScreenWidth } from "../lib/types";
 
 export type ThemeMode = "light" | "dark" | "system";
 
+// Named color palettes. Each theme is purely CSS: see the matching
+// [data-theme="..."] / [data-theme="..."].dark blocks in index.css.
+// Adding a new theme = add an entry here + the two CSS blocks.
+export type ThemeName =
+  | "default"
+  | "ocean"
+  | "violet"
+  | "emerald"
+  | "rose"
+  | "amber"
+  | "slate"
+  | "terminal"
+  | "mc"
+  | "solarized";
+
+export const themes: { value: ThemeName; label: string }[] = [
+  // modern
+  { value: "default", label: "Default" },
+  { value: "ocean", label: "Ocean" },
+  { value: "violet", label: "Violet" },
+  { value: "emerald", label: "Emerald" },
+  { value: "rose", label: "Rose" },
+  { value: "amber", label: "Amber" },
+  { value: "slate", label: "Slate" },
+  // classic
+  { value: "terminal", label: "Green Terminal" },
+  { value: "mc", label: "Midnight Commander" },
+  { value: "solarized", label: "Solarized" },
+];
+
 function getInitialThemeMode(): ThemeMode {
   if (typeof window !== "undefined") {
     try {
@@ -22,6 +52,7 @@ function getInitialThemeMode(): ThemeMode {
 
 // Persistent stores
 export const themeMode = persistentStore<ThemeMode>("theme-mode", getInitialThemeMode());
+export const themeName = persistentStore<ThemeName>("theme-name", "default");
 export const appTitle = persistentStore<string>("app-title", "llama-swap");
 
 const prefersDarkQuery = "(prefers-color-scheme: dark)";

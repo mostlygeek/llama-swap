@@ -14,7 +14,7 @@
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { Separator } from "$lib/components/ui/separator/index.js";
   import { enableAPIEvents, checkPerformanceEnabled } from "./stores/api";
-  import { initScreenWidth, initSystemThemeListener, isDarkMode, appTitle, connectionState } from "./stores/theme";
+  import { initScreenWidth, initSystemThemeListener, isDarkMode, themeName, appTitle, connectionState } from "./stores/theme";
   import { currentRoute } from "./stores/route";
   import { selectedPlaygroundTab, playgroundTabs } from "./stores/playground";
 
@@ -65,6 +65,12 @@
 
   $effect(() => {
     document.documentElement.classList.toggle("dark", $isDarkMode);
+  });
+
+  $effect(() => {
+    const el = document.documentElement;
+    if ($themeName === "default") el.removeAttribute("data-theme");
+    else el.setAttribute("data-theme", $themeName);
   });
 
   $effect(() => {
