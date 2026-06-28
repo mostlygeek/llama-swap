@@ -15,6 +15,7 @@
     metrics={sortedMetrics}
     storagePrefix="activity"
     showModelColumn={true}
+    showPagination={true}
     cardClass="min-h-[30rem] overflow-auto"
     emptyMessage="No activity recorded"
   />

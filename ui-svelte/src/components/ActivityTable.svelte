@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import type { ActivityLogEntry, ReqRespCapture } from "../lib/types";
   import { getCapture } from "../stores/api";
   import { persistentStore } from "../stores/persistent";
@@ -135,23 +136,21 @@
   // svelte-ignore state_referenced_locally
   const storedPageSize = persistentStore<number>(`${storagePrefix}-page-size`, 10);
 
+  // When not paginating, use a large page size so all rows render in one page.
   // svelte-ignore state_referenced_locally
   let pagination = $state<PaginationState>({
     pageIndex: 0,
-    pageSize: showPagination ? $storedPageSize : 1,
+    pageSize: showPagination ? $storedPageSize : Number.MAX_SAFE_INTEGER,
   });
 
-  // When not paginating, show every row; reset page on data/pageSize change.
-  $effect(() => {
-    if (!showPagination) {
-      pagination.pageSize = metrics.length || 1;
-    }
-  });
-
+  // Reset to the first page when the data source changes. We deliberately do
+  // NOT track pagination here — page-size changes reset pageIndex inside
+  // onPaginationChange instead, to avoid clobbering page navigation.
   $effect(() => {
     metrics;
-    pagination.pageSize;
-    pagination.pageIndex = 0;
+    untrack(() => {
+      pagination = { ...pagination, pageIndex: 0 };
+    });
   });
 
   let selectedCapture = $state<ReqRespCapture | null>(null);
@@ -286,8 +285,16 @@
       },
     },
     onPaginationChange: (updater) => {
+      const prev = pagination;
+      const next =
+        typeof updater === "function" ? updater(prev) : updater;
+      // Reassign so the table's $effect.pre (which reads state.pagination)
+      // picks up the new value. Reset to first page when the page size
+      // changes so we don't land on an empty page.
       pagination =
-        typeof updater === "function" ? updater(pagination) : updater;
+        next.pageSize !== prev.pageSize
+          ? { pageIndex: 0, pageSize: next.pageSize }
+          : next;
       if (showPagination) storedPageSize.set(pagination.pageSize);
     },
     onColumnVisibilityChange: (updater) => {
