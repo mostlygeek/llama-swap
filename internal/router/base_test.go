@@ -29,7 +29,7 @@ func (s *stubPlanner) OnSwapStart(string, []string)          {}
 func newTestBase(t *testing.T, processes map[string]process.Process, planner scheduler.Swapper) *baseRouter {
 	t.Helper()
 	conf := config.Config{HealthCheckTimeout: 5}
-	b, err := newBaseRouter("test", conf, processes, logmon.NewWriter(io.Discard), planner)
+	b, err := newBaseRouter("test", conf, processes, logmon.NewWriter(io.Discard), planner, nil)
 	if err != nil {
 		t.Fatalf("newBaseRouter: %v", err)
 	}

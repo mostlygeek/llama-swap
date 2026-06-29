@@ -21,7 +21,7 @@ func newTestMatrix(t *testing.T, conf config.Config, expanded []config.ExpandedS
 		solver: newMatrixSolver(expanded, evictCosts),
 		logger: logger,
 	}
-	base, err := newBaseRouter("matrix", conf, processes, logger, swapper)
+	base, err := newBaseRouter("matrix", conf, processes, logger, swapper, nil)
 	if err != nil {
 		t.Fatalf("newBaseRouter: %v", err)
 	}

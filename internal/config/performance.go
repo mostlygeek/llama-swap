@@ -9,6 +9,13 @@ import (
 type PerformanceConfig struct {
 	Disabled bool          `yaml:"disabled"`
 	Every    time.Duration `yaml:"every"`
+
+	// GpuBudgetMB is an optional soft ceiling, in MiB, on total GPU-managed
+	// memory (VRAM + GTT, as reported by the perf monitor). When > 0 and the
+	// monitor is active, the router evicts least-recently-used models before
+	// a swap so the projected footprint stays under budget. 0 (default)
+	// disables the gate entirely. See internal/router/memgate.go.
+	GpuBudgetMB int `yaml:"gpuBudgetMB"`
 }
 
 func (p *PerformanceConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {

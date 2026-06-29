@@ -80,6 +80,13 @@ type ModelConfig struct {
 	// Limit concurrency of HTTP requests to process
 	ConcurrencyLimit int `yaml:"concurrencyLimit"`
 
+	// VramEstimateMB is an optional estimate, in MiB, of the GPU memory this
+	// model needs once loaded. It is used only by the GPU budget gate
+	// (performance.gpuBudgetMB) to project the post-load footprint before a
+	// swap. 0 (default) makes the gate reactive for this model: it evicts only
+	// once live usage already exceeds the budget. See internal/router/memgate.go.
+	VramEstimateMB int `yaml:"vramEstimateMB"`
+
 	// Model filters see issue #174
 	Filters ModelFilters `yaml:"filters"`
 

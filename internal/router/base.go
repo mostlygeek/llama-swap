@@ -37,6 +37,12 @@ type baseRouter struct {
 	logger    *logmon.Monitor
 	schedule  scheduler.Scheduler
 
+	// memGate, when non-nil, is an optional fail-open admission gate that
+	// evicts LRU models before a swap to keep total GPU memory under a
+	// configured budget. nil disables it (no budget configured or no perf
+	// monitor). See memgate.go.
+	memGate *memGate
+
 	// shutdownCtx governs the request machinery: cancelling it tells grant()
 	// and ServeHTTP to stop granting and reject callers. It is deliberately
 	// separate from procCtx — see procCtx below.
@@ -75,6 +81,7 @@ func newBaseRouter(
 	processes map[string]process.Process,
 	logger *logmon.Monitor,
 	planner scheduler.Swapper,
+	gate *memGate,
 ) (*baseRouter, error) {
 	shutdownCtx, shutdownFn := context.WithCancel(context.Background())
 	procCtx, procCancel := context.WithCancel(context.Background())
@@ -83,6 +90,7 @@ func newBaseRouter(
 		config:      conf,
 		processes:   processes,
 		logger:      logger,
+		memGate:     gate,
 		shutdownCtx: shutdownCtx,
 		shutdownFn:  shutdownFn,
 		procCtx:     procCtx,
@@ -253,6 +261,16 @@ func (b *baseRouter) doSwap(modelID string, toStop []string) {
 		}(b.processes[mID], mID)
 	}
 	wg.Wait()
+
+	// Live-GTT budget gate: the solver-decided evictions (toStop) are now
+	// stopped and their GPU memory freed. Before launching the target, evict
+	// additional LRU models if the projected footprint would still exceed the
+	// configured GPU budget. This single chokepoint covers the matrix, group,
+	// and solo load paths. nil gate (no budget / no monitor) is a no-op, and
+	// the gate itself is fail-open, so it never blocks a load.
+	if b.memGate != nil {
+		b.memGate.EnsureFits(modelID, b.processes, toStop, b.logger)
+	}
 
 	target := b.processes[modelID]
 	if target.State() == process.StateStopped {
