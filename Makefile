@@ -34,31 +34,31 @@ test-all:
 ui/node_modules:
 	cd ui-svelte && npm install
 
-# build react UI
+# build react UI into internal/server/ui_dist; the `embed_ui` build tag embeds
+# this output into the binary (see internal/server/embed.go)
 ui: ui/node_modules
 	cd ui-svelte && npm run build
-	touch internal/server/ui_dist/placeholder.txt
 
 # Build OSX binary
 mac: ui
 	@echo "Building Mac binary..."
-	GOOS=darwin GOARCH=arm64 go build -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-darwin-arm64
+	GOOS=darwin GOARCH=arm64 go build -tags embed_ui -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-darwin-arm64
 
 # Build Linux binary
 linux: linux-arm64 linux-amd64
 
 linux-amd64: ui
 	@echo "Building Linux AMD64 binary..."
-	GOOS=linux GOARCH=amd64 go build -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-linux-amd64
+	GOOS=linux GOARCH=amd64 go build -tags embed_ui -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-linux-amd64
 
 linux-arm64: ui
 	@echo "Building Linux ARM64 binary..."
-	GOOS=linux GOARCH=arm64 go build -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-linux-arm64
+	GOOS=linux GOARCH=arm64 go build -tags embed_ui -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-linux-arm64
 
 # Build Windows binary
 windows: ui
 	@echo "Building Windows binary..."
-	GOOS=windows GOARCH=amd64 go build -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-windows-amd64.exe
+	GOOS=windows GOARCH=amd64 go build -tags embed_ui -ldflags="-X main.commit=${GIT_HASH} -X main.version=local_${GIT_HASH} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-windows-amd64.exe
 
 # for testing with real external processes
 simple-responder:

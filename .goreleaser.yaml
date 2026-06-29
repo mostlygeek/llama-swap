@@ -3,6 +3,9 @@ version: 2
 builds:
   - env:
       - CGO_ENABLED=0
+    # embed the UI built by `make ui` into ui_dist (see internal/server/embed.go)
+    tags:
+      - embed_ui
     goos:
       - linux
       - darwin
