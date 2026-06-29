@@ -12,7 +12,7 @@
 @custom-variant data-off (&:is([data-state="off"]));
 
 :root {
-  --radius: 0;
+  --radius: 0.5rem;
 
   /* shadcn base palette (zinc) */
   --background: oklch(1 0 0);
