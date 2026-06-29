@@ -9,7 +9,7 @@ builds:
     # match the version/commit/date vars defined in llama-swap.go:
     #   version = tag, commit = `git rev-parse --short HEAD`, date = RFC3339 UTC
     ldflags:
-      - -X main.version={{ .Version }}
+      - -X main.version={{ .Tag }}
       - -X main.commit={{ .ShortCommit }}
       - -X main.date={{ .Date }}
     goos:
