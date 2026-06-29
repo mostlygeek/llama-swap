@@ -5,6 +5,7 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/internal/process"
 )
 
@@ -12,7 +13,7 @@ type Matrix struct {
 	*baseRouter
 }
 
-func NewMatrix(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Matrix, error) {
+func NewMatrix(conf config.Config, proxylog, upstreamlog *logmon.Monitor, perfMon *perf.Monitor) (*Matrix, error) {
 	mtx := conf.Routing.Router.Settings.Matrix
 	if mtx == nil {
 		return nil, fmt.Errorf("matrix router requires a matrix configuration")
@@ -23,10 +24,12 @@ func NewMatrix(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Matr
 		logger: proxylog,
 	}
 
+	gate := newMemGateFromConfig(conf, perfMon)
+
 	// Build a process for every model in the config. Any model can run alone
 	// even if it is not part of a set; this mirrors proxy.NewMatrix.
 	processes := make(map[string]process.Process, len(conf.Models))
-	base, err := newBaseRouter("matrix", conf, processes, proxylog, swapper)
+	base, err := newBaseRouter("matrix", conf, processes, proxylog, swapper, gate)
 	if err != nil {
 		return nil, fmt.Errorf("creating base router: %w", err)
 	}

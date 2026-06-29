@@ -39,6 +39,12 @@ type Process interface {
 	// and may change at any time after the call returns.
 	State() ProcessState
 
+	// LastUse returns the unix-nano timestamp of the most recent completed
+	// ServeHTTP call, or 0 if the process has never served a request. It is
+	// used to pick least-recently-used eviction victims. Like State(), this is
+	// a snapshot that may change immediately after the call returns.
+	LastUse() int64
+
 	// ServeHTTP forwards requests to the underlying process
 	// Calling it when the process is not ready will result in a
 	// 503 response with a body indicating it is a llama-swap-error

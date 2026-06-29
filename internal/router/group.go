@@ -5,6 +5,7 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/internal/process"
 )
 
@@ -12,7 +13,7 @@ type Group struct {
 	*baseRouter
 }
 
-func NewGroup(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Group, error) {
+func NewGroup(conf config.Config, proxylog, upstreamlog *logmon.Monitor, perfMon *perf.Monitor) (*Group, error) {
 	modelToGroup := make(map[string]string)
 	for gid, gcfg := range conf.Routing.Router.Settings.Groups {
 		for _, mid := range gcfg.Members {
@@ -28,8 +29,10 @@ func NewGroup(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Group
 		modelToGroup: modelToGroup,
 	}
 
+	gate := newMemGateFromConfig(conf, perfMon)
+
 	processes := make(map[string]process.Process, len(modelToGroup))
-	base, err := newBaseRouter("group", conf, processes, proxylog, swapper)
+	base, err := newBaseRouter("group", conf, processes, proxylog, swapper, gate)
 	if err != nil {
 		return nil, fmt.Errorf("creating base router: %w", err)
 	}

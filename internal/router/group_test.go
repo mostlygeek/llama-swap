@@ -26,7 +26,7 @@ func newTestGroup(t *testing.T, conf config.Config, processes map[string]process
 		config:       conf,
 		modelToGroup: modelToGroup,
 	}
-	base, err := newBaseRouter("group", conf, processes, logmon.NewWriter(io.Discard), swapper)
+	base, err := newBaseRouter("group", conf, processes, logmon.NewWriter(io.Discard), swapper, nil)
 	if err != nil {
 		t.Fatalf("newBaseRouter: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestGroup_NewGroup_DuplicateMembership(t *testing.T) {
 		},
 	}
 	log := logmon.NewWriter(io.Discard)
-	if _, err := NewGroup(conf, log, log); err == nil {
+	if _, err := NewGroup(conf, log, log, nil); err == nil {
 		t.Fatalf("expected error for duplicate membership")
 	}
 }

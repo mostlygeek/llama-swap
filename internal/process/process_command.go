@@ -669,6 +669,12 @@ func (p *ProcessCommand) State() ProcessState {
 	return StateStopped
 }
 
+// LastUse returns the unix-nano timestamp of the most recent completed
+// ServeHTTP call (see the p.lastUse store in ServeHTTP), or 0 if never served.
+func (p *ProcessCommand) LastUse() int64 {
+	return p.lastUse.Load()
+}
+
 func (p *ProcessCommand) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	fn := p.handler.Load()
 	if fn == nil {
