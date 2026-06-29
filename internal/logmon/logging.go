@@ -160,10 +160,11 @@ func (w *Monitor) Write(p []byte) (n int, err error) {
 	case w.broadcastCh <- bufferCopy:
 	default:
 		// Subscribers (e.g. the web UI log stream) can't keep up. Drop the
-		// live broadcast rather than block: Write runs on the upstream
-		// process's stdout drain, so blocking here stalls llama.cpp itself
-		// (issue #875). GetHistory() still has the data for reconnecting
-		// clients, and the dropped bytes are reported in-stream below.
+		// live broadcast rather than block: for the upstream monitor Write
+		// runs on the process's stdout drain, so blocking here stalls
+		// llama.cpp itself (issue #875). GetHistory() still has the data for
+		// reconnecting clients, and the dropped bytes are reported in-stream
+		// below.
 		w.dropped.Add(uint64(len(p)))
 	}
 	return n, nil
