@@ -188,6 +188,18 @@ func tryRocmSmi(ctx context.Context, every time.Duration, logger *logmon.Monitor
 	if _, err := exec.LookPath("rocm-smi"); err != nil {
 		return nil, ErrNoGpuTool
 	}
+
+	// On AMD APUs/iGPUs rocm-smi only reports the tiny "VRAM" BIOS carveout
+	// (often 512 MiB) and is blind to GTT, where the model actually lives.
+	// When sysfs shows that carveout pattern, defer to the sysfs backend
+	// (which sums vram+gtt) instead of reporting a misleadingly small number.
+	// dGPUs, where VRAM is the real pool, are unaffected and rocm-smi still
+	// wins. See sysfsHasApuCarveout and readSysfs.
+	if sysfsHasApuCarveout() {
+		logger.Debug("rocm-smi: amdgpu APU carveout detected, deferring to sysfs (GTT)")
+		return nil, ErrNoGpuTool
+	}
+
 	if every < time.Second {
 		every = time.Second
 	}
@@ -659,6 +671,53 @@ func readSysfs() ([]GpuStat, error) {
 	}
 
 	return stats, nil
+}
+
+// apuCarveoutMaxVramBytes is the upper bound for what we treat as a "VRAM"
+// BIOS carveout on an APU/iGPU. Real dGPUs expose VRAM well above this (the
+// smallest modern AMD dGPUs ship 2+ GiB), while APU carveouts are typically
+// 256-512 MiB. 1 GiB leaves comfortable headroom on both sides.
+const apuCarveoutMaxVramBytes = 1 * 1024 * 1024 * 1024
+
+// sysfsHasApuCarveout reports whether any amdgpu card looks like an APU/iGPU
+// whose dedicated "VRAM" is just a small BIOS carveout backed by a much larger
+// GTT pool. In that case rocm-smi (which only reports the carveout) is not
+// authoritative and the sysfs backend should be used instead.
+//
+// It is deliberately conservative: it requires a small VRAM total AND a GTT
+// pool that dwarfs it, so a dGPU (large VRAM, comparatively small GTT) never
+// matches and rocm-smi continues to win there.
+func sysfsHasApuCarveout() bool {
+	matches, err := filepath.Glob(filepath.Join(drmClassPath, "card[0-9]*"))
+	if err != nil {
+		return false
+	}
+
+	for _, cardPath := range matches {
+		base := filepath.Base(cardPath)
+		if strings.Contains(base, "-") {
+			continue // connector entry, not a real card
+		}
+
+		devicePath := filepath.Join(cardPath, "device")
+
+		gttTotal, ok := readSysfsUint(filepath.Join(devicePath, "mem_info_gtt_total"))
+		if !ok {
+			continue // not an amdgpu card with memory accounting
+		}
+		vramTotal, ok := readSysfsUint(filepath.Join(devicePath, "mem_info_vram_total"))
+		if !ok {
+			continue
+		}
+
+		// APU carveout: small dedicated VRAM, and a GTT pool far larger than
+		// it (the model's real home).
+		if vramTotal <= apuCarveoutMaxVramBytes && gttTotal > vramTotal {
+			return true
+		}
+	}
+
+	return false
 }
 
 // readSysfsUint reads a sysfs file expected to contain a single unsigned

@@ -134,3 +134,70 @@ func TestReadSysfs_MissingFilesGraceful(t *testing.T) {
 	assert.Greater(t, stats[0].MemTotalMB, 0)
 	assert.Equal(t, 0, stats[0].MemUsedMB)
 }
+
+func TestSysfsHasApuCarveout_APUDetected(t *testing.T) {
+	root := t.TempDir()
+	// Radeon 680M: 512 MiB VRAM carveout, 23 GiB GTT. rocm-smi would only see
+	// the carveout, so we must defer to sysfs.
+	makeAmdgpuCard(t, root, "card0",
+		"536870912",   // vram_total = 512 MiB
+		"519950336",   // vram_used
+		"24696061952", // gtt_total ~ 23 GiB
+		"14810259456", // gtt_used
+	)
+
+	old := drmClassPath
+	drmClassPath = root
+	defer func() { drmClassPath = old }()
+
+	assert.True(t, sysfsHasApuCarveout(),
+		"APU with tiny VRAM carveout and large GTT should be detected")
+}
+
+func TestSysfsHasApuCarveout_DGPUNotDetected(t *testing.T) {
+	root := t.TempDir()
+	// dGPU: 24 GiB real VRAM, small GTT. rocm-smi is authoritative here, so
+	// this must NOT trigger the deferral.
+	makeAmdgpuCard(t, root, "card0",
+		"25769803776", // vram_total = 24 GiB
+		"10737418240", // vram_used
+		"268435456",   // gtt_total = 256 MiB
+		"16777216",    // gtt_used
+	)
+
+	old := drmClassPath
+	drmClassPath = root
+	defer func() { drmClassPath = old }()
+
+	assert.False(t, sysfsHasApuCarveout(),
+		"dGPU with large VRAM should not be treated as an APU carveout")
+}
+
+func TestSysfsHasApuCarveout_NoAmdgpu(t *testing.T) {
+	root := t.TempDir()
+	// Non-amdgpu card: no mem_info_gtt_total. Nothing to defer for.
+	dev := filepath.Join(root, "card0", "device")
+	writeFile(t, filepath.Join(dev, "uevent"), "DRIVER=i915\n")
+	writeFile(t, filepath.Join(dev, "mem_info_vram_total"), "536870912")
+
+	old := drmClassPath
+	drmClassPath = root
+	defer func() { drmClassPath = old }()
+
+	assert.False(t, sysfsHasApuCarveout())
+}
+
+func TestSysfsHasApuCarveout_SkipsConnectorEntries(t *testing.T) {
+	root := t.TempDir()
+	makeAmdgpuCard(t, root, "card0",
+		"536870912", "519950336", "24696061952", "14810259456")
+	// Connector nodes also match card* but have no memory accounting; they
+	// must not affect the result.
+	writeFile(t, filepath.Join(root, "card0-DP-1", "device", "uevent"), "DRIVER=amdgpu\n")
+
+	old := drmClassPath
+	drmClassPath = root
+	defer func() { drmClassPath = old }()
+
+	assert.True(t, sysfsHasApuCarveout())
+}
