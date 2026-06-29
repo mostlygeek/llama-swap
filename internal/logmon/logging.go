@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/event"
@@ -107,6 +108,12 @@ type Monitor struct {
 
 	stdout io.Writer
 
+	// broadcastCh hands log data to a dedicated goroutine that owns the
+	// (backpressuring) event bus. Write performs a non-blocking send so that
+	// slow subscribers can never stall the upstream process's stdout drain.
+	broadcastCh chan []byte
+	dropped     atomic.Uint64
+
 	level      Level
 	prefix     string
 	timeFormat string
@@ -117,14 +124,17 @@ func New() *Monitor {
 }
 
 func NewWriter(stdout io.Writer) *Monitor {
-	return &Monitor{
-		eventbus:   event.NewDispatcherConfig(1000),
-		buffer:     nil,
-		stdout:     stdout,
-		level:      LevelInfo,
-		prefix:     "",
-		timeFormat: "",
+	m := &Monitor{
+		eventbus:    event.NewDispatcherConfig(1000),
+		buffer:      nil,
+		stdout:      stdout,
+		broadcastCh: make(chan []byte, 1024),
+		level:       LevelInfo,
+		prefix:      "",
+		timeFormat:  "",
 	}
+	go m.broadcastLoop()
+	return m
 }
 
 func (w *Monitor) Write(p []byte) (n int, err error) {
@@ -146,7 +156,16 @@ func (w *Monitor) Write(p []byte) (n int, err error) {
 
 	bufferCopy := make([]byte, len(p))
 	copy(bufferCopy, p)
-	w.broadcast(bufferCopy)
+	select {
+	case w.broadcastCh <- bufferCopy:
+	default:
+		// Subscribers (e.g. the web UI log stream) can't keep up. Drop the
+		// live broadcast rather than block: Write runs on the upstream
+		// process's stdout drain, so blocking here stalls llama.cpp itself
+		// (issue #875). GetHistory() still has the data for reconnecting
+		// clients, and the dropped bytes are reported in-stream below.
+		w.dropped.Add(uint64(len(p)))
+	}
 	return n, nil
 }
 
@@ -173,8 +192,18 @@ func (w *Monitor) OnLogData(callback func(data []byte)) context.CancelFunc {
 	})
 }
 
-func (w *Monitor) broadcast(msg []byte) {
-	event.Publish(w.eventbus, DataEvent{Data: msg})
+// broadcastLoop is the only place that publishes to the (backpressuring)
+// event bus. If subscribers are slow it blocks here, never on Write. Before
+// delivering a message it flushes any pending dropped-byte count as an
+// in-stream marker so the UI shows where the gap is.
+func (w *Monitor) broadcastLoop() {
+	for msg := range w.broadcastCh {
+		if dropped := w.dropped.Swap(0); dropped > 0 {
+			notice := fmt.Appendf(nil, "\n— %d bytes dropped —\n", dropped)
+			event.Publish(w.eventbus, DataEvent{Data: notice})
+		}
+		event.Publish(w.eventbus, DataEvent{Data: msg})
+	}
 }
 
 func (w *Monitor) SetPrefix(prefix string) {
