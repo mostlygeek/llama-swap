@@ -60,7 +60,7 @@
         <dd class="font-medium">{$connectionState ?? "unknown"}</dd>
       </div>
       <div class="flex justify-between gap-4">
-        <dt class="text-muted-foreground">API Version</dt>
+        <dt class="text-muted-foreground">Version</dt>
         <dd class="font-medium">{$versionInfo?.version ?? "unknown"}</dd>
       </div>
       <div class="flex justify-between gap-4">

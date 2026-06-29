@@ -177,8 +177,8 @@ func TestServer_HandleUIAndFavicon(t *testing.T) {
 	for _, path := range []string{"/ui/", "/favicon.ico"} {
 		w := httptest.NewRecorder()
 		s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
-		// The embedded ui_dist only carries placeholder.txt in test builds, so
-		// these resolve to 404 — the handlers still execute end to end.
+		// Tests build without the `embed_ui` tag, so uiFS is empty and these
+		// resolve to 404 — the handlers still execute end to end.
 		if w.Code != http.StatusOK && w.Code != http.StatusNotFound {
 			t.Errorf("%s: status = %d", path, w.Code)
 		}

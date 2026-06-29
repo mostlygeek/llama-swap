@@ -1,28 +1,16 @@
 package server
 
 import (
-	"embed"
 	"io/fs"
 	"net/http"
 	"path"
 	"strings"
 )
 
-// uiStaticFS holds the embedded UI build. The build is copied into ui_dist by
-// the Makefile's `ui` target; placeholder.txt keeps the embed valid before a
-// build has run.
-//
-//go:embed ui_dist
-var uiStaticFS embed.FS
-
-// uiFS is the embedded UI rooted at ui_dist.
-var uiFS = func() http.FileSystem {
-	sub, err := fs.Sub(uiStaticFS, "ui_dist")
-	if err != nil {
-		panic(err)
-	}
-	return http.FS(sub)
-}()
+// uiFS holds the UI build served under /ui/. Its value depends on build tags:
+// embed.go embeds the real ui_dist build when compiled with `-tags embed_ui`,
+// while embed_notag.go provides an empty filesystem for plain builds and tests.
+// See those files for details.
 
 // selectEncoding chooses the best pre-compressed encoding the client accepts.
 // It returns the encoding ("br" or "gzip") and the matching file extension.
