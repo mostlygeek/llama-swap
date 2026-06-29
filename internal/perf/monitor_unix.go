@@ -333,8 +333,56 @@ func parseRocmSmiLine(header string, line string) *GpuStat {
 	return result
 }
 
+// drmClassPath is the sysfs directory containing DRM card entries. It is a
+// variable (rather than a const) so tests can point it at a temp-dir fixture.
+var drmClassPath = "/sys/class/drm"
+
+// trySysfs is the fallback GPU backend used when no userspace tool (LACT,
+// nvidia-smi, rocm-smi) is available. It reads amdgpu memory accounting
+// directly from sysfs. This is the only backend that correctly reports memory
+// on AMD APUs/iGPUs, where the "VRAM" sysfs is a tiny BIOS carveout (often
+// 512 MiB) and the model actually lives in GTT (GPU-accessible system RAM).
+// rocm-smi only reports the VRAM carveout there and is effectively blind to
+// the real working set; see readSysfs for the combined vram+gtt accounting.
 func trySysfs(ctx context.Context, every time.Duration, logger *logmon.Monitor) (chan []GpuStat, error) {
-	return nil, ErrNotImplemented
+	// Probe once up front so we can fail fast (and fall through to
+	// ErrNoGpuTool) when there is no amdgpu card to read.
+	if _, err := readSysfs(); err != nil {
+		return nil, err
+	}
+
+	if every < time.Second {
+		every = time.Second
+	}
+
+	ch := make(chan []GpuStat, 1)
+
+	go func() {
+		defer close(ch)
+		ticker := time.NewTicker(every)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				stats, err := readSysfs()
+				if err != nil {
+					logger.Debugf("sysfs read failed: %s", err.Error())
+					continue
+				}
+				if len(stats) > 0 {
+					select {
+					case ch <- stats:
+					default:
+					}
+				}
+			}
+		}
+	}()
+
+	return ch, nil
 }
 
 func lactSocketPath() string {
@@ -524,8 +572,139 @@ func lactGetDeviceStats(conn net.Conn, id string, name string, index int) (GpuSt
 	}, nil
 }
 
+// readSysfs enumerates amdgpu cards under drmClassPath and returns one GpuStat
+// per card. Memory is reported as the sum of VRAM and GTT:
+//
+//	MemTotalMB = (vram_total + gtt_total) / MiB
+//	MemUsedMB  = (vram_used  + gtt_used)  / MiB
+//	MemUtilPct = used / total * 100
+//
+// GTT (Graphics Translation Table) is GPU-accessible system RAM. On dGPUs it
+// is small relative to dedicated VRAM, so this sum is dominated by VRAM and
+// matches the other backends. On APUs/iGPUs the dedicated "VRAM" is only a
+// small BIOS carveout and models are allocated in GTT, so including GTT is
+// required to report the real GPU-managed memory footprint.
 func readSysfs() ([]GpuStat, error) {
-	return nil, ErrNotImplemented
+	// Only "cardN" entries are real DRM cards. Connector entries such as
+	// "card0-DP-1" also match card* globs but have no memory accounting.
+	matches, err := filepath.Glob(filepath.Join(drmClassPath, "card[0-9]*"))
+	if err != nil {
+		return nil, err
+	}
+
+	const toMB = 1024 * 1024
+
+	stats := make([]GpuStat, 0, len(matches))
+	for _, cardPath := range matches {
+		base := filepath.Base(cardPath)
+
+		// Skip connector entries (e.g. "card0-DP-1", "card0-HDMI-A-1").
+		if strings.Contains(base, "-") {
+			continue
+		}
+
+		id, err := strconv.Atoi(strings.TrimPrefix(base, "card"))
+		if err != nil {
+			continue
+		}
+
+		devicePath := filepath.Join(cardPath, "device")
+
+		// gtt_total is the marker for an amdgpu card with memory accounting;
+		// skip anything (other drivers, render-only nodes) that lacks it.
+		gttTotal, ok := readSysfsUint(filepath.Join(devicePath, "mem_info_gtt_total"))
+		if !ok {
+			continue
+		}
+
+		// Best-effort: amdgpu is the only driver exposing mem_info_gtt_*, but
+		// confirm via uevent when present so we never misreport another driver.
+		if driver, ok := readSysfsString(filepath.Join(devicePath, "uevent")); ok {
+			if drv := ueventValue(driver, "DRIVER"); drv != "" && drv != "amdgpu" {
+				continue
+			}
+		}
+
+		vramTotal, _ := readSysfsUint(filepath.Join(devicePath, "mem_info_vram_total"))
+		vramUsed, _ := readSysfsUint(filepath.Join(devicePath, "mem_info_vram_used"))
+		gttUsed, _ := readSysfsUint(filepath.Join(devicePath, "mem_info_gtt_used"))
+
+		memTotal := vramTotal + gttTotal
+		memUsed := vramUsed + gttUsed
+
+		var memUtil float64
+		if memTotal > 0 {
+			memUtil = float64(memUsed) / float64(memTotal) * 100
+		}
+
+		stat := GpuStat{
+			Timestamp:  time.Now(),
+			ID:         id,
+			Name:       sysfsDeviceName(devicePath, base),
+			MemTotalMB: int(memTotal / toMB),
+			MemUsedMB:  int(memUsed / toMB),
+			MemUtilPct: memUtil,
+		}
+
+		// gpu_busy_percent is exposed by amdgpu as a 0-100 integer.
+		if busy, ok := readSysfsUint(filepath.Join(devicePath, "gpu_busy_percent")); ok {
+			stat.GpuUtilPct = float64(busy)
+		}
+
+		stats = append(stats, stat)
+	}
+
+	if len(stats) == 0 {
+		return nil, ErrNoGpuTool
+	}
+
+	return stats, nil
+}
+
+// readSysfsUint reads a sysfs file expected to contain a single unsigned
+// integer. The bool result is false when the file is missing or unparseable.
+func readSysfsUint(path string) (uint64, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, false
+	}
+	v, err := strconv.ParseUint(strings.TrimSpace(string(data)), 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
+}
+
+// readSysfsString reads a sysfs file as a trimmed string.
+func readSysfsString(path string) (string, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(string(data)), true
+}
+
+// ueventValue extracts KEY=value from sysfs uevent contents.
+func ueventValue(uevent, key string) string {
+	for _, line := range strings.Split(uevent, "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), key+"="); ok {
+			return v
+		}
+	}
+	return ""
+}
+
+// sysfsDeviceName derives a human-readable device name. amdgpu does not expose
+// a product string in sysfs, so we fall back to the PCI ID from uevent and
+// finally to the card slot (e.g. "amdgpu card0 (1002:1681)").
+func sysfsDeviceName(devicePath, base string) string {
+	name := "amdgpu " + base
+	if uevent, ok := readSysfsString(filepath.Join(devicePath, "uevent")); ok {
+		if pciID := ueventValue(uevent, "PCI_ID"); pciID != "" {
+			name = name + " (" + pciID + ")"
+		}
+	}
+	return name
 }
 
 func readSysStats() (SysStat, error) {
