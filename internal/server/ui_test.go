@@ -1,6 +1,8 @@
 package server
 
 import (
+	"errors"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -88,5 +90,104 @@ func TestServer_ServeUI_MissingFile(t *testing.T) {
 	w := serveUIRequest(t, "/ui/missing.js", "")
 	if w.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+// Tests for embed_notag.go: emptyUIFS and uiFS behavior when built without
+// the embed_ui tag (which is the default for `go test`).
+
+func TestEmptyUIFS_Open_ReturnsErrNotExist(t *testing.T) {
+	paths := []string{
+		"",
+		"/",
+		"index.html",
+		"/index.html",
+		"favicon.ico",
+		"assets/app.js",
+		"deep/nested/path/file.css",
+		"file.with.many.dots.txt",
+	}
+	e := emptyUIFS{}
+	for _, p := range paths {
+		t.Run(p, func(t *testing.T) {
+			f, err := e.Open(p)
+			if f != nil {
+				f.Close()
+				t.Errorf("Open(%q): got non-nil file, want nil", p)
+			}
+			if !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("Open(%q): err = %v, want fs.ErrNotExist", p, err)
+			}
+		})
+	}
+}
+
+func TestEmptyUIFS_ImplementsFSInterface(t *testing.T) {
+	// Compile-time assertion: emptyUIFS must satisfy fs.FS.
+	var _ fs.FS = emptyUIFS{}
+}
+
+func TestUiFS_NotNil(t *testing.T) {
+	// uiFS is set at package init time; it must never be nil.
+	if uiFS == nil {
+		t.Fatal("uiFS is nil")
+	}
+}
+
+func TestUiFS_OpenReturnsErrorForAnyPath(t *testing.T) {
+	// When built without embed_ui, uiFS wraps emptyUIFS and must return an
+	// error for every path — no real files are embedded.
+	paths := []string{
+		"/",
+		"/index.html",
+		"/favicon.ico",
+		"/app.js",
+		"/nonexistent-file.txt",
+	}
+	for _, p := range paths {
+		t.Run(p, func(t *testing.T) {
+			f, err := uiFS.Open(p)
+			if err == nil {
+				if f != nil {
+					f.Close()
+				}
+				t.Errorf("uiFS.Open(%q): expected error, got nil", p)
+			}
+		})
+	}
+}
+
+func TestUiFS_ServeUIWithEmptyFS_Returns404(t *testing.T) {
+	// serveUI uses the package-level uiFS. When built without embed_ui the
+	// filesystem is empty, so every path — including the SPA root — should
+	// result in a 404 (not a server error).
+	paths := []string{
+		"/ui/",
+		"/ui/index.html",
+		"/ui/missing.js",
+		"/ui/some/spa/route",
+	}
+	for _, p := range paths {
+		t.Run(p, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, p, nil)
+			w := httptest.NewRecorder()
+			serveUI(uiFS, w, req)
+			if w.Code != http.StatusNotFound {
+				t.Errorf("serveUI(uiFS, %q): status = %d, want 404", p, w.Code)
+			}
+		})
+	}
+}
+
+func TestEmptyUIFS_OpenOnlyReturnsErrNotExist_NotOtherErrors(t *testing.T) {
+	// Regression: Open must return exactly fs.ErrNotExist (or wrap it), not a
+	// different error like io.EOF or a permission error.
+	e := emptyUIFS{}
+	_, err := e.Open("any-path")
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("error = %v; want errors.Is(err, fs.ErrNotExist) == true", err)
 	}
 }
