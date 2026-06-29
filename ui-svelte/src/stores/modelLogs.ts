@@ -1,4 +1,5 @@
 import { writable, type Readable } from "svelte/store";
+import { getAuthHeaders } from "../lib/authUtils";
 
 const LOG_LENGTH_LIMIT = 1024 * 100; /* 100KB of log data */
 
@@ -18,6 +19,7 @@ export function streamModelLog(modelId: string): Readable<string> {
     try {
       const res = await fetch(`/logs/stream/${encodeURIComponent(modelId)}`, {
         method: "GET",
+        headers: getAuthHeaders(),
         signal: controller.signal,
       });
       if (!res.ok || !res.body) {
