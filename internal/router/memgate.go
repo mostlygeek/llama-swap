@@ -162,19 +162,46 @@ func (g *memGate) EnsureFits(
 			return
 		}
 
+		victimEst := g.estimateMB(victim)
+
 		log.Infof("memgate: evicting LRU model %s to free GPU memory for %s", victim, incoming)
 		if err := procs[victim].Stop(g.stopTimeout); err != nil {
 			log.Warnf("memgate: stopping %s failed: %v", victim, err)
 		}
 		excluded[victim] = struct{}{}
 
-		// Re-read live usage: the Stop above has freed the victim's GPU memory,
-		// so the next decision is based on the real post-eviction footprint
-		// rather than arithmetic guesswork.
-		if reUsed, ok := g.probe.liveUsedMB(); ok {
+		// Account for the freed memory ARITHMETICALLY. A fresh live re-read is
+		// not trustworthy here: the perf monitor polls on a >=5s interval, so
+		// immediately after Stop the probe almost always still reports the
+		// pre-eviction value. Trusting that stale reading would keep `projected`
+		// over budget and evict the entire resident set. Instead, subtract the
+		// victim's estimated footprint and only believe a live reading when it
+		// reports LESS than the arithmetic projection (i.e. it has actually
+		// observed the freeing, or other memory was released too).
+		used -= victimEst
+		if used < 0 {
+			used = 0
+		}
+		liveProgressed := false
+		if reUsed, ok := g.probe.liveUsedMB(); ok && reUsed < used {
 			used = reUsed
+			liveProgressed = true
 		}
 		projected = used + estimate
+
+		// Unknown-size victim (no estimate) where the live re-read also showed
+		// no drop below the arithmetic projection: we made no measurable
+		// progress and the >=5s-stale probe can't be trusted. Continuing would
+		// evict the entire resident set on a single unknown model. Bound to this
+		// one eviction and fail open. If the live reading DID drop (real freeing
+		// observed), keep looping normally.
+		if victimEst <= 0 && !liveProgressed {
+			if projected > g.budgetMB {
+				log.Warnf("memgate: evicted unknown-size model %s but cannot confirm %s fits (projected=%dMB > budget=%dMB); loading anyway",
+					victim, incoming, projected, g.budgetMB)
+			}
+			return
+		}
 	}
 
 	log.Infof("memgate: %s now fits (projected=%dMB <= budget=%dMB)", incoming, projected, g.budgetMB)
@@ -198,6 +225,14 @@ func (g *memGate) pickLRUVictim(
 		switch p.State() {
 		case process.StateStopped, process.StateShutdown:
 			continue // not resident, frees no GPU memory
+		case process.StateStarting, process.StateStopping:
+			// In transition under another (parallel) swap: Starting is a model
+			// some other swap is mid-loading, Stopping is one already being
+			// torn down. Evicting either races that swap. Skipping Starting
+			// also fixes a subtler bug: a never-served model has LastUse()==0,
+			// which sorts it FIRST, so a just-launched target would otherwise
+			// be the preferred victim.
+			continue
 		}
 		candidates = append(candidates, candidate{id: id, lastUse: p.LastUse()})
 	}

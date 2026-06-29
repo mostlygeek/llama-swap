@@ -154,6 +154,27 @@ func TestSysfsHasApuCarveout_APUDetected(t *testing.T) {
 		"APU with tiny VRAM carveout and large GTT should be detected")
 }
 
+func TestSysfsHasApuCarveout_LargeUMACarveoutDetected(t *testing.T) {
+	root := t.TempDir()
+	// M3 regression: some 680M/780M boards expose a 2-4 GiB BIOS UMA carveout,
+	// not the typical 512 MiB. The old absolute 1 GiB VRAM bound missed these,
+	// so rocm-smi (carveout-only) wrongly won. The ratio discriminator
+	// (gtt >= 2*vram) detects them regardless of carveout size.
+	makeAmdgpuCard(t, root, "card0",
+		"4294967296",  // vram_total = 4 GiB UMA carveout
+		"2147483648",  // vram_used  = 2 GiB
+		"30064771072", // gtt_total  = 28 GiB (dwarfs the 4 GiB carveout)
+		"10737418240", // gtt_used   = 10 GiB
+	)
+
+	old := drmClassPath
+	drmClassPath = root
+	defer func() { drmClassPath = old }()
+
+	assert.True(t, sysfsHasApuCarveout(),
+		"APU with a 4 GiB UMA carveout and far larger GTT must be detected via the ratio")
+}
+
 func TestSysfsHasApuCarveout_DGPUNotDetected(t *testing.T) {
 	root := t.TempDir()
 	// dGPU: 24 GiB real VRAM, small GTT. rocm-smi is authoritative here, so

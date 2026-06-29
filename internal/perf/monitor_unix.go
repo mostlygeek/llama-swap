@@ -673,20 +673,28 @@ func readSysfs() ([]GpuStat, error) {
 	return stats, nil
 }
 
-// apuCarveoutMaxVramBytes is the upper bound for what we treat as a "VRAM"
-// BIOS carveout on an APU/iGPU. Real dGPUs expose VRAM well above this (the
-// smallest modern AMD dGPUs ship 2+ GiB), while APU carveouts are typically
-// 256-512 MiB. 1 GiB leaves comfortable headroom on both sides.
-const apuCarveoutMaxVramBytes = 1 * 1024 * 1024 * 1024
+// apuCarveoutGttVramRatio is the discriminator between an APU/iGPU UMA carveout
+// and a dGPU. On an APU the dedicated "VRAM" is a BIOS UMA carveout and the real
+// pool is GTT (GPU-accessible system RAM), so gtt_total dwarfs vram_total. On a
+// dGPU the opposite holds: VRAM is the large dedicated pool and GTT is a
+// comparatively small fraction.
+//
+// We require gtt_total >= 2 * vram_total. An absolute VRAM bound (the old 1 GiB
+// cap) wrongly excluded boards with a 2-4 GiB BIOS UMA carveout (common on
+// Radeon 680M/780M), which then fell through to rocm-smi and reported only the
+// carveout. A ratio is carveout-size independent: a 4 GiB carveout on a board
+// with 32+ GiB GTT still passes, while a dGPU (24 GiB VRAM, sub-GiB GTT) never
+// does.
+const apuCarveoutGttVramRatio = 2
 
 // sysfsHasApuCarveout reports whether any amdgpu card looks like an APU/iGPU
-// whose dedicated "VRAM" is just a small BIOS carveout backed by a much larger
+// whose dedicated "VRAM" is just a BIOS UMA carveout backed by a much larger
 // GTT pool. In that case rocm-smi (which only reports the carveout) is not
 // authoritative and the sysfs backend should be used instead.
 //
-// It is deliberately conservative: it requires a small VRAM total AND a GTT
-// pool that dwarfs it, so a dGPU (large VRAM, comparatively small GTT) never
-// matches and rocm-smi continues to win there.
+// It is deliberately conservative: it requires a GTT pool that is at least
+// apuCarveoutGttVramRatio times the VRAM total, so a dGPU (large VRAM,
+// comparatively small GTT) never matches and rocm-smi continues to win there.
 func sysfsHasApuCarveout() bool {
 	matches, err := filepath.Glob(filepath.Join(drmClassPath, "card[0-9]*"))
 	if err != nil {
@@ -710,9 +718,10 @@ func sysfsHasApuCarveout() bool {
 			continue
 		}
 
-		// APU carveout: small dedicated VRAM, and a GTT pool far larger than
-		// it (the model's real home).
-		if vramTotal <= apuCarveoutMaxVramBytes && gttTotal > vramTotal {
+		// APU carveout: a GTT pool that dwarfs the dedicated VRAM (the model's
+		// real home), regardless of the carveout's absolute size. vramTotal==0
+		// would falsely match, so guard against it.
+		if vramTotal > 0 && gttTotal >= apuCarveoutGttVramRatio*vramTotal {
 			return true
 		}
 	}
