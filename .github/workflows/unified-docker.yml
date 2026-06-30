@@ -31,6 +31,11 @@ on:
         type: boolean
         required: false
         default: true
+      build_cuda13:
+        description: "Build CUDA 13 image"
+        type: boolean
+        required: false
+        default: true
       build_vulkan:
         description: "Build Vulkan image"
         type: boolean
@@ -59,6 +64,9 @@ jobs:
           if [[ "${{ github.event_name }}" == "schedule" ]] || [[ "${{ inputs.build_cuda }}" == "true" ]]; then
             backends+=("cuda")
           fi
+          if [[ "${{ github.event_name }}" == "schedule" ]] || [[ "${{ inputs.build_cuda13 }}" == "true" ]]; then
+            backends+=("cuda13")
+          fi
           if [[ "${{ github.event_name }}" == "schedule" ]] || [[ "${{ inputs.build_vulkan }}" == "true" ]]; then
             backends+=("vulkan")
           fi
@@ -68,11 +76,20 @@ jobs:
   build:
     needs: setup
     if: ${{ needs.setup.outputs.matrix != '[]' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         backend: ${{ fromJSON(needs.setup.outputs.matrix) }}
+        platform: ["linux/amd64", "linux/arm64"]
+        include:
+          - platform: linux/amd64
+            arch: amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            arch: arm64
+            runner: ubuntu-24.04-arm
+
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
@@ -104,14 +121,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build unified Docker image (${{ matrix.backend }})
+      - name: Build unified Docker image (${{ matrix.backend }} - ${{ matrix.platform }})
         env:
           LLAMA_REF: ${{ inputs.llama_cpp_ref || 'master' }}
           WHISPER_REF: ${{ inputs.whisper_ref || 'master' }}
           SD_REF: ${{ inputs.sd_ref || 'master' }}
           IK_LLAMA_REF: ${{ inputs.ik_llama_ref || 'main' }}
           LS_VERSION: ${{ inputs.llama_swap_version || 'main' }}
-          DOCKER_IMAGE_TAG: ghcr.io/mostlygeek/llama-swap:unified-${{ matrix.backend }}
+          DOCKER_IMAGE_TAG: ghcr.io/${{ github.repository }}:unified-${{ matrix.backend }}-${{ matrix.arch }}
           # When running under act, use the local builder that has warm ccache.
           # On GitHub Actions, BUILDX_BUILDER is unset so docker uses the builder
           # created by setup-buildx-action above.
@@ -123,14 +140,82 @@ jobs:
       - name: Push to GitHub Container Registry
         if: ${{ !env.ACT && (github.event_name == 'schedule' || inputs.push_to_ghcr == true) }}
         run: |
-          BASE_TAG="ghcr.io/mostlygeek/llama-swap:unified-${{ matrix.backend }}"
+          BASE_TAG="ghcr.io/${{ github.repository }}:unified-${{ matrix.backend }}-${{ matrix.arch }}"
           DATE_TAG=$(date -u +%Y-%m-%d)
 
           docker push "${BASE_TAG}"
           docker tag "${BASE_TAG}" "${BASE_TAG}-${DATE_TAG}"
           docker push "${BASE_TAG}-${DATE_TAG}"
 
+      - name: Build unified Rootless Docker image (${{ matrix.backend }} - ${{ matrix.platform }})
+        env:
+          DOCKER_IMAGE_TAG: ghcr.io/${{ github.repository }}:unified-${{ matrix.backend }}-${{ matrix.arch }}
+          # When running under act, use the local builder that has warm ccache.
+          # On GitHub Actions, BUILDX_BUILDER is unset so docker uses the builder
+          # created by setup-buildx-action above.
+          BUILDX_BUILDER: ${{ env.ACT == 'true' && 'llama-swap-builder' || '' }}
+        run: |
+          chmod +x docker/unified/build-image-rootless.sh
+          docker/unified/build-image-rootless.sh --${{ matrix.backend }}
+
+      - name: Push Rootless to GitHub Container Registry
+        if: ${{ !env.ACT && (github.event_name == 'schedule' || inputs.push_to_ghcr == true) }}
+        run: |
+          BASE_TAG="ghcr.io/${{ github.repository }}:unified-${{ matrix.backend }}-${{ matrix.arch }}"
+          DATE_TAG=$(date -u +%Y-%m-%d)
+
           ROOTLESS_TAG="${BASE_TAG}-rootless"
           docker push "${ROOTLESS_TAG}"
           docker tag "${ROOTLESS_TAG}" "${ROOTLESS_TAG}-${DATE_TAG}"
           docker push "${ROOTLESS_TAG}-${DATE_TAG}"
+
+  merge-manifests:
+    needs:
+      - setup
+      - build
+    if: ${{ github.event_name == 'schedule' || inputs.push_to_ghcr == true }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: ${{ fromJSON(needs.setup.outputs.matrix) }}
+
+    steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set date tag
+        run: echo "DATE_TAG=$(date -u +%Y-%m-%d)" >> $GITHUB_ENV
+
+      - name: Create and push multi-arch manifest
+        if: ${{ !env.ACT }}
+        run: |
+          BASE_TAG="ghcr.io/${{ github.repository }}:unified-${{ matrix.backend }}"
+          BASE_TAG_DATE="${BASE_TAG}-${DATE_TAG}"
+          AMD64_TAG="${BASE_TAG}-amd64"
+          ARM64_TAG="${BASE_TAG}-arm64"
+
+          ROOTLESS_TAG="${BASE_TAG}-rootless"
+          ROOTLESS_TAG_DATE="${ROOTLESS_TAG}-${DATE_TAG}"
+          ROOTLESS_AMD64_TAG="${AMD64_TAG}-rootless"
+          ROOTLESS_ARM64_TAG="${ARM64_TAG}-rootless"
+
+          docker buildx imagetools create -t "${BASE_TAG}" \
+            "${AMD64_TAG}" \
+            "${ARM64_TAG}"
+
+          docker buildx imagetools create -t "${BASE_TAG_DATE}" \
+            "${AMD64_TAG}" \
+            "${ARM64_TAG}"
+
+          docker buildx imagetools create -t "${ROOTLESS_TAG}" \
+            "${ROOTLESS_AMD64_TAG}" \
+            "${ROOTLESS_ARM64_TAG}"
+
+          docker buildx imagetools create -t "${ROOTLESS_TAG_DATE}" \
+            "${ROOTLESS_AMD64_TAG}" \
+            "${ROOTLESS_ARM64_TAG}"
