@@ -66,6 +66,7 @@ func newLoadingWriter(logger *logmon.Monitor, modelName string, w http.ResponseW
 		startTime:     time.Now(),
 		tickDuration:  750 * time.Millisecond,
 		charPerSecond: 75,
+		done:          make(chan struct{}),
 	}
 
 	s.Header().Set("Content-Type", "text/event-stream")
@@ -84,7 +85,6 @@ func (s *loadingWriter) setUpdate(msg string) {
 }
 
 func (s *loadingWriter) start(ctx context.Context) {
-	s.done = make(chan struct{})
 	defer close(s.done)
 
 	defer func() {

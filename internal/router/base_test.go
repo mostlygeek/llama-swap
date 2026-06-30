@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,16 +20,28 @@ import (
 // scheduling decision logic (queueing, collation, eviction collisions) lives in
 // the scheduler package and is tested directly there; see fifo_test.go.
 
-// stubPlanner evicts nothing. baseRouter tests drive the run loop through the
-// default FIFO scheduler without exercising any particular eviction policy.
-type stubPlanner struct{}
+// stubPlanner evicts configured targets. baseRouter tests drive the run loop
+// through the default FIFO scheduler without exercising router planner details.
+type stubPlanner struct {
+	evict map[string][]string
+}
 
-func (s *stubPlanner) EvictionFor(string, []string) []string { return nil }
-func (s *stubPlanner) OnSwapStart(string, []string)          {}
+func (s *stubPlanner) EvictionFor(target string, _ []string) []string {
+	if s.evict == nil {
+		return nil
+	}
+	return s.evict[target]
+}
+func (s *stubPlanner) OnSwapStart(string, []string) {}
 
 func newTestBase(t *testing.T, processes map[string]process.Process, planner scheduler.Swapper) *baseRouter {
 	t.Helper()
 	conf := config.Config{HealthCheckTimeout: 5}
+	return newTestBaseWithConfig(t, conf, processes, planner)
+}
+
+func newTestBaseWithConfig(t *testing.T, conf config.Config, processes map[string]process.Process, planner scheduler.Swapper) *baseRouter {
+	t.Helper()
 	b, err := newBaseRouter("test", conf, processes, logmon.NewWriter(io.Discard), planner)
 	if err != nil {
 		t.Fatalf("newBaseRouter: %v", err)
@@ -227,6 +240,63 @@ func TestBaseRouter_ModelNotFound(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Errorf("status=%d want %d body=%q", w.Code, http.StatusNotFound, w.Body.String())
+	}
+}
+
+func TestBaseRouter_ConcurrencyLimitRejectsBeforeLoadingStream(t *testing.T) {
+	sendLoading := true
+	conf := config.Config{
+		HealthCheckTimeout: 5,
+		Models: map[string]config.ModelConfig{
+			"a": {ConcurrencyLimit: 2, SendLoadingState: &sendLoading},
+			"b": {},
+		},
+	}
+	a := newFakeProcess("a")
+	a.autoReady = true
+	bProc := newFakeProcess("b")
+	bProc.autoReady = true
+	bProc.serveBlock = make(chan struct{})
+
+	b := newTestBaseWithConfig(t, conf, map[string]process.Process{"a": a, "b": bProc}, &stubPlanner{
+		evict: map[string][]string{"a": {"b"}},
+	})
+
+	bDone := make(chan struct{})
+	go func() {
+		b.ServeHTTP(httptest.NewRecorder(), newStreamRequest("b"))
+		close(bDone)
+	}()
+	waitSignal(t, bProc.serveStarted, "b request start")
+	waitProcessed(t, b.testProcessed, 2)
+
+	aDone1 := make(chan struct{})
+	aDone2 := make(chan struct{})
+	go func() {
+		b.ServeHTTP(httptest.NewRecorder(), newStreamRequest("a"))
+		close(aDone1)
+	}()
+	go func() {
+		b.ServeHTTP(httptest.NewRecorder(), newStreamRequest("a"))
+		close(aDone2)
+	}()
+	waitProcessed(t, b.testProcessed, 2)
+
+	w := httptest.NewRecorder()
+	b.ServeHTTP(w, newStreamRequest("a"))
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("status=%d want 429 body=%q", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type=%q want application/json", got)
+	}
+	if strings.Contains(w.Body.String(), "llama-swap loading model") {
+		t.Fatalf("429 body contains loading stream: %q", w.Body.String())
+	}
+
+	close(bProc.serveBlock)
+	for name, ch := range map[string]chan struct{}{"b": bDone, "a1": aDone1, "a2": aDone2} {
+		waitSignal(t, ch, name+" request finish")
 	}
 }
 

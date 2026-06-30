@@ -146,15 +146,91 @@ func newFIFO(planner Swapper, eff Effects) *FIFO {
 	return NewFIFO("test", logmon.NewWriter(io.Discard), planner, config.FifoConfig{}, nil, eff)
 }
 
-func req(model string) HandlerReq { return HandlerReq{Model: model} }
+func req(model string) HandlerReq {
+	return HandlerReq{
+		Model: model,
+		Ctx:   context.Background(),
+		Admit: make(chan error, 1),
+	}
+}
 
 // reqCh creates a HandlerReq with a unique Respond channel so OnCancel can
 // identify it among queued requests and swap waiters.
 func reqCh(model string) HandlerReq {
-	return HandlerReq{
-		Model:   model,
-		Respond: make(chan HandlerResp, 1),
+	r := req(model)
+	r.Respond = make(chan HandlerResp, 1)
+	return r
+}
+
+func admitErr(t *testing.T, req HandlerReq) error {
+	t.Helper()
+	select {
+	case err := <-req.Admit:
+		return err
+	default:
+		t.Fatal("admission result not sent")
+		return nil
 	}
+}
+
+func assertAdmitted(t *testing.T, req HandlerReq) {
+	t.Helper()
+	if err := admitErr(t, req); err != nil {
+		t.Fatalf("admission err=%v want nil", err)
+	}
+}
+
+func assertAdmission429(t *testing.T, req HandlerReq) {
+	t.Helper()
+	var httpErr shared.HTTPError
+	err := admitErr(t, req)
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("admission err=%v want HTTPError", err)
+	}
+	if httpErr.StatusCode() != http.StatusTooManyRequests {
+		t.Fatalf("StatusCode()=%d want 429", httpErr.StatusCode())
+	}
+	if httpErr.Header().Get("Retry-After") == "" {
+		t.Fatal("missing Retry-After header")
+	}
+}
+
+func TestFIFO_SendAdmission_CancelledContextWins(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	r := HandlerReq{
+		Ctx:   ctx,
+		Admit: make(chan error, 1),
+	}
+
+	if sendAdmission(r, nil) {
+		t.Fatal("sendAdmission returned true for cancelled request")
+	}
+	select {
+	case err := <-r.Admit:
+		t.Fatalf("admission sent after cancellation: %v", err)
+	default:
+	}
+}
+
+func TestFIFO_SendAdmission_NilAdmitPreservesExistingBehavior(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if !sendAdmission(HandlerReq{Ctx: ctx}, nil) {
+		t.Fatal("nil Admit should preserve existing accepted behavior")
+	}
+}
+
+func TestFIFO_ReleaseWithoutReservationPanics(t *testing.T) {
+	s := newFIFO(&stubPlanner{}, newFakeEffects())
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("release without reservation did not panic")
+		}
+	}()
+	s.release("a")
 }
 
 func TestFIFO_FastPath(t *testing.T) {
@@ -197,16 +273,17 @@ func TestFIFO_ModelNotFound(t *testing.T) {
 	eff := newFakeEffects() // no states => model unknown
 	s := newFIFO(&stubPlanner{}, eff)
 
-	s.OnRequest(req("ghost"))
+	r := req("ghost")
+	s.OnRequest(r)
 
 	if got := len(eff.starts); got != 0 {
 		t.Errorf("StartSwap calls=%d want 0", got)
 	}
-	if eff.errored("ghost") != 1 {
-		t.Fatalf("want 1 error grant for ghost, grants=%+v", eff.grants)
+	if got := eff.errored("ghost"); got != 0 {
+		t.Fatalf("error grants=%d want 0 for admission rejection", got)
 	}
-	if !errors.Is(eff.grants[0].err, ErrModelNotFound) {
-		t.Errorf("err=%v want ErrModelNotFound", eff.grants[0].err)
+	if err := admitErr(t, r); !errors.Is(err, ErrModelNotFound) {
+		t.Errorf("admission err=%v want ErrModelNotFound", err)
 	}
 }
 
@@ -672,36 +749,32 @@ func newFIFOWithLimit(t *testing.T, model string, limit int) (*FIFO, *fakeEffect
 }
 
 // TestFIFO_ConcurrencyLimit_RejectsOverLimit verifies that a request arriving
-// while the model is at capacity gets an error grant instead of being served,
-// and that a new request succeeds once an in-flight one completes.
+// while the model is at capacity gets rejected during admission, before it can
+// be queued or served, and that a new request succeeds once capacity returns.
 func TestFIFO_ConcurrencyLimit_RejectsOverLimit(t *testing.T) {
 	s, eff := newFIFOWithLimit(t, "a", 1)
 
 	// First request: served (inFlight 0 → 1).
-	s.OnRequest(req("a"))
+	r1 := req("a")
+	s.OnRequest(r1)
+	assertAdmitted(t, r1)
 	if got := eff.served("a"); got != 1 {
 		t.Fatalf("served(a)=%d want 1", got)
 	}
 
-	// Second request while slot is occupied: rejected with HTTPError 429.
-	s.OnRequest(req("a"))
-	if got := eff.errored("a"); got != 1 {
-		t.Fatalf("errored(a)=%d want 1 (over-limit)", got)
-	}
-	var httpErr shared.HTTPError
-	if !errors.As(eff.grants[len(eff.grants)-1].err, &httpErr) {
-		t.Fatalf("err=%v want HTTPError", eff.grants[len(eff.grants)-1].err)
-	}
-	if httpErr.StatusCode() != http.StatusTooManyRequests {
-		t.Fatalf("StatusCode()=%d want 429", httpErr.StatusCode())
-	}
-	if httpErr.Header().Get("Retry-After") == "" {
-		t.Fatal("missing Retry-After header")
+	// Second request while slot is occupied: rejected at admission with 429.
+	r2 := req("a")
+	s.OnRequest(r2)
+	assertAdmission429(t, r2)
+	if got := eff.errored("a"); got != 0 {
+		t.Fatalf("errored(a)=%d want 0 (over-limit rejects before grant)", got)
 	}
 
 	// After the in-flight request finishes, a new request succeeds.
 	s.OnServeDone(ServeDoneEvent{ModelID: "a"})
-	s.OnRequest(req("a"))
+	r3 := req("a")
+	s.OnRequest(r3)
+	assertAdmitted(t, r3)
 	if got := eff.served("a"); got != 2 {
 		t.Fatalf("served(a)=%d want 2 after drain", got)
 	}
@@ -716,16 +789,20 @@ func TestFIFO_ConcurrencyLimit_DefaultIsTen(t *testing.T) {
 	s := newFIFO(&stubPlanner{}, eff)
 
 	for i := 0; i < 10; i++ {
-		s.OnRequest(req("a"))
+		r := req("a")
+		s.OnRequest(r)
+		assertAdmitted(t, r)
 	}
 	if got := eff.served("a"); got != 10 {
 		t.Fatalf("served(a)=%d want 10 (default limit)", got)
 	}
 
 	// 11th request is rejected.
-	s.OnRequest(req("a"))
-	if got := eff.errored("a"); got != 1 {
-		t.Fatalf("errored(a)=%d want 1 (over default limit)", got)
+	r := req("a")
+	s.OnRequest(r)
+	assertAdmission429(t, r)
+	if got := eff.errored("a"); got != 0 {
+		t.Fatalf("errored(a)=%d want 0 (over default limit rejects before grant)", got)
 	}
 }
 
@@ -734,21 +811,27 @@ func TestFIFO_ConcurrencyLimit_DefaultIsTen(t *testing.T) {
 func TestFIFO_ConcurrencyLimit_CustomLimit(t *testing.T) {
 	s, eff := newFIFOWithLimit(t, "a", 2)
 
-	s.OnRequest(req("a"))
-	s.OnRequest(req("a"))
-	s.OnRequest(req("a"))
+	r1 := req("a")
+	r2 := req("a")
+	r3 := req("a")
+	s.OnRequest(r1)
+	s.OnRequest(r2)
+	s.OnRequest(r3)
+	assertAdmitted(t, r1)
+	assertAdmitted(t, r2)
+	assertAdmission429(t, r3)
 
 	if got := eff.served("a"); got != 2 {
 		t.Fatalf("served(a)=%d want 2 (custom limit)", got)
 	}
-	if got := eff.errored("a"); got != 1 {
-		t.Fatalf("errored(a)=%d want 1 (over custom limit)", got)
+	if got := eff.errored("a"); got != 0 {
+		t.Fatalf("errored(a)=%d want 0 (over custom limit rejects before grant)", got)
 	}
 }
 
 // TestFIFO_ConcurrencyLimit_SwapWaiters verifies that when more swap waiters
-// exist than the concurrency limit, excess waiters are rejected on swap
-// completion rather than exceeding the limit.
+// exist than the concurrency limit, excess waiters are rejected during
+// admission rather than after the loading stream has started.
 func TestFIFO_ConcurrencyLimit_SwapWaiters(t *testing.T) {
 	eff := newFakeEffects()
 	eff.states["a"] = process.StateStopped
@@ -758,22 +841,108 @@ func TestFIFO_ConcurrencyLimit_SwapWaiters(t *testing.T) {
 	s := NewFIFO("test", logmon.NewWriter(io.Discard), &stubPlanner{}, config.FifoConfig{}, models, eff)
 
 	// Three requests arrive while model is loading: one starts swap, two join.
-	s.OnRequest(req("a"))
-	s.OnRequest(req("a"))
-	s.OnRequest(req("a"))
+	r1 := req("a")
+	r2 := req("a")
+	r3 := req("a")
+	s.OnRequest(r1)
+	s.OnRequest(r2)
+	s.OnRequest(r3)
+	assertAdmitted(t, r1)
+	assertAdmitted(t, r2)
+	assertAdmission429(t, r3)
 
 	if got := eff.startsFor("a"); got != 1 {
 		t.Fatalf("StartSwap(a)=%d want 1", got)
 	}
+	if sw := s.active["a"]; len(sw.waiters) != 2 {
+		t.Fatalf("waiters=%d want 2 (third request must not join)", len(sw.waiters))
+	}
 
-	// Swap completes: two served (limit), one rejected.
+	// Swap completes: only the two admitted requests are served.
 	eff.states["a"] = process.StateReady
 	s.OnSwapDone(SwapDone{ModelID: "a"})
 
 	if got := eff.served("a"); got != 2 {
-		t.Fatalf("served(a)=%d want 2 (limit on swap completion)", got)
+		t.Fatalf("served(a)=%d want 2", got)
 	}
-	if got := eff.errored("a"); got != 1 {
-		t.Fatalf("errored(a)=%d want 1 (excess waiter rejected)", got)
+	if got := eff.errored("a"); got != 0 {
+		t.Fatalf("errored(a)=%d want 0 (excess waiter rejected at admission)", got)
+	}
+}
+
+func TestFIFO_ConcurrencyLimit_QueuedWaitersReserveCapacity(t *testing.T) {
+	eff := newFakeEffects()
+	eff.states["a"] = process.StateStopped
+	eff.states["b"] = process.StateStopped
+	models := map[string]config.ModelConfig{
+		"a": {ConcurrencyLimit: 2},
+		"b": {},
+	}
+	s := NewFIFO("test", logmon.NewWriter(io.Discard), &stubPlanner{evict: map[string][]string{"a": {"b"}}}, config.FifoConfig{}, models, eff)
+
+	bReq := req("b")
+	aReq1 := req("a")
+	aReq2 := req("a")
+	aReq3 := req("a")
+
+	s.OnRequest(bReq)  // StartSwap(b)
+	s.OnRequest(aReq1) // queued behind b
+	s.OnRequest(aReq2) // queued behind b
+	s.OnRequest(aReq3) // rejected before queueing
+
+	assertAdmitted(t, bReq)
+	assertAdmitted(t, aReq1)
+	assertAdmitted(t, aReq2)
+	assertAdmission429(t, aReq3)
+
+	if got := len(s.queued); got != 2 {
+		t.Fatalf("queue len=%d want 2", got)
+	}
+	if got := eff.startsFor("a"); got != 0 {
+		t.Fatalf("StartSwap(a)=%d want 0 while b is loading", got)
+	}
+
+	eff.states["b"] = process.StateReady
+	s.OnSwapDone(SwapDone{ModelID: "b"})
+	s.OnServeDone(ServeDoneEvent{ModelID: "b"})
+	if got := eff.startsFor("a"); got != 1 {
+		t.Fatalf("StartSwap(a)=%d want 1 after b drains", got)
+	}
+
+	eff.states["a"] = process.StateReady
+	s.OnSwapDone(SwapDone{ModelID: "a"})
+	if got := eff.served("a"); got != 2 {
+		t.Fatalf("served(a)=%d want 2", got)
+	}
+}
+
+func TestFIFO_ConcurrencyLimit_CancelledQueuedWaiterReleasesReservation(t *testing.T) {
+	eff := newFakeEffects()
+	eff.states["a"] = process.StateStopped
+	eff.states["b"] = process.StateStopped
+	models := map[string]config.ModelConfig{
+		"a": {ConcurrencyLimit: 1},
+		"b": {},
+	}
+	s := NewFIFO("test", logmon.NewWriter(io.Discard), &stubPlanner{evict: map[string][]string{"a": {"b"}}}, config.FifoConfig{}, models, eff)
+
+	bReq := req("b")
+	cancelledReq := reqCh("a")
+	rejectedReq := req("a")
+	retryReq := req("a")
+
+	s.OnRequest(bReq)
+	s.OnRequest(cancelledReq)
+	s.OnRequest(rejectedReq)
+	assertAdmitted(t, bReq)
+	assertAdmitted(t, cancelledReq)
+	assertAdmission429(t, rejectedReq)
+
+	s.OnCancel(cancelledReq)
+	s.OnRequest(retryReq)
+	assertAdmitted(t, retryReq)
+
+	if got := len(s.queued); got != 1 {
+		t.Fatalf("queue len=%d want 1 after cancel and retry", got)
 	}
 }

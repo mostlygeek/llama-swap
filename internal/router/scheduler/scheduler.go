@@ -112,6 +112,7 @@ func New(conf config.Config, name string, logger *logmon.Monitor, planner Swappe
 type HandlerReq struct {
 	Model      string
 	Ctx        context.Context
+	Admit      chan error
 	Respond    chan HandlerResp
 	PositionCh chan int
 }
