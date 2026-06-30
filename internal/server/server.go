@@ -87,6 +87,7 @@ var modelPostFormRoutes = []string{
 var modelGetRoutes = []string{
 	"/v1/audio/voices",
 	"/sdapi/v1/loras",
+	"/props",
 }
 
 // isMetricsRecordPath reports whether path is one of the model-dispatched
