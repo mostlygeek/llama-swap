@@ -325,10 +325,16 @@ func sendAdmission(req HandlerReq, err error) bool {
 	if req.Admit == nil {
 		return true
 	}
+	done := reqDone(req)
+	select {
+	case <-done:
+		return false
+	default:
+	}
 	select {
 	case req.Admit <- err:
 		return true
-	case <-reqDone(req):
+	case <-done:
 		return false
 	}
 }
@@ -341,8 +347,11 @@ func reqDone(req HandlerReq) <-chan struct{} {
 }
 
 func (s *FIFO) release(modelID string) {
-	s.reserved[modelID]--
 	if s.reserved[modelID] <= 0 {
+		panic(fmt.Sprintf("%s: release without reservation for model %s", s.name, modelID))
+	}
+	s.reserved[modelID]--
+	if s.reserved[modelID] == 0 {
 		delete(s.reserved, modelID)
 	}
 }

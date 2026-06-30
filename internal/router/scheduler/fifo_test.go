@@ -195,6 +195,44 @@ func assertAdmission429(t *testing.T, req HandlerReq) {
 	}
 }
 
+func TestFIFO_SendAdmission_CancelledContextWins(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	r := HandlerReq{
+		Ctx:   ctx,
+		Admit: make(chan error, 1),
+	}
+
+	if sendAdmission(r, nil) {
+		t.Fatal("sendAdmission returned true for cancelled request")
+	}
+	select {
+	case err := <-r.Admit:
+		t.Fatalf("admission sent after cancellation: %v", err)
+	default:
+	}
+}
+
+func TestFIFO_SendAdmission_NilAdmitPreservesExistingBehavior(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if !sendAdmission(HandlerReq{Ctx: ctx}, nil) {
+		t.Fatal("nil Admit should preserve existing accepted behavior")
+	}
+}
+
+func TestFIFO_ReleaseWithoutReservationPanics(t *testing.T) {
+	s := newFIFO(&stubPlanner{}, newFakeEffects())
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("release without reservation did not panic")
+		}
+	}()
+	s.release("a")
+}
+
 func TestFIFO_FastPath(t *testing.T) {
 	eff := newFakeEffects()
 	eff.states["a"] = process.StateReady
