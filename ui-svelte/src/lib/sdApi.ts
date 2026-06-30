@@ -1,4 +1,5 @@
 import type { SdApiTxt2ImgRequest, SdApiResponse, SdApiLora } from "./types";
+import { getAuthHeaders } from "./authUtils";
 
 export async function generateSdImage(
   request: SdApiTxt2ImgRequest,
@@ -6,9 +7,9 @@ export async function generateSdImage(
 ): Promise<SdApiResponse> {
   const response = await fetch("/sdapi/v1/txt2img", {
     method: "POST",
-    headers: {
+    headers: getAuthHeaders({
       "Content-Type": "application/json",
-    },
+    }),
     body: JSON.stringify(request),
     signal,
   });
@@ -27,7 +28,7 @@ export async function fetchSdLoras(
 ): Promise<SdApiLora[]> {
   const response = await fetch(
     `/sdapi/v1/loras?model=${encodeURIComponent(model)}`,
-    { signal }
+    { headers: getAuthHeaders(), signal }
   );
 
   if (!response.ok) {

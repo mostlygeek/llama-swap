@@ -1,4 +1,5 @@
 import type { SpeechGenerationRequest } from "./types";
+import { getAuthHeaders } from "./authUtils";
 
 export async function generateSpeech(
   model: string,
@@ -14,9 +15,9 @@ export async function generateSpeech(
 
   const response = await fetch("/v1/audio/speech", {
     method: "POST",
-    headers: {
+    headers: getAuthHeaders({
       "Content-Type": "application/json",
-    },
+    }),
     body: JSON.stringify(request),
     signal,
   });

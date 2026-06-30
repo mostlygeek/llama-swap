@@ -4,6 +4,7 @@
   import { createPlaygroundInterface } from "../../lib/playgroundInterface";
   import { generateSpeech } from "../../lib/speechApi";
   import { playgroundStores } from "../../stores/playgroundActivity";
+  import { getAuthHeaders } from "../../lib/authUtils";
   import ModelSelector from "./ModelSelector.svelte";
   import ExpandableTextarea from "./ExpandableTextarea.svelte";
   import EmptyState from "../EmptyState.svelte";
@@ -74,7 +75,9 @@
     isLoadingVoices = true;
 
     try {
-      const response = await fetch(`/v1/audio/voices?model=${encodeURIComponent(model)}`);
+      const response = await fetch(`/v1/audio/voices?model=${encodeURIComponent(model)}`, {
+        headers: getAuthHeaders(),
+      });
       if (!response.ok) {
         // Fall back to default voices if API call fails
         availableVoices = defaultVoices;
