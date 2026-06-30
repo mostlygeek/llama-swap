@@ -200,14 +200,30 @@ func waitProcessed(t *testing.T, ch chan struct{}, n int) {
 	for i := 0; i < n; i++ {
 		select {
 		case <-ch:
-		case <-time.After(2 * time.Second):
-			t.Fatalf("waitProcessed: only %d/%d events received", i, n)
+		case <-t.Context().Done():
+			t.Fatalf("waitProcessed: only %d/%d events received: %v", i, n, context.Cause(t.Context()))
 		}
+	}
+}
+
+func waitSignal(t *testing.T, ch <-chan struct{}, name string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-t.Context().Done():
+		t.Fatalf("%s did not signal: %v", name, context.Cause(t.Context()))
 	}
 }
 
 func newRequest(model string) *http.Request {
 	body := fmt.Sprintf(`{"model":%q}`, model)
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	return r
+}
+
+func newStreamRequest(model string) *http.Request {
+	body := fmt.Sprintf(`{"model":%q,"stream":true}`, model)
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	return r

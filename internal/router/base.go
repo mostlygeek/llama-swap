@@ -425,6 +425,7 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		// Unbuffered: a successful send on Respond proves the waiter is
 		// alive and consuming. grant() relies on this to avoid handing a
 		// handleFunc to a cancelled waiter and leaking the inFlight count.
+		Admit:      make(chan error, 1),
 		Respond:    make(chan scheduler.HandlerResp),
 		PositionCh: make(chan int, 1),
 	}
@@ -435,6 +436,24 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	case <-b.shutdownCtx.Done():
 		shared.SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
+		return
+	}
+
+	var admissionErr error
+	select {
+	case admissionErr = <-hr.Admit:
+	case <-req.Context().Done():
+		select {
+		case b.cancelCh <- hr:
+		case <-b.shutdownCtx.Done():
+		}
+		return
+	case <-b.shutdownCtx.Done():
+		shared.SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
+		return
+	}
+	if admissionErr != nil {
+		shared.SendError(w, req, admissionErr)
 		return
 	}
 
