@@ -33,7 +33,7 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
   - `v1/rerank`, `v1/reranking`, `/rerank`
   - `/infill` - for code infilling
   - `/completion` - for completion endpoint
-  - `/props` - requires `model` to be specified in request.
+  - `/props` - requires `model` to be specified in request. note llama-server's autoload param is not supported and will be ignored if specified.
 - ✅ SDAPI via [stable-diffusion.cpp's server](https://github.com/leejet/stable-diffusion.cpp/tree/master/examples/server)
   - `/sdapi/v1/txt2img`
   - `/sdapi/v1/img2img`
