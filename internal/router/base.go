@@ -22,7 +22,6 @@ type shutdownReq struct {
 
 type unloadReq struct {
 	targets []string
-	timeout time.Duration
 	respond chan struct{}
 }
 
@@ -127,7 +126,7 @@ func (b *baseRouter) run() {
 			b.notifyProcessed()
 
 		case req := <-b.unloadCh:
-			b.schedule.OnUnload(req.targets, req.timeout)
+			b.schedule.OnUnload(req.targets)
 			close(req.respond)
 			b.notifyProcessed()
 
@@ -198,8 +197,9 @@ func (b *baseRouter) GrantServe(req scheduler.HandlerReq, modelID string) bool {
 }
 
 // StopProcesses implements scheduler.Effects, stopping the named processes in
-// parallel and blocking until all have stopped.
-func (b *baseRouter) StopProcesses(timeout time.Duration, ids []string) {
+// parallel and blocking until all have stopped. Each process is given its
+// configured unloadTimeout to stop gracefully.
+func (b *baseRouter) StopProcesses(ids []string) {
 	var wg sync.WaitGroup
 	for _, id := range ids {
 		p, ok := b.processes[id]
@@ -209,10 +209,7 @@ func (b *baseRouter) StopProcesses(timeout time.Duration, ids []string) {
 		wg.Add(1)
 		go func(id string, p process.Process) {
 			defer wg.Done()
-			stopTimeout := timeout
-			if stopTimeout <= 0 {
-				stopTimeout = b.unloadTimeout(id)
-			}
+			stopTimeout := b.unloadTimeout(id)
 			if err := p.Stop(stopTimeout); err != nil {
 				b.logger.Warnf("%s: stopping %s failed: %v", b.name, id, err)
 			}
@@ -337,15 +334,15 @@ func (b *baseRouter) healthCheckTimeout() time.Duration {
 	return t
 }
 
+// unloadTimeout returns the graceful stop timeout for a model. Config parsing
+// guarantees both the global and per-model unloadTimeout are populated (a zero
+// model value is rewritten to the global default on parse), so no zero handling
+// is needed here.
 func (b *baseRouter) unloadTimeout(modelID string) time.Duration {
-	seconds := b.config.UnloadTimeout
-	if mc, ok := b.config.Models[modelID]; ok && mc.UnloadTimeout > 0 {
-		seconds = mc.UnloadTimeout
+	if mc, ok := b.config.Models[modelID]; ok {
+		return time.Duration(mc.UnloadTimeout) * time.Second
 	}
-	if seconds <= 0 {
-		seconds = config.DEFAULT_UNLOAD_TIMEOUT
-	}
-	return time.Duration(seconds) * time.Second
+	return time.Duration(b.config.UnloadTimeout) * time.Second
 }
 
 func (b *baseRouter) Handles(model string) bool {
@@ -388,9 +385,9 @@ func (b *baseRouter) RunningModels() map[string]process.ProcessState {
 // for — Stop kills the upstream, those callers see whatever error the
 // reverse proxy surfaces and may retry. Their trackedServe defers fire
 // normally and decrement inFlight as the dying handlers return.
-// A non-positive timeout uses the configured unloadTimeout for each targeted
-// model, falling back to the global unloadTimeout.
-func (b *baseRouter) Unload(timeout time.Duration, models ...string) {
+// Each targeted process is given its configured unloadTimeout to stop
+// gracefully.
+func (b *baseRouter) Unload(models ...string) {
 	targets := models
 	if len(targets) == 0 {
 		targets = make([]string, 0, len(b.processes))
@@ -402,7 +399,7 @@ func (b *baseRouter) Unload(timeout time.Duration, models ...string) {
 		return
 	}
 
-	req := unloadReq{targets: targets, timeout: timeout, respond: make(chan struct{})}
+	req := unloadReq{targets: targets, respond: make(chan struct{})}
 	select {
 	case b.unloadCh <- req:
 	case <-b.runDone:

@@ -204,7 +204,7 @@ type runningModel struct {
 // handleUnload stops every running local process. Peer models are remote and
 // unaffected.
 func (s *Server) handleUnload(w http.ResponseWriter, r *http.Request) {
-	s.local.Unload(0)
+	s.local.Unload()
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))
 }

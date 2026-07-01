@@ -302,7 +302,6 @@ models:
 
     # unloadTimeout: graceful timeout in seconds for manual/API unloads
     # - optional, default: global unloadTimeout
-    # - a value of 0 uses the global unloadTimeout
     # - useful for slow cmdStop commands such as docker stop
     unloadTimeout: 10
 

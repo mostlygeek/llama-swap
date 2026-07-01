@@ -83,7 +83,7 @@ func TestBaseRouter_UnloadAll(t *testing.T) {
 	c.markReady()
 
 	b := newTestBase(t, map[string]process.Process{"a": a, "c": c}, &stubPlanner{})
-	b.Unload(time.Second)
+	b.Unload()
 
 	if a.State() != process.StateStopped || c.State() != process.StateStopped {
 		t.Fatalf("Unload() should stop every process: a=%q c=%q", a.State(), c.State())
@@ -97,7 +97,7 @@ func TestBaseRouter_UnloadSpecificModel(t *testing.T) {
 	c.markReady()
 
 	b := newTestBase(t, map[string]process.Process{"a": a, "c": c}, &stubPlanner{})
-	b.Unload(time.Second, "a")
+	b.Unload("a")
 
 	if a.State() != process.StateStopped {
 		t.Errorf("a should be stopped, got %q", a.State())
@@ -122,7 +122,7 @@ func TestBaseRouter_UnloadSpecificModelUsesConfiguredTimeout(t *testing.T) {
 		},
 	}
 	b := newTestBaseWithConfig(t, conf, map[string]process.Process{"a": a, "c": c}, &stubPlanner{})
-	b.Unload(0, "a")
+	b.Unload("a")
 
 	if a.lastStopTimeout() != 45*time.Second {
 		t.Errorf("a stop timeout=%v want 45s", a.lastStopTimeout())
@@ -147,7 +147,7 @@ func TestBaseRouter_UnloadAllUsesConfiguredTimeouts(t *testing.T) {
 		},
 	}
 	b := newTestBaseWithConfig(t, conf, map[string]process.Process{"a": a, "c": c}, &stubPlanner{})
-	b.Unload(0)
+	b.Unload()
 
 	if a.lastStopTimeout() != 45*time.Second {
 		t.Errorf("a stop timeout=%v want 45s", a.lastStopTimeout())
@@ -177,7 +177,7 @@ func TestBaseRouter_Unload_StopsInParallel(t *testing.T) {
 
 	unloadDone := make(chan struct{})
 	go func() {
-		b.Unload(time.Second, "a", "b", "c")
+		b.Unload("a", "b", "c")
 		close(unloadDone)
 	}()
 
