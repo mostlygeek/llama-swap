@@ -58,8 +58,16 @@ func (s *Server) modelStatus() []apiModel {
 	}
 
 	for peerID, peer := range s.cfg.Peers {
+		known := make(map[string]bool, len(peer.Models))
 		for _, modelID := range peer.Models {
+			known[modelID] = true
 			models = append(models, apiModel{Id: modelID, PeerID: peerID})
+		}
+		for virtualID := range peer.Filters.SetParamsByID {
+			if known[virtualID] {
+				continue
+			}
+			models = append(models, apiModel{Id: virtualID, PeerID: peerID})
 		}
 	}
 

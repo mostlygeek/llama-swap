@@ -2,8 +2,11 @@ package router
 
 import (
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/shared"
@@ -49,4 +52,37 @@ type LocalRouter interface {
 	// modelID must be a real (non-alias) config key. Returns false when the
 	// model is not known to this router.
 	ProcessLogger(modelID string) (*logmon.Monitor, bool)
+}
+
+// ResolveVirtualSubID checks whether search is a key in any peer's
+// SetParamsByID and returns the matching peer config, resolved base model name,
+// and whether a match was found. Peers are visited in sorted order (first-wins
+// for duplicates). When found but the base model cannot be determined (multiple
+// models, no match), baseModel is empty.
+func ResolveVirtualSubID(cfg config.Config, search string) (peer *config.PeerConfig, baseModel string, found bool) {
+	peerIDs := make([]string, 0, len(cfg.Peers))
+	for peerID := range cfg.Peers {
+		peerIDs = append(peerIDs, peerID)
+	}
+	sort.Strings(peerIDs)
+
+	for _, peerID := range peerIDs {
+		p := cfg.Peers[peerID]
+		if len(p.Filters.SetParamsByID) == 0 {
+			continue
+		}
+		if _, inByID := p.Filters.SetParamsByID[search]; !inByID {
+			continue
+		}
+		for _, base := range p.Models {
+			if search == base || strings.HasPrefix(search, base+":") {
+				return &p, base, true
+			}
+		}
+		if len(p.Models) == 1 {
+			return &p, p.Models[0], true
+		}
+		return &p, "", true
+	}
+	return nil, "", false
 }
