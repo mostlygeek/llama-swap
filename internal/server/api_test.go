@@ -336,15 +336,15 @@ func TestServer_HandleUpstream_InflightTracksSupportedPaths(t *testing.T) {
 			if w.Code != http.StatusOK {
 				t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
 			}
-			if during.Total != 1 || len(during.Requests) != 1 {
+			if len(during.Requests) != 1 {
 				t.Fatalf("inflight during request = %+v, want 1 request", during)
 			}
 			entry := during.Requests[0]
 			if entry.Model != "m1" || entry.Method != tc.method || entry.ReqPath != tc.wantPath {
 				t.Errorf("inflight entry = %+v, want model=m1 method=%s path=%s", entry, tc.method, tc.wantPath)
 			}
-			if got := s.inflight.Current(); got.Total != 0 {
-				t.Errorf("inflight after request = %d, want 0", got.Total)
+			if got := s.inflight.Current(); len(got.Requests) != 0 {
+				t.Errorf("inflight after request = %d, want 0", len(got.Requests))
 			}
 		})
 	}
@@ -366,7 +366,7 @@ func TestServer_HandleUpstream_InflightSkipsUnsupportedPath(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
 	}
-	if during.Total != 0 || len(during.Requests) != 0 {
+	if len(during.Requests) != 0 {
 		t.Fatalf("inflight during unsupported path = %+v, want empty", during)
 	}
 }

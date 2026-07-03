@@ -71,7 +71,6 @@ export interface InflightRequestEntry {
 }
 
 export interface InFlightStats {
-  total: number;
   requests?: InflightRequestEntry[];
 }
 

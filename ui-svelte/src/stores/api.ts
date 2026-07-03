@@ -125,8 +125,9 @@ export function handleAPIEventMessage(data: string): void {
 
     case "inflight": {
       const stats = JSON.parse(message.data) as InFlightStats;
-      inFlightRequests.set(stats.total ?? 0);
-      inflightRequestEntries.set(stats.requests ?? []);
+      const requests = stats.requests ?? [];
+      inFlightRequests.set(requests.length);
+      inflightRequestEntries.set(requests);
       break;
     }
   }

@@ -93,7 +93,7 @@ func (t *inflightTracker) snapshotLocked() shared.InFlightRequestsEvent {
 		}
 		return requests[i].Timestamp.Before(requests[j].Timestamp)
 	})
-	return shared.InFlightRequestsEvent{Total: len(requests), Requests: requests}
+	return shared.InFlightRequestsEvent{Requests: requests}
 }
 
 func copyMetadata(metadata map[string]string) map[string]string {

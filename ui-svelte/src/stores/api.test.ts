@@ -15,7 +15,6 @@ describe("api store event handling", () => {
       JSON.stringify({
         type: "inflight",
         data: JSON.stringify({
-          total: 1,
           requests: [
             {
               id: "7",

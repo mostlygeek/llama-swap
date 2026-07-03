@@ -46,7 +46,6 @@ func (e ModelPreloadedEvent) Type() uint32 {
 }
 
 type InFlightRequestsEvent struct {
-	Total    int                    `json:"total"`
 	Requests []InflightRequestEntry `json:"requests"`
 }
 

@@ -32,9 +32,6 @@ func TestServer_InflightMiddleware_AddsAndRemovesEntriesAroundRequestHandling(t 
 
 	handler.ServeHTTP(httptest.NewRecorder(), req)
 
-	if duringRequest.Total != 1 {
-		t.Fatalf("inflight total during request = %d, want 1", duringRequest.Total)
-	}
 	if len(duringRequest.Requests) != 1 {
 		t.Fatalf("inflight requests during request = %d, want 1", len(duringRequest.Requests))
 	}
@@ -45,7 +42,7 @@ func TestServer_InflightMiddleware_AddsAndRemovesEntriesAroundRequestHandling(t 
 	if entry.Metadata["source"] != "test" {
 		t.Errorf("metadata = %v, want source=test", entry.Metadata)
 	}
-	if got := tracker.Current(); got.Total != 0 || len(got.Requests) != 0 {
+	if got := tracker.Current(); len(got.Requests) != 0 {
 		t.Errorf("inflight after request = %+v, want empty", got)
 	}
 }
@@ -127,8 +124,8 @@ func TestServer_InflightCancelByIDCancelsRequestContext(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("request context was not canceled")
 	}
-	if got := tracker.Current(); got.Total != 0 {
-		t.Errorf("inflight after cancel cleanup = %d, want 0", got.Total)
+	if got := tracker.Current(); len(got.Requests) != 0 {
+		t.Errorf("inflight after cancel cleanup = %d, want 0", len(got.Requests))
 	}
 }
 
@@ -138,7 +135,7 @@ func waitInflightEvent(t *testing.T, events <-chan shared.InFlightRequestsEvent,
 	for {
 		select {
 		case got := <-events:
-			if got.Total == total {
+			if len(got.Requests) == total {
 				return got
 			}
 		case <-timer:
@@ -214,8 +211,8 @@ func TestServer_InflightMetricsRecordsCompletedOnce(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%q", w.Code, w.Body.String())
 	}
-	if got := s.inflight.Current(); got.Total != 0 {
-		t.Fatalf("inflight total after request = %d, want 0", got.Total)
+	if got := s.inflight.Current(); len(got.Requests) != 0 {
+		t.Fatalf("inflight total after request = %d, want 0", len(got.Requests))
 	}
 	gotMetrics := s.metrics.getMetrics()
 	if len(gotMetrics) != 1 {
