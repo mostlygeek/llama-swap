@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import type { ActivityLogEntry, ReqRespCapture } from "../lib/types";
-  import { getCapture } from "../stores/api";
+  import type { ActivityLogEntry, InflightRequestEntry, ReqRespCapture } from "../lib/types";
+  import { cancelInflightRequest, getCapture } from "../stores/api";
   import { persistentStore } from "../stores/persistent";
   import CaptureDialog from "./CaptureDialog.svelte";
   import {
@@ -25,6 +25,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import {
     Columns3,
+    ChevronDown,
     ChevronLeft,
     ChevronRight,
     ChevronsLeft,
@@ -32,7 +33,9 @@
     ArrowUp,
     ArrowDown,
     ArrowUpDown,
+    CircleX,
     GripVertical,
+    X,
   } from "@lucide/svelte";
   import HeaderLabel from "./activity-table/HeaderLabel.svelte";
   import ViewCaptureButton from "./activity-table/ViewCaptureButton.svelte";
@@ -41,6 +44,7 @@
 
   interface Props {
     metrics: ActivityLogEntry[];
+    inflightRequests?: InflightRequestEntry[];
     storagePrefix: string;
     showModelColumn?: boolean;
     showPagination?: boolean;
@@ -52,6 +56,7 @@
 
   let {
     metrics,
+    inflightRequests = [],
     storagePrefix,
     showModelColumn = true,
     showPagination = false,
@@ -145,6 +150,8 @@
 
   // svelte-ignore state_referenced_locally
   const storedPageSize = persistentStore<number>(`${storagePrefix}-page-size`, 10);
+  // svelte-ignore state_referenced_locally
+  const storedInflightOpen = persistentStore<boolean>(`${storagePrefix}-inflight-open`, true);
 
   // When not paginating, use a large page size so all rows render in one page.
   // svelte-ignore state_referenced_locally
@@ -155,6 +162,7 @@
 
   // svelte-ignore state_referenced_locally
   let sorting = $state<SortingState>([]);
+  let inflightOpen = $state($storedInflightOpen);
 
   // Reset to the first page when the data source changes. We deliberately do
   // NOT track pagination here — page-size changes reset pageIndex inside
@@ -169,6 +177,21 @@
   let selectedCapture = $state<ReqRespCapture | null>(null);
   let dialogOpen = $state(false);
   let loadingCaptureId = $state<number | null>(null);
+  let cancelingInflightIds = $state<string[]>([]);
+  let inflightNowMs = $state(Date.now());
+
+  $effect(() => {
+    if (inflightRequests.length === 0) return;
+
+    let frame = 0;
+    const tick = () => {
+      inflightNowMs = Date.now();
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+
+    return () => cancelAnimationFrame(frame);
+  });
 
   async function viewCapture(id: number) {
     loadingCaptureId = id;
@@ -181,6 +204,21 @@
   function closeDialog() {
     dialogOpen = false;
     selectedCapture = null;
+  }
+
+  function setInflightOpen(open: boolean) {
+    inflightOpen = open;
+    storedInflightOpen.set(open);
+  }
+
+  async function cancelInflight(id: string) {
+    if (cancelingInflightIds.includes(id)) return;
+    cancelingInflightIds = [...cancelingInflightIds, id];
+    try {
+      await cancelInflightRequest(id);
+    } finally {
+      cancelingInflightIds = cancelingInflightIds.filter((current) => current !== id);
+    }
   }
 
   function buildColumns(withModel: boolean): ColumnDef<ActivityLogEntry>[] {
@@ -352,6 +390,8 @@
 
   let thClass = $derived(compact ? "px-4 py-2 h-9" : "px-6 py-3 h-12");
   let tdClass = $derived(compact ? "px-4 py-2" : "px-6 py-4");
+  let visibleColumnCount = $derived(table.getVisibleLeafColumns().length);
+  let pageCount = $derived(Math.max(table.getPageCount(), 1));
 
   function sortIcon(state: false | "asc" | "desc") {
     if (state === "asc") return ArrowUp;
@@ -397,9 +437,93 @@
     dragColId = null;
     dragOverColId = null;
   }
+
+  function formatInflightElapsed(timestamp: string): string {
+    const started = Date.parse(timestamp);
+    if (!Number.isFinite(started)) return "0.00s";
+    return `${(Math.max(0, inflightNowMs - started) / 1000).toFixed(2)}s`;
+  }
 </script>
 
-<Card.Root class="shrink-0 gap-0 overflow-hidden py-0 {cardClass}">
+<Card.Root class="relative p-3">
+  <div class="flex items-center gap-2 pr-7 text-sm">
+    <span class="text-muted-foreground text-xs uppercase tracking-wider">In-flight Requests</span>
+    <span>
+      <span class="font-semibold">{inflightRequests.length}</span> active
+    </span>
+  </div>
+
+  <Button
+    variant="ghost"
+    size="icon-xs"
+    class="text-muted-foreground absolute right-2 top-2 rounded-full"
+    onclick={() => setInflightOpen(!inflightOpen)}
+    title={inflightOpen ? "Hide in-flight requests" : "Show in-flight requests"}
+  >
+    {#if inflightOpen}
+      <X />
+    {:else}
+      <ChevronDown />
+    {/if}
+  </Button>
+
+  {#if inflightOpen}
+    <div class="mt-3 overflow-x-auto">
+      <Table.Root class="min-w-full">
+        <Table.Header>
+          <Table.Row>
+            <Table.Head class={thClass}>Cancel</Table.Head>
+            <Table.Head class={thClass}>Elapsed</Table.Head>
+            <Table.Head class={thClass}>Model</Table.Head>
+            <Table.Head class={thClass}>Method</Table.Head>
+            <Table.Head class={thClass}>Path</Table.Head>
+          </Table.Row>
+        </Table.Header>
+        <Table.Body>
+          {#each inflightRequests as request (request.id)}
+            <Table.Row>
+              <Table.Cell class={tdClass}>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  class="text-muted-foreground hover:text-destructive size-6"
+                  onclick={() => cancelInflight(request.id)}
+                  disabled={cancelingInflightIds.includes(request.id)}
+                  title="Cancel request"
+                  aria-label="Cancel inflight request"
+                >
+                  <CircleX class="size-4" />
+                </Button>
+              </Table.Cell>
+              <Table.Cell class="{tdClass} font-mono text-xs tabular-nums">
+                {formatInflightElapsed(request.timestamp)}
+              </Table.Cell>
+              <Table.Cell class={tdClass}>
+                <span class="block max-w-[16rem] truncate" title={request.model}>
+                  {request.model || "-"}
+                </span>
+              </Table.Cell>
+              <Table.Cell class="{tdClass} font-mono text-xs">{request.method || "-"}</Table.Cell>
+              <Table.Cell class="{tdClass} font-mono text-xs">
+                <span class="block max-w-[22rem] truncate" title={request.req_path}>
+                  {request.req_path || "-"}
+                </span>
+              </Table.Cell>
+            </Table.Row>
+          {:else}
+            <Table.Row>
+              <Table.Cell colspan={5} class="text-muted-foreground py-6 text-center text-sm">
+                No in-flight requests
+              </Table.Cell>
+            </Table.Row>
+          {/each}
+        </Table.Body>
+      </Table.Root>
+    </div>
+  {/if}
+</Card.Root>
+
+<Card.Root class="mt-3 shrink-0 gap-0 overflow-hidden py-0 {cardClass}">
   <Card.Header class="flex items-center justify-between border-b px-4 py-2">
     <div class="flex items-center gap-2">
       {#if title}
@@ -498,20 +622,21 @@
               </Table.Cell>
             {/each}
           </Table.Row>
-        {:else}
+        {/each}
+        {#if table.getRowModel().rows.length === 0}
           <Table.Row>
-            <Table.Cell colspan={columns.length} class="text-muted-foreground py-6 text-center text-sm">
+            <Table.Cell colspan={visibleColumnCount} class="text-muted-foreground py-6 text-center text-sm">
               {emptyMessage}
             </Table.Cell>
           </Table.Row>
-        {/each}
+        {/if}
       </Table.Body>
     </Table.Root>
 
     {#if showPagination && metrics.length > 0}
       <div class="flex items-center justify-between gap-2 border-t px-4 py-2 text-sm">
         <span class="text-muted-foreground text-xs">
-          Page {pagination.pageIndex + 1} of {table.getPageCount()} · {metrics.length} total
+          Page {pagination.pageIndex + 1} of {pageCount} · {metrics.length} total
         </span>
         <div class="flex items-center gap-1">
           <Button
@@ -544,7 +669,7 @@
           <Button
             variant="ghost"
             size="icon-sm"
-            onclick={() => table.setPageIndex(table.getPageCount() - 1)}
+            onclick={() => table.setPageIndex(pageCount - 1)}
             disabled={!table.getCanNextPage()}
             title="Last page"
           >

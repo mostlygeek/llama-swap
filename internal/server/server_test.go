@@ -23,6 +23,7 @@ import (
 type stubRouter struct {
 	models        map[string]bool
 	response      string
+	serveHTTP     func(http.ResponseWriter, *http.Request)
 	shutdownCalls atomic.Int32
 	running       map[string]process.ProcessState
 	unloadCalls   atomic.Int32
@@ -39,7 +40,11 @@ func newStubRouter(models []string, response string) *stubRouter {
 
 func (s *stubRouter) Handles(model string) bool      { return s.models[model] }
 func (s *stubRouter) Shutdown(_ time.Duration) error { s.shutdownCalls.Add(1); return nil }
-func (s *stubRouter) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
+func (s *stubRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if s.serveHTTP != nil {
+		s.serveHTTP(w, r)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(s.response))
 }
@@ -64,7 +69,7 @@ func newTestServer(local router.LocalRouter, peer router.Router) *Server {
 		muxlog:      logmon.NewWriter(io.Discard),
 		proxylog:    proxylog,
 		upstreamlog: logmon.NewWriter(io.Discard),
-		inflight:    &inflightCounter{},
+		inflight:    newInflightTracker(),
 		metrics:     newMetricsMonitor(proxylog, 0, 0),
 		local:       local,
 		peer:        peer,

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { metrics } from "../../stores/api";
+  import { inflightRequestEntries, metrics } from "../../stores/api";
   import ActivityTable from "../ActivityTable.svelte";
 
   interface Props {
@@ -11,10 +11,14 @@
   let modelMetrics = $derived(
     [...$metrics].filter((m) => m.model === modelId).sort((a, b) => b.id - a.id)
   );
+  let modelInflightRequests = $derived(
+    $inflightRequestEntries.filter((request) => request.model === modelId)
+  );
 </script>
 
 <ActivityTable
   metrics={modelMetrics}
+  inflightRequests={modelInflightRequests}
   storagePrefix="model-detail"
   showModelColumn={false}
   showPagination={true}

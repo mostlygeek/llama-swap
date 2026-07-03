@@ -29,7 +29,7 @@ type Server struct {
 	upstreamlog *logmon.Monitor
 
 	perf     *perf.Monitor
-	inflight *inflightCounter
+	inflight *inflightTracker
 	metrics  *metricsMonitor
 	build    BuildInfo
 
@@ -147,7 +147,7 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 		proxylog:    proxylog,
 		upstreamlog: upstreamlog,
 		perf:        perfMon,
-		inflight:    &inflightCounter{},
+		inflight:    newInflightTracker(),
 		metrics:     newMetricsMonitor(proxylog, cfg.MetricsMaxInMemory, cfg.CaptureBuffer),
 		build:       build,
 		local:       local,
@@ -243,13 +243,17 @@ func (s *Server) routes() {
 
 	// Upstream passthrough. Meter only the model-dispatched endpoints that can
 	// produce token usage/timings.
-	upstreamChain := apiChain.Append(CreateMetricsMiddleware(s.metrics, s.cfg))
+	upstreamChain := apiChain.Append(
+		CreateUpstreamInflightMiddleware(s.inflight, s.cfg),
+		CreateMetricsMiddleware(s.metrics, s.cfg),
+	)
 	mux.HandleFunc("GET /upstream", handleUpstreamRedirect)
 	mux.Handle("/upstream/{upstreamPath...}", upstreamChain.ThenFunc(s.handleUpstream))
 
 	// API group (API-key protected) consumed by the UI.
 	mux.Handle("POST /api/models/unload", apiChain.ThenFunc(s.handleAPIUnloadAll))
 	mux.Handle("POST /api/models/unload/{model...}", apiChain.ThenFunc(s.handleAPIUnloadModel))
+	mux.Handle("POST /api/inflight/{id}/cancel", apiChain.ThenFunc(s.handleAPICancelInflight))
 	mux.Handle("GET /api/events", apiChain.ThenFunc(s.handleAPIEvents))
 	mux.Handle("GET /api/metrics", apiChain.ThenFunc(s.handleAPIMetrics))
 	mux.Handle("GET /api/performance", apiChain.ThenFunc(s.handleAPIPerformance))

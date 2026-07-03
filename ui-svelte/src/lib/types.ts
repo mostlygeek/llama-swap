@@ -61,8 +61,17 @@ export interface LogData {
   data: string;
 }
 
+export interface InflightRequestEntry {
+  id: string;
+  timestamp: string;
+  model: string;
+  req_path: string;
+  method: string;
+  metadata?: Record<string, string>;
+}
+
 export interface InFlightStats {
-  total: number;
+  requests?: InflightRequestEntry[];
 }
 
 export interface NetIOStat {

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { inFlightRequests, metrics } from "../stores/api";
+  import { metrics } from "../stores/api";
   import { persistentStore } from "../stores/persistent";
   import { calculateHistogramData } from "../lib/histogram";
   import TokenHistogram from "./TokenHistogram.svelte";
@@ -31,7 +31,6 @@
       totalInputTokens,
       totalOutputTokens,
       totalCacheTokens,
-      inFlightRequests: $inFlightRequests,
       promptHistogramData,
       genHistogramData,
     };
@@ -82,8 +81,7 @@
     <div class="text-muted-foreground text-xs uppercase tracking-wider">Processed</div>
     <div class="text-muted-foreground text-xs uppercase tracking-wider">Generated</div>
     <div class="text-sm">
-      <span class="font-semibold">{nf.format(stats.totalRequests)}</span> completed,
-      <span class="font-semibold">{nf.format(stats.inFlightRequests)}</span> waiting
+      <span class="font-semibold">{nf.format(stats.totalRequests)}</span> completed
     </div>
     <div class="text-sm">
       <span class="font-semibold">{nf.format(stats.totalCacheTokens)}</span> tokens

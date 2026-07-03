@@ -1,5 +1,7 @@
 package shared
 
+import "time"
+
 const ProcessStateChangeEventID = 0x01
 const ConfigFileChangedEventID = 0x03
 const ActivityLogEventID = 0x05
@@ -44,9 +46,18 @@ func (e ModelPreloadedEvent) Type() uint32 {
 }
 
 type InFlightRequestsEvent struct {
-	Total int
+	Requests []InflightRequestEntry `json:"requests"`
 }
 
 func (e InFlightRequestsEvent) Type() uint32 {
 	return InFlightRequestsEventID
+}
+
+type InflightRequestEntry struct {
+	ID        string            `json:"id"`
+	Timestamp time.Time         `json:"timestamp"`
+	Model     string            `json:"model"`
+	ReqPath   string            `json:"req_path"`
+	Method    string            `json:"method"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
 }
