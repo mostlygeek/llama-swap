@@ -24,6 +24,22 @@ import (
 )
 
 func getGpuStats(ctx context.Context, every time.Duration, logger *logmon.Monitor) (chan []GpuStat, error) {
+	// On AMD APUs/iGPUs every userspace tool (LACT, rocm-smi) reports only the
+	// tiny "VRAM" BIOS carveout (often 512 MiB) and is blind to GTT, where the
+	// models and KV cache actually live. Any consumer that budgets against
+	// GPU memory (the memgate) would then compare near-zero "used" numbers
+	// against a multi-GiB budget and never fire. When the carveout pattern is
+	// present, sysfs (which sums vram+gtt) is the only correct backend, so it
+	// must win over ALL tools, not just rocm-smi.
+	if sysfsHasApuCarveout() {
+		if ch, err := trySysfs(ctx, every, logger); err == nil {
+			logger.Info("using sysfs for GPU monitoring (amdgpu APU carveout detected; GTT-aware)")
+			return ch, nil
+		} else {
+			logger.Debugf("sysfs (APU carveout): %s", err.Error())
+		}
+	}
+
 	if ch, err := tryLACT(ctx, every, logger); err == nil {
 		logger.Info("using LACT for GPU monitoring")
 		return ch, nil
@@ -671,6 +687,24 @@ func readSysfs() ([]GpuStat, error) {
 	}
 
 	return stats, nil
+}
+
+// ReadLiveGpuMemUsedMB performs a fresh, synchronous sysfs read of total
+// GPU-managed memory in use (VRAM + GTT, in MiB) summed across amdgpu cards.
+// Unlike Monitor.Current() it is never stale: it reads
+// /sys/class/drm/cardN/device/mem_info_* at call time (a few microseconds).
+// ok is false when no amdgpu sysfs accounting is available; callers should
+// then fall back to the monitor's last polled sample.
+func ReadLiveGpuMemUsedMB() (usedMB int, ok bool) {
+	stats, err := readSysfs()
+	if err != nil {
+		return 0, false
+	}
+	total := 0
+	for _, s := range stats {
+		total += s.MemUsedMB
+	}
+	return total, true
 }
 
 // apuCarveoutGttVramRatio is the discriminator between an APU/iGPU UMA carveout
