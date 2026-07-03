@@ -149,7 +149,7 @@ func upstreamMetricsServer(response string) *Server {
 		muxlog:      logmon.NewWriter(io.Discard),
 		proxylog:    proxylog,
 		upstreamlog: logmon.NewWriter(io.Discard),
-		inflight:    &inflightCounter{},
+		inflight:    newInflightTracker(),
 		metrics:     newMetricsMonitor(proxylog, 10, 0),
 		local:       newStubRouter([]string{"m1"}, response),
 		peer:        newStubRouter(nil, ""),
@@ -298,6 +298,94 @@ func TestServer_HandleUpstream_MetricsSkipsGET(t *testing.T) {
 	if len(s.metrics.getMetrics()) != 0 {
 		t.Errorf("want no metrics entries for GET upstream, got %d", len(s.metrics.getMetrics()))
 	}
+}
+
+func TestServer_HandleUpstream_InflightTracksSupportedPaths(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		method   string
+		path     string
+		wantPath string
+	}{
+		{
+			name:     "post inference",
+			method:   http.MethodPost,
+			path:     "/upstream/m1/v1/chat/completions",
+			wantPath: "/v1/chat/completions",
+		},
+		{
+			name:     "get model endpoint",
+			method:   http.MethodGet,
+			path:     "/upstream/m1/props",
+			wantPath: "/props",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			local := newStubRouter([]string{"m1"}, "ok")
+			var s *Server
+			var during shared.InFlightRequestsEvent
+			local.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
+				during = s.inflight.Current()
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("ok"))
+			}
+			s = upstreamInflightServer(local)
+
+			w := httptest.NewRecorder()
+			s.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, strings.NewReader(`{}`)))
+			if w.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
+			}
+			if during.Total != 1 || len(during.Requests) != 1 {
+				t.Fatalf("inflight during request = %+v, want 1 request", during)
+			}
+			entry := during.Requests[0]
+			if entry.Model != "m1" || entry.Method != tc.method || entry.ReqPath != tc.wantPath {
+				t.Errorf("inflight entry = %+v, want model=m1 method=%s path=%s", entry, tc.method, tc.wantPath)
+			}
+			if got := s.inflight.Current(); got.Total != 0 {
+				t.Errorf("inflight after request = %d, want 0", got.Total)
+			}
+		})
+	}
+}
+
+func TestServer_HandleUpstream_InflightSkipsUnsupportedPath(t *testing.T) {
+	local := newStubRouter([]string{"m1"}, "ok")
+	var s *Server
+	var during shared.InFlightRequestsEvent
+	local.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
+		during = s.inflight.Current()
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	}
+	s = upstreamInflightServer(local)
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/upstream/m1/probe", strings.NewReader(`{}`)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
+	}
+	if during.Total != 0 || len(during.Requests) != 0 {
+		t.Fatalf("inflight during unsupported path = %+v, want empty", during)
+	}
+}
+
+func upstreamInflightServer(local *stubRouter) *Server {
+	cfg := config.Config{Models: map[string]config.ModelConfig{"m1": {}}}
+	proxylog := logmon.NewWriter(io.Discard)
+	s := &Server{
+		cfg:         cfg,
+		muxlog:      logmon.NewWriter(io.Discard),
+		proxylog:    proxylog,
+		upstreamlog: logmon.NewWriter(io.Discard),
+		inflight:    newInflightTracker(),
+		metrics:     newMetricsMonitor(proxylog, 10, 0),
+		local:       local,
+		peer:        newStubRouter(nil, ""),
+	}
+	s.routes()
+	return s
 }
 
 func TestServer_HandleMetrics_Unavailable(t *testing.T) {

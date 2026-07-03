@@ -177,6 +177,19 @@ func (s *Server) handleAPICapture(w http.ResponseWriter, r *http.Request) {
 	w.Write(jsonBytes)
 }
 
+// handleAPICancelInflight cancels an active model-dispatched request by its
+// inflight ID. Normal request cleanup removes the row and emits the update.
+func (s *Server) handleAPICancelInflight(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" || !s.inflight.Cancel(id) {
+		shared.SendResponse(w, r, http.StatusNotFound, "inflight request not found")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"msg": "ok"})
+}
+
 type messageType string
 
 const (
@@ -237,8 +250,11 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 			send(messageEnvelope{Type: msgTypeMetrics, Data: string(j)})
 		}
 	}
-	sendInFlight := func(total int) {
-		if j, err := json.Marshal(map[string]int{"total": total}); err == nil {
+	sendInFlight := func(stats shared.InFlightRequestsEvent) {
+		if stats.Requests == nil {
+			stats.Requests = []shared.InflightRequestEntry{}
+		}
+		if j, err := json.Marshal(stats); err == nil {
 			send(messageEnvelope{Type: msgTypeInFlight, Data: string(j)})
 		}
 	}
@@ -248,14 +264,14 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 	defer s.proxylog.OnLogData(func(data []byte) { sendLogData("proxy", data) })()
 	defer s.upstreamlog.OnLogData(func(data []byte) { sendLogData("upstream", data) })()
 	defer event.On(func(e ActivityLogEvent) { sendMetrics([]ActivityLogEntry{e.Metrics}) })()
-	defer event.On(func(e shared.InFlightRequestsEvent) { sendInFlight(e.Total) })()
+	defer event.On(func(e shared.InFlightRequestsEvent) { sendInFlight(e) })()
 
 	// initial payload
 	sendLogData("proxy", s.proxylog.GetHistory())
 	sendLogData("upstream", s.upstreamlog.GetHistory())
 	sendModels()
 	sendMetrics(s.metrics.getMetrics())
-	sendInFlight(int(s.inflight.Current()))
+	sendInFlight(s.inflight.Current())
 
 	for {
 		select {

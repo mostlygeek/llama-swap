@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { metrics } from "../stores/api";
+  import { inflightRequestEntries, metrics } from "../stores/api";
   import ActivityStats from "../components/ActivityStats.svelte";
   import ActivityTable from "../components/ActivityTable.svelte";
 
@@ -13,6 +13,7 @@
 
   <ActivityTable
     metrics={sortedMetrics}
+    inflightRequests={$inflightRequestEntries}
     storagePrefix="activity"
     showModelColumn={true}
     showPagination={true}
