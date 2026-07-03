@@ -120,6 +120,12 @@ func (b *baseRouter) notifyProcessed() {
 func (b *baseRouter) run() {
 	defer close(b.runDone)
 
+	// Runtime memory enforcement. Started here rather than in newBaseRouter
+	// because the constructors populate b.processes AFTER newBaseRouter
+	// returns but BEFORE `go run()`; starting the watchdog any earlier would
+	// race that map fill. The map is never mutated once run() starts.
+	go b.redlineLoop()
+
 	for {
 		select {
 		case req := <-b.shutdownCh:
@@ -266,10 +272,21 @@ func (b *baseRouter) doSwap(modelID string, toStop []string) {
 	// stopped and their GPU memory freed. Before launching the target, evict
 	// additional LRU models if the projected footprint would still exceed the
 	// configured GPU budget. This single chokepoint covers the matrix, group,
-	// and solo load paths. nil gate (no budget / no monitor) is a no-op, and
-	// the gate itself is fail-open, so it never blocks a load.
+	// and solo load paths. nil gate (no budget / no monitor) is a no-op. In
+	// strict mode an unfittable load is REJECTED here: the error fans out to
+	// every waiter as a 503 via OnSwapDone, and the target never launches.
+	// A granted admission holds a reservation until the swap completes, so
+	// concurrent admissions cannot jointly overshoot the budget.
 	if b.memGate != nil {
-		b.memGate.EnsureFits(modelID, b.processes, toStop, b.logger)
+		if err := b.memGate.EnsureFits(modelID, b.processes, toStop, b.logger); err != nil {
+			b.logger.Warnf("%s: admission rejected for %s: %v", b.name, modelID, err)
+			select {
+			case b.swapDoneCh <- scheduler.SwapDone{ModelID: modelID, Err: err}:
+			case <-b.shutdownCtx.Done():
+			}
+			return
+		}
+		defer b.memGate.Release(modelID)
 	}
 
 	target := b.processes[modelID]
