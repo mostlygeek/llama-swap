@@ -160,6 +160,41 @@ func (f *fakeProcess) WaitReady(ctx context.Context) error {
 	}
 }
 
+// EnsureReady mirrors ProcessCommand.EnsureReady for the fake: it registers a
+// start when stopped (reusing Run's observable signals runCalls/runStarted so
+// existing tests keep their hooks) and blocks until markReady/autoReady flips
+// the state, or ctx is cancelled.
+func (f *fakeProcess) EnsureReady(ctx context.Context, _ time.Duration) error {
+	f.mu.Lock()
+	if f.state == process.StateReady {
+		f.mu.Unlock()
+		return nil
+	}
+	rc := f.readyCh
+	auto := false
+	if f.state == process.StateStopped {
+		f.runCalls.Add(1)
+		f.state = process.StateStarting
+		select {
+		case <-f.runStarted:
+		default:
+			close(f.runStarted)
+		}
+		auto = f.autoReady
+	}
+	f.mu.Unlock()
+
+	if auto {
+		f.setState(process.StateReady)
+	}
+	select {
+	case <-rc:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (f *fakeProcess) Logger() *logmon.Monitor { return logmon.NewWriter(io.Discard) }
 
 func (f *fakeProcess) ServeHTTP(w http.ResponseWriter, _ *http.Request) {

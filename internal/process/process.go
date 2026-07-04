@@ -26,8 +26,18 @@ type Process interface {
 	// to a ready state to process traffic
 	Run(timeout time.Duration) error
 
-	// WaitReady blocks until the process is ready to serve requests
-	// or the context is cancelled. It returns nil when the process is ready
+	// EnsureReady starts the process if it is stopped and blocks until it is
+	// ready to serve, the start fails, or the context is cancelled. Unlike a
+	// caller-side State()+Run()+WaitReady() sequence, the decision to start is
+	// made inside the state machine against live state, so it cannot be
+	// derailed by a concurrent Stop (e.g. a TTL unload) between snapshot and
+	// start. The timeout parameter bounds the health-check wait, as in Run.
+	EnsureReady(ctx context.Context, timeout time.Duration) error
+
+	// WaitReady blocks while the process is starting and returns nil once it
+	// is ready to serve requests. If no start is in flight (stopped or shut
+	// down) it fails fast — wrapping ErrNotStarted — rather than parking,
+	// since a waiter parked with no pending start can never be woken.
 	WaitReady(context.Context) error
 
 	// Stop blocks until the process has terminated. It returns nil when
