@@ -48,6 +48,115 @@ func ParseNvidiaSmiLine(line string) *GpuStat {
 	}
 }
 
+// ParseIntelGpuTop parses one JSON sample object from intel_gpu_top -J output.
+func ParseIntelGpuTop(data string) *GpuStat {
+	var stats intelGpuTopStat
+	if err := json.Unmarshal([]byte(data), &stats); err != nil {
+		return nil
+	}
+
+	var gpuUtil float64
+	for _, eng := range stats.Engines {
+		if float64(eng.Busy) > gpuUtil {
+			gpuUtil = float64(eng.Busy)
+		}
+	}
+	// Fallback to 100% - RC6% if engine utilization is reported as 0
+	if gpuUtil == 0 && float64(stats.RC6.Value) > 0 && float64(stats.RC6.Value) <= 100.0 {
+		gpuUtil = 100.0 - float64(stats.RC6.Value)
+	}
+
+	var powerDraw float64
+	if float64(stats.Power.GPU) > 0 {
+		powerDraw = float64(stats.Power.GPU)
+	} else if float64(stats.Power.Package) > 0 {
+		powerDraw = float64(stats.Power.Package)
+	}
+
+	var memUsedBytes float64
+	for _, client := range stats.Clients {
+		for _, memType := range []string{"local", "system", "gtt"} {
+			if memMap, ok := client.Memory[memType]; ok {
+				if val, ok2 := memMap["resident"]; ok2 {
+					memUsedBytes += float64(val)
+					break
+				}
+			}
+		}
+	}
+	memUsedMB := int(memUsedBytes / 1024 / 1024)
+
+	return &GpuStat{
+		Timestamp:  time.Now(),
+		ID:         0, // ponytail: intel_gpu_top monitors a single device
+		Name:       "Intel GPU",
+		GpuUtilPct: gpuUtil,
+		MemUsedMB:  memUsedMB,
+		PowerDrawW: powerDraw,
+	}
+}
+
+type intelGpuTopStat struct {
+	Period struct {
+		Duration flexFloat64 `json:"duration"`
+		Unit     string      `json:"unit"`
+	} `json:"period"`
+	Frequency struct {
+		Requested flexFloat64 `json:"requested"`
+		Actual    flexFloat64 `json:"actual"`
+		Unit      string      `json:"unit"`
+	} `json:"frequency"`
+	Power struct {
+		GPU     flexFloat64 `json:"GPU"`
+		Package flexFloat64 `json:"Package"`
+		Unit    string      `json:"unit"`
+	} `json:"power"`
+	RC6 struct {
+		Value flexFloat64 `json:"value"`
+		Unit  string      `json:"unit"`
+	} `json:"rc6"`
+	Engines map[string]intelGpuEngine `json:"engines"`
+	Clients map[string]intelGpuClient `json:"clients"`
+}
+
+type intelGpuEngine struct {
+	Busy flexFloat64 `json:"busy"`
+	Sema flexFloat64 `json:"sema"`
+	Wait flexFloat64 `json:"wait"`
+	Unit string      `json:"unit"`
+}
+
+type intelGpuClient struct {
+	Name          string                               `json:"name"`
+	Pid           string                               `json:"pid"`
+	EngineClasses map[string]intelGpuClientEngineClass `json:"engine-classes"`
+	Memory        map[string]map[string]flexFloat64    `json:"memory"`
+}
+
+type intelGpuClientEngineClass struct {
+	Busy flexFloat64 `json:"busy"`
+	Unit string      `json:"unit"`
+}
+
+// flexFloat64 handles numbers serialized as JSON numbers or strings (e.g. "0.000000")
+type flexFloat64 float64
+
+func (f *flexFloat64) UnmarshalJSON(b []byte) error {
+	s := strings.TrimSpace(string(b))
+	s = strings.Trim(s, `"`)
+	if s == "" || s == "null" || s == "N/A" || s == "-" {
+		*f = 0
+		return nil
+	}
+	val, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		*f = 0
+		return nil
+	}
+	*f = flexFloat64(val)
+	return nil
+}
+
 // mactopOutput maps the subset of mactop's headless JSON output that is
 // relevant to GpuStat. Note that mactop's memory object is whole-system memory,
 // not GPU-attributed; the darwin monitor overlays ioreg's GPU-attributed

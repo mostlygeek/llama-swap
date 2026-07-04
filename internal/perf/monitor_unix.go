@@ -45,6 +45,13 @@ func getGpuStats(ctx context.Context, every time.Duration, logger *logmon.Monito
 		logger.Debugf("rocm-smi: %s", err.Error())
 	}
 
+	if ch, err := tryIntelGpuTop(ctx, every, logger); err == nil {
+		logger.Info("using intel_gpu_top for GPU monitoring")
+		return ch, nil
+	} else {
+		logger.Debugf("intel_gpu_top: %s", err.Error())
+	}
+
 	if ch, err := trySysfs(ctx, every, logger); err == nil {
 		logger.Info("using sysfs for GPU monitoring")
 		return ch, nil
@@ -331,6 +338,85 @@ func parseRocmSmiLine(header string, line string) *GpuStat {
 	result.Name = name
 
 	return result
+}
+
+func tryIntelGpuTop(ctx context.Context, every time.Duration, logger *logmon.Monitor) (chan []GpuStat, error) {
+	if _, err := exec.LookPath("intel_gpu_top"); err != nil {
+		return nil, ErrNoGpuTool
+	}
+	ms := int(every.Milliseconds())
+	if ms < 100 {
+		ms = 1000
+	}
+	cmd := exec.CommandContext(ctx, "intel_gpu_top", "-J", "-s", fmt.Sprintf("%d", ms))
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("intel_gpu_top stdout pipe failed: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("intel_gpu_top start failed: %w", err)
+	}
+	ch := make(chan []GpuStat, 1)
+	go func() {
+		defer close(ch)
+		scanner := bufio.NewScanner(stdout)
+		// intel_gpu_top's JSON objects can be large; allow generous line lengths.
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+		// intel_gpu_top -J pretty-prints objects across many lines inside an outer 
+		// "[" that never closes, with objects that may or may not be comma-separated.
+		// stdlib json rejects both variants, so accumulate each top-level object by
+		// brace depth.
+		var jsonBuf strings.Builder
+		depth := 0
+		inString := false
+		escaped := false
+
+		for scanner.Scan() {
+			line := scanner.Text()
+			for _, r := range line {
+				if escaped {
+					escaped = false
+					continue
+				}
+				if r == '\\' && inString {
+					escaped = true
+					continue
+				}
+				if r == '"' {
+					inString = !inString
+					continue
+				}
+				if !inString {
+					if r == '{' {
+						depth++
+					} else if r == '}' {
+						depth--
+					}
+				}
+			}
+			if depth > 0 || jsonBuf.Len() > 0 {
+				jsonBuf.WriteString(line)
+				jsonBuf.WriteByte('\n')
+			}
+			if depth == 0 && jsonBuf.Len() > 0 {
+				str := strings.TrimSpace(jsonBuf.String())
+				str = strings.TrimSuffix(str, ",")
+				if strings.HasPrefix(str, "{") && strings.HasSuffix(str, "}") {
+					stat := ParseIntelGpuTop(str)
+					if stat != nil {
+						select {
+						case ch <- []GpuStat{*stat}:
+						default:
+						}
+					}
+				}
+				jsonBuf.Reset()
+			}
+		}
+		cmd.Wait()
+	}()
+	return ch, nil
 }
 
 func trySysfs(ctx context.Context, every time.Duration, logger *logmon.Monitor) (chan []GpuStat, error) {
