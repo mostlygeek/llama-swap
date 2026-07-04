@@ -100,6 +100,15 @@ func NewPeer(cfg config.Config, logger *logmon.Monitor) (*Peer, error) {
 			}
 			modelMap[modelID] = pp
 		}
+
+		// Register virtual sub-IDs from setParamsByID so they route to the same peer
+		for virtualID := range peer.Filters.SetParamsByID {
+			if _, found := modelMap[virtualID]; found {
+				logger.Warnf("peer %s: setParamsByID key %s already mapped to another peer, skipping", peerID, virtualID)
+				continue
+			}
+			modelMap[virtualID] = pp
+		}
 	}
 
 	shutdownCtx, shutdownFn := context.WithCancel(context.Background())
