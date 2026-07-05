@@ -11,7 +11,6 @@ import (
 	"net"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/cache"
@@ -38,7 +37,6 @@ func (e ActivityLogEvent) Type() uint32 {
 // activity in a store, and (when captures are enabled) stores
 // zstd+CBOR-compressed request/response captures in a sized in-memory cache.
 type metricsMonitor struct {
-	mu             sync.RWMutex
 	store          *store.Store
 	maxMetrics     int
 	logger         *logmon.Monitor
@@ -74,9 +72,6 @@ func newMetricsMonitorWithStore(logger *logmon.Monitor, maxMetrics int, captureB
 
 // queueMetrics persists a metric and returns the store-assigned row.
 func (mp *metricsMonitor) queueMetrics(ctx context.Context, metric ActivityLogEntry) (ActivityLogEntry, bool) {
-	mp.mu.Lock()
-	defer mp.mu.Unlock()
-
 	stored, err := mp.store.InsertActivity(ctx, metric)
 	if err != nil {
 		mp.warnf("failed to persist activity metric: %v", err)
