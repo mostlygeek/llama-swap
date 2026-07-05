@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -42,6 +43,9 @@ type baseRouter struct {
 	processes map[string]process.Process
 	logger    *logmon.Monitor
 	schedule  scheduler.Scheduler
+	// planner is the eviction policy, retained for the read-only can-i-load
+	// preflight (CanLoad); the scheduler owns it for live decisions.
+	planner scheduler.Swapper
 
 	// memGate, when non-nil, is an optional fail-open admission gate that
 	// evicts LRU models before a swap to keep total GPU memory under a
@@ -76,6 +80,11 @@ type baseRouter struct {
 
 	serializeGate *serializeGate
 	serializeSeq  atomic.Int64
+
+	// leases, when non-nil, is the model-lease table. It backs refuse-don't-break
+	// admission (a load that would evict a leased model is refused) and the
+	// /leases API. nil disables leases entirely.
+	leases *leaseTable
 
 	// testProcessed, when non-nil, receives one event after each handlerReq
 	// or swapDone has been fully processed by run(). Tests use it to wait
@@ -113,12 +122,19 @@ func newBaseRouter(
 		serveDoneCh:     make(chan scheduler.ServeDoneEvent),
 		inFlightQueryCh: make(chan inFlightQuery),
 		runDone:         make(chan struct{}),
+		planner:         planner,
 	}
 	if conf.Performance.SerializeInference {
 		b.serializeGate = newSerializeGate()
 	}
+	b.leases = newLeaseTable(conf.Performance.MaxLeaseDuration, conf.Performance.LeaseStatePath)
+	if err := b.leases.loadAndReconcile(conf.Performance.LeaseStatePath); err != nil {
+		logger.Warnf("%s: could not load lease state from %s: %v", name, conf.Performance.LeaseStatePath, err)
+	}
+	go b.leases.runSweeper(defaultLeaseSweep)
 	if b.memGate != nil {
 		b.memGate.inFlight = b.InFlight
+		b.memGate.leases = b.leases
 	}
 	sched, err := scheduler.New(conf, name, logger, planner, b)
 	if err != nil {
@@ -214,6 +230,21 @@ func (b *baseRouter) StartSwap(modelID string, evict []string) {
 	go b.doSwap(modelID, evict)
 }
 
+// TryClaimEviction implements scheduler.Effects. It enforces refuse-don't-break:
+// a nil return means the eviction set holds no live lease and has been claimed
+// (doSwap releases the claim once the stops complete); a non-nil return is a
+// LeaseBlockedError (503 + blocked_by) that the scheduler grants to the caller
+// instead of starting the swap. Leases disabled -> always nil.
+func (b *baseRouter) TryClaimEviction(evict []string) error {
+	if b.leases == nil || len(evict) == 0 {
+		return nil
+	}
+	if blockers := b.leases.TryClaimEviction(evict); len(blockers) > 0 {
+		return &LeaseBlockedError{Model: strings.Join(evict, ","), BlockedBy: blockers}
+	}
+	return nil
+}
+
 // GrantError implements scheduler.Effects.
 func (b *baseRouter) GrantError(req scheduler.HandlerReq, err error) {
 	b.grant(req, scheduler.HandlerResp{Err: err})
@@ -288,6 +319,30 @@ func (b *baseRouter) trackedServe(modelID string, p process.Process) http.Handle
 	}
 }
 
+// validateLeaseHeader enforces the optional X-Llama-Swap-Lease header: a header
+// naming a live lease for a different model than the request is an obvious
+// mismatch and is rejected; an unknown/expired id is logged and ignored so a
+// client that lost its lease (e.g. across a restart) is not hard-failed.
+func (b *baseRouter) validateLeaseHeader(r *http.Request, modelID string) error {
+	if b.leases == nil {
+		return nil
+	}
+	id := r.Header.Get(LeaseHeader)
+	if id == "" {
+		return nil
+	}
+	lease, ok := b.leases.Lookup(id)
+	if !ok {
+		b.logger.Debugf("%s: request for %s references unknown lease %s; ignoring", b.name, modelID, id)
+		return nil
+	}
+	if lease.Model != modelID {
+		return &LeaseMismatchError{LeaseID: id, LeaseModel: lease.Model, RequestModel: modelID}
+	}
+	b.logger.Debugf("%s: request for %s references lease %s (holder=%s)", b.name, modelID, id, lease.Holder)
+	return nil
+}
+
 func (b *baseRouter) InFlight(modelID string) int {
 	respond := make(chan int, 1)
 	select {
@@ -305,6 +360,14 @@ func (b *baseRouter) InFlight(modelID string) int {
 
 func (b *baseRouter) doSwap(modelID string, toStop []string) {
 	timeout := b.healthCheckTimeout()
+
+	// Release the eviction claim the scheduler placed on toStop once this swap
+	// finishes stopping them: at that point they are gone and re-leasing them is
+	// safe. Deferred so every exit path (including an admission rejection below)
+	// clears it. A nil lease table or empty toStop makes this a no-op.
+	if b.leases != nil && len(toStop) > 0 {
+		defer b.leases.ReleaseEvictionClaim(toStop)
+	}
 
 	var wg sync.WaitGroup
 	for _, mID := range toStop {
@@ -369,6 +432,10 @@ func (b *baseRouter) handleShutdown(req shutdownReq) {
 	b.shutdownFn()
 
 	b.schedule.OnShutdown(shutdownErr)
+
+	if b.leases != nil {
+		b.leases.stop()
+	}
 
 	stopTimeout := req.timeout
 	if stopTimeout <= 0 {
@@ -500,6 +567,11 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	data, err := shared.FetchContext(req, b.config)
 	if err != nil {
+		shared.SendError(w, req, err)
+		return
+	}
+
+	if err := b.validateLeaseHeader(req, data.ModelID); err != nil {
 		shared.SendError(w, req, err)
 		return
 	}

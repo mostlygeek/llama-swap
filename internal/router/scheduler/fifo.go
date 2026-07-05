@@ -129,7 +129,16 @@ func (s *FIFO) OnRequest(req HandlerReq) {
 		return
 	}
 
-	// (6) Start a new (possibly parallel) swap.
+	// (6) Refuse-don't-break: if starting this swap would evict a lease-protected
+	// model, reject with 503 + blocked_by rather than breaking the lease. A
+	// clear claim is held until the swap's stops finish.
+	if err := s.effects.TryClaimEviction(evict); err != nil {
+		s.logger.Debugf("%s: refusing swap for model %s: %v", s.name, req.Model, err)
+		s.effects.GrantError(req, err)
+		return
+	}
+
+	// (7) Start a new (possibly parallel) swap.
 	s.logger.Debugf("%s: starting swap for model %s, evicting %v", s.name, req.Model, evict)
 	s.startSwap(req, evict, running)
 }
@@ -371,6 +380,13 @@ func (s *FIFO) drainQueue() {
 		}
 		if conflictsWithInFlight(evict, s.inFlight) {
 			remaining = append(remaining, req)
+			continue
+		}
+		// Refuse-don't-break: a queued request that could only proceed by
+		// evicting a leased model is rejected, not parked for hours.
+		if err := s.effects.TryClaimEviction(evict); err != nil {
+			s.logger.Debugf("%s: refusing queued swap for model %s: %v", s.name, req.Model, err)
+			s.effects.GrantError(req, err)
 			continue
 		}
 		s.logger.Debugf("%s: queued request for model %s now starting swap, evicting %v", s.name, req.Model, evict)

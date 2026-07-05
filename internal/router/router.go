@@ -49,4 +49,18 @@ type LocalRouter interface {
 	// modelID must be a real (non-alias) config key. Returns false when the
 	// model is not known to this router.
 	ProcessLogger(modelID string) (*logmon.Monitor, bool)
+
+	// AcquireLease creates a lease protecting model from eviction for up to ttl
+	// (clamped to the configured cap). Rejects unknown or mid-eviction models.
+	AcquireLease(model, holder, reason string, ttl time.Duration) (Lease, error)
+	// ReleaseLease drops a lease by id, reporting whether one was removed.
+	ReleaseLease(id string) bool
+	// ExtendLease pushes a live lease's expiry out by ttl; false if unknown/expired.
+	ExtendLease(id string, ttl time.Duration) (Lease, bool)
+	// KillLeases force-removes every live lease matching the selector.
+	KillLeases(id, model, holder string) []Lease
+	// ListLeases returns a point-in-time view of every live lease.
+	ListLeases() []LeaseView
+	// CanLoad is the read-only can-i-load preflight for model.
+	CanLoad(model string) (LoadVerdict, error)
 }

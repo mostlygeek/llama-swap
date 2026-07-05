@@ -83,6 +83,14 @@ type Effects interface {
 	RunningModels() map[string]process.ProcessState
 	// StartSwap launches the swap goroutine for modelID, stopping evict first.
 	StartSwap(modelID string, evict []string)
+	// TryClaimEviction enforces refuse-don't-break: it atomically checks that
+	// no model in evict holds a live lease and, if clear, claims them for
+	// eviction (released when the swap's stops complete). It returns a non-nil
+	// HTTPError (503 + blocked_by) when a lease blocks the eviction, in which
+	// case NOTHING is claimed and the caller must not start the swap. A nil
+	// return means the caller owns the claim and may proceed to StartSwap.
+	// Always nil when leases are disabled.
+	TryClaimEviction(evict []string) error
 	// GrantError responds to a caller with an error.
 	GrantError(req HandlerReq, err error)
 	// GrantServe hands a caller the wrapped handler for modelID and reports

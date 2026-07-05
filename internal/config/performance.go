@@ -58,6 +58,19 @@ type PerformanceConfig struct {
 	// handler to execute at a time across all local models. Default false
 	// preserves historical parallel behaviour.
 	SerializeInference bool `yaml:"serializeInference"`
+
+	// MaxLeaseDuration caps the TTL any single model lease can hold (acquire
+	// and extend both clamp to it). A lease protects its model from eviction
+	// until it expires, is released, or is killed; the cap bounds the worst
+	// case when a client sets a long TTL and then crashes. Default 4h. The
+	// lease API is always available; it is inert until a lease is acquired.
+	MaxLeaseDuration time.Duration `yaml:"maxLeaseDuration"`
+
+	// LeaseStatePath, when non-empty, is a file the lease table is persisted to
+	// so leases survive a llama-swap restart. On startup the table is
+	// reconciled: expired entries are dropped and surviving leases are marked
+	// so clients re-acquire. Empty (default) keeps leases in memory only.
+	LeaseStatePath string `yaml:"leaseStatePath"`
 }
 
 func (p *PerformanceConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
@@ -65,6 +78,7 @@ func (p *PerformanceConfig) UnmarshalYAML(unmarshal func(interface{}) error) err
 	defaults := rawPerformanceConfig{
 		Every:            5 * time.Second,
 		AdmissionMaxWait: 30 * time.Second,
+		MaxLeaseDuration: 4 * time.Hour,
 	}
 
 	if err := unmarshal(&defaults); err != nil {
@@ -85,6 +99,9 @@ func (p *PerformanceConfig) Validate() error {
 	}
 	if p.AdmissionMaxWait < 0 {
 		return fmt.Errorf("admissionMaxWait must be >= 0, got %v", p.AdmissionMaxWait)
+	}
+	if p.MaxLeaseDuration < 0 {
+		return fmt.Errorf("maxLeaseDuration must be >= 0, got %v", p.MaxLeaseDuration)
 	}
 	if p.GpuRedlineMB > 0 && p.GpuBudgetMB > 0 && p.GpuRedlineMB < p.GpuBudgetMB {
 		return fmt.Errorf("gpuRedlineMB (%d) must be >= gpuBudgetMB (%d)", p.GpuRedlineMB, p.GpuBudgetMB)

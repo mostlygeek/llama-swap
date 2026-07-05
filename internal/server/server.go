@@ -240,6 +240,14 @@ func (s *Server) routes() {
 	mux.Handle("GET /unload", apiChain.ThenFunc(s.handleUnload))
 	mux.Handle("GET /running", apiChain.ThenFunc(s.handleRunning))
 
+	// Model-lease endpoints (refuse-don't-break eviction protection).
+	mux.Handle("POST /leases", apiChain.ThenFunc(s.handleLeaseAcquire))
+	mux.Handle("GET /leases", apiChain.ThenFunc(s.handleLeaseList))
+	mux.Handle("POST /leases/kill", apiChain.ThenFunc(s.handleLeaseKill))
+	mux.Handle("POST /leases/{id}/extend", apiChain.ThenFunc(s.handleLeaseExtend))
+	mux.Handle("DELETE /leases/{id}", apiChain.ThenFunc(s.handleLeaseRelease))
+	mux.Handle("GET /leases/can-load/{model...}", apiChain.ThenFunc(s.handleCanLoad))
+
 	// Upstream passthrough. Meter only the model-dispatched endpoints that can
 	// produce token usage/timings.
 	upstreamChain := apiChain.Append(CreateMetricsMiddleware(s.metrics, s.cfg))

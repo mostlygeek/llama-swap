@@ -62,6 +62,9 @@ type fakeEffects struct {
 	starts []startRec
 	grants []grantRec
 	stops  []stopRec
+
+	claimBlock func(evict []string) error
+	claimed    [][]string
 }
 
 func newFakeEffects() *fakeEffects {
@@ -89,6 +92,19 @@ func (f *fakeEffects) RunningModels() map[string]process.ProcessState {
 
 func (f *fakeEffects) StartSwap(modelID string, evict []string) {
 	f.starts = append(f.starts, startRec{model: modelID, evict: evict})
+}
+
+// claimBlock, when non-nil, decides TryClaimEviction's result for a given evict
+// set: a non-nil return refuses the swap (refuse-don't-break). Default nil never
+// blocks. claimed records every claimed (non-refused) eviction set.
+func (f *fakeEffects) TryClaimEviction(evict []string) error {
+	if f.claimBlock != nil {
+		if err := f.claimBlock(evict); err != nil {
+			return err
+		}
+	}
+	f.claimed = append(f.claimed, evict)
+	return nil
 }
 
 func (f *fakeEffects) GrantError(req HandlerReq, err error) {
@@ -775,5 +791,59 @@ func TestFIFO_ConcurrencyLimit_SwapWaiters(t *testing.T) {
 	}
 	if got := eff.errored("a"); got != 1 {
 		t.Fatalf("errored(a)=%d want 1 (excess waiter rejected)", got)
+	}
+}
+
+// leaseBlocked is a stand-in HTTPError-free error the fake returns to model a
+// refuse-don't-break rejection.
+type leaseBlockedStub struct{ msg string }
+
+func (e leaseBlockedStub) Error() string { return e.msg }
+
+func TestFIFO_RefuseDontBreak_RejectsEvictionOfLeasedModel(t *testing.T) {
+	eff := newFakeEffects()
+	eff.states["target"] = process.StateStopped
+	eff.states["leased"] = process.StateReady
+	// Loading target would evict "leased".
+	planner := &stubPlanner{evict: map[string][]string{"target": {"leased"}}}
+	// The lease table refuses any eviction touching "leased".
+	eff.claimBlock = func(evict []string) error {
+		for _, m := range evict {
+			if m == "leased" {
+				return leaseBlockedStub{msg: "blocked by lease on leased"}
+			}
+		}
+		return nil
+	}
+	s := newFIFO(planner, eff)
+
+	s.OnRequest(req("target"))
+
+	if got := eff.startsFor("target"); got != 0 {
+		t.Fatalf("StartSwap(target)=%d want 0 (must be refused, not started)", got)
+	}
+	if got := eff.errored("target"); got != 1 {
+		t.Fatalf("errored(target)=%d want 1 (refuse-don't-break 503)", got)
+	}
+	if len(eff.claimed) != 0 {
+		t.Fatalf("a blocked claim must not record a claim; got %v", eff.claimed)
+	}
+}
+
+func TestFIFO_RefuseDontBreak_AllowsEvictionOfUnleasedModel(t *testing.T) {
+	eff := newFakeEffects()
+	eff.states["target"] = process.StateStopped
+	eff.states["idle"] = process.StateReady
+	planner := &stubPlanner{evict: map[string][]string{"target": {"idle"}}}
+	// No claimBlock => nothing is lease-protected.
+	s := newFIFO(planner, eff)
+
+	s.OnRequest(req("target"))
+
+	if got := eff.startsFor("target"); got != 1 {
+		t.Fatalf("StartSwap(target)=%d want 1 (unleased eviction proceeds)", got)
+	}
+	if len(eff.claimed) != 1 {
+		t.Fatalf("a successful swap must claim its eviction set exactly once; got %v", eff.claimed)
 	}
 }

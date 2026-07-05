@@ -118,10 +118,19 @@ func (g *memGate) enforceRedline(procs map[string]process.Process, log *logmon.M
 			return
 		}
 
+		// Claim the victim before stopping so a lease cannot be acquired in the
+		// pick->stop window. On the hard tier leases are ignored (safety beats a
+		// lease); on the soft tier a just-arrived lease means we skip this victim.
+		if !g.claimVictim(victim, hard) {
+			excluded[victim] = struct{}{}
+			continue
+		}
+
 		log.Warnf("redline: evicting %s (used=%dMB, budget=%dMB)", victim, used, g.budgetMB)
 		if err := procs[victim].Stop(g.stopTimeout); err != nil {
 			log.Warnf("redline: stopping %s failed: %v", victim, err)
 		}
+		g.releaseVictim(victim, hard)
 		excluded[victim] = struct{}{}
 
 		settled, observed := g.settleAfterEviction(used, g.estimateMB(victim))

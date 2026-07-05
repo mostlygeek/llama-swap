@@ -27,6 +27,13 @@ type stubRouter struct {
 	running       map[string]process.ProcessState
 	unloadCalls   atomic.Int32
 	loggers       map[string]*logmon.Monitor
+
+	acquireLease func(model, holder, reason string, ttl time.Duration) (router.Lease, error)
+	releaseLease func(id string) bool
+	extendLease  func(id string, ttl time.Duration) (router.Lease, bool)
+	killLeases   func(id, model, holder string) []router.Lease
+	listLeases   func() []router.LeaseView
+	canLoad      func(model string) (router.LoadVerdict, error)
 }
 
 func newStubRouter(models []string, response string) *stubRouter {
@@ -53,6 +60,43 @@ func (s *stubRouter) ProcessLogger(modelID string) (*logmon.Monitor, bool) {
 		}
 	}
 	return nil, false
+}
+
+func (s *stubRouter) AcquireLease(model, holder, reason string, ttl time.Duration) (router.Lease, error) {
+	if s.acquireLease != nil {
+		return s.acquireLease(model, holder, reason, ttl)
+	}
+	return router.Lease{}, nil
+}
+func (s *stubRouter) ReleaseLease(id string) bool {
+	if s.releaseLease != nil {
+		return s.releaseLease(id)
+	}
+	return false
+}
+func (s *stubRouter) ExtendLease(id string, ttl time.Duration) (router.Lease, bool) {
+	if s.extendLease != nil {
+		return s.extendLease(id, ttl)
+	}
+	return router.Lease{}, false
+}
+func (s *stubRouter) KillLeases(id, model, holder string) []router.Lease {
+	if s.killLeases != nil {
+		return s.killLeases(id, model, holder)
+	}
+	return nil
+}
+func (s *stubRouter) ListLeases() []router.LeaseView {
+	if s.listLeases != nil {
+		return s.listLeases()
+	}
+	return nil
+}
+func (s *stubRouter) CanLoad(model string) (router.LoadVerdict, error) {
+	if s.canLoad != nil {
+		return s.canLoad(model)
+	}
+	return router.LoadVerdict{Model: model}, nil
 }
 
 // newTestServer wires a Server with stub routers and a built mux.

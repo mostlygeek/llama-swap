@@ -73,6 +73,10 @@ type MemoryBudgetError struct {
 	Model      string
 	Detail     string
 	RetryAfter int
+	// BlockedBy names the leases that prevented the gate from freeing memory,
+	// when the load was refused specifically because every model it could have
+	// evicted is lease-protected. Empty when the rejection is plain over-budget.
+	BlockedBy []Blocker
 }
 
 func (e *MemoryBudgetError) Error() string {
@@ -93,7 +97,11 @@ func (e *MemoryBudgetError) Header() http.Header {
 }
 
 func (e *MemoryBudgetError) Body() []byte {
-	b, _ := json.Marshal(map[string]string{"error": e.Error()})
+	payload := map[string]any{"error": e.Error()}
+	if len(e.BlockedBy) > 0 {
+		payload["blocked_by"] = e.BlockedBy
+	}
+	b, _ := json.Marshal(payload)
 	return b
 }
 
@@ -151,6 +159,38 @@ type memGate struct {
 	// admission and red-line eviction skip models with in-flight requests;
 	// hard-line emergency eviction intentionally ignores it.
 	inFlight func(modelID string) int
+
+	// leases, when non-nil, is the lease table. Normal admission and red-line
+	// eviction never pick a leased model as a victim and CLAIM each victim
+	// before stopping it (closing the pick->stop race against a concurrent
+	// lease acquire); hard-line emergency eviction ignores leases entirely
+	// (safety beats a lease). nil disables all lease awareness in the gate.
+	leases *leaseTable
+}
+
+// leaseProtected reports whether model currently holds a live lease.
+func (g *memGate) leaseProtected(modelID string) bool {
+	return g.leases != nil && g.leases.IsProtected(modelID)
+}
+
+// claimVictim reserves victim for eviction so a lease cannot be acquired on it
+// while it is being stopped. allowLeased (the hard-line/host-OOM tier) skips the
+// claim entirely: safety eviction breaks leases. It returns false only when a
+// live lease exists on the victim right now, telling the caller to pick another.
+func (g *memGate) claimVictim(victim string, allowLeased bool) bool {
+	if g.leases == nil || allowLeased {
+		return true
+	}
+	return g.leases.TryClaimEviction([]string{victim}) == nil
+}
+
+// releaseVictim clears a claim taken by claimVictim. It must be paired with a
+// claimVictim that returned true (and matching allowLeased).
+func (g *memGate) releaseVictim(victim string, allowLeased bool) {
+	if g.leases == nil || allowLeased {
+		return
+	}
+	g.leases.ReleaseEvictionClaim([]string{victim})
 }
 
 // newMemGate returns a gate, or nil when it should be disabled (no budget or no
@@ -311,7 +351,7 @@ func (g *memGate) EnsureFits(
 		}
 		if time.Now().After(deadline) {
 			log.Warnf("memgate: rejecting %s after %s: %s", incoming, g.maxWait, detail)
-			return &MemoryBudgetError{Model: incoming, Detail: detail, RetryAfter: 10}
+			return &MemoryBudgetError{Model: incoming, Detail: detail, RetryAfter: 10, BlockedBy: g.residentBlockers(procs, incoming)}
 		}
 		log.Infof("memgate: %s does not fit yet (%s); waiting up to %s for memory to free",
 			incoming, detail, time.Until(deadline).Round(time.Second))
@@ -387,12 +427,21 @@ func (g *memGate) tryFit(
 			return false, detail
 		}
 
+		// Claim the victim before stopping it so a lease cannot be acquired in
+		// the pick->stop window. A false return means a lease landed on it just
+		// now: leave it running, exclude it, and pick a different victim.
+		if !g.claimVictim(victim, false) {
+			excluded[victim] = struct{}{}
+			continue
+		}
+
 		victimEst := g.estimateMB(victim)
 
 		log.Infof("memgate: evicting LRU model %s to free memory for %s", victim, incoming)
 		if err := procs[victim].Stop(g.stopTimeout); err != nil {
 			log.Warnf("memgate: stopping %s failed: %v", victim, err)
 		}
+		g.releaseVictim(victim, false)
 		excluded[victim] = struct{}{}
 
 		used, ok = g.settleAfterEviction(used, victimEst)
@@ -495,6 +544,9 @@ func (g *memGate) pickLRUVictim(
 		if !allowInFlight && g.inFlight != nil && g.inFlight(id) > 0 {
 			continue
 		}
+		if !allowInFlight && g.leaseProtected(id) {
+			continue
+		}
 		switch p.State() {
 		case process.StateStopped, process.StateShutdown:
 			continue // not resident, frees no GPU memory
@@ -523,6 +575,27 @@ func (g *memGate) pickLRUVictim(
 		return candidates[i].id < candidates[j].id
 	})
 	return candidates[0].id, true
+}
+
+// residentBlockers returns the leases protecting any currently-resident model
+// other than incoming, to explain a strict rejection. Empty when leases are
+// disabled or no resident model is leased.
+func (g *memGate) residentBlockers(procs map[string]process.Process, incoming string) []Blocker {
+	if g.leases == nil {
+		return nil
+	}
+	models := make([]string, 0, len(procs))
+	for id, p := range procs {
+		if id == incoming {
+			continue
+		}
+		switch p.State() {
+		case process.StateStopped, process.StateShutdown:
+			continue
+		}
+		models = append(models, id)
+	}
+	return g.leases.Blockers(models)
 }
 
 // estimateMB returns the incoming model's configured VRAM estimate in MiB, or 0
