@@ -4,11 +4,13 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -207,21 +209,32 @@ func (t *leaseTable) Kill(id, model, holder string) []Lease {
 
 // List returns a point-in-time view of every live lease, sorted by model then
 // id. inFlight, when non-nil, supplies each model's active request count.
+//
+// inFlight is queried AFTER the lock is released: the production callback
+// (baseRouter.InFlight) round-trips through the single run loop, and the run
+// loop itself takes t.mu (via TryClaimEviction). Calling it under t.mu would
+// deadlock the whole router. The lock is a strict leaf; nothing that waits on
+// the run loop may run under it.
 func (t *leaseTable) List(inFlight func(string) int) []LeaseView {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	now := t.now()
-	out := make([]LeaseView, 0, len(t.leases))
+	live := make([]Lease, 0, len(t.leases))
 	for _, l := range t.leases {
-		if !l.ExpiresAt.After(now) {
-			continue
+		if l.ExpiresAt.After(now) {
+			live = append(live, *l)
 		}
+	}
+	t.mu.Unlock()
+
+	out := make([]LeaseView, 0, len(live))
+	for i := range live {
+		l := live[i]
 		reqs := 0
 		if inFlight != nil {
 			reqs = inFlight(l.Model)
 		}
 		out = append(out, LeaseView{
-			Lease:          *l,
+			Lease:          l,
 			ActiveRequests: reqs,
 			TTLRemainingMS: l.ExpiresAt.Sub(now).Milliseconds(),
 		})
@@ -601,6 +614,9 @@ func sanitizeField(s string, max int) string {
 // crockford is the ULID base32 alphabet.
 const crockford = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
+// leaseIDFallback seeds id randomness only if crypto/rand ever fails.
+var leaseIDFallback atomic.Uint64
+
 // newLeaseID returns a lexicographically sortable, unique id: a 48-bit
 // millisecond timestamp followed by 80 bits of randomness, Crockford base32
 // encoded (a ULID). Sortable-by-time makes tie-breaks and logs read naturally.
@@ -613,7 +629,16 @@ func newLeaseID(now time.Time) string {
 	b[3] = byte(ms >> 16)
 	b[4] = byte(ms >> 8)
 	b[5] = byte(ms)
-	_, _ = rand.Read(b[6:])
+	if _, err := io.ReadFull(rand.Reader, b[6:]); err != nil {
+		// crypto/rand should never fail; if it does, fall back to a strictly
+		// increasing counter mixed with the nanosecond clock so ids in the same
+		// millisecond still differ rather than colliding on a zeroed suffix.
+		n := leaseIDFallback.Add(1)
+		mix := uint64(now.UnixNano()) ^ n
+		for i := range 10 {
+			b[6+i] = byte(mix >> (uint(i%8) * 8))
+		}
+	}
 
 	var out [26]byte
 	// Encode 128 bits as 26 base32 chars (Crockford), high bits first.

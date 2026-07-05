@@ -138,6 +138,9 @@ func newBaseRouter(
 	}
 	sched, err := scheduler.New(conf, name, logger, planner, b)
 	if err != nil {
+		// The lease table's sweeper (and persistence writer, if configured) are
+		// already running; stop them so a failed construction leaks nothing.
+		b.leases.stop()
 		return nil, err
 	}
 	b.schedule = sched

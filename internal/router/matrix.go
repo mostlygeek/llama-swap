@@ -40,6 +40,7 @@ func NewMatrix(conf config.Config, proxylog, upstreamlog *logmon.Monitor, perfMo
 		if err != nil {
 			base.shutdownFn()
 			base.procCancel()
+			base.leases.stop()
 			return nil, fmt.Errorf("creating process for %q: %w", mid, err)
 		}
 		processes[mid] = p

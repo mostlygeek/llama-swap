@@ -139,3 +139,35 @@ func TestBaseRouter_LeaseHeaderValidation(t *testing.T) {
 		t.Fatalf("absent header must pass; got %v", err)
 	}
 }
+
+// TestLeaseTable_ListReleasesLockBeforeInFlight is the regression guard for the
+// run-loop deadlock (H1). In production the inFlight callback (baseRouter.InFlight)
+// round-trips through the single run loop, and the run loop itself takes the
+// lease lock via TryClaimEviction. If List holds t.mu across the callback, the
+// two deadlock. This test makes the callback assert it can take t.mu, which is
+// only possible if List released it first.
+func TestLeaseTable_ListReleasesLockBeforeInFlight(t *testing.T) {
+	lt, _ := newTestLeaseTable(t)
+	lt.Acquire("m", "holder", "reason", time.Hour)
+
+	done := make(chan struct{})
+	go func() {
+		lt.List(func(string) int {
+			// The lock must be free here; a real inFlight callback needs the run
+			// loop, which needs this same lock.
+			if !lt.mu.TryLock() {
+				t.Error("List held t.mu while calling the inFlight callback (deadlock risk)")
+			} else {
+				lt.mu.Unlock()
+			}
+			return 0
+		})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("List deadlocked calling inFlight under its own lock")
+	}
+}

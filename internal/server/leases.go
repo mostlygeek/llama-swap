@@ -3,7 +3,9 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/router"
@@ -82,7 +84,7 @@ func (s *Server) handleLeaseRelease(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleLeaseExtend(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var req extendRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err.Error() != "EOF" {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 		return
 	}
@@ -111,6 +113,9 @@ func (s *Server) handleLeaseKill(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 		return
 	}
+	req.ID = strings.TrimSpace(req.ID)
+	req.Model = strings.TrimSpace(req.Model)
+	req.Holder = strings.TrimSpace(req.Holder)
 	set := 0
 	for _, v := range []string{req.ID, req.Model, req.Holder} {
 		if v != "" {

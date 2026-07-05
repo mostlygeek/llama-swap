@@ -42,6 +42,7 @@ func NewGroup(conf config.Config, proxylog, upstreamlog *logmon.Monitor, perfMon
 		if !ok {
 			base.shutdownFn()
 			base.procCancel()
+			base.leases.stop()
 			return nil, fmt.Errorf("no model config for %q", mid)
 		}
 		procLog := logmon.NewWriter(upstreamlog)
@@ -49,6 +50,7 @@ func NewGroup(conf config.Config, proxylog, upstreamlog *logmon.Monitor, perfMon
 		if err != nil {
 			base.shutdownFn()
 			base.procCancel()
+			base.leases.stop()
 			return nil, fmt.Errorf("creating process for %q: %w", mid, err)
 		}
 		processes[mid] = p
