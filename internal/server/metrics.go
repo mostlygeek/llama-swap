@@ -44,17 +44,7 @@ type metricsMonitor struct {
 	captureCache   *cache.Cache // zstd-compressed CBOR of ReqRespCapture
 }
 
-// newMetricsMonitor creates a metricsMonitor retaining up to maxMetrics entries.
-// captureBufferMB is the capture buffer size in megabytes; 0 disables captures.
-func newMetricsMonitor(logger *logmon.Monitor, maxMetrics int, captureBufferMB int) *metricsMonitor {
-	st, err := store.New("")
-	if err != nil {
-		panic(err)
-	}
-	return newMetricsMonitorWithStore(logger, maxMetrics, captureBufferMB, st)
-}
-
-func newMetricsMonitorWithStore(logger *logmon.Monitor, maxMetrics int, captureBufferMB int, st *store.Store) *metricsMonitor {
+func newMetricsMonitor(logger *logmon.Monitor, maxMetrics int, captureBufferMB int, st *store.Store) *metricsMonitor {
 	if maxMetrics <= 0 {
 		maxMetrics = 1000
 	}

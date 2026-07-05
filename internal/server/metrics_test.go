@@ -64,7 +64,7 @@ func TestServer_ProcessStreamingResponse_NoData(t *testing.T) {
 }
 
 func TestMetricsMonitor_RecordMetadata(t *testing.T) {
-	mm := newMetricsMonitor(nil, 10, 0)
+	mm := newTestMetricsMonitor(t, nil, 10, 0)
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"usage":{}}`))
 	r = r.WithContext(shared.SetContext(r.Context(), shared.ReqContextData{
 		ModelID:  "m",
@@ -91,7 +91,7 @@ func TestMetricsMonitor_RecordMetadata(t *testing.T) {
 }
 
 func TestMetricsMonitor_RecordFailedRequestCapture(t *testing.T) {
-	mm := newMetricsMonitor(logmon.NewWriter(io.Discard), 10, 5)
+	mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 10, 5)
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	reqHeaders := map[string]string{"content-type": "application/json"}
 
@@ -136,7 +136,7 @@ func TestMetricsMonitor_RecordFailedRequestCapture(t *testing.T) {
 
 func TestMetricsMonitor_RecordFailedRequestStatusFallback(t *testing.T) {
 	// Non-JSON error body: ErrorMsg falls back to the HTTP status text.
-	mm := newMetricsMonitor(logmon.NewWriter(io.Discard), 10, 5)
+	mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 10, 5)
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 
 	w := httptest.NewRecorder()
@@ -156,7 +156,7 @@ func TestMetricsMonitor_RecordFailedRequestStatusFallback(t *testing.T) {
 }
 
 func TestMetricsMonitor_RecordFailedRequestCaptureDisabled(t *testing.T) {
-	mm := newMetricsMonitor(logmon.NewWriter(io.Discard), 10, 0) // captures disabled
+	mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 10, 0) // captures disabled
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 
 	w := httptest.NewRecorder()
@@ -183,7 +183,7 @@ func TestMetricsMonitor_RecordFailedRequestCaptureDisabled(t *testing.T) {
 }
 
 func TestMetricsMonitor_RecordDecompressionFailureSetsErrorMsg(t *testing.T) {
-	mm := newMetricsMonitor(logmon.NewWriter(io.Discard), 10, 5)
+	mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 10, 5)
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 
 	w := httptest.NewRecorder()
@@ -208,7 +208,7 @@ func TestMetricsMonitor_RecordDecompressionFailureSetsErrorMsg(t *testing.T) {
 }
 
 func TestMetricsMonitor_DecodeResponseBody(t *testing.T) {
-	mm := newMetricsMonitor(logmon.NewWriter(io.Discard), 10, 5)
+	mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 10, 5)
 
 	// No Content-Encoding: body returned unchanged.
 	w := httptest.NewRecorder()
@@ -277,7 +277,7 @@ func TestServer_ParseMetrics_Infill(t *testing.T) {
 // an /upstream/<model>/v1/audio/speech request uses the path-specific capture
 // mask (headers only) rather than falling back to captureAll.
 func TestServer_MetricsMiddleware_UpstreamAudioCaptureSkipsRespBody(t *testing.T) {
-	mm := newMetricsMonitor(logmon.NewWriter(io.Discard), 100, 5)
+	mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 100, 5)
 	cfg := config.Config{Models: map[string]config.ModelConfig{"m1": {}}}
 
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
