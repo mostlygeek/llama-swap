@@ -54,6 +54,9 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
   - `/health` - just returns "OK"
   - `/metrics` - system and GPU metrics for prometheus
 - ✅ API Key support - define keys to restrict access to API endpoints
+- ✅ Model leases: protect an in-use model from eviction (refuse-don't-break), plus optional global inference serialization ([docs](docs/model-leases.md))
+  - `POST/GET/DELETE /leases`, `POST /leases/{id}/extend`, `POST /leases/kill`, `GET /leases/can-load/{model}`
+  - `X-Llama-Swap-Lease` request header; `scripts/model_lease.py` client + `llama-swap-lease` CLI
 - ✅ Customizable
   - Run concurrent models with a custom DSL swap matrix ([#643](https://github.com/mostlygeek/llama-swap/issues/643))
   - Automatic unloading of models after timeout by setting a `ttl`
