@@ -93,9 +93,10 @@ func (s *Server) handleAPIUnloadModel(w http.ResponseWriter, r *http.Request) {
 
 // handleAPIMetrics serves the activity log as a JSON array.
 func (s *Server) handleAPIMetrics(w http.ResponseWriter, r *http.Request) {
-	limit := s.cfg.MetricsMaxInMemory
-	if limit <= 0 {
-		limit = 1000
+	limit, err := parseActivityLimit(strings.TrimSpace(r.URL.Query().Get("limit")), 100)
+	if err != nil {
+		shared.SendResponse(w, r, http.StatusBadRequest, err.Error())
+		return
 	}
 	page, err := s.store.ListActivity(r.Context(), store.ActivityQuery{
 		Limit: limit,
@@ -140,6 +141,20 @@ func (s *Server) handleAPIActivityStats(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(stats)
 }
 
+func parseActivityLimit(raw string, defaultLimit int) (int, error) {
+	if raw == "" {
+		return defaultLimit, nil
+	}
+	limit, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("invalid limit")
+	}
+	if limit > 0 && limit < 1000 {
+		return limit, nil
+	}
+	return 0, fmt.Errorf("limit must be between 1 and 999")
+}
+
 func parseActivityQuery(r *http.Request) (store.ActivityQuery, error) {
 	const defaultLimit = 25
 	query := store.ActivityQuery{
@@ -149,16 +164,11 @@ func parseActivityQuery(r *http.Request) (store.ActivityQuery, error) {
 	}
 
 	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
-		limit, err := strconv.Atoi(raw)
+		limit, err := parseActivityLimit(raw, defaultLimit)
 		if err != nil {
-			return store.ActivityQuery{}, fmt.Errorf("invalid limit")
+			return store.ActivityQuery{}, err
 		}
-		switch limit {
-		case 10, 25, 50, 100:
-			query.Limit = limit
-		default:
-			return store.ActivityQuery{}, fmt.Errorf("limit must be one of 10, 25, 50, 100")
-		}
+		query.Limit = limit
 	}
 
 	if raw := strings.TrimSpace(r.URL.Query().Get("page")); raw != "" {
