@@ -1,16 +1,13 @@
 <script lang="ts">
-  import { untrack } from "svelte";
   import type { ActivityLogEntry, InflightRequestEntry, ReqRespCapture } from "../lib/types";
   import { cancelInflightRequest, getCapture } from "../stores/api";
   import { persistentStore } from "../stores/persistent";
   import CaptureDialog from "./CaptureDialog.svelte";
   import {
     type ColumnDef,
-    type PaginationState,
     type SortingState,
     type VisibilityState,
     getCoreRowModel,
-    getPaginationRowModel,
     getSortedRowModel,
   } from "@tanstack/table-core";
   import {
@@ -40,6 +37,7 @@
   import HeaderLabel from "./activity-table/HeaderLabel.svelte";
   import ViewCaptureButton from "./activity-table/ViewCaptureButton.svelte";
   import MetaCell from "./activity-table/MetaCell.svelte";
+  import ModelLink from "./activity-table/ModelLink.svelte";
   import { formatDuration, formatSpeed, formatRelativeTime } from "../lib/format";
 
   interface Props {
@@ -48,6 +46,15 @@
     storagePrefix: string;
     showModelColumn?: boolean;
     showPagination?: boolean;
+    page?: number;
+    limit?: number;
+    total?: number;
+    totalPages?: number;
+    onPageChange?: (page: number) => void;
+    onPageSizeChange?: (limit: number) => void;
+    sort?: string;
+    order?: "asc" | "desc";
+    onSortChange?: (sort: string, order: "asc" | "desc") => void;
     title?: string;
     compact?: boolean;
     emptyMessage?: string;
@@ -60,6 +67,15 @@
     storagePrefix,
     showModelColumn = true,
     showPagination = false,
+    page = 1,
+    limit = 25,
+    total = metrics.length,
+    totalPages = metrics.length > 0 ? 1 : 0,
+    onPageChange,
+    onPageSizeChange,
+    sort,
+    order = "desc",
+    onSortChange,
     title,
     compact = false,
     emptyMessage = "No activity recorded",
@@ -149,30 +165,16 @@
   });
 
   // svelte-ignore state_referenced_locally
-  const storedPageSize = persistentStore<number>(`${storagePrefix}-page-size`, 10);
-  // svelte-ignore state_referenced_locally
   const storedInflightOpen = persistentStore<boolean>(`${storagePrefix}-inflight-open`, true);
 
-  // When not paginating, use a large page size so all rows render in one page.
-  // svelte-ignore state_referenced_locally
-  let pagination = $state<PaginationState>({
-    pageIndex: 0,
-    pageSize: showPagination ? $storedPageSize : Number.MAX_SAFE_INTEGER,
-  });
-
-  // svelte-ignore state_referenced_locally
-  let sorting = $state<SortingState>([]);
+  // When onSortChange is provided the table sorts on the server: the sort
+  // state is driven by the sort/order props and toggles are forwarded to the
+  // parent. Otherwise it falls back to client-side sorting of the current page.
+  let localSorting = $state<SortingState>([]);
+  let sorting = $derived<SortingState>(
+    onSortChange ? (sort ? [{ id: sort, desc: order === "desc" }] : []) : localSorting
+  );
   let inflightOpen = $state($storedInflightOpen);
-
-  // Reset to the first page when the data source changes. We deliberately do
-  // NOT track pagination here — page-size changes reset pageIndex inside
-  // onPaginationChange instead, to avoid clobbering page navigation.
-  $effect(() => {
-    metrics;
-    untrack(() => {
-      pagination = { ...pagination, pageIndex: 0 };
-    });
-  });
 
   let selectedCapture = $state<ReqRespCapture | null>(null);
   let dialogOpen = $state(false);
@@ -242,7 +244,8 @@
         id: "model",
         accessorKey: "model",
         header: "Model",
-        cell: ({ row }) => row.original.model ?? "-",
+        cell: ({ row }) =>
+          renderComponent(ModelLink, { model: row.original.model }),
       });
     }
 
@@ -343,9 +346,6 @@
       return columns;
     },
     state: {
-      get pagination() {
-        return pagination;
-      },
       get columnVisibility() {
         return columnVisibility;
       },
@@ -356,27 +356,21 @@
         return columnOrder;
       },
     },
+    // svelte-ignore state_referenced_locally
+    manualSorting: !!onSortChange,
     onSortingChange: (updater) => {
-      sorting =
-        typeof updater === "function" ? updater(sorting) : updater;
+      const next = typeof updater === "function" ? updater(sorting) : updater;
+      if (onSortChange) {
+        const first = next[0];
+        onSortChange(first?.id ?? "", first?.desc === false ? "asc" : "desc");
+      } else {
+        localSorting = next;
+      }
     },
     onColumnOrderChange: (updater) => {
       columnOrder =
         typeof updater === "function" ? updater(columnOrder) : updater;
       storedColumnOrder.set(columnOrder);
-    },
-    onPaginationChange: (updater) => {
-      const prev = pagination;
-      const next =
-        typeof updater === "function" ? updater(prev) : updater;
-      // Reassign so the table's $effect.pre (which reads state.pagination)
-      // picks up the new value. Reset to first page when the page size
-      // changes so we don't land on an empty page.
-      pagination =
-        next.pageSize !== prev.pageSize
-          ? { pageIndex: 0, pageSize: next.pageSize }
-          : next;
-      if (showPagination) storedPageSize.set(pagination.pageSize);
     },
     onColumnVisibilityChange: (updater) => {
       columnVisibility =
@@ -384,14 +378,32 @@
       storedVisibility.set(columnVisibility);
     },
     getCoreRowModel: getCoreRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
   });
 
   let thClass = $derived(compact ? "px-4 py-2 h-9" : "px-6 py-3 h-12");
   let tdClass = $derived(compact ? "px-4 py-2" : "px-6 py-4");
   let visibleColumnCount = $derived(table.getVisibleLeafColumns().length);
-  let pageCount = $derived(Math.max(table.getPageCount(), 1));
+  let pageCount = $derived(Math.max(totalPages, 1));
+  let visiblePages = $derived.by(() => {
+    const maxButtons = 7;
+    const count = pageCount;
+    const current = Math.min(Math.max(page, 1), count);
+    const half = Math.floor(maxButtons / 2);
+    let start = Math.max(1, current - half);
+    let end = Math.min(count, start + maxButtons - 1);
+    start = Math.max(1, end - maxButtons + 1);
+    return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+  });
+
+  function setServerPage(nextPage: number) {
+    const clamped = Math.min(Math.max(nextPage, 1), pageCount);
+    if (clamped !== page) onPageChange?.(clamped);
+  }
+
+  function setServerPageSize(nextLimit: number) {
+    onPageSizeChange?.(nextLimit);
+  }
 
   function sortIcon(state: false | "asc" | "desc") {
     if (state === "asc") return ArrowUp;
@@ -529,7 +541,7 @@
       {#if title}
         <Card.Title class="text-sm font-semibold">
           {title}
-          <span class="text-muted-foreground text-xs font-normal">({metrics.length})</span>
+          <span class="text-muted-foreground text-xs font-normal">({total})</span>
         </Card.Title>
       {/if}
     </div>
@@ -538,14 +550,14 @@
         <span class="text-muted-foreground text-xs">Rows</span>
         <Select.Root
           type="single"
-          value={String(pagination.pageSize)}
-          onValueChange={(v) => table.setPageSize(Number(v))}
+          value={String(limit)}
+          onValueChange={(v) => setServerPageSize(Number(v))}
         >
           <Select.Trigger size="sm" class="h-7 w-[4.5rem] text-xs">
-            {pagination.pageSize}
+            {limit}
           </Select.Trigger>
           <Select.Content>
-            {#each [5, 10, 25, 50] as size (size)}
+            {#each [10, 25, 50, 100] as size (size)}
               <Select.Item value={String(size)}>{size}</Select.Item>
             {/each}
           </Select.Content>
@@ -633,17 +645,17 @@
       </Table.Body>
     </Table.Root>
 
-    {#if showPagination && metrics.length > 0}
+    {#if showPagination && total > 0}
       <div class="flex items-center justify-between gap-2 border-t px-4 py-2 text-sm">
         <span class="text-muted-foreground text-xs">
-          Page {pagination.pageIndex + 1} of {pageCount} · {metrics.length} total
+          Page {page} of {pageCount} · {total} total
         </span>
         <div class="flex items-center gap-1">
           <Button
             variant="ghost"
             size="icon-sm"
-            onclick={() => table.setPageIndex(0)}
-            disabled={!table.getCanPreviousPage()}
+            onclick={() => setServerPage(1)}
+            disabled={page <= 1}
             title="First page"
           >
             <ChevronsLeft />
@@ -651,17 +663,28 @@
           <Button
             variant="ghost"
             size="icon-sm"
-            onclick={() => table.previousPage()}
-            disabled={!table.getCanPreviousPage()}
+            onclick={() => setServerPage(page - 1)}
+            disabled={page <= 1}
             title="Previous page"
           >
             <ChevronLeft />
           </Button>
+          {#each visiblePages as pageNumber (pageNumber)}
+            <Button
+              variant={pageNumber === page ? "secondary" : "ghost"}
+              size="sm"
+              class="h-7 min-w-7 px-2 text-xs"
+              onclick={() => setServerPage(pageNumber)}
+              disabled={pageNumber === page}
+            >
+              {pageNumber}
+            </Button>
+          {/each}
           <Button
             variant="ghost"
             size="icon-sm"
-            onclick={() => table.nextPage()}
-            disabled={!table.getCanNextPage()}
+            onclick={() => setServerPage(page + 1)}
+            disabled={page >= pageCount}
             title="Next page"
           >
             <ChevronRight />
@@ -669,8 +692,8 @@
           <Button
             variant="ghost"
             size="icon-sm"
-            onclick={() => table.setPageIndex(pageCount - 1)}
-            disabled={!table.getCanNextPage()}
+            onclick={() => setServerPage(pageCount)}
+            disabled={page >= pageCount}
             title="Last page"
           >
             <ChevronsRight />

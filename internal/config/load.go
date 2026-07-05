@@ -60,6 +60,12 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		return Config{}, fmt.Errorf("globalTTL must be >= 0")
 	}
 
+	if config.Store != nil {
+		if err := validateStorePath(config.Store.Path); err != nil {
+			return Config{}, err
+		}
+	}
+
 	// Apply default for upstream.ignorePaths when not specified. The default
 	// matches common static-asset suffixes so they do not trigger a swap.
 	if len(config.Upstream.IgnorePaths) == 0 {
@@ -433,4 +439,11 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	}
 
 	return config, nil
+}
+
+func validateStorePath(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("store.path must not be empty")
+	}
+	return nil
 }

@@ -1,7 +1,8 @@
 import { writable, derived } from "svelte/store";
 import type {
   Model,
-  ActivityLogEntry,
+  ActivityPage,
+  ActivityStatsData,
   VersionInfo,
   LogData,
   APIEventEnvelope,
@@ -21,7 +22,7 @@ export const models = writable<Model[]>([]);
 export const hasListedModels = derived(models, ($models) => $models.some((m) => !m.unlisted));
 export const proxyLogs = writable<string>("");
 export const upstreamLogs = writable<string>("");
-export const metrics = writable<ActivityLogEntry[]>([]);
+export const activityRevision = writable<number>(0);
 export const inFlightRequests = writable<number>(0);
 export const inflightRequestEntries = writable<InflightRequestEntry[]>([]);
 export const performanceEnabled = writable<boolean>(false);
@@ -44,7 +45,7 @@ export function enableAPIEvents(enabled: boolean): void {
   if (!enabled) {
     apiEventSource?.close();
     apiEventSource = null;
-    metrics.set([]);
+    activityRevision.set(0);
     inFlightRequests.set(0);
     inflightRequestEntries.set([]);
     return;
@@ -63,7 +64,7 @@ export function enableAPIEvents(enabled: boolean): void {
       // Clear everything on connect to keep things in sync
       proxyLogs.set("");
       upstreamLogs.set("");
-      metrics.set([]);
+      activityRevision.update((n) => n + 1);
       inFlightRequests.set(0);
       inflightRequestEntries.set([]);
       models.set([]);
@@ -118,8 +119,13 @@ export function handleAPIEventMessage(data: string): void {
     }
 
     case "metrics": {
-      const newMetrics = JSON.parse(message.data) as ActivityLogEntry[];
-      metrics.update((prevMetrics) => [...newMetrics, ...prevMetrics]);
+      // Backward-compatible activity invalidation for older servers.
+      activityRevision.update((n) => n + 1);
+      break;
+    }
+
+    case "activity": {
+      activityRevision.update((n) => n + 1);
       break;
     }
 
@@ -161,6 +167,40 @@ export async function listModels(): Promise<Model[]> {
     console.error("Failed to fetch models:", error);
     return [];
   }
+}
+
+export async function getActivity(params: {
+  model?: string;
+  page?: number;
+  limit?: number;
+  sort?: string;
+  order?: "asc" | "desc";
+} = {}): Promise<ActivityPage> {
+  const query = new URLSearchParams();
+  if (params.model) query.set("model", params.model);
+  if (params.page) query.set("page", String(params.page));
+  if (params.limit) query.set("limit", String(params.limit));
+  if (params.sort) query.set("sort", params.sort);
+  if (params.order) query.set("order", params.order);
+  const url = query.size > 0 ? `/api/metrics/activity?${query}` : "/api/metrics/activity";
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch activity: ${response.status}`);
+  }
+  return await response.json();
+}
+
+export async function getActivityStats(model?: string): Promise<ActivityStatsData> {
+  const query = new URLSearchParams();
+  if (model) query.set("model", model);
+  const url = query.size > 0 ? `/api/metrics/stats?${query}` : "/api/metrics/stats";
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch activity stats: ${response.status}`);
+  }
+  return await response.json();
 }
 
 export async function unloadAllModels(): Promise<void> {

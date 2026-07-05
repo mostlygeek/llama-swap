@@ -214,6 +214,21 @@
             "default": 5,
             "description": "Size in megabytes of the buffer for storing request/response captures. Set to 0 to disable captures."
         },
+        "store": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "SQLite database file path for persistent activity logs."
+                }
+            },
+            "required": [
+                "path"
+            ],
+            "additionalProperties": false,
+            "description": "Store configuration for durable llama-swap state."
+        },
         "performance": {
             "type": "object",
             "properties": {

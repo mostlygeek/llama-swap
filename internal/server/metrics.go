@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"compress/flate"
 	"compress/gzip"
-	"encoding/json"
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -17,36 +17,13 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/cache"
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
-	"github.com/mostlygeek/llama-swap/internal/ring"
 	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/store"
 	"github.com/tidwall/gjson"
 )
 
-// TokenMetrics holds token usage and performance metrics.
-type TokenMetrics struct {
-	CachedTokens    int     `json:"cache_tokens"`
-	DraftTokens     int     `json:"draft_tokens"`
-	DraftAccTokens  int     `json:"draft_acc_tokens"`
-	InputTokens     int     `json:"input_tokens"`
-	OutputTokens    int     `json:"output_tokens"`
-	PromptPerSecond float64 `json:"prompt_per_second"`
-	TokensPerSecond float64 `json:"tokens_per_second"`
-}
-
-// ActivityLogEntry represents parsed token statistics from llama-server logs.
-type ActivityLogEntry struct {
-	ID              int               `json:"id"`
-	Timestamp       time.Time         `json:"timestamp"`
-	Model           string            `json:"model"`
-	ReqPath         string            `json:"req_path"`
-	RespContentType string            `json:"resp_content_type"`
-	RespStatusCode  int               `json:"resp_status_code"`
-	Tokens          TokenMetrics      `json:"tokens"`
-	DurationMs      int               `json:"duration_ms"`
-	HasCapture      bool              `json:"has_capture"`
-	ErrorMsg        string            `json:"error_msg,omitempty"`
-	Metadata        map[string]string `json:"metadata,omitempty"`
-}
+type TokenMetrics = store.TokenMetrics
+type ActivityLogEntry = store.ActivityLogEntry
 
 // ActivityLogEvent carries a single activity log entry to event subscribers.
 type ActivityLogEvent struct {
@@ -57,15 +34,14 @@ func (e ActivityLogEvent) Type() uint32 {
 	return shared.ActivityLogEventID
 }
 
-// metricsMonitor parses upstream responses for token statistics, keeps a
-// bounded in-memory ring of recent activity, and (when captures are enabled)
-// stores zstd+CBOR-compressed request/response captures in a sized cache.
+// metricsMonitor parses upstream responses for token statistics, stores
+// activity in a store, and (when captures are enabled) stores
+// zstd+CBOR-compressed request/response captures in a sized in-memory cache.
 type metricsMonitor struct {
-	mu      sync.RWMutex
-	metrics ring.Buffer[ActivityLogEntry]
-	nextID  int
-	logger  *logmon.Monitor
-
+	mu             sync.RWMutex
+	store          *store.Store
+	maxMetrics     int
+	logger         *logmon.Monitor
 	enableCaptures bool
 	captureCache   *cache.Cache // zstd-compressed CBOR of ReqRespCapture
 }
@@ -73,12 +49,21 @@ type metricsMonitor struct {
 // newMetricsMonitor creates a metricsMonitor retaining up to maxMetrics entries.
 // captureBufferMB is the capture buffer size in megabytes; 0 disables captures.
 func newMetricsMonitor(logger *logmon.Monitor, maxMetrics int, captureBufferMB int) *metricsMonitor {
+	st, err := store.New("")
+	if err != nil {
+		panic(err)
+	}
+	return newMetricsMonitorWithStore(logger, maxMetrics, captureBufferMB, st)
+}
+
+func newMetricsMonitorWithStore(logger *logmon.Monitor, maxMetrics int, captureBufferMB int, st *store.Store) *metricsMonitor {
 	if maxMetrics <= 0 {
 		maxMetrics = 1000
 	}
 	mm := &metricsMonitor{
 		logger:         logger,
-		metrics:        ring.NewBuffer[ActivityLogEntry](maxMetrics),
+		store:          st,
+		maxMetrics:     maxMetrics,
 		enableCaptures: captureBufferMB > 0,
 	}
 	if captureBufferMB > 0 {
@@ -87,15 +72,22 @@ func newMetricsMonitor(logger *logmon.Monitor, maxMetrics int, captureBufferMB i
 	return mm
 }
 
-// queueMetrics adds a metric to the ring and returns its assigned ID.
-func (mp *metricsMonitor) queueMetrics(metric ActivityLogEntry) int {
+// queueMetrics persists a metric and returns the store-assigned row.
+func (mp *metricsMonitor) queueMetrics(ctx context.Context, metric ActivityLogEntry) (ActivityLogEntry, bool) {
 	mp.mu.Lock()
 	defer mp.mu.Unlock()
 
-	metric.ID = mp.nextID
-	mp.nextID++
-	mp.metrics.Push(metric)
-	return metric.ID
+	stored, err := mp.store.InsertActivity(ctx, metric)
+	if err != nil {
+		mp.warnf("failed to persist activity metric: %v", err)
+		return ActivityLogEntry{}, false
+	}
+	if mp.store.IsInMemory() {
+		if err := mp.store.PruneActivity(ctx, mp.maxMetrics); err != nil {
+			mp.warnf("failed to prune activity metrics: %v", err)
+		}
+	}
+	return stored, true
 }
 
 // emitMetric publishes an ActivityLogEvent for the given metric.
@@ -103,26 +95,26 @@ func (mp *metricsMonitor) emitMetric(metric ActivityLogEntry) {
 	event.Emit(ActivityLogEvent{Metrics: metric})
 }
 
-// getMetrics returns a copy of the current metrics.
-func (mp *metricsMonitor) getMetrics() []ActivityLogEntry {
-	mp.mu.RLock()
-	defer mp.mu.RUnlock()
-
-	result := mp.metrics.Slice()
-	if result == nil {
-		return []ActivityLogEntry{}
-	}
-	if mp.captureCache != nil {
-		for i := range result {
-			result[i].HasCapture = mp.captureCache.Has(result[i].ID)
+func (mp *metricsMonitor) overlayCaptureState(entries []ActivityLogEntry) {
+	if mp.captureCache == nil {
+		for i := range entries {
+			entries[i].HasCapture = false
 		}
+		return
 	}
-	return result
+	for i := range entries {
+		entries[i].HasCapture = mp.captureCache.Has(entries[i].ID)
+	}
 }
 
-// getMetricsJSON returns the current metrics as a JSON array.
-func (mp *metricsMonitor) getMetricsJSON() ([]byte, error) {
-	return json.Marshal(mp.getMetrics())
+func (mp *metricsMonitor) warnf(format string, args ...any) {
+	if mp.logger != nil {
+		mp.logger.Warnf(format, args...)
+	}
+}
+
+func (mp *metricsMonitor) Close() error {
+	return nil
 }
 
 // record parses a completed response body and stores/emits an activity entry.
@@ -149,7 +141,11 @@ func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *resp
 	}
 
 	queueAndEmit := func() {
-		tm.ID = mp.queueMetrics(tm)
+		stored, ok := mp.queueMetrics(r.Context(), tm)
+		if !ok {
+			return
+		}
+		tm = stored
 		mp.emitMetric(tm)
 	}
 
@@ -157,7 +153,11 @@ func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *resp
 		mp.logger.Warnf("non-200 response, recording partial metrics: status=%d, path=%s", recorder.Status(), r.URL.Path)
 		decoded, decErr := mp.decodeResponseBody(recorder, r.URL.Path)
 		tm.ErrorMsg = failedErrorMessage(recorder.Status(), decoded, decErr)
-		tm.ID = mp.queueMetrics(tm)
+		stored, ok := mp.queueMetrics(r.Context(), tm)
+		if !ok {
+			return
+		}
+		tm = stored
 		// Capture the request only; the failure is surfaced via ErrorMsg
 		// rather than storing the (possibly undisplayable) response body.
 		tm.HasCapture = mp.storeCapture(tm.ID, r, recorder, cf&^captureRespBody, reqBody, reqHeaders, nil)
@@ -214,7 +214,11 @@ func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *resp
 		mp.logger.Warnf("metrics: invalid JSON in response body path=%s, recording minimal metrics", r.URL.Path)
 	}
 
-	tm.ID = mp.queueMetrics(tm)
+	stored, ok := mp.queueMetrics(r.Context(), tm)
+	if !ok {
+		return
+	}
+	tm = stored
 	tm.HasCapture = mp.storeCapture(tm.ID, r, recorder, cf, reqBody, reqHeaders, body)
 	mp.emitMetric(tm)
 }

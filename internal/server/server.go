@@ -16,6 +16,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/internal/router"
 	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/store"
 )
 
 // Server owns the HTTP mux, cross-cutting middleware, and the local/peer model
@@ -31,6 +32,7 @@ type Server struct {
 	perf     *perf.Monitor
 	inflight *inflightTracker
 	metrics  *metricsMonitor
+	store    *store.Store
 	build    BuildInfo
 
 	local router.LocalRouter
@@ -118,7 +120,7 @@ type BuildInfo struct {
 	Date    string
 }
 
-func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, upstreamlog *logmon.Monitor, perfMon *perf.Monitor, build BuildInfo) (*Server, error) {
+func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, upstreamlog *logmon.Monitor, perfMon *perf.Monitor, st *store.Store, build BuildInfo) (*Server, error) {
 	var local router.LocalRouter
 	var err error
 
@@ -140,6 +142,10 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 		return nil, fmt.Errorf("creating peer router: %w", err)
 	}
 
+	if st == nil {
+		return nil, fmt.Errorf("store is required")
+	}
+
 	shutdownCtx, shutdownFn := context.WithCancel(context.Background())
 	s := &Server{
 		cfg:         cfg,
@@ -148,7 +154,8 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 		upstreamlog: upstreamlog,
 		perf:        perfMon,
 		inflight:    newInflightTracker(),
-		metrics:     newMetricsMonitor(proxylog, cfg.MetricsMaxInMemory, cfg.CaptureBuffer),
+		metrics:     newMetricsMonitorWithStore(proxylog, cfg.MetricsMaxInMemory, cfg.CaptureBuffer, st),
+		store:       st,
 		build:       build,
 		local:       local,
 		peer:        peer,
@@ -256,6 +263,8 @@ func (s *Server) routes() {
 	mux.Handle("POST /api/inflight/{id}/cancel", apiChain.ThenFunc(s.handleAPICancelInflight))
 	mux.Handle("GET /api/events", apiChain.ThenFunc(s.handleAPIEvents))
 	mux.Handle("GET /api/metrics", apiChain.ThenFunc(s.handleAPIMetrics))
+	mux.Handle("GET /api/metrics/activity", apiChain.ThenFunc(s.handleAPIActivity))
+	mux.Handle("GET /api/metrics/stats", apiChain.ThenFunc(s.handleAPIActivityStats))
 	mux.Handle("GET /api/performance", apiChain.ThenFunc(s.handleAPIPerformance))
 	mux.Handle("GET /api/version", apiChain.ThenFunc(s.handleAPIVersion))
 	mux.Handle("GET /api/captures/{id}", apiChain.ThenFunc(s.handleAPICapture))

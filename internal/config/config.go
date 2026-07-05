@@ -104,6 +104,10 @@ type HookOnStartup struct {
 	Preload []string `yaml:"preload"`
 }
 
+type Store struct {
+	Path string `yaml:"path"`
+}
+
 type Config struct {
 	HealthCheckTimeout int                    `yaml:"healthCheckTimeout"`
 	LogRequests        bool                   `yaml:"logRequests"`
@@ -112,6 +116,7 @@ type Config struct {
 	LogToStdout        string                 `yaml:"logToStdout"`
 	MetricsMaxInMemory int                    `yaml:"metricsMaxInMemory"`
 	CaptureBuffer      int                    `yaml:"captureBuffer"`
+	Store              *Store                 `yaml:"store"`
 	Performance        PerformanceConfig      `yaml:"performance"`
 	GlobalTTL          int                    `yaml:"globalTTL"`
 	Models             map[string]ModelConfig `yaml:"models"` /* key is model ID */

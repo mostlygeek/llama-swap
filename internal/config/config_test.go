@@ -66,6 +66,27 @@ models:
 	assert.Contains(t, err.Error(), "duplicate alias m1 found in model: model")
 }
 
+func TestConfig_StorePath(t *testing.T) {
+	t.Run("path accepted", func(t *testing.T) {
+		cfg, err := LoadConfigFromReader(strings.NewReader(`
+store:
+  path: data/llama-swap.db
+`))
+		require.NoError(t, err)
+		require.NotNil(t, cfg.Store)
+		assert.Equal(t, "data/llama-swap.db", cfg.Store.Path)
+	})
+
+	t.Run("empty path rejected", func(t *testing.T) {
+		_, err := LoadConfigFromReader(strings.NewReader(`
+store:
+  path: ""
+`))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "store.path must not be empty")
+	})
+}
+
 func TestConfig_FindConfig(t *testing.T) {
 
 	// TODO?

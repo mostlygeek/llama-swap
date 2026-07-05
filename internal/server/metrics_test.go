@@ -78,7 +78,7 @@ func TestMetricsMonitor_RecordMetadata(t *testing.T) {
 
 	mm.record("m", r, copier, 0, nil, nil)
 
-	entries := mm.getMetrics()
+	entries := metricsEntries(t, mm)
 	if len(entries) != 1 {
 		t.Fatalf("want 1 entry, got %d", len(entries))
 	}
@@ -104,7 +104,7 @@ func TestMetricsMonitor_RecordFailedRequestCapture(t *testing.T) {
 	reqBody := []byte(`{"model":"m","messages":[]}`)
 	mm.record("m", r, copier, captureAll, reqBody, reqHeaders)
 
-	entries := mm.getMetrics()
+	entries := metricsEntries(t, mm)
 	if len(entries) != 1 {
 		t.Fatalf("want 1 entry, got %d", len(entries))
 	}
@@ -146,7 +146,7 @@ func TestMetricsMonitor_RecordFailedRequestStatusFallback(t *testing.T) {
 
 	mm.record("m", r, copier, captureAll, nil, nil)
 
-	entries := mm.getMetrics()
+	entries := metricsEntries(t, mm)
 	if len(entries) != 1 {
 		t.Fatalf("want 1 entry, got %d", len(entries))
 	}
@@ -166,7 +166,7 @@ func TestMetricsMonitor_RecordFailedRequestCaptureDisabled(t *testing.T) {
 
 	mm.record("m", r, copier, captureAll, []byte("req"), nil)
 
-	entries := mm.getMetrics()
+	entries := metricsEntries(t, mm)
 	if len(entries) != 1 {
 		t.Fatalf("want 1 entry, got %d", len(entries))
 	}
@@ -194,7 +194,7 @@ func TestMetricsMonitor_RecordDecompressionFailureSetsErrorMsg(t *testing.T) {
 
 	mm.record("m", r, copier, captureAll, []byte("req"), nil)
 
-	entries := mm.getMetrics()
+	entries := metricsEntries(t, mm)
 	if len(entries) != 1 {
 		t.Fatalf("want 1 entry, got %d", len(entries))
 	}
@@ -290,7 +290,7 @@ func TestServer_MetricsMiddleware_UpstreamAudioCaptureSkipsRespBody(t *testing.T
 	req := httptest.NewRequest(http.MethodPost, "/upstream/m1/v1/audio/speech", strings.NewReader(`{"model":"m1"}`))
 	handler.ServeHTTP(httptest.NewRecorder(), req)
 
-	entries := mm.getMetrics()
+	entries := metricsEntries(t, mm)
 	if len(entries) == 0 {
 		t.Fatal("no metrics recorded")
 	}

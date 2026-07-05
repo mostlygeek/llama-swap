@@ -255,7 +255,7 @@ func TestServer_HandleUpstream_MetricsRecordsSupportedPath(t *testing.T) {
 	if w.Code != http.StatusOK || w.Body.String() != resp {
 		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
 	}
-	entries := s.metrics.getMetrics()
+	entries := metricsEntries(t, s.metrics)
 	if len(entries) != 1 {
 		t.Fatalf("want 1 metrics entry, got %d", len(entries))
 	}
@@ -281,8 +281,8 @@ func TestServer_HandleUpstream_MetricsSkipsUnsupportedPath(t *testing.T) {
 	if w.Code != http.StatusOK || w.Body.String() != "ok" {
 		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
 	}
-	if len(s.metrics.getMetrics()) != 0 {
-		t.Errorf("want no metrics entries for unsupported path, got %d", len(s.metrics.getMetrics()))
+	if len(metricsEntries(t, s.metrics)) != 0 {
+		t.Errorf("want no metrics entries for unsupported path, got %d", len(metricsEntries(t, s.metrics)))
 	}
 }
 
@@ -295,8 +295,8 @@ func TestServer_HandleUpstream_MetricsSkipsGET(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d", w.Code)
 	}
-	if len(s.metrics.getMetrics()) != 0 {
-		t.Errorf("want no metrics entries for GET upstream, got %d", len(s.metrics.getMetrics()))
+	if len(metricsEntries(t, s.metrics)) != 0 {
+		t.Errorf("want no metrics entries for GET upstream, got %d", len(metricsEntries(t, s.metrics)))
 	}
 }
 

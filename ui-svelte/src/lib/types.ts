@@ -47,6 +47,14 @@ export interface ActivityLogEntry {
   metadata?: Record<string, string>;
 }
 
+export interface ActivityPage {
+  data: ActivityLogEntry[];
+  page: number;
+  limit: number;
+  total: number;
+  total_pages: number;
+}
+
 export interface ReqRespCapture {
   id: number;
   req_path: string;
@@ -115,7 +123,7 @@ export interface PerformanceResponse {
 }
 
 export interface APIEventEnvelope {
-  type: "modelStatus" | "logData" | "metrics" | "inflight" | "perfsys" | "perfgpu";
+  type: "modelStatus" | "logData" | "metrics" | "activity" | "inflight" | "perfsys" | "perfgpu";
   data: string;
 }
 
@@ -127,6 +135,15 @@ export interface HistogramData {
   p99: number;
   p95: number;
   p50: number;
+}
+
+export interface ActivityStatsData {
+  total_requests: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_cache_tokens: number;
+  prompt_histogram: HistogramData | null;
+  gen_histogram: HistogramData | null;
 }
 
 export interface VersionInfo {
