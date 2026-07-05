@@ -112,7 +112,7 @@ func (g *memGate) enforceRedline(procs map[string]process.Process, log *logmon.M
 	}
 
 	for used > g.budgetMB || g.hostBreach() > 0 {
-		victim, ok := g.pickLRUVictim(procs, excluded, !hard)
+		victim, ok := g.pickLRUVictim(procs, excluded, !hard, hard)
 		if !ok {
 			log.Warnf("redline: still over (used=%dMB, budget=%dMB) but no evictable models remain", used, g.budgetMB)
 			return

@@ -53,6 +53,11 @@ type PerformanceConfig struct {
 	// the kernel TTM eviction stall / hardware-watchdog reboot that follows
 	// unchecked growth. Should be >= GpuRedlineMB.
 	GpuHardlineMB int `yaml:"gpuHardlineMB"`
+
+	// SerializeInference, when true, allows at most one upstream inference
+	// handler to execute at a time across all local models. Default false
+	// preserves historical parallel behaviour.
+	SerializeInference bool `yaml:"serializeInference"`
 }
 
 func (p *PerformanceConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {

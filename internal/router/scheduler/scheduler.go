@@ -66,6 +66,8 @@ type Scheduler interface {
 	// swap waiters and queued requests). Process teardown is the baseRouter's
 	// responsibility.
 	OnShutdown(err error)
+	// InFlight returns the number of scheduler-tracked active requests for a model.
+	InFlight(modelID string) int
 }
 
 // Effects is implemented by the baseRouter. The scheduler calls back through it

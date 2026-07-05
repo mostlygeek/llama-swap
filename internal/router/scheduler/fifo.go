@@ -269,6 +269,13 @@ func (s *FIFO) OnShutdown(err error) {
 	}
 }
 
+// InFlight returns the current per-model in-flight request count. The scheduler
+// owns this state on the router run loop; callers must query it through that
+// same loop or otherwise know no concurrent scheduler mutation is happening.
+func (s *FIFO) InFlight(modelID string) int {
+	return s.inFlight[modelID]
+}
+
 // grantHandler hands the caller a tracked handler for modelID and, only if the
 // caller was still there to receive it, bumps the in-flight count. Incrementing
 // when the grant failed would strand the counter and block future evictions.

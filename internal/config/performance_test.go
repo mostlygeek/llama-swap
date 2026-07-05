@@ -19,6 +19,7 @@ models:
 
 	// When performance section is missing, defaults should be applied
 	assert.False(t, config.Performance.Disabled)
+	assert.False(t, config.Performance.SerializeInference)
 	assert.Equal(t, 5*time.Second, config.Performance.Every)
 }
 
@@ -27,6 +28,7 @@ func TestPerformanceConfig_CustomValues(t *testing.T) {
 performance:
   enable: true
   every: 30s
+  serializeInference: true
 models:
   model1:
     cmd: path/to/cmd --port ${PORT}
@@ -35,6 +37,7 @@ models:
 	assert.NoError(t, err)
 
 	assert.False(t, config.Performance.Disabled)
+	assert.True(t, config.Performance.SerializeInference)
 	assert.Equal(t, 30*time.Second, config.Performance.Every)
 }
 

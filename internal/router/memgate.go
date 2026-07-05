@@ -146,6 +146,11 @@ type memGate struct {
 	// admitted but not yet Released. They count toward every projection and
 	// their holders are never picked as eviction victims.
 	reservations map[string]int
+
+	// inFlight reports scheduler-owned per-model active request counts. Normal
+	// admission and red-line eviction skip models with in-flight requests;
+	// hard-line emergency eviction intentionally ignores it.
+	inFlight func(modelID string) int
 }
 
 // newMemGate returns a gate, or nil when it should be disabled (no budget or no
@@ -370,7 +375,7 @@ func (g *memGate) tryFit(
 	}
 
 	for projected > g.budgetMB || hostShort != "" {
-		victim, ok := g.pickLRUVictim(procs, excluded, false)
+		victim, ok := g.pickLRUVictim(procs, excluded, false, false)
 		if !ok {
 			detail := fmt.Sprintf("projected=%dMB > budget=%dMB with no evictable models", projected, g.budgetMB)
 			if hostShort != "" {
@@ -469,12 +474,14 @@ func (g *memGate) Release(modelID string) {
 
 // pickLRUVictim returns the resident (non-stopped) model with the oldest
 // LastUse() that is not excluded. When spareMRU is true the single
-// most-recently-used candidate is spared — the best available proxy for "the
-// model actively serving right now". ok is false when no candidate exists.
+// most-recently-used candidate is spared. Unless allowInFlight is true, models
+// with active scheduler-tracked requests are also excluded. ok is false when no
+// candidate exists.
 func (g *memGate) pickLRUVictim(
 	procs map[string]process.Process,
 	excluded map[string]struct{},
 	spareMRU bool,
+	allowInFlight bool,
 ) (string, bool) {
 	type candidate struct {
 		id      string
@@ -483,6 +490,9 @@ func (g *memGate) pickLRUVictim(
 	var candidates []candidate
 	for id, p := range procs {
 		if _, skip := excluded[id]; skip {
+			continue
+		}
+		if !allowInFlight && g.inFlight != nil && g.inFlight(id) > 0 {
 			continue
 		}
 		switch p.State() {

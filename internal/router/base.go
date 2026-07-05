@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -24,6 +25,11 @@ type unloadReq struct {
 	targets []string
 	timeout time.Duration
 	respond chan struct{}
+}
+
+type inFlightQuery struct {
+	modelID string
+	respond chan int
 }
 
 // baseRouter owns the channels, run-loop, and process machinery shared by every
@@ -58,14 +64,18 @@ type baseRouter struct {
 	procCtx    context.Context
 	procCancel context.CancelFunc
 
-	handlerCh   chan scheduler.HandlerReq
-	cancelCh    chan scheduler.HandlerReq
-	shutdownCh  chan shutdownReq
-	unloadCh    chan unloadReq
-	swapDoneCh  chan scheduler.SwapDone
-	serveDoneCh chan scheduler.ServeDoneEvent
+	handlerCh       chan scheduler.HandlerReq
+	cancelCh        chan scheduler.HandlerReq
+	shutdownCh      chan shutdownReq
+	unloadCh        chan unloadReq
+	swapDoneCh      chan scheduler.SwapDone
+	serveDoneCh     chan scheduler.ServeDoneEvent
+	inFlightQueryCh chan inFlightQuery
 
 	runDone chan struct{}
+
+	serializeGate *serializeGate
+	serializeSeq  atomic.Int64
 
 	// testProcessed, when non-nil, receives one event after each handlerReq
 	// or swapDone has been fully processed by run(). Tests use it to wait
@@ -86,22 +96,29 @@ func newBaseRouter(
 	shutdownCtx, shutdownFn := context.WithCancel(context.Background())
 	procCtx, procCancel := context.WithCancel(context.Background())
 	b := &baseRouter{
-		name:        name,
-		config:      conf,
-		processes:   processes,
-		logger:      logger,
-		memGate:     gate,
-		shutdownCtx: shutdownCtx,
-		shutdownFn:  shutdownFn,
-		procCtx:     procCtx,
-		procCancel:  procCancel,
-		handlerCh:   make(chan scheduler.HandlerReq),
-		cancelCh:    make(chan scheduler.HandlerReq),
-		shutdownCh:  make(chan shutdownReq),
-		unloadCh:    make(chan unloadReq),
-		swapDoneCh:  make(chan scheduler.SwapDone),
-		serveDoneCh: make(chan scheduler.ServeDoneEvent),
-		runDone:     make(chan struct{}),
+		name:            name,
+		config:          conf,
+		processes:       processes,
+		logger:          logger,
+		memGate:         gate,
+		shutdownCtx:     shutdownCtx,
+		shutdownFn:      shutdownFn,
+		procCtx:         procCtx,
+		procCancel:      procCancel,
+		handlerCh:       make(chan scheduler.HandlerReq),
+		cancelCh:        make(chan scheduler.HandlerReq),
+		shutdownCh:      make(chan shutdownReq),
+		unloadCh:        make(chan unloadReq),
+		swapDoneCh:      make(chan scheduler.SwapDone),
+		serveDoneCh:     make(chan scheduler.ServeDoneEvent),
+		inFlightQueryCh: make(chan inFlightQuery),
+		runDone:         make(chan struct{}),
+	}
+	if conf.Performance.SerializeInference {
+		b.serializeGate = newSerializeGate()
+	}
+	if b.memGate != nil {
+		b.memGate.inFlight = b.InFlight
 	}
 	sched, err := scheduler.New(conf, name, logger, planner, b)
 	if err != nil {
@@ -151,6 +168,9 @@ func (b *baseRouter) run() {
 
 		case ev := <-b.serveDoneCh:
 			b.schedule.OnServeDone(ev)
+
+		case q := <-b.inFlightQueryCh:
+			q.respond <- b.schedule.InFlight(q.modelID)
 		}
 	}
 }
@@ -249,7 +269,37 @@ func (b *baseRouter) trackedServe(modelID string, p process.Process) http.Handle
 			case <-b.shutdownCtx.Done():
 			}
 		}()
+
+		if b.serializeGate != nil {
+			priority := 0
+			if data, ok := shared.ReadContext(r.Context()); ok {
+				if p, err := strconv.Atoi(data.Metadata["fifo_priority"]); err == nil {
+					priority = p
+				}
+			}
+			release, ok := b.serializeGate.acquire(r.Context(), priority, b.serializeSeq.Add(1))
+			if !ok {
+				return
+			}
+			defer release()
+		}
+
 		p.ServeHTTP(w, r)
+	}
+}
+
+func (b *baseRouter) InFlight(modelID string) int {
+	respond := make(chan int, 1)
+	select {
+	case b.inFlightQueryCh <- inFlightQuery{modelID: modelID, respond: respond}:
+	case <-b.runDone:
+		return 0
+	}
+	select {
+	case n := <-respond:
+		return n
+	case <-b.runDone:
+		return 0
 	}
 }
 
