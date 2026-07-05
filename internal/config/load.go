@@ -440,10 +440,3 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 
 	return config, nil
 }
-
-func validateStorePath(path string) error {
-	if strings.TrimSpace(path) == "" {
-		return fmt.Errorf("store.path must not be empty")
-	}
-	return nil
-}
