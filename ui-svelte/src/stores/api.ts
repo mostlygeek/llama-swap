@@ -118,12 +118,6 @@ export function handleAPIEventMessage(data: string): void {
       break;
     }
 
-    case "metrics": {
-      // Backward-compatible activity invalidation for older servers.
-      activityRevision.update((n) => n + 1);
-      break;
-    }
-
     case "activity": {
       activityRevision.update((n) => n + 1);
       break;

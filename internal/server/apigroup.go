@@ -91,26 +91,6 @@ func (s *Server) handleAPIUnloadModel(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("OK"))
 }
 
-// handleAPIMetrics serves the activity log as a JSON array.
-func (s *Server) handleAPIMetrics(w http.ResponseWriter, r *http.Request) {
-	limit, err := parseActivityLimit(strings.TrimSpace(r.URL.Query().Get("limit")), 100)
-	if err != nil {
-		shared.SendResponse(w, r, http.StatusBadRequest, err.Error())
-		return
-	}
-	page, err := s.store.ListActivity(r.Context(), store.ActivityQuery{
-		Limit: limit,
-		Page:  1,
-	})
-	if err != nil {
-		shared.SendResponse(w, r, http.StatusInternalServerError, "failed to get metrics")
-		return
-	}
-	s.metrics.overlayCaptureState(page.Data)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(page.Data)
-}
-
 // handleAPIActivity serves paginated activity table rows.
 func (s *Server) handleAPIActivity(w http.ResponseWriter, r *http.Request) {
 	query, err := parseActivityQuery(r)
@@ -141,10 +121,7 @@ func (s *Server) handleAPIActivityStats(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(stats)
 }
 
-func parseActivityLimit(raw string, defaultLimit int) (int, error) {
-	if raw == "" {
-		return defaultLimit, nil
-	}
+func parseActivityLimit(raw string) (int, error) {
 	limit, err := strconv.Atoi(raw)
 	if err != nil {
 		return 0, fmt.Errorf("invalid limit")
@@ -164,7 +141,7 @@ func parseActivityQuery(r *http.Request) (store.ActivityQuery, error) {
 	}
 
 	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
-		limit, err := parseActivityLimit(raw, defaultLimit)
+		limit, err := parseActivityLimit(raw)
 		if err != nil {
 			return store.ActivityQuery{}, err
 		}
@@ -292,7 +269,6 @@ type messageType string
 const (
 	msgTypeModelStatus messageType = "modelStatus"
 	msgTypeLogData     messageType = "logData"
-	msgTypeMetrics     messageType = "metrics"
 	msgTypeActivity    messageType = "activity"
 	msgTypeInFlight    messageType = "inflight"
 )

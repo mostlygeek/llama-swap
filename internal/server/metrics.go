@@ -60,8 +60,14 @@ func newMetricsMonitor(logger *logmon.Monitor, maxMetrics int, captureBufferMB i
 	return mm
 }
 
-// queueMetrics persists a metric and returns the store-assigned row.
-func (mp *metricsMonitor) queueMetrics(ctx context.Context, metric ActivityLogEntry) (ActivityLogEntry, bool) {
+// queueMetrics persists a metric and returns the store-assigned row. It
+// deliberately does not take the request context: record runs after the
+// handler returns, and an aborted request (canceled context) must still be
+// recorded — that is exactly when the error entry matters.
+func (mp *metricsMonitor) queueMetrics(metric ActivityLogEntry) (ActivityLogEntry, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	stored, err := mp.store.InsertActivity(ctx, metric)
 	if err != nil {
 		mp.warnf("failed to persist activity metric: %v", err)
@@ -126,7 +132,7 @@ func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *resp
 	}
 
 	queueAndEmit := func() {
-		stored, ok := mp.queueMetrics(r.Context(), tm)
+		stored, ok := mp.queueMetrics(tm)
 		if !ok {
 			return
 		}
@@ -138,7 +144,7 @@ func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *resp
 		mp.logger.Warnf("non-200 response, recording partial metrics: status=%d, path=%s", recorder.Status(), r.URL.Path)
 		decoded, decErr := mp.decodeResponseBody(recorder, r.URL.Path)
 		tm.ErrorMsg = failedErrorMessage(recorder.Status(), decoded, decErr)
-		stored, ok := mp.queueMetrics(r.Context(), tm)
+		stored, ok := mp.queueMetrics(tm)
 		if !ok {
 			return
 		}
@@ -199,7 +205,7 @@ func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *resp
 		mp.logger.Warnf("metrics: invalid JSON in response body path=%s, recording minimal metrics", r.URL.Path)
 	}
 
-	stored, ok := mp.queueMetrics(r.Context(), tm)
+	stored, ok := mp.queueMetrics(tm)
 	if !ok {
 		return
 	}

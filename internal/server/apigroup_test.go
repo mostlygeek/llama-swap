@@ -181,17 +181,21 @@ func TestServer_APIVersion(t *testing.T) {
 	}
 }
 
-func TestServer_APIMetrics_Empty(t *testing.T) {
+func TestServer_APIMetricsActivity_Empty(t *testing.T) {
 	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
 
 	w := httptest.NewRecorder()
-	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/metrics", nil))
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/metrics/activity", nil))
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d", w.Code)
 	}
-	if body := strings.TrimSpace(w.Body.String()); body != "[]" {
-		t.Errorf("body = %q, want []", body)
+	var page store.ActivityPage
+	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if page.Total != 0 || len(page.Data) != 0 {
+		t.Errorf("page = %+v, want empty", page)
 	}
 }
 
@@ -200,7 +204,7 @@ func TestServer_APIMetricsActivity(t *testing.T) {
 	s.metrics.enableCaptures = true
 	s.metrics.captureCache = cache.New(1024 * 1024)
 
-	storedM1, ok := s.metrics.queueMetrics(context.Background(), ActivityLogEntry{
+	storedM1, ok := s.metrics.queueMetrics(ActivityLogEntry{
 		Timestamp: time.Unix(1, 0),
 		Model:     "m1",
 		ReqPath:   "/v1/chat/completions",
@@ -212,7 +216,7 @@ func TestServer_APIMetricsActivity(t *testing.T) {
 	if ok := s.metrics.addCapture(ReqRespCapture{ID: storedM1.ID, ReqPath: "/v1/chat/completions"}); !ok {
 		t.Fatal("addCapture failed")
 	}
-	if _, ok := s.metrics.queueMetrics(context.Background(), ActivityLogEntry{
+	if _, ok := s.metrics.queueMetrics(ActivityLogEntry{
 		Timestamp: time.Unix(2, 0),
 		Model:     "m2",
 		ReqPath:   "/v1/chat/completions",
@@ -245,7 +249,7 @@ func TestServer_APIMetricsStats(t *testing.T) {
 		{Timestamp: time.Unix(2, 0), Model: "m1", Tokens: TokenMetrics{InputTokens: 3, OutputTokens: 4, PromptPerSecond: 30, TokensPerSecond: 40}},
 		{Timestamp: time.Unix(3, 0), Model: "m2", Tokens: TokenMetrics{InputTokens: 5, OutputTokens: 6, PromptPerSecond: 50}},
 	} {
-		if _, ok := s.metrics.queueMetrics(context.Background(), entry); !ok {
+		if _, ok := s.metrics.queueMetrics(entry); !ok {
 			t.Fatal("queueMetrics failed")
 		}
 	}

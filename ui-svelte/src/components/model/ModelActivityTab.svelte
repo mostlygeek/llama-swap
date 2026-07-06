@@ -22,12 +22,19 @@
   let total = $state(0);
   let totalPages = $state(0);
   let requestID = 0;
+  let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastRefresh = 0;
 
   let modelInflightRequests = $derived(
     $inflightRequestEntries.filter((request) => request.model === modelId)
   );
 
   async function refreshActivity() {
+    if (refreshTimer !== null) {
+      clearTimeout(refreshTimer);
+      refreshTimer = null;
+    }
+    lastRefresh = Date.now();
     const id = ++requestID;
     try {
       const activity = await getActivity({ model: modelId, page, limit, sort, order });
@@ -56,9 +63,21 @@
     page = 1;
   }
 
+  // scheduleRefresh throttles SSE-driven refreshes to one per second; a
+  // user-driven refreshActivity cancels any pending timer.
+  function scheduleRefresh() {
+    if (refreshTimer !== null) return;
+    const wait = Math.max(0, 1000 - (Date.now() - lastRefresh));
+    refreshTimer = setTimeout(() => {
+      refreshTimer = null;
+      refreshActivity();
+    }, wait);
+  }
+
+  // Refresh immediately on connect and when the user changes the model or
+  // paging/sorting.
   $effect(() => {
     if ($connectionState !== "connected") return;
-    $activityRevision;
     modelId;
     page;
     limit;
@@ -67,6 +86,26 @@
     untrack(() => {
       refreshActivity();
     });
+  });
+
+  // New activity only changes what page 1 shows; skip SSE-driven refreshes
+  // while browsing older pages. seenRevision keeps the effect's initial run
+  // (and re-runs from other deps) from scheduling a redundant fetch.
+  let seenRevision = $activityRevision;
+  $effect(() => {
+    if ($connectionState !== "connected") return;
+    const revision = $activityRevision;
+    untrack(() => {
+      if (revision === seenRevision) return;
+      seenRevision = revision;
+      if (page === 1) scheduleRefresh();
+    });
+  });
+
+  $effect(() => {
+    return () => {
+      if (refreshTimer !== null) clearTimeout(refreshTimer);
+    };
   });
 </script>
 

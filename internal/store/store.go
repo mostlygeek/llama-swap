@@ -281,11 +281,7 @@ func (s *Store) ActivityStats(ctx context.Context, query ActivityStatsQuery) (Ac
 		return ActivityStats{}, fmt.Errorf("activity stats: %w", err)
 	}
 
-	promptValues, err := s.metricValues(ctx, where, args, "prompt_per_second")
-	if err != nil {
-		return ActivityStats{}, err
-	}
-	genValues, err := s.metricValues(ctx, where, args, "tokens_per_second")
+	promptValues, genValues, err := s.speedValues(ctx, where, args)
 	if err != nil {
 		return ActivityStats{}, err
 	}
@@ -294,46 +290,50 @@ func (s *Store) ActivityStats(ctx context.Context, query ActivityStatsQuery) (Ac
 	return stats, nil
 }
 
-func (s *Store) metricValues(ctx context.Context, where string, args []any, column string) ([]float64, error) {
+// speedValues reads both histogram source columns in a single scan. Zero
+// values mean the speed was not reported and are excluded per column. No
+// ORDER BY: calculateHistogramData sorts the values itself.
+func (s *Store) speedValues(ctx context.Context, where string, args []any) (prompt, gen []float64, err error) {
 	filter := where
 	if filter == "" {
-		filter = ` WHERE ` + column + ` > 0`
+		filter = ` WHERE prompt_per_second > 0 OR tokens_per_second > 0`
 	} else {
-		filter += ` AND ` + column + ` > 0`
+		filter += ` AND (prompt_per_second > 0 OR tokens_per_second > 0)`
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+column+` FROM activity`+filter+` ORDER BY `+column, args...)
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT prompt_per_second, tokens_per_second FROM activity`+filter, args...)
 	if err != nil {
-		return nil, fmt.Errorf("activity %s histogram: %w", column, err)
+		return nil, nil, fmt.Errorf("activity histogram: %w", err)
 	}
 	defer rows.Close()
 
-	var values []float64
 	for rows.Next() {
-		var value float64
-		if err := rows.Scan(&value); err != nil {
-			return nil, fmt.Errorf("activity %s histogram row: %w", column, err)
+		var promptValue, genValue float64
+		if err := rows.Scan(&promptValue, &genValue); err != nil {
+			return nil, nil, fmt.Errorf("activity histogram row: %w", err)
 		}
-		values = append(values, value)
+		if promptValue > 0 {
+			prompt = append(prompt, promptValue)
+		}
+		if genValue > 0 {
+			gen = append(gen, genValue)
+		}
 	}
-	return values, rows.Err()
+	return prompt, gen, rows.Err()
 }
 
 func (s *Store) PruneActivity(ctx context.Context, maxRows int) error {
 	if maxRows <= 0 {
 		return nil
 	}
-	var count int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM activity`).Scan(&count); err != nil {
-		return fmt.Errorf("prune activity count: %w", err)
-	}
-	if count <= maxRows {
-		return nil
-	}
-	var cutoffID int64
-	if err := s.db.QueryRowContext(ctx, `SELECT id FROM activity ORDER BY id DESC LIMIT 1 OFFSET ?`, maxRows).Scan(&cutoffID); err != nil {
-		return fmt.Errorf("prune activity cutoff: %w", err)
-	}
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM activity WHERE id <= ?`, cutoffID); err != nil {
+	// AUTOINCREMENT ids are monotonic and never reused, so the rows beyond
+	// the newest maxRows are exactly those with id <= MAX(id) - maxRows.
+	// One statement keeps the per-insert prune cheap; if ids ever become
+	// sparse this retains fewer than maxRows rows, which is fine for a
+	// bounded recent-activity cap.
+	if _, err := s.db.ExecContext(ctx,
+		`DELETE FROM activity WHERE id <= (SELECT MAX(id) FROM activity) - ?`, maxRows,
+	); err != nil {
 		return fmt.Errorf("prune activity: %w", err)
 	}
 	return nil
