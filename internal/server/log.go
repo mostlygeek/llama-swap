@@ -76,7 +76,7 @@ func (s *Server) getLogger(logMonitorID string) (*logmon.Monitor, error) {
 	case "upstream":
 		return s.upstreamlog, nil
 	default:
-		if _, modelID, _, found := findModelInPath(s.cfg, "/"+logMonitorID); found {
+		if _, modelID, _, found := shared.FindModelInPath(s.cfg, "/"+logMonitorID); found {
 			if log, ok := s.local.ProcessLogger(modelID); ok {
 				return log, nil
 			}

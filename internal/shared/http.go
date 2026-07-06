@@ -26,6 +26,9 @@ type ReqContextData struct {
 	ModelID          string
 	Streaming        bool
 	SendLoadingState bool
+	// Metadata is a request-scoped key/value bag that handlers may mutate
+	// while processing. The metrics middleware copies it into ActivityLogEntry.
+	Metadata map[string]string
 }
 
 var (
@@ -88,14 +91,22 @@ func SendResponse(w http.ResponseWriter, r *http.Request, status int, message st
 	w.Write(resp)
 }
 
-// FetchContext will attempt to get the model id from the context then
-// from the model body. If it extracts the model from the body it will
-// store the model in the context for downstream handlers. An error
-// will be returned when model can not be fetch from either location.
+// FetchContext will attempt to get the model id from the context, then
+// from an /upstream/<model> path prefix, then from the request body/query.
+// If it extracts the model it will store it in the context for downstream
+// handlers. An error will be returned when a model cannot be identified.
 func FetchContext(r *http.Request, cfg config.Config) (ReqContextData, error) {
 	data, ok := ReadContext(r.Context())
 	if ok {
 		return data, nil
+	}
+
+	if strings.HasPrefix(r.URL.Path, "/upstream/") {
+		if data, ok := extractUpstreamContext(r, cfg); ok {
+			*r = *r.WithContext(SetContext(r.Context(), data))
+			return data, nil
+		}
+		return ReqContextData{}, ErrNoModelInContext
 	}
 
 	if data, err := extractContext(r); err == nil && data.Model != "" {
@@ -114,6 +125,59 @@ func FetchContext(r *http.Request, cfg config.Config) (ReqContextData, error) {
 	return ReqContextData{}, ErrNoModelInContext
 }
 
+// extractUpstreamContext resolves the model from an /upstream/<model>/... path.
+func extractUpstreamContext(r *http.Request, cfg config.Config) (ReqContextData, bool) {
+	searchName, realName, _, found := FindModelInPath(cfg, strings.TrimPrefix(r.URL.Path, "/upstream"))
+	if !found {
+		return ReqContextData{}, false
+	}
+	return ReqContextData{
+		Model:            searchName,
+		ModelID:          realName,
+		ApiKey:           ExtractAPIKey(r),
+		Streaming:        r.URL.Query().Get("stream") == "true",
+		SendLoadingState: sendLoadingState(cfg, realName),
+		Metadata:         make(map[string]string),
+	}, true
+}
+
+// sendLoadingState reports whether the configured model wants loading-state SSEs.
+func sendLoadingState(cfg config.Config, modelID string) bool {
+	if mc, ok := cfg.Models[modelID]; ok {
+		return mc.SendLoadingState != nil && *mc.SendLoadingState
+	}
+	return false
+}
+
+// FindModelInPath walks a slash-separated path, building up segments until one
+// matches a configured model. This resolves model names that contain slashes
+// (e.g. "author/model"). Returns the matched name, its real model ID, the
+// remaining path, and whether a match was found.
+func FindModelInPath(cfg config.Config, path string) (searchName, realName, remainingPath string, found bool) {
+	parts := strings.Split(strings.TrimSpace(path), "/")
+	name := ""
+
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		if name == "" {
+			name = part
+		} else {
+			name = name + "/" + part
+		}
+
+		if modelID, ok := cfg.RealModelName(name); ok {
+			searchName = name
+			realName = modelID
+			remainingPath = "/" + strings.Join(parts[i+1:], "/")
+			found = true
+		}
+	}
+
+	return
+}
+
 func SetContext(ctx context.Context, data ReqContextData) context.Context {
 	return context.WithValue(ctx, ReqContextKey, data)
 }
@@ -121,6 +185,25 @@ func SetContext(ctx context.Context, data ReqContextData) context.Context {
 func ReadContext(ctx context.Context) (ReqContextData, bool) {
 	data, ok := ctx.Value(ReqContextKey).(ReqContextData)
 	return data, ok
+}
+
+// SetReqData attaches a key/value pair to the request context's metadata map.
+// The metadata map must already exist in the context's ReqContextData; callers
+// should ensure FetchContext has run or initialize the map themselves.
+// It returns an error for nil contexts or contexts without request data.
+func SetReqData(ctx context.Context, key, value string) error {
+	if ctx == nil {
+		return fmt.Errorf("cannot set request metadata on nil context")
+	}
+	data, ok := ReadContext(ctx)
+	if !ok {
+		return fmt.Errorf("no request context data found")
+	}
+	if data.Metadata == nil {
+		return fmt.Errorf("no metadata map in request context")
+	}
+	data.Metadata[key] = value
+	return nil
 }
 
 // extractContext pulls fields from an HTTP request into a ReqContextData,
@@ -139,6 +222,7 @@ func extractContext(r *http.Request) (ReqContextData, error) {
 			Model:     q.Get("model"),
 			Streaming: q.Get("stream") == "true",
 			ApiKey:    apiKey,
+			Metadata:  make(map[string]string),
 		}, nil
 	}
 
@@ -157,6 +241,7 @@ func extractContext(r *http.Request) (ReqContextData, error) {
 			Model:     gjson.GetBytes(bodyBytes, "model").String(),
 			Streaming: gjson.GetBytes(bodyBytes, "stream").Bool(),
 			ApiKey:    apiKey,
+			Metadata:  make(map[string]string),
 		}, nil
 	}
 
@@ -178,6 +263,7 @@ func extractContext(r *http.Request) (ReqContextData, error) {
 		Model:     r.FormValue("model"),
 		Streaming: r.FormValue("stream") == "true",
 		ApiKey:    apiKey,
+		Metadata:  make(map[string]string),
 	}, nil
 }
 

@@ -33,15 +33,16 @@ type TokenMetrics struct {
 
 // ActivityLogEntry represents parsed token statistics from llama-server logs.
 type ActivityLogEntry struct {
-	ID              int          `json:"id"`
-	Timestamp       time.Time    `json:"timestamp"`
-	Model           string       `json:"model"`
-	ReqPath         string       `json:"req_path"`
-	RespContentType string       `json:"resp_content_type"`
-	RespStatusCode  int          `json:"resp_status_code"`
-	Tokens          TokenMetrics `json:"tokens"`
-	DurationMs      int          `json:"duration_ms"`
-	HasCapture      bool         `json:"has_capture"`
+	ID              int               `json:"id"`
+	Timestamp       time.Time         `json:"timestamp"`
+	Model           string            `json:"model"`
+	ReqPath         string            `json:"req_path"`
+	RespContentType string            `json:"resp_content_type"`
+	RespStatusCode  int               `json:"resp_status_code"`
+	Tokens          TokenMetrics      `json:"tokens"`
+	DurationMs      int               `json:"duration_ms"`
+	HasCapture      bool              `json:"has_capture"`
+	Metadata        map[string]string `json:"metadata,omitempty"`
 }
 
 // ActivityLogEvent carries a single activity log entry to event subscribers.
@@ -133,6 +134,13 @@ func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *resp
 		RespContentType: recorder.Header().Get("Content-Type"),
 		RespStatusCode:  recorder.Status(),
 		DurationMs:      int(time.Since(recorder.StartTime()).Milliseconds()),
+	}
+
+	if ctxData, ok := shared.ReadContext(r.Context()); ok && len(ctxData.Metadata) > 0 {
+		tm.Metadata = make(map[string]string, len(ctxData.Metadata))
+		for k, v := range ctxData.Metadata {
+			tm.Metadata[k] = v
+		}
 	}
 
 	queueAndEmit := func() {

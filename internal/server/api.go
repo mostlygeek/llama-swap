@@ -271,7 +271,7 @@ func (s *Server) startPreload() {
 			if err != nil {
 				continue
 			}
-			req = req.WithContext(shared.SetContext(req.Context(), shared.ReqContextData{Model: modelID, ModelID: modelID}))
+			req = req.WithContext(shared.SetContext(req.Context(), shared.ReqContextData{Model: modelID, ModelID: modelID, Metadata: make(map[string]string)}))
 
 			dw := &discardResponseWriter{status: http.StatusOK}
 			s.local.ServeHTTP(dw, req)
@@ -314,7 +314,7 @@ func handleUpstreamRedirect(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleUpstream(w http.ResponseWriter, r *http.Request) {
 	upstreamPath := r.PathValue("upstreamPath")
 
-	searchName, modelID, remainingPath, found := findModelInPath(s.cfg, "/"+upstreamPath)
+	searchName, modelID, remainingPath, found := shared.FindModelInPath(s.cfg, "/"+upstreamPath)
 	if !found {
 		shared.SendResponse(w, r, http.StatusNotFound, "model not found")
 		return
@@ -338,7 +338,7 @@ func (s *Server) handleUpstream(w http.ResponseWriter, r *http.Request) {
 	// Strip the /upstream/<model> prefix before forwarding.
 	r.URL.Path = remainingPath
 	// Pin the resolved model so the router skips body/query extraction.
-	*r = *r.WithContext(shared.SetContext(r.Context(), shared.ReqContextData{Model: searchName, ModelID: modelID}))
+	*r = *r.WithContext(shared.SetContext(r.Context(), shared.ReqContextData{Model: searchName, ModelID: modelID, Metadata: make(map[string]string)}))
 
 	switch {
 	case s.local.Handles(modelID):
@@ -348,30 +348,4 @@ func (s *Server) handleUpstream(w http.ResponseWriter, r *http.Request) {
 	default:
 		shared.SendResponse(w, r, http.StatusNotFound, "no router for model "+modelID)
 	}
-}
-
-// findModelInPath walks a slash-separated path, building up segments until one
-// matches a configured model. This resolves model names that contain slashes
-// (e.g. "author/model"). Returns the matched name, its real model ID, the
-// remaining path, and whether a match was found.
-func findModelInPath(cfg config.Config, path string) (searchName, realName, remainingPath string, found bool) {
-	parts := strings.Split(strings.TrimSpace(path), "/")
-	name := ""
-
-	for i, part := range parts {
-		if part == "" {
-			continue
-		}
-		if name == "" {
-			name = part
-		} else {
-			name = name + "/" + part
-		}
-
-		if modelID, ok := cfg.RealModelName(name); ok {
-			return name, modelID, "/" + strings.Join(parts[i+1:], "/"), true
-		}
-	}
-
-	return "", "", "", false
 }

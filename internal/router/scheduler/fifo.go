@@ -3,6 +3,7 @@ package scheduler
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
@@ -278,6 +279,11 @@ func (s *FIFO) grantHandler(req HandlerReq, modelID string) {
 		s.effects.GrantError(req, shared.ConcurrencyLimitError{})
 		return
 	}
+
+	if err := shared.SetReqData(req.Ctx, "fifo_priority", strconv.Itoa(s.cfg.Priority[req.Model])); err != nil {
+		s.logger.Debugf("failed to set fifo_priority metadata: %v", err)
+	}
+
 	if s.effects.GrantServe(req, modelID) {
 		s.inFlight[modelID]++
 	}
