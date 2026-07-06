@@ -13,3 +13,5 @@ dist/
 internal/server/ui_dist/*
 config.yaml
 .claude/
+turistation_config.yaml
+turiserver_config.yaml
