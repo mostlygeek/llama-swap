@@ -291,4 +291,6 @@ For Python based inference servers like vllm or tabbyAPI it is recommended to ru
 > [!NOTE]
 > Thank you to everyone who has given this project a ⭐️!
 
-[![Star History Chart](https://api.star-history.com/svg?repos=mostlygeek/llama-swap&type=Date)](https://www.star-history.com/#mostlygeek/llama-swap&Date)
+## Star History
+
+[![Star History Chart](https://api.star-history.com/chart?repos=mostlygeek/llama-swap&type=date&legend=top-left&sealed_token=11p0VYUat56nvRhCW_s8Zn9FRLBzIWoWDuQ10v9_n1tBppiwL7qFSVf4CE8dy6rhMQ466jt1buCCzUvitO7prlGn4JbHr1B6JCJKE2B4n8ffDVBnwJ78Tg)](https://www.star-history.com/?repos=mostlygeek%2Fllama-swap&type=date&legend=top-left)
