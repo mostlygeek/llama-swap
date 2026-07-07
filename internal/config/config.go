@@ -156,6 +156,11 @@ type Config struct {
 	// support remote peers, see issue #433, #296
 	Peers PeerDictionaryConfig `yaml:"peers"`
 
+	// load-balanced pools: one externally-visible name backed by N member
+	// model instances on different GPUs. Requests addressed to the pool's
+	// name are fanned out across the members.
+	Pools map[string]PoolConfig `yaml:"pools"`
+
 	// upstream controls behaviour of the /upstream passthrough endpoint
 	Upstream UpstreamConfig `yaml:"upstream"`
 }
@@ -197,6 +202,15 @@ func (c *Config) RealModelName(search string) (string, bool) {
 	} else {
 		return "", false
 	}
+}
+
+// PoolMembers returns the configured members of a pool. ok is false when
+// search is not a pool name.
+func (c *Config) PoolMembers(search string) ([]string, bool) {
+	if pool, found := c.Pools[search]; found {
+		return pool.Members, true
+	}
+	return nil, false
 }
 
 func (c *Config) FindConfig(modelName string) (ModelConfig, string, bool) {

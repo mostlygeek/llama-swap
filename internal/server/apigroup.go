@@ -74,9 +74,16 @@ func (s *Server) handleAPIUnloadAll(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"msg": "ok"})
 }
 
-// handleAPIUnloadModel stops a single named local process.
+// handleAPIUnloadModel stops a single named local process. A pool name
+// unloads every member of the pool.
 func (s *Server) handleAPIUnloadModel(w http.ResponseWriter, r *http.Request) {
 	requested := strings.TrimPrefix(r.PathValue("model"), "/")
+	if members, ok := s.cfg.PoolMembers(requested); ok {
+		s.local.Unload(apiUnloadTimeout, members...)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+		return
+	}
 	realName, found := s.cfg.RealModelName(requested)
 	if !found {
 		shared.SendResponse(w, r, http.StatusNotFound, "model not found")

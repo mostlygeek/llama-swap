@@ -376,7 +376,9 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		}
 	}
 
-	// Clean up hooks preload
+	// Clean up hooks preload. A pool name expands to its first member so the
+	// pool starts with one warm instance; further members are warmed by
+	// spillover on demand.
 	if len(config.Hooks.OnStartup.Preload) > 0 {
 		var toPreload []string
 		for _, modelID := range config.Hooks.OnStartup.Preload {
@@ -386,6 +388,8 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			}
 			if real, found := config.RealModelName(modelID); found {
 				toPreload = append(toPreload, real)
+			} else if pool, found := config.Pools[modelID]; found && len(pool.Members) > 0 {
+				toPreload = append(toPreload, pool.Members[0])
 			}
 		}
 		config.Hooks.OnStartup.Preload = toPreload
@@ -436,6 +440,75 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			}
 		}
 		config.Peers[peerName] = peerConfig
+	}
+
+	// Validate pools: name must not collide with a model ID or an alias, every
+	// member must reference a real (non-pool) model ID, and a member must
+	// belong to at most one pool. Pool-to-pool nesting is rejected.
+	for poolID, poolCfg := range config.Pools {
+		if err := poolCfg.Validate(poolID); err != nil {
+			return Config{}, err
+		}
+		if _, exists := config.Models[poolID]; exists {
+			return Config{}, fmt.Errorf("pool %q: name conflicts with an existing model ID", poolID)
+		}
+		if _, exists := config.aliases[poolID]; exists {
+			return Config{}, fmt.Errorf("pool %q: name conflicts with an existing model alias", poolID)
+		}
+		for _, member := range poolCfg.Members {
+			if _, exists := config.Models[member]; !exists {
+				return Config{}, fmt.Errorf("pool %q: member %q is not a configured model", poolID, member)
+			}
+			if _, exists := config.Pools[member]; exists {
+				return Config{}, fmt.Errorf("pool %q: member %q is itself a pool (nesting not supported)", poolID, member)
+			}
+			// Request filters resolve against the requested model name, which
+			// on the pool path is the pool name - a member's filters would be
+			// silently bypassed. Reject rather than surprise.
+			mc := config.Models[member]
+			if mc.Filters.StripParams != "" || len(mc.Filters.SetParams) > 0 || len(mc.Filters.SetParamsByID) > 0 || mc.UseModelName != "" {
+				return Config{}, fmt.Errorf("pool %q: member %q defines filters/useModelName, which are not applied to requests addressed to the pool name; remove them or use the member directly", poolID, member)
+			}
+		}
+	}
+	memberOwner := make(map[string]string)
+	for poolID, poolCfg := range config.Pools {
+		for _, member := range poolCfg.Members {
+			if owner, taken := memberOwner[member]; taken {
+				return Config{}, fmt.Errorf("model %q is a member of multiple pools: %q and %q", member, owner, poolID)
+			}
+			memberOwner[member] = poolID
+		}
+	}
+
+	// Pool members must be able to coexist: all members of a pool must share
+	// one routing group with swap disabled. Otherwise spilling to a cold
+	// member evicts the warm sibling (the default group is swap:true) and the
+	// pool silently degrades to serial evict/reload thrashing.
+	if config.Matrix == nil && len(config.Pools) > 0 {
+		groupOf := make(map[string]string, len(config.Models))
+		for groupID, groupConfig := range config.Groups {
+			for _, member := range groupConfig.Members {
+				groupOf[member] = groupID
+			}
+		}
+		for poolID, poolCfg := range config.Pools {
+			firstGroup := ""
+			for i, member := range poolCfg.Members {
+				gid, found := groupOf[member]
+				if !found {
+					return Config{}, fmt.Errorf("pool %q: member %q is not in any group", poolID, member)
+				}
+				if config.Groups[gid].Swap {
+					return Config{}, fmt.Errorf("pool %q: member %q is in group %q which has swap: true; pool members must share a group with swap: false so they can run concurrently", poolID, member, gid)
+				}
+				if i == 0 {
+					firstGroup = gid
+				} else if gid != firstGroup {
+					return Config{}, fmt.Errorf("pool %q: members span groups %q and %q; all members of a pool must share one group", poolID, firstGroup, gid)
+				}
+			}
+		}
 	}
 
 	return config, nil

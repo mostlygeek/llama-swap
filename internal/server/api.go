@@ -190,6 +190,39 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Pools surface as one entry per pool name. The display metadata is taken
+	// from the first member that has it set, so the user sees a coherent
+	// listing without having to repeat name/description on every member.
+	for poolID, poolCfg := range s.cfg.Pools {
+		var name, desc string
+		var meta map[string]any
+		var caps config.ModelCapConfig
+		poolStatus := "unloaded"
+		for _, member := range poolCfg.Members {
+			mc, ok := s.cfg.Models[member]
+			if !ok {
+				continue
+			}
+			if name == "" {
+				name = mc.Name
+			}
+			if desc == "" {
+				desc = mc.Description
+			}
+			if meta == nil && len(mc.Metadata) > 0 {
+				meta = mc.Metadata
+			}
+			if caps.Empty() {
+				caps = mc.Capabilities
+			}
+			// the pool counts as loaded when any member is
+			if modelStatus(member) == "loaded" {
+				poolStatus = "loaded"
+			}
+		}
+		data = append(data, newRecord(poolID, name, desc, meta, caps, poolStatus))
+	}
+
 	sort.Slice(data, func(i, j int) bool { return data[i].ID < data[j].ID })
 
 	// Echo the Origin so browser clients can read the listing.

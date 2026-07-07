@@ -38,6 +38,8 @@ type Server struct {
 	local router.LocalRouter
 	peer  router.Router
 
+	picker *poolPicker
+
 	mux     *http.ServeMux
 	handler http.Handler
 
@@ -159,6 +161,7 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 		build:       build,
 		local:       local,
 		peer:        peer,
+		picker:      newPoolPicker(cfg),
 		shutdownCtx: shutdownCtx,
 		shutdownFn:  shutdownFn,
 	}
@@ -168,7 +171,11 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 }
 
 // localPeerHandler dispatches a model-routed request to the local or peer
-// router. The model is resolved once via shared.FetchContext.
+// router. The model is resolved once via shared.FetchContext. When the
+// requested name is a load-balanced pool, this handler rewrites the routing
+// key (data.ModelID) to a picked member before dispatch; the original
+// data.Model is kept so downstream filters and the upstream response continue
+// to see the name the client asked for.
 func (s *Server) localPeerHandler(w http.ResponseWriter, r *http.Request) {
 	stripVersionPrefix(r)
 
@@ -176,6 +183,34 @@ func (s *Server) localPeerHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		shared.SendError(w, r, shared.ErrNoModelInContext)
 		return
+	}
+
+	if member, ok := s.picker.Pick(data.Model, s.local.RunningModels()); ok {
+		// Pick reserved an in-flight slot on member; release it when done.
+		s.proxylog.Debugf("dispatch: pool %s -> member %s", data.Model, member)
+		data.ModelID = member
+		// FetchContext could not resolve the pool name to a model config, so
+		// carry the picked member's loading-state setting into the context.
+		if mc, exists := s.cfg.Models[member]; exists {
+			data.SendLoadingState = mc.SendLoadingState != nil && *mc.SendLoadingState
+		}
+		*r = *r.WithContext(shared.SetContext(r.Context(), data))
+		defer s.picker.Release(data.Model, member)
+
+		// Watch the response status so a member that cannot start (e.g. its
+		// GPU is occupied) is quarantined instead of re-picked immediately.
+		sr := &statusRecorder{ResponseWriter: w}
+		w = sr
+		defer func() {
+			if sr.status >= http.StatusInternalServerError {
+				s.picker.NoteFailure(data.Model, member)
+			}
+		}()
+	} else if pool, isMember := s.picker.MemberPool(data.ModelID); isMember {
+		// Direct request to a member's own ID: count it so pool balancing
+		// sees the load.
+		s.picker.Acquire(pool, data.ModelID)
+		defer s.picker.Release(pool, data.ModelID)
 	}
 
 	switch {
