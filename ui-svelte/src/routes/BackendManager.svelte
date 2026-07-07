@@ -13,6 +13,10 @@
   let backends = $state<BackendEntry[]>([]);
   let loadingBackends = $state(false);
 
+  let adoptingBackend = $state<string | null>(null);
+  let adoptRepo = $state("");
+  let adoptBranch = $state("main");
+
   async function doBuild() {
     if (!repo.trim() || !backendName.trim()) return;
     building = true;
@@ -40,9 +44,29 @@
   }
 
   async function doUpdateBackend(be: BackendEntry) {
-    const label = `${shortRepo(be.repo || "")}@${be.branch || "main"}`;
+    if (!be.repo) {
+      adoptingBackend = be.name;
+      adoptRepo = "";
+      adoptBranch = "main";
+      return;
+    }
+    const label = `${shortRepo(be.repo)}@${be.branch || "main"}`;
     if (!confirm(`Rebuild "${be.name}" from ${label}? The existing backend will be replaced.`)) return;
     const task = await updateBackend(be.name);
+    if (!task) return;
+    trackBuild(task);
+    await refreshBackends();
+  }
+
+  function cancelAdopt() {
+    adoptingBackend = null;
+  }
+
+  async function confirmAdopt(name: string) {
+    if (!adoptRepo.trim()) return;
+    if (!confirm(`Rebuild "${name}" from ${adoptRepo.trim()}@${adoptBranch.trim() || "main"}? The existing backend will be replaced.`)) return;
+    const task = await updateBackend(name, adoptRepo.trim(), adoptBranch.trim() || "main");
+    adoptingBackend = null;
     if (!task) return;
     trackBuild(task);
     await refreshBackends();
@@ -156,22 +180,42 @@
     {:else}
       <div class="overflow-y-auto max-h-64">
         {#each backends as be}
-          <div class="flex items-center justify-between py-2 px-2 border-b border-border hover:bg-secondary-hover text-sm">
-            <div class="flex-1 min-w-0">
-              <span class="font-medium">{be.name}</span>
-              {#if be.repo}
-                <span class="text-txtsecondary text-xs ml-2">{shortRepo(be.repo)}@{be.branch || "main"}</span>
-              {/if}
-              {#if be.size}
-                <span class="text-txtsecondary ml-2">{formatSize(be.size)}</span>
-              {/if}
-            </div>
-            <div class="flex items-center gap-1 shrink-0 ml-2">
-              {#if be.repo}
+          <div class="py-2 px-2 border-b border-border hover:bg-secondary-hover text-sm">
+            <div class="flex items-center justify-between">
+              <div class="flex-1 min-w-0">
+                <span class="font-medium">{be.name}</span>
+                {#if be.repo}
+                  <span class="text-txtsecondary text-xs ml-2">{shortRepo(be.repo)}@{be.branch || "main"}</span>
+                {:else}
+                  <span class="text-txtsecondary text-xs ml-2 italic">source unknown</span>
+                {/if}
+                {#if be.size}
+                  <span class="text-txtsecondary ml-2">{formatSize(be.size)}</span>
+                {/if}
+              </div>
+              <div class="flex items-center gap-1 shrink-0 ml-2">
                 <button class="btn btn--sm" onclick={() => doUpdateBackend(be)}>Update</button>
-              {/if}
-              <button class="btn btn--sm text-red-500" onclick={() => doDeleteBackend(be.name)}>Delete</button>
+                <button class="btn btn--sm text-red-500" onclick={() => doDeleteBackend(be.name)}>Delete</button>
+              </div>
             </div>
+            {#if adoptingBackend === be.name}
+              <div class="flex gap-2 items-center mt-2">
+                <input
+                  type="text"
+                  class="input flex-1 px-2 py-1 border rounded bg-surface text-xs"
+                  placeholder="https://github.com/user/llama.cpp"
+                  bind:value={adoptRepo}
+                />
+                <input
+                  type="text"
+                  class="input w-24 px-2 py-1 border rounded bg-surface text-xs"
+                  placeholder="main"
+                  bind:value={adoptBranch}
+                />
+                <button class="btn btn--sm" onclick={() => confirmAdopt(be.name)} disabled={!adoptRepo.trim()}>Rebuild</button>
+                <button class="btn btn--sm" onclick={cancelAdopt}>Cancel</button>
+              </div>
+            {/if}
           </div>
         {/each}
       </div>

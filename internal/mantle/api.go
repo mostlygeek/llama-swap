@@ -27,10 +27,12 @@ type Handler struct {
 	buildScript string
 }
 
-// NewHandler creates a new mantle API handler.
-func NewHandler(cfg *config.Config, configPath, modelsDir, backendsDir, buildScript string) *Handler {
+// NewHandler creates a new mantle API handler. tm is constructed once by the
+// caller and outlives config reloads, so long-running tasks (builds,
+// downloads) stay visible across a reload instead of being silently orphaned.
+func NewHandler(tm *TaskManager, cfg *config.Config, configPath, modelsDir, backendsDir, buildScript string) *Handler {
 	return &Handler{
-		tm:          NewTaskManager(),
+		tm:          tm,
 		cfg:         cfg,
 		configPath:  configPath,
 		modelsDir:   modelsDir,
@@ -302,7 +304,7 @@ func (h *Handler) handleStartBuild(w http.ResponseWriter, r *http.Request) {
 		}
 		cmakeArgs = append(cmakeArgs, parsed...)
 	}
-	task := h.tm.StartBuild(req.Repo, req.Branch, req.BackendName, h.buildScript, h.backendsDir, cmakeArgs)
+	task := h.tm.StartBuild(req.Repo, req.Branch, req.BackendName, h.buildScript, h.backendsDir, cmakeArgs, false)
 	jsonResponse(w, http.StatusAccepted, task)
 }
 
@@ -353,6 +355,15 @@ func (h *Handler) handleDeleteBackend(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusOK, map[string]string{"msg": "deleted"})
 }
 
+type updateBackendRequest struct {
+	Repo   string `json:"repo"`
+	Branch string `json:"branch"`
+}
+
+// handleUpdateBackend rebuilds an existing backend from its source, replacing
+// it in place. Backends built before source tracking was added (or installed
+// by other means) have no meta.json; the caller can supply repo/branch in the
+// request body to adopt them, after which future updates no longer need it.
 func (h *Handler) handleUpdateBackend(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
@@ -363,24 +374,33 @@ func (h *Handler) handleUpdateBackend(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "invalid backend name")
 		return
 	}
-	metaData, err := os.ReadFile(filepath.Join(h.backendsDir, name, "meta.json"))
-	if err != nil {
-		jsonError(w, http.StatusNotFound, "backend not found or missing build metadata")
-		return
+
+	var req updateBackendRequest
+	if r.ContentLength != 0 {
+		json.NewDecoder(r.Body).Decode(&req)
 	}
-	var meta struct {
-		Repo   string `json:"repo"`
-		Branch string `json:"branch"`
+
+	if req.Repo == "" {
+		metaData, err := os.ReadFile(filepath.Join(h.backendsDir, name, "meta.json"))
+		if err != nil {
+			jsonError(w, http.StatusNotFound, "backend has no build metadata; provide repo/branch to adopt it")
+			return
+		}
+		var meta struct {
+			Repo   string `json:"repo"`
+			Branch string `json:"branch"`
+		}
+		if err := json.Unmarshal(metaData, &meta); err != nil || meta.Repo == "" {
+			jsonError(w, http.StatusInternalServerError, "failed to read build metadata")
+			return
+		}
+		req.Repo, req.Branch = meta.Repo, meta.Branch
 	}
-	if err := json.Unmarshal(metaData, &meta); err != nil || meta.Repo == "" {
-		jsonError(w, http.StatusInternalServerError, "failed to read build metadata")
-		return
-	}
-	if err := DeleteBackend(h.backendsDir, name); err != nil {
-		jsonError(w, http.StatusInternalServerError, fmt.Sprintf("failed to remove old backend: %v", err))
-		return
-	}
-	task := h.tm.StartBuild(meta.Repo, meta.Branch, name, h.buildScript, h.backendsDir, nil)
+
+	// The old backend is left in place until the new build succeeds -
+	// StartBuild builds into a staging dir and swaps it in atomically, so a
+	// failed rebuild doesn't lose the working binary.
+	task := h.tm.StartBuild(req.Repo, req.Branch, name, h.buildScript, h.backendsDir, nil, true)
 	jsonResponse(w, http.StatusAccepted, task)
 }
 
@@ -437,6 +457,9 @@ func (h *Handler) streamProgress(w http.ResponseWriter, r *http.Request, task *T
 	if task.Type == "build" {
 		cancel1 = event.SubscribeTo(event.Default, shared.BackendBuildProgressEventID,
 			func(ev shared.BackendBuildProgressEvent) {
+				if ev.TaskID != task.ID {
+					return
+				}
 				select {
 				case eventCh <- ev:
 				case <-ctx.Done():
@@ -446,6 +469,9 @@ func (h *Handler) streamProgress(w http.ResponseWriter, r *http.Request, task *T
 	} else if task.Type == "download" {
 		cancel2 = event.SubscribeTo(event.Default, shared.ModelDownloadProgressEventID,
 			func(ev shared.ModelDownloadProgressEvent) {
+				if ev.TaskID != task.ID {
+					return
+				}
 				select {
 				case eventCh <- ev:
 				case <-ctx.Done():

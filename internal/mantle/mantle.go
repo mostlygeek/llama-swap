@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/event"
+	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/shared"
 )
 
@@ -97,12 +98,24 @@ type TaskManager struct {
 	mu    sync.Mutex
 	tasks map[string]*Task
 	next  int
+	log   *logmon.Monitor
 }
 
-// NewTaskManager creates a new task manager.
-func NewTaskManager() *TaskManager {
+// NewTaskManager creates a new task manager. log receives a line for every
+// line of build output, so it shows up in the container logs / /logs
+// endpoint (in addition to the task's own last-line progress message).
+func NewTaskManager(log *logmon.Monitor) *TaskManager {
 	return &TaskManager{
 		tasks: make(map[string]*Task),
+		log:   log,
+	}
+}
+
+// logBuildLine forwards a build output line to the shared log monitor, if one
+// was configured.
+func (tm *TaskManager) logBuildLine(taskID, line string) {
+	if tm.log != nil {
+		tm.log.Infof("[build %s] %s", taskID, line)
 	}
 }
 

@@ -120,7 +120,7 @@ type BuildInfo struct {
 	Date    string
 }
 
-func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, upstreamlog *logmon.Monitor, perfMon *perf.Monitor, build BuildInfo) (*Server, error) {
+func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, upstreamlog *logmon.Monitor, perfMon *perf.Monitor, build BuildInfo, tm *mantle.TaskManager) (*Server, error) {
 	var local router.LocalRouter
 	var err error
 
@@ -157,7 +157,7 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 		shutdownCtx: shutdownCtx,
 		shutdownFn:  shutdownFn,
 	}
-	s.mantle = mantle.NewHandler(&s.cfg, cfg.ConfigPath,
+	s.mantle = mantle.NewHandler(tm, &s.cfg, cfg.ConfigPath,
 		cfg.ModelsDir, cfg.BackendsDir, cfg.BuildScript)
 	s.routes()
 	s.startPreload()

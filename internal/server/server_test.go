@@ -14,6 +14,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/mantle"
 	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/router"
 	"github.com/mostlygeek/llama-swap/internal/shared"
@@ -86,7 +87,7 @@ func TestServer_New_GroupConfig(t *testing.T) {
 	discard := logmon.NewWriter(io.Discard)
 	cfg := config.Config{HealthCheckTimeout: 15}
 	cfg.Routing.Router.Use = "group"
-	s, err := New(cfg, discard, discard, discard, nil, BuildInfo{})
+	s, err := New(cfg, discard, discard, discard, nil, BuildInfo{}, mantle.NewTaskManager(discard))
 	if err != nil {
 		t.Fatalf("New (group): %v", err)
 	}
@@ -103,7 +104,7 @@ func TestServer_New_MatrixConfig(t *testing.T) {
 	cfg := config.Config{HealthCheckTimeout: 15}
 	cfg.Routing.Router.Use = "matrix"
 	cfg.Routing.Router.Settings.Matrix = &config.MatrixConfig{}
-	s, err := New(cfg, discard, discard, discard, nil, BuildInfo{})
+	s, err := New(cfg, discard, discard, discard, nil, BuildInfo{}, mantle.NewTaskManager(discard))
 	if err != nil {
 		t.Fatalf("New (matrix): %v", err)
 	}

@@ -19,6 +19,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/mantle"
 	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/server"
@@ -166,7 +167,13 @@ func main() {
 
 	buildInfo := server.BuildInfo{Version: version, Commit: commit, Date: date}
 
-	initialSrv, err := server.New(cfg, muxLog, proxyLog, upstreamLog, perfMon, buildInfo)
+	// taskManager tracks long-running mantle tasks (backend builds, model
+	// downloads). It outlives config reloads, like the loggers and perfMon
+	// above, so a build/download in progress stays visible instead of being
+	// silently orphaned when the config watcher rebuilds the server.
+	taskManager := mantle.NewTaskManager(proxyLog)
+
+	initialSrv, err := server.New(cfg, muxLog, proxyLog, upstreamLog, perfMon, buildInfo, taskManager)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)
 		os.Exit(1)
@@ -226,7 +233,7 @@ func main() {
 			perfMon.UpdateConfig(newCfg.Performance)
 		}
 
-		newSrv, err := server.New(newCfg, muxLog, proxyLog, upstreamLog, perfMon, buildInfo)
+		newSrv, err := server.New(newCfg, muxLog, proxyLog, upstreamLog, perfMon, buildInfo, taskManager)
 		if err != nil {
 			proxyLog.Warnf("failed to build new server during reload: %v", err)
 			return

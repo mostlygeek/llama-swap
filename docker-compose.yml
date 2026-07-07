@@ -3,7 +3,7 @@ services:
     image: llama-swap:unified-cuda
     build:
       context: .
-      dockerfile: docker/Dockerfile.simplified
+      dockerfile: docker/Dockerfile
       args:
         BACKEND: cuda
         MAX_BUILD_JOBS: 1
