@@ -30,6 +30,7 @@ type modelRecord struct {
 	SupportedParameters []string       `json:"supported_parameters,omitempty"`
 	ContextLength       int            `json:"context_length,omitempty"`
 	Meta                map[string]any `json:"meta,omitempty"`
+	Status              map[string]any `json:"status"`
 }
 
 // cappedMetadataKeys are top-level /v1/models fields produced by the
@@ -138,8 +139,16 @@ func filterCappedMetadata(md map[string]any) map[string]any {
 func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	created := time.Now().Unix()
 	data := make([]modelRecord, 0, len(s.cfg.Models))
+	running := s.local.RunningModels()
 
-	newRecord := func(id, name, description string, metadata map[string]any, caps config.ModelCapConfig) modelRecord {
+	modelStatus := func(id string) string {
+		if _, ok := running[id]; ok {
+			return "loaded"
+		}
+		return "unloaded"
+	}
+
+	newRecord := func(id, name, description string, metadata map[string]any, caps config.ModelCapConfig, status string) modelRecord {
 		rec := modelRecord{
 			ID:          id,
 			Object:      "model",
@@ -147,6 +156,7 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 			OwnedBy:     "llama-swap",
 			Name:        strings.TrimSpace(name),
 			Description: strings.TrimSpace(description),
+			Status:      map[string]any{"value": status},
 		}
 		rec.Architecture, rec.Capabilities, rec.SupportedParameters, rec.ContextLength = renderCapabilities(caps)
 		if !caps.Empty() {
@@ -162,12 +172,13 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 		if mc.Unlisted {
 			continue
 		}
-		data = append(data, newRecord(id, mc.Name, mc.Description, mc.Metadata, mc.Capabilities))
+		status := modelStatus(id)
+		data = append(data, newRecord(id, mc.Name, mc.Description, mc.Metadata, mc.Capabilities, status))
 
 		if s.cfg.IncludeAliasesInList {
 			for _, alias := range mc.Aliases {
 				if alias := strings.TrimSpace(alias); alias != "" {
-					data = append(data, newRecord(alias, mc.Name, mc.Description, mc.Metadata, mc.Capabilities))
+					data = append(data, newRecord(alias, mc.Name, mc.Description, mc.Metadata, mc.Capabilities, status))
 				}
 			}
 		}
@@ -175,7 +186,7 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 
 	for peerID, peer := range s.cfg.Peers {
 		for _, modelID := range peer.Models {
-			data = append(data, newRecord(modelID, peerID+": "+modelID, "", map[string]any{"peerID": peerID}, config.ModelCapConfig{}))
+			data = append(data, newRecord(modelID, peerID+": "+modelID, "", map[string]any{"peerID": peerID}, config.ModelCapConfig{}, "unloaded"))
 		}
 	}
 
