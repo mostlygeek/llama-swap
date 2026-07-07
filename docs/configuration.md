@@ -146,6 +146,13 @@ metricsMaxInMemory: 1000
 # - set to 0 to disable
 captureBuffer: 15
 
+# store: persistent storage for llama-swap state
+# - optional, default: in-memory sqlite database capped by metricsMaxInMemory
+# - path is a sqlite database file path
+# - file-backed sqlite keeps activity logs across restarts
+# store:
+#   path: /path/to/file.sqlite
+
 # performance: configuration for system monitoring statistics
 # - timing values are duration strings like 1s, 1h30m, 90m, 2h10s, etc.
 performance:

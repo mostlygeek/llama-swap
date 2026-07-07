@@ -13,6 +13,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/store"
 )
 
 // apiModel is one entry in the /api/events modelStatus payload.
@@ -90,15 +91,88 @@ func (s *Server) handleAPIUnloadModel(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("OK"))
 }
 
-// handleAPIMetrics serves the activity log as a JSON array.
-func (s *Server) handleAPIMetrics(w http.ResponseWriter, r *http.Request) {
-	data, err := s.metrics.getMetricsJSON()
+// handleAPIActivity serves paginated activity table rows.
+func (s *Server) handleAPIActivity(w http.ResponseWriter, r *http.Request) {
+	query, err := parseActivityQuery(r)
 	if err != nil {
-		shared.SendResponse(w, r, http.StatusInternalServerError, "failed to get metrics")
+		shared.SendResponse(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
+	page, err := s.store.ListActivity(r.Context(), query)
+	if err != nil {
+		shared.SendResponse(w, r, http.StatusInternalServerError, "failed to get activity")
+		return
+	}
+	s.metrics.overlayCaptureState(page.Data)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(page)
+}
+
+// handleAPIActivityStats serves aggregate activity statistics and histograms.
+func (s *Server) handleAPIActivityStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := s.store.ActivityStats(r.Context(), store.ActivityStatsQuery{
+		Model: strings.TrimSpace(r.URL.Query().Get("model")),
+	})
+	if err != nil {
+		shared.SendResponse(w, r, http.StatusInternalServerError, "failed to get activity stats")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(data)
+	json.NewEncoder(w).Encode(stats)
+}
+
+func parseActivityLimit(raw string) (int, error) {
+	limit, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("invalid limit")
+	}
+	if limit > 0 && limit < 1000 {
+		return limit, nil
+	}
+	return 0, fmt.Errorf("limit must be between 1 and 999")
+}
+
+func parseActivityQuery(r *http.Request) (store.ActivityQuery, error) {
+	const defaultLimit = 25
+	query := store.ActivityQuery{
+		Model: strings.TrimSpace(r.URL.Query().Get("model")),
+		Limit: defaultLimit,
+		Page:  1,
+	}
+
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		limit, err := parseActivityLimit(raw)
+		if err != nil {
+			return store.ActivityQuery{}, err
+		}
+		query.Limit = limit
+	}
+
+	if raw := strings.TrimSpace(r.URL.Query().Get("page")); raw != "" {
+		page, err := strconv.Atoi(raw)
+		if err != nil || page < 1 {
+			return store.ActivityQuery{}, fmt.Errorf("page must be >= 1")
+		}
+		query.Page = page
+	}
+
+	if raw := strings.TrimSpace(r.URL.Query().Get("sort")); raw != "" {
+		if _, ok := store.ActivitySortColumn(raw); !ok {
+			return store.ActivityQuery{}, fmt.Errorf("invalid sort column")
+		}
+		query.Sort = raw
+	}
+
+	if raw := strings.TrimSpace(r.URL.Query().Get("order")); raw != "" {
+		switch strings.ToLower(raw) {
+		case "asc", "desc":
+			query.Order = strings.ToLower(raw)
+		default:
+			return store.ActivityQuery{}, fmt.Errorf("order must be asc or desc")
+		}
+	}
+
+	return query, nil
 }
 
 // handleAPIPerformance serves the buffered system/GPU stats, optionally
@@ -195,7 +269,7 @@ type messageType string
 const (
 	msgTypeModelStatus messageType = "modelStatus"
 	msgTypeLogData     messageType = "logData"
-	msgTypeMetrics     messageType = "metrics"
+	msgTypeActivity    messageType = "activity"
 	msgTypeInFlight    messageType = "inflight"
 )
 
@@ -245,9 +319,9 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 			send(messageEnvelope{Type: msgTypeLogData, Data: string(j)})
 		}
 	}
-	sendMetrics := func(metrics []ActivityLogEntry) {
-		if j, err := json.Marshal(metrics); err == nil {
-			send(messageEnvelope{Type: msgTypeMetrics, Data: string(j)})
+	sendActivity := func(id int) {
+		if j, err := json.Marshal(map[string]int{"id": id}); err == nil {
+			send(messageEnvelope{Type: msgTypeActivity, Data: string(j)})
 		}
 	}
 	sendInFlight := func(stats shared.InFlightRequestsEvent) {
@@ -263,14 +337,13 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 	defer event.On(func(e shared.ConfigFileChangedEvent) { sendModels() })()
 	defer s.proxylog.OnLogData(func(data []byte) { sendLogData("proxy", data) })()
 	defer s.upstreamlog.OnLogData(func(data []byte) { sendLogData("upstream", data) })()
-	defer event.On(func(e ActivityLogEvent) { sendMetrics([]ActivityLogEntry{e.Metrics}) })()
+	defer event.On(func(e ActivityLogEvent) { sendActivity(e.Metrics.ID) })()
 	defer event.On(func(e shared.InFlightRequestsEvent) { sendInFlight(e) })()
 
 	// initial payload
 	sendLogData("proxy", s.proxylog.GetHistory())
 	sendLogData("upstream", s.upstreamlog.GetHistory())
 	sendModels()
-	sendMetrics(s.metrics.getMetrics())
 	sendInFlight(s.inflight.Current())
 
 	for {

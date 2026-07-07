@@ -224,7 +224,7 @@ func TestServer_HandleAPIUnloadModel(t *testing.T) {
 
 func TestServer_HandleAPICapture(t *testing.T) {
 	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
-	s.metrics = newMetricsMonitor(logmon.NewWriter(io.Discard), 100, 5)
+	s.metrics = newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 100, 5)
 	s.metrics.addCapture(ReqRespCapture{ID: 42, ReqPath: "/v1/chat/completions"})
 
 	t.Run("found", func(t *testing.T) {

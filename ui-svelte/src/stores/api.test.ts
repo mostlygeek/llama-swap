@@ -1,6 +1,7 @@
 import { get } from "svelte/store";
 import { describe, expect, it } from "vitest";
 import {
+  activityRevision,
   handleAPIEventMessage,
   inFlightRequests,
   inflightRequestEntries,
@@ -40,5 +41,18 @@ describe("api store event handling", () => {
         metadata: { source: "test" },
       },
     ]);
+  });
+
+  it("increments activity revision for activity events", () => {
+    activityRevision.set(0);
+
+    handleAPIEventMessage(
+      JSON.stringify({
+        type: "activity",
+        data: JSON.stringify({ id: 42 }),
+      })
+    );
+
+    expect(get(activityRevision)).toBe(1);
   });
 });

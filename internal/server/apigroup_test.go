@@ -9,9 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/internal/cache"
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/store"
 )
 
 func TestServer_InflightMiddleware_AddsAndRemovesEntriesAroundRequestHandling(t *testing.T) {
@@ -124,8 +126,24 @@ func TestServer_InflightCancelByIDCancelsRequestContext(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("request context was not canceled")
 	}
-	if got := tracker.Current(); len(got.Requests) != 0 {
-		t.Errorf("inflight after cancel cleanup = %d, want 0", len(got.Requests))
+	waitInflightTrackerCount(t, tracker, 0)
+}
+
+func waitInflightTrackerCount(t *testing.T, tracker *inflightTracker, total int) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		if got := tracker.Current(); len(got.Requests) == total {
+			return
+		}
+		select {
+		case <-deadline:
+			got := tracker.Current()
+			t.Fatalf("inflight total = %d, want %d", len(got.Requests), total)
+		case <-tick.C:
+		}
 	}
 }
 
@@ -163,17 +181,93 @@ func TestServer_APIVersion(t *testing.T) {
 	}
 }
 
-func TestServer_APIMetrics_Empty(t *testing.T) {
+func TestServer_APIMetricsActivity_Empty(t *testing.T) {
 	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
 
 	w := httptest.NewRecorder()
-	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/metrics", nil))
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/metrics/activity", nil))
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d", w.Code)
 	}
-	if body := strings.TrimSpace(w.Body.String()); body != "[]" {
-		t.Errorf("body = %q, want []", body)
+	var page store.ActivityPage
+	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if page.Total != 0 || len(page.Data) != 0 {
+		t.Errorf("page = %+v, want empty", page)
+	}
+}
+
+func TestServer_APIMetricsActivity(t *testing.T) {
+	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
+	s.metrics.enableCaptures = true
+	s.metrics.captureCache = cache.New(1024 * 1024)
+
+	storedM1, ok := s.metrics.queueMetrics(ActivityLogEntry{
+		Timestamp: time.Unix(1, 0),
+		Model:     "m1",
+		ReqPath:   "/v1/chat/completions",
+		Tokens:    TokenMetrics{InputTokens: 1, OutputTokens: 2},
+	})
+	if !ok {
+		t.Fatal("queueMetrics m1 failed")
+	}
+	if ok := s.metrics.addCapture(ReqRespCapture{ID: storedM1.ID, ReqPath: "/v1/chat/completions"}); !ok {
+		t.Fatal("addCapture failed")
+	}
+	if _, ok := s.metrics.queueMetrics(ActivityLogEntry{
+		Timestamp: time.Unix(2, 0),
+		Model:     "m2",
+		ReqPath:   "/v1/chat/completions",
+		Tokens:    TokenMetrics{InputTokens: 3, OutputTokens: 4},
+	}); !ok {
+		t.Fatal("queueMetrics m2 failed")
+	}
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/metrics/activity?model=m1&limit=10&page=1", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%q", w.Code, w.Body.String())
+	}
+	var page store.ActivityPage
+	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if page.Total != 1 || len(page.Data) != 1 {
+		t.Fatalf("page = %+v", page)
+	}
+	if page.Data[0].ID != storedM1.ID || !page.Data[0].HasCapture {
+		t.Fatalf("entry = %+v", page.Data[0])
+	}
+}
+
+func TestServer_APIMetricsStats(t *testing.T) {
+	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
+	for _, entry := range []ActivityLogEntry{
+		{Timestamp: time.Unix(1, 0), Model: "m1", Tokens: TokenMetrics{InputTokens: 1, OutputTokens: 2, CachedTokens: 1, PromptPerSecond: 10, TokensPerSecond: 20}},
+		{Timestamp: time.Unix(2, 0), Model: "m1", Tokens: TokenMetrics{InputTokens: 3, OutputTokens: 4, PromptPerSecond: 30, TokensPerSecond: 40}},
+		{Timestamp: time.Unix(3, 0), Model: "m2", Tokens: TokenMetrics{InputTokens: 5, OutputTokens: 6, PromptPerSecond: 50}},
+	} {
+		if _, ok := s.metrics.queueMetrics(entry); !ok {
+			t.Fatal("queueMetrics failed")
+		}
+	}
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/metrics/stats?model=m1", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%q", w.Code, w.Body.String())
+	}
+	var stats store.ActivityStats
+	if err := json.Unmarshal(w.Body.Bytes(), &stats); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if stats.TotalRequests != 2 || stats.TotalInputTokens != 4 || stats.TotalOutputTokens != 6 || stats.TotalCacheTokens != 1 {
+		t.Fatalf("stats = %+v", stats)
+	}
+	if stats.PromptHistogram == nil || stats.GenerationHistogram == nil {
+		t.Fatalf("expected histograms: %+v", stats)
 	}
 }
 
@@ -214,7 +308,7 @@ func TestServer_InflightMetricsRecordsCompletedOnce(t *testing.T) {
 	if got := s.inflight.Current(); len(got.Requests) != 0 {
 		t.Fatalf("inflight total after request = %d, want 0", len(got.Requests))
 	}
-	gotMetrics := s.metrics.getMetrics()
+	gotMetrics := metricsEntries(t, s.metrics)
 	if len(gotMetrics) != 1 {
 		t.Fatalf("metrics len = %d, want 1", len(gotMetrics))
 	}

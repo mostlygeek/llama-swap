@@ -23,6 +23,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/server"
 	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/store"
 	"github.com/mostlygeek/llama-swap/internal/watcher"
 )
 
@@ -52,6 +53,13 @@ var logTimeFormats = map[string]string{
 	"stampmilli":  time.StampMilli,
 	"stampmicro":  time.StampMicro,
 	"stampnano":   time.StampNano,
+}
+
+func configStorePath(cfg config.Config) string {
+	if cfg.Store == nil {
+		return ""
+	}
+	return strings.TrimSpace(cfg.Store.Path)
 }
 
 func main() {
@@ -146,15 +154,25 @@ func main() {
 
 	buildInfo := server.BuildInfo{Version: version, Commit: commit, Date: date}
 
-	initialSrv, err := server.New(cfg, muxLog, proxyLog, upstreamLog, perfMon, buildInfo)
+	initialStorePath := configStorePath(cfg)
+	initialStore, err := store.New(initialStorePath)
+	if err != nil {
+		slog.Error("failed to create store", "error", err)
+		os.Exit(1)
+	}
+
+	initialSrv, err := server.New(cfg, muxLog, proxyLog, upstreamLog, perfMon, initialStore, buildInfo)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)
+		initialStore.Close()
 		os.Exit(1)
 	}
 
 	// activeSrv is swapped atomically during hot reload.
 	var activeMu sync.RWMutex
 	activeSrv := initialSrv
+	activeStore := initialStore
+	activeStorePath := initialStorePath
 
 	httpServer := &http.Server{
 		Addr: listenAddr,
@@ -201,21 +219,48 @@ func main() {
 			perfMon.UpdateConfig(newCfg.Performance)
 		}
 
-		newSrv, err := server.New(newCfg, muxLog, proxyLog, upstreamLog, perfMon, buildInfo)
+		newStorePath := configStorePath(newCfg)
+		activeMu.RLock()
+		currentStore := activeStore
+		currentStorePath := activeStorePath
+		activeMu.RUnlock()
+
+		newStore := currentStore
+		storeChanged := newStorePath != currentStorePath
+		if storeChanged {
+			newStore, err = store.New(newStorePath)
+			if err != nil {
+				proxyLog.Warnf("failed to create new store during reload: %v", err)
+				return
+			}
+		}
+
+		newSrv, err := server.New(newCfg, muxLog, proxyLog, upstreamLog, perfMon, newStore, buildInfo)
 		if err != nil {
 			proxyLog.Warnf("failed to build new server during reload: %v", err)
+			if storeChanged {
+				newStore.Close()
+			}
 			return
 		}
 
 		activeMu.Lock()
 		old := activeSrv
+		oldStore := activeStore
 		activeSrv = newSrv
+		activeStore = newStore
+		activeStorePath = newStorePath
 		activeMu.Unlock()
 
 		applyLogSettings(newCfg)
 
 		if err := old.Shutdown(shutdownTimeout); err != nil {
 			proxyLog.Warnf("error shutting down old server during reload: %v", err)
+		}
+		if storeChanged {
+			if err := oldStore.Close(); err != nil {
+				proxyLog.Warnf("error closing old store during reload: %v", err)
+			}
 		}
 
 		// Notify UI after a short delay so it can refresh model state.
@@ -311,6 +356,7 @@ func main() {
 
 				activeMu.RLock()
 				srv := activeSrv
+				st := activeStore
 				activeMu.RUnlock()
 
 				// Close long-lived SSE streams first so httpServer.Shutdown can
@@ -339,6 +385,9 @@ func main() {
 
 				if perfMon != nil {
 					perfMon.Stop()
+				}
+				if err := st.Close(); err != nil {
+					proxyLog.Warnf("store shutdown error: %v", err)
 				}
 
 				close(exitChan)

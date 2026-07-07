@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -64,6 +66,52 @@ models:
 	// this is a contains because it could be `model1` or `model2` depending on the order
 	// go decided on the order of the map
 	assert.Contains(t, err.Error(), "duplicate alias m1 found in model: model")
+}
+
+func TestConfig_StorePath(t *testing.T) {
+	t.Run("path accepted in writable directory", func(t *testing.T) {
+		dir := t.TempDir()
+		storePath := filepath.Join(dir, "llama-swap.db")
+		cfg, err := LoadConfigFromReader(strings.NewReader(`
+store:
+  path: ` + storePath + `
+`))
+		require.NoError(t, err)
+		require.NotNil(t, cfg.Store)
+		assert.Equal(t, storePath, cfg.Store.Path)
+	})
+
+	t.Run("existing writable file accepted", func(t *testing.T) {
+		dir := t.TempDir()
+		storePath := filepath.Join(dir, "llama-swap.db")
+		require.NoError(t, os.WriteFile(storePath, []byte("{}"), 0644))
+
+		cfg, err := LoadConfigFromReader(strings.NewReader(`
+store:
+  path: ` + storePath + `
+`))
+		require.NoError(t, err)
+		require.NotNil(t, cfg.Store)
+		assert.Equal(t, storePath, cfg.Store.Path)
+	})
+
+	t.Run("non-existent directory rejected", func(t *testing.T) {
+		_, err := LoadConfigFromReader(strings.NewReader(`
+store:
+  path: /no/such/dir/llama-swap.db
+`))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not writable")
+	})
+
+	t.Run("empty path rejected", func(t *testing.T) {
+		_, err := LoadConfigFromReader(strings.NewReader(`
+store:
+  path: ""
+`))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "store.path must not be empty")
+	})
 }
 
 func TestConfig_FindConfig(t *testing.T) {
