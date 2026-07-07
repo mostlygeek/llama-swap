@@ -82,6 +82,50 @@ func TestServer_HandleListModels_Aliases(t *testing.T) {
 	}
 }
 
+func TestServer_HandleListModels_Status(t *testing.T) {
+	local := newStubRouter(nil, "")
+	local.running = map[string]process.ProcessState{"loaded-model": process.StateReady}
+	s := newTestServer(local, newStubRouter(nil, ""))
+	s.cfg = config.Config{
+		IncludeAliasesInList: true,
+		Models: map[string]config.ModelConfig{
+			"loaded-model":   {Aliases: []string{"loaded-alias"}},
+			"unloaded-model": {},
+		},
+		Peers: config.PeerDictionaryConfig{
+			"peer1": {Models: []string{"remote-model"}},
+		},
+	}
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
+
+	var resp struct {
+		Data []modelRecord `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	statuses := map[string]string{}
+	for _, m := range resp.Data {
+		statuses[m.ID], _ = m.Status["value"].(string)
+	}
+
+	if statuses["loaded-model"] != "loaded" {
+		t.Errorf("loaded-model status = %q, want loaded", statuses["loaded-model"])
+	}
+	if statuses["loaded-alias"] != "loaded" {
+		t.Errorf("loaded-alias status = %q, want loaded", statuses["loaded-alias"])
+	}
+	if statuses["unloaded-model"] != "unloaded" {
+		t.Errorf("unloaded-model status = %q, want unloaded", statuses["unloaded-model"])
+	}
+	if statuses["remote-model"] != "unloaded" {
+		t.Errorf("remote-model status = %q, want unloaded", statuses["remote-model"])
+	}
+}
+
 func TestServer_FindModelInPath(t *testing.T) {
 	cfg := config.Config{Models: map[string]config.ModelConfig{
 		"author":       {},
