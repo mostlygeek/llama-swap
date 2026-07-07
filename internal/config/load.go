@@ -485,7 +485,15 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	// one routing group with swap disabled. Otherwise spilling to a cold
 	// member evicts the warm sibling (the default group is swap:true) and the
 	// pool silently degrades to serial evict/reload thrashing.
-	if config.Matrix == nil && len(config.Pools) > 0 {
+	//
+	// Matrix routing has no group with a swap flag to check, and the matrix
+	// solver may evict a running set member to load another, which breaks the
+	// coexistence a pool needs. Reject the combination rather than accept a
+	// pool that cannot actually keep its members warm together.
+	if config.Matrix != nil && len(config.Pools) > 0 {
+		return Config{}, fmt.Errorf("pools are not supported with matrix routing; use group routing and place each pool's members in one group with swap: false")
+	}
+	if len(config.Pools) > 0 {
 		groupOf := make(map[string]string, len(config.Models))
 		for groupID, groupConfig := range config.Groups {
 			for _, member := range groupConfig.Members {

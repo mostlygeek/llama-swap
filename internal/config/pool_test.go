@@ -230,6 +230,26 @@ groups:
 			wantErr: `span groups`,
 		},
 		{
+			name: "matrix routing rejected with pools",
+			yaml: `
+models:
+  a:
+    cmd: echo a ${PORT}
+  b:
+    cmd: echo b ${PORT}
+pools:
+  pool:
+    members: [a, b]
+matrix:
+  vars:
+    x: a
+    y: b
+  sets:
+    combo: "x | y"
+`,
+			wantErr: `not supported with matrix routing`,
+		},
+		{
 			name: "member with filters",
 			yaml: `
 models:
