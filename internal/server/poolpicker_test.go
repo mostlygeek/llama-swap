@@ -144,8 +144,8 @@ func TestPoolPicker_QueueBalancesOnStarting(t *testing.T) {
 		"a": process.StateReady,
 		"b": process.StateStarting,
 	}
-	p.Pick("pool", running)    // a (ready, idle)
-	p.Acquire("pool", "b")     // b warming with one queued
+	p.Pick("pool", running) // a (ready, idle)
+	p.Acquire("pool", "b")  // b warming with one queued
 	m, _ := p.Pick("pool", running)
 	if m != "c" {
 		t.Fatalf("got %q, want c (least busy non-ready)", m)
@@ -190,8 +190,8 @@ func TestPoolPicker_FailureQuarantine(t *testing.T) {
 	}
 	// when every cold candidate is quarantined, fall back to them anyway
 	p.NoteFailure("pool", "c")
-	p.Release("pool", m)      // free the reservation on c from above
-	p.Pick("pool", running)   // re-saturate... a is still at 1; this pick:
+	p.Release("pool", m)    // free the reservation on c from above
+	p.Pick("pool", running) // re-saturate... a is still at 1; this pick:
 	// ready a saturated, spill = quarantined fallback {b, c}
 	m2, _ := p.Pick("pool", running)
 	if m2 == "a" {
