@@ -14,9 +14,6 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/shared"
 )
 
-// apiUnloadTimeout is used by the API endpoints to stop processes
-const apiUnloadTimeout = 10 * time.Second
-
 // modelRecord is one entry in the OpenAI-compatible /v1/models listing.
 type modelRecord struct {
 	ID                  string         `json:"id"`
@@ -218,7 +215,7 @@ type runningModel struct {
 // handleUnload stops every running local process. Peer models are remote and
 // unaffected.
 func (s *Server) handleUnload(w http.ResponseWriter, r *http.Request) {
-	s.local.Unload(apiUnloadTimeout)
+	s.local.Unload()
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))
 }

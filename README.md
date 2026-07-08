@@ -216,6 +216,7 @@ Almost all configuration settings are optional and can be added one step at a ti
   - `macros` reusable snippets
 - Model customization
   - `ttl` to automatically unload models
+  - `unloadTimeout` to tune graceful manual/API unloads
   - `aliases` to use familiar model names (e.g., "gpt-4o-mini")
   - `env` to pass custom environment variables to inference servers
   - `cmdStop` gracefully stop Docker/Podman containers

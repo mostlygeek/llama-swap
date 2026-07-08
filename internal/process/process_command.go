@@ -280,7 +280,7 @@ func (p *ProcessCommand) run() {
 								}
 								if time.Since(time.Unix(0, p.lastUse.Load())) > ttlDuration {
 									p.proxyLogger.Infof("<%s> Unloading model, TTL of %ds reached", p.id, p.config.UnloadAfter)
-									p.Stop(10 * time.Second)
+									p.Stop(time.Duration(p.config.UnloadTimeout) * time.Second)
 									return
 								}
 							}

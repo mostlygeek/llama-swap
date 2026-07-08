@@ -35,6 +35,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		MetricsMaxInMemory: 1000,
 		CaptureBuffer:      5,
 		GlobalTTL:          0,
+		UnloadTimeout:      DEFAULT_UNLOAD_TIMEOUT,
 	}
 	if err = yaml.Unmarshal([]byte(yamlStr), &config); err != nil {
 		return Config{}, err
@@ -58,6 +59,13 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 
 	if config.GlobalTTL < 0 {
 		return Config{}, fmt.Errorf("globalTTL must be >= 0")
+	}
+
+	if config.UnloadTimeout < 0 {
+		return Config{}, fmt.Errorf("unloadTimeout must be >= 0")
+	}
+	if config.UnloadTimeout == 0 {
+		config.UnloadTimeout = DEFAULT_UNLOAD_TIMEOUT
 	}
 
 	if config.Store != nil {
@@ -119,6 +127,14 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 
 		if modelConfig.UnloadAfter < 0 {
 			return Config{}, fmt.Errorf("model %s: invalid TTL value %d", modelId, modelConfig.UnloadAfter)
+		}
+
+		// set model unloadTimeout to the global value when left at the default
+		if modelConfig.UnloadTimeout < 0 {
+			return Config{}, fmt.Errorf("model %s: invalid unloadTimeout value %d", modelId, modelConfig.UnloadTimeout)
+		}
+		if modelConfig.UnloadTimeout == 0 {
+			modelConfig.UnloadTimeout = config.UnloadTimeout
 		}
 
 		// Validate model macros
