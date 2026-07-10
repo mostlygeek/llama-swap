@@ -5,7 +5,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -89,7 +91,7 @@ func TestBaseRouter_UnloadAll(t *testing.T) {
 	c.markReady()
 
 	b := newTestBase(t, map[string]process.Process{"a": a, "c": c}, &stubPlanner{})
-	b.Unload()
+	b.Unload(time.Second)
 
 	if a.State() != process.StateStopped || c.State() != process.StateStopped {
 		t.Fatalf("Unload() should stop every process: a=%q c=%q", a.State(), c.State())
@@ -103,7 +105,7 @@ func TestBaseRouter_UnloadSpecificModel(t *testing.T) {
 	c.markReady()
 
 	b := newTestBase(t, map[string]process.Process{"a": a, "c": c}, &stubPlanner{})
-	b.Unload("a")
+	b.Unload(time.Second, "a")
 
 	if a.State() != process.StateStopped {
 		t.Errorf("a should be stopped, got %q", a.State())
@@ -128,7 +130,7 @@ func TestBaseRouter_UnloadSpecificModelUsesConfiguredTimeout(t *testing.T) {
 		},
 	}
 	b := newTestBaseWithConfig(t, conf, map[string]process.Process{"a": a, "c": c}, &stubPlanner{})
-	b.Unload("a")
+	b.Unload(0, "a")
 
 	if a.lastStopTimeout() != 45*time.Second {
 		t.Errorf("a stop timeout=%v want 45s", a.lastStopTimeout())
@@ -153,13 +155,117 @@ func TestBaseRouter_UnloadAllUsesConfiguredTimeouts(t *testing.T) {
 		},
 	}
 	b := newTestBaseWithConfig(t, conf, map[string]process.Process{"a": a, "c": c}, &stubPlanner{})
-	b.Unload()
+	b.Unload(0)
 
 	if a.lastStopTimeout() != 45*time.Second {
 		t.Errorf("a stop timeout=%v want 45s", a.lastStopTimeout())
 	}
 	if c.lastStopTimeout() != 25*time.Second {
 		t.Errorf("c stop timeout=%v want 25s", c.lastStopTimeout())
+	}
+}
+
+func TestBaseRouter_UnloadStopsSmallestTimeoutFirst(t *testing.T) {
+	a := newFakeProcess("a")
+	a.markReady()
+	c := newFakeProcess("c")
+	c.markReady()
+	e := newFakeProcess("e")
+	e.markReady()
+
+	var mu sync.Mutex
+	var order []string
+	record := func(id string) {
+		mu.Lock()
+		order = append(order, id)
+		mu.Unlock()
+	}
+	a.onStop = record
+	c.onStop = record
+	e.onStop = record
+
+	conf := config.Config{
+		HealthCheckTimeout: 5,
+		UnloadTimeout:      25,
+		Models: map[string]config.ModelConfig{
+			"a": {UnloadTimeout: 45},
+			"c": {UnloadTimeout: 10},
+			"e": {UnloadTimeout: 25},
+		},
+	}
+	b := newTestBaseWithConfig(t, conf, map[string]process.Process{"a": a, "c": c, "e": e}, &stubPlanner{})
+	// Named in descending timeout order; Unload must re-order ascending.
+	b.Unload(0, "a", "e", "c")
+
+	mu.Lock()
+	defer mu.Unlock()
+	if want := []string{"c", "e", "a"}; !slices.Equal(order, want) {
+		t.Errorf("stop order=%v want %v", order, want)
+	}
+}
+
+// TestBaseRouter_UnloadZeroStopsSameTimeoutInParallel verifies that models
+// resolving to the same unloadTimeout share one unload request and stop
+// concurrently, rather than one request per model. Both fakeProcess.Stop
+// calls are pinned via stopBlock; the test only releases them after
+// observing both stopStarted, which deadlocks if the stops were sequential.
+func TestBaseRouter_UnloadZeroStopsSameTimeoutInParallel(t *testing.T) {
+	a := newFakeProcess("a")
+	a.markReady()
+	a.stopBlock = make(chan struct{})
+	c := newFakeProcess("c")
+	c.markReady()
+	c.stopBlock = make(chan struct{})
+
+	conf := config.Config{
+		HealthCheckTimeout: 5,
+		UnloadTimeout:      25,
+		// no per-model values: both models inherit the global 25s
+	}
+	b := newTestBaseWithConfig(t, conf, map[string]process.Process{"a": a, "c": c}, &stubPlanner{})
+
+	unloadDone := make(chan struct{})
+	go func() {
+		b.Unload(0)
+		close(unloadDone)
+	}()
+
+	for _, p := range []*fakeProcess{a, c} {
+		select {
+		case <-p.stopStarted:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("Stop on %s never started — same-timeout unloads are not parallel", p.id)
+		}
+	}
+	close(a.stopBlock)
+	close(c.stopBlock)
+
+	select {
+	case <-unloadDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Unload did not return after stops were released")
+	}
+	if a.lastStopTimeout() != 25*time.Second || c.lastStopTimeout() != 25*time.Second {
+		t.Errorf("stop timeouts a=%v c=%v want 25s each", a.lastStopTimeout(), c.lastStopTimeout())
+	}
+}
+
+func TestBaseRouter_UnloadPositiveTimeoutOverridesConfigured(t *testing.T) {
+	a := newFakeProcess("a")
+	a.markReady()
+
+	conf := config.Config{
+		HealthCheckTimeout: 5,
+		UnloadTimeout:      25,
+		Models: map[string]config.ModelConfig{
+			"a": {UnloadTimeout: 45},
+		},
+	}
+	b := newTestBaseWithConfig(t, conf, map[string]process.Process{"a": a}, &stubPlanner{})
+	b.Unload(time.Second, "a")
+
+	if a.lastStopTimeout() != time.Second {
+		t.Errorf("a stop timeout=%v want 1s", a.lastStopTimeout())
 	}
 }
 
@@ -183,7 +289,7 @@ func TestBaseRouter_Unload_StopsInParallel(t *testing.T) {
 
 	unloadDone := make(chan struct{})
 	go func() {
-		b.Unload("a", "b", "c")
+		b.Unload(time.Second, "a", "b", "c")
 		close(unloadDone)
 	}()
 

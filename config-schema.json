@@ -173,7 +173,7 @@
             "type": "integer",
             "minimum": 0,
             "default": 10,
-            "description": "Graceful timeout in seconds for manual/API unloads before force-killing the model process. 0 uses the default of 10 seconds."
+            "description": "Graceful timeout in seconds when unloading a model (manual, API, or TTL expiry) before force-killing the model process. 0 uses the default of 10 seconds."
         },
         "logLevel": {
             "type": "string",
@@ -346,7 +346,7 @@
                         "type": "integer",
                         "minimum": 0,
                         "default": 0,
-                        "description": "Graceful timeout in seconds for manual/API unloads of this model before force-killing it. 0 uses the global unloadTimeout."
+                        "description": "Graceful timeout in seconds when unloading this model (manual, API, or TTL expiry) before force-killing it. 0 uses the global unloadTimeout."
                     },
                     "useModelName": {
                         "type": "string",

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
@@ -47,7 +48,8 @@ type startRec struct {
 }
 
 type stopRec struct {
-	ids []string
+	timeout time.Duration
+	ids     []string
 }
 
 // fakeEffects is an in-memory scheduler.Effects. Tests program process states
@@ -103,8 +105,8 @@ func (f *fakeEffects) GrantServe(req HandlerReq, modelID string) bool {
 	return ok
 }
 
-func (f *fakeEffects) StopProcesses(ids []string) {
-	f.stops = append(f.stops, stopRec{ids: ids})
+func (f *fakeEffects) StopProcesses(timeout time.Duration, ids []string) {
+	f.stops = append(f.stops, stopRec{timeout: timeout, ids: ids})
 }
 
 // served counts grants that handed modelID a handler and were received.
@@ -574,13 +576,16 @@ func TestFIFO_OnUnload_ReleasesActiveWaiters(t *testing.T) {
 	s.OnRequest(req("a")) // active swap a with one waiter
 	s.OnRequest(req("a")) // join
 
-	s.OnUnload([]string{"a"})
+	s.OnUnload([]string{"a"}, time.Second)
 
 	if got := eff.errored("a"); got != 2 {
 		t.Errorf("errored(a)=%d want 2 (active swap waiters released)", got)
 	}
 	if len(eff.stops) != 1 || len(eff.stops[0].ids) != 1 || eff.stops[0].ids[0] != "a" {
 		t.Errorf("StopProcesses=%+v want one call stopping [a]", eff.stops)
+	}
+	if eff.stops[0].timeout != time.Second {
+		t.Errorf("StopProcesses timeout=%v want 1s", eff.stops[0].timeout)
 	}
 }
 
@@ -594,7 +599,7 @@ func TestFIFO_OnUnload_DropsQueuedRequests(t *testing.T) {
 	s.OnRequest(req("a")) // StartSwap(a)
 	s.OnRequest(req("b")) // queued
 
-	s.OnUnload([]string{"b"})
+	s.OnUnload([]string{"b"}, time.Second)
 
 	if got := eff.errored("b"); got != 1 {
 		t.Errorf("errored(b)=%d want 1 (queued request dropped)", got)

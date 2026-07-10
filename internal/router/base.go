@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,6 +23,7 @@ type shutdownReq struct {
 
 type unloadReq struct {
 	targets []string
+	timeout time.Duration
 	respond chan struct{}
 }
 
@@ -126,7 +128,7 @@ func (b *baseRouter) run() {
 			b.notifyProcessed()
 
 		case req := <-b.unloadCh:
-			b.schedule.OnUnload(req.targets)
+			b.schedule.OnUnload(req.targets, req.timeout)
 			close(req.respond)
 			b.notifyProcessed()
 
@@ -197,9 +199,8 @@ func (b *baseRouter) GrantServe(req scheduler.HandlerReq, modelID string) bool {
 }
 
 // StopProcesses implements scheduler.Effects, stopping the named processes in
-// parallel and blocking until all have stopped. Each process is given its
-// configured unloadTimeout to stop gracefully.
-func (b *baseRouter) StopProcesses(ids []string) {
+// parallel and blocking until all have stopped.
+func (b *baseRouter) StopProcesses(timeout time.Duration, ids []string) {
 	var wg sync.WaitGroup
 	for _, id := range ids {
 		p, ok := b.processes[id]
@@ -209,8 +210,7 @@ func (b *baseRouter) StopProcesses(ids []string) {
 		wg.Add(1)
 		go func(id string, p process.Process) {
 			defer wg.Done()
-			stopTimeout := b.unloadTimeout(id)
-			if err := p.Stop(stopTimeout); err != nil {
+			if err := p.Stop(timeout); err != nil {
 				b.logger.Warnf("%s: stopping %s failed: %v", b.name, id, err)
 			}
 		}(id, p)
@@ -385,9 +385,15 @@ func (b *baseRouter) RunningModels() map[string]process.ProcessState {
 // for — Stop kills the upstream, those callers see whatever error the
 // reverse proxy surfaces and may retry. Their trackedServe defers fire
 // normally and decrement inFlight as the dying handlers return.
-// Each targeted process is given its configured unloadTimeout to stop
-// gracefully.
-func (b *baseRouter) Unload(models ...string) {
+//
+// A timeout <= 0 unloads each targeted model with its configured
+// unloadTimeout: targets sharing a timeout are stopped in parallel within one
+// unload request, and the requests are processed smallest timeout first. The
+// requests are sequential, so a hung stop on a large model (long timeouts
+// usually mean multi-node unloads) cannot delay reclaiming the quick ones
+// queued behind it. A positive timeout overrides the configured values and
+// stops every target with that timeout.
+func (b *baseRouter) Unload(timeout time.Duration, models ...string) {
 	targets := models
 	if len(targets) == 0 {
 		targets = make([]string, 0, len(b.processes))
@@ -399,7 +405,29 @@ func (b *baseRouter) Unload(models ...string) {
 		return
 	}
 
-	req := unloadReq{targets: targets, respond: make(chan struct{})}
+	if timeout > 0 {
+		b.sendUnload(targets, timeout)
+		return
+	}
+	buckets := make(map[time.Duration][]string)
+	for _, id := range targets {
+		t := b.unloadTimeout(id)
+		buckets[t] = append(buckets[t], id)
+	}
+	timeouts := make([]time.Duration, 0, len(buckets))
+	for t := range buckets {
+		timeouts = append(timeouts, t)
+	}
+	sort.Slice(timeouts, func(i, j int) bool { return timeouts[i] < timeouts[j] })
+	for _, t := range timeouts {
+		b.sendUnload(buckets[t], t)
+	}
+}
+
+// sendUnload funnels one unload request through the run loop and blocks until
+// the scheduler has stopped the targeted processes.
+func (b *baseRouter) sendUnload(targets []string, timeout time.Duration) {
+	req := unloadReq{targets: targets, timeout: timeout, respond: make(chan struct{})}
 	select {
 	case b.unloadCh <- req:
 	case <-b.runDone:

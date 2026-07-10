@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
@@ -218,7 +219,7 @@ func (s *FIFO) OnServeDone(ev ServeDoneEvent) {
 // OnUnload reconciles router-owned state with the impending Stop, performs the
 // Stop (synchronously, via Effects) so callers of Unload remain blocked until
 // each targeted process has exited, then drains the queue.
-func (s *FIFO) OnUnload(targets []string) {
+func (s *FIFO) OnUnload(targets []string, timeout time.Duration) {
 	unloadErr := fmt.Errorf("%s: model unloaded", s.name)
 
 	targetSet := make(map[string]bool, len(targets))
@@ -258,7 +259,7 @@ func (s *FIFO) OnUnload(targets []string) {
 	// rely on "after Unload returns, the process is stopped". inFlight is
 	// intentionally NOT cleared here: each dying handler will fire its tracked
 	// serve and reach OnServeDone in the normal way.
-	s.effects.StopProcesses(targets)
+	s.effects.StopProcesses(timeout, targets)
 
 	// Removing entries from active above may have unblocked queued requests
 	// that previously collided with the now-cancelled swaps.

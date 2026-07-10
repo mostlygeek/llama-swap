@@ -13,6 +13,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
@@ -60,7 +61,7 @@ type Scheduler interface {
 	// OnUnload reconciles scheduler state for an unload, stops the targeted
 	// processes via Effects, and drains the queue. It must block until the
 	// targeted processes have stopped.
-	OnUnload(targets []string)
+	OnUnload(targets []string, timeout time.Duration)
 	// OnShutdown grants err to every waiter the scheduler still holds (active
 	// swap waiters and queued requests). Process teardown is the baseRouter's
 	// responsibility.
@@ -87,9 +88,8 @@ type Effects interface {
 	// its in-flight count only when this returns true.
 	GrantServe(req HandlerReq, modelID string) bool
 	// StopProcesses stops the named processes in parallel and blocks until all
-	// have stopped, each given its configured unloadTimeout. Unknown IDs are
-	// skipped.
-	StopProcesses(ids []string)
+	// have stopped. Unknown IDs are skipped.
+	StopProcesses(timeout time.Duration, ids []string)
 }
 
 // New returns a Scheduler selected by conf.Routing.Scheduler.Use, configured

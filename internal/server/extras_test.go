@@ -201,6 +201,9 @@ func TestServer_HandleAPIUnloadAll(t *testing.T) {
 	if len(local.unloadModels) != 0 {
 		t.Errorf("unloadModels = %v, want empty for unload all", local.unloadModels)
 	}
+	if local.unloadTimeout != 0 {
+		t.Errorf("unloadTimeout = %v, want 0 (use configured timeouts)", local.unloadTimeout)
+	}
 }
 
 func TestServer_HandleAPIUnloadModel(t *testing.T) {
@@ -216,6 +219,9 @@ func TestServer_HandleAPIUnloadModel(t *testing.T) {
 		}
 		if len(local.unloadModels) != 1 || local.unloadModels[0] != "m1" {
 			t.Errorf("unloadModels = %v, want [m1]", local.unloadModels)
+		}
+		if local.unloadTimeout != 0 {
+			t.Errorf("unloadTimeout = %v, want 0 (use configured timeouts)", local.unloadTimeout)
 		}
 	})
 

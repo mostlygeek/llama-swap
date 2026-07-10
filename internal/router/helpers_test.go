@@ -60,6 +60,10 @@ type fakeProcess struct {
 	serveCalls   atomic.Int32
 	stopTimeouts []time.Duration
 
+	// onStop, when non-nil, is invoked at the start of every Stop call.
+	// Tests share one recorder across fakes to observe stop ordering.
+	onStop func(id string)
+
 	// inFlightServe counts ServeHTTP calls currently inside the handler.
 	// stoppedWhileServing flips true if Stop is ever called while that
 	// counter is non-zero — a direct, race-free observation of the
@@ -127,6 +131,9 @@ func (f *fakeProcess) Run(_ time.Duration) error {
 
 func (f *fakeProcess) Stop(timeout time.Duration) error {
 	f.stopCalls.Add(1)
+	if f.onStop != nil {
+		f.onStop(f.id)
+	}
 	if f.inFlightServe.Load() > 0 {
 		f.stoppedWhileServing.Store(true)
 	}

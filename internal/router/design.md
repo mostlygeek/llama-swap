@@ -50,7 +50,7 @@ for {
     select {
     case req := <-b.shutdownCh:  b.handleShutdown(req); return
     case req := <-b.handlerCh:   b.schedule.OnRequest(req)
-    case req := <-b.unloadCh:    b.schedule.OnUnload(req.targets); close(req.respond)
+    case req := <-b.unloadCh:    b.schedule.OnUnload(req.targets, req.timeout); close(req.respond)
     case ev := <-b.swapDoneCh:   b.schedule.OnSwapDone(ev)
     case ev := <-b.serveDoneCh:  b.schedule.OnServeDone(ev)
     }
@@ -71,7 +71,7 @@ The run loop turns external happenings into method calls on the scheduler:
 - A new HTTP request becomes `OnRequest(HandlerReq)`.
 - A swap goroutine finishing becomes `OnSwapDone(SwapDone)`.
 - A tracked request handler returning becomes `OnServeDone(ServeDoneEvent)`.
-- An admin unload becomes `OnUnload(targets)`.
+- An admin unload becomes `OnUnload(targets, timeout)`.
 - Shutdown becomes `OnShutdown(err)`.
 
 The scheduler reacts by calling **back out** through `Effects`: inspect a
@@ -152,7 +152,7 @@ type Scheduler interface {
     OnRequest(req HandlerReq)
     OnSwapDone(ev SwapDone)
     OnServeDone(ev ServeDoneEvent)
-    OnUnload(targets []string)
+    OnUnload(targets []string, timeout time.Duration)
     OnShutdown(err error)
 }
 ```
@@ -201,7 +201,7 @@ type Effects interface {
     StartSwap(modelID string, evict []string)
     GrantError(req HandlerReq, err error)
     GrantServe(req HandlerReq, modelID string) bool
-    StopProcesses(ids []string)
+    StopProcesses(timeout time.Duration, ids []string)
 }
 ```
 
@@ -300,9 +300,8 @@ Method by method, as implemented in `base.go`:
   in-flight contract above). This is the one `Effects` method whose return value
   carries state-machine significance.
 
-- **`StopProcesses(ids)`** — stop processes in parallel and **block**
-  until all have stopped, each given its configured unloadTimeout. Used by
-  `OnUnload` so an admin `Unload` call can
+- **`StopProcesses(timeout, ids)`** — stop processes in parallel and **block**
+  until all have stopped. Used by `OnUnload` so an admin `Unload` call can
   guarantee the process is dead by the time it returns. (Note `StartSwap` is
   async but `StopProcesses` is sync — the difference is deliberate and tied to
   the caller's expectations.)
@@ -372,7 +371,7 @@ What each method must do:
 
 - **`OnServeDone(ev)`** — decrement the model's in-flight count; when it hits zero, re-examine the queue. Do **not** clear in-flight counts by hand; the handlers post their own `ServeDoneEvent`s on return.
 
-- **`OnUnload(targets)`** — error out any waiters or queued requests for the unloaded models, call `Effects.StopProcesses` (synchronously — the admin caller relies on the process being dead afterwards), then re-examine the queue.
+- **`OnUnload(targets, timeout)`** — error out any waiters or queued requests for the unloaded models, call `Effects.StopProcesses` (synchronously — the admin caller relies on the process being dead afterwards), then re-examine the queue.
 
 - **`OnShutdown(err)`** — error out every waiter you still hold (active swap waiters and queued requests). Don't touch processes; teardown is `baseRouter`'s job.
 
