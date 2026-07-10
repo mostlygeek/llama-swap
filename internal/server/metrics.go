@@ -185,6 +185,7 @@ func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *resp
 		parsed := gjson.ParseBytes(body)
 		usage := parsed.Get("usage")
 		timings := parsed.Get("timings")
+		responseMetrics := parsed.Get("metrics")
 
 		// /infill responses are arrays; timings live in the last element (#463).
 		if strings.HasPrefix(r.URL.Path, "/infill") {
@@ -193,8 +194,8 @@ func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *resp
 			}
 		}
 
-		if usage.Exists() || timings.Exists() {
-			if parsedMetrics, err := parseMetrics(modelID, recorder.StartTime(), usage, timings); err != nil {
+		if usage.Exists() || timings.Exists() || responseMetrics.Exists() {
+			if parsedMetrics, err := parseMetrics(modelID, recorder.StartTime(), usage, timings, responseMetrics); err != nil {
 				mp.logger.Warnf("error parsing metrics: %v, path=%s, recording minimal metrics", err, r.URL.Path)
 			} else {
 				tm.Tokens = parsedMetrics.Tokens
@@ -351,6 +352,7 @@ func processStreamingResponse(modelID string, start time.Time, body []byte) (Act
 		cachedTokens              int64 = -1
 		hasAny                    bool
 		timings                   gjson.Result
+		responseMetrics           gjson.Result
 	)
 
 	prefix := []byte("data:")
@@ -402,23 +404,28 @@ func processStreamingResponse(modelID string, start time.Time, body []byte) (Act
 			timings = t
 			hasAny = true
 		}
+		if m := parsed.Get("metrics"); m.Exists() {
+			responseMetrics = m
+			hasAny = true
+		}
 	}
 
 	if !hasAny {
 		return ActivityLogEntry{}, fmt.Errorf("no valid JSON data found in stream")
 	}
 
-	return buildMetrics(modelID, start, inputTokens, outputTokens, cachedTokens, timings), nil
+	return buildMetrics(modelID, start, inputTokens, outputTokens, cachedTokens, timings, responseMetrics), nil
 }
 
-func parseMetrics(modelID string, start time.Time, usage, timings gjson.Result) (ActivityLogEntry, error) {
+func parseMetrics(modelID string, start time.Time, usage, timings, responseMetrics gjson.Result) (ActivityLogEntry, error) {
 	input, output, cached, _ := extractUsageTokens(usage)
-	return buildMetrics(modelID, start, input, output, cached, timings), nil
+	return buildMetrics(modelID, start, input, output, cached, timings, responseMetrics), nil
 }
 
 // buildMetrics composes an ActivityLogEntry from accumulated token counts and
-// optional llama-server timings (which override input/output and provide rates).
-func buildMetrics(modelID string, start time.Time, inputTokens, outputTokens, cachedTokens int64, timings gjson.Result) ActivityLogEntry {
+// optional llama-server timings (which override input/output and provide rates)
+// or vLLM response metrics.
+func buildMetrics(modelID string, start time.Time, inputTokens, outputTokens, cachedTokens int64, timings, responseMetrics gjson.Result) ActivityLogEntry {
 	wallDurationMs := int(time.Since(start).Milliseconds())
 	durationMs := wallDurationMs
 	tokensPerSecond := -1.0
@@ -442,6 +449,9 @@ func buildMetrics(modelID string, start time.Time, inputTokens, outputTokens, ca
 			draftTokens = int(timings.Get("draft_n").Int())
 			draftAccTokens = int(timings.Get("draft_n_accepted").Int())
 		}
+	}
+	if tokensPerSecondValue := responseMetrics.Get("tokens_per_second"); tokensPerSecondValue.Exists() {
+		tokensPerSecond = tokensPerSecondValue.Float()
 	}
 
 	return ActivityLogEntry{
