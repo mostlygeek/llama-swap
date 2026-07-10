@@ -228,19 +228,24 @@ func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *resp
 		}
 	} else if gjson.ValidBytes(body) {
 		parsed := gjson.ParseBytes(body)
-		usage := parsed.Get("usage")
-		timings := parsed.Get("timings")
-		responseMetrics := parsed.Get("metrics")
+		sources := metricSources{
+			usage:       parsed.Get("usage"),
+			timings:     parsed.Get("timings"),
+			metrics:     parsed.Get("metrics"),
+			tensorfold:  parsed.Get("tensorfold"),
+			speculative: parsed.Get("speculative"),
+		}
 
 		// /infill responses are arrays; timings live in the last element (#463).
 		if strings.HasPrefix(r.URL.Path, "/infill") {
 			if arr := parsed.Array(); len(arr) > 0 {
-				timings = arr[len(arr)-1].Get("timings")
+				sources.timings = arr[len(arr)-1].Get("timings")
 			}
 		}
 
-		if usage.Exists() || timings.Exists() || responseMetrics.Exists() {
-			if parsedMetrics, err := parseMetrics(modelID, recorder.StartTime(), usage, timings, responseMetrics); err != nil {
+		if sources.usage.Exists() || sources.timings.Exists() || sources.metrics.Exists() ||
+			sources.tensorfold.Exists() || sources.speculative.Exists() {
+			if parsedMetrics, err := parseMetrics(modelID, recorder.StartTime(), sources); err != nil {
 				mp.logger.Warnf("error parsing metrics: %v, path=%s, recording minimal metrics", err, r.URL.Path)
 			} else {
 				tm.Tokens = parsedMetrics.Tokens
@@ -391,14 +396,22 @@ func extractUsageTokens(usage gjson.Result) (input, output, cached int64, ok boo
 	return
 }
 
+// metricSources holds the optional metric blocks a response may carry. A
+// missing block leaves its gjson.Result zero-valued, so Exists() is false.
+type metricSources struct {
+	usage       gjson.Result // OpenAI usage, plus TabbyAPI/oMLX embedded rates
+	timings     gjson.Result // llama-server timings
+	metrics     gjson.Result // vLLM response metrics
+	tensorfold  gjson.Result // TensorFold engine metrics
+	speculative gjson.Result // TensorFold speculative decoding counters
+}
+
 func processStreamingResponse(modelID string, start time.Time, body []byte) (ActivityLogEntry, error) {
 	var (
 		inputTokens, outputTokens int64
 		cachedTokens              int64 = -1
 		hasAny                    bool
-		usage                     gjson.Result
-		timings                   gjson.Result
-		responseMetrics           gjson.Result
+		sources                   metricSources
 	)
 
 	prefix := []byte("data:")
@@ -447,14 +460,22 @@ func processStreamingResponse(modelID string, start time.Time, body []byte) (Act
 			}
 			// Remember the last usage block so buildMetrics can read the
 			// backend rates it embeds there.
-			usage = u
+			sources.usage = u
 		}
 		if t := parsed.Get("timings"); t.Exists() {
-			timings = t
+			sources.timings = t
 			hasAny = true
 		}
 		if m := parsed.Get("metrics"); m.Exists() {
-			responseMetrics = m
+			sources.metrics = m
+			hasAny = true
+		}
+		if tf := parsed.Get("tensorfold"); tf.Exists() {
+			sources.tensorfold = tf
+			hasAny = true
+		}
+		if spec := parsed.Get("speculative"); spec.Exists() {
+			sources.speculative = spec
 			hasAny = true
 		}
 	}
@@ -463,20 +484,21 @@ func processStreamingResponse(modelID string, start time.Time, body []byte) (Act
 		return ActivityLogEntry{}, fmt.Errorf("no valid JSON data found in stream")
 	}
 
-	return buildMetrics(modelID, start, inputTokens, outputTokens, cachedTokens, usage, timings, responseMetrics), nil
+	return buildMetrics(modelID, start, inputTokens, outputTokens, cachedTokens, sources), nil
 }
 
-func parseMetrics(modelID string, start time.Time, usage, timings, responseMetrics gjson.Result) (ActivityLogEntry, error) {
-	input, output, cached, _ := extractUsageTokens(usage)
-	return buildMetrics(modelID, start, input, output, cached, usage, timings, responseMetrics), nil
+func parseMetrics(modelID string, start time.Time, sources metricSources) (ActivityLogEntry, error) {
+	input, output, cached, _ := extractUsageTokens(sources.usage)
+	return buildMetrics(modelID, start, input, output, cached, sources), nil
 }
 
 // buildMetrics composes an ActivityLogEntry from accumulated token counts and
-// optional llama-server timings (which override input/output and provide rates)
-// or vLLM response metrics (rates and speculative decoding counters). TabbyAPI
-// and oMLX embed rates in the usage block, which supplies base rates
-// when timings and metrics are absent.
-func buildMetrics(modelID string, start time.Time, inputTokens, outputTokens, cachedTokens int64, usage, timings, responseMetrics gjson.Result) ActivityLogEntry {
+// optional backend metric blocks. llama-server timings override input/output
+// and provide rates; vLLM response metrics provide rates and speculative
+// decoding counters; TensorFold provides rates, timing and speculative
+// counters. TabbyAPI and oMLX embed rates in the usage block, which supplies
+// base rates when the other blocks are absent.
+func buildMetrics(modelID string, start time.Time, inputTokens, outputTokens, cachedTokens int64, sources metricSources) ActivityLogEntry {
 	wallDurationMs := int(time.Since(start).Milliseconds())
 	durationMs := wallDurationMs
 	tokensPerSecond := -1.0
@@ -487,7 +509,8 @@ func buildMetrics(modelID string, start time.Time, inputTokens, outputTokens, ca
 	// TabbyAPI reports prompt/completion rates and total time inside its usage
 	// block. These are base values that llama-server timings and vLLM metrics
 	// override when present.
-	if usage.Exists() {
+	if sources.usage.Exists() {
+		usage := sources.usage
 		if v := usage.Get("prompt_tokens_per_sec"); v.Exists() && v.Type != gjson.Null {
 			promptPerSecond = v.Float()
 		} else if v := usage.Get("prompt_tokens_per_second"); v.Type == gjson.Number {
@@ -507,7 +530,8 @@ func buildMetrics(modelID string, start time.Time, inputTokens, outputTokens, ca
 		}
 	}
 
-	if timings.Exists() {
+	if sources.timings.Exists() {
+		timings := sources.timings
 		inputTokens = timings.Get("prompt_n").Int()
 		outputTokens = timings.Get("predicted_n").Int()
 		promptPerSecond = timings.Get("prompt_per_second").Float()
@@ -528,7 +552,7 @@ func buildMetrics(modelID string, start time.Time, inputTokens, outputTokens, ca
 	// when started with --per-request-spec-decode-metrics (#1032). Both counters
 	// are required so the acceptance rate is never derived from a half-filled
 	// object.
-	if spec := responseMetrics.Get("speculative_decoding"); spec.Exists() {
+	if spec := sources.metrics.Get("speculative_decoding"); spec.Exists() {
 		drafted := spec.Get("num_draft_tokens")
 		accepted := spec.Get("num_accepted_draft_tokens")
 		if drafted.Exists() && accepted.Exists() {
@@ -536,15 +560,57 @@ func buildMetrics(modelID string, start time.Time, inputTokens, outputTokens, ca
 			draftAccTokens = int(accepted.Int())
 		}
 	}
-	if timeToFirstToken := responseMetrics.Get("time_to_first_token_ms"); timeToFirstToken.Exists() && timeToFirstToken.Float() > 0 {
+	if timeToFirstToken := sources.metrics.Get("time_to_first_token_ms"); timeToFirstToken.Exists() && timeToFirstToken.Float() > 0 {
 		cachedForRate := cachedTokens
 		if cachedForRate < 0 {
 			cachedForRate = 0
 		}
 		promptPerSecond = float64(inputTokens-cachedForRate) / (timeToFirstToken.Float() / 1000)
 	}
-	if meanInterTokenLatency := responseMetrics.Get("mean_itl_ms"); meanInterTokenLatency.Exists() && meanInterTokenLatency.Float() > 0 {
+	if meanInterTokenLatency := sources.metrics.Get("mean_itl_ms"); meanInterTokenLatency.Exists() && meanInterTokenLatency.Float() > 0 {
 		tokensPerSecond = 1000 / meanInterTokenLatency.Float()
+	}
+
+	// TensorFold reports its timing in seconds at the top level of the response.
+	// prefill_seconds is the pure prefill time, so it gives the prompt
+	// throughput; time_to_first_token is the fallback when prefill is not
+	// reported. seconds is the total request time.
+	if sources.tensorfold.Exists() {
+		tensorfold := sources.tensorfold
+		if v := tensorfold.Get("tokens_per_second"); v.Type == gjson.Number {
+			tokensPerSecond = v.Float()
+		}
+		if v := tensorfold.Get("seconds"); v.Type == gjson.Number {
+			if secondsMs := int(v.Float() * 1000); secondsMs > durationMs {
+				durationMs = secondsMs
+			}
+		}
+		if inputTokens > 0 {
+			cachedForRate := cachedTokens
+			if cachedForRate < 0 {
+				cachedForRate = 0
+			}
+			if v := tensorfold.Get("prefill_seconds"); v.Type == gjson.Number && v.Float() > 0 {
+				promptPerSecond = float64(inputTokens-cachedForRate) / v.Float()
+			} else if v := tensorfold.Get("time_to_first_token"); v.Type == gjson.Number && v.Float() > 0 {
+				promptPerSecond = float64(inputTokens-cachedForRate) / v.Float()
+			}
+		}
+	}
+
+	// TensorFold places speculative decoding counters in a sibling object. It
+	// also tolerates them nested under tensorfold for older responses.
+	spec := sources.speculative
+	if !spec.Exists() {
+		spec = sources.tensorfold.Get("speculative")
+	}
+	if spec.Exists() {
+		drafted := spec.Get("drafted")
+		accepted := spec.Get("accepted")
+		if drafted.Exists() && accepted.Exists() {
+			draftTokens = int(drafted.Int())
+			draftAccTokens = int(accepted.Int())
+		}
 	}
 
 	return ActivityLogEntry{

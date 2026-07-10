@@ -17,10 +17,22 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+// metricSourcesFromBody builds the metric blocks parseMetrics reads from a
+// parsed response body.
+func metricSourcesFromBody(parsed gjson.Result) metricSources {
+	return metricSources{
+		usage:       parsed.Get("usage"),
+		timings:     parsed.Get("timings"),
+		metrics:     parsed.Get("metrics"),
+		tensorfold:  parsed.Get("tensorfold"),
+		speculative: parsed.Get("speculative"),
+	}
+}
+
 func TestServer_ParseMetrics_ChatCompletions(t *testing.T) {
 	body := `{"usage":{"prompt_tokens":12,"completion_tokens":7,"prompt_tokens_details":{"cached_tokens":4}}}`
 	parsed := gjson.Parse(body)
-	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
+	entry, err := parseMetrics("m", time.Now(), metricSourcesFromBody(parsed))
 	if err != nil {
 		t.Fatalf("parseMetrics: %v", err)
 	}
@@ -89,7 +101,7 @@ func TestServer_ActivitySourceForwardedHeaders(t *testing.T) {
 func TestServer_ParseMetrics_Timings(t *testing.T) {
 	body := `{"timings":{"prompt_n":20,"predicted_n":50,"prompt_per_second":100.0,"predicted_per_second":40.0,"prompt_ms":200,"predicted_ms":1250,"cache_n":8}}`
 	parsed := gjson.Parse(body)
-	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
+	entry, err := parseMetrics("m", time.Now(), metricSourcesFromBody(parsed))
 	if err != nil {
 		t.Fatalf("parseMetrics: %v", err)
 	}
@@ -107,7 +119,7 @@ func TestServer_ParseMetrics_Timings(t *testing.T) {
 func TestServer_ParseMetrics_TabbyAPI(t *testing.T) {
 	body := `{"id":"chatcmpl-131b9995cd0c40c99e2ce958083ee406","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":83,"prompt_time":2.36,"prompt_tokens_per_sec":35.17,"completion_tokens":192,"completion_time":11.22,"completion_tokens_per_sec":17.11,"total_tokens":275,"total_time":13.63},"model":"SC_6.00bpw_H6_V6"}`
 	parsed := gjson.Parse(body)
-	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
+	entry, err := parseMetrics("m", time.Now(), metricSourcesFromBody(parsed))
 	if err != nil {
 		t.Fatalf("parseMetrics: %v", err)
 	}
@@ -167,7 +179,7 @@ func TestServer_ParseMetrics_OMLX(t *testing.T) {
 						entry, err = processStreamingResponse("m", time.Now(), []byte(stream))
 					} else {
 						parsed := gjson.Parse(body)
-						entry, err = parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
+						entry, err = parseMetrics("m", time.Now(), metricSourcesFromBody(parsed))
 					}
 					if err != nil {
 						t.Fatalf("parse metrics: %v", err)
@@ -221,12 +233,58 @@ func TestServer_MetricsMiddleware_OMLX(t *testing.T) {
 	}
 }
 
+func TestServer_MetricsMiddleware_TensorFold(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		name := "JSON"
+		if streaming {
+			name = "SSE"
+		}
+		t.Run(name, func(t *testing.T) {
+			mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 10, 0)
+			cfg := config.Config{Models: map[string]config.ModelConfig{"m": {}}}
+			body := `{"usage":{"prompt_tokens":100,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":40}},"tensorfold":{"tokens_per_second":50.5,"seconds":1.25,"prefill_seconds":0.2},"speculative":{"drafted":10,"accepted":7}}`
+			contentType := "application/json"
+			if streaming {
+				contentType = "text/event-stream"
+				body = "data: " + body + "\n\ndata: [DONE]\n\n"
+			}
+			handler := chain.New(CreateMetricsMiddleware(mm, cfg)).ThenFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", contentType)
+				io.WriteString(w, body)
+			})
+			r := chatRequest("m")
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			if w.Code != http.StatusOK || w.Body.String() != body {
+				t.Fatalf("response = %d %q, want 200 %q", w.Code, w.Body.String(), body)
+			}
+			entries := metricsEntries(t, mm)
+			if len(entries) != 1 {
+				t.Fatalf("want 1 entry, got %d", len(entries))
+			}
+			entry := entries[0]
+			if entry.Tokens.InputTokens != 100 || entry.Tokens.OutputTokens != 20 || entry.Tokens.CachedTokens != 40 {
+				t.Fatalf("tokens = %+v", entry.Tokens)
+			}
+			if got, want := entry.Tokens.PromptPerSecond, float64(100-40)/0.2; math.Abs(got-want) > 1e-9 {
+				t.Errorf("PromptPerSecond = %v, want %v", got, want)
+			}
+			if entry.Tokens.TokensPerSecond != 50.5 {
+				t.Errorf("TokensPerSecond = %v, want 50.5", entry.Tokens.TokensPerSecond)
+			}
+			if entry.Tokens.DraftTokens != 10 || entry.Tokens.DraftAccTokens != 7 {
+				t.Fatalf("draft tokens = %+v", entry.Tokens)
+			}
+		})
+	}
+}
+
 // llama-server timings and TabbyAPI usage rates never appear together, but a
 // response carrying both must keep the timings-sourced rates.
 func TestServer_ParseMetrics_TabbyAPINotOverwrittenByTimings(t *testing.T) {
 	body := `{"usage":{"prompt_tokens":83,"completion_tokens":192,"prompt_tokens_per_sec":35.17,"completion_tokens_per_sec":17.11},"timings":{"prompt_n":20,"predicted_n":50,"prompt_per_second":100.0,"predicted_per_second":40.0,"prompt_ms":200,"predicted_ms":1250}}`
 	parsed := gjson.Parse(body)
-	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
+	entry, err := parseMetrics("m", time.Now(), metricSourcesFromBody(parsed))
 	if err != nil {
 		t.Fatalf("parseMetrics: %v", err)
 	}
@@ -293,7 +351,7 @@ data: [DONE]
 func TestServer_ParseMetrics_VLLMMetrics(t *testing.T) {
 	body := `{"id":"chatcmpl-abc123","object":"chat.completion","usage":{"prompt_tokens":42,"completion_tokens":128,"total_tokens":170,"prompt_tokens_details":{"cached_tokens":20}},"metrics":{"time_to_first_token_ms":85.2,"generation_time_ms":1240.5,"queue_time_ms":12.3,"mean_itl_ms":9.1,"tokens_per_second":103.2}}`
 	parsed := gjson.Parse(body)
-	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
+	entry, err := parseMetrics("m", time.Now(), metricSourcesFromBody(parsed))
 	if err != nil {
 		t.Fatalf("parseMetrics: %v", err)
 	}
@@ -311,7 +369,7 @@ func TestServer_ParseMetrics_VLLMMetrics(t *testing.T) {
 func TestServer_ParseMetrics_VLLMSpeculativeDecoding(t *testing.T) {
 	body := `{"id":"chatcmpl-abc123","object":"chat.completion","usage":{"prompt_tokens":42,"completion_tokens":128},"metrics":{"mean_itl_ms":9.1,"speculative_decoding":{"mean_acceptance_length":1.7,"draft_acceptance_rate":0.7,"acceptance_histogram":[6,14],"num_spec_steps":20,"num_accepted_draft_tokens":14,"num_draft_tokens":20,"num_spec_tokens":1}}}`
 	parsed := gjson.Parse(body)
-	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
+	entry, err := parseMetrics("m", time.Now(), metricSourcesFromBody(parsed))
 	if err != nil {
 		t.Fatalf("parseMetrics: %v", err)
 	}
@@ -325,7 +383,7 @@ func TestServer_ParseMetrics_VLLMSpeculativeDecoding(t *testing.T) {
 func TestServer_ParseMetrics_VLLMSpeculativeDecodingPartial(t *testing.T) {
 	body := `{"usage":{"prompt_tokens":42,"completion_tokens":128},"metrics":{"speculative_decoding":{"num_draft_tokens":20}}}`
 	parsed := gjson.Parse(body)
-	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
+	entry, err := parseMetrics("m", time.Now(), metricSourcesFromBody(parsed))
 	if err != nil {
 		t.Fatalf("parseMetrics: %v", err)
 	}
@@ -356,12 +414,83 @@ data: [DONE]
 func TestServer_ParseMetrics_TimingsDraftTokensNotOverwritten(t *testing.T) {
 	body := `{"timings":{"prompt_n":20,"predicted_n":50,"draft_n":30,"draft_n_accepted":12},"metrics":{"speculative_decoding":{}}}`
 	parsed := gjson.Parse(body)
-	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
+	entry, err := parseMetrics("m", time.Now(), metricSourcesFromBody(parsed))
 	if err != nil {
 		t.Fatalf("parseMetrics: %v", err)
 	}
 	if entry.Tokens.DraftTokens != 30 || entry.Tokens.DraftAccTokens != 12 {
 		t.Fatalf("draft tokens = %+v, want 12/30", entry.Tokens)
+	}
+}
+
+// TensorFold emits its engine metrics and speculative counters on the final
+// stream chunk, before the usage-only chunk.
+func TestServer_ProcessStreamingResponse_TensorFold(t *testing.T) {
+	body := []byte(`data: {"id":"chatcmpl-1889b6772bacb027659c3629226f02e7","object":"chat.completion.chunk","created":1792716431,"model":"DeepSeek-V4.1-Flash-1017","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"exact_mode":"exact","tensorfold":{"enable_thinking":true,"reasoning_effort":null,"engine":"lanes","tokens_per_second":77.4795665623183,"seconds":2.877028559,"prefill_seconds":1.186083556,"prefill_widths":[],"prefill_raised":[],"time_to_first_token":1.196519402,"sampling":"exact","drafts":true,"token_sha":"4835c57f2a67","min_rows":3},"speculative":{"rounds":37,"drafted":148,"accepted":94,"acceptance_rate":0.6351351351351351,"tokens_per_round":3.5675675675675675}}
+
+data: {"id":"chatcmpl-1889b6772bacb027659c3629226f02e7","object":"chat.completion.chunk","created":1792716431,"model":"DeepSeek-V4.1-Flash-1017","choices":[],"usage":{"prompt_tokens":6081,"completion_tokens":132,"total_tokens":6213,"prompt_tokens_details":{"cached_tokens":4096},"completion_tokens_details":{"reasoning_tokens":68}}}
+
+data: [DONE]
+
+`)
+	entry, err := processStreamingResponse("m", time.Now(), body)
+	if err != nil {
+		t.Fatalf("processStreamingResponse: %v", err)
+	}
+	if entry.Tokens.InputTokens != 6081 || entry.Tokens.OutputTokens != 132 || entry.Tokens.CachedTokens != 4096 {
+		t.Fatalf("tokens = %+v", entry.Tokens)
+	}
+	if got, want := entry.Tokens.TokensPerSecond, 77.4795665623183; math.Abs(got-want) > 1e-9 {
+		t.Errorf("TokensPerSecond = %v, want %v", got, want)
+	}
+	if got, want := entry.Tokens.PromptPerSecond, float64(6081-4096)/1.186083556; math.Abs(got-want) > 1e-9 {
+		t.Errorf("PromptPerSecond = %v, want %v", got, want)
+	}
+	if entry.Tokens.DraftTokens != 148 || entry.Tokens.DraftAccTokens != 94 {
+		t.Errorf("draft tokens = %d/%d, want 148/94", entry.Tokens.DraftTokens, entry.Tokens.DraftAccTokens)
+	}
+	seconds := 2.877028559
+	if want := int(seconds * 1000); entry.DurationMs != want {
+		t.Errorf("DurationMs = %d, want %d", entry.DurationMs, want)
+	}
+}
+
+// Without prefill_seconds, prompt throughput falls back to time_to_first_token.
+// Speculative counters nested under tensorfold are accepted as well.
+func TestServer_ParseMetrics_TensorFold(t *testing.T) {
+	body := `{"usage":{"prompt_tokens":100,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":40}},"tensorfold":{"tokens_per_second":50.5,"seconds":1.25,"time_to_first_token":0.2,"speculative":{"drafted":10,"accepted":7}}}`
+	parsed := gjson.Parse(body)
+	entry, err := parseMetrics("m", time.Now(), metricSourcesFromBody(parsed))
+	if err != nil {
+		t.Fatalf("parseMetrics: %v", err)
+	}
+	if entry.Tokens.InputTokens != 100 || entry.Tokens.OutputTokens != 20 || entry.Tokens.CachedTokens != 40 {
+		t.Fatalf("tokens = %+v", entry.Tokens)
+	}
+	if got, want := entry.Tokens.TokensPerSecond, 50.5; math.Abs(got-want) > 1e-9 {
+		t.Errorf("TokensPerSecond = %v, want %v", got, want)
+	}
+	if got, want := entry.Tokens.PromptPerSecond, float64(100-40)/0.2; math.Abs(got-want) > 1e-9 {
+		t.Errorf("PromptPerSecond = %v, want %v", got, want)
+	}
+	if entry.Tokens.DraftTokens != 10 || entry.Tokens.DraftAccTokens != 7 {
+		t.Errorf("draft tokens = %d/%d, want 10/7", entry.Tokens.DraftTokens, entry.Tokens.DraftAccTokens)
+	}
+	if entry.DurationMs != 1250 {
+		t.Errorf("DurationMs = %d, want 1250", entry.DurationMs)
+	}
+}
+
+// A speculative object missing either counter must leave both unset.
+func TestServer_ParseMetrics_TensorFoldPartialSpeculative(t *testing.T) {
+	body := `{"usage":{"prompt_tokens":10,"completion_tokens":5},"speculative":{"drafted":10}}`
+	parsed := gjson.Parse(body)
+	entry, err := parseMetrics("m", time.Now(), metricSourcesFromBody(parsed))
+	if err != nil {
+		t.Fatalf("parseMetrics: %v", err)
+	}
+	if entry.Tokens.DraftTokens != -1 || entry.Tokens.DraftAccTokens != -1 {
+		t.Fatalf("draft tokens = %+v, want -1/-1", entry.Tokens)
 	}
 }
 
@@ -686,7 +815,11 @@ func TestServer_ParseMetrics_Infill(t *testing.T) {
 	if arr := parsed.Array(); len(arr) > 0 {
 		timings = arr[len(arr)-1].Get("timings")
 	}
-	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), timings, parsed.Get("metrics"))
+	entry, err := parseMetrics("m", time.Now(), metricSources{
+		usage:   parsed.Get("usage"),
+		timings: timings,
+		metrics: parsed.Get("metrics"),
+	})
 	if err != nil {
 		t.Fatalf("parseMetrics: %v", err)
 	}
