@@ -28,7 +28,7 @@ export function formatFileSize(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
-/** Format a timestamp as a coarse relative time ("now", "5m ago", "a while ago"). */
+/** Format a timestamp as a relative time or local timestamp when older than a day. */
 export function formatRelativeTime(timestamp: string): string {
   const now = new Date();
   const date = new Date(timestamp);
@@ -39,5 +39,13 @@ export function formatRelativeTime(timestamp: string): string {
   if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
   const diffInHours = Math.floor(diffInMinutes / 60);
   if (diffInHours < 24) return `${diffInHours}h ago`;
-  return "a while ago";
+  const datePart = [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+  const timePart = [date.getHours(), date.getMinutes(), date.getSeconds()]
+    .map((value) => String(value).padStart(2, "0"))
+    .join(":");
+  return `${datePart} ${timePart}`;
 }
