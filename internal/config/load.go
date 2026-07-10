@@ -190,6 +190,12 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			}
 		}
 
+		// Resolve macros in capabilities (they couldn't be decoded properly
+		// during YAML unmarshal because e.g. "${default_ctx}" is not an int).
+		if err := modelConfig.Capabilities.ResolveMacros(mergedMacros); err != nil {
+			return Config{}, fmt.Errorf("model %s: %w", modelId, err)
+		}
+
 		// Handle PORT macro - only allocate if cmd uses it
 		cmdHasPort := strings.Contains(modelConfig.Cmd, "${PORT}")
 		proxyHasPort := strings.Contains(modelConfig.Proxy, "${PORT}")
@@ -247,10 +253,6 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			if err := validateNestedForUnknownMacros(modelConfig.Metadata, fmt.Sprintf("model %s metadata", modelId)); err != nil {
 				return Config{}, err
 			}
-		}
-
-		if err = modelConfig.Capabilities.Validate(); err != nil {
-			return Config{}, fmt.Errorf("model %s: %w", modelId, err)
 		}
 
 		// Validate SetParamsByID keys and values
