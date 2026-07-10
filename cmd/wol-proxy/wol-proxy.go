@@ -106,8 +106,10 @@ func main() {
 type upstreamStatus string
 
 const (
-	notready upstreamStatus = "not ready"
-	ready    upstreamStatus = "ready"
+	notready              upstreamStatus = "not ready"
+	ready                 upstreamStatus = "ready"
+	initialReconnectDelay                = 100 * time.Millisecond
+	maxReconnectDelay                    = 10 * time.Second
 )
 
 type proxyServer struct {
@@ -132,9 +134,13 @@ func newProxy(url *url.URL) *proxyServer {
 			Timeout: 0, // No timeout for SSE connection
 		}
 
-		waitDuration := 10 * time.Second
+		reconnectDelay := time.Duration(0)
 
 		for {
+			if reconnectDelay > 0 {
+				time.Sleep(reconnectDelay)
+			}
+
 			slog.Debug("connecting to SSE endpoint", "url", eventsUrl)
 
 			req, err := http.NewRequest("GET", eventsUrl, nil)
@@ -142,7 +148,7 @@ func newProxy(url *url.URL) *proxyServer {
 				slog.Warn("failed to create SSE request", "error", err)
 				proxy.setStatus(notready)
 				proxy.incFail(1)
-				time.Sleep(waitDuration)
+				reconnectDelay = nextReconnectDelay(reconnectDelay)
 				continue
 			}
 
@@ -155,7 +161,7 @@ func newProxy(url *url.URL) *proxyServer {
 				slog.Error("failed to connect to SSE endpoint", "error", err)
 				proxy.setStatus(notready)
 				proxy.incFail(1)
-				time.Sleep(10 * time.Second)
+				reconnectDelay = nextReconnectDelay(reconnectDelay)
 				continue
 			}
 
@@ -165,7 +171,7 @@ func newProxy(url *url.URL) *proxyServer {
 				_ = resp.Body.Close()
 				proxy.setStatus(notready)
 				proxy.incFail(1)
-				time.Sleep(10 * time.Second)
+				reconnectDelay = nextReconnectDelay(reconnectDelay)
 				continue
 			}
 
@@ -173,6 +179,7 @@ func newProxy(url *url.URL) *proxyServer {
 			slog.Info("connected to SSE endpoint, upstream ready")
 			proxy.setStatus(ready)
 			proxy.resetFailures()
+			reconnectDelay = 0
 
 			// Read from the SSE stream to detect disconnection
 			scanner := bufio.NewScanner(resp.Body)
@@ -203,12 +210,22 @@ func newProxy(url *url.URL) *proxyServer {
 			proxy.setStatus(notready)
 			proxy.incFail(1)
 
-			// Wait before reconnecting
-			time.Sleep(waitDuration)
 		}
 	}()
 
 	return proxy
+}
+
+func nextReconnectDelay(current time.Duration) time.Duration {
+	if current == 0 {
+		return initialReconnectDelay
+	}
+
+	next := current * 2
+	if next > maxReconnectDelay {
+		return maxReconnectDelay
+	}
+	return next
 }
 
 func (p *proxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {

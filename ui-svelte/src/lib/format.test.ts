@@ -58,6 +58,7 @@ describe("formatRelativeTime", () => {
     expect(formatRelativeTime("2026-06-28T11:59:30Z")).toBe("30s ago");
     expect(formatRelativeTime("2026-06-28T11:55:00Z")).toBe("5m ago");
     expect(formatRelativeTime("2026-06-28T09:00:00Z")).toBe("3h ago");
-    expect(formatRelativeTime("2026-06-25T12:00:00Z")).toBe("a while ago");
+    const olderThanOneDay = new Date(2026, 5, 25, 12, 34, 56);
+    expect(formatRelativeTime(olderThanOneDay.toISOString())).toBe("2026-06-25 12:34:56");
   });
 });
