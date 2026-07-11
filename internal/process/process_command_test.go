@@ -33,14 +33,14 @@ func TestProcess_ApplyReasoningEffort(t *testing.T) {
 		Efforts: map[string]int{"none": 0, "low": 1024, "medium": 2048, "high": 4096, "xhigh": 8192},
 	}
 
-	request := func(body string) *http.Request {
-		r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	request := func(path, body string) *http.Request {
+		r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 		r.Header.Set("Content-Type", "application/json")
 		return r
 	}
 
 	t.Run("selected effort forwards dynamic controls", func(t *testing.T) {
-		r := request(`{"reasoning_effort":"high"}`)
+		r := request("/v1/chat/completions", `{"reasoning_effort":"high"}`)
 		if ok := applyReasoningEffort(httptest.NewRecorder(), r, "qwopus", reasoning, true, ""); !ok {
 			t.Fatal("applyReasoningEffort returned false")
 		}
@@ -57,7 +57,7 @@ func TestProcess_ApplyReasoningEffort(t *testing.T) {
 	})
 
 	t.Run("none disables thinking", func(t *testing.T) {
-		r := request(`{"reasoning_effort":"none"}`)
+		r := request("/v1/chat/completions", `{"reasoning_effort":"none"}`)
 		if ok := applyReasoningEffort(httptest.NewRecorder(), r, "qwopus", reasoning, true, ""); !ok {
 			t.Fatal("applyReasoningEffort returned false")
 		}
@@ -71,7 +71,7 @@ func TestProcess_ApplyReasoningEffort(t *testing.T) {
 	})
 
 	t.Run("default preserves startup behavior", func(t *testing.T) {
-		r := request(`{"reasoning_effort":"default"}`)
+		r := request("/v1/chat/completions", `{"reasoning_effort":"default"}`)
 		if ok := applyReasoningEffort(httptest.NewRecorder(), r, "qwopus", reasoning, false, ""); !ok {
 			t.Fatal("applyReasoningEffort returned false")
 		}
@@ -82,7 +82,7 @@ func TestProcess_ApplyReasoningEffort(t *testing.T) {
 	})
 
 	t.Run("fixed upstream rejects explicit effort", func(t *testing.T) {
-		r := request(`{"reasoning_effort":"low"}`)
+		r := request("/v1/chat/completions", `{"reasoning_effort":"low"}`)
 		w := httptest.NewRecorder()
 		if ok := applyReasoningEffort(w, r, "qwopus", reasoning, false, "llama.cpp was started with a fixed reasoning budget"); ok {
 			t.Fatal("applyReasoningEffort returned true")
@@ -93,7 +93,7 @@ func TestProcess_ApplyReasoningEffort(t *testing.T) {
 	})
 
 	t.Run("unsupported model rejects effort", func(t *testing.T) {
-		r := request(`{"reasoning_effort":"low"}`)
+		r := request("/v1/chat/completions", `{"reasoning_effort":"low"}`)
 		w := httptest.NewRecorder()
 		if ok := applyReasoningEffort(w, r, "plain", config.ModelReasoningConfig{}, true, ""); ok {
 			t.Fatal("applyReasoningEffort returned true")
@@ -102,6 +102,102 @@ func TestProcess_ApplyReasoningEffort(t *testing.T) {
 			t.Errorf("status=%d body=%s", w.Code, w.Body.String())
 		}
 	})
+
+	for _, tc := range []struct {
+		effort string
+		budget int64
+		enable bool
+	}{
+		{"none", 0, false},
+		{"low", 1024, true},
+		{"medium", 2048, true},
+		{"high", 4096, true},
+		{"xhigh", 8192, true},
+	} {
+		t.Run("responses nested "+tc.effort, func(t *testing.T) {
+			r := request("/v1/responses", `{"reasoning":{"effort":"`+tc.effort+`"}}`)
+			if ok := applyReasoningEffort(httptest.NewRecorder(), r, "qwopus-test", reasoning, true, ""); !ok {
+				t.Fatal("applyReasoningEffort returned false")
+			}
+			body, _ := io.ReadAll(r.Body)
+			if got := gjson.GetBytes(body, "thinking_budget_tokens").Int(); got != tc.budget {
+				t.Errorf("thinking_budget_tokens = %d, want %d", got, tc.budget)
+			}
+			if got := gjson.GetBytes(body, "chat_template_kwargs.enable_thinking").Bool(); got != tc.enable {
+				t.Errorf("enable_thinking = %v, want %v", got, tc.enable)
+			}
+			if gjson.GetBytes(body, "reasoning").Exists() {
+				t.Errorf("nested reasoning selector was forwarded: %s", body)
+			}
+		})
+	}
+
+	t.Run("responses nested default preserves startup behavior", func(t *testing.T) {
+		r := request("/v1/responses", `{"reasoning":{"effort":"default"}}`)
+		if ok := applyReasoningEffort(httptest.NewRecorder(), r, "qwopus", reasoning, false, ""); !ok {
+			t.Fatal("applyReasoningEffort returned false")
+		}
+		body, _ := io.ReadAll(r.Body)
+		if gjson.GetBytes(body, "reasoning").Exists() || gjson.GetBytes(body, "thinking_budget_tokens").Exists() {
+			t.Errorf("default body = %s, want no overrides", body)
+		}
+	})
+
+	t.Run("responses omitted effort preserves request", func(t *testing.T) {
+		r := request("/v1/responses", `{"input":"hello"}`)
+		if ok := applyReasoningEffort(httptest.NewRecorder(), r, "qwopus", reasoning, false, ""); !ok {
+			t.Fatal("applyReasoningEffort returned false")
+		}
+		body, _ := io.ReadAll(r.Body)
+		if string(body) != `{"input":"hello"}` {
+			t.Errorf("body = %s", body)
+		}
+	})
+
+	t.Run("responses top level compatibility alias", func(t *testing.T) {
+		r := request("/v1/responses", `{"reasoning_effort":"low"}`)
+		if ok := applyReasoningEffort(httptest.NewRecorder(), r, "qwopus", reasoning, true, ""); !ok {
+			t.Fatal("applyReasoningEffort returned false")
+		}
+		body, _ := io.ReadAll(r.Body)
+		if got := gjson.GetBytes(body, "thinking_budget_tokens").Int(); got != 1024 || gjson.GetBytes(body, "reasoning_effort").Exists() {
+			t.Errorf("compatibility body = %s", body)
+		}
+	})
+
+	t.Run("responses rejects both selector forms", func(t *testing.T) {
+		r := request("/v1/responses", `{"reasoning_effort":"low","reasoning":{"effort":"high"}}`)
+		w := httptest.NewRecorder()
+		if ok := applyReasoningEffort(w, r, "qwopus", reasoning, true, ""); ok {
+			t.Fatal("applyReasoningEffort returned true")
+		}
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "cannot both") {
+			t.Errorf("status=%d body=%s", w.Code, w.Body.String())
+		}
+	})
+
+	for _, tc := range []struct {
+		name      string
+		reasoning config.ModelReasoningConfig
+		dynamic   bool
+		reason    string
+	}{
+		{"unsupported model", config.ModelReasoningConfig{}, true, ""},
+		{"fixed budget", reasoning, false, "llama.cpp was started with a fixed reasoning budget"},
+		{"old build", reasoning, false, "llama.cpp does not support per-request reasoning budgets"},
+		{"unknown build", reasoning, false, "llama.cpp does not support per-request reasoning budgets"},
+	} {
+		t.Run("responses nested "+tc.name+" rejects", func(t *testing.T) {
+			r := request("/v1/responses", `{"reasoning":{"effort":"low"}}`)
+			w := httptest.NewRecorder()
+			if ok := applyReasoningEffort(w, r, "qwopus", tc.reasoning, tc.dynamic, tc.reason); ok {
+				t.Fatal("applyReasoningEffort returned true")
+			}
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want 400", w.Code)
+			}
+		})
+	}
 }
 
 func TestProcess_SupportsThinkingBudgetBuildInfo(t *testing.T) {

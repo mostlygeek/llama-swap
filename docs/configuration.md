@@ -410,6 +410,19 @@ models:
       tlsHandshake: 10
       idleConn: 90
 
+    # Output caps and reasoning effort
+    # - max_output_tokens caps max_tokens and max_completion_tokens for Chat
+    #   Completions, max_tokens for Completions, and max_output_tokens for Responses
+    # - Chat Completions accepts reasoning_effort; Responses accepts reasoning.effort
+    #   (top-level reasoning_effort remains a compatibility alias for Responses)
+    # - dynamic effort selection requires llama.cpp build b8605 or newer and no
+    #   --reasoning-budget or LLAMA_ARG_THINK_BUDGET startup override
+    # - omitted or default effort preserves upstream startup behavior
+    # - llama-swap metadata extensions in /v1/models: architecture, capabilities,
+    #   supported_parameters, context_length, max_input_tokens, max_output_tokens,
+    #   reasoning_supported, reasoning_default, reasoning_efforts, reasoning_budgets
+    # - OpenAI's compatible core fields are id, object, created, and owned_by
+
     # capabilities: model metadata and optional generation limits
     capabilities:
       # context: maximum token context length supported by the model

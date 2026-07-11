@@ -573,23 +573,25 @@ func applyReasoningEffort(w http.ResponseWriter, r *http.Request, modelID string
 		shared.SendResponse(w, r, http.StatusBadRequest, "could not read request body")
 		return false
 	}
-	effortValue := gjson.GetBytes(body, "reasoning_effort")
-	if !effortValue.Exists() {
+	effort, hasEffort, nested, err := requestReasoningEffort(body, r.URL.Path)
+	if err != nil {
+		shared.SendResponse(w, r, http.StatusBadRequest, err.Error())
+		return false
+	}
+	if !hasEffort {
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		return true
 	}
-	effort := effortValue.String()
+	body, err = removeReasoningSelector(body, nested)
+	if err != nil {
+		shared.SendResponse(w, r, http.StatusInternalServerError, "could not remove reasoning effort")
+		return false
+	}
 	if !reasoning.Enabled() {
 		shared.SendResponse(w, r, http.StatusBadRequest, fmt.Sprintf("reasoning_effort is not supported for model %q", modelID))
 		return false
 	}
-	if effort == "default" {
-		body, err = sjson.DeleteBytes(body, "reasoning_effort")
-		if err != nil {
-			shared.SendResponse(w, r, http.StatusInternalServerError, "could not remove reasoning_effort")
-			return false
-		}
-	} else {
+	if effort != "default" {
 		budget, ok := reasoning.Efforts[effort]
 		if !ok {
 			shared.SendResponse(w, r, http.StatusBadRequest, "reasoning_effort must be one of: default, none, low, medium, high, xhigh")
@@ -599,10 +601,7 @@ func applyReasoningEffort(w http.ResponseWriter, r *http.Request, modelID string
 			shared.SendResponse(w, r, http.StatusBadRequest, fmt.Sprintf("reasoning_effort is unavailable for model %q: %s", modelID, unavailableReason))
 			return false
 		}
-		body, err = sjson.DeleteBytes(body, "reasoning_effort")
-		if err == nil {
-			body, err = sjson.SetBytes(body, "thinking_budget_tokens", budget)
-		}
+		body, err = sjson.SetBytes(body, "thinking_budget_tokens", budget)
 		if err == nil {
 			body, err = sjson.SetBytes(body, "chat_template_kwargs.enable_thinking", effort != "none")
 		}
@@ -618,6 +617,38 @@ func applyReasoningEffort(w http.ResponseWriter, r *http.Request, modelID string
 	return true
 }
 
+func requestReasoningEffort(body []byte, path string) (effort string, exists, nested bool, err error) {
+	topLevel := gjson.GetBytes(body, "reasoning_effort")
+	if !isResponsesPath(path) {
+		return topLevel.String(), topLevel.Exists(), false, nil
+	}
+
+	nestedValue := gjson.GetBytes(body, "reasoning.effort")
+	if nestedValue.Exists() && topLevel.Exists() {
+		return "", false, false, fmt.Errorf("reasoning.effort and reasoning_effort cannot both be supplied")
+	}
+	if nestedValue.Exists() {
+		return nestedValue.String(), true, true, nil
+	}
+	return topLevel.String(), topLevel.Exists(), false, nil
+}
+
+func removeReasoningSelector(body []byte, nested bool) ([]byte, error) {
+	if !nested {
+		return sjson.DeleteBytes(body, "reasoning_effort")
+	}
+
+	updated, err := sjson.DeleteBytes(body, "reasoning.effort")
+	if err != nil {
+		return nil, err
+	}
+	reasoning := gjson.GetBytes(updated, "reasoning")
+	if reasoning.IsObject() && len(reasoning.Map()) == 0 {
+		return sjson.DeleteBytes(updated, "reasoning")
+	}
+	return updated, nil
+}
+
 func isReasoningPath(path string) bool {
 	switch path {
 	case "/v1/chat/completions", "/chat/completions", "/v1/responses", "/responses":
@@ -625,6 +656,10 @@ func isReasoningPath(path string) bool {
 	default:
 		return false
 	}
+}
+
+func isResponsesPath(path string) bool {
+	return path == "/v1/responses" || path == "/responses"
 }
 
 // sendStopSignal runs the configured CmdStop (if any) or sends SIGTERM to

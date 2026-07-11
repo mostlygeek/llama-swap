@@ -17,7 +17,10 @@ import (
 // apiUnloadTimeout is used by the API endpoints to stop processes
 const apiUnloadTimeout = 10 * time.Second
 
-// modelRecord is one entry in the OpenAI-compatible /v1/models listing.
+// modelRecord is one entry in the OpenAI-compatible /v1/models listing. The
+// OpenAI core fields are ID, Object, Created, and OwnedBy. Architecture,
+// Capabilities, SupportedParameters, ContextLength, MaxInputTokens,
+// MaxOutputTokens, and Reasoning* are llama-swap model metadata extensions.
 type modelRecord struct {
 	ID                  string         `json:"id"`
 	Object              string         `json:"object"`
