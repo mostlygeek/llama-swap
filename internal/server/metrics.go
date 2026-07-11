@@ -450,8 +450,15 @@ func buildMetrics(modelID string, start time.Time, inputTokens, outputTokens, ca
 			draftAccTokens = int(timings.Get("draft_n_accepted").Int())
 		}
 	}
-	if tokensPerSecondValue := responseMetrics.Get("tokens_per_second"); tokensPerSecondValue.Exists() {
-		tokensPerSecond = tokensPerSecondValue.Float()
+	if timeToFirstToken := responseMetrics.Get("time_to_first_token_ms"); timeToFirstToken.Exists() && timeToFirstToken.Float() > 0 {
+		cachedForRate := cachedTokens
+		if cachedForRate < 0 {
+			cachedForRate = 0
+		}
+		promptPerSecond = float64(inputTokens-cachedForRate) / (timeToFirstToken.Float() / 1000)
+	}
+	if meanInterTokenLatency := responseMetrics.Get("mean_itl_ms"); meanInterTokenLatency.Exists() && meanInterTokenLatency.Float() > 0 {
+		tokensPerSecond = 1000 / meanInterTokenLatency.Float()
 	}
 
 	return ActivityLogEntry{
