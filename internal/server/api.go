@@ -29,7 +29,12 @@ type modelRecord struct {
 	Capabilities        map[string]any `json:"capabilities,omitempty"`
 	SupportedParameters []string       `json:"supported_parameters,omitempty"`
 	ContextLength       int            `json:"context_length,omitempty"`
+	MaxInputTokens      int            `json:"max_input_tokens,omitempty"`
 	MaxOutputTokens     int            `json:"max_output_tokens,omitempty"`
+	ReasoningSupported  bool           `json:"reasoning_supported,omitempty"`
+	ReasoningDefault    string         `json:"reasoning_default,omitempty"`
+	ReasoningEfforts    []string       `json:"reasoning_efforts,omitempty"`
+	ReasoningBudgets    map[string]int `json:"reasoning_budgets,omitempty"`
 	Meta                map[string]any `json:"meta,omitempty"`
 	Status              map[string]any `json:"status"`
 }
@@ -42,12 +47,17 @@ var cappedMetadataKeys = map[string]struct{}{
 	"capabilities":         {},
 	"supported_parameters": {},
 	"context_length":       {},
+	"max_input_tokens":     {},
 	"max_output_tokens":    {},
+	"reasoning_supported":  {},
+	"reasoning_default":    {},
+	"reasoning_efforts":    {},
+	"reasoning_budgets":    {},
 }
 
 // renderCapabilities converts a model's capabilities config into additional
 // /v1/models fields. Returns zero values when caps.Empty() is true.
-func renderCapabilities(caps config.ModelCapConfig) (arch map[string]any, capsMap map[string]any, params []string, ctxLen, maxOutputTokens int) {
+func renderCapabilities(caps config.ModelCapConfig) (arch map[string]any, capsMap map[string]any, params []string, ctxLen, maxInputTokens, maxOutputTokens int, reasoningSupported bool, reasoningDefault string, reasoningEfforts []string, reasoningBudgets map[string]int) {
 	if caps.Empty() {
 		return
 	}
@@ -107,6 +117,21 @@ func renderCapabilities(caps config.ModelCapConfig) (arch map[string]any, capsMa
 	}
 	if caps.MaxOutputTokens > 0 {
 		maxOutputTokens = caps.MaxOutputTokens
+		if caps.Context > 0 {
+			maxInputTokens = caps.Context - caps.MaxOutputTokens
+		}
+	}
+	if caps.Reasoning.Enabled() {
+		reasoningSupported = true
+		reasoningDefault = caps.Reasoning.Default
+		reasoningEfforts = make([]string, 0, len(caps.Reasoning.Efforts))
+		reasoningBudgets = make(map[string]int, len(caps.Reasoning.Efforts))
+		for effort, budget := range caps.Reasoning.Efforts {
+			reasoningEfforts = append(reasoningEfforts, effort)
+			reasoningBudgets[effort] = budget
+		}
+		sort.Strings(reasoningEfforts)
+		params = append(params, "reasoning_effort")
 	}
 
 	return
@@ -163,7 +188,7 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 			Description: strings.TrimSpace(description),
 			Status:      map[string]any{"value": status},
 		}
-		rec.Architecture, rec.Capabilities, rec.SupportedParameters, rec.ContextLength, rec.MaxOutputTokens = renderCapabilities(caps)
+		rec.Architecture, rec.Capabilities, rec.SupportedParameters, rec.ContextLength, rec.MaxInputTokens, rec.MaxOutputTokens, rec.ReasoningSupported, rec.ReasoningDefault, rec.ReasoningEfforts, rec.ReasoningBudgets = renderCapabilities(caps)
 		if !caps.Empty() {
 			metadata = filterCappedMetadata(metadata)
 		}

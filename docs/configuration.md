@@ -423,6 +423,19 @@ models:
       # - context is not used as an output-token limit
       max_output_tokens: 4096
 
+      # reasoning: optional reasoning effort selection and token budgets
+      # - default must be configured in efforts
+      # - valid efforts: none, low, medium, high, xhigh
+      # - none must have budget 0; all other budgets must be greater than 0
+      #   and less than max_output_tokens
+      reasoning:
+        default: medium
+        efforts:
+          none: 0
+          low: 512
+          medium: 1024
+          high: 2048
+
   # Unlisted model example:
   "qwen-unlisted":
     # unlisted: boolean, true or false

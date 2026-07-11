@@ -19,20 +19,40 @@ var validModalities = map[string]struct{}{
 	"image": {},
 }
 
+var validReasoningEfforts = map[string]struct{}{
+	"none":   {},
+	"low":    {},
+	"medium": {},
+	"high":   {},
+	"xhigh":  {},
+}
+
+// ModelReasoningConfig defines the reasoning modes and their token budgets.
+// A non-empty Efforts map marks a model as supporting reasoning selection.
+type ModelReasoningConfig struct {
+	Default string         `yaml:"default"`
+	Efforts map[string]int `yaml:"efforts"`
+}
+
+func (c ModelReasoningConfig) Enabled() bool {
+	return len(c.Efforts) > 0
+}
+
 // ModelCapConfig defines what modalities and features a model supports.
 // Used in /v1/models to inform clients. An empty block (all zero values) is
 // treated as not configured.
 //
 // The custom UnmarshalYAML stores the raw YAML node so macro substitution
 // can be applied later via ResolveMacros. After ResolveMacros is called the
-// typed fields (In, Out, Tools, Reranker, Context, MaxOutputTokens) are populated.
+// typed fields (In, Out, Tools, Reranker, Context, MaxOutputTokens, Reasoning) are populated.
 type ModelCapConfig struct {
-	In              []string `yaml:"in"`
-	Out             []string `yaml:"out"`
-	Tools           bool     `yaml:"tools"`
-	Reranker        bool     `yaml:"reranker"`
-	Context         int      `yaml:"context"`
-	MaxOutputTokens int      `yaml:"max_output_tokens"`
+	In              []string             `yaml:"in"`
+	Out             []string             `yaml:"out"`
+	Tools           bool                 `yaml:"tools"`
+	Reranker        bool                 `yaml:"reranker"`
+	Context         int                  `yaml:"context"`
+	MaxOutputTokens int                  `yaml:"max_output_tokens"`
+	Reasoning       ModelReasoningConfig `yaml:"reasoning"`
 
 	rawNode *yaml.Node
 }
@@ -54,6 +74,7 @@ func (c *ModelCapConfig) UnmarshalYAML(value *yaml.Node) error {
 		c.Reranker = false
 		c.Context = 0
 		c.MaxOutputTokens = 0
+		c.Reasoning = ModelReasoningConfig{}
 	}
 	return nil
 }
@@ -96,7 +117,7 @@ func (c *ModelCapConfig) ResolveMacros(macros MacroList) error {
 
 // Empty returns true when all fields are at their zero values.
 func (c ModelCapConfig) Empty() bool {
-	return len(c.In) == 0 && len(c.Out) == 0 && !c.Tools && !c.Reranker && c.Context == 0 && c.MaxOutputTokens == 0
+	return len(c.In) == 0 && len(c.Out) == 0 && !c.Tools && !c.Reranker && c.Context == 0 && c.MaxOutputTokens == 0 && !c.Reasoning.Enabled() && c.Reasoning.Default == ""
 }
 
 // Validate checks that all modality values are recognized and context is
@@ -117,6 +138,41 @@ func (c ModelCapConfig) Validate() error {
 	}
 	if c.MaxOutputTokens < 0 {
 		return errors.New("capabilities.max_output_tokens: must be >= 0")
+	}
+	if c.Context > 0 && c.MaxOutputTokens > c.Context {
+		return errors.New("capabilities.max_output_tokens: must be <= capabilities.context")
+	}
+	if !c.Reasoning.Enabled() {
+		if c.Reasoning.Default != "" {
+			return errors.New("capabilities.reasoning.default: requires capabilities.reasoning.efforts")
+		}
+		return nil
+	}
+	if c.MaxOutputTokens == 0 {
+		return errors.New("capabilities.reasoning: requires capabilities.max_output_tokens > 0")
+	}
+	if _, ok := validReasoningEfforts[c.Reasoning.Default]; !ok {
+		return fmt.Errorf("capabilities.reasoning.default: invalid effort %q", c.Reasoning.Default)
+	}
+	if _, ok := c.Reasoning.Efforts[c.Reasoning.Default]; !ok {
+		return fmt.Errorf("capabilities.reasoning.default: %q is not configured in capabilities.reasoning.efforts", c.Reasoning.Default)
+	}
+	for effort, budget := range c.Reasoning.Efforts {
+		if _, ok := validReasoningEfforts[effort]; !ok {
+			return fmt.Errorf("capabilities.reasoning.efforts: invalid effort %q", effort)
+		}
+		if effort == "none" {
+			if budget != 0 {
+				return errors.New("capabilities.reasoning.efforts.none: must be 0")
+			}
+			continue
+		}
+		if budget <= 0 {
+			return fmt.Errorf("capabilities.reasoning.efforts.%s: must be > 0", effort)
+		}
+		if budget >= c.MaxOutputTokens {
+			return fmt.Errorf("capabilities.reasoning.efforts.%s: must be less than capabilities.max_output_tokens", effort)
+		}
 	}
 	return nil
 }

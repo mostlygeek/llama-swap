@@ -330,6 +330,37 @@ func TestConfig_ModelCapabilities_Validate(t *testing.T) {
 		assert.Contains(t, err.Error(), "capabilities.max_output_tokens")
 	})
 
+	t.Run("reasoning", func(t *testing.T) {
+		valid := ModelCapConfig{
+			Context:         32000,
+			MaxOutputTokens: 4096,
+			Reasoning: ModelReasoningConfig{
+				Default: "medium",
+				Efforts: map[string]int{"none": 0, "low": 512, "medium": 1024, "high": 2048},
+			},
+		}
+		assert.NoError(t, valid.Validate())
+
+		for _, tc := range []struct {
+			name string
+			caps ModelCapConfig
+		}{
+			{"default_without_efforts", ModelCapConfig{Reasoning: ModelReasoningConfig{Default: "low"}}},
+			{"invalid_default", ModelCapConfig{MaxOutputTokens: 10, Reasoning: ModelReasoningConfig{Default: "invalid", Efforts: map[string]int{"low": 1}}}},
+			{"default_not_configured", ModelCapConfig{MaxOutputTokens: 10, Reasoning: ModelReasoningConfig{Default: "high", Efforts: map[string]int{"low": 1}}}},
+			{"unknown_effort", ModelCapConfig{MaxOutputTokens: 10, Reasoning: ModelReasoningConfig{Default: "low", Efforts: map[string]int{"low": 1, "max": 2}}}},
+			{"none_with_budget", ModelCapConfig{MaxOutputTokens: 10, Reasoning: ModelReasoningConfig{Default: "none", Efforts: map[string]int{"none": 1}}}},
+			{"enabled_effort_without_budget", ModelCapConfig{MaxOutputTokens: 10, Reasoning: ModelReasoningConfig{Default: "low", Efforts: map[string]int{"low": 0}}}},
+			{"budget_at_output_limit", ModelCapConfig{MaxOutputTokens: 10, Reasoning: ModelReasoningConfig{Default: "low", Efforts: map[string]int{"low": 10}}}},
+			{"reasoning_without_output_limit", ModelCapConfig{Reasoning: ModelReasoningConfig{Default: "low", Efforts: map[string]int{"low": 1}}}},
+			{"output_exceeds_context", ModelCapConfig{Context: 10, MaxOutputTokens: 11}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				assert.Error(t, tc.caps.Validate())
+			})
+		}
+	})
+
 	t.Run("rejects_invalid_at_load", func(t *testing.T) {
 		content := `
 models:
@@ -347,6 +378,27 @@ models:
 }
 
 func TestConfig_ModelCapabilities_MacroResolution(t *testing.T) {
+	t.Run("reasoning budgets from macros", func(t *testing.T) {
+		content := `
+macros:
+  output_tokens: 4096
+  medium_budget: 1024
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    capabilities:
+      max_output_tokens: ${output_tokens}
+      reasoning:
+        default: medium
+        efforts:
+          none: 0
+          medium: ${medium_budget}
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, 1024, config.Models["model1"].Capabilities.Reasoning.Efforts["medium"])
+	})
+
 	t.Run("max output tokens from macro", func(t *testing.T) {
 		content := `
 macros:

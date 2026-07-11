@@ -46,7 +46,7 @@ func (s *Server) modelStatus() []apiModel {
 		if st, ok := running[id]; ok {
 			state = string(st)
 		}
-		_, capsMap, _, _, _ := renderCapabilities(mc.Capabilities)
+		_, capsMap, _, _, _, _, _, _, _, _ := renderCapabilities(mc.Capabilities)
 		models = append(models, apiModel{
 			Id:           id,
 			Name:         mc.Name,

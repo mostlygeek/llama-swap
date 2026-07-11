@@ -24,6 +24,7 @@ func TestServer_ApplyMaxOutputTokens(t *testing.T) {
 		{"chat caps max_tokens", "/v1/chat/completions", `{"max_tokens":512}`, "max_tokens", 128},
 		{"chat preserves lower max_tokens", "/v1/chat/completions", `{"max_tokens":64}`, "max_tokens", 64},
 		{"chat caps negative max_tokens", "/v1/chat/completions", `{"max_tokens":-1}`, "max_tokens", 128},
+		{"chat caps zero max_tokens", "/v1/chat/completions", `{"max_tokens":0}`, "max_tokens", 128},
 		{"chat caps fractional max_tokens", "/v1/chat/completions", `{"max_tokens":128.5}`, "max_tokens", 128},
 		{"chat caps max_completion_tokens", "/v1/chat/completions", `{"max_completion_tokens":512}`, "max_completion_tokens", 128},
 		{"completions injects default", "/v1/completions", `{}`, "max_tokens", 128},

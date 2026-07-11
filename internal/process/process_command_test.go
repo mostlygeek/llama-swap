@@ -16,6 +16,7 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/tidwall/gjson"
 )
 
 const (
@@ -25,6 +26,100 @@ const (
 	testPollInterval    = 20 * time.Millisecond
 	testLogPollInterval = 10 * time.Millisecond
 )
+
+func TestProcess_ApplyReasoningEffort(t *testing.T) {
+	reasoning := config.ModelReasoningConfig{
+		Default: "medium",
+		Efforts: map[string]int{"none": 0, "low": 1024, "medium": 2048, "high": 4096, "xhigh": 8192},
+	}
+
+	request := func(body string) *http.Request {
+		r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		return r
+	}
+
+	t.Run("selected effort forwards dynamic controls", func(t *testing.T) {
+		r := request(`{"reasoning_effort":"high"}`)
+		if ok := applyReasoningEffort(httptest.NewRecorder(), r, "qwopus", reasoning, true, ""); !ok {
+			t.Fatal("applyReasoningEffort returned false")
+		}
+		body, _ := io.ReadAll(r.Body)
+		if got := gjson.GetBytes(body, "thinking_budget_tokens").Int(); got != 4096 {
+			t.Errorf("thinking_budget_tokens = %d, want 4096", got)
+		}
+		if !gjson.GetBytes(body, "chat_template_kwargs.enable_thinking").Bool() {
+			t.Error("enable_thinking = false, want true")
+		}
+		if gjson.GetBytes(body, "reasoning_effort").Exists() {
+			t.Error("reasoning_effort was forwarded")
+		}
+	})
+
+	t.Run("none disables thinking", func(t *testing.T) {
+		r := request(`{"reasoning_effort":"none"}`)
+		if ok := applyReasoningEffort(httptest.NewRecorder(), r, "qwopus", reasoning, true, ""); !ok {
+			t.Fatal("applyReasoningEffort returned false")
+		}
+		body, _ := io.ReadAll(r.Body)
+		if got := gjson.GetBytes(body, "thinking_budget_tokens").Int(); got != 0 {
+			t.Errorf("thinking_budget_tokens = %d, want 0", got)
+		}
+		if gjson.GetBytes(body, "chat_template_kwargs.enable_thinking").Bool() {
+			t.Error("enable_thinking = true, want false")
+		}
+	})
+
+	t.Run("default preserves startup behavior", func(t *testing.T) {
+		r := request(`{"reasoning_effort":"default"}`)
+		if ok := applyReasoningEffort(httptest.NewRecorder(), r, "qwopus", reasoning, false, ""); !ok {
+			t.Fatal("applyReasoningEffort returned false")
+		}
+		body, _ := io.ReadAll(r.Body)
+		if gjson.GetBytes(body, "thinking_budget_tokens").Exists() || gjson.GetBytes(body, "reasoning_effort").Exists() {
+			t.Errorf("default body = %s, want no overrides", body)
+		}
+	})
+
+	t.Run("fixed upstream rejects explicit effort", func(t *testing.T) {
+		r := request(`{"reasoning_effort":"low"}`)
+		w := httptest.NewRecorder()
+		if ok := applyReasoningEffort(w, r, "qwopus", reasoning, false, "llama.cpp was started with a fixed reasoning budget"); ok {
+			t.Fatal("applyReasoningEffort returned true")
+		}
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "fixed reasoning budget") {
+			t.Errorf("status=%d body=%s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("unsupported model rejects effort", func(t *testing.T) {
+		r := request(`{"reasoning_effort":"low"}`)
+		w := httptest.NewRecorder()
+		if ok := applyReasoningEffort(w, r, "plain", config.ModelReasoningConfig{}, true, ""); ok {
+			t.Fatal("applyReasoningEffort returned true")
+		}
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "not supported") {
+			t.Errorf("status=%d body=%s", w.Code, w.Body.String())
+		}
+	})
+}
+
+func TestProcess_SupportsThinkingBudgetBuildInfo(t *testing.T) {
+	for _, tc := range []struct {
+		buildInfo string
+		want      bool
+	}{
+		{"b8604-deadbee", false},
+		{"b8605-0fcb376", true},
+		{"b9000-deadbee", true},
+		{"unknown", false},
+		{"b9000-custom", false},
+	} {
+		if got := supportsThinkingBudgetBuildInfo(tc.buildInfo); got != tc.want {
+			t.Errorf("supportsThinkingBudgetBuildInfo(%q) = %v, want %v", tc.buildInfo, got, tc.want)
+		}
+	}
+}
 
 func newProcessCommand(t *testing.T, conf config.ModelConfig) *ProcessCommand {
 	t.Helper()

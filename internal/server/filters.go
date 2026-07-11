@@ -111,7 +111,7 @@ func applyMaxOutputTokens(body []byte, path string, max int) ([]byte, error) {
 			continue
 		}
 		configured = true
-		if value.Type == gjson.Number && value.Float() >= 0 && value.Float() <= float64(max) && value.Float() == math.Trunc(value.Float()) {
+		if value.Type == gjson.Number && value.Float() > 0 && value.Float() <= float64(max) && value.Float() == math.Trunc(value.Float()) {
 			continue
 		}
 		var err error

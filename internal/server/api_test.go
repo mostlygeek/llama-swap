@@ -62,7 +62,14 @@ func TestServer_HandleListModels_Aliases(t *testing.T) {
 	s.cfg = config.Config{
 		IncludeAliasesInList: true,
 		Models: map[string]config.ModelConfig{
-			"real": {Aliases: []string{"nick"}, Capabilities: config.ModelCapConfig{MaxOutputTokens: 1024}},
+			"real": {Aliases: []string{"nick"}, Capabilities: config.ModelCapConfig{
+				Context:         8192,
+				MaxOutputTokens: 1024,
+				Reasoning: config.ModelReasoningConfig{
+					Default: "low",
+					Efforts: map[string]int{"none": 0, "low": 256},
+				},
+			}},
 		},
 	}
 
@@ -85,6 +92,12 @@ func TestServer_HandleListModels_Aliases(t *testing.T) {
 	}
 	if ids["real"].MaxOutputTokens != 1024 || ids["nick"].MaxOutputTokens != 1024 {
 		t.Errorf("alias max_output_tokens = %d, real = %d, want 1024", ids["nick"].MaxOutputTokens, ids["real"].MaxOutputTokens)
+	}
+	if ids["real"].MaxInputTokens != 7168 || ids["nick"].MaxInputTokens != 7168 {
+		t.Errorf("alias max_input_tokens = %d, real = %d, want 7168", ids["nick"].MaxInputTokens, ids["real"].MaxInputTokens)
+	}
+	if !ids["real"].ReasoningSupported || !ids["nick"].ReasoningSupported || ids["real"].ReasoningDefault != "low" || ids["nick"].ReasoningDefault != "low" {
+		t.Errorf("alias reasoning metadata = real:%+v nick:%+v", ids["real"], ids["nick"])
 	}
 }
 
@@ -524,6 +537,9 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 		if m.ContextLength != 100000 {
 			t.Errorf("context_length = %d", m.ContextLength)
 		}
+		if m.MaxInputTokens != 91808 {
+			t.Errorf("max_input_tokens = %d", m.MaxInputTokens)
+		}
 		if m.MaxOutputTokens != 8192 {
 			t.Errorf("max_output_tokens = %d", m.MaxOutputTokens)
 		}
@@ -619,6 +635,31 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 		}
 	})
 
+	t.Run("reasoning", func(t *testing.T) {
+		m := getModel(t, newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{
+				Context:         32000,
+				MaxOutputTokens: 4096,
+				Reasoning: config.ModelReasoningConfig{
+					Default: "medium",
+					Efforts: map[string]int{"none": 0, "low": 512, "medium": 1024, "high": 2048},
+				},
+			},
+		}))
+		if !m.ReasoningSupported || m.ReasoningDefault != "medium" {
+			t.Errorf("reasoning support/default = %v/%q", m.ReasoningSupported, m.ReasoningDefault)
+		}
+		if !stringSliceEqual(m.ReasoningEfforts, []string{"high", "low", "medium", "none"}) {
+			t.Errorf("reasoning_efforts = %v", m.ReasoningEfforts)
+		}
+		if m.ReasoningBudgets["medium"] != 1024 || m.ReasoningBudgets["none"] != 0 {
+			t.Errorf("reasoning_budgets = %v", m.ReasoningBudgets)
+		}
+		if !stringSliceEqual(m.SupportedParameters, []string{"reasoning_effort"}) {
+			t.Errorf("supported_parameters = %v", m.SupportedParameters)
+		}
+	})
+
 	t.Run("audio_transcriptions", func(t *testing.T) {
 		m := getModel(t, newServer(config.ModelConfig{
 			Capabilities: config.ModelCapConfig{In: []string{"audio"}, Out: []string{"text"}},
@@ -667,7 +708,9 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 			Capabilities: config.ModelCapConfig{In: []string{"text"}},
 			Metadata: map[string]any{
 				"architecture":      "should-be-dropped",
+				"max_input_tokens":  "should-be-dropped",
 				"max_output_tokens": "should-be-dropped",
+				"reasoning_budgets": "should-be-dropped",
 				"custom_field":      "should-remain",
 				"capabilities":      "also-dropped",
 				"other_metadata":    "also-remain",
@@ -685,6 +728,12 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 		}
 		if _, ok := meta["max_output_tokens"]; ok {
 			t.Error("max_output_tokens should be filtered from metadata")
+		}
+		if _, ok := meta["max_input_tokens"]; ok {
+			t.Error("max_input_tokens should be filtered from metadata")
+		}
+		if _, ok := meta["reasoning_budgets"]; ok {
+			t.Error("reasoning_budgets should be filtered from metadata")
 		}
 		if _, ok := meta["custom_field"]; !ok {
 			t.Error("custom_field should remain in metadata")
