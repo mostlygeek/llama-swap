@@ -442,6 +442,12 @@
                                 "minimum": 0,
                                 "default": 0,
                                 "description": "Maximum token context length supported by the model."
+                            },
+                            "max_output_tokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "default": 0,
+                                "description": "Maximum output tokens for a generation request. 0 does not enforce a limit."
                             }
                         },
                         "additionalProperties": false,

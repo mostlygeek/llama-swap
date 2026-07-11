@@ -62,7 +62,7 @@ func TestServer_HandleListModels_Aliases(t *testing.T) {
 	s.cfg = config.Config{
 		IncludeAliasesInList: true,
 		Models: map[string]config.ModelConfig{
-			"real": {Aliases: []string{"nick"}},
+			"real": {Aliases: []string{"nick"}, Capabilities: config.ModelCapConfig{MaxOutputTokens: 1024}},
 		},
 	}
 
@@ -73,12 +73,18 @@ func TestServer_HandleListModels_Aliases(t *testing.T) {
 		Data []modelRecord `json:"data"`
 	}
 	json.Unmarshal(w.Body.Bytes(), &resp)
-	ids := map[string]bool{}
+	ids := map[string]modelRecord{}
 	for _, m := range resp.Data {
-		ids[m.ID] = true
+		ids[m.ID] = m
 	}
-	if !ids["real"] || !ids["nick"] {
+	if _, ok := ids["real"]; !ok {
+		t.Errorf("expected real entry; got %v", ids)
+	}
+	if _, ok := ids["nick"]; !ok {
 		t.Errorf("expected alias entry; got %v", ids)
+	}
+	if ids["real"].MaxOutputTokens != 1024 || ids["nick"].MaxOutputTokens != 1024 {
+		t.Errorf("alias max_output_tokens = %d, real = %d, want 1024", ids["nick"].MaxOutputTokens, ids["real"].MaxOutputTokens)
 	}
 }
 
@@ -484,10 +490,11 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 	t.Run("all_fields", func(t *testing.T) {
 		m := getModel(t, newServer(config.ModelConfig{
 			Capabilities: config.ModelCapConfig{
-				In:      []string{"text", "image"},
-				Out:     []string{"text", "audio"},
-				Tools:   true,
-				Context: 100000,
+				In:              []string{"text", "image"},
+				Out:             []string{"text", "audio"},
+				Tools:           true,
+				Context:         100000,
+				MaxOutputTokens: 8192,
 			},
 		}))
 		if m.Architecture == nil {
@@ -516,6 +523,9 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 		}
 		if m.ContextLength != 100000 {
 			t.Errorf("context_length = %d", m.ContextLength)
+		}
+		if m.MaxOutputTokens != 8192 {
+			t.Errorf("max_output_tokens = %d", m.MaxOutputTokens)
 		}
 	})
 
@@ -597,6 +607,18 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 		}
 	})
 
+	t.Run("max_output_tokens", func(t *testing.T) {
+		m := getModel(t, newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{MaxOutputTokens: 4096},
+		}))
+		if m.MaxOutputTokens != 4096 {
+			t.Errorf("max_output_tokens = %d", m.MaxOutputTokens)
+		}
+		if m.ContextLength != 0 {
+			t.Errorf("context_length = %d, want 0", m.ContextLength)
+		}
+	})
+
 	t.Run("audio_transcriptions", func(t *testing.T) {
 		m := getModel(t, newServer(config.ModelConfig{
 			Capabilities: config.ModelCapConfig{In: []string{"audio"}, Out: []string{"text"}},
@@ -644,10 +666,11 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 		m := getModel(t, newServer(config.ModelConfig{
 			Capabilities: config.ModelCapConfig{In: []string{"text"}},
 			Metadata: map[string]any{
-				"architecture":   "should-be-dropped",
-				"custom_field":   "should-remain",
-				"capabilities":   "also-dropped",
-				"other_metadata": "also-remain",
+				"architecture":      "should-be-dropped",
+				"max_output_tokens": "should-be-dropped",
+				"custom_field":      "should-remain",
+				"capabilities":      "also-dropped",
+				"other_metadata":    "also-remain",
 			},
 		}))
 		if m.Architecture == nil || m.Architecture["input_modalities"] == nil {
@@ -659,6 +682,9 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 		meta := m.Meta["llamaswap"].(map[string]any)
 		if _, ok := meta["architecture"]; ok {
 			t.Error("architecture should be filtered from metadata")
+		}
+		if _, ok := meta["max_output_tokens"]; ok {
+			t.Error("max_output_tokens should be filtered from metadata")
 		}
 		if _, ok := meta["custom_field"]; !ok {
 			t.Error("custom_field should remain in metadata")

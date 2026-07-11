@@ -13,6 +13,77 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+func TestServer_ApplyMaxOutputTokens(t *testing.T) {
+	tests := []struct {
+		name  string
+		path  string
+		body  string
+		field string
+		want  int64
+	}{
+		{"chat caps max_tokens", "/v1/chat/completions", `{"max_tokens":512}`, "max_tokens", 128},
+		{"chat preserves lower max_tokens", "/v1/chat/completions", `{"max_tokens":64}`, "max_tokens", 64},
+		{"chat caps negative max_tokens", "/v1/chat/completions", `{"max_tokens":-1}`, "max_tokens", 128},
+		{"chat caps fractional max_tokens", "/v1/chat/completions", `{"max_tokens":128.5}`, "max_tokens", 128},
+		{"chat caps max_completion_tokens", "/v1/chat/completions", `{"max_completion_tokens":512}`, "max_completion_tokens", 128},
+		{"completions injects default", "/v1/completions", `{}`, "max_tokens", 128},
+		{"responses caps max_output_tokens", "/v1/responses", `{"max_output_tokens":512}`, "max_output_tokens", 128},
+		{"versionless responses injects default", "/v/responses", `{}`, "max_output_tokens", 128},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, err := applyMaxOutputTokens([]byte(tt.body), tt.path, 128)
+			if err != nil {
+				t.Fatalf("applyMaxOutputTokens: %v", err)
+			}
+			if got := gjson.GetBytes(out, tt.field).Int(); got != tt.want {
+				t.Errorf("%s = %d, want %d", tt.field, got, tt.want)
+			}
+		})
+	}
+
+	t.Run("zero configuration leaves request unchanged", func(t *testing.T) {
+		body := []byte(`{"max_tokens":512}`)
+		out, err := applyMaxOutputTokens(body, "/v1/chat/completions", 0)
+		if err != nil {
+			t.Fatalf("applyMaxOutputTokens: %v", err)
+		}
+		if string(out) != string(body) {
+			t.Errorf("body = %s, want %s", out, body)
+		}
+	})
+}
+
+func TestServer_MaxOutputTokens_Alias(t *testing.T) {
+	cfg, err := config.LoadConfigFromReader(strings.NewReader(`
+models:
+  real:
+    cmd: llama-server --port ${PORT}
+    aliases: [alias]
+    filters:
+      setParams:
+        max_tokens: 512
+    capabilities:
+      max_output_tokens: 128
+`))
+	if err != nil {
+		t.Fatalf("LoadConfigFromReader: %v", err)
+	}
+
+	var got []byte
+	handler := CreateFilterMiddleware(cfg)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		got, _ = io.ReadAll(r.Body)
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"alias"}`))
+	req.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	if tokens := gjson.GetBytes(got, "max_tokens").Int(); tokens != 128 {
+		t.Errorf("max_tokens = %d, want 128", tokens)
+	}
+}
+
 func TestServer_ApplyFilters(t *testing.T) {
 	t.Run("useModelName rewrite", func(t *testing.T) {
 		out, err := applyFilters([]byte(`{"model":"alias","temp":1}`), "alias", "real-model", config.Filters{})

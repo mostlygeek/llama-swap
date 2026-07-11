@@ -29,6 +29,7 @@ type modelRecord struct {
 	Capabilities        map[string]any `json:"capabilities,omitempty"`
 	SupportedParameters []string       `json:"supported_parameters,omitempty"`
 	ContextLength       int            `json:"context_length,omitempty"`
+	MaxOutputTokens     int            `json:"max_output_tokens,omitempty"`
 	Meta                map[string]any `json:"meta,omitempty"`
 	Status              map[string]any `json:"status"`
 }
@@ -41,11 +42,12 @@ var cappedMetadataKeys = map[string]struct{}{
 	"capabilities":         {},
 	"supported_parameters": {},
 	"context_length":       {},
+	"max_output_tokens":    {},
 }
 
 // renderCapabilities converts a model's capabilities config into additional
 // /v1/models fields. Returns zero values when caps.Empty() is true.
-func renderCapabilities(caps config.ModelCapConfig) (arch map[string]any, capsMap map[string]any, params []string, ctxLen int) {
+func renderCapabilities(caps config.ModelCapConfig) (arch map[string]any, capsMap map[string]any, params []string, ctxLen, maxOutputTokens int) {
 	if caps.Empty() {
 		return
 	}
@@ -103,6 +105,9 @@ func renderCapabilities(caps config.ModelCapConfig) (arch map[string]any, capsMa
 	if caps.Context > 0 {
 		ctxLen = caps.Context
 	}
+	if caps.MaxOutputTokens > 0 {
+		maxOutputTokens = caps.MaxOutputTokens
+	}
 
 	return
 }
@@ -158,7 +163,7 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 			Description: strings.TrimSpace(description),
 			Status:      map[string]any{"value": status},
 		}
-		rec.Architecture, rec.Capabilities, rec.SupportedParameters, rec.ContextLength = renderCapabilities(caps)
+		rec.Architecture, rec.Capabilities, rec.SupportedParameters, rec.ContextLength, rec.MaxOutputTokens = renderCapabilities(caps)
 		if !caps.Empty() {
 			metadata = filterCappedMetadata(metadata)
 		}

@@ -363,6 +363,13 @@ models:
       # - must be an integer > 0
       context: 32000
 
+      # max_output_tokens: maximum generated tokens allowed per request
+      # - default: 0 (no limit)
+      # - caps max_tokens and max_completion_tokens for chat completions,
+      #   max_tokens for completions, and max_output_tokens for responses
+      # - lower client-provided values are preserved
+      max_output_tokens: 4096
+
   # Unlisted model example:
   "qwen-unlisted":
     # unlisted: boolean, true or false

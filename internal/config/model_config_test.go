@@ -188,6 +188,7 @@ models:
         - image
       tools: true
       context: 32000
+      max_output_tokens: 4096
 `
 		config, err := LoadConfigFromReader(strings.NewReader(content))
 		assert.NoError(t, err)
@@ -198,6 +199,7 @@ models:
 		assert.Equal(t, []string{"text", "audio", "image"}, mc.Capabilities.Out)
 		assert.True(t, mc.Capabilities.Tools)
 		assert.Equal(t, 32000, mc.Capabilities.Context)
+		assert.Equal(t, 4096, mc.Capabilities.MaxOutputTokens)
 	})
 
 	t.Run("partial fields", func(t *testing.T) {
@@ -208,6 +210,7 @@ models:
     capabilities:
       tools: true
       context: 8192
+      max_output_tokens: 1024
 `
 		config, err := LoadConfigFromReader(strings.NewReader(content))
 		assert.NoError(t, err)
@@ -218,6 +221,7 @@ models:
 		assert.Nil(t, mc.Capabilities.Out)
 		assert.True(t, mc.Capabilities.Tools)
 		assert.Equal(t, 8192, mc.Capabilities.Context)
+		assert.Equal(t, 1024, mc.Capabilities.MaxOutputTokens)
 	})
 
 	t.Run("not set", func(t *testing.T) {
@@ -319,6 +323,13 @@ func TestConfig_ModelCapabilities_Validate(t *testing.T) {
 		assert.Contains(t, err.Error(), "capabilities.context")
 	})
 
+	t.Run("negative_max_output_tokens", func(t *testing.T) {
+		caps := ModelCapConfig{MaxOutputTokens: -1}
+		err := caps.Validate()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "capabilities.max_output_tokens")
+	})
+
 	t.Run("rejects_invalid_at_load", func(t *testing.T) {
 		content := `
 models:
@@ -336,6 +347,21 @@ models:
 }
 
 func TestConfig_ModelCapabilities_MacroResolution(t *testing.T) {
+	t.Run("max output tokens from macro", func(t *testing.T) {
+		content := `
+macros:
+  max_output: 4096
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    capabilities:
+      max_output_tokens: ${max_output}
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, 4096, config.Models["model1"].Capabilities.MaxOutputTokens)
+	})
+
 	t.Run("context from global macro", func(t *testing.T) {
 		content := `
 macros:

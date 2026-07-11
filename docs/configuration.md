@@ -410,6 +410,19 @@ models:
       tlsHandshake: 10
       idleConn: 90
 
+    # capabilities: model metadata and optional generation limits
+    capabilities:
+      # context: maximum token context length supported by the model
+      context: 32000
+
+      # max_output_tokens: maximum generated tokens allowed per request
+      # - default: 0 (no limit)
+      # - caps max_tokens and max_completion_tokens for /v1/chat/completions,
+      #   max_tokens for /v1/completions, and max_output_tokens for /v1/responses
+      # - a lower client-provided value is preserved; higher values are capped
+      # - context is not used as an output-token limit
+      max_output_tokens: 4096
+
   # Unlisted model example:
   "qwen-unlisted":
     # unlisted: boolean, true or false

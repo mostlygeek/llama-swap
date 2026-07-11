@@ -25,13 +25,14 @@ var validModalities = map[string]struct{}{
 //
 // The custom UnmarshalYAML stores the raw YAML node so macro substitution
 // can be applied later via ResolveMacros. After ResolveMacros is called the
-// typed fields (In, Out, Tools, Reranker, Context) are populated.
+// typed fields (In, Out, Tools, Reranker, Context, MaxOutputTokens) are populated.
 type ModelCapConfig struct {
-	In       []string `yaml:"in"`
-	Out      []string `yaml:"out"`
-	Tools    bool     `yaml:"tools"`
-	Reranker bool     `yaml:"reranker"`
-	Context  int      `yaml:"context"`
+	In              []string `yaml:"in"`
+	Out             []string `yaml:"out"`
+	Tools           bool     `yaml:"tools"`
+	Reranker        bool     `yaml:"reranker"`
+	Context         int      `yaml:"context"`
+	MaxOutputTokens int      `yaml:"max_output_tokens"`
 
 	rawNode *yaml.Node
 }
@@ -52,6 +53,7 @@ func (c *ModelCapConfig) UnmarshalYAML(value *yaml.Node) error {
 		c.Tools = false
 		c.Reranker = false
 		c.Context = 0
+		c.MaxOutputTokens = 0
 	}
 	return nil
 }
@@ -94,7 +96,7 @@ func (c *ModelCapConfig) ResolveMacros(macros MacroList) error {
 
 // Empty returns true when all fields are at their zero values.
 func (c ModelCapConfig) Empty() bool {
-	return len(c.In) == 0 && len(c.Out) == 0 && !c.Tools && !c.Reranker && c.Context == 0
+	return len(c.In) == 0 && len(c.Out) == 0 && !c.Tools && !c.Reranker && c.Context == 0 && c.MaxOutputTokens == 0
 }
 
 // Validate checks that all modality values are recognized and context is
@@ -112,6 +114,9 @@ func (c ModelCapConfig) Validate() error {
 	}
 	if c.Context < 0 {
 		return errors.New("capabilities.context: must be >= 0")
+	}
+	if c.MaxOutputTokens < 0 {
+		return errors.New("capabilities.max_output_tokens: must be >= 0")
 	}
 	return nil
 }
