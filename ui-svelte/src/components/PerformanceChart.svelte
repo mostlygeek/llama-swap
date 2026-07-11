@@ -20,9 +20,10 @@
     yMax?: number;
     yLabel?: string;
     showLegend?: boolean;
+    valueFormatter?: (value: number) => string;
   }
 
-  let { title, labels, datasets, yMin, yMax, yLabel, showLegend = true }: Props = $props();
+  let { title, labels, datasets, yMin, yMax, yLabel, showLegend = true, valueFormatter }: Props = $props();
 
   let canvas: HTMLCanvasElement;
   let chart: Chart;
@@ -72,6 +73,14 @@
           bodyColor: colors.tooltipText,
           borderColor: colors.tooltipBorder,
           borderWidth: 1,
+          callbacks: valueFormatter
+            ? {
+                label: (context: { dataset: { label?: string }; parsed: { y: number | null } }) => {
+                  const value = context.parsed.y;
+                  return `${context.dataset.label ?? "Value"}: ${value === null ? "N/A" : valueFormatter(value)}`;
+                },
+              }
+            : undefined,
         },
       },
       scales: {
@@ -84,7 +93,11 @@
         y: {
           min: yMin,
           max: yMax,
-          ticks: { color: colors.tick, font: { size: 10 } },
+          ticks: {
+            color: colors.tick,
+            font: { size: 10 },
+            callback: valueFormatter ? (value: string | number) => valueFormatter(Number(value)) : undefined,
+          },
           grid: { color: colors.grid },
           title: yLabel
             ? { display: true, text: yLabel, color: colors.tick }

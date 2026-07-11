@@ -3,6 +3,8 @@
   import { fetchPerformance } from "../stores/api";
   import { persistentStore } from "../stores/persistent";
   import type { SysStat, GpuStat } from "../lib/types";
+  import { formatBytesPerSecond } from "../lib/format";
+  import { buildAdvancedGpuIO, hasAdvancedGpuIO } from "../lib/performanceGpu";
   import PerformanceChart from "../components/PerformanceChart.svelte";
   import SegmentedControl from "../components/SegmentedControl.svelte";
   import * as Card from "$lib/components/ui/card/index.js";
@@ -410,6 +412,19 @@
   const gpuVramTempDatasets = $derived(buildGpuDatasets(filteredGpuStats, "vram_temp_c"));
   const gpuPowerDatasets = $derived(buildGpuDatasets(filteredGpuStats, "power_draw_w"));
   const hasVramTemp = $derived(filteredGpuStats.some((g) => g.vram_temp_c > 0));
+  const advancedGpuIO = $derived(buildAdvancedGpuIO(filteredGpuStats, gpuTimestamps));
+  const hasAdvancedGpuIOData = $derived(hasAdvancedGpuIO(filteredGpuStats));
+
+  function colorizeGpuDatasets(datasets: Array<{ label: string; data: Array<number | null> }>) {
+    return datasets.map((dataset, index) => ({
+      ...dataset,
+      borderColor: COLORS[index % COLORS.length],
+    }));
+  }
+
+  const memoryBandwidthDatasets = $derived(colorizeGpuDatasets(advancedGpuIO.memoryBandwidthDatasets));
+  const pcieDatasets = $derived(colorizeGpuDatasets(advancedGpuIO.pcieDatasets));
+  const graphicsClockDatasets = $derived(colorizeGpuDatasets(advancedGpuIO.graphicsClockDatasets));
 </script>
 
 <div class="space-y-6">
@@ -488,6 +503,69 @@
       </div>
     {/if}
   </section>
+
+  {#if hasAdvancedGpuIOData}
+    <section class="space-y-4">
+      <h3 class="text-lg font-medium text-foreground">Advanced GPU I/O</h3>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {#if memoryBandwidthDatasets.length > 0}
+          <div>
+            <PerformanceChart
+              title="Memory Bandwidth"
+              labels={gpuLabels}
+              datasets={memoryBandwidthDatasets}
+              yMin={0}
+              yLabel="B/s"
+              valueFormatter={formatBytesPerSecond}
+            />
+            {#if advancedGpuIO.memoryBandwidthUtilization.length > 0}
+              <div class="flex flex-wrap items-center justify-center gap-4 text-xs text-muted-foreground mt-1 px-4">
+                {#each advancedGpuIO.memoryBandwidthUtilization as reference}
+                  <span
+                    >{reference.name || `GPU ${reference.id}`} bandwidth: <span class="text-foreground font-medium"
+                      >{reference.value.toFixed(1)}%</span
+                    ></span
+                  >
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/if}
+        {#if pcieDatasets.length > 0}
+          <PerformanceChart
+            title="PCIe Throughput"
+            labels={gpuLabels}
+            datasets={pcieDatasets}
+            yMin={0}
+            yLabel="B/s"
+            valueFormatter={formatBytesPerSecond}
+          />
+        {/if}
+        {#if graphicsClockDatasets.length > 0}
+          <div>
+            <PerformanceChart
+              title="Graphics Clock"
+              labels={gpuLabels}
+              datasets={graphicsClockDatasets}
+              yMin={0}
+              yLabel="MHz"
+            />
+            {#if advancedGpuIO.graphicsClockMaximums.length > 0}
+              <div class="flex flex-wrap items-center justify-center gap-4 text-xs text-muted-foreground mt-1 px-4">
+                {#each advancedGpuIO.graphicsClockMaximums as reference}
+                  <span
+                    >{reference.name || `GPU ${reference.id}`} max: <span class="text-foreground font-medium"
+                      >{reference.value.toLocaleString()} MHz</span
+                    ></span
+                  >
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    </section>
+  {/if}
 
   <!-- System Section -->
   <section class="space-y-4">
