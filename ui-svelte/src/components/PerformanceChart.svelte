@@ -8,7 +8,7 @@
 
   interface Dataset {
     label: string;
-    data: number[];
+    data: Array<number | null>;
     borderColor: string;
   }
 

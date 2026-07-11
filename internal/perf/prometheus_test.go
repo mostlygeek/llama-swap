@@ -12,6 +12,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func float64Ptr(value float64) *float64 {
+	return &value
+}
+
 func TestSanitizeLabel(t *testing.T) {
 	tests := []struct {
 		input string
@@ -245,4 +249,35 @@ func TestMetricsHandler_WithGpuStats(t *testing.T) {
 	body := rec.Body.String()
 	assert.Contains(t, body, "llamaswap_gpu_temperature_celsius")
 	assert.Contains(t, body, `name="TestGPU"`)
+}
+
+func TestWriteGpuMetrics_ExtendedMetrics(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeGpuMetrics(rec, []GpuStat{
+		{
+			ID:                   3,
+			Name:                 "Intel Arc Pro B70",
+			UUID:                 "intel-uuid",
+			ComputeUtilPct:       float64Ptr(99.99),
+			RenderUtilPct:        float64Ptr(12.5),
+			CopyUtilPct:          float64Ptr(25),
+			MemReadBandwidthKBps: float64Ptr(1000),
+			PcieRxMBps:           float64Ptr(12.5),
+			GraphicsClockMHz:     float64Ptr(2800),
+			PowerLimitW:          float64Ptr(230),
+			EnergyConsumedJ:      float64Ptr(100.5),
+		},
+		{ID: 9, Name: "Intel Arc A770", UUID: "intel-uuid-2"},
+	})
+	body := rec.Body.String()
+
+	assert.Contains(t, body, `llamaswap_gpu_compute_util_percent{id="3",name="Intel Arc Pro B70",uuid="intel-uuid"} 99.99`)
+	assert.Contains(t, body, `llamaswap_gpu_render_util_percent{id="3",name="Intel Arc Pro B70",uuid="intel-uuid"} 12.5`)
+	assert.Contains(t, body, `llamaswap_gpu_copy_util_percent{id="3",name="Intel Arc Pro B70",uuid="intel-uuid"} 25`)
+	assert.Contains(t, body, `llamaswap_gpu_memory_read_bytes_per_second{id="3",name="Intel Arc Pro B70",uuid="intel-uuid"} 1e+06`)
+	assert.Contains(t, body, `llamaswap_gpu_pcie_rx_bytes_per_second{id="3",name="Intel Arc Pro B70",uuid="intel-uuid"} 1.25e+07`)
+	assert.Contains(t, body, `llamaswap_gpu_graphics_clock_mhz{id="3",name="Intel Arc Pro B70",uuid="intel-uuid"} 2800`)
+	assert.Contains(t, body, `llamaswap_gpu_power_limit_watts{id="3",name="Intel Arc Pro B70",uuid="intel-uuid"} 230`)
+	assert.Contains(t, body, `llamaswap_gpu_energy_consumed_joules{id="3",name="Intel Arc Pro B70",uuid="intel-uuid"} 100.5`)
+	assert.NotContains(t, body, `llamaswap_gpu_compute_util_percent{id="9"`)
 }
