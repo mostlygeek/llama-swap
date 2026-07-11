@@ -410,6 +410,23 @@ models:
       tlsHandshake: 10
       idleConn: 90
 
+```
+
+### Output caps and reasoning effort
+
+`max_output_tokens` is the per-model generated-token limit. llama-swap caps or
+injects `max_tokens` and `max_completion_tokens` for Chat Completions,
+`max_tokens` for Completions, and `max_output_tokens` for Responses. Chat
+Completions accepts `reasoning_effort`; Responses accepts `reasoning.effort`,
+while top-level `reasoning_effort` remains a compatibility alias.
+
+Dynamic effort selection requires official llama.cpp build `b8605` or newer and
+cannot be used with `--reasoning-budget` or `LLAMA_ARG_THINK_BUDGET`.
+Omitted or `default` effort does not add thinking overrides. The extended
+`/v1/models` fields are llama-swap metadata extensions; the OpenAI-compatible
+core is `id`, `object`, `created`, and `owned_by`.
+
+```yaml
     # Output caps and reasoning effort
     # - max_output_tokens caps max_tokens and max_completion_tokens for Chat
     #   Completions, max_tokens for Completions, and max_output_tokens for Responses

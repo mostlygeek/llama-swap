@@ -16,6 +16,7 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/shared"
 	"github.com/tidwall/gjson"
 )
 
@@ -197,6 +198,61 @@ func TestProcess_ApplyReasoningEffort(t *testing.T) {
 				t.Errorf("status = %d, want 400", w.Code)
 			}
 		})
+	}
+}
+
+func TestProcessCommand_ResponsesReasoningAlias(t *testing.T) {
+	cfg, err := config.LoadConfigFromReader(strings.NewReader(`
+models:
+  canonical:
+    cmd: llama-server --port ${PORT}
+    aliases: [MODEL_ALIAS]
+    capabilities:
+      max_output_tokens: 4096
+      reasoning:
+        default: medium
+        efforts:
+          none: 0
+          low: 1024
+          medium: 2048
+`))
+	if err != nil {
+		t.Fatalf("LoadConfigFromReader: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+"model":"MODEL_ALIAS","input":"test","reasoning":{"effort":"low"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	data, err := shared.FetchContext(req, cfg)
+	if err != nil {
+		t.Fatalf("FetchContext: %v", err)
+	}
+	if data.ModelID != "canonical" {
+		t.Fatalf("ModelID = %q, want canonical", data.ModelID)
+	}
+
+	var upstreamBody []byte
+	p := &ProcessCommand{id: data.ModelID, config: cfg.Models[data.ModelID]}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !applyReasoningEffort(w, r, p.id, p.config.Capabilities.Reasoning, true, "") {
+			return
+		}
+		upstreamBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	})
+	p.handler.Store(&handler)
+	p.ServeHTTP(httptest.NewRecorder(), req)
+
+	if gjson.GetBytes(upstreamBody, "model").String() != "MODEL_ALIAS" {
+		t.Errorf("upstream model = %s, want MODEL_ALIAS", upstreamBody)
+	}
+	if gjson.GetBytes(upstreamBody, "reasoning.effort").Exists() || gjson.GetBytes(upstreamBody, "reasoning_effort").Exists() {
+		t.Errorf("reasoning selector was forwarded: %s", upstreamBody)
+	}
+	if got := gjson.GetBytes(upstreamBody, "thinking_budget_tokens").Int(); got != 1024 {
+		t.Errorf("thinking_budget_tokens = %d, want 1024", got)
+	}
+	if !gjson.GetBytes(upstreamBody, "chat_template_kwargs.enable_thinking").Bool() {
+		t.Errorf("enable_thinking = false, want true")
 	}
 }
 
