@@ -2,6 +2,7 @@ package server
 
 import (
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -58,7 +59,7 @@ func TestServer_ProcessStreamingResponse(t *testing.T) {
 }
 
 func TestServer_ProcessStreamingResponse_VLLMMetrics(t *testing.T) {
-	body := []byte(`data: {"id":"chatcmpl-b7a832cea986aea4","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":14,"total_tokens":166,"completion_tokens":152},"metrics":{"tokens_per_second":24.116032676555495}}
+	body := []byte(`data: {"id":"chatcmpl-b7a832cea986aea4","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":14,"total_tokens":166,"completion_tokens":152},"metrics":{"time_to_first_token_ms":70,"mean_itl_ms":10,"tokens_per_second":24.116032676555495}}
 
 data: [DONE]
 `)
@@ -69,23 +70,32 @@ data: [DONE]
 	if entry.Tokens.InputTokens != 14 || entry.Tokens.OutputTokens != 152 {
 		t.Fatalf("tokens = %+v", entry.Tokens)
 	}
-	if entry.Tokens.TokensPerSecond != 24.116032676555495 {
-		t.Errorf("TokensPerSecond = %v, want 24.116032676555495", entry.Tokens.TokensPerSecond)
+	if entry.Tokens.CachedTokens != -1 {
+		t.Errorf("CachedTokens = %d, want -1", entry.Tokens.CachedTokens)
+	}
+	if got, want := entry.Tokens.PromptPerSecond, 200.0; math.Abs(got-want) > 1e-9 {
+		t.Errorf("PromptPerSecond = %v, want %v", got, want)
+	}
+	if entry.Tokens.TokensPerSecond != 100 {
+		t.Errorf("TokensPerSecond = %v, want 100", entry.Tokens.TokensPerSecond)
 	}
 }
 
 func TestServer_ParseMetrics_VLLMMetrics(t *testing.T) {
-	body := `{"id":"chatcmpl-ad324a51921b2e7f","object":"chat.completion","usage":{"prompt_tokens":14,"total_tokens":260,"completion_tokens":246,"prompt_tokens_details":null},"metrics":{"tokens_per_second":24.298537778478494}}`
+	body := `{"id":"chatcmpl-abc123","object":"chat.completion","usage":{"prompt_tokens":42,"completion_tokens":128,"total_tokens":170,"prompt_tokens_details":{"cached_tokens":20}},"metrics":{"time_to_first_token_ms":85.2,"generation_time_ms":1240.5,"queue_time_ms":12.3,"mean_itl_ms":9.1,"tokens_per_second":103.2}}`
 	parsed := gjson.Parse(body)
 	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
 	if err != nil {
 		t.Fatalf("parseMetrics: %v", err)
 	}
-	if entry.Tokens.InputTokens != 14 || entry.Tokens.OutputTokens != 246 {
+	if entry.Tokens.InputTokens != 42 || entry.Tokens.OutputTokens != 128 || entry.Tokens.CachedTokens != 20 {
 		t.Fatalf("tokens = %+v", entry.Tokens)
 	}
-	if entry.Tokens.TokensPerSecond != 24.298537778478494 {
-		t.Errorf("TokensPerSecond = %v, want 24.298537778478494", entry.Tokens.TokensPerSecond)
+	if got, want := entry.Tokens.PromptPerSecond, float64(42-20)/(85.2/1000); math.Abs(got-want) > 1e-9 {
+		t.Errorf("PromptPerSecond = %v, want %v", got, want)
+	}
+	if got, want := entry.Tokens.TokensPerSecond, 1000/9.1; math.Abs(got-want) > 1e-9 {
+		t.Errorf("TokensPerSecond = %v, want %v", got, want)
 	}
 }
 
