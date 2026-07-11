@@ -499,6 +499,25 @@
                                 "description": "Optional reasoning-effort support and per-effort token budgets."
                             }
                         },
+                        "allOf": [
+                            {
+                                "if": {
+                                    "required": [
+                                        "reasoning"
+                                    ]
+                                },
+                                "then": {
+                                    "required": [
+                                        "max_output_tokens"
+                                    ],
+                                    "properties": {
+                                        "max_output_tokens": {
+                                            "minimum": 1
+                                        }
+                                    }
+                                }
+                            }
+                        ],
                         "additionalProperties": false,
                         "description": "Defines what the model accepts for input, output and other metadata. Used in v1/models to inform clients what the model can do. An empty capabilities block (all zero values) is treated as not configured."
                     }
