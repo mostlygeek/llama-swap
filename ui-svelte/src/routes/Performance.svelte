@@ -4,7 +4,7 @@
   import { persistentStore } from "../stores/persistent";
   import type { SysStat, GpuStat } from "../lib/types";
   import { formatBytesPerSecond } from "../lib/format";
-  import { buildAdvancedGpuIO, hasAdvancedGpuIO } from "../lib/performanceGpu";
+  import { buildAdvancedGpuIO, gpuTimestampBucket, hasAdvancedGpuIO } from "../lib/performanceGpu";
   import PerformanceChart from "../components/PerformanceChart.svelte";
   import SegmentedControl from "../components/SegmentedControl.svelte";
   import * as Card from "$lib/components/ui/card/index.js";
@@ -310,9 +310,10 @@
     const timestamps: string[] = [];
     const stats = filteredGpuStats;
     for (const g of stats) {
-      if (!seen.has(g.timestamp)) {
-        seen.add(g.timestamp);
-        timestamps.push(g.timestamp);
+      const timestamp = gpuTimestampBucket(g.timestamp);
+      if (!seen.has(timestamp)) {
+        seen.add(timestamp);
+        timestamps.push(timestamp);
       }
     }
     return timestamps;
@@ -342,7 +343,7 @@
       if (!byGpu.has(key)) {
         byGpu.set(key, { id: g.id, name: g.name, values: Array(timestamps.length).fill(null) });
       }
-      const index = indexByTimestamp.get(g.timestamp);
+      const index = indexByTimestamp.get(gpuTimestampBucket(g.timestamp));
       if (index !== undefined) byGpu.get(key)!.values[index] = g[field] as number;
     }
 
@@ -380,7 +381,7 @@
           values: new Map(fields.map((field) => [field.key, Array(timestamps.length).fill(null)])),
         });
       }
-      const index = indexByTimestamp.get(g.timestamp);
+      const index = indexByTimestamp.get(gpuTimestampBucket(g.timestamp));
       if (index === undefined) continue;
       const entry = byGpu.get(identity)!;
       for (const field of fields) {

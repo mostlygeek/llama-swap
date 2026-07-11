@@ -42,12 +42,18 @@ function gpuIdentity(gpu: GpuStat): string {
   return gpu.uuid || String(gpu.id);
 }
 
+export function gpuTimestampBucket(timestamp: string): string {
+  const milliseconds = new Date(timestamp).getTime();
+  if (Number.isNaN(milliseconds)) return timestamp;
+  return new Date(Math.floor(milliseconds / 1000) * 1000).toISOString();
+}
+
 export function hasAdvancedGpuIO(stats: GpuStat[]): boolean {
   return stats.some((stat) => advancedFields.some((field) => typeof stat[field] === "number"));
 }
 
 export function buildOptionalGpuDatasets(stats: GpuStat[], timestamps: string[], fields: FieldDefinition[]): GpuDataset[] {
-  const indexByTimestamp = new Map(timestamps.map((timestamp, index) => [timestamp, index]));
+  const indexByTimestamp = new Map(timestamps.map((timestamp, index) => [gpuTimestampBucket(timestamp), index]));
   const byGpu = new Map<string, { id: number; name: string; values: Map<OptionalGpuField, Array<number | null>> }>();
 
   for (const stat of stats) {
@@ -60,7 +66,7 @@ export function buildOptionalGpuDatasets(stats: GpuStat[], timestamps: string[],
       });
     }
 
-    const index = indexByTimestamp.get(stat.timestamp);
+    const index = indexByTimestamp.get(gpuTimestampBucket(stat.timestamp));
     if (index === undefined) continue;
     const entry = byGpu.get(identity)!;
     for (const field of fields) {

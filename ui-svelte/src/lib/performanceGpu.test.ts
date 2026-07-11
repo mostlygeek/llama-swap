@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildAdvancedGpuIO, hasAdvancedGpuIO } from "./performanceGpu";
+import { buildAdvancedGpuIO, gpuTimestampBucket, hasAdvancedGpuIO } from "./performanceGpu";
 import type { GpuStat } from "./types";
 
 function gpu(overrides: Partial<GpuStat>): GpuStat {
@@ -27,6 +27,11 @@ describe("advanced GPU I/O", () => {
 
   it("detects available optional telemetry including zero values", () => {
     expect(hasAdvancedGpuIO([gpu({ graphics_clock_mhz: 0 })])).toBe(true);
+  });
+
+  it("groups per-device samples from one poll into a one-second bucket", () => {
+    expect(gpuTimestampBucket("2026-07-11T12:00:00.100Z")).toBe("2026-07-11T12:00:00.000Z");
+    expect(gpuTimestampBucket("2026-07-11T12:00:00.900Z")).toBe("2026-07-11T12:00:00.000Z");
   });
 
   it("keeps multi-GPU bandwidth series separate and gaps missing samples", () => {
