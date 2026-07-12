@@ -36,6 +36,10 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		CaptureBuffer:      5,
 		GlobalTTL:          0,
 		UnloadTimeout:      DEFAULT_UNLOAD_TIMEOUT,
+		UI: UIConfig{Activity: UIActivityConfig{SessionID: []string{
+			"X-Session-ID",
+			"X-Litellm-Session-Id",
+		}}},
 	}
 	if err = yaml.Unmarshal([]byte(yamlStr), &config); err != nil {
 		return Config{}, err
@@ -67,6 +71,8 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	if config.UnloadTimeout == 0 {
 		config.UnloadTimeout = DEFAULT_UNLOAD_TIMEOUT
 	}
+
+	config.UI.Activity.SessionID = normalizeHeaderNames(config.UI.Activity.SessionID)
 
 	if config.Store != nil {
 		if err := validateStorePath(config.Store.Path); err != nil {
@@ -457,4 +463,22 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	}
 
 	return config, nil
+}
+
+func normalizeHeaderNames(names []string) []string {
+	normalized := make([]string, 0, len(names))
+	seen := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		key := strings.ToLower(name)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		normalized = append(normalized, name)
+	}
+	return normalized
 }

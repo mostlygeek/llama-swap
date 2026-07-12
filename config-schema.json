@@ -235,6 +235,32 @@
             "additionalProperties": false,
             "description": "Store configuration for durable llama-swap state."
         },
+        "ui": {
+            "type": "object",
+            "properties": {
+                "activity": {
+                    "type": "object",
+                    "properties": {
+                        "session_id": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            },
+                            "default": [
+                                "X-Session-ID",
+                                "X-Litellm-Session-Id"
+                            ],
+                            "description": "Ordered request headers used to identify sessions in the Activity page."
+                        }
+                    },
+                    "additionalProperties": false,
+                    "default": {}
+                }
+            },
+            "additionalProperties": false,
+            "default": {},
+            "description": "Embedded UI configuration."
+        },
         "performance": {
             "type": "object",
             "properties": {

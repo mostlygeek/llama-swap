@@ -206,9 +206,9 @@ func (s *Server) routes() {
 	modelChain := chain.New(
 		authMW,
 		CreateRequestContextMiddleware(s.cfg),
+		CreateInflightMiddleware(s.inflight),
 		CreateFilterMiddleware(s.cfg),
 		CreateFormFilterMiddleware(s.cfg),
-		CreateInflightMiddleware(s.inflight),
 		CreateMetricsMiddleware(s.metrics, s.cfg),
 	)
 	// Custom endpoints only need auth.

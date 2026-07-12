@@ -146,6 +146,15 @@ metricsMaxInMemory: 1000
 # - set to 0 to disable
 captureBuffer: 15
 
+# ui.activity.session_id: ordered request headers used to identify sessions in
+# the Activity page's in-flight request table.
+# - optional, default: ["X-Session-ID", "X-Litellm-Session-Id"]
+# - matching is case-insensitive; the first non-empty matching header is shown
+# - set to [] to disable session ID lookup
+ui:
+  activity:
+    session_id: ["X-Session-ID", "X-Litellm-Session-Id"]
+
 # store: persistent storage for llama-swap state
 # - optional, default: in-memory sqlite database capped by metricsMaxInMemory
 # - path is a sqlite database file path

@@ -10,6 +10,7 @@ import type {
   InFlightStats,
   InflightRequestEntry,
   PerformanceResponse,
+  UIConfig,
 } from "../lib/types";
 import { connectionState } from "./theme";
 
@@ -25,6 +26,10 @@ export const upstreamLogs = writable<string>("");
 export const activityRevision = writable<number>(0);
 export const inFlightRequests = writable<number>(0);
 export const inflightRequestEntries = writable<InflightRequestEntry[]>([]);
+const defaultUIConfig = (): UIConfig => ({
+  activity: { session_id: ["X-Session-ID", "X-Litellm-Session-Id"] },
+});
+export const uiConfig = writable<UIConfig>(defaultUIConfig());
 export const performanceEnabled = writable<boolean>(false);
 export const versionInfo = writable<VersionInfo>({
   build_date: "unknown",
@@ -48,6 +53,7 @@ export function enableAPIEvents(enabled: boolean): void {
     activityRevision.set(0);
     inFlightRequests.set(0);
     inflightRequestEntries.set([]);
+    uiConfig.set(defaultUIConfig());
     return;
   }
 
@@ -67,6 +73,7 @@ export function enableAPIEvents(enabled: boolean): void {
       activityRevision.update((n) => n + 1);
       inFlightRequests.set(0);
       inflightRequestEntries.set([]);
+      uiConfig.set(defaultUIConfig());
       models.set([]);
       retryCount = 0;
       connectionState.set("connected");
@@ -125,9 +132,41 @@ export function handleAPIEventMessage(data: string): void {
 
     case "inflight": {
       const stats = JSON.parse(message.data) as InFlightStats;
-      const requests = stats.requests ?? [];
-      inFlightRequests.set(requests.length);
-      inflightRequestEntries.set(requests);
+      const withReceiptTime = (request: InflightRequestEntry): InflightRequestEntry => ({
+        ...request,
+        client_received_at_ms: performance.now(),
+      });
+      inflightRequestEntries.update((current) => {
+        let requests = current;
+        switch (stats.operation) {
+          case "snapshot":
+            requests = (stats.requests ?? []).map(withReceiptTime);
+            break;
+          case "upsert": {
+            if (!stats.request) break;
+            const received = withReceiptTime(stats.request);
+            const index = current.findIndex((request) => request.id === received.id);
+            requests = index === -1
+              ? [...current, received]
+              : current.map((request, i) => i === index ? received : request);
+            break;
+          }
+          case "remove":
+            requests = current.filter((request) => request.id !== stats.id);
+            break;
+        }
+        requests.sort((a, b) => {
+          const byTime = Date.parse(a.timestamp) - Date.parse(b.timestamp);
+          return byTime || a.id.localeCompare(b.id, undefined, { numeric: true });
+        });
+        inFlightRequests.set(requests.length);
+        return requests;
+      });
+      break;
+    }
+
+    case "uiConfig": {
+      uiConfig.set(JSON.parse(message.data) as UIConfig);
       break;
     }
   }
