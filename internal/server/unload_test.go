@@ -21,6 +21,7 @@ models:
     proxy: http://localhost:8080
     aliases:
       - alias
+      - " alias "
 `))
 	if err != nil {
 		t.Fatalf("load config: %v", err)
@@ -72,6 +73,19 @@ func TestServer_OpenWebUIUnload(t *testing.T) {
 		s, local := newUnloadTestServer(t)
 		w := httptest.NewRecorder()
 		s.ServeHTTP(w, unloadRequest(`{"model":"alias"}`))
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 body=%q", w.Code, w.Body.String())
+		}
+		if len(local.unloadModels) != 1 || strings.Join(local.unloadModels[0], ",") != "real" {
+			t.Errorf("unloads = %#v, want [[real]]", local.unloadModels)
+		}
+	})
+
+	t.Run("whitespace alias resolves exactly", func(t *testing.T) {
+		s, local := newUnloadTestServer(t)
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, unloadRequest(`{"model":" alias "}`))
 
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200 body=%q", w.Code, w.Body.String())

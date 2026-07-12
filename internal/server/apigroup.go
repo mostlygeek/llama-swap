@@ -116,12 +116,11 @@ func (s *Server) handleOpenWebUIUnload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	requested := strings.TrimSpace(body.Model)
-	if requested == "" {
+	if strings.TrimSpace(body.Model) == "" {
 		shared.SendResponse(w, r, http.StatusBadRequest, "model is required")
 		return
 	}
-	if status, message := s.unloadLocalModel(requested); status != 0 {
+	if status, message := s.unloadLocalModel(body.Model); status != 0 {
 		shared.SendResponse(w, r, status, message)
 		return
 	}
