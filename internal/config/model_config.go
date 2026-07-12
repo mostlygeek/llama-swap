@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -42,9 +41,10 @@ func (c ModelReasoningConfig) Enabled() bool {
 // Used in /v1/models to inform clients. An empty block (all zero values) is
 // treated as not configured.
 //
-// The custom UnmarshalYAML stores the raw YAML node so macro substitution
-// can be applied later via ResolveMacros. After ResolveMacros is called the
-// typed fields (In, Out, Tools, Reranker, Context, MaxOutputTokens, Reasoning) are populated.
+// The custom UnmarshalYAML stores an untyped representation so YAML anchors
+// can be resolved before macro substitution. After ResolveMacros is called
+// the typed fields (In, Out, Tools, Reranker, Context, MaxOutputTokens, and
+// Reasoning) are populated.
 type ModelCapConfig struct {
 	In              []string             `yaml:"in"`
 	Out             []string             `yaml:"out"`
@@ -54,61 +54,44 @@ type ModelCapConfig struct {
 	MaxOutputTokens int                  `yaml:"max_output_tokens"`
 	Reasoning       ModelReasoningConfig `yaml:"reasoning"`
 
-	rawNode *yaml.Node
+	raw map[string]any
 }
 
-// UnmarshalYAML stores the raw YAML node so macro substitution via
-// ResolveMacros can apply before the typed fields are decoded.
+// UnmarshalYAML decodes capabilities into an untyped map. This materializes
+// YAML aliases and merge keys while allowing macro placeholders in fields
+// that will ultimately be decoded as ints or bools.
 func (c *ModelCapConfig) UnmarshalYAML(value *yaml.Node) error {
-	c.rawNode = value
-	// Pre-populate typed fields for the common case (no macros).
-	// If this succeeds we have valid data; if not (e.g. string in int field
-	// because of a macro reference like "${default_ctx}"), we keep the raw
-	// node and resolve after macro substitution.
-	type rawCap ModelCapConfig
-	if err := value.Decode((*rawCap)(c)); err != nil {
-		// Reset fields to zero; macro resolution will re-decode.
-		c.In = nil
-		c.Out = nil
-		c.Tools = false
-		c.Reranker = false
-		c.Context = 0
-		c.MaxOutputTokens = 0
-		c.Reasoning = ModelReasoningConfig{}
-	}
-	return nil
+	return value.Decode(&c.raw)
 }
 
-// ResolveMacros marshals the raw YAML node back to YAML, substitutes all
-// macros (LIFO order matching LoadConfigFromReader), and re-decodes the
-// result into the typed fields.
+// ResolveMacros substitutes all macros in the untyped representation (LIFO
+// order matching LoadConfigFromReader), then decodes the resolved values into
+// the typed fields.
 func (c *ModelCapConfig) ResolveMacros(macros MacroList) error {
-	if c.rawNode == nil {
-		return nil
-	}
-	if len(macros) == 0 {
+	if c.raw == nil {
 		return c.Validate()
 	}
 
-	rawYAML, err := yaml.Marshal(c.rawNode)
-	if err != nil {
-		return fmt.Errorf("capabilities: failed to marshal raw node: %w", err)
-	}
-
-	s := string(rawYAML)
-
-	// Substitute macros in LIFO order (same as LoadConfigFromReader).
+	var resolved any = c.raw
 	for i := len(macros) - 1; i >= 0; i-- {
 		entry := macros[i]
-		macroSlug := fmt.Sprintf("${%s}", entry.Name)
-		macroStr := fmt.Sprintf("%v", entry.Value)
-		s = strings.ReplaceAll(s, macroSlug, macroStr)
+		var err error
+		resolved, err = substituteMacroInValue(resolved, entry.Name, entry.Value)
+		if err != nil {
+			return fmt.Errorf("capabilities: failed macro substitution: %w", err)
+		}
+	}
+	if err := validateNestedForUnknownMacros(resolved, "capabilities"); err != nil {
+		return err
 	}
 
-	// Decode the substituted YAML back into the typed struct.
+	var node yaml.Node
+	if err := node.Encode(resolved); err != nil {
+		return fmt.Errorf("capabilities: failed to encode after macro substitution: %w", err)
+	}
 	*c = ModelCapConfig{}
 	type rawCap ModelCapConfig
-	if err := yaml.Unmarshal([]byte(s), (*rawCap)(c)); err != nil {
+	if err := node.Decode((*rawCap)(c)); err != nil {
 		return fmt.Errorf("capabilities: failed to decode after macro substitution: %w", err)
 	}
 

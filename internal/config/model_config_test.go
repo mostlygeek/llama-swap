@@ -515,6 +515,26 @@ models:
 		assert.True(t, mc.Capabilities.Reranker)
 	})
 
+	t.Run("quoted direct macros preserve scalar types", func(t *testing.T) {
+		content := `
+macros:
+  default_ctx: 32768
+  has_tools: true
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    capabilities:
+      context: "${default_ctx}"
+      tools: "${has_tools}"
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+
+		mc := config.Models["model1"]
+		assert.Equal(t, 32768, mc.Capabilities.Context)
+		assert.True(t, mc.Capabilities.Tools)
+	})
+
 	t.Run("no capabilities block is unchanged", func(t *testing.T) {
 		content := `
 macros:
@@ -540,6 +560,6 @@ models:
 `
 		_, err := LoadConfigFromReader(strings.NewReader(content))
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to decode after macro substitution")
+		assert.Contains(t, err.Error(), "capabilities: unknown macro '${undefined_macro}'")
 	})
 }
