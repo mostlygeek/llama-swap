@@ -247,6 +247,8 @@ func (s *Server) routes() {
 	// Operations endpoints.
 	mux.Handle("GET /unload", apiChain.ThenFunc(s.handleUnload))
 	mux.Handle("GET /running", apiChain.ThenFunc(s.handleRunning))
+	// llama.cpp-compatible endpoint used by Open WebUI's unload control.
+	mux.Handle("POST /models/unload", apiChain.ThenFunc(s.handleOpenWebUIUnload))
 
 	// Upstream passthrough. Meter only the model-dispatched endpoints that can
 	// produce token usage/timings.

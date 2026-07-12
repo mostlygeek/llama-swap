@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -28,6 +29,8 @@ type stubRouter struct {
 	shutdownCalls atomic.Int32
 	running       map[string]process.ProcessState
 	unloadCalls   atomic.Int32
+	unloadMu      sync.Mutex
+	unloadModels  [][]string
 	loggers       map[string]*logmon.Monitor
 }
 
@@ -51,7 +54,12 @@ func (s *stubRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *stubRouter) RunningModels() map[string]process.ProcessState { return s.running }
-func (s *stubRouter) Unload(_ time.Duration, _ ...string)            { s.unloadCalls.Add(1) }
+func (s *stubRouter) Unload(_ time.Duration, models ...string) {
+	s.unloadCalls.Add(1)
+	s.unloadMu.Lock()
+	s.unloadModels = append(s.unloadModels, append([]string(nil), models...))
+	s.unloadMu.Unlock()
+}
 func (s *stubRouter) ProcessLogger(modelID string) (*logmon.Monitor, bool) {
 	if s.loggers != nil {
 		if lg, ok := s.loggers[modelID]; ok {
