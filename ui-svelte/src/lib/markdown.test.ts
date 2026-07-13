@@ -421,3 +421,98 @@ describe("renderStreamingMarkdown", () => {
     expect(pendingHtml).toContain("<strong>bold</strong>");
   });
 });
+
+// The curated highlight.js language subset registered in markdown.ts (a
+// deliberate reduction from highlight.js's full ~190-language bundle down to
+// ~35 languages, to cut bundle size). These tests guard that every language
+// in the curated list is still wired up correctly, and that languages
+// outside the subset correctly fall back to plaintext rather than throwing.
+const CURATED_LANGUAGES: Array<[string, string]> = [
+  ["bash", 'echo "hello"'],
+  ["c", "int main() { return 0; }"],
+  ["cpp", "class Foo {};"],
+  ["csharp", "public class Foo {}"],
+  ["css", ".foo { color: red; }"],
+  ["diff", "--- a\n+++ b\n-old\n+new"],
+  ["go", "package main\nfunc main() {}"],
+  ["graphql", "query { foo }"],
+  ["ini", "[section]\nkey=value"],
+  ["java", "public class Foo {}"],
+  ["javascript", "const x = 1;"],
+  ["json", '{"a": 1}'],
+  ["kotlin", "fun main() {}"],
+  ["less", "@color: red;\n.foo { color: @color; }"],
+  ["lua", "local x = 1"],
+  ["makefile", "all:\n\techo hi"],
+  ["markdown", "# Title"],
+  ["objectivec", "@interface Foo\n@end"],
+  ["perl", "my $x = 1;"],
+  ["php", '<?php echo "hi"; ?>'],
+  ["php-template", "<div><?php echo $x; ?></div>"],
+  ["python", "def foo():\n    pass"],
+  ["python-repl", ">>> print(1)"],
+  ["r", "x <- 1"],
+  ["ruby", "def foo; end"],
+  ["rust", "fn main() {}"],
+  ["scss", "$var: red;\n.foo { color: $var; }"],
+  ["shell", "echo hi"],
+  ["sql", "SELECT * FROM foo;"],
+  ["swift", "func foo() {}"],
+  ["typescript", "const x: number = 1;"],
+  ["vbnet", "Dim x As Integer = 1"],
+  ["wasm", "(module (func))"],
+  ["xml", "<foo>bar</foo>"],
+  ["yaml", "key: value"],
+];
+
+describe("curated highlight.js language registration", () => {
+  it.each(CURATED_LANGUAGES)(
+    "highlights '%s' code blocks without falling back to plaintext",
+    (lang, code) => {
+      const result = renderMarkdown("```" + lang + "\n" + code + "\n```");
+      expect(result).toContain(`language-${lang}`);
+      expect(result).not.toContain("language-plaintext");
+    },
+  );
+
+  it("still renders plaintext fenced blocks with the hljs wrapper class", () => {
+    const result = renderMarkdown("```plaintext\njust text\n```");
+    expect(result).toContain("hljs");
+    expect(result).toContain("language-plaintext");
+    expect(result).toContain("just text");
+  });
+
+  it("falls back to plaintext for a language outside the curated subset (elixir)", () => {
+    const result = renderMarkdown("```elixir\ndefmodule Foo do\nend\n```");
+    expect(result).toContain("language-plaintext");
+    expect(result).not.toContain("language-elixir");
+    expect(result).toContain("defmodule");
+  });
+
+  it("falls back to plaintext for a second excluded language (haskell)", () => {
+    const result = renderMarkdown('```haskell\nmain = putStrLn "hi"\n```');
+    expect(result).toContain("language-plaintext");
+    expect(result).not.toContain("language-haskell");
+  });
+
+  it("falls back to plaintext for code fences with no language info string", () => {
+    const result = renderMarkdown("```\nsome code\n```");
+    expect(result).toContain("language-plaintext");
+    expect(result).toContain("some code");
+  });
+
+  it("resolves language aliases declared by curated grammars (js -> javascript)", () => {
+    const result = renderMarkdown("```js\nconst x = 1;\n```");
+    expect(result).toContain("language-javascript");
+  });
+
+  it("resolves the python-repl grammar under its own hyphenated name", () => {
+    const result = renderMarkdown("```python-repl\n>>> print(1)\n```");
+    expect(result).toContain("language-python-repl");
+  });
+
+  it("resolves the php-template grammar under its own hyphenated name", () => {
+    const result = renderMarkdown("```php-template\n<div><?php echo $x; ?></div>\n```");
+    expect(result).toContain("language-php-template");
+  });
+});
