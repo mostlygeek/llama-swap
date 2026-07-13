@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { Component } from "svelte";
+  import type { Component, ComponentType, SvelteComponent } from "svelte";
   import Router from "svelte-spa-router";
   import { wrap } from "svelte-spa-router/wrap";
   import AppSidebar from "./components/AppSidebar.svelte";
+  import RouteLoadingImpl from "./components/RouteLoading.svelte";
   import PlaygroundStub from "./routes/PlaygroundStub.svelte";
   import * as Sidebar from "$lib/components/ui/sidebar/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
@@ -13,18 +14,25 @@
   import { currentRoute } from "./stores/route";
   import { selectedPlaygroundTab, playgroundTabs } from "./stores/playground";
 
+  // svelte-spa-router's types predate Svelte 5 (loadingComponent wants the
+  // old class-component ComponentType); the cast is safe since Router.svelte
+  // just instantiates whatever component object it's given.
+  const RouteLoading = RouteLoadingImpl as unknown as ComponentType<SvelteComponent>;
+
   // Routes are lazy-loaded so their (and their dependencies') code isn't part
   // of the initial bundle; each becomes its own chunk fetched on first visit.
+  // loadingComponent covers the (usually brief) fetch with a themed
+  // placeholder instead of a blank/white flash.
   const routes = {
-    "/": wrap({ asyncComponent: () => import("./routes/Activity.svelte") }),
+    "/": wrap({ asyncComponent: () => import("./routes/Activity.svelte"), loadingComponent: RouteLoading }),
     "/playground": PlaygroundStub,
-    "/models": wrap({ asyncComponent: () => import("./routes/ModelsDash.svelte") }),
-    "/models/:id": wrap({ asyncComponent: () => import("./routes/ModelDetail.svelte") }),
-    "/logs": wrap({ asyncComponent: () => import("./routes/LogViewer.svelte") }),
-    "/activity": wrap({ asyncComponent: () => import("./routes/Activity.svelte") }),
-    "/settings": wrap({ asyncComponent: () => import("./routes/Settings.svelte") }),
-    "/performance": wrap({ asyncComponent: () => import("./routes/Performance.svelte") }),
-    "*": wrap({ asyncComponent: () => import("./routes/Activity.svelte") }),
+    "/models": wrap({ asyncComponent: () => import("./routes/ModelsDash.svelte"), loadingComponent: RouteLoading }),
+    "/models/:id": wrap({ asyncComponent: () => import("./routes/ModelDetail.svelte"), loadingComponent: RouteLoading }),
+    "/logs": wrap({ asyncComponent: () => import("./routes/LogViewer.svelte"), loadingComponent: RouteLoading }),
+    "/activity": wrap({ asyncComponent: () => import("./routes/Activity.svelte"), loadingComponent: RouteLoading }),
+    "/settings": wrap({ asyncComponent: () => import("./routes/Settings.svelte"), loadingComponent: RouteLoading }),
+    "/performance": wrap({ asyncComponent: () => import("./routes/Performance.svelte"), loadingComponent: RouteLoading }),
+    "*": wrap({ asyncComponent: () => import("./routes/Activity.svelte"), loadingComponent: RouteLoading }),
   };
 
   const routeTitles: Record<string, string> = {
@@ -114,6 +122,8 @@
         <div class="h-full" class:hidden={$currentRoute !== "/playground"}>
           {#if PlaygroundComponent}
             <PlaygroundComponent />
+          {:else}
+            <RouteLoading />
           {/if}
         </div>
         <div class="h-full" class:hidden={$currentRoute === "/playground"}>
