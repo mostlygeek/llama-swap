@@ -30,6 +30,9 @@ export default defineConfig({
   build: {
     outDir: "../internal/server/ui_dist",
     assetsDir: "assets",
+    // The playground chunk (markdown/KaTeX/highlight.js) is deferred and
+    // loaded only after initial mount, so its size doesn't affect first paint.
+    chunkSizeWarningLimit: 700,
   },
   server: {
     // yes very insecure but who's running this thing
