@@ -5,6 +5,9 @@ import remarkMath from "remark-math";
 import remarkRehype from "remark-rehype";
 import rehypeKatex from "rehype-katex";
 import rehypeStringify from "rehype-stringify";
+// Scoped here (rather than in the global stylesheet) so it ships with this
+// module's chunk instead of loading on every page.
+import "katex/dist/katex.min.css";
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
 import c from "highlight.js/lib/languages/c";

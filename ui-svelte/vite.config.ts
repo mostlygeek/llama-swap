@@ -1,14 +1,33 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import tailwindcss from "@tailwindcss/vite";
 import { compression } from "vite-plugin-compression2";
 import path from "node:path";
+
+// KaTeX's CSS lists woff2/woff/ttf fallbacks per font-face, but browsers only
+// ever fetch the first format they support (woff2, universally today) - the
+// other two formats are never downloaded, they just bloat the build output
+// (and the Go binary it's embedded into). Strip them at build time.
+function stripKatexFontFallbacks(): Plugin {
+  return {
+    name: "strip-katex-font-fallbacks",
+    enforce: "pre",
+    transform(code, id) {
+      if (!id.endsWith("katex.min.css")) return null;
+      return code.replace(
+        /url\(([^)]+\.woff2)\) format\("woff2"\),url\([^)]+\.woff\) format\("woff"\),url\([^)]+\.ttf\) format\("truetype"\)/g,
+        'url($1) format("woff2")',
+      );
+    },
+  };
+}
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
     svelte(),
     tailwindcss(),
+    stripKatexFontFallbacks(),
     compression({
       algorithm: "gzip",
       exclude: [/\.(br)$/, /\.(gz)$/],
