@@ -1,3 +1,5 @@
+import { getAuthHeaders } from "./authUtils";
+
 export interface RerankResult {
   index: number;
   relevance_score: number;
@@ -18,7 +20,7 @@ export async function rerank(
 ): Promise<RerankResponse> {
   const response = await fetch("/v1/rerank", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ model, query, documents }),
     signal,
   });

@@ -12,6 +12,7 @@ import type {
   PerformanceResponse,
 } from "../lib/types";
 import { connectionState } from "./theme";
+import { getAuthHeaders } from "../lib/authUtils";
 
 const LOG_LENGTH_LIMIT = 1024 * 100; /* 100KB of log data */
 
@@ -137,7 +138,7 @@ export function handleAPIEventMessage(data: string): void {
 connectionState.subscribe(async (status) => {
   if (status === "connected") {
     try {
-      const response = await fetch("/api/version");
+      const response = await fetch("/api/version", { headers: getAuthHeaders() });
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -151,7 +152,7 @@ connectionState.subscribe(async (status) => {
 
 export async function listModels(): Promise<Model[]> {
   try {
-    const response = await fetch("/api/models/");
+    const response = await fetch("/api/models/", { headers: getAuthHeaders() });
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
@@ -201,6 +202,7 @@ export async function unloadAllModels(): Promise<void> {
   try {
     const response = await fetch(`/api/models/unload`, {
       method: "POST",
+      headers: getAuthHeaders(),
     });
     if (!response.ok) {
       throw new Error(`Failed to unload models: ${response.status}`);
@@ -215,6 +217,7 @@ export async function unloadSingleModel(model: string): Promise<void> {
   try {
     const response = await fetch(`/api/models/unload/${model}`, {
       method: "POST",
+      headers: getAuthHeaders(),
     });
     if (!response.ok) {
       throw new Error(`Failed to unload model: ${response.status}`);
@@ -243,6 +246,7 @@ export async function loadModel(model: string, signal?: AbortSignal): Promise<vo
   try {
     const response = await fetch(`/upstream/${model}/?_=${Date.now()}`, {
       method: "GET",
+      headers: getAuthHeaders(),
       signal,
     });
     if (!response.ok) {
@@ -259,7 +263,7 @@ export async function loadModel(model: string, signal?: AbortSignal): Promise<vo
 
 export async function getCapture(id: number): Promise<ReqRespCapture | null> {
   try {
-    const response = await fetch(`/api/captures/${id}`);
+    const response = await fetch(`/api/captures/${id}`, { headers: getAuthHeaders() });
     if (response.status === 404) {
       return null;
     }
@@ -275,7 +279,7 @@ export async function getCapture(id: number): Promise<ReqRespCapture | null> {
 
 export async function checkPerformanceEnabled(): Promise<void> {
   try {
-    const response = await fetch("/api/performance");
+    const response = await fetch("/api/performance", { headers: getAuthHeaders() });
     if (!response.ok) {
       performanceEnabled.set(false);
       return;
@@ -290,7 +294,7 @@ export async function checkPerformanceEnabled(): Promise<void> {
 export async function fetchPerformance(after?: string): Promise<PerformanceResponse | null> {
   try {
     const url = after ? `/api/performance?after=${encodeURIComponent(after)}` : "/api/performance";
-    const response = await fetch(url);
+    const response = await fetch(url, { headers: getAuthHeaders() });
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }

@@ -1,7 +1,9 @@
 <script lang="ts">
   import { connectionState, themeName, themeMode, themes, type ThemeMode } from "../stores/theme";
   import { versionInfo } from "../stores/api";
+  import { apiKey } from "../stores/auth";
   import * as Select from "$lib/components/ui/select/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
 
   const modes: { value: ThemeMode; label: string }[] = [
     { value: "light", label: "Light" },
@@ -49,6 +51,14 @@
           {/each}
         </Select.Content>
       </Select.Root>
+    </div>
+  </div>
+
+  <div class="rounded-lg border p-4 space-y-3 max-w-md mb-4">
+    <h4 class="text-sm font-semibold text-muted-foreground">Authentication</h4>
+    <div class="flex flex-col gap-2">
+      <span class="text-sm">Playground API Key</span>
+      <Input type="password" placeholder="Optional API key for Playground endpoints" bind:value={$apiKey} />
     </div>
   </div>
 

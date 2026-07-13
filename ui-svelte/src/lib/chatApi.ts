@@ -1,4 +1,5 @@
 import type { ChatMessage, ContentPart } from "./types";
+import { getAuthHeaders } from "./authUtils";
 
 export type Endpoint = "v1/chat/completions" | "v1/messages" | "v1/responses";
 
@@ -303,9 +304,9 @@ export async function* streamChatCompletion(
 
   const response = await fetch(url, {
     method: "POST",
-    headers: {
+    headers: getAuthHeaders({
       "Content-Type": "application/json",
-    },
+    }),
     body: JSON.stringify(body),
     signal,
   });
