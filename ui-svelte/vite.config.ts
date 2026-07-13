@@ -22,22 +22,25 @@ function stripKatexFontFallbacks(): Plugin {
   };
 }
 
+// Already-compressed formats: re-compressing them wastes build time and only
+// bloats the embedded assets with .gz/.br copies nobody benefits from.
+// Already-compressed formats gain nothing from gzip/brotli, they just add dead
+// weight to the Go binary these assets are embedded into.
+const compressionExclude = [/\.(br|gz)$/, /\.(png|jpe?g|gif|webp|avif|ico)$/, /\.(woff2?)$/];
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
     svelte(),
     tailwindcss(),
     stripKatexFontFallbacks(),
+    // The option is `algorithms` (plural) - the plugin ignores unknown keys and
+    // silently runs both gzip and brotli, whose second pass also compresses
+    // files the exclude filter already rejected.
     compression({
-      algorithm: "gzip",
-      exclude: [/\.(br)$/, /\.(gz)$/],
+      algorithms: ["brotliCompress"],
+      exclude: compressionExclude,
       threshold: 1024,
-    }),
-    compression({
-      algorithm: "brotliCompress",
-      exclude: [/\.(br)$/, /\.(gz)$/],
-      threshold: 1024,
-      filename: "[path][base].br",
     }),
   ],
   base: "/ui/",
