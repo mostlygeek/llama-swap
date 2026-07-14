@@ -44,6 +44,27 @@ groups:
 	assert.Contains(t, err.Error(), "model member model2 is used in multiple groups:")
 }
 
+func TestConfig_HasFixedReasoningBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		env  []string
+		want bool
+	}{
+		{"no override", []string{"llama-server", "--port", "8080"}, nil, false},
+		{"separate command argument", []string{"llama-server", "--reasoning-budget", "8192"}, nil, true},
+		{"equals command argument", []string{"llama-server", "--reasoning-budget=8192"}, nil, true},
+		{"environment override", []string{"llama-server"}, []string{"LLAMA_ARG_THINK_BUDGET=8192"}, true},
+		{"unrelated environment", []string{"llama-server"}, []string{"OTHER_REASONING_BUDGET=8192"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := HasFixedReasoningBudget(tc.args, tc.env); got != tc.want {
+				t.Errorf("HasFixedReasoningBudget() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestConfig_ModelAliasesAreUnique(t *testing.T) {
 	content := `
 models:

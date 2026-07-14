@@ -55,3 +55,22 @@ func StripComments(cmdStr string) string {
 	}
 	return strings.Join(cleanedLines, "\n")
 }
+
+// HasFixedReasoningBudget reports whether the upstream command or environment
+// overrides llama.cpp's request-level thinking budget.
+func HasFixedReasoningBudget(args, env []string) bool {
+	for i, arg := range args {
+		if arg == "--reasoning-budget" && i+1 < len(args) {
+			return true
+		}
+		if strings.HasPrefix(arg, "--reasoning-budget=") {
+			return true
+		}
+	}
+	for _, value := range env {
+		if strings.HasPrefix(value, "LLAMA_ARG_THINK_BUDGET=") {
+			return true
+		}
+	}
+	return false
+}

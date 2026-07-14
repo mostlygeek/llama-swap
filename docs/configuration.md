@@ -410,6 +410,62 @@ models:
       tlsHandshake: 10
       idleConn: 90
 
+```
+
+### Output caps and reasoning effort
+
+`max_output_tokens` is the per-model generated-token limit. llama-swap caps or
+injects `max_tokens` and `max_completion_tokens` for Chat Completions,
+`max_tokens` for Completions, and `max_output_tokens` for Responses. Chat
+Completions accepts `reasoning_effort`; Responses accepts `reasoning.effort`,
+while top-level `reasoning_effort` remains a compatibility alias.
+
+Dynamic effort selection requires official llama.cpp build `b8605` or newer and
+cannot be used with `--reasoning-budget` or `LLAMA_ARG_THINK_BUDGET`.
+Omitted or `default` effort does not add thinking overrides. The extended
+`/v1/models` fields are llama-swap metadata extensions; the OpenAI-compatible
+core is `id`, `object`, `created`, and `owned_by`.
+
+```yaml
+    # Output caps and reasoning effort
+    # - max_output_tokens caps max_tokens and max_completion_tokens for Chat
+    #   Completions, max_tokens for Completions, and max_output_tokens for Responses
+    # - Chat Completions accepts reasoning_effort; Responses accepts reasoning.effort
+    #   (top-level reasoning_effort remains a compatibility alias for Responses)
+    # - dynamic effort selection requires llama.cpp build b8605 or newer and no
+    #   --reasoning-budget or LLAMA_ARG_THINK_BUDGET startup override
+    # - omitted or default effort preserves upstream startup behavior
+    # - llama-swap metadata extensions in /v1/models: architecture, capabilities,
+    #   supported_parameters, context_length, max_input_tokens, max_output_tokens,
+    #   reasoning_supported, reasoning_default, reasoning_efforts, reasoning_budgets
+    # - OpenAI's compatible core fields are id, object, created, and owned_by
+
+    # capabilities: model metadata and optional generation limits
+    capabilities:
+      # context: maximum token context length supported by the model
+      context: 32000
+
+      # max_output_tokens: maximum generated tokens allowed per request
+      # - default: 0 (no limit)
+      # - caps max_tokens and max_completion_tokens for /v1/chat/completions,
+      #   max_tokens for /v1/completions, and max_output_tokens for /v1/responses
+      # - a lower client-provided value is preserved; higher values are capped
+      # - context is not used as an output-token limit
+      max_output_tokens: 4096
+
+      # reasoning: optional reasoning effort selection and token budgets
+      # - default must be configured in efforts
+      # - valid efforts: none, low, medium, high, xhigh
+      # - none must have budget 0; all other budgets must be greater than 0
+      #   and less than max_output_tokens
+      reasoning:
+        default: medium
+        efforts:
+          none: 0
+          low: 512
+          medium: 1024
+          high: 2048
+
   # Unlisted model example:
   "qwen-unlisted":
     # unlisted: boolean, true or false

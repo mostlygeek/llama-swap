@@ -442,8 +442,82 @@
                                 "minimum": 0,
                                 "default": 0,
                                 "description": "Maximum token context length supported by the model."
+                            },
+                            "max_output_tokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "default": 0,
+                                "description": "Maximum output tokens for a generation request. 0 does not enforce a limit."
+                            },
+                            "reasoning": {
+                                "type": "object",
+                                "required": [
+                                    "default",
+                                    "efforts"
+                                ],
+                                "properties": {
+                                    "default": {
+                                        "type": "string",
+                                        "enum": [
+                                            "none",
+                                            "low",
+                                            "medium",
+                                            "high",
+                                            "xhigh"
+                                        ],
+                                        "description": "Default reasoning effort for requests that do not specify one."
+                                    },
+                                    "efforts": {
+                                        "type": "object",
+                                        "minProperties": 1,
+                                        "properties": {
+                                            "none": {
+                                                "const": 0
+                                            },
+                                            "low": {
+                                                "type": "integer",
+                                                "minimum": 1
+                                            },
+                                            "medium": {
+                                                "type": "integer",
+                                                "minimum": 1
+                                            },
+                                            "high": {
+                                                "type": "integer",
+                                                "minimum": 1
+                                            },
+                                            "xhigh": {
+                                                "type": "integer",
+                                                "minimum": 1
+                                            }
+                                        },
+                                        "additionalProperties": false,
+                                        "description": "Token budget for each supported reasoning effort. Enabled effort budgets must be less than max_output_tokens."
+                                    }
+                                },
+                                "additionalProperties": false,
+                                "description": "Optional reasoning-effort support and per-effort token budgets."
                             }
                         },
+                        "allOf": [
+                            {
+                                "if": {
+                                    "required": [
+                                        "reasoning"
+                                    ]
+                                },
+                                "then": {
+                                    "required": [
+                                        "max_output_tokens"
+                                    ],
+                                    "properties": {
+                                        "max_output_tokens": {
+                                            "minimum": 1
+                                        }
+                                    }
+                                }
+                            }
+                        ],
                         "additionalProperties": false,
                         "description": "Defines what the model accepts for input, output and other metadata. Used in v1/models to inform clients what the model can do. An empty capabilities block (all zero values) is treated as not configured."
                     }

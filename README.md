@@ -222,6 +222,7 @@ Almost all configuration settings are optional and can be added one step at a ti
   - `useModelName` to override model names sent to upstream servers
   - `${PORT}` automatic port variables for dynamic port assignment
   - `filters` rewrite parts of requests before sending to the upstream server
+  - `capabilities` advertise model features, set output-token limits, and configure reasoning-effort budgets
 
 See the [configuration documentation](docs/configuration.md) for all options.
 

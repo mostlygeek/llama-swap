@@ -1,14 +1,18 @@
 package process
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
 	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -17,6 +21,8 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 var ErrStartAborted = fmt.Errorf("aborted")
@@ -36,6 +42,10 @@ const cmdWaitDelay = 10 * time.Second
 // Stop() by this point, so killProcess is a no-op kill; the short grace just
 // bounds the rare case where a process is still alive when its context is cut.
 const parentCancelGraceTimeout = time.Second
+
+const minimumThinkingBudgetBuild = 8605
+
+var buildInfoPattern = regexp.MustCompile(`^b(\d+)-[0-9a-f]+$`)
 
 type runReq struct {
 	timeout time.Duration
@@ -363,6 +373,12 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 	if err != nil {
 		return startResult{err: fmt.Errorf("unable to get sanitized command: %w", err)}
 	}
+	fixedReasoningBudget := config.HasFixedReasoningBudget(args, p.config.Env)
+	reasoningDynamic := false
+	reasoningUnavailableReason := "llama.cpp does not support per-request reasoning budgets"
+	if fixedReasoningBudget {
+		reasoningUnavailableReason = "llama.cpp was started with a fixed reasoning budget"
+	}
 
 	proxyURL, err := url.Parse(p.config.Proxy)
 	if err != nil {
@@ -404,6 +420,9 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 				}
 			}
 		}()
+		if !applyReasoningEffort(w, r, p.id, p.config.Capabilities.Reasoning, reasoningDynamic, reasoningUnavailableReason) {
+			return
+		}
 		reverseProxy.ServeHTTP(w, r)
 	})
 
@@ -465,6 +484,9 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 
 	checkEndpoint := strings.TrimSpace(p.config.CheckEndpoint)
 	if checkEndpoint == "none" {
+		if !fixedReasoningBudget {
+			reasoningDynamic = upstreamSupportsThinkingBudget(reverseProxy, startCtx)
+		}
 		return startResult{cmd: cmd, cmdDone: cmdDone, cancel: cmdCancel, handlerFn: handlerFn}
 	}
 
@@ -509,8 +531,135 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 		case <-time.After(time.Second):
 		}
 	}
+	if !fixedReasoningBudget {
+		reasoningDynamic = upstreamSupportsThinkingBudget(reverseProxy, startCtx)
+	}
 
 	return startResult{cmd: cmd, cmdDone: cmdDone, cancel: cmdCancel, handlerFn: handlerFn}
+}
+
+// upstreamSupportsThinkingBudget accepts official llama.cpp builds at or after
+// the commit that introduced the request-level field. Unknown/forked builds are
+// deliberately rejected rather than silently ignoring a selected effort.
+func upstreamSupportsThinkingBudget(proxy *httputil.ReverseProxy, ctx context.Context) bool {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "/props", nil)
+	if err != nil {
+		return false
+	}
+	rr := httptest.NewRecorder()
+	proxy.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		return false
+	}
+	buildInfo := gjson.GetBytes(rr.Body.Bytes(), "build_info").String()
+	return supportsThinkingBudgetBuildInfo(buildInfo)
+}
+
+func supportsThinkingBudgetBuildInfo(buildInfo string) bool {
+	match := buildInfoPattern.FindStringSubmatch(buildInfo)
+	if len(match) != 2 {
+		return false
+	}
+	build, err := strconv.Atoi(match[1])
+	return err == nil && build >= minimumThinkingBudgetBuild
+}
+
+func applyReasoningEffort(w http.ResponseWriter, r *http.Request, modelID string, reasoning config.ModelReasoningConfig, dynamic bool, unavailableReason string) bool {
+	if r.Method != http.MethodPost || !isReasoningPath(r.URL.Path) || !strings.Contains(r.Header.Get("Content-Type"), "application/json") {
+		return true
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		shared.SendResponse(w, r, http.StatusBadRequest, "could not read request body")
+		return false
+	}
+	effort, hasEffort, nested, err := requestReasoningEffort(body, r.URL.Path)
+	if err != nil {
+		shared.SendResponse(w, r, http.StatusBadRequest, err.Error())
+		return false
+	}
+	if !hasEffort {
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		return true
+	}
+	body, err = removeReasoningSelector(body, nested)
+	if err != nil {
+		shared.SendResponse(w, r, http.StatusInternalServerError, "could not remove reasoning effort")
+		return false
+	}
+	if !reasoning.Enabled() {
+		shared.SendResponse(w, r, http.StatusBadRequest, fmt.Sprintf("reasoning_effort is not supported for model %q", modelID))
+		return false
+	}
+	if effort != "default" {
+		budget, ok := reasoning.Efforts[effort]
+		if !ok {
+			shared.SendResponse(w, r, http.StatusBadRequest, "reasoning_effort must be one of: default, none, low, medium, high, xhigh")
+			return false
+		}
+		if !dynamic {
+			shared.SendResponse(w, r, http.StatusBadRequest, fmt.Sprintf("reasoning_effort is unavailable for model %q: %s", modelID, unavailableReason))
+			return false
+		}
+		body, err = sjson.SetBytes(body, "thinking_budget_tokens", budget)
+		if err == nil {
+			body, err = sjson.SetBytes(body, "chat_template_kwargs.enable_thinking", effort != "none")
+		}
+		if err != nil {
+			shared.SendResponse(w, r, http.StatusInternalServerError, "could not apply reasoning_effort")
+			return false
+		}
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	r.Header.Del("Transfer-Encoding")
+	r.Header.Set("Content-Length", strconv.Itoa(len(body)))
+	r.ContentLength = int64(len(body))
+	return true
+}
+
+func requestReasoningEffort(body []byte, path string) (effort string, exists, nested bool, err error) {
+	topLevel := gjson.GetBytes(body, "reasoning_effort")
+	if !isResponsesPath(path) {
+		return topLevel.String(), topLevel.Exists(), false, nil
+	}
+
+	nestedValue := gjson.GetBytes(body, "reasoning.effort")
+	if nestedValue.Exists() && topLevel.Exists() {
+		return "", false, false, fmt.Errorf("reasoning.effort and reasoning_effort cannot both be supplied")
+	}
+	if nestedValue.Exists() {
+		return nestedValue.String(), true, true, nil
+	}
+	return topLevel.String(), topLevel.Exists(), false, nil
+}
+
+func removeReasoningSelector(body []byte, nested bool) ([]byte, error) {
+	if !nested {
+		return sjson.DeleteBytes(body, "reasoning_effort")
+	}
+
+	updated, err := sjson.DeleteBytes(body, "reasoning.effort")
+	if err != nil {
+		return nil, err
+	}
+	reasoning := gjson.GetBytes(updated, "reasoning")
+	if reasoning.IsObject() && len(reasoning.Map()) == 0 {
+		return sjson.DeleteBytes(updated, "reasoning")
+	}
+	return updated, nil
+}
+
+func isReasoningPath(path string) bool {
+	switch path {
+	case "/v1/chat/completions", "/chat/completions", "/v1/responses", "/responses":
+		return true
+	default:
+		return false
+	}
+}
+
+func isResponsesPath(path string) bool {
+	return path == "/v1/responses" || path == "/responses"
 }
 
 // sendStopSignal runs the configured CmdStop (if any) or sends SIGTERM to

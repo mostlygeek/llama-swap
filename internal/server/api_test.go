@@ -62,7 +62,14 @@ func TestServer_HandleListModels_Aliases(t *testing.T) {
 	s.cfg = config.Config{
 		IncludeAliasesInList: true,
 		Models: map[string]config.ModelConfig{
-			"real": {Aliases: []string{"nick"}},
+			"real": {Aliases: []string{"nick"}, Capabilities: config.ModelCapConfig{
+				Context:         8192,
+				MaxOutputTokens: 1024,
+				Reasoning: config.ModelReasoningConfig{
+					Default: "low",
+					Efforts: map[string]int{"none": 0, "low": 256},
+				},
+			}},
 		},
 	}
 
@@ -73,12 +80,24 @@ func TestServer_HandleListModels_Aliases(t *testing.T) {
 		Data []modelRecord `json:"data"`
 	}
 	json.Unmarshal(w.Body.Bytes(), &resp)
-	ids := map[string]bool{}
+	ids := map[string]modelRecord{}
 	for _, m := range resp.Data {
-		ids[m.ID] = true
+		ids[m.ID] = m
 	}
-	if !ids["real"] || !ids["nick"] {
+	if _, ok := ids["real"]; !ok {
+		t.Errorf("expected real entry; got %v", ids)
+	}
+	if _, ok := ids["nick"]; !ok {
 		t.Errorf("expected alias entry; got %v", ids)
+	}
+	if ids["real"].MaxOutputTokens != 1024 || ids["nick"].MaxOutputTokens != 1024 {
+		t.Errorf("alias max_output_tokens = %d, real = %d, want 1024", ids["nick"].MaxOutputTokens, ids["real"].MaxOutputTokens)
+	}
+	if ids["real"].MaxInputTokens != 7168 || ids["nick"].MaxInputTokens != 7168 {
+		t.Errorf("alias max_input_tokens = %d, real = %d, want 7168", ids["nick"].MaxInputTokens, ids["real"].MaxInputTokens)
+	}
+	if !ids["real"].ReasoningSupported || !ids["nick"].ReasoningSupported || ids["real"].ReasoningDefault != "low" || ids["nick"].ReasoningDefault != "low" {
+		t.Errorf("alias reasoning metadata = real:%+v nick:%+v", ids["real"], ids["nick"])
 	}
 }
 
@@ -484,10 +503,11 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 	t.Run("all_fields", func(t *testing.T) {
 		m := getModel(t, newServer(config.ModelConfig{
 			Capabilities: config.ModelCapConfig{
-				In:      []string{"text", "image"},
-				Out:     []string{"text", "audio"},
-				Tools:   true,
-				Context: 100000,
+				In:              []string{"text", "image"},
+				Out:             []string{"text", "audio"},
+				Tools:           true,
+				Context:         100000,
+				MaxOutputTokens: 8192,
 			},
 		}))
 		if m.Architecture == nil {
@@ -516,6 +536,12 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 		}
 		if m.ContextLength != 100000 {
 			t.Errorf("context_length = %d", m.ContextLength)
+		}
+		if m.MaxInputTokens != 91808 {
+			t.Errorf("max_input_tokens = %d", m.MaxInputTokens)
+		}
+		if m.MaxOutputTokens != 8192 {
+			t.Errorf("max_output_tokens = %d", m.MaxOutputTokens)
 		}
 	})
 
@@ -597,6 +623,43 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 		}
 	})
 
+	t.Run("max_output_tokens", func(t *testing.T) {
+		m := getModel(t, newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{MaxOutputTokens: 4096},
+		}))
+		if m.MaxOutputTokens != 4096 {
+			t.Errorf("max_output_tokens = %d", m.MaxOutputTokens)
+		}
+		if m.ContextLength != 0 {
+			t.Errorf("context_length = %d, want 0", m.ContextLength)
+		}
+	})
+
+	t.Run("reasoning", func(t *testing.T) {
+		m := getModel(t, newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{
+				Context:         32000,
+				MaxOutputTokens: 4096,
+				Reasoning: config.ModelReasoningConfig{
+					Default: "medium",
+					Efforts: map[string]int{"none": 0, "low": 512, "medium": 1024, "high": 2048},
+				},
+			},
+		}))
+		if !m.ReasoningSupported || m.ReasoningDefault != "medium" {
+			t.Errorf("reasoning support/default = %v/%q", m.ReasoningSupported, m.ReasoningDefault)
+		}
+		if !stringSliceEqual(m.ReasoningEfforts, []string{"high", "low", "medium", "none"}) {
+			t.Errorf("reasoning_efforts = %v", m.ReasoningEfforts)
+		}
+		if m.ReasoningBudgets["medium"] != 1024 || m.ReasoningBudgets["none"] != 0 {
+			t.Errorf("reasoning_budgets = %v", m.ReasoningBudgets)
+		}
+		if !stringSliceEqual(m.SupportedParameters, []string{"reasoning_effort"}) {
+			t.Errorf("supported_parameters = %v", m.SupportedParameters)
+		}
+	})
+
 	t.Run("audio_transcriptions", func(t *testing.T) {
 		m := getModel(t, newServer(config.ModelConfig{
 			Capabilities: config.ModelCapConfig{In: []string{"audio"}, Out: []string{"text"}},
@@ -644,10 +707,13 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 		m := getModel(t, newServer(config.ModelConfig{
 			Capabilities: config.ModelCapConfig{In: []string{"text"}},
 			Metadata: map[string]any{
-				"architecture":   "should-be-dropped",
-				"custom_field":   "should-remain",
-				"capabilities":   "also-dropped",
-				"other_metadata": "also-remain",
+				"architecture":      "should-be-dropped",
+				"max_input_tokens":  "should-be-dropped",
+				"max_output_tokens": "should-be-dropped",
+				"reasoning_budgets": "should-be-dropped",
+				"custom_field":      "should-remain",
+				"capabilities":      "also-dropped",
+				"other_metadata":    "also-remain",
 			},
 		}))
 		if m.Architecture == nil || m.Architecture["input_modalities"] == nil {
@@ -659,6 +725,15 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 		meta := m.Meta["llamaswap"].(map[string]any)
 		if _, ok := meta["architecture"]; ok {
 			t.Error("architecture should be filtered from metadata")
+		}
+		if _, ok := meta["max_output_tokens"]; ok {
+			t.Error("max_output_tokens should be filtered from metadata")
+		}
+		if _, ok := meta["max_input_tokens"]; ok {
+			t.Error("max_input_tokens should be filtered from metadata")
+		}
+		if _, ok := meta["reasoning_budgets"]; ok {
+			t.Error("reasoning_budgets should be filtered from metadata")
 		}
 		if _, ok := meta["custom_field"]; !ok {
 			t.Error("custom_field should remain in metadata")

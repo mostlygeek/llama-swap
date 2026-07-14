@@ -363,6 +363,26 @@ models:
       # - must be an integer > 0
       context: 32000
 
+      # max_output_tokens: maximum generated tokens allowed per request
+      # - default: 0 (no limit)
+      # - caps max_tokens and max_completion_tokens for chat completions,
+      #   max_tokens for completions, and max_output_tokens for responses
+      # - lower client-provided values are preserved
+      max_output_tokens: 4096
+
+      # reasoning: optional reasoning effort selection and token budgets
+      # - default must be configured in efforts
+      # - valid efforts: none, low, medium, high, xhigh
+      # - none must have budget 0; all other budgets must be greater than 0
+      #   and less than max_output_tokens
+      reasoning:
+        default: medium
+        efforts:
+          none: 0
+          low: 512
+          medium: 1024
+          high: 2048
+
   # Unlisted model example:
   "qwen-unlisted":
     # unlisted: boolean, true or false

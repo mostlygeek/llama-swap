@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
@@ -57,6 +59,11 @@ func CreateFilterMiddleware(cfg config.Config) chain.Middleware {
 				shared.SendResponse(w, r, http.StatusInternalServerError, err.Error())
 				return
 			}
+			body, err = applyMaxOutputTokens(body, r.URL.Path, maxOutputTokens(cfg, data.Model))
+			if err != nil {
+				shared.SendResponse(w, r, http.StatusInternalServerError, err.Error())
+				return
+			}
 
 			r.Body = io.NopCloser(bytes.NewReader(body))
 			r.Header.Del("Transfer-Encoding")
@@ -66,6 +73,62 @@ func CreateFilterMiddleware(cfg config.Config) chain.Middleware {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// maxOutputTokens returns the configured cap for a model or alias. A zero value
+// leaves requests unchanged for backwards compatibility.
+func maxOutputTokens(cfg config.Config, requested string) int {
+	realName, ok := cfg.RealModelName(requested)
+	if !ok {
+		return 0
+	}
+	return cfg.Models[realName].Capabilities.MaxOutputTokens
+}
+
+// applyMaxOutputTokens caps OpenAI-compatible generation parameters. It runs
+// after user filters so filters cannot raise a model's configured limit.
+func applyMaxOutputTokens(body []byte, path string, max int) ([]byte, error) {
+	if max == 0 {
+		return body, nil
+	}
+
+	var fields []string
+	switch path {
+	case "/v1/chat/completions", "/v/chat/completions":
+		fields = []string{"max_tokens", "max_completion_tokens"}
+	case "/v1/completions", "/v/completions":
+		fields = []string{"max_tokens"}
+	case "/v1/responses", "/v/responses":
+		fields = []string{"max_output_tokens"}
+	default:
+		return body, nil
+	}
+
+	configured := false
+	for _, field := range fields {
+		value := gjson.GetBytes(body, field)
+		if !value.Exists() {
+			continue
+		}
+		configured = true
+		if value.Type == gjson.Number && value.Float() > 0 && value.Float() <= float64(max) && value.Float() == math.Trunc(value.Float()) {
+			continue
+		}
+		var err error
+		body, err = sjson.SetBytes(body, field, max)
+		if err != nil {
+			return nil, fmt.Errorf("error capping parameter %s in request: %w", field, err)
+		}
+	}
+
+	if !configured {
+		var err error
+		body, err = sjson.SetBytes(body, fields[0], max)
+		if err != nil {
+			return nil, fmt.Errorf("error setting parameter %s in request: %w", fields[0], err)
+		}
+	}
+	return body, nil
 }
 
 // CreateFormFilterMiddleware returns middleware that applies the UseModelName
