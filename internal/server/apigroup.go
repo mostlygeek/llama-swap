@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -77,18 +78,55 @@ func (s *Server) handleAPIUnloadAll(w http.ResponseWriter, r *http.Request) {
 // handleAPIUnloadModel stops a single named local process.
 func (s *Server) handleAPIUnloadModel(w http.ResponseWriter, r *http.Request) {
 	requested := strings.TrimPrefix(r.PathValue("model"), "/")
-	realName, found := s.cfg.RealModelName(requested)
-	if !found {
-		shared.SendResponse(w, r, http.StatusNotFound, "model not found")
+	if status, message := s.unloadLocalModel(requested); status != 0 {
+		shared.SendResponse(w, r, status, message)
 		return
 	}
-	if !s.local.Handles(realName) {
-		shared.SendResponse(w, r, http.StatusNotFound, "no local server found for requested model")
-		return
-	}
-	s.local.Unload(apiUnloadTimeout, realName)
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))
+}
+
+// unloadLocalModel resolves a configured model or alias and stops only its
+// canonical local process. It returns an HTTP status and message on failure.
+func (s *Server) unloadLocalModel(requested string) (int, string) {
+	realName, found := s.cfg.RealModelName(requested)
+	if !found {
+		return http.StatusNotFound, "model not found"
+	}
+	if !s.local.Handles(realName) {
+		return http.StatusNotFound, "no local server found for requested model"
+	}
+	s.local.Unload(apiUnloadTimeout, realName)
+	return 0, ""
+}
+
+// handleOpenWebUIUnload provides llama.cpp's named-model unload endpoint for
+// Open WebUI while keeping llama-swap's management API unchanged.
+func (s *Server) handleOpenWebUIUnload(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Model string `json:"model"`
+	}
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&body); err != nil {
+		shared.SendResponse(w, r, http.StatusBadRequest, "invalid unload request")
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		shared.SendResponse(w, r, http.StatusBadRequest, "invalid unload request")
+		return
+	}
+
+	if strings.TrimSpace(body.Model) == "" {
+		shared.SendResponse(w, r, http.StatusBadRequest, "model is required")
+		return
+	}
+	if status, message := s.unloadLocalModel(body.Model); status != 0 {
+		shared.SendResponse(w, r, status, message)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"status": true})
 }
 
 // handleAPIActivity serves paginated activity table rows.
