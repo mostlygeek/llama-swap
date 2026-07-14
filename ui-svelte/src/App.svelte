@@ -1,15 +1,11 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import type { Component, ComponentType, SvelteComponent } from "svelte";
   import Router from "svelte-spa-router";
+  import { wrap } from "svelte-spa-router/wrap";
   import AppSidebar from "./components/AppSidebar.svelte";
-  import LogViewer from "./routes/LogViewer.svelte";
-  import ModelDetail from "./routes/ModelDetail.svelte";
-  import ModelsDash from "./routes/ModelsDash.svelte";
-  import Activity from "./routes/Activity.svelte";
-  import Performance from "./routes/Performance.svelte";
-  import Playground from "./routes/Playground.svelte";
+  import RouteLoadingImpl from "./components/RouteLoading.svelte";
   import PlaygroundStub from "./routes/PlaygroundStub.svelte";
-  import Settings from "./routes/Settings.svelte";
   import * as Sidebar from "$lib/components/ui/sidebar/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { Separator } from "$lib/components/ui/separator/index.js";
@@ -18,16 +14,25 @@
   import { currentRoute } from "./stores/route";
   import { selectedPlaygroundTab, playgroundTabs } from "./stores/playground";
 
+  // svelte-spa-router's types predate Svelte 5 (loadingComponent wants the
+  // old class-component ComponentType); the cast is safe since Router.svelte
+  // just instantiates whatever component object it's given.
+  const RouteLoading = RouteLoadingImpl as unknown as ComponentType<SvelteComponent>;
+
+  // Routes are lazy-loaded so their (and their dependencies') code isn't part
+  // of the initial bundle; each becomes its own chunk fetched on first visit.
+  // loadingComponent covers the (usually brief) fetch with a themed
+  // placeholder instead of a blank/white flash.
   const routes = {
-    "/": Activity,
+    "/": wrap({ asyncComponent: () => import("./routes/Activity.svelte"), loadingComponent: RouteLoading }),
     "/playground": PlaygroundStub,
-    "/models": ModelsDash,
-    "/models/:id": ModelDetail,
-    "/logs": LogViewer,
-    "/activity": Activity,
-    "/settings": Settings,
-    "/performance": Performance,
-    "*": Activity,
+    "/models": wrap({ asyncComponent: () => import("./routes/ModelsDash.svelte"), loadingComponent: RouteLoading }),
+    "/models/:id": wrap({ asyncComponent: () => import("./routes/ModelDetail.svelte"), loadingComponent: RouteLoading }),
+    "/logs": wrap({ asyncComponent: () => import("./routes/LogViewer.svelte"), loadingComponent: RouteLoading }),
+    "/activity": wrap({ asyncComponent: () => import("./routes/Activity.svelte"), loadingComponent: RouteLoading }),
+    "/settings": wrap({ asyncComponent: () => import("./routes/Settings.svelte"), loadingComponent: RouteLoading }),
+    "/performance": wrap({ asyncComponent: () => import("./routes/Performance.svelte"), loadingComponent: RouteLoading }),
+    "*": wrap({ asyncComponent: () => import("./routes/Activity.svelte"), loadingComponent: RouteLoading }),
   };
 
   const routeTitles: Record<string, string> = {
@@ -78,11 +83,20 @@
     document.title = `${icon} ${$appTitle}`;
   });
 
+  // Playground is always mounted (rather than routed) so it keeps its state
+  // when the user navigates away, but it's still lazy-loaded on app start so
+  // its dependencies (chat markdown/KaTeX/highlight.js rendering) don't block
+  // the initial page load.
+  let PlaygroundComponent = $state<Component | null>(null);
+
   onMount(() => {
     const cleanupScreenWidth = initScreenWidth();
     const cleanupSystemTheme = initSystemThemeListener();
     enableAPIEvents(true);
     checkPerformanceEnabled();
+    import("./routes/Playground.svelte").then((m) => {
+      PlaygroundComponent = m.default;
+    });
 
     return () => {
       cleanupScreenWidth();
@@ -106,7 +120,11 @@
 
       <main class="min-h-0 flex-1 overflow-auto p-4">
         <div class="h-full" class:hidden={$currentRoute !== "/playground"}>
-          <Playground />
+          {#if PlaygroundComponent}
+            <PlaygroundComponent />
+          {:else}
+            <RouteLoading />
+          {/if}
         </div>
         <div class="h-full" class:hidden={$currentRoute === "/playground"}>
           <Router {routes} on:routeLoaded={handleRouteLoaded} />

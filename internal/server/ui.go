@@ -12,35 +12,28 @@ import (
 // while embed_notag.go provides an empty filesystem for plain builds and tests.
 // See those files for details.
 
-// selectEncoding chooses the best pre-compressed encoding the client accepts.
-// It returns the encoding ("br" or "gzip") and the matching file extension.
-func selectEncoding(acceptEncoding string) (encoding, ext string) {
-	if acceptEncoding == "" {
-		return "", ""
-	}
+// acceptsBrotli reports whether the client accepts brotli. Brotli is the only
+// encoding the UI build pre-compresses; clients without it get the original
+// file uncompressed.
+func acceptsBrotli(acceptEncoding string) bool {
 	for _, part := range strings.Split(acceptEncoding, ",") {
 		if strings.TrimSpace(strings.SplitN(part, ";", 2)[0]) == "br" {
-			return "br", ".br"
+			return true
 		}
 	}
-	for _, part := range strings.Split(acceptEncoding, ",") {
-		if strings.TrimSpace(strings.SplitN(part, ";", 2)[0]) == "gzip" {
-			return "gzip", ".gz"
-		}
-	}
-	return "", ""
+	return false
 }
 
 // serveCompressedFile serves name from fsys, preferring a pre-compressed
-// sibling (name+".br" / name+".gz") when the client accepts it. It returns an
-// error without writing a response when name cannot be served, so callers can
-// fall back (e.g. SPA routing).
+// sibling (name+".br") when the client accepts brotli. It returns an error
+// without writing a response when name cannot be served, so callers can fall
+// back (e.g. SPA routing).
 func serveCompressedFile(fsys http.FileSystem, w http.ResponseWriter, r *http.Request, name string) error {
-	if encoding, ext := selectEncoding(r.Header.Get("Accept-Encoding")); encoding != "" {
-		if cf, err := fsys.Open(name + ext); err == nil {
+	if acceptsBrotli(r.Header.Get("Accept-Encoding")) {
+		if cf, err := fsys.Open(name + ".br"); err == nil {
 			defer cf.Close()
 			if stat, err := cf.Stat(); err == nil && !stat.IsDir() {
-				w.Header().Set("Content-Encoding", encoding)
+				w.Header().Set("Content-Encoding", "br")
 				w.Header().Add("Vary", "Accept-Encoding")
 				http.ServeContent(w, r, name, stat.ModTime(), cf)
 				return nil

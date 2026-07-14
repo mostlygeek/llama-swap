@@ -1,10 +1,31 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Chart, registerables } from "chart.js";
+  import {
+    Chart,
+    LineController,
+    LineElement,
+    PointElement,
+    LinearScale,
+    CategoryScale,
+    Legend,
+    Title,
+    Tooltip,
+  } from "chart.js";
   import { isDarkMode } from "../stores/theme";
   import * as Card from "$lib/components/ui/card/index.js";
 
-  Chart.register(...registerables);
+  // Only the line-chart pieces this component actually uses, instead of
+  // Chart.js's full `registerables` (every chart type/scale/plugin).
+  Chart.register(
+    LineController,
+    LineElement,
+    PointElement,
+    LinearScale,
+    CategoryScale,
+    Legend,
+    Title,
+    Tooltip,
+  );
 
   interface Dataset {
     label: string;
