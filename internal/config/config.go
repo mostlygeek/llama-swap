@@ -9,6 +9,7 @@ import (
 )
 
 const DEFAULT_GROUP_ID = "(default)"
+const DEFAULT_UNLOAD_TIMEOUT = 10
 const (
 	LogToStdoutProxy    = "proxy"
 	LogToStdoutUpstream = "upstream"
@@ -119,6 +120,7 @@ type Config struct {
 	Store              *Store                 `yaml:"store"`
 	Performance        PerformanceConfig      `yaml:"performance"`
 	GlobalTTL          int                    `yaml:"globalTTL"`
+	UnloadTimeout      int                    `yaml:"unloadTimeout"`
 	Models             map[string]ModelConfig `yaml:"models"` /* key is model ID */
 	Profiles           map[string][]string    `yaml:"profiles"`
 

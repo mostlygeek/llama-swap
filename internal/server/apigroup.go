@@ -69,7 +69,7 @@ func (s *Server) modelStatus() []apiModel {
 
 // handleAPIUnloadAll stops every running local process.
 func (s *Server) handleAPIUnloadAll(w http.ResponseWriter, r *http.Request) {
-	s.local.Unload(apiUnloadTimeout)
+	s.local.Unload(0)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"msg": "ok"})
 }
@@ -86,7 +86,7 @@ func (s *Server) handleAPIUnloadModel(w http.ResponseWriter, r *http.Request) {
 		shared.SendResponse(w, r, http.StatusNotFound, "no local server found for requested model")
 		return
 	}
-	s.local.Unload(apiUnloadTimeout, realName)
+	s.local.Unload(0, realName)
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))
 }

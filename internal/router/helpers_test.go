@@ -55,9 +55,14 @@ type fakeProcess struct {
 	// Stop calls can be in flight simultaneously.
 	stopBlock chan struct{}
 
-	runCalls   atomic.Int32
-	stopCalls  atomic.Int32
-	serveCalls atomic.Int32
+	runCalls     atomic.Int32
+	stopCalls    atomic.Int32
+	serveCalls   atomic.Int32
+	stopTimeouts []time.Duration
+
+	// onStop, when non-nil, is invoked at the start of every Stop call.
+	// Tests share one recorder across fakes to observe stop ordering.
+	onStop func(id string)
 
 	// inFlightServe counts ServeHTTP calls currently inside the handler.
 	// stoppedWhileServing flips true if Stop is ever called while that
@@ -124,12 +129,16 @@ func (f *fakeProcess) Run(_ time.Duration) error {
 	return nil
 }
 
-func (f *fakeProcess) Stop(_ time.Duration) error {
+func (f *fakeProcess) Stop(timeout time.Duration) error {
 	f.stopCalls.Add(1)
+	if f.onStop != nil {
+		f.onStop(f.id)
+	}
 	if f.inFlightServe.Load() > 0 {
 		f.stoppedWhileServing.Store(true)
 	}
 	f.mu.Lock()
+	f.stopTimeouts = append(f.stopTimeouts, timeout)
 	select {
 	case <-f.stopStarted:
 	default:
@@ -155,6 +164,15 @@ func (f *fakeProcess) Stop(_ time.Duration) error {
 		close(f.stopCh)
 	}
 	return nil
+}
+
+func (f *fakeProcess) lastStopTimeout() time.Duration {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.stopTimeouts) == 0 {
+		return 0
+	}
+	return f.stopTimeouts[len(f.stopTimeouts)-1]
 }
 
 func (f *fakeProcess) WaitReady(ctx context.Context) error {

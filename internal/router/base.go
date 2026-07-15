@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -333,6 +334,17 @@ func (b *baseRouter) healthCheckTimeout() time.Duration {
 	return t
 }
 
+// unloadTimeout returns the graceful stop timeout for a model. Config parsing
+// guarantees both the global and per-model unloadTimeout are populated (a zero
+// model value is rewritten to the global default on parse), so no zero handling
+// is needed here.
+func (b *baseRouter) unloadTimeout(modelID string) time.Duration {
+	if mc, ok := b.config.Models[modelID]; ok {
+		return time.Duration(mc.UnloadTimeout) * time.Second
+	}
+	return time.Duration(b.config.UnloadTimeout) * time.Second
+}
+
 func (b *baseRouter) Handles(model string) bool {
 	_, ok := b.processes[model]
 	return ok
@@ -373,6 +385,14 @@ func (b *baseRouter) RunningModels() map[string]process.ProcessState {
 // for — Stop kills the upstream, those callers see whatever error the
 // reverse proxy surfaces and may retry. Their trackedServe defers fire
 // normally and decrement inFlight as the dying handlers return.
+//
+// A timeout <= 0 unloads each targeted model with its configured
+// unloadTimeout: targets sharing a timeout are stopped in parallel within one
+// unload request, and the requests are processed smallest timeout first. The
+// requests are sequential, so a hung stop on a large model (long timeouts
+// usually mean multi-node unloads) cannot delay reclaiming the quick ones
+// queued behind it. A positive timeout overrides the configured values and
+// stops every target with that timeout.
 func (b *baseRouter) Unload(timeout time.Duration, models ...string) {
 	targets := models
 	if len(targets) == 0 {
@@ -385,6 +405,28 @@ func (b *baseRouter) Unload(timeout time.Duration, models ...string) {
 		return
 	}
 
+	if timeout > 0 {
+		b.sendUnload(targets, timeout)
+		return
+	}
+	buckets := make(map[time.Duration][]string)
+	for _, id := range targets {
+		t := b.unloadTimeout(id)
+		buckets[t] = append(buckets[t], id)
+	}
+	timeouts := make([]time.Duration, 0, len(buckets))
+	for t := range buckets {
+		timeouts = append(timeouts, t)
+	}
+	sort.Slice(timeouts, func(i, j int) bool { return timeouts[i] < timeouts[j] })
+	for _, t := range timeouts {
+		b.sendUnload(buckets[t], t)
+	}
+}
+
+// sendUnload funnels one unload request through the run loop and blocks until
+// the scheduler has stopped the targeted processes.
+func (b *baseRouter) sendUnload(targets []string, timeout time.Duration) {
 	req := unloadReq{targets: targets, timeout: timeout, respond: make(chan struct{})}
 	select {
 	case b.unloadCh <- req:

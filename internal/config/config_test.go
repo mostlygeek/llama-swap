@@ -967,6 +967,87 @@ models:
 	})
 }
 
+func TestConfig_UnloadTimeout(t *testing.T) {
+	t.Run("defaults to 10 seconds", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: server --port ${PORT}
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, DEFAULT_UNLOAD_TIMEOUT, config.UnloadTimeout)
+		assert.Equal(t, DEFAULT_UNLOAD_TIMEOUT, config.Models["model1"].UnloadTimeout)
+	})
+
+	t.Run("global unloadTimeout sets model default", func(t *testing.T) {
+		content := `
+unloadTimeout: 25
+models:
+  model1:
+    cmd: server --port ${PORT}
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, 25, config.UnloadTimeout)
+		assert.Equal(t, 25, config.Models["model1"].UnloadTimeout)
+	})
+
+	t.Run("model unloadTimeout overrides global", func(t *testing.T) {
+		content := `
+unloadTimeout: 25
+models:
+  model1:
+    cmd: server --port ${PORT}
+    unloadTimeout: 45
+  model2:
+    cmd: server --port ${PORT}
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, 25, config.UnloadTimeout)
+		assert.Equal(t, 45, config.Models["model1"].UnloadTimeout)
+		assert.Equal(t, 25, config.Models["model2"].UnloadTimeout)
+	})
+
+	t.Run("model unloadTimeout=0 uses global", func(t *testing.T) {
+		content := `
+unloadTimeout: 25
+models:
+  model1:
+    cmd: server --port ${PORT}
+    unloadTimeout: 0
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, 25, config.Models["model1"].UnloadTimeout)
+	})
+
+	t.Run("negative global unloadTimeout rejected", func(t *testing.T) {
+		content := `
+unloadTimeout: -1
+models:
+  model1:
+    cmd: server --port ${PORT}
+`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unloadTimeout must be >= 0")
+	})
+
+	t.Run("negative model unloadTimeout rejected", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: server --port ${PORT}
+    unloadTimeout: -1
+`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "model model1: invalid unloadTimeout value -1")
+	})
+}
+
 func TestConfig_EnvMacros(t *testing.T) {
 	t.Run("basic env substitution in cmd", func(t *testing.T) {
 		t.Setenv("TEST_MODEL_PATH", "/opt/models")

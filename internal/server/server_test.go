@@ -28,6 +28,8 @@ type stubRouter struct {
 	shutdownCalls atomic.Int32
 	running       map[string]process.ProcessState
 	unloadCalls   atomic.Int32
+	unloadModels  []string
+	unloadTimeout time.Duration
 	loggers       map[string]*logmon.Monitor
 }
 
@@ -51,7 +53,11 @@ func (s *stubRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *stubRouter) RunningModels() map[string]process.ProcessState { return s.running }
-func (s *stubRouter) Unload(_ time.Duration, _ ...string)            { s.unloadCalls.Add(1) }
+func (s *stubRouter) Unload(timeout time.Duration, models ...string) {
+	s.unloadCalls.Add(1)
+	s.unloadTimeout = timeout
+	s.unloadModels = append([]string(nil), models...)
+}
 func (s *stubRouter) ProcessLogger(modelID string) (*logmon.Monitor, bool) {
 	if s.loggers != nil {
 		if lg, ok := s.loggers[modelID]; ok {
@@ -258,6 +264,12 @@ func TestServer_Unload(t *testing.T) {
 	}
 	if got := local.unloadCalls.Load(); got != 1 {
 		t.Errorf("unloadCalls=%d want 1", got)
+	}
+	if len(local.unloadModels) != 0 {
+		t.Errorf("unloadModels=%v want empty for unload all", local.unloadModels)
+	}
+	if local.unloadTimeout != 0 {
+		t.Errorf("unloadTimeout=%v want 0 (use configured timeouts)", local.unloadTimeout)
 	}
 }
 

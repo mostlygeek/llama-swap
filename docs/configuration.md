@@ -190,6 +190,13 @@ includeAliasesInList: false
 # - must be >= 0
 globalTTL: 0
 
+# unloadTimeout: graceful timeout in seconds when unloading a model (manual, API, or ttl expiry)
+# - optional, default: 10
+# - used before force-killing the model process on unload
+# - can be overridden per model with model.unloadTimeout
+# - large values extend how long an unload can take when a process does not exit cleanly
+unloadTimeout: 10
+
 # macros: a dictionary of string substitutions
 # - optional, default: empty dictionary
 # - macros are reusable snippets
@@ -300,6 +307,11 @@ models:
     # - a ttl of 0 will mean never unload
     # - a value of 0 disables automatic unloading of the model
     ttl: 60
+
+    # unloadTimeout: graceful timeout in seconds when unloading this model (manual, API, or ttl expiry)
+    # - optional, default: global unloadTimeout
+    # - useful for slow cmdStop commands such as docker stop
+    unloadTimeout: 10
 
     # useModelName: override the model name that is sent to upstream server
     # - optional, default: ""
