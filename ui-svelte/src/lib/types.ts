@@ -75,11 +75,26 @@ export interface InflightRequestEntry {
   model: string;
   req_path: string;
   method: string;
+  req_headers: Record<string, string>;
+  remote_ip: string;
+  resp_headers: Record<string, string>;
+  resp_bytes: number;
+  elapsed_ms: number;
+  client_received_at_ms?: number;
   metadata?: Record<string, string>;
 }
 
 export interface InFlightStats {
+  operation: "snapshot" | "upsert" | "remove";
   requests?: InflightRequestEntry[];
+  request?: InflightRequestEntry;
+  id?: string;
+}
+
+export interface UIConfig {
+  activity: {
+    session_id: string[];
+  };
 }
 
 export interface NetIOStat {
@@ -123,7 +138,7 @@ export interface PerformanceResponse {
 }
 
 export interface APIEventEnvelope {
-  type: "modelStatus" | "logData" | "activity" | "inflight" | "perfsys" | "perfgpu";
+  type: "modelStatus" | "logData" | "activity" | "inflight" | "uiConfig" | "perfsys" | "perfgpu";
   data: string;
 }
 

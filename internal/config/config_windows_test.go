@@ -249,6 +249,10 @@ groups:
 		HealthCheckTimeout: 15,
 		MetricsMaxInMemory: 1000,
 		CaptureBuffer:      5,
+		UI: UIConfig{Activity: UIActivityConfig{SessionID: []string{
+			"X-Session-ID",
+			"X-Litellm-Session-Id",
+		}}},
 		Performance: PerformanceConfig{
 			Every: 5 * time.Second,
 		},

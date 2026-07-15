@@ -46,7 +46,10 @@ func (e ModelPreloadedEvent) Type() uint32 {
 }
 
 type InFlightRequestsEvent struct {
-	Requests []InflightRequestEntry `json:"requests"`
+	Operation string                 `json:"operation"`
+	Requests  []InflightRequestEntry `json:"requests,omitempty"`
+	Request   *InflightRequestEntry  `json:"request,omitempty"`
+	ID        string                 `json:"id,omitempty"`
 }
 
 func (e InFlightRequestsEvent) Type() uint32 {
@@ -54,10 +57,15 @@ func (e InFlightRequestsEvent) Type() uint32 {
 }
 
 type InflightRequestEntry struct {
-	ID        string            `json:"id"`
-	Timestamp time.Time         `json:"timestamp"`
-	Model     string            `json:"model"`
-	ReqPath   string            `json:"req_path"`
-	Method    string            `json:"method"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
+	ID          string            `json:"id"`
+	Timestamp   time.Time         `json:"timestamp"`
+	Model       string            `json:"model"`
+	ReqPath     string            `json:"req_path"`
+	Method      string            `json:"method"`
+	ReqHeaders  map[string]string `json:"req_headers"`
+	RemoteIP    string            `json:"remote_ip"`
+	RespHeaders map[string]string `json:"resp_headers"`
+	RespBytes   int64             `json:"resp_bytes"`
+	ElapsedMs   int64             `json:"elapsed_ms"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
 }

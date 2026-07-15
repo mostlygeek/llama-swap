@@ -10,6 +10,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { RefreshCw, Download } from "@lucide/svelte";
+  import { playgroundSessionHeaders } from "../../lib/playgroundSession";
 
   const iface = createPlaygroundInterface("playground-speech-model", playgroundStores.speechGenerating);
   const selectedModelStore = iface.selectedModel;
@@ -74,7 +75,9 @@
     isLoadingVoices = true;
 
     try {
-      const response = await fetch(`/v1/audio/voices?model=${encodeURIComponent(model)}`);
+      const response = await fetch(`/v1/audio/voices?model=${encodeURIComponent(model)}`, {
+        headers: playgroundSessionHeaders,
+      });
       if (!response.ok) {
         // Fall back to default voices if API call fails
         availableVoices = defaultVoices;

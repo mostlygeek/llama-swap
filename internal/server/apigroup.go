@@ -271,6 +271,7 @@ const (
 	msgTypeLogData     messageType = "logData"
 	msgTypeActivity    messageType = "activity"
 	msgTypeInFlight    messageType = "inflight"
+	msgTypeUIConfig    messageType = "uiConfig"
 )
 
 type messageEnvelope struct {
@@ -324,12 +325,17 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 			send(messageEnvelope{Type: msgTypeActivity, Data: string(j)})
 		}
 	}
-	sendInFlight := func(stats shared.InFlightRequestsEvent) {
-		if stats.Requests == nil {
-			stats.Requests = []shared.InflightRequestEntry{}
+	sendInFlight := func(update shared.InFlightRequestsEvent) {
+		if update.Operation == inflightOperationSnapshot && update.Requests == nil {
+			update.Requests = []shared.InflightRequestEntry{}
 		}
-		if j, err := json.Marshal(stats); err == nil {
+		if j, err := json.Marshal(update); err == nil {
 			send(messageEnvelope{Type: msgTypeInFlight, Data: string(j)})
+		}
+	}
+	sendUIConfig := func() {
+		if j, err := json.Marshal(s.cfg.UI); err == nil {
+			send(messageEnvelope{Type: msgTypeUIConfig, Data: string(j)})
 		}
 	}
 
@@ -344,6 +350,7 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 	sendLogData("proxy", s.proxylog.GetHistory())
 	sendLogData("upstream", s.upstreamlog.GetHistory())
 	sendModels()
+	sendUIConfig()
 	sendInFlight(s.inflight.Current())
 
 	for {

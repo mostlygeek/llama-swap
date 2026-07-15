@@ -1,4 +1,5 @@
 import type { SpeechGenerationRequest } from "./types";
+import { playgroundSessionHeaders } from "./playgroundSession";
 
 export async function generateSpeech(
   model: string,
@@ -16,6 +17,7 @@ export async function generateSpeech(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      ...playgroundSessionHeaders,
     },
     body: JSON.stringify(request),
     signal,
