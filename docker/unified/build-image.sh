@@ -18,11 +18,15 @@ set -euo pipefail
 
 BACKEND=""
 NO_CACHE=false
+CLI_CUDA_ARCHITECTURES=""
 
 for arg in "$@"; do
     case $arg in
         --cuda)
             BACKEND="cuda"
+            ;;
+        --cuda13)
+            BACKEND="cuda13"
             ;;
         --vulkan)
             BACKEND="vulkan"
@@ -30,13 +34,18 @@ for arg in "$@"; do
         --no-cache)
             NO_CACHE=true
             ;;
+        --cuda-archs=*)
+            CLI_CUDA_ARCHITECTURES="${arg#*=}"
+            ;;
         --help|-h)
-            echo "Usage: ./build-image.sh --cuda|--vulkan [--no-cache]"
+            echo "Usage: ./build-image.sh --cuda|--cuda13|--vulkan [--no-cache] [--cuda-archs=...]"
             echo ""
             echo "Options:"
             echo "  --cuda      Build CUDA image (NVIDIA GPUs)"
+            echo "  --cuda13    Build CUDA 13 image (NVIDIA GPUs)"
             echo "  --vulkan    Build Vulkan image (AMD GPUs and compatible hardware)"
             echo "  --no-cache  Force rebuild without using Docker cache"
+            echo "  --cuda-archs Specify CUDA architectures (e.g., '86;89' for sm_86, sm_89)"
             echo "  --help, -h  Show this help message"
             echo ""
             echo "Environment variables:"
@@ -46,19 +55,60 @@ for arg in "$@"; do
             echo "  SD_REF               Pin stable-diffusion.cpp to a commit, tag, or branch"
             echo "  IK_LLAMA_REF         Pin ik_llama.cpp to a commit, tag, or branch (CUDA only)"
             echo "  LS_VERSION           Override llama-swap version (e.g., '170' or 'latest')"
+            echo "  CMAKE_CUDA_ARCHITECTURES  Override CUDA architectures (default: 75;86;89;120;121)"
+            echo ""
+            echo "Examples:"
+            echo "  ./build-image.sh --cuda --cuda-archs=86        # Build for sm_86 only"
+            echo "  ./build-image.sh --cuda --cuda-archs=86;89   # Build for sm_86 and sm_89"
             exit 0
             ;;
     esac
 done
 
 if [[ -z "$BACKEND" ]]; then
-    echo "Error: No backend specified. Please use --cuda or --vulkan."
+    echo "Error: No backend specified. Please use --cuda, --cuda13, or --vulkan."
     echo ""
-    echo "Usage: ./build-image.sh --cuda|--vulkan [--no-cache]"
+    echo "Usage: ./build-image.sh --cuda|--cuda13|--vulkan [--no-cache]"
     exit 1
 fi
 
-DOCKER_IMAGE_TAG="${DOCKER_IMAGE_TAG:-llama-swap:unified-${BACKEND}}"
+# Resolve CUDA architectures: CLI flag overrides env var, env var overrides default
+# Precedence: CLI flag > environment variable > default list
+CMAKE_CUDA_ARCHITECTURES="${CLI_CUDA_ARCHITECTURES:-${CMAKE_CUDA_ARCHITECTURES:-75;86;89;120;121}}"
+CUDA_VERSION="${CUDA_VERSION:-12.9.1}"
+if [[ "$BACKEND" == "cuda" || "$BACKEND" == "cuda13" ]]; then
+    IS_CUDA_BACKEND=true
+else
+    IS_CUDA_BACKEND=false
+fi
+
+if [[ "$BACKEND" == "cuda" ]]; then
+    CUDA_VERSION="12.9.1"
+    if [[ -z "$CLI_CUDA_ARCHITECTURES" ]]; then
+        # For CUDA 12, default to older set of architectures
+        CMAKE_CUDA_ARCHITECTURES="60;61;75;86;89"
+    fi
+fi
+
+if [[ "$BACKEND" == "cuda13" ]]; then
+    CUDA_VERSION="13.2.0"
+    if [[ -z "$CLI_CUDA_ARCHITECTURES" ]]; then
+        # For CUDA 13, default to a more modern set of architectures
+        CMAKE_CUDA_ARCHITECTURES="86;89;120;121"
+    fi
+fi
+
+
+ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64) ARCH="amd64" ;;
+    aarch64|arm64) ARCH="arm64" ;;
+    *) echo "FATAL: Unsupported architecture: $ARCH" >&2; exit 1 ;;
+esac
+
+DOCKER_IMAGE_TAG="${DOCKER_IMAGE_TAG:-llama-swap:unified-${BACKEND}-${ARCH}}"
+GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-mostlygeek/llama-swap}"
+
 
 # Git repository URLs
 LLAMA_REPO="https://github.com/ggml-org/llama.cpp.git"
@@ -156,7 +206,7 @@ else
 fi
 
 # Resolve ik_llama.cpp ref (CUDA only)
-if [[ "$BACKEND" == "cuda" ]]; then
+if [[ "$IS_CUDA_BACKEND" == true ]]; then
     if [[ -n "${IK_LLAMA_REF:-}" ]]; then
         IK_LLAMA_HASH=$(resolve_ref "${IK_LLAMA_REPO}" "${IK_LLAMA_REF}") || exit 1
         echo "ik_llama.cpp: ${IK_LLAMA_REF} -> ${IK_LLAMA_HASH}"
@@ -201,6 +251,8 @@ BUILD_ARGS=(
     --build-arg "SD_COMMIT_HASH=${SD_HASH}"
     --build-arg "IK_LLAMA_COMMIT_HASH=${IK_LLAMA_HASH}"
     --build-arg "LS_VERSION=${LS_HASH}"
+    --build-arg "CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}"
+    --build-arg "CUDA_VERSION=${CUDA_VERSION}"
     -t "${DOCKER_IMAGE_TAG}"
     -f "${SCRIPT_DIR}/Dockerfile"
 )
@@ -209,7 +261,7 @@ if [[ "$NO_CACHE" == true ]]; then
     BUILD_ARGS+=(--no-cache)
     echo "Note: Building without cache"
 elif [[ "${GITHUB_ACTIONS:-}" == "true" && "${ACT:-}" != "true" ]]; then
-    CACHE_REF="ghcr.io/mostlygeek/llama-swap:unified-${BACKEND}-cache"
+    CACHE_REF="ghcr.io/${GITHUB_REPOSITORY}:unified-${BACKEND}-cache-${ARCH}"
     BUILD_ARGS+=(
         --cache-from "type=registry,ref=${CACHE_REF}"
         --cache-to "type=registry,ref=${CACHE_REF},mode=max"
@@ -226,7 +278,7 @@ echo "=========================================="
 echo ""
 
 EXPECTED_BINARIES=(llama-server llama-cli whisper-server whisper-cli sd-server sd-cli llama-swap)
-if [[ "$BACKEND" == "cuda" ]]; then
+if [[ "$IS_CUDA_BACKEND" == true ]]; then
     EXPECTED_BINARIES+=(ik-llama-server)
 fi
 
@@ -249,29 +301,10 @@ if [[ ${#MISSING_BINARIES[@]} -gt 0 ]]; then
 fi
 
 VERIFIED_LIST="llama-server, llama-cli, whisper-server, whisper-cli, sd-server, sd-cli, llama-swap"
-if [[ "$BACKEND" == "cuda" ]]; then
+if [[ "$IS_CUDA_BACKEND" == true ]]; then
     VERIFIED_LIST="${VERIFIED_LIST}, ik-llama-server"
 fi
 echo "All expected binaries verified: ${VERIFIED_LIST}"
-
-echo ""
-echo "=========================================="
-echo "Building rootless image..."
-echo "=========================================="
-echo ""
-
-ROOTLESS_TAG="${DOCKER_IMAGE_TAG}-rootless"
-docker buildx build --load -t "${ROOTLESS_TAG}" - <<EOF
-FROM ${DOCKER_IMAGE_TAG}
-USER root
-RUN groupadd --system --gid 10001 llama-swap && \\
-    useradd --system --uid 10001 --gid 10001 \\
-      --home /app --shell /sbin/nologin llama-swap && \\
-    chown -R 10001:10001 /etc/llama-swap /models
-USER 10001
-EOF
-
-echo "Rootless image built: ${ROOTLESS_TAG}"
 
 echo ""
 echo "=========================================="
@@ -280,13 +313,12 @@ echo "=========================================="
 echo ""
 echo "Image tags:"
 echo "  ${DOCKER_IMAGE_TAG}"
-echo "  ${ROOTLESS_TAG}"
 echo ""
 echo "Built with:"
 echo "  llama.cpp:            ${LLAMA_HASH}"
 echo "  whisper.cpp:          ${WHISPER_HASH}"
 echo "  stable-diffusion.cpp: ${SD_HASH}"
-if [[ "$BACKEND" == "cuda" ]]; then
+if [[ "$IS_CUDA_BACKEND" == true ]]; then
     echo "  ik_llama.cpp:         ${IK_LLAMA_HASH}"
 fi
 echo "  llama-swap:           $(docker run --rm --entrypoint cat "${DOCKER_IMAGE_TAG}" /versions.txt | grep llama-swap | cut -d' ' -f2-)"
