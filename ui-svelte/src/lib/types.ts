@@ -138,8 +138,14 @@ export interface PerformanceResponse {
 }
 
 export interface APIEventEnvelope {
-  type: "modelStatus" | "logData" | "activity" | "inflight" | "uiConfig" | "perfsys" | "perfgpu";
+  type: "modelStatus" | "logData" | "activity" | "inflight" | "uiConfig" | "perfsys" | "perfgpu" | "profileChanged";
   data: string;
+}
+
+export interface Profile {
+  name: string;
+  description?: string;
+  aliases: Record<string, string>;
 }
 
 export interface HistogramData {

@@ -123,6 +123,27 @@ func TestLoadConfigSources_DuplicatePeer(t *testing.T) {
 	assert.Contains(t, err.Error(), `duplicate peers "remote"`)
 }
 
+func TestLoadConfigSources_ProfilesMerge(t *testing.T) {
+	dir := t.TempDir()
+	writeYAML(t, dir, "a.yaml", "models:\n"+modelCfg("m1", "echo m1")+"profiles:\n  first:\n    aliases: {a1: m1}\n")
+	writeYAML(t, dir, "b.yaml", "models:\n"+modelCfg("m2", "echo m2")+"profiles:\n  second:\n    aliases: {a2: m2}\n")
+
+	cfg, err := LoadConfigSources("", dir)
+	require.NoError(t, err)
+	assert.Contains(t, cfg.Profiles, "first")
+	assert.Contains(t, cfg.Profiles, "second")
+}
+
+func TestLoadConfigSources_DuplicateProfile(t *testing.T) {
+	dir := t.TempDir()
+	writeYAML(t, dir, "a.yaml", "models:\n"+modelCfg("m1", "echo m1")+"profiles:\n  shared:\n    aliases: {a1: m1}\n")
+	writeYAML(t, dir, "b.yaml", "models:\n"+modelCfg("m2", "echo m2")+"profiles:\n  shared:\n    aliases: {a2: m2}\n")
+
+	_, err := LoadConfigSources("", dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `duplicate profiles "shared"`)
+}
+
 func TestLoadConfigSources_ScalarConflict(t *testing.T) {
 	dir := t.TempDir()
 	writeYAML(t, dir, "a.yaml", "models:\n"+modelCfg("m1", "echo m1")+"\nglobalTTL: 100\n")

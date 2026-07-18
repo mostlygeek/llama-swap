@@ -97,6 +97,32 @@ func (c *GroupConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	return nil
 }
 
+// ProfileConfig is a named runtime overlay that remaps aliases to different
+// targets without a config reload. See fork README and issue discussion for
+// PR #774. Note: upstream removed its list-based `profiles:` feature; this fork
+// repurposes the key for runtime alias overlays.
+type ProfileConfig struct {
+	Description string            `yaml:"description"`
+	Aliases     map[string]string `yaml:"aliases"`
+}
+
+// UnmarshalYAML provides a targeted error for the removed legacy profiles shape
+// (a bare list of model IDs), guiding users to the alias-map form or to groups.
+func (p *ProfileConfig) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.SequenceNode {
+		return fmt.Errorf("legacy profiles format removed: use profiles.<name>.aliases map; see docs/configuration.md and use groups for concurrent model loading")
+	}
+
+	type rawProfileConfig ProfileConfig
+	var raw rawProfileConfig
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+
+	*p = ProfileConfig(raw)
+	return nil
+}
+
 type HooksConfig struct {
 	OnStartup HookOnStartup `yaml:"on_startup"`
 }
@@ -118,20 +144,20 @@ type UIActivityConfig struct {
 }
 
 type Config struct {
-	HealthCheckTimeout int                    `yaml:"healthCheckTimeout"`
-	LogRequests        bool                   `yaml:"logRequests"`
-	LogLevel           string                 `yaml:"logLevel"`
-	LogTimeFormat      string                 `yaml:"logTimeFormat"`
-	LogToStdout        string                 `yaml:"logToStdout"`
-	MetricsMaxInMemory int                    `yaml:"metricsMaxInMemory"`
-	CaptureBuffer      int                    `yaml:"captureBuffer"`
-	Store              *Store                 `yaml:"store"`
-	UI                 UIConfig               `yaml:"ui"`
-	Performance        PerformanceConfig      `yaml:"performance"`
-	GlobalTTL          int                    `yaml:"globalTTL"`
-	UnloadTimeout      int                    `yaml:"unloadTimeout"`
-	Models             map[string]ModelConfig `yaml:"models"` /* key is model ID */
-	Profiles           map[string][]string    `yaml:"profiles"`
+	HealthCheckTimeout int                      `yaml:"healthCheckTimeout"`
+	LogRequests        bool                     `yaml:"logRequests"`
+	LogLevel           string                   `yaml:"logLevel"`
+	LogTimeFormat      string                   `yaml:"logTimeFormat"`
+	LogToStdout        string                   `yaml:"logToStdout"`
+	MetricsMaxInMemory int                      `yaml:"metricsMaxInMemory"`
+	CaptureBuffer      int                      `yaml:"captureBuffer"`
+	Store              *Store                   `yaml:"store"`
+	UI                 UIConfig                 `yaml:"ui"`
+	Performance        PerformanceConfig        `yaml:"performance"`
+	GlobalTTL          int                      `yaml:"globalTTL"`
+	UnloadTimeout      int                      `yaml:"unloadTimeout"`
+	Models             map[string]ModelConfig   `yaml:"models"` /* key is model ID */
+	Profiles           map[string]ProfileConfig `yaml:"profiles"`
 
 	// routing is the canonical source for swap/scheduling configuration.
 	// New code must read Routing, never the backwards-compat fields below.
@@ -201,13 +227,74 @@ type RouterSettings struct {
 }
 
 func (c *Config) RealModelName(search string) (string, bool) {
+	return c.RealModelNameWithProfile(search, nil)
+}
+
+// EffectiveRequestName applies active profile aliases without shadowing model IDs.
+func (c *Config) EffectiveRequestName(search string, profileAliases map[string]string) string {
 	if _, found := c.Models[search]; found {
-		return search, true
-	} else if name, found := c.aliases[search]; found {
-		return name, found
-	} else {
+		return search
+	}
+	if target, ok := profileAliases[search]; ok {
+		return target
+	}
+	return search
+}
+
+// RealModelNameWithProfile resolves search to a model ID with profile aliases applied.
+func (c *Config) RealModelNameWithProfile(search string, profileAliases map[string]string) (string, bool) {
+	effective := c.EffectiveRequestName(search, profileAliases)
+	if effective == "" {
 		return "", false
 	}
+	if _, found := c.Models[effective]; found {
+		return effective, true
+	}
+	name, found := c.aliases[effective]
+	return name, found
+}
+
+// EffectiveAliasesFor returns aliases that resolve to modelID under the profile overlay.
+func (c *Config) EffectiveAliasesFor(modelID string, profileAliases map[string]string) []string {
+	static := c.Models[modelID].Aliases
+	if len(profileAliases) == 0 {
+		return static
+	}
+
+	seen := make(map[string]struct{}, len(static))
+	out := make([]string, 0, len(static))
+	for _, alias := range static {
+		if target, overridden := profileAliases[alias]; overridden {
+			resolved, _ := c.RealModelName(target)
+			if resolved != modelID {
+				continue
+			}
+		}
+		if _, found := seen[alias]; found {
+			continue
+		}
+		seen[alias] = struct{}{}
+		out = append(out, alias)
+	}
+
+	added := make([]string, 0)
+	for alias, target := range profileAliases {
+		if _, found := c.Models[alias]; found {
+			continue
+		}
+		resolved, _ := c.RealModelName(target)
+		if resolved != modelID {
+			continue
+		}
+		if _, found := seen[alias]; found {
+			continue
+		}
+		seen[alias] = struct{}{}
+		added = append(added, alias)
+	}
+	sort.Strings(added)
+	out = append(out, added...)
+	return out
 }
 
 func (c *Config) FindConfig(modelName string) (ModelConfig, string, bool) {

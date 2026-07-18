@@ -7,7 +7,7 @@
   import { toggleTheme, themeMode, appTitle } from "../stores/theme";
   import { currentRoute } from "../stores/route";
   import { playgroundActivity } from "../stores/playgroundActivity";
-  import { performanceEnabled, models } from "../stores/api";
+  import { performanceEnabled, models, profiles, activeProfile, fetchProfiles, setActiveProfile } from "../stores/api";
   import { showUnlistedModels } from "../stores/modelDisplay";
   import { modelsMenuOpen } from "../stores/sidebar";
   import type { Model } from "../lib/types";
@@ -52,6 +52,15 @@
     yellow: "bg-warning",
     green: "bg-success",
   };
+
+  async function handleProfileChange(e: Event): Promise<void> {
+    const target = e.currentTarget as HTMLSelectElement;
+    try {
+      await setActiveProfile(target.value);
+    } catch {
+      void fetchProfiles();
+    }
+  }
 </script>
 
 <Sidebar.Root collapsible="icon">
@@ -181,6 +190,25 @@
         </Sidebar.Menu>
       </Sidebar.GroupContent>
     </Sidebar.Group>
+
+    {#if $profiles.length > 0}
+      <Sidebar.Group class="group-data-[collapsible=icon]:hidden">
+        <Sidebar.GroupLabel>Profile</Sidebar.GroupLabel>
+        <Sidebar.GroupContent>
+          <select
+            value={$activeProfile}
+            onchange={handleProfileChange}
+            aria-label="Active profile"
+            class="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-2 py-1.5 text-sm text-sidebar-foreground focus:outline-none focus:ring-2 focus:ring-sidebar-ring"
+          >
+            <option value="">(no profile)</option>
+            {#each $profiles as profile}
+              <option value={profile.name} title={profile.description ?? ""}>{profile.name}</option>
+            {/each}
+          </select>
+        </Sidebar.GroupContent>
+      </Sidebar.Group>
+    {/if}
   </Sidebar.Content>
 
   <Sidebar.Footer>
