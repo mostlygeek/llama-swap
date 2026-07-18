@@ -32,6 +32,30 @@
   const defaultVoices = ["coral", "alloy", "echo", "fable", "onyx", "nova", "shimmer"];
   const CACHE_KEY = "playground-speech-voices-cache";
 
+  // schema detection for openai format or plain list of strings
+  function getVoiceIds(data: unknown): string[] {
+    if (Array.isArray(data)) {
+      return data.filter((voice): voice is string => typeof voice === "string");
+    }
+
+    if (!data || typeof data !== "object") return [];
+
+    const response = data as { voices?: unknown };
+    if (Array.isArray(response.voices)) {
+      return response.voices
+        .map((voice) =>
+          typeof voice === "string"
+            ? voice
+            : voice && typeof voice === "object" && typeof (voice as { id?: unknown }).id === "string"
+              ? (voice as { id: string }).id
+              : null
+        )
+        .filter((voice): voice is string => voice !== null);
+    }
+
+    return [];
+  }
+
   function getVoicesCache(): Record<string, string[]> {
     if (typeof window === "undefined") return {};
     try {
@@ -76,6 +100,7 @@
 
     try {
       const response = await fetch(`/v1/audio/voices?model=${encodeURIComponent(model)}`, {
+        cache: "no-store",
         headers: playgroundSessionHeaders,
       });
       if (!response.ok) {
@@ -88,8 +113,7 @@
         return;
       }
       const data = await response.json();
-      // Expect response to be an array of voice strings or an object with a voices array
-      const voices = Array.isArray(data) ? data : (data.voices || defaultVoices);
+      const voices = getVoiceIds(data);
       const newVoices = voices.length > 0 ? voices : defaultVoices;
 
       availableVoices = newVoices;
@@ -205,14 +229,14 @@
         onValueChange={(v) => v && handleVoiceChange(v)}
       >
         <Select.Trigger class="h-9 w-40">{$selectedVoiceStore}</Select.Trigger>
-        <Select.Content>
+        <Select.Content class="max-h-[60vh]">
           {#each availableVoices as voice (voice)}
             <Select.Item value={voice}>{voice}</Select.Item>
           {/each}
           <Select.Item value="(refresh)">(refresh)</Select.Item>
         </Select.Content>
       </Select.Root>
-      {#if $selectedModelStore && !getVoicesCache()[$selectedModelStore]}
+      {#if $selectedModelStore}
         <Button
           variant="outline"
           size="icon"
