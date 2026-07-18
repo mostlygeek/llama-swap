@@ -100,6 +100,7 @@
 
     try {
       const response = await fetch(`/v1/audio/voices?model=${encodeURIComponent(model)}`, {
+        cache: "no-store",
         headers: playgroundSessionHeaders,
       });
       if (!response.ok) {
@@ -235,7 +236,7 @@
           <Select.Item value="(refresh)">(refresh)</Select.Item>
         </Select.Content>
       </Select.Root>
-      {#if $selectedModelStore && !getVoicesCache()[$selectedModelStore]}
+      {#if $selectedModelStore}
         <Button
           variant="outline"
           size="icon"
