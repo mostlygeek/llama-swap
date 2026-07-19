@@ -6,10 +6,10 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/shared"
 	"github.com/tidwall/gjson"
 )
 
@@ -56,54 +56,6 @@ func TestServer_ApplyFilters(t *testing.T) {
 	})
 }
 
-func TestServer_RewriteMultipartModel(t *testing.T) {
-	var buf bytes.Buffer
-	mw := multipart.NewWriter(&buf)
-	mw.WriteField("model", "old-name")
-	mw.WriteField("language", "en")
-	fw, _ := mw.CreateFormFile("file", "audio.wav")
-	fw.Write([]byte("RIFFdata"))
-	mw.Close()
-
-	r := httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions", &buf)
-	r.Header.Set("Content-Type", mw.FormDataContentType())
-	if err := r.ParseMultipartForm(32 << 20); err != nil {
-		t.Fatalf("ParseMultipartForm: %v", err)
-	}
-
-	body, contentType, err := rewriteMultipartModel(r.MultipartForm, "new-name")
-	if err != nil {
-		t.Fatalf("rewriteMultipartModel: %v", err)
-	}
-
-	parsed, err := multipart.NewReader(bytes.NewReader(body), boundaryOf(t, contentType)).ReadForm(32 << 20)
-	if err != nil {
-		t.Fatalf("re-parse: %v", err)
-	}
-	if got := parsed.Value["model"][0]; got != "new-name" {
-		t.Errorf("model = %q, want new-name", got)
-	}
-	if got := parsed.Value["language"][0]; got != "en" {
-		t.Errorf("language = %q, want en", got)
-	}
-	fh := parsed.File["file"][0]
-	f, _ := fh.Open()
-	data, _ := io.ReadAll(f)
-	f.Close()
-	if string(data) != "RIFFdata" {
-		t.Errorf("file data = %q, want RIFFdata", data)
-	}
-}
-
-func boundaryOf(t *testing.T, contentType string) string {
-	t.Helper()
-	_, params, ok := strings.Cut(contentType, "boundary=")
-	if !ok {
-		t.Fatalf("no boundary in %q", contentType)
-	}
-	return params
-}
-
 func TestServer_FormFilterMiddleware(t *testing.T) {
 	cfg := config.Config{Models: map[string]config.ModelConfig{
 		"whisper": {UseModelName: "whisper-large-v3"},
@@ -119,14 +71,42 @@ func TestServer_FormFilterMiddleware(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions", &buf)
 	r.Header.Set("Content-Type", mw.FormDataContentType())
 
-	var gotModel string
+	var gotModel, gotFilename, gotFileBody string
+	var gotContext shared.ReqContextData
 	final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseMultipartForm(32 << 20)
+		if err := r.ParseMultipartForm(shared.MaxMultiPartSize); err != nil {
+			t.Errorf("ParseMultipartForm: %v", err)
+			return
+		}
 		gotModel = r.MultipartForm.Value["model"][0]
+		fileHeader := r.MultipartForm.File["file"][0]
+		gotFilename = fileHeader.Filename
+		file, err := fileHeader.Open()
+		if err != nil {
+			t.Errorf("open file: %v", err)
+			return
+		}
+		data, err := io.ReadAll(file)
+		file.Close()
+		if err != nil {
+			t.Errorf("read file: %v", err)
+			return
+		}
+		gotFileBody = string(data)
+		gotContext, _ = shared.ReadContext(r.Context())
 	})
 	CreateFormFilterMiddleware(cfg)(final).ServeHTTP(httptest.NewRecorder(), r)
 
 	if gotModel != "whisper-large-v3" {
 		t.Errorf("model rewritten to %q, want whisper-large-v3", gotModel)
+	}
+	if gotFilename != "a.wav" {
+		t.Errorf("filename = %q, want a.wav", gotFilename)
+	}
+	if gotFileBody != "xx" {
+		t.Errorf("file body = %q, want xx", gotFileBody)
+	}
+	if gotContext.Model != "whisper" || gotContext.ModelID != "whisper" {
+		t.Errorf("request context = %+v, want original whisper model", gotContext)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -133,6 +134,13 @@ func TestReplaceRequestModel(t *testing.T) {
 		if err := writer.WriteField("prompt", "hello"); err != nil {
 			t.Fatalf("write prompt: %v", err)
 		}
+		file, err := writer.CreateFormFile("file", "audio.wav")
+		if err != nil {
+			t.Fatalf("create file: %v", err)
+		}
+		if _, err := file.Write([]byte("RIFFdata")); err != nil {
+			t.Fatalf("write file: %v", err)
+		}
 		if err := writer.Close(); err != nil {
 			t.Fatalf("close multipart: %v", err)
 		}
@@ -149,13 +157,82 @@ func TestReplaceRequestModel(t *testing.T) {
 		}
 		assertBodyLength(t, updated, rewritten)
 		updated.Body = io.NopCloser(bytes.NewReader(rewritten))
-		if err := updated.ParseMultipartForm(32 << 20); err != nil {
+		if err := updated.ParseMultipartForm(MaxMultiPartSize); err != nil {
 			t.Fatalf("parse multipart: %v", err)
 		}
 		if got := updated.FormValue("model"); got != "target" {
 			t.Fatalf("model = %q, want target", got)
 		}
+		if got := updated.FormValue("prompt"); got != "hello" {
+			t.Fatalf("prompt = %q, want hello", got)
+		}
+		fileHeader := updated.MultipartForm.File["file"][0]
+		if got := fileHeader.Filename; got != "audio.wav" {
+			t.Fatalf("filename = %q, want audio.wav", got)
+		}
+		uploaded, err := fileHeader.Open()
+		if err != nil {
+			t.Fatalf("open file: %v", err)
+		}
+		fileBody, err := io.ReadAll(uploaded)
+		uploaded.Close()
+		if err != nil {
+			t.Fatalf("read file: %v", err)
+		}
+		if got := string(fileBody); got != "RIFFdata" {
+			t.Fatalf("file body = %q, want RIFFdata", got)
+		}
 		assertContextInvalidated(t, updated)
+	})
+
+	t.Run("multipart temp files cleaned up", func(t *testing.T) {
+		tempDir := t.TempDir()
+		t.Setenv("TMPDIR", tempDir)
+		t.Setenv("TMP", tempDir)
+		t.Setenv("TEMP", tempDir)
+
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		if err := writer.WriteField("model", "public"); err != nil {
+			t.Fatalf("write model: %v", err)
+		}
+		file, err := writer.CreateFormFile("file", "audio.wav")
+		if err != nil {
+			t.Fatalf("create file: %v", err)
+		}
+		if _, err := file.Write([]byte("file-on-disk")); err != nil {
+			t.Fatalf("write file: %v", err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatalf("close multipart: %v", err)
+		}
+
+		original := append([]byte(nil), body.Bytes()...)
+		r := withContext(httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(original)))
+		r.Header.Set("Content-Type", writer.FormDataContentType())
+		if err := r.ParseMultipartForm(0); err != nil {
+			t.Fatalf("parse multipart: %v", err)
+		}
+		entries, err := os.ReadDir(tempDir)
+		if err != nil {
+			t.Fatalf("read temp dir: %v", err)
+		}
+		if len(entries) == 0 {
+			t.Fatal("multipart file was not written to disk")
+		}
+		r.Body = io.NopCloser(bytes.NewReader(original))
+
+		if _, err := ReplaceRequestModel(r, "public", "target"); err != nil {
+			t.Fatalf("ReplaceRequestModel: %v", err)
+		}
+
+		entries, err = os.ReadDir(tempDir)
+		if err != nil {
+			t.Fatalf("read temp dir: %v", err)
+		}
+		if len(entries) != 0 {
+			t.Fatalf("multipart temp files were not removed: %v", entries)
+		}
 	})
 
 	t.Run("upstream path", func(t *testing.T) {

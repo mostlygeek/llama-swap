@@ -34,6 +34,8 @@ type ReqContextData struct {
 	Metadata map[string]string
 }
 
+const MaxMultiPartSize = 32 << 20
+
 var (
 	ReqContextKey        = &contextkey{"context"}
 	ErrNoModelInContext  = fmt.Errorf("no model in request context")
@@ -185,10 +187,12 @@ func ReplaceRequestModel(r *http.Request, model, replacement string) (*http.Requ
 		}
 		replaceRequestBody(r, body)
 	case strings.Contains(contentType, "multipart/form-data"):
-		if err := r.ParseMultipartForm(32 << 20); err != nil {
+		if err := r.ParseMultipartForm(MaxMultiPartSize); err != nil {
 			return r, fmt.Errorf("could not parse multipart form: %w", err)
 		}
-		body, rewrittenContentType, err := replaceMultipartModel(r.MultipartForm, replacement)
+		form := r.MultipartForm
+		defer form.RemoveAll()
+		body, rewrittenContentType, err := replaceMultipartModel(form, replacement)
 		if err != nil {
 			return r, err
 		}
@@ -396,7 +400,7 @@ func extractContext(r *http.Request) (ReqContextData, error) {
 	// after parsing.
 	r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	if strings.Contains(contentType, "multipart/form-data") {
-		if err := r.ParseMultipartForm(32 << 20); err != nil {
+		if err := r.ParseMultipartForm(MaxMultiPartSize); err != nil {
 			return ReqContextData{}, fmt.Errorf("error parsing multipart form: %w", err)
 		}
 	} else {
