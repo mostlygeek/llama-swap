@@ -7,6 +7,7 @@ const ConfigFileChangedEventID = 0x03
 const ActivityLogEventID = 0x05
 const ModelPreloadedEventID = 0x06
 const InFlightRequestsEventID = 0x07
+const ProfileChangedEventID = 0x08
 
 // ProcessStateChangeEvent is emitted whenever a process transitions between
 // lifecycle states. States are carried as strings so this package stays a leaf
@@ -68,4 +69,12 @@ type InflightRequestEntry struct {
 	RespBytes   int64             `json:"resp_bytes"`
 	ElapsedMs   int64             `json:"elapsed_ms"`
 	Metadata    map[string]string `json:"metadata,omitempty"`
+}
+
+type ProfileChangedEvent struct {
+	Active string
+}
+
+func (e ProfileChangedEvent) Type() uint32 {
+	return ProfileChangedEventID
 }

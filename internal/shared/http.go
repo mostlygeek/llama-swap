@@ -9,11 +9,14 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 type contextkey struct {
@@ -125,6 +128,149 @@ func FetchContext(r *http.Request, cfg config.Config) (ReqContextData, error) {
 	return ReqContextData{}, ErrNoModelInContext
 }
 
+// ExtractModel returns the model name encoded in a request without caching
+// request data in its context.
+func ExtractModel(r *http.Request) (string, error) {
+	data, err := extractContext(r)
+	return data.Model, err
+}
+
+// ReplaceRequestModel replaces model with replacement wherever the request
+// encodes its model ID. It returns a request whose cached model context has
+// been invalidated so downstream handlers resolve the replacement normally.
+func ReplaceRequestModel(r *http.Request, model, replacement string) (*http.Request, error) {
+	if strings.HasPrefix(r.URL.Path, "/upstream/") {
+		upstreamPath := strings.TrimPrefix(r.PathValue("upstreamPath"), "/")
+		if upstreamPath != model && !strings.HasPrefix(upstreamPath, model+"/") {
+			return r, nil
+		}
+
+		remainingPath := strings.TrimPrefix(upstreamPath, model)
+		rewrittenPath := replacement + remainingPath
+		if replacement == "" {
+			rewrittenPath = ""
+		}
+		r.SetPathValue("upstreamPath", rewrittenPath)
+		r.URL.Path = "/upstream/" + rewrittenPath
+		r.URL.RawPath = ""
+		return invalidateRequestContext(r), nil
+	}
+
+	current, err := ExtractModel(r)
+	if err != nil {
+		return r, err
+	}
+	if current != model {
+		return r, nil
+	}
+
+	if r.Method == http.MethodGet {
+		query := r.URL.Query()
+		query.Set("model", replacement)
+		r.URL.RawQuery = query.Encode()
+		return invalidateRequestContext(r), nil
+	}
+
+	contentType := r.Header.Get("Content-Type")
+	switch {
+	case strings.Contains(contentType, "application/json"):
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			return r, fmt.Errorf("could not read request body")
+		}
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		body, err = sjson.SetBytes(body, "model", replacement)
+		if err != nil {
+			return r, fmt.Errorf("could not rewrite model in JSON body: %w", err)
+		}
+		replaceRequestBody(r, body)
+	case strings.Contains(contentType, "multipart/form-data"):
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			return r, fmt.Errorf("could not parse multipart form: %w", err)
+		}
+		body, rewrittenContentType, err := replaceMultipartModel(r.MultipartForm, replacement)
+		if err != nil {
+			return r, err
+		}
+		r.MultipartForm = nil
+		r.Form = nil
+		r.PostForm = nil
+		r.Header.Set("Content-Type", rewrittenContentType)
+		replaceRequestBody(r, body)
+	case strings.Contains(contentType, "application/x-www-form-urlencoded"):
+		if err := r.ParseForm(); err != nil {
+			return r, fmt.Errorf("could not parse form: %w", err)
+		}
+		r.PostForm.Set("model", replacement)
+		replaceRequestBody(r, []byte(r.PostForm.Encode()))
+	default:
+		if err := r.ParseForm(); err != nil {
+			return r, fmt.Errorf("could not parse form: %w", err)
+		}
+		r.PostForm.Set("model", replacement)
+		replaceRequestBody(r, []byte(r.PostForm.Encode()))
+	}
+
+	return invalidateRequestContext(r), nil
+}
+
+func invalidateRequestContext(r *http.Request) *http.Request {
+	if _, ok := ReadContext(r.Context()); !ok {
+		return r
+	}
+	return r.WithContext(context.WithValue(r.Context(), ReqContextKey, struct{}{}))
+}
+
+func replaceRequestBody(r *http.Request, body []byte) {
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	r.Header.Del("Transfer-Encoding")
+	r.Header.Set("Content-Length", strconv.Itoa(len(body)))
+	r.ContentLength = int64(len(body))
+}
+
+func replaceMultipartModel(form *multipart.Form, replacement string) ([]byte, string, error) {
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+
+	for key, values := range form.Value {
+		for _, value := range values {
+			if key == "model" {
+				value = replacement
+			}
+			field, err := mw.CreateFormField(key)
+			if err != nil {
+				return nil, "", fmt.Errorf("error recreating form field %s: %w", key, err)
+			}
+			if _, err := field.Write([]byte(value)); err != nil {
+				return nil, "", fmt.Errorf("error writing form field %s: %w", key, err)
+			}
+		}
+	}
+
+	for key, headers := range form.File {
+		for _, fh := range headers {
+			part, err := mw.CreateFormFile(key, fh.Filename)
+			if err != nil {
+				return nil, "", fmt.Errorf("error recreating form file %s: %w", key, err)
+			}
+			file, err := fh.Open()
+			if err != nil {
+				return nil, "", fmt.Errorf("error opening uploaded file %s: %w", key, err)
+			}
+			if _, err := io.Copy(part, file); err != nil {
+				file.Close()
+				return nil, "", fmt.Errorf("error copying file data %s: %w", key, err)
+			}
+			file.Close()
+		}
+	}
+
+	if err := mw.Close(); err != nil {
+		return nil, "", fmt.Errorf("error finalizing multipart form: %w", err)
+	}
+	return buf.Bytes(), mw.FormDataContentType(), nil
+}
+
 // extractUpstreamContext resolves the model from an /upstream/<model>/... path.
 func extractUpstreamContext(r *http.Request, cfg config.Config) (ReqContextData, bool) {
 	searchName, realName, _, found := FindModelInPath(cfg, strings.TrimPrefix(r.URL.Path, "/upstream"))
@@ -167,7 +313,7 @@ func FindModelInPath(cfg config.Config, path string) (searchName, realName, rema
 			name = name + "/" + part
 		}
 
-		if modelID, ok := cfg.RealModelName(name); ok {
+		if modelID, ok := cfg.ResolveBaseModel(name); ok {
 			searchName = name
 			realName = modelID
 			remainingPath = "/" + strings.Join(parts[i+1:], "/")

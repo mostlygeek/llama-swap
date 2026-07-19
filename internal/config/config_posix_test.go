@@ -140,8 +140,10 @@ models:
 healthCheckTimeout: 15
 profiles:
   test:
-    - model1
-    - model2
+    description: Test profile
+    pins:
+      fast: model1
+      disabled: ~
 groups:
   group1:
     swap: true
@@ -267,8 +269,14 @@ groups:
 		Performance: PerformanceConfig{
 			Every: 5 * time.Second,
 		},
-		Profiles: map[string][]string{
-			"test": {"model1", "model2"},
+		Profiles: map[string]ProfileConfig{
+			"test": {
+				Description: "Test profile",
+				Pins: map[string]string{
+					"fast":     "model1",
+					"disabled": "",
+				},
+			},
 		},
 		aliases: map[string]string{
 			"m1":        "model1",

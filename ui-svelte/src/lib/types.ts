@@ -23,6 +23,17 @@ export interface Model {
   capabilities?: ModelCapabilities;
 }
 
+export interface Profile {
+  id: string;
+  description: string;
+  pins: Record<string, string>;
+}
+
+export interface ProfileState {
+  active: string | null;
+  profiles: Profile[];
+}
+
 export interface TokenMetrics {
   cache_tokens: number;
   draft_tokens: number;
@@ -138,7 +149,7 @@ export interface PerformanceResponse {
 }
 
 export interface APIEventEnvelope {
-  type: "modelStatus" | "logData" | "activity" | "inflight" | "uiConfig" | "perfsys" | "perfgpu";
+  type: "modelStatus" | "logData" | "activity" | "inflight" | "uiConfig" | "profileChanged" | "perfsys" | "perfgpu";
   data: string;
 }
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/internal/router"
@@ -35,6 +36,9 @@ type Server struct {
 	store    *store.Store
 	build    BuildInfo
 
+	profileMu     sync.RWMutex
+	activeProfile string
+
 	local router.LocalRouter
 	peer  router.Router
 
@@ -44,6 +48,35 @@ type Server struct {
 	shutdownCtx  context.Context
 	shutdownFn   context.CancelFunc
 	shuttingDown atomic.Bool
+}
+
+// ActiveProfile returns the active runtime profile, or an empty string when no
+// profile is active.
+func (s *Server) ActiveProfile() string {
+	s.profileMu.RLock()
+	defer s.profileMu.RUnlock()
+	return s.activeProfile
+}
+
+// setActiveProfile updates the runtime selection. An empty name deactivates
+// profiles. It returns whether the selection changed.
+func (s *Server) setActiveProfile(name string) (bool, error) {
+	if name != "" {
+		if _, ok := s.cfg.Profiles[name]; !ok {
+			return false, fmt.Errorf("profile %q not found", name)
+		}
+	}
+	s.profileMu.Lock()
+	if s.activeProfile == name {
+		s.profileMu.Unlock()
+		return false, nil
+	}
+	s.activeProfile = name
+	s.profileMu.Unlock()
+
+	s.proxylog.Infof("active profile changed to %q", name)
+	event.Emit(shared.ProfileChangedEvent{Active: name})
+	return true, nil
 }
 
 // modelPostJSONRoutes are endpoints with a model id in the JSON request body.
@@ -205,6 +238,7 @@ func (s *Server) routes() {
 	authMW := CreateAuthMiddleware(s.cfg)
 	modelChain := chain.New(
 		authMW,
+		CreateProfileMiddleware(s),
 		CreateRequestContextMiddleware(s.cfg),
 		CreateInflightMiddleware(s.inflight),
 		CreateFilterMiddleware(s.cfg),
@@ -251,6 +285,7 @@ func (s *Server) routes() {
 	// Upstream passthrough. Meter only the model-dispatched endpoints that can
 	// produce token usage/timings.
 	upstreamChain := apiChain.Append(
+		CreateProfileMiddleware(s),
 		CreateUpstreamInflightMiddleware(s.inflight, s.cfg),
 		CreateMetricsMiddleware(s.metrics, s.cfg),
 	)
@@ -260,6 +295,8 @@ func (s *Server) routes() {
 	// API group (API-key protected) consumed by the UI.
 	mux.Handle("POST /api/models/unload", apiChain.ThenFunc(s.handleAPIUnloadAll))
 	mux.Handle("POST /api/models/unload/{model...}", apiChain.ThenFunc(s.handleAPIUnloadModel))
+	mux.Handle("GET /api/profiles", apiChain.ThenFunc(s.handleAPIProfiles))
+	mux.Handle("PUT /api/profiles/active", apiChain.ThenFunc(s.handleAPIActiveProfile))
 	mux.Handle("POST /api/inflight/{id}/cancel", apiChain.ThenFunc(s.handleAPICancelInflight))
 	mux.Handle("GET /api/events", apiChain.ThenFunc(s.handleAPIEvents))
 	mux.Handle("GET /api/metrics/activity", apiChain.ThenFunc(s.handleAPIActivity))

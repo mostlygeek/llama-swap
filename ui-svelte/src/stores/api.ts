@@ -11,6 +11,8 @@ import type {
   InflightRequestEntry,
   PerformanceResponse,
   UIConfig,
+  Profile,
+  ProfileState,
 } from "../lib/types";
 import { connectionState } from "./theme";
 
@@ -18,9 +20,51 @@ const LOG_LENGTH_LIMIT = 1024 * 100; /* 100KB of log data */
 
 // Stores
 export const models = writable<Model[]>([]);
+export const profiles = writable<Profile[]>([]);
+export const activeProfile = writable<string | null>(null);
 
-// True when at least one listed (non-unlisted) model is configured.
-export const hasListedModels = derived(models, ($models) => $models.some((m) => !m.unlisted));
+// Active profile pins exposed as virtual models for Playground selectors.
+// Concrete model management continues to use `models`.
+export const profileModels = derived(
+  [models, profiles, activeProfile],
+  ([$models, $profiles, $activeProfile]): Model[] => {
+    const profile = $profiles.find((candidate) => candidate.id === $activeProfile);
+    if (!profile) return [];
+
+    const modelIDs = new Set<string>();
+    for (const model of $models) {
+      modelIDs.add(model.id);
+      for (const alias of model.aliases ?? []) modelIDs.add(alias);
+    }
+
+    const result: Model[] = [];
+    for (const [pin, target] of Object.entries(profile.pins)) {
+      if (!target || modelIDs.has(pin)) continue;
+
+      const targetModel = $models.find(
+        (model) => model.id === target || model.aliases?.includes(target),
+      );
+      result.push(targetModel
+        ? { ...targetModel, id: pin, unlisted: false, aliases: undefined }
+        : {
+            id: pin,
+            state: "stopped",
+            name: "",
+            description: "",
+            unlisted: false,
+            peerID: "",
+          });
+    }
+    return result.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+  },
+);
+
+// True when at least one concrete model or active profile pin is selectable.
+export const hasListedModels = derived(
+  [models, profileModels],
+  ([$models, $profileModels]) =>
+    $profileModels.length > 0 || $models.some((model) => !model.unlisted),
+);
 export const proxyLogs = writable<string>("");
 export const upstreamLogs = writable<string>("");
 export const activityRevision = writable<number>(0);
@@ -38,6 +82,7 @@ export const versionInfo = writable<VersionInfo>({
 });
 
 let apiEventSource: EventSource | null = null;
+let profileRevision = 0;
 
 function appendLog(newData: string, store: typeof proxyLogs | typeof upstreamLogs): void {
   store.update((prev) => {
@@ -54,6 +99,9 @@ export function enableAPIEvents(enabled: boolean): void {
     inFlightRequests.set(0);
     inflightRequestEntries.set([]);
     uiConfig.set(defaultUIConfig());
+    profiles.set([]);
+    activeProfile.set(null);
+    profileRevision++;
     return;
   }
 
@@ -75,8 +123,12 @@ export function enableAPIEvents(enabled: boolean): void {
       inflightRequestEntries.set([]);
       uiConfig.set(defaultUIConfig());
       models.set([]);
+      profiles.set([]);
+      activeProfile.set(null);
+      profileRevision++;
       retryCount = 0;
       connectionState.set("connected");
+      void fetchProfiles().catch((error) => console.error(error));
     };
 
     apiEventSource.onmessage = (e: MessageEvent) => {
@@ -169,7 +221,40 @@ export function handleAPIEventMessage(data: string): void {
       uiConfig.set(JSON.parse(message.data) as UIConfig);
       break;
     }
+
+    case "profileChanged": {
+      const state = JSON.parse(message.data) as Pick<ProfileState, "active">;
+      profileRevision++;
+      activeProfile.set(state.active);
+      break;
+    }
   }
+}
+
+export async function fetchProfiles(): Promise<ProfileState> {
+  const revision = profileRevision;
+  const response = await fetch("/api/profiles");
+  if (!response.ok) {
+    throw new Error(`Failed to list profiles: ${response.status}`);
+  }
+  const state = await response.json() as ProfileState;
+  profiles.set(state.profiles);
+  if (profileRevision === revision) activeProfile.set(state.active);
+  return state;
+}
+
+export async function setActiveProfile(name: string | null): Promise<void> {
+  const revision = profileRevision;
+  const response = await fetch("/api/profiles/active", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to switch profile: ${response.status}`);
+  }
+  const state = await response.json() as Pick<ProfileState, "active">;
+  if (profileRevision === revision) activeProfile.set(state.active);
 }
 
 // Fetch version info when connected

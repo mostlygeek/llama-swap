@@ -1,12 +1,26 @@
 import { get } from "svelte/store";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  activeProfile,
   activityRevision,
+  fetchProfiles,
   handleAPIEventMessage,
+  hasListedModels,
   inFlightRequests,
   inflightRequestEntries,
+  models,
+  profileModels,
+  profiles,
+  setActiveProfile,
   uiConfig,
 } from "./api";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  models.set([]);
+  profiles.set([]);
+  activeProfile.set(null);
+});
 
 describe("api store event handling", () => {
   it("parses inflight request entries", () => {
@@ -106,5 +120,94 @@ describe("api store event handling", () => {
     );
 
     expect(get(activityRevision)).toBe(1);
+  });
+
+  it("applies profile change events", () => {
+    activeProfile.set(null);
+    handleAPIEventMessage(JSON.stringify({
+      type: "profileChanged",
+      data: JSON.stringify({ active: "coding" }),
+    }));
+    expect(get(activeProfile)).toBe("coding");
+  });
+
+  it("loads and switches profiles", async () => {
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          active: null,
+          profiles: [{ id: "coding", description: "Coding", pins: { llm: "real" } }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ active: "coding" }),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    await fetchProfiles();
+    expect(get(profiles)).toHaveLength(1);
+    expect(get(activeProfile)).toBeNull();
+
+    await setActiveProfile("coding");
+    expect(get(activeProfile)).toBe("coding");
+    expect(mockFetch).toHaveBeenLastCalledWith("/api/profiles/active", expect.objectContaining({
+      method: "PUT",
+      body: JSON.stringify({ name: "coding" }),
+    }));
+  });
+
+  it("exposes active profile pins as Playground models", () => {
+    models.set([
+      {
+        id: "real",
+        state: "ready",
+        name: "Real",
+        description: "",
+        unlisted: true,
+        peerID: "",
+        aliases: ["variant"],
+        capabilities: { vision: true },
+      },
+      {
+        id: "peer-model",
+        state: "stopped",
+        name: "",
+        description: "",
+        unlisted: true,
+        peerID: "remote",
+      },
+    ]);
+    profiles.set([{
+      id: "coding",
+      description: "",
+      pins: {
+        public: "variant",
+        "remote-pin": "peer-model",
+        disabled: "",
+        real: "peer-model",
+        variant: "peer-model",
+      },
+    }]);
+    activeProfile.set("coding");
+
+    expect(get(profileModels).map((model) => model.id)).toEqual(["public", "remote-pin"]);
+    expect(get(profileModels)[0]).toMatchObject({
+      id: "public",
+      state: "ready",
+      unlisted: false,
+      capabilities: { vision: true },
+    });
+    expect(get(profileModels)[1]).toMatchObject({
+      id: "remote-pin",
+      peerID: "remote",
+      unlisted: false,
+    });
+    expect(get(hasListedModels)).toBe(true);
+
+    activeProfile.set(null);
+    expect(get(profileModels)).toEqual([]);
+    expect(get(hasListedModels)).toBe(false);
   });
 });
