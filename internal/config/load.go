@@ -94,14 +94,6 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 
 	// Populate the aliases map
 	config.aliases = make(map[string]string)
-	for modelName, modelConfig := range config.Models {
-		for _, alias := range modelConfig.Aliases {
-			if _, found := config.aliases[alias]; found {
-				return Config{}, fmt.Errorf("duplicate alias %s found in model: %s", alias, modelName)
-			}
-			config.aliases[alias] = modelName
-		}
-	}
 
 	// Validate global macros
 	for _, macro := range config.Macros {
@@ -183,6 +175,18 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			modelConfig.Filters.StripParams = strings.ReplaceAll(modelConfig.Filters.StripParams, macroSlug, macroStr)
 			modelConfig.Name = strings.ReplaceAll(modelConfig.Name, macroSlug, macroStr)
 			modelConfig.Description = strings.ReplaceAll(modelConfig.Description, macroSlug, macroStr)
+			for i, alias := range modelConfig.Aliases {
+				modelConfig.Aliases[i] = strings.ReplaceAll(alias, macroSlug, macroStr)
+			}
+
+			// Substitute macros in SetParams (type-preserving)
+			if len(modelConfig.Filters.SetParams) > 0 {
+				result, err := substituteMacroInValue(modelConfig.Filters.SetParams, entry.Name, entry.Value)
+				if err != nil {
+					return Config{}, fmt.Errorf("model %s filters.setParams: %s", modelId, err.Error())
+				}
+				modelConfig.Filters.SetParams = result.(map[string]any)
+			}
 
 			// Substitute macros in SetParamsByID keys and values
 			if len(modelConfig.Filters.SetParamsByID) > 0 {
@@ -234,6 +238,9 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			modelConfig.Proxy = strings.ReplaceAll(modelConfig.Proxy, macroSlug, macroStr)
 			modelConfig.Name = strings.ReplaceAll(modelConfig.Name, macroSlug, macroStr)
 			modelConfig.Description = strings.ReplaceAll(modelConfig.Description, macroSlug, macroStr)
+			for i, alias := range modelConfig.Aliases {
+				modelConfig.Aliases[i] = strings.ReplaceAll(alias, macroSlug, macroStr)
+			}
 
 			if len(modelConfig.Metadata) > 0 {
 				result, err := substituteMacroInValue(modelConfig.Metadata, "PORT", nextPort)
@@ -275,6 +282,20 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			if err := validateNestedForUnknownMacros(modelConfig.Metadata, fmt.Sprintf("model %s metadata", modelId)); err != nil {
 				return Config{}, err
 			}
+		}
+		if len(modelConfig.Filters.SetParams) > 0 {
+			if err := validateNestedForUnknownMacros(modelConfig.Filters.SetParams, fmt.Sprintf("model %s filters.setParams", modelId)); err != nil {
+				return Config{}, err
+			}
+		}
+		for _, alias := range modelConfig.Aliases {
+			if matches := macroPatternRegex.FindAllStringSubmatch(alias, -1); len(matches) > 0 {
+				return Config{}, fmt.Errorf("unknown macro '${%s}' found in model %s aliases", matches[0][1], modelId)
+			}
+			if _, found := config.aliases[alias]; found {
+				return Config{}, fmt.Errorf("duplicate alias %s found in model: %s", alias, modelId)
+			}
+			config.aliases[alias] = modelId
 		}
 
 		// Validate SetParamsByID keys and values
