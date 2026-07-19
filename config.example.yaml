@@ -124,7 +124,9 @@ unloadTimeout: 10
 # - macro names are strings and must be less than 64 characters
 # - macro names must match the regex ^[a-zA-Z0-9_-]+$
 # - macro names must not be a reserved name: PORT or MODEL_ID
-# - macro values can be numbers, bools, or strings
+# - macro values can be numbers, bools, strings, or maps
+#   - map-valued macros can only be used as a whole value (e.g.
+#     filters.reasoning.presets), never interpolated into strings
 # - macros can contain other macros, but they must be defined before they are used
 # - environment variables can be referenced with ${env.VAR_NAME} syntax
 #   - env macros are substituted first, before regular macros
@@ -144,6 +146,18 @@ macros:
   # - ${env.VAR_NAME} pulls the value from the system environment
   # - useful for paths, secrets, or machine-specific configuration
   "models_dir": "${env.HOME}/models"
+
+  # Example of a map-valued macro, shared reasoning presets for
+  # filters.reasoning.presets (see the filters section below)
+  "reasoning_presets":
+    none:
+      enableThinking: false
+    medium:
+      enableThinking: true
+      budgetTokens: 8192
+    high:
+      enableThinking: true
+      budgetTokens: 32768
 
 # apiKeys: require an API key when making requests to inference endpoints
 # - optional, default: []
@@ -309,6 +323,8 @@ models:
       #   model swap or process restart. Note that toggling enable_thinking may
       #   still change the rendered chat-template suffix (template dependent)
       #   and require partial prompt re-prefill upstream
+      # - presets can also reference a map-valued macro so multiple models
+      #   share one definition: `presets: ${reasoning_presets}` (see macros)
       reasoning:
         inputField: reasoning_effort
         presets:

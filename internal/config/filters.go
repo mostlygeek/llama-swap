@@ -6,6 +6,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // ProtectedParams is a list of parameters that cannot be set or stripped via filters
@@ -43,6 +45,11 @@ const DefaultReasoningInputField = "reasoning_effort"
 // ReasoningFilter maps client reasoning effort values (e.g. "none", "medium")
 // to llama.cpp-native request parameters. Only string-valued input fields are
 // translated; unknown or non-string values are forwarded unchanged.
+//
+// The custom UnmarshalYAML stores an untyped representation so presets can
+// reference a map-valued macro (presets: ${my_presets}), which is not
+// decodable into the typed field. After ResolveMacros is called the typed
+// fields (InputField, Presets) are populated.
 type ReasoningFilter struct {
 	// InputField is the top-level request field holding the effort value.
 	// Defaults to "reasoning_effort".
@@ -50,6 +57,51 @@ type ReasoningFilter struct {
 
 	// Presets maps an effort value to the native fields to inject.
 	Presets map[string]ReasoningPreset `yaml:"presets"`
+
+	raw map[string]any
+}
+
+// UnmarshalYAML decodes the reasoning filter into an untyped map. This
+// materializes YAML aliases while allowing macro placeholders in fields that
+// will ultimately be decoded as structured values (e.g. presets).
+func (rf *ReasoningFilter) UnmarshalYAML(value *yaml.Node) error {
+	return value.Decode(&rf.raw)
+}
+
+// ResolveMacros substitutes all macros in the untyped representation (LIFO
+// order matching LoadConfigFromReader), then decodes the resolved values into
+// the typed fields. It is a no-op for programmatically constructed filters.
+func (rf *ReasoningFilter) ResolveMacros(macros MacroList) error {
+	if rf.raw == nil {
+		return nil
+	}
+
+	var resolved any = rf.raw
+	for i := len(macros) - 1; i >= 0; i-- {
+		entry := macros[i]
+		var err error
+		resolved, err = substituteMacroInValue(resolved, entry.Name, entry.Value)
+		if err != nil {
+			return fmt.Errorf("failed macro substitution: %w", err)
+		}
+	}
+	if err := validateNestedForUnknownMacros(resolved, "presets"); err != nil {
+		return err
+	}
+
+	var node yaml.Node
+	if err := node.Encode(resolved); err != nil {
+		return fmt.Errorf("failed to encode after macro substitution: %w", err)
+	}
+	type rawReasoningFilter ReasoningFilter
+	typed := rawReasoningFilter{}
+	if err := node.Decode(&typed); err != nil {
+		return fmt.Errorf("failed to decode after macro substitution: %w", err)
+	}
+	rf.InputField = typed.InputField
+	rf.Presets = typed.Presets
+
+	return nil
 }
 
 // ReasoningPreset describes the llama.cpp-native fields injected for one

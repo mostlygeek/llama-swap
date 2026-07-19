@@ -176,19 +176,37 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			macroSlug := fmt.Sprintf("${%s}", entry.Name)
 			macroStr := fmt.Sprintf("%v", entry.Value)
 
-			modelConfig.Cmd = strings.ReplaceAll(modelConfig.Cmd, macroSlug, macroStr)
-			modelConfig.CmdStop = strings.ReplaceAll(modelConfig.CmdStop, macroSlug, macroStr)
-			modelConfig.Proxy = strings.ReplaceAll(modelConfig.Proxy, macroSlug, macroStr)
-			modelConfig.CheckEndpoint = strings.ReplaceAll(modelConfig.CheckEndpoint, macroSlug, macroStr)
-			modelConfig.Filters.StripParams = strings.ReplaceAll(modelConfig.Filters.StripParams, macroSlug, macroStr)
-			modelConfig.Name = strings.ReplaceAll(modelConfig.Name, macroSlug, macroStr)
-			modelConfig.Description = strings.ReplaceAll(modelConfig.Description, macroSlug, macroStr)
+			if isScalarMacroValue(entry.Value) {
+				modelConfig.Cmd = strings.ReplaceAll(modelConfig.Cmd, macroSlug, macroStr)
+				modelConfig.CmdStop = strings.ReplaceAll(modelConfig.CmdStop, macroSlug, macroStr)
+				modelConfig.Proxy = strings.ReplaceAll(modelConfig.Proxy, macroSlug, macroStr)
+				modelConfig.CheckEndpoint = strings.ReplaceAll(modelConfig.CheckEndpoint, macroSlug, macroStr)
+				modelConfig.Filters.StripParams = strings.ReplaceAll(modelConfig.Filters.StripParams, macroSlug, macroStr)
+				modelConfig.Name = strings.ReplaceAll(modelConfig.Name, macroSlug, macroStr)
+				modelConfig.Description = strings.ReplaceAll(modelConfig.Description, macroSlug, macroStr)
+			} else {
+				// Non-scalar macros can only be substituted as whole values
+				// (e.g. filters.reasoning.presets), never into string fields
+				for _, field := range []string{
+					modelConfig.Cmd, modelConfig.CmdStop, modelConfig.Proxy, modelConfig.CheckEndpoint,
+					modelConfig.Filters.StripParams, modelConfig.Name, modelConfig.Description,
+				} {
+					if strings.Contains(field, macroSlug) {
+						return Config{}, fmt.Errorf("model %s: macro '%s' has a non-scalar value and can only be used as a whole value", modelId, entry.Name)
+					}
+				}
+			}
 
 			// Substitute macros in SetParamsByID keys and values
 			if len(modelConfig.Filters.SetParamsByID) > 0 {
 				newSetParamsByID := make(map[string]map[string]any, len(modelConfig.Filters.SetParamsByID))
 				for key, paramMap := range modelConfig.Filters.SetParamsByID {
-					newKey := strings.ReplaceAll(key, macroSlug, macroStr)
+					newKey := key
+					if isScalarMacroValue(entry.Value) {
+						newKey = strings.ReplaceAll(key, macroSlug, macroStr)
+					} else if strings.Contains(key, macroSlug) {
+						return Config{}, fmt.Errorf("model %s filters.setParamsByID: macro '%s' has a non-scalar value and cannot be used in a key", modelId, entry.Name)
+					}
 					newValAny, err := substituteMacroInValue(any(paramMap), entry.Name, entry.Value)
 					if err != nil {
 						return Config{}, fmt.Errorf("model %s filters.setParamsByID: %s", modelId, err.Error())
@@ -216,6 +234,14 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		// during YAML unmarshal because e.g. "${default_ctx}" is not an int).
 		if err := modelConfig.Capabilities.ResolveMacros(mergedMacros); err != nil {
 			return Config{}, fmt.Errorf("model %s: %w", modelId, err)
+		}
+
+		// Resolve macros in the reasoning filter (presets may reference a
+		// map-valued macro, which is not decodable during YAML unmarshal).
+		if modelConfig.Filters.Reasoning != nil {
+			if err := modelConfig.Filters.Reasoning.ResolveMacros(mergedMacros); err != nil {
+				return Config{}, fmt.Errorf("model %s filters.reasoning: %w", modelId, err)
+			}
 		}
 
 		// Handle PORT macro - only allocate if cmd uses it
@@ -438,10 +464,14 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		for i := len(config.Macros) - 1; i >= 0; i-- {
 			entry := config.Macros[i]
 			macroSlug := fmt.Sprintf("${%s}", entry.Name)
-			macroStr := fmt.Sprintf("%v", entry.Value)
 
-			peerConfig.ApiKey = strings.ReplaceAll(peerConfig.ApiKey, macroSlug, macroStr)
-			peerConfig.Filters.StripParams = strings.ReplaceAll(peerConfig.Filters.StripParams, macroSlug, macroStr)
+			if isScalarMacroValue(entry.Value) {
+				macroStr := fmt.Sprintf("%v", entry.Value)
+				peerConfig.ApiKey = strings.ReplaceAll(peerConfig.ApiKey, macroSlug, macroStr)
+				peerConfig.Filters.StripParams = strings.ReplaceAll(peerConfig.Filters.StripParams, macroSlug, macroStr)
+			} else if strings.Contains(peerConfig.ApiKey, macroSlug) || strings.Contains(peerConfig.Filters.StripParams, macroSlug) {
+				return Config{}, fmt.Errorf("peers.%s: macro '%s' has a non-scalar value and can only be used as a whole value", peerName, entry.Name)
+			}
 
 			// Substitute in setParams (type-preserving)
 			if len(peerConfig.Filters.SetParams) > 0 {
@@ -461,6 +491,9 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			return Config{}, fmt.Errorf("peers.%s.filters.stripParams: unknown macro '${%s}'", peerName, matches[0][1])
 		}
 		if peerConfig.Filters.Reasoning != nil {
+			if err := peerConfig.Filters.Reasoning.ResolveMacros(config.Macros); err != nil {
+				return Config{}, fmt.Errorf("peers.%s.filters.reasoning: %w", peerName, err)
+			}
 			if err := peerConfig.Filters.Reasoning.Validate(); err != nil {
 				return Config{}, fmt.Errorf("peers.%s.filters.reasoning: %w", peerName, err)
 			}
