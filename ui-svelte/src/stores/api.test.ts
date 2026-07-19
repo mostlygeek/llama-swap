@@ -5,8 +5,11 @@ import {
   activityRevision,
   fetchProfiles,
   handleAPIEventMessage,
+  hasListedModels,
   inFlightRequests,
   inflightRequestEntries,
+  models,
+  profileModels,
   profiles,
   setActiveProfile,
   uiConfig,
@@ -14,6 +17,9 @@ import {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  models.set([]);
+  profiles.set([]);
+  activeProfile.set(null);
 });
 
 describe("api store event handling", () => {
@@ -150,5 +156,58 @@ describe("api store event handling", () => {
       method: "PUT",
       body: JSON.stringify({ name: "coding" }),
     }));
+  });
+
+  it("exposes active profile pins as Playground models", () => {
+    models.set([
+      {
+        id: "real",
+        state: "ready",
+        name: "Real",
+        description: "",
+        unlisted: true,
+        peerID: "",
+        aliases: ["variant"],
+        capabilities: { vision: true },
+      },
+      {
+        id: "peer-model",
+        state: "stopped",
+        name: "",
+        description: "",
+        unlisted: true,
+        peerID: "remote",
+      },
+    ]);
+    profiles.set([{
+      id: "coding",
+      description: "",
+      pins: {
+        public: "variant",
+        "remote-pin": "peer-model",
+        disabled: "",
+        real: "peer-model",
+        variant: "peer-model",
+      },
+    }]);
+    activeProfile.set("coding");
+
+    expect(get(profileModels).map((model) => model.id)).toEqual(["public", "remote-pin"]);
+    expect(get(profileModels)[0]).toMatchObject({
+      id: "public",
+      state: "ready",
+      unlisted: false,
+      capabilities: { vision: true },
+    });
+    expect(get(profileModels)[1]).toMatchObject({
+      id: "remote-pin",
+      peerID: "remote",
+      unlisted: false,
+    });
+    expect(get(hasListedModels)).toBe(true);
+
+    activeProfile.set(null);
+    expect(get(profileModels)).toEqual([]);
+    expect(get(hasListedModels)).toBe(false);
   });
 });

@@ -23,8 +23,48 @@ export const models = writable<Model[]>([]);
 export const profiles = writable<Profile[]>([]);
 export const activeProfile = writable<string | null>(null);
 
-// True when at least one listed (non-unlisted) model is configured.
-export const hasListedModels = derived(models, ($models) => $models.some((m) => !m.unlisted));
+// Active profile pins exposed as virtual models for Playground selectors.
+// Concrete model management continues to use `models`.
+export const profileModels = derived(
+  [models, profiles, activeProfile],
+  ([$models, $profiles, $activeProfile]): Model[] => {
+    const profile = $profiles.find((candidate) => candidate.id === $activeProfile);
+    if (!profile) return [];
+
+    const modelIDs = new Set<string>();
+    for (const model of $models) {
+      modelIDs.add(model.id);
+      for (const alias of model.aliases ?? []) modelIDs.add(alias);
+    }
+
+    const result: Model[] = [];
+    for (const [pin, target] of Object.entries(profile.pins)) {
+      if (!target || modelIDs.has(pin)) continue;
+
+      const targetModel = $models.find(
+        (model) => model.id === target || model.aliases?.includes(target),
+      );
+      result.push(targetModel
+        ? { ...targetModel, id: pin, unlisted: false, aliases: undefined }
+        : {
+            id: pin,
+            state: "stopped",
+            name: "",
+            description: "",
+            unlisted: false,
+            peerID: "",
+          });
+    }
+    return result.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+  },
+);
+
+// True when at least one concrete model or active profile pin is selectable.
+export const hasListedModels = derived(
+  [models, profileModels],
+  ([$models, $profileModels]) =>
+    $profileModels.length > 0 || $models.some((model) => !model.unlisted),
+);
 export const proxyLogs = writable<string>("");
 export const upstreamLogs = writable<string>("");
 export const activityRevision = writable<number>(0);

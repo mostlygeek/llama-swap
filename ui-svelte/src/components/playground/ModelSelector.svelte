@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { models } from "../../stores/api";
+  import { models, profileModels } from "../../stores/api";
   import { groupModels } from "../../lib/modelUtils";
   import * as Select from "$lib/components/ui/select/index.js";
 
@@ -15,7 +15,7 @@
 
   let grouped = $derived(groupModels($models, capabilities, matchAny));
   let hasMatching = $derived(grouped.localMatching.length > 0);
-  let hasModels = $derived(hasMatching || grouped.local.length > 0 || Object.keys(grouped.peersByProvider).length > 0);
+  let hasModels = $derived($profileModels.length > 0 || hasMatching || grouped.local.length > 0 || Object.keys(grouped.peersByProvider).length > 0);
 </script>
 
 {#if hasModels}
@@ -28,6 +28,15 @@
     <Select.Trigger class="min-w-0 flex-1 basis-48">{value || placeholder}</Select.Trigger>
     <Select.Content class="max-h-[60vh]">
       <Select.Item value="">{placeholder}</Select.Item>
+      {#if $profileModels.length > 0}
+        <Select.Group>
+          <Select.Label>Profile</Select.Label>
+          {#each $profileModels as model (model.id)}
+            <Select.Item value={model.id}>{model.id}</Select.Item>
+          {/each}
+        </Select.Group>
+        <Select.Separator />
+      {/if}
       {#if hasMatching}
         <Select.Group>
           <Select.Label>Matching Capabilities</Select.Label>
