@@ -262,7 +262,7 @@ func applyReasoningFilter(body []byte, f config.Filters) ([]byte, string, error)
 			// translation and forward the request as-is.
 			return body, fmt.Sprintf("reasoning: chat_template_kwargs is not an object, skipping translation of %s=%q", field, effort.Str), nil
 		}
-		if kwargs.Type == gjson.Null {
+		if kwargs.Exists() && kwargs.Type == gjson.Null {
 			if body, err = sjson.SetBytes(body, "chat_template_kwargs", map[string]any{}); err != nil {
 				return nil, "", fmt.Errorf("error resetting chat_template_kwargs in request")
 			}
