@@ -192,6 +192,9 @@ func ReplaceRequestModel(r *http.Request, model, replacement string) (*http.Requ
 		if err != nil {
 			return r, err
 		}
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
 		r.MultipartForm = nil
 		r.Form = nil
 		r.PostForm = nil

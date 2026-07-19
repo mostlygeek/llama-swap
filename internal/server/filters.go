@@ -108,6 +108,9 @@ func CreateFormFilterMiddleware(cfg config.Config) chain.Middleware {
 			}
 
 			r.Body = io.NopCloser(bytes.NewReader(body))
+			if r.MultipartForm != nil {
+				_ = r.MultipartForm.RemoveAll()
+			}
 			r.MultipartForm = nil
 			r.Header.Del("Transfer-Encoding")
 			r.Header.Set("Content-Type", contentType)
