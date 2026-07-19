@@ -11,7 +11,9 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
@@ -20,13 +22,14 @@ import (
 //
 //   - UseModelName rewrite (issue #69)
 //   - StripParams removal (issue #174)
+//   - Reasoning effort translation
 //   - SetParams injection (issue #453)
 //   - SetParamsByID per-alias overrides
 //
 // Non-JSON requests (GET, multipart forms) pass through untouched. The buffered
 // body is re-attached with Content-Length / Transfer-Encoding cleanup so the
 // downstream reverse proxy forwards the correct bytes (see issue #11).
-func CreateFilterMiddleware(cfg config.Config) chain.Middleware {
+func CreateFilterMiddleware(cfg config.Config, proxyLogger *logmon.Monitor) chain.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !strings.Contains(r.Header.Get("Content-Type"), "application/json") {
@@ -52,10 +55,13 @@ func CreateFilterMiddleware(cfg config.Config) chain.Middleware {
 				return
 			}
 
-			body, err = applyFilters(body, data.Model, useModelName, filters)
+			body, warning, err := applyFilters(body, data.Model, useModelName, filters)
 			if err != nil {
 				shared.SendResponse(w, r, http.StatusInternalServerError, err.Error())
 				return
+			}
+			if warning != "" && proxyLogger != nil {
+				proxyLogger.Warnf("filters: %s (model: %s)", warning, data.Model)
 			}
 
 			r.Body = io.NopCloser(bytes.NewReader(body))
@@ -182,37 +188,100 @@ func resolveFilters(cfg config.Config, requested string) (useModelName string, f
 	return "", config.Filters{}, false
 }
 
-// applyFilters rewrites the JSON body in place. Order matches the legacy
-// ProxyManager: useModelName, stripParams, setParams, then setParamsByID (which
-// can override setParams).
-func applyFilters(body []byte, requested, useModelName string, f config.Filters) ([]byte, error) {
+// applyFilters rewrites the JSON body in place. Order: useModelName,
+// stripParams, reasoning translation, setParams, then setParamsByID.
+// setParams/setParamsByID overwrite unconditionally, so they can override
+// values the reasoning step injected. A non-empty warning is returned when the
+// reasoning translation was skipped on a malformed body.
+func applyFilters(body []byte, requested, useModelName string, f config.Filters) ([]byte, string, error) {
 	var err error
 
 	if useModelName != "" {
 		if body, err = sjson.SetBytes(body, "model", useModelName); err != nil {
-			return nil, fmt.Errorf("error rewriting model name in JSON: %w", err)
+			return nil, "", fmt.Errorf("error rewriting model name in JSON: %w", err)
 		}
 	}
 
 	for _, param := range f.SanitizedStripParams() {
 		if body, err = sjson.DeleteBytes(body, param); err != nil {
-			return nil, fmt.Errorf("error stripping parameter %s from request", param)
+			return nil, "", fmt.Errorf("error stripping parameter %s from request", param)
 		}
+	}
+
+	body, warning, err := applyReasoningFilter(body, f)
+	if err != nil {
+		return nil, "", err
 	}
 
 	setParams, setKeys := f.SanitizedSetParams()
 	for _, key := range setKeys {
 		if body, err = sjson.SetBytes(body, key, setParams[key]); err != nil {
-			return nil, fmt.Errorf("error setting parameter %s in request", key)
+			return nil, "", fmt.Errorf("error setting parameter %s in request", key)
 		}
 	}
 
 	byID, byIDKeys := f.SanitizedSetParamsByID(requested)
 	for _, key := range byIDKeys {
 		if body, err = sjson.SetBytes(body, key, byID[key]); err != nil {
-			return nil, fmt.Errorf("error setting parameter %s in request", key)
+			return nil, "", fmt.Errorf("error setting parameter %s in request", key)
 		}
 	}
 
-	return body, nil
+	return body, warning, nil
+}
+
+// applyReasoningFilter translates a client-sent reasoning effort value (e.g.
+// "reasoning_effort": "medium") into llama.cpp-native request fields using the
+// model's configured presets. Only string effort values with a matching preset
+// are translated; anything else is forwarded unchanged. A matched preset fills
+// only fields the client did not set explicitly, and the input field is
+// removed only after translation completes. A non-empty warning is returned
+// when translation is aborted because chat_template_kwargs is not an object.
+func applyReasoningFilter(body []byte, f config.Filters) ([]byte, string, error) {
+	rf := f.Reasoning
+	if rf == nil {
+		return body, "", nil
+	}
+
+	field := f.ReasoningInputField()
+	effort := gjson.GetBytes(body, field)
+	if !effort.Exists() || effort.Type != gjson.String {
+		return body, "", nil
+	}
+
+	preset, found := rf.PresetFor(effort.Str)
+	if !found {
+		return body, "", nil
+	}
+
+	var err error
+	if preset.EnableThinking != nil {
+		kwargs := gjson.GetBytes(body, "chat_template_kwargs")
+		if kwargs.Exists() && kwargs.Type != gjson.Null && !kwargs.IsObject() {
+			// A malformed chat_template_kwargs cannot be merged into; abort the
+			// translation and forward the request as-is.
+			return body, fmt.Sprintf("reasoning: chat_template_kwargs is not an object, skipping translation of %s=%q", field, effort.Str), nil
+		}
+		if kwargs.Exists() && kwargs.Type == gjson.Null {
+			if body, err = sjson.SetBytes(body, "chat_template_kwargs", map[string]any{}); err != nil {
+				return nil, "", fmt.Errorf("error resetting chat_template_kwargs in request")
+			}
+		}
+		if !gjson.GetBytes(body, "chat_template_kwargs.enable_thinking").Exists() {
+			if body, err = sjson.SetBytes(body, "chat_template_kwargs.enable_thinking", *preset.EnableThinking); err != nil {
+				return nil, "", fmt.Errorf("error setting chat_template_kwargs.enable_thinking in request")
+			}
+		}
+	}
+
+	if preset.BudgetTokens != nil && !gjson.GetBytes(body, "thinking_budget_tokens").Exists() {
+		if body, err = sjson.SetBytes(body, "thinking_budget_tokens", *preset.BudgetTokens); err != nil {
+			return nil, "", fmt.Errorf("error setting thinking_budget_tokens in request")
+		}
+	}
+
+	if body, err = sjson.DeleteBytes(body, field); err != nil {
+		return nil, "", fmt.Errorf("error removing %s from request", field)
+	}
+	return body, "", nil
 }

@@ -15,6 +15,18 @@ var (
 	envMacroRegex     = regexp.MustCompile(`\$\{env\.([a-zA-Z_][a-zA-Z0-9_]*)\}`)
 )
 
+// isScalarMacroValue reports whether a macro value is a scalar that can be
+// interpolated into strings. Non-scalar macros (maps) may only be used as a
+// whole YAML value, e.g. filters.reasoning.presets: ${my_presets}.
+func isScalarMacroValue(value any) bool {
+	switch value.(type) {
+	case string, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64, bool:
+		return true
+	default:
+		return false
+	}
+}
+
 // validateMacro validates macro name and value constraints
 func validateMacro(name string, value any) error {
 	if len(name) >= 64 {
@@ -24,7 +36,8 @@ func validateMacro(name string, value any) error {
 		return fmt.Errorf("macro name '%s' contains invalid characters, must match pattern ^[a-zA-Z0-9_-]+$", name)
 	}
 
-	// Validate that value is a scalar type
+	// Validate the value type: scalars can be interpolated anywhere, maps can
+	// only be substituted as a whole value (e.g. filters.reasoning.presets)
 	switch v := value.(type) {
 	case string:
 		// Check for self-reference
@@ -34,8 +47,14 @@ func validateMacro(name string, value any) error {
 		}
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64, bool:
 		// These types are allowed
+	case map[string]any:
+		// Scan nested strings for self-reference via the YAML rendering
+		macroSlug := fmt.Sprintf("${%s}", name)
+		if rendered, err := yaml.Marshal(v); err == nil && strings.Contains(string(rendered), macroSlug) {
+			return fmt.Errorf("macro '%s' contains self-reference", name)
+		}
 	default:
-		return fmt.Errorf("macro '%s' has invalid type %T, must be a scalar type (string, int, float, or bool)", name, value)
+		return fmt.Errorf("macro '%s' has invalid type %T, must be a scalar type (string, int, float, or bool) or a map", name, value)
 	}
 
 	switch name {
@@ -89,7 +108,6 @@ func validateNestedForUnknownMacros(value any, context string) error {
 // This is called once per macro, allowing LIFO substitution order
 func substituteMacroInValue(value any, macroName string, macroValue any) (any, error) {
 	macroSlug := fmt.Sprintf("${%s}", macroName)
-	macroStr := fmt.Sprintf("%v", macroValue)
 
 	switch v := value.(type) {
 	case string:
@@ -99,7 +117,10 @@ func substituteMacroInValue(value any, macroName string, macroValue any) (any, e
 		}
 		// Handle string interpolation
 		if strings.Contains(v, macroSlug) {
-			return strings.ReplaceAll(v, macroSlug, macroStr), nil
+			if !isScalarMacroValue(macroValue) {
+				return nil, fmt.Errorf("macro '%s' has a non-scalar value and can only be used as a whole value, not interpolated into a string", macroName)
+			}
+			return strings.ReplaceAll(v, macroSlug, fmt.Sprintf("%v", macroValue)), nil
 		}
 		return v, nil
 

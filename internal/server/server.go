@@ -207,7 +207,7 @@ func (s *Server) routes() {
 		authMW,
 		CreateRequestContextMiddleware(s.cfg),
 		CreateInflightMiddleware(s.inflight),
-		CreateFilterMiddleware(s.cfg),
+		CreateFilterMiddleware(s.cfg, s.proxylog),
 		CreateFormFilterMiddleware(s.cfg),
 		CreateMetricsMiddleware(s.metrics, s.cfg),
 	)

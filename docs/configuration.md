@@ -214,7 +214,9 @@ unloadTimeout: 10
 # - macro names are strings and must be less than 64 characters
 # - macro names must match the regex ^[a-zA-Z0-9_-]+$
 # - macro names must not be a reserved name: PORT or MODEL_ID
-# - macro values can be numbers, bools, or strings
+# - macro values can be numbers, bools, strings, or maps
+#   - map-valued macros can only be used as a whole value (e.g.
+#     filters.reasoning.presets), never interpolated into strings
 # - macros can contain other macros, but they must be defined before they are used
 # - environment variables can be referenced with ${env.VAR_NAME} syntax
 #   - env macros are substituted first, before regular macros
@@ -234,6 +236,18 @@ macros:
   # - ${env.VAR_NAME} pulls the value from the system environment
   # - useful for paths, secrets, or machine-specific configuration
   "models_dir": "${env.HOME}/models"
+
+  # Example of a map-valued macro, shared reasoning presets for
+  # filters.reasoning.presets (see the filters section below)
+  "reasoning_presets":
+    none:
+      enableThinking: false
+    medium:
+      enableThinking: true
+      budgetTokens: 8192
+    high:
+      enableThinking: true
+      budgetTokens: 32768
 
 # apiKeys: require an API key when making requests to inference endpoints
 # - optional, default: []
@@ -330,7 +344,7 @@ models:
 
     # filters: a dictionary of filter settings
     # - optional, default: empty dictionary
-    # - same capabilities as peer filters (stripParams, setParams)
+    # - same capabilities as peer filters (stripParams, setParams, reasoning)
     filters:
       # stripParams: a comma separated list of parameters to remove from the request
       # - optional, default: ""
@@ -361,14 +375,52 @@ models:
       # - model aliases will be automatically created for each key
       setParamsByID:
         "${MODEL_ID}":
-          chat_template_kwargs:
-            reasoning_effort: medium
-        "${MODEL_ID}:high":
-          chat_template_kwargs:
-            reasoning_effort: high
-        "${MODEL_ID}:low":
-          chat_template_kwargs:
-            reasoning_effort: low
+          temperature: 0.7
+        "${MODEL_ID}:creative":
+          temperature: 1.0
+
+      # reasoning: translate a client-sent reasoning effort value (e.g. from
+      # Open WebUI or OpenCode) into llama.cpp-native request fields
+      # - optional, default: not set (no translation)
+      # - reads the top-level `inputField` (default: reasoning_effort) from the
+      #   request; only string values with a matching preset are translated,
+      #   unknown or non-string values pass through unchanged
+      # - enableThinking sets chat_template_kwargs.enable_thinking, merging into
+      #   an existing chat_template_kwargs object without touching other keys
+      # - budgetTokens sets thinking_budget_tokens; omit it to not inject the field
+      # - explicit client-supplied native fields always win: a preset only fills
+      #   fields missing from the request
+      # - the input field is removed from the forwarded request only after a
+      #   successful translation
+      # - runs after stripParams and before setParams/setParamsByID, which keep
+      #   their unconditional-overwrite semantics and can override preset values
+      # - reasoning_format / reasoning_control are not injected automatically;
+      #   use setParams if the upstream needs them
+      # - the model ID is never changed, so effort changes never trigger a
+      #   model swap or process restart. Note that toggling enable_thinking may
+      #   still change the rendered chat-template suffix (template dependent)
+      #   and require partial prompt re-prefill upstream
+      # - presets can also reference a map-valued macro so multiple models
+      #   share one definition: `presets: ${reasoning_presets}` (see macros)
+      reasoning:
+        inputField: reasoning_effort
+        presets:
+          none:
+            enableThinking: false
+          minimal:
+            enableThinking: true
+            budgetTokens: 1024
+          low:
+            enableThinking: true
+            budgetTokens: 2048
+          medium:
+            enableThinking: true
+            budgetTokens: 8192
+          high:
+            enableThinking: true
+            budgetTokens: 32768
+          max:
+            enableThinking: true
 
     # aliases: alternative model names that this model configuration is used for
     # - optional, default: empty array
@@ -601,7 +653,7 @@ peers:
 
     # filters: a dictionary of filter settings for peer requests
     # - optional, default: empty dictionary
-    # - same capabilities as model filters (stripParams, setParams)
+    # - same capabilities as model filters (stripParams, setParams, reasoning)
     filters:
       # stripParams: a comma separated list of parameters to remove from the request
       # - optional, default: ""

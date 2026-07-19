@@ -705,7 +705,8 @@ func TestConfig_InvalidMacroType(t *testing.T) {
 startPort: 10000
 macros:
   INVALID:
-    nested: value
+    - one
+    - two
 
 models:
   test-model:
@@ -785,7 +786,7 @@ models:
 			shouldErr: true,
 		},
 		{
-			name: "map macro (invalid)",
+			name: "map macro (valid, whole-value use only)",
 			yaml: `
 startPort: 10000
 macros:
@@ -794,6 +795,19 @@ macros:
 models:
   test-model:
     cmd: /path/to/server -p ${PORT}
+`,
+			shouldErr: false,
+		},
+		{
+			name: "map macro in cmd (invalid)",
+			yaml: `
+startPort: 10000
+macros:
+  MAP:
+    key: value
+models:
+  test-model:
+    cmd: /path/to/server -p ${PORT} ${MAP}
 `,
 			shouldErr: true,
 		},
@@ -1848,4 +1862,174 @@ routing:
 	cfg, err := LoadConfigFromReader(strings.NewReader(yaml))
 	require.NoError(t, err)
 	assert.Equal(t, 5, cfg.Routing.Scheduler.Settings.Fifo.Priority["gemma"])
+}
+
+func TestConfig_ReasoningFilterValidation(t *testing.T) {
+	t.Run("valid reasoning filter loads", func(t *testing.T) {
+		cfg, err := LoadConfigFromReader(strings.NewReader(`
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    filters:
+      reasoning:
+        presets:
+          none:
+            enableThinking: false
+          medium:
+            enableThinking: true
+            budgetTokens: 8192
+          max:
+            enableThinking: true
+`))
+		require.NoError(t, err)
+		rf := cfg.Models["model1"].Filters.Reasoning
+		require.NotNil(t, rf)
+		assert.Equal(t, "reasoning_effort", cfg.Models["model1"].Filters.ReasoningInputField())
+		require.Contains(t, rf.Presets, "medium")
+		require.NotNil(t, rf.Presets["medium"].BudgetTokens)
+		assert.Equal(t, 8192, *rf.Presets["medium"].BudgetTokens)
+		assert.Nil(t, rf.Presets["max"].BudgetTokens)
+	})
+
+	t.Run("invalid reasoning filter rejected", func(t *testing.T) {
+		_, err := LoadConfigFromReader(strings.NewReader(`
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    filters:
+      reasoning:
+        presets:
+          medium:
+            budgetTokens: -1
+`))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "model model1 filters.reasoning")
+	})
+}
+
+func TestConfig_ReasoningFilterMacroPresets(t *testing.T) {
+	t.Run("shared macro presets resolve for multiple models", func(t *testing.T) {
+		cfg, err := LoadConfigFromReader(strings.NewReader(`
+macros:
+  reasoning_presets:
+    none:
+      enableThinking: false
+    medium:
+      enableThinking: true
+      budgetTokens: 8192
+
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    filters:
+      reasoning:
+        presets: ${reasoning_presets}
+  model2:
+    cmd: path/to/cmd --port ${PORT}
+    filters:
+      reasoning:
+        inputField: effort
+        presets: ${reasoning_presets}
+`))
+		require.NoError(t, err)
+
+		for _, modelID := range []string{"model1", "model2"} {
+			rf := cfg.Models[modelID].Filters.Reasoning
+			require.NotNil(t, rf, modelID)
+			require.Contains(t, rf.Presets, "medium", modelID)
+			require.NotNil(t, rf.Presets["medium"].BudgetTokens, modelID)
+			assert.Equal(t, 8192, *rf.Presets["medium"].BudgetTokens, modelID)
+			require.NotNil(t, rf.Presets["none"].EnableThinking, modelID)
+			assert.False(t, *rf.Presets["none"].EnableThinking, modelID)
+		}
+		assert.Equal(t, "reasoning_effort", cfg.Models["model1"].Filters.ReasoningInputField())
+		assert.Equal(t, "effort", cfg.Models["model2"].Filters.ReasoningInputField())
+	})
+
+	t.Run("model macro overrides global presets macro", func(t *testing.T) {
+		cfg, err := LoadConfigFromReader(strings.NewReader(`
+macros:
+  reasoning_presets:
+    medium:
+      budgetTokens: 8192
+
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    macros:
+      reasoning_presets:
+        medium:
+          budgetTokens: 512
+    filters:
+      reasoning:
+        presets: ${reasoning_presets}
+`))
+		require.NoError(t, err)
+		rf := cfg.Models["model1"].Filters.Reasoning
+		require.NotNil(t, rf)
+		require.NotNil(t, rf.Presets["medium"].BudgetTokens)
+		assert.Equal(t, 512, *rf.Presets["medium"].BudgetTokens)
+	})
+
+	t.Run("unknown macro in presets rejected", func(t *testing.T) {
+		_, err := LoadConfigFromReader(strings.NewReader(`
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    filters:
+      reasoning:
+        presets: ${missing_presets}
+`))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "model model1 filters.reasoning")
+		assert.Contains(t, err.Error(), "missing_presets")
+	})
+
+	t.Run("map macro interpolated into a string rejected", func(t *testing.T) {
+		_, err := LoadConfigFromReader(strings.NewReader(`
+macros:
+  reasoning_presets:
+    medium:
+      budgetTokens: 8192
+
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    filters:
+      reasoning:
+        inputField: "effort_${reasoning_presets}"
+        presets: ${reasoning_presets}
+`))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "non-scalar")
+	})
+
+	t.Run("peer presets resolve from global macro", func(t *testing.T) {
+		cfg, err := LoadConfigFromReader(strings.NewReader(`
+macros:
+  reasoning_presets:
+    high:
+      enableThinking: true
+      budgetTokens: 32768
+
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+
+peers:
+  peer1:
+    proxy: http://localhost:9999
+    models:
+      - remote-model
+    filters:
+      reasoning:
+        presets: ${reasoning_presets}
+`))
+		require.NoError(t, err)
+		rf := cfg.Peers["peer1"].Filters.Reasoning
+		require.NotNil(t, rf)
+		require.Contains(t, rf.Presets, "high")
+		require.NotNil(t, rf.Presets["high"].BudgetTokens)
+		assert.Equal(t, 32768, *rf.Presets["high"].BudgetTokens)
+	})
 }

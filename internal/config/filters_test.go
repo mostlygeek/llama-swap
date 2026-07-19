@@ -283,3 +283,100 @@ func TestProtectedParams(t *testing.T) {
 	// Verify that "model" is protected
 	assert.Contains(t, ProtectedParams, "model")
 }
+
+func TestFilters_ReasoningInputField(t *testing.T) {
+	assert.Equal(t, "", Filters{}.ReasoningInputField())
+	assert.Equal(t, "reasoning_effort", Filters{Reasoning: &ReasoningFilter{}}.ReasoningInputField())
+	assert.Equal(t, "effort", Filters{Reasoning: &ReasoningFilter{InputField: "effort"}}.ReasoningInputField())
+}
+
+func TestReasoningFilter_PresetFor(t *testing.T) {
+	enabled := true
+	rf := &ReasoningFilter{
+		Presets: map[string]ReasoningPreset{
+			"max": {EnableThinking: &enabled},
+		},
+	}
+
+	preset, found := rf.PresetFor("max")
+	assert.True(t, found)
+	assert.Equal(t, &enabled, preset.EnableThinking)
+	assert.Nil(t, preset.BudgetTokens)
+
+	_, found = rf.PresetFor("unknown")
+	assert.False(t, found)
+}
+
+func TestReasoningFilter_Validate(t *testing.T) {
+	enabled := true
+	budget := 8192
+	zero := 0
+	validPresets := map[string]ReasoningPreset{
+		"medium": {EnableThinking: &enabled, BudgetTokens: &budget},
+	}
+
+	tests := []struct {
+		name    string
+		filter  ReasoningFilter
+		wantErr string
+	}{
+		{
+			name:   "valid with default inputField",
+			filter: ReasoningFilter{Presets: validPresets},
+		},
+		{
+			name:   "valid with custom inputField",
+			filter: ReasoningFilter{InputField: "effort", Presets: validPresets},
+		},
+		{
+			name:    "protected inputField",
+			filter:  ReasoningFilter{InputField: "model", Presets: validPresets},
+			wantErr: "protected",
+		},
+		{
+			name:    "dotted inputField",
+			filter:  ReasoningFilter{InputField: "reasoning.effort", Presets: validPresets},
+			wantErr: "must contain only letters, digits, underscores, or hyphens",
+		},
+		{
+			name:    "wildcard inputField",
+			filter:  ReasoningFilter{InputField: "re*", Presets: validPresets},
+			wantErr: "must contain only letters, digits, underscores, or hyphens",
+		},
+		{
+			name:    "pipe inputField",
+			filter:  ReasoningFilter{InputField: "a|b", Presets: validPresets},
+			wantErr: "must contain only letters, digits, underscores, or hyphens",
+		},
+		{
+			name:    "empty presets",
+			filter:  ReasoningFilter{},
+			wantErr: "presets must not be empty",
+		},
+		{
+			name: "preset with no fields",
+			filter: ReasoningFilter{Presets: map[string]ReasoningPreset{
+				"medium": {},
+			}},
+			wantErr: "must set enableThinking and/or budgetTokens",
+		},
+		{
+			name: "non-positive budgetTokens",
+			filter: ReasoningFilter{Presets: map[string]ReasoningPreset{
+				"medium": {BudgetTokens: &zero},
+			}},
+			wantErr: "greater than 0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.filter.Validate()
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.ErrorContains(t, err, tt.wantErr)
+			}
+		})
+	}
+}

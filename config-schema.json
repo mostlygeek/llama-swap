@@ -22,6 +22,10 @@
                     },
                     {
                         "type": "boolean"
+                    },
+                    {
+                        "type": "object",
+                        "description": "Map-valued macro. Can only be substituted as a whole value (e.g. filters.reasoning.presets), not interpolated into strings."
                     }
                 ]
             },
@@ -38,7 +42,7 @@
                 }
             },
             "default": {},
-            "description": "A dictionary of string substitutions. Macros are reusable snippets used in model cmd, cmdStop, proxy, checkEndpoint, filters.stripParams. Macro names must be <64 chars, match ^[a-zA-Z0-9_-]+$, and not be PORT or MODEL_ID. Values can be string, number, or boolean. Macros can reference other macros defined before them."
+            "description": "A dictionary of string substitutions. Macros are reusable snippets used in model cmd, cmdStop, proxy, checkEndpoint, filters.stripParams. Macro names must be <64 chars, match ^[a-zA-Z0-9_-]+$, and not be PORT or MODEL_ID. Values can be string, number, boolean, or a map (maps can only be used as whole values, e.g. filters.reasoning.presets). Macros can reference other macros defined before them."
         },
         "timeouts": {
             "type": "object",
@@ -402,11 +406,67 @@
                                 },
                                 "default": {},
                                 "description": "Dictionary mapping requested model IDs (or aliases) to parameters to set/override in requests. Applied after setParams and can override those values. Useful with aliases to vary behaviour depending on which alias the client used (e.g. different reasoning_effort per alias). Keys support ${MODEL_ID} macro substitution. Protected params like 'model' cannot be overridden."
+                            },
+                            "reasoning": {
+                                "type": "object",
+                                "properties": {
+                                    "inputField": {
+                                        "type": "string",
+                                        "default": "reasoning_effort",
+                                        "pattern": "^[A-Za-z0-9_-]+$",
+                                        "description": "Top-level request field holding the client's reasoning effort value. Must not be 'model' and may only contain letters, digits, underscores, and hyphens."
+                                    },
+                                    "presets": {
+                                        "oneOf": [
+                                            {
+                                                "type": "string",
+                                                "pattern": "^\\$\\{[a-zA-Z0-9_-]+\\}$",
+                                                "description": "Reference to a map-valued macro holding the presets, e.g. ${reasoning_presets}."
+                                            },
+                                            {
+                                                "type": "object",
+                                                "additionalProperties": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "enableThinking": {
+                                                            "type": "boolean",
+                                                            "description": "Sets chat_template_kwargs.enable_thinking unless the client set it explicitly."
+                                                        },
+                                                        "budgetTokens": {
+                                                            "type": "integer",
+                                                            "minimum": 1,
+                                                            "description": "Sets thinking_budget_tokens unless the client set it explicitly. Omit to not inject the field."
+                                                        }
+                                                    },
+                                                    "additionalProperties": false,
+                                                    "anyOf": [
+                                                        {
+                                                            "required": [
+                                                                "enableThinking"
+                                                            ]
+                                                        },
+                                                        {
+                                                            "required": [
+                                                                "budgetTokens"
+                                                            ]
+                                                        }
+                                                    ]
+                                                }
+                                            }
+                                        ],
+                                        "description": "Maps a reasoning effort value (e.g. none, low, medium, high, max) to the llama.cpp-native fields to inject. Can also be a reference to a map-valued macro (e.g. ${reasoning_presets}) shared between models."
+                                    }
+                                },
+                                "required": [
+                                    "presets"
+                                ],
+                                "additionalProperties": false,
+                                "description": "Translates a client-sent reasoning effort value into llama.cpp-native request fields. Applied after stripParams and before setParams. Only string effort values with a matching preset are translated; unknown or non-string values pass through unchanged. Explicit client-supplied native fields are never overwritten, and the input field is removed only after a successful translation."
                             }
                         },
                         "additionalProperties": false,
                         "default": {},
-                        "description": "Dictionary of filter settings. Supports stripParams, setParams, and setParamsByID."
+                        "description": "Dictionary of filter settings. Supports stripParams, setParams, setParamsByID, and reasoning."
                     },
                     "metadata": {
                         "type": "object",
@@ -577,11 +637,67 @@
                                 "additionalProperties": true,
                                 "default": {},
                                 "description": "Dictionary of parameters to set/override in requests to this peer. Useful for injecting provider-specific settings. Protected params like 'model' cannot be overridden. Values can be strings, numbers, booleans, arrays, or objects."
+                            },
+                            "reasoning": {
+                                "type": "object",
+                                "properties": {
+                                    "inputField": {
+                                        "type": "string",
+                                        "default": "reasoning_effort",
+                                        "pattern": "^[A-Za-z0-9_-]+$",
+                                        "description": "Top-level request field holding the client's reasoning effort value. Must not be 'model' and may only contain letters, digits, underscores, and hyphens."
+                                    },
+                                    "presets": {
+                                        "oneOf": [
+                                            {
+                                                "type": "string",
+                                                "pattern": "^\\$\\{[a-zA-Z0-9_-]+\\}$",
+                                                "description": "Reference to a map-valued macro holding the presets, e.g. ${reasoning_presets}."
+                                            },
+                                            {
+                                                "type": "object",
+                                                "additionalProperties": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "enableThinking": {
+                                                            "type": "boolean",
+                                                            "description": "Sets chat_template_kwargs.enable_thinking unless the client set it explicitly."
+                                                        },
+                                                        "budgetTokens": {
+                                                            "type": "integer",
+                                                            "minimum": 1,
+                                                            "description": "Sets thinking_budget_tokens unless the client set it explicitly. Omit to not inject the field."
+                                                        }
+                                                    },
+                                                    "additionalProperties": false,
+                                                    "anyOf": [
+                                                        {
+                                                            "required": [
+                                                                "enableThinking"
+                                                            ]
+                                                        },
+                                                        {
+                                                            "required": [
+                                                                "budgetTokens"
+                                                            ]
+                                                        }
+                                                    ]
+                                                }
+                                            }
+                                        ],
+                                        "description": "Maps a reasoning effort value (e.g. none, low, medium, high, max) to the llama.cpp-native fields to inject. Can also be a reference to a map-valued macro (e.g. ${reasoning_presets}) shared between models."
+                                    }
+                                },
+                                "required": [
+                                    "presets"
+                                ],
+                                "additionalProperties": false,
+                                "description": "Translates a client-sent reasoning effort value into llama.cpp-native request fields. Applied after stripParams and before setParams. Only string effort values with a matching preset are translated; unknown or non-string values pass through unchanged. Explicit client-supplied native fields are never overwritten, and the input field is removed only after a successful translation."
                             }
                         },
                         "additionalProperties": false,
                         "default": {},
-                        "description": "Dictionary of filter settings for peer requests. Supports stripParams and setParams."
+                        "description": "Dictionary of filter settings for peer requests. Supports stripParams, setParams, and reasoning."
                     },
                     "timeouts": {
                         "type": "object",
