@@ -363,7 +363,7 @@ func tryIntelGpuTop(ctx context.Context, every time.Duration, logger *logmon.Mon
 		// intel_gpu_top's JSON objects can be large; allow generous line lengths.
 		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
-		// intel_gpu_top -J pretty-prints objects across many lines inside an outer 
+		// intel_gpu_top -J pretty-prints objects across many lines inside an outer
 		// "[" that never closes, with objects that may or may not be comma-separated.
 		// stdlib json rejects both variants, so accumulate each top-level object by
 		// brace depth.
