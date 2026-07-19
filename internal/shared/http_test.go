@@ -92,6 +92,38 @@ func TestReplaceRequestModel(t *testing.T) {
 		assertContextInvalidated(t, updated)
 	})
 
+	for _, tc := range []struct {
+		name        string
+		contentType string
+	}{
+		{name: "missing content type"},
+		{name: "other content type", contentType: "text/plain"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := withContext(httptest.NewRequest(http.MethodPost, "/?model=public", nil))
+			if tc.contentType != "" {
+				r.Header.Set("Content-Type", tc.contentType)
+			}
+			updated, err := ReplaceRequestModel(r, "public", "target")
+			if err != nil {
+				t.Fatalf("ReplaceRequestModel: %v", err)
+			}
+			body, err := io.ReadAll(updated.Body)
+			if err != nil {
+				t.Fatalf("read body: %v", err)
+			}
+			values, err := url.ParseQuery(string(body))
+			if err != nil {
+				t.Fatalf("parse body: %v", err)
+			}
+			if got := values.Get("model"); got != "target" {
+				t.Fatalf("model = %q, want target", got)
+			}
+			assertBodyLength(t, updated, body)
+			assertContextInvalidated(t, updated)
+		})
+	}
+
 	t.Run("multipart", func(t *testing.T) {
 		var body bytes.Buffer
 		writer := multipart.NewWriter(&body)

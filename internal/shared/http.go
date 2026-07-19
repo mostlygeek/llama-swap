@@ -203,6 +203,12 @@ func ReplaceRequestModel(r *http.Request, model, replacement string) (*http.Requ
 		}
 		r.PostForm.Set("model", replacement)
 		replaceRequestBody(r, []byte(r.PostForm.Encode()))
+	default:
+		if err := r.ParseForm(); err != nil {
+			return r, fmt.Errorf("could not parse form: %w", err)
+		}
+		r.PostForm.Set("model", replacement)
+		replaceRequestBody(r, []byte(r.PostForm.Encode()))
 	}
 
 	return invalidateRequestContext(r), nil
