@@ -137,6 +137,7 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	created := time.Now().Unix()
 	data := make([]modelRecord, 0, len(s.cfg.Models))
 	running := s.local.RunningModels()
+	modelIDs := make(map[string]struct{})
 
 	modelStatus := func(id string) string {
 		if _, ok := running[id]; ok {
@@ -166,6 +167,11 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for id, mc := range s.cfg.Models {
+		modelIDs[id] = struct{}{}
+		for _, alias := range mc.Aliases {
+			modelIDs[alias] = struct{}{}
+		}
+
 		if mc.Unlisted {
 			continue
 		}
@@ -183,7 +189,20 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 
 	for peerID, peer := range s.cfg.Peers {
 		for _, modelID := range peer.Models {
+			modelIDs[modelID] = struct{}{}
 			data = append(data, newRecord(modelID, peerID+": "+modelID, "", map[string]any{"peerID": peerID}, config.ModelCapConfig{}, "unloaded"))
+		}
+	}
+
+	if profile, ok := s.cfg.Profiles[s.ActiveProfile()]; ok {
+		for pin, target := range profile.Pins {
+			if target == "" {
+				continue
+			}
+			if _, shadowsModel := modelIDs[pin]; shadowsModel {
+				continue
+			}
+			data = append(data, newRecord(pin, "", "", nil, config.ModelCapConfig{}, "unloaded"))
 		}
 	}
 

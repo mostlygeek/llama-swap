@@ -44,6 +44,8 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
   - `/running` - list currently running models ([#61](https://github.com/mostlygeek/llama-swap/issues/61))
   - `POST /api/models/unload` - manually unload all running models ([#58](https://github.com/mostlygeek/llama-swap/issues/58))
   - `POST /api/models/unload/:model_id` - unload a specific model
+  - `GET /api/profiles` - list configured profiles and the active selection
+  - `PUT /api/profiles/active` - activate a profile or select none
   - `/logs` - remote log monitoring
     - `GET /logs` returns buffered plain text logs.
       - If `Accept: text/html` is sent, `/logs` redirects to `/ui/`.
@@ -56,6 +58,7 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
   - `/metrics` - system and GPU metrics for prometheus
 - ✅ API Key support - define keys to restrict access to API endpoints
 - ✅ Customizable
+  - Switch model ID routing at runtime with profiles
   - Run concurrent models with a custom DSL swap matrix ([#643](https://github.com/mostlygeek/llama-swap/issues/643))
   - Automatic unloading of models after timeout by setting a `ttl`
   - Docker and Podman support using `cmd` and `cmdStop` together

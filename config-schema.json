@@ -298,6 +298,48 @@
         "macros": {
             "$ref": "#/definitions/macros"
         },
+        "profiles": {
+            "type": "object",
+            "default": {},
+            "description": "Runtime-selectable model ID rewrites. One profile or none may be active at runtime.",
+            "propertyNames": {
+                "type": "string",
+                "minLength": 1
+            },
+            "additionalProperties": {
+                "type": "object",
+                "required": [
+                    "pins"
+                ],
+                "properties": {
+                    "description": {
+                        "type": "string",
+                        "default": "",
+                        "maxLength": 1024
+                    },
+                    "pins": {
+                        "type": "object",
+                        "minProperties": 1,
+                        "description": "Model IDs to rewrite while this profile is active. An empty string or null disables the model ID.",
+                        "propertyNames": {
+                            "type": "string",
+                            "minLength": 1
+                        },
+                        "additionalProperties": {
+                            "oneOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ]
+                        }
+                    }
+                },
+                "additionalProperties": false
+            }
+        },
         "models": {
             "type": "object",
             "description": "A dictionary of model configurations. Each key is a model's ID. Model settings have defaults if not defined. The model's ID is available as ${MODEL_ID}.",

@@ -117,21 +117,44 @@ type UIActivityConfig struct {
 	SessionID []string `yaml:"session_id" json:"session_id"`
 }
 
+// ProfileConfig describes a runtime-selectable set of model ID rewrites.
+// Empty pin targets disable the corresponding model ID while the profile is
+// active. YAML null values decode to the same empty string representation.
+type ProfileConfig struct {
+	Description string            `yaml:"description" json:"description"`
+	Pins        map[string]string `yaml:"pins" json:"pins"`
+}
+
+// UnmarshalYAML rejects the removed list-shaped profile syntax with a useful
+// migration error while allowing null pin values to normalize to empty strings.
+func (c *ProfileConfig) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind != yaml.MappingNode {
+		return fmt.Errorf("profile must be a mapping with description and pins; the legacy list syntax is no longer supported")
+	}
+	type rawProfileConfig ProfileConfig
+	var raw rawProfileConfig
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	*c = ProfileConfig(raw)
+	return nil
+}
+
 type Config struct {
-	HealthCheckTimeout int                    `yaml:"healthCheckTimeout"`
-	LogRequests        bool                   `yaml:"logRequests"`
-	LogLevel           string                 `yaml:"logLevel"`
-	LogTimeFormat      string                 `yaml:"logTimeFormat"`
-	LogToStdout        string                 `yaml:"logToStdout"`
-	MetricsMaxInMemory int                    `yaml:"metricsMaxInMemory"`
-	CaptureBuffer      int                    `yaml:"captureBuffer"`
-	Store              *Store                 `yaml:"store"`
-	UI                 UIConfig               `yaml:"ui"`
-	Performance        PerformanceConfig      `yaml:"performance"`
-	GlobalTTL          int                    `yaml:"globalTTL"`
-	UnloadTimeout      int                    `yaml:"unloadTimeout"`
-	Models             map[string]ModelConfig `yaml:"models"` /* key is model ID */
-	Profiles           map[string][]string    `yaml:"profiles"`
+	HealthCheckTimeout int                      `yaml:"healthCheckTimeout"`
+	LogRequests        bool                     `yaml:"logRequests"`
+	LogLevel           string                   `yaml:"logLevel"`
+	LogTimeFormat      string                   `yaml:"logTimeFormat"`
+	LogToStdout        string                   `yaml:"logToStdout"`
+	MetricsMaxInMemory int                      `yaml:"metricsMaxInMemory"`
+	CaptureBuffer      int                      `yaml:"captureBuffer"`
+	Store              *Store                   `yaml:"store"`
+	UI                 UIConfig                 `yaml:"ui"`
+	Performance        PerformanceConfig        `yaml:"performance"`
+	GlobalTTL          int                      `yaml:"globalTTL"`
+	UnloadTimeout      int                      `yaml:"unloadTimeout"`
+	Models             map[string]ModelConfig   `yaml:"models"` /* key is model ID */
+	Profiles           map[string]ProfileConfig `yaml:"profiles"`
 
 	// routing is the canonical source for swap/scheduling configuration.
 	// New code must read Routing, never the backwards-compat fields below.
@@ -216,6 +239,22 @@ func (c *Config) FindConfig(modelName string) (ModelConfig, string, bool) {
 	} else {
 		return c.Models[realName], realName, true
 	}
+}
+
+// ResolveBaseModel resolves a name without applying profiles. Local model IDs
+// and aliases take precedence over peer model IDs, matching server dispatch.
+func (c *Config) ResolveBaseModel(search string) (string, bool) {
+	if realName, found := c.RealModelName(search); found {
+		return realName, true
+	}
+	for _, peer := range c.Peers {
+		for _, modelID := range peer.Models {
+			if modelID == search {
+				return search, true
+			}
+		}
+	}
+	return "", false
 }
 
 func LoadConfig(path string) (Config, error) {

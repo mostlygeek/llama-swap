@@ -81,6 +81,7 @@ llama-swap supports many more features to customize how you want to manage your 
 | `env`     | define environment variables per model         |
 | `aliases` | serve a model with different names             |
 | `filters` | modify requests before sending to the upstream |
+| `profiles` | switch model ID replacements at runtime       |
 | `...`     | And many more tweaks                           |
 
 ## Full Configuration Example
@@ -247,6 +248,21 @@ apiKeys:
   # use environment variable macros to keep secrets out of the config
   - "${env.API_KEY_1}"
   - "${env.API_KEY_2}"
+
+# profiles: named model ID replacements switched at runtime through the UI or API
+# - optional, default: empty dictionary
+# - one profile or none is active; startup and configuration reload select none
+# - pins are applied before aliases, filters, and routing
+# - targets may be a local model, peer model, alias, or setParamsByID alias
+# - an empty string or YAML null (~) disables the pin with a 404; it is not
+#   added to model listings, while existing local, alias, or peer IDs remain
+profiles:
+  "coding":
+    description: "Coding-focused model routing"
+    pins:
+      "llm-code": "gpt-oss-120b"
+      "llm-plan": "qwen-unlisted"
+      "image-gen": ~
 
 # models: a dictionary of model configurations
 # - required

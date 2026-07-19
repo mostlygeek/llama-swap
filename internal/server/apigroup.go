@@ -28,6 +28,70 @@ type apiModel struct {
 	Capabilities map[string]any `json:"capabilities,omitempty"`
 }
 
+type apiProfile struct {
+	ID          string            `json:"id"`
+	Description string            `json:"description"`
+	Pins        map[string]string `json:"pins"`
+}
+
+func nullableProfile(name string) any {
+	if name == "" {
+		return nil
+	}
+	return name
+}
+
+func (s *Server) handleAPIProfiles(w http.ResponseWriter, r *http.Request) {
+	ids := make([]string, 0, len(s.cfg.Profiles))
+	for id := range s.cfg.Profiles {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	profiles := make([]apiProfile, 0, len(ids))
+	for _, id := range ids {
+		profile := s.cfg.Profiles[id]
+		profiles = append(profiles, apiProfile{
+			ID:          id,
+			Description: profile.Description,
+			Pins:        profile.Pins,
+		})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"active":   nullableProfile(s.ActiveProfile()),
+		"profiles": profiles,
+	})
+}
+
+func (s *Server) handleAPIActiveProfile(w http.ResponseWriter, r *http.Request) {
+	var body map[string]json.RawMessage
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&body); err != nil {
+		shared.SendResponse(w, r, http.StatusBadRequest, "invalid profile request")
+		return
+	}
+	raw, ok := body["name"]
+	if !ok {
+		shared.SendResponse(w, r, http.StatusBadRequest, "profile name is required")
+		return
+	}
+
+	var name string
+	if string(raw) != "null" {
+		if err := json.Unmarshal(raw, &name); err != nil {
+			shared.SendResponse(w, r, http.StatusBadRequest, "profile name must be a string or null")
+			return
+		}
+	}
+	if _, err := s.setActiveProfile(name); err != nil {
+		shared.SendResponse(w, r, http.StatusNotFound, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"active": nullableProfile(s.ActiveProfile())})
+}
+
 // modelStatus returns every configured model joined with its current process
 // state (defaulting to "stopped"), followed by peer models.
 func (s *Server) modelStatus() []apiModel {
@@ -272,6 +336,7 @@ const (
 	msgTypeActivity    messageType = "activity"
 	msgTypeInFlight    messageType = "inflight"
 	msgTypeUIConfig    messageType = "uiConfig"
+	msgTypeProfile     messageType = "profileChanged"
 )
 
 type messageEnvelope struct {
@@ -338,9 +403,18 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 			send(messageEnvelope{Type: msgTypeUIConfig, Data: string(j)})
 		}
 	}
+	sendProfile := func() {
+		if j, err := json.Marshal(map[string]any{"active": nullableProfile(s.ActiveProfile())}); err == nil {
+			send(messageEnvelope{Type: msgTypeProfile, Data: string(j)})
+		}
+	}
 
 	defer event.On(func(e shared.ProcessStateChangeEvent) { sendModels() })()
 	defer event.On(func(e shared.ConfigFileChangedEvent) { sendModels() })()
+	defer event.On(func(e shared.ProfileChangedEvent) {
+		sendProfile()
+		sendModels()
+	})()
 	defer s.proxylog.OnLogData(func(data []byte) { sendLogData("proxy", data) })()
 	defer s.upstreamlog.OnLogData(func(data []byte) { sendLogData("upstream", data) })()
 	defer event.On(func(e ActivityLogEvent) { sendActivity(e.Metrics.ID) })()
@@ -351,6 +425,7 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 	sendLogData("upstream", s.upstreamlog.GetHistory())
 	sendModels()
 	sendUIConfig()
+	sendProfile()
 	sendInFlight(s.inflight.Current())
 
 	for {

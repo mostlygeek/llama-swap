@@ -462,7 +462,34 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		config.Peers[peerName] = peerConfig
 	}
 
+	if err := validateProfiles(config); err != nil {
+		return Config{}, err
+	}
+
 	return config, nil
+}
+
+func validateProfiles(config Config) error {
+	for profileName, profile := range config.Profiles {
+		if strings.TrimSpace(profileName) == "" {
+			return fmt.Errorf("profiles: profile names cannot be empty")
+		}
+		if len(profile.Pins) == 0 {
+			return fmt.Errorf("profiles.%s.pins must contain at least one entry", profileName)
+		}
+		for pin, target := range profile.Pins {
+			if strings.TrimSpace(pin) == "" {
+				return fmt.Errorf("profiles.%s.pins: pin names cannot be empty", profileName)
+			}
+			if target == "" {
+				continue
+			}
+			if _, found := config.ResolveBaseModel(target); !found {
+				return fmt.Errorf("profiles.%s.pins.%s references unknown model %q", profileName, pin, target)
+			}
+		}
+	}
+	return nil
 }
 
 func normalizeHeaderNames(names []string) []string {

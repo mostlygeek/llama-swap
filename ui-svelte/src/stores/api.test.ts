@@ -1,12 +1,20 @@
 import { get } from "svelte/store";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  activeProfile,
   activityRevision,
+  fetchProfiles,
   handleAPIEventMessage,
   inFlightRequests,
   inflightRequestEntries,
+  profiles,
+  setActiveProfile,
   uiConfig,
 } from "./api";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("api store event handling", () => {
   it("parses inflight request entries", () => {
@@ -106,5 +114,41 @@ describe("api store event handling", () => {
     );
 
     expect(get(activityRevision)).toBe(1);
+  });
+
+  it("applies profile change events", () => {
+    activeProfile.set(null);
+    handleAPIEventMessage(JSON.stringify({
+      type: "profileChanged",
+      data: JSON.stringify({ active: "coding" }),
+    }));
+    expect(get(activeProfile)).toBe("coding");
+  });
+
+  it("loads and switches profiles", async () => {
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          active: null,
+          profiles: [{ id: "coding", description: "Coding", pins: { llm: "real" } }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ active: "coding" }),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    await fetchProfiles();
+    expect(get(profiles)).toHaveLength(1);
+    expect(get(activeProfile)).toBeNull();
+
+    await setActiveProfile("coding");
+    expect(get(activeProfile)).toBe("coding");
+    expect(mockFetch).toHaveBeenLastCalledWith("/api/profiles/active", expect.objectContaining({
+      method: "PUT",
+      body: JSON.stringify({ name: "coding" }),
+    }));
   });
 });

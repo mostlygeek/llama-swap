@@ -9,7 +9,14 @@
   import * as Sidebar from "$lib/components/ui/sidebar/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { Separator } from "$lib/components/ui/separator/index.js";
-  import { enableAPIEvents, checkPerformanceEnabled } from "./stores/api";
+  import * as Select from "$lib/components/ui/select/index.js";
+  import {
+    activeProfile,
+    checkPerformanceEnabled,
+    enableAPIEvents,
+    profiles,
+    setActiveProfile,
+  } from "./stores/api";
   import { initScreenWidth, initSystemThemeListener, isDarkMode, themeName, appTitle, connectionState } from "./stores/theme";
   import { currentRoute } from "./stores/route";
   import { selectedPlaygroundTab, playgroundTabs } from "./stores/playground";
@@ -59,6 +66,20 @@
     }
     return routeTitles[$currentRoute] ?? "Activity";
   });
+
+  const noProfileValue = "__none__";
+  let switchingProfile = $state(false);
+
+  async function handleProfileChange(value: string): Promise<void> {
+    switchingProfile = true;
+    try {
+      await setActiveProfile(value === noProfileValue ? null : value);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      switchingProfile = false;
+    }
+  }
 
   function handleRouteLoaded(event: { detail: { route: string | RegExp; location?: string } }) {
     const route = event.detail.route;
@@ -116,6 +137,30 @@
         <Sidebar.Trigger class="-ml-1" />
         <Separator orientation="vertical" class="mr-2 !h-4" />
         <h2 class="truncate pb-0 text-sm font-semibold">{sectionTitle}</h2>
+        {#if $profiles.length > 0}
+          <div class="ml-auto flex items-center gap-2">
+            <span class="text-muted-foreground hidden text-xs sm:inline">Profile</span>
+            <Select.Root
+              type="single"
+              value={$activeProfile ?? noProfileValue}
+              onValueChange={(value) => value && void handleProfileChange(value)}
+            >
+              <Select.Trigger
+                class="w-40"
+                aria-label="Active profile"
+                disabled={switchingProfile}
+              >
+                {$activeProfile ?? "None"}
+              </Select.Trigger>
+              <Select.Content>
+                <Select.Item value={noProfileValue}>None</Select.Item>
+                {#each $profiles as profile (profile.id)}
+                  <Select.Item value={profile.id}>{profile.id}</Select.Item>
+                {/each}
+              </Select.Content>
+            </Select.Root>
+          </div>
+        {/if}
       </header>
 
       <main class="min-h-0 flex-1 overflow-auto p-4">

@@ -9,11 +9,139 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 )
+
+func TestReplaceRequestModel(t *testing.T) {
+	withContext := func(r *http.Request) *http.Request {
+		return r.WithContext(SetContext(r.Context(), ReqContextData{
+			Model:    "public",
+			ModelID:  "public",
+			Metadata: make(map[string]string),
+		}))
+	}
+	assertContextInvalidated := func(t *testing.T, r *http.Request) {
+		t.Helper()
+		if _, ok := ReadContext(r.Context()); ok {
+			t.Fatal("request model context was not invalidated")
+		}
+	}
+	assertBodyLength := func(t *testing.T, r *http.Request, body []byte) {
+		t.Helper()
+		if r.ContentLength != int64(len(body)) {
+			t.Fatalf("ContentLength = %d, want %d", r.ContentLength, len(body))
+		}
+		if got, want := r.Header.Get("Content-Length"), strconv.Itoa(len(body)); got != want {
+			t.Fatalf("Content-Length = %q, want %q", got, want)
+		}
+	}
+
+	t.Run("query", func(t *testing.T) {
+		r := withContext(httptest.NewRequest(http.MethodGet, "/props?model=public", nil))
+		updated, err := ReplaceRequestModel(r, "public", "target")
+		if err != nil {
+			t.Fatalf("ReplaceRequestModel: %v", err)
+		}
+		if got := updated.URL.Query().Get("model"); got != "target" {
+			t.Fatalf("model = %q, want target", got)
+		}
+		assertContextInvalidated(t, updated)
+	})
+
+	t.Run("json", func(t *testing.T) {
+		r := withContext(httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"model":"public","prompt":"hello"}`)))
+		r.Header.Set("Content-Type", "application/json")
+		updated, err := ReplaceRequestModel(r, "public", "target")
+		if err != nil {
+			t.Fatalf("ReplaceRequestModel: %v", err)
+		}
+		body, err := io.ReadAll(updated.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		if !strings.Contains(string(body), `"model":"target"`) {
+			t.Fatalf("body = %s, want target model", body)
+		}
+		assertBodyLength(t, updated, body)
+		assertContextInvalidated(t, updated)
+	})
+
+	t.Run("urlencoded", func(t *testing.T) {
+		r := withContext(httptest.NewRequest(http.MethodPost, "/", strings.NewReader(url.Values{"model": {"public"}}.Encode())))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		updated, err := ReplaceRequestModel(r, "public", "target")
+		if err != nil {
+			t.Fatalf("ReplaceRequestModel: %v", err)
+		}
+		body, err := io.ReadAll(updated.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		values, err := url.ParseQuery(string(body))
+		if err != nil {
+			t.Fatalf("parse body: %v", err)
+		}
+		if got := values.Get("model"); got != "target" {
+			t.Fatalf("model = %q, want target", got)
+		}
+		assertBodyLength(t, updated, body)
+		assertContextInvalidated(t, updated)
+	})
+
+	t.Run("multipart", func(t *testing.T) {
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		if err := writer.WriteField("model", "public"); err != nil {
+			t.Fatalf("write model: %v", err)
+		}
+		if err := writer.WriteField("prompt", "hello"); err != nil {
+			t.Fatalf("write prompt: %v", err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatalf("close multipart: %v", err)
+		}
+		r := withContext(httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body.Bytes())))
+		r.Header.Set("Content-Type", writer.FormDataContentType())
+
+		updated, err := ReplaceRequestModel(r, "public", "target")
+		if err != nil {
+			t.Fatalf("ReplaceRequestModel: %v", err)
+		}
+		rewritten, err := io.ReadAll(updated.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		assertBodyLength(t, updated, rewritten)
+		updated.Body = io.NopCloser(bytes.NewReader(rewritten))
+		if err := updated.ParseMultipartForm(32 << 20); err != nil {
+			t.Fatalf("parse multipart: %v", err)
+		}
+		if got := updated.FormValue("model"); got != "target" {
+			t.Fatalf("model = %q, want target", got)
+		}
+		assertContextInvalidated(t, updated)
+	})
+
+	t.Run("upstream path", func(t *testing.T) {
+		r := withContext(httptest.NewRequest(http.MethodPost, "/upstream/author/public/v1/chat/completions", nil))
+		r.SetPathValue("upstreamPath", "author/public/v1/chat/completions")
+		updated, err := ReplaceRequestModel(r, "author/public", "target")
+		if err != nil {
+			t.Fatalf("ReplaceRequestModel: %v", err)
+		}
+		if got, want := updated.PathValue("upstreamPath"), "target/v1/chat/completions"; got != want {
+			t.Fatalf("upstreamPath = %q, want %q", got, want)
+		}
+		if got, want := updated.URL.Path, "/upstream/target/v1/chat/completions"; got != want {
+			t.Fatalf("URL.Path = %q, want %q", got, want)
+		}
+		assertContextInvalidated(t, updated)
+	})
+}
 
 func TestExtractContext_GET(t *testing.T) {
 	tests := []struct {
@@ -466,6 +594,9 @@ func TestFetchContext_UpstreamPath(t *testing.T) {
 			"author/model": {},
 			"real":         {Aliases: []string{"nick"}},
 		},
+		Peers: config.PeerDictionaryConfig{
+			"remote": {Models: []string{"peer-model"}},
+		},
 	}
 
 	cases := []struct {
@@ -477,6 +608,7 @@ func TestFetchContext_UpstreamPath(t *testing.T) {
 	}{
 		{"known model", "/upstream/m1/v1/chat/completions", "m1", "m1", false},
 		{"model with slash", "/upstream/author/model/v1/chat", "author/model", "author/model", false},
+		{"peer model", "/upstream/peer-model/v1/chat", "peer-model", "peer-model", false},
 		{"unknown model", "/upstream/nope/v1/chat/completions", "", "", true},
 		{"bare model path", "/upstream/m1/", "m1", "m1", false},
 	}
