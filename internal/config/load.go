@@ -287,6 +287,12 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			}
 		}
 
+		if modelConfig.Filters.Reasoning != nil {
+			if err := modelConfig.Filters.Reasoning.Validate(); err != nil {
+				return Config{}, fmt.Errorf("model %s filters.reasoning: %w", modelId, err)
+			}
+		}
+
 		// Auto-register setParamsByID keys as aliases (skip the model's own ID)
 		for key := range modelConfig.Filters.SetParamsByID {
 			if key == modelId {
@@ -453,6 +459,11 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		}
 		if matches := macroPatternRegex.FindAllStringSubmatch(peerConfig.Filters.StripParams, -1); len(matches) > 0 {
 			return Config{}, fmt.Errorf("peers.%s.filters.stripParams: unknown macro '${%s}'", peerName, matches[0][1])
+		}
+		if peerConfig.Filters.Reasoning != nil {
+			if err := peerConfig.Filters.Reasoning.Validate(); err != nil {
+				return Config{}, fmt.Errorf("peers.%s.filters.reasoning: %w", peerName, err)
+			}
 		}
 		if len(peerConfig.Filters.SetParams) > 0 {
 			if err := validateNestedForUnknownMacros(peerConfig.Filters.SetParams, fmt.Sprintf("peers.%s.filters.setParams", peerName)); err != nil {

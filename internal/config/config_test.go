@@ -1849,3 +1849,46 @@ routing:
 	require.NoError(t, err)
 	assert.Equal(t, 5, cfg.Routing.Scheduler.Settings.Fifo.Priority["gemma"])
 }
+
+func TestConfig_ReasoningFilterValidation(t *testing.T) {
+	t.Run("valid reasoning filter loads", func(t *testing.T) {
+		cfg, err := LoadConfigFromReader(strings.NewReader(`
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    filters:
+      reasoning:
+        presets:
+          none:
+            enableThinking: false
+          medium:
+            enableThinking: true
+            budgetTokens: 8192
+          max:
+            enableThinking: true
+`))
+		require.NoError(t, err)
+		rf := cfg.Models["model1"].Filters.Reasoning
+		require.NotNil(t, rf)
+		assert.Equal(t, "reasoning_effort", cfg.Models["model1"].Filters.ReasoningInputField())
+		require.Contains(t, rf.Presets, "medium")
+		require.NotNil(t, rf.Presets["medium"].BudgetTokens)
+		assert.Equal(t, 8192, *rf.Presets["medium"].BudgetTokens)
+		assert.Nil(t, rf.Presets["max"].BudgetTokens)
+	})
+
+	t.Run("invalid reasoning filter rejected", func(t *testing.T) {
+		_, err := LoadConfigFromReader(strings.NewReader(`
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    filters:
+      reasoning:
+        presets:
+          medium:
+            budgetTokens: -1
+`))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "model model1 filters.reasoning")
+	})
+}
