@@ -345,8 +345,8 @@ func tryIntelGpuTop(ctx context.Context, every time.Duration, logger *logmon.Mon
 		return nil, ErrNoGpuTool
 	}
 	ms := int(every.Milliseconds())
-	if ms < 100 {
-		ms = 1000
+	if ms < 5000 {
+		ms = 5000
 	}
 	cmd := exec.CommandContext(ctx, "intel_gpu_top", "-J", "-s", fmt.Sprintf("%d", ms))
 	stdout, err := cmd.StdoutPipe()
