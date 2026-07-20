@@ -345,7 +345,7 @@ func tryIntelGpuTop(ctx context.Context, every time.Duration, logger *logmon.Mon
 		return nil, ErrNoGpuTool
 	}
 
-    // Probe: list devices to verify GPU is present and accessible.
+	// Probe: list devices to verify GPU is present and accessible.
 	probeCtx, probeCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer probeCancel()
 	probeCmd := exec.CommandContext(probeCtx, "intel_gpu_top", "-L")
