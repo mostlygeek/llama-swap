@@ -100,6 +100,10 @@ func NewPeer(cfg config.Config, logger *logmon.Monitor) (*Peer, error) {
 			}
 			modelMap[modelID] = pp
 		}
+
+		for alias := range peer.Aliases {
+			modelMap[alias] = pp
+		}
 	}
 
 	shutdownCtx, shutdownFn := context.WithCancel(context.Background())

@@ -610,3 +610,84 @@ func TestNewPeer_CustomTimeouts(t *testing.T) {
 		t.Error("expected ForceAttemptHTTP2 to be true")
 	}
 }
+
+func TestNewPeer_RegistersAliases(t *testing.T) {
+	proxyURL, _ := url.Parse("http://peer1.example.com:8080")
+	peers := config.PeerDictionaryConfig{
+		"peer1": config.PeerConfig{
+			Proxy:    "http://peer1.example.com:8080",
+			ProxyURL: proxyURL,
+			Models:   []string{"real-model"},
+			Aliases: map[string]string{
+				"alias-a": "real-model",
+				"alias-b": "real-model",
+			},
+		},
+	}
+
+	pr, err := NewPeer(config.Config{Peers: peers}, testLogger)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The real model plus two aliases should all be registered.
+	if len(pr.peers) != 3 {
+		t.Fatalf("expected 3 entries (model + 2 aliases), got %d", len(pr.peers))
+	}
+	for _, name := range []string{"real-model", "alias-a", "alias-b"} {
+		if _, ok := pr.peers[name]; !ok {
+			t.Errorf("expected %q to be mapped", name)
+		}
+	}
+}
+
+func TestPeer_Handles_AcceptsAlias(t *testing.T) {
+	proxyURL, _ := url.Parse("http://peer1.example.com:8080")
+	peers := config.PeerDictionaryConfig{
+		"peer1": config.PeerConfig{
+			Proxy:    "http://peer1.example.com:8080",
+			ProxyURL: proxyURL,
+			Models:   []string{"real-model"},
+			Aliases:  map[string]string{"friendly-alias": "real-model"},
+		},
+	}
+
+	pr, err := NewPeer(config.Config{Peers: peers}, testLogger)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !pr.Handles("friendly-alias") {
+		t.Error("expected Handles() to return true for peer alias")
+	}
+	if !pr.Handles("real-model") {
+		t.Error("expected Handles() to return true for peer model")
+	}
+	if pr.Handles("unknown-model") {
+		t.Error("expected Handles() to return false for unknown model")
+	}
+}
+
+func TestNewPeer_AliasCollidingWithModelSkipped(t *testing.T) {
+	proxyURL, _ := url.Parse("http://peer1.example.com:8080")
+	peers := config.PeerDictionaryConfig{
+		"peer1": config.PeerConfig{
+			Proxy:    "http://peer1.example.com:8080",
+			ProxyURL: proxyURL,
+			Models:   []string{"shared-name"},
+			Aliases:  map[string]string{"shared-name": "other"},
+		},
+	}
+
+	pr, err := NewPeer(config.Config{Peers: peers}, testLogger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pr.peers) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(pr.peers))
+	}
+	if _, ok := pr.peers["shared-name"]; !ok {
+		t.Error(`expected "shared-name" to remain mapped to its model`)
+	}
+}
+
