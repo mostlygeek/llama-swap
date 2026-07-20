@@ -79,7 +79,6 @@ func ParseIntelGpuTop(data string) *GpuStat {
 			if memMap, ok := client.Memory[memType]; ok {
 				if val, ok2 := memMap["resident"]; ok2 {
 					memUsedBytes += float64(val)
-					break
 				}
 			}
 		}
