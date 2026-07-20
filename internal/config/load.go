@@ -462,6 +462,10 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		config.Peers[peerName] = peerConfig
 	}
 
+	if err := validateSelectors(config); err != nil {
+		return Config{}, err
+	}
+
 	if err := validateProfiles(config); err != nil {
 		return Config{}, err
 	}
@@ -485,6 +489,9 @@ func validateProfiles(config Config) error {
 				continue
 			}
 			if _, found := config.ResolveBaseModel(target); !found {
+				if _, found := config.Selectors[target]; found {
+					continue
+				}
 				return fmt.Errorf("profiles.%s.pins.%s references unknown model %q", profileName, pin, target)
 			}
 		}

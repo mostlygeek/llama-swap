@@ -135,7 +135,7 @@ func filterCappedMetadata(md map[string]any) map[string]any {
 // (with optional aliases) plus peer models.
 func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	created := time.Now().Unix()
-	data := make([]modelRecord, 0, len(s.cfg.Models))
+	data := make([]modelRecord, 0, len(s.cfg.Models)+len(s.cfg.Selectors))
 	running := s.local.RunningModels()
 	modelIDs := make(map[string]struct{})
 
@@ -192,6 +192,26 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 			modelIDs[modelID] = struct{}{}
 			data = append(data, newRecord(modelID, peerID+": "+modelID, "", map[string]any{"peerID": peerID}, config.ModelCapConfig{}, "unloaded"))
 		}
+	}
+
+	for selectorID, selector := range s.cfg.Selectors {
+		modelIDs[selectorID] = struct{}{}
+		if selector.Unlisted {
+			continue
+		}
+		status := "unloaded"
+		for _, target := range selector.Targets {
+			modelID, local := s.cfg.RealModelName(target)
+			if !local {
+				continue
+			}
+			state := running[modelID]
+			if state == process.StateReady || state == process.StateStarting {
+				status = "loaded"
+				break
+			}
+		}
+		data = append(data, newRecord(selectorID, selector.Name, selector.Description, selector.Metadata, config.ModelCapConfig{}, status))
 	}
 
 	if profile, ok := s.cfg.Profiles[s.ActiveProfile()]; ok {
