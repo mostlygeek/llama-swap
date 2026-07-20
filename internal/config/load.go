@@ -445,6 +445,18 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 				}
 				peerConfig.Filters.SetParams = result.(map[string]any)
 			}
+
+			// Substitute in aliases (map[string]string); both keys and
+			// values are simple strings, so a direct ReplaceAll is enough.
+			if len(peerConfig.Aliases) > 0 {
+				newAliases := make(map[string]string, len(peerConfig.Aliases))
+				for k, v := range peerConfig.Aliases {
+					newK := strings.ReplaceAll(k, macroSlug, macroStr)
+					newV := strings.ReplaceAll(v, macroSlug, macroStr)
+					newAliases[newK] = newV
+				}
+				peerConfig.Aliases = newAliases
+			}
 		}
 
 		// Validate no unknown macros remain
@@ -459,10 +471,99 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 				return Config{}, err
 			}
 		}
+		for aliasKey, aliasVal := range peerConfig.Aliases {
+			if matches := macroPatternRegex.FindAllStringSubmatch(aliasKey, -1); len(matches) > 0 {
+				return Config{}, fmt.Errorf("peers.%s.aliases: unknown macro '${%s}' in key %q", peerName, matches[0][1], aliasKey)
+			}
+			if matches := macroPatternRegex.FindAllStringSubmatch(aliasVal, -1); len(matches) > 0 {
+				return Config{}, fmt.Errorf("peers.%s.aliases: unknown macro '${%s}' in value for %q", peerName, matches[0][1], aliasKey)
+			}
+		}
 		config.Peers[peerName] = peerConfig
 	}
 
+	if err := validatePeerAliases(config); err != nil {
+		return Config{}, err
+	}
+
 	return config, nil
+}
+
+// validatePeerAliases enforces global uniqueness for peer aliases and their
+// upstream model names. Alias keys must not collide with:
+//   - the peer's own `models` list
+//   - any other peer's `models` or alias keys
+//   - any local model ID or local model alias
+//
+// Alias values (the upstream model name) must be non-empty. See issue #806.
+func validatePeerAliases(config Config) error {
+	// Sort peer names for stable, deterministic error messages.
+	peerNames := make([]string, 0, len(config.Peers))
+	for name := range config.Peers {
+		peerNames = append(peerNames, name)
+	}
+	sort.Strings(peerNames)
+
+	// Track every name claimed by a peer (model or alias), and which peer
+	// claimed it. Used to detect collisions between peers.
+	claimedBy := make(map[string]string)
+
+	for _, peerName := range peerNames {
+		peer := config.Peers[peerName]
+
+		// Register this peer's own models first so an alias from a later
+		// peer (or the same peer) is rejected against them.
+		for _, m := range peer.Models {
+			if owner, exists := claimedBy[m]; exists && owner != peerName {
+				return fmt.Errorf("peers.%s.models: %q is already served by peer %q", peerName, m, owner)
+			}
+			claimedBy[m] = peerName
+		}
+
+		ownModels := make(map[string]struct{}, len(peer.Models))
+		for _, m := range peer.Models {
+			ownModels[m] = struct{}{}
+		}
+
+		// Sort alias keys for deterministic error reporting.
+		aliasKeys := make([]string, 0, len(peer.Aliases))
+		for k := range peer.Aliases {
+			aliasKeys = append(aliasKeys, k)
+		}
+		sort.Strings(aliasKeys)
+
+		for _, aliasKey := range aliasKeys {
+			upstream := peer.Aliases[aliasKey]
+
+			if strings.TrimSpace(aliasKey) == "" {
+				return fmt.Errorf("peers.%s.aliases: empty alias key", peerName)
+			}
+			if strings.TrimSpace(upstream) == "" {
+				return fmt.Errorf("peers.%s.aliases: empty upstream model name for alias %q", peerName, aliasKey)
+			}
+
+			// Must not collide with this peer's own models.
+			if _, exists := ownModels[aliasKey]; exists {
+				return fmt.Errorf("peers.%s.aliases: alias %q conflicts with an entry in peers.%s.models", peerName, aliasKey, peerName)
+			}
+
+			// Must not collide with local model IDs or aliases.
+			if _, exists := config.Models[aliasKey]; exists {
+				return fmt.Errorf("peers.%s.aliases: alias %q conflicts with a local model ID", peerName, aliasKey)
+			}
+			if owner, exists := config.aliases[aliasKey]; exists {
+				return fmt.Errorf("peers.%s.aliases: alias %q conflicts with local alias of model %q", peerName, aliasKey, owner)
+			}
+
+			// Must be globally unique across all peers.
+			if owner, exists := claimedBy[aliasKey]; exists && owner != peerName {
+				return fmt.Errorf("peers.%s.aliases: alias %q is already served by peer %q", peerName, aliasKey, owner)
+			}
+			claimedBy[aliasKey] = peerName
+		}
+	}
+
+	return nil
 }
 
 func normalizeHeaderNames(names []string) []string {

@@ -7,11 +7,12 @@ import (
 
 type PeerDictionaryConfig map[string]PeerConfig
 type PeerConfig struct {
-	Proxy    string   `yaml:"proxy"`
-	ProxyURL *url.URL `yaml:"-"`
-	ApiKey   string   `yaml:"apiKey"`
-	Models   []string `yaml:"models"`
-	Filters  Filters  `yaml:"filters"`
+	Proxy    string            `yaml:"proxy"`
+	ProxyURL *url.URL          `yaml:"-"`
+	ApiKey   string            `yaml:"apiKey"`
+	Models   []string          `yaml:"models"`
+	Aliases  map[string]string `yaml:"aliases"`
+	Filters  Filters           `yaml:"filters"`
 
 	// Timeout settings for proxy connections
 	Timeouts TimeoutsConfig `yaml:"timeouts"`
@@ -23,6 +24,7 @@ func (c *PeerConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		Proxy:   "",
 		ApiKey:  "",
 		Models:  []string{},
+		Aliases: map[string]string{},
 		Filters: Filters{},
 
 		// mostly matches http.DefaultTransport but with a 60s ResponseHeader timeout
