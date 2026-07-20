@@ -119,6 +119,40 @@ func CreateFormFilterMiddleware(cfg config.Config) chain.Middleware {
 	}
 }
 
+// CreateQueryFilterMiddleware returns middleware that applies the UseModelName
+// rewrite to the `model` query parameter of model-dispatched GET requests
+// (e.g. /v1/audio/voices?model=alias). JSON-body and multipart filters do not
+// run on GET requests because there is no body, so without this middleware the
+// alias reaches the upstream unchanged and is rejected as unknown.
+func CreateQueryFilterMiddleware(cfg config.Config) chain.Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			requested := r.URL.Query().Get("model")
+			if requested == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			useModelName, _, ok := resolveFilters(cfg, requested)
+			if !ok || useModelName == "" || useModelName == requested {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			q := r.URL.Query()
+			q.Set("model", useModelName)
+			r.URL.RawQuery = q.Encode()
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // rewriteMultipartModel reconstructs a multipart form, replacing the "model"
 // field value with useModelName. It returns the encoded body and the matching
 // Content-Type header (which carries the generated boundary).

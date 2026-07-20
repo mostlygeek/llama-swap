@@ -185,3 +185,138 @@ func TestServer_ResolveFilters_PeerAlias(t *testing.T) {
 		}
 	})
 }
+
+func TestServer_QueryFilterMiddleware(t *testing.T) {
+	t.Run("rewrites GET ?model alias to upstream name", func(t *testing.T) {
+		cfg := config.Config{
+			Peers: config.PeerDictionaryConfig{
+				"modelbest": config.PeerConfig{
+					Models:  []string{"MiniCPM-V-4.6-Thinking"},
+					Aliases: map[string]string{"friendly-alias": "MiniCPM-V-4.6-Thinking"},
+				},
+			},
+		}
+
+		r := httptest.NewRequest(http.MethodGet, "/v1/audio/voices?model=friendly-alias", nil)
+		var gotModel string
+		final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotModel = r.URL.Query().Get("model")
+		})
+		CreateQueryFilterMiddleware(cfg)(final).ServeHTTP(httptest.NewRecorder(), r)
+
+		if gotModel != "MiniCPM-V-4.6-Thinking" {
+			t.Errorf("model query param = %q, want MiniCPM-V-4.6-Thinking", gotModel)
+		}
+	})
+
+	t.Run("leaves non-aliased GET model untouched", func(t *testing.T) {
+		cfg := config.Config{
+			Peers: config.PeerDictionaryConfig{
+				"modelbest": config.PeerConfig{Models: []string{"real-model"}},
+			},
+		}
+
+		r := httptest.NewRequest(http.MethodGet, "/v1/audio/voices?model=real-model", nil)
+		var gotModel string
+		final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotModel = r.URL.Query().Get("model")
+		})
+		CreateQueryFilterMiddleware(cfg)(final).ServeHTTP(httptest.NewRecorder(), r)
+
+		if gotModel != "real-model" {
+			t.Errorf("model query param = %q, want real-model (unchanged)", gotModel)
+		}
+	})
+
+	t.Run("skips POST requests", func(t *testing.T) {
+		cfg := config.Config{
+			Peers: config.PeerDictionaryConfig{
+				"modelbest": config.PeerConfig{
+					Models:  []string{"real-model"},
+					Aliases: map[string]string{"alias": "real-model"},
+				},
+			},
+		}
+
+		r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions?model=alias", nil)
+		var gotModel string
+		final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotModel = r.URL.Query().Get("model")
+		})
+		CreateQueryFilterMiddleware(cfg)(final).ServeHTTP(httptest.NewRecorder(), r)
+
+		if gotModel != "alias" {
+			t.Errorf("POST model query param = %q, want alias (must not rewrite POST)", gotModel)
+		}
+	})
+
+	t.Run("skips GET without model query param", func(t *testing.T) {
+		cfg := config.Config{
+			Peers: config.PeerDictionaryConfig{
+				"modelbest": config.PeerConfig{
+					Models:  []string{"real-model"},
+					Aliases: map[string]string{"alias": "real-model"},
+				},
+			},
+		}
+
+		r := httptest.NewRequest(http.MethodGet, "/v1/audio/voices", nil)
+		called := false
+		final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = true
+		})
+		CreateQueryFilterMiddleware(cfg)(final).ServeHTTP(httptest.NewRecorder(), r)
+
+		if !called {
+			t.Error("expected next handler to be called even without model param")
+		}
+	})
+
+	t.Run("preserves other query parameters", func(t *testing.T) {
+		cfg := config.Config{
+			Peers: config.PeerDictionaryConfig{
+				"modelbest": config.PeerConfig{
+					Models:  []string{"real-model"},
+					Aliases: map[string]string{"alias": "real-model"},
+				},
+			},
+		}
+
+		r := httptest.NewRequest(http.MethodGet, "/v1/audio/voices?model=alias&stream=true&other=hi", nil)
+		var gotModel, gotStream, gotOther string
+		final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			q := r.URL.Query()
+			gotModel = q.Get("model")
+			gotStream = q.Get("stream")
+			gotOther = q.Get("other")
+		})
+		CreateQueryFilterMiddleware(cfg)(final).ServeHTTP(httptest.NewRecorder(), r)
+
+		if gotModel != "real-model" {
+			t.Errorf("model = %q, want real-model", gotModel)
+		}
+		if gotStream != "true" {
+			t.Errorf("stream = %q, want true", gotStream)
+		}
+		if gotOther != "hi" {
+			t.Errorf("other = %q, want hi", gotOther)
+		}
+	})
+
+	t.Run("handles local model useModelName", func(t *testing.T) {
+		cfg := config.Config{Models: map[string]config.ModelConfig{
+			"local": {UseModelName: "real-local"},
+		}}
+
+		r := httptest.NewRequest(http.MethodGet, "/v1/audio/voices?model=local", nil)
+		var gotModel string
+		final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotModel = r.URL.Query().Get("model")
+		})
+		CreateQueryFilterMiddleware(cfg)(final).ServeHTTP(httptest.NewRecorder(), r)
+
+		if gotModel != "real-local" {
+			t.Errorf("model query param = %q, want real-local", gotModel)
+		}
+	})
+}

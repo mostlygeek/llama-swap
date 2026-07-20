@@ -209,6 +209,7 @@ func (s *Server) routes() {
 		CreateInflightMiddleware(s.inflight),
 		CreateFilterMiddleware(s.cfg),
 		CreateFormFilterMiddleware(s.cfg),
+		CreateQueryFilterMiddleware(s.cfg),
 		CreateMetricsMiddleware(s.metrics, s.cfg),
 	)
 	// Custom endpoints only need auth.
