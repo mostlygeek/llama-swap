@@ -11,6 +11,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -48,16 +49,20 @@ func main() {
 // serveCmd implements the serve subcommand.
 func serveCmd(args []string) {
 	var (
-		vllmURL    string
-		listenAddr string
-		sleepLevel int
-		timeout    time.Duration
+		vllmURL     string
+		listenAddr  string
+		sleepLevel  int
+		startCmd    string
+		healthPath  string
+		waitTimeout time.Duration
 	)
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	fs.StringVar(&vllmURL, "vllm-url", "", "Base URL of vLLM server (e.g., http://127.0.0.1:8000)")
 	fs.StringVar(&listenAddr, "listen", "", "Address to listen on (e.g., :$PORT)")
 	fs.IntVar(&sleepLevel, "sleep-level", 1, "Sleep level to use when sleeping (default 1)")
-	fs.DurationVar(&timeout, "health-check-timeout", 120*time.Second, "Timeout for health checks")
+	fs.StringVar(&startCmd, "start-cmd", "", "Command to start the vLLM daemon if not running (e.g., 'docker run ...')")
+	fs.StringVar(&healthPath, "health-path", "/health", "Health check path (default /health)")
+	fs.DurationVar(&waitTimeout, "wait-timeout", 120*time.Second, "Timeout waiting for daemon to become healthy")
 	fs.Parse(args)
 
 	if vllmURL == "" {
@@ -66,31 +71,41 @@ func serveCmd(args []string) {
 	if listenAddr == "" {
 		log.Fatalf("--listen is required")
 	}
+	if startCmd == "" {
+		log.Fatalf("--start-cmd is required")
+	}
 
 	// Ensure vLLM URL does not have trailing slash.
 	vllmURL = strings.TrimRight(vllmURL, "/")
 
-	// Step 1: Wake up vLLM daemon.
-	if err := wakeUpVLLM(vllmURL); err != nil {
-		log.Fatalf("Failed to wake up vLLM: %v", err)
+	// Step 1: Check if vLLM daemon is healthy.
+	if err := checkHealthy(vllmURL, healthPath); err == nil {
+		// Healthy and awake, proceed to proxy.
+		log.Printf("vLLM daemon is healthy at %s%s", vllmURL, healthPath)
+	} else {
+		// Not healthy, try to wake up.
+		log.Printf("vLLM daemon not healthy (%v), attempting to wake up", err)
+		if err := wakeUpVLLM(vllmURL); err != nil {
+			// Wake up failed, assume daemon not running, try to start it.
+			log.Printf("Wake up failed: %v, attempting to start daemon", err)
+			if err := startDaemon(startCmd, vllmURL, healthPath, waitTimeout); err != nil {
+				log.Fatalf("Failed to start daemon: %v", err)
+			}
+		} else {
+			// Wake up succeeded, now wait for healthy.
+			log.Printf("Wake up sent, waiting for healthy state")
+			if err := waitForHealthyWithPath(vllmURL, healthPath, waitTimeout); err != nil {
+				log.Fatalf("vLLM health check failed after wake up: %v", err)
+			}
+		}
 	}
 
-	// Step 2: Wait for vLLM to be healthy.
-	if err := waitForHealthy(vllmURL, timeout); err != nil {
-		log.Fatalf("vLLM health check failed: %v", err)
-	}
-
-	// Step 3: Set up reverse proxy from listenAddr to vllmURL.
+	// Step 2: Set up reverse proxy from listenAddr to vllmURL.
 	proxyURL, err := url.Parse(vllmURL)
 	if err != nil {
 		log.Fatalf("Invalid vLLM URL %q: %v", vllmURL, err)
 	}
 	proxy := httputil.NewSingleHostReverseProxy(proxyURL)
-	// Preserve host header? We'll keep the default Director which changes the host to the upstream.
-	// We want to pass through the Host header as is? Actually, the reverse proxy will set the Host to the upstream's host.
-	// That's fine because vLLM doesn't care about the Host header.
-	// However, we need to keep the X-Forwarded-* headers? Not necessary for our use.
-	// We'll modify the proxy to add X-Forwarded-For, etc. but for simplicity we leave it.
 
 	// Create a custom transport to set timeouts.
 	transport := &http.Transport{
@@ -198,15 +213,14 @@ func wakeUpVLLM(vllmURL string) error {
 	return nil
 }
 
-// waitForHealthy polls the vLLM daemon's health endpoint.
-// We use /v1/models as a generic health check that should work for vLLM.
-func waitForHealthy(vllmURL string, timeout time.Duration) error {
+// waitForHealthyWithPath polls the vLLM daemon's health endpoint at the given path.
+func waitForHealthyWithPath(vllmURL string, healthPath string, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		// Create a request with context.
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, vllmURL+"/v1/models", nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, vllmURL+healthPath, nil)
 		if err != nil {
 			return err
 		}
@@ -229,4 +243,39 @@ func waitForHealthy(vllmURL string, timeout time.Duration) error {
 		time.Sleep(1 * time.Second)
 	}
 	return ctx.Err()
+}
+
+// checkHealthy sends a GET request to the health path and returns nil if the response status is 200 OK.
+func checkHealthy(vllmURL string, healthPath string) error {
+	resp, err := http.Get(vllmURL + healthPath)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// startDaemon executes the start command and waits for the vLLM daemon to become healthy.
+func startDaemon(startCmd string, vllmURL string, healthPath string, waitTimeout time.Duration) error {
+	// Start the daemon command.
+	cmd := exec.Command("sh", "-c", startCmd)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start daemon command: %w", err)
+	}
+	// Wait for healthy state.
+	log.Printf("Started daemon with PID %d, waiting for healthy state", cmd.Process.Pid)
+	err := waitForHealthyWithPath(vllmURL, healthPath, waitTimeout)
+	if err != nil {
+		// If we fail to become healthy, kill the started process.
+		_ = cmd.Process.Kill()
+		return fmt.Errorf("daemon did not become healthy: %w", err)
+	}
+	// Daemon is healthy, we don't wait for the command to exit (it should keep running).
+	// We'll let it run; the wrapper will not kill it on exit.
+	return nil
 }

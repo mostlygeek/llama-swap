@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -48,7 +49,7 @@ func TestWaitForHealthy(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	if err := waitForHealthy(ts.URL, 2*time.Second); err != nil {
+	if err := waitForHealthyWithPath(ts.URL, "/v1/models", 2*time.Second); err != nil {
 		t.Fatalf("waitForHealthy failed: %v", err)
 	}
 
@@ -61,7 +62,7 @@ func TestWaitForHealthy(t *testing.T) {
 	}))
 	defer ts2.Close()
 
-	err := waitForHealthy(ts2.URL, 1*time.Second)
+	err := waitForHealthyWithPath(ts2.URL, "/v1/models", 1*time.Second)
 	if err == nil {
 		t.Errorf("waitForHealthy expected timeout error")
 		return
@@ -82,5 +83,18 @@ func TestSleepCommandMarshal(t *testing.T) {
 	expected := `{"level":1}`
 	if string(data) != expected {
 		t.Errorf("Expected %s, got %s", expected, string(data))
+	}
+}
+
+// TestStartDaemon tests that startDaemon returns an error when the start command exits
+// quickly and the daemon does not become healthy.
+func TestStartDaemon(t *testing.T) {
+	// Use a start command that exits immediately (true) and a health URL that will not respond.
+	err := startDaemon("true", "http://127.0.0.1:12345/health", "/health", 10*time.Millisecond)
+	if err == nil {
+		t.Fatalf("startDaemon expected error but got nil")
+	}
+	if !strings.Contains(err.Error(), "daemon did not become healthy") {
+		t.Errorf("error expected to contain 'daemon did not become healthy', got %v", err)
 	}
 }
