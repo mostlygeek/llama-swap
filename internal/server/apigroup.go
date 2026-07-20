@@ -62,6 +62,11 @@ func (s *Server) modelStatus() []apiModel {
 		for _, modelID := range peer.Models {
 			models = append(models, apiModel{Id: modelID, PeerID: peerID})
 		}
+		if s.cfg.IncludeAliasesInList {
+			for _, aliasKey := range sortedAliases(peer.Aliases) {
+				models = append(models, apiModel{Id: aliasKey, PeerID: peerID})
+			}
+		}
 	}
 
 	return models

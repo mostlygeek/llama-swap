@@ -165,8 +165,9 @@ func rewriteMultipartModel(form *multipart.Form, useModelName string) ([]byte, s
 	return buf.Bytes(), mw.FormDataContentType(), nil
 }
 
-// resolveFilters returns the filter settings for a requested model. UseModelName
-// only applies to local models; peers carry filters but no name rewrite.
+// resolveFilters returns the filter settings for a requested model. For local
+// models UseModelName carries the alias rewrite; for peer aliases it carries
+// the upstream model name. Direct peer models carry filters but no name rewrite.
 func resolveFilters(cfg config.Config, requested string) (useModelName string, filters config.Filters, ok bool) {
 	if realName, found := cfg.RealModelName(requested); found {
 		mc := cfg.Models[realName]
@@ -177,6 +178,11 @@ func resolveFilters(cfg config.Config, requested string) (useModelName string, f
 			if m == requested {
 				return "", peer.Filters, true
 			}
+		}
+		// Peer aliases remap the requested name to the upstream model name
+		// via the same useModelName path used by local models (issue #806).
+		if upstreamModel, found := peer.Aliases[requested]; found {
+			return upstreamModel, peer.Filters, true
 		}
 	}
 	return "", config.Filters{}, false

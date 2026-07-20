@@ -130,3 +130,58 @@ func TestServer_FormFilterMiddleware(t *testing.T) {
 		t.Errorf("model rewritten to %q, want whisper-large-v3", gotModel)
 	}
 }
+
+func TestServer_ResolveFilters_PeerAlias(t *testing.T) {
+	cfg := config.Config{
+		Peers: config.PeerDictionaryConfig{
+			"modelbest": config.PeerConfig{
+				Models: []string{"MiniCPM-V-4.6-Thinking"},
+				Aliases: map[string]string{
+					"MiniCPM":      "MiniCPM-V-4.6-Thinking",
+					"qwen3.5-lite": "MiniCPM-V-4.6-Thinking",
+				},
+				Filters: config.Filters{StripParams: "temperature"},
+			},
+		},
+	}
+
+	t.Run("peer alias returns upstream name as useModelName", func(t *testing.T) {
+		useModelName, filters, ok := resolveFilters(cfg, "MiniCPM")
+		if !ok {
+			t.Fatal("expected ok=true for peer alias")
+		}
+		if useModelName != "MiniCPM-V-4.6-Thinking" {
+			t.Errorf("useModelName = %q, want MiniCPM-V-4.6-Thinking", useModelName)
+		}
+		if filters.StripParams != "temperature" {
+			t.Errorf("filters.StripParams = %q, want temperature", filters.StripParams)
+		}
+	})
+
+	t.Run("peer model without alias returns empty useModelName", func(t *testing.T) {
+		useModelName, _, ok := resolveFilters(cfg, "MiniCPM-V-4.6-Thinking")
+		if !ok {
+			t.Fatal("expected ok=true for peer model")
+		}
+		if useModelName != "" {
+			t.Errorf("useModelName = %q, want empty", useModelName)
+		}
+	})
+
+	t.Run("unknown model returns ok=false", func(t *testing.T) {
+		_, _, ok := resolveFilters(cfg, "unknown")
+		if ok {
+			t.Error("expected ok=false for unknown model")
+		}
+	})
+
+	t.Run("applyFilters rewrites model name for peer alias", func(t *testing.T) {
+		out, err := applyFilters([]byte(`{"model":"MiniCPM","prompt":"hi"}`), "MiniCPM", "MiniCPM-V-4.6-Thinking", config.Filters{})
+		if err != nil {
+			t.Fatalf("applyFilters: %v", err)
+		}
+		if got := gjson.GetBytes(out, "model").String(); got != "MiniCPM-V-4.6-Thinking" {
+			t.Errorf("model = %q, want MiniCPM-V-4.6-Thinking", got)
+		}
+	})
+}

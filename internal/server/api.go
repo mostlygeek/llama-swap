@@ -185,6 +185,12 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 		for _, modelID := range peer.Models {
 			data = append(data, newRecord(modelID, peerID+": "+modelID, "", map[string]any{"peerID": peerID}, config.ModelCapConfig{}, "unloaded"))
 		}
+
+		if s.cfg.IncludeAliasesInList {
+			for _, aliasKey := range sortedAliases(peer.Aliases) {
+				data = append(data, newRecord(aliasKey, peerID+": "+aliasKey, "", map[string]any{"peerID": peerID}, config.ModelCapConfig{}, "unloaded"))
+			}
+		}
 	}
 
 	sort.Slice(data, func(i, j int) bool { return data[i].ID < data[j].ID })
@@ -199,6 +205,20 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 		"object": "list",
 		"data":   data,
 	})
+}
+
+// sortedAliases returns the keys of a peer aliases map in sorted order, or nil
+// if the map is empty. Used for stable, deterministic model listings.
+func sortedAliases(aliases map[string]string) []string {
+	if len(aliases) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(aliases))
+	for k := range aliases {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // runningModel is one entry in the /running listing.
