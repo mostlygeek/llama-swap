@@ -202,12 +202,13 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 		status := "unloaded"
 		for _, target := range selector.Targets {
 			modelID, local := s.cfg.RealModelName(target)
-			if !local {
-				continue
+			if local {
+				state := running[modelID]
+				if state == process.StateReady || state == process.StateStarting {
+					status = "loaded"
+				}
 			}
-			state := running[modelID]
-			if state == process.StateReady || state == process.StateStarting {
-				status = "loaded"
+			if selector.Strategy == config.SelectorStrategyPin || status == "loaded" {
 				break
 			}
 		}

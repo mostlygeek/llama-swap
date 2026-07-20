@@ -318,3 +318,30 @@ func TestServer_Selector_ModelListings(t *testing.T) {
 	assert.Equal(t, "testing", metadata["purpose"])
 	assert.NotContains(t, byID, "hidden-selector")
 }
+
+func TestServer_Selector_ModelListingPinUsesFirstTarget(t *testing.T) {
+	cfg := selectorTestConfig(t)
+	selector := cfg.Selectors["public"]
+	selector.Targets = []string{"a", "b"}
+	cfg.Selectors["public"] = selector
+
+	local := newStubRouter([]string{"a", "b", "c"}, "")
+	local.running = map[string]process.ProcessState{"b": process.StateReady}
+	s := selectorTestServer(t, cfg, local)
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var response struct {
+		Data []modelRecord `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	for _, record := range response.Data {
+		if record.ID == "public" {
+			assert.Equal(t, "unloaded", record.Status["value"])
+			return
+		}
+	}
+	t.Fatal("public selector missing from model listing")
+}
