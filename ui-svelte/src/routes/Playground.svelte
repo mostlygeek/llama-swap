@@ -8,6 +8,7 @@
   import ConcurrencyInterface from "../components/playground/ConcurrencyInterface.svelte";
   import * as Card from "$lib/components/ui/card/index.js";
   import { Tabs, TabsList, TabsTrigger } from "$lib/components/ui/tabs/index.js";
+  import { fetchPlaygroundModels, models } from "../stores/api";
   import { selectedPlaygroundTab, playgroundTabs, type PlaygroundTab } from "../stores/playground";
 
   const tabComponents: Record<PlaygroundTab, Component> = {
@@ -18,6 +19,11 @@
     rerank: RerankInterface,
     concurrency: ConcurrencyInterface,
   };
+
+  $effect(() => {
+    void $models;
+    void fetchPlaygroundModels();
+  });
 </script>
 
 <Card.Root class="flex h-full flex-col gap-0 overflow-hidden p-4">

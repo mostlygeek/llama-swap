@@ -316,6 +316,7 @@ func TestServer_Selector_ModelListings(t *testing.T) {
 	metadata, ok := public.Meta["llamaswap"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "testing", metadata["purpose"])
+	assert.Equal(t, "selector", metadata["type"])
 	assert.NotContains(t, byID, "hidden-selector")
 }
 

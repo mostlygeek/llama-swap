@@ -124,6 +124,8 @@ func CreateSelectorMiddleware(s *Server) chain.Middleware {
 				return
 			}
 
+			s.proxylog.Debugf("selector: id=%s target=%s", model, target)
+
 			if selector.Strategy == config.SelectorStrategyBalance {
 				modelID, _ := s.cfg.RealModelName(target)
 				defer balances.release(model, modelID)

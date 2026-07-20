@@ -3,14 +3,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   activeProfile,
   activityRevision,
+  fetchPlaygroundModels,
   fetchProfiles,
   handleAPIEventMessage,
   hasListedModels,
   inFlightRequests,
   inflightRequestEntries,
   models,
+  playgroundModels,
   profileModels,
   profiles,
+  selectorModels,
   setActiveProfile,
   uiConfig,
 } from "./api";
@@ -18,6 +21,7 @@ import {
 afterEach(() => {
   vi.unstubAllGlobals();
   models.set([]);
+  playgroundModels.set([]);
   profiles.set([]);
   activeProfile.set(null);
 });
@@ -158,55 +162,57 @@ describe("api store event handling", () => {
     }));
   });
 
-  it("exposes active profile pins as Playground models", () => {
-    models.set([
-      {
-        id: "real",
-        state: "ready",
-        name: "Real",
-        description: "",
-        unlisted: true,
-        peerID: "",
-        aliases: ["variant"],
-        capabilities: { vision: true },
-      },
-      {
-        id: "peer-model",
-        state: "stopped",
-        name: "",
-        description: "",
-        unlisted: true,
-        peerID: "remote",
-      },
-    ]);
-    profiles.set([{
-      id: "coding",
-      description: "",
-      pins: {
-        public: "variant",
-        "remote-pin": "peer-model",
-        disabled: "",
-        real: "peer-model",
-        variant: "peer-model",
-      },
-    }]);
-    activeProfile.set("coding");
+  it("loads Playground models and virtual model types from v1/models", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [
+          {
+            id: "real",
+            name: "Real",
+            capabilities: { vision: true },
+            meta: { llamaswap: { type: "model", aliases: ["variant", "alternate"] } },
+          },
+          {
+            id: "variant",
+            meta: { llamaswap: { type: "alias", modelID: "real" } },
+          },
+          {
+            id: "remote-model",
+            meta: { llamaswap: { type: "peer", peerID: "remote" } },
+          },
+          {
+            id: "pool",
+            meta: { llamaswap: { type: "selector" } },
+          },
+          {
+            id: "public",
+            meta: { llamaswap: { type: "profile" } },
+          },
+        ],
+      }),
+    });
+    vi.stubGlobal("fetch", mockFetch);
 
-    expect(get(profileModels).map((model) => model.id)).toEqual(["public", "remote-pin"]);
-    expect(get(profileModels)[0]).toMatchObject({
-      id: "public",
-      state: "ready",
-      unlisted: false,
+    await fetchPlaygroundModels();
+
+    expect(mockFetch).toHaveBeenCalledWith("/v1/models");
+    expect(get(playgroundModels).map((model) => model.id)).not.toContain("variant");
+    expect(get(playgroundModels).find((model) => model.id === "real")).toMatchObject({
+      aliases: ["variant", "alternate"],
       capabilities: { vision: true },
+      playgroundType: "model",
     });
-    expect(get(profileModels)[1]).toMatchObject({
-      id: "remote-pin",
+    expect(get(playgroundModels).find((model) => model.id === "remote-model")).toMatchObject({
       peerID: "remote",
-      unlisted: false,
+      playgroundType: "peer",
     });
+    expect(get(selectorModels).map((model) => model.id)).toEqual(["pool"]);
+    expect(get(profileModels).map((model) => model.id)).toEqual(["public"]);
     expect(get(hasListedModels)).toBe(true);
 
-    activeProfile.set(null);
+    playgroundModels.set([]);
+    expect(get(selectorModels)).toEqual([]);
     expect(get(profileModels)).toEqual([]);
     expect(get(hasListedModels)).toBe(false);
   });

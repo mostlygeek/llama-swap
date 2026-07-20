@@ -239,18 +239,22 @@ func TestServer_Profile_ModelListings(t *testing.T) {
 		Data []modelRecord `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
-	names := make(map[string]string)
+	records := make(map[string]modelRecord)
 	for _, record := range response.Data {
-		names[record.ID] = record.Name
+		records[record.ID] = record
 	}
-	assert.Contains(t, names, "public")
-	assert.Empty(t, names["public"])
-	assert.Equal(t, "Real Model", names["real"])
-	assert.Equal(t, "remote: remote-model", names["remote-model"])
-	assert.Contains(t, names, "expose")
-	assert.Empty(t, names["expose"])
-	assert.NotContains(t, names, "disabled")
-	assert.NotContains(t, names, "hidden")
+	assert.Contains(t, records, "public")
+	assert.Empty(t, records["public"].Name)
+	assert.Equal(t, "Real Model", records["real"].Name)
+	assert.Equal(t, "remote: remote-model", records["remote-model"].Name)
+	assert.Contains(t, records, "expose")
+	assert.Empty(t, records["expose"].Name)
+	assert.NotContains(t, records, "disabled")
+	assert.NotContains(t, records, "hidden")
+	require.Contains(t, records["public"].Meta, "llamaswap")
+	metadata, ok := records["public"].Meta["llamaswap"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "profile", metadata["type"])
 
 	status := s.modelStatus()
 	byID := make(map[string]apiModel)

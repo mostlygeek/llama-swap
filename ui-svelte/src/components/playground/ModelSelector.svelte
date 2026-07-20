@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { models, profileModels } from "../../stores/api";
+  import { playgroundModels, profileModels, selectorModels } from "../../stores/api";
   import { groupModels } from "../../lib/modelUtils";
   import * as Select from "$lib/components/ui/select/index.js";
 
@@ -13,9 +13,19 @@
 
   let { value = $bindable(), placeholder = "Select a model...", disabled = false, capabilities, matchAny = false }: Props = $props();
 
-  let grouped = $derived(groupModels($models, capabilities, matchAny));
+  let grouped = $derived(groupModels(
+    $playgroundModels.filter((model) => model.playgroundType === "model" || model.playgroundType === "peer"),
+    capabilities,
+    matchAny,
+  ));
   let hasMatching = $derived(grouped.localMatching.length > 0);
-  let hasModels = $derived($profileModels.length > 0 || hasMatching || grouped.local.length > 0 || Object.keys(grouped.peersByProvider).length > 0);
+  let hasModels = $derived(
+    $profileModels.length > 0
+      || $selectorModels.length > 0
+      || hasMatching
+      || grouped.local.length > 0
+      || Object.keys(grouped.peersByProvider).length > 0
+  );
 </script>
 
 {#if hasModels}
@@ -47,6 +57,15 @@
                 <Select.Item value={alias}>↳ {alias}</Select.Item>
               {/each}
             {/if}
+          {/each}
+        </Select.Group>
+        <Select.Separator />
+      {/if}
+      {#if $selectorModels.length > 0}
+        <Select.Group>
+          <Select.Label>Selectors</Select.Label>
+          {#each $selectorModels as model (model.id)}
+            <Select.Item value={model.id}>{model.id}</Select.Item>
           {/each}
         </Select.Group>
         <Select.Separator />
