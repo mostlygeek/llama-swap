@@ -344,6 +344,20 @@ func tryIntelGpuTop(ctx context.Context, every time.Duration, logger *logmon.Mon
 	if _, err := exec.LookPath("intel_gpu_top"); err != nil {
 		return nil, ErrNoGpuTool
 	}
+
+    // Probe: list devices to verify GPU is present and accessible.
+	probeCtx, probeCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer probeCancel()
+	probeCmd := exec.CommandContext(probeCtx, "intel_gpu_top", "-L")
+	if out, err := probeCmd.Output(); err != nil {
+		if probeCtx.Err() == context.DeadlineExceeded {
+			logger.Debug("intel_gpu_top -L timed out")
+		} else {
+			logger.Debugf("intel_gpu_top -L: %s", out)
+		}
+		return nil, ErrNoGpuTool
+	}
+
 	ms := int(every.Milliseconds())
 	if ms < 5000 {
 		ms = 5000
