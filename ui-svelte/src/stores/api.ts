@@ -55,6 +55,8 @@ export const versionInfo = writable<VersionInfo>({
 let apiEventSource: EventSource | null = null;
 let profileRevision = 0;
 let playgroundModelsRequest = 0;
+let playgroundModelsFetch: Promise<Model[]> | null = null;
+let playgroundModelsRefreshQueued = false;
 
 function appendLog(newData: string, store: typeof proxyLogs | typeof upstreamLogs): void {
   store.update((prev) => {
@@ -72,6 +74,7 @@ export function enableAPIEvents(enabled: boolean): void {
     inflightRequestEntries.set([]);
     uiConfig.set(defaultUIConfig());
     playgroundModelsRequest++;
+    playgroundModelsRefreshQueued = false;
     playgroundModels.set([]);
     profiles.set([]);
     activeProfile.set(null);
@@ -97,6 +100,8 @@ export function enableAPIEvents(enabled: boolean): void {
       inflightRequestEntries.set([]);
       uiConfig.set(defaultUIConfig());
       models.set([]);
+      playgroundModelsRequest++;
+      playgroundModelsRefreshQueued = false;
       playgroundModels.set([]);
       profiles.set([]);
       activeProfile.set(null);
@@ -263,8 +268,7 @@ interface ModelListRecord {
   };
 }
 
-export async function fetchPlaygroundModels(): Promise<Model[]> {
-  const request = ++playgroundModelsRequest;
+async function loadPlaygroundModels(request: number): Promise<Model[]> {
   try {
     const response = await fetch("/v1/models");
     if (!response.ok) {
@@ -313,6 +317,25 @@ export async function fetchPlaygroundModels(): Promise<Model[]> {
     console.error("Failed to fetch Playground models:", error);
     return [];
   }
+}
+
+export function fetchPlaygroundModels(): Promise<Model[]> {
+  if (playgroundModelsFetch) {
+    playgroundModelsRefreshQueued = true;
+    return playgroundModelsFetch;
+  }
+
+  const request = ++playgroundModelsRequest;
+  const currentFetch = loadPlaygroundModels(request).finally(() => {
+    if (playgroundModelsFetch !== currentFetch) return;
+    playgroundModelsFetch = null;
+    if (playgroundModelsRefreshQueued) {
+      playgroundModelsRefreshQueued = false;
+      void fetchPlaygroundModels();
+    }
+  });
+  playgroundModelsFetch = currentFetch;
+  return currentFetch;
 }
 
 export async function getActivity(params: {

@@ -11,6 +11,8 @@
   import { fetchPlaygroundModels, models } from "../stores/api";
   import { selectedPlaygroundTab, playgroundTabs, type PlaygroundTab } from "../stores/playground";
 
+  const MODEL_REFRESH_DEBOUNCE_MS = 200;
+
   const tabComponents: Record<PlaygroundTab, Component> = {
     chat: ChatInterface,
     images: ImageInterface,
@@ -20,9 +22,19 @@
     concurrency: ConcurrencyInterface,
   };
 
+  let initializedModels = false;
   $effect(() => {
     void $models;
-    void fetchPlaygroundModels();
+    if (!initializedModels) {
+      initializedModels = true;
+      void fetchPlaygroundModels();
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      void fetchPlaygroundModels();
+    }, MODEL_REFRESH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timeout);
   });
 </script>
 

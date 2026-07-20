@@ -216,4 +216,36 @@ describe("api store event handling", () => {
     expect(get(profileModels)).toEqual([]);
     expect(get(hasListedModels)).toBe(false);
   });
+
+  it("coalesces overlapping Playground model refreshes", async () => {
+    type ModelResponse = {
+      ok: boolean;
+      json: () => Promise<{ data: [] }>;
+    };
+    let resolveFirst!: (response: ModelResponse) => void;
+    const firstResponse = new Promise<ModelResponse>((resolve) => {
+      resolveFirst = resolve;
+    });
+    const mockFetch = vi.fn()
+      .mockReturnValueOnce(firstResponse)
+      .mockResolvedValue({
+        ok: true,
+        json: async () => ({ data: [] }),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const first = fetchPlaygroundModels();
+    const overlapping = fetchPlaygroundModels();
+
+    expect(overlapping).toBe(first);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    resolveFirst({
+      ok: true,
+      json: async () => ({ data: [] }),
+    });
+    await first;
+
+    await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+  });
 });
