@@ -619,4 +619,20 @@ peers:
         provider:
           data_collection: "deny"
           zdr: true
+
+    # aliases: a dictionary mapping friendly alias names to the upstream model
+    # name that the peer API actually expects.
+    # - optional, default: empty dictionary
+    # - keys are the model names clients send to llama-swap
+    # - values are the real model names sent to the upstream peer
+    # - alias keys must be globally unique: they must not collide with this
+    #   peer's `models`, other peers' models/aliases, or any local model
+    #   ID/alias
+    # - supports global macros in both keys and values
+    # - peer filters (stripParams, setParams) still apply to aliased requests
+    # - aliases appear in /v1/models when includeAliasesInList is enabled
+    aliases:
+      # Example: expose long OpenAI model names under shorter aliases
+      "gpt-4o-mini": "meta-llama/llama-3.1-8b-instruct"
+      "qwen3": "qwen/qwen3-235b-a22b-2507"
 ```

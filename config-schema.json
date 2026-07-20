@@ -563,6 +563,15 @@
                         },
                         "description": "A list of models served by the peer."
                     },
+                    "aliases": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "string",
+                            "minLength": 1
+                        },
+                        "default": {},
+                        "description": "A dictionary mapping friendly alias names (keys) to the upstream model names (values) that the peer API actually expects. Alias keys must be globally unique: they must not collide with this peer's models, other peers' models/aliases, or any local model ID/alias. Supports global macros in both keys and values. Peer filters still apply to aliased requests. Aliases appear in /v1/models when includeAliasesInList is enabled."
+                    },
                     "filters": {
                         "type": "object",
                         "properties": {
