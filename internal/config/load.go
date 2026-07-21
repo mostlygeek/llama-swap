@@ -292,6 +292,9 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			if matches := macroPatternRegex.FindAllStringSubmatch(alias, -1); len(matches) > 0 {
 				return Config{}, fmt.Errorf("unknown macro '${%s}' found in model %s aliases", matches[0][1], modelId)
 			}
+			if _, found := config.Models[alias]; found {
+				return Config{}, fmt.Errorf("alias %s conflicts with a model ID", alias)
+			}
 			if _, found := config.aliases[alias]; found {
 				return Config{}, fmt.Errorf("duplicate alias %s found in model: %s", alias, modelId)
 			}

@@ -80,6 +80,22 @@ models:
 	assert.Equal(t, map[string]any{"model": "qwen"}, setParams["nested"])
 }
 
+func TestConfig_ModelAliasConflictWithModelID(t *testing.T) {
+	content := `
+macros:
+  OTHER_MODEL: model2
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    aliases:
+      - "${OTHER_MODEL}"
+  model2:
+    cmd: path/to/cmd --port ${PORT}
+`
+	_, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.ErrorContains(t, err, "alias model2 conflicts with a model ID")
+}
+
 func TestConfig_ModelSendLoadingState(t *testing.T) {
 	content := `
 sendLoadingState: true
