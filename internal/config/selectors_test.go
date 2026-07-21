@@ -29,7 +29,7 @@ selectors:
     metadata:
       family: coding
   workers:
-    strategy: balance
+    strategy: spillover
     targets: [a, b]
 `))
 	require.NoError(t, err)
@@ -37,14 +37,14 @@ selectors:
 	coding := cfg.Selectors["coding"]
 	assert.Equal(t, SelectorStrategyWarm, coding.Strategy)
 	assert.Equal(t, []string{"a", "b"}, coding.Targets)
-	assert.Equal(t, 1, coding.Balance.Spillover)
+	assert.Equal(t, 1, coding.Spillover)
 	assert.Equal(t, "Coding Model", coding.Name)
 	assert.Equal(t, "Best available coding model", coding.Description)
 	assert.True(t, coding.Unlisted)
 	assert.Equal(t, "coding", coding.Metadata["family"])
 
 	workers := cfg.Selectors["workers"]
-	assert.Equal(t, 1, workers.Balance.Spillover)
+	assert.Equal(t, 1, workers.Spillover)
 }
 
 func TestConfig_Selectors_Validation(t *testing.T) {
@@ -165,43 +165,42 @@ selectors:
 			wantErr: `must resolve to a local model for strategy "warm"`,
 		},
 		{
-			name: "balance peer target",
+			name: "spillover peer target",
 			config: `
 selectors:
   public:
-    strategy: balance
+    strategy: spillover
     targets: [remote-model]
 `,
-			wantErr: `must resolve to a local model for strategy "balance"`,
+			wantErr: `must resolve to a local model for strategy "spillover"`,
 		},
 		{
 			name: "invalid spillover",
 			config: `
 selectors:
   public:
-    strategy: balance
+    strategy: spillover
     targets: [a]
-    balance:
-      spillover: 0
+    spillover: 0
 `,
 			wantErr: "spillover must be >= 1",
 		},
 		{
-			name: "duplicate resolved balance target",
+			name: "duplicate resolved spillover target",
 			config: `
 selectors:
   public:
-    strategy: balance
+    strategy: spillover
     targets: [a, alias-a]
 `,
 			wantErr: `duplicate resolved model "a"`,
 		},
 		{
-			name: "balance swapping group",
+			name: "spillover swapping group",
 			config: `
 selectors:
   public:
-    strategy: balance
+    strategy: spillover
     targets: [a, b]
 `,
 			wantErr: "must share a group with swap: false",
@@ -234,7 +233,7 @@ peers:
 	}
 }
 
-func TestConfig_Selectors_BalanceCoexistence(t *testing.T) {
+func TestConfig_Selectors_SpilloverCoexistence(t *testing.T) {
 	t.Run("group", func(t *testing.T) {
 		cfg, err := LoadConfigFromReader(strings.NewReader(`
 models:
@@ -248,13 +247,12 @@ groups:
     members: [a, b]
 selectors:
   public:
-    strategy: balance
+    strategy: spillover
     targets: [a, b]
-    balance:
-      spillover: 4
+    spillover: 4
 `))
 		require.NoError(t, err)
-		assert.Equal(t, 4, cfg.Selectors["public"].Balance.Spillover)
+		assert.Equal(t, 4, cfg.Selectors["public"].Spillover)
 	})
 
 	t.Run("matrix common set", func(t *testing.T) {
@@ -272,7 +270,7 @@ matrix:
     pool: "A & B"
 selectors:
   public:
-    strategy: balance
+    strategy: spillover
     targets: [a, b]
 `))
 		require.NoError(t, err)
@@ -293,7 +291,7 @@ matrix:
     pool: "A | B"
 selectors:
   public:
-    strategy: balance
+    strategy: spillover
     targets: [a, b]
 `))
 		require.Error(t, err)

@@ -360,7 +360,7 @@
                         "enum": [
                             "warm",
                             "pin",
-                            "balance"
+                            "spillover"
                         ],
                         "description": "How a target is selected for each request."
                     },
@@ -373,18 +373,11 @@
                         },
                         "description": "Ordered target model IDs or aliases. Selector IDs cannot be targets."
                     },
-                    "balance": {
-                        "type": "object",
-                        "properties": {
-                            "spillover": {
-                                "type": "integer",
-                                "minimum": 1,
-                                "default": 1,
-                                "description": "Requests reserved per active target before starting the next balance target."
-                            }
-                        },
-                        "additionalProperties": false,
-                        "default": {}
+                    "spillover": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 1,
+                        "description": "Requests reserved per active target before spilling over to the next target."
                     },
                     "name": {
                         "type": "string",

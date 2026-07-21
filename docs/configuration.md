@@ -290,17 +290,17 @@ selectors:
       - "gpt-oss-120b"
       - "z-ai/glm-4.7"
 
-  # balance spreads requests across local instances that may run concurrently
+  # spillover fills local targets to the reservation count in order,
+  # starting the next target when the active targets reach that count
   "llama":
-    strategy: balance
+    strategy: spillover
     targets:
       - "docker-llama"
       - "modelA"
       - "modelB"
-    balance:
-      # start the next instance once active instances reach this reservation count
-      # - optional, default: 1
-      spillover: 4
+    # requests reserved per active target before spilling over to the next target
+    # - optional, default: 1
+    spillover: 4
 
 # models: a dictionary of model configurations
 # - required

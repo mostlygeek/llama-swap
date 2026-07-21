@@ -8,26 +8,21 @@ import (
 )
 
 const (
-	SelectorStrategyWarm    = "warm"
-	SelectorStrategyPin     = "pin"
-	SelectorStrategyBalance = "balance"
+	SelectorStrategyWarm      = "warm"
+	SelectorStrategyPin       = "pin"
+	SelectorStrategySpillover = "spillover"
 )
-
-// SelectorBalanceConfig contains settings used by the balance strategy.
-type SelectorBalanceConfig struct {
-	Spillover int `yaml:"spillover" json:"spillover"`
-}
 
 // SelectorConfig describes a virtual model ID that resolves to a concrete
 // local model, alias, or peer model for each request.
 type SelectorConfig struct {
-	Strategy    string                `yaml:"strategy" json:"strategy"`
-	Targets     []string              `yaml:"targets" json:"targets"`
-	Balance     SelectorBalanceConfig `yaml:"balance" json:"balance"`
-	Name        string                `yaml:"name" json:"name"`
-	Description string                `yaml:"description" json:"description"`
-	Unlisted    bool                  `yaml:"unlisted" json:"unlisted"`
-	Metadata    map[string]any        `yaml:"metadata" json:"metadata"`
+	Strategy    string         `yaml:"strategy" json:"strategy"`
+	Targets     []string       `yaml:"targets" json:"targets"`
+	Spillover   int            `yaml:"spillover" json:"spillover"`
+	Name        string         `yaml:"name" json:"name"`
+	Description string         `yaml:"description" json:"description"`
+	Unlisted    bool           `yaml:"unlisted" json:"unlisted"`
+	Metadata    map[string]any `yaml:"metadata" json:"metadata"`
 }
 
 // UnmarshalYAML applies selector defaults while retaining the distinction
@@ -35,9 +30,9 @@ type SelectorConfig struct {
 func (c *SelectorConfig) UnmarshalYAML(value *yaml.Node) error {
 	type rawSelectorConfig SelectorConfig
 	defaults := rawSelectorConfig{
-		Targets:  []string{},
-		Balance:  SelectorBalanceConfig{Spillover: 1},
-		Metadata: map[string]any{},
+		Targets:   []string{},
+		Spillover: 1,
+		Metadata:  map[string]any{},
 	}
 	if err := value.Decode(&defaults); err != nil {
 		return err
@@ -66,11 +61,11 @@ func validateSelectors(config Config) error {
 		}
 
 		switch selector.Strategy {
-		case SelectorStrategyPin, SelectorStrategyWarm, SelectorStrategyBalance:
+		case SelectorStrategyPin, SelectorStrategyWarm, SelectorStrategySpillover:
 		case "":
 			return fmt.Errorf("selectors.%s.strategy is required", selectorID)
 		default:
-			return fmt.Errorf("selectors.%s.strategy: unknown strategy %q (valid: warm, pin, balance)", selectorID, selector.Strategy)
+			return fmt.Errorf("selectors.%s.strategy: unknown strategy %q (valid: warm, pin, spillover)", selectorID, selector.Strategy)
 		}
 		if len(selector.Targets) == 0 {
 			return fmt.Errorf("selectors.%s.targets must contain at least one entry", selectorID)
@@ -85,7 +80,7 @@ func validateSelectors(config Config) error {
 				return fmt.Errorf("selectors.%s.targets[%d] references unknown model %q", selectorID, i, target)
 			}
 
-			if selector.Strategy == SelectorStrategyWarm || selector.Strategy == SelectorStrategyBalance {
+			if selector.Strategy == SelectorStrategyWarm || selector.Strategy == SelectorStrategySpillover {
 				realName, local := config.RealModelName(target)
 				if !local {
 					return fmt.Errorf("selectors.%s.targets[%d] must resolve to a local model for strategy %q", selectorID, i, selector.Strategy)
@@ -94,11 +89,11 @@ func validateSelectors(config Config) error {
 			}
 		}
 
-		if selector.Strategy != SelectorStrategyBalance {
+		if selector.Strategy != SelectorStrategySpillover {
 			continue
 		}
-		if selector.Balance.Spillover < 1 {
-			return fmt.Errorf("selectors.%s.balance.spillover must be >= 1", selectorID)
+		if selector.Spillover < 1 {
+			return fmt.Errorf("selectors.%s.spillover must be >= 1", selectorID)
 		}
 
 		seen := make(map[string]struct{}, len(resolvedTargets))
@@ -108,14 +103,14 @@ func validateSelectors(config Config) error {
 			}
 			seen[target] = struct{}{}
 		}
-		if err := validateBalanceCoexistence(config, selectorID, resolvedTargets); err != nil {
+		if err := validateSpilloverCoexistence(config, selectorID, resolvedTargets); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func validateBalanceCoexistence(config Config, selectorID string, targets []string) error {
+func validateSpilloverCoexistence(config Config, selectorID string, targets []string) error {
 	if len(targets) <= 1 {
 		return nil
 	}
@@ -155,11 +150,11 @@ func validateBalanceCoexistence(config Config, selectorID string, targets []stri
 		return fmt.Errorf("selectors.%s target %q is not in a routing group", selectorID, targets[0])
 	}
 	if config.Routing.Router.Settings.Groups[groupID].Swap {
-		return fmt.Errorf("selectors.%s balance targets must share a group with swap: false", selectorID)
+		return fmt.Errorf("selectors.%s spillover targets must share a group with swap: false", selectorID)
 	}
 	for _, target := range targets[1:] {
 		if groupOf[target] != groupID {
-			return fmt.Errorf("selectors.%s balance targets must share one routing group", selectorID)
+			return fmt.Errorf("selectors.%s spillover targets must share one routing group", selectorID)
 		}
 	}
 	return nil

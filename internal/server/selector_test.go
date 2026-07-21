@@ -51,10 +51,9 @@ selectors:
     strategy: warm
     targets: [a, b, c]
   balanced:
-    strategy: balance
+    strategy: spillover
     targets: [a, b, c]
-    balance:
-      spillover: 1
+    spillover: 1
   hidden-selector:
     strategy: pin
     targets: [a]
@@ -120,7 +119,7 @@ func TestServer_SelectorStrategyWarm(t *testing.T) {
 	assert.Equal(t, "a", target)
 }
 
-func TestServer_SelectorStrategyBalance(t *testing.T) {
+func TestServer_SelectorStrategySpillover(t *testing.T) {
 	cfg := config.Config{
 		Models: map[string]config.ModelConfig{
 			"a": {},
@@ -129,26 +128,26 @@ func TestServer_SelectorStrategyBalance(t *testing.T) {
 		},
 		Selectors: map[string]config.SelectorConfig{
 			"pool": {
-				Strategy: config.SelectorStrategyBalance,
-				Targets:  []string{"a", "b", "c"},
-				Balance:  config.SelectorBalanceConfig{Spillover: 2},
+				Strategy:  config.SelectorStrategySpillover,
+				Targets:   []string{"a", "b", "c"},
+				Spillover: 2,
 			},
 		},
 	}
-	tracker := newSelectorBalanceTracker(cfg)
+	tracker := newSelectorSpilloverTracker(cfg)
 
-	first, err := strategyBalance("pool", tracker, nil)
+	first, err := strategySpillover("pool", tracker, nil)
 	require.NoError(t, err)
-	second, err := strategyBalance("pool", tracker, nil)
+	second, err := strategySpillover("pool", tracker, nil)
 	require.NoError(t, err)
-	third, err := strategyBalance("pool", tracker, nil)
+	third, err := strategySpillover("pool", tracker, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "a", first)
 	assert.Equal(t, "a", second)
 	assert.Equal(t, "b", third)
 
 	tracker.release("pool", "a")
-	target, err := strategyBalance("pool", tracker, map[string]process.ProcessState{
+	target, err := strategySpillover("pool", tracker, map[string]process.ProcessState{
 		"a": process.StateReady,
 		"b": process.StateReady,
 		"c": process.StateReady,
@@ -156,14 +155,14 @@ func TestServer_SelectorStrategyBalance(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "c", target)
 
-	stoppedTracker := newSelectorBalanceTracker(cfg)
-	_, err = strategyBalance("pool", stoppedTracker, map[string]process.ProcessState{
+	stoppedTracker := newSelectorSpilloverTracker(cfg)
+	_, err = strategySpillover("pool", stoppedTracker, map[string]process.ProcessState{
 		"a": process.StateStopping,
 		"b": process.StateStopping,
 		"c": process.StateShutdown,
 	})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no available balance targets")
+	assert.Contains(t, err.Error(), "no available spillover targets")
 }
 
 func TestServer_SelectorMiddleware_RewritesBeforeFiltersAndRecordsActivity(t *testing.T) {
@@ -217,7 +216,7 @@ func TestServer_SelectorMiddleware_ProfileRunsFirst(t *testing.T) {
 	assert.Equal(t, "public", entries[0].Metadata["selector"])
 }
 
-func TestServer_SelectorMiddleware_BalanceReservations(t *testing.T) {
+func TestServer_SelectorMiddleware_SpilloverReservations(t *testing.T) {
 	cfg := selectorTestConfig(t)
 	local := newStubRouter([]string{"a", "b", "c"}, "")
 	local.running = map[string]process.ProcessState{
@@ -254,7 +253,7 @@ func TestServer_SelectorMiddleware_BalanceReservations(t *testing.T) {
 	<-done
 }
 
-func TestServer_SelectorMiddleware_AllBalanceTargetsStopping(t *testing.T) {
+func TestServer_SelectorMiddleware_AllSpilloverTargetsStopping(t *testing.T) {
 	cfg := selectorTestConfig(t)
 	local := newStubRouter([]string{"a", "b", "c"}, "")
 	local.running = map[string]process.ProcessState{
@@ -267,7 +266,7 @@ func TestServer_SelectorMiddleware_AllBalanceTargetsStopping(t *testing.T) {
 	w := httptest.NewRecorder()
 	s.ServeHTTP(w, chatRequest("balanced"))
 	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
-	assert.Contains(t, w.Body.String(), "no available balance targets")
+	assert.Contains(t, w.Body.String(), "no available spillover targets")
 }
 
 func TestServer_SelectorMiddleware_UpstreamUnsupported(t *testing.T) {

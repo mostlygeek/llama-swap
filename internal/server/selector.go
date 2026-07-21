@@ -23,44 +23,44 @@ func selectorFromContext(ctx context.Context) string {
 	return selectorID
 }
 
-type balanceTarget struct {
+type spilloverTarget struct {
 	target  string
 	modelID string
 }
 
-type selectorBalanceState struct {
+type selectorSpilloverState struct {
 	mu        sync.Mutex
 	spillover int
-	targets   []balanceTarget
+	targets   []spilloverTarget
 	inflight  map[string]int
 	rr        uint64
 }
 
-type selectorBalanceTracker struct {
-	states map[string]*selectorBalanceState
+type selectorSpilloverTracker struct {
+	states map[string]*selectorSpilloverState
 }
 
-func newSelectorBalanceTracker(cfg config.Config) *selectorBalanceTracker {
-	tracker := &selectorBalanceTracker{states: make(map[string]*selectorBalanceState)}
+func newSelectorSpilloverTracker(cfg config.Config) *selectorSpilloverTracker {
+	tracker := &selectorSpilloverTracker{states: make(map[string]*selectorSpilloverState)}
 	for selectorID, selector := range cfg.Selectors {
-		if selector.Strategy != config.SelectorStrategyBalance {
+		if selector.Strategy != config.SelectorStrategySpillover {
 			continue
 		}
-		state := &selectorBalanceState{
-			spillover: selector.Balance.Spillover,
-			targets:   make([]balanceTarget, 0, len(selector.Targets)),
+		state := &selectorSpilloverState{
+			spillover: selector.Spillover,
+			targets:   make([]spilloverTarget, 0, len(selector.Targets)),
 			inflight:  make(map[string]int, len(selector.Targets)),
 		}
 		for _, target := range selector.Targets {
 			modelID, _ := cfg.RealModelName(target)
-			state.targets = append(state.targets, balanceTarget{target: target, modelID: modelID})
+			state.targets = append(state.targets, spilloverTarget{target: target, modelID: modelID})
 		}
 		tracker.states[selectorID] = state
 	}
 	return tracker
 }
 
-func (t *selectorBalanceTracker) release(selectorID, modelID string) {
+func (t *selectorSpilloverTracker) release(selectorID, modelID string) {
 	if t == nil {
 		return
 	}
@@ -78,7 +78,7 @@ func (t *selectorBalanceTracker) release(selectorID, modelID string) {
 // CreateSelectorMiddleware resolves selector model IDs after profile rewrites
 // and before the normal request context, filters, routing, and metrics pipeline.
 func CreateSelectorMiddleware(s *Server) chain.Middleware {
-	balances := newSelectorBalanceTracker(s.cfg)
+	spillovers := newSelectorSpilloverTracker(s.cfg)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if len(s.cfg.Selectors) == 0 {
@@ -103,8 +103,8 @@ func CreateSelectorMiddleware(s *Server) chain.Middleware {
 				target, err = strategyPin(selector)
 			case config.SelectorStrategyWarm:
 				target, err = strategyWarm(s.cfg, selector, s.local.RunningModels())
-			case config.SelectorStrategyBalance:
-				target, err = strategyBalance(model, balances, s.local.RunningModels())
+			case config.SelectorStrategySpillover:
+				target, err = strategySpillover(model, spillovers, s.local.RunningModels())
 			default:
 				err = fmt.Errorf("unknown selector strategy %q", selector.Strategy)
 			}
@@ -115,9 +115,9 @@ func CreateSelectorMiddleware(s *Server) chain.Middleware {
 
 			updated, err := shared.ReplaceRequestModel(r, model, target)
 			if err != nil {
-				if selector.Strategy == config.SelectorStrategyBalance {
+				if selector.Strategy == config.SelectorStrategySpillover {
 					if modelID, found := s.cfg.RealModelName(target); found {
-						balances.release(model, modelID)
+						spillovers.release(model, modelID)
 					}
 				}
 				shared.SendResponse(w, r, http.StatusBadRequest, err.Error())
@@ -126,9 +126,9 @@ func CreateSelectorMiddleware(s *Server) chain.Middleware {
 
 			s.proxylog.Debugf("selector: id=%s target=%s", model, target)
 
-			if selector.Strategy == config.SelectorStrategyBalance {
+			if selector.Strategy == config.SelectorStrategySpillover {
 				modelID, _ := s.cfg.RealModelName(target)
-				defer balances.release(model, modelID)
+				defer spillovers.release(model, modelID)
 			}
 			next.ServeHTTP(w, withSelectorContext(updated, model))
 		})
@@ -162,16 +162,16 @@ func strategyWarm(cfg config.Config, selector config.SelectorConfig, running map
 	return selector.Targets[0], nil
 }
 
-func strategyBalance(selectorID string, tracker *selectorBalanceTracker, running map[string]process.ProcessState) (string, error) {
+func strategySpillover(selectorID string, tracker *selectorSpilloverTracker, running map[string]process.ProcessState) (string, error) {
 	if tracker == nil || tracker.states[selectorID] == nil {
-		return "", fmt.Errorf("balance selector %q is not configured", selectorID)
+		return "", fmt.Errorf("spillover selector %q is not configured", selectorID)
 	}
 	state := tracker.states[selectorID]
 	state.mu.Lock()
 	defer state.mu.Unlock()
 
-	active := make([]balanceTarget, 0, len(state.targets))
-	cold := make([]balanceTarget, 0, len(state.targets))
+	active := make([]spilloverTarget, 0, len(state.targets))
+	cold := make([]spilloverTarget, 0, len(state.targets))
 	for _, target := range state.targets {
 		processState, runningNow := running[target.modelID]
 		switch {
@@ -188,7 +188,7 @@ func strategyBalance(selectorID string, tracker *selectorBalanceTracker, running
 
 	if len(active) == 0 {
 		if len(cold) == 0 {
-			return "", fmt.Errorf("selector %q has no available balance targets", selectorID)
+			return "", fmt.Errorf("selector %q has no available spillover targets", selectorID)
 		}
 		return state.reserve(cold[0]), nil
 	}
@@ -203,14 +203,14 @@ func strategyBalance(selectorID string, tracker *selectorBalanceTracker, running
 	return state.reserveLeastBusy(active), nil
 }
 
-func (s *selectorBalanceState) reserve(target balanceTarget) string {
+func (s *selectorSpilloverState) reserve(target spilloverTarget) string {
 	s.inflight[target.modelID]++
 	return target.target
 }
 
-func (s *selectorBalanceState) reserveLeastBusy(targets []balanceTarget) string {
+func (s *selectorSpilloverState) reserveLeastBusy(targets []spilloverTarget) string {
 	minimum := s.minimum(targets)
-	tied := make([]balanceTarget, 0, len(targets))
+	tied := make([]spilloverTarget, 0, len(targets))
 	for _, target := range targets {
 		if s.inflight[target.modelID] == minimum {
 			tied = append(tied, target)
@@ -221,7 +221,7 @@ func (s *selectorBalanceState) reserveLeastBusy(targets []balanceTarget) string 
 	return s.reserve(target)
 }
 
-func (s *selectorBalanceState) minimum(targets []balanceTarget) int {
+func (s *selectorSpilloverState) minimum(targets []spilloverTarget) int {
 	minimum := -1
 	for _, target := range targets {
 		if count := s.inflight[target.modelID]; minimum < 0 || count < minimum {
