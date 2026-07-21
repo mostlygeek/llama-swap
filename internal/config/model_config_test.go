@@ -52,6 +52,50 @@ models:
 	}
 }
 
+func TestConfig_ModelMacrosInAliasesAndSetParams(t *testing.T) {
+	content := `
+models:
+  qwen:
+    cmd: path/to/cmd --port ${PORT}
+    macros:
+      DEFAULT_TEMPERATURE: 0.7
+    aliases:
+      - "${MODEL_ID}:instruct"
+    filters:
+      setParams:
+        temperature: ${DEFAULT_TEMPERATURE}
+        nested:
+          model: "${MODEL_ID}"
+`
+	cfg, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.NoError(t, err)
+	assert.Equal(t, "qwen:instruct", cfg.Models["qwen"].Aliases[0])
+
+	realName, found := cfg.RealModelName("qwen:instruct")
+	assert.True(t, found)
+	assert.Equal(t, "qwen", realName)
+
+	setParams, _ := cfg.Models["qwen"].Filters.SanitizedSetParams()
+	assert.Equal(t, 0.7, setParams["temperature"])
+	assert.Equal(t, map[string]any{"model": "qwen"}, setParams["nested"])
+}
+
+func TestConfig_ModelAliasConflictWithModelID(t *testing.T) {
+	content := `
+macros:
+  OTHER_MODEL: model2
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    aliases:
+      - "${OTHER_MODEL}"
+  model2:
+    cmd: path/to/cmd --port ${PORT}
+`
+	_, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.ErrorContains(t, err, "alias model2 conflicts with a model ID")
+}
+
 func TestConfig_ModelSendLoadingState(t *testing.T) {
 	content := `
 sendLoadingState: true
