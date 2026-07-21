@@ -78,25 +78,35 @@ func serveCmd(args []string) {
 	// Ensure vLLM URL does not have trailing slash.
 	vllmURL = strings.TrimRight(vllmURL, "/")
 
-	// Step 1: Check if vLLM daemon is healthy.
-	if err := checkHealthy(vllmURL, healthPath); err == nil {
-		// Healthy and awake, proceed to proxy.
-		log.Printf("vLLM daemon is healthy at %s%s", vllmURL, healthPath)
-	} else {
-		// Not healthy, try to wake up.
-		log.Printf("vLLM daemon not healthy (%v), attempting to wake up", err)
+	// Step 1: Ensure the daemon is running and awake.
+	// First, check if we can reach the daemon (liveness).
+	if err := checkHealthy(vllmURL, healthPath); err != nil {
+		// Not reachable, try to wake up (in case it's asleep but we couldn't reach? Actually, if not reachable, waking won't work)
+		log.Printf("vLLM daemon not reachable (%v), attempting to wake up", err)
 		if err := wakeUpVLLM(vllmURL); err != nil {
-			// Wake up failed, assume daemon not running, try to start it.
+			// Wake up failed (e.g., connection refused), assume daemon not running, try to start it.
 			log.Printf("Wake up failed: %v, attempting to start daemon", err)
 			if err := startDaemon(startCmd, vllmURL, healthPath, waitTimeout); err != nil {
 				log.Fatalf("Failed to start daemon: %v", err)
 			}
 		} else {
-			// Wake up succeeded, now wait for healthy.
+			// Wake up succeeded, now wait for healthy (liveness).
 			log.Printf("Wake up sent, waiting for healthy state")
 			if err := waitForHealthyWithPath(vllmURL, healthPath, waitTimeout); err != nil {
 				log.Fatalf("vLLM health check failed after wake up: %v", err)
 			}
+		}
+	} else {
+		// Reachable (liveness ok). Now wake up to ensure it's not asleep.
+		log.Printf("vLLM daemon is reachable at %s%s, attempting to wake up if asleep", vllmURL, healthPath)
+		if err := wakeUpVLLM(vllmURL); err != nil {
+			// Log the error but continue because wake is idempotent and we might be already awake.
+			log.Printf("Warning: wake up failed (but continuing): %v", err)
+		}
+		// After waking, we wait for the daemon to become healthy again (liveness) to ensure it's ready.
+		log.Printf("Waiting for vLLM to be healthy after wake up")
+		if err := waitForHealthyWithPath(vllmURL, healthPath, 10*time.Second); err != nil {
+			log.Fatalf("vLLM health check failed after wake up: %v", err)
 		}
 	}
 
