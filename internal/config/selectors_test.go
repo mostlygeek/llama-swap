@@ -37,14 +37,14 @@ selectors:
 	coding := cfg.Selectors["coding"]
 	assert.Equal(t, SelectorStrategyWarm, coding.Strategy)
 	assert.Equal(t, []string{"a", "b"}, coding.Targets)
-	assert.Equal(t, 1, coding.Spillover)
+	assert.Equal(t, 1, coding.Settings.Spillover)
 	assert.Equal(t, "Coding Model", coding.Name)
 	assert.Equal(t, "Best available coding model", coding.Description)
 	assert.True(t, coding.Unlisted)
 	assert.Equal(t, "coding", coding.Metadata["family"])
 
 	workers := cfg.Selectors["workers"]
-	assert.Equal(t, 1, workers.Spillover)
+	assert.Equal(t, 1, workers.Settings.Spillover)
 }
 
 func TestConfig_Selectors_Validation(t *testing.T) {
@@ -181,9 +181,10 @@ selectors:
   public:
     strategy: spillover
     targets: [a]
-    spillover: 0
+    settings:
+      spillover: 0
 `,
-			wantErr: "spillover must be >= 1",
+			wantErr: "settings.spillover must be >= 1",
 		},
 		{
 			name: "duplicate resolved spillover target",
@@ -249,10 +250,11 @@ selectors:
   public:
     strategy: spillover
     targets: [a, b]
-    spillover: 4
+    settings:
+      spillover: 4
 `))
 		require.NoError(t, err)
-		assert.Equal(t, 4, cfg.Selectors["public"].Spillover)
+		assert.Equal(t, 4, cfg.Selectors["public"].Settings.Spillover)
 	})
 
 	t.Run("matrix common set", func(t *testing.T) {

@@ -53,7 +53,8 @@ selectors:
   balanced:
     strategy: spillover
     targets: [a, b, c]
-    spillover: 1
+    settings:
+      spillover: 1
   hidden-selector:
     strategy: pin
     targets: [a]
@@ -128,9 +129,9 @@ func TestServer_SelectorStrategySpillover(t *testing.T) {
 		},
 		Selectors: map[string]config.SelectorConfig{
 			"pool": {
-				Strategy:  config.SelectorStrategySpillover,
-				Targets:   []string{"a", "b", "c"},
-				Spillover: 2,
+				Strategy: config.SelectorStrategySpillover,
+				Targets:  []string{"a", "b", "c"},
+				Settings: config.SelectorSettings{Spillover: 2},
 			},
 		},
 	}

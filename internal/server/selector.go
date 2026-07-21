@@ -47,7 +47,7 @@ func newSelectorSpilloverTracker(cfg config.Config) *selectorSpilloverTracker {
 			continue
 		}
 		state := &selectorSpilloverState{
-			spillover: selector.Spillover,
+			spillover: selector.Settings.Spillover,
 			targets:   make([]spilloverTarget, 0, len(selector.Targets)),
 			inflight:  make(map[string]int, len(selector.Targets)),
 		}

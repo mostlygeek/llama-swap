@@ -13,16 +13,21 @@ const (
 	SelectorStrategySpillover = "spillover"
 )
 
+// SelectorSettings contains strategy-specific selector settings.
+type SelectorSettings struct {
+	Spillover int `yaml:"spillover" json:"spillover"`
+}
+
 // SelectorConfig describes a virtual model ID that resolves to a concrete
 // local model, alias, or peer model for each request.
 type SelectorConfig struct {
-	Strategy    string         `yaml:"strategy" json:"strategy"`
-	Targets     []string       `yaml:"targets" json:"targets"`
-	Spillover   int            `yaml:"spillover" json:"spillover"`
-	Name        string         `yaml:"name" json:"name"`
-	Description string         `yaml:"description" json:"description"`
-	Unlisted    bool           `yaml:"unlisted" json:"unlisted"`
-	Metadata    map[string]any `yaml:"metadata" json:"metadata"`
+	Strategy    string           `yaml:"strategy" json:"strategy"`
+	Targets     []string         `yaml:"targets" json:"targets"`
+	Settings    SelectorSettings `yaml:"settings" json:"settings"`
+	Name        string           `yaml:"name" json:"name"`
+	Description string           `yaml:"description" json:"description"`
+	Unlisted    bool             `yaml:"unlisted" json:"unlisted"`
+	Metadata    map[string]any   `yaml:"metadata" json:"metadata"`
 }
 
 // UnmarshalYAML applies selector defaults while retaining the distinction
@@ -30,9 +35,9 @@ type SelectorConfig struct {
 func (c *SelectorConfig) UnmarshalYAML(value *yaml.Node) error {
 	type rawSelectorConfig SelectorConfig
 	defaults := rawSelectorConfig{
-		Targets:   []string{},
-		Spillover: 1,
-		Metadata:  map[string]any{},
+		Targets:  []string{},
+		Settings: SelectorSettings{Spillover: 1},
+		Metadata: map[string]any{},
 	}
 	if err := value.Decode(&defaults); err != nil {
 		return err
@@ -92,8 +97,8 @@ func validateSelectors(config Config) error {
 		if selector.Strategy != SelectorStrategySpillover {
 			continue
 		}
-		if selector.Spillover < 1 {
-			return fmt.Errorf("selectors.%s.spillover must be >= 1", selectorID)
+		if selector.Settings.Spillover < 1 {
+			return fmt.Errorf("selectors.%s.settings.spillover must be >= 1", selectorID)
 		}
 
 		seen := make(map[string]struct{}, len(resolvedTargets))

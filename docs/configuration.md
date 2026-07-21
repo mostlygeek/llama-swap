@@ -298,9 +298,10 @@ selectors:
       - "docker-llama"
       - "modelA"
       - "modelB"
-    # requests reserved per active target before spilling over to the next target
-    # - optional, default: 1
-    spillover: 4
+    settings:
+      # requests reserved per active target before spilling over to the next target
+      # - optional, default: 1
+      spillover: 4
 
 # models: a dictionary of model configurations
 # - required

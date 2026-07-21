@@ -373,11 +373,18 @@
                         },
                         "description": "Ordered target model IDs or aliases. Selector IDs cannot be targets."
                     },
-                    "spillover": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "default": 1,
-                        "description": "Requests reserved per active target before spilling over to the next target."
+                    "settings": {
+                        "type": "object",
+                        "properties": {
+                            "spillover": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "default": 1,
+                                "description": "Requests reserved per active target before spilling over to the next target."
+                            }
+                        },
+                        "additionalProperties": false,
+                        "default": {}
                     },
                     "name": {
                         "type": "string",
