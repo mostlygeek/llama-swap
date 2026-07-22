@@ -425,6 +425,9 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 	p.proxyLogger.Debugf("<%s> Executing start command: %s, env: %s", p.id, strings.Join(args, " "), strings.Join(p.config.Env, ", "))
 
 	cmdDone := make(chan struct{})
+	// Reset the process log so a premature exit surfaces only output from
+	// the current launch, not accumulated history from earlier attempts.
+	p.processLogger.Clear()
 	if err := cmd.Start(); err != nil {
 		cmdCancel()
 		return startResult{err: fmt.Errorf("failed to start command '%s': %w", strings.Join(args, " "), err)}
@@ -456,6 +459,9 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 	}
 	prematureExit := func() startResult {
 		cmdCancel()
+		if output := p.processLogger.GetHistory(); len(output) > 0 {
+			return startResult{err: fmt.Errorf("upstream command exited prematurely:\n%s", strings.TrimSpace(string(output)))}
+		}
 		return startResult{err: fmt.Errorf("upstream command exited prematurely")}
 	}
 

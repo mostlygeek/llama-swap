@@ -644,3 +644,31 @@ func TestProcessCommand_ConcurrentRunStop(t *testing.T) {
 		}
 	}
 }
+
+func TestProcessCommand_PrematureExitSurfacesOutput(t *testing.T) {
+	skipIfNoSimpleResponder(t)
+
+	// An undefined flag makes simple-responder (a Go flag program) print an error
+	// to stderr and exit before it becomes ready, mirroring a real upstream server
+	// rejecting a bad argument.
+	cmd, port := simpleResponderCmd(t, "-nonexistent-flag")
+	p := newProcessCommand(t, config.ModelConfig{
+		Cmd:                cmd,
+		Proxy:              fmt.Sprintf("http://127.0.0.1:%d", port),
+		CheckEndpoint:      "/health",
+		HealthCheckTimeout: 10,
+	})
+	t.Cleanup(func() { p.Stop(testStopTimeout) })
+
+	err := p.Run(testStartTimeout)
+	if err == nil {
+		t.Fatal("expected Run() to fail for a process that exits prematurely")
+	}
+	if !strings.Contains(err.Error(), "exited prematurely") {
+		t.Errorf("expected a premature-exit error, got: %v", err)
+	}
+	// The captured upstream output must be surfaced so the real cause is visible.
+	if !strings.Contains(err.Error(), "nonexistent-flag") {
+		t.Errorf("expected error to include upstream output, got: %v", err)
+	}
+}
