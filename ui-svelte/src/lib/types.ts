@@ -143,6 +143,23 @@ export interface GpuStat {
   mem_total_mb: number;
   fan_speed_pct: number;
   power_draw_w: number;
+  compute_util_pct?: number;
+  render_util_pct?: number;
+  copy_util_pct?: number;
+  eu_active_pct?: number;
+  eu_stall_pct?: number;
+  eu_idle_pct?: number;
+  mem_read_bandwidth_kbps?: number;
+  mem_write_bandwidth_kbps?: number;
+  mem_bandwidth_util_pct?: number;
+  pcie_rx_mbps?: number;
+  pcie_tx_mbps?: number;
+  graphics_clock_mhz?: number;
+  graphics_clock_max_mhz?: number;
+  media_clock_mhz?: number;
+  media_clock_max_mhz?: number;
+  power_limit_w?: number;
+  energy_consumed_j?: number;
 }
 
 export interface PerformanceResponse {

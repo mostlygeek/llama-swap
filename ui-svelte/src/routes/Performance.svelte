@@ -3,6 +3,8 @@
   import { fetchPerformance } from "../stores/api";
   import { persistentStore } from "../stores/persistent";
   import type { SysStat, GpuStat } from "../lib/types";
+  import { formatBytesPerSecond } from "../lib/format";
+  import { buildAdvancedGpuIO, gpuTimestampBucket, hasAdvancedGpuIO } from "../lib/performanceGpu";
   import PerformanceChart from "../components/PerformanceChart.svelte";
   import SegmentedControl from "../components/SegmentedControl.svelte";
   import * as Card from "$lib/components/ui/card/index.js";
@@ -303,41 +305,53 @@
 
   const hasGpuData = $derived(gpuData.length > 0);
 
-  const gpuLabels = $derived.by(() => {
+  const gpuTimestamps = $derived.by(() => {
     const seen = new Set<string>();
-    const labels: string[] = [];
+    const timestamps: string[] = [];
     const stats = filteredGpuStats;
-    if (stats.length === 0) return [];
-    const refTime = new Date(stats[stats.length - 1].timestamp).getTime();
     for (const g of stats) {
-      const label = formatDelta(g.timestamp, refTime);
-      if (!seen.has(label)) {
-        seen.add(label);
-        labels.push(label);
+      const timestamp = gpuTimestampBucket(g.timestamp);
+      if (!seen.has(timestamp)) {
+        seen.add(timestamp);
+        timestamps.push(timestamp);
       }
     }
-    return labels;
+    return timestamps;
   });
+
+  const gpuLabels = $derived.by(() => {
+    if (gpuTimestamps.length === 0) return [];
+    const refTime = new Date(gpuTimestamps[gpuTimestamps.length - 1]).getTime();
+    return gpuTimestamps.map((timestamp) => formatDelta(timestamp, refTime));
+  });
+
+  function gpuIdentity(gpu: GpuStat): string {
+    return gpu.uuid || String(gpu.id);
+  }
 
   function buildGpuDatasets(
     stats: GpuStat[],
     field: keyof Pick<GpuStat, "gpu_util_pct" | "mem_util_pct" | "temp_c" | "vram_temp_c" | "power_draw_w">,
   ) {
     if (stats.length === 0) return [];
+    const timestamps = gpuTimestamps;
+    const indexByTimestamp = new Map(timestamps.map((timestamp, index) => [timestamp, index]));
+    const byGpu = new Map<string, { id: number; name: string; values: Array<number | null> }>();
 
-    const byId = new Map<number, { name: string; values: number[] }>();
     for (const g of stats) {
-      if (!byId.has(g.id)) {
-        byId.set(g.id, { name: g.name, values: [] });
+      const key = gpuIdentity(g);
+      if (!byGpu.has(key)) {
+        byGpu.set(key, { id: g.id, name: g.name, values: Array(timestamps.length).fill(null) });
       }
-      byId.get(g.id)!.values.push(g[field] as number);
+      const index = indexByTimestamp.get(gpuTimestampBucket(g.timestamp));
+      if (index !== undefined) byGpu.get(key)!.values[index] = g[field] as number;
     }
 
     const datasets = [];
     let colorIdx = 0;
-    for (const [id, entry] of byId) {
+    for (const entry of byGpu.values()) {
       datasets.push({
-        label: entry.name || `GPU ${id}`,
+        label: entry.name || `GPU ${entry.id}`,
         data: entry.values,
         borderColor: COLORS[colorIdx % COLORS.length],
       });
@@ -346,12 +360,72 @@
     return datasets;
   }
 
-  const gpuUtilDatasets = $derived(buildGpuDatasets(filteredGpuStats, "gpu_util_pct"));
+  function buildGpuUtilDatasets(stats: GpuStat[]) {
+    if (stats.length === 0) return [];
+    const timestamps = gpuTimestamps;
+    const indexByTimestamp = new Map(timestamps.map((timestamp, index) => [timestamp, index]));
+    const fields: Array<{ key: keyof Pick<GpuStat, "gpu_util_pct" | "compute_util_pct" | "render_util_pct" | "copy_util_pct">; label: string }> = [
+      { key: "gpu_util_pct", label: "GPU" },
+      { key: "compute_util_pct", label: "Compute" },
+      { key: "render_util_pct", label: "Render" },
+      { key: "copy_util_pct", label: "Copy" },
+    ];
+    const byGpu = new Map<string, { id: number; name: string; values: Map<string, Array<number | null>> }>();
+
+    for (const g of stats) {
+      const identity = gpuIdentity(g);
+      if (!byGpu.has(identity)) {
+        byGpu.set(identity, {
+          id: g.id,
+          name: g.name,
+          values: new Map(fields.map((field) => [field.key, Array(timestamps.length).fill(null)])),
+        });
+      }
+      const index = indexByTimestamp.get(gpuTimestampBucket(g.timestamp));
+      if (index === undefined) continue;
+      const entry = byGpu.get(identity)!;
+      for (const field of fields) {
+        const value = g[field.key];
+        if (typeof value === "number") entry.values.get(field.key)![index] = value;
+      }
+    }
+
+    const datasets = [];
+    let colorIdx = 0;
+    for (const entry of byGpu.values()) {
+      for (const field of fields) {
+        const values = entry.values.get(field.key)!;
+        if (values.every((value) => value === null)) continue;
+        datasets.push({
+          label: `${entry.name || `GPU ${entry.id}`} ${field.label}`,
+          data: values,
+          borderColor: COLORS[colorIdx % COLORS.length],
+        });
+        colorIdx++;
+      }
+    }
+    return datasets;
+  }
+
+  const gpuUtilDatasets = $derived(buildGpuUtilDatasets(filteredGpuStats));
   const gpuMemDatasets = $derived(buildGpuDatasets(filteredGpuStats, "mem_util_pct"));
   const gpuTempDatasets = $derived(buildGpuDatasets(filteredGpuStats, "temp_c"));
   const gpuVramTempDatasets = $derived(buildGpuDatasets(filteredGpuStats, "vram_temp_c"));
   const gpuPowerDatasets = $derived(buildGpuDatasets(filteredGpuStats, "power_draw_w"));
   const hasVramTemp = $derived(filteredGpuStats.some((g) => g.vram_temp_c > 0));
+  const advancedGpuIO = $derived(buildAdvancedGpuIO(filteredGpuStats, gpuTimestamps));
+  const hasAdvancedGpuIOData = $derived(hasAdvancedGpuIO(filteredGpuStats));
+
+  function colorizeGpuDatasets(datasets: Array<{ label: string; data: Array<number | null> }>) {
+    return datasets.map((dataset, index) => ({
+      ...dataset,
+      borderColor: COLORS[index % COLORS.length],
+    }));
+  }
+
+  const memoryBandwidthDatasets = $derived(colorizeGpuDatasets(advancedGpuIO.memoryBandwidthDatasets));
+  const pcieDatasets = $derived(colorizeGpuDatasets(advancedGpuIO.pcieDatasets));
+  const graphicsClockDatasets = $derived(colorizeGpuDatasets(advancedGpuIO.graphicsClockDatasets));
 </script>
 
 <div class="space-y-6">
@@ -430,6 +504,69 @@
       </div>
     {/if}
   </section>
+
+  {#if hasAdvancedGpuIOData}
+    <section class="space-y-4">
+      <h3 class="text-lg font-medium text-foreground">Advanced GPU I/O</h3>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {#if memoryBandwidthDatasets.length > 0}
+          <div>
+            <PerformanceChart
+              title="Memory Bandwidth"
+              labels={gpuLabels}
+              datasets={memoryBandwidthDatasets}
+              yMin={0}
+              yLabel="B/s"
+              valueFormatter={formatBytesPerSecond}
+            />
+            {#if advancedGpuIO.memoryBandwidthUtilization.length > 0}
+              <div class="flex flex-wrap items-center justify-center gap-4 text-xs text-muted-foreground mt-1 px-4">
+                {#each advancedGpuIO.memoryBandwidthUtilization as reference}
+                  <span
+                    >{reference.name || `GPU ${reference.id}`} bandwidth: <span class="text-foreground font-medium"
+                      >{reference.value.toFixed(1)}%</span
+                    ></span
+                  >
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/if}
+        {#if pcieDatasets.length > 0}
+          <PerformanceChart
+            title="PCIe Throughput"
+            labels={gpuLabels}
+            datasets={pcieDatasets}
+            yMin={0}
+            yLabel="B/s"
+            valueFormatter={formatBytesPerSecond}
+          />
+        {/if}
+        {#if graphicsClockDatasets.length > 0}
+          <div>
+            <PerformanceChart
+              title="Graphics Clock"
+              labels={gpuLabels}
+              datasets={graphicsClockDatasets}
+              yMin={0}
+              yLabel="MHz"
+            />
+            {#if advancedGpuIO.graphicsClockMaximums.length > 0}
+              <div class="flex flex-wrap items-center justify-center gap-4 text-xs text-muted-foreground mt-1 px-4">
+                {#each advancedGpuIO.graphicsClockMaximums as reference}
+                  <span
+                    >{reference.name || `GPU ${reference.id}`} max: <span class="text-foreground font-medium"
+                      >{reference.value.toLocaleString()} MHz</span
+                    ></span
+                  >
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    </section>
+  {/if}
 
   <!-- System Section -->
   <section class="space-y-4">

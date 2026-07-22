@@ -24,34 +24,29 @@ import (
 )
 
 func getGpuStats(ctx context.Context, every time.Duration, logger *logmon.Monitor) (chan []GpuStat, error) {
-	if ch, err := tryLACT(ctx, every, logger); err == nil {
-		logger.Info("using LACT for GPU monitoring")
-		return ch, nil
-	} else {
-		logger.Debugf("LACT: %s", err.Error())
-	}
+	return getGpuStatsWithProviders(ctx, every, logger, []gpuStatsProvider{
+		{name: "LACT", try: tryLACT},
+		{name: "nvidia-smi", try: tryNvidiaSmi},
+		{name: "rocm-smi", try: tryRocmSmi},
+		{name: "xpu-smi", try: tryXpuSmi},
+		{name: "sysfs", try: trySysfs},
+	})
+}
 
-	if ch, err := tryNvidiaSmi(ctx, every, logger); err == nil {
-		logger.Info("using nvidia-smi for GPU monitoring")
-		return ch, nil
-	} else {
-		logger.Debugf("nvidia-smi: %s", err.Error())
-	}
+type gpuStatsProvider struct {
+	name string
+	try  func(context.Context, time.Duration, *logmon.Monitor) (chan []GpuStat, error)
+}
 
-	if ch, err := tryRocmSmi(ctx, every, logger); err == nil {
-		logger.Info("using rocm-smi for GPU monitoring")
-		return ch, nil
-	} else {
-		logger.Debugf("rocm-smi: %s", err.Error())
+func getGpuStatsWithProviders(ctx context.Context, every time.Duration, logger *logmon.Monitor, providers []gpuStatsProvider) (chan []GpuStat, error) {
+	for _, provider := range providers {
+		ch, err := provider.try(ctx, every, logger)
+		if err == nil {
+			logger.Infof("using %s for GPU monitoring", provider.name)
+			return ch, nil
+		}
+		logger.Debugf("%s: %s", provider.name, err.Error())
 	}
-
-	if ch, err := trySysfs(ctx, every, logger); err == nil {
-		logger.Info("using sysfs for GPU monitoring")
-		return ch, nil
-	} else {
-		logger.Debugf("sysfs: %s", err.Error())
-	}
-
 	return nil, ErrNoGpuTool
 }
 
