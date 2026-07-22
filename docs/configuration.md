@@ -253,7 +253,7 @@ apiKeys:
 # - optional, default: empty dictionary
 # - one profile or none is active; startup and configuration reload select none
 # - pins are applied before aliases, filters, and routing
-# - targets may be a local model, peer model, alias, or setParamsByID alias
+# - targets may be a local model, peer model, alias, setParamsByID alias, or selector
 # - an empty string or YAML null (~) disables the pin with a 404; it is not
 #   added to model listings, while existing local, alias, or peer IDs remain
 profiles:
@@ -263,6 +263,45 @@ profiles:
       "llm-code": "gpt-oss-120b"
       "llm-plan": "qwen-unlisted"
       "image-gen": ~
+
+# selectors: virtual model IDs resolved to concrete targets per request
+# - optional, default: empty dictionary
+# - profiles run first, so a profile pin may target a selector
+# - selector IDs cannot collide with model IDs, aliases, or peer model names
+# - selector targets cannot be other selectors
+# - selectors are not supported on /upstream/<model> paths
+selectors:
+  # warm chooses the first ready target in order, then an already-starting
+  # target, and cold-starts the first target when none are running
+  "coding-model":
+    strategy: warm
+    targets:
+      - "gpt-oss-120b"
+      - "qwen-unlisted"
+    name: "Coding Model"
+    description: "Best currently loaded coding model"
+    metadata:
+      purpose: coding
+
+  # pin always uses the first target; remaining entries are reference data
+  "llm-plan":
+    strategy: pin
+    targets:
+      - "gpt-oss-120b"
+      - "z-ai/glm-4.7"
+
+  # spillover fills local targets to the reservation count in order,
+  # starting the next target when the active targets reach that count
+  "llama":
+    strategy: spillover
+    targets:
+      - "docker-llama"
+      - "modelA"
+      - "modelB"
+    settings:
+      # requests reserved per active target before spilling over to the next target
+      # - optional, default: 1
+      spillover: 4
 
 # models: a dictionary of model configurations
 # - required

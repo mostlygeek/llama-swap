@@ -13,6 +13,7 @@ import type {
   UIConfig,
   Profile,
   ProfileState,
+  PlaygroundModelType,
 } from "../lib/types";
 import { connectionState } from "./theme";
 
@@ -20,51 +21,21 @@ const LOG_LENGTH_LIMIT = 1024 * 100; /* 100KB of log data */
 
 // Stores
 export const models = writable<Model[]>([]);
+export const playgroundModels = writable<Model[]>([]);
 export const profiles = writable<Profile[]>([]);
 export const activeProfile = writable<string | null>(null);
 
-// Active profile pins exposed as virtual models for Playground selectors.
-// Concrete model management continues to use `models`.
+// Model records used by Playground come from the OpenAI-compatible listing.
 export const profileModels = derived(
-  [models, profiles, activeProfile],
-  ([$models, $profiles, $activeProfile]): Model[] => {
-    const profile = $profiles.find((candidate) => candidate.id === $activeProfile);
-    if (!profile) return [];
-
-    const modelIDs = new Set<string>();
-    for (const model of $models) {
-      modelIDs.add(model.id);
-      for (const alias of model.aliases ?? []) modelIDs.add(alias);
-    }
-
-    const result: Model[] = [];
-    for (const [pin, target] of Object.entries(profile.pins)) {
-      if (!target || modelIDs.has(pin)) continue;
-
-      const targetModel = $models.find(
-        (model) => model.id === target || model.aliases?.includes(target),
-      );
-      result.push(targetModel
-        ? { ...targetModel, id: pin, unlisted: false, aliases: undefined }
-        : {
-            id: pin,
-            state: "stopped",
-            name: "",
-            description: "",
-            unlisted: false,
-            peerID: "",
-          });
-    }
-    return result.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
-  },
+  playgroundModels,
+  ($playgroundModels) => $playgroundModels.filter((model) => model.playgroundType === "profile"),
+);
+export const selectorModels = derived(
+  playgroundModels,
+  ($playgroundModels) => $playgroundModels.filter((model) => model.playgroundType === "selector"),
 );
 
-// True when at least one concrete model or active profile pin is selectable.
-export const hasListedModels = derived(
-  [models, profileModels],
-  ([$models, $profileModels]) =>
-    $profileModels.length > 0 || $models.some((model) => !model.unlisted),
-);
+export const hasListedModels = derived(playgroundModels, ($playgroundModels) => $playgroundModels.length > 0);
 export const proxyLogs = writable<string>("");
 export const upstreamLogs = writable<string>("");
 export const activityRevision = writable<number>(0);
@@ -83,6 +54,9 @@ export const versionInfo = writable<VersionInfo>({
 
 let apiEventSource: EventSource | null = null;
 let profileRevision = 0;
+let playgroundModelsRequest = 0;
+let playgroundModelsFetch: Promise<Model[]> | null = null;
+let playgroundModelsRefreshQueued = false;
 
 function appendLog(newData: string, store: typeof proxyLogs | typeof upstreamLogs): void {
   store.update((prev) => {
@@ -99,6 +73,9 @@ export function enableAPIEvents(enabled: boolean): void {
     inFlightRequests.set(0);
     inflightRequestEntries.set([]);
     uiConfig.set(defaultUIConfig());
+    playgroundModelsRequest++;
+    playgroundModelsRefreshQueued = false;
+    playgroundModels.set([]);
     profiles.set([]);
     activeProfile.set(null);
     profileRevision++;
@@ -123,6 +100,9 @@ export function enableAPIEvents(enabled: boolean): void {
       inflightRequestEntries.set([]);
       uiConfig.set(defaultUIConfig());
       models.set([]);
+      playgroundModelsRequest++;
+      playgroundModelsRefreshQueued = false;
+      playgroundModels.set([]);
       profiles.set([]);
       activeProfile.set(null);
       profileRevision++;
@@ -273,18 +253,89 @@ connectionState.subscribe(async (status) => {
   }
 });
 
-export async function listModels(): Promise<Model[]> {
+interface ModelListRecord {
+  id: string;
+  name?: string;
+  description?: string;
+  capabilities?: Model["capabilities"];
+  meta?: {
+    llamaswap?: {
+      type?: PlaygroundModelType | "alias";
+      aliases?: string[];
+      modelID?: string;
+      peerID?: string;
+    };
+  };
+}
+
+async function loadPlaygroundModels(request: number): Promise<Model[]> {
   try {
-    const response = await fetch("/api/models/");
+    const response = await fetch("/v1/models");
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
-    const data = await response.json();
-    return data || [];
+    const responseData = await response.json() as { data?: ModelListRecord[] };
+    const records = responseData.data ?? [];
+    const aliasesByModel = new Map<string, Set<string>>();
+    for (const record of records) {
+      const metadata = record.meta?.llamaswap;
+      if (metadata?.aliases) {
+        aliasesByModel.set(record.id, new Set(metadata.aliases));
+      }
+      if (metadata?.type === "alias" && metadata.modelID) {
+        const aliases = aliasesByModel.get(metadata.modelID) ?? new Set<string>();
+        aliases.add(record.id);
+        aliasesByModel.set(metadata.modelID, aliases);
+      }
+    }
+    const newModels = records
+      .filter((record) => record.meta?.llamaswap?.type !== "alias")
+      .map((record): Model => {
+        const metadata = record.meta?.llamaswap;
+        const metadataType = metadata?.type;
+        const playgroundType: PlaygroundModelType = metadataType && metadataType !== "alias"
+          ? metadataType
+          : "model";
+        return {
+          id: record.id,
+          state: "unknown",
+          name: record.name ?? "",
+          description: record.description ?? "",
+          unlisted: false,
+          peerID: metadata?.peerID ?? "",
+          playgroundType,
+          aliases: [...(aliasesByModel.get(record.id) ?? [])],
+          capabilities: record.capabilities,
+        };
+      });
+    newModels.sort((a, b) => {
+      return (a.name + a.id).localeCompare(b.name + b.id, undefined, { numeric: true });
+    });
+    if (request === playgroundModelsRequest) playgroundModels.set(newModels);
+    return newModels;
   } catch (error) {
-    console.error("Failed to fetch models:", error);
+    console.error("Failed to fetch Playground models:", error);
     return [];
   }
+}
+
+export function fetchPlaygroundModels(): Promise<Model[]> {
+  if (playgroundModelsFetch) {
+    playgroundModelsRefreshQueued = true;
+    return playgroundModelsFetch;
+  }
+
+  const request = ++playgroundModelsRequest;
+  const currentFetch = loadPlaygroundModels(request).finally(() => {
+    if (playgroundModelsFetch !== currentFetch) return;
+    playgroundModelsFetch = null;
+    if (playgroundModelsRefreshQueued) {
+      playgroundModelsRefreshQueued = false;
+      void fetchPlaygroundModels();
+    }
+  });
+  playgroundModelsFetch = currentFetch;
+  return currentFetch;
 }
 
 export async function getActivity(params: {

@@ -320,7 +320,7 @@
                     "pins": {
                         "type": "object",
                         "minProperties": 1,
-                        "description": "Model IDs to rewrite while this profile is active. An empty string or null disables the model ID.",
+                        "description": "Model IDs to rewrite while this profile is active. Targets may be concrete models, aliases, peer models, or selector IDs. An empty string or null disables the model ID.",
                         "propertyNames": {
                             "type": "string",
                             "minLength": 1
@@ -335,6 +335,79 @@
                                 }
                             ]
                         }
+                    }
+                },
+                "additionalProperties": false
+            }
+        },
+        "selectors": {
+            "type": "object",
+            "default": {},
+            "description": "Virtual model IDs that select a concrete target for each request. Selectors run after profiles and are not supported on /upstream paths.",
+            "propertyNames": {
+                "type": "string",
+                "minLength": 1
+            },
+            "additionalProperties": {
+                "type": "object",
+                "required": [
+                    "strategy",
+                    "targets"
+                ],
+                "properties": {
+                    "strategy": {
+                        "type": "string",
+                        "enum": [
+                            "warm",
+                            "pin",
+                            "spillover"
+                        ],
+                        "description": "How a target is selected for each request."
+                    },
+                    "targets": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                            "type": "string",
+                            "minLength": 1
+                        },
+                        "description": "Ordered target model IDs or aliases. Selector IDs cannot be targets."
+                    },
+                    "settings": {
+                        "type": "object",
+                        "properties": {
+                            "spillover": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "default": 1,
+                                "description": "Requests reserved per active target before spilling over to the next target."
+                            }
+                        },
+                        "additionalProperties": false,
+                        "default": {}
+                    },
+                    "name": {
+                        "type": "string",
+                        "default": "",
+                        "maxLength": 128,
+                        "description": "Display name used in the /v1/models response."
+                    },
+                    "description": {
+                        "type": "string",
+                        "default": "",
+                        "maxLength": 1024,
+                        "description": "Description used in the /v1/models response."
+                    },
+                    "unlisted": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Hide this selector from /v1/models while keeping it requestable."
+                    },
+                    "metadata": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "default": {},
+                        "description": "Arbitrary selector metadata included in /v1/models."
                     }
                 },
                 "additionalProperties": false

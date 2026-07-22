@@ -8,7 +8,10 @@
   import ConcurrencyInterface from "../components/playground/ConcurrencyInterface.svelte";
   import * as Card from "$lib/components/ui/card/index.js";
   import { Tabs, TabsList, TabsTrigger } from "$lib/components/ui/tabs/index.js";
+  import { fetchPlaygroundModels, models } from "../stores/api";
   import { selectedPlaygroundTab, playgroundTabs, type PlaygroundTab } from "../stores/playground";
+
+  const MODEL_REFRESH_DEBOUNCE_MS = 200;
 
   const tabComponents: Record<PlaygroundTab, Component> = {
     chat: ChatInterface,
@@ -18,6 +21,21 @@
     rerank: RerankInterface,
     concurrency: ConcurrencyInterface,
   };
+
+  let initializedModels = false;
+  $effect(() => {
+    void $models;
+    if (!initializedModels) {
+      initializedModels = true;
+      void fetchPlaygroundModels();
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      void fetchPlaygroundModels();
+    }, MODEL_REFRESH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timeout);
+  });
 </script>
 
 <Card.Root class="flex h-full flex-col gap-0 overflow-hidden p-4">

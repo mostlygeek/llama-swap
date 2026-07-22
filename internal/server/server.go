@@ -239,6 +239,7 @@ func (s *Server) routes() {
 	modelChain := chain.New(
 		authMW,
 		CreateProfileMiddleware(s),
+		CreateSelectorMiddleware(s),
 		CreateRequestContextMiddleware(s.cfg),
 		CreateInflightMiddleware(s.inflight),
 		CreateFilterMiddleware(s.cfg),

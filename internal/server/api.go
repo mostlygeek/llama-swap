@@ -135,7 +135,7 @@ func filterCappedMetadata(md map[string]any) map[string]any {
 // (with optional aliases) plus peer models.
 func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	created := time.Now().Unix()
-	data := make([]modelRecord, 0, len(s.cfg.Models))
+	data := make([]modelRecord, 0, len(s.cfg.Models)+len(s.cfg.Selectors))
 	running := s.local.RunningModels()
 	modelIDs := make(map[string]struct{})
 
@@ -146,7 +146,13 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 		return "unloaded"
 	}
 
-	newRecord := func(id, name, description string, metadata map[string]any, caps config.ModelCapConfig, status string) modelRecord {
+	newRecord := func(
+		id, name, description string,
+		metadata map[string]any,
+		caps config.ModelCapConfig,
+		status string,
+		internalMetadata map[string]any,
+	) modelRecord {
 		rec := modelRecord{
 			ID:          id,
 			Object:      "model",
@@ -160,8 +166,15 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 		if !caps.Empty() {
 			metadata = filterCappedMetadata(metadata)
 		}
-		if len(metadata) > 0 {
-			rec.Meta = map[string]any{"llamaswap": metadata}
+		llamaSwapMetadata := make(map[string]any, len(metadata)+len(internalMetadata))
+		for key, value := range metadata {
+			llamaSwapMetadata[key] = value
+		}
+		for key, value := range internalMetadata {
+			llamaSwapMetadata[key] = value
+		}
+		if len(llamaSwapMetadata) > 0 {
+			rec.Meta = map[string]any{"llamaswap": llamaSwapMetadata}
 		}
 		return rec
 	}
@@ -176,12 +189,24 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		status := modelStatus(id)
-		data = append(data, newRecord(id, mc.Name, mc.Description, mc.Metadata, mc.Capabilities, status))
+		internalMetadata := map[string]any{"type": "model"}
+		if len(mc.Aliases) > 0 {
+			internalMetadata["aliases"] = mc.Aliases
+		}
+		data = append(data, newRecord(id, mc.Name, mc.Description, mc.Metadata, mc.Capabilities, status, internalMetadata))
 
 		if s.cfg.IncludeAliasesInList {
 			for _, alias := range mc.Aliases {
 				if alias := strings.TrimSpace(alias); alias != "" {
-					data = append(data, newRecord(alias, mc.Name, mc.Description, mc.Metadata, mc.Capabilities, status))
+					data = append(data, newRecord(
+						alias,
+						mc.Name,
+						mc.Description,
+						mc.Metadata,
+						mc.Capabilities,
+						status,
+						map[string]any{"type": "alias", "modelID": id},
+					))
 				}
 			}
 		}
@@ -190,8 +215,45 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	for peerID, peer := range s.cfg.Peers {
 		for _, modelID := range peer.Models {
 			modelIDs[modelID] = struct{}{}
-			data = append(data, newRecord(modelID, peerID+": "+modelID, "", map[string]any{"peerID": peerID}, config.ModelCapConfig{}, "unloaded"))
+			data = append(data, newRecord(
+				modelID,
+				peerID+": "+modelID,
+				"",
+				nil,
+				config.ModelCapConfig{},
+				"unloaded",
+				map[string]any{"type": "peer", "peerID": peerID},
+			))
 		}
+	}
+
+	for selectorID, selector := range s.cfg.Selectors {
+		modelIDs[selectorID] = struct{}{}
+		if selector.Unlisted {
+			continue
+		}
+		status := "unloaded"
+		for _, target := range selector.Targets {
+			modelID, local := s.cfg.RealModelName(target)
+			if local {
+				state := running[modelID]
+				if state == process.StateReady || state == process.StateStarting {
+					status = "loaded"
+				}
+			}
+			if selector.Strategy == config.SelectorStrategyPin || status == "loaded" {
+				break
+			}
+		}
+		data = append(data, newRecord(
+			selectorID,
+			selector.Name,
+			selector.Description,
+			selector.Metadata,
+			config.ModelCapConfig{},
+			status,
+			map[string]any{"type": "selector"},
+		))
 	}
 
 	if profile, ok := s.cfg.Profiles[s.ActiveProfile()]; ok {
@@ -202,7 +264,15 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 			if _, shadowsModel := modelIDs[pin]; shadowsModel {
 				continue
 			}
-			data = append(data, newRecord(pin, "", "", nil, config.ModelCapConfig{}, "unloaded"))
+			data = append(data, newRecord(
+				pin,
+				"",
+				"",
+				nil,
+				config.ModelCapConfig{},
+				"unloaded",
+				map[string]any{"type": "profile"},
+			))
 		}
 	}
 

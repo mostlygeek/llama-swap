@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { models } from "../../stores/api";
+  import { playgroundModels, selectorModels } from "../../stores/api";
   import { persistentStore } from "../../stores/persistent";
   import { streamChatCompletion } from "../../lib/chatApi";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -44,8 +44,12 @@
 
   let timelineMaxMs = $derived(Math.max(100, ...Object.values(runs).map((r) => r.elapsedMs)));
 
-  let availableModels = $derived($models.filter((m) => !m.unlisted));
-  let hasModels = $derived(availableModels.length > 0);
+  let availableModels = $derived($playgroundModels.filter((model) => model.playgroundType !== "selector"));
+  let modeSections = $derived([
+    { label: "Selectors", ids: $selectorModels.map((model) => model.id) },
+    { label: "Models", ids: availableModels.map((model) => model.id) },
+  ].filter((section) => section.ids.length > 0));
+  let hasModels = $derived(modeSections.length > 0);
   let canRun = $derived(!isRunning && $testListStore.length > 0 && $promptStore.trim() !== "");
 
   function newId(): string {
@@ -396,18 +400,27 @@
         {#if !hasModels}
           <div class="p-3 text-sm text-muted-foreground text-center">No models configured.</div>
         {:else}
-          <div class="divide-y divide-gray-100 dark:divide-white/5">
-            {#each availableModels as m (m.id)}
-              <button
-                type="button"
-                class="hover:bg-accent hover:text-foreground flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-sm font-normal transition-colors disabled:pointer-events-none disabled:opacity-50"
-                onclick={() => addModel(m.id)}
-                disabled={isRunning}
-                title="Add {m.id}"
-              >
-                <span class="text-primary" aria-hidden="true">+</span>
-                <span class="truncate flex-1">{m.id}</span>
-              </button>
+          <div class="divide-y divide-border">
+            {#each modeSections as section (section.label)}
+              <div>
+                <div class="bg-muted/50 px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  {section.label}
+                </div>
+                <div class="divide-y divide-gray-100 dark:divide-white/5">
+                  {#each section.ids as id (id)}
+                    <button
+                      type="button"
+                      class="hover:bg-accent hover:text-foreground flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-sm font-normal transition-colors disabled:pointer-events-none disabled:opacity-50"
+                      onclick={() => addModel(id)}
+                      disabled={isRunning}
+                      title="Add {id}"
+                    >
+                      <span class="text-primary" aria-hidden="true">+</span>
+                      <span class="truncate flex-1">{id}</span>
+                    </button>
+                  {/each}
+                </div>
+              </div>
             {/each}
           </div>
         {/if}
