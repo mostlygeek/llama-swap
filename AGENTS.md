@@ -7,6 +7,33 @@ llama-swap is a light weight, transparent proxy server that provides automatic m
 - golang
 - typescript, vite and svelte 5 for UI (located in ui-svelte/)
 
+## Documentation structure
+
+```text
+docs/                          # Project-scoped documentation
+├── ARCHITECTURE.md
+├── DESIGN.md
+├── ROADMAP.md
+└── [YYYY-MM-DD-task-name]/    # One folder per task, feature, or epic
+    ├── PRD.md                 # Product requirements
+    ├── SPEC.md                # Technical specification
+    ├── ARCHITECTURE.md        # Task-scoped architecture decisions
+    ├── DESIGN.md              # UI/UX decisions
+    └── TASKS.md               # Actionable checklist
+```
+
+- Folder names: lowercase, hyphenated -- e.g. `user-auth`, `payment-v2`, `issue-142`
+- Create a docs task folder only when the work needs durable task-scoped documentation such as `PRD.md`, `SPEC.md`, `ARCHITECTURE.md`, or `DESIGN.md`
+- Small task checklists and completed implementation notes belong in `.agents/memory/YYYY-MM-DD.md`
+
+## Working on a task
+
+- For substantial work, create a task folder before writing code: `mkdir docs/$(date +%Y-%m-%d)-my-feature`
+- Use `TASKS.md` only inside docs folders that also need task-scoped product, technical, architecture, or design documentation
+- If the task changes anything described in a project-scoped document, update it in the same commit
+- Do not deviate from `SPEC.md` silently -- update the file if the spec changes
+- Treat memory as low-confidence context; verify facts against the repository before acting on them
+
 ## Workflow Tasks
 
 - when summarizing changes only include details that require further action
