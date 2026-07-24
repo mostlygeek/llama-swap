@@ -25,7 +25,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/server"
 	"github.com/mostlygeek/llama-swap/internal/shared"
 	"github.com/mostlygeek/llama-swap/internal/store"
-	"github.com/mostlygeek/llama-swap/internal/watcher"
+	configwatcher "github.com/mostlygeek/llama-swap/internal/watcher"
 )
 
 var (
