@@ -14,6 +14,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/mantle"
 	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/router"
 	"github.com/mostlygeek/llama-swap/internal/shared"
@@ -132,7 +133,7 @@ func TestServer_New_GroupConfig(t *testing.T) {
 		t.Fatalf("store.New: %v", err)
 	}
 	defer st.Close()
-	s, err := New(cfg, discard, discard, discard, nil, st, BuildInfo{})
+	s, err := New(cfg, discard, discard, discard, nil, st, BuildInfo{}, mantle.NewTaskManager(discard))
 	if err != nil {
 		t.Fatalf("New (group): %v", err)
 	}
@@ -154,7 +155,7 @@ func TestServer_New_MatrixConfig(t *testing.T) {
 		t.Fatalf("store.New: %v", err)
 	}
 	defer st.Close()
-	s, err := New(cfg, discard, discard, discard, nil, st, BuildInfo{})
+	s, err := New(cfg, discard, discard, discard, nil, st, BuildInfo{}, mantle.NewTaskManager(discard))
 	if err != nil {
 		t.Fatalf("New (matrix): %v", err)
 	}

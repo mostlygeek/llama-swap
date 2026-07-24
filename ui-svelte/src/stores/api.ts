@@ -10,6 +10,7 @@ import type {
   InFlightStats,
   InflightRequestEntry,
   PerformanceResponse,
+  ModelEstimate,
   UIConfig,
   Profile,
   ProfileState,
@@ -21,6 +22,7 @@ const LOG_LENGTH_LIMIT = 1024 * 100; /* 100KB of log data */
 
 // Stores
 export const models = writable<Model[]>([]);
+export const modelEstimates = writable<Record<string, ModelEstimate>>({});
 export const playgroundModels = writable<Model[]>([]);
 export const profiles = writable<Profile[]>([]);
 export const activeProfile = writable<string | null>(null);
@@ -429,6 +431,18 @@ export async function loadModel(model: string, signal?: AbortSignal): Promise<vo
     }
     console.error("Failed to load model:", error);
     throw error;
+  }
+}
+
+export async function fetchModelEstimates(): Promise<void> {
+  try {
+    const response = await fetch("/api/mantle/models/estimates");
+    if (!response.ok) {
+      throw new Error(`Failed to fetch model estimates: ${response.status}`);
+    }
+    modelEstimates.set(await response.json());
+  } catch (error) {
+    console.error("Failed to fetch model estimates:", error);
   }
 }
 

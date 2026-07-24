@@ -25,6 +25,17 @@ export interface Model {
   capabilities?: ModelCapabilities;
 }
 
+export interface ModelEstimate {
+  weightsBytes: number;
+  kvCacheBytes: number;
+  totalBytes: number;
+  nCtx: number;
+  nLayers: number;
+  cacheTypeK: string;
+  cacheTypeV: string;
+  slidingWindow: number;
+}
+
 export interface Profile {
   id: string;
   description: string;
@@ -199,6 +210,9 @@ export interface ChatMessage {
   content: string | ContentPart[];
   reasoning_content?: string;
   reasoningTimeMs?: number;
+  // Generation stats for assistant messages
+  genTokens?: number;
+  genMs?: number;
 }
 
 export function getTextContent(content: string | ContentPart[]): string {
@@ -285,7 +299,71 @@ export interface AudioTranscriptionResponse {
 }
 
 export interface SpeechGenerationRequest {
-  model: string;
-  input: string;
-  voice: string;
+	model: string;
+	input: string;
+	voice: string;
+}
+
+// --- Mantle management types ---
+
+export type TaskState = "running" | "completed" | "failed" | "cancelled";
+
+export interface MantleTask {
+	id: string;
+	type: "download" | "build";
+	state: TaskState;
+	message: string;
+	pct: number;
+	createdAt: string;
+	updatedAt: string;
+	repo?: string;
+	branch?: string;
+	modelID?: string;
+}
+
+export interface HFModel {
+	id: string;
+	name: string;
+	description: string;
+	downloads: number;
+	likes: number;
+	updatedAt: string;
+	tags: string[];
+	gguf: boolean;
+}
+
+export interface HFFile {
+	path: string;
+	size: number;
+}
+
+export type LocalModelKind = "gguf" | "safetensors" | "whisper" | "repo";
+
+export interface LocalModel {
+	name: string;
+	path: string;
+	size: number;
+	kind: LocalModelKind;
+}
+
+export interface BackendEntry {
+	name: string;
+	path: string;
+	size: number;
+	taskID?: string;
+	repo?: string;
+	branch?: string;
+}
+
+export interface BuildRequest {
+	backendName?: string;
+	repo: string;
+	branch?: string;
+	cmakeFlags?: string;
+	cmakeArgs?: string[];
+}
+
+export interface DownloadRequest {
+	modelID: string;
+	filename: string;
 }

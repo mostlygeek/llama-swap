@@ -10,14 +10,18 @@
 # and installing binaries. Build stages are independent for cache efficiency.
 
 ARG BACKEND=cuda
+ARG BUILD_WHISPER=false
+ARG BUILD_IK_LLAMA=true
 
 # ── Builder bases ──────────────────────────────────────────────────────
 
 FROM nvidia/cuda:12.9.1-devel-ubuntu24.04 AS builder-base-cuda
 
-ARG CMAKE_CUDA_ARCHITECTURES="60;61;75;86;89"
+ARG CMAKE_CUDA_ARCHITECTURES="75;86;89"
+ARG MAX_BUILD_JOBS=4
 ENV DEBIAN_FRONTEND=noninteractive
 ENV CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}
+ENV MAX_BUILD_JOBS=${MAX_BUILD_JOBS}
 ENV CCACHE_DIR=/ccache
 ENV CCACHE_MAXSIZE=2G
 ENV PATH="/usr/lib/ccache:${PATH}"
@@ -34,7 +38,9 @@ WORKDIR /build
 
 FROM ubuntu:24.04 AS builder-base-vulkan
 
+ARG MAX_BUILD_JOBS=4
 ENV DEBIAN_FRONTEND=noninteractive
+ENV MAX_BUILD_JOBS=${MAX_BUILD_JOBS}
 ENV CCACHE_DIR=/ccache
 ENV CCACHE_MAXSIZE=2G
 ENV PATH="/usr/lib/ccache:${PATH}"
@@ -53,24 +59,30 @@ WORKDIR /build
 
 FROM builder-base-${BACKEND} AS builder-base
 
-# ── Build whisper.cpp (fastest build, run first) ──────────────────────
+# ── Build whisper.cpp (optional, BUILD_WHISPER=true to enable) ────────
 
-FROM builder-base AS whisper-build
+FROM ubuntu:24.04 AS whisper-false
+RUN mkdir -p /install/bin /install/lib
+
+FROM builder-base AS whisper-true
 ARG BACKEND=cuda
 ARG WHISPER_FFMPEG=yes
 ARG WHISPER_COMMIT_HASH=master
-COPY install-whisper.sh /build/
+COPY docker/install-whisper.sh /build/
 RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
     --mount=type=cache,id=whisper-${BACKEND},target=/src/whisper.cpp/build \
     BACKEND=${BACKEND} WHISPER_FFMPEG=${WHISPER_FFMPEG} \
     bash /build/install-whisper.sh "${WHISPER_COMMIT_HASH}"
+
+ARG BUILD_WHISPER=false
+FROM whisper-${BUILD_WHISPER} AS whisper-build
 
 # ── Build stable-diffusion.cpp ────────────────────────────────────────
 
 FROM builder-base AS sd-build
 ARG BACKEND=cuda
 ARG SD_COMMIT_HASH=master
-COPY install-sd.sh /build/
+COPY docker/install-sd.sh /build/
 RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
     --mount=type=cache,id=sd-${BACKEND},target=/src/stable-diffusion.cpp/build \
     BACKEND=${BACKEND} bash /build/install-sd.sh "${SD_COMMIT_HASH}"
@@ -80,48 +92,69 @@ RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
 FROM builder-base AS llama-build
 ARG BACKEND=cuda
 ARG LLAMA_COMMIT_HASH=master
-COPY install-llama.sh /build/
+COPY docker/install-llama.sh /build/
 RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
     --mount=type=cache,id=llama-${BACKEND},target=/src/llama.cpp/build \
     BACKEND=${BACKEND} bash /build/install-llama.sh "${LLAMA_COMMIT_HASH}"
 
-# ── Build ik_llama.cpp (CUDA only) ────────────────────────────────────
+# ── Build ik_llama.cpp (optional, BUILD_IK_LLAMA=true to enable) ──────
 #
-# Two named stages allow ARG BACKEND to select at build time:
-#   - ik-llama-cuda  : real build (from builder-base-cuda)
-#   - ik-llama-vulkan: no-op (empty /install/bin, skips CUDA pull entirely)
-# BuildKit only evaluates the selected branch, so vulkan builds never
-# pull nvidia/cuda:*-devel or compile ik_llama.cpp.
+# BuildKit only evaluates the selected branch, so when BUILD_IK_LLAMA=false
+# the ik-llama-true stage (FROM builder-base-cuda) is never pulled or built.
+# build-image.sh forces false for vulkan builds automatically.
 
-FROM builder-base-vulkan AS ik-llama-vulkan
+FROM ubuntu:24.04 AS ik-llama-false
 RUN mkdir -p /install/bin
 
-FROM builder-base-cuda AS ik-llama-cuda
+FROM builder-base-cuda AS ik-llama-true
 ARG IK_LLAMA_COMMIT_HASH=main
-COPY install-ik-llama.sh /build/
+COPY docker/install-ik-llama.sh /build/
 RUN --mount=type=cache,id=ccache-cuda,target=/ccache \
     --mount=type=cache,id=ik-llama-cuda,target=/src/ik_llama.cpp/build \
     bash /build/install-ik-llama.sh "${IK_LLAMA_COMMIT_HASH}"
 
-ARG BACKEND=cuda
-FROM ik-llama-${BACKEND} AS ik-llama-build
+ARG BUILD_IK_LLAMA=true
+FROM ik-llama-${BUILD_IK_LLAMA} AS ik-llama-build
+
+# ── UI ────────────────────────────────────────────────────────────────
+
+FROM node:22-bookworm AS ui-build
+WORKDIR /src/ui-svelte
+COPY ui-svelte/package*.json ./
+COPY ui-svelte/.npmrc ./
+RUN npm ci
+COPY ui-svelte/ ./
+RUN npm run build
 
 # ── Download llama-swap release binary ────────────────────────────────
 
 FROM builder-base AS llama-swap-download
 ARG LS_VERSION=latest
-COPY install-llama-swap.sh /build/
+COPY docker/install-llama-swap.sh /build/
 RUN bash /build/install-llama-swap.sh "${LS_VERSION}"
+
+# ── Build llama-swap from local source ────────────────────────────────
+
+FROM golang:1.26 AS llama-swap-local
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+COPY --from=ui-build /src/internal/server/ui_dist ./internal/server/ui_dist
+RUN mkdir -p /install/bin && \
+    CGO_ENABLED=0 GOOS=linux go build -o /install/bin/llama-swap . && \
+    echo "local" > /install/llama-swap-version
 
 # ── Runtime bases ─────────────────────────────────────────────────────
 
-FROM nvidia/cuda:12.9.1-runtime-ubuntu24.04 AS runtime-cuda
+FROM nvidia/cuda:12.9.1-devel-ubuntu24.04 AS runtime-cuda
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
 ENV PATH="/usr/local/bin:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential cmake git ninja-build ccache make wget libssl-dev \
     libgomp1 python3 curl ca-certificates \
     libavcodec60 libavformat60 libavutil58 libswresample4 \
     && rm -rf /var/lib/apt/lists/*
@@ -138,6 +171,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH="/usr/local/bin:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential cmake git ninja-build ccache make wget libssl-dev \
     libgomp1 libvulkan1 mesa-vulkan-drivers \
     python3 curl ca-certificates \
     libavcodec60 libavformat60 libavutil58 libswresample4 \
@@ -148,11 +182,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 FROM runtime-${BACKEND} AS runtime
 
 ARG BACKEND=cuda
+ARG CMAKE_CUDA_ARCHITECTURES="75;86;89"
+ARG MAX_BUILD_JOBS=4
 ARG LLAMA_COMMIT_HASH=unknown
 ARG WHISPER_COMMIT_HASH=unknown
 ARG SD_COMMIT_HASH=unknown
 ARG IK_LLAMA_COMMIT_HASH=unknown
 ARG RUN_UID=0
+ENV BACKEND=${BACKEND}
+ENV CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}
+ENV MAX_BUILD_JOBS=${MAX_BUILD_JOBS}
+ENV CCACHE_DIR=/tmp/ccache
+ENV CCACHE_MAXSIZE=2G
+ENV PATH="/usr/lib/ccache:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-numpy python3-sentencepiece python3-pip \
@@ -169,9 +211,8 @@ RUN if [ "$RUN_UID" != "0" ]; then \
 
 WORKDIR /app
 
-# Copy whisper.cpp binaries and libraries
-COPY --from=whisper-build /install/bin/whisper-server /usr/local/bin/
-COPY --from=whisper-build /install/bin/whisper-cli /usr/local/bin/
+# Copy whisper.cpp binaries and libraries (empty copy when BUILD_WHISPER=false)
+COPY --from=whisper-build /install/bin/ /usr/local/bin/
 COPY --from=whisper-build /install/lib/ /usr/local/lib/
 
 # Copy stable-diffusion.cpp binaries and libraries
@@ -191,12 +232,14 @@ COPY --from=ik-llama-build /install/bin/ /usr/local/bin/
 RUN pip install uv --break-system-packages
 
 # Copy llama-swap binary
-COPY --from=llama-swap-download /install/bin/llama-swap /usr/local/bin/
-COPY --from=llama-swap-download /install/llama-swap-version /tmp/
+COPY --from=llama-swap-local /install/bin/llama-swap /usr/local/bin/
+COPY --from=llama-swap-local /install/llama-swap-version /tmp/
+COPY docker/build-llamacpp.sh /usr/local/bin/build-llamacpp.sh
+RUN chmod +x /usr/local/bin/build-llamacpp.sh
 
 RUN ldconfig
 
-COPY config.example.yaml /etc/llama-swap/config/config.yaml
+COPY docker/config.example.yaml /etc/llama-swap/config/config.yaml
 
 # Version tracking
 RUN echo "llama.cpp: ${LLAMA_COMMIT_HASH}" > /versions.txt && \
@@ -211,4 +254,4 @@ RUN mkdir -p /models && chown ${RUN_UID}:${RUN_UID} /models
 WORKDIR /models
 USER ${RUN_UID}
 ENTRYPOINT ["llama-swap"]
-CMD ["-config", "/etc/llama-swap/config/config.yaml", "-listen", "0.0.0.0:8080"]
+CMD ["-config", "/etc/llama-swap/config/config.yaml", "-listen", "0.0.0.0:8080", "-watch-config"]

@@ -14,13 +14,17 @@
     content: string | ContentPart[];
     reasoning_content?: string;
     reasoningTimeMs?: number;
+    genTokens?: number;
+    genMs?: number;
     isStreaming?: boolean;
     isReasoning?: boolean;
     onEdit?: (newContent: string) => void;
     onRegenerate?: () => void;
   }
 
-  let { role, content, reasoning_content = "", reasoningTimeMs = 0, isStreaming = false, isReasoning = false, onEdit, onRegenerate }: Props = $props();
+  let { role, content, reasoning_content = "", reasoningTimeMs = 0, genTokens = 0, genMs = 0, isStreaming = false, isReasoning = false, onEdit, onRegenerate }: Props = $props();
+
+  let tokensPerSec = $derived(genMs > 0 ? (genTokens / genMs) * 1000 : 0);
 
   let textContent = $derived(getTextContent(content));
   let imageUrls = $derived(getImageUrls(content));
@@ -192,6 +196,11 @@
           {#if isStreaming && !isReasoning}
             <span class="inline-block w-2 h-4 bg-current animate-pulse ml-0.5"></span>
           {/if}
+        </div>
+      {/if}
+      {#if genTokens > 0}
+        <div class="mt-2 text-xs text-txtsecondary tabular-nums">
+          {genTokens} tok · {formatDuration(genMs)}{#if tokensPerSec > 0} · {tokensPerSec.toFixed(1)} tok/s{/if}
         </div>
       {/if}
       {#if !isStreaming}

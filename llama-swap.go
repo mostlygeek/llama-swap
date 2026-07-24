@@ -19,12 +19,13 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/mantle"
 	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/server"
 	"github.com/mostlygeek/llama-swap/internal/shared"
 	"github.com/mostlygeek/llama-swap/internal/store"
-	"github.com/mostlygeek/llama-swap/internal/watcher"
+	configwatcher "github.com/mostlygeek/llama-swap/internal/watcher"
 )
 
 var (
@@ -70,6 +71,9 @@ func main() {
 	flagKeyFile := flag.String("tls-key-file", "", "TLS key file")
 	flagVersion := flag.Bool("version", false, "show version and exit")
 	flagWatchConfig := flag.Bool("watch-config", false, "reload config on file change")
+	flagModelsDir := flag.String("models-dir", "", "directory for downloaded models (default: <config-dir>/models)")
+	flagBackendsDir := flag.String("backends-dir", "", "directory for compiled backends (default: <config-dir>/backends)")
+	flagBuildScript := flag.String("build-script", "", "path to backend build script")
 	flag.Parse()
 
 	if *flagVersion {
@@ -101,6 +105,24 @@ func main() {
 	if err != nil {
 		slog.Error("failed to load config", "config", *flagConfig, "config-dir", *flagConfigDir, "error", err)
 		os.Exit(1)
+	}
+	configPath := *flagConfig
+	// Set runtime paths for Mantle management
+	cfg.ConfigPath = configPath
+	if *flagModelsDir != "" {
+		cfg.ModelsDir = *flagModelsDir
+	} else if cfg.ModelsDir == "" {
+		cfg.ModelsDir = filepath.Join(filepath.Dir(configPath), "models")
+	}
+	if *flagBackendsDir != "" {
+		cfg.BackendsDir = *flagBackendsDir
+	} else if cfg.BackendsDir == "" {
+		cfg.BackendsDir = filepath.Join(filepath.Dir(configPath), "backends")
+	}
+	if *flagBuildScript != "" {
+		cfg.BuildScript = *flagBuildScript
+	} else if cfg.BuildScript == "" {
+		cfg.BuildScript = "/usr/local/bin/build-llamacpp.sh"
 	}
 
 	// Loggers are wired per cfg.LogToStdout: proxy/upstream feed muxLog, which
@@ -150,6 +172,12 @@ func main() {
 
 	buildInfo := server.BuildInfo{Version: version, Commit: commit, Date: date}
 
+	// taskManager tracks long-running mantle tasks (backend builds, model
+	// downloads). It outlives config reloads, like the loggers and perfMon
+	// above, so a build/download in progress stays visible instead of being
+	// silently orphaned when the config watcher rebuilds the server.
+	taskManager := mantle.NewTaskManager(proxyLog)
+
 	initialStorePath := configStorePath(cfg)
 	initialStore, err := store.New(initialStorePath)
 	if err != nil {
@@ -157,7 +185,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	initialSrv, err := server.New(cfg, muxLog, proxyLog, upstreamLog, perfMon, initialStore, buildInfo)
+	initialSrv, err := server.New(cfg, muxLog, proxyLog, upstreamLog, perfMon, initialStore, buildInfo, taskManager)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)
 		initialStore.Close()
@@ -206,6 +234,11 @@ func main() {
 			proxyLog.Warnf("failed to reload config: %v", err)
 			return
 		}
+		// Re-apply runtime paths on reload
+		newCfg.ConfigPath = configPath
+		newCfg.ModelsDir = cfg.ModelsDir
+		newCfg.BackendsDir = cfg.BackendsDir
+		newCfg.BuildScript = cfg.BuildScript
 
 		if perfMon != nil {
 			perfMon.UpdateConfig(newCfg.Performance)
@@ -227,7 +260,7 @@ func main() {
 			}
 		}
 
-		newSrv, err := server.New(newCfg, muxLog, proxyLog, upstreamLog, perfMon, newStore, buildInfo)
+		newSrv, err := server.New(newCfg, muxLog, proxyLog, upstreamLog, perfMon, newStore, buildInfo, taskManager)
 		if err != nil {
 			proxyLog.Warnf("failed to build new server during reload: %v", err)
 			if storeChanged {

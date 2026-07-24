@@ -191,6 +191,12 @@ type Config struct {
 	// support remote peers, see issue #433, #296
 	Peers PeerDictionaryConfig `yaml:"peers"`
 
+	// Runtime paths for Mantle management (not from YAML config)
+	ConfigPath  string `yaml:"-"`
+	ModelsDir   string `yaml:"-"`
+	BackendsDir string `yaml:"-"`
+	BuildScript string `yaml:"-"`
+
 	// upstream controls behaviour of the /upstream passthrough endpoint
 	Upstream UpstreamConfig `yaml:"upstream"`
 }

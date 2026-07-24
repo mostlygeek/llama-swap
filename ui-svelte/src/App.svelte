@@ -35,9 +35,12 @@
     "/playground": PlaygroundStub,
     "/models": wrap({ asyncComponent: () => import("./routes/ModelsDash.svelte"), loadingComponent: RouteLoading }),
     "/models/:id": wrap({ asyncComponent: () => import("./routes/ModelDetail.svelte"), loadingComponent: RouteLoading }),
+    "/models/hub": wrap({ asyncComponent: () => import("./routes/ModelManager.svelte"), loadingComponent: RouteLoading }),
     "/logs": wrap({ asyncComponent: () => import("./routes/LogViewer.svelte"), loadingComponent: RouteLoading }),
     "/activity": wrap({ asyncComponent: () => import("./routes/Activity.svelte"), loadingComponent: RouteLoading }),
     "/settings": wrap({ asyncComponent: () => import("./routes/Settings.svelte"), loadingComponent: RouteLoading }),
+    "/config": wrap({ asyncComponent: () => import("./routes/ConfigEditor.svelte"), loadingComponent: RouteLoading }),
+    "/backends": wrap({ asyncComponent: () => import("./routes/BackendManager.svelte"), loadingComponent: RouteLoading }),
     "/performance": wrap({ asyncComponent: () => import("./routes/Performance.svelte"), loadingComponent: RouteLoading }),
     "*": wrap({ asyncComponent: () => import("./routes/Activity.svelte"), loadingComponent: RouteLoading }),
   };
@@ -46,9 +49,12 @@
     "/": "Activity",
     "/playground": "Playground",
     "/models": "Models",
+    "/models/hub": "Model Hub",
     "/activity": "Activity",
     "/logs": "Logs",
     "/settings": "Settings",
+    "/config": "Configuration",
+    "/backends": "Backends",
     "/performance": "Performance",
   };
 

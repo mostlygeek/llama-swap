@@ -1,6 +1,9 @@
 .aider*
 .env
 build/
+backends/
+models/
+.gocache/
 dist/
 .vscode
 .DS_Store
@@ -8,3 +11,7 @@ dist/
 
 # UI build output; embedded via the `embed_ui` build tag (internal/server/embed.go)
 internal/server/ui_dist/*
+config.yaml
+.claude/
+turistation_config.yaml
+turiserver_config.yaml

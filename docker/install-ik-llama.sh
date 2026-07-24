@@ -35,7 +35,7 @@ rm -rf build/CMakeCache.txt build/CMakeFiles 2>/dev/null || true
 
 echo "=== Building ik_llama.cpp ==="
 cmake -B build "${CMAKE_FLAGS[@]}"
-cmake --build build --config Release -j"$(nproc)" --target llama-server
+cmake --build build --config Release -j"${MAX_BUILD_JOBS:-4}" --target llama-server
 
 if [ ! -f "build/bin/llama-server" ]; then
     echo "FATAL: llama-server not found in build/bin/" >&2

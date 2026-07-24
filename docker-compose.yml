@@ -1,0 +1,51 @@
+services:
+  llama-swap:
+    image: llama-swap:unified-cuda
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      args:
+        BACKEND: cuda
+        MAX_BUILD_JOBS: 1
+        BUILD_WHISPER: "false"
+        BUILD_IK_LLAMA: "false"
+    runtime: nvidia
+    ports:
+      - "9292:8080"
+    command:
+      - -config
+      - /etc/llama-swap/config/config.yaml
+      - -models-dir
+      - /models
+      - -backends-dir
+      - /backends
+      - -watch-config
+    volumes:
+      # - /mnt/storage/lm_storage/models/gguf:/models
+      # - /mnt/storage/lm_storage/backends:/backends
+      # - /mnt/storage/lm_storage/configs/config.yaml:/etc/llama-swap/config/config.yaml
+      # - /mnt/storage/ComfyUI/models:/ComfyUI-Models
+      - /mnt/c/Users/sross/.lmstudio/models:/models
+      - /mnt/c/Users/sross/.ollama/models/blobs:/mnt/c/Users/sross/.ollama/models/blobs
+      - ./backends/:/backends/
+      - ./config.yaml:/etc/llama-swap/config/config.yaml
+      - ./docker/build-llamacpp.sh:/etc/llama-swap/config/build-llamacpp.sh
+      - ./scripts/pipe-wrap.py:/usr/local/bin/pipe-wrap.py
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      LD_LIBRARY_PATH: /usr/local/cuda/lib64:/usr/lib/x86_64-linux-gnu
+    restart: unless-stopped
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    ports:
+      - "8080:8080"
+    volumes:
+      - /mnt/storage/open-webui-data:/app/backend/data
+    environment:
+      OLLAMA_BASE_URL: http://llama-swap:8080
+      WEBUI_SECRET_KEY: ""
+    restart: unless-stopped
+    depends_on:
+      - llama-swap

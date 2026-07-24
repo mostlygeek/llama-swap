@@ -1,5 +1,6 @@
 <script lang="ts">
   import { playgroundModels, selectorModels } from "../../stores/api";
+  import { connectionState } from "../../stores/theme";
   import { persistentStore } from "../../stores/persistent";
   import { streamChatCompletion } from "../../lib/chatApi";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -21,6 +22,7 @@
     contentMs: number;
     phase: Phase;
     elapsedMs: number;
+    completionTokens?: number;
     error?: string;
   };
   type TestEntry = { id: string; model: string };
@@ -255,6 +257,7 @@
           loadingDone,
           phase: nextPhase,
           elapsedMs: now - start,
+          completionTokens: chunk.completionTokens ?? prev.completionTokens,
         };
       }
       const prev = runs[entry.id];
@@ -397,7 +400,9 @@
         Models <span class="text-[10px] font-normal">— click to queue (add the same model more than once to test parallel requests)</span>
       </div>
       <div class="flex-1 border border-border rounded-md overflow-y-auto min-h-0">
-        {#if !hasModels}
+        {#if $connectionState !== "connected"}
+          <div class="p-3 text-sm text-muted-foreground text-center">Connecting…</div>
+        {:else if !hasModels}
           <div class="p-3 text-sm text-muted-foreground text-center">No models configured.</div>
         {:else}
           <div class="divide-y divide-border">
@@ -643,6 +648,22 @@
                 <div class="text-red-500 mt-2">[error] {run.error}</div>
               {/if}
             </div>
+            {#if run?.status === "done"}
+              {@const ttftMs = (run.waitingMs) + (run.loadingMs) + (run.reasoningMs)}
+              {@const tps = run.completionTokens && run.contentMs > 0 ? run.completionTokens / (run.contentMs / 1000) : 0}
+              <div class="shrink-0 flex items-center gap-3 px-2 py-1 text-[10px] tabular-nums text-txtsecondary border-t border-gray-100 dark:border-white/10">
+                {#if run.loadingMs > 0}
+                  <span title="Model load time">load {formatElapsed(run.loadingMs)}</span>
+                {/if}
+                <span title="Time to first content token">TTFT {formatElapsed(ttftMs)}</span>
+                {#if tps > 0}
+                  <span title="Generation speed">{tps.toFixed(1)} tk/s</span>
+                {/if}
+                {#if run.completionTokens}
+                  <span class="ml-auto">{run.completionTokens} tok</span>
+                {/if}
+              </div>
+            {/if}
           </div>
         {/each}
       </div>

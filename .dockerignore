@@ -1,0 +1,8 @@
+.git
+.gocache
+build
+backends
+models
+ui-svelte/node_modules
+internal/server/ui_dist
+*.log
