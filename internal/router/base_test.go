@@ -345,6 +345,70 @@ func TestBaseRouter_OnDemandStart(t *testing.T) {
 	}
 }
 
+// TestBaseRouter_RequestDuringStop is the router-level regression test for
+// issue #946. A process being stopped outside the router's knowledge (a TTL
+// unload, a crash, an operator kill) must not wedge the swap machinery: the
+// request has to wait for the stop to finish and then start the model.
+//
+// Before the fix doSwap read State(), saw StateStopping, skipped the start, and
+// then subscribed to a process nobody would ever start — stranding the swap, so
+// every later request for the model joined the same zombie swap and hung.
+func TestBaseRouter_RequestDuringStop(t *testing.T) {
+	a := newFakeProcess("a")
+	a.markReady()
+	a.autoReady = true
+	// Pin Stop so the process sits in StateStopping while the request arrives.
+	a.stopBlock = make(chan struct{})
+
+	b := newTestBase(t, map[string]process.Process{"a": a}, &stubPlanner{})
+
+	// Stop the process directly, the way the process's own TTL goroutine does —
+	// the router is never told about it.
+	stopDone := make(chan struct{})
+	go func() {
+		defer close(stopDone)
+		_ = a.Stop(time.Second)
+	}()
+	waitSignal(t, a.stopStarted, "a.stopStarted")
+
+	if got := a.State(); got != process.StateStopping {
+		t.Fatalf("State()=%s want %s before request", got, process.StateStopping)
+	}
+
+	w := httptest.NewRecorder()
+	served := make(chan struct{})
+	go func() {
+		defer close(served)
+		b.ServeHTTP(w, newRequest("a"))
+	}()
+
+	// The router must ask the process to start even though it is mid-stop, and
+	// leave the process to decide when. The stop is still pinned here, so this
+	// signal can only arrive from a start requested during StateStopping —
+	// which is precisely what the old State()-then-Run code refused to do.
+	waitSignal(t, a.ensureAsked, "a.ensureAsked")
+
+	// Let the unload complete. The request must now start the model itself.
+	close(a.stopBlock)
+	<-stopDone
+
+	select {
+	case <-served:
+	case <-t.Context().Done():
+		t.Fatalf("request during stop never completed: %v", context.Cause(t.Context()))
+	}
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
+	}
+	if got := a.runCalls.Load(); got != 1 {
+		t.Errorf("runCalls=%d want 1 (model must be restarted after the unload)", got)
+	}
+	if got := a.serveCalls.Load(); got != 1 {
+		t.Errorf("serveCalls=%d want 1", got)
+	}
+}
+
 func TestBaseRouter_ContextCancel(t *testing.T) {
 	a := newFakeProcess("a")
 	// autoReady=false so swap parks forever until we mark ready.
