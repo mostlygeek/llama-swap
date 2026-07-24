@@ -37,7 +37,7 @@ func TestServer_CaptureCompressRoundtrip(t *testing.T) {
 }
 
 func TestServer_CaptureStoreAndRetrieve(t *testing.T) {
-	mm := newMetricsMonitor(logmon.NewWriter(io.Discard), 100, 5)
+	mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 100, 5)
 	if !mm.enableCaptures {
 		t.Fatal("captures should be enabled with non-zero buffer")
 	}
@@ -57,7 +57,7 @@ func TestServer_CaptureStoreAndRetrieve(t *testing.T) {
 }
 
 func TestServer_CaptureDisabled(t *testing.T) {
-	mm := newMetricsMonitor(logmon.NewWriter(io.Discard), 100, 0)
+	mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 100, 0)
 	if mm.enableCaptures {
 		t.Fatal("captures should be disabled with zero buffer")
 	}

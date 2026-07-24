@@ -1,4 +1,5 @@
 import type { SdApiTxt2ImgRequest, SdApiResponse, SdApiLora } from "./types";
+import { playgroundSessionHeaders } from "./playgroundSession";
 
 export async function generateSdImage(
   request: SdApiTxt2ImgRequest,
@@ -8,6 +9,7 @@ export async function generateSdImage(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      ...playgroundSessionHeaders,
     },
     body: JSON.stringify(request),
     signal,
@@ -27,7 +29,7 @@ export async function fetchSdLoras(
 ): Promise<SdApiLora[]> {
   const response = await fetch(
     `/sdapi/v1/loras?model=${encodeURIComponent(model)}`,
-    { signal }
+    { headers: playgroundSessionHeaders, signal }
   );
 
   if (!response.ok) {

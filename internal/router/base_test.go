@@ -5,6 +5,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,16 +22,28 @@ import (
 // scheduling decision logic (queueing, collation, eviction collisions) lives in
 // the scheduler package and is tested directly there; see fifo_test.go.
 
-// stubPlanner evicts nothing. baseRouter tests drive the run loop through the
-// default FIFO scheduler without exercising any particular eviction policy.
-type stubPlanner struct{}
+// stubPlanner evicts configured targets. baseRouter tests drive the run loop
+// through the default FIFO scheduler without exercising router planner details.
+type stubPlanner struct {
+	evict map[string][]string
+}
 
-func (s *stubPlanner) EvictionFor(string, []string) []string { return nil }
-func (s *stubPlanner) OnSwapStart(string, []string)          {}
+func (s *stubPlanner) EvictionFor(target string, _ []string) []string {
+	if s.evict == nil {
+		return nil
+	}
+	return s.evict[target]
+}
+func (s *stubPlanner) OnSwapStart(string, []string) {}
 
 func newTestBase(t *testing.T, processes map[string]process.Process, planner scheduler.Swapper) *baseRouter {
 	t.Helper()
 	conf := config.Config{HealthCheckTimeout: 5}
+	return newTestBaseWithConfig(t, conf, processes, planner)
+}
+
+func newTestBaseWithConfig(t *testing.T, conf config.Config, processes map[string]process.Process, planner scheduler.Swapper) *baseRouter {
+	t.Helper()
 	b, err := newBaseRouter("test", conf, processes, logmon.NewWriter(io.Discard), planner)
 	if err != nil {
 		t.Fatalf("newBaseRouter: %v", err)
@@ -97,6 +112,160 @@ func TestBaseRouter_UnloadSpecificModel(t *testing.T) {
 	}
 	if c.State() != process.StateReady {
 		t.Errorf("c should remain ready, got %q", c.State())
+	}
+}
+
+func TestBaseRouter_UnloadSpecificModelUsesConfiguredTimeout(t *testing.T) {
+	a := newFakeProcess("a")
+	a.markReady()
+	c := newFakeProcess("c")
+	c.markReady()
+
+	conf := config.Config{
+		HealthCheckTimeout: 5,
+		UnloadTimeout:      25,
+		Models: map[string]config.ModelConfig{
+			"a": {UnloadTimeout: 45},
+			"c": {UnloadTimeout: 25},
+		},
+	}
+	b := newTestBaseWithConfig(t, conf, map[string]process.Process{"a": a, "c": c}, &stubPlanner{})
+	b.Unload(0, "a")
+
+	if a.lastStopTimeout() != 45*time.Second {
+		t.Errorf("a stop timeout=%v want 45s", a.lastStopTimeout())
+	}
+	if got := c.stopCalls.Load(); got != 0 {
+		t.Errorf("c stopCalls=%d want 0", got)
+	}
+}
+
+func TestBaseRouter_UnloadAllUsesConfiguredTimeouts(t *testing.T) {
+	a := newFakeProcess("a")
+	a.markReady()
+	c := newFakeProcess("c")
+	c.markReady()
+
+	conf := config.Config{
+		HealthCheckTimeout: 5,
+		UnloadTimeout:      25,
+		Models: map[string]config.ModelConfig{
+			"a": {UnloadTimeout: 45},
+			"c": {UnloadTimeout: 25},
+		},
+	}
+	b := newTestBaseWithConfig(t, conf, map[string]process.Process{"a": a, "c": c}, &stubPlanner{})
+	b.Unload(0)
+
+	if a.lastStopTimeout() != 45*time.Second {
+		t.Errorf("a stop timeout=%v want 45s", a.lastStopTimeout())
+	}
+	if c.lastStopTimeout() != 25*time.Second {
+		t.Errorf("c stop timeout=%v want 25s", c.lastStopTimeout())
+	}
+}
+
+func TestBaseRouter_UnloadStopsSmallestTimeoutFirst(t *testing.T) {
+	a := newFakeProcess("a")
+	a.markReady()
+	c := newFakeProcess("c")
+	c.markReady()
+	e := newFakeProcess("e")
+	e.markReady()
+
+	var mu sync.Mutex
+	var order []string
+	record := func(id string) {
+		mu.Lock()
+		order = append(order, id)
+		mu.Unlock()
+	}
+	a.onStop = record
+	c.onStop = record
+	e.onStop = record
+
+	conf := config.Config{
+		HealthCheckTimeout: 5,
+		UnloadTimeout:      25,
+		Models: map[string]config.ModelConfig{
+			"a": {UnloadTimeout: 45},
+			"c": {UnloadTimeout: 10},
+			"e": {UnloadTimeout: 25},
+		},
+	}
+	b := newTestBaseWithConfig(t, conf, map[string]process.Process{"a": a, "c": c, "e": e}, &stubPlanner{})
+	// Named in descending timeout order; Unload must re-order ascending.
+	b.Unload(0, "a", "e", "c")
+
+	mu.Lock()
+	defer mu.Unlock()
+	if want := []string{"c", "e", "a"}; !slices.Equal(order, want) {
+		t.Errorf("stop order=%v want %v", order, want)
+	}
+}
+
+// TestBaseRouter_UnloadZeroStopsSameTimeoutInParallel verifies that models
+// resolving to the same unloadTimeout share one unload request and stop
+// concurrently, rather than one request per model. Both fakeProcess.Stop
+// calls are pinned via stopBlock; the test only releases them after
+// observing both stopStarted, which deadlocks if the stops were sequential.
+func TestBaseRouter_UnloadZeroStopsSameTimeoutInParallel(t *testing.T) {
+	a := newFakeProcess("a")
+	a.markReady()
+	a.stopBlock = make(chan struct{})
+	c := newFakeProcess("c")
+	c.markReady()
+	c.stopBlock = make(chan struct{})
+
+	conf := config.Config{
+		HealthCheckTimeout: 5,
+		UnloadTimeout:      25,
+		// no per-model values: both models inherit the global 25s
+	}
+	b := newTestBaseWithConfig(t, conf, map[string]process.Process{"a": a, "c": c}, &stubPlanner{})
+
+	unloadDone := make(chan struct{})
+	go func() {
+		b.Unload(0)
+		close(unloadDone)
+	}()
+
+	for _, p := range []*fakeProcess{a, c} {
+		select {
+		case <-p.stopStarted:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("Stop on %s never started — same-timeout unloads are not parallel", p.id)
+		}
+	}
+	close(a.stopBlock)
+	close(c.stopBlock)
+
+	select {
+	case <-unloadDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Unload did not return after stops were released")
+	}
+	if a.lastStopTimeout() != 25*time.Second || c.lastStopTimeout() != 25*time.Second {
+		t.Errorf("stop timeouts a=%v c=%v want 25s each", a.lastStopTimeout(), c.lastStopTimeout())
+	}
+}
+
+func TestBaseRouter_UnloadPositiveTimeoutOverridesConfigured(t *testing.T) {
+	a := newFakeProcess("a")
+	a.markReady()
+
+	conf := config.Config{
+		HealthCheckTimeout: 5,
+		UnloadTimeout:      25,
+		Models: map[string]config.ModelConfig{
+			"a": {UnloadTimeout: 45},
+		},
+	}
+	b := newTestBaseWithConfig(t, conf, map[string]process.Process{"a": a}, &stubPlanner{})
+	b.Unload(time.Second, "a")
+
+	if a.lastStopTimeout() != time.Second {
+		t.Errorf("a stop timeout=%v want 1s", a.lastStopTimeout())
 	}
 }
 
@@ -227,6 +396,63 @@ func TestBaseRouter_ModelNotFound(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Errorf("status=%d want %d body=%q", w.Code, http.StatusNotFound, w.Body.String())
+	}
+}
+
+func TestBaseRouter_ConcurrencyLimitRejectsBeforeLoadingStream(t *testing.T) {
+	sendLoading := true
+	conf := config.Config{
+		HealthCheckTimeout: 5,
+		Models: map[string]config.ModelConfig{
+			"a": {ConcurrencyLimit: 2, SendLoadingState: &sendLoading},
+			"b": {},
+		},
+	}
+	a := newFakeProcess("a")
+	a.autoReady = true
+	bProc := newFakeProcess("b")
+	bProc.autoReady = true
+	bProc.serveBlock = make(chan struct{})
+
+	b := newTestBaseWithConfig(t, conf, map[string]process.Process{"a": a, "b": bProc}, &stubPlanner{
+		evict: map[string][]string{"a": {"b"}},
+	})
+
+	bDone := make(chan struct{})
+	go func() {
+		b.ServeHTTP(httptest.NewRecorder(), newStreamRequest("b"))
+		close(bDone)
+	}()
+	waitSignal(t, bProc.serveStarted, "b request start")
+	waitProcessed(t, b.testProcessed, 2)
+
+	aDone1 := make(chan struct{})
+	aDone2 := make(chan struct{})
+	go func() {
+		b.ServeHTTP(httptest.NewRecorder(), newStreamRequest("a"))
+		close(aDone1)
+	}()
+	go func() {
+		b.ServeHTTP(httptest.NewRecorder(), newStreamRequest("a"))
+		close(aDone2)
+	}()
+	waitProcessed(t, b.testProcessed, 2)
+
+	w := httptest.NewRecorder()
+	b.ServeHTTP(w, newStreamRequest("a"))
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("status=%d want 429 body=%q", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type=%q want application/json", got)
+	}
+	if strings.Contains(w.Body.String(), "llama-swap loading model") {
+		t.Fatalf("429 body contains loading stream: %q", w.Body.String())
+	}
+
+	close(bProc.serveBlock)
+	for name, ch := range map[string]chan struct{}{"b": bDone, "a1": aDone1, "a2": aDone2} {
+		waitSignal(t, ch, name+" request finish")
 	}
 }
 

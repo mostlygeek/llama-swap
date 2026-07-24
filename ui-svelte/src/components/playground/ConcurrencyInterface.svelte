@@ -1,8 +1,12 @@
 <script lang="ts">
-  import { models } from "../../stores/api";
+  import { playgroundModels, selectorModels } from "../../stores/api";
   import { connectionState } from "../../stores/theme";
   import { persistentStore } from "../../stores/persistent";
   import { streamChatCompletion } from "../../lib/chatApi";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
+  import { X } from "@lucide/svelte";
 
   type Status = "waiting" | "streaming" | "done" | "error";
   type Phase = "waiting" | "loading" | "reasoning" | "content";
@@ -42,8 +46,12 @@
 
   let timelineMaxMs = $derived(Math.max(100, ...Object.values(runs).map((r) => r.elapsedMs)));
 
-  let availableModels = $derived($models.filter((m) => !m.unlisted));
-  let hasModels = $derived(availableModels.length > 0);
+  let availableModels = $derived($playgroundModels.filter((model) => model.playgroundType !== "selector"));
+  let modeSections = $derived([
+    { label: "Selectors", ids: $selectorModels.map((model) => model.id) },
+    { label: "Models", ids: availableModels.map((model) => model.id) },
+  ].filter((section) => section.ids.length > 0));
+  let hasModels = $derived(modeSections.length > 0);
   let canRun = $derived(!isRunning && $testListStore.length > 0 && $promptStore.trim() !== "");
 
   function newId(): string {
@@ -369,79 +377,88 @@
     <!-- Run controls -->
     <div class="flex items-center gap-2">
       {#if isRunning}
-        <button class="btn bg-red-500 hover:bg-red-600 text-white border-red-500" onclick={stop}>
-          <span class="inline-block w-3 h-3 bg-white align-middle mr-2"></span>Stop
-        </button>
+        <Button variant="destructive" onclick={stop}>
+          <span class="mr-1 inline-block h-3 w-3 bg-current align-middle"></span>Stop
+        </Button>
       {:else}
-        <button
-          class="btn bg-primary text-btn-primary-text hover:opacity-90"
+        <Button
           onclick={run}
           disabled={!canRun}
           title={$testListStore.length === 0 ? "Add models from the list below" : "Run concurrent requests"}
         >
-          <span class="inline-block align-middle mr-2" aria-hidden="true">▶</span>Go
-        </button>
+          <span class="mr-1 inline-block align-middle" aria-hidden="true">▶</span>Go
+        </Button>
       {/if}
-      <button class="btn btn--sm" onclick={clearAll} disabled={isRunning || $testListStore.length === 0}>
+      <Button variant="outline" size="sm" onclick={clearAll} disabled={isRunning || $testListStore.length === 0}>
         Clear ({$testListStore.length})
-      </button>
+      </Button>
     </div>
 
     <!-- Available models -->
     <div class="flex flex-col min-h-0 flex-1">
-      <div class="text-xs font-medium text-txtsecondary mb-1">
+      <div class="text-xs font-medium text-muted-foreground mb-1">
         Models <span class="text-[10px] font-normal">— click to queue (add the same model more than once to test parallel requests)</span>
       </div>
-      <div class="flex-1 border border-gray-200 dark:border-white/10 rounded overflow-y-auto min-h-0">
+      <div class="flex-1 border border-border rounded-md overflow-y-auto min-h-0">
         {#if $connectionState !== "connected"}
-          <div class="p-3 text-sm text-txtsecondary text-center">Connecting…</div>
+          <div class="p-3 text-sm text-muted-foreground text-center">Connecting…</div>
         {:else if !hasModels}
-          <div class="p-3 text-sm text-txtsecondary text-center">No models configured.</div>
+          <div class="p-3 text-sm text-muted-foreground text-center">No models configured.</div>
         {:else}
-          <ul class="divide-y divide-gray-100 dark:divide-white/5">
-            {#each availableModels as m (m.id)}
-              <li>
-                <button
-                  class="w-full text-left px-2 py-1.5 text-sm hover:bg-secondary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                  onclick={() => addModel(m.id)}
-                  disabled={isRunning}
-                  title="Add {m.id}"
-                >
-                  <span class="text-primary" aria-hidden="true">+</span>
-                  <span class="truncate flex-1">{m.id}</span>
-                </button>
-              </li>
+          <div class="divide-y divide-border">
+            {#each modeSections as section (section.label)}
+              <div>
+                <div class="bg-muted/50 px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  {section.label}
+                </div>
+                <div class="divide-y divide-gray-100 dark:divide-white/5">
+                  {#each section.ids as id (id)}
+                    <button
+                      type="button"
+                      class="hover:bg-accent hover:text-foreground flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-sm font-normal transition-colors disabled:pointer-events-none disabled:opacity-50"
+                      onclick={() => addModel(id)}
+                      disabled={isRunning}
+                      title="Add {id}"
+                    >
+                      <span class="text-primary" aria-hidden="true">+</span>
+                      <span class="truncate flex-1">{id}</span>
+                    </button>
+                  {/each}
+                </div>
+              </div>
             {/each}
-          </ul>
+          </div>
         {/if}
       </div>
     </div>
 
     <!-- Settings -->
-    <div class="flex flex-col gap-2 border-t border-gray-200 dark:border-white/10 pt-3">
+    <div class="flex flex-col gap-2 border-t border-border pt-3">
       <div class="flex items-center justify-between">
-        <label for="concurrency-prompt" class="text-xs font-medium text-txtsecondary">Prompt</label>
-        <button
-          class="text-[10px] text-txtsecondary hover:text-txtmain underline"
+        <label for="concurrency-prompt" class="text-xs font-medium text-muted-foreground">Prompt</label>
+        <Button
+          variant="link"
+          size="sm"
+          class="h-auto p-0 text-[10px]"
           onclick={resetDefaults}
           disabled={isRunning}
         >
           reset defaults
-        </button>
+        </Button>
       </div>
-      <textarea
+      <Textarea
         id="concurrency-prompt"
-        class="w-full px-2 py-1.5 text-sm rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary resize-none"
-        rows="3"
+        class="resize-none text-sm"
+        rows={3}
         bind:value={$promptStore}
         disabled={isRunning}
-      ></textarea>
-      <label for="concurrency-max-tokens" class="text-xs font-medium text-txtsecondary">max_tokens</label>
-      <input
+      ></Textarea>
+      <label for="concurrency-max-tokens" class="text-xs font-medium text-muted-foreground">max_tokens</label>
+      <Input
         id="concurrency-max-tokens"
         type="number"
         min="1"
-        class="w-full px-2 py-1.5 text-sm rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
+        class="h-8 text-sm"
         bind:value={$maxTokensStore}
         disabled={isRunning}
       />
@@ -452,8 +469,8 @@
   <div class="flex-1 min-w-0 min-h-0 overflow-y-auto">
     {#if $testListStore.length === 0}
       <div class="h-full flex items-center justify-center px-6">
-        <div class="max-w-md text-sm text-txtsecondary space-y-4">
-          <h4 class="text-base font-semibold text-txtmain pb-0">Load Test</h4>
+        <div class="max-w-md text-sm text-muted-foreground space-y-4">
+          <h4 class="text-base font-semibold text-foreground pb-0">Load Test</h4>
           <p>
             Fire several streaming chat completions at llama-swap at the same time to see how it handles parallel
             loading and concurrent inference. Each request streams into its own panel with a live timer and status.
@@ -461,16 +478,16 @@
           <ol class="list-decimal list-inside space-y-1">
             <li>Click models on the left to queue them — repeat a model to hit it with parallel requests.</li>
             <li>Tweak the prompt and <code>max_tokens</code> if you want.</li>
-            <li>Press <span class="font-semibold text-txtmain">Go</span> to launch them concurrently.</li>
+            <li>Press <span class="font-semibold text-foreground">Go</span> to launch them concurrently.</li>
           </ol>
           <p class="text-xs">Tip: drag a result card's header to reorder, or hit × to drop it.</p>
         </div>
       </div>
     {:else}
       <!-- Gantt-style timeline -->
-      <div class="mb-3 border border-gray-200 dark:border-white/10 rounded">
+      <div class="mb-3 border border-border rounded-md">
           <button
-            class="w-full flex items-center gap-2 px-2 py-1.5 text-xs font-medium text-txtsecondary hover:bg-secondary-hover transition-colors {$timelineCollapsedStore ? 'rounded' : 'rounded-t border-b border-gray-200 dark:border-white/10'}"
+            class="w-full flex items-center gap-2 px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent transition-colors {$timelineCollapsedStore ? 'rounded-md' : 'rounded-t border-b border-border'}"
             onclick={() => timelineCollapsedStore.update((v) => !v)}
             aria-expanded={!$timelineCollapsedStore}
           >
@@ -485,7 +502,7 @@
             </svg>
             <span>Timeline</span>
             {#if !$timelineCollapsedStore}
-              <span class="flex items-center gap-3 text-[10px] text-txtsecondary font-normal ml-3" aria-hidden="true">
+              <span class="flex items-center gap-3 text-[10px] text-muted-foreground font-normal ml-3" aria-hidden="true">
                 <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-slate-200 dark:bg-white/10 border border-gray-300 dark:border-white/10"></span>waiting</span>
                 <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-slate-400 dark:bg-slate-500"></span>loading</span>
                 <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-purple-500"></span>reasoning</span>
@@ -494,7 +511,7 @@
                 <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-red-500"></span>error</span>
               </span>
             {/if}
-            <span class="ml-auto tabular-nums text-txtsecondary">
+            <span class="ml-auto tabular-nums text-muted-foreground">
               max {formatElapsed(timelineMaxMs)} · {$testListStore.length} request{$testListStore.length === 1 ? "" : "s"}
             </span>
           </button>
@@ -503,13 +520,13 @@
               <!-- X axis ticks -->
               <div class="flex" aria-hidden="true">
                 <div class="w-40 shrink-0"></div>
-                <div class="relative flex-1 h-4 border-b border-gray-200 dark:border-white/10">
+                <div class="relative flex-1 h-4 border-b border-border">
                   {#each timelineTicks as t (t)}
                     <div
-                      class="absolute top-0 bottom-0 border-l border-gray-200 dark:border-white/10"
+                      class="absolute top-0 bottom-0 border-l border-border"
                       style="left: {(t / timelineMaxMs) * 100}%;"
                     >
-                      <span class="absolute -top-0.5 left-1 text-[10px] text-txtsecondary tabular-nums">{formatTickMs(t)}</span>
+                      <span class="absolute -top-0.5 left-1 text-[10px] text-muted-foreground tabular-nums">{formatTickMs(t)}</span>
                     </div>
                   {/each}
                 </div>
@@ -524,14 +541,14 @@
                   {@const reasoningPct = run ? (run.reasoningMs / timelineMaxMs) * 100 : 0}
                   {@const contentPct = run ? (run.contentMs / timelineMaxMs) * 100 : 0}
                   <div class="flex items-center text-xs">
-                    <div class="w-40 shrink-0 flex items-center gap-1 pr-2 text-txtsecondary">
+                    <div class="w-40 shrink-0 flex items-center gap-1 pr-2 text-muted-foreground">
                       <span class="tabular-nums w-5 text-right">{i + 1}.</span>
                       <span class="truncate" title={entry.model}>{entry.model}</span>
                     </div>
                     <div class="relative flex-1 h-4">
                       {#each timelineTicks as t (t)}
                         <div
-                          class="absolute top-0 bottom-0 border-l border-gray-100 dark:border-white/5"
+                          class="absolute top-0 bottom-0 border-l border-border"
                           style="left: {(t / timelineMaxMs) * 100}%;"
                           aria-hidden="true"
                         ></div>
@@ -565,7 +582,7 @@
                         ></div>
                       {/if}
                     </div>
-                    <div class="w-16 shrink-0 pl-2 tabular-nums text-txtsecondary text-right">
+                    <div class="w-16 shrink-0 pl-2 tabular-nums text-muted-foreground text-right">
                       {run ? formatElapsed(run.elapsedMs) : "—"}
                     </div>
                   </div>
@@ -579,16 +596,16 @@
           {@const run = runs[entry.id]}
           {@const status = run?.status ?? "waiting"}
           <div
-            class="border rounded flex flex-col min-h-0 transition-colors {dragOverIndex === i && dragIndex !== i
+            class="border rounded-md flex flex-col min-h-0 transition-colors {dragOverIndex === i && dragIndex !== i
               ? 'border-primary ring-2 ring-primary/40'
-              : 'border-gray-200 dark:border-white/10'} {dragIndex === i ? 'opacity-40' : ''}"
+              : 'border-border'} {dragIndex === i ? 'opacity-40' : ''}"
             style="height: 280px;"
             role="listitem"
             ondragover={(e) => onDragOver(i, e)}
             ondrop={(e) => onDrop(i, e)}
           >
             <div
-              class="shrink-0 flex items-center gap-2 px-2 py-1.5 border-b border-gray-200 dark:border-white/10 bg-secondary/40 rounded-t"
+              class="shrink-0 flex items-center gap-2 px-2 py-1.5 border-b border-border bg-secondary/40 rounded-t"
               draggable={!isRunning}
               role="button"
               tabindex="-1"
@@ -598,26 +615,28 @@
               class:cursor-grab={!isRunning}
               title={isRunning ? "" : "Drag to reorder"}
             >
-              <span class="text-txtsecondary select-none" aria-hidden="true">⋮⋮</span>
-              <span class="text-txtsecondary tabular-nums text-xs w-5 text-right">{i + 1}.</span>
+              <span class="text-muted-foreground select-none" aria-hidden="true">⋮⋮</span>
+              <span class="text-muted-foreground tabular-nums text-xs w-5 text-right">{i + 1}.</span>
               <span class="flex-1 truncate text-sm font-medium" title={entry.model}>{entry.model}</span>
-              <span class="text-xs tabular-nums text-txtsecondary">
+              <span class="text-xs tabular-nums text-muted-foreground">
                 {run ? formatElapsed(run.elapsedMs) : "—"}
               </span>
               <span class="status text-[10px] {statusBadgeClass(status)}">{status}</span>
-              <button
-                class="w-5 h-5 flex items-center justify-center text-txtsecondary hover:text-red-500 transition-colors rounded disabled:opacity-30 disabled:cursor-not-allowed"
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                class="h-5 w-5 text-muted-foreground hover:text-red-500"
                 onclick={() => removeEntry(entry.id)}
                 disabled={isRunning}
                 aria-label="Remove"
-                tabindex="-1"
+                tabindex={-1}
               >
-                ×
-              </button>
+                <X class="size-3" />
+              </Button>
             </div>
             <div class="flex-1 min-h-0 overflow-y-auto font-mono text-xs px-2 py-1.5">
               {#if run?.loadingText}
-                <div class="bg-secondary/40 dark:bg-white/5 text-txtsecondary rounded px-2 py-1 mb-2 whitespace-pre-wrap">{run.loadingText.trim()}</div>
+                <div class="bg-secondary/40 dark:bg-white/5 text-muted-foreground rounded-md px-2 py-1 mb-2 whitespace-pre-wrap">{run.loadingText.trim()}</div>
               {/if}
               {#if run?.reasoningContent}
                 <div class="text-purple-700 dark:text-purple-300 whitespace-pre-wrap">{run.reasoningContent}</div>

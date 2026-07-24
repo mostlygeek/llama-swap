@@ -1,14 +1,20 @@
-import { writable } from "svelte/store";
+import { writable, derived } from "svelte/store";
 import type {
   Model,
-  ActivityLogEntry,
+  ActivityPage,
+  ActivityStatsData,
   VersionInfo,
   LogData,
   APIEventEnvelope,
   ReqRespCapture,
   InFlightStats,
+  InflightRequestEntry,
   PerformanceResponse,
   ModelEstimate,
+  UIConfig,
+  Profile,
+  ProfileState,
+  PlaygroundModelType,
 } from "../lib/types";
 import { connectionState } from "./theme";
 
@@ -17,10 +23,31 @@ const LOG_LENGTH_LIMIT = 1024 * 100; /* 100KB of log data */
 // Stores
 export const models = writable<Model[]>([]);
 export const modelEstimates = writable<Record<string, ModelEstimate>>({});
+export const playgroundModels = writable<Model[]>([]);
+export const profiles = writable<Profile[]>([]);
+export const activeProfile = writable<string | null>(null);
+
+// Model records used by Playground come from the OpenAI-compatible listing.
+export const profileModels = derived(
+  playgroundModels,
+  ($playgroundModels) => $playgroundModels.filter((model) => model.playgroundType === "profile"),
+);
+export const selectorModels = derived(
+  playgroundModels,
+  ($playgroundModels) => $playgroundModels.filter((model) => model.playgroundType === "selector"),
+);
+
+export const hasListedModels = derived(playgroundModels, ($playgroundModels) => $playgroundModels.length > 0);
 export const proxyLogs = writable<string>("");
 export const upstreamLogs = writable<string>("");
-export const metrics = writable<ActivityLogEntry[]>([]);
+export const activityRevision = writable<number>(0);
 export const inFlightRequests = writable<number>(0);
+export const inflightRequestEntries = writable<InflightRequestEntry[]>([]);
+const defaultUIConfig = (): UIConfig => ({
+  activity: { session_id: ["X-Session-ID", "X-Litellm-Session-Id"] },
+});
+export const uiConfig = writable<UIConfig>(defaultUIConfig());
+export const performanceEnabled = writable<boolean>(false);
 export const versionInfo = writable<VersionInfo>({
   build_date: "unknown",
   commit: "unknown",
@@ -28,6 +55,10 @@ export const versionInfo = writable<VersionInfo>({
 });
 
 let apiEventSource: EventSource | null = null;
+let profileRevision = 0;
+let playgroundModelsRequest = 0;
+let playgroundModelsFetch: Promise<Model[]> | null = null;
+let playgroundModelsRefreshQueued = false;
 
 function appendLog(newData: string, store: typeof proxyLogs | typeof upstreamLogs): void {
   store.update((prev) => {
@@ -40,8 +71,16 @@ export function enableAPIEvents(enabled: boolean): void {
   if (!enabled) {
     apiEventSource?.close();
     apiEventSource = null;
-    metrics.set([]);
+    activityRevision.set(0);
     inFlightRequests.set(0);
+    inflightRequestEntries.set([]);
+    uiConfig.set(defaultUIConfig());
+    playgroundModelsRequest++;
+    playgroundModelsRefreshQueued = false;
+    playgroundModels.set([]);
+    profiles.set([]);
+    activeProfile.set(null);
+    profileRevision++;
     return;
   }
 
@@ -58,51 +97,25 @@ export function enableAPIEvents(enabled: boolean): void {
       // Clear everything on connect to keep things in sync
       proxyLogs.set("");
       upstreamLogs.set("");
-      metrics.set([]);
+      activityRevision.update((n) => n + 1);
       inFlightRequests.set(0);
+      inflightRequestEntries.set([]);
+      uiConfig.set(defaultUIConfig());
       models.set([]);
+      playgroundModelsRequest++;
+      playgroundModelsRefreshQueued = false;
+      playgroundModels.set([]);
+      profiles.set([]);
+      activeProfile.set(null);
+      profileRevision++;
       retryCount = 0;
       connectionState.set("connected");
+      void fetchProfiles().catch((error) => console.error(error));
     };
 
     apiEventSource.onmessage = (e: MessageEvent) => {
       try {
-        const message = JSON.parse(e.data) as APIEventEnvelope;
-        switch (message.type) {
-          case "modelStatus": {
-            const newModels = JSON.parse(message.data) as Model[];
-            // Sort models by name and id
-            newModels.sort((a, b) => {
-              return (a.name + a.id).localeCompare(b.name + b.id, undefined, { numeric: true });
-            });
-            models.set(newModels);
-            break;
-          }
-
-          case "logData": {
-            const logData = JSON.parse(message.data) as LogData;
-            switch (logData.source) {
-              case "proxy":
-                appendLog(logData.data, proxyLogs);
-                break;
-              case "upstream":
-                appendLog(logData.data, upstreamLogs);
-                break;
-            }
-            break;
-          }
-
-          case "metrics": {
-            const newMetrics = JSON.parse(message.data) as ActivityLogEntry[];
-            metrics.update((prevMetrics) => [...newMetrics, ...prevMetrics]);
-            break;
-          }
-          case "inflight": {
-            const stats = JSON.parse(message.data) as InFlightStats;
-            inFlightRequests.set(stats.total ?? 0);
-            break;
-          }
-        }
+        handleAPIEventMessage(e.data);
       } catch (err) {
         console.error(e.data, err);
       }
@@ -118,6 +131,112 @@ export function enableAPIEvents(enabled: boolean): void {
   };
 
   connect();
+}
+
+export function handleAPIEventMessage(data: string): void {
+  const message = JSON.parse(data) as APIEventEnvelope;
+  switch (message.type) {
+    case "modelStatus": {
+      const newModels = JSON.parse(message.data) as Model[];
+      // Sort models by name and id
+      newModels.sort((a, b) => {
+        return (a.name + a.id).localeCompare(b.name + b.id, undefined, { numeric: true });
+      });
+      models.set(newModels);
+      break;
+    }
+
+    case "logData": {
+      const logData = JSON.parse(message.data) as LogData;
+      switch (logData.source) {
+        case "proxy":
+          appendLog(logData.data, proxyLogs);
+          break;
+        case "upstream":
+          appendLog(logData.data, upstreamLogs);
+          break;
+      }
+      break;
+    }
+
+    case "activity": {
+      activityRevision.update((n) => n + 1);
+      break;
+    }
+
+    case "inflight": {
+      const stats = JSON.parse(message.data) as InFlightStats;
+      const withReceiptTime = (request: InflightRequestEntry): InflightRequestEntry => ({
+        ...request,
+        client_received_at_ms: performance.now(),
+      });
+      inflightRequestEntries.update((current) => {
+        let requests = current;
+        switch (stats.operation) {
+          case "snapshot":
+            requests = (stats.requests ?? []).map(withReceiptTime);
+            break;
+          case "upsert": {
+            if (!stats.request) break;
+            const received = withReceiptTime(stats.request);
+            const index = current.findIndex((request) => request.id === received.id);
+            requests = index === -1
+              ? [...current, received]
+              : current.map((request, i) => i === index ? received : request);
+            break;
+          }
+          case "remove":
+            requests = current.filter((request) => request.id !== stats.id);
+            break;
+        }
+        requests.sort((a, b) => {
+          const byTime = Date.parse(a.timestamp) - Date.parse(b.timestamp);
+          return byTime || a.id.localeCompare(b.id, undefined, { numeric: true });
+        });
+        inFlightRequests.set(requests.length);
+        return requests;
+      });
+      break;
+    }
+
+    case "uiConfig": {
+      uiConfig.set(JSON.parse(message.data) as UIConfig);
+      break;
+    }
+
+    case "profileChanged": {
+      const state = JSON.parse(message.data) as Pick<ProfileState, "active">;
+      profileRevision++;
+      activeProfile.set(state.active);
+      break;
+    }
+  }
+}
+
+export async function fetchProfiles(): Promise<ProfileState> {
+  const revision = profileRevision;
+  const response = await fetch("/api/profiles");
+  if (!response.ok) {
+    throw new Error(`Failed to list profiles: ${response.status}`);
+  }
+  const state = await response.json() as ProfileState;
+  profiles.set(state.profiles);
+  if (profileRevision === revision) activeProfile.set(state.active);
+  return state;
+}
+
+export async function setActiveProfile(name: string | null): Promise<void> {
+  const revision = profileRevision;
+  const response = await fetch("/api/profiles/active", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to switch profile: ${response.status}`);
+  }
+  const state = await response.json() as Pick<ProfileState, "active">;
+  if (profileRevision === revision) activeProfile.set(state.active);
 }
 
 // Fetch version info when connected
@@ -136,18 +255,123 @@ connectionState.subscribe(async (status) => {
   }
 });
 
-export async function listModels(): Promise<Model[]> {
+interface ModelListRecord {
+  id: string;
+  name?: string;
+  description?: string;
+  capabilities?: Model["capabilities"];
+  meta?: {
+    llamaswap?: {
+      type?: PlaygroundModelType | "alias";
+      aliases?: string[];
+      modelID?: string;
+      peerID?: string;
+    };
+  };
+}
+
+async function loadPlaygroundModels(request: number): Promise<Model[]> {
   try {
-    const response = await fetch("/api/models/");
+    const response = await fetch("/v1/models");
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
-    const data = await response.json();
-    return data || [];
+    const responseData = await response.json() as { data?: ModelListRecord[] };
+    const records = responseData.data ?? [];
+    const aliasesByModel = new Map<string, Set<string>>();
+    for (const record of records) {
+      const metadata = record.meta?.llamaswap;
+      if (metadata?.aliases) {
+        aliasesByModel.set(record.id, new Set(metadata.aliases));
+      }
+      if (metadata?.type === "alias" && metadata.modelID) {
+        const aliases = aliasesByModel.get(metadata.modelID) ?? new Set<string>();
+        aliases.add(record.id);
+        aliasesByModel.set(metadata.modelID, aliases);
+      }
+    }
+    const newModels = records
+      .filter((record) => record.meta?.llamaswap?.type !== "alias")
+      .map((record): Model => {
+        const metadata = record.meta?.llamaswap;
+        const metadataType = metadata?.type;
+        const playgroundType: PlaygroundModelType = metadataType && metadataType !== "alias"
+          ? metadataType
+          : "model";
+        return {
+          id: record.id,
+          state: "unknown",
+          name: record.name ?? "",
+          description: record.description ?? "",
+          unlisted: false,
+          peerID: metadata?.peerID ?? "",
+          playgroundType,
+          aliases: [...(aliasesByModel.get(record.id) ?? [])],
+          capabilities: record.capabilities,
+        };
+      });
+    newModels.sort((a, b) => {
+      return (a.name + a.id).localeCompare(b.name + b.id, undefined, { numeric: true });
+    });
+    if (request === playgroundModelsRequest) playgroundModels.set(newModels);
+    return newModels;
   } catch (error) {
-    console.error("Failed to fetch models:", error);
+    console.error("Failed to fetch Playground models:", error);
     return [];
   }
+}
+
+export function fetchPlaygroundModels(): Promise<Model[]> {
+  if (playgroundModelsFetch) {
+    playgroundModelsRefreshQueued = true;
+    return playgroundModelsFetch;
+  }
+
+  const request = ++playgroundModelsRequest;
+  const currentFetch = loadPlaygroundModels(request).finally(() => {
+    if (playgroundModelsFetch !== currentFetch) return;
+    playgroundModelsFetch = null;
+    if (playgroundModelsRefreshQueued) {
+      playgroundModelsRefreshQueued = false;
+      void fetchPlaygroundModels();
+    }
+  });
+  playgroundModelsFetch = currentFetch;
+  return currentFetch;
+}
+
+export async function getActivity(params: {
+  model?: string;
+  page?: number;
+  limit?: number;
+  sort?: string;
+  order?: "asc" | "desc";
+} = {}): Promise<ActivityPage> {
+  const query = new URLSearchParams();
+  if (params.model) query.set("model", params.model);
+  if (params.page) query.set("page", String(params.page));
+  if (params.limit) query.set("limit", String(params.limit));
+  if (params.sort) query.set("sort", params.sort);
+  if (params.order) query.set("order", params.order);
+  const url = query.size > 0 ? `/api/metrics/activity?${query}` : "/api/metrics/activity";
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch activity: ${response.status}`);
+  }
+  return await response.json();
+}
+
+export async function getActivityStats(model?: string): Promise<ActivityStatsData> {
+  const query = new URLSearchParams();
+  if (model) query.set("model", model);
+  const url = query.size > 0 ? `/api/metrics/stats?${query}` : "/api/metrics/stats";
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch activity stats: ${response.status}`);
+  }
+  return await response.json();
 }
 
 export async function unloadAllModels(): Promise<void> {
@@ -174,6 +398,20 @@ export async function unloadSingleModel(model: string): Promise<void> {
     }
   } catch (error) {
     console.error("Failed to unload model", model, error);
+    throw error;
+  }
+}
+
+export async function cancelInflightRequest(id: string): Promise<void> {
+  try {
+    const response = await fetch(`/api/inflight/${encodeURIComponent(id)}/cancel`, {
+      method: "POST",
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to cancel request: ${response.status}`);
+    }
+  } catch (error) {
+    console.error("Failed to cancel inflight request", id, error);
     throw error;
   }
 }
@@ -221,6 +459,20 @@ export async function getCapture(id: number): Promise<ReqRespCapture | null> {
   } catch (error) {
     console.error("Failed to fetch capture:", error);
     return null;
+  }
+}
+
+export async function checkPerformanceEnabled(): Promise<void> {
+  try {
+    const response = await fetch("/api/performance");
+    if (!response.ok) {
+      performanceEnabled.set(false);
+      return;
+    }
+    const data = await response.json();
+    performanceEnabled.set(data.enabled);
+  } catch {
+    performanceEnabled.set(false);
   }
 }
 

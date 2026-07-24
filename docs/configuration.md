@@ -81,6 +81,7 @@ llama-swap supports many more features to customize how you want to manage your 
 | `env`     | define environment variables per model         |
 | `aliases` | serve a model with different names             |
 | `filters` | modify requests before sending to the upstream |
+| `profiles` | switch model ID replacements at runtime       |
 | `...`     | And many more tweaks                           |
 
 ## Full Configuration Example
@@ -146,6 +147,22 @@ metricsMaxInMemory: 1000
 # - set to 0 to disable
 captureBuffer: 15
 
+# ui.activity.session_id: ordered request headers used to identify sessions in
+# the Activity page's in-flight request table.
+# - optional, default: ["X-Session-ID", "X-Litellm-Session-Id"]
+# - matching is case-insensitive; the first non-empty matching header is shown
+# - set to [] to disable session ID lookup
+ui:
+  activity:
+    session_id: ["X-Session-ID", "X-Litellm-Session-Id"]
+
+# store: persistent storage for llama-swap state
+# - optional, default: in-memory sqlite database capped by metricsMaxInMemory
+# - path is a sqlite database file path
+# - file-backed sqlite keeps activity logs across restarts
+# store:
+#   path: /path/to/file.sqlite
+
 # performance: configuration for system monitoring statistics
 # - timing values are duration strings like 1s, 1h30m, 90m, 2h10s, etc.
 performance:
@@ -182,6 +199,13 @@ includeAliasesInList: false
 # - optional, default: 0 (never automatically unload)
 # - must be >= 0
 globalTTL: 0
+
+# unloadTimeout: graceful timeout in seconds when unloading a model (manual, API, or ttl expiry)
+# - optional, default: 10
+# - used before force-killing the model process on unload
+# - can be overridden per model with model.unloadTimeout
+# - large values extend how long an unload can take when a process does not exit cleanly
+unloadTimeout: 10
 
 # macros: a dictionary of string substitutions
 # - optional, default: empty dictionary
@@ -224,6 +248,60 @@ apiKeys:
   # use environment variable macros to keep secrets out of the config
   - "${env.API_KEY_1}"
   - "${env.API_KEY_2}"
+
+# profiles: named model ID replacements switched at runtime through the UI or API
+# - optional, default: empty dictionary
+# - one profile or none is active; startup and configuration reload select none
+# - pins are applied before aliases, filters, and routing
+# - targets may be a local model, peer model, alias, setParamsByID alias, or selector
+# - an empty string or YAML null (~) disables the pin with a 404; it is not
+#   added to model listings, while existing local, alias, or peer IDs remain
+profiles:
+  "coding":
+    description: "Coding-focused model routing"
+    pins:
+      "llm-code": "gpt-oss-120b"
+      "llm-plan": "qwen-unlisted"
+      "image-gen": ~
+
+# selectors: virtual model IDs resolved to concrete targets per request
+# - optional, default: empty dictionary
+# - profiles run first, so a profile pin may target a selector
+# - selector IDs cannot collide with model IDs, aliases, or peer model names
+# - selector targets cannot be other selectors
+# - selectors are not supported on /upstream/<model> paths
+selectors:
+  # warm chooses the first ready target in order, then an already-starting
+  # target, and cold-starts the first target when none are running
+  "coding-model":
+    strategy: warm
+    targets:
+      - "gpt-oss-120b"
+      - "qwen-unlisted"
+    name: "Coding Model"
+    description: "Best currently loaded coding model"
+    metadata:
+      purpose: coding
+
+  # pin always uses the first target; remaining entries are reference data
+  "llm-plan":
+    strategy: pin
+    targets:
+      - "gpt-oss-120b"
+      - "z-ai/glm-4.7"
+
+  # spillover fills local targets to the reservation count in order,
+  # starting the next target when the active targets reach that count
+  "llama":
+    strategy: spillover
+    targets:
+      - "docker-llama"
+      - "modelA"
+      - "modelB"
+    settings:
+      # requests reserved per active target before spilling over to the next target
+      # - optional, default: 1
+      spillover: 4
 
 # models: a dictionary of model configurations
 # - required
@@ -293,6 +371,11 @@ models:
     # - a ttl of 0 will mean never unload
     # - a value of 0 disables automatic unloading of the model
     ttl: 60
+
+    # unloadTimeout: graceful timeout in seconds when unloading this model (manual, API, or ttl expiry)
+    # - optional, default: global unloadTimeout
+    # - useful for slow cmdStop commands such as docker stop
+    unloadTimeout: 10
 
     # useModelName: override the model name that is sent to upstream server
     # - optional, default: ""

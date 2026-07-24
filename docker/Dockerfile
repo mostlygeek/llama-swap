@@ -29,6 +29,7 @@ ENV PATH="/usr/lib/ccache:${PATH}"
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake git python3 python3-pip libssl-dev \
     curl ca-certificates ccache make wget \
+    pkg-config libavcodec-dev libavformat-dev libavutil-dev libswresample-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
@@ -48,6 +49,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake git python3 python3-pip libssl-dev \
     curl ca-certificates ccache make wget software-properties-common \
     libvulkan-dev glslang-tools spirv-tools vulkan-validationlayers glslc \
+    pkg-config libavcodec-dev libavformat-dev libavutil-dev libswresample-dev \
     spirv-headers \
     && rm -rf /var/lib/apt/lists/*
 
@@ -64,11 +66,13 @@ RUN mkdir -p /install/bin /install/lib
 
 FROM builder-base AS whisper-true
 ARG BACKEND=cuda
+ARG WHISPER_FFMPEG=yes
 ARG WHISPER_COMMIT_HASH=master
 COPY docker/install-whisper.sh /build/
 RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
     --mount=type=cache,id=whisper-${BACKEND},target=/src/whisper.cpp/build \
-    BACKEND=${BACKEND} bash /build/install-whisper.sh "${WHISPER_COMMIT_HASH}"
+    BACKEND=${BACKEND} WHISPER_FFMPEG=${WHISPER_FFMPEG} \
+    bash /build/install-whisper.sh "${WHISPER_COMMIT_HASH}"
 
 ARG BUILD_WHISPER=false
 FROM whisper-${BUILD_WHISPER} AS whisper-build
@@ -152,6 +156,7 @@ ENV PATH="/usr/local/bin:${PATH}"
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake git ninja-build ccache make wget libssl-dev \
     libgomp1 python3 curl ca-certificates \
+    libavcodec60 libavformat60 libavutil58 libswresample4 \
     && rm -rf /var/lib/apt/lists/*
 
 # CUDA stub drivers for container compatibility
@@ -169,6 +174,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake git ninja-build ccache make wget libssl-dev \
     libgomp1 libvulkan1 mesa-vulkan-drivers \
     python3 curl ca-certificates \
+    libavcodec60 libavformat60 libavutil58 libswresample4 \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Select runtime base by BACKEND ────────────────────────────────────
@@ -217,6 +223,7 @@ COPY --from=sd-build /install/lib/ /usr/local/lib/
 # Copy llama.cpp binaries (statically linked)
 COPY --from=llama-build /install/bin/llama-server /usr/local/bin/
 COPY --from=llama-build /install/bin/llama-cli /usr/local/bin/
+COPY --from=llama-build /install/bin/llama-tts /usr/local/bin/
 
 # Copy ik-llama-server (CUDA only; empty copy for vulkan)
 COPY --from=ik-llama-build /install/bin/ /usr/local/bin/

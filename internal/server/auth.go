@@ -46,6 +46,7 @@ func CreateAuthMiddleware(cfg config.Config) chain.Middleware {
 func CreateRequestContextMiddleware(cfg config.Config) chain.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r = markInflightStart(r)
 			data, err := shared.FetchContext(r, cfg)
 			if err != nil {
 				shared.SendError(w, r, shared.ErrNoModelInContext)

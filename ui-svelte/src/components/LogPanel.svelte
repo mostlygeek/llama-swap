@@ -1,5 +1,9 @@
 <script lang="ts">
   import { persistentStore } from "../stores/persistent";
+  import { Type, WrapText, Search, SearchX, CircleX } from "@lucide/svelte";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import * as Card from "$lib/components/ui/card/index.js";
 
   interface Props {
     id: string;
@@ -81,59 +85,32 @@
   });
 </script>
 
-<div class="rounded-lg overflow-hidden flex flex-col bg-gray-950/5 dark:bg-white/10 h-full w-full p-1">
-  <div class="p-4">
-    <div class="flex items-center justify-between">
-      <h3 class="m-0 text-lg p-0">{title}</h3>
-
-      <div class="flex gap-2 items-center">
-        <button class="btn border-0" onclick={toggleFontSize} title="Change font size">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4">
-            <path d="M2 4v3h5v12h3V7h5V4H2zm19 5h-9v3h3v7h3v-7h3V9z"/>
-          </svg>
-        </button>
-        <button class="btn border-0" onclick={toggleWrapText} title="Toggle text wrap">
-          {#if $wrapTextStore}
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4">
-              <path fill-rule="evenodd" d="M3 6.75A.75.75 0 0 1 3.75 6h16.5a.75.75 0 0 1 0 1.5H3.75A.75.75 0 0 1 3 6.75ZM3 12a.75.75 0 0 1 .75-.75h16.5a.75.75 0 0 1 0 1.5H3.75A.75.75 0 0 1 3 12Zm0 5.25a.75.75 0 0 1 .75-.75h16.5a.75.75 0 0 1 0 1.5H3.75a.75.75 0 0 1-.75-.75Z" clip-rule="evenodd" />
-            </svg>
-          {:else}
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4">
-              <path fill-rule="evenodd" d="M3 6.75A.75.75 0 0 1 3.75 6h16.5a.75.75 0 0 1 0 1.5H3.75A.75.75 0 0 1 3 6.75ZM3 12a.75.75 0 0 1 .75-.75h10.5a.75.75 0 0 1 0 1.5H3.75A.75.75 0 0 1 3 12Zm0 5.25a.75.75 0 0 1 .75-.75h16.5a.75.75 0 0 1 0 1.5H3.75a.75.75 0 0 1-.75-.75Z" clip-rule="evenodd" />
-            </svg>
-          {/if}
-        </button>
-        <button class="btn border-0" onclick={toggleFilter} title="Toggle filter">
-          {#if $showFilterStore}
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4">
-              <path fill-rule="evenodd" d="M10.5 3.75a6.75 6.75 0 1 0 0 13.5 6.75 6.75 0 0 0 0-13.5ZM2.25 10.5a8.25 8.25 0 1 1 14.59 5.28l4.69 4.69a.75.75 0 1 1-1.06 1.06l-4.69-4.69A8.25 8.25 0 0 1 2.25 10.5Z" clip-rule="evenodd" />
-            </svg>
-          {:else}
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
-              <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-            </svg>
-          {/if}
-        </button>
+<Card.Root class="bg-muted/30 h-full w-full gap-0 overflow-hidden py-0">
+  <Card.Header class="border-b px-4 py-2">
+    <Card.Title class="text-sm font-semibold">{title}</Card.Title>
+    <Card.Action>
+      <div class="flex items-center gap-1">
+        <Button variant="ghost" size="icon-sm" onclick={toggleFontSize} title="Change font size">
+          <Type />
+        </Button>
+        <Button variant="ghost" size="icon-sm" onclick={toggleWrapText} title="Toggle text wrap">
+          <WrapText class={$wrapTextStore ? "text-primary" : ""} />
+        </Button>
+        <Button variant="ghost" size="icon-sm" onclick={toggleFilter} title="Toggle filter">
+          {#if $showFilterStore}<SearchX />{:else}<Search />{/if}
+        </Button>
       </div>
-    </div>
-
+    </Card.Action>
     {#if $showFilterStore}
-      <div class="mt-2 flex gap-2 items-center w-full">
-        <input
-          type="text"
-          class="w-full text-sm border border-gray-950/10 dark:border-white/5 p-2 rounded outline-none"
-          placeholder="Filter logs (regex)..."
-          bind:value={filterRegex}
-        />
-        <button class="pl-2" onclick={() => (filterRegex = "")} aria-label="Clear filter">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
-            <path fill-rule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25Zm-1.72 6.97a.75.75 0 1 0-1.06 1.06L10.94 12l-1.72 1.72a.75.75 0 1 0 1.06 1.06L12 13.06l1.72 1.72a.75.75 0 1 0 1.06-1.06L13.06 12l1.72-1.72a.75.75 0 1 0-1.06-1.06L12 10.94l-1.72-1.72Z" clip-rule="evenodd" />
-          </svg>
-        </button>
+      <div class="flex w-full items-center gap-2 pt-2">
+        <Input type="text" class="h-8" placeholder="Filter logs (regex)..." bind:value={filterRegex} />
+        <Button variant="ghost" size="icon-sm" onclick={() => (filterRegex = "")} aria-label="Clear filter">
+          <CircleX />
+        </Button>
       </div>
     {/if}
-  </div>
-  <div class="rounded-lg bg-background font-mono text-sm flex-1 overflow-hidden">
+  </Card.Header>
+  <Card.Content class="bg-background min-h-0 flex-1 p-0 font-mono text-sm">
     <pre bind:this={preElement} onscroll={handleScroll} class="{textWrapClass} {fontSizeClass} h-full overflow-auto p-4">{filteredLogs}</pre>
-  </div>
-</div>
+  </Card.Content>
+</Card.Root>

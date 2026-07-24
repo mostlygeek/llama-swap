@@ -1,4 +1,5 @@
 import type { AudioTranscriptionResponse } from "./types";
+import { playgroundSessionHeaders } from "./playgroundSession";
 
 export async function transcribeAudio(
   model: string,
@@ -11,6 +12,7 @@ export async function transcribeAudio(
 
   const response = await fetch("/v1/audio/transcriptions", {
     method: "POST",
+    headers: playgroundSessionHeaders,
     body: formData,
     signal,
   });

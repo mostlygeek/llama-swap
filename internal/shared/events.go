@@ -1,12 +1,15 @@
 package shared
 
+import "time"
+
 const ProcessStateChangeEventID = 0x01
 const ConfigFileChangedEventID = 0x03
 const ActivityLogEventID = 0x05
 const ModelPreloadedEventID = 0x06
 const InFlightRequestsEventID = 0x07
-const BackendBuildProgressEventID = 0x08
-const ModelDownloadProgressEventID = 0x09
+const ProfileChangedEventID = 0x08
+const BackendBuildProgressEventID = 0x09
+const ModelDownloadProgressEventID = 0x0A
 
 // ProcessStateChangeEvent is emitted whenever a process transitions between
 // lifecycle states. States are carried as strings so this package stays a leaf
@@ -46,7 +49,10 @@ func (e ModelPreloadedEvent) Type() uint32 {
 }
 
 type InFlightRequestsEvent struct {
-	Total int
+	Operation string                 `json:"operation"`
+	Requests  []InflightRequestEntry `json:"requests,omitempty"`
+	Request   *InflightRequestEntry  `json:"request,omitempty"`
+	ID        string                 `json:"id,omitempty"`
 }
 
 func (e InFlightRequestsEvent) Type() uint32 {
@@ -89,4 +95,26 @@ type ModelDownloadProgressEvent struct {
 
 func (e ModelDownloadProgressEvent) Type() uint32 {
 	return ModelDownloadProgressEventID
+}
+
+type InflightRequestEntry struct {
+	ID          string            `json:"id"`
+	Timestamp   time.Time         `json:"timestamp"`
+	Model       string            `json:"model"`
+	ReqPath     string            `json:"req_path"`
+	Method      string            `json:"method"`
+	ReqHeaders  map[string]string `json:"req_headers"`
+	RemoteIP    string            `json:"remote_ip"`
+	RespHeaders map[string]string `json:"resp_headers"`
+	RespBytes   int64             `json:"resp_bytes"`
+	ElapsedMs   int64             `json:"elapsed_ms"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+}
+
+type ProfileChangedEvent struct {
+	Active string
+}
+
+func (e ProfileChangedEvent) Type() uint32 {
+	return ProfileChangedEventID
 }

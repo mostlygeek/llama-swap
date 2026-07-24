@@ -1,9 +1,12 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { Maximize2, X } from "lucide-svelte";
+  import { Maximize2, X } from "@lucide/svelte";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
 
   interface Props {
     value: string;
+    ref?: HTMLTextAreaElement | null;
     placeholder?: string;
     rows?: number;
     disabled?: boolean;
@@ -12,6 +15,7 @@
 
   let {
     value = $bindable(),
+    ref = $bindable(null),
     placeholder = "",
     rows = 3,
     disabled = false,
@@ -52,69 +56,55 @@
   });
 </script>
 
-<div class="flex-1 relative group flex items-stretch min-h-0">
-  <textarea
-    class="w-full px-3 py-2 pr-10 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-inset focus:ring-primary resize-none"
+<div class="group relative flex min-h-0 flex-1 items-stretch">
+  <Textarea
+    class="resize-none pr-10"
+    bind:ref
     {placeholder}
     {rows}
     bind:value
     {onkeydown}
     {disabled}
-  ></textarea>
-  <button
-    class="absolute top-2 right-2 p-1.5 rounded-lg opacity-60 md:opacity-0 group-hover:opacity-100 transition-opacity bg-surface/90 hover:bg-surface border border-gray-200 dark:border-white/10 shadow-sm"
+  />
+  <Button
+    variant="outline"
+    size="icon-sm"
+    class="absolute right-2 top-2 opacity-60 transition-opacity group-hover:opacity-100 md:opacity-0"
     onclick={openExpanded}
     title="Expand to edit"
     type="button"
     {disabled}
   >
-    <Maximize2 class="w-4 h-4" />
-  </button>
+    <Maximize2 />
+  </Button>
 </div>
 
 {#if isExpanded}
   <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-    <div class="w-full max-w-4xl h-[80vh] flex flex-col bg-surface rounded-lg shadow-xl border border-gray-200 dark:border-white/10">
+    <div class="bg-card flex h-[80vh] w-full max-w-4xl flex-col rounded-lg border shadow-xl">
       <!-- Header -->
-      <div class="flex justify-between items-center p-4 border-b border-gray-200 dark:border-white/10">
-        <h3 class="font-medium">Edit Text</h3>
-        <button
-          class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10"
-          onclick={closeExpanded}
-          title="Close"
-          type="button"
-        >
-          <X class="w-5 h-5" />
-        </button>
+      <div class="flex items-center justify-between border-b p-4">
+        <h3 class="pb-0 font-medium">Edit Text</h3>
+        <Button variant="ghost" size="icon-sm" onclick={closeExpanded} title="Close" type="button">
+          <X />
+        </Button>
       </div>
 
       <!-- Textarea -->
       <div class="flex-1 p-4">
-        <textarea
-          bind:this={expandedTextarea}
-          class="w-full h-full px-4 py-3 rounded border border-gray-200 dark:border-white/10 bg-card focus:outline-none focus:ring-2 focus:ring-primary resize-none"
-          placeholder={placeholder}
+        <Textarea
+          bind:ref={expandedTextarea}
+          class="h-full resize-none"
+          {placeholder}
           bind:value={expandedValue}
           onkeydown={handleKeyDown}
-        ></textarea>
+        />
       </div>
 
       <!-- Footer -->
-      <div class="flex justify-end gap-2 p-4 border-t border-gray-200 dark:border-white/10">
-        <button
-          class="btn"
-          onclick={closeExpanded}
-          type="button"
-        >
-          Cancel
-        </button>
-        <button
-          class="btn bg-primary text-btn-primary-text hover:opacity-90"
-          onclick={saveExpanded}
-          type="button"
-        >
-          Done
-        </button>
+      <div class="flex justify-end gap-2 border-t p-4">
+        <Button variant="outline" onclick={closeExpanded} type="button">Cancel</Button>
+        <Button onclick={saveExpanded} type="button">Done</Button>
       </div>
     </div>
   </div>

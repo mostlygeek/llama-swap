@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -9,11 +10,9 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/event"
+	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/shared"
 )
-
-// apiUnloadTimeout is used by the API endpoints to stop processes
-const apiUnloadTimeout = 10 * time.Second
 
 // modelRecord is one entry in the OpenAI-compatible /v1/models listing.
 type modelRecord struct {
@@ -28,6 +27,7 @@ type modelRecord struct {
 	SupportedParameters []string       `json:"supported_parameters,omitempty"`
 	ContextLength       int            `json:"context_length,omitempty"`
 	Meta                map[string]any `json:"meta,omitempty"`
+	Status              map[string]any `json:"status"`
 }
 
 // cappedMetadataKeys are top-level /v1/models fields produced by the
@@ -135,9 +135,24 @@ func filterCappedMetadata(md map[string]any) map[string]any {
 // (with optional aliases) plus peer models.
 func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	created := time.Now().Unix()
-	data := make([]modelRecord, 0, len(s.cfg.Models))
+	data := make([]modelRecord, 0, len(s.cfg.Models)+len(s.cfg.Selectors))
+	running := s.local.RunningModels()
+	modelIDs := make(map[string]struct{})
 
-	newRecord := func(id, name, description string, metadata map[string]any, caps config.ModelCapConfig) modelRecord {
+	modelStatus := func(id string) string {
+		if _, ok := running[id]; ok {
+			return "loaded"
+		}
+		return "unloaded"
+	}
+
+	newRecord := func(
+		id, name, description string,
+		metadata map[string]any,
+		caps config.ModelCapConfig,
+		status string,
+		internalMetadata map[string]any,
+	) modelRecord {
 		rec := modelRecord{
 			ID:          id,
 			Object:      "model",
@@ -145,27 +160,53 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 			OwnedBy:     "llama-swap",
 			Name:        strings.TrimSpace(name),
 			Description: strings.TrimSpace(description),
+			Status:      map[string]any{"value": status},
 		}
 		rec.Architecture, rec.Capabilities, rec.SupportedParameters, rec.ContextLength = renderCapabilities(caps)
 		if !caps.Empty() {
 			metadata = filterCappedMetadata(metadata)
 		}
-		if len(metadata) > 0 {
-			rec.Meta = map[string]any{"llamaswap": metadata}
+		llamaSwapMetadata := make(map[string]any, len(metadata)+len(internalMetadata))
+		for key, value := range metadata {
+			llamaSwapMetadata[key] = value
+		}
+		for key, value := range internalMetadata {
+			llamaSwapMetadata[key] = value
+		}
+		if len(llamaSwapMetadata) > 0 {
+			rec.Meta = map[string]any{"llamaswap": llamaSwapMetadata}
 		}
 		return rec
 	}
 
 	for id, mc := range s.cfg.Models {
+		modelIDs[id] = struct{}{}
+		for _, alias := range mc.Aliases {
+			modelIDs[alias] = struct{}{}
+		}
+
 		if mc.Unlisted {
 			continue
 		}
-		data = append(data, newRecord(id, mc.Name, mc.Description, mc.Metadata, mc.Capabilities))
+		status := modelStatus(id)
+		internalMetadata := map[string]any{"type": "model"}
+		if len(mc.Aliases) > 0 {
+			internalMetadata["aliases"] = mc.Aliases
+		}
+		data = append(data, newRecord(id, mc.Name, mc.Description, mc.Metadata, mc.Capabilities, status, internalMetadata))
 
 		if s.cfg.IncludeAliasesInList {
 			for _, alias := range mc.Aliases {
 				if alias := strings.TrimSpace(alias); alias != "" {
-					data = append(data, newRecord(alias, mc.Name, mc.Description, mc.Metadata, mc.Capabilities))
+					data = append(data, newRecord(
+						alias,
+						mc.Name,
+						mc.Description,
+						mc.Metadata,
+						mc.Capabilities,
+						status,
+						map[string]any{"type": "alias", "modelID": id},
+					))
 				}
 			}
 		}
@@ -173,7 +214,65 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 
 	for peerID, peer := range s.cfg.Peers {
 		for _, modelID := range peer.Models {
-			data = append(data, newRecord(modelID, peerID+": "+modelID, "", map[string]any{"peerID": peerID}, config.ModelCapConfig{}))
+			modelIDs[modelID] = struct{}{}
+			data = append(data, newRecord(
+				modelID,
+				peerID+": "+modelID,
+				"",
+				nil,
+				config.ModelCapConfig{},
+				"unloaded",
+				map[string]any{"type": "peer", "peerID": peerID},
+			))
+		}
+	}
+
+	for selectorID, selector := range s.cfg.Selectors {
+		modelIDs[selectorID] = struct{}{}
+		if selector.Unlisted {
+			continue
+		}
+		status := "unloaded"
+		for _, target := range selector.Targets {
+			modelID, local := s.cfg.RealModelName(target)
+			if local {
+				state := running[modelID]
+				if state == process.StateReady || state == process.StateStarting {
+					status = "loaded"
+				}
+			}
+			if selector.Strategy == config.SelectorStrategyPin || status == "loaded" {
+				break
+			}
+		}
+		data = append(data, newRecord(
+			selectorID,
+			selector.Name,
+			selector.Description,
+			selector.Metadata,
+			config.ModelCapConfig{},
+			status,
+			map[string]any{"type": "selector"},
+		))
+	}
+
+	if profile, ok := s.cfg.Profiles[s.ActiveProfile()]; ok {
+		for pin, target := range profile.Pins {
+			if target == "" {
+				continue
+			}
+			if _, shadowsModel := modelIDs[pin]; shadowsModel {
+				continue
+			}
+			data = append(data, newRecord(
+				pin,
+				"",
+				"",
+				nil,
+				config.ModelCapConfig{},
+				"unloaded",
+				map[string]any{"type": "profile"},
+			))
 		}
 	}
 
@@ -205,7 +304,7 @@ type runningModel struct {
 // handleUnload stops every running local process. Peer models are remote and
 // unaffected.
 func (s *Server) handleUnload(w http.ResponseWriter, r *http.Request) {
-	s.local.Unload(apiUnloadTimeout)
+	s.local.Unload(0)
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))
 }
@@ -339,6 +438,28 @@ func (s *Server) handleUpstream(w http.ResponseWriter, r *http.Request) {
 	r.URL.Path = remainingPath
 	// Pin the resolved model so the router skips body/query extraction.
 	*r = *r.WithContext(shared.SetContext(r.Context(), shared.ReqContextData{Model: searchName, ModelID: modelID, Metadata: make(map[string]string)}))
+
+	// If the path matches an upstream.ignorePaths entry and the model is
+	// not already loaded, refuse the request without triggering a swap. The
+	// server was not able to process the response because the model was not
+	// already loaded.
+	for _, re := range s.cfg.Upstream.IgnorePaths {
+		if !re.MatchString(remainingPath) {
+			continue
+		}
+		if s.local.Handles(modelID) {
+			state, ok := s.local.RunningModels()[modelID]
+			if !ok || state != process.StateReady {
+				shared.SendResponse(w, r, http.StatusConflict,
+					fmt.Sprintf("model %s is not loaded; path matches upstream.ignorePaths", modelID))
+				return
+			}
+		}
+		// Either the model is already loaded (no swap would be triggered)
+		// or this is a peer model (peer proxying never swaps). Fall through
+		// to normal dispatch.
+		break
+	}
 
 	switch {
 	case s.local.Handles(modelID):

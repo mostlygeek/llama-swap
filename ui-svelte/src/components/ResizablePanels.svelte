@@ -135,7 +135,7 @@
   <div
     role="separator"
     tabindex="0"
-    class="{handleClass} bg-primary hover:bg-success transition-colors rounded flex-shrink-0"
+    class="{handleClass} bg-primary hover:bg-success transition-colors rounded-md flex-shrink-0"
     onmousedown={handleMouseDown}
     ontouchstart={handleTouchStart}
     onkeydown={handleKeyDown}

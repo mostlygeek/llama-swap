@@ -1,15 +1,23 @@
 <script lang="ts">
-  import { models } from "../../stores/api";
-  import { persistentStore } from "../../stores/persistent";
+  import { hasListedModels } from "../../stores/api";
+  import { createPlaygroundInterface } from "../../lib/playgroundInterface";
   import { rerank } from "../../lib/rerankApi";
   import { playgroundStores } from "../../stores/playgroundActivity";
   import ModelSelector from "./ModelSelector.svelte";
+  import EmptyState from "../EmptyState.svelte";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
+  import * as ToggleGroup from "$lib/components/ui/toggle-group/index.js";
 
   type RerankRow = { doc: string; score: number | null };
   type SortOrder = "none" | "asc" | "desc";
   type EditorMode = "table" | "json";
 
-  const selectedModelStore = persistentStore<string>("playground-rerank-model", "");
+  const iface = createPlaygroundInterface("playground-rerank-model", playgroundStores.rerankLoading);
+  const selectedModelStore = iface.selectedModel;
+  const loadingStore = iface.busy;
+  const error = iface.error;
 
   const defaultQuery = "How do LLM's work?";
   const defaultDocs = [
@@ -29,16 +37,13 @@
     ...defaultDocs.map((doc) => ({ doc, score: null })),
     { doc: "", score: null },
   ]);
-  let isLoading = $state(false);
-  let error = $state<string | null>(null);
+  let isLoading = $derived($loadingStore);
   let usage = $state<{ prompt_tokens: number; total_tokens: number } | null>(null);
-  let abortController: AbortController | null = null;
   let sortOrder = $state<SortOrder>("desc");
   let editorMode = $state<EditorMode>("table");
   let jsonText = $state("");
   let jsonError = $state<string | null>(null);
 
-  let hasModels = $derived($models.some((m) => !m.unlisted));
 
   let canSubmit = $derived((() => {
     if (!$selectedModelStore || isLoading) return false;
@@ -79,11 +84,6 @@
     if (editorMode === "table" && rows[rows.length - 1]?.doc.trim() !== "") {
       rows = [...rows, { doc: "", score: null }];
     }
-  });
-
-  // Sync loading state to activity store
-  $effect(() => {
-    playgroundStores.rerankLoading.set(isLoading);
   });
 
   function switchToJson() {
@@ -155,7 +155,7 @@
         query = submitQuery;
         editorMode = "table";
       } catch {
-        error = "Invalid JSON — fix before submitting";
+        $error = "Invalid JSON — fix before submitting";
         return;
       }
       nonEmptyEntries = rows
@@ -168,21 +168,17 @@
         .filter((e) => e.doc.trim() !== "");
     }
 
-    isLoading = true;
-    error = null;
     usage = null;
 
     // Clear previous scores
     rows = rows.map((r) => ({ ...r, score: null }));
 
-    abortController = new AbortController();
-
-    try {
+    await iface.run(async (signal) => {
       const response = await rerank(
         $selectedModelStore,
         submitQuery,
         nonEmptyEntries.map((e) => e.doc),
-        abortController.signal
+        signal
       );
 
       usage = response.usage;
@@ -196,26 +192,17 @@
         }
       }
       rows = updated;
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
-        // User cancelled
-      } else {
-        error = err instanceof Error ? err.message : "An error occurred";
-      }
-    } finally {
-      isLoading = false;
-      abortController = null;
-    }
+    });
   }
 
   function cancel() {
-    abortController?.abort();
+    iface.cancel();
   }
 
   function clear() {
     query = defaultQuery;
     rows = [...defaultDocs.map((doc) => ({ doc, score: null })), { doc: "", score: null }];
-    error = null;
+    $error = null;
     usage = null;
     sortOrder = "desc";
     jsonText = "";
@@ -234,9 +221,9 @@
   }
 
   function scoreColor(score: number | null): string {
-    if (score === null) return "text-txtsecondary";
+    if (score === null) return "text-muted-foreground";
     if (score > 0) return "text-green-600 dark:text-green-400";
-    return "text-red-500 dark:text-red-400";
+    return "text-destructive";
   }
 
   function formatScore(score: number | null): string {
@@ -256,7 +243,7 @@
     rows.every((r, i) => r.score === null && r.doc === (defaultDocs[i] ?? "")) &&
     rows.length === defaultDocs.length + 1 &&
     !jsonText.trim() &&
-    !error &&
+    !$error &&
     !usage
   );
 </script>
@@ -266,9 +253,9 @@
   <div class="shrink-0 flex flex-wrap gap-2 mb-4">
     <ModelSelector bind:value={$selectedModelStore} placeholder="Select a rerank model..." disabled={isLoading} capabilities={["reranker"]} />
     {#if editorMode === "table"}
-      <input
+      <Input
         type="text"
-        class="min-w-0 flex-1 basis-48 px-3 py-2 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
+        class="min-w-0 flex-1 basis-48"
         placeholder="Query..."
         bind:value={query}
         disabled={isLoading}
@@ -276,60 +263,48 @@
       />
     {/if}
     <!-- Table / JSON toggle -->
-    <div class="flex rounded border border-gray-200 dark:border-white/10 overflow-hidden shrink-0">
-      <button
-        class="px-3 py-1.5 text-sm transition-colors {editorMode === 'table'
-          ? 'bg-primary text-btn-primary-text'
-          : 'bg-surface hover:bg-secondary-hover'}"
-        onclick={switchToTable}
-        disabled={isLoading}
-      >
-        Table
-      </button>
-      <button
-        class="px-3 py-1.5 text-sm border-l border-gray-200 dark:border-white/10 transition-colors {editorMode === 'json'
-          ? 'bg-primary text-btn-primary-text'
-          : 'bg-surface hover:bg-secondary-hover'}"
-        onclick={switchToJson}
-        disabled={isLoading}
-      >
-        JSON
-      </button>
-    </div>
+    <ToggleGroup.Root
+      type="single"
+      variant="outline"
+      value={editorMode}
+      onValueChange={(v) => v && (v === "table" ? switchToTable() : switchToJson())}
+      class="shrink-0"
+    >
+      <ToggleGroup.Item value="table" disabled={isLoading}>Table</ToggleGroup.Item>
+      <ToggleGroup.Item value="json" disabled={isLoading}>JSON</ToggleGroup.Item>
+    </ToggleGroup.Root>
   </div>
 
-  {#if !hasModels}
-    <div class="flex-1 flex items-center justify-center text-txtsecondary">
-      <p>No models configured. Add models to your configuration to use reranking.</p>
-    </div>
+  {#if !$hasListedModels}
+    <EmptyState message="No models configured. Add models to your configuration to use reranking." />
   {:else if editorMode === "json"}
     <!-- JSON editor -->
-    <div class="flex-1 flex flex-col min-h-0 mb-4">
-      <textarea
-        class="flex-1 w-full font-mono text-sm px-3 py-2 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+    <div class="mb-4 flex min-h-0 flex-1 flex-col">
+      <Textarea
+        class="w-full flex-1 resize-none font-mono text-sm"
         bind:value={jsonText}
         disabled={isLoading}
         placeholder={'{\n  "query": "your search query",\n  "documents": [\n    "document one",\n    "document two"\n  ]\n}'}
         spellcheck={false}
-      ></textarea>
+      />
       {#if jsonError}
-        <p class="mt-1 text-sm text-red-500">{jsonError}</p>
+        <p class="text-destructive mt-1 text-sm">{jsonError}</p>
       {/if}
     </div>
   {:else}
     <!-- Document table -->
-    <div class="flex-1 overflow-y-auto mb-4 border border-gray-200 dark:border-white/10 rounded">
-      <table class="w-full border-collapse table-fixed">
+    <div class="mb-4 flex-1 overflow-y-auto rounded-lg border">
+      <table class="w-full table-fixed border-collapse">
         <colgroup>
           <col class="w-auto" />
           <col style="width: 120px" />
           <col style="width: 40px" />
         </colgroup>
-        <thead class="sticky top-0 bg-surface border-b border-gray-200 dark:border-white/10">
+        <thead class="bg-card sticky top-0 border-b">
           <tr>
-            <th class="px-3 py-2 text-left text-sm font-medium text-txtsecondary">Document</th>
+            <th class="text-muted-foreground px-3 py-2 text-left text-sm font-medium">Document</th>
             <th
-              class="px-3 py-2 text-right text-sm font-medium text-txtsecondary cursor-pointer select-none hover:text-txtprimary transition-colors"
+              class="text-muted-foreground hover:text-foreground cursor-pointer select-none px-3 py-2 text-right text-sm font-medium transition-colors"
               onclick={cycleSortOrder}
             >
               Score{sortIndicator()}
@@ -339,11 +314,11 @@
         </thead>
         <tbody>
           {#each displayRows as { row, i } (i)}
-            <tr class="border-b border-gray-100 dark:border-white/5 last:border-0">
+            <tr class="border-b last:border-0">
               <td class="px-3 py-1.5">
-                <input
+                <Input
                   type="text"
-                  class="w-full bg-transparent focus:outline-none focus:ring-1 focus:ring-primary rounded px-1 py-0.5"
+                  class="border-0 focus-visible:ring-1 h-7 px-1 py-0.5 bg-transparent"
                   placeholder={i === rows.length - 1 ? "Add document..." : "Document text..."}
                   value={row.doc}
                   oninput={(e) => updateDoc(i, (e.target as HTMLInputElement).value)}
@@ -353,21 +328,23 @@
               </td>
               <td class="px-3 py-1.5 text-right font-mono text-sm {scoreColor(row.score)}">
                 {#if isLoading && row.score === null && row.doc.trim() !== ""}
-                  <span class="inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin align-middle"></span>
+                  <span class="inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent align-middle"></span>
                 {:else}
                   {formatScore(row.score)}
                 {/if}
               </td>
               <td class="px-2 py-1.5 text-center">
-                <button
-                  class="w-7 h-7 flex items-center justify-center text-txtsecondary hover:text-red-500 transition-colors rounded disabled:opacity-30 disabled:cursor-not-allowed"
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  class="h-7 w-7 text-muted-foreground hover:text-destructive"
                   onclick={() => deleteRow(i)}
                   disabled={rows.length <= 1}
-                  tabindex="-1"
+                  tabindex={-1}
                   aria-label="Remove row"
                 >
                   ×
-                </button>
+                </Button>
               </td>
             </tr>
           {/each}
@@ -377,29 +354,19 @@
   {/if}
 
   <!-- Bottom toolbar -->
-  {#if hasModels}
-    <div class="shrink-0 flex flex-wrap items-center gap-2">
+  {#if $hasListedModels}
+    <div class="flex shrink-0 flex-wrap items-center gap-2">
       {#if isLoading}
-        <button class="btn bg-red-500 hover:bg-red-600 text-white" onclick={cancel}>
-          Cancel
-        </button>
+        <Button variant="destructive" onclick={cancel}>Cancel</Button>
       {:else}
-        <button
-          class="btn bg-primary text-btn-primary-text hover:opacity-90"
-          onclick={submit}
-          disabled={!canSubmit}
-        >
-          Rerank
-        </button>
-        <button class="btn" onclick={clear} disabled={isCleared}>
-          Clear
-        </button>
+        <Button onclick={submit} disabled={!canSubmit}>Rerank</Button>
+        <Button variant="outline" onclick={clear} disabled={isCleared}>Clear</Button>
       {/if}
 
-      {#if error}
-        <span class="text-sm text-red-500 ml-2">{error}</span>
+      {#if $error}
+        <span class="text-destructive ml-2 text-sm">{$error}</span>
       {:else if usage}
-        <span class="text-sm text-txtsecondary ml-2">{usage.total_tokens} tokens</span>
+        <span class="text-muted-foreground ml-2 text-sm">{usage.total_tokens} tokens</span>
       {/if}
     </div>
   {/if}

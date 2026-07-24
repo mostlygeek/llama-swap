@@ -1,9 +1,31 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Chart, registerables } from "chart.js";
+  import {
+    Chart,
+    LineController,
+    LineElement,
+    PointElement,
+    LinearScale,
+    CategoryScale,
+    Legend,
+    Title,
+    Tooltip,
+  } from "chart.js";
   import { isDarkMode } from "../stores/theme";
+  import * as Card from "$lib/components/ui/card/index.js";
 
-  Chart.register(...registerables);
+  // Only the line-chart pieces this component actually uses, instead of
+  // Chart.js's full `registerables` (every chart type/scale/plugin).
+  Chart.register(
+    LineController,
+    LineElement,
+    PointElement,
+    LinearScale,
+    CategoryScale,
+    Legend,
+    Title,
+    Tooltip,
+  );
 
   interface Dataset {
     label: string;
@@ -143,6 +165,8 @@
   });
 </script>
 
-<div class="card p-4 h-[300px]">
-  <canvas bind:this={canvas}></canvas>
-</div>
+<Card.Root class="h-[300px] py-0">
+  <Card.Content class="h-full p-4">
+    <canvas bind:this={canvas}></canvas>
+  </Card.Content>
+</Card.Root>

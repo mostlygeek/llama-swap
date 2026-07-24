@@ -1,0 +1,251 @@
+import { get } from "svelte/store";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  activeProfile,
+  activityRevision,
+  fetchPlaygroundModels,
+  fetchProfiles,
+  handleAPIEventMessage,
+  hasListedModels,
+  inFlightRequests,
+  inflightRequestEntries,
+  models,
+  playgroundModels,
+  profileModels,
+  profiles,
+  selectorModels,
+  setActiveProfile,
+  uiConfig,
+} from "./api";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  models.set([]);
+  playgroundModels.set([]);
+  profiles.set([]);
+  activeProfile.set(null);
+});
+
+describe("api store event handling", () => {
+  it("parses inflight request entries", () => {
+    inFlightRequests.set(0);
+    inflightRequestEntries.set([]);
+
+    handleAPIEventMessage(
+      JSON.stringify({
+        type: "inflight",
+        data: JSON.stringify({
+          operation: "snapshot",
+          requests: [
+            {
+              id: "7",
+              timestamp: "2026-07-03T00:00:00Z",
+              model: "m1",
+              req_path: "/v1/chat/completions",
+              method: "POST",
+              req_headers: { "User-Agent": "test-agent" },
+              remote_ip: "203.0.113.9",
+              resp_headers: {},
+              resp_bytes: 0,
+              elapsed_ms: 125,
+              metadata: { source: "test" },
+            },
+          ],
+        }),
+      })
+    );
+
+    expect(get(inFlightRequests)).toBe(1);
+    expect(get(inflightRequestEntries)).toEqual([
+      {
+        id: "7",
+        timestamp: "2026-07-03T00:00:00Z",
+        model: "m1",
+        req_path: "/v1/chat/completions",
+        method: "POST",
+        req_headers: { "User-Agent": "test-agent" },
+        remote_ip: "203.0.113.9",
+        resp_headers: {},
+        resp_bytes: 0,
+        elapsed_ms: 125,
+        client_received_at_ms: expect.any(Number),
+        metadata: { source: "test" },
+      },
+    ]);
+  });
+
+  it("upserts and removes inflight entries by id", () => {
+    handleAPIEventMessage(JSON.stringify({
+      type: "inflight",
+      data: JSON.stringify({
+        operation: "upsert",
+        request: {
+          id: "7",
+          timestamp: "2026-07-03T00:00:00Z",
+          model: "m1",
+          req_path: "/v1/chat/completions",
+          method: "POST",
+          req_headers: {},
+          remote_ip: "203.0.113.9",
+          resp_headers: { "Content-Type": "text/event-stream" },
+          resp_bytes: 42,
+          elapsed_ms: 250,
+        },
+      }),
+    }));
+
+    expect(get(inflightRequestEntries)).toHaveLength(1);
+    expect(get(inflightRequestEntries)[0].resp_bytes).toBe(42);
+
+    handleAPIEventMessage(JSON.stringify({
+      type: "inflight",
+      data: JSON.stringify({ operation: "remove", id: "7" }),
+    }));
+    expect(get(inflightRequestEntries)).toEqual([]);
+    expect(get(inFlightRequests)).toBe(0);
+  });
+
+  it("parses UI activity configuration", () => {
+    handleAPIEventMessage(JSON.stringify({
+      type: "uiConfig",
+      data: JSON.stringify({ activity: { session_id: ["X-Trace-ID"] } }),
+    }));
+    expect(get(uiConfig).activity.session_id).toEqual(["X-Trace-ID"]);
+  });
+
+  it("increments activity revision for activity events", () => {
+    activityRevision.set(0);
+
+    handleAPIEventMessage(
+      JSON.stringify({
+        type: "activity",
+        data: JSON.stringify({ id: 42 }),
+      })
+    );
+
+    expect(get(activityRevision)).toBe(1);
+  });
+
+  it("applies profile change events", () => {
+    activeProfile.set(null);
+    handleAPIEventMessage(JSON.stringify({
+      type: "profileChanged",
+      data: JSON.stringify({ active: "coding" }),
+    }));
+    expect(get(activeProfile)).toBe("coding");
+  });
+
+  it("loads and switches profiles", async () => {
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          active: null,
+          profiles: [{ id: "coding", description: "Coding", pins: { llm: "real" } }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ active: "coding" }),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    await fetchProfiles();
+    expect(get(profiles)).toHaveLength(1);
+    expect(get(activeProfile)).toBeNull();
+
+    await setActiveProfile("coding");
+    expect(get(activeProfile)).toBe("coding");
+    expect(mockFetch).toHaveBeenLastCalledWith("/api/profiles/active", expect.objectContaining({
+      method: "PUT",
+      body: JSON.stringify({ name: "coding" }),
+    }));
+  });
+
+  it("loads Playground models and virtual model types from v1/models", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [
+          {
+            id: "real",
+            name: "Real",
+            capabilities: { vision: true },
+            meta: { llamaswap: { type: "model", aliases: ["variant", "alternate"] } },
+          },
+          {
+            id: "variant",
+            meta: { llamaswap: { type: "alias", modelID: "real" } },
+          },
+          {
+            id: "remote-model",
+            meta: { llamaswap: { type: "peer", peerID: "remote" } },
+          },
+          {
+            id: "pool",
+            meta: { llamaswap: { type: "selector" } },
+          },
+          {
+            id: "public",
+            meta: { llamaswap: { type: "profile" } },
+          },
+        ],
+      }),
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    await fetchPlaygroundModels();
+
+    expect(mockFetch).toHaveBeenCalledWith("/v1/models");
+    expect(get(playgroundModels).map((model) => model.id)).not.toContain("variant");
+    expect(get(playgroundModels).find((model) => model.id === "real")).toMatchObject({
+      aliases: ["variant", "alternate"],
+      capabilities: { vision: true },
+      playgroundType: "model",
+    });
+    expect(get(playgroundModels).find((model) => model.id === "remote-model")).toMatchObject({
+      peerID: "remote",
+      playgroundType: "peer",
+    });
+    expect(get(selectorModels).map((model) => model.id)).toEqual(["pool"]);
+    expect(get(profileModels).map((model) => model.id)).toEqual(["public"]);
+    expect(get(hasListedModels)).toBe(true);
+
+    playgroundModels.set([]);
+    expect(get(selectorModels)).toEqual([]);
+    expect(get(profileModels)).toEqual([]);
+    expect(get(hasListedModels)).toBe(false);
+  });
+
+  it("coalesces overlapping Playground model refreshes", async () => {
+    type ModelResponse = {
+      ok: boolean;
+      json: () => Promise<{ data: [] }>;
+    };
+    let resolveFirst!: (response: ModelResponse) => void;
+    const firstResponse = new Promise<ModelResponse>((resolve) => {
+      resolveFirst = resolve;
+    });
+    const mockFetch = vi.fn()
+      .mockReturnValueOnce(firstResponse)
+      .mockResolvedValue({
+        ok: true,
+        json: async () => ({ data: [] }),
+      });
+    vi.stubGlobal("fetch", mockFetch);
+
+    const first = fetchPlaygroundModels();
+    const overlapping = fetchPlaygroundModels();
+
+    expect(overlapping).toBe(first);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    resolveFirst({
+      ok: true,
+      json: async () => ({ data: [] }),
+    });
+    await first;
+
+    await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+  });
+});

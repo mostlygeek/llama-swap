@@ -1,28 +1,60 @@
 <script lang="ts">
-  import { models } from "../../stores/api";
+  import { hasListedModels } from "../../stores/api";
   import { persistentStore } from "../../stores/persistent";
+  import { createPlaygroundInterface } from "../../lib/playgroundInterface";
   import { generateSpeech } from "../../lib/speechApi";
   import { playgroundStores } from "../../stores/playgroundActivity";
   import ModelSelector from "./ModelSelector.svelte";
   import ExpandableTextarea from "./ExpandableTextarea.svelte";
+  import EmptyState from "../EmptyState.svelte";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
+  import { RefreshCw, Download } from "@lucide/svelte";
+  import { playgroundSessionHeaders } from "../../lib/playgroundSession";
 
-  const selectedModelStore = persistentStore<string>("playground-speech-model", "");
+  const iface = createPlaygroundInterface("playground-speech-model", playgroundStores.speechGenerating);
+  const selectedModelStore = iface.selectedModel;
+  const busyStore = iface.busy;
+  const errorStore = iface.error;
   const selectedVoiceStore = persistentStore<string>("playground-speech-voice", "coral");
   const autoPlayStore = persistentStore<boolean>("playground-speech-autoplay", false);
 
   let inputText = $state("");
-  let isGenerating = $state(false);
+  let isGenerating = $derived($busyStore);
+  let error = $derived($errorStore);
   let generatedAudioUrl = $state<string | null>(null);
   let generatedVoice = $state<string | null>(null);
   let generatedTimestamp = $state<Date | null>(null);
-  let error = $state<string | null>(null);
-  let abortController = $state<AbortController | null>(null);
   let audioElement = $state<HTMLAudioElement | null>(null);
   let availableVoices = $state<string[]>(["coral", "alloy", "echo", "fable", "onyx", "nova", "shimmer"]);
   let isLoadingVoices = $state(false);
 
   const defaultVoices = ["coral", "alloy", "echo", "fable", "onyx", "nova", "shimmer"];
   const CACHE_KEY = "playground-speech-voices-cache";
+
+  // schema detection for openai format or plain list of strings
+  function getVoiceIds(data: unknown): string[] {
+    if (Array.isArray(data)) {
+      return data.filter((voice): voice is string => typeof voice === "string");
+    }
+
+    if (!data || typeof data !== "object") return [];
+
+    const response = data as { voices?: unknown };
+    if (Array.isArray(response.voices)) {
+      return response.voices
+        .map((voice) =>
+          typeof voice === "string"
+            ? voice
+            : voice && typeof voice === "object" && typeof (voice as { id?: unknown }).id === "string"
+              ? (voice as { id: string }).id
+              : null
+        )
+        .filter((voice): voice is string => voice !== null);
+    }
+
+    return [];
+  }
 
   function getVoicesCache(): Record<string, string[]> {
     if (typeof window === "undefined") return {};
@@ -43,13 +75,8 @@
     }
   }
 
-  let hasModels = $derived($models.some((m) => !m.unlisted));
 
   let isInitialLoad = $state(true);
-
-  $effect(() => {
-    playgroundStores.speechGenerating.set(isGenerating);
-  });
 
   // On page load, restore cached voices for the selected model if available
   $effect(() => {
@@ -72,7 +99,10 @@
     isLoadingVoices = true;
 
     try {
-      const response = await fetch(`/v1/audio/voices?model=${encodeURIComponent(model)}`);
+      const response = await fetch(`/v1/audio/voices?model=${encodeURIComponent(model)}`, {
+        cache: "no-store",
+        headers: playgroundSessionHeaders,
+      });
       if (!response.ok) {
         // Fall back to default voices if API call fails
         availableVoices = defaultVoices;
@@ -83,8 +113,7 @@
         return;
       }
       const data = await response.json();
-      // Expect response to be an array of voice strings or an object with a voices array
-      const voices = Array.isArray(data) ? data : (data.voices || defaultVoices);
+      const voices = getVoiceIds(data);
       const newVoices = voices.length > 0 ? voices : defaultVoices;
 
       availableVoices = newVoices;
@@ -106,8 +135,7 @@
     }
   }
 
-  function handleVoiceChange(event: Event) {
-    const value = (event.target as HTMLSelectElement).value;
+  function handleVoiceChange(value: string) {
     if (value === "(refresh)") {
       refreshVoices();
     } else {
@@ -129,16 +157,12 @@
     const trimmedText = inputText.trim();
     if (!trimmedText || !$selectedModelStore || isGenerating) return;
 
-    isGenerating = true;
-    error = null;
-    abortController = new AbortController();
-
-    try {
+    await iface.run(async (signal) => {
       const audioBlob = await generateSpeech(
         $selectedModelStore,
         trimmedText,
         $selectedVoiceStore,
-        abortController.signal
+        signal
       );
 
       // Revoke previous URL to prevent memory leaks
@@ -150,20 +174,11 @@
       generatedAudioUrl = URL.createObjectURL(audioBlob);
       generatedVoice = $selectedVoiceStore;
       generatedTimestamp = new Date();
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
-        // User cancelled
-      } else {
-        error = err instanceof Error ? err.message : "An error occurred";
-      }
-    } finally {
-      isGenerating = false;
-      abortController = null;
-    }
+    });
   }
 
   function cancelGeneration() {
-    abortController?.abort();
+    iface.cancel();
   }
 
   function clearInput() {
@@ -208,49 +223,42 @@
   <div class="shrink-0 flex gap-2 mb-4">
     <ModelSelector bind:value={$selectedModelStore} placeholder="Select a speech model..." disabled={isGenerating} capabilities={["audio_speech"]} />
     <div class="flex gap-2">
-      <select
-        class="shrink-0 px-3 py-2 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
+      <Select.Root
+        type="single"
         value={$selectedVoiceStore}
-        onchange={handleVoiceChange}
-        disabled={isGenerating || isLoadingVoices || !$selectedModelStore}
+        onValueChange={(v) => v && handleVoiceChange(v)}
       >
-        {#each availableVoices as voice (voice)}
-          <option value={voice}>{voice}</option>
-        {/each}
-        <option value="(refresh)">(refresh)</option>
-      </select>
-      {#if $selectedModelStore && !getVoicesCache()[$selectedModelStore]}
-        <button
-          class="btn shrink-0"
+        <Select.Trigger class="h-9 w-40">{$selectedVoiceStore}</Select.Trigger>
+        <Select.Content class="max-h-[60vh]">
+          {#each availableVoices as voice (voice)}
+            <Select.Item value={voice}>{voice}</Select.Item>
+          {/each}
+          <Select.Item value="(refresh)">(refresh)</Select.Item>
+        </Select.Content>
+      </Select.Root>
+      {#if $selectedModelStore}
+        <Button
+          variant="outline"
+          size="icon"
+          class="shrink-0"
           onclick={refreshVoices}
           disabled={isLoadingVoices}
           title={isLoadingVoices ? "Loading voices..." : "Load voices for this model"}
         >
-          {#if isLoadingVoices}
-            <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-          {:else}
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-            </svg>
-          {/if}
-        </button>
+          <RefreshCw class={isLoadingVoices ? "animate-spin" : ""} />
+        </Button>
       {/if}
     </div>
   </div>
 
   <!-- Empty state for no models configured -->
-  {#if !hasModels}
-    <div class="flex-1 flex items-center justify-center text-txtsecondary">
-      <p>No models configured. Add models to your configuration to generate speech.</p>
-    </div>
+  {#if !$hasListedModels}
+    <EmptyState message="No models configured. Add models to your configuration to generate speech." />
   {:else}
     <!-- Audio display area -->
-    <div class="shrink-0 mb-4 bg-surface border border-gray-200 dark:border-white/10 rounded p-4 md:p-6">
+    <div class="shrink-0 mb-4 bg-background border border-border rounded-md p-4 md:p-6">
       {#if isGenerating}
-        <div class="flex items-center justify-center text-txtsecondary py-8">
+        <div class="flex items-center justify-center text-muted-foreground py-8">
           <div class="text-center">
             <div class="inline-block w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mb-2"></div>
             <p>Generating speech...</p>
@@ -267,7 +275,7 @@
         <div class="flex flex-col gap-4">
           <!-- Header with metadata and download -->
           <div class="flex items-center justify-between gap-4">
-            <div class="flex flex-wrap gap-3 text-sm text-txtsecondary">
+            <div class="flex flex-wrap gap-3 text-sm text-muted-foreground">
               {#if generatedVoice}
                 <span class="flex items-center gap-1">
                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -285,15 +293,9 @@
                 </span>
               {/if}
             </div>
-            <button
-              class="btn shrink-0"
-              onclick={downloadAudio}
-              title="Download audio file"
-            >
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-              </svg>
-            </button>
+            <Button variant="outline" size="icon" class="shrink-0" onclick={downloadAudio} title="Download audio file">
+              <Download />
+            </Button>
           </div>
 
           <!-- Audio player with larger controls -->
@@ -305,7 +307,7 @@
           </div>
         </div>
       {:else}
-        <div class="flex items-center justify-center text-txtsecondary py-8">
+        <div class="flex items-center justify-center text-muted-foreground py-8">
           <div class="text-center">
             <svg class="w-12 h-12 md:w-16 md:h-16 mx-auto mb-2 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>
@@ -327,24 +329,25 @@
       />
       <div class="shrink-0 flex md:flex-col gap-2">
         {#if isGenerating}
-          <button class="btn bg-red-500 hover:bg-red-600 text-white flex-1 md:flex-none" onclick={cancelGeneration}>
+          <Button variant="destructive" class="flex-1 md:flex-none" onclick={cancelGeneration}>
             Cancel
-          </button>
+          </Button>
         {:else}
-          <button
-            class="btn bg-primary text-btn-primary-text hover:opacity-90 flex-1 md:flex-none"
+          <Button
+            class="flex-1 md:flex-none"
             onclick={generate}
             disabled={!inputText.trim() || !$selectedModelStore}
           >
             Generate
-          </button>
-          <button
-            class="btn flex-1 md:flex-none"
+          </Button>
+          <Button
+            variant="outline"
+            class="flex-1 md:flex-none"
             onclick={clearInput}
             disabled={!inputText.trim()}
           >
             Clear
-          </button>
+          </Button>
           <label class="flex items-center justify-center gap-2 text-sm cursor-pointer">
             <input
               type="checkbox"

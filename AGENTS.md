@@ -5,16 +5,14 @@ llama-swap is a light weight, transparent proxy server that provides automatic m
 ## Tech stack
 
 - golang
-- typescript, vite and svelt5 for UI (located in ui/)
+- typescript, vite and svelte 5 for UI (located in ui-svelte/)
 
 ## Workflow Tasks
 
 - when summarizing changes only include details that require further action
-- just say "Done." when there is no further action
-- use the github CLI `gh` to create pull requests and work with github
 - Rules for creating pull requests:
-  - keep them short and focused on changes.
-  - never include a test plan
+  - keep them short and focused on changes
+  - skip the test plan
   - write the summary using the same style rules as commit message
 
 ## Testing
@@ -30,7 +28,7 @@ llama-swap is a light weight, transparent proxy server that provides automatic m
 ### Commit message example format:
 
 ```
-proxy: add new feature
+internal/server: add new feature
 
 Add new feature that implements functionality X and Y.
 

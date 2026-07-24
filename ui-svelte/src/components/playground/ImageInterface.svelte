@@ -1,14 +1,24 @@
 <script lang="ts">
-  import { models } from "../../stores/api";
+  import { hasListedModels } from "../../stores/api";
   import { persistentStore } from "../../stores/persistent";
+  import { createPlaygroundInterface } from "../../lib/playgroundInterface";
   import { generateImage } from "../../lib/imageApi";
   import { generateSdImage, fetchSdLoras } from "../../lib/sdApi";
   import { playgroundStores } from "../../stores/playgroundActivity";
   import ModelSelector from "./ModelSelector.svelte";
   import ExpandableTextarea from "./ExpandableTextarea.svelte";
+  import EmptyState from "../EmptyState.svelte";
   import type { ImageApiMode, SdApiLora, SdApiLoraRef } from "../../lib/types";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
+  import { Download, X } from "@lucide/svelte";
 
-  const selectedModelStore = persistentStore<string>("playground-image-model", "");
+  const iface = createPlaygroundInterface("playground-image-model", playgroundStores.imageGenerating);
+  const selectedModelStore = iface.selectedModel;
+  const busyStore = iface.busy;
+  const error = iface.error;
   const selectedSizeStore = persistentStore<string>("playground-image-size", "1024x1024");
   const apiModeStore = persistentStore<ImageApiMode>("playground-image-api-mode", "openai");
 
@@ -22,10 +32,8 @@
   const sdBatchSizeStore = persistentStore<number>("playground-sdapi-batch-size", 1);
 
   let prompt = $state("");
-  let isGenerating = $state(false);
+  let isGenerating = $derived($busyStore);
   let generatedImages = $state<string[]>([]);
-  let error = $state<string | null>(null);
-  let abortController = $state<AbortController | null>(null);
   let showFullscreen = $state(false);
   let fullscreenIndex = $state(0);
   let showSettings = $state(false);
@@ -37,12 +45,7 @@
   let lorasLoaded = $state(false);
   let loraError = $state<string | null>(null);
 
-  let hasModels = $derived($models.some((m) => !m.unlisted));
   let isSdapi = $derived($apiModeStore === "sdapi");
-
-  $effect(() => {
-    playgroundStores.imageGenerating.set(isGenerating);
-  });
 
   async function loadLoras() {
     if (!$selectedModelStore || isLoadingLoras) return;
@@ -59,18 +62,6 @@
     } finally {
       isLoadingLoras = false;
     }
-  }
-
-  function addLora(event: Event) {
-    const select = event.target as HTMLSelectElement;
-    const path = select.value;
-    if (!path) return;
-
-    const lora = availableLoras.find((l) => l.path === path);
-    if (lora && !selectedLoras.some((l) => l.path === path)) {
-      selectedLoras = [...selectedLoras, { path: lora.path, multiplier: 1.0 }];
-    }
-    select.value = "";
   }
 
   function removeLora(path: string) {
@@ -91,11 +82,7 @@
     const trimmedPrompt = prompt.trim();
     if (!trimmedPrompt || !$selectedModelStore || isGenerating) return;
 
-    isGenerating = true;
-    error = null;
-    abortController = new AbortController();
-
-    try {
+    await iface.run(async (signal) => {
       if (isSdapi) {
         const [w, h] = $selectedSizeStore.split("x").map(Number);
         const request = {
@@ -113,7 +100,7 @@
           lora: selectedLoras.length > 0 ? selectedLoras : undefined,
         };
 
-        const response = await generateSdImage(request, abortController.signal);
+        const response = await generateSdImage(request, signal);
         if (response.images && response.images.length > 0) {
           generatedImages = response.images.map(
             (img) => `data:image/png;base64,${img}`
@@ -124,7 +111,7 @@
           $selectedModelStore,
           trimmedPrompt,
           $selectedSizeStore,
-          abortController.signal
+          signal
         );
 
         if (response.data && response.data.length > 0) {
@@ -136,25 +123,16 @@
           }
         }
       }
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
-        // User cancelled
-      } else {
-        error = err instanceof Error ? err.message : "An error occurred";
-      }
-    } finally {
-      isGenerating = false;
-      abortController = null;
-    }
+    });
   }
 
   function cancelGeneration() {
-    abortController?.abort();
+    iface.cancel();
   }
 
   function clearImage() {
     generatedImages = [];
-    error = null;
+    $error = null;
     prompt = "";
   }
 
@@ -195,65 +173,73 @@
   <div class="shrink-0 flex flex-wrap gap-2 mb-4">
     <ModelSelector bind:value={$selectedModelStore} placeholder="Select an image model..." disabled={isGenerating} capabilities={["image_generation", "image_to_image"]} matchAny={true} />
 
-    <select
-      class="px-3 py-2 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
-      bind:value={$apiModeStore}
-      disabled={isGenerating}
+    <Select.Root
+      type="single"
+      value={$apiModeStore}
+      onValueChange={(v) => v && apiModeStore.set(v as ImageApiMode)}
     >
-      <option value="openai">OpenAI</option>
-      <option value="sdapi">SDAPI</option>
-    </select>
+      <Select.Trigger class="h-9 w-32">{$apiModeStore}</Select.Trigger>
+      <Select.Content>
+        <Select.Item value="openai">OpenAI</Select.Item>
+        <Select.Item value="sdapi">SDAPI</Select.Item>
+      </Select.Content>
+    </Select.Root>
 
-    <select
-      class="px-3 py-2 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
-      bind:value={$selectedSizeStore}
-      disabled={isGenerating}
+    <Select.Root
+      type="single"
+      value={$selectedSizeStore}
+      onValueChange={(v) => v && selectedSizeStore.set(v)}
     >
-      <optgroup label="Square">
-        <option value="512x512">512x512</option>
-        <option value="1024x1024">1024x1024</option>
-      </optgroup>
-      <optgroup label="Landscape">
-        <option value="1024x768">1024x768 (4:3)</option>
-        <option value="1280x720">1280x720 (16:9)</option>
-        <option value="1792x1024">1792x1024 (SDXL)</option>
-      </optgroup>
-      <optgroup label="Portrait">
-        <option value="768x1024">768x1024 (3:4)</option>
-        <option value="720x1280">720x1280 (9:16)</option>
-        <option value="1024x1792">1024x1792 (SDXL)</option>
-      </optgroup>
-    </select>
+      <Select.Trigger class="h-9 w-40">{$selectedSizeStore}</Select.Trigger>
+      <Select.Content>
+        <Select.Group>
+          <Select.Label>Square</Select.Label>
+          <Select.Item value="512x512">512x512</Select.Item>
+          <Select.Item value="1024x1024">1024x1024</Select.Item>
+        </Select.Group>
+        <Select.Separator />
+        <Select.Group>
+          <Select.Label>Landscape</Select.Label>
+          <Select.Item value="1024x768">1024x768 (4:3)</Select.Item>
+          <Select.Item value="1280x720">1280x720 (16:9)</Select.Item>
+          <Select.Item value="1792x1024">1792x1024 (SDXL)</Select.Item>
+        </Select.Group>
+        <Select.Separator />
+        <Select.Group>
+          <Select.Label>Portrait</Select.Label>
+          <Select.Item value="768x1024">768x1024 (3:4)</Select.Item>
+          <Select.Item value="720x1280">720x1280 (9:16)</Select.Item>
+          <Select.Item value="1024x1792">1024x1792 (SDXL)</Select.Item>
+        </Select.Group>
+      </Select.Content>
+    </Select.Root>
 
     {#if isSdapi}
-      <button
-        class="px-3 py-2 rounded border border-gray-200 dark:border-white/10 bg-surface hover:bg-secondary-hover transition-colors"
-        onclick={() => showSettings = !showSettings}
-      >
+      <Button variant="outline" onclick={() => showSettings = !showSettings}>
         {showSettings ? "Hide Settings" : "Settings"}
-      </button>
+      </Button>
     {/if}
   </div>
 
   <!-- SDAPI Settings Panel -->
   {#if isSdapi && showSettings}
-    <div class="shrink-0 mb-4 p-4 rounded border border-gray-200 dark:border-white/10 bg-surface">
+    <div class="shrink-0 mb-4 p-4 rounded-md border border-border bg-background">
       <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
         <label class="flex flex-col gap-1">
-          <span class="text-xs text-txtsecondary">Steps</span>
-          <input
+          <span class="text-xs text-muted-foreground">Steps</span>
+          <Input
             type="number"
-            class="px-2 py-1 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
+            class="h-8"
             bind:value={$sdStepsStore}
             min="1"
             max="150"
           />
         </label>
         <label class="flex flex-col gap-1">
-          <span class="text-xs text-txtsecondary">CFG Scale</span>
-          <input
+          <span class="text-xs text-muted-foreground">CFG Scale</span>
+          <Input
             type="number"
-            class="px-2 py-1 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
+            class="h-8"
             bind:value={$sdCfgScaleStore}
             min="1"
             max="30"
@@ -261,121 +247,141 @@
           />
         </label>
         <label class="flex flex-col gap-1">
-          <span class="text-xs text-txtsecondary">Seed (-1 = random)</span>
-          <input
+          <span class="text-xs text-muted-foreground">Seed (-1 = random)</span>
+          <Input
             type="number"
-            class="px-2 py-1 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
+            class="h-8"
             bind:value={$sdSeedStore}
             min="-1"
           />
         </label>
         <label class="flex flex-col gap-1">
-          <span class="text-xs text-txtsecondary">Batch Size</span>
-          <input
+          <span class="text-xs text-muted-foreground">Batch Size</span>
+          <Input
             type="number"
-            class="px-2 py-1 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
+            class="h-8"
             bind:value={$sdBatchSizeStore}
             min="1"
             max="8"
           />
         </label>
         <label class="flex flex-col gap-1">
-          <span class="text-xs text-txtsecondary">Sampler</span>
-          <select
-            class="px-2 py-1 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
-            bind:value={$sdSamplerStore}
+          <span class="text-xs text-muted-foreground">Sampler</span>
+          <Select.Root
+            type="single"
+            value={$sdSamplerStore}
+            onValueChange={(v) => sdSamplerStore.set(v ?? "")}
           >
-            <option value="">Default</option>
-            <option value="euler_a">euler_a</option>
-            <option value="euler">euler</option>
-            <option value="heun">heun</option>
-            <option value="dpm2">dpm2</option>
-            <option value="dpmpp2s_a">dpmpp2s_a</option>
-            <option value="dpmpp2m">dpmpp2m</option>
-            <option value="dpmpp2mv2">dpmpp2mv2</option>
-            <option value="ipndm">ipndm</option>
-            <option value="ipndm_v">ipndm_v</option>
-            <option value="lcm">lcm</option>
-            <option value="ddim_trailing">ddim_trailing</option>
-            <option value="tcd">tcd</option>
-          </select>
+            <Select.Trigger class="h-8">{$sdSamplerStore || "Default"}</Select.Trigger>
+            <Select.Content>
+              <Select.Item value="">Default</Select.Item>
+              <Select.Item value="euler_a">euler_a</Select.Item>
+              <Select.Item value="euler">euler</Select.Item>
+              <Select.Item value="heun">heun</Select.Item>
+              <Select.Item value="dpm2">dpm2</Select.Item>
+              <Select.Item value="dpmpp2s_a">dpmpp2s_a</Select.Item>
+              <Select.Item value="dpmpp2m">dpmpp2m</Select.Item>
+              <Select.Item value="dpmpp2mv2">dpmpp2mv2</Select.Item>
+              <Select.Item value="ipndm">ipndm</Select.Item>
+              <Select.Item value="ipndm_v">ipndm_v</Select.Item>
+              <Select.Item value="lcm">lcm</Select.Item>
+              <Select.Item value="ddim_trailing">ddim_trailing</Select.Item>
+              <Select.Item value="tcd">tcd</Select.Item>
+            </Select.Content>
+          </Select.Root>
         </label>
         <label class="flex flex-col gap-1">
-          <span class="text-xs text-txtsecondary">Scheduler</span>
-          <select
-            class="px-2 py-1 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
-            bind:value={$sdSchedulerStore}
+          <span class="text-xs text-muted-foreground">Scheduler</span>
+          <Select.Root
+            type="single"
+            value={$sdSchedulerStore}
+            onValueChange={(v) => sdSchedulerStore.set(v ?? "")}
           >
-            <option value="">Auto for model</option>
-            <option value="discrete">discrete</option>
-            <option value="karras">karras</option>
-            <option value="exponential">exponential</option>
-            <option value="ays">ays</option>
-            <option value="gits">gits</option>
-          </select>
+            <Select.Trigger class="h-8">{$sdSchedulerStore || "Auto for model"}</Select.Trigger>
+            <Select.Content>
+              <Select.Item value="">Auto for model</Select.Item>
+              <Select.Item value="discrete">discrete</Select.Item>
+              <Select.Item value="karras">karras</Select.Item>
+              <Select.Item value="exponential">exponential</Select.Item>
+              <Select.Item value="ays">ays</Select.Item>
+              <Select.Item value="gits">gits</Select.Item>
+            </Select.Content>
+          </Select.Root>
         </label>
       </div>
 
       <label class="flex flex-col gap-1 mb-3">
-        <span class="text-xs text-txtsecondary">Negative Prompt</span>
-        <textarea
-          class="px-2 py-1 rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary resize-y text-sm"
+        <span class="text-xs text-muted-foreground">Negative Prompt</span>
+        <Textarea
           bind:value={$sdNegativePromptStore}
-          rows="2"
+          rows={2}
           placeholder="Elements to avoid..."
-        ></textarea>
+        ></Textarea>
       </label>
 
       <!-- LoRA Selection -->
       <div>
-        <span class="text-xs text-txtsecondary block mb-1">LoRAs</span>
+        <span class="text-xs text-muted-foreground block mb-1">LoRAs</span>
         <div class="flex items-center gap-2 mb-2">
-          <button
-            class="px-3 py-1.5 text-sm rounded border border-gray-200 dark:border-white/10 bg-surface hover:bg-secondary-hover transition-colors disabled:opacity-50"
+          <Button
+            variant="outline"
+            size="sm"
             onclick={loadLoras}
             disabled={!$selectedModelStore || isLoadingLoras}
           >
             {isLoadingLoras ? "Loading..." : lorasLoaded ? "Reload LoRAs" : "Load LoRAs"}
-          </button>
+          </Button>
           {#if lorasLoaded && availableLoras.length > 0}
-            <select
-              class="flex-1 px-2 py-1.5 text-sm rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-2 focus:ring-primary"
-              onchange={addLora}
+            <Select.Root
+              type="single"
+              value=""
+              onValueChange={(v) => {
+                if (v) {
+                  const lora = availableLoras.find((l) => l.path === v);
+                  if (lora && !selectedLoras.some((s) => s.path === v)) {
+                    selectedLoras = [...selectedLoras, { path: lora.path, multiplier: 1.0 }];
+                  }
+                }
+              }}
             >
-              <option value="">Add a LoRA...</option>
-              {#each availableLoras.filter((l) => !selectedLoras.some((s) => s.path === l.path)) as lora}
-                <option value={lora.path}>{lora.name}</option>
-              {/each}
-            </select>
+              <Select.Trigger class="h-8 flex-1">Add a LoRA...</Select.Trigger>
+              <Select.Content>
+                {#each availableLoras.filter((l) => !selectedLoras.some((s) => s.path === l.path)) as lora (lora.path)}
+                  <Select.Item value={lora.path}>{lora.name}</Select.Item>
+                {/each}
+              </Select.Content>
+            </Select.Root>
           {/if}
         </div>
         {#if loraError}
           <p class="text-xs text-red-500 mb-1">{loraError}</p>
         {/if}
         {#if lorasLoaded && availableLoras.length === 0}
-          <p class="text-xs text-txtsecondary">No LoRAs available</p>
+          <p class="text-xs text-muted-foreground">No LoRAs available</p>
         {/if}
         {#if selectedLoras.length > 0}
           <div class="flex flex-col gap-1.5">
             {#each selectedLoras as lora}
               <div class="flex items-center gap-2 text-sm">
                 <span class="flex-1 truncate">{getLoraName(lora.path)}</span>
-                <input
+                <Input
                   type="number"
-                  class="w-20 px-1.5 py-1 text-xs rounded border border-gray-200 dark:border-white/10 bg-surface focus:outline-none focus:ring-1 focus:ring-primary"
+                  class="h-7 w-20 text-xs"
                   value={lora.multiplier}
                   oninput={(e) => updateLoraMultiplier(lora.path, parseFloat((e.target as HTMLInputElement).value) || 1)}
                   min="0"
                   max="2"
                   step="0.1"
                 />
-                <button
-                  class="px-1.5 py-0.5 text-xs rounded border border-gray-200 dark:border-white/10 hover:bg-red-500 hover:text-white hover:border-red-500 transition-colors"
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="h-7 px-1.5 text-xs hover:bg-destructive hover:text-destructive-foreground"
                   onclick={() => removeLora(lora.path)}
                   aria-label="Remove LoRA"
                 >
-                  x
-                </button>
+                  <X class="size-3" />
+                </Button>
               </div>
             {/each}
           </div>
@@ -385,25 +391,22 @@
   {/if}
 
   <!-- Empty state for no models configured -->
-  {#if !hasModels}
-    <div class="flex-1 flex items-center justify-center text-txtsecondary">
-      <p>No models configured. Add models to your configuration to generate images.</p>
-    </div>
+  {#if !$hasListedModels}
+    <EmptyState message="No models configured. Add models to your configuration to generate images." />
   {:else}
     <!-- Image display area -->
-    <div class="flex-1 overflow-auto mb-4 flex items-center justify-center bg-surface border border-gray-200 dark:border-white/10 rounded">
+    <div class="flex-1 overflow-auto mb-4 flex items-center justify-center bg-background border border-border rounded-md">
       {#if isGenerating}
-        <div class="text-center text-txtsecondary">
+        <div class="text-center text-muted-foreground">
           <div class="inline-block w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mb-2"></div>
           <p>Generating image...</p>
         </div>
-      {:else if error}
+      {:else if $error}
         <div class="text-center text-red-500 p-4">
           <p class="font-medium">Error</p>
-          <p class="text-sm mt-1">{error}</p>
+          <p class="text-sm mt-1">{$error}</p>
         </div>
       {:else if generatedImages.length > 1}
-        <!-- Grid for multiple images (batch) -->
         <div class="grid grid-cols-2 gap-2 p-2 w-full h-full overflow-auto">
           {#each generatedImages as img, i}
             <div class="relative flex items-center justify-center">
@@ -418,15 +421,15 @@
                   class="max-w-full max-h-full object-contain hover:opacity-90 transition-opacity"
                 />
               </button>
-              <button
-                class="absolute bottom-2 right-2 p-1.5 bg-black/60 hover:bg-black/80 text-white rounded-full transition-colors"
+              <Button
+                variant="secondary"
+                size="icon"
+                class="absolute bottom-2 right-2 h-8 w-8 bg-black/60 hover:bg-black/80 text-white"
                 onclick={(e) => { e.stopPropagation(); downloadImage(i); }}
                 aria-label="Download image"
               >
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-                </svg>
-              </button>
+                <Download class="size-4" />
+              </Button>
             </div>
           {/each}
         </div>
@@ -443,18 +446,18 @@
               class="max-w-full max-h-full object-contain hover:opacity-90 transition-opacity"
             />
           </button>
-          <button
-            class="absolute bottom-2 right-2 p-2 bg-black/60 hover:bg-black/80 text-white rounded-full transition-colors"
+          <Button
+            variant="secondary"
+            size="icon"
+            class="absolute bottom-2 right-2 bg-black/60 hover:bg-black/80 text-white"
             onclick={(e) => { e.stopPropagation(); downloadImage(0); }}
             aria-label="Download image"
           >
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-            </svg>
-          </button>
+            <Download class="size-5" />
+          </Button>
         </div>
       {:else}
-        <div class="text-center text-txtsecondary">
+        <div class="text-center text-muted-foreground">
           <p>Enter a prompt below to generate an image</p>
         </div>
       {/if}
@@ -471,24 +474,25 @@
       />
       <div class="flex flex-row md:flex-col gap-2">
         {#if isGenerating}
-          <button class="btn bg-red-500 hover:bg-red-600 text-white flex-1 md:flex-none" onclick={cancelGeneration}>
+          <Button variant="destructive" class="flex-1 md:flex-none" onclick={cancelGeneration}>
             Cancel
-          </button>
+          </Button>
         {:else}
-          <button
-            class="btn bg-primary text-btn-primary-text hover:opacity-90 flex-1 md:flex-none"
+          <Button
+            class="flex-1 md:flex-none"
             onclick={generate}
             disabled={!prompt.trim() || !$selectedModelStore}
           >
             Generate
-          </button>
-          <button
-            class="btn flex-1 md:flex-none"
+          </Button>
+          <Button
+            variant="outline"
+            class="flex-1 md:flex-none"
             onclick={clearImage}
-            disabled={generatedImages.length === 0 && !error && !prompt.trim()}
+            disabled={generatedImages.length === 0 && !$error && !prompt.trim()}
           >
             Clear
-          </button>
+          </Button>
         {/if}
       </div>
     </div>
@@ -505,13 +509,15 @@
     aria-modal="true"
     tabindex="-1"
   >
-    <button
-      class="absolute top-4 right-4 text-white hover:text-gray-300 text-2xl w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors"
+    <Button
+      variant="secondary"
+      size="icon"
+      class="absolute top-4 right-4 bg-black/60 hover:bg-black/80 text-white"
       onclick={() => closeFullscreen()}
       aria-label="Close fullscreen"
     >
-      ×
-    </button>
+      <X class="size-6" />
+    </Button>
     <img
       src={generatedImages[fullscreenIndex]}
       alt="AI generated content"
