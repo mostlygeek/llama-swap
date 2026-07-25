@@ -214,9 +214,14 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 
 	for peerID, peer := range s.cfg.Peers {
 		for _, modelID := range peer.Models {
-			modelIDs[modelID] = struct{}{}
+			fqn := config.PeerModelFQN(peerID, modelID)
+			modelIDs[fqn] = struct{}{}
+			if resolvedPeer, resolvedModel, found := s.cfg.ResolvePeerModel(modelID); found &&
+				resolvedPeer == peerID && resolvedModel == modelID {
+				modelIDs[modelID] = struct{}{}
+			}
 			data = append(data, newRecord(
-				modelID,
+				fqn,
 				peerID+": "+modelID,
 				"",
 				nil,

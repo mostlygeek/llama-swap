@@ -36,8 +36,11 @@
     return path === "/" ? current === "/" : current.startsWith(path);
   }
 
-  let visibleModels = $derived(
-    $showUnlistedModels ? $models : $models.filter((m) => !m.unlisted),
+  let visibleLocalModels = $derived(
+    $models.filter((model) => !model.peerID && ($showUnlistedModels || !model.unlisted)),
+  );
+  let visiblePeerModels = $derived(
+    $models.filter((model) => model.peerID && ($showUnlistedModels || !model.unlisted)),
   );
 
   type DotColor = "grey" | "yellow" | "green";
@@ -53,6 +56,21 @@
     green: "bg-success",
   };
 </script>
+
+{#snippet modelMenuItem(model: Model)}
+  <Sidebar.MenuSubItem>
+    <Sidebar.MenuSubButton
+      isActive={$currentRoute === `/models/${encodeURIComponent(model.id)}`}
+    >
+      {#snippet child({ props })}
+        <a href="/models/{encodeURIComponent(model.id)}" use:link {...props}>
+          <span class={`size-2 shrink-0 rounded-full ${dotClass[statusDotColor(model)]}`}></span>
+          <span class="flex-1 truncate">{model.id}</span>
+        </a>
+      {/snippet}
+    </Sidebar.MenuSubButton>
+  </Sidebar.MenuSubItem>
+{/snippet}
 
 <Sidebar.Root collapsible="icon">
   <Sidebar.Header>
@@ -136,20 +154,17 @@
               </Sidebar.MenuButton>
               <Collapsible.Content>
                 <Sidebar.MenuSub>
-                  {#each visibleModels as model (model.id)}
-                    <Sidebar.MenuSubItem>
-                      <Sidebar.MenuSubButton
-                        isActive={$currentRoute === `/models/${encodeURIComponent(model.id)}`}
-                      >
-                        {#snippet child({ props })}
-                          <a href="/models/{encodeURIComponent(model.id)}" use:link {...props}>
-                            <span class={`size-2 shrink-0 rounded-full ${dotClass[statusDotColor(model)]}`}></span>
-                            <span class="flex-1 truncate">{model.id}</span>
-                          </a>
-                        {/snippet}
-                      </Sidebar.MenuSubButton>
-                    </Sidebar.MenuSubItem>
+                  {#each visibleLocalModels as model (model.id)}
+                    {@render modelMenuItem(model)}
                   {/each}
+                  {#if visiblePeerModels.length > 0}
+                    <li class="text-sidebar-foreground/70 px-2 pt-2 pb-1 text-xs font-medium">
+                      Peers
+                    </li>
+                    {#each visiblePeerModels as model (model.id)}
+                      {@render modelMenuItem(model)}
+                    {/each}
+                  {/if}
                 </Sidebar.MenuSub>
               </Collapsible.Content>
             </Collapsible.Root>

@@ -42,7 +42,7 @@ peers:
 selectors:
   public:
     strategy: pin
-    targets: [variant, remote-model]
+    targets: [variant, remote/remote-model]
     name: Public Model
     description: Public selector
     metadata:
@@ -164,6 +164,36 @@ func TestServer_SelectorStrategySpillover(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no available spillover targets")
+}
+
+func TestServer_SelectorStrategySpillover_RemoteModels(t *testing.T) {
+	cfg := config.Config{
+		Peers: config.PeerDictionaryConfig{
+			"remote": {Models: []string{"a", "b"}},
+		},
+		Selectors: map[string]config.SelectorConfig{
+			"pool": {
+				Strategy: config.SelectorStrategySpillover,
+				Targets:  []string{"remote/a", "remote/b"},
+				Settings: config.SelectorSettings{Spillover: 1},
+			},
+		},
+	}
+	tracker := newSelectorSpilloverTracker(cfg)
+
+	first, err := strategySpillover("pool", tracker, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "remote/a", first)
+
+	second, err := strategySpillover("pool", tracker, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "remote/b", second)
+
+	tracker.release("pool", first)
+	tracker.release("pool", second)
+	target, err := strategySpillover("pool", tracker, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "remote/a", target)
 }
 
 func TestServer_SelectorMiddleware_RewritesBeforeFiltersAndRecordsActivity(t *testing.T) {

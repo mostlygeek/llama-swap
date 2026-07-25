@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/internal/shared"
@@ -124,7 +125,7 @@ func (s *Server) modelStatus() []apiModel {
 
 	for peerID, peer := range s.cfg.Peers {
 		for _, modelID := range peer.Models {
-			models = append(models, apiModel{Id: modelID, PeerID: peerID})
+			models = append(models, apiModel{Id: config.PeerModelFQN(peerID, modelID), PeerID: peerID})
 		}
 	}
 

@@ -745,6 +745,43 @@ func TestFetchContext_UpstreamPath(t *testing.T) {
 	}
 }
 
+func TestFindModelInPath_PeerNamespaces(t *testing.T) {
+	cfg := config.Config{
+		Models: map[string]config.ModelConfig{"local": {}},
+		Peers: config.PeerDictionaryConfig{
+			"p1": {Models: []string{"shared", "org/model"}},
+			"p2": {Models: []string{"shared", "unique"}},
+		},
+	}
+
+	tests := []struct {
+		path      string
+		wantName  string
+		wantModel string
+		wantRest  string
+		wantFound bool
+	}{
+		{"/p1/shared/v1/chat", "p1/shared", "p1/shared", "/v1/chat", true},
+		{"/p2/shared/v1/chat", "p2/shared", "p2/shared", "/v1/chat", true},
+		{"/p1/org/model/v1/chat", "p1/org/model", "p1/org/model", "/v1/chat", true},
+		{"/unique/v1/chat", "unique", "unique", "/v1/chat", true},
+		{"/shared/v1/chat", "", "", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			name, modelID, rest, found := FindModelInPath(cfg, tt.path)
+			if name != tt.wantName || modelID != tt.wantModel || rest != tt.wantRest || found != tt.wantFound {
+				t.Fatalf(
+					"FindModelInPath(%q) = (%q, %q, %q, %v), want (%q, %q, %q, %v)",
+					tt.path, name, modelID, rest, found,
+					tt.wantName, tt.wantModel, tt.wantRest, tt.wantFound,
+				)
+			}
+		})
+	}
+}
+
 func TestFetchContext_UpstreamPath_DoesNotReadBody(t *testing.T) {
 	cfg := config.Config{Models: map[string]config.ModelConfig{"m1": {}}}
 	body := `{"model":"should-not-matter"}`

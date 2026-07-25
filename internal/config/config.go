@@ -248,12 +248,8 @@ func (c *Config) ResolveBaseModel(search string) (string, bool) {
 	if realName, found := c.RealModelName(search); found {
 		return realName, true
 	}
-	for _, peer := range c.Peers {
-		for _, modelID := range peer.Models {
-			if modelID == search {
-				return search, true
-			}
-		}
+	if _, _, found := c.ResolvePeerModel(search); found {
+		return search, true
 	}
 	return "", false
 }

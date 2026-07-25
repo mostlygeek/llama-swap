@@ -253,7 +253,7 @@ apiKeys:
 # - optional, default: empty dictionary
 # - one profile or none is active; startup and configuration reload select none
 # - pins are applied before aliases, filters, and routing
-# - targets may be a local model, peer model, alias, setParamsByID alias, or selector
+# - targets may be a local model, fully qualified peer model, alias, setParamsByID alias, or selector
 # - an empty string or YAML null (~) disables the pin with a 404; it is not
 #   added to model listings, while existing local, alias, or peer IDs remain
 profiles:
@@ -267,7 +267,7 @@ profiles:
 # selectors: virtual model IDs resolved to concrete targets per request
 # - optional, default: empty dictionary
 # - profiles run first, so a profile pin may target a selector
-# - selector IDs cannot collide with model IDs, aliases, or peer model names
+# - selector IDs cannot collide with model IDs, aliases, or fully qualified peer model names
 # - selector targets cannot be other selectors
 # - selectors are not supported on /upstream/<model> paths
 selectors:
@@ -290,7 +290,7 @@ selectors:
       - "gpt-oss-120b"
       - "z-ai/glm-4.7"
 
-  # spillover fills local targets to the reservation count in order,
+  # spillover fills local or remote targets to the reservation count in order,
   # starting the next target when the active targets reach that count
   "llama":
     strategy: spillover
@@ -615,6 +615,10 @@ hooks:
 # - optional, default empty dictionary
 # - peers can be another llama-swap
 # - peers can be any server that provides the /v1/ generative api endpoints supported by llama-swap
+# - peer models are always addressable as <peer ID>/<model ID>
+# - an unqualified model ID is accepted only when exactly one peer provides it
+# - local model IDs and aliases take precedence over unqualified peer model IDs
+# - fully qualified peer names are reserved and are the peer IDs shown by /v1/models
 peers:
   # keys is the peer'd ID
   llama-swap-peer:

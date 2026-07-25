@@ -56,6 +56,27 @@ func TestServer_ApplyFilters(t *testing.T) {
 	})
 }
 
+func TestServer_ResolveFilters_QualifiedPeer(t *testing.T) {
+	want := config.Filters{StripParams: "temperature"}
+	cfg := config.Config{Peers: config.PeerDictionaryConfig{
+		"remote": {
+			Models:  []string{"org/model"},
+			Filters: want,
+		},
+	}}
+
+	useModelName, got, ok := resolveFilters(cfg, "remote/org/model")
+	if !ok {
+		t.Fatal("qualified peer filters were not resolved")
+	}
+	if useModelName != "" {
+		t.Fatalf("useModelName = %q, want empty for peer", useModelName)
+	}
+	if got.StripParams != want.StripParams {
+		t.Fatalf("StripParams = %q, want %q", got.StripParams, want.StripParams)
+	}
+}
+
 func TestServer_FormFilterMiddleware(t *testing.T) {
 	cfg := config.Config{Models: map[string]config.ModelConfig{
 		"whisper": {UseModelName: "whisper-large-v3"},
