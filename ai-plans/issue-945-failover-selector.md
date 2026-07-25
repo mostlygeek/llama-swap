@@ -37,6 +37,8 @@ Three decisions shape everything below:
 - When a response is already committed as an SSE stream, **splice the failover into the open stream**
   with a status message rather than suppressing the loading animation. The status line and headers
   cannot be changed after commit, and the design accepts that.
+- The loading writer **moves out of the router and into the middleware chain** first, as a
+  prerequisite refactor (§2).
 
 ## 1. Defining Failure
 
@@ -65,7 +67,7 @@ This is where local targets differ from peers:
   shutdown errors that must be matched explicitly and excluded.
 - **Client cancellation is not a failure.** Check `req.Context().Err()` before inspecting status.
 - **No heartbeats against local models.** Probing a local model means loading it, which is the exact
-  side effect to avoid. Local health is entirely request-driven; the half-open probe in §3 is a real
+  side effect to avoid. Local health is entirely request-driven; the half-open probe in §4 is a real
   user request, not a synthetic one.
 
 ### Make classification explicit, not heuristic
@@ -85,7 +87,72 @@ The classifier then knows with certainty that llama-swap generated the response 
 back to status matching only for genuinely upstream-authored responses. This is a small change that
 is also useful to API clients trying to tell proxy errors from model errors.
 
-## 2. Where Failover Is Still Possible
+## 2. Prerequisite: The Loading Writer Moves into the Chain
+
+`newLoadingWriter` is constructed inside `baseRouter.ServeHTTP` today. Before building failover, move
+it out of `internal/router` and into a middleware in `internal/server`. This is a prerequisite, not a
+drive-by cleanup: without it, telling llama-swap-authored bytes from upstream bytes (§3) needs an
+exported interface in `internal/shared` and a `router` → `shared` call, purely so two layers in
+different packages can agree on a boundary. As neighbouring middlewares in one package, that
+boundary is a private detail.
+
+The writer itself is self-contained — all of `internal/router/loading.go` plus one ~40-line block in
+`baseRouter.ServeHTTP`, referenced nowhere else. Its unit tests construct it directly against an
+`httptest.ResponseRecorder` and move packages unchanged. It needs exactly three things from inside
+the router:
+
+**1. Is the model already ready.** `baseRouter` already implements `ModelState(modelID)` to satisfy
+`scheduler.Effects`; promote that one method onto the `LocalRouter` interface. (`s.local.Handles`
+and `s.local.RunningModels` are already used in the server package and would also work, but
+`RunningModels` allocates a map per call on a hot path.)
+
+**2. Live queue position** (`HandlerReq.PositionCh`, fed by `broadcastQueuePositions` in the FIFO
+scheduler). Solve by inverting ownership of the channel: the middleware creates the `chan int` and
+puts it in the request context; `baseRouter.ServeHTTP` pulls it out and uses it for
+`HandlerReq.PositionCh` instead of making its own. About four lines, the feature survives, and the
+router is left forwarding an opaque channel rather than driving a UI. The alternatives — a
+`QueuePosition` query on the router, or an event keyed by a request ID threaded through
+server → router → scheduler — are worse, because positions are per-request rather than per-model, so
+both re-introduce a wider coupling than the one being removed.
+
+**3. The moment the swap completes**, to stop the animation and fence the writer before the real
+handler writes. This is the one real behavior change: the stop trigger becomes *the first downstream
+`Write`/`WriteHeader`* instead of *the scheduler granting the handler*. The fence moves out of call
+ordering in `base.go` and into the writer, where `writeMu`/`released` already live — the wrapper's
+`Write` cancels the animation context, waits on `done` (bounded, as `waitForCompletion` already
+does), sets `released`, then forwards. Keep a `defer` on the middleware's return path so the
+client-cancel and shutdown paths stay fenced when nothing downstream ever writes; today those are
+covered by `finishLoading` being called at all three of `ServeHTTP`'s exits. Deadlock risk is low:
+`sendData` holds `writeMu` for a single frame and `sendInline` sleeps outside the lock.
+
+Consequence worth deciding deliberately: **the animation now runs through prefill**, not just through
+loading, because "ready" is no longer the stop signal. This is likely an improvement — today the
+stream goes silent between `Done!` and the first token — but it is user-visible. It also subsumes the
+`Done! (1.23s)` epilogue problem: the epilogue currently fires on any exit, including a failed
+attempt, so it should become outcome-aware as part of this move.
+
+What the move buys beyond enabling §3:
+
+- `internal/router` stops knowing about SSE framing, OpenAI chunk shapes, and
+  `/v1/chat/completions` (`isLoadingPath`). Presentation leaves the routing layer.
+- `baseRouter.ServeHTTP` drops ~40 of its ~115 lines, including the subtlest hazard in the file — a
+  still-streaming goroutine flushing a finalized response and panicking on the recycled
+  `*bufio.Writer`. The hazard does not vanish, but it moves next to the mutex that already guards it.
+- Layer ordering becomes explicit in `routes()` rather than implicit in where `base.go` happens to
+  construct things.
+
+What it costs:
+
+- Peer models must be excluded explicitly via `s.local.Handles(modelID)`; the router boundary did
+  that for free.
+- One more `ResponseWriter` wrapper on the streaming path, marginal next to the metrics tee that
+  already buffers every chunk.
+- Placement relative to `CreateMetricsMiddleware` becomes a decision. Inside (after) it reproduces
+  today's behavior, where loading frames land in the metrics buffer and the response-byte count.
+  Outside keeps llama-swap's own frames out of captures and usage parsing, which is more correct.
+  Recommend outside, and call out the changed byte counts.
+
+## 3. Where Failover Is Still Possible
 
 Failover is bounded by what the client has already seen. The `failoverWriter` — an
 `http.ResponseWriter` + `Flusher` + `Hijacker` modelled on `responseBodyCopier` in
@@ -144,28 +211,29 @@ selectors, splice into the open stream:
 
 ### Marking the preamble
 
-Both the loading writer and the real handler write to the same `w` inside a single `next.ServeHTTP`
-call, so the middleware cannot see the boundary between them. Add an optional interface in
-`internal/shared` (a leaf package both `router` and `server` already import):
+The loading writer and the real handler write to the same `w`, so the failover writer cannot tell
+their output apart on its own. With the loading writer moved into the chain (§2), the two are
+adjacent middlewares in package `server` and the marker is a private interface between them:
 
 ```go
-// PreambleWriter is implemented by response writers that need to distinguish
+// preambleWriter is implemented by response writers that need to distinguish
 // llama-swap-authored output from upstream output.
-type PreambleWriter interface {
-    BeginPreamble()
-    EndPreamble()
+type preambleWriter interface {
+    beginPreamble()
+    endPreamble()
 }
 ```
 
-`newLoadingWriter` type-asserts `w` and calls `BeginPreamble`; `loadingWriter.release()` — already
-the exact "preamble finished" moment — calls `EndPreamble`. `failoverWriter` implements the
-interface; every other `ResponseWriter` ignores it, so nothing else changes.
+The loading middleware type-asserts the writer it was handed and brackets its own output;
+`failoverWriter` implements the interface; every other `ResponseWriter` ignores it, so nothing else
+changes. The existing `release()` fence is already the exact "preamble finished" moment.
 
-One polish item this exposes: `loadingWriter.start`'s deferred epilogue writes `Done! (1.23s)` even
-when the attempt failed, so a failed attempt emits "Done!" immediately before the failover notice.
-The epilogue should become outcome-aware.
+Had the loading writer stayed in `internal/router`, this would have had to be an exported interface
+in `internal/shared` plus a call from `router` into it — permanent public API for what is really a
+handshake between two adjacent layers. That is the main reason §2 is a prerequisite rather than a
+nice-to-have.
 
-## 3. Where Health State Lives
+## 4. Where Health State Lives
 
 A new `internal/server/health.go`, owned by `Server` beside `s.inflight` and `s.metrics`, constructed
 in `server.New` and handed to `CreateSelectorMiddleware`.
@@ -223,7 +291,7 @@ the operator cannot debug.
 State is in-memory and resets on config reload, because reload builds a fresh `server.New`. That is
 acceptable and should be documented.
 
-## 4. Optional Peer Health Poll
+## 5. Optional Peer Health Poll
 
 Peers can be probed safely — a `GET /health` does not load a model — so peer recovery need not wait
 for a user request. This is opt-in per peer:
@@ -246,7 +314,7 @@ peers:
   404 for one model on an otherwise healthy host) — that still needs a real half-open request.
 - **Local models are never polled**, for the reason in §1.
 
-## 5. The Middleware
+## 6. The Middleware
 
 Rather than adding a second middleware, generalise `CreateSelectorMiddleware` from "resolve one
 target" to "resolve an ordered candidate list, then run the attempt loop". `pin`, `warm`, and
@@ -278,7 +346,7 @@ Record the outcome in request metadata via `shared.SetReqData` (`failover.target
 `failover.attempts`) so the existing activity log carries it with no new plumbing, and emit a new
 `shared.SelectorTargetHealthEvent` on circuit transitions for the UI and logs.
 
-## 6. Configuration
+## 7. Configuration
 
 Flat settings keys, consistent with the existing `settings.spillover`, and durations as integer
 seconds, consistent with `unloadTimeout` and `healthCheckTimeout`:
@@ -310,24 +378,45 @@ default to off because a long prefill can legitimately delay the first token by 
 `validateSelectors` rejects these keys on non-failover strategies, requires at least two targets for
 `failover`, and (unlike `warm`) allows peer targets.
 
-## 7. Implementation Surface
+## 8. Implementation Surface
+
+Prerequisite (§2), landing as its own change first:
+
+| File | Change |
+|---|---|
+| `internal/server/loading.go` *(moved from `internal/router/loading.go`)* | the writer, plus the middleware that wraps it; first-byte stop trigger; outcome-aware epilogue |
+| `internal/router/base.go` | delete the loading block from `ServeHTTP`; read `PositionCh` from the request context |
+| `internal/router/router.go` | promote `ModelState` onto the `LocalRouter` interface |
+| `internal/server/server.go` | register the loading middleware in `modelChain` |
+
+Failover itself:
 
 | File | Change |
 |---|---|
 | `internal/server/health.go` *(new)* | `healthTracker`, `targetHealth`, `peerHealth`, circuit breaker, peer poller |
-| `internal/server/failover.go` *(new)* | `failoverWriter` three-state machine, classifier, attempt loop, request snapshot |
+| `internal/server/failover.go` *(new)* | `failoverWriter` three-state machine, `preambleWriter`, classifier, attempt loop, request snapshot |
 | `internal/server/selector.go` | candidate-list refactor, `strategyFailover`, shared `resolveTarget` helper |
 | `internal/server/server.go` | construct and wire `s.health` |
 | `internal/server/api.go` | target health in `/v1/models` |
 | `internal/config/selectors.go` | `failover` strategy const, settings, defaults, validation |
 | `internal/config/peer.go` | `healthCheckPath`, `healthCheckInterval` |
 | `internal/shared/http.go` | `X-Llamaswap-Error` header |
-| `internal/shared/events.go` | `PreambleWriter`, `SelectorTargetHealthEvent`, SSE notice helper |
-| `internal/router/loading.go` | call `BeginPreamble` / `EndPreamble`, outcome-aware epilogue |
+| `internal/shared/events.go` | `SelectorTargetHealthEvent` |
 | `internal/router/peer.go`, `internal/process/process_command.go` | tag llama-swap-origin errors |
 | `config-schema.json`, `config.example.yaml`, `docs/configuration.md` | document `failover` |
 
-## 8. Testing
+## 9. Testing
+
+For the §2 prerequisite, the existing `loading_test.go` unit tests move over unchanged. Two cases
+have to be added, because they cover what the old call ordering in `base.go` guaranteed implicitly
+and the new writer now has to guarantee itself:
+
+- **Fence before the first downstream byte**: the animation goroutine is stopped, its epilogue
+  flushed, and the writer released before any downstream write reaches the client — no interleaving.
+- **Nothing downstream ever writes**: client cancels mid-load, so only the middleware's deferred
+  path runs. Assert the goroutine is stopped and no write lands on a finalized response.
+
+For failover:
 
 - **Classifier table test**: each class → expected failover and circuit decision, including the
   non-failure cases (cold local model, TTL unload, client disconnect).
