@@ -38,8 +38,19 @@ type fakeProcess struct {
 	state       process.ProcessState
 	readyCh     chan struct{}
 	stopCh      chan struct{}
-	runStarted  chan struct{} // closed on the first Run call
+	runStarted  chan struct{} // closed on the first Run/EnsureReady call that starts
 	stopStarted chan struct{} // closed on the first Stop call
+	// ensureAsked is closed when EnsureReady is first called, before it
+	// serializes against an in-flight Stop. Tests use it to observe that the
+	// router asked for a start rather than deciding for itself not to.
+	ensureAsked chan struct{}
+
+	// opMu serializes Stop against EnsureReady the way ProcessCommand's run
+	// loop does: a stop keeps that loop parked inside killProcess, so a start
+	// request cannot even be received until the stop has finished. Without
+	// this the fake would let a start decision be made against a stale state,
+	// which is exactly the bug being guarded against (issue #946).
+	opMu sync.Mutex
 
 	autoReady bool
 
@@ -80,6 +91,7 @@ func newFakeProcess(id string) *fakeProcess {
 		stopCh:       make(chan struct{}),
 		runStarted:   make(chan struct{}),
 		stopStarted:  make(chan struct{}),
+		ensureAsked:  make(chan struct{}),
 		serveStarted: make(chan struct{}),
 	}
 }
@@ -87,12 +99,27 @@ func newFakeProcess(id string) *fakeProcess {
 func (f *fakeProcess) setState(s process.ProcessState) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.setStateLocked(s)
+}
+
+func (f *fakeProcess) setStateLocked(s process.ProcessState) {
 	f.state = s
-	if s == process.StateReady {
+	switch s {
+	case process.StateReady:
 		select {
 		case <-f.readyCh:
 		default:
 			close(f.readyCh)
+		}
+	case process.StateStopped:
+		// A stopped process is no longer ready. Re-arm readyCh so a later
+		// WaitReady/EnsureReady blocks until it is started again, mirroring
+		// ProcessCommand — a latched-open readyCh would let a caller believe
+		// a stopped process is serving.
+		select {
+		case <-f.readyCh:
+			f.readyCh = make(chan struct{})
+		default:
 		}
 	}
 }
@@ -130,6 +157,9 @@ func (f *fakeProcess) Run(_ time.Duration) error {
 }
 
 func (f *fakeProcess) Stop(timeout time.Duration) error {
+	f.opMu.Lock()
+	defer f.opMu.Unlock()
+
 	f.stopCalls.Add(1)
 	if f.onStop != nil {
 		f.onStop(f.id)
@@ -144,10 +174,14 @@ func (f *fakeProcess) Stop(timeout time.Duration) error {
 	default:
 		close(f.stopStarted)
 	}
+	if f.state != process.StateStopped {
+		f.setStateLocked(process.StateStopping)
+	}
 	f.mu.Unlock()
 
 	// Test hook: hold Stop here so the test can prove multiple Stops are
-	// in flight at the same time before any of them complete.
+	// in flight at the same time before any of them complete. While held the
+	// process reports StateStopping, as a real one does.
 	if f.stopBlock != nil {
 		<-f.stopBlock
 	}
@@ -157,7 +191,7 @@ func (f *fakeProcess) Stop(timeout time.Duration) error {
 	if f.state == process.StateStopped {
 		return nil
 	}
-	f.state = process.StateStopped
+	f.setStateLocked(process.StateStopped)
 	select {
 	case <-f.stopCh:
 	default:
@@ -173,6 +207,53 @@ func (f *fakeProcess) lastStopTimeout() time.Duration {
 		return 0
 	}
 	return f.stopTimeouts[len(f.stopTimeouts)-1]
+}
+
+// EnsureReady mirrors ProcessCommand.EnsureReady: it takes the start decision
+// under opMu (the fake's stand-in for the run loop) so a stop still in flight
+// holds the caller until the process is really stopped, then starts.
+func (f *fakeProcess) EnsureReady(ctx context.Context, _ time.Duration) error {
+	f.mu.Lock()
+	select {
+	case <-f.ensureAsked:
+	default:
+		close(f.ensureAsked)
+	}
+	f.mu.Unlock()
+
+	f.opMu.Lock()
+	f.mu.Lock()
+	switch f.state {
+	case process.StateReady:
+		f.mu.Unlock()
+		f.opMu.Unlock()
+		return nil
+	case process.StateShutdown:
+		f.mu.Unlock()
+		f.opMu.Unlock()
+		return fmt.Errorf("fakeProcess %s: shutdown", f.id)
+	}
+	// Counted as a run: EnsureReady is how the router starts a process now.
+	f.runCalls.Add(1)
+	f.setStateLocked(process.StateStarting)
+	select {
+	case <-f.runStarted:
+	default:
+		close(f.runStarted)
+	}
+	rc := f.readyCh
+	f.mu.Unlock()
+	f.opMu.Unlock()
+
+	if f.autoReady {
+		f.setState(process.StateReady)
+	}
+	select {
+	case <-rc:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (f *fakeProcess) WaitReady(ctx context.Context) error {

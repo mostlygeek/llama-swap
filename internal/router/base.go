@@ -255,16 +255,19 @@ func (b *baseRouter) doSwap(modelID string, toStop []string) {
 	}
 	wg.Wait()
 
+	// EnsureReady rather than a State() check followed by Run: the router must
+	// not assume anything about the process. Deciding out here means acting on
+	// a snapshot that the process's own run loop can invalidate at any moment —
+	// a TTL unload landing in that window used to leave the swap waiting on a
+	// process nobody was ever going to start (issue #946). EnsureReady makes
+	// the same decision inside the process, where the state is owned.
 	target := b.processes[modelID]
-	if target.State() == process.StateStopped {
-		go func() {
-			if err := target.Run(timeout); err != nil {
-				b.logger.Warnf("%s: running %s exited: %v", b.name, modelID, err)
-			}
-		}()
+	err := target.EnsureReady(b.shutdownCtx, timeout)
+	if err != nil && b.shutdownCtx.Err() == nil {
+		// Quiet during shutdown: every in-flight swap fails at once there, and
+		// that is expected rather than worth a warning per model.
+		b.logger.Warnf("%s: starting %s failed: %v", b.name, modelID, err)
 	}
-
-	err := target.WaitReady(b.shutdownCtx)
 
 	select {
 	case b.swapDoneCh <- scheduler.SwapDone{ModelID: modelID, Err: err}:
