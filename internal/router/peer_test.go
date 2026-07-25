@@ -49,14 +49,20 @@ func TestNewPeer_SinglePeer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pr.peers) != 2 {
-		t.Fatalf("expected 2 entries, got %d", len(pr.peers))
+	if len(pr.peers) != 4 {
+		t.Fatalf("expected 4 entries, got %d", len(pr.peers))
 	}
 	if _, ok := pr.peers["model-a"]; !ok {
 		t.Error("expected model-a to be mapped")
 	}
 	if _, ok := pr.peers["model-b"]; !ok {
 		t.Error("expected model-b to be mapped")
+	}
+	if _, ok := pr.peers["peer1/model-a"]; !ok {
+		t.Error("expected peer1/model-a to be mapped")
+	}
+	if _, ok := pr.peers["peer1/model-b"]; !ok {
+		t.Error("expected peer1/model-b to be mapped")
 	}
 	if _, ok := pr.peers["model-c"]; ok {
 		t.Error("expected model-c to not be mapped")
@@ -83,10 +89,15 @@ func TestNewPeer_MultiplePeers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pr.peers) != 4 {
-		t.Fatalf("expected 4 entries, got %d", len(pr.peers))
+	if len(pr.peers) != 8 {
+		t.Fatalf("expected 8 entries, got %d", len(pr.peers))
 	}
 	for _, m := range []string{"model-a", "model-b", "model-c", "model-d"} {
+		if _, ok := pr.peers[m]; !ok {
+			t.Errorf("expected %s to be mapped", m)
+		}
+	}
+	for _, m := range []string{"peer1/model-a", "peer1/model-b", "peer2/model-c", "peer2/model-d"} {
 		if _, ok := pr.peers[m]; !ok {
 			t.Errorf("expected %s to be mapped", m)
 		}
@@ -113,11 +124,84 @@ func TestNewPeer_DuplicateModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pr.peers) != 1 {
-		t.Fatalf("expected 1 entry for duplicate model, got %d", len(pr.peers))
+	if len(pr.peers) != 2 {
+		t.Fatalf("expected 2 qualified entries for duplicate model, got %d", len(pr.peers))
 	}
-	if _, ok := pr.peers["duplicate-model"]; !ok {
-		t.Error("expected duplicate-model to be mapped")
+	if _, ok := pr.peers["duplicate-model"]; ok {
+		t.Error("duplicate bare model should not be mapped")
+	}
+	if _, ok := pr.peers["alpha-peer/duplicate-model"]; !ok {
+		t.Error("expected alpha-peer/duplicate-model to be mapped")
+	}
+	if _, ok := pr.peers["beta-peer/duplicate-model"]; !ok {
+		t.Error("expected beta-peer/duplicate-model to be mapped")
+	}
+}
+
+func TestNewPeer_FQNPrecedesCollidingBareModel(t *testing.T) {
+	proxyURL, _ := url.Parse("http://peer.example.com")
+	pr, err := NewPeer(config.Config{Peers: config.PeerDictionaryConfig{
+		"p1": {
+			ProxyURL: proxyURL,
+			Models:   []string{"model"},
+		},
+		"p2": {
+			ProxyURL: proxyURL,
+			Models:   []string{"p1/model"},
+		},
+	}}, testLogger)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := pr.peers["p1/model"]; got == nil || got.member.peerID != "p1" || got.modelID != "model" {
+		t.Fatalf("p1/model route = %#v, want p1 model", got)
+	}
+	if got := pr.peers["p2/p1/model"]; got == nil || got.member.peerID != "p2" || got.modelID != "p1/model" {
+		t.Fatalf("p2/p1/model route = %#v, want p2 p1/model", got)
+	}
+}
+
+func TestPeer_ServeHTTP_QualifiedModelRewritten(t *testing.T) {
+	var upstreamModel string
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, err := shared.ExtractModel(r)
+		if err != nil {
+			t.Errorf("ExtractModel: %v", err)
+		} else {
+			upstreamModel = data
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer testServer.Close()
+
+	proxyURL, _ := url.Parse(testServer.URL)
+	pr, err := NewPeer(config.Config{Peers: config.PeerDictionaryConfig{
+		"strix": {
+			Proxy:    testServer.URL,
+			ProxyURL: proxyURL,
+			Models:   []string{"Q3.6-27B-MTP"},
+		},
+	}}, testLogger)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/completions",
+		strings.NewReader(`{"model":"strix/Q3.6-27B-MTP","prompt":"hello"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	pr.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	if upstreamModel != "Q3.6-27B-MTP" {
+		t.Fatalf("upstream model = %q, want Q3.6-27B-MTP", upstreamModel)
 	}
 }
 
@@ -589,7 +673,7 @@ func TestNewPeer_CustomTimeouts(t *testing.T) {
 		t.Fatal("expected model1 to be mapped")
 	}
 
-	transport, ok := member.reverseProxy.Transport.(*http.Transport)
+	transport, ok := member.member.reverseProxy.Transport.(*http.Transport)
 	if !ok {
 		t.Fatal("expected Transport to be *http.Transport")
 	}

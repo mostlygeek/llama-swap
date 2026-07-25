@@ -246,7 +246,7 @@ func TestServer_Profile_ModelListings(t *testing.T) {
 	assert.Contains(t, records, "public")
 	assert.Empty(t, records["public"].Name)
 	assert.Equal(t, "Real Model", records["real"].Name)
-	assert.Equal(t, "remote: remote-model", records["remote-model"].Name)
+	assert.Equal(t, "remote: remote-model", records["remote/remote-model"].Name)
 	assert.Contains(t, records, "expose")
 	assert.Empty(t, records["expose"].Name)
 	assert.NotContains(t, records, "disabled")
@@ -263,7 +263,7 @@ func TestServer_Profile_ModelListings(t *testing.T) {
 	}
 	assert.Contains(t, byID, "real")
 	assert.Contains(t, byID, "hidden")
-	assert.Equal(t, "remote", byID["remote-model"].PeerID)
+	assert.Equal(t, "remote", byID["remote/remote-model"].PeerID)
 	assert.NotContains(t, byID, "public")
 	assert.NotContains(t, byID, "expose")
 	assert.NotContains(t, byID, "disabled")

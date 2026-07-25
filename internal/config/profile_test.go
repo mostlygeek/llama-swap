@@ -30,6 +30,7 @@ profiles:
       alias: local-fast
       variant: local-thinking
       peer: peer-model
+      peer-qualified: remote/peer-model
       disabled-empty: ""
       disabled-null: ~
       local: peer-model
@@ -51,6 +52,7 @@ profiles:
 		{"alias", "local-fast", "local", false},
 		{"variant", "local-thinking", "local", false},
 		{"peer", "peer-model", "peer-model", false},
+		{"peer-qualified", "remote/peer-model", "remote/peer-model", false},
 		{"local", "peer-model", "peer-model", false},
 		{"disabled-empty", "", "", true},
 		{"disabled-null", "", "", true},

@@ -44,10 +44,18 @@
 
   let timelineMaxMs = $derived(Math.max(100, ...Object.values(runs).map((r) => r.elapsedMs)));
 
-  let availableModels = $derived($playgroundModels.filter((model) => model.playgroundType !== "selector"));
+  let availableModels = $derived(
+    $playgroundModels.filter(
+      (model) => model.playgroundType !== "selector" && model.playgroundType !== "peer"
+    )
+  );
+  let peerModels = $derived(
+    $playgroundModels.filter((model) => model.playgroundType === "peer")
+  );
   let modeSections = $derived([
     { label: "Selectors", ids: $selectorModels.map((model) => model.id) },
     { label: "Models", ids: availableModels.map((model) => model.id) },
+    { label: "Peers", ids: peerModels.map((model) => model.id) },
   ].filter((section) => section.ids.length > 0));
   let hasModels = $derived(modeSections.length > 0);
   let canRun = $derived(!isRunning && $testListStore.length > 0 && $promptStore.trim() !== "");

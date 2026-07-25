@@ -145,16 +145,6 @@ selectors:
 			wantErr: "name conflicts with model alias",
 		},
 		{
-			name: "peer collision",
-			config: `
-selectors:
-  remote-model:
-    strategy: pin
-    targets: [a]
-`,
-			wantErr: "name conflicts with peer model",
-		},
-		{
 			name: "warm peer target",
 			config: `
 selectors:
@@ -163,16 +153,6 @@ selectors:
     targets: [remote-model]
 `,
 			wantErr: `must resolve to a local model for strategy "warm"`,
-		},
-		{
-			name: "spillover peer target",
-			config: `
-selectors:
-  public:
-    strategy: spillover
-    targets: [remote-model]
-`,
-			wantErr: `must resolve to a local model for strategy "spillover"`,
 		},
 		{
 			name: "invalid spillover",
@@ -195,6 +175,16 @@ selectors:
     targets: [a, alias-a]
 `,
 			wantErr: `duplicate resolved model "a"`,
+		},
+		{
+			name: "duplicate resolved peer spillover target",
+			config: `
+selectors:
+  public:
+    strategy: spillover
+    targets: [remote-model, remote/remote-model]
+`,
+			wantErr: `duplicate resolved model "remote/remote-model"`,
 		},
 		{
 			name: "spillover swapping group",
@@ -232,6 +222,21 @@ peers:
 			assert.Contains(t, err.Error(), tc.wantErr)
 		})
 	}
+}
+
+func TestConfig_Selectors_PeerModelFQN(t *testing.T) {
+	cfg, err := LoadConfigFromReader(strings.NewReader(`
+peers:
+  remote:
+    proxy: http://example.com
+    models: [remote-model]
+selectors:
+  remote-model:
+    strategy: spillover
+    targets: [remote/remote-model]
+`))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"remote/remote-model"}, cfg.Selectors["remote-model"].Targets)
 }
 
 func TestConfig_Selectors_SpilloverCoexistence(t *testing.T) {
@@ -298,6 +303,37 @@ selectors:
 `))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "must all appear together in one expanded matrix set")
+	})
+
+	t.Run("remote targets", func(t *testing.T) {
+		_, err := LoadConfigFromReader(strings.NewReader(`
+peers:
+  remote:
+    proxy: http://example.com
+    models: [a, b]
+selectors:
+  public:
+    strategy: spillover
+    targets: [remote/a, remote/b]
+`))
+		require.NoError(t, err)
+	})
+
+	t.Run("mixed local and remote targets", func(t *testing.T) {
+		_, err := LoadConfigFromReader(strings.NewReader(`
+models:
+  local:
+    cmd: echo ${PORT}
+peers:
+  remote:
+    proxy: http://example.com
+    models: [remote-model]
+selectors:
+  public:
+    strategy: spillover
+    targets: [local, remote/remote-model]
+`))
+		require.NoError(t, err)
 	})
 }
 

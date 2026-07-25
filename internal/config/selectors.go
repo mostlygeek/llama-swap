@@ -57,13 +57,6 @@ func validateSelectors(config Config) error {
 		if _, found := config.aliases[selectorID]; found {
 			return fmt.Errorf("selectors.%s: name conflicts with model alias %q", selectorID, selectorID)
 		}
-		for peerID, peer := range config.Peers {
-			for _, modelID := range peer.Models {
-				if modelID == selectorID {
-					return fmt.Errorf("selectors.%s: name conflicts with peer model %q from peer %q", selectorID, modelID, peerID)
-				}
-			}
-		}
 
 		switch selector.Strategy {
 		case SelectorStrategyPin, SelectorStrategyWarm, SelectorStrategySpillover:
@@ -77,6 +70,7 @@ func validateSelectors(config Config) error {
 		}
 
 		resolvedTargets := make([]string, 0, len(selector.Targets))
+		localTargets := make([]string, 0, len(selector.Targets))
 		for i, target := range selector.Targets {
 			if _, found := config.Selectors[target]; found {
 				return fmt.Errorf("selectors.%s.targets[%d] references selector %q; selector chaining is not supported", selectorID, i, target)
@@ -85,10 +79,18 @@ func validateSelectors(config Config) error {
 				return fmt.Errorf("selectors.%s.targets[%d] references unknown model %q", selectorID, i, target)
 			}
 
-			if selector.Strategy == SelectorStrategyWarm || selector.Strategy == SelectorStrategySpillover {
-				realName, local := config.RealModelName(target)
+			realName, local := config.RealModelName(target)
+			if selector.Strategy == SelectorStrategyWarm {
 				if !local {
 					return fmt.Errorf("selectors.%s.targets[%d] must resolve to a local model for strategy %q", selectorID, i, selector.Strategy)
+				}
+			}
+			if selector.Strategy == SelectorStrategySpillover {
+				if local {
+					localTargets = append(localTargets, realName)
+				} else {
+					peerID, modelID, _ := config.ResolvePeerModel(target)
+					realName = PeerModelFQN(peerID, modelID)
 				}
 				resolvedTargets = append(resolvedTargets, realName)
 			}
@@ -108,7 +110,7 @@ func validateSelectors(config Config) error {
 			}
 			seen[target] = struct{}{}
 		}
-		if err := validateSpilloverCoexistence(config, selectorID, resolvedTargets); err != nil {
+		if err := validateSpilloverCoexistence(config, selectorID, localTargets); err != nil {
 			return err
 		}
 	}

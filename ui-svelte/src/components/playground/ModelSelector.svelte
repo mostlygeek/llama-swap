@@ -24,7 +24,7 @@
       || $selectorModels.length > 0
       || hasMatching
       || grouped.local.length > 0
-      || Object.keys(grouped.peersByProvider).length > 0
+      || grouped.peers.length > 0
   );
 </script>
 
@@ -84,14 +84,14 @@
         </Select.Group>
         <Select.Separator />
       {/if}
-      {#each Object.entries(grouped.peersByProvider).sort(([a], [b]) => a.localeCompare(b)) as [peerId, peerModels] (peerId)}
+      {#if grouped.peers.length > 0}
         <Select.Group>
-          <Select.Label>Peer: {peerId}</Select.Label>
-          {#each peerModels as model (model.id)}
+          <Select.Label>Peers</Select.Label>
+          {#each grouped.peers as model (model.id)}
             <Select.Item value={model.id}>{model.id}</Select.Item>
           {/each}
         </Select.Group>
-      {/each}
+      {/if}
     </Select.Content>
   </Select.Root>
 {/if}

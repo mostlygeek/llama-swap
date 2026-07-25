@@ -49,11 +49,54 @@ func TestServer_HandleListModels(t *testing.T) {
 	for _, m := range resp.Data {
 		ids[m.ID] = true
 	}
-	if !ids["visible"] || !ids["remote-model"] {
+	if !ids["visible"] || !ids["peer1/remote-model"] {
 		t.Errorf("missing expected models: %v", ids)
 	}
 	if ids["hidden"] {
 		t.Error("unlisted model should not appear")
+	}
+}
+
+func TestServer_HandleListModels_PeerNamespaces(t *testing.T) {
+	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
+	s.cfg = config.Config{
+		Models: map[string]config.ModelConfig{"shared": {}},
+		Peers: config.PeerDictionaryConfig{
+			"cuda":  {Models: []string{"shared"}},
+			"strix": {Models: []string{"shared"}},
+		},
+	}
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
+
+	var resp struct {
+		Data []modelRecord `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	ids := make(map[string]bool)
+	for _, model := range resp.Data {
+		ids[model.ID] = true
+	}
+	for _, id := range []string{"shared", "cuda/shared", "strix/shared"} {
+		if !ids[id] {
+			t.Errorf("missing model %q from %v", id, ids)
+		}
+	}
+	if len(ids) != 3 {
+		t.Errorf("model IDs = %v, want exactly local and two qualified peers", ids)
+	}
+
+	statusIDs := make(map[string]bool)
+	for _, model := range s.modelStatus() {
+		statusIDs[model.Id] = true
+	}
+	for _, id := range []string{"shared", "cuda/shared", "strix/shared"} {
+		if !statusIDs[id] {
+			t.Errorf("missing status model %q from %v", id, statusIDs)
+		}
 	}
 }
 
@@ -121,8 +164,8 @@ func TestServer_HandleListModels_Status(t *testing.T) {
 	if statuses["unloaded-model"] != "unloaded" {
 		t.Errorf("unloaded-model status = %q, want unloaded", statuses["unloaded-model"])
 	}
-	if statuses["remote-model"] != "unloaded" {
-		t.Errorf("remote-model status = %q, want unloaded", statuses["remote-model"])
+	if statuses["peer1/remote-model"] != "unloaded" {
+		t.Errorf("peer1/remote-model status = %q, want unloaded", statuses["peer1/remote-model"])
 	}
 }
 

@@ -117,12 +117,8 @@ func resolveFilters(cfg config.Config, requested string) (useModelName string, f
 		mc := cfg.Models[realName]
 		return mc.UseModelName, mc.Filters.Filters, true
 	}
-	for _, peer := range cfg.Peers {
-		for _, m := range peer.Models {
-			if m == requested {
-				return "", peer.Filters, true
-			}
-		}
+	if peerID, _, found := cfg.ResolvePeerModel(requested); found {
+		return "", cfg.Peers[peerID].Filters, true
 	}
 	return "", config.Filters{}, false
 }

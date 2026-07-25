@@ -107,17 +107,19 @@
               {#if model.unlisted}
                 <Tag class="px-1.5 text-[0.625rem] uppercase">unlisted</Tag>
               {/if}
-              <a
-                href="/upstream/{encodeURIComponent(model.id)}/"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="text-muted-foreground hover:text-foreground"
-                title="Open model server"
-                aria-label="Open model server"
+              {#if !model.peerID}
+                <a
+                  href="/upstream/{encodeURIComponent(model.id)}/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="text-muted-foreground hover:text-foreground"
+                  title="Open model server"
+                  aria-label="Open model server"
               >
                 <ExternalLink class="size-4" />
               </a>
-              <ModelLoadButton {model} />
+                <ModelLoadButton {model} />
+              {/if}
             </div>
           {/each}
         </div>

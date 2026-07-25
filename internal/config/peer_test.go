@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -205,5 +206,142 @@ filters:
 	}
 	if config.Filters.SetParams["max_tokens"] != 1000 {
 		t.Errorf("expected max_tokens 1000, got %v", config.Filters.SetParams["max_tokens"])
+	}
+}
+
+func TestConfig_ResolvePeerModel(t *testing.T) {
+	cfg := Config{
+		Models: map[string]ModelConfig{"shared": {}},
+		Peers: PeerDictionaryConfig{
+			"p1": {Models: []string{"shared", "org/model"}},
+			"p2": {Models: []string{"shared", "unique"}},
+		},
+	}
+
+	tests := []struct {
+		search      string
+		wantPeerID  string
+		wantModelID string
+		wantFound   bool
+	}{
+		{search: "p1/shared", wantPeerID: "p1", wantModelID: "shared", wantFound: true},
+		{search: "p2/shared", wantPeerID: "p2", wantModelID: "shared", wantFound: true},
+		{search: "p1/org/model", wantPeerID: "p1", wantModelID: "org/model", wantFound: true},
+		{search: "unique", wantPeerID: "p2", wantModelID: "unique", wantFound: true},
+		{search: "shared", wantFound: false},
+		{search: "missing", wantFound: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.search, func(t *testing.T) {
+			peerID, modelID, found := cfg.ResolvePeerModel(tt.search)
+			if peerID != tt.wantPeerID || modelID != tt.wantModelID || found != tt.wantFound {
+				t.Fatalf(
+					"ResolvePeerModel(%q) = (%q, %q, %v), want (%q, %q, %v)",
+					tt.search, peerID, modelID, found,
+					tt.wantPeerID, tt.wantModelID, tt.wantFound,
+				)
+			}
+		})
+	}
+
+	if got, found := cfg.ResolveBaseModel("shared"); !found || got != "shared" {
+		t.Fatalf("ResolveBaseModel(shared) = (%q, %v), want local model", got, found)
+	}
+	if got, found := cfg.ResolveBaseModel("p1/shared"); !found || got != "p1/shared" {
+		t.Fatalf("ResolveBaseModel(p1/shared) = (%q, %v), want peer FQN", got, found)
+	}
+}
+
+func TestConfig_ResolvePeerModel_FQNPrecedesBareName(t *testing.T) {
+	cfg := Config{Peers: PeerDictionaryConfig{
+		"p1": {Models: []string{"model"}},
+		"p2": {Models: []string{"p1/model"}},
+	}}
+
+	peerID, modelID, found := cfg.ResolvePeerModel("p1/model")
+	if !found || peerID != "p1" || modelID != "model" {
+		t.Fatalf("ResolvePeerModel(p1/model) = (%q, %q, %v), want p1/model FQN", peerID, modelID, found)
+	}
+
+	peerID, modelID, found = cfg.ResolvePeerModel("p2/p1/model")
+	if !found || peerID != "p2" || modelID != "p1/model" {
+		t.Fatalf("ResolvePeerModel(p2/p1/model) = (%q, %q, %v), want p2 raw slash model", peerID, modelID, found)
+	}
+}
+
+func TestConfig_ValidatePeerNamespace(t *testing.T) {
+	t.Run("ambiguous constructed name", func(t *testing.T) {
+		cfg := Config{Peers: PeerDictionaryConfig{
+			"a":   {Models: []string{"b/c"}},
+			"a/b": {Models: []string{"c"}},
+		}}
+		if err := ValidatePeerNamespace(cfg); err == nil {
+			t.Fatal("expected ambiguous peer FQN error")
+		}
+	})
+
+	tests := []struct {
+		name   string
+		mutate func(*Config)
+	}{
+		{
+			name: "local model",
+			mutate: func(cfg *Config) {
+				cfg.Models["peer/model"] = ModelConfig{}
+			},
+		},
+		{
+			name: "local alias",
+			mutate: func(cfg *Config) {
+				cfg.Models["local"] = ModelConfig{Aliases: []string{"peer/model"}}
+			},
+		},
+		{
+			name: "selector",
+			mutate: func(cfg *Config) {
+				cfg.Selectors["peer/model"] = SelectorConfig{}
+			},
+		},
+		{
+			name: "profile pin",
+			mutate: func(cfg *Config) {
+				cfg.Profiles["profile"] = ProfileConfig{Pins: map[string]string{"peer/model": "local"}}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Config{
+				Models:    map[string]ModelConfig{},
+				Peers:     PeerDictionaryConfig{"peer": {Models: []string{"model"}}},
+				Selectors: map[string]SelectorConfig{},
+				Profiles:  map[string]ProfileConfig{},
+			}
+			tt.mutate(&cfg)
+			if err := ValidatePeerNamespace(cfg); err == nil {
+				t.Fatal("expected reserved peer FQN conflict")
+			}
+		})
+	}
+}
+
+func TestConfig_LoadPeerNamespaceConflict(t *testing.T) {
+	_, err := LoadConfigFromReader(strings.NewReader(`
+models:
+  local:
+    cmd: echo ${PORT}
+    filters:
+      setParamsByID:
+        peer/model:
+          temperature: 0.5
+peers:
+  peer:
+    proxy: http://example.com
+    models: [model]
+`))
+	if err == nil || !strings.Contains(err.Error(), "conflicts with fully qualified peer model name") {
+		t.Fatalf("LoadConfigFromReader error = %v, want peer FQN conflict", err)
 	}
 }

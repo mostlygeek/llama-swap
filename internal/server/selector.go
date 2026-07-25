@@ -26,6 +26,7 @@ func selectorFromContext(ctx context.Context) string {
 type spilloverTarget struct {
 	target  string
 	modelID string
+	local   bool
 }
 
 type selectorSpilloverState struct {
@@ -52,15 +53,23 @@ func newSelectorSpilloverTracker(cfg config.Config) *selectorSpilloverTracker {
 			inflight:  make(map[string]int, len(selector.Targets)),
 		}
 		for _, target := range selector.Targets {
-			modelID, _ := cfg.RealModelName(target)
-			state.targets = append(state.targets, spilloverTarget{target: target, modelID: modelID})
+			modelID, local := cfg.RealModelName(target)
+			if !local {
+				peerID, peerModelID, _ := cfg.ResolvePeerModel(target)
+				modelID = config.PeerModelFQN(peerID, peerModelID)
+			}
+			state.targets = append(state.targets, spilloverTarget{
+				target:  target,
+				modelID: modelID,
+				local:   local,
+			})
 		}
 		tracker.states[selectorID] = state
 	}
 	return tracker
 }
 
-func (t *selectorSpilloverTracker) release(selectorID, modelID string) {
+func (t *selectorSpilloverTracker) release(selectorID, target string) {
 	if t == nil {
 		return
 	}
@@ -69,8 +78,11 @@ func (t *selectorSpilloverTracker) release(selectorID, modelID string) {
 		return
 	}
 	state.mu.Lock()
-	if state.inflight[modelID] > 0 {
-		state.inflight[modelID]--
+	for _, candidate := range state.targets {
+		if candidate.target == target && state.inflight[candidate.modelID] > 0 {
+			state.inflight[candidate.modelID]--
+			break
+		}
 	}
 	state.mu.Unlock()
 }
@@ -116,9 +128,7 @@ func CreateSelectorMiddleware(s *Server) chain.Middleware {
 			updated, err := shared.ReplaceRequestModel(r, model, target)
 			if err != nil {
 				if selector.Strategy == config.SelectorStrategySpillover {
-					if modelID, found := s.cfg.RealModelName(target); found {
-						spillovers.release(model, modelID)
-					}
+					spillovers.release(model, target)
 				}
 				shared.SendResponse(w, r, http.StatusBadRequest, err.Error())
 				return
@@ -127,8 +137,7 @@ func CreateSelectorMiddleware(s *Server) chain.Middleware {
 			s.proxylog.Debugf("selector: id=%s target=%s", model, target)
 
 			if selector.Strategy == config.SelectorStrategySpillover {
-				modelID, _ := s.cfg.RealModelName(target)
-				defer spillovers.release(model, modelID)
+				defer spillovers.release(model, target)
 			}
 			next.ServeHTTP(w, withSelectorContext(updated, model))
 		})
@@ -173,6 +182,15 @@ func strategySpillover(selectorID string, tracker *selectorSpilloverTracker, run
 	active := make([]spilloverTarget, 0, len(state.targets))
 	cold := make([]spilloverTarget, 0, len(state.targets))
 	for _, target := range state.targets {
+		if !target.local {
+			if state.inflight[target.modelID] > 0 {
+				active = append(active, target)
+			} else {
+				cold = append(cold, target)
+			}
+			continue
+		}
+
 		processState, runningNow := running[target.modelID]
 		switch {
 		case processState == process.StateStopping || processState == process.StateShutdown:

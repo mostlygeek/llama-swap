@@ -178,7 +178,7 @@ describe("api store event handling", () => {
             meta: { llamaswap: { type: "alias", modelID: "real" } },
           },
           {
-            id: "remote-model",
+            id: "remote/remote-model",
             meta: { llamaswap: { type: "peer", peerID: "remote" } },
           },
           {
@@ -203,7 +203,7 @@ describe("api store event handling", () => {
       capabilities: { vision: true },
       playgroundType: "model",
     });
-    expect(get(playgroundModels).find((model) => model.id === "remote-model")).toMatchObject({
+    expect(get(playgroundModels).find((model) => model.id === "remote/remote-model")).toMatchObject({
       peerID: "remote",
       playgroundType: "peer",
     });

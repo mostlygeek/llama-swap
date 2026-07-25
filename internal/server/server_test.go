@@ -200,6 +200,23 @@ func TestServer_RouteToPeerModel(t *testing.T) {
 	}
 }
 
+func TestServer_RouteToLocalModel_PrefersLocalCollision(t *testing.T) {
+	s := newTestServer(
+		newStubRouter([]string{"shared"}, "local response"),
+		newStubRouter([]string{"shared"}, "peer response"),
+	)
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, chatRequest("shared"))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
+	}
+	if w.Body.String() != "local response" {
+		t.Errorf("body=%q want local response", w.Body.String())
+	}
+}
+
 func TestServer_UnknownModelReturns404(t *testing.T) {
 	s := newTestServer(
 		newStubRouter([]string{"local-model"}, ""),
