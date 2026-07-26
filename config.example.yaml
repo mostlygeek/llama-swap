@@ -594,23 +594,23 @@ routing:
       # A model that appears in no set can only run on its own.
       #
       matrix:
-        # vars: short aliases for model IDs (alphanumeric, 1-8 chars)
-        # - required: sets and evict_costs reference these names, not model IDs
+        # vars: optional aliases for model IDs
+        # - names may contain alphanumeric, "-", or "." characters (1-32 chars)
         # - map each short name to a real model ID (not a model alias)
         # - keeps the set expressions short and readable
+        # - sets and evict_costs may mix vars with real model IDs
+        # - a var takes precedence when its name is also a real model ID
         vars:
           g: gemma-model
           q: qwen-model
           m: mistral-model
           v: voxtral-model
           e: reranker-model
-          L: llama-70B
-          sd: stable-diffusion
 
         # evict_costs: relative cost of losing a running model (default: 1)
         evict_costs:
           v: 50 # vllm backend, slow cold start
-          L: 30 # 70B weights, slow to load
+          llama-70B: 30 # 70B weights, slow to load
 
         # sets: named combinations of models that may run together.
         # Each value is an expression built from these operators:
@@ -620,28 +620,28 @@ routing:
         #   +ref  inline the expression of another set
         #
         # Each expression expands into one or more concrete sets:
-        #   "L"                  → [L]
+        #   "model-a"            → [model-a]
         #   "a & b"              → [a, b]
         #   "a | b"              → [a], [b]
         #   "(a | b) & c"        → [a, c], [b, c]
         #   "(a | b) & (c | d)"  → [a,c], [a,d], [b,c], [b,d]
         #   "+llms & v"          → inline the llms set, then AND with v
         sets:
-          # An LLM plus TTS. Switching between g/q/m keeps v loaded.
-          # expands to: [g,v], [q,v], [m,v]
-          standard: "(g | q | m) & v"
+          # An LLM plus TTS. Vars and real model IDs may be mixed.
+          # expands to: [g,v], [qwen-model,v], [m,v]
+          standard: "(g | qwen-model | m) & v"
 
           # An LLM plus TTS plus reranker.
           # expands to: [g,v,e], [q,v,e]
           with_rerank: "(g | q) & v & e"
 
           # An LLM plus image generation, no TTS.
-          # expands to: [g,sd], [q,sd]
-          creative: "(g | q) & sd"
+          # expands to: [g,stable-diffusion], [q,stable-diffusion]
+          creative: "(g | q) & stable-diffusion"
 
           # The 70B model uses every GPU, so it can only run alone.
-          # expands to: [L]
-          full: "L"
+          # Vars are not required when using real model IDs.
+          full: "llama-70B"
 
   # scheduler: how queued requests are ordered.
   # The default and only valid scheduler is "fifo"

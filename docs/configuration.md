@@ -548,24 +548,22 @@ models:
 # A model not appearing in any set can only run alone.
 #
 matrix:
-  # vars: short names for models (alphanumeric, 1-8 chars)
-  # - required for sets and evict_costs settings
+  # vars: optional short names for models (alphanumeric, "-", or ".", 1-32 chars)
   # - each entry is a short name to a real model ID. Do not use an alias
   # - used to keep set DSL logic short and easier to read
-  # - sets and evict_costs only use identifiers defined in vars
+  # - sets and evict_costs may mix vars with real model IDs
+  # - a var takes precedence when its name is also a real model ID
   vars:
     g: gemma-model
     q: qwen-model
     m: mistral-model
     v: voxtral-model
     e: reranker-model
-    L: llama-70B
-    sd: stable-diffusion
 
   # evict_costs: relative cost of losing a running model (default: 1)
   evict_costs:
     v: 50 # vllm backend, slow cold start
-    L: 30 # 70B weights, slow to load
+    llama-70B: 30 # 70B weights, slow to load
 
   # sets: named sets of concurrent model combinations
   # Values are DSL strings with operators:
@@ -575,28 +573,28 @@ matrix:
   #   +ref  inline another set's expression
   #
   # Expansion examples:
-  #   "L"                  → [L]
+  #   "model-a"            → [model-a]
   #   "a & b"              → [a, b]
   #   "a | b"              → [a], [b]
   #   "(a | b) & c"        → [a, c], [b, c]
   #   "(a | b) & (c | d)"  → [a,c], [a,d], [b,c], [b,d]
   #   "+llms & v"          → expands llms inline, then applies & v
   sets:
-    # LLM + TTS: switching between g/q/m won't evict v
-    # expands to: [g,v], [q,v], [m,v]
-    standard: "(g | q | m) & v"
+    # LLM + TTS: vars and real model IDs may be mixed
+    # expands to: [g,v], [qwen-model,v], [m,v]
+    standard: "(g | qwen-model | m) & v"
 
     # LLM + TTS + reranker
     # expands to: [g,v,e], [q,v,e]
     with_rerank: "(g | q) & v & e"
 
     # LLM + image generation, no TTS
-    # expands to: [g,sd], [q,sd]
-    creative: "(g | q) & sd"
+    # expands to: [g,stable-diffusion], [q,stable-diffusion]
+    creative: "(g | q) & stable-diffusion"
 
     # 70B model uses all GPUs, can only run alone
-    # expands to: [L]
-    full: "L"
+    # vars are not required when using real model IDs
+    full: "llama-70B"
 
 # hooks: a dictionary of event triggers and actions
 # - optional, default: empty dictionary
