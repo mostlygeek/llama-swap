@@ -4,12 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
-
-	"gopkg.in/yaml.v3"
 )
 
 const (
-	MODEL_CONFIG_DEFAULT_TTL = -1
+	MODEL_CONFIG_DEFAULT_TTL   = -1
+	MODEL_CONFIG_DEFAULT_PROXY = "http://localhost:${PORT}"
 )
 
 var validModalities = map[string]struct{}{
@@ -21,59 +20,12 @@ var validModalities = map[string]struct{}{
 // ModelCapConfig defines what modalities and features a model supports.
 // Used in /v1/models to inform clients. An empty block (all zero values) is
 // treated as not configured.
-//
-// The custom UnmarshalYAML stores an untyped representation so YAML anchors
-// can be resolved before macro substitution. After ResolveMacros is called
-// the typed fields (In, Out, Tools, Reranker, Context) are populated.
 type ModelCapConfig struct {
 	In       []string `yaml:"in"`
 	Out      []string `yaml:"out"`
 	Tools    bool     `yaml:"tools"`
 	Reranker bool     `yaml:"reranker"`
 	Context  int      `yaml:"context"`
-
-	raw map[string]any
-}
-
-// UnmarshalYAML decodes capabilities into an untyped map. This materializes
-// YAML aliases and merge keys while allowing macro placeholders in fields
-// that will ultimately be decoded as ints or bools.
-func (c *ModelCapConfig) UnmarshalYAML(value *yaml.Node) error {
-	return value.Decode(&c.raw)
-}
-
-// ResolveMacros substitutes all macros in the untyped representation (LIFO
-// order matching LoadConfigFromReader), then decodes the resolved values into
-// the typed fields.
-func (c *ModelCapConfig) ResolveMacros(macros MacroList) error {
-	if c.raw == nil {
-		return c.Validate()
-	}
-
-	var resolved any = c.raw
-	for i := len(macros) - 1; i >= 0; i-- {
-		entry := macros[i]
-		var err error
-		resolved, err = substituteMacroInValue(resolved, entry.Name, entry.Value)
-		if err != nil {
-			return fmt.Errorf("capabilities: failed macro substitution: %w", err)
-		}
-	}
-	if err := validateNestedForUnknownMacros(resolved, "capabilities"); err != nil {
-		return err
-	}
-
-	var node yaml.Node
-	if err := node.Encode(resolved); err != nil {
-		return fmt.Errorf("capabilities: failed to encode after macro substitution: %w", err)
-	}
-	*c = ModelCapConfig{}
-	type rawCap ModelCapConfig
-	if err := node.Decode((*rawCap)(c)); err != nil {
-		return fmt.Errorf("capabilities: failed to decode after macro substitution: %w", err)
-	}
-
-	return c.Validate()
 }
 
 // Empty returns true when all fields are at their zero values.
@@ -159,7 +111,7 @@ func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	defaults := rawModelConfig{
 		Cmd:              "",
 		CmdStop:          "",
-		Proxy:            "http://localhost:${PORT}",
+		Proxy:            MODEL_CONFIG_DEFAULT_PROXY,
 		Aliases:          []string{},
 		Env:              []string{},
 		CheckEndpoint:    "/health",

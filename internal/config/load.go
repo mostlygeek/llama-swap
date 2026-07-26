@@ -25,7 +25,17 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		return Config{}, err
 	}
 
-	// Unmarshal into full Config with defaults
+	raw, macroConfig, err := resolveConfigMacros(yamlStr)
+	if err != nil {
+		return Config{}, err
+	}
+
+	var node yaml.Node
+	if err = node.Encode(raw); err != nil {
+		return Config{}, err
+	}
+
+	// Decode the resolved values into the full Config with defaults.
 	config := Config{
 		HealthCheckTimeout: 120,
 		StartPort:          5800,
@@ -41,8 +51,13 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			"X-Litellm-Session-Id",
 		}}},
 	}
-	if err = yaml.Unmarshal([]byte(yamlStr), &config); err != nil {
+	if err = node.Decode(&config); err != nil {
 		return Config{}, err
+	}
+	config.Macros = macroConfig.Macros
+	for modelID, modelConfig := range config.Models {
+		modelConfig.Macros = macroConfig.Models[modelID].Macros
+		config.Models[modelID] = modelConfig
 	}
 
 	if config.HealthCheckTimeout < 15 {
@@ -103,28 +118,16 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		}
 	}
 
-	// Validate global macros
-	for _, macro := range config.Macros {
-		if err = validateMacro(macro.Name, macro.Value); err != nil {
-			return Config{}, err
-		}
-	}
-
-	// Get and sort all model IDs for consistent port assignment
+	// Sort model IDs for deterministic validation and normalization.
 	modelIds := make([]string, 0, len(config.Models))
 	for modelId := range config.Models {
 		modelIds = append(modelIds, modelId)
 	}
 	sort.Strings(modelIds)
 
-	nextPort := config.StartPort
 	for _, modelId := range modelIds {
 		modelConfig := config.Models[modelId]
 		modelConfig.HealthCheckTimeout = config.HealthCheckTimeout
-
-		// Strip comments from command fields
-		modelConfig.Cmd = StripComments(modelConfig.Cmd)
-		modelConfig.CmdStop = StripComments(modelConfig.CmdStop)
 
 		// set model TTL to globalTTL it is the default value
 		if modelConfig.UnloadAfter == MODEL_CONFIG_DEFAULT_TTL {
@@ -143,148 +146,8 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			modelConfig.UnloadTimeout = config.UnloadTimeout
 		}
 
-		// Validate model macros
-		for _, macro := range modelConfig.Macros {
-			if err = validateMacro(macro.Name, macro.Value); err != nil {
-				return Config{}, fmt.Errorf("model %s: %s", modelId, err.Error())
-			}
-		}
-
-		// Build merged macro list: MODEL_ID + global macros + model macros (model overrides global)
-		mergedMacros := make(MacroList, 0, len(config.Macros)+len(modelConfig.Macros)+1)
-		mergedMacros = append(mergedMacros, MacroEntry{Name: "MODEL_ID", Value: modelId})
-		mergedMacros = append(mergedMacros, config.Macros...)
-
-		// Add model macros (override globals with same name)
-		for _, entry := range modelConfig.Macros {
-			found := false
-			for i, existing := range mergedMacros {
-				if existing.Name == entry.Name {
-					mergedMacros[i] = entry
-					found = true
-					break
-				}
-			}
-			if !found {
-				mergedMacros = append(mergedMacros, entry)
-			}
-		}
-
-		// Substitute remaining macros in model fields (LIFO order)
-		for i := len(mergedMacros) - 1; i >= 0; i-- {
-			entry := mergedMacros[i]
-			macroSlug := fmt.Sprintf("${%s}", entry.Name)
-			macroStr := fmt.Sprintf("%v", entry.Value)
-
-			modelConfig.Cmd = strings.ReplaceAll(modelConfig.Cmd, macroSlug, macroStr)
-			modelConfig.CmdStop = strings.ReplaceAll(modelConfig.CmdStop, macroSlug, macroStr)
-			modelConfig.Proxy = strings.ReplaceAll(modelConfig.Proxy, macroSlug, macroStr)
-			modelConfig.CheckEndpoint = strings.ReplaceAll(modelConfig.CheckEndpoint, macroSlug, macroStr)
-			modelConfig.Filters.StripParams = strings.ReplaceAll(modelConfig.Filters.StripParams, macroSlug, macroStr)
-			modelConfig.Name = strings.ReplaceAll(modelConfig.Name, macroSlug, macroStr)
-			modelConfig.Description = strings.ReplaceAll(modelConfig.Description, macroSlug, macroStr)
-
-			// Substitute macros in SetParamsByID keys and values
-			if len(modelConfig.Filters.SetParamsByID) > 0 {
-				newSetParamsByID := make(map[string]map[string]any, len(modelConfig.Filters.SetParamsByID))
-				for key, paramMap := range modelConfig.Filters.SetParamsByID {
-					newKey := strings.ReplaceAll(key, macroSlug, macroStr)
-					newValAny, err := substituteMacroInValue(any(paramMap), entry.Name, entry.Value)
-					if err != nil {
-						return Config{}, fmt.Errorf("model %s filters.setParamsByID: %s", modelId, err.Error())
-					}
-					newParamMap, ok := newValAny.(map[string]any)
-					if !ok {
-						return Config{}, fmt.Errorf("model %s filters.setParamsByID: unexpected type after macro substitution", modelId)
-					}
-					newSetParamsByID[newKey] = newParamMap
-				}
-				modelConfig.Filters.SetParamsByID = newSetParamsByID
-			}
-
-			// Substitute in metadata (type-preserving)
-			if len(modelConfig.Metadata) > 0 {
-				result, err := substituteMacroInValue(modelConfig.Metadata, entry.Name, entry.Value)
-				if err != nil {
-					return Config{}, fmt.Errorf("model %s metadata: %s", modelId, err.Error())
-				}
-				modelConfig.Metadata = result.(map[string]any)
-			}
-		}
-
-		// Resolve macros in capabilities (they couldn't be decoded properly
-		// during YAML unmarshal because e.g. "${default_ctx}" is not an int).
-		if err := modelConfig.Capabilities.ResolveMacros(mergedMacros); err != nil {
+		if err := modelConfig.Capabilities.Validate(); err != nil {
 			return Config{}, fmt.Errorf("model %s: %w", modelId, err)
-		}
-
-		// Handle PORT macro - only allocate if cmd uses it
-		cmdHasPort := strings.Contains(modelConfig.Cmd, "${PORT}")
-		proxyHasPort := strings.Contains(modelConfig.Proxy, "${PORT}")
-		if cmdHasPort || proxyHasPort {
-			if !cmdHasPort && proxyHasPort {
-				return Config{}, fmt.Errorf("model %s: proxy uses ${PORT} but cmd does not - ${PORT} is only available when used in cmd", modelId)
-			}
-
-			macroSlug := "${PORT}"
-			macroStr := fmt.Sprintf("%v", nextPort)
-
-			modelConfig.Cmd = strings.ReplaceAll(modelConfig.Cmd, macroSlug, macroStr)
-			modelConfig.CmdStop = strings.ReplaceAll(modelConfig.CmdStop, macroSlug, macroStr)
-			modelConfig.Proxy = strings.ReplaceAll(modelConfig.Proxy, macroSlug, macroStr)
-			modelConfig.Name = strings.ReplaceAll(modelConfig.Name, macroSlug, macroStr)
-			modelConfig.Description = strings.ReplaceAll(modelConfig.Description, macroSlug, macroStr)
-
-			if len(modelConfig.Metadata) > 0 {
-				result, err := substituteMacroInValue(modelConfig.Metadata, "PORT", nextPort)
-				if err != nil {
-					return Config{}, fmt.Errorf("model %s metadata: %s", modelId, err.Error())
-				}
-				modelConfig.Metadata = result.(map[string]any)
-			}
-
-			nextPort++
-		}
-
-		// Validate no unknown macros remain
-		fieldMap := map[string]string{
-			"cmd":                 modelConfig.Cmd,
-			"cmdStop":             modelConfig.CmdStop,
-			"proxy":               modelConfig.Proxy,
-			"checkEndpoint":       modelConfig.CheckEndpoint,
-			"filters.stripParams": modelConfig.Filters.StripParams,
-			"name":                modelConfig.Name,
-			"description":         modelConfig.Description,
-		}
-
-		for fieldName, fieldValue := range fieldMap {
-			matches := macroPatternRegex.FindAllStringSubmatch(fieldValue, -1)
-			for _, match := range matches {
-				macroName := match[1]
-				if macroName == "PID" && fieldName == "cmdStop" {
-					continue // replaced at runtime
-				}
-				if macroName == "PORT" || macroName == "MODEL_ID" {
-					return Config{}, fmt.Errorf("macro '${%s}' should have been substituted in %s.%s", macroName, modelId, fieldName)
-				}
-				return Config{}, fmt.Errorf("unknown macro '${%s}' found in %s.%s", macroName, modelId, fieldName)
-			}
-		}
-
-		if len(modelConfig.Metadata) > 0 {
-			if err := validateNestedForUnknownMacros(modelConfig.Metadata, fmt.Sprintf("model %s metadata", modelId)); err != nil {
-				return Config{}, err
-			}
-		}
-
-		// Validate SetParamsByID keys and values
-		for key, paramMap := range modelConfig.Filters.SetParamsByID {
-			if matches := macroPatternRegex.FindAllStringSubmatch(key, -1); len(matches) > 0 {
-				return Config{}, fmt.Errorf("unknown macro '${%s}' found in model %s filters.setParamsByID key", matches[0][1], modelId)
-			}
-			if err := validateNestedForUnknownMacros(any(paramMap), fmt.Sprintf("model %s filters.setParamsByID[%s]", modelId, key)); err != nil {
-				return Config{}, err
-			}
 		}
 
 		// Auto-register setParamsByID keys as aliases (skip the model's own ID)
@@ -424,42 +287,6 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			return Config{}, fmt.Errorf("apiKeys[%d]: api key cannot contain spaces", i)
 		}
 		config.RequiredAPIKeys[i] = apikey
-	}
-
-	// Process peers with global macro substitution
-	for peerName, peerConfig := range config.Peers {
-		// Substitute global macros (LIFO order)
-		for i := len(config.Macros) - 1; i >= 0; i-- {
-			entry := config.Macros[i]
-			macroSlug := fmt.Sprintf("${%s}", entry.Name)
-			macroStr := fmt.Sprintf("%v", entry.Value)
-
-			peerConfig.ApiKey = strings.ReplaceAll(peerConfig.ApiKey, macroSlug, macroStr)
-			peerConfig.Filters.StripParams = strings.ReplaceAll(peerConfig.Filters.StripParams, macroSlug, macroStr)
-
-			// Substitute in setParams (type-preserving)
-			if len(peerConfig.Filters.SetParams) > 0 {
-				result, err := substituteMacroInValue(peerConfig.Filters.SetParams, entry.Name, entry.Value)
-				if err != nil {
-					return Config{}, fmt.Errorf("peers.%s.filters.setParams: %w", peerName, err)
-				}
-				peerConfig.Filters.SetParams = result.(map[string]any)
-			}
-		}
-
-		// Validate no unknown macros remain
-		if matches := macroPatternRegex.FindAllStringSubmatch(peerConfig.ApiKey, -1); len(matches) > 0 {
-			return Config{}, fmt.Errorf("peers.%s.apiKey: unknown macro '${%s}'", peerName, matches[0][1])
-		}
-		if matches := macroPatternRegex.FindAllStringSubmatch(peerConfig.Filters.StripParams, -1); len(matches) > 0 {
-			return Config{}, fmt.Errorf("peers.%s.filters.stripParams: unknown macro '${%s}'", peerName, matches[0][1])
-		}
-		if len(peerConfig.Filters.SetParams) > 0 {
-			if err := validateNestedForUnknownMacros(peerConfig.Filters.SetParams, fmt.Sprintf("peers.%s.filters.setParams", peerName)); err != nil {
-				return Config{}, err
-			}
-		}
-		config.Peers[peerName] = peerConfig
 	}
 
 	if err := ValidatePeerNamespace(config); err != nil {

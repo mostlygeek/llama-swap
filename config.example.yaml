@@ -119,16 +119,19 @@ unloadTimeout: 10
 # macros: a dictionary of string substitutions
 # - optional, default: empty dictionary
 # - macros are reusable snippets
-# - used in a model's cmd, cmdStop, proxy, checkEndpoint, filters.stripParams
+# - global macros can be used in any configuration value
+# - model macros can be used in any value within that model
 # - useful for reducing common configuration settings
 # - macro names are strings and must be less than 64 characters
 # - macro names must match the regex ^[a-zA-Z0-9_-]+$
-# - macro names must not be a reserved name: PORT or MODEL_ID
+# - macro names must not be a reserved name: PID, PORT, or MODEL_ID
 # - macro values can be numbers, bools, or strings
 # - macros can contain other macros, but they must be defined before they are used
 # - environment variables can be referenced with ${env.VAR_NAME} syntax
 #   - env macros are substituted first, before regular macros
 #   - if the env var is not set, config loading will fail with an error
+# - ${PORT} is assigned while loading each model that uses it in cmd
+# - ${PID} is substituted when a model's cmdStop runs
 macros:
   # Example of a multi-line macro
   "latest-llama": >
