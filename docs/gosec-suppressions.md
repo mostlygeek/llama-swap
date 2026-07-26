@@ -17,7 +17,7 @@ To list the live markers at any time:
 grep -rn "#nosec" internal/
 ```
 
-Total: **36** suppressions across **10** rules (G115 ×18, G204 ×6, G404 ×3, G120 ×2, G710 ×2, G304 ×1, G703 ×1, G705 ×1, G118 ×1, G103 ×1).
+Total: **33** suppressions across **9** rules (G115 ×18, G204 ×6, G120 ×2, G710 ×2, G304 ×1, G703 ×1, G705 ×1, G118 ×1, G103 ×1).
 
 ---
 
@@ -67,18 +67,6 @@ the arguments come from untrusted/remote input, and no shell is invoked.
 - `internal/perf/monitor_windows.go:41` — `nvidia-smi`, same as above.
 - `internal/perf/monitor_darwin.go:124` — `mactop` (literal binary + flags +
   integer `--interval` arg).
-
----
-
-## G404 — weak random (math/rand) · 3 sites · HIGH
-
-**Verdict: false positive.** `math/rand` is used only to jitter the timing of
-cosmetic model-loading progress remarks. The values never feed a token, key,
-nonce, salt, credential, or any security decision, so CWE-338 does not apply.
-
-Marker: `// #nosec G404 -- cosmetic loading-spinner remark timing; not security-sensitive`
-
-Sites: `internal/router/loading.go:110,135,143`
 
 ---
 

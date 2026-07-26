@@ -50,6 +50,13 @@ logToStdout: "proxy"
 # - useful for limiting memory usage when processing large volumes of metrics
 metricsMaxInMemory: 1000
 
+# metricsStoreFile: persist metrics to disk so they survive server restarts
+# - optional, default: "" (disabled)
+# - when set to a file path, metrics are periodically saved as a JSON array
+#   and reloaded on startup
+# - example: "/var/lib/llama-swap/metrics.json"
+#metricsStoreFile: "/var/lib/llama-swap/metrics.json"
+
 # captureBuffer: how many MBs to allocate for storing request/response captures
 # - optional, default: 10
 # - set to 0 to disable

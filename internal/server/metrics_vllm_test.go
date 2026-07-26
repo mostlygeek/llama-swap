@@ -15,7 +15,7 @@ import (
 // sentinel for rates and cache rather than reporting a misleading 0 t/s, while
 // token counts stay at 0.
 func TestServer_Record_VLLMStreamingNoUsage_UsesUnknownSentinel(t *testing.T) {
-	mp := newMetricsMonitor(logmon.NewWriter(io.Discard), 10, 0)
+	mp := newMetricsMonitor(logmon.NewWriter(io.Discard), 10, 0, "", 0)
 
 	rec := httptest.NewRecorder()
 	copier := newBodyCopier(rec)
@@ -45,7 +45,7 @@ func TestServer_Record_VLLMStreamingNoUsage_UsesUnknownSentinel(t *testing.T) {
 // TestServer_Record_NonOKResponse_UsesUnknownSentinel verifies the failure path
 // also reports unknown rates rather than 0.
 func TestServer_Record_NonOKResponse_UsesUnknownSentinel(t *testing.T) {
-	mp := newMetricsMonitor(logmon.NewWriter(io.Discard), 10, 0)
+	mp := newMetricsMonitor(logmon.NewWriter(io.Discard), 10, 0, "", 0)
 
 	rec := httptest.NewRecorder()
 	copier := newBodyCopier(rec)

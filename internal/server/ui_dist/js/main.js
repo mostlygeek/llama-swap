@@ -14,6 +14,7 @@ import { ModelsPage } from "./pages/models.js";
 import { LogsPage } from "./pages/logs.js";
 import { ActivityPage } from "./pages/activity.js";
 import { PerformancePage } from "./pages/performance.js";
+import { StatsPage } from "./pages/stats.js";
 
 const routes = {
   "/": PlaygroundPage,
@@ -21,6 +22,7 @@ const routes = {
   "/logs": LogsPage,
   "/activity": ActivityPage,
   "/performance": PerformancePage,
+  "/stats": StatsPage,
 };
 
 // data-theme attribute effect (App.svelte $effect)

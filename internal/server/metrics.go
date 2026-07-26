@@ -54,6 +54,7 @@ func (e ActivityLogEvent) Type() uint32 {
 // metricsMonitor parses upstream responses for token statistics, keeps a
 // bounded in-memory ring of recent activity, and (when captures are enabled)
 // stores zstd+CBOR-compressed request/response captures in a sized cache.
+// When a MetricsFileStore is configured, metrics survive server restarts.
 type metricsMonitor struct {
 	mu      sync.RWMutex
 	metrics ring.Buffer[ActivityLogEntry]
@@ -62,11 +63,15 @@ type metricsMonitor struct {
 
 	enableCaptures bool
 	captureCache   *cache.Cache // zstd-compressed CBOR of ReqRespCapture
+
+	store *MetricsFileStore
 }
 
 // newMetricsMonitor creates a metricsMonitor retaining up to maxMetrics entries.
 // captureBufferMB is the capture buffer size in megabytes; 0 disables captures.
-func newMetricsMonitor(logger *logmon.Monitor, maxMetrics int, captureBufferMB int) *metricsMonitor {
+// When storeFile is non-empty, metrics are persisted to that path (JSON format)
+// with periodic flushes at storeInterval (0 = 5s default).
+func newMetricsMonitor(logger *logmon.Monitor, maxMetrics int, captureBufferMB int, storeFile string, storeInterval time.Duration) *metricsMonitor {
 	if maxMetrics <= 0 {
 		maxMetrics = 1000
 	}
@@ -78,6 +83,27 @@ func newMetricsMonitor(logger *logmon.Monitor, maxMetrics int, captureBufferMB i
 	if captureBufferMB > 0 {
 		mm.captureCache = cache.New(captureBufferMB * 1024 * 1024)
 	}
+
+	// File-backed persistence for metrics
+	if storeFile != "" {
+		mm.store = NewMetricsFileStore(storeFile, storeInterval, mm.getMetrics)
+		if mm.store != nil {
+			if existing, err := mm.store.Load(); err != nil {
+				logger.Warnf("metrics: failed to load stored metrics: %v", err)
+			} else if len(existing) > 0 {
+				for i, e := range existing {
+					if e.ID >= mm.nextID {
+						mm.nextID = e.ID + 1
+					}
+					mm.metrics.Push(e)
+					_ = i
+				}
+				logger.Infof("metrics: loaded %d entries from %s", len(existing), storeFile)
+			}
+			mm.store.Start()
+		}
+	}
+
 	return mm
 }
 
@@ -438,6 +464,14 @@ func buildMetrics(modelID string, start, firstWrite time.Time, inputTokens, outp
 		},
 		DurationMs: durationMs,
 	}
+}
+
+// Close stops the background metrics persistence, flushing any pending data.
+func (mp *metricsMonitor) Close() error {
+	if mp.store != nil {
+		return mp.store.Close()
+	}
+	return nil
 }
 
 // decompressBody decompresses the body based on the Content-Encoding header.
