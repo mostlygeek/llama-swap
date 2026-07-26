@@ -298,6 +298,14 @@ macros:
 			expectedError: "macro name 'MODEL_ID' is reserved",
 		},
 		{
+			name: "global macro named PID",
+			config: `
+macros:
+  PID: 1234
+`,
+			expectedError: "macro name 'PID' is reserved",
+		},
+		{
 			name: "model macro named PORT",
 			config: `
 models:

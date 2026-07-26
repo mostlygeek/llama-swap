@@ -63,15 +63,6 @@ func (ml MacroList) Get(name string) (any, bool) {
 	return nil, false
 }
 
-// ToMap converts MacroList to a map (for backward compatibility if needed)
-func (ml MacroList) ToMap() map[string]any {
-	result := make(map[string]any, len(ml))
-	for _, entry := range ml {
-		result[entry.Name] = entry.Value
-	}
-	return result
-}
-
 type GroupConfig struct {
 	Swap       bool     `yaml:"swap"`
 	Exclusive  bool     `yaml:"exclusive"`

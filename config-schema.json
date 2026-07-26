@@ -32,13 +32,14 @@
                 "pattern": "^[a-zA-Z0-9_-]+$",
                 "not": {
                     "enum": [
+                        "PID",
                         "PORT",
                         "MODEL_ID"
                     ]
                 }
             },
             "default": {},
-            "description": "A dictionary of string substitutions. Macros are reusable snippets used in model cmd, cmdStop, proxy, checkEndpoint, filters.stripParams. Macro names must be <64 chars, match ^[a-zA-Z0-9_-]+$, and not be PORT or MODEL_ID. Values can be string, number, or boolean. Macros can reference other macros defined before them."
+            "description": "A dictionary of string substitutions. Global macros can be used in any configuration value; model macros are scoped to their model. Macro names must be <64 chars, match ^[a-zA-Z0-9_-]+$, and not be PID, PORT, or MODEL_ID. Values can be string, number, or boolean. Macros can reference other macros defined before them."
         },
         "timeouts": {
             "type": "object",
