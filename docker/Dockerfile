@@ -142,7 +142,7 @@ RUN go mod download
 COPY . .
 COPY --from=ui-build /src/internal/server/ui_dist ./internal/server/ui_dist
 RUN mkdir -p /install/bin && \
-    CGO_ENABLED=0 GOOS=linux go build -o /install/bin/llama-swap . && \
+    CGO_ENABLED=0 GOOS=linux go build -tags embed_ui -o /install/bin/llama-swap . && \
     echo "local" > /install/llama-swap-version
 
 # ── Runtime bases ─────────────────────────────────────────────────────

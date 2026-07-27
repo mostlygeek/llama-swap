@@ -1,6 +1,6 @@
 <script lang="ts">
   import { link } from "svelte-spa-router";
-  import { FerrisWheel, Boxes, Activity, ScrollText, Gauge, Sun, Moon, Monitor, ChevronRight, Settings } from "@lucide/svelte";
+  import { FerrisWheel, Boxes, Activity, ScrollText, Gauge, Sun, Moon, Monitor, ChevronRight, Settings, PackageSearch, Cog, Server } from "@lucide/svelte";
   import * as Sidebar from "$lib/components/ui/sidebar/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -156,11 +156,44 @@
           </Sidebar.MenuItem>
 
           <Sidebar.MenuItem>
+            <Sidebar.MenuButton isActive={isActive("/models/hub", $currentRoute)} tooltipContent="Model Hub">
+              {#snippet child({ props })}
+                <a href="/models/hub" use:link {...props}>
+                  <PackageSearch />
+                  <span>Model Hub</span>
+                </a>
+              {/snippet}
+            </Sidebar.MenuButton>
+          </Sidebar.MenuItem>
+
+          <Sidebar.MenuItem>
             <Sidebar.MenuButton isActive={isActive("/logs", $currentRoute)} tooltipContent="Logs">
               {#snippet child({ props })}
                 <a href="/logs" use:link {...props}>
                   <ScrollText />
                   <span>Logs</span>
+                </a>
+              {/snippet}
+            </Sidebar.MenuButton>
+          </Sidebar.MenuItem>
+
+          <Sidebar.MenuItem>
+            <Sidebar.MenuButton isActive={isActive("/config", $currentRoute)} tooltipContent="Configuration">
+              {#snippet child({ props })}
+                <a href="/config" use:link {...props}>
+                  <Cog />
+                  <span>Configuration</span>
+                </a>
+              {/snippet}
+            </Sidebar.MenuButton>
+          </Sidebar.MenuItem>
+
+          <Sidebar.MenuItem>
+            <Sidebar.MenuButton isActive={isActive("/backends", $currentRoute)} tooltipContent="Backends">
+              {#snippet child({ props })}
+                <a href="/backends" use:link {...props}>
+                  <Server />
+                  <span>Backends</span>
                 </a>
               {/snippet}
             </Sidebar.MenuButton>
