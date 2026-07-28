@@ -283,3 +283,80 @@ func TestProtectedParams(t *testing.T) {
 	// Verify that "model" is protected
 	assert.Contains(t, ProtectedParams, "model")
 }
+
+func TestFilters_MatchRuleValidate(t *testing.T) {
+	validSet := map[string]any{"top_p": 0.9}
+
+	tests := []struct {
+		name    string
+		rule    MatchRule
+		wantErr string
+	}{
+		{
+			name: "valid rule",
+			rule: MatchRule{Key: "reasoning_effort", Match: "high", Set: validSet},
+		},
+		{
+			name:    "empty key",
+			rule:    MatchRule{Match: "high", Set: validSet},
+			wantErr: "key must not be empty",
+		},
+		{
+			name:    "protected key",
+			rule:    MatchRule{Key: "model", Match: "x", Set: validSet},
+			wantErr: "is a protected parameter",
+		},
+		{
+			name:    "dotted key",
+			rule:    MatchRule{Key: "a.b", Match: "x", Set: validSet},
+			wantErr: "must contain only letters",
+		},
+		{
+			name:    "wildcard key",
+			rule:    MatchRule{Key: "a*", Match: "x", Set: validSet},
+			wantErr: "must contain only letters",
+		},
+		{
+			name:    "empty set",
+			rule:    MatchRule{Key: "reasoning_effort", Match: "high"},
+			wantErr: "set must not be empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.rule.Validate()
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			assert.ErrorContains(t, err, tt.wantErr)
+		})
+	}
+}
+
+func TestFilters_MatchRuleSanitizedSet(t *testing.T) {
+	t.Run("empty set", func(t *testing.T) {
+		params, keys := MatchRule{Key: "k", Match: "v"}.SanitizedSet()
+		assert.Nil(t, params)
+		assert.Nil(t, keys)
+	})
+
+	t.Run("keys sorted and protected removed", func(t *testing.T) {
+		rule := MatchRule{Key: "k", Match: "v", Set: map[string]any{
+			"top_p": 0.9,
+			"model": "hijacked",
+			"temp":  0.1,
+		}}
+		params, keys := rule.SanitizedSet()
+		assert.Equal(t, []string{"temp", "top_p"}, keys)
+		assert.Equal(t, map[string]any{"temp": 0.1, "top_p": 0.9}, params)
+	})
+
+	t.Run("only protected params", func(t *testing.T) {
+		rule := MatchRule{Key: "k", Match: "v", Set: map[string]any{"model": "x"}}
+		params, keys := rule.SanitizedSet()
+		assert.Nil(t, params)
+		assert.Nil(t, keys)
+	})
+}

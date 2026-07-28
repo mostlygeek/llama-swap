@@ -22,6 +22,13 @@
                     },
                     {
                         "type": "boolean"
+                    },
+                    {
+                        "type": "object",
+                        "additionalProperties": true
+                    },
+                    {
+                        "type": "array"
                     }
                 ]
             },
@@ -39,7 +46,7 @@
                 }
             },
             "default": {},
-            "description": "A dictionary of string substitutions. Global macros can be used in any configuration value; model macros are scoped to their model. Macro names must be <64 chars, match ^[a-zA-Z0-9_-]+$, and not be PID, PORT, or MODEL_ID. Values can be string, number, or boolean. Macros can reference other macros defined before them."
+            "description": "A dictionary of substitutions. Global macros can be used in any configuration value; model macros are scoped to their model. Macro names must be <64 chars, match ^[a-zA-Z0-9_-]+$, and not be PID, PORT, or MODEL_ID. Values can be a string, number, boolean, object, or array. Objects and arrays may only be substituted as a whole value (e.g. filters.setParamsByMatch: ${my_rules}); interpolating one into a string is a load-time error. Macros can reference other macros defined before them."
         },
         "timeouts": {
             "type": "object",
@@ -518,11 +525,42 @@
                                 },
                                 "default": {},
                                 "description": "Dictionary mapping requested model IDs (or aliases) to parameters to set/override in requests. Applied after setParams and can override those values. Useful with aliases to vary behaviour depending on which alias the client used (e.g. different reasoning_effort per alias). Keys support ${MODEL_ID} macro substitution. Protected params like 'model' cannot be overridden."
+                            },
+                            "setParamsByMatch": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "key": {
+                                            "type": "string",
+                                            "pattern": "^[A-Za-z0-9_-]+$",
+                                            "description": "Top-level request field to inspect (e.g. reasoning_effort). Must not be 'model' and may only contain letters, digits, underscores, and hyphens."
+                                        },
+                                        "match": {
+                                            "type": "string",
+                                            "description": "Value the key must equal for the rule to apply. Non-string JSON values are compared by their string form, so booleans and numbers must be quoted."
+                                        },
+                                        "set": {
+                                            "type": "object",
+                                            "additionalProperties": true,
+                                            "minProperties": 1,
+                                            "description": "Parameters to apply when the rule matches. Object values are merged into an existing request object rather than replacing it. Protected params like 'model' cannot be overridden."
+                                        }
+                                    },
+                                    "required": [
+                                        "key",
+                                        "match",
+                                        "set"
+                                    ],
+                                    "additionalProperties": false
+                                },
+                                "default": [],
+                                "description": "List of rules that set parameters when a request field equals a value. Rules are evaluated in order and every matching rule applies, so a later rule overrides an earlier one. Applied after stripParams and before setParams/setParamsByID. Because rules match on the request body instead of the model ID, clients can vary parameters between requests without causing a model swap."
                             }
                         },
                         "additionalProperties": false,
                         "default": {},
-                        "description": "Dictionary of filter settings. Supports stripParams, setParams, and setParamsByID."
+                        "description": "Dictionary of filter settings. Supports stripParams, setParams, setParamsByID, and setParamsByMatch."
                     },
                     "metadata": {
                         "type": "object",
@@ -693,11 +731,42 @@
                                 "additionalProperties": true,
                                 "default": {},
                                 "description": "Dictionary of parameters to set/override in requests to this peer. Useful for injecting provider-specific settings. Protected params like 'model' cannot be overridden. Values can be strings, numbers, booleans, arrays, or objects."
+                            },
+                            "setParamsByMatch": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "key": {
+                                            "type": "string",
+                                            "pattern": "^[A-Za-z0-9_-]+$",
+                                            "description": "Top-level request field to inspect (e.g. reasoning_effort). Must not be 'model' and may only contain letters, digits, underscores, and hyphens."
+                                        },
+                                        "match": {
+                                            "type": "string",
+                                            "description": "Value the key must equal for the rule to apply. Non-string JSON values are compared by their string form, so booleans and numbers must be quoted."
+                                        },
+                                        "set": {
+                                            "type": "object",
+                                            "additionalProperties": true,
+                                            "minProperties": 1,
+                                            "description": "Parameters to apply when the rule matches. Object values are merged into an existing request object rather than replacing it. Protected params like 'model' cannot be overridden."
+                                        }
+                                    },
+                                    "required": [
+                                        "key",
+                                        "match",
+                                        "set"
+                                    ],
+                                    "additionalProperties": false
+                                },
+                                "default": [],
+                                "description": "List of rules that set parameters when a request field equals a value. Rules are evaluated in order and every matching rule applies, so a later rule overrides an earlier one. Applied after stripParams and before setParams."
                             }
                         },
                         "additionalProperties": false,
                         "default": {},
-                        "description": "Dictionary of filter settings for peer requests. Supports stripParams and setParams."
+                        "description": "Dictionary of filter settings for peer requests. Supports stripParams, setParams, and setParamsByMatch."
                     },
                     "timeouts": {
                         "type": "object",

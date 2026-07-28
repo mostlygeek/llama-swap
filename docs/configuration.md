@@ -216,7 +216,10 @@ unloadTimeout: 10
 # - macro names are strings and must be less than 64 characters
 # - macro names must match the regex ^[a-zA-Z0-9_-]+$
 # - macro names must not be a reserved name: PID, PORT, or MODEL_ID
-# - macro values can be numbers, bools, or strings
+# - macro values can be numbers, bools, strings, maps, or lists
+# - map and list macros can only be substituted as a whole value, for example
+#   `setParamsByMatch: ${reasoning_rules}`. Interpolating one into a string is
+#   a load-time error. Use them to share structured settings between models.
 # - macros can contain other macros, but they must be defined before they are used
 # - environment variables can be referenced with ${env.VAR_NAME} syntax
 #   - env macros are substituted first, before regular macros
@@ -233,6 +236,21 @@ macros:
   # Example of macro-in-macro usage. macros can contain other macros
   # but they must be previously declared.
   "default_args": "--ctx-size ${default_ctx}"
+
+  # Example of a list-valued macro. Structured macros let several models share
+  # one definition, and are used as a whole value: setParamsByMatch: ${reasoning_rules}
+  "reasoning_rules":
+    - key: reasoning_effort
+      match: none
+      set:
+        chat_template_kwargs:
+          enable_thinking: false
+    - key: reasoning_effort
+      match: high
+      set:
+        chat_template_kwargs:
+          enable_thinking: true
+        thinking_budget_tokens: 8192
 
   # Example of environment variable macros
   # - ${env.VAR_NAME} pulls the value from the system environment
@@ -388,7 +406,7 @@ models:
 
     # filters: a dictionary of filter settings
     # - optional, default: empty dictionary
-    # - same capabilities as peer filters (stripParams, setParams)
+    # - same capabilities as peer filters (stripParams, setParams, setParamsByMatch)
     filters:
       # stripParams: a comma separated list of parameters to remove from the request
       # - optional, default: ""
@@ -427,6 +445,33 @@ models:
         "${MODEL_ID}:low":
           chat_template_kwargs:
             reasoning_effort: low
+
+      # setParamsByMatch: a list of rules that set parameters when a request
+      # field equals a value
+      # - optional, default: empty list
+      # - matches on the request body, not the model ID, so clients that send a
+      #   fixed `model` and vary a separate field (e.g. Open WebUI or OpenCode
+      #   sending reasoning_effort) get variant behaviour with no model swap
+      # - `key` is a top-level request field, letters/digits/underscore/hyphen
+      #   only; the `model` key cannot be matched on
+      # - `match` is compared against the field's string form, so JSON booleans
+      #   and numbers must be quoted (e.g. match: "true")
+      # - rules run in order and every match applies, so a later rule wins
+      # - object values are merged into an existing request object instead of
+      #   replacing it, so other keys the client sent are preserved
+      # - runs after stripParams and before setParams/setParamsByID
+      setParamsByMatch:
+        - key: reasoning_effort
+          match: none
+          set:
+            chat_template_kwargs:
+              enable_thinking: false
+        - key: reasoning_effort
+          match: high
+          set:
+            chat_template_kwargs:
+              enable_thinking: true
+            thinking_budget_tokens: 8192
 
     # aliases: alternative model names that this model configuration is used for
     # - optional, default: empty array
@@ -661,7 +706,7 @@ peers:
 
     # filters: a dictionary of filter settings for peer requests
     # - optional, default: empty dictionary
-    # - same capabilities as model filters (stripParams, setParams)
+    # - same capabilities as model filters (stripParams, setParams, setParamsByMatch)
     filters:
       # stripParams: a comma separated list of parameters to remove from the request
       # - optional, default: ""

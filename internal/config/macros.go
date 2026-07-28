@@ -26,6 +26,18 @@ type configMacroConfig struct {
 	Models map[string]modelMacroConfig `yaml:"models"`
 }
 
+// isScalarMacroValue reports whether a macro value is a scalar that can be
+// interpolated into a string. Maps and lists may only be substituted as a whole
+// value (e.g. filters.setParamsByMatch: ${my_rules}).
+func isScalarMacroValue(value any) bool {
+	switch value.(type) {
+	case string, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64, bool:
+		return true
+	default:
+		return false
+	}
+}
+
 // validateMacro validates macro name and value constraints
 func validateMacro(name string, value any) error {
 	if len(name) >= 64 {
@@ -35,18 +47,24 @@ func validateMacro(name string, value any) error {
 		return fmt.Errorf("macro name '%s' contains invalid characters, must match pattern ^[a-zA-Z0-9_-]+$", name)
 	}
 
-	// Validate that value is a scalar type
+	// Scalars can be interpolated anywhere; maps and lists are only valid as a
+	// whole value, which lets structured settings be shared between models.
+	macroSlug := fmt.Sprintf("${%s}", name)
 	switch v := value.(type) {
 	case string:
 		// Check for self-reference
-		macroSlug := fmt.Sprintf("${%s}", name)
 		if strings.Contains(v, macroSlug) {
 			return fmt.Errorf("macro '%s' contains self-reference", name)
 		}
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64, bool:
 		// These types are allowed
+	case map[string]any, []any:
+		// Scan nested values for a self-reference via the YAML rendering
+		if rendered, err := yaml.Marshal(v); err == nil && strings.Contains(string(rendered), macroSlug) {
+			return fmt.Errorf("macro '%s' contains self-reference", name)
+		}
 	default:
-		return fmt.Errorf("macro '%s' has invalid type %T, must be a scalar type (string, int, float, or bool)", name, value)
+		return fmt.Errorf("macro '%s' has invalid type %T, must be a scalar type (string, int, float, or bool), a map, or a list", name, value)
 	}
 
 	switch name {
@@ -136,7 +154,11 @@ func resolveConfigMacros(yamlStr string) (map[string]any, configMacroConfig, err
 		if key == "models" {
 			continue
 		}
-		raw[key] = substituteMacroList(value, declarations.Macros)
+		resolved, err := substituteMacroList(value, declarations.Macros)
+		if err != nil {
+			return nil, configMacroConfig{}, err
+		}
+		raw[key] = resolved
 	}
 
 	// startPort may itself contain a global macro, so read it only after the
@@ -165,7 +187,10 @@ func resolveConfigMacros(yamlStr string) (map[string]any, configMacroConfig, err
 		// covers every model value; setParamsByID keys are handled separately
 		// because ordinary mapping keys are intentionally not macro targets.
 		macros := mergeModelMacros(modelID, declarations.Macros, declarations.Models[modelID].Macros)
-		resolved := substituteMacroList(model, macros)
+		resolved, err := substituteMacroList(model, macros)
+		if err != nil {
+			return nil, configMacroConfig{}, fmt.Errorf("model %s: %w", modelID, err)
+		}
 		model = resolved.(map[string]any)
 		if err := substituteSetParamsByIDKeys(model, macros); err != nil {
 			return nil, configMacroConfig{}, fmt.Errorf("model %s filters.setParamsByID: %w", modelID, err)
@@ -184,7 +209,10 @@ func resolveConfigMacros(yamlStr string) (map[string]any, configMacroConfig, err
 			}
 
 			portMacro := MacroList{{Name: "PORT", Value: nextPort}}
-			resolved = substituteMacroList(model, portMacro)
+			resolved, err = substituteMacroList(model, portMacro)
+			if err != nil {
+				return nil, configMacroConfig{}, fmt.Errorf("model %s: %w", modelID, err)
+			}
 			model = resolved.(map[string]any)
 			if err := substituteSetParamsByIDKeys(model, portMacro); err != nil {
 				return nil, configMacroConfig{}, fmt.Errorf("model %s filters.setParamsByID: %w", modelID, err)
@@ -254,11 +282,15 @@ func mergeModelMacros(modelID string, global, model MacroList) MacroList {
 	return merged
 }
 
-func substituteMacroList(resolved any, macros MacroList) any {
+func substituteMacroList(resolved any, macros MacroList) (any, error) {
 	for i := len(macros) - 1; i >= 0; i-- {
-		resolved = substituteMacroInValue(resolved, macros[i].Name, macros[i].Value)
+		var err error
+		resolved, err = substituteMacroInValue(resolved, macros[i].Name, macros[i].Value)
+		if err != nil {
+			return nil, err
+		}
 	}
-	return resolved
+	return resolved, nil
 }
 
 func substituteSetParamsByIDKeys(model map[string]any, macros MacroList) error {
@@ -411,41 +443,51 @@ func validateMacroUses(value any, path, modelID, fieldPath string, allowPID bool
 }
 
 // substituteMacroInValue recursively substitutes a single macro in a value structure
-func substituteMacroInValue(value any, macroName string, macroValue any) any {
+func substituteMacroInValue(value any, macroName string, macroValue any) (any, error) {
 	macroSlug := fmt.Sprintf("${%s}", macroName)
-	macroStr := fmt.Sprintf("%v", macroValue)
 
 	switch v := value.(type) {
 	case string:
 		// Check if this is a direct macro substitution
 		if v == macroSlug {
-			return macroValue
+			return macroValue, nil
 		}
 		// Handle string interpolation
 		if strings.Contains(v, macroSlug) {
-			return strings.ReplaceAll(v, macroSlug, macroStr)
+			if !isScalarMacroValue(macroValue) {
+				return nil, fmt.Errorf("macro '%s' has a non-scalar value and can only be used as a whole value, not interpolated into a string", macroName)
+			}
+			return strings.ReplaceAll(v, macroSlug, fmt.Sprintf("%v", macroValue)), nil
 		}
-		return v
+		return v, nil
 
 	case map[string]any:
 		// Recursively process map values
 		newMap := make(map[string]any)
 		for key, val := range v {
-			newMap[key] = substituteMacroInValue(val, macroName, macroValue)
+			newVal, err := substituteMacroInValue(val, macroName, macroValue)
+			if err != nil {
+				return nil, err
+			}
+			newMap[key] = newVal
 		}
-		return newMap
+		return newMap, nil
 
 	case []any:
 		// Recursively process slice elements
 		newSlice := make([]any, len(v))
 		for i, val := range v {
-			newSlice[i] = substituteMacroInValue(val, macroName, macroValue)
+			newVal, err := substituteMacroInValue(val, macroName, macroValue)
+			if err != nil {
+				return nil, err
+			}
+			newSlice[i] = newVal
 		}
-		return newSlice
+		return newSlice, nil
 
 	default:
 		// Return scalar types as-is
-		return value
+		return value, nil
 	}
 }
 

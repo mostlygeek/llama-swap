@@ -709,6 +709,8 @@ models:
 }
 
 func TestConfig_InvalidMacroType(t *testing.T) {
+	// Maps and lists are valid macro values, but only as a whole value. Using
+	// one inside a string is what makes the type invalid for that position.
 	content := `
 startPort: 10000
 macros:
@@ -717,13 +719,13 @@ macros:
 
 models:
   test-model:
-    cmd: /path/to/server -p ${PORT}
+    cmd: /path/to/server -p ${PORT} ${INVALID}
 `
 
 	_, err := LoadConfigFromReader(strings.NewReader(content))
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "INVALID")
-	assert.Contains(t, err.Error(), "must be a scalar type")
+	assert.Contains(t, err.Error(), "can only be used as a whole value")
 }
 
 func TestConfig_MacroTypeValidation(t *testing.T) {
@@ -781,7 +783,7 @@ models:
 			shouldErr: false,
 		},
 		{
-			name: "array macro (invalid)",
+			name: "array macro (valid as a whole value)",
 			yaml: `
 startPort: 10000
 macros:
@@ -790,10 +792,10 @@ models:
   test-model:
     cmd: /path/to/server -p ${PORT}
 `,
-			shouldErr: true,
+			shouldErr: false,
 		},
 		{
-			name: "map macro (invalid)",
+			name: "map macro (valid as a whole value)",
 			yaml: `
 startPort: 10000
 macros:
@@ -802,6 +804,18 @@ macros:
 models:
   test-model:
     cmd: /path/to/server -p ${PORT}
+`,
+			shouldErr: false,
+		},
+		{
+			name: "array macro interpolated into a string (invalid)",
+			yaml: `
+startPort: 10000
+macros:
+  ARR: [1, 2, 3]
+models:
+  test-model:
+    cmd: /path/to/server -p ${PORT} ${ARR}
 `,
 			shouldErr: true,
 		},
@@ -1856,4 +1870,219 @@ routing:
 	cfg, err := LoadConfigFromReader(strings.NewReader(yaml))
 	require.NoError(t, err)
 	assert.Equal(t, 5, cfg.Routing.Scheduler.Settings.Fifo.Priority["gemma"])
+}
+
+func TestConfig_SetParamsByMatchValidation(t *testing.T) {
+	t.Run("valid rules load", func(t *testing.T) {
+		cfg, err := LoadConfigFromReader(strings.NewReader(`
+models:
+  m1:
+    cmd: server --port ${PORT}
+    filters:
+      setParamsByMatch:
+        - key: reasoning_effort
+          match: none
+          set:
+            chat_template_kwargs:
+              enable_thinking: false
+        - key: reasoning_effort
+          match: high
+          set:
+            chat_template_kwargs:
+              enable_thinking: true
+            thinking_budget_tokens: 8192
+`))
+		require.NoError(t, err)
+		rules := cfg.Models["m1"].Filters.SetParamsByMatch
+		require.Len(t, rules, 2)
+		assert.Equal(t, "reasoning_effort", rules[0].Key)
+		assert.Equal(t, "none", rules[0].Match)
+		assert.Equal(t, 8192, rules[1].Set["thinking_budget_tokens"])
+	})
+
+	t.Run("protected key rejected", func(t *testing.T) {
+		_, err := LoadConfigFromReader(strings.NewReader(`
+models:
+  m1:
+    cmd: server --port ${PORT}
+    filters:
+      setParamsByMatch:
+        - key: model
+          match: x
+          set:
+            top_p: 0.9
+`))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "model m1 filters.setParamsByMatch[0]")
+		assert.Contains(t, err.Error(), "protected parameter")
+	})
+
+	t.Run("empty set rejected", func(t *testing.T) {
+		_, err := LoadConfigFromReader(strings.NewReader(`
+models:
+  m1:
+    cmd: server --port ${PORT}
+    filters:
+      setParamsByMatch:
+        - key: reasoning_effort
+          match: high
+`))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "set must not be empty")
+	})
+
+	t.Run("dotted key rejected", func(t *testing.T) {
+		_, err := LoadConfigFromReader(strings.NewReader(`
+models:
+  m1:
+    cmd: server --port ${PORT}
+    filters:
+      setParamsByMatch:
+        - key: a.b
+          match: x
+          set:
+            top_p: 0.9
+`))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "must contain only letters")
+	})
+
+	t.Run("peer rules validated", func(t *testing.T) {
+		_, err := LoadConfigFromReader(strings.NewReader(`
+peers:
+  p1:
+    proxy: http://localhost:9999
+    models: [remote-model]
+    filters:
+      setParamsByMatch:
+        - key: model
+          match: x
+          set:
+            top_p: 0.9
+`))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "peers.p1.filters.setParamsByMatch[0]")
+	})
+
+	t.Run("macros expand inside set values", func(t *testing.T) {
+		cfg, err := LoadConfigFromReader(strings.NewReader(`
+macros:
+  budget: 4096
+models:
+  m1:
+    cmd: server --port ${PORT}
+    filters:
+      setParamsByMatch:
+        - key: reasoning_effort
+          match: high
+          set:
+            thinking_budget_tokens: ${budget}
+`))
+		require.NoError(t, err)
+		rules := cfg.Models["m1"].Filters.SetParamsByMatch
+		require.Len(t, rules, 1)
+		assert.Equal(t, 4096, rules[0].Set["thinking_budget_tokens"])
+	})
+}
+
+func TestConfig_StructuredMacros(t *testing.T) {
+	t.Run("list macro shared by multiple models", func(t *testing.T) {
+		cfg, err := LoadConfigFromReader(strings.NewReader(`
+macros:
+  reasoning_rules:
+    - key: reasoning_effort
+      match: none
+      set:
+        chat_template_kwargs:
+          enable_thinking: false
+    - key: reasoning_effort
+      match: high
+      set:
+        chat_template_kwargs:
+          enable_thinking: true
+        thinking_budget_tokens: 8192
+models:
+  m1:
+    cmd: server --port ${PORT}
+    filters:
+      setParamsByMatch: ${reasoning_rules}
+  m2:
+    cmd: server --port ${PORT}
+    filters:
+      setParamsByMatch: ${reasoning_rules}
+`))
+		require.NoError(t, err)
+		require.Len(t, cfg.Models["m1"].Filters.SetParamsByMatch, 2)
+		require.Len(t, cfg.Models["m2"].Filters.SetParamsByMatch, 2)
+		assert.Equal(t, "none", cfg.Models["m1"].Filters.SetParamsByMatch[0].Match)
+		assert.Equal(t, 8192, cfg.Models["m2"].Filters.SetParamsByMatch[1].Set["thinking_budget_tokens"])
+	})
+
+	t.Run("map macro used as a whole value", func(t *testing.T) {
+		cfg, err := LoadConfigFromReader(strings.NewReader(`
+macros:
+  shared_params:
+    temperature: 0.7
+    top_p: 0.9
+models:
+  m1:
+    cmd: server --port ${PORT}
+    filters:
+      setParams: ${shared_params}
+`))
+		require.NoError(t, err)
+		assert.Equal(t, 0.7, cfg.Models["m1"].Filters.SetParams["temperature"])
+	})
+
+	t.Run("non-scalar macro cannot be interpolated into a string", func(t *testing.T) {
+		_, err := LoadConfigFromReader(strings.NewReader(`
+macros:
+  reasoning_rules:
+    - key: reasoning_effort
+      match: none
+      set:
+        top_p: 0.9
+models:
+  m1:
+    cmd: server --port ${PORT} ${reasoning_rules}
+`))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "can only be used as a whole value")
+	})
+
+	t.Run("self-reference in a list macro rejected", func(t *testing.T) {
+		_, err := LoadConfigFromReader(strings.NewReader(`
+macros:
+  loop:
+    - key: k
+      match: "${loop}"
+      set:
+        top_p: 0.9
+models:
+  m1:
+    cmd: server --port ${PORT}
+`))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "self-reference")
+	})
+
+	t.Run("scalar macros still interpolate", func(t *testing.T) {
+		cfg, err := LoadConfigFromReader(strings.NewReader(`
+macros:
+  budget: 4096
+  flags: "--foo --bar"
+models:
+  m1:
+    cmd: server --port ${PORT} ${flags}
+    filters:
+      setParamsByMatch:
+        - key: reasoning_effort
+          match: high
+          set:
+            thinking_budget_tokens: ${budget}
+`))
+		require.NoError(t, err)
+		assert.Contains(t, cfg.Models["m1"].Cmd, "--foo --bar")
+		assert.Equal(t, 4096, cfg.Models["m1"].Filters.SetParamsByMatch[0].Set["thinking_budget_tokens"])
+	})
 }
