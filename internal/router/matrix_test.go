@@ -14,11 +14,23 @@ import (
 
 // newTestMatrix builds a Matrix router from supplied processes, bypassing
 // NewMatrix's call to process.New.
-func newTestMatrix(t *testing.T, conf config.Config, expanded []config.ExpandedSet, evictCosts map[string]int, processes map[string]process.Process) *Matrix {
+func newTestMatrix(t *testing.T, conf config.Config, sets config.OrderedSets, evictCosts map[string]int, processes map[string]process.Process) *Matrix {
 	t.Helper()
+	models := make(map[string]config.ModelConfig, len(processes))
+	for model := range processes {
+		models[model] = config.ModelConfig{}
+	}
+	matrix := &config.MatrixConfig{
+		EvictCosts: evictCosts,
+		Sets:       sets,
+	}
+	if err := config.ValidateMatrix(matrix, models); err != nil {
+		t.Fatalf("ValidateMatrix: %v", err)
+	}
+
 	logger := logmon.NewWriter(io.Discard)
 	swapper := &matrixSwapper{
-		solver: newMatrixSolver(expanded, evictCosts),
+		solver: newMatrixSolver(matrix.Program(), matrix.ResolvedEvictCosts()),
 		logger: logger,
 	}
 	base, err := newBaseRouter("matrix", conf, processes, logger, swapper)
@@ -54,11 +66,11 @@ func TestMatrix_SwapEvictsConflicting(t *testing.T) {
 	b.autoReady = true
 
 	// Two single-model sets: a and b never coexist, so loading b must evict a.
-	expanded := []config.ExpandedSet{
-		{SetName: "s_a", DSL: "a", Models: []string{"a"}},
-		{SetName: "s_b", DSL: "b", Models: []string{"b"}},
+	sets := config.OrderedSets{
+		{Name: "s_a", DSL: "a"},
+		{Name: "s_b", DSL: "b"},
 	}
-	r := newTestMatrix(t, baseMatrixConfig(), expanded, nil, map[string]process.Process{"a": a, "b": b})
+	r := newTestMatrix(t, baseMatrixConfig(), sets, nil, map[string]process.Process{"a": a, "b": b})
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, newRequest("b"))
@@ -85,10 +97,10 @@ func TestMatrix_CoexistInSet(t *testing.T) {
 	b.autoReady = true
 
 	// Both fit in s_ab, so b's swap should not stop a.
-	expanded := []config.ExpandedSet{
-		{SetName: "s_ab", DSL: "a & b", Models: []string{"a", "b"}},
+	sets := config.OrderedSets{
+		{Name: "s_ab", DSL: "a & b"},
 	}
-	r := newTestMatrix(t, baseMatrixConfig(), expanded, nil, map[string]process.Process{"a": a, "b": b})
+	r := newTestMatrix(t, baseMatrixConfig(), sets, nil, map[string]process.Process{"a": a, "b": b})
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, newRequest("b"))
@@ -111,10 +123,10 @@ func TestMatrix_CoexistingSetParallel(t *testing.T) {
 	a := newFakeProcess("a")
 	pb := newFakeProcess("b")
 
-	expanded := []config.ExpandedSet{
-		{SetName: "s_ab", DSL: "a & b", Models: []string{"a", "b"}},
+	sets := config.OrderedSets{
+		{Name: "s_ab", DSL: "a & b"},
 	}
-	r := newTestMatrix(t, baseMatrixConfig(), expanded, nil, map[string]process.Process{"a": a, "b": pb})
+	r := newTestMatrix(t, baseMatrixConfig(), sets, nil, map[string]process.Process{"a": a, "b": pb})
 
 	w1 := httptest.NewRecorder()
 	done1 := make(chan struct{})
@@ -161,11 +173,11 @@ func TestMatrix_IncompatibleQueues(t *testing.T) {
 	a := newFakeProcess("a")
 	pb := newFakeProcess("b")
 
-	expanded := []config.ExpandedSet{
-		{SetName: "s_a", DSL: "a", Models: []string{"a"}},
-		{SetName: "s_b", DSL: "b", Models: []string{"b"}},
+	sets := config.OrderedSets{
+		{Name: "s_a", DSL: "a"},
+		{Name: "s_b", DSL: "b"},
 	}
-	r := newTestMatrix(t, baseMatrixConfig(), expanded, nil, map[string]process.Process{"a": a, "b": pb})
+	r := newTestMatrix(t, baseMatrixConfig(), sets, nil, map[string]process.Process{"a": a, "b": pb})
 
 	w1 := httptest.NewRecorder()
 	done1 := make(chan struct{})
@@ -212,11 +224,10 @@ func TestMatrix_IncompatibleQueues(t *testing.T) {
 // when multiple candidate sets have equal eviction cost, the earlier-defined
 // set wins.
 func TestMatrixSolver_TieBreakDefinitionOrder(t *testing.T) {
-	expanded := []config.ExpandedSet{
-		{SetName: "first", DSL: "a & b", Models: []string{"a", "b"}},
-		{SetName: "second", DSL: "a & c", Models: []string{"a", "c"}},
-	}
-	s := newMatrixSolver(expanded, nil)
+	s := newTestMatrixSolver(t, config.OrderedSets{
+		{Name: "first", DSL: "a & b"},
+		{Name: "second", DSL: "a & c"},
+	}, nil, "a", "b", "c")
 
 	// No models running, request "a": both sets have cost 0 and contain a.
 	// Definition order: "first" wins.
@@ -231,11 +242,10 @@ func TestMatrixSolver_TieBreakDefinitionOrder(t *testing.T) {
 func TestMatrixSolver_EvictCostsPreferred(t *testing.T) {
 	// b is expensive to evict; c is cheap. Request "a" with both b and c
 	// running. The solver should pick the set that keeps b.
-	expanded := []config.ExpandedSet{
-		{SetName: "a_with_c", DSL: "a & c", Models: []string{"a", "c"}}, // would evict b (cost 10)
-		{SetName: "a_with_b", DSL: "a & b", Models: []string{"a", "b"}}, // would evict c (cost 1)
-	}
-	s := newMatrixSolver(expanded, map[string]int{"b": 10, "c": 1})
+	s := newTestMatrixSolver(t, config.OrderedSets{
+		{Name: "a_with_c", DSL: "a & c"}, // would evict b (cost 10)
+		{Name: "a_with_b", DSL: "a & b"}, // would evict c (cost 1)
+	}, map[string]int{"b": 10, "c": 1}, "a", "b", "c")
 
 	result := s.Solve("a", []string{"b", "c"})
 	if result.SetName != "a_with_b" {
@@ -244,4 +254,20 @@ func TestMatrixSolver_EvictCostsPreferred(t *testing.T) {
 	if len(result.Evict) != 1 || result.Evict[0] != "c" {
 		t.Errorf("Evict=%v want [c]", result.Evict)
 	}
+}
+
+func newTestMatrixSolver(t *testing.T, sets config.OrderedSets, evictCosts map[string]int, modelNames ...string) *matrixSolver {
+	t.Helper()
+	models := make(map[string]config.ModelConfig, len(modelNames))
+	for _, model := range modelNames {
+		models[model] = config.ModelConfig{}
+	}
+	matrix := &config.MatrixConfig{
+		EvictCosts: evictCosts,
+		Sets:       sets,
+	}
+	if err := config.ValidateMatrix(matrix, models); err != nil {
+		t.Fatalf("ValidateMatrix: %v", err)
+	}
+	return newMatrixSolver(matrix.Program(), matrix.ResolvedEvictCosts())
 }

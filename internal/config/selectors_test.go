@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -303,6 +304,31 @@ selectors:
 `))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "must all appear together in one expanded matrix set")
+	})
+
+	t.Run("matrix symbolic large", func(t *testing.T) {
+		const (
+			dimensions = 4
+			choices    = 11
+		)
+
+		var yaml strings.Builder
+		yaml.WriteString("models:\n  target:\n    cmd: echo ${PORT}\n")
+		groups := make([]string, dimensions)
+		for dimension := range dimensions {
+			alternatives := make([]string, choices)
+			for choice := range choices {
+				name := fmt.Sprintf("model-%d-%d", dimension, choice)
+				alternatives[choice] = name
+				fmt.Fprintf(&yaml, "  %s:\n    cmd: echo ${PORT}\n", name)
+			}
+			groups[dimension] = "(" + strings.Join(alternatives, " | ") + ")"
+		}
+		fmt.Fprintf(&yaml, "matrix:\n  sets:\n    large: \"target & %s\"\n", strings.Join(groups, " & "))
+		yaml.WriteString("selectors:\n  public:\n    strategy: spillover\n    targets: [target, model-0-0]\n")
+
+		_, err := LoadConfigFromReader(strings.NewReader(yaml.String()))
+		require.NoError(t, err)
 	})
 
 	t.Run("remote targets", func(t *testing.T) {

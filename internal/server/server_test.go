@@ -147,8 +147,16 @@ func TestServer_New_GroupConfig(t *testing.T) {
 func TestServer_New_MatrixConfig(t *testing.T) {
 	discard := logmon.NewWriter(io.Discard)
 	cfg := config.Config{HealthCheckTimeout: 15}
+	cfg.Models = map[string]config.ModelConfig{
+		"model": {
+			Cmd:   "echo ready",
+			Proxy: "http://localhost:8080",
+		},
+	}
 	cfg.Routing.Router.Use = "matrix"
-	cfg.Routing.Router.Settings.Matrix = &config.MatrixConfig{}
+	cfg.Routing.Router.Settings.Matrix = &config.MatrixConfig{
+		Sets: config.OrderedSets{{Name: "single", DSL: "model"}},
+	}
 	st, err := store.New("")
 	if err != nil {
 		t.Fatalf("store.New: %v", err)

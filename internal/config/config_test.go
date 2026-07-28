@@ -1725,7 +1725,7 @@ matrix:
 	require.NoError(t, err)
 	assert.Equal(t, "matrix", cfg.Routing.Router.Use)
 	require.NotNil(t, cfg.Routing.Router.Settings.Matrix)
-	assert.Len(t, cfg.Routing.Router.Settings.Matrix.ExpandedSets, 2)
+	assert.NotNil(t, cfg.Routing.Router.Settings.Matrix.Program())
 }
 
 func TestConfig_Routing_RouterUseMatrix(t *testing.T) {
@@ -1745,7 +1745,7 @@ routing:
 	require.NoError(t, err)
 	assert.Equal(t, "matrix", cfg.Routing.Router.Use)
 	require.NotNil(t, cfg.Routing.Router.Settings.Matrix)
-	assert.Len(t, cfg.Routing.Router.Settings.Matrix.ExpandedSets, 2)
+	assert.NotNil(t, cfg.Routing.Router.Settings.Matrix.Program())
 }
 
 func TestConfig_Routing_RouterUseGroup(t *testing.T) {

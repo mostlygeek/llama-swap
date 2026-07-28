@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 
+	matrixdsl "github.com/mostlygeek/llama-swap/internal/matrix"
 	"gopkg.in/yaml.v3"
 )
 
@@ -15,8 +16,7 @@ type MatrixConfig struct {
 	EvictCosts map[string]int    `yaml:"evict_costs"`
 	Sets       OrderedSets       `yaml:"sets"`
 
-	// populated by ValidateMatrix; not settable from yaml
-	ExpandedSets []ExpandedSet `yaml:"-"`
+	program *matrixdsl.Program
 }
 
 // SetEntry is a single named set with its DSL expression.
@@ -55,27 +55,20 @@ func (os *OrderedSets) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-// ExpandedSet is one valid combination of concurrent models (real model names).
-type ExpandedSet struct {
-	SetName string
-	DSL     string
-	Models  []string // real model names, sorted
-}
-
-// ValidateMatrix validates the matrix config and returns all expanded sets.
-func ValidateMatrix(matrix MatrixConfig, models map[string]ModelConfig) ([]ExpandedSet, error) {
+// ValidateMatrix validates and compiles a matrix configuration.
+func ValidateMatrix(matrix *MatrixConfig, models map[string]ModelConfig) error {
 	if len(matrix.Sets) == 0 {
-		return nil, fmt.Errorf("matrix must define at least one set")
+		return fmt.Errorf("matrix must define at least one set")
 	}
 
 	// Validate var entries
 	if matrix.Var != nil {
 		for id, modelName := range matrix.Var {
 			if !varKeyPattern.MatchString(id) {
-				return nil, fmt.Errorf("var key %q must contain only alphanumeric, '-' or '.' characters and be 1-32 characters long", id)
+				return fmt.Errorf("var key %q must contain only alphanumeric, '-' or '.' characters and be 1-32 characters long", id)
 			}
 			if _, exists := models[modelName]; !exists {
-				return nil, fmt.Errorf("var key %q references unknown model %q", id, modelName)
+				return fmt.Errorf("var key %q references unknown model %q", id, modelName)
 			}
 		}
 	}
@@ -84,84 +77,30 @@ func ValidateMatrix(matrix MatrixConfig, models map[string]ModelConfig) ([]Expan
 	if matrix.EvictCosts != nil {
 		for key, cost := range matrix.EvictCosts {
 			if cost <= 0 {
-				return nil, fmt.Errorf("evict_cost for %q must be a positive integer, got %d", key, cost)
+				return fmt.Errorf("evict_cost for %q must be a positive integer, got %d", key, cost)
 			}
 			if _, ok := resolveMatrixModel(key, matrix.Var, models); !ok {
-				return nil, fmt.Errorf("evict_costs: unknown var or model %q", key)
+				return fmt.Errorf("evict_costs: unknown var or model %q", key)
 			}
 		}
 	}
 
-	// Build dependency graph for +ref topological sort
-	setNames := make(map[string]bool)
+	definitions := make([]matrixdsl.Definition, 0, len(matrix.Sets))
 	for _, entry := range matrix.Sets {
-		setNames[entry.Name] = true
+		definitions = append(definitions, matrixdsl.Definition{
+			Name: entry.Name,
+			DSL:  entry.DSL,
+		})
 	}
 
-	deps := make(map[string][]string) // setName -> set names it depends on
-	for _, entry := range matrix.Sets {
-		refs, err := extractRefs(entry.DSL)
-		if err != nil {
-			return nil, fmt.Errorf("set %q: %w", entry.Name, err)
-		}
-		for _, ref := range refs {
-			if !setNames[ref] {
-				return nil, fmt.Errorf("set %q references undefined set %q", entry.Name, ref)
-			}
-		}
-		deps[entry.Name] = refs
-	}
-
-	// Topological sort with cycle detection
-	order, err := topologicalSort(matrix.Sets, deps)
+	program, err := matrixdsl.Compile(definitions, func(ident string) (string, bool) {
+		return resolveMatrixModel(ident, matrix.Var, models)
+	})
 	if err != nil {
-		return nil, err
+		return err
 	}
-
-	// Expand sets in topological order
-	resolvedRefs := make(map[string][][]string) // set name -> expanded alias-level combos
-	var allExpanded []ExpandedSet
-	totalCombinations := 0
-
-	// Build ordered map for efficient lookup
-	setDSL := make(map[string]string)
-	for _, entry := range matrix.Sets {
-		setDSL[entry.Name] = entry.DSL
-	}
-
-	for _, name := range order {
-		dsl := setDSL[name]
-		combos, err := ParseAndExpandDSL(dsl, resolvedRefs)
-		if err != nil {
-			return nil, fmt.Errorf("set %q: %w", name, err)
-		}
-
-		resolvedRefs[name] = combos
-
-		// Resolve var IDs and direct model names to real model names.
-		for _, combo := range combos {
-			resolved := make([]string, 0, len(combo))
-			for _, ident := range combo {
-				realName, ok := resolveMatrixModel(ident, matrix.Var, models)
-				if !ok {
-					return nil, fmt.Errorf("set %q: unknown var or model %q", name, ident)
-				}
-				resolved = append(resolved, realName)
-			}
-			allExpanded = append(allExpanded, ExpandedSet{
-				SetName: name,
-				DSL:     dsl,
-				Models:  dedupAndSort(resolved),
-			})
-		}
-
-		totalCombinations += len(combos)
-		if totalCombinations > maxDSLExpansions {
-			return nil, fmt.Errorf("total expanded combinations (%d) exceed limit of %d", totalCombinations, maxDSLExpansions)
-		}
-	}
-
-	return allExpanded, nil
+	matrix.program = program
+	return nil
 }
 
 func resolveMatrixModel(ident string, vars map[string]string, models map[string]ModelConfig) (string, bool) {
@@ -172,46 +111,6 @@ func resolveMatrixModel(ident string, vars map[string]string, models map[string]
 		return ident, true
 	}
 	return "", false
-}
-
-// topologicalSort returns set names in dependency order.
-// Returns an error if a cycle is detected.
-func topologicalSort(sets OrderedSets, deps map[string][]string) ([]string, error) {
-	// States: 0 = unvisited, 1 = visiting, 2 = visited
-	state := make(map[string]int)
-	var order []string
-
-	var visit func(name string) error
-	visit = func(name string) error {
-		switch state[name] {
-		case 1:
-			return fmt.Errorf("circular reference detected involving set %q", name)
-		case 2:
-			return nil
-		}
-		state[name] = 1
-
-		for _, dep := range deps[name] {
-			if err := visit(dep); err != nil {
-				return err
-			}
-		}
-
-		state[name] = 2
-		order = append(order, name)
-		return nil
-	}
-
-	// Visit in definition order for deterministic output
-	for _, entry := range sets {
-		if state[entry.Name] == 0 {
-			if err := visit(entry.Name); err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	return order, nil
 }
 
 // ResolvedEvictCosts returns a map of real model name -> evict cost,
@@ -230,4 +129,9 @@ func (m *MatrixConfig) ResolvedEvictCosts() map[string]int {
 		}
 	}
 	return costs
+}
+
+// Program returns the immutable compiled matrix program.
+func (m *MatrixConfig) Program() *matrixdsl.Program {
+	return m.program
 }
