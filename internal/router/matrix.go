@@ -17,9 +17,14 @@ func NewMatrix(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Matr
 	if mtx == nil {
 		return nil, fmt.Errorf("matrix router requires a matrix configuration")
 	}
+	if mtx.Program() == nil {
+		if err := config.ValidateMatrix(mtx, conf.Models); err != nil {
+			return nil, fmt.Errorf("compiling matrix configuration: %w", err)
+		}
+	}
 
 	swapper := &matrixSwapper{
-		solver: newMatrixSolver(mtx.ExpandedSets, mtx.ResolvedEvictCosts()),
+		solver: newMatrixSolver(mtx.Program(), mtx.ResolvedEvictCosts()),
 		logger: proxylog,
 	}
 

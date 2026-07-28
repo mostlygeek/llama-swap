@@ -124,23 +124,8 @@ func validateSpilloverCoexistence(config Config, selectorID string, targets []st
 
 	if config.Routing.Router.Use == "matrix" {
 		matrix := config.Routing.Router.Settings.Matrix
-		if matrix != nil {
-			for _, set := range matrix.ExpandedSets {
-				members := make(map[string]struct{}, len(set.Models))
-				for _, modelID := range set.Models {
-					members[modelID] = struct{}{}
-				}
-				allFound := true
-				for _, target := range targets {
-					if _, found := members[target]; !found {
-						allFound = false
-						break
-					}
-				}
-				if allFound {
-					return nil
-				}
-			}
+		if matrix != nil && matrix.program != nil && matrix.program.CanContainAll(targets) {
+			return nil
 		}
 		return fmt.Errorf("selectors.%s.targets must all appear together in one expanded matrix set", selectorID)
 	}

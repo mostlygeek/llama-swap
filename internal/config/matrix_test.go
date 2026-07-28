@@ -37,24 +37,18 @@ func TestValidateMatrix_Basic(t *testing.T) {
 		},
 	}
 
-	expanded, err := ValidateMatrix(matrix, models)
+	err := ValidateMatrix(&matrix, models)
 	require.NoError(t, err)
 
-	// standard expands to [gemma,voxtral], [qwen,voxtral], [mistral,voxtral]
-	// full expands to [llama70B]
-	assert.Len(t, expanded, 4)
+	result := matrix.Program().Solve("gemma", []string{"voxtral"}, matrix.ResolvedEvictCosts())
+	assert.Equal(t, "standard", result.SetName)
+	assert.Equal(t, []string{"gemma", "voxtral"}, result.TargetSet)
+	assert.Empty(t, result.Evict)
 
-	assert.Equal(t, "standard", expanded[0].SetName)
-	assert.Equal(t, []string{"gemma", "voxtral"}, expanded[0].Models)
-
-	assert.Equal(t, "standard", expanded[1].SetName)
-	assert.Equal(t, []string{"qwen", "voxtral"}, expanded[1].Models)
-
-	assert.Equal(t, "standard", expanded[2].SetName)
-	assert.Equal(t, []string{"mistral", "voxtral"}, expanded[2].Models)
-
-	assert.Equal(t, "full", expanded[3].SetName)
-	assert.Equal(t, []string{"llama70B"}, expanded[3].Models)
+	result = matrix.Program().Solve("llama70B", []string{"voxtral"}, matrix.ResolvedEvictCosts())
+	assert.Equal(t, "full", result.SetName)
+	assert.Equal(t, []string{"llama70B"}, result.TargetSet)
+	assert.Equal(t, []string{"voxtral"}, result.Evict)
 }
 
 func TestValidateMatrix_WithRef(t *testing.T) {
@@ -75,18 +69,13 @@ func TestValidateMatrix_WithRef(t *testing.T) {
 		},
 	}
 
-	expanded, err := ValidateMatrix(matrix, models)
+	err := ValidateMatrix(&matrix, models)
 	require.NoError(t, err)
 
-	// llms: [gemma], [qwen], [mistral]
-	// with_tts: [gemma,voxtral], [qwen,voxtral], [mistral,voxtral]
-	// mega: [gemma,reranker,voxtral], [qwen,reranker,voxtral], [mistral,reranker,voxtral]
-	assert.Len(t, expanded, 9)
-
-	// Check mega entries
-	megaEntries := filterBySetName(expanded, "mega")
-	assert.Len(t, megaEntries, 3)
-	assert.Equal(t, []string{"gemma", "reranker", "voxtral"}, megaEntries[0].Models)
+	result := matrix.Program().Solve("reranker", []string{"gemma", "voxtral"}, nil)
+	assert.Equal(t, "mega", result.SetName)
+	assert.Equal(t, []string{"gemma", "reranker", "voxtral"}, result.TargetSet)
+	assert.Empty(t, result.Evict)
 }
 
 func TestValidateMatrix_DirectAndMixedModelNames(t *testing.T) {
@@ -97,10 +86,10 @@ func TestValidateMatrix_DirectAndMixedModelNames(t *testing.T) {
 			Sets: OrderedSets{{Name: "combo", DSL: "gemma & voxtral"}},
 		}
 
-		expanded, err := ValidateMatrix(matrix, models)
+		err := ValidateMatrix(&matrix, models)
 		require.NoError(t, err)
-		require.Len(t, expanded, 1)
-		assert.Equal(t, []string{"gemma", "voxtral"}, expanded[0].Models)
+		result := matrix.Program().Solve("gemma", []string{"voxtral"}, nil)
+		assert.Equal(t, []string{"gemma", "voxtral"}, result.TargetSet)
 	})
 
 	t.Run("mixed vars and model names", func(t *testing.T) {
@@ -112,12 +101,11 @@ func TestValidateMatrix_DirectAndMixedModelNames(t *testing.T) {
 			},
 		}
 
-		expanded, err := ValidateMatrix(matrix, models)
+		err := ValidateMatrix(&matrix, models)
 		require.NoError(t, err)
-		comboEntries := filterBySetName(expanded, "combo")
-		require.Len(t, comboEntries, 2)
-		assert.Equal(t, []string{"gemma", "voxtral"}, comboEntries[0].Models)
-		assert.Equal(t, []string{"qwen", "voxtral"}, comboEntries[1].Models)
+		result := matrix.Program().Solve("qwen", []string{"voxtral"}, nil)
+		assert.Equal(t, "combo", result.SetName)
+		assert.Equal(t, []string{"qwen", "voxtral"}, result.TargetSet)
 	})
 
 	t.Run("deduplicates after resolution", func(t *testing.T) {
@@ -126,10 +114,10 @@ func TestValidateMatrix_DirectAndMixedModelNames(t *testing.T) {
 			Sets: OrderedSets{{Name: "combo", DSL: "g & gemma"}},
 		}
 
-		expanded, err := ValidateMatrix(matrix, models)
+		err := ValidateMatrix(&matrix, models)
 		require.NoError(t, err)
-		require.Len(t, expanded, 1)
-		assert.Equal(t, []string{"gemma"}, expanded[0].Models)
+		result := matrix.Program().Solve("gemma", nil, nil)
+		assert.Equal(t, []string{"gemma"}, result.TargetSet)
 	})
 
 	t.Run("vars take precedence over model names", func(t *testing.T) {
@@ -138,10 +126,10 @@ func TestValidateMatrix_DirectAndMixedModelNames(t *testing.T) {
 			Sets: OrderedSets{{Name: "combo", DSL: "qwen"}},
 		}
 
-		expanded, err := ValidateMatrix(matrix, models)
+		err := ValidateMatrix(&matrix, models)
 		require.NoError(t, err)
-		require.Len(t, expanded, 1)
-		assert.Equal(t, []string{"gemma"}, expanded[0].Models)
+		result := matrix.Program().Solve("gemma", nil, nil)
+		assert.Equal(t, []string{"gemma"}, result.TargetSet)
 	})
 }
 
@@ -159,7 +147,7 @@ func TestValidateMatrix_VarKeyValidation(t *testing.T) {
 				Var:  map[string]string{key: "gemma"},
 				Sets: OrderedSets{{Name: "s", DSL: key}},
 			}
-			_, err := ValidateMatrix(matrix, models)
+			err := ValidateMatrix(&matrix, models)
 			require.NoError(t, err)
 		})
 	}
@@ -180,7 +168,7 @@ func TestValidateMatrix_VarKeyValidation(t *testing.T) {
 				Var:  map[string]string{tt.alias: "gemma"},
 				Sets: OrderedSets{{Name: "s", DSL: tt.alias}},
 			}
-			_, err := ValidateMatrix(matrix, models)
+			err := ValidateMatrix(&matrix, models)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.errMsg)
 		})
@@ -195,7 +183,7 @@ func TestValidateMatrix_AliasReferencesUnknownModel(t *testing.T) {
 		Sets: OrderedSets{{Name: "s", DSL: "x"}},
 	}
 
-	_, err := ValidateMatrix(matrix, models)
+	err := ValidateMatrix(&matrix, models)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown model")
 }
@@ -209,7 +197,7 @@ func TestValidateMatrix_EvictCostInvalid(t *testing.T) {
 			EvictCosts: map[string]int{"g": 0},
 			Sets:       OrderedSets{{Name: "s", DSL: "g"}},
 		}
-		_, err := ValidateMatrix(matrix, models)
+		err := ValidateMatrix(&matrix, models)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "positive integer")
 	})
@@ -220,7 +208,7 @@ func TestValidateMatrix_EvictCostInvalid(t *testing.T) {
 			EvictCosts: map[string]int{"g": -1},
 			Sets:       OrderedSets{{Name: "s", DSL: "g"}},
 		}
-		_, err := ValidateMatrix(matrix, models)
+		err := ValidateMatrix(&matrix, models)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "positive integer")
 	})
@@ -231,7 +219,7 @@ func TestValidateMatrix_EvictCostInvalid(t *testing.T) {
 			EvictCosts: map[string]int{"unknown": 5},
 			Sets:       OrderedSets{{Name: "s", DSL: "g"}},
 		}
-		_, err := ValidateMatrix(matrix, models)
+		err := ValidateMatrix(&matrix, models)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unknown var or model")
 	})
@@ -241,7 +229,7 @@ func TestValidateMatrix_EvictCostInvalid(t *testing.T) {
 			EvictCosts: map[string]int{"gemma": 5},
 			Sets:       OrderedSets{{Name: "s", DSL: "gemma"}},
 		}
-		_, err := ValidateMatrix(matrix, models)
+		err := ValidateMatrix(&matrix, models)
 		require.NoError(t, err)
 	})
 }
@@ -257,7 +245,7 @@ func TestValidateMatrix_CycleDetection(t *testing.T) {
 		},
 	}
 
-	_, err := ValidateMatrix(matrix, models)
+	err := ValidateMatrix(&matrix, models)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "circular reference")
 }
@@ -272,13 +260,14 @@ func TestValidateMatrix_UndefinedRefTarget(t *testing.T) {
 		},
 	}
 
-	_, err := ValidateMatrix(matrix, models)
+	err := ValidateMatrix(&matrix, models)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "references undefined set")
 }
 
 func TestValidateMatrix_NoSets(t *testing.T) {
-	_, err := ValidateMatrix(MatrixConfig{}, makeModels("gemma"))
+	matrix := MatrixConfig{}
+	err := ValidateMatrix(&matrix, makeModels("gemma"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "at least one set")
 }
@@ -293,7 +282,7 @@ func TestValidateMatrix_UnknownMapIDInDSL(t *testing.T) {
 		},
 	}
 
-	_, err := ValidateMatrix(matrix, models)
+	err := ValidateMatrix(&matrix, models)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown var or model")
 }
@@ -356,19 +345,9 @@ matrix:
 	cfg, err := LoadConfigFromReader(strings.NewReader(yaml))
 	require.NoError(t, err)
 	assert.NotNil(t, cfg.Matrix)
-	assert.Len(t, cfg.Matrix.ExpandedSets, 2)
+	assert.NotNil(t, cfg.Matrix.Program())
 	assert.Equal(t, "matrix", cfg.Routing.Router.Use)
-	assert.Len(t, cfg.Routing.Router.Settings.Matrix.ExpandedSets, 2)
+	assert.Same(t, cfg.Matrix.Program(), cfg.Routing.Router.Settings.Matrix.Program())
 	// Groups should be empty when matrix is used
 	assert.Empty(t, cfg.Groups)
-}
-
-func filterBySetName(sets []ExpandedSet, name string) []ExpandedSet {
-	var result []ExpandedSet
-	for _, s := range sets {
-		if s.SetName == name {
-			result = append(result, s)
-		}
-	}
-	return result
 }

@@ -214,11 +214,9 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	}
 
 	if config.Matrix != nil {
-		expandedSets, err := ValidateMatrix(*config.Matrix, config.Models)
-		if err != nil {
+		if err := ValidateMatrix(config.Matrix, config.Models); err != nil {
 			return Config{}, fmt.Errorf("matrix: %w", err)
 		}
-		config.Matrix.ExpandedSets = expandedSets
 	} else {
 		config = AddDefaultGroupToConfig(config)
 
@@ -241,8 +239,8 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	}
 
 	// Build the canonical Config.Routing from the effective result. Both legacy
-	// and new-style configs converge here. The Matrix pointer is shared so
-	// ExpandedSets stays in one place.
+	// and new-style configs converge here. The Matrix pointer is shared so the
+	// compiled matrix program stays in one place.
 	if config.Matrix != nil {
 		config.Routing.Router.Use = "matrix"
 	} else {
