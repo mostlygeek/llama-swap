@@ -2,6 +2,7 @@ package router
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
@@ -54,17 +55,39 @@ func NewMatrix(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Matr
 
 // matrixSwapper decides evictions by asking the matrix solver against the
 // running set the scheduler hands it.
+//
+// The scheduler drives planners from a single event-loop goroutine and calls
+// OnSwapStart with the same target and running set it just gave EvictionFor,
+// so the last decision is cached and reused instead of solving twice per
+// swap. The cache is only valid under that single-goroutine access pattern.
 type matrixSwapper struct {
 	solver *matrixSolver
 	logger *logmon.Monitor
+
+	lastTarget  string
+	lastRunning []string
+	lastResult  solveResult
+	lastValid   bool
+}
+
+func (p *matrixSwapper) solve(target string, running []string) solveResult {
+	if p.lastValid && p.lastTarget == target && slices.Equal(p.lastRunning, running) {
+		return p.lastResult
+	}
+	result := p.solver.Solve(target, running)
+	p.lastTarget = target
+	p.lastRunning = slices.Clone(running)
+	p.lastResult = result
+	p.lastValid = true
+	return result
 }
 
 func (p *matrixSwapper) EvictionFor(target string, running []string) []string {
-	return p.solver.Solve(target, running).Evict
+	return p.solve(target, running).Evict
 }
 
 func (p *matrixSwapper) OnSwapStart(target string, running []string) {
-	result := p.solver.Solve(target, running)
+	result := p.solve(target, running)
 	switch {
 	case len(result.Evict) > 0:
 		p.logger.Infof("matrix: model=%s set=%s dsl=%q evict=%v target=%v cost=%d",

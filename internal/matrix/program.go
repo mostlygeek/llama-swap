@@ -18,11 +18,17 @@ type compiledSet struct {
 	name string
 	dsl  string
 	root *node
+	// support has a bit for every model reachable in this set's expression,
+	// using the program-wide modelBits registry. A query whose required
+	// models are not all in support can skip evaluating this set entirely.
+	support bitMask
 }
 
 // Program is an immutable, compiled matrix DSL program.
 type Program struct {
-	sets []compiledSet
+	sets      []compiledSet
+	modelBits map[string]int
+	words     int
 }
 
 // Decision describes the selected matrix set and the running models it evicts.
@@ -108,7 +114,73 @@ func Compile(definitions []Definition, resolve Resolver) (*Program, error) {
 			root: roots[name],
 		})
 	}
-	return &Program{sets: sets}, nil
+
+	program := &Program{sets: sets}
+	program.computeSupport()
+	return program, nil
+}
+
+// computeSupport builds the program-wide model registry and, for each set, a
+// bitmask of every model its expression can mention. Support is a union over
+// all leaves reachable through AND, OR, and references.
+func (p *Program) computeSupport() {
+	memo := make(map[*node]map[string]bool)
+	var collect func(n *node) map[string]bool
+	collect = func(n *node) map[string]bool {
+		if models, ok := memo[n]; ok {
+			return models
+		}
+		var models map[string]bool
+		switch n.kind {
+		case nodeLeaf:
+			models = map[string]bool{n.name: true}
+		case nodeRef:
+			models = collect(n.ref)
+		default:
+			models = make(map[string]bool)
+			for _, child := range n.children {
+				for model := range collect(child) {
+					models[model] = true
+				}
+			}
+		}
+		memo[n] = models
+		return models
+	}
+
+	p.modelBits = make(map[string]int)
+	setModels := make([]map[string]bool, len(p.sets))
+	for i := range p.sets {
+		setModels[i] = collect(p.sets[i].root)
+		for model := range setModels[i] {
+			if _, ok := p.modelBits[model]; !ok {
+				p.modelBits[model] = len(p.modelBits)
+			}
+		}
+	}
+
+	p.words = (len(p.modelBits) + 63) / 64
+	for i := range p.sets {
+		support := make(bitMask, p.words)
+		for model := range setModels[i] {
+			bit := p.modelBits[model]
+			support[bit/64] |= uint64(1) << uint(bit%64)
+		}
+		p.sets[i].support = support
+	}
+}
+
+// supportsAll reports whether every model can appear in the set's expression.
+// A set that fails this check can never produce a matching state for a query
+// requiring those models.
+func (p *Program) supportsAll(set *compiledSet, models []string) bool {
+	for _, model := range models {
+		bit, ok := p.modelBits[model]
+		if !ok || !set.support.has(bit) {
+			return false
+		}
+	}
+	return true
 }
 
 func topologicalOrder(definitions []Definition, deps map[string][]string) ([]string, error) {
@@ -163,11 +235,17 @@ func (p *Program) Solve(target string, running []string, evictionCosts map[strin
 	evaluator := newEvaluator(relevant)
 	targetBit := evaluator.modelBits[target]
 
+	// Skip every set when the target appears in no set's expression.
+	globalTargetBit, targetKnown := p.modelBits[target]
+
 	bestCost := -1
 	var bestSet *compiledSet
 	var bestState projectedState
 	for i := range p.sets {
 		set := &p.sets[i]
+		if !targetKnown || !set.support.has(globalTargetBit) {
+			continue
+		}
 		for _, state := range evaluator.evaluate(set.root) {
 			if !state.mask.has(targetBit) {
 				continue
@@ -217,7 +295,11 @@ func (p *Program) CanContainAll(models []string) bool {
 
 	evaluator := newEvaluator(models)
 	required := evaluator.fullMask()
-	for _, set := range p.sets {
+	for i := range p.sets {
+		set := &p.sets[i]
+		if !p.supportsAll(set, models) {
+			continue
+		}
 		for _, state := range evaluator.evaluate(set.root) {
 			if required.subsetOf(state.mask) {
 				return true
@@ -234,7 +316,11 @@ func (p *Program) findContaining(models []string) (string, string) {
 
 	evaluator := newEvaluator(models)
 	required := evaluator.fullMask()
-	for _, set := range p.sets {
+	for i := range p.sets {
+		set := &p.sets[i]
+		if !p.supportsAll(set, models) {
+			continue
+		}
 		for _, state := range evaluator.evaluate(set.root) {
 			if required.subsetOf(state.mask) {
 				return set.name, set.dsl
