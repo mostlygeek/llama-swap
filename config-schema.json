@@ -8,6 +8,11 @@
         "models"
     ],
     "definitions": {
+        "macroReference": {
+            "type": "string",
+            "pattern": "^\\$\\{[A-Za-z0-9_-]+\\}$",
+            "description": "A whole-value macro reference (e.g. ${my_rules}) that expands to the field's native type at load time."
+        },
         "macros": {
             "type": "object",
             "additionalProperties": {
@@ -527,35 +532,42 @@
                                 "description": "Dictionary mapping requested model IDs (or aliases) to parameters to set/override in requests. Applied after setParams and can override those values. Useful with aliases to vary behaviour depending on which alias the client used (e.g. different reasoning_effort per alias). Keys support ${MODEL_ID} macro substitution. Protected params like 'model' cannot be overridden."
                             },
                             "setParamsByMatch": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "key": {
-                                            "type": "string",
-                                            "pattern": "^[A-Za-z0-9_-]+$",
-                                            "description": "Top-level request field to inspect (e.g. reasoning_effort). Must not be 'model' and may only contain letters, digits, underscores, and hyphens."
-                                        },
-                                        "match": {
-                                            "type": "string",
-                                            "description": "Value the key must equal for the rule to apply. Non-string JSON values are compared by their string form, so booleans and numbers must be quoted."
-                                        },
-                                        "set": {
+                                "oneOf": [
+                                    {
+                                        "type": "array",
+                                        "items": {
                                             "type": "object",
-                                            "additionalProperties": true,
-                                            "minProperties": 1,
-                                            "description": "Parameters to apply when the rule matches. Object values are merged into an existing request object rather than replacing it. Protected params like 'model' cannot be overridden."
+                                            "properties": {
+                                                "key": {
+                                                    "type": "string",
+                                                    "pattern": "^[A-Za-z0-9_-]+$",
+                                                    "description": "Top-level request field to inspect (e.g. reasoning_effort). Must not be 'model' and may only contain letters, digits, underscores, and hyphens."
+                                                },
+                                                "match": {
+                                                    "type": "string",
+                                                    "description": "Value the key must equal for the rule to apply. Non-string JSON values are compared by their string form, so booleans and numbers must be quoted."
+                                                },
+                                                "set": {
+                                                    "type": "object",
+                                                    "additionalProperties": true,
+                                                    "minProperties": 1,
+                                                    "description": "Parameters to apply when the rule matches. Object values are merged into an existing request object rather than replacing it. Protected params like 'model' cannot be overridden."
+                                                }
+                                            },
+                                            "required": [
+                                                "key",
+                                                "match",
+                                                "set"
+                                            ],
+                                            "additionalProperties": false
                                         }
                                     },
-                                    "required": [
-                                        "key",
-                                        "match",
-                                        "set"
-                                    ],
-                                    "additionalProperties": false
-                                },
+                                    {
+                                        "$ref": "#/definitions/macroReference"
+                                    }
+                                ],
                                 "default": [],
-                                "description": "List of rules that set parameters when a request field equals a value. Rules are evaluated in order and every matching rule applies, so a later rule overrides an earlier one. Applied after stripParams and before setParams/setParamsByID. Because rules match on the request body instead of the model ID, clients can vary parameters between requests without causing a model swap."
+                                "description": "List of rules that set parameters when a request field equals a value, or a whole-value macro reference (e.g. ${my_rules}) expanding to such a list. Rules are evaluated in order and every matching rule applies, so a later rule overrides an earlier one. Applied after stripParams and before setParams/setParamsByID. Because rules match on the request body instead of the model ID, clients can vary parameters between requests without causing a model swap."
                             }
                         },
                         "additionalProperties": false,
@@ -733,35 +745,42 @@
                                 "description": "Dictionary of parameters to set/override in requests to this peer. Useful for injecting provider-specific settings. Protected params like 'model' cannot be overridden. Values can be strings, numbers, booleans, arrays, or objects."
                             },
                             "setParamsByMatch": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "key": {
-                                            "type": "string",
-                                            "pattern": "^[A-Za-z0-9_-]+$",
-                                            "description": "Top-level request field to inspect (e.g. reasoning_effort). Must not be 'model' and may only contain letters, digits, underscores, and hyphens."
-                                        },
-                                        "match": {
-                                            "type": "string",
-                                            "description": "Value the key must equal for the rule to apply. Non-string JSON values are compared by their string form, so booleans and numbers must be quoted."
-                                        },
-                                        "set": {
+                                "oneOf": [
+                                    {
+                                        "type": "array",
+                                        "items": {
                                             "type": "object",
-                                            "additionalProperties": true,
-                                            "minProperties": 1,
-                                            "description": "Parameters to apply when the rule matches. Object values are merged into an existing request object rather than replacing it. Protected params like 'model' cannot be overridden."
+                                            "properties": {
+                                                "key": {
+                                                    "type": "string",
+                                                    "pattern": "^[A-Za-z0-9_-]+$",
+                                                    "description": "Top-level request field to inspect (e.g. reasoning_effort). Must not be 'model' and may only contain letters, digits, underscores, and hyphens."
+                                                },
+                                                "match": {
+                                                    "type": "string",
+                                                    "description": "Value the key must equal for the rule to apply. Non-string JSON values are compared by their string form, so booleans and numbers must be quoted."
+                                                },
+                                                "set": {
+                                                    "type": "object",
+                                                    "additionalProperties": true,
+                                                    "minProperties": 1,
+                                                    "description": "Parameters to apply when the rule matches. Object values are merged into an existing request object rather than replacing it. Protected params like 'model' cannot be overridden."
+                                                }
+                                            },
+                                            "required": [
+                                                "key",
+                                                "match",
+                                                "set"
+                                            ],
+                                            "additionalProperties": false
                                         }
                                     },
-                                    "required": [
-                                        "key",
-                                        "match",
-                                        "set"
-                                    ],
-                                    "additionalProperties": false
-                                },
+                                    {
+                                        "$ref": "#/definitions/macroReference"
+                                    }
+                                ],
                                 "default": [],
-                                "description": "List of rules that set parameters when a request field equals a value. Rules are evaluated in order and every matching rule applies, so a later rule overrides an earlier one. Applied after stripParams and before setParams."
+                                "description": "List of rules that set parameters when a request field equals a value, or a whole-value macro reference (e.g. ${my_rules}) expanding to such a list. Rules are evaluated in order and every matching rule applies, so a later rule overrides an earlier one. Applied after stripParams and before setParams."
                             }
                         },
                         "additionalProperties": false,
