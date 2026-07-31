@@ -29,6 +29,9 @@ Only use these technologies:
 
 - Run `gofmt -w <file>` before committing to fix any formatting
 - Use this format for commit messages:
+- When referencing issues use "fix: #123", "update: #123"
+- Use "fix" when the branch resolves an issue
+- Use "update" when the branch only contributes to the issue
 
 ```
 internal/server: short clear description of change
@@ -39,7 +42,8 @@ Add new feature that implements functionality X and Y.
 - key change 2
 - key change 3
 
-fixes #123
+fix: #123
+update: #456
 ```
 
 ## Code Reviews
