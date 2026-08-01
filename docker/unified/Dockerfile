@@ -139,6 +139,7 @@ ENV PATH="/usr/local/bin:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 libvulkan1 mesa-vulkan-drivers \
+    rocm-smi \
     python3 curl ca-certificates \
     libavcodec60 libavformat60 libavutil58 libswresample4 \
     && rm -rf /var/lib/apt/lists/*
