@@ -13,7 +13,13 @@
 
   let modelId = $derived($params?.id ?? "");
 
-  let model = $derived<Model | undefined>($models.find((m) => m.id === modelId));
+  // Resolve the route param to a model record by ID, falling back to an
+  // alias match so links to alias targets (e.g. selector targets) resolve.
+  let model = $derived<Model | undefined>(
+    $models.find((m) => m.id === modelId) ??
+      $models.find((m) => m.aliases?.includes(modelId)),
+  );
+  let resolvedId = $derived(model?.id ?? modelId);
 </script>
 
 <div class="flex h-full flex-col gap-4 overflow-y-auto p-2">
@@ -33,7 +39,7 @@
           <div class="ml-auto flex items-center gap-2">
             {#if !model.peerID}
               <a
-                href={`/upstream/${encodeURIComponent(modelId)}/`}
+                href={`/upstream/${encodeURIComponent(resolvedId)}/`}
                 target="_blank"
                 rel="noopener noreferrer"
                 class="text-muted-foreground hover:text-foreground"
@@ -64,12 +70,12 @@
 
       <!-- Activity -->
       <TabsContent value="activity">
-        <ModelActivityTab modelId={modelId} />
+        <ModelActivityTab modelId={resolvedId} />
       </TabsContent>
 
       <!-- Logs -->
       <TabsContent value="logs" class="min-h-0 flex-1">
-        <ModelLogsTab modelId={modelId} />
+        <ModelLogsTab modelId={resolvedId} />
       </TabsContent>
 
       <!-- Details -->
