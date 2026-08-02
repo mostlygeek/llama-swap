@@ -183,7 +183,14 @@ describe("api store event handling", () => {
           },
           {
             id: "pool",
-            meta: { llamaswap: { type: "selector" } },
+            meta: {
+              llamaswap: {
+                type: "selector",
+                strategy: "spillover",
+                targets: ["real", "remote/remote-model"],
+                spillover: 4,
+              },
+            },
           },
           {
             id: "public",
@@ -208,6 +215,11 @@ describe("api store event handling", () => {
       playgroundType: "peer",
     });
     expect(get(selectorModels).map((model) => model.id)).toEqual(["pool"]);
+    expect(get(selectorModels)[0]).toMatchObject({
+      strategy: "spillover",
+      targets: ["real", "remote/remote-model"],
+      spillover: 4,
+    });
     expect(get(profileModels).map((model) => model.id)).toEqual(["public"]);
     expect(get(hasListedModels)).toBe(true);
 

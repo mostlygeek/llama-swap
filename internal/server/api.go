@@ -250,6 +250,14 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
+		internalMetadata := map[string]any{
+			"type":     "selector",
+			"strategy": selector.Strategy,
+			"targets":  selector.Targets,
+		}
+		if selector.Strategy == config.SelectorStrategySpillover {
+			internalMetadata["spillover"] = selector.Settings.Spillover
+		}
 		data = append(data, newRecord(
 			selectorID,
 			selector.Name,
@@ -257,7 +265,7 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 			selector.Metadata,
 			config.ModelCapConfig{},
 			status,
-			map[string]any{"type": "selector"},
+			internalMetadata,
 		))
 	}
 
