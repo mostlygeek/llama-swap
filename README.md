@@ -46,6 +46,7 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
   - `POST /api/models/unload/:model_id` - unload a specific model
   - `GET /api/profiles` - list configured profiles and the active selection
   - `PUT /api/profiles/active` - activate a profile or select none
+  - `GET /api/kv/:key` - read a stored key/value entry, for keys marked readable over the API
   - `/logs` - remote log monitoring
     - `GET /logs` returns buffered plain text logs.
       - If `Accept: text/html` is sent, `/logs` redirects to `/ui/`.

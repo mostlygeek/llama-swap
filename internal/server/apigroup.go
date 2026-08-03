@@ -293,6 +293,29 @@ func (s *Server) handleAPIVersion(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleAPIKV returns the value stored under a public keyvalue key. Private
+// and unregistered keys are both reported as not found.
+func (s *Server) handleAPIKV(w http.ResponseWriter, r *http.Request) {
+	key, ok := store.PublicKVKey(r.PathValue("key"))
+	if !ok {
+		shared.SendResponse(w, r, http.StatusNotFound, "unknown key")
+		return
+	}
+
+	value, found, err := store.GetKV[json.RawMessage](r.Context(), s.store, key)
+	if err != nil {
+		shared.SendResponse(w, r, http.StatusInternalServerError, "failed to get value")
+		return
+	}
+	if !found {
+		shared.SendResponse(w, r, http.StatusNotFound, "key not set")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"key": string(key), "value": value})
+}
+
 // handleAPICapture returns the stored request/response capture for a metric ID.
 func (s *Server) handleAPICapture(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))

@@ -476,3 +476,56 @@ func TestServer_APIEvents_InitialPayload(t *testing.T) {
 		}
 	}
 }
+
+func TestServer_APIKV(t *testing.T) {
+	const key store.Key = "test.api.settings"
+	t.Cleanup(store.RegisterKVKeyForTest(key, true))
+
+	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
+	type settings struct {
+		Theme string `json:"theme"`
+	}
+	if err := store.SetKV(context.Background(), s.store, key, settings{Theme: "dark"}); err != nil {
+		t.Fatalf("SetKV: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/kv/"+string(key), nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", w.Code, w.Body.String())
+	}
+	var got struct {
+		Key   string   `json:"key"`
+		Value settings `json:"value"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.Key != string(key) || got.Value.Theme != "dark" {
+		t.Errorf("body = %+v", got)
+	}
+}
+
+func TestServer_APIKV_NotFound(t *testing.T) {
+	const privateKey store.Key = "test.api.private"
+	const unsetKey store.Key = "test.api.unset"
+	t.Cleanup(store.RegisterKVKeyForTest(privateKey, false))
+	t.Cleanup(store.RegisterKVKeyForTest(unsetKey, true))
+
+	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
+	if err := store.SetKV(context.Background(), s.store, privateKey, "secret"); err != nil {
+		t.Fatalf("SetKV: %v", err)
+	}
+
+	for _, key := range []string{string(privateKey), string(unsetKey), "test.api.unregistered"} {
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/kv/"+key, nil))
+		if w.Code != http.StatusNotFound {
+			t.Errorf("GET /api/kv/%s status = %d, want 404", key, w.Code)
+		}
+		if strings.Contains(w.Body.String(), "secret") {
+			t.Errorf("GET /api/kv/%s leaked the private value: %q", key, w.Body.String())
+		}
+	}
+}
