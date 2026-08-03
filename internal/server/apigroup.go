@@ -293,6 +293,18 @@ func (s *Server) handleAPIVersion(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleAPIHardware serves the hardware snapshot captured at process startup.
+func (s *Server) handleAPIHardware(w http.ResponseWriter, r *http.Request) {
+	if s.hardware == nil {
+		shared.SendResponse(w, r, http.StatusServiceUnavailable, "hardware detection unavailable")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(s.hardware); err != nil {
+		s.proxylog.Warnf("failed to encode hardware snapshot: %v", err)
+	}
+}
+
 // handleAPICapture returns the stored request/response capture for a metric ID.
 func (s *Server) handleAPICapture(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))

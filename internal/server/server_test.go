@@ -132,7 +132,7 @@ func TestServer_New_GroupConfig(t *testing.T) {
 		t.Fatalf("store.New: %v", err)
 	}
 	defer st.Close()
-	s, err := New(cfg, discard, discard, discard, nil, st, BuildInfo{})
+	s, err := New(cfg, discard, discard, discard, nil, st, BuildInfo{}, nil)
 	if err != nil {
 		t.Fatalf("New (group): %v", err)
 	}
@@ -162,7 +162,7 @@ func TestServer_New_MatrixConfig(t *testing.T) {
 		t.Fatalf("store.New: %v", err)
 	}
 	defer st.Close()
-	s, err := New(cfg, discard, discard, discard, nil, st, BuildInfo{})
+	s, err := New(cfg, discard, discard, discard, nil, st, BuildInfo{}, nil)
 	if err != nil {
 		t.Fatalf("New (matrix): %v", err)
 	}

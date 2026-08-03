@@ -14,6 +14,7 @@ import type {
   Profile,
   ProfileState,
   PlaygroundModelType,
+  HardwareSnapshot,
 } from "../lib/types";
 import { connectionState } from "./theme";
 
@@ -480,4 +481,12 @@ export async function fetchPerformance(after?: string): Promise<PerformanceRespo
     console.error("Failed to fetch performance data:", error);
     return null;
   }
+}
+
+export async function getHardware(): Promise<HardwareSnapshot> {
+  const response = await fetch("/api/hardware");
+  if (!response.ok) {
+    throw new Error(`Failed to fetch hardware: ${response.status}`);
+  }
+  return await response.json() as HardwareSnapshot;
 }
