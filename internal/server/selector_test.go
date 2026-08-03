@@ -347,6 +347,18 @@ func TestServer_Selector_ModelListings(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "testing", metadata["purpose"])
 	assert.Equal(t, "selector", metadata["type"])
+	assert.Equal(t, config.SelectorStrategyPin, metadata["strategy"])
+	assert.Equal(t, []any{"variant", "remote/remote-model"}, metadata["targets"])
+	assert.NotContains(t, metadata, "spillover")
+
+	balanced, found := byID["balanced"]
+	require.True(t, found)
+	balancedMetadata, ok := balanced.Meta["llamaswap"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, config.SelectorStrategySpillover, balancedMetadata["strategy"])
+	assert.Equal(t, []any{"a", "b", "c"}, balancedMetadata["targets"])
+	assert.Equal(t, float64(1), balancedMetadata["spillover"])
+
 	assert.NotContains(t, byID, "hidden-selector")
 }
 

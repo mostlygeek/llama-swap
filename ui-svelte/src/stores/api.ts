@@ -264,6 +264,9 @@ interface ModelListRecord {
       aliases?: string[];
       modelID?: string;
       peerID?: string;
+      strategy?: string;
+      targets?: string[];
+      spillover?: number;
     };
   };
 }
@@ -306,6 +309,9 @@ async function loadPlaygroundModels(request: number): Promise<Model[]> {
           playgroundType,
           aliases: [...(aliasesByModel.get(record.id) ?? [])],
           capabilities: record.capabilities,
+          strategy: metadata?.strategy,
+          targets: metadata?.targets ?? [],
+          spillover: metadata?.spillover,
         };
       });
     newModels.sort((a, b) => {
