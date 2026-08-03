@@ -64,6 +64,7 @@ func serveCmd(args []string) {
 	fs.StringVar(&healthPath, "health-path", "/health", "Health check path (default /health)")
 	fs.DurationVar(&waitTimeout, "wait-timeout", 120*time.Second, "Timeout waiting for daemon to become healthy")
 	fs.Parse(args)
+	startArgs := fs.Args()
 
 	if vllmURL == "" {
 		log.Fatalf("--vllm-url is required")
@@ -71,8 +72,8 @@ func serveCmd(args []string) {
 	if listenAddr == "" {
 		log.Fatalf("--listen is required")
 	}
-	if startCmd == "" {
-		log.Fatalf("--start-cmd is required")
+	if startCmd == "" && len(startArgs) == 0 {
+		log.Fatalf("--start-cmd or a command after -- is required")
 	}
 
 	// Ensure vLLM URL does not have trailing slash.
@@ -86,7 +87,7 @@ func serveCmd(args []string) {
 		if err := wakeUpVLLM(vllmURL); err != nil {
 			// Wake up failed (e.g., connection refused), assume daemon not running, try to start it.
 			log.Printf("Wake up failed: %v, attempting to start daemon", err)
-			if err := startDaemon(startCmd, vllmURL, healthPath, waitTimeout); err != nil {
+			if err := startDaemon(startCmd, startArgs, vllmURL, healthPath, waitTimeout); err != nil {
 				log.Fatalf("Failed to start daemon: %v", err)
 			}
 		} else {
@@ -269,9 +270,14 @@ func checkHealthy(vllmURL string, healthPath string) error {
 }
 
 // startDaemon executes the start command and waits for the vLLM daemon to become healthy.
-func startDaemon(startCmd string, vllmURL string, healthPath string, waitTimeout time.Duration) error {
-	// Start the daemon command.
-	cmd := exec.Command("sh", "-c", startCmd)
+func startDaemon(startCmd string, startArgs []string, vllmURL string, healthPath string, waitTimeout time.Duration) error {
+	var cmd *exec.Cmd
+	if len(startArgs) > 0 {
+		cmd = exec.Command(startArgs[0], startArgs[1:]...)
+	} else {
+		// Keep --start-cmd for backward compatibility.
+		cmd = exec.Command("sh", "-c", startCmd)
+	}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
