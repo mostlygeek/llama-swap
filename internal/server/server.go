@@ -101,6 +101,9 @@ var modelPostJSONRoutes = []string{
 	"/sdapi/v1/txt2img",
 	"/sdapi/v1/img2img",
 
+	// audio.cpp generic task API
+	"/audioapi/v1/tasks/run",
+
 	// versionless routes, the /v/ is stripped before the request is forwarded upstream
 	// see issue #728
 	"/v/chat/completions",
@@ -207,6 +210,7 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 // router. The model is resolved once via shared.FetchContext.
 func (s *Server) localPeerHandler(w http.ResponseWriter, r *http.Request) {
 	stripVersionPrefix(r)
+	stripAudioAPIPrefix(r)
 
 	data, err := shared.FetchContext(r, s.cfg)
 	if err != nil {
@@ -231,6 +235,15 @@ func (s *Server) localPeerHandler(w http.ResponseWriter, r *http.Request) {
 func stripVersionPrefix(r *http.Request) {
 	if strings.HasPrefix(r.URL.Path, "/v/") {
 		r.URL.Path = strings.TrimPrefix(r.URL.Path, "/v")
+	}
+}
+
+// stripAudioAPIPrefix rewrites /audioapi/... requests to their /... form
+// before forwarding upstream, so /audioapi/v1/tasks/run reaches the upstream
+// as /v1/tasks/run.
+func stripAudioAPIPrefix(r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/audioapi") {
+		r.URL.Path = strings.TrimPrefix(r.URL.Path, "/audioapi")
 	}
 }
 
