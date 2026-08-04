@@ -66,10 +66,11 @@ func TestHardware_FinalizeAcceleratorsMergesAndRemovesIdentity(t *testing.T) {
 }
 
 func TestHardware_FinalizeAcceleratorsPreservesMixedVendors(t *testing.T) {
+	capacity := uint64(32 * 1024 * 1024 * 1024)
 	found := []detectedAccelerator{
 		{identity: "0000:01:00.0", value: Accelerator{Kind: "gpu", Vendor: stringPtr("NVIDIA"), Model: stringPtr("RTX 4090"), Memory: AcceleratorMemory{Kind: "dedicated"}}},
-		{identity: "0000:65:00.0", value: Accelerator{Kind: "gpu", Vendor: stringPtr("AMD"), Architecture: stringPtr("gfx1151"), Memory: AcceleratorMemory{Kind: "unknown"}}},
-		{identity: "0000:65:00.0", value: Accelerator{Kind: "gpu", Vendor: stringPtr("AMD"), Model: stringPtr("Radeon 8060S"), Memory: AcceleratorMemory{Kind: "shared_system"}}},
+		{identity: "0000:65:00.0", value: Accelerator{Kind: "gpu", Vendor: stringPtr("AMD"), Architecture: stringPtr("gfx1151"), Memory: AcceleratorMemory{Kind: "unified"}}},
+		{identity: "0000:65:00.0", value: Accelerator{Kind: "gpu", Vendor: stringPtr("AMD"), Model: stringPtr("Radeon 8060S"), Memory: AcceleratorMemory{Kind: "dedicated", CapacityBytes: &capacity}}},
 	}
 
 	got := finalizeAccelerators(found)
@@ -81,6 +82,9 @@ func TestHardware_FinalizeAcceleratorsPreservesMixedVendors(t *testing.T) {
 	}
 	if stringValue(got[1].Architecture) != "gfx1151" || stringValue(got[1].Model) != "Radeon 8060S" {
 		t.Fatalf("finalizeAccelerators() AMD device = %+v", got[1])
+	}
+	if got[1].Memory.Kind != "unified" || got[1].Memory.CapacityBytes == nil || *got[1].Memory.CapacityBytes != capacity {
+		t.Fatalf("finalizeAccelerators() AMD memory = %+v", got[1].Memory)
 	}
 }
 

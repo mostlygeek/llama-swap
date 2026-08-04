@@ -4,12 +4,16 @@ package hw
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/shirou/gopsutil/v4/host"
 	"github.com/yusufpapurcu/wmi"
 )
+
+const wmiQueryTimeout = 5 * time.Second
 
 type win32VideoController struct {
 	Name                 string
@@ -39,7 +43,10 @@ func detectPlatform(ctx context.Context, _ *HardwareSnapshot) ([]detectedAcceler
 	}
 
 	var controllers []win32VideoController
-	if err := wmi.Query("SELECT Name, AdapterCompatibility, DriverVersion, PNPDeviceID FROM Win32_VideoController", &controllers); err != nil {
+	if err := queryWMI(ctx, "SELECT Name, AdapterCompatibility, DriverVersion, PNPDeviceID FROM Win32_VideoController", &controllers); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return result, nil
+		}
 		if len(result) > 0 {
 			return result, nil
 		}
@@ -74,9 +81,9 @@ func detectPlatform(ctx context.Context, _ *HardwareSnapshot) ([]detectedAcceler
 	return result, nil
 }
 
-func detectEnvironment(_ context.Context, _ *host.InfoStat) ExecutionEnvironment {
+func detectEnvironment(ctx context.Context, _ *host.InfoStat) ExecutionEnvironment {
 	var systems []win32ComputerSystem
-	if err := wmi.Query("SELECT Manufacturer, Model FROM Win32_ComputerSystem", &systems); err != nil || len(systems) == 0 {
+	if err := queryWMI(ctx, "SELECT Manufacturer, Model FROM Win32_ComputerSystem", &systems); err != nil || len(systems) == 0 {
 		return ExecutionEnvironment{Kind: "unknown"}
 	}
 	combined := strings.ToLower(systems[0].Manufacturer + " " + systems[0].Model)
@@ -92,6 +99,23 @@ func detectEnvironment(_ context.Context, _ *host.InfoStat) ExecutionEnvironment
 		}
 	}
 	return ExecutionEnvironment{Kind: "unknown"}
+}
+
+func queryWMI(ctx context.Context, query string, destination any) error {
+	ctx, cancel := context.WithTimeout(ctx, wmiQueryTimeout)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- wmi.Query(query, destination)
+	}()
+
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func platformMemoryCapacity(total uint64) uint64 { return total }

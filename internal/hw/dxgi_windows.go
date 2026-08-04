@@ -74,7 +74,7 @@ func detectDXGI() ([]detectedAccelerator, error) {
 			break
 		}
 		if hresultFailed(hresult) || adapter == nil {
-			continue
+			break
 		}
 
 		var desc dxgiAdapterDesc

@@ -58,9 +58,6 @@ func Detect(ctx context.Context, detectorVersion string) (HardwareSnapshot, erro
 	snapshot.Memory.CapacityBytes = capacity
 
 	detected, err := detectPlatform(ctx, &snapshot)
-	if ctx.Err() != nil {
-		return HardwareSnapshot{}, ctx.Err()
-	}
 	if err == nil {
 		snapshot.Accelerators = finalizeAccelerators(detected)
 	}
@@ -181,8 +178,11 @@ func mergeAccelerator(dst *Accelerator, src Accelerator) {
 	if dst.Architecture == nil {
 		dst.Architecture = src.Architecture
 	}
+	if dst.Memory.Kind == "" || dst.Memory.Kind == "unknown" {
+		dst.Memory.Kind = src.Memory.Kind
+	}
 	if dst.Memory.CapacityBytes == nil {
-		dst.Memory = src.Memory
+		dst.Memory.CapacityBytes = src.Memory.CapacityBytes
 	}
 	if dst.Driver == nil {
 		dst.Driver = src.Driver
