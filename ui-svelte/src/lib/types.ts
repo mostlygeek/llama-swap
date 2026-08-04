@@ -184,6 +184,71 @@ export interface VersionInfo {
   version: string;
 }
 
+export interface HardwareSnapshot {
+  schema_version: number;
+  captured_at: string;
+  capture: HardwareCapture;
+  architecture: HardwareArchitecture;
+  operating_system: HardwareOperatingSystem;
+  environment: HardwareEnvironment;
+  cpu: HardwareCPU;
+  memory: HardwareMemory;
+  accelerators: HardwareAccelerator[];
+}
+
+export interface HardwareCapture {
+  scope: "inference_host";
+  method: "detected" | "detected_and_edited" | "manual";
+  detector: { name: string; version: string } | null;
+}
+
+export interface HardwareArchitecture {
+  name: string;
+  raw_name?: string | null;
+}
+
+export interface HardwareOperatingSystem {
+  family: string;
+  name: string | null;
+  version: string | null;
+  kernel: string | null;
+  raw_family?: string | null;
+}
+
+export interface HardwareEnvironment {
+  kind: string;
+  name: string | null;
+  version: string | null;
+  raw_kind?: string | null;
+}
+
+export interface HardwareCPU {
+  vendor: string | null;
+  model: string | null;
+  socket_count: number | null;
+  physical_core_count: number | null;
+  logical_thread_count: number | null;
+}
+
+export interface HardwareMemory {
+  capacity_bytes: number;
+}
+
+export interface HardwareAccelerator {
+  index: number;
+  kind: "gpu" | "npu" | "other";
+  raw_kind?: string | null;
+  vendor: string | null;
+  model: string | null;
+  architecture: string | null;
+  memory: {
+    kind: "dedicated" | "unified" | "shared_system" | "unknown";
+    capacity_bytes: number | null;
+  };
+  driver: { name: string | null; version: string | null } | null;
+  power_limit_watts: number | null;
+}
+
 export type ScreenWidth = "xs" | "sm" | "md" | "lg" | "xl" | "2xl";
 
 export type TextContentPart = {

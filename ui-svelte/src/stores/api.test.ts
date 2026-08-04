@@ -5,6 +5,7 @@ import {
   activityRevision,
   fetchPlaygroundModels,
   fetchProfiles,
+  getHardware,
   handleAPIEventMessage,
   hasListedModels,
   inFlightRequests,
@@ -24,6 +25,30 @@ afterEach(() => {
   playgroundModels.set([]);
   profiles.set([]);
   activeProfile.set(null);
+});
+
+describe("hardware api", () => {
+  it("fetches the hardware snapshot", async () => {
+    const snapshot = {
+      schema_version: 1,
+      captured_at: "2026-08-03T12:00:00Z",
+      capture: { scope: "inference_host", method: "detected", detector: { name: "llama-swap", version: "246" } },
+      architecture: { name: "x86_64" },
+      operating_system: { family: "linux", name: "Ubuntu", version: "24.04", kernel: "6.8" },
+      environment: { kind: "native", name: null, version: null },
+      cpu: { vendor: "AMD", model: "Ryzen", socket_count: 1, physical_core_count: 16, logical_thread_count: 32 },
+      memory: { capacity_bytes: 1024 },
+      accelerators: [],
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => snapshot }));
+    await expect(getHardware()).resolves.toEqual(snapshot);
+    expect(fetch).toHaveBeenCalledWith("/api/hardware");
+  });
+
+  it("rejects unavailable hardware", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 503 }));
+    await expect(getHardware()).rejects.toThrow("Failed to fetch hardware: 503");
+  });
 });
 
 describe("api store event handling", () => {
