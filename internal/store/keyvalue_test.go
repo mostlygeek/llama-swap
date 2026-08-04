@@ -56,10 +56,10 @@ func TestStore_KeyValueEmptyKey(t *testing.T) {
 	}
 	defer store.Close()
 
-	if _, err := store.GetKeyValue(ctx, "  "); !errors.Is(err, ErrKeyEmpty) {
+	if _, err := store.GetKeyValue(ctx, Key("  ")); !errors.Is(err, ErrKeyEmpty) {
 		t.Fatalf("GetKeyValue empty key err = %v, want ErrKeyEmpty", err)
 	}
-	if err := store.SetKeyValue(ctx, "", "value"); !errors.Is(err, ErrKeyEmpty) {
+	if err := store.SetKeyValue(ctx, Key(""), "value"); !errors.Is(err, ErrKeyEmpty) {
 		t.Fatalf("SetKeyValue empty key err = %v, want ErrKeyEmpty", err)
 	}
 }
