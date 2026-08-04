@@ -39,7 +39,7 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
   - `/sdapi/v1/img2img`
   - `/sdapi/v1/loras` - requires `model` in request body to fetch the correct loras
 
-- ✅ audio.cpp supported extra endpoints ([audio.cpp](https://github.com/0xShug0/audio.cpp))
+- ✅ [audio.cpp](https://github.com/0xShug0/audio.cpp) supported [extra endpoints](https://github.com/0xShug0/audio.cpp/blob/main/app/server/README.md#post-v1tasksrun)
   - `/audioapi/v1/tasks/run`
 
 - ✅ llama-swap API
