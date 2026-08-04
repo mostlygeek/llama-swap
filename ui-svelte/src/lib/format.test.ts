@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { formatDuration, formatSpeed, formatFileSize, formatRelativeTime } from "./format";
+import { formatDuration, formatSpeed, formatFileSize, formatBytesPerSecond, formatRelativeTime } from "./format";
 
 describe("formatDuration", () => {
   it("defaults to seconds with 2 decimals", () => {
@@ -41,6 +41,15 @@ describe("formatFileSize", () => {
 
   it("formats megabytes", () => {
     expect(formatFileSize(5 * 1024 * 1024)).toBe("5.0 MB");
+  });
+});
+
+describe("formatBytesPerSecond", () => {
+  it("formats byte rates with binary units", () => {
+    expect(formatBytesPerSecond(512)).toBe("512 B/s");
+    expect(formatBytesPerSecond(2048)).toBe("2.0 KiB/s");
+    expect(formatBytesPerSecond(5 * 1024 * 1024)).toBe("5.0 MiB/s");
+    expect(formatBytesPerSecond(2 * 1024 * 1024 * 1024)).toBe("2.0 GiB/s");
   });
 });
 

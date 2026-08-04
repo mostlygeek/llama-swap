@@ -16,6 +16,24 @@ type GpuStat struct {
 	MemTotalMB  int     `json:"mem_total_mb"`
 	FanSpeedPct float64 `json:"fan_speed_pct"`
 	PowerDrawW  float64 `json:"power_draw_w"`
+
+	ComputeUtilPct        *float64 `json:"compute_util_pct,omitempty"`
+	RenderUtilPct         *float64 `json:"render_util_pct,omitempty"`
+	CopyUtilPct           *float64 `json:"copy_util_pct,omitempty"`
+	EUActivePct           *float64 `json:"eu_active_pct,omitempty"`
+	EUStallPct            *float64 `json:"eu_stall_pct,omitempty"`
+	EUIdlePct             *float64 `json:"eu_idle_pct,omitempty"`
+	MemReadBandwidthKBps  *float64 `json:"mem_read_bandwidth_kbps,omitempty"`
+	MemWriteBandwidthKBps *float64 `json:"mem_write_bandwidth_kbps,omitempty"`
+	MemBandwidthUtilPct   *float64 `json:"mem_bandwidth_util_pct,omitempty"`
+	PcieRxMBps            *float64 `json:"pcie_rx_mbps,omitempty"`
+	PcieTxMBps            *float64 `json:"pcie_tx_mbps,omitempty"`
+	GraphicsClockMHz      *float64 `json:"graphics_clock_mhz,omitempty"`
+	GraphicsClockMaxMHz   *float64 `json:"graphics_clock_max_mhz,omitempty"`
+	MediaClockMHz         *float64 `json:"media_clock_mhz,omitempty"`
+	MediaClockMaxMHz      *float64 `json:"media_clock_max_mhz,omitempty"`
+	PowerLimitW           *float64 `json:"power_limit_w,omitempty"`
+	EnergyConsumedJ       *float64 `json:"energy_consumed_j,omitempty"`
 }
 
 type NetIOStat struct {

@@ -1,0 +1,4 @@
+# XPU-SMI version: 2.0.0; command: xpu-smi --query-gpu=<fields> --format=csv,nounits; GPU: Intel Arc family; synthesized.
+ name , memory.total , index , utilization.gpu , memory.used , power.draw , uuid , temperature.gpu , utilization.compute
+Intel Arc Pro B70,32656,3,22.22,23997.9,140.31,00000000-0000-0000-0000-000000000003,57,99.99
+Intel Arc A770,16384,9,N/A,1024,100.5,00000000-0000-0000-0000-000000000009,N/A,N/A

@@ -194,6 +194,27 @@ Binaries are available on the [release](https://github.com/mostlygeek/llama-swap
 1. `make clean all`
 1. look in the `build/` subdirectory for the llama-swap binary
 
+### Intel GPU monitoring
+
+On Linux, performance monitoring automatically uses `xpu-smi` when LACT,
+`nvidia-smi`, and `rocm-smi` are unavailable. Install a compatible Intel XPU
+Manager, Level Zero, Compute Runtime, Xe driver, and firmware stack to monitor
+Intel Arc and Arc Pro GPUs. Memory and power telemetry may be available without
+additional privileges; temperature, PCIe and memory bandwidth, and engine
+utilization require the llama-swap process to have sufficient GPU-monitoring
+access.
+
+llama-swap never runs `sudo`. For complete XPU-SMI telemetry in Docker, install
+the matching Intel runtime in the image and start it with writable DRM devices,
+UID 0, and only `SYS_ADMIN` in addition to dropped default capabilities:
+
+```shell
+docker run --rm --user 0 --cap-drop ALL --cap-add SYS_ADMIN --device /dev/dri ...
+```
+
+Do not use `--privileged` or add `SYS_RAWIO`. Incomplete driver or permission
+support leaves individual metrics unavailable while the GPU remains visible.
+
 ## Configuration
 
 ```yaml

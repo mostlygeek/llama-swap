@@ -28,6 +28,14 @@ export function formatFileSize(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
+/** Format a byte rate using binary units. */
+export function formatBytesPerSecond(bytesPerSecond: number): string {
+  if (bytesPerSecond < 1024) return `${bytesPerSecond.toFixed(0)} B/s`;
+  if (bytesPerSecond < 1024 * 1024) return `${(bytesPerSecond / 1024).toFixed(1)} KiB/s`;
+  if (bytesPerSecond < 1024 * 1024 * 1024) return `${(bytesPerSecond / (1024 * 1024)).toFixed(1)} MiB/s`;
+  return `${(bytesPerSecond / (1024 * 1024 * 1024)).toFixed(1)} GiB/s`;
+}
+
 /** Format a timestamp as a relative time or local timestamp when older than a day. */
 export function formatRelativeTime(timestamp: string): string {
   const now = new Date();
