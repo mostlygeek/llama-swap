@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"gopkg.in/yaml.v3"
 )
 
 func TestConfig_ModelConfigSanitizedCommand(t *testing.T) {
@@ -484,4 +485,21 @@ models:
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "capabilities: unknown macro '${undefined_macro}'")
 	})
+}
+
+func TestModelConfig_SurviveClientAbortDefaultsOff(t *testing.T) {
+	var cfg ModelConfig
+	if err := yaml.Unmarshal([]byte("cmd: echo hi\n"), &cfg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if cfg.SurviveClientAbort {
+		t.Fatal("surviveClientAbort must default to false so llama.cpp keeps freeing slots on disconnect")
+	}
+
+	if err := yaml.Unmarshal([]byte("cmd: echo hi\nsurviveClientAbort: true\n"), &cfg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !cfg.SurviveClientAbort {
+		t.Fatal("surviveClientAbort: true must parse")
+	}
 }

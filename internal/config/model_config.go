@@ -99,6 +99,13 @@ type ModelConfig struct {
 	// Timeout settings for proxy connections
 	Timeouts TimeoutsConfig `yaml:"timeouts"`
 
+	// SurviveClientAbort keeps an in-flight upstream request running when the
+	// client disconnects mid-stream, instead of propagating the cancellation.
+	// Off by default: for llama.cpp, cancelling on disconnect is what frees the
+	// slot. Turn it on for backends that cannot survive a mid-generation abort.
+	// See #980.
+	SurviveClientAbort bool `yaml:"surviveClientAbort"`
+
 	// Capabilities defines what modalities and features the model supports.
 	Capabilities ModelCapConfig `yaml:"capabilities"`
 
@@ -122,6 +129,8 @@ func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		ConcurrencyLimit: 0,
 		Name:             "",
 		Description:      "",
+
+		SurviveClientAbort: false,
 
 		// matches http.DefaultTransport
 		Timeouts: TimeoutsConfig{

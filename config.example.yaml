@@ -395,6 +395,16 @@ models:
     # - optional, default: undefined (use global setting)
     sendLoadingState: false
 
+    # surviveClientAbort: keep the upstream request running when the client
+    # disconnects mid-stream, instead of cancelling it
+    # - optional, default: false
+    # - leave off for llama.cpp: cancelling on disconnect is what frees the slot
+    # - turn on for backends that cannot survive a mid-generation abort, where a
+    #   cancelled request takes down every other request sharing the batch
+    # - the abandoned response is drained in the background, bounded by size and
+    #   time, so a wedged upstream cannot hold the connection open forever
+    surviveClientAbort: false
+
     # timeouts: configure proxy connection timeouts for this model
     # - optional, defaults shown below
     # - useful for models running on slower hardware that need longer timeouts

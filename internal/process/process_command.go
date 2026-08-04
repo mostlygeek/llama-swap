@@ -435,6 +435,10 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 		if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
 			resp.Header.Set("X-Accel-Buffering", "no")
 		}
+		if p.config.SurviveClientAbort {
+			// Let the upstream finish its stream even when the client stops reading.
+			resp.Body = &drainOnAbortBody{ReadCloser: resp.Body, logger: p.proxyLogger, id: p.id}
+		}
 		return nil
 	}
 	// httputil.ReverseProxy panics with http.ErrAbortHandler when the upstream
@@ -451,6 +455,12 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 				}
 			}
 		}()
+		if p.config.SurviveClientAbort {
+			// The upstream request deliberately does NOT inherit the client's
+			// cancellation, so a client that vanishes mid-stream cannot abort the
+			// in-flight generation. Paired with the draining body above.
+			r = r.WithContext(context.WithoutCancel(r.Context()))
+		}
 		reverseProxy.ServeHTTP(w, r)
 	})
 

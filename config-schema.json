@@ -1,862 +1,867 @@
 {
-    "$schema": "https://json-schema.org/draft-07/schema#",
-    "$id": "llama-swap-config-schema.json",
-    "title": "llama-swap configuration",
-    "description": "Configuration file for llama-swap",
-    "type": "object",
-    "required": [
-        "models"
-    ],
-    "definitions": {
-        "macros": {
-            "type": "object",
-            "additionalProperties": {
-                "oneOf": [
-                    {
-                        "type": "string",
-                        "minLength": 0,
-                        "maxLength": 1024
-                    },
-                    {
-                        "type": "number"
-                    },
-                    {
-                        "type": "boolean"
-                    }
-                ]
-            },
-            "propertyNames": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 64,
-                "pattern": "^[a-zA-Z0-9_-]+$",
-                "not": {
-                    "enum": [
-                        "PID",
-                        "PORT",
-                        "MODEL_ID"
-                    ]
-                }
-            },
-            "default": {},
-            "description": "A dictionary of string substitutions. Global macros can be used in any configuration value; model macros are scoped to their model. Macro names must be <64 chars, match ^[a-zA-Z0-9_-]+$, and not be PID, PORT, or MODEL_ID. Values can be string, number, or boolean. Macros can reference other macros defined before them."
-        },
-        "timeouts": {
-            "type": "object",
-            "properties": {
-                "connect": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "default": 30,
-                    "description": "TCP connection timeout in seconds. Set to 0 to disable."
-                },
-                "keepalive": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "default": 30,
-                    "description": "TCP keepalive timeout in seconds. Set to 0 to disable."
-                },
-                "responseHeader": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "default": 0,
-                    "description": "Time to wait for response headers in seconds. Set to 0 to disable."
-                },
-                "tlsHandshake": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "default": 10,
-                    "description": "TLS handshake timeout in seconds. Set to 0 to disable."
-                },
-                "expectContinue": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "default": 1,
-                    "description": "Expect-Continue timeout in seconds. Set to 0 to disable."
-                },
-                "idleConn": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "default": 90,
-                    "description": "Idle connection timeout in seconds. Set to 0 to disable."
-                }
-            },
-            "additionalProperties": false,
-            "description": "Timeout settings for proxy connections."
-        },
-        "groupsConfig": {
-            "type": "object",
-            "additionalProperties": {
-                "type": "object",
-                "required": [
-                    "members"
-                ],
-                "properties": {
-                    "swap": {
-                        "type": "boolean",
-                        "default": true,
-                        "description": "Controls model swapping behaviour within the group. True: only one model runs at a time. False: all models can run together."
-                    },
-                    "exclusive": {
-                        "type": "boolean",
-                        "default": true,
-                        "description": "Controls how the group affects other groups. True: causes all other groups to unload when this group runs a model. False: does not affect other groups."
-                    },
-                    "persistent": {
-                        "type": "boolean",
-                        "default": false,
-                        "description": "Prevents other groups from unloading the models in this group. Does not affect individual model behaviour."
-                    },
-                    "members": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "description": "Array of model IDs that are members of this group. Model IDs must be defined in models."
-                    }
-                }
-            },
-            "description": "A dictionary of group settings. Provides advanced controls over model swapping behaviour. Model IDs must be defined in models. A model can only be a member of one group. Behaviour controlled via swap, exclusive, persistent."
-        },
-        "matrixConfig": {
-            "type": "object",
-            "description": "Solver-based alternative to groups. Declares valid combinations of concurrent models. The solver minimizes eviction cost when swapping. A config must use either groups or matrix, not both.",
-            "required": [
-                "vars",
-                "sets"
-            ],
-            "properties": {
-                "vars": {
-                    "type": "object",
-                    "description": "Short names for models. Keys must be alphanumeric, 1-8 characters. All sets and evict_costs must use these IDs.",
-                    "minProperties": 1,
-                    "additionalProperties": {
-                        "type": "string"
-                    },
-                    "propertyNames": {
-                        "pattern": "^[a-zA-Z0-9]{1,8}$"
-                    }
-                },
-                "evict_costs": {
-                    "type": "object",
-                    "description": "Relative cost of evicting a running model. Models not listed default to 1. Values must be positive integers.",
-                    "additionalProperties": {
-                        "type": "integer",
-                        "minimum": 1
-                    }
-                },
-                "sets": {
-                    "type": "object",
-                    "description": "Named sets of concurrent model combinations. Values are DSL strings using & (AND), | (OR), () (grouping), and +ref (inline another set). Definition order is used for tie-breaking.",
-                    "minProperties": 1,
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                }
-            },
-            "additionalProperties": false
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "llama-swap-config-schema.json",
+  "title": "llama-swap configuration",
+  "description": "Configuration file for llama-swap",
+  "type": "object",
+  "required": [
+    "models"
+  ],
+  "definitions": {
+    "macros": {
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 1024
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          }
+        ]
+      },
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[a-zA-Z0-9_-]+$",
+        "not": {
+          "enum": [
+            "PID",
+            "PORT",
+            "MODEL_ID"
+          ]
         }
+      },
+      "default": {},
+      "description": "A dictionary of string substitutions. Global macros can be used in any configuration value; model macros are scoped to their model. Macro names must be <64 chars, match ^[a-zA-Z0-9_-]+$, and not be PID, PORT, or MODEL_ID. Values can be string, number, or boolean. Macros can reference other macros defined before them."
     },
-    "properties": {
-        "healthCheckTimeout": {
-            "type": "integer",
-            "minimum": 15,
-            "default": 120,
-            "description": "Number of seconds to wait for a model to be ready to serve requests."
+    "timeouts": {
+      "type": "object",
+      "properties": {
+        "connect": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 30,
+          "description": "TCP connection timeout in seconds. Set to 0 to disable."
         },
-        "globalTTL": {
-            "type": "integer",
-            "minimum": 0,
-            "default": 0,
-            "description": "Default TTL for all models in seconds, 0 means no TTL and models will never be automatically unloaded"
+        "keepalive": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 30,
+          "description": "TCP keepalive timeout in seconds. Set to 0 to disable."
         },
-        "unloadTimeout": {
-            "type": "integer",
-            "minimum": 0,
-            "default": 10,
-            "description": "Graceful timeout in seconds when unloading a model (manual, API, or TTL expiry) before force-killing the model process. 0 uses the default of 10 seconds."
+        "responseHeader": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Time to wait for response headers in seconds. Set to 0 to disable."
         },
-        "logLevel": {
-            "type": "string",
-            "enum": [
-                "debug",
-                "info",
-                "warn",
-                "error"
-            ],
-            "default": "info",
-            "description": "Sets the logging value. Valid values: debug, info, warn, error."
+        "tlsHandshake": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 10,
+          "description": "TLS handshake timeout in seconds. Set to 0 to disable."
         },
-        "logTimeFormat": {
-            "type": "string",
-            "enum": [
-                "",
-                "ansic",
-                "unixdate",
-                "rubydate",
-                "rfc822",
-                "rfc822z",
-                "rfc850",
-                "rfc1123",
-                "rfc1123z",
-                "rfc3339",
-                "rfc3339nano",
-                "kitchen",
-                "stamp",
-                "stampmilli",
-                "stampmicro",
-                "stampnano"
-            ],
-            "default": "",
-            "description": "Enables and sets the logging timestamp format. Valid values: \"\", \"ansic\", \"unixdate\", \"rubydate\", \"rfc822\", \"rfc822z\", \"rfc850\", \"rfc1123\", \"rfc1123z\", \"rfc3339\", \"rfc3339nano\", \"kitchen\", \"stamp\", \"stampmilli\", \"stampmicro\", and \"stampnano\". For more info, read: https://pkg.go.dev/time#pkg-constants"
+        "expectContinue": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 1,
+          "description": "Expect-Continue timeout in seconds. Set to 0 to disable."
         },
-        "metricsMaxInMemory": {
-            "type": "integer",
-            "default": 1000,
-            "description": "Maximum number of metrics to keep in memory. Controls how many metrics are stored before older ones are discarded."
-        },
-        "captureBuffer": {
-            "type": "integer",
-            "minimum": 0,
-            "default": 5,
-            "description": "Size in megabytes of the buffer for storing request/response captures. Set to 0 to disable captures."
-        },
-        "store": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "SQLite database file path for persistent activity logs."
-                }
-            },
-            "required": [
-                "path"
-            ],
-            "additionalProperties": false,
-            "description": "Store configuration for durable llama-swap state."
-        },
-        "ui": {
-            "type": "object",
-            "properties": {
-                "activity": {
-                    "type": "object",
-                    "properties": {
-                        "session_id": {
-                            "type": "array",
-                            "items": {
-                                "type": "string"
-                            },
-                            "default": [
-                                "X-Session-ID",
-                                "X-Litellm-Session-Id"
-                            ],
-                            "description": "Ordered request headers used to identify sessions in the Activity page."
-                        }
-                    },
-                    "additionalProperties": false,
-                    "default": {}
-                }
-            },
-            "additionalProperties": false,
-            "default": {},
-            "description": "Embedded UI configuration."
-        },
-        "performance": {
-            "type": "object",
-            "properties": {
-                "disabled": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "Disable system performance monitoring."
-                },
-                "every": {
-                    "type": "string",
-                    "pattern": "^[-+]?(\\d+(\\.\\d+)?(ns|us|ms|s|m|h))+$",
-                    "default": "15s",
-                    "description": "Delay between polling for new performance statistics. Minimum duration is 1s. Lower values use more RAM as stats are kept in memory."
-                }
-            },
-            "additionalProperties": false,
-            "default": {},
-            "description": "Configuration for CPU, RAM and GPU monitoring statistics."
-        },
-        "startPort": {
-            "type": "integer",
-            "default": 5800,
-            "description": "Starting port number for the automatic ${PORT} macro. The ${PORT} macro is incremented for every model that uses it."
-        },
-        "sendLoadingState": {
+        "idleConn": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 90,
+          "description": "Idle connection timeout in seconds. Set to 0 to disable."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Timeout settings for proxy connections."
+    },
+    "groupsConfig": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "members"
+        ],
+        "properties": {
+          "swap": {
+            "type": "boolean",
+            "default": true,
+            "description": "Controls model swapping behaviour within the group. True: only one model runs at a time. False: all models can run together."
+          },
+          "exclusive": {
+            "type": "boolean",
+            "default": true,
+            "description": "Controls how the group affects other groups. True: causes all other groups to unload when this group runs a model. False: does not affect other groups."
+          },
+          "persistent": {
             "type": "boolean",
             "default": false,
-            "description": "Inject loading status updates into the reasoning field. When true, a stream of loading messages will be sent to the client."
-        },
-        "includeAliasesInList": {
-            "type": "boolean",
-            "default": false,
-            "description": "Present aliases within the /v1/models OpenAI API listing. when true, model aliases will be output to the API model listing duplicating all fields except for Id so chat UIs can use the alias equivalent to the original."
-        },
-        "macros": {
-            "$ref": "#/definitions/macros"
-        },
-        "profiles": {
-            "type": "object",
-            "default": {},
-            "description": "Runtime-selectable model ID rewrites. One profile or none may be active at runtime.",
-            "propertyNames": {
-                "type": "string",
-                "minLength": 1
-            },
-            "additionalProperties": {
-                "type": "object",
-                "required": [
-                    "pins"
-                ],
-                "properties": {
-                    "description": {
-                        "type": "string",
-                        "default": "",
-                        "maxLength": 1024
-                    },
-                    "pins": {
-                        "type": "object",
-                        "minProperties": 1,
-                        "description": "Model IDs to rewrite while this profile is active. Targets may be concrete models, aliases, peer models, or selector IDs. An empty string or null disables the model ID.",
-                        "propertyNames": {
-                            "type": "string",
-                            "minLength": 1
-                        },
-                        "additionalProperties": {
-                            "oneOf": [
-                                {
-                                    "type": "string"
-                                },
-                                {
-                                    "type": "null"
-                                }
-                            ]
-                        }
-                    }
-                },
-                "additionalProperties": false
-            }
-        },
-        "selectors": {
-            "type": "object",
-            "default": {},
-            "description": "Virtual model IDs that select a concrete target for each request. Selectors run after profiles and are not supported on /upstream paths.",
-            "propertyNames": {
-                "type": "string",
-                "minLength": 1
-            },
-            "additionalProperties": {
-                "type": "object",
-                "required": [
-                    "strategy",
-                    "targets"
-                ],
-                "properties": {
-                    "strategy": {
-                        "type": "string",
-                        "enum": [
-                            "warm",
-                            "pin",
-                            "spillover"
-                        ],
-                        "description": "How a target is selected for each request."
-                    },
-                    "targets": {
-                        "type": "array",
-                        "minItems": 1,
-                        "items": {
-                            "type": "string",
-                            "minLength": 1
-                        },
-                        "description": "Ordered target model IDs or aliases. Selector IDs cannot be targets."
-                    },
-                    "settings": {
-                        "type": "object",
-                        "properties": {
-                            "spillover": {
-                                "type": "integer",
-                                "minimum": 1,
-                                "default": 1,
-                                "description": "Requests reserved per active target before spilling over to the next target."
-                            }
-                        },
-                        "additionalProperties": false,
-                        "default": {}
-                    },
-                    "name": {
-                        "type": "string",
-                        "default": "",
-                        "maxLength": 128,
-                        "description": "Display name used in the /v1/models response."
-                    },
-                    "description": {
-                        "type": "string",
-                        "default": "",
-                        "maxLength": 1024,
-                        "description": "Description used in the /v1/models response."
-                    },
-                    "unlisted": {
-                        "type": "boolean",
-                        "default": false,
-                        "description": "Hide this selector from /v1/models while keeping it requestable."
-                    },
-                    "metadata": {
-                        "type": "object",
-                        "additionalProperties": true,
-                        "default": {},
-                        "description": "Arbitrary selector metadata included in /v1/models."
-                    }
-                },
-                "additionalProperties": false
-            }
-        },
-        "models": {
-            "type": "object",
-            "description": "A dictionary of model configurations. Each key is a model's ID. Model settings have defaults if not defined. The model's ID is available as ${MODEL_ID}.",
-            "additionalProperties": {
-                "type": "object",
-                "required": [
-                    "cmd"
-                ],
-                "properties": {
-                    "macros": {
-                        "$ref": "#/definitions/macros"
-                    },
-                    "cmd": {
-                        "type": "string",
-                        "minLength": 1,
-                        "description": "Command to run to start the inference server. Macros can be used. Comments allowed with |."
-                    },
-                    "cmdStop": {
-                        "type": "string",
-                        "default": "",
-                        "description": "Command to run to stop the model gracefully. Uses ${PID} macro for upstream process id. If empty, default shutdown behavior is used."
-                    },
-                    "name": {
-                        "type": "string",
-                        "default": "",
-                        "maxLength": 128,
-                        "description": "Display name for the model. Used in v1/models API response."
-                    },
-                    "description": {
-                        "type": "string",
-                        "default": "",
-                        "maxLength": 1024,
-                        "description": "Description for the model. Used in v1/models API response."
-                    },
-                    "env": {
-                        "type": "array",
-                        "items": {
-                            "type": "string",
-                            "pattern": "^[A-Z_][A-Z0-9_]*=.*$"
-                        },
-                        "default": [],
-                        "description": "Array of environment variables to inject into cmd's environment. Each value is a string in ENV_NAME=value format."
-                    },
-                    "proxy": {
-                        "type": "string",
-                        "default": "http://localhost:${PORT}",
-                        "format": "uri",
-                        "description": "URL where llama-swap routes API requests. If custom port is used in cmd, this must be set."
-                    },
-                    "aliases": {
-                        "type": "array",
-                        "items": {
-                            "type": "string",
-                            "minLength": 1
-                        },
-                        "default": [],
-                        "description": "Alternative model names for this configuration. Must be unique globally."
-                    },
-                    "checkEndpoint": {
-                        "type": "string",
-                        "default": "/health",
-                        "pattern": "^/.*$|^none$",
-                        "description": "URL path to check if the server is ready. Use 'none' to skip health checking."
-                    },
-                    "ttl": {
-                        "type": "integer",
-                        "minimum": -1,
-                        "default": -1,
-                        "description": "Automatically unload the model after ttl seconds. -1 uses the global TTL value, 0 disables unloading. Must be >0 to enable."
-                    },
-                    "unloadTimeout": {
-                        "type": "integer",
-                        "minimum": 0,
-                        "default": 0,
-                        "description": "Graceful timeout in seconds when unloading this model (manual, API, or TTL expiry) before force-killing it. 0 uses the global unloadTimeout."
-                    },
-                    "useModelName": {
-                        "type": "string",
-                        "default": "",
-                        "description": "Override the model name sent to upstream server. Useful if upstream expects a different name."
-                    },
-                    "filters": {
-                        "type": "object",
-                        "properties": {
-                            "stripParams": {
-                                "type": "string",
-                                "default": "",
-                                "pattern": "^[a-zA-Z0-9_, ]*$",
-                                "description": "Comma separated list of parameters to remove from the request. Used for server-side enforcement of sampling parameters."
-                            },
-                            "setParams": {
-                                "type": "object",
-                                "additionalProperties": true,
-                                "default": {},
-                                "description": "Dictionary of parameters to set/override in requests. Useful for enforcing specific parameter values. Protected params like 'model' cannot be overridden. Values can be strings, numbers, booleans, arrays, or objects."
-                            },
-                            "setParamsByID": {
-                                "type": "object",
-                                "additionalProperties": {
-                                    "type": "object",
-                                    "additionalProperties": true
-                                },
-                                "default": {},
-                                "description": "Dictionary mapping requested model IDs (or aliases) to parameters to set/override in requests. Applied after setParams and can override those values. Useful with aliases to vary behaviour depending on which alias the client used (e.g. different reasoning_effort per alias). Keys support ${MODEL_ID} macro substitution. Protected params like 'model' cannot be overridden."
-                            }
-                        },
-                        "additionalProperties": false,
-                        "default": {},
-                        "description": "Dictionary of filter settings. Supports stripParams, setParams, and setParamsByID."
-                    },
-                    "metadata": {
-                        "type": "object",
-                        "additionalProperties": true,
-                        "default": {},
-                        "description": "Dictionary of arbitrary values included in /v1/models. Can contain complex types. Only passed through in /v1/models responses."
-                    },
-                    "concurrencyLimit": {
-                        "type": "integer",
-                        "minimum": 0,
-                        "default": 0,
-                        "description": "Overrides allowed number of active parallel requests to a model. 0 uses internal default of 10. >0 overrides default. Requests exceeding limit get HTTP 429."
-                    },
-                    "sendLoadingState": {
-                        "type": "boolean",
-                        "description": "Overrides the global sendLoadingState for this model. Ommitting this property will use the global setting."
-                    },
-                    "unlisted": {
-                        "type": "boolean",
-                        "default": false,
-                        "description": "If true the model will not show up in /v1/models responses. It can still be used as normal in API requests."
-                    },
-                    "timeouts": {
-                        "$ref": "#/definitions/timeouts"
-                    },
-                    "capabilities": {
-                        "type": "object",
-                        "properties": {
-                            "in": {
-                                "type": "array",
-                                "minItems": 1,
-                                "uniqueItems": true,
-                                "default": [],
-                                "items": {
-                                    "type": "string",
-                                    "enum": [
-                                        "text",
-                                        "audio",
-                                        "image"
-                                    ]
-                                },
-                                "description": "List of input modalities understood by the model."
-                            },
-                            "out": {
-                                "type": "array",
-                                "minItems": 1,
-                                "uniqueItems": true,
-                                "default": [],
-                                "items": {
-                                    "type": "string",
-                                    "enum": [
-                                        "text",
-                                        "audio",
-                                        "image"
-                                    ]
-                                },
-                                "description": "List of output modalities generated by the model."
-                            },
-                            "tools": {
-                                "type": "boolean",
-                                "default": false,
-                                "description": "Whether the model supports function calling."
-                            },
-                            "reranker": {
-                                "type": "boolean",
-                                "default": false,
-                                "description": "Whether the model supports the /v1/rerank endpoint."
-                            },
-                            "context": {
-                                "type": "integer",
-                                "minimum": 0,
-                                "default": 0,
-                                "description": "Maximum token context length supported by the model."
-                            }
-                        },
-                        "additionalProperties": false,
-                        "description": "Defines what the model accepts for input, output and other metadata. Used in v1/models to inform clients what the model can do. An empty capabilities block (all zero values) is treated as not configured."
-                    }
-                }
-            }
-        },
-        "groups": {
-            "$ref": "#/definitions/groupsConfig"
-        },
-        "matrix": {
-            "$ref": "#/definitions/matrixConfig"
-        },
-        "hooks": {
-            "type": "object",
-            "properties": {
-                "on_startup": {
-                    "type": "object",
-                    "properties": {
-                        "preload": {
-                            "type": "array",
-                            "items": {
-                                "type": "string"
-                            },
-                            "default": [],
-                            "description": "List of model IDs to load on startup. Model names must match keys in models. When preloading multiple models, define a group to prevent swapping."
-                        }
-                    },
-                    "additionalProperties": false,
-                    "description": "Actions to perform on startup. Only supported action is preload."
-                }
-            },
-            "additionalProperties": false,
-            "description": "A dictionary of event triggers and actions. Only supported hook is on_startup."
-        },
-        "logToStdout": {
-            "type": "string",
-            "enum": [
-                "proxy",
-                "upstream",
-                "both",
-                "none"
-            ],
-            "default": "proxy",
-            "description": "Controls what is logged to stdout. 'proxy': logs generated by llama-swap, 'upstream': copy of upstream process stdout logs, 'both': both interleaved together, 'none': no logs written to stdout."
-        },
-        "apiKeys": {
+            "description": "Prevents other groups from unloading the models in this group. Does not affect individual model behaviour."
+          },
+          "members": {
             "type": "array",
             "items": {
-                "type": "string",
-                "minLength": 1
+              "type": "string"
             },
-            "default": [],
-            "description": "Require an API key when making requests to inference endpoints. When empty, authorization will not be checked. Each key is a non-empty string."
+            "description": "Array of model IDs that are members of this group. Model IDs must be defined in models."
+          }
+        }
+      },
+      "description": "A dictionary of group settings. Provides advanced controls over model swapping behaviour. Model IDs must be defined in models. A model can only be a member of one group. Behaviour controlled via swap, exclusive, persistent."
+    },
+    "matrixConfig": {
+      "type": "object",
+      "description": "Solver-based alternative to groups. Declares valid combinations of concurrent models. The solver minimizes eviction cost when swapping. A config must use either groups or matrix, not both.",
+      "required": [
+        "vars",
+        "sets"
+      ],
+      "properties": {
+        "vars": {
+          "type": "object",
+          "description": "Short names for models. Keys must be alphanumeric, 1-8 characters. All sets and evict_costs must use these IDs.",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "string"
+          },
+          "propertyNames": {
+            "pattern": "^[a-zA-Z0-9]{1,8}$"
+          }
         },
-        "peers": {
+        "evict_costs": {
+          "type": "object",
+          "description": "Relative cost of evicting a running model. Models not listed default to 1. Values must be positive integers.",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "sets": {
+          "type": "object",
+          "description": "Named sets of concurrent model combinations. Values are DSL strings using & (AND), | (OR), () (grouping), and +ref (inline another set). Definition order is used for tie-breaking.",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "properties": {
+    "healthCheckTimeout": {
+      "type": "integer",
+      "minimum": 15,
+      "default": 120,
+      "description": "Number of seconds to wait for a model to be ready to serve requests."
+    },
+    "globalTTL": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Default TTL for all models in seconds, 0 means no TTL and models will never be automatically unloaded"
+    },
+    "unloadTimeout": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 10,
+      "description": "Graceful timeout in seconds when unloading a model (manual, API, or TTL expiry) before force-killing the model process. 0 uses the default of 10 seconds."
+    },
+    "logLevel": {
+      "type": "string",
+      "enum": [
+        "debug",
+        "info",
+        "warn",
+        "error"
+      ],
+      "default": "info",
+      "description": "Sets the logging value. Valid values: debug, info, warn, error."
+    },
+    "logTimeFormat": {
+      "type": "string",
+      "enum": [
+        "",
+        "ansic",
+        "unixdate",
+        "rubydate",
+        "rfc822",
+        "rfc822z",
+        "rfc850",
+        "rfc1123",
+        "rfc1123z",
+        "rfc3339",
+        "rfc3339nano",
+        "kitchen",
+        "stamp",
+        "stampmilli",
+        "stampmicro",
+        "stampnano"
+      ],
+      "default": "",
+      "description": "Enables and sets the logging timestamp format. Valid values: \"\", \"ansic\", \"unixdate\", \"rubydate\", \"rfc822\", \"rfc822z\", \"rfc850\", \"rfc1123\", \"rfc1123z\", \"rfc3339\", \"rfc3339nano\", \"kitchen\", \"stamp\", \"stampmilli\", \"stampmicro\", and \"stampnano\". For more info, read: https://pkg.go.dev/time#pkg-constants"
+    },
+    "metricsMaxInMemory": {
+      "type": "integer",
+      "default": 1000,
+      "description": "Maximum number of metrics to keep in memory. Controls how many metrics are stored before older ones are discarded."
+    },
+    "captureBuffer": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 5,
+      "description": "Size in megabytes of the buffer for storing request/response captures. Set to 0 to disable captures."
+    },
+    "store": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "SQLite database file path for persistent activity logs."
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false,
+      "description": "Store configuration for durable llama-swap state."
+    },
+    "ui": {
+      "type": "object",
+      "properties": {
+        "activity": {
+          "type": "object",
+          "properties": {
+            "session_id": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": [
+                "X-Session-ID",
+                "X-Litellm-Session-Id"
+              ],
+              "description": "Ordered request headers used to identify sessions in the Activity page."
+            }
+          },
+          "additionalProperties": false,
+          "default": {}
+        }
+      },
+      "additionalProperties": false,
+      "default": {},
+      "description": "Embedded UI configuration."
+    },
+    "performance": {
+      "type": "object",
+      "properties": {
+        "disabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Disable system performance monitoring."
+        },
+        "every": {
+          "type": "string",
+          "pattern": "^[-+]?(\\d+(\\.\\d+)?(ns|us|ms|s|m|h))+$",
+          "default": "15s",
+          "description": "Delay between polling for new performance statistics. Minimum duration is 1s. Lower values use more RAM as stats are kept in memory."
+        }
+      },
+      "additionalProperties": false,
+      "default": {},
+      "description": "Configuration for CPU, RAM and GPU monitoring statistics."
+    },
+    "startPort": {
+      "type": "integer",
+      "default": 5800,
+      "description": "Starting port number for the automatic ${PORT} macro. The ${PORT} macro is incremented for every model that uses it."
+    },
+    "sendLoadingState": {
+      "type": "boolean",
+      "default": false,
+      "description": "Inject loading status updates into the reasoning field. When true, a stream of loading messages will be sent to the client."
+    },
+    "includeAliasesInList": {
+      "type": "boolean",
+      "default": false,
+      "description": "Present aliases within the /v1/models OpenAI API listing. when true, model aliases will be output to the API model listing duplicating all fields except for Id so chat UIs can use the alias equivalent to the original."
+    },
+    "macros": {
+      "$ref": "#/definitions/macros"
+    },
+    "profiles": {
+      "type": "object",
+      "default": {},
+      "description": "Runtime-selectable model ID rewrites. One profile or none may be active at runtime.",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "pins"
+        ],
+        "properties": {
+          "description": {
+            "type": "string",
+            "default": "",
+            "maxLength": 1024
+          },
+          "pins": {
             "type": "object",
+            "minProperties": 1,
+            "description": "Model IDs to rewrite while this profile is active. Targets may be concrete models, aliases, peer models, or selector IDs. An empty string or null disables the model ID.",
+            "propertyNames": {
+              "type": "string",
+              "minLength": 1
+            },
             "additionalProperties": {
-                "type": "object",
-                "required": [
-                    "proxy",
-                    "models"
-                ],
-                "properties": {
-                    "proxy": {
-                        "type": "string",
-                        "format": "uri",
-                        "description": "A valid base URL to proxy requests to. Requested path to llama-swap will be appended to the end of the proxy value."
-                    },
-                    "apiKey": {
-                        "type": "string",
-                        "default": "",
-                        "description": "A string key to be injected into the request. If blank, no key will be added. Key will be injected into headers: Authorization: Bearer <key> and x-api-key: <key>."
-                    },
-                    "models": {
-                        "type": "array",
-                        "items": {
-                            "type": "string",
-                            "minLength": 1
-                        },
-                        "description": "A list of models served by the peer."
-                    },
-                    "filters": {
-                        "type": "object",
-                        "properties": {
-                            "stripParams": {
-                                "type": "string",
-                                "default": "",
-                                "pattern": "^[a-zA-Z0-9_, ]*$",
-                                "description": "Comma separated list of parameters to remove from the request. Useful for removing parameters that the peer doesn't support."
-                            },
-                            "setParams": {
-                                "type": "object",
-                                "additionalProperties": true,
-                                "default": {},
-                                "description": "Dictionary of parameters to set/override in requests to this peer. Useful for injecting provider-specific settings. Protected params like 'model' cannot be overridden. Values can be strings, numbers, booleans, arrays, or objects."
-                            }
-                        },
-                        "additionalProperties": false,
-                        "default": {},
-                        "description": "Dictionary of filter settings for peer requests. Supports stripParams and setParams."
-                    },
-                    "timeouts": {
-                        "type": "object",
-                        "properties": {
-                            "connect": {
-                                "type": "integer",
-                                "minimum": 0,
-                                "default": 30,
-                                "description": "TCP connection timeout in seconds."
-                            },
-                            "keepalive": {
-                                "type": "integer",
-                                "minimum": 0,
-                                "default": 30,
-                                "description": "TCP keepalive connection timeout in seconds."
-                            },
-                            "responseHeader": {
-                                "type": "integer",
-                                "minimum": 0,
-                                "default": 0,
-                                "description": "Time to wait for response headers in seconds."
-                            },
-                            "tlsHandshake": {
-                                "type": "integer",
-                                "minimum": 0,
-                                "default": 10,
-                                "description": "TLS handshake timeout in seconds."
-                            },
-                            "idleConn": {
-                                "type": "integer",
-                                "minimum": 0,
-                                "default": 90,
-                                "description": "Idle connection timeout in seconds."
-                            }
-                        },
-                        "additionalProperties": false,
-                        "description": "Timeout settings for proxy connections to this peer."
-                    }
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
                 }
-            },
-            "default": {},
-            "description": "A dictionary of remote peers and models they provide. Peers can be another llama-swap or any server that provides the /v1/ generative API endpoints supported by llama-swap."
+              ]
+            }
+          }
         },
-        "upstream": {
+        "additionalProperties": false
+      }
+    },
+    "selectors": {
+      "type": "object",
+      "default": {},
+      "description": "Virtual model IDs that select a concrete target for each request. Selectors run after profiles and are not supported on /upstream paths.",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "strategy",
+          "targets"
+        ],
+        "properties": {
+          "strategy": {
+            "type": "string",
+            "enum": [
+              "warm",
+              "pin",
+              "spillover"
+            ],
+            "description": "How a target is selected for each request."
+          },
+          "targets": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Ordered target model IDs or aliases. Selector IDs cannot be targets."
+          },
+          "settings": {
             "type": "object",
-            "description": "Controls behaviour of the /upstream passthrough endpoint. Recommended to only use in special use cases; leaving it as the default will typically be the best experience.",
             "properties": {
-                "ignorePaths": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                    "default": [
-                        ".*\\.(js|json|css|png|gif|jpg|jpeg|ico|txt)$"
-                    ],
-                    "description": "List of RE2 compatible regular expressions. Any request to a path matching any of the regular expressions will be ignored and not trigger a swap. When not specified, defaults to a pattern matching common static-asset suffixes (.js, .json, .css, .png, .gif, .jpg, .jpeg, .ico, .txt)."
-                }
+              "spillover": {
+                "type": "integer",
+                "minimum": 1,
+                "default": 1,
+                "description": "Requests reserved per active target before spilling over to the next target."
+              }
             },
             "additionalProperties": false,
             "default": {}
-        },
-        "routing": {
+          },
+          "name": {
+            "type": "string",
+            "default": "",
+            "maxLength": 128,
+            "description": "Display name used in the /v1/models response."
+          },
+          "description": {
+            "type": "string",
+            "default": "",
+            "maxLength": 1024,
+            "description": "Description used in the /v1/models response."
+          },
+          "unlisted": {
+            "type": "boolean",
+            "default": false,
+            "description": "Hide this selector from /v1/models while keeping it requestable."
+          },
+          "metadata": {
             "type": "object",
-            "description": "Canonical routing/scheduling configuration. Alternative to the legacy top-level 'groups'/'matrix' keys; a config must not use both styles.",
-            "properties": {
-                "scheduler": {
-                    "type": "object",
-                    "description": "Scheduler configuration. Decides the order in which queued requests are serviced.",
-                    "properties": {
-                        "use": {
-                            "type": "string",
-                            "enum": [
-                                "fifo"
-                            ],
-                            "default": "fifo",
-                            "description": "Scheduler to use. Only 'fifo' is currently supported."
-                        },
-                        "settings": {
-                            "type": "object",
-                            "properties": {
-                                "fifo": {
-                                    "type": "object",
-                                    "properties": {
-                                        "priority": {
-                                            "type": "object",
-                                            "description": "Per-model priority. Keys are model IDs, values are integers (default 0). Higher values are serviced first.",
-                                            "additionalProperties": {
-                                                "type": "integer"
-                                            }
-                                        }
-                                    },
-                                    "additionalProperties": false
-                                }
-                            },
-                            "additionalProperties": false
-                        }
-                    },
-                    "additionalProperties": false
-                },
-                "router": {
-                    "type": "object",
-                    "description": "Router configuration. Selects between the group and matrix swapping strategies.",
-                    "properties": {
-                        "use": {
-                            "type": "string",
-                            "enum": [
-                                "group",
-                                "matrix"
-                            ],
-                            "default": "group",
-                            "description": "Router to use. 'group' uses static groups, 'matrix' uses the solver-based swap matrix."
-                        },
-                        "settings": {
-                            "type": "object",
-                            "properties": {
-                                "groups": {
-                                    "$ref": "#/definitions/groupsConfig"
-                                },
-                                "matrix": {
-                                    "$ref": "#/definitions/matrixConfig"
-                                }
-                            },
-                            "additionalProperties": false
-                        }
-                    },
-                    "additionalProperties": false
-                }
-            },
-            "additionalProperties": false
-        }
-    },
-    "allOf": [
-        {
-            "if": {
-                "required": [
-                    "groups"
-                ]
-            },
-            "then": {
-                "not": {
-                    "required": [
-                        "matrix"
-                    ]
-                }
-            }
+            "additionalProperties": true,
+            "default": {},
+            "description": "Arbitrary selector metadata included in /v1/models."
+          }
         },
-        {
-            "if": {
-                "required": [
-                    "matrix"
-                ]
+        "additionalProperties": false
+      }
+    },
+    "models": {
+      "type": "object",
+      "description": "A dictionary of model configurations. Each key is a model's ID. Model settings have defaults if not defined. The model's ID is available as ${MODEL_ID}.",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "cmd"
+        ],
+        "properties": {
+          "macros": {
+            "$ref": "#/definitions/macros"
+          },
+          "cmd": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Command to run to start the inference server. Macros can be used. Comments allowed with |."
+          },
+          "cmdStop": {
+            "type": "string",
+            "default": "",
+            "description": "Command to run to stop the model gracefully. Uses ${PID} macro for upstream process id. If empty, default shutdown behavior is used."
+          },
+          "name": {
+            "type": "string",
+            "default": "",
+            "maxLength": 128,
+            "description": "Display name for the model. Used in v1/models API response."
+          },
+          "description": {
+            "type": "string",
+            "default": "",
+            "maxLength": 1024,
+            "description": "Description for the model. Used in v1/models API response."
+          },
+          "env": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Z_][A-Z0-9_]*=.*$"
             },
-            "then": {
-                "not": {
-                    "required": [
-                        "groups"
-                    ]
-                }
-            }
+            "default": [],
+            "description": "Array of environment variables to inject into cmd's environment. Each value is a string in ENV_NAME=value format."
+          },
+          "proxy": {
+            "type": "string",
+            "default": "http://localhost:${PORT}",
+            "format": "uri",
+            "description": "URL where llama-swap routes API requests. If custom port is used in cmd, this must be set."
+          },
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "default": [],
+            "description": "Alternative model names for this configuration. Must be unique globally."
+          },
+          "checkEndpoint": {
+            "type": "string",
+            "default": "/health",
+            "pattern": "^/.*$|^none$",
+            "description": "URL path to check if the server is ready. Use 'none' to skip health checking."
+          },
+          "ttl": {
+            "type": "integer",
+            "minimum": -1,
+            "default": -1,
+            "description": "Automatically unload the model after ttl seconds. -1 uses the global TTL value, 0 disables unloading. Must be >0 to enable."
+          },
+          "unloadTimeout": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Graceful timeout in seconds when unloading this model (manual, API, or TTL expiry) before force-killing it. 0 uses the global unloadTimeout."
+          },
+          "useModelName": {
+            "type": "string",
+            "default": "",
+            "description": "Override the model name sent to upstream server. Useful if upstream expects a different name."
+          },
+          "filters": {
+            "type": "object",
+            "properties": {
+              "stripParams": {
+                "type": "string",
+                "default": "",
+                "pattern": "^[a-zA-Z0-9_, ]*$",
+                "description": "Comma separated list of parameters to remove from the request. Used for server-side enforcement of sampling parameters."
+              },
+              "setParams": {
+                "type": "object",
+                "additionalProperties": true,
+                "default": {},
+                "description": "Dictionary of parameters to set/override in requests. Useful for enforcing specific parameter values. Protected params like 'model' cannot be overridden. Values can be strings, numbers, booleans, arrays, or objects."
+              },
+              "setParamsByID": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "default": {},
+                "description": "Dictionary mapping requested model IDs (or aliases) to parameters to set/override in requests. Applied after setParams and can override those values. Useful with aliases to vary behaviour depending on which alias the client used (e.g. different reasoning_effort per alias). Keys support ${MODEL_ID} macro substitution. Protected params like 'model' cannot be overridden."
+              }
+            },
+            "additionalProperties": false,
+            "default": {},
+            "description": "Dictionary of filter settings. Supports stripParams, setParams, and setParamsByID."
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true,
+            "default": {},
+            "description": "Dictionary of arbitrary values included in /v1/models. Can contain complex types. Only passed through in /v1/models responses."
+          },
+          "concurrencyLimit": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Overrides allowed number of active parallel requests to a model. 0 uses internal default of 10. >0 overrides default. Requests exceeding limit get HTTP 429."
+          },
+          "sendLoadingState": {
+            "type": "boolean",
+            "description": "Overrides the global sendLoadingState for this model. Ommitting this property will use the global setting."
+          },
+          "unlisted": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true the model will not show up in /v1/models responses. It can still be used as normal in API requests."
+          },
+          "timeouts": {
+            "$ref": "#/definitions/timeouts"
+          },
+          "capabilities": {
+            "type": "object",
+            "properties": {
+              "in": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "default": [],
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "text",
+                    "audio",
+                    "image"
+                  ]
+                },
+                "description": "List of input modalities understood by the model."
+              },
+              "out": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "default": [],
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "text",
+                    "audio",
+                    "image"
+                  ]
+                },
+                "description": "List of output modalities generated by the model."
+              },
+              "tools": {
+                "type": "boolean",
+                "default": false,
+                "description": "Whether the model supports function calling."
+              },
+              "reranker": {
+                "type": "boolean",
+                "default": false,
+                "description": "Whether the model supports the /v1/rerank endpoint."
+              },
+              "context": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 0,
+                "description": "Maximum token context length supported by the model."
+              }
+            },
+            "additionalProperties": false,
+            "description": "Defines what the model accepts for input, output and other metadata. Used in v1/models to inform clients what the model can do. An empty capabilities block (all zero values) is treated as not configured."
+          },
+          "surviveClientAbort": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true, an in-flight upstream request keeps running when the client disconnects mid-stream instead of being cancelled. Off by default: for llama.cpp, cancelling on disconnect is what frees the slot. Enable for backends that cannot survive a mid-generation abort."
+          }
         }
-    ]
+      }
+    },
+    "groups": {
+      "$ref": "#/definitions/groupsConfig"
+    },
+    "matrix": {
+      "$ref": "#/definitions/matrixConfig"
+    },
+    "hooks": {
+      "type": "object",
+      "properties": {
+        "on_startup": {
+          "type": "object",
+          "properties": {
+            "preload": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": [],
+              "description": "List of model IDs to load on startup. Model names must match keys in models. When preloading multiple models, define a group to prevent swapping."
+            }
+          },
+          "additionalProperties": false,
+          "description": "Actions to perform on startup. Only supported action is preload."
+        }
+      },
+      "additionalProperties": false,
+      "description": "A dictionary of event triggers and actions. Only supported hook is on_startup."
+    },
+    "logToStdout": {
+      "type": "string",
+      "enum": [
+        "proxy",
+        "upstream",
+        "both",
+        "none"
+      ],
+      "default": "proxy",
+      "description": "Controls what is logged to stdout. 'proxy': logs generated by llama-swap, 'upstream': copy of upstream process stdout logs, 'both': both interleaved together, 'none': no logs written to stdout."
+    },
+    "apiKeys": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "default": [],
+      "description": "Require an API key when making requests to inference endpoints. When empty, authorization will not be checked. Each key is a non-empty string."
+    },
+    "peers": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "proxy",
+          "models"
+        ],
+        "properties": {
+          "proxy": {
+            "type": "string",
+            "format": "uri",
+            "description": "A valid base URL to proxy requests to. Requested path to llama-swap will be appended to the end of the proxy value."
+          },
+          "apiKey": {
+            "type": "string",
+            "default": "",
+            "description": "A string key to be injected into the request. If blank, no key will be added. Key will be injected into headers: Authorization: Bearer <key> and x-api-key: <key>."
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "A list of models served by the peer."
+          },
+          "filters": {
+            "type": "object",
+            "properties": {
+              "stripParams": {
+                "type": "string",
+                "default": "",
+                "pattern": "^[a-zA-Z0-9_, ]*$",
+                "description": "Comma separated list of parameters to remove from the request. Useful for removing parameters that the peer doesn't support."
+              },
+              "setParams": {
+                "type": "object",
+                "additionalProperties": true,
+                "default": {},
+                "description": "Dictionary of parameters to set/override in requests to this peer. Useful for injecting provider-specific settings. Protected params like 'model' cannot be overridden. Values can be strings, numbers, booleans, arrays, or objects."
+              }
+            },
+            "additionalProperties": false,
+            "default": {},
+            "description": "Dictionary of filter settings for peer requests. Supports stripParams and setParams."
+          },
+          "timeouts": {
+            "type": "object",
+            "properties": {
+              "connect": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 30,
+                "description": "TCP connection timeout in seconds."
+              },
+              "keepalive": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 30,
+                "description": "TCP keepalive connection timeout in seconds."
+              },
+              "responseHeader": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 0,
+                "description": "Time to wait for response headers in seconds."
+              },
+              "tlsHandshake": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 10,
+                "description": "TLS handshake timeout in seconds."
+              },
+              "idleConn": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 90,
+                "description": "Idle connection timeout in seconds."
+              }
+            },
+            "additionalProperties": false,
+            "description": "Timeout settings for proxy connections to this peer."
+          }
+        }
+      },
+      "default": {},
+      "description": "A dictionary of remote peers and models they provide. Peers can be another llama-swap or any server that provides the /v1/ generative API endpoints supported by llama-swap."
+    },
+    "upstream": {
+      "type": "object",
+      "description": "Controls behaviour of the /upstream passthrough endpoint. Recommended to only use in special use cases; leaving it as the default will typically be the best experience.",
+      "properties": {
+        "ignorePaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            ".*\\.(js|json|css|png|gif|jpg|jpeg|ico|txt)$"
+          ],
+          "description": "List of RE2 compatible regular expressions. Any request to a path matching any of the regular expressions will be ignored and not trigger a swap. When not specified, defaults to a pattern matching common static-asset suffixes (.js, .json, .css, .png, .gif, .jpg, .jpeg, .ico, .txt)."
+        }
+      },
+      "additionalProperties": false,
+      "default": {}
+    },
+    "routing": {
+      "type": "object",
+      "description": "Canonical routing/scheduling configuration. Alternative to the legacy top-level 'groups'/'matrix' keys; a config must not use both styles.",
+      "properties": {
+        "scheduler": {
+          "type": "object",
+          "description": "Scheduler configuration. Decides the order in which queued requests are serviced.",
+          "properties": {
+            "use": {
+              "type": "string",
+              "enum": [
+                "fifo"
+              ],
+              "default": "fifo",
+              "description": "Scheduler to use. Only 'fifo' is currently supported."
+            },
+            "settings": {
+              "type": "object",
+              "properties": {
+                "fifo": {
+                  "type": "object",
+                  "properties": {
+                    "priority": {
+                      "type": "object",
+                      "description": "Per-model priority. Keys are model IDs, values are integers (default 0). Higher values are serviced first.",
+                      "additionalProperties": {
+                        "type": "integer"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "router": {
+          "type": "object",
+          "description": "Router configuration. Selects between the group and matrix swapping strategies.",
+          "properties": {
+            "use": {
+              "type": "string",
+              "enum": [
+                "group",
+                "matrix"
+              ],
+              "default": "group",
+              "description": "Router to use. 'group' uses static groups, 'matrix' uses the solver-based swap matrix."
+            },
+            "settings": {
+              "type": "object",
+              "properties": {
+                "groups": {
+                  "$ref": "#/definitions/groupsConfig"
+                },
+                "matrix": {
+                  "$ref": "#/definitions/matrixConfig"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "groups"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "matrix"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "matrix"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "groups"
+          ]
+        }
+      }
+    }
+  ]
 }
