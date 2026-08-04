@@ -90,7 +90,7 @@ func TestSleepCommandMarshal(t *testing.T) {
 // quickly and the daemon does not become healthy.
 func TestStartDaemon(t *testing.T) {
 	// Use a start command that exits immediately (true) and a health URL that will not respond.
-	err := startDaemon("true", "http://127.0.0.1:12345/health", "/health", 10*time.Millisecond)
+	err := startDaemon("true", nil, "http://127.0.0.1:12345/health", "/health", 10*time.Millisecond)
 	if err == nil {
 		t.Fatalf("startDaemon expected error but got nil")
 	}
