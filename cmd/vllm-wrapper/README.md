@@ -119,6 +119,93 @@ models:
     ttl: 3600   # unload after 1 hour of inactivity
 ```
 
+## Systemd setup for native vLLM startup
+
+`llama-swap` runs as the system service user `llama`, while vLLM is started as a transient user service with `systemd-run --user`.
+
+Enable the user systemd manager:
+
+```bash
+sudo loginctl enable-linger llama
+
+uid=$(id -u llama)
+sudo systemctl start "user@${uid}.service"
+```
+
+Expose the user D-Bus session to `llama.service`:
+
+```bash
+sudo mkdir -p /etc/systemd/system/llama.service.d
+
+sudo tee /etc/systemd/system/llama.service.d/user-bus.conf >/dev/null <<EOF
+[Unit]
+Wants=user@${uid}.service
+After=user@${uid}.service
+
+[Service]
+Environment=XDG_RUNTIME_DIR=/run/user/${uid}
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${uid}/bus
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl restart llama.service
+```
+
+Use `systemd-run` in the `llama-swap` model command:
+
+```yaml
+cmd: |
+  vllm-wrapper serve
+  --vllm-url http://127.0.0.1:18000
+  --listen :${PORT}
+  --wait-timeout 5m
+  --
+  systemd-run
+  --user
+  --unit=vllm-qwen
+  --collect
+  --property=Restart=no
+  --property=StandardOutput=journal
+  --property=StandardError=journal
+  --setenv=HF_HOME
+  --setenv=VLLM_SERVER_DEV_MODE
+  --
+  ${vllm}
+  serve
+  ${model}
+  --port 18000
+  --enable-sleep-mode
+```
+
+Environment variables required by vLLM must be passed explicitly with `--setenv`.
+
+Check the service status:
+
+```bash
+uid=$(id -u llama)
+
+sudo -u llama env \
+  XDG_RUNTIME_DIR="/run/user/${uid}" \
+  DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" \
+  systemctl --user status vllm-qwen.service
+```
+
+Follow the vLLM logs:
+
+```bash
+uid=$(id -u llama)
+
+sudo -u llama env \
+  XDG_RUNTIME_DIR="/run/user/${uid}" \
+  DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" \
+  journalctl --user \
+    -u vllm-qwen.service \
+    -f \
+    -o cat
+```
+
+
+
 ## How it works
 
 ### serve subcommand
