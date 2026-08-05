@@ -75,7 +75,7 @@ models:
       serve
       ${model_path}
       --host 127.0.0.1
-      --port 8001
+      --port 8000
       --max-model-len ${context_size}
       --enable-sleep-mode
 ```
