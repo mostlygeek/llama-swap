@@ -97,14 +97,19 @@ Configure your model's `cmdStop` to invoke `vllm-wrapper sleep`:
 ```yaml
 models:
   my-vllm-model:
-    cmdStop: vllm-wrapper sleep --vllm-url http://127.0.0.1:8000
-    # Optional flag:
+    cmdStop: |
+      vllm-wrapper sleep
+      --vllm-url http://127.0.0.1:8000
+      --stop-pid ${PID}
+    # Optional flags:
     #   --sleep-level: sleep level to use (default: 1)
+    #   --stop-pid: PID of the serve proxy to terminate after a successful sleep request
 ```
 
 When llama-swap stops the model, it will:
 1. Send a sleep request to the vLLM daemon (POST to `/sleep` with JSON `{"level": 1}`).
-2. Exit with status 0, leaving the vLLM daemon running but asleep.
+2. If `--stop-pid` is provided, send SIGTERM to the specified `vllm-wrapper serve` process after the sleep request succeeds.
+3. Exit with status 0, leaving the vLLM daemon running but asleep while allowing llama-swap to complete the unload operation.
 
 ## Example Configuration
 
@@ -114,7 +119,7 @@ Here is a complete example using vLLM with sleep mode, demonstrating cold start 
 models:
   qwen-7b-chat:
     cmd: vllm-wrapper serve --vllm-url http://127.0.0.1:8000 --listen :${PORT} --start-cmd "docker run --rm -p 8000:8000 ... --enable-sleep-mode"
-    cmdStop: vllm-wrapper sleep --vllm-url http://127.0.0.1:8000
+    cmdStop: vllm-wrapper sleep --vllm-url http://127.0.0.1:8000 --stop-pid ${PID}
     # You may also want to set a TTL to automatically unload after a period of inactivity:
     ttl: 3600   # unload after 1 hour of inactivity
 ```
@@ -220,7 +225,8 @@ sudo -u llama env \
 ### sleep subcommand
 
 1. Sends a POST request to `${vllm-url}/sleep` with a JSON body `{"level": <level>}` where `<level>` is the sleep level (default 1).
-2. Upon receiving a successful response (HTTP 200), exits with status 0.
+2. If `--stop-pid` is provided, sends SIGTERM to the specified `vllm-wrapper serve` process after the sleep request succeeds.
+3. Exits with status 0, leaving the vLLM daemon running in sleep mode.
 
 ## Notes
 
