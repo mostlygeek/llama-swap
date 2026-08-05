@@ -325,6 +325,11 @@ func validateProfiles(config Config) error {
 			}
 		}
 	}
+	if config.DefaultProfile != "" {
+		if _, found := config.Profiles[config.DefaultProfile]; !found {
+			return fmt.Errorf("defaultProfile references unknown profile %q", config.DefaultProfile)
+		}
+	}
 	return nil
 }
 

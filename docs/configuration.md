@@ -82,6 +82,7 @@ llama-swap supports many more features to customize how you want to manage your 
 | `aliases` | serve a model with different names             |
 | `filters` | modify requests before sending to the upstream |
 | `profiles` | switch model ID replacements at runtime       |
+| `defaultProfile` | activate a profile on startup            |
 | `...`     | And many more tweaks                           |
 
 ## Full Configuration Example
@@ -254,7 +255,8 @@ apiKeys:
 
 # profiles: named model ID replacements switched at runtime through the UI or API
 # - optional, default: empty dictionary
-# - one profile or none is active; startup and configuration reload select none
+# - one profile or none is active; startup and configuration reload select the
+#   defaultProfile below, or none when it is unset
 # - pins are applied before aliases, filters, and routing
 # - targets may be a local model, fully qualified peer model, alias, setParamsByID alias, or selector
 # - an empty string or YAML null (~) disables the pin with a 404; it is not
@@ -266,6 +268,12 @@ profiles:
       "llm-code": "gpt-oss-120b"
       "llm-plan": "qwen-unlisted"
       "image-gen": ~
+
+# defaultProfile: profile to activate on startup and after a configuration reload
+# - optional, default: empty string, which starts with no profile active
+# - must name a key under profiles or the configuration fails to load
+# - the runtime selection is not persisted; restarts return to this profile
+defaultProfile: "coding"
 
 # selectors: virtual model IDs resolved to concrete targets per request
 # - optional, default: empty dictionary

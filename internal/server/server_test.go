@@ -174,6 +174,30 @@ func TestServer_New_MatrixConfig(t *testing.T) {
 	}
 }
 
+func TestServer_New_DefaultProfile(t *testing.T) {
+	discard := logmon.NewWriter(io.Discard)
+	cfg := config.Config{HealthCheckTimeout: 15}
+	cfg.Profiles = map[string]config.ProfileConfig{
+		"coding": {Pins: map[string]string{"llm-code": "model"}},
+	}
+	cfg.DefaultProfile = "coding"
+	st, err := store.New("")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer st.Close()
+	s, err := New(cfg, discard, discard, discard, nil, st, BuildInfo{}, nil)
+	if err != nil {
+		t.Fatalf("New (default profile): %v", err)
+	}
+	if got := s.ActiveProfile(); got != "coding" {
+		t.Fatalf("ActiveProfile()=%q want %q", got, "coding")
+	}
+	if err := s.Shutdown(time.Second); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+}
+
 func TestServer_RouteToLocalModel(t *testing.T) {
 	s := newTestServer(
 		newStubRouter([]string{"local-model"}, "local response"),
