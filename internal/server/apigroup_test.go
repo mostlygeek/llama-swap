@@ -12,6 +12,7 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/cache"
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/hw"
 	"github.com/mostlygeek/llama-swap/internal/shared"
 	"github.com/mostlygeek/llama-swap/internal/store"
 )
@@ -289,6 +290,47 @@ func TestServer_APIVersion(t *testing.T) {
 	}
 	if got["version"] != "1.2.3" || got["commit"] != "deadbeef" || got["build_date"] != "2026-05-19" {
 		t.Errorf("body = %v", got)
+	}
+}
+
+func TestServer_APIHardware(t *testing.T) {
+	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
+	s.hardware = &hw.HardwareSnapshot{
+		SchemaVersion: hw.SchemaVersion,
+		CapturedAt:    time.Date(2026, time.August, 3, 12, 0, 0, 0, time.UTC),
+		Capture: hw.HardwareCapture{
+			Scope:    hw.CaptureScopeInferenceHost,
+			Method:   hw.CaptureMethodDetected,
+			Detector: &hw.DetectorInfo{Name: "llama-swap", Version: "246"},
+		},
+		Architecture:    hw.Architecture{Name: "x86_64"},
+		OperatingSystem: hw.OperatingSystem{Family: "linux"},
+		Environment:     hw.ExecutionEnvironment{Kind: "unknown"},
+		Memory:          hw.SystemMemory{CapacityBytes: 1024},
+		Accelerators:    []hw.Accelerator{},
+	}
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/hardware", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d", w.Code)
+	}
+	var got hw.HardwareSnapshot
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.SchemaVersion != 1 || got.Memory.CapacityBytes != 1024 || got.Accelerators == nil {
+		t.Errorf("body = %+v", got)
+	}
+}
+
+func TestServer_APIHardwareUnavailable(t *testing.T) {
+	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/hardware", nil))
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusServiceUnavailable)
 	}
 }
 

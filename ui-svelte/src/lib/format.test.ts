@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { formatDuration, formatSpeed, formatFileSize, formatRelativeTime } from "./format";
+import { formatDuration, formatSpeed, formatFileSize, formatCapacity, formatRelativeTime } from "./format";
 
 describe("formatDuration", () => {
   it("defaults to seconds with 2 decimals", () => {
@@ -41,6 +41,17 @@ describe("formatFileSize", () => {
 
   it("formats megabytes", () => {
     expect(formatFileSize(5 * 1024 * 1024)).toBe("5.0 MB");
+  });
+});
+
+describe("formatCapacity", () => {
+  it("formats binary hardware capacities", () => {
+    expect(formatCapacity(24 * 1024 ** 3)).toBe("24.0 GiB");
+    expect(formatCapacity(1.5 * 1024 ** 4)).toBe("1.50 TiB");
+  });
+
+  it("handles unavailable capacities", () => {
+    expect(formatCapacity(0)).toBe("Not detected");
   });
 });
 
