@@ -55,6 +55,7 @@ func serveCmd(args []string) {
 		startCmd    string
 		healthPath  string
 		waitTimeout time.Duration
+		journalUnit string
 	)
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	fs.StringVar(&vllmURL, "vllm-url", "", "Base URL of vLLM server (e.g., http://127.0.0.1:8000)")
@@ -63,6 +64,7 @@ func serveCmd(args []string) {
 	fs.StringVar(&startCmd, "start-cmd", "", "Command to start the vLLM daemon if not running (e.g., 'docker run ...')")
 	fs.StringVar(&healthPath, "health-path", "/health", "Health check path (default /health)")
 	fs.DurationVar(&waitTimeout, "wait-timeout", 120*time.Second, "Timeout waiting for daemon to become healthy")
+	fs.StringVar(&journalUnit, "journal-unit", "", "User systemd unit whose logs should be forwarded to stdout")
 	fs.Parse(args)
 	startArgs := fs.Args()
 
@@ -78,6 +80,14 @@ func serveCmd(args []string) {
 
 	// Ensure vLLM URL does not have trailing slash.
 	vllmURL = strings.TrimRight(vllmURL, "/")
+
+	journalCtx, stopJournal := context.WithCancel(context.Background())
+	defer stopJournal()
+	if journalUnit != "" {
+		if err := startJournalForwarder(journalCtx, journalUnit); err != nil {
+			log.Printf("Warning: failed to forward logs from %s: %v", journalUnit, err)
+		}
+	}
 
 	// Step 1: Ensure the daemon is running and awake.
 	// First, check if we can reach the daemon (liveness).
@@ -266,6 +276,34 @@ func checkHealthy(vllmURL string, healthPath string) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
+	return nil
+}
+
+// startJournalForwarder forwards new log entries from a user systemd unit to stdout.
+func startJournalForwarder(ctx context.Context, unit string) error {
+	cmd := exec.CommandContext(
+		ctx,
+		"journalctl",
+		"--user-unit="+unit,
+		"--follow",
+		"--lines=0",
+		"--output=cat",
+		"--no-pager",
+	)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start journalctl for %s: %w", unit, err)
+	}
+
+	go func() {
+		err := cmd.Wait()
+		if ctx.Err() == nil && err != nil {
+			log.Printf("Journal forwarding for %s stopped: %v", unit, err)
+		}
+	}()
+
 	return nil
 }
 
