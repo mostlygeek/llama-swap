@@ -159,6 +159,8 @@ cmd: |
   --vllm-url http://127.0.0.1:18000
   --listen :${PORT}
   --wait-timeout 5m
+  --journal-unit: vllm-qwen.service
+  # optional systemd user unit whose new journal entries are forwarded to the wrapper's stdout, making vLLM logs available through llama-swap's upstream log stream.
   --
   systemd-run
   --user
