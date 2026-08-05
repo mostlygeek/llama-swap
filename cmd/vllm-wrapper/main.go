@@ -186,10 +186,12 @@ func sleepCmd(args []string) {
 	var (
 		vllmURL    string
 		sleepLevel int
+		stopPID    int
 	)
 	fs := flag.NewFlagSet("sleep", flag.ExitOnError)
 	fs.StringVar(&vllmURL, "vllm-url", "", "Base URL of vLLM server (e.g., http://127.0.0.1:8000)")
 	fs.IntVar(&sleepLevel, "sleep-level", 1, "Sleep level to use (default 1)")
+	fs.IntVar(&stopPID, "stop-pid", 0, "PID of the serve proxy to terminate after vLLM successfully enters sleep mode")
 	fs.Parse(args)
 
 	if vllmURL == "" {
@@ -216,6 +218,13 @@ func sleepCmd(args []string) {
 	}
 
 	log.Printf("Successfully put vLLM to sleep (level %d)", sleepLevel)
+
+	if stopPID > 0 {
+		if err := syscall.Kill(stopPID, syscall.SIGTERM); err != nil {
+			log.Fatalf("Failed to stop serve proxy process %d: %v", stopPID, err)
+		}
+		log.Printf("Sent SIGTERM to serve proxy process %d", stopPID)
+	}
 }
 
 // wakeUpVLLM sends a POST to /wake_up to wake the vLLM daemon.
