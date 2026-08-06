@@ -10,8 +10,10 @@
   import type { VideoJob } from "../../lib/types";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
-  import { Download, X, Video as VideoIcon } from "@lucide/svelte";
+  import * as Collapsible from "$lib/components/ui/collapsible/index.js";
+  import { Download, X, Video as VideoIcon, ChevronRight } from "@lucide/svelte";
   import { formatFileSize } from "../../lib/format";
 
   const iface = createPlaygroundInterface("playground-video-model", playgroundStores.videoGenerating);
@@ -22,9 +24,12 @@
   const secondsStore = persistentStore<number>("playground-video-seconds", 5);
   const fpsStore = persistentStore<number>("playground-video-fps", 24);
   const modeStore = persistentStore<"async" | "sync">("playground-video-mode", "async");
+  const negativePromptStore = persistentStore<string>("playground-video-negative-prompt", "");
+  const advancedStore = persistentStore<string>("playground-video-advanced", "");
 
   let prompt = $state("");
   let isGenerating = $derived($busyStore);
+  let advancedOpen = $state(false);
   let referenceFile = $state<File | null>(null);
   let isDragging = $state(false);
   let fileInput = $state<HTMLInputElement | null>(null);
@@ -82,13 +87,42 @@
     if (fileInput) fileInput.value = "";
   }
 
+  // Parses the Advanced JSON box into a plain object, or returns an error
+  // message. An empty box is valid (no advanced overrides).
+  function parseAdvanced(): { value?: Record<string, unknown>; error?: string } {
+    const raw = $advancedStore.trim();
+    if (!raw) return { value: undefined };
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return { error: "Advanced parameters must be valid JSON." };
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return { error: "Advanced parameters must be a JSON object, e.g. {\"width\": 832}." };
+    }
+    return { value: parsed as Record<string, unknown> };
+  }
+
   async function generate() {
     const trimmedPrompt = prompt.trim();
     if (!trimmedPrompt || !$selectedModelStore || isGenerating) return;
 
+    const { value: advanced, error: advancedError } = parseAdvanced();
+    if (advancedError) {
+      $error = advancedError;
+      return;
+    }
+
     jobStatus = null;
     await iface.run(async (signal) => {
-      const params = { size: $sizeStore, seconds: $secondsStore, fps: $fpsStore };
+      const params = {
+        size: $sizeStore,
+        seconds: $secondsStore,
+        fps: $fpsStore,
+        negativePrompt: $negativePromptStore.trim() || undefined,
+        advanced,
+      };
 
       const videoBlob =
         $modeStore === "sync"
@@ -279,6 +313,44 @@
         <Button variant="outline" size="sm" onclick={() => fileInput?.click()} disabled={isGenerating}>Browse</Button>
       {/if}
     </div>
+
+    <!-- Negative prompt -->
+    <label class="shrink-0 mb-4 flex flex-col gap-1 text-sm">
+      <span class="text-xs text-muted-foreground">Negative prompt (optional)</span>
+      <Input
+        type="text"
+        placeholder="What to avoid, e.g. low quality, blurry, static"
+        bind:value={$negativePromptStore}
+        disabled={isGenerating}
+      />
+    </label>
+
+    <!-- Advanced parameters: raw, backend-specific fields (e.g. vLLM-omni's
+         width/height/num_frames/seed/extra_params) that override the basic
+         size/seconds/fps/negative-prompt fields above when present. Keeps
+         the base controls universal across OpenAI-video-compatible
+         backends while still supporting a specific backend's exact fields. -->
+    <Collapsible.Root open={advancedOpen} onOpenChange={(v) => (advancedOpen = v)} class="shrink-0 mb-4">
+      <Collapsible.Trigger class="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+        <ChevronRight class="size-4 transition-transform {advancedOpen ? 'rotate-90' : ''}" />
+        Advanced parameters
+      </Collapsible.Trigger>
+      <Collapsible.Content>
+        <div class="mt-2 flex flex-col gap-1">
+          <Textarea
+            bind:value={$advancedStore}
+            placeholder={`{"width": 832, "height": 480, "num_frames": 33, "seed": 42, "extra_params": {"sample_solver": "euler"}}`}
+            rows={4}
+            disabled={isGenerating}
+            class="font-mono text-xs"
+          />
+          <span class="text-xs text-muted-foreground">
+            Backend-specific fields (e.g. vLLM-omni's width/height/num_frames/seed/extra_params) as a JSON object — sent
+            as-is, overrides the fields above.
+          </span>
+        </div>
+      </Collapsible.Content>
+    </Collapsible.Root>
 
     <!-- Prompt input area -->
     <div class="shrink-0 flex flex-col md:flex-row gap-2">

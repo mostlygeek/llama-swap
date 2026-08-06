@@ -56,6 +56,42 @@ describe("createVideoJob", () => {
     expect(body.get("input_reference")).toBe(file);
   });
 
+  it("sends negativePrompt and flattens advanced fields, dropping an advanced model override", async () => {
+    const job: VideoJob = { id: "video-1", status: "queued" };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(job));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createVideoJob("my-model", "a bear playing with yarn", {
+      negativePrompt: "low quality, blurry, static",
+      advanced: {
+        width: 832,
+        height: 480,
+        seed: 42,
+        extra_params: { sample_solver: "euler" },
+        model: "should-not-override",
+      },
+    });
+
+    const body = fetchMock.mock.calls[0][1].body as FormData;
+    expect(body.get("model")).toBe("my-model");
+    expect(body.get("negative_prompt")).toBe("low quality, blurry, static");
+    expect(body.get("width")).toBe("832");
+    expect(body.get("height")).toBe("480");
+    expect(body.get("seed")).toBe("42");
+    expect(body.get("extra_params")).toBe('{"sample_solver":"euler"}');
+  });
+
+  it("lets advanced fields override same-named basic params", async () => {
+    const job: VideoJob = { id: "video-1", status: "queued" };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(job));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createVideoJob("my-model", "prompt", { fps: 24, advanced: { fps: 30 } });
+
+    const body = fetchMock.mock.calls[0][1].body as FormData;
+    expect(body.get("fps")).toBe("30");
+  });
+
   it("throws with the status and body on a non-ok response", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 400, text: async () => "bad request" }));
 

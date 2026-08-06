@@ -368,6 +368,11 @@ export interface VideoGenerationParams {
   size?: string; // "WIDTHxHEIGHT"
   seconds?: number;
   fps?: number;
+  negativePrompt?: string;
+  // Backend-specific extension fields (e.g. vLLM-omni's width/height/
+  // num_frames/seed/extra_params) parsed from the Playground's Advanced
+  // JSON box. Values here override same-named basic params.
+  advanced?: Record<string, unknown>;
 }
 
 // Only "queued" and "completed" are documented; other values pass through

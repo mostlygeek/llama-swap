@@ -17,7 +17,23 @@ function buildVideoFormData(
   if (params.size) formData.append("size", params.size);
   if (params.seconds !== undefined) formData.append("seconds", String(params.seconds));
   if (params.fps !== undefined) formData.append("fps", String(params.fps));
+  if (params.negativePrompt) formData.append("negative_prompt", params.negativePrompt);
   if (referenceFile) formData.append("input_reference", referenceFile);
+
+  // Backend-specific extension fields (e.g. vLLM-omni's width/height/
+  // num_frames/seed/extra_params - see the "vllm-omni extension fields"
+  // table on https://docs.vllm.ai/projects/vllm-omni/en/latest/serving/videos_api/).
+  // Scalars are sent as plain strings; objects/arrays (like extra_params)
+  // are JSON-encoded, matching what the docs' curl examples send. Applied
+  // last so it intentionally overrides the basic fields above, and "model"
+  // is never overridable since it drives llama-swap's routing.
+  if (params.advanced) {
+    for (const [key, value] of Object.entries(params.advanced)) {
+      if (key === "model" || value === undefined) continue;
+      formData.set(key, typeof value === "object" && value !== null ? JSON.stringify(value) : String(value));
+    }
+  }
+
   return formData;
 }
 
