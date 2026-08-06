@@ -473,6 +473,29 @@ models:
     # - processes have 5 seconds to shutdown until forceful termination is attempted
     cmdStop: docker stop ${MODEL_ID}
 
+  # Video generation example (vLLM-omni):
+  # any backend that implements vLLM-omni's OpenAI-compatible video API
+  # (POST /v1/videos, /v1/videos/sync) works with no special configuration -
+  # llama-swap only reads the "model" field from the request and passes
+  # every other field straight through, so backend-specific fields (e.g.
+  # width/height/num_frames/seed/extra_params) are handled automatically.
+  # See: https://docs.vllm.ai/projects/vllm-omni/en/latest/serving/videos_api/
+  "wan2.2-ti2v-5b":
+    description: "Wan2.2-TI2V-5B (Wan-AI/Wan2.2-TI2V-5B-Diffusers) - text/image-to-video via vLLM-omni"
+    capabilities:
+      in: [text, image]
+      out: [video]
+    proxy: "http://127.0.0.1:${PORT}"
+    checkEndpoint: /health
+    cmd: |
+      docker run --name ${MODEL_ID} --rm --gpus all --ipc=host
+      -p 127.0.0.1:${PORT}:8000 -v /models:/models:ro
+      vllm/vllm-omni:latest
+      vllm serve /models/Wan-AI/Wan2.2-TI2V-5B-Diffusers
+      --omni --host 0.0.0.0 --port 8000 --trust-remote-code
+      --served-model-name wan2.2-ti2v-5b
+    cmdStop: docker stop ${MODEL_ID}
+
 # hooks: a dictionary of event triggers and actions
 # - optional, default: empty dictionary
 # - the only supported hook is on_startup
