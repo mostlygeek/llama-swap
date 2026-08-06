@@ -11,6 +11,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -147,6 +148,11 @@ func ReplaceRequestModel(r *http.Request, model, replacement string) (*http.Requ
 			return r, nil
 		}
 
+		// Capture the client's escaping of everything after the model name
+		// before URL.Path is rewritten; EscapedPath falls back to re-encoding
+		// Path once RawPath no longer decodes to it.
+		escapedRemaining := EscapedPathSuffix(r.URL.EscapedPath(), strings.Count(model, "/")+2)
+
 		remainingPath := strings.TrimPrefix(upstreamPath, model)
 		rewrittenPath := replacement + remainingPath
 		if replacement == "" {
@@ -155,6 +161,12 @@ func ReplaceRequestModel(r *http.Request, model, replacement string) (*http.Requ
 		r.SetPathValue("upstreamPath", rewrittenPath)
 		r.URL.Path = "/upstream/" + rewrittenPath
 		r.URL.RawPath = ""
+		if replacement != "" && escapedRemaining != "" {
+			// Escape the substituted model name the way Go would, then splice
+			// the untouched remainder back on.
+			prefix := (&url.URL{Path: "/upstream/" + replacement}).EscapedPath()
+			r.URL.RawPath = prefix + escapedRemaining
+		}
 		return invalidateRequestContext(r), nil
 	}
 
@@ -326,6 +338,26 @@ func FindModelInPath(cfg config.Config, path string) (searchName, realName, rema
 	}
 
 	return
+}
+
+// EscapedPathSuffix drops the first n segments from an escaped URL path,
+// leaving the remainder's percent-encoding untouched. Both ServeMux path
+// values and url.URL.Path decode %2F into a literal "/", which splits a single
+// segment in two; rebuilding a path from either loses the distinction. Callers
+// use the result as url.URL.RawPath so the original encoding survives to the
+// upstream. Returns "" when the path has fewer than n segments, in which case
+// callers should leave RawPath empty and fall back to encoding Path.
+func EscapedPathSuffix(escapedPath string, n int) string {
+	rest := escapedPath
+	for range n {
+		rest = strings.TrimPrefix(rest, "/")
+		idx := strings.Index(rest, "/")
+		if idx < 0 {
+			return ""
+		}
+		rest = rest[idx:]
+	}
+	return rest
 }
 
 func SetContext(ctx context.Context, data ReqContextData) context.Context {

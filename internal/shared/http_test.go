@@ -782,6 +782,90 @@ func TestFindModelInPath_PeerNamespaces(t *testing.T) {
 	}
 }
 
+func TestEscapedPathSuffix(t *testing.T) {
+	tests := []struct {
+		path string
+		n    int
+		want string
+	}{
+		{"/upstream/m1/api/userdata/workflows%2Fsdxl.json", 2, "/api/userdata/workflows%2Fsdxl.json"},
+		{"/upstream/author/m1/api/x%2Fy", 3, "/api/x%2Fy"},
+		{"/upstream/m1/v1/chat/completions", 2, "/v1/chat/completions"},
+		{"/upstream/m1/", 2, "/"},
+		// No remainder at all: callers keep RawPath empty and fall back to
+		// encoding URL.Path.
+		{"/upstream/m1", 2, ""},
+		{"/upstream", 2, ""},
+		{"", 2, ""},
+		{"/upstream/m1/api", 0, "/upstream/m1/api"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			if got := EscapedPathSuffix(tt.path, tt.n); got != tt.want {
+				t.Errorf("EscapedPathSuffix(%q, %d) = %q, want %q", tt.path, tt.n, got, tt.want)
+			}
+		})
+	}
+}
+
+// A pinned profile rewrites the model inside an /upstream path; the escaping of
+// everything after the model name must come through untouched.
+func TestReplaceRequestModel_UpstreamPreservesEncodedPath(t *testing.T) {
+	tests := []struct {
+		name        string
+		target      string
+		model       string
+		replacement string
+		wantPath    string
+		wantEscaped string
+	}{
+		{
+			name:        "encoded slash survives pin",
+			target:      "/upstream/public/api/userdata/workflows%2Fsdxl.json",
+			model:       "public",
+			replacement: "real",
+			wantPath:    "/upstream/real/api/userdata/workflows/sdxl.json",
+			wantEscaped: "/upstream/real/api/userdata/workflows%2Fsdxl.json",
+		},
+		{
+			name:        "multi-segment model name",
+			target:      "/upstream/author/public/api/x%2Fy",
+			model:       "author/public",
+			replacement: "real",
+			wantPath:    "/upstream/real/api/x/y",
+			wantEscaped: "/upstream/real/api/x%2Fy",
+		},
+		{
+			name:        "unescaped path unchanged",
+			target:      "/upstream/public/v1/chat/completions",
+			model:       "public",
+			replacement: "real",
+			wantPath:    "/upstream/real/v1/chat/completions",
+			wantEscaped: "/upstream/real/v1/chat/completions",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, tt.target, nil)
+			// Mirror what ServeMux does: path values arrive already decoded.
+			req.SetPathValue("upstreamPath", strings.TrimPrefix(req.URL.Path, "/upstream/"))
+
+			req, err := ReplaceRequestModel(req, tt.model, tt.replacement)
+			if err != nil {
+				t.Fatalf("ReplaceRequestModel: %v", err)
+			}
+			if req.URL.Path != tt.wantPath {
+				t.Errorf("URL.Path = %q, want %q", req.URL.Path, tt.wantPath)
+			}
+			if got := req.URL.EscapedPath(); got != tt.wantEscaped {
+				t.Errorf("EscapedPath() = %q, want %q", got, tt.wantEscaped)
+			}
+		})
+	}
+}
+
 func TestFetchContext_UpstreamPath_DoesNotReadBody(t *testing.T) {
 	cfg := config.Config{Models: map[string]config.ModelConfig{"m1": {}}}
 	body := `{"model":"should-not-matter"}`

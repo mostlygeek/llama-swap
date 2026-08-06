@@ -228,6 +228,78 @@ func TestServer_HandleUpstream(t *testing.T) {
 	})
 }
 
+// A percent-encoded separator inside a single path segment (ComfyUI addresses
+// user files as /userdata/workflows%2Fname.json) must survive the
+// /upstream/<model> prefix strip. ServeMux path values and url.URL.Path both
+// decode %2F, which would hand the upstream two segments instead of one.
+func TestServer_HandleUpstream_PreservesEncodedPath(t *testing.T) {
+	tests := []struct {
+		name   string
+		models []string
+		target string
+		want   string
+	}{
+		{
+			name:   "encoded slash in segment",
+			models: []string{"m1"},
+			target: "/upstream/m1/api/userdata/workflows%2Fsdxl_simple_example.json?overwrite=false&full_info=true",
+			want:   "/api/userdata/workflows%2Fsdxl_simple_example.json",
+		},
+		{
+			name:   "encoded slash under multi-segment model name",
+			models: []string{"author/m1"},
+			target: "/upstream/author/m1/api/userdata/workflows%2Fsdxl.json",
+			want:   "/api/userdata/workflows%2Fsdxl.json",
+		},
+		{
+			name:   "other escapes preserved",
+			models: []string{"m1"},
+			target: "/upstream/m1/api/userdata/my%20file.json",
+			want:   "/api/userdata/my%20file.json",
+		},
+		{
+			name:   "unescaped path unchanged",
+			models: []string{"m1"},
+			target: "/upstream/m1/v1/chat/completions",
+			want:   "/v1/chat/completions",
+		},
+		{
+			name:   "bare model with trailing slash",
+			models: []string{"m1"},
+			target: "/upstream/m1/",
+			want:   "/",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			local := newStubRouter(tc.models, "")
+			var got string
+			local.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
+				// EscapedPath is what httputil.ReverseProxy puts on the wire.
+				got = r.URL.EscapedPath()
+				w.WriteHeader(http.StatusOK)
+			}
+			s := newTestServer(local, newStubRouter(nil, ""))
+			models := make(map[string]config.ModelConfig, len(tc.models))
+			for _, id := range tc.models {
+				models[id] = config.ModelConfig{}
+			}
+			s.cfg = config.Config{Models: models}
+			s.routes()
+
+			w := httptest.NewRecorder()
+			s.ServeHTTP(w, httptest.NewRequest(http.MethodPost, tc.target, nil))
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200 (body=%q)", w.Code, w.Body.String())
+			}
+			if got != tc.want {
+				t.Errorf("upstream path = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func upstreamMetricsServer(t *testing.T, response string) *Server {
 	t.Helper()
 	cfg := config.Config{Models: map[string]config.ModelConfig{"m1": {}}}

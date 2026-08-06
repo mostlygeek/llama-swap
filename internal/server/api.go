@@ -425,6 +425,9 @@ func handleUpstreamRedirect(w http.ResponseWriter, r *http.Request) {
 // the model's process, bypassing model dispatch by body/query inspection.
 func (s *Server) handleUpstream(w http.ResponseWriter, r *http.Request) {
 	upstreamPath := r.PathValue("upstreamPath")
+	// Read the escaped path before URL.Path is rewritten below: EscapedPath
+	// only returns RawPath while it still decodes to Path.
+	escapedPath := r.URL.EscapedPath()
 
 	searchName, modelID, remainingPath, found := shared.FindModelInPath(s.cfg, "/"+upstreamPath)
 	if !found {
@@ -447,8 +450,12 @@ func (s *Server) handleUpstream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Strip the /upstream/<model> prefix before forwarding.
+	// Strip the /upstream/<model> prefix before forwarding. RawPath carries the
+	// client's original escaping through to the upstream: a %2F inside a single
+	// segment (e.g. ComfyUI's /userdata/{file}) has already been decoded into a
+	// path separator by both PathValue and URL.Path.
 	r.URL.Path = remainingPath
+	r.URL.RawPath = shared.EscapedPathSuffix(escapedPath, strings.Count(searchName, "/")+2)
 	// Pin the resolved model so the router skips body/query extraction.
 	*r = *r.WithContext(shared.SetContext(r.Context(), shared.ReqContextData{Model: searchName, ModelID: modelID, Metadata: make(map[string]string)}))
 
