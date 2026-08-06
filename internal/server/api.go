@@ -447,8 +447,11 @@ func (s *Server) handleUpstream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Strip the /upstream/<model> prefix before forwarding.
+	// Strip the /upstream/<model> prefix before forwarding. URL.Path is decoded,
+	// so retain the matching escaped suffix in RawPath for the reverse proxy.
+	escapedRemaining := shared.EscapedPathSuffix(r.URL.EscapedPath(), "/upstream/"+searchName)
 	r.URL.Path = remainingPath
+	r.URL.RawPath = escapedRemaining
 	// Pin the resolved model so the router skips body/query extraction.
 	*r = *r.WithContext(shared.SetContext(r.Context(), shared.ReqContextData{Model: searchName, ModelID: modelID, Metadata: make(map[string]string)}))
 

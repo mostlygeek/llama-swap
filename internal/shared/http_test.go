@@ -252,6 +252,22 @@ func TestReplaceRequestModel(t *testing.T) {
 	})
 }
 
+func TestProxy_ReplaceRequestModelUpstreamPreservesEscapedPath(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/upstream/author%2Fmodel/api/x%2Fy", nil)
+	r.SetPathValue("upstreamPath", strings.TrimPrefix(r.URL.Path, "/upstream/"))
+
+	updated, err := ReplaceRequestModel(r, "author/model", "target/model")
+	if err != nil {
+		t.Fatalf("ReplaceRequestModel: %v", err)
+	}
+	if got, want := updated.URL.Path, "/upstream/target/model/api/x/y"; got != want {
+		t.Errorf("URL.Path = %q, want %q", got, want)
+	}
+	if got, want := updated.URL.EscapedPath(), "/upstream/target/model/api/x%2Fy"; got != want {
+		t.Errorf("EscapedPath() = %q, want %q", got, want)
+	}
+}
+
 func TestExtractContext_GET(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -777,6 +793,43 @@ func TestFindModelInPath_PeerNamespaces(t *testing.T) {
 					tt.path, name, modelID, rest, found,
 					tt.wantName, tt.wantModel, tt.wantRest, tt.wantFound,
 				)
+			}
+		})
+	}
+}
+
+func TestProxy_EscapedPathSuffix(t *testing.T) {
+	tests := []struct {
+		escapedPath   string
+		decodedPrefix string
+		want          string
+	}{
+		{
+			escapedPath:   "/upstream/m1/api/userdata/workflows%2Fexample.json",
+			decodedPrefix: "/upstream/m1",
+			want:          "/api/userdata/workflows%2Fexample.json",
+		},
+		{
+			escapedPath:   "/upstream/author/model/api/x%2Fy",
+			decodedPrefix: "/upstream/author/model",
+			want:          "/api/x%2Fy",
+		},
+		{
+			escapedPath:   "/upstream/author%2Fmodel/api/x%2Fy",
+			decodedPrefix: "/upstream/author/model",
+			want:          "/api/x%2Fy",
+		},
+		{
+			escapedPath:   "/upstream/m1",
+			decodedPrefix: "/upstream/m1",
+			want:          "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.escapedPath, func(t *testing.T) {
+			if got := EscapedPathSuffix(tt.escapedPath, tt.decodedPrefix); got != tt.want {
+				t.Errorf("EscapedPathSuffix(%q, %q) = %q, want %q", tt.escapedPath, tt.decodedPrefix, got, tt.want)
 			}
 		})
 	}
