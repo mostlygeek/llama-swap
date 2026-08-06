@@ -11,7 +11,7 @@
 #   WHISPER_REF=v1.0.0 ./build-image.sh --vulkan         # Pin whisper.cpp to a tag
 #   SD_REF=master ./build-image.sh --cuda                # Pin stable-diffusion.cpp to a branch
 #   LS_VERSION=170 ./build-image.sh --cuda               # Override llama-swap version
-#   IK_LLAMA_REF=main ./build-image.sh --cuda            # Pin ik_llama.cpp to main branch (CUDA only)
+#   IK_LLAMA_REF=main ./build-image.sh --cuda            # Pin ik_llama.cpp to main branch
 #
 
 set -euo pipefail
@@ -45,7 +45,7 @@ for arg in "$@"; do
             echo "  LLAMA_REF            Pin llama.cpp to a commit, tag, or branch"
             echo "  WHISPER_REF          Pin whisper.cpp to a commit, tag, or branch"
             echo "  SD_REF               Pin stable-diffusion.cpp to a commit, tag, or branch"
-            echo "  IK_LLAMA_REF         Pin ik_llama.cpp to a commit, tag, or branch (CUDA only)"
+            echo "  IK_LLAMA_REF         Pin ik_llama.cpp to a commit, tag, or branch"
             echo "  LS_VERSION           Override llama-swap version (e.g., '170' or 'latest')"
             echo "  WHISPER_FFMPEG       Enable whisper.cpp FFmpeg support (default: yes)"
             exit 0
@@ -157,22 +157,17 @@ else
     echo "stable-diffusion.cpp: latest HEAD: ${SD_HASH}"
 fi
 
-# Resolve ik_llama.cpp ref (CUDA only)
-if [[ "$BACKEND" == "cuda" ]]; then
-    if [[ -n "${IK_LLAMA_REF:-}" ]]; then
-        IK_LLAMA_HASH=$(resolve_ref "${IK_LLAMA_REPO}" "${IK_LLAMA_REF}") || exit 1
-        echo "ik_llama.cpp: ${IK_LLAMA_REF} -> ${IK_LLAMA_HASH}"
-    else
-        IK_LLAMA_HASH=$(get_latest_hash "${IK_LLAMA_REPO}")
-        if [[ -z "${IK_LLAMA_HASH}" ]]; then
-            echo "ERROR: Could not determine latest commit for ik_llama.cpp" >&2
-            exit 1
-        fi
-        echo "ik_llama.cpp: latest HEAD: ${IK_LLAMA_HASH}"
-    fi
+# Resolve ik_llama.cpp ref (available for all backends; CUDA-only at runtime)
+if [[ -n "${IK_LLAMA_REF:-}" ]]; then
+    IK_LLAMA_HASH=$(resolve_ref "${IK_LLAMA_REPO}" "${IK_LLAMA_REF}") || exit 1
+    echo "ik_llama.cpp: ${IK_LLAMA_REF} -> ${IK_LLAMA_HASH}"
 else
-    IK_LLAMA_HASH="n/a"
-    echo "ik_llama.cpp: skipped (vulkan build)"
+    IK_LLAMA_HASH=$(get_latest_hash "${IK_LLAMA_REPO}")
+    if [[ -z "${IK_LLAMA_HASH}" ]]; then
+        echo "ERROR: Could not determine latest commit for ik_llama.cpp" >&2
+        exit 1
+    fi
+    echo "ik_llama.cpp: latest HEAD: ${IK_LLAMA_HASH}"
 fi
 
 # Resolve llama-swap ref
@@ -228,10 +223,7 @@ echo "Verifying build artifacts..."
 echo "=========================================="
 echo ""
 
-EXPECTED_BINARIES=(llama-server llama-cli whisper-server whisper-cli sd-server sd-cli llama-swap)
-if [[ "$BACKEND" == "cuda" ]]; then
-    EXPECTED_BINARIES+=(ik-llama-server)
-fi
+EXPECTED_BINARIES=(llama-server llama-cli whisper-server whisper-cli sd-server sd-cli ik-llama-server llama-swap)
 
 MISSING_BINARIES=()
 for binary in "${EXPECTED_BINARIES[@]}"; do
