@@ -146,6 +146,7 @@ type Config struct {
 	UnloadTimeout      int                       `yaml:"unloadTimeout"`
 	Models             map[string]ModelConfig    `yaml:"models"` /* key is model ID */
 	Profiles           map[string]ProfileConfig  `yaml:"profiles"`
+	DefaultProfile     string                    `yaml:"defaultProfile"`
 	Selectors          map[string]SelectorConfig `yaml:"selectors"`
 
 	// routing is the canonical source for swap/scheduling configuration.

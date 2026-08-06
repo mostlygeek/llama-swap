@@ -341,6 +341,11 @@
                 "additionalProperties": false
             }
         },
+        "defaultProfile": {
+            "type": "string",
+            "default": "",
+            "description": "Profile to activate on startup and after a configuration reload. Must name a key under profiles. An empty value starts with no profile active."
+        },
         "selectors": {
             "type": "object",
             "default": {},
