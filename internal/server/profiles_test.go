@@ -125,6 +125,37 @@ func TestServer_ProfileMiddleware_JSONAndFilters(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
+// DELETE /v1/videos/{video_id} carries its model in the query, so a profile pin
+// has to rewrite the query parameter rather than attach a form body.
+func TestServer_ProfileMiddleware_RewriteDeleteQueryModel(t *testing.T) {
+	cfg := profileTestConfig(t)
+	local := newStubRouter([]string{"real", "hidden"}, "")
+	var gotQueryModel string
+	var gotModelID string
+	var gotContentLength int64
+	var gotBody []byte
+	local.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
+		gotQueryModel = r.URL.Query().Get("model")
+		gotContentLength = r.ContentLength
+		gotBody, _ = io.ReadAll(r.Body)
+		data, _ := shared.ReadContext(r.Context())
+		gotModelID = data.ModelID
+		w.WriteHeader(http.StatusOK)
+	}
+	s := profileTestServer(t, cfg, local)
+	_, err := s.setActiveProfile("coding")
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/v1/videos/video-123?model=public", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	assert.Equal(t, "variant", gotQueryModel)
+	assert.Equal(t, "real", gotModelID)
+	assert.Zero(t, gotContentLength)
+	assert.Empty(t, gotBody)
+}
+
 func TestServer_Profile_UpstreamPreservesBody(t *testing.T) {
 	cfg := profileTestConfig(t)
 	local := newStubRouter([]string{"real", "hidden"}, "")

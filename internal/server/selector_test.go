@@ -224,6 +224,36 @@ func TestServer_SelectorMiddleware_RewritesBeforeFiltersAndRecordsActivity(t *te
 	assert.Equal(t, "public", entries[0].Metadata["selector"])
 }
 
+// DELETE /v1/videos/{video_id} identifies its backend with a ?model= query
+// parameter, so the selector rewrite must land in the query and leave the
+// bodyless request alone.
+func TestServer_SelectorMiddleware_RewriteDeleteQueryModel(t *testing.T) {
+	cfg := selectorTestConfig(t)
+	local := newStubRouter([]string{"a", "b", "c"}, "")
+	var received shared.ReqContextData
+	var gotQueryModel string
+	var gotContentLength int64
+	var gotBody []byte
+	local.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
+		received, _ = shared.ReadContext(r.Context())
+		gotQueryModel = r.URL.Query().Get("model")
+		gotContentLength = r.ContentLength
+		gotBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}
+	s := selectorTestServer(t, cfg, local)
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/v1/videos/video-123?model=public", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	assert.Equal(t, "variant", gotQueryModel)
+	assert.Equal(t, "variant", received.Model)
+	assert.Equal(t, "a", received.ModelID)
+	assert.Zero(t, gotContentLength)
+	assert.Empty(t, gotBody)
+}
+
 func TestServer_SelectorMiddleware_ProfileRunsFirst(t *testing.T) {
 	cfg := selectorTestConfig(t)
 	local := newStubRouter([]string{"a", "b", "c"}, "")
