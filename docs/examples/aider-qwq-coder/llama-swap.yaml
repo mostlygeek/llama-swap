@@ -1,8 +1,10 @@
 healthCheckTimeout: 300
 logLevel: debug
 
-profiles:
-    aider:
+groups:
+  aider:
+    swap: false
+    members:
       - qwen-coder-32B
       - QwQ
 
