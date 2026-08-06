@@ -667,6 +667,42 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 		}
 	})
 
+	t.Run("video_understanding", func(t *testing.T) {
+		m := getModel(t, newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{In: []string{"video"}},
+		}))
+		if m.Capabilities == nil || m.Capabilities["video_understanding"] != true {
+			t.Error("expected video_understanding: true")
+		}
+	})
+
+	t.Run("video_generation", func(t *testing.T) {
+		m := getModel(t, newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{In: []string{"text"}, Out: []string{"video"}},
+		}))
+		if m.Capabilities == nil || m.Capabilities["video_generation"] != true {
+			t.Error("expected video_generation: true")
+		}
+	})
+
+	t.Run("image_to_video", func(t *testing.T) {
+		m := getModel(t, newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{In: []string{"image"}, Out: []string{"video"}},
+		}))
+		if m.Capabilities == nil || m.Capabilities["image_to_video"] != true {
+			t.Error("expected image_to_video: true")
+		}
+	})
+
+	t.Run("video_to_video", func(t *testing.T) {
+		m := getModel(t, newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{In: []string{"video"}, Out: []string{"video"}},
+		}))
+		if m.Capabilities == nil || m.Capabilities["video_to_video"] != true {
+			t.Error("expected video_to_video: true")
+		}
+	})
+
 	t.Run("empty_skip", func(t *testing.T) {
 		m := getModel(t, newServer(config.ModelConfig{}))
 		if m.Architecture != nil {
