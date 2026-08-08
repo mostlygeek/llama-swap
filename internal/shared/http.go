@@ -11,8 +11,10 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/tidwall/gjson"
@@ -147,6 +149,10 @@ func ReplaceRequestModel(r *http.Request, model, replacement string) (*http.Requ
 			return r, nil
 		}
 
+		// Preserve the client's escaping of the path after the model name before
+		// URL.Path is rewritten below.
+		escapedRemaining := EscapedPathSuffix(r.URL.EscapedPath(), "/upstream/"+model)
+
 		remainingPath := strings.TrimPrefix(upstreamPath, model)
 		rewrittenPath := replacement + remainingPath
 		if replacement == "" {
@@ -155,6 +161,10 @@ func ReplaceRequestModel(r *http.Request, model, replacement string) (*http.Requ
 		r.SetPathValue("upstreamPath", rewrittenPath)
 		r.URL.Path = "/upstream/" + rewrittenPath
 		r.URL.RawPath = ""
+		if replacement != "" && escapedRemaining != "" {
+			prefix := (&url.URL{Path: "/upstream/" + replacement}).EscapedPath()
+			r.URL.RawPath = prefix + escapedRemaining
+		}
 		return invalidateRequestContext(r), nil
 	}
 
@@ -326,6 +336,37 @@ func FindModelInPath(cfg config.Config, path string) (searchName, realName, rema
 	}
 
 	return
+}
+
+// EscapedPathSuffix removes decodedPrefix from escapedPath while leaving the
+// remaining percent-encoding untouched. Decoded paths cannot identify the
+// boundary alone: a model name such as "author/model" may have arrived as the
+// single escaped segment "author%2Fmodel".
+func EscapedPathSuffix(escapedPath, decodedPrefix string) string {
+	rawIndex, prefixIndex := 0, 0
+	for rawIndex < len(escapedPath) && prefixIndex < len(decodedPrefix) {
+		end := rawIndex + 1
+		if escapedPath[rawIndex] == '%' {
+			end = rawIndex + 3
+		} else {
+			_, size := utf8.DecodeRuneInString(escapedPath[rawIndex:])
+			end = rawIndex + size
+		}
+		if end > len(escapedPath) {
+			return ""
+		}
+
+		decoded, err := url.PathUnescape(escapedPath[rawIndex:end])
+		if err != nil || !strings.HasPrefix(decodedPrefix[prefixIndex:], decoded) {
+			return ""
+		}
+		rawIndex = end
+		prefixIndex += len(decoded)
+	}
+	if prefixIndex != len(decodedPrefix) {
+		return ""
+	}
+	return escapedPath[rawIndex:]
 }
 
 func SetContext(ctx context.Context, data ReqContextData) context.Context {

@@ -228,6 +228,61 @@ func TestServer_HandleUpstream(t *testing.T) {
 	})
 }
 
+func TestProxy_HandleUpstreamPreservesEscapedPath(t *testing.T) {
+	tests := []struct {
+		name   string
+		models []string
+		target string
+		want   string
+	}{
+		{
+			name:   "encoded slash in resource path",
+			models: []string{"m1"},
+			target: "/upstream/m1/api/userdata/workflows%2Fexample.json",
+			want:   "/api/userdata/workflows%2Fexample.json",
+		},
+		{
+			name:   "multi-segment model name",
+			models: []string{"author/model"},
+			target: "/upstream/author/model/api/x%2Fy",
+			want:   "/api/x%2Fy",
+		},
+		{
+			name:   "encoded separator in multi-segment model name",
+			models: []string{"author/model"},
+			target: "/upstream/author%2Fmodel/api/x%2Fy",
+			want:   "/api/x%2Fy",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			local := newStubRouter(tt.models, "")
+			var got string
+			local.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
+				got = r.URL.EscapedPath()
+				w.WriteHeader(http.StatusOK)
+			}
+			s := newTestServer(local, newStubRouter(nil, ""))
+			models := make(map[string]config.ModelConfig, len(tt.models))
+			for _, model := range tt.models {
+				models[model] = config.ModelConfig{}
+			}
+			s.cfg = config.Config{Models: models}
+			s.routes()
+
+			w := httptest.NewRecorder()
+			s.ServeHTTP(w, httptest.NewRequest(http.MethodPost, tt.target, nil))
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200 (body=%q)", w.Code, w.Body.String())
+			}
+			if got != tt.want {
+				t.Errorf("upstream escaped path = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func upstreamMetricsServer(t *testing.T, response string) *Server {
 	t.Helper()
 	cfg := config.Config{Models: map[string]config.ModelConfig{"m1": {}}}
