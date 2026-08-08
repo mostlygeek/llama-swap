@@ -552,3 +552,77 @@ func TestBaseRouter_Shutdown_StopsAllProcesses(t *testing.T) {
 		t.Errorf("second Shutdown returned nil, want error")
 	}
 }
+
+// newWebsocketSwapBase builds a router where a request for "b" must evict "a",
+// with "a" already ready and holding its ServeHTTP open the way a live
+// websocket does.
+func newWebsocketSwapBase(t *testing.T, strategy string) (*baseRouter, *fakeProcess, *fakeProcess) {
+	t.Helper()
+	conf := config.Config{
+		HealthCheckTimeout: 5,
+		Models: map[string]config.ModelConfig{
+			"a": {WebsocketStrategy: strategy},
+			"b": {},
+		},
+	}
+	a := newFakeProcess("a")
+	a.markReady()
+	a.serveBlock = make(chan struct{})
+	t.Cleanup(func() { close(a.serveBlock) })
+
+	bProc := newFakeProcess("b")
+	bProc.autoReady = true
+
+	b := newTestBaseWithConfig(t, conf, map[string]process.Process{"a": a, "b": bProc}, &stubPlanner{
+		evict: map[string][]string{"b": {"a"}},
+	})
+	return b, a, bProc
+}
+
+// TestBaseRouter_WebsocketStrategyIgnore_DoesNotBlockSwap verifies that an open
+// websocket to a model configured with websocketStrategy: ignore is not counted
+// as an in-flight request, so a request for a model that must evict it starts
+// its swap immediately instead of waiting for the connection to close.
+func TestBaseRouter_WebsocketStrategyIgnore_DoesNotBlockSwap(t *testing.T) {
+	b, a, bProc := newWebsocketSwapBase(t, config.WEBSOCKET_STRATEGY_IGNORE)
+
+	go b.ServeHTTP(httptest.NewRecorder(), newWebsocketRequest("a"))
+	waitSignal(t, a.serveStarted, "websocket serve start")
+	waitProcessed(t, b.testProcessed, 1)
+
+	w := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		b.ServeHTTP(w, newRequest("b"))
+		close(done)
+	}()
+
+	waitSignal(t, a.stopStarted, "eviction of a")
+	waitSignal(t, bProc.serveStarted, "b serve start")
+	waitSignal(t, done, "b request finish")
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status=%d want 200 body=%q", w.Code, w.Body.String())
+	}
+}
+
+// TestBaseRouter_WebsocketStrategyBlock_BlocksSwap is the control: with the
+// default strategy the same websocket counts as in-flight, so the swap is
+// deferred until it closes.
+func TestBaseRouter_WebsocketStrategyBlock_BlocksSwap(t *testing.T) {
+	b, a, bProc := newWebsocketSwapBase(t, config.WEBSOCKET_STRATEGY_BLOCK)
+
+	go b.ServeHTTP(httptest.NewRecorder(), newWebsocketRequest("a"))
+	waitSignal(t, a.serveStarted, "websocket serve start")
+	waitProcessed(t, b.testProcessed, 1)
+
+	go b.ServeHTTP(httptest.NewRecorder(), newRequest("b"))
+	waitProcessed(t, b.testProcessed, 1)
+
+	if got := a.stopCalls.Load(); got != 0 {
+		t.Errorf("a.stopCalls=%d want 0 (websocket should hold off the swap)", got)
+	}
+	if got := bProc.runCalls.Load(); got != 0 {
+		t.Errorf("b.runCalls=%d want 0 (swap should be queued)", got)
+	}
+}

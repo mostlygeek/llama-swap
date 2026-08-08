@@ -96,6 +96,34 @@ func SendResponse(w http.ResponseWriter, r *http.Request, status int, message st
 	w.Write(resp)
 }
 
+// IsWebsocketUpgrade reports whether r is a websocket handshake (RFC 6455):
+// the Connection header's comma separated token list contains "upgrade" and
+// the Upgrade header names "websocket". Both are matched case-insensitively,
+// and both headers may legally appear more than once, so every value is
+// inspected.
+func IsWebsocketUpgrade(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	if !headerHasToken(r.Header, "Upgrade", "websocket") {
+		return false
+	}
+	return headerHasToken(r.Header, "Connection", "upgrade")
+}
+
+// headerHasToken reports whether any value of the named header contains token
+// in its comma separated list.
+func headerHasToken(h http.Header, name, token string) bool {
+	for _, value := range h.Values(name) {
+		for _, part := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(part), token) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // FetchContext will attempt to get the model id from the context, then
 // from an /upstream/<model> path prefix, then from the request body/query.
 // If it extracts the model it will store it in the context for downstream

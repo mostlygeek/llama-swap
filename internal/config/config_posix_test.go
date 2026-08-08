@@ -224,6 +224,7 @@ groups:
 				Timeouts:           defaultTimeout,
 				HealthCheckTimeout: 15,
 				UnloadTimeout:      DEFAULT_UNLOAD_TIMEOUT,
+				WebsocketStrategy:  WEBSOCKET_STRATEGY_BLOCK,
 			},
 			"model2": {
 				Cmd:                "path/to/server --arg1 one",
@@ -235,6 +236,7 @@ groups:
 				Timeouts:           defaultTimeout,
 				HealthCheckTimeout: 15,
 				UnloadTimeout:      DEFAULT_UNLOAD_TIMEOUT,
+				WebsocketStrategy:  WEBSOCKET_STRATEGY_BLOCK,
 			},
 			"model3": {
 				Cmd:                "path/to/cmd --arg1 one",
@@ -246,6 +248,7 @@ groups:
 				Timeouts:           defaultTimeout,
 				HealthCheckTimeout: 15,
 				UnloadTimeout:      DEFAULT_UNLOAD_TIMEOUT,
+				WebsocketStrategy:  WEBSOCKET_STRATEGY_BLOCK,
 			},
 			"model4": {
 				Cmd:                "path/to/cmd --arg1 one",
@@ -257,6 +260,7 @@ groups:
 				Timeouts:           defaultTimeout,
 				HealthCheckTimeout: 15,
 				UnloadTimeout:      DEFAULT_UNLOAD_TIMEOUT,
+				WebsocketStrategy:  WEBSOCKET_STRATEGY_BLOCK,
 			},
 		},
 		HealthCheckTimeout: 15,

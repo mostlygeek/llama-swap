@@ -207,9 +207,16 @@ func (s *FIFO) OnSwapDone(ev SwapDone) {
 // OnServeDone decrements the per-model in-flight count and, when that drops to
 // zero, retries the queue: requests whose swap was deferred because they would
 // have evicted this (now-idle) process can now proceed.
+//
+// A request granted with SkipInFlight was never counted, so only its
+// concurrency reservation is released. Nothing else can have been unblocked by
+// it finishing, so the queue is left alone.
 func (s *FIFO) OnServeDone(ev ServeDoneEvent) {
-	s.inFlight[ev.ModelID]--
 	s.release(ev.ModelID)
+	if ev.SkipInFlight {
+		return
+	}
+	s.inFlight[ev.ModelID]--
 	if s.inFlight[ev.ModelID] <= 0 {
 		delete(s.inFlight, ev.ModelID)
 		s.drainQueue()
@@ -283,15 +290,20 @@ func (s *FIFO) OnShutdown(err error) {
 // when the grant failed would strand the counter and block future evictions.
 // Concurrency-limit rejection happens earlier in admit, before a request can
 // start the loading stream.
+//
+// Requests marked SkipInFlight are served without being counted, so they never
+// hold off an eviction of the model serving them.
 func (s *FIFO) grantHandler(req HandlerReq, modelID string) {
 	if err := shared.SetReqData(req.Ctx, "fifo_priority", strconv.Itoa(s.cfg.Priority[req.Model])); err != nil {
 		s.logger.Debugf("failed to set fifo_priority metadata: %v", err)
 	}
 
-	if s.effects.GrantServe(req, modelID) {
-		s.inFlight[modelID]++
-	} else {
+	if !s.effects.GrantServe(req, modelID) {
 		s.release(modelID)
+		return
+	}
+	if !req.SkipInFlight {
+		s.inFlight[modelID]++
 	}
 }
 

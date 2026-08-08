@@ -195,7 +195,7 @@ func (b *baseRouter) GrantError(req scheduler.HandlerReq, err error) {
 // the router would never again be willing to evict this model.
 func (b *baseRouter) GrantServe(req scheduler.HandlerReq, modelID string) bool {
 	p := b.processes[modelID]
-	return b.grant(req, scheduler.HandlerResp{HandleFunc: b.trackedServe(modelID, p)})
+	return b.grant(req, scheduler.HandlerResp{HandleFunc: b.trackedServe(modelID, p, req.SkipInFlight)})
 }
 
 // StopProcesses implements scheduler.Effects, stopping the named processes in
@@ -228,11 +228,13 @@ func (b *baseRouter) StopProcesses(timeout time.Duration, ids []string) {
 // The select on shutdownCtx.Done() is a release valve: if the router is
 // already shutting down, nobody is reading serveDoneCh, so we drop the
 // notification rather than blocking the HTTP goroutine forever.
-func (b *baseRouter) trackedServe(modelID string, p process.Process) http.HandlerFunc {
+// skipInFlight carries the request's SkipInFlight decision back to the
+// scheduler so the decrement matches whatever the increment did.
+func (b *baseRouter) trackedServe(modelID string, p process.Process, skipInFlight bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			select {
-			case b.serveDoneCh <- scheduler.ServeDoneEvent{ModelID: modelID}:
+			case b.serveDoneCh <- scheduler.ServeDoneEvent{ModelID: modelID, SkipInFlight: skipInFlight}:
 			case <-b.shutdownCtx.Done():
 			}
 		}()
@@ -346,6 +348,19 @@ func (b *baseRouter) unloadTimeout(modelID string) time.Duration {
 		return time.Duration(mc.UnloadTimeout) * time.Second
 	}
 	return time.Duration(b.config.UnloadTimeout) * time.Second
+}
+
+// skipInFlight reports whether req should be served without counting against
+// the model's in-flight requests. A websocket connection is a single request
+// that lives as long as the client keeps it open, so counting it means the
+// model can never be evicted while a client is connected. Models that set
+// websocketStrategy: ignore opt out of that.
+func (b *baseRouter) skipInFlight(modelID string, req *http.Request) bool {
+	mc, ok := b.config.Models[modelID]
+	if !ok {
+		return false
+	}
+	return mc.IgnoresWebsockets() && shared.IsWebsocketUpgrade(req)
 }
 
 func (b *baseRouter) Handles(model string) bool {
@@ -470,9 +485,10 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		// Unbuffered: a successful send on Respond proves the waiter is
 		// alive and consuming. grant() relies on this to avoid handing a
 		// handleFunc to a cancelled waiter and leaking the inFlight count.
-		Admit:      make(chan error, 1),
-		Respond:    make(chan scheduler.HandlerResp),
-		PositionCh: make(chan int, 1),
+		Admit:        make(chan error, 1),
+		Respond:      make(chan scheduler.HandlerResp),
+		PositionCh:   make(chan int, 1),
+		SkipInFlight: b.skipInFlight(data.ModelID, req),
 	}
 
 	select {

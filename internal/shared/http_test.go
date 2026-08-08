@@ -801,3 +801,67 @@ func TestFetchContext_UpstreamPath_DoesNotReadBody(t *testing.T) {
 		t.Errorf("body was consumed: %q", string(got))
 	}
 }
+
+func TestShared_IsWebsocketUpgrade(t *testing.T) {
+	tests := []struct {
+		name    string
+		headers map[string][]string
+		want    bool
+	}{
+		{
+			name:    "standard handshake",
+			headers: map[string][]string{"Connection": {"Upgrade"}, "Upgrade": {"websocket"}},
+			want:    true,
+		},
+		{
+			name:    "lowercase values",
+			headers: map[string][]string{"Connection": {"upgrade"}, "Upgrade": {"WebSocket"}},
+			want:    true,
+		},
+		{
+			name:    "connection token list",
+			headers: map[string][]string{"Connection": {"keep-alive, Upgrade"}, "Upgrade": {"websocket"}},
+			want:    true,
+		},
+		{
+			name:    "repeated connection headers",
+			headers: map[string][]string{"Connection": {"keep-alive", "Upgrade"}, "Upgrade": {"websocket"}},
+			want:    true,
+		},
+		{
+			name:    "upgrade to something else",
+			headers: map[string][]string{"Connection": {"Upgrade"}, "Upgrade": {"h2c"}},
+			want:    false,
+		},
+		{
+			name:    "upgrade header without connection token",
+			headers: map[string][]string{"Upgrade": {"websocket"}},
+			want:    false,
+		},
+		{
+			name:    "plain request",
+			headers: nil,
+			want:    false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "/v1/realtime", nil)
+			for name, values := range tc.headers {
+				for _, v := range values {
+					r.Header.Add(name, v)
+				}
+			}
+			if got := IsWebsocketUpgrade(r); got != tc.want {
+				t.Errorf("IsWebsocketUpgrade()=%v want %v", got, tc.want)
+			}
+		})
+	}
+
+	t.Run("nil request", func(t *testing.T) {
+		if IsWebsocketUpgrade(nil) {
+			t.Error("IsWebsocketUpgrade(nil)=true want false")
+		}
+	})
+}

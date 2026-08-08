@@ -485,3 +485,51 @@ models:
 		assert.Contains(t, err.Error(), "capabilities: unknown macro '${undefined_macro}'")
 	})
 }
+
+func TestConfig_ModelWebsocketStrategy(t *testing.T) {
+	t.Run("defaults_to_block", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, WEBSOCKET_STRATEGY_BLOCK, config.Models["model1"].WebsocketStrategy)
+		assert.False(t, config.Models["model1"].IgnoresWebsockets())
+	})
+
+	t.Run("ignore_is_parsed", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    websocketStrategy: ignore
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, WEBSOCKET_STRATEGY_IGNORE, config.Models["model1"].WebsocketStrategy)
+		assert.True(t, config.Models["model1"].IgnoresWebsockets())
+	})
+
+	t.Run("rejects_invalid_at_load", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    websocketStrategy: sometimes
+`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "websocketStrategy")
+		assert.Contains(t, err.Error(), "sometimes")
+	})
+
+	t.Run("empty_value_is_valid", func(t *testing.T) {
+		// ModelConfig values built in Go (not parsed from YAML) leave the field
+		// zero; that must behave like the default rather than fail validation.
+		mc := ModelConfig{}
+		assert.NoError(t, mc.ValidateWebsocketStrategy())
+		assert.False(t, mc.IgnoresWebsockets())
+	})
+}

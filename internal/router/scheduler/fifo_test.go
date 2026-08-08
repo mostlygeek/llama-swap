@@ -946,3 +946,141 @@ func TestFIFO_ConcurrencyLimit_CancelledQueuedWaiterReleasesReservation(t *testi
 		t.Fatalf("queue len=%d want 1 after cancel and retry", got)
 	}
 }
+
+// skipReq is a HandlerReq that has been marked to skip in-flight accounting,
+// as baseRouter does for a websocket to a websocketStrategy: ignore model.
+func skipReq(model string) HandlerReq {
+	r := req(model)
+	r.SkipInFlight = true
+	return r
+}
+
+// TestFIFO_SkipInFlight_DoesNotBlockEviction verifies that a request granted
+// with SkipInFlight never enters the in-flight count, so a later request that
+// must evict its model starts a swap immediately instead of queuing.
+func TestFIFO_SkipInFlight_DoesNotBlockEviction(t *testing.T) {
+	eff := newFakeEffects()
+	eff.states["a"] = process.StateReady
+	eff.states["b"] = process.StateStopped
+	planner := &stubPlanner{evict: map[string][]string{"b": {"a"}}}
+	s := newFIFO(planner, eff)
+
+	// A long-lived websocket to "a": served, but not counted.
+	ws := skipReq("a")
+	s.OnRequest(ws)
+	assertAdmitted(t, ws)
+	if got := eff.served("a"); got != 1 {
+		t.Fatalf("served(a)=%d want 1", got)
+	}
+	if got := s.inFlight["a"]; got != 0 {
+		t.Fatalf("inFlight[a]=%d want 0 (skipped request must not be counted)", got)
+	}
+
+	// A request for "b" evicts "a". The still-open websocket must not defer it.
+	rb := req("b")
+	s.OnRequest(rb)
+	assertAdmitted(t, rb)
+	if got := len(s.queued); got != 0 {
+		t.Fatalf("queue len=%d want 0 (skipped request must not defer the swap)", got)
+	}
+	if got := eff.startsFor("b"); got != 1 {
+		t.Fatalf("StartSwap(b)=%d want 1", got)
+	}
+}
+
+// TestFIFO_SkipInFlight_CountedRequestStillBlocks is the control for the test
+// above: an ordinary request to the same model does defer the swap.
+func TestFIFO_SkipInFlight_CountedRequestStillBlocks(t *testing.T) {
+	eff := newFakeEffects()
+	eff.states["a"] = process.StateReady
+	eff.states["b"] = process.StateStopped
+	planner := &stubPlanner{evict: map[string][]string{"b": {"a"}}}
+	s := newFIFO(planner, eff)
+
+	ra := req("a")
+	s.OnRequest(ra)
+	assertAdmitted(t, ra)
+	if got := s.inFlight["a"]; got != 1 {
+		t.Fatalf("inFlight[a]=%d want 1", got)
+	}
+
+	rb := req("b")
+	s.OnRequest(rb)
+	assertAdmitted(t, rb)
+	if got := len(s.queued); got != 1 {
+		t.Fatalf("queue len=%d want 1 (counted request defers the swap)", got)
+	}
+	if got := eff.startsFor("b"); got != 0 {
+		t.Fatalf("StartSwap(b)=%d want 0 while a is busy", got)
+	}
+}
+
+// TestFIFO_SkipInFlight_OnServeDoneLeavesCountAlone verifies the decrement
+// matches the increment: a finishing skipped request must not drive the count
+// of a concurrently counted request negative.
+func TestFIFO_SkipInFlight_OnServeDoneLeavesCountAlone(t *testing.T) {
+	eff := newFakeEffects()
+	eff.states["a"] = process.StateReady
+	s := newFIFO(&stubPlanner{}, eff)
+
+	counted := req("a")
+	s.OnRequest(counted)
+	assertAdmitted(t, counted)
+
+	ws := skipReq("a")
+	s.OnRequest(ws)
+	assertAdmitted(t, ws)
+
+	if got := s.inFlight["a"]; got != 1 {
+		t.Fatalf("inFlight[a]=%d want 1 (only the counted request)", got)
+	}
+
+	s.OnServeDone(ServeDoneEvent{ModelID: "a", SkipInFlight: true})
+	if got := s.inFlight["a"]; got != 1 {
+		t.Fatalf("inFlight[a]=%d want 1 after skipped request finishes", got)
+	}
+
+	s.OnServeDone(ServeDoneEvent{ModelID: "a"})
+	if got, ok := s.inFlight["a"]; ok {
+		t.Fatalf("inFlight[a]=%d want entry removed after counted request finishes", got)
+	}
+}
+
+// TestFIFO_SkipInFlight_ReleasesConcurrencySlot verifies that a skipped request
+// still reserves and releases a concurrency slot: websockets are excluded from
+// swap blocking, not from the concurrency limit.
+func TestFIFO_SkipInFlight_ReleasesConcurrencySlot(t *testing.T) {
+	s, _ := newFIFOWithLimit(t, "a", 1)
+
+	ws := skipReq("a")
+	s.OnRequest(ws)
+	assertAdmitted(t, ws)
+
+	over := req("a")
+	s.OnRequest(over)
+	assertAdmission429(t, over)
+
+	s.OnServeDone(ServeDoneEvent{ModelID: "a", SkipInFlight: true})
+
+	after := req("a")
+	s.OnRequest(after)
+	assertAdmitted(t, after)
+}
+
+// TestFIFO_SkipInFlight_FailedGrantReleasesReservation verifies the reservation
+// is released when the caller walks away before receiving the handler.
+func TestFIFO_SkipInFlight_FailedGrantReleasesReservation(t *testing.T) {
+	s, eff := newFIFOWithLimit(t, "a", 1)
+	eff.serveResult["a"] = false
+
+	gone := skipReq("a")
+	s.OnRequest(gone)
+	assertAdmitted(t, gone)
+
+	if got := s.reserved["a"]; got != 0 {
+		t.Fatalf("reserved[a]=%d want 0 after failed grant", got)
+	}
+	if got := s.inFlight["a"]; got != 0 {
+		t.Fatalf("inFlight[a]=%d want 0 after failed grant", got)
+	}
+}

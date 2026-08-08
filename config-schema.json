@@ -536,6 +536,12 @@
                         "default": 0,
                         "description": "Overrides allowed number of active parallel requests to a model. 0 uses internal default of 10. >0 overrides default. Requests exceeding limit get HTTP 429."
                     },
+                    "websocketStrategy": {
+                        "type": "string",
+                        "enum": ["block", "ignore"],
+                        "default": "block",
+                        "description": "Controls whether websocket connections count as in-flight requests for this model. 'block' (default) counts them, so an open connection prevents the model from being swapped out or TTL unloaded. 'ignore' leaves them out of in-flight counting, so a long lived connection cannot pin the model loaded."
+                    },
                     "sendLoadingState": {
                         "type": "boolean",
                         "description": "Overrides the global sendLoadingState for this model. Ommitting this property will use the global setting."

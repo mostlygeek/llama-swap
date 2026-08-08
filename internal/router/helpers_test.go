@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -330,4 +331,13 @@ func newStreamRequest(model string) *http.Request {
 
 func newRequestCtx(ctx context.Context, model string) *http.Request {
 	return newRequest(model).WithContext(ctx)
+}
+
+// newWebsocketRequest builds a websocket handshake for model. The handshake is
+// a GET, so the model travels in the query string.
+func newWebsocketRequest(model string) *http.Request {
+	r := httptest.NewRequest(http.MethodGet, "/v1/realtime?model="+url.QueryEscape(model), nil)
+	r.Header.Set("Connection", "Upgrade")
+	r.Header.Set("Upgrade", "websocket")
+	return r
 }

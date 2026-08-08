@@ -11,6 +11,26 @@ const (
 	MODEL_CONFIG_DEFAULT_PROXY = "http://localhost:${PORT}"
 )
 
+// websocketStrategy values. A websocket connection is a single HTTP request
+// that stays open for as long as the client wants it, so by default it pins
+// the model: llama-swap will not swap out a process that is still serving a
+// request. These values let that behaviour be overridden per model.
+const (
+	// WEBSOCKET_STRATEGY_BLOCK counts websocket connections as ordinary
+	// in-flight requests, so an open connection blocks swapping and TTL
+	// unloading. This is the default.
+	WEBSOCKET_STRATEGY_BLOCK = "block"
+
+	// WEBSOCKET_STRATEGY_IGNORE excludes websocket connections from in-flight
+	// accounting, so they never keep a model loaded.
+	WEBSOCKET_STRATEGY_IGNORE = "ignore"
+)
+
+var validWebsocketStrategies = map[string]struct{}{
+	WEBSOCKET_STRATEGY_BLOCK:  {},
+	WEBSOCKET_STRATEGY_IGNORE: {},
+}
+
 var validModalities = map[string]struct{}{
 	"text":  {},
 	"audio": {},
@@ -82,6 +102,10 @@ type ModelConfig struct {
 	// Limit concurrency of HTTP requests to process
 	ConcurrencyLimit int `yaml:"concurrencyLimit"`
 
+	// WebsocketStrategy controls whether websocket connections to this model
+	// count as in-flight requests. See WEBSOCKET_STRATEGY_* above.
+	WebsocketStrategy string `yaml:"websocketStrategy"`
+
 	// Model filters see issue #174
 	Filters ModelFilters `yaml:"filters"`
 
@@ -123,6 +147,8 @@ func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		Name:             "",
 		Description:      "",
 
+		WebsocketStrategy: WEBSOCKET_STRATEGY_BLOCK,
+
 		// matches http.DefaultTransport
 		Timeouts: TimeoutsConfig{
 			Connect:        30,
@@ -149,6 +175,26 @@ func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 func (m *ModelConfig) SanitizedCommand() ([]string, error) {
 	return SanitizeCommand(m.Cmd)
+}
+
+// ValidateWebsocketStrategy checks that websocketStrategy holds a recognized
+// value. An empty value is accepted and behaves like the default, "block":
+// configs parsed from YAML always get the default filled in, but ModelConfig
+// values built directly in Go leave it zero.
+func (m ModelConfig) ValidateWebsocketStrategy() error {
+	if m.WebsocketStrategy == "" {
+		return nil
+	}
+	if _, ok := validWebsocketStrategies[m.WebsocketStrategy]; !ok {
+		return fmt.Errorf("websocketStrategy: invalid value %q, must be one of: block, ignore", m.WebsocketStrategy)
+	}
+	return nil
+}
+
+// IgnoresWebsockets reports whether websocket connections to this model should
+// be left out of in-flight request accounting.
+func (m ModelConfig) IgnoresWebsockets() bool {
+	return m.WebsocketStrategy == WEBSOCKET_STRATEGY_IGNORE
 }
 
 // ModelFilters embeds Filters and adds legacy support for strip_params field

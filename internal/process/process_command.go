@@ -753,6 +753,16 @@ func (p *ProcessCommand) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("llama-swap-error: [%s] process is not ready", p.id), http.StatusServiceUnavailable)
 		return
 	}
+	// A websocket connection occupies one ServeHTTP call for its whole
+	// lifetime, so counting it keeps inflight above zero and the TTL timer from
+	// ever firing. Models configured with websocketStrategy: ignore leave these
+	// connections out of the count (and out of lastUse), accepting that an idle
+	// model may be unloaded while a client is still connected.
+	if p.config.IgnoresWebsockets() && shared.IsWebsocketUpgrade(r) {
+		(*fn)(w, r)
+		return
+	}
+
 	p.inflight.Add(1)
 	defer func() {
 		p.lastUse.Store(time.Now().UnixNano())

@@ -115,6 +115,15 @@ type HandlerReq struct {
 	Admit      chan error
 	Respond    chan HandlerResp
 	PositionCh chan int
+
+	// SkipInFlight excludes this request from the scheduler's per-model
+	// in-flight count, so it does not defer a swap that would evict the model
+	// it is being served by. It is set for websocket connections to models
+	// configured with websocketStrategy: ignore — such a connection can stay
+	// open indefinitely and would otherwise pin the model forever. The
+	// concurrency-limit reservation is unaffected: these requests still occupy
+	// a slot for as long as they are being served.
+	SkipInFlight bool
 }
 
 // HandlerResp is the routing decision returned to a HandlerReq's caller: either
@@ -133,4 +142,8 @@ type SwapDone struct {
 // ServeDoneEvent is reported when a tracked ServeHTTP handler returns.
 type ServeDoneEvent struct {
 	ModelID string
+
+	// SkipInFlight mirrors HandlerReq.SkipInFlight for the request that is
+	// finishing, so the scheduler only decrements what it incremented.
+	SkipInFlight bool
 }

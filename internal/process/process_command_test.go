@@ -747,3 +747,74 @@ func TestProcessCommand_ConcurrentRunStop(t *testing.T) {
 		}
 	}
 }
+
+// serveWithStubHandler installs a stub reverse-proxy handler on p and serves
+// one request through ProcessCommand.ServeHTTP, returning the inflight count
+// observed from inside the handler.
+func serveWithStubHandler(p *ProcessCommand, r *http.Request) int64 {
+	var observed int64
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		observed = p.inflight.Load()
+		w.WriteHeader(http.StatusOK)
+	})
+	p.handler.Store(&handler)
+	p.ServeHTTP(httptest.NewRecorder(), r)
+	return observed
+}
+
+// TestProcessCommand_WebsocketStrategy_InflightAccounting verifies that a
+// websocket connection is left out of the in-flight count (which gates TTL
+// unloading) only when the model sets websocketStrategy: ignore, and that
+// ordinary requests are always counted.
+func TestProcessCommand_WebsocketStrategy_InflightAccounting(t *testing.T) {
+	websocketReq := func() *http.Request {
+		r := httptest.NewRequest(http.MethodGet, "/v1/realtime", nil)
+		r.Header.Set("Connection", "Upgrade")
+		r.Header.Set("Upgrade", "websocket")
+		return r
+	}
+
+	tests := []struct {
+		name     string
+		strategy string
+		request  func() *http.Request
+		want     int64
+	}{
+		{
+			name:     "ignore skips websockets",
+			strategy: config.WEBSOCKET_STRATEGY_IGNORE,
+			request:  websocketReq,
+			want:     0,
+		},
+		{
+			name:     "block counts websockets",
+			strategy: config.WEBSOCKET_STRATEGY_BLOCK,
+			request:  websocketReq,
+			want:     1,
+		},
+		{
+			name:     "default counts websockets",
+			strategy: "",
+			request:  websocketReq,
+			want:     1,
+		},
+		{
+			name:     "ignore still counts normal requests",
+			strategy: config.WEBSOCKET_STRATEGY_IGNORE,
+			request:  func() *http.Request { return httptest.NewRequest(http.MethodGet, "/health", nil) },
+			want:     1,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := newProcessCommand(t, config.ModelConfig{WebsocketStrategy: tc.strategy})
+			if got := serveWithStubHandler(p, tc.request()); got != tc.want {
+				t.Errorf("inflight during serve=%d want %d", got, tc.want)
+			}
+			if got := p.inflight.Load(); got != 0 {
+				t.Errorf("inflight after serve=%d want 0", got)
+			}
+		})
+	}
+}

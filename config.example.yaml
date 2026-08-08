@@ -391,6 +391,18 @@ models:
     # - recommended to be omitted and the default used
     concurrencyLimit: 0
 
+    # websocketStrategy: controls whether websocket connections count as in-flight requests
+    # - optional, default: block
+    # - a websocket is a single HTTP request that stays open for as long as the client wants,
+    #   so by default it keeps the model loaded: llama-swap will not swap out or TTL unload a
+    #   model that is still serving a request
+    # - block: (default) websockets count as in-flight requests and block swapping
+    # - ignore: websockets are not counted, so they never keep the model loaded. Open
+    #   connections are terminated when the model is swapped out or unloaded
+    # - useful for servers that hold a websocket open (e.g. a UI) but should not stop other
+    #   models from loading
+    websocketStrategy: block
+
     # sendLoadingState: overrides the global sendLoadingState setting for this model
     # - optional, default: undefined (use global setting)
     sendLoadingState: false
