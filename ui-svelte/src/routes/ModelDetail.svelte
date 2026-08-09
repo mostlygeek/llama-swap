@@ -10,6 +10,7 @@
   import ModelActivityTab from "../components/model/ModelActivityTab.svelte";
   import ModelLogsTab from "../components/model/ModelLogsTab.svelte";
   import ModelDetailsTab from "../components/model/ModelDetailsTab.svelte";
+  import { modelServerPath } from "../lib/modelUtils";
 
   let modelId = $derived($params?.id ?? "");
 
@@ -39,7 +40,7 @@
           <div class="ml-auto flex items-center gap-2">
             {#if !model.peerID}
               <a
-                href={`/upstream/${encodeURIComponent(resolvedId)}/`}
+                href={modelServerPath(resolvedId)}
                 target="_blank"
                 rel="noopener noreferrer"
                 class="text-muted-foreground hover:text-foreground"

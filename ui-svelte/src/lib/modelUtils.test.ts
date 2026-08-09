@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { matchesCapabilities, groupModels } from "./modelUtils";
+import { matchesCapabilities, groupModels, modelServerPath } from "./modelUtils";
 import type { Model } from "./types";
 
 function makeModel(overrides: Partial<Model> = {}): Model {
@@ -13,6 +13,16 @@ function makeModel(overrides: Partial<Model> = {}): Model {
     ...overrides,
   };
 }
+
+describe("modelServerPath", () => {
+  it("uses the ComfyUI endpoint for the reserved model", () => {
+    expect(modelServerPath("comfyui_auto")).toBe("/comfyui/");
+  });
+
+  it("uses the encoded upstream endpoint for other models", () => {
+    expect(modelServerPath("org/model name")).toBe("/upstream/org%2Fmodel%20name/");
+  });
+});
 
 describe("matchesCapabilities", () => {
   it("returns true when required is empty", () => {

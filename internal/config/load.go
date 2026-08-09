@@ -128,6 +128,11 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	for _, modelId := range modelIds {
 		modelConfig := config.Models[modelId]
 		modelConfig.HealthCheckTimeout = config.HealthCheckTimeout
+		if modelId == ComfyUIModelID {
+			if modelConfig.ConcurrencyLimit < comfyUIConcurrencyLimit {
+				modelConfig.ConcurrencyLimit = comfyUIConcurrencyLimit
+			}
+		}
 
 		// set model TTL to globalTTL it is the default value
 		if modelConfig.UnloadAfter == MODEL_CONFIG_DEFAULT_TTL {

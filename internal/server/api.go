@@ -421,6 +421,55 @@ func handleUpstreamRedirect(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/ui/models", http.StatusFound)
 }
 
+func handleComfyUIRedirect(w http.ResponseWriter, r *http.Request) {
+	location := "/comfyui/"
+	if r.URL.RawQuery != "" {
+		location += "?" + r.URL.RawQuery
+	}
+	status := http.StatusPermanentRedirect
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		status = http.StatusMovedPermanently
+	}
+	http.Redirect(w, r, location, status)
+}
+
+// handleComfyUI proxies requests under /comfyui/ to the fixed local
+// ComfyUI model. Its compatibility settings are applied while loading config.
+func (s *Server) handleComfyUI(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.cfg.Models[config.ComfyUIModelID]; !ok || !s.local.Handles(config.ComfyUIModelID) {
+		shared.SendResponse(w, r, http.StatusNotFound, "local model "+config.ComfyUIModelID+" not found")
+		return
+	}
+
+	// Strip the /comfyui prefix before forwarding. URL.Path and PathValue are
+	// decoded, so retain the matching escaped suffix in RawPath exactly as the
+	// generic /upstream handler does.
+	remainingPath := "/" + strings.TrimPrefix(r.PathValue("comfyPath"), "/")
+	escapedRemaining := shared.EscapedPathSuffix(r.URL.EscapedPath(), "/comfyui")
+	r.URL.Path = remainingPath
+	r.URL.RawPath = escapedRemaining
+
+	// Only an explicit request for the ComfyUI root may start the model. Once
+	// it is unloaded, stale browser requests for assets, APIs, or websockets
+	// must not cause it to be loaded again.
+	if remainingPath != "/" {
+		state, ok := s.local.RunningModels()[config.ComfyUIModelID]
+		if !ok || state != process.StateReady {
+			shared.SendResponse(w, r, http.StatusConflict,
+				"model "+config.ComfyUIModelID+" is not loaded; only /comfyui/ can start it")
+			return
+		}
+	}
+
+	*r = *r.WithContext(shared.SetContext(r.Context(), shared.ReqContextData{
+		ApiKey:   shared.ExtractAPIKey(r),
+		Model:    config.ComfyUIModelID,
+		ModelID:  config.ComfyUIModelID,
+		Metadata: make(map[string]string),
+	}))
+	s.local.ServeHTTP(w, r)
+}
+
 // handleUpstream proxies ANY request under /upstream/<model>/<path> directly to
 // the model's process, bypassing model dispatch by body/query inspection.
 func (s *Server) handleUpstream(w http.ResponseWriter, r *http.Request) {

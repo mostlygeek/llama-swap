@@ -9,6 +9,10 @@ import (
 const (
 	MODEL_CONFIG_DEFAULT_TTL   = -1
 	MODEL_CONFIG_DEFAULT_PROXY = "http://localhost:${PORT}"
+	comfyUIConcurrencyLimit    = 50
+
+	// ComfyUIModelID identifies the model used by the /comfyui endpoint.
+	ComfyUIModelID = "comfyui_auto"
 )
 
 var validModalities = map[string]struct{}{

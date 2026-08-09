@@ -443,13 +443,13 @@ models:
       context: 32000
 
   # Unlisted model example:
-  "qwen-unlisted":
+  "unlisted-model":
     # unlisted: boolean, true or false
     # - optional, default: false
     # - unlisted models do not show up in /v1/models api requests
     # - can be requested as normal through all apis
     unlisted: true
-    cmd: llama-server --port ${PORT} -m Llama-3.2-1B-Instruct-Q4_K_M.gguf -ngl 0
+    cmd: some-upstream-server
 
   # Docker example:
   # container runtimes like Docker and Podman can be used reliably with

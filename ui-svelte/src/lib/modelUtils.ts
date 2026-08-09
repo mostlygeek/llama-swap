@@ -6,6 +6,11 @@ export interface GroupedModels {
   peers: Model[];
 }
 
+export function modelServerPath(modelId: string): string {
+  if (modelId === "comfyui_auto") return "/comfyui/";
+  return `/upstream/${encodeURIComponent(modelId)}/`;
+}
+
 export function matchesCapabilities(model: Model, required: string[], matchAny = false): boolean {
   if (!required.length) return true;
   if (!model.capabilities) return false;
