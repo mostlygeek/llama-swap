@@ -264,6 +264,27 @@ models:
 		assert.True(t, mc.Capabilities.Reranker)
 	})
 
+	t.Run("video fields", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    capabilities:
+      in:
+        - text
+        - video
+      out:
+        - video
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+
+		mc := config.Models["model1"]
+		assert.False(t, mc.Capabilities.Empty())
+		assert.Equal(t, []string{"text", "video"}, mc.Capabilities.In)
+		assert.Equal(t, []string{"video"}, mc.Capabilities.Out)
+	})
+
 	t.Run("reranker false is empty", func(t *testing.T) {
 		content := `
 models:
@@ -297,19 +318,24 @@ func TestConfig_ModelCapabilities_Validate(t *testing.T) {
 	})
 
 	t.Run("invalid_in_modality", func(t *testing.T) {
-		caps := ModelCapConfig{In: []string{"video"}}
+		caps := ModelCapConfig{In: []string{"haptic"}}
 		err := caps.Validate()
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "capabilities.in")
-		assert.Contains(t, err.Error(), "video")
+		assert.Contains(t, err.Error(), "haptic")
 	})
 
 	t.Run("invalid_out_modality", func(t *testing.T) {
-		caps := ModelCapConfig{Out: []string{"video"}}
+		caps := ModelCapConfig{Out: []string{"haptic"}}
 		err := caps.Validate()
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "capabilities.out")
-		assert.Contains(t, err.Error(), "video")
+		assert.Contains(t, err.Error(), "haptic")
+	})
+
+	t.Run("video_modality_valid", func(t *testing.T) {
+		caps := ModelCapConfig{In: []string{"video"}, Out: []string{"video"}}
+		assert.NoError(t, caps.Validate())
 	})
 
 	t.Run("negative_context", func(t *testing.T) {
@@ -327,11 +353,11 @@ models:
     capabilities:
       in:
         - text
-        - video
+        - haptic
 `
 		_, err := LoadConfigFromReader(strings.NewReader(content))
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "video")
+		assert.Contains(t, err.Error(), "haptic")
 	})
 }
 

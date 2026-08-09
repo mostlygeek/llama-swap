@@ -53,6 +53,52 @@ func TestReplaceRequestModel(t *testing.T) {
 		assertContextInvalidated(t, updated)
 	})
 
+	t.Run("query delete", func(t *testing.T) {
+		r := withContext(httptest.NewRequest(http.MethodDelete, "/v1/videos/video-123?model=public", nil))
+		updated, err := ReplaceRequestModel(r, "public", "target")
+		if err != nil {
+			t.Fatalf("ReplaceRequestModel: %v", err)
+		}
+		if got := updated.URL.Query().Get("model"); got != "target" {
+			t.Fatalf("model = %q, want target", got)
+		}
+		body, err := io.ReadAll(updated.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		if len(body) != 0 {
+			t.Fatalf("body = %q, want empty", body)
+		}
+		if updated.ContentLength != 0 {
+			t.Fatalf("ContentLength = %d, want 0", updated.ContentLength)
+		}
+		if got := updated.Header.Get("Content-Length"); got != "" {
+			t.Fatalf("Content-Length = %q, want empty", got)
+		}
+		assertContextInvalidated(t, updated)
+	})
+
+	t.Run("json with query model", func(t *testing.T) {
+		r := withContext(httptest.NewRequest(http.MethodPost, "/?model=public", strings.NewReader(`{"model":"public"}`)))
+		r.Header.Set("Content-Type", "application/json")
+		updated, err := ReplaceRequestModel(r, "public", "target")
+		if err != nil {
+			t.Fatalf("ReplaceRequestModel: %v", err)
+		}
+		if got := updated.URL.Query().Get("model"); got != "target" {
+			t.Fatalf("query model = %q, want target", got)
+		}
+		body, err := io.ReadAll(updated.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		if !strings.Contains(string(body), `"model":"target"`) {
+			t.Fatalf("body = %s, want target model", body)
+		}
+		assertBodyLength(t, updated, body)
+		assertContextInvalidated(t, updated)
+	})
+
 	t.Run("json", func(t *testing.T) {
 		r := withContext(httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"model":"public","prompt":"hello"}`)))
 		r.Header.Set("Content-Type", "application/json")
@@ -289,6 +335,41 @@ func TestExtractContext_GET(t *testing.T) {
 			}
 			if got.Model != tt.wantModel {
 				t.Errorf("want %q got %q", tt.wantModel, got.Model)
+			}
+		})
+	}
+}
+
+// DELETE endpoints such as /v1/videos/{video_id} carry the model in the query
+// because the job id alone doesn't identify the backend that created it.
+func TestExtractContext_DELETE(t *testing.T) {
+	tests := []struct {
+		name      string
+		query     string
+		wantModel string
+	}{
+		{"model present", "model=llama3", "llama3"},
+		{"model with slashes", "model=author/model-7b", "author/model-7b"},
+		{"model missing", "", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, _ := http.NewRequest(http.MethodDelete, "/v1/videos/video-123?"+tt.query, nil)
+			got, err := extractContext(r)
+			if err != nil {
+				t.Fatalf("extractContext: %v", err)
+			}
+			if got.Model != tt.wantModel {
+				t.Errorf("want %q got %q", tt.wantModel, got.Model)
+			}
+
+			model, err := ExtractModel(r)
+			if err != nil {
+				t.Fatalf("ExtractModel: %v", err)
+			}
+			if model != tt.wantModel {
+				t.Errorf("ExtractModel: want %q got %q", tt.wantModel, model)
 			}
 		})
 	}

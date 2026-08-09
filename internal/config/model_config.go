@@ -15,6 +15,7 @@ var validModalities = map[string]struct{}{
 	"text":  {},
 	"audio": {},
 	"image": {},
+	"video": {},
 }
 
 // ModelCapConfig defines what modalities and features a model supports.
@@ -38,12 +39,12 @@ func (c ModelCapConfig) Empty() bool {
 func (c ModelCapConfig) Validate() error {
 	for _, m := range c.In {
 		if _, ok := validModalities[m]; !ok {
-			return fmt.Errorf("capabilities.in: invalid modality %q, must be one of: text, audio, image", m)
+			return fmt.Errorf("capabilities.in: invalid modality %q, must be one of: text, audio, image, video", m)
 		}
 	}
 	for _, m := range c.Out {
 		if _, ok := validModalities[m]; !ok {
-			return fmt.Errorf("capabilities.out: invalid modality %q, must be one of: text, audio, image", m)
+			return fmt.Errorf("capabilities.out: invalid modality %q, must be one of: text, audio, image, video", m)
 		}
 	}
 	if c.Context < 0 {

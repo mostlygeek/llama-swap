@@ -9,6 +9,10 @@ export interface ModelCapabilities {
   audio_speech?: boolean;
   image_generation?: boolean;
   image_to_image?: boolean;
+  video_understanding?: boolean;
+  video_generation?: boolean;
+  image_to_video?: boolean;
+  video_to_video?: boolean;
   function_calling?: boolean;
   reranker?: boolean;
 }
@@ -357,4 +361,27 @@ export interface SpeechGenerationRequest {
   model: string;
   input: string;
   voice: string;
+}
+
+// vLLM-omni video generation types: https://docs.vllm.ai/projects/vllm-omni/en/latest/serving/videos_api/
+export interface VideoGenerationParams {
+  size?: string; // "WIDTHxHEIGHT"
+  seconds?: number;
+  fps?: number;
+  negativePrompt?: string;
+  // Backend-specific extension fields (e.g. vLLM-omni's width/height/
+  // num_frames/seed/extra_params) parsed from the Playground's Advanced
+  // JSON box. Values here override same-named basic params.
+  advanced?: Record<string, unknown>;
+}
+
+// Only "queued" and "completed" are documented; other values pass through
+// unrecognized so status handling stays defensive.
+export type VideoJobStatus = "queued" | "in_progress" | "completed" | "failed" | (string & {});
+
+export interface VideoJob {
+  id: string;
+  status: VideoJobStatus;
+  created_at?: number;
+  error?: string | { message?: string };
 }

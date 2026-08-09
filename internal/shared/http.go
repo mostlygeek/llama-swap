@@ -176,11 +176,19 @@ func ReplaceRequestModel(r *http.Request, model, replacement string) (*http.Requ
 		return r, nil
 	}
 
-	if r.Method == http.MethodGet {
+	if modelInQuery(r) {
 		query := r.URL.Query()
 		query.Set("model", replacement)
 		r.URL.RawQuery = query.Encode()
 		return invalidateRequestContext(r), nil
+	}
+
+	// Body-carrying methods may also pass the model in the query: extractContext
+	// resolves them through r.Form, which merges the URL query into the parsed
+	// body. Keep both in sync so nothing downstream sees the original id.
+	if query := r.URL.Query(); query.Get("model") == model {
+		query.Set("model", replacement)
+		r.URL.RawQuery = query.Encode()
 	}
 
 	contentType := r.Header.Get("Content-Type")
@@ -397,9 +405,18 @@ func SetReqData(ctx context.Context, key, value string) error {
 	return nil
 }
 
+// modelInQuery reports whether a request encodes its model id in the URL query
+// instead of a body. These are the model-dispatched GET endpoints (/props,
+// /v1/audio/voices, /v1/videos/...) and DELETE endpoints
+// (/v1/videos/{video_id}), where the resource id alone doesn't identify which
+// backend owns it.
+func modelInQuery(r *http.Request) bool {
+	return r.Method == http.MethodGet || r.Method == http.MethodDelete
+}
+
 // extractContext pulls fields from an HTTP request into a ReqContextData,
-// returning whatever is available. For GET requests it reads query parameters.
-// For POST requests it inspects Content-Type and parses JSON,
+// returning whatever is available. For GET and DELETE requests it reads query
+// parameters. For POST requests it inspects Content-Type and parses JSON,
 // multipart/form-data, or application/x-www-form-urlencoded bodies. The
 // request body is always restored before returning. An error is returned only
 // for I/O or parse failures, not for missing fields.
@@ -407,7 +424,7 @@ func extractContext(r *http.Request) (ReqContextData, error) {
 
 	apiKey := ExtractAPIKey(r)
 
-	if r.Method == http.MethodGet {
+	if modelInQuery(r) {
 		q := r.URL.Query()
 		return ReqContextData{
 			Model:     q.Get("model"),

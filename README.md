@@ -26,6 +26,11 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
   - `v1/audio/voices`
   - `v1/images/generations`
   - `v1/images/edits`
+  - `v1/videos` - create a video generation job ([vLLM-omni video API](https://docs.vllm.ai/projects/vllm-omni/en/latest/serving/videos_api/))
+  - `v1/videos/sync` - create a video generation job and wait for the result
+  - `v1/videos/{video_id}`, `v1/videos/{video_id}/content` - poll status / download a video job
+    - the model isn't in the request, so these require `?model={model_id}`, same as `/props`
+  - `DELETE v1/videos/{video_id}` - delete a video job - also requires `?model={model_id}`
 - ✅ Anthropic API supported endpoints:
   - `v1/messages`
   - `v1/messages/count_tokens`
