@@ -34,8 +34,11 @@ profiles:
       disabled-empty: ""
       disabled-null: ~
       local: peer-model
+defaultProfile: coding
 `))
 	require.NoError(t, err)
+
+	assert.Equal(t, "coding", cfg.DefaultProfile)
 
 	profile := cfg.Profiles["coding"]
 	assert.Equal(t, "Coding profile", profile.Description)
@@ -106,6 +109,16 @@ func TestConfig_Profiles_Validation(t *testing.T) {
       public: missing
 `,
 			wantErr: "references unknown model",
+		},
+		{
+			name: "unknown default profile",
+			profile: `profiles:
+  good:
+    pins:
+      public: model
+defaultProfile: missing
+`,
+			wantErr: "defaultProfile references unknown profile",
 		},
 	}
 
