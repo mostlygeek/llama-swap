@@ -32,6 +32,7 @@ Only use these technologies:
 - When referencing issues use "fix: #123", "update: #123"
 - Use "fix" when the branch resolves an issue
 - Use "update" when the branch only contributes to the issue
+- Hardwrap commit messages to 80 characters wide
 
 ```
 internal/server: short clear description of change
