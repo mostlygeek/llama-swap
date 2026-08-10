@@ -306,9 +306,9 @@ models:
     # - useful for slow cmdStop commands such as docker stop
     unloadTimeout: 10
 
-    # workarounds: compatibility workarounds for upstream applications
+    # compat: compatibility settings for upstream applications
     # - optional, default: empty
-    workarounds:
+    compat:
       # ignoreWebsockets: do not let websocket connections load a stopped model
       # or count toward concurrency, TTL activity, or swap decisions
       # - optional, default: false

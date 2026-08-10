@@ -701,7 +701,7 @@ func TestServer_HandleUpstream_InflightIgnoresConfiguredWebsocket(t *testing.T) 
 		w.WriteHeader(http.StatusSwitchingProtocols)
 	}
 	s = upstreamInflightServer(t, local, config.ModelConfig{
-		Workarounds: config.WorkaroundsConfig{IgnoreWebsockets: true},
+		Compat: config.CompatConfig{IgnoreWebsockets: true},
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/upstream/m1/props", nil)

@@ -138,7 +138,7 @@ func CreateSelectorMiddleware(s *Server) chain.Middleware {
 
 			if selector.Strategy == config.SelectorStrategySpillover {
 				modelConfig, _, local := s.cfg.FindConfig(target)
-				if local && modelConfig.Workarounds.IgnoreWebsockets && shared.IsWebSocketUpgrade(updated) {
+				if local && modelConfig.Compat.IgnoreWebsockets && shared.IsWebSocketUpgrade(updated) {
 					// strategySpillover reserves while choosing. Release immediately
 					// so a long-lived ignored websocket does not affect later choices.
 					spillovers.release(model, target)

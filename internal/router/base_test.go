@@ -355,7 +355,7 @@ func TestBaseRouter_IgnoreWebsocketsRejectsModelUnlessReady(t *testing.T) {
 			conf := config.Config{
 				HealthCheckTimeout: 5,
 				Models: map[string]config.ModelConfig{
-					"a": {Workarounds: config.WorkaroundsConfig{IgnoreWebsockets: true}},
+					"a": {Compat: config.CompatConfig{IgnoreWebsockets: true}},
 				},
 			}
 			b := newTestBaseWithConfig(t, conf, map[string]process.Process{"a": a}, &stubPlanner{})
@@ -379,7 +379,7 @@ func TestBaseRouter_IgnoreWebsocketsRejectsModelUnlessReady(t *testing.T) {
 	}
 }
 
-func TestBaseRouter_WebsocketStartsModelWhenWorkaroundDisabled(t *testing.T) {
+func TestBaseRouter_WebsocketStartsModelWhenCompatDisabled(t *testing.T) {
 	a := newFakeProcess("a")
 	a.autoReady = true
 	conf := config.Config{
@@ -411,7 +411,7 @@ func TestBaseRouter_IgnoreWebsocketsDoesNotBlockSwap(t *testing.T) {
 	conf := config.Config{
 		HealthCheckTimeout: 5,
 		Models: map[string]config.ModelConfig{
-			"a": {Workarounds: config.WorkaroundsConfig{IgnoreWebsockets: true}},
+			"a": {Compat: config.CompatConfig{IgnoreWebsockets: true}},
 			"b": {},
 		},
 	}

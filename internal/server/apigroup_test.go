@@ -70,7 +70,7 @@ func TestServer_InflightMiddleware_AddsAndRemovesEntriesAroundRequestHandling(t 
 func TestServer_InflightMiddleware_IgnoresConfiguredWebsocket(t *testing.T) {
 	tracker := newInflightTracker()
 	cfg := config.Config{Models: map[string]config.ModelConfig{
-		"m1": {Workarounds: config.WorkaroundsConfig{IgnoreWebsockets: true}},
+		"m1": {Compat: config.CompatConfig{IgnoreWebsockets: true}},
 	}}
 	var duringRequest shared.InFlightRequestsEvent
 	handler := CreateInflightMiddleware(tracker, cfg)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

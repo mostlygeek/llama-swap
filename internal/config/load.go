@@ -132,7 +132,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 			if modelConfig.ConcurrencyLimit < comfyUIConcurrencyLimit {
 				modelConfig.ConcurrencyLimit = comfyUIConcurrencyLimit
 			}
-			modelConfig.Workarounds.IgnoreWebsockets = true
+			modelConfig.Compat.IgnoreWebsockets = true
 		}
 
 		// set model TTL to globalTTL it is the default value

@@ -287,7 +287,7 @@ func TestServer_SelectorMiddleware_SpilloverReservations(t *testing.T) {
 func TestServer_SelectorMiddleware_IgnoredWebsocketDoesNotReserveSpillover(t *testing.T) {
 	cfg := selectorTestConfig(t)
 	a := cfg.Models["a"]
-	a.Workarounds.IgnoreWebsockets = true
+	a.Compat.IgnoreWebsockets = true
 	cfg.Models["a"] = a
 	local := newStubRouter([]string{"a", "b", "c"}, "")
 	local.running = map[string]process.ProcessState{

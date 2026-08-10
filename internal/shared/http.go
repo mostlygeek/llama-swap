@@ -76,7 +76,7 @@ func ShouldIgnoreWebsocket(r *http.Request, cfg config.Config) bool {
 		return false
 	}
 	mc, ok := cfg.Models[data.ModelID]
-	return ok && mc.Workarounds.IgnoreWebsockets
+	return ok && mc.Compat.IgnoreWebsockets
 }
 
 func SendError(w http.ResponseWriter, r *http.Request, err error) {
