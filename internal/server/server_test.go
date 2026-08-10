@@ -16,8 +16,8 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/router"
-	"github.com/mostlygeek/llama-swap/internal/shared"
 	"github.com/mostlygeek/llama-swap/internal/store"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 // stubRouter is a minimal router.LocalRouter for Server dispatch tests.
@@ -349,8 +349,8 @@ func TestServer_Preload(t *testing.T) {
 		OnStartup: config.HookOnStartup{Preload: []string{"m1"}},
 	}}
 
-	got := make(chan shared.ModelPreloadedEvent, 1)
-	cancel := event.On(func(e shared.ModelPreloadedEvent) { got <- e })
+	got := make(chan swaputil.ModelPreloadedEvent, 1)
+	cancel := event.On(func(e swaputil.ModelPreloadedEvent) { got <- e })
 	defer cancel()
 
 	s.startPreload()

@@ -13,8 +13,8 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/perf"
-	"github.com/mostlygeek/llama-swap/internal/shared"
 	"github.com/mostlygeek/llama-swap/internal/store"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 // apiModel is one entry in the /api/events modelStatus payload.
@@ -69,24 +69,24 @@ func (s *Server) handleAPIActiveProfile(w http.ResponseWriter, r *http.Request) 
 	var body map[string]json.RawMessage
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&body); err != nil {
-		shared.SendResponse(w, r, http.StatusBadRequest, "invalid profile request")
+		swaputil.SendResponse(w, r, http.StatusBadRequest, "invalid profile request")
 		return
 	}
 	raw, ok := body["name"]
 	if !ok {
-		shared.SendResponse(w, r, http.StatusBadRequest, "profile name is required")
+		swaputil.SendResponse(w, r, http.StatusBadRequest, "profile name is required")
 		return
 	}
 
 	var name string
 	if string(raw) != "null" {
 		if err := json.Unmarshal(raw, &name); err != nil {
-			shared.SendResponse(w, r, http.StatusBadRequest, "profile name must be a string or null")
+			swaputil.SendResponse(w, r, http.StatusBadRequest, "profile name must be a string or null")
 			return
 		}
 	}
 	if _, err := s.setActiveProfile(name); err != nil {
-		shared.SendResponse(w, r, http.StatusNotFound, err.Error())
+		swaputil.SendResponse(w, r, http.StatusNotFound, err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -144,11 +144,11 @@ func (s *Server) handleAPIUnloadModel(w http.ResponseWriter, r *http.Request) {
 	requested := strings.TrimPrefix(r.PathValue("model"), "/")
 	realName, found := s.cfg.RealModelName(requested)
 	if !found {
-		shared.SendResponse(w, r, http.StatusNotFound, "model not found")
+		swaputil.SendResponse(w, r, http.StatusNotFound, "model not found")
 		return
 	}
 	if !s.local.Handles(realName) {
-		shared.SendResponse(w, r, http.StatusNotFound, "no local server found for requested model")
+		swaputil.SendResponse(w, r, http.StatusNotFound, "no local server found for requested model")
 		return
 	}
 	s.local.Unload(0, realName)
@@ -160,12 +160,12 @@ func (s *Server) handleAPIUnloadModel(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPIActivity(w http.ResponseWriter, r *http.Request) {
 	query, err := parseActivityQuery(r)
 	if err != nil {
-		shared.SendResponse(w, r, http.StatusBadRequest, err.Error())
+		swaputil.SendResponse(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	page, err := s.store.ListActivity(r.Context(), query)
 	if err != nil {
-		shared.SendResponse(w, r, http.StatusInternalServerError, "failed to get activity")
+		swaputil.SendResponse(w, r, http.StatusInternalServerError, "failed to get activity")
 		return
 	}
 	s.metrics.overlayCaptureState(page.Data)
@@ -179,7 +179,7 @@ func (s *Server) handleAPIActivityStats(w http.ResponseWriter, r *http.Request) 
 		Model: strings.TrimSpace(r.URL.Query().Get("model")),
 	})
 	if err != nil {
-		shared.SendResponse(w, r, http.StatusInternalServerError, "failed to get activity stats")
+		swaputil.SendResponse(w, r, http.StatusInternalServerError, "failed to get activity stats")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -255,7 +255,7 @@ func (s *Server) handleAPIPerformance(w http.ResponseWriter, r *http.Request) {
 	if afterStr := r.URL.Query().Get("after"); afterStr != "" {
 		after, err := time.Parse(time.RFC3339, afterStr)
 		if err != nil {
-			shared.SendResponse(w, r, http.StatusBadRequest, "invalid 'after' timestamp, use RFC3339 format")
+			swaputil.SendResponse(w, r, http.StatusBadRequest, "invalid 'after' timestamp, use RFC3339 format")
 			return
 		}
 		filteredSys := make([]perf.SysStat, 0, len(sysStats))
@@ -296,7 +296,7 @@ func (s *Server) handleAPIVersion(w http.ResponseWriter, r *http.Request) {
 // handleAPIHardware serves the hardware snapshot captured at process startup.
 func (s *Server) handleAPIHardware(w http.ResponseWriter, r *http.Request) {
 	if s.hardware == nil {
-		shared.SendResponse(w, r, http.StatusServiceUnavailable, "hardware detection unavailable")
+		swaputil.SendResponse(w, r, http.StatusServiceUnavailable, "hardware detection unavailable")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -309,19 +309,19 @@ func (s *Server) handleAPIHardware(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPICapture(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
-		shared.SendResponse(w, r, http.StatusBadRequest, "invalid capture ID")
+		swaputil.SendResponse(w, r, http.StatusBadRequest, "invalid capture ID")
 		return
 	}
 
 	capture := s.metrics.getCaptureByID(id)
 	if capture == nil {
-		shared.SendResponse(w, r, http.StatusNotFound, "capture not found")
+		swaputil.SendResponse(w, r, http.StatusNotFound, "capture not found")
 		return
 	}
 
 	jsonBytes, err := json.Marshal(capture)
 	if err != nil {
-		shared.SendResponse(w, r, http.StatusInternalServerError, "failed to marshal capture")
+		swaputil.SendResponse(w, r, http.StatusInternalServerError, "failed to marshal capture")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -333,7 +333,7 @@ func (s *Server) handleAPICapture(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPICancelInflight(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" || !s.inflight.Cancel(id) {
-		shared.SendResponse(w, r, http.StatusNotFound, "inflight request not found")
+		swaputil.SendResponse(w, r, http.StatusNotFound, "inflight request not found")
 		return
 	}
 
@@ -369,7 +369,7 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		shared.SendResponse(w, r, http.StatusInternalServerError, "streaming unsupported")
+		swaputil.SendResponse(w, r, http.StatusInternalServerError, "streaming unsupported")
 		return
 	}
 
@@ -403,9 +403,9 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 			send(messageEnvelope{Type: msgTypeActivity, Data: string(j)})
 		}
 	}
-	sendInFlight := func(update shared.InFlightRequestsEvent) {
+	sendInFlight := func(update swaputil.InFlightRequestsEvent) {
 		if update.Operation == inflightOperationSnapshot && update.Requests == nil {
-			update.Requests = []shared.InflightRequestEntry{}
+			update.Requests = []swaputil.InflightRequestEntry{}
 		}
 		if j, err := json.Marshal(update); err == nil {
 			send(messageEnvelope{Type: msgTypeInFlight, Data: string(j)})
@@ -422,16 +422,16 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	defer event.On(func(e shared.ProcessStateChangeEvent) { sendModels() })()
-	defer event.On(func(e shared.ConfigFileChangedEvent) { sendModels() })()
-	defer event.On(func(e shared.ProfileChangedEvent) {
+	defer event.On(func(e swaputil.ProcessStateChangeEvent) { sendModels() })()
+	defer event.On(func(e swaputil.ConfigFileChangedEvent) { sendModels() })()
+	defer event.On(func(e swaputil.ProfileChangedEvent) {
 		sendProfile()
 		sendModels()
 	})()
 	defer s.proxylog.OnLogData(func(data []byte) { sendLogData("proxy", data) })()
 	defer s.upstreamlog.OnLogData(func(data []byte) { sendLogData("upstream", data) })()
 	defer event.On(func(e ActivityLogEvent) { sendActivity(e.Metrics.ID) })()
-	defer event.On(func(e shared.InFlightRequestsEvent) { sendInFlight(e) })()
+	defer event.On(func(e swaputil.InFlightRequestsEvent) { sendInFlight(e) })()
 
 	// initial payload
 	sendLogData("proxy", s.proxylog.GetHistory())

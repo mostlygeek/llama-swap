@@ -10,7 +10,7 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
-	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 	"github.com/tidwall/sjson"
 )
 
@@ -33,9 +33,9 @@ func CreateFilterMiddleware(cfg config.Config) chain.Middleware {
 				return
 			}
 
-			data, err := shared.FetchContext(r, cfg)
+			data, err := swaputil.FetchContext(r, cfg)
 			if err != nil {
-				shared.SendError(w, r, shared.ErrNoModelInContext)
+				swaputil.SendError(w, r, swaputil.ErrNoModelInContext)
 				return
 			}
 
@@ -47,13 +47,13 @@ func CreateFilterMiddleware(cfg config.Config) chain.Middleware {
 
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
-				shared.SendResponse(w, r, http.StatusBadRequest, "could not read request body")
+				swaputil.SendResponse(w, r, http.StatusBadRequest, "could not read request body")
 				return
 			}
 
 			body, err = applyFilters(body, data.Model, useModelName, filters)
 			if err != nil {
-				shared.SendResponse(w, r, http.StatusInternalServerError, err.Error())
+				swaputil.SendResponse(w, r, http.StatusInternalServerError, err.Error())
 				return
 			}
 
@@ -83,9 +83,9 @@ func CreateFormFilterMiddleware(cfg config.Config) chain.Middleware {
 				return
 			}
 
-			data, err := shared.FetchContext(r, cfg)
+			data, err := swaputil.FetchContext(r, cfg)
 			if err != nil {
-				shared.SendError(w, r, shared.ErrNoModelInContext)
+				swaputil.SendError(w, r, swaputil.ErrNoModelInContext)
 				return
 			}
 
@@ -95,9 +95,9 @@ func CreateFormFilterMiddleware(cfg config.Config) chain.Middleware {
 				return
 			}
 
-			updated, err := shared.ReplaceRequestModel(r, data.Model, useModelName)
+			updated, err := swaputil.ReplaceRequestModel(r, data.Model, useModelName)
 			if err != nil {
-				shared.SendResponse(w, r, http.StatusBadRequest, err.Error())
+				swaputil.SendResponse(w, r, http.StatusBadRequest, err.Error())
 				return
 			}
 

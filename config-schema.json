@@ -548,7 +548,7 @@
                     "timeouts": {
                         "$ref": "#/definitions/timeouts"
                     },
-                    "workarounds": {
+                    "compat": {
                         "type": "object",
                         "properties": {
                             "ignoreWebsockets": {
@@ -559,7 +559,7 @@
                         },
                         "additionalProperties": false,
                         "default": {},
-                        "description": "Compatibility workarounds for upstream applications."
+                        "description": "Compatibility settings for upstream applications."
                     },
                     "capabilities": {
                         "type": "object",

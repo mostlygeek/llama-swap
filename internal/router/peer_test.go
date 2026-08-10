@@ -12,7 +12,7 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
-	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 var testLogger = logmon.NewWriter(os.Stdout)
@@ -165,7 +165,7 @@ func TestNewPeer_FQNPrecedesCollidingBareModel(t *testing.T) {
 func TestPeer_ServeHTTP_QualifiedModelRewritten(t *testing.T) {
 	var upstreamModel string
 	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		data, err := shared.ExtractModel(r)
+		data, err := swaputil.ExtractModel(r)
 		if err != nil {
 			t.Errorf("ExtractModel: %v", err)
 		} else {
@@ -227,7 +227,7 @@ func TestPeer_ServeHTTP_Success(t *testing.T) {
 	}
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	*req = *req.WithContext(shared.SetContext(req.Context(), shared.ReqContextData{Model: "test-model", ModelID: "test-model"}))
+	*req = *req.WithContext(swaputil.SetContext(req.Context(), swaputil.ReqContextData{Model: "test-model", ModelID: "test-model"}))
 	w := httptest.NewRecorder()
 
 	pr.ServeHTTP(w, req)
@@ -263,7 +263,7 @@ func TestPeer_ServeHTTP_PeerModelNotFound(t *testing.T) {
 	}
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	*req = *req.WithContext(shared.SetContext(req.Context(), shared.ReqContextData{Model: "nonexistent-model", ModelID: "nonexistent-model"}))
+	*req = *req.WithContext(swaputil.SetContext(req.Context(), swaputil.ReqContextData{Model: "nonexistent-model", ModelID: "nonexistent-model"}))
 	w := httptest.NewRecorder()
 
 	pr.ServeHTTP(w, req)
@@ -297,7 +297,7 @@ func TestPeer_ServeHTTP_ApiKeyInjection(t *testing.T) {
 	}
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	*req = *req.WithContext(shared.SetContext(req.Context(), shared.ReqContextData{Model: "test-model", ModelID: "test-model"}))
+	*req = *req.WithContext(swaputil.SetContext(req.Context(), swaputil.ReqContextData{Model: "test-model", ModelID: "test-model"}))
 	w := httptest.NewRecorder()
 
 	pr.ServeHTTP(w, req)
@@ -331,7 +331,7 @@ func TestPeer_ServeHTTP_NoApiKey(t *testing.T) {
 	}
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	*req = *req.WithContext(shared.SetContext(req.Context(), shared.ReqContextData{Model: "test-model", ModelID: "test-model"}))
+	*req = *req.WithContext(swaputil.SetContext(req.Context(), swaputil.ReqContextData{Model: "test-model", ModelID: "test-model"}))
 	w := httptest.NewRecorder()
 
 	pr.ServeHTTP(w, req)
@@ -364,7 +364,7 @@ func TestPeer_ServeHTTP_HostHeaderSet(t *testing.T) {
 	}
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	*req = *req.WithContext(shared.SetContext(req.Context(), shared.ReqContextData{Model: "test-model", ModelID: "test-model"}))
+	*req = *req.WithContext(swaputil.SetContext(req.Context(), swaputil.ReqContextData{Model: "test-model", ModelID: "test-model"}))
 	w := httptest.NewRecorder()
 
 	pr.ServeHTTP(w, req)
@@ -396,7 +396,7 @@ func TestPeer_ServeHTTP_SSEHeaderModification(t *testing.T) {
 	}
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	*req = *req.WithContext(shared.SetContext(req.Context(), shared.ReqContextData{Model: "test-model", ModelID: "test-model"}))
+	*req = *req.WithContext(swaputil.SetContext(req.Context(), swaputil.ReqContextData{Model: "test-model", ModelID: "test-model"}))
 	w := httptest.NewRecorder()
 
 	pr.ServeHTTP(w, req)
@@ -432,7 +432,7 @@ func TestPeer_ServeHTTP_ShutdownRejectsNewRequests(t *testing.T) {
 	}
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	*req = *req.WithContext(shared.SetContext(req.Context(), shared.ReqContextData{Model: "test-model", ModelID: "test-model"}))
+	*req = *req.WithContext(swaputil.SetContext(req.Context(), swaputil.ReqContextData{Model: "test-model", ModelID: "test-model"}))
 	w := httptest.NewRecorder()
 
 	pr.ServeHTTP(w, req)
@@ -470,7 +470,7 @@ func TestPeer_ServeHTTP_WaitsForInflightDuringShutdown(t *testing.T) {
 	}
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	*req = *req.WithContext(shared.SetContext(req.Context(), shared.ReqContextData{Model: "test-model", ModelID: "test-model"}))
+	*req = *req.WithContext(swaputil.SetContext(req.Context(), swaputil.ReqContextData{Model: "test-model", ModelID: "test-model"}))
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -533,7 +533,7 @@ func TestPeer_ServeHTTP_ShutdownTimeoutCancelsInflight(t *testing.T) {
 	}
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	*req = *req.WithContext(shared.SetContext(req.Context(), shared.ReqContextData{Model: "test-model", ModelID: "test-model"}))
+	*req = *req.WithContext(swaputil.SetContext(req.Context(), swaputil.ReqContextData{Model: "test-model", ModelID: "test-model"}))
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -636,7 +636,7 @@ func TestPeer_ServeHTTP_ContextOverridesBodyModel(t *testing.T) {
 	body := strings.NewReader(`{"model":"body-model","prompt":"hello"}`)
 	req := httptest.NewRequest("POST", "/v1/chat/completions", body)
 	req.Header.Set("Content-Type", "application/json")
-	*req = *req.WithContext(shared.SetContext(req.Context(), shared.ReqContextData{Model: "context-model", ModelID: "context-model"}))
+	*req = *req.WithContext(swaputil.SetContext(req.Context(), swaputil.ReqContextData{Model: "context-model", ModelID: "context-model"}))
 	w := httptest.NewRecorder()
 
 	pr.ServeHTTP(w, req)

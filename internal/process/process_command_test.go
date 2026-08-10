@@ -671,7 +671,7 @@ func TestProcessCommand_TTL_IgnoresWebsocket(t *testing.T) {
 		HealthCheckTimeout: 10,
 		UnloadAfter:        1,
 		UnloadTimeout:      1,
-		Workarounds:        config.WorkaroundsConfig{IgnoreWebsockets: true},
+		Compat:             config.CompatConfig{IgnoreWebsockets: true},
 	})
 	runErr := runAsync(t, p)
 

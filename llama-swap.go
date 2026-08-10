@@ -23,8 +23,8 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/server"
-	"github.com/mostlygeek/llama-swap/internal/shared"
 	"github.com/mostlygeek/llama-swap/internal/store"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 	"github.com/mostlygeek/llama-swap/internal/watcher"
 )
 
@@ -271,7 +271,7 @@ func main() {
 
 		// Notify UI after a short delay so it can refresh model state.
 		time.AfterFunc(3*time.Second, func() {
-			event.Emit(shared.ConfigFileChangedEvent{State: shared.ReloadingStateEnd})
+			event.Emit(swaputil.ConfigFileChangedEvent{State: swaputil.ReloadingStateEnd})
 		})
 
 		proxyLog.Info("configuration reloaded")
@@ -332,7 +332,7 @@ func main() {
 		}
 	}()
 
-	if !shared.IsLoopbackAddr(listenAddr) {
+	if !swaputil.IsLoopbackAddr(listenAddr) {
 		_, port, _ := net.SplitHostPort(listenAddr)
 		proxyLog.Infof("llama-swap is reachable by all hosts on the network, use -listen localhost:%s to restrict to loopback only", port)
 	}

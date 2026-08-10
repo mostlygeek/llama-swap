@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
-	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 	"github.com/tidwall/gjson"
 )
 
@@ -93,9 +93,9 @@ func TestServer_FormFilterMiddleware(t *testing.T) {
 	r.Header.Set("Content-Type", mw.FormDataContentType())
 
 	var gotModel, gotFilename, gotFileBody string
-	var gotContext shared.ReqContextData
+	var gotContext swaputil.ReqContextData
 	final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseMultipartForm(shared.MaxMultiPartSize); err != nil {
+		if err := r.ParseMultipartForm(swaputil.MaxMultiPartSize); err != nil {
 			t.Errorf("ParseMultipartForm: %v", err)
 			return
 		}
@@ -114,7 +114,7 @@ func TestServer_FormFilterMiddleware(t *testing.T) {
 			return
 		}
 		gotFileBody = string(data)
-		gotContext, _ = shared.ReadContext(r.Context())
+		gotContext, _ = swaputil.ReadContext(r.Context())
 	})
 	CreateFormFilterMiddleware(cfg)(final).ServeHTTP(httptest.NewRecorder(), r)
 

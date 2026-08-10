@@ -8,15 +8,15 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/event"
-	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 func TestProcessCommand_EmitsStateChangeEvents(t *testing.T) {
 	skipIfNoSimpleResponder(t)
 
 	var mu sync.Mutex
-	var transitions []shared.ProcessStateChangeEvent
-	cancel := event.On(func(e shared.ProcessStateChangeEvent) {
+	var transitions []swaputil.ProcessStateChangeEvent
+	cancel := event.On(func(e swaputil.ProcessStateChangeEvent) {
 		if e.ProcessName != t.Name() {
 			return
 		}

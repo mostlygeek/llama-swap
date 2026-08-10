@@ -113,7 +113,7 @@ and `Unload(timeout, models...)`, both implemented once on `baseRouter` so
 `GET /unload` stops every local process; `GET /running` lists non-stopped
 processes joined against config for `cmd`/`proxy`/`ttl`/`name`/`description`.
 `startPreload` fires a background `GET /` at each `Hooks.OnStartup.Preload`
-model and emits `shared.ModelPreloadedEvent`.
+model and emits `swaputil.ModelPreloadedEvent`.
 
 ---
 
@@ -123,7 +123,7 @@ model and emits `shared.ModelPreloadedEvent`.
 config reloads via `UpdateConfig`) and passed into `server.New`. `GET /metrics`
 serves `perf.Monitor.MetricsHandler()` output, 503 when disabled.
 
-`internal/process` emits `shared.ProcessStateChangeEvent` from `setState`.
+`internal/process` emits `swaputil.ProcessStateChangeEvent` from `setState`.
 `server.inflightCounter` (atomic) + `CreateInflightMiddleware` track
 model-dispatched requests and emit `InFlightRequestsEvent`. `metricsMonitor`
 (in `metrics.go`) parses token usage from upstream responses via

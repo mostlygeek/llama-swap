@@ -10,7 +10,7 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/process"
-	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -199,10 +199,10 @@ func TestServer_SelectorStrategySpillover_RemoteModels(t *testing.T) {
 func TestServer_SelectorMiddleware_RewritesBeforeFiltersAndRecordsActivity(t *testing.T) {
 	cfg := selectorTestConfig(t)
 	local := newStubRouter([]string{"a", "b", "c"}, "")
-	var received shared.ReqContextData
+	var received swaputil.ReqContextData
 	var body []byte
 	local.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
-		received, _ = shared.ReadContext(r.Context())
+		received, _ = swaputil.ReadContext(r.Context())
 		body, _ = io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"usage":{"prompt_tokens":2,"completion_tokens":3}}`))
@@ -227,9 +227,9 @@ func TestServer_SelectorMiddleware_RewritesBeforeFiltersAndRecordsActivity(t *te
 func TestServer_SelectorMiddleware_ProfileRunsFirst(t *testing.T) {
 	cfg := selectorTestConfig(t)
 	local := newStubRouter([]string{"a", "b", "c"}, "")
-	var received shared.ReqContextData
+	var received swaputil.ReqContextData
 	local.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
-		received, _ = shared.ReadContext(r.Context())
+		received, _ = swaputil.ReadContext(r.Context())
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"usage":{}}`))
 	}
@@ -258,7 +258,7 @@ func TestServer_SelectorMiddleware_SpilloverReservations(t *testing.T) {
 	selected := make(chan string, 2)
 	release := make(chan struct{})
 	local.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
-		data, _ := shared.ReadContext(r.Context())
+		data, _ := swaputil.ReadContext(r.Context())
 		selected <- data.ModelID
 		<-release
 		w.WriteHeader(http.StatusOK)
@@ -287,7 +287,7 @@ func TestServer_SelectorMiddleware_SpilloverReservations(t *testing.T) {
 func TestServer_SelectorMiddleware_IgnoredWebsocketDoesNotReserveSpillover(t *testing.T) {
 	cfg := selectorTestConfig(t)
 	a := cfg.Models["a"]
-	a.Workarounds.IgnoreWebsockets = true
+	a.Compat.IgnoreWebsockets = true
 	cfg.Models["a"] = a
 	local := newStubRouter([]string{"a", "b", "c"}, "")
 	local.running = map[string]process.ProcessState{
@@ -298,7 +298,7 @@ func TestServer_SelectorMiddleware_IgnoredWebsocketDoesNotReserveSpillover(t *te
 	selected := make(chan string, 2)
 	release := make(chan struct{})
 	local.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
-		data, _ := shared.ReadContext(r.Context())
+		data, _ := swaputil.ReadContext(r.Context())
 		selected <- data.ModelID
 		<-release
 		w.WriteHeader(http.StatusOK)
