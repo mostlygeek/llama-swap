@@ -67,6 +67,13 @@ type TimeoutsConfig struct {
 	IdleConn       int `yaml:"idleConn"`
 }
 
+// WorkaroundsConfig holds compatibility workarounds for upstream applications.
+type WorkaroundsConfig struct {
+	// IgnoreWebsockets prevents websocket connections from participating in
+	// model lifecycle activity such as swapping, concurrency, and TTL tracking.
+	IgnoreWebsockets bool `yaml:"ignoreWebsockets"`
+}
+
 type ModelConfig struct {
 	Cmd           string   `yaml:"cmd"`
 	CmdStop       string   `yaml:"cmdStop"`
@@ -102,6 +109,9 @@ type ModelConfig struct {
 
 	// Timeout settings for proxy connections
 	Timeouts TimeoutsConfig `yaml:"timeouts"`
+
+	// Compatibility workarounds for upstream applications.
+	Workarounds WorkaroundsConfig `yaml:"workarounds"`
 
 	// Capabilities defines what modalities and features the model supports.
 	Capabilities ModelCapConfig `yaml:"capabilities"`

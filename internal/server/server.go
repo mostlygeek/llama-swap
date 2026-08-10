@@ -244,7 +244,7 @@ func (s *Server) routes() {
 		CreateProfileMiddleware(s),
 		CreateSelectorMiddleware(s),
 		CreateRequestContextMiddleware(s.cfg),
-		CreateInflightMiddleware(s.inflight),
+		CreateInflightMiddleware(s.inflight, s.cfg),
 		CreateFilterMiddleware(s.cfg),
 		CreateFormFilterMiddleware(s.cfg),
 		CreateMetricsMiddleware(s.metrics, s.cfg),

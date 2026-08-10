@@ -46,6 +46,39 @@ var (
 	ErrNoLocalModelFound = fmt.Errorf("local model not found")
 )
 
+// IsWebSocketUpgrade reports whether r contains a valid websocket protocol
+// upgrade request. Header token comparisons are case-insensitive and support
+// comma-separated or repeated header values.
+func IsWebSocketUpgrade(r *http.Request) bool {
+	return headerContainsToken(r.Header.Values("Connection"), "upgrade") &&
+		headerContainsToken(r.Header.Values("Upgrade"), "websocket")
+}
+
+func headerContainsToken(values []string, token string) bool {
+	for _, value := range values {
+		for part := range strings.SplitSeq(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(part), token) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ShouldIgnoreWebsocket reports whether r is a websocket request whose local
+// model configuration opts out of websocket lifecycle activity.
+func ShouldIgnoreWebsocket(r *http.Request, cfg config.Config) bool {
+	if !IsWebSocketUpgrade(r) {
+		return false
+	}
+	data, err := FetchContext(r, cfg)
+	if err != nil {
+		return false
+	}
+	mc, ok := cfg.Models[data.ModelID]
+	return ok && mc.Workarounds.IgnoreWebsockets
+}
+
 func SendError(w http.ResponseWriter, r *http.Request, err error) {
 	var httpErr HTTPError
 	if errors.As(err, &httpErr) {

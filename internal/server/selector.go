@@ -137,7 +137,14 @@ func CreateSelectorMiddleware(s *Server) chain.Middleware {
 			s.proxylog.Debugf("selector: id=%s target=%s", model, target)
 
 			if selector.Strategy == config.SelectorStrategySpillover {
-				defer spillovers.release(model, target)
+				modelConfig, _, local := s.cfg.FindConfig(target)
+				if local && modelConfig.Workarounds.IgnoreWebsockets && shared.IsWebSocketUpgrade(updated) {
+					// strategySpillover reserves while choosing. Release immediately
+					// so a long-lived ignored websocket does not affect later choices.
+					spillovers.release(model, target)
+				} else {
+					defer spillovers.release(model, target)
+				}
 			}
 			next.ServeHTTP(w, withSelectorContext(updated, model))
 		})

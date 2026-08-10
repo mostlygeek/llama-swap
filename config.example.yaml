@@ -302,6 +302,14 @@ models:
     # - useful for slow cmdStop commands such as docker stop
     unloadTimeout: 10
 
+    # workarounds: compatibility workarounds for upstream applications
+    # - optional, default: empty
+    workarounds:
+      # ignoreWebsockets: do not let websocket connections load a stopped model
+      # or count toward concurrency, TTL activity, or swap decisions
+      # - optional, default: false
+      ignoreWebsockets: true
+
     # useModelName: override the model name that is sent to upstream server
     # - optional, default: ""
     # - useful for when the upstream server expects a specific model name that

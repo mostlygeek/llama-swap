@@ -96,6 +96,8 @@ models:
   %s:
     cmd: comfyui --port ${PORT}
     concurrencyLimit: %d
+    workarounds:
+      ignoreWebsockets: false
   regular:
     cmd: regular --port ${PORT}
     concurrencyLimit: 10
@@ -103,9 +105,28 @@ models:
 			cfg, err := LoadConfigFromReader(strings.NewReader(content))
 			assert.NoError(t, err)
 			assert.Equal(t, tt.wantLimit, cfg.Models[ComfyUIModelID].ConcurrencyLimit)
+			assert.True(t, cfg.Models[ComfyUIModelID].Workarounds.IgnoreWebsockets)
 			assert.Equal(t, 10, cfg.Models["regular"].ConcurrencyLimit)
+			assert.False(t, cfg.Models["regular"].Workarounds.IgnoreWebsockets)
 		})
 	}
+}
+
+func TestConfig_ModelWorkarounds(t *testing.T) {
+	content := `
+models:
+  enabled:
+    cmd: enabled --port ${PORT}
+    workarounds:
+      ignoreWebsockets: true
+  default:
+    cmd: default --port ${PORT}
+`
+
+	cfg, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.NoError(t, err)
+	assert.True(t, cfg.Models["enabled"].Workarounds.IgnoreWebsockets)
+	assert.False(t, cfg.Models["default"].Workarounds.IgnoreWebsockets)
 }
 
 func TestConfig_SetParamsByIDAutoAlias(t *testing.T) {

@@ -650,7 +650,7 @@ func TestServer_HandleUpstream_InflightTracksSupportedPaths(t *testing.T) {
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte("ok"))
 			}
-			s = upstreamInflightServer(t, local)
+			s = upstreamInflightServer(t, local, config.ModelConfig{})
 
 			w := httptest.NewRecorder()
 			s.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, strings.NewReader(`{}`)))
@@ -680,7 +680,7 @@ func TestServer_HandleUpstream_InflightSkipsUnsupportedPath(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	}
-	s = upstreamInflightServer(t, local)
+	s = upstreamInflightServer(t, local, config.ModelConfig{})
 
 	w := httptest.NewRecorder()
 	s.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/upstream/m1/probe", strings.NewReader(`{}`)))
@@ -692,9 +692,32 @@ func TestServer_HandleUpstream_InflightSkipsUnsupportedPath(t *testing.T) {
 	}
 }
 
-func upstreamInflightServer(t *testing.T, local *stubRouter) *Server {
+func TestServer_HandleUpstream_InflightIgnoresConfiguredWebsocket(t *testing.T) {
+	local := newStubRouter([]string{"m1"}, "ok")
+	var s *Server
+	var during shared.InFlightRequestsEvent
+	local.serveHTTP = func(w http.ResponseWriter, _ *http.Request) {
+		during = s.inflight.Current()
+		w.WriteHeader(http.StatusSwitchingProtocols)
+	}
+	s = upstreamInflightServer(t, local, config.ModelConfig{
+		Workarounds: config.WorkaroundsConfig{IgnoreWebsockets: true},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/upstream/m1/props", nil)
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if len(during.Requests) != 0 {
+		t.Fatalf("inflight during ignored websocket = %+v, want empty", during)
+	}
+}
+
+func upstreamInflightServer(t *testing.T, local *stubRouter, mc config.ModelConfig) *Server {
 	t.Helper()
-	cfg := config.Config{Models: map[string]config.ModelConfig{"m1": {}}}
+	cfg := config.Config{Models: map[string]config.ModelConfig{"m1": mc}}
 	proxylog := logmon.NewWriter(io.Discard)
 	s := &Server{
 		cfg:         cfg,

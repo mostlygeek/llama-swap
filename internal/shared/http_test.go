@@ -712,6 +712,31 @@ func TestServer_ExtractAPIKey(t *testing.T) {
 	}
 }
 
+func TestIsWebSocketUpgrade(t *testing.T) {
+	tests := []struct {
+		name       string
+		connection string
+		upgrade    string
+		want       bool
+	}{
+		{name: "standard", connection: "Upgrade", upgrade: "websocket", want: true},
+		{name: "case insensitive tokens", connection: "keep-alive, UpGrAdE", upgrade: "WebSocket", want: true},
+		{name: "missing connection token", connection: "keep-alive", upgrade: "websocket"},
+		{name: "different protocol", connection: "Upgrade", upgrade: "h2c"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "/socket", nil)
+			r.Header.Set("Connection", tt.connection)
+			r.Header.Set("Upgrade", tt.upgrade)
+			if got := IsWebSocketUpgrade(r); got != tt.want {
+				t.Errorf("IsWebSocketUpgrade() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFetchContext_UpstreamPath(t *testing.T) {
 	cfg := config.Config{
 		Models: map[string]config.ModelConfig{
