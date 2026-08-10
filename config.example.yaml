@@ -173,6 +173,10 @@ upstream:
   ignorePaths:
     - '.*\.(js|json|css|png|gif|jpg|jpeg|ico|txt)$'
 
+    # ComfyUI specific: ignore /ws and /api/jobs to prevent swaps
+    # when the UI is open
+    - ^\/ws$|^\/api\/jobs$
+
 # profiles: named model ID replacements switched at runtime through the UI or API
 # - optional, default: empty dictionary
 # - one profile or none is active; startup and configuration reload select none
