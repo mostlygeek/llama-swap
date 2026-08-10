@@ -362,9 +362,14 @@ func (w *inflightResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 
 // CreateInflightMiddleware returns middleware that tracks model-dispatched
 // requests until downstream handling completes.
-func CreateInflightMiddleware(t *inflightTracker) chain.Middleware {
+func CreateInflightMiddleware(t *inflightTracker, cfg config.Config) chain.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if shared.ShouldIgnoreWebsocket(r, cfg) {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			ctx, cancel := context.WithCancel(r.Context())
 			defer cancel()
 
@@ -396,6 +401,10 @@ func CreateUpstreamInflightMiddleware(t *inflightTracker, cfg config.Config) cha
 			}
 
 			if _, err := shared.FetchContext(r, cfg); err != nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if shared.ShouldIgnoreWebsocket(r, cfg) {
 				next.ServeHTTP(w, r)
 				return
 			}

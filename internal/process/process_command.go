@@ -753,6 +753,10 @@ func (p *ProcessCommand) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("llama-swap-error: [%s] process is not ready", p.id), http.StatusServiceUnavailable)
 		return
 	}
+	if p.config.Workarounds.IgnoreWebsockets && shared.IsWebSocketUpgrade(r) {
+		(*fn)(w, r)
+		return
+	}
 	p.inflight.Add(1)
 	defer func() {
 		p.lastUse.Store(time.Now().UnixNano())

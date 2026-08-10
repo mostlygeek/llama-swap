@@ -20,6 +20,7 @@
   import * as Switch from "$lib/components/ui/switch/index.js";
   import * as Label from "$lib/components/ui/label/index.js";
   import { PowerOff, Loader2, ExternalLink, SquareStack } from "@lucide/svelte";
+  import { modelServerPath } from "../lib/modelUtils";
 
   let unloadingAll = $state(false);
 
@@ -82,7 +83,7 @@
     {/if}
     {#if !model.peerID}
       <a
-        href="/upstream/{encodeURIComponent(model.id)}/"
+        href={modelServerPath(model.id)}
         target="_blank"
         rel="noopener noreferrer"
         class="text-muted-foreground hover:text-foreground"

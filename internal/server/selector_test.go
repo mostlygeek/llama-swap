@@ -284,6 +284,49 @@ func TestServer_SelectorMiddleware_SpilloverReservations(t *testing.T) {
 	<-done
 }
 
+func TestServer_SelectorMiddleware_IgnoredWebsocketDoesNotReserveSpillover(t *testing.T) {
+	cfg := selectorTestConfig(t)
+	a := cfg.Models["a"]
+	a.Workarounds.IgnoreWebsockets = true
+	cfg.Models["a"] = a
+	local := newStubRouter([]string{"a", "b", "c"}, "")
+	local.running = map[string]process.ProcessState{
+		"a": process.StateReady,
+		"b": process.StateReady,
+		"c": process.StateReady,
+	}
+	selected := make(chan string, 2)
+	release := make(chan struct{})
+	local.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
+		data, _ := shared.ReadContext(r.Context())
+		selected <- data.ModelID
+		<-release
+		w.WriteHeader(http.StatusOK)
+	}
+	s := selectorTestServer(t, cfg, local)
+
+	websocketRequest := func() *http.Request {
+		r := httptest.NewRequest(http.MethodGet, "/props?model=balanced", nil)
+		r.Header.Set("Connection", "Upgrade")
+		r.Header.Set("Upgrade", "websocket")
+		return r
+	}
+	done := make(chan struct{}, 2)
+	for i, want := range []string{"a", "b"} {
+		go func() {
+			s.ServeHTTP(httptest.NewRecorder(), websocketRequest())
+			done <- struct{}{}
+		}()
+		if got := <-selected; got != want {
+			t.Fatalf("request %d selected model=%q want %q", i+1, got, want)
+		}
+	}
+
+	close(release)
+	<-done
+	<-done
+}
+
 func TestServer_SelectorMiddleware_AllSpilloverTargetsStopping(t *testing.T) {
 	cfg := selectorTestConfig(t)
 	local := newStubRouter([]string{"a", "b", "c"}, "")

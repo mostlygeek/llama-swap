@@ -244,7 +244,7 @@ func (s *Server) routes() {
 		CreateProfileMiddleware(s),
 		CreateSelectorMiddleware(s),
 		CreateRequestContextMiddleware(s.cfg),
-		CreateInflightMiddleware(s.inflight),
+		CreateInflightMiddleware(s.inflight, s.cfg),
 		CreateFilterMiddleware(s.cfg),
 		CreateFormFilterMiddleware(s.cfg),
 		CreateMetricsMiddleware(s.metrics, s.cfg),
@@ -295,6 +295,12 @@ func (s *Server) routes() {
 	)
 	mux.HandleFunc("GET /upstream", handleUpstreamRedirect)
 	mux.Handle("/upstream/{upstreamPath...}", upstreamChain.ThenFunc(s.handleUpstream))
+
+	// ComfyUI compatibility passthrough. This uses the fixed comfyui_auto model,
+	// whose compatibility settings are applied while loading config. Only the
+	// root path may start an unloaded model.
+	mux.Handle("/comfyui", apiChain.ThenFunc(handleComfyUIRedirect))
+	mux.Handle("/comfyui/{comfyPath...}", apiChain.ThenFunc(s.handleComfyUI))
 
 	// API group (API-key protected) consumed by the UI.
 	mux.Handle("POST /api/models/unload", apiChain.ThenFunc(s.handleAPIUnloadAll))

@@ -19,7 +19,7 @@ import (
 
 func TestServer_InflightMiddleware_AddsAndRemovesEntriesAroundRequestHandling(t *testing.T) {
 	tracker := newInflightTracker()
-	mw := CreateInflightMiddleware(tracker)
+	mw := CreateInflightMiddleware(tracker, config.Config{})
 
 	var duringRequest shared.InFlightRequestsEvent
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -67,6 +67,28 @@ func TestServer_InflightMiddleware_AddsAndRemovesEntriesAroundRequestHandling(t 
 	}
 }
 
+func TestServer_InflightMiddleware_IgnoresConfiguredWebsocket(t *testing.T) {
+	tracker := newInflightTracker()
+	cfg := config.Config{Models: map[string]config.ModelConfig{
+		"m1": {Workarounds: config.WorkaroundsConfig{IgnoreWebsockets: true}},
+	}}
+	var duringRequest shared.InFlightRequestsEvent
+	handler := CreateInflightMiddleware(tracker, cfg)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		duringRequest = tracker.Current()
+		w.WriteHeader(http.StatusSwitchingProtocols)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/props?model=m1", nil)
+	req.Header.Set("Connection", "keep-alive, Upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	req = req.WithContext(shared.SetContext(req.Context(), shared.ReqContextData{Model: "m1", ModelID: "m1"}))
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	if len(duringRequest.Requests) != 0 {
+		t.Fatalf("inflight during ignored websocket = %+v, want empty", duringRequest)
+	}
+}
+
 func TestServer_InflightMiddleware_StreamsResponseUpdates(t *testing.T) {
 	events := make(chan shared.InFlightRequestsEvent, 8)
 	tracker := newInflightTrackerWithPublisher(8, func(update shared.InFlightRequestsEvent) {
@@ -75,7 +97,7 @@ func TestServer_InflightMiddleware_StreamsResponseUpdates(t *testing.T) {
 
 	release := make(chan struct{})
 	done := make(chan struct{})
-	handler := CreateInflightMiddleware(tracker)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	handler := CreateInflightMiddleware(tracker, config.Config{})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Set-Cookie", "secret=value")
 		w.WriteHeader(http.StatusOK)
@@ -125,7 +147,7 @@ func TestServer_InflightEventPayloadIncludesRequestEntries(t *testing.T) {
 
 	release := make(chan struct{})
 	done := make(chan struct{})
-	handler := CreateInflightMiddleware(tracker)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := CreateInflightMiddleware(tracker, config.Config{})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-release
 	}))
 
@@ -207,7 +229,7 @@ func TestServer_InflightCancelByIDCancelsRequestContext(t *testing.T) {
 	tracker := newInflightTracker()
 	idCh := make(chan string, 1)
 	done := make(chan struct{})
-	handler := CreateInflightMiddleware(tracker)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := CreateInflightMiddleware(tracker, config.Config{})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		current := tracker.Current()
 		if len(current.Requests) != 1 {
 			t.Errorf("inflight requests = %d, want 1", len(current.Requests))
