@@ -12,7 +12,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
-	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 func TestServer_HandleListModels(t *testing.T) {
@@ -190,7 +190,7 @@ func TestServer_FindModelInPath(t *testing.T) {
 		{"/", "", "", false},
 	}
 	for _, c := range cases {
-		name, _, rem, found := shared.FindModelInPath(cfg, c.path)
+		name, _, rem, found := swaputil.FindModelInPath(cfg, c.path)
 		if found != c.wantFound || name != c.wantName || (found && rem != c.wantRem) {
 			t.Errorf("FindModelInPath(%q) = (%q,%q,%v), want (%q,%q,%v)",
 				c.path, name, rem, found, c.wantName, c.wantRem, c.wantFound)
@@ -232,13 +232,13 @@ func TestServer_HandleComfyUI(t *testing.T) {
 	local := newStubRouter([]string{config.ComfyUIModelID}, "")
 	var gotPath string
 	var gotQuery string
-	var gotContext shared.ReqContextData
+	var gotContext swaputil.ReqContextData
 	serveCalls := 0
 	local.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
 		serveCalls++
 		gotPath = r.URL.EscapedPath()
 		gotQuery = r.URL.RawQuery
-		gotContext, _ = shared.ReadContext(r.Context())
+		gotContext, _ = swaputil.ReadContext(r.Context())
 		w.WriteHeader(http.StatusOK)
 	}
 	s := newTestServer(local, newStubRouter(nil, ""))
@@ -644,7 +644,7 @@ func TestServer_HandleUpstream_InflightTracksSupportedPaths(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			local := newStubRouter([]string{"m1"}, "ok")
 			var s *Server
-			var during shared.InFlightRequestsEvent
+			var during swaputil.InFlightRequestsEvent
 			local.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
 				during = s.inflight.Current()
 				w.WriteHeader(http.StatusOK)
@@ -674,7 +674,7 @@ func TestServer_HandleUpstream_InflightTracksSupportedPaths(t *testing.T) {
 func TestServer_HandleUpstream_InflightSkipsUnsupportedPath(t *testing.T) {
 	local := newStubRouter([]string{"m1"}, "ok")
 	var s *Server
-	var during shared.InFlightRequestsEvent
+	var during swaputil.InFlightRequestsEvent
 	local.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
 		during = s.inflight.Current()
 		w.WriteHeader(http.StatusOK)
@@ -695,7 +695,7 @@ func TestServer_HandleUpstream_InflightSkipsUnsupportedPath(t *testing.T) {
 func TestServer_HandleUpstream_InflightIgnoresConfiguredWebsocket(t *testing.T) {
 	local := newStubRouter([]string{"m1"}, "ok")
 	var s *Server
-	var during shared.InFlightRequestsEvent
+	var during swaputil.InFlightRequestsEvent
 	local.serveHTTP = func(w http.ResponseWriter, _ *http.Request) {
 		during = s.inflight.Current()
 		w.WriteHeader(http.StatusSwitchingProtocols)

@@ -13,15 +13,15 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/cache"
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/hw"
-	"github.com/mostlygeek/llama-swap/internal/shared"
 	"github.com/mostlygeek/llama-swap/internal/store"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 func TestServer_InflightMiddleware_AddsAndRemovesEntriesAroundRequestHandling(t *testing.T) {
 	tracker := newInflightTracker()
 	mw := CreateInflightMiddleware(tracker, config.Config{})
 
-	var duringRequest shared.InFlightRequestsEvent
+	var duringRequest swaputil.InFlightRequestsEvent
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		duringRequest = tracker.Current()
 	}))
@@ -32,7 +32,7 @@ func TestServer_InflightMiddleware_AddsAndRemovesEntriesAroundRequestHandling(t 
 	req.Header.Set("User-Agent", "test-agent")
 	req.Header.Set("Authorization", "Bearer secret")
 	req.Header.Set("X-Forwarded-For", "203.0.113.9, 10.0.0.1")
-	req = req.WithContext(shared.SetContext(req.Context(), shared.ReqContextData{
+	req = req.WithContext(swaputil.SetContext(req.Context(), swaputil.ReqContextData{
 		Model:    "requested-model",
 		ModelID:  "resolved-model",
 		Metadata: map[string]string{"source": "test"},
@@ -72,7 +72,7 @@ func TestServer_InflightMiddleware_IgnoresConfiguredWebsocket(t *testing.T) {
 	cfg := config.Config{Models: map[string]config.ModelConfig{
 		"m1": {Compat: config.CompatConfig{IgnoreWebsockets: true}},
 	}}
-	var duringRequest shared.InFlightRequestsEvent
+	var duringRequest swaputil.InFlightRequestsEvent
 	handler := CreateInflightMiddleware(tracker, cfg)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		duringRequest = tracker.Current()
 		w.WriteHeader(http.StatusSwitchingProtocols)
@@ -81,7 +81,7 @@ func TestServer_InflightMiddleware_IgnoresConfiguredWebsocket(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/props?model=m1", nil)
 	req.Header.Set("Connection", "keep-alive, Upgrade")
 	req.Header.Set("Upgrade", "websocket")
-	req = req.WithContext(shared.SetContext(req.Context(), shared.ReqContextData{Model: "m1", ModelID: "m1"}))
+	req = req.WithContext(swaputil.SetContext(req.Context(), swaputil.ReqContextData{Model: "m1", ModelID: "m1"}))
 	handler.ServeHTTP(httptest.NewRecorder(), req)
 
 	if len(duringRequest.Requests) != 0 {
@@ -90,8 +90,8 @@ func TestServer_InflightMiddleware_IgnoresConfiguredWebsocket(t *testing.T) {
 }
 
 func TestServer_InflightMiddleware_StreamsResponseUpdates(t *testing.T) {
-	events := make(chan shared.InFlightRequestsEvent, 8)
-	tracker := newInflightTrackerWithPublisher(8, func(update shared.InFlightRequestsEvent) {
+	events := make(chan swaputil.InFlightRequestsEvent, 8)
+	tracker := newInflightTrackerWithPublisher(8, func(update swaputil.InFlightRequestsEvent) {
 		events <- update
 	})
 
@@ -109,7 +109,7 @@ func TestServer_InflightMiddleware_StreamsResponseUpdates(t *testing.T) {
 	go func() {
 		defer close(done)
 		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-		req = req.WithContext(shared.SetContext(req.Context(), shared.ReqContextData{ModelID: "m1"}))
+		req = req.WithContext(swaputil.SetContext(req.Context(), swaputil.ReqContextData{ModelID: "m1"}))
 		handler.ServeHTTP(httptest.NewRecorder(), req)
 	}()
 
@@ -140,8 +140,8 @@ func TestServer_InflightMiddleware_StreamsResponseUpdates(t *testing.T) {
 }
 
 func TestServer_InflightEventPayloadIncludesRequestEntries(t *testing.T) {
-	events := make(chan shared.InFlightRequestsEvent, 4)
-	tracker := newInflightTrackerWithPublisher(4, func(update shared.InFlightRequestsEvent) {
+	events := make(chan swaputil.InFlightRequestsEvent, 4)
+	tracker := newInflightTrackerWithPublisher(4, func(update swaputil.InFlightRequestsEvent) {
 		events <- update
 	})
 
@@ -154,7 +154,7 @@ func TestServer_InflightEventPayloadIncludesRequestEntries(t *testing.T) {
 	go func() {
 		defer close(done)
 		req := httptest.NewRequest(http.MethodGet, "/props?model=m1", nil)
-		req = req.WithContext(shared.SetContext(req.Context(), shared.ReqContextData{
+		req = req.WithContext(swaputil.SetContext(req.Context(), swaputil.ReqContextData{
 			Model:   "m1",
 			ModelID: "m1",
 		}))
@@ -184,10 +184,10 @@ func TestServer_InflightEventPayloadIncludesRequestEntries(t *testing.T) {
 func TestServer_InflightTracker_OutboxDoesNotBlockRequests(t *testing.T) {
 	publishStarted := make(chan struct{})
 	releasePublisher := make(chan struct{})
-	published := make(chan shared.InFlightRequestsEvent, 4)
+	published := make(chan swaputil.InFlightRequestsEvent, 4)
 	var blockFirst sync.Once
 
-	tracker := newInflightTrackerWithPublisher(1, func(update shared.InFlightRequestsEvent) {
+	tracker := newInflightTrackerWithPublisher(1, func(update swaputil.InFlightRequestsEvent) {
 		blockFirst.Do(func() {
 			close(publishStarted)
 			<-releasePublisher
@@ -242,7 +242,7 @@ func TestServer_InflightCancelByIDCancelsRequestContext(t *testing.T) {
 
 	go func() {
 		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-		req = req.WithContext(shared.SetContext(req.Context(), shared.ReqContextData{ModelID: "m1"}))
+		req = req.WithContext(swaputil.SetContext(req.Context(), swaputil.ReqContextData{ModelID: "m1"}))
 		handler.ServeHTTP(httptest.NewRecorder(), req)
 	}()
 
@@ -281,7 +281,7 @@ func waitInflightTrackerCount(t *testing.T, tracker *inflightTracker, total int)
 	}
 }
 
-func waitInflightEvent(t *testing.T, events <-chan shared.InFlightRequestsEvent, operation string) shared.InFlightRequestsEvent {
+func waitInflightEvent(t *testing.T, events <-chan swaputil.InFlightRequestsEvent, operation string) swaputil.InFlightRequestsEvent {
 	t.Helper()
 	timer := time.After(2 * time.Second)
 	for {

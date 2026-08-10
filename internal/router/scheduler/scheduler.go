@@ -18,12 +18,12 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
-	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 // ErrModelNotFound is granted to callers whose model is not handled by this
-// router. It is an alias for shared.ErrNoLocalModelFound.
-var ErrModelNotFound = shared.ErrNoLocalModelFound
+// router. It is an alias for swaputil.ErrNoLocalModelFound.
+var ErrModelNotFound = swaputil.ErrNoLocalModelFound
 
 // Swapper is the eviction policy: it decides which running models must be
 // stopped before a target can serve. It is orthogonal to the scheduling

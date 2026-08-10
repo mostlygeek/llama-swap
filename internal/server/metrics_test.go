@@ -11,7 +11,7 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
-	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 	"github.com/tidwall/gjson"
 )
 
@@ -108,7 +108,7 @@ func TestServer_ProcessStreamingResponse_NoData(t *testing.T) {
 func TestMetricsMonitor_RecordMetadata(t *testing.T) {
 	mm := newTestMetricsMonitor(t, nil, 10, 0)
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"usage":{}}`))
-	r = r.WithContext(shared.SetContext(r.Context(), shared.ReqContextData{
+	r = r.WithContext(swaputil.SetContext(r.Context(), swaputil.ReqContextData{
 		ModelID:  "m",
 		Metadata: map[string]string{"client": "web", "trace": "abc"},
 	}))

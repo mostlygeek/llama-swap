@@ -15,7 +15,7 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
-	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 type peerMember struct {
@@ -171,22 +171,22 @@ func (r *Peer) Shutdown(timeout time.Duration) error {
 
 func (r *Peer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if r.shuttingDown.Load() {
-		shared.SendError(w, req, fmt.Errorf("peer proxy is shutting down"))
+		swaputil.SendError(w, req, fmt.Errorf("peer proxy is shutting down"))
 		return
 	}
 	r.inflight.Add(1)
 	defer r.inflight.Done()
 
-	data, err := shared.FetchContext(req, r.cfg)
+	data, err := swaputil.FetchContext(req, r.cfg)
 	if err != nil {
-		shared.SendError(w, req, err)
+		swaputil.SendError(w, req, err)
 		return
 	}
 
 	route, found := r.peers[data.ModelID]
 	if !found {
 		r.logger.Warnf("peer model not found: %s", data.ModelID)
-		shared.SendError(w, req, ErrNoPeerModelFound)
+		swaputil.SendError(w, req, ErrNoPeerModelFound)
 		return
 	}
 	pp := route.member
@@ -194,9 +194,9 @@ func (r *Peer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r.logger.Debugf("peer: routing model %s to peer %s as %s", data.ModelID, pp.peerID, route.modelID)
 
 	if data.Model != route.modelID {
-		req, err = shared.ReplaceRequestModel(req, data.Model, route.modelID)
+		req, err = swaputil.ReplaceRequestModel(req, data.Model, route.modelID)
 		if err != nil {
-			shared.SendResponse(w, req, http.StatusBadRequest, err.Error())
+			swaputil.SendResponse(w, req, http.StatusBadRequest, err.Error())
 			return
 		}
 	}

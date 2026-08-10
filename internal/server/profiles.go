@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/mostlygeek/llama-swap/internal/chain"
-	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 // CreateProfileMiddleware applies the request's active profile snapshot before
@@ -20,15 +20,15 @@ func CreateProfileMiddleware(s *Server) chain.Middleware {
 				if strings.HasPrefix(r.URL.Path, "/upstream/") {
 					model, replacement, pinned = upstreamProfilePin(r.PathValue("upstreamPath"), profile.Pins)
 				} else {
-					model, _ = shared.ExtractModel(r)
+					model, _ = swaputil.ExtractModel(r)
 					if model != "" {
 						replacement, pinned = profile.Pins[model]
 					}
 				}
 				if pinned {
-					updated, err := shared.ReplaceRequestModel(r, model, replacement)
+					updated, err := swaputil.ReplaceRequestModel(r, model, replacement)
 					if err != nil {
-						shared.SendResponse(w, r, http.StatusBadRequest, err.Error())
+						swaputil.SendResponse(w, r, http.StatusBadRequest, err.Error())
 						return
 					}
 					r = updated

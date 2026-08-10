@@ -16,8 +16,8 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/cache"
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
-	"github.com/mostlygeek/llama-swap/internal/shared"
 	"github.com/mostlygeek/llama-swap/internal/store"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 	"github.com/tidwall/gjson"
 )
 
@@ -30,7 +30,7 @@ type ActivityLogEvent struct {
 }
 
 func (e ActivityLogEvent) Type() uint32 {
-	return shared.ActivityLogEventID
+	return swaputil.ActivityLogEventID
 }
 
 // metricsMonitor parses upstream responses for token statistics, stores
@@ -124,7 +124,7 @@ func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *resp
 		DurationMs:      int(time.Since(recorder.StartTime()).Milliseconds()),
 	}
 
-	if ctxData, ok := shared.ReadContext(r.Context()); ok && len(ctxData.Metadata) > 0 {
+	if ctxData, ok := swaputil.ReadContext(r.Context()); ok && len(ctxData.Metadata) > 0 {
 		tm.Metadata = make(map[string]string, len(ctxData.Metadata))
 		for k, v := range ctxData.Metadata {
 			tm.Metadata[k] = v

@@ -17,8 +17,8 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/internal/router"
-	"github.com/mostlygeek/llama-swap/internal/shared"
 	"github.com/mostlygeek/llama-swap/internal/store"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 // Server owns the HTTP mux, cross-cutting middleware, and the local/peer model
@@ -77,7 +77,7 @@ func (s *Server) setActiveProfile(name string) (bool, error) {
 	s.profileMu.Unlock()
 
 	s.proxylog.Infof("active profile changed to %q", name)
-	event.Emit(shared.ProfileChangedEvent{Active: name})
+	event.Emit(swaputil.ProfileChangedEvent{Active: name})
 	return true, nil
 }
 
@@ -204,13 +204,13 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 }
 
 // localPeerHandler dispatches a model-routed request to the local or peer
-// router. The model is resolved once via shared.FetchContext.
+// router. The model is resolved once via swaputil.FetchContext.
 func (s *Server) localPeerHandler(w http.ResponseWriter, r *http.Request) {
 	stripVersionPrefix(r)
 
-	data, err := shared.FetchContext(r, s.cfg)
+	data, err := swaputil.FetchContext(r, s.cfg)
 	if err != nil {
-		shared.SendError(w, r, shared.ErrNoModelInContext)
+		swaputil.SendError(w, r, swaputil.ErrNoModelInContext)
 		return
 	}
 
@@ -222,7 +222,7 @@ func (s *Server) localPeerHandler(w http.ResponseWriter, r *http.Request) {
 		s.proxylog.Debugf("dispatch: using peer for model: %s", data.ModelID)
 		s.peer.ServeHTTP(w, r)
 	default:
-		shared.SendError(w, r, router.ErrNoRouterFound)
+		swaputil.SendError(w, r, router.ErrNoRouterFound)
 	}
 }
 
