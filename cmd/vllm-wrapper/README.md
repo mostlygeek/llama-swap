@@ -15,7 +15,7 @@ When using vLLM with llama-swap, you can leverage vLLM's sleep mode to drastical
 
 - vLLM server must be started with `--enable-sleep-mode`.
 - The vLLM server must be reachable at the URL provided to the wrapper.
-- To enable automatic start‑if‑not‑running, provide either a `--start-cmd` flag with a shell command (e.g., `docker run ...`) or pass the daemon executable and arguments after `--`. The argv-based method is preferred for native vLLM installations; `--start-cmd` is retained for backward compatibility.
+- To enable automatic start‑if‑not‑running, provide the daemon executable and arguments after `--`.
 
 ## Installation
 
@@ -35,30 +35,7 @@ go install ./cmd/vllm-wrapper
 
 ### As a model's `cmd`
 
-#### With `--start-cmd` (shell string)
-
-Configure your model in `config.yaml` with a `cmd` that invokes `vllm-wrapper serve`:
-
-```yaml
-models:
-  my-vllm-model:
-    cmd: vllm-wrapper serve --vllm-url http://127.0.0.1:8000 --listen :${PORT} --start-cmd "docker run --rm -p 8000:8000 ... --enable-sleep-mode"
-    # Optional flags:
-    #   --sleep-level: sleep level to use when sleeping (default: 1)
-    #   --health-path: health check path (default: /health)
-    #   --wait-timeout: timeout waiting for daemon to become healthy (default: 120s)
-```
-
-When llama-swap starts the model, it will:
-1. Check if the vLLM daemon is healthy by querying `${vllm-url}${health-path}` (default `/health`).
-2. If healthy and awake, proceed to step 4.
-3. If not healthy, attempt to wake the daemon by calling `${vllm-url}/wake_up`.
-4. If wake‑up fails (e.g., connection refused), execute the `--start-cmd` to start the daemon.
-5. Wait for the daemon to become healthy (polling the health path).
-6. Start a reverse proxy from the port assigned by llama-swap (via `${PORT}`) to `${vllm-url}`.
-7. Stay in the foreground as a proxy, allowing llama-swap to consider the model as running.
-
-#### With argv-based startup (after `--`)
+#### Daemon startup
 
 For native vLLM installations or when `llama-swap` splits the command into separate arguments, use the `--` separator. Everything after `--` is treated as the daemon executable and its arguments, launched directly without `sh -c`:
 
@@ -79,8 +56,6 @@ models:
       --max-model-len ${context_size}
       --enable-sleep-mode
 ```
-
-Precedence: if both `--start-cmd` and arguments after `--` are provided, the argv-based command takes priority. The `--start-cmd` fallback is used only when no positional arguments follow `--`.
 
 Benefits of argv-based startup:
 - Enables native vLLM without Docker.
@@ -118,7 +93,17 @@ Here is a complete example using vLLM with sleep mode, demonstrating cold start 
 ```yaml
 models:
   qwen-7b-chat:
-    cmd: vllm-wrapper serve --vllm-url http://127.0.0.1:8000 --listen :${PORT} --start-cmd "docker run --rm -p 8000:8000 ... --enable-sleep-mode"
+    cmd: |
+      vllm-wrapper serve
+      --vllm-url http://127.0.0.1:8000
+      --listen :${PORT}
+      --
+      ${vllm}
+      serve
+      ${model_path}
+      --host 127.0.0.1
+      --port 8000
+      --enable-sleep-mode
     cmdStop: vllm-wrapper sleep --vllm-url http://127.0.0.1:8000 --stop-pid ${PID}
     # You may also want to set a TTL to automatically unload after a period of inactivity:
     ttl: 3600   # unload after 1 hour of inactivity
@@ -211,15 +196,13 @@ sudo -u llama env \
     -o cat
 ```
 
-
-
 ## How it works
 
 ### serve subcommand
 
 1. **Health check**: Sends a GET request to `${vllm-url}${health-path}` (default `/health`). If the response is HTTP 200, the daemon is considered healthy and awake, and we proceed to step 4.
 2. **Wake up**: If the health check fails (non‑200 or connection error), send a POST request to `${vllm-url}/wake_up`. If the wake‑up succeeds (HTTP 200 or 204), proceed to step 4.
-3. **Start daemon**: If the wake‑up fails (indicating the daemon is not running), use the command specified after `--` (argv-based, launched via `exec.Command`), or fall back to `--start-cmd` (run via `sh -c`). The wrapper starts the command as a child process, then waits for the daemon to become healthy by polling the health path.
+3. **Start daemon**: If the wake‑up fails (indicating the daemon is not running), use the command specified after `--` (argv-based, launched via `exec.Command`). The wrapper starts the command as a child process, then waits for the daemon to become healthy by polling the health path.
 4. **Reverse proxy**: Once the daemon is healthy, start an HTTP server listening on `${PORT}` (or the address provided to `--listen`) that proxies all requests to the vLLM upstream URL. The proxy preserves streaming responses by setting `X-Accel-Buffering: no`.
 
 ### sleep subcommand
@@ -234,7 +217,7 @@ sudo -u llama env \
 - It is designed to be simple and robust.
 - For production use, ensure the vLLM daemon is properly managed (e.g., restarted if it crashes) outside of this wrapper.
 - The wrapper does not handle TLS certificates; if your vLLM server uses HTTPS, provide the appropriate URL and ensure the system's root CAs are configured.
-- On SIGTERM/SIGINT, the wrapper exits cleanly and does **not** kill the vLLM daemon, allowing it to be slept later.
+- On SIGTERM, the wrapper sends a sleep request to vLLM (using the configured sleep level) before shutting down, then exits cleanly without killing the vLLM daemon.
 
 ## Building
 
