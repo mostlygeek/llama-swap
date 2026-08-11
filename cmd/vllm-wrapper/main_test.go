@@ -92,7 +92,7 @@ func TestSleepCommandMarshal(t *testing.T) {
 // quickly and the daemon does not become healthy.
 func TestStartDaemon(t *testing.T) {
 	// Use a start command that exits immediately (true) and a health URL that will not respond.
-	err := startDaemon("true", nil, "http://127.0.0.1:12345/health", "/health", 10*time.Millisecond)
+	err := startDaemon([]string{"true"}, "http://127.0.0.1:12345/health", "/health", 10*time.Millisecond)
 	if err == nil {
 		t.Fatalf("startDaemon expected error but got nil")
 	}
@@ -113,7 +113,7 @@ func TestStartDaemonArgv(t *testing.T) {
 		t.Fatalf("write helper script: %v", err)
 	}
 
-	err := startDaemon("", []string{script, "arg1", "arg2", "arg3"}, "http://127.0.0.1:12345/health", "/health", 100*time.Millisecond)
+	err := startDaemon([]string{script, "arg1", "arg2", "arg3"}, "http://127.0.0.1:12345/health", "/health", 100*time.Millisecond)
 	if err == nil {
 		t.Fatal("expected error (health check fails)")
 	}
@@ -134,37 +134,4 @@ func TestStartDaemonArgv(t *testing.T) {
 	}
 }
 
-// TestStartDaemonArgvPrecedence verifies that argv-based startup takes precedence
-// over the legacy startCmd when both are provided.
-func TestStartDaemonArgvPrecedence(t *testing.T) {
-	tmpDir := t.TempDir()
-	argvFile := filepath.Join(tmpDir, "argv.txt")
 
-	script := filepath.Join(tmpDir, "write-argv.sh")
-	if err := os.WriteFile(script, []byte(
-		"#!/bin/bash\nprintf '%s\n' \"$@\" > \""+argvFile+"\"\nexit 0\n",
-	), 0755); err != nil {
-		t.Fatalf("write helper script: %v", err)
-	}
-
-	// Both startCmd and startArgs provided — argv should take precedence.
-	err := startDaemon("echo legacy", []string{script, "from-argv"}, "http://127.0.0.1:12345/health", "/health", 100*time.Millisecond)
-	if err == nil {
-		t.Fatal("expected error (health check fails)")
-	}
-
-	content, err := os.ReadFile(argvFile)
-	if err != nil {
-		t.Fatalf("read argv file: %v", err)
-	}
-	got := strings.Split(strings.TrimSpace(string(content)), "\n")
-	want := []string{"from-argv"}
-	if len(got) != len(want) {
-		t.Fatalf("argv length: got %d, want %d", len(got), len(want))
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("argv[%d]: got %q, want %q", i, got[i], want[i])
-		}
-	}
-}
