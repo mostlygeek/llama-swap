@@ -79,7 +79,7 @@
     {#if $showCapabilityTags}
       {@const badges = listCapabilityBadges(model)}
       {#if badges.length > 0}
-        <div class="flex min-w-0 flex-wrap items-center gap-1">
+        <div class="hidden min-w-0 flex-wrap items-center gap-1 sm:flex">
           {#each badges as badge (badge.key)}
             <Tag class={`px-1.5 text-[0.625rem] ${capabilityBadgeClass[badge.key] ?? ""}`}>{badge.label}</Tag>
           {/each}
