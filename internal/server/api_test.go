@@ -989,6 +989,55 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 	})
 }
 
+// TestServer_ModelStatus_Capabilities verifies the /api/events modelStatus
+// payload carries capability booleans and context_length for configured models.
+// The Models list reads both from this SSE payload.
+func TestServer_ModelStatus_Capabilities(t *testing.T) {
+	newServer := func(mc config.ModelConfig) *Server {
+		s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
+		s.cfg = config.Config{Models: map[string]config.ModelConfig{"m": mc}}
+		return s
+	}
+
+	t.Run("renders capabilities and context", func(t *testing.T) {
+		s := newServer(config.ModelConfig{
+			Capabilities: config.ModelCapConfig{
+				In:      []string{"text", "image"},
+				Tools:   true,
+				Context: 128000,
+			},
+		})
+		status := s.modelStatus()
+		if len(status) != 1 {
+			t.Fatalf("expected 1 model, got %d", len(status))
+		}
+		m := status[0]
+		if m.Id != "m" {
+			t.Errorf("id = %q, want m", m.Id)
+		}
+		if m.Capabilities == nil || m.Capabilities["vision"] != true {
+			t.Errorf("vision = %v", m.Capabilities)
+		}
+		if m.Capabilities["function_calling"] != true {
+			t.Errorf("function_calling = %v", m.Capabilities["function_calling"])
+		}
+		if m.ContextLength != 128000 {
+			t.Errorf("context_length = %d, want 128000", m.ContextLength)
+		}
+	})
+
+	t.Run("omits capabilities when empty", func(t *testing.T) {
+		s := newServer(config.ModelConfig{})
+		m := s.modelStatus()[0]
+		if m.Capabilities != nil {
+			t.Errorf("expected no capabilities, got %v", m.Capabilities)
+		}
+		if m.ContextLength != 0 {
+			t.Errorf("expected no context_length, got %d", m.ContextLength)
+		}
+	})
+}
+
 func stringSliceEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
