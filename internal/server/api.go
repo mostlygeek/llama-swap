@@ -173,8 +173,14 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 		for key, value := range internalMetadata {
 			llamaSwapMetadata[key] = value
 		}
-		if len(llamaSwapMetadata) > 0 {
-			rec.Meta = map[string]any{"llamaswap": llamaSwapMetadata}
+		if len(llamaSwapMetadata) > 0 || rec.ContextLength > 0 {
+			rec.Meta = make(map[string]any)
+			if len(llamaSwapMetadata) > 0 {
+				rec.Meta["llamaswap"] = llamaSwapMetadata
+			}
+			if rec.ContextLength > 0 {
+				rec.Meta["n_ctx"] = rec.ContextLength
+			}
 		}
 		return rec
 	}
