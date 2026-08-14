@@ -18,6 +18,15 @@ models:
       --flash-attn
       --request-path /v1/audio/transcriptions --inference-path ""
 
+  "audio":
+    checkEndpoint: /health
+    # set "backend" in audiocpp-server.json (or pass --backend) to match the
+    # image: cuda or vulkan. audiocpp_server defaults to cuda.
+    cmd: |
+      audiocpp_server
+      --config /models/audiocpp-server.json
+      --port ${PORT}
+
   "image":
     checkEndpoint: /
     cmd: |
