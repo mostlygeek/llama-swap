@@ -228,7 +228,7 @@ echo "Verifying build artifacts..."
 echo "=========================================="
 echo ""
 
-EXPECTED_BINARIES=(llama-server llama-cli whisper-server whisper-cli sd-server sd-cli llama-swap)
+EXPECTED_BINARIES=(llama-server llama-cli whisper-server whisper-cli sd-server sd-cli llama-swap vllm-wrapper)
 if [[ "$BACKEND" == "cuda" ]]; then
     EXPECTED_BINARIES+=(ik-llama-server)
 fi
@@ -251,7 +251,7 @@ if [[ ${#MISSING_BINARIES[@]} -gt 0 ]]; then
     exit 1
 fi
 
-VERIFIED_LIST="llama-server, llama-cli, whisper-server, whisper-cli, sd-server, sd-cli, llama-swap"
+VERIFIED_LIST="llama-server, llama-cli, whisper-server, whisper-cli, sd-server, sd-cli, llama-swap, vllm-wrapper"
 if [[ "$BACKEND" == "cuda" ]]; then
     VERIFIED_LIST="${VERIFIED_LIST}, ik-llama-server"
 fi

@@ -113,6 +113,18 @@ ARG LS_VERSION=latest
 COPY install-llama-swap.sh /build/
 RUN bash /build/install-llama-swap.sh "${LS_VERSION}"
 
+# ── Build vllm-wrapper from llama-swap source ─────────────────────────
+#
+# vllm-wrapper is not shipped in the llama-swap release archives, so it is
+# compiled from the same revision as the llama-swap binary above.
+
+FROM golang:1.26-bookworm AS vllm-wrapper-build
+ARG LS_VERSION=latest
+COPY install-vllm-wrapper.sh /build/
+RUN --mount=type=cache,id=go-build,target=/root/.cache/go-build \
+    --mount=type=cache,id=go-mod,target=/go/pkg/mod \
+    bash /build/install-vllm-wrapper.sh "${LS_VERSION}"
+
 # ── Runtime bases ─────────────────────────────────────────────────────
 
 FROM nvidia/cuda:12.9.1-runtime-ubuntu24.04 AS runtime-cuda
@@ -194,6 +206,9 @@ RUN pip install uv --break-system-packages
 # Copy llama-swap binary
 COPY --from=llama-swap-download /install/bin/llama-swap /usr/local/bin/
 COPY --from=llama-swap-download /install/llama-swap-version /tmp/
+
+# Copy vllm-wrapper binary
+COPY --from=vllm-wrapper-build /install/bin/vllm-wrapper /usr/local/bin/
 
 RUN ldconfig
 
