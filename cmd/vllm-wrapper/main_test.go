@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -90,7 +92,7 @@ func TestSleepCommandMarshal(t *testing.T) {
 // quickly and the daemon does not become healthy.
 func TestStartDaemon(t *testing.T) {
 	// Use a start command that exits immediately (true) and a health URL that will not respond.
-	err := startDaemon("true", "http://127.0.0.1:12345/health", "/health", 10*time.Millisecond)
+	err := startDaemon([]string{"true"}, "http://127.0.0.1:12345/health", "/health", 10*time.Millisecond)
 	if err == nil {
 		t.Fatalf("startDaemon expected error but got nil")
 	}
@@ -98,3 +100,38 @@ func TestStartDaemon(t *testing.T) {
 		t.Errorf("error expected to contain 'daemon did not become healthy', got %v", err)
 	}
 }
+
+// TestStartDaemonArgv verifies that multiple startArgs are passed as separate argv values.
+func TestStartDaemonArgv(t *testing.T) {
+	tmpDir := t.TempDir()
+	argvFile := filepath.Join(tmpDir, "argv.txt")
+
+	script := filepath.Join(tmpDir, "write-argv.sh")
+	if err := os.WriteFile(script, []byte(
+		"#!/bin/bash\nprintf '%s\n' \"$@\" > \""+argvFile+"\"\nexit 0\n",
+	), 0755); err != nil {
+		t.Fatalf("write helper script: %v", err)
+	}
+
+	err := startDaemon([]string{script, "arg1", "arg2", "arg3"}, "http://127.0.0.1:12345/health", "/health", 100*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected error (health check fails)")
+	}
+
+	content, err := os.ReadFile(argvFile)
+	if err != nil {
+		t.Fatalf("read argv file: %v", err)
+	}
+	got := strings.Split(strings.TrimSpace(string(content)), "\n")
+	want := []string{"arg1", "arg2", "arg3"}
+	if len(got) != len(want) {
+		t.Fatalf("argv length: got %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("argv[%d]: got %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+
