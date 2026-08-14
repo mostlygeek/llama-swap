@@ -23,6 +23,7 @@ export interface Model {
   playgroundType?: PlaygroundModelType;
   aliases?: string[];
   capabilities?: ModelCapabilities;
+  context_length?: number;
   // selector-only fields from the v1/models llamaswap metadata
   strategy?: string;
   targets?: string[];

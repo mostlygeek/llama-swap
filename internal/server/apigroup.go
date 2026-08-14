@@ -19,14 +19,15 @@ import (
 
 // apiModel is one entry in the /api/events modelStatus payload.
 type apiModel struct {
-	Id           string         `json:"id"`
-	Name         string         `json:"name"`
-	Description  string         `json:"description"`
-	State        string         `json:"state"`
-	Unlisted     bool           `json:"unlisted"`
-	PeerID       string         `json:"peerID"`
-	Aliases      []string       `json:"aliases,omitempty"`
-	Capabilities map[string]any `json:"capabilities,omitempty"`
+	Id            string         `json:"id"`
+	Name          string         `json:"name"`
+	Description   string         `json:"description"`
+	State         string         `json:"state"`
+	Unlisted      bool           `json:"unlisted"`
+	PeerID        string         `json:"peerID"`
+	Aliases       []string       `json:"aliases,omitempty"`
+	Capabilities  map[string]any `json:"capabilities,omitempty"`
+	ContextLength int            `json:"context_length,omitempty"`
 }
 
 type apiProfile struct {
@@ -111,15 +112,16 @@ func (s *Server) modelStatus() []apiModel {
 		if st, ok := running[id]; ok {
 			state = string(st)
 		}
-		_, capsMap, _, _ := renderCapabilities(mc.Capabilities)
+		_, capsMap, _, ctxLen := renderCapabilities(mc.Capabilities)
 		models = append(models, apiModel{
-			Id:           id,
-			Name:         mc.Name,
-			Description:  mc.Description,
-			State:        state,
-			Unlisted:     mc.Unlisted,
-			Aliases:      mc.Aliases,
-			Capabilities: capsMap,
+			Id:            id,
+			Name:          mc.Name,
+			Description:   mc.Description,
+			State:         state,
+			Unlisted:      mc.Unlisted,
+			Aliases:       mc.Aliases,
+			Capabilities:  capsMap,
+			ContextLength: ctxLen,
 		})
 	}
 

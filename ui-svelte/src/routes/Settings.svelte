@@ -1,7 +1,10 @@
 <script lang="ts">
   import { connectionState, themeName, themeMode, themes, type ThemeMode } from "../stores/theme";
   import { versionInfo } from "../stores/api";
+  import { showCapabilityTags } from "../stores/modelDisplay";
   import * as Select from "$lib/components/ui/select/index.js";
+  import * as Switch from "$lib/components/ui/switch/index.js";
+  import * as Label from "$lib/components/ui/label/index.js";
 
   const modes: { value: ThemeMode; label: string }[] = [
     { value: "light", label: "Light" },
@@ -49,6 +52,24 @@
           {/each}
         </Select.Content>
       </Select.Root>
+    </div>
+  </div>
+
+  <div class="rounded-lg border p-4 space-y-3 max-w-md mb-4">
+    <h4 class="text-sm font-semibold text-muted-foreground">Models page</h4>
+    <div class="flex items-start justify-between gap-4">
+      <div>
+        <Label.Root for="show-capability-tags" class="text-sm">Show capability tags</Label.Root>
+        <p class="text-muted-foreground text-xs">
+          Show all capability badges next to each model, mirroring the Details tab
+          (vision, tools, context window, and more).
+        </p>
+      </div>
+      <Switch.Root
+        id="show-capability-tags"
+        checked={$showCapabilityTags}
+        onCheckedChange={(v) => showCapabilityTags.set(v)}
+      />
     </div>
   </div>
 
