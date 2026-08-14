@@ -18,6 +18,13 @@ models:
       --flash-attn
       --request-path /v1/audio/transcriptions --inference-path ""
 
+  "audio":
+    checkEndpoint: /health
+    cmd: |
+      audiocpp_server
+      --config /models/audiocpp-server.json
+      --port ${PORT}
+
   "image":
     checkEndpoint: /
     cmd: |

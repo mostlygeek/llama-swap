@@ -18,6 +18,10 @@ on:
         description: "stable-diffusion.cpp commit hash, tag, or branch"
         required: false
         default: "master"
+      audio_ref:
+        description: "audio.cpp commit hash, tag, or branch"
+        required: false
+        default: "main"
       ik_llama_ref:
         description: "ik_llama.cpp commit hash, tag, or branch (CUDA only)"
         required: false
@@ -109,6 +113,7 @@ jobs:
           LLAMA_REF: ${{ inputs.llama_cpp_ref || 'master' }}
           WHISPER_REF: ${{ inputs.whisper_ref || 'master' }}
           SD_REF: ${{ inputs.sd_ref || 'master' }}
+          AUDIO_REF: ${{ inputs.audio_ref || 'main' }}
           IK_LLAMA_REF: ${{ inputs.ik_llama_ref || 'main' }}
           LS_VERSION: ${{ inputs.llama_swap_version || 'main' }}
           DOCKER_IMAGE_TAG: ghcr.io/mostlygeek/llama-swap:unified-${{ matrix.backend }}
