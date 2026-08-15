@@ -1,7 +1,7 @@
-# this makes use of llama-swap's profile feature to
-# keep the architect and editor models in VRAM on different GPUs
+# this keeps the architect and editor models in VRAM on different GPUs
+# using a llama-swap group with swap: false
 
-- name: "openai/aider:QwQ"
+- name: "openai/QwQ"
   edit_format: diff
   extra_params:
     max_tokens: 16384
@@ -12,10 +12,10 @@
     num_ctx: 16384
   use_temperature: 0.6
   reasoning_tag: think
-  weak_model_name: "openai/aider:qwen-coder-32B"
-  editor_model_name: "openai/aider:qwen-coder-32B"
+  weak_model_name: "openai/qwen-coder-32B"
+  editor_model_name: "openai/qwen-coder-32B"
 
-- name: "openai/aider:qwen-coder-32B"
+- name: "openai/qwen-coder-32B"
   edit_format: diff
   extra_params:
     max_tokens: 16384
@@ -25,4 +25,4 @@
   use_temperature: 0.6
   reasoning_tag: think
   editor_edit_format: editor-diff
-  editor_model_name: "openai/aider:qwen-coder-32B"
+  editor_model_name: "openai/qwen-coder-32B"
