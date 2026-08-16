@@ -31,11 +31,11 @@
     ArrowDown,
     ArrowUpDown,
     CircleX,
+    Download,
     GripVertical,
     ListFilter,
     X,
   } from "@lucide/svelte";
-  import { Badge } from "$lib/components/ui/badge/index.js";
   import FilterDrawer from "./activity-table/FilterDrawer.svelte";
   import { activeFilterCount, type ActivityFilters } from "../lib/activityFilters";
   import HeaderLabel from "./activity-table/HeaderLabel.svelte";
@@ -43,6 +43,8 @@
   import MetaCell from "./activity-table/MetaCell.svelte";
   import ModelLink from "./activity-table/ModelLink.svelte";
   import MiddleEllipsis from "./activity-table/MiddleEllipsis.svelte";
+  import ExportDialog from "./activity-table/ExportDialog.svelte";
+  import { buildActivityMarkdown, formatDrafted } from "../lib/activityExport";
   import { formatDuration, formatSpeed, formatRelativeTime } from "../lib/format";
   import { formatBytes, liveElapsedMs, requestHeader, sessionID } from "../lib/inflight";
 
@@ -96,12 +98,6 @@
   let filtersEnabled = $derived(!!filters && !!onFiltersChange);
   let filterCount = $derived(filters ? activeFilterCount(filters) : 0);
 
-  function formatDrafted(drafted: number, accepted: number): string {
-    return drafted > 0
-      ? ((accepted * 100) / drafted).toFixed(1) + "% (" + accepted + "/" + drafted + ")"
-      : "-";
-  }
-
   interface ColMeta {
     id: string;
     label: string;
@@ -122,8 +118,8 @@
       { id: "prompt", label: "Prompt", defaultVisible: true },
       { id: "generated", label: "Generated", defaultVisible: true },
       { id: "drafted", label: "Drafted", defaultVisible: false },
-      { id: "prompt_speed", label: "Prompt Speed", defaultVisible: true },
-      { id: "gen_speed", label: "Gen Speed", defaultVisible: true },
+      { id: "prompt_speed", label: "Prefill", defaultVisible: true },
+      { id: "gen_speed", label: "Decode", defaultVisible: true },
       { id: "duration", label: "Duration", defaultVisible: true },
       { id: "capture", label: "Capture", defaultVisible: true },
       { id: "meta", label: "Meta", defaultVisible: false }
@@ -264,6 +260,8 @@
 
   let selectedCapture = $state<ReqRespCapture | null>(null);
   let dialogOpen = $state(false);
+  let exportOpen = $state(false);
+  let exportMarkdown = $state("");
   let loadingCaptureId = $state<number | null>(null);
   let cancelingInflightIds = $state<string[]>([]);
   let inflightNowMs = $state(performance.now());
@@ -296,6 +294,21 @@
   function closeDialog() {
     dialogOpen = false;
     selectedCapture = null;
+  }
+
+  // Built on demand rather than in a $derived: the source only matters while
+  // the dialog is open, and activity refreshes land every second.
+  function openExport() {
+    exportMarkdown = buildActivityMarkdown(
+      table.getRowModel().rows.map((row) => row.original),
+      exportColumns
+    );
+    exportOpen = true;
+  }
+
+  function closeExport() {
+    exportOpen = false;
+    exportMarkdown = "";
   }
 
   function setInflightOpen(open: boolean) {
@@ -394,13 +407,13 @@
       {
         id: "prompt_speed",
         accessorFn: (row) => row.tokens.prompt_per_second,
-        header: "Prompt Speed",
+        header: "Prefill",
         cell: ({ row }) => formatSpeed(row.original.tokens.prompt_per_second),
       },
       {
         id: "gen_speed",
         accessorFn: (row) => row.tokens.tokens_per_second,
-        header: "Gen Speed",
+        header: "Decode",
         cell: ({ row }) => formatSpeed(row.original.tokens.tokens_per_second),
       },
       {
@@ -480,6 +493,15 @@
   // animate:flip element must be the sole child of the each block.
   let menuColumnIds = $derived(
     columnOrder.filter((id) => table.getColumn(id)?.getCanHide() ?? false)
+  );
+
+  // Mirrors what is on screen (order and visibility), minus Capture: it is a
+  // button that fetches a body on click, so it has no text form to export.
+  let exportColumns = $derived(
+    table
+      .getVisibleLeafColumns()
+      .filter((column) => column.id !== "capture")
+      .map((column) => ({ id: column.id, label: columnLabelMap[column.id] ?? column.id }))
   );
 
   // The header sticks to the top of the scrolling table container. It needs an
@@ -757,6 +779,14 @@
       {/if}
     </div>
     <div class="flex items-center gap-2">
+      <button
+        type="button"
+        class="hover:bg-muted inline-flex size-7 items-center justify-center rounded-[min(var(--radius-md),12px)]"
+        title="Export as markdown"
+        onclick={openExport}
+      >
+        <Download class="size-4" />
+      </button>
       {#if filtersEnabled}
         <button
           type="button"
@@ -769,11 +799,10 @@
         >
           <ListFilter class="size-4" />
           {#if filterCount > 0}
-            <Badge
-              class="absolute -right-1.5 -top-1.5 size-4 justify-center rounded-full p-0 text-[10px] tabular-nums"
-            >
-              {filterCount}
-            </Badge>
+            <span
+              class="bg-primary absolute -right-0.5 -top-0.5 size-2 rounded-full"
+              aria-hidden="true"
+            ></span>
           {/if}
         </button>
       {/if}
@@ -944,3 +973,5 @@
 </Card.Root>
 
 <CaptureDialog capture={selectedCapture} open={dialogOpen} onclose={closeDialog} />
+
+<ExportDialog markdown={exportMarkdown} open={exportOpen} onclose={closeExport} />

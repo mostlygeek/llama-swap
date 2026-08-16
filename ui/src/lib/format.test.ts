@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { formatDuration, formatSpeed, formatFileSize, formatCapacity, formatRelativeTime } from "./format";
+import {
+  formatDuration,
+  formatSpeed,
+  formatFileSize,
+  formatCapacity,
+  formatRelativeTime,
+  formatAbsoluteTime,
+} from "./format";
 
 describe("formatDuration", () => {
   it("defaults to seconds with 2 decimals", () => {
@@ -71,5 +78,19 @@ describe("formatRelativeTime", () => {
     expect(formatRelativeTime("2026-06-28T09:00:00Z")).toBe("3h ago");
     const olderThanOneDay = new Date(2026, 5, 25, 12, 34, 56);
     expect(formatRelativeTime(olderThanOneDay.toISOString())).toBe("2026-06-25 12:34:56");
+  });
+});
+
+describe("formatAbsoluteTime", () => {
+  it("formats a timestamp in local time", () => {
+    expect(formatAbsoluteTime(new Date(2026, 0, 2, 3, 4, 5).toISOString())).toBe(
+      "2026-01-02 03:04:05"
+    );
+  });
+
+  it("is unaffected by how recent the timestamp is", () => {
+    expect(formatAbsoluteTime(new Date(2026, 11, 31, 23, 59, 59).toISOString())).toBe(
+      "2026-12-31 23:59:59"
+    );
   });
 });
