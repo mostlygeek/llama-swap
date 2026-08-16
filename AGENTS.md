@@ -3,7 +3,7 @@
 Only use these technologies:
 
 - Go 1.26+
-- Typescript, Vite and Svelte 5 for UI (ui-svelte/)
+- Typescript, Vite and Svelte 5 for UI (ui/)
 - Docker
 - Markdown
 - YAML
@@ -20,7 +20,7 @@ Only use these technologies:
 - Use test naming conventions like `TestProxy_<test name>`, `TestProcessGroup_<test name>`, etc.
 - Use `go test -v -run <new tests>` to quickly check new tests
 - Use `make test-dev` after any changes to Go source
-- Use `make test-ui` after any changes in ui-svelte
+- Use `make test-ui` after any changes in ui/
 - Use `make test-all` for commiting changes
 - Use the ./build subdirectory for testing binary builds
 
