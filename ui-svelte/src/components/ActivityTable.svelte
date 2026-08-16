@@ -2,6 +2,7 @@
   import type { ActivityLogEntry, InflightRequestEntry, ReqRespCapture } from "../lib/types";
   import { cancelInflightRequest, getCapture, uiConfig } from "../stores/api";
   import { persistentStore } from "../stores/persistent";
+  import { flip } from "svelte/animate";
   import CaptureDialog from "./CaptureDialog.svelte";
   import {
     type ColumnDef,
@@ -455,6 +456,12 @@
     getSortedRowModel: getSortedRowModel(),
   });
 
+  // Precomputed (rather than filtered inline in the template) because the
+  // animate:flip element must be the sole child of the each block.
+  let menuColumnIds = $derived(
+    columnOrder.filter((id) => table.getColumn(id)?.getCanHide() ?? false)
+  );
+
   let thClass = $derived(compact ? "px-2 py-2 h-9" : "px-3 py-3 h-12");
   let tdClass = $derived(compact ? "px-2 py-2" : "px-3 py-4");
   let inflightThClass = $derived(compact ? "h-7 px-2 py-1" : "h-8 px-3 py-1.5");
@@ -488,7 +495,6 @@
   }
 
   let dragColId: string | null = $state(null);
-  let dragOverColId: string | null = $state(null);
 
   function handleColDragStart(e: DragEvent, colId: string) {
     dragColId = colId;
@@ -498,32 +504,32 @@
     }
   }
 
+  // Reorders columnOrder live as the drag crosses other rows, so the
+  // animate:flip on each row animates the columns sliding out of the way
+  // and the menu's order always matches what onColumnOrderChange applies
+  // to the table.
   function handleColDragOver(e: DragEvent, colId: string) {
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-    if (dragOverColId !== colId) dragOverColId = colId;
+    if (!dragColId || dragColId === colId) return;
+    const order = [...columnOrder];
+    const fromIndex = order.indexOf(dragColId);
+    const toIndex = order.indexOf(colId);
+    if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) return;
+    order.splice(fromIndex, 1);
+    order.splice(toIndex, 0, dragColId);
+    columnOrder = order;
   }
 
-  function handleColDrop(e: DragEvent, targetId: string) {
+  function handleColDrop(e: DragEvent) {
     e.preventDefault();
-    const sourceId = dragColId;
     dragColId = null;
-    dragOverColId = null;
-    if (!sourceId || sourceId === targetId) return;
-    const order = [...columnOrder];
-    const fromIndex = order.indexOf(sourceId);
-    let toIndex = order.indexOf(targetId);
-    if (fromIndex === -1 || toIndex === -1) return;
-    order.splice(fromIndex, 1);
-    if (fromIndex < toIndex) toIndex -= 1;
-    order.splice(toIndex, 0, sourceId);
-    columnOrder = order;
-    storedColumnOrder.set(order);
+    storedColumnOrder.set(columnOrder);
   }
 
   function handleColDragEnd() {
     dragColId = null;
-    dragOverColId = null;
+    storedColumnOrder.set(columnOrder);
   }
 
   function formatInflightElapsed(request: InflightRequestEntry, nowMs: number): string {
@@ -536,7 +542,6 @@
   }
 
   let inflightDragColId: string | null = $state(null);
-  let inflightDragOverColId: string | null = $state(null);
 
   function handleInflightColDragStart(e: DragEvent, id: string) {
     inflightDragColId = id;
@@ -549,29 +554,25 @@
   function handleInflightColDragOver(e: DragEvent, id: string) {
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-    inflightDragOverColId = id;
+    if (!inflightDragColId || inflightDragColId === id) return;
+    const next = [...inflightColumnOrder];
+    const from = next.indexOf(inflightDragColId);
+    const to = next.indexOf(id);
+    if (from === -1 || to === -1 || from === to) return;
+    next.splice(from, 1);
+    next.splice(to, 0, inflightDragColId);
+    inflightColumnOrder = next;
   }
 
-  function handleInflightColDrop(e: DragEvent, targetId: string) {
+  function handleInflightColDrop(e: DragEvent) {
     e.preventDefault();
-    const sourceId = inflightDragColId;
     inflightDragColId = null;
-    inflightDragOverColId = null;
-    if (!sourceId || sourceId === targetId) return;
-    const next = [...inflightColumnOrder];
-    const from = next.indexOf(sourceId);
-    let to = next.indexOf(targetId);
-    if (from === -1 || to === -1) return;
-    next.splice(from, 1);
-    if (from < to) to -= 1;
-    next.splice(to, 0, sourceId);
-    inflightColumnOrder = next;
-    storedInflightColumnOrder.set(next);
+    storedInflightColumnOrder.set(inflightColumnOrder);
   }
 
   function clearInflightColumnDrag() {
     inflightDragColId = null;
-    inflightDragOverColId = null;
+    storedInflightColumnOrder.set(inflightColumnOrder);
   }
 </script>
 
@@ -596,21 +597,27 @@
           Columns <span class="text-[10px] normal-case tracking-normal">(drag to reorder)</span>
         </DropdownMenu.Label>
         {#each inflightColumnOrder as columnId (columnId)}
-          {@const isDragOver = inflightDragOverColId === columnId && inflightDragColId !== columnId}
-          <DropdownMenu.CheckboxItem
-            checked={inflightColumnVisibility[columnId] !== false}
-            onCheckedChange={(visible) => toggleInflightColumn(columnId, !!visible)}
-            closeOnSelect={false}
+          <div
+            animate:flip={{ duration: 200 }}
             draggable="true"
+            role="button"
+            tabindex="-1"
+            aria-label="Drag to reorder {inflightColumnLabelMap[columnId] ?? columnId}"
             ondragstart={(event) => handleInflightColDragStart(event, columnId)}
             ondragover={(event) => handleInflightColDragOver(event, columnId)}
-            ondrop={(event) => handleInflightColDrop(event, columnId)}
+            ondrop={handleInflightColDrop}
             ondragend={clearInflightColumnDrag}
-            class={isDragOver ? "bg-accent" : ""}
+            class={inflightDragColId === columnId ? "opacity-40" : ""}
           >
-            <GripVertical class="text-muted-foreground/50 size-4 cursor-grab active:cursor-grabbing" />
-            <span class="flex-1">{inflightColumnLabelMap[columnId] ?? columnId}</span>
-          </DropdownMenu.CheckboxItem>
+            <DropdownMenu.CheckboxItem
+              checked={inflightColumnVisibility[columnId] !== false}
+              onCheckedChange={(visible) => toggleInflightColumn(columnId, !!visible)}
+              closeOnSelect={false}
+            >
+              <GripVertical class="text-muted-foreground/50 size-4 cursor-grab active:cursor-grabbing" />
+              <span class="flex-1">{inflightColumnLabelMap[columnId] ?? columnId}</span>
+            </DropdownMenu.CheckboxItem>
+          </div>
         {/each}
       </DropdownMenu.Content>
     </DropdownMenu.Root>
@@ -732,24 +739,29 @@
           <DropdownMenu.Label class="text-muted-foreground border-b px-3 py-2 text-xs font-medium uppercase tracking-wider">
             Columns <span class="text-[10px] normal-case tracking-normal">(drag to reorder)</span>
           </DropdownMenu.Label>
-          {#each table.getAllColumns() as column (column.id)}
-            {#if column.getCanHide()}
-              {@const isDragOver = dragOverColId === column.id && dragColId !== column.id}
+          {#each menuColumnIds as columnId (columnId)}
+            {@const column = table.getColumn(columnId)}
+            <div
+              animate:flip={{ duration: 200 }}
+              draggable="true"
+              role="button"
+              tabindex="-1"
+              aria-label="Drag to reorder {columnLabelMap[columnId] ?? columnId}"
+              ondragstart={(e) => handleColDragStart(e, columnId)}
+              ondragover={(e) => handleColDragOver(e, columnId)}
+              ondrop={handleColDrop}
+              ondragend={handleColDragEnd}
+              class={dragColId === columnId ? "opacity-40" : ""}
+            >
               <DropdownMenu.CheckboxItem
-                checked={column.getIsVisible()}
-                onCheckedChange={(v) => column.toggleVisibility(!!v)}
+                checked={column?.getIsVisible() ?? false}
+                onCheckedChange={(v) => column?.toggleVisibility(!!v)}
                 closeOnSelect={false}
-                draggable="true"
-                ondragstart={(e) => handleColDragStart(e, column.id)}
-                ondragover={(e) => handleColDragOver(e, column.id)}
-                ondrop={(e) => handleColDrop(e, column.id)}
-                ondragend={handleColDragEnd}
-                class={isDragOver ? "bg-accent" : ""}
               >
                 <GripVertical class="text-muted-foreground/50 size-4 cursor-grab active:cursor-grabbing" />
-                <span class="flex-1">{columnLabelMap[column.id] ?? column.id}</span>
+                <span class="flex-1">{columnLabelMap[columnId] ?? columnId}</span>
               </DropdownMenu.CheckboxItem>
-            {/if}
+            </div>
           {/each}
         </DropdownMenu.Content>
       </DropdownMenu.Root>
