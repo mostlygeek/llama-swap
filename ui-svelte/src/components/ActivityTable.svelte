@@ -494,6 +494,23 @@
     return ArrowUpDown;
   }
 
+  // A hovered row only yields once the pointer passes its midpoint in the
+  // direction of travel. Without that hysteresis the swap fires as soon as
+  // the pointer touches the neighbour and the rows oscillate.
+  //
+  // The midpoint comes from offsetTop/offsetHeight rather than
+  // getBoundingClientRect() because the rect includes the in-flight
+  // animate:flip transform: hit-testing a row that is still sliding compares
+  // against a position that no longer matches where it will settle.
+  function crossedMidpoint(e: DragEvent, movingDown: boolean): boolean {
+    const el = e.currentTarget as HTMLElement | null;
+    const parent = el?.offsetParent as HTMLElement | null;
+    if (!el || !parent) return true;
+    const top = parent.getBoundingClientRect().top - parent.scrollTop + el.offsetTop;
+    const midpoint = top + el.offsetHeight / 2;
+    return movingDown ? e.clientY > midpoint : e.clientY < midpoint;
+  }
+
   let dragColId: string | null = $state(null);
 
   function handleColDragStart(e: DragEvent, colId: string) {
@@ -516,6 +533,7 @@
     const fromIndex = order.indexOf(dragColId);
     const toIndex = order.indexOf(colId);
     if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) return;
+    if (!crossedMidpoint(e, toIndex > fromIndex)) return;
     order.splice(fromIndex, 1);
     order.splice(toIndex, 0, dragColId);
     columnOrder = order;
@@ -559,6 +577,7 @@
     const from = next.indexOf(inflightDragColId);
     const to = next.indexOf(id);
     if (from === -1 || to === -1 || from === to) return;
+    if (!crossedMidpoint(e, to > from)) return;
     next.splice(from, 1);
     next.splice(to, 0, inflightDragColId);
     inflightColumnOrder = next;
