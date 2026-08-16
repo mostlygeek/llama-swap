@@ -18,7 +18,6 @@
   } from "$lib/components/ui/data-table/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
-  import * as Select from "$lib/components/ui/select/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import {
@@ -33,8 +32,12 @@
     ArrowUpDown,
     CircleX,
     GripVertical,
+    ListFilter,
     X,
   } from "@lucide/svelte";
+  import { Badge } from "$lib/components/ui/badge/index.js";
+  import FilterDrawer from "./activity-table/FilterDrawer.svelte";
+  import { activeFilterCount, type ActivityFilters } from "../lib/activityFilters";
   import HeaderLabel from "./activity-table/HeaderLabel.svelte";
   import ViewCaptureButton from "./activity-table/ViewCaptureButton.svelte";
   import MetaCell from "./activity-table/MetaCell.svelte";
@@ -62,6 +65,8 @@
     compact?: boolean;
     emptyMessage?: string;
     cardClass?: string;
+    filters?: ActivityFilters;
+    onFiltersChange?: (filters: ActivityFilters) => void;
   }
 
   let {
@@ -83,7 +88,13 @@
     compact = false,
     emptyMessage = "No activity recorded",
     cardClass = "",
+    filters,
+    onFiltersChange,
   }: Props = $props();
+
+  // The filter drawer only renders when the parent owns filter state.
+  let filtersEnabled = $derived(!!filters && !!onFiltersChange);
+  let filterCount = $derived(filters ? activeFilterCount(filters) : 0);
 
   function formatDrafted(drafted: number, accepted: number): string {
     return drafted > 0
@@ -170,6 +181,9 @@
   // svelte-ignore state_referenced_locally
   const storedInflightOpen = persistentStore<boolean>(`${storagePrefix}-inflight-open`, true);
 
+  // svelte-ignore state_referenced_locally
+  const storedFilterOpen = persistentStore<boolean>(`${storagePrefix}-filter-open`, false);
+
   function buildInflightColumnMeta(withModel: boolean): ColMeta[] {
     const cols: ColMeta[] = [
       { id: "cancel", label: "Cancel", defaultVisible: true },
@@ -246,6 +260,7 @@
     onSortChange ? (sort ? [{ id: sort, desc: order === "desc" }] : []) : localSorting
   );
   let inflightOpen = $state($storedInflightOpen);
+  let filterOpen = $state($storedFilterOpen);
 
   let selectedCapture = $state<ReqRespCapture | null>(null);
   let dialogOpen = $state(false);
@@ -288,6 +303,11 @@
     storedInflightOpen.set(open);
   }
 
+  function setFilterOpen(open: boolean) {
+    filterOpen = open;
+    storedFilterOpen.set(open);
+  }
+
   async function cancelInflight(id: string) {
     if (cancelingInflightIds.includes(id)) return;
     cancelingInflightIds = [...cancelingInflightIds, id];
@@ -304,7 +324,7 @@
         id: "id",
         accessorKey: "id",
         header: "ID",
-        cell: ({ row }) => String(row.original.id + 1),
+        cell: ({ row }) => String(row.original.id),
       },
       {
         id: "time",
@@ -462,7 +482,14 @@
     columnOrder.filter((id) => table.getColumn(id)?.getCanHide() ?? false)
   );
 
-  let thClass = $derived(compact ? "px-2 py-2 h-9" : "px-3 py-3 h-12");
+  // The header sticks to the top of the scrolling table container. It needs an
+  // opaque background so rows pass underneath, and the bottom rule is drawn as
+  // an inset shadow because a collapsed table border does not paint reliably on
+  // a sticky cell.
+  let thClass = $derived(
+    (compact ? "px-2 py-2 h-9" : "px-3 py-3 h-12") +
+      " bg-card sticky top-0 z-10 shadow-[inset_0_-1px_0_var(--border)]"
+  );
   let tdClass = $derived(compact ? "px-2 py-2" : "px-3 py-4");
   let inflightThClass = $derived(compact ? "h-7 px-2 py-1" : "h-8 px-3 py-1.5");
   let inflightTdClass = $derived(compact ? "px-2 py-1" : "px-3 py-1.5");
@@ -730,22 +757,25 @@
       {/if}
     </div>
     <div class="flex items-center gap-2">
-      {#if showPagination}
-        <span class="text-muted-foreground text-xs">Rows</span>
-        <Select.Root
-          type="single"
-          value={String(limit)}
-          onValueChange={(v) => setServerPageSize(Number(v))}
+      {#if filtersEnabled}
+        <button
+          type="button"
+          class="hover:bg-muted relative inline-flex size-7 items-center justify-center rounded-[min(var(--radius-md),12px)] {filterOpen
+            ? 'bg-muted'
+            : ''}"
+          title={filterOpen ? "Hide filters" : "Show filters"}
+          aria-expanded={filterOpen}
+          onclick={() => setFilterOpen(!filterOpen)}
         >
-          <Select.Trigger size="sm" class="h-7 w-[4.5rem] text-xs">
-            {limit}
-          </Select.Trigger>
-          <Select.Content>
-            {#each [10, 25, 50, 100] as size (size)}
-              <Select.Item value={String(size)}>{size}</Select.Item>
-            {/each}
-          </Select.Content>
-        </Select.Root>
+          <ListFilter class="size-4" />
+          {#if filterCount > 0}
+            <Badge
+              class="absolute -right-1.5 -top-1.5 size-4 justify-center rounded-full p-0 text-[10px] tabular-nums"
+            >
+              {filterCount}
+            </Badge>
+          {/if}
+        </button>
       {/if}
       <DropdownMenu.Root>
         <DropdownMenu.Trigger
@@ -786,7 +816,27 @@
       </DropdownMenu.Root>
     </div>
   </Card.Header>
-  <Card.Content class="overflow-x-auto p-0">
+  {#if filtersEnabled && filterOpen && filters && onFiltersChange}
+    <FilterDrawer
+      {filters}
+      onchange={onFiltersChange}
+      showRows={showPagination}
+      {limit}
+      onLimitChange={setServerPageSize}
+    />
+  {/if}
+  <!--
+    Table.Root always wraps the table in an overflow-x-auto div, and CSS
+    promotes that box's overflow-y to auto as well, making it the sticky
+    header's scrollport. Bounding its height here is what turns it into a real
+    scrolling box so `sticky top-0` on the header has something to stick to.
+    Horizontal scrolling stays on that same wrapper, so Card.Content does not
+    need its own overflow. Override the bound per call site by setting
+    --activity-table-max-h (e.g. cardClass="[--activity-table-max-h:70vh]").
+  -->
+  <Card.Content
+    class="p-0 [&>[data-slot=table-container]]:max-h-[var(--activity-table-max-h,60vh)] [&>[data-slot=table-container]]:overflow-y-auto"
+  >
     <Table.Root class="min-w-full">
       <Table.Header>
         {#each table.getHeaderGroups() as headerGroup (headerGroup.id)}

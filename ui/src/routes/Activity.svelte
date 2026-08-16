@@ -4,10 +4,19 @@
   import { activityRevision, getActivity, getActivityStats, inflightRequestEntries } from "../stores/api";
   import { connectionState } from "../stores/theme";
   import { persistentStore } from "../stores/persistent";
+  import {
+    emptyActivityFilters,
+    normalizeActivityFilters,
+    type ActivityFilters,
+  } from "../lib/activityFilters";
   import ActivityStats from "../components/ActivityStats.svelte";
   import ActivityTable from "../components/ActivityTable.svelte";
 
   const storedPageSize = persistentStore<number>("activity-page-size", 25);
+  const storedFilters = persistentStore<ActivityFilters>(
+    "activity-filters",
+    emptyActivityFilters()
+  );
 
   let rows = $state<ActivityLogEntry[]>([]);
   let stats = $state<ActivityStatsData | null>(null);
@@ -17,6 +26,8 @@
   let order = $state<"asc" | "desc">("desc");
   let total = $state(0);
   let totalPages = $state(0);
+  // svelte-ignore state_referenced_locally
+  let filters = $state<ActivityFilters>(normalizeActivityFilters($storedFilters));
   let requestID = 0;
   let refreshTimer: ReturnType<typeof setTimeout> | null = null;
   let lastRefresh = 0;
@@ -30,7 +41,9 @@
     const id = ++requestID;
     try {
       const [activity, activityStats] = await Promise.all([
-        getActivity({ page, limit, sort, order }),
+        getActivity({ page, limit, sort, order, filters }),
+        // Stats stay unfiltered: the cards describe all recorded activity, not
+        // the current table view.
         getActivityStats(),
       ]);
       if (id !== requestID) return;
@@ -59,6 +72,12 @@
     page = 1;
   }
 
+  function setFilters(nextFilters: ActivityFilters) {
+    filters = nextFilters;
+    page = 1;
+    storedFilters.set(nextFilters);
+  }
+
   // scheduleRefresh throttles SSE-driven refreshes to one per second; a
   // user-driven refreshActivity cancels any pending timer.
   function scheduleRefresh() {
@@ -77,6 +96,7 @@
     limit;
     sort;
     order;
+    filters;
     untrack(() => {
       refreshActivity();
     });
@@ -123,6 +143,8 @@
     {sort}
     {order}
     onSortChange={setSort}
+    {filters}
+    onFiltersChange={setFilters}
     cardClass="min-h-[30rem] overflow-auto"
     emptyMessage="No activity recorded"
   />

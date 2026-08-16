@@ -4,6 +4,11 @@
   import { activityRevision, getActivity, inflightRequestEntries } from "../../stores/api";
   import { connectionState } from "../../stores/theme";
   import { persistentStore } from "../../stores/persistent";
+  import {
+    emptyActivityFilters,
+    normalizeActivityFilters,
+    type ActivityFilters,
+  } from "../../lib/activityFilters";
   import ActivityTable from "../ActivityTable.svelte";
 
   interface Props {
@@ -13,6 +18,10 @@
   let { modelId }: Props = $props();
 
   const storedPageSize = persistentStore<number>("model-detail-activity-page-size", 25);
+  const storedFilters = persistentStore<ActivityFilters>(
+    "model-detail-activity-filters",
+    emptyActivityFilters()
+  );
 
   let modelMetrics = $state<ActivityLogEntry[]>([]);
   let page = $state(1);
@@ -21,6 +30,8 @@
   let order = $state<"asc" | "desc">("desc");
   let total = $state(0);
   let totalPages = $state(0);
+  // svelte-ignore state_referenced_locally
+  let filters = $state<ActivityFilters>(normalizeActivityFilters($storedFilters));
   let requestID = 0;
   let refreshTimer: ReturnType<typeof setTimeout> | null = null;
   let lastRefresh = 0;
@@ -37,7 +48,7 @@
     lastRefresh = Date.now();
     const id = ++requestID;
     try {
-      const activity = await getActivity({ model: modelId, page, limit, sort, order });
+      const activity = await getActivity({ model: modelId, page, limit, sort, order, filters });
       if (id !== requestID) return;
       modelMetrics = activity.data;
       total = activity.total;
@@ -63,6 +74,12 @@
     page = 1;
   }
 
+  function setFilters(nextFilters: ActivityFilters) {
+    filters = nextFilters;
+    page = 1;
+    storedFilters.set(nextFilters);
+  }
+
   // scheduleRefresh throttles SSE-driven refreshes to one per second; a
   // user-driven refreshActivity cancels any pending timer.
   function scheduleRefresh() {
@@ -83,6 +100,7 @@
     limit;
     sort;
     order;
+    filters;
     untrack(() => {
       refreshActivity();
     });
@@ -124,6 +142,8 @@
   {sort}
   {order}
   onSortChange={setSort}
+  {filters}
+  onFiltersChange={setFilters}
   compact={true}
   title="Recent Activity"
   emptyMessage="No activity recorded for this model"

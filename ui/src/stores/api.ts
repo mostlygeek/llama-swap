@@ -16,6 +16,7 @@ import type {
   PlaygroundModelType,
   HardwareSnapshot,
 } from "../lib/types";
+import { appendActivityFilters, type ActivityFilters } from "../lib/activityFilters";
 import { connectionState } from "./theme";
 
 const LOG_LENGTH_LIMIT = 1024 * 100; /* 100KB of log data */
@@ -351,6 +352,7 @@ export async function getActivity(params: {
   limit?: number;
   sort?: string;
   order?: "asc" | "desc";
+  filters?: ActivityFilters;
 } = {}): Promise<ActivityPage> {
   const query = new URLSearchParams();
   if (params.model) query.set("model", params.model);
@@ -358,6 +360,10 @@ export async function getActivity(params: {
   if (params.limit) query.set("limit", String(params.limit));
   if (params.sort) query.set("sort", params.sort);
   if (params.order) query.set("order", params.order);
+  // Drawer filters only ever add id bounds, so they never conflict with a
+  // model pinned above. The API also accepts repeated "model" params and
+  // start/end timestamps, which no UI control currently produces.
+  if (params.filters) appendActivityFilters(query, params.filters);
   const url = query.size > 0 ? `/api/metrics/activity?${query}` : "/api/metrics/activity";
 
   const response = await fetch(url);

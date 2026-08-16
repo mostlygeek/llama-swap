@@ -185,7 +185,7 @@
     {#if capture}
       <Dialog.Header class="border-b border-border px-4 py-3">
         <Dialog.Title class="text-lg font-bold">
-          Capture #{capture.id + 1}{#if capture.req_path}
+          Capture #{capture.id}{#if capture.req_path}
             <span class="font-mono text-base font-normal text-muted-foreground">{capture.req_path}</span>{/if}
         </Dialog.Title>
       </Dialog.Header>

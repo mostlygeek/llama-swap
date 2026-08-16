@@ -199,13 +199,76 @@ func parseActivityLimit(raw string) (int, error) {
 	return 0, fmt.Errorf("limit must be between 1 and 999")
 }
 
+// parseActivityTime reads an optional RFC3339 timestamp param, matching the
+// ?after= convention used by handleAPIPerformance. A missing param is the zero
+// time, which the store treats as unbounded. The UI does not send these; they
+// exist for direct API consumers.
+func parseActivityTime(r *http.Request, param string) (time.Time, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get(param))
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	parsed, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid '%s' timestamp, use RFC3339 format", param)
+	}
+	return parsed, nil
+}
+
+// parseActivityID reads an optional row id bound. A missing param is 0, which
+// the store treats as unbounded.
+func parseActivityID(r *http.Request, param string) (int, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get(param))
+	if raw == "" {
+		return 0, nil
+	}
+	id, err := strconv.Atoi(raw)
+	if err != nil || id < 1 {
+		return 0, fmt.Errorf("%s must be >= 1", param)
+	}
+	return id, nil
+}
+
 func parseActivityQuery(r *http.Request) (store.ActivityQuery, error) {
 	const defaultLimit = 25
 	query := store.ActivityQuery{
-		Model: strings.TrimSpace(r.URL.Query().Get("model")),
 		Limit: defaultLimit,
 		Page:  1,
 	}
+
+	// model repeats to filter on several models at once (?model=a&model=b).
+	// A single ?model=x stays a plain exact match.
+	for _, raw := range r.URL.Query()["model"] {
+		if model := strings.TrimSpace(raw); model != "" {
+			query.Models = append(query.Models, model)
+		}
+	}
+
+	start, err := parseActivityTime(r, "start")
+	if err != nil {
+		return store.ActivityQuery{}, err
+	}
+	end, err := parseActivityTime(r, "end")
+	if err != nil {
+		return store.ActivityQuery{}, err
+	}
+	if !start.IsZero() && !end.IsZero() && start.After(end) {
+		return store.ActivityQuery{}, fmt.Errorf("start must be before end")
+	}
+	query.Start, query.End = start, end
+
+	minID, err := parseActivityID(r, "min_id")
+	if err != nil {
+		return store.ActivityQuery{}, err
+	}
+	maxID, err := parseActivityID(r, "max_id")
+	if err != nil {
+		return store.ActivityQuery{}, err
+	}
+	if minID > 0 && maxID > 0 && minID > maxID {
+		return store.ActivityQuery{}, fmt.Errorf("min_id must be <= max_id")
+	}
+	query.MinID, query.MaxID = minID, maxID
 
 	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
 		limit, err := parseActivityLimit(raw)
