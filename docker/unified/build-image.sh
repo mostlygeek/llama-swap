@@ -274,6 +274,35 @@ if [[ "$BACKEND" == "cuda" ]]; then
 fi
 echo "All expected binaries verified: ${VERIFIED_LIST}"
 
+# audio.cpp must be a deployment build: the model_specs catalog is compiled into
+# the binaries, since the image ships no model_specs/ directory for the runtime
+# to discover. Without it every load of a package without an embedded spec fails
+# with "model spec not found for family ...". The compiled catalog is raw JSON in
+# .rodata, so grepping the binary for a known spec confirms it is there.
+if ! docker run --rm --entrypoint grep "${DOCKER_IMAGE_TAG}" \
+        -aq '"family": "pocket_tts"' /usr/local/bin/audiocpp_server; then
+    echo "ERROR: audiocpp_server was not built with AUDIOCPP_DEPLOYMENT_BUILD=ON;"
+    echo "       its compiled model spec catalog is missing."
+    exit 1
+fi
+
+# Run the binary so a missing runtime library is caught here rather than on a
+# user's first request. CUDA builds link libcuda.so.1, which the NVIDIA
+# container runtime only injects with --gpus; point at the stub copied into the
+# image so this works on a build machine with no GPU.
+SMOKE_ARGS=(--rm)
+if [[ "$BACKEND" == "cuda" ]]; then
+    SMOKE_ARGS+=(-e "LD_LIBRARY_PATH=/usr/local/cuda/lib64/stubs:/usr/local/cuda/lib64")
+fi
+
+if ! docker run "${SMOKE_ARGS[@]}" --entrypoint audiocpp_server "${DOCKER_IMAGE_TAG}" --help >/dev/null; then
+    echo "ERROR: audiocpp_server --help failed; the binary or its runtime"
+    echo "       libraries are broken in the image."
+    exit 1
+fi
+
+echo "audio.cpp verified: deployment build (compiled model spec catalog), binary runs"
+
 echo ""
 echo "=========================================="
 echo "Building rootless image..."
