@@ -4,13 +4,13 @@ on:
   push:
     branches: [ "main" ]
     paths:
-      - 'ui-svelte/**'
+      - 'ui/**'
       - '.github/workflows/ui-tests.yml'
 
   pull_request:
     branches: [ "main" ]
     paths:
-      - 'ui-svelte/**'
+      - 'ui/**'
       - '.github/workflows/ui-tests.yml'
 
   workflow_dispatch:
@@ -27,7 +27,7 @@ jobs:
       with:
         node-version: '24'
         cache: 'npm'
-        cache-dependency-path: ui-svelte/package-lock.json
+        cache-dependency-path: ui/package-lock.json
 
     - name: Run UI tests
       run: make test-ui

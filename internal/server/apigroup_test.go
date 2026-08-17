@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -414,6 +415,93 @@ func TestServer_APIMetricsActivity(t *testing.T) {
 	}
 	if page.Data[0].ID != storedM1.ID || !page.Data[0].HasCapture {
 		t.Fatalf("entry = %+v", page.Data[0])
+	}
+}
+
+func TestServer_APIMetricsActivityFilters(t *testing.T) {
+	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
+
+	// ids 1..4 at ts_created 1000..1003, models m1/m2/m1/m3.
+	for i, model := range []string{"m1", "m2", "m1", "m3"} {
+		if _, ok := s.metrics.queueMetrics(ActivityLogEntry{
+			Timestamp: time.Unix(int64(1000+i), 0),
+			Model:     model,
+			ReqPath:   "/v1/chat/completions",
+		}); !ok {
+			t.Fatal("queueMetrics failed")
+		}
+	}
+
+	// ts_created 1000..1003 as RFC3339. The UI never sends these; they are
+	// part of the API for direct consumers.
+	at := func(offset int) string {
+		return url.QueryEscape(time.Unix(int64(1000+offset), 0).UTC().Format(time.RFC3339))
+	}
+
+	tests := []struct {
+		name  string
+		query string
+		want  []int
+	}{
+		{"repeated model", "?model=m1&model=m3", []int{4, 3, 1}},
+		{"single model still works", "?model=m2", []int{2}},
+		{"id range", "?min_id=2&max_id=3", []int{3, 2}},
+		{"min id only", "?min_id=4", []int{4}},
+		{"max id only", "?max_id=2", []int{2, 1}},
+		{"id range and model combined", "?model=m1&min_id=2", []int{3}},
+		{"start only", "?start=" + at(2), []int{4, 3}},
+		{"end only", "?end=" + at(1), []int{2, 1}},
+		{"time range inclusive", "?start=" + at(1) + "&end=" + at(2), []int{3, 2}},
+		{"time and model combined", "?start=" + at(0) + "&end=" + at(3) + "&model=m1", []int{3, 1}},
+		{"time and id range combined", "?start=" + at(0) + "&min_id=3", []int{4, 3}},
+		{"no filters", "", []int{4, 3, 2, 1}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/metrics/activity"+tt.query, nil))
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d body=%q", w.Code, w.Body.String())
+			}
+			var page store.ActivityPage
+			if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if page.Total != len(tt.want) {
+				t.Fatalf("Total = %d, want %d", page.Total, len(tt.want))
+			}
+			if len(page.Data) != len(tt.want) {
+				t.Fatalf("len(Data) = %d, want %d", len(page.Data), len(tt.want))
+			}
+			for i, wantID := range tt.want {
+				if page.Data[i].ID != wantID {
+					t.Fatalf("Data[%d].ID = %d, want %d", i, page.Data[i].ID, wantID)
+				}
+			}
+		})
+	}
+}
+
+func TestServer_APIMetricsActivityInvalidFilters(t *testing.T) {
+	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
+
+	for _, query := range []string{
+		"?min_id=abc",
+		"?max_id=0",
+		"?min_id=-1",
+		"?min_id=9&max_id=2",
+		"?start=nonsense",
+		"?end=2026-01-01",
+		"?start=2026-02-01T00:00:00Z&end=2026-01-01T00:00:00Z",
+	} {
+		t.Run(query, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/metrics/activity"+query, nil))
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d (body=%q)", w.Code, http.StatusBadRequest, w.Body.String())
+			}
+		})
 	}
 }
 

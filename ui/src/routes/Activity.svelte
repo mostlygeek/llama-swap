@@ -1,33 +1,36 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import type { ActivityLogEntry } from "../../lib/types";
-  import { activityRevision, getActivity, inflightRequestEntries } from "../../stores/api";
-  import { connectionState } from "../../stores/theme";
-  import { persistentStore } from "../../stores/persistent";
-  import ActivityTable from "../ActivityTable.svelte";
+  import type { ActivityLogEntry, ActivityStatsData } from "../lib/types";
+  import { activityRevision, getActivity, getActivityStats, inflightRequestEntries } from "../stores/api";
+  import { connectionState } from "../stores/theme";
+  import { persistentStore } from "../stores/persistent";
+  import {
+    emptyActivityFilters,
+    normalizeActivityFilters,
+    type ActivityFilters,
+  } from "../lib/activityFilters";
+  import ActivityStats from "../components/ActivityStats.svelte";
+  import ActivityTable from "../components/ActivityTable.svelte";
 
-  interface Props {
-    modelId: string;
-  }
+  const storedPageSize = persistentStore<number>("activity-page-size", 25);
+  const storedFilters = persistentStore<ActivityFilters>(
+    "activity-filters",
+    emptyActivityFilters()
+  );
 
-  let { modelId }: Props = $props();
-
-  const storedPageSize = persistentStore<number>("model-detail-activity-page-size", 25);
-
-  let modelMetrics = $state<ActivityLogEntry[]>([]);
+  let rows = $state<ActivityLogEntry[]>([]);
+  let stats = $state<ActivityStatsData | null>(null);
   let page = $state(1);
   let limit = $state($storedPageSize);
   let sort = $state("id");
   let order = $state<"asc" | "desc">("desc");
   let total = $state(0);
   let totalPages = $state(0);
+  // svelte-ignore state_referenced_locally
+  let filters = $state<ActivityFilters>(normalizeActivityFilters($storedFilters));
   let requestID = 0;
   let refreshTimer: ReturnType<typeof setTimeout> | null = null;
   let lastRefresh = 0;
-
-  let modelInflightRequests = $derived(
-    $inflightRequestEntries.filter((request) => request.model === modelId)
-  );
 
   async function refreshActivity() {
     if (refreshTimer !== null) {
@@ -37,13 +40,19 @@
     lastRefresh = Date.now();
     const id = ++requestID;
     try {
-      const activity = await getActivity({ model: modelId, page, limit, sort, order });
+      const [activity, activityStats] = await Promise.all([
+        getActivity({ page, limit, sort, order, filters }),
+        // Stats stay unfiltered: the cards describe all recorded activity, not
+        // the current table view.
+        getActivityStats(),
+      ]);
       if (id !== requestID) return;
-      modelMetrics = activity.data;
+      rows = activity.data;
       total = activity.total;
       totalPages = activity.total_pages;
+      stats = activityStats;
     } catch (error) {
-      console.error("Failed to refresh model activity:", error);
+      console.error("Failed to refresh activity:", error);
     }
   }
 
@@ -63,6 +72,12 @@
     page = 1;
   }
 
+  function setFilters(nextFilters: ActivityFilters) {
+    filters = nextFilters;
+    page = 1;
+    storedFilters.set(nextFilters);
+  }
+
   // scheduleRefresh throttles SSE-driven refreshes to one per second; a
   // user-driven refreshActivity cancels any pending timer.
   function scheduleRefresh() {
@@ -74,15 +89,14 @@
     }, wait);
   }
 
-  // Refresh immediately on connect and when the user changes the model or
-  // paging/sorting.
+  // Refresh immediately on connect and when the user changes paging/sorting.
   $effect(() => {
     if ($connectionState !== "connected") return;
-    modelId;
     page;
     limit;
     sort;
     order;
+    filters;
     untrack(() => {
       refreshActivity();
     });
@@ -109,22 +123,29 @@
   });
 </script>
 
-<ActivityTable
-  metrics={modelMetrics}
-  inflightRequests={modelInflightRequests}
-  storagePrefix="model-detail"
-  showModelColumn={false}
-  showPagination={true}
-  {page}
-  {limit}
-  {total}
-  totalPages={totalPages}
-  onPageChange={setPage}
-  onPageSizeChange={setPageSize}
-  {sort}
-  {order}
-  onSortChange={setSort}
-  compact={true}
-  title="Recent Activity"
-  emptyMessage="No activity recorded for this model"
-/>
+<div class="p-2">
+  <div class="mt-4 mb-4">
+    <ActivityStats {stats} />
+  </div>
+
+  <ActivityTable
+    metrics={rows}
+    inflightRequests={$inflightRequestEntries}
+    storagePrefix="activity"
+    showModelColumn={true}
+    showPagination={true}
+    {page}
+    {limit}
+    {total}
+    totalPages={totalPages}
+    onPageChange={setPage}
+    onPageSizeChange={setPageSize}
+    {sort}
+    {order}
+    onSortChange={setSort}
+    {filters}
+    onFiltersChange={setFilters}
+    cardClass="min-h-[30rem] overflow-auto"
+    emptyMessage="No activity recorded"
+  />
+</div>

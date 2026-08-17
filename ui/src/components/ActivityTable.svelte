@@ -2,6 +2,7 @@
   import type { ActivityLogEntry, InflightRequestEntry, ReqRespCapture } from "../lib/types";
   import { cancelInflightRequest, getCapture, uiConfig } from "../stores/api";
   import { persistentStore } from "../stores/persistent";
+  import { flip } from "svelte/animate";
   import CaptureDialog from "./CaptureDialog.svelte";
   import {
     type ColumnDef,
@@ -17,7 +18,6 @@
   } from "$lib/components/ui/data-table/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
-  import * as Select from "$lib/components/ui/select/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import {
@@ -31,14 +31,20 @@
     ArrowDown,
     ArrowUpDown,
     CircleX,
+    Download,
     GripVertical,
+    ListFilter,
     X,
   } from "@lucide/svelte";
+  import FilterDrawer from "./activity-table/FilterDrawer.svelte";
+  import { activeFilterCount, type ActivityFilters } from "../lib/activityFilters";
   import HeaderLabel from "./activity-table/HeaderLabel.svelte";
   import ViewCaptureButton from "./activity-table/ViewCaptureButton.svelte";
   import MetaCell from "./activity-table/MetaCell.svelte";
   import ModelLink from "./activity-table/ModelLink.svelte";
   import MiddleEllipsis from "./activity-table/MiddleEllipsis.svelte";
+  import ExportDialog from "./activity-table/ExportDialog.svelte";
+  import { buildActivityMarkdown, formatDrafted } from "../lib/activityExport";
   import { formatDuration, formatSpeed, formatRelativeTime } from "../lib/format";
   import { formatBytes, liveElapsedMs, requestHeader, sessionID } from "../lib/inflight";
 
@@ -61,6 +67,8 @@
     compact?: boolean;
     emptyMessage?: string;
     cardClass?: string;
+    filters?: ActivityFilters;
+    onFiltersChange?: (filters: ActivityFilters) => void;
   }
 
   let {
@@ -82,13 +90,13 @@
     compact = false,
     emptyMessage = "No activity recorded",
     cardClass = "",
+    filters,
+    onFiltersChange,
   }: Props = $props();
 
-  function formatDrafted(drafted: number, accepted: number): string {
-    return drafted > 0
-      ? ((accepted * 100) / drafted).toFixed(1) + "% (" + accepted + "/" + drafted + ")"
-      : "-";
-  }
+  // The filter drawer only renders when the parent owns filter state.
+  let filtersEnabled = $derived(!!filters && !!onFiltersChange);
+  let filterCount = $derived(filters ? activeFilterCount(filters) : 0);
 
   interface ColMeta {
     id: string;
@@ -110,8 +118,8 @@
       { id: "prompt", label: "Prompt", defaultVisible: true },
       { id: "generated", label: "Generated", defaultVisible: true },
       { id: "drafted", label: "Drafted", defaultVisible: false },
-      { id: "prompt_speed", label: "Prompt Speed", defaultVisible: true },
-      { id: "gen_speed", label: "Gen Speed", defaultVisible: true },
+      { id: "prompt_speed", label: "Prefill", defaultVisible: true },
+      { id: "gen_speed", label: "Decode", defaultVisible: true },
       { id: "duration", label: "Duration", defaultVisible: true },
       { id: "capture", label: "Capture", defaultVisible: true },
       { id: "meta", label: "Meta", defaultVisible: false }
@@ -168,6 +176,9 @@
 
   // svelte-ignore state_referenced_locally
   const storedInflightOpen = persistentStore<boolean>(`${storagePrefix}-inflight-open`, true);
+
+  // svelte-ignore state_referenced_locally
+  const storedFilterOpen = persistentStore<boolean>(`${storagePrefix}-filter-open`, false);
 
   function buildInflightColumnMeta(withModel: boolean): ColMeta[] {
     const cols: ColMeta[] = [
@@ -245,9 +256,12 @@
     onSortChange ? (sort ? [{ id: sort, desc: order === "desc" }] : []) : localSorting
   );
   let inflightOpen = $state($storedInflightOpen);
+  let filterOpen = $state($storedFilterOpen);
 
   let selectedCapture = $state<ReqRespCapture | null>(null);
   let dialogOpen = $state(false);
+  let exportOpen = $state(false);
+  let exportMarkdown = $state("");
   let loadingCaptureId = $state<number | null>(null);
   let cancelingInflightIds = $state<string[]>([]);
   let inflightNowMs = $state(performance.now());
@@ -282,9 +296,29 @@
     selectedCapture = null;
   }
 
+  // Built on demand rather than in a $derived: the source only matters while
+  // the dialog is open, and activity refreshes land every second.
+  function openExport() {
+    exportMarkdown = buildActivityMarkdown(
+      table.getRowModel().rows.map((row) => row.original),
+      exportColumns
+    );
+    exportOpen = true;
+  }
+
+  function closeExport() {
+    exportOpen = false;
+    exportMarkdown = "";
+  }
+
   function setInflightOpen(open: boolean) {
     inflightOpen = open;
     storedInflightOpen.set(open);
+  }
+
+  function setFilterOpen(open: boolean) {
+    filterOpen = open;
+    storedFilterOpen.set(open);
   }
 
   async function cancelInflight(id: string) {
@@ -303,7 +337,7 @@
         id: "id",
         accessorKey: "id",
         header: "ID",
-        cell: ({ row }) => String(row.original.id + 1),
+        cell: ({ row }) => String(row.original.id),
       },
       {
         id: "time",
@@ -373,13 +407,13 @@
       {
         id: "prompt_speed",
         accessorFn: (row) => row.tokens.prompt_per_second,
-        header: "Prompt Speed",
+        header: "Prefill",
         cell: ({ row }) => formatSpeed(row.original.tokens.prompt_per_second),
       },
       {
         id: "gen_speed",
         accessorFn: (row) => row.tokens.tokens_per_second,
-        header: "Gen Speed",
+        header: "Decode",
         cell: ({ row }) => formatSpeed(row.original.tokens.tokens_per_second),
       },
       {
@@ -455,7 +489,29 @@
     getSortedRowModel: getSortedRowModel(),
   });
 
-  let thClass = $derived(compact ? "px-2 py-2 h-9" : "px-3 py-3 h-12");
+  // Precomputed (rather than filtered inline in the template) because the
+  // animate:flip element must be the sole child of the each block.
+  let menuColumnIds = $derived(
+    columnOrder.filter((id) => table.getColumn(id)?.getCanHide() ?? false)
+  );
+
+  // Mirrors what is on screen (order and visibility), minus Capture: it is a
+  // button that fetches a body on click, so it has no text form to export.
+  let exportColumns = $derived(
+    table
+      .getVisibleLeafColumns()
+      .filter((column) => column.id !== "capture")
+      .map((column) => ({ id: column.id, label: columnLabelMap[column.id] ?? column.id }))
+  );
+
+  // The header sticks to the top of the scrolling table container. It needs an
+  // opaque background so rows pass underneath, and the bottom rule is drawn as
+  // an inset shadow because a collapsed table border does not paint reliably on
+  // a sticky cell.
+  let thClass = $derived(
+    (compact ? "px-2 py-2 h-9" : "px-3 py-3 h-12") +
+      " bg-card sticky top-0 z-10 shadow-[inset_0_-1px_0_var(--border)]"
+  );
   let tdClass = $derived(compact ? "px-2 py-2" : "px-3 py-4");
   let inflightThClass = $derived(compact ? "h-7 px-2 py-1" : "h-8 px-3 py-1.5");
   let inflightTdClass = $derived(compact ? "px-2 py-1" : "px-3 py-1.5");
@@ -487,8 +543,24 @@
     return ArrowUpDown;
   }
 
+  // A hovered row only yields once the pointer passes its midpoint in the
+  // direction of travel. Without that hysteresis the swap fires as soon as
+  // the pointer touches the neighbour and the rows oscillate.
+  //
+  // The midpoint comes from offsetTop/offsetHeight rather than
+  // getBoundingClientRect() because the rect includes the in-flight
+  // animate:flip transform: hit-testing a row that is still sliding compares
+  // against a position that no longer matches where it will settle.
+  function crossedMidpoint(e: DragEvent, movingDown: boolean): boolean {
+    const el = e.currentTarget as HTMLElement | null;
+    const parent = el?.offsetParent as HTMLElement | null;
+    if (!el || !parent) return true;
+    const top = parent.getBoundingClientRect().top - parent.scrollTop + el.offsetTop;
+    const midpoint = top + el.offsetHeight / 2;
+    return movingDown ? e.clientY > midpoint : e.clientY < midpoint;
+  }
+
   let dragColId: string | null = $state(null);
-  let dragOverColId: string | null = $state(null);
 
   function handleColDragStart(e: DragEvent, colId: string) {
     dragColId = colId;
@@ -498,32 +570,33 @@
     }
   }
 
+  // Reorders columnOrder live as the drag crosses other rows, so the
+  // animate:flip on each row animates the columns sliding out of the way
+  // and the menu's order always matches what onColumnOrderChange applies
+  // to the table.
   function handleColDragOver(e: DragEvent, colId: string) {
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-    if (dragOverColId !== colId) dragOverColId = colId;
+    if (!dragColId || dragColId === colId) return;
+    const order = [...columnOrder];
+    const fromIndex = order.indexOf(dragColId);
+    const toIndex = order.indexOf(colId);
+    if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) return;
+    if (!crossedMidpoint(e, toIndex > fromIndex)) return;
+    order.splice(fromIndex, 1);
+    order.splice(toIndex, 0, dragColId);
+    columnOrder = order;
   }
 
-  function handleColDrop(e: DragEvent, targetId: string) {
+  function handleColDrop(e: DragEvent) {
     e.preventDefault();
-    const sourceId = dragColId;
     dragColId = null;
-    dragOverColId = null;
-    if (!sourceId || sourceId === targetId) return;
-    const order = [...columnOrder];
-    const fromIndex = order.indexOf(sourceId);
-    let toIndex = order.indexOf(targetId);
-    if (fromIndex === -1 || toIndex === -1) return;
-    order.splice(fromIndex, 1);
-    if (fromIndex < toIndex) toIndex -= 1;
-    order.splice(toIndex, 0, sourceId);
-    columnOrder = order;
-    storedColumnOrder.set(order);
+    storedColumnOrder.set(columnOrder);
   }
 
   function handleColDragEnd() {
     dragColId = null;
-    dragOverColId = null;
+    storedColumnOrder.set(columnOrder);
   }
 
   function formatInflightElapsed(request: InflightRequestEntry, nowMs: number): string {
@@ -536,7 +609,6 @@
   }
 
   let inflightDragColId: string | null = $state(null);
-  let inflightDragOverColId: string | null = $state(null);
 
   function handleInflightColDragStart(e: DragEvent, id: string) {
     inflightDragColId = id;
@@ -549,29 +621,26 @@
   function handleInflightColDragOver(e: DragEvent, id: string) {
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-    inflightDragOverColId = id;
+    if (!inflightDragColId || inflightDragColId === id) return;
+    const next = [...inflightColumnOrder];
+    const from = next.indexOf(inflightDragColId);
+    const to = next.indexOf(id);
+    if (from === -1 || to === -1 || from === to) return;
+    if (!crossedMidpoint(e, to > from)) return;
+    next.splice(from, 1);
+    next.splice(to, 0, inflightDragColId);
+    inflightColumnOrder = next;
   }
 
-  function handleInflightColDrop(e: DragEvent, targetId: string) {
+  function handleInflightColDrop(e: DragEvent) {
     e.preventDefault();
-    const sourceId = inflightDragColId;
     inflightDragColId = null;
-    inflightDragOverColId = null;
-    if (!sourceId || sourceId === targetId) return;
-    const next = [...inflightColumnOrder];
-    const from = next.indexOf(sourceId);
-    let to = next.indexOf(targetId);
-    if (from === -1 || to === -1) return;
-    next.splice(from, 1);
-    if (from < to) to -= 1;
-    next.splice(to, 0, sourceId);
-    inflightColumnOrder = next;
-    storedInflightColumnOrder.set(next);
+    storedInflightColumnOrder.set(inflightColumnOrder);
   }
 
   function clearInflightColumnDrag() {
     inflightDragColId = null;
-    inflightDragOverColId = null;
+    storedInflightColumnOrder.set(inflightColumnOrder);
   }
 </script>
 
@@ -596,21 +665,27 @@
           Columns <span class="text-[10px] normal-case tracking-normal">(drag to reorder)</span>
         </DropdownMenu.Label>
         {#each inflightColumnOrder as columnId (columnId)}
-          {@const isDragOver = inflightDragOverColId === columnId && inflightDragColId !== columnId}
-          <DropdownMenu.CheckboxItem
-            checked={inflightColumnVisibility[columnId] !== false}
-            onCheckedChange={(visible) => toggleInflightColumn(columnId, !!visible)}
-            closeOnSelect={false}
+          <div
+            animate:flip={{ duration: 200 }}
             draggable="true"
+            role="button"
+            tabindex="-1"
+            aria-label="Drag to reorder {inflightColumnLabelMap[columnId] ?? columnId}"
             ondragstart={(event) => handleInflightColDragStart(event, columnId)}
             ondragover={(event) => handleInflightColDragOver(event, columnId)}
-            ondrop={(event) => handleInflightColDrop(event, columnId)}
+            ondrop={handleInflightColDrop}
             ondragend={clearInflightColumnDrag}
-            class={isDragOver ? "bg-accent" : ""}
+            class={inflightDragColId === columnId ? "opacity-40" : ""}
           >
-            <GripVertical class="text-muted-foreground/50 size-4 cursor-grab active:cursor-grabbing" />
-            <span class="flex-1">{inflightColumnLabelMap[columnId] ?? columnId}</span>
-          </DropdownMenu.CheckboxItem>
+            <DropdownMenu.CheckboxItem
+              checked={inflightColumnVisibility[columnId] !== false}
+              onCheckedChange={(visible) => toggleInflightColumn(columnId, !!visible)}
+              closeOnSelect={false}
+            >
+              <GripVertical class="text-muted-foreground/50 size-4 cursor-grab active:cursor-grabbing" />
+              <span class="flex-1">{inflightColumnLabelMap[columnId] ?? columnId}</span>
+            </DropdownMenu.CheckboxItem>
+          </div>
         {/each}
       </DropdownMenu.Content>
     </DropdownMenu.Root>
@@ -704,22 +779,32 @@
       {/if}
     </div>
     <div class="flex items-center gap-2">
-      {#if showPagination}
-        <span class="text-muted-foreground text-xs">Rows</span>
-        <Select.Root
-          type="single"
-          value={String(limit)}
-          onValueChange={(v) => setServerPageSize(Number(v))}
+      <button
+        type="button"
+        class="hover:bg-muted inline-flex size-7 items-center justify-center rounded-[min(var(--radius-md),12px)]"
+        title="Export as markdown"
+        onclick={openExport}
+      >
+        <Download class="size-4" />
+      </button>
+      {#if filtersEnabled}
+        <button
+          type="button"
+          class="hover:bg-muted relative inline-flex size-7 items-center justify-center rounded-[min(var(--radius-md),12px)] {filterOpen
+            ? 'bg-muted'
+            : ''}"
+          title={filterOpen ? "Hide filters" : "Show filters"}
+          aria-expanded={filterOpen}
+          onclick={() => setFilterOpen(!filterOpen)}
         >
-          <Select.Trigger size="sm" class="h-7 w-[4.5rem] text-xs">
-            {limit}
-          </Select.Trigger>
-          <Select.Content>
-            {#each [10, 25, 50, 100] as size (size)}
-              <Select.Item value={String(size)}>{size}</Select.Item>
-            {/each}
-          </Select.Content>
-        </Select.Root>
+          <ListFilter class="size-4" />
+          {#if filterCount > 0}
+            <span
+              class="bg-primary absolute -right-0.5 -top-0.5 size-2 rounded-full"
+              aria-hidden="true"
+            ></span>
+          {/if}
+        </button>
       {/if}
       <DropdownMenu.Root>
         <DropdownMenu.Trigger
@@ -732,30 +817,55 @@
           <DropdownMenu.Label class="text-muted-foreground border-b px-3 py-2 text-xs font-medium uppercase tracking-wider">
             Columns <span class="text-[10px] normal-case tracking-normal">(drag to reorder)</span>
           </DropdownMenu.Label>
-          {#each table.getAllColumns() as column (column.id)}
-            {#if column.getCanHide()}
-              {@const isDragOver = dragOverColId === column.id && dragColId !== column.id}
+          {#each menuColumnIds as columnId (columnId)}
+            {@const column = table.getColumn(columnId)}
+            <div
+              animate:flip={{ duration: 200 }}
+              draggable="true"
+              role="button"
+              tabindex="-1"
+              aria-label="Drag to reorder {columnLabelMap[columnId] ?? columnId}"
+              ondragstart={(e) => handleColDragStart(e, columnId)}
+              ondragover={(e) => handleColDragOver(e, columnId)}
+              ondrop={handleColDrop}
+              ondragend={handleColDragEnd}
+              class={dragColId === columnId ? "opacity-40" : ""}
+            >
               <DropdownMenu.CheckboxItem
-                checked={column.getIsVisible()}
-                onCheckedChange={(v) => column.toggleVisibility(!!v)}
+                checked={column?.getIsVisible() ?? false}
+                onCheckedChange={(v) => column?.toggleVisibility(!!v)}
                 closeOnSelect={false}
-                draggable="true"
-                ondragstart={(e) => handleColDragStart(e, column.id)}
-                ondragover={(e) => handleColDragOver(e, column.id)}
-                ondrop={(e) => handleColDrop(e, column.id)}
-                ondragend={handleColDragEnd}
-                class={isDragOver ? "bg-accent" : ""}
               >
                 <GripVertical class="text-muted-foreground/50 size-4 cursor-grab active:cursor-grabbing" />
-                <span class="flex-1">{columnLabelMap[column.id] ?? column.id}</span>
+                <span class="flex-1">{columnLabelMap[columnId] ?? columnId}</span>
               </DropdownMenu.CheckboxItem>
-            {/if}
+            </div>
           {/each}
         </DropdownMenu.Content>
       </DropdownMenu.Root>
     </div>
   </Card.Header>
-  <Card.Content class="overflow-x-auto p-0">
+  {#if filtersEnabled && filterOpen && filters && onFiltersChange}
+    <FilterDrawer
+      {filters}
+      onchange={onFiltersChange}
+      showRows={showPagination}
+      {limit}
+      onLimitChange={setServerPageSize}
+    />
+  {/if}
+  <!--
+    Table.Root always wraps the table in an overflow-x-auto div, and CSS
+    promotes that box's overflow-y to auto as well, making it the sticky
+    header's scrollport. Bounding its height here is what turns it into a real
+    scrolling box so `sticky top-0` on the header has something to stick to.
+    Horizontal scrolling stays on that same wrapper, so Card.Content does not
+    need its own overflow. Override the bound per call site by setting
+    --activity-table-max-h (e.g. cardClass="[--activity-table-max-h:70vh]").
+  -->
+  <Card.Content
+    class="p-0 [&>[data-slot=table-container]]:max-h-[var(--activity-table-max-h,60vh)] [&>[data-slot=table-container]]:overflow-y-auto"
+  >
     <Table.Root class="min-w-full">
       <Table.Header>
         {#each table.getHeaderGroups() as headerGroup (headerGroup.id)}
@@ -863,3 +973,5 @@
 </Card.Root>
 
 <CaptureDialog capture={selectedCapture} open={dialogOpen} onclose={closeDialog} />
+
+<ExportDialog markdown={exportMarkdown} open={exportOpen} onclose={closeExport} />

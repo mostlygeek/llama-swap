@@ -12,6 +12,10 @@
 
   let { capture, open, onclose }: Props = $props();
 
+  // The clipboard fallback used on plain http has to live inside the dialog;
+  // see copyText.
+  let contentEl = $state<HTMLElement | null>(null);
+
   type BodyTab = "raw" | "pretty" | "chat";
   let reqBodyTab: BodyTab = $state("pretty");
   let respBodyTab: BodyTab = $state("pretty");
@@ -104,7 +108,7 @@
   }
 
   async function copyToClipboard(text: string, type: "req" | "resp") {
-    if (!(await copyText(text))) return;
+    if (!(await copyText(text, contentEl))) return;
     if (type === "req") {
       copiedReq = true;
       setTimeout(() => (copiedReq = false), 1500);
@@ -181,11 +185,14 @@
     if (!v) onclose();
   }}
 >
-  <Dialog.Content class="flex max-h-[90vh] w-[90%] sm:max-w-[90%] flex-col gap-0 p-0">
+  <Dialog.Content
+    bind:ref={contentEl}
+    class="flex max-h-[90vh] w-[90%] sm:max-w-[90%] flex-col gap-0 p-0"
+  >
     {#if capture}
       <Dialog.Header class="border-b border-border px-4 py-3">
         <Dialog.Title class="text-lg font-bold">
-          Capture #{capture.id + 1}{#if capture.req_path}
+          Capture #{capture.id}{#if capture.req_path}
             <span class="font-mono text-base font-normal text-muted-foreground">{capture.req_path}</span>{/if}
         </Dialog.Title>
       </Dialog.Header>

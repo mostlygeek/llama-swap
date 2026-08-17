@@ -42,6 +42,20 @@ export function formatCapacity(bytes: number): string {
   return `${value.toFixed(precision)} ${units[unit]}`;
 }
 
+/** Format a timestamp as a local "YYYY-MM-DD HH:mm:ss" string. */
+export function formatAbsoluteTime(timestamp: string): string {
+  const date = new Date(timestamp);
+  const datePart = [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+  const timePart = [date.getHours(), date.getMinutes(), date.getSeconds()]
+    .map((value) => String(value).padStart(2, "0"))
+    .join(":");
+  return `${datePart} ${timePart}`;
+}
+
 /** Format a timestamp as a relative time or local timestamp when older than a day. */
 export function formatRelativeTime(timestamp: string): string {
   const now = new Date();
@@ -53,13 +67,5 @@ export function formatRelativeTime(timestamp: string): string {
   if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
   const diffInHours = Math.floor(diffInMinutes / 60);
   if (diffInHours < 24) return `${diffInHours}h ago`;
-  const datePart = [
-    date.getFullYear(),
-    String(date.getMonth() + 1).padStart(2, "0"),
-    String(date.getDate()).padStart(2, "0"),
-  ].join("-");
-  const timePart = [date.getHours(), date.getMinutes(), date.getSeconds()]
-    .map((value) => String(value).padStart(2, "0"))
-    .join(":");
-  return `${datePart} ${timePart}`;
+  return formatAbsoluteTime(timestamp);
 }
