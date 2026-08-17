@@ -133,5 +133,3 @@ func TestStartDaemonArgv(t *testing.T) {
 		}
 	}
 }
-
-
