@@ -1,5 +1,7 @@
 <script lang="ts">
   import { persistentStore } from "../stores/persistent";
+  import { isDarkMode } from "../stores/theme";
+  import { ansiToHtml } from "../lib/ansi";
   import { Type, WrapText, Search, SearchX, CircleX } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -68,6 +70,8 @@
     }
   });
 
+  let renderedLogs = $derived(ansiToHtml(filteredLogs, $isDarkMode));
+
   let preElement: HTMLPreElement;
   let userScrolledUp = $state(false);
 
@@ -111,6 +115,6 @@
     {/if}
   </Card.Header>
   <Card.Content class="bg-background min-h-0 flex-1 p-0 font-mono text-sm">
-    <pre bind:this={preElement} onscroll={handleScroll} class="{textWrapClass} {fontSizeClass} h-full overflow-auto p-4">{filteredLogs}</pre>
+    <pre bind:this={preElement} onscroll={handleScroll} class="{textWrapClass} {fontSizeClass} h-full overflow-auto p-4">{@html renderedLogs}</pre>
   </Card.Content>
 </Card.Root>
