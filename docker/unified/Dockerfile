@@ -19,9 +19,10 @@ FROM nvidia/cuda:12.9.1-devel-ubuntu24.04 AS builder-base-cuda
 # 60/61 are Pascal (P100, GTX 10xx, P40) -- the oldest architecture ggml still
 # supports -- through 89 (Ada). CMake emits PTX alongside SASS for each entry,
 # so architectures between and above the list (70 Volta, 80 Ampere, 90 Hopper,
-# 120 Blackwell) still run by JIT-compiling the nearest lower PTX; they just
-# pay a first-run JIT cost and miss arch-specific kernels. Add those numbers
-# here to compile them natively, at the cost of build time in every stage.
+# 100 and 120 Blackwell) still run by JIT-compiling the nearest lower PTX; they
+# just pay a first-run JIT cost and miss arch-specific kernels. Add those
+# numbers here to compile them natively, at the cost of build time in every
+# stage.
 ARG CMAKE_CUDA_ARCHITECTURES="60;61;75;86;89"
 ENV DEBIAN_FRONTEND=noninteractive
 ENV CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}

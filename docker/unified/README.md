@@ -18,8 +18,8 @@ that is reachable from the container; vLLM itself is not included in the image.
 image ships a starter with the backend it was built for already set:
 
 ```bash
-docker run --rm llama-swap:unified-cuda \
-  cat /etc/llama-swap/audiocpp-server.example.json > /path/to/models/audiocpp-server.json
+docker run --rm --entrypoint cat llama-swap:unified-cuda \
+  /etc/llama-swap/audiocpp-server.example.json > /path/to/models/audiocpp-server.json
 ```
 
 Replace the example entries with your models, then point the `audio` entry in
@@ -51,11 +51,12 @@ cmd: |
 
 The CUDA image compiles SASS for compute capabilities `60;61;75;86;89`, so
 Pascal (P100, GTX 10xx, P40) and newer NVIDIA GPUs are supported. Architectures
-between and above those entries — Volta (70), Ampere (80), Hopper (90),
-Blackwell (120) — run by JIT-compiling the nearest lower PTX, which costs time
-on first load. Add the number to `CMAKE_CUDA_ARCHITECTURES` in the Dockerfile to
-compile one of them natively; the list is shared with llama.cpp, whisper.cpp,
-stable-diffusion.cpp and ik_llama.cpp, so each addition lengthens every build.
+between and above those entries — Volta (70), Ampere (80), Hopper (90) and
+Blackwell (100 on datacenter parts, 120 on GeForce and RTX PRO) — run by
+JIT-compiling the nearest lower PTX, which costs time on first load. Add the
+number to `CMAKE_CUDA_ARCHITECTURES` in the Dockerfile to compile one of them
+natively; the list is shared with llama.cpp, whisper.cpp, stable-diffusion.cpp
+and ik_llama.cpp, so each addition lengthens every build.
 
 The Vulkan image builds audio.cpp with `ENGINE_ENABLE_VULKAN=ON`. audio.cpp is
 tuned for CUDA, and the server prints a notice on startup that a non-CUDA
