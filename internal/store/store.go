@@ -336,6 +336,45 @@ func (s *Store) speedValues(ctx context.Context, where string, args []any) (prom
 	return prompt, gen, rows.Err()
 }
 
+// ModelTokenTotals holds aggregate token usage and request counts for one
+// model, summed across all currently retained activity rows.
+type ModelTokenTotals struct {
+	Model        string
+	Requests     int
+	InputTokens  int
+	OutputTokens int
+	CacheTokens  int
+}
+
+// TokenTotalsByModel returns aggregate request and token counts grouped by
+// model, for all retained activity rows.
+func (s *Store) TokenTotalsByModel(ctx context.Context) ([]ModelTokenTotals, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+			model_id,
+			COUNT(*),
+			COALESCE(SUM(input_tokens), 0),
+			COALESCE(SUM(output_tokens), 0),
+			COALESCE(SUM(CASE WHEN cache_tokens > 0 THEN cache_tokens ELSE 0 END), 0)
+		FROM activity
+		GROUP BY model_id
+		ORDER BY model_id`)
+	if err != nil {
+		return nil, fmt.Errorf("token totals by model: %w", err)
+	}
+	defer rows.Close()
+
+	var totals []ModelTokenTotals
+	for rows.Next() {
+		var t ModelTokenTotals
+		if err := rows.Scan(&t.Model, &t.Requests, &t.InputTokens, &t.OutputTokens, &t.CacheTokens); err != nil {
+			return nil, fmt.Errorf("token totals by model row: %w", err)
+		}
+		totals = append(totals, t)
+	}
+	return totals, rows.Err()
+}
+
 func (s *Store) PruneActivity(ctx context.Context, maxRows int) error {
 	if maxRows <= 0 {
 		return nil

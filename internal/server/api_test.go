@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -8,10 +9,13 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/internal/process"
+	"github.com/mostlygeek/llama-swap/internal/store"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
@@ -740,6 +744,44 @@ func TestServer_HandleMetrics_Unavailable(t *testing.T) {
 	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	if w.Code != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want 503", w.Code)
+	}
+}
+
+func TestServer_HandleMetrics_PerModelTokenCounters(t *testing.T) {
+	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
+	perfMonitor, err := perf.New(config.PerformanceConfig{Every: time.Second}, logmon.NewWriter(io.Discard))
+	if err != nil {
+		t.Fatalf("perf.New: %v", err)
+	}
+	s.perf = perfMonitor
+
+	if _, err := s.store.InsertActivity(context.Background(), store.ActivityLogEntry{
+		Model: "m1",
+		Tokens: store.TokenMetrics{
+			InputTokens:  10,
+			OutputTokens: 20,
+			CachedTokens: 5,
+		},
+	}); err != nil {
+		t.Fatalf("InsertActivity: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	body := w.Body.String()
+	for _, want := range []string{
+		`llamaswap_model_requests_total{model="m1"} 1`,
+		`llamaswap_model_input_tokens_total{model="m1"} 10`,
+		`llamaswap_model_output_tokens_total{model="m1"} 20`,
+		`llamaswap_model_cache_tokens_total{model="m1"} 5`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q, got:\n%s", want, body)
+		}
 	}
 }
 

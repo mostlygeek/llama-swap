@@ -341,6 +341,60 @@ func TestStore_ActivityStats(t *testing.T) {
 	}
 }
 
+func TestStore_TokenTotalsByModel(t *testing.T) {
+	ctx := context.Background()
+	store, err := New("")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer store.Close()
+
+	entries := []ActivityLogEntry{
+		{Timestamp: time.Unix(1, 0), Model: "m1", Tokens: TokenMetrics{CachedTokens: 2, InputTokens: 10, OutputTokens: 20}},
+		{Timestamp: time.Unix(2, 0), Model: "m1", Tokens: TokenMetrics{CachedTokens: -1, InputTokens: 5, OutputTokens: 8}},
+		{Timestamp: time.Unix(3, 0), Model: "m2", Tokens: TokenMetrics{InputTokens: 7, OutputTokens: 9}},
+	}
+	for _, entry := range entries {
+		if _, err := store.InsertActivity(ctx, entry); err != nil {
+			t.Fatalf("InsertActivity: %v", err)
+		}
+	}
+
+	totals, err := store.TokenTotalsByModel(ctx)
+	if err != nil {
+		t.Fatalf("TokenTotalsByModel: %v", err)
+	}
+	want := []ModelTokenTotals{
+		{Model: "m1", Requests: 2, InputTokens: 15, OutputTokens: 28, CacheTokens: 2},
+		{Model: "m2", Requests: 1, InputTokens: 7, OutputTokens: 9, CacheTokens: 0},
+	}
+	if len(totals) != len(want) {
+		t.Fatalf("totals = %+v, want %+v", totals, want)
+	}
+	for i, got := range totals {
+		if got != want[i] {
+			t.Errorf("totals[%d] = %+v, want %+v", i, got, want[i])
+		}
+	}
+}
+
+func TestStore_TokenTotalsByModel_Empty(t *testing.T) {
+	ctx := context.Background()
+	store, err := New("")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer store.Close()
+
+	totals, err := store.TokenTotalsByModel(ctx)
+	if err != nil {
+		t.Fatalf("TokenTotalsByModel: %v", err)
+	}
+	if len(totals) != 0 {
+		t.Fatalf("totals = %+v, want empty", totals)
+	}
+}
+
 func TestStore_PruneActivity(t *testing.T) {
 	ctx := context.Background()
 	store, err := New("")
