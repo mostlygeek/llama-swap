@@ -46,29 +46,3 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  trigger-tap-update:
-    runs-on: ubuntu-latest
-    needs: goreleaser
-    steps:
-      - name: "Resolve tag to dispatch"
-        id: tag
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: "Trigger tap repository update"
-        uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 #4.0.1
-        with:
-          token: ${{ secrets.TAP_REPO_PAT }}
-          repository: mostlygeek/homebrew-llama-swap
-          event-type: new-release
-          client-payload: |
-            {
-              "release": {
-                "tag_name": "${{ steps.tag.outputs.tag }}"
-              }
-            }
