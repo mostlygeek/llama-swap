@@ -84,6 +84,33 @@ llama-swap supports many more features to customize how you want to manage your 
 | `profiles` | switch model ID replacements at runtime       |
 | `...`     | And many more tweaks                           |
 
+## Matrix catch-all models
+
+Matrix expressions can use the reserved reference `+undefined` for a catch-all
+set of models. A model is considered defined when its resolved real model ID
+appears as a leaf in any user-authored set. Vars are resolved before this check;
+set references such as `+base` are not leaves and do not define additional
+models themselves.
+
+The orphan model list is computed once at compile time and sorted by model ID,
+so the synthesized expression is deterministic. For example, if `a` is named
+by a leaf and `b` and `c` are not, `+undefined` behaves as `(b | c)`. If there
+are no orphan models, a `+undefined` term is dropped. This also propagates
+through references: a set that becomes empty can be dropped from a parent set
+that references it. A set defined as only `+undefined` therefore remains
+empty and is never selectable.
+
+A user-defined set literally named `undefined` always shadows the synthetic set,
+and no orphan synthesis occurs. When synthesis is used, llama-swap logs one of
+these messages after matrix compilation:
+
+- `matrix: synthesized set "undefined" = (modelA | modelB | ...)`
+- `matrix: synthesized set "undefined" is empty; +undefined terms dropped`
+- `matrix: set "undefined" is user-defined; orphan synthesis disabled`
+
+Editing `models:` changes which models are orphans. The synthesized set is
+recomputed on the next configuration reload by design.
+
 ## Full Configuration Example
 
 Check [config.example.yaml](https://github.com/mostlygeek/llama-swap/blob/main/config.example.yaml) for the most up to date reference for all example configurations. It has grown quite complex but your favorite local LLM can help with a local configuration.

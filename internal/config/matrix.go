@@ -93,9 +93,13 @@ func ValidateMatrix(matrix *MatrixConfig, models map[string]ModelConfig) error {
 		})
 	}
 
+	modelIDs := make([]string, 0, len(models))
+	for modelID := range models {
+		modelIDs = append(modelIDs, modelID)
+	}
 	program, err := matrixdsl.Compile(definitions, func(ident string) (string, bool) {
 		return resolveMatrixModel(ident, matrix.Var, models)
-	})
+	}, modelIDs)
 	if err != nil {
 		return err
 	}
