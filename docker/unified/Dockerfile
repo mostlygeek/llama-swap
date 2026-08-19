@@ -15,6 +15,14 @@ ARG BACKEND=cuda
 
 FROM nvidia/cuda:12.9.1-devel-ubuntu24.04 AS builder-base-cuda
 
+# Compute capabilities compiled as SASS, shared by every CUDA build stage.
+# 60/61 are Pascal (P100, GTX 10xx, P40) -- the oldest architecture ggml still
+# supports -- through 89 (Ada). CMake emits PTX alongside SASS for each entry,
+# so architectures between and above the list (70 Volta, 80 Ampere, 90 Hopper,
+# 100 and 120 Blackwell) still run by JIT-compiling the nearest lower PTX; they
+# just pay a first-run JIT cost and miss arch-specific kernels. Add those
+# numbers here to compile them natively, at the cost of build time in every
+# stage.
 ARG CMAKE_CUDA_ARCHITECTURES="60;61;75;86;89"
 ENV DEBIAN_FRONTEND=noninteractive
 ENV CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}
@@ -205,9 +213,12 @@ COPY --from=sd-build /install/bin/sd-server /usr/local/bin/
 COPY --from=sd-build /install/bin/sd-cli /usr/local/bin/
 COPY --from=sd-build /install/lib/ /usr/local/lib/
 
-# Copy audio.cpp binaries (statically linked)
+# Copy audio.cpp binaries (statically linked, model specs compiled in via
+# AUDIOCPP_DEPLOYMENT_BUILD). The on-disk spec catalog is installed too so
+# --model-spec-override has a path to point at.
 COPY --from=audio-build /install/bin/audiocpp_server /usr/local/bin/
 COPY --from=audio-build /install/bin/audiocpp_cli /usr/local/bin/
+COPY --from=audio-build /install/share/audiocpp/ /usr/local/share/audiocpp/
 
 # Copy llama.cpp binaries (statically linked)
 COPY --from=llama-build /install/bin/llama-server /usr/local/bin/
@@ -231,6 +242,14 @@ COPY --from=vllm-wrapper-build /install/bin/vllm-wrapper /usr/local/bin/
 RUN ldconfig
 
 COPY config.example.yaml /etc/llama-swap/config/config.yaml
+
+# audiocpp_server takes its own JSON config. Ship a starter with this image's
+# backend baked in -- the binary defaults to "cuda", so a vulkan image that
+# copies an unedited example would try to load every model on a backend it was
+# not built with.
+COPY audiocpp-server.example.json /etc/llama-swap/audiocpp-server.example.json
+RUN sed -i "s/__BACKEND__/${BACKEND}/" /etc/llama-swap/audiocpp-server.example.json && \
+    chown -R ${RUN_UID}:${RUN_UID} /etc/llama-swap
 
 # Version tracking
 RUN echo "llama.cpp: ${LLAMA_COMMIT_HASH}" > /versions.txt && \

@@ -20,8 +20,11 @@ models:
 
   "audio":
     checkEndpoint: /health
-    # set "backend" in audiocpp-server.json (or pass --backend) to match the
-    # image: cuda or vulkan. audiocpp_server defaults to cuda.
+    # audiocpp_server takes its own JSON config listing the models it serves.
+    # Copy the starter shipped in the image -- it already has this image's
+    # backend set -- and replace the example models with your own:
+    #   docker run --rm --entrypoint cat <image> \
+    #     /etc/llama-swap/audiocpp-server.example.json > /models/audiocpp-server.json
     cmd: |
       audiocpp_server
       --config /models/audiocpp-server.json
