@@ -55,6 +55,10 @@ Long-form entries with full context live in
   phase timeline, drag-to-reorder result cards) and Help tab — the docs agent
   over the server's MCP tools (`/api/mcp`) with a full agent loop
   (tool-call accumulation, sanitize-on-reload, max-iterations continue).
+- perf: sysfs GPU provider (Intel xe/i915 + generic hwmon/fdinfo) with hwmon
+  reads throttled to 5s while the GPU is active, so hosts without
+  nvidia-smi/rocm-smi/LACT (e.g. Intel Arc) get GPU telemetry and idle cards
+  stay runtime-suspended. Cherry-picked from the fork's `intel-card` branch.
 
 ### Security
 

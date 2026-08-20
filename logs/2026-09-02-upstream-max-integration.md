@@ -235,3 +235,26 @@ getHardware, cancelInflightRequest, checkPerformanceEnabled, hasListedModels).
 - Settings has no accent-theme picker (our theme system is mode-only).
 - No browser available in this container; in-browser testing pending (Node
   + HTTP-level verification done instead).
+
+## Phase 10 — Intel GPU monitoring commits (cherry-pick from fork intel-card)
+
+User ask: pull the two Intel-graphics monitoring commits from the fork's
+`intel-card` branch into this branch.
+
+- Fetched `https://github.com/anantshri/llama-swap.git intel-card` (SSH remote
+  lacked access; HTTPS fetch per environment guidance). Branch sits on the old
+  fork `main`; both commits target `internal/perf/` only.
+- `b53c769` (was `6fdcfc1`): sysfs GPU provider — `monitor_sysfs.go` (+592) +
+  `monitor_sysfs_test.go` (+270); replaces the `trySysfs` stub (identical stub
+  existed on this branch, so the cherry-pick applied without conflicts).
+- `d1d0e54` (was `6554972`): throttle hwmon reads to 5s while GPU active
+  (idle GPU stays runtime-suspended; fdinfo /proc walk stays per-tick as the
+  activity gate).
+- Post-pick fixes: `gofmt -w` on both files (old branch's formatting predated
+  current gofmt); `docs/gosec-suppressions.md` ledger updated 75→78 (the
+  provider's 3 G304 markers are kernel-enumerated sysfs//proc paths — same FP
+  category; the audit ledger test caught the drift, as designed).
+- Verification: all 9 sysfs tests pass (discovery/iGPU-skip, hwmon temps+fan,
+  idle-zeroed telemetry, fdinfo VRAM incl. resident fallback, engine util in
+  cycles + ns formats, throttle); `go test -race ./internal/...` green;
+  `make gosec` 0 ×3 GOOS; aidc-scan clean.

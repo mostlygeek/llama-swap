@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // Fixture mirrors a real Intel Arc Pro B70 (xe driver) as observed on kernel
@@ -65,22 +66,22 @@ func fakeSysfs(t *testing.T) string {
 	igpuDir := "devices/pci0000:00/0000:00:02.0"
 
 	writeFiles(t, root, map[string]string{
-		gpuDir + "/vendor":    "0x8086",
-		gpuDir + "/device":    "0xe223",
-		gpuDir + "/resource":  "0x00000041f8000000 0x00000041f8ffffff 0x000000000014220c\n0x0000000000000000 0x0000000000000000 0x0000000000000000\n0x0000004800000000 0x0000004fffffffff 0x000000000014220c\n",
-		gpuDir + "/hwmon/hwmon9/name":             "xe",
-		gpuDir + "/hwmon/hwmon9/temp2_input":      "48000",
-		gpuDir + "/hwmon/hwmon9/temp2_label":      "pkg",
-		gpuDir + "/hwmon/hwmon9/temp3_input":      "50000",
-		gpuDir + "/hwmon/hwmon9/temp3_label":      "vram",
-		gpuDir + "/hwmon/hwmon9/temp4_input":      "39000",
-		gpuDir + "/hwmon/hwmon9/temp4_label":      "mctrl",
-		gpuDir + "/hwmon/hwmon9/fan1_input":       "1074",
-		gpuDir + "/hwmon/hwmon9/fan1_max":         "4980",
-		gpuDir + "/hwmon/hwmon9/energy1_input":    "255045692199",
-		gpuDir + "/hwmon/hwmon9/energy1_label":    "card",
-		igpuDir + "/vendor":                       "0x8086",
-		igpuDir + "/device":                       "0x4692",
+		gpuDir + "/vendor":                     "0x8086",
+		gpuDir + "/device":                     "0xe223",
+		gpuDir + "/resource":                   "0x00000041f8000000 0x00000041f8ffffff 0x000000000014220c\n0x0000000000000000 0x0000000000000000 0x0000000000000000\n0x0000004800000000 0x0000004fffffffff 0x000000000014220c\n",
+		gpuDir + "/hwmon/hwmon9/name":          "xe",
+		gpuDir + "/hwmon/hwmon9/temp2_input":   "48000",
+		gpuDir + "/hwmon/hwmon9/temp2_label":   "pkg",
+		gpuDir + "/hwmon/hwmon9/temp3_input":   "50000",
+		gpuDir + "/hwmon/hwmon9/temp3_label":   "vram",
+		gpuDir + "/hwmon/hwmon9/temp4_input":   "39000",
+		gpuDir + "/hwmon/hwmon9/temp4_label":   "mctrl",
+		gpuDir + "/hwmon/hwmon9/fan1_input":    "1074",
+		gpuDir + "/hwmon/hwmon9/fan1_max":      "4980",
+		gpuDir + "/hwmon/hwmon9/energy1_input": "255045692199",
+		gpuDir + "/hwmon/hwmon9/energy1_label": "card",
+		igpuDir + "/vendor":                    "0x8086",
+		igpuDir + "/device":                    "0x4692",
 	})
 
 	// driver symlinks (targets must exist for EvalSymlinks)
@@ -203,6 +204,35 @@ func TestPollReportsVramViaFdinfo(t *testing.T) {
 	}
 	if stat.MemUtilPct < 50.4 || stat.MemUtilPct > 50.6 {
 		t.Errorf("MemUtilPct = %.2f, want ~50.4", stat.MemUtilPct)
+	}
+}
+
+// Even while active, hwmon must not be read more than once per
+// sysfsHwmonMinInterval -- each read wakes a sleeping card.
+func TestHwmonThrottledWhileActive(t *testing.T) {
+	sysRoot := fakeSysfs(t)
+	withSysfs(t, sysRoot)
+
+	procRootLocal := t.TempDir()
+	writeFiles(t, procRootLocal, map[string]string{"1234/fdinfo/17": xeFdinfo})
+	symlink(t, procRootLocal, "1234/fd/17", "/dev/dri/renderD128")
+	oldProc := procRoot
+	procRoot = procRootLocal
+	t.Cleanup(func() { procRoot = oldProc })
+
+	g := discoverSysfsGpus()[0]
+	first, err := g.poll()
+	if err != nil || first.TempC != 48 {
+		t.Fatalf("first poll should read hwmon (TempC=48), got %+v err=%v", first, err)
+	}
+	second, _ := g.poll()
+	if second.TempC != 0 {
+		t.Errorf("immediate second poll must skip hwmon, got TempC=%d", second.TempC)
+	}
+	g.lastHwmonAt = time.Now().Add(-2 * sysfsHwmonMinInterval)
+	third, _ := g.poll()
+	if third.TempC != 48 {
+		t.Errorf("poll after interval must read hwmon again, got TempC=%d", third.TempC)
 	}
 }
 

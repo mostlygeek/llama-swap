@@ -23,7 +23,7 @@ To list the live markers at any time:
 grep -rn "#nosec" internal/
 ```
 
-Total: **75** suppressions across **12** rules (G115 ×25, G103 ×20, G204 ×7, G304 ×7, G404 ×4, G202 ×3, G117 ×2, G120 ×2, G710 ×2, G118 ×1, G703 ×1, G705 ×1).
+Total: **78** suppressions across **12** rules (G115 ×25, G103 ×20, G304 ×10, G204 ×7, G404 ×4, G202 ×3, G117 ×2, G120 ×2, G710 ×2, G118 ×1, G703 ×1, G705 ×1).
 
 ---
 
@@ -57,12 +57,15 @@ Files: `internal/process/{process_command,runtime_windows}.go`,
 `internal/perf/{monitor_unix,monitor_darwin,monitor_windows}.go`,
 `internal/hw/detect_linux.go`.
 
-## G304 — file inclusion via variable · 7 sites · MEDIUM
+## G304 — file inclusion via variable · 10 sites · MEDIUM
 
 **Verdict: false positive.** Every path is either the operator-supplied config
 file (`internal/config/{config,merge,load_windows}.go`) or an internally
 constructed sysfs/hwmon path enumerated by the kernel
-(`internal/hw/{detect_linux,amd_linux}.go`). None derive from request input.
+(`internal/hw/{detect_linux,amd_linux}.go`, `internal/perf/monitor_sysfs.go` —
+the GPU telemetry provider reads `/sys/class/drm/*/` + `/proc/<pid>/fdinfo/`
+paths it derives from `ReadDir` listings, never from request input). None
+derive from request input.
 
 ## G404 — weak random number generator · 4 sites · HIGH
 
