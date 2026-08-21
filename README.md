@@ -12,8 +12,7 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
 ## Features:
 
 - ✅ Easy to deploy and configure: one binary, one configuration file. no external dependencies
-- ✅ On-demand model switching
-- ✅ Use any local OpenAI compatible server (llama.cpp, vllm, tabbyAPI, stable-diffusion.cpp, etc.)
+- ✅ On-demand model switching for many local AI servers (llama.cpp + forks, vllm, stable-diffusion.cpp, audio.cpp, ComfyUI, etc.)
   - future proof, upgrade your inference servers at any time.
 - ✅ OpenAI API supported endpoints:
   - `v1/completions`
@@ -33,14 +32,18 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
   - `v1/rerank`, `v1/reranking`, `/rerank`
   - `/infill` - for code infilling
   - `/completion` - for completion endpoint
+  - `/models` - list available models. same behavior as `v1/models`
   - `/props` - requires `?model={model_id}` query parameter to be provided. The autoload parameter is not supported and will be ignored.
 - ✅ SDAPI via [stable-diffusion.cpp's server](https://github.com/leejet/stable-diffusion.cpp/tree/master/examples/server)
   - `/sdapi/v1/txt2img`
   - `/sdapi/v1/img2img`
   - `/sdapi/v1/loras` - requires `model` in request body to fetch the correct loras
+- ✅ [audio.cpp](https://github.com/0xShug0/audio.cpp) supported [extra endpoints](https://github.com/0xShug0/audio.cpp/blob/main/app/server/README.md#post-v1tasksrun)
+  - `/audioapi/v1/tasks/run`
+- ✅ `/comfyui/` - ComfyUI custom endpoint ([#1001](https://github.com/mostlygeek/llama-swap/issues/1001)) for more reliable swapping
 - ✅ llama-swap API
   - `/ui` - web UI
-  - `/upstream/:model_id` - direct access to upstream server ([demo](https://github.com/mostlygeek/llama-swap/pull/31))
+  - `/upstream/:model_id` - direct access to upstream server ([demo](https://github.com/mostlygeek/llama-swap/pull/31))  
   - `/running` - list currently running models ([#61](https://github.com/mostlygeek/llama-swap/issues/61))
   - `POST /api/models/unload` - manually unload all running models ([#58](https://github.com/mostlygeek/llama-swap/issues/58))
   - `POST /api/models/unload/:model_id` - unload a specific model
@@ -57,7 +60,7 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
   - `/health` - just returns "OK"
   - `/metrics` - system and GPU metrics for prometheus
 - ✅ API Key support - define keys to restrict access to API endpoints
-- ✅ Customizable
+- ✅ Customization
   - Switch model ID routing at runtime with profiles
   - Run concurrent models with a custom DSL swap matrix ([#643](https://github.com/mostlygeek/llama-swap/issues/643))
   - Automatic unloading of models after timeout by setting a `ttl`

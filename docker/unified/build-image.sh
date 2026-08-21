@@ -10,6 +10,7 @@
 #   LLAMA_REF=v1.2.3 ./build-image.sh --cuda             # Pin llama.cpp to a tag
 #   WHISPER_REF=v1.0.0 ./build-image.sh --vulkan         # Pin whisper.cpp to a tag
 #   SD_REF=master ./build-image.sh --cuda                # Pin stable-diffusion.cpp to a branch
+#   AUDIO_REF=main ./build-image.sh --cuda               # Pin audio.cpp to a branch
 #   LS_VERSION=170 ./build-image.sh --cuda               # Override llama-swap version
 #   IK_LLAMA_REF=main ./build-image.sh --cuda            # Pin ik_llama.cpp to main branch (CUDA only)
 #
@@ -45,6 +46,7 @@ for arg in "$@"; do
             echo "  LLAMA_REF            Pin llama.cpp to a commit, tag, or branch"
             echo "  WHISPER_REF          Pin whisper.cpp to a commit, tag, or branch"
             echo "  SD_REF               Pin stable-diffusion.cpp to a commit, tag, or branch"
+            echo "  AUDIO_REF            Pin audio.cpp to a commit, tag, or branch"
             echo "  IK_LLAMA_REF         Pin ik_llama.cpp to a commit, tag, or branch (CUDA only)"
             echo "  LS_VERSION           Override llama-swap version (e.g., '170' or 'latest')"
             echo "  WHISPER_FFMPEG       Enable whisper.cpp FFmpeg support (default: yes)"
@@ -66,6 +68,7 @@ DOCKER_IMAGE_TAG="${DOCKER_IMAGE_TAG:-llama-swap:unified-${BACKEND}}"
 LLAMA_REPO="https://github.com/ggml-org/llama.cpp.git"
 WHISPER_REPO="https://github.com/ggml-org/whisper.cpp.git"
 SD_REPO="https://github.com/leejet/stable-diffusion.cpp.git"
+AUDIO_REPO="https://github.com/0xShug0/audio.cpp.git"
 LLAMA_SWAP_REPO="https://github.com/mostlygeek/llama-swap.git"
 IK_LLAMA_REPO="https://github.com/ikawrakow/ik_llama.cpp.git"
 
@@ -157,6 +160,19 @@ else
     echo "stable-diffusion.cpp: latest HEAD: ${SD_HASH}"
 fi
 
+# Resolve audio.cpp ref
+if [[ -n "${AUDIO_REF:-}" ]]; then
+    AUDIO_HASH=$(resolve_ref "${AUDIO_REPO}" "${AUDIO_REF}") || exit 1
+    echo "audio.cpp: ${AUDIO_REF} -> ${AUDIO_HASH}"
+else
+    AUDIO_HASH=$(get_latest_hash "${AUDIO_REPO}")
+    if [[ -z "${AUDIO_HASH}" ]]; then
+        echo "ERROR: Could not determine latest commit for audio.cpp" >&2
+        exit 1
+    fi
+    echo "audio.cpp: latest HEAD: ${AUDIO_HASH}"
+fi
+
 # Resolve ik_llama.cpp ref (CUDA only)
 if [[ "$BACKEND" == "cuda" ]]; then
     if [[ -n "${IK_LLAMA_REF:-}" ]]; then
@@ -201,6 +217,7 @@ BUILD_ARGS=(
     --build-arg "LLAMA_COMMIT_HASH=${LLAMA_HASH}"
     --build-arg "WHISPER_COMMIT_HASH=${WHISPER_HASH}"
     --build-arg "SD_COMMIT_HASH=${SD_HASH}"
+    --build-arg "AUDIO_COMMIT_HASH=${AUDIO_HASH}"
     --build-arg "IK_LLAMA_COMMIT_HASH=${IK_LLAMA_HASH}"
     --build-arg "LS_VERSION=${LS_HASH}"
     --build-arg "WHISPER_FFMPEG=${WHISPER_FFMPEG}"
@@ -228,7 +245,7 @@ echo "Verifying build artifacts..."
 echo "=========================================="
 echo ""
 
-EXPECTED_BINARIES=(llama-server llama-cli whisper-server whisper-cli sd-server sd-cli llama-swap)
+EXPECTED_BINARIES=(llama-server llama-cli llama-bench whisper-server whisper-cli sd-server sd-cli audiocpp_server audiocpp_cli llama-swap vllm-wrapper)
 if [[ "$BACKEND" == "cuda" ]]; then
     EXPECTED_BINARIES+=(ik-llama-server)
 fi
@@ -251,11 +268,40 @@ if [[ ${#MISSING_BINARIES[@]} -gt 0 ]]; then
     exit 1
 fi
 
-VERIFIED_LIST="llama-server, llama-cli, whisper-server, whisper-cli, sd-server, sd-cli, llama-swap"
+VERIFIED_LIST="llama-server, llama-cli, llama-bench, whisper-server, whisper-cli, sd-server, sd-cli, audiocpp_server, audiocpp_cli, llama-swap, vllm-wrapper"
 if [[ "$BACKEND" == "cuda" ]]; then
     VERIFIED_LIST="${VERIFIED_LIST}, ik-llama-server"
 fi
 echo "All expected binaries verified: ${VERIFIED_LIST}"
+
+# audio.cpp must be a deployment build: the model_specs catalog is compiled into
+# the binaries, since the image ships no model_specs/ directory for the runtime
+# to discover. Without it every load of a package without an embedded spec fails
+# with "model spec not found for family ...". The compiled catalog is raw JSON in
+# .rodata, so grepping the binary for a known spec confirms it is there.
+if ! docker run --rm --entrypoint grep "${DOCKER_IMAGE_TAG}" \
+        -aq '"family": "pocket_tts"' /usr/local/bin/audiocpp_server; then
+    echo "ERROR: audiocpp_server was not built with AUDIOCPP_DEPLOYMENT_BUILD=ON;"
+    echo "       its compiled model spec catalog is missing."
+    exit 1
+fi
+
+# Run the binary so a missing runtime library is caught here rather than on a
+# user's first request. CUDA builds link libcuda.so.1, which the NVIDIA
+# container runtime only injects with --gpus; point at the stub copied into the
+# image so this works on a build machine with no GPU.
+SMOKE_ARGS=(--rm)
+if [[ "$BACKEND" == "cuda" ]]; then
+    SMOKE_ARGS+=(-e "LD_LIBRARY_PATH=/usr/local/cuda/lib64/stubs:/usr/local/cuda/lib64")
+fi
+
+if ! docker run "${SMOKE_ARGS[@]}" --entrypoint audiocpp_server "${DOCKER_IMAGE_TAG}" --help >/dev/null; then
+    echo "ERROR: audiocpp_server --help failed; the binary or its runtime"
+    echo "       libraries are broken in the image."
+    exit 1
+fi
+
+echo "audio.cpp verified: deployment build (compiled model spec catalog), binary runs"
 
 echo ""
 echo "=========================================="
@@ -289,6 +335,7 @@ echo "Built with:"
 echo "  llama.cpp:            ${LLAMA_HASH}"
 echo "  whisper.cpp:          ${WHISPER_HASH}"
 echo "  stable-diffusion.cpp: ${SD_HASH}"
+echo "  audio.cpp:            ${AUDIO_HASH}"
 if [[ "$BACKEND" == "cuda" ]]; then
     echo "  ik_llama.cpp:         ${IK_LLAMA_HASH}"
 fi

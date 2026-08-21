@@ -9,7 +9,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/process"
-	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 type selectorContextKey struct{}
@@ -98,7 +98,7 @@ func CreateSelectorMiddleware(s *Server) chain.Middleware {
 				return
 			}
 
-			model, err := shared.ExtractModel(r)
+			model, err := swaputil.ExtractModel(r)
 			if err != nil || model == "" {
 				next.ServeHTTP(w, r)
 				return
@@ -121,23 +121,30 @@ func CreateSelectorMiddleware(s *Server) chain.Middleware {
 				err = fmt.Errorf("unknown selector strategy %q", selector.Strategy)
 			}
 			if err != nil {
-				shared.SendResponse(w, r, http.StatusServiceUnavailable, err.Error())
+				swaputil.SendResponse(w, r, http.StatusServiceUnavailable, err.Error())
 				return
 			}
 
-			updated, err := shared.ReplaceRequestModel(r, model, target)
+			updated, err := swaputil.ReplaceRequestModel(r, model, target)
 			if err != nil {
 				if selector.Strategy == config.SelectorStrategySpillover {
 					spillovers.release(model, target)
 				}
-				shared.SendResponse(w, r, http.StatusBadRequest, err.Error())
+				swaputil.SendResponse(w, r, http.StatusBadRequest, err.Error())
 				return
 			}
 
 			s.proxylog.Debugf("selector: id=%s target=%s", model, target)
 
 			if selector.Strategy == config.SelectorStrategySpillover {
-				defer spillovers.release(model, target)
+				modelConfig, _, local := s.cfg.FindConfig(target)
+				if local && modelConfig.Compat.IgnoreWebsockets && swaputil.IsWebSocketUpgrade(updated) {
+					// strategySpillover reserves while choosing. Release immediately
+					// so a long-lived ignored websocket does not affect later choices.
+					spillovers.release(model, target)
+				} else {
+					defer spillovers.release(model, target)
+				}
 			}
 			next.ServeHTTP(w, withSelectorContext(updated, model))
 		})

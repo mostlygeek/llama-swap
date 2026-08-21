@@ -345,6 +345,103 @@ func TestBaseRouter_OnDemandStart(t *testing.T) {
 	}
 }
 
+func TestBaseRouter_IgnoreWebsocketsRejectsModelUnlessReady(t *testing.T) {
+	for _, state := range []process.ProcessState{process.StateStopped, process.StateStarting} {
+		t.Run(string(state), func(t *testing.T) {
+			a := newFakeProcess("a")
+			if state != process.StateStopped {
+				a.setState(state)
+			}
+			conf := config.Config{
+				HealthCheckTimeout: 5,
+				Models: map[string]config.ModelConfig{
+					"a": {Compat: config.CompatConfig{IgnoreWebsockets: true}},
+				},
+			}
+			b := newTestBaseWithConfig(t, conf, map[string]process.Process{"a": a}, &stubPlanner{})
+
+			r := httptest.NewRequest(http.MethodGet, "/props?model=a", nil)
+			r.Header.Set("Connection", "keep-alive, Upgrade")
+			r.Header.Set("Upgrade", "websocket")
+			w := httptest.NewRecorder()
+			b.ServeHTTP(w, r)
+
+			if w.Code != http.StatusConflict {
+				t.Fatalf("status=%d want %d body=%q", w.Code, http.StatusConflict, w.Body.String())
+			}
+			if got := a.runCalls.Load(); got != 0 {
+				t.Errorf("runCalls=%d want 0", got)
+			}
+			if got := a.serveCalls.Load(); got != 0 {
+				t.Errorf("serveCalls=%d want 0", got)
+			}
+		})
+	}
+}
+
+func TestBaseRouter_WebsocketStartsModelWhenCompatDisabled(t *testing.T) {
+	a := newFakeProcess("a")
+	a.autoReady = true
+	conf := config.Config{
+		HealthCheckTimeout: 5,
+		Models:             map[string]config.ModelConfig{"a": {}},
+	}
+	b := newTestBaseWithConfig(t, conf, map[string]process.Process{"a": a}, &stubPlanner{})
+
+	r := httptest.NewRequest(http.MethodGet, "/props?model=a", nil)
+	r.Header.Set("Connection", "Upgrade")
+	r.Header.Set("Upgrade", "websocket")
+	w := httptest.NewRecorder()
+	b.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d want %d body=%q", w.Code, http.StatusOK, w.Body.String())
+	}
+	if got := a.runCalls.Load(); got != 1 {
+		t.Errorf("runCalls=%d want 1", got)
+	}
+}
+
+func TestBaseRouter_IgnoreWebsocketsDoesNotBlockSwap(t *testing.T) {
+	a := newFakeProcess("a")
+	a.markReady()
+	a.serveBlock = make(chan struct{})
+	pb := newFakeProcess("b")
+	pb.autoReady = true
+	conf := config.Config{
+		HealthCheckTimeout: 5,
+		Models: map[string]config.ModelConfig{
+			"a": {Compat: config.CompatConfig{IgnoreWebsockets: true}},
+			"b": {},
+		},
+	}
+	b := newTestBaseWithConfig(t, conf, map[string]process.Process{"a": a, "b": pb}, &stubPlanner{
+		evict: map[string][]string{"b": {"a"}},
+	})
+
+	websocketDone := make(chan struct{})
+	go func() {
+		defer close(websocketDone)
+		r := httptest.NewRequest(http.MethodGet, "/props?model=a", nil)
+		r.Header.Set("Connection", "Upgrade")
+		r.Header.Set("Upgrade", "websocket")
+		b.ServeHTTP(httptest.NewRecorder(), r)
+	}()
+	waitSignal(t, a.serveStarted, "websocket request start")
+
+	w := httptest.NewRecorder()
+	b.ServeHTTP(w, newRequest("b"))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
+	}
+	if !a.stoppedWhileServing.Load() {
+		t.Fatal("ignored websocket prevented the conflicting model from swapping in")
+	}
+
+	close(a.serveBlock)
+	waitSignal(t, websocketDone, "websocket request finish")
+}
+
 // TestBaseRouter_RequestDuringStop is the router-level regression test for
 // issue #946. A process being stopped outside the router's knowledge (a TTL
 // unload, a crash, an operator kill) must not wedge the swap machinery: the

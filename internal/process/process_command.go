@@ -16,7 +16,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
-	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 var ErrStartAborted = fmt.Errorf("aborted")
@@ -140,7 +140,7 @@ func (p *ProcessCommand) run() {
 		state = s
 		p.state.Store(s)
 		if old != s {
-			event.Emit(shared.ProcessStateChangeEvent{
+			event.Emit(swaputil.ProcessStateChangeEvent{
 				ProcessName: p.id,
 				OldState:    string(old),
 				NewState:    string(s),
@@ -751,6 +751,10 @@ func (p *ProcessCommand) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	fn := p.handler.Load()
 	if fn == nil {
 		http.Error(w, fmt.Sprintf("llama-swap-error: [%s] process is not ready", p.id), http.StatusServiceUnavailable)
+		return
+	}
+	if p.config.Compat.IgnoreWebsockets && swaputil.IsWebSocketUpgrade(r) {
+		(*fn)(w, r)
 		return
 	}
 	p.inflight.Add(1)

@@ -9,7 +9,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
-	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 // defaultConcurrencyLimit caps simultaneous in-flight requests per model when
@@ -284,7 +284,7 @@ func (s *FIFO) OnShutdown(err error) {
 // Concurrency-limit rejection happens earlier in admit, before a request can
 // start the loading stream.
 func (s *FIFO) grantHandler(req HandlerReq, modelID string) {
-	if err := shared.SetReqData(req.Ctx, "fifo_priority", strconv.Itoa(s.cfg.Priority[req.Model])); err != nil {
+	if err := swaputil.SetReqData(req.Ctx, "fifo_priority", strconv.Itoa(s.cfg.Priority[req.Model])); err != nil {
 		s.logger.Debugf("failed to set fifo_priority metadata: %v", err)
 	}
 
@@ -307,7 +307,7 @@ func (s *FIFO) grantError(req HandlerReq, err error) {
 // post-admission error.
 func (s *FIFO) admit(req HandlerReq) bool {
 	if s.reserved[req.Model] >= s.limit(req.Model) {
-		s.rejectAdmission(req, shared.ConcurrencyLimitError{})
+		s.rejectAdmission(req, swaputil.ConcurrencyLimitError{})
 		return false
 	}
 	if !sendAdmission(req, nil) {

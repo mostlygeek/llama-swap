@@ -18,12 +18,13 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/event"
+	"github.com/mostlygeek/llama-swap/internal/hw"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/server"
-	"github.com/mostlygeek/llama-swap/internal/shared"
 	"github.com/mostlygeek/llama-swap/internal/store"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 	"github.com/mostlygeek/llama-swap/internal/watcher"
 )
 
@@ -128,6 +129,19 @@ func main() {
 	applyLogSettings(cfg)
 	proxyLog.Debugf("PID: %d", os.Getpid())
 
+	// Hardware describes the inference host and remains stable for the life of
+	// this process, including config reloads. Detection is best effort so an
+	// unavailable platform probe never prevents llama-swap from starting.
+	var hardwareSnapshot *hw.HardwareSnapshot
+	detectCtx, detectCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	detectedHardware, detectErr := hw.Detect(detectCtx, version)
+	detectCancel()
+	if detectErr != nil {
+		proxyLog.Warnf("hardware detection unavailable: %v", detectErr)
+	} else {
+		hardwareSnapshot = &detectedHardware
+	}
+
 	// On Windows, bind the process tree to a Job Object so every upstream
 	// process is reaped when llama-swap exits — even on a forced kill. No-op
 	// elsewhere. Non-fatal: a failure just falls back to per-process teardown.
@@ -157,7 +171,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	initialSrv, err := server.New(cfg, muxLog, proxyLog, upstreamLog, perfMon, initialStore, buildInfo)
+	initialSrv, err := server.New(cfg, muxLog, proxyLog, upstreamLog, perfMon, initialStore, buildInfo, hardwareSnapshot)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)
 		initialStore.Close()
@@ -227,7 +241,7 @@ func main() {
 			}
 		}
 
-		newSrv, err := server.New(newCfg, muxLog, proxyLog, upstreamLog, perfMon, newStore, buildInfo)
+		newSrv, err := server.New(newCfg, muxLog, proxyLog, upstreamLog, perfMon, newStore, buildInfo, hardwareSnapshot)
 		if err != nil {
 			proxyLog.Warnf("failed to build new server during reload: %v", err)
 			if storeChanged {
@@ -257,7 +271,7 @@ func main() {
 
 		// Notify UI after a short delay so it can refresh model state.
 		time.AfterFunc(3*time.Second, func() {
-			event.Emit(shared.ConfigFileChangedEvent{State: shared.ReloadingStateEnd})
+			event.Emit(swaputil.ConfigFileChangedEvent{State: swaputil.ReloadingStateEnd})
 		})
 
 		proxyLog.Info("configuration reloaded")
@@ -318,7 +332,7 @@ func main() {
 		}
 	}()
 
-	if !shared.IsLoopbackAddr(listenAddr) {
+	if !swaputil.IsLoopbackAddr(listenAddr) {
 		_, port, _ := net.SplitHostPort(listenAddr)
 		proxyLog.Infof("llama-swap is reachable by all hosts on the network, use -listen localhost:%s to restrict to loopback only", port)
 	}

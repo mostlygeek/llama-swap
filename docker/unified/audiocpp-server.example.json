@@ -1,0 +1,26 @@
+{
+  "host": "127.0.0.1",
+  "backend": "__BACKEND__",
+  "device": 0,
+  "threads": 1,
+  "lazy_load": true,
+  "models": [
+    {
+      "id": "pocket-tts",
+      "family": "pocket_tts",
+      "path": "/models/pocket-tts",
+      "task": "tts",
+      "mode": "offline",
+      "default_voice_preset": {
+        "voice_id": "alba"
+      }
+    },
+    {
+      "id": "qwen3-asr",
+      "family": "qwen3_asr",
+      "path": "/models/Qwen3-ASR-0.6B",
+      "task": "asr",
+      "mode": "offline"
+    }
+  ]
+}

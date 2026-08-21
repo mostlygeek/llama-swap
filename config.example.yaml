@@ -173,6 +173,10 @@ upstream:
   ignorePaths:
     - '.*\.(js|json|css|png|gif|jpg|jpeg|ico|txt)$'
 
+    # ComfyUI specific: ignore /ws and /api/jobs to prevent swaps
+    # when the UI is open
+    - ^\/ws$|^\/api\/jobs$
+
 # profiles: named model ID replacements switched at runtime through the UI or API
 # - optional, default: empty dictionary
 # - one profile or none is active; startup and configuration reload select none
@@ -301,6 +305,14 @@ models:
     # - a value of 0 uses the global unloadTimeout
     # - useful for slow cmdStop commands such as docker stop
     unloadTimeout: 10
+
+    # compat: compatibility settings for upstream applications
+    # - optional, default: empty
+    compat:
+      # ignoreWebsockets: do not let websocket connections load a stopped model
+      # or count toward concurrency, TTL activity, or swap decisions
+      # - optional, default: false
+      ignoreWebsockets: true
 
     # useModelName: override the model name that is sent to upstream server
     # - optional, default: ""
@@ -443,13 +455,13 @@ models:
       context: 32000
 
   # Unlisted model example:
-  "qwen-unlisted":
+  "unlisted-model":
     # unlisted: boolean, true or false
     # - optional, default: false
     # - unlisted models do not show up in /v1/models api requests
     # - can be requested as normal through all apis
     unlisted: true
-    cmd: llama-server --port ${PORT} -m Llama-3.2-1B-Instruct-Q4_K_M.gguf -ngl 0
+    cmd: some-upstream-server
 
   # Docker example:
   # container runtimes like Docker and Podman can be used reliably with

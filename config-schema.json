@@ -548,6 +548,19 @@
                     "timeouts": {
                         "$ref": "#/definitions/timeouts"
                     },
+                    "compat": {
+                        "type": "object",
+                        "properties": {
+                            "ignoreWebsockets": {
+                                "type": "boolean",
+                                "default": false,
+                                "description": "Do not let websocket connections load a stopped model or count toward concurrency, TTL activity, swap decisions, selector load, or in-flight activity."
+                            }
+                        },
+                        "additionalProperties": false,
+                        "default": {},
+                        "description": "Compatibility settings for upstream applications."
+                    },
                     "capabilities": {
                         "type": "object",
                         "properties": {

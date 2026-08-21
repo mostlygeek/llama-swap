@@ -15,6 +15,14 @@ ARG BACKEND=cuda
 
 FROM nvidia/cuda:12.9.1-devel-ubuntu24.04 AS builder-base-cuda
 
+# Compute capabilities compiled as SASS, shared by every CUDA build stage.
+# 60/61 are Pascal (P100, GTX 10xx, P40) -- the oldest architecture ggml still
+# supports -- through 89 (Ada). CMake emits PTX alongside SASS for each entry,
+# so architectures between and above the list (70 Volta, 80 Ampere, 90 Hopper,
+# 100 and 120 Blackwell) still run by JIT-compiling the nearest lower PTX; they
+# just pay a first-run JIT cost and miss arch-specific kernels. Add those
+# numbers here to compile them natively, at the cost of build time in every
+# stage.
 ARG CMAKE_CUDA_ARCHITECTURES="60;61;75;86;89"
 ENV DEBIAN_FRONTEND=noninteractive
 ENV CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}
@@ -75,6 +83,16 @@ RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
     --mount=type=cache,id=sd-${BACKEND},target=/src/stable-diffusion.cpp/build \
     BACKEND=${BACKEND} bash /build/install-sd.sh "${SD_COMMIT_HASH}"
 
+# ── Build audio.cpp ───────────────────────────────────────────────────
+
+FROM builder-base AS audio-build
+ARG BACKEND=cuda
+ARG AUDIO_COMMIT_HASH=main
+COPY install-audio.sh /build/
+RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
+    --mount=type=cache,id=audio-${BACKEND},target=/src/audio.cpp/build \
+    BACKEND=${BACKEND} bash /build/install-audio.sh "${AUDIO_COMMIT_HASH}"
+
 # ── Build llama.cpp (slowest build, run last) ─────────────────────────
 
 FROM builder-base AS llama-build
@@ -113,6 +131,18 @@ ARG LS_VERSION=latest
 COPY install-llama-swap.sh /build/
 RUN bash /build/install-llama-swap.sh "${LS_VERSION}"
 
+# ── Build vllm-wrapper from llama-swap source ─────────────────────────
+#
+# vllm-wrapper is not shipped in the llama-swap release archives, so it is
+# compiled from the same revision as the llama-swap binary above.
+
+FROM golang:1.26-bookworm AS vllm-wrapper-build
+ARG LS_VERSION=latest
+COPY install-vllm-wrapper.sh /build/
+RUN --mount=type=cache,id=go-build,target=/root/.cache/go-build \
+    --mount=type=cache,id=go-mod,target=/go/pkg/mod \
+    bash /build/install-vllm-wrapper.sh "${LS_VERSION}"
+
 # ── Runtime bases ─────────────────────────────────────────────────────
 
 FROM nvidia/cuda:12.9.1-runtime-ubuntu24.04 AS runtime-cuda
@@ -124,6 +154,7 @@ ENV PATH="/usr/local/bin:${PATH}"
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 python3 curl ca-certificates \
     libavcodec60 libavformat60 libavutil58 libswresample4 \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # CUDA stub drivers for container compatibility
@@ -139,8 +170,10 @@ ENV PATH="/usr/local/bin:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 libvulkan1 mesa-vulkan-drivers \
+    rocm-smi \
     python3 curl ca-certificates \
     libavcodec60 libavformat60 libavutil58 libswresample4 \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Select runtime base by BACKEND ────────────────────────────────────
@@ -152,6 +185,7 @@ ARG LLAMA_COMMIT_HASH=unknown
 ARG WHISPER_COMMIT_HASH=unknown
 ARG SD_COMMIT_HASH=unknown
 ARG IK_LLAMA_COMMIT_HASH=unknown
+ARG AUDIO_COMMIT_HASH=unknown
 ARG RUN_UID=0
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -179,10 +213,18 @@ COPY --from=sd-build /install/bin/sd-server /usr/local/bin/
 COPY --from=sd-build /install/bin/sd-cli /usr/local/bin/
 COPY --from=sd-build /install/lib/ /usr/local/lib/
 
+# Copy audio.cpp binaries (statically linked, model specs compiled in via
+# AUDIOCPP_DEPLOYMENT_BUILD). The on-disk spec catalog is installed too so
+# --model-spec-override has a path to point at.
+COPY --from=audio-build /install/bin/audiocpp_server /usr/local/bin/
+COPY --from=audio-build /install/bin/audiocpp_cli /usr/local/bin/
+COPY --from=audio-build /install/share/audiocpp/ /usr/local/share/audiocpp/
+
 # Copy llama.cpp binaries (statically linked)
 COPY --from=llama-build /install/bin/llama-server /usr/local/bin/
 COPY --from=llama-build /install/bin/llama-cli /usr/local/bin/
 COPY --from=llama-build /install/bin/llama-tts /usr/local/bin/
+COPY --from=llama-build /install/bin/llama-bench /usr/local/bin/
 
 # Copy ik-llama-server (CUDA only; empty copy for vulkan)
 COPY --from=ik-llama-build /install/bin/ /usr/local/bin/
@@ -194,15 +236,27 @@ RUN pip install uv --break-system-packages
 COPY --from=llama-swap-download /install/bin/llama-swap /usr/local/bin/
 COPY --from=llama-swap-download /install/llama-swap-version /tmp/
 
+# Copy vllm-wrapper binary
+COPY --from=vllm-wrapper-build /install/bin/vllm-wrapper /usr/local/bin/
+
 RUN ldconfig
 
 COPY config.example.yaml /etc/llama-swap/config/config.yaml
+
+# audiocpp_server takes its own JSON config. Ship a starter with this image's
+# backend baked in -- the binary defaults to "cuda", so a vulkan image that
+# copies an unedited example would try to load every model on a backend it was
+# not built with.
+COPY audiocpp-server.example.json /etc/llama-swap/audiocpp-server.example.json
+RUN sed -i "s/__BACKEND__/${BACKEND}/" /etc/llama-swap/audiocpp-server.example.json && \
+    chown -R ${RUN_UID}:${RUN_UID} /etc/llama-swap
 
 # Version tracking
 RUN echo "llama.cpp: ${LLAMA_COMMIT_HASH}" > /versions.txt && \
     echo "whisper.cpp: ${WHISPER_COMMIT_HASH}" >> /versions.txt && \
     echo "stable-diffusion.cpp: ${SD_COMMIT_HASH}" >> /versions.txt && \
     echo "ik_llama.cpp: ${IK_LLAMA_COMMIT_HASH}" >> /versions.txt && \
+    echo "audio.cpp: ${AUDIO_COMMIT_HASH}" >> /versions.txt && \
     echo "llama-swap: $(cat /tmp/llama-swap-version)" >> /versions.txt && \
     echo "backend: ${BACKEND}" >> /versions.txt && \
     echo "build_timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> /versions.txt

@@ -160,6 +160,20 @@ func TestServer_StripVersionPrefix(t *testing.T) {
 	}
 }
 
+func TestServer_StripAudioAPIPrefix(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/audioapi/v1/tasks/run", nil)
+	stripAudioAPIPrefix(r)
+	if r.URL.Path != "/v1/tasks/run" {
+		t.Errorf("path = %q, want /v1/tasks/run", r.URL.Path)
+	}
+
+	r2 := httptest.NewRequest(http.MethodGet, "/v1/tasks/run", nil)
+	stripAudioAPIPrefix(r2)
+	if r2.URL.Path != "/v1/tasks/run" {
+		t.Errorf("path = %q, want unchanged", r2.URL.Path)
+	}
+}
+
 func TestServer_CloseStreams(t *testing.T) {
 	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
 	s.CloseStreams()

@@ -16,7 +16,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/event"
-	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 const inflightUpdateInterval = 250 * time.Millisecond
@@ -54,29 +54,29 @@ type inflightTracker struct {
 	mu       sync.RWMutex
 	requests map[string]*inflightRequest
 
-	updates          chan shared.InFlightRequestsEvent
+	updates          chan swaputil.InFlightRequestsEvent
 	needsSnapshot    atomic.Bool
 	publisherRunning atomic.Bool
-	publish          func(shared.InFlightRequestsEvent)
+	publish          func(swaputil.InFlightRequestsEvent)
 }
 
 type inflightRequest struct {
-	entry       shared.InflightRequestEntry
+	entry       swaputil.InflightRequestEntry
 	cancel      context.CancelFunc
 	lastEmitted time.Time
 	timer       *time.Timer
 }
 
 func newInflightTracker() *inflightTracker {
-	return newInflightTrackerWithPublisher(inflightOutboxSize, func(update shared.InFlightRequestsEvent) {
+	return newInflightTrackerWithPublisher(inflightOutboxSize, func(update swaputil.InFlightRequestsEvent) {
 		event.Emit(update)
 	})
 }
 
-func newInflightTrackerWithPublisher(size int, publish func(shared.InFlightRequestsEvent)) *inflightTracker {
+func newInflightTrackerWithPublisher(size int, publish func(swaputil.InFlightRequestsEvent)) *inflightTracker {
 	t := &inflightTracker{
 		requests: make(map[string]*inflightRequest),
-		updates:  make(chan shared.InFlightRequestsEvent, size),
+		updates:  make(chan swaputil.InFlightRequestsEvent, size),
 		publish:  publish,
 	}
 	return t
@@ -84,7 +84,7 @@ func newInflightTrackerWithPublisher(size int, publish func(shared.InFlightReque
 
 func (t *inflightTracker) Add(r *http.Request, cancel context.CancelFunc) string {
 	id := strconv.FormatUint(t.nextID.Add(1), 10)
-	entry := shared.InflightRequestEntry{
+	entry := swaputil.InflightRequestEntry{
 		ID:          id,
 		Timestamp:   inflightStart(r),
 		ReqPath:     r.URL.Path,
@@ -94,7 +94,7 @@ func (t *inflightTracker) Add(r *http.Request, cancel context.CancelFunc) string
 		RespHeaders: map[string]string{},
 	}
 	redactHeaders(entry.ReqHeaders)
-	if data, ok := shared.ReadContext(r.Context()); ok {
+	if data, ok := swaputil.ReadContext(r.Context()); ok {
 		entry.Model = data.ModelID
 		entry.Metadata = copyMetadata(data.Metadata)
 	}
@@ -115,7 +115,7 @@ func (t *inflightTracker) Remove(id string) {
 		if req.timer != nil {
 			req.timer.Stop()
 		}
-		t.enqueueLocked(shared.InFlightRequestsEvent{Operation: inflightOperationRemove, ID: id})
+		t.enqueueLocked(swaputil.InFlightRequestsEvent{Operation: inflightOperationRemove, ID: id})
 	}
 	t.mu.Unlock()
 }
@@ -180,7 +180,7 @@ func (t *inflightTracker) emitPending(id string) {
 // enqueueLocked adds an update without allowing event-bus backpressure to
 // block the request path. On overflow, a later snapshot replaces any dropped
 // incremental updates with the tracker's authoritative state.
-func (t *inflightTracker) enqueueLocked(update shared.InFlightRequestsEvent) {
+func (t *inflightTracker) enqueueLocked(update swaputil.InFlightRequestsEvent) {
 	select {
 	case t.updates <- update:
 	default:
@@ -241,17 +241,17 @@ func (t *inflightTracker) Cancel(id string) bool {
 	return true
 }
 
-func (t *inflightTracker) Current() shared.InFlightRequestsEvent {
+func (t *inflightTracker) Current() swaputil.InFlightRequestsEvent {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	return shared.InFlightRequestsEvent{
+	return swaputil.InFlightRequestsEvent{
 		Operation: inflightOperationSnapshot,
 		Requests:  t.snapshotLocked(),
 	}
 }
 
-func (t *inflightTracker) snapshotLocked() []shared.InflightRequestEntry {
-	requests := make([]shared.InflightRequestEntry, 0, len(t.requests))
+func (t *inflightTracker) snapshotLocked() []swaputil.InflightRequestEntry {
+	requests := make([]swaputil.InflightRequestEntry, 0, len(t.requests))
 	for _, req := range t.requests {
 		requests = append(requests, copyInflightEntry(req.entry))
 	}
@@ -264,12 +264,12 @@ func (t *inflightTracker) snapshotLocked() []shared.InflightRequestEntry {
 	return requests
 }
 
-func upsertInflightEvent(entry shared.InflightRequestEntry) shared.InFlightRequestsEvent {
+func upsertInflightEvent(entry swaputil.InflightRequestEntry) swaputil.InFlightRequestsEvent {
 	entry = copyInflightEntry(entry)
-	return shared.InFlightRequestsEvent{Operation: inflightOperationUpsert, Request: &entry}
+	return swaputil.InFlightRequestsEvent{Operation: inflightOperationUpsert, Request: &entry}
 }
 
-func copyInflightEntry(entry shared.InflightRequestEntry) shared.InflightRequestEntry {
+func copyInflightEntry(entry swaputil.InflightRequestEntry) swaputil.InflightRequestEntry {
 	entry.Metadata = copyMetadata(entry.Metadata)
 	entry.ReqHeaders = copyStringMap(entry.ReqHeaders)
 	entry.RespHeaders = copyStringMap(entry.RespHeaders)
@@ -277,7 +277,7 @@ func copyInflightEntry(entry shared.InflightRequestEntry) shared.InflightRequest
 	return entry
 }
 
-func refreshInflightElapsed(update shared.InFlightRequestsEvent) shared.InFlightRequestsEvent {
+func refreshInflightElapsed(update swaputil.InFlightRequestsEvent) swaputil.InFlightRequestsEvent {
 	if update.Request != nil {
 		entry := *update.Request
 		setInflightElapsed(&entry)
@@ -289,7 +289,7 @@ func refreshInflightElapsed(update shared.InFlightRequestsEvent) shared.InFlight
 	return update
 }
 
-func setInflightElapsed(entry *shared.InflightRequestEntry) {
+func setInflightElapsed(entry *swaputil.InflightRequestEntry) {
 	elapsed := time.Since(entry.Timestamp)
 	if elapsed < 0 {
 		elapsed = 0
@@ -362,9 +362,14 @@ func (w *inflightResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 
 // CreateInflightMiddleware returns middleware that tracks model-dispatched
 // requests until downstream handling completes.
-func CreateInflightMiddleware(t *inflightTracker) chain.Middleware {
+func CreateInflightMiddleware(t *inflightTracker, cfg config.Config) chain.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if swaputil.ShouldIgnoreWebsocket(r, cfg) {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			ctx, cancel := context.WithCancel(r.Context())
 			defer cancel()
 
@@ -389,13 +394,17 @@ func CreateUpstreamInflightMiddleware(t *inflightTracker, cfg config.Config) cha
 			}
 			r = markInflightStart(r)
 
-			_, _, remainingPath, found := shared.FindModelInPath(cfg, strings.TrimPrefix(r.URL.Path, "/upstream"))
+			_, _, remainingPath, found := swaputil.FindModelInPath(cfg, strings.TrimPrefix(r.URL.Path, "/upstream"))
 			if !found || !isModelDispatchedRequest(r.Method, remainingPath) {
 				next.ServeHTTP(w, r)
 				return
 			}
 
-			if _, err := shared.FetchContext(r, cfg); err != nil {
+			if _, err := swaputil.FetchContext(r, cfg); err != nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if swaputil.ShouldIgnoreWebsocket(r, cfg) {
 				next.ServeHTTP(w, r)
 				return
 			}

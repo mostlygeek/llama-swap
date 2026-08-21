@@ -13,20 +13,21 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/perf"
-	"github.com/mostlygeek/llama-swap/internal/shared"
 	"github.com/mostlygeek/llama-swap/internal/store"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 // apiModel is one entry in the /api/events modelStatus payload.
 type apiModel struct {
-	Id           string         `json:"id"`
-	Name         string         `json:"name"`
-	Description  string         `json:"description"`
-	State        string         `json:"state"`
-	Unlisted     bool           `json:"unlisted"`
-	PeerID       string         `json:"peerID"`
-	Aliases      []string       `json:"aliases,omitempty"`
-	Capabilities map[string]any `json:"capabilities,omitempty"`
+	Id            string         `json:"id"`
+	Name          string         `json:"name"`
+	Description   string         `json:"description"`
+	State         string         `json:"state"`
+	Unlisted      bool           `json:"unlisted"`
+	PeerID        string         `json:"peerID"`
+	Aliases       []string       `json:"aliases,omitempty"`
+	Capabilities  map[string]any `json:"capabilities,omitempty"`
+	ContextLength int            `json:"context_length,omitempty"`
 }
 
 type apiProfile struct {
@@ -69,24 +70,24 @@ func (s *Server) handleAPIActiveProfile(w http.ResponseWriter, r *http.Request) 
 	var body map[string]json.RawMessage
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&body); err != nil {
-		shared.SendResponse(w, r, http.StatusBadRequest, "invalid profile request")
+		swaputil.SendResponse(w, r, http.StatusBadRequest, "invalid profile request")
 		return
 	}
 	raw, ok := body["name"]
 	if !ok {
-		shared.SendResponse(w, r, http.StatusBadRequest, "profile name is required")
+		swaputil.SendResponse(w, r, http.StatusBadRequest, "profile name is required")
 		return
 	}
 
 	var name string
 	if string(raw) != "null" {
 		if err := json.Unmarshal(raw, &name); err != nil {
-			shared.SendResponse(w, r, http.StatusBadRequest, "profile name must be a string or null")
+			swaputil.SendResponse(w, r, http.StatusBadRequest, "profile name must be a string or null")
 			return
 		}
 	}
 	if _, err := s.setActiveProfile(name); err != nil {
-		shared.SendResponse(w, r, http.StatusNotFound, err.Error())
+		swaputil.SendResponse(w, r, http.StatusNotFound, err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -111,15 +112,16 @@ func (s *Server) modelStatus() []apiModel {
 		if st, ok := running[id]; ok {
 			state = string(st)
 		}
-		_, capsMap, _, _ := renderCapabilities(mc.Capabilities)
+		_, capsMap, _, ctxLen := renderCapabilities(mc.Capabilities)
 		models = append(models, apiModel{
-			Id:           id,
-			Name:         mc.Name,
-			Description:  mc.Description,
-			State:        state,
-			Unlisted:     mc.Unlisted,
-			Aliases:      mc.Aliases,
-			Capabilities: capsMap,
+			Id:            id,
+			Name:          mc.Name,
+			Description:   mc.Description,
+			State:         state,
+			Unlisted:      mc.Unlisted,
+			Aliases:       mc.Aliases,
+			Capabilities:  capsMap,
+			ContextLength: ctxLen,
 		})
 	}
 
@@ -144,11 +146,11 @@ func (s *Server) handleAPIUnloadModel(w http.ResponseWriter, r *http.Request) {
 	requested := strings.TrimPrefix(r.PathValue("model"), "/")
 	realName, found := s.cfg.RealModelName(requested)
 	if !found {
-		shared.SendResponse(w, r, http.StatusNotFound, "model not found")
+		swaputil.SendResponse(w, r, http.StatusNotFound, "model not found")
 		return
 	}
 	if !s.local.Handles(realName) {
-		shared.SendResponse(w, r, http.StatusNotFound, "no local server found for requested model")
+		swaputil.SendResponse(w, r, http.StatusNotFound, "no local server found for requested model")
 		return
 	}
 	s.local.Unload(0, realName)
@@ -160,12 +162,12 @@ func (s *Server) handleAPIUnloadModel(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPIActivity(w http.ResponseWriter, r *http.Request) {
 	query, err := parseActivityQuery(r)
 	if err != nil {
-		shared.SendResponse(w, r, http.StatusBadRequest, err.Error())
+		swaputil.SendResponse(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	page, err := s.store.ListActivity(r.Context(), query)
 	if err != nil {
-		shared.SendResponse(w, r, http.StatusInternalServerError, "failed to get activity")
+		swaputil.SendResponse(w, r, http.StatusInternalServerError, "failed to get activity")
 		return
 	}
 	s.metrics.overlayCaptureState(page.Data)
@@ -179,7 +181,7 @@ func (s *Server) handleAPIActivityStats(w http.ResponseWriter, r *http.Request) 
 		Model: strings.TrimSpace(r.URL.Query().Get("model")),
 	})
 	if err != nil {
-		shared.SendResponse(w, r, http.StatusInternalServerError, "failed to get activity stats")
+		swaputil.SendResponse(w, r, http.StatusInternalServerError, "failed to get activity stats")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -197,13 +199,76 @@ func parseActivityLimit(raw string) (int, error) {
 	return 0, fmt.Errorf("limit must be between 1 and 999")
 }
 
+// parseActivityTime reads an optional RFC3339 timestamp param, matching the
+// ?after= convention used by handleAPIPerformance. A missing param is the zero
+// time, which the store treats as unbounded. The UI does not send these; they
+// exist for direct API consumers.
+func parseActivityTime(r *http.Request, param string) (time.Time, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get(param))
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	parsed, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid '%s' timestamp, use RFC3339 format", param)
+	}
+	return parsed, nil
+}
+
+// parseActivityID reads an optional row id bound. A missing param is 0, which
+// the store treats as unbounded.
+func parseActivityID(r *http.Request, param string) (int, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get(param))
+	if raw == "" {
+		return 0, nil
+	}
+	id, err := strconv.Atoi(raw)
+	if err != nil || id < 1 {
+		return 0, fmt.Errorf("%s must be >= 1", param)
+	}
+	return id, nil
+}
+
 func parseActivityQuery(r *http.Request) (store.ActivityQuery, error) {
 	const defaultLimit = 25
 	query := store.ActivityQuery{
-		Model: strings.TrimSpace(r.URL.Query().Get("model")),
 		Limit: defaultLimit,
 		Page:  1,
 	}
+
+	// model repeats to filter on several models at once (?model=a&model=b).
+	// A single ?model=x stays a plain exact match.
+	for _, raw := range r.URL.Query()["model"] {
+		if model := strings.TrimSpace(raw); model != "" {
+			query.Models = append(query.Models, model)
+		}
+	}
+
+	start, err := parseActivityTime(r, "start")
+	if err != nil {
+		return store.ActivityQuery{}, err
+	}
+	end, err := parseActivityTime(r, "end")
+	if err != nil {
+		return store.ActivityQuery{}, err
+	}
+	if !start.IsZero() && !end.IsZero() && start.After(end) {
+		return store.ActivityQuery{}, fmt.Errorf("start must be before end")
+	}
+	query.Start, query.End = start, end
+
+	minID, err := parseActivityID(r, "min_id")
+	if err != nil {
+		return store.ActivityQuery{}, err
+	}
+	maxID, err := parseActivityID(r, "max_id")
+	if err != nil {
+		return store.ActivityQuery{}, err
+	}
+	if minID > 0 && maxID > 0 && minID > maxID {
+		return store.ActivityQuery{}, fmt.Errorf("min_id must be <= max_id")
+	}
+	query.MinID, query.MaxID = minID, maxID
 
 	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
 		limit, err := parseActivityLimit(raw)
@@ -255,7 +320,7 @@ func (s *Server) handleAPIPerformance(w http.ResponseWriter, r *http.Request) {
 	if afterStr := r.URL.Query().Get("after"); afterStr != "" {
 		after, err := time.Parse(time.RFC3339, afterStr)
 		if err != nil {
-			shared.SendResponse(w, r, http.StatusBadRequest, "invalid 'after' timestamp, use RFC3339 format")
+			swaputil.SendResponse(w, r, http.StatusBadRequest, "invalid 'after' timestamp, use RFC3339 format")
 			return
 		}
 		filteredSys := make([]perf.SysStat, 0, len(sysStats))
@@ -293,23 +358,35 @@ func (s *Server) handleAPIVersion(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleAPIHardware serves the hardware snapshot captured at process startup.
+func (s *Server) handleAPIHardware(w http.ResponseWriter, r *http.Request) {
+	if s.hardware == nil {
+		swaputil.SendResponse(w, r, http.StatusServiceUnavailable, "hardware detection unavailable")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(s.hardware); err != nil {
+		s.proxylog.Warnf("failed to encode hardware snapshot: %v", err)
+	}
+}
+
 // handleAPICapture returns the stored request/response capture for a metric ID.
 func (s *Server) handleAPICapture(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
-		shared.SendResponse(w, r, http.StatusBadRequest, "invalid capture ID")
+		swaputil.SendResponse(w, r, http.StatusBadRequest, "invalid capture ID")
 		return
 	}
 
 	capture := s.metrics.getCaptureByID(id)
 	if capture == nil {
-		shared.SendResponse(w, r, http.StatusNotFound, "capture not found")
+		swaputil.SendResponse(w, r, http.StatusNotFound, "capture not found")
 		return
 	}
 
 	jsonBytes, err := json.Marshal(capture)
 	if err != nil {
-		shared.SendResponse(w, r, http.StatusInternalServerError, "failed to marshal capture")
+		swaputil.SendResponse(w, r, http.StatusInternalServerError, "failed to marshal capture")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -321,7 +398,7 @@ func (s *Server) handleAPICapture(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPICancelInflight(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" || !s.inflight.Cancel(id) {
-		shared.SendResponse(w, r, http.StatusNotFound, "inflight request not found")
+		swaputil.SendResponse(w, r, http.StatusNotFound, "inflight request not found")
 		return
 	}
 
@@ -357,7 +434,7 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		shared.SendResponse(w, r, http.StatusInternalServerError, "streaming unsupported")
+		swaputil.SendResponse(w, r, http.StatusInternalServerError, "streaming unsupported")
 		return
 	}
 
@@ -391,9 +468,9 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 			send(messageEnvelope{Type: msgTypeActivity, Data: string(j)})
 		}
 	}
-	sendInFlight := func(update shared.InFlightRequestsEvent) {
+	sendInFlight := func(update swaputil.InFlightRequestsEvent) {
 		if update.Operation == inflightOperationSnapshot && update.Requests == nil {
-			update.Requests = []shared.InflightRequestEntry{}
+			update.Requests = []swaputil.InflightRequestEntry{}
 		}
 		if j, err := json.Marshal(update); err == nil {
 			send(messageEnvelope{Type: msgTypeInFlight, Data: string(j)})
@@ -410,16 +487,16 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	defer event.On(func(e shared.ProcessStateChangeEvent) { sendModels() })()
-	defer event.On(func(e shared.ConfigFileChangedEvent) { sendModels() })()
-	defer event.On(func(e shared.ProfileChangedEvent) {
+	defer event.On(func(e swaputil.ProcessStateChangeEvent) { sendModels() })()
+	defer event.On(func(e swaputil.ConfigFileChangedEvent) { sendModels() })()
+	defer event.On(func(e swaputil.ProfileChangedEvent) {
 		sendProfile()
 		sendModels()
 	})()
 	defer s.proxylog.OnLogData(func(data []byte) { sendLogData("proxy", data) })()
 	defer s.upstreamlog.OnLogData(func(data []byte) { sendLogData("upstream", data) })()
 	defer event.On(func(e ActivityLogEvent) { sendActivity(e.Metrics.ID) })()
-	defer event.On(func(e shared.InFlightRequestsEvent) { sendInFlight(e) })()
+	defer event.On(func(e swaputil.InFlightRequestsEvent) { sendInFlight(e) })()
 
 	// initial payload
 	sendLogData("proxy", s.proxylog.GetHistory())

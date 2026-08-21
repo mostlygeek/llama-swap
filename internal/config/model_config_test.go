@@ -73,6 +73,62 @@ models:
 	}
 }
 
+func TestConfig_ComfyUIOverrides(t *testing.T) {
+	if ComfyUIModelID != "comfyui_auto" {
+		t.Fatalf("ComfyUIModelID=%q want comfyui_auto", ComfyUIModelID)
+	}
+
+	tests := []struct {
+		name             string
+		concurrencyLimit int
+		wantLimit        int
+	}{
+		{name: "unset limit", wantLimit: 50},
+		{name: "lower limit", concurrencyLimit: 10, wantLimit: 50},
+		{name: "minimum limit", concurrencyLimit: 50, wantLimit: 50},
+		{name: "higher limit", concurrencyLimit: 60, wantLimit: 60},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			content := fmt.Sprintf(`
+models:
+  %s:
+    cmd: comfyui --port ${PORT}
+    concurrencyLimit: %d
+    compat:
+      ignoreWebsockets: false
+  regular:
+    cmd: regular --port ${PORT}
+    concurrencyLimit: 10
+`, ComfyUIModelID, tt.concurrencyLimit)
+			cfg, err := LoadConfigFromReader(strings.NewReader(content))
+			assert.NoError(t, err)
+			assert.Equal(t, tt.wantLimit, cfg.Models[ComfyUIModelID].ConcurrencyLimit)
+			assert.True(t, cfg.Models[ComfyUIModelID].Compat.IgnoreWebsockets)
+			assert.Equal(t, 10, cfg.Models["regular"].ConcurrencyLimit)
+			assert.False(t, cfg.Models["regular"].Compat.IgnoreWebsockets)
+		})
+	}
+}
+
+func TestConfig_ModelCompat(t *testing.T) {
+	content := `
+models:
+  enabled:
+    cmd: enabled --port ${PORT}
+    compat:
+      ignoreWebsockets: true
+  default:
+    cmd: default --port ${PORT}
+`
+
+	cfg, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.NoError(t, err)
+	assert.True(t, cfg.Models["enabled"].Compat.IgnoreWebsockets)
+	assert.False(t, cfg.Models["default"].Compat.IgnoreWebsockets)
+}
+
 func TestConfig_SetParamsByIDAutoAlias(t *testing.T) {
 	content := `
 models:

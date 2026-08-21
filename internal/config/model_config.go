@@ -9,6 +9,10 @@ import (
 const (
 	MODEL_CONFIG_DEFAULT_TTL   = -1
 	MODEL_CONFIG_DEFAULT_PROXY = "http://localhost:${PORT}"
+	comfyUIConcurrencyLimit    = 50
+
+	// ComfyUIModelID identifies the model used by the /comfyui endpoint.
+	ComfyUIModelID = "comfyui_auto"
 )
 
 var validModalities = map[string]struct{}{
@@ -63,6 +67,13 @@ type TimeoutsConfig struct {
 	IdleConn       int `yaml:"idleConn"`
 }
 
+// CompatConfig holds compatibility settings for upstream applications.
+type CompatConfig struct {
+	// IgnoreWebsockets prevents websocket connections from participating in
+	// model lifecycle activity such as swapping, concurrency, and TTL tracking.
+	IgnoreWebsockets bool `yaml:"ignoreWebsockets"`
+}
+
 type ModelConfig struct {
 	Cmd           string   `yaml:"cmd"`
 	CmdStop       string   `yaml:"cmdStop"`
@@ -98,6 +109,9 @@ type ModelConfig struct {
 
 	// Timeout settings for proxy connections
 	Timeouts TimeoutsConfig `yaml:"timeouts"`
+
+	// Compatibility settings for upstream applications.
+	Compat CompatConfig `yaml:"compat"`
 
 	// Capabilities defines what modalities and features the model supports.
 	Capabilities ModelCapConfig `yaml:"capabilities"`

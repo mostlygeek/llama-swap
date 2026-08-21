@@ -11,7 +11,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
-	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 // FIFO methods all run on the router's single run-loop goroutine, so these
@@ -182,7 +182,7 @@ func assertAdmitted(t *testing.T, req HandlerReq) {
 
 func assertAdmission429(t *testing.T, req HandlerReq) {
 	t.Helper()
-	var httpErr shared.HTTPError
+	var httpErr swaputil.HTTPError
 	err := admitErr(t, req)
 	if !errors.As(err, &httpErr) {
 		t.Fatalf("admission err=%v want HTTPError", err)
@@ -254,13 +254,13 @@ func TestFIFO_GrantSetsPriorityMetadata(t *testing.T) {
 	cfg := config.FifoConfig{Priority: map[string]int{"a": 7}}
 	s := NewFIFO("test", logmon.NewWriter(io.Discard), &stubPlanner{}, cfg, nil, eff)
 
-	ctx := shared.SetContext(context.Background(), shared.ReqContextData{ModelID: "a", Metadata: make(map[string]string)})
+	ctx := swaputil.SetContext(context.Background(), swaputil.ReqContextData{ModelID: "a", Metadata: make(map[string]string)})
 	s.OnRequest(HandlerReq{Model: "a", Ctx: ctx})
 
 	if got := eff.served("a"); got != 1 {
 		t.Fatalf("served(a)=%d want 1", got)
 	}
-	data, ok := shared.ReadContext(eff.lastServeReq.Ctx)
+	data, ok := swaputil.ReadContext(eff.lastServeReq.Ctx)
 	if !ok {
 		t.Fatal("context data missing from granted request")
 	}

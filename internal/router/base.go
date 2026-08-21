@@ -13,7 +13,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/router/scheduler"
-	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 type shutdownReq struct {
@@ -454,13 +454,33 @@ func (b *baseRouter) Shutdown(timeout time.Duration) error {
 
 func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if b.shuttingDown.Load() {
-		shared.SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
+		swaputil.SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
 		return
 	}
 
-	data, err := shared.FetchContext(req, b.config)
+	data, err := swaputil.FetchContext(req, b.config)
 	if err != nil {
-		shared.SendError(w, req, err)
+		swaputil.SendError(w, req, err)
+		return
+	}
+
+	// Ignored websocket connections are deliberately kept outside the
+	// scheduler: they cannot start or queue a model, consume concurrency, or
+	// prevent another request from swapping the process out. A process may stop
+	// immediately after this readiness check; dropping that websocket is the
+	// intended tradeoff of opting out of lifecycle tracking.
+	if swaputil.ShouldIgnoreWebsocket(req, b.config) {
+		p, ok := b.processes[data.ModelID]
+		if !ok {
+			swaputil.SendError(w, req, scheduler.ErrModelNotFound)
+			return
+		}
+		if p.State() != process.StateReady {
+			swaputil.SendResponse(w, req, http.StatusConflict,
+				fmt.Sprintf("model %s is not loaded; ignored websocket requests cannot start it", data.ModelID))
+			return
+		}
+		p.ServeHTTP(w, req)
 		return
 	}
 
@@ -480,7 +500,7 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	case <-req.Context().Done():
 		return
 	case <-b.shutdownCtx.Done():
-		shared.SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
+		swaputil.SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
 		return
 	}
 
@@ -494,11 +514,11 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 		return
 	case <-b.shutdownCtx.Done():
-		shared.SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
+		swaputil.SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
 		return
 	}
 	if admissionErr != nil {
-		shared.SendError(w, req, admissionErr)
+		swaputil.SendError(w, req, admissionErr)
 		return
 	}
 
@@ -557,12 +577,12 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	case <-b.shutdownCtx.Done():
 		finishLoading()
-		shared.SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
+		swaputil.SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
 		return
 	}
 
 	if resp.Err != nil {
-		shared.SendError(w, req, resp.Err)
+		swaputil.SendError(w, req, resp.Err)
 		return
 	}
 	resp.HandleFunc(w, req)

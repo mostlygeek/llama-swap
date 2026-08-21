@@ -10,7 +10,7 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/process"
-	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -199,10 +199,10 @@ func TestServer_SelectorStrategySpillover_RemoteModels(t *testing.T) {
 func TestServer_SelectorMiddleware_RewritesBeforeFiltersAndRecordsActivity(t *testing.T) {
 	cfg := selectorTestConfig(t)
 	local := newStubRouter([]string{"a", "b", "c"}, "")
-	var received shared.ReqContextData
+	var received swaputil.ReqContextData
 	var body []byte
 	local.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
-		received, _ = shared.ReadContext(r.Context())
+		received, _ = swaputil.ReadContext(r.Context())
 		body, _ = io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"usage":{"prompt_tokens":2,"completion_tokens":3}}`))
@@ -227,9 +227,9 @@ func TestServer_SelectorMiddleware_RewritesBeforeFiltersAndRecordsActivity(t *te
 func TestServer_SelectorMiddleware_ProfileRunsFirst(t *testing.T) {
 	cfg := selectorTestConfig(t)
 	local := newStubRouter([]string{"a", "b", "c"}, "")
-	var received shared.ReqContextData
+	var received swaputil.ReqContextData
 	local.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
-		received, _ = shared.ReadContext(r.Context())
+		received, _ = swaputil.ReadContext(r.Context())
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"usage":{}}`))
 	}
@@ -258,7 +258,7 @@ func TestServer_SelectorMiddleware_SpilloverReservations(t *testing.T) {
 	selected := make(chan string, 2)
 	release := make(chan struct{})
 	local.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
-		data, _ := shared.ReadContext(r.Context())
+		data, _ := swaputil.ReadContext(r.Context())
 		selected <- data.ModelID
 		<-release
 		w.WriteHeader(http.StatusOK)
@@ -279,6 +279,49 @@ func TestServer_SelectorMiddleware_SpilloverReservations(t *testing.T) {
 	second := <-selected
 
 	assert.NotEqual(t, first, second)
+	close(release)
+	<-done
+	<-done
+}
+
+func TestServer_SelectorMiddleware_IgnoredWebsocketDoesNotReserveSpillover(t *testing.T) {
+	cfg := selectorTestConfig(t)
+	a := cfg.Models["a"]
+	a.Compat.IgnoreWebsockets = true
+	cfg.Models["a"] = a
+	local := newStubRouter([]string{"a", "b", "c"}, "")
+	local.running = map[string]process.ProcessState{
+		"a": process.StateReady,
+		"b": process.StateReady,
+		"c": process.StateReady,
+	}
+	selected := make(chan string, 2)
+	release := make(chan struct{})
+	local.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
+		data, _ := swaputil.ReadContext(r.Context())
+		selected <- data.ModelID
+		<-release
+		w.WriteHeader(http.StatusOK)
+	}
+	s := selectorTestServer(t, cfg, local)
+
+	websocketRequest := func() *http.Request {
+		r := httptest.NewRequest(http.MethodGet, "/props?model=balanced", nil)
+		r.Header.Set("Connection", "Upgrade")
+		r.Header.Set("Upgrade", "websocket")
+		return r
+	}
+	done := make(chan struct{}, 2)
+	for i, want := range []string{"a", "b"} {
+		go func() {
+			s.ServeHTTP(httptest.NewRecorder(), websocketRequest())
+			done <- struct{}{}
+		}()
+		if got := <-selected; got != want {
+			t.Fatalf("request %d selected model=%q want %q", i+1, got, want)
+		}
+	}
+
 	close(release)
 	<-done
 	<-done
@@ -347,6 +390,18 @@ func TestServer_Selector_ModelListings(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "testing", metadata["purpose"])
 	assert.Equal(t, "selector", metadata["type"])
+	assert.Equal(t, config.SelectorStrategyPin, metadata["strategy"])
+	assert.Equal(t, []any{"variant", "remote/remote-model"}, metadata["targets"])
+	assert.NotContains(t, metadata, "spillover")
+
+	balanced, found := byID["balanced"]
+	require.True(t, found)
+	balancedMetadata, ok := balanced.Meta["llamaswap"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, config.SelectorStrategySpillover, balancedMetadata["strategy"])
+	assert.Equal(t, []any{"a", "b", "c"}, balancedMetadata["targets"])
+	assert.Equal(t, float64(1), balancedMetadata["spillover"])
+
 	assert.NotContains(t, byID, "hidden-selector")
 }
 

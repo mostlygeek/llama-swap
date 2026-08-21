@@ -34,12 +34,12 @@ test-all:
 	go test -race -count=1 ./internal/...
 
 ui/node_modules:
-	cd ui-svelte && npm install
+	cd ui && npm install
 
-# build react UI into internal/server/ui_dist; the `embed_ui` build tag embeds
+# build the UI into internal/server/ui_dist; the `embed_ui` build tag embeds
 # this output into the binary (see internal/server/embed.go)
 ui: ui/node_modules
-	cd ui-svelte && npm run build
+	cd ui && npm run build
 
 # Build OSX binary
 mac: ui
@@ -97,7 +97,7 @@ wol-proxy: $(BUILD_DIR)
 	go build -o $(BUILD_DIR)/wol-proxy-$(GOOS)-$(GOARCH)-$(shell date +%Y-%m-%d) cmd/wol-proxy/wol-proxy.go
 
 test-ui:
-	cd ui-svelte && npm ci && npm run check && npm test
+	cd ui && npm ci && npm run check && npm test
 
 # Phony targets
 .PHONY: all clean ui mac windows simple-responder simple-responder-windows test test-all test-dev test-ui wol-proxy
