@@ -99,6 +99,63 @@ func TestServer_ParseMetrics_VLLMMetrics(t *testing.T) {
 	}
 }
 
+func TestServer_ParseMetrics_VLLMSpeculativeDecoding(t *testing.T) {
+	body := `{"id":"chatcmpl-abc123","object":"chat.completion","usage":{"prompt_tokens":42,"completion_tokens":128},"metrics":{"mean_itl_ms":9.1,"speculative_decoding":{"mean_acceptance_length":1.7,"draft_acceptance_rate":0.7,"acceptance_histogram":[6,14],"num_spec_steps":20,"num_accepted_draft_tokens":14,"num_draft_tokens":20,"num_spec_tokens":1}}}`
+	parsed := gjson.Parse(body)
+	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
+	if err != nil {
+		t.Fatalf("parseMetrics: %v", err)
+	}
+	if entry.Tokens.DraftTokens != 20 || entry.Tokens.DraftAccTokens != 14 {
+		t.Fatalf("draft tokens = %+v, want 14/20", entry.Tokens)
+	}
+}
+
+// A speculative_decoding object missing either counter must leave both unset so
+// the acceptance rate is not computed from half the data.
+func TestServer_ParseMetrics_VLLMSpeculativeDecodingPartial(t *testing.T) {
+	body := `{"usage":{"prompt_tokens":42,"completion_tokens":128},"metrics":{"speculative_decoding":{"num_draft_tokens":20}}}`
+	parsed := gjson.Parse(body)
+	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
+	if err != nil {
+		t.Fatalf("parseMetrics: %v", err)
+	}
+	if entry.Tokens.DraftTokens != -1 || entry.Tokens.DraftAccTokens != -1 {
+		t.Fatalf("draft tokens = %+v, want -1/-1", entry.Tokens)
+	}
+}
+
+// vLLM only emits the metrics object on the final streamed chunk.
+func TestServer_ProcessStreamingResponse_VLLMSpeculativeDecoding(t *testing.T) {
+	body := []byte(`data: {"choices":[{"delta":{"content":"hi"}}]}
+
+data: {"object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":11742,"completion_tokens":35},"metrics":{"mean_itl_ms":17.209908293272534,"speculative_decoding":{"mean_acceptance_length":1.7,"draft_acceptance_rate":0.7,"num_spec_steps":20,"num_accepted_draft_tokens":14,"num_draft_tokens":20,"num_spec_tokens":1}}}
+
+data: [DONE]
+`)
+	entry, err := processStreamingResponse("m", time.Now(), body)
+	if err != nil {
+		t.Fatalf("processStreamingResponse: %v", err)
+	}
+	if entry.Tokens.DraftTokens != 20 || entry.Tokens.DraftAccTokens != 14 {
+		t.Fatalf("draft tokens = %+v, want 14/20", entry.Tokens)
+	}
+}
+
+// llama-server timings and vLLM metrics never appear together, but a response
+// carrying both must not have its timings-sourced draft counts clobbered.
+func TestServer_ParseMetrics_TimingsDraftTokensNotOverwritten(t *testing.T) {
+	body := `{"timings":{"prompt_n":20,"predicted_n":50,"draft_n":30,"draft_n_accepted":12},"metrics":{"speculative_decoding":{}}}`
+	parsed := gjson.Parse(body)
+	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
+	if err != nil {
+		t.Fatalf("parseMetrics: %v", err)
+	}
+	if entry.Tokens.DraftTokens != 30 || entry.Tokens.DraftAccTokens != 12 {
+		t.Fatalf("draft tokens = %+v, want 12/30", entry.Tokens)
+	}
+}
+
 func TestServer_ProcessStreamingResponse_NoData(t *testing.T) {
 	if _, err := processStreamingResponse("m", time.Now(), []byte("data: [DONE]\n\n")); err == nil {
 		t.Fatal("expected error for stream with no usage data")

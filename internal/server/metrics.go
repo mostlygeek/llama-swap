@@ -430,7 +430,7 @@ func parseMetrics(modelID string, start time.Time, usage, timings, responseMetri
 
 // buildMetrics composes an ActivityLogEntry from accumulated token counts and
 // optional llama-server timings (which override input/output and provide rates)
-// or vLLM response metrics.
+// or vLLM response metrics (rates and speculative decoding counters).
 func buildMetrics(modelID string, start time.Time, inputTokens, outputTokens, cachedTokens int64, timings, responseMetrics gjson.Result) ActivityLogEntry {
 	wallDurationMs := int(time.Since(start).Milliseconds())
 	durationMs := wallDurationMs
@@ -454,6 +454,18 @@ func buildMetrics(modelID string, start time.Time, inputTokens, outputTokens, ca
 		if timings.Get("draft_n").Exists() && timings.Get("draft_n_accepted").Exists() {
 			draftTokens = int(timings.Get("draft_n").Int())
 			draftAccTokens = int(timings.Get("draft_n_accepted").Int())
+		}
+	}
+	// vLLM reports speculative decoding counts under metrics.speculative_decoding
+	// when started with --per-request-spec-decode-metrics (#1032). Both counters
+	// are required so the acceptance rate is never derived from a half-filled
+	// object.
+	if spec := responseMetrics.Get("speculative_decoding"); spec.Exists() {
+		drafted := spec.Get("num_draft_tokens")
+		accepted := spec.Get("num_accepted_draft_tokens")
+		if drafted.Exists() && accepted.Exists() {
+			draftTokens = int(drafted.Int())
+			draftAccTokens = int(accepted.Int())
 		}
 	}
 	if timeToFirstToken := responseMetrics.Get("time_to_first_token_ms"); timeToFirstToken.Exists() && timeToFirstToken.Float() > 0 {
