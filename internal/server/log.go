@@ -155,16 +155,28 @@ var requestLogPathSkips = []string{"/wol-health", "/api/performance", "/metrics"
 // is forwarded so httputil.ReverseProxy can upgrade websocket connections.
 type statusRecorder struct {
 	http.ResponseWriter
-	status int
-	size   int
+	status      int
+	size        int
+	wroteHeader bool
 }
 
 func (sr *statusRecorder) WriteHeader(code int) {
 	sr.status = code
+	sr.wroteHeader = true
 	sr.ResponseWriter.WriteHeader(code)
 }
 
+// MarkStatus records code for the access log without writing to the client.
+// This is the outermost recorder, so there is nothing further to forward to.
+func (sr *statusRecorder) MarkStatus(code int) { sr.status = code }
+
+// WroteHeader reports whether a response status reached the client.
+func (sr *statusRecorder) WroteHeader() bool { return sr.wroteHeader }
+
 func (sr *statusRecorder) Write(b []byte) (int, error) {
+	// An implicit 200 from net/http still counts as a response the client
+	// started receiving, so it must not be overwritten by a late sentinel.
+	sr.wroteHeader = true
 	n, err := sr.ResponseWriter.Write(b)
 	sr.size += n
 	return n, err
@@ -225,6 +237,16 @@ func CreateRequestLogMiddleware(proxylog *logmon.Monitor) chain.Middleware {
 
 			rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(rec, r)
+
+			// Cancellation branches (a client hanging up during a cold model
+			// load, for one) return without writing anything, which would
+			// otherwise be logged as the seeded 200. net/http cancels the
+			// request context when the client disconnects or when the
+			// top-level ServeHTTP returns; this middleware is inside that
+			// call, so a done context here means the client really left.
+			// Deriving it once covers every such branch, including ones added
+			// later. See #1029.
+			swaputil.MarkClientClosed(rec, r)
 
 			proxylog.Infof("Request %s \"%s %s %s\" %d %d \"%s\" %v",
 				ip, method, path, proto, rec.status, rec.size, ua, time.Since(start))

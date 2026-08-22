@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -89,6 +90,14 @@ func NewPeer(cfg config.Config, logger *logmon.Monitor) (*Peer, error) {
 		}
 
 		reverseProxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+			// A client that hung up is not a peer failure: record the
+			// client-closed sentinel instead of blaming the peer with a 502
+			// (#1029). Nothing is sent — the client is already gone.
+			if errors.Is(err, context.Canceled) || r.Context().Err() != nil {
+				logger.Debugf("peer %s: client disconnected: %v", peerID, err)
+				swaputil.MarkClientClosed(w, r)
+				return
+			}
 			logger.Warnf("peer %s: proxy error: %v", peerID, err)
 			errMsg := fmt.Sprintf("peer proxy error: %v", err)
 			if runtime.GOOS == "darwin" && strings.Contains(err.Error(), "connect: no route to host") {

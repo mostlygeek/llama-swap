@@ -344,6 +344,18 @@ func (w *inflightResponseWriter) Write(data []byte) (int, error) {
 	return n, err
 }
 
+// MarkStatus forwards a recorded-only status to the wrapped writer. The
+// tracker records bytes and headers rather than a status code, so there is
+// nothing to update here.
+func (w *inflightResponseWriter) MarkStatus(code int) {
+	if marker, ok := w.ResponseWriter.(swaputil.StatusMarker); ok {
+		marker.MarkStatus(code)
+	}
+}
+
+// WroteHeader reports whether a response status reached the client.
+func (w *inflightResponseWriter) WroteHeader() bool { return w.wroteHeader }
+
 func (w *inflightResponseWriter) Flush() {
 	if !w.wroteHeader {
 		w.WriteHeader(http.StatusOK)

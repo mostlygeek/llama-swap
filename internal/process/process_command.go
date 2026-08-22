@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -20,6 +21,37 @@ import (
 )
 
 var ErrStartAborted = fmt.Errorf("aborted")
+
+// healthCheckKey marks requests issued by the health check loop, which polls
+// the upstream through the same reverse proxy. Their failures are the expected
+// shape of a model still booting, so they must not be logged as proxy errors.
+type healthCheckKey struct{}
+
+// newProxyErrorHandler builds the ErrorHandler for a model's reverse proxy.
+//
+// httputil.ReverseProxy's default handler answers every failure with 502, so a
+// client hanging up mid-generation is logged as a Bad Gateway and sends
+// operators looking at an inference server that was healthy the whole time.
+// Cancellation is classified here, where the error is actually known: the
+// request is recorded with the client-closed sentinel rather than blamed on the
+// upstream, and at debug level because an impatient caller is normal traffic.
+// Real upstream failures keep the 502. See #1029.
+func newProxyErrorHandler(id string, proxyLogger *logmon.Monitor) func(http.ResponseWriter, *http.Request, error) {
+	return func(w http.ResponseWriter, r *http.Request, err error) {
+		if errors.Is(err, context.Canceled) || r.Context().Err() != nil {
+			proxyLogger.Debugf("<%s> client disconnected: %v", id, err)
+			swaputil.MarkClientClosed(w, r)
+			return
+		}
+		if _, ok := r.Context().Value(healthCheckKey{}).(bool); ok {
+			proxyLogger.Debugf("<%s> health check not ready: %v", id, err)
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		proxyLogger.Warnf("<%s> proxy error: %v", id, err)
+		w.WriteHeader(http.StatusBadGateway)
+	}
+}
 
 // cmdWaitDelay is the upper bound the runtime will wait for child I/O to
 // drain after the process exits before force-closing the stdout/stderr
@@ -431,6 +463,7 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 		MaxIdleConnsPerHost:   10,
 		IdleConnTimeout:       time.Duration(p.config.Timeouts.IdleConn) * time.Second,
 	}
+	reverseProxy.ErrorHandler = newProxyErrorHandler(p.id, p.proxyLogger)
 	reverseProxy.ModifyResponse = func(resp *http.Response) error {
 		if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
 			resp.Header.Set("X-Accel-Buffering", "no")
@@ -536,7 +569,10 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 			return abort(fmt.Errorf("health check timed out after %v", healthCheckTimeout))
 		}
 
-		req, _ := http.NewRequestWithContext(startCtx, "GET", p.config.CheckEndpoint, nil)
+		// Tagged so the proxy ErrorHandler logs a not-yet-listening upstream
+		// at debug rather than as a proxy error once per poll.
+		checkCtx := context.WithValue(startCtx, healthCheckKey{}, true)
+		req, _ := http.NewRequestWithContext(checkCtx, "GET", p.config.CheckEndpoint, nil)
 		rr := httptest.NewRecorder()
 		reverseProxy.ServeHTTP(rr, req)
 		resp := rr.Result()
