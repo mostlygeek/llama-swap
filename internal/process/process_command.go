@@ -750,7 +750,7 @@ func (p *ProcessCommand) State() ProcessState {
 func (p *ProcessCommand) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	fn := p.handler.Load()
 	if fn == nil {
-		http.Error(w, fmt.Sprintf("llama-swap-error: [%s] process is not ready", p.id), http.StatusServiceUnavailable)
+		swaputil.SendResponse(w, r, http.StatusServiceUnavailable, fmt.Sprintf("[%s] process is not ready", p.id))
 		return
 	}
 	if p.config.Compat.IgnoreWebsockets && swaputil.IsWebSocketUpgrade(r) {

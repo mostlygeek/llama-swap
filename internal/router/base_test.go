@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/router/scheduler"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 // These tests cover baseRouter's own machinery — the run loop, process
@@ -609,6 +611,15 @@ func TestBaseRouter_ConcurrencyLimitRejectsBeforeLoadingStream(t *testing.T) {
 	}
 	if strings.Contains(w.Body.String(), "llama-swap loading model") {
 		t.Fatalf("429 body contains loading stream: %q", w.Body.String())
+	}
+	// OpenAI clients read body["error"]["message"], so "error" must decode as
+	// an object rather than a bare string.
+	var envelope swaputil.ErrorEnvelope
+	if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("429 body is not an OpenAI error envelope: %v, body=%q", err, w.Body.String())
+	}
+	if envelope.Error.Message == "" || envelope.Error.Type != swaputil.ErrorTypeRateLimit {
+		t.Fatalf("429 error=%+v, want a rate_limit_error with a message", envelope.Error)
 	}
 
 	close(bProc.serveBlock)

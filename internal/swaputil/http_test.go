@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -877,5 +879,116 @@ func TestFetchContext_UpstreamPath_DoesNotReadBody(t *testing.T) {
 	}
 	if string(got) != body {
 		t.Errorf("body was consumed: %q", string(got))
+	}
+}
+
+func TestSendResponse_JSONEnvelope(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	w := httptest.NewRecorder()
+	SendResponse(w, r, http.StatusBadRequest, "could not read request body")
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+	if got := w.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", got)
+	}
+
+	var envelope ErrorEnvelope
+	if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("body is not an OpenAI-style error envelope: %v, body=%s", err, w.Body.String())
+	}
+	if envelope.Error.Message != "could not read request body" {
+		t.Errorf("error.message = %q, want %q", envelope.Error.Message, "could not read request body")
+	}
+	if envelope.Error.Type != ErrorTypeInvalidRequest {
+		t.Errorf("error.type = %q, want %q", envelope.Error.Type, ErrorTypeInvalidRequest)
+	}
+	if envelope.Src != "llama-swap" {
+		t.Errorf("src = %q, want llama-swap", envelope.Src)
+	}
+}
+
+func TestSendResponse_TextFormats(t *testing.T) {
+	t.Run("plain", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Accept", "text/plain")
+		w := httptest.NewRecorder()
+		SendResponse(w, r, http.StatusNotFound, "model not found")
+
+		if got := w.Header().Get("Content-Type"); got != "text/plain" {
+			t.Fatalf("Content-Type = %q, want text/plain", got)
+		}
+		if got, want := w.Body.String(), "llama-swap: model not found"; got != want {
+			t.Errorf("body = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("html", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Accept", "text/html")
+		w := httptest.NewRecorder()
+		SendResponse(w, r, http.StatusNotFound, "model not found")
+
+		if got := w.Header().Get("Content-Type"); got != "text/html" {
+			t.Fatalf("Content-Type = %q, want text/html", got)
+		}
+		if !strings.Contains(w.Body.String(), "model not found") {
+			t.Errorf("body = %q, want it to contain the message", w.Body.String())
+		}
+	})
+}
+
+func TestSendError_HTTPErrorIsWrittenVerbatim(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	w := httptest.NewRecorder()
+	SendError(w, r, ConcurrencyLimitError{})
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", w.Code)
+	}
+	if got := w.Header().Get("Retry-After"); got != "1" {
+		t.Errorf("Retry-After = %q, want 1", got)
+	}
+
+	var envelope ErrorEnvelope
+	if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("body is not an OpenAI-style error envelope: %v, body=%s", err, w.Body.String())
+	}
+	if envelope.Error.Type != ErrorTypeRateLimit || envelope.Error.Code != "concurrency_limit" {
+		t.Errorf("error = %+v, want a rate_limit_error/concurrency_limit", envelope.Error)
+	}
+}
+
+func TestSendError_MapsSentinelErrors(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+	}{
+		{"no model in context", ErrNoModelInContext, http.StatusNotFound},
+		{"no peer model", ErrNoPeerModelFound, http.StatusNotFound},
+		{"no local model", ErrNoLocalModelFound, http.StatusNotFound},
+		{"no router", ErrNoRouterFound, http.StatusNotFound},
+		{"unknown", errors.New("boom"), http.StatusInternalServerError},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+			w := httptest.NewRecorder()
+			SendError(w, r, tc.err)
+
+			if w.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d", w.Code, tc.wantStatus)
+			}
+			var envelope ErrorEnvelope
+			if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
+				t.Fatalf("body is not an OpenAI-style error envelope: %v, body=%s", err, w.Body.String())
+			}
+			if envelope.Error.Message == "" || envelope.Error.Type == "" {
+				t.Errorf("error = %+v, want message and type set", envelope.Error)
+			}
+		})
 	}
 }
