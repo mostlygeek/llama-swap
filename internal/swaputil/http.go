@@ -79,6 +79,43 @@ func ShouldIgnoreWebsocket(r *http.Request, cfg config.Config) bool {
 	return ok && mc.Compat.IgnoreWebsockets
 }
 
+// StatusClientClosedRequest mirrors nginx's non-standard 499 "Client Closed
+// Request". llama-swap records it when a client disconnects before any
+// response was written, so an abandoned request is not filed as a success (a
+// cancelled cold-start load) or blamed on the upstream (a 502 from the reverse
+// proxy). It is never written to the connection — the client is already gone —
+// so it only ever appears in the access log and the activity store.
+const StatusClientClosedRequest = 499
+
+// StatusMarker is implemented by the response recorders in the middleware
+// chain. It lets a status be recorded for logging and metrics without writing
+// anything to the client.
+type StatusMarker interface {
+	// MarkStatus records code as the response status without writing it to
+	// the connection. Recorders that wrap another writer forward the call so
+	// every recorder in the chain agrees on the status.
+	MarkStatus(code int)
+	// WroteHeader reports whether a response status has already been written.
+	WroteHeader() bool
+}
+
+// MarkClientClosed records StatusClientClosedRequest on w when r's context
+// reports that the client went away before any response status was written. It
+// reports whether the sentinel was recorded.
+//
+// Nothing is sent to the client: the connection is already gone, and on a
+// streamed response the upstream may have flushed headers long ago, where a
+// late WriteHeader would only produce "superfluous response.WriteHeader" spam.
+// A response that already started is left with the status it really had.
+func MarkClientClosed(w http.ResponseWriter, r *http.Request) bool {
+	marker, ok := w.(StatusMarker)
+	if !ok || marker.WroteHeader() || r.Context().Err() == nil {
+		return false
+	}
+	marker.MarkStatus(StatusClientClosedRequest)
+	return true
+}
+
 func SendError(w http.ResponseWriter, r *http.Request, err error) {
 	var httpErr HTTPError
 	if errors.As(err, &httpErr) {

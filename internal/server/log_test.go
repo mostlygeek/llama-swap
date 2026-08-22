@@ -2,6 +2,7 @@ package server
 
 import (
 	"bufio"
+	"context"
 	"io"
 	"net"
 	"net/http"
@@ -139,6 +140,83 @@ func TestServer_RequestLogMiddleware(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestServer_RequestLogMiddleware_ClientClosed covers #1029: a client that
+// hangs up before anything is written (e.g. during a cold model load) used to
+// be logged as the seeded 200, hiding aborted requests from status-code
+// monitoring. It must be logged as 499 instead — but only when no response had
+// started.
+func TestServer_RequestLogMiddleware_ClientClosed(t *testing.T) {
+	cases := []struct {
+		name    string
+		handler http.HandlerFunc
+		want    string
+		notWant string
+	}{
+		{
+			// The cold-load cancellation branches in baseRouter.ServeHTTP:
+			// they return without touching the ResponseWriter.
+			name:    "no response written is logged as 499",
+			handler: func(w http.ResponseWriter, r *http.Request) {},
+			want:    "499 0",
+			notWant: "200 0",
+		},
+		{
+			// A response already on the wire keeps the status the client
+			// actually received, even though it hung up mid-stream.
+			name: "response already started keeps its status",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("partial"))
+			},
+			want:    "200 7",
+			notWant: "499",
+		},
+		{
+			// An implicit 200 from a bare Write counts as started too.
+			name: "implicit 200 from Write keeps its status",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.Write([]byte("partial"))
+			},
+			want:    "200 7",
+			notWant: "499",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			proxylog := logmon.NewWriter(io.Discard)
+			ctx, cancel := context.WithCancel(context.Background())
+			r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(ctx)
+			r.RemoteAddr = "192.168.1.1:5000"
+			// The client goes away while the handler is still waiting.
+			cancel()
+
+			CreateRequestLogMiddleware(proxylog)(c.handler).ServeHTTP(httptest.NewRecorder(), r)
+
+			line := string(proxylog.GetHistory())
+			if !strings.Contains(line, c.want) {
+				t.Errorf("log line %q missing %q", line, c.want)
+			}
+			if strings.Contains(line, c.notWant) {
+				t.Errorf("log line %q should not contain %q", line, c.notWant)
+			}
+		})
+	}
+
+	t.Run("live client keeps the seeded 200", func(t *testing.T) {
+		proxylog := logmon.NewWriter(io.Discard)
+		r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+		r.RemoteAddr = "192.168.1.1:5000"
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
+
+		CreateRequestLogMiddleware(proxylog)(handler).ServeHTTP(httptest.NewRecorder(), r)
+
+		if line := string(proxylog.GetHistory()); !strings.Contains(line, "200 0") {
+			t.Errorf("log line %q should report 200 for a connected client", line)
+		}
+	})
 }
 
 // TestServer_RequestLogMiddleware_WebSocketUpgrade verifies that the access-log
