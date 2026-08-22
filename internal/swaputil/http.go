@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
@@ -104,7 +103,9 @@ func SendError(w http.ResponseWriter, r *http.Request, err error) {
 	}
 }
 
-// SendResponse detects what content type the client prefers and returns an error response in that format.
+// SendResponse detects what content type the client prefers and returns an
+// error response in that format. JSON responses use the OpenAI-compatible
+// envelope, where "error" is an object rather than a string.
 func SendResponse(w http.ResponseWriter, r *http.Request, status int, message string) {
 	acceptHeader := r.Header.Get("Accept")
 	if strings.Contains(acceptHeader, "text/plain") {
@@ -123,12 +124,7 @@ func SendResponse(w http.ResponseWriter, r *http.Request, status int, message st
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	resp, err := json.Marshal(map[string]string{"src": "llama-swap", "error": message})
-	if err != nil {
-		w.Write([]byte(`{"src":"llama-swap", "error": "failed to marshal response"}`))
-		return
-	}
-	w.Write(resp)
+	w.Write(NewErrorEnvelope(status, message, "").JSON())
 }
 
 // FetchContext will attempt to get the model id from the context, then

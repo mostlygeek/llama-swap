@@ -94,7 +94,7 @@ func NewPeer(cfg config.Config, logger *logmon.Monitor) (*Peer, error) {
 			if runtime.GOOS == "darwin" && strings.Contains(err.Error(), "connect: no route to host") {
 				errMsg += " (hint: on macOS, check System Settings > Privacy & Security > Local Network permissions)"
 			}
-			http.Error(w, errMsg, http.StatusBadGateway)
+			swaputil.SendResponse(w, r, http.StatusBadGateway, errMsg)
 		}
 
 		pp := &peerMember{
