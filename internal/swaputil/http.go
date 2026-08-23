@@ -157,6 +157,15 @@ func MarkClientClosed(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func SendError(w http.ResponseWriter, r *http.Request, err error) {
+	// A response that already started cannot carry a status any more, and its
+	// body would be appended to whatever the client is mid-way through reading
+	// — corrupting a stream rather than reporting the error. Callers that can
+	// still report in-band (the loading stream frames it as SSE) do so before
+	// reaching here; for the rest, dropping it is the lesser harm.
+	if ResponseStarted(w) {
+		return
+	}
+
 	var httpErr HTTPError
 	if errors.As(err, &httpErr) {
 		for k, v := range httpErr.Header() {

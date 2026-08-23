@@ -241,6 +241,50 @@ func (s *loadingWriter) sendData(data string) {
 	}
 }
 
+// sendError streams err to the client as a terminating SSE error frame
+// followed by [DONE].
+//
+// Once the loading stream has committed its 200, a real status can no longer be
+// sent: swaputil.SendError's WriteHeader is dropped and its JSON body lands in
+// the stream as a bare line, which every SSE parser discards silently (the text
+// before the first colon is read as an unknown field name). The client is left
+// with a truncated stream, no [DONE], and no reason — the same
+// failure-reported-as-success shape as #1029. Framing the error keeps it
+// visible.
+//
+// Must be called before release, while writes still reach the client.
+func (s *loadingWriter) sendError(err error) {
+	type errorBody struct {
+		Message string `json:"message"`
+		Type    string `json:"type"`
+	}
+	type errorMessage struct {
+		Error errorBody `json:"error"`
+	}
+
+	jsonData, marshalErr := json.Marshal(errorMessage{
+		Error: errorBody{Message: err.Error(), Type: "llama-swap"},
+	})
+	if marshalErr != nil {
+		s.logger.Errorf("<%s> Failed to marshal SSE error: %v", s.modelName, marshalErr)
+		return
+	}
+
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if s.released {
+		return
+	}
+
+	if _, werr := fmt.Fprintf(s.writer, "data: %s\n\ndata: [DONE]\n\n", jsonData); werr != nil {
+		s.logger.Debugf("<%s> Failed to write SSE error (client likely disconnected): %v", s.modelName, werr)
+		return
+	}
+	if flusher, ok := s.writer.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
 // release fences the loadingWriter off from the underlying ResponseWriter.
 // After it returns, the streaming goroutine will not write to or flush the
 // writer again: any in-flight write completes under writeMu first, and later
