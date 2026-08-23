@@ -4,6 +4,7 @@
   import { streamChatCompletion, type Endpoint } from "../../lib/chatApi";
   import { playgroundStores } from "../../stores/playgroundActivity";
   import type { ChatMessage, ContentPart } from "../../lib/types";
+  import { isSubmitEnter } from "../../lib/ime";
   import ChatMessageComponent from "./ChatMessage.svelte";
   import ModelSelector from "./ModelSelector.svelte";
   import ExpandableTextarea from "./ExpandableTextarea.svelte";
@@ -247,7 +248,7 @@
   }
 
   function handleKeyDown(event: KeyboardEvent) {
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (isSubmitEnter(event)) {
       event.preventDefault();
       sendMessage();
     }

@@ -11,6 +11,7 @@
   import * as Select from "$lib/components/ui/select/index.js";
   import { RefreshCw, Download } from "@lucide/svelte";
   import { playgroundSessionHeaders } from "../../lib/playgroundSession";
+  import { isSubmitEnter } from "../../lib/ime";
 
   const iface = createPlaygroundInterface("playground-speech-model", playgroundStores.speechGenerating);
   const selectedModelStore = iface.selectedModel;
@@ -211,7 +212,7 @@
   }
 
   function handleKeyDown(event: KeyboardEvent) {
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (isSubmitEnter(event)) {
       event.preventDefault();
       generate();
     }

@@ -2,6 +2,7 @@
   import { hasListedModels } from "../../stores/api";
   import { createPlaygroundInterface } from "../../lib/playgroundInterface";
   import { rerank } from "../../lib/rerankApi";
+  import { isSubmitEnter } from "../../lib/ime";
   import { playgroundStores } from "../../stores/playgroundActivity";
   import ModelSelector from "./ModelSelector.svelte";
   import EmptyState from "../EmptyState.svelte";
@@ -232,7 +233,7 @@
   }
 
   function handleKeyDown(e: KeyboardEvent) {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (isSubmitEnter(e)) {
       e.preventDefault();
       submit();
     }
