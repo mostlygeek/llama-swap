@@ -608,9 +608,17 @@ func (w *responseBodyCopier) WroteHeader() bool { return w.wroteHeader }
 
 // Flush forwards to the underlying writer so streaming responses still flush.
 func (w *responseBodyCopier) Flush() {
-	if f, ok := w.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
+	f, ok := w.ResponseWriter.(http.Flusher)
+	if !ok {
+		return
 	}
+	// Flushing commits the implicit 200, so the response has started even if
+	// nothing wrote a header. Recorded here for the same reason as in
+	// statusRecorder: the client-closed sentinel must not overwrite it.
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	f.Flush()
 }
 
 // Hijack forwards to the underlying writer so httputil.ReverseProxy can take

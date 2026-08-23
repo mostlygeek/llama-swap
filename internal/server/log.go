@@ -161,6 +161,14 @@ type statusRecorder struct {
 }
 
 func (sr *statusRecorder) WriteHeader(code int) {
+	// net/http commits the first status and ignores every later one, so the
+	// access log has to do the same. Handlers do call WriteHeader after a
+	// response has started — a shutdown or dispatch error arriving once the
+	// loading stream has already sent its 200 — and recording the second code
+	// would report a status the client never received.
+	if sr.wroteHeader {
+		return
+	}
 	sr.status = code
 	sr.wroteHeader = true
 	sr.ResponseWriter.WriteHeader(code)
@@ -183,9 +191,14 @@ func (sr *statusRecorder) Write(b []byte) (int, error) {
 }
 
 func (sr *statusRecorder) Flush() {
-	if f, ok := sr.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
+	f, ok := sr.ResponseWriter.(http.Flusher)
+	if !ok {
+		return
 	}
+	// Flushing commits net/http's implicit 200 and puts it on the wire, so the
+	// client has started receiving a response even if nothing wrote a header.
+	sr.wroteHeader = true
+	f.Flush()
 }
 
 // Hijack forwards to the underlying ResponseWriter so httputil.ReverseProxy can
