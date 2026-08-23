@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 func TestLoadingWriter_SSEHeadersAndInitialMessage(t *testing.T) {
@@ -98,18 +99,19 @@ func TestLoadingWriter_SendError(t *testing.T) {
 		}
 	}
 
-	var msg struct {
-		Error struct {
-			Message string `json:"message"`
-			Type    string `json:"type"`
-		} `json:"error"`
-	}
+	// The frame must carry the same envelope as a non-streamed error body, so
+	// clients do not need a second shape for streamed failures.
+	var msg swaputil.ErrorEnvelope
 	first, _, _ := strings.Cut(chunk, "\n")
 	if err := json.Unmarshal([]byte(strings.TrimPrefix(first, "data: ")), &msg); err != nil {
 		t.Fatalf("error frame is not JSON: %v (%q)", err, first)
 	}
 	if msg.Error.Message != "upstream command exited prematurely" {
 		t.Errorf("message = %q, want the underlying error", msg.Error.Message)
+	}
+	want := swaputil.NewErrorEnvelope(http.StatusInternalServerError, "upstream command exited prematurely", "")
+	if msg.Error.Type != want.Error.Type || msg.Error.Code != want.Error.Code || msg.Src != want.Src {
+		t.Errorf("envelope = %+v, want the shared shape %+v", msg, want)
 	}
 	if !strings.HasSuffix(strings.TrimRight(chunk, "\n"), "data: [DONE]") {
 		t.Errorf("stream not terminated with [DONE]: %q", chunk)

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 var loadingPaths = []string{
@@ -252,23 +253,14 @@ func (s *loadingWriter) sendData(data string) {
 // failure-reported-as-success shape as #1029. Framing the error keeps it
 // visible.
 //
+// The frame carries the same envelope as a non-streamed error body (#1038), so
+// a client sees one error shape either way. The status only selects the
+// envelope's type/code — 500 matches what this error would have been answered
+// with had the stream not already committed a 200.
+//
 // Must be called before release, while writes still reach the client.
 func (s *loadingWriter) sendError(err error) {
-	type errorBody struct {
-		Message string `json:"message"`
-		Type    string `json:"type"`
-	}
-	type errorMessage struct {
-		Error errorBody `json:"error"`
-	}
-
-	jsonData, marshalErr := json.Marshal(errorMessage{
-		Error: errorBody{Message: err.Error(), Type: "llama-swap"},
-	})
-	if marshalErr != nil {
-		s.logger.Errorf("<%s> Failed to marshal SSE error: %v", s.modelName, marshalErr)
-		return
-	}
+	jsonData := swaputil.NewErrorEnvelope(http.StatusInternalServerError, err.Error(), "").JSON()
 
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()

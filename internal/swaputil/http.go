@@ -157,11 +157,8 @@ func MarkClientClosed(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func SendError(w http.ResponseWriter, r *http.Request, err error) {
-	// A response that already started cannot carry a status any more, and its
-	// body would be appended to whatever the client is mid-way through reading
-	// — corrupting a stream rather than reporting the error. Callers that can
-	// still report in-band (the loading stream frames it as SSE) do so before
-	// reaching here; for the rest, dropping it is the lesser harm.
+	// Guarded here as well as in SendResponse because the HTTPError branch
+	// below writes its own body rather than delegating. See SendResponse.
 	if ResponseStarted(w) {
 		return
 	}
@@ -194,6 +191,15 @@ func SendError(w http.ResponseWriter, r *http.Request, err error) {
 // error response in that format. JSON responses use the OpenAI-compatible
 // envelope, where "error" is an object rather than a string.
 func SendResponse(w http.ResponseWriter, r *http.Request, status int, message string) {
+	// A response that already started cannot carry a status any more, and this
+	// body would be appended to whatever the client is mid-way through reading
+	// — corrupting a stream rather than reporting the error. Callers that can
+	// still report in-band (the loading stream frames it as SSE) do so before
+	// reaching here; for the rest, dropping it is the lesser harm.
+	if ResponseStarted(w) {
+		return
+	}
+
 	acceptHeader := r.Header.Get("Accept")
 	if strings.Contains(acceptHeader, "text/plain") {
 		w.Header().Set("Content-Type", "text/plain")
