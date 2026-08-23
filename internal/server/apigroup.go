@@ -417,6 +417,10 @@ const (
 	msgTypeProfile     messageType = "profileChanged"
 )
 
+// sendDropReportInterval is how often handleAPIEvents reports messages that
+// were dropped because the send buffer was full.
+const sendDropReportInterval = 5 * time.Second
+
 type messageEnvelope struct {
 	Type messageType `json:"type"`
 	Data string      `json:"data"`
@@ -444,13 +448,39 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
+	// Dropped messages are counted and reported at most once per interval.
+	// Logging every drop floods the logs because each warning becomes a log
+	// event that is sent over this same buffer, which drops again.
+	dropped := newSuppressionCounter(sendDropReportInterval)
+	cancelled := newSuppressionCounter(sendDropReportInterval)
+	reportDropped := func(n int) {
+		s.proxylog.Warnf("handleAPIEvents sendBuffer full, %d messages suppressed", n)
+	}
+	reportCancelled := func(n int) {
+		s.proxylog.Warnf("handleAPIEvents send suppressed due to context done, %d messages suppressed", n)
+	}
+	// runs after the event handlers below are unsubscribed so any remaining
+	// counts are reported before the connection goes away
+	defer func() {
+		if n, ok := dropped.Flush(); ok {
+			reportDropped(n)
+		}
+		if n, ok := cancelled.Flush(); ok {
+			reportCancelled(n)
+		}
+	}()
+
 	send := func(msg messageEnvelope) {
 		select {
 		case sendBuffer <- msg:
 		case <-ctx.Done():
-			s.proxylog.Warn("handleAPIEvents send suppressed due to context done")
+			if n, ok := cancelled.Add(); ok {
+				reportCancelled(n)
+			}
 		default:
-			s.proxylog.Warn("handleAPIEvents sendBuffer full, dropped message")
+			if n, ok := dropped.Add(); ok {
+				reportDropped(n)
+			}
 		}
 	}
 	sendModels := func() {
