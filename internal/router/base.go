@@ -552,20 +552,40 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// reclaims it. release() must run even when waitForCompletion times out:
 	// otherwise a still-streaming goroutine flushes a finalized response and
 	// panics on the recycled *bufio.Writer.
-	finishLoading := func() {
+	//
+	// A non-nil streamErr is framed into the stream first, while writes still
+	// reach the client: the 200 is already committed, so this is the only way
+	// the error can be reported at all.
+	finishLoading := func(streamErr error) {
 		cancelLoad()
 		if lw != nil {
 			lw.waitForCompletion(1 * time.Second)
+			if streamErr != nil {
+				lw.sendError(streamErr)
+			}
 			lw.release()
+		}
+	}
+
+	// reportError sends err as a normal error response, for the paths where no
+	// loading stream was live to carry it in-band. When one was, finishLoading
+	// has already framed it into the stream and a second report would append a
+	// bare JSON line that SSE parsers discard.
+	reportError := func(err error) {
+		if lw == nil {
+			swaputil.SendError(w, req, err)
 		}
 	}
 
 	var resp scheduler.HandlerResp
 	select {
 	case resp = <-hr.Respond:
-		finishLoading()
+		// Pass the dispatch error in so it is framed into the stream before
+		// release fences the writer; a nil error just ends the stream.
+		finishLoading(resp.Err)
 	case <-req.Context().Done():
-		finishLoading()
+		// The client is gone, so there is nobody to report to.
+		finishLoading(nil)
 		// Notify the scheduler so it can prune this request from its queue
 		// and swap waiters. Without this, a queued request whose client left
 		// would sit in the scheduler until drainQueue eventually starts a
@@ -576,13 +596,14 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 		return
 	case <-b.shutdownCtx.Done():
-		finishLoading()
-		swaputil.SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
+		shutdownErr := fmt.Errorf("%s is shutting down", b.name)
+		finishLoading(shutdownErr)
+		reportError(shutdownErr)
 		return
 	}
 
 	if resp.Err != nil {
-		swaputil.SendError(w, req, resp.Err)
+		reportError(resp.Err)
 		return
 	}
 	resp.HandleFunc(w, req)

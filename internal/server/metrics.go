@@ -104,6 +104,12 @@ func (mp *metricsMonitor) warnf(format string, args ...any) {
 	}
 }
 
+func (mp *metricsMonitor) debugf(format string, args ...any) {
+	if mp.logger != nil {
+		mp.logger.Debugf(format, args...)
+	}
+}
+
 func (mp *metricsMonitor) Close() error {
 	return nil
 }
@@ -144,6 +150,18 @@ func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *resp
 		}
 		tm = stored
 		mp.emitMetric(tm)
+	}
+
+	// A client that hangs up is normal traffic, not a server fault: record the
+	// entry so the abort is visible, but at debug level and without the
+	// synthesized upstream error message the failure path below would attach.
+	// No capture is stored — there is no response to inspect, and a client
+	// retrying in a loop would otherwise flood the capture store. See #1029.
+	if recorder.Status() == swaputil.StatusClientClosedRequest {
+		mp.debugf("metrics: client disconnected before response, path=%s", r.URL.Path)
+		tm.ErrorMsg = "client disconnected before response"
+		queueAndEmit()
+		return
 	}
 
 	if recorder.Status() != http.StatusOK {
@@ -576,11 +594,31 @@ func (w *responseBodyCopier) WriteHeader(statusCode int) {
 	w.ResponseWriter.WriteHeader(statusCode)
 }
 
+// MarkStatus records code for metrics without writing to the client, and
+// forwards to the wrapped writer so the access-log recorder agrees.
+func (w *responseBodyCopier) MarkStatus(code int) {
+	w.status = code
+	if marker, ok := w.ResponseWriter.(swaputil.StatusMarker); ok {
+		marker.MarkStatus(code)
+	}
+}
+
+// WroteHeader reports whether a response status reached the client.
+func (w *responseBodyCopier) WroteHeader() bool { return w.wroteHeader }
+
 // Flush forwards to the underlying writer so streaming responses still flush.
 func (w *responseBodyCopier) Flush() {
-	if f, ok := w.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
+	f, ok := w.ResponseWriter.(http.Flusher)
+	if !ok {
+		return
 	}
+	// Flushing commits the implicit 200, so the response has started even if
+	// nothing wrote a header. Recorded here for the same reason as in
+	// statusRecorder: the client-closed sentinel must not overwrite it.
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	f.Flush()
 }
 
 // Hijack forwards to the underlying writer so httputil.ReverseProxy can take

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"io"
 	"math"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
@@ -186,6 +188,120 @@ func TestMetricsMonitor_RecordMetadata(t *testing.T) {
 	}
 	if entries[0].Metadata["trace"] != "abc" {
 		t.Errorf("trace = %q, want abc", entries[0].Metadata["trace"])
+	}
+}
+
+// TestMetricsMonitor_RecordClientClosed covers #1029: a client that hangs up
+// before a response is written must not be filed as a successful (empty-body)
+// metric. It is recorded with the 499 sentinel and a client-cancelled
+// ErrorMsg, and skips the capture the upstream-failure path would store.
+func TestMetricsMonitor_RecordClientClosed(t *testing.T) {
+	mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 10, 5)
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	w := httptest.NewRecorder()
+	copier := newBodyCopier(w)
+	// Nothing is ever written: this is the cold-load cancellation shape.
+	copier.MarkStatus(swaputil.StatusClientClosedRequest)
+
+	mm.record("m", r, copier, captureAll, []byte("req"), nil)
+
+	entries := metricsEntries(t, mm)
+	if len(entries) != 1 {
+		t.Fatalf("want 1 entry, got %d", len(entries))
+	}
+	entry := entries[0]
+	if entry.RespStatusCode != swaputil.StatusClientClosedRequest {
+		t.Errorf("status = %d, want %d", entry.RespStatusCode, swaputil.StatusClientClosedRequest)
+	}
+	if entry.ErrorMsg != "client disconnected before response" {
+		t.Errorf("error_msg = %q, want client-cancelled message", entry.ErrorMsg)
+	}
+	if entry.HasCapture {
+		t.Error("a cancelled request has no response to capture")
+	}
+}
+
+// TestServer_MetricsMiddleware_ClientClosed checks the middleware derives the
+// sentinel for a handler that returns without writing, and that the marker
+// propagates outward to the access-log recorder so both agree.
+func TestServer_MetricsMiddleware_ClientClosed(t *testing.T) {
+	mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 10, 0)
+	cfg := config.Config{Models: map[string]config.ModelConfig{"m": {}}}
+
+	proxylog := logmon.NewWriter(io.Discard)
+	handler := chain.New(
+		CreateRequestLogMiddleware(proxylog),
+		CreateMetricsMiddleware(mm, cfg),
+	).ThenFunc(func(w http.ResponseWriter, r *http.Request) {})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	body := `{"model":"m","messages":[{"role":"user","content":"hi"}]}`
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body)).WithContext(ctx)
+	r.Header.Set("Content-Type", "application/json")
+	r.RemoteAddr = "192.168.1.1:5000"
+	cancel()
+
+	handler.ServeHTTP(httptest.NewRecorder(), r)
+
+	entries := metricsEntries(t, mm)
+	if len(entries) != 1 {
+		t.Fatalf("want 1 entry, got %d", len(entries))
+	}
+	if entries[0].RespStatusCode != swaputil.StatusClientClosedRequest {
+		t.Errorf("activity status = %d, want %d", entries[0].RespStatusCode, swaputil.StatusClientClosedRequest)
+	}
+	if line := string(proxylog.GetHistory()); !strings.Contains(line, "499 0") {
+		t.Errorf("access log %q should report 499", line)
+	}
+}
+
+// TestServer_MetricsMiddleware_ServerSideCancelIsNotClientClosed guards the
+// distinction #1029's fix depends on. The inflight middleware derives a
+// cancellable context that POST /api/inflight/{id}/cancel fires, so testing
+// "is this request's context done?" would report an operator cancelling a
+// request from the UI as a client that hung up.
+func TestServer_MetricsMiddleware_ServerSideCancelIsNotClientClosed(t *testing.T) {
+	mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 10, 0)
+	cfg := config.Config{Models: map[string]config.ModelConfig{"m": {}}}
+
+	proxylog := logmon.NewWriter(io.Discard)
+	// The handler stands in for a dispatch that is cancelled mid-flight and
+	// answers the still-connected client, as the proxy ErrorHandler does.
+	handler := chain.New(
+		CreateRequestLogMiddleware(proxylog),
+		CreateMetricsMiddleware(mm, cfg),
+	).ThenFunc(func(w http.ResponseWriter, r *http.Request) {
+		derived, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		cancel() // the operator cancels it
+		r = r.WithContext(derived)
+		if swaputil.MarkClientClosed(w, r) {
+			return
+		}
+		w.WriteHeader(http.StatusBadGateway)
+	})
+
+	body := `{"model":"m","messages":[{"role":"user","content":"hi"}]}`
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	r.RemoteAddr = "192.168.1.1:5000"
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadGateway {
+		t.Errorf("client got %d, want %d: a connected client must be answered", w.Code, http.StatusBadGateway)
+	}
+	entries := metricsEntries(t, mm)
+	if len(entries) != 1 {
+		t.Fatalf("want 1 entry, got %d", len(entries))
+	}
+	if entries[0].RespStatusCode == swaputil.StatusClientClosedRequest {
+		t.Error("a server-side cancel must not be recorded as a client disconnect")
+	}
+	if line := string(proxylog.GetHistory()); strings.Contains(line, "499") {
+		t.Errorf("access log %q should not report 499 for a connected client", line)
 	}
 }
 

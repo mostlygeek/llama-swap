@@ -78,7 +78,91 @@ func ShouldIgnoreWebsocket(r *http.Request, cfg config.Config) bool {
 	return ok && mc.Compat.IgnoreWebsockets
 }
 
+// StatusClientClosedRequest mirrors nginx's non-standard 499 "Client Closed
+// Request". llama-swap records it when a client disconnects before any
+// response was written, so an abandoned request is not filed as a success (a
+// cancelled cold-start load) or blamed on the upstream (a 502 from the reverse
+// proxy). It is never written to the connection — the client is already gone —
+// so it only ever appears in the access log and the activity store.
+const StatusClientClosedRequest = 499
+
+// StatusMarker is implemented by the response recorders in the middleware
+// chain. It lets a status be recorded for logging and metrics without writing
+// anything to the client.
+type StatusMarker interface {
+	// MarkStatus records code as the response status without writing it to
+	// the connection. Recorders that wrap another writer forward the call so
+	// every recorder in the chain agrees on the status.
+	MarkStatus(code int)
+	// WroteHeader reports whether a response status has already been written.
+	WroteHeader() bool
+}
+
+// clientCtxKey carries the connection's own context past middleware that derive
+// cancellable child contexts from it.
+type clientCtxKey struct{}
+
+// SetClientContext returns ctx carrying clientCtx as the client connection's
+// context, so a later cancellation can be attributed correctly.
+func SetClientContext(ctx, clientCtx context.Context) context.Context {
+	return context.WithValue(ctx, clientCtxKey{}, clientCtx)
+}
+
+// WithClientContext returns r with its current context remembered as the client
+// connection's own. Call it before any middleware derives a cancellable child
+// context, so a request aborted server-side is not mistaken for a client that
+// hung up.
+func WithClientContext(r *http.Request) *http.Request {
+	return r.WithContext(SetClientContext(r.Context(), r.Context()))
+}
+
+// ClientContext returns the client connection's context as remembered by
+// WithClientContext, falling back to ctx itself when none was recorded.
+func ClientContext(ctx context.Context) context.Context {
+	if clientCtx, ok := ctx.Value(clientCtxKey{}).(context.Context); ok {
+		return clientCtx
+	}
+	return ctx
+}
+
+// ResponseStarted reports whether a response status has already reached the
+// client, in which case an error handler has nothing useful left to send.
+func ResponseStarted(w http.ResponseWriter) bool {
+	marker, ok := w.(StatusMarker)
+	return ok && marker.WroteHeader()
+}
+
+// MarkClientClosed records StatusClientClosedRequest on w when the client
+// connection itself went away before any response status was written. It
+// reports whether the sentinel was recorded.
+//
+// The test is deliberately the client's own context rather than the request's:
+// middleware derive cancellable children from it (the inflight tracker, which
+// an operator can cancel from the UI, and the peer router's shutdown link), and
+// a request killed server-side still has a live client that must be answered
+// normally. Blaming that client would be the same misattribution this sentinel
+// exists to fix.
+//
+// When it does apply, nothing is sent: the connection is already gone, and on a
+// streamed response the upstream may have flushed headers long ago, where a
+// late WriteHeader would only produce "superfluous response.WriteHeader" spam.
+// A response that already started keeps the status it really had.
+func MarkClientClosed(w http.ResponseWriter, r *http.Request) bool {
+	marker, ok := w.(StatusMarker)
+	if !ok || marker.WroteHeader() || ClientContext(r.Context()).Err() == nil {
+		return false
+	}
+	marker.MarkStatus(StatusClientClosedRequest)
+	return true
+}
+
 func SendError(w http.ResponseWriter, r *http.Request, err error) {
+	// Guarded here as well as in SendResponse because the HTTPError branch
+	// below writes its own body rather than delegating. See SendResponse.
+	if ResponseStarted(w) {
+		return
+	}
+
 	var httpErr HTTPError
 	if errors.As(err, &httpErr) {
 		for k, v := range httpErr.Header() {
@@ -107,6 +191,15 @@ func SendError(w http.ResponseWriter, r *http.Request, err error) {
 // error response in that format. JSON responses use the OpenAI-compatible
 // envelope, where "error" is an object rather than a string.
 func SendResponse(w http.ResponseWriter, r *http.Request, status int, message string) {
+	// A response that already started cannot carry a status any more, and this
+	// body would be appended to whatever the client is mid-way through reading
+	// — corrupting a stream rather than reporting the error. Callers that can
+	// still report in-band (the loading stream frames it as SSE) do so before
+	// reaching here; for the rest, dropping it is the lesser harm.
+	if ResponseStarted(w) {
+		return
+	}
+
 	acceptHeader := r.Header.Get("Accept")
 	if strings.Contains(acceptHeader, "text/plain") {
 		w.Header().Set("Content-Type", "text/plain")

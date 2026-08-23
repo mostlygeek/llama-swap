@@ -54,6 +54,10 @@ type fakeProcess struct {
 
 	autoReady bool
 
+	// ensureErr, when non-nil, makes EnsureReady fail with it, driving the
+	// dispatch-error path without needing a real process to die.
+	ensureErr error
+
 	// serveBlock, when non-nil, makes ServeHTTP receive from it before
 	// writing its response. Tests use this to hold a request in-flight.
 	// Closing the channel releases every blocked ServeHTTP caller.
@@ -223,6 +227,12 @@ func (f *fakeProcess) EnsureReady(ctx context.Context, _ time.Duration) error {
 
 	f.opMu.Lock()
 	f.mu.Lock()
+	if f.ensureErr != nil {
+		err := f.ensureErr
+		f.mu.Unlock()
+		f.opMu.Unlock()
+		return err
+	}
 	switch f.state {
 	case process.StateReady:
 		f.mu.Unlock()

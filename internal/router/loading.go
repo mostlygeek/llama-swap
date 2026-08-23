@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 var loadingPaths = []string{
@@ -234,6 +235,41 @@ func (s *loadingWriter) sendData(data string) {
 
 	if _, err = fmt.Fprintf(s.writer, "data: %s\n\n", jsonData); err != nil {
 		s.logger.Debugf("<%s> Failed to write SSE data (client likely disconnected): %v", s.modelName, err)
+		return
+	}
+	if flusher, ok := s.writer.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+// sendError streams err to the client as a terminating SSE error frame
+// followed by [DONE].
+//
+// Once the loading stream has committed its 200, a real status can no longer be
+// sent: swaputil.SendError's WriteHeader is dropped and its JSON body lands in
+// the stream as a bare line, which every SSE parser discards silently (the text
+// before the first colon is read as an unknown field name). The client is left
+// with a truncated stream, no [DONE], and no reason — the same
+// failure-reported-as-success shape as #1029. Framing the error keeps it
+// visible.
+//
+// The frame carries the same envelope as a non-streamed error body (#1038), so
+// a client sees one error shape either way. The status only selects the
+// envelope's type/code — 500 matches what this error would have been answered
+// with had the stream not already committed a 200.
+//
+// Must be called before release, while writes still reach the client.
+func (s *loadingWriter) sendError(err error) {
+	jsonData := swaputil.NewErrorEnvelope(http.StatusInternalServerError, err.Error(), "").JSON()
+
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if s.released {
+		return
+	}
+
+	if _, werr := fmt.Fprintf(s.writer, "data: %s\n\ndata: [DONE]\n\n", jsonData); werr != nil {
+		s.logger.Debugf("<%s> Failed to write SSE error (client likely disconnected): %v", s.modelName, werr)
 		return
 	}
 	if flusher, ok := s.writer.(http.Flusher); ok {
