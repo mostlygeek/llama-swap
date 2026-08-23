@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -63,6 +64,20 @@ func configStorePath(cfg config.Config) string {
 	return strings.TrimSpace(cfg.Store.Path)
 }
 
+// runValidate loads the configuration from the given sources and prints a
+// short human-readable result to out. It returns 0 when the config loads
+// without error and 1 otherwise. It does not start the server, detect
+// hardware, or open a listener.
+func runValidate(configPath, configDir string, out io.Writer) int {
+	cfg, err := config.LoadConfigSources(configPath, configDir)
+	if err != nil {
+		fmt.Fprintf(out, "config validation failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(out, "config is valid: %d model(s), %d peer(s)\n", len(cfg.Models), len(cfg.Peers))
+	return 0
+}
+
 func main() {
 	flagConfig := flag.String("config", "", "path to config file")
 	flagConfigDir := flag.String("config-dir", "", "directory of *.yml/*.yaml config files (additive to -config)")
@@ -71,6 +86,7 @@ func main() {
 	flagKeyFile := flag.String("tls-key-file", "", "TLS key file")
 	flagVersion := flag.Bool("version", false, "show version and exit")
 	flagWatchConfig := flag.Bool("watch-config", false, "reload config on file change")
+	flagValidate := flag.Bool("validate", false, "validate the config file and exit (without starting the server)")
 	flag.Parse()
 
 	if *flagVersion {
@@ -81,6 +97,11 @@ func main() {
 	if *flagConfig == "" && *flagConfigDir == "" {
 		slog.Error("at least one of -config or -config-dir must be provided")
 		os.Exit(1)
+	}
+
+	if *flagValidate {
+		code := runValidate(*flagConfig, *flagConfigDir, os.Stdout)
+		os.Exit(code)
 	}
 
 	useTLS := *flagCertFile != "" || *flagKeyFile != ""
