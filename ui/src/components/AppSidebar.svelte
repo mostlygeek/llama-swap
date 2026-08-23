@@ -11,6 +11,7 @@
   import { showUnlistedModels } from "../stores/modelDisplay";
   import { modelsMenuOpen } from "../stores/sidebar";
   import type { Model } from "../lib/types";
+  import { isComposingKey } from "../lib/ime";
   import ConnectionStatus from "./ConnectionStatus.svelte";
 
   function handleTitleChange(newTitle: string): void {
@@ -19,7 +20,7 @@
   }
 
   function handleKeyDown(e: KeyboardEvent): void {
-    if (e.key === "Enter") {
+    if (e.key === "Enter" && !isComposingKey(e)) {
       e.preventDefault();
       const target = e.currentTarget as HTMLElement;
       handleTitleChange(target.textContent || "(set title)");

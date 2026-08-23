@@ -8,6 +8,7 @@
   import type { ContentPart } from "../../lib/types";
   import { formatDuration } from "../../lib/format";
   import { copyText } from "../../lib/clipboard";
+  import { isSubmitEnter } from "../../lib/ime";
 
   interface Props {
     role: "user" | "assistant" | "system";
@@ -91,7 +92,7 @@
   }
 
   function handleKeyDown(event: KeyboardEvent) {
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (isSubmitEnter(event)) {
       event.preventDefault();
       saveEdit();
     } else if (event.key === "Escape") {
