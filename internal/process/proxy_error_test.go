@@ -55,11 +55,13 @@ func (m *markerRecorder) WroteHeader() bool { return m.wroteHeader }
 // 502, blaming a healthy upstream. Cancellation must record the client-closed
 // sentinel instead, while genuine upstream failures keep their 502.
 func TestProcessCommand_ProxyErrorHandler(t *testing.T) {
-	t.Run("cancelled request records the sentinel without writing", func(t *testing.T) {
+	t.Run("client disconnect records the sentinel without writing", func(t *testing.T) {
 		logger := logmon.NewWriter(io.Discard)
 		handler := newProxyErrorHandler("m", logger)
 
-		ctx, cancel := context.WithCancel(context.Background())
+		// The client connection itself goes away.
+		clientCtx, cancel := context.WithCancel(context.Background())
+		ctx := swaputil.SetClientContext(clientCtx, clientCtx)
 		r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(ctx)
 		cancel()
 
@@ -93,6 +95,35 @@ func TestProcessCommand_ProxyErrorHandler(t *testing.T) {
 		}
 		if line := string(logger.GetHistory()); !strings.Contains(line, "proxy error") {
 			t.Errorf("upstream failure should be logged: %q", line)
+		}
+	})
+
+	// A request cancelled server-side (an operator cancelling it from the UI,
+	// or shutdown) still has a connected client. Recording it as a client
+	// disconnect would misattribute it, and returning without writing would
+	// let net/http finalize an empty 200 that tells the caller it succeeded.
+	t.Run("server-side cancel still answers the connected client", func(t *testing.T) {
+		logger := logmon.NewWriter(io.Discard)
+		handler := newProxyErrorHandler("m", logger)
+
+		// The client is alive; the inflight tracker's derived context is what
+		// gets cancelled, exactly as POST /api/inflight/{id}/cancel does.
+		clientCtx := context.Background()
+		ctx, cancel := context.WithCancel(swaputil.SetClientContext(clientCtx, clientCtx))
+		r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(ctx)
+		cancel()
+
+		rec := newMarkerRecorder()
+		handler(rec, r, context.Canceled)
+
+		if rec.marked == swaputil.StatusClientClosedRequest {
+			t.Error("a server-side cancel must not be recorded as a client disconnect")
+		}
+		if rec.status != http.StatusBadGateway {
+			t.Errorf("status = %d, want %d: a connected client must get a real response", rec.status, http.StatusBadGateway)
+		}
+		if line := string(logger.GetHistory()); strings.Contains(line, "proxy error") {
+			t.Errorf("a cancel is not an upstream fault: %q", line)
 		}
 	})
 

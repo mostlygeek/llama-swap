@@ -235,6 +235,12 @@ func CreateRequestLogMiddleware(proxylog *logmon.Monitor) chain.Middleware {
 			start := time.Now()
 			ip, method, path, proto, ua := clientIP(r), r.Method, r.URL.Path, r.Proto, r.UserAgent()
 
+			// This is the outermost middleware, so the context here is still
+			// the connection's own. Remember it before anything downstream
+			// derives a cancellable child, so a request cancelled server-side
+			// is not later reported as a client that hung up.
+			r = swaputil.WithClientContext(r)
+
 			rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(rec, r)
 

@@ -98,17 +98,58 @@ type StatusMarker interface {
 	WroteHeader() bool
 }
 
-// MarkClientClosed records StatusClientClosedRequest on w when r's context
-// reports that the client went away before any response status was written. It
+// clientCtxKey carries the connection's own context past middleware that derive
+// cancellable child contexts from it.
+type clientCtxKey struct{}
+
+// SetClientContext returns ctx carrying clientCtx as the client connection's
+// context, so a later cancellation can be attributed correctly.
+func SetClientContext(ctx, clientCtx context.Context) context.Context {
+	return context.WithValue(ctx, clientCtxKey{}, clientCtx)
+}
+
+// WithClientContext returns r with its current context remembered as the client
+// connection's own. Call it before any middleware derives a cancellable child
+// context, so a request aborted server-side is not mistaken for a client that
+// hung up.
+func WithClientContext(r *http.Request) *http.Request {
+	return r.WithContext(SetClientContext(r.Context(), r.Context()))
+}
+
+// ClientContext returns the client connection's context as remembered by
+// WithClientContext, falling back to ctx itself when none was recorded.
+func ClientContext(ctx context.Context) context.Context {
+	if clientCtx, ok := ctx.Value(clientCtxKey{}).(context.Context); ok {
+		return clientCtx
+	}
+	return ctx
+}
+
+// ResponseStarted reports whether a response status has already reached the
+// client, in which case an error handler has nothing useful left to send.
+func ResponseStarted(w http.ResponseWriter) bool {
+	marker, ok := w.(StatusMarker)
+	return ok && marker.WroteHeader()
+}
+
+// MarkClientClosed records StatusClientClosedRequest on w when the client
+// connection itself went away before any response status was written. It
 // reports whether the sentinel was recorded.
 //
-// Nothing is sent to the client: the connection is already gone, and on a
+// The test is deliberately the client's own context rather than the request's:
+// middleware derive cancellable children from it (the inflight tracker, which
+// an operator can cancel from the UI, and the peer router's shutdown link), and
+// a request killed server-side still has a live client that must be answered
+// normally. Blaming that client would be the same misattribution this sentinel
+// exists to fix.
+//
+// When it does apply, nothing is sent: the connection is already gone, and on a
 // streamed response the upstream may have flushed headers long ago, where a
 // late WriteHeader would only produce "superfluous response.WriteHeader" spam.
-// A response that already started is left with the status it really had.
+// A response that already started keeps the status it really had.
 func MarkClientClosed(w http.ResponseWriter, r *http.Request) bool {
 	marker, ok := w.(StatusMarker)
-	if !ok || marker.WroteHeader() || r.Context().Err() == nil {
+	if !ok || marker.WroteHeader() || ClientContext(r.Context()).Err() == nil {
 		return false
 	}
 	marker.MarkStatus(StatusClientClosedRequest)

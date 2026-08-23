@@ -38,17 +38,25 @@ type healthCheckKey struct{}
 // Real upstream failures keep the 502. See #1029.
 func newProxyErrorHandler(id string, proxyLogger *logmon.Monitor) func(http.ResponseWriter, *http.Request, error) {
 	return func(w http.ResponseWriter, r *http.Request, err error) {
-		if errors.Is(err, context.Canceled) || r.Context().Err() != nil {
-			proxyLogger.Debugf("<%s> client disconnected: %v", id, err)
-			swaputil.MarkClientClosed(w, r)
-			return
-		}
-		if _, ok := r.Context().Value(healthCheckKey{}).(bool); ok {
+		// Pick the log level first: a cancelled request is never an upstream
+		// fault, whether or not the sentinel ends up applying below.
+		switch {
+		case errors.Is(err, context.Canceled) || r.Context().Err() != nil:
+			proxyLogger.Debugf("<%s> request cancelled: %v", id, err)
+		case r.Context().Value(healthCheckKey{}) != nil:
 			proxyLogger.Debugf("<%s> health check not ready: %v", id, err)
-			w.WriteHeader(http.StatusBadGateway)
+		default:
+			proxyLogger.Warnf("<%s> proxy error: %v", id, err)
+		}
+
+		// Only a client that actually hung up gets the recorded-only sentinel.
+		// A request cancelled server-side (an operator cancelling it from the
+		// UI, or shutdown) still has a client waiting, and must be answered —
+		// otherwise net/http finalizes it as an empty 200, telling the caller
+		// the request succeeded.
+		if swaputil.MarkClientClosed(w, r) || swaputil.ResponseStarted(w) {
 			return
 		}
-		proxyLogger.Warnf("<%s> proxy error: %v", id, err)
 		w.WriteHeader(http.StatusBadGateway)
 	}
 }

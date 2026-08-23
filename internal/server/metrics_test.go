@@ -256,6 +256,55 @@ func TestServer_MetricsMiddleware_ClientClosed(t *testing.T) {
 	}
 }
 
+// TestServer_MetricsMiddleware_ServerSideCancelIsNotClientClosed guards the
+// distinction #1029's fix depends on. The inflight middleware derives a
+// cancellable context that POST /api/inflight/{id}/cancel fires, so testing
+// "is this request's context done?" would report an operator cancelling a
+// request from the UI as a client that hung up.
+func TestServer_MetricsMiddleware_ServerSideCancelIsNotClientClosed(t *testing.T) {
+	mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 10, 0)
+	cfg := config.Config{Models: map[string]config.ModelConfig{"m": {}}}
+
+	proxylog := logmon.NewWriter(io.Discard)
+	// The handler stands in for a dispatch that is cancelled mid-flight and
+	// answers the still-connected client, as the proxy ErrorHandler does.
+	handler := chain.New(
+		CreateRequestLogMiddleware(proxylog),
+		CreateMetricsMiddleware(mm, cfg),
+	).ThenFunc(func(w http.ResponseWriter, r *http.Request) {
+		derived, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		cancel() // the operator cancels it
+		r = r.WithContext(derived)
+		if swaputil.MarkClientClosed(w, r) {
+			return
+		}
+		w.WriteHeader(http.StatusBadGateway)
+	})
+
+	body := `{"model":"m","messages":[{"role":"user","content":"hi"}]}`
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	r.RemoteAddr = "192.168.1.1:5000"
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadGateway {
+		t.Errorf("client got %d, want %d: a connected client must be answered", w.Code, http.StatusBadGateway)
+	}
+	entries := metricsEntries(t, mm)
+	if len(entries) != 1 {
+		t.Fatalf("want 1 entry, got %d", len(entries))
+	}
+	if entries[0].RespStatusCode == swaputil.StatusClientClosedRequest {
+		t.Error("a server-side cancel must not be recorded as a client disconnect")
+	}
+	if line := string(proxylog.GetHistory()); strings.Contains(line, "499") {
+		t.Errorf("access log %q should not report 499 for a connected client", line)
+	}
+}
+
 func TestMetricsMonitor_RecordFailedRequestCapture(t *testing.T) {
 	mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 10, 5)
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)

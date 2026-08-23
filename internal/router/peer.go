@@ -90,15 +90,21 @@ func NewPeer(cfg config.Config, logger *logmon.Monitor) (*Peer, error) {
 		}
 
 		reverseProxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-			// A client that hung up is not a peer failure: record the
-			// client-closed sentinel instead of blaming the peer with a 502
-			// (#1029). Nothing is sent — the client is already gone.
+			// A cancelled request is not a peer failure, so keep it out of the
+			// warning stream whether or not the sentinel applies below.
 			if errors.Is(err, context.Canceled) || r.Context().Err() != nil {
-				logger.Debugf("peer %s: client disconnected: %v", peerID, err)
-				swaputil.MarkClientClosed(w, r)
+				logger.Debugf("peer %s: request cancelled: %v", peerID, err)
+			} else {
+				logger.Warnf("peer %s: proxy error: %v", peerID, err)
+			}
+
+			// Only a client that actually hung up gets the recorded-only
+			// sentinel (#1029). A request cancelled server-side still has a
+			// client waiting for an answer.
+			if swaputil.MarkClientClosed(w, r) || swaputil.ResponseStarted(w) {
 				return
 			}
-			logger.Warnf("peer %s: proxy error: %v", peerID, err)
+
 			errMsg := fmt.Sprintf("peer proxy error: %v", err)
 			if runtime.GOOS == "darwin" && strings.Contains(err.Error(), "connect: no route to host") {
 				errMsg += " (hint: on macOS, check System Settings > Privacy & Security > Local Network permissions)"
@@ -216,15 +222,16 @@ func (r *Peer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Cancel the proxy request when the client disconnects or shutdown times out.
-	// AfterFunc links both parent contexts to our child without a goroutine leak.
-	ctx, cancel := context.WithCancel(context.Background())
-	stopReq := context.AfterFunc(req.Context(), cancel)
+	// Deriving from the request covers the client half directly and keeps the
+	// request's context values — notably the client context that tells a real
+	// disconnect apart from a server-side cancel. AfterFunc links the unrelated
+	// shutdown context in without a goroutine leak.
+	ctx, cancel := context.WithCancel(req.Context())
 	stopShutdown := context.AfterFunc(r.shutdownCtx, cancel)
 	req = req.WithContext(ctx)
 
 	pp.reverseProxy.ServeHTTP(w, req)
 
 	stopShutdown()
-	stopReq()
 	cancel()
 }
