@@ -101,4 +101,4 @@ test-ui:
 
 # Phony targets
 .PHONY: all clean ui mac windows simple-responder simple-responder-windows test test-all test-dev test-ui wol-proxy
-.PHONE: linux linux-arm64 linux-amd64
+.PHONY: linux linux-arm64 linux-amd64
