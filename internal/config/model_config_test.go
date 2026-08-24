@@ -347,25 +347,51 @@ func TestConfig_ModelCapabilities_Validate(t *testing.T) {
 		assert.NoError(t, caps.Validate())
 	})
 
+	t.Run("video_input_modality", func(t *testing.T) {
+		caps := ModelCapConfig{
+			In:      []string{"text", "image", "video"},
+			Out:     []string{"text", "audio"},
+			Tools:   true,
+			Context: 100000,
+		}
+		assert.NoError(t, caps.Validate())
+	})
+
+	t.Run("video_output_modality", func(t *testing.T) {
+		// `video` is added to the shared modality set, so it is valid on `out`
+		// as well as `in`. Asserted explicitly so that stays a decision rather
+		// than a side effect of the two lists sharing one map.
+		caps := ModelCapConfig{Out: []string{"video"}}
+		assert.NoError(t, caps.Validate())
+	})
+
+	t.Run("video_with_other_modalities", func(t *testing.T) {
+		caps := ModelCapConfig{
+			In:  []string{"text", "image", "video"},
+			Out: []string{"text", "video"},
+		}
+		assert.NoError(t, caps.Validate())
+	})
+
 	t.Run("empty_is_valid", func(t *testing.T) {
 		caps := ModelCapConfig{}
 		assert.NoError(t, caps.Validate())
 	})
 
 	t.Run("invalid_in_modality", func(t *testing.T) {
-		caps := ModelCapConfig{In: []string{"video"}}
+		caps := ModelCapConfig{In: []string{"foo"}}
 		err := caps.Validate()
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "capabilities.in")
-		assert.Contains(t, err.Error(), "video")
+		assert.Contains(t, err.Error(), "foo")
 	})
 
 	t.Run("invalid_out_modality", func(t *testing.T) {
-		caps := ModelCapConfig{Out: []string{"video"}}
+		caps := ModelCapConfig{Out: []string{"foo"}}
 		err := caps.Validate()
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "capabilities.out")
-		assert.Contains(t, err.Error(), "video")
+		assert.Contains(t, err.Error(), "foo")
 	})
 
 	t.Run("negative_context", func(t *testing.T) {
@@ -383,11 +409,32 @@ models:
     capabilities:
       in:
         - text
-        - video
+        - foo
 `
 		_, err := LoadConfigFromReader(strings.NewReader(content))
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "video")
+		assert.Contains(t, err.Error(), "foo")
+	})
+
+	t.Run("video_accepted_at_load", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    capabilities:
+      in:
+        - text
+        - image
+        - video
+      out:
+        - text
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+
+		mc := config.Models["model1"]
+		assert.Equal(t, []string{"text", "image", "video"}, mc.Capabilities.In)
+		assert.Equal(t, []string{"text"}, mc.Capabilities.Out)
 	})
 }
 
