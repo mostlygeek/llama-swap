@@ -638,10 +638,15 @@
                             },
                             "default": [],
                             "description": "List of model IDs to load on startup. Model names must match keys in models. When preloading multiple models, define a group to prevent swapping."
+                        },
+                        "profile": {
+                            "type": "string",
+                            "default": "",
+                            "description": "Profile to activate on startup and after a configuration reload. Must name a key under profiles. An empty value starts with no profile active."
                         }
                     },
                     "additionalProperties": false,
-                    "description": "Actions to perform on startup. Only supported action is preload."
+                    "description": "Actions to perform on startup."
                 }
             },
             "additionalProperties": false,

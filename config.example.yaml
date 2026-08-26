@@ -179,7 +179,8 @@ upstream:
 
 # profiles: named model ID replacements switched at runtime through the UI or API
 # - optional, default: empty dictionary
-# - one profile or none is active; startup and configuration reload select none
+# - one profile or none is active; hooks.on_startup.profile selects the profile
+#   used on startup and after a configuration reload
 # - pins are applied before aliases, filters, and routing
 # - targets may be a local model, fully qualified peer model, alias, setParamsByID alias, or selector
 # - an empty string or YAML null (~) disables the pin with a 404; it is not
@@ -491,8 +492,13 @@ models:
 hooks:
   # on_startup: a dictionary of actions to perform on startup
   # - optional, default: empty dictionary
-  # - the only supported action is preload
   on_startup:
+    # profile: profile to activate on startup and after a configuration reload
+    # - optional, default: empty string, which starts with no profile active
+    # - must name a key under profiles or the configuration fails to load
+    # - runtime selection is not persisted; restarts and reloads return to this profile
+    profile: "coding"
+
     # preload: a list of model ids to load on startup
     # - optional, default: empty list
     # - model names must match keys in the models sections
