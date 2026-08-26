@@ -29,6 +29,7 @@ var (
 	flagListen   = flag.String("listen", ":8080", "listen address to listen on")
 	flagLog      = flag.String("log", "info", "log level (debug, info, warn, error)")
 	flagTimeout  = flag.Int("timeout", 60, "seconds requests wait for upstream response before failing")
+	flagAPIKey   = flag.String("api-key", "", "API key sent as Bearer token to the upstream SSE endpoint")
 )
 
 func main() {
@@ -155,6 +156,9 @@ func newProxy(url *url.URL) *proxyServer {
 			req.Header.Set("Accept", "text/event-stream")
 			req.Header.Set("Cache-Control", "no-cache")
 			req.Header.Set("Connection", "keep-alive")
+			if *flagAPIKey != "" {
+				req.Header.Set("Authorization", "Bearer "+*flagAPIKey)
+			}
 
 			resp, err := client.Do(req)
 			if err != nil {
