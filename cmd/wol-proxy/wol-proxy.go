@@ -110,6 +110,8 @@ const (
 	ready                 upstreamStatus = "ready"
 	initialReconnectDelay                = 100 * time.Millisecond
 	maxReconnectDelay                    = 10 * time.Second
+	healthCheckInterval                  = 10 * time.Second
+	healthCheckTimeout                   = 5 * time.Second
 )
 
 type proxyServer struct {
@@ -117,6 +119,8 @@ type proxyServer struct {
 	failCount     int
 	statusMutex   sync.RWMutex
 	status        upstreamStatus
+	sseBodyMu     sync.Mutex
+	sseBody       io.Closer
 }
 
 func newProxy(url *url.URL) *proxyServer {
@@ -180,6 +184,7 @@ func newProxy(url *url.URL) *proxyServer {
 			proxy.setStatus(ready)
 			proxy.resetFailures()
 			reconnectDelay = 0
+			proxy.setSSEBody(resp.Body)
 
 			// Read from the SSE stream to detect disconnection
 			scanner := bufio.NewScanner(resp.Body)
@@ -205,11 +210,36 @@ func newProxy(url *url.URL) *proxyServer {
 			}
 
 			// Connection closed or error occurred
+			proxy.setSSEBody(nil)
 			_ = resp.Body.Close()
 			slog.Info("SSE connection closed, upstream not ready")
 			proxy.setStatus(notready)
 			proxy.incFail(1)
 
+		}
+	}()
+
+	// start a goroutine that periodically checks upstream liveness so a
+	// silently dead connection (e.g. upstream suspended without a TCP close)
+	// is detected and the upstream is marked not ready again
+	go func() {
+		healthUrl := url.Scheme + "://" + url.Host + "/wol-health"
+		client := &http.Client{Timeout: healthCheckTimeout}
+		ticker := time.NewTicker(healthCheckInterval)
+		defer ticker.Stop()
+		for range ticker.C {
+			resp, err := client.Get(healthUrl)
+			if err == nil {
+				_, _ = io.Copy(io.Discard, resp.Body)
+				_ = resp.Body.Close()
+				continue
+			}
+			slog.Warn("upstream health check failed, marking upstream not ready", "error", err)
+			proxy.setStatus(notready)
+			proxy.incFail(1)
+			if c := proxy.takeSSEBody(); c != nil {
+				_ = c.Close() // force the SSE monitor to reconnect
+			}
 		}
 	}()
 
@@ -311,6 +341,20 @@ func (p *proxyServer) resetFailures() {
 	p.statusMutex.Lock()
 	defer p.statusMutex.Unlock()
 	p.failCount = 0
+}
+
+func (p *proxyServer) setSSEBody(c io.Closer) {
+	p.sseBodyMu.Lock()
+	defer p.sseBodyMu.Unlock()
+	p.sseBody = c
+}
+
+func (p *proxyServer) takeSSEBody() io.Closer {
+	p.sseBodyMu.Lock()
+	defer p.sseBodyMu.Unlock()
+	c := p.sseBody
+	p.sseBody = nil
+	return c
 }
 
 func sendMagicPacket(macAddr string) error {
