@@ -26,6 +26,7 @@ type modelRecord struct {
 	Capabilities        map[string]any `json:"capabilities,omitempty"`
 	SupportedParameters []string       `json:"supported_parameters,omitempty"`
 	ContextLength       int            `json:"context_length,omitempty"`
+	ContextWindow       int            `json:"context_window,omitempty"`
 	Meta                map[string]any `json:"meta,omitempty"`
 	Status              map[string]any `json:"status"`
 }
@@ -38,6 +39,7 @@ var cappedMetadataKeys = map[string]struct{}{
 	"capabilities":         {},
 	"supported_parameters": {},
 	"context_length":       {},
+	"context_window":       {},
 }
 
 // renderCapabilities converts a model's capabilities config into additional
@@ -163,6 +165,9 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 			Status:      map[string]any{"value": status},
 		}
 		rec.Architecture, rec.Capabilities, rec.SupportedParameters, rec.ContextLength = renderCapabilities(caps)
+		// context_window mirrors context_length for OpenAI-compatible gateways
+		// (e.g. Bifrost) that read the context size from this field name.
+		rec.ContextWindow = rec.ContextLength
 		if !caps.Empty() {
 			metadata = filterCappedMetadata(metadata)
 		}
