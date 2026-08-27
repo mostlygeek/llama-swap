@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/store"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 	"github.com/tidwall/gjson"
 )
@@ -188,6 +190,46 @@ func TestMetricsMonitor_RecordMetadata(t *testing.T) {
 	}
 	if entries[0].Metadata["trace"] != "abc" {
 		t.Errorf("trace = %q, want abc", entries[0].Metadata["trace"])
+	}
+}
+
+// TestMetricsMonitor_QueueMetricsSkipsPruneForDiskBackedStore covers #1059: a
+// disk-backed store must retain every activity row, since MetricsMaxInMemory
+// bounds only the in-memory store's size. Only an in-memory store should ever
+// be pruned down to maxMetrics.
+func TestMetricsMonitor_QueueMetricsSkipsPruneForDiskBackedStore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "llama-swap.sqlite")
+	st, err := store.New(path)
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Errorf("store.Close: %v", err)
+		}
+	})
+	if st.IsInMemory() {
+		t.Fatal("expected disk-backed store, got in-memory")
+	}
+
+	mm := newMetricsMonitor(nil, 2, 0, st)
+	for i := 0; i < 5; i++ {
+		if _, ok := mm.queueMetrics(ActivityLogEntry{Timestamp: time.Unix(int64(i), 0), Model: "m"}); !ok {
+			t.Fatalf("queueMetrics: insert %d failed", i)
+		}
+	}
+
+	entries := metricsEntries(t, mm)
+	if len(entries) != 5 {
+		t.Fatalf("want all 5 rows retained on disk-backed store, got %d", len(entries))
+	}
+
+	stats, err := st.ActivityStats(context.Background(), store.ActivityStatsQuery{})
+	if err != nil {
+		t.Fatalf("ActivityStats: %v", err)
+	}
+	if stats.TotalRequests != 5 {
+		t.Fatalf("TotalRequests = %d, want 5", stats.TotalRequests)
 	}
 }
 
