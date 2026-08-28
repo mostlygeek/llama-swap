@@ -341,7 +341,7 @@ fi
 # container runtime only injects with --gpus; point at the stub copied into the
 # image so this works on a build machine with no GPU.
 SMOKE_ARGS=(--rm)
-if [[ "$BACKEND" == "cuda" ]]; then
+if [[ "$IS_CUDA_BACKEND" == true ]]; then
     SMOKE_ARGS+=(-e "LD_LIBRARY_PATH=/usr/local/cuda/lib64/stubs:/usr/local/cuda/lib64")
 fi
 
