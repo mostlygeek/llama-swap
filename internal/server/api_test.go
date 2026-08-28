@@ -816,6 +816,9 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 		if m.ContextLength != 100000 {
 			t.Errorf("context_length = %d", m.ContextLength)
 		}
+		if m.ContextWindow != 100000 {
+			t.Errorf("context_window = %d", m.ContextWindow)
+		}
 	})
 
 	t.Run("in_only", func(t *testing.T) {
@@ -839,6 +842,9 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 		}
 		if m.ContextLength != 0 {
 			t.Error("should not have context_length")
+		}
+		if m.ContextWindow != 0 {
+			t.Error("should not have context_window")
 		}
 	})
 
@@ -891,6 +897,9 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 		if m.ContextLength != 32768 {
 			t.Errorf("context_length = %d", m.ContextLength)
 		}
+		if m.ContextWindow != 32768 {
+			t.Errorf("context_window = %d", m.ContextWindow)
+		}
 		if m.Architecture != nil {
 			t.Error("should not have architecture")
 		}
@@ -937,6 +946,9 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 		if m.ContextLength != 0 {
 			t.Error("should not have context_length")
 		}
+		if m.ContextWindow != 0 {
+			t.Error("should not have context_window")
+		}
 	})
 
 	t.Run("metadata_precedence", func(t *testing.T) {
@@ -946,6 +958,7 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 				"architecture":   "should-be-dropped",
 				"custom_field":   "should-remain",
 				"capabilities":   "also-dropped",
+				"context_window": "also-dropped",
 				"other_metadata": "also-remain",
 			},
 		}))
@@ -962,6 +975,9 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 		if _, ok := meta["custom_field"]; !ok {
 			t.Error("custom_field should remain in metadata")
 		}
+		if _, ok := meta["context_window"]; ok {
+			t.Error("context_window should be filtered from metadata when caps are set")
+		}
 	})
 
 	t.Run("metadata_passthrough_no_caps", func(t *testing.T) {
@@ -970,6 +986,7 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 				"architecture":   "preserved",
 				"context_length": 4096,
 				"capabilities":   "preserved",
+				"context_window": 8192,
 				"custom_field":   "preserved",
 			},
 		}))
@@ -985,6 +1002,9 @@ func TestServer_HandleListModels_Capabilities(t *testing.T) {
 		}
 		if _, ok := meta["context_length"]; !ok {
 			t.Error("context_length should be preserved in metadata when caps is empty")
+		}
+		if _, ok := meta["context_window"]; !ok {
+			t.Error("context_window should be preserved in metadata when caps is empty")
 		}
 	})
 }
