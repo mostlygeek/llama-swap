@@ -49,7 +49,7 @@ CMAKE_FLAGS=(
     -DENGINE_BUILD_WARMBENCH=OFF
 )
 
-if [ "$BACKEND" = "cuda" ]; then
+if [[ "$BACKEND" = "cuda" || "$BACKEND" == "cuda13" ]]; then
     # docs/build/linux.md: set CUDAToolkit_ROOT *and* CMAKE_CUDA_COMPILER.
     # CMake otherwise takes the first nvcc on PATH and the first CUDA libraries
     # it finds, which can be two different toolkits. That mismatch links without
