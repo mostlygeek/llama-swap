@@ -29,6 +29,7 @@ var (
 	flagListen   = flag.String("listen", ":8080", "listen address to listen on")
 	flagLog      = flag.String("log", "info", "log level (debug, info, warn, error)")
 	flagTimeout  = flag.Int("timeout", 60, "seconds requests wait for upstream response before failing")
+	flagAPIKey   = flag.String("api-key", "", "API key sent as Bearer token to the upstream SSE endpoint (falls back to LLAMA_SWAP_API_KEY env var)")
 )
 
 func main() {
@@ -83,7 +84,12 @@ func main() {
 		}
 	}
 
-	proxy := newProxy(upstreamURL)
+	apiKey := *flagAPIKey
+	if apiKey == "" {
+		apiKey = os.Getenv("LLAMA_SWAP_API_KEY")
+	}
+
+	proxy := newProxy(upstreamURL, apiKey)
 	server := &http.Server{
 		Addr:    *flagListen,
 		Handler: proxy,
@@ -123,7 +129,7 @@ type proxyServer struct {
 	sseBody       io.Closer
 }
 
-func newProxy(url *url.URL) *proxyServer {
+func newProxy(url *url.URL, apiKey string) *proxyServer {
 	p := httputil.NewSingleHostReverseProxy(url)
 	proxy := &proxyServer{
 		upstreamProxy: p,
@@ -159,6 +165,9 @@ func newProxy(url *url.URL) *proxyServer {
 			req.Header.Set("Accept", "text/event-stream")
 			req.Header.Set("Cache-Control", "no-cache")
 			req.Header.Set("Connection", "keep-alive")
+			if apiKey != "" {
+				req.Header.Set("Authorization", "Bearer "+apiKey)
+			}
 
 			resp, err := client.Do(req)
 			if err != nil {
