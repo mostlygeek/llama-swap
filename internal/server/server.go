@@ -12,10 +12,13 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/event"
+	"github.com/mostlygeek/llama-swap/internal/hw"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/internal/router"
-	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/store"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 // Server owns the HTTP mux, cross-cutting middleware, and the local/peer model
@@ -29,9 +32,14 @@ type Server struct {
 	upstreamlog *logmon.Monitor
 
 	perf     *perf.Monitor
-	inflight *inflightCounter
+	inflight *inflightTracker
 	metrics  *metricsMonitor
+	store    *store.Store
 	build    BuildInfo
+	hardware *hw.HardwareSnapshot
+
+	profileMu     sync.RWMutex
+	activeProfile string
 
 	local router.LocalRouter
 	peer  router.Router
@@ -42,6 +50,35 @@ type Server struct {
 	shutdownCtx  context.Context
 	shutdownFn   context.CancelFunc
 	shuttingDown atomic.Bool
+}
+
+// ActiveProfile returns the active runtime profile, or an empty string when no
+// profile is active.
+func (s *Server) ActiveProfile() string {
+	s.profileMu.RLock()
+	defer s.profileMu.RUnlock()
+	return s.activeProfile
+}
+
+// setActiveProfile updates the runtime selection. An empty name deactivates
+// profiles. It returns whether the selection changed.
+func (s *Server) setActiveProfile(name string) (bool, error) {
+	if name != "" {
+		if _, ok := s.cfg.Profiles[name]; !ok {
+			return false, fmt.Errorf("profile %q not found", name)
+		}
+	}
+	s.profileMu.Lock()
+	if s.activeProfile == name {
+		s.profileMu.Unlock()
+		return false, nil
+	}
+	s.activeProfile = name
+	s.profileMu.Unlock()
+
+	s.proxylog.Infof("active profile changed to %q", name)
+	event.Emit(swaputil.ProfileChangedEvent{Active: name})
+	return true, nil
 }
 
 // modelPostJSONRoutes are endpoints with a model id in the JSON request body.
@@ -63,6 +100,9 @@ var modelPostJSONRoutes = []string{
 	"/v1/images/generations",
 	"/sdapi/v1/txt2img",
 	"/sdapi/v1/img2img",
+
+	// audio.cpp generic task API
+	"/audioapi/v1/tasks/run",
 
 	// versionless routes, the /v/ is stripped before the request is forwarded upstream
 	// see issue #728
@@ -87,6 +127,28 @@ var modelPostFormRoutes = []string{
 var modelGetRoutes = []string{
 	"/v1/audio/voices",
 	"/sdapi/v1/loras",
+	"/props",
+}
+
+// isMetricsRecordPath reports whether path is one of the model-dispatched
+// endpoints that the metrics middleware records in the activity log.
+func isMetricsRecordPath(path string) bool {
+	for _, p := range modelPostJSONRoutes {
+		if p == path {
+			return true
+		}
+	}
+	for _, p := range modelPostFormRoutes {
+		if p == path {
+			return true
+		}
+	}
+	for _, p := range modelGetRoutes {
+		if p == path {
+			return true
+		}
+	}
+	return false
 }
 
 // BuildInfo carries version metadata surfaced by GET /api/version.
@@ -96,7 +158,7 @@ type BuildInfo struct {
 	Date    string
 }
 
-func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, upstreamlog *logmon.Monitor, perfMon *perf.Monitor, build BuildInfo) (*Server, error) {
+func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, upstreamlog *logmon.Monitor, perfMon *perf.Monitor, st *store.Store, build BuildInfo, hardware *hw.HardwareSnapshot) (*Server, error) {
 	var local router.LocalRouter
 	var err error
 
@@ -118,6 +180,10 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 		return nil, fmt.Errorf("creating peer router: %w", err)
 	}
 
+	if st == nil {
+		return nil, fmt.Errorf("store is required")
+	}
+
 	shutdownCtx, shutdownFn := context.WithCancel(context.Background())
 	s := &Server{
 		cfg:         cfg,
@@ -125,9 +191,11 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 		proxylog:    proxylog,
 		upstreamlog: upstreamlog,
 		perf:        perfMon,
-		inflight:    &inflightCounter{},
-		metrics:     newMetricsMonitor(proxylog, cfg.MetricsMaxInMemory, cfg.CaptureBuffer),
+		inflight:    newInflightTracker(),
+		metrics:     newMetricsMonitor(proxylog, cfg.MetricsMaxInMemory, cfg.CaptureBuffer, st),
+		store:       st,
 		build:       build,
+		hardware:    hardware,
 		local:       local,
 		peer:        peer,
 		shutdownCtx: shutdownCtx,
@@ -139,13 +207,14 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 }
 
 // localPeerHandler dispatches a model-routed request to the local or peer
-// router. The model is resolved once via shared.FetchContext.
+// router. The model is resolved once via swaputil.FetchContext.
 func (s *Server) localPeerHandler(w http.ResponseWriter, r *http.Request) {
 	stripVersionPrefix(r)
+	stripAudioAPIPrefix(r)
 
-	data, err := shared.FetchContext(r, s.cfg)
+	data, err := swaputil.FetchContext(r, s.cfg)
 	if err != nil {
-		shared.SendError(w, r, shared.ErrNoModelInContext)
+		swaputil.SendError(w, r, swaputil.ErrNoModelInContext)
 		return
 	}
 
@@ -157,7 +226,7 @@ func (s *Server) localPeerHandler(w http.ResponseWriter, r *http.Request) {
 		s.proxylog.Debugf("dispatch: using peer for model: %s", data.ModelID)
 		s.peer.ServeHTTP(w, r)
 	default:
-		shared.SendError(w, r, router.ErrNoRouterFound)
+		swaputil.SendError(w, r, router.ErrNoRouterFound)
 	}
 }
 
@@ -169,6 +238,15 @@ func stripVersionPrefix(r *http.Request) {
 	}
 }
 
+// stripAudioAPIPrefix rewrites /audioapi/... requests to their /... form
+// before forwarding upstream, so /audioapi/v1/tasks/run reaches the upstream
+// as /v1/tasks/run.
+func stripAudioAPIPrefix(r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/audioapi") {
+		r.URL.Path = strings.TrimPrefix(r.URL.Path, "/audioapi")
+	}
+}
+
 // routes builds the mux, registers every route, and wraps the mux with the
 // global CORS middleware.
 func (s *Server) routes() {
@@ -176,11 +254,12 @@ func (s *Server) routes() {
 	authMW := CreateAuthMiddleware(s.cfg)
 	modelChain := chain.New(
 		authMW,
+		CreateProfileMiddleware(s),
+		CreateSelectorMiddleware(s),
 		CreateRequestContextMiddleware(s.cfg),
-		CreateConcurrencyMiddleware(s.cfg),
+		CreateInflightMiddleware(s.inflight, s.cfg),
 		CreateFilterMiddleware(s.cfg),
 		CreateFormFilterMiddleware(s.cfg),
-		CreateInflightMiddleware(s.inflight),
 		CreateMetricsMiddleware(s.metrics, s.cfg),
 	)
 	// Custom endpoints only need auth.
@@ -201,6 +280,7 @@ func (s *Server) routes() {
 
 	// llama-swap API + custom endpoints.
 	mux.Handle("GET /v1/models", apiChain.ThenFunc(s.handleListModels))
+	mux.Handle("GET /models", apiChain.ThenFunc(s.handleListModels))
 	mux.Handle("GET /logs", apiChain.ThenFunc(s.handleLogs))
 	mux.Handle("GET /logs/stream", apiChain.ThenFunc(s.handleLogStream))
 	mux.Handle("GET /logs/stream/{logMonitorID...}", apiChain.ThenFunc(s.handleLogStream))
@@ -220,17 +300,34 @@ func (s *Server) routes() {
 	mux.Handle("GET /unload", apiChain.ThenFunc(s.handleUnload))
 	mux.Handle("GET /running", apiChain.ThenFunc(s.handleRunning))
 
-	// Upstream passthrough.
+	// Upstream passthrough. Meter only the model-dispatched endpoints that can
+	// produce token usage/timings.
+	upstreamChain := apiChain.Append(
+		CreateProfileMiddleware(s),
+		CreateUpstreamInflightMiddleware(s.inflight, s.cfg),
+		CreateMetricsMiddleware(s.metrics, s.cfg),
+	)
 	mux.HandleFunc("GET /upstream", handleUpstreamRedirect)
-	mux.Handle("/upstream/{upstreamPath...}", apiChain.ThenFunc(s.handleUpstream))
+	mux.Handle("/upstream/{upstreamPath...}", upstreamChain.ThenFunc(s.handleUpstream))
+
+	// ComfyUI compatibility passthrough. This uses the fixed comfyui_auto model,
+	// whose compatibility settings are applied while loading config. Only the
+	// root path may start an unloaded model.
+	mux.Handle("/comfyui", apiChain.ThenFunc(handleComfyUIRedirect))
+	mux.Handle("/comfyui/{comfyPath...}", apiChain.ThenFunc(s.handleComfyUI))
 
 	// API group (API-key protected) consumed by the UI.
 	mux.Handle("POST /api/models/unload", apiChain.ThenFunc(s.handleAPIUnloadAll))
 	mux.Handle("POST /api/models/unload/{model...}", apiChain.ThenFunc(s.handleAPIUnloadModel))
+	mux.Handle("GET /api/profiles", apiChain.ThenFunc(s.handleAPIProfiles))
+	mux.Handle("PUT /api/profiles/active", apiChain.ThenFunc(s.handleAPIActiveProfile))
+	mux.Handle("POST /api/inflight/{id}/cancel", apiChain.ThenFunc(s.handleAPICancelInflight))
 	mux.Handle("GET /api/events", apiChain.ThenFunc(s.handleAPIEvents))
-	mux.Handle("GET /api/metrics", apiChain.ThenFunc(s.handleAPIMetrics))
+	mux.Handle("GET /api/metrics/activity", apiChain.ThenFunc(s.handleAPIActivity))
+	mux.Handle("GET /api/metrics/stats", apiChain.ThenFunc(s.handleAPIActivityStats))
 	mux.Handle("GET /api/performance", apiChain.ThenFunc(s.handleAPIPerformance))
 	mux.Handle("GET /api/version", apiChain.ThenFunc(s.handleAPIVersion))
+	mux.Handle("GET /api/hardware", apiChain.ThenFunc(s.handleAPIHardware))
 	mux.Handle("GET /api/captures/{id}", apiChain.ThenFunc(s.handleAPICapture))
 
 	s.mux = mux

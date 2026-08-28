@@ -4,14 +4,13 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
-	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 	"github.com/tidwall/sjson"
 )
 
@@ -34,9 +33,9 @@ func CreateFilterMiddleware(cfg config.Config) chain.Middleware {
 				return
 			}
 
-			data, err := shared.FetchContext(r, cfg)
+			data, err := swaputil.FetchContext(r, cfg)
 			if err != nil {
-				shared.SendError(w, r, shared.ErrNoModelInContext)
+				swaputil.SendError(w, r, swaputil.ErrNoModelInContext)
 				return
 			}
 
@@ -48,13 +47,13 @@ func CreateFilterMiddleware(cfg config.Config) chain.Middleware {
 
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
-				shared.SendResponse(w, r, http.StatusBadRequest, "could not read request body")
+				swaputil.SendResponse(w, r, http.StatusBadRequest, "could not read request body")
 				return
 			}
 
 			body, err = applyFilters(body, data.Model, useModelName, filters)
 			if err != nil {
-				shared.SendResponse(w, r, http.StatusInternalServerError, err.Error())
+				swaputil.SendResponse(w, r, http.StatusInternalServerError, err.Error())
 				return
 			}
 
@@ -84,9 +83,9 @@ func CreateFormFilterMiddleware(cfg config.Config) chain.Middleware {
 				return
 			}
 
-			data, err := shared.FetchContext(r, cfg)
+			data, err := swaputil.FetchContext(r, cfg)
 			if err != nil {
-				shared.SendError(w, r, shared.ErrNoModelInContext)
+				swaputil.SendError(w, r, swaputil.ErrNoModelInContext)
 				return
 			}
 
@@ -96,73 +95,19 @@ func CreateFormFilterMiddleware(cfg config.Config) chain.Middleware {
 				return
 			}
 
-			if err := r.ParseMultipartForm(32 << 20); err != nil {
-				shared.SendResponse(w, r, http.StatusBadRequest, fmt.Sprintf("error parsing multipart form: %s", err.Error()))
-				return
-			}
-
-			body, contentType, err := rewriteMultipartModel(r.MultipartForm, useModelName)
+			updated, err := swaputil.ReplaceRequestModel(r, data.Model, useModelName)
 			if err != nil {
-				shared.SendResponse(w, r, http.StatusInternalServerError, err.Error())
+				swaputil.SendResponse(w, r, http.StatusBadRequest, err.Error())
 				return
 			}
 
-			r.Body = io.NopCloser(bytes.NewReader(body))
-			r.MultipartForm = nil
-			r.Header.Del("Transfer-Encoding")
-			r.Header.Set("Content-Type", contentType)
-			r.Header.Set("Content-Length", strconv.Itoa(len(body)))
-			r.ContentLength = int64(len(body))
-
-			next.ServeHTTP(w, r)
+			// UseModelName changes only the model name sent upstream. Keep the
+			// original request context so routing and metrics still identify
+			// the configured model.
+			updated = updated.WithContext(r.Context())
+			next.ServeHTTP(w, updated)
 		})
 	}
-}
-
-// rewriteMultipartModel reconstructs a multipart form, replacing the "model"
-// field value with useModelName. It returns the encoded body and the matching
-// Content-Type header (which carries the generated boundary).
-func rewriteMultipartModel(form *multipart.Form, useModelName string) ([]byte, string, error) {
-	var buf bytes.Buffer
-	mw := multipart.NewWriter(&buf)
-
-	for key, values := range form.Value {
-		for _, value := range values {
-			if key == "model" {
-				value = useModelName
-			}
-			field, err := mw.CreateFormField(key)
-			if err != nil {
-				return nil, "", fmt.Errorf("error recreating form field %s: %w", key, err)
-			}
-			if _, err := field.Write([]byte(value)); err != nil {
-				return nil, "", fmt.Errorf("error writing form field %s: %w", key, err)
-			}
-		}
-	}
-
-	for key, headers := range form.File {
-		for _, fh := range headers {
-			part, err := mw.CreateFormFile(key, fh.Filename)
-			if err != nil {
-				return nil, "", fmt.Errorf("error recreating form file %s: %w", key, err)
-			}
-			file, err := fh.Open()
-			if err != nil {
-				return nil, "", fmt.Errorf("error opening uploaded file %s: %w", key, err)
-			}
-			if _, err := io.Copy(part, file); err != nil {
-				file.Close()
-				return nil, "", fmt.Errorf("error copying file data %s: %w", key, err)
-			}
-			file.Close()
-		}
-	}
-
-	if err := mw.Close(); err != nil {
-		return nil, "", fmt.Errorf("error finalizing multipart form: %w", err)
-	}
-	return buf.Bytes(), mw.FormDataContentType(), nil
 }
 
 // resolveFilters returns the filter settings for a requested model. UseModelName
@@ -172,12 +117,8 @@ func resolveFilters(cfg config.Config, requested string) (useModelName string, f
 		mc := cfg.Models[realName]
 		return mc.UseModelName, mc.Filters.Filters, true
 	}
-	for _, peer := range cfg.Peers {
-		for _, m := range peer.Models {
-			if m == requested {
-				return "", peer.Filters, true
-			}
-		}
+	if peerID, _, found := cfg.ResolvePeerModel(requested); found {
+		return "", cfg.Peers[peerID].Filters, true
 	}
 	return "", config.Filters{}, false
 }

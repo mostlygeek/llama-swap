@@ -16,16 +16,20 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/router"
-	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/store"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 // stubRouter is a minimal router.LocalRouter for Server dispatch tests.
 type stubRouter struct {
 	models        map[string]bool
 	response      string
+	serveHTTP     func(http.ResponseWriter, *http.Request)
 	shutdownCalls atomic.Int32
 	running       map[string]process.ProcessState
 	unloadCalls   atomic.Int32
+	unloadModels  []string
+	unloadTimeout time.Duration
 	loggers       map[string]*logmon.Monitor
 }
 
@@ -39,13 +43,21 @@ func newStubRouter(models []string, response string) *stubRouter {
 
 func (s *stubRouter) Handles(model string) bool      { return s.models[model] }
 func (s *stubRouter) Shutdown(_ time.Duration) error { s.shutdownCalls.Add(1); return nil }
-func (s *stubRouter) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
+func (s *stubRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if s.serveHTTP != nil {
+		s.serveHTTP(w, r)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(s.response))
 }
 
 func (s *stubRouter) RunningModels() map[string]process.ProcessState { return s.running }
-func (s *stubRouter) Unload(_ time.Duration, _ ...string)            { s.unloadCalls.Add(1) }
+func (s *stubRouter) Unload(timeout time.Duration, models ...string) {
+	s.unloadCalls.Add(1)
+	s.unloadTimeout = timeout
+	s.unloadModels = append([]string(nil), models...)
+}
 func (s *stubRouter) ProcessLogger(modelID string) (*logmon.Monitor, bool) {
 	if s.loggers != nil {
 		if lg, ok := s.loggers[modelID]; ok {
@@ -59,13 +71,18 @@ func (s *stubRouter) ProcessLogger(modelID string) (*logmon.Monitor, bool) {
 func newTestServer(local router.LocalRouter, peer router.Router) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	proxylog := logmon.NewWriter(io.Discard)
+	st, err := store.New("")
+	if err != nil {
+		panic(err)
+	}
 	s := &Server{
 		cfg:         config.Config{},
 		muxlog:      logmon.NewWriter(io.Discard),
 		proxylog:    proxylog,
 		upstreamlog: logmon.NewWriter(io.Discard),
-		inflight:    &inflightCounter{},
-		metrics:     newMetricsMonitor(proxylog, 0, 0),
+		inflight:    newInflightTracker(),
+		metrics:     newMetricsMonitor(proxylog, 0, 0, st),
+		store:       st,
 		local:       local,
 		peer:        peer,
 		shutdownCtx: ctx,
@@ -75,9 +92,42 @@ func newTestServer(local router.LocalRouter, peer router.Router) *Server {
 	return s
 }
 
+func newTestMetricsMonitor(t *testing.T, logger *logmon.Monitor, maxMetrics int, captureBufferMB int) *metricsMonitor {
+	t.Helper()
+	st, err := store.New("")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Errorf("store.Close: %v", err)
+		}
+	})
+	return newMetricsMonitor(logger, maxMetrics, captureBufferMB, st)
+}
+
+func metricsEntries(t *testing.T, mm *metricsMonitor) []ActivityLogEntry {
+	t.Helper()
+	page, err := mm.store.ListActivity(context.Background(), store.ActivityQuery{Limit: 1000, Page: 1})
+	if err != nil {
+		t.Fatalf("ListActivity: %v", err)
+	}
+	mm.overlayCaptureState(page.Data)
+	return page.Data
+}
+
 func chatRequest(model string) *http.Request {
 	body := strings.NewReader(`{"model":"` + model + `"}`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", body)
+	req.Header.Set("Content-Type", "application/json")
+	return req
+}
+
+// audioTaskRequest builds a JSON POST to the /audioapi/v1/tasks/run endpoint
+// carrying the given model field.
+func audioTaskRequest(model string) *http.Request {
+	body := strings.NewReader(`{"model":"` + model + `"}`)
+	req := httptest.NewRequest(http.MethodPost, "/audioapi/v1/tasks/run", body)
 	req.Header.Set("Content-Type", "application/json")
 	return req
 }
@@ -86,7 +136,12 @@ func TestServer_New_GroupConfig(t *testing.T) {
 	discard := logmon.NewWriter(io.Discard)
 	cfg := config.Config{HealthCheckTimeout: 15}
 	cfg.Routing.Router.Use = "group"
-	s, err := New(cfg, discard, discard, discard, nil, BuildInfo{})
+	st, err := store.New("")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer st.Close()
+	s, err := New(cfg, discard, discard, discard, nil, st, BuildInfo{}, nil)
 	if err != nil {
 		t.Fatalf("New (group): %v", err)
 	}
@@ -101,9 +156,22 @@ func TestServer_New_GroupConfig(t *testing.T) {
 func TestServer_New_MatrixConfig(t *testing.T) {
 	discard := logmon.NewWriter(io.Discard)
 	cfg := config.Config{HealthCheckTimeout: 15}
+	cfg.Models = map[string]config.ModelConfig{
+		"model": {
+			Cmd:   "echo ready",
+			Proxy: "http://localhost:8080",
+		},
+	}
 	cfg.Routing.Router.Use = "matrix"
-	cfg.Routing.Router.Settings.Matrix = &config.MatrixConfig{}
-	s, err := New(cfg, discard, discard, discard, nil, BuildInfo{})
+	cfg.Routing.Router.Settings.Matrix = &config.MatrixConfig{
+		Sets: config.OrderedSets{{Name: "single", DSL: "model"}},
+	}
+	st, err := store.New("")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer st.Close()
+	s, err := New(cfg, discard, discard, discard, nil, st, BuildInfo{}, nil)
 	if err != nil {
 		t.Fatalf("New (matrix): %v", err)
 	}
@@ -149,6 +217,23 @@ func TestServer_RouteToPeerModel(t *testing.T) {
 	}
 }
 
+func TestServer_RouteToLocalModel_PrefersLocalCollision(t *testing.T) {
+	s := newTestServer(
+		newStubRouter([]string{"shared"}, "local response"),
+		newStubRouter([]string{"shared"}, "peer response"),
+	)
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, chatRequest("shared"))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
+	}
+	if w.Body.String() != "local response" {
+		t.Errorf("body=%q want local response", w.Body.String())
+	}
+}
+
 func TestServer_UnknownModelReturns404(t *testing.T) {
 	s := newTestServer(
 		newStubRouter([]string{"local-model"}, ""),
@@ -160,6 +245,40 @@ func TestServer_UnknownModelReturns404(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Errorf("status=%d want 404 body=%q", w.Code, w.Body.String())
+	}
+}
+
+func TestServer_AudioAPIRoutesTaskRequest(t *testing.T) {
+	s := newTestServer(
+		newStubRouter([]string{"local-audio"}, "local audio response"),
+		newStubRouter(nil, ""),
+	)
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, audioTaskRequest("local-audio"))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
+	}
+	if w.Body.String() != "local audio response" {
+		t.Errorf("body=%q want %q", w.Body.String(), "local audio response")
+	}
+}
+
+func TestServer_AudioAPIRewritesUpstreamPath(t *testing.T) {
+	var gotPath string
+	local := newStubRouter([]string{"m1"}, "")
+	local.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}
+	s := newTestServer(local, newStubRouter(nil, ""))
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, audioTaskRequest("m1"))
+
+	if gotPath != "/v1/tasks/run" {
+		t.Errorf("upstream path = %q, want /v1/tasks/run", gotPath)
 	}
 }
 
@@ -214,6 +333,12 @@ func TestServer_Unload(t *testing.T) {
 	if got := local.unloadCalls.Load(); got != 1 {
 		t.Errorf("unloadCalls=%d want 1", got)
 	}
+	if len(local.unloadModels) != 0 {
+		t.Errorf("unloadModels=%v want empty for unload all", local.unloadModels)
+	}
+	if local.unloadTimeout != 0 {
+		t.Errorf("unloadTimeout=%v want 0 (use configured timeouts)", local.unloadTimeout)
+	}
 }
 
 func TestServer_Running(t *testing.T) {
@@ -267,8 +392,8 @@ func TestServer_Preload(t *testing.T) {
 		OnStartup: config.HookOnStartup{Preload: []string{"m1"}},
 	}}
 
-	got := make(chan shared.ModelPreloadedEvent, 1)
-	cancel := event.On(func(e shared.ModelPreloadedEvent) { got <- e })
+	got := make(chan swaputil.ModelPreloadedEvent, 1)
+	cancel := event.On(func(e swaputil.ModelPreloadedEvent) { got <- e })
 	defer cancel()
 
 	s.startPreload()

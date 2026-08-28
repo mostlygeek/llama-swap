@@ -10,7 +10,6 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
-	"github.com/mostlygeek/llama-swap/internal/router/scheduler"
 )
 
 // newTestGroup builds a Group directly from the supplied processes and config,
@@ -27,10 +26,10 @@ func newTestGroup(t *testing.T, conf config.Config, processes map[string]process
 		config:       conf,
 		modelToGroup: modelToGroup,
 	}
-	base := newBaseRouter("group", conf, processes, logmon.NewWriter(io.Discard),
-		func(name string, logger *logmon.Monitor, eff scheduler.Effects) scheduler.Scheduler {
-			return scheduler.NewFIFO(name, logger, swapper, conf.Routing.Scheduler.Settings.Fifo, eff)
-		})
+	base, err := newBaseRouter("group", conf, processes, logmon.NewWriter(io.Discard), swapper)
+	if err != nil {
+		t.Fatalf("newBaseRouter: %v", err)
+	}
 	base.testProcessed = make(chan struct{}, 64)
 	g := &Group{baseRouter: base}
 	go base.run()

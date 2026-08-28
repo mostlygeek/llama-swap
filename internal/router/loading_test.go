@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 func TestLoadingWriter_SSEHeadersAndInitialMessage(t *testing.T) {
@@ -70,6 +72,66 @@ func TestLoadingWriter_WritePassthrough(t *testing.T) {
 	body := w.Body.String()
 	if !strings.Contains(body, "hello") {
 		t.Errorf("Write passthrough failed, body: %s", body)
+	}
+}
+
+// TestLoadingWriter_SendError checks that an error arriving after the loading
+// stream committed its 200 is delivered as a frame the client can parse, and
+// terminates the stream. Writing it as a bare JSON line (what swaputil.SendError
+// used to leave behind) is silently dropped by every SSE parser.
+func TestLoadingWriter_SendError(t *testing.T) {
+	logger := logmon.NewWriter(io.Discard)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	lw := newLoadingWriter(logger, "test-model", w, req)
+	before := w.Body.Len()
+	lw.sendError(fmt.Errorf("upstream command exited prematurely"))
+	chunk := w.Body.String()[before:]
+
+	// Every line must be a well-formed SSE field, or an SSE parser drops it.
+	for _, line := range strings.Split(strings.TrimRight(chunk, "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "data: ") {
+			t.Errorf("line %q is not an SSE field; a parser would ignore it", line)
+		}
+	}
+
+	// The frame must carry the same envelope as a non-streamed error body, so
+	// clients do not need a second shape for streamed failures.
+	var msg swaputil.ErrorEnvelope
+	first, _, _ := strings.Cut(chunk, "\n")
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(first, "data: ")), &msg); err != nil {
+		t.Fatalf("error frame is not JSON: %v (%q)", err, first)
+	}
+	if msg.Error.Message != "upstream command exited prematurely" {
+		t.Errorf("message = %q, want the underlying error", msg.Error.Message)
+	}
+	want := swaputil.NewErrorEnvelope(http.StatusInternalServerError, "upstream command exited prematurely", "")
+	if msg.Error.Type != want.Error.Type || msg.Error.Code != want.Error.Code || msg.Src != want.Src {
+		t.Errorf("envelope = %+v, want the shared shape %+v", msg, want)
+	}
+	if !strings.HasSuffix(strings.TrimRight(chunk, "\n"), "data: [DONE]") {
+		t.Errorf("stream not terminated with [DONE]: %q", chunk)
+	}
+}
+
+// Once released, the streaming goroutine must not touch the writer — a write
+// against a finalized response panics on the recycled *bufio.Writer.
+func TestLoadingWriter_SendErrorAfterReleaseIsDropped(t *testing.T) {
+	logger := logmon.NewWriter(io.Discard)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	lw := newLoadingWriter(logger, "test-model", w, req)
+	lw.release()
+
+	before := w.Body.Len()
+	lw.sendError(fmt.Errorf("too late"))
+	if w.Body.Len() != before {
+		t.Errorf("sendError wrote %d bytes after release", w.Body.Len()-before)
 	}
 }
 

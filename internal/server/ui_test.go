@@ -7,22 +7,21 @@ import (
 	"testing/fstest"
 )
 
-func TestServer_SelectEncoding(t *testing.T) {
+func TestServer_AcceptsBrotli(t *testing.T) {
 	cases := []struct {
-		accept   string
-		encoding string
-		ext      string
+		accept string
+		want   bool
 	}{
-		{"", "", ""},
-		{"gzip", "gzip", ".gz"},
-		{"gzip, deflate, br", "br", ".br"},
-		{"deflate", "", ""},
-		{"br;q=1.0, gzip;q=0.8", "br", ".br"},
+		{"", false},
+		{"gzip", false},
+		{"deflate", false},
+		{"brotli", false},
+		{"gzip, deflate, br", true},
+		{"br;q=1.0, gzip;q=0.8", true},
 	}
 	for _, c := range cases {
-		enc, ext := selectEncoding(c.accept)
-		if enc != c.encoding || ext != c.ext {
-			t.Errorf("selectEncoding(%q) = (%q, %q), want (%q, %q)", c.accept, enc, ext, c.encoding, c.ext)
+		if got := acceptsBrotli(c.accept); got != c.want {
+			t.Errorf("acceptsBrotli(%q) = %v, want %v", c.accept, got, c.want)
 		}
 	}
 }
@@ -32,7 +31,6 @@ func uiTestFS() http.FileSystem {
 		"index.html":  {Data: []byte("<html>app</html>")},
 		"app.js":      {Data: []byte("plain")},
 		"app.js.br":   {Data: []byte("brotli")},
-		"app.js.gz":   {Data: []byte("gzipped")},
 		"favicon.ico": {Data: []byte("icon")},
 	})
 }
@@ -65,6 +63,16 @@ func TestServer_ServeUI_Brotli(t *testing.T) {
 	}
 	if w.Body.String() != "brotli" {
 		t.Errorf("body = %q, want brotli", w.Body.String())
+	}
+}
+
+func TestServer_ServeUI_GzipOnlyClientGetsPlain(t *testing.T) {
+	w := serveUIRequest(t, "/ui/app.js", "gzip, deflate")
+	if got := w.Header().Get("Content-Encoding"); got != "" {
+		t.Fatalf("Content-Encoding = %q, want empty", got)
+	}
+	if w.Body.String() != "plain" {
+		t.Errorf("body = %q, want plain", w.Body.String())
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -12,7 +13,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/router/scheduler"
-	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 type shutdownReq struct {
@@ -28,8 +29,7 @@ type unloadReq struct {
 
 // baseRouter owns the channels, run-loop, and process machinery shared by every
 // concrete router. Concrete routers embed *baseRouter and supply a
-// scheduler.Factory (which captures their scheduler.Swapper) describing how
-// requests are scheduled and how their eviction set is decided. baseRouter
+// scheduler.Swapper describing how eviction sets are decided. baseRouter
 // implements scheduler.Effects so the scheduler can call back for side-effects.
 type baseRouter struct {
 	name      string
@@ -75,8 +75,8 @@ func newBaseRouter(
 	conf config.Config,
 	processes map[string]process.Process,
 	logger *logmon.Monitor,
-	newSched scheduler.Factory,
-) *baseRouter {
+	planner scheduler.Swapper,
+) (*baseRouter, error) {
 	shutdownCtx, shutdownFn := context.WithCancel(context.Background())
 	procCtx, procCancel := context.WithCancel(context.Background())
 	b := &baseRouter{
@@ -96,8 +96,12 @@ func newBaseRouter(
 		serveDoneCh: make(chan scheduler.ServeDoneEvent),
 		runDone:     make(chan struct{}),
 	}
-	b.schedule = newSched(name, logger, b)
-	return b
+	sched, err := scheduler.New(conf, name, logger, planner, b)
+	if err != nil {
+		return nil, err
+	}
+	b.schedule = sched
+	return b, nil
 }
 
 func (b *baseRouter) notifyProcessed() {
@@ -251,16 +255,19 @@ func (b *baseRouter) doSwap(modelID string, toStop []string) {
 	}
 	wg.Wait()
 
+	// EnsureReady rather than a State() check followed by Run: the router must
+	// not assume anything about the process. Deciding out here means acting on
+	// a snapshot that the process's own run loop can invalidate at any moment —
+	// a TTL unload landing in that window used to leave the swap waiting on a
+	// process nobody was ever going to start (issue #946). EnsureReady makes
+	// the same decision inside the process, where the state is owned.
 	target := b.processes[modelID]
-	if target.State() == process.StateStopped {
-		go func() {
-			if err := target.Run(timeout); err != nil {
-				b.logger.Warnf("%s: running %s exited: %v", b.name, modelID, err)
-			}
-		}()
+	err := target.EnsureReady(b.shutdownCtx, timeout)
+	if err != nil && b.shutdownCtx.Err() == nil {
+		// Quiet during shutdown: every in-flight swap fails at once there, and
+		// that is expected rather than worth a warning per model.
+		b.logger.Warnf("%s: starting %s failed: %v", b.name, modelID, err)
 	}
-
-	err := target.WaitReady(b.shutdownCtx)
 
 	select {
 	case b.swapDoneCh <- scheduler.SwapDone{ModelID: modelID, Err: err}:
@@ -330,6 +337,17 @@ func (b *baseRouter) healthCheckTimeout() time.Duration {
 	return t
 }
 
+// unloadTimeout returns the graceful stop timeout for a model. Config parsing
+// guarantees both the global and per-model unloadTimeout are populated (a zero
+// model value is rewritten to the global default on parse), so no zero handling
+// is needed here.
+func (b *baseRouter) unloadTimeout(modelID string) time.Duration {
+	if mc, ok := b.config.Models[modelID]; ok {
+		return time.Duration(mc.UnloadTimeout) * time.Second
+	}
+	return time.Duration(b.config.UnloadTimeout) * time.Second
+}
+
 func (b *baseRouter) Handles(model string) bool {
 	_, ok := b.processes[model]
 	return ok
@@ -370,6 +388,14 @@ func (b *baseRouter) RunningModels() map[string]process.ProcessState {
 // for — Stop kills the upstream, those callers see whatever error the
 // reverse proxy surfaces and may retry. Their trackedServe defers fire
 // normally and decrement inFlight as the dying handlers return.
+//
+// A timeout <= 0 unloads each targeted model with its configured
+// unloadTimeout: targets sharing a timeout are stopped in parallel within one
+// unload request, and the requests are processed smallest timeout first. The
+// requests are sequential, so a hung stop on a large model (long timeouts
+// usually mean multi-node unloads) cannot delay reclaiming the quick ones
+// queued behind it. A positive timeout overrides the configured values and
+// stops every target with that timeout.
 func (b *baseRouter) Unload(timeout time.Duration, models ...string) {
 	targets := models
 	if len(targets) == 0 {
@@ -382,6 +408,28 @@ func (b *baseRouter) Unload(timeout time.Duration, models ...string) {
 		return
 	}
 
+	if timeout > 0 {
+		b.sendUnload(targets, timeout)
+		return
+	}
+	buckets := make(map[time.Duration][]string)
+	for _, id := range targets {
+		t := b.unloadTimeout(id)
+		buckets[t] = append(buckets[t], id)
+	}
+	timeouts := make([]time.Duration, 0, len(buckets))
+	for t := range buckets {
+		timeouts = append(timeouts, t)
+	}
+	sort.Slice(timeouts, func(i, j int) bool { return timeouts[i] < timeouts[j] })
+	for _, t := range timeouts {
+		b.sendUnload(buckets[t], t)
+	}
+}
+
+// sendUnload funnels one unload request through the run loop and blocks until
+// the scheduler has stopped the targeted processes.
+func (b *baseRouter) sendUnload(targets []string, timeout time.Duration) {
 	req := unloadReq{targets: targets, timeout: timeout, respond: make(chan struct{})}
 	select {
 	case b.unloadCh <- req:
@@ -406,13 +454,33 @@ func (b *baseRouter) Shutdown(timeout time.Duration) error {
 
 func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if b.shuttingDown.Load() {
-		shared.SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
+		swaputil.SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
 		return
 	}
 
-	data, err := shared.FetchContext(req, b.config)
+	data, err := swaputil.FetchContext(req, b.config)
 	if err != nil {
-		shared.SendError(w, req, err)
+		swaputil.SendError(w, req, err)
+		return
+	}
+
+	// Ignored websocket connections are deliberately kept outside the
+	// scheduler: they cannot start or queue a model, consume concurrency, or
+	// prevent another request from swapping the process out. A process may stop
+	// immediately after this readiness check; dropping that websocket is the
+	// intended tradeoff of opting out of lifecycle tracking.
+	if swaputil.ShouldIgnoreWebsocket(req, b.config) {
+		p, ok := b.processes[data.ModelID]
+		if !ok {
+			swaputil.SendError(w, req, scheduler.ErrModelNotFound)
+			return
+		}
+		if p.State() != process.StateReady {
+			swaputil.SendResponse(w, req, http.StatusConflict,
+				fmt.Sprintf("model %s is not loaded; ignored websocket requests cannot start it", data.ModelID))
+			return
+		}
+		p.ServeHTTP(w, req)
 		return
 	}
 
@@ -422,6 +490,7 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		// Unbuffered: a successful send on Respond proves the waiter is
 		// alive and consuming. grant() relies on this to avoid handing a
 		// handleFunc to a cancelled waiter and leaking the inFlight count.
+		Admit:      make(chan error, 1),
 		Respond:    make(chan scheduler.HandlerResp),
 		PositionCh: make(chan int, 1),
 	}
@@ -431,7 +500,25 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	case <-req.Context().Done():
 		return
 	case <-b.shutdownCtx.Done():
-		shared.SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
+		swaputil.SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
+		return
+	}
+
+	var admissionErr error
+	select {
+	case admissionErr = <-hr.Admit:
+	case <-req.Context().Done():
+		select {
+		case b.cancelCh <- hr:
+		case <-b.shutdownCtx.Done():
+		}
+		return
+	case <-b.shutdownCtx.Done():
+		swaputil.SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
+		return
+	}
+	if admissionErr != nil {
+		swaputil.SendError(w, req, admissionErr)
 		return
 	}
 
@@ -465,20 +552,40 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// reclaims it. release() must run even when waitForCompletion times out:
 	// otherwise a still-streaming goroutine flushes a finalized response and
 	// panics on the recycled *bufio.Writer.
-	finishLoading := func() {
+	//
+	// A non-nil streamErr is framed into the stream first, while writes still
+	// reach the client: the 200 is already committed, so this is the only way
+	// the error can be reported at all.
+	finishLoading := func(streamErr error) {
 		cancelLoad()
 		if lw != nil {
 			lw.waitForCompletion(1 * time.Second)
+			if streamErr != nil {
+				lw.sendError(streamErr)
+			}
 			lw.release()
+		}
+	}
+
+	// reportError sends err as a normal error response, for the paths where no
+	// loading stream was live to carry it in-band. When one was, finishLoading
+	// has already framed it into the stream and a second report would append a
+	// bare JSON line that SSE parsers discard.
+	reportError := func(err error) {
+		if lw == nil {
+			swaputil.SendError(w, req, err)
 		}
 	}
 
 	var resp scheduler.HandlerResp
 	select {
 	case resp = <-hr.Respond:
-		finishLoading()
+		// Pass the dispatch error in so it is framed into the stream before
+		// release fences the writer; a nil error just ends the stream.
+		finishLoading(resp.Err)
 	case <-req.Context().Done():
-		finishLoading()
+		// The client is gone, so there is nobody to report to.
+		finishLoading(nil)
 		// Notify the scheduler so it can prune this request from its queue
 		// and swap waiters. Without this, a queued request whose client left
 		// would sit in the scheduler until drainQueue eventually starts a
@@ -489,13 +596,14 @@ func (b *baseRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 		return
 	case <-b.shutdownCtx.Done():
-		finishLoading()
-		shared.SendError(w, req, fmt.Errorf("%s is shutting down", b.name))
+		shutdownErr := fmt.Errorf("%s is shutting down", b.name)
+		finishLoading(shutdownErr)
+		reportError(shutdownErr)
 		return
 	}
 
 	if resp.Err != nil {
-		shared.SendError(w, req, resp.Err)
+		reportError(resp.Err)
 		return
 	}
 	resp.HandleFunc(w, req)

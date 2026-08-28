@@ -11,17 +11,19 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
-	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 // ErrModelNotFound is granted to callers whose model is not handled by this
-// router. It is an alias for shared.ErrNoLocalModelFound.
-var ErrModelNotFound = shared.ErrNoLocalModelFound
+// router. It is an alias for swaputil.ErrNoLocalModelFound.
+var ErrModelNotFound = swaputil.ErrNoLocalModelFound
 
 // Swapper is the eviction policy: it decides which running models must be
 // stopped before a target can serve. It is orthogonal to the scheduling
@@ -90,14 +92,27 @@ type Effects interface {
 	StopProcesses(timeout time.Duration, ids []string)
 }
 
-// Factory builds a Scheduler bound to a baseRouter's Effects. The concrete
-// router captures its Swapper in the closure it passes as a Factory.
-type Factory func(name string, logger *logmon.Monitor, eff Effects) Scheduler
+// New returns a Scheduler selected by conf.Routing.Scheduler.Use, configured
+// from conf and bound to the given planner and effects. Currently only "fifo"
+// (the default) is supported.
+func New(conf config.Config, name string, logger *logmon.Monitor, planner Swapper, eff Effects) (Scheduler, error) {
+	use := conf.Routing.Scheduler.Use
+	if use == "" {
+		use = "fifo"
+	}
+	switch use {
+	case "fifo":
+		return NewFIFO(name, logger, planner, conf.Routing.Scheduler.Settings.Fifo, conf.Models, eff), nil
+	default:
+		return nil, fmt.Errorf("unsupported scheduler type: %q", use)
+	}
+}
 
 // HandlerReq is one in-flight ServeHTTP request waiting for a routing decision.
 type HandlerReq struct {
 	Model      string
 	Ctx        context.Context
+	Admit      chan error
 	Respond    chan HandlerResp
 	PositionCh chan int
 }

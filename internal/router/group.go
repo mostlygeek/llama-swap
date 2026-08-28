@@ -6,7 +6,6 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
-	"github.com/mostlygeek/llama-swap/internal/router/scheduler"
 )
 
 type Group struct {
@@ -30,10 +29,10 @@ func NewGroup(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Group
 	}
 
 	processes := make(map[string]process.Process, len(modelToGroup))
-	base := newBaseRouter("group", conf, processes, proxylog,
-		func(name string, logger *logmon.Monitor, eff scheduler.Effects) scheduler.Scheduler {
-			return scheduler.NewFIFO(name, logger, swapper, conf.Routing.Scheduler.Settings.Fifo, eff)
-		})
+	base, err := newBaseRouter("group", conf, processes, proxylog, swapper)
+	if err != nil {
+		return nil, fmt.Errorf("creating base router: %w", err)
+	}
 
 	for mid := range modelToGroup {
 		modelCfg, _, ok := conf.FindConfig(mid)

@@ -123,6 +123,24 @@ finishes it posts a `SwapDone` onto `swapDoneCh`, which the run loop delivers as
 quick events (`OnRequest` to start, `OnSwapDone` to finish) and everything in
 between is handled normally.
 
+### `doSwap` never decides from a process state snapshot
+
+To start the target, `doSwap` calls a single `process.EnsureReady`. It
+deliberately does **not** read `State()` and branch on the result. Processes
+change state on their own — a TTL unload, a crash, an operator kill — so any
+state the router reads is already stale by the time it acts on it. `EnsureReady`
+takes that decision inside the process's own single-writer run loop, where the
+state is owned: ready is a no-op, stopped starts, and a stop still in flight
+holds the request until it finishes and then starts.
+
+This is the rule that matters when extending the router: **advisory reads of
+process state are fine** (which model to evict, what `/running` reports — being
+slightly stale is harmless there), but **a read that gates a mutation is a bug**.
+Move that decision into the process instead. Getting this wrong is what caused
+issue #946: a request arriving during a TTL unload saw `StateStopping`, skipped
+the start, and then waited forever on a process nobody was going to start —
+which wedged that model's swap slot and hung every later request for it.
+
 ### In-flight tracking and `trackedServe`
 
 When the scheduler grants a request, the handler it hands back is wrapped by
@@ -279,7 +297,7 @@ Method by method, as implemented in `base.go`:
   state, and whether this router handles the model at all. The scheduler uses it
   for the "unknown model" check and the "already ready" fast path. Safe to call
   any time because the process map is fixed at construction and `State()` is a
-  snapshot.
+  snapshot. Advisory only — never branch a start or stop on it (see above).
 
 - **`RunningModels()`** — the state of every process that isn't stopped or shut
   down. The scheduler unions its keys with its own in-flight swap targets to

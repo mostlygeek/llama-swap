@@ -302,9 +302,6 @@ func parseRocmSmiLine(header string, line string) *GpuStat {
 		case "GPU use (%)":
 			gpuUtil, _ := strconv.ParseFloat(val, 64)
 			result.GpuUtilPct = gpuUtil
-		case "GPU Memory Allocated (VRAM%)":
-			memUtil, _ := strconv.ParseFloat(val, 64)
-			result.MemUtilPct = memUtil
 		case "VRAM Total Memory (B)":
 			memTotal, _ := strconv.ParseUint(val, 10, 64)
 			result.MemTotalMB = int(memTotal / toMB)
@@ -320,6 +317,10 @@ func parseRocmSmiLine(header string, line string) *GpuStat {
 
 	if result.ID == -1 {
 		return nil
+	}
+
+	if result.MemTotalMB > 0 {
+		result.MemUtilPct = float64(result.MemUsedMB) / float64(result.MemTotalMB) * 100
 	}
 
 	name := device

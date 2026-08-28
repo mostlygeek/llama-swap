@@ -6,7 +6,7 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
-	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 // CreateAuthMiddleware returns middleware that validates API keys when the
@@ -20,7 +20,7 @@ func CreateAuthMiddleware(cfg config.Config) chain.Middleware {
 			return next
 		}
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			provided := shared.ExtractAPIKey(r)
+			provided := swaputil.ExtractAPIKey(r)
 
 			valid := false
 			for _, key := range keys {
@@ -31,7 +31,7 @@ func CreateAuthMiddleware(cfg config.Config) chain.Middleware {
 			}
 			if !valid {
 				w.Header().Set("WWW-Authenticate", `Basic realm="llama-swap"`)
-				shared.SendResponse(w, r, http.StatusUnauthorized, "unauthorized: invalid or missing API key")
+				swaputil.SendResponse(w, r, http.StatusUnauthorized, "unauthorized: invalid or missing API key")
 				return
 			}
 
@@ -46,9 +46,10 @@ func CreateAuthMiddleware(cfg config.Config) chain.Middleware {
 func CreateRequestContextMiddleware(cfg config.Config) chain.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			data, err := shared.FetchContext(r, cfg)
+			r = markInflightStart(r)
+			data, err := swaputil.FetchContext(r, cfg)
 			if err != nil {
-				shared.SendError(w, r, shared.ErrNoModelInContext)
+				swaputil.SendError(w, r, swaputil.ErrNoModelInContext)
 				return
 			}
 			_ = data

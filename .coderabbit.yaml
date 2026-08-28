@@ -12,9 +12,13 @@ reviews:
   finishing_touches:
     docstrings:
       enabled: false
+    unit_tests: 
+      enabled: false
   auto_review:
     enabled: false
     drafts: false
+  unit_tests:
+    enabled: false
 chat:
   auto_reply: true
 issue_enrichment:

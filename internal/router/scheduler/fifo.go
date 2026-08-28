@@ -3,12 +3,18 @@ package scheduler
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/process"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
+
+// defaultConcurrencyLimit caps simultaneous in-flight requests per model when
+// the model config leaves concurrencyLimit unset.
+const defaultConcurrencyLimit = 10
 
 // activeSwap tracks one in-flight swap and the callers waiting on it.
 type activeSwap struct {
@@ -33,21 +39,35 @@ type FIFO struct {
 	cfg     config.FifoConfig
 	effects Effects
 
+	limits   map[string]int
 	active   map[string]*activeSwap
+	reserved map[string]int
 	inFlight map[string]int
 	queued   []HandlerReq
 }
 
-// NewFIFO builds a FIFO scheduler. It matches scheduler.Factory once a planner
-// is captured in a closure.
-func NewFIFO(name string, logger *logmon.Monitor, planner Swapper, cfg config.FifoConfig, eff Effects) *FIFO {
+// NewFIFO builds a FIFO scheduler. Per-model concurrency limits are derived
+// from models: each model's ConcurrencyLimit overrides defaultConcurrencyLimit
+// when set to a value greater than zero.
+func NewFIFO(name string, logger *logmon.Monitor, planner Swapper, cfg config.FifoConfig, models map[string]config.ModelConfig, eff Effects) *FIFO {
+	limits := make(map[string]int, len(models))
+	for id, mc := range models {
+		limit := defaultConcurrencyLimit
+		if mc.ConcurrencyLimit > 0 {
+			limit = mc.ConcurrencyLimit
+		}
+		limits[id] = limit
+	}
+
 	return &FIFO{
 		name:     name,
 		logger:   logger,
 		planner:  planner,
 		cfg:      cfg,
 		effects:  eff,
+		limits:   limits,
 		active:   make(map[string]*activeSwap),
+		reserved: make(map[string]int),
 		inFlight: make(map[string]int),
 	}
 }
@@ -76,7 +96,11 @@ func (s *FIFO) OnRequest(req HandlerReq) {
 	state, ok := s.effects.ModelState(req.Model)
 	if !ok {
 		s.logger.Debugf("%s: model %s not handled by this router", s.name, req.Model)
-		s.effects.GrantError(req, ErrModelNotFound)
+		s.rejectAdmission(req, ErrModelNotFound)
+		return
+	}
+
+	if !s.admit(req) {
 		return
 	}
 
@@ -130,6 +154,7 @@ func (s *FIFO) OnCancel(req HandlerReq) {
 		for _, q := range s.queued {
 			if q.Respond == req.Respond {
 				removed = true
+				s.release(q.Model)
 				continue
 			}
 			kept = append(kept, q)
@@ -143,6 +168,7 @@ func (s *FIFO) OnCancel(req HandlerReq) {
 		for _, w := range sw.waiters {
 			if w.Respond == req.Respond {
 				removed = true
+				s.release(w.Model)
 				continue
 			}
 			filtered = append(filtered, w)
@@ -169,7 +195,7 @@ func (s *FIFO) OnSwapDone(ev SwapDone) {
 
 	for _, w := range sw.waiters {
 		if ev.Err != nil {
-			s.effects.GrantError(w, ev.Err)
+			s.grantError(w, ev.Err)
 		} else {
 			s.grantHandler(w, ev.ModelID)
 		}
@@ -183,6 +209,7 @@ func (s *FIFO) OnSwapDone(ev SwapDone) {
 // have evicted this (now-idle) process can now proceed.
 func (s *FIFO) OnServeDone(ev ServeDoneEvent) {
 	s.inFlight[ev.ModelID]--
+	s.release(ev.ModelID)
 	if s.inFlight[ev.ModelID] <= 0 {
 		delete(s.inFlight, ev.ModelID)
 		s.drainQueue()
@@ -209,7 +236,7 @@ func (s *FIFO) OnUnload(targets []string, timeout time.Duration) {
 			continue
 		}
 		for _, w := range sw.waiters {
-			s.effects.GrantError(w, unloadErr)
+			s.grantError(w, unloadErr)
 		}
 		delete(s.active, id)
 	}
@@ -220,7 +247,7 @@ func (s *FIFO) OnUnload(targets []string, timeout time.Duration) {
 		kept := s.queued[:0]
 		for _, w := range s.queued {
 			if targetSet[w.Model] {
-				s.effects.GrantError(w, unloadErr)
+				s.grantError(w, unloadErr)
 				continue
 			}
 			kept = append(kept, w)
@@ -243,21 +270,99 @@ func (s *FIFO) OnUnload(targets []string, timeout time.Duration) {
 func (s *FIFO) OnShutdown(err error) {
 	for _, sw := range s.active {
 		for _, w := range sw.waiters {
-			s.effects.GrantError(w, err)
+			s.grantError(w, err)
 		}
 	}
 	for _, w := range s.queued {
-		s.effects.GrantError(w, err)
+		s.grantError(w, err)
 	}
 }
 
 // grantHandler hands the caller a tracked handler for modelID and, only if the
 // caller was still there to receive it, bumps the in-flight count. Incrementing
 // when the grant failed would strand the counter and block future evictions.
+// Concurrency-limit rejection happens earlier in admit, before a request can
+// start the loading stream.
 func (s *FIFO) grantHandler(req HandlerReq, modelID string) {
+	if err := swaputil.SetReqData(req.Ctx, "fifo_priority", strconv.Itoa(s.cfg.Priority[req.Model])); err != nil {
+		s.logger.Debugf("failed to set fifo_priority metadata: %v", err)
+	}
+
 	if s.effects.GrantServe(req, modelID) {
 		s.inFlight[modelID]++
+	} else {
+		s.release(modelID)
 	}
+}
+
+// grantError reports a post-admission error to the caller and releases the
+// request's reserved concurrency slot.
+func (s *FIFO) grantError(req HandlerReq, err error) {
+	s.release(req.Model)
+	s.effects.GrantError(req, err)
+}
+
+// admit performs the pre-stream admission handshake. Accepted requests reserve
+// one future serving slot until they serve, cancel while waiting, or receive a
+// post-admission error.
+func (s *FIFO) admit(req HandlerReq) bool {
+	if s.reserved[req.Model] >= s.limit(req.Model) {
+		s.rejectAdmission(req, swaputil.ConcurrencyLimitError{})
+		return false
+	}
+	if !sendAdmission(req, nil) {
+		return false
+	}
+	s.reserved[req.Model]++
+	return true
+}
+
+func (s *FIFO) rejectAdmission(req HandlerReq, err error) {
+	sendAdmission(req, err)
+}
+
+func sendAdmission(req HandlerReq, err error) bool {
+	if req.Admit == nil {
+		return true
+	}
+	done := reqDone(req)
+	select {
+	case <-done:
+		return false
+	default:
+	}
+	select {
+	case req.Admit <- err:
+		return true
+	case <-done:
+		return false
+	}
+}
+
+func reqDone(req HandlerReq) <-chan struct{} {
+	if req.Ctx == nil {
+		return nil
+	}
+	return req.Ctx.Done()
+}
+
+func (s *FIFO) release(modelID string) {
+	if s.reserved[modelID] <= 0 {
+		panic(fmt.Sprintf("%s: release without reservation for model %s", s.name, modelID))
+	}
+	s.reserved[modelID]--
+	if s.reserved[modelID] == 0 {
+		delete(s.reserved, modelID)
+	}
+}
+
+// limit returns the per-model concurrency cap, defaulting to
+// defaultConcurrencyLimit when the model has no explicit entry.
+func (s *FIFO) limit(modelID string) int {
+	if l, ok := s.limits[modelID]; ok {
+		return l
+	}
+	return defaultConcurrencyLimit
 }
 
 // startSwap records the swap as active and launches it via Effects. running is
@@ -305,7 +410,7 @@ func (s *FIFO) drainQueue() {
 	for _, req := range pending {
 		state, ok := s.effects.ModelState(req.Model)
 		if !ok {
-			s.effects.GrantError(req, ErrModelNotFound)
+			s.grantError(req, ErrModelNotFound)
 			continue
 		}
 		if sw, ok := s.active[req.Model]; ok {
