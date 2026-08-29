@@ -1,0 +1,10 @@
+- id: hard-peer-model-addressing
+  question: My peer is called sippy and serves a model called gemma-4-12B. What model id do clients use?
+  tags: [peers, multihop]
+  expect_regex: ["sippy/gemma-4-12B"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    `sippy/gemma-4-12B` -- peer models are addressed as <peer-id>/<model>.
+  rubric:
+    - Gives sippy/gemma-4-12B
+    - Explains the peer-id/model naming rule

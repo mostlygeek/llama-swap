@@ -1,0 +1,78 @@
+- id: hard-ttl-zero-trap
+  question: Does setting ttl to 0 on a model make it unload as soon as it goes idle?
+  tags: [ttl, trap]
+  expect_any: ["no", "never", "not", "not unload", "prevents"]
+  forbid_regex: ["immediat(e|ely) unload", "unloads? right away"]
+  expect_tools_any: [docs__search_docs, docs__get_config_schema]
+  reference: |
+    No -- the opposite. `ttl: 0` means never unload automatically. `-1` is the
+    default and inherits globalTTL.
+  rubric:
+    - Answers no
+    - States that ttl 0 means never unload automatically
+    - Does not claim 0 means unload immediately
+
+- id: hard-default-unloadtimeout
+  question: What is the default value of unloadTimeout in llama-swap?
+  tags: [defaults]
+  expect_regex: ["\\b10\\b"]
+  expect_tools_any: [docs__get_config_schema, docs__search_docs]
+  max_iterations: 5
+  reference: |
+    10 seconds.
+  rubric:
+    - Gives 10
+    - Identifies the unit as seconds
+
+- id: hard-default-healthcheck
+  question: How long does llama-swap wait for a model to become healthy before giving up, by default?
+  tags: [defaults]
+  expect_regex: ["120"]
+  expect_tools_any: [docs__get_config_schema, docs__search_docs]
+  max_iterations: 5
+  reference: |
+    `healthCheckTimeout` defaults to 120 seconds.
+  rubric:
+    - Gives 120 seconds
+    - Names the healthCheckTimeout setting
+
+- id: hard-startport-default
+  question: If I never set startPort, what port number does llama-swap assign to the first model it starts?
+  tags: [defaults, trap]
+  expect_regex: ["5800"]
+  forbid_regex: ["10001"]
+  expect_tools_any: [docs__get_config_schema, docs__search_docs]
+  reference: |
+    5800. config.example.yaml sets startPort to 10001 as an example value, but
+    the documented default is 5800.
+  rubric:
+    - Gives 5800
+    - Does not give 10001, which is only the example value in config.example.yaml
+
+- id: hard-docker-ttl-multihop
+  question: I run a model in Docker and want it unloaded after 10 minutes idle. What do I set, and what else should I check so the container actually stops?
+  tags: [ttl, docker, multihop]
+  expect_regex: ["ttl", "600", "cmdStop"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    `ttl: 600` unloads after 10 minutes idle. For a container you also need
+    `cmdStop: docker stop ${MODEL_ID}`, because otherwise llama-swap signals
+    the `docker run` client rather than the container, and you should raise
+    `unloadTimeout` above the default 10s since `docker stop` is slow.
+  rubric:
+    - Gives ttl 600 for the idle unload
+    - Says cmdStop is needed so the container itself is stopped
+    - Mentions raising unloadTimeout for a slow container stop
+
+- id: hard-docker-port-side
+  question: In a docker cmd with -p ${PORT}:8080, which side is the port inside the container?
+  tags: [docker, trap]
+  expect_regex: ["8080"]
+  expect_tools: [docs__search_docs]
+  max_iterations: 5
+  reference: |
+    The right-hand side, 8080. The container's internal port is fixed; only the
+    host side, ${PORT}, varies.
+  rubric:
+    - Identifies 8080 / the right-hand side as the container-internal port
+    - Says the ${PORT} side is the host port llama-swap assigned

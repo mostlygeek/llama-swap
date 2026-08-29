@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Component } from "svelte";
   import ChatInterface from "../components/playground/ChatInterface.svelte";
+  import DocsInterface from "../components/playground/DocsInterface.svelte";
   import ImageInterface from "../components/playground/ImageInterface.svelte";
   import AudioInterface from "../components/playground/AudioInterface.svelte";
   import SpeechInterface from "../components/playground/SpeechInterface.svelte";
@@ -15,6 +16,7 @@
 
   const tabComponents: Record<PlaygroundTab, Component> = {
     chat: ChatInterface,
+    docs: DocsInterface,
     images: ImageInterface,
     speech: SpeechInterface,
     audio: AudioInterface,

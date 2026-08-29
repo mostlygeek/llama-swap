@@ -1,0 +1,11 @@
+- id: operations-startup-hooks
+  question: Where do I configure commands that run around llama-swap lifecycle events?
+  expect_regex: ["hooks"]
+  expect_tools_any: [docs__search_docs, docs__get_doc]
+  require_tools: true
+
+- id: operations-observability
+  question: Which setting limits how many metrics stay in memory?
+  expect_regex: ["metricsMaxInMemory"]
+  expect_tools_any: [docs__search_docs, docs__get_doc]
+  require_tools: true

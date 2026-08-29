@@ -1,0 +1,84 @@
+# Abstention cases: features llama-swap does not have.
+#
+# The correct behaviour is to say so, not to invent a plausible config key. A
+# small model asked "how do I configure X" will happily produce a YAML block
+# for an X that does not exist, and that failure is invisible to every other
+# case in this suite -- these are the only cases that catch it.
+#
+# Each forbid_regex names the key the model is most likely to invent. Verified
+# absent from config-schema.json and docs/ when written.
+
+- id: negative-rate-limiting
+  question: How do I configure per-API-key rate limiting in llama-swap?
+  tags: [negative]
+  expect_any: ["not", "no ", "does not", "doesn't", "cannot", "isn't", "unable"]
+  forbid_regex: ["rateLimit", "rate_limit", "requestsPerMinute", "quota"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    llama-swap has no rate limiting. apiKeys is all-or-nothing access control:
+    a request either carries a valid key or it does not. Rate limiting would
+    have to be done by a reverse proxy in front of llama-swap.
+  rubric:
+    - States that llama-swap does not have rate limiting
+    - Does not invent a configuration key for it
+    - Optionally suggests a reverse proxy as the alternative
+
+- id: negative-model-download
+  question: What setting makes llama-swap download a GGUF from Hugging Face automatically if it is missing?
+  tags: [negative]
+  expect_any: ["not", "no ", "does not", "doesn't", "cannot", "isn't"]
+  # hf_download is a key gemma-4-12B has been observed inventing here.
+  forbid_regex: ["autoDownload", "auto_download", "downloadUrl", "hf_download"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    There is none. llama-swap starts a command you give it; obtaining model
+    files is out of scope. The cmd would have to fetch the file, or it has to
+    exist already.
+  rubric:
+    - States that llama-swap has no automatic model downloading
+    - Does not invent a download-related configuration key
+
+- id: negative-multi-user
+  question: How do I set up user accounts with different permissions in llama-swap?
+  tags: [negative]
+  expect_any: ["not", "no ", "does not", "doesn't", "cannot", "isn't"]
+  forbid_regex: ["users:", "roles:", "permissions:", "rbac"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    llama-swap has no user accounts or roles. apiKeys is a flat list of keys
+    that are all equivalent.
+  rubric:
+    - States there are no user accounts or per-user permissions
+    - Correctly describes apiKeys as a flat list of equivalent keys
+    - Does not invent a users or roles config section
+
+- id: negative-invented-key
+  question: What does the models.*.maxConcurrentRequests setting do in llama-swap?
+  tags: [negative]
+  expect_any: ["not", "no ", "does not", "doesn't", "exist", "isn't"]
+  expect_tools: [docs__search_docs, docs__get_config_schema]
+  forbid_regex: ["maxConcurrentRequests (is|sets|controls|limits)"]
+  reference: |
+    There is no such setting. The nearest real one is
+    `models.*.concurrencyLimit`. Naming that instead is a good answer, but only
+    if the reply also says maxConcurrentRequests itself does not exist --
+    silently answering about a different key leaves the user believing the one
+    they asked about is real.
+  rubric:
+    - States that maxConcurrentRequests is not a real setting
+    - Does not fabricate a description or default for maxConcurrentRequests
+    - May point at concurrencyLimit as the real equivalent
+
+- id: negative-cron-unload
+  question: How do I schedule llama-swap to unload all models at 2am every night?
+  tags: [negative]
+  expect_any: ["not", "no ", "does not", "doesn't", "cannot", "isn't"]
+  forbid_regex: ["cron:", "schedule:.*2", "unloadAt"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    llama-swap has no scheduler for this. The way to do it is an external cron
+    job calling POST /api/models/unload, or ttl to unload on idle instead.
+  rubric:
+    - States llama-swap has no built-in scheduling for unloads
+    - Suggests external cron against the unload endpoint, or ttl
+    - Does not invent a cron or schedule config key

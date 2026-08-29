@@ -264,11 +264,29 @@ export type ImageContentPart = {
 
 export type ContentPart = TextContentPart | ImageContentPart;
 
+export type ChatRole = "user" | "assistant" | "system" | "tool";
+
+/** A tool call requested by the model. `arguments` is a JSON *string*. */
+export interface ToolCall {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+}
+
 export interface ChatMessage {
-  role: "user" | "assistant" | "system";
+  role: ChatRole;
   content: string | ContentPart[];
   reasoning_content?: string;
   reasoningTimeMs?: number;
+
+  /** Wire fields. tool_calls is assistant-only; the rest are tool-only. */
+  tool_calls?: ToolCall[];
+  tool_call_id?: string;
+  name?: string;
+
+  /** UI-only. Stripped before a message is sent upstream. */
+  toolOk?: boolean;
+  toolDurationMs?: number;
 }
 
 export function getTextContent(content: string | ContentPart[]): string {
@@ -277,6 +295,24 @@ export function getTextContent(content: string | ContentPart[]): string {
   }
   const textParts = content.filter((part): part is TextContentPart => part.type === "text");
   return textParts.map((part) => part.text).join("\n");
+}
+
+/**
+ * True when an assistant turn carries nothing worth rendering as a message.
+ *
+ * A turn that only requested tools has no text: it is shown as its tool cards
+ * instead of an empty bubble. A turn that *thought* before calling the tool is
+ * not empty, though -- the reasoning is the only record of why the model chose
+ * that call, and hiding it makes a reasoning model look like it thinks only on
+ * its final answer.
+ */
+export function isToolCallOnlyTurn(message: ChatMessage): boolean {
+  return (
+    message.role === "assistant" &&
+    Boolean(message.tool_calls?.length) &&
+    getTextContent(message.content) === "" &&
+    !message.reasoning_content
+  );
 }
 
 export function getImageUrls(content: string | ContentPart[]): string[] {

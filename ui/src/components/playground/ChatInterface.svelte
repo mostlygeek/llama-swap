@@ -1,7 +1,9 @@
 <script lang="ts">
+  import { get } from "svelte/store";
   import { hasListedModels } from "../../stores/api";
   import { persistentStore } from "../../stores/persistent";
   import { streamChatCompletion, type Endpoint } from "../../lib/chatApi";
+  import { DOCS_AGENT_SYSTEM_PROMPT } from "../../lib/prompts/docsAgent";
   import { playgroundStores } from "../../stores/playgroundActivity";
   import type { ChatMessage, ContentPart } from "../../lib/types";
   import { isSubmitEnter } from "../../lib/ime";
@@ -24,16 +26,33 @@
   const endpointStore = persistentStore<Endpoint>("playground-endpoint", "v1/chat/completions");
   const maxTokensStore = persistentStore<number>("playground-max-tokens", 4096);
 
-  function loadMessages(): ChatMessage[] {
+  // This tab was briefly the docs agent; that is the Docs tab now. Anyone who
+  // used it in between has the agent's prompt persisted here, which is not a
+  // prompt they chose, so it is cleared once.
+  if (get(systemPromptStore) === DOCS_AGENT_SYSTEM_PROMPT) {
+    systemPromptStore.set("");
+  }
+
+  /** Chat holds no tool turns; the Docs tab is where tool calling lives. */
+  type PlainMessage = ChatMessage & { role: "user" | "assistant" | "system" };
+
+  function loadMessages(): PlainMessage[] {
     try {
       const saved = localStorage.getItem("playground-messages");
-      return saved ? JSON.parse(saved) : [];
+      const parsed = saved ? JSON.parse(saved) : [];
+      if (!Array.isArray(parsed)) return [];
+      // A history left over from when this tab was agentic still holds tool
+      // turns this tab cannot render or replay. Sending one upstream is a hard
+      // 400, so they are dropped on load.
+      return parsed.filter(
+        (msg: ChatMessage): msg is PlainMessage => msg?.role !== "tool" && !msg?.tool_calls?.length
+      );
     } catch {
       return [];
     }
   }
 
-  let messages = $state<ChatMessage[]>(loadMessages());
+  let messages = $state<PlainMessage[]>(loadMessages());
   let userInput = $state("");
   let isStreaming = $state(false);
   let isReasoning = $state(false);
@@ -138,6 +157,58 @@
     reasoningStartTime = 0;
   }
 
+  /** Merges a patch into the last message. */
+  function patchLast(patch: Partial<PlainMessage>) {
+    messages = messages.map((msg, i) => (i === messages.length - 1 ? { ...msg, ...patch } : msg));
+  }
+
+  function lastText(): string {
+    const last = messages[messages.length - 1];
+    return typeof last?.content === "string" ? last.content : "";
+  }
+
+  /** Applies a streamed delta to the in-progress assistant message. */
+  function appendDelta(kind: "content" | "reasoning", text: string) {
+    if (kind === "reasoning") {
+      if (!isReasoning) {
+        isReasoning = true;
+        reasoningStartTime = Date.now();
+      }
+      const last = messages[messages.length - 1];
+      patchLast({ reasoning_content: (last?.reasoning_content || "") + text });
+      return;
+    }
+
+    // The first content delta ends the reasoning phase.
+    if (isReasoning) {
+      patchLast({ reasoningTimeMs: Date.now() - reasoningStartTime });
+      isReasoning = false;
+    }
+    patchLast({ content: lastText() + text });
+  }
+
+  function handleTurnError(error: unknown) {
+    if (error instanceof Error && error.name === "AbortError") {
+      // Cancelled by the user: keep the partial response.
+      if (isReasoning && reasoningStartTime > 0) {
+        patchLast({ reasoningTimeMs: Date.now() - reasoningStartTime });
+      }
+      return;
+    }
+    const message = error instanceof Error ? error.message : "An error occurred";
+    patchLast({ content: lastText() + `\n\n**Error:** ${message}` });
+  }
+
+  /** The conversation to send, with the optional system prompt prepended. */
+  function requestMessages(): ChatMessage[] {
+    const out: ChatMessage[] = [];
+    if ($systemPromptStore.trim()) {
+      out.push({ role: "system", content: $systemPromptStore.trim() });
+    }
+    out.push(...messages.slice(0, -1)); // everything but the empty placeholder
+    return out;
+  }
+
   async function regenerateFromIndex(idx: number) {
     // Remove all messages after the edited user message
     messages = messages.slice(0, idx + 1);
@@ -151,83 +222,20 @@
     abortController = new AbortController();
 
     try {
-      // Build messages array with optional system prompt
-      const apiMessages: ChatMessage[] = [];
-      if ($systemPromptStore.trim()) {
-        apiMessages.push({ role: "system", content: $systemPromptStore.trim() });
-      }
-      apiMessages.push(...messages.slice(0, -1)); // Add all messages except the empty assistant one
-
       const stream = streamChatCompletion(
         $selectedModelStore,
-        apiMessages,
+        requestMessages(),
         abortController.signal,
         { temperature: $temperatureStore, endpoint: $endpointStore, max_tokens: $maxTokensStore }
       );
 
       for await (const chunk of stream) {
         if (chunk.done) break;
-
-        // Handle reasoning content
-        if (chunk.reasoning_content) {
-          // Start timing on first reasoning content
-          if (!isReasoning) {
-            isReasoning = true;
-            reasoningStartTime = Date.now();
-          }
-
-          // Update the last message with reasoning content
-          messages = messages.map((msg, i) =>
-            i === messages.length - 1
-              ? { ...msg, reasoning_content: (msg.reasoning_content || "") + chunk.reasoning_content }
-              : msg
-          );
-        }
-
-        // Handle regular content - end reasoning phase when we get content
-        if (chunk.content) {
-          if (isReasoning) {
-            // Calculate reasoning time
-            const reasoningTimeMs = Date.now() - reasoningStartTime;
-            isReasoning = false;
-
-            // Update message with reasoning time
-            messages = messages.map((msg, i) =>
-              i === messages.length - 1
-                ? { ...msg, reasoningTimeMs }
-                : msg
-            );
-          }
-
-          // Update the last message (assistant) with new content
-          messages = messages.map((msg, i) =>
-            i === messages.length - 1
-              ? { ...msg, content: msg.content + chunk.content }
-              : msg
-          );
-        }
+        if (chunk.reasoning_content) appendDelta("reasoning", chunk.reasoning_content);
+        if (chunk.content) appendDelta("content", chunk.content);
       }
     } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        // User cancelled, keep partial response
-        // If we were still reasoning, record the time
-        if (isReasoning && reasoningStartTime > 0) {
-          const reasoningTimeMs = Date.now() - reasoningStartTime;
-          messages = messages.map((msg, i) =>
-            i === messages.length - 1
-              ? { ...msg, reasoningTimeMs }
-              : msg
-          );
-        }
-      } else {
-        // Show error in the assistant message
-        const errorMessage = error instanceof Error ? error.message : "An error occurred";
-        messages = messages.map((msg, i) =>
-          i === messages.length - 1
-            ? { ...msg, content: msg.content + `\n\n**Error:** ${errorMessage}` }
-            : msg
-        );
-      }
+      handleTurnError(error);
     } finally {
       isStreaming = false;
       isReasoning = false;

@@ -23,6 +23,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/internal/process"
+	"github.com/mostlygeek/llama-swap/internal/reference"
 	"github.com/mostlygeek/llama-swap/internal/server"
 	"github.com/mostlygeek/llama-swap/internal/store"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
@@ -185,6 +186,11 @@ func main() {
 
 	buildInfo := server.BuildInfo{Version: version, Commit: commit, Date: date}
 
+	// Indexed once and shared by every Server instance, including the ones a
+	// hot config reload creates: the documentation is immutable and does not
+	// depend on cfg.
+	referenceDocs := reference.New(referenceFiles)
+
 	initialStorePath := configStorePath(cfg)
 	initialStore, err := store.New(initialStorePath)
 	if err != nil {
@@ -192,7 +198,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	initialSrv, err := server.New(cfg, muxLog, proxyLog, upstreamLog, perfMon, initialStore, buildInfo, hardwareSnapshot)
+	initialSrv, err := server.New(cfg, muxLog, proxyLog, upstreamLog, perfMon, initialStore, buildInfo, hardwareSnapshot, referenceDocs)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)
 		initialStore.Close()
@@ -262,7 +268,7 @@ func main() {
 			}
 		}
 
-		newSrv, err := server.New(newCfg, muxLog, proxyLog, upstreamLog, perfMon, newStore, buildInfo, hardwareSnapshot)
+		newSrv, err := server.New(newCfg, muxLog, proxyLog, upstreamLog, perfMon, newStore, buildInfo, hardwareSnapshot, referenceDocs)
 		if err != nil {
 			proxyLog.Warnf("failed to build new server during reload: %v", err)
 			if storeChanged {

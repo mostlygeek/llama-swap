@@ -53,6 +53,25 @@ func (ml *MacroList) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
+// MarshalYAML renders the list back as an ordered mapping, the shape it is
+// written in, rather than the default slice-of-structs. Only diagnostics such
+// as the config__get_config tool marshal a Config, but when they do the macro
+// block should read like the source file.
+func (ml MacroList) MarshalYAML() (interface{}, error) {
+	node := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	for _, entry := range ml {
+		var key, value yaml.Node
+		if err := key.Encode(entry.Name); err != nil {
+			return nil, fmt.Errorf("encoding macro name %q: %w", entry.Name, err)
+		}
+		if err := value.Encode(entry.Value); err != nil {
+			return nil, fmt.Errorf("encoding macro value for %q: %w", entry.Name, err)
+		}
+		node.Content = append(node.Content, &key, &value)
+	}
+	return node, nil
+}
+
 // Get retrieves a macro value by name
 func (ml MacroList) Get(name string) (any, bool) {
 	for _, entry := range ml {

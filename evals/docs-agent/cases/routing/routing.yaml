@@ -1,0 +1,64 @@
+# Grounded in internal/docagent/db/guides/groups-and-matrix.md and guides/profiles-and-selectors.md
+- id: routing-two-routers
+  question: What are the two routing engines in llama-swap and how do I choose one?
+  tags: [routing]
+  expect_regex: ["group", "matrix"]
+  expect_any: ["routing", "router"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    `group` and `matrix`, selected with `routing.router.use`. group is the
+    default and simpler; matrix takes a list of allowed concurrent
+    combinations and solves for the cheapest way to satisfy a request.
+  rubric:
+    - Names both group and matrix
+    - Shows or names routing.router.use as the selector
+
+- id: routing-group-flags
+  question: What do the swap and exclusive flags do on a llama-swap group?
+  tags: [routing]
+  expect_regex: ["swap", "exclusive"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    `swap` controls how members behave among themselves: true means one at a
+    time, false means they all coexist. `exclusive` controls the group's effect
+    on other groups: true means loading a member unloads everything else.
+  rubric:
+    - Says swap governs behaviour among members of the same group
+    - Says exclusive governs whether loading a member unloads other groups
+
+- id: routing-model-many-groups
+  question: Can one model be a member of two different groups in llama-swap?
+  tags: [routing]
+  expect_any: ["only one", "one group", "cannot", "can't", "no"]
+  expect_tools: [docs__search_docs]
+  max_iterations: 5
+  reference: |
+    No. A model can belong to only one group.
+  rubric:
+    - Answers no
+    - States a model may belong to only one group
+
+- id: routing-persistent-group
+  question: How do I keep an embeddings model loaded so nothing else ever unloads it?
+  tags: [routing]
+  expect_any: ["persistent", "ttl", "resident"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Put it in a group with `persistent: true`. Other groups can never unload a
+    persistent group. Pair with `ttl: 0` to stop TTL unloading it too.
+  rubric:
+    - Names the persistent group flag
+    - Shows a yaml snippet with persistent true
+
+- id: routing-profiles-vs-selectors
+  question: What is the difference between a profile and a selector in llama-swap?
+  tags: [routing, profiles]
+  expect_regex: ["profile", "selector"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    A profile switches a whole set of pinned models at runtime. A selector
+    resolves a virtual model ID to a real one per request, using a strategy
+    such as spillover.
+  rubric:
+    - Describes profiles as switching a set of models at runtime
+    - Describes selectors as resolving a virtual model id per request

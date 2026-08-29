@@ -1,0 +1,77 @@
+# Grounded in internal/docagent/db/guides/writing-cmd.md and internal/docagent/db/tutorials/first-config.md
+- id: cmd-port-macro
+  question: What does ${PORT} expand to in a model's cmd?
+  tags: [cmd]
+  expect_any: ["free port", "assigned", "startPort", "allocat"]
+  expect_tools: [docs__search_docs]
+  max_iterations: 5
+  reference: |
+    A free port assigned to that model by llama-swap, allocated starting at
+    `startPort` (default 10001).
+  rubric:
+    - Says it is a port llama-swap assigns to the model
+    - Mentions startPort or that the port is allocated automatically
+
+- id: cmd-when-to-set-proxy
+  question: I hardcoded a port in my model's cmd instead of using ${PORT}. Do I need to do anything else?
+  tags: [cmd, proxy]
+  expect_regex: ["proxy"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Yes. `proxy` defaults to `http://localhost:${PORT}`, so with a hardcoded
+    port you must set `proxy` to match, or llama-swap proxies to the wrong
+    place and every request times out.
+  rubric:
+    - Says proxy must be set to match the hardcoded port
+    - Explains that otherwise requests hang or time out
+
+- id: cmd-comments-in-block
+  question: Can I put comments inside a multi-line cmd in llama-swap?
+  tags: [cmd]
+  expect_regex: ["#"]
+  expect_any: ["strip", "removed", "yes"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Yes. In a YAML block scalar, lines starting with `#` are stripped before
+    the command runs, so flags can be annotated.
+  rubric:
+    - Answers yes
+    - Explains that lines beginning with # are stripped before the command runs
+
+- id: cmd-model-id-macro
+  question: What does ${MODEL_ID} expand to?
+  tags: [cmd]
+  expect_any: ["key", "name", "id"]
+  expect_tools: [docs__search_docs]
+  max_iterations: 5
+  reference: |
+    The model's key in the `models` map.
+  rubric:
+    - Says it expands to the model's key/id from the models map
+
+- id: cmd-required-field
+  question: What is the only required setting for a model in llama-swap?
+  tags: [cmd, config]
+  expect_regex: ["cmd"]
+  expect_tools: [docs__search_docs]
+  max_iterations: 5
+  reference: |
+    `cmd` is the only required setting on a model.
+  rubric:
+    - Identifies cmd as the only required setting
+
+- id: cmd-minimal-config
+  question: Show me the smallest working llama-swap config for a single llama-server model.
+  tags: [cmd, getting-started]
+  expect_regex: ["models:", "cmd:", "\\$\\{PORT\\}"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    ```yaml
+    models:
+      model1:
+        cmd: llama-server --port ${PORT} --model /path/to/model.gguf
+    ```
+  rubric:
+    - Shows a yaml block with a models map and a cmd
+    - Uses ${PORT} in the command
+    - Does not include settings that are not required

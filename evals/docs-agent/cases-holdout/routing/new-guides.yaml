@@ -1,0 +1,11 @@
+- id: holdout-routing-queue-retries
+  question: Why is repeatedly retrying clients a poor way to handle work waiting for a model load?
+  expect_regex: ["queue"]
+  expect_tools_any: [docs__search_docs, docs__get_doc]
+  require_tools: true
+
+- id: holdout-routing-matrix-or
+  question: In a llama-swap matrix rule, which operator represents an alternative requirement?
+  expect_any: ["\\|", "pipe"]
+  expect_tools_any: [docs__search_docs, docs__get_doc]
+  require_tools: true

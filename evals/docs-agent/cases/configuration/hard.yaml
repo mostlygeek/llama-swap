@@ -1,0 +1,11 @@
+- id: hard-macro-type-preservation
+  question: If I define a macro with the numeric value 0.7 and use it as an entire config value, is it passed through as a number or a string?
+  tags: [macros, trap]
+  expect_any: ["number", "numeric", "type"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    As a number. A value that is *exactly* one macro keeps its type; a macro
+    interpolated into a larger string becomes a string.
+  rubric:
+    - Says it stays a number when the value is exactly one macro
+    - Notes that interpolating into a larger string makes it a string

@@ -1,0 +1,12 @@
+- id: hard-strip-model-param
+  question: Can I use stripParams to remove the model parameter from incoming requests?
+  tags: [filters, trap]
+  expect_any: ["no", "cannot", "can't", "never"]
+  expect_regex: ["model"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    No. The `model` parameter can never be stripped, and other protected
+    params cannot be overridden by setParams either.
+  rubric:
+    - Answers no
+    - States that model can never be stripped

@@ -15,7 +15,9 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/hw"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/mcptools"
 	"github.com/mostlygeek/llama-swap/internal/perf"
+	"github.com/mostlygeek/llama-swap/internal/reference"
 	"github.com/mostlygeek/llama-swap/internal/router"
 	"github.com/mostlygeek/llama-swap/internal/store"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
@@ -37,6 +39,19 @@ type Server struct {
 	store    *store.Store
 	build    BuildInfo
 	hardware *hw.HardwareSnapshot
+
+	// reference is llama-swap's own embedded documentation, served to the
+	// Playground's agentic chat and to external MCP clients through /api/mcp.
+	// It is immutable and independent of cfg, so the same library is shared
+	// across the Server instances a hot config reload creates. A nil value
+	// disables the endpoint; Docs methods are nil-receiver safe.
+	reference *reference.Docs
+
+	// tools is the MCP tool surface served at /api/mcp. Providers are
+	// aggregated here rather than enumerated in the handler, so a future
+	// provider that proxies an upstream MCP endpoint plugs in without
+	// touching the transport.
+	tools *mcptools.Registry
 
 	profileMu     sync.RWMutex
 	activeProfile string
@@ -158,7 +173,7 @@ type BuildInfo struct {
 	Date    string
 }
 
-func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, upstreamlog *logmon.Monitor, perfMon *perf.Monitor, st *store.Store, build BuildInfo, hardware *hw.HardwareSnapshot) (*Server, error) {
+func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, upstreamlog *logmon.Monitor, perfMon *perf.Monitor, st *store.Store, build BuildInfo, hardware *hw.HardwareSnapshot, refs *reference.Docs) (*Server, error) {
 	var local router.LocalRouter
 	var err error
 
@@ -196,12 +211,25 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 		store:         st,
 		build:         build,
 		hardware:      hardware,
+		reference:     refs,
 		activeProfile: cfg.Hooks.OnStartup.Profile,
 		local:         local,
 		peer:          peer,
 		shutdownCtx:   shutdownCtx,
 		shutdownFn:    shutdownFn,
 	}
+	// SysProvider is constructed here because this is where perf and hardware
+	// are in scope; wiring those in later is a change to internal/mcptools.
+	tools, err := mcptools.New(
+		mcptools.NewDocsProvider(refs),
+		mcptools.NewSysProvider(nil),
+		mcptools.NewConfigProvider(cfg),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("building the MCP tool registry: %w", err)
+	}
+	s.tools = tools
+
 	s.routes()
 	s.startPreload()
 	return s, nil
@@ -331,6 +359,12 @@ func (s *Server) routes() {
 	mux.Handle("GET /api/hardware", apiChain.ThenFunc(s.handleAPIHardware))
 	mux.Handle("GET /api/captures/{id}", apiChain.ThenFunc(s.handleAPICapture))
 
+	// Stateless MCP server exposing llama-swap's own documentation as tools,
+	// consumed by the Playground's agentic chat and by any external MCP client.
+	// Registered without a method so non-POST reaches the handler and gets a
+	// 405 with Allow, rather than the mux's bare 404.
+	mux.Handle("/api/mcp", apiChain.ThenFunc(s.handleAPIMCP))
+
 	s.mux = mux
 	s.handler = chain.New(CreateRequestLogMiddleware(s.proxylog), CreateCORSMiddleware()).Then(mux)
 }
@@ -362,6 +396,13 @@ func (s *Server) Shutdown(timeout time.Duration) error {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var errs []error
+
+	// Server.Shutdown is a closed list: anything holding resources that is not
+	// released here leaks. The tool registry is cheap today and expensive once
+	// a provider holds upstream connections or subprocesses.
+	if err := s.tools.Shutdown(timeout); err != nil {
+		errs = append(errs, err)
+	}
 
 	for _, rt := range []router.Router{s.local, s.peer} {
 		if rt == nil {

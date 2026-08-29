@@ -23,6 +23,10 @@ Only use these technologies:
 - Use `make test-ui` after any changes in ui/
 - Use `make test-all` for commiting changes
 - Use the ./build subdirectory for testing binary builds
+- Use `make eval-docs-agent` to score the Playground's Docs Agent against a
+  local model after changing its system prompt, `internal/docagent/db/` content, the MCP
+  tool descriptions, or the docs search ranking. See
+  `evals/docs-agent/README.md` for the tuning loop.
 
 ### git commit rules
 

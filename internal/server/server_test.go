@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,7 +15,9 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/mcptools"
 	"github.com/mostlygeek/llama-swap/internal/process"
+	"github.com/mostlygeek/llama-swap/internal/reference"
 	"github.com/mostlygeek/llama-swap/internal/router"
 	"github.com/mostlygeek/llama-swap/internal/store"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
@@ -92,6 +95,28 @@ func newTestServer(local router.LocalRouter, peer router.Router) *Server {
 	return s
 }
 
+// newTestServerWithReference is newTestServer plus an indexed documentation
+// library, for the /api/mcp tests. Handlers read s.reference at request time,
+// so no re-registration is needed.
+func newTestServerWithReference(local router.LocalRouter, peer router.Router, fsys fs.FS) *Server {
+	s := newTestServer(local, peer)
+	s.reference = reference.New(fsys)
+
+	registry, err := mcptools.New(
+		mcptools.NewDocsProvider(s.reference),
+		mcptools.NewSysProvider(func() time.Time { return testClock }),
+		mcptools.NewConfigProvider(s.cfg),
+	)
+	if err != nil {
+		panic(err)
+	}
+	s.tools = registry
+	return s
+}
+
+// testClock is the fixed instant SysProvider reports in tests.
+var testClock = time.Date(2026, 3, 14, 15, 9, 26, 0, time.UTC)
+
 func newTestMetricsMonitor(t *testing.T, logger *logmon.Monitor, maxMetrics int, captureBufferMB int) *metricsMonitor {
 	t.Helper()
 	st, err := store.New("")
@@ -141,7 +166,7 @@ func TestServer_New_GroupConfig(t *testing.T) {
 		t.Fatalf("store.New: %v", err)
 	}
 	defer st.Close()
-	s, err := New(cfg, discard, discard, discard, nil, st, BuildInfo{}, nil)
+	s, err := New(cfg, discard, discard, discard, nil, st, BuildInfo{}, nil, nil)
 	if err != nil {
 		t.Fatalf("New (group): %v", err)
 	}
@@ -171,7 +196,7 @@ func TestServer_New_MatrixConfig(t *testing.T) {
 		t.Fatalf("store.New: %v", err)
 	}
 	defer st.Close()
-	s, err := New(cfg, discard, discard, discard, nil, st, BuildInfo{}, nil)
+	s, err := New(cfg, discard, discard, discard, nil, st, BuildInfo{}, nil, nil)
 	if err != nil {
 		t.Fatalf("New (matrix): %v", err)
 	}

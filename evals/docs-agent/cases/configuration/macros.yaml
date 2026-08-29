@@ -1,0 +1,60 @@
+# Grounded in internal/docagent/db/guides/macros.md
+- id: macros-reserved-names
+  question: Can I define a macro named PORT in my llama-swap config?
+  tags: [macros]
+  expect_any: ["reserved", "cannot", "can't", "not allowed"]
+  expect_tools: [docs__search_docs]
+  max_iterations: 5
+  reference: |
+    No. PORT, PID and MODEL_ID are reserved built-in macros and cannot be
+    redefined.
+  rubric:
+    - Answers no
+    - Says PORT is a reserved built-in name, along with PID and MODEL_ID
+
+- id: macros-ordering-rule
+  question: My macro references another macro but it isn't being substituted. Why?
+  tags: [macros]
+  expect_any: ["before", "order", "earlier", "reorder"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    A macro may only reference macros defined *before* it. A macro referring to
+    a later definition does not resolve. Reorder the definitions.
+  rubric:
+    - Identifies that a macro can only reference macros defined before it
+    - Suggests reordering the definitions
+
+- id: macros-name-charset
+  question: What characters are allowed in a llama-swap macro name, and how long can it be?
+  tags: [macros]
+  expect_regex: ["64"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Names must match `^[a-zA-Z0-9_-]+$` and be under 64 characters.
+  rubric:
+    - States the 64 character limit
+    - Describes the allowed character set as letters, digits, underscore and hyphen
+
+- id: macros-model-scope-override
+  question: If a global macro and a model's own macro have the same name, which one wins for that model?
+  tags: [macros]
+  expect_any: ["model", "override", "wins"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    The model-scoped macro wins. Model macros override a global macro of the
+    same name, for that model only.
+  rubric:
+    - Says the model-scoped macro overrides the global one
+    - Notes the override applies only to that model
+
+- id: macros-env-var
+  question: How do I use an environment variable inside my llama-swap config?
+  tags: [macros, env]
+  expect_regex: ["\\$\\{env\\."]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Use the `${env.VAR}` macro form, for example `${env.HOME}/models` or
+    `apiKey: ${env.OPENROUTER_API_KEY}`.
+  rubric:
+    - Shows the ${env.VAR} syntax
+    - Gives a concrete example of where it can be used

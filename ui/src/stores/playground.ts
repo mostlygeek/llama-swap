@@ -1,9 +1,10 @@
 import { persistentStore } from "./persistent";
 
-export type PlaygroundTab = "chat" | "images" | "speech" | "audio" | "rerank" | "concurrency";
+export type PlaygroundTab = "chat" | "docs" | "images" | "speech" | "audio" | "rerank" | "concurrency";
 
 export const playgroundTabs: { id: PlaygroundTab; label: string }[] = [
   { id: "chat", label: "Chat" },
+  { id: "docs", label: "Docs" },
   { id: "images", label: "Images" },
   { id: "speech", label: "Speech" },
   { id: "audio", label: "Transcription" },
