@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/docagent"
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/mcptools"
@@ -103,9 +104,9 @@ func newTestServerWithReference(local router.LocalRouter, peer router.Router, fs
 	s.reference = reference.New(fsys)
 
 	registry, err := mcptools.New(
-		mcptools.NewDocsProvider(s.reference),
+		docagent.NewDocsProvider(s.reference),
 		mcptools.NewSysProvider(func() time.Time { return testClock }),
-		mcptools.NewConfigProvider(s.cfg),
+		config.NewConfigProvider(s.cfg),
 	)
 	if err != nil {
 		panic(err)
@@ -446,7 +447,7 @@ func TestServer_New_OnStartupProfile(t *testing.T) {
 		t.Fatalf("store.New: %v", err)
 	}
 	defer st.Close()
-	s, err := New(cfg, discard, discard, discard, nil, st, BuildInfo{}, nil)
+	s, err := New(cfg, discard, discard, discard, nil, st, BuildInfo{}, nil, nil)
 	if err != nil {
 		t.Fatalf("New (startup profile): %v", err)
 	}

@@ -1,4 +1,4 @@
-package mcptools
+package docagent
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/internal/mcptools"
 	"github.com/mostlygeek/llama-swap/internal/reference"
 )
 
@@ -15,9 +16,6 @@ import (
 // local model is commonly 4k-32k tokens. Every result passes through one of
 // these caps.
 const (
-	// MaxToolResultBytes is exported so transport tests can assert the cap.
-	MaxToolResultBytes   = 16 * 1024
-	maxToolResultBytes   = MaxToolResultBytes
 	maxSearchResultBytes = 8 * 1024
 	maxSchemaResultBytes = 8 * 1024
 
@@ -37,6 +35,8 @@ type DocsProvider struct {
 	docs *reference.Docs
 }
 
+var _ mcptools.Provider = (*DocsProvider)(nil)
+
 // NewDocsProvider builds the provider. A nil or disabled *reference.Docs
 // yields a provider that advertises no tools rather than an error, matching
 // how the rest of llama-swap treats missing documentation.
@@ -54,13 +54,13 @@ var toolCategories = []string{"tutorials", "guides", "examples", "reference"}
 
 // Reading documentation is both read-only and idempotent: the same call
 // returns the same answer until the binary is rebuilt.
-func docsAnnotations() *Annotations {
-	return &Annotations{ReadOnlyHint: true, IdempotentHint: true}
+func docsAnnotations() *mcptools.Annotations {
+	return &mcptools.Annotations{ReadOnlyHint: true, IdempotentHint: true}
 }
 
 // Tools lists the documentation tools. Names are local; the registry adds the
 // "docs" namespace.
-func (p *DocsProvider) Tools(context.Context) ([]Tool, error) {
+func (p *DocsProvider) Tools(context.Context) ([]mcptools.Tool, error) {
 	if !p.docs.Enabled() {
 		return nil, nil
 	}
@@ -70,12 +70,12 @@ func (p *DocsProvider) Tools(context.Context) ([]Tool, error) {
 	// size; past a few hundred docs, drop the enum and rely on list_docs.
 	ids := p.docs.IDs()
 
-	return []Tool{
+	return []mcptools.Tool{
 		{
 			Name:  "list_docs",
 			Title: "List llama-swap documentation",
 			Description: "List the available llama-swap documentation. Returns every document's id, title and summary. " +
-				"Call this first to see what exists, then call " + QualifyName(p.ID(), "get_doc") + " with an id.",
+				"Call this first to see what exists, then call " + mcptools.QualifyName(p.ID(), "get_doc") + " with an id.",
 			Annotations: docsAnnotations(),
 			Tags:        []string{"docs", "index", "configuration"},
 			InputSchema: map[string]any{
@@ -97,8 +97,8 @@ func (p *DocsProvider) Tools(context.Context) ([]Tool, error) {
 		{
 			Name:  "get_doc",
 			Title: "Read a llama-swap document",
-			Description: "Read one llama-swap document by id. Ids come from " + QualifyName(p.ID(), "list_docs") + " or " +
-				QualifyName(p.ID(), "search_docs") + ". " +
+			Description: "Read one llama-swap document by id. Ids come from " + mcptools.QualifyName(p.ID(), "list_docs") + " or " +
+				mcptools.QualifyName(p.ID(), "search_docs") + ". " +
 				"Ids starting with 'reference/config/' return that section of config.example.yaml verbatim, comments included.",
 			Annotations: docsAnnotations(),
 			Tags:        []string{"docs", "configuration"},
@@ -130,7 +130,7 @@ func (p *DocsProvider) Tools(context.Context) ([]Tool, error) {
 			Name:  "search_docs",
 			Title: "Search llama-swap documentation",
 			Description: "Required first step for every llama-swap question. Keyword search across all documentation, including config.example.yaml. " +
-				"Returns matching snippets with the document id to read next, via " + QualifyName(p.ID(), "get_doc") + ".",
+				"Returns matching snippets with the document id to read next, via " + mcptools.QualifyName(p.ID(), "get_doc") + ".",
 			Annotations: docsAnnotations(),
 			Tags:        []string{"docs", "search", "configuration"},
 			InputSchema: map[string]any{
@@ -175,9 +175,9 @@ func (p *DocsProvider) Tools(context.Context) ([]Tool, error) {
 }
 
 // Call runs one documentation tool by its local name.
-func (p *DocsProvider) Call(_ context.Context, name string, args map[string]json.RawMessage) (Result, error) {
+func (p *DocsProvider) Call(_ context.Context, name string, args map[string]json.RawMessage) (mcptools.Result, error) {
 	if !p.docs.Enabled() {
-		return Result{}, fmt.Errorf("no documentation is indexed")
+		return mcptools.Result{}, fmt.Errorf("no documentation is indexed")
 	}
 
 	switch name {
@@ -190,27 +190,27 @@ func (p *DocsProvider) Call(_ context.Context, name string, args map[string]json
 	case "get_config_schema":
 		return p.getConfigSchema(args), nil
 	default:
-		return Result{}, fmt.Errorf("unknown tool %q", name)
+		return mcptools.Result{}, fmt.Errorf("unknown tool %q", name)
 	}
 }
 
-func (p *DocsProvider) listDocs(args map[string]json.RawMessage) Result {
+func (p *DocsProvider) listDocs(args map[string]json.RawMessage) mcptools.Result {
 	filter := reference.IndexFilter{
-		Category: stringArg(args, "category"),
-		Tag:      stringArg(args, "tag"),
+		Category: mcptools.StringArg(args, "category"),
+		Tag:      mcptools.StringArg(args, "tag"),
 	}
 
 	index := p.docs.Index(filter)
 	if len(index) == 0 {
-		return Result{
+		return mcptools.Result{
 			IsError: true,
 			Content: fmt.Sprintf("No documents matched. Valid categories are: %s. Call %s with no arguments to see everything.",
-				strings.Join(toolCategories, ", "), QualifyName(p.ID(), "list_docs")),
+				strings.Join(toolCategories, ", "), mcptools.QualifyName(p.ID(), "list_docs")),
 		}
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "llama-swap documentation. Read one with %s using its id.\n", QualifyName(p.ID(), "get_doc"))
+	fmt.Fprintf(&b, "llama-swap documentation. Read one with %s using its id.\n", mcptools.QualifyName(p.ID(), "get_doc"))
 
 	category := ""
 	for _, meta := range index {
@@ -221,28 +221,28 @@ func (p *DocsProvider) listDocs(args map[string]json.RawMessage) Result {
 		fmt.Fprintf(&b, "- %s — %s: %s\n", meta.ID, meta.Title, meta.Summary)
 	}
 
-	return capResult(b.String(), maxToolResultBytes)
+	return mcptools.CapResult(b.String(), mcptools.MaxToolResultBytes)
 }
 
-func (p *DocsProvider) getDoc(args map[string]json.RawMessage) Result {
-	id := stringArg(args, "id")
+func (p *DocsProvider) getDoc(args map[string]json.RawMessage) mcptools.Result {
+	id := mcptools.StringArg(args, "id")
 	if id == "" {
-		return Result{IsError: true, Content: fmt.Sprintf(
-			"Error: \"id\" is required. Call %s to see the available ids.", QualifyName(p.ID(), "list_docs"))}
+		return mcptools.Result{IsError: true, Content: fmt.Sprintf(
+			"Error: \"id\" is required. Call %s to see the available ids.", mcptools.QualifyName(p.ID(), "list_docs"))}
 	}
 
-	maxLines := intArg(args, "max_lines", defaultDocMaxLines)
+	maxLines := mcptools.IntArg(args, "max_lines", defaultDocMaxLines)
 	if maxLines > maxDocMaxLines {
 		maxLines = maxDocMaxLines
 	}
 
 	doc, ok := p.docs.Doc(id, reference.DocOptions{
-		Offset:   intArg(args, "offset", 0),
+		Offset:   mcptools.IntArg(args, "offset", 0),
 		MaxLines: maxLines,
-		MaxBytes: maxToolResultBytes,
+		MaxBytes: mcptools.MaxToolResultBytes,
 	})
 	if !ok {
-		return Result{IsError: true, Content: unknownDocMessage(p.ID(), id, p.docs.IDs())}
+		return mcptools.Result{IsError: true, Content: unknownDocMessage(p.ID(), id, p.docs.IDs())}
 	}
 
 	var b strings.Builder
@@ -261,38 +261,38 @@ func (p *DocsProvider) getDoc(args map[string]json.RawMessage) Result {
 			doc.EndLine, doc.Lines, doc.EndLine)
 	}
 
-	result := capResult(b.String(), maxToolResultBytes)
+	result := mcptools.CapResult(b.String(), mcptools.MaxToolResultBytes)
 	result.Truncated = result.Truncated || doc.Truncated
 	return result
 }
 
-func (p *DocsProvider) searchDocs(args map[string]json.RawMessage) Result {
-	query := stringArg(args, "query")
+func (p *DocsProvider) searchDocs(args map[string]json.RawMessage) mcptools.Result {
+	query := mcptools.StringArg(args, "query")
 	if query == "" {
-		return Result{IsError: true, Content: `Error: "query" is required.`}
+		return mcptools.Result{IsError: true, Content: `Error: "query" is required.`}
 	}
 
 	hits := p.docs.Search(query, reference.SearchOptions{
-		MaxHits: intArg(args, "max_results", 0),
+		MaxHits: mcptools.IntArg(args, "max_results", 0),
 	})
 	if len(hits) == 0 {
 		// An empty result set is a valid answer, not an error.
-		return Result{
-			Content: fmt.Sprintf("No matches for %q. Try %s, or fewer and broader keywords.", query, QualifyName(p.ID(), "list_docs")),
+		return mcptools.Result{
+			Content: fmt.Sprintf("No matches for %q. Try %s, or fewer and broader keywords.", query, mcptools.QualifyName(p.ID(), "list_docs")),
 		}
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "%d matches for %q. Read a document in full with %s.\n", len(hits), query, QualifyName(p.ID(), "get_doc"))
+	fmt.Fprintf(&b, "%d matches for %q. Read a document in full with %s.\n", len(hits), query, mcptools.QualifyName(p.ID(), "get_doc"))
 	for i, hit := range hits {
 		fmt.Fprintf(&b, "\n%d. %s (line %d) — %s\n```\n%s\n```\n", i+1, hit.ID, hit.Line, hit.Title, hit.Snippet)
 	}
 
-	return capResult(b.String(), maxSearchResultBytes)
+	return mcptools.CapResult(b.String(), maxSearchResultBytes)
 }
 
-func (p *DocsProvider) getConfigSchema(args map[string]json.RawMessage) Result {
-	path := stringArg(args, "path")
+func (p *DocsProvider) getConfigSchema(args map[string]json.RawMessage) mcptools.Result {
+	path := mcptools.StringArg(args, "path")
 
 	fragment, ok := p.docs.SchemaFragment(path)
 	if !ok {
@@ -306,7 +306,7 @@ func (p *DocsProvider) getConfigSchema(args map[string]json.RawMessage) Result {
 		if siblings := p.docs.SchemaPaths(parent); len(siblings) > 0 {
 			content += " Valid paths here: " + strings.Join(siblings, ", ")
 		}
-		return Result{IsError: true, Content: content}
+		return mcptools.Result{IsError: true, Content: content}
 	}
 
 	displayPath := fragment.Path
@@ -343,10 +343,10 @@ func (p *DocsProvider) getConfigSchema(args map[string]json.RawMessage) Result {
 			}
 			fmt.Fprintf(&b, "- %s%s: %s — %s\n", prop.Name, marker, prop.Type, prop.Description)
 		}
-		fmt.Fprintf(&b, "\nInspect one with %s path=\"%s<key>\".\n", QualifyName(p.ID(), "get_config_schema"), dotted(fragment.Path))
+		fmt.Fprintf(&b, "\nInspect one with %s path=\"%s<key>\".\n", mcptools.QualifyName(p.ID(), "get_config_schema"), dotted(fragment.Path))
 	}
 
-	return capResult(b.String(), maxSchemaResultBytes)
+	return mcptools.CapResult(b.String(), maxSchemaResultBytes)
 }
 
 // unknownDocMessage suggests real ids so the model can correct itself instead
@@ -372,15 +372,7 @@ func unknownDocMessage(providerID, id string, ids []string) string {
 	}
 
 	return fmt.Sprintf("Error: no document with id %q. Did you mean one of: %s? Call %s to see them all.",
-		id, strings.Join(suggestions, ", "), QualifyName(providerID, "list_docs"))
-}
-
-func capResult(content string, max int) Result {
-	capped, truncated := reference.CapText(content, max)
-	if truncated {
-		capped += "\n[truncated]"
-	}
-	return Result{Content: capped, Truncated: truncated}
+		id, strings.Join(suggestions, ", "), mcptools.QualifyName(providerID, "list_docs"))
 }
 
 // dotted returns the path with a trailing separator, so callers can append a
@@ -390,37 +382,4 @@ func dotted(path string) string {
 		return ""
 	}
 	return path + "."
-}
-
-func stringArg(args map[string]json.RawMessage, key string) string {
-	raw, ok := args[key]
-	if !ok {
-		return ""
-	}
-	var value string
-	if err := json.Unmarshal(raw, &value); err != nil {
-		// Small models sometimes send a number or a bare token. Fall back to
-		// the raw text rather than silently treating the argument as absent.
-		return strings.Trim(strings.TrimSpace(string(raw)), `"`)
-	}
-	return strings.TrimSpace(value)
-}
-
-func intArg(args map[string]json.RawMessage, key string, fallback int) int {
-	raw, ok := args[key]
-	if !ok {
-		return fallback
-	}
-	var value int
-	if err := json.Unmarshal(raw, &value); err != nil {
-		// Tolerate a stringified number, which small models emit often.
-		var asString string
-		if json.Unmarshal(raw, &asString) == nil {
-			if json.Unmarshal([]byte(asString), &value) == nil {
-				return value
-			}
-		}
-		return fallback
-	}
-	return value
 }

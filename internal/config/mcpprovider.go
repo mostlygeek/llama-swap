@@ -1,4 +1,4 @@
-package mcptools
+package config
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/mcptools"
 )
 
 // maxConfigResultBytes caps a get_config result. It is larger than the docs
@@ -23,13 +23,15 @@ const maxConfigResultBytes = 32 * 1024
 // reload constructs a fresh Server and therefore a fresh registry, so the
 // snapshot always matches what is actually running.
 type ConfigProvider struct {
-	cfg config.Config
+	cfg Config
 }
 
 // NewConfigProvider builds the provider around a configuration snapshot.
-func NewConfigProvider(cfg config.Config) *ConfigProvider {
+func NewConfigProvider(cfg Config) *ConfigProvider {
 	return &ConfigProvider{cfg: cfg}
 }
+
+var _ mcptools.Provider = (*ConfigProvider)(nil)
 
 func (p *ConfigProvider) ID() string { return "config" }
 
@@ -37,12 +39,12 @@ func (p *ConfigProvider) Shutdown(time.Duration) error { return nil }
 
 // Reading the configuration is read-only. It is not idempotent across a hot
 // reload, but within one process the snapshot never changes.
-func configAnnotations() *Annotations {
-	return &Annotations{ReadOnlyHint: true, IdempotentHint: true}
+func configAnnotations() *mcptools.Annotations {
+	return &mcptools.Annotations{ReadOnlyHint: true, IdempotentHint: true}
 }
 
-func (p *ConfigProvider) Tools(context.Context) ([]Tool, error) {
-	return []Tool{
+func (p *ConfigProvider) Tools(context.Context) ([]mcptools.Tool, error) {
+	return []mcptools.Tool{
 		{
 			Name:  "get_config",
 			Title: "Show the current llama-swap configuration",
@@ -69,20 +71,20 @@ func (p *ConfigProvider) Tools(context.Context) ([]Tool, error) {
 	}, nil
 }
 
-func (p *ConfigProvider) Call(_ context.Context, name string, args map[string]json.RawMessage) (Result, error) {
+func (p *ConfigProvider) Call(_ context.Context, name string, args map[string]json.RawMessage) (mcptools.Result, error) {
 	if name != "get_config" {
-		return Result{}, fmt.Errorf("unknown tool %q", name)
+		return mcptools.Result{}, fmt.Errorf("unknown tool %q", name)
 	}
 
-	path := stringArg(args, "path")
+	path := mcptools.StringArg(args, "path")
 	yamlText, found, err := p.cfg.RedactedYAML(path)
 	if err != nil {
-		return Result{}, fmt.Errorf("rendering config: %w", err)
+		return mcptools.Result{}, fmt.Errorf("rendering config: %w", err)
 	}
 	if !found {
 		keys := p.cfg.ConfigTopLevelKeys()
 		sort.Strings(keys)
-		return Result{
+		return mcptools.Result{
 			IsError: true,
 			Content: fmt.Sprintf("Error: no config section at path %q. Top-level keys: %s.",
 				path, strings.Join(keys, ", ")),
@@ -102,7 +104,7 @@ func (p *ConfigProvider) Call(_ context.Context, name string, args map[string]js
 	// A large config can still exceed the cap even after pruning. Give the
 	// model the one move that fixes it rather than leaving it with a
 	// half-parsed document.
-	result := capResult(b.String(), maxConfigResultBytes)
+	result := mcptools.CapResult(b.String(), maxConfigResultBytes)
 	if result.Truncated {
 		result.Content += "\nThe full config is larger than one response. Call get_config again " +
 			"with a \"path\" (for example \"models\", \"models.<id>\", \"peers\", \"groups\") " +

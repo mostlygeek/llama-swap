@@ -12,6 +12,7 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/docagent"
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/hw"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
@@ -221,9 +222,9 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 	// SysProvider is constructed here because this is where perf and hardware
 	// are in scope; wiring those in later is a change to internal/mcptools.
 	tools, err := mcptools.New(
-		mcptools.NewDocsProvider(refs),
+		docagent.NewDocsProvider(refs),
 		mcptools.NewSysProvider(nil),
-		mcptools.NewConfigProvider(cfg),
+		config.NewConfigProvider(cfg),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("building the MCP tool registry: %w", err)

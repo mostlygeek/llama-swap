@@ -79,7 +79,7 @@ func (p *SysProvider) timeNow(args map[string]json.RawMessage) Result {
 	writeZone(&b, "UTC", now.UTC())
 	writeZone(&b, "server local", now.Local())
 
-	if zone := stringArg(args, "timezone"); zone != "" {
+	if zone := StringArg(args, "timezone"); zone != "" {
 		// LoadLocation reads the system zoneinfo database, which a minimal
 		// container image may not carry. Reporting that as a tool error rather
 		// than a protocol error lets the model fall back to UTC.
@@ -95,7 +95,7 @@ func (p *SysProvider) timeNow(args map[string]json.RawMessage) Result {
 	}
 
 	fmt.Fprintf(&b, "unix: %d\n", now.Unix())
-	return capResult(b.String(), maxToolResultBytes)
+	return CapResult(b.String(), MaxToolResultBytes)
 }
 
 // writeZone renders one zone as RFC 3339 plus a human-readable form, with the

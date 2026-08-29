@@ -10,6 +10,7 @@ import (
 	"testing/fstest"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/docagent"
 	"github.com/mostlygeek/llama-swap/internal/mcptools"
 )
 
@@ -804,8 +805,8 @@ func TestServer_APIMCP_GetDocPaginates(t *testing.T) {
 func TestServer_APIMCP_GetDocClampsMaxLines(t *testing.T) {
 	result := callToolRPC(t, longDocServer(t, 900), "docs__get_doc", `{"id":"guides/routing/long","max_lines":5000}`)
 
-	if lines := strings.Count(result.text(), "\n"); lines > mcptools.MaxDocLines+20 {
-		t.Errorf("returned %d lines, want <= %d", lines, mcptools.MaxDocLines)
+	if lines := strings.Count(result.text(), "\n"); lines > docagent.MaxDocLines+20 {
+		t.Errorf("returned %d lines, want <= %d", lines, docagent.MaxDocLines)
 	}
 }
 

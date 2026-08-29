@@ -1,4 +1,4 @@
-package mcptools
+package config
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/mcptools"
 )
 
 const configProviderFixture = `
@@ -25,14 +25,14 @@ peers:
 
 func newTestConfigProvider(t *testing.T) *ConfigProvider {
 	t.Helper()
-	cfg, err := config.LoadConfigFromReader(strings.NewReader(configProviderFixture))
+	cfg, err := LoadConfigFromReader(strings.NewReader(configProviderFixture))
 	if err != nil {
 		t.Fatalf("LoadConfigFromReader: %v", err)
 	}
 	return NewConfigProvider(cfg)
 }
 
-func callConfig(t *testing.T, p *ConfigProvider, args string) Result {
+func callConfig(t *testing.T, p *ConfigProvider, args string) mcptools.Result {
 	t.Helper()
 	var parsed map[string]json.RawMessage
 	if args != "" {
@@ -53,7 +53,7 @@ func TestConfigProvider_Tools(t *testing.T) {
 		t.Fatalf("Tools: %v", err)
 	}
 	if len(tools) != 1 || tools[0].Name != "get_config" {
-		t.Fatalf("tools = %v, want one named %q", namesOf(tools), "get_config")
+		t.Fatalf("tools = %v, want one named %q", tools, "get_config")
 	}
 	if tools[0].Annotations == nil || !tools[0].Annotations.ReadOnlyHint {
 		t.Error("get_config should be marked readOnlyHint")
@@ -106,7 +106,7 @@ func TestConfigProvider_GetConfigTruncationPointsAtPath(t *testing.T) {
 	for i := 0; i < 120; i++ {
 		fmt.Fprintf(&b, "  model-%03d:\n    cmd: \"llama-server --model /models/model-%03d.gguf --port ${PORT}\"\n", i, i)
 	}
-	cfg, err := config.LoadConfigFromReader(strings.NewReader(b.String()))
+	cfg, err := LoadConfigFromReader(strings.NewReader(b.String()))
 	if err != nil {
 		t.Fatalf("LoadConfigFromReader: %v", err)
 	}

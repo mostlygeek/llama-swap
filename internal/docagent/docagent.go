@@ -1,4 +1,5 @@
-// Package docagent owns the documentation corpus used by the Docs Agent.
+// Package docagent owns the documentation corpus and MCP tools used by the
+// Docs Agent.
 package docagent
 
 import "embed"
