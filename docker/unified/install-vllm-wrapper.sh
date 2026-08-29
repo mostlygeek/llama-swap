@@ -35,7 +35,7 @@ VERSION="${VERSION#v}"
 if [ "$VERSION" = "latest" ]; then
     echo "=== Resolving latest llama-swap release ==="
     VERSION=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
-        | grep '"tag_name"' | head -1 | cut -d'"' -f4 | sed 's/^v//')
+        | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/' | sed 's/^v//')
     if [ -z "$VERSION" ]; then
         echo "FATAL: Could not determine latest release version" >&2
         exit 1
