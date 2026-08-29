@@ -19,6 +19,7 @@ set -euo pipefail
 BACKEND=""
 NO_CACHE=false
 CLI_CUDA_ARCHITECTURES=""
+CLI_CUDA_VERSION=""
 WHISPER_FFMPEG="${WHISPER_FFMPEG:-yes}"
 
 for arg in "$@"; do
@@ -38,8 +39,11 @@ for arg in "$@"; do
         --cuda-archs=*)
             CLI_CUDA_ARCHITECTURES="${arg#*=}"
             ;;
+        --cuda-version=*)
+            CLI_CUDA_VERSION="${arg#*=}"
+            ;;
         --help|-h)
-            echo "Usage: ./build-image.sh --cuda|--cuda13|--vulkan [--no-cache] [--cuda-archs=...]"
+            echo "Usage: ./build-image.sh --cuda|--cuda13|--vulkan [--no-cache] [--cuda-archs=...] [--cuda-version=...]"
             echo ""
             echo "Options:"
             echo "  --cuda      Build CUDA image (NVIDIA GPUs)"
@@ -47,6 +51,7 @@ for arg in "$@"; do
             echo "  --vulkan    Build Vulkan image (AMD GPUs and compatible hardware)"
             echo "  --no-cache  Force rebuild without using Docker cache"
             echo "  --cuda-archs Specify CUDA architectures (e.g., '86;89' for sm_86, sm_89)"
+            echo "  --cuda-version Override CUDA version (defaults: 12.9.1 for --cuda, 13.2.0 for --cuda13)"
             echo "  --help, -h  Show this help message"
             echo ""
             echo "Environment variables:"
@@ -77,7 +82,7 @@ fi
 # Resolve CUDA architectures: CLI flag overrides env var, env var overrides default
 # Precedence: CLI flag > environment variable > default list
 CMAKE_CUDA_ARCHITECTURES="${CLI_CUDA_ARCHITECTURES:-${CMAKE_CUDA_ARCHITECTURES:-75;86;89;120;121}}"
-CUDA_VERSION="${CUDA_VERSION:-12.9.1}"
+CUDA_VERSION="${CLI_CUDA_VERSION:-12.9.1}"
 if [[ "$BACKEND" == "cuda" || "$BACKEND" == "cuda13" ]]; then
     IS_CUDA_BACKEND=true
 else
@@ -85,7 +90,7 @@ else
 fi
 
 if [[ "$BACKEND" == "cuda" ]]; then
-    CUDA_VERSION="12.9.1"
+    CUDA_VERSION="${CLI_CUDA_VERSION:-12.9.1}"
     if [[ -z "$CLI_CUDA_ARCHITECTURES" ]]; then
         # For CUDA 12, default to older set of architectures
         CMAKE_CUDA_ARCHITECTURES="60;61;75;86;89"
@@ -93,7 +98,7 @@ if [[ "$BACKEND" == "cuda" ]]; then
 fi
 
 if [[ "$BACKEND" == "cuda13" ]]; then
-    CUDA_VERSION="13.2.0"
+    CUDA_VERSION="${CLI_CUDA_VERSION:-13.2.0}"
     if [[ -z "$CLI_CUDA_ARCHITECTURES" ]]; then
         # For CUDA 13, default to a more modern set of architectures
         CMAKE_CUDA_ARCHITECTURES="86;89;120;121"
@@ -352,25 +357,6 @@ if ! docker run "${SMOKE_ARGS[@]}" --entrypoint audiocpp_server "${DOCKER_IMAGE_
 fi
 
 echo "audio.cpp verified: deployment build (compiled model spec catalog), binary runs"
-
-echo ""
-echo "=========================================="
-echo "Building rootless image..."
-echo "=========================================="
-echo ""
-
-ROOTLESS_TAG="${DOCKER_IMAGE_TAG}-rootless"
-docker buildx build --load -t "${ROOTLESS_TAG}" - <<EOF
-FROM ${DOCKER_IMAGE_TAG}
-USER root
-RUN groupadd --system --gid 10001 llama-swap && \\
-    useradd --system --uid 10001 --gid 10001 \\
-      --home /app --shell /sbin/nologin llama-swap && \\
-    chown -R 10001:10001 /etc/llama-swap /models
-USER 10001
-EOF
-
-echo "Rootless image built: ${ROOTLESS_TAG}"
 
 echo ""
 echo "=========================================="
