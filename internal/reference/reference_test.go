@@ -83,7 +83,7 @@ tags: [getting-started]
 Step one.
 `)},
 		"internal/docagent/db/README.md": &fstest.MapFile{Data: []byte("# contributor guide\n\nnot an article\n")},
-		"README.md":         &fstest.MapFile{Data: []byte("# llama-swap\n\n![hero](docs/assets/hero.webp)\n\nRun models and swap between them.\n")},
+		"README.md":                      &fstest.MapFile{Data: []byte("# llama-swap\n\n![hero](docs/assets/hero.webp)\n\nRun models and swap between them.\n")},
 	}
 }
 
