@@ -408,6 +408,31 @@ func TestServer_Preload(t *testing.T) {
 	}
 }
 
+// TestServer_New_OnStartupProfile verifies New activates the configured startup profile.
+func TestServer_New_OnStartupProfile(t *testing.T) {
+	discard := logmon.NewWriter(io.Discard)
+	cfg := config.Config{HealthCheckTimeout: 15}
+	cfg.Profiles = map[string]config.ProfileConfig{
+		"coding": {Pins: map[string]string{"llm-code": "model"}},
+	}
+	cfg.Hooks.OnStartup.Profile = "coding"
+	st, err := store.New("")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	defer st.Close()
+	s, err := New(cfg, discard, discard, discard, nil, st, BuildInfo{}, nil)
+	if err != nil {
+		t.Fatalf("New (startup profile): %v", err)
+	}
+	if got := s.ActiveProfile(); got != "coding" {
+		t.Fatalf("ActiveProfile()=%q want %q", got, "coding")
+	}
+	if err := s.Shutdown(time.Second); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+}
+
 func TestServer_Shutdown_StopsRoutersAndIsIdempotent(t *testing.T) {
 	local := newStubRouter([]string{"local-model"}, "")
 	peer := newStubRouter(nil, "")

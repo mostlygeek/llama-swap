@@ -186,20 +186,21 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 
 	shutdownCtx, shutdownFn := context.WithCancel(context.Background())
 	s := &Server{
-		cfg:         cfg,
-		muxlog:      muxlog,
-		proxylog:    proxylog,
-		upstreamlog: upstreamlog,
-		perf:        perfMon,
-		inflight:    newInflightTracker(),
-		metrics:     newMetricsMonitor(proxylog, cfg.MetricsMaxInMemory, cfg.CaptureBuffer, st),
-		store:       st,
-		build:       build,
-		hardware:    hardware,
-		local:       local,
-		peer:        peer,
-		shutdownCtx: shutdownCtx,
-		shutdownFn:  shutdownFn,
+		cfg:           cfg,
+		muxlog:        muxlog,
+		proxylog:      proxylog,
+		upstreamlog:   upstreamlog,
+		perf:          perfMon,
+		inflight:      newInflightTracker(),
+		metrics:       newMetricsMonitor(proxylog, cfg.MetricsMaxInMemory, cfg.CaptureBuffer, st),
+		store:         st,
+		build:         build,
+		hardware:      hardware,
+		activeProfile: cfg.Hooks.OnStartup.Profile,
+		local:         local,
+		peer:          peer,
+		shutdownCtx:   shutdownCtx,
+		shutdownFn:    shutdownFn,
 	}
 	s.routes()
 	s.startPreload()
