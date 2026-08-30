@@ -195,16 +195,68 @@ project_image_arg() {
     esac
 }
 
-# Everything that goes into a project's artifacts, beyond the upstream commit:
-# the Dockerfile (stage definition, base images, CMAKE_CUDA_ARCHITECTURES), the
-# install script, and the build args the script reads. The registry layer cache
-# this replaces keyed on all of it, so the tag has to as well -- otherwise
-# editing an install script or the architecture list would leave every project
-# whose upstream had not moved pinned to a stale artifacts image.
-recipe_hash() {
+# The slice of the Dockerfile that can change what a project compiles: the
+# transitive closure of its -artifacts stage, with ${BACKEND} resolved so only
+# the selected builder base is included. Comments and blank lines are dropped,
+# matching BuildKit, which keys on instructions rather than file text.
+#
+# Hashing the whole Dockerfile instead would rebuild every project for an edit
+# to the runtime stage, the -src stages or the other backend's base -- none of
+# which any project's artifacts depend on. That is most of the file, and it is
+# the part that changes most often.
+dockerfile_slice() {
     local project="$1"
+    awk -v root="${project}-artifacts" -v backend="${BACKEND}" '
+        function resolve(tok) { gsub(/\$\{BACKEND\}/, backend, tok); return tok }
+        /^[[:space:]]*#/ { next }
+        /^[[:space:]]*$/ { next }
+        {
+            if (tolower($1) == "from") {
+                cur = "<anon" (++anon) ">"
+                for (i = 1; i < NF; i++) if (tolower($i) == "as") cur = $(i + 1)
+                order[++nstage] = cur
+                base[cur] = resolve($2)
+            }
+            if (cur == "") next
+            text[cur] = text[cur] $0 "\n"
+            if (match($0, /--from=[^[:space:]]+/)) {
+                dep = substr($0, RSTART + 7, RLENGTH - 7)
+                deps[cur] = deps[cur] " " resolve(dep)
+            }
+        }
+        END {
+            queue[qn = 1] = root
+            for (qi = 1; qi <= qn; qi++) {
+                s = queue[qi]
+                if ((s in seen) || !(s in text)) continue
+                seen[s] = 1
+                if (base[s] != "") queue[++qn] = base[s]
+                m = split(deps[s], d, " ")
+                for (i = 1; i <= m; i++) if (d[i] != "") queue[++qn] = d[i]
+            }
+            for (i = 1; i <= nstage; i++)
+                if ((order[i] in seen) && !(order[i] in done)) {
+                    done[order[i]] = 1
+                    printf "%s", text[order[i]]
+                }
+        }
+    ' "${SCRIPT_DIR}/Dockerfile"
+}
+
+# Everything that goes into a project's artifacts beyond the upstream commit:
+# its Dockerfile slice, its install script, and the build args it reads. The
+# registry layer cache this replaces keyed on all of it, so the tag has to as
+# well -- otherwise editing an install script or CMAKE_CUDA_ARCHITECTURES would
+# leave every project whose upstream had not moved pinned to a stale image.
+recipe_hash() {
+    local project="$1" slice
+    slice="$(dockerfile_slice "${project}")"
+    if [[ -z "${slice}" ]]; then
+        echo "ERROR: no Dockerfile stages found for ${project}-artifacts" >&2
+        return 1
+    fi
     {
-        cat "${SCRIPT_DIR}/Dockerfile"
+        printf '%s\n' "${slice}"
         cat "${SCRIPT_DIR}/install-${project}.sh"
         echo "WHISPER_FFMPEG=${WHISPER_FFMPEG}"
     } | sha256sum | cut -c1-8
