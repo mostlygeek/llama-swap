@@ -7,14 +7,14 @@
   import { fetchToolDefinitions, callTool, friendlyToolName } from "../../lib/agentTools";
   import { DOCS_AGENT_SYSTEM_PROMPT } from "../../lib/prompts/docsAgent";
   import { playgroundStores } from "../../stores/playgroundActivity";
-  import { getTextContent, isToolCallOnlyTurn, type ChatMessage } from "../../lib/types";
+  import { getTextContent, type ChatMessage } from "../../lib/types";
   import { isSubmitEnter } from "../../lib/ime";
   import ChatMessageComponent from "./ChatMessage.svelte";
-  import ToolCallCard from "./ToolCallCard.svelte";
+  import type { WorkItem } from "./AgentWork.svelte";
   import ModelSelector from "./ModelSelector.svelte";
   import ExpandableTextarea from "./ExpandableTextarea.svelte";
   import EmptyState from "../EmptyState.svelte";
-  import { Wrench, TriangleAlert, X } from "@lucide/svelte";
+  import { TriangleAlert, X } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button/index.js";
 
   /**
@@ -67,11 +67,99 @@
   let agentNotice = $state<string | null>(null);
   let showJinjaHint = $state(false);
 
+  type DisplayMessage =
+    | { kind: "message"; message: ChatMessage & { role: "user" | "system" }; idx: number }
+    | {
+        kind: "agent";
+        content: string;
+        workItems: WorkItem[];
+        finalAssistantIdx: number;
+        userMessageIdx: number | undefined;
+        isCurrent: boolean;
+      };
+
   // name -> friendly label, so tool-call cards can show it without re-deriving.
   let toolLabels = $derived(
     new Map(toolDefs.map((t) => [t.function.name, friendlyToolName(t.function.name, t.function.title)]))
   );
   let canSend = $derived(Boolean($selectedModelStore) && toolDefs.length > 0 && !isStreaming);
+
+  // A complete agent response can include several model turns and tool calls.
+  // Keep that contiguous run in one card so its reasoning, work, and answer
+  // read as a single response.
+  let displayMessages = $derived.by<DisplayMessage[]>(() => {
+    const display: DisplayMessage[] = [];
+
+    for (let idx = 0; idx < messages.length;) {
+      const message = messages[idx];
+      if (message.role !== "assistant") {
+        // Tool results are consumed with the preceding assistant turn. An
+        // orphaned result cannot occur in a valid agent conversation.
+        if (message.role === "user" || message.role === "system") {
+          display.push({ kind: "message", message: message as ChatMessage & { role: "user" | "system" }, idx });
+        }
+        idx++;
+        continue;
+      }
+
+      let userMessageIdx: number | undefined;
+      for (let messageIdx = idx - 1; messageIdx >= 0; messageIdx--) {
+        if (messages[messageIdx].role === "user") {
+          userMessageIdx = messageIdx;
+          break;
+        }
+      }
+
+      const group: { message: ChatMessage; idx: number }[] = [];
+      while (idx < messages.length && (messages[idx].role === "assistant" || messages[idx].role === "tool")) {
+        group.push({ message: messages[idx], idx });
+        idx++;
+      }
+
+      const calls = new Map<string, string>();
+      for (const { message } of group) {
+        for (const call of message.tool_calls ?? []) calls.set(call.id, call.function.arguments);
+      }
+
+      const assistantTurns = group.filter(({ message }) => message.role === "assistant");
+      const finalAssistantIdx = assistantTurns[assistantTurns.length - 1].idx;
+      display.push({
+        kind: "agent",
+        content: assistantTurns
+          .map(({ message }) => getTextContent(message.content))
+          .filter((content) => content.trim())
+          .join("\n\n"),
+        workItems: group.flatMap<WorkItem>(({ message, idx: messageIdx }) => {
+          if (message.role === "assistant") {
+            const reasoning = message.reasoning_content ?? "";
+            return reasoning
+              ? [{
+                  kind: "reasoning" as const,
+                  content: reasoning,
+                  durationMs: message.reasoningTimeMs,
+                  running: isReasoning && messageIdx === messages.length - 1,
+                }]
+              : [];
+          }
+          return [{
+            kind: "tool" as const,
+            name: message.name ?? "",
+            label: toolLabels.get(message.name ?? "") ?? friendlyToolName(message.name ?? ""),
+            args: calls.get(message.tool_call_id ?? "") ?? "",
+            content: getTextContent(message.content),
+            ok: message.toolOk,
+            durationMs: message.toolDurationMs ?? 0,
+            running: message.toolOk === undefined,
+          }];
+        }),
+        finalAssistantIdx,
+        userMessageIdx,
+        isCurrent: finalAssistantIdx === messages.length - 1,
+      });
+    }
+
+    return display;
+  });
 
   onMount(() => {
     fetchToolDefinitions()
@@ -259,6 +347,12 @@
       switch (event.type) {
         case "iteration":
           agentIteration = event.n;
+          // The initial placeholder is created before the loop starts. Later
+          // iterations start only after all tool results, keeping parallel
+          // calls together without empty assistant turns between them.
+          if (event.n > 1) {
+            messages = [...messages, { role: "assistant", content: "" }];
+          }
           break;
 
         case "content":
@@ -290,8 +384,6 @@
 
         case "tool_end":
           patchLast(event.message);
-          // Placeholder for the model's next turn.
-          messages = [...messages, { role: "assistant", content: "" }];
           break;
 
         case "max_iterations":
@@ -318,17 +410,6 @@
     return toolDefs.some(
       (tool) => text.includes(`"${tool.function.name}"`) || text.includes(`${tool.function.name}(`)
     );
-  }
-
-  /** Arguments for a tool result, found on the assistant turn that requested it. */
-  function argsForToolMessage(idx: number): string {
-    const id = messages[idx]?.tool_call_id;
-    for (let i = idx - 1; i >= 0; i--) {
-      const call = messages[i].tool_calls?.find((c) => c.id === id);
-      if (call) return call.function.arguments;
-      if (messages[i].role !== "tool") break;
-    }
-    return "";
   }
 
   async function editMessage(idx: number, newContent: string) {
@@ -361,22 +442,6 @@
       </Button>
     </div>
 
-    <!--
-      The tool list is shown, not configured: it is what makes the answers
-      trustworthy, so it is worth seeing, but turning one off only breaks the
-      agent.
-    -->
-    {#if toolDefs.length > 0}
-      <div class="text-muted-foreground mt-2 flex flex-wrap items-center gap-1.5 text-xs">
-        <Wrench class="size-3.5 shrink-0" />
-        <span>Answers using</span>
-        {#each toolDefs as tool (tool.function.name)}
-          <span class="bg-muted/60 rounded px-1.5 py-0.5" title={tool.function.description}>
-            {friendlyToolName(tool.function.name, tool.function.title)}
-          </span>
-        {/each}
-      </div>
-    {/if}
   </div>
 
   {#if !$hasListedModels}
@@ -419,31 +484,25 @@
           </div>
         </EmptyState>
       {:else}
-        {#each messages as message, idx (idx)}
-          {#if message.role === "tool"}
-            <ToolCallCard
-              name={message.name ?? ""}
-              label={toolLabels.get(message.name ?? "") ?? friendlyToolName(message.name ?? "")}
-              args={argsForToolMessage(idx)}
-              content={getTextContent(message.content)}
-              ok={message.toolOk}
-              durationMs={message.toolDurationMs ?? 0}
-              running={message.toolOk === undefined}
+        {#each displayMessages as item, idx (idx)}
+          {#if item.kind === "agent"}
+            <ChatMessageComponent
+              role="assistant"
+              content={item.content}
+              workItems={item.workItems}
+              isStreaming={isStreaming && item.isCurrent}
+              isReasoning={isReasoning && item.isCurrent}
+              onRegenerate={!isStreaming && item.userMessageIdx !== undefined
+                ? () => regenerateFromIndex(item.userMessageIdx!)
+                : undefined}
             />
-          {:else if isToolCallOnlyTurn(message)}
-            <!-- A turn that only made tool calls has nothing to show; its cards follow. -->
           {:else}
             <ChatMessageComponent
-              role={message.role}
-              content={message.content}
-              reasoning_content={message.reasoning_content}
-              reasoningTimeMs={message.reasoningTimeMs}
-              isStreaming={isStreaming && idx === messages.length - 1 && message.role === "assistant"}
-              isReasoning={isReasoning && idx === messages.length - 1 && message.role === "assistant"}
-              onEdit={message.role === "user" ? (newContent) => editMessage(idx, newContent) : undefined}
-              onRegenerate={message.role === "assistant" && idx > 0 && messages[idx - 1].role === "user"
-                ? () => regenerateFromIndex(idx - 1)
-                : undefined}
+              role={item.message.role}
+              content={item.message.content}
+              reasoning_content={item.message.reasoning_content}
+              reasoningTimeMs={item.message.reasoningTimeMs}
+              onEdit={item.message.role === "user" ? (newContent) => editMessage(item.idx, newContent) : undefined}
             />
           {/if}
         {/each}

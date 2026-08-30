@@ -9,6 +9,9 @@
   import { formatDuration } from "../../lib/format";
   import { copyText } from "../../lib/clipboard";
   import { isSubmitEnter } from "../../lib/ime";
+  import ToolCallCard from "./ToolCallCard.svelte";
+  import AgentWork from "./AgentWork.svelte";
+  import type { WorkItem } from "./AgentWork.svelte";
 
   interface Props {
     role: "user" | "assistant" | "system";
@@ -17,15 +20,42 @@
     reasoningTimeMs?: number;
     isStreaming?: boolean;
     isReasoning?: boolean;
+    toolResults?: ToolWorkResult[];
+    workItems?: WorkItem[];
     onEdit?: (newContent: string) => void;
     onRegenerate?: () => void;
   }
 
-  let { role, content, reasoning_content = "", reasoningTimeMs = 0, isStreaming = false, isReasoning = false, onEdit, onRegenerate }: Props = $props();
+  interface ToolWorkResult {
+    name: string;
+    label: string;
+    args: string;
+    content: string;
+    ok?: boolean;
+    durationMs?: number;
+    running?: boolean;
+  }
+
+  let {
+    role,
+    content,
+    reasoning_content = "",
+    reasoningTimeMs = 0,
+    isStreaming = false,
+    isReasoning = false,
+    toolResults = [],
+    workItems = [],
+    onEdit,
+    onRegenerate,
+  }: Props = $props();
 
   let textContent = $derived(getTextContent(content));
   let imageUrls = $derived(getImageUrls(content));
   let hasImages = $derived(imageUrls.length > 0);
+  let hasMessageText = $derived(Boolean(textContent.trim()));
+  let isReasoningOnly = $derived(
+    role === "assistant" && !hasMessageText && !hasImages && Boolean(reasoning_content || workItems.length)
+  );
   let canEdit = $derived(onEdit !== undefined && !hasImages);
 
   let streamingCache = createStreamingCache();
@@ -129,15 +159,19 @@
   }
 </script>
 
-<div class="flex {role === 'user' ? 'justify-end' : 'justify-start'} mb-4">
+<div class="flex {role === 'user' ? 'justify-end' : 'justify-start'}" class:mb-4={!isReasoningOnly}>
   <div
-    class="group relative rounded-lg px-4 py-2 {role === 'user'
-      ? 'bg-primary text-primary-foreground max-w-[85%]'
-      : 'bg-card w-full border sm:w-4/5'}"
+    class="group relative {role === 'user'
+      ? 'bg-primary text-primary-foreground max-w-[85%] rounded-lg px-4 py-2'
+      : isReasoningOnly
+        ? 'w-full'
+        : 'bg-card w-full rounded-lg border px-4 py-2 sm:w-4/5'}"
   >
     {#if role === "assistant"}
-      {#if reasoning_content || isReasoning}
-        <div class="mb-3 overflow-hidden rounded-md border">
+      {#if workItems.length}
+        <AgentWork items={workItems} running={isStreaming} />
+      {:else if reasoning_content || isReasoning}
+        <div class="overflow-hidden rounded-md border" class:mb-3={!isReasoningOnly}>
           <button
             class="bg-muted/50 hover:bg-muted flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors"
             onclick={() => showReasoning = !showReasoning}
@@ -182,6 +216,21 @@
           {/each}
         </div>
       {/if}
+      {#if !workItems.length && toolResults.length}
+        <div class="mb-3">
+          {#each toolResults as tool, idx (idx)}
+            <ToolCallCard
+              name={tool.name}
+              label={tool.label}
+              args={tool.args}
+              content={tool.content}
+              ok={tool.ok}
+              durationMs={tool.durationMs}
+              running={tool.running}
+            />
+          {/each}
+        </div>
+      {/if}
       {#if showRaw}
         <div class="whitespace-pre-wrap font-mono text-sm">{textContent}</div>
       {:else}
@@ -195,7 +244,7 @@
           {/if}
         </div>
       {/if}
-      {#if !isStreaming}
+      {#if !isStreaming && hasMessageText}
         <div class="mt-2 flex gap-1 border-t pt-1">
           {#if onRegenerate}
             <Button variant="ghost" size="icon-xs" class="text-muted-foreground" onclick={onRegenerate} title="Regenerate response">

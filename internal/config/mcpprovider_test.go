@@ -90,6 +90,32 @@ func TestConfigProvider_GetConfigWithPath(t *testing.T) {
 	}
 }
 
+func TestConfigProvider_GetConfigOmitsDefaults(t *testing.T) {
+	got := callConfig(t, newTestConfigProvider(t), "").Content
+
+	for _, defaultValue := range []string{
+		"healthCheckTimeout: 120",
+		"logLevel: info",
+		"logToStdout: proxy",
+		"metricsMaxInMemory: 1000",
+		"checkEndpoint: /health",
+		"proxy: http://localhost:${PORT}",
+		"connect: 30",
+		"responseHeader: 60",
+		"swap: true",
+		"exclusive: true",
+	} {
+		if strings.Contains(got, defaultValue) {
+			t.Errorf("result includes default value %q:\n%s", defaultValue, got)
+		}
+	}
+	for _, configuredValue := range []string{"cmd:", "proxy: http://edge:8080", "models:", "m1"} {
+		if !strings.Contains(got, configuredValue) {
+			t.Errorf("result dropped configured value %q:\n%s", configuredValue, got)
+		}
+	}
+}
+
 func TestConfigProvider_GetConfigUnknownPath(t *testing.T) {
 	res := callConfig(t, newTestConfigProvider(t), `{"path":"nope.nowhere"}`)
 	if !res.IsError {
@@ -103,7 +129,7 @@ func TestConfigProvider_GetConfigUnknownPath(t *testing.T) {
 func TestConfigProvider_GetConfigTruncationPointsAtPath(t *testing.T) {
 	var b strings.Builder
 	b.WriteString("models:\n")
-	for i := 0; i < 120; i++ {
+	for i := 0; i < 220; i++ {
 		fmt.Fprintf(&b, "  model-%03d:\n    cmd: \"llama-server --model /models/model-%03d.gguf --port ${PORT}\"\n", i, i)
 	}
 	cfg, err := LoadConfigFromReader(strings.NewReader(b.String()))
