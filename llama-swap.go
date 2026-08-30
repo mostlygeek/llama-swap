@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"flag"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/docs"
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/docagent"
 	"github.com/mostlygeek/llama-swap/internal/event"
@@ -37,6 +39,12 @@ var (
 )
 
 const shutdownTimeout = 30 * time.Second
+
+// docsConfigSchema stays at the repository root because it is the public
+// schema URL and is also used by deployment tooling.
+//
+//go:embed config-schema.json
+var docsConfigSchema []byte
 
 // logTimeFormats maps the cfg.LogTimeFormat value to a Go time layout. An
 // unset or unrecognised value yields "" — no timestamp prefix.
@@ -189,7 +197,7 @@ func main() {
 	// Indexed once and shared by every Server instance, including the ones a
 	// hot config reload creates: the documentation is immutable and does not
 	// depend on cfg.
-	referenceDocs := docagent.New(referenceFiles)
+	referenceDocs := docagent.NewWithSchema(docs.Files, docsConfigSchema)
 
 	initialStorePath := configStorePath(cfg)
 	initialStore, err := store.New(initialStorePath)

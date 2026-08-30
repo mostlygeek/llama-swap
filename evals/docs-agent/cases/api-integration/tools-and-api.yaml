@@ -1,4 +1,4 @@
-# Grounded in internal/docagent/kb/tutorials/tool-calling-setup.md, guides/mcp-endpoint.md,
+# Grounded in docs/kb/tutorials/tool-calling-setup.md, guides/mcp-endpoint.md,
 # guides/api-keys-and-auth.md, guides/filters-and-request-rewriting.md
 - id: tools-jinja-flag
   question: My model answers in prose describing a tool call instead of actually calling the tool. What is missing?

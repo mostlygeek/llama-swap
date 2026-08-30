@@ -10,7 +10,7 @@ import (
 )
 
 // frontmatter is the YAML block at the top of every knowledge base article.
-// internal/docagent/kb/README.md documents the contract; TestKB_FrontmatterIsValid enforces
+// docs/kb/README.md documents the contract; TestKB_FrontmatterIsValid enforces
 // it against the real corpus.
 type frontmatter struct {
 	Title      string   `yaml:"title"`
@@ -25,7 +25,7 @@ type frontmatter struct {
 // against this in the golden test.
 const maxSummaryLen = 200
 
-// parseKB walks internal/docagent/kb recursively and returns one doc per article.
+// parseKB walks docs/kb recursively and returns one doc per article.
 // README.md files are contributor guides, not articles, so they are skipped.
 func parseKB(fsys fs.FS) []*doc {
 	var docs []*doc

@@ -44,7 +44,7 @@ models:
     }
   }
 }`)},
-		"internal/docagent/kb/guides/routing/unloading.md": &fstest.MapFile{Data: []byte(`---
+		"kb/guides/routing/unloading.md": &fstest.MapFile{Data: []byte(`---
 title: Unloading models
 summary: How ttl frees VRAM.
 category: guides
@@ -56,7 +56,7 @@ config_keys: [globalTTL]
 
 Set ttl to unload an idle model and free its VRAM.
 `)},
-		"internal/docagent/kb/tutorials/start.md": &fstest.MapFile{Data: []byte(`---
+		"kb/tutorials/start.md": &fstest.MapFile{Data: []byte(`---
 title: Getting started
 summary: Build a first config.
 category: tutorials
@@ -745,7 +745,7 @@ func TestServer_APIMCP_GetDoc(t *testing.T) {
 		if !strings.Contains(result.text(), "free its VRAM") {
 			t.Errorf("body missing:\n%s", result.text())
 		}
-		if !strings.Contains(result.text(), "internal/docagent/kb/guides/routing/unloading.md") {
+		if !strings.Contains(result.text(), "kb/guides/routing/unloading.md") {
 			t.Errorf("citation missing:\n%s", result.text())
 		}
 		if strings.Contains(result.text(), "summary: How ttl") {
@@ -777,7 +777,7 @@ func longDocServer(t *testing.T, lines int) *Server {
 	}
 
 	fsys := mcpTestFS()
-	fsys["internal/docagent/kb/guides/routing/long.md"] = &fstest.MapFile{Data: []byte(long.String())}
+	fsys["kb/guides/routing/long.md"] = &fstest.MapFile{Data: []byte(long.String())}
 	return newTestServerWithReference(newStubRouter(nil, ""), newStubRouter(nil, ""), fsys)
 }
 

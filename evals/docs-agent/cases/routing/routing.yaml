@@ -1,4 +1,4 @@
-# Grounded in internal/docagent/kb/guides/groups-and-matrix.md and guides/profiles-and-selectors.md
+# Grounded in docs/kb/guides/groups-and-matrix.md and guides/profiles-and-selectors.md
 - id: routing-two-routers
   question: What are the two routing engines in llama-swap and how do I choose one?
   tags: [routing]

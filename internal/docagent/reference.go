@@ -3,7 +3,7 @@
 //
 // Everything retrievable is a "doc" with an id in one flat namespace:
 //
-//	guides/model-runtime/ttl-and-unloading  a knowledge base article from internal/docagent/kb/
+//	guides/model-runtime/ttl-and-unloading  a knowledge base article from docs/kb/
 //	reference/config/models     a top-level section of config.example.yaml
 //	reference/readme            README.md
 //
@@ -24,7 +24,7 @@ import (
 const (
 	configExampleFile = "config.example.yaml"
 	configSchemaFile  = "config-schema.json"
-	kbDir             = "internal/docagent/kb"
+	kbDir             = "kb"
 )
 
 // Category values. Index listings are ordered by this sequence so a model
@@ -94,6 +94,13 @@ type Docs struct {
 // config.example.yaml, yields a disabled *Docs whose methods return empty
 // results. Callers check Enabled and report the feature as unavailable.
 func New(fsys fs.FS) *Docs {
+	return NewWithSchema(fsys, nil)
+}
+
+// NewWithSchema indexes fsys, using schema when it is non-empty instead of a
+// config-schema.json file in fsys. This lets the embedded documentation remain
+// self-contained while the public schema stays at the repository root.
+func NewWithSchema(fsys fs.FS, schema []byte) *Docs {
 	if fsys == nil {
 		return &Docs{}
 	}
@@ -117,7 +124,11 @@ func New(fsys fs.FS) *Docs {
 		d.add(doc)
 	}
 
-	if raw, err := fs.ReadFile(fsys, configSchemaFile); err == nil {
+	raw := schema
+	if len(raw) == 0 {
+		raw, _ = fs.ReadFile(fsys, configSchemaFile)
+	}
+	if len(raw) != 0 {
 		var schema map[string]any
 		if json.Unmarshal(raw, &schema) == nil {
 			d.schema = schema

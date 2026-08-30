@@ -1,4 +1,4 @@
-# Grounded in internal/docagent/kb/guides/troubleshooting-model-wont-load.md and tutorials/running-in-docker.md
+# Grounded in docs/kb/guides/troubleshooting-model-wont-load.md and tutorials/running-in-docker.md
 - id: trouble-starts-but-hangs
   question: My model process starts fine but every request hangs or returns a connection error. What is wrong?
   tags: [troubleshooting]

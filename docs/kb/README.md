@@ -8,7 +8,7 @@ real text instead of guesswork.
 ## Layout
 
 ```
-internal/docagent/kb/
+docs/kb/
   guides/
     configuration/*.md
     model-runtime/*.md
@@ -52,7 +52,7 @@ updated: 2026-08-25
 | `config_keys` | no | config keys the article explains; each must resolve in `config-schema.json` |
 | `updated` | no | `YYYY-MM-DD` |
 
-`TestKB_FrontmatterIsValid` in `internal/reference` enforces all of the above,
+`TestKB_FrontmatterIsValid` in `internal/docagent` enforces all of the above,
 including that every `config_keys` entry is a real key. Run `make test-dev`
 after adding an article.
 

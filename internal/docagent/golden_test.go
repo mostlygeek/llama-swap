@@ -9,18 +9,26 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// repoFS is the real repository tree. internal/config/config_schema_test.go
-// sets the precedent for a test reaching up to the repo root.
+// repoFS is the embedded documentation source tree.
 func repoFS(t *testing.T) fs.FS {
 	t.Helper()
-	return os.DirFS("../..")
+	return os.DirFS("../../docs")
 }
 
-// TestKB_FrontmatterIsValid is what keeps internal/docagent/kb honest. Everything the
-// contributor guide in internal/docagent/kb/README.md promises is enforced here.
+func repoDocs(t *testing.T) *Docs {
+	t.Helper()
+	schema, err := os.ReadFile("../../config-schema.json")
+	if err != nil {
+		t.Fatalf("read config schema: %v", err)
+	}
+	return NewWithSchema(repoFS(t), schema)
+}
+
+// TestKB_FrontmatterIsValid is what keeps docs/kb honest. Everything the
+// contributor guide in docs/kb/README.md promises is enforced here.
 func TestKB_FrontmatterIsValid(t *testing.T) {
 	fsys := repoFS(t)
-	docs := New(fsys)
+	docs := repoDocs(t)
 
 	if !docs.Enabled() {
 		t.Fatal("reference library did not index the repository")
@@ -51,7 +59,7 @@ func TestKB_FrontmatterIsValid(t *testing.T) {
 			content := strings.ReplaceAll(string(raw), "\r\n", "\n")
 
 			if !strings.HasPrefix(content, "---\n") {
-				t.Fatal("missing frontmatter block; see internal/docagent/kb/README.md")
+				t.Fatal("missing frontmatter block; see docs/kb/README.md")
 			}
 
 			var fm frontmatter
@@ -120,7 +128,7 @@ func TestKB_FrontmatterIsValid(t *testing.T) {
 
 // TestKB_CrossReferencesResolve catches links to renamed or deleted articles.
 func TestKB_CrossReferencesResolve(t *testing.T) {
-	docs := New(repoFS(t))
+	docs := repoDocs(t)
 
 	known := map[string]bool{}
 	for _, id := range docs.IDs() {
@@ -153,7 +161,7 @@ func TestKB_CrossReferencesResolve(t *testing.T) {
 }
 
 func TestDocs_RealConfigExample_SectionKeys(t *testing.T) {
-	docs := New(repoFS(t))
+	docs := repoDocs(t)
 
 	// Every top-level key of config.example.yaml, in file order. Update this
 	// list deliberately when the reference file gains or loses a section.
@@ -201,7 +209,7 @@ func TestDocs_RealConfigExample_SectionKeys(t *testing.T) {
 }
 
 func TestDocs_RealSchema_KnownPaths(t *testing.T) {
-	docs := New(repoFS(t))
+	docs := repoDocs(t)
 
 	for _, path := range []string{
 		"", "models", "models.*", "models.*.cmd", "models.*.filters",
@@ -218,7 +226,7 @@ func TestDocs_RealSchema_KnownPaths(t *testing.T) {
 // The whole point of the flat namespace is that the model has one getter, so
 // every id the index advertises must actually be fetchable.
 func TestDocs_RealTree_EveryIndexedIDIsFetchable(t *testing.T) {
-	docs := New(repoFS(t))
+	docs := repoDocs(t)
 
 	index := docs.Index(IndexFilter{})
 	if len(index) < 30 {

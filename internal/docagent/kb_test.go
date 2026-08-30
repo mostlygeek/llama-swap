@@ -27,7 +27,7 @@ func TestDocs_KB_ParsesFrontmatter(t *testing.T) {
 	if len(got.ConfigKeys) != 1 || got.ConfigKeys[0] != "alpha" {
 		t.Errorf("ConfigKeys = %v", got.ConfigKeys)
 	}
-	if got.Source != "internal/docagent/kb/guides/routing/first-tip.md" {
+	if got.Source != "kb/guides/routing/first-tip.md" {
 		t.Errorf("Source = %q", got.Source)
 	}
 	// The frontmatter block must not leak into the body.
@@ -38,9 +38,9 @@ func TestDocs_KB_ParsesFrontmatter(t *testing.T) {
 
 func TestDocs_KB_SkipsReadme(t *testing.T) {
 	fsys := testFS()
-	fsys["internal/docagent/kb/guides/routing/README.md"] = &fstest.MapFile{Data: []byte("# nested guide index\n")}
+	fsys["kb/guides/routing/README.md"] = &fstest.MapFile{Data: []byte("# nested guide index\n")}
 	d := New(fsys)
-	for _, id := range []string{"guides/README", "guides/routing/README", "internal/docagent/kb/README"} {
+	for _, id := range []string{"guides/README", "guides/routing/README", "kb/README"} {
 		if _, ok := d.Doc(id, DocOptions{}); ok {
 			t.Errorf("Doc(%q) ok = true, want false", id)
 		}
@@ -79,7 +79,7 @@ func TestDocs_KB_ToleratesBadFrontmatter(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fsys := testFS()
-			fsys["internal/docagent/kb/guides/routing/odd.md"] = &fstest.MapFile{Data: []byte(tt.body)}
+			fsys["kb/guides/routing/odd.md"] = &fstest.MapFile{Data: []byte(tt.body)}
 
 			got, ok := New(fsys).Doc("guides/routing/odd", DocOptions{})
 			if !ok {
@@ -100,8 +100,8 @@ func TestDocs_KB_ToleratesBadFrontmatter(t *testing.T) {
 
 func TestDocs_KB_SkipsNonMarkdown(t *testing.T) {
 	fsys := testFS()
-	fsys["internal/docagent/kb/guides/routing/notes.txt"] = &fstest.MapFile{Data: []byte("not markdown")}
-	fsys["internal/docagent/kb/guides/routing/diagram.png"] = &fstest.MapFile{Data: []byte("binary")}
+	fsys["kb/guides/routing/notes.txt"] = &fstest.MapFile{Data: []byte("not markdown")}
+	fsys["kb/guides/routing/diagram.png"] = &fstest.MapFile{Data: []byte("binary")}
 
 	for _, id := range []string{"guides/routing/notes", "guides/routing/notes.txt", "guides/diagram"} {
 		if _, ok := New(fsys).Doc(id, DocOptions{}); ok {
@@ -112,7 +112,7 @@ func TestDocs_KB_SkipsNonMarkdown(t *testing.T) {
 
 func TestDocs_KB_EmptyArticleIsNotIndexed(t *testing.T) {
 	fsys := testFS()
-	fsys["internal/docagent/kb/guides/routing/empty.md"] = &fstest.MapFile{Data: []byte("---\ntitle: Nothing\n---\n\n")}
+	fsys["kb/guides/routing/empty.md"] = &fstest.MapFile{Data: []byte("---\ntitle: Nothing\n---\n\n")}
 
 	if _, ok := New(fsys).Doc("guides/routing/empty", DocOptions{}); ok {
 		t.Error("Doc() ok = true, want false for an empty article")

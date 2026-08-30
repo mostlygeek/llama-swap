@@ -263,14 +263,14 @@ The metadata will be schemaless, allowing users to define any key-value pairs th
 
 ### Documentation
 
-- [x] Verify [config.example.yaml](config.example.yaml) already has complete metadata examples (lines 149-171)
+- [x] Verify [config.example.yaml](../docs/config.example.yaml) already has complete metadata examples (lines 149-171)
 - [x] No additional documentation needed per project instructions
 
 ## Known Issues and Considerations
 
 ### Inconsistencies
 
-None identified. The plan references the correct existing example in [config.example.yaml:149-171](config.example.yaml#L149-L171).
+None identified. The plan references the correct existing example in [config.example.yaml:149-171](../docs/config.example.yaml#L149-L171).
 
 ### Design Decisions
 

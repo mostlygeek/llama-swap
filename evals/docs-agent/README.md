@@ -78,13 +78,13 @@ Change **one at a time**, and nothing outside this list.
 | # | Surface | Files | Restart needed |
 |---|---|---|---|
 | 1 | System prompt | `ui/src/lib/prompts/docsAgent.ts` | no |
-| 2 | Knowledge base | `internal/docagent/kb/**/*.md` | yes |
+| 2 | Knowledge base | `docs/kb/**/*.md` | yes |
 | 3 | Tool descriptions and schemas | `internal/mcptools/{docs,config,sys}.go` | yes |
 | 4 | Search ranking | `internal/reference/search.go` | yes |
 | 5 | MCP instructions | `internal/server/apimcp.go` (`mcpInstructions`) | yes |
 
 Surface 1 is the fast loop: the prompt is sent by the client, so an edit is
-live on the next run with no restart. Surfaces 2–5 are compiled in — `internal/docagent/kb`
+live on the next run with no restart. Surfaces 2–5 are compiled in — `docs/kb`
 reaches the binary through `//go:embed` in `reference_embed.go` — so they need
 `run.sh` without `--base-url`.
 
@@ -212,14 +212,14 @@ model, because a model grading itself ratifies its own mistakes.
 
 ## Adding cases
 
-Every assertion must be grounded in something `internal/docagent/kb/` actually says — check
+Every assertion must be grounded in something `docs/kb/` actually says — check
 before you write it. A case asserting a fact the documentation does not contain
 tests the model's pretraining, not this agent, and it can never be fixed by any
 of the five surfaces.
 
 Constraints to respect while editing:
 
-- `internal/docagent/kb/` frontmatter is validated by `TestKB_FrontmatterIsValid`
+- `docs/kb/` frontmatter is validated by `TestKB_FrontmatterIsValid`
   (`internal/reference/golden_test.go`); every `config_keys` entry must resolve
   in `config-schema.json`. Run `make test-dev`.
 - MCP tool names must match `[a-zA-Z0-9_-]{1,64}`. `agentTools.ts` silently

@@ -43,7 +43,7 @@ RUN \
     tar -zxf "llama-swap_${LS_VER}_linux_${ARCH}.tar.gz" && \
     rm "llama-swap_${LS_VER}_linux_${ARCH}.tar.gz"
 
-COPY --chown=$UID:$GID config.example.yaml /app/config.yaml
+COPY --chown=$UID:$GID docs/config.example.yaml /app/config.yaml
 
 HEALTHCHECK CMD curl -f http://localhost:8080/ || exit 1
 ENTRYPOINT [ "/app/llama-swap", "-config", "/app/config.yaml", "-watch-config"]

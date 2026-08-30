@@ -1,4 +1,4 @@
-# Grounded in internal/docagent/kb/guides/ttl-and-unloading.md
+# Grounded in docs/kb/guides/ttl-and-unloading.md
 - id: ttl-unload-after-5min
   question: How do I make a model unload after 5 minutes of inactivity?
   tags: [ttl]
