@@ -1,16 +1,16 @@
-// Package reference indexes llama-swap's own documentation so it can be
+// Package docagent indexes llama-swap's own documentation so it can be
 // served to an LLM through the /api/mcp endpoint.
 //
 // Everything retrievable is a "doc" with an id in one flat namespace:
 //
-//	guides/model-runtime/ttl-and-unloading  a knowledge base article from internal/docagent/db/
+//	guides/model-runtime/ttl-and-unloading  a knowledge base article from internal/docagent/kb/
 //	reference/config/models     a top-level section of config.example.yaml
 //	reference/readme            README.md
 //
 // One namespace means the agent needs one index listing, one getter and one
 // search rather than a set per source, which materially improves how reliably
 // small local models can use the tools.
-package reference
+package docagent
 
 import (
 	"encoding/json"
@@ -24,7 +24,7 @@ import (
 const (
 	configExampleFile = "config.example.yaml"
 	configSchemaFile  = "config-schema.json"
-	kbDir             = "internal/docagent/db"
+	kbDir             = "internal/docagent/kb"
 )
 
 // Category values. Index listings are ordered by this sequence so a model

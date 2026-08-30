@@ -4,7 +4,7 @@ package docagent
 
 import "embed"
 
-// DB contains the knowledge-base guides, examples, and tutorials.
+// KB contains the knowledge-base guides, examples, and tutorials.
 //
-//go:embed db
-var DB embed.FS
+//go:embed kb
+var KB embed.FS

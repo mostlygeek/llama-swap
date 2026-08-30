@@ -7,7 +7,7 @@ import "embed"
 // the /api/mcp endpoint.
 //
 // The knowledge base is embedded as a directory: adding an article to
-// internal/docagent/db/ must not require editing this directive. Everything else is an
+// internal/docagent/kb/ must not require editing this directive. Everything else is an
 // explicit file list, deliberately never "//go:embed docs" -- docs/ is over
 // 3MB, almost all of it images under docs/assets/. docs/newrouter-todo.md is
 // also excluded: it is a stale internal TODO, and a stale internal TODO is
@@ -17,6 +17,6 @@ import "embed"
 // in the tree, so plain `go build` and `go test ./...` work unconditionally
 // and the feature ships in development builds too.
 //
-//go:embed internal/docagent/db
+//go:embed internal/docagent/kb
 //go:embed config.example.yaml config-schema.json README.md
 var referenceFiles embed.FS

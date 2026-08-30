@@ -18,12 +18,12 @@ import (
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/docagent"
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/hw"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/internal/process"
-	"github.com/mostlygeek/llama-swap/internal/reference"
 	"github.com/mostlygeek/llama-swap/internal/server"
 	"github.com/mostlygeek/llama-swap/internal/store"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
@@ -189,7 +189,7 @@ func main() {
 	// Indexed once and shared by every Server instance, including the ones a
 	// hot config reload creates: the documentation is immutable and does not
 	// depend on cfg.
-	referenceDocs := reference.New(referenceFiles)
+	referenceDocs := docagent.New(referenceFiles)
 
 	initialStorePath := configStorePath(cfg)
 	initialStore, err := store.New(initialStorePath)

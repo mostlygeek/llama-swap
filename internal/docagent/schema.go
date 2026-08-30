@@ -1,4 +1,4 @@
-package reference
+package docagent
 
 import (
 	"encoding/json"

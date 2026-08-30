@@ -362,7 +362,7 @@ func TestRegistry_ShutsDownEveryProvider(t *testing.T) {
 }
 
 // A Server built without a registry must not panic; every method is
-// nil-receiver safe, matching reference.Docs.
+// nil-receiver safe, matching docagent.Docs.
 func TestRegistry_NilIsSafe(t *testing.T) {
 	var r *Registry
 

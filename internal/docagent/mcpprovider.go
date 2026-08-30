@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/mcptools"
-	"github.com/mostlygeek/llama-swap/internal/reference"
 )
 
 // Tool results are read straight into a model's context window, which for a
@@ -32,15 +31,15 @@ const (
 // in-memory read of an immutable index, so it holds no resources and its
 // Shutdown is a no-op.
 type DocsProvider struct {
-	docs *reference.Docs
+	docs *Docs
 }
 
 var _ mcptools.Provider = (*DocsProvider)(nil)
 
-// NewDocsProvider builds the provider. A nil or disabled *reference.Docs
+// NewDocsProvider builds the provider. A nil or disabled *Docs
 // yields a provider that advertises no tools rather than an error, matching
 // how the rest of llama-swap treats missing documentation.
-func NewDocsProvider(docs *reference.Docs) *DocsProvider {
+func NewDocsProvider(docs *Docs) *DocsProvider {
 	return &DocsProvider{docs: docs}
 }
 
@@ -195,7 +194,7 @@ func (p *DocsProvider) Call(_ context.Context, name string, args map[string]json
 }
 
 func (p *DocsProvider) listDocs(args map[string]json.RawMessage) mcptools.Result {
-	filter := reference.IndexFilter{
+	filter := IndexFilter{
 		Category: mcptools.StringArg(args, "category"),
 		Tag:      mcptools.StringArg(args, "tag"),
 	}
@@ -236,7 +235,7 @@ func (p *DocsProvider) getDoc(args map[string]json.RawMessage) mcptools.Result {
 		maxLines = maxDocMaxLines
 	}
 
-	doc, ok := p.docs.Doc(id, reference.DocOptions{
+	doc, ok := p.docs.Doc(id, DocOptions{
 		Offset:   mcptools.IntArg(args, "offset", 0),
 		MaxLines: maxLines,
 		MaxBytes: mcptools.MaxToolResultBytes,
@@ -272,7 +271,7 @@ func (p *DocsProvider) searchDocs(args map[string]json.RawMessage) mcptools.Resu
 		return mcptools.Result{IsError: true, Content: `Error: "query" is required.`}
 	}
 
-	hits := p.docs.Search(query, reference.SearchOptions{
+	hits := p.docs.Search(query, SearchOptions{
 		MaxHits: mcptools.IntArg(args, "max_results", 0),
 	})
 	if len(hits) == 0 {

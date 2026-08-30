@@ -1,4 +1,4 @@
-package reference
+package docagent
 
 import (
 	"testing"
@@ -57,7 +57,7 @@ beta:
     }
   }
 }`)},
-		"internal/docagent/db/guides/routing/first-tip.md": &fstest.MapFile{Data: []byte(`---
+		"internal/docagent/kb/guides/routing/first-tip.md": &fstest.MapFile{Data: []byte(`---
 title: A first tip
 summary: Explains alpha and how it behaves.
 category: guides
@@ -71,7 +71,7 @@ The alpha setting controls the first thing.
 
 Another paragraph mentioning beta.
 `)},
-		"internal/docagent/db/tutorials/walkthrough.md": &fstest.MapFile{Data: []byte(`---
+		"internal/docagent/kb/tutorials/walkthrough.md": &fstest.MapFile{Data: []byte(`---
 title: A walkthrough
 summary: Start to finish.
 category: tutorials
@@ -82,7 +82,7 @@ tags: [getting-started]
 
 Step one.
 `)},
-		"internal/docagent/db/README.md": &fstest.MapFile{Data: []byte("# contributor guide\n\nnot an article\n")},
+		"internal/docagent/kb/README.md": &fstest.MapFile{Data: []byte("# contributor guide\n\nnot an article\n")},
 		"README.md":                      &fstest.MapFile{Data: []byte("# llama-swap\n\n![hero](docs/assets/hero.webp)\n\nRun models and swap between them.\n")},
 	}
 }
@@ -211,7 +211,7 @@ func TestDocs_Doc_IDIsNeverJoinedToAPath(t *testing.T) {
 	for _, id := range []string{
 		"../../etc/passwd",
 		"guides/routing/../../config.example.yaml",
-		"internal/docagent/db/guides/routing/first-tip.md",
+		"internal/docagent/kb/guides/routing/first-tip.md",
 		"/etc/passwd",
 	} {
 		if _, ok := d.Doc(id, DocOptions{}); ok {

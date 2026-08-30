@@ -1,4 +1,4 @@
-package reference
+package docagent
 
 import (
 	"io/fs"
@@ -16,8 +16,8 @@ func repoFS(t *testing.T) fs.FS {
 	return os.DirFS("../..")
 }
 
-// TestKB_FrontmatterIsValid is what keeps internal/docagent/db honest. Everything the
-// contributor guide in internal/docagent/db/README.md promises is enforced here.
+// TestKB_FrontmatterIsValid is what keeps internal/docagent/kb honest. Everything the
+// contributor guide in internal/docagent/kb/README.md promises is enforced here.
 func TestKB_FrontmatterIsValid(t *testing.T) {
 	fsys := repoFS(t)
 	docs := New(fsys)
@@ -45,12 +45,17 @@ func TestKB_FrontmatterIsValid(t *testing.T) {
 				t.Fatalf("read: %v", err)
 			}
 
-			if !strings.HasPrefix(string(raw), "---\n") {
-				t.Fatal("missing frontmatter block; see internal/docagent/db/README.md")
+			// Git may check these Markdown files out with CRLF line endings on
+			// Windows. Normalize them so this validation checks the document
+			// structure rather than the platform's newline convention.
+			content := strings.ReplaceAll(string(raw), "\r\n", "\n")
+
+			if !strings.HasPrefix(content, "---\n") {
+				t.Fatal("missing frontmatter block; see internal/docagent/kb/README.md")
 			}
 
 			var fm frontmatter
-			block, _, _ := strings.Cut(strings.TrimPrefix(string(raw), "---\n"), "\n---")
+			block, _, _ := strings.Cut(strings.TrimPrefix(content, "---\n"), "\n---")
 			if err := yaml.Unmarshal([]byte(block), &fm); err != nil {
 				t.Fatalf("frontmatter is not valid YAML: %v", err)
 			}

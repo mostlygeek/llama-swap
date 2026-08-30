@@ -1,4 +1,4 @@
-package reference
+package docagent
 
 import (
 	"strings"
@@ -36,7 +36,7 @@ func TestDocs_Search_HitsCarryDocIDs(t *testing.T) {
 // A title or tag match is a much stronger signal than a passing mention.
 func TestDocs_Search_RanksTitleAndTagMatchesHighest(t *testing.T) {
 	fsys := testFS()
-	fsys["internal/docagent/db/guides/routing/passing.md"] = &fstest.MapFile{Data: []byte(`---
+	fsys["internal/docagent/kb/guides/routing/passing.md"] = &fstest.MapFile{Data: []byte(`---
 title: Something else entirely
 summary: Unrelated.
 category: guides
@@ -82,7 +82,7 @@ func TestDocs_Search_BoundsHits(t *testing.T) {
 
 func TestDocs_Search_BoundsSnippetWidth(t *testing.T) {
 	fsys := testFS()
-	fsys["internal/docagent/db/guides/routing/wide.md"] = &fstest.MapFile{Data: []byte(
+	fsys["internal/docagent/kb/guides/routing/wide.md"] = &fstest.MapFile{Data: []byte(
 		"---\ntitle: Wide\nsummary: Wide.\ncategory: guides\n---\n\n# Wide\n\nneedle " +
 			strings.Repeat("x", 600) + "\n")}
 
@@ -100,7 +100,7 @@ func TestDocs_Search_BoundsSnippetWidth(t *testing.T) {
 // One dense paragraph must not consume the whole result budget.
 func TestDocs_Search_MergesAdjacentHits(t *testing.T) {
 	fsys := testFS()
-	fsys["internal/docagent/db/guides/routing/dense.md"] = &fstest.MapFile{Data: []byte(`---
+	fsys["internal/docagent/kb/guides/routing/dense.md"] = &fstest.MapFile{Data: []byte(`---
 title: Dense
 summary: Dense.
 category: guides

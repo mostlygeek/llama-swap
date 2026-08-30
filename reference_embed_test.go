@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mostlygeek/llama-swap/internal/reference"
+	"github.com/mostlygeek/llama-swap/internal/docagent"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +18,7 @@ func TestReferenceFS_ContainsExpectedFiles(t *testing.T) {
 		"config.example.yaml",
 		"config-schema.json",
 		"README.md",
-		"internal/docagent/db/README.md",
+		"internal/docagent/kb/README.md",
 	} {
 		data, err := referenceFiles.ReadFile(name)
 		require.NoErrorf(t, err, "%s is not embedded", name)
@@ -30,13 +30,13 @@ func TestReferenceFS_ContainsKnowledgeBase(t *testing.T) {
 	articles := 0
 	categories := map[string]bool{}
 
-	err := fs.WalkDir(referenceFiles, "internal/docagent/db", func(p string, entry fs.DirEntry, err error) error {
+	err := fs.WalkDir(referenceFiles, "internal/docagent/kb", func(p string, entry fs.DirEntry, err error) error {
 		require.NoError(t, err)
 		if entry.IsDir() || !strings.HasSuffix(p, ".md") || strings.EqualFold(entry.Name(), "README.md") {
 			return nil
 		}
 		articles++
-		rel := strings.TrimPrefix(p, "internal/docagent/db/")
+		rel := strings.TrimPrefix(p, "internal/docagent/kb/")
 		categories[strings.Split(rel, "/")[0]] = true
 		return nil
 	})
@@ -44,7 +44,7 @@ func TestReferenceFS_ContainsKnowledgeBase(t *testing.T) {
 
 	assert.Greaterf(t, articles, 0, "no knowledge base articles were embedded")
 	for _, want := range []string{"guides", "examples"} {
-		assert.Truef(t, categories[want], "no articles embedded from internal/docagent/db/%s", want)
+		assert.Truef(t, categories[want], "no articles embedded from internal/docagent/kb/%s", want)
 	}
 }
 
@@ -69,10 +69,10 @@ func TestReferenceFS_ExcludesAssets(t *testing.T) {
 // The embedded tree is what the tool endpoints actually serve, so index it the
 // same way the server does.
 func TestReferenceFS_IndexesSuccessfully(t *testing.T) {
-	docs := reference.New(referenceFiles)
+	docs := docagent.New(referenceFiles)
 	require.True(t, docs.Enabled(), "embedded files did not index")
 
-	index := docs.Index(reference.IndexFilter{})
+	index := docs.Index(docagent.IndexFilter{})
 	assert.Greater(t, len(index), 30, "expected the full documentation corpus")
 
 	for _, id := range []string{
@@ -81,7 +81,7 @@ func TestReferenceFS_IndexesSuccessfully(t *testing.T) {
 		"reference/readme",
 		"guides/configuration/macros",
 	} {
-		_, ok := docs.Doc(id, reference.DocOptions{})
+		_, ok := docs.Doc(id, docagent.DocOptions{})
 		assert.Truef(t, ok, "%s is not reachable from the embedded tree", id)
 	}
 

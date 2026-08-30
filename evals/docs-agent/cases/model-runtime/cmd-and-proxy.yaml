@@ -1,4 +1,4 @@
-# Grounded in internal/docagent/db/guides/writing-cmd.md and internal/docagent/db/tutorials/first-config.md
+# Grounded in internal/docagent/kb/guides/writing-cmd.md and internal/docagent/kb/tutorials/first-config.md
 - id: cmd-port-macro
   question: What does ${PORT} expand to in a model's cmd?
   tags: [cmd]

@@ -3,8 +3,6 @@ package mcptools
 import (
 	"encoding/json"
 	"strings"
-
-	"github.com/mostlygeek/llama-swap/internal/reference"
 )
 
 // MaxToolResultBytes caps tool results intended for a model's context window.
@@ -14,11 +12,24 @@ const MaxToolResultBytes = 16 * 1024
 
 // CapResult truncates content to max bytes and marks the result when it does.
 func CapResult(content string, max int) Result {
-	capped, truncated := reference.CapText(content, max)
+	capped, truncated := capText(content, max)
 	if truncated {
 		capped += "\n[truncated]"
 	}
 	return Result{Content: capped, Truncated: truncated}
+}
+
+// capText truncates s at the last newline before maxBytes. It reports whether
+// anything was removed.
+func capText(s string, maxBytes int) (string, bool) {
+	if maxBytes <= 0 || len(s) <= maxBytes {
+		return s, false
+	}
+	cut := s[:maxBytes]
+	if idx := strings.LastIndexByte(cut, '\n'); idx > 0 {
+		cut = cut[:idx]
+	}
+	return cut, true
 }
 
 // StringArg reads a string tool argument, tolerating the malformed bare

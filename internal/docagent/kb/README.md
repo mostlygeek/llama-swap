@@ -8,7 +8,7 @@ real text instead of guesswork.
 ## Layout
 
 ```
-internal/docagent/db/
+internal/docagent/kb/
   guides/
     configuration/*.md
     model-runtime/*.md

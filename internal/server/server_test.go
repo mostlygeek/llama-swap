@@ -18,7 +18,6 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/mcptools"
 	"github.com/mostlygeek/llama-swap/internal/process"
-	"github.com/mostlygeek/llama-swap/internal/reference"
 	"github.com/mostlygeek/llama-swap/internal/router"
 	"github.com/mostlygeek/llama-swap/internal/store"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
@@ -101,7 +100,7 @@ func newTestServer(local router.LocalRouter, peer router.Router) *Server {
 // so no re-registration is needed.
 func newTestServerWithReference(local router.LocalRouter, peer router.Router, fsys fs.FS) *Server {
 	s := newTestServer(local, peer)
-	s.reference = reference.New(fsys)
+	s.reference = docagent.New(fsys)
 
 	registry, err := mcptools.New(
 		docagent.NewDocsProvider(s.reference),
