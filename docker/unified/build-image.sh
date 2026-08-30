@@ -41,7 +41,13 @@ STAGE_TARGET=""
 WHISPER_FFMPEG="${WHISPER_FFMPEG:-yes}"
 
 # Registry holding the base and artifacts images used by --stage/--assemble.
-ARTIFACT_REPO="${ARTIFACT_REPO:-ghcr.io/mostlygeek/llama-swap}"
+#
+# Deliberately a different package from the published llama-swap images. These
+# are build inputs, not releases: a new tag is minted per project per upstream
+# commit, so sharing the package would bury :unified-cuda under thousands of
+# :art-* tags. It also keeps them out of reach of the delete-untagged cleanup
+# in containers.yml, which is scoped to `package: llama-swap`.
+ARTIFACT_REPO="${ARTIFACT_REPO:-ghcr.io/mostlygeek/llama-swap-build}"
 
 # Upstream projects compiled into the image. ik-llama is CUDA only.
 ALL_PROJECTS=(whisper sd audio llama ik-llama)
@@ -83,7 +89,7 @@ for arg in "$@"; do
             echo "  LS_VERSION           Override llama-swap version (e.g., '170' or 'latest')"
             echo "  WHISPER_FFMPEG       Enable whisper.cpp FFmpeg support (default: yes)"
             echo "  ARTIFACT_REPO        Registry for base and artifacts images"
-            echo "                       (default: ghcr.io/mostlygeek/llama-swap)"
+            echo "                       (default: ghcr.io/mostlygeek/llama-swap-build)"
             exit 0
             ;;
     esac

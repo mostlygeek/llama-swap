@@ -85,8 +85,16 @@ recompiling anything.
 ```
 
 `--stage` and `--assemble` push to and read from `ARTIFACT_REPO` (default
-`ghcr.io/mostlygeek/llama-swap`), so they need registry credentials and a buildx
-container driver. They are for CI; use plain `./build-image.sh --cuda` locally
+`ghcr.io/mostlygeek/llama-swap-build`), so they need registry credentials and a
+buildx container driver.
+
+That is a separate GHCR package from the published `llama-swap` images on
+purpose. Artifacts are build inputs rather than releases — a new tag per project
+per upstream commit, most nights — so keeping them in the release package would
+bury `:unified-cuda` under thousands of `:art-*` tags. It also keeps them
+clear of the `delete-untagged` cleanup in `containers.yml`, which is scoped to
+`package: llama-swap`, so the two never interact and the build package can be
+given its own retention policy. They are for CI; use plain `./build-image.sh --cuda` locally
 and under `act`. The local path chains the images through the docker image
 store, so it wants buildx's default `docker` driver (the default) rather than a
 container driver.
