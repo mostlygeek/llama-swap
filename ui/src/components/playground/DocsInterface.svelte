@@ -74,6 +74,7 @@
         content: string;
         workItems: WorkItem[];
         finalAssistantIdx: number;
+        userMessageIdx: number | undefined;
         isCurrent: boolean;
       };
 
@@ -99,6 +100,14 @@
         }
         idx++;
         continue;
+      }
+
+      let userMessageIdx: number | undefined;
+      for (let messageIdx = idx - 1; messageIdx >= 0; messageIdx--) {
+        if (messages[messageIdx].role === "user") {
+          userMessageIdx = messageIdx;
+          break;
+        }
       }
 
       const group: { message: ChatMessage; idx: number }[] = [];
@@ -144,6 +153,7 @@
           }];
         }),
         finalAssistantIdx,
+        userMessageIdx,
         isCurrent: finalAssistantIdx === messages.length - 1,
       });
     }
@@ -482,8 +492,8 @@
               workItems={item.workItems}
               isStreaming={isStreaming && item.isCurrent}
               isReasoning={isReasoning && item.isCurrent}
-              onRegenerate={item.finalAssistantIdx > 0 && messages[item.finalAssistantIdx - 1].role === "user"
-                ? () => regenerateFromIndex(item.finalAssistantIdx - 1)
+              onRegenerate={!isStreaming && item.userMessageIdx !== undefined
+                ? () => regenerateFromIndex(item.userMessageIdx!)
                 : undefined}
             />
           {:else}
