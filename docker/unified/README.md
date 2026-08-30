@@ -43,8 +43,12 @@ to a locally compiled stage by default or to a published artifacts image when
 `<PROJECT>_IMAGE` is set. BuildKit only walks the branch it needs, so an
 assemble build never enters a compile stage.
 
-Artifacts images are tagged with the upstream commit they were built from
-(`:art-llama-cuda-<commit>`), which means:
+Artifacts images are tagged with the upstream commit they were built from and
+a hash of the recipe that built it — the Dockerfile, that project's install
+script, and the build args it reads (`:art-llama-cuda-<commit>-<recipe>`).
+Both halves matter: without the recipe hash, editing an install script or
+`CMAKE_CUDA_ARCHITECTURES` would leave every project whose upstream had not
+moved pinned to a stale artifacts image. Tagging this way means:
 
 - a project whose upstream has not moved is already published, and its job
   exits without building

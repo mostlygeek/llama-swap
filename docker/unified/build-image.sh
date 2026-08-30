@@ -108,6 +108,8 @@ log() {
 
 DOCKER_IMAGE_TAG="${DOCKER_IMAGE_TAG:-llama-swap:unified-${BACKEND}}"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Git repository URLs
 LLAMA_REPO="https://github.com/ggml-org/llama.cpp.git"
 WHISPER_REPO="https://github.com/ggml-org/whisper.cpp.git"
@@ -193,13 +195,28 @@ project_image_arg() {
     esac
 }
 
-# Artifacts images are addressed by the upstream commit they were built from, so
-# a rerun that resolves the same commit finds its own output already published
-# and reuses it instead of recompiling.
+# Everything that goes into a project's artifacts, beyond the upstream commit:
+# the Dockerfile (stage definition, base images, CMAKE_CUDA_ARCHITECTURES), the
+# install script, and the build args the script reads. The registry layer cache
+# this replaces keyed on all of it, so the tag has to as well -- otherwise
+# editing an install script or the architecture list would leave every project
+# whose upstream had not moved pinned to a stale artifacts image.
+recipe_hash() {
+    local project="$1"
+    {
+        cat "${SCRIPT_DIR}/Dockerfile"
+        cat "${SCRIPT_DIR}/install-${project}.sh"
+        echo "WHISPER_FFMPEG=${WHISPER_FFMPEG}"
+    } | sha256sum | cut -c1-8
+}
+
+# Artifacts images are addressed by the upstream commit plus that recipe, so a
+# rerun with both unchanged finds its own output already published and reuses
+# it instead of recompiling, and any change to either forces a rebuild.
 artifact_tag() {
     local project="$1" hash
     hash="$(project_hash "${project}")" || return 1
-    echo "${ARTIFACT_REPO}:art-${project}-${BACKEND}-${hash:0:12}"
+    echo "${ARTIFACT_REPO}:art-${project}-${BACKEND}-${hash:0:12}-$(recipe_hash "${project}")"
 }
 
 artifact_exists() {
@@ -330,8 +347,6 @@ if [[ "$MODE" == "resolve" ]]; then
     exit 0
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
 BUILD_ARGS=(
     --build-arg "BACKEND=${BACKEND}"
     --build-arg "LLAMA_COMMIT_HASH=${LLAMA_HASH}"
@@ -358,7 +373,7 @@ if [[ "$MODE" == "stage" ]]; then
     echo "Artifacts image: ${ARTIFACT_TAG}"
 
     if [[ "$NO_CACHE" != true ]] && artifact_exists "${ARTIFACT_TAG}"; then
-        echo "Already published for this commit, nothing to build."
+        echo "Already published for this commit and recipe, nothing to build."
         exit 0
     fi
 
