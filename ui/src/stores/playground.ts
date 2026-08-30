@@ -4,12 +4,12 @@ export type PlaygroundTab = "chat" | "docs" | "images" | "speech" | "audio" | "r
 
 export const playgroundTabs: { id: PlaygroundTab; label: string }[] = [
   { id: "chat", label: "Chat" },
-  { id: "docs", label: "Docs" },
   { id: "images", label: "Images" },
   { id: "speech", label: "Speech" },
   { id: "audio", label: "Transcription" },
   { id: "rerank", label: "Rerank" },
   { id: "concurrency", label: "Load Test" },
+  { id: "docs", label: "Help" },
 ];
 
 export const selectedPlaygroundTab = persistentStore<PlaygroundTab>("playground-selected-tab", "chat");
