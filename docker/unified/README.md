@@ -23,7 +23,7 @@ docker run --rm --entrypoint cat llama-swap:unified-cuda \
 ```
 
 Replace the example entries with your models, then point the `audio` entry in
-`config.yaml` at it (see `config.example.yaml`). Every model needs a `family`
+`config.yaml` at it (see `docs/config.example.yaml`). Every model needs a `family`
 matching an audio.cpp model spec, and a `path` to the package inside the
 container.
 
@@ -61,4 +61,3 @@ and ik_llama.cpp, so each addition lengthens every build.
 The Vulkan image builds audio.cpp with `ENGINE_ENABLE_VULKAN=ON`. audio.cpp is
 tuned for CUDA, and the server prints a notice on startup that a non-CUDA
 backend may have lower performance and model coverage.
-

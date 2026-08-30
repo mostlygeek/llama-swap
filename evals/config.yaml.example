@@ -1,0 +1,15 @@
+macros:
+  MPATH: /path/to/models
+
+models:
+  # the docs-agent uses gemma-4-12B Q4_K_M with MTP as a baseline.
+  # if you've gotten to this point you will have a configuration
+  # that looks like this
+  "gemma-4-12B":
+    cmd: >
+      /path/to/llama-server -listen localhost:${PORT}
+      --model {MPATH}/unsloth/gemma-4-12b-it-Q4_K_M.gguf
+      --model-draft ${MPATH}/unsloth/MTP/mtp-gemma-4-12b-it-Q8_0.gguf
+      --spec-type draft-mtp --spec-draft-n-max 4
+      --mmproj ${MPATH}/unsloth/gemma-4-12B-mmproj-F16.gguf
+      --temp 1.0 --top-p 0.95 --top-k 64

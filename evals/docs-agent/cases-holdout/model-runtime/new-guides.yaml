@@ -1,0 +1,13 @@
+- id: holdout-capabilities-are-not-features
+  question: Does declaring tools true make a model without a compatible template generate tool calls?
+  expect_any: ["does not", "doesn't", "not"]
+  expect_regex: ["template"]
+  expect_tools_any: [docs__search_docs, docs__get_doc]
+  require_tools: true
+
+- id: holdout-loading-state-not-speed
+  question: Does sendLoadingState make model startup faster or only report progress to the client?
+  expect_any: ["not", "only"]
+  expect_regex: ["loading"]
+  expect_tools_any: [docs__search_docs, docs__get_doc]
+  require_tools: true

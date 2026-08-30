@@ -1,0 +1,77 @@
+# Grounded in docs/kb/guides/troubleshooting-model-wont-load.md and tutorials/running-in-docker.md
+- id: trouble-starts-but-hangs
+  question: My model process starts fine but every request hangs or returns a connection error. What is wrong?
+  tags: [troubleshooting]
+  expect_regex: ["proxy"]
+  expect_any: ["port"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Almost always a mismatch between the port in `cmd` and `proxy`. proxy
+    defaults to http://localhost:${PORT}; if cmd hardcodes a port, proxy must
+    point at it. This is the most common misconfiguration.
+  rubric:
+    - Identifies a proxy/port mismatch as the likely cause
+    - Explains how to fix it
+
+- id: trouble-health-check
+  question: My inference server has no /health endpoint and llama-swap never considers it ready. What do I change?
+  tags: [troubleshooting]
+  expect_regex: ["checkEndpoint"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Set `checkEndpoint` to a path the server does serve, or `"none"` to skip
+    the check. llama-swap polls checkEndpoint (default /health) until it
+    returns HTTP 200, otherwise requests wait out healthCheckTimeout.
+  rubric:
+    - Names the checkEndpoint setting
+    - Mentions that the default is /health, or that "none" disables the check
+
+- id: trouble-where-are-logs
+  question: Where do I see the actual error output from a model that failed to start?
+  tags: [troubleshooting, logs]
+  expect_any: ["upstream", "/logs"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    `curl http://localhost:8080/logs`, or the Logs page in the web UI. The
+    upstream stream is the model's own stdout/stderr, which is where the real
+    error usually is. `logLevel: debug` turns up detail.
+  rubric:
+    - Points at the /logs endpoint or the UI Logs page
+    - Notes the upstream stream carries the model's own output
+
+- id: trouble-docker-cmdstop
+  question: When I run a model in Docker, the container keeps running after llama-swap unloads it. How do I fix that?
+  tags: [troubleshooting, docker]
+  expect_regex: ["cmdStop"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Set `cmdStop: docker stop ${MODEL_ID}`. Without it llama-swap SIGTERMs the
+    `docker run` client rather than the container, leaving the container
+    running and holding VRAM.
+  rubric:
+    - Names cmdStop and shows docker stop with ${MODEL_ID}
+    - Explains that signalling the docker run client does not stop the container
+
+- id: trouble-docker-port-mapping
+  question: What should proxy be set to for a model running in a Docker container?
+  tags: [docker, proxy]
+  expect_regex: ["proxy", "\\$\\{PORT\\}"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    `proxy: "http://127.0.0.1:${PORT}"`, with `-p ${PORT}:NNNN` mapping that
+    host port to the fixed port the server listens on inside the container.
+  rubric:
+    - Gives proxy as http://127.0.0.1:${PORT}
+    - Explains the -p host:container port mapping
+
+- id: trouble-first-step
+  question: A model won't load at all. What is the very first thing I should check?
+  tags: [troubleshooting]
+  expect_any: ["shell", "on its own", "by hand", "manually", "command"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Run the `cmd` yourself in a shell with a real port substituted for
+    ${PORT}. If it fails there it is not a llama-swap problem.
+  rubric:
+    - Says to run the cmd directly in a shell first
+    - Explains this separates llama-swap problems from server problems

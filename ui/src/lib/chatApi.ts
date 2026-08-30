@@ -3,9 +3,35 @@ import { playgroundSessionHeaders } from "./playgroundSession";
 
 export type Endpoint = "v1/chat/completions" | "v1/messages" | "v1/responses";
 
+/** One entry of the OpenAI-format `tools` array, mapped from an MCP tools/list. */
+export interface ToolDefinition {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+    /** Human-friendly display name from the MCP tool's `title`, when it has one. */
+    title?: string;
+  };
+}
+
+/**
+ * A fragment of a tool call. Backends disagree on how these are split: some
+ * omit `index`, some repeat the full `name` on every chunk. See
+ * accumulateToolCalls in agentLoop.ts for how they are reassembled.
+ */
+export interface ToolCallDelta {
+  index?: number;
+  id?: string;
+  type?: string;
+  function?: { name?: string; arguments?: string };
+}
+
 export interface StreamChunk {
   content: string;
   reasoning_content?: string;
+  tool_calls?: ToolCallDelta[];
+  finish_reason?: string;
   done: boolean;
 }
 
@@ -13,6 +39,8 @@ export interface ChatOptions {
   temperature?: number;
   endpoint?: Endpoint;
   max_tokens?: number;
+  tools?: ToolDefinition[];
+  tool_choice?: "auto" | "none" | "required";
 }
 
 function parseDataUrl(url: string): { media_type: string; data: string } {
@@ -27,6 +55,12 @@ function splitSystemMessages(messages: ChatMessage[]): { system: string; rest: C
   const systemParts: string[] = [];
   const rest: ChatMessage[] = [];
   for (const msg of messages) {
+    // /v1/messages and /v1/responses are text-only here, but the history can
+    // still hold tool messages from an earlier agent turn if the user switched
+    // endpoints mid-conversation. Passing one through is a hard 400 upstream.
+    if (msg.role === "tool") {
+      continue;
+    }
     if (msg.role === "system") {
       if (typeof msg.content === "string") {
         systemParts.push(msg.content);
@@ -45,13 +79,38 @@ function splitSystemMessages(messages: ChatMessage[]): { system: string; rest: C
 function buildChatCompletionsBody(model: string, messages: ChatMessage[], options?: ChatOptions): object {
   return {
     model,
-    messages: messages.map((m) => ({
-      role: m.role,
-      content: m.content,
-    })),
+    messages: messages.map((m) => {
+      // content is coerced to "" rather than left undefined: an assistant turn
+      // that only made tool calls has no text, and several backends reject a
+      // message with a missing content field.
+      const out: Record<string, unknown> = { role: m.role, content: m.content ?? "" };
+      if (m.role === "assistant" && m.tool_calls?.length) {
+        out.tool_calls = m.tool_calls;
+      }
+      if (m.role === "tool") {
+        out.tool_call_id = m.tool_call_id;
+        if (m.name) out.name = m.name;
+      }
+      return out;
+    }),
     stream: true,
     temperature: options?.temperature,
     ...(options?.max_tokens ? { max_tokens: options.max_tokens } : {}),
+    ...(options?.tools?.length
+      ? {
+          // Strip UI-only metadata (e.g. `function.title`) so only the wire
+          // fields the API defines reach the backend.
+          tools: options.tools.map((t) => ({
+            type: t.type,
+            function: {
+              name: t.function.name,
+              description: t.function.description,
+              parameters: t.function.parameters,
+            },
+          })),
+          tool_choice: options.tool_choice ?? "auto",
+        }
+      : {}),
   };
 }
 
@@ -112,13 +171,17 @@ function buildResponsesBody(model: string, messages: ChatMessage[], options?: Ch
   return body;
 }
 
-function buildRequest(
+// Exported for tests: this is the whole request-shaping surface.
+export function buildRequest(
   endpoint: Endpoint,
   model: string,
   messages: ChatMessage[],
   options?: ChatOptions
 ): { url: string; body: object } {
   const url = "/" + endpoint;
+  if (options?.tools?.length && endpoint !== "v1/chat/completions") {
+    throw new Error("Tool calling is only supported on /v1/chat/completions");
+  }
   switch (endpoint) {
     case "v1/messages":
       return { url, body: buildMessagesBody(model, messages, options) };
@@ -130,7 +193,8 @@ function buildRequest(
   }
 }
 
-function parseChatCompletionsLine(line: string): StreamChunk | null {
+// Exported for tests.
+export function parseChatCompletionsLine(line: string): StreamChunk | null {
   const trimmed = line.trim();
   if (!trimmed || !trimmed.startsWith("data: ")) {
     return null;
@@ -143,12 +207,15 @@ function parseChatCompletionsLine(line: string): StreamChunk | null {
 
   try {
     const parsed = JSON.parse(data);
-    const delta = parsed.choices?.[0]?.delta;
+    const choice = parsed.choices?.[0];
+    const delta = choice?.delta;
     const content = delta?.content || "";
     const reasoning_content = delta?.reasoning_content || delta?.reasoning || "";
+    const tool_calls = Array.isArray(delta?.tool_calls) ? (delta.tool_calls as ToolCallDelta[]) : undefined;
+    const finish_reason = choice?.finish_reason || undefined;
 
-    if (content || reasoning_content) {
-      return { content, reasoning_content, done: false };
+    if (content || reasoning_content || tool_calls || finish_reason) {
+      return { content, reasoning_content, tool_calls, finish_reason, done: false };
     }
     return null;
   } catch {

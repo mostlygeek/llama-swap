@@ -1,0 +1,25 @@
+- id: hard-group-swap-semantics
+  question: A group has swap true and exclusive false. I request a second member of that group. What happens to the first?
+  tags: [routing, trap]
+  expect_any: ["unload", "evict", "stop"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    It is unloaded. swap: true means only one member of the group runs at a
+    time. exclusive: false only affects other groups, which are left alone.
+  rubric:
+    - Says the first member is unloaded
+    - Attributes it to swap true governing members among themselves
+    - Notes exclusive false means other groups are unaffected
+
+- id: hard-matrix-operators
+  question: In a llama-swap matrix set expression, what do the & and | operators mean?
+  tags: [routing, multihop]
+  expect_regex: ["&", "\\|"]
+  expect_any: ["and", "or"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    `&` is AND -- these models run together. `|` is OR -- alternatives.
+    Parentheses group, and `+name` inlines another set's expression.
+  rubric:
+    - Says & means the models run together (AND)
+    - Says | means alternatives (OR)

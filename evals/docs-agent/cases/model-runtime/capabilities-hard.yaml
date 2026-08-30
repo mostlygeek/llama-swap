@@ -1,0 +1,14 @@
+- id: hard-capabilities-trap
+  question: If I set capabilities.tools true on a model whose GGUF has no tool template, will it start emitting tool calls?
+  tags: [tools, trap]
+  expect_any: ["no", "not", "won't", "will not"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    No. capabilities.tools is advertising only -- it changes what /v1/models
+    reports and nothing about how requests are proxied. Setting it on a model
+    that cannot do tools is the worse mistake, because clients then send tool
+    definitions that get silently ignored.
+  rubric:
+    - Answers no
+    - Explains the flag is advertising only
+    - Notes that setting it on an incapable model causes tools to be silently ignored

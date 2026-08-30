@@ -1,6 +1,6 @@
 import { persistentStore } from "./persistent";
 
-export type PlaygroundTab = "chat" | "images" | "speech" | "audio" | "rerank" | "concurrency";
+export type PlaygroundTab = "chat" | "docs" | "images" | "speech" | "audio" | "rerank" | "concurrency";
 
 export const playgroundTabs: { id: PlaygroundTab; label: string }[] = [
   { id: "chat", label: "Chat" },
@@ -9,6 +9,7 @@ export const playgroundTabs: { id: PlaygroundTab; label: string }[] = [
   { id: "audio", label: "Transcription" },
   { id: "rerank", label: "Rerank" },
   { id: "concurrency", label: "Load Test" },
+  { id: "docs", label: "Help" },
 ];
 
 export const selectedPlaygroundTab = persistentStore<PlaygroundTab>("playground-selected-tab", "chat");

@@ -241,7 +241,7 @@ COPY --from=vllm-wrapper-build /install/bin/vllm-wrapper /usr/local/bin/
 
 RUN ldconfig
 
-COPY config.example.yaml /etc/llama-swap/config/config.yaml
+COPY docs/config.example.yaml /etc/llama-swap/config/config.yaml
 
 # audiocpp_server takes its own JSON config. Ship a starter with this image's
 # backend baked in -- the binary defaults to "cuda", so a vulkan image that

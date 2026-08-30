@@ -1,0 +1,76 @@
+# Grounded in docs/kb/guides/ttl-and-unloading.md
+- id: ttl-unload-after-5min
+  question: How do I make a model unload after 5 minutes of inactivity?
+  tags: [ttl]
+  expect_regex: ["ttl", "300"]
+  expect_any: ["second"]
+  expect_tools: [docs__search_docs]
+  max_iterations: 5
+  reference: |
+    Set `ttl: 300` on the model. ttl is in seconds and measures inactivity --
+    the timer resets on every request.
+
+    ```yaml
+    models:
+      qwen-coder:
+        ttl: 300
+        cmd: llama-server --port ${PORT} -m /models/qwen.gguf
+    ```
+  rubric:
+    - States that ttl is measured in seconds
+    - Shows a yaml snippet setting ttl to 300 on a model
+    - Does not claim unloadTimeout is what controls idle unloading
+
+- id: ttl-vs-unloadtimeout
+  question: What is the difference between ttl and unloadTimeout?
+  tags: [ttl]
+  expect_regex: ["ttl", "unloadTimeout"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    ttl decides *when* a model is unloaded (seconds of inactivity).
+    unloadTimeout decides *how long to wait* for the process to exit once
+    unloading has started. unloadTimeout applies to every unload: TTL expiry, a
+    manual unload, or a swap.
+  rubric:
+    - Says ttl controls when unloading starts, based on idle time
+    - Says unloadTimeout controls how long to wait for the process to exit
+    - Does not conflate the two
+
+- id: ttl-never-unload
+  question: What ttl value keeps a model loaded forever and never unloads it automatically?
+  tags: [ttl]
+  expect_regex: ["\\b0\\b"]
+  expect_tools: [docs__search_docs]
+  max_iterations: 5
+  reference: |
+    `ttl: 0` means never unload automatically. The default is `-1`, which
+    inherits globalTTL.
+  rubric:
+    - States that ttl 0 means never unload automatically
+    - Does not claim -1 or a large number is the way to never unload
+
+- id: ttl-default-value
+  question: What is the default value of a model's ttl setting, and what does it mean?
+  tags: [ttl]
+  expect_regex: ["-1"]
+  expect_any: ["globalTTL", "global"]
+  # get_config_schema is as good an answer here as search_docs; pinning to one
+  # would measure conformity rather than accuracy.
+  expect_tools_any: [docs__search_docs, docs__get_config_schema]
+  reference: |
+    The default is `-1`, which means inherit `globalTTL`.
+  rubric:
+    - States the default is -1
+    - Explains that -1 inherits globalTTL
+
+- id: ttl-unload-on-demand
+  question: How can I unload a specific model right now with curl, without waiting for its ttl?
+  tags: [ttl, api]
+  expect_regex: ["/api/models/unload"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    `curl -X POST http://localhost:8080/api/models/unload/<model-id>` unloads
+    one model. Omitting the model id, or `GET /unload`, unloads everything.
+  rubric:
+    - Gives the /api/models/unload endpoint with a model id
+    - Shows a runnable curl command

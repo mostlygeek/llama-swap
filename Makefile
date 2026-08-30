@@ -99,6 +99,11 @@ wol-proxy: $(BUILD_DIR)
 test-ui:
 	cd ui && npm ci && npm run check && npm test
 
+# Score the Playground's Docs Agent against a local model. Builds and starts
+# llama-swap itself; see evals/docs-agent/README.md for the tuning loop.
+eval-docs-agent:
+	./evals/docs-agent/run.sh $(EVAL_ARGS)
+
 # Phony targets
-.PHONY: all clean ui mac windows simple-responder simple-responder-windows test test-all test-dev test-ui wol-proxy
+.PHONY: all clean ui mac windows simple-responder simple-responder-windows test test-all test-dev test-ui wol-proxy eval-docs-agent
 .PHONY: linux linux-arm64 linux-amd64
