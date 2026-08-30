@@ -41,7 +41,7 @@ on:
         required: false
         default: true
       push_to_ghcr:
-        description: "Push images to ghcr.io"
+        description: "Push the unified images to ghcr.io (per-project artifacts images are always pushed; they are how the build stages reach the assemble job)"
         type: boolean
         required: false
         default: true
@@ -50,13 +50,48 @@ permissions:
   contents: read
   packages: write
 
+# Each upstream project is compiled in its own job and published as an
+# artifacts-only image, then a final job copies those into the unified image.
+# Building them all in one job put five concurrent CUDA compiles on a four-core
+# runner, which stopped fitting in the 6h job limit; a cancelled job also never
+# reached --cache-to, so nothing was cached and every later run rebuilt
+# everything from scratch. Artifacts images are tagged by upstream commit, so a
+# project that has not moved is skipped, and one project overrunning no longer
+# discards the other four.
 jobs:
   setup:
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      backends: ${{ steps.set-matrix.outputs.backends }}
+      builds: ${{ steps.set-matrix.outputs.builds }}
+      llama_hash: ${{ steps.refs.outputs.llama_hash }}
+      whisper_hash: ${{ steps.refs.outputs.whisper_hash }}
+      sd_hash: ${{ steps.refs.outputs.sd_hash }}
+      audio_hash: ${{ steps.refs.outputs.audio_hash }}
+      ik_llama_hash: ${{ steps.refs.outputs.ik_llama_hash }}
+      ls_hash: ${{ steps.refs.outputs.ls_hash }}
     steps:
-      - id: set-matrix
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
+
+      # Resolve every ref once, here. The build and assemble jobs are handed
+      # full commit hashes, so a branch that moves mid-run cannot leave two
+      # jobs building different revisions of the same project.
+      - name: Resolve upstream commits
+        id: refs
+        env:
+          LLAMA_REF: ${{ inputs.llama_cpp_ref || 'master' }}
+          WHISPER_REF: ${{ inputs.whisper_ref || 'master' }}
+          SD_REF: ${{ inputs.sd_ref || 'master' }}
+          AUDIO_REF: ${{ inputs.audio_ref || 'main' }}
+          IK_LLAMA_REF: ${{ inputs.ik_llama_ref || 'main' }}
+          LS_VERSION: ${{ inputs.llama_swap_version || 'main' }}
+        run: |
+          chmod +x docker/unified/build-image.sh
+          docker/unified/build-image.sh --cuda --resolve | tee -a "$GITHUB_OUTPUT"
+
+      - name: Build job matrix
+        id: set-matrix
         run: |
           backends=()
           # schedule uses defaults (build both); workflow_dispatch respects inputs
@@ -66,17 +101,92 @@ jobs:
           if [[ "${{ github.event_name }}" == "schedule" ]] || [[ "${{ inputs.build_vulkan }}" == "true" ]]; then
             backends+=("vulkan")
           fi
-          matrix=$(printf '%s\n' "${backends[@]}" | jq -R . | jq -sc .)
-          echo "matrix=$matrix" >> $GITHUB_OUTPUT
 
-  build:
+          if [[ ${#backends[@]} -eq 0 ]]; then
+            echo "backends=[]" >> $GITHUB_OUTPUT
+            echo "builds=[]" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          backends_json=$(printf '%s\n' "${backends[@]}" | jq -R . | jq -sc .)
+
+          # One job per backend/project pair. ik_llama.cpp is CUDA only.
+          builds='[]'
+          for backend in "${backends[@]}"; do
+            projects=(whisper sd audio llama)
+            if [[ "$backend" == "cuda" ]]; then
+              projects+=("ik-llama")
+            fi
+            for project in "${projects[@]}"; do
+              builds=$(jq -c --arg b "$backend" --arg p "$project" \
+                '. + [{backend: $b, project: $p}]' <<< "$builds")
+            done
+          done
+
+          echo "backends=$backends_json" >> $GITHUB_OUTPUT
+          echo "builds=$builds" >> $GITHUB_OUTPUT
+
+  build-artifacts:
     needs: setup
-    if: ${{ needs.setup.outputs.matrix != '[]' }}
+    if: ${{ needs.setup.outputs.builds != '[]' }}
+    name: build ${{ matrix.project }} (${{ matrix.backend }})
     runs-on: ubuntu-latest
+    # Each project gets a runner to itself now. GitHub's hard cap is 360m; stop
+    # short of it so an overrun is reported as a timeout on one project rather
+    # than a silent cancellation of the whole build.
+    timeout-minutes: 330
     strategy:
       fail-fast: false
       matrix:
-        backend: ${{ fromJSON(needs.setup.outputs.matrix) }}
+        include: ${{ fromJSON(needs.setup.outputs.builds) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
+
+      - name: Free up disk space
+        run: |
+          echo "Before cleanup:"
+          df -h
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker system prune -af
+          echo "After cleanup:"
+          df -h
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd #v4.0.0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish artifacts
+        env:
+          LLAMA_REF: ${{ needs.setup.outputs.llama_hash }}
+          WHISPER_REF: ${{ needs.setup.outputs.whisper_hash }}
+          SD_REF: ${{ needs.setup.outputs.sd_hash }}
+          AUDIO_REF: ${{ needs.setup.outputs.audio_hash }}
+          IK_LLAMA_REF: ${{ needs.setup.outputs.ik_llama_hash }}
+          LS_VERSION: ${{ needs.setup.outputs.ls_hash }}
+        run: |
+          chmod +x docker/unified/build-image.sh
+          docker/unified/build-image.sh --${{ matrix.backend }} --stage=${{ matrix.project }}
+
+  assemble:
+    needs: [setup, build-artifacts]
+    if: ${{ needs.setup.outputs.backends != '[]' }}
+    name: assemble (${{ matrix.backend }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: ${{ fromJSON(needs.setup.outputs.backends) }}
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
@@ -108,14 +218,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build unified Docker image (${{ matrix.backend }})
+      # Copies each project's published /install into the runtime image. The
+      # compile stages are not part of this build's graph, so this is minutes.
+      - name: Assemble unified Docker image (${{ matrix.backend }})
         env:
-          LLAMA_REF: ${{ inputs.llama_cpp_ref || 'master' }}
-          WHISPER_REF: ${{ inputs.whisper_ref || 'master' }}
-          SD_REF: ${{ inputs.sd_ref || 'master' }}
-          AUDIO_REF: ${{ inputs.audio_ref || 'main' }}
-          IK_LLAMA_REF: ${{ inputs.ik_llama_ref || 'main' }}
-          LS_VERSION: ${{ inputs.llama_swap_version || 'main' }}
+          LLAMA_REF: ${{ needs.setup.outputs.llama_hash }}
+          WHISPER_REF: ${{ needs.setup.outputs.whisper_hash }}
+          SD_REF: ${{ needs.setup.outputs.sd_hash }}
+          AUDIO_REF: ${{ needs.setup.outputs.audio_hash }}
+          IK_LLAMA_REF: ${{ needs.setup.outputs.ik_llama_hash }}
+          LS_VERSION: ${{ needs.setup.outputs.ls_hash }}
           DOCKER_IMAGE_TAG: ghcr.io/mostlygeek/llama-swap:unified-${{ matrix.backend }}
           # When running under act, use the local builder that has warm ccache.
           # On GitHub Actions, BUILDX_BUILDER is unset so docker uses the builder
@@ -123,7 +235,7 @@ jobs:
           BUILDX_BUILDER: ${{ env.ACT == 'true' && 'llama-swap-builder' || '' }}
         run: |
           chmod +x docker/unified/build-image.sh
-          docker/unified/build-image.sh --${{ matrix.backend }}
+          docker/unified/build-image.sh --${{ matrix.backend }} --assemble
 
       - name: Push to GitHub Container Registry
         if: ${{ !env.ACT && (github.event_name == 'schedule' || inputs.push_to_ghcr == true) }}

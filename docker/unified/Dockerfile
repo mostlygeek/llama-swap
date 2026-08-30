@@ -11,6 +11,18 @@
 
 ARG BACKEND=cuda
 
+# Source of each project's /install artifacts. The default names the local
+# <project>-artifacts stage, so an ordinary build compiles everything in one
+# pass. CI overrides these with published artifacts images so each project can
+# compile on its own runner; BuildKit then never enters the compile stages.
+# These must stay above the first FROM -- only ARGs declared there are global
+# build args, and a FROM can only expand a global.
+ARG WHISPER_IMAGE=whisper-artifacts
+ARG SD_IMAGE=sd-artifacts
+ARG AUDIO_IMAGE=audio-artifacts
+ARG LLAMA_IMAGE=llama-artifacts
+ARG IK_LLAMA_IMAGE=ik-llama-artifacts
+
 # ── Builder bases ──────────────────────────────────────────────────────
 
 FROM nvidia/cuda:12.9.1-devel-ubuntu24.04 AS builder-base-cuda
@@ -61,6 +73,24 @@ WORKDIR /build
 
 FROM builder-base-${BACKEND} AS builder-base
 
+# ── Upstream project builds ───────────────────────────────────────────
+#
+# Each project contributes to the runtime image through exactly one thing: an
+# /install directory. That is expressed as a pair of stages per project:
+#
+#   <project>-artifacts : FROM scratch, holding only /install. Cheap to push,
+#                         so CI can compile each project on its own runner and
+#                         publish the result (build-image.sh --stage=<project>).
+#   <project>-src       : where the runtime stage COPYs from. Defaults to the
+#                         local -artifacts stage, so a plain `build-image.sh
+#                         --cuda` still compiles everything in one pass. Set
+#                         <PROJECT>_IMAGE to a published artifacts image and
+#                         BuildKit pulls it instead of compiling -- the COPY
+#                         lines in the runtime stage do not change either way.
+#
+# BuildKit only evaluates the branch that is selected, so an assemble build
+# never enters the compile stages at all.
+
 # ── Build whisper.cpp (fastest build, run first) ──────────────────────
 
 FROM builder-base AS whisper-build
@@ -73,6 +103,11 @@ RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
     BACKEND=${BACKEND} WHISPER_FFMPEG=${WHISPER_FFMPEG} \
     bash /build/install-whisper.sh "${WHISPER_COMMIT_HASH}"
 
+FROM scratch AS whisper-artifacts
+COPY --from=whisper-build /install /install
+
+FROM ${WHISPER_IMAGE} AS whisper-src
+
 # ── Build stable-diffusion.cpp ────────────────────────────────────────
 
 FROM builder-base AS sd-build
@@ -82,6 +117,11 @@ COPY install-sd.sh /build/
 RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
     --mount=type=cache,id=sd-${BACKEND},target=/src/stable-diffusion.cpp/build \
     BACKEND=${BACKEND} bash /build/install-sd.sh "${SD_COMMIT_HASH}"
+
+FROM scratch AS sd-artifacts
+COPY --from=sd-build /install /install
+
+FROM ${SD_IMAGE} AS sd-src
 
 # ── Build audio.cpp ───────────────────────────────────────────────────
 
@@ -93,6 +133,11 @@ RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
     --mount=type=cache,id=audio-${BACKEND},target=/src/audio.cpp/build \
     BACKEND=${BACKEND} bash /build/install-audio.sh "${AUDIO_COMMIT_HASH}"
 
+FROM scratch AS audio-artifacts
+COPY --from=audio-build /install /install
+
+FROM ${AUDIO_IMAGE} AS audio-src
+
 # ── Build llama.cpp (slowest build, run last) ─────────────────────────
 
 FROM builder-base AS llama-build
@@ -102,6 +147,11 @@ COPY install-llama.sh /build/
 RUN --mount=type=cache,id=ccache-${BACKEND},target=/ccache \
     --mount=type=cache,id=llama-${BACKEND},target=/src/llama.cpp/build \
     BACKEND=${BACKEND} bash /build/install-llama.sh "${LLAMA_COMMIT_HASH}"
+
+FROM scratch AS llama-artifacts
+COPY --from=llama-build /install /install
+
+FROM ${LLAMA_IMAGE} AS llama-src
 
 # ── Build ik_llama.cpp (CUDA only) ────────────────────────────────────
 #
@@ -123,6 +173,11 @@ RUN --mount=type=cache,id=ccache-cuda,target=/ccache \
 
 ARG BACKEND=cuda
 FROM ik-llama-${BACKEND} AS ik-llama-build
+
+FROM scratch AS ik-llama-artifacts
+COPY --from=ik-llama-build /install /install
+
+FROM ${IK_LLAMA_IMAGE} AS ik-llama-src
 
 # ── Download llama-swap release binary ────────────────────────────────
 
@@ -204,30 +259,30 @@ RUN if [ "$RUN_UID" != "0" ]; then \
 WORKDIR /app
 
 # Copy whisper.cpp binaries and libraries
-COPY --from=whisper-build /install/bin/whisper-server /usr/local/bin/
-COPY --from=whisper-build /install/bin/whisper-cli /usr/local/bin/
-COPY --from=whisper-build /install/lib/ /usr/local/lib/
+COPY --from=whisper-src /install/bin/whisper-server /usr/local/bin/
+COPY --from=whisper-src /install/bin/whisper-cli /usr/local/bin/
+COPY --from=whisper-src /install/lib/ /usr/local/lib/
 
 # Copy stable-diffusion.cpp binaries and libraries
-COPY --from=sd-build /install/bin/sd-server /usr/local/bin/
-COPY --from=sd-build /install/bin/sd-cli /usr/local/bin/
-COPY --from=sd-build /install/lib/ /usr/local/lib/
+COPY --from=sd-src /install/bin/sd-server /usr/local/bin/
+COPY --from=sd-src /install/bin/sd-cli /usr/local/bin/
+COPY --from=sd-src /install/lib/ /usr/local/lib/
 
 # Copy audio.cpp binaries (statically linked, model specs compiled in via
 # AUDIOCPP_DEPLOYMENT_BUILD). The on-disk spec catalog is installed too so
 # --model-spec-override has a path to point at.
-COPY --from=audio-build /install/bin/audiocpp_server /usr/local/bin/
-COPY --from=audio-build /install/bin/audiocpp_cli /usr/local/bin/
-COPY --from=audio-build /install/share/audiocpp/ /usr/local/share/audiocpp/
+COPY --from=audio-src /install/bin/audiocpp_server /usr/local/bin/
+COPY --from=audio-src /install/bin/audiocpp_cli /usr/local/bin/
+COPY --from=audio-src /install/share/audiocpp/ /usr/local/share/audiocpp/
 
 # Copy llama.cpp binaries (statically linked)
-COPY --from=llama-build /install/bin/llama-server /usr/local/bin/
-COPY --from=llama-build /install/bin/llama-cli /usr/local/bin/
-COPY --from=llama-build /install/bin/llama-tts /usr/local/bin/
-COPY --from=llama-build /install/bin/llama-bench /usr/local/bin/
+COPY --from=llama-src /install/bin/llama-server /usr/local/bin/
+COPY --from=llama-src /install/bin/llama-cli /usr/local/bin/
+COPY --from=llama-src /install/bin/llama-tts /usr/local/bin/
+COPY --from=llama-src /install/bin/llama-bench /usr/local/bin/
 
 # Copy ik-llama-server (CUDA only; empty copy for vulkan)
-COPY --from=ik-llama-build /install/bin/ /usr/local/bin/
+COPY --from=ik-llama-src /install/bin/ /usr/local/bin/
 
 # Install uv
 RUN pip install uv --break-system-packages

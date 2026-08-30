@@ -14,12 +14,30 @@
 #   LS_VERSION=170 ./build-image.sh --cuda               # Override llama-swap version
 #   IK_LLAMA_REF=main ./build-image.sh --cuda            # Pin ik_llama.cpp to main branch (CUDA only)
 #
+# Split build (CI only). Compiling every upstream project in one job puts five
+# concurrent CUDA builds on four cores, which no longer fits in a GitHub Actions
+# job. These modes let each project compile on its own runner and publish an
+# artifacts-only image, which a final assemble step copies into the unified
+# image. The resulting image is identical either way -- see README.md.
+#
+#   ./build-image.sh --cuda --resolve         # print resolved hashes as key=value
+#   ./build-image.sh --cuda --stage=whisper   # build + push one project's artifacts
+#   ./build-image.sh --cuda --assemble        # assemble unified image from artifacts
+#
 
 set -euo pipefail
 
 BACKEND=""
 NO_CACHE=false
+MODE="unified"
+STAGE_PROJECT=""
 WHISPER_FFMPEG="${WHISPER_FFMPEG:-yes}"
+
+# Registry holding the per-project artifacts images used by --stage/--assemble.
+ARTIFACT_REPO="${ARTIFACT_REPO:-ghcr.io/mostlygeek/llama-swap}"
+
+# Upstream projects compiled into the image. ik-llama is CUDA only.
+ALL_PROJECTS=(whisper sd audio llama ik-llama)
 
 for arg in "$@"; do
     case $arg in
@@ -32,6 +50,16 @@ for arg in "$@"; do
         --no-cache)
             NO_CACHE=true
             ;;
+        --resolve)
+            MODE="resolve"
+            ;;
+        --assemble)
+            MODE="assemble"
+            ;;
+        --stage=*)
+            MODE="stage"
+            STAGE_PROJECT="${arg#*=}"
+            ;;
         --help|-h)
             echo "Usage: ./build-image.sh --cuda|--vulkan [--no-cache]"
             echo ""
@@ -40,6 +68,12 @@ for arg in "$@"; do
             echo "  --vulkan    Build Vulkan image (AMD GPUs and compatible hardware)"
             echo "  --no-cache  Force rebuild without using Docker cache"
             echo "  --help, -h  Show this help message"
+            echo ""
+            echo "Split build (CI only):"
+            echo "  --resolve         Print resolved commit hashes as key=value and exit"
+            echo "  --stage=PROJECT   Build and push one project's artifacts image"
+            echo "                    (${ALL_PROJECTS[*]})"
+            echo "  --assemble        Assemble the unified image from published artifacts"
             echo ""
             echo "Environment variables:"
             echo "  DOCKER_IMAGE_TAG     Set custom image tag (default: llama-swap:unified-cuda or llama-swap:unified-vulkan)"
@@ -50,6 +84,8 @@ for arg in "$@"; do
             echo "  IK_LLAMA_REF         Pin ik_llama.cpp to a commit, tag, or branch (CUDA only)"
             echo "  LS_VERSION           Override llama-swap version (e.g., '170' or 'latest')"
             echo "  WHISPER_FFMPEG       Enable whisper.cpp FFmpeg support (default: yes)"
+            echo "  ARTIFACT_REPO        Registry for --stage/--assemble artifacts images"
+            echo "                       (default: ghcr.io/mostlygeek/llama-swap)"
             exit 0
             ;;
     esac
@@ -61,6 +97,14 @@ if [[ -z "$BACKEND" ]]; then
     echo "Usage: ./build-image.sh --cuda|--vulkan [--no-cache]"
     exit 1
 fi
+
+# --resolve emits machine-readable output only, so the progress chatter that
+# every other mode prints has to stay off it.
+log() {
+    if [[ "$MODE" != "resolve" ]]; then
+        echo "$@"
+    fi
+}
 
 DOCKER_IMAGE_TAG="${DOCKER_IMAGE_TAG:-llama-swap:unified-${BACKEND}}"
 
@@ -116,99 +160,175 @@ get_latest_hash() {
     git ls-remote "${1}" HEAD 2>/dev/null | head -1 | cut -f1
 }
 
-echo "=========================================="
-echo "llama-swap Unified Build (${BACKEND})"
-echo "=========================================="
-echo ""
+# Projects built for this backend. ik_llama.cpp has no vulkan support.
+backend_projects() {
+    local project
+    for project in "${ALL_PROJECTS[@]}"; do
+        if [[ "${project}" == "ik-llama" && "${BACKEND}" != "cuda" ]]; then
+            continue
+        fi
+        echo "${project}"
+    done
+}
+
+project_hash() {
+    case "$1" in
+        whisper)  echo "${WHISPER_HASH}" ;;
+        sd)       echo "${SD_HASH}" ;;
+        audio)    echo "${AUDIO_HASH}" ;;
+        llama)    echo "${LLAMA_HASH}" ;;
+        ik-llama) echo "${IK_LLAMA_HASH}" ;;
+        *) echo "ERROR: unknown project '$1'" >&2; return 1 ;;
+    esac
+}
+
+project_image_arg() {
+    case "$1" in
+        whisper)  echo "WHISPER_IMAGE" ;;
+        sd)       echo "SD_IMAGE" ;;
+        audio)    echo "AUDIO_IMAGE" ;;
+        llama)    echo "LLAMA_IMAGE" ;;
+        ik-llama) echo "IK_LLAMA_IMAGE" ;;
+        *) echo "ERROR: unknown project '$1'" >&2; return 1 ;;
+    esac
+}
+
+# Artifacts images are addressed by the upstream commit they were built from, so
+# a rerun that resolves the same commit finds its own output already published
+# and reuses it instead of recompiling.
+artifact_tag() {
+    local project="$1" hash
+    hash="$(project_hash "${project}")" || return 1
+    echo "${ARTIFACT_REPO}:art-${project}-${BACKEND}-${hash:0:12}"
+}
+
+artifact_exists() {
+    docker buildx imagetools inspect "$1" >/dev/null 2>&1
+}
+
+log "=========================================="
+if [[ "$MODE" == "stage" ]]; then
+    log "llama-swap Artifacts Build (${STAGE_PROJECT}, ${BACKEND})"
+elif [[ "$MODE" == "assemble" ]]; then
+    log "llama-swap Unified Assemble (${BACKEND})"
+else
+    log "llama-swap Unified Build (${BACKEND})"
+fi
+log "=========================================="
+log ""
+
+if [[ "$MODE" == "stage" ]]; then
+    if ! printf '%s\n' "${ALL_PROJECTS[@]}" | grep -qx -- "${STAGE_PROJECT}"; then
+        echo "ERROR: unknown project '${STAGE_PROJECT}'" >&2
+        echo "  Known projects: ${ALL_PROJECTS[*]}" >&2
+        exit 1
+    fi
+    if ! backend_projects | grep -qx -- "${STAGE_PROJECT}"; then
+        echo "ERROR: project '${STAGE_PROJECT}' is not built for the ${BACKEND} backend" >&2
+        exit 1
+    fi
+fi
+
+# ── Resolve refs ──────────────────────────────────────────────────────
+#
+# A full 40-char SHA short-circuits resolve_ref without a network call, so CI
+# resolves every ref once up front and passes the hashes to the per-project and
+# assemble jobs. That keeps a moving branch from resolving differently in each
+# job and assembling an image out of mismatched artifacts.
 
 # Resolve llama.cpp ref
 if [[ -n "${LLAMA_REF:-}" ]]; then
     LLAMA_HASH=$(resolve_ref "${LLAMA_REPO}" "${LLAMA_REF}") || exit 1
-    echo "llama.cpp: ${LLAMA_REF} -> ${LLAMA_HASH}"
+    log "llama.cpp: ${LLAMA_REF} -> ${LLAMA_HASH}"
 else
     LLAMA_HASH=$(get_latest_hash "${LLAMA_REPO}")
     if [[ -z "${LLAMA_HASH}" ]]; then
         echo "ERROR: Could not determine latest commit for llama.cpp" >&2
         exit 1
     fi
-    echo "llama.cpp: latest HEAD: ${LLAMA_HASH}"
+    log "llama.cpp: latest HEAD: ${LLAMA_HASH}"
 fi
 
 # Resolve whisper.cpp ref
 if [[ -n "${WHISPER_REF:-}" ]]; then
     WHISPER_HASH=$(resolve_ref "${WHISPER_REPO}" "${WHISPER_REF}") || exit 1
-    echo "whisper.cpp: ${WHISPER_REF} -> ${WHISPER_HASH}"
+    log "whisper.cpp: ${WHISPER_REF} -> ${WHISPER_HASH}"
 else
     WHISPER_HASH=$(get_latest_hash "${WHISPER_REPO}")
     if [[ -z "${WHISPER_HASH}" ]]; then
         echo "ERROR: Could not determine latest commit for whisper.cpp" >&2
         exit 1
     fi
-    echo "whisper.cpp: latest HEAD: ${WHISPER_HASH}"
+    log "whisper.cpp: latest HEAD: ${WHISPER_HASH}"
 fi
 
 # Resolve stable-diffusion.cpp ref
 if [[ -n "${SD_REF:-}" ]]; then
     SD_HASH=$(resolve_ref "${SD_REPO}" "${SD_REF}") || exit 1
-    echo "stable-diffusion.cpp: ${SD_REF} -> ${SD_HASH}"
+    log "stable-diffusion.cpp: ${SD_REF} -> ${SD_HASH}"
 else
     SD_HASH=$(get_latest_hash "${SD_REPO}")
     if [[ -z "${SD_HASH}" ]]; then
         echo "ERROR: Could not determine latest commit for stable-diffusion.cpp" >&2
         exit 1
     fi
-    echo "stable-diffusion.cpp: latest HEAD: ${SD_HASH}"
+    log "stable-diffusion.cpp: latest HEAD: ${SD_HASH}"
 fi
 
 # Resolve audio.cpp ref
 if [[ -n "${AUDIO_REF:-}" ]]; then
     AUDIO_HASH=$(resolve_ref "${AUDIO_REPO}" "${AUDIO_REF}") || exit 1
-    echo "audio.cpp: ${AUDIO_REF} -> ${AUDIO_HASH}"
+    log "audio.cpp: ${AUDIO_REF} -> ${AUDIO_HASH}"
 else
     AUDIO_HASH=$(get_latest_hash "${AUDIO_REPO}")
     if [[ -z "${AUDIO_HASH}" ]]; then
         echo "ERROR: Could not determine latest commit for audio.cpp" >&2
         exit 1
     fi
-    echo "audio.cpp: latest HEAD: ${AUDIO_HASH}"
+    log "audio.cpp: latest HEAD: ${AUDIO_HASH}"
 fi
 
-# Resolve ik_llama.cpp ref (CUDA only)
-if [[ "$BACKEND" == "cuda" ]]; then
+# Resolve ik_llama.cpp ref (CUDA only, but --resolve always reports it so one
+# setup job can feed both backends)
+if [[ "$BACKEND" == "cuda" || "$MODE" == "resolve" ]]; then
     if [[ -n "${IK_LLAMA_REF:-}" ]]; then
         IK_LLAMA_HASH=$(resolve_ref "${IK_LLAMA_REPO}" "${IK_LLAMA_REF}") || exit 1
-        echo "ik_llama.cpp: ${IK_LLAMA_REF} -> ${IK_LLAMA_HASH}"
+        log "ik_llama.cpp: ${IK_LLAMA_REF} -> ${IK_LLAMA_HASH}"
     else
         IK_LLAMA_HASH=$(get_latest_hash "${IK_LLAMA_REPO}")
         if [[ -z "${IK_LLAMA_HASH}" ]]; then
             echo "ERROR: Could not determine latest commit for ik_llama.cpp" >&2
             exit 1
         fi
-        echo "ik_llama.cpp: latest HEAD: ${IK_LLAMA_HASH}"
+        log "ik_llama.cpp: latest HEAD: ${IK_LLAMA_HASH}"
     fi
 else
     IK_LLAMA_HASH="n/a"
-    echo "ik_llama.cpp: skipped (vulkan build)"
+    log "ik_llama.cpp: skipped (vulkan build)"
 fi
 
 # Resolve llama-swap ref
 if [[ -n "${LS_VERSION:-}" ]]; then
     LS_HASH=$(resolve_ref "${LLAMA_SWAP_REPO}" "${LS_VERSION}") || exit 1
-    echo "llama-swap: ${LS_VERSION} -> ${LS_HASH}"
+    log "llama-swap: ${LS_VERSION} -> ${LS_HASH}"
 else
     LS_HASH=$(get_latest_hash "${LLAMA_SWAP_REPO}")
     if [[ -z "${LS_HASH}" ]]; then
         echo "ERROR: Could not determine latest commit for llama-swap" >&2
         exit 1
     fi
-    echo "llama-swap: latest HEAD: ${LS_HASH}"
+    log "llama-swap: latest HEAD: ${LS_HASH}"
 fi
 
-echo ""
-echo "=========================================="
-echo "Starting Docker build..."
-echo "=========================================="
-echo ""
+if [[ "$MODE" == "resolve" ]]; then
+    echo "llama_hash=${LLAMA_HASH}"
+    echo "whisper_hash=${WHISPER_HASH}"
+    echo "sd_hash=${SD_HASH}"
+    echo "audio_hash=${AUDIO_HASH}"
+    echo "ik_llama_hash=${IK_LLAMA_HASH}"
+    echo "ls_hash=${LS_HASH}"
+    exit 0
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -221,21 +341,79 @@ BUILD_ARGS=(
     --build-arg "IK_LLAMA_COMMIT_HASH=${IK_LLAMA_HASH}"
     --build-arg "LS_VERSION=${LS_HASH}"
     --build-arg "WHISPER_FFMPEG=${WHISPER_FFMPEG}"
-    -t "${DOCKER_IMAGE_TAG}"
     -f "${SCRIPT_DIR}/Dockerfile"
 )
 
 if [[ "$NO_CACHE" == true ]]; then
     BUILD_ARGS+=(--no-cache)
     echo "Note: Building without cache"
-elif [[ "${GITHUB_ACTIONS:-}" == "true" && "${ACT:-}" != "true" ]]; then
-    CACHE_REF="ghcr.io/mostlygeek/llama-swap:unified-${BACKEND}-cache"
-    BUILD_ARGS+=(
-        --cache-from "type=registry,ref=${CACHE_REF}"
-        --cache-to "type=registry,ref=${CACHE_REF},mode=max"
-    )
-    echo "Note: Using registry cache (${CACHE_REF})"
 fi
+
+# ── --stage: build and publish one project's artifacts ────────────────
+
+if [[ "$MODE" == "stage" ]]; then
+    ARTIFACT_TAG="$(artifact_tag "${STAGE_PROJECT}")"
+
+    echo ""
+    echo "Artifacts image: ${ARTIFACT_TAG}"
+
+    if [[ "$NO_CACHE" != true ]] && artifact_exists "${ARTIFACT_TAG}"; then
+        echo "Already published for this commit, nothing to build."
+        exit 0
+    fi
+
+    echo ""
+    echo "=========================================="
+    echo "Building ${STAGE_PROJECT} artifacts..."
+    echo "=========================================="
+    echo ""
+
+    DOCKER_BUILDKIT=1 docker buildx build --push \
+        --target "${STAGE_PROJECT}-artifacts" \
+        -t "${ARTIFACT_TAG}" \
+        "${BUILD_ARGS[@]}" "${SCRIPT_DIR}"
+
+    echo ""
+    echo "Published: ${ARTIFACT_TAG}"
+    exit 0
+fi
+
+# ── --assemble: point each -src stage at a published artifacts image ──
+
+if [[ "$MODE" == "assemble" ]]; then
+    MISSING_ARTIFACTS=()
+    echo ""
+    echo "Artifacts images:"
+    while read -r project; do
+        tag="$(artifact_tag "${project}")"
+        if artifact_exists "${tag}"; then
+            echo "  ${tag}"
+        else
+            echo "  ${tag}  [MISSING]"
+            MISSING_ARTIFACTS+=("${tag}")
+        fi
+        BUILD_ARGS+=(--build-arg "$(project_image_arg "${project}")=${tag}")
+    done < <(backend_projects)
+
+    if [[ ${#MISSING_ARTIFACTS[@]} -gt 0 ]]; then
+        echo ""
+        echo "ERROR: cannot assemble, these artifacts images were never published:" >&2
+        for tag in "${MISSING_ARTIFACTS[@]}"; do
+            echo "  - ${tag}" >&2
+        done
+        echo "" >&2
+        echo "Run the matching --stage=PROJECT build first." >&2
+        exit 1
+    fi
+fi
+
+BUILD_ARGS+=(-t "${DOCKER_IMAGE_TAG}")
+
+echo ""
+echo "=========================================="
+echo "Starting Docker build..."
+echo "=========================================="
+echo ""
 
 DOCKER_BUILDKIT=1 docker buildx build --load "${BUILD_ARGS[@]}" "${SCRIPT_DIR}"
 

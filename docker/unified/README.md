@@ -12,6 +12,63 @@ These scripts create a custom llama-swap container that contains:
 binary in the image. It expects a vLLM server started with `--enable-sleep-mode`
 that is reachable from the container; vLLM itself is not included in the image.
 
+## Building
+
+For local builds, one command compiles everything and assembles the image:
+
+```bash
+./build-image.sh --cuda      # or --vulkan
+```
+
+### How CI builds it
+
+Compiling every project in a single job put five concurrent CUDA builds on a
+four-core runner and stopped fitting in the 6h GitHub Actions job limit. Worse,
+a cancelled job never reaches its cache export, so nothing was cached and the
+next night rebuilt everything again — one overrun kept every later run failing.
+
+`unified-docker.yml` splits that into a job per project. Each one compiles a
+single upstream project and pushes an artifacts image holding nothing but that
+project's `/install` tree:
+
+```
+setup ── resolve every upstream ref once
+  ├─ build whisper / sd / audio / llama / ik-llama   (one runner each)
+  └─ assemble ── COPY the artifacts into the runtime image, verify, push
+```
+
+The image is the same either way. Every project reaches the runtime stage
+through `COPY --from=<project>-src /install/...`, and `<project>-src` resolves
+to a locally compiled stage by default or to a published artifacts image when
+`<PROJECT>_IMAGE` is set. BuildKit only walks the branch it needs, so an
+assemble build never enters a compile stage.
+
+Artifacts images are tagged with the upstream commit they were built from
+(`:art-llama-cuda-<commit>`), which means:
+
+- a project whose upstream has not moved is already published, and its job
+  exits without building
+- a project that overruns its own job no longer discards the four that finished
+- reruns are idempotent, and a failed assemble can be retried without
+  recompiling anything
+
+The scripted equivalents, should you need to drive it by hand:
+
+```bash
+./build-image.sh --cuda --resolve         # print resolved commit hashes
+./build-image.sh --cuda --stage=llama     # build + push one project's artifacts
+./build-image.sh --cuda --assemble        # assemble from published artifacts
+```
+
+`--stage` and `--assemble` push to and read from `ARTIFACT_REPO` (default
+`ghcr.io/mostlygeek/llama-swap`), so they need registry credentials and a
+buildx container driver. They are meant for CI; use the plain
+`./build-image.sh --cuda` above for local work and under `act`.
+
+Because artifacts images are addressed by content, the old
+`:unified-<backend>-cache` BuildKit cache tags are no longer written and can be
+deleted from the registry.
+
 ## audio.cpp
 
 `audiocpp_server` needs its own JSON config listing the models it serves. The
