@@ -45,10 +45,16 @@ next night rebuilt everything again — one overrun kept every later run failing
 
 ```
 setup ── resolve every upstream ref once
-  └─ base cuda / base vulkan
-       └─ whisper / sd / audio / llama / ik-llama   (one runner each)
-            └─ assemble ── copy /install trees in, verify, push
+  ├─ cuda ─── base ── whisper sd audio llama ik-llama ── assemble ── push
+  └─ vulkan ─ base ── whisper sd audio llama ─────────── assemble ── push
 ```
+
+Each backend is a separate call to `unified-docker-backend.yml`, which holds
+the base → projects → assemble chain for one backend. They are separate calls
+rather than one matrix because `needs` applies to a whole job, not to
+individual matrix cells: sharing a job graph would keep the Vulkan image, whose
+four projects finish in minutes, waiting on CUDA's multi-hour ik_llama.cpp
+compile before it could publish.
 
 Every image is addressed by its content, so anything unchanged is skipped:
 
