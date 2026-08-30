@@ -14,64 +14,79 @@ that is reachable from the container; vLLM itself is not included in the image.
 
 ## Building
 
-For local builds, one command compiles everything and assembles the image:
-
 ```bash
 ./build-image.sh --cuda      # or --vulkan
 ```
 
+That compiles everything and assembles the image, same as before.
+
+### Layout
+
+The build is one Dockerfile per piece:
+
+| file | produces |
+|---|---|
+| `base-<backend>.Dockerfile` | the builder base (compilers, CUDA/Vulkan SDK) |
+| `<project>.Dockerfile` | one upstream project, as a `scratch` image of `/install` |
+| `runtime.Dockerfile` | the final image, copying those `/install` trees in |
+
+A project's build inputs are therefore exactly two files — its own Dockerfile
+and its install script — plus the tag of the base it compiles from. Nothing has
+to be inferred from a shared file.
+
 ### How CI builds it
 
-Compiling every project in a single job put five concurrent CUDA builds on a
+Compiling every project in one job put five concurrent CUDA builds on a
 four-core runner and stopped fitting in the 6h GitHub Actions job limit. Worse,
 a cancelled job never reaches its cache export, so nothing was cached and the
 next night rebuilt everything again — one overrun kept every later run failing.
 
-`unified-docker.yml` splits that into a job per project. Each one compiles a
-single upstream project and pushes an artifacts image holding nothing but that
-project's `/install` tree:
+`unified-docker.yml` gives each piece its own job and its own 6h budget:
 
 ```
 setup ── resolve every upstream ref once
-  ├─ build whisper / sd / audio / llama / ik-llama   (one runner each)
-  └─ assemble ── COPY the artifacts into the runtime image, verify, push
+  └─ base cuda / base vulkan
+       └─ whisper / sd / audio / llama / ik-llama   (one runner each)
+            └─ assemble ── copy /install trees in, verify, push
 ```
 
-The image is the same either way. Every project reaches the runtime stage
-through `COPY --from=<project>-src /install/...`, and `<project>-src` resolves
-to a locally compiled stage by default or to a published artifacts image when
-`<PROJECT>_IMAGE` is set. BuildKit only walks the branch it needs, so an
-assemble build never enters a compile stage.
+Every image is addressed by its content, so anything unchanged is skipped:
 
-Artifacts images are tagged with the upstream commit they were built from and
-a hash of the recipe that built it — the Dockerfile, that project's install
-script, and the build args it reads (`:art-llama-cuda-<commit>-<recipe>`).
-Both halves matter: without the recipe hash, editing an install script or
-`CMAKE_CUDA_ARCHITECTURES` would leave every project whose upstream had not
-moved pinned to a stale artifacts image. Tagging this way means:
+- the base by its own Dockerfile's hash
+- a project by its upstream commit, plus a hash of its Dockerfile, its install
+  script, the base tag and the build args it reads
 
-- a project whose upstream has not moved is already published, and its job
-  exits without building
-- a project that overruns its own job no longer discards the four that finished
-- reruns are idempotent, and a failed assemble can be retried without
-  recompiling anything
+Which gives, concretely:
 
-The scripted equivalents, should you need to drive it by hand:
+| edit | rebuilds |
+|---|---|
+| `runtime.Dockerfile`, this README | nothing |
+| `install-sd.sh` or `sd.Dockerfile` | sd, both backends |
+| `base-cuda.Dockerfile` (e.g. `CMAKE_CUDA_ARCHITECTURES`) | the CUDA base and all 5 CUDA projects; no Vulkan |
+| `base-vulkan.Dockerfile` | the Vulkan base and all 4 Vulkan projects; no CUDA |
+
+and means a project that overruns its own job no longer discards the ones that
+finished, reruns are idempotent, and a failed assemble can be retried without
+recompiling anything.
+
+### Driving it by hand
 
 ```bash
 ./build-image.sh --cuda --resolve         # print resolved commit hashes
+./build-image.sh --cuda --stage=base      # build + push the builder base
 ./build-image.sh --cuda --stage=llama     # build + push one project's artifacts
-./build-image.sh --cuda --assemble        # assemble from published artifacts
+./build-image.sh --cuda --assemble        # assemble from published images
 ```
 
 `--stage` and `--assemble` push to and read from `ARTIFACT_REPO` (default
-`ghcr.io/mostlygeek/llama-swap`), so they need registry credentials and a
-buildx container driver. They are meant for CI; use the plain
-`./build-image.sh --cuda` above for local work and under `act`.
+`ghcr.io/mostlygeek/llama-swap`), so they need registry credentials and a buildx
+container driver. They are for CI; use plain `./build-image.sh --cuda` locally
+and under `act`. The local path chains the images through the docker image
+store, so it wants buildx's default `docker` driver (the default) rather than a
+container driver.
 
-Because artifacts images are addressed by content, the old
-`:unified-<backend>-cache` BuildKit cache tags are no longer written and can be
-deleted from the registry.
+Because images are addressed by content, the old `:unified-<backend>-cache`
+BuildKit cache tags are no longer written and can be deleted from the registry.
 
 ## audio.cpp
 
@@ -115,9 +130,9 @@ Pascal (P100, GTX 10xx, P40) and newer NVIDIA GPUs are supported. Architectures
 between and above those entries — Volta (70), Ampere (80), Hopper (90) and
 Blackwell (100 on datacenter parts, 120 on GeForce and RTX PRO) — run by
 JIT-compiling the nearest lower PTX, which costs time on first load. Add the
-number to `CMAKE_CUDA_ARCHITECTURES` in the Dockerfile to compile one of them
-natively; the list is shared with llama.cpp, whisper.cpp, stable-diffusion.cpp
-and ik_llama.cpp, so each addition lengthens every build.
+number to `CMAKE_CUDA_ARCHITECTURES` in `base-cuda.Dockerfile` to compile one of
+them natively. The base is what every CUDA project compiles from, so an addition
+lengthens all of them — and changes the base's hash, which rebuilds all five.
 
 The Vulkan image builds audio.cpp with `ENGINE_ENABLE_VULKAN=ON`. audio.cpp is
 tuned for CUDA, and the server prints a notice on startup that a non-CUDA
