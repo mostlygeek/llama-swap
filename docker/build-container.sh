@@ -185,13 +185,13 @@ for CONTAINER_TYPE in non-root root; do
       --build-arg BASE_TAG=${BASE_TAG} --build-arg LS_VER=${LS_VER} --build-arg UID=${USER_UID} \
       --build-arg LS_REPO=${LS_BINARY_REPO} --build-arg GID=${USER_GID} --build-arg USER_HOME=${USER_HOME} \
       --build-arg BASE_IMAGE=${BASE_IMAGE} \
-      -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} .
+      -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} ..
   else
     docker build --provenance=false -f llama-swap.Containerfile \
       --build-arg BASE_TAG=${BASE_TAG} --build-arg LS_VER=${LS_VER} --build-arg UID=${USER_UID} \
       --build-arg LS_REPO=${LS_BINARY_REPO} --build-arg GID=${USER_GID} --build-arg USER_HOME=${USER_HOME} \
       -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} \
-      --build-arg BASE_IMAGE=${BASE_IMAGE} .
+      --build-arg BASE_IMAGE=${BASE_IMAGE} ..
   fi
 
   # For architectures with stable-diffusion.cpp support, layer sd-server on top.
@@ -203,7 +203,7 @@ for CONTAINER_TYPE in non-root root; do
         --build-arg BASE=${CONTAINER_TAG} \
         --build-arg SD_IMAGE=${SD_IMAGE} --build-arg SD_TAG=${SD_TAG} \
         --build-arg UID=${USER_UID} --build-arg GID=${USER_GID} \
-        -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} . ;;
+        -t ${CONTAINER_TAG} -t ${CONTAINER_LATEST} .. ;;
   esac
 
   # cpu builds push inline via buildx --push; all other archs push here.
