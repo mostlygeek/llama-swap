@@ -5,7 +5,8 @@
 # That is what lets an artifacts image be keyed on this base's tag plus the
 # project's own two files, with nothing to infer from a shared Dockerfile.
 
-FROM nvidia/cuda:12.9.1-devel-ubuntu24.04
+ARG CUDA_VERSION=12.9.1
+FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu24.04
 
 # Compute capabilities compiled as SASS, shared by every CUDA build.
 # 60/61 are Pascal (P100, GTX 10xx, P40) -- the oldest architecture ggml still
