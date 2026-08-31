@@ -40,6 +40,15 @@ MODE="unified"
 STAGE_TARGET=""
 WHISPER_FFMPEG="${WHISPER_FFMPEG:-yes}"
 
+# CUDA compute capabilities compiled as SASS. Only the CUDA base reads it as a
+# build arg; the projects inherit it through the base image's ENV.
+CMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES:-60;61;75;86;89}"
+
+# CUDA toolkit and runtime version, matching nvidia/cuda image tags. The CUDA
+# builder base and the runtime image are both built from it, so the compiled
+# binaries and their runtime libraries always come from the same CUDA.
+CUDA_VERSION="${CUDA_VERSION:-12.9.1}"
+
 # Registry holding the base and artifacts images used by --stage/--assemble.
 #
 # Deliberately a different package from the published llama-swap images. These
@@ -88,6 +97,10 @@ for arg in "$@"; do
             echo "  IK_LLAMA_REF         Pin ik_llama.cpp to a commit, tag, or branch (CUDA only)"
             echo "  LS_VERSION           Override llama-swap version (e.g., '170' or 'latest')"
             echo "  WHISPER_FFMPEG       Enable whisper.cpp FFmpeg support (default: yes)"
+            echo "  CMAKE_CUDA_ARCHITECTURES  CUDA compute capabilities to compile natively"
+            echo "                       (default: 60;61;75;86;89, CUDA only)"
+            echo "  CUDA_VERSION         CUDA toolkit/runtime version as an nvidia/cuda image tag"
+            echo "                       (default: 12.9.1, CUDA only)"
             echo "  ARTIFACT_REPO        Registry for base and artifacts images"
             echo "                       (default: ghcr.io/mostlygeek/llama-swap-build)"
             exit 0
@@ -99,6 +112,13 @@ if [[ -z "$BACKEND" ]]; then
     echo "Error: No backend specified. Please use --cuda or --vulkan."
     echo ""
     echo "Usage: ./build-image.sh --cuda|--vulkan [--no-cache]"
+    exit 1
+fi
+
+# The value becomes part of nvidia/cuda image tags, so a bad version should
+# fail here with a clear message rather than a docker "image not found".
+if [[ "$BACKEND" == "cuda" && ! "$CUDA_VERSION" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+    echo "ERROR: CUDA_VERSION '${CUDA_VERSION}' is not a valid nvidia/cuda version (e.g., 12.9.1)" >&2
     exit 1
 fi
 
@@ -205,7 +225,16 @@ project_image_arg() {
 # tag below without anything having to inspect the base.
 base_tag() {
     local h
-    h="$(sha256sum "${SCRIPT_DIR}/base-${BACKEND}.Dockerfile" | cut -c1-12)"
+    # The CUDA base bakes CMAKE_CUDA_ARCHITECTURES into its ENV and the
+    # CUDA_VERSION into its FROM line, so an override of either must change
+    # the tag even though the Dockerfile is unchanged.
+    h="$( {
+        sha256sum "${SCRIPT_DIR}/base-${BACKEND}.Dockerfile"
+        if [[ "${BACKEND}" == "cuda" ]]; then
+            echo "${CMAKE_CUDA_ARCHITECTURES}"
+            echo "${CUDA_VERSION}"
+        fi
+    } | sha256sum | cut -c1-12)"
     echo "${ARTIFACT_REPO}:base-${BACKEND}-${h}"
 }
 
@@ -338,6 +367,11 @@ BASE_TAG="$(base_tag)"
 
 build_base() {
     local output=("$@")
+    local args=()
+    if [[ "${BACKEND}" == "cuda" ]]; then
+        args+=(--build-arg "CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}")
+        args+=(--build-arg "CUDA_VERSION=${CUDA_VERSION}")
+    fi
     echo ""
     echo "=========================================="
     echo "Building builder base (${BACKEND})..."
@@ -346,6 +380,7 @@ build_base() {
     DOCKER_BUILDKIT=1 docker buildx build "${output[@]}" \
         -f "${SCRIPT_DIR}/base-${BACKEND}.Dockerfile" \
         -t "${BASE_TAG}" \
+        "${args[@]}" \
         "${CACHE_ARGS[@]}" \
         "${SCRIPT_DIR}"
 }
@@ -385,6 +420,7 @@ build_runtime() {
         --build-arg "SD_COMMIT_HASH=${SD_HASH}"
         --build-arg "AUDIO_COMMIT_HASH=${AUDIO_HASH}"
         --build-arg "IK_LLAMA_COMMIT_HASH=${IK_LLAMA_HASH}"
+        --build-arg "CUDA_VERSION=${CUDA_VERSION}"
         # config.example.yaml lives at the repo root, outside this build
         # context, so it comes in as a named context instead.
         --build-context "repo-docs=${REPO_ROOT}/docs"
@@ -572,6 +608,8 @@ echo "  stable-diffusion.cpp: ${SD_HASH}"
 echo "  audio.cpp:            ${AUDIO_HASH}"
 if [[ "$BACKEND" == "cuda" ]]; then
     echo "  ik_llama.cpp:         ${IK_LLAMA_HASH}"
+    echo "  CUDA version:         ${CUDA_VERSION}"
+    echo "  CUDA architectures:   ${CMAKE_CUDA_ARCHITECTURES}"
 fi
 echo "  llama-swap:           $(docker run --rm --entrypoint cat "${DOCKER_IMAGE_TAG}" /versions.txt | grep llama-swap | cut -d' ' -f2-)"
 echo ""

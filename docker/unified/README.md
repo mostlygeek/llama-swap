@@ -68,7 +68,8 @@ Which gives, concretely:
 |---|---|
 | `runtime.Dockerfile`, this README | nothing |
 | `install-sd.sh` or `sd.Dockerfile` | sd, both backends |
-| `base-cuda.Dockerfile` (e.g. `CMAKE_CUDA_ARCHITECTURES`) | the CUDA base and all 5 CUDA projects; no Vulkan |
+| `base-cuda.Dockerfile` (e.g. `CMAKE_CUDA_ARCHITECTURES`, or setting the env var of the same name) | the CUDA base and all 5 CUDA projects; no Vulkan |
+| `CUDA_VERSION` env var | the CUDA base, all 5 CUDA projects, and the runtime image; no Vulkan |
 | `base-vulkan.Dockerfile` | the Vulkan base and all 4 Vulkan projects; no CUDA |
 
 and means a project that overruns its own job no longer discards the ones that
@@ -137,15 +138,26 @@ cmd: |
   --port ${PORT}
 ```
 
+### CUDA version
+
+The CUDA toolkit the projects compile against and the runtime libraries the
+final image ships both come from `nvidia/cuda` images, pinned to the same
+version: `12.9.1` by default. Set the `CUDA_VERSION` environment variable to
+use another one — it takes the version portion of the `nvidia/cuda` image tag,
+so `CUDA_VERSION=12.6.0` builds from `nvidia/cuda:12.6.0-devel-ubuntu24.04`.
+It changes the CUDA base's hash, so a new version rebuilds the base, all five
+CUDA projects, and the runtime image.
+
 ### GPU support
 
 The CUDA image compiles SASS for compute capabilities `60;61;75;86;89`, so
 Pascal (P100, GTX 10xx, P40) and newer NVIDIA GPUs are supported. Architectures
 between and above those entries — Volta (70), Ampere (80), Hopper (90) and
 Blackwell (100 on datacenter parts, 120 on GeForce and RTX PRO) — run by
-JIT-compiling the nearest lower PTX, which costs time on first load. Add the
-number to `CMAKE_CUDA_ARCHITECTURES` in `base-cuda.Dockerfile` to compile one of
-them natively. The base is what every CUDA project compiles from, so an addition
+JIT-compiling the nearest lower PTX, which costs time on first load. Set the
+`CMAKE_CUDA_ARCHITECTURES` environment variable when invoking `build-image.sh`
+(to edit the default, change it in `base-cuda.Dockerfile`) to compile one of them
+natively. The base is what every CUDA project compiles from, so an addition
 lengthens all of them — and changes the base's hash, which rebuilds all five.
 
 The Vulkan image builds audio.cpp with `ENGINE_ENABLE_VULKAN=ON`. audio.cpp is

@@ -11,6 +11,7 @@ ARG SD_IMAGE
 ARG AUDIO_IMAGE
 ARG LLAMA_IMAGE
 ARG IK_LLAMA_IMAGE=ik-llama-empty
+ARG CUDA_VERSION=12.9.1
 
 FROM ${WHISPER_IMAGE} AS whisper-src
 FROM ${SD_IMAGE} AS sd-src
@@ -50,7 +51,8 @@ RUN --mount=type=cache,id=go-build,target=/root/.cache/go-build \
 # stage is unreachable for vulkan builds, so BuildKit never resolves it there.
 FROM ${BUILDER_BASE} AS cuda-stubs
 
-FROM nvidia/cuda:12.9.1-runtime-ubuntu24.04 AS runtime-cuda
+ARG CUDA_VERSION=12.9.1
+FROM nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu24.04 AS runtime-cuda
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
