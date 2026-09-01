@@ -104,6 +104,32 @@ func TestServer_ApplyFilters(t *testing.T) {
 		}
 	})
 
+	t.Run("soft keys are paths, consistent with the write target", func(t *testing.T) {
+		f := config.Filters{
+			SetParams: map[string]any{"chat_template_kwargs.enable_thinking?": true},
+		}
+
+		// Nested value present: the check finds it at the path the write
+		// would target, so the soft default yields.
+		out, err := applyFilters([]byte(`{"model":"m","chat_template_kwargs":{"enable_thinking":false}}`), "m", "", f)
+		if err != nil {
+			t.Fatalf("applyFilters: %v", err)
+		}
+		if got := gjson.GetBytes(out, "chat_template_kwargs.enable_thinking").Bool(); got != false {
+			t.Errorf("enable_thinking = %v, want false (request value kept)", got)
+		}
+
+		// Absent: the soft default writes the nested location, exactly
+		// where a hard setParams key would write.
+		out, err = applyFilters([]byte(`{"model":"m"}`), "m", "", f)
+		if err != nil {
+			t.Fatalf("applyFilters: %v", err)
+		}
+		if got := gjson.GetBytes(out, "chat_template_kwargs.enable_thinking").Bool(); got != true {
+			t.Errorf("enable_thinking = %v, want true (soft default applied)", got)
+		}
+	})
+
 	t.Run("soft setParamsByID yields to request but overrides setParams", func(t *testing.T) {
 		f := config.Filters{
 			SetParams:     map[string]any{"top_p": 0.5},

@@ -50,6 +50,10 @@ It works the same everywhere `setParams` works: model filters, per-alias
 - **`setParamsByID` still overrides `setParams`.** A soft `setParamsByID`
   value yields to the client, not to `setParams`: when the client didn't send
   the key, the per-alias soft default wins over a plain `setParams` value.
+- **Keys are paths, as everywhere in filters.** A dotted key like
+  `chat_template_kwargs.enable_thinking?` checks and sets the nested
+  value; the presence check targets exactly the location the write
+  would modify, same as a hard `setParams` key.
 - Protected params (`model`) cannot be set, with or without `?`.
 
 ## When to use which
