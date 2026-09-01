@@ -339,10 +339,14 @@ models:
       # - protected params like "model" cannot be overridden
       # - values can be strings, numbers, booleans, arrays, or objects
       # - always runs for the model
+      # - a key ending in "?" is a soft default: only applied when the
+      #   request does not already contain that parameter
       setParams:
         # Example: enforce specific sampling parameters
         temperature: 0.7
         top_p: 0.9
+        # Example: default max_tokens, requests that set it win
+        max_tokens?: 4096
 
       # setParamsByID: a dictionary of parameters to set based the model ID
       # - optional, default: empty dictionary

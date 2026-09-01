@@ -2,9 +2,9 @@
 title: Rewriting requests with filters
 summary: Use stripParams, setParams and setParamsByID while preserving the protected model parameter.
 category: guides
-tags: [filters, strip-params, set-params, aliases, sampling]
+tags: [filters, strip-params, set-params, soft-defaults, aliases, sampling]
 config_keys: [models.*.filters, models.*.filters.stripParams, models.*.filters.setParams, models.*.filters.setParamsByID, peers.*.filters]
-updated: 2026-08-25
+updated: 2026-09-01
 ---
 
 # Rewriting requests with filters
@@ -47,6 +47,17 @@ models:
 Runs on every request to the model and overrides whatever the client sent.
 Values may be strings, numbers, booleans, arrays or objects. `model` and other
 protected params cannot be overridden.
+
+A key ending in `?` is a **soft default** instead: it applies only when the
+request does not already carry that parameter, so a client that sends its own
+value wins. Works in `setParams` and `setParamsByID` alike — see
+`guides/api-integration/soft-defaults`.
+
+```yaml
+      setParams:
+        temperature: 0.7    # forced
+        max_tokens?: 4096   # only if the request didn't set max_tokens
+```
 
 For peers this is how you inject provider-specific settings:
 
@@ -93,9 +104,10 @@ reload — with different parameters applied.
 1. Profile pins resolve the requested ID
 2. Aliases resolve
 3. `stripParams` removes keys
-4. `setParams` applies
-5. `setParamsByID` applies, overriding `setParams`
-6. The request is proxied
+4. Soft defaults (`key?`) check which parameters the request carries
+5. `setParams` applies
+6. `setParamsByID` applies, overriding `setParams`
+7. The request is proxied
 
 ## When not to use filters
 
@@ -105,5 +117,6 @@ only rewrite the request body; they cannot change how the server was started.
 
 ## Related
 
+- `guides/api-integration/soft-defaults` — set a parameter only if the request didn't
 - `reference/config/models` — the annotated `filters` block
 - `reference/config/peers` — peer filters

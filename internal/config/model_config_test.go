@@ -220,7 +220,7 @@ models:
 	assert.Equal(t, []string{"top_k"}, stripParams)
 
 	// Check setParams
-	setParams, keys := modelConfig.Filters.SanitizedSetParams()
+	setParams, keys, _ := modelConfig.Filters.SanitizedSetParams()
 	assert.NotNil(t, setParams)
 	assert.Equal(t, []string{"stop", "temperature", "top_p"}, keys)
 	assert.Equal(t, 0.7, setParams["temperature"])

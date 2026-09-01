@@ -41,6 +41,94 @@ func TestServer_ApplyFilters(t *testing.T) {
 		}
 	})
 
+	t.Run("soft default applied when request lacks the key", func(t *testing.T) {
+		f := config.Filters{
+			SetParams: map[string]any{"max_tokens?": 32768},
+		}
+		out, err := applyFilters([]byte(`{"model":"m"}`), "m", "", f)
+		if err != nil {
+			t.Fatalf("applyFilters: %v", err)
+		}
+		if got := gjson.GetBytes(out, "max_tokens").Int(); got != 32768 {
+			t.Errorf("max_tokens = %v, want 32768", got)
+		}
+	})
+
+	t.Run("request value wins over soft default", func(t *testing.T) {
+		f := config.Filters{
+			SetParams: map[string]any{"max_tokens?": 32768},
+		}
+		out, err := applyFilters([]byte(`{"model":"m","max_tokens":64}`), "m", "", f)
+		if err != nil {
+			t.Fatalf("applyFilters: %v", err)
+		}
+		if got := gjson.GetBytes(out, "max_tokens").Int(); got != 64 {
+			t.Errorf("max_tokens = %v, want 64", got)
+		}
+	})
+
+	t.Run("request null, zero and false count as sent", func(t *testing.T) {
+		f := config.Filters{
+			SetParams: map[string]any{
+				"max_tokens?": 32768,
+				"stream?":     true,
+				"stop?":       "</s>",
+			},
+		}
+		out, err := applyFilters([]byte(`{"model":"m","max_tokens":0,"stream":false,"stop":null}`), "m", "", f)
+		if err != nil {
+			t.Fatalf("applyFilters: %v", err)
+		}
+		if got := gjson.GetBytes(out, "max_tokens").Int(); got != 0 {
+			t.Errorf("max_tokens = %v, want 0", got)
+		}
+		if got := gjson.GetBytes(out, "stream").Bool(); got != false {
+			t.Errorf("stream = %v, want false", got)
+		}
+		if got := gjson.GetBytes(out, "stop"); got.Type != gjson.Null {
+			t.Errorf("stop = %v, want null", got)
+		}
+	})
+
+	t.Run("stripped param counts as not sent", func(t *testing.T) {
+		f := config.Filters{
+			StripParams: "temperature",
+			SetParams:   map[string]any{"temperature?": 0.2},
+		}
+		out, err := applyFilters([]byte(`{"model":"m","temperature":0.7}`), "m", "", f)
+		if err != nil {
+			t.Fatalf("applyFilters: %v", err)
+		}
+		if got := gjson.GetBytes(out, "temperature").Float(); got != 0.2 {
+			t.Errorf("temperature = %v, want 0.2", got)
+		}
+	})
+
+	t.Run("soft setParamsByID yields to request but overrides setParams", func(t *testing.T) {
+		f := config.Filters{
+			SetParams:     map[string]any{"top_p": 0.5},
+			SetParamsByID: map[string]map[string]any{"alias": {"top_p?": 0.1}},
+		}
+
+		// Request without top_p: the soft byID value overrides setParams.
+		out, err := applyFilters([]byte(`{"model":"alias"}`), "alias", "", f)
+		if err != nil {
+			t.Fatalf("applyFilters: %v", err)
+		}
+		if got := gjson.GetBytes(out, "top_p").Float(); got != 0.1 {
+			t.Errorf("top_p = %v, want 0.1", got)
+		}
+
+		// Request with top_p: the soft byID value yields, setParams still applies.
+		out, err = applyFilters([]byte(`{"model":"alias","top_p":0.9}`), "alias", "", f)
+		if err != nil {
+			t.Fatalf("applyFilters: %v", err)
+		}
+		if got := gjson.GetBytes(out, "top_p").Float(); got != 0.5 {
+			t.Errorf("top_p = %v, want 0.5", got)
+		}
+	})
+
 	t.Run("setParamsByID overrides setParams", func(t *testing.T) {
 		f := config.Filters{
 			SetParams:     map[string]any{"top_p": 0.5},

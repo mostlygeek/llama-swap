@@ -11,6 +11,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
+	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
@@ -141,15 +142,33 @@ func applyFilters(body []byte, requested, useModelName string, f config.Filters)
 		}
 	}
 
-	setParams, setKeys := f.SanitizedSetParams()
+	setParams, setKeys, setSoft := f.SanitizedSetParams()
+	byID, byIDKeys, byIDSoft := f.SanitizedSetParamsByID(requested)
+
+	// Soft defaults ("key?", issue #1052) yield to parameters the client sent.
+	// Snapshot which of them the request carries before any values are written,
+	// so a soft key still applies when an earlier filter set it, and stripped
+	// params count as not sent.
+	requestHas := make(map[string]bool, len(setSoft)+len(byIDSoft))
+	for _, soft := range []map[string]bool{setSoft, byIDSoft} {
+		for key := range soft {
+			requestHas[key] = gjson.GetBytes(body, key).Exists()
+		}
+	}
+
 	for _, key := range setKeys {
+		if setSoft[key] && requestHas[key] {
+			continue
+		}
 		if body, err = sjson.SetBytes(body, key, setParams[key]); err != nil {
 			return nil, fmt.Errorf("error setting parameter %s in request", key)
 		}
 	}
 
-	byID, byIDKeys := f.SanitizedSetParamsByID(requested)
 	for _, key := range byIDKeys {
+		if byIDSoft[key] && requestHas[key] {
+			continue
+		}
 		if body, err = sjson.SetBytes(body, key, byID[key]); err != nil {
 			return nil, fmt.Errorf("error setting parameter %s in request", key)
 		}
