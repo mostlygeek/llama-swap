@@ -1,6 +1,6 @@
 <script lang="ts">
   import { link } from "svelte-spa-router";
-  import { FerrisWheel, Boxes, Activity, ScrollText, Gauge, Cpu, Sun, Moon, Monitor, ChevronRight, Settings } from "@lucide/svelte";
+  import { FerrisWheel, Boxes, Activity, Cat, ScrollText, Gauge, Cpu, Sun, Moon, Monitor, ChevronRight, Settings } from "@lucide/svelte";
   import * as Sidebar from "$lib/components/ui/sidebar/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -110,7 +110,7 @@
               <Sidebar.MenuButton isActive={isActive("/tailcat", $currentRoute)} tooltipContent="Tailcat">
                 {#snippet child({ props })}
                   <a href="/tailcat" use:link {...props}>
-                    <Activity />
+                    <Cat />
                     <span>Tailcat</span>
                   </a>
                 {/snippet}
