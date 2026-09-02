@@ -18,7 +18,8 @@ that is reachable from the container; vLLM itself is not included in the image.
 ./build-image.sh --cuda      # or --vulkan
 ```
 
-That compiles everything and assembles the image, same as before.
+That compiles everything and assembles the image, same as before, and derives
+the `-rootless` variant (same image with a non-root user) from it.
 
 ### Layout
 
@@ -29,6 +30,7 @@ The build is one Dockerfile per piece:
 | `base-<backend>.Dockerfile` | the builder base (compilers, CUDA/Vulkan SDK) |
 | `<project>.Dockerfile` | one upstream project, as a `scratch` image of `/install` |
 | `runtime.Dockerfile` | the final image, copying those `/install` trees in |
+| `rootless.Dockerfile` | the runtime image plus a non-root user (`-rootless`) |
 
 A project's build inputs are therefore exactly two files — its own Dockerfile
 and its install script — plus the tag of the base it compiles from. Nothing has
@@ -45,8 +47,8 @@ next night rebuilt everything again — one overrun kept every later run failing
 
 ```
 setup ── resolve every upstream ref once
-  ├─ cuda ─── base ── whisper sd audio llama ik-llama ── assemble ── push
-  └─ vulkan ─ base ── whisper sd audio llama ─────────── assemble ── push
+  ├─ cuda ─── base ── whisper sd audio llama ik-llama ── assemble ── push ── rootless
+  └─ vulkan ─ base ── whisper sd audio llama ─────────── assemble ── push ── rootless
 ```
 
 Each backend is a separate call to `unified-docker-backend.yml`, which holds
@@ -67,6 +69,7 @@ Which gives, concretely:
 | edit | rebuilds |
 |---|---|
 | `runtime.Dockerfile`, this README | nothing |
+| `rootless.Dockerfile` | nothing but the `-rootless` variant |
 | `install-sd.sh` or `sd.Dockerfile` | sd, both backends |
 | `base-cuda.Dockerfile` (e.g. `CMAKE_CUDA_ARCHITECTURES`, or setting the env var of the same name) | the CUDA base and all 5 CUDA projects; no Vulkan |
 | `CUDA_VERSION` env var | the CUDA base, all 5 CUDA projects, and the runtime image; no Vulkan |
@@ -83,7 +86,16 @@ recompiling anything.
 ./build-image.sh --cuda --stage=base      # build + push the builder base
 ./build-image.sh --cuda --stage=llama     # build + push one project's artifacts
 ./build-image.sh --cuda --assemble        # assemble from published images
+./build-image.sh --cuda --rootless        # rootless variant of DOCKER_IMAGE_TAG
 ```
+
+`--rootless` is a separate step and runs after the runtime image is pushed. Its
+`FROM` is the runtime image tag, and CI builds with a buildx container driver,
+which resolves `FROM` through the registry rather than the local image store —
+building it inside `--assemble` made it point at a tag no step had published
+yet. It still runs with the `docker` driver (`--builder default`), so it uses
+the image the assemble step already loaded and re-pulls from the registry only
+on a runner that does not have it.
 
 `--stage` and `--assemble` push to and read from `ARTIFACT_REPO` (default
 `ghcr.io/mostlygeek/llama-swap-build`), so they need registry credentials and a

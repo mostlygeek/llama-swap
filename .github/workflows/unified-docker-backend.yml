@@ -17,6 +17,11 @@ on:
         description: "cuda or vulkan"
         required: true
         type: string
+      platform:
+        description: "Target platform, linux/amd64 or linux/arm64"
+        required: false
+        type: string
+        default: "linux/amd64"
       projects:
         description: "JSON array of projects to build for this backend"
         required: true
@@ -43,15 +48,30 @@ on:
       ls_hash:
         required: true
         type: string
+      cuda_version:
+        description: "CUDA toolkit/runtime version as an nvidia/cuda image tag (CUDA only; default 12.9.1)"
+        required: false
+        type: string
+        default: ""
+      cuda_architectures:
+        description: "CUDA compute capabilities to compile natively, e.g. 80;86;89 (CUDA only; default 60;61;75;86;89)"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
   packages: write
 
+# Each stage runs natively on a runner matching the target platform: amd64 on
+# ubuntu-latest, arm64 on the GitHub-hosted ubuntu-24.04-arm runner. Cross
+# compiling CUDA through QEMU is impractically slow, so there is no
+# cross-building -- the arch just selects the runner.
+
 jobs:
   base:
     name: base
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.platform == 'linux/arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     timeout-minutes: 60
     steps:
       - name: Checkout code
@@ -80,15 +100,26 @@ jobs:
           password: ${{ github.token }}
 
       # Skipped entirely when base-<backend>.Dockerfile has not changed.
+      # The base tag also depends on the CUDA version and architectures, so
+      # both must be set identically in every job that calls build-image.sh.
       - name: Build and publish builder base
+        env:
+          # Publish under the repo that triggers the build, so forks build
+          # their own images instead of pushing into the upstream namespace.
+          ARTIFACT_REPO: ghcr.io/${{ github.repository }}-build
+          CUDA_VERSION: ${{ inputs.cuda_version || '12.9.1' }}
+          # Empty means the script's default, which differs per platform
+          # (the aarch64 CUDA toolchain does not support sm_60/sm_61).
+          CMAKE_CUDA_ARCHITECTURES: ${{ inputs.cuda_architectures }}
+          PLATFORM: ${{ inputs.platform }}
         run: |
           chmod +x docker/unified/build-image.sh
           docker/unified/build-image.sh --${{ inputs.backend }} --stage=base
 
   artifacts:
-    name: build ${{ matrix.project }}
+    name: build ${{ matrix.project }} (${{ inputs.platform }})
     needs: base
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.platform == 'linux/arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     # Each project gets a runner to itself. GitHub's hard cap is 360m; stop
     # short of it so an overrun is reported as a timeout on one project rather
     # than a silent cancellation of the whole build.
@@ -127,6 +158,10 @@ jobs:
       # both unchanged since a previous run published them.
       - name: Build and publish artifacts
         env:
+          ARTIFACT_REPO: ghcr.io/${{ github.repository }}-build
+          CUDA_VERSION: ${{ inputs.cuda_version || '12.9.1' }}
+          CMAKE_CUDA_ARCHITECTURES: ${{ inputs.cuda_architectures }}
+          PLATFORM: ${{ inputs.platform }}
           LLAMA_REF: ${{ inputs.llama_hash }}
           WHISPER_REF: ${{ inputs.whisper_hash }}
           SD_REF: ${{ inputs.sd_hash }}
@@ -138,9 +173,9 @@ jobs:
           docker/unified/build-image.sh --${{ inputs.backend }} --stage=${{ matrix.project }}
 
   assemble:
-    name: assemble
+    name: assemble (${{ inputs.platform }})
     needs: artifacts
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.platform == 'linux/arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     timeout-minutes: 90
     steps:
       - name: Checkout code
@@ -173,17 +208,42 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
+      # Tag shared by the assemble, push and rootless steps. Per-platform tag;
+      # unified-docker.yml merges the platforms into the arch-less multi-arch
+      # manifest. CUDA images include the version so multiple CUDA versions can
+      # coexist.
+      - name: Set image tags
+        env:
+          CUDA_VERSION: ${{ inputs.cuda_version || '12.9.1' }}
+        run: |
+          case "${{ inputs.platform }}" in
+            linux/arm64) ARCH="arm64" ;;
+            linux/amd64) ARCH="amd64" ;;
+            *) echo "ERROR: unsupported platform '${{ inputs.platform }}'" >&2; exit 1 ;;
+          esac
+          if [[ "${{ inputs.backend }}" == "cuda" ]]; then
+            echo "IMAGE_TAG=ghcr.io/${{ github.repository }}:unified-cuda-${CUDA_VERSION}-${ARCH}" >> "$GITHUB_ENV"
+          else
+            echo "IMAGE_TAG=ghcr.io/${{ github.repository }}:unified-${{ inputs.backend }}-${ARCH}" >> "$GITHUB_ENV"
+          fi
+          # Shared by the runtime and rootless pushes so their date tags match.
+          echo "DATE_TAG=$(date -u +%Y-%m-%d)" >> "$GITHUB_ENV"
+
       # Copies each project's published /install into the runtime image. The
       # compile stages are not part of this build's graph, so this is minutes.
       - name: Assemble unified Docker image
         env:
+          CUDA_VERSION: ${{ inputs.cuda_version || '12.9.1' }}
+          CMAKE_CUDA_ARCHITECTURES: ${{ inputs.cuda_architectures }}
           LLAMA_REF: ${{ inputs.llama_hash }}
           WHISPER_REF: ${{ inputs.whisper_hash }}
           SD_REF: ${{ inputs.sd_hash }}
           AUDIO_REF: ${{ inputs.audio_hash }}
           IK_LLAMA_REF: ${{ inputs.ik_llama_hash }}
           LS_VERSION: ${{ inputs.ls_hash }}
-          DOCKER_IMAGE_TAG: ghcr.io/mostlygeek/llama-swap:unified-${{ inputs.backend }}
+          PLATFORM: ${{ inputs.platform }}
+          DOCKER_IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          ARTIFACT_REPO: ghcr.io/${{ github.repository }}-build
           # When running under act, use the local builder that has warm ccache.
           # On GitHub Actions, BUILDX_BUILDER is unset so docker uses the builder
           # created by setup-buildx-action above.
@@ -195,14 +255,30 @@ jobs:
       - name: Push to GitHub Container Registry
         if: ${{ !env.ACT && inputs.push_to_ghcr }}
         run: |
-          BASE_TAG="ghcr.io/mostlygeek/llama-swap:unified-${{ inputs.backend }}"
-          DATE_TAG=$(date -u +%Y-%m-%d)
+          docker push "${IMAGE_TAG}"
+          docker tag "${IMAGE_TAG}" "${IMAGE_TAG}-${DATE_TAG}"
+          docker push "${IMAGE_TAG}-${DATE_TAG}"
 
-          docker push "${BASE_TAG}"
-          docker tag "${BASE_TAG}" "${BASE_TAG}-${DATE_TAG}"
-          docker push "${BASE_TAG}-${DATE_TAG}"
-
-          ROOTLESS_TAG="${BASE_TAG}-rootless"
-          docker push "${ROOTLESS_TAG}"
-          docker tag "${ROOTLESS_TAG}" "${ROOTLESS_TAG}-${DATE_TAG}"
-          docker push "${ROOTLESS_TAG}-${DATE_TAG}"
+      # The rootless image is the runtime image plus a non-root user, so it is
+      # built after that image is pushed rather than at the end of --assemble:
+      # as part of --assemble its FROM pointed at a tag no step had published
+      # yet, and the buildx container driver -- which cannot see the locally
+      # loaded image -- failed to resolve it.
+      - name: Build and push rootless image
+        if: ${{ !env.ACT && inputs.push_to_ghcr }}
+        env:
+          CUDA_VERSION: ${{ inputs.cuda_version || '12.9.1' }}
+          CMAKE_CUDA_ARCHITECTURES: ${{ inputs.cuda_architectures }}
+          LLAMA_REF: ${{ inputs.llama_hash }}
+          WHISPER_REF: ${{ inputs.whisper_hash }}
+          SD_REF: ${{ inputs.sd_hash }}
+          AUDIO_REF: ${{ inputs.audio_hash }}
+          IK_LLAMA_REF: ${{ inputs.ik_llama_hash }}
+          LS_VERSION: ${{ inputs.ls_hash }}
+          PLATFORM: ${{ inputs.platform }}
+          DOCKER_IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          DATE_TAG: ${{ env.DATE_TAG }}
+          ARTIFACT_REPO: ghcr.io/${{ github.repository }}-build
+        run: |
+          chmod +x docker/unified/build-image.sh
+          docker/unified/build-image.sh --${{ inputs.backend }} --rootless

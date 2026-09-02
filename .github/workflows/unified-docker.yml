@@ -26,6 +26,14 @@ on:
         description: "ik_llama.cpp commit hash, tag, or branch (CUDA only)"
         required: false
         default: "main"
+      cuda_versions:
+        description: "Comma-separated CUDA versions to build (e.g. 12.9.1,13.3.0)"
+        required: false
+        default: ""
+      cuda_architectures:
+        description: "Override CUDA compute capabilities for all versions (default: 60;61;75;86;89 for CUDA 12, 86;89;120;121 for CUDA 13)"
+        required: false
+        default: ""
       llama_swap_version:
         description: "llama-swap version (e.g. v198, latest, main)"
         required: false
@@ -37,6 +45,11 @@ on:
         default: true
       build_vulkan:
         description: "Build Vulkan image"
+        type: boolean
+        required: false
+        default: true
+      build_arm64:
+        description: "Also build the linux/arm64 images (amd64 is always built)"
         type: boolean
         required: false
         default: true
@@ -62,15 +75,17 @@ permissions:
 # base tag -- so anything unchanged is skipped, and one project overrunning no
 # longer discards the others.
 #
-# Each backend runs as its own call to unified-docker-backend.yml, so Vulkan
-# publishes as soon as its own projects finish rather than waiting on the
-# multi-hour CUDA compiles.
+# Each backend+version runs as its own call to unified-docker-backend.yml, so
+# Vulkan publishes as soon as its own projects finish rather than waiting on
+# the multi-hour CUDA compiles. Multiple CUDA versions build independently.
 jobs:
   setup:
     runs-on: ubuntu-latest
     outputs:
       build_cuda: ${{ steps.plan.outputs.build_cuda }}
       build_vulkan: ${{ steps.plan.outputs.build_vulkan }}
+      build_arm64: ${{ steps.plan.outputs.build_arm64 }}
+      platforms: ${{ steps.plan.outputs.platforms }}
       cuda_projects: ${{ steps.plan.outputs.cuda_projects }}
       vulkan_projects: ${{ steps.plan.outputs.vulkan_projects }}
       push_to_ghcr: ${{ steps.plan.outputs.push_to_ghcr }}
@@ -80,6 +95,9 @@ jobs:
       audio_hash: ${{ steps.refs.outputs.audio_hash }}
       ik_llama_hash: ${{ steps.refs.outputs.ik_llama_hash }}
       ls_hash: ${{ steps.refs.outputs.ls_hash }}
+      cuda_versions: ${{ steps.plan.outputs.cuda_versions }}
+      cuda_arch_12: ${{ steps.plan.outputs.cuda_arch_12 }}
+      cuda_arch_13: ${{ steps.plan.outputs.cuda_arch_13 }}
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
@@ -105,31 +123,59 @@ jobs:
         run: |
           # schedule uses defaults (build both, push); workflow_dispatch respects inputs
           if [[ "${{ github.event_name }}" == "schedule" ]]; then
-            build_cuda=true; build_vulkan=true; push=true
+            build_cuda=true; build_vulkan=true; build_arm64=true; push=true
           else
             build_cuda="${{ inputs.build_cuda }}"
             build_vulkan="${{ inputs.build_vulkan }}"
+            build_arm64="${{ inputs.build_arm64 }}"
             push="${{ inputs.push_to_ghcr }}"
           fi
+
+          # amd64 is always built; arm64 adds the second entry the merge jobs
+          # iterate over when folding the per-platform images together.
+          if [[ "${build_arm64}" == "true" ]]; then
+            platforms='["linux/amd64","linux/arm64"]'
+          else
+            platforms='["linux/amd64"]'
+          fi
+
+          # Multiple CUDA versions are built independently; each gets its own
+          # base, artifacts, assemble, and merge jobs.
+          cuda_versions="${{ inputs.cuda_versions || '12.9.1,13.3.0' }}"
 
           {
             echo "build_cuda=${build_cuda}"
             echo "build_vulkan=${build_vulkan}"
+            echo "build_arm64=${build_arm64}"
             echo "push_to_ghcr=${push}"
+            echo "platforms=${platforms}"
             # ik_llama.cpp has no Vulkan build.
             echo 'cuda_projects=["whisper","sd","audio","llama","ik-llama"]'
             echo 'vulkan_projects=["whisper","sd","audio","llama"]'
+            echo "cuda_versions=${cuda_versions}"
+            # Per-version defaults: CUDA 12 supports Pascal through Ada;
+            # CUDA 13 drops Pascal/Volta/Turing and adds Blackwell (120/121).
+            # An explicit cuda_architectures input overrides both.
+            echo "cuda_arch_12=${{ inputs.cuda_architectures || '60;61;75;86;89' }}"
+            echo "cuda_arch_13=${{ inputs.cuda_architectures || '86;89;120;121' }}"
           } >> "$GITHUB_OUTPUT"
 
-  cuda:
+# One backend call per version per platform so each chain (base -> projects ->
+# assemble) runs independently on native runners; a merge job then folds the
+# per-platform images into the arch-less multi-arch manifests.
+
+  # ── CUDA 12.9.1 ──────────────────────────────────────────────────────────
+
+  cuda-1291:
     needs: setup
-    if: ${{ needs.setup.outputs.build_cuda == 'true' }}
+    if: ${{ needs.setup.outputs.build_cuda == 'true' && contains(needs.setup.outputs.cuda_versions, '12.9.1') }}
     uses: ./.github/workflows/unified-docker-backend.yml
     permissions:
       contents: read
       packages: write
     with:
       backend: cuda
+      platform: linux/amd64
       projects: ${{ needs.setup.outputs.cuda_projects }}
       push_to_ghcr: ${{ needs.setup.outputs.push_to_ghcr == 'true' }}
       llama_hash: ${{ needs.setup.outputs.llama_hash }}
@@ -138,6 +184,159 @@ jobs:
       audio_hash: ${{ needs.setup.outputs.audio_hash }}
       ik_llama_hash: ${{ needs.setup.outputs.ik_llama_hash }}
       ls_hash: ${{ needs.setup.outputs.ls_hash }}
+      cuda_version: "12.9.1"
+      cuda_architectures: ${{ needs.setup.outputs.cuda_arch_12 }}
+
+  cuda-1291-arm64:
+    needs: setup
+    if: ${{ needs.setup.outputs.build_cuda == 'true' && needs.setup.outputs.build_arm64 == 'true' && contains(needs.setup.outputs.cuda_versions, '12.9.1') }}
+    uses: ./.github/workflows/unified-docker-backend.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      backend: cuda
+      platform: linux/arm64
+      projects: ${{ needs.setup.outputs.cuda_projects }}
+      push_to_ghcr: ${{ needs.setup.outputs.push_to_ghcr == 'true' }}
+      llama_hash: ${{ needs.setup.outputs.llama_hash }}
+      whisper_hash: ${{ needs.setup.outputs.whisper_hash }}
+      sd_hash: ${{ needs.setup.outputs.sd_hash }}
+      audio_hash: ${{ needs.setup.outputs.audio_hash }}
+      ik_llama_hash: ${{ needs.setup.outputs.ik_llama_hash }}
+      ls_hash: ${{ needs.setup.outputs.ls_hash }}
+      cuda_version: "12.9.1"
+      cuda_architectures: ${{ needs.setup.outputs.cuda_arch_12 }}
+
+  cuda-1291-merge:
+    needs:
+      - setup
+      - cuda-1291
+      - cuda-1291-arm64
+    if: ${{ needs.setup.outputs.build_cuda == 'true' && needs.setup.outputs.push_to_ghcr == 'true' && contains(needs.setup.outputs.cuda_versions, '12.9.1') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # Fails loudly if a requested platform's images are missing, rather than
+      # silently publishing a single-arch manifest after a failed build.
+      - name: Merge platform images into multi-arch manifests
+        env:
+          BASE_TAG: ghcr.io/${{ github.repository }}:unified-cuda-12.9.1
+          PLATFORMS: ${{ needs.setup.outputs.platforms }}
+        run: |
+          set -eu
+          DATE_TAG=$(date -u +%Y-%m-%d)
+          base_tags=()
+          rootless_tags=()
+          for platform in $(echo "${PLATFORMS}" | jq -r '.[]'); do
+            arch="${platform#linux/}"
+            for tag in "${BASE_TAG}-${arch}" "${BASE_TAG}-${arch}-rootless"; do
+              if ! docker buildx imagetools inspect "${tag}" >/dev/null 2>&1; then
+                echo "ERROR: ${tag} was not published; the ${platform} build must have failed." >&2
+                exit 1
+              fi
+            done
+            base_tags+=("${BASE_TAG}-${arch}")
+            rootless_tags+=("${BASE_TAG}-${arch}-rootless")
+          done
+          docker buildx imagetools create -t "${BASE_TAG}" "${base_tags[@]}"
+          docker buildx imagetools create -t "${BASE_TAG}-${DATE_TAG}" "${base_tags[@]}"
+          docker buildx imagetools create -t "${BASE_TAG}-rootless" "${rootless_tags[@]}"
+          docker buildx imagetools create -t "${BASE_TAG}-rootless-${DATE_TAG}" "${rootless_tags[@]}"
+
+  # ── CUDA 13.3.0 ──────────────────────────────────────────────────────────
+
+  cuda-1330:
+    needs: setup
+    if: ${{ needs.setup.outputs.build_cuda == 'true' && contains(needs.setup.outputs.cuda_versions, '13.3.0') }}
+    uses: ./.github/workflows/unified-docker-backend.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      backend: cuda
+      platform: linux/amd64
+      projects: ${{ needs.setup.outputs.cuda_projects }}
+      push_to_ghcr: ${{ needs.setup.outputs.push_to_ghcr == 'true' }}
+      llama_hash: ${{ needs.setup.outputs.llama_hash }}
+      whisper_hash: ${{ needs.setup.outputs.whisper_hash }}
+      sd_hash: ${{ needs.setup.outputs.sd_hash }}
+      audio_hash: ${{ needs.setup.outputs.audio_hash }}
+      ik_llama_hash: ${{ needs.setup.outputs.ik_llama_hash }}
+      ls_hash: ${{ needs.setup.outputs.ls_hash }}
+      cuda_version: "13.3.0"
+      cuda_architectures: ${{ needs.setup.outputs.cuda_arch_13 }}
+
+  cuda-1330-arm64:
+    needs: setup
+    if: ${{ needs.setup.outputs.build_cuda == 'true' && needs.setup.outputs.build_arm64 == 'true' && contains(needs.setup.outputs.cuda_versions, '13.3.0') }}
+    uses: ./.github/workflows/unified-docker-backend.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      backend: cuda
+      platform: linux/arm64
+      projects: ${{ needs.setup.outputs.cuda_projects }}
+      push_to_ghcr: ${{ needs.setup.outputs.push_to_ghcr == 'true' }}
+      llama_hash: ${{ needs.setup.outputs.llama_hash }}
+      whisper_hash: ${{ needs.setup.outputs.whisper_hash }}
+      sd_hash: ${{ needs.setup.outputs.sd_hash }}
+      audio_hash: ${{ needs.setup.outputs.audio_hash }}
+      ik_llama_hash: ${{ needs.setup.outputs.ik_llama_hash }}
+      ls_hash: ${{ needs.setup.outputs.ls_hash }}
+      cuda_version: "13.3.0"
+      cuda_architectures: ${{ needs.setup.outputs.cuda_arch_13 }}
+
+  cuda-1330-merge:
+    needs:
+      - setup
+      - cuda-1330
+      - cuda-1330-arm64
+    if: ${{ needs.setup.outputs.build_cuda == 'true' && needs.setup.outputs.push_to_ghcr == 'true' && contains(needs.setup.outputs.cuda_versions, '13.3.0') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Merge platform images into multi-arch manifests
+        env:
+          BASE_TAG: ghcr.io/${{ github.repository }}:unified-cuda-13.3.0
+          PLATFORMS: ${{ needs.setup.outputs.platforms }}
+        run: |
+          set -eu
+          DATE_TAG=$(date -u +%Y-%m-%d)
+          base_tags=()
+          rootless_tags=()
+          for platform in $(echo "${PLATFORMS}" | jq -r '.[]'); do
+            arch="${platform#linux/}"
+            for tag in "${BASE_TAG}-${arch}" "${BASE_TAG}-${arch}-rootless"; do
+              if ! docker buildx imagetools inspect "${tag}" >/dev/null 2>&1; then
+                echo "ERROR: ${tag} was not published; the ${platform} build must have failed." >&2
+                exit 1
+              fi
+            done
+            base_tags+=("${BASE_TAG}-${arch}")
+            rootless_tags+=("${BASE_TAG}-${arch}-rootless")
+          done
+          docker buildx imagetools create -t "${BASE_TAG}" "${base_tags[@]}"
+          docker buildx imagetools create -t "${BASE_TAG}-${DATE_TAG}" "${base_tags[@]}"
+          docker buildx imagetools create -t "${BASE_TAG}-rootless" "${rootless_tags[@]}"
+          docker buildx imagetools create -t "${BASE_TAG}-rootless-${DATE_TAG}" "${rootless_tags[@]}"
+
+  # ── Vulkan ───────────────────────────────────────────────────────────────
 
   vulkan:
     needs: setup
@@ -148,6 +347,7 @@ jobs:
       packages: write
     with:
       backend: vulkan
+      platform: linux/amd64
       projects: ${{ needs.setup.outputs.vulkan_projects }}
       push_to_ghcr: ${{ needs.setup.outputs.push_to_ghcr == 'true' }}
       llama_hash: ${{ needs.setup.outputs.llama_hash }}
@@ -156,3 +356,65 @@ jobs:
       audio_hash: ${{ needs.setup.outputs.audio_hash }}
       ik_llama_hash: ${{ needs.setup.outputs.ik_llama_hash }}
       ls_hash: ${{ needs.setup.outputs.ls_hash }}
+      cuda_version: ""
+      cuda_architectures: ""
+
+  vulkan-arm64:
+    needs: setup
+    if: ${{ needs.setup.outputs.build_vulkan == 'true' && needs.setup.outputs.build_arm64 == 'true' }}
+    uses: ./.github/workflows/unified-docker-backend.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      backend: vulkan
+      platform: linux/arm64
+      projects: ${{ needs.setup.outputs.vulkan_projects }}
+      push_to_ghcr: ${{ needs.setup.outputs.push_to_ghcr == 'true' }}
+      llama_hash: ${{ needs.setup.outputs.llama_hash }}
+      whisper_hash: ${{ needs.setup.outputs.whisper_hash }}
+      sd_hash: ${{ needs.setup.outputs.sd_hash }}
+      audio_hash: ${{ needs.setup.outputs.audio_hash }}
+      ik_llama_hash: ${{ needs.setup.outputs.ik_llama_hash }}
+      ls_hash: ${{ needs.setup.outputs.ls_hash }}
+
+  vulkan-merge:
+    needs:
+      - setup
+      - vulkan
+      - vulkan-arm64
+    if: ${{ needs.setup.outputs.build_vulkan == 'true' && needs.setup.outputs.push_to_ghcr == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Merge platform images into multi-arch manifests
+        env:
+          BASE_TAG: ghcr.io/${{ github.repository }}:unified-vulkan
+          PLATFORMS: ${{ needs.setup.outputs.platforms }}
+        run: |
+          set -eu
+          DATE_TAG=$(date -u +%Y-%m-%d)
+          base_tags=()
+          rootless_tags=()
+          for platform in $(echo "${PLATFORMS}" | jq -r '.[]'); do
+            arch="${platform#linux/}"
+            for tag in "${BASE_TAG}-${arch}" "${BASE_TAG}-${arch}-rootless"; do
+              if ! docker buildx imagetools inspect "${tag}" >/dev/null 2>&1; then
+                echo "ERROR: ${tag} was not published; the ${platform} build must have failed." >&2
+                exit 1
+              fi
+            done
+            base_tags+=("${BASE_TAG}-${arch}")
+            rootless_tags+=("${BASE_TAG}-${arch}-rootless")
+          done
+          docker buildx imagetools create -t "${BASE_TAG}" "${base_tags[@]}"
+          docker buildx imagetools create -t "${BASE_TAG}-${DATE_TAG}" "${base_tags[@]}"
+          docker buildx imagetools create -t "${BASE_TAG}-rootless" "${rootless_tags[@]}"
+          docker buildx imagetools create -t "${BASE_TAG}-rootless-${DATE_TAG}" "${rootless_tags[@]}"

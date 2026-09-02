@@ -30,6 +30,11 @@
 #   ./build-image.sh --cuda --stage=base      # build + push the builder base
 #   ./build-image.sh --cuda --stage=whisper   # build + push one project's artifacts
 #   ./build-image.sh --cuda --assemble        # assemble the unified image
+#   ./build-image.sh --cuda --rootless        # build + push the rootless variant
+#
+# The rootless image is the published runtime image plus a non-root user, so
+# --rootless is its own CI step that runs after the runtime image has been
+# pushed: its FROM has to resolve a tag that only exists once that push did.
 #
 
 set -euo pipefail
@@ -39,10 +44,7 @@ NO_CACHE=false
 MODE="unified"
 STAGE_TARGET=""
 WHISPER_FFMPEG="${WHISPER_FFMPEG:-yes}"
-
-# CUDA compute capabilities compiled as SASS. Only the CUDA base reads it as a
-# build arg; the projects inherit it through the base image's ENV.
-CMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES:-60;61;75;86;89}"
+PLATFORM="${PLATFORM:-}"
 
 # CUDA toolkit and runtime version, matching nvidia/cuda image tags. The CUDA
 # builder base and the runtime image are both built from it, so the compiled
@@ -66,19 +68,25 @@ for arg in "$@"; do
         --cuda)    BACKEND="cuda" ;;
         --vulkan)  BACKEND="vulkan" ;;
         --no-cache) NO_CACHE=true ;;
+        --platform=*)
+            PLATFORM="${arg#*=}"
+            ;;
         --resolve)  MODE="resolve" ;;
         --assemble) MODE="assemble" ;;
+        --rootless) MODE="rootless" ;;
         --stage=*)
             MODE="stage"
             STAGE_TARGET="${arg#*=}"
             ;;
         --help|-h)
-            echo "Usage: ./build-image.sh --cuda|--vulkan [--no-cache]"
+            echo "Usage: ./build-image.sh --cuda|--vulkan [--no-cache] [--platform=linux/amd64|linux/arm64]"
             echo ""
             echo "Options:"
             echo "  --cuda      Build CUDA image (NVIDIA GPUs)"
             echo "  --vulkan    Build Vulkan image (AMD GPUs and compatible hardware)"
             echo "  --no-cache  Force rebuild without using Docker cache"
+            echo "  --platform=PLATFORM  Build for PLATFORM (linux/amd64 or linux/arm64);"
+            echo "                       defaults to the host architecture"
             echo "  --help, -h  Show this help message"
             echo ""
             echo "Split build (CI only):"
@@ -87,6 +95,8 @@ for arg in "$@"; do
             echo "  --stage=PROJECT  Build and push one project's artifacts image"
             echo "                   (${ALL_PROJECTS[*]})"
             echo "  --assemble       Assemble the unified image from published artifacts"
+            echo "  --rootless       Build and push the rootless variant of DOCKER_IMAGE_TAG"
+            echo "                   (DOCKER_IMAGE_TAG must be loaded locally or published)"
             echo ""
             echo "Environment variables:"
             echo "  DOCKER_IMAGE_TAG     Set custom image tag (default: llama-swap:unified-cuda or llama-swap:unified-vulkan)"
@@ -97,8 +107,9 @@ for arg in "$@"; do
             echo "  IK_LLAMA_REF         Pin ik_llama.cpp to a commit, tag, or branch (CUDA only)"
             echo "  LS_VERSION           Override llama-swap version (e.g., '170' or 'latest')"
             echo "  WHISPER_FFMPEG       Enable whisper.cpp FFmpeg support (default: yes)"
+            echo "  PLATFORM               Target platform (linux/amd64 or linux/arm64)"
             echo "  CMAKE_CUDA_ARCHITECTURES  CUDA compute capabilities to compile natively"
-            echo "                       (default: 60;61;75;86;89, CUDA only)"
+            echo "                       (default: amd64 60;61;75;86;89, arm64 80;86;89;121, CUDA only)"
             echo "  CUDA_VERSION         CUDA toolkit/runtime version as an nvidia/cuda image tag"
             echo "                       (default: 12.9.1, CUDA only)"
             echo "  ARTIFACT_REPO        Registry for base and artifacts images"
@@ -111,7 +122,7 @@ done
 if [[ -z "$BACKEND" ]]; then
     echo "Error: No backend specified. Please use --cuda or --vulkan."
     echo ""
-    echo "Usage: ./build-image.sh --cuda|--vulkan [--no-cache]"
+    echo "Usage: ./build-image.sh --cuda|--vulkan [--no-cache] [--platform=linux/amd64|linux/arm64]"
     exit 1
 fi
 
@@ -120,6 +131,36 @@ fi
 if [[ "$BACKEND" == "cuda" && ! "$CUDA_VERSION" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
     echo "ERROR: CUDA_VERSION '${CUDA_VERSION}' is not a valid nvidia/cuda version (e.g., 12.9.1)" >&2
     exit 1
+fi
+
+# The platform the image is built for: explicit --platform/PLATFORM (CI builds
+# each platform natively on matching runners), or the host architecture for
+# local builds. It is baked into the base and artifacts tags below so both
+# platforms can coexist in the registry.
+if [[ -n "$PLATFORM" ]]; then
+    case "$PLATFORM" in
+        linux/amd64) ARCH="amd64" ;;
+        linux/arm64) ARCH="arm64" ;;
+        *) echo "ERROR: unsupported platform '${PLATFORM}' (use linux/amd64 or linux/arm64)" >&2; exit 1 ;;
+    esac
+else
+    case "$(uname -m)" in
+        x86_64) ARCH="amd64" ;;
+        aarch64|arm64) ARCH="arm64" ;;
+        *) echo "ERROR: unsupported host architecture '$(uname -m)'" >&2; exit 1 ;;
+    esac
+fi
+
+# CUDA compute capabilities compiled as SASS. Only the CUDA base reads it as a
+# build arg; the projects inherit it through the base image's ENV. The default
+# depends on the platform: the nvidia/cuda aarch64 toolchain does not support
+# Pascal (60/61), so the arm64 set skips them and adds 121 (GB10, DGX Spark).
+if [[ -z "${CMAKE_CUDA_ARCHITECTURES:-}" ]]; then
+    if [[ "$ARCH" == "arm64" ]]; then
+        CMAKE_CUDA_ARCHITECTURES="80;86;89;121"
+    else
+        CMAKE_CUDA_ARCHITECTURES="60;61;75;86;89"
+    fi
 fi
 
 # --resolve emits machine-readable output only, so the progress chatter that
@@ -230,12 +271,13 @@ base_tag() {
     # the tag even though the Dockerfile is unchanged.
     h="$( {
         sha256sum "${SCRIPT_DIR}/base-${BACKEND}.Dockerfile"
+        echo "${ARCH}"
         if [[ "${BACKEND}" == "cuda" ]]; then
             echo "${CMAKE_CUDA_ARCHITECTURES}"
             echo "${CUDA_VERSION}"
         fi
     } | sha256sum | cut -c1-12)"
-    echo "${ARTIFACT_REPO}:base-${BACKEND}-${h}"
+    echo "${ARTIFACT_REPO}:base-${BACKEND}-${ARCH}-${h}"
 }
 
 # A project's artifacts are determined by the upstream commit plus its recipe:
@@ -250,7 +292,7 @@ artifact_tag() {
         echo "base=$(base_tag)"
         echo "WHISPER_FFMPEG=${WHISPER_FFMPEG}"
     } | sha256sum | cut -c1-8 )"
-    echo "${ARTIFACT_REPO}:art-${project}-${BACKEND}-${commit:0:12}-${recipe}"
+    echo "${ARTIFACT_REPO}:art-${project}-${BACKEND}-${ARCH}-${commit:0:12}-${recipe}"
 }
 
 image_exists() {
@@ -261,6 +303,7 @@ log "=========================================="
 case "$MODE" in
     stage)    log "llama-swap Build (${STAGE_TARGET}, ${BACKEND})" ;;
     assemble) log "llama-swap Unified Assemble (${BACKEND})" ;;
+    rootless) log "llama-swap Rootless Variant (${BACKEND})" ;;
     *)        log "llama-swap Unified Build (${BACKEND})" ;;
 esac
 log "=========================================="
@@ -361,7 +404,13 @@ if [[ "$NO_CACHE" == true ]]; then
     echo "Note: Building without cache"
 fi
 
+PLATFORM_ARGS=()
+if [[ -n "$PLATFORM" ]]; then
+    PLATFORM_ARGS+=(--platform="$PLATFORM")
+fi
+
 BASE_TAG="$(base_tag)"
+ROOTLESS_TAG="${DOCKER_IMAGE_TAG}-rootless"
 
 # ── Builders ──────────────────────────────────────────────────────────
 
@@ -381,6 +430,7 @@ build_base() {
         -f "${SCRIPT_DIR}/base-${BACKEND}.Dockerfile" \
         -t "${BASE_TAG}" \
         "${args[@]}" \
+        "${PLATFORM_ARGS[@]}" \
         "${CACHE_ARGS[@]}" \
         "${SCRIPT_DIR}"
 }
@@ -406,6 +456,7 @@ build_project() {
         --build-arg "AUDIO_COMMIT_HASH=${AUDIO_HASH}" \
         --build-arg "LLAMA_COMMIT_HASH=${LLAMA_HASH}" \
         --build-arg "IK_LLAMA_COMMIT_HASH=${IK_LLAMA_HASH}" \
+        "${PLATFORM_ARGS[@]}" \
         "${CACHE_ARGS[@]}" \
         "${SCRIPT_DIR}"
 }
@@ -438,7 +489,48 @@ build_runtime() {
     DOCKER_BUILDKIT=1 docker buildx build --load \
         -f "${SCRIPT_DIR}/runtime.Dockerfile" \
         -t "${DOCKER_IMAGE_TAG}" \
-        "${args[@]}" "${CACHE_ARGS[@]}" \
+        "${args[@]}" "${PLATFORM_ARGS[@]}" "${CACHE_ARGS[@]}" \
+        "${SCRIPT_DIR}"
+}
+
+# The rootless variant is the finished runtime image with a non-root user
+# layered on top of it.
+#
+# It builds with the docker (daemon) builder rather than the CI builder
+# deliberately: rootless.Dockerfile's FROM points at ${DOCKER_IMAGE_TAG}, which
+# only exists in the daemon's image store (a local --load) or in the registry
+# (after a push). A docker-container builder can resolve neither a locally
+# loaded tag nor one that has not been pushed yet, which is what broke CI.
+build_rootless() {
+    local output=("$@")
+    local tags=(-t "${ROOTLESS_TAG}")
+    if [[ -n "${ROOTLESS_DATE_TAG:-}" ]]; then
+        tags+=(-t "${ROOTLESS_DATE_TAG}")
+    fi
+
+    # Use the registry copy when there is no local one; the daemon pull and the
+    # registry credentials are already set up in CI.
+    if ! docker image inspect "${DOCKER_IMAGE_TAG}" >/dev/null 2>&1; then
+        if ! image_exists "${DOCKER_IMAGE_TAG}"; then
+            echo "ERROR: base image ${DOCKER_IMAGE_TAG} is neither loaded locally nor published." >&2
+            echo "  The rootless image is built on top of the runtime image, so that" >&2
+            echo "  image has to be built (--assemble) or pushed first." >&2
+            exit 1
+        fi
+        echo "${DOCKER_IMAGE_TAG} not loaded locally, pulling it from the registry..."
+    fi
+
+    echo ""
+    echo "=========================================="
+    echo "Building rootless image (${BACKEND})..."
+    echo "=========================================="
+    echo ""
+    DOCKER_BUILDKIT=1 docker buildx build --builder default "${output[@]}" \
+        -f "${SCRIPT_DIR}/rootless.Dockerfile" \
+        "${tags[@]}" \
+        --build-arg "BASE_IMAGE=${DOCKER_IMAGE_TAG}" \
+        "${PLATFORM_ARGS[@]}" \
+        "${CACHE_ARGS[@]}" \
         "${SCRIPT_DIR}"
 }
 
@@ -473,6 +565,29 @@ if [[ "$MODE" == "stage" ]]; then
 
     echo ""
     echo "Published: ${TARGET_TAG}"
+    exit 0
+fi
+
+# ── --rootless: publish the rootless variant of the runtime image ──────
+#
+# Its own CI step so it never depends on an image tag that a later step is
+# still responsible for publishing: the assemble job pushes the runtime image
+# first, then this runs.
+
+if [[ "$MODE" == "rootless" ]]; then
+    # Same date tag as the runtime image gets, so the pair always matches.
+    if [[ -n "${DATE_TAG:-}" ]]; then
+        ROOTLESS_DATE_TAG="${ROOTLESS_TAG}-${DATE_TAG}"
+    fi
+
+    echo ""
+    echo "Base image:  ${DOCKER_IMAGE_TAG}"
+    echo "Rootless:    ${ROOTLESS_TAG}"
+
+    build_rootless --push
+
+    echo ""
+    echo "Published: ${ROOTLESS_TAG}${ROOTLESS_DATE_TAG:+ ${ROOTLESS_DATE_TAG}}"
     exit 0
 fi
 
@@ -573,24 +688,13 @@ fi
 
 echo "audio.cpp verified: deployment build (compiled model spec catalog), binary runs"
 
-echo ""
-echo "=========================================="
-echo "Building rootless image..."
-echo "=========================================="
-echo ""
-
-ROOTLESS_TAG="${DOCKER_IMAGE_TAG}-rootless"
-docker buildx build --load -t "${ROOTLESS_TAG}" - <<EOF
-FROM ${DOCKER_IMAGE_TAG}
-USER root
-RUN groupadd --system --gid 10001 llama-swap && \\
-    useradd --system --uid 10001 --gid 10001 \\
-      --home /app --shell /sbin/nologin llama-swap && \\
-    chown -R 10001:10001 /etc/llama-swap /models
-USER 10001
-EOF
-
-echo "Rootless image built: ${ROOTLESS_TAG}"
+# Only the local unified build derives the rootless image here. CI builds it
+# with --rootless as a separate step, after the runtime image is pushed.
+ROOTLESS_BUILT=false
+if [[ "$MODE" == "unified" ]]; then
+    build_rootless --load
+    ROOTLESS_BUILT=true
+fi
 
 echo ""
 echo "=========================================="
@@ -599,9 +703,13 @@ echo "=========================================="
 echo ""
 echo "Image tags:"
 echo "  ${DOCKER_IMAGE_TAG}"
-echo "  ${ROOTLESS_TAG}"
+if [[ "$ROOTLESS_BUILT" == true ]]; then
+    echo "  ${ROOTLESS_TAG}"
+fi
 echo ""
 echo "Built with:"
+echo "  platform:             ${PLATFORM:-native}"
+echo "  architecture:         ${ARCH}"
 echo "  llama.cpp:            ${LLAMA_HASH}"
 echo "  whisper.cpp:          ${WHISPER_HASH}"
 echo "  stable-diffusion.cpp: ${SD_HASH}"
