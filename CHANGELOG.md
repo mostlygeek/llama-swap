@@ -10,6 +10,24 @@ Long-form entries with full context live in
 
 ## [Unreleased]
 
+### Added (selective upstream-PR ports)
+
+- Surface the upstream's own log output in the error when a model process exits
+  before becoming ready, instead of the opaque "upstream command exited
+  prematurely" (upstream PR #897).
+- `POST /models/unload` — llama.cpp-compatible named-model unload used by
+  Open WebUI (upstream PR #924).
+- `setParamsByMatch` request filter: set parameters when a request field
+  matches a configured value, plus map/list macros usable as whole values
+  (upstream PR #934).
+- Per-model output-token caps (`capabilities.max_output_tokens`) enforced after
+  user filters, and dynamic reasoning-effort selection for llama.cpp b8605+
+  (`capabilities.reasoning` with per-effort budgets); both surfaced as
+  `/v1/models` metadata extensions (upstream PR #915). The capability probe is
+  bounded by a 2s timeout so an unresponsive upstream cannot stall startup.
+- Matrix `+undefined` reference: a set can include every model not named by
+  any other set expression (upstream PR #1026).
+
 ### Changed
 
 - Re-established the fork on upstream `7a14664` (2026-08-31), inheriting the new

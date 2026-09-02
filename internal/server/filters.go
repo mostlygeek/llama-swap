@@ -4,13 +4,16 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
+	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
@@ -19,6 +22,7 @@ import (
 //
 //   - UseModelName rewrite (issue #69)
 //   - StripParams removal (issue #174)
+//   - SetParamsByMatch request-field matching (issue #958)
 //   - SetParams injection (issue #453)
 //   - SetParamsByID per-alias overrides
 //
@@ -56,6 +60,11 @@ func CreateFilterMiddleware(cfg config.Config) chain.Middleware {
 				swaputil.SendResponse(w, r, http.StatusInternalServerError, err.Error())
 				return
 			}
+			body, err = applyMaxOutputTokens(body, r.URL.Path, maxOutputTokens(cfg, data.Model))
+			if err != nil {
+				swaputil.SendResponse(w, r, http.StatusInternalServerError, err.Error())
+				return
+			}
 
 			r.Body = io.NopCloser(bytes.NewReader(body))
 			r.Header.Del("Transfer-Encoding")
@@ -65,6 +74,62 @@ func CreateFilterMiddleware(cfg config.Config) chain.Middleware {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// maxOutputTokens returns the configured cap for a model or alias. A zero value
+// leaves requests unchanged for backwards compatibility.
+func maxOutputTokens(cfg config.Config, requested string) int {
+	realName, ok := cfg.RealModelName(requested)
+	if !ok {
+		return 0
+	}
+	return cfg.Models[realName].Capabilities.MaxOutputTokens
+}
+
+// applyMaxOutputTokens caps OpenAI-compatible generation parameters. It runs
+// after user filters so filters cannot raise a model's configured limit.
+func applyMaxOutputTokens(body []byte, path string, max int) ([]byte, error) {
+	if max == 0 {
+		return body, nil
+	}
+
+	var fields []string
+	switch path {
+	case "/v1/chat/completions", "/v/chat/completions":
+		fields = []string{"max_tokens", "max_completion_tokens"}
+	case "/v1/completions", "/v/completions":
+		fields = []string{"max_tokens"}
+	case "/v1/responses", "/v/responses":
+		fields = []string{"max_output_tokens"}
+	default:
+		return body, nil
+	}
+
+	configured := false
+	for _, field := range fields {
+		value := gjson.GetBytes(body, field)
+		if !value.Exists() {
+			continue
+		}
+		configured = true
+		if value.Type == gjson.Number && value.Float() > 0 && value.Float() <= float64(max) && value.Float() == math.Trunc(value.Float()) {
+			continue
+		}
+		var err error
+		body, err = sjson.SetBytes(body, field, max)
+		if err != nil {
+			return nil, fmt.Errorf("error capping parameter %s in request: %w", field, err)
+		}
+	}
+
+	if !configured {
+		var err error
+		body, err = sjson.SetBytes(body, fields[0], max)
+		if err != nil {
+			return nil, fmt.Errorf("error setting parameter %s in request: %w", fields[0], err)
+		}
+	}
+	return body, nil
 }
 
 // CreateFormFilterMiddleware returns middleware that applies the UseModelName
@@ -124,8 +189,8 @@ func resolveFilters(cfg config.Config, requested string) (useModelName string, f
 }
 
 // applyFilters rewrites the JSON body in place. Order matches the legacy
-// ProxyManager: useModelName, stripParams, setParams, then setParamsByID (which
-// can override setParams).
+// ProxyManager: useModelName, stripParams, setParamsByMatch, setParams, then
+// setParamsByID (which can override setParams).
 func applyFilters(body []byte, requested, useModelName string, f config.Filters) ([]byte, error) {
 	var err error
 
@@ -139,6 +204,10 @@ func applyFilters(body []byte, requested, useModelName string, f config.Filters)
 		if body, err = sjson.DeleteBytes(body, param); err != nil {
 			return nil, fmt.Errorf("error stripping parameter %s from request", param)
 		}
+	}
+
+	if body, err = applySetParamsByMatch(body, f); err != nil {
+		return nil, err
 	}
 
 	setParams, setKeys := f.SanitizedSetParams()
@@ -156,4 +225,74 @@ func applyFilters(body []byte, requested, useModelName string, f config.Filters)
 	}
 
 	return body, nil
+}
+
+// applySetParamsByMatch applies every rule whose key matches its configured
+// value. Rules run in configuration order, so a later rule overrides an earlier
+// one. Requests that do not carry the key, or carry a different value, are left
+// untouched. Because rules match on the request body and never on the model ID,
+// a client can change these params between requests without triggering a swap.
+func applySetParamsByMatch(body []byte, f config.Filters) ([]byte, error) {
+	var err error
+
+	for _, rule := range f.SetParamsByMatch {
+		value := gjson.GetBytes(body, rule.Key)
+		if !value.Exists() || value.String() != rule.Match {
+			continue
+		}
+
+		set, keys := rule.SanitizedSet()
+		for _, key := range keys {
+			if body, err = setMergedParam(body, key, set[key]); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	return body, nil
+}
+
+// setMergedParam writes val at key. When the configured value and the value
+// already in the request are both objects, sub-keys are written individually so
+// keys the client sent survive (e.g. setting chat_template_kwargs.enable_thinking
+// keeps any other chat_template_kwargs the client provided). Anything else is a
+// plain overwrite.
+func setMergedParam(body []byte, key string, val any) ([]byte, error) {
+	sub, isMap := val.(map[string]any)
+	if !isMap || !gjson.GetBytes(body, key).IsObject() {
+		body, err := sjson.SetBytes(body, key, val)
+		if err != nil {
+			return nil, fmt.Errorf("error setting parameter %s in request", key)
+		}
+		return body, nil
+	}
+
+	subKeys := make([]string, 0, len(sub))
+	for subKey := range sub {
+		subKeys = append(subKeys, subKey)
+	}
+	sort.Strings(subKeys)
+
+	var err error
+	for _, subKey := range subKeys {
+		path := key + "." + escapePathSegment(subKey)
+		if body, err = sjson.SetBytes(body, path, sub[subKey]); err != nil {
+			return nil, fmt.Errorf("error setting parameter %s in request", path)
+		}
+	}
+	return body, nil
+}
+
+// escapePathSegment escapes the characters gjson/sjson treat as path syntax so
+// a sub-key is matched literally when joined into a composite path.
+func escapePathSegment(segment string) string {
+	var b strings.Builder
+	for _, r := range segment {
+		switch r {
+		case '.', '*', '?', '\\':
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }

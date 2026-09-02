@@ -178,7 +178,7 @@ func TestProgram_CompileErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := Compile(tt.defs, resolve)
+			_, err := Compile(tt.defs, resolve, nil)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.errMsg)
 		})
@@ -254,7 +254,7 @@ func compileIdentity(t *testing.T, definitions []Definition, models []string) *P
 	}
 	program, err := Compile(definitions, func(name string) (string, bool) {
 		return name, known[name]
-	})
+	}, nil)
 	require.NoError(t, err)
 	return program
 }

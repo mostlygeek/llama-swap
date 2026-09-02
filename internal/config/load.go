@@ -297,6 +297,10 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		return Config{}, err
 	}
 
+	if err := validateSetParamsByMatch(config); err != nil {
+		return Config{}, err
+	}
+
 	if err := validateSelectors(config); err != nil {
 		return Config{}, err
 	}
@@ -306,6 +310,27 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	}
 
 	return config, nil
+}
+
+// validateSetParamsByMatch checks every setParamsByMatch rule on models and
+// peers. Macros inside rule values are already expanded and validated before
+// the typed decode, so only the rule shape is checked here.
+func validateSetParamsByMatch(config Config) error {
+	for modelID, modelConfig := range config.Models {
+		for i, rule := range modelConfig.Filters.SetParamsByMatch {
+			if err := rule.Validate(); err != nil {
+				return fmt.Errorf("model %s filters.setParamsByMatch[%d]: %w", modelID, i, err)
+			}
+		}
+	}
+	for peerID, peerConfig := range config.Peers {
+		for i, rule := range peerConfig.Filters.SetParamsByMatch {
+			if err := rule.Validate(); err != nil {
+				return fmt.Errorf("peers.%s.filters.setParamsByMatch[%d]: %w", peerID, i, err)
+			}
+		}
+	}
+	return nil
 }
 
 func validateProfiles(config Config) error {
