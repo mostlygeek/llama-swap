@@ -197,6 +197,17 @@ func detectDRMSysfs() ([]detectedAccelerator, error) {
 			driver = &Driver{Name: nonEmptyStringPtr(driverName), Version: nonEmptyStringPtr(driverVersion)}
 		}
 		model := readTrimmed(filepath.Join(devicePath, "product_name"))
+		var architecture *string
+		if vendor == "Intel" {
+			if id, err := strconv.ParseUint(strings.TrimPrefix(strings.ToLower(readTrimmed(filepath.Join(devicePath, "device"))), "0x"), 16, 16); err == nil {
+				if info, ok := intelGPU(uint16(id)); ok {
+					architecture = nonEmptyStringPtr(info.Architecture)
+					if model == "" {
+						model = info.Model
+					}
+				}
+			}
+		}
 		powerLimit := readPowerLimit(devicePath)
 		result = append(result, detectedAccelerator{
 			identity: normalizePCIIdentity(filepath.Base(resolved)),
@@ -204,6 +215,7 @@ func detectDRMSysfs() ([]detectedAccelerator, error) {
 				Kind:            "gpu",
 				Vendor:          stringPtr(vendor),
 				Model:           nonEmptyStringPtr(model),
+				Architecture:    architecture,
 				Memory:          memory,
 				Driver:          driver,
 				PowerLimitWatts: powerLimit,

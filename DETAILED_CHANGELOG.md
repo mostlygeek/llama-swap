@@ -5,6 +5,121 @@ High-level summaries live in [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
+## 2026-09-02 — Intel GPU architecture/model from PCI device ID
+
+### What
+
+Linux hardware detection now fills the `architecture` field (and, for Battlemage
+discrete cards, `model`) for Intel GPUs. On an Intel Arc B-series host the
+Hardware tab previously showed `Architecture: Not detected` and a generic
+`Gpu N` for both the discrete card and the integrated GPU.
+
+### Why
+
+`detectDRMSysfs` (`internal/hw/detect_linux.go`) only ever set architecture for
+AMD (ROCm/KFD gfx strings) and NVIDIA — there was no Intel code path. Intel also
+leaves the `.../device/product_name` sysfs attribute empty, so `model` fell back
+to the generic label. Intel encodes the GPU generation in the PCI device ID
+(`.../device/device`, e.g. `0xe20b`), so it is derivable without extra tooling.
+
+### How
+
+- New `internal/hw/intel.go` (platform-neutral, so it is unit-testable without
+  Linux and reusable by the Windows dxgi path later): `intelGPU(deviceID uint16)`
+  looks up a curated `map[uint16]string` (architecture) plus a small
+  `map[uint16]string` (marketing model). IDs are grouped by platform with the
+  source cited (kernel `include/drm/intel/pciids.h` `INTEL_*_IDS` macros + Mesa
+  chipset tables). Coverage: DG1, Alchemist/DG2 + ATS-M, Battlemage/BMG G21, and
+  integrated Tiger/Rocket/Alder/Meteor/Arrow/Lunar Lake. Unknown IDs return
+  `ok=false`, leaving the field "Not detected" rather than guessing.
+- Models are only assigned where a die maps unambiguously to one product name:
+  Battlemage `0xE20B`→Arc B580, `0xE20C`→Arc B570, `0xE211`→Arc Pro B50,
+  `0xE212`→Arc Pro B60. Alchemist dies and integrated parts (one die → many SKUs)
+  get architecture only.
+- `detectDRMSysfs` reads `.../device/device`, parses the hex ID as a `uint16`
+  (`strconv.ParseUint(_, 16, 16)`, so the `uint16` conversion is bounded — no
+  gosec G115), and when the vendor is Intel sets `Architecture` and falls back to
+  the table model only when `product_name` is empty.
+- No type/schema/UI change: `Architecture` and `Model` are already `*string` on
+  `Accelerator` with no enum validation, and `hardware.js` already renders both.
+
+### Commands
+
+- `gofmt -w internal/hw/intel.go internal/hw/intel_test.go internal/hw/detect_linux.go`
+- `go test -v -run TestIntelGPU ./internal/hw/` → 5 passed
+- `make test-dev` → all packages ok, staticcheck clean
+- `make gosec` → 0 issues across linux/darwin/windows
+- `aidc-scan` → semgrep/gitleaks/gosec clean
+
+### Verification
+
+Unit tests (`internal/hw/intel_test.go`) cover discrete hits with model,
+Battlemage/Alchemist architecture-only hits, one ID per integrated platform, and
+unknown/boundary IDs (`0x4904`, `0x490A`, `0xE201`, `0xE224`, `0x56C3`, `0x0000`,
+`0xFFFF`) that must miss. Real-hardware confirmation on the reporter's B-series
+box is pending (should read `Architecture: Battlemage` for the `xe` card).
+
+### Notes
+
+- The table needs an occasional refresh as Intel ships new device IDs; the
+  per-group source citations make that a copy-from-header task.
+- Separate, still-open bug (not addressed here): the `xe` driver reports VRAM at
+  `device/tile0/vram0/total_bytes`, not the amdgpu-only `mem_info_vram_total`, so
+  discrete Intel VRAM still shows "Shared System".
+
+## 2026-09-02 — Apple GPU Metal driver detection on recent macOS
+
+### What
+
+On an Apple M4 Max the Hardware tab showed `Driver: Not detected`. It now reads
+`Metal 4` (name "Metal" + family version "4"). Architecture ("Apple M4"), Model
+("Apple M4 Max") and unified memory were already correct; Power Limit stays "Not
+detected" because Apple Silicon does not expose a per-GPU power cap.
+
+### Why
+
+`parseSystemProfiler` (`internal/hw/detect_darwin.go`) only set the driver when
+`spdisplays_metal` / `spdisplays_metal_support` were present. Recent macOS
+(Sequoia / macOS 26 on M4) reports Metal support under the renamed key
+`spdisplays_mtlgpufamilysupport` with value `spdisplays_metal4`, which the old
+lookup missed — confirmed from the machine's `system_profiler -json
+SPDisplaysDataType` output.
+
+### How
+
+- New `internal/hw/apple.go` (platform-neutral, so it is unit-testable on Linux
+  like `intel.go`): `metalFamilyKeys` lists all known key spellings newest-first
+  (`spdisplays_mtlgpufamilysupport`, `spdisplays_metalfamily`,
+  `spdisplays_metal_support`, `spdisplays_metal`) and `metalVersion(value)`
+  extracts the family number via `(?i)metal\s*([0-9]+)` (`spdisplays_metal4`→"4",
+  legacy `spdisplays_supported`→"").
+- `detect_darwin.go` now resolves the value via `firstMapString(display,
+  metalFamilyKeys...)` and sets `Driver{Name:"Metal", Version:metalVersion(...)}`;
+  `nonEmptyStringPtr` keeps Version nil when the value has no number, so legacy
+  values still render just "Metal".
+
+### Commands
+
+- `gofmt -w internal/hw/apple.go internal/hw/apple_test.go internal/hw/detect_darwin.go internal/hw/hardware_darwin_test.go`
+- `go test -run 'TestMetalVersion|TestIntelGPU' ./internal/hw/` → pass
+- `GOOS=darwin go vet ./internal/hw/` → clean (darwin tests can't execute on the
+  Linux build host)
+- `make gosec` → 0 issues across linux/darwin/windows; `aidc-scan` clean
+
+### Verification
+
+`TestMetalVersion` (neutral, runs on Linux) covers the metal4/metal3/legacy/empty
+cases. `TestHardware_DarwinMetalDriverFamily` (darwin build tag) drives
+`parseSystemProfiler` with the real M4 Max JSON and asserts `Metal`/`4`; it is
+compile+vet-checked here and runs on macOS CI.
+
+### Notes
+
+- Architecture is intentionally the family ("Apple M4"), with the variant in
+  Model ("Apple M4 Max"); left unchanged.
+- Power Limit is not exposed for Apple Silicon GPUs — no fix possible from
+  `system_profiler`.
+
 ## 2026-09-02 — Fix dead close buttons in the activity capture dialog
 
 ### What

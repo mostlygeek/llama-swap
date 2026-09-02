@@ -80,6 +80,16 @@ Long-form entries with full context live in
 
 ### Fixed
 
+- Intel GPU hardware detection now reports an architecture (and, for Battlemage
+  discrete cards, a model) on Linux by mapping the PCI device ID to a generation
+  codename — DG1, Alchemist, Battlemage, and recent integrated Xe (Tiger/Rocket/
+  Alder/Meteor/Arrow/Lunar Lake). Previously both fields showed "Not detected"
+  because the sysfs detector never populated architecture and Intel leaves
+  `product_name` empty.
+- Apple GPU driver now shows "Metal" (with family version, e.g. "Metal 4")
+  instead of "Not detected" on recent macOS. `system_profiler` renamed the
+  Metal-support key to `spdisplays_mtlgpufamilysupport`; the detector now probes
+  that alongside the older `spdisplays_metal*` spellings.
 - Activity capture dialog: the header `×` and footer `Close` buttons both work
   again. The render bound a click handler to only the first `[data-close]`
   element via `querySelector`, leaving the other button dead.
