@@ -50,6 +50,58 @@ signal; acceptable given the wrapper is not deployed on Windows.
 
 ---
 
+## 2026-09-02 — Suppress DXGI COM interop gosec false positives (Windows)
+
+### What
+
+CI `gosec` (pinned to `v2.26.1` in `.github/workflows/gosec.yml`) reported 12
+`GOOS=windows` findings in `internal/hw/dxgi_windows.go` — 5×G115 (integer
+overflow) and 7×G103 (`unsafe.Pointer`). The local `make gosec` uses an older
+`gosec` (`dev`) that predates the G115 rule, so these were invisible locally.
+
+### Why
+
+Both classes are false positives inherent to DXGI COM interop:
+
+- **G115 (HRESULT/LUID):** an `HRESULT` is a 32-bit status code returned from a
+  syscall as `uintptr`. Truncating it to `uint32`/`int32` and testing the sign
+  bit is the documented Win32 `SUCCEEDED`/`FAILED` semantics, not an overflow.
+  The `luid:%08x` identity likewise reinterprets the fixed 32-bit `AdapterLUID`
+  ABI field for display.
+- **G103 (`unsafe.Pointer`):** mandatory to pass the COM factory/adapter vtable
+  pointers and `DXGI_ADAPTER_DESC` struct across the `syscall.SyscallN` /
+  `LazyProc.Call` boundary. Same by-design verdict as the existing
+  `pdh_windows.go` / `d3dkmt_windows.go` sites.
+
+### How
+
+Added inline `// #nosec G115 -- …` / `// #nosec G103 -- …` markers at the exact
+flagged lines (4 G115 markers — one covers the two conversions on the
+`hresultFailed` line — and 7 G103 markers), matching the established style. No
+code was restructured to dodge the scanner. Updated the audit ledger
+`docs/gosec-suppressions.md`: summary totals (G115 25→29, G103 20→27, total
+78→89) and the G115/G103 section prose to name `dxgi_windows.go`. The
+`TestNosecLedgerInSync` guard enforces the marker/ledger counts stay in sync.
+
+### Commands
+
+- `go install github.com/securego/gosec/v2/cmd/gosec@v2.26.1` (match CI)
+- `GOOS=windows gosec ./internal/hw/` → `Issues: 0`
+- `GOOS={linux,darwin,windows} gosec ./...` → all `Issues: 0`, no build errors
+- `GOOS=windows go build ./internal/hw/` → ok
+- `gofmt -w internal/hw/dxgi_windows.go`
+- `go test ./internal/audit/` → `TestNosecLedgerInSync` passes
+- `aidc-scan` → clean
+
+### Notes
+
+`make gosec` locally still runs the `dev` gosec, which under-reports vs CI. The
+verification above installed the CI-pinned `v2.26.1` explicitly to reproduce and
+confirm the fix. Consider pinning the same version in the Makefile as a
+follow-up so local and CI agree.
+
+---
+
 ## 2026-09-02 — Maximal upstream integration (re-established on upstream `7a14664`)
 
 ### What

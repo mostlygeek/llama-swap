@@ -83,6 +83,10 @@ Long-form entries with full context live in
 - `cmd/vllm-wrapper` now cross-compiles for Windows: the `syscall.Kill` call
   (Unix-only) moved behind a build-tagged `stopProcess` helper
   (`stop_unix.go` / `stop_windows.go`), unblocking `GOOS=windows gosec`.
+- Documented the DXGI COM interop `gosec` false positives in
+  `internal/hw/dxgi_windows.go` (G115 HRESULT/LUID truncation, G103
+  `unsafe.Pointer` vtable calls) with inline `#nosec` markers, so the newer
+  CI `gosec` (v2.26.1) reports zero findings on the Windows target.
 
 ### Security
 

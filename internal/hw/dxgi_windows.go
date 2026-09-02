@@ -53,11 +53,11 @@ func detectDXGI() ([]detectedAccelerator, error) {
 	}
 	var factory *dxgiObject
 	hresult, _, _ := procCreateDXGIFactory.Call(
-		uintptr(unsafe.Pointer(&iidIDXGIFactory)),
-		uintptr(unsafe.Pointer(&factory)),
+		uintptr(unsafe.Pointer(&iidIDXGIFactory)), // #nosec G103 -- unsafe.Pointer is required to marshal the DXGI COM syscall ABI
+		uintptr(unsafe.Pointer(&factory)),         // #nosec G103 -- unsafe.Pointer is required to marshal the DXGI COM syscall ABI
 	)
 	if hresultFailed(hresult) || factory == nil {
-		return nil, fmt.Errorf("CreateDXGIFactory failed: HRESULT 0x%08x", uint32(hresult))
+		return nil, fmt.Errorf("CreateDXGIFactory failed: HRESULT 0x%08x", uint32(hresult)) // #nosec G115 -- HRESULT is a 32-bit status code; truncating the syscall uintptr to uint32 is the defined Win32 semantics
 	}
 	defer releaseDXGI(factory)
 
@@ -66,11 +66,11 @@ func detectDXGI() ([]detectedAccelerator, error) {
 		var adapter *dxgiObject
 		hresult, _, _ = syscall.SyscallN(
 			factory.vtable[7],
-			uintptr(unsafe.Pointer(factory)),
+			uintptr(unsafe.Pointer(factory)), // #nosec G103 -- unsafe.Pointer is required to marshal the DXGI COM syscall ABI
 			uintptr(index),
-			uintptr(unsafe.Pointer(&adapter)),
+			uintptr(unsafe.Pointer(&adapter)), // #nosec G103 -- unsafe.Pointer is required to marshal the DXGI COM syscall ABI
 		)
-		if uint32(hresult) == dxgiErrorNotFound {
+		if uint32(hresult) == dxgiErrorNotFound { // #nosec G115 -- HRESULT is a 32-bit status code; truncating the syscall uintptr to uint32 is the defined Win32 semantics
 			break
 		}
 		if hresultFailed(hresult) || adapter == nil {
@@ -80,8 +80,8 @@ func detectDXGI() ([]detectedAccelerator, error) {
 		var desc dxgiAdapterDesc
 		descResult, _, _ := syscall.SyscallN(
 			adapter.vtable[8],
-			uintptr(unsafe.Pointer(adapter)),
-			uintptr(unsafe.Pointer(&desc)),
+			uintptr(unsafe.Pointer(adapter)), // #nosec G103 -- unsafe.Pointer is required to marshal the DXGI COM syscall ABI
+			uintptr(unsafe.Pointer(&desc)),   // #nosec G103 -- unsafe.Pointer is required to marshal the DXGI COM syscall ABI
 		)
 		releaseDXGI(adapter)
 		if hresultFailed(descResult) {
@@ -102,7 +102,7 @@ func detectDXGI() ([]detectedAccelerator, error) {
 			memory = AcceleratorMemory{Kind: "shared_system", CapacityBytes: &capacity}
 		}
 		result = append(result, detectedAccelerator{
-			identity: fmt.Sprintf("luid:%08x:%08x", uint32(desc.AdapterLUIDHighPart), desc.AdapterLUIDLowPart),
+			identity: fmt.Sprintf("luid:%08x:%08x", uint32(desc.AdapterLUIDHighPart), desc.AdapterLUIDLowPart), // #nosec G115 -- LUID high part is a fixed 32-bit ABI field; reinterpreting int32 bits as uint32 for display is intentional
 			value: Accelerator{
 				Kind:   "gpu",
 				Vendor: nonEmptyStringPtr(vendor),
@@ -116,12 +116,12 @@ func detectDXGI() ([]detectedAccelerator, error) {
 
 func releaseDXGI(object *dxgiObject) {
 	if object != nil && object.vtable != nil {
-		syscall.SyscallN(object.vtable[2], uintptr(unsafe.Pointer(object)))
+		syscall.SyscallN(object.vtable[2], uintptr(unsafe.Pointer(object))) // #nosec G103 -- unsafe.Pointer is required to marshal the DXGI COM syscall ABI
 	}
 }
 
 func hresultFailed(result uintptr) bool {
-	return int32(uint32(result)) < 0
+	return int32(uint32(result)) < 0 // #nosec G115 -- HRESULT is a 32-bit status code; truncating the syscall uintptr and testing its sign bit is the defined Win32 SUCCEEDED/FAILED semantics
 }
 
 func windowsPCIVendor(id uint32) string {
