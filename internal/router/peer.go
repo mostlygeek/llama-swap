@@ -17,11 +17,14 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
+	"github.com/mostlygeek/llama-swap/internal/tailcat"
 )
 
 type peerMember struct {
 	peerID       string
 	reverseProxy *httputil.ReverseProxy
+	transport    *http.Transport
+	tailcat      *tailcat.Client
 	apiKey       string
 }
 
@@ -31,9 +34,10 @@ type peerRoute struct {
 }
 
 type Peer struct {
-	cfg    config.Config
-	logger *logmon.Monitor
-	peers  map[string]*peerRoute
+	cfg     config.Config
+	logger  *logmon.Monitor
+	peers   map[string]*peerRoute
+	members []*peerMember
 
 	shutdownCtx  context.Context
 	shutdownFn   context.CancelFunc
@@ -51,6 +55,7 @@ func NewPeer(cfg config.Config, logger *logmon.Monitor) (*Peer, error) {
 	bareRoutes := make(map[string][]*peerRoute)
 
 	peerIDs := make([]string, 0, len(peers))
+	tailcatClients := make(map[string]*tailcat.Client)
 	for peerID := range peers {
 		peerIDs = append(peerIDs, peerID)
 	}
@@ -58,13 +63,36 @@ func NewPeer(cfg config.Config, logger *logmon.Monitor) (*Peer, error) {
 
 	for _, peerID := range peerIDs {
 		peer := peers[peerID]
+		var tailcatClient *tailcat.Client
+		proxyFromEnvironment := http.ProxyFromEnvironment
+		dialContext := (&net.Dialer{
+			Timeout:   time.Duration(peer.Timeouts.Connect) * time.Second,
+			KeepAlive: time.Duration(peer.Timeouts.KeepAlive) * time.Second,
+		}).DialContext
+		if _, blob, privateKey, found := peer.Tailcat(); found {
+			clientKey := "ephemeral:" + peerID
+			if privateKey != nil {
+				clientKey = privateKey.Identity() + ":" + blob
+			}
+			tailcatClient = tailcatClients[clientKey]
+			if tailcatClient == nil {
+				tailcatClient = tailcat.NewClient(peerID, blob, privateKey, logger)
+				tailcatClients[clientKey] = tailcatClient
+			}
+			proxyFromEnvironment = nil
+			dialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+				if peer.Timeouts.Connect > 0 {
+					var cancel context.CancelFunc
+					ctx, cancel = context.WithTimeout(ctx, time.Duration(peer.Timeouts.Connect)*time.Second)
+					defer cancel()
+				}
+				return tailcatClient.DialContext(ctx, network, address)
+			}
+		}
 
 		peerTransport := &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
-			DialContext: (&net.Dialer{
-				Timeout:   time.Duration(peer.Timeouts.Connect) * time.Second,
-				KeepAlive: time.Duration(peer.Timeouts.KeepAlive) * time.Second,
-			}).DialContext,
+			Proxy:                 proxyFromEnvironment,
+			DialContext:           dialContext,
 			TLSHandshakeTimeout:   time.Duration(peer.Timeouts.TLSHandshake) * time.Second,
 			ResponseHeaderTimeout: time.Duration(peer.Timeouts.ResponseHeader) * time.Second,
 			ExpectContinueTimeout: time.Duration(peer.Timeouts.ExpectContinue) * time.Second,
@@ -115,6 +143,8 @@ func NewPeer(cfg config.Config, logger *logmon.Monitor) (*Peer, error) {
 		pp := &peerMember{
 			peerID:       peerID,
 			reverseProxy: reverseProxy,
+			transport:    peerTransport,
+			tailcat:      tailcatClient,
 			apiKey:       peer.ApiKey,
 		}
 
@@ -143,13 +173,22 @@ func NewPeer(cfg config.Config, logger *logmon.Monitor) (*Peer, error) {
 
 	shutdownCtx, shutdownFn := context.WithCancel(context.Background())
 
-	return &Peer{
+	r := &Peer{
 		cfg:         cfg,
 		logger:      logger,
 		peers:       modelMap,
 		shutdownCtx: shutdownCtx,
 		shutdownFn:  shutdownFn,
-	}, nil
+	}
+	seenMembers := make(map[*peerMember]struct{})
+	for _, route := range modelMap {
+		if _, ok := seenMembers[route.member]; ok {
+			continue
+		}
+		seenMembers[route.member] = struct{}{}
+		r.members = append(r.members, route.member)
+	}
+	return r, nil
 }
 
 func (r *Peer) Handles(model string) bool {
@@ -165,7 +204,7 @@ func (r *Peer) Shutdown(timeout time.Duration) error {
 	if timeout == 0 {
 		r.shutdownFn()
 		r.inflight.Wait()
-		return nil
+		return r.closeTransports(time.Second)
 	}
 
 	done := make(chan struct{})
@@ -176,12 +215,31 @@ func (r *Peer) Shutdown(timeout time.Duration) error {
 
 	select {
 	case <-done:
-		return nil
+		r.shutdownFn()
+		return r.closeTransports(timeout)
 	case <-time.After(timeout):
 		r.shutdownFn()
 		r.inflight.Wait()
-		return fmt.Errorf("peer shutdown timed out after %v", timeout)
+		return errors.Join(fmt.Errorf("peer shutdown timed out after %v", timeout), r.closeTransports(time.Millisecond))
 	}
+}
+
+func (r *Peer) closeTransports(timeout time.Duration) error {
+	var errs []error
+	closedTailcat := make(map[*tailcat.Client]struct{})
+	for _, member := range r.members {
+		member.transport.CloseIdleConnections()
+		if member.tailcat != nil {
+			if _, closed := closedTailcat[member.tailcat]; closed {
+				continue
+			}
+			closedTailcat[member.tailcat] = struct{}{}
+			if err := member.tailcat.CloseWithTimeout(timeout); err != nil {
+				errs = append(errs, fmt.Errorf("peer %s: %w", member.peerID, err))
+			}
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (r *Peer) ServeHTTP(w http.ResponseWriter, req *http.Request) {

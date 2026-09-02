@@ -13,6 +13,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
+	"github.com/tailscale/tailcat"
 )
 
 var testLogger = logmon.NewWriter(os.Stdout)
@@ -692,5 +693,38 @@ func TestNewPeer_CustomTimeouts(t *testing.T) {
 	}
 	if !transport.ForceAttemptHTTP2 {
 		t.Error("expected ForceAttemptHTTP2 to be true")
+	}
+}
+
+func TestNewPeer_TailcatTransportDisablesEnvironmentProxyAndCleansUp(t *testing.T) {
+	private := tailcat.NewPrivateKey()
+	private.Public.RegionID = 1
+	blob := private.Public.ConnBlob()
+	cfg, err := config.LoadConfigFromReader(strings.NewReader(`
+models: {}
+peers:
+  cat:
+    proxy: tailcat://` + string(blob) + `
+    models: [remote]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pr, err := NewPeer(cfg, testLogger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	member := pr.peers["cat/remote"].member
+	if member.tailcat == nil {
+		t.Fatal("Tailcat client was not attached")
+	}
+	if member.transport.Proxy != nil {
+		t.Fatal("Tailcat transport must not use environment HTTP proxies")
+	}
+	if member.reverseProxy.Transport != member.transport {
+		t.Fatal("reverse proxy does not use the Tailcat transport")
+	}
+	if err := pr.Shutdown(time.Second); err != nil {
+		t.Fatalf("Shutdown: %v", err)
 	}
 }

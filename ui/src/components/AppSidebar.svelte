@@ -7,7 +7,7 @@
   import { toggleTheme, themeMode, appTitle } from "../stores/theme";
   import { currentRoute } from "../stores/route";
   import { playgroundActivity } from "../stores/playgroundActivity";
-  import { performanceEnabled, models } from "../stores/api";
+  import { performanceEnabled, models, tailcatStatus } from "../stores/api";
   import { showUnlistedModels } from "../stores/modelDisplay";
   import { modelsMenuOpen } from "../stores/sidebar";
   import type { Model } from "../lib/types";
@@ -104,6 +104,19 @@
               {/snippet}
             </Sidebar.MenuButton>
           </Sidebar.MenuItem>
+
+          {#if $tailcatStatus.enabled}
+            <Sidebar.MenuItem>
+              <Sidebar.MenuButton isActive={isActive("/tailcat", $currentRoute)} tooltipContent="Tailcat">
+                {#snippet child({ props })}
+                  <a href="/tailcat" use:link {...props}>
+                    <Activity />
+                    <span>Tailcat</span>
+                  </a>
+                {/snippet}
+              </Sidebar.MenuButton>
+            </Sidebar.MenuItem>
+          {/if}
 
           <Sidebar.MenuItem>
             <Sidebar.MenuButton isActive={isActive("/playground", $currentRoute)} tooltipContent="Playground">

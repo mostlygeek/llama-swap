@@ -169,8 +169,8 @@ func TestDocs_RealConfigExample_SectionKeys(t *testing.T) {
 		"healthCheckTimeout", "logLevel", "logTimeFormat", "logToStdout",
 		"metricsMaxInMemory", "captureBuffer", "ui", "performance", "startPort",
 		"sendLoadingState", "includeAliasesInList", "globalTTL", "unloadTimeout",
-		"macros", "apiKeys", "upstream", "profiles", "selectors", "models",
-		"hooks", "routing", "peers",
+		"macros", "apiKeys", "tailcat", "upstream", "profiles", "selectors",
+		"models", "hooks", "routing", "peers",
 	}
 
 	for _, key := range want {
@@ -215,6 +215,7 @@ func TestDocs_RealSchema_KnownPaths(t *testing.T) {
 		"", "models", "models.*", "models.*.cmd", "models.*.filters",
 		"models.*.capabilities", "models.*.capabilities.tools",
 		"routing", "routing.router.use", "peers", "peers.*.apiKey",
+		"tailcat", "tailcat.models", "peers.*.tailcatKey",
 		"profiles", "selectors", "macros", "apiKeys", "globalTTL",
 	} {
 		if _, ok := docs.SchemaFragment(path); !ok {

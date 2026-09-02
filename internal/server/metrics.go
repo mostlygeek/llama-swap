@@ -18,6 +18,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/store"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
+	"github.com/mostlygeek/llama-swap/internal/tailcat"
 	"github.com/tidwall/gjson"
 )
 
@@ -114,6 +115,19 @@ func (mp *metricsMonitor) Close() error {
 	return nil
 }
 
+// activitySource returns trusted connection metadata for activity records.
+// Forwarding headers are intentionally ignored because callers can spoof them.
+func activitySource(r *http.Request) string {
+	if source, ok := tailcat.SourceFromContext(r.Context()); ok {
+		return source
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	return "ip:" + host
+}
+
 // record parses a completed response body and stores/emits an activity entry.
 // Successful requests store a zstd+CBOR capture (when enabled) with cf
 // controlling which parts are retained. Failed (non-200) requests capture the
@@ -129,6 +143,7 @@ func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *resp
 		RespStatusCode:  recorder.Status(),
 		DurationMs:      int(time.Since(recorder.StartTime()).Milliseconds()),
 	}
+	tm.Src = activitySource(r)
 
 	if ctxData, ok := swaputil.ReadContext(r.Context()); ok && len(ctxData.Metadata) > 0 {
 		tm.Metadata = make(map[string]string, len(ctxData.Metadata))

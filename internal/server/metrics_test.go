@@ -29,6 +29,28 @@ func TestServer_ParseMetrics_ChatCompletions(t *testing.T) {
 	}
 }
 
+func TestServer_ActivitySourceStripsClientPort(t *testing.T) {
+	tests := []struct {
+		name       string
+		remoteAddr string
+		want       string
+	}{
+		{name: "IPv4", remoteAddr: "192.168.1.10:54321", want: "ip:192.168.1.10"},
+		{name: "IPv6", remoteAddr: "[2001:db8::10]:54321", want: "ip:2001:db8::10"},
+		{name: "missing port", remoteAddr: "localhost", want: "ip:localhost"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "/", nil)
+			r.RemoteAddr = test.remoteAddr
+			r.Header.Set("X-Forwarded-For", "203.0.113.10:9999")
+			if got := activitySource(r); got != test.want {
+				t.Fatalf("activitySource() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestServer_ParseMetrics_Timings(t *testing.T) {
 	body := `{"timings":{"prompt_n":20,"predicted_n":50,"prompt_per_second":100.0,"predicted_per_second":40.0,"prompt_ms":200,"predicted_ms":1250,"cache_n":8}}`
 	parsed := gjson.Parse(body)

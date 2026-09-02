@@ -43,6 +43,7 @@
   import MetaCell from "./activity-table/MetaCell.svelte";
   import ModelLink from "./activity-table/ModelLink.svelte";
   import MiddleEllipsis from "./activity-table/MiddleEllipsis.svelte";
+  import SourceCell from "./activity-table/SourceCell.svelte";
   import ExportDialog from "./activity-table/ExportDialog.svelte";
   import { buildActivityMarkdown, formatDrafted } from "../lib/activityExport";
   import { formatDuration, formatSpeed, formatRelativeTime } from "../lib/format";
@@ -53,6 +54,8 @@
     inflightRequests?: InflightRequestEntry[];
     storagePrefix: string;
     showModelColumn?: boolean;
+    showSourceColumn?: boolean;
+    showInflight?: boolean;
     showPagination?: boolean;
     page?: number;
     limit?: number;
@@ -76,6 +79,8 @@
     inflightRequests = [],
     storagePrefix,
     showModelColumn = true,
+    showSourceColumn = true,
+    showInflight = true,
     showPagination = false,
     page = 1,
     limit = 25,
@@ -104,11 +109,12 @@
     defaultVisible: boolean;
   }
 
-  function buildColumnMeta(withModel: boolean): ColMeta[] {
+  function buildColumnMeta(withModel: boolean, withSource: boolean): ColMeta[] {
     const cols: ColMeta[] = [
       { id: "id", label: "ID", defaultVisible: true },
       { id: "time", label: "Time", defaultVisible: true },
     ];
+    if (withSource) cols.push({ id: "src", label: "Source/Caller", defaultVisible: true });
     if (withModel) cols.push({ id: "model", label: "Model", defaultVisible: true });
     cols.push(
       { id: "req_path", label: "Path", defaultVisible: false },
@@ -127,7 +133,7 @@
     return cols;
   }
 
-  let columnMeta = $derived(buildColumnMeta(showModelColumn));
+  let columnMeta = $derived(buildColumnMeta(showModelColumn, showSourceColumn));
 
   let columnLabelMap = $derived(
     Object.fromEntries(columnMeta.map((c) => [c.id, c.label])) as Record<string, string>
@@ -331,7 +337,7 @@
     }
   }
 
-  function buildColumns(withModel: boolean): ColumnDef<ActivityLogEntry>[] {
+  function buildColumns(withModel: boolean, withSource: boolean): ColumnDef<ActivityLogEntry>[] {
     const cols: ColumnDef<ActivityLogEntry>[] = [
       {
         id: "id",
@@ -346,6 +352,15 @@
         cell: ({ row }) => formatRelativeTime(row.original.timestamp),
       },
     ];
+
+    if (withSource) {
+      cols.push({
+        id: "src",
+        accessorKey: "src",
+        header: "Source/Caller",
+        cell: ({ row }) => renderComponent(SourceCell, { source: row.original.src }),
+      });
+    }
 
     if (withModel) {
       cols.push({
@@ -444,7 +459,7 @@
     return cols;
   }
 
-  let columns = $derived(buildColumns(showModelColumn));
+  let columns = $derived(buildColumns(showModelColumn, showSourceColumn));
 
   const table = createSvelteTable({
     get data() {
@@ -644,6 +659,7 @@
   }
 </script>
 
+{#if showInflight}
 <Card.Root class="relative p-3">
   <div class="flex items-center gap-2 pr-16 text-sm">
     <span class="text-muted-foreground text-xs uppercase tracking-wider">In-flight Requests</span>
@@ -767,6 +783,7 @@
     </div>
   {/if}
 </Card.Root>
+{/if}
 
 <Card.Root class="mt-3 shrink-0 gap-0 overflow-hidden py-0 {cardClass}">
   <Card.Header class="flex items-center justify-between border-b px-4 py-2">

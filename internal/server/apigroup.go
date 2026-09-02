@@ -235,6 +235,7 @@ func parseActivityQuery(r *http.Request) (store.ActivityQuery, error) {
 		Limit: defaultLimit,
 		Page:  1,
 	}
+	query.SrcPrefix = r.URL.Query().Get("src_prefix")
 
 	// model repeats to filter on several models at once (?model=a&model=b).
 	// A single ?model=x stays a plain exact match.
@@ -356,6 +357,16 @@ func (s *Server) handleAPIVersion(w http.ResponseWriter, r *http.Request) {
 		"commit":     s.build.Commit,
 		"build_date": s.build.Date,
 	})
+}
+
+func (s *Server) handleAPITailcat(w http.ResponseWriter, r *http.Request) {
+	address := ""
+	enabled := s.cfg.TailcatEnabled()
+	if enabled {
+		address = s.TailcatAddress()
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"enabled": enabled, "address": address})
 }
 
 // handleAPIHardware serves the hardware snapshot captured at process startup.
