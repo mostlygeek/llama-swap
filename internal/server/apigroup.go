@@ -13,6 +13,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/perf"
+	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/store"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
@@ -28,6 +29,8 @@ type apiModel struct {
 	Aliases       []string       `json:"aliases,omitempty"`
 	Capabilities  map[string]any `json:"capabilities,omitempty"`
 	ContextLength int            `json:"context_length,omitempty"`
+	LoadStartedAt int64          `json:"loadStartedAt,omitempty"` // unix ms; only while state == starting
+	EstLoadMs     int64          `json:"estLoadMs,omitempty"`     // median of prior successful loads; 0 = unknown
 }
 
 type apiProfile struct {
@@ -113,6 +116,16 @@ func (s *Server) modelStatus() []apiModel {
 			state = string(st)
 		}
 		_, capsMap, _, ctxLen := renderCapabilities(mc.Capabilities)
+		// state (from RunningModels above) and li are read separately, so a load
+		// finishing between the two reads can yield state="starting" with
+		// li.StartedAt already 0 for a single snapshot. That is the benign
+		// direction — the UI treats a missing start time as elapsed 0 and the
+		// next snapshot corrects it; the reverse (ready + stale StartedAt) cannot
+		// happen because run() clears StartedAt before it publishes StateReady.
+		var li process.LoadInfo
+		if info, ok := s.local.LoadInfo(id); ok {
+			li = info
+		}
 		models = append(models, apiModel{
 			Id:            id,
 			Name:          mc.Name,
@@ -122,6 +135,8 @@ func (s *Server) modelStatus() []apiModel {
 			Aliases:       mc.Aliases,
 			Capabilities:  capsMap,
 			ContextLength: ctxLen,
+			LoadStartedAt: li.StartedAt,
+			EstLoadMs:     li.EstimateMs,
 		})
 	}
 

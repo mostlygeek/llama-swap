@@ -1058,6 +1058,50 @@ func TestServer_ModelStatus_Capabilities(t *testing.T) {
 	})
 }
 
+// TestServer_ModelStatus_LoadInfo verifies the /api/events modelStatus payload
+// carries the load-timing fields when the local router has them, and omits them
+// (json omitempty → absent/zero) when it does not.
+func TestServer_ModelStatus_LoadInfo(t *testing.T) {
+	t.Run("renders load timing while starting", func(t *testing.T) {
+		local := newStubRouter([]string{"m"}, "")
+		local.running = map[string]process.ProcessState{"m": process.StateStarting}
+		local.loadInfo = map[string]process.LoadInfo{
+			"m": {StartedAt: 1700000000123, EstimateMs: 42000},
+		}
+		s := newTestServer(local, newStubRouter(nil, ""))
+		s.cfg = config.Config{Models: map[string]config.ModelConfig{"m": {}}}
+
+		status := s.modelStatus()
+		if len(status) != 1 {
+			t.Fatalf("expected 1 model, got %d", len(status))
+		}
+		m := status[0]
+		if m.State != string(process.StateStarting) {
+			t.Errorf("state = %q, want %q", m.State, process.StateStarting)
+		}
+		if m.LoadStartedAt != 1700000000123 {
+			t.Errorf("loadStartedAt = %d, want 1700000000123", m.LoadStartedAt)
+		}
+		if m.EstLoadMs != 42000 {
+			t.Errorf("estLoadMs = %d, want 42000", m.EstLoadMs)
+		}
+	})
+
+	t.Run("omits load timing when router has none", func(t *testing.T) {
+		local := newStubRouter([]string{"m"}, "")
+		s := newTestServer(local, newStubRouter(nil, ""))
+		s.cfg = config.Config{Models: map[string]config.ModelConfig{"m": {}}}
+
+		m := s.modelStatus()[0]
+		if m.LoadStartedAt != 0 {
+			t.Errorf("loadStartedAt = %d, want 0", m.LoadStartedAt)
+		}
+		if m.EstLoadMs != 0 {
+			t.Errorf("estLoadMs = %d, want 0", m.EstLoadMs)
+		}
+	})
+}
+
 func stringSliceEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

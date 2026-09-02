@@ -15,6 +15,7 @@
   import { listCapabilityBadges, capabilityBadgeClass } from "../lib/capabilities";
   import type { Model } from "../lib/types";
   import ModelLoadButton from "../components/ModelLoadButton.svelte";
+  import LoadProgressBar from "../components/LoadProgressBar.svelte";
   import Tag from "../components/Tag.svelte";
   import * as Card from "$lib/components/ui/card/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -75,6 +76,7 @@
           · {model.aliases.join(", ")}
         {/if}
       </div>
+      <LoadProgressBar {model} className="mt-1" />
     </a>
     {#if $showCapabilityTags}
       {@const badges = listCapabilityBadges(model)}
