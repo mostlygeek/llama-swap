@@ -1,0 +1,49 @@
+healthCheckTimeout: 300
+logLevel: debug
+
+profiles:
+    aider:
+      - qwen-coder-32B
+      - QwQ
+
+models:
+  "qwen-coder-32B":
+    env:
+      - "CUDA_VISIBLE_DEVICES=0"
+    aliases:
+      - coder
+    proxy: "http://127.0.0.1:8999"
+
+    # set appropriate paths for your environment
+    cmd: >
+      /path/to/llama-server
+      --host 127.0.0.1 --port 8999 --flash-attn --slots
+      --ctx-size 16000
+      --ctx-size-draft 16000
+      --model /path/to/Qwen2.5-Coder-32B-Instruct-Q4_K_M.gguf
+      --model-draft /path/to/Qwen2.5-Coder-1.5B-Instruct-Q8_0.gguf
+      -ngl 99 -ngld 99
+      --draft-max 16 --draft-min 4 --draft-p-min 0.4
+      --cache-type-k q8_0 --cache-type-v q8_0
+  "QwQ":
+    env:
+      - "CUDA_VISIBLE_DEVICES=1"
+    proxy: "http://127.0.0.1:9503"
+
+    # set appropriate paths for your environment
+    cmd: >
+      /path/to/llama-server
+      --host 127.0.0.1 --port 9503
+      --flash-attn --metrics
+      --slots
+      --model /path/to/Qwen_QwQ-32B-Q4_K_M.gguf
+      --cache-type-k q8_0 --cache-type-v q8_0
+      --ctx-size 32000
+      --samplers "top_k;top_p;min_p;temperature;dry;typ_p;xtc"
+      --temp 0.6
+      --repeat-penalty 1.1
+      --dry-multiplier 0.5
+      --min-p 0.01
+      --top-k 40
+      --top-p 0.95
+      -ngl 99 -ngld 99
