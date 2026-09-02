@@ -278,3 +278,42 @@ the branch was re-established on upstream rather than descending from main.
   the restored paths.
 - Outcome: PR from `integration/upstream-max` → `main` is now conflict-free
   (every main commit is an ancestor of the branch tip).
+
+## Phase 12 — README refresh after the merge to main
+
+The merged README was upstream's version: missing the fork identity and the
+fork's features, and wrong about this fork in places.
+
+- Restored the fork notice (was in the old fork README, lost in the
+  re-establishment), updated to describe the current five additions
+  (Ollama API, Anthropic translation, no-npm UI, Intel sysfs GPU monitoring,
+  gosec hardening) and the new divergence baseline `7a14664`.
+- Features list: added the Ollama-compatible endpoint block, noted the
+  Anthropic translation + passthrough flags, added `/api/metrics/activity`,
+  `/api/metrics/stats`, `/api/inflight/:id/cancel`, `/api/hardware`,
+  `/api/mcp`, and the sysfs provider note on `/metrics`.
+- Web UI section: documented the Stats/Hardware/Settings pages, model detail
+  pages, Load Test tab, and the no-npm nature of this fork's UI.
+- Fixed "Building from source": requires Go only (no Node.js/npm); clone URL
+  pointed at the fork.
+- Fixed two doc links that were broken upstream as well
+  (`docs/kb/guides/configuration/configuration-overview.md`,
+  `docs/kb/tutorials/tool-calling-setup.md` — neither exists in any tree);
+  the Docs-tab references now match this fork's "Help" tab naming.
+- Verified every relative link in the README resolves; aidc-scan clean.
+
+## Phase 13 — remove docker build workflows (user request)
+
+The fork never builds container images (README's image references point at
+upstream's ghcr.io), so the three docker-build workflows only burn CI minutes:
+
+- Removed `.github/workflows/containers.yml` (legacy image builds),
+  `unified-docker.yml` and `unified-docker-backend.yml` (unified image builds).
+- Kept `sbom.yml` (aidc SBOM/license gate — its docker step is commented out),
+  `go-ci*.yml`, `gosec.yml`, `config-schema.yml`, `release.yml`,
+  `closeinactive.yml`.
+- Kept the `docker/` directory itself (24 files, no code references) to
+  minimize deleted-file churn on future upstream merges — user decision.
+- `docs/semgrep-suppressions.md`: dropped the now-moot run-shell-injection
+  entry for the removed workflows; verified no dangling references remain and
+  semgrep/aidc-scan stay clean.

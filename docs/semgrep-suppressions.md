@@ -42,7 +42,7 @@ grep -rn "nosemgrep" internal/ cmd/ .github/
   mutex-guarded. Site: `internal/server/server.go`.
 - **`iterate-over-empty-map`, `string-to-int-signedness-cast`** — Windows GPU
   telemetry syscall code. Site: `internal/perf/pdh_windows.go`.
-- **`run-shell-injection`** (`.github/workflows/unified-docker*.yml`) — inherited
-  upstream CI whose `${{ }}` values are constrained build-matrix inputs, not free
-  user input, and are already routed through `env` where user-facing. Suppressed
-  pending an upstream hardening pass.
+
+(The docker-build workflows that carried `run-shell-injection` suppressions were
+removed in this fork — images are not built here. The `docker/` build assets
+themselves are kept to minimize upstream-merge churn.)

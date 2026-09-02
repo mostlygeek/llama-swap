@@ -3,6 +3,46 @@
 ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/mostlygeek/llama-swap/go-ci.yml)
 ![GitHub Repo stars](https://img.shields.io/github/stars/mostlygeek/llama-swap)
 
+> [!IMPORTANT]
+> **Fork Notice**
+>
+> This is a fork of [llama-swap](https://github.com/mostlygeek/llama-swap) maintained by
+> [Anant Shrivastava](https://github.com/anantshri) for personal additions deemed necessary.
+> The code is open sourced purely for reference purposes.
+>
+> **[Anant](https://github.com/anantshri) does not encourage others to use this fork**, as it
+> will not be maintained beyond what the original author provides. Please use the original
+> package: https://github.com/mostlygeek/llama-swap
+>
+> ### Changes in this fork
+>
+> 1. **Ollama-compatible API** — inbound Ollama requests are translated to OpenAI shape and
+>    forwarded to the upstream server (`passthroughOllama: true` on a model forwards unchanged):
+>    `POST /api/chat`, `POST /api/generate`, `POST /api/embed`, `POST /api/embeddings`,
+>    `GET /api/tags`, `POST /api/show`, `GET /api/ps`; `HEAD /` returns `200` for Ollama client
+>    reachability probes; model-management endpoints return *not implemented*.
+> 2. **Anthropic `/v1/messages` translation** — inbound Anthropic Messages requests are
+>    translated to OpenAI `v1/chat/completions` and responses translated back (streaming and
+>    buffered); `passthroughAnthropic: true` forwards unchanged. `/v1/messages/count_tokens`
+>    stays a raw pass-through.
+> 3. **No-npm web UI** — the Svelte/npm UI is replaced with hand-authored vanilla ES-module
+>    JavaScript committed under `internal/server/ui_dist/` and embedded via `//go:embed`.
+>    Building requires only Go; there is no Node.js/npm build step. All upstream UI features
+>    are ported (activity table with pagination/export, profiles & selectors, model detail
+>    pages, hardware page, Load Test and Help/docs-agent playground tabs).
+> 4. **Intel GPU monitoring** — a sysfs GPU provider (`internal/perf/monitor_sysfs.go`) reads
+>    kernel interfaces only (hwmon + DRM fdinfo; Intel `xe`/`i915` and other drivers), so
+>    hosts without `nvidia-smi`/`rocm-smi`/LACT get GPU telemetry. Sensor reads are throttled
+>    to 5s while the GPU is active and skipped while idle, so runtime-suspended cards stay
+>    asleep.
+> 5. **Security hardening** — `make gosec` reports zero findings across
+>    `GOOS=linux/darwin/windows`; every suppression is a reviewed false positive documented in
+>    [docs/gosec-suppressions.md](docs/gosec-suppressions.md) and kept in sync by a test.
+>
+> Divergence baseline: upstream `7a14664`. The fork is re-established on top of the upstream
+> base with the additions above applied as a small set of clean commits, so the divergence
+> from upstream is easy to see.
+
 # llama-swap
 
 Run multiple generative AI models on your machine and hot-swap between them on demand. llama-swap works with any OpenAI and Anthropic API compatible server and is used by thousands of people to power their local AI workflows.
@@ -26,8 +66,16 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
   - `v1/images/generations`
   - `v1/images/edits`
 - ✅ Anthropic API supported endpoints:
-  - `v1/messages`
+  - `v1/messages` - translated to OpenAI `v1/chat/completions` unless the model sets `passthroughAnthropic: true` (fork addition)
   - `v1/messages/count_tokens`
+- ✅ Ollama-compatible API (fork addition) — translated to OpenAI shape unless the model sets `passthroughOllama: true`:
+  - `POST /api/chat`, `POST /api/generate` - chat / generate (streaming and non-streaming)
+  - `POST /api/embed`, `POST /api/embeddings` - embeddings
+  - `GET /api/tags` - list available models
+  - `POST /api/show` - show model details
+  - `GET /api/ps` - list running models
+  - `HEAD /` returns `200` so Ollama clients (e.g. Enchanted via OllamaKit) pass their reachability probe
+  - Model-management endpoints (`/api/create`, `/api/copy`, `/api/delete`, `/api/pull`, `/api/push`, `/api/blobs/:digest`) return *not implemented* — llama-swap routes requests to user-managed processes
 - ✅ llama-server (llama.cpp) supported endpoints
   - `v1/rerank`, `v1/reranking`, `/rerank`
   - `/infill` - for code infilling
@@ -58,7 +106,12 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
     - `GET /logs/stream/upstream` streams upstream process logs only.
     - `GET /logs/stream/{model_id}` streams logs for one model (including IDs with slashes, like `author/model`).
   - `/health` - just returns "OK"
-  - `/metrics` - system and GPU metrics for prometheus
+  - `/metrics` - system and GPU metrics for prometheus (NVIDIA via nvidia-smi, AMD via rocm-smi, Intel/others via kernel sysfs — fork addition)
+  - `GET /api/metrics/activity` - paginated activity log (token usage, speeds, durations) backed by sqlite storage
+  - `GET /api/metrics/stats` - aggregate activity statistics and speed histograms
+  - `POST /api/inflight/:id/cancel` - cancel an in-flight request
+  - `GET /api/hardware` - detected inference-host hardware profile (experimental)
+  - `/api/mcp` - llama-swap's own documentation as MCP tools, for the Playground's docs agent and any MCP client
 - ✅ API Key support - define keys to restrict access to API endpoints
 - ✅ Customization
   - Switch model ID routing at runtime with profiles
@@ -89,6 +142,12 @@ Manually load and unload models:
 Real time log streaming:
 
 <img width="1087" height="668" alt="image" src="https://github.com/user-attachments/assets/9bb0c362-862c-4e68-820c-4c977fc9de4e" />
+
+The web UI also includes a per-model **Stats** page, a **Hardware** page, a
+**Settings** page, model detail pages with per-model logs, and a **Load Test**
+playground tab for firing concurrent requests at llama-swap. In this fork the
+UI is hand-authored vanilla JavaScript committed to the repo — same features,
+no Node.js/npm build step.
 
 ## Installation
 
@@ -192,8 +251,8 @@ Binaries are available on the [release](https://github.com/mostlygeek/llama-swap
 
 ### Building from source
 
-1. Building requires Go and Node.js (for UI).
-1. `git clone https://github.com/mostlygeek/llama-swap.git`
+1. Building requires Go. The web UI is hand-authored vanilla JavaScript committed to the repo (fork change: no Node.js/npm build step).
+1. `git clone https://github.com/anantshri/llama-swap.git`
 1. `make clean all`
 1. look in the `build/` subdirectory for the llama-swap binary
 
@@ -227,20 +286,20 @@ Almost all configuration settings are optional and can be added one step at a ti
   - `env` to pass custom environment variables to inference servers
   - `cmdStop` gracefully stop Docker/Podman containers
   - `useModelName` to override model names sent to upstream servers
+  - `passthroughAnthropic` / `passthroughOllama` (fork addition) to forward Anthropic/Ollama requests to the upstream unchanged, for backends that speak those APIs natively
   - `${PORT}` automatic port variables for dynamic port assignment
   - `filters` rewrite parts of requests before sending to the upstream server
 
-See the [configuration guide](docs/kb/guides/configuration/configuration-overview.md) for an overview, and
-the [knowledge base](docs/kb/) for focused guides on the features people ask about
-most.
+See the [knowledge base](docs/kb/) for focused guides on the features people ask
+about most.
 
-You can also just ask. The Playground's **Docs** tab is an agent that calls
+You can also just ask. The Playground's **Help** tab is an agent that calls
 llama-swap's own documentation tools and answers questions about your
 configuration using the real text of `config.example.yaml` and the knowledge
 base, running entirely on a local model. Pick a tool-capable model in
-**Playground → Docs** and ask away — see
-[Setting up tool calling](docs/kb/tutorials/tool-calling-setup.md) if the model
-answers without calling anything.
+**Playground → Help** and ask away — if the model answers without calling any
+tools, llama-server needs `--jinja` for tool calling to work (the Help tab
+detects and hints at this).
 
 Those same tools are served as an MCP endpoint at `/api/mcp`, so any MCP client
 can ask about your configuration too. See
