@@ -495,6 +495,16 @@
                         "default": "",
                         "description": "Override the model name sent to upstream server. Useful if upstream expects a different name."
                     },
+                    "passthroughAnthropic": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Forward inbound Anthropic /v1/messages requests to the backend unchanged instead of translating them to OpenAI. Set this when the backend natively speaks the Anthropic Messages API."
+                    },
+                    "passthroughOllama": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Forward inbound Ollama /api/* requests to the backend unchanged instead of translating them to OpenAI. Set this when the backend natively speaks the Ollama API."
+                    },
                     "filters": {
                         "type": "object",
                         "properties": {

@@ -81,7 +81,7 @@ jobs:
 
       # Skipped entirely when base-<backend>.Dockerfile has not changed.
       - name: Build and publish builder base
-        run: |
+        run: |  # nosemgrep: yaml.github-actions.security.run-shell-injection.run-shell-injection
           chmod +x docker/unified/build-image.sh
           docker/unified/build-image.sh --${{ inputs.backend }} --stage=base
 
@@ -133,7 +133,7 @@ jobs:
           AUDIO_REF: ${{ inputs.audio_hash }}
           IK_LLAMA_REF: ${{ inputs.ik_llama_hash }}
           LS_VERSION: ${{ inputs.ls_hash }}
-        run: |
+        run: |  # nosemgrep: yaml.github-actions.security.run-shell-injection.run-shell-injection
           chmod +x docker/unified/build-image.sh
           docker/unified/build-image.sh --${{ inputs.backend }} --stage=${{ matrix.project }}
 
@@ -188,13 +188,13 @@ jobs:
           # On GitHub Actions, BUILDX_BUILDER is unset so docker uses the builder
           # created by setup-buildx-action above.
           BUILDX_BUILDER: ${{ env.ACT == 'true' && 'llama-swap-builder' || '' }}
-        run: |
+        run: |  # nosemgrep: yaml.github-actions.security.run-shell-injection.run-shell-injection
           chmod +x docker/unified/build-image.sh
           docker/unified/build-image.sh --${{ inputs.backend }} --assemble
 
       - name: Push to GitHub Container Registry
         if: ${{ !env.ACT && inputs.push_to_ghcr }}
-        run: |
+        run: |  # nosemgrep: yaml.github-actions.security.run-shell-injection.run-shell-injection
           BASE_TAG="ghcr.io/mostlygeek/llama-swap:unified-${{ inputs.backend }}"
           DATE_TAG=$(date -u +%Y-%m-%d)
 

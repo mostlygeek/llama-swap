@@ -17,6 +17,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/hw"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/mcptools"
+	"github.com/mostlygeek/llama-swap/internal/ollama"
 	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/internal/router"
 	"github.com/mostlygeek/llama-swap/internal/store"
@@ -61,6 +62,14 @@ type Server struct {
 
 	mux     *http.ServeMux
 	handler http.Handler
+
+	// translatedDispatch is the model-dispatch pipeline (request-body filters +
+	// token metrics + local/peer routing) used by the Anthropic and Ollama
+	// compatibility handlers. Those handlers wrap the response writer outside
+	// this chain so metrics records the raw OpenAI bytes while the client
+	// receives the translated shape. Auth + in-flight tracking are applied by
+	// the outer route chain, not here.
+	translatedDispatch http.Handler
 
 	shutdownCtx  context.Context
 	shutdownFn   context.CancelFunc
@@ -297,7 +306,27 @@ func (s *Server) routes() {
 	mux := http.NewServeMux()
 	dispatch := http.HandlerFunc(s.localPeerHandler)
 
+	// translatedDispatch applies the request-body filters and token metrics
+	// before routing, but not auth/in-flight (the Anthropic/Ollama route chains
+	// own those). The handlers wrap the response writer outside this chain so
+	// metrics tees the raw OpenAI bytes while the client sees the translated
+	// shape.
+	s.translatedDispatch = chain.New(
+		CreateFilterMiddleware(s.cfg),
+		CreateFormFilterMiddleware(s.cfg),
+		CreateMetricsMiddleware(s.metrics, s.cfg),
+	).Then(dispatch)
+
+	// Anthropic Messages API. /v1/messages and /v/messages are intercepted for
+	// OpenAI<->Anthropic translation (auth + in-flight only; translation and
+	// metrics happen inside the handler). Their count_tokens variants stay plain
+	// model-dispatched pass-through.
+	anthropicChain := chain.New(authMW, CreateInflightMiddleware(s.inflight, s.cfg))
 	for _, path := range modelPostJSONRoutes {
+		if path == "/v1/messages" || path == "/v/messages" {
+			mux.Handle("POST "+path, anthropicChain.ThenFunc(s.handleAnthropicMessages))
+			continue
+		}
 		mux.Handle("POST "+path, modelChain.Then(dispatch))
 	}
 	for _, path := range modelPostFormRoutes {
@@ -306,6 +335,17 @@ func (s *Server) routes() {
 	for _, path := range modelGetRoutes {
 		mux.Handle("GET "+path, modelChain.Then(dispatch))
 	}
+
+	// Ollama-compatible API surface (see internal/ollama). llama-swap already
+	// serves /api/version (handleAPIVersion), so SkipVersion is true. Each route
+	// gets auth + in-flight tracking; translation + metrics happen inside the
+	// handler via translatedDispatch. These paths are disjoint from the
+	// llama-swap /api/* control endpoints registered below.
+	ollamaChain := chain.New(authMW, CreateInflightMiddleware(s.inflight, s.cfg))
+	registerOllama := func(method, path string, h http.HandlerFunc) {
+		mux.Handle(method+" "+path, ollamaChain.ThenFunc(h))
+	}
+	ollama.Register(registerOllama, &ollamaDispatcher{s: s}, ollama.Options{SkipVersion: true})
 
 	// llama-swap API + custom endpoints.
 	mux.Handle("GET /v1/models", apiChain.ThenFunc(s.handleListModels))
@@ -317,10 +357,21 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /health", handleHealth)
 	mux.HandleFunc("GET /wol-health", handleHealth)
 	mux.HandleFunc("GET /{$}", handleRootRedirect)
+	// Ollama clients (e.g. Enchanted via OllamaKit) probe HEAD / for
+	// reachability and expect 200, like a real Ollama server. Registered
+	// explicitly so it is not answered by the GET /{$} redirect.
+	mux.HandleFunc("HEAD /{$}", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
 
-	// Embedded UI.
+	// Embedded UI. The hand-authored vanilla-JS SPA under ui_dist is embedded
+	// via //go:embed (see ui.go); root assets referenced by index.html and the
+	// PWA manifest are served from the FS root.
 	mux.Handle("GET /ui/", chain.New(authMW).ThenFunc(s.handleUI))
 	mux.HandleFunc("GET /favicon.ico", s.handleFavicon)
+	for _, asset := range rootUIAssets {
+		mux.HandleFunc("GET /"+asset, s.handleRootAsset)
+	}
 
 	// Prometheus metrics (wrapped by apiChain, matches the legacy endpoint).
 	mux.Handle("GET /metrics", apiChain.ThenFunc(s.handleMetrics))
@@ -401,7 +452,7 @@ func (s *Server) Shutdown(timeout time.Duration) error {
 	// released here leaks. The tool registry is cheap today and expensive once
 	// a provider holds upstream connections or subprocesses.
 	if err := s.tools.Shutdown(timeout); err != nil {
-		errs = append(errs, err)
+		errs = append(errs, err) // nosemgrep: trailofbits.go.racy-append-to-slice.racy-append-to-slice
 	}
 
 	for _, rt := range []router.Router{s.local, s.peer} {

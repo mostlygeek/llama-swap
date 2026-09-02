@@ -169,7 +169,7 @@ func SendError(w http.ResponseWriter, r *http.Request, err error) {
 			w.Header()[k] = v
 		}
 		w.WriteHeader(httpErr.StatusCode())
-		w.Write(httpErr.Body())
+		_, _ = w.Write(httpErr.Body()) // nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
 		return
 	}
 
@@ -204,20 +204,20 @@ func SendResponse(w http.ResponseWriter, r *http.Request, status int, message st
 	if strings.Contains(acceptHeader, "text/plain") {
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(status)
-		w.Write([]byte(fmt.Sprintf("llama-swap: %s", message)))
+		_, _ = w.Write([]byte(fmt.Sprintf("llama-swap: %s", message))) // nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter,go.lang.security.audit.xss.no-printf-in-responsewriter.no-printf-in-responsewriter
 		return
 	}
 
 	if strings.Contains(acceptHeader, "text/html") {
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(status)
-		w.Write([]byte(fmt.Sprintf(`<html><body><h1>llama-swap</h1><p>%s</p></body></html>`, html.EscapeString(message))))
+		_, _ = w.Write([]byte(fmt.Sprintf(`<html><body><h1>llama-swap</h1><p>%s</p></body></html>`, html.EscapeString(message)))) // nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter,go.lang.security.audit.xss.no-printf-in-responsewriter.no-printf-in-responsewriter
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	w.Write(NewErrorEnvelope(status, message, "").JSON())
+	_, _ = w.Write(NewErrorEnvelope(status, message, "").JSON()) // nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
 }
 
 // FetchContext will attempt to get the model id from the context, then
@@ -319,6 +319,9 @@ func ReplaceRequestModel(r *http.Request, model, replacement string) (*http.Requ
 		}
 		replaceRequestBody(r, body)
 	case strings.Contains(contentType, "multipart/form-data"):
+		// #nosec G120 -- in-memory parsing is bounded to MaxMultiPartSize (32MB);
+		// a hard total-size cap would break the large audio/image uploads this
+		// proxy must forward.
 		if err := r.ParseMultipartForm(MaxMultiPartSize); err != nil {
 			return r, fmt.Errorf("could not parse multipart form: %w", err)
 		}
@@ -394,10 +397,10 @@ func replaceMultipartModel(form *multipart.Form, replacement string) ([]byte, st
 				return nil, "", fmt.Errorf("error opening uploaded file %s: %w", key, err)
 			}
 			if _, err := io.Copy(part, file); err != nil {
-				file.Close()
+				_ = file.Close()
 				return nil, "", fmt.Errorf("error copying file data %s: %w", key, err)
 			}
-			file.Close()
+			_ = file.Close()
 		}
 	}
 
@@ -563,6 +566,8 @@ func extractContext(r *http.Request) (ReqContextData, error) {
 	// after parsing.
 	r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	if strings.Contains(contentType, "multipart/form-data") {
+		// #nosec G120 -- parses from the already-buffered body; in-memory use is
+		// bounded to MaxMultiPartSize (32MB). See the note on the other call.
 		if err := r.ParseMultipartForm(MaxMultiPartSize); err != nil {
 			return ReqContextData{}, fmt.Errorf("error parsing multipart form: %w", err)
 		}

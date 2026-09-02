@@ -156,7 +156,7 @@ func detectAMDKFD(nodesRoot, drmRoot, deviceRoot string) ([]detectedAccelerator,
 }
 
 func readKFDProperties(path string) (map[string]uint64, error) {
-	file, err := os.Open(path)
+	file, err := os.Open(path) // #nosec G304 -- reads an operator-configured or internal sysfs/config path, not attacker-controlled input
 	if err != nil {
 		return nil, err
 	}

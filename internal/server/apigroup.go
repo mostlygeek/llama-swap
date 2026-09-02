@@ -60,7 +60,7 @@ func (s *Server) handleAPIProfiles(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"active":   nullableProfile(s.ActiveProfile()),
 		"profiles": profiles,
 	})
@@ -91,7 +91,7 @@ func (s *Server) handleAPIActiveProfile(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"active": nullableProfile(s.ActiveProfile())})
+	_ = json.NewEncoder(w).Encode(map[string]any{"active": nullableProfile(s.ActiveProfile())})
 }
 
 // modelStatus returns every configured model joined with its current process
@@ -138,7 +138,7 @@ func (s *Server) modelStatus() []apiModel {
 func (s *Server) handleAPIUnloadAll(w http.ResponseWriter, r *http.Request) {
 	s.local.Unload(0)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"msg": "ok"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"msg": "ok"})
 }
 
 // handleAPIUnloadModel stops a single named local process.
@@ -155,7 +155,7 @@ func (s *Server) handleAPIUnloadModel(w http.ResponseWriter, r *http.Request) {
 	}
 	s.local.Unload(0, realName)
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("OK"))
+	_, _ = w.Write([]byte("OK"))
 }
 
 // handleAPIActivity serves paginated activity table rows.
@@ -172,7 +172,7 @@ func (s *Server) handleAPIActivity(w http.ResponseWriter, r *http.Request) {
 	}
 	s.metrics.overlayCaptureState(page.Data)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(page)
+	_ = json.NewEncoder(w).Encode(page)
 }
 
 // handleAPIActivityStats serves aggregate activity statistics and histograms.
@@ -185,7 +185,7 @@ func (s *Server) handleAPIActivityStats(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
+	_ = json.NewEncoder(w).Encode(stats)
 }
 
 func parseActivityLimit(raw string) (int, error) {
@@ -311,7 +311,7 @@ func (s *Server) handleAPIPerformance(w http.ResponseWriter, r *http.Request) {
 	if s.perf == nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(map[string]bool{"enabled": false})
+		_ = json.NewEncoder(w).Encode(map[string]bool{"enabled": false})
 		return
 	}
 
@@ -341,7 +341,7 @@ func (s *Server) handleAPIPerformance(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"enabled":   true,
 		"sys_stats": sysStats,
 		"gpu_stats": gpuStats,
@@ -351,7 +351,7 @@ func (s *Server) handleAPIPerformance(w http.ResponseWriter, r *http.Request) {
 // handleAPIVersion serves the build metadata.
 func (s *Server) handleAPIVersion(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"version":    s.build.Version,
 		"commit":     s.build.Commit,
 		"build_date": s.build.Date,
@@ -390,7 +390,7 @@ func (s *Server) handleAPICapture(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(jsonBytes)
+	_, _ = w.Write(jsonBytes) // nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
 }
 
 // handleAPICancelInflight cancels an active model-dispatched request by its
@@ -403,7 +403,7 @@ func (s *Server) handleAPICancelInflight(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"msg": "ok"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"msg": "ok"})
 }
 
 type messageType string
@@ -547,7 +547,7 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				continue
 			}
-			fmt.Fprintf(w, "event:message\ndata:%s\n\n", data)
+			fmt.Fprintf(w, "event:message\ndata:%s\n\n", data) // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 			flusher.Flush()
 		}
 	}

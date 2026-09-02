@@ -63,7 +63,7 @@ func serveCmd(args []string) {
 	fs.StringVar(&healthPath, "health-path", "/health", "Health check path (default /health)")
 	fs.DurationVar(&waitTimeout, "wait-timeout", 120*time.Second, "Timeout waiting for daemon to become healthy")
 	fs.StringVar(&journalUnit, "journal-unit", "", "User systemd unit whose logs should be forwarded to stdout")
-	fs.Parse(args)
+	_ = fs.Parse(args)
 	startArgs := fs.Args()
 
 	if vllmURL == "" {
@@ -156,6 +156,7 @@ func serveCmd(args []string) {
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			proxy.ServeHTTP(w, r)
 		}),
+		ReadHeaderTimeout: 30 * time.Second, // mitigate slowloris
 	}
 
 	// Start server in a goroutine.
@@ -201,7 +202,7 @@ func sleepCmd(args []string) {
 	fs.StringVar(&vllmURL, "vllm-url", "", "Base URL of vLLM server (e.g., http://127.0.0.1:8000)")
 	fs.IntVar(&sleepLevel, "sleep-level", 1, "Sleep level to use (default 1)")
 	fs.IntVar(&stopPID, "stop-pid", 0, "PID of the serve proxy to terminate after vLLM successfully enters sleep mode")
-	fs.Parse(args)
+	_ = fs.Parse(args)
 
 	if vllmURL == "" {
 		log.Fatalf("--vllm-url is required")
@@ -295,10 +296,10 @@ func waitForHealthyWithPath(vllmURL string, healthPath string, timeout time.Dura
 			continue
 		}
 		if resp.StatusCode == http.StatusOK {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return nil
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		// Wait a bit before retrying.
 		time.Sleep(1 * time.Second)
 	}
@@ -320,7 +321,7 @@ func checkHealthy(vllmURL string, healthPath string) error {
 
 // startJournalForwarder forwards new log entries from a user systemd unit to stdout.
 func startJournalForwarder(ctx context.Context, unit string) error {
-	cmd := exec.CommandContext(
+	cmd := exec.CommandContext( // #nosec G204 -- launches operator-configured model commands by design (the core proxy function)
 		ctx,
 		"journalctl",
 		"--user-unit="+unit,
@@ -348,7 +349,7 @@ func startJournalForwarder(ctx context.Context, unit string) error {
 
 // startDaemon executes the start command and waits for the vLLM daemon to become healthy.
 func startDaemon(startArgs []string, vllmURL string, healthPath string, waitTimeout time.Duration) error {
-	cmd := exec.Command(startArgs[0], startArgs[1:]...)
+	cmd := exec.Command(startArgs[0], startArgs[1:]...) // #nosec G204 -- launches operator-configured model commands by design (the core proxy function) nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {

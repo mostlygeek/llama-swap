@@ -156,7 +156,7 @@ func New(
 	}
 	p.state.Store(StateStopped)
 
-	go p.run()
+	go p.run() // #nosec G118 -- lifecycle goroutine intentionally outlives the per-request context
 	return p, nil
 }
 
@@ -357,7 +357,7 @@ func (p *ProcessCommand) run() {
 								}
 								if time.Since(time.Unix(0, p.lastUse.Load())) > ttlDuration {
 									p.proxyLogger.Infof("<%s> Unloading model, TTL of %ds reached", p.id, p.config.UnloadAfter)
-									p.Stop(time.Duration(p.config.UnloadTimeout) * time.Second)
+									_ = p.Stop(time.Duration(p.config.UnloadTimeout) * time.Second)
 									return
 								}
 							}
@@ -502,7 +502,7 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 	// cmd.WaitDelay only acts as the inherited-pipe backstop measured from
 	// process exit (see killProcess).
 	cmdCtx, cmdCancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(cmdCtx, args[0], args[1:]...)
+	cmd := exec.CommandContext(cmdCtx, args[0], args[1:]...) // #nosec G204 -- launches operator-configured model commands by design (the core proxy function) nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	cmd.Stderr = p.processLogger
 	cmd.Stdout = p.processLogger
 	cmd.Env = append(cmd.Environ(), p.config.Env...)
@@ -584,7 +584,7 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 		rr := httptest.NewRecorder()
 		reverseProxy.ServeHTTP(rr, req)
 		resp := rr.Result()
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if resp.StatusCode == http.StatusOK {
 			p.proxyLogger.Infof("<%s> Health check passed on %s%s", p.id, p.config.Proxy, p.config.CheckEndpoint)
 			break
@@ -620,7 +620,7 @@ func (p *ProcessCommand) sendStopSignal(cmd *exec.Cmd) error {
 		)
 		if err == nil {
 			p.processLogger.Debugf("<%s> sendStopSignal() running stop command: %s", p.id, strings.Join(stopArgs, " "))
-			stopCmd := exec.Command(stopArgs[0], stopArgs[1:]...)
+			stopCmd := exec.Command(stopArgs[0], stopArgs[1:]...) // #nosec G204 -- launches operator-configured model commands by design (the core proxy function) nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 			stopCmd.Env = cmd.Env
 			setProcAttributes(stopCmd)
 			runErr := stopCmd.Run()

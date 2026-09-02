@@ -91,8 +91,9 @@ func main() {
 
 	proxy := newProxy(upstreamURL, apiKey)
 	server := &http.Server{
-		Addr:    *flagListen,
-		Handler: proxy,
+		Addr:              *flagListen,
+		Handler:           proxy,
+		ReadHeaderTimeout: 30 * time.Second, // mitigate slowloris
 	}
 
 	// start the server
@@ -106,7 +107,7 @@ func main() {
 	// graceful shutdown
 	ctx, _ := signal.NotifyContext(context.Background(), os.Interrupt)
 	<-ctx.Done()
-	server.Close()
+	_ = server.Close()
 }
 
 type upstreamStatus string
@@ -273,8 +274,8 @@ func (p *proxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		failCount := p.getFailures()
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(200)
-		fmt.Fprintf(w, "status: %s\n", status)
-		fmt.Fprintf(w, "failures: %d\n", failCount)
+		fmt.Fprintf(w, "status: %s\n", status)      // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
+		fmt.Fprintf(w, "failures: %d\n", failCount) // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 		return
 	}
 
@@ -296,7 +297,7 @@ func (p *proxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if path == "/" || strings.HasPrefix(path, "/ui/") {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, loadingPageHTML)
+			fmt.Fprint(w, loadingPageHTML) // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 			return
 		}
 

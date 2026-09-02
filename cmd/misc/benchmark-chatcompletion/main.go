@@ -100,8 +100,8 @@ func main() {
 					mu.Unlock()
 					continue
 				}
-				io.Copy(io.Discard, resp.Body)
-				resp.Body.Close()
+				_, _ = io.Copy(io.Discard, resp.Body)
+				_ = resp.Body.Close()
 
 				// Record status code
 				mu.Lock()

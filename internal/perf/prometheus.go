@@ -30,42 +30,42 @@ func writeSysMetrics(w http.ResponseWriter, s SysStat) {
 	fmt.Fprintf(w, "# HELP llamaswap_cpu_util_percent CPU utilization per core (0-100)\n")
 	fmt.Fprintf(w, "# TYPE llamaswap_cpu_util_percent gauge\n")
 	for i, pct := range s.CpuUtilPerCore {
-		fmt.Fprintf(w, "llamaswap_cpu_util_percent{core=\"%d\"} %g\n", i, pct)
+		fmt.Fprintf(w, "llamaswap_cpu_util_percent{core=\"%d\"} %g\n", i, pct) // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 	}
 
 	fmt.Fprintf(w, "# HELP llamaswap_memory_total_bytes Total memory in bytes\n")
 	fmt.Fprintf(w, "# TYPE llamaswap_memory_total_bytes gauge\n")
-	fmt.Fprintf(w, "llamaswap_memory_total_bytes %d\n", int64(s.MemTotalMB)*mbToBytes)
+	fmt.Fprintf(w, "llamaswap_memory_total_bytes %d\n", int64(s.MemTotalMB)*mbToBytes) // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 
 	fmt.Fprintf(w, "# HELP llamaswap_memory_used_bytes Used memory in bytes\n")
 	fmt.Fprintf(w, "# TYPE llamaswap_memory_used_bytes gauge\n")
-	fmt.Fprintf(w, "llamaswap_memory_used_bytes %d\n", int64(s.MemUsedMB)*mbToBytes)
+	fmt.Fprintf(w, "llamaswap_memory_used_bytes %d\n", int64(s.MemUsedMB)*mbToBytes) // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 
 	fmt.Fprintf(w, "# HELP llamaswap_memory_free_bytes Free memory in bytes\n")
 	fmt.Fprintf(w, "# TYPE llamaswap_memory_free_bytes gauge\n")
-	fmt.Fprintf(w, "llamaswap_memory_free_bytes %d\n", int64(s.MemFreeMB)*mbToBytes)
+	fmt.Fprintf(w, "llamaswap_memory_free_bytes %d\n", int64(s.MemFreeMB)*mbToBytes) // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 
 	fmt.Fprintf(w, "# HELP llamaswap_swap_total_bytes Total swap in bytes\n")
 	fmt.Fprintf(w, "# TYPE llamaswap_swap_total_bytes gauge\n")
-	fmt.Fprintf(w, "llamaswap_swap_total_bytes %d\n", int64(s.SwapTotalMB)*mbToBytes)
+	fmt.Fprintf(w, "llamaswap_swap_total_bytes %d\n", int64(s.SwapTotalMB)*mbToBytes) // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 
 	fmt.Fprintf(w, "# HELP llamaswap_swap_used_bytes Used swap in bytes\n")
 	fmt.Fprintf(w, "# TYPE llamaswap_swap_used_bytes gauge\n")
-	fmt.Fprintf(w, "llamaswap_swap_used_bytes %d\n", int64(s.SwapUsedMB)*mbToBytes)
+	fmt.Fprintf(w, "llamaswap_swap_used_bytes %d\n", int64(s.SwapUsedMB)*mbToBytes) // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 
 	fmt.Fprintf(w, "# HELP llamaswap_load_average Load average\n")
 	fmt.Fprintf(w, "# TYPE llamaswap_load_average gauge\n")
-	fmt.Fprintf(w, "llamaswap_load_average{interval=\"1m\"} %g\n", s.LoadAvg1)
-	fmt.Fprintf(w, "llamaswap_load_average{interval=\"5m\"} %g\n", s.LoadAvg5)
-	fmt.Fprintf(w, "llamaswap_load_average{interval=\"15m\"} %g\n", s.LoadAvg15)
+	fmt.Fprintf(w, "llamaswap_load_average{interval=\"1m\"} %g\n", s.LoadAvg1)   // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
+	fmt.Fprintf(w, "llamaswap_load_average{interval=\"5m\"} %g\n", s.LoadAvg5)   // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
+	fmt.Fprintf(w, "llamaswap_load_average{interval=\"15m\"} %g\n", s.LoadAvg15) // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 
 	if len(s.NetIO) > 0 {
 		fmt.Fprintf(w, "# HELP llamaswap_network_bytes_total Total network bytes transferred\n")
 		fmt.Fprintf(w, "# TYPE llamaswap_network_bytes_total counter\n")
 		for _, io := range s.NetIO {
 			iface := sanitizeLabel(io.Name)
-			fmt.Fprintf(w, "llamaswap_network_bytes_total{interface=\"%s\",direction=\"recv\"} %d\n", iface, io.BytesRecv)
-			fmt.Fprintf(w, "llamaswap_network_bytes_total{interface=\"%s\",direction=\"sent\"} %d\n", iface, io.BytesSent)
+			fmt.Fprintf(w, "llamaswap_network_bytes_total{interface=\"%s\",direction=\"recv\"} %d\n", iface, io.BytesRecv) // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
+			fmt.Fprintf(w, "llamaswap_network_bytes_total{interface=\"%s\",direction=\"sent\"} %d\n", iface, io.BytesSent) // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 		}
 	}
 }
@@ -93,14 +93,14 @@ func writeGpuMetrics(w http.ResponseWriter, gpus []GpuStat) {
 	}
 
 	for _, m := range metrics {
-		fmt.Fprintf(w, "# HELP %s %s\n", m.name, m.help)
-		fmt.Fprintf(w, "# TYPE %s gauge\n", m.name)
+		fmt.Fprintf(w, "# HELP %s %s\n", m.name, m.help) // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
+		fmt.Fprintf(w, "# TYPE %s gauge\n", m.name)      // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 		for _, g := range gpus {
 			if g.UUID != "" {
-				fmt.Fprintf(w, "%s{id=\"%d\",name=\"%s\",uuid=\"%s\"} %g\n",
+				fmt.Fprintf(w, "%s{id=\"%d\",name=\"%s\",uuid=\"%s\"} %g\n", // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 					m.name, g.ID, sanitizeLabel(g.Name), sanitizeLabel(g.UUID), m.value(g))
 			} else {
-				fmt.Fprintf(w, "%s{id=\"%d\",name=\"%s\"} %g\n",
+				fmt.Fprintf(w, "%s{id=\"%d\",name=\"%s\"} %g\n", // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 					m.name, g.ID, sanitizeLabel(g.Name), m.value(g))
 			}
 		}

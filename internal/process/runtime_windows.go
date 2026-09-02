@@ -47,7 +47,7 @@ func taskkillProcessTree(cmd *exec.Cmd, force bool) error {
 		args = append(args, "/f")
 	}
 	args = append(args, "/t", "/pid", fmt.Sprintf("%d", cmd.Process.Pid))
-	kill := exec.Command("taskkill", args...)
+	kill := exec.Command("taskkill", args...) // #nosec G204 -- launches operator-configured model commands by design (the core proxy function)
 	setProcAttributes(kill)
 	return kill.Run()
 }

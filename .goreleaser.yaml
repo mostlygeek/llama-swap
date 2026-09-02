@@ -3,9 +3,8 @@ version: 2
 builds:
   - env:
       - CGO_ENABLED=0
-    # embed the UI built by `make ui` into ui_dist (see internal/server/embed.go)
-    tags:
-      - embed_ui
+    # The vanilla-JS UI under internal/server/ui_dist is committed and embedded
+    # via //go:embed (see internal/server/ui.go) — no build tag or JS build step.
     # match the version/commit/date vars defined in llama-swap.go:
     #   version = tag, commit = `git rev-parse --short HEAD`, date = RFC3339 UTC
     ldflags:

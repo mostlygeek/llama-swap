@@ -52,20 +52,20 @@ type pdhGpuUtil struct {
 // Returns nil with an error if PDH or the counter is unavailable.
 func initPdhGpuUtil() (*pdhGpuUtil, error) {
 	var query uintptr
-	if ret, _, _ := procPdhOpenQuery.Call(0, 0, uintptr(unsafe.Pointer(&query))); ret != 0 {
+	if ret, _, _ := procPdhOpenQuery.Call(0, 0, uintptr(unsafe.Pointer(&query))); ret != 0 { // #nosec G103 -- unsafe.Pointer is required to marshal Windows GPU syscall structs
 		return nil, fmt.Errorf("PdhOpenQuery: 0x%x", ret)
 	}
 
 	path, _ := windows.UTF16PtrFromString(`\GPU Engine(*)\Utilization Percentage`)
 	var counter uintptr
 	if ret, _, _ := procPdhAddEnglishCounter.Call(
-		query, uintptr(unsafe.Pointer(path)), 0, uintptr(unsafe.Pointer(&counter)),
+		query, uintptr(unsafe.Pointer(path)), 0, uintptr(unsafe.Pointer(&counter)), // #nosec G103 -- unsafe.Pointer is required to marshal Windows GPU syscall structs
 	); ret != 0 {
-		procPdhCloseQuery.Call(query)
+		_, _, _ = procPdhCloseQuery.Call(query)
 		return nil, fmt.Errorf("PdhAddEnglishCounter(GPU Engine): 0x%x", ret)
 	}
 
-	procPdhCollectQueryData.Call(query)
+	_, _, _ = procPdhCollectQueryData.Call(query)
 
 	return &pdhGpuUtil{query: query, counter: counter}, nil
 }
@@ -73,7 +73,7 @@ func initPdhGpuUtil() (*pdhGpuUtil, error) {
 // close releases the PDH query handle.
 func (p *pdhGpuUtil) close() {
 	if p.query != 0 {
-		procPdhCloseQuery.Call(p.query)
+		_, _, _ = procPdhCloseQuery.Call(p.query)
 		p.query = 0
 	}
 }
@@ -91,8 +91,8 @@ func (p *pdhGpuUtil) collect() map[LUID]float64 {
 	var itemCount uint32
 	ret, _, _ = procPdhGetFormattedCounterArray.Call(
 		p.counter, pdhFmtDouble,
-		uintptr(unsafe.Pointer(&bufSize)),
-		uintptr(unsafe.Pointer(&itemCount)),
+		uintptr(unsafe.Pointer(&bufSize)),   // #nosec G103 -- unsafe.Pointer is required to marshal Windows GPU syscall structs
+		uintptr(unsafe.Pointer(&itemCount)), // #nosec G103 -- unsafe.Pointer is required to marshal Windows GPU syscall structs
 		0,
 	)
 	if ret != pdhMoreData || itemCount == 0 {
@@ -102,19 +102,19 @@ func (p *pdhGpuUtil) collect() map[LUID]float64 {
 	buf := make([]byte, bufSize)
 	ret, _, _ = procPdhGetFormattedCounterArray.Call(
 		p.counter, pdhFmtDouble,
-		uintptr(unsafe.Pointer(&bufSize)),
-		uintptr(unsafe.Pointer(&itemCount)),
-		uintptr(unsafe.Pointer(&buf[0])),
+		uintptr(unsafe.Pointer(&bufSize)),   // #nosec G103 -- unsafe.Pointer is required to marshal Windows GPU syscall structs
+		uintptr(unsafe.Pointer(&itemCount)), // #nosec G103 -- unsafe.Pointer is required to marshal Windows GPU syscall structs
+		uintptr(unsafe.Pointer(&buf[0])),    // #nosec G103 -- unsafe.Pointer is required to marshal Windows GPU syscall structs
 	)
 	if ret != 0 {
 		return nil
 	}
 
 	itemSize := uint32(unsafe.Sizeof(pdhCounterValueItem{}))
-	result := make(map[LUID]float64)
+	result := make(map[LUID]float64) // nosemgrep: trailofbits.go.iterate-over-empty-map.iterate-over-empty-map
 
 	for i := uint32(0); i < itemCount; i++ {
-		item := (*pdhCounterValueItem)(unsafe.Pointer(&buf[i*itemSize]))
+		item := (*pdhCounterValueItem)(unsafe.Pointer(&buf[i*itemSize])) // #nosec G103 -- unsafe.Pointer is required to marshal Windows GPU syscall structs
 		if item.FmtValue.CStatus != 0 {
 			continue
 		}
@@ -146,7 +146,7 @@ func parsePdhLuid(name string) (LUID, bool) {
 	if len(parts) < 3 {
 		return LUID{}, false
 	}
-	hp, err := strconv.ParseUint(parts[0], 16, 32)
+	hp, err := strconv.ParseUint(parts[0], 16, 32) // nosemgrep: trailofbits.go.string-to-int-signedness-cast.string-to-int-signedness-cast
 	if err != nil {
 		return LUID{}, false
 	}
@@ -155,5 +155,5 @@ func parsePdhLuid(name string) (LUID, bool) {
 	if err != nil {
 		return LUID{}, false
 	}
-	return LUID{LowPart: uint32(lp), HighPart: int32(hp)}, true
+	return LUID{LowPart: uint32(lp), HighPart: int32(hp)}, true // #nosec G115 -- converts a bounded system/hardware counter value; overflow cannot occur in practice
 }

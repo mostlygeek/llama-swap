@@ -52,7 +52,7 @@ func (s *stubRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(s.response))
+	w.Write([]byte(s.response)) // nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
 }
 
 func (s *stubRouter) RunningModels() map[string]process.ProcessState { return s.running }

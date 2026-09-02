@@ -45,7 +45,7 @@ func tryNvidiaSmiWindows(ctx context.Context, every time.Duration, logger *logmo
 		sec = 1
 	}
 
-	cmd := exec.CommandContext(ctx, "nvidia-smi",
+	cmd := exec.CommandContext(ctx, "nvidia-smi", // #nosec G204 -- launches operator-configured model commands by design (the core proxy function)
 		"--query-gpu=index,name,uuid,temperature.gpu,utilization.gpu,memory.used,memory.total,fan.speed,power.draw",
 		"--format=csv,noheader,nounits",
 		"--loop", fmt.Sprintf("%d", sec),
@@ -80,7 +80,7 @@ func tryNvidiaSmiWindows(ctx context.Context, every time.Duration, logger *logmo
 				}
 			}
 		}
-		cmd.Wait()
+		_ = cmd.Wait()
 	}()
 
 	return ch, nil
@@ -113,9 +113,9 @@ func readSysStats() (SysStat, error) {
 	return SysStat{
 		Timestamp:      time.Now(),
 		CpuUtilPerCore: cpuPcts,
-		MemTotalMB:     int(vmStat.Total / toMB),
-		MemUsedMB:      int(vmStat.Used / toMB),
-		MemFreeMB:      int(vmStat.Free / toMB),
+		MemTotalMB:     int(vmStat.Total / toMB), // #nosec G115 -- converts a bounded system/hardware counter value; overflow cannot occur in practice
+		MemUsedMB:      int(vmStat.Used / toMB),  // #nosec G115 -- converts a bounded system/hardware counter value; overflow cannot occur in practice
+		MemFreeMB:      int(vmStat.Free / toMB),  // #nosec G115 -- converts a bounded system/hardware counter value; overflow cannot occur in practice
 		NetIO:          netIO,
 	}, nil
 }

@@ -131,7 +131,7 @@ func listYAMLFiles(dir string) ([]string, error) {
 // parsing so that flow-style constructs like [${env.API_KEY}] parse
 // correctly — the brace would otherwise be interpreted as a flow mapping.
 func parseSource(path string) (*yaml.Node, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- reads an operator-configured or internal sysfs/config path, not attacker-controlled input
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config %s: %w", path, err)
 	}

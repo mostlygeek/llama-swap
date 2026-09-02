@@ -52,7 +52,7 @@ func detectEnvironment(ctx context.Context, info *host.InfoStat) ExecutionEnviro
 		return ExecutionEnvironment{Kind: "container", Name: stringPtr("Docker")}
 	}
 	if path, err := exec.LookPath("systemd-detect-virt"); err == nil {
-		command := exec.CommandContext(ctx, path)
+		command := exec.CommandContext(ctx, path) // #nosec G204 -- launches operator-configured model commands by design (the core proxy function)
 		output, commandErr := command.Output()
 		name := strings.TrimSpace(string(output))
 		if commandErr == nil && name != "" && name != "none" {
@@ -98,7 +98,7 @@ func displayEnvironmentName(value string) string {
 }
 
 func platformMemoryCapacity(total uint64) uint64 {
-	if physical := zoneinfoMemoryCapacity("/proc/zoneinfo", uint64(os.Getpagesize())); physical > total {
+	if physical := zoneinfoMemoryCapacity("/proc/zoneinfo", uint64(os.Getpagesize())); physical > total { // #nosec G115 -- converts a bounded system/hardware counter value; overflow cannot occur in practice
 		total = physical
 	}
 	return limitedMemoryCapacity(total, []string{
@@ -111,7 +111,7 @@ func zoneinfoMemoryCapacity(path string, pageSize uint64) uint64 {
 	if pageSize == 0 {
 		return 0
 	}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- reads an operator-configured or internal sysfs/config path, not attacker-controlled input
 	if err != nil {
 		return 0
 	}
@@ -142,7 +142,7 @@ func zoneinfoMemoryCapacity(path string, pageSize uint64) uint64 {
 func limitedMemoryCapacity(total uint64, paths []string) uint64 {
 	capacity := total
 	for _, path := range paths {
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) // #nosec G304 -- reads an operator-configured or internal sysfs/config path, not attacker-controlled input
 		if err != nil {
 			continue
 		}
@@ -250,7 +250,7 @@ func readPowerLimit(devicePath string) *float64 {
 }
 
 func readTrimmed(path string) string {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- reads an operator-configured or internal sysfs/config path, not attacker-controlled input
 	if err != nil {
 		return ""
 	}

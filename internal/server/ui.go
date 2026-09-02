@@ -1,39 +1,59 @@
 package server
 
 import (
+	"embed"
 	"io/fs"
 	"net/http"
 	"path"
 	"strings"
 )
 
-// uiFS holds the UI build served under /ui/. Its value depends on build tags:
-// embed.go embeds the real ui_dist build when compiled with `-tags embed_ui`,
-// while embed_notag.go provides an empty filesystem for plain builds and tests.
-// See those files for details.
+// uiStaticFS holds the embedded UI. The UI under ui_dist is hand-authored
+// vanilla ES-module JavaScript committed to the repo (no build step). The all:
+// prefix is required so dot/underscore-prefixed files (e.g. __selftest.html)
+// are embedded too.
+//
+//go:embed all:ui_dist
+var uiStaticFS embed.FS
 
-// acceptsBrotli reports whether the client accepts brotli. Brotli is the only
-// encoding the UI build pre-compresses; clients without it get the original
-// file uncompressed.
-func acceptsBrotli(acceptEncoding string) bool {
+// uiFS is the embedded UI rooted at ui_dist.
+var uiFS = func() http.FileSystem {
+	sub, err := fs.Sub(uiStaticFS, "ui_dist")
+	if err != nil {
+		panic(err)
+	}
+	return http.FS(sub)
+}()
+
+// selectEncoding chooses the best pre-compressed encoding the client accepts.
+// It returns the encoding ("br" or "gzip") and the matching file extension.
+func selectEncoding(acceptEncoding string) (encoding, ext string) {
+	if acceptEncoding == "" {
+		return "", ""
+	}
 	for _, part := range strings.Split(acceptEncoding, ",") {
 		if strings.TrimSpace(strings.SplitN(part, ";", 2)[0]) == "br" {
-			return true
+			return "br", ".br"
 		}
 	}
-	return false
+	for _, part := range strings.Split(acceptEncoding, ",") {
+		if strings.TrimSpace(strings.SplitN(part, ";", 2)[0]) == "gzip" {
+			return "gzip", ".gz"
+		}
+	}
+	return "", ""
 }
 
 // serveCompressedFile serves name from fsys, preferring a pre-compressed
-// sibling (name+".br") when the client accepts brotli. It returns an error
-// without writing a response when name cannot be served, so callers can fall
-// back (e.g. SPA routing).
+// sibling (name+".br" / name+".gz") when the client accepts it. It returns an
+// error without writing a response when name cannot be served, so callers can
+// fall back (e.g. SPA routing).
 func serveCompressedFile(fsys http.FileSystem, w http.ResponseWriter, r *http.Request, name string) error {
-	if acceptsBrotli(r.Header.Get("Accept-Encoding")) {
-		if cf, err := fsys.Open(name + ".br"); err == nil {
+	if encoding, ext := selectEncoding(r.Header.Get("Accept-Encoding")); encoding != "" {
+		if cf, err := fsys.Open(name + ext); err == nil {
 			defer cf.Close()
 			if stat, err := cf.Stat(); err == nil && !stat.IsDir() {
-				w.Header().Set("Content-Encoding", "br")
+				w.Header().Set("Content-Encoding", encoding)
 				w.Header().Add("Vary", "Accept-Encoding")
 				http.ServeContent(w, r, name, stat.ModTime(), cf)
 				return nil
@@ -87,6 +107,28 @@ func serveUI(fsys http.FileSystem, w http.ResponseWriter, r *http.Request) {
 // handleFavicon serves /favicon.ico from the embedded UI build.
 func (s *Server) handleFavicon(w http.ResponseWriter, r *http.Request) {
 	if err := serveCompressedFile(uiFS, w, r, "favicon.ico"); err != nil {
+		http.NotFound(w, r)
+	}
+}
+
+// rootUIAssets are files that index.html and the web app manifest reference at
+// the site root (not under /ui/). They live in the embedded UI FS root and are
+// served at / so browsers and the PWA manifest can resolve them. favicon.ico has
+// its own handler (handleFavicon).
+var rootUIAssets = []string{
+	"favicon.svg",
+	"favicon-96x96.png",
+	"apple-touch-icon.png",
+	"site.webmanifest",
+	"web-app-manifest-192x192.png",
+	"web-app-manifest-512x512.png",
+}
+
+// handleRootAsset serves a single embedded UI asset by its base name from the
+// FS root.
+func (s *Server) handleRootAsset(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/")
+	if err := serveCompressedFile(uiFS, w, r, name); err != nil {
 		http.NotFound(w, r)
 	}
 }

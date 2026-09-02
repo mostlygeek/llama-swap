@@ -1,0 +1,47 @@
+name: Gosec
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/gosec.yml"
+
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/gosec.yml"
+
+  workflow_dispatch:
+
+jobs:
+  gosec:
+    # Matrix across GOOS so build-tag-gated files (monitor_darwin.go,
+    # monitor_unix.go, monitor_windows.go, d3dkmt_windows.go, pdh_windows.go,
+    # process_windows.go, ...) all get scanned. The runner is always
+    # ubuntu-latest — only the GOOS env var changes which files gosec compiles.
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux, darwin, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c #6.4.0
+        with:
+          go-version-file: go.mod
+
+      - name: Install gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@v2.26.1
+
+      - name: Run gosec (GOOS=${{ matrix.goos }})
+        env:
+          GOOS: ${{ matrix.goos }}
+        run: gosec ./...

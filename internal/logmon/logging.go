@@ -241,7 +241,7 @@ func (w *Monitor) log(level Level, msg string) {
 	if level < w.level {
 		return
 	}
-	w.Write(w.formatMessage(level.String(), msg))
+	_, _ = w.Write(w.formatMessage(level.String(), msg))
 }
 
 func (w *Monitor) Debug(msg string) { w.log(LevelDebug, msg) }

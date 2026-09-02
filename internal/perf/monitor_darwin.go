@@ -86,7 +86,7 @@ func sampleIoreg(ctx context.Context) *GpuStat {
 
 	var memTotalMB int
 	if vmStat, err := mem.VirtualMemory(); err == nil {
-		memTotalMB = int(vmStat.Total / (1024 * 1024))
+		memTotalMB = int(vmStat.Total / (1024 * 1024)) // #nosec G115 -- converts a bounded system/hardware counter value; overflow cannot occur in practice
 	}
 
 	return ParseIoregOutput(out, memTotalMB)
@@ -121,7 +121,7 @@ func tryMactop(ctx context.Context, every time.Duration, logger *logmon.Monitor)
 		intervalMs = 1000
 	}
 
-	cmd := exec.CommandContext(ctx, "mactop",
+	cmd := exec.CommandContext(ctx, "mactop", // #nosec G204 -- launches operator-configured model commands by design (the core proxy function)
 		"--headless",
 		"--format", "json",
 		"--interval", fmt.Sprintf("%d", intervalMs),
@@ -161,7 +161,7 @@ func tryMactop(ctx context.Context, every time.Duration, logger *logmon.Monitor)
 				}
 			}
 		}
-		cmd.Wait()
+		_ = cmd.Wait()
 	}()
 
 	return ch, nil
@@ -182,8 +182,8 @@ func readSysStats() (SysStat, error) {
 
 	var swapTotalMB, swapUsedMB int
 	if swapStat, err := mem.SwapMemory(); err == nil {
-		swapTotalMB = int(swapStat.Total / toMB)
-		swapUsedMB = int(swapStat.Used / toMB)
+		swapTotalMB = int(swapStat.Total / toMB) // #nosec G115 -- converts a bounded system/hardware counter value; overflow cannot occur in practice
+		swapUsedMB = int(swapStat.Used / toMB)   // #nosec G115 -- converts a bounded system/hardware counter value; overflow cannot occur in practice
 	}
 
 	var loadAvg1, loadAvg5, loadAvg15 float64
@@ -196,9 +196,9 @@ func readSysStats() (SysStat, error) {
 	return SysStat{
 		Timestamp:      time.Now(),
 		CpuUtilPerCore: cpuPcts,
-		MemTotalMB:     int(vmStat.Total / toMB),
-		MemUsedMB:      int(vmStat.Used / toMB),
-		MemFreeMB:      int(vmStat.Free / toMB),
+		MemTotalMB:     int(vmStat.Total / toMB), // #nosec G115 -- converts a bounded system/hardware counter value; overflow cannot occur in practice
+		MemUsedMB:      int(vmStat.Used / toMB),  // #nosec G115 -- converts a bounded system/hardware counter value; overflow cannot occur in practice
+		MemFreeMB:      int(vmStat.Free / toMB),  // #nosec G115 -- converts a bounded system/hardware counter value; overflow cannot occur in practice
 		SwapTotalMB:    swapTotalMB,
 		SwapUsedMB:     swapUsedMB,
 		LoadAvg1:       loadAvg1,

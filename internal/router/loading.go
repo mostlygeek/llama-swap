@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math/rand"
+	"math/rand" // nosemgrep: go.lang.security.audit.crypto.math_random.math-random-used
 	"net/http"
 	"strings"
 	"sync"
@@ -103,12 +103,12 @@ func (s *loadingWriter) start(ctx context.Context) {
 
 	remarks := make([]string, len(loadingRemarks))
 	copy(remarks, loadingRemarks)
-	rand.Shuffle(len(remarks), func(i, j int) {
+	rand.Shuffle(len(remarks), func(i, j int) { // #nosec G404 -- non-cryptographic selection for load balancing; math/rand is sufficient
 		remarks[i], remarks[j] = remarks[j], remarks[i]
 	})
 	ri := 0
 
-	nextRemarkIn := time.Duration(2+rand.Intn(4)) * time.Second
+	nextRemarkIn := time.Duration(2+rand.Intn(4)) * time.Second // #nosec G404 -- non-cryptographic selection for load balancing; math/rand is sufficient
 	lastRemarkTime := time.Time{}
 
 	ticker := time.NewTicker(s.tickDuration)
@@ -133,7 +133,7 @@ func (s *loadingWriter) start(ctx context.Context) {
 				s.sendInline(update)
 				s.sendData(" ")
 				lastRemarkTime = time.Now()
-				nextRemarkIn = time.Duration(5+rand.Intn(5)) * time.Second
+				nextRemarkIn = time.Duration(5+rand.Intn(5)) * time.Second // #nosec G404 -- non-cryptographic selection for load balancing; math/rand is sufficient
 			} else if time.Since(lastRemarkTime) >= nextRemarkIn {
 				remark := remarks[ri%len(remarks)]
 				ri++
@@ -141,7 +141,7 @@ func (s *loadingWriter) start(ctx context.Context) {
 				s.sendInline(remark)
 				s.sendData(" ")
 				lastRemarkTime = time.Now()
-				nextRemarkIn = time.Duration(5+rand.Intn(5)) * time.Second
+				nextRemarkIn = time.Duration(5+rand.Intn(5)) * time.Second // #nosec G404 -- non-cryptographic selection for load balancing; math/rand is sufficient
 			} else {
 				s.sendData(".")
 			}

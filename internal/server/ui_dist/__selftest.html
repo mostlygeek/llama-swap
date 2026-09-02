@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>llama-swap UI self-test</title>
+    <link rel="stylesheet" href="/ui/vendor/katex/katex.min.css" />
+    <style>
+      body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; margin: 1.5rem; line-height: 1.4; }
+      h1 { font-size: 1.25rem; }
+      .summary { font-weight: bold; padding: 0.5rem 0.75rem; border-radius: 4px; margin: 0.75rem 0; }
+      .ok { background: #e6f7e6; color: #1a7f1a; }
+      .bad { background: #fde8e8; color: #b91c1c; }
+      .group { margin: 1rem 0 0.25rem; font-weight: bold; }
+      .pass { color: #1a7f1a; }
+      .fail { color: #b91c1c; }
+      ul { margin: 0.25rem 0 0; padding-left: 1.25rem; }
+      li { white-space: pre-wrap; }
+    </style>
+
+    <!-- vendored libraries as classic scripts (same load order as index.html) -->
+    <script src="/ui/vendor/marked.min.js"></script>
+    <script src="/ui/vendor/katex/katex.min.js"></script>
+    <script src="/ui/vendor/highlight.min.js"></script>
+  </head>
+  <body>
+    <h1>llama-swap UI self-test</h1>
+    <p>In-browser port of markdown.test.ts + histogram.test.ts + canned SSE chunk tests (replaces vitest).</p>
+    <div id="summary" class="summary">Running…</div>
+    <div id="results"></div>
+
+    <script type="module">
+      import {
+        renderMarkdown, escapeHtml, splitCompleteBlocks, closePendingBlock,
+        normalizeLatexDelimiters, renderStreamingMarkdown, createStreamingCache,
+      } from "/ui/js/markdown.js";
+      import { calculateHistogramData } from "/ui/js/util/histogram.js";
+      import { parseStream } from "/ui/js/api/chat.js";
+
+      // ---- tiny test harness ----
+      const groups = [];
+      let cur = null;
+      function group(name) { cur = { name, tests: [] }; groups.push(cur); }
+      function test(name, fn) {
+        try { fn(); cur.tests.push({ name, ok: true }); }
+        catch (e) { cur.tests.push({ name, ok: false, msg: e && e.message ? e.message : String(e) }); }
+      }
+      const fail = (m) => { throw new Error(m); };
+      function expect(actual) {
+        return {
+          toBe: (e) => { if (actual !== e) fail(`expected ${JSON.stringify(actual)} === ${JSON.stringify(e)}`); },
+          toEqual: (e) => { if (JSON.stringify(actual) !== JSON.stringify(e)) fail(`expected ${JSON.stringify(actual)} deep-eq ${JSON.stringify(e)}`); },
+          toContain: (e) => { if (!String(actual).includes(e)) fail(`expected output to contain ${JSON.stringify(e)}`); },
+          toMatch: (re) => { if (!re.test(String(actual))) fail(`expected ${JSON.stringify(actual)} to match ${re}`); },
+          toBeNull: () => { if (actual !== null) fail(`expected null, got ${JSON.stringify(actual)}`); },
+          toBeTruthy: () => { if (!actual) fail(`expected truthy, got ${JSON.stringify(actual)}`); },
+          toBeGreaterThanOrEqual: (e) => { if (!(actual >= e)) fail(`expected ${actual} >= ${e}`); },
+          toBeLessThanOrEqual: (e) => { if (!(actual <= e)) fail(`expected ${actual} <= ${e}`); },
+          toBeCloseTo: (e, d = 2) => { if (Math.abs(actual - e) > Math.pow(10, -d) / 2) fail(`expected ${actual} close to ${e}`); },
+          notToThrow: (fn2) => fn2,
+        };
+      }
+      const expectNotThrow = (fn) => { try { fn(); } catch (e) { fail(`unexpected throw: ${e}`); } };
+
+      // ===== markdown.test.ts =====
+      group("renderMarkdown — basic");
+      test("renders plain text", () => expect(renderMarkdown("Hello world")).toContain("Hello world"));
+      test("renders bold text", () => expect(renderMarkdown("**bold**")).toContain("<strong>bold</strong>"));
+      test("renders italic text", () => expect(renderMarkdown("*italic*")).toContain("<em>italic</em>"));
+      test("renders code blocks", () => { const r = renderMarkdown("```js\nconst x = 1;\n```"); expect(r).toContain("hljs"); expect(r).toContain("const"); });
+      test("empty content -> empty string", () => expect(renderMarkdown("")).toBe(""));
+      test("null content -> empty string", () => expect(renderMarkdown(null)).toBe(""));
+      test("undefined content -> empty string", () => expect(renderMarkdown(undefined)).toBe(""));
+
+      group("renderMarkdown — KaTeX");
+      test("inline math $...$", () => { const r = renderMarkdown("The equation $E = mc^2$ is famous."); expect(r).toContain("katex"); expect(r).toContain("E"); expect(r).toContain("="); expect(r).toContain("mc"); });
+      test("display math $$...$$", () => { const r = renderMarkdown("$$\\int_{a}^{b} f(x) dx$$"); expect(r).toContain("katex"); expect(r).toContain("∫"); expect(r).toContain("f(x)"); });
+      test("complex LaTeX", () => { const r = renderMarkdown("$$\\sum_{i=1}^{n} x_i = \\frac{1}{n}\\sum_{i=1}^{n} x_i$$"); expect(r).toContain("katex"); expect(r).toContain("∑"); });
+      test("Greek letters", () => { const r = renderMarkdown("$\\alpha + \\beta = \\gamma$"); expect(r).toContain("katex"); expect(r).toMatch(/[αβγ]|alpha|beta|gamma/); });
+      test("fractions", () => { const r = renderMarkdown("$\\frac{a}{b}$"); expect(r).toContain("katex"); expect(r).toContain("frac"); });
+      test("subscripts and superscripts", () => { const r = renderMarkdown("$x^2 + y_3$"); expect(r).toContain("katex"); expect(r).toContain("sup"); expect(r).toContain("sub"); });
+      test("multiple inline math", () => { const r = renderMarkdown("First $x = 1$ and then $y = 2$."); expect((r.match(/katex/g) || []).length).toBeGreaterThanOrEqual(2); });
+      test("math within document", () => {
+        const r = renderMarkdown("# Heading\n\nThis is a paragraph with $E = mc^2$ inline math.\n\n$$\\int_0^\\infty e^{-x} dx = 1$$\n\nMore text here.\n");
+        expect(r).toContain("<h1>Heading</h1>"); expect(r).toContain("katex"); expect(r).toContain("E = mc"); expect(r).toContain("∫"); expect(r).toContain("∞");
+      });
+      test("escaped dollar signs", () => { const r = renderMarkdown("This costs \\$5 and $x = 1$."); expect(r).toContain("katex"); expect(r).toContain("$5"); });
+      test("empty math expressions", () => expect(renderMarkdown("$$$")).toBeTruthy());
+      test("matrices", () => { const r = renderMarkdown("$$\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}$$"); expect(r).toContain("katex"); expect(r).toContain("pmatrix"); });
+      test("square roots", () => { const r = renderMarkdown("$\\sqrt{x^2 + y^2}$"); expect(r).toContain("katex"); expect(r).toContain("sqrt"); });
+      test("\\[...\\] display math", () => expect(renderMarkdown("\\[\nx^2 + y^2 = z^2\n\\]")).toContain("katex"));
+      test("\\(...\\) inline math", () => expect(renderMarkdown("The equation \\(E = mc^2\\) is famous.")).toContain("katex"));
+
+      group("normalizeLatexDelimiters");
+      test("converts \\[...\\] to $$...$$", () => expect(normalizeLatexDelimiters("\\[\nx^2\n\\]")).toBe("$$\nx^2\n$$"));
+      test("converts \\(...\\) to $...$", () => expect(normalizeLatexDelimiters("\\(x^2\\)")).toBe("$x^2$"));
+      test("leaves $$ and $ unchanged", () => expect(normalizeLatexDelimiters("$$x^2$$ and $y$")).toBe("$$x^2$$ and $y$"));
+      test("handles multiple occurrences", () => expect(normalizeLatexDelimiters("\\(a\\) and \\(b\\)")).toBe("$a$ and $b$"));
+
+      group("escapeHtml");
+      test("escapes HTML entities", () => { expect(escapeHtml("<script>")).toBe("&lt;script&gt;"); expect(escapeHtml('"quoted"')).toBe("&quot;quoted&quot;"); expect(escapeHtml("'single'")).toBe("&#39;single&#39;"); expect(escapeHtml("a & b")).toBe("a &amp; b"); });
+      test("handles empty string", () => expect(escapeHtml("")).toBe(""));
+
+      group("renderMarkdown — error handling");
+      test("does not throw on invalid LaTeX", () => expectNotThrow(() => renderMarkdown("$\\invalidcommand{")));
+      test("returns fallback HTML on processing errors", () => expect(renderMarkdown("$" + "a".repeat(10000) + "$")).toBeTruthy());
+
+      group("splitCompleteBlocks");
+      test("everything pending when no blank line", () => expect(splitCompleteBlocks("Hello world")).toEqual({ complete: "", pending: "Hello world" }));
+      test("empty input", () => expect(splitCompleteBlocks("")).toEqual({ complete: "", pending: "" }));
+      test("splits on blank line", () => expect(splitCompleteBlocks("First paragraph.\n\nSecond paragraph")).toEqual({ complete: "First paragraph.\n", pending: "Second paragraph" }));
+      test("splits at last blank line", () => expect(splitCompleteBlocks("Para 1.\n\nPara 2.\n\nPara 3")).toEqual({ complete: "Para 1.\n\nPara 2.\n", pending: "Para 3" }));
+      test("closed code fence is complete", () => expect(splitCompleteBlocks("```js\nconst x = 1;\n```\nMore text")).toEqual({ complete: "```js\nconst x = 1;\n```", pending: "More text" }));
+      test("unclosed code fence is pending", () => expect(splitCompleteBlocks("Done paragraph.\n\n```js\nconst x = 1;")).toEqual({ complete: "Done paragraph.\n", pending: "```js\nconst x = 1;" }));
+      test("no split on blank inside fence", () => expect(splitCompleteBlocks("```\nline1\n\nline2\n```")).toEqual({ complete: "```\nline1\n\nline2\n```", pending: "" }));
+      test("tilde fences", () => expect(splitCompleteBlocks("~~~py\nprint('hi')\n~~~\nAfter")).toEqual({ complete: "~~~py\nprint('hi')\n~~~", pending: "After" }));
+      test("backtick not closed by tilde", () => expect(splitCompleteBlocks("```\ncode\n~~~\nstill code")).toEqual({ complete: "", pending: "```\ncode\n~~~\nstill code" }));
+      test("closed math block is complete", () => expect(splitCompleteBlocks("$$\nx^2\n$$\nAfter")).toEqual({ complete: "$$\nx^2\n$$", pending: "After" }));
+      test("unclosed math block is pending", () => expect(splitCompleteBlocks("Before.\n\n$$\nx^2")).toEqual({ complete: "Before.\n", pending: "$$\nx^2" }));
+      test("closed \\[...\\] math block", () => expect(splitCompleteBlocks("\\[\nx^2\n\\]\nAfter")).toEqual({ complete: "\\[\nx^2\n\\]", pending: "After" }));
+      test("unclosed \\[ math block", () => expect(splitCompleteBlocks("Before.\n\n\\[\nx^2")).toEqual({ complete: "Before.\n", pending: "\\[\nx^2" }));
+      test("trailing blank line completes", () => expect(splitCompleteBlocks("Hello world.\n")).toEqual({ complete: "Hello world.\n", pending: "" }));
+
+      group("closePendingBlock");
+      test("empty input", () => expect(closePendingBlock("")).toBe(""));
+      test("plain text unchanged", () => expect(closePendingBlock("Hello world")).toBe("Hello world"));
+      test("closes backtick fence", () => expect(closePendingBlock("```python\nprint('hi')")).toBe("```python\nprint('hi')\n```"));
+      test("closes tilde fence", () => expect(closePendingBlock("~~~js\nconst x = 1;")).toBe("~~~js\nconst x = 1;\n~~~"));
+      test("already-closed fence unchanged", () => expect(closePendingBlock("```py\ncode\n```")).toBe("```py\ncode\n```"));
+      test("closes math block", () => expect(closePendingBlock("$$\nx^2 + y^2")).toBe("$$\nx^2 + y^2\n$$"));
+      test("already-closed math unchanged", () => expect(closePendingBlock("$$\nx^2\n$$")).toBe("$$\nx^2\n$$"));
+      test("closes \\[ math with \\]", () => expect(closePendingBlock("\\[\nx^2 + y^2")).toBe("\\[\nx^2 + y^2\n\\]"));
+      test("already-closed \\[...\\] unchanged", () => expect(closePendingBlock("\\[\nx^2\n\\]")).toBe("\\[\nx^2\n\\]"));
+      test("closes fence preceded by text", () => expect(closePendingBlock("Some text\n```\ncode")).toBe("Some text\n```\ncode\n```"));
+      test("headers unchanged", () => expect(closePendingBlock("## Hello")).toBe("## Hello"));
+      test("tables unchanged", () => expect(closePendingBlock("| a | b |\n| --- | --- |\n| 1 | 2 |")).toBe("| a | b |\n| --- | --- |\n| 1 | 2 |"));
+      test("lists unchanged", () => expect(closePendingBlock("- item 1\n- item 2")).toBe("- item 1\n- item 2"));
+
+      group("renderStreamingMarkdown");
+      test("renders complete + pending", () => { const c = createStreamingCache(); const { blocks, pendingHtml } = renderStreamingMarkdown("# Hello\n\nWorld", c); expect(blocks.length).toBe(1); expect(blocks[0].html).toContain("<h1>Hello</h1>"); expect(pendingHtml).toContain("World"); expect(pendingHtml).toContain("<p>"); });
+      test("preserves blocks when complete unchanged", () => { const c = createStreamingCache(); renderStreamingMarkdown("# Hello\n\nWor", c); const first = c.blocks; const { blocks } = renderStreamingMarkdown("# Hello\n\nWorld", c); expect(blocks === first).toBe(true); expect(c.completeKey).toBe("# Hello\n"); });
+      test("appends new block on new section", () => { const c = createStreamingCache(); renderStreamingMarkdown("# Hello\n\nParagraph", c); expect(c.blocks.length).toBe(1); const fb = c.blocks[0]; renderStreamingMarkdown("# Hello\n\nParagraph.\n\nMore", c); expect(c.blocks.length).toBe(2); expect(c.blocks[0].id).toBe(fb.id); expect(c.blocks[0].html).toBe(fb.html); expect(c.blocks[1].html).toContain("Paragraph."); });
+      test("assigns stable unique ids", () => { const c = createStreamingCache(); renderStreamingMarkdown("A.\n\nB.\n\nC", c); expect(c.blocks.length).toBe(1); const id0 = c.blocks[0].id; renderStreamingMarkdown("A.\n\nB.\n\nC.\n\nD", c); expect(c.blocks.length).toBe(2); expect(c.blocks[0].id).toBe(id0); expect(c.blocks[1].id).toBe(id0 + 1); });
+      test("pending code block highlighted", () => { const c = createStreamingCache(); const { pendingHtml } = renderStreamingMarkdown("Done.\n\n```python\nprint('hello')", c); expect(pendingHtml).toContain("<code"); expect(pendingHtml).toContain("hljs"); });
+      test("pending table rendered", () => { const c = createStreamingCache(); const { pendingHtml } = renderStreamingMarkdown("Done.\n\n| a | b |\n| --- | --- |\n| 1 | 2 |", c); expect(pendingHtml).toContain("<table>"); expect(pendingHtml).toContain("<td>"); });
+      test("pending through markdown pipeline", () => { const c = createStreamingCache(); const { pendingHtml } = renderStreamingMarkdown("Done.\n\nSome **bold** text", c); expect(pendingHtml).toContain("<strong>bold</strong>"); });
+
+      // ===== histogram.test.ts =====
+      group("calculateHistogramData — edge cases");
+      test("null for empty input", () => expect(calculateHistogramData([])).toBeNull());
+      test("single value", () => { const r = calculateHistogramData([42]); expect(r.bins).toEqual([1]); expect(r.min).toBe(42); expect(r.max).toBe(42); expect(r.binSize).toBe(0); expect(r.p50).toBe(42); expect(r.p95).toBe(42); expect(r.p99).toBe(42); });
+      test("all identical values", () => { const r = calculateHistogramData([10, 10, 10, 10, 10]); expect(r.bins).toEqual([5]); expect(r.min).toBe(10); expect(r.max).toBe(10); expect(r.binSize).toBe(0); });
+      test("two distinct values", () => { const r = calculateHistogramData([10, 20]); expect(r.min).toBe(10); expect(r.max).toBe(20); expect(r.p50).toBe(15); expect(r.bins.reduce((s, b) => s + b, 0)).toBe(2); });
+
+      group("calculateHistogramData — bins");
+      test("bins sum to total", () => { const v = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]; const r = calculateHistogramData(v); expect(r.bins.reduce((s, b) => s + b, 0)).toBe(v.length); });
+      test("uniform across bins (n=100)", () => { const v = Array.from({ length: 100 }, (_, i) => i); const r = calculateHistogramData(v); expect(r.bins.length).toBe(8); expect(r.bins.reduce((s, b) => s + b, 0)).toBe(100); });
+      test("places values in correct bins", () => { const r = calculateHistogramData([1, 1, 1, 5, 5, 9, 9, 9], { minBins: 3, maxBins: 3 }); expect(r.bins.length).toBe(3); expect(r.bins.reduce((s, b) => s + b, 0)).toBe(8); });
+      test("skewed distribution", () => { const r = calculateHistogramData([1, 1, 1, 1, 1, 100]); expect(r.bins.reduce((s, b) => s + b, 0)).toBe(6); });
+
+      group("calculateHistogramData — percentiles");
+      test("p50 even-length", () => expect(calculateHistogramData([1, 2, 3, 4]).p50).toBe(2.5));
+      test("p50 odd-length", () => expect(calculateHistogramData([1, 2, 3, 4, 5]).p50).toBe(3));
+      test("p99 interpolation", () => expect(calculateHistogramData(Array.from({ length: 100 }, (_, i) => i + 1)).p99).toBeCloseTo(99.01));
+      test("p95 interpolation", () => expect(calculateHistogramData(Array.from({ length: 100 }, (_, i) => i + 1)).p95).toBeCloseTo(95.05));
+      test("percentiles monotonic", () => { const r = calculateHistogramData(Array.from({ length: 200 }, (_, i) => (i * 37) % 100)); expect(r.p50).toBeLessThanOrEqual(r.p95); expect(r.p95).toBeLessThanOrEqual(r.p99); });
+
+      group("calculateHistogramData — bin count adaptation");
+      test("min bins for small datasets (n=8)", () => expect(calculateHistogramData(Array.from({ length: 8 }, (_, i) => i)).bins.length).toBe(5));
+      test("scales with size (n=100)", () => expect(calculateHistogramData(Array.from({ length: 100 }, (_, i) => i)).bins.length).toBe(8));
+      test("caps at maximum (n=1000)", () => expect(calculateHistogramData(Array.from({ length: 1000 }, (_, i) => i), { minBins: 5, maxBins: 10 }).bins.length).toBe(10));
+      test("respects custom options", () => expect(calculateHistogramData(Array.from({ length: 100 }, (_, i) => i), { minBins: 5, maxBins: 10 }).bins.length).toBe(8));
+
+      group("calculateHistogramData — min/max");
+      test("identifies min/max", () => { const r = calculateHistogramData([5, 3, 8, 1, 9, 2]); expect(r.min).toBe(1); expect(r.max).toBe(9); });
+      test("negative values", () => { const r = calculateHistogramData([-10, -5, 0, 5, 10]); expect(r.min).toBe(-10); expect(r.max).toBe(10); });
+      test("floating point values", () => { const r = calculateHistogramData([1.5, 2.7, 3.14, 0.5, 4.99]); expect(r.min).toBe(0.5); expect(r.max).toBe(4.99); });
+
+      // ===== chat SSE parsers (canned chunks) =====
+      const enc = new TextEncoder();
+      function readerFrom(chunks) {
+        let i = 0;
+        return { read: async () => (i < chunks.length ? { done: false, value: enc.encode(chunks[i++]) } : { done: true }), releaseLock() {} };
+      }
+      async function collect(endpoint, chunks) {
+        const out = [];
+        for await (const c of parseStream(endpoint, readerFrom(chunks))) out.push(c);
+        return out;
+      }
+      async function atest(name, fn) {
+        try { await fn(); cur.tests.push({ name, ok: true }); }
+        catch (e) { cur.tests.push({ name, ok: false, msg: e && e.message ? e.message : String(e) }); }
+      }
+
+      async function runAsync() {
+        group("chat SSE — OpenAI chat/completions");
+        await atest("basic content + reasoning + done", async () => expect(await collect("v1/chat/completions", [
+          'data: {"choices":[{"delta":{"content":"Hel"}}]}\n',
+          'data: {"choices":[{"delta":{"content":"lo"}}]}\n',
+          'data: {"choices":[{"delta":{"reasoning_content":"thinking"}}]}\n',
+          'data: [DONE]\n',
+        ])).toEqual([
+          { content: "Hel", reasoning_content: "", done: false },
+          { content: "lo", reasoning_content: "", done: false },
+          { content: "", reasoning_content: "thinking", done: false },
+          { content: "", done: true },
+        ]));
+        await atest("split mid-line across chunks", async () => expect(await collect("v1/chat/completions", [
+          'data: {"choices":[{"delta":{"con', 'tent":"Hi"}}]}\n', 'data: [DONE]\n',
+        ])).toEqual([{ content: "Hi", reasoning_content: "", done: false }, { content: "", done: true }]));
+        await atest("reasoning alias", async () => expect(await collect("v1/chat/completions", [
+          'data: {"choices":[{"delta":{"reasoning":"r"}}]}\n', 'data: [DONE]\n',
+        ])).toEqual([{ content: "", reasoning_content: "r", done: false }, { content: "", done: true }]));
+
+        group("chat SSE — Anthropic messages");
+        await atest("text + thinking + stop", async () => expect(await collect("v1/messages", [
+          'event: content_block_delta\ndata: {"delta":{"type":"text_delta","text":"He"}}\n\n',
+          'event: content_block_delta\ndata: {"delta":{"type":"thinking_delta","thinking":"th"}}\n\n',
+          'event: message_stop\ndata: {}\n\n',
+        ])).toEqual([
+          { content: "He", done: false },
+          { content: "", reasoning_content: "th", done: false },
+          { content: "", done: true },
+        ]));
+        await atest("split across chunk boundary", async () => expect(await collect("v1/messages", [
+          'event: content_block_delta\ndata: {"delta":{"type":"text_de', 'lta","text":"X"}}\n\nevent: message_stop\ndata: {}\n\n',
+        ])).toEqual([{ content: "X", done: false }, { content: "", done: true }]));
+
+        group("chat SSE — OpenAI responses");
+        await atest("output_text + reasoning_summary + completed", async () => expect(await collect("v1/responses", [
+          'event: response.output_text.delta\ndata: {"delta":"Wo"}\n\n',
+          'event: response.reasoning_summary_text.delta\ndata: {"delta":"rs"}\n\n',
+          'event: response.completed\ndata: {}\n\n',
+        ])).toEqual([
+          { content: "Wo", done: false },
+          { content: "", reasoning_content: "rs", done: false },
+          { content: "", done: true },
+        ]));
+
+        render();
+      }
+
+      // ---- render results ----
+      function render() {
+        let total = 0, passed = 0;
+        const out = [];
+        for (const g of groups) {
+          out.push(`<div class="group">${g.name}</div><ul>`);
+          for (const t of g.tests) {
+            total++;
+            if (t.ok) { passed++; out.push(`<li class="pass">✓ ${t.name}</li>`); }
+            else out.push(`<li class="fail">✗ ${t.name} — ${escapeHtml(t.msg)}</li>`);
+          }
+          out.push("</ul>");
+        }
+        document.getElementById("results").innerHTML = out.join("");
+        const sum = document.getElementById("summary");
+        const failed = total - passed;
+        sum.textContent = `${passed}/${total} passed${failed ? `, ${failed} FAILED` : " — all green"}`;
+        sum.className = "summary " + (failed ? "bad" : "ok");
+      }
+
+      runAsync();
+    </script>
+  </body>
+</html>

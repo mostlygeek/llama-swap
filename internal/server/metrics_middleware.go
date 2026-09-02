@@ -58,7 +58,7 @@ func CreateMetricsMiddleware(mm *metricsMonitor, cfg config.Config) chain.Middle
 				if cf&captureReqBody != 0 && r.Body != nil {
 					if buffered, err := io.ReadAll(r.Body); err == nil {
 						reqBody = buffered
-						r.Body.Close()
+						_ = r.Body.Close()
 						r.Body = io.NopCloser(bytes.NewReader(reqBody))
 					}
 				}

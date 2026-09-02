@@ -58,7 +58,7 @@ func initD3DKMT() error {
 func ntstatusCall(proc *windows.LazyProc, arg unsafe.Pointer) error {
 	ret, _, _ := proc.Call(uintptr(arg))
 	if ret != 0 {
-		return fmt.Errorf("NTSTATUS 0x%08x", uint32(ret))
+		return fmt.Errorf("NTSTATUS 0x%08x", uint32(ret)) // #nosec G115 -- converts a bounded system/hardware counter value; overflow cannot occur in practice
 	}
 	return nil
 }
@@ -69,9 +69,9 @@ func d3dkmEnumerateAdapters() ([]D3DKMT_ADAPTERINFO, error) {
 	var adapters [maxEnumAdapters]D3DKMT_ADAPTERINFO
 	enum := D3DKMT_ENUMADAPTERS2{
 		NumAdapters: maxEnumAdapters,
-		pAdapters:   uintptr(unsafe.Pointer(&adapters[0])),
+		pAdapters:   uintptr(unsafe.Pointer(&adapters[0])), // #nosec G103 -- unsafe.Pointer is required to marshal Windows GPU syscall structs
 	}
-	if err := ntstatusCall(procEnumAdapters2, unsafe.Pointer(&enum)); err != nil {
+	if err := ntstatusCall(procEnumAdapters2, unsafe.Pointer(&enum)); err != nil { // #nosec G103 -- unsafe.Pointer is required to marshal Windows GPU syscall structs
 		return nil, fmt.Errorf("EnumAdapters2: %w", err)
 	}
 	if enum.NumAdapters == 0 {
@@ -89,7 +89,7 @@ func d3dkmOpenAdapter(luid LUID) (uint32, error) {
 	req := D3DKMT_OPENADAPTERFROMLUID{
 		AdapterLuid: luid,
 	}
-	if err := ntstatusCall(procOpenAdapterFromLuid, unsafe.Pointer(&req)); err != nil {
+	if err := ntstatusCall(procOpenAdapterFromLuid, unsafe.Pointer(&req)); err != nil { // #nosec G103 -- unsafe.Pointer is required to marshal Windows GPU syscall structs
 		return 0, fmt.Errorf("OpenAdapterFromLuid: %w", err)
 	}
 	return req.hAdapter, nil
@@ -98,7 +98,7 @@ func d3dkmOpenAdapter(luid LUID) (uint32, error) {
 // d3dkmCloseAdapter closes a previously opened D3DKMT adapter handle.
 func d3dkmCloseAdapter(hAdapter uint32) error {
 	req := D3DKMT_CLOSEADAPTER{hAdapter: hAdapter}
-	return ntstatusCall(procCloseAdapter, unsafe.Pointer(&req))
+	return ntstatusCall(procCloseAdapter, unsafe.Pointer(&req)) // #nosec G103 -- unsafe.Pointer is required to marshal Windows GPU syscall structs
 }
 
 // d3dkmGetAdapterPerfData queries per-adapter performance data (temperature,
@@ -108,10 +108,10 @@ func d3dkmGetAdapterPerfData(hAdapter uint32) (*D3DKMT_ADAPTER_PERFDATA, error) 
 	req := D3DKMT_QUERYADAPTERINFO{
 		hAdapter:              hAdapter,
 		Type:                  KMTQAITYPE_ADAPTERPERFDATA,
-		pPrivateDriverData:    uintptr(unsafe.Pointer(&data)),
+		pPrivateDriverData:    uintptr(unsafe.Pointer(&data)), // #nosec G103 -- unsafe.Pointer is required to marshal Windows GPU syscall structs
 		PrivateDriverDataSize: uint32(unsafe.Sizeof(data)),
 	}
-	if err := ntstatusCall(procQueryAdapterInfo, unsafe.Pointer(&req)); err != nil {
+	if err := ntstatusCall(procQueryAdapterInfo, unsafe.Pointer(&req)); err != nil { // #nosec G103 -- unsafe.Pointer is required to marshal Windows GPU syscall structs
 		return nil, fmt.Errorf("QueryAdapterInfo(ADAPTERPERFDATA): %w", err)
 	}
 	return &data, nil
@@ -124,10 +124,10 @@ func d3dkmGetAdapterPerfDataCaps(hAdapter uint32) (*D3DKMT_ADAPTER_PERFDATACAPS,
 	req := D3DKMT_QUERYADAPTERINFO{
 		hAdapter:              hAdapter,
 		Type:                  KMTQAITYPE_ADAPTERPERFDATA_CAPS,
-		pPrivateDriverData:    uintptr(unsafe.Pointer(&data)),
+		pPrivateDriverData:    uintptr(unsafe.Pointer(&data)), // #nosec G103 -- unsafe.Pointer is required to marshal Windows GPU syscall structs
 		PrivateDriverDataSize: uint32(unsafe.Sizeof(data)),
 	}
-	if err := ntstatusCall(procQueryAdapterInfo, unsafe.Pointer(&req)); err != nil {
+	if err := ntstatusCall(procQueryAdapterInfo, unsafe.Pointer(&req)); err != nil { // #nosec G103 -- unsafe.Pointer is required to marshal Windows GPU syscall structs
 		return nil, fmt.Errorf("QueryAdapterInfo(ADAPTERPERFDATACAPS): %w", err)
 	}
 	return &data, nil
@@ -195,7 +195,7 @@ func d3dkmQueryAdapterStats(luid LUID) (nbSegments uint32, nodeCount uint32, err
 		Type:        int32(D3DKMT_QUERYSTATISTICS_ADAPTER),
 		AdapterLuid: luid,
 	}
-	if err := ntstatusCall(procQueryStatistics, unsafe.Pointer(&buf)); err != nil {
+	if err := ntstatusCall(procQueryStatistics, unsafe.Pointer(&buf)); err != nil { // #nosec G103 -- unsafe.Pointer is required to marshal Windows GPU syscall structs
 		return 0, 0, fmt.Errorf("QueryStatistics(ADAPTER): %w", err)
 	}
 	nbSegments = binary.LittleEndian.Uint32(buf._result[qsoffsetNbSegments : qsoffsetNbSegments+4])
@@ -209,9 +209,9 @@ func d3dkmQuerySegmentStats(luid LUID, segmentID uint32) (commitLimit uint64, by
 	buf := queryStatsBuffer{
 		Type:        int32(D3DKMT_QUERYSTATISTICS_SEGMENT),
 		AdapterLuid: luid,
-		QueryId:     int32(segmentID),
+		QueryId:     int32(segmentID), // #nosec G115 -- converts a bounded system/hardware counter value; overflow cannot occur in practice
 	}
-	if err := ntstatusCall(procQueryStatistics, unsafe.Pointer(&buf)); err != nil {
+	if err := ntstatusCall(procQueryStatistics, unsafe.Pointer(&buf)); err != nil { // #nosec G103 -- unsafe.Pointer is required to marshal Windows GPU syscall structs
 		return 0, 0, fmt.Errorf("QueryStatistics(SEGMENT %d): %w", segmentID, err)
 	}
 	commitLimit = binary.LittleEndian.Uint64(buf._result[qsoffsetCommitLimit : qsoffsetCommitLimit+8])
@@ -228,9 +228,9 @@ func d3dkmQueryNodeStats(luid LUID, nodeID uint32) (runningTime uint64, systemRu
 	buf := queryStatsBuffer{
 		Type:        int32(D3DKMT_QUERYSTATISTICS_NODE),
 		AdapterLuid: luid,
-		QueryId:     int32(nodeID),
+		QueryId:     int32(nodeID), // #nosec G115 -- converts a bounded system/hardware counter value; overflow cannot occur in practice
 	}
-	if err := ntstatusCall(procQueryStatistics, unsafe.Pointer(&buf)); err != nil {
+	if err := ntstatusCall(procQueryStatistics, unsafe.Pointer(&buf)); err != nil { // #nosec G103 -- unsafe.Pointer is required to marshal Windows GPU syscall structs
 		return 0, 0, fmt.Errorf("QueryStatistics(NODE %d): %w", nodeID, err)
 	}
 	runningTime = binary.LittleEndian.Uint64(buf._result[qsoffsetRunningTime : qsoffsetRunningTime+8])
@@ -338,7 +338,7 @@ func tryD3DKMT(ctx context.Context, every time.Duration, logger *logmon.Monitor)
 		nbSegments, nodeCount, err := d3dkmQueryAdapterStats(ai.AdapterLuid)
 		if err != nil {
 			logger.Debugf("adapter %d: query stats failed: %s", i, err.Error())
-			d3dkmCloseAdapter(hAdapter)
+			_ = d3dkmCloseAdapter(hAdapter)
 			continue
 		}
 
@@ -347,7 +347,7 @@ func tryD3DKMT(ctx context.Context, every time.Duration, logger *logmon.Monitor)
 			logger.Debugf("adapter %d: perf caps failed: %s", i, err.Error())
 		}
 
-		d3dkmCloseAdapter(hAdapter)
+		_ = d3dkmCloseAdapter(hAdapter)
 
 		var maxFanRPM uint32
 		if caps != nil {
@@ -405,7 +405,7 @@ func tryD3DKMT(ctx context.Context, every time.Duration, logger *logmon.Monitor)
 
 		defer func() {
 			for _, a := range adapters {
-				d3dkmCloseAdapter(a.hAdapter)
+				_ = d3dkmCloseAdapter(a.hAdapter)
 			}
 		}()
 
@@ -452,8 +452,8 @@ func tryD3DKMT(ctx context.Context, every time.Duration, logger *logmon.Monitor)
 						if err != nil {
 							continue
 						}
-						memUsedMB += int(resident / (1024 * 1024))
-						memTotalMB += int(limit / (1024 * 1024))
+						memUsedMB += int(resident / (1024 * 1024)) // #nosec G115 -- converts a bounded system/hardware counter value; overflow cannot occur in practice
+						memTotalMB += int(limit / (1024 * 1024))   // #nosec G115 -- converts a bounded system/hardware counter value; overflow cannot occur in practice
 					}
 
 					var gpuUtil float64

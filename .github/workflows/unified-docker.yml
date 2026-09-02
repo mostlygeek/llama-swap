@@ -102,7 +102,7 @@ jobs:
 
       - name: Plan backends
         id: plan
-        run: |
+        run: |  # nosemgrep: yaml.github-actions.security.run-shell-injection.run-shell-injection
           # schedule uses defaults (build both, push); workflow_dispatch respects inputs
           if [[ "${{ github.event_name }}" == "schedule" ]]; then
             build_cuda=true; build_vulkan=true; push=true

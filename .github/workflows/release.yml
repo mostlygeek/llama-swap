@@ -28,13 +28,6 @@ jobs:
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c #6.4.0
         with:
           go-version-file: go.mod
-      - name: Set up Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # 6.4.0
-        with:
-          node-version: "24"
-      - name: Build UI
-        run: |
-          make ui
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@1a80836c5c9d9e5755a25cb59ec6f45a3b5f41a8 #7.2.1
@@ -53,11 +46,17 @@ jobs:
     steps:
       - name: "Resolve tag to dispatch"
         id: tag
+        env:
+          # Pass through env and reference as shell variables so untrusted
+          # values cannot be interpolated into the script (shell injection).
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "tag=$INPUT_TAG" >> "$GITHUB_OUTPUT"
           else
-            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "tag=$REF_NAME" >> "$GITHUB_OUTPUT"
           fi
 
       - name: "Trigger tap repository update"

@@ -209,7 +209,7 @@ func main() {
 	initialSrv, err := server.New(cfg, muxLog, proxyLog, upstreamLog, perfMon, initialStore, buildInfo, hardwareSnapshot, referenceDocs)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)
-		initialStore.Close()
+		_ = initialStore.Close()
 		os.Exit(1)
 	}
 
@@ -227,6 +227,9 @@ func main() {
 			activeMu.RUnlock()
 			srv.ServeHTTP(w, r)
 		}),
+		// Bound the header-read phase to mitigate slowloris; body/stream phases
+		// stay unbounded for long-running LLM requests.
+		ReadHeaderTimeout: 30 * time.Second,
 	}
 
 	// reload guards against overlapping reloads triggered by concurrent signals
@@ -280,7 +283,7 @@ func main() {
 		if err != nil {
 			proxyLog.Warnf("failed to build new server during reload: %v", err)
 			if storeChanged {
-				newStore.Close()
+				_ = newStore.Close()
 			}
 			return
 		}

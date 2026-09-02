@@ -266,7 +266,7 @@ func (c *Config) ResolveBaseModel(search string) (string, bool) {
 }
 
 func LoadConfig(path string) (Config, error) {
-	file, err := os.Open(path)
+	file, err := os.Open(path) // #nosec G304 -- reads an operator-configured or internal sysfs/config path, not attacker-controlled input
 	if err != nil {
 		return Config{}, err
 	}

@@ -146,22 +146,22 @@ func New(path string) (*Store, error) {
 
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `PRAGMA busy_timeout = 5000`); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("configure sqlite store: %w", err)
 	}
 	if diskFile {
 		var mode string
 		if err := db.QueryRowContext(ctx, `PRAGMA journal_mode = WAL`).Scan(&mode); err != nil {
-			db.Close()
+			_ = db.Close()
 			return nil, fmt.Errorf("enable sqlite store WAL mode: %w", err)
 		}
 		if !strings.EqualFold(mode, "wal") {
-			db.Close()
+			_ = db.Close()
 			return nil, fmt.Errorf("enable sqlite store WAL mode: got %q", mode)
 		}
 	}
 	if err := runMigrations(ctx, db); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	return &Store{db: db, inMemory: !diskFile}, nil
@@ -241,6 +241,9 @@ func (s *Store) ListActivity(ctx context.Context, query ActivityQuery) (Activity
 		return ActivityPage{}, fmt.Errorf("count activity: %w", err)
 	}
 
+	// #nosec G202 -- `where` uses ? placeholders (bound via args) and
+	// activityOrderBy only emits whitelisted columns + a hardcoded direction;
+	// no user input is concatenated into the SQL text.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
 			id, ts_created, model_id, req_path, resp_content_type, resp_status_code,
@@ -282,6 +285,8 @@ func (s *Store) ActivityStats(ctx context.Context, query ActivityStatsQuery) (Ac
 		filter.Models = []string{model}
 	}
 	where, args := activityWhere(filter)
+	// #nosec G202 -- `where` uses ? placeholders bound via args; no user input
+	// is concatenated into the SQL text.
 	row := s.db.QueryRowContext(ctx, `
 		SELECT
 			COUNT(*),
@@ -314,6 +319,8 @@ func (s *Store) speedValues(ctx context.Context, where string, args []any) (prom
 	} else {
 		filter += ` AND (prompt_per_second > 0 OR tokens_per_second > 0)`
 	}
+	// #nosec G202 -- `filter` is the caller's placeholder-based WHERE clause
+	// plus a constant predicate; user values are bound via args.
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT prompt_per_second, tokens_per_second FROM activity`+filter, args...)
 	if err != nil {

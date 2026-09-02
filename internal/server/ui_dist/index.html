@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+
+    <!-- vendored styles (offline, no CDN) -->
+    <link rel="stylesheet" href="/ui/vendor/katex/katex.min.css" />
+    <link rel="stylesheet" href="/ui/css/app.css" />
+    <link rel="stylesheet" href="/ui/css/chat.css" />
+
+    <title>llama-swap</title>
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <!-- vendored libraries as classic scripts; expose window globals before the module entry -->
+    <script src="/ui/vendor/chart.umd.js"></script>
+    <script src="/ui/vendor/marked.min.js"></script>
+    <script src="/ui/vendor/katex/katex.min.js"></script>
+    <script src="/ui/vendor/highlight.min.js"></script>
+
+    <script type="module" src="/ui/js/main.js"></script>
+  </body>
+</html>

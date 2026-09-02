@@ -299,7 +299,7 @@ func (f *fakeProcess) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 		<-f.serveBlock
 	}
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "ok:%s", f.id)
+	fmt.Fprintf(w, "ok:%s", f.id) // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 }
 
 // waitProcessed drains n events from ch, fataling on timeout. One event fires

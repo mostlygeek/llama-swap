@@ -87,6 +87,16 @@ type ModelConfig struct {
 	Unlisted      bool     `yaml:"unlisted"`
 	UseModelName  string   `yaml:"useModelName"`
 
+	// PassthroughAnthropic forwards an inbound Anthropic /v1/messages request to
+	// the backend unchanged instead of translating it to OpenAI. Set this when
+	// the backend natively speaks the Anthropic Messages API.
+	PassthroughAnthropic bool `yaml:"passthroughAnthropic"`
+
+	// PassthroughOllama forwards inbound Ollama /api/* requests to the backend
+	// unchanged instead of translating them to OpenAI. Set this when the backend
+	// natively speaks the Ollama API.
+	PassthroughOllama bool `yaml:"passthroughOllama"`
+
 	// #179 for /v1/models
 	Name        string `yaml:"name"`
 	Description string `yaml:"description"`

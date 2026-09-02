@@ -308,7 +308,7 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"object": "list",
 		"data":   data,
 	})
@@ -330,7 +330,7 @@ type runningModel struct {
 func (s *Server) handleUnload(w http.ResponseWriter, r *http.Request) {
 	s.local.Unload(0)
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("OK"))
+	_, _ = w.Write([]byte("OK"))
 }
 
 // handleRunning lists local processes that are not stopped, joining each model
@@ -353,7 +353,7 @@ func (s *Server) handleRunning(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(list, func(i, j int) bool { return list[i].Model < list[j].Model })
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"running": list})
+	_ = json.NewEncoder(w).Encode(map[string]any{"running": list})
 }
 
 // discardResponseWriter satisfies http.ResponseWriter for preload requests,
@@ -413,7 +413,7 @@ func (s *Server) startPreload() {
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if s.perf == nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte("# performance monitor not available\n"))
+		_, _ = w.Write([]byte("# performance monitor not available\n"))
 		return
 	}
 	s.perf.MetricsHandler().ServeHTTP(w, r)
@@ -421,7 +421,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("OK"))
+	_, _ = w.Write([]byte("OK"))
 }
 
 func handleRootRedirect(w http.ResponseWriter, r *http.Request) {
@@ -441,7 +441,9 @@ func handleComfyUIRedirect(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
 		status = http.StatusMovedPermanently
 	}
-	http.Redirect(w, r, location, status)
+	// #nosec G710 -- relative same-origin redirect (fixed "/comfyui/" prefix);
+	// only the query string is carried over, the host is never user-controlled.
+	http.Redirect(w, r, location, status) // nosemgrep: go.lang.security.injection.open-redirect.open-redirect
 }
 
 // handleComfyUI proxies requests under /comfyui/ to the fixed local
@@ -499,10 +501,12 @@ func (s *Server) handleUpstream(w http.ResponseWriter, r *http.Request) {
 		if r.URL.RawQuery != "" {
 			newPath += "?" + r.URL.RawQuery
 		}
+		// #nosec G710 -- relative same-origin redirect (fixed "/upstream/" prefix
+		// + resolved model name); the host is never user-controlled.
 		if r.Method == http.MethodGet || r.Method == http.MethodHead {
-			http.Redirect(w, r, newPath, http.StatusMovedPermanently)
+			http.Redirect(w, r, newPath, http.StatusMovedPermanently) // nosemgrep: go.lang.security.injection.open-redirect.open-redirect
 		} else {
-			http.Redirect(w, r, newPath, http.StatusPermanentRedirect)
+			http.Redirect(w, r, newPath, http.StatusPermanentRedirect) // nosemgrep: go.lang.security.injection.open-redirect.open-redirect
 		}
 		return
 	}

@@ -54,7 +54,7 @@ var envSecretName = regexp.MustCompile(`(?i)(key|token|secret|password|passwd|cr
 // cmd/cmdStop strings and env entries have their secret arguments blanked, and
 // any recognizable credential token is scrubbed wherever it appears.
 func (c Config) RedactedYAML(path string) (out string, found bool, err error) {
-	marshaled, err := yaml.Marshal(c)
+	marshaled, err := yaml.Marshal(c) // #nosec G117 -- marshals config only as the first step of RedactedYAML, which then scrubs credential keys
 	if err != nil {
 		return "", false, fmt.Errorf("marshaling config: %w", err)
 	}
@@ -117,7 +117,7 @@ func pruneEmpty(v any) (any, bool) {
 // ConfigTopLevelKeys lists the keys available at the root of RedactedYAML, so a
 // caller can suggest valid paths when one does not resolve.
 func (c Config) ConfigTopLevelKeys() []string {
-	marshaled, err := yaml.Marshal(c)
+	marshaled, err := yaml.Marshal(c) // #nosec G117 -- marshals config only as the first step of RedactedYAML, which then scrubs credential keys
 	if err != nil {
 		return nil
 	}

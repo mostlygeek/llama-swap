@@ -191,8 +191,8 @@ func TestServer_HandleUIAndFavicon(t *testing.T) {
 	for _, path := range []string{"/ui/", "/favicon.ico"} {
 		w := httptest.NewRecorder()
 		s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
-		// Tests build without the `embed_ui` tag, so uiFS is empty and these
-		// resolve to 404 — the handlers still execute end to end.
+		// ui_dist is always embedded (//go:embed), so these resolve to 200;
+		// accept 404 too so the assertion holds regardless of asset presence.
 		if w.Code != http.StatusOK && w.Code != http.StatusNotFound {
 			t.Errorf("%s: status = %d", path, w.Code)
 		}

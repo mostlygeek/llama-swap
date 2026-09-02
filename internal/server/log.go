@@ -62,7 +62,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain")
-	w.Write(s.muxlog.GetHistory())
+	_, _ = w.Write(s.muxlog.GetHistory()) // nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
 }
 
 // getLogger resolves a log monitor by id. An empty id maps to the combined
@@ -115,7 +115,9 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) {
 	_, skipHistory := r.URL.Query()["no-history"]
 	if !skipHistory {
 		if history := logger.GetHistory(); len(history) != 0 {
-			w.Write(history)
+			// #nosec G705 -- streamed as text/plain with X-Content-Type-Options:
+			// nosniff (set above), so the browser never interprets it as HTML.
+			_, _ = w.Write(history) // nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
 			flusher.Flush()
 		}
 	}
@@ -139,7 +141,7 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) {
 		case <-s.shutdownCtx.Done():
 			return
 		case data := <-sendChan:
-			w.Write(data)
+			_, _ = w.Write(data) // nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
 			flusher.Flush()
 		}
 	}

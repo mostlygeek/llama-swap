@@ -50,7 +50,7 @@ func main() {
 	cmd.WaitDelay = 500 * time.Millisecond
 	cmd.Cancel = func() error {
 		fmt.Println("✔︎ Cancel() called, sending SIGTERM")
-		cmd.Process.Signal(syscall.SIGTERM)
+		_ = cmd.Process.Signal(syscall.SIGTERM)
 
 		//return nil
 

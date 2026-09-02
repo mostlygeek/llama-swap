@@ -1,0 +1,1529 @@
+{
+	"Golang errors": {},
+	"Issues": [
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion uint64 -\u003e int",
+			"file": "/workspace/internal/perf/monitor_unix.go",
+			"code": "576: \t\tMemUsedMB:      int(vmStat.Used / toMB),\n577: \t\tMemFreeMB:      int(vmStat.Free / toMB),\n578: \t\tSwapTotalMB:    swapTotalMB,\n",
+			"line": "577",
+			"column": "22",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion uint64 -\u003e int",
+			"file": "/workspace/internal/perf/monitor_unix.go",
+			"code": "575: \t\tMemTotalMB:     int(vmStat.Total / toMB),\n576: \t\tMemUsedMB:      int(vmStat.Used / toMB),\n577: \t\tMemFreeMB:      int(vmStat.Free / toMB),\n",
+			"line": "576",
+			"column": "22",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion uint64 -\u003e int",
+			"file": "/workspace/internal/perf/monitor_unix.go",
+			"code": "574: \t\tCpuUtilPerCore: cpuPcts,\n575: \t\tMemTotalMB:     int(vmStat.Total / toMB),\n576: \t\tMemUsedMB:      int(vmStat.Used / toMB),\n",
+			"line": "575",
+			"column": "22",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion uint64 -\u003e int",
+			"file": "/workspace/internal/perf/monitor_unix.go",
+			"code": "547: \t\tswapTotalMB = int(swapStat.Total / toMB)\n548: \t\tswapUsedMB = int(swapStat.Used / toMB)\n549: \t}\n",
+			"line": "548",
+			"column": "19",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion uint64 -\u003e int",
+			"file": "/workspace/internal/perf/monitor_unix.go",
+			"code": "546: \tif swapStat, err := mem.SwapMemory(); err == nil {\n547: \t\tswapTotalMB = int(swapStat.Total / toMB)\n548: \t\tswapUsedMB = int(swapStat.Used / toMB)\n",
+			"line": "547",
+			"column": "20",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion uint64 -\u003e int",
+			"file": "/workspace/internal/perf/monitor_unix.go",
+			"code": "463: \tif stats.Vram.Total != nil {\n464: \t\tmemTotalMB = int(*stats.Vram.Total / 1024 / 1024)\n465: \t}\n",
+			"line": "464",
+			"column": "19",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion uint64 -\u003e int",
+			"file": "/workspace/internal/perf/monitor_unix.go",
+			"code": "460: \tif stats.Vram.Used != nil {\n461: \t\tmemUsedMB = int(*stats.Vram.Used / 1024 / 1024)\n462: \t}\n",
+			"line": "461",
+			"column": "18",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion uint64 -\u003e int",
+			"file": "/workspace/internal/perf/gpu_parse.go",
+			"code": "158: \tmemUsedMB := int(out.Memory.Used / toMB)\n159: \tmemTotalMB := int(out.Memory.Total / toMB)\n160: \n",
+			"line": "159",
+			"column": "19",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion uint64 -\u003e int",
+			"file": "/workspace/internal/perf/gpu_parse.go",
+			"code": "157: \tconst toMB = 1024 * 1024\n158: \tmemUsedMB := int(out.Memory.Used / toMB)\n159: \tmemTotalMB := int(out.Memory.Total / toMB)\n",
+			"line": "158",
+			"column": "18",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion int -\u003e uint64",
+			"file": "/workspace/internal/hw/detect_linux.go",
+			"code": "100: func platformMemoryCapacity(total uint64) uint64 {\n101: \tif physical := zoneinfoMemoryCapacity(\"/proc/zoneinfo\", uint64(os.Getpagesize())); physical \u003e total {\n102: \t\ttotal = physical\n",
+			"line": "101",
+			"column": "64",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "338",
+				"url": "https://cwe.mitre.org/data/definitions/338.html"
+			},
+			"rule_id": "G404",
+			"details": "Use of weak random number generator (math/rand or math/rand/v2 instead of crypto/rand)",
+			"file": "/workspace/internal/router/loading.go",
+			"code": "143: \t\t\t\tlastRemarkTime = time.Now()\n144: \t\t\t\tnextRemarkIn = time.Duration(5+rand.Intn(5)) * time.Second\n145: \t\t\t} else {\n",
+			"line": "144",
+			"column": "36",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "338",
+				"url": "https://cwe.mitre.org/data/definitions/338.html"
+			},
+			"rule_id": "G404",
+			"details": "Use of weak random number generator (math/rand or math/rand/v2 instead of crypto/rand)",
+			"file": "/workspace/internal/router/loading.go",
+			"code": "135: \t\t\t\tlastRemarkTime = time.Now()\n136: \t\t\t\tnextRemarkIn = time.Duration(5+rand.Intn(5)) * time.Second\n137: \t\t\t} else if time.Since(lastRemarkTime) \u003e= nextRemarkIn {\n",
+			"line": "136",
+			"column": "36",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "338",
+				"url": "https://cwe.mitre.org/data/definitions/338.html"
+			},
+			"rule_id": "G404",
+			"details": "Use of weak random number generator (math/rand or math/rand/v2 instead of crypto/rand)",
+			"file": "/workspace/internal/router/loading.go",
+			"code": "110: \n111: \tnextRemarkIn := time.Duration(2+rand.Intn(4)) * time.Second\n112: \tlastRemarkTime := time.Time{}\n",
+			"line": "111",
+			"column": "34",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "338",
+				"url": "https://cwe.mitre.org/data/definitions/338.html"
+			},
+			"rule_id": "G404",
+			"details": "Use of weak random number generator (math/rand or math/rand/v2 instead of crypto/rand)",
+			"file": "/workspace/internal/router/loading.go",
+			"code": "105: \tcopy(remarks, loadingRemarks)\n106: \trand.Shuffle(len(remarks), func(i, j int) {\n107: \t\tremarks[i], remarks[j] = remarks[j], remarks[i]\n108: \t})\n109: \tri := 0\n",
+			"line": "106-108",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G703",
+			"details": "Path traversal via taint analysis",
+			"file": "/workspace/internal/perf/monitor_unix.go",
+			"code": "342: \tif p := os.Getenv(\"LACT_DAEMON_SOCKET_PATH\"); p != \"\" {\n343: \t\tif _, err := os.Stat(p); err == nil {\n344: \t\t\treturn p\n",
+			"line": "343",
+			"column": "23",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "400",
+				"url": "https://cwe.mitre.org/data/definitions/400.html"
+			},
+			"rule_id": "G118",
+			"details": "Goroutine uses context.Background/TODO while request-scoped context is available",
+			"file": "/workspace/internal/process/process_command.go",
+			"code": "158: \n159: \tgo p.run()\n160: \treturn p, nil\n",
+			"line": "159",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "79",
+				"url": "https://cwe.mitre.org/data/definitions/79.html"
+			},
+			"rule_id": "G705",
+			"details": "XSS via taint analysis",
+			"file": "/workspace/internal/server/log.go",
+			"code": "117: \t\tif history := logger.GetHistory(); len(history) != 0 {\n118: \t\t\tw.Write(history)\n119: \t\t\tflusher.Flush()\n",
+			"line": "118",
+			"column": "11",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "400",
+				"url": "https://cwe.mitre.org/data/definitions/400.html"
+			},
+			"rule_id": "G120",
+			"details": "Unbounded form parsing in HTTP handlers can cause memory exhaustion",
+			"file": "/workspace/internal/swaputil/http.go",
+			"code": "565: \tif strings.Contains(contentType, \"multipart/form-data\") {\n566: \t\tif err := r.ParseMultipartForm(MaxMultiPartSize); err != nil {\n567: \t\t\treturn ReqContextData{}, fmt.Errorf(\"error parsing multipart form: %w\", err)\n",
+			"line": "566",
+			"column": "33",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "400",
+				"url": "https://cwe.mitre.org/data/definitions/400.html"
+			},
+			"rule_id": "G120",
+			"details": "Unbounded form parsing in HTTP handlers can cause memory exhaustion",
+			"file": "/workspace/internal/swaputil/http.go",
+			"code": "321: \tcase strings.Contains(contentType, \"multipart/form-data\"):\n322: \t\tif err := r.ParseMultipartForm(MaxMultiPartSize); err != nil {\n323: \t\t\treturn r, fmt.Errorf(\"could not parse multipart form: %w\", err)\n",
+			"line": "322",
+			"column": "33",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with variable",
+			"file": "/workspace/internal/hw/detect_linux.go",
+			"code": "54: \tif path, err := exec.LookPath(\"systemd-detect-virt\"); err == nil {\n55: \t\tcommand := exec.CommandContext(ctx, path)\n56: \t\toutput, commandErr := command.Output()\n",
+			"line": "55",
+			"column": "14",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/workspace/internal/process/process_command.go",
+			"code": "622: \t\t\tp.processLogger.Debugf(\"\u003c%s\u003e sendStopSignal() running stop command: %s\", p.id, strings.Join(stopArgs, \" \"))\n623: \t\t\tstopCmd := exec.Command(stopArgs[0], stopArgs[1:]...)\n624: \t\t\tstopCmd.Env = cmd.Env\n",
+			"line": "623",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/workspace/internal/process/process_command.go",
+			"code": "504: \tcmdCtx, cmdCancel := context.WithCancel(context.Background())\n505: \tcmd := exec.CommandContext(cmdCtx, args[0], args[1:]...)\n506: \tcmd.Stderr = p.processLogger\n",
+			"line": "505",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/workspace/internal/perf/monitor_unix.go",
+			"code": "145: \n146: \tcmd := exec.CommandContext(ctx, \"nvidia-smi\",\n147: \t\t\"--query-gpu=index,name,uuid,temperature.gpu,utilization.gpu,memory.used,memory.total,fan.speed,power.draw\",\n148: \t\t\"--format=csv,noheader,nounits\",\n149: \t\t\"--loop\", fmt.Sprintf(\"%d\", sec),\n150: \t)\n151: \n",
+			"line": "146-150",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/workspace/cmd/vllm-wrapper/main.go",
+			"code": "350: func startDaemon(startArgs []string, vllmURL string, healthPath string, waitTimeout time.Duration) error {\n351: \tcmd := exec.Command(startArgs[0], startArgs[1:]...)\n352: \tcmd.Stdout = os.Stdout\n",
+			"line": "351",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "/workspace/cmd/vllm-wrapper/main.go",
+			"code": "322: func startJournalForwarder(ctx context.Context, unit string) error {\n323: \tcmd := exec.CommandContext(\n324: \t\tctx,\n325: \t\t\"journalctl\",\n326: \t\t\"--user-unit=\"+unit,\n327: \t\t\"--follow\",\n328: \t\t\"--lines=0\",\n329: \t\t\"--output=cat\",\n330: \t\t\"--no-pager\",\n331: \t)\n332: \tcmd.Stdout = os.Stdout\n",
+			"line": "323-331",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "89",
+				"url": "https://cwe.mitre.org/data/definitions/89.html"
+			},
+			"rule_id": "G202",
+			"details": "SQL string concatenation",
+			"file": "/workspace/internal/store/store.go",
+			"code": "317: \trows, err := s.db.QueryContext(ctx,\n318: \t\t`SELECT prompt_per_second, tokens_per_second FROM activity`+filter, args...)\n319: \tif err != nil {\n",
+			"line": "318",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "89",
+				"url": "https://cwe.mitre.org/data/definitions/89.html"
+			},
+			"rule_id": "G202",
+			"details": "SQL string concatenation",
+			"file": "/workspace/internal/store/store.go",
+			"code": "284: \twhere, args := activityWhere(filter)\n285: \trow := s.db.QueryRowContext(ctx, `\n286: \t\tSELECT\n287: \t\t\tCOUNT(*),\n288: \t\t\tCOALESCE(SUM(input_tokens), 0),\n289: \t\t\tCOALESCE(SUM(output_tokens), 0),\n290: \t\t\tCOALESCE(SUM(CASE WHEN cache_tokens \u003e 0 THEN cache_tokens ELSE 0 END), 0)\n291: \t\tFROM activity`+where, args...)\n292: \n",
+			"line": "285-291",
+			"column": "35",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "89",
+				"url": "https://cwe.mitre.org/data/definitions/89.html"
+			},
+			"rule_id": "G202",
+			"details": "SQL string concatenation",
+			"file": "/workspace/internal/store/store.go",
+			"code": "243: \n244: \trows, err := s.db.QueryContext(ctx, `\n245: \t\tSELECT\n246: \t\t\tid, ts_created, model_id, req_path, resp_content_type, resp_status_code,\n247: \t\t\tcache_tokens, draft_tokens, draft_acc_tokens, input_tokens, output_tokens,\n248: \t\t\tprompt_per_second, tokens_per_second, duration_ms, error_msg, metadata_json\n249: \t\tFROM activity`+where+activityOrderBy(query)+`\n250: \t\tLIMIT ? OFFSET ?`,\n251: \t\tappend(args, query.Limit, offset)...,\n",
+			"line": "244-250",
+			"column": "38",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/workspace/internal/hw/detect_linux.go",
+			"code": "252: func readTrimmed(path string) string {\n253: \tdata, err := os.ReadFile(path)\n254: \tif err != nil {\n",
+			"line": "253",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/workspace/internal/hw/detect_linux.go",
+			"code": "144: \tfor _, path := range paths {\n145: \t\tdata, err := os.ReadFile(path)\n146: \t\tif err != nil {\n",
+			"line": "145",
+			"column": "16",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/workspace/internal/hw/detect_linux.go",
+			"code": "113: \t}\n114: \tdata, err := os.ReadFile(path)\n115: \tif err != nil {\n",
+			"line": "114",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/workspace/internal/hw/amd_linux.go",
+			"code": "158: func readKFDProperties(path string) (map[string]uint64, error) {\n159: \tfile, err := os.Open(path)\n160: \tif err != nil {\n",
+			"line": "159",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/workspace/internal/config/merge.go",
+			"code": "133: func parseSource(path string) (*yaml.Node, error) {\n134: \tdata, err := os.ReadFile(path)\n135: \tif err != nil {\n",
+			"line": "134",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/workspace/internal/config/config.go",
+			"code": "268: func LoadConfig(path string) (Config, error) {\n269: \tfile, err := os.Open(path)\n270: \tif err != nil {\n",
+			"line": "269",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "400",
+				"url": "https://cwe.mitre.org/data/definitions/400.html"
+			},
+			"rule_id": "G112",
+			"details": "Potential Slowloris Attack because ReadHeaderTimeout is not configured in the http.Server",
+			"file": "/workspace/llama-swap.go",
+			"code": "221: \n222: \thttpServer := \u0026http.Server{\n223: \t\tAddr: listenAddr,\n224: \t\tHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {\n225: \t\t\tactiveMu.RLock()\n226: \t\t\tsrv := activeSrv\n227: \t\t\tactiveMu.RUnlock()\n228: \t\t\tsrv.ServeHTTP(w, r)\n229: \t\t}),\n230: \t}\n231: \n",
+			"line": "222-230",
+			"column": "17",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "400",
+				"url": "https://cwe.mitre.org/data/definitions/400.html"
+			},
+			"rule_id": "G112",
+			"details": "Potential Slowloris Attack because ReadHeaderTimeout is not configured in the http.Server",
+			"file": "/workspace/cmd/wol-proxy/wol-proxy.go",
+			"code": "92: \tproxy := newProxy(upstreamURL, apiKey)\n93: \tserver := \u0026http.Server{\n94: \t\tAddr:    *flagListen,\n95: \t\tHandler: proxy,\n96: \t}\n97: \n",
+			"line": "93-96",
+			"column": "13",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "400",
+				"url": "https://cwe.mitre.org/data/definitions/400.html"
+			},
+			"rule_id": "G112",
+			"details": "Potential Slowloris Attack because ReadHeaderTimeout is not configured in the http.Server",
+			"file": "/workspace/cmd/vllm-wrapper/main.go",
+			"code": "153: \t// Create HTTP server.\n154: \tsrv := \u0026http.Server{\n155: \t\tAddr: listenAddr,\n156: \t\tHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {\n157: \t\t\tproxy.ServeHTTP(w, r)\n158: \t\t}),\n159: \t}\n160: \n",
+			"line": "154-159",
+			"column": "10",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "400",
+				"url": "https://cwe.mitre.org/data/definitions/400.html"
+			},
+			"rule_id": "G112",
+			"details": "Potential Slowloris Attack because ReadHeaderTimeout is not configured in the http.Server",
+			"file": "/workspace/cmd/simple-responder/simple-responder.go",
+			"code": "315: \n316: \tsrv := \u0026http.Server{\n317: \t\tAddr:    address,\n318: \t\tHandler: r.Handler(),\n319: \t}\n320: \n",
+			"line": "316-319",
+			"column": "10",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "400",
+				"url": "https://cwe.mitre.org/data/definitions/400.html"
+			},
+			"rule_id": "G112",
+			"details": "Potential Slowloris Attack because ReadHeaderTimeout is not configured in the http.Server",
+			"file": "/workspace/cmd/fake-model/main.go",
+			"code": "282: \n283: \tsrv := \u0026http.Server{\n284: \t\tAddr:    *flagListen,\n285: \t\tHandler: mux,\n286: \t}\n287: \n",
+			"line": "283-286",
+			"column": "10",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": null,
+			"rule_id": "G710",
+			"details": "Open redirect via taint analysis",
+			"file": "/workspace/internal/server/api.go",
+			"code": "504: \t\t} else {\n505: \t\t\thttp.Redirect(w, r, newPath, http.StatusPermanentRedirect)\n506: \t\t}\n",
+			"line": "505",
+			"column": "17",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": null,
+			"rule_id": "G710",
+			"details": "Open redirect via taint analysis",
+			"file": "/workspace/internal/server/api.go",
+			"code": "502: \t\tif r.Method == http.MethodGet || r.Method == http.MethodHead {\n503: \t\t\thttp.Redirect(w, r, newPath, http.StatusMovedPermanently)\n504: \t\t} else {\n",
+			"line": "503",
+			"column": "17",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": null,
+			"rule_id": "G710",
+			"details": "Open redirect via taint analysis",
+			"file": "/workspace/internal/server/api.go",
+			"code": "443: \t}\n444: \thttp.Redirect(w, r, location, status)\n445: }\n",
+			"line": "444",
+			"column": "15",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "499",
+				"url": "https://cwe.mitre.org/data/definitions/499.html"
+			},
+			"rule_id": "G117",
+			"details": "Marshaled struct field \"RequiredAPIKeys\" (YAML key \"apiKeys\") matches secret pattern",
+			"file": "/workspace/internal/config/redact.go",
+			"code": "119: func (c Config) ConfigTopLevelKeys() []string {\n120: \tmarshaled, err := yaml.Marshal(c)\n121: \tif err != nil {\n",
+			"line": "120",
+			"column": "20",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "499",
+				"url": "https://cwe.mitre.org/data/definitions/499.html"
+			},
+			"rule_id": "G117",
+			"details": "Marshaled struct field \"RequiredAPIKeys\" (YAML key \"apiKeys\") matches secret pattern",
+			"file": "/workspace/internal/config/redact.go",
+			"code": "56: func (c Config) RedactedYAML(path string) (out string, found bool, err error) {\n57: \tmarshaled, err := yaml.Marshal(c)\n58: \tif err != nil {\n",
+			"line": "57",
+			"column": "20",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/llama-swap.go",
+			"code": "282: \t\t\tif storeChanged {\n283: \t\t\t\tnewStore.Close()\n284: \t\t\t}\n",
+			"line": "283",
+			"column": "5",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/llama-swap.go",
+			"code": "211: \t\tslog.Error(\"failed to create server\", \"error\", err)\n212: \t\tinitialStore.Close()\n213: \t\tos.Exit(1)\n",
+			"line": "212",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/swaputil/http.go",
+			"code": "399: \t\t\t}\n400: \t\t\tfile.Close()\n401: \t\t}\n",
+			"line": "400",
+			"column": "4",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/swaputil/http.go",
+			"code": "396: \t\t\tif _, err := io.Copy(part, file); err != nil {\n397: \t\t\t\tfile.Close()\n398: \t\t\t\treturn nil, \"\", fmt.Errorf(\"error copying file data %s: %w\", key, err)\n",
+			"line": "397",
+			"column": "5",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/swaputil/http.go",
+			"code": "219: \tw.WriteHeader(status)\n220: \tw.Write(NewErrorEnvelope(status, message, \"\").JSON())\n221: }\n",
+			"line": "220",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/swaputil/http.go",
+			"code": "213: \t\tw.WriteHeader(status)\n214: \t\tw.Write([]byte(fmt.Sprintf(`\u003chtml\u003e\u003cbody\u003e\u003ch1\u003ellama-swap\u003c/h1\u003e\u003cp\u003e%s\u003c/p\u003e\u003c/body\u003e\u003c/html\u003e`, html.EscapeString(message))))\n215: \t\treturn\n",
+			"line": "214",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/swaputil/http.go",
+			"code": "206: \t\tw.WriteHeader(status)\n207: \t\tw.Write([]byte(fmt.Sprintf(\"llama-swap: %s\", message)))\n208: \t\treturn\n",
+			"line": "207",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/swaputil/http.go",
+			"code": "171: \t\tw.WriteHeader(httpErr.StatusCode())\n172: \t\tw.Write(httpErr.Body())\n173: \t\treturn\n",
+			"line": "172",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/store/store.go",
+			"code": "163: \tif err := runMigrations(ctx, db); err != nil {\n164: \t\tdb.Close()\n165: \t\treturn nil, err\n",
+			"line": "164",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/store/store.go",
+			"code": "158: \t\tif !strings.EqualFold(mode, \"wal\") {\n159: \t\t\tdb.Close()\n160: \t\t\treturn nil, fmt.Errorf(\"enable sqlite store WAL mode: got %q\", mode)\n",
+			"line": "159",
+			"column": "4",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/store/store.go",
+			"code": "154: \t\tif err := db.QueryRowContext(ctx, `PRAGMA journal_mode = WAL`).Scan(\u0026mode); err != nil {\n155: \t\t\tdb.Close()\n156: \t\t\treturn nil, fmt.Errorf(\"enable sqlite store WAL mode: %w\", err)\n",
+			"line": "155",
+			"column": "4",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/store/store.go",
+			"code": "148: \tif _, err := db.ExecContext(ctx, `PRAGMA busy_timeout = 5000`); err != nil {\n149: \t\tdb.Close()\n150: \t\treturn nil, fmt.Errorf(\"configure sqlite store: %w\", err)\n",
+			"line": "149",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/server/metrics_middleware.go",
+			"code": "60: \t\t\t\t\t\treqBody = buffered\n61: \t\t\t\t\t\tr.Body.Close()\n62: \t\t\t\t\t\tr.Body = io.NopCloser(bytes.NewReader(reqBody))\n",
+			"line": "61",
+			"column": "7",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/server/log.go",
+			"code": "141: \t\tcase data := \u003c-sendChan:\n142: \t\t\tw.Write(data)\n143: \t\t\tflusher.Flush()\n",
+			"line": "142",
+			"column": "4",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/server/log.go",
+			"code": "117: \t\tif history := logger.GetHistory(); len(history) != 0 {\n118: \t\t\tw.Write(history)\n119: \t\t\tflusher.Flush()\n",
+			"line": "118",
+			"column": "4",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/server/log.go",
+			"code": "64: \tw.Header().Set(\"Content-Type\", \"text/plain\")\n65: \tw.Write(s.muxlog.GetHistory())\n66: }\n",
+			"line": "65",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/server/apimcp.go",
+			"code": "193: \t\tw.WriteHeader(http.StatusServiceUnavailable)\n194: \t\tjson.NewEncoder(w).Encode(map[string]bool{\"enabled\": false})\n195: \t\treturn\n",
+			"line": "194",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/server/apigroup.go",
+			"code": "405: \tw.Header().Set(\"Content-Type\", \"application/json\")\n406: \tjson.NewEncoder(w).Encode(map[string]string{\"msg\": \"ok\"})\n407: }\n",
+			"line": "406",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/server/apigroup.go",
+			"code": "392: \tw.Header().Set(\"Content-Type\", \"application/json\")\n393: \tw.Write(jsonBytes)\n394: }\n",
+			"line": "393",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/server/apigroup.go",
+			"code": "353: \tw.Header().Set(\"Content-Type\", \"application/json\")\n354: \tjson.NewEncoder(w).Encode(map[string]string{\n355: \t\t\"version\":    s.build.Version,\n356: \t\t\"commit\":     s.build.Commit,\n357: \t\t\"build_date\": s.build.Date,\n358: \t})\n359: }\n",
+			"line": "354-358",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/server/apigroup.go",
+			"code": "343: \tw.Header().Set(\"Content-Type\", \"application/json\")\n344: \tjson.NewEncoder(w).Encode(map[string]any{\n345: \t\t\"enabled\":   true,\n346: \t\t\"sys_stats\": sysStats,\n347: \t\t\"gpu_stats\": gpuStats,\n348: \t})\n349: }\n",
+			"line": "344-348",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/server/apigroup.go",
+			"code": "313: \t\tw.WriteHeader(http.StatusServiceUnavailable)\n314: \t\tjson.NewEncoder(w).Encode(map[string]bool{\"enabled\": false})\n315: \t\treturn\n",
+			"line": "314",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/server/apigroup.go",
+			"code": "187: \tw.Header().Set(\"Content-Type\", \"application/json\")\n188: \tjson.NewEncoder(w).Encode(stats)\n189: }\n",
+			"line": "188",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/server/apigroup.go",
+			"code": "174: \tw.Header().Set(\"Content-Type\", \"application/json\")\n175: \tjson.NewEncoder(w).Encode(page)\n176: }\n",
+			"line": "175",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/server/apigroup.go",
+			"code": "157: \tw.WriteHeader(http.StatusOK)\n158: \tw.Write([]byte(\"OK\"))\n159: }\n",
+			"line": "158",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/server/apigroup.go",
+			"code": "140: \tw.Header().Set(\"Content-Type\", \"application/json\")\n141: \tjson.NewEncoder(w).Encode(map[string]string{\"msg\": \"ok\"})\n142: }\n",
+			"line": "141",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/server/apigroup.go",
+			"code": "93: \tw.Header().Set(\"Content-Type\", \"application/json\")\n94: \tjson.NewEncoder(w).Encode(map[string]any{\"active\": nullableProfile(s.ActiveProfile())})\n95: }\n",
+			"line": "94",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/server/apigroup.go",
+			"code": "62: \tw.Header().Set(\"Content-Type\", \"application/json\")\n63: \tjson.NewEncoder(w).Encode(map[string]any{\n64: \t\t\"active\":   nullableProfile(s.ActiveProfile()),\n65: \t\t\"profiles\": profiles,\n66: \t})\n67: }\n",
+			"line": "63-66",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/server/api.go",
+			"code": "423: \tw.WriteHeader(http.StatusOK)\n424: \tw.Write([]byte(\"OK\"))\n425: }\n",
+			"line": "424",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/server/api.go",
+			"code": "415: \t\tw.WriteHeader(http.StatusServiceUnavailable)\n416: \t\tw.Write([]byte(\"# performance monitor not available\\n\"))\n417: \t\treturn\n",
+			"line": "416",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/server/api.go",
+			"code": "355: \tw.Header().Set(\"Content-Type\", \"application/json\")\n356: \tjson.NewEncoder(w).Encode(map[string]any{\"running\": list})\n357: }\n",
+			"line": "356",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/server/api.go",
+			"code": "332: \tw.WriteHeader(http.StatusOK)\n333: \tw.Write([]byte(\"OK\"))\n334: }\n",
+			"line": "333",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/server/api.go",
+			"code": "310: \tw.Header().Set(\"Content-Type\", \"application/json\")\n311: \tjson.NewEncoder(w).Encode(map[string]any{\n312: \t\t\"object\": \"list\",\n313: \t\t\"data\":   data,\n314: \t})\n315: }\n",
+			"line": "311-314",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/process/process_command.go",
+			"code": "586: \t\tresp := rr.Result()\n587: \t\tresp.Body.Close()\n588: \t\tif resp.StatusCode == http.StatusOK {\n",
+			"line": "587",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/process/process_command.go",
+			"code": "359: \t\t\t\t\t\t\t\t\tp.proxyLogger.Infof(\"\u003c%s\u003e Unloading model, TTL of %ds reached\", p.id, p.config.UnloadAfter)\n360: \t\t\t\t\t\t\t\t\tp.Stop(time.Duration(p.config.UnloadTimeout) * time.Second)\n361: \t\t\t\t\t\t\t\t\treturn\n",
+			"line": "360",
+			"column": "10",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/perf/monitor_unix.go",
+			"code": "180: \t\t}\n181: \t\tcmd.Wait()\n182: \t}()\n",
+			"line": "181",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/perf/monitor_unix.go",
+			"code": "120: \t\t\t\t}\n121: \t\t\t\tconn.Close()\n122: \n",
+			"line": "121",
+			"column": "5",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/perf/monitor_unix.go",
+			"code": "105: \t\t\t\tif err != nil {\n106: \t\t\t\t\tconn.Close()\n107: \t\t\t\t\tcontinue\n",
+			"line": "106",
+			"column": "6",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/perf/monitor_unix.go",
+			"code": "101: \t\t\t\t}\n102: \t\t\t\tconn.SetDeadline(time.Now().Add(5 * time.Second))\n103: \n",
+			"line": "102",
+			"column": "5",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/perf/monitor_unix.go",
+			"code": "69: \n70: \tconn.SetDeadline(time.Now().Add(5 * time.Second))\n71: \n",
+			"line": "70",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/internal/logmon/logging.go",
+			"code": "243: \t}\n244: \tw.Write(w.formatMessage(level.String(), msg))\n245: }\n",
+			"line": "244",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/cmd/wol-proxy/wol-proxy.go",
+			"code": "108: \t\u003c-ctx.Done()\n109: \tserver.Close()\n110: }\n",
+			"line": "109",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/cmd/vllm-wrapper/main.go",
+			"code": "300: \t\t}\n301: \t\tresp.Body.Close()\n302: \t\t// Wait a bit before retrying.\n",
+			"line": "301",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/cmd/vllm-wrapper/main.go",
+			"code": "297: \t\tif resp.StatusCode == http.StatusOK {\n298: \t\t\tresp.Body.Close()\n299: \t\t\treturn nil\n",
+			"line": "298",
+			"column": "4",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/cmd/vllm-wrapper/main.go",
+			"code": "203: \tfs.IntVar(\u0026stopPID, \"stop-pid\", 0, \"PID of the serve proxy to terminate after vLLM successfully enters sleep mode\")\n204: \tfs.Parse(args)\n205: \n",
+			"line": "204",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/cmd/vllm-wrapper/main.go",
+			"code": "65: \tfs.StringVar(\u0026journalUnit, \"journal-unit\", \"\", \"User systemd unit whose logs should be forwarded to stdout\")\n66: \tfs.Parse(args)\n67: \tstartArgs := fs.Args()\n",
+			"line": "66",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/cmd/simple-responder/simple-responder.go",
+			"code": "239: \t\tfor _, char := range echo {\n240: \t\t\tc.Writer.Write([]byte(string(char)))\n241: \t\t\tc.Writer.Flush()\n",
+			"line": "240",
+			"column": "4",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/cmd/misc/process-cmd-test/main.go",
+			"code": "52: \t\tfmt.Println(\"✔︎ Cancel() called, sending SIGTERM\")\n53: \t\tcmd.Process.Signal(syscall.SIGTERM)\n54: \n",
+			"line": "53",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/cmd/misc/benchmark-chatcompletion/main.go",
+			"code": "103: \t\t\t\tio.Copy(io.Discard, resp.Body)\n104: \t\t\t\tresp.Body.Close()\n105: \n",
+			"line": "104",
+			"column": "5",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/cmd/misc/benchmark-chatcompletion/main.go",
+			"code": "102: \t\t\t\t}\n103: \t\t\t\tio.Copy(io.Discard, resp.Body)\n104: \t\t\t\tresp.Body.Close()\n",
+			"line": "103",
+			"column": "5",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/workspace/cmd/fake-model/main.go",
+			"code": "209: \t\t\tw.Header().Set(\"Content-Type\", \"application/json\")\n210: \t\t\tjson.NewEncoder(w).Encode(resp)\n211: \t\t\treturn\n",
+			"line": "210",
+			"column": "4",
+			"nosec": false,
+			"suppressions": null
+		}
+	],
+	"Stats": {
+		"files": 95,
+		"lines": 20775,
+		"nosec": 0,
+		"found": 95
+	},
+	"GosecVersion": "dev"
+}

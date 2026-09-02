@@ -33,11 +33,11 @@ func validateStorePath(path string) error {
 	if info.IsDir() {
 		return fmt.Errorf("store.path: %s is a directory, not a file", path)
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY, 0)
+	f, err := os.OpenFile(path, os.O_WRONLY, 0) // #nosec G304 -- reads an operator-configured or internal sysfs/config path, not attacker-controlled input
 	if err != nil {
 		return fmt.Errorf("store.path: %s is not writable: %w", path, err)
 	}
-	f.Close()
+	_ = f.Close()
 	return nil
 }
 
@@ -46,6 +46,6 @@ func checkDirWritableWindows(dir string) error {
 	if err != nil {
 		return err
 	}
-	tmp.Close()
+	_ = tmp.Close()
 	return os.Remove(tmp.Name())
 }
