@@ -168,6 +168,7 @@ apiKeys:
 # - "*" exposes every callable public ID
 # - admin defaults false and keeps the UI, /api, logs, metrics and operations private
 # - debug defaults false; set true to include verbose Tailcat transport logs in proxy logs
+# - changing allow or debug requires restarting llama-swap; models and admin update on reload
 tailcat:
   allow:
     - nodekey:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef

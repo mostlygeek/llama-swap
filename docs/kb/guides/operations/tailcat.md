@@ -24,15 +24,20 @@ restarts:
 tailcat genkey --key=/path/to/server.private.json --fixed-region
 ```
 
-Create a stable client identity when you want to restrict callers:
+To retrieve the public key for an existing client identity, use the root
+`--key` option before `printpub`:
 
 ```bash
-tailcat genkey --client --key=/path/to/client.private.json
+tailcat --key=/path/to/client.private.json printpub
 ```
 
-The client command prints its full `nodekey:...` public key. Put that exact
-value in the server allowlist. You can also obtain it later by running the same
-client-key generation workflow with a new file and updating the allowlist.
+This prints the full `nodekey:...` public key. Put that exact value in the
+server allowlist.
+
+Use `tailcat genkey --client --key=/path/to/client.private.json` only when
+intentionally creating or rotating a client private key. After a rotation,
+update `tailcat.allow` and each affected peer's `tailcatKey` value before using
+the new identity.
 
 ```yaml
 tailcat:
