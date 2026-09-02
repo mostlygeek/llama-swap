@@ -21,6 +21,11 @@ import (
 
 var ErrStartAborted = fmt.Errorf("aborted")
 
+// ErrNotStarted is returned (wrapped) by WaitReady when the process is not
+// ready and no start is in flight. Callers that want "start it if needed"
+// semantics should use EnsureReady instead.
+var ErrNotStarted = fmt.Errorf("process not started")
+
 // cmdWaitDelay is the upper bound the runtime will wait for child I/O to
 // drain after the process exits before force-closing the stdout/stderr
 // pipes. Required so that cmd.Wait() returns even when a forked grandchild
@@ -40,6 +45,11 @@ const parentCancelGraceTimeout = time.Second
 type runReq struct {
 	timeout time.Duration
 	respond chan error
+	// ready, when non-nil, marks this as an EnsureReady request: run()
+	// answers it (buffered, exactly once) when the start resolves — nil at
+	// readiness, or the failure/abort/shutdown error. Run callers leave it
+	// nil and keep the block-until-terminated contract via respond.
+	ready chan error
 }
 
 type stopReq struct {
@@ -142,10 +152,9 @@ func (p *ProcessCommand) run() {
 		}
 	}
 	var (
-		cmd          *exec.Cmd
-		cmdDone      <-chan struct{}
-		cmdCancel    context.CancelFunc
-		readyWaiters []waitReadyReq
+		cmd       *exec.Cmd
+		cmdDone   <-chan struct{}
+		cmdCancel context.CancelFunc
 		// runResp parks the in-flight Run caller's response channel. The
 		// interface contract is that Run blocks until the process is
 		// terminated, so we hold this until Stop, parentCtx, or an
@@ -153,18 +162,13 @@ func (p *ProcessCommand) run() {
 		runResp chan<- error
 	)
 
-	// notifyWaiters wakes every blocked WaitReady caller with the given result.
-	// Used on transitions out of StateStarting (ready, failed, aborted, or
-	// shutdown) — anything that resolves the "is it ready yet?" question.
-	notifyWaiters := func(err error) {
-		for _, w := range readyWaiters {
-			select {
-			case w.respond <- err:
-			default:
-			}
-		}
-		readyWaiters = nil
-	}
+	// There is deliberately NO parked-waiter list here. WaitReady requests
+	// are answered immediately from current state (see the waitReadyCh case);
+	// requests that arrive while a start is resolving simply pend on the
+	// channel and are answered on the next loop iteration. A parked waiter
+	// can never be woken reliably: any notify-on-transition scheme races
+	// senders that are still blocked on the channel when the transition
+	// happens (the 2026-07-04 bigdumbo TTL-unload wedge).
 
 	// respondRun delivers the final Run result, if a Run caller is parked.
 	respondRun := func(err error) {
@@ -192,7 +196,6 @@ func (p *ProcessCommand) run() {
 				cmdDone = nil
 				cmdCancel = nil
 			}
-			notifyWaiters(fmt.Errorf("[%s] shutdown", p.id))
 			respondRun(fmt.Errorf("[%s] shutdown", p.id))
 			return
 
@@ -209,11 +212,19 @@ func (p *ProcessCommand) run() {
 			cmdCancel = nil
 			p.handler.Store(nil)
 			setState(StateStopped)
+			if runResp == nil {
+				// No Run caller is parked to receive and surface this (the
+				// router starts processes via EnsureReady, which returned at
+				// readiness), so log it here or it is lost.
+				p.proxyLogger.Warnf("<%s> upstream exited unexpectedly", p.id)
+			}
 			respondRun(fmt.Errorf("[%s] upstream exited unexpectedly", p.id))
 
-		// WaitReady: if we're already in a terminal-for-this-question state,
-		// respond immediately; otherwise queue the caller and let a future
-		// state transition wake them via notifyWaiters.
+		// WaitReady: answered immediately from current state. Never parked —
+		// state here is only ever Stopped or Ready (Starting/Stopping exist
+		// solely inside the runCh/stopCh case bodies, where this channel is
+		// not being received; sends made during those windows pend and are
+		// answered on the next iteration, after the transition resolved).
 		case req := <-p.waitReadyCh:
 			switch state {
 			case StateReady:
@@ -221,7 +232,7 @@ func (p *ProcessCommand) run() {
 			case StateShutdown:
 				req.respond <- fmt.Errorf("[%s] shutdown", p.id)
 			default:
-				readyWaiters = append(readyWaiters, req)
+				req.respond <- fmt.Errorf("[%s] %w", p.id, ErrNotStarted)
 			}
 
 		// Run: start the upstream process. Only valid from StateStopped.
@@ -231,7 +242,17 @@ func (p *ProcessCommand) run() {
 		// start.
 		case req := <-p.runCh:
 			if state != StateStopped {
-				req.respond <- fmt.Errorf("[%s] could not be started in %s state", p.id, state)
+				err := fmt.Errorf("[%s] could not be started in %s state", p.id, state)
+				if req.ready != nil {
+					// EnsureReady semantics: an already-ready process is
+					// success, not a start conflict.
+					if state == StateReady {
+						req.ready <- nil
+					} else {
+						req.ready <- err
+					}
+				}
+				req.respond <- err
 				continue
 			}
 			setState(StateStarting)
@@ -257,12 +278,23 @@ func (p *ProcessCommand) run() {
 					cmdCancel = res.cancel
 					fn := res.handlerFn
 					p.handler.Store(&fn)
+					// Reset the idle clock: becoming ready counts as use.
+					// Without this a reload after a >TTL idle gap inherits a
+					// stale lastUse and the TTL goroutine below can unload the
+					// model on its very first tick, before the request that
+					// triggered the reload has reached ServeHTTP.
+					p.lastUse.Store(time.Now().UnixNano())
 					setState(StateReady)
-					notifyWaiters(nil)
-					// Park the Run response — Run blocks until the process
-					// terminates, so we only fire this when Stop, parentCtx,
-					// or the upstream exit takes the process down.
-					runResp = req.respond
+					if req.ready != nil {
+						req.ready <- nil
+					} else {
+						// Park the Run response — Run blocks until the process
+						// terminates, so we only fire this when Stop, parentCtx,
+						// or the upstream exit takes the process down.
+						// EnsureReady callers returned at readiness above and
+						// do not park (their respond stays unread and buffered).
+						runResp = req.respond
+					}
 
 					// Start TTL goroutine if configured — self-terminates
 					// when state leaves StateReady.
@@ -288,7 +320,9 @@ func (p *ProcessCommand) run() {
 					}
 				} else {
 					setState(StateStopped)
-					notifyWaiters(res.err)
+					if req.ready != nil {
+						req.ready <- res.err
+					}
 					req.respond <- res.err
 				}
 
@@ -305,7 +339,9 @@ func (p *ProcessCommand) run() {
 					p.killProcess(res.cmd, res.cancel, res.cmdDone, stop.timeout)
 				}
 				setState(StateStopped)
-				notifyWaiters(ErrStartAborted)
+				if req.ready != nil {
+					req.ready <- ErrStartAborted
+				}
 				req.respond <- ErrStartAborted
 				pendingStop = &stop
 
@@ -324,7 +360,9 @@ func (p *ProcessCommand) run() {
 				if res.cmd != nil {
 					p.killProcess(res.cmd, res.cancel, res.cmdDone, parentCancelGraceTimeout)
 				}
-				notifyWaiters(fmt.Errorf("[%s] shutdown", p.id))
+				if req.ready != nil {
+					req.ready <- fmt.Errorf("[%s] shutdown", p.id)
+				}
 				respondRun(fmt.Errorf("[%s] shutdown", p.id))
 				return
 			}
@@ -622,6 +660,35 @@ func (p *ProcessCommand) Run(timeout time.Duration) error {
 	select {
 	case err := <-req.respond:
 		return err
+	case <-p.parentCtx.Done():
+		return fmt.Errorf("[%s] shutdown", p.id)
+	}
+}
+
+// EnsureReady starts the process if it is stopped and blocks until it is
+// ready, the start fails, or ctx is cancelled. The start decision is made by
+// run() against live state in a single request, so a concurrent Stop (e.g. a
+// TTL unload) between a caller's State() snapshot and the start cannot strand
+// the caller: a send that pends during the stop is received after it, sees
+// StateStopped, and starts the process.
+func (p *ProcessCommand) EnsureReady(ctx context.Context, timeout time.Duration) error {
+	req := runReq{
+		timeout: timeout,
+		respond: make(chan error, 1),
+		ready:   make(chan error, 1),
+	}
+	select {
+	case p.runCh <- req:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-p.parentCtx.Done():
+		return fmt.Errorf("[%s] shutdown", p.id)
+	}
+	select {
+	case err := <-req.ready:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
 	case <-p.parentCtx.Done():
 		return fmt.Errorf("[%s] shutdown", p.id)
 	}

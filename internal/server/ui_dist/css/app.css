@@ -216,7 +216,7 @@ table td { padding: 0.5rem; }
 .models-name { padding: 0.5rem; }
 .models-name.model-unlisted { color: var(--color-txtsecondary); }
 .models-link { font-weight: 600; color: var(--color-primary); }
-.model-desc { font-style: italic; margin: 0.125rem 0 0; }
+.model-desc { font-style: italic; margin: 0.125rem 0 0; white-space: pre-line; }
 .model-aliases { font-size: 0.75rem; color: var(--color-txtsecondary); margin: 0.125rem 0 0; }
 .models-action { width: 5rem; padding: 0.5rem; text-align: right; }
 .models-state { width: 6rem; padding: 0.5rem; text-align: center; }
