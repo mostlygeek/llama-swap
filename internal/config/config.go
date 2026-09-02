@@ -124,6 +124,7 @@ type Config struct {
 	LogTimeFormat      string                 `yaml:"logTimeFormat"`
 	LogToStdout        string                 `yaml:"logToStdout"`
 	MetricsMaxInMemory int                    `yaml:"metricsMaxInMemory"`
+	MetricsStoreFile   string                 `yaml:"metricsStoreFile"`
 	CaptureBuffer      int                    `yaml:"captureBuffer"`
 	Performance        PerformanceConfig      `yaml:"performance"`
 	GlobalTTL          int                    `yaml:"globalTTL"`
@@ -211,6 +212,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		LogTimeFormat:      "",
 		LogToStdout:        LogToStdoutProxy,
 		MetricsMaxInMemory: 1000,
+		MetricsStoreFile:   "",
 		CaptureBuffer:      5,
 		GlobalTTL:          0,
 	}

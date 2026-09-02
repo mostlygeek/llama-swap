@@ -131,7 +131,7 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 		upstreamlog: upstreamlog,
 		perf:        perfMon,
 		inflight:    &inflightCounter{},
-		metrics:     newMetricsMonitor(proxylog, cfg.MetricsMaxInMemory, cfg.CaptureBuffer),
+		metrics:     newMetricsMonitor(proxylog, cfg.MetricsMaxInMemory, cfg.CaptureBuffer, cfg.MetricsStoreFile, 5*time.Second),
 		build:       build,
 		local:       local,
 		peer:        peer,
@@ -292,10 +292,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // tear down routers; call Shutdown for that. Safe to call repeatedly.
 func (s *Server) CloseStreams() {
 	s.shutdownFn()
+	// Flush metrics persistence if active
+	if s.metrics != nil {
+		_ = s.metrics.Close()
+	}
 }
 
 // Shutdown stops the local and peer routers in parallel. It is idempotent;
-// repeated calls return nil without re-running shutdown.
+// repeated calls return nil without re-running shutdown. Also flushes and
+// stops the metrics persistence store if active.
 //
 // Callers must drain inflight HTTP requests (httpServer.Shutdown) before
 // calling this, otherwise inflight requests 502 when their processes are torn
@@ -306,6 +311,12 @@ func (s *Server) Shutdown(timeout time.Duration) error {
 		return nil
 	}
 	s.shutdownFn()
+
+	// Flush and stop metrics persistence so a hot-reload doesn't leave
+	// orphaned goroutines writing to the same file.
+	if s.metrics != nil {
+		_ = s.metrics.Close()
+	}
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex

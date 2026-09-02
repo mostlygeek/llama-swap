@@ -136,6 +136,11 @@
             "default": 1000,
             "description": "Maximum number of metrics to keep in memory. Controls how many metrics are stored before older ones are discarded."
         },
+        "metricsStoreFile": {
+            "type": "string",
+            "default": "",
+            "description": "Optional file path to persist metrics to disk as JSON. When set, metrics survive server restarts. Example: '/var/lib/llama-swap/metrics.json'"
+        },
         "captureBuffer": {
             "type": "integer",
             "minimum": 0,

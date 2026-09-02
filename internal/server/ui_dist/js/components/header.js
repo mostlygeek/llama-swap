@@ -11,6 +11,7 @@ const NAV = [
   { path: "/", label: "Playground" },
   { path: "/models", label: "Models" },
   { path: "/activity", label: "Activity" },
+  { path: "/stats", label: "Stats" },
   { path: "/logs", label: "Logs" },
   { path: "/performance", label: "Performance" },
 ];

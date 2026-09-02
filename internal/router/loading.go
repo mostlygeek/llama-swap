@@ -2,9 +2,10 @@ package router
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"net/http"
 	"strings"
 	"sync"
@@ -83,6 +84,23 @@ func (s *loadingWriter) setUpdate(msg string) {
 	s.pendingMu.Unlock()
 }
 
+// cryptoIntn returns a uniform random int in [0, max) using crypto/rand.
+func cryptoIntn(max int) int {
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(max)))
+	if err != nil {
+		return 0
+	}
+	return int(n.Int64())
+}
+
+// cryptoShuffle randomises a slice using crypto/rand (Fisher-Yates).
+func cryptoShuffle[T any](s []T) {
+	for i := len(s) - 1; i > 0; i-- {
+		j := cryptoIntn(i + 1)
+		s[i], s[j] = s[j], s[i]
+	}
+}
+
 func (s *loadingWriter) start(ctx context.Context) {
 	s.done = make(chan struct{})
 	defer close(s.done)
@@ -102,12 +120,10 @@ func (s *loadingWriter) start(ctx context.Context) {
 
 	remarks := make([]string, len(loadingRemarks))
 	copy(remarks, loadingRemarks)
-	rand.Shuffle(len(remarks), func(i, j int) {
-		remarks[i], remarks[j] = remarks[j], remarks[i]
-	})
+	cryptoShuffle(remarks)
 	ri := 0
 
-	nextRemarkIn := time.Duration(2+rand.Intn(4)) * time.Second // #nosec G404 -- cosmetic loading-spinner remark timing; not security-sensitive
+	nextRemarkIn := time.Duration(2+cryptoIntn(4)) * time.Second
 	lastRemarkTime := time.Time{}
 
 	ticker := time.NewTicker(s.tickDuration)
@@ -132,7 +148,7 @@ func (s *loadingWriter) start(ctx context.Context) {
 				s.sendInline(update)
 				s.sendData(" ")
 				lastRemarkTime = time.Now()
-				nextRemarkIn = time.Duration(5+rand.Intn(5)) * time.Second // #nosec G404 -- cosmetic loading-spinner remark timing; not security-sensitive
+				nextRemarkIn = time.Duration(5+cryptoIntn(5)) * time.Second
 			} else if time.Since(lastRemarkTime) >= nextRemarkIn {
 				remark := remarks[ri%len(remarks)]
 				ri++
@@ -140,7 +156,7 @@ func (s *loadingWriter) start(ctx context.Context) {
 				s.sendInline(remark)
 				s.sendData(" ")
 				lastRemarkTime = time.Now()
-				nextRemarkIn = time.Duration(5+rand.Intn(5)) * time.Second // #nosec G404 -- cosmetic loading-spinner remark timing; not security-sensitive
+				nextRemarkIn = time.Duration(5+cryptoIntn(5)) * time.Second
 			} else {
 				s.sendData(".")
 			}

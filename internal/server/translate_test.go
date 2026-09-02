@@ -46,7 +46,7 @@ func newTranslateServer(t *testing.T, cfg config.Config, local router.LocalRoute
 		proxylog:    proxylog,
 		upstreamlog: logmon.NewWriter(io.Discard),
 		inflight:    &inflightCounter{},
-		metrics:     newMetricsMonitor(proxylog, 0, 0),
+		metrics:     newMetricsMonitor(proxylog, 0, 0, "", 0),
 		local:       local,
 		peer:        newStubRouter(nil, ""),
 		shutdownCtx: ctx,
