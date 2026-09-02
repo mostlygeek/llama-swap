@@ -258,3 +258,23 @@ User ask: pull the two Intel-graphics monitoring commits from the fork's
   idle-zeroed telemetry, fdinfo VRAM incl. resident fallback, engine util in
   cycles + ns formats, throttle); `go test -race ./internal/...` green;
   `make gosec` 0 ×3 GOOS; aidc-scan clean.
+
+## Phase 11 — prepare for the PR into protected main
+
+`main` is protected (no direct push). The PR must therefore be conflict-free
+at merge time. A direct PR showed 37 conflicts + 38 main-only files, because
+the branch was re-established on upstream rather than descending from main.
+
+- Recorded `git merge -s ours main`: main becomes an ancestor (merge-base =
+  main tip), our tree stays authoritative. Superseded main-only code is
+  intentionally not carried: `internal/server/{concurrency,metrics_store,
+  metrics_vllm_test}.go`, `internal/config/matrix_dsl*.go`, legacy
+  `proxy/ollama/`, old `router_test.go`, monolithic `docker/unified/Dockerfile`
+  (replaced by upstream's per-project Dockerfiles).
+- Restored main's historical docs (no code impact): `ai-plans/`,
+  `docs/examples/`, `feature-addition.md`, `docs/newrouter-todo.md`.
+- Verified post-merge: build clean, full `-race` suite green, `make gosec` 0
+  ×3 GOOS, audit ledger in sync, gitleaks history clean, aidc-scan clean on
+  the restored paths.
+- Outcome: PR from `integration/upstream-max` → `main` is now conflict-free
+  (every main commit is an ancestor of the branch tip).
