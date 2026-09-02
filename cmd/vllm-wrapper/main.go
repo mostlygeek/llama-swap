@@ -230,10 +230,10 @@ func sleepCmd(args []string) {
 	log.Printf("Successfully put vLLM to sleep (level %d)", sleepLevel)
 
 	if stopPID > 0 {
-		if err := syscall.Kill(stopPID, syscall.SIGTERM); err != nil {
+		if err := stopProcess(stopPID); err != nil {
 			log.Fatalf("Failed to stop serve proxy process %d: %v", stopPID, err)
 		}
-		log.Printf("Sent SIGTERM to serve proxy process %d", stopPID)
+		log.Printf("Sent stop signal to serve proxy process %d", stopPID)
 	}
 }
 

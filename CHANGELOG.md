@@ -78,6 +78,12 @@ Long-form entries with full context live in
   nvidia-smi/rocm-smi/LACT (e.g. Intel Arc) get GPU telemetry and idle cards
   stay runtime-suspended. Cherry-picked from the fork's `intel-card` branch.
 
+### Fixed
+
+- `cmd/vllm-wrapper` now cross-compiles for Windows: the `syscall.Kill` call
+  (Unix-only) moved behind a build-tagged `stopProcess` helper
+  (`stop_unix.go` / `stop_windows.go`), unblocking `GOOS=windows gosec`.
+
 ### Security
 
 - Handled every `gosec` G104 unhandled-error finding explicitly and added

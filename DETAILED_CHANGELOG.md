@@ -5,6 +5,51 @@ High-level summaries live in [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
+## 2026-09-02 — Fix `GOOS=windows gosec` build failure in vllm-wrapper
+
+### What
+
+`make gosec` failed its `GOOS=windows` pass — not on a finding, but on a compile
+error: `cmd/vllm-wrapper/main.go:233:21: undefined: syscall.Kill`.
+
+### Why
+
+`syscall.Kill` is only defined on Unix-like platforms. The `sleep` subcommand
+used it to send `SIGTERM` to the serve proxy PID after vLLM enters sleep mode.
+Windows has no `syscall.Kill`, so the package would not compile under
+`GOOS=windows`, and gosec aborts the whole target when a package fails to build.
+(`syscall.SIGTERM` in the signal-handling path is fine — that constant is defined
+on Windows; only `Kill` is missing.)
+
+### How
+
+Extracted the stop call behind a small `stopProcess(pid int) error` helper split
+across build-tagged files:
+
+- `cmd/vllm-wrapper/stop_unix.go` (`//go:build !windows`) → `syscall.Kill(pid, syscall.SIGTERM)`
+  (unchanged graceful behavior on Linux/macOS).
+- `cmd/vllm-wrapper/stop_windows.go` (`//go:build windows`) → `os.FindProcess(pid).Kill()`
+  (Windows has no SIGTERM). This wrapper targets Linux/systemd deployments; the
+  Windows build exists only to keep cross-compilation and gosec green.
+
+`main.go` line 233 now calls `stopProcess(stopPID)`.
+
+### Commands
+
+- `GOOS=windows go build ./cmd/vllm-wrapper/` → ok
+- `GOOS=linux go build ./cmd/vllm-wrapper/` → ok
+- `go test ./cmd/vllm-wrapper/` → 5 passed
+- `make gosec` → linux/darwin/windows all report `Issues: 0`, no build errors
+- `aidc-scan` → clean
+
+### Notes
+
+Behavior on the primary Linux path is identical (still `SIGTERM`). The Windows
+variant is a hard kill because the platform offers no graceful-termination
+signal; acceptable given the wrapper is not deployed on Windows.
+
+---
+
 ## 2026-09-02 — Maximal upstream integration (re-established on upstream `7a14664`)
 
 ### What
