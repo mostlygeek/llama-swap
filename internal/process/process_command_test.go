@@ -900,7 +900,11 @@ func TestProcessCommand_TTL_IgnoresWebsocket(t *testing.T) {
 	websocketStarted := make(chan struct{})
 	releaseWebsocket := make(chan struct{})
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/health" {
+		// Only the websocket upgrade blocks until released. Startup probes
+		// (the /health check and the /props reasoning-budget probe) must be
+		// answered immediately — otherwise they would trip the block-until-
+		// released dance and deadlock the server's Close on shutdown.
+		if !swaputil.IsWebSocketUpgrade(r) {
 			w.WriteHeader(http.StatusOK)
 			return
 		}

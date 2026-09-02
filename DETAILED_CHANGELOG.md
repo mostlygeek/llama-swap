@@ -50,6 +50,75 @@ signal; acceptable given the wrapper is not deployed on Windows.
 
 ---
 
+## 2026-09-02 — Fix TTL_IgnoresWebsocket deadlock (fork feature collision)
+
+### What
+
+`TestProcessCommand_TTL_IgnoresWebsocket` (`internal/process`) intermittently
+deadlocked in CI, tripping the 10-minute test timeout and failing `make
+test-all` / `make test-dev`. The trace showed a `panic: close of closed channel`
+at `process_command_test.go:907` and a `httptest.Server blocked in Close` on an
+active connection.
+
+### Why
+
+A collision between two independently-pulled features:
+
+- The test (upstream PR #1002) uses a mock upstream that treats *any non-`/health`
+  request* as "the websocket": it `close(websocketStarted)`s and then blocks on
+  `<-releaseWebsocket`.
+- The fork's dynamic-reasoning capability (upstream PR #915) added a `/props`
+  reasoning-budget probe in `doStart` (`upstreamSupportsThinkingBudget`, fired
+  when the command has no fixed budget — which the test's `simple-responder`
+  does not).
+
+At startup the `/props` probe hit the mock's non-`/health` branch, closing
+`websocketStarted` early and leaving a mock handler goroutine parked on
+`<-releaseWebsocket`. Then the test's real websocket request called
+`close(websocketStarted)` again → `close of closed channel` panic (recovered by
+`net/http`, but it severed the proxied response → `unexpected EOF` → the request
+returned early). The test then failed at line 942
+(`websocket request completed before it was released`) via `t.Fatal`, which
+skipped `close(releaseWebsocket)`; the `t.Cleanup` `mock.Close()` then blocked
+forever on the still-parked `/props` goroutine → 10-minute timeout.
+
+### How
+
+Changed the mock upstream to block only on the *actual* websocket upgrade,
+answering every startup probe (`/health`, `/props`, anything else) with `200`
+immediately — mirroring production's `swaputil.IsWebSocketUpgrade` check:
+
+```go
+if !swaputil.IsWebSocketUpgrade(r) {
+    w.WriteHeader(http.StatusOK)
+    return
+}
+close(websocketStarted)
+<-releaseWebsocket
+w.WriteHeader(http.StatusOK)
+```
+
+The `/props` probe now gets an empty-body `200` (`build_info` absent →
+`reasoningDynamic=false`), so it no longer parks a goroutine, and only the real
+`/socket` upgrade drives the block-until-released sequence the test asserts on.
+Test-only change; no production behavior touched.
+
+### Commands
+
+- `make simple-responder` (test needs the helper binary)
+- `go test -v -run TestProcessCommand_TTL_IgnoresWebsocket -count=5 ./internal/process/` → 5/5 pass
+- `go test ./internal/process/` → 46 pass (was a 600s timeout)
+- `make test-all` → all packages `ok`
+- `gofmt -w internal/process/process_command_test.go`; `aidc-scan` → clean
+
+### Notes
+
+Root cause is the fork carrying both upstream PR #1002 (the test) and PR #915
+(the `/props` probe) that upstream did not have to reconcile against each other.
+The fix hardens the test's mock so any future startup probe is tolerated too.
+
+---
+
 ## 2026-09-02 — Suppress DXGI COM interop gosec false positives (Windows)
 
 ### What

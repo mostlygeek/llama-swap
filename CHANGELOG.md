@@ -87,6 +87,10 @@ Long-form entries with full context live in
   `internal/hw/dxgi_windows.go` (G115 HRESULT/LUID truncation, G103
   `unsafe.Pointer` vtable calls) with inline `#nosec` markers, so the newer
   CI `gosec` (v2.26.1) reports zero findings on the Windows target.
+- `TestProcessCommand_TTL_IgnoresWebsocket` no longer deadlocks (10-minute CI
+  timeout): its mock upstream now blocks only on the real websocket upgrade,
+  so the fork's `/props` reasoning-budget startup probe is answered instead of
+  tripping the block-until-released path.
 
 ### Security
 
