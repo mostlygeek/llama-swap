@@ -56,6 +56,7 @@ func NewPeer(cfg config.Config, logger *logmon.Monitor) (*Peer, error) {
 
 	peerIDs := make([]string, 0, len(peers))
 	tailcatClients := make(map[string]*tailcat.Client)
+	members := make([]*peerMember, 0, len(peers))
 	for peerID := range peers {
 		peerIDs = append(peerIDs, peerID)
 	}
@@ -147,6 +148,7 @@ func NewPeer(cfg config.Config, logger *logmon.Monitor) (*Peer, error) {
 			tailcat:      tailcatClient,
 			apiKey:       peer.ApiKey,
 		}
+		members = append(members, pp)
 
 		seen := make(map[string]struct{})
 		for _, modelID := range peer.Models {
@@ -177,16 +179,9 @@ func NewPeer(cfg config.Config, logger *logmon.Monitor) (*Peer, error) {
 		cfg:         cfg,
 		logger:      logger,
 		peers:       modelMap,
+		members:     members,
 		shutdownCtx: shutdownCtx,
 		shutdownFn:  shutdownFn,
-	}
-	seenMembers := make(map[*peerMember]struct{})
-	for _, route := range modelMap {
-		if _, ok := seenMembers[route.member]; ok {
-			continue
-		}
-		seenMembers[route.member] = struct{}{}
-		r.members = append(r.members, route.member)
 	}
 	return r, nil
 }
@@ -207,6 +202,10 @@ func (r *Peer) Shutdown(timeout time.Duration) error {
 		return r.closeTransports(time.Second)
 	}
 
+	deadline := time.Now().Add(timeout)
+	deadlineCtx, cancelDeadline := context.WithDeadline(context.Background(), deadline)
+	defer cancelDeadline()
+
 	done := make(chan struct{})
 	go func() {
 		r.inflight.Wait()
@@ -216,27 +215,56 @@ func (r *Peer) Shutdown(timeout time.Duration) error {
 	select {
 	case <-done:
 		r.shutdownFn()
-		return r.closeTransports(timeout)
-	case <-time.After(timeout):
+		return r.closeTransports(max(time.Until(deadline), 0))
+	case <-deadlineCtx.Done():
 		r.shutdownFn()
-		r.inflight.Wait()
-		return errors.Join(fmt.Errorf("peer shutdown timed out after %v", timeout), r.closeTransports(time.Millisecond))
+		select {
+		case <-done:
+		case <-deadlineCtx.Done():
+		}
+		return errors.Join(fmt.Errorf("peer shutdown timed out after %v", timeout), r.closeTransports(max(time.Until(deadline), 0)))
 	}
 }
 
 func (r *Peer) closeTransports(timeout time.Duration) error {
-	var errs []error
+	type closeResult struct {
+		index int
+		err   error
+	}
+
+	deadline := time.Now().Add(timeout)
 	closedTailcat := make(map[*tailcat.Client]struct{})
-	for _, member := range r.members {
-		member.transport.CloseIdleConnections()
+	errs := make([]error, len(r.members))
+	done := make(chan closeResult, len(r.members))
+	for i, member := range r.members {
+		closeTailcat := false
 		if member.tailcat != nil {
-			if _, closed := closedTailcat[member.tailcat]; closed {
-				continue
+			if _, closed := closedTailcat[member.tailcat]; !closed {
+				closedTailcat[member.tailcat] = struct{}{}
+				closeTailcat = true
 			}
-			closedTailcat[member.tailcat] = struct{}{}
-			if err := member.tailcat.CloseWithTimeout(timeout); err != nil {
-				errs = append(errs, fmt.Errorf("peer %s: %w", member.peerID, err))
+		}
+
+		go func() {
+			var err error
+			member.transport.CloseIdleConnections()
+			if closeTailcat {
+				if closeErr := member.tailcat.CloseWithTimeout(max(time.Until(deadline), 0)); closeErr != nil {
+					err = fmt.Errorf("peer %s: %w", member.peerID, closeErr)
+				}
 			}
+			done <- closeResult{index: i, err: err}
+		}()
+	}
+
+	timer := time.NewTimer(max(time.Until(deadline), 0))
+	defer timer.Stop()
+	for range r.members {
+		select {
+		case result := <-done:
+			errs[result.index] = result.err
+		case <-timer.C:
+			return errors.Join(errs...)
 		}
 	}
 	return errors.Join(errs...)

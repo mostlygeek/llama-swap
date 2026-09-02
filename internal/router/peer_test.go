@@ -105,6 +105,30 @@ func TestNewPeer_MultiplePeers(t *testing.T) {
 	}
 }
 
+func TestNewPeer_MembersIncludePeersWithoutModels(t *testing.T) {
+	proxyURL, _ := url.Parse("http://peer.example.com:8080")
+	peers := config.PeerDictionaryConfig{
+		"modeled-peer": {
+			ProxyURL: proxyURL,
+			Models:   []string{"model-a"},
+		},
+		"empty-peer": {
+			ProxyURL: proxyURL,
+		},
+	}
+
+	pr, err := NewPeer(config.Config{Peers: peers}, testLogger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pr.members) != 2 {
+		t.Fatalf("expected 2 members, got %d", len(pr.members))
+	}
+	if pr.members[0].peerID != "empty-peer" || pr.members[1].peerID != "modeled-peer" {
+		t.Fatalf("members = [%s, %s], want sorted peer order", pr.members[0].peerID, pr.members[1].peerID)
+	}
+}
+
 func TestNewPeer_DuplicateModel(t *testing.T) {
 	proxyURL1, _ := url.Parse("http://peer1.example.com:8080")
 	proxyURL2, _ := url.Parse("http://peer2.example.com:8080")
@@ -553,6 +577,30 @@ func TestPeer_ServeHTTP_ShutdownTimeoutCancelsInflight(t *testing.T) {
 
 	close(released)
 	wg.Wait()
+}
+
+func TestPeer_ShutdownTimeoutBoundsInflightWait(t *testing.T) {
+	pr, err := NewPeer(config.Config{}, testLogger)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pr.inflight.Add(1)
+	shutdownDone := make(chan error, 1)
+	go func() {
+		shutdownDone <- pr.Shutdown(50 * time.Millisecond)
+	}()
+
+	select {
+	case err := <-shutdownDone:
+		if err == nil || !strings.Contains(err.Error(), "peer shutdown timed out") {
+			t.Fatalf("Shutdown error = %v, want timeout", err)
+		}
+	case <-time.After(time.Second):
+		pr.inflight.Done()
+		t.Fatal("Shutdown remained blocked on an inflight request after its deadline")
+	}
+	pr.inflight.Done()
 }
 
 func TestPeer_ShutdownMultiple(t *testing.T) {
