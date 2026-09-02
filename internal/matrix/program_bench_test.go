@@ -19,7 +19,7 @@ func BenchmarkProgram_SolveMultiSet(b *testing.B) {
 		definitions, known, costs := multiSetDefinitions(setCount, 10)
 		program, err := Compile(definitions, func(name string) (string, bool) {
 			return name, known[name]
-		})
+		}, nil)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -87,7 +87,7 @@ func BenchmarkMatrix_Compile(b *testing.B) {
 			for b.Loop() {
 				program, err := Compile([]Definition{definition}, func(name string) (string, bool) {
 					return name, known[name]
-				})
+				}, nil)
 				if err != nil {
 					b.Fatal(err)
 				}
