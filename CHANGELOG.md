@@ -80,6 +80,9 @@ Long-form entries with full context live in
 
 ### Fixed
 
+- Activity capture dialog: the header `×` and footer `Close` buttons both work
+  again. The render bound a click handler to only the first `[data-close]`
+  element via `querySelector`, leaving the other button dead.
 - `cmd/vllm-wrapper` now cross-compiles for Windows: the `syscall.Kill` call
   (Unix-only) moved behind a build-tagged `stopProcess` helper
   (`stop_unix.go` / `stop_windows.go`), unblocking `GOOS=windows gosec`.

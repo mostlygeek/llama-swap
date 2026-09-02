@@ -5,6 +5,50 @@ High-level summaries live in [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
+## 2026-09-02 — Fix dead close buttons in the activity capture dialog
+
+### What
+
+On `/activity`, opening an entry's capture ("View") shows a modal whose close
+controls (`×` in the header, `Close` in the footer) did nothing. The dialog
+could only be dismissed via Escape or a backdrop click.
+
+### Why
+
+`captureDialog.js`'s `render()` produced two `[data-close]` buttons but wired
+the click handler with `dlg.querySelector("[data-close]")`, which returns only
+the first match. Depending on the branch, one button — or, in the
+capture-not-found path, both — ended up without a handler.
+
+### How
+
+Changed the single `querySelector` bind to
+`dlg.querySelectorAll("[data-close]").forEach(...)` so every close button in the
+rendered dialog gets the `close` handler.
+
+```diff
+-    dlg.querySelector("[data-close]")?.addEventListener("click", close);
++    dlg.querySelectorAll("[data-close]").forEach((btn) => btn.addEventListener("click", close));
+```
+
+### Commands
+
+- `aidc-scan` → semgrep + gitleaks clean; all language scanners skipped (only
+  a hand-authored JS file under `internal/server/ui_dist/` changed, no build
+  step).
+
+### Verification
+
+Reviewed the rendered markup: both the header `×` and footer `Close` now match
+the `[data-close]` selector and receive the handler.
+
+### Notes
+
+The web UI under `internal/server/ui_dist/` is vanilla ES-module JS served
+directly with no build step, so no rebuild was required.
+
+---
+
 ## 2026-09-02 — Fix `GOOS=windows gosec` build failure in vllm-wrapper
 
 ### What
