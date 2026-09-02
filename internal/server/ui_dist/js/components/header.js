@@ -14,6 +14,8 @@ const NAV = [
   { path: "/stats", label: "Stats" },
   { path: "/logs", label: "Logs" },
   { path: "/performance", label: "Performance" },
+  { path: "/hardware", label: "Hardware" },
+  { path: "/settings", label: "Settings" },
 ];
 
 function isActive(path, current) {

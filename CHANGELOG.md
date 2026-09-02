@@ -33,6 +33,29 @@ Long-form entries with full context live in
 - The Svelte UI and its npm build step: the hand-authored vanilla-JS SPA under
   `internal/server/ui_dist/` is embedded via `//go:embed` (no build tag).
 
+### Added (upstream UI feature port to the vanilla JS UI)
+
+- Activity page rebuilt on the server-backed store: paginated
+  `/api/metrics/activity` with server-side sorting, min/max-ID filters,
+  live-refresh throttled on the SSE `activity` revision, store-computed
+  `/api/metrics/stats` cards + histograms, in-flight requests table with
+  cancel, and markdown export of the visible rows.
+- SSE layer updated to the upstream event set (`activity`, entry-based
+  `inflight`, `uiConfig`, `profileChanged`) — the old fork-specific
+  full-metrics-payload events no longer exist server-side.
+- Models page: profiles card (active profile, pin mappings, switcher),
+  selectors card (targets/strategy/spillover), capability badges + context
+  window per model, model-server open link.
+- Model detail page (`/models/:id`): Activity / Logs (per-model stream) /
+  Details (capabilities) tabs; param-aware hash router.
+- Hardware page from `/api/hardware` with a copyable plain-text summary;
+  Settings page (theme mode, capability-tag toggle, build info).
+- Logs: ANSI color rendering (SGR → styled spans, theme-aware palettes).
+- Playground: Load Test tab (concurrent streaming requests with Gantt-style
+  phase timeline, drag-to-reorder result cards) and Help tab — the docs agent
+  over the server's MCP tools (`/api/mcp`) with a full agent loop
+  (tool-call accumulation, sanitize-on-reload, max-iterations continue).
+
 ### Security
 
 - Handled every `gosec` G104 unhandled-error finding explicitly and added

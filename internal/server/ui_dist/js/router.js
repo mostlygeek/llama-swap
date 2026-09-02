@@ -4,7 +4,10 @@
 // are cleaned up).
 import { observable } from "./store.js";
 
+// The matched route pattern (e.g. "/models/:id"), used for nav highlighting.
 export const currentRoute = observable("/");
+// The actual location path (e.g. "/models/qwen"), used to extract params.
+export const currentPath = observable("/");
 
 function normalize(hash) {
   // svelte-spa-router uses "#/path"; default to "/"
@@ -13,10 +16,20 @@ function normalize(hash) {
   return h;
 }
 
+// Does a route pattern match a concrete path? Segments starting with ":" match
+// any non-empty segment (e.g. "/models/:id" matches "/models/qwen").
+function patternMatches(pattern, path) {
+  if (pattern === path) return true;
+  const pSegs = pattern.split("/").filter(Boolean);
+  const segs = path.split("/").filter(Boolean);
+  if (pSegs.length !== segs.length) return false;
+  return pSegs.every((p, i) => (p.startsWith(":") ? segs[i] !== "" : p === segs[i]));
+}
+
 // routes: { "/path": factory } where factory() -> { el, destroy? }
 // playgroundFactory is mounted once and toggled.
 export function startRouter({ routes, playgroundFactory, playgroundContainer, routeContainer }) {
-  const known = new Set(Object.keys(routes));
+  const patterns = Object.keys(routes);
 
   const playground = playgroundFactory();
   playgroundContainer.appendChild(playground.el);
@@ -25,10 +38,18 @@ export function startRouter({ routes, playgroundFactory, playgroundContainer, ro
 
   function resolve(path) {
     if (path === "/") return null; // playground
+    // Exact match first, then param patterns; more specific (longer literal
+    // prefix) patterns win so "/models" is not shadowed by "/models/:id".
     if (routes[path]) return path;
-    // startsWith match for nested paths (e.g. /models/foo)
-    for (const p of known) {
-      if (p !== "/" && path.startsWith(p)) return p;
+    const candidates = patterns.filter((p) => p.includes("/:") && patternMatches(p, path));
+    if (candidates.length > 0) {
+      candidates.sort((a, b) => b.length - a.length);
+      return candidates[0];
+    }
+    // startsWith match for nested paths (e.g. a legacy "/models/foo" link when
+    // only "/models" exists)
+    for (const p of patterns) {
+      if (p !== "/" && !p.includes("/:") && path.startsWith(p)) return p;
     }
     return "/"; // wildcard -> playground
   }
@@ -36,7 +57,9 @@ export function startRouter({ routes, playgroundFactory, playgroundContainer, ro
   function render() {
     const path = normalize(location.hash || "#/");
     const matched = resolve(path);
-    currentRoute.set(matched === null ? "/" : matched);
+    const routePattern = matched === null ? "/" : matched;
+    currentRoute.set(routePattern);
+    currentPath.set(path);
 
     const isPlayground = matched === null || matched === "/";
     playgroundContainer.style.display = isPlayground ? "" : "none";
@@ -47,11 +70,13 @@ export function startRouter({ routes, playgroundFactory, playgroundContainer, ro
       return;
     }
 
-    if (active && active.path === matched) return; // already mounted
+    // Remount when either the pattern or the concrete path changes, so
+    // /models/a -> /models/b (same pattern, different param) rebuilds the page.
+    if (active && active.path === path) return;
     teardownActive();
     const instance = routes[matched]();
     routeContainer.appendChild(instance.el);
-    active = { instance, path: matched };
+    active = { instance, path };
   }
 
   function teardownActive() {

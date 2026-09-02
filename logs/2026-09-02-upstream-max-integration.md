@@ -163,3 +163,75 @@ Feature integration complete and verified. Definitive gates green: `make gosec`
 Secrets clean (trufflehog + gitleaks). Remaining open item: aidc `semgrep`
 reports ~31 categorical false positives (see Phase 7) — a scanner-policy
 decision, no first-party real issue outstanding.
+
+## Phase 9 — upstream Svelte-UI feature port to the vanilla JS UI
+
+User ask: upstream kept evolving their Svelte UI; port those features to our
+html/js/css version. Scope agreed: full parity including the two big playground
+tabs (Load Test + Help/docs-agent).
+
+### Critical fix first: SSE event layer
+Our UI listened for fork-specific `metrics` full-payload events that upstream's
+server no longer emits — Activity/Stats pages got no live data at all. Rewrote
+`api.js` to the upstream event set (`activity` revision bumps, entry-based
+`inflight` snapshot/upsert/remove, `uiConfig`, `profileChanged`) and added the
+missing stores + fetchers (playgroundModels via /v1/models with capabilities/
+selectors metadata, profiles + setActiveProfile, getActivity/getActivityStats,
+getHardware, cancelInflightRequest, checkPerformanceEnabled, hasListedModels).
+
+### Ported (new files under `internal/server/ui_dist/`)
+- `util/format.js`, `util/activityExport.js` (token-weighted summary + markdown
+  table export), `util/capabilities.js` (badges incl. 128K-style context),
+  `util/inflight.js`, `util/ansi.js` (SGR→spans, light/dark palettes, 256/RGB)
+- `components/activityTable.js` — shared by Activity page + model detail:
+  server-paginated, server-sorted (click headers), persistent column
+  visibility, min/max-ID filter drawer, in-flight table (live elapsed via
+  rAF, cancel), capture viewer, markdown export dialog
+- `components/activityStats.js` — now store-computed stats + histograms
+- `components/modelsPanel.js` — profiles card (mappings + switcher), selectors
+  card, capability badges, per-row open-model-server link, caps toggle
+- `pages/modelDetail.js` — `/models/:id` with Activity/Logs/Details tabs;
+  per-model log stream via `/logs/stream/{id}` (long-lived fetch reader)
+- `pages/hardware.js` (`/api/hardware` overview + copyable text summary),
+  `pages/settings.js` (theme mode segmented control, caps toggle, build info)
+- `agent/agentLoop.js` (runAgent generator, accumulateToolCalls,
+  sanitizeMessages), `agent/agentTools.js` (MCP client for /api/mcp, protocol
+  2026-07-28 header style, name validation, friendly names),
+  `agent/docsAgentPrompt.js`, `components/agentWork.js` (reasoning + tool cards)
+- `components/concurrencyInterface.js` — Load Test: queue models (repeat for
+  parallel), streaming runs with phase tracking (waiting/loading/reasoning/
+  content, ━━━━━ loading-marker split), Gantt timeline with ticks + legend,
+  drag-to-reorder result cards, abort
+- `components/docsInterface.js` — Help: docs agent over MCP tools, suggestion
+  chips, per-turn agent cards, --jinja hint, max-iterations notice, regenerate
+- `chat.js`: tool_calls parsing + tools/tool_result body mapping
+  (chat-completions only, dropped on other endpoints)
+- `router.js`: `:param` patterns (`/models/:id`), remounts on param change,
+  new `currentPath` observable (real path) alongside `currentRoute` (pattern)
+- `main.js`/`header.js`: new routes + nav (Hardware, Settings)
+- `css/newpages.css`: all new component styles using existing theme tokens
+
+### Verification
+- `node --check` on all 56 JS files; all 159 relative imports resolve.
+- Node-run unit checks of the pure ports (ansi colors incl. 256-color,
+  capabilities badges, summarizeActivity/markdown export, inflight helpers,
+  format), agent loop with scripted deps (fragment accumulation — the
+  "get_docget_doc" case, full tool round-trip, sanitizeMessages pruning),
+  chat tool-chunk parsing.
+- Runtime smoke against fake-model backend: all new modules served (200),
+  `/api/hardware`, `/api/profiles`, `/v1/models`, `/api/metrics/stats`,
+  `/api/metrics/activity?sort&order&min_id`, MCP `tools/list` + `tools/call`
+  round-trip all exercised; SSE observed emitting modelStatus/logData/
+  inflight/uiConfig/profileChanged; activity recorded to the store after a
+  chat completion.
+- Gates: `go build`, `go test ./internal/server/` (embed) green; aidc-scan
+  clean (semgrep/gitleaks/shellcheck); `.gitleaksignore` re-derived for the
+  new commit hash (same 3 upstream example-key FPs).
+
+### Known limitations
+- `/stats` (fork-specific page) still aggregates the most recent ≤999 activity
+  rows client-side; full-history per-model stats could use
+  `/api/metrics/stats?model=…` per model (follow-up).
+- Settings has no accent-theme picker (our theme system is mode-only).
+- No browser available in this container; in-browser testing pending (Node
+  + HTTP-level verification done instead).
