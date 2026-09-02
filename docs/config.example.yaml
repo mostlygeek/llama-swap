@@ -645,6 +645,13 @@ routing:
         #   "(a | b) & (c | d)"  → [a,c], [a,d], [b,c], [b,d]
         #   "+llms & v"          → inline the llms set, then AND with v
         sets:
+          # +undefined includes every model not named by a leaf in any set.
+          # User-defined set names and vars take precedence as usual.
+          # Example catch-all shape:
+          # always: "task-small & embed-model"
+          # main: "+always & moe-medium & (dense-a | dense-b)"
+          # scratch: "+always & +undefined"
+
           # An LLM plus TTS. Vars and real model IDs may be mixed.
           # expands to: [g,v], [qwen-model,v], [m,v]
           standard: "(g | qwen-model | m) & v"

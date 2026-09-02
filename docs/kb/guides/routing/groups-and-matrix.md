@@ -119,6 +119,38 @@ Two things worth internalising:
 `evict_costs` (default 1) is how you express "this one is painful to reload".
 Give slow cold-starting backends a high cost.
 
+### Catch unlisted models with `+undefined`
+
+Use the reserved reference `+undefined` for models not referenced by a leaf in
+any user-authored set. Vars resolve to their real model IDs before this check;
+references such as `+base` are not leaves and do not define more models.
+
+The orphan list is computed once at compile time and sorted by model ID, making
+the synthesized expression deterministic. For example, if `a` is named by a
+leaf while `b` and `c` are not, `+undefined` behaves as `(b | c)`:
+
+```yaml
+sets:
+  always:  "task-small & embed-model"
+  main:    "+always & moe-medium & (dense-a | dense-b)"
+  scratch: "+always & +undefined"
+```
+
+If there are no orphans, the `+undefined` term is dropped. Empty results also
+propagate through references, so `outer: "+empty & x"` behaves as `x` when
+`empty` ultimately resolves only to an empty `+undefined`. A set containing
+only an empty `+undefined` is never selectable.
+
+A user-defined set named `undefined` takes precedence and disables synthesis.
+When `+undefined` is referenced, startup and reload log one of:
+
+- `matrix: synthesized set "undefined" = (modelA | modelB | ...)`
+- `matrix: synthesized set "undefined" is empty; +undefined terms dropped`
+- `matrix: set "undefined" is user-defined; orphan synthesis disabled`
+
+Editing `models:` changes the orphan list on the next configuration reload by
+design.
+
 ## Which one?
 
 Use **group** if your setup is describable as "these run together, those swap
