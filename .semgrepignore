@@ -1,0 +1,11 @@
+# Vendored, third-party, minified assets are not first-party code and are not
+# audited line-by-line. The committed UI depends on these upstream libraries
+# (Chart.js, marked, highlight.js, KaTeX) as pre-built bundles.
+internal/server/ui_dist/vendor/
+
+# Build output / binaries
+build/
+
+# Semgrep's own defaults (kept explicit so this file fully controls scope).
+.git/
+node_modules/

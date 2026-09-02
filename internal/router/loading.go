@@ -2,16 +2,16 @@ package router
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"math/big"
+	"math/rand" // nosemgrep: go.lang.security.audit.crypto.math_random.math-random-used
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 var loadingPaths = []string{
@@ -67,6 +67,7 @@ func newLoadingWriter(logger *logmon.Monitor, modelName string, w http.ResponseW
 		startTime:     time.Now(),
 		tickDuration:  750 * time.Millisecond,
 		charPerSecond: 75,
+		done:          make(chan struct{}),
 	}
 
 	s.Header().Set("Content-Type", "text/event-stream")
@@ -84,25 +85,7 @@ func (s *loadingWriter) setUpdate(msg string) {
 	s.pendingMu.Unlock()
 }
 
-// cryptoIntn returns a uniform random int in [0, max) using crypto/rand.
-func cryptoIntn(max int) int {
-	n, err := rand.Int(rand.Reader, big.NewInt(int64(max)))
-	if err != nil {
-		return 0
-	}
-	return int(n.Int64())
-}
-
-// cryptoShuffle randomises a slice using crypto/rand (Fisher-Yates).
-func cryptoShuffle[T any](s []T) {
-	for i := len(s) - 1; i > 0; i-- {
-		j := cryptoIntn(i + 1)
-		s[i], s[j] = s[j], s[i]
-	}
-}
-
 func (s *loadingWriter) start(ctx context.Context) {
-	s.done = make(chan struct{})
 	defer close(s.done)
 
 	defer func() {
@@ -120,10 +103,12 @@ func (s *loadingWriter) start(ctx context.Context) {
 
 	remarks := make([]string, len(loadingRemarks))
 	copy(remarks, loadingRemarks)
-	cryptoShuffle(remarks)
+	rand.Shuffle(len(remarks), func(i, j int) { // #nosec G404 -- non-cryptographic selection for load balancing; math/rand is sufficient
+		remarks[i], remarks[j] = remarks[j], remarks[i]
+	})
 	ri := 0
 
-	nextRemarkIn := time.Duration(2+cryptoIntn(4)) * time.Second
+	nextRemarkIn := time.Duration(2+rand.Intn(4)) * time.Second // #nosec G404 -- non-cryptographic selection for load balancing; math/rand is sufficient
 	lastRemarkTime := time.Time{}
 
 	ticker := time.NewTicker(s.tickDuration)
@@ -148,7 +133,7 @@ func (s *loadingWriter) start(ctx context.Context) {
 				s.sendInline(update)
 				s.sendData(" ")
 				lastRemarkTime = time.Now()
-				nextRemarkIn = time.Duration(5+cryptoIntn(5)) * time.Second
+				nextRemarkIn = time.Duration(5+rand.Intn(5)) * time.Second // #nosec G404 -- non-cryptographic selection for load balancing; math/rand is sufficient
 			} else if time.Since(lastRemarkTime) >= nextRemarkIn {
 				remark := remarks[ri%len(remarks)]
 				ri++
@@ -156,7 +141,7 @@ func (s *loadingWriter) start(ctx context.Context) {
 				s.sendInline(remark)
 				s.sendData(" ")
 				lastRemarkTime = time.Now()
-				nextRemarkIn = time.Duration(5+cryptoIntn(5)) * time.Second
+				nextRemarkIn = time.Duration(5+rand.Intn(5)) * time.Second // #nosec G404 -- non-cryptographic selection for load balancing; math/rand is sufficient
 			} else {
 				s.sendData(".")
 			}
@@ -250,6 +235,41 @@ func (s *loadingWriter) sendData(data string) {
 
 	if _, err = fmt.Fprintf(s.writer, "data: %s\n\n", jsonData); err != nil {
 		s.logger.Debugf("<%s> Failed to write SSE data (client likely disconnected): %v", s.modelName, err)
+		return
+	}
+	if flusher, ok := s.writer.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+// sendError streams err to the client as a terminating SSE error frame
+// followed by [DONE].
+//
+// Once the loading stream has committed its 200, a real status can no longer be
+// sent: swaputil.SendError's WriteHeader is dropped and its JSON body lands in
+// the stream as a bare line, which every SSE parser discards silently (the text
+// before the first colon is read as an unknown field name). The client is left
+// with a truncated stream, no [DONE], and no reason — the same
+// failure-reported-as-success shape as #1029. Framing the error keeps it
+// visible.
+//
+// The frame carries the same envelope as a non-streamed error body (#1038), so
+// a client sees one error shape either way. The status only selects the
+// envelope's type/code — 500 matches what this error would have been answered
+// with had the stream not already committed a 200.
+//
+// Must be called before release, while writes still reach the client.
+func (s *loadingWriter) sendError(err error) {
+	jsonData := swaputil.NewErrorEnvelope(http.StatusInternalServerError, err.Error(), "").JSON()
+
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if s.released {
+		return
+	}
+
+	if _, werr := fmt.Fprintf(s.writer, "data: %s\n\ndata: [DONE]\n\n", jsonData); werr != nil {
+		s.logger.Debugf("<%s> Failed to write SSE error (client likely disconnected): %v", s.modelName, werr)
 		return
 	}
 	if flusher, ok := s.writer.(http.Flusher); ok {

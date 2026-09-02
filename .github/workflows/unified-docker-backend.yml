@@ -1,0 +1,208 @@
+name: Build Unified Docker Image (backend)
+
+# The build chain for ONE backend: builder base -> one job per upstream
+# project -> assemble and push.
+#
+# unified-docker.yml calls this once per backend so the two are fully
+# independent. Vulkan's four projects finish in minutes; CUDA's ik_llama.cpp
+# takes hours. With both backends in one job graph the Vulkan image could not
+# publish until CUDA finished, because `needs` applies to a whole job and not
+# to individual matrix cells. Separate calls are the only way GitHub expresses
+# per-backend dependencies.
+
+on:
+  workflow_call:
+    inputs:
+      backend:
+        description: "cuda or vulkan"
+        required: true
+        type: string
+      projects:
+        description: "JSON array of projects to build for this backend"
+        required: true
+        type: string
+      push_to_ghcr:
+        description: "Push the assembled image to ghcr.io"
+        required: true
+        type: boolean
+      llama_hash:
+        required: true
+        type: string
+      whisper_hash:
+        required: true
+        type: string
+      sd_hash:
+        required: true
+        type: string
+      audio_hash:
+        required: true
+        type: string
+      ik_llama_hash:
+        required: true
+        type: string
+      ls_hash:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  base:
+    name: base
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
+
+      - name: Free up disk space
+        run: |
+          echo "Before cleanup:"
+          df -h
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker system prune -af
+          echo "After cleanup:"
+          df -h
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd #v4.0.0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # Skipped entirely when base-<backend>.Dockerfile has not changed.
+      - name: Build and publish builder base
+        run: |  # nosemgrep: yaml.github-actions.security.run-shell-injection.run-shell-injection
+          chmod +x docker/unified/build-image.sh
+          docker/unified/build-image.sh --${{ inputs.backend }} --stage=base
+
+  artifacts:
+    name: build ${{ matrix.project }}
+    needs: base
+    runs-on: ubuntu-latest
+    # Each project gets a runner to itself. GitHub's hard cap is 360m; stop
+    # short of it so an overrun is reported as a timeout on one project rather
+    # than a silent cancellation of the whole build.
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(inputs.projects) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
+
+      - name: Free up disk space
+        run: |
+          echo "Before cleanup:"
+          df -h
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker system prune -af
+          echo "After cleanup:"
+          df -h
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd #v4.0.0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # Skipped entirely when this project's upstream commit and recipe are
+      # both unchanged since a previous run published them.
+      - name: Build and publish artifacts
+        env:
+          LLAMA_REF: ${{ inputs.llama_hash }}
+          WHISPER_REF: ${{ inputs.whisper_hash }}
+          SD_REF: ${{ inputs.sd_hash }}
+          AUDIO_REF: ${{ inputs.audio_hash }}
+          IK_LLAMA_REF: ${{ inputs.ik_llama_hash }}
+          LS_VERSION: ${{ inputs.ls_hash }}
+        run: |  # nosemgrep: yaml.github-actions.security.run-shell-injection.run-shell-injection
+          chmod +x docker/unified/build-image.sh
+          docker/unified/build-image.sh --${{ inputs.backend }} --stage=${{ matrix.project }}
+
+  assemble:
+    name: assemble
+    needs: artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
+
+      - name: Free up disk space
+        run: |
+          echo "Before cleanup:"
+          df -h
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker system prune -af
+          echo "After cleanup:"
+          df -h
+
+      # On GitHub Actions runners, create a fresh builder.
+      # When running locally under act, skip this and reuse the existing
+      # llama-swap-builder (which has ccache warm) to avoid exhausting disk.
+      - name: Set up Docker Buildx
+        if: ${{ !env.ACT }}
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd #v4.0.0
+
+      - name: Log in to GitHub Container Registry
+        if: ${{ !env.ACT }}
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # Copies each project's published /install into the runtime image. The
+      # compile stages are not part of this build's graph, so this is minutes.
+      - name: Assemble unified Docker image
+        env:
+          LLAMA_REF: ${{ inputs.llama_hash }}
+          WHISPER_REF: ${{ inputs.whisper_hash }}
+          SD_REF: ${{ inputs.sd_hash }}
+          AUDIO_REF: ${{ inputs.audio_hash }}
+          IK_LLAMA_REF: ${{ inputs.ik_llama_hash }}
+          LS_VERSION: ${{ inputs.ls_hash }}
+          DOCKER_IMAGE_TAG: ghcr.io/mostlygeek/llama-swap:unified-${{ inputs.backend }}
+          # When running under act, use the local builder that has warm ccache.
+          # On GitHub Actions, BUILDX_BUILDER is unset so docker uses the builder
+          # created by setup-buildx-action above.
+          BUILDX_BUILDER: ${{ env.ACT == 'true' && 'llama-swap-builder' || '' }}
+        run: |  # nosemgrep: yaml.github-actions.security.run-shell-injection.run-shell-injection
+          chmod +x docker/unified/build-image.sh
+          docker/unified/build-image.sh --${{ inputs.backend }} --assemble
+
+      - name: Push to GitHub Container Registry
+        if: ${{ !env.ACT && inputs.push_to_ghcr }}
+        run: |  # nosemgrep: yaml.github-actions.security.run-shell-injection.run-shell-injection
+          BASE_TAG="ghcr.io/mostlygeek/llama-swap:unified-${{ inputs.backend }}"
+          DATE_TAG=$(date -u +%Y-%m-%d)
+
+          docker push "${BASE_TAG}"
+          docker tag "${BASE_TAG}" "${BASE_TAG}-${DATE_TAG}"
+          docker push "${BASE_TAG}-${DATE_TAG}"
+
+          ROOTLESS_TAG="${BASE_TAG}-rootless"
+          docker push "${ROOTLESS_TAG}"
+          docker tag "${ROOTLESS_TAG}" "${ROOTLESS_TAG}-${DATE_TAG}"
+          docker push "${ROOTLESS_TAG}-${DATE_TAG}"

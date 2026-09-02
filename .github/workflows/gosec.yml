@@ -22,9 +22,9 @@ on:
 jobs:
   gosec:
     # Matrix across GOOS so build-tag-gated files (monitor_darwin.go,
-    # monitor_unix.go, monitor_windows.go, process_windows.go) all get
-    # scanned. The runner is always ubuntu-latest — only the GOOS env var
-    # changes which files gosec compiles in.
+    # monitor_unix.go, monitor_windows.go, d3dkmt_windows.go, pdh_windows.go,
+    # process_windows.go, ...) all get scanned. The runner is always
+    # ubuntu-latest — only the GOOS env var changes which files gosec compiles.
     strategy:
       fail-fast: false
       matrix:
@@ -40,12 +40,6 @@ jobs:
 
       - name: Install gosec
         run: go install github.com/securego/gosec/v2/cmd/gosec@v2.26.1
-
-      # proxy/ui_embed.go has //go:embed ui_dist, but ui_dist/ is a build
-      # artifact and not in the repo. Create an empty placeholder so the
-      # embed directive resolves during gosec's compile pass.
-      - name: Create ui_dist placeholder for //go:embed
-        run: mkdir -p proxy/ui_dist && touch proxy/ui_dist/placeholder.txt
 
       - name: Run gosec (GOOS=${{ matrix.goos }})
         env:

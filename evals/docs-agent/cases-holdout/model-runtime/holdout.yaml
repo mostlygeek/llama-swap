@@ -1,0 +1,123 @@
+# Held-out cases. Run these only to check whether gains on cases/ are real.
+#
+# Nothing in the optimization loop should be tuned against this file. If the
+# training pass rate climbs while this one does not, the prompt or the KB has
+# been fitted to the training questions rather than improved.
+
+- id: holdout-globalttl-meaning
+  question: If I set globalTTL to 600 and leave every model's ttl alone, what happens?
+  tags: [ttl, holdout]
+  expect_regex: ["10 minutes|600"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Every model unloads after 10 minutes of inactivity, because the default
+    per-model ttl of -1 inherits globalTTL.
+  rubric:
+    - Says every model unloads after 600 seconds / 10 minutes idle
+    - Explains that the default ttl of -1 inherits globalTTL
+
+- id: holdout-ttl-resets
+  question: Does a model's ttl countdown measure total time loaded, or idle time?
+  tags: [ttl, holdout]
+  expect_any: ["idle", "inactiv", "resets"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Idle time. The timer measures inactivity and resets on every request.
+  rubric:
+    - Says it measures inactivity, not total lifetime
+    - Notes the timer resets on each request
+
+- id: holdout-startport-default
+  question: What port does llama-swap start assigning model ports from?
+  tags: [cmd, holdout]
+  expect_regex: ["5800"]
+  expect_tools_any: [docs__search_docs, docs__get_config_schema]
+  reference: |
+    `startPort`, which defaults to 5800.
+  rubric:
+    - Gives 5800
+    - Names the startPort setting
+
+- id: holdout-pid-macro
+  question: Where can I use the ${PID} macro in a llama-swap config?
+  tags: [cmd, holdout]
+  expect_regex: ["cmdStop"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    In `cmdStop` only. It expands to the upstream process id.
+  rubric:
+    - States ${PID} is only available in cmdStop
+    - Says it is the upstream process id
+
+- id: holdout-matrix-purpose
+  question: When would I choose the matrix router over the group router?
+  tags: [routing, holdout]
+  expect_regex: ["matrix"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    When the allowed concurrent combinations are more complex than named
+    groups can express. matrix takes a list of model combinations that may run
+    together and solves for the cheapest way to satisfy each request.
+  rubric:
+    - Describes matrix as taking allowed concurrent combinations
+    - Contrasts it with group being simpler / the default
+
+- id: holdout-model-capabilities-vision
+  question: How do I tell llama-swap that a model supports images?
+  tags: [tools, holdout]
+  expect_regex: ["capabilities"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Set the model's `capabilities` block, which is what /v1/models reports to
+    clients. It is advertising only.
+  rubric:
+    - Names the model capabilities block
+    - Notes capabilities are advertising only
+
+- id: holdout-unload-everything
+  question: What is the simplest curl command to unload every loaded model?
+  tags: [api, holdout]
+  expect_regex: ["unload"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    `curl http://localhost:8080/unload`, or
+    `curl -X POST http://localhost:8080/api/models/unload`.
+  rubric:
+    - Gives a working curl against /unload or /api/models/unload
+    - Does not require a model id
+
+- id: holdout-config-check
+  question: How do I check my llama-swap config file is valid without starting the server?
+  tags: [cli, holdout]
+  expect_regex: ["-validate|--validate"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Run llama-swap with `-validate`, which validates the config and exits.
+  rubric:
+    - Names the -validate flag
+    - Says it exits without starting the server
+
+- id: holdout-negative-gpu-pinning
+  question: How do I pin a model to GPU 1 using a llama-swap config setting?
+  tags: [negative, holdout]
+  expect_any: ["not", "no ", "does not", "doesn't", "cannot", "isn't"]
+  forbid_regex: ["gpu:", "device:", "gpuIndex"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    llama-swap has no GPU pinning setting. You do it in the model's own cmd or
+    env, for example CUDA_VISIBLE_DEVICES, or llama-server's own device flags.
+  rubric:
+    - States there is no llama-swap config key for GPU pinning
+    - Points at the model's cmd or env instead
+    - Does not invent a gpu or device config key
+
+- id: holdout-reload-config
+  question: How do I make llama-swap pick up config changes without restarting it?
+  tags: [cli, holdout]
+  expect_any: ["watch-config", "SIGHUP", "reload"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Send SIGHUP, or run with `-watch-config` to reload on file change.
+  rubric:
+    - Names SIGHUP or the -watch-config flag
+    - Does not claim a restart is required

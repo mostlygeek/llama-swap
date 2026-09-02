@@ -12,10 +12,16 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/docagent"
+	"github.com/mostlygeek/llama-swap/internal/event"
+	"github.com/mostlygeek/llama-swap/internal/hw"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/mcptools"
 	"github.com/mostlygeek/llama-swap/internal/ollama"
 	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/internal/router"
+	"github.com/mostlygeek/llama-swap/internal/store"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 // Server owns the HTTP mux, cross-cutting middleware, and the local/peer model
@@ -29,9 +35,27 @@ type Server struct {
 	upstreamlog *logmon.Monitor
 
 	perf     *perf.Monitor
-	inflight *inflightCounter
+	inflight *inflightTracker
 	metrics  *metricsMonitor
+	store    *store.Store
 	build    BuildInfo
+	hardware *hw.HardwareSnapshot
+
+	// reference is llama-swap's own embedded documentation, served to the
+	// Playground's agentic chat and to external MCP clients through /api/mcp.
+	// It is immutable and independent of cfg, so the same library is shared
+	// across the Server instances a hot config reload creates. A nil value
+	// disables the endpoint; Docs methods are nil-receiver safe.
+	reference *docagent.Docs
+
+	// tools is the MCP tool surface served at /api/mcp. Providers are
+	// aggregated here rather than enumerated in the handler, so a future
+	// provider that proxies an upstream MCP endpoint plugs in without
+	// touching the transport.
+	tools *mcptools.Registry
+
+	profileMu     sync.RWMutex
+	activeProfile string
 
 	local router.LocalRouter
 	peer  router.Router
@@ -39,15 +63,46 @@ type Server struct {
 	mux     *http.ServeMux
 	handler http.Handler
 
-	// translatedDispatch is the dispatch pipeline (request filters + token
-	// metrics + local/peer routing) used by the Anthropic and Ollama
-	// translation layers. The translating writer is installed by the caller
-	// outside this chain so metrics tees the raw OpenAI bytes.
+	// translatedDispatch is the model-dispatch pipeline (request-body filters +
+	// token metrics + local/peer routing) used by the Anthropic and Ollama
+	// compatibility handlers. Those handlers wrap the response writer outside
+	// this chain so metrics records the raw OpenAI bytes while the client
+	// receives the translated shape. Auth + in-flight tracking are applied by
+	// the outer route chain, not here.
 	translatedDispatch http.Handler
 
 	shutdownCtx  context.Context
 	shutdownFn   context.CancelFunc
 	shuttingDown atomic.Bool
+}
+
+// ActiveProfile returns the active runtime profile, or an empty string when no
+// profile is active.
+func (s *Server) ActiveProfile() string {
+	s.profileMu.RLock()
+	defer s.profileMu.RUnlock()
+	return s.activeProfile
+}
+
+// setActiveProfile updates the runtime selection. An empty name deactivates
+// profiles. It returns whether the selection changed.
+func (s *Server) setActiveProfile(name string) (bool, error) {
+	if name != "" {
+		if _, ok := s.cfg.Profiles[name]; !ok {
+			return false, fmt.Errorf("profile %q not found", name)
+		}
+	}
+	s.profileMu.Lock()
+	if s.activeProfile == name {
+		s.profileMu.Unlock()
+		return false, nil
+	}
+	s.activeProfile = name
+	s.profileMu.Unlock()
+
+	s.proxylog.Infof("active profile changed to %q", name)
+	event.Emit(swaputil.ProfileChangedEvent{Active: name})
+	return true, nil
 }
 
 // modelPostJSONRoutes are endpoints with a model id in the JSON request body.
@@ -69,6 +124,9 @@ var modelPostJSONRoutes = []string{
 	"/v1/images/generations",
 	"/sdapi/v1/txt2img",
 	"/sdapi/v1/img2img",
+
+	// audio.cpp generic task API
+	"/audioapi/v1/tasks/run",
 
 	// versionless routes, the /v/ is stripped before the request is forwarded upstream
 	// see issue #728
@@ -93,6 +151,28 @@ var modelPostFormRoutes = []string{
 var modelGetRoutes = []string{
 	"/v1/audio/voices",
 	"/sdapi/v1/loras",
+	"/props",
+}
+
+// isMetricsRecordPath reports whether path is one of the model-dispatched
+// endpoints that the metrics middleware records in the activity log.
+func isMetricsRecordPath(path string) bool {
+	for _, p := range modelPostJSONRoutes {
+		if p == path {
+			return true
+		}
+	}
+	for _, p := range modelPostFormRoutes {
+		if p == path {
+			return true
+		}
+	}
+	for _, p := range modelGetRoutes {
+		if p == path {
+			return true
+		}
+	}
+	return false
 }
 
 // BuildInfo carries version metadata surfaced by GET /api/version.
@@ -102,16 +182,17 @@ type BuildInfo struct {
 	Date    string
 }
 
-func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, upstreamlog *logmon.Monitor, perfMon *perf.Monitor, build BuildInfo) (*Server, error) {
+func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, upstreamlog *logmon.Monitor, perfMon *perf.Monitor, st *store.Store, build BuildInfo, hardware *hw.HardwareSnapshot, refs *docagent.Docs) (*Server, error) {
 	var local router.LocalRouter
 	var err error
 
-	if cfg.Matrix != nil {
+	switch cfg.Routing.Router.Use {
+	case "matrix":
 		local, err = router.NewMatrix(cfg, proxylog, upstreamlog)
 		if err != nil {
 			return nil, fmt.Errorf("creating matrix router: %w", err)
 		}
-	} else {
+	default: // "group"
 		local, err = router.NewGroup(cfg, proxylog, upstreamlog)
 		if err != nil {
 			return nil, fmt.Errorf("creating group router: %w", err)
@@ -123,34 +204,55 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 		return nil, fmt.Errorf("creating peer router: %w", err)
 	}
 
+	if st == nil {
+		return nil, fmt.Errorf("store is required")
+	}
+
 	shutdownCtx, shutdownFn := context.WithCancel(context.Background())
 	s := &Server{
-		cfg:         cfg,
-		muxlog:      muxlog,
-		proxylog:    proxylog,
-		upstreamlog: upstreamlog,
-		perf:        perfMon,
-		inflight:    &inflightCounter{},
-		metrics:     newMetricsMonitor(proxylog, cfg.MetricsMaxInMemory, cfg.CaptureBuffer, cfg.MetricsStoreFile, 5*time.Second),
-		build:       build,
-		local:       local,
-		peer:        peer,
-		shutdownCtx: shutdownCtx,
-		shutdownFn:  shutdownFn,
+		cfg:           cfg,
+		muxlog:        muxlog,
+		proxylog:      proxylog,
+		upstreamlog:   upstreamlog,
+		perf:          perfMon,
+		inflight:      newInflightTracker(),
+		metrics:       newMetricsMonitor(proxylog, cfg.MetricsMaxInMemory, cfg.CaptureBuffer, st),
+		store:         st,
+		build:         build,
+		hardware:      hardware,
+		reference:     refs,
+		activeProfile: cfg.Hooks.OnStartup.Profile,
+		local:         local,
+		peer:          peer,
+		shutdownCtx:   shutdownCtx,
+		shutdownFn:    shutdownFn,
 	}
+	// SysProvider is constructed here because this is where perf and hardware
+	// are in scope; wiring those in later is a change to internal/mcptools.
+	tools, err := mcptools.New(
+		docagent.NewDocsProvider(refs),
+		mcptools.NewSysProvider(nil),
+		config.NewConfigProvider(cfg),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("building the MCP tool registry: %w", err)
+	}
+	s.tools = tools
+
 	s.routes()
 	s.startPreload()
 	return s, nil
 }
 
 // localPeerHandler dispatches a model-routed request to the local or peer
-// router. The model is resolved once via router.FetchContext.
+// router. The model is resolved once via swaputil.FetchContext.
 func (s *Server) localPeerHandler(w http.ResponseWriter, r *http.Request) {
 	stripVersionPrefix(r)
+	stripAudioAPIPrefix(r)
 
-	data, err := router.FetchContext(r, s.cfg)
+	data, err := swaputil.FetchContext(r, s.cfg)
 	if err != nil {
-		router.SendError(w, r, router.ErrNoModelInContext)
+		swaputil.SendError(w, r, swaputil.ErrNoModelInContext)
 		return
 	}
 
@@ -162,7 +264,7 @@ func (s *Server) localPeerHandler(w http.ResponseWriter, r *http.Request) {
 		s.proxylog.Debugf("dispatch: using peer for model: %s", data.ModelID)
 		s.peer.ServeHTTP(w, r)
 	default:
-		router.SendError(w, r, router.ErrNoRouterFound)
+		swaputil.SendError(w, r, router.ErrNoRouterFound)
 	}
 }
 
@@ -174,25 +276,28 @@ func stripVersionPrefix(r *http.Request) {
 	}
 }
 
+// stripAudioAPIPrefix rewrites /audioapi/... requests to their /... form
+// before forwarding upstream, so /audioapi/v1/tasks/run reaches the upstream
+// as /v1/tasks/run.
+func stripAudioAPIPrefix(r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/audioapi") {
+		r.URL.Path = strings.TrimPrefix(r.URL.Path, "/audioapi")
+	}
+}
+
 // routes builds the mux, registers every route, and wraps the mux with the
 // global CORS middleware.
 func (s *Server) routes() {
-	authMW := CreateAuthMiddleware(s.cfg)
-	filterMW := CreateFilterMiddleware(s.cfg)
-	formFilterMW := CreateFormFilterMiddleware(s.cfg)
 
-	// Model-dispatched routes get auth + per-model concurrency limiting + body
-	// filters + in-flight tracking + token metrics. concurrencyMW rejects with
-	// 429 before the body filters do any rewrite work. filterMW rewrites JSON
-	// bodies and formFilterMW rewrites multipart bodies; each is a no-op for the
-	// other's Content-Type. Both run before the metrics middleware so it buffers
-	// the rewritten body.
+	authMW := CreateAuthMiddleware(s.cfg)
 	modelChain := chain.New(
 		authMW,
-		CreateConcurrencyMiddleware(s.cfg),
-		filterMW,
-		formFilterMW,
-		CreateInflightMiddleware(s.inflight),
+		CreateProfileMiddleware(s),
+		CreateSelectorMiddleware(s),
+		CreateRequestContextMiddleware(s.cfg),
+		CreateInflightMiddleware(s.inflight, s.cfg),
+		CreateFilterMiddleware(s.cfg),
+		CreateFormFilterMiddleware(s.cfg),
 		CreateMetricsMiddleware(s.metrics, s.cfg),
 	)
 	// Custom endpoints only need auth.
@@ -201,21 +306,25 @@ func (s *Server) routes() {
 	mux := http.NewServeMux()
 	dispatch := http.HandlerFunc(s.localPeerHandler)
 
-	// translatedDispatch applies the request body filters and token metrics
-	// before routing. The Anthropic/Ollama handlers wrap the response writer
-	// (outside this chain) so metrics records the raw OpenAI bytes while the
-	// client receives the translated shape.
+	// translatedDispatch applies the request-body filters and token metrics
+	// before routing, but not auth/in-flight (the Anthropic/Ollama route chains
+	// own those). The handlers wrap the response writer outside this chain so
+	// metrics tees the raw OpenAI bytes while the client sees the translated
+	// shape.
 	s.translatedDispatch = chain.New(
-		filterMW,
-		formFilterMW,
+		CreateFilterMiddleware(s.cfg),
+		CreateFormFilterMiddleware(s.cfg),
 		CreateMetricsMiddleware(s.metrics, s.cfg),
 	).Then(dispatch)
 
+	// Anthropic Messages API. /v1/messages and /v/messages are intercepted for
+	// OpenAI<->Anthropic translation (auth + in-flight only; translation and
+	// metrics happen inside the handler). Their count_tokens variants stay plain
+	// model-dispatched pass-through.
+	anthropicChain := chain.New(authMW, CreateInflightMiddleware(s.inflight, s.cfg))
 	for _, path := range modelPostJSONRoutes {
-		// /v1/messages and /v/messages get Anthropic translation (registered
-		// below); their count_tokens variants stay plain pass-through.
 		if path == "/v1/messages" || path == "/v/messages" {
-			mux.Handle("POST "+path, chain.New(authMW, CreateInflightMiddleware(s.inflight)).ThenFunc(s.handleAnthropicMessages))
+			mux.Handle("POST "+path, anthropicChain.ThenFunc(s.handleAnthropicMessages))
 			continue
 		}
 		mux.Handle("POST "+path, modelChain.Then(dispatch))
@@ -228,9 +337,11 @@ func (s *Server) routes() {
 	}
 
 	// Ollama-compatible API surface (see internal/ollama). llama-swap already
-	// serves /api/version, so SkipVersion is true. Each route gets auth +
-	// in-flight tracking; translation + metrics happen inside the handler.
-	ollamaChain := chain.New(authMW, CreateInflightMiddleware(s.inflight))
+	// serves /api/version (handleAPIVersion), so SkipVersion is true. Each route
+	// gets auth + in-flight tracking; translation + metrics happen inside the
+	// handler via translatedDispatch. These paths are disjoint from the
+	// llama-swap /api/* control endpoints registered below.
+	ollamaChain := chain.New(authMW, CreateInflightMiddleware(s.inflight, s.cfg))
 	registerOllama := func(method, path string, h http.HandlerFunc) {
 		mux.Handle(method+" "+path, ollamaChain.ThenFunc(h))
 	}
@@ -238,6 +349,7 @@ func (s *Server) routes() {
 
 	// llama-swap API + custom endpoints.
 	mux.Handle("GET /v1/models", apiChain.ThenFunc(s.handleListModels))
+	mux.Handle("GET /models", apiChain.ThenFunc(s.handleListModels))
 	mux.Handle("GET /logs", apiChain.ThenFunc(s.handleLogs))
 	mux.Handle("GET /logs/stream", apiChain.ThenFunc(s.handleLogStream))
 	mux.Handle("GET /logs/stream/{logMonitorID...}", apiChain.ThenFunc(s.handleLogStream))
@@ -246,38 +358,63 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /wol-health", handleHealth)
 	mux.HandleFunc("GET /{$}", handleRootRedirect)
 	// Ollama clients (e.g. Enchanted via OllamaKit) probe HEAD / for
-	// reachability and expect 200, like a real Ollama server. Register it
+	// reachability and expect 200, like a real Ollama server. Registered
 	// explicitly so it is not answered by the GET /{$} redirect.
 	mux.HandleFunc("HEAD /{$}", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// Embedded UI.
-	mux.HandleFunc("GET /ui/", s.handleUI)
+	// Embedded UI. The hand-authored vanilla-JS SPA under ui_dist is embedded
+	// via //go:embed (see ui.go); root assets referenced by index.html and the
+	// PWA manifest are served from the FS root.
+	mux.Handle("GET /ui/", chain.New(authMW).ThenFunc(s.handleUI))
 	mux.HandleFunc("GET /favicon.ico", s.handleFavicon)
 	for _, asset := range rootUIAssets {
 		mux.HandleFunc("GET /"+asset, s.handleRootAsset)
 	}
 
-	// Prometheus metrics (no auth, matches the legacy endpoint).
-	mux.HandleFunc("GET /metrics", s.handleMetrics)
+	// Prometheus metrics (wrapped by apiChain, matches the legacy endpoint).
+	mux.Handle("GET /metrics", apiChain.ThenFunc(s.handleMetrics))
 
 	// Operations endpoints.
 	mux.Handle("GET /unload", apiChain.ThenFunc(s.handleUnload))
 	mux.Handle("GET /running", apiChain.ThenFunc(s.handleRunning))
 
-	// Upstream passthrough.
+	// Upstream passthrough. Meter only the model-dispatched endpoints that can
+	// produce token usage/timings.
+	upstreamChain := apiChain.Append(
+		CreateProfileMiddleware(s),
+		CreateUpstreamInflightMiddleware(s.inflight, s.cfg),
+		CreateMetricsMiddleware(s.metrics, s.cfg),
+	)
 	mux.HandleFunc("GET /upstream", handleUpstreamRedirect)
-	mux.Handle("/upstream/{upstreamPath...}", apiChain.ThenFunc(s.handleUpstream))
+	mux.Handle("/upstream/{upstreamPath...}", upstreamChain.ThenFunc(s.handleUpstream))
+
+	// ComfyUI compatibility passthrough. This uses the fixed comfyui_auto model,
+	// whose compatibility settings are applied while loading config. Only the
+	// root path may start an unloaded model.
+	mux.Handle("/comfyui", apiChain.ThenFunc(handleComfyUIRedirect))
+	mux.Handle("/comfyui/{comfyPath...}", apiChain.ThenFunc(s.handleComfyUI))
 
 	// API group (API-key protected) consumed by the UI.
 	mux.Handle("POST /api/models/unload", apiChain.ThenFunc(s.handleAPIUnloadAll))
 	mux.Handle("POST /api/models/unload/{model...}", apiChain.ThenFunc(s.handleAPIUnloadModel))
+	mux.Handle("GET /api/profiles", apiChain.ThenFunc(s.handleAPIProfiles))
+	mux.Handle("PUT /api/profiles/active", apiChain.ThenFunc(s.handleAPIActiveProfile))
+	mux.Handle("POST /api/inflight/{id}/cancel", apiChain.ThenFunc(s.handleAPICancelInflight))
 	mux.Handle("GET /api/events", apiChain.ThenFunc(s.handleAPIEvents))
-	mux.Handle("GET /api/metrics", apiChain.ThenFunc(s.handleAPIMetrics))
+	mux.Handle("GET /api/metrics/activity", apiChain.ThenFunc(s.handleAPIActivity))
+	mux.Handle("GET /api/metrics/stats", apiChain.ThenFunc(s.handleAPIActivityStats))
 	mux.Handle("GET /api/performance", apiChain.ThenFunc(s.handleAPIPerformance))
 	mux.Handle("GET /api/version", apiChain.ThenFunc(s.handleAPIVersion))
+	mux.Handle("GET /api/hardware", apiChain.ThenFunc(s.handleAPIHardware))
 	mux.Handle("GET /api/captures/{id}", apiChain.ThenFunc(s.handleAPICapture))
+
+	// Stateless MCP server exposing llama-swap's own documentation as tools,
+	// consumed by the Playground's agentic chat and by any external MCP client.
+	// Registered without a method so non-POST reaches the handler and gets a
+	// 405 with Allow, rather than the mux's bare 404.
+	mux.Handle("/api/mcp", apiChain.ThenFunc(s.handleAPIMCP))
 
 	s.mux = mux
 	s.handler = chain.New(CreateRequestLogMiddleware(s.proxylog), CreateCORSMiddleware()).Then(mux)
@@ -292,15 +429,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // tear down routers; call Shutdown for that. Safe to call repeatedly.
 func (s *Server) CloseStreams() {
 	s.shutdownFn()
-	// Flush metrics persistence if active
-	if s.metrics != nil {
-		_ = s.metrics.Close()
-	}
 }
 
 // Shutdown stops the local and peer routers in parallel. It is idempotent;
-// repeated calls return nil without re-running shutdown. Also flushes and
-// stops the metrics persistence store if active.
+// repeated calls return nil without re-running shutdown.
 //
 // Callers must drain inflight HTTP requests (httpServer.Shutdown) before
 // calling this, otherwise inflight requests 502 when their processes are torn
@@ -312,15 +444,16 @@ func (s *Server) Shutdown(timeout time.Duration) error {
 	}
 	s.shutdownFn()
 
-	// Flush and stop metrics persistence so a hot-reload doesn't leave
-	// orphaned goroutines writing to the same file.
-	if s.metrics != nil {
-		_ = s.metrics.Close()
-	}
-
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var errs []error
+
+	// Server.Shutdown is a closed list: anything holding resources that is not
+	// released here leaks. The tool registry is cheap today and expensive once
+	// a provider holds upstream connections or subprocesses.
+	if err := s.tools.Shutdown(timeout); err != nil {
+		errs = append(errs, err) // nosemgrep: trailofbits.go.racy-append-to-slice.racy-append-to-slice
+	}
 
 	for _, rt := range []router.Router{s.local, s.peer} {
 		if rt == nil {

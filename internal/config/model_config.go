@@ -2,12 +2,60 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"runtime"
 )
 
 const (
-	MODEL_CONFIG_DEFAULT_TTL = -1
+	MODEL_CONFIG_DEFAULT_TTL   = -1
+	MODEL_CONFIG_DEFAULT_PROXY = "http://localhost:${PORT}"
+	comfyUIConcurrencyLimit    = 50
+
+	// ComfyUIModelID identifies the model used by the /comfyui endpoint.
+	ComfyUIModelID = "comfyui_auto"
 )
+
+var validModalities = map[string]struct{}{
+	"text":  {},
+	"audio": {},
+	"image": {},
+	"video": {},
+}
+
+// ModelCapConfig defines what modalities and features a model supports.
+// Used in /v1/models to inform clients. An empty block (all zero values) is
+// treated as not configured.
+type ModelCapConfig struct {
+	In       []string `yaml:"in"`
+	Out      []string `yaml:"out"`
+	Tools    bool     `yaml:"tools"`
+	Reranker bool     `yaml:"reranker"`
+	Context  int      `yaml:"context"`
+}
+
+// Empty returns true when all fields are at their zero values.
+func (c ModelCapConfig) Empty() bool {
+	return len(c.In) == 0 && len(c.Out) == 0 && !c.Tools && !c.Reranker && c.Context == 0
+}
+
+// Validate checks that all modality values are recognized and context is
+// non-negative. Returns an error if any value is invalid.
+func (c ModelCapConfig) Validate() error {
+	for _, m := range c.In {
+		if _, ok := validModalities[m]; !ok {
+			return fmt.Errorf("capabilities.in: invalid modality %q, must be one of: text, audio, image, video", m)
+		}
+	}
+	for _, m := range c.Out {
+		if _, ok := validModalities[m]; !ok {
+			return fmt.Errorf("capabilities.out: invalid modality %q, must be one of: text, audio, image, video", m)
+		}
+	}
+	if c.Context < 0 {
+		return errors.New("capabilities.context: must be >= 0")
+	}
+	return nil
+}
 
 // TimeoutsConfig holds timeout settings for proxy connections
 // 0 = no timeout
@@ -20,6 +68,13 @@ type TimeoutsConfig struct {
 	IdleConn       int `yaml:"idleConn"`
 }
 
+// CompatConfig holds compatibility settings for upstream applications.
+type CompatConfig struct {
+	// IgnoreWebsockets prevents websocket connections from participating in
+	// model lifecycle activity such as swapping, concurrency, and TTL tracking.
+	IgnoreWebsockets bool `yaml:"ignoreWebsockets"`
+}
+
 type ModelConfig struct {
 	Cmd           string   `yaml:"cmd"`
 	CmdStop       string   `yaml:"cmdStop"`
@@ -28,6 +83,7 @@ type ModelConfig struct {
 	Env           []string `yaml:"env"`
 	CheckEndpoint string   `yaml:"checkEndpoint"`
 	UnloadAfter   int      `yaml:"ttl"`
+	UnloadTimeout int      `yaml:"unloadTimeout"`
 	Unlisted      bool     `yaml:"unlisted"`
 	UseModelName  string   `yaml:"useModelName"`
 
@@ -65,6 +121,12 @@ type ModelConfig struct {
 	// Timeout settings for proxy connections
 	Timeouts TimeoutsConfig `yaml:"timeouts"`
 
+	// Compatibility settings for upstream applications.
+	Compat CompatConfig `yaml:"compat"`
+
+	// Capabilities defines what modalities and features the model supports.
+	Capabilities ModelCapConfig `yaml:"capabilities"`
+
 	// Copy of HealthCheckTimeout from global config
 	HealthCheckTimeout int `yaml:"healthCheckTimeout"`
 }
@@ -72,20 +134,19 @@ type ModelConfig struct {
 func (m *ModelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	type rawModelConfig ModelConfig
 	defaults := rawModelConfig{
-		Cmd:                  "",
-		CmdStop:              "",
-		Proxy:                "http://localhost:${PORT}",
-		Aliases:              []string{},
-		Env:                  []string{},
-		CheckEndpoint:        "/health",
-		UnloadAfter:          MODEL_CONFIG_DEFAULT_TTL, // use GlobalTTL
-		Unlisted:             false,
-		UseModelName:         "",
-		PassthroughAnthropic: false,
-		PassthroughOllama:    false,
-		ConcurrencyLimit:     0,
-		Name:                 "",
-		Description:          "",
+		Cmd:              "",
+		CmdStop:          "",
+		Proxy:            MODEL_CONFIG_DEFAULT_PROXY,
+		Aliases:          []string{},
+		Env:              []string{},
+		CheckEndpoint:    "/health",
+		UnloadAfter:      MODEL_CONFIG_DEFAULT_TTL, // use GlobalTTL
+		UnloadTimeout:    0,                        // use global UnloadTimeout
+		Unlisted:         false,
+		UseModelName:     "",
+		ConcurrencyLimit: 0,
+		Name:             "",
+		Description:      "",
 
 		// matches http.DefaultTransport
 		Timeouts: TimeoutsConfig{

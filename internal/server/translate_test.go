@@ -8,45 +8,35 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
-	"github.com/mostlygeek/llama-swap/internal/process"
-	"github.com/mostlygeek/llama-swap/internal/router"
+	"github.com/mostlygeek/llama-swap/internal/store"
 	"github.com/tidwall/gjson"
 )
 
-// scriptedRouter is a LocalRouter whose ServeHTTP runs a test-supplied handler,
-// standing in for a model's upstream process so the translation layer can be
-// exercised end-to-end through the real dispatch pipeline.
-type scriptedRouter struct {
-	handled map[string]bool
-	handler http.HandlerFunc
-	running map[string]process.ProcessState
-}
-
-func (s *scriptedRouter) Handles(model string) bool                        { return s.handled[model] }
-func (s *scriptedRouter) Shutdown(time.Duration) error                     { return nil }
-func (s *scriptedRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.handler(w, r) }
-func (s *scriptedRouter) RunningModels() map[string]process.ProcessState   { return s.running }
-func (s *scriptedRouter) Unload(time.Duration, ...string)                  {}
-func (s *scriptedRouter) ProcessLogger(string) (*logmon.Monitor, bool) {
-	return nil, false
-}
-
-func newTranslateServer(t *testing.T, cfg config.Config, local router.LocalRouter) *Server {
+// newTranslateServer builds a Server with a caller-supplied config and local
+// router, so the Anthropic/Ollama translation layer can be exercised end-to-end
+// through the real dispatch pipeline. It mirrors newTestServer but takes a cfg
+// (the translation handlers resolve models via cfg.RealModelName).
+func newTranslateServer(t *testing.T, cfg config.Config, local *stubRouter) *Server {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	proxylog := logmon.NewWriter(io.Discard)
+	st, err := store.New("")
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
 	s := &Server{
 		cfg:         cfg,
 		muxlog:      logmon.NewWriter(io.Discard),
 		proxylog:    proxylog,
 		upstreamlog: logmon.NewWriter(io.Discard),
-		inflight:    &inflightCounter{},
-		metrics:     newMetricsMonitor(proxylog, 0, 0, "", 0),
+		inflight:    newInflightTracker(),
+		metrics:     newMetricsMonitor(proxylog, 0, 0, st),
+		store:       st,
 		local:       local,
 		peer:        newStubRouter(nil, ""),
 		shutdownCtx: ctx,
@@ -56,6 +46,7 @@ func newTranslateServer(t *testing.T, cfg config.Config, local router.LocalRoute
 	return s
 }
 
+// oneModelConfig is a minimal config with a single local model.
 func oneModelConfig() config.Config {
 	return config.Config{Models: map[string]config.ModelConfig{"test-model": {}}}
 }
@@ -66,15 +57,13 @@ const openAIChatJSON = `{"id":"chatcmpl-x","choices":[{"message":{"role":"assist
 func TestServer_AnthropicMessages_BufferedTranslation(t *testing.T) {
 	var gotPath string
 	var gotBody []byte
-	local := &scriptedRouter{
-		handled: map[string]bool{"test-model": true},
-		handler: func(w http.ResponseWriter, r *http.Request) {
-			gotPath = r.URL.Path
-			gotBody, _ = io.ReadAll(r.Body)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(openAIChatJSON))
-		},
+	local := newStubRouter([]string{"test-model"}, "")
+	local.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(openAIChatJSON))
 	}
 	s := newTranslateServer(t, oneModelConfig(), local)
 
@@ -117,13 +106,11 @@ func TestServer_AnthropicMessages_StreamingTranslation(t *testing.T) {
 		``,
 		``,
 	}, "\n")
-	local := &scriptedRouter{
-		handled: map[string]bool{"test-model": true},
-		handler: func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "text/event-stream")
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(sse))
-		},
+	local := newStubRouter([]string{"test-model"}, "")
+	local.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(sse)) // nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
 	}
 	s := newTranslateServer(t, oneModelConfig(), local)
 
@@ -141,16 +128,44 @@ func TestServer_AnthropicMessages_StreamingTranslation(t *testing.T) {
 	}
 }
 
+// TestServer_AnthropicMessages_Passthrough verifies a model with
+// passthroughAnthropic set forwards the raw Anthropic body unchanged (no
+// translation to the chat-completions path).
+func TestServer_AnthropicMessages_Passthrough(t *testing.T) {
+	var gotPath string
+	var gotBody []byte
+	local := newStubRouter([]string{"native"}, "")
+	local.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}
+	cfg := config.Config{Models: map[string]config.ModelConfig{
+		"native": {PassthroughAnthropic: true},
+	}}
+	s := newTranslateServer(t, cfg, local)
+
+	body := `{"model":"native","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	s.ServeHTTP(httptest.NewRecorder(), req)
+
+	if gotPath != "/v1/messages" {
+		t.Errorf("upstream path = %q, want /v1/messages (unchanged)", gotPath)
+	}
+	if !gjson.GetBytes(gotBody, "max_tokens").Exists() {
+		t.Errorf("passthrough body not Anthropic-shaped: %s", gotBody)
+	}
+}
+
 func TestServer_OllamaChat_BufferedTranslation(t *testing.T) {
 	var gotPath string
-	local := &scriptedRouter{
-		handled: map[string]bool{"test-model": true},
-		handler: func(w http.ResponseWriter, r *http.Request) {
-			gotPath = r.URL.Path
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(openAIChatJSON))
-		},
+	local := newStubRouter([]string{"test-model"}, "")
+	local.serveHTTP = func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(openAIChatJSON))
 	}
 	s := newTranslateServer(t, oneModelConfig(), local)
 
@@ -175,11 +190,10 @@ func TestServer_OllamaChat_BufferedTranslation(t *testing.T) {
 	}
 }
 
-// TestServer_OllamaHeadProbe verifies that HEAD / returns 200 (Ollama clients
-// such as Enchanted probe it for reachability) while GET / still redirects to
-// the UI.
+// TestServer_OllamaHeadProbe verifies HEAD / returns 200 (Ollama clients such
+// as Enchanted probe it for reachability) while GET / still redirects.
 func TestServer_OllamaHeadProbe(t *testing.T) {
-	s := newTranslateServer(t, oneModelConfig(), &scriptedRouter{})
+	s := newTranslateServer(t, oneModelConfig(), newStubRouter(nil, ""))
 
 	wHead := httptest.NewRecorder()
 	s.ServeHTTP(wHead, httptest.NewRequest(http.MethodHead, "/", nil))
@@ -199,7 +213,7 @@ func TestServer_OllamaTags_ListsModels(t *testing.T) {
 		"alpha": {Name: "Alpha"},
 		"beta":  {Unlisted: true},
 	}}
-	s := newTranslateServer(t, cfg, &scriptedRouter{})
+	s := newTranslateServer(t, cfg, newStubRouter(nil, ""))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/tags", nil)
 	w := httptest.NewRecorder()
@@ -219,5 +233,21 @@ func TestServer_OllamaTags_ListsModels(t *testing.T) {
 	// Unlisted "beta" is excluded; only "alpha" is listed.
 	if len(resp.Models) != 1 || resp.Models[0].Name != "alpha" {
 		t.Errorf("tags = %+v, want only alpha", resp.Models)
+	}
+}
+
+// TestServer_OllamaVersion_ServedByUpstream confirms /api/version is answered by
+// the llama-swap handler (Ollama registration uses SkipVersion) and is disjoint
+// from the llama-swap /api/* control endpoints.
+func TestServer_OllamaVersion_ServedByUpstream(t *testing.T) {
+	s := newTranslateServer(t, oneModelConfig(), newStubRouter(nil, ""))
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/version", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("/api/version = %d, want 200", w.Code)
+	}
+	if !gjson.GetBytes(w.Body.Bytes(), "version").Exists() {
+		t.Errorf("/api/version missing version field: %s", w.Body.String())
 	}
 }

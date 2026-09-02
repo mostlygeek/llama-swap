@@ -107,7 +107,7 @@ func sendChunk(w http.ResponseWriter, content string, finishReason *string) erro
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(w, "data: %s\n\n", data)
+	_, err = fmt.Fprintf(w, "data: %s\n\n", data) // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 	return err
 }
 
@@ -207,9 +207,7 @@ func chatHandler(ready <-chan struct{}) http.HandlerFunc {
 				},
 			}
 			w.Header().Set("Content-Type", "application/json")
-			if err := json.NewEncoder(w).Encode(resp); err != nil {
-				log.Printf("error encoding response: %v", err)
-			}
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 
@@ -234,7 +232,7 @@ func chatHandler(ready <-chan struct{}) http.HandlerFunc {
 			},
 		}
 		if data, err := json.Marshal(first); err == nil {
-			fmt.Fprintf(w, "data: %s\n\n", data)
+			fmt.Fprintf(w, "data: %s\n\n", data) // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 			flusher.Flush()
 		}
 
@@ -284,8 +282,8 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              *flagListen,
-		ReadHeaderTimeout: 30 * time.Second,
 		Handler:           mux,
+		ReadHeaderTimeout: 30 * time.Second, // mitigate slowloris
 	}
 
 	go func() {

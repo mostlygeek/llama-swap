@@ -18,6 +18,10 @@ on:
         description: "stable-diffusion.cpp commit hash, tag, or branch"
         required: false
         default: "master"
+      audio_ref:
+        description: "audio.cpp commit hash, tag, or branch"
+        required: false
+        default: "main"
       ik_llama_ref:
         description: "ik_llama.cpp commit hash, tag, or branch (CUDA only)"
         required: false
@@ -37,7 +41,7 @@ on:
         required: false
         default: true
       push_to_ghcr:
-        description: "Push images to ghcr.io"
+        description: "Push the unified images to ghcr.io (per-project artifacts images are always pushed; they are how the build stages reach the assemble job)"
         type: boolean
         required: false
         default: true
@@ -46,91 +50,109 @@ permissions:
   contents: read
   packages: write
 
+# The build is one Dockerfile per piece: a builder base per backend, one per
+# upstream project, and the runtime. Each compiles in its own job and publishes
+# an image; a final job copies the /install trees into the unified image.
+#
+# Building everything in one job put five concurrent CUDA compiles on a
+# four-core runner, which stopped fitting in the 6h job limit; a cancelled job
+# also never reached --cache-to, so nothing was cached and every later run
+# rebuilt from scratch. Images are addressed by content -- the base by its
+# Dockerfile, a project by its upstream commit plus its own two files and the
+# base tag -- so anything unchanged is skipped, and one project overrunning no
+# longer discards the others.
+#
+# Each backend runs as its own call to unified-docker-backend.yml, so Vulkan
+# publishes as soon as its own projects finish rather than waiting on the
+# multi-hour CUDA compiles.
 jobs:
   setup:
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-    steps:
-      - id: set-matrix
-        run: |
-          backends=()
-          # schedule uses defaults (build both); workflow_dispatch respects inputs
-          if [[ "${{ github.event_name }}" == "schedule" ]] || [[ "${{ inputs.build_cuda }}" == "true" ]]; then
-            backends+=("cuda")
-          fi
-          if [[ "${{ github.event_name }}" == "schedule" ]] || [[ "${{ inputs.build_vulkan }}" == "true" ]]; then
-            backends+=("vulkan")
-          fi
-          matrix=$(printf '%s\n' "${backends[@]}" | jq -R . | jq -sc .)
-          echo "matrix=$matrix" >> $GITHUB_OUTPUT
-
-  build:
-    needs: setup
-    if: ${{ needs.setup.outputs.matrix != '[]' }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        backend: ${{ fromJSON(needs.setup.outputs.matrix) }}
+      build_cuda: ${{ steps.plan.outputs.build_cuda }}
+      build_vulkan: ${{ steps.plan.outputs.build_vulkan }}
+      cuda_projects: ${{ steps.plan.outputs.cuda_projects }}
+      vulkan_projects: ${{ steps.plan.outputs.vulkan_projects }}
+      push_to_ghcr: ${{ steps.plan.outputs.push_to_ghcr }}
+      llama_hash: ${{ steps.refs.outputs.llama_hash }}
+      whisper_hash: ${{ steps.refs.outputs.whisper_hash }}
+      sd_hash: ${{ steps.refs.outputs.sd_hash }}
+      audio_hash: ${{ steps.refs.outputs.audio_hash }}
+      ik_llama_hash: ${{ steps.refs.outputs.ik_llama_hash }}
+      ls_hash: ${{ steps.refs.outputs.ls_hash }}
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
 
-      - name: Free up disk space
-        run: |
-          echo "Before cleanup:"
-          df -h
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo docker system prune -af
-          echo "After cleanup:"
-          df -h
-
-      # On GitHub Actions runners, create a fresh builder.
-      # When running locally under act, skip this and reuse the existing
-      # llama-swap-builder (which has ccache warm) to avoid exhausting disk.
-      - name: Set up Docker Buildx
-        if: ${{ !env.ACT }}
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd #v4.0.0
-
-      - name: Log in to GitHub Container Registry
-        if: ${{ !env.ACT }}
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build unified Docker image (${{ matrix.backend }})
+      # Resolve every ref once, here. The build and assemble jobs are handed
+      # full commit hashes, so a branch that moves mid-run cannot leave two
+      # jobs building different revisions of the same project.
+      - name: Resolve upstream commits
+        id: refs
         env:
           LLAMA_REF: ${{ inputs.llama_cpp_ref || 'master' }}
           WHISPER_REF: ${{ inputs.whisper_ref || 'master' }}
           SD_REF: ${{ inputs.sd_ref || 'master' }}
+          AUDIO_REF: ${{ inputs.audio_ref || 'main' }}
           IK_LLAMA_REF: ${{ inputs.ik_llama_ref || 'main' }}
           LS_VERSION: ${{ inputs.llama_swap_version || 'main' }}
-          DOCKER_IMAGE_TAG: ghcr.io/mostlygeek/llama-swap:unified-${{ matrix.backend }}
-          # When running under act, use the local builder that has warm ccache.
-          # On GitHub Actions, BUILDX_BUILDER is unset so docker uses the builder
-          # created by setup-buildx-action above.
-          BUILDX_BUILDER: ${{ env.ACT == 'true' && 'llama-swap-builder' || '' }}
         run: |
           chmod +x docker/unified/build-image.sh
-          docker/unified/build-image.sh --${{ matrix.backend }}
+          docker/unified/build-image.sh --cuda --resolve | tee -a "$GITHUB_OUTPUT"
 
-      - name: Push to GitHub Container Registry
-        if: ${{ !env.ACT && (github.event_name == 'schedule' || inputs.push_to_ghcr == true) }}
-        run: |
-          BASE_TAG="ghcr.io/mostlygeek/llama-swap:unified-${{ matrix.backend }}"
-          DATE_TAG=$(date -u +%Y-%m-%d)
+      - name: Plan backends
+        id: plan
+        run: |  # nosemgrep: yaml.github-actions.security.run-shell-injection.run-shell-injection
+          # schedule uses defaults (build both, push); workflow_dispatch respects inputs
+          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+            build_cuda=true; build_vulkan=true; push=true
+          else
+            build_cuda="${{ inputs.build_cuda }}"
+            build_vulkan="${{ inputs.build_vulkan }}"
+            push="${{ inputs.push_to_ghcr }}"
+          fi
 
-          docker push "${BASE_TAG}"
-          docker tag "${BASE_TAG}" "${BASE_TAG}-${DATE_TAG}"
-          docker push "${BASE_TAG}-${DATE_TAG}"
+          {
+            echo "build_cuda=${build_cuda}"
+            echo "build_vulkan=${build_vulkan}"
+            echo "push_to_ghcr=${push}"
+            # ik_llama.cpp has no Vulkan build.
+            echo 'cuda_projects=["whisper","sd","audio","llama","ik-llama"]'
+            echo 'vulkan_projects=["whisper","sd","audio","llama"]'
+          } >> "$GITHUB_OUTPUT"
 
-          ROOTLESS_TAG="${BASE_TAG}-rootless"
-          docker push "${ROOTLESS_TAG}"
-          docker tag "${ROOTLESS_TAG}" "${ROOTLESS_TAG}-${DATE_TAG}"
-          docker push "${ROOTLESS_TAG}-${DATE_TAG}"
+  cuda:
+    needs: setup
+    if: ${{ needs.setup.outputs.build_cuda == 'true' }}
+    uses: ./.github/workflows/unified-docker-backend.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      backend: cuda
+      projects: ${{ needs.setup.outputs.cuda_projects }}
+      push_to_ghcr: ${{ needs.setup.outputs.push_to_ghcr == 'true' }}
+      llama_hash: ${{ needs.setup.outputs.llama_hash }}
+      whisper_hash: ${{ needs.setup.outputs.whisper_hash }}
+      sd_hash: ${{ needs.setup.outputs.sd_hash }}
+      audio_hash: ${{ needs.setup.outputs.audio_hash }}
+      ik_llama_hash: ${{ needs.setup.outputs.ik_llama_hash }}
+      ls_hash: ${{ needs.setup.outputs.ls_hash }}
+
+  vulkan:
+    needs: setup
+    if: ${{ needs.setup.outputs.build_vulkan == 'true' }}
+    uses: ./.github/workflows/unified-docker-backend.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      backend: vulkan
+      projects: ${{ needs.setup.outputs.vulkan_projects }}
+      push_to_ghcr: ${{ needs.setup.outputs.push_to_ghcr == 'true' }}
+      llama_hash: ${{ needs.setup.outputs.llama_hash }}
+      whisper_hash: ${{ needs.setup.outputs.whisper_hash }}
+      sd_hash: ${{ needs.setup.outputs.sd_hash }}
+      audio_hash: ${{ needs.setup.outputs.audio_hash }}
+      ik_llama_hash: ${{ needs.setup.outputs.ik_llama_hash }}
+      ls_hash: ${{ needs.setup.outputs.ls_hash }}

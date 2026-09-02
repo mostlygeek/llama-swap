@@ -197,6 +197,67 @@ func TestLogMonitor_ClearAndReuse(t *testing.T) {
 	}
 }
 
+// TestLogMonitor_DropsWhenSubscriberBlocked verifies that a stalled subscriber
+// can never block Write (the upstream process's stdout drain) and that dropped
+// data is reported in-stream with a marker once delivery resumes. See #875.
+func TestLogMonitor_DropsWhenSubscriberBlocked(t *testing.T) {
+	lm := NewWriter(io.Discard)
+
+	release := make(chan struct{})
+	var once sync.Once
+	var mu sync.Mutex
+	var received [][]byte
+
+	cancel := lm.OnLogData(func(data []byte) {
+		// Block the first delivery, stalling the broadcaster goroutine so the
+		// hand-off channel and event queue fill and subsequent writes drop.
+		once.Do(func() { <-release })
+		mu.Lock()
+		received = append(received, append([]byte(nil), data...))
+		mu.Unlock()
+	})
+	defer cancel()
+
+	// Flood well past the hand-off channel (1024) + event queue (1000)
+	// capacity. None of these writes may block.
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 4000; i++ {
+			lm.Write([]byte("x"))
+		}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Write blocked while subscriber was stalled")
+	}
+
+	close(release)
+
+	deadline := time.After(5 * time.Second)
+	for {
+		mu.Lock()
+		found := false
+		for _, d := range received {
+			if strings.Contains(string(d), "bytes dropped") {
+				found = true
+				break
+			}
+		}
+		mu.Unlock()
+		if found {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("expected a 'bytes dropped' marker after resuming delivery")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
 func BenchmarkLogMonitorWrite(b *testing.B) {
 	smallMsg := []byte("small message\n")
 	mediumMsg := []byte(strings.Repeat("medium message content ", 10) + "\n")

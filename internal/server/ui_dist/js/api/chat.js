@@ -32,15 +32,38 @@ function splitSystemMessages(messages) {
 }
 
 function buildChatCompletionsBody(model, messages, options) {
+  // Tool results keep their name/tool_call_id alongside assistant tool_calls so
+  // an agent conversation round-trips through the backend unchanged.
+  const mapped = messages.map((m) => {
+    const out = { role: m.role, content: m.content };
+    if (m.role === "assistant" && m.tool_calls?.length) {
+      out.tool_calls = m.tool_calls;
+    }
+    if (m.role === "tool") {
+      out.tool_call_id = m.tool_call_id;
+      if (m.name) out.name = m.name;
+    }
+    return out;
+  });
   return {
     model,
-    messages: messages.map((m) => ({
-      role: m.role,
-      content: m.content,
-    })),
+    messages: mapped,
     stream: true,
     temperature: options?.temperature,
     ...(options?.max_tokens ? { max_tokens: options.max_tokens } : {}),
+    // Tools are only supported on the chat-completions endpoint.
+    ...(options?.tools?.length
+      ? {
+          tools: options.tools.map((t) => ({
+            type: "function",
+            function: {
+              name: t.function.name,
+              description: t.function.description,
+              parameters: t.function.parameters,
+            },
+          })),
+        }
+      : {}),
   };
 }
 
@@ -103,14 +126,18 @@ function buildResponsesBody(model, messages, options) {
 
 function buildRequest(endpoint, model, messages, options) {
   const url = "/" + endpoint;
+  // Tools are a chat-completions-only feature; drop them rather than error.
+  const opts = options?.tools?.length && endpoint !== "v1/chat/completions"
+    ? { ...options, tools: undefined }
+    : options;
   switch (endpoint) {
     case "v1/messages":
-      return { url, body: buildMessagesBody(model, messages, options) };
+      return { url, body: buildMessagesBody(model, messages, opts) };
     case "v1/responses":
-      return { url, body: buildResponsesBody(model, messages, options) };
+      return { url, body: buildResponsesBody(model, messages, opts) };
     case "v1/chat/completions":
     default:
-      return { url, body: buildChatCompletionsBody(model, messages, options) };
+      return { url, body: buildChatCompletionsBody(model, messages, opts) };
   }
 }
 
@@ -127,12 +154,15 @@ export function parseChatCompletionsLine(line) {
 
   try {
     const parsed = JSON.parse(data);
-    const delta = parsed.choices?.[0]?.delta;
+    const choice = parsed.choices?.[0];
+    const delta = choice?.delta;
     const content = delta?.content || "";
     const reasoning_content = delta?.reasoning_content || delta?.reasoning || "";
+    const tool_calls = Array.isArray(delta?.tool_calls) ? delta.tool_calls : undefined;
+    const finish_reason = choice?.finish_reason || undefined;
 
-    if (content || reasoning_content) {
-      return { content, reasoning_content, done: false };
+    if (content || reasoning_content || tool_calls || finish_reason) {
+      return { content, reasoning_content, tool_calls, finish_reason, done: false };
     }
     return null;
   } catch {

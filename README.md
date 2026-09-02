@@ -1,33 +1,4 @@
-> [!IMPORTANT]
-> **Fork Notice**
->
-> This is a fork of [llama-swap](https://github.com/mostlygeek/llama-swap) maintained by [Anant Shrivastava](https://github.com/anantshri) for personal additions deemed necessary. The code is open sourced purely for reference purposes.
->
-> **[Anant](https://github.com/anantshri) does not encourage others to use this fork**, as it will not be maintained beyond what the original author provides. Please use the original package: https://github.com/mostlygeek/llama-swap
->
-> ### Where this branch diverges
->
-> This `upstream-code` branch is re-based on top of current upstream (the rewritten `internal/` routing backend from [#790](https://github.com/mostlygeek/llama-swap/pull/790)) rather than the older `proxy/` package layout used by the fork's `main` branch. The fork's additions are re-applied on top of that upstream base as a small set of clean commits, so the divergence from upstream is easy to see. Divergence baseline: upstream commit `ccfba0d`.
->
-> ### Changes in this fork (this branch)
->
-> 1. **Ollama-compatible API** — inbound Ollama requests are translated to OpenAI shape and forwarded to the upstream server (set `passthroughOllama: true` on a model to forward unchanged):
->    - `POST /api/chat`, `POST /api/generate` — chat / generate (streaming and non-streaming)
->    - `POST /api/embed`, `POST /api/embeddings` — embeddings
->    - `GET /api/tags` — list available models
->    - `POST /api/show` — show model details
->    - `GET /api/ps` — list running models
->    - `HEAD /` returns `200` so Ollama clients (e.g. Enchanted via OllamaKit) pass their reachability probe
->    - Model-management endpoints (`/api/create`, `/api/copy`, `/api/delete`, `/api/pull`, `/api/push`, `/api/blobs/:digest`) are stubbed and return *not implemented* — llama-swap routes requests to user-managed processes
-> 2. **Anthropic `/v1/messages` translation** — inbound Anthropic Messages requests are translated to OpenAI and the response is translated back (set `passthroughAnthropic: true` to forward unchanged). `/v1/messages/count_tokens` stays a raw pass-through.
-> 3. **No-npm web UI** — the Svelte/npm UI is replaced with hand-authored vanilla ES-module JavaScript committed under `internal/server/ui_dist/` and embedded via `//go:embed`. There is no Node.js/npm build step.
-> 4. **Removed the legacy `proxy/` implementation** (`cmd/legacy`) that upstream keeps alongside the new backend, so this fork ships a single implementation.
-> 5. **vLLM-friendly activity metrics** — rate and cache fields default to an `unknown` sentinel instead of `0` on failure paths and for vLLM streaming requests that omit `usage` chunks, so the Activity dashboard shows `unknown` rather than a misleading `0 t/s`. See the vLLM tip in [docs/configuration.md](docs/configuration.md).
-> 6. **Metrics persistence** — activity stats survive server restarts via file-based JSON persistence (`metricsStoreFile` config option). Metrics are flushed to disk every 5s with atomic writes and reloaded on startup.
-> 7. **Per-model Stats page** — new `/stats` page under the Web UI showing per-model aggregated token counts, average speeds, and usage summaries, computed entirely in the browser from `GET /api/metrics`.
-> 8. **Swap-deadlock fix (TTL unload race)** — a request racing a `ttl` unload (or a failed model start) could park a readiness waiter that nothing would ever wake, permanently wedging the router: every request then hung until client timeout and returned `200` with an empty body, while `/running` reported nothing loaded. The swap path now issues a single atomic `Process.EnsureReady` request resolved against live state inside the process state machine, `WaitReady` fails fast (`ErrNotStarted`) instead of parking, and the TTL idle clock resets when a model becomes ready so a fresh reload cannot be unloaded on its first tick. See [CHANGELOG.md](CHANGELOG.md) and [DETAILED_CHANGELOG.md](DETAILED_CHANGELOG.md).
-
-![llama-swap header image](docs/assets/hero3.webp)
+![llama-swap header image](docs/assets/hero4.webp)
 ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/mostlygeek/llama-swap/total)
 ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/mostlygeek/llama-swap/go-ci.yml)
 ![GitHub Repo stars](https://img.shields.io/github/stars/mostlygeek/llama-swap)
@@ -41,8 +12,7 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
 ## Features:
 
 - ✅ Easy to deploy and configure: one binary, one configuration file. no external dependencies
-- ✅ On-demand model switching
-- ✅ Use any local OpenAI compatible server (llama.cpp, vllm, tabbyAPI, stable-diffusion.cpp, etc.)
+- ✅ On-demand model switching for many local AI servers (llama.cpp + forks, vllm, stable-diffusion.cpp, audio.cpp, ComfyUI, etc.)
   - future proof, upgrade your inference servers at any time.
 - ✅ OpenAI API supported endpoints:
   - `v1/completions`
@@ -56,27 +26,29 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
   - `v1/images/generations`
   - `v1/images/edits`
 - ✅ Anthropic API supported endpoints:
-  - `v1/messages` - translated to OpenAI `v1/chat/completions` unless the model sets `passthroughAnthropic: true`
-  - `v1/messages/count_tokens` - raw pass-through (no OpenAI equivalent)
-- ✅ Ollama API compatible endpoints (translated to OpenAI unless the model sets `passthroughOllama: true`):
-  - `POST /api/chat`, `POST /api/generate` - chat/generate (streaming and non-streaming)
-  - `POST /api/embed`, `POST /api/embeddings` - embeddings
-  - `GET /api/tags`, `POST /api/show`, `GET /api/ps` - model listing/info answered from config
-  - model-management endpoints (`/api/create`, `/api/pull`, …) return `501 Not Implemented`
+  - `v1/messages`
+  - `v1/messages/count_tokens`
 - ✅ llama-server (llama.cpp) supported endpoints
   - `v1/rerank`, `v1/reranking`, `/rerank`
   - `/infill` - for code infilling
   - `/completion` - for completion endpoint
+  - `/models` - list available models. same behavior as `v1/models`
+  - `/props` - requires `?model={model_id}` query parameter to be provided. The autoload parameter is not supported and will be ignored.
 - ✅ SDAPI via [stable-diffusion.cpp's server](https://github.com/leejet/stable-diffusion.cpp/tree/master/examples/server)
   - `/sdapi/v1/txt2img`
   - `/sdapi/v1/img2img`
   - `/sdapi/v1/loras` - requires `model` in request body to fetch the correct loras
+- ✅ [audio.cpp](https://github.com/0xShug0/audio.cpp) supported [extra endpoints](https://github.com/0xShug0/audio.cpp/blob/main/app/server/README.md#post-v1tasksrun)
+  - `/audioapi/v1/tasks/run`
+- ✅ `/comfyui/` - ComfyUI custom endpoint ([#1001](https://github.com/mostlygeek/llama-swap/issues/1001)) for more reliable swapping
 - ✅ llama-swap API
   - `/ui` - web UI
-  - `/upstream/:model_id` - direct access to upstream server ([demo](https://github.com/mostlygeek/llama-swap/pull/31))
+  - `/upstream/:model_id` - direct access to upstream server ([demo](https://github.com/mostlygeek/llama-swap/pull/31))  
   - `/running` - list currently running models ([#61](https://github.com/mostlygeek/llama-swap/issues/61))
   - `POST /api/models/unload` - manually unload all running models ([#58](https://github.com/mostlygeek/llama-swap/issues/58))
   - `POST /api/models/unload/:model_id` - unload a specific model
+  - `GET /api/profiles` - list configured profiles and the active selection
+  - `PUT /api/profiles/active` - activate a profile or select none
   - `/logs` - remote log monitoring
     - `GET /logs` returns buffered plain text logs.
       - If `Accept: text/html` is sent, `/logs` redirects to `/ui/`.
@@ -88,7 +60,8 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
   - `/health` - just returns "OK"
   - `/metrics` - system and GPU metrics for prometheus
 - ✅ API Key support - define keys to restrict access to API endpoints
-- ✅ Customizable
+- ✅ Customization
+  - Switch model ID routing at runtime with profiles
   - Run concurrent models with a custom DSL swap matrix ([#643](https://github.com/mostlygeek/llama-swap/issues/643))
   - Automatic unloading of models after timeout by setting a `ttl`
   - Docker and Podman support using `cmd` and `cmdStop` together
@@ -99,33 +72,34 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
 
 llama-swap includes a real time web interface with a playground for testing out all sorts of local models:
 
-<img width="1125" height="876" alt="image" src="https://github.com/user-attachments/assets/8ee41947-97af-463d-b0f0-8e9c478fac07" />
+<img width="1094" height="667" alt="image" src="https://github.com/user-attachments/assets/a79b3cea-5ee1-45f1-8db9-5f5331690e64" />
 
 View detailed token metrics:
 
-<img width="1111" height="515" alt="image" src="https://github.com/user-attachments/assets/64bfb280-d7a3-4126-971a-a128fd40410c" />
+<img width="1090" height="672" alt="image" src="https://github.com/user-attachments/assets/145f4ece-af2f-4a45-a3c1-45ae5d3c7e7f" />
 
 Inspect request and responses:
 
-<img width="1111" height="720" alt="image" src="https://github.com/user-attachments/assets/24fe4aca-1448-4d7c-b9e8-a967589bda6c" />
+<img width="1078" height="668" alt="image" src="https://github.com/user-attachments/assets/947cda4f-9aa1-4fa5-a550-5c469968c1d9" />
 
 Manually load and unload models:
 
-<img width="1109" height="719" alt="image" src="https://github.com/user-attachments/assets/02b1e1f2-abd0-4050-84ae-facd66ff01c4" />
+<img width="1088" height="659" alt="image" src="https://github.com/user-attachments/assets/b6b850f3-c5b0-4c14-ba90-be2de25b51c7" />
 
 Real time log streaming:
 
-<img width="1107" height="559" alt="image" src="https://github.com/user-attachments/assets/39669a10-cff2-409e-836a-5bad8bd0140c" />
+<img width="1087" height="668" alt="image" src="https://github.com/user-attachments/assets/9bb0c362-862c-4e68-820c-4c977fc9de4e" />
 
 ## Installation
 
 llama-swap can be installed in multiple ways
 
 1. Docker
-2. Homebrew (OSX and Linux)
-3. WinGet
-4. From release binaries
-5. From source
+2. Homebrew (macOS and Linux)
+3. MacPorts (macOS)
+4. WinGet
+5. From release binaries
+6. From source
 
 ### Docker Install ([download images](https://github.com/mostlygeek/llama-swap/pkgs/container/llama-swap))
 
@@ -189,6 +163,16 @@ brew install llama-swap
 llama-swap --config path/to/config.yaml --listen localhost:8080
 ```
 
+### MacPorts (macOS)
+
+> [!NOTE]
+> Maintained by MacPorts community - [llama-swap port](https://ports.macports.org/port/llama-swap). It is not an official part of llama-swap.
+
+```shell
+sudo port install llama-swap
+llama-swap --config path/to/config.yaml --listen localhost:8080
+```
+
 ### WinGet Install (Windows)
 
 > [!NOTE]
@@ -208,7 +192,7 @@ Binaries are available on the [release](https://github.com/mostlygeek/llama-swap
 
 ### Building from source
 
-1. Building requires only Go. The web UI is hand-authored vanilla JavaScript committed under `internal/server/ui_dist/` and embedded via `//go:embed`; there is no Node.js/npm build step.
+1. Building requires Go and Node.js (for UI).
 1. `git clone https://github.com/mostlygeek/llama-swap.git`
 1. `make clean all`
 1. look in the `build/` subdirectory for the llama-swap binary
@@ -238,6 +222,7 @@ Almost all configuration settings are optional and can be added one step at a ti
   - `macros` reusable snippets
 - Model customization
   - `ttl` to automatically unload models
+  - `unloadTimeout` to tune graceful unloads (manual, API and `ttl` expiry)
   - `aliases` to use familiar model names (e.g., "gpt-4o-mini")
   - `env` to pass custom environment variables to inference servers
   - `cmdStop` gracefully stop Docker/Podman containers
@@ -245,7 +230,21 @@ Almost all configuration settings are optional and can be added one step at a ti
   - `${PORT}` automatic port variables for dynamic port assignment
   - `filters` rewrite parts of requests before sending to the upstream server
 
-See the [configuration documentation](docs/configuration.md) for all options.
+See the [configuration guide](docs/kb/guides/configuration/configuration-overview.md) for an overview, and
+the [knowledge base](docs/kb/) for focused guides on the features people ask about
+most.
+
+You can also just ask. The Playground's **Docs** tab is an agent that calls
+llama-swap's own documentation tools and answers questions about your
+configuration using the real text of `config.example.yaml` and the knowledge
+base, running entirely on a local model. Pick a tool-capable model in
+**Playground → Docs** and ask away — see
+[Setting up tool calling](docs/kb/tutorials/tool-calling-setup.md) if the model
+answers without calling anything.
+
+Those same tools are served as an MCP endpoint at `/api/mcp`, so any MCP client
+can ask about your configuration too. See
+[Connecting an MCP client](docs/kb/guides/api-integration/mcp-endpoint.md).
 
 ## How does llama-swap work?
 
@@ -307,10 +306,3 @@ curl -Ns 'http://host/logs/stream?no-history'
 Any OpenAI compatible server would work. llama-swap was originally designed for llama-server and it is the best supported.
 
 For Python based inference servers like vllm or tabbyAPI it is recommended to run them via podman or docker. This provides clean environment isolation as well as responding correctly to `SIGTERM` signals for proper shutdown.
-
-## Star History
-
-> [!NOTE]
-> Thank you to everyone who has given this project a ⭐️!
-
-[![Star History Chart](https://api.star-history.com/svg?repos=mostlygeek/llama-swap&type=Date)](https://www.star-history.com/#mostlygeek/llama-swap&Date)

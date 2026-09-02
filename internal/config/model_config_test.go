@@ -73,6 +73,62 @@ models:
 	}
 }
 
+func TestConfig_ComfyUIOverrides(t *testing.T) {
+	if ComfyUIModelID != "comfyui_auto" {
+		t.Fatalf("ComfyUIModelID=%q want comfyui_auto", ComfyUIModelID)
+	}
+
+	tests := []struct {
+		name             string
+		concurrencyLimit int
+		wantLimit        int
+	}{
+		{name: "unset limit", wantLimit: 50},
+		{name: "lower limit", concurrencyLimit: 10, wantLimit: 50},
+		{name: "minimum limit", concurrencyLimit: 50, wantLimit: 50},
+		{name: "higher limit", concurrencyLimit: 60, wantLimit: 60},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			content := fmt.Sprintf(`
+models:
+  %s:
+    cmd: comfyui --port ${PORT}
+    concurrencyLimit: %d
+    compat:
+      ignoreWebsockets: false
+  regular:
+    cmd: regular --port ${PORT}
+    concurrencyLimit: 10
+`, ComfyUIModelID, tt.concurrencyLimit)
+			cfg, err := LoadConfigFromReader(strings.NewReader(content))
+			assert.NoError(t, err)
+			assert.Equal(t, tt.wantLimit, cfg.Models[ComfyUIModelID].ConcurrencyLimit)
+			assert.True(t, cfg.Models[ComfyUIModelID].Compat.IgnoreWebsockets)
+			assert.Equal(t, 10, cfg.Models["regular"].ConcurrencyLimit)
+			assert.False(t, cfg.Models["regular"].Compat.IgnoreWebsockets)
+		})
+	}
+}
+
+func TestConfig_ModelCompat(t *testing.T) {
+	content := `
+models:
+  enabled:
+    cmd: enabled --port ${PORT}
+    compat:
+      ignoreWebsockets: true
+  default:
+    cmd: default --port ${PORT}
+`
+
+	cfg, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.NoError(t, err)
+	assert.True(t, cfg.Models["enabled"].Compat.IgnoreWebsockets)
+	assert.False(t, cfg.Models["default"].Compat.IgnoreWebsockets)
+}
+
 func TestConfig_SetParamsByIDAutoAlias(t *testing.T) {
 	content := `
 models:
@@ -152,7 +208,7 @@ models:
         stop:
           - "<|end|>"
           - "<|stop|>"
-`
+ `
 	config, err := LoadConfigFromReader(strings.NewReader(content))
 	assert.NoError(t, err)
 
@@ -169,4 +225,366 @@ models:
 	assert.Equal(t, []string{"stop", "temperature", "top_p"}, keys)
 	assert.Equal(t, 0.7, setParams["temperature"])
 	assert.Equal(t, 0.9, setParams["top_p"])
+}
+
+func TestConfig_ModelCapabilities(t *testing.T) {
+	t.Run("all fields", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    capabilities:
+      in:
+        - text
+        - audio
+        - image
+      out:
+        - text
+        - audio
+        - image
+      tools: true
+      context: 32000
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+
+		mc := config.Models["model1"]
+		assert.False(t, mc.Capabilities.Empty())
+		assert.Equal(t, []string{"text", "audio", "image"}, mc.Capabilities.In)
+		assert.Equal(t, []string{"text", "audio", "image"}, mc.Capabilities.Out)
+		assert.True(t, mc.Capabilities.Tools)
+		assert.Equal(t, 32000, mc.Capabilities.Context)
+	})
+
+	t.Run("partial fields", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    capabilities:
+      tools: true
+      context: 8192
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+
+		mc := config.Models["model1"]
+		assert.False(t, mc.Capabilities.Empty())
+		assert.Nil(t, mc.Capabilities.In)
+		assert.Nil(t, mc.Capabilities.Out)
+		assert.True(t, mc.Capabilities.Tools)
+		assert.Equal(t, 8192, mc.Capabilities.Context)
+	})
+
+	t.Run("not set", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+
+		mc := config.Models["model1"]
+		assert.True(t, mc.Capabilities.Empty())
+	})
+
+	t.Run("tools false is empty", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    capabilities:
+      tools: false
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+
+		mc := config.Models["model1"]
+		assert.True(t, mc.Capabilities.Empty())
+	})
+
+	t.Run("reranker true is not empty", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    capabilities:
+      reranker: true
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+
+		mc := config.Models["model1"]
+		assert.False(t, mc.Capabilities.Empty())
+		assert.True(t, mc.Capabilities.Reranker)
+	})
+
+	t.Run("reranker false is empty", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    capabilities:
+      reranker: false
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+
+		mc := config.Models["model1"]
+		assert.True(t, mc.Capabilities.Empty())
+	})
+}
+
+func TestConfig_ModelCapabilities_Validate(t *testing.T) {
+	t.Run("valid_modalities", func(t *testing.T) {
+		caps := ModelCapConfig{
+			In:      []string{"text", "image"},
+			Out:     []string{"text", "audio"},
+			Tools:   true,
+			Context: 100000,
+		}
+		assert.NoError(t, caps.Validate())
+	})
+
+	t.Run("video_input_modality", func(t *testing.T) {
+		caps := ModelCapConfig{
+			In:      []string{"text", "image", "video"},
+			Out:     []string{"text", "audio"},
+			Tools:   true,
+			Context: 100000,
+		}
+		assert.NoError(t, caps.Validate())
+	})
+
+	t.Run("video_output_modality", func(t *testing.T) {
+		// `video` is added to the shared modality set, so it is valid on `out`
+		// as well as `in`. Asserted explicitly so that stays a decision rather
+		// than a side effect of the two lists sharing one map.
+		caps := ModelCapConfig{Out: []string{"video"}}
+		assert.NoError(t, caps.Validate())
+	})
+
+	t.Run("video_with_other_modalities", func(t *testing.T) {
+		caps := ModelCapConfig{
+			In:  []string{"text", "image", "video"},
+			Out: []string{"text", "video"},
+		}
+		assert.NoError(t, caps.Validate())
+	})
+
+	t.Run("empty_is_valid", func(t *testing.T) {
+		caps := ModelCapConfig{}
+		assert.NoError(t, caps.Validate())
+	})
+
+	t.Run("invalid_in_modality", func(t *testing.T) {
+		caps := ModelCapConfig{In: []string{"foo"}}
+		err := caps.Validate()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "capabilities.in")
+		assert.Contains(t, err.Error(), "foo")
+	})
+
+	t.Run("invalid_out_modality", func(t *testing.T) {
+		caps := ModelCapConfig{Out: []string{"foo"}}
+		err := caps.Validate()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "capabilities.out")
+		assert.Contains(t, err.Error(), "foo")
+	})
+
+	t.Run("negative_context", func(t *testing.T) {
+		caps := ModelCapConfig{Context: -1}
+		err := caps.Validate()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "capabilities.context")
+	})
+
+	t.Run("rejects_invalid_at_load", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    capabilities:
+      in:
+        - text
+        - foo
+`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "foo")
+	})
+
+	t.Run("video_accepted_at_load", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    capabilities:
+      in:
+        - text
+        - image
+        - video
+      out:
+        - text
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+
+		mc := config.Models["model1"]
+		assert.Equal(t, []string{"text", "image", "video"}, mc.Capabilities.In)
+		assert.Equal(t, []string{"text"}, mc.Capabilities.Out)
+	})
+}
+
+func TestConfig_ModelCapabilities_MacroResolution(t *testing.T) {
+	t.Run("context from global macro", func(t *testing.T) {
+		content := `
+macros:
+  default_ctx: 98304
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    capabilities:
+      in:
+        - text
+        - image
+      out:
+        - text
+      tools: true
+      context: ${default_ctx}
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+
+		mc := config.Models["model1"]
+		assert.False(t, mc.Capabilities.Empty())
+		assert.Equal(t, []string{"text", "image"}, mc.Capabilities.In)
+		assert.Equal(t, []string{"text"}, mc.Capabilities.Out)
+		assert.True(t, mc.Capabilities.Tools)
+		assert.Equal(t, 98304, mc.Capabilities.Context)
+	})
+
+	t.Run("context from model macro overrides global", func(t *testing.T) {
+		content := `
+macros:
+  default_ctx: 4096
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    macros:
+      default_ctx: 65536
+    capabilities:
+      context: ${default_ctx}
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+
+		mc := config.Models["model1"]
+		assert.Equal(t, 65536, mc.Capabilities.Context)
+	})
+
+	t.Run("macro in modalities", func(t *testing.T) {
+		content := `
+macros:
+  img_modality: image
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    capabilities:
+      in:
+        - text
+        - ${img_modality}
+      out:
+        - text
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+
+		mc := config.Models["model1"]
+		assert.Equal(t, []string{"text", "image"}, mc.Capabilities.In)
+	})
+
+	t.Run("macro in tools", func(t *testing.T) {
+		content := `
+macros:
+  has_tools: true
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    capabilities:
+      tools: ${has_tools}
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+
+		mc := config.Models["model1"]
+		assert.True(t, mc.Capabilities.Tools)
+	})
+
+	t.Run("macro in reranker", func(t *testing.T) {
+		content := `
+macros:
+  is_reranker: true
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    capabilities:
+      reranker: ${is_reranker}
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+
+		mc := config.Models["model1"]
+		assert.True(t, mc.Capabilities.Reranker)
+	})
+
+	t.Run("quoted direct macros preserve scalar types", func(t *testing.T) {
+		content := `
+macros:
+  default_ctx: 32768
+  has_tools: true
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    capabilities:
+      context: "${default_ctx}"
+      tools: "${has_tools}"
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+
+		mc := config.Models["model1"]
+		assert.Equal(t, 32768, mc.Capabilities.Context)
+		assert.True(t, mc.Capabilities.Tools)
+	})
+
+	t.Run("no capabilities block is unchanged", func(t *testing.T) {
+		content := `
+macros:
+  default_ctx: 98304
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+
+		mc := config.Models["model1"]
+		assert.True(t, mc.Capabilities.Empty())
+	})
+
+	t.Run("unknown macro in capabilities errors", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: path/to/cmd --port ${PORT}
+    capabilities:
+      context: ${undefined_macro}
+`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "capabilities: unknown macro '${undefined_macro}'")
+	})
 }

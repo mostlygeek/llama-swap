@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -13,7 +14,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
-	"github.com/mostlygeek/llama-swap/internal/router"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 // NewLoggers builds the proxy, upstream, and combined (mux) log monitors,
@@ -61,7 +62,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain")
-	_, _ = w.Write(s.muxlog.GetHistory())
+	_, _ = w.Write(s.muxlog.GetHistory()) // nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
 }
 
 // getLogger resolves a log monitor by id. An empty id maps to the combined
@@ -75,7 +76,7 @@ func (s *Server) getLogger(logMonitorID string) (*logmon.Monitor, error) {
 	case "upstream":
 		return s.upstreamlog, nil
 	default:
-		if _, modelID, _, found := findModelInPath(s.cfg, "/"+logMonitorID); found {
+		if _, modelID, _, found := swaputil.FindModelInPath(s.cfg, "/"+logMonitorID); found {
 			if log, ok := s.local.ProcessLogger(modelID); ok {
 				return log, nil
 			}
@@ -101,20 +102,22 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) {
 
 	logger, err := s.getLogger(logMonitorID)
 	if err != nil {
-		router.SendResponse(w, r, http.StatusBadRequest, err.Error())
+		swaputil.SendResponse(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		router.SendResponse(w, r, http.StatusInternalServerError, "streaming unsupported")
+		swaputil.SendResponse(w, r, http.StatusInternalServerError, "streaming unsupported")
 		return
 	}
 
 	_, skipHistory := r.URL.Query()["no-history"]
 	if !skipHistory {
 		if history := logger.GetHistory(); len(history) != 0 {
-			_, _ = w.Write(history) // #nosec G705 -- response is text/plain + nosniff; log bytes are not rendered as HTML
+			// #nosec G705 -- streamed as text/plain with X-Content-Type-Options:
+			// nosniff (set above), so the browser never interprets it as HTML.
+			_, _ = w.Write(history) // nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
 			flusher.Flush()
 		}
 	}
@@ -138,7 +141,7 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) {
 		case <-s.shutdownCtx.Done():
 			return
 		case data := <-sendChan:
-			_, _ = w.Write(data)
+			_, _ = w.Write(data) // nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
 			flusher.Flush()
 		}
 	}
@@ -150,28 +153,63 @@ var requestLogPathSkips = []string{"/wol-health", "/api/performance", "/metrics"
 
 // statusRecorder wraps an http.ResponseWriter to capture the response status
 // code and the number of body bytes written, so the access log can report
-// them. Flush is forwarded so streaming handlers (SSE) still work.
+// them. Flush is forwarded so streaming handlers (SSE) still work, and Hijack
+// is forwarded so httputil.ReverseProxy can upgrade websocket connections.
 type statusRecorder struct {
 	http.ResponseWriter
-	status int
-	size   int
+	status      int
+	size        int
+	wroteHeader bool
 }
 
 func (sr *statusRecorder) WriteHeader(code int) {
+	// net/http commits the first status and ignores every later one, so the
+	// access log has to do the same. Handlers do call WriteHeader after a
+	// response has started — a shutdown or dispatch error arriving once the
+	// loading stream has already sent its 200 — and recording the second code
+	// would report a status the client never received.
+	if sr.wroteHeader {
+		return
+	}
 	sr.status = code
+	sr.wroteHeader = true
 	sr.ResponseWriter.WriteHeader(code)
 }
 
+// MarkStatus records code for the access log without writing to the client.
+// This is the outermost recorder, so there is nothing further to forward to.
+func (sr *statusRecorder) MarkStatus(code int) { sr.status = code }
+
+// WroteHeader reports whether a response status reached the client.
+func (sr *statusRecorder) WroteHeader() bool { return sr.wroteHeader }
+
 func (sr *statusRecorder) Write(b []byte) (int, error) {
+	// An implicit 200 from net/http still counts as a response the client
+	// started receiving, so it must not be overwritten by a late sentinel.
+	sr.wroteHeader = true
 	n, err := sr.ResponseWriter.Write(b)
 	sr.size += n
 	return n, err
 }
 
 func (sr *statusRecorder) Flush() {
-	if f, ok := sr.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
+	f, ok := sr.ResponseWriter.(http.Flusher)
+	if !ok {
+		return
 	}
+	// Flushing commits net/http's implicit 200 and puts it on the wire, so the
+	// client has started receiving a response even if nothing wrote a header.
+	sr.wroteHeader = true
+	f.Flush()
+}
+
+// Hijack forwards to the underlying ResponseWriter so httputil.ReverseProxy can
+// take over the connection for websocket upgrades.
+func (sr *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := sr.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, fmt.Errorf("underlying ResponseWriter does not support hijacking")
 }
 
 // clientIP resolves the originating client address, preferring proxy headers
@@ -212,8 +250,24 @@ func CreateRequestLogMiddleware(proxylog *logmon.Monitor) chain.Middleware {
 			start := time.Now()
 			ip, method, path, proto, ua := clientIP(r), r.Method, r.URL.Path, r.Proto, r.UserAgent()
 
+			// This is the outermost middleware, so the context here is still
+			// the connection's own. Remember it before anything downstream
+			// derives a cancellable child, so a request cancelled server-side
+			// is not later reported as a client that hung up.
+			r = swaputil.WithClientContext(r)
+
 			rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(rec, r)
+
+			// Cancellation branches (a client hanging up during a cold model
+			// load, for one) return without writing anything, which would
+			// otherwise be logged as the seeded 200. net/http cancels the
+			// request context when the client disconnects or when the
+			// top-level ServeHTTP returns; this middleware is inside that
+			// call, so a done context here means the client really left.
+			// Deriving it once covers every such branch, including ones added
+			// later. See #1029.
+			swaputil.MarkClientClosed(rec, r)
 
 			proxylog.Infof("Request %s \"%s %s %s\" %d %d \"%s\" %v",
 				ip, method, path, proto, rec.status, rec.size, ua, time.Since(start))

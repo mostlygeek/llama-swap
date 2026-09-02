@@ -1,0 +1,60 @@
+name: sbom
+
+# Reference CI caller for the aidc SBOM + license automation. All the real
+# logic lives in scripts/ci/, so this workflow is a thin wrapper — the same
+# scripts run unchanged under Jenkins, GitLab CI, or any other runner. See
+# docs/security.md for the env-in / exit-code-out contract.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  sbom:
+    runs-on: ubuntu-latest
+    env:
+      # Fail the build on a license conflict in CI (the dev loop only warns).
+      AIDC_LICENSE_MODE: fail
+      # Point at a built image to also produce a build-time SBOM + code-vs-build
+      # diff. Leave unset to generate the code-level SBOM only.
+      # AIDC_IMAGE_REF: myapp:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Install syft + grype (pinned + checksum-verified)
+        run: |
+          set -euo pipefail
+          # Direct release artifacts, verified against pinned checksums —
+          # no unpinned installer scripts. To bump: pick the new version from
+          # the tool's GitHub releases page, take the linux_amd64 sha256 from
+          # its checksums.txt asset, and update the four values below.
+          SYFT_VERSION=v1.18.1
+          SYFT_SHA256=066c251652221e4d44fcc4d115ce3df33a91769da38c830a8533199db2f65aab
+          GRYPE_VERSION=v0.87.0
+          GRYPE_SHA256=be710d15f5477e5c77ce03d14e480263415d7ab135e04b8483663f688823087d
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL "https://github.com/anchore/syft/releases/download/${SYFT_VERSION}/syft_${SYFT_VERSION#v}_linux_amd64.tar.gz" -o /tmp/syft.tar.gz
+          echo "$SYFT_SHA256  /tmp/syft.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/syft.tar.gz -C "$HOME/.local/bin" syft
+          curl -fsSL "https://github.com/anchore/grype/releases/download/${GRYPE_VERSION}/grype_${GRYPE_VERSION#v}_linux_amd64.tar.gz" -o /tmp/grype.tar.gz
+          echo "$GRYPE_SHA256  /tmp/grype.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/grype.tar.gz -C "$HOME/.local/bin" grype
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # - name: Build image (uncomment to enable build-time SBOM + diff)
+      #   run: docker build -t "$AIDC_IMAGE_REF" .
+
+      - name: Generate SBOMs + license check
+        run: ./scripts/ci/aidc-sbom-all.sh
+
+      - name: Upload SBOM artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sbom
+          path: sbom/

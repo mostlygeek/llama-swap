@@ -1,0 +1,11 @@
+# gitleaks fingerprint allowlist. Each entry is a reviewed false positive:
+# example/placeholder API keys in documentation and test fixtures committed to
+# upstream history. Confirmed non-secrets — `trufflehog filesystem` reports
+# zero over the working tree. Fingerprints are re-derived per commit, so both
+# the original upstream commit and our port commits are listed.
+542d73d2b55bec764fa9d6c9362ba0fb77e58b9d:docs/config.example.yaml:generic-api-key:175
+542d73d2b55bec764fa9d6c9362ba0fb77e58b9d:docs/kb/guides/operations/tailcat.md:generic-api-key:42
+542d73d2b55bec764fa9d6c9362ba0fb77e58b9d:ui/src/lib/activitySource.test.ts:generic-api-key:8
+04abb855933977b6cd954032b45c1f7e25c05522:docs/config.example.yaml:generic-api-key:173
+04abb855933977b6cd954032b45c1f7e25c05522:docs/kb/guides/operations/tailcat.md:generic-api-key:40
+04abb855933977b6cd954032b45c1f7e25c05522:ui/src/lib/activitySource.test.ts:generic-api-key:8

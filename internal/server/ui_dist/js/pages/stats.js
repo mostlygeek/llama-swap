@@ -1,5 +1,5 @@
-// Stats page: per-model aggregated metrics computed client-side from /api/metrics.
-// No backend work — just fetches the raw JSON array and reduces by model.
+// Stats page: per-model aggregated metrics computed client-side from the
+// activity log (/api/metrics/activity). Reduces the entries by model.
 import { el, cleanupAll } from "../dom.js";
 
 const nf = new Intl.NumberFormat();
@@ -67,9 +67,14 @@ export function StatsPage() {
 
   async function fetchMetrics() {
     try {
-      const resp = await fetch("/api/metrics");
+      // Upstream serves the activity log at /api/metrics/activity as a paginated
+      // page ({data:[...]}); the entry shape (tokens.*, timestamp, model,
+      // duration_ms) matches what aggregate() expects. limit is capped server
+      // side (<1000), so this aggregates over the most recent requests.
+      const resp = await fetch("/api/metrics/activity?limit=999");
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      return await resp.json();
+      const page = await resp.json();
+      return Array.isArray(page) ? page : (page.data || []);
     } catch (err) {
       console.error("Failed to fetch metrics:", err);
       return [];

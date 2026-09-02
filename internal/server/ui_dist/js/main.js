@@ -11,17 +11,30 @@ import {
 } from "./theme.js";
 import { PlaygroundPage } from "./pages/playground.js";
 import { ModelsPage } from "./pages/models.js";
+import { ModelDetailPage } from "./pages/modelDetail.js";
 import { LogsPage } from "./pages/logs.js";
 import { ActivityPage } from "./pages/activity.js";
 import { PerformancePage } from "./pages/performance.js";
+import { HardwarePage } from "./pages/hardware.js";
+import { SettingsPage } from "./pages/settings.js";
 import { StatsPage } from "./pages/stats.js";
+import { currentPath } from "./router.js";
+
+// /models/:id resolves the trailing segment as the model id.
+function modelIdFromRoute() {
+  const path = currentPath.get();
+  return path.startsWith("/models/") ? decodeURIComponent(path.slice("/models/".length)) : "";
+}
 
 const routes = {
   "/": PlaygroundPage,
   "/models": ModelsPage,
+  "/models/:id": () => ModelDetailPage(modelIdFromRoute),
   "/logs": LogsPage,
   "/activity": ActivityPage,
   "/performance": PerformancePage,
+  "/hardware": HardwarePage,
+  "/settings": SettingsPage,
   "/stats": StatsPage,
 };
 

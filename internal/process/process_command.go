@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -16,15 +17,49 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
-	"github.com/mostlygeek/llama-swap/internal/shared"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 var ErrStartAborted = fmt.Errorf("aborted")
 
-// ErrNotStarted is returned (wrapped) by WaitReady when the process is not
-// ready and no start is in flight. Callers that want "start it if needed"
-// semantics should use EnsureReady instead.
-var ErrNotStarted = fmt.Errorf("process not started")
+// healthCheckKey marks requests issued by the health check loop, which polls
+// the upstream through the same reverse proxy. Their failures are the expected
+// shape of a model still booting, so they must not be logged as proxy errors.
+type healthCheckKey struct{}
+
+// newProxyErrorHandler builds the ErrorHandler for a model's reverse proxy.
+//
+// httputil.ReverseProxy's default handler answers every failure with 502, so a
+// client hanging up mid-generation is logged as a Bad Gateway and sends
+// operators looking at an inference server that was healthy the whole time.
+// Cancellation is classified here, where the error is actually known: the
+// request is recorded with the client-closed sentinel rather than blamed on the
+// upstream, and at debug level because an impatient caller is normal traffic.
+// Real upstream failures keep the 502. See #1029.
+func newProxyErrorHandler(id string, proxyLogger *logmon.Monitor) func(http.ResponseWriter, *http.Request, error) {
+	return func(w http.ResponseWriter, r *http.Request, err error) {
+		// Pick the log level first: a cancelled request is never an upstream
+		// fault, whether or not the sentinel ends up applying below.
+		switch {
+		case errors.Is(err, context.Canceled) || r.Context().Err() != nil:
+			proxyLogger.Debugf("<%s> request cancelled: %v", id, err)
+		case r.Context().Value(healthCheckKey{}) != nil:
+			proxyLogger.Debugf("<%s> health check not ready: %v", id, err)
+		default:
+			proxyLogger.Warnf("<%s> proxy error: %v", id, err)
+		}
+
+		// Only a client that actually hung up gets the recorded-only sentinel.
+		// A request cancelled server-side (an operator cancelling it from the
+		// UI, or shutdown) still has a client waiting, and must be answered —
+		// otherwise net/http finalizes it as an empty 200, telling the caller
+		// the request succeeded.
+		if swaputil.MarkClientClosed(w, r) || swaputil.ResponseStarted(w) {
+			return
+		}
+		w.WriteHeader(http.StatusBadGateway)
+	}
+}
 
 // cmdWaitDelay is the upper bound the runtime will wait for child I/O to
 // drain after the process exits before force-closing the stdout/stderr
@@ -42,14 +77,15 @@ const cmdWaitDelay = 10 * time.Second
 // bounds the rare case where a process is still alive when its context is cut.
 const parentCancelGraceTimeout = time.Second
 
-type runReq struct {
+// startReq asks the run loop to bring the process up. Run and EnsureReady share
+// this one request type — and therefore one code path — so there is only ever a
+// single way to start a process. block selects the caller's semantics: Run parks
+// its response until the process terminates, EnsureReady is answered as soon as
+// the process is ready or the start fails.
+type startReq struct {
 	timeout time.Duration
 	respond chan error
-	// ready, when non-nil, marks this as an EnsureReady request: run()
-	// answers it (buffered, exactly once) when the start resolves — nil at
-	// readiness, or the failure/abort/shutdown error. Run callers leave it
-	// nil and keep the block-until-terminated contract via respond.
-	ready chan error
+	block   bool
 }
 
 type stopReq struct {
@@ -82,7 +118,7 @@ type ProcessCommand struct {
 	// pipe-close backstop from dominating their runtime.
 	waitDelay time.Duration
 
-	runCh       chan runReq
+	startCh     chan startReq
 	stopCh      chan stopReq
 	waitReadyCh chan waitReadyReq
 
@@ -113,14 +149,14 @@ func New(
 		processLogger: processLogger,
 		proxyLogger:   proxyLogger,
 
-		runCh:       make(chan runReq),
+		startCh:     make(chan startReq),
 		stopCh:      make(chan stopReq),
 		waitReadyCh: make(chan waitReadyReq),
 		waitDelay:   cmdWaitDelay,
 	}
 	p.state.Store(StateStopped)
 
-	go p.run() // #nosec G118 -- lifecycle goroutine (one per model); terminates on parentCtx.Done(), not request-scoped
+	go p.run() // #nosec G118 -- lifecycle goroutine intentionally outlives the per-request context
 	return p, nil
 }
 
@@ -144,7 +180,7 @@ func (p *ProcessCommand) run() {
 		state = s
 		p.state.Store(s)
 		if old != s {
-			event.Emit(shared.ProcessStateChangeEvent{
+			event.Emit(swaputil.ProcessStateChangeEvent{
 				ProcessName: p.id,
 				OldState:    string(old),
 				NewState:    string(s),
@@ -152,9 +188,10 @@ func (p *ProcessCommand) run() {
 		}
 	}
 	var (
-		cmd       *exec.Cmd
-		cmdDone   <-chan struct{}
-		cmdCancel context.CancelFunc
+		cmd          *exec.Cmd
+		cmdDone      <-chan struct{}
+		cmdCancel    context.CancelFunc
+		readyWaiters []waitReadyReq
 		// runResp parks the in-flight Run caller's response channel. The
 		// interface contract is that Run blocks until the process is
 		// terminated, so we hold this until Stop, parentCtx, or an
@@ -162,13 +199,19 @@ func (p *ProcessCommand) run() {
 		runResp chan<- error
 	)
 
-	// There is deliberately NO parked-waiter list here. WaitReady requests
-	// are answered immediately from current state (see the waitReadyCh case);
-	// requests that arrive while a start is resolving simply pend on the
-	// channel and are answered on the next loop iteration. A parked waiter
-	// can never be woken reliably: any notify-on-transition scheme races
-	// senders that are still blocked on the channel when the transition
-	// happens (the 2026-07-04 bigdumbo TTL-unload wedge).
+	// notifyWaiters wakes every blocked WaitReady caller with the given result.
+	// It must be called on every transition into a state that resolves the
+	// "is it ready yet?" question — ready, failed, aborted, shutdown, stopped,
+	// or exited. Missing one strands the subscriber forever (issue #946).
+	notifyWaiters := func(err error) {
+		for _, w := range readyWaiters {
+			select {
+			case w.respond <- err:
+			default:
+			}
+		}
+		readyWaiters = nil
+	}
 
 	// respondRun delivers the final Run result, if a Run caller is parked.
 	respondRun := func(err error) {
@@ -196,6 +239,7 @@ func (p *ProcessCommand) run() {
 				cmdDone = nil
 				cmdCancel = nil
 			}
+			notifyWaiters(fmt.Errorf("[%s] shutdown", p.id))
 			respondRun(fmt.Errorf("[%s] shutdown", p.id))
 			return
 
@@ -212,19 +256,17 @@ func (p *ProcessCommand) run() {
 			cmdCancel = nil
 			p.handler.Store(nil)
 			setState(StateStopped)
-			if runResp == nil {
-				// No Run caller is parked to receive and surface this (the
-				// router starts processes via EnsureReady, which returned at
-				// readiness), so log it here or it is lost.
-				p.proxyLogger.Warnf("<%s> upstream exited unexpectedly", p.id)
-			}
+			p.proxyLogger.Warnf("<%s> upstream process exited unexpectedly", p.id)
+			// Safety net: readyWaiters is normally empty here because
+			// WaitReady is answered immediately while StateReady. Notifying
+			// anyway keeps the invariant that no transition into a settled
+			// state can leave a subscriber parked forever.
+			notifyWaiters(fmt.Errorf("[%s] upstream exited unexpectedly", p.id))
 			respondRun(fmt.Errorf("[%s] upstream exited unexpectedly", p.id))
 
-		// WaitReady: answered immediately from current state. Never parked —
-		// state here is only ever Stopped or Ready (Starting/Stopping exist
-		// solely inside the runCh/stopCh case bodies, where this channel is
-		// not being received; sends made during those windows pend and are
-		// answered on the next iteration, after the transition resolved).
+		// WaitReady: if we're already in a terminal-for-this-question state,
+		// respond immediately; otherwise queue the caller and let a future
+		// state transition wake them via notifyWaiters.
 		case req := <-p.waitReadyCh:
 			switch state {
 			case StateReady:
@@ -232,27 +274,36 @@ func (p *ProcessCommand) run() {
 			case StateShutdown:
 				req.respond <- fmt.Errorf("[%s] shutdown", p.id)
 			default:
-				req.respond <- fmt.Errorf("[%s] %w", p.id, ErrNotStarted)
+				readyWaiters = append(readyWaiters, req)
 			}
 
-		// Run: start the upstream process. Only valid from StateStopped.
+		// Start the upstream process (Run or EnsureReady — see startReq).
 		// doStart can take a long time (health-check polling), so it runs in
 		// a separate goroutine and we wait on resultCh. While waiting we also
 		// listen for an incoming Stop — that's how callers cancel an in-flight
 		// start.
-		case req := <-p.runCh:
-			if state != StateStopped {
-				err := fmt.Errorf("[%s] could not be started in %s state", p.id, state)
-				if req.ready != nil {
-					// EnsureReady semantics: an already-ready process is
-					// success, not a start conflict.
-					if state == StateReady {
-						req.ready <- nil
-					} else {
-						req.ready <- err
-					}
+		case req := <-p.startCh:
+			// EnsureReady answers straight from the current state when the
+			// "is it ready?" question is already settled. There is deliberately
+			// no StateStopping case: a stop keeps this loop parked inside
+			// killProcess and out of the select, so a request can only ever be
+			// received once the stop has finished and state is Stopped again.
+			// Waiting on the channel IS the synchronisation — the caller never
+			// has to guess the state from outside.
+			if !req.block {
+				switch state {
+				case StateReady:
+					req.respond <- nil
+					continue
+				case StateShutdown:
+					req.respond <- fmt.Errorf("[%s] shutdown", p.id)
+					continue
 				}
-				req.respond <- err
+			}
+			// Only valid from StateStopped. For Run this is also the "second
+			// Run while already running" rejection.
+			if state != StateStopped {
+				req.respond <- fmt.Errorf("[%s] could not be started in %s state", p.id, state)
 				continue
 			}
 			setState(StateStarting)
@@ -278,22 +329,16 @@ func (p *ProcessCommand) run() {
 					cmdCancel = res.cancel
 					fn := res.handlerFn
 					p.handler.Store(&fn)
-					// Reset the idle clock: becoming ready counts as use.
-					// Without this a reload after a >TTL idle gap inherits a
-					// stale lastUse and the TTL goroutine below can unload the
-					// model on its very first tick, before the request that
-					// triggered the reload has reached ServeHTTP.
-					p.lastUse.Store(time.Now().UnixNano())
 					setState(StateReady)
-					if req.ready != nil {
-						req.ready <- nil
-					} else {
+					notifyWaiters(nil)
+					if req.block {
 						// Park the Run response — Run blocks until the process
 						// terminates, so we only fire this when Stop, parentCtx,
 						// or the upstream exit takes the process down.
-						// EnsureReady callers returned at readiness above and
-						// do not park (their respond stays unread and buffered).
 						runResp = req.respond
+					} else {
+						// EnsureReady's question is answered: it's ready.
+						req.respond <- nil
 					}
 
 					// Start TTL goroutine if configured — self-terminates
@@ -312,7 +357,7 @@ func (p *ProcessCommand) run() {
 								}
 								if time.Since(time.Unix(0, p.lastUse.Load())) > ttlDuration {
 									p.proxyLogger.Infof("<%s> Unloading model, TTL of %ds reached", p.id, p.config.UnloadAfter)
-									_ = p.Stop(10 * time.Second)
+									_ = p.Stop(time.Duration(p.config.UnloadTimeout) * time.Second)
 									return
 								}
 							}
@@ -320,9 +365,7 @@ func (p *ProcessCommand) run() {
 					}
 				} else {
 					setState(StateStopped)
-					if req.ready != nil {
-						req.ready <- res.err
-					}
+					notifyWaiters(res.err)
 					req.respond <- res.err
 				}
 
@@ -339,9 +382,7 @@ func (p *ProcessCommand) run() {
 					p.killProcess(res.cmd, res.cancel, res.cmdDone, stop.timeout)
 				}
 				setState(StateStopped)
-				if req.ready != nil {
-					req.ready <- ErrStartAborted
-				}
+				notifyWaiters(ErrStartAborted)
 				req.respond <- ErrStartAborted
 				pendingStop = &stop
 
@@ -360,9 +401,7 @@ func (p *ProcessCommand) run() {
 				if res.cmd != nil {
 					p.killProcess(res.cmd, res.cancel, res.cmdDone, parentCancelGraceTimeout)
 				}
-				if req.ready != nil {
-					req.ready <- fmt.Errorf("[%s] shutdown", p.id)
-				}
+				notifyWaiters(fmt.Errorf("[%s] shutdown", p.id))
 				respondRun(fmt.Errorf("[%s] shutdown", p.id))
 				return
 			}
@@ -375,6 +414,7 @@ func (p *ProcessCommand) run() {
 
 		// Stop: tear down a running process.
 		case stop := <-p.stopCh:
+			toreDown := cmd != nil
 			if cmd != nil {
 				setState(StateStopping)
 				p.killProcess(cmd, cmdCancel, cmdDone, stop.timeout)
@@ -386,6 +426,15 @@ func (p *ProcessCommand) run() {
 			// Stop is a no-op (and not an error) when already Stopped — this
 			// is what makes it idempotent for callers that don't track state.
 			setState(StateStopped)
+			if toreDown {
+				// A process we just killed is not going to become ready, so
+				// release anyone parked on that question rather than leaving
+				// them stranded (issue #946). Guarded on having actually torn
+				// something down: an idempotent no-op Stop must not cancel a
+				// subscriber waiting on a start that hasn't happened yet, which
+				// is the legitimate `go Run(); WaitReady()` ordering.
+				notifyWaiters(fmt.Errorf("[%s] stopped", p.id))
+			}
 			respondRun(nil)
 			stop.respond <- nil
 		}
@@ -422,6 +471,7 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 		MaxIdleConnsPerHost:   10,
 		IdleConnTimeout:       time.Duration(p.config.Timeouts.IdleConn) * time.Second,
 	}
+	reverseProxy.ErrorHandler = newProxyErrorHandler(p.id, p.proxyLogger)
 	reverseProxy.ModifyResponse = func(resp *http.Response) error {
 		if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
 			resp.Header.Set("X-Accel-Buffering", "no")
@@ -452,7 +502,7 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 	// cmd.WaitDelay only acts as the inherited-pipe backstop measured from
 	// process exit (see killProcess).
 	cmdCtx, cmdCancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(cmdCtx, args[0], args[1:]...) // #nosec G204 -- launches the operator-configured model command (config.SanitizedCommand); not untrusted input
+	cmd := exec.CommandContext(cmdCtx, args[0], args[1:]...) // #nosec G204 -- launches operator-configured model commands by design (the core proxy function) nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	cmd.Stderr = p.processLogger
 	cmd.Stdout = p.processLogger
 	cmd.Env = append(cmd.Environ(), p.config.Env...)
@@ -527,7 +577,10 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 			return abort(fmt.Errorf("health check timed out after %v", healthCheckTimeout))
 		}
 
-		req, _ := http.NewRequestWithContext(startCtx, "GET", p.config.CheckEndpoint, nil)
+		// Tagged so the proxy ErrorHandler logs a not-yet-listening upstream
+		// at debug rather than as a proxy error once per poll.
+		checkCtx := context.WithValue(startCtx, healthCheckKey{}, true)
+		req, _ := http.NewRequestWithContext(checkCtx, "GET", p.config.CheckEndpoint, nil)
 		rr := httptest.NewRecorder()
 		reverseProxy.ServeHTTP(rr, req)
 		resp := rr.Result()
@@ -567,7 +620,7 @@ func (p *ProcessCommand) sendStopSignal(cmd *exec.Cmd) error {
 		)
 		if err == nil {
 			p.processLogger.Debugf("<%s> sendStopSignal() running stop command: %s", p.id, strings.Join(stopArgs, " "))
-			stopCmd := exec.Command(stopArgs[0], stopArgs[1:]...) // #nosec G204 -- operator-configured cmdStop (config.SanitizeCommand), ${PID} is an integer; not untrusted input
+			stopCmd := exec.Command(stopArgs[0], stopArgs[1:]...) // #nosec G204 -- launches operator-configured model commands by design (the core proxy function) nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 			stopCmd.Env = cmd.Env
 			setProcAttributes(stopCmd)
 			runErr := stopCmd.Run()
@@ -623,7 +676,12 @@ func (p *ProcessCommand) killProcess(cmd *exec.Cmd, cancel context.CancelFunc, c
 	// cannot block the run() goroutine; the gracefulTimeout + Process.Kill
 	// path below still guarantees teardown.
 	if cmd != nil {
-		go func() { _ = p.sendStopSignal(cmd) }()
+		go func() {
+			p.proxyLogger.Debugf("[%s] sending stop signal with timeout %v", p.id, gracefulTimeout)
+			if err := p.sendStopSignal(cmd); err != nil {
+				p.proxyLogger.Warnf("[%s] stop signal failed: %v", p.id, err)
+			}
+		}()
 	}
 
 	timer := time.NewTimer(gracefulTimeout)
@@ -648,12 +706,13 @@ func (p *ProcessCommand) ID() string {
 }
 
 func (p *ProcessCommand) Run(timeout time.Duration) error {
-	req := runReq{
+	req := startReq{
 		timeout: timeout,
 		respond: make(chan error, 1),
+		block:   true,
 	}
 	select {
-	case p.runCh <- req:
+	case p.startCh <- req:
 	case <-p.parentCtx.Done():
 		return fmt.Errorf("[%s] shutdown", p.id)
 	}
@@ -665,27 +724,28 @@ func (p *ProcessCommand) Run(timeout time.Duration) error {
 	}
 }
 
-// EnsureReady starts the process if it is stopped and blocks until it is
-// ready, the start fails, or ctx is cancelled. The start decision is made by
-// run() against live state in a single request, so a concurrent Stop (e.g. a
-// TTL unload) between a caller's State() snapshot and the start cannot strand
-// the caller: a send that pends during the stop is received after it, sees
-// StateStopped, and starts the process.
+// EnsureReady brings the process to a ready state and blocks until it is
+// serving. See the Process interface for the full state-by-state contract.
+//
+// The send on startCh is the synchronisation point: it can only be received
+// when the run loop is back at its select, so a stop that is still in progress
+// naturally holds the request until the process is really stopped. Callers must
+// not inspect State() first — that read races the run loop and is what caused
+// issue #946.
 func (p *ProcessCommand) EnsureReady(ctx context.Context, timeout time.Duration) error {
-	req := runReq{
+	req := startReq{
 		timeout: timeout,
 		respond: make(chan error, 1),
-		ready:   make(chan error, 1),
 	}
 	select {
-	case p.runCh <- req:
+	case p.startCh <- req:
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-p.parentCtx.Done():
 		return fmt.Errorf("[%s] shutdown", p.id)
 	}
 	select {
-	case err := <-req.ready:
+	case err := <-req.respond:
 		return err
 	case <-ctx.Done():
 		return ctx.Err()
@@ -734,7 +794,11 @@ func (p *ProcessCommand) State() ProcessState {
 func (p *ProcessCommand) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	fn := p.handler.Load()
 	if fn == nil {
-		http.Error(w, fmt.Sprintf("llama-swap-error: [%s] process is not ready", p.id), http.StatusServiceUnavailable)
+		swaputil.SendResponse(w, r, http.StatusServiceUnavailable, fmt.Sprintf("[%s] process is not ready", p.id))
+		return
+	}
+	if p.config.Compat.IgnoreWebsockets && swaputil.IsWebSocketUpgrade(r) {
+		(*fn)(w, r)
 		return
 	}
 	p.inflight.Add(1)

@@ -1,10 +1,12 @@
 package server
 
 import (
+	"bufio"
 	"bytes"
 	"compress/flate"
 	"compress/gzip"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -75,6 +77,55 @@ func TestServer_BodyCopier_Flush(t *testing.T) {
 	}
 }
 
+// hijackRecorder is an httptest.ResponseRecorder that also implements
+// http.Hijacker, returning a pipe so Hijack forwarding can be exercised.
+type hijackRecorder struct {
+	*httptest.ResponseRecorder
+	conn net.Conn
+}
+
+func (h *hijackRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return h.conn, bufio.NewReadWriter(bufio.NewReader(h.conn), bufio.NewWriter(h.conn)), nil
+}
+
+func TestServer_BodyCopier_Hijack(t *testing.T) {
+	t.Run("forwards to underlying hijacker", func(t *testing.T) {
+		client, server := net.Pipe()
+		defer client.Close()
+		defer server.Close()
+
+		bc := newBodyCopier(&hijackRecorder{httptest.NewRecorder(), server})
+		conn, _, err := bc.Hijack()
+		if err != nil {
+			t.Fatalf("Hijack: %v", err)
+		}
+		if conn != server {
+			t.Errorf("Hijack returned unexpected conn")
+		}
+	})
+
+	t.Run("errors when underlying writer is not a hijacker", func(t *testing.T) {
+		bc := newBodyCopier(httptest.NewRecorder())
+		if _, _, err := bc.Hijack(); err == nil {
+			t.Error("expected error hijacking a non-Hijacker ResponseWriter")
+		}
+	})
+}
+
+func TestServer_BodyCopier_SkipsBufferingOnUpgrade(t *testing.T) {
+	rec := httptest.NewRecorder()
+	bc := newBodyCopier(rec)
+	bc.WriteHeader(http.StatusSwitchingProtocols)
+	bc.Write([]byte("websocket frame bytes"))
+
+	if bc.body.Len() != 0 {
+		t.Errorf("upgrade body buffered = %q, want empty", bc.body.Bytes())
+	}
+	if got := rec.Body.String(); got != "websocket frame bytes" {
+		t.Errorf("client body = %q, want %q", got, "websocket frame bytes")
+	}
+}
+
 func TestServer_HeaderMapAndRedact(t *testing.T) {
 	h := http.Header{
 		"Content-Type":  {"application/json"},
@@ -109,6 +160,20 @@ func TestServer_StripVersionPrefix(t *testing.T) {
 	}
 }
 
+func TestServer_StripAudioAPIPrefix(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/audioapi/v1/tasks/run", nil)
+	stripAudioAPIPrefix(r)
+	if r.URL.Path != "/v1/tasks/run" {
+		t.Errorf("path = %q, want /v1/tasks/run", r.URL.Path)
+	}
+
+	r2 := httptest.NewRequest(http.MethodGet, "/v1/tasks/run", nil)
+	stripAudioAPIPrefix(r2)
+	if r2.URL.Path != "/v1/tasks/run" {
+		t.Errorf("path = %q, want unchanged", r2.URL.Path)
+	}
+}
+
 func TestServer_CloseStreams(t *testing.T) {
 	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
 	s.CloseStreams()
@@ -126,8 +191,8 @@ func TestServer_HandleUIAndFavicon(t *testing.T) {
 	for _, path := range []string{"/ui/", "/favicon.ico"} {
 		w := httptest.NewRecorder()
 		s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
-		// The embedded ui_dist only carries placeholder.txt in test builds, so
-		// these resolve to 404 — the handlers still execute end to end.
+		// ui_dist is always embedded (//go:embed), so these resolve to 200;
+		// accept 404 too so the assertion holds regardless of asset presence.
 		if w.Code != http.StatusOK && w.Code != http.StatusNotFound {
 			t.Errorf("%s: status = %d", path, w.Code)
 		}
@@ -147,6 +212,12 @@ func TestServer_HandleAPIUnloadAll(t *testing.T) {
 	if local.unloadCalls.Load() != 1 {
 		t.Errorf("unloadCalls = %d, want 1", local.unloadCalls.Load())
 	}
+	if len(local.unloadModels) != 0 {
+		t.Errorf("unloadModels = %v, want empty for unload all", local.unloadModels)
+	}
+	if local.unloadTimeout != 0 {
+		t.Errorf("unloadTimeout = %v, want 0 (use configured timeouts)", local.unloadTimeout)
+	}
 }
 
 func TestServer_HandleAPIUnloadModel(t *testing.T) {
@@ -159,6 +230,12 @@ func TestServer_HandleAPIUnloadModel(t *testing.T) {
 		s.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/models/unload/m1", nil))
 		if w.Code != http.StatusOK {
 			t.Errorf("status = %d, want 200", w.Code)
+		}
+		if len(local.unloadModels) != 1 || local.unloadModels[0] != "m1" {
+			t.Errorf("unloadModels = %v, want [m1]", local.unloadModels)
+		}
+		if local.unloadTimeout != 0 {
+			t.Errorf("unloadTimeout = %v, want 0 (use configured timeouts)", local.unloadTimeout)
 		}
 	})
 
@@ -173,7 +250,7 @@ func TestServer_HandleAPIUnloadModel(t *testing.T) {
 
 func TestServer_HandleAPICapture(t *testing.T) {
 	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
-	s.metrics = newMetricsMonitor(logmon.NewWriter(io.Discard), 100, 5, "", 0)
+	s.metrics = newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 100, 5)
 	s.metrics.addCapture(ReqRespCapture{ID: 42, ReqPath: "/v1/chat/completions"})
 
 	t.Run("found", func(t *testing.T) {

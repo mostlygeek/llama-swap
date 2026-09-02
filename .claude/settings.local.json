@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -E \"\\\\.go$\")",
+      "WebFetch(domain:github.com)",
+      "Bash(go build *)",
+      "Bash(go test *)",
+      "Bash(go vet *)",
+      "Bash(gofmt -w proxy/ollama/translate.go proxy/ollama/translate_test.go)",
+      "Bash(gofmt -l .)",
+      "WebFetch(domain:docs.vllm.ai)",
+      "WebSearch",
+      "Bash(curl -s http://dumbo.tailb4963.ts.net:8080/api/metrics)",
+      "Bash(curl -sN -X POST http://dumbo.tailb4963.ts.net:8080/v1/chat/completions -H 'Content-Type: application/json' -d '{\"model\":\"qwen3.5-9b\",\"stream\":true,\"stream_options\":{\"include_usage\":true},\"messages\":[{\"role\":\"user\",\"content\":\"Write a short paragraph about the moon.\"}]}' -o /tmp/stream2.txt -w 'HTTP %{http_code}, total=%{time_total}s, ttfb=%{time_starttransfer}s\\\\n')",
+      "Read(//tmp/**)",
+      "Bash(command -v gosec)",
+      "Bash(gosec --version)",
+      "Bash(rtk read *)"
+    ]
+  }
+}

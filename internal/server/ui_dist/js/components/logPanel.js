@@ -1,7 +1,9 @@
-// Log viewer pane with persistent font-size / wrap / filter settings.
-// Ported from components/LogPanel.svelte.
+// Log viewer pane with persistent font-size / wrap / filter settings and ANSI
+// color rendering. Ported from components/LogPanel.svelte.
 import { el, cleanupAll } from "../dom.js";
 import { persistent } from "../store.js";
+import { isDarkMode } from "../theme.js";
+import { ansiToHtml } from "../util/ansi.js";
 
 const FONT_SIZES = ["xxs", "xs", "small", "normal"];
 
@@ -64,7 +66,9 @@ export function LogPanel({ id, title, logData }) {
   }
 
   function applyContent() {
-    pre.textContent = getFiltered();
+    // SGR color sequences become inline-styled spans; the palette follows the
+    // active theme so colors stay readable on both backgrounds.
+    pre.innerHTML = ansiToHtml(getFiltered(), isDarkMode.get());
     if (!userScrolledUp) pre.scrollTop = pre.scrollHeight;
   }
 

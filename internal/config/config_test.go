@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -64,6 +66,52 @@ models:
 	// this is a contains because it could be `model1` or `model2` depending on the order
 	// go decided on the order of the map
 	assert.Contains(t, err.Error(), "duplicate alias m1 found in model: model")
+}
+
+func TestConfig_StorePath(t *testing.T) {
+	t.Run("path accepted in writable directory", func(t *testing.T) {
+		dir := t.TempDir()
+		storePath := filepath.Join(dir, "llama-swap.db")
+		cfg, err := LoadConfigFromReader(strings.NewReader(`
+store:
+  path: ` + storePath + `
+`))
+		require.NoError(t, err)
+		require.NotNil(t, cfg.Store)
+		assert.Equal(t, storePath, cfg.Store.Path)
+	})
+
+	t.Run("existing writable file accepted", func(t *testing.T) {
+		dir := t.TempDir()
+		storePath := filepath.Join(dir, "llama-swap.db")
+		require.NoError(t, os.WriteFile(storePath, []byte("{}"), 0644))
+
+		cfg, err := LoadConfigFromReader(strings.NewReader(`
+store:
+  path: ` + storePath + `
+`))
+		require.NoError(t, err)
+		require.NotNil(t, cfg.Store)
+		assert.Equal(t, storePath, cfg.Store.Path)
+	})
+
+	t.Run("non-existent directory rejected", func(t *testing.T) {
+		_, err := LoadConfigFromReader(strings.NewReader(`
+store:
+  path: /no/such/dir/llama-swap.db
+`))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not writable")
+	})
+
+	t.Run("empty path rejected", func(t *testing.T) {
+		_, err := LoadConfigFromReader(strings.NewReader(`
+store:
+  path: ""
+`))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "store.path must not be empty")
+	})
 }
 
 func TestConfig_FindConfig(t *testing.T) {
@@ -248,6 +296,14 @@ macros:
   MODEL_ID: model1
 `,
 			expectedError: "macro name 'MODEL_ID' is reserved",
+		},
+		{
+			name: "global macro named PID",
+			config: `
+macros:
+  PID: 1234
+`,
+			expectedError: "macro name 'PID' is reserved",
 		},
 		{
 			name: "model macro named PORT",
@@ -777,22 +833,27 @@ func TestConfig_APIKeys_Invalid(t *testing.T) {
 		{
 			name:        "blank spaces only",
 			content:     `apiKeys: ["   "]`,
-			expectedErr: "api key cannot contain spaces: `   `",
+			expectedErr: "apiKeys[0]: api key cannot contain spaces",
 		},
 		{
 			name:        "contains leading space",
 			content:     `apiKeys: [" key123"]`,
-			expectedErr: "api key cannot contain spaces: ` key123`",
+			expectedErr: "apiKeys[0]: api key cannot contain spaces",
 		},
 		{
 			name:        "contains trailing space",
 			content:     `apiKeys: ["key123 "]`,
-			expectedErr: "api key cannot contain spaces: `key123 `",
+			expectedErr: "apiKeys[0]: api key cannot contain spaces",
 		},
 		{
 			name:        "contains middle space",
 			content:     `apiKeys: ["key 123"]`,
-			expectedErr: "api key cannot contain spaces: `key 123`",
+			expectedErr: "apiKeys[0]: api key cannot contain spaces",
+		},
+		{
+			name:        "space in second key reports correct index",
+			content:     `apiKeys: ["valid-key", "bad key"]`,
+			expectedErr: "apiKeys[1]: api key cannot contain spaces",
 		},
 		{
 			name:        "empty in list with valid keys",
@@ -911,6 +972,87 @@ models:
 		_, err := LoadConfigFromReader(strings.NewReader(content))
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "globalTTL must be >= 0")
+	})
+}
+
+func TestConfig_UnloadTimeout(t *testing.T) {
+	t.Run("defaults to 10 seconds", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: server --port ${PORT}
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, DEFAULT_UNLOAD_TIMEOUT, config.UnloadTimeout)
+		assert.Equal(t, DEFAULT_UNLOAD_TIMEOUT, config.Models["model1"].UnloadTimeout)
+	})
+
+	t.Run("global unloadTimeout sets model default", func(t *testing.T) {
+		content := `
+unloadTimeout: 25
+models:
+  model1:
+    cmd: server --port ${PORT}
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, 25, config.UnloadTimeout)
+		assert.Equal(t, 25, config.Models["model1"].UnloadTimeout)
+	})
+
+	t.Run("model unloadTimeout overrides global", func(t *testing.T) {
+		content := `
+unloadTimeout: 25
+models:
+  model1:
+    cmd: server --port ${PORT}
+    unloadTimeout: 45
+  model2:
+    cmd: server --port ${PORT}
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, 25, config.UnloadTimeout)
+		assert.Equal(t, 45, config.Models["model1"].UnloadTimeout)
+		assert.Equal(t, 25, config.Models["model2"].UnloadTimeout)
+	})
+
+	t.Run("model unloadTimeout=0 uses global", func(t *testing.T) {
+		content := `
+unloadTimeout: 25
+models:
+  model1:
+    cmd: server --port ${PORT}
+    unloadTimeout: 0
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, 25, config.Models["model1"].UnloadTimeout)
+	})
+
+	t.Run("negative global unloadTimeout rejected", func(t *testing.T) {
+		content := `
+unloadTimeout: -1
+models:
+  model1:
+    cmd: server --port ${PORT}
+`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unloadTimeout must be >= 0")
+	})
+
+	t.Run("negative model unloadTimeout rejected", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: server --port ${PORT}
+    unloadTimeout: -1
+`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "model model1: invalid unloadTimeout value -1")
 	})
 }
 
@@ -1543,4 +1685,175 @@ peers:
 	assert.Equal(t, 10, peerConfig.Timeouts.TLSHandshake)
 	assert.Equal(t, 1, peerConfig.Timeouts.ExpectContinue)
 	assert.Equal(t, 90, peerConfig.Timeouts.IdleConn)
+}
+
+// twoModels is a minimal models block reused by the routing tests below.
+const twoModels = `
+models:
+  gemma:
+    cmd: echo gemma
+    proxy: http://localhost:8080
+  qwen:
+    cmd: echo qwen
+    proxy: http://localhost:8081
+`
+
+func TestConfig_Routing_LegacyTopLevelGroups(t *testing.T) {
+	yaml := twoModels + `
+groups:
+  g1:
+    members: [gemma, qwen]
+`
+	cfg, err := LoadConfigFromReader(strings.NewReader(yaml))
+	require.NoError(t, err)
+	assert.Equal(t, "group", cfg.Routing.Router.Use)
+	// default group injected for orphaned models (none here) still leaves g1
+	assert.Contains(t, cfg.Routing.Router.Settings.Groups, "g1")
+	assert.Equal(t, "fifo", cfg.Routing.Scheduler.Use)
+}
+
+func TestConfig_Routing_LegacyTopLevelMatrix(t *testing.T) {
+	yaml := twoModels + `
+matrix:
+  vars:
+    g: gemma
+    q: qwen
+  sets:
+    combo: "g | q"
+`
+	cfg, err := LoadConfigFromReader(strings.NewReader(yaml))
+	require.NoError(t, err)
+	assert.Equal(t, "matrix", cfg.Routing.Router.Use)
+	require.NotNil(t, cfg.Routing.Router.Settings.Matrix)
+	assert.NotNil(t, cfg.Routing.Router.Settings.Matrix.Program())
+}
+
+func TestConfig_Routing_RouterUseMatrix(t *testing.T) {
+	yaml := twoModels + `
+routing:
+  router:
+    use: matrix
+    settings:
+      matrix:
+        vars:
+          g: gemma
+          q: qwen
+        sets:
+          combo: "g | q"
+`
+	cfg, err := LoadConfigFromReader(strings.NewReader(yaml))
+	require.NoError(t, err)
+	assert.Equal(t, "matrix", cfg.Routing.Router.Use)
+	require.NotNil(t, cfg.Routing.Router.Settings.Matrix)
+	assert.NotNil(t, cfg.Routing.Router.Settings.Matrix.Program())
+}
+
+func TestConfig_Routing_RouterUseGroup(t *testing.T) {
+	yaml := twoModels + `
+routing:
+  router:
+    use: group
+    settings:
+      groups:
+        g1:
+          members: [gemma, qwen]
+`
+	cfg, err := LoadConfigFromReader(strings.NewReader(yaml))
+	require.NoError(t, err)
+	assert.Equal(t, "group", cfg.Routing.Router.Use)
+	assert.Contains(t, cfg.Routing.Router.Settings.Groups, "g1")
+}
+
+func TestConfig_Routing_DefaultsToGroup(t *testing.T) {
+	cfg, err := LoadConfigFromReader(strings.NewReader(twoModels))
+	require.NoError(t, err)
+	assert.Equal(t, "group", cfg.Routing.Router.Use)
+	assert.Equal(t, "fifo", cfg.Routing.Scheduler.Use)
+}
+
+func TestConfig_Routing_LegacyAndRoutingConflict(t *testing.T) {
+	yaml := twoModels + `
+groups:
+  g1:
+    members: [gemma, qwen]
+routing:
+  router:
+    use: group
+`
+	_, err := LoadConfigFromReader(strings.NewReader(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "migrate")
+}
+
+func TestConfig_Routing_RouterUseMatrixWithoutSettings(t *testing.T) {
+	yaml := twoModels + `
+routing:
+  router:
+    use: matrix
+`
+	_, err := LoadConfigFromReader(strings.NewReader(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "routing.router.settings.matrix is not set")
+}
+
+// Both groups and matrix may be defined under routing.router.settings;
+// routing.router.use selects which one is active.
+func TestConfig_Routing_RouterSettingsBothGroupsAndMatrix(t *testing.T) {
+	yaml := twoModels + `
+routing:
+  router:
+    use: group
+    settings:
+      groups:
+        g1:
+          members: [gemma, qwen]
+      matrix:
+        sets:
+          s: "gemma"
+`
+	config, err := LoadConfigFromReader(strings.NewReader(yaml))
+	require.NoError(t, err)
+	// use: group means groups are active and matrix is ignored
+	assert.Equal(t, "group", config.Routing.Router.Use)
+	assert.Nil(t, config.Matrix)
+	assert.Contains(t, config.Groups, "g1")
+}
+
+func TestConfig_Routing_UnknownRouter(t *testing.T) {
+	yaml := twoModels + `
+routing:
+  router:
+    use: bogus
+`
+	_, err := LoadConfigFromReader(strings.NewReader(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown router")
+}
+
+func TestConfig_Routing_FifoPriorityUnknownModel(t *testing.T) {
+	yaml := twoModels + `
+routing:
+  scheduler:
+    settings:
+      fifo:
+        priority:
+          nope: 5
+`
+	_, err := LoadConfigFromReader(strings.NewReader(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown model")
+}
+
+func TestConfig_Routing_FifoPriorityKnownModel(t *testing.T) {
+	yaml := twoModels + `
+routing:
+  scheduler:
+    settings:
+      fifo:
+        priority:
+          gemma: 5
+`
+	cfg, err := LoadConfigFromReader(strings.NewReader(yaml))
+	require.NoError(t, err)
+	assert.Equal(t, 5, cfg.Routing.Scheduler.Settings.Fifo.Priority["gemma"])
 }

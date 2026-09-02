@@ -1,0 +1,38 @@
+# aidc license compatibility matrix (TAB-separated; '#' starts a comment).
+#
+# Each row declares a dependency license that is a CONCERN for a project that
+# ships under the given project license. aidc-license-check.sh flags any dependency
+# whose license matches a row for the resolved project license.
+#
+# Columns:  <project-license> <TAB> <conflicting-dep-license>
+#
+# '*' in the project column matches ANY project license (use for licenses that
+# are worth surfacing regardless, e.g. network copyleft).
+#
+# This is a conservative default focused on permissive projects pulling in
+# strong copyleft. It is NOT legal advice — tune it for your project. This file
+# is user-owned: aidc scaffolds it once and never overwrites your edits.
+#
+# --- Network copyleft: surface in any project -------------------------------
+*	AGPL-3.0-only
+*	AGPL-3.0-or-later
+#
+# --- Permissive project + strong copyleft dependency ------------------------
+MIT	GPL-2.0-only
+MIT	GPL-2.0-or-later
+MIT	GPL-3.0-only
+MIT	GPL-3.0-or-later
+BSD-2-Clause	GPL-2.0-only
+BSD-2-Clause	GPL-3.0-only
+BSD-2-Clause	GPL-3.0-or-later
+BSD-3-Clause	GPL-2.0-only
+BSD-3-Clause	GPL-3.0-only
+BSD-3-Clause	GPL-3.0-or-later
+ISC	GPL-2.0-only
+ISC	GPL-3.0-only
+ISC	GPL-3.0-or-later
+Apache-2.0	GPL-2.0-only
+Apache-2.0	GPL-2.0-or-later
+Apache-2.0	GPL-3.0-only
+Apache-2.0	GPL-3.0-or-later
+MPL-2.0	GPL-2.0-only

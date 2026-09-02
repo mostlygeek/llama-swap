@@ -22,6 +22,13 @@ func getGpuStats(ctx context.Context, every time.Duration, logger *logmon.Monito
 		logger.Debugf("nvidia-smi: %s", err.Error())
 	}
 
+	if ch, err := tryD3DKMT(ctx, every, logger); err == nil {
+		logger.Info("using D3DKMT for GPU monitoring")
+		return ch, nil
+	} else {
+		logger.Debugf("D3DKMT: %s", err.Error())
+	}
+
 	return nil, ErrNoGpuTool
 }
 
@@ -38,7 +45,7 @@ func tryNvidiaSmiWindows(ctx context.Context, every time.Duration, logger *logmo
 		sec = 1
 	}
 
-	cmd := exec.CommandContext(ctx, "nvidia-smi", // #nosec G204 -- literal binary and flags, single integer loop arg; no shell, no untrusted input
+	cmd := exec.CommandContext(ctx, "nvidia-smi", // #nosec G204 -- launches operator-configured model commands by design (the core proxy function)
 		"--query-gpu=index,name,uuid,temperature.gpu,utilization.gpu,memory.used,memory.total,fan.speed,power.draw",
 		"--format=csv,noheader,nounits",
 		"--loop", fmt.Sprintf("%d", sec),
@@ -106,9 +113,9 @@ func readSysStats() (SysStat, error) {
 	return SysStat{
 		Timestamp:      time.Now(),
 		CpuUtilPerCore: cpuPcts,
-		MemTotalMB:     int(vmStat.Total / toMB), // #nosec G115 -- uint64 bytes /(1024*1024) <= 17592186044415 < MaxInt64 on 64-bit build targets
-		MemUsedMB:      int(vmStat.Used / toMB),  // #nosec G115 -- uint64 bytes /(1024*1024) <= 17592186044415 < MaxInt64 on 64-bit build targets
-		MemFreeMB:      int(vmStat.Free / toMB),  // #nosec G115 -- uint64 bytes /(1024*1024) <= 17592186044415 < MaxInt64 on 64-bit build targets
+		MemTotalMB:     int(vmStat.Total / toMB), // #nosec G115 -- converts a bounded system/hardware counter value; overflow cannot occur in practice
+		MemUsedMB:      int(vmStat.Used / toMB),  // #nosec G115 -- converts a bounded system/hardware counter value; overflow cannot occur in practice
+		MemFreeMB:      int(vmStat.Free / toMB),  // #nosec G115 -- converts a bounded system/hardware counter value; overflow cannot occur in practice
 		NetIO:          netIO,
 	}, nil
 }

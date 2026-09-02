@@ -1,0 +1,92 @@
+package perf
+
+type LUID struct {
+	LowPart  uint32
+	HighPart int32
+}
+
+const maxEnumAdapters = 16
+
+type D3DKMT_ENUMADAPTERS2 struct {
+	NumAdapters uint32
+	pAdapters   uintptr
+}
+
+type D3DKMT_ADAPTERINFO struct {
+	hAdapter                     uint32
+	AdapterLuid                  LUID
+	NumOfSources                 uint32
+	bPresentMoveRegionsPreferred int32
+}
+
+type D3DKMT_OPENADAPTERFROMLUID struct {
+	AdapterLuid LUID
+	hAdapter    uint32
+}
+
+type D3DKMT_CLOSEADAPTER struct {
+	hAdapter uint32
+}
+
+type KMTQUERYADAPTERINFOTYPE int32
+
+const (
+	KMTQAITYPE_UMDRIVERPRIVATE          KMTQUERYADAPTERINFOTYPE = 0
+	KMTQAITYPE_ADAPTERREGISTRYINFO      KMTQUERYADAPTERINFOTYPE = 8
+	KMTQAITYPE_DRIVERVERSION            KMTQUERYADAPTERINFOTYPE = 13
+	KMTQAITYPE_PHYSICALADAPTERDEVICEIDS KMTQUERYADAPTERINFOTYPE = 31
+	KMTQAITYPE_NODEPERFDATA             KMTQUERYADAPTERINFOTYPE = 61
+	KMTQAITYPE_ADAPTERPERFDATA          KMTQUERYADAPTERINFOTYPE = 62
+	KMTQAITYPE_ADAPTERPERFDATA_CAPS     KMTQUERYADAPTERINFOTYPE = 63
+)
+
+type D3DKMT_QUERYADAPTERINFO struct {
+	hAdapter              uint32
+	Type                  KMTQUERYADAPTERINFOTYPE
+	pPrivateDriverData    uintptr
+	PrivateDriverDataSize uint32
+}
+
+type D3DKMT_ADAPTER_PERFDATA struct {
+	PhysicalAdapterIndex uint32
+	MemoryFrequency      uint64
+	MaxMemoryFrequency   uint64
+	MaxMemoryFrequencyOC uint64
+	MemoryBandwidth      uint64
+	PCIEBandwidth        uint64
+	FanRPM               uint32
+	Power                uint32
+	Temperature          uint32
+	PowerStateOverride   byte
+}
+
+type D3DKMT_QUERYSTATISTICS_TYPE int32
+
+const (
+	D3DKMT_QUERYSTATISTICS_ADAPTER             D3DKMT_QUERYSTATISTICS_TYPE = 0
+	D3DKMT_QUERYSTATISTICS_PROCESS             D3DKMT_QUERYSTATISTICS_TYPE = 1
+	D3DKMT_QUERYSTATISTICS_PROCESS_ADAPTER     D3DKMT_QUERYSTATISTICS_TYPE = 2
+	D3DKMT_QUERYSTATISTICS_SEGMENT             D3DKMT_QUERYSTATISTICS_TYPE = 3
+	D3DKMT_QUERYSTATISTICS_PROCESS_SEGMENT     D3DKMT_QUERYSTATISTICS_TYPE = 4
+	D3DKMT_QUERYSTATISTICS_NODE                D3DKMT_QUERYSTATISTICS_TYPE = 5
+	D3DKMT_QUERYSTATISTICS_PROCESS_NODE        D3DKMT_QUERYSTATISTICS_TYPE = 6
+	D3DKMT_QUERYSTATISTICS_VIDPNSOURCE         D3DKMT_QUERYSTATISTICS_TYPE = 7
+	D3DKMT_QUERYSTATISTICS_PROCESS_VIDPNSOURCE D3DKMT_QUERYSTATISTICS_TYPE = 8
+)
+
+type D3DKMT_ADAPTER_PERFDATACAPS struct {
+	PhysicalAdapterIndex uint32
+	MaxMemoryBandwidth   uint64
+	MaxPCIEBandwidth     uint64
+	MaxFanRPM            uint32
+	TemperatureMax       uint32
+	TemperatureWarning   uint32
+}
+
+type D3DKMT_QUERYSTATISTICS_QUERY_SEGMENT struct {
+	SegmentId uint32
+}
+
+type D3DKMT_QUERYSTATISTICS_QUERY_NODE struct {
+	NodeId uint32
+}

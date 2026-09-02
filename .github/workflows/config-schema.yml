@@ -44,13 +44,10 @@ jobs:
 
           echo "✓ config-schema.json is valid"
 
-      - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 #v6.2.0
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c #6.4.0
         with:
-          python-version: "3.x"
-
-      - name: Install check-jsonschema
-        run: pip install check-jsonschema
+          go-version-file: go.mod
 
       - name: Validate config.example.yaml against schema
-        run: check-jsonschema --schemafile config-schema.json config.example.yaml
+        run: go test ./internal/config/ -run TestConfig_ExampleMatchesSchema -v

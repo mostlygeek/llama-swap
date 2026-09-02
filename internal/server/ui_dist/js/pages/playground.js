@@ -1,4 +1,5 @@
-// Playground page: tab shell with persistent tab selection (chat/images/speech/audio/rerank).
+// Playground page: tab shell with persistent tab selection
+// (chat/images/speech/audio/rerank/loadtest/help).
 // Ported from routes/Playground.svelte. All tabs are kept mounted; non-active tabs are
 // hidden via display:none to preserve state across tab switches (matching Svelte).
 import { el, cleanupAll } from "../dom.js";
@@ -8,6 +9,8 @@ import { ImageInterface } from "../components/imageInterface.js";
 import { SpeechInterface } from "../components/speechInterface.js";
 import { AudioInterface } from "../components/audioInterface.js";
 import { RerankInterface } from "../components/rerankInterface.js";
+import { ConcurrencyInterface } from "../components/concurrencyInterface.js";
+import { DocsInterface } from "../components/docsInterface.js";
 
 const TABS = [
   { id: "chat", label: "Chat", factory: () => ChatInterface() },
@@ -15,6 +18,8 @@ const TABS = [
   { id: "speech", label: "Speech", factory: () => SpeechInterface() },
   { id: "audio", label: "Transcription", factory: () => AudioInterface() },
   { id: "rerank", label: "Rerank", factory: () => RerankInterface() },
+  { id: "concurrency", label: "Load Test", factory: () => ConcurrencyInterface() },
+  { id: "docs", label: "Help", factory: () => DocsInterface() },
 ];
 
 export function PlaygroundPage() {

@@ -29,6 +29,7 @@ var (
 	flagListen   = flag.String("listen", ":8080", "listen address to listen on")
 	flagLog      = flag.String("log", "info", "log level (debug, info, warn, error)")
 	flagTimeout  = flag.Int("timeout", 60, "seconds requests wait for upstream response before failing")
+	flagAPIKey   = flag.String("api-key", "", "API key sent as Bearer token to the upstream SSE endpoint (falls back to LLAMA_SWAP_API_KEY env var)")
 )
 
 func main() {
@@ -83,11 +84,16 @@ func main() {
 		}
 	}
 
-	proxy := newProxy(upstreamURL)
+	apiKey := *flagAPIKey
+	if apiKey == "" {
+		apiKey = os.Getenv("LLAMA_SWAP_API_KEY")
+	}
+
+	proxy := newProxy(upstreamURL, apiKey)
 	server := &http.Server{
 		Addr:              *flagListen,
-		ReadHeaderTimeout: 30 * time.Second,
 		Handler:           proxy,
+		ReadHeaderTimeout: 30 * time.Second, // mitigate slowloris
 	}
 
 	// start the server
@@ -101,16 +107,18 @@ func main() {
 	// graceful shutdown
 	ctx, _ := signal.NotifyContext(context.Background(), os.Interrupt)
 	<-ctx.Done()
-	if err := server.Close(); err != nil {
-		slog.Error("error closing server", "error", err)
-	}
+	_ = server.Close()
 }
 
 type upstreamStatus string
 
 const (
-	notready upstreamStatus = "not ready"
-	ready    upstreamStatus = "ready"
+	notready              upstreamStatus = "not ready"
+	ready                 upstreamStatus = "ready"
+	initialReconnectDelay                = 100 * time.Millisecond
+	maxReconnectDelay                    = 10 * time.Second
+	healthCheckInterval                  = 10 * time.Second
+	healthCheckTimeout                   = 5 * time.Second
 )
 
 type proxyServer struct {
@@ -118,9 +126,11 @@ type proxyServer struct {
 	failCount     int
 	statusMutex   sync.RWMutex
 	status        upstreamStatus
+	sseBodyMu     sync.Mutex
+	sseBody       io.Closer
 }
 
-func newProxy(url *url.URL) *proxyServer {
+func newProxy(url *url.URL, apiKey string) *proxyServer {
 	p := httputil.NewSingleHostReverseProxy(url)
 	proxy := &proxyServer{
 		upstreamProxy: p,
@@ -135,9 +145,13 @@ func newProxy(url *url.URL) *proxyServer {
 			Timeout: 0, // No timeout for SSE connection
 		}
 
-		waitDuration := 10 * time.Second
+		reconnectDelay := time.Duration(0)
 
 		for {
+			if reconnectDelay > 0 {
+				time.Sleep(reconnectDelay)
+			}
+
 			slog.Debug("connecting to SSE endpoint", "url", eventsUrl)
 
 			req, err := http.NewRequest("GET", eventsUrl, nil)
@@ -145,20 +159,23 @@ func newProxy(url *url.URL) *proxyServer {
 				slog.Warn("failed to create SSE request", "error", err)
 				proxy.setStatus(notready)
 				proxy.incFail(1)
-				time.Sleep(waitDuration)
+				reconnectDelay = nextReconnectDelay(reconnectDelay)
 				continue
 			}
 
 			req.Header.Set("Accept", "text/event-stream")
 			req.Header.Set("Cache-Control", "no-cache")
 			req.Header.Set("Connection", "keep-alive")
+			if apiKey != "" {
+				req.Header.Set("Authorization", "Bearer "+apiKey)
+			}
 
 			resp, err := client.Do(req)
 			if err != nil {
 				slog.Error("failed to connect to SSE endpoint", "error", err)
 				proxy.setStatus(notready)
 				proxy.incFail(1)
-				time.Sleep(10 * time.Second)
+				reconnectDelay = nextReconnectDelay(reconnectDelay)
 				continue
 			}
 
@@ -168,7 +185,7 @@ func newProxy(url *url.URL) *proxyServer {
 				_ = resp.Body.Close()
 				proxy.setStatus(notready)
 				proxy.incFail(1)
-				time.Sleep(10 * time.Second)
+				reconnectDelay = nextReconnectDelay(reconnectDelay)
 				continue
 			}
 
@@ -176,6 +193,8 @@ func newProxy(url *url.URL) *proxyServer {
 			slog.Info("connected to SSE endpoint, upstream ready")
 			proxy.setStatus(ready)
 			proxy.resetFailures()
+			reconnectDelay = 0
+			proxy.setSSEBody(resp.Body)
 
 			// Read from the SSE stream to detect disconnection
 			scanner := bufio.NewScanner(resp.Body)
@@ -201,17 +220,52 @@ func newProxy(url *url.URL) *proxyServer {
 			}
 
 			// Connection closed or error occurred
+			proxy.setSSEBody(nil)
 			_ = resp.Body.Close()
 			slog.Info("SSE connection closed, upstream not ready")
 			proxy.setStatus(notready)
 			proxy.incFail(1)
 
-			// Wait before reconnecting
-			time.Sleep(waitDuration)
+		}
+	}()
+
+	// start a goroutine that periodically checks upstream liveness so a
+	// silently dead connection (e.g. upstream suspended without a TCP close)
+	// is detected and the upstream is marked not ready again
+	go func() {
+		healthUrl := url.Scheme + "://" + url.Host + "/wol-health"
+		client := &http.Client{Timeout: healthCheckTimeout}
+		ticker := time.NewTicker(healthCheckInterval)
+		defer ticker.Stop()
+		for range ticker.C {
+			resp, err := client.Get(healthUrl)
+			if err == nil {
+				_, _ = io.Copy(io.Discard, resp.Body)
+				_ = resp.Body.Close()
+				continue
+			}
+			slog.Warn("upstream health check failed, marking upstream not ready", "error", err)
+			proxy.setStatus(notready)
+			proxy.incFail(1)
+			if c := proxy.takeSSEBody(); c != nil {
+				_ = c.Close() // force the SSE monitor to reconnect
+			}
 		}
 	}()
 
 	return proxy
+}
+
+func nextReconnectDelay(current time.Duration) time.Duration {
+	if current == 0 {
+		return initialReconnectDelay
+	}
+
+	next := current * 2
+	if next > maxReconnectDelay {
+		return maxReconnectDelay
+	}
+	return next
 }
 
 func (p *proxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -220,8 +274,8 @@ func (p *proxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		failCount := p.getFailures()
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(200)
-		fmt.Fprintf(w, "status: %s\n", status)
-		fmt.Fprintf(w, "failures: %d\n", failCount)
+		fmt.Fprintf(w, "status: %s\n", status)      // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
+		fmt.Fprintf(w, "failures: %d\n", failCount) // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 		return
 	}
 
@@ -243,7 +297,7 @@ func (p *proxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if path == "/" || strings.HasPrefix(path, "/ui/") {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, loadingPageHTML)
+			fmt.Fprint(w, loadingPageHTML) // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 			return
 		}
 
@@ -297,6 +351,20 @@ func (p *proxyServer) resetFailures() {
 	p.statusMutex.Lock()
 	defer p.statusMutex.Unlock()
 	p.failCount = 0
+}
+
+func (p *proxyServer) setSSEBody(c io.Closer) {
+	p.sseBodyMu.Lock()
+	defer p.sseBodyMu.Unlock()
+	p.sseBody = c
+}
+
+func (p *proxyServer) takeSSEBody() io.Closer {
+	p.sseBodyMu.Lock()
+	defer p.sseBodyMu.Unlock()
+	c := p.sseBody
+	p.sseBody = nil
+	return c
 }
 
 func sendMagicPacket(macAddr string) error {

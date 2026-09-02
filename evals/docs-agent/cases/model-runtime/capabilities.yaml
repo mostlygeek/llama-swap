@@ -1,0 +1,11 @@
+- id: capabilities-advertise-tools
+  question: How do I tell clients that a configured model supports tool calls?
+  expect_regex: ["capabilities", "tools", "true"]
+  expect_tools_any: [docs__search_docs, docs__get_doc]
+  require_tools: true
+
+- id: loading-feedback
+  question: What setting lets a compatible client see that llama-swap is still loading a model?
+  expect_regex: ["sendLoadingState", "true"]
+  expect_tools_any: [docs__search_docs, docs__get_doc]
+  require_tools: true

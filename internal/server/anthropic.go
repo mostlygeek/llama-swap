@@ -9,7 +9,7 @@ import (
 	"github.com/tidwall/gjson"
 
 	"github.com/mostlygeek/llama-swap/internal/apiconv"
-	"github.com/mostlygeek/llama-swap/internal/router"
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
 // dispatchTranslated forwards an already-translated (OpenAI-shaped) body through
@@ -33,14 +33,14 @@ func (s *Server) dispatchTranslated(w http.ResponseWriter, r *http.Request, body
 func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		router.SendResponse(w, r, http.StatusBadRequest, "could not read request body")
+		swaputil.SendResponse(w, r, http.StatusBadRequest, "could not read request body")
 		return
 	}
 	_ = r.Body.Close()
 
 	requestedModel := gjson.GetBytes(body, "model").String()
 	if requestedModel == "" {
-		router.SendResponse(w, r, http.StatusBadRequest, "missing or invalid 'model' key")
+		swaputil.SendResponse(w, r, http.StatusBadRequest, "missing or invalid 'model' key")
 		return
 	}
 
@@ -60,7 +60,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 
 	converted, terr := apiconv.AnthropicToOpenAIRequest(body)
 	if terr != nil {
-		router.SendResponse(w, r, http.StatusBadRequest, "error translating Anthropic request to OpenAI: "+terr.Error())
+		swaputil.SendResponse(w, r, http.StatusBadRequest, "error translating Anthropic request to OpenAI: "+terr.Error())
 		return
 	}
 	r.URL.Path = "/v1/chat/completions"

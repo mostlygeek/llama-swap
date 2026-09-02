@@ -1,0 +1,17 @@
+- id: connectivity-peer-address
+  question: A peer named lab serves model qwen. What model identifier do clients request?
+  expect_regex: ["lab/qwen"]
+  expect_tools_any: [docs__search_docs, docs__get_doc]
+  require_tools: true
+
+- id: connectivity-proxy-timeout
+  question: A model process starts but never becomes ready. What two proxy-related settings should I verify first?
+  expect_any: ["proxy", "checkEndpoint"]
+  expect_tools_any: [docs__search_docs, docs__get_doc]
+  require_tools: true
+
+- id: connectivity-upstream-passthrough
+  question: Which upstream setting prevents static UI paths from triggering a model swap?
+  expect_regex: ["ignorePaths"]
+  expect_tools_any: [docs__search_docs, docs__get_doc]
+  require_tools: true

@@ -34,7 +34,7 @@ func SetupTreeCleanup() error {
 	if _, err := windows.SetInformationJobObject(
 		job,
 		windows.JobObjectExtendedLimitInformation,
-		uintptr(unsafe.Pointer(&info)), // #nosec G103 -- required unsafe.Pointer/Sizeof for the Win32 SetInformationJobObject syscall (x/sys/windows idiom)
+		uintptr(unsafe.Pointer(&info)), // #nosec G103 -- unsafe.Pointer is required to marshal Windows GPU syscall structs
 		uint32(unsafe.Sizeof(info)),
 	); err != nil {
 		_ = windows.CloseHandle(job)

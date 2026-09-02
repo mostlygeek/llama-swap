@@ -1,0 +1,84 @@
+# Grounded in docs/kb/tutorials/tool-calling-setup.md, guides/mcp-endpoint.md,
+# guides/api-keys-and-auth.md, guides/filters-and-request-rewriting.md
+- id: tools-jinja-flag
+  question: My model answers in prose describing a tool call instead of actually calling the tool. What is missing?
+  tags: [tools]
+  expect_regex: ["--jinja"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    llama-server needs `--jinja`. Without it llama.cpp ignores the tools array
+    entirely and answers in prose, with no error.
+  rubric:
+    - Identifies the missing --jinja flag
+    - Explains that without it the tools array is ignored silently
+
+- id: tools-capability-flag
+  question: What does capabilities.tools true actually do for a model in llama-swap?
+  tags: [tools]
+  expect_any: ["advertis", "report", "/v1/models", "function_calling"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    It is advertising only. It makes /v1/models report
+    capabilities.function_calling true and supported_parameters
+    ["tools","tool_choice"]. It changes nothing about how requests are proxied.
+  rubric:
+    - Says the flag is advertising only
+    - Says it changes nothing about proxying behaviour
+
+- id: tools-mcp-endpoint-path
+  question: What URL do I point an MCP client at to use llama-swap's documentation tools?
+  tags: [mcp]
+  expect_regex: ["/api/mcp"]
+  expect_tools: [docs__search_docs]
+  max_iterations: 5
+  reference: |
+    `/api/mcp`, for example http://localhost:8080/api/mcp.
+  rubric:
+    - Gives the /api/mcp path
+
+- id: api-keys-protect
+  question: How do I require an API key to access my llama-swap instance?
+  tags: [security]
+  expect_regex: ["apiKeys"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Set the top-level `apiKeys` list. When it is empty every request is
+    allowed; when it is populated a matching key is required.
+  rubric:
+    - Names the top-level apiKeys setting
+    - Shows a yaml snippet
+
+- id: api-keys-out-of-config
+  question: How do I keep a peer's API key out of my config file?
+  tags: [security, macros]
+  expect_regex: ["\\$\\{env\\."]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Use an env macro: `apiKey: ${env.OPENROUTER_API_KEY}`.
+  rubric:
+    - Shows the ${env.VAR} form used for apiKey
+    - Does not suggest committing the key
+
+- id: filters-strip-params
+  question: How do I stop clients from overriding the temperature on one of my models?
+  tags: [filters]
+  expect_regex: ["stripParams"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Use `filters.stripParams: "temperature"` on the model, which removes the
+    parameter from incoming requests. setParams can then force a value.
+  rubric:
+    - Names filters.stripParams
+    - Shows a yaml snippet applying it to a model
+
+- id: peers-remote-model
+  question: How do I serve a model that runs on another machine through my llama-swap?
+  tags: [peers]
+  expect_regex: ["peers"]
+  expect_tools: [docs__search_docs]
+  reference: |
+    Add a `peers` entry with a `proxy` base URL and the list of `models` that
+    peer serves. Models are addressed as <peer-id>/<model>.
+  rubric:
+    - Names the peers config section
+    - Shows proxy and models keys in a yaml snippet

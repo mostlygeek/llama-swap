@@ -26,19 +26,30 @@ type Process interface {
 	// to a ready state to process traffic
 	Run(timeout time.Duration) error
 
-	// EnsureReady starts the process if it is stopped and blocks until it is
-	// ready to serve, the start fails, or the context is cancelled. Unlike a
-	// caller-side State()+Run()+WaitReady() sequence, the decision to start is
-	// made inside the state machine against live state, so it cannot be
-	// derailed by a concurrent Stop (e.g. a TTL unload) between snapshot and
-	// start. The timeout parameter bounds the health-check wait, as in Run.
-	EnsureReady(ctx context.Context, timeout time.Duration) error
-
-	// WaitReady blocks while the process is starting and returns nil once it
-	// is ready to serve requests. If no start is in flight (stopped or shut
-	// down) it fails fast — wrapping ErrNotStarted — rather than parking,
-	// since a waiter parked with no pending start can never be woken.
+	// WaitReady blocks until the process is ready to serve requests
+	// or the context is cancelled. It returns nil when the process is ready
+	//
+	// WaitReady only subscribes, it never starts anything, and it cannot tell
+	// "stopped, but a start is coming" apart from "stopped, and nothing is
+	// coming" — a subscription that arrives after a start has already failed or
+	// been aborted waits for a process nobody is going to start. Pass a context
+	// with a deadline if that matters. Callers that want the process serving
+	// should use EnsureReady, which has neither problem.
 	WaitReady(context.Context) error
+
+	// EnsureReady brings the process to a ready state and blocks until it is
+	// serving, the start fails, or ctx is cancelled. The timeout parameter
+	// controls how long to wait for the process to become ready.
+	//
+	// Unlike Run, the decision of whether a start is needed is made inside the
+	// process's own state machine, so callers never inspect State() first and
+	// cannot race a concurrent transition:
+	//
+	//	ready    -> returns nil immediately
+	//	stopped  -> starts the process and waits for it to become ready
+	//	stopping -> waits for the stop to finish, then starts
+	//	shutdown -> returns an error
+	EnsureReady(ctx context.Context, timeout time.Duration) error
 
 	// Stop blocks until the process has terminated. It returns nil when
 	// the process terminated as expected (exit 0)
@@ -51,7 +62,7 @@ type Process interface {
 
 	// ServeHTTP forwards requests to the underlying process
 	// Calling it when the process is not ready will result in a
-	// 503 response with a body indicating it is a llama-swap-error
+	// 503 response with an error body identifying llama-swap as the source
 	ServeHTTP(http.ResponseWriter, *http.Request)
 
 	// Logger returns the monitor that captures this process's stdout/stderr.

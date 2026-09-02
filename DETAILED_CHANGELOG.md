@@ -5,6 +5,42 @@ High-level summaries live in [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
+## 2026-09-02 — Maximal upstream integration (re-established on upstream `7a14664`)
+
+### What
+
+Rebuilt the fork on top of upstream `7a14664` (2026-08-31) instead of merging 96
+divergent upstream commits into a heavily-rewritten tree. Upstream's new
+scheduler, selectors, profiles, peer namespaces, `internal/matrix`,
+`internal/hw`, ComfyUI, sqlite `internal/store`, and docagent/mcptools are
+inherited natively; the fork's differentiators (Anthropic `apiconv`, Ollama
+compat, vanilla `ui_dist` UI, passthrough config, gosec hardening, guardrails)
+were re-applied on top as a curated patch series.
+
+### Why
+
+A straight merge was infeasible: nearly every upstream commit collided with the
+files the fork rewrote (`server.go` routes, config, router), and upstream's
+naming refactor (#1003) touched symbols referenced throughout the fork.
+
+### How / verification
+
+Phase-by-phase, each verified with `go build ./...` + targeted `go test` before
+advancing; full `go test ./internal/...` green (20 packages). Adopted upstream's
+sqlite store (dropped the file-based metrics store). See the session log
+`logs/2026-09-02-upstream-max-integration.md` for the per-phase diff, commands,
+and the gosec baseline/oracle.
+
+### Notes
+
+- Selectors/profiles/capabilities are **API-only** on this branch (the vanilla
+  UI has no screens for them yet) — deferred follow-up.
+- The `/stats` page aggregates over the most recent ≤999 activity rows
+  (server-side limit) rather than all-time — deferred rewire onto
+  `/api/metrics/stats`.
+
+---
+
 ## 2026-07-04 — Router swap deadlock on TTL unload race (+ failed-start variant, TTL first-tick unload)
 
 ### What

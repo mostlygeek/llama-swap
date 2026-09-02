@@ -1,0 +1,12 @@
+- id: routing-queue-capacity
+  question: Requests pile up while a model is loading. What should I inspect before adding client retries?
+  expect_any: ["queue", "health", "proxy"]
+  expect_tools_any: [docs__search_docs, docs__get_doc]
+  require_tools: true
+
+- id: routing-matrix-operators
+  question: In a matrix set expression, what do ampersand and pipe mean?
+  expect_regex: ["&"]
+  expect_any: ["both", "and", "\\|", "either"]
+  expect_tools_any: [docs__search_docs, docs__get_doc]
+  require_tools: true

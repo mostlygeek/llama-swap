@@ -1,0 +1,18 @@
+- id: holdout-peer-config
+  question: What peer field contains the remote llama-swap address?
+  expect_regex: ["proxy"]
+  expect_tools_any: [docs__search_docs, docs__get_doc]
+  require_tools: true
+
+- id: holdout-check-endpoint
+  question: What model setting controls the HTTP endpoint used to decide readiness?
+  expect_regex: ["checkEndpoint"]
+  expect_tools_any: [docs__search_docs, docs__get_doc]
+  require_tools: true
+
+- id: holdout-upstream-is-not-model
+  question: Does an upstream passthrough target participate in local model loading and routing?
+  expect_any: ["does not", "doesn't", "not"]
+  expect_regex: ["routing"]
+  expect_tools_any: [docs__search_docs, docs__get_doc]
+  require_tools: true

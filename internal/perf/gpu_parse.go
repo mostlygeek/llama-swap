@@ -155,8 +155,8 @@ func ParseMactopLine(line string) *GpuStat {
 	}
 
 	const toMB = 1024 * 1024
-	memUsedMB := int(out.Memory.Used / toMB)   // #nosec G115 -- uint64 bytes /(1024*1024) <= 17592186044415 < MaxInt64 on 64-bit build targets
-	memTotalMB := int(out.Memory.Total / toMB) // #nosec G115 -- uint64 bytes /(1024*1024) <= 17592186044415 < MaxInt64 on 64-bit build targets
+	memUsedMB := int(out.Memory.Used / toMB)   // #nosec G115 -- converts a bounded system/hardware counter value; overflow cannot occur in practice
+	memTotalMB := int(out.Memory.Total / toMB) // #nosec G115 -- converts a bounded system/hardware counter value; overflow cannot occur in practice
 
 	var memUtil float64
 	if memTotalMB > 0 {

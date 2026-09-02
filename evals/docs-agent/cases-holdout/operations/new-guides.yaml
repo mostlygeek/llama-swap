@@ -1,0 +1,11 @@
+- id: holdout-hooks-observable
+  question: What should you check before adding retries to a failing startup hook?
+  expect_regex: ["logs"]
+  expect_tools_any: [docs__search_docs, docs__get_doc]
+  require_tools: true
+
+- id: holdout-capture-retention
+  question: Which setting bounds retained request captures in memory?
+  expect_regex: ["captureBuffer"]
+  expect_tools_any: [docs__search_docs, docs__get_doc]
+  require_tools: true

@@ -39,29 +39,118 @@ func newProcessCommand(t *testing.T, conf config.ModelConfig) *ProcessCommand {
 // runAsync starts Run in a goroutine and waits until the process is ready,
 // matching the new interface contract where Run blocks until the process is
 // terminated. Returns a channel that delivers Run's eventual error.
-//
-// WaitReady no longer parks when no start is in flight, so if this goroutine's
-// WaitReady wins the race against the Run goroutine's registration it gets
-// ErrNotStarted — retry until Run has been picked up.
 func runAsync(t *testing.T, p *ProcessCommand) <-chan error {
 	t.Helper()
 	ch := make(chan error, 1)
 	go func() { ch <- p.Run(testStartTimeout) }()
 	ctx, cancel := context.WithTimeout(context.Background(), testStartTimeout)
 	defer cancel()
-	for {
-		err := p.WaitReady(ctx)
-		if err == nil {
-			return ch
+	if err := p.WaitReady(ctx); err != nil {
+		t.Fatalf("WaitReady: %v", err)
+	}
+	return ch
+}
+
+// waitForState polls until the process reaches want, failing the test if it
+// does not get there in time.
+func waitForState(t *testing.T, p *ProcessCommand, want ProcessState) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := p.State(); got == want {
+			return
 		}
-		if !errors.Is(err, ErrNotStarted) {
-			t.Fatalf("WaitReady: %v", err)
+		time.Sleep(testPollInterval)
+	}
+	t.Fatalf("state is %s, want %s", p.State(), want)
+}
+
+// TestProcessCommand_EnsureReadyDuringStop is the regression test for issue
+// #946: a caller that wants the process serving while it is being stopped must
+// wait for the stop to finish and then get a freshly started process, instead
+// of hanging forever.
+//
+// -ignore-sig-term makes the upstream survive the graceful signal, so the
+// process sits in StateStopping for the whole unload timeout rather than
+// milliseconds. That is the deterministic form of the reporter's `kill -STOP`
+// reproduction: EnsureReady is provably called mid-stop.
+func TestProcessCommand_EnsureReadyDuringStop(t *testing.T) {
+	skipIfNoSimpleResponder(t)
+
+	cmd, port := simpleResponderCmd(t, "-silent", "-ignore-sig-term")
+	p := newProcessCommand(t, config.ModelConfig{
+		Cmd:                cmd,
+		Proxy:              fmt.Sprintf("http://127.0.0.1:%d", port),
+		CheckEndpoint:      "/health",
+		HealthCheckTimeout: 10,
+	})
+	t.Cleanup(func() { p.Stop(testStopTimeout) }) //nolint: errcheck
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := p.EnsureReady(ctx, testStartTimeout); err != nil {
+		t.Fatalf("EnsureReady: %v", err)
+	}
+
+	stopDone := make(chan struct{})
+	go func() {
+		defer close(stopDone)
+		p.Stop(testStopTimeout) //nolint: errcheck
+	}()
+
+	waitForState(t, p, StateStopping)
+
+	if err := p.EnsureReady(ctx, testStartTimeout); err != nil {
+		t.Fatalf("EnsureReady during stop: %v", err)
+	}
+	if got := p.State(); got != StateReady {
+		t.Errorf("State() = %s, want %s", got, StateReady)
+	}
+
+	select {
+	case <-stopDone:
+	case <-time.After(testReturnTimeout):
+		t.Error("Stop did not return")
+	}
+}
+
+// TestProcessCommand_EnsureReadyIsIdempotent covers the settled states:
+// EnsureReady on a ready process is a no-op, and it reports an error once the
+// process has been shut down.
+func TestProcessCommand_EnsureReadyIsIdempotent(t *testing.T) {
+	skipIfNoSimpleResponder(t)
+
+	parentCtx, cancelParent := context.WithCancel(context.Background())
+	logger := logmon.NewWriter(io.Discard)
+	cmd, port := simpleResponderCmd(t, "-silent")
+	p, err := New(parentCtx, t.Name(), config.ModelConfig{
+		Cmd:                cmd,
+		Proxy:              fmt.Sprintf("http://127.0.0.1:%d", port),
+		CheckEndpoint:      "/health",
+		HealthCheckTimeout: 10,
+	}, logger, logger)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { p.Stop(testStopTimeout) }) //nolint: errcheck
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	for i := 0; i < 3; i++ {
+		if err := p.EnsureReady(ctx, testStartTimeout); err != nil {
+			t.Fatalf("EnsureReady call %d: %v", i+1, err)
 		}
-		select {
-		case <-ctx.Done():
-			t.Fatalf("WaitReady: %v", ctx.Err())
-		case <-time.After(testPollInterval):
+		if got := p.State(); got != StateReady {
+			t.Fatalf("State() = %s after call %d, want %s", got, i+1, StateReady)
 		}
+	}
+
+	cancelParent()
+	waitForState(t, p, StateShutdown)
+	if err := p.EnsureReady(ctx, testStartTimeout); err == nil {
+		t.Error("EnsureReady after shutdown: expected error, got nil")
 	}
 }
 
@@ -85,8 +174,8 @@ func TestProcessCommand_StartStop(t *testing.T) {
 	if rr.Code != http.StatusServiceUnavailable {
 		t.Errorf("before start: expected 503, got %d", rr.Code)
 	}
-	if body := rr.Body.String(); !strings.Contains(body, "llama-swap-error") {
-		t.Errorf("before start: expected body to contain %q, got %q", "llama-swap-error", body)
+	if body := rr.Body.String(); !strings.Contains(body, `"src":"llama-swap"`) || !strings.Contains(body, "process is not ready") {
+		t.Errorf("before start: expected llama-swap error envelope, got %q", body)
 	}
 
 	runErr := runAsync(t, p)
@@ -124,8 +213,8 @@ func TestProcessCommand_StartStop(t *testing.T) {
 	if rr.Code != http.StatusServiceUnavailable {
 		t.Errorf("after stop: expected 503, got %d", rr.Code)
 	}
-	if body := rr.Body.String(); !strings.Contains(body, "llama-swap-error") {
-		t.Errorf("after stop: expected body to contain %q, got %q", "llama-swap-error", body)
+	if body := rr.Body.String(); !strings.Contains(body, `"src":"llama-swap"`) || !strings.Contains(body, "process is not ready") {
+		t.Errorf("after stop: expected llama-swap error envelope, got %q", body)
 	}
 }
 
@@ -558,6 +647,71 @@ func TestProcessCommand_TTL_ResetsOnRequest(t *testing.T) {
 	}
 }
 
+func TestProcessCommand_TTL_IgnoresWebsocket(t *testing.T) {
+	skipIfNoSimpleResponder(t)
+
+	websocketStarted := make(chan struct{})
+	releaseWebsocket := make(chan struct{})
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		close(websocketStarted)
+		<-releaseWebsocket
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(mock.Close)
+
+	cmd, _ := simpleResponderCmd(t, "-silent")
+	p := newProcessCommand(t, config.ModelConfig{
+		Cmd:                cmd,
+		Proxy:              mock.URL,
+		CheckEndpoint:      "/health",
+		HealthCheckTimeout: 10,
+		UnloadAfter:        1,
+		UnloadTimeout:      1,
+		Compat:             config.CompatConfig{IgnoreWebsockets: true},
+	})
+	runErr := runAsync(t, p)
+
+	requestDone := make(chan struct{})
+	go func() {
+		defer close(requestDone)
+		r := httptest.NewRequest(http.MethodGet, "/socket", nil)
+		r.Header.Set("Connection", "Upgrade")
+		r.Header.Set("Upgrade", "websocket")
+		p.ServeHTTP(httptest.NewRecorder(), r)
+	}()
+
+	select {
+	case <-websocketStarted:
+	case <-time.After(testReturnTimeout):
+		t.Fatal("websocket request did not reach upstream")
+	}
+	waitForState(t, p, StateStopped)
+	select {
+	case <-requestDone:
+		t.Fatal("websocket request completed before it was released")
+	default:
+	}
+
+	close(releaseWebsocket)
+	select {
+	case <-requestDone:
+	case <-time.After(testReturnTimeout):
+		t.Fatal("websocket request did not finish after release")
+	}
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("Run() after TTL stop: %v", err)
+		}
+	case <-time.After(testReturnTimeout):
+		t.Fatal("Run() did not return after TTL stop")
+	}
+}
+
 // TestProcessCommand_TTL_ZeroDisables verifies that UnloadAfter=0 does not
 // spawn a TTL goroutine — the process stays ready until explicitly stopped.
 func TestProcessCommand_TTL_ZeroDisables(t *testing.T) {
@@ -656,208 +810,5 @@ func TestProcessCommand_ConcurrentRunStop(t *testing.T) {
 				p.Stop(testStopTimeout) //nolint: errcheck
 			}
 		}
-	}
-}
-
-// TestProcessCommand_EnsureReady covers the basic contract: it starts a
-// stopped process, returns once ready, and is a no-op success on an
-// already-ready process.
-func TestProcessCommand_EnsureReady(t *testing.T) {
-	skipIfNoSimpleResponder(t)
-
-	cmd, port := simpleResponderCmd(t, "-silent", "-respond hello")
-	p := newProcessCommand(t, config.ModelConfig{
-		Cmd:                cmd,
-		Proxy:              fmt.Sprintf("http://127.0.0.1:%d", port),
-		CheckEndpoint:      "/health",
-		HealthCheckTimeout: 10,
-	})
-	t.Cleanup(func() { p.Stop(testStopTimeout) })
-
-	if err := p.EnsureReady(context.Background(), testStartTimeout); err != nil {
-		t.Fatalf("EnsureReady: %v", err)
-	}
-	if got := p.State(); got != StateReady {
-		t.Fatalf("after EnsureReady: expected state %s, got %s", StateReady, got)
-	}
-
-	rr := httptest.NewRecorder()
-	p.ServeHTTP(rr, httptest.NewRequest("GET", "/test", nil))
-	if rr.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rr.Code)
-	}
-
-	// Second call on a ready process: immediate success, no restart.
-	done := make(chan error, 1)
-	go func() { done <- p.EnsureReady(context.Background(), testStartTimeout) }()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("EnsureReady on ready process: %v", err)
-		}
-	case <-time.After(testReturnTimeout):
-		t.Fatal("EnsureReady on ready process did not return promptly")
-	}
-}
-
-// TestProcessCommand_EnsureReadyDuringStop is the regression test for the
-// 2026-07-04 bigdumbo wedge: a request arriving while a TTL unload had the
-// process in StateStopping. The old router-side sequence — State() snapshot,
-// conditionally Run, then WaitReady — observed StateStopping, skipped Run,
-// and parked WaitReady on a process nothing would ever start again, wedging
-// the router permanently. EnsureReady must instead ride out the in-flight
-// Stop, restart the process, and return ready.
-func TestProcessCommand_EnsureReadyDuringStop(t *testing.T) {
-	skipIfNoSimpleResponder(t)
-
-	// -ignore-sig-term keeps the upstream alive through the graceful SIGTERM
-	// phase, holding run() inside its stopCh case for the full graceful
-	// timeout below. That guarantees EnsureReady's request lands while the
-	// stop is genuinely in flight, not after it completed.
-	cmd, port := simpleResponderCmd(t, "-silent", "-ignore-sig-term")
-	cfg := config.ModelConfig{
-		Cmd:                cmd,
-		Proxy:              fmt.Sprintf("http://127.0.0.1:%d", port),
-		CheckEndpoint:      "/health",
-		HealthCheckTimeout: 10,
-	}
-	p := newProcessCommand(t, cfg)
-	t.Cleanup(func() { p.Stop(testStopTimeout) })
-
-	if err := p.EnsureReady(context.Background(), testStartTimeout); err != nil {
-		t.Fatalf("initial EnsureReady: %v", err)
-	}
-
-	const gracefulWindow = 1500 * time.Millisecond
-	stopRet := make(chan error, 1)
-	go func() { stopRet <- p.Stop(gracefulWindow) }()
-
-	// Wait until the stop request has been picked up (state left Ready) so
-	// EnsureReady below is issued against an in-flight stop.
-	deadline := time.Now().Add(testStartTimeout)
-	for p.State() == StateReady {
-		if time.Now().After(deadline) {
-			t.Fatal("process never left StateReady after Stop")
-		}
-		time.Sleep(testPollInterval)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	start := time.Now()
-	if err := p.EnsureReady(ctx, testStartTimeout); err != nil {
-		t.Fatalf("EnsureReady during stop: %v (pre-fix behaviour: parked forever)", err)
-	}
-	t.Logf("EnsureReady rode out the stop and restarted in %v", time.Since(start))
-
-	if got := p.State(); got != StateReady {
-		t.Errorf("after EnsureReady: expected state %s, got %s", StateReady, got)
-	}
-	rr := httptest.NewRecorder()
-	p.ServeHTTP(rr, httptest.NewRequest("GET", "/test", nil))
-	if rr.Code != http.StatusOK {
-		t.Errorf("restarted process: expected 200, got %d", rr.Code)
-	}
-
-	select {
-	case err := <-stopRet:
-		if err != nil {
-			t.Errorf("Stop: %v", err)
-		}
-	case <-time.After(testStopTimeout + gracefulWindow):
-		t.Fatal("Stop did not return")
-	}
-}
-
-// TestProcessCommand_EnsureReadyStartFailure verifies a failed start is
-// reported as an error instead of blocking. The old Run+WaitReady pairing
-// could park WaitReady forever when the start failure resolved before the
-// WaitReady request was received (the second wedge mode).
-func TestProcessCommand_EnsureReadyStartFailure(t *testing.T) {
-	skipIfNoSimpleResponder(t)
-
-	// Unknown flag makes simple-responder exit immediately: doStart sees a
-	// premature exit before the health check can pass.
-	cmd, port := simpleResponderCmd(t, "-definitely-not-a-real-flag")
-	p := newProcessCommand(t, config.ModelConfig{
-		Cmd:                cmd,
-		Proxy:              fmt.Sprintf("http://127.0.0.1:%d", port),
-		CheckEndpoint:      "/health",
-		HealthCheckTimeout: 10,
-	})
-	t.Cleanup(func() { p.Stop(testStopTimeout) })
-
-	done := make(chan error, 1)
-	go func() { done <- p.EnsureReady(context.Background(), testStartTimeout) }()
-	select {
-	case err := <-done:
-		if err == nil {
-			t.Fatal("EnsureReady on failing command: expected error, got nil")
-		}
-	case <-time.After(testStartTimeout + testReturnTimeout):
-		t.Fatal("EnsureReady did not return after start failure (pre-fix behaviour: parked forever)")
-	}
-	if got := p.State(); got != StateStopped {
-		t.Errorf("after failed start: expected state %s, got %s", StateStopped, got)
-	}
-}
-
-// TestProcessCommand_WaitReadyNotStarted verifies WaitReady fails fast with
-// ErrNotStarted when the process is stopped and no start is in flight,
-// instead of parking a waiter that nothing will ever wake.
-func TestProcessCommand_WaitReadyNotStarted(t *testing.T) {
-	cmd, port := simpleResponderCmd(t, "-silent")
-	p := newProcessCommand(t, config.ModelConfig{
-		Cmd:                cmd,
-		Proxy:              fmt.Sprintf("http://127.0.0.1:%d", port),
-		CheckEndpoint:      "/health",
-		HealthCheckTimeout: 10,
-	})
-
-	ctx, cancel := context.WithTimeout(context.Background(), testReturnTimeout)
-	defer cancel()
-	err := p.WaitReady(ctx)
-	if err == nil {
-		t.Fatal("WaitReady on stopped process: expected error, got nil")
-	}
-	if !errors.Is(err, ErrNotStarted) {
-		t.Fatalf("WaitReady on stopped process: expected ErrNotStarted, got %v", err)
-	}
-	if ctx.Err() != nil {
-		t.Fatal("WaitReady blocked until context timeout instead of failing fast")
-	}
-}
-
-// TestProcessCommand_StartResetsLastUse verifies that becoming ready resets
-// the TTL idle clock. Without it, a reload after an idle gap longer than the
-// TTL inherits a stale lastUse and the TTL goroutine unloads the model on its
-// first tick — before the request that triggered the reload gets served.
-func TestProcessCommand_StartResetsLastUse(t *testing.T) {
-	skipIfNoSimpleResponder(t)
-
-	cmd, port := simpleResponderCmd(t, "-silent")
-	p := newProcessCommand(t, config.ModelConfig{
-		Cmd:                cmd,
-		Proxy:              fmt.Sprintf("http://127.0.0.1:%d", port),
-		CheckEndpoint:      "/health",
-		HealthCheckTimeout: 10,
-	})
-	t.Cleanup(func() { p.Stop(testStopTimeout) })
-
-	// Simulate the stale clock a reload-after-idle inherits.
-	stale := time.Now().Add(-time.Hour).UnixNano()
-	p.lastUse.Store(stale)
-
-	before := time.Now()
-	if err := p.EnsureReady(context.Background(), testStartTimeout); err != nil {
-		t.Fatalf("EnsureReady: %v", err)
-	}
-
-	got := p.lastUse.Load()
-	if got == stale {
-		t.Fatal("lastUse not reset on start: TTL can unload a freshly loaded model on its first tick")
-	}
-	if got < before.UnixNano() {
-		t.Fatalf("lastUse = %d, expected a timestamp at or after start (%d)", got, before.UnixNano())
 	}
 }

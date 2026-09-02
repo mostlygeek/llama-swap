@@ -140,7 +140,7 @@ func TestHandler_ChatStreaming_EmitsNDJSON(t *testing.T) {
 				``,
 				``,
 			}, "\n")
-			_, _ = w.Write([]byte(sse))
+			_, _ = w.Write([]byte(sse)) // nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
 		},
 	}
 	router := newTestRouter(d, Options{})
