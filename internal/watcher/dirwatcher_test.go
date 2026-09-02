@@ -36,6 +36,23 @@ func writeYAMLInDir(t *testing.T, dir, name, content string) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644))
 }
 
+// removeDirWithRetry removes dir, retrying briefly to tolerate the transient
+// Windows "file is being used by another process" sharing violation that occurs
+// when the watcher goroutine happens to be reading the directory at the same
+// instant (Windows refuses to unlink a path another handle has open). On other
+// platforms the first attempt succeeds.
+func removeDirWithRetry(t *testing.T, dir string) {
+	t.Helper()
+	var err error
+	for i := 0; i < 50; i++ {
+		if err = os.RemoveAll(dir); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	require.NoError(t, err)
+}
+
 func TestDirWatcher_NoFireOnBaseline(t *testing.T) {
 	dir := t.TempDir()
 	writeYAMLInDir(t, dir, "a.yaml", "a")
@@ -144,7 +161,7 @@ func TestDirWatcher_MissingDirRecovers(t *testing.T) {
 	time.Sleep(testInterval * 2)
 
 	// Remove the directory. No fire expected on disappearance alone.
-	require.NoError(t, os.RemoveAll(dir))
+	removeDirWithRetry(t, dir)
 	time.Sleep(testInterval * 3)
 	require.Equal(t, int64(0), atomic.LoadInt64(&n), "directory removal alone must not fire")
 

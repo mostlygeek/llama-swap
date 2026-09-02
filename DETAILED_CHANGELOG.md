@@ -50,6 +50,56 @@ signal; acceptable given the wrapper is not deployed on Windows.
 
 ---
 
+## 2026-09-02 — Fix TestDirWatcher_MissingDirRecovers Windows CI flake
+
+### What
+
+Windows CI (`make test-all`) failed:
+
+```
+--- FAIL: TestDirWatcher_MissingDirRecovers (0.05s)
+    dirwatcher_test.go:147: Received unexpected error:
+      unlinkat C:\...\TestDirWatcher_MissingDirRecovers.../001:
+      The process cannot access the file because it is being used by another process.
+```
+
+### Why
+
+The test removes the watched directory *while the `DirWatcher` goroutine is
+running* (by design — it verifies the watcher survives a disappearing dir). The
+watcher polls every 25 ms via `os.ReadDir`, which briefly holds an open handle
+on the directory. Windows refuses to unlink a path another handle has open
+(no `FILE_SHARE_DELETE`), so when the test's `os.RemoveAll(dir)` lands in the
+same instant as a poll's `ReadDir`, it returns a sharing violation. POSIX
+`unlinkat` has no such restriction, so linux/darwin never hit it.
+
+### How
+
+Added a `removeDirWithRetry` test helper that retries `os.RemoveAll` up to 50×
+with a 10 ms backoff (≤500 ms, 20× the poll interval) and used it at the mid-run
+removal site. The watcher's handle is only held for the microseconds of a
+`ReadDir` call, so a retry quickly finds a gap. First attempt succeeds on
+non-Windows, so behavior there is unchanged. Test-only; the watcher itself
+already handles a missing directory correctly (`scanDir` returns
+`exists=false`).
+
+Other removals in the watcher tests operate on single files, not the directory,
+so they don't hold the directory handle that `ReadDir` does and were left as-is.
+
+### Commands
+
+- `gofmt -w internal/watcher/dirwatcher_test.go`
+- `GOOS=windows go vet ./internal/watcher/` → ok
+- `go test -run TestDirWatcher -count=3 ./internal/watcher/` → 24 pass
+- `go test ./internal/watcher/` → pass
+
+### Notes
+
+Could not reproduce on the linux dev host (POSIX semantics); the fix targets the
+exact Windows error and is a no-op cost on other platforms.
+
+---
+
 ## 2026-09-02 — Fix TTL_IgnoresWebsocket deadlock (fork feature collision)
 
 ### What

@@ -91,6 +91,9 @@ Long-form entries with full context live in
   timeout): its mock upstream now blocks only on the real websocket upgrade,
   so the fork's `/props` reasoning-budget startup probe is answered instead of
   tripping the block-until-released path.
+- `TestDirWatcher_MissingDirRecovers` no longer fails on Windows CI: the
+  mid-run directory removal retries briefly to tolerate the transient Windows
+  sharing violation when the watcher is polling the directory concurrently.
 
 ### Security
 
