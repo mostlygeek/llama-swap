@@ -481,16 +481,16 @@ func (b *baseRouter) doSwap(modelID string, toStop []string) {
 	}
 	wg.Wait()
 
-	target := b.processes[modelID]
-	if target.State() == process.StateStopped {
-		go func() {
-			if err := target.Run(timeout); err != nil {
-				b.logger.Warnf("%s: running %s exited: %v", b.name, modelID, err)
-			}
-		}()
+	// EnsureReady makes the start decision inside the process state machine
+	// against live state. The previous State()-snapshot + Run + WaitReady
+	// sequence here could observe StateStopping during a TTL unload, skip
+	// Run, and then park WaitReady on a process nothing would ever start
+	// again — wedging this swap (and, via the active map, the whole router)
+	// permanently. See the 2026-07-04 bigdumbo incident.
+	err := b.processes[modelID].EnsureReady(b.shutdownCtx, timeout)
+	if err != nil {
+		b.logger.Warnf("%s: starting %s failed: %v", b.name, modelID, err)
 	}
-
-	err := target.WaitReady(b.shutdownCtx)
 
 	select {
 	case b.swapDoneCh <- swapDone{modelID: modelID, err: err}:
