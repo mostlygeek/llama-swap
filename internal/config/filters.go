@@ -18,7 +18,7 @@ type Filters struct {
 	StripParams string `yaml:"stripParams"`
 
 	// SetParams is a dictionary of parameters to set/override in requests.
-	// A key ending in "?" (e.g. "max_tokens?") is a soft default: it is only
+	// A key ending in "?" (e.g. "max_tokens?") is set-if-undefined: it is only
 	// applied when the request does not already carry that parameter.
 	// Protected params (like "model") cannot be set
 	SetParams map[string]any `yaml:"setParams"`
@@ -26,7 +26,7 @@ type Filters struct {
 	// SetParamsByID maps requested model IDs to parameters to set/override in requests.
 	// Useful with aliases: a single loaded model can behave differently depending on
 	// which alias the client used. Applied after SetParams, so it can override those values.
-	// Keys ending in "?" are soft defaults, as in SetParams.
+	// Keys ending in "?" are set-if-undefined, as in SetParams.
 	// Protected params (like "model") cannot be set.
 	SetParamsByID map[string]map[string]any `yaml:"setParamsByID"`
 }
@@ -61,10 +61,10 @@ func (f Filters) SanitizedStripParams() []string {
 }
 
 // SanitizedSetParamsByID returns the params to set for the given requestedModelID,
-// with protected params removed, the "?" soft-default suffix stripped from keys,
-// and keys sorted for consistent iteration order. Keys spelled with the suffix
-// are reported in soft. Returns nil if the ID has no entry or all its params
-// are protected.
+// with protected params removed, the "?" set-if-undefined suffix stripped from
+// keys, and keys sorted for consistent iteration order. Keys spelled with the
+// suffix are reported in soft. Returns nil if the ID has no entry or all its
+// params are protected.
 func (f Filters) SanitizedSetParamsByID(requestedModelID string) (map[string]any, []string, map[string]bool) {
 	if len(f.SetParamsByID) == 0 {
 		return nil, nil, nil
@@ -77,7 +77,7 @@ func (f Filters) SanitizedSetParamsByID(requestedModelID string) (map[string]any
 }
 
 // SanitizedSetParams returns a copy of SetParams with protected params removed,
-// the "?" soft-default suffix stripped from keys, and keys sorted for
+// the "?" set-if-undefined suffix stripped from keys, and keys sorted for
 // consistent iteration order. Keys spelled with the suffix are reported in soft.
 func (f Filters) SanitizedSetParams() (map[string]any, []string, map[string]bool) {
 	if len(f.SetParams) == 0 {
@@ -87,9 +87,9 @@ func (f Filters) SanitizedSetParams() (map[string]any, []string, map[string]bool
 }
 
 // sanitizeParams removes protected params from raw and strips the "?" suffix
-// that marks a soft default (issue #1052), e.g. "max_tokens?": 32768. Soft
-// keys are returned (without the suffix) in soft; callers apply them only when
-// the request does not already carry the parameter. When the same key is
+// that marks a set-if-undefined key (issue #1052), e.g. "max_tokens?": 32768.
+// Such keys are returned (without the suffix) in soft; callers apply them only
+// when the body does not already carry the parameter. When the same key is
 // spelled both hard and soft, the hard spelling wins. Keys are sorted for
 // consistent iteration order.
 func sanitizeParams(raw map[string]any) (map[string]any, []string, map[string]bool) {

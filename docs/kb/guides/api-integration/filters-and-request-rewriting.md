@@ -2,7 +2,7 @@
 title: Rewriting requests with filters
 summary: Use stripParams, setParams and setParamsByID while preserving the protected model parameter.
 category: guides
-tags: [filters, strip-params, set-params, soft-defaults, aliases, sampling]
+tags: [filters, strip-params, set-params, set-if-undefined, aliases, sampling]
 config_keys: [models.*.filters, models.*.filters.stripParams, models.*.filters.setParams, models.*.filters.setParamsByID, peers.*.filters]
 updated: 2026-09-01
 ---
@@ -48,10 +48,10 @@ Runs on every request to the model and overrides whatever the client sent.
 Values may be strings, numbers, booleans, arrays or objects. `model` and other
 protected params cannot be overridden.
 
-A key ending in `?` is a **soft default** instead: it applies only when the
-request does not already carry that parameter, so a client that sends its own
+A key ending in `?` is **set-if-undefined** instead: it applies only when the
+body does not already carry that parameter, so a client that sends its own
 value wins. Works in `setParams` and `setParamsByID` alike — see
-`guides/api-integration/soft-defaults`.
+`guides/api-integration/set-if-undefined`.
 
 ```yaml
       setParams:
@@ -104,10 +104,13 @@ reload — with different parameters applied.
 1. Profile pins resolve the requested ID
 2. Aliases resolve
 3. `stripParams` removes keys
-4. Soft defaults (`key?`) check which parameters the request carries
-5. `setParams` applies
-6. `setParamsByID` applies, overriding `setParams`
-7. The request is proxied
+4. `setParams` applies
+5. `setParamsByID` applies, overriding `setParams`
+6. The request is proxied
+
+Filters apply like a pipe: `stripParams | setParams | setParamsByID`. A
+set-if-undefined key (`key?`) checks the body at its own stage, so a stripped
+key counts as undefined and a key an earlier stage set counts as defined.
 
 ## When not to use filters
 
@@ -117,6 +120,6 @@ only rewrite the request body; they cannot change how the server was started.
 
 ## Related
 
-- `guides/api-integration/soft-defaults` — set a parameter only if the request didn't
+- `guides/api-integration/set-if-undefined` — set a parameter only if the request didn't
 - `reference/config/models` — the annotated `filters` block
 - `reference/config/peers` — peer filters

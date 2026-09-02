@@ -41,7 +41,7 @@ func TestServer_ApplyFilters(t *testing.T) {
 		}
 	})
 
-	t.Run("soft default applied when request lacks the key", func(t *testing.T) {
+	t.Run("set-if-undefined applied when request lacks the key", func(t *testing.T) {
 		f := config.Filters{
 			SetParams: map[string]any{"max_tokens?": 32768},
 		}
@@ -54,7 +54,7 @@ func TestServer_ApplyFilters(t *testing.T) {
 		}
 	})
 
-	t.Run("request value wins over soft default", func(t *testing.T) {
+	t.Run("request value wins over set-if-undefined", func(t *testing.T) {
 		f := config.Filters{
 			SetParams: map[string]any{"max_tokens?": 32768},
 		}
@@ -104,13 +104,13 @@ func TestServer_ApplyFilters(t *testing.T) {
 		}
 	})
 
-	t.Run("soft keys are paths, consistent with the write target", func(t *testing.T) {
+	t.Run("set-if-undefined keys are paths, consistent with the write target", func(t *testing.T) {
 		f := config.Filters{
 			SetParams: map[string]any{"chat_template_kwargs.enable_thinking?": true},
 		}
 
 		// Nested value present: the check finds it at the path the write
-		// would target, so the soft default yields.
+		// would target, so the configured value yields.
 		out, err := applyFilters([]byte(`{"model":"m","chat_template_kwargs":{"enable_thinking":false}}`), "m", "", f)
 		if err != nil {
 			t.Fatalf("applyFilters: %v", err)
@@ -119,39 +119,58 @@ func TestServer_ApplyFilters(t *testing.T) {
 			t.Errorf("enable_thinking = %v, want false (request value kept)", got)
 		}
 
-		// Absent: the soft default writes the nested location, exactly
+		// Absent: the configured value writes the nested location, exactly
 		// where a hard setParams key would write.
 		out, err = applyFilters([]byte(`{"model":"m"}`), "m", "", f)
 		if err != nil {
 			t.Fatalf("applyFilters: %v", err)
 		}
 		if got := gjson.GetBytes(out, "chat_template_kwargs.enable_thinking").Bool(); got != true {
-			t.Errorf("enable_thinking = %v, want true (soft default applied)", got)
+			t.Errorf("enable_thinking = %v, want true (set-if-undefined applied)", got)
 		}
 	})
 
-	t.Run("soft setParamsByID yields to request but overrides setParams", func(t *testing.T) {
+	t.Run("set-if-undefined setParamsByID is a no-op when setParams already set the key", func(t *testing.T) {
+		// Filters apply like a pipe: stripParams | setParams | setParamsByID.
+		// A "?" key only fills what is undefined at its stage, so a value an
+		// earlier stage set counts as defined.
 		f := config.Filters{
 			SetParams:     map[string]any{"top_p": 0.5},
 			SetParamsByID: map[string]map[string]any{"alias": {"top_p?": 0.1}},
 		}
 
-		// Request without top_p: the soft byID value overrides setParams.
-		out, err := applyFilters([]byte(`{"model":"alias"}`), "alias", "", f)
-		if err != nil {
-			t.Fatalf("applyFilters: %v", err)
+		for _, body := range []string{`{"model":"alias"}`, `{"model":"alias","top_p":0.9}`} {
+			out, err := applyFilters([]byte(body), "alias", "", f)
+			if err != nil {
+				t.Fatalf("applyFilters(%s): %v", body, err)
+			}
+			if got := gjson.GetBytes(out, "top_p").Float(); got != 0.5 {
+				t.Errorf("top_p = %v, want 0.5 (setParams value, body %s)", got, body)
+			}
 		}
-		if got := gjson.GetBytes(out, "top_p").Float(); got != 0.1 {
-			t.Errorf("top_p = %v, want 0.1", got)
+	})
+
+	t.Run("pipe order: stripParams then setParams then setParamsByID", func(t *testing.T) {
+		// The example from issue #1052: strip removes the client value,
+		// setParams forces 1000, and both "?" entries are no-ops because
+		// setParams has already set the key.
+		f := config.Filters{
+			StripParams: "max_tokens",
+			SetParams:   map[string]any{"max_tokens": 1000},
+			SetParamsByID: map[string]map[string]any{
+				"my-model":      {"max_tokens?": 500},
+				"my-model:high": {"max_tokens?": 2000},
+			},
 		}
 
-		// Request with top_p: the soft byID value yields, setParams still applies.
-		out, err = applyFilters([]byte(`{"model":"alias","top_p":0.9}`), "alias", "", f)
-		if err != nil {
-			t.Fatalf("applyFilters: %v", err)
-		}
-		if got := gjson.GetBytes(out, "top_p").Float(); got != 0.5 {
-			t.Errorf("top_p = %v, want 0.5", got)
+		for _, requested := range []string{"my-model", "my-model:high"} {
+			out, err := applyFilters([]byte(`{"model":"m","max_tokens":999}`), requested, "", f)
+			if err != nil {
+				t.Fatalf("applyFilters(%s): %v", requested, err)
+			}
+			if got := gjson.GetBytes(out, "max_tokens").Int(); got != 1000 {
+				t.Errorf("max_tokens = %v, want 1000 (requested %s)", got, requested)
+			}
 		}
 	})
 

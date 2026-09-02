@@ -339,7 +339,7 @@ models:
       # - protected params like "model" cannot be overridden
       # - values can be strings, numbers, booleans, arrays, or objects
       # - always runs for the model
-      # - a key ending in "?" is a soft default: only applied when the
+      # - a key ending in "?" is set-if-undefined: only applied when the
       #   request does not already contain that parameter
       setParams:
         # Example: enforce specific sampling parameters

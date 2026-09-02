@@ -145,19 +145,13 @@ func applyFilters(body []byte, requested, useModelName string, f config.Filters)
 	setParams, setKeys, setSoft := f.SanitizedSetParams()
 	byID, byIDKeys, byIDSoft := f.SanitizedSetParamsByID(requested)
 
-	// Soft defaults ("key?", issue #1052) yield to parameters the client sent.
-	// Snapshot which of them the request carries before any values are written,
-	// so a soft key still applies when an earlier filter set it, and stripped
-	// params count as not sent.
-	requestHas := make(map[string]bool, len(setSoft)+len(byIDSoft))
-	for _, soft := range []map[string]bool{setSoft, byIDSoft} {
-		for key := range soft {
-			requestHas[key] = gjson.GetBytes(body, key).Exists()
-		}
-	}
-
+	// Set-if-undefined keys ("key?", issue #1052) only fill parameters the body
+	// does not carry at that point in the pipeline. Filters apply like a pipe —
+	// stripParams | setParams | setParamsByID — so a stripped key counts as
+	// undefined, and a key an earlier stage set counts as defined (a "key?" in
+	// setParamsByID is a no-op when setParams already set it).
 	for _, key := range setKeys {
-		if setSoft[key] && requestHas[key] {
+		if setSoft[key] && gjson.GetBytes(body, key).Exists() {
 			continue
 		}
 		if body, err = sjson.SetBytes(body, key, setParams[key]); err != nil {
@@ -166,7 +160,7 @@ func applyFilters(body []byte, requested, useModelName string, f config.Filters)
 	}
 
 	for _, key := range byIDKeys {
-		if byIDSoft[key] && requestHas[key] {
+		if byIDSoft[key] && gjson.GetBytes(body, key).Exists() {
 			continue
 		}
 		if body, err = sjson.SetBytes(body, key, byID[key]); err != nil {
