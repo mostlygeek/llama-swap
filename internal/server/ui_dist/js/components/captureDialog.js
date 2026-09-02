@@ -212,7 +212,7 @@ export function CaptureDialogController() {
       </div>
     `;
 
-    dlg.querySelector("[data-close]")?.addEventListener("click", close);
+    dlg.querySelectorAll("[data-close]").forEach((btn) => btn.addEventListener("click", close));
     dlg.querySelectorAll("[data-tab]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const tab = btn.getAttribute("data-tab");
