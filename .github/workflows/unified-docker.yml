@@ -31,7 +31,12 @@ on:
         required: false
         default: ""
       cuda_architectures:
-        description: "Override CUDA compute capabilities for all versions (default: 60;61;75;86;89 for CUDA 12, 86;89;120;121 for CUDA 13)"
+        description: >
+          Override CUDA compute capabilities. One list applies to every
+          version (e.g. 86;89;120;121); two comma-separated lists apply
+          positionally to 12.9.1 then 13.3.0,
+          e.g. 60;61;75;86;89,86;89;120;121
+          (defaults: 60;61;75;86;89 for CUDA 12, 86;89;120;121 for CUDA 13)
         required: false
         default: ""
       llama_swap_version:
@@ -143,6 +148,27 @@ jobs:
           # base, artifacts, assemble, and merge jobs.
           cuda_versions="${{ inputs.cuda_versions || '12.9.1,13.3.0' }}"
 
+          # One list applies to every version; two lists map positionally
+          # to 12.9.1 and 13.3.0. Anything else is a typo -- fail the run
+          # rather than silently build a version with the wrong archs.
+          arch_override="${{ inputs.cuda_architectures }}"
+          if [[ -n "${arch_override}" ]]; then
+            IFS=',' read -ra arch_lists <<< "${arch_override}"
+            case "${#arch_lists[@]}" in
+              1) arch_12="${arch_lists[0]}"; arch_13="${arch_lists[0]}" ;;
+              2) arch_12="${arch_lists[0]}"; arch_13="${arch_lists[1]}" ;;
+              *)
+                echo "ERROR: cuda_architectures must have 1 or 2 comma-separated lists, got ${#arch_lists[@]}" >&2
+                exit 1
+                ;;
+            esac
+          else
+            # CUDA 12 supports Pascal through Ada; CUDA 13 drops
+            # Pascal/Volta/Turing and adds Blackwell (120/121).
+            arch_12="60;61;75;86;89"
+            arch_13="86;89;120;121"
+          fi
+
           {
             echo "build_cuda=${build_cuda}"
             echo "build_vulkan=${build_vulkan}"
@@ -153,11 +179,8 @@ jobs:
             echo 'cuda_projects=["whisper","sd","audio","llama","ik-llama"]'
             echo 'vulkan_projects=["whisper","sd","audio","llama"]'
             echo "cuda_versions=${cuda_versions}"
-            # Per-version defaults: CUDA 12 supports Pascal through Ada;
-            # CUDA 13 drops Pascal/Volta/Turing and adds Blackwell (120/121).
-            # An explicit cuda_architectures input overrides both.
-            echo "cuda_arch_12=${{ inputs.cuda_architectures || '60;61;75;86;89' }}"
-            echo "cuda_arch_13=${{ inputs.cuda_architectures || '86;89;120;121' }}"
+            echo "cuda_arch_12=${arch_12}"
+            echo "cuda_arch_13=${arch_13}"
           } >> "$GITHUB_OUTPUT"
 
 # One backend call per version per platform so each chain (base -> projects ->
