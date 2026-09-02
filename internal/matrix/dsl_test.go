@@ -46,6 +46,17 @@ func TestDSL_Tokenize(t *testing.T) {
 				{typ: tokEOF},
 			},
 		},
+		{
+			name: "namespaced reference", input: "+auto:orphans & x",
+			expect: []token{
+				{typ: tokRef, val: "auto:orphans"},
+				{typ: tokAnd, val: "&"},
+				{typ: tokIdent, val: "x"},
+				{typ: tokEOF},
+			},
+		},
+		{name: "bare namespaced name", input: "auto:orphans", errMsg: "unexpected character ':'"},
+		{name: "bare model with colon", input: "qwen3:32b", errMsg: "unexpected character ':'"},
 		{name: "empty ref", input: "+", errMsg: "expected set name after '+'"},
 		{name: "invalid character", input: "a @ b", errMsg: "unexpected character"},
 	}
@@ -178,7 +189,7 @@ func TestProgram_CompileErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := Compile(tt.defs, resolve)
+			_, err := Compile(tt.defs, resolve, nil)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.errMsg)
 		})
@@ -254,7 +265,7 @@ func compileIdentity(t *testing.T, definitions []Definition, models []string) *P
 	}
 	program, err := Compile(definitions, func(name string) (string, bool) {
 		return name, known[name]
-	})
+	}, nil)
 	require.NoError(t, err)
 	return program
 }
