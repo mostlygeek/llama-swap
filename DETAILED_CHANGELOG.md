@@ -5,6 +5,222 @@ High-level summaries live in [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
+## 2026-09-02 — Fix `GOOS=windows gosec` build failure in vllm-wrapper
+
+### What
+
+`make gosec` failed its `GOOS=windows` pass — not on a finding, but on a compile
+error: `cmd/vllm-wrapper/main.go:233:21: undefined: syscall.Kill`.
+
+### Why
+
+`syscall.Kill` is only defined on Unix-like platforms. The `sleep` subcommand
+used it to send `SIGTERM` to the serve proxy PID after vLLM enters sleep mode.
+Windows has no `syscall.Kill`, so the package would not compile under
+`GOOS=windows`, and gosec aborts the whole target when a package fails to build.
+(`syscall.SIGTERM` in the signal-handling path is fine — that constant is defined
+on Windows; only `Kill` is missing.)
+
+### How
+
+Extracted the stop call behind a small `stopProcess(pid int) error` helper split
+across build-tagged files:
+
+- `cmd/vllm-wrapper/stop_unix.go` (`//go:build !windows`) → `syscall.Kill(pid, syscall.SIGTERM)`
+  (unchanged graceful behavior on Linux/macOS).
+- `cmd/vllm-wrapper/stop_windows.go` (`//go:build windows`) → `os.FindProcess(pid).Kill()`
+  (Windows has no SIGTERM). This wrapper targets Linux/systemd deployments; the
+  Windows build exists only to keep cross-compilation and gosec green.
+
+`main.go` line 233 now calls `stopProcess(stopPID)`.
+
+### Commands
+
+- `GOOS=windows go build ./cmd/vllm-wrapper/` → ok
+- `GOOS=linux go build ./cmd/vllm-wrapper/` → ok
+- `go test ./cmd/vllm-wrapper/` → 5 passed
+- `make gosec` → linux/darwin/windows all report `Issues: 0`, no build errors
+- `aidc-scan` → clean
+
+### Notes
+
+Behavior on the primary Linux path is identical (still `SIGTERM`). The Windows
+variant is a hard kill because the platform offers no graceful-termination
+signal; acceptable given the wrapper is not deployed on Windows.
+
+---
+
+## 2026-09-02 — Fix TestDirWatcher_MissingDirRecovers Windows CI flake
+
+### What
+
+Windows CI (`make test-all`) failed:
+
+```
+--- FAIL: TestDirWatcher_MissingDirRecovers (0.05s)
+    dirwatcher_test.go:147: Received unexpected error:
+      unlinkat C:\...\TestDirWatcher_MissingDirRecovers.../001:
+      The process cannot access the file because it is being used by another process.
+```
+
+### Why
+
+The test removes the watched directory *while the `DirWatcher` goroutine is
+running* (by design — it verifies the watcher survives a disappearing dir). The
+watcher polls every 25 ms via `os.ReadDir`, which briefly holds an open handle
+on the directory. Windows refuses to unlink a path another handle has open
+(no `FILE_SHARE_DELETE`), so when the test's `os.RemoveAll(dir)` lands in the
+same instant as a poll's `ReadDir`, it returns a sharing violation. POSIX
+`unlinkat` has no such restriction, so linux/darwin never hit it.
+
+### How
+
+Added a `removeDirWithRetry` test helper that retries `os.RemoveAll` up to 50×
+with a 10 ms backoff (≤500 ms, 20× the poll interval) and used it at the mid-run
+removal site. The watcher's handle is only held for the microseconds of a
+`ReadDir` call, so a retry quickly finds a gap. First attempt succeeds on
+non-Windows, so behavior there is unchanged. Test-only; the watcher itself
+already handles a missing directory correctly (`scanDir` returns
+`exists=false`).
+
+Other removals in the watcher tests operate on single files, not the directory,
+so they don't hold the directory handle that `ReadDir` does and were left as-is.
+
+### Commands
+
+- `gofmt -w internal/watcher/dirwatcher_test.go`
+- `GOOS=windows go vet ./internal/watcher/` → ok
+- `go test -run TestDirWatcher -count=3 ./internal/watcher/` → 24 pass
+- `go test ./internal/watcher/` → pass
+
+### Notes
+
+Could not reproduce on the linux dev host (POSIX semantics); the fix targets the
+exact Windows error and is a no-op cost on other platforms.
+
+---
+
+## 2026-09-02 — Fix TTL_IgnoresWebsocket deadlock (fork feature collision)
+
+### What
+
+`TestProcessCommand_TTL_IgnoresWebsocket` (`internal/process`) intermittently
+deadlocked in CI, tripping the 10-minute test timeout and failing `make
+test-all` / `make test-dev`. The trace showed a `panic: close of closed channel`
+at `process_command_test.go:907` and a `httptest.Server blocked in Close` on an
+active connection.
+
+### Why
+
+A collision between two independently-pulled features:
+
+- The test (upstream PR #1002) uses a mock upstream that treats *any non-`/health`
+  request* as "the websocket": it `close(websocketStarted)`s and then blocks on
+  `<-releaseWebsocket`.
+- The fork's dynamic-reasoning capability (upstream PR #915) added a `/props`
+  reasoning-budget probe in `doStart` (`upstreamSupportsThinkingBudget`, fired
+  when the command has no fixed budget — which the test's `simple-responder`
+  does not).
+
+At startup the `/props` probe hit the mock's non-`/health` branch, closing
+`websocketStarted` early and leaving a mock handler goroutine parked on
+`<-releaseWebsocket`. Then the test's real websocket request called
+`close(websocketStarted)` again → `close of closed channel` panic (recovered by
+`net/http`, but it severed the proxied response → `unexpected EOF` → the request
+returned early). The test then failed at line 942
+(`websocket request completed before it was released`) via `t.Fatal`, which
+skipped `close(releaseWebsocket)`; the `t.Cleanup` `mock.Close()` then blocked
+forever on the still-parked `/props` goroutine → 10-minute timeout.
+
+### How
+
+Changed the mock upstream to block only on the *actual* websocket upgrade,
+answering every startup probe (`/health`, `/props`, anything else) with `200`
+immediately — mirroring production's `swaputil.IsWebSocketUpgrade` check:
+
+```go
+if !swaputil.IsWebSocketUpgrade(r) {
+    w.WriteHeader(http.StatusOK)
+    return
+}
+close(websocketStarted)
+<-releaseWebsocket
+w.WriteHeader(http.StatusOK)
+```
+
+The `/props` probe now gets an empty-body `200` (`build_info` absent →
+`reasoningDynamic=false`), so it no longer parks a goroutine, and only the real
+`/socket` upgrade drives the block-until-released sequence the test asserts on.
+Test-only change; no production behavior touched.
+
+### Commands
+
+- `make simple-responder` (test needs the helper binary)
+- `go test -v -run TestProcessCommand_TTL_IgnoresWebsocket -count=5 ./internal/process/` → 5/5 pass
+- `go test ./internal/process/` → 46 pass (was a 600s timeout)
+- `make test-all` → all packages `ok`
+- `gofmt -w internal/process/process_command_test.go`; `aidc-scan` → clean
+
+### Notes
+
+Root cause is the fork carrying both upstream PR #1002 (the test) and PR #915
+(the `/props` probe) that upstream did not have to reconcile against each other.
+The fix hardens the test's mock so any future startup probe is tolerated too.
+
+---
+
+## 2026-09-02 — Suppress DXGI COM interop gosec false positives (Windows)
+
+### What
+
+CI `gosec` (pinned to `v2.26.1` in `.github/workflows/gosec.yml`) reported 12
+`GOOS=windows` findings in `internal/hw/dxgi_windows.go` — 5×G115 (integer
+overflow) and 7×G103 (`unsafe.Pointer`). The local `make gosec` uses an older
+`gosec` (`dev`) that predates the G115 rule, so these were invisible locally.
+
+### Why
+
+Both classes are false positives inherent to DXGI COM interop:
+
+- **G115 (HRESULT/LUID):** an `HRESULT` is a 32-bit status code returned from a
+  syscall as `uintptr`. Truncating it to `uint32`/`int32` and testing the sign
+  bit is the documented Win32 `SUCCEEDED`/`FAILED` semantics, not an overflow.
+  The `luid:%08x` identity likewise reinterprets the fixed 32-bit `AdapterLUID`
+  ABI field for display.
+- **G103 (`unsafe.Pointer`):** mandatory to pass the COM factory/adapter vtable
+  pointers and `DXGI_ADAPTER_DESC` struct across the `syscall.SyscallN` /
+  `LazyProc.Call` boundary. Same by-design verdict as the existing
+  `pdh_windows.go` / `d3dkmt_windows.go` sites.
+
+### How
+
+Added inline `// #nosec G115 -- …` / `// #nosec G103 -- …` markers at the exact
+flagged lines (4 G115 markers — one covers the two conversions on the
+`hresultFailed` line — and 7 G103 markers), matching the established style. No
+code was restructured to dodge the scanner. Updated the audit ledger
+`docs/gosec-suppressions.md`: summary totals (G115 25→29, G103 20→27, total
+78→89) and the G115/G103 section prose to name `dxgi_windows.go`. The
+`TestNosecLedgerInSync` guard enforces the marker/ledger counts stay in sync.
+
+### Commands
+
+- `go install github.com/securego/gosec/v2/cmd/gosec@v2.26.1` (match CI)
+- `GOOS=windows gosec ./internal/hw/` → `Issues: 0`
+- `GOOS={linux,darwin,windows} gosec ./...` → all `Issues: 0`, no build errors
+- `GOOS=windows go build ./internal/hw/` → ok
+- `gofmt -w internal/hw/dxgi_windows.go`
+- `go test ./internal/audit/` → `TestNosecLedgerInSync` passes
+- `aidc-scan` → clean
+
+### Notes
+
+`make gosec` locally still runs the `dev` gosec, which under-reports vs CI. The
+verification above installed the CI-pinned `v2.26.1` explicitly to reproduce and
+confirm the fix. Consider pinning the same version in the Makefile as a
+follow-up so local and CI agree.
+
+---
+
 ## 2026-09-02 — Maximal upstream integration (re-established on upstream `7a14664`)
 
 ### What

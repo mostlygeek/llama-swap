@@ -317,3 +317,56 @@ upstream's ghcr.io), so the three docker-build workflows only burn CI minutes:
 - `docs/semgrep-suppressions.md`: dropped the now-moot run-shell-injection
   entry for the removed workflows; verified no dangling references remain and
   semgrep/aidc-scan stay clean.
+
+## Phase 14 — selective upstream-PR ports (branch: selective-pull)
+
+User picked 5 PRs from the upstream open-PR triage (31 reviewed). Each ported
+from the contributor's fork over HTTPS, adapted to our tree (notably
+`internal/shared` → `internal/swaputil` rename), verified, left UNCOMMITTED
+per user instruction.
+
+### PR #897 — surface upstream output on premature exit
+- `internal/process/process_command.go`: `prematureExit` appends
+  `processLogger.GetHistory()`; logger cleared before each `cmd.Start()`.
+- Runtime-verified: a bad-flag model now returns the upstream's actual stderr
+  ("flag provided but not defined: …" + usage) to the client.
+
+### PR #924 — Open WebUI model unload
+- `POST /models/unload` (llama.cpp-style JSON `{model}`), shared
+  `unloadLocalModel` helper resolving aliases; management API unchanged.
+- Verified no route collision with our Ollama `/api/*` layer or the
+  model-dispatch loops. Runtime: load → unload → `{"status":true}`.
+- Tests adapted to our single-call stubRouter recorder.
+
+### PR #934 — setParamsByMatch filter + structured macros
+- Cherry-picked 2 commits; conflicts resolved (root config.example.yaml is a
+  stub in our tree — content lives in docs/; `internal/shared`→`swaputil`).
+- Adds key/match/set rules (run after stripParams, before setParams; protected
+  params excluded; one-level object merge) + map/list macros as whole values.
+- 46 config tests + server filter tests pass; schema updated.
+
+### PR #915 — per-model output caps + dynamic reasoning effort
+- Most intricate port: 5 commits via `git apply --reject` + hand resolution.
+- Adopted: `capabilities.max_output_tokens` + `capabilities.reasoning`
+  {default,efforts} (schema+validation), output-token capping in the filter
+  middleware (after user filters so they can't raise the cap), llama.cpp
+  build detection (b8605+) + `/props` probe, reasoning-effort rewriting
+  (chat-completions + nested Responses), `/v1/models` metadata extensions
+  (max_input_tokens, reasoning_* fields, renderCapabilities now 10-return).
+- **Deliberately NOT adopted**: the PR's rawNode macro machinery in
+  ModelCapConfig — our base has the NEWER upstream anchor handling (#918
+  era); only struct fields + validation were taken.
+- **Bug found & fixed during port**: the `/props` capability probe had no
+  timeout — an upstream that accepts but never answers would hang model
+  startup forever (our TTL websocket test caught it). Added a 2s
+  `reasoningProbeTimeout` bound.
+
+### PR #1026 — matrix `+undefined` fallback set
+- Clean apply: `internal/matrix/program.go` (orphan collection at compile
+  time), `+undefined` reference in DSL, router + config wiring, 14 tests.
+
+### Verification (all green)
+`go build ./...`; gofmt clean; `go vet` clean; full `-race` suite; `make gosec`
+0 ×3 GOOS; ledger in sync; aidc-scan clean (semgrep/gitleaks/gosec); gitleaks
+history clean; runtime smoke (Open WebUI unload round-trip, premature-exit
+error surfacing, /v1/models schema extensions).

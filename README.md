@@ -95,6 +95,7 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
   - `/running` - list currently running models ([#61](https://github.com/mostlygeek/llama-swap/issues/61))
   - `POST /api/models/unload` - manually unload all running models ([#58](https://github.com/mostlygeek/llama-swap/issues/58))
   - `POST /api/models/unload/:model_id` - unload a specific model
+  - `POST /models/unload` - llama.cpp-compatible named unload used by Open WebUI (fork addition, upstream PR #924)
   - `GET /api/profiles` - list configured profiles and the active selection
   - `PUT /api/profiles/active` - activate a profile or select none
   - `/logs` - remote log monitoring

@@ -23,11 +23,11 @@ To list the live markers at any time:
 grep -rn "#nosec" internal/
 ```
 
-Total: **78** suppressions across **12** rules (G115 ×25, G103 ×20, G304 ×10, G204 ×7, G404 ×4, G202 ×3, G117 ×2, G120 ×2, G710 ×2, G118 ×1, G703 ×1, G705 ×1).
+Total: **89** suppressions across **12** rules (G115 ×29, G103 ×27, G304 ×10, G204 ×7, G404 ×4, G202 ×3, G117 ×2, G120 ×2, G710 ×2, G118 ×1, G703 ×1, G705 ×1).
 
 ---
 
-## G115 — integer overflow in numeric conversions · 25 sites · HIGH
+## G115 — integer overflow in numeric conversions · 29 sites · HIGH
 
 **Verdict: false positive on the supported 64-bit build targets.**
 
@@ -36,16 +36,21 @@ byte counts (divided down by `1024*1024`), GPU utilization percentages, or
 fixed-width syscall fields — read from gopsutil / mactop / LACT / the Windows
 D3DKMT and PDH APIs. The values are physically bounded well below `MaxInt`/the
 target width on the 64-bit targets the project ships (`amd64`, `arm64`).
+The `internal/hw/dxgi_windows.go` sites reinterpret DXGI `HRESULT` status codes
+and the fixed 32-bit LUID ABI field: an `HRESULT` is defined as a 32-bit value,
+so truncating the syscall `uintptr` return to 32 bits and testing its sign bit
+is the documented Win32 `SUCCEEDED`/`FAILED` semantics, not an overflow.
 Files: `internal/perf/{monitor_unix,monitor_darwin,monitor_windows,gpu_parse,d3dkmt_windows,pdh_windows}.go`,
-`internal/hw/detect_linux.go`.
+`internal/hw/{detect_linux,dxgi_windows}.go`.
 
-## G103 — use of unsafe.Pointer · 20 sites · (info)
+## G103 — use of unsafe.Pointer · 27 sites · (info)
 
-**Verdict: required, by design.** All sites are in the Windows GPU telemetry
-syscall paths (`internal/perf/d3dkmt_windows.go`, `pdh_windows.go`,
-`internal/process/treecleanup_windows.go`), where `unsafe.Pointer` is mandatory
-to marshal fixed-layout structs across the `syscall`/`golang.org/x/sys/windows`
-boundary. There is no safe alternative for these OS ABIs.
+**Verdict: required, by design.** All sites are in the Windows GPU/adapter
+telemetry syscall paths (`internal/perf/d3dkmt_windows.go`, `pdh_windows.go`,
+`internal/hw/dxgi_windows.go`, `internal/process/treecleanup_windows.go`), where
+`unsafe.Pointer` is mandatory to marshal fixed-layout structs and COM vtable
+pointers across the `syscall`/`golang.org/x/sys/windows` boundary. There is no
+safe alternative for these OS ABIs.
 
 ## G204 — subprocess launched with a variable · 7 sites · MEDIUM
 

@@ -10,6 +10,24 @@ Long-form entries with full context live in
 
 ## [Unreleased]
 
+### Added (selective upstream-PR ports)
+
+- Surface the upstream's own log output in the error when a model process exits
+  before becoming ready, instead of the opaque "upstream command exited
+  prematurely" (upstream PR #897).
+- `POST /models/unload` — llama.cpp-compatible named-model unload used by
+  Open WebUI (upstream PR #924).
+- `setParamsByMatch` request filter: set parameters when a request field
+  matches a configured value, plus map/list macros usable as whole values
+  (upstream PR #934).
+- Per-model output-token caps (`capabilities.max_output_tokens`) enforced after
+  user filters, and dynamic reasoning-effort selection for llama.cpp b8605+
+  (`capabilities.reasoning` with per-effort budgets); both surfaced as
+  `/v1/models` metadata extensions (upstream PR #915). The capability probe is
+  bounded by a 2s timeout so an unresponsive upstream cannot stall startup.
+- Matrix `+undefined` reference: a set can include every model not named by
+  any other set expression (upstream PR #1026).
+
 ### Changed
 
 - Re-established the fork on upstream `7a14664` (2026-08-31), inheriting the new
@@ -59,6 +77,23 @@ Long-form entries with full context live in
   reads throttled to 5s while the GPU is active, so hosts without
   nvidia-smi/rocm-smi/LACT (e.g. Intel Arc) get GPU telemetry and idle cards
   stay runtime-suspended. Cherry-picked from the fork's `intel-card` branch.
+
+### Fixed
+
+- `cmd/vllm-wrapper` now cross-compiles for Windows: the `syscall.Kill` call
+  (Unix-only) moved behind a build-tagged `stopProcess` helper
+  (`stop_unix.go` / `stop_windows.go`), unblocking `GOOS=windows gosec`.
+- Documented the DXGI COM interop `gosec` false positives in
+  `internal/hw/dxgi_windows.go` (G115 HRESULT/LUID truncation, G103
+  `unsafe.Pointer` vtable calls) with inline `#nosec` markers, so the newer
+  CI `gosec` (v2.26.1) reports zero findings on the Windows target.
+- `TestProcessCommand_TTL_IgnoresWebsocket` no longer deadlocks (10-minute CI
+  timeout): its mock upstream now blocks only on the real websocket upgrade,
+  so the fork's `/props` reasoning-budget startup probe is answered instead of
+  tripping the block-until-released path.
+- `TestDirWatcher_MissingDirRecovers` no longer fails on Windows CI: the
+  mid-run directory removal retries briefly to tolerate the transient Windows
+  sharing violation when the watcher is polling the directory concurrently.
 
 ### Security
 
