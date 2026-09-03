@@ -8,7 +8,34 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mostlygeek/llama-swap/internal/config"
 )
+
+func TestConfigureTailcatListener_RequiresModels(t *testing.T) {
+	cfg := config.Config{}
+	err := configureTailcatListener(&cfg, "/path/to/server.private.json")
+	require.ErrorContains(t, err, "tailcat.models")
+
+	cfg.Tailcat = &config.TailcatConfig{}
+	err = configureTailcatListener(&cfg, "/path/to/server.private.json")
+	require.ErrorContains(t, err, "tailcat.models")
+
+	cfg.Tailcat.Models = []string{"model"}
+	require.NoError(t, configureTailcatListener(&cfg, "/path/to/server.private.json"))
+	assert.True(t, cfg.TailcatEnabled())
+}
+
+func TestConfigureTailcatListener_DisabledWithoutFlag(t *testing.T) {
+	cfg := config.Config{}
+	require.NoError(t, configureTailcatListener(&cfg, ""))
+	assert.False(t, cfg.TailcatEnabled())
+}
+
+func TestLoadTailcatListenerKey_InvalidFile(t *testing.T) {
+	_, err := loadTailcatListenerKey(filepath.Join(t.TempDir(), "missing.private.json"), true)
+	require.ErrorContains(t, err, "-listen-tailcat")
+}
 
 func TestRunValidate_ValidConfig(t *testing.T) {
 	dir := t.TempDir()

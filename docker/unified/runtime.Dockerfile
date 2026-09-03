@@ -38,7 +38,7 @@ RUN bash /build/install-llama-swap.sh "${LS_VERSION}"
 # vllm-wrapper is not shipped in the llama-swap release archives, so it is
 # compiled from the same revision as the llama-swap binary above.
 
-FROM golang:1.26-bookworm AS vllm-wrapper-build
+FROM golang:1.27-bookworm AS vllm-wrapper-build
 ARG LS_VERSION=latest
 COPY install-vllm-wrapper.sh /build/
 RUN --mount=type=cache,id=go-build,target=/root/.cache/go-build \

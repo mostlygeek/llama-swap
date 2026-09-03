@@ -195,6 +195,9 @@ func redactWhole(v any) any {
 }
 
 func redactString(key, s string) string {
+	if strings.EqualFold(key, "proxy") && strings.HasPrefix(s, "tailcat://") {
+		return "tailcat://" + RedactedPlaceholder
+	}
 	switch strings.ToLower(key) {
 	case "cmd", "cmdstop":
 		for _, re := range cmdSecretPatterns {

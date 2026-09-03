@@ -5,6 +5,8 @@ import {
   activityRevision,
   fetchPlaygroundModels,
   fetchProfiles,
+  fetchTailcatStatus,
+  getActivity,
   getHardware,
   handleAPIEventMessage,
   hasListedModels,
@@ -16,6 +18,7 @@ import {
   profiles,
   selectorModels,
   setActiveProfile,
+  tailcatStatus,
   uiConfig,
 } from "./api";
 
@@ -25,6 +28,28 @@ afterEach(() => {
   playgroundModels.set([]);
   profiles.set([]);
   activeProfile.set(null);
+  tailcatStatus.set({ enabled: false, address: "" });
+});
+
+describe("tailcat api", () => {
+  it("fetches status and publishes it for conditional navigation", async () => {
+    const status = { enabled: true, address: "tcCaseSensitiveToken" };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => status }));
+
+    await expect(fetchTailcatStatus()).resolves.toEqual(status);
+    expect(fetch).toHaveBeenCalledWith("/api/tailcat");
+    expect(get(tailcatStatus)).toEqual(status);
+  });
+
+  it("requests literal Tailcat source-prefix pagination", async () => {
+    const page = { data: [], page: 2, limit: 10, total: 0, total_pages: 0 };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => page }));
+
+    await getActivity({ srcPrefix: "tc:", page: 2, limit: 10, sort: "src", order: "asc" });
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/metrics/activity?page=2&limit=10&sort=src&order=asc&src_prefix=tc%3A"
+    );
+  });
 });
 
 describe("hardware api", () => {

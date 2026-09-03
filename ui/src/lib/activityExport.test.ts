@@ -13,6 +13,7 @@ import {
 function entry(overrides: Partial<ActivityLogEntry> = {}): ActivityLogEntry {
   return {
     id: 1,
+    src: "ip:127.0.0.1:1234",
     timestamp: new Date(2026, 5, 25, 12, 34, 56).toISOString(),
     model: "qwen3",
     req_path: "/v1/chat/completions",
@@ -41,6 +42,13 @@ describe("formatDrafted", () => {
 
   it("renders a dash when nothing was drafted", () => {
     expect(formatDrafted(0, 0)).toBe("-");
+  });
+});
+
+describe("activity source export", () => {
+  it("renders the trusted source column", () => {
+    expect(activityCellText(entry({ src: "tc:nodekey:abc" }), "src")).toBe("tc:nodekey:abc");
+    expect(activityCellText(entry({ src: "" }), "src")).toBe("-");
   });
 });
 

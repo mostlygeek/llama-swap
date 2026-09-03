@@ -54,6 +54,7 @@ export interface TokenMetrics {
 export interface ActivityLogEntry {
   id: number;
   timestamp: string;
+  src: string;
   model: string;
   req_path: string;
   resp_content_type: string;
@@ -63,6 +64,11 @@ export interface ActivityLogEntry {
   has_capture: boolean;
   error_msg?: string;
   metadata?: Record<string, string>;
+}
+
+export interface TailcatStatus {
+  enabled: boolean;
+  address: string;
 }
 
 export interface ActivityPage {

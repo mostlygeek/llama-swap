@@ -672,6 +672,38 @@
             "default": [],
             "description": "Require an API key when making requests to inference endpoints. When empty, authorization will not be checked. Each key is a non-empty string."
         },
+        "tailcat": {
+            "type": "object",
+            "properties": {
+                "allow": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "pattern": "^nodekey:[0-9a-f]{64}$"
+                    },
+                    "default": [],
+                    "description": "Client node public keys allowed to connect. Empty allows any client possessing the connection token."
+                },
+                "models": {
+                    "type": "array",
+                    "items": { "type": "string", "minLength": 1 },
+                    "default": [],
+                    "description": "Exact public model request IDs exposed through Tailcat. The -listen-tailcat flag requires at least one entry; '*' exposes every callable model."
+                },
+                "admin": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Expose llama-swap's complete HTTP surface through Tailcat. False exposes only health, model listings, and allowlisted inference endpoints."
+                },
+                "debug": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Include verbose Tailcat transport diagnostics in the proxy log."
+                }
+            },
+            "additionalProperties": false,
+            "description": "Tailcat HTTP policy. A Tailcat listener starts only when -listen-tailcat supplies a server PrivateKey JSON file."
+        },
         "peers": {
             "type": "object",
             "additionalProperties": {
@@ -690,6 +722,11 @@
                         "type": "string",
                         "default": "",
                         "description": "A string key to be injected into the request. If blank, no key will be added. Key will be injected into headers: Authorization: Bearer <key> and x-api-key: <key>."
+                    },
+                    "tailcatKey": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Optional Tailcat client PrivateKey JSON file, or 'ephemeral'. Valid only when proxy uses tailcat://. Omitted and 'ephemeral' both create a process-lifetime identity per peer."
                     },
                     "models": {
                         "type": "array",
