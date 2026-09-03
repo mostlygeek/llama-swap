@@ -27,7 +27,7 @@ on:
         required: false
         default: "main"
       cuda_versions:
-        description: "Comma-separated CUDA versions to build (e.g. 12.9.1,13.3.0)"
+        description: "Comma-separated CUDA versions to build (supported: 12.9.1, 13.3.0)"
         required: false
         default: ""
       cuda_architectures:
@@ -101,6 +101,8 @@ jobs:
       ik_llama_hash: ${{ steps.refs.outputs.ik_llama_hash }}
       ls_hash: ${{ steps.refs.outputs.ls_hash }}
       cuda_versions: ${{ steps.plan.outputs.cuda_versions }}
+      build_cuda_1291: ${{ steps.plan.outputs.build_cuda_1291 }}
+      build_cuda_1330: ${{ steps.plan.outputs.build_cuda_1330 }}
       cuda_arch_12: ${{ steps.plan.outputs.cuda_arch_12 }}
       cuda_arch_13: ${{ steps.plan.outputs.cuda_arch_13 }}
     steps:
@@ -145,8 +147,31 @@ jobs:
           fi
 
           # Multiple CUDA versions are built independently; each gets its own
-          # base, artifacts, assemble, and merge jobs.
+          # base, artifacts, assemble, and merge jobs. The request is parsed
+          # as exact comma-separated tokens: anything unsupported fails the
+          # run rather than silently skipping or substituting a version.
           cuda_versions="${{ inputs.cuda_versions || '12.9.1,13.3.0' }}"
+          build_1291=false; build_1330=false
+          IFS=',' read -ra ver_list <<< "${cuda_versions}"
+          for v in "${ver_list[@]}"; do
+            v="${v#"${v%%[![:space:]]*}"}"; v="${v%"${v##*[![:space:]]}"}"
+            case "${v}" in
+              12.9.1) build_1291=true ;;
+              13.3.0) build_1330=true ;;
+              *)
+                echo "ERROR: unsupported CUDA version '${v}' (supported: 12.9.1, 13.3.0)" >&2
+                exit 1
+                ;;
+            esac
+          done
+          if [[ "${build_1291}" == "false" && "${build_1330}" == "false" ]]; then
+            echo "ERROR: no CUDA versions selected" >&2
+            exit 1
+          fi
+          # Canonical list of the requested versions, in 12.9.1 then 13.3.0 order.
+          norm=""
+          if [[ "${build_1291}" == "true" ]]; then norm="12.9.1"; fi
+          if [[ "${build_1330}" == "true" ]]; then norm="${norm:+${norm},}13.3.0"; fi
 
           # One list applies to every version; two lists map positionally
           # to 12.9.1 and 13.3.0. Anything else is a typo -- fail the run
@@ -178,7 +203,9 @@ jobs:
             # ik_llama.cpp has no Vulkan build.
             echo 'cuda_projects=["whisper","sd","audio","llama","ik-llama"]'
             echo 'vulkan_projects=["whisper","sd","audio","llama"]'
-            echo "cuda_versions=${cuda_versions}"
+            echo "cuda_versions=${norm}"
+            echo "build_cuda_1291=${build_1291}"
+            echo "build_cuda_1330=${build_1330}"
             echo "cuda_arch_12=${arch_12}"
             echo "cuda_arch_13=${arch_13}"
           } >> "$GITHUB_OUTPUT"
@@ -191,7 +218,7 @@ jobs:
 
   cuda-1291:
     needs: setup
-    if: ${{ needs.setup.outputs.build_cuda == 'true' && contains(needs.setup.outputs.cuda_versions, '12.9.1') }}
+    if: ${{ needs.setup.outputs.build_cuda == 'true' && needs.setup.outputs.build_cuda_1291 == 'true' }}
     uses: ./.github/workflows/unified-docker-backend.yml
     permissions:
       contents: read
@@ -212,7 +239,7 @@ jobs:
 
   cuda-1291-arm64:
     needs: setup
-    if: ${{ needs.setup.outputs.build_cuda == 'true' && needs.setup.outputs.build_arm64 == 'true' && contains(needs.setup.outputs.cuda_versions, '12.9.1') }}
+    if: ${{ needs.setup.outputs.build_cuda == 'true' && needs.setup.outputs.build_arm64 == 'true' && needs.setup.outputs.build_cuda_1291 == 'true' }}
     uses: ./.github/workflows/unified-docker-backend.yml
     permissions:
       contents: read
@@ -236,7 +263,12 @@ jobs:
       - setup
       - cuda-1291
       - cuda-1291-arm64
-    if: ${{ needs.setup.outputs.build_cuda == 'true' && needs.setup.outputs.push_to_ghcr == 'true' && contains(needs.setup.outputs.cuda_versions, '12.9.1') }}
+    if: ${{ always()
+        && needs.cuda-1291.result == 'success'
+        && (needs.cuda-1291-arm64.result == 'skipped' || needs.cuda-1291-arm64.result == 'success')
+        && needs.setup.outputs.build_cuda == 'true'
+        && needs.setup.outputs.push_to_ghcr == 'true'
+        && needs.setup.outputs.build_cuda_1291 == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -278,7 +310,7 @@ jobs:
 
   cuda-1330:
     needs: setup
-    if: ${{ needs.setup.outputs.build_cuda == 'true' && contains(needs.setup.outputs.cuda_versions, '13.3.0') }}
+    if: ${{ needs.setup.outputs.build_cuda == 'true' && needs.setup.outputs.build_cuda_1330 == 'true' }}
     uses: ./.github/workflows/unified-docker-backend.yml
     permissions:
       contents: read
@@ -299,7 +331,7 @@ jobs:
 
   cuda-1330-arm64:
     needs: setup
-    if: ${{ needs.setup.outputs.build_cuda == 'true' && needs.setup.outputs.build_arm64 == 'true' && contains(needs.setup.outputs.cuda_versions, '13.3.0') }}
+    if: ${{ needs.setup.outputs.build_cuda == 'true' && needs.setup.outputs.build_arm64 == 'true' && needs.setup.outputs.build_cuda_1330 == 'true' }}
     uses: ./.github/workflows/unified-docker-backend.yml
     permissions:
       contents: read
@@ -323,7 +355,12 @@ jobs:
       - setup
       - cuda-1330
       - cuda-1330-arm64
-    if: ${{ needs.setup.outputs.build_cuda == 'true' && needs.setup.outputs.push_to_ghcr == 'true' && contains(needs.setup.outputs.cuda_versions, '13.3.0') }}
+    if: ${{ always()
+        && needs.cuda-1330.result == 'success'
+        && (needs.cuda-1330-arm64.result == 'skipped' || needs.cuda-1330-arm64.result == 'success')
+        && needs.setup.outputs.build_cuda == 'true'
+        && needs.setup.outputs.push_to_ghcr == 'true'
+        && needs.setup.outputs.build_cuda_1330 == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -406,7 +443,11 @@ jobs:
       - setup
       - vulkan
       - vulkan-arm64
-    if: ${{ needs.setup.outputs.build_vulkan == 'true' && needs.setup.outputs.push_to_ghcr == 'true' }}
+    if: ${{ always()
+        && needs.vulkan.result == 'success'
+        && (needs.vulkan-arm64.result == 'skipped' || needs.vulkan-arm64.result == 'success')
+        && needs.setup.outputs.build_vulkan == 'true'
+        && needs.setup.outputs.push_to_ghcr == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
