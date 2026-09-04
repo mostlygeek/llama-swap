@@ -6,6 +6,7 @@
   import { runAgent, sanitizeMessages, DEFAULT_MAX_ITERATIONS } from "../../lib/agentLoop";
   import { fetchToolDefinitions, callTool, friendlyToolName } from "../../lib/agentTools";
   import { DOCS_AGENT_SYSTEM_PROMPT } from "../../lib/prompts/docsAgent";
+  import { pickSuggestions } from "../../lib/prompts/docsSuggestions";
   import { docsAgentStreaming } from "../../stores/playgroundActivity";
   import { getTextContent, type ChatMessage } from "../../lib/types";
   import { isSubmitEnter } from "../../lib/ime";
@@ -32,13 +33,6 @@
   const TEMPERATURE = 0;
   const MAX_TOKENS = 4096;
 
-  const SUGGESTIONS = [
-    "How do I unload a model after 5 minutes of inactivity?",
-    "How do I run two models on one GPU at the same time?",
-    "What models are configured on this server?",
-    "My model won't load. How do I debug it?",
-  ];
-
   const selectedModelStore = persistentStore<string>("playground-docs-model", "");
 
   function loadMessages(): ChatMessage[] {
@@ -54,6 +48,9 @@
   }
 
   let messages = $state<ChatMessage[]>(loadMessages());
+  // Drawn once per empty chat rather than derived: a list that recomputed
+  // would reshuffle under the reader's cursor.
+  let suggestions = $state(pickSuggestions());
   let userInput = $state("");
   let isStreaming = $state(false);
   let isReasoning = $state(false);
@@ -243,6 +240,7 @@
       cancelStreaming();
     }
     messages = [];
+    suggestions = pickSuggestions();
     isReasoning = false;
     reasoningStartTime = 0;
     agentIteration = 0;
@@ -470,7 +468,7 @@
               from what the model remembers.
             </p>
             <div class="mt-4 flex flex-col gap-2">
-              {#each SUGGESTIONS as suggestion (suggestion)}
+              {#each suggestions as suggestion (suggestion)}
                 <button
                   type="button"
                   class="hover:bg-muted/70 disabled:hover:bg-transparent rounded-md border px-3 py-2 text-left text-sm transition-colors disabled:opacity-50"

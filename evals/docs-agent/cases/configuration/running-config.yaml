@@ -105,3 +105,24 @@
   rubric:
     - Names all four models
     - Gives the right limit for each
+
+# Offered on the empty Help page, so it is a button a new user is likely to
+# press first. What it must not do is answer from the model's memory of some
+# other project: the only honest answer compares what the docs describe against
+# what this config sets. Nothing here asserts on the text -- which features are
+# unused depends on the config the eval was started with -- only that the agent
+# reads both before answering.
+- id: running-config-unused-features
+  question: What llama-swap features am I not using?
+  tags: [config, running-config, discovery]
+  expect_tools: [config__get_config]
+  expect_tools_any: [docs__list_docs, docs__search_docs]
+  max_iterations: 8
+  reference: |
+    A comparison of the documented features against this server's config: the
+    sections it never sets (groups, profiles, selectors, peers, hooks, filters,
+    capabilities, and so on) with a sentence on what each would do for it.
+  rubric:
+    - Names features that are genuinely absent from the running config
+    - Says what each one would do, rather than only listing key names
+    - Invents no feature llama-swap does not have
