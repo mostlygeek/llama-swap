@@ -31,7 +31,7 @@
    * answers with no way to tell why. The only choice left is the model.
    */
   const TEMPERATURE = 0;
-  const MAX_TOKENS = 4096;
+  const MAX_TOKENS = 65536;
 
   const selectedModelStore = persistentStore<string>("playground-docs-model", "");
 
