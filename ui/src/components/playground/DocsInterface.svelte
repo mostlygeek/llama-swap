@@ -25,13 +25,12 @@
    * -- the same chat message, model selector and textarea -- not because Help
    * is a playground tab. It stopped being one.
    *
-   * Unlike the Chat tab this exposes no settings. The prompt, temperature and
-   * tool set are the thing being shipped -- they are tuned together against
+   * Unlike the Chat tab this exposes no settings. The prompt and tool set are
+   * the thing being shipped -- they are tuned together against
    * evals/docs-agent, and a user who turns one of them down just gets worse
-   * answers with no way to tell why. The only choice left is the model.
+   * answers with no way to tell why. Sampling params are left unset so the
+   * server's own defaults apply. The only choice left is the model.
    */
-  const TEMPERATURE = 0;
-  const MAX_TOKENS = 4096;
 
   const selectedModelStore = persistentStore<string>("playground-docs-model", "");
 
@@ -332,9 +331,7 @@
     const deps = {
       streamChat: (msgs: ChatMessage[], sig: AbortSignal) =>
         streamChatCompletion($selectedModelStore, msgs, sig, {
-          temperature: TEMPERATURE,
           endpoint: "v1/chat/completions" as const,
-          max_tokens: MAX_TOKENS,
           tools,
         }),
       callTool,
