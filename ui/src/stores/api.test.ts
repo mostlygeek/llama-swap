@@ -28,12 +28,12 @@ afterEach(() => {
   playgroundModels.set([]);
   profiles.set([]);
   activeProfile.set(null);
-  tailcatStatus.set({ enabled: false, address: "" });
+  tailcatStatus.set({ enabled: false, address: "", models: [] });
 });
 
 describe("tailcat api", () => {
   it("fetches status and publishes it for conditional navigation", async () => {
-    const status = { enabled: true, address: "tcCaseSensitiveToken" };
+    const status = { enabled: true, address: "tcCaseSensitiveToken", models: ["chat"] };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => status }));
 
     await expect(fetchTailcatStatus()).resolves.toEqual(status);

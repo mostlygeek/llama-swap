@@ -361,12 +361,14 @@ func (s *Server) handleAPIVersion(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAPITailcat(w http.ResponseWriter, r *http.Request) {
 	address := ""
+	var models []string
 	enabled := s.cfg.TailcatEnabled()
 	if enabled {
 		address = s.TailcatAddress()
+		models = config.ExposedTailcatModels(s.cfg)
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"enabled": enabled, "address": address})
+	json.NewEncoder(w).Encode(map[string]any{"enabled": enabled, "address": address, "models": models})
 }
 
 // handleAPIHardware serves the hardware snapshot captured at process startup.

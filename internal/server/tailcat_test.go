@@ -138,7 +138,9 @@ func TestServer_APITailcatStatus(t *testing.T) {
 	s.SetTailcatAddress("tcCaseSensitiveToken")
 	w := httptest.NewRecorder()
 	s.ServeHTTP(w, tailcatRequest(http.MethodGet, "/api/tailcat", ""))
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"enabled":true`) || !strings.Contains(w.Body.String(), "tcCaseSensitiveToken") {
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"enabled":true`) ||
+		!strings.Contains(w.Body.String(), "tcCaseSensitiveToken") ||
+		!strings.Contains(w.Body.String(), `"models":["public"]`) {
 		t.Fatalf("status response = %d %q", w.Code, w.Body.String())
 	}
 }
