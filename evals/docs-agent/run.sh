@@ -7,6 +7,11 @@
 # visible after a rebuild. Everything the agent model needs comes through the
 # same server, via peers, so there is only ever one base URL.
 #
+# The server is started with fixture/ merged in through -config-dir. That is
+# what makes the cases about the running configuration gradeable: without it
+# config__get_config would answer over whatever config this machine happens to
+# have. Attaching with --base-url means supplying it yourself; see below.
+#
 # Usage:
 #   ./run.sh                              build, start, eval, tear down
 #   ./run.sh --repeat 3 --label prompt-v2  what to run before keeping a change
@@ -25,6 +30,7 @@ CONCURRENCY=1
 PORT=18080
 BASE_URL=""
 CASES="evals/docs-agent/cases"
+FIXTURE_DIR="evals/docs-agent/fixture"
 EMBED_UI=0
 AGENT_ARGS=()
 
@@ -38,7 +44,7 @@ while [[ $# -gt 0 ]]; do
     --cases)    CASES="$2"; shift 2 ;;
     --holdout)  CASES="evals/docs-agent/cases-holdout"; shift ;;
     --embed-ui) EMBED_UI=1; shift ;;
-    -h|--help)  sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'; exit 0 ;;
+    -h|--help)  sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'; exit 0 ;;
     # Everything else is forwarded: --repeat, --label, --only, --system-prompt,
     # --temperature, --out, --report ...
     *)          AGENT_ARGS+=("$1"); shift ;;
@@ -64,8 +70,8 @@ if [[ -z "$BASE_URL" ]]; then
     go build -o build/llama-swap .
   fi
 
-  echo "==> starting llama-swap on 127.0.0.1:$PORT"
-  ./build/llama-swap -config "$CONFIG" -listen "127.0.0.1:$PORT" >"${TMPDIR:-/tmp}/docs-agent-swap.log" 2>&1 &
+  echo "==> starting llama-swap on 127.0.0.1:$PORT with $FIXTURE_DIR merged in"
+  ./build/llama-swap -config "$CONFIG" -config-dir "$FIXTURE_DIR" -listen "127.0.0.1:$PORT" >"${TMPDIR:-/tmp}/docs-agent-swap.log" 2>&1 &
   SERVER_PID=$!
   trap 'kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true' EXIT
 
@@ -87,6 +93,12 @@ if [[ -z "$BASE_URL" ]]; then
     echo "error: llama-swap did not become healthy within 30s" >&2
     exit 1
   fi
+else
+  # The running-config cases ask about models that only exist in the fixture.
+  # A server started without it answers them from the wrong config and fails
+  # them all, which looks like a regression in the agent.
+  echo "==> attaching to $BASE_URL; it must have been started with:"
+  echo "      -config-dir $FIXTURE_DIR"
 fi
 
 echo "==> $BASE_URL is up; running eval with $MODEL"

@@ -2,7 +2,7 @@
  * The Docs Agent's system prompt.
  *
  * This is the single tuning surface that needs no server restart: it is sent by
- * the client on every request. Both the Playground's Docs tab and the headless
+ * the client on every request. Both the UI's Help page and the headless
  * CLI in src/cli/ use this constant, so an edit here changes what real users get
  * and what the eval suite measures at the same time. That is deliberate -- a
  * prompt that only ever improved the benchmark would be worthless.
@@ -10,7 +10,7 @@
  * The tool inventory below deliberately restates internal/server/apimcp.go's
  * `mcpInstructions`. That string is only returned from MCP `server/discover`,
  * which agentTools.ts never calls, so it reaches external MCP clients but never
- * the Playground. Until the two are unified, keep them consistent by hand.
+ * the Help page. Until the two are unified, keep them consistent by hand.
  *
  * Measure before and after with:
  *   npm run agent -- eval --repeat 3
@@ -26,7 +26,7 @@ Tools are namespaced by provider.
 - \`docs__list_docs\` - the index of every document, with ids, titles and summaries. Use it to browse when a search comes back empty.
 - \`docs__get_doc\` - read one document in full by id. Ids come from the other two tools.
 - \`docs__get_config_schema\` - look up one configuration key by dotted path (for example \`models.*.ttl\`) to get its type, default and allowed values.
-- \`config__get_config\` - the configuration this server is running right now, with credentials redacted. Use it only when the question is about this specific running setup.
+- \`config__get_config\` - the configuration this server is running right now, with credentials redacted. It answers a jq query, so ask for exactly the part you need: \`.models | keys\` for the configured model ids, \`.models.qwen3\` for one model, \`.models["qwen3-8b"].ttl\` when the id is not a plain word, \`.\` for everything. Use it only when the question is about this specific running setup.
 - \`sys__now\` - the current date and time on the server.
 
 Document ids beginning with \`reference/config/\` are sections of \`config.example.yaml\` reproduced verbatim.

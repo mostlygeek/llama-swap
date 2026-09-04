@@ -4,14 +4,14 @@ summary: Point any MCP client at /api/mcp to search and read llama-swap's docume
 category: guides
 tags: [mcp, tools, agent, api, integration]
 config_keys: [apiKeys]
-updated: 2026-08-27
+updated: 2026-09-04
 ---
 
 # Connecting an MCP client to llama-swap
 
 llama-swap serves its own documentation as an MCP server at `/api/mcp`. Any
 MCP client can point at a running instance and ask about llama-swap
-configuration — the same tools the web UI's Playground Docs tab uses.
+configuration — the same tools the web UI's Help page uses.
 
 ```
 http://localhost:8080/api/mcp
@@ -68,13 +68,38 @@ from, which keeps names unique once llama-swap starts proxying other MCP servers
 
 | tool | what it does |
 | --- | --- |
-| `config__get_config` | the configuration this instance is running right now, as YAML, with credentials redacted; pass `path` to scope it to a section like `models` or `models.qwen3` |
+| `config__get_config` | the configuration this instance is running right now, as YAML, with credentials redacted; pass a jq `query` to select part of it |
 
 `config__get_config` returns the *effective* config: defaults filled in, `${env.*}`
 and macro references already expanded. `apiKeys`, `peers.<id>.apiKey`, secret-looking
 `cmd`/`env` arguments, and any recognizable credential token are replaced with
 `[REDACTED]` before the result leaves the server. It is what lets an agent give advice
 about the setup actually in front of it.
+
+The `query` argument is a [jq](https://jqlang.org/manual/) expression, evaluated by
+[gojq](https://github.com/itchyny/gojq), so a client asks for exactly what it needs
+instead of reading the whole document and throwing most of it away:
+
+| query | what comes back |
+| --- | --- |
+| omitted, or `.` | the whole config |
+| `.models \| keys` | the configured model ids |
+| `.models.qwen3` | one model |
+| `.models["qwen3-8b"].ttl` | one field of a model whose id jq will not take bare |
+| `.models \| to_entries \| map({id: .key, ttl: .value.ttl})` | one field from every model |
+| `.models \| to_entries \| map(select(.value.ttl == null)) \| map(.key)` | the models with no `ttl` set |
+
+Results are YAML. A query producing more than one result returns them as several
+YAML documents separated by `---`. `null` means nothing is set at that key: either
+it does not exist, or its value is the default, since defaults are omitted. `env`
+and `$ENV` are not available: the process environment holds exactly the credentials
+that redaction keeps out of the result.
+
+A query is bounded three ways, and each refusal explains itself so a client can
+retry with something narrower: evaluation is capped at five seconds, a result
+larger than 32KB is refused rather than returned truncated, and a query that
+builds a value too large to hold — `[range(0; 1000000000)]` and its relatives —
+is stopped while it is still building it.
 
 **`sys__*` — facts about the machine**
 
@@ -144,7 +169,7 @@ Only protocol problems — an unknown method, a header mismatch, a malformed bod
 - JSON-RPC batching is not supported. MCP removed it in revision 2025-06-18.
 - Results are size-capped so they fit a local model's context window.
   `docs__get_doc` says so when it truncates and tells you the `offset` to continue
-  from; `config__get_config` tells you to pass a `path` for the section you want.
+  from; `config__get_config` never truncates, it asks you for a narrower `query`.
 
 ## Related
 

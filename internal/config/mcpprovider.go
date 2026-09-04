@@ -3,20 +3,74 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"reflect"
+	"regexp"
+	"runtime/metrics"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
+	"github.com/itchyny/gojq"
 	"github.com/mostlygeek/llama-swap/internal/mcptools"
 	"gopkg.in/yaml.v3"
 )
 
-// maxConfigResultBytes caps a get_config result. It is larger than the docs
-// cap: a config review is a heavier task and the whole point is to see the
-// setup, but it is still bounded so a full dump cannot swamp a small context.
+// maxConfigResultBytes bounds one get_config result. The caller chooses what
+// comes back by writing a jq query, so this cap is a backstop against a query
+// that asks for more than a context window can hold. When it trips the caller
+// is told to narrow the query rather than handed a document that stops
+// mid-value.
 const maxConfigResultBytes = 32 * 1024
+
+// configQueryTimeout bounds evaluation. jq is a real language and the queries
+// come from a model, so a non-terminating expression is a question of when,
+// not if.
+const configQueryTimeout = 5 * time.Second
+
+// maxConfigQueryNodes caps the values in one result -- every scalar, and every
+// array and object holding them -- counted before the result is rendered.
+//
+// Rendering is not free: yaml.Marshal walks the whole value and builds the
+// whole string before anything can be measured, so a result that will be
+// refused for its size has to be refused before that. The configuration
+// document is a few thousand values at most, and the rendered answer is capped
+// at 32KB, so nothing a caller has any business asking for comes near this.
+const maxConfigQueryNodes = 200_000
+
+// maxConfigQueryHeapGrowth is how far the live heap may grow during one query
+// before it is cancelled.
+//
+// This is the only limit that can stop a query like "[range(0; 5000000)]".
+// gojq builds that array in full before it hands the value back, so the caps
+// above never get to see it -- the process is killed by the allocator first,
+// and /api/mcp needs no credentials by default. gojq checks for cancellation
+// on every instruction it executes, so cancelling lands part-way through the
+// build rather than after it.
+//
+// The budget is enormous next to any legitimate result and small next to the
+// machine, which is the right trade: the cost of tripping it is one error
+// message the caller can act on.
+const maxConfigQueryHeapGrowth = 128 << 20
+
+// configQueryHeapPoll is how often that growth is sampled. A single append can
+// double a large slice in one allocation, so the peak overshoots the budget by
+// however much one such step adds; sampling often keeps that bounded.
+const configQueryHeapPoll = 10 * time.Millisecond
+
+// errConfigResultTooLarge signals that rendering stopped because the result
+// passed maxConfigResultBytes.
+var errConfigResultTooLarge = errors.New("config query result is too large")
+
+// errConfigValueTooLarge signals that a single result held more values than
+// maxConfigQueryNodes, so it was refused rather than rendered.
+var errConfigValueTooLarge = errors.New("config query result has too many values")
+
+// errConfigQueryOutOfMemory signals that the heap guard cancelled the query.
+var errConfigQueryOutOfMemory = errors.New("config query used too much memory")
 
 // ConfigProvider serves the running llama-swap configuration so an agent can
 // give advice about the setup in front of it rather than in the abstract.
@@ -25,12 +79,34 @@ const maxConfigResultBytes = 32 * 1024
 // reload constructs a fresh Server and therefore a fresh registry, so the
 // snapshot always matches what is actually running.
 type ConfigProvider struct {
-	cfg Config
+	cfg    Config
+	limits configQueryLimits
+}
+
+// configQueryLimits bounds one evaluation. They are a field rather than
+// constants read in place so a test can prove a limit works without spending
+// what the production budget is worth of memory or time to do it.
+type configQueryLimits struct {
+	timeout     time.Duration
+	resultBytes int
+	valueNodes  int
+	heapGrowth  uint64
+	heapPoll    time.Duration
+}
+
+func defaultConfigQueryLimits() configQueryLimits {
+	return configQueryLimits{
+		timeout:     configQueryTimeout,
+		resultBytes: maxConfigResultBytes,
+		valueNodes:  maxConfigQueryNodes,
+		heapGrowth:  maxConfigQueryHeapGrowth,
+		heapPoll:    configQueryHeapPoll,
+	}
 }
 
 // NewConfigProvider builds the provider around a configuration snapshot.
 func NewConfigProvider(cfg Config) *ConfigProvider {
-	return &ConfigProvider{cfg: cfg}
+	return &ConfigProvider{cfg: cfg, limits: defaultConfigQueryLimits()}
 }
 
 var _ mcptools.Provider = (*ConfigProvider)(nil)
@@ -49,22 +125,27 @@ func (p *ConfigProvider) Tools(context.Context) ([]mcptools.Tool, error) {
 	return []mcptools.Tool{
 		{
 			Name:  "get_config",
-			Title: "Show the current llama-swap configuration",
-			Description: "Return the configuration llama-swap is running right now, as YAML, with " +
-				"API keys and other credentials redacted. Values are fully resolved: ${env.*} and " +
-				"macro references are already expanded, and values equal to their defaults are omitted. " +
-				"Pass \"path\" to narrow to a section, for example \"models\" or \"models.qwen3\" or " +
-				"\"peers\"; omit it for the whole document. Use this to review or troubleshoot the " +
-				"active setup before suggesting changes.",
+			Title: "Query the current llama-swap configuration",
+			Description: "Query the configuration llama-swap is running right now with a jq expression. " +
+				"The result is YAML, with API keys and other credentials redacted. Values are fully " +
+				"resolved: ${env.*} and macro references are already expanded, and values equal to " +
+				"their defaults are omitted. Pass \"query\" to select exactly the part you need, so " +
+				"nothing has to be truncated; omit it for the whole document. For example: " +
+				"\".models | keys\" lists the configured model ids, \".models.qwen3\" shows one model, " +
+				"\".models | to_entries | map({id: .key, ttl: .value.ttl})\" pulls one field from every " +
+				"model, and \".peers\" shows the peers. Quote any id that is not a plain word: " +
+				"\".models[\"qwen3-8b\"]\". Use this to review or troubleshoot the active setup before " +
+				"suggesting changes.",
 			Annotations: configAnnotations(),
 			Tags:        []string{"config", "configuration", "troubleshooting"},
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path": map[string]any{
+					"query": map[string]any{
 						"type": "string",
-						"description": "Dotted key selecting a section of the config, for example " +
-							"'models', 'models.qwen3', 'peers', or 'macros'. Omit for the full config.",
+						"description": "jq expression selecting part of the config, for example " +
+							"'.models | keys', '.models.qwen3', '.models[\"qwen3-8b\"].ttl', or '.macros'. " +
+							"Defaults to '.', the whole config.",
 					},
 				},
 				"additionalProperties": false,
@@ -73,83 +154,279 @@ func (p *ConfigProvider) Tools(context.Context) ([]mcptools.Tool, error) {
 	}, nil
 }
 
-func (p *ConfigProvider) Call(_ context.Context, name string, args map[string]json.RawMessage) (mcptools.Result, error) {
+func (p *ConfigProvider) Call(ctx context.Context, name string, args map[string]json.RawMessage) (mcptools.Result, error) {
 	if name != "get_config" {
 		return mcptools.Result{}, fmt.Errorf("unknown tool %q", name)
 	}
 
-	path := mcptools.StringArg(args, "path")
-	// Render the full tree before selecting a path so default-only sections can
-	// still be addressed. For example, get_config({"path":"performance"})
-	// should return an empty mapping, rather than report that the section does
-	// not exist merely because every value in it is a default.
+	query := mcptools.StringArg(args, "query")
+	if query == "" {
+		// get_config took a dotted "path" before it took a jq query. Name the
+		// equivalent expression instead of silently returning the whole config,
+		// which is the answer a caller with the old argument least expects.
+		if path := mcptools.StringArg(args, "path"); path != "" {
+			return mcptools.Result{IsError: true, Content: fmt.Sprintf(
+				"Error: get_config takes a jq \"query\", not a \"path\". Call it again with query=%s",
+				jqPathQuery(path))}, nil
+		}
+		query = "."
+	}
+
+	code, err := compileConfigQuery(query)
+	if err != nil {
+		return mcptools.Result{IsError: true, Content: fmt.Sprintf(
+			"Error: %s is not a valid jq query: %v. An id that is not a plain word has to be "+
+				"quoted, as in \".models[\"qwen3-8b\"]\"; \".models.qwen3-8b\" is a subtraction to jq. "+
+				"Use \".\" for the whole config, or \".models | keys\" for the model ids.",
+			query, err)}, nil
+	}
+
+	document, err := p.queryDocument()
+	if err != nil {
+		return mcptools.Result{}, err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, p.limits.timeout)
+	defer cancel()
+
+	// The guard cancels ctx, so it has to be watching before the query starts
+	// running and stopped once it has finished.
+	guard := newHeapGuard(cancel, p.limits.heapGrowth, p.limits.heapPoll)
+	out, err := runConfigQuery(ctx, code, document, p.limits.resultBytes, p.limits.valueNodes)
+	guard.stop()
+
+	switch {
+	case guard.tripped():
+		return mcptools.Result{IsError: true, Content: fmt.Sprintf(
+			"Error: the query %s was building a value too large to hold in memory, so it was "+
+				"stopped. Ask for part of the config rather than generating data: \".models | keys\" "+
+				"lists the model ids, and \".models.<id>\" reads one model.", query)}, nil
+	case errors.Is(err, errConfigValueTooLarge), errors.Is(err, errConfigResultTooLarge):
+		return mcptools.Result{IsError: true, Content: fmt.Sprintf(
+			"Error: the result of %s is larger than %dKB. Ask for less rather than everything: "+
+				"\".models | keys\" lists the model ids, \".models.<id>\" reads one model, and "+
+				"\".models | to_entries | map({id: .key, ttl: .value.ttl})\" pulls one field from all "+
+				"of them. %s", query, p.limits.resultBytes/1024, p.topLevelKeyHint())}, nil
+	case errors.Is(err, context.DeadlineExceeded):
+		return mcptools.Result{IsError: true, Content: fmt.Sprintf(
+			"Error: the query %s did not finish within %s. Simplify it.", query, p.limits.timeout)}, nil
+	case err != nil:
+		return mcptools.Result{IsError: true, Content: fmt.Sprintf(
+			"Error: the query %s failed: %v", query, err)}, nil
+	}
+
+	if out.results == 0 {
+		return mcptools.Result{Content: fmt.Sprintf(
+			"The query %s matched nothing. %s", query, p.topLevelKeyHint())}, nil
+	}
+
+	var b strings.Builder
+	if query == "." {
+		b.WriteString("Current llama-swap configuration (credentials redacted, values resolved):\n\n")
+	} else {
+		fmt.Fprintf(&b, "Current llama-swap configuration, jq query %s (credentials redacted, values resolved):\n\n", query)
+	}
+	b.WriteString("```yaml\n")
+	b.WriteString(strings.TrimRight(out.body, "\n"))
+	b.WriteString("\n```\n")
+	if out.nullOnly {
+		// jq answers a key that is not there with null, which reads like a
+		// value. Say what it means, since an omitted default looks the same.
+		fmt.Fprintf(&b, "\nnull means nothing is set there: either the key does not exist, "+
+			"or its value is the default and defaults are omitted. %s\n", p.topLevelKeyHint())
+	}
+	return mcptools.Result{Content: b.String()}, nil
+}
+
+// configQueryOutput is what one evaluation produced: the results rendered as
+// YAML documents, how many there were, and whether every one of them was null.
+type configQueryOutput struct {
+	body     string
+	results  int
+	nullOnly bool
+}
+
+// runConfigQuery evaluates code over document and renders each result as a YAML
+// document.
+//
+// Two budgets bound the work. byteLimit stops the loop once the rendered output
+// is longer than any answer should be, and nodeLimit refuses a single result
+// before it is rendered, because yaml.Marshal builds the whole string before
+// there is anything to measure. Neither can bound what gojq does inside Next;
+// that is the heap guard's job.
+func runConfigQuery(ctx context.Context, code *gojq.Code, document any, byteLimit, nodeLimit int) (configQueryOutput, error) {
+	out := configQueryOutput{nullOnly: true}
+
+	var b strings.Builder
+	iter := code.RunWithContext(ctx, document)
+	for {
+		value, ok := iter.Next()
+		if !ok {
+			break
+		}
+		if err, isErr := value.(error); isErr {
+			return configQueryOutput{}, err
+		}
+		if countValues(value, nodeLimit) > nodeLimit {
+			return configQueryOutput{}, errConfigValueTooLarge
+		}
+
+		buf, err := yaml.Marshal(value)
+		if err != nil {
+			return configQueryOutput{}, fmt.Errorf("rendering result as YAML: %w", err)
+		}
+		if out.results > 0 {
+			// Several results are several YAML documents, which is what the
+			// document separator is for.
+			b.WriteString("---\n")
+		}
+		b.Write(buf)
+
+		out.results++
+		if value != nil {
+			out.nullOnly = false
+		}
+		if b.Len() > byteLimit {
+			return configQueryOutput{}, errConfigResultTooLarge
+		}
+	}
+
+	out.body = b.String()
+	return out, nil
+}
+
+// countValues counts the scalars and containers in value, giving up once the
+// count is past limit. Walking a value that is already too big to render is
+// only worth doing until that is established.
+func countValues(value any, limit int) int {
+	switch typed := value.(type) {
+	case map[string]any:
+		count := 1
+		for _, child := range typed {
+			count += countValues(child, limit-count)
+			if count > limit {
+				return count
+			}
+		}
+		return count
+	case []any:
+		count := 1
+		for _, child := range typed {
+			count += countValues(child, limit-count)
+			if count > limit {
+				return count
+			}
+		}
+		return count
+	default:
+		return 1
+	}
+}
+
+// compileConfigQuery parses and compiles one jq expression. gojq keeps the
+// process environment out of reach by default; the loader is passed explicitly
+// because `env` would otherwise hand back exactly the credentials that
+// redaction removes from the config.
+func compileConfigQuery(query string) (*gojq.Code, error) {
+	parsed, err := gojq.Parse(query)
+	if err != nil {
+		return nil, err
+	}
+	return gojq.Compile(parsed, gojq.WithEnvironLoader(func() []string { return nil }))
+}
+
+// queryDocument renders the effective configuration as the plain JSON-shaped
+// values gojq evaluates over.
+func (p *ConfigProvider) queryDocument() (any, error) {
 	yamlText, found, err := p.cfg.RedactedYAML("")
 	if err != nil {
-		return mcptools.Result{}, fmt.Errorf("rendering config: %w", err)
+		return nil, fmt.Errorf("rendering config: %w", err)
 	}
 	if !found { // RedactedYAML for the root always succeeds; retain this guard.
-		return mcptools.Result{}, fmt.Errorf("rendering config: root configuration was not found")
+		return nil, fmt.Errorf("rendering config: root configuration was not found")
 	}
 
 	var current map[string]any
 	if err := yaml.Unmarshal([]byte(yamlText), &current); err != nil {
-		return mcptools.Result{}, fmt.Errorf("parsing rendered config: %w", err)
-	}
-
-	if path != "" {
-		_, exists := navigateConfig(current, strings.Split(path, "."))
-		if !exists {
-			keys := p.cfg.ConfigTopLevelKeys()
-			sort.Strings(keys)
-			return mcptools.Result{
-				IsError: true,
-				Content: fmt.Sprintf("Error: no config section at path %q. Top-level keys: %s.",
-					path, strings.Join(keys, ", ")),
-			}, nil
-		}
+		return nil, fmt.Errorf("parsing rendered config: %w", err)
 	}
 
 	defaults, err := configProviderDefaults(p.cfg)
 	if err != nil {
-		return mcptools.Result{}, fmt.Errorf("building config defaults: %w", err)
+		return nil, fmt.Errorf("building config defaults: %w", err)
 	}
 	filtered, empty := pruneConfigDefaults(current, defaults, "")
 	if empty {
 		filtered = map[string]any{}
 	}
-	if path != "" {
-		filtered, _ = navigateConfig(filtered, strings.Split(path, "."))
-		if filtered == nil {
-			filtered = map[string]any{}
+
+	// A round trip through JSON is what makes the tree safe to hand to gojq: it
+	// flattens the YAML-only types (timestamps, for one) that gojq cannot walk.
+	encoded, err := json.Marshal(filtered)
+	if err != nil {
+		return nil, fmt.Errorf("encoding config for the query: %w", err)
+	}
+	var document any
+	if err := json.Unmarshal(encoded, &document); err != nil {
+		return nil, fmt.Errorf("decoding config for the query: %w", err)
+	}
+	return normalizeQueryNumbers(document), nil
+}
+
+// normalizeQueryNumbers turns whole float64 values back into ints. JSON decoding
+// makes every number a float64, and gojq passes that straight through, so
+// without this a port renders as 8.08e+03.
+func normalizeQueryNumbers(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			typed[key] = normalizeQueryNumbers(child)
+		}
+		return typed
+	case []any:
+		for i, child := range typed {
+			typed[i] = normalizeQueryNumbers(child)
+		}
+		return typed
+	case float64:
+		if typed == math.Trunc(typed) && math.Abs(typed) < 1<<53 {
+			return int(typed)
+		}
+		return typed
+	default:
+		return value
+	}
+}
+
+// topLevelKeyHint names the sections a query can start from, so a caller that
+// asked for something that is not there can correct itself in one turn.
+func (p *ConfigProvider) topLevelKeyHint() string {
+	keys := p.cfg.ConfigTopLevelKeys()
+	if len(keys) == 0 {
+		return ""
+	}
+	sort.Strings(keys)
+	return "Top-level keys: " + strings.Join(keys, ", ") + "."
+}
+
+// bareJQKey matches the field names jq accepts after a dot without quoting.
+var bareJQKey = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+
+// jqPathQuery renders a dotted config path as the jq expression selecting the
+// same subtree, quoting the segments jq would not take bare.
+func jqPathQuery(path string) string {
+	var b strings.Builder
+	for _, segment := range strings.Split(path, ".") {
+		if bareJQKey.MatchString(segment) {
+			b.WriteString("." + segment)
+		} else {
+			fmt.Fprintf(&b, "[%q]", segment)
 		}
 	}
-
-	buf, err := yaml.Marshal(filtered)
-	if err != nil {
-		return mcptools.Result{}, fmt.Errorf("marshaling filtered config: %w", err)
+	if b.Len() == 0 {
+		return "."
 	}
-	yamlText = string(buf)
-
-	var b strings.Builder
-	if path == "" {
-		b.WriteString("Current llama-swap configuration (credentials redacted, values resolved):\n\n")
-	} else {
-		fmt.Fprintf(&b, "Current llama-swap configuration at %q (credentials redacted, values resolved):\n\n", path)
-	}
-	b.WriteString("```yaml\n")
-	b.WriteString(strings.TrimRight(yamlText, "\n"))
-	b.WriteString("\n```\n")
-
-	// A large config can still exceed the cap even after pruning. Give the
-	// model the one move that fixes it rather than leaving it with a
-	// half-parsed document.
-	result := mcptools.CapResult(b.String(), maxConfigResultBytes)
-	if result.Truncated {
-		result.Content += "\nThe full config is larger than one response. Call get_config again " +
-			"with a \"path\" (for example \"models\", \"models.<id>\", \"peers\", \"groups\") " +
-			"to read a section in full."
-	}
-	return result, nil
+	return b.String()
 }
 
 // configProviderDefaults returns rendered defaults in the same YAML shape as
@@ -291,4 +568,77 @@ func pruneConfigDefaults(value, defaults any, path string) (any, bool) {
 		}
 	}
 	return out, len(out) == 0
+}
+
+// heapGuard cancels a running query when the live heap grows past a budget.
+//
+// It exists for one shape of query: the kind that builds a single enormous
+// value. gojq returns nothing until that value is complete, so a caller writing
+// "[range(0; 5000000)]" reaches the allocator long before it reaches any check
+// on the result. Measuring the heap is the only signal available while the
+// query is still inside gojq.
+//
+// The measurement is the whole process, not the query, so it is a safety net
+// rather than an accountant: other work allocating heavily at the same moment
+// can trip it. That costs one recoverable error message, which is the cheaper
+// mistake.
+type heapGuard struct {
+	fired atomic.Bool
+	done  chan struct{}
+	over  chan struct{}
+}
+
+// newHeapGuard starts watching. It cancels the query's context when the live
+// heap has grown by more than growth bytes since now, sampling every poll.
+func newHeapGuard(cancel context.CancelFunc, growth uint64, poll time.Duration) *heapGuard {
+	guard := &heapGuard{done: make(chan struct{}), over: make(chan struct{})}
+	ceiling := liveHeapBytes() + growth
+
+	go func() {
+		defer close(guard.over)
+		ticker := time.NewTicker(poll)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-guard.done:
+				return
+			case <-ticker.C:
+				if liveHeapBytes() > ceiling {
+					guard.fired.Store(true)
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+
+	return guard
+}
+
+// stop ends the watch and waits for it, so a finished query leaves no
+// goroutine behind and tripped() is settled by the time it returns.
+func (g *heapGuard) stop() {
+	close(g.done)
+	<-g.over
+}
+
+// tripped reports whether the guard is what cancelled the query. Only call it
+// after stop.
+func (g *heapGuard) tripped() bool { return g.fired.Load() }
+
+// heapObjectsMetric is the live heap: objects allocated and not yet collected.
+// Reading it does not stop the world, unlike runtime.ReadMemStats, which
+// matters because this is sampled every few milliseconds while a query runs.
+const heapObjectsMetric = "/memory/classes/heap/objects:bytes"
+
+func liveHeapBytes() uint64 {
+	sample := []metrics.Sample{{Name: heapObjectsMetric}}
+	metrics.Read(sample)
+	if sample[0].Value.Kind() != metrics.KindUint64 {
+		// The metric was removed from the runtime. TestConfigProvider_HeapMetricIsSupported
+		// fails in that case; returning 0 here leaves the guard inert rather
+		// than cancelling every query.
+		return 0
+	}
+	return sample[0].Value.Uint64()
 }

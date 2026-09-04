@@ -1,6 +1,7 @@
 # Docs Agent evaluation harness
 
-A headless driver and scored test suite for the Playground's Docs agent. It exists so that a strong coding agent — Claude Code,
+A headless driver and scored test suite for the Docs agent behind the UI's
+Help page. It exists so that a strong coding agent — Claude Code,
 Codex — can improve the Docs Agent's accuracy on a small local model by
 measuring, changing one thing, and measuring again.
 
@@ -11,7 +12,7 @@ improvement to the score is an improvement to the product.
 ## One server serves everything
 
 ```bash
-go run . -config evals/config.yaml -listen :8080
+go run . -config evals/config.yaml -config-dir evals/docs-agent/fixture -listen :8080
 ```
 
 That single instance serves both halves:
@@ -19,6 +20,9 @@ That single instance serves both halves:
 - `/api/mcp` — the documentation tools, compiled from **your working tree**.
 - `/v1/chat/completions` — the agent model, which may be local or reached
   through a `peers:` block.
+
+`-config-dir` merges the model fixture in; see [The running-config
+fixture](#the-running-config-fixture). `run.sh` passes it for you.
 
 > **Do not point `--base-url` at a remote llama-swap you did not build.**
 > `/api/mcp` does not exist in releases and answers 404. The CLI refuses to
@@ -79,7 +83,7 @@ Change **one at a time**, and nothing outside this list.
 |---|---|---|---|
 | 1 | System prompt | `ui/src/lib/prompts/docsAgent.ts` | no |
 | 2 | Knowledge base | `docs/kb/**/*.md` | yes |
-| 3 | Tool descriptions and schemas | `internal/mcptools/{docs,config,sys}.go` | yes |
+| 3 | Tool descriptions and schemas | `internal/docagent/mcpprovider.go`, `internal/config/mcpprovider.go`, `internal/mcptools/sys.go` | yes |
 | 4 | Search ranking | `internal/reference/search.go` | yes |
 | 5 | MCP instructions | `internal/server/apimcp.go` (`mcpInstructions`) | yes |
 
@@ -90,8 +94,8 @@ reaches the binary through `//go:embed` in `reference_embed.go` — so they need
 
 Surface 5 currently reaches external MCP clients only. `agentTools.ts` calls
 `tools/list` and `tools/call` but never `server/discover`, so `mcpInstructions`
-never reaches the Playground. Improving it is still worthwhile for other MCP
-clients, but it will not move this score. The Playground's equivalent is
+never reaches the Help page. Improving it is still worthwhile for other MCP
+clients, but it will not move this score. The Help page's equivalent is
 surface 1.
 
 ## The protocol
@@ -210,12 +214,37 @@ refuses (exit 2) below `--min-score`, because judging answers that already fail
 regex checks wastes tokens, and it refuses a judge model equal to the agent
 model, because a model grading itself ratifies its own mistakes.
 
+## The running-config fixture
+
+`fixture/models.yaml` is a checked-in llama-swap config: 24 models with the
+nested blocks a real setup has — `capabilities`, `filters`, `timeouts`,
+`metadata`, model-scoped `macros` — plus two groups. `run.sh` merges it into
+the server with `-config-dir`, so `config__get_config` answers over the same
+models on every machine and cases about the running setup can be graded.
+
+It exists because the config tool takes a jq query. A query is only worth
+writing when the document is too large to read, and the whole fixture renders
+to roughly 10KB of YAML — several thousand tokens, most of a small model's
+context. `cases/configuration/running-config.yaml` asks for one nested field
+out of that; an agent that reads everything usually loses the field in the
+noise, so a pass means it queried for what it needed.
+
+Attaching with `--base-url` bypasses `run.sh`'s server startup, so start that
+server with `-config-dir evals/docs-agent/fixture` yourself or the
+running-config cases all fail.
+
+Editing rules are at the top of `fixture/models.yaml`. The short version: every
+name starts with `eval-` so it cannot collide with the config on the machine
+running the eval, and a value change there is a change to what the cases
+assert — grep the model id first.
+
 ## Adding cases
 
-Every assertion must be grounded in something `docs/kb/` actually says — check
-before you write it. A case asserting a fact the documentation does not contain
-tests the model's pretraining, not this agent, and it can never be fixed by any
-of the five surfaces.
+Every assertion must be grounded in something `docs/kb/` actually says, or —
+for a question about the running setup — in `fixture/models.yaml`. Check before
+you write it. A case asserting a fact neither source contains tests the model's
+pretraining, not this agent, and it can never be fixed by any of the five
+surfaces.
 
 Constraints to respect while editing:
 
@@ -226,8 +255,10 @@ Constraints to respect while editing:
   drops anything else, because these names are forwarded as OpenAI function
   names.
 - Run `gofmt -w` on any Go file you touch; CI fails on `gofmt -l`.
-- Do not assert on `config__get_config` output. It reflects whichever config
-  the server was started with, so such a case is machine-specific.
+- Assert on `config__get_config` output only for models, groups and values that
+  come from `fixture/models.yaml`. Everything else in that tool's output is
+  whatever config the person running the eval started the server with, so a case
+  built on it is machine-specific and will fail for someone else.
 
 ## Comparing models
 

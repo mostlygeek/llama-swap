@@ -1,0 +1,128 @@
+# Grounded in evals/docs-agent/fixture/models.yaml, which run.sh merges into
+# the server's config so these answers are the same on every machine. Every
+# value asserted here is in that file; grep the model id before changing one.
+#
+# What this file measures: config__get_config takes a jq query, and these
+# questions are about one nested field of a 24 model configuration. Reading the
+# whole document to answer them costs several thousand tokens and usually loses
+# the field in the noise, so a pass here means the agent queried for what it
+# actually needed.
+
+- id: running-config-model-ttl
+  question: On this server, what ttl is configured for the model eval-llama33-70b?
+  tags: [config, running-config, ttl]
+  expect_regex: ["3600"]
+  expect_tools: [config__get_config]
+  max_iterations: 6
+  reference: |
+    `ttl: 3600` — it unloads after an hour of inactivity.
+  rubric:
+    - Gives 3600
+    - Reads the value from the running configuration rather than the documentation
+
+- id: running-config-strip-params
+  question: Which request parameters does the model eval-devstral-24b strip out on this server?
+  tags: [config, running-config, filters]
+  expect_regex: ["temperature", "top[_-]?p", "top[_-]?k"]
+  expect_tools: [config__get_config]
+  max_iterations: 6
+  reference: |
+    Its `filters.stripParams` is `temperature, top_p, top_k`, so those three are
+    removed from requests before they reach the upstream server.
+  rubric:
+    - Names all three of temperature, top_p and top_k
+    - Attributes them to the model's filters.stripParams setting
+
+- id: running-config-capabilities-context
+  question: What context length does eval-llama4-scout declare in this server's config, and does it take image input?
+  tags: [config, running-config, capabilities]
+  expect_regex: ["262,?144"]
+  expect_any: ["image", "vision", "multimodal"]
+  expect_tools: [config__get_config]
+  max_iterations: 6
+  reference: |
+    `capabilities.context` is 262144 and `capabilities.in` is `[text, image]`,
+    so yes, it accepts images.
+  rubric:
+    - Gives 262144 as the declared context
+    - Says it accepts image input as well as text
+
+- id: running-config-nested-metadata
+  question: What does the metadata on eval-deepseek-r1-distill-32b record about reasoning in this server's config?
+  tags: [config, running-config, metadata]
+  expect_regex: ["high", "think"]
+  expect_tools: [config__get_config]
+  max_iterations: 6
+  reference: |
+    `metadata.reasoning` is `{enabled: true, effort: high, tag: think}`.
+  rubric:
+    - Reports the effort as high and the tag as think
+    - Says reasoning is enabled
+
+- id: running-config-group-members
+  question: Which models are in the eval-vision group on this server?
+  tags: [config, running-config, groups]
+  expect_regex:
+    ["eval-gemma3-27b-vision", "eval-llama4-scout", "eval-qwen25-vl-7b"]
+  forbid_regex: ["eval-nomic-embed-v15", "eval-bge-reranker-v2"]
+  expect_tools: [config__get_config]
+  max_iterations: 6
+  reference: |
+    eval-gemma3-27b-vision, eval-llama4-scout and eval-qwen25-vl-7b. The group
+    swaps and is exclusive, so loading one unloads the others.
+  rubric:
+    - Lists exactly the three vision models
+    - Does not list members of another group
+
+- id: running-config-timeout-field
+  question: What response header timeout is configured for eval-mistral-nemo-12b on this server?
+  tags: [config, running-config, timeouts]
+  expect_regex: ["300"]
+  forbid_regex: ["\\b15\\b"]
+  expect_tools: [config__get_config]
+  max_iterations: 6
+  reference: |
+    `timeouts.responseHeader: 300`.
+  rubric:
+    - Gives 300 seconds
+    - Answers with the responseHeader timeout, not the connect timeout
+
+- id: running-config-concurrency-across-models
+  question: Which of the eval- models on this server set a concurrencyLimit, and what is each limit?
+  tags: [config, running-config, hard]
+  expect_regex:
+    [
+      "eval-qwen3-coder-30b",
+      "eval-nemotron-49b",
+      "eval-nomic-embed-v15",
+      "eval-qwen3-embed-8b",
+    ]
+  expect_tools: [config__get_config]
+  max_iterations: 8
+  reference: |
+    Four of them: eval-qwen3-coder-30b (2), eval-nemotron-49b (1),
+    eval-nomic-embed-v15 (8) and eval-qwen3-embed-8b (4).
+  rubric:
+    - Names all four models
+    - Gives the right limit for each
+
+# Offered on the empty Help page, so it is a button a new user is likely to
+# press first. What it must not do is answer from the model's memory of some
+# other project: the only honest answer compares what the docs describe against
+# what this config sets. Nothing here asserts on the text -- which features are
+# unused depends on the config the eval was started with -- only that the agent
+# reads both before answering.
+- id: running-config-unused-features
+  question: What llama-swap features am I not using?
+  tags: [config, running-config, discovery]
+  expect_tools: [config__get_config]
+  expect_tools_any: [docs__list_docs, docs__search_docs]
+  max_iterations: 8
+  reference: |
+    A comparison of the documented features against this server's config: the
+    sections it never sets (groups, profiles, selectors, peers, hooks, filters,
+    capabilities, and so on) with a sentence on what each would do for it.
+  rubric:
+    - Names features that are genuinely absent from the running config
+    - Says what each one would do, rather than only listing key names
+    - Invents no feature llama-swap does not have
