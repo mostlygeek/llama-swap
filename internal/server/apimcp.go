@@ -110,8 +110,10 @@ const mcpInstructions = "Tools are namespaced by provider. The docs__* tools ans
 	"llama-swap's own configuration: call docs__list_docs for an index, docs__search_docs to find " +
 	"something by keyword, docs__get_doc to read a document in full, and docs__get_config_schema to " +
 	"check what a configuration key accepts. Document ids starting with 'reference/config/' return " +
-	"sections of config.example.yaml verbatim. config__get_config returns the configuration this " +
-	"server is running right now, with credentials redacted, for advice about the active setup. " +
+	"sections of config.example.yaml verbatim. config__get_config answers a jq query against the " +
+	"configuration this server is running right now, with credentials redacted, for advice about " +
+	"the active setup: pass a \"query\" such as \".models | keys\" or \".models.qwen3\" to read " +
+	"exactly the part you need. " +
 	"The sys__* tools report facts about the machine llama-swap is running on."
 
 func (s *Server) mcpDiscover() discoverResult {
