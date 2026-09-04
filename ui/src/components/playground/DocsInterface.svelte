@@ -15,7 +15,7 @@
   import ModelSelector from "./ModelSelector.svelte";
   import ExpandableTextarea from "./ExpandableTextarea.svelte";
   import EmptyState from "../EmptyState.svelte";
-  import { TriangleAlert, X } from "@lucide/svelte";
+  import { RefreshCw, TriangleAlert, X } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button/index.js";
 
   /**
@@ -63,7 +63,6 @@
 
   let toolDefs = $state<ToolDefinition[]>([]);
   let toolsLoaded = $state(false);
-  let agentIteration = $state(0);
   let agentNotice = $state<string | null>(null);
   let showJinjaHint = $state(false);
 
@@ -231,6 +230,10 @@
     void sendMessage();
   }
 
+  function refreshSuggestions() {
+    suggestions = pickSuggestions();
+  }
+
   function cancelStreaming() {
     abortController?.abort();
   }
@@ -243,7 +246,6 @@
     suggestions = pickSuggestions();
     isReasoning = false;
     reasoningStartTime = 0;
-    agentIteration = 0;
     agentNotice = null;
     showJinjaHint = false;
   }
@@ -311,7 +313,6 @@
     isStreaming = true;
     isReasoning = false;
     reasoningStartTime = 0;
-    agentIteration = 0;
     agentNotice = null;
     abortController = new AbortController();
 
@@ -347,7 +348,6 @@
     })) {
       switch (event.type) {
         case "iteration":
-          agentIteration = event.n;
           // The initial placeholder is created before the loop starts. Later
           // iterations start only after all tool results, keeping parallel
           // calls together without empty assistant turns between them.
@@ -461,17 +461,16 @@
     >
       {#if messages.length === 0}
         <EmptyState full>
-          <div class="max-w-md px-4 text-center">
-            <p class="text-foreground text-sm font-medium">Ask about llama-swap</p>
+          <div class="w-full max-w-xl px-4 text-center">
+            <p class="text-foreground text-sm font-medium">Ask llama-swap about llama-swap</p>
             <p class="mt-1 text-sm">
-              Answers come from this server's own documentation and its running configuration, not
-              from what the model remembers.
+              Choose a topic below or ask a question to get started.
             </p>
             <div class="mt-4 flex flex-col gap-2">
               {#each suggestions as suggestion (suggestion.number)}
                 <button
                   type="button"
-                  class="hover:bg-muted/70 disabled:hover:bg-transparent rounded-md border px-3 py-2 text-left text-sm transition-colors disabled:opacity-50"
+                  class="hover:bg-muted/70 disabled:hover:bg-transparent min-h-14 rounded-md border px-3 py-2 text-left text-sm transition-colors disabled:opacity-50"
                   disabled={!canSend}
                   onclick={() => ask(suggestion.question)}
                 >
@@ -482,6 +481,17 @@
                   {suggestion.question}
                 </button>
               {/each}
+            </div>
+            <div class="mt-2 flex justify-end">
+              <Button
+                variant="ghost"
+                size="sm"
+                class="text-muted-foreground"
+                onclick={refreshSuggestions}
+              >
+                <RefreshCw />
+                Refresh topics
+              </Button>
             </div>
             {#if !$selectedModelStore}
               <p class="mt-3 text-xs">Select a model to get started.</p>
@@ -548,11 +558,6 @@
         <div class="flex flex-col gap-2">
           {#if isStreaming}
             <Button variant="destructive" onclick={cancelStreaming}>Cancel</Button>
-            {#if agentIteration > 1}
-              <span class="text-muted-foreground text-center text-xs tabular-nums">
-                round {agentIteration}/{DEFAULT_MAX_ITERATIONS}
-              </span>
-            {/if}
           {:else}
             <Button onclick={sendMessage} disabled={!userInput.trim() || !canSend}>Send</Button>
           {/if}

@@ -10,7 +10,7 @@ import type { ToolCallOutcome } from "./agentTools";
  * DocsInterface.svelte supplies the real streamChat and callTool.
  */
 
-export const DEFAULT_MAX_ITERATIONS = 8;
+export const DEFAULT_MAX_ITERATIONS = 16;
 
 export type AgentEvent =
   | { type: "content"; delta: string }

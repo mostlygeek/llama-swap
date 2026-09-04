@@ -137,7 +137,7 @@ func (p *DocsProvider) Tools(context.Context) ([]mcptools.Tool, error) {
 				"properties": map[string]any{
 					"query": map[string]any{
 						"type":        "string",
-						"description": "Keywords, for example 'ttl unload' or 'draft model speculative'.",
+						"description": "Keywords, for example 'ttl unload' or 'Docker health check'.",
 					},
 					"max_results": map[string]any{
 						"type":        "integer",
