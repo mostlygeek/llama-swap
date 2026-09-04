@@ -1,0 +1,40 @@
+# Held-out cases over the same fixture as
+# cases/configuration/running-config.yaml. Different models, different fields,
+# different wording. Do not tune against these; they exist to show whether a
+# gain on the training questions was real.
+
+- id: holdout-running-config-idle-unload
+  question: How long does eval-qwen3-coder-30b stay loaded on this server when nothing is using it?
+  tags: [config, running-config, holdout]
+  expect_regex: ["1800|30 min"]
+  expect_tools: [config__get_config]
+  max_iterations: 6
+  reference: |
+    `ttl: 1800`, so 30 minutes of inactivity.
+  rubric:
+    - Gives 1800 seconds or 30 minutes
+    - Names ttl as the setting
+
+- id: holdout-running-config-check-endpoint
+  question: What health check endpoint is configured for eval-phi4-14b on this server?
+  tags: [config, running-config, holdout]
+  expect_regex: ["/v1/models"]
+  expect_tools: [config__get_config]
+  max_iterations: 6
+  reference: |
+    `checkEndpoint: /v1/models`.
+  rubric:
+    - Gives /v1/models
+    - Names checkEndpoint as the setting
+
+- id: holdout-running-config-metadata-quant
+  question: What quantization does this server's config record in the metadata for eval-deepseek-v3-671b?
+  tags: [config, running-config, holdout]
+  expect_regex: ["UD-IQ1_S"]
+  expect_tools: [config__get_config]
+  max_iterations: 6
+  reference: |
+    `metadata.quant` is `UD-IQ1_S`.
+  rubric:
+    - Gives UD-IQ1_S
+    - Reads it from the model's metadata block

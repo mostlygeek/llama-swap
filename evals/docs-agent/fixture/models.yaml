@@ -1,0 +1,266 @@
+# A long, deterministic configuration for the Docs Agent eval.
+#
+# run.sh merges this file on top of the user's evals/config.yaml with
+# -config-dir, so `config__get_config` answers over the same models on every
+# machine. Without it, cases about the running setup could only be graded
+# against whatever config the person running the eval happens to have, which is
+# why the README used to rule such cases out entirely.
+#
+# What it is for: the config tool takes a jq query, and the point of a query is
+# that a model can pull one nested field out of a configuration far too large to
+# read. That only gets measured against a configuration that is actually large.
+# Two dozen models with real nested blocks -- capabilities, filters, timeouts,
+# metadata, macros -- render to several thousand tokens of YAML.
+#
+# Rules for editing:
+#
+#   - Every id, alias and group name starts with "eval-". Models, groups and
+#     peers are identity-keyed: a name that collides with one in the user's own
+#     config is a hard merge error that stops the server from starting.
+#   - Define nothing but `models` and `groups`. A top-level scalar that differs
+#     from the user's config is also a merge error.
+#   - No global `macros`. Those merge by name and would silently rewrite a
+#     macro the user's own models depend on. Model-scoped macros are safe.
+#   - Nothing here is ever started, so the commands only have to parse. They
+#     still need ${PORT}, because the default proxy address uses it.
+#   - Changing a value here changes what the cases assert. Grep the case files
+#     for the id before editing one.
+
+models:
+  # -- coding ---------------------------------------------------------------
+  eval-qwen3-coder-30b:
+    macros:
+      eval-srv: /opt/llama.cpp/llama-server --port ${PORT} --host 127.0.0.1
+    cmd: |
+      ${eval-srv}
+      --model /models/qwen3-coder-30b-a3b-Q4_K_M.gguf
+      --ctx-size 65536 --n-gpu-layers 99
+    aliases: [eval-coder, eval-qwen3-coder]
+    ttl: 1800
+    concurrencyLimit: 2
+    metadata:
+      family: qwen3
+      quant: Q4_K_M
+      vram_gb: 22
+    capabilities:
+      in: [text]
+      out: [text]
+      tools: true
+      context: 65536
+
+  eval-qwen3-coder-480b:
+    cmd: /opt/llama.cpp/llama-server --port ${PORT} --model /models/qwen3-coder-480b-a35b-UD-Q2_K_XL.gguf --ctx-size 32768
+    env:
+      - CUDA_VISIBLE_DEVICES=0,1,2,3
+      - GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
+    unloadTimeout: 300
+    description: The big coder. Loads slowly; leave it running.
+    metadata:
+      family: qwen3
+      quant: UD-Q2_K_XL
+      vram_gb: 176
+
+  eval-devstral-24b:
+    cmd: /opt/llama.cpp/llama-server --port ${PORT} --model /models/devstral-small-2507-Q5_K_M.gguf --ctx-size 49152
+    ttl: 600
+    filters:
+      stripParams: "temperature, top_p, top_k"
+    metadata:
+      family: mistral
+      quant: Q5_K_M
+
+  # -- vision ---------------------------------------------------------------
+  eval-gemma3-27b-vision:
+    cmd: >
+      /opt/llama.cpp/llama-server --port ${PORT}
+      --model /models/gemma-3-27b-it-Q4_K_M.gguf
+      --mmproj /models/gemma-3-27b-mmproj-F16.gguf
+    ttl: 900
+    capabilities:
+      in: [text, image]
+      out: [text]
+      tools: true
+      context: 131072
+    metadata:
+      family: gemma3
+      quant: Q4_K_M
+
+  eval-llama4-scout:
+    cmd: >
+      /opt/llama.cpp/llama-server --port ${PORT}
+      --model /models/llama-4-scout-17b-16e-UD-Q4_K_XL.gguf
+      --mmproj /models/llama-4-scout-mmproj-F16.gguf
+    ttl: 1200
+    capabilities:
+      in: [text, image]
+      out: [text]
+      tools: true
+      context: 262144
+    filters:
+      stripParams: "presence_penalty, frequency_penalty"
+    metadata:
+      family: llama4
+      quant: UD-Q4_K_XL
+
+  eval-qwen25-vl-7b:
+    cmd: >
+      /opt/llama.cpp/llama-server --port ${PORT}
+      --model /models/qwen2.5-vl-7b-instruct-Q8_0.gguf
+      --mmproj /models/qwen2.5-vl-7b-mmproj-F16.gguf
+    ttl: 300
+    capabilities:
+      in: [text, image]
+      out: [text]
+      context: 32768
+
+  # -- general ---------------------------------------------------------------
+  eval-llama33-70b:
+    cmd: /opt/llama.cpp/llama-server --port ${PORT} --model /models/llama-3.3-70b-instruct-Q4_K_M.gguf --ctx-size 32768
+    ttl: 3600
+    timeouts:
+      connect: 45
+      responseHeader: 120
+    metadata:
+      family: llama3
+      quant: Q4_K_M
+      vram_gb: 42
+
+  eval-mistral-nemo-12b:
+    cmd: /opt/llama.cpp/llama-server --port ${PORT} --model /models/mistral-nemo-12b-instruct-Q6_K.gguf --ctx-size 65536
+    ttl: 450
+    timeouts:
+      connect: 15
+      responseHeader: 300
+      idleConn: 90
+
+  eval-phi4-14b:
+    cmd: /opt/llama.cpp/llama-server --port ${PORT} --model /models/phi-4-Q6_K.gguf --ctx-size 16384
+    checkEndpoint: /v1/models
+    ttl: 240
+
+  eval-glm4-32b:
+    cmd: /opt/llama.cpp/llama-server --port ${PORT} --model /models/glm-4-32b-0414-Q4_K_M.gguf --ctx-size 32768
+    useModelName: glm-4-32b
+    ttl: 900
+
+  eval-deepseek-r1-distill-32b:
+    cmd: /opt/llama.cpp/llama-server --port ${PORT} --model /models/deepseek-r1-distill-qwen-32b-Q4_K_M.gguf --ctx-size 65536
+    ttl: 1500
+    metadata:
+      family: deepseek
+      quant: Q4_K_M
+      reasoning:
+        enabled: true
+        effort: high
+        tag: think
+
+  eval-deepseek-v3-671b:
+    cmd: /opt/llama.cpp/llama-server --port ${PORT} --model /models/deepseek-v3-0324-UD-IQ1_S.gguf --ctx-size 16384
+    cmdStop: pkill -f deepseek-v3-0324
+    unloadTimeout: 600
+    metadata:
+      family: deepseek
+      quant: UD-IQ1_S
+      vram_gb: 160
+
+  eval-nemotron-49b:
+    cmd: /opt/llama.cpp/llama-server --port ${PORT} --model /models/llama-3.3-nemotron-super-49b-Q4_K_M.gguf --ctx-size 32768
+    ttl: 1200
+    concurrencyLimit: 1
+
+  eval-command-r-35b:
+    cmd: /opt/llama.cpp/llama-server --port ${PORT} --model /models/c4ai-command-r-35b-08-2024-Q4_K_M.gguf --ctx-size 32768
+    ttl: 600
+    filters:
+      stripParams: "logit_bias"
+
+  eval-olmo2-13b:
+    cmd: /opt/llama.cpp/llama-server --port ${PORT} --model /models/olmo-2-13b-instruct-Q6_K.gguf --ctx-size 8192
+    ttl: 300
+    description: Fully open weights and data, kept for comparison runs.
+
+  eval-tinyllama-smoke:
+    cmd: /opt/llama.cpp/llama-server --port ${PORT} --model /models/tinyllama-1.1b-chat-Q4_K_M.gguf --ctx-size 2048
+    ttl: 60
+    unlisted: true
+
+  # -- embeddings and reranking ---------------------------------------------
+  eval-nomic-embed-v15:
+    cmd: /opt/llama.cpp/llama-server --port ${PORT} --model /models/nomic-embed-text-v1.5-F16.gguf --embedding --pooling mean
+    ttl: 7200
+    concurrencyLimit: 8
+    capabilities:
+      in: [text]
+      out: [text]
+      context: 8192
+
+  eval-qwen3-embed-8b:
+    cmd: /opt/llama.cpp/llama-server --port ${PORT} --model /models/qwen3-embedding-8b-Q8_0.gguf --embedding --pooling last
+    ttl: 7200
+    concurrencyLimit: 4
+
+  eval-bge-reranker-v2:
+    cmd: /opt/llama.cpp/llama-server --port ${PORT} --model /models/bge-reranker-v2-m3-Q8_0.gguf --reranking
+    ttl: 7200
+    capabilities:
+      in: [text]
+      out: [text]
+      reranker: true
+      context: 8192
+
+  # -- audio ------------------------------------------------------------------
+  eval-whisper-large-v3:
+    cmd: /opt/whisper.cpp/whisper-server --port ${PORT} --model /models/ggml-large-v3-turbo.bin --inference-path /v1/audio/transcriptions
+    checkEndpoint: /
+    ttl: 1800
+    capabilities:
+      in: [audio]
+      out: [text]
+
+  eval-parakeet-tdt:
+    cmd: /opt/parakeet/serve.py --port ${PORT} --model /models/parakeet-tdt-0.6b-v2
+    checkEndpoint: /healthz
+    ttl: 1800
+    capabilities:
+      in: [audio]
+      out: [text]
+
+  # -- draft models, never served directly ------------------------------------
+  eval-qwen3-32b-draft:
+    cmd: /opt/llama.cpp/llama-server --port ${PORT} --model /models/qwen3-0.6b-Q8_0.gguf --ctx-size 8192
+    unlisted: true
+    ttl: 120
+
+  eval-llama31-8b-draft:
+    cmd: /opt/llama.cpp/llama-server --port ${PORT} --model /models/llama-3.2-1b-instruct-Q8_0.gguf --ctx-size 8192
+    unlisted: true
+    ttl: 120
+
+  eval-sd35-medium:
+    cmd: /opt/stable-diffusion.cpp/sd-server --port ${PORT} --model /models/sd3.5-medium-Q8_0.gguf
+    checkEndpoint: /
+    ttl: 600
+    capabilities:
+      in: [text]
+      out: [image]
+
+groups:
+  # Vision models share one set of GPUs, so loading one unloads the others.
+  eval-vision:
+    swap: true
+    exclusive: true
+    members:
+      - eval-gemma3-27b-vision
+      - eval-llama4-scout
+      - eval-qwen25-vl-7b
+
+  # Retrieval models are small and stay up together alongside whatever else is
+  # loaded.
+  eval-retrieval:
+    swap: false
+    exclusive: false
+    persistent: true
+    members:
+      - eval-nomic-embed-v15
+      - eval-qwen3-embed-8b
+      - eval-bge-reranker-v2
