@@ -468,14 +468,18 @@
               from what the model remembers.
             </p>
             <div class="mt-4 flex flex-col gap-2">
-              {#each suggestions as suggestion (suggestion)}
+              {#each suggestions as suggestion (suggestion.number)}
                 <button
                   type="button"
                   class="hover:bg-muted/70 disabled:hover:bg-transparent rounded-md border px-3 py-2 text-left text-sm transition-colors disabled:opacity-50"
                   disabled={!canSend}
-                  onclick={() => ask(suggestion)}
+                  onclick={() => ask(suggestion.question)}
                 >
-                  {suggestion}
+                  <!-- The number is the topic's place in the pool, not this
+                       button's place on screen, so it stays muted: it labels
+                       the question rather than competing with it. -->
+                  <span class="text-muted-foreground tabular-nums">#{suggestion.number}.</span>
+                  {suggestion.question}
                 </button>
               {/each}
             </div>
