@@ -21,57 +21,132 @@
  */
 export const DOCS_SUGGESTIONS: string[] = [
   // The running config, read through config__get_config.
-  "What llama-swap features am I not using?",
-  "What models are configured on this server?",
-  "Which of my models never unload, and how much are they holding?",
+  "What can llama-swap do that I'm not using?",
+  "What models are set up here?",
+  "Which models stay loaded, and how much memory do they use?",
 
   // guides/routing/groups-and-matrix, guides/routing/profiles-and-selectors
-  "How do I run several models at once instead of swapping between them?",
-  "Can I switch between whole sets of models at runtime?",
-  "Can one model name resolve to a different model per request?",
+  "How can I keep several models ready at once?",
+  "How can I switch between sets of models?",
+  "Can one model name choose a different model each time?",
 
   // guides/model-runtime/ttl-and-unloading, .../troubleshooting-model-wont-load
-  "How do I unload a model after 5 minutes of inactivity?",
-  "My model won't load. How do I debug it?",
+  "How do I unload a model after five minutes idle?",
+  "A model won't start. How do I fix it?",
 
   // guides/connectivity/remote-peers, examples/peers-and-multi-host
-  "How do I serve models running on another machine through this one?",
-
-  // examples/speculative-decoding
-  "How do I use a small draft model to speed up a large one?",
+  "How do I use models on another computer?",
 
   // guides/operations/startup-preloading-and-hooks
-  "How do I load my most-used models at startup instead of on the first request?",
+  "How do I load my most-used models at startup?",
 
   // guides/routing/capacity-and-queues
-  "How do I limit how many requests one model handles at a time?",
+  "How many requests can one model handle at once?",
 
   // guides/api-integration/filters-and-request-rewriting
-  "How do I stop clients from overriding a sampling parameter?",
+  "How do I stop apps changing a model's settings?",
 
   // guides/configuration/macros
-  "How do I stop repeating the same long command in every model?",
+  "How do I avoid repeating a long command for every model?",
 
   // guides/api-integration/api-keys-and-auth
   "How do I keep API keys out of my config file?",
 
   // guides/model-runtime/capabilities-and-model-listings
-  "How do I tell clients which of my models handle images or tool calls?",
+  "How do I tell apps a model can handle images or tools?",
 
   // guides/model-runtime/client-compatibility-and-loading-feedback
-  "My client errors out while a model is still loading. Can I fix that?",
+  "My app fails while a model loads. What can I do?",
 
   // guides/operations/observability-storage-and-activity
-  "Can I see the full request and response body for a call?",
+  "Can I save requests and responses while I troubleshoot?",
 
   // guides/api-integration/mcp-endpoint
-  "How do I point an MCP client at this server?",
+  "How do I connect an MCP app to this server?",
 
   // guides/operations/tailcat
-  "How do I reach this server from another network without opening a port?",
+  "How do I reach this server safely from another network?",
 
   // guides/operations/container-security
-  "How do I run llama-swap in a container without running as root?",
+  "How do I run llama-swap more safely in a container?",
+
+  // guides/model-runtime/writing-cmd
+  "What is the smallest model setup to get started?",
+  "My model starts but does not answer. What is wrong?",
+  "Can I use a server other than llama-server?",
+  "How do I set up tool use in llama-server?",
+  "How do I make a model use certain GPUs?",
+  "How do I send a different model name to the server behind llama-swap?",
+
+  // guides/model-runtime/ttl-and-unloading
+  "How does automatic model unloading work?",
+  "How do I fully stop a Docker model container?",
+  "How do I unload a model right now?",
+  "Which models should always stay loaded?",
+
+  // guides/model-runtime/capabilities-and-model-listings,
+  // guides/model-runtime/client-compatibility-and-loading-feedback
+  "Why does my model say it supports tools but not use them?",
+  "How do I show model nicknames to apps?",
+  "How can an app show that a model is still loading?",
+
+  // guides/model-runtime/troubleshooting-model-wont-load,
+  // guides/connectivity/proxy-timeouts
+  "How do I make sure llama-swap knows when a model is ready?",
+  "Where can I find why a model did not start?",
+  "A model takes forever to start. Should I just wait longer?",
+
+  // guides/routing/groups-and-matrix
+  "How should I arrange models that can run together?",
+  "How do I keep embeddings ready while swapping chat models?",
+  "How do I stop a slow model being unloaded too soon?",
+
+  // guides/routing/capacity-and-queues
+  "How do I limit a model's requests at one time?",
+  "How do I put chat requests ahead of batch jobs?",
+
+  // guides/routing/profiles-and-selectors
+  "How do I choose a model that is already ready?",
+  "How do I use a remote model only when my local one is busy?",
+  "How do I hide a model in one profile?",
+
+  // guides/connectivity/remote-peers, examples/peers-and-multi-host
+  "How do I tell apart matching model names from different places?",
+  "How do I allow more time for a slow remote service?",
+  "How do I use cloud models alongside local models?",
+
+  // guides/connectivity/upstream-passthrough
+  "How do I stop website files from starting a model?",
+
+  // guides/api-integration/api-keys-and-auth
+  "How do I require API keys and change them without downtime?",
+  "When do I need a reverse proxy for access control?",
+
+  // guides/api-integration/filters-and-request-rewriting
+  "How do I offer different presets without reloading a model?",
+  "How do I remove settings a provider does not support?",
+  "What order are model names and request settings applied in?",
+
+  // guides/api-integration/mcp-endpoint
+  "How do I connect an MCP app to llama-swap's help?",
+  "Which MCP tools can check this server's setup?",
+
+  // guides/configuration/macros
+  "How do I reuse the same setup for several models?",
+  "How do environment variables keep secrets out of my config?",
+
+  // guides/operations/startup-preloading-and-hooks
+  "How do I load a model when llama-swap starts?",
+  "When should I run a command at startup?",
+
+  // guides/operations/observability-storage-and-activity
+  "Where can I see slow requests and model activity?",
+  "How do I keep more history while I troubleshoot?",
+
+  // guides/operations/tailcat
+  "How do I limit who can reach my server through Tailcat?",
+  "How do I connect to another server through Tailcat?",
+
 ];
 
 /** How many suggestions the Help page shows at once. */

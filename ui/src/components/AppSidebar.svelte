@@ -238,7 +238,7 @@
     </Sidebar.Menu>
 
     <div
-      class="flex items-center justify-between gap-2 px-1 group-data-[collapsible=icon]:flex-col-reverse"
+      class="flex items-center justify-between gap-2 group-data-[collapsible=icon]:flex-col-reverse"
     >
       <Sidebar.MenuButton
         isActive={isActive("/settings", $currentRoute)}
