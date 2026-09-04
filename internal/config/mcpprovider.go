@@ -8,8 +8,10 @@ import (
 	"math"
 	"reflect"
 	"regexp"
+	"runtime/metrics"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/itchyny/gojq"
@@ -29,9 +31,46 @@ const maxConfigResultBytes = 32 * 1024
 // not if.
 const configQueryTimeout = 5 * time.Second
 
+// maxConfigQueryNodes caps the values in one result -- every scalar, and every
+// array and object holding them -- counted before the result is rendered.
+//
+// Rendering is not free: yaml.Marshal walks the whole value and builds the
+// whole string before anything can be measured, so a result that will be
+// refused for its size has to be refused before that. The configuration
+// document is a few thousand values at most, and the rendered answer is capped
+// at 32KB, so nothing a caller has any business asking for comes near this.
+const maxConfigQueryNodes = 200_000
+
+// maxConfigQueryHeapGrowth is how far the live heap may grow during one query
+// before it is cancelled.
+//
+// This is the only limit that can stop a query like "[range(0; 5000000)]".
+// gojq builds that array in full before it hands the value back, so the caps
+// above never get to see it -- the process is killed by the allocator first,
+// and /api/mcp needs no credentials by default. gojq checks for cancellation
+// on every instruction it executes, so cancelling lands part-way through the
+// build rather than after it.
+//
+// The budget is enormous next to any legitimate result and small next to the
+// machine, which is the right trade: the cost of tripping it is one error
+// message the caller can act on.
+const maxConfigQueryHeapGrowth = 128 << 20
+
+// configQueryHeapPoll is how often that growth is sampled. A single append can
+// double a large slice in one allocation, so the peak overshoots the budget by
+// however much one such step adds; sampling often keeps that bounded.
+const configQueryHeapPoll = 10 * time.Millisecond
+
 // errConfigResultTooLarge signals that rendering stopped because the result
 // passed maxConfigResultBytes.
 var errConfigResultTooLarge = errors.New("config query result is too large")
+
+// errConfigValueTooLarge signals that a single result held more values than
+// maxConfigQueryNodes, so it was refused rather than rendered.
+var errConfigValueTooLarge = errors.New("config query result has too many values")
+
+// errConfigQueryOutOfMemory signals that the heap guard cancelled the query.
+var errConfigQueryOutOfMemory = errors.New("config query used too much memory")
 
 // ConfigProvider serves the running llama-swap configuration so an agent can
 // give advice about the setup in front of it rather than in the abstract.
@@ -40,12 +79,34 @@ var errConfigResultTooLarge = errors.New("config query result is too large")
 // reload constructs a fresh Server and therefore a fresh registry, so the
 // snapshot always matches what is actually running.
 type ConfigProvider struct {
-	cfg Config
+	cfg    Config
+	limits configQueryLimits
+}
+
+// configQueryLimits bounds one evaluation. They are a field rather than
+// constants read in place so a test can prove a limit works without spending
+// what the production budget is worth of memory or time to do it.
+type configQueryLimits struct {
+	timeout     time.Duration
+	resultBytes int
+	valueNodes  int
+	heapGrowth  uint64
+	heapPoll    time.Duration
+}
+
+func defaultConfigQueryLimits() configQueryLimits {
+	return configQueryLimits{
+		timeout:     configQueryTimeout,
+		resultBytes: maxConfigResultBytes,
+		valueNodes:  maxConfigQueryNodes,
+		heapGrowth:  maxConfigQueryHeapGrowth,
+		heapPoll:    configQueryHeapPoll,
+	}
 }
 
 // NewConfigProvider builds the provider around a configuration snapshot.
 func NewConfigProvider(cfg Config) *ConfigProvider {
-	return &ConfigProvider{cfg: cfg}
+	return &ConfigProvider{cfg: cfg, limits: defaultConfigQueryLimits()}
 }
 
 var _ mcptools.Provider = (*ConfigProvider)(nil)
@@ -125,20 +186,30 @@ func (p *ConfigProvider) Call(ctx context.Context, name string, args map[string]
 		return mcptools.Result{}, err
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, configQueryTimeout)
+	ctx, cancel := context.WithTimeout(ctx, p.limits.timeout)
 	defer cancel()
 
-	out, err := runConfigQuery(ctx, code, document, maxConfigResultBytes)
+	// The guard cancels ctx, so it has to be watching before the query starts
+	// running and stopped once it has finished.
+	guard := newHeapGuard(cancel, p.limits.heapGrowth, p.limits.heapPoll)
+	out, err := runConfigQuery(ctx, code, document, p.limits.resultBytes, p.limits.valueNodes)
+	guard.stop()
+
 	switch {
-	case errors.Is(err, errConfigResultTooLarge):
+	case guard.tripped():
+		return mcptools.Result{IsError: true, Content: fmt.Sprintf(
+			"Error: the query %s was building a value too large to hold in memory, so it was "+
+				"stopped. Ask for part of the config rather than generating data: \".models | keys\" "+
+				"lists the model ids, and \".models.<id>\" reads one model.", query)}, nil
+	case errors.Is(err, errConfigValueTooLarge), errors.Is(err, errConfigResultTooLarge):
 		return mcptools.Result{IsError: true, Content: fmt.Sprintf(
 			"Error: the result of %s is larger than %dKB. Ask for less rather than everything: "+
 				"\".models | keys\" lists the model ids, \".models.<id>\" reads one model, and "+
 				"\".models | to_entries | map({id: .key, ttl: .value.ttl})\" pulls one field from all "+
-				"of them. %s", query, maxConfigResultBytes/1024, p.topLevelKeyHint())}, nil
+				"of them. %s", query, p.limits.resultBytes/1024, p.topLevelKeyHint())}, nil
 	case errors.Is(err, context.DeadlineExceeded):
 		return mcptools.Result{IsError: true, Content: fmt.Sprintf(
-			"Error: the query %s did not finish within %s. Simplify it.", query, configQueryTimeout)}, nil
+			"Error: the query %s did not finish within %s. Simplify it.", query, p.limits.timeout)}, nil
 	case err != nil:
 		return mcptools.Result{IsError: true, Content: fmt.Sprintf(
 			"Error: the query %s failed: %v", query, err)}, nil
@@ -176,9 +247,14 @@ type configQueryOutput struct {
 }
 
 // runConfigQuery evaluates code over document and renders each result as a YAML
-// document. It gives up as soon as the rendered output passes limit, so an
-// expression like `range(1e9)` cannot build a huge string in memory.
-func runConfigQuery(ctx context.Context, code *gojq.Code, document any, limit int) (configQueryOutput, error) {
+// document.
+//
+// Two budgets bound the work. byteLimit stops the loop once the rendered output
+// is longer than any answer should be, and nodeLimit refuses a single result
+// before it is rendered, because yaml.Marshal builds the whole string before
+// there is anything to measure. Neither can bound what gojq does inside Next;
+// that is the heap guard's job.
+func runConfigQuery(ctx context.Context, code *gojq.Code, document any, byteLimit, nodeLimit int) (configQueryOutput, error) {
 	out := configQueryOutput{nullOnly: true}
 
 	var b strings.Builder
@@ -190,6 +266,9 @@ func runConfigQuery(ctx context.Context, code *gojq.Code, document any, limit in
 		}
 		if err, isErr := value.(error); isErr {
 			return configQueryOutput{}, err
+		}
+		if countValues(value, nodeLimit) > nodeLimit {
+			return configQueryOutput{}, errConfigValueTooLarge
 		}
 
 		buf, err := yaml.Marshal(value)
@@ -207,13 +286,41 @@ func runConfigQuery(ctx context.Context, code *gojq.Code, document any, limit in
 		if value != nil {
 			out.nullOnly = false
 		}
-		if b.Len() > limit {
+		if b.Len() > byteLimit {
 			return configQueryOutput{}, errConfigResultTooLarge
 		}
 	}
 
 	out.body = b.String()
 	return out, nil
+}
+
+// countValues counts the scalars and containers in value, giving up once the
+// count is past limit. Walking a value that is already too big to render is
+// only worth doing until that is established.
+func countValues(value any, limit int) int {
+	switch typed := value.(type) {
+	case map[string]any:
+		count := 1
+		for _, child := range typed {
+			count += countValues(child, limit-count)
+			if count > limit {
+				return count
+			}
+		}
+		return count
+	case []any:
+		count := 1
+		for _, child := range typed {
+			count += countValues(child, limit-count)
+			if count > limit {
+				return count
+			}
+		}
+		return count
+	default:
+		return 1
+	}
 }
 
 // compileConfigQuery parses and compiles one jq expression. gojq keeps the
@@ -461,4 +568,77 @@ func pruneConfigDefaults(value, defaults any, path string) (any, bool) {
 		}
 	}
 	return out, len(out) == 0
+}
+
+// heapGuard cancels a running query when the live heap grows past a budget.
+//
+// It exists for one shape of query: the kind that builds a single enormous
+// value. gojq returns nothing until that value is complete, so a caller writing
+// "[range(0; 5000000)]" reaches the allocator long before it reaches any check
+// on the result. Measuring the heap is the only signal available while the
+// query is still inside gojq.
+//
+// The measurement is the whole process, not the query, so it is a safety net
+// rather than an accountant: other work allocating heavily at the same moment
+// can trip it. That costs one recoverable error message, which is the cheaper
+// mistake.
+type heapGuard struct {
+	fired atomic.Bool
+	done  chan struct{}
+	over  chan struct{}
+}
+
+// newHeapGuard starts watching. It cancels the query's context when the live
+// heap has grown by more than growth bytes since now, sampling every poll.
+func newHeapGuard(cancel context.CancelFunc, growth uint64, poll time.Duration) *heapGuard {
+	guard := &heapGuard{done: make(chan struct{}), over: make(chan struct{})}
+	ceiling := liveHeapBytes() + growth
+
+	go func() {
+		defer close(guard.over)
+		ticker := time.NewTicker(poll)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-guard.done:
+				return
+			case <-ticker.C:
+				if liveHeapBytes() > ceiling {
+					guard.fired.Store(true)
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+
+	return guard
+}
+
+// stop ends the watch and waits for it, so a finished query leaves no
+// goroutine behind and tripped() is settled by the time it returns.
+func (g *heapGuard) stop() {
+	close(g.done)
+	<-g.over
+}
+
+// tripped reports whether the guard is what cancelled the query. Only call it
+// after stop.
+func (g *heapGuard) tripped() bool { return g.fired.Load() }
+
+// heapObjectsMetric is the live heap: objects allocated and not yet collected.
+// Reading it does not stop the world, unlike runtime.ReadMemStats, which
+// matters because this is sampled every few milliseconds while a query runs.
+const heapObjectsMetric = "/memory/classes/heap/objects:bytes"
+
+func liveHeapBytes() uint64 {
+	sample := []metrics.Sample{{Name: heapObjectsMetric}}
+	metrics.Read(sample)
+	if sample[0].Value.Kind() != metrics.KindUint64 {
+		// The metric was removed from the runtime. TestConfigProvider_HeapMetricIsSupported
+		// fails in that case; returning 0 here leaves the guard inert rather
+		// than cancelling every query.
+		return 0
+	}
+	return sample[0].Value.Uint64()
 }

@@ -3,7 +3,9 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"runtime/metrics"
 	"strings"
 	"testing"
 	"time"
@@ -308,5 +310,117 @@ func TestConfigProvider_UnknownTool(t *testing.T) {
 	_, err := newTestConfigProvider(t).Call(context.Background(), "get_doc", nil)
 	if err == nil {
 		t.Fatal("want an error for an unknown tool")
+	}
+}
+
+// A query that builds one enormous value is the shape none of the result-size
+// caps can catch: gojq returns nothing until the value is complete, so
+// "[range(0; 1000000000)]" reaches the allocator long before it reaches any
+// check on the result. Before the heap guard this killed the process, and
+// /api/mcp needs no credentials by default.
+func TestConfigProvider_GetConfigQuerySurvivesAHugeConstructedValue(t *testing.T) {
+	provider := newTestConfigProvider(t)
+	// A budget small enough that the test costs megabytes rather than the
+	// production budget's worth of them.
+	provider.limits.heapGrowth = 16 << 20
+	provider.limits.heapPoll = 2 * time.Millisecond
+	// Long enough that the timeout cannot be what ends these queries -- under
+	// -race the same work takes an order of magnitude longer, and a timeout
+	// standing in for the guard would hide the guard failing. Still short
+	// enough to bound the damage if it does.
+	provider.limits.timeout = 30 * time.Second
+
+	for _, query := range []string{
+		`[range(0; 1000000000)]`,
+		`[range(0; 5000000)]`,
+		`[limit(5000000; repeat("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))]`,
+	} {
+		t.Run(query, func(t *testing.T) {
+			start := time.Now()
+			res := callConfig(t, provider, fmt.Sprintf(`{"query":%q}`, query))
+			if !res.IsError {
+				t.Fatalf("want IsError for a query that builds an unbounded value, got %d bytes", len(res.Content))
+			}
+			if !strings.Contains(res.Content, "too large to hold in memory") {
+				t.Errorf("the caller should be told what happened:\n%s", res.Content)
+			}
+			// The point of the guard is that it fires while the value is being
+			// built, rather than the query running to its deadline.
+			if elapsed := time.Since(start); elapsed >= provider.limits.timeout {
+				t.Errorf("took %s; the guard should stop this well before the %s timeout",
+					elapsed.Round(time.Millisecond), provider.limits.timeout)
+			}
+		})
+	}
+}
+
+// The guard must not fire on a query that asks for something real.
+func TestConfigProvider_GetConfigQueryGuardLeavesNormalQueriesAlone(t *testing.T) {
+	provider := newTestConfigProvider(t)
+	provider.limits.heapGrowth = 16 << 20
+	provider.limits.heapPoll = 2 * time.Millisecond
+
+	for _, query := range []string{".", ".models | keys", `.models["qwen3"].cmd`, ".peers"} {
+		res := callConfig(t, provider, fmt.Sprintf(`{"query":%q}`, query))
+		if res.IsError {
+			t.Errorf("query %s was refused:\n%s", query, res.Content)
+		}
+	}
+}
+
+// yaml.Marshal walks and copies the whole value before anything can measure
+// the result, so a value that will be refused has to be refused before it is
+// rendered. A generous byte limit with a tiny node limit proves which check
+// fired.
+func TestConfigProvider_RunConfigQueryRefusesABigValueBeforeRenderingIt(t *testing.T) {
+	code, err := compileConfigQuery("[range(0; 5000)]")
+	if err != nil {
+		t.Fatalf("compileConfigQuery: %v", err)
+	}
+
+	_, err = runConfigQuery(context.Background(), code, map[string]any{}, 1<<30, 100)
+	if !errors.Is(err, errConfigValueTooLarge) {
+		t.Fatalf("err = %v, want errConfigValueTooLarge", err)
+	}
+}
+
+func TestConfigProvider_CountValues(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value any
+		want  int
+	}{
+		{"scalar", 1, 1},
+		{"null", nil, 1},
+		{"empty array", []any{}, 1},
+		{"flat array", []any{1, 2, 3}, 4},
+		{"map", map[string]any{"a": 1, "b": 2}, 3},
+		{"nested", map[string]any{"a": []any{1, map[string]any{"b": 2}}}, 5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := countValues(tc.value, 1000); got != tc.want {
+				t.Errorf("countValues = %d, want %d", got, tc.want)
+			}
+		})
+	}
+
+	// Counting stops once the answer is "more than the limit"; it does not
+	// walk the rest of a value it has already rejected.
+	big := make([]any, 10_000)
+	if got := countValues(big, 10); got <= 10 {
+		t.Errorf("countValues = %d, want a count over the limit", got)
+	}
+}
+
+// The guard reads the live heap through runtime/metrics. If that metric ever
+// goes away the guard silently stops guarding, so notice here instead.
+func TestConfigProvider_HeapMetricIsSupported(t *testing.T) {
+	sample := []metrics.Sample{{Name: heapObjectsMetric}}
+	metrics.Read(sample)
+	if sample[0].Value.Kind() != metrics.KindUint64 {
+		t.Fatalf("%s is no longer a uint64 metric; the heap guard is inert without it", heapObjectsMetric)
+	}
+	if liveHeapBytes() == 0 {
+		t.Error("liveHeapBytes() = 0, want the live heap size")
 	}
 }

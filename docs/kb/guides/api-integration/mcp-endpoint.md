@@ -95,8 +95,11 @@ it does not exist, or its value is the default, since defaults are omitted. `env
 and `$ENV` are not available: the process environment holds exactly the credentials
 that redaction keeps out of the result.
 
-Evaluation is capped at five seconds, and a result larger than 32KB is refused
-with a message asking for a narrower query rather than returned truncated.
+A query is bounded three ways, and each refusal explains itself so a client can
+retry with something narrower: evaluation is capped at five seconds, a result
+larger than 32KB is refused rather than returned truncated, and a query that
+builds a value too large to hold — `[range(0; 1000000000)]` and its relatives —
+is stopped while it is still building it.
 
 **`sys__*` — facts about the machine**
 
