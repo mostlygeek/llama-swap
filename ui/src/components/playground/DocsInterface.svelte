@@ -31,7 +31,6 @@
    * answers with no way to tell why. The only choice left is the model.
    */
   const TEMPERATURE = 0;
-  const MAX_TOKENS = 65536;
 
   const selectedModelStore = persistentStore<string>("playground-docs-model", "");
 
@@ -334,7 +333,6 @@
         streamChatCompletion($selectedModelStore, msgs, sig, {
           temperature: TEMPERATURE,
           endpoint: "v1/chat/completions" as const,
-          max_tokens: MAX_TOKENS,
           tools,
         }),
       callTool,

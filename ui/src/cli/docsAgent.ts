@@ -62,7 +62,7 @@ Common options:
   --system-prompt F  file to use instead of DOCS_AGENT_SYSTEM_PROMPT ("none" for empty)
   --max-iterations N agent loop ceiling (default ${DEFAULT_MAX_ITERATIONS})
   --temperature N    default 0
-  --max-tokens N     default 65536
+  --max-tokens N     omitted by default (let the model stop on its own)
   --timeout N        per-turn seconds (default 300)
 
 eval options:
@@ -94,7 +94,7 @@ interface CommonOpts {
   systemPromptSource: string;
   maxIterations: number;
   temperature: number;
-  maxTokens: number;
+  maxTokens: number | undefined;
   timeoutMs: number;
 }
 
@@ -152,7 +152,10 @@ async function common(values: CLIValues): Promise<CommonOpts> {
       "--max-iterations",
     ),
     temperature: intOpt(values.temperature as string, 0, "--temperature"),
-    maxTokens: intOpt(values["max-tokens"] as string, 65536, "--max-tokens"),
+    maxTokens:
+      values["max-tokens"] === undefined
+        ? undefined
+        : intOpt(values["max-tokens"] as string, 0, "--max-tokens"),
     timeoutMs: intOpt(values.timeout as string, 300, "--timeout") * 1000,
   };
 }
