@@ -1,7 +1,6 @@
 <script lang="ts">
   import type { Component } from "svelte";
   import ChatInterface from "../components/playground/ChatInterface.svelte";
-  import DocsInterface from "../components/playground/DocsInterface.svelte";
   import ImageInterface from "../components/playground/ImageInterface.svelte";
   import AudioInterface from "../components/playground/AudioInterface.svelte";
   import SpeechInterface from "../components/playground/SpeechInterface.svelte";
@@ -9,14 +8,11 @@
   import ConcurrencyInterface from "../components/playground/ConcurrencyInterface.svelte";
   import * as Card from "$lib/components/ui/card/index.js";
   import { Tabs, TabsList, TabsTrigger } from "$lib/components/ui/tabs/index.js";
-  import { fetchPlaygroundModels, models } from "../stores/api";
+  import { refreshPlaygroundModels } from "$lib/hooks/playground-models.svelte";
   import { selectedPlaygroundTab, playgroundTabs, type PlaygroundTab } from "../stores/playground";
-
-  const MODEL_REFRESH_DEBOUNCE_MS = 200;
 
   const tabComponents: Record<PlaygroundTab, Component> = {
     chat: ChatInterface,
-    docs: DocsInterface,
     images: ImageInterface,
     speech: SpeechInterface,
     audio: AudioInterface,
@@ -24,20 +20,7 @@
     concurrency: ConcurrencyInterface,
   };
 
-  let initializedModels = false;
-  $effect(() => {
-    void $models;
-    if (!initializedModels) {
-      initializedModels = true;
-      void fetchPlaygroundModels();
-      return;
-    }
-
-    const timeout = window.setTimeout(() => {
-      void fetchPlaygroundModels();
-    }, MODEL_REFRESH_DEBOUNCE_MS);
-    return () => window.clearTimeout(timeout);
-  });
+  refreshPlaygroundModels();
 </script>
 
 <Card.Root class="flex h-full flex-col gap-0 overflow-hidden p-4">

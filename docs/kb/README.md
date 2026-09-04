@@ -1,6 +1,6 @@
 # llama-swap knowledge base
 
-Short, focused articles that the Playground's Docs agent can search and read.
+Short, focused articles that the Help page's Docs agent can search and read.
 Every file here is indexed at build time and served over MCP at `/api/mcp`, so an
 LLM running on your own hardware can answer questions about llama-swap using
 real text instead of guesswork.

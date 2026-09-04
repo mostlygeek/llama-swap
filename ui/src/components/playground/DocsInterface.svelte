@@ -6,7 +6,7 @@
   import { runAgent, sanitizeMessages, DEFAULT_MAX_ITERATIONS } from "../../lib/agentLoop";
   import { fetchToolDefinitions, callTool, friendlyToolName } from "../../lib/agentTools";
   import { DOCS_AGENT_SYSTEM_PROMPT } from "../../lib/prompts/docsAgent";
-  import { playgroundStores } from "../../stores/playgroundActivity";
+  import { docsAgentStreaming } from "../../stores/playgroundActivity";
   import { getTextContent, type ChatMessage } from "../../lib/types";
   import { isSubmitEnter } from "../../lib/ime";
   import ChatMessageComponent from "./ChatMessage.svelte";
@@ -19,7 +19,10 @@
 
   /**
    * The Docs Agent: a fixed agentic client for llama-swap's own documentation
-   * tools.
+   * tools. This is the whole of the Help page; routes/Help.svelte only frames
+   * it. It sits among the playground components because it is built from them
+   * -- the same chat message, model selector and textarea -- not because Help
+   * is a playground tab. It stopped being one.
    *
    * Unlike the Chat tab this exposes no settings. The prompt, temperature and
    * tool set are the thing being shipped -- they are tuned together against
@@ -169,7 +172,7 @@
   });
 
   $effect(() => {
-    playgroundStores.docsStreaming.set(isStreaming);
+    docsAgentStreaming.set(isStreaming);
   });
 
   let wasStreaming = $state(false);

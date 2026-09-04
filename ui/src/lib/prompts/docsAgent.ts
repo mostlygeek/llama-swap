@@ -2,7 +2,7 @@
  * The Docs Agent's system prompt.
  *
  * This is the single tuning surface that needs no server restart: it is sent by
- * the client on every request. Both the Playground's Docs tab and the headless
+ * the client on every request. Both the UI's Help page and the headless
  * CLI in src/cli/ use this constant, so an edit here changes what real users get
  * and what the eval suite measures at the same time. That is deliberate -- a
  * prompt that only ever improved the benchmark would be worthless.
@@ -10,7 +10,7 @@
  * The tool inventory below deliberately restates internal/server/apimcp.go's
  * `mcpInstructions`. That string is only returned from MCP `server/discover`,
  * which agentTools.ts never calls, so it reaches external MCP clients but never
- * the Playground. Until the two are unified, keep them consistent by hand.
+ * the Help page. Until the two are unified, keep them consistent by hand.
  *
  * Measure before and after with:
  *   npm run agent -- eval --repeat 3

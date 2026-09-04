@@ -1,6 +1,7 @@
 # Docs Agent evaluation harness
 
-A headless driver and scored test suite for the Playground's Docs agent. It exists so that a strong coding agent — Claude Code,
+A headless driver and scored test suite for the Docs agent behind the UI's
+Help page. It exists so that a strong coding agent — Claude Code,
 Codex — can improve the Docs Agent's accuracy on a small local model by
 measuring, changing one thing, and measuring again.
 
@@ -93,8 +94,8 @@ reaches the binary through `//go:embed` in `reference_embed.go` — so they need
 
 Surface 5 currently reaches external MCP clients only. `agentTools.ts` calls
 `tools/list` and `tools/call` but never `server/discover`, so `mcpInstructions`
-never reaches the Playground. Improving it is still worthwhile for other MCP
-clients, but it will not move this score. The Playground's equivalent is
+never reaches the Help page. Improving it is still worthwhile for other MCP
+clients, but it will not move this score. The Help page's equivalent is
 surface 1.
 
 ## The protocol

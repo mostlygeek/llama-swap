@@ -25,7 +25,7 @@ import { DOCS_AGENT_SYSTEM_PROMPT } from "../lib/prompts/docsAgent";
 import type { ChatMessage } from "../lib/types";
 
 /**
- * Headless driver for the Playground's Docs Agent.
+ * Headless driver for the Docs Agent behind the UI's Help page.
  *
  * The whole point is that this imports agentLoop.ts, chatApi.ts and
  * agentTools.ts unmodified, so what is measured here is exactly what the

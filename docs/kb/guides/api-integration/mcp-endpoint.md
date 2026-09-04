@@ -11,7 +11,7 @@ updated: 2026-09-04
 
 llama-swap serves its own documentation as an MCP server at `/api/mcp`. Any
 MCP client can point at a running instance and ask about llama-swap
-configuration — the same tools the web UI's Playground Docs tab uses.
+configuration — the same tools the web UI's Help page uses.
 
 ```
 http://localhost:8080/api/mcp
