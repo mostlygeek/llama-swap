@@ -52,7 +52,7 @@ describe("pickSuggestions", () => {
   });
 
   it("asks the question that sends the reader looking for what they are missing", () => {
-    expect(DOCS_SUGGESTIONS).toContain("What llama-swap features am I not using?");
+    expect(DOCS_SUGGESTIONS).toContain("What can llama-swap do that I'm not using?");
   });
 });
 
