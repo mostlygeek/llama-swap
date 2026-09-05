@@ -105,8 +105,8 @@ llama-swap can be installed in multiple ways
 
 Two types of container images are built nightly for llama-swap:
 
-1. A unified container with llama-server, ik-llama-server, stable-diffusion.cpp, whisper.cpp and llama-swap built from source. This is only available for cuda and vulkan but has more capabilities. This one is recommended for use.
-2. A legacy image that is based on llama.cpp's images and llama-swap copied into the container. Use this one if you prefer to stay close to llama.cpp's container images.
+1. A unified container with llama-server, ik-llama-server, stable-diffusion.cpp, whisper.cpp, audio.cpp and llama-swap all built from source. Available for CUDA 12, CUDA 13 and Vulkan. This one is recommended for use.
+2. A legacy image, which is llama.cpp's own `llama-server` container with llama-swap copied in. It carries only what that base image ships, so no image generation, speech or ik-llama-server.
 
 #### Unified container (Recommended)
 
@@ -131,13 +131,89 @@ $ docker run -it --rm --runtime nvidia -p 9292:8080 \
  ghcr.io/mostlygeek/llama-swap:unified-cuda13
 ```
 
-The unified images can also be configured with `LLAMA_SWAP_*` environment
-variables instead of flags — `LLAMA_SWAP_CONFIG`, `LLAMA_SWAP_LISTEN`,
-`LLAMA_SWAP_WATCH_CONFIG` and so on. See
-[docker/unified/README.md](docker/unified/README.md#configuring-with-environment-variables).
-Passing flags to the container works exactly as before.
+##### Configuring startup with environment variables
+
+The unified images can be configured with `LLAMA_SWAP_*` environment variables
+instead of command line flags, which is usually easier in a compose file or a
+Kubernetes manifest. Each one maps to a llama-swap flag:
+
+| variable | flag | default in the image |
+| --- | --- | --- |
+| `LLAMA_SWAP_CONFIG` | `-config` | `/etc/llama-swap/config/config.yaml` |
+| `LLAMA_SWAP_CONFIG_DIR` | `-config-dir` | — |
+| `LLAMA_SWAP_LISTEN` | `-listen` | `0.0.0.0:8080` |
+| `LLAMA_SWAP_TLS_CERT_FILE` | `-tls-cert-file` | — |
+| `LLAMA_SWAP_TLS_KEY_FILE` | `-tls-key-file` | — |
+| `LLAMA_SWAP_LISTEN_TAILCAT` | `-listen-tailcat` | — |
+| `LLAMA_SWAP_WATCH_CONFIG` | `-watch-config` | `true` |
+| `LLAMA_SWAP_VALIDATE` | `-validate` | `false` |
+
+```shell
+# configure startup with environment variables instead of flags
+$ docker run -it --rm --runtime nvidia -p 9292:8080 \
+ -v /path/to/models:/models \
+ -e LLAMA_SWAP_CONFIG=/models/llama-swap.yaml \
+ -e LLAMA_SWAP_LISTEN=0.0.0.0:8080 \
+ -e LLAMA_SWAP_WATCH_CONFIG=false \
+ ghcr.io/mostlygeek/llama-swap:unified-cuda13
+```
+
+```yaml
+services:
+  llama-swap:
+    image: ghcr.io/mostlygeek/llama-swap:unified-cuda13
+    ports:
+      - "9292:8080"
+    volumes:
+      - /path/to/models:/models
+    environment:
+      LLAMA_SWAP_CONFIG: /models/llama-swap.yaml
+      LLAMA_SWAP_LISTEN: 0.0.0.0:8080
+      LLAMA_SWAP_WATCH_CONFIG: "false"
+```
+
+**Keep `LLAMA_SWAP_LISTEN` on `0.0.0.0` whenever you publish a port.** A
+container that binds its own loopback is not reachable through `-p`, so
+`localhost:8080` there gives connection refused. Bind loopback only when the
+container shares the host's network, where it usefully limits llama-swap to the
+host itself:
+
+```shell
+# reachable from the host only, not from the network
+$ docker run -it --rm --runtime nvidia --network host \
+ -v /path/to/models:/models \
+ -e LLAMA_SWAP_LISTEN=localhost:8080 \
+ ghcr.io/mostlygeek/llama-swap:unified-cuda13
+```
+
+An unset or empty variable contributes nothing and leaves llama-swap's own
+default. Booleans accept `true`/`false`, `1`/`0`, `yes`/`no` or `on`/`off` in any
+case; anything else stops the container rather than being read as "off".
+`-version` is deliberately not mapped — use `docker run <image> -version`.
+
+Passing flags to the container still works and behaves exactly as it always has:
+arguments replace every default rather than adding to the variables above.
+
+```shell
+# unchanged: runs `llama-swap -config /models/my.yaml`, nothing else added
+$ docker run ghcr.io/mostlygeek/llama-swap:unified-cuda13 -config /models/my.yaml
+```
+
+See [docker/unified/README.md](docker/unified/README.md#configuring-with-environment-variables)
+for the details.
 
 #### Legacy container
+
+This image is llama.cpp's own `llama-server` container
+([ghcr.io/ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp/pkgs/container/llama.cpp))
+with the llama-swap binary copied into it. It tracks llama.cpp's nightly server
+images closely, which is its only real advantage.
+
+**Prefer the unified container.** The legacy image inherits whatever the
+`llama-server` base ships and nothing else, so it has no stable-diffusion.cpp,
+whisper.cpp, audio.cpp or ik-llama-server, and no `LLAMA_SWAP_*` environment
+variable support. Use it only if staying on llama.cpp's exact server image
+matters to you.
 
 ```shell
 $ docker pull ghcr.io/mostlygeek/llama-swap:cuda
