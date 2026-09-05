@@ -57,6 +57,9 @@ linux-arm64: ui
 	@echo "Building Linux ARM64 binary..."
 	GOOS=linux GOARCH=arm64 go build -tags embed_ui -ldflags="-X main.commit=${GIT_HASH} -X main.version=${GIT_VERSION} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)-linux-arm64
 
+native: ui
+	go build -tags embed_ui -ldflags="-X main.commit=${GIT_HASH} -X main.version=${GIT_VERSION} -X main.date=${BUILD_DATE}" -o $(BUILD_DIR)/$(APP_NAME)
+
 # Build Windows binary
 windows: ui
 	@echo "Building Windows binary..."
