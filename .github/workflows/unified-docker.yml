@@ -40,6 +40,11 @@ on:
         type: boolean
         required: false
         default: true
+      build_arm64:
+        description: "Include linux/arm64 in the CUDA 13 image (NVIDIA GB10 / DGX Spark)"
+        type: boolean
+        required: false
+        default: true
       build_vulkan:
         description: "Build Vulkan image"
         type: boolean
@@ -78,6 +83,14 @@ permissions:
 # CMAKE_CUDA_ARCHITECTURES differ, and the builder base tag is keyed on both, so
 # each variant gets its own base and artifacts images and neither invalidates
 # the other.
+#
+# cuda13 is also the only variant built for linux/arm64. NVIDIA's GB10 -- the
+# Blackwell GPU in DGX Spark -- sits next to a Grace CPU, so aarch64 is the only
+# way to reach it, and its sm_121 needs a CUDA 13 nvcc. Every other NVIDIA arm64
+# part is a Grace pairing too, so there is nothing for an arm64 CUDA 12 image to
+# run on, and no arm64 GPU that the Vulkan image would serve. Each platform is a
+# separate matrix cell over the backend workflow, compiled natively on a runner
+# of that architecture; a manifest job then joins them into the tag users pull.
 jobs:
   setup:
     runs-on: ubuntu-latest
@@ -87,6 +100,9 @@ jobs:
       build_vulkan: ${{ steps.plan.outputs.build_vulkan }}
       cuda_projects: ${{ steps.plan.outputs.cuda_projects }}
       vulkan_projects: ${{ steps.plan.outputs.vulkan_projects }}
+      amd64_only: ${{ steps.plan.outputs.amd64_only }}
+      cuda13_platforms: ${{ steps.plan.outputs.cuda13_platforms }}
+      date_tag: ${{ steps.plan.outputs.date_tag }}
       push_to_ghcr: ${{ steps.plan.outputs.push_to_ghcr }}
       llama_hash: ${{ steps.refs.outputs.llama_hash }}
       whisper_hash: ${{ steps.refs.outputs.whisper_hash }}
@@ -119,12 +135,21 @@ jobs:
         run: |
           # schedule uses defaults (build all, push); workflow_dispatch respects inputs
           if [[ "${{ github.event_name }}" == "schedule" ]]; then
-            build_cuda=true; build_cuda13=true; build_vulkan=true; push=true
+            build_cuda=true; build_cuda13=true; build_vulkan=true
+            build_arm64=true; push=true
           else
             build_cuda="${{ inputs.build_cuda }}"
             build_cuda13="${{ inputs.build_cuda13 }}"
             build_vulkan="${{ inputs.build_vulkan }}"
+            build_arm64="${{ inputs.build_arm64 }}"
             push="${{ inputs.push_to_ghcr }}"
+          fi
+
+          # cuda and vulkan are amd64 only; cuda13 adds arm64 for GB10.
+          if [[ "${build_arm64}" == "true" ]]; then
+            cuda13_platforms='["linux/amd64","linux/arm64"]'
+          else
+            cuda13_platforms='["linux/amd64"]'
           fi
 
           {
@@ -135,19 +160,30 @@ jobs:
             # ik_llama.cpp has no Vulkan build. Both CUDA variants build it.
             echo 'cuda_projects=["whisper","sd","audio","llama","ik-llama"]'
             echo 'vulkan_projects=["whisper","sd","audio","llama"]'
+            echo 'amd64_only=["linux/amd64"]'
+            echo "cuda13_platforms=${cuda13_platforms}"
+            # Resolved once so every platform's image and the manifest that
+            # joins them carry the same date, even across UTC midnight.
+            echo "date_tag=$(date -u +%Y-%m-%d)"
           } >> "$GITHUB_OUTPUT"
 
   cuda:
     needs: setup
     if: ${{ needs.setup.outputs.build_cuda == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJSON(needs.setup.outputs.amd64_only) }}
     uses: ./.github/workflows/unified-docker-backend.yml
     permissions:
       contents: read
       packages: write
     with:
       variant: cuda
+      platform: ${{ matrix.platform }}
       projects: ${{ needs.setup.outputs.cuda_projects }}
       push_to_ghcr: ${{ needs.setup.outputs.push_to_ghcr == 'true' }}
+      date_tag: ${{ needs.setup.outputs.date_tag }}
       llama_hash: ${{ needs.setup.outputs.llama_hash }}
       whisper_hash: ${{ needs.setup.outputs.whisper_hash }}
       sd_hash: ${{ needs.setup.outputs.sd_hash }}
@@ -155,17 +191,35 @@ jobs:
       ik_llama_hash: ${{ needs.setup.outputs.ik_llama_hash }}
       ls_hash: ${{ needs.setup.outputs.ls_hash }}
 
+  cuda-manifest:
+    needs: [setup, cuda]
+    if: ${{ needs.setup.outputs.build_cuda == 'true' && needs.setup.outputs.push_to_ghcr == 'true' }}
+    uses: ./.github/workflows/unified-docker-manifest.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      variant: cuda
+      platforms: ${{ needs.setup.outputs.amd64_only }}
+      date_tag: ${{ needs.setup.outputs.date_tag }}
+
   cuda13:
     needs: setup
     if: ${{ needs.setup.outputs.build_cuda13 == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJSON(needs.setup.outputs.cuda13_platforms) }}
     uses: ./.github/workflows/unified-docker-backend.yml
     permissions:
       contents: read
       packages: write
     with:
       variant: cuda13
+      platform: ${{ matrix.platform }}
       projects: ${{ needs.setup.outputs.cuda_projects }}
       push_to_ghcr: ${{ needs.setup.outputs.push_to_ghcr == 'true' }}
+      date_tag: ${{ needs.setup.outputs.date_tag }}
       llama_hash: ${{ needs.setup.outputs.llama_hash }}
       whisper_hash: ${{ needs.setup.outputs.whisper_hash }}
       sd_hash: ${{ needs.setup.outputs.sd_hash }}
@@ -173,20 +227,50 @@ jobs:
       ik_llama_hash: ${{ needs.setup.outputs.ik_llama_hash }}
       ls_hash: ${{ needs.setup.outputs.ls_hash }}
 
+  cuda13-manifest:
+    needs: [setup, cuda13]
+    if: ${{ needs.setup.outputs.build_cuda13 == 'true' && needs.setup.outputs.push_to_ghcr == 'true' }}
+    uses: ./.github/workflows/unified-docker-manifest.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      variant: cuda13
+      platforms: ${{ needs.setup.outputs.cuda13_platforms }}
+      date_tag: ${{ needs.setup.outputs.date_tag }}
+
   vulkan:
     needs: setup
     if: ${{ needs.setup.outputs.build_vulkan == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJSON(needs.setup.outputs.amd64_only) }}
     uses: ./.github/workflows/unified-docker-backend.yml
     permissions:
       contents: read
       packages: write
     with:
       variant: vulkan
+      platform: ${{ matrix.platform }}
       projects: ${{ needs.setup.outputs.vulkan_projects }}
       push_to_ghcr: ${{ needs.setup.outputs.push_to_ghcr == 'true' }}
+      date_tag: ${{ needs.setup.outputs.date_tag }}
       llama_hash: ${{ needs.setup.outputs.llama_hash }}
       whisper_hash: ${{ needs.setup.outputs.whisper_hash }}
       sd_hash: ${{ needs.setup.outputs.sd_hash }}
       audio_hash: ${{ needs.setup.outputs.audio_hash }}
       ik_llama_hash: ${{ needs.setup.outputs.ik_llama_hash }}
       ls_hash: ${{ needs.setup.outputs.ls_hash }}
+
+  vulkan-manifest:
+    needs: [setup, vulkan]
+    if: ${{ needs.setup.outputs.build_vulkan == 'true' && needs.setup.outputs.push_to_ghcr == 'true' }}
+    uses: ./.github/workflows/unified-docker-manifest.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      variant: vulkan
+      platforms: ${{ needs.setup.outputs.amd64_only }}
+      date_tag: ${{ needs.setup.outputs.date_tag }}

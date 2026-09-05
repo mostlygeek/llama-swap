@@ -112,11 +112,14 @@ Two types of container images are built nightly for llama-swap:
 
 There are three unified images. Pick the one that matches your GPU:
 
-| tag | GPUs |
-| --- | --- |
-| `unified-cuda13` | NVIDIA Ampere through Blackwell: A100, RTX 30xx/40xx/50xx, H100, RTX PRO. Built with CUDA 13. |
-| `unified-cuda` | NVIDIA Pascal through Ada: P40, P100, GTX 10xx, RTX 20xx/30xx/40xx. Built with CUDA 12, for cards CUDA 13 dropped. |
-| `unified-vulkan` | AMD and other Vulkan capable GPUs. |
+| tag | platforms | GPUs |
+| --- | --- | --- |
+| `unified-cuda13` | amd64, arm64 | NVIDIA Ampere through Blackwell: A100, RTX 30xx/40xx/50xx, H100, RTX PRO, and GB10 on DGX Spark. Built with CUDA 13. |
+| `unified-cuda` | amd64 | NVIDIA Pascal through Ada: P40, P100, GTX 10xx, RTX 20xx/30xx/40xx. Built with CUDA 12, for cards CUDA 13 dropped. |
+| `unified-vulkan` | amd64 | AMD and other Vulkan capable GPUs. |
+
+`unified-cuda13` is a multi-arch tag, so `docker pull` picks the right image for
+the host — including the aarch64 one a DGX Spark needs.
 
 ```shell
 $ docker pull ghcr.io/mostlygeek/llama-swap:unified-cuda13

@@ -17,6 +17,14 @@ on:
         description: "cuda, cuda13 or vulkan -- the build-image.sh flag, minus the dashes"
         required: true
         type: string
+      platform:
+        description: "linux/amd64 or linux/arm64 -- also picks the runner"
+        required: true
+        type: string
+      date_tag:
+        description: "Date suffix for the published tags, resolved once by setup"
+        required: true
+        type: string
       projects:
         description: "JSON array of projects to build for this variant"
         required: true
@@ -48,10 +56,15 @@ permissions:
   contents: read
   packages: write
 
+# Every stage runs natively on a runner of the target architecture. Compiling
+# CUDA through QEMU is not practical for builds that already take hours, so the
+# platform selects the runner rather than a cross-build. The selection is
+# repeated on each job because `runs-on` cannot read the `env` context.
+
 jobs:
   base:
-    name: base
-    runs-on: ubuntu-latest
+    name: base (${{ inputs.platform }})
+    runs-on: ${{ inputs.platform == 'linux/arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     timeout-minutes: 60
     steps:
       - name: Checkout code
@@ -81,14 +94,16 @@ jobs:
 
       # Skipped entirely when base-<backend>.Dockerfile has not changed.
       - name: Build and publish builder base
+        env:
+          PLATFORM: ${{ inputs.platform }}
         run: |
           chmod +x docker/unified/build-image.sh
           docker/unified/build-image.sh --${{ inputs.variant }} --stage=base
 
   artifacts:
-    name: build ${{ matrix.project }}
+    name: build ${{ matrix.project }} (${{ inputs.platform }})
     needs: base
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.platform == 'linux/arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     # Each project gets a runner to itself. GitHub's hard cap is 360m; stop
     # short of it so an overrun is reported as a timeout on one project rather
     # than a silent cancellation of the whole build.
@@ -127,6 +142,7 @@ jobs:
       # both unchanged since a previous run published them.
       - name: Build and publish artifacts
         env:
+          PLATFORM: ${{ inputs.platform }}
           LLAMA_REF: ${{ inputs.llama_hash }}
           WHISPER_REF: ${{ inputs.whisper_hash }}
           SD_REF: ${{ inputs.sd_hash }}
@@ -138,9 +154,9 @@ jobs:
           docker/unified/build-image.sh --${{ inputs.variant }} --stage=${{ matrix.project }}
 
   assemble:
-    name: assemble
+    name: assemble (${{ inputs.platform }})
     needs: artifacts
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.platform == 'linux/arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     timeout-minutes: 90
     steps:
       - name: Checkout code
@@ -173,10 +189,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      # Copies each project's published /install into the runtime image. The
-      # compile stages are not part of this build's graph, so this is minutes.
-      - name: Assemble unified Docker image
+      # Copies each project's published /install into the runtime image, verifies
+      # the binaries, derives the rootless variant, and pushes both under
+      # arch-qualified tags. The compile stages are not part of this build's
+      # graph, so this is minutes. The date-suffixed and arch-less tags are
+      # minted by the manifest job once every platform has landed.
+      - name: Assemble and push this platform's image
         env:
+          PLATFORM: ${{ inputs.platform }}
+          DATE_TAG: ${{ inputs.date_tag }}
           LLAMA_REF: ${{ inputs.llama_hash }}
           WHISPER_REF: ${{ inputs.whisper_hash }}
           SD_REF: ${{ inputs.sd_hash }}
@@ -190,19 +211,8 @@ jobs:
           BUILDX_BUILDER: ${{ env.ACT == 'true' && 'llama-swap-builder' || '' }}
         run: |
           chmod +x docker/unified/build-image.sh
-          docker/unified/build-image.sh --${{ inputs.variant }} --assemble
-
-      - name: Push to GitHub Container Registry
-        if: ${{ !env.ACT && inputs.push_to_ghcr }}
-        run: |
-          BASE_TAG="ghcr.io/mostlygeek/llama-swap:unified-${{ inputs.variant }}"
-          DATE_TAG=$(date -u +%Y-%m-%d)
-
-          docker push "${BASE_TAG}"
-          docker tag "${BASE_TAG}" "${BASE_TAG}-${DATE_TAG}"
-          docker push "${BASE_TAG}-${DATE_TAG}"
-
-          ROOTLESS_TAG="${BASE_TAG}-rootless"
-          docker push "${ROOTLESS_TAG}"
-          docker tag "${ROOTLESS_TAG}" "${ROOTLESS_TAG}-${DATE_TAG}"
-          docker push "${ROOTLESS_TAG}-${DATE_TAG}"
+          PUSH_FLAG=""
+          if [[ "${ACT:-}" != "true" && "${{ inputs.push_to_ghcr }}" == "true" ]]; then
+            PUSH_FLAG="--push"
+          fi
+          docker/unified/build-image.sh --${{ inputs.variant }} --assemble ${PUSH_FLAG}

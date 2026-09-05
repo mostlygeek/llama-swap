@@ -6,6 +6,7 @@
 #   ./build-image.sh --cuda                              # Build CUDA 12 image
 #   ./build-image.sh --cuda13                            # Build CUDA 13 image
 #   ./build-image.sh --vulkan                            # Build Vulkan image
+#   ./build-image.sh --cuda13 --platform=linux/arm64     # Build for another arch
 #   ./build-image.sh --cuda --no-cache                   # Build without cache
 #   LLAMA_REF=b1234 ./build-image.sh --vulkan            # Pin llama.cpp to a commit hash
 #   LLAMA_REF=v1.2.3 ./build-image.sh --cuda             # Pin llama.cpp to a tag
@@ -38,7 +39,15 @@
 #   ./build-image.sh --cuda --resolve         # print resolved hashes as key=value
 #   ./build-image.sh --cuda --stage=base      # build + push the builder base
 #   ./build-image.sh --cuda --stage=whisper   # build + push one project's artifacts
-#   ./build-image.sh --cuda --assemble        # assemble the unified image
+#   ./build-image.sh --cuda --assemble        # assemble one platform's image
+#   ./build-image.sh --cuda --manifest        # join the platforms into one tag
+#
+# Platforms. CUDA 13 publishes linux/amd64 and linux/arm64 -- NVIDIA's GB10
+# (DGX Spark) pairs a Blackwell GPU with a Grace CPU, so an aarch64 image is the
+# only way to reach it. Every stage builds natively on a runner of the matching
+# architecture; emulating a multi-hour CUDA compile through QEMU is not
+# practical. --assemble therefore produces one platform's image under an
+# arch-qualified tag, and --manifest joins those into the tag users pull.
 #
 
 set -euo pipefail
@@ -51,7 +60,22 @@ VARIANT=""
 NO_CACHE=false
 MODE="unified"
 STAGE_TARGET=""
+PUSH=false
 WHISPER_FFMPEG="${WHISPER_FFMPEG:-yes}"
+
+# Platform to build for. Empty means the host's own architecture, which is what
+# a local build wants; CI sets it explicitly and schedules the job on a runner
+# of that architecture.
+PLATFORM="${PLATFORM:-}"
+
+# Platforms --manifest joins, comma separated. Defaults to just this one, so a
+# single-platform variant takes the same code path as a multi-platform one.
+MANIFEST_PLATFORMS="${MANIFEST_PLATFORMS:-}"
+
+# Date suffix for the published tags. CI resolves it once, in the setup job, so
+# every platform's image and the manifest that joins them agree even when a
+# build runs across UTC midnight.
+DATE_TAG="${DATE_TAG:-}"
 
 # Registry holding the base and artifacts images used by --stage/--assemble.
 #
@@ -71,8 +95,12 @@ for arg in "$@"; do
         --cuda13)  BACKEND="cuda";   VARIANT="cuda13" ;;
         --vulkan)  BACKEND="vulkan"; VARIANT="vulkan" ;;
         --no-cache) NO_CACHE=true ;;
+        --push)     PUSH=true ;;
         --resolve)  MODE="resolve" ;;
         --assemble) MODE="assemble" ;;
+        --manifest) MODE="manifest" ;;
+        --platform=*)  PLATFORM="${arg#*=}" ;;
+        --platforms=*) MANIFEST_PLATFORMS="${arg#*=}" ;;
         --stage=*)
             MODE="stage"
             STAGE_TARGET="${arg#*=}"
@@ -85,6 +113,7 @@ for arg in "$@"; do
             echo "  --cuda13    Build CUDA 13 image, Ampere through Blackwell (sm 80-120)"
             echo "  --vulkan    Build Vulkan image (AMD GPUs and compatible hardware)"
             echo "  --no-cache  Force rebuild without using Docker cache"
+            echo "  --platform=PLATFORM  linux/amd64 or linux/arm64 (default: this host)"
             echo "  --help, -h  Show this help message"
             echo ""
             echo "Split build (CI only):"
@@ -92,7 +121,10 @@ for arg in "$@"; do
             echo "  --stage=base     Build and push the builder base image"
             echo "  --stage=PROJECT  Build and push one project's artifacts image"
             echo "                   (${ALL_PROJECTS[*]})"
-            echo "  --assemble       Assemble the unified image from published artifacts"
+            echo "  --assemble       Assemble one platform's image from published artifacts"
+            echo "  --manifest       Join the per-platform images into one multi-arch tag"
+            echo "  --platforms=LIST Platforms --manifest joins (default: just --platform)"
+            echo "  --push           Push what --assemble built"
             echo ""
             echo "Environment variables:"
             echo "  DOCKER_IMAGE_TAG     Set custom image tag (default: llama-swap:unified-<variant>,"
@@ -106,9 +138,11 @@ for arg in "$@"; do
             echo "  WHISPER_FFMPEG       Enable whisper.cpp FFmpeg support (default: yes)"
             echo "  CMAKE_CUDA_ARCHITECTURES  CUDA compute capabilities to compile natively"
             echo "                       (default: 60;61;75;86;89 for --cuda,"
-            echo "                       80;86;89;90;100;120 for --cuda13)"
+            echo "                       80;86;89;90;100;120 for --cuda13 on amd64,"
+            echo "                       90;100;120;121 for --cuda13 on arm64)"
             echo "  CUDA_VERSION         CUDA toolkit/runtime version as an nvidia/cuda image tag"
             echo "                       (default: 12.9.1 for --cuda, 13.3.1 for --cuda13)"
+            echo "  DATE_TAG             Date suffix for published tags (default: today, UTC)"
             echo "  ARTIFACT_REPO        Registry for base and artifacts images"
             echo "                       (default: ghcr.io/mostlygeek/llama-swap-build)"
             exit 0
@@ -123,6 +157,32 @@ if [[ -z "$BACKEND" ]]; then
     exit 1
 fi
 
+# The architecture being built for. Every stage compiles natively on a machine
+# of this architecture -- CI picks the runner, a local build uses the host.
+if [[ -n "${PLATFORM}" ]]; then
+    case "${PLATFORM}" in
+        linux/amd64) ARCH="amd64" ;;
+        linux/arm64) ARCH="arm64" ;;
+        *) echo "ERROR: unsupported platform '${PLATFORM}' (use linux/amd64 or linux/arm64)" >&2; exit 1 ;;
+    esac
+else
+    case "$(uname -m)" in
+        x86_64)        ARCH="amd64" ;;
+        aarch64|arm64) ARCH="arm64" ;;
+        *) echo "ERROR: unsupported host architecture '$(uname -m)'" >&2; exit 1 ;;
+    esac
+fi
+
+# Architecture qualifier for the base and artifacts tags below. amd64 keeps the
+# unsuffixed names it has always had, so introducing a second architecture
+# invalidates nothing: every artifacts image published to date stays addressable
+# and no amd64 project recompiles. Anything else is suffixed.
+if [[ "${ARCH}" == "amd64" ]]; then
+    ARCH_TAG=""
+else
+    ARCH_TAG="-${ARCH}"
+fi
+
 # CUDA toolkit/runtime version, matching nvidia/cuda image tags, and the compute
 # capabilities compiled as SASS. Together they are what separates the two CUDA
 # variants: the builder base and the runtime image are both built from
@@ -131,19 +191,31 @@ fi
 #
 #   cuda    CUDA 12: Pascal (60/61) through Ada (89). 12.x still ships nvcc
 #           support for Maxwell, Pascal and Volta.
-#   cuda13  CUDA 13: Ampere (80/86) through Blackwell (100 on datacenter parts,
-#           120 on GeForce and RTX PRO), by way of Ada (89) and Hopper (90).
-#           CUDA 13 removed everything below Turing from nvcc, and llama-swap
-#           still ships images for those cards, hence two CUDA variants rather
-#           than a version bump. Jetson's sm_87 is left out: those boards need
-#           an l4t base image, not nvidia/cuda.
+#   cuda13  CUDA 13: Ampere (80/86) through Blackwell, by way of Ada (89) and
+#           Hopper (90). CUDA 13 removed everything below Turing from nvcc, and
+#           llama-swap still ships images for those cards, hence two CUDA
+#           variants rather than a version bump.
 #
-# CMake emits PTX alongside SASS for every entry, so an architecture above the
-# list -- a future Blackwell derivative, say -- still runs by JIT-compiling the
-# nearest lower PTX. Only the CUDA base reads these as build args; the projects
+# The architecture lists differ by platform because the hardware does. On amd64
+# the range is Ampere through Blackwell on PCIe cards. On arm64 the only NVIDIA
+# parts that exist are Grace pairings, so Pascal through Ada are pointless and
+# 121 -- GB10, the Blackwell GPU in DGX Spark, and the whole reason for an arm64
+# image -- is essential. 90 is GH200, 100 is GB200, 120 covers a discrete
+# GeForce or RTX PRO card in an aarch64 host.
+#
+# Blackwell spans two major versions and PTX only JITs forward within one, so
+# 100 (compute 10.0, datacenter) and 120/121 (compute 12.x) cannot stand in for
+# each other -- both branches have to be listed. Everything above the highest
+# entry of a major version still runs by JIT-compiling that version's PTX.
+# Jetson's 87 and Thor's 110 are left out: those boards need an l4t base image,
+# not nvidia/cuda. Only the CUDA base reads these as build args; the projects
 # inherit the architectures through the base image's ENV.
-case "${VARIANT}" in
-    cuda13)
+case "${VARIANT}:${ARCH}" in
+    cuda13:arm64)
+        CUDA_VERSION="${CUDA_VERSION:-13.3.1}"
+        CMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES:-90;100;120;121}"
+        ;;
+    cuda13:*)
         CUDA_VERSION="${CUDA_VERSION:-13.3.1}"
         CMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES:-80;86;89;90;100;120}"
         ;;
@@ -152,6 +224,10 @@ case "${VARIANT}" in
         CMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES:-60;61;75;86;89}"
         ;;
 esac
+
+# Resolved once here rather than per stage: a build that crosses UTC midnight
+# would otherwise tag its platforms and its manifest with different dates.
+DATE_TAG="${DATE_TAG:-$(date -u +%Y-%m-%d)}"
 
 # The value becomes part of nvidia/cuda image tags, so a bad version should
 # fail here with a clear message rather than a docker "image not found".
@@ -275,7 +351,7 @@ base_tag() {
             echo "${CUDA_VERSION}"
         fi
     } | sha256sum | cut -c1-12)"
-    echo "${ARTIFACT_REPO}:base-${VARIANT}-${h}"
+    echo "${ARTIFACT_REPO}:base-${VARIANT}${ARCH_TAG}-${h}"
 }
 
 # A project's artifacts are determined by the upstream commit plus its recipe:
@@ -290,7 +366,7 @@ artifact_tag() {
         echo "base=$(base_tag)"
         echo "WHISPER_FFMPEG=${WHISPER_FFMPEG}"
     } | sha256sum | cut -c1-8 )"
-    echo "${ARTIFACT_REPO}:art-${project}-${VARIANT}-${commit:0:12}-${recipe}"
+    echo "${ARTIFACT_REPO}:art-${project}-${VARIANT}${ARCH_TAG}-${commit:0:12}-${recipe}"
 }
 
 image_exists() {
@@ -299,9 +375,10 @@ image_exists() {
 
 log "=========================================="
 case "$MODE" in
-    stage)    log "llama-swap Build (${STAGE_TARGET}, ${VARIANT})" ;;
-    assemble) log "llama-swap Unified Assemble (${VARIANT})" ;;
-    *)        log "llama-swap Unified Build (${VARIANT})" ;;
+    stage)    log "llama-swap Build (${STAGE_TARGET}, ${VARIANT}, ${ARCH})" ;;
+    assemble) log "llama-swap Unified Assemble (${VARIANT}, ${ARCH})" ;;
+    manifest) log "llama-swap Manifest (${VARIANT})" ;;
+    *)        log "llama-swap Unified Build (${VARIANT}, ${ARCH})" ;;
 esac
 log "=========================================="
 log ""
@@ -316,6 +393,71 @@ if [[ "$MODE" == "stage" && "$STAGE_TARGET" != "base" ]]; then
         echo "ERROR: project '${STAGE_TARGET}' is not built for the ${VARIANT} variant" >&2
         exit 1
     fi
+fi
+
+# ── --manifest: join the per-platform images into one tag ─────────────
+#
+# Runs after every platform's assemble job has pushed its arch-qualified image.
+# imagetools reads those from the registry and writes a manifest list, so this
+# needs no builder and no image pull.
+
+if [[ "$MODE" == "manifest" ]]; then
+    MANIFEST_ARCHES=()
+    for platform in ${MANIFEST_PLATFORMS//,/ }; do
+        case "${platform}" in
+            linux/amd64) MANIFEST_ARCHES+=("amd64") ;;
+            linux/arm64) MANIFEST_ARCHES+=("arm64") ;;
+            *) echo "ERROR: unsupported platform '${platform}' in --platforms" >&2; exit 1 ;;
+        esac
+    done
+    if [[ ${#MANIFEST_ARCHES[@]} -eq 0 ]]; then
+        MANIFEST_ARCHES=("${ARCH}")
+    fi
+
+    # Every source has to be present. Publishing a manifest that silently lost a
+    # platform would leave users of that architecture pulling a stale image with
+    # nothing to indicate the build had failed.
+    MISSING=()
+    for arch in "${MANIFEST_ARCHES[@]}"; do
+        for suffix in "" "-rootless"; do
+            tag="${DOCKER_IMAGE_TAG}-${arch}${suffix}"
+            if image_exists "${tag}"; then
+                echo "  ${tag}"
+            else
+                echo "  ${tag}  [MISSING]"
+                MISSING+=("${tag}")
+            fi
+        done
+    done
+    if [[ ${#MISSING[@]} -gt 0 ]]; then
+        echo "" >&2
+        echo "ERROR: cannot publish the manifest, these images were never pushed:" >&2
+        printf '  - %s\n' "${MISSING[@]}" >&2
+        echo "" >&2
+        echo "The assemble job for that platform must have failed." >&2
+        exit 1
+    fi
+
+    for suffix in "" "-rootless"; do
+        srcs=()
+        for arch in "${MANIFEST_ARCHES[@]}"; do
+            srcs+=("${DOCKER_IMAGE_TAG}-${arch}${suffix}")
+        done
+        echo ""
+        echo "Publishing ${DOCKER_IMAGE_TAG}${suffix} (${MANIFEST_ARCHES[*]})"
+        docker buildx imagetools create \
+            -t "${DOCKER_IMAGE_TAG}${suffix}" \
+            -t "${DOCKER_IMAGE_TAG}${suffix}-${DATE_TAG}" \
+            "${srcs[@]}"
+    done
+
+    echo ""
+    echo "Published:"
+    echo "  ${DOCKER_IMAGE_TAG}"
+    echo "  ${DOCKER_IMAGE_TAG}-${DATE_TAG}"
+    echo "  ${DOCKER_IMAGE_TAG}-rootless"
+    echo "  ${DOCKER_IMAGE_TAG}-rootless-${DATE_TAG}"
+    exit 0
 fi
 
 # ── Resolve refs ──────────────────────────────────────────────────────
@@ -403,6 +545,22 @@ fi
 
 BASE_TAG="$(base_tag)"
 
+PLATFORM_ARGS=()
+if [[ -n "${PLATFORM}" ]]; then
+    PLATFORM_ARGS+=(--platform="${PLATFORM}")
+fi
+
+# What the assembled image is tagged. --assemble builds one platform's half of
+# a manifest list, so it is published arch-qualified and --manifest joins the
+# halves under DOCKER_IMAGE_TAG itself. A local build has only its own platform
+# and wants the plain name.
+if [[ "${MODE}" == "assemble" ]]; then
+    RUNTIME_TAG="${DOCKER_IMAGE_TAG}-${ARCH}"
+else
+    RUNTIME_TAG="${DOCKER_IMAGE_TAG}"
+fi
+ROOTLESS_TAG="${RUNTIME_TAG}-rootless"
+
 # ── Builders ──────────────────────────────────────────────────────────
 
 build_base() {
@@ -421,6 +579,7 @@ build_base() {
         -f "${SCRIPT_DIR}/base-${BACKEND}.Dockerfile" \
         -t "${BASE_TAG}" \
         "${args[@]}" \
+        "${PLATFORM_ARGS[@]}" \
         "${CACHE_ARGS[@]}" \
         "${SCRIPT_DIR}"
 }
@@ -446,6 +605,7 @@ build_project() {
         --build-arg "AUDIO_COMMIT_HASH=${AUDIO_HASH}" \
         --build-arg "LLAMA_COMMIT_HASH=${LLAMA_HASH}" \
         --build-arg "IK_LLAMA_COMMIT_HASH=${IK_LLAMA_HASH}" \
+        "${PLATFORM_ARGS[@]}" \
         "${CACHE_ARGS[@]}" \
         "${SCRIPT_DIR}"
 }
@@ -479,8 +639,29 @@ build_runtime() {
     echo ""
     DOCKER_BUILDKIT=1 docker buildx build --load \
         -f "${SCRIPT_DIR}/runtime.Dockerfile" \
-        -t "${DOCKER_IMAGE_TAG}" \
-        "${args[@]}" "${CACHE_ARGS[@]}" \
+        -t "${RUNTIME_TAG}" \
+        "${args[@]}" "${PLATFORM_ARGS[@]}" "${CACHE_ARGS[@]}" \
+        "${SCRIPT_DIR}"
+}
+
+# The rootless image is the finished runtime image plus a non-root user.
+#
+# It builds with the `default` builder -- the docker daemon -- on purpose. Its
+# FROM names the image the step above just loaded, and only the daemon has that
+# image: a docker-container builder resolves FROM through the registry, where it
+# found the *previously published* runtime image and silently layered the user
+# onto a build one night old.
+build_rootless() {
+    echo ""
+    echo "=========================================="
+    echo "Building rootless image (${VARIANT}, ${ARCH})..."
+    echo "=========================================="
+    echo ""
+    DOCKER_BUILDKIT=1 docker buildx build --builder default --load \
+        -f "${SCRIPT_DIR}/rootless.Dockerfile" \
+        -t "${ROOTLESS_TAG}" \
+        --build-arg "BASE_IMAGE=${RUNTIME_TAG}" \
+        "${PLATFORM_ARGS[@]}" \
         "${SCRIPT_DIR}"
 }
 
@@ -564,7 +745,7 @@ fi
 
 MISSING_BINARIES=()
 for binary in "${EXPECTED_BINARIES[@]}"; do
-    if ! docker run --rm --entrypoint which "${DOCKER_IMAGE_TAG}" "${binary}" >/dev/null 2>&1; then
+    if ! docker run --rm --entrypoint which "${RUNTIME_TAG}" "${binary}" >/dev/null 2>&1; then
         MISSING_BINARIES+=("${binary}")
     fi
 done
@@ -591,7 +772,7 @@ echo "All expected binaries verified: ${VERIFIED_LIST}"
 # to discover. Without it every load of a package without an embedded spec fails
 # with "model spec not found for family ...". The compiled catalog is raw JSON in
 # .rodata, so grepping the binary for a known spec confirms it is there.
-if ! docker run --rm --entrypoint grep "${DOCKER_IMAGE_TAG}" \
+if ! docker run --rm --entrypoint grep "${RUNTIME_TAG}" \
         -aq '"family": "pocket_tts"' /usr/local/bin/audiocpp_server; then
     echo "ERROR: audiocpp_server was not built with AUDIOCPP_DEPLOYMENT_BUILD=ON;"
     echo "       its compiled model spec catalog is missing."
@@ -607,7 +788,7 @@ if [[ "$BACKEND" == "cuda" ]]; then
     SMOKE_ARGS+=(-e "LD_LIBRARY_PATH=/usr/local/cuda/lib64/stubs:/usr/local/cuda/lib64")
 fi
 
-if ! docker run "${SMOKE_ARGS[@]}" --entrypoint audiocpp_server "${DOCKER_IMAGE_TAG}" --help >/dev/null; then
+if ! docker run "${SMOKE_ARGS[@]}" --entrypoint audiocpp_server "${RUNTIME_TAG}" --help >/dev/null; then
     echo "ERROR: audiocpp_server --help failed; the binary or its runtime"
     echo "       libraries are broken in the image."
     exit 1
@@ -615,24 +796,22 @@ fi
 
 echo "audio.cpp verified: deployment build (compiled model spec catalog), binary runs"
 
-echo ""
-echo "=========================================="
-echo "Building rootless image..."
-echo "=========================================="
-echo ""
-
-ROOTLESS_TAG="${DOCKER_IMAGE_TAG}-rootless"
-docker buildx build --load -t "${ROOTLESS_TAG}" - <<EOF
-FROM ${DOCKER_IMAGE_TAG}
-USER root
-RUN groupadd --system --gid 10001 llama-swap && \\
-    useradd --system --uid 10001 --gid 10001 \\
-      --home /app --shell /sbin/nologin llama-swap && \\
-    chown -R 10001:10001 /etc/llama-swap /models
-USER 10001
-EOF
+build_rootless
 
 echo "Rootless image built: ${ROOTLESS_TAG}"
+
+# --push publishes exactly what was just built and verified. The date-suffixed
+# tags are minted by --manifest instead, so a user-facing tag never names a
+# single platform's image.
+if [[ "$PUSH" == true ]]; then
+    echo ""
+    echo "=========================================="
+    echo "Pushing images..."
+    echo "=========================================="
+    echo ""
+    docker push "${RUNTIME_TAG}"
+    docker push "${ROOTLESS_TAG}"
+fi
 
 echo ""
 echo "=========================================="
@@ -640,10 +819,11 @@ echo "Build complete!"
 echo "=========================================="
 echo ""
 echo "Image tags:"
-echo "  ${DOCKER_IMAGE_TAG}"
+echo "  ${RUNTIME_TAG}"
 echo "  ${ROOTLESS_TAG}"
 echo ""
 echo "Built with:"
+echo "  platform:             linux/${ARCH}"
 echo "  llama.cpp:            ${LLAMA_HASH}"
 echo "  whisper.cpp:          ${WHISPER_HASH}"
 echo "  stable-diffusion.cpp: ${SD_HASH}"
@@ -653,15 +833,15 @@ if [[ "$BACKEND" == "cuda" ]]; then
     echo "  CUDA version:         ${CUDA_VERSION}"
     echo "  CUDA architectures:   ${CMAKE_CUDA_ARCHITECTURES}"
 fi
-echo "  llama-swap:           $(docker run --rm --entrypoint cat "${DOCKER_IMAGE_TAG}" /versions.txt | grep llama-swap | cut -d' ' -f2-)"
+echo "  llama-swap:           $(docker run --rm --entrypoint cat "${RUNTIME_TAG}" /versions.txt | grep llama-swap | cut -d' ' -f2-)"
 echo ""
 if [[ "$BACKEND" == "vulkan" ]]; then
     echo "Run with:"
-    echo "  docker run -it --rm --device /dev/dri:/dev/dri ${DOCKER_IMAGE_TAG}"
+    echo "  docker run -it --rm --device /dev/dri:/dev/dri ${RUNTIME_TAG}"
     echo ""
     echo "Note: For AMD GPUs, you may also need:"
-    echo "  docker run -it --rm --device /dev/dri:/dev/dri --group-add video ${DOCKER_IMAGE_TAG}"
+    echo "  docker run -it --rm --device /dev/dri:/dev/dri --group-add video ${RUNTIME_TAG}"
 else
     echo "Run with:"
-    echo "  docker run -it --rm --gpus all ${DOCKER_IMAGE_TAG}"
+    echo "  docker run -it --rm --gpus all ${RUNTIME_TAG}"
 fi
