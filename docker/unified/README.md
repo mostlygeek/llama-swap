@@ -223,6 +223,20 @@ script entirely. `run_test.sh` covers these cases against a stub binary:
 ./run_test.sh
 ```
 
+## The config the image ships
+
+`/etc/llama-swap/config/config.yaml` inside the image comes from
+`config.example.yaml` in this directory. It is deliberately small — one
+gemma-4-12B entry — so a container started with nothing mounted comes up and
+there is something working to edit. Mount your own over that path, or point
+`LLAMA_SWAP_CONFIG` somewhere else.
+
+It is **not** `docs/config.example.yaml`. That file documents every available
+option and uses strict `${env.X}` macros, which fail the whole config when the
+variable is unset, so it cannot be run as-is — it is reference material.
+`TestConfig_ContainerExampleLoads` keeps the container's copy loadable, and the
+image build re-checks it with `LLAMA_SWAP_VALIDATE=true` before publishing.
+
 ## audio.cpp
 
 `audiocpp_server` needs its own JSON config listing the models it serves. The

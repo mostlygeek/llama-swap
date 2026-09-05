@@ -156,9 +156,11 @@ COPY --from=vllm-wrapper-build /install/bin/vllm-wrapper /usr/local/bin/
 
 RUN ldconfig
 
-# config.example.yaml lives at the repo root (docs/), outside this build
-# context, so build-image.sh passes it as a named build context.
-COPY --from=repo-docs config.example.yaml /etc/llama-swap/config/config.yaml
+# The starter config the container runs with: small, and valid, so a container
+# started with nothing mounted comes up. docs/config.example.yaml in the repo
+# documents every option instead and is reference material -- it uses strict
+# ${env.X} macros and does not load on its own.
+COPY config.example.yaml /etc/llama-swap/config/config.yaml
 
 # audiocpp_server takes its own JSON config. Ship a starter with this image's
 # backend baked in -- the binary defaults to "cuda", so a vulkan image that

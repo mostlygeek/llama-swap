@@ -254,7 +254,6 @@ log() {
 DOCKER_IMAGE_TAG="${DOCKER_IMAGE_TAG:-llama-swap:unified-${VARIANT}}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 # Git repository URLs
 LLAMA_REPO="https://github.com/ggml-org/llama.cpp.git"
@@ -630,9 +629,6 @@ build_runtime() {
         --build-arg "CUDA_VERSION=${CUDA_VERSION}"
         --build-arg "CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}"
         --build-arg "VARIANT=${VARIANT}"
-        # config.example.yaml lives at the repo root, outside this build
-        # context, so it comes in as a named context instead.
-        --build-context "repo-docs=${REPO_ROOT}/docs"
     )
     local project
     while read -r project; do
@@ -819,6 +815,19 @@ if ! grep -v '^run\.sh:' <<<"${PROBE_OUT}" | grep -qF -- "${ENTRYPOINT_PROBE}"; 
     echo "       run.sh is not translating environment variables into flags."
     echo "Container output:"
     echo "${PROBE_OUT}"
+    exit 1
+fi
+
+# The starter config the image ships has to load, or a container started with
+# nothing mounted exits on its first run. -validate only loads the config -- no
+# listener, no hardware detection -- so this is cheap and catches the config
+# drifting into something unloadable.
+VALIDATE_OUT="$(docker run --rm -e LLAMA_SWAP_VALIDATE=true "${RUNTIME_TAG}" 2>&1 || true)"
+if ! grep -q "config is valid" <<<"${VALIDATE_OUT}"; then
+    echo "ERROR: the config shipped at /etc/llama-swap/config/config.yaml does not load,"
+    echo "       so this image exits immediately when run with nothing mounted."
+    echo "Container output:"
+    echo "${VALIDATE_OUT}"
     exit 1
 fi
 
