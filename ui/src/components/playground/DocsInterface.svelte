@@ -535,7 +535,7 @@
           <div class="min-w-0 flex-1">
             The model described a tool call instead of making one. llama-server needs
             <code class="font-mono">--jinja</code> for tool calling to work. See the
-            <span class="font-mono">tutorials/tool-calling-setup</span> guide — ask about it here.
+            <span class="font-mono">guides/model-runtime/writing-cmd</span> guide — ask about it here.
           </div>
           <Button variant="ghost" size="icon-sm" onclick={() => (showJinjaHint = false)} title="Dismiss">
             <X class="size-3" />

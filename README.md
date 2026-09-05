@@ -230,17 +230,17 @@ Almost all configuration settings are optional and can be added one step at a ti
   - `${PORT}` automatic port variables for dynamic port assignment
   - `filters` rewrite parts of requests before sending to the upstream server
 
-See the [configuration guide](docs/kb/guides/configuration/configuration-overview.md) for an overview, and
-the [knowledge base](docs/kb/) for focused guides on the features people ask about
-most.
+See [`config.example.yaml`](docs/config.example.yaml) for an annotated overview of every
+setting, and the [knowledge base](docs/kb/) for focused guides on the features people ask
+about most.
 
-You can also just ask. The Playground's **Docs** tab is an agent that calls
+You can also just ask. The **Help** page (in the sidebar) is an agent that calls
 llama-swap's own documentation tools and answers questions about your
 configuration using the real text of `config.example.yaml` and the knowledge
-base, running entirely on a local model. Pick a tool-capable model in
-**Playground → Docs** and ask away — see
-[Setting up tool calling](docs/kb/tutorials/tool-calling-setup.md) if the model
-answers without calling anything.
+base, running entirely on a local model. Pick a tool-capable model on the
+**Help** page and ask away — see
+[Writing the cmd for a model](docs/kb/guides/model-runtime/writing-cmd.md) if the model
+answers without calling anything (llama-server needs `--jinja` for tool calling to work).
 
 Those same tools are served as an MCP endpoint at `/api/mcp`, so any MCP client
 can ask about your configuration too. See
