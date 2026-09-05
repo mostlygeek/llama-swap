@@ -30,9 +30,11 @@
   function peerConfigYaml(address: string, models: string[]): string {
     const modelLines =
       models.length > 0 ? models.map((model) => `      - ${model}`).join("\n") : "      - REPLACE_WITH_MODEL_ID";
-    // tailcatKey is intentionally omitted: it creates an ephemeral client
-    // identity by default so nobody's private key ends up in a shared snippet.
-    return `peers:\n  friend:\n    proxy: tailcat://${address}\n    models:\n${modelLines}\n`;
+    // tailcatKey is commented out: without it, connecting uses an ephemeral
+    // client identity, so nobody's private key ends up in a shared snippet.
+    // The commented line shows how to generate a stable one if this server
+    // allowlists callers.
+    return `peers:\n  friend:\n    proxy: tailcat://${address}\n    # tailcatKey: /path/to/client.private.json  # generate with: tailcat genkey --client --key=/path/to/client.private.json\n    models:\n${modelLines}\n`;
   }
 
   async function copyPeerConfig() {
