@@ -30,6 +30,7 @@ const (
 	nodeRef
 	nodeAnd
 	nodeOr
+	nodeEmpty
 )
 
 type node struct {

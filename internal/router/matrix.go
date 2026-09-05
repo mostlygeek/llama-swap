@@ -3,6 +3,7 @@ package router
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
@@ -22,6 +23,15 @@ func NewMatrix(conf config.Config, proxylog, upstreamlog *logmon.Monitor) (*Matr
 		if err := config.ValidateMatrix(mtx, conf.Models); err != nil {
 			return nil, fmt.Errorf("compiling matrix configuration: %w", err)
 		}
+	}
+	models, mode := mtx.Program().SynthesizedUndefined()
+	switch mode {
+	case "synthesized":
+		proxylog.Infof("matrix: synthesized set \"undefined\" = (%s)", strings.Join(models, " | "))
+	case "empty":
+		proxylog.Info("matrix: synthesized set \"undefined\" is empty; +undefined terms dropped")
+	case "user-defined":
+		proxylog.Info("matrix: set \"undefined\" is user-defined; orphan synthesis disabled")
 	}
 
 	swapper := &matrixSwapper{
