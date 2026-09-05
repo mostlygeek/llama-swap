@@ -230,9 +230,9 @@ Almost all configuration settings are optional and can be added one step at a ti
   - `${PORT}` automatic port variables for dynamic port assignment
   - `filters` rewrite parts of requests before sending to the upstream server
 
-See [`config.example.yaml`](docs/config.example.yaml) for an annotated overview of every
-setting, and the [knowledge base](docs/kb/) for focused guides on the features people ask
-about most.
+See the [configuration overview](docs/kb/guides/configuration/configuration-overview.md)
+to get started, and the [knowledge base](docs/kb/) for focused guides on the features
+people ask about most.
 
 You can also just ask. The **Help** page (in the sidebar) is an agent that calls
 llama-swap's own documentation tools and answers questions about your
