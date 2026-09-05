@@ -803,14 +803,22 @@ fi
 
 echo "audio.cpp verified: deployment build (compiled model spec catalog), binary runs"
 
-# The entrypoint turns LLAMA_SWAP_* variables into flags, so exercise that path
-# end to end rather than just checking the script is present. -validate only
-# loads the config -- no listener, no hardware detection -- so this also catches
-# an image shipping a default config that cannot be parsed.
-if ! docker run --rm -e LLAMA_SWAP_VALIDATE=true "${RUNTIME_TAG}" | grep -q "config is valid"; then
-    echo "ERROR: LLAMA_SWAP_VALIDATE=true did not validate the shipped config;"
-    echo "       run.sh is not translating environment variables into flags, or"
-    echo "       /etc/llama-swap/config/config.yaml does not parse."
+# The entrypoint turns LLAMA_SWAP_* variables into flags. Point -config at a path
+# that cannot exist and look for it in llama-swap's own output: nothing but
+# run.sh can have put it on the command line. run.sh echoes the command line
+# too, so its line is filtered out first -- otherwise this would pass on our own
+# echo without the binary ever having received the flag.
+#
+# The container exits non-zero here by design, so the output is captured rather
+# than piped: under `set -o pipefail` a pipeline would report the expected
+# failure as a failed check.
+ENTRYPOINT_PROBE="/nonexistent/llama-swap-env-probe.yaml"
+PROBE_OUT="$(docker run --rm -e "LLAMA_SWAP_CONFIG=${ENTRYPOINT_PROBE}" "${RUNTIME_TAG}" 2>&1 || true)"
+if ! grep -v '^run\.sh:' <<<"${PROBE_OUT}" | grep -qF -- "${ENTRYPOINT_PROBE}"; then
+    echo "ERROR: LLAMA_SWAP_CONFIG did not reach llama-swap as -config;"
+    echo "       run.sh is not translating environment variables into flags."
+    echo "Container output:"
+    echo "${PROBE_OUT}"
     exit 1
 fi
 
