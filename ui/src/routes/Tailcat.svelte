@@ -9,6 +9,7 @@
   import ActivityTable from "../components/ActivityTable.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
+  import { Tabs, TabsContent, TabsList, TabsTrigger } from "$lib/components/ui/tabs/index.js";
 
   const TOKEN_MASK = "•".repeat(24);
 
@@ -101,57 +102,56 @@
 
 <div class="space-y-4 p-2">
   <Card.Root>
-    <Card.Header>
-      <Card.Title>Tailcat connection token</Card.Title>
-      <Card.Description>
-        Treat this case-sensitive token like a capability: anyone holding it can attempt to connect.
-      </Card.Description>
-    </Card.Header>
     <Card.Content>
       {#if $tailcatStatus.enabled && $tailcatStatus.address}
-        <div class="flex items-center gap-2">
-          <code class="bg-muted min-w-0 flex-1 overflow-x-auto rounded-md px-3 py-2 text-xs">
-            {tokenRevealed ? $tailcatStatus.address : TOKEN_MASK}
-          </code>
-          <Button
-            variant="outline"
-            size="sm"
-            onclick={() => (tokenRevealed = !tokenRevealed)}
-            aria-label={tokenRevealed ? "Hide Tailcat connection token" : "Reveal Tailcat connection token"}
-          >
-            {#if tokenRevealed}<EyeOff class="size-4" />{:else}<Eye class="size-4" />{/if}
-          </Button>
-          <Button variant="outline" size="sm" onclick={copyAddress} aria-label="Copy Tailcat connection token">
-            {#if copied}<Check class="size-4" /> Copied{:else}<Copy class="size-4" /> Copy{/if}
-          </Button>
-        </div>
+        <Tabs value="token">
+          <TabsList variant="line">
+            <TabsTrigger value="token">Token</TabsTrigger>
+            <TabsTrigger value="peer-config">Peer Config</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="token" class="mt-4 space-y-2">
+            <p class="text-muted-foreground text-sm">
+              Treat this case-sensitive token like a capability: anyone holding it can attempt to connect.
+            </p>
+            <div class="flex items-center gap-2">
+              <code class="bg-muted min-w-0 flex-1 overflow-x-auto rounded-md px-3 py-2 text-xs">
+                {tokenRevealed ? $tailcatStatus.address : TOKEN_MASK}
+              </code>
+              <Button
+                variant="outline"
+                size="sm"
+                onclick={() => (tokenRevealed = !tokenRevealed)}
+                aria-label={tokenRevealed ? "Hide Tailcat connection token" : "Reveal Tailcat connection token"}
+              >
+                {#if tokenRevealed}<EyeOff class="size-4" />{:else}<Eye class="size-4" />{/if}
+              </Button>
+              <Button variant="outline" size="sm" onclick={copyAddress} aria-label="Copy Tailcat connection token">
+                {#if copied}<Check class="size-4" /> Copied{:else}<Copy class="size-4" /> Copy{/if}
+              </Button>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="peer-config" class="mt-4 space-y-2">
+            <p class="text-muted-foreground text-sm">
+              Copy a ready-to-paste <code>peers</code> entry, including the exposed models, for a friend to add to
+              their own config so they can route requests through this server.
+            </p>
+            <div class="flex items-center gap-2">
+              <code class="bg-muted min-w-0 flex-1 overflow-x-auto rounded-md px-3 py-2 text-xs whitespace-pre">
+                {tokenRevealed ? peerConfigYaml($tailcatStatus.address, $tailcatStatus.models) : TOKEN_MASK}
+              </code>
+              <Button variant="outline" size="sm" onclick={copyPeerConfig} aria-label="Copy peer configuration">
+                {#if configCopied}<Check class="size-4" /> Copied{:else}<Copy class="size-4" /> Copy{/if}
+              </Button>
+            </div>
+          </TabsContent>
+        </Tabs>
       {:else}
         <p class="text-muted-foreground text-sm">Tailcat is not currently available.</p>
       {/if}
     </Card.Content>
   </Card.Root>
-
-  {#if $tailcatStatus.enabled && $tailcatStatus.address}
-    <Card.Root>
-      <Card.Header>
-        <Card.Title>Share with a friend</Card.Title>
-        <Card.Description>
-          Copy a ready-to-paste <code>peers</code> entry, including the exposed models, for a friend to add to their
-          own config so they can route requests through this server.
-        </Card.Description>
-      </Card.Header>
-      <Card.Content>
-        <div class="flex items-center gap-2">
-          <code class="bg-muted min-w-0 flex-1 overflow-x-auto rounded-md px-3 py-2 text-xs whitespace-pre">
-            {tokenRevealed ? peerConfigYaml($tailcatStatus.address, $tailcatStatus.models) : TOKEN_MASK}
-          </code>
-          <Button variant="outline" size="sm" onclick={copyPeerConfig} aria-label="Copy peer configuration">
-            {#if configCopied}<Check class="size-4" /> Copied{:else}<Copy class="size-4" /> Copy{/if}
-          </Button>
-        </div>
-      </Card.Content>
-    </Card.Root>
-  {/if}
 
   <ActivityTable
     metrics={rows}
