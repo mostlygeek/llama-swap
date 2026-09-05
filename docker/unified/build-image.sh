@@ -14,7 +14,7 @@
 #   SD_REF=master ./build-image.sh --cuda                # Pin stable-diffusion.cpp to a branch
 #   AUDIO_REF=main ./build-image.sh --cuda               # Pin audio.cpp to a branch
 #   LS_VERSION=170 ./build-image.sh --cuda               # Override llama-swap version
-#   IK_LLAMA_REF=main ./build-image.sh --cuda            # Pin ik_llama.cpp to main branch (CUDA only)
+#   IK_LLAMA_REF=main ./build-image.sh --cuda            # Pin ik_llama.cpp to main branch
 #
 # The build is one Dockerfile per piece:
 #
@@ -86,7 +86,7 @@ DATE_TAG="${DATE_TAG:-}"
 # in containers.yml, which is scoped to `package: llama-swap`.
 ARTIFACT_REPO="${ARTIFACT_REPO:-ghcr.io/mostlygeek/llama-swap-build}"
 
-# Upstream projects compiled into the image. ik-llama is CUDA only.
+# Upstream projects compiled into the image.
 ALL_PROJECTS=(whisper sd audio llama ik-llama)
 
 for arg in "$@"; do
@@ -133,7 +133,7 @@ for arg in "$@"; do
             echo "  WHISPER_REF          Pin whisper.cpp to a commit, tag, or branch"
             echo "  SD_REF               Pin stable-diffusion.cpp to a commit, tag, or branch"
             echo "  AUDIO_REF            Pin audio.cpp to a commit, tag, or branch"
-            echo "  IK_LLAMA_REF         Pin ik_llama.cpp to a commit, tag, or branch (CUDA only)"
+            echo "  IK_LLAMA_REF         Pin ik_llama.cpp to a commit, tag, or branch"
             echo "  LS_VERSION           Override llama-swap version (e.g., '170' or 'latest')"
             echo "  WHISPER_FFMPEG       Enable whisper.cpp FFmpeg support (default: yes)"
             echo "  CMAKE_CUDA_ARCHITECTURES  CUDA compute capabilities to compile natively"
@@ -307,13 +307,12 @@ get_latest_hash() {
     git ls-remote "${1}" HEAD 2>/dev/null | head -1 | cut -f1
 }
 
-# Projects built for this backend. ik_llama.cpp has no vulkan support.
+# Projects built for this backend. Every project currently builds on every
+# backend; this stays a function rather than a plain reference to
+# ALL_PROJECTS so a future backend-specific project has one place to skip.
 backend_projects() {
     local project
     for project in "${ALL_PROJECTS[@]}"; do
-        if [[ "${project}" == "ik-llama" && "${BACKEND}" != "cuda" ]]; then
-            continue
-        fi
         echo "${project}"
     done
 }
@@ -509,19 +508,13 @@ else
     log "audio.cpp: latest HEAD: ${AUDIO_HASH}"
 fi
 
-# CUDA only, but --resolve always reports it so one setup job feeds both backends
-if [[ "$BACKEND" == "cuda" || "$MODE" == "resolve" ]]; then
-    if [[ -n "${IK_LLAMA_REF:-}" ]]; then
-        IK_LLAMA_HASH=$(resolve_ref "${IK_LLAMA_REPO}" "${IK_LLAMA_REF}") || exit 1
-        log "ik_llama.cpp: ${IK_LLAMA_REF} -> ${IK_LLAMA_HASH}"
-    else
-        IK_LLAMA_HASH=$(get_latest_hash "${IK_LLAMA_REPO}")
-        [[ -n "${IK_LLAMA_HASH}" ]] || { echo "ERROR: Could not determine latest commit for ik_llama.cpp" >&2; exit 1; }
-        log "ik_llama.cpp: latest HEAD: ${IK_LLAMA_HASH}"
-    fi
+if [[ -n "${IK_LLAMA_REF:-}" ]]; then
+    IK_LLAMA_HASH=$(resolve_ref "${IK_LLAMA_REPO}" "${IK_LLAMA_REF}") || exit 1
+    log "ik_llama.cpp: ${IK_LLAMA_REF} -> ${IK_LLAMA_HASH}"
 else
-    IK_LLAMA_HASH="n/a"
-    log "ik_llama.cpp: skipped (vulkan build)"
+    IK_LLAMA_HASH=$(get_latest_hash "${IK_LLAMA_REPO}")
+    [[ -n "${IK_LLAMA_HASH}" ]] || { echo "ERROR: Could not determine latest commit for ik_llama.cpp" >&2; exit 1; }
+    log "ik_llama.cpp: latest HEAD: ${IK_LLAMA_HASH}"
 fi
 
 if [[ -n "${LS_VERSION:-}" ]]; then
@@ -741,10 +734,7 @@ echo "Verifying build artifacts..."
 echo "=========================================="
 echo ""
 
-EXPECTED_BINARIES=(llama-server llama-cli llama-bench whisper-server whisper-cli sd-server sd-cli audiocpp_server audiocpp_cli llama-swap vllm-wrapper)
-if [[ "$BACKEND" == "cuda" ]]; then
-    EXPECTED_BINARIES+=(ik-llama-server)
-fi
+EXPECTED_BINARIES=(llama-server llama-cli llama-bench whisper-server whisper-cli sd-server sd-cli audiocpp_server audiocpp_cli llama-swap vllm-wrapper ik-llama-server)
 
 MISSING_BINARIES=()
 for binary in "${EXPECTED_BINARIES[@]}"; do
@@ -764,10 +754,7 @@ if [[ ${#MISSING_BINARIES[@]} -gt 0 ]]; then
     exit 1
 fi
 
-VERIFIED_LIST="llama-server, llama-cli, llama-bench, whisper-server, whisper-cli, sd-server, sd-cli, audiocpp_server, audiocpp_cli, llama-swap, vllm-wrapper"
-if [[ "$BACKEND" == "cuda" ]]; then
-    VERIFIED_LIST="${VERIFIED_LIST}, ik-llama-server"
-fi
+VERIFIED_LIST="llama-server, llama-cli, llama-bench, whisper-server, whisper-cli, sd-server, sd-cli, audiocpp_server, audiocpp_cli, llama-swap, vllm-wrapper, ik-llama-server"
 echo "All expected binaries verified: ${VERIFIED_LIST}"
 
 # audio.cpp must be a deployment build: the model_specs catalog is compiled into
@@ -876,8 +863,8 @@ echo "  llama.cpp:            ${LLAMA_HASH}"
 echo "  whisper.cpp:          ${WHISPER_HASH}"
 echo "  stable-diffusion.cpp: ${SD_HASH}"
 echo "  audio.cpp:            ${AUDIO_HASH}"
+echo "  ik_llama.cpp:         ${IK_LLAMA_HASH}"
 if [[ "$BACKEND" == "cuda" ]]; then
-    echo "  ik_llama.cpp:         ${IK_LLAMA_HASH}"
     echo "  CUDA version:         ${CUDA_VERSION}"
     echo "  CUDA architectures:   ${CMAKE_CUDA_ARCHITECTURES}"
 fi

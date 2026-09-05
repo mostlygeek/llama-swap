@@ -4,11 +4,11 @@ name: Build Unified Docker Image (variant)
 # project -> assemble and push.
 #
 # unified-docker.yml calls this once per variant so they are fully independent.
-# Vulkan's four projects finish in minutes; CUDA's ik_llama.cpp takes hours.
-# With every variant in one job graph the Vulkan image could not publish until
-# CUDA finished, because `needs` applies to a whole job and not to individual
-# matrix cells. Separate calls are the only way GitHub expresses per-variant
-# dependencies.
+# ik_llama.cpp alone takes hours to compile, on every backend. With every
+# variant in one job graph, whichever image finished first could not publish
+# until the others did too, because `needs` applies to a whole job and not to
+# individual matrix cells. Separate calls are the only way GitHub expresses
+# per-variant dependencies.
 
 on:
   workflow_call:

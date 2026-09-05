@@ -23,7 +23,7 @@ on:
         required: false
         default: "main"
       ik_llama_ref:
-        description: "ik_llama.cpp commit hash, tag, or branch (CUDA only)"
+        description: "ik_llama.cpp commit hash, tag, or branch"
         required: false
         default: "main"
       llama_swap_version:
@@ -157,9 +157,8 @@ jobs:
             echo "build_cuda13=${build_cuda13}"
             echo "build_vulkan=${build_vulkan}"
             echo "push_to_ghcr=${push}"
-            # ik_llama.cpp has no Vulkan build. Both CUDA variants build it.
             echo 'cuda_projects=["whisper","sd","audio","llama","ik-llama"]'
-            echo 'vulkan_projects=["whisper","sd","audio","llama"]'
+            echo 'vulkan_projects=["whisper","sd","audio","llama","ik-llama"]'
             echo 'amd64_only=["linux/amd64"]'
             echo "cuda13_platforms=${cuda13_platforms}"
             # Resolved once so every platform's image and the manifest that

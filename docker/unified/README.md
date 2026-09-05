@@ -99,7 +99,7 @@ setup ── resolve every upstream ref once, fix the date tag
   ├─ cuda ─── amd64 ── base ── whisper sd audio llama ik-llama ── assemble ─┬─ manifest
   ├─ cuda13 ┬ amd64 ── base ── whisper sd audio llama ik-llama ── assemble ─┤
   │         └ arm64 ── base ── whisper sd audio llama ik-llama ── assemble ─┼─ manifest
-  └─ vulkan ─ amd64 ── base ── whisper sd audio llama ─────────── assemble ─┴─ manifest
+  └─ vulkan ─ amd64 ── base ── whisper sd audio llama ik-llama ── assemble ─┴─ manifest
 ```
 
 Platforms are a matrix over the same backend workflow, so a variant's chain is
@@ -108,9 +108,9 @@ per-platform and the manifest job waits for every one of them.
 Each variant is a separate call to `unified-docker-backend.yml`, which holds
 the base → projects → assemble chain for one variant. They are separate calls
 rather than one matrix because `needs` applies to a whole job, not to
-individual matrix cells: sharing a job graph would keep the Vulkan image, whose
-four projects finish in minutes, waiting on CUDA's multi-hour ik_llama.cpp
-compile before it could publish.
+individual matrix cells: sharing a job graph would keep every variant waiting
+on the slowest one to finish before any of them could publish, and
+ik_llama.cpp alone takes hours to compile on every backend.
 
 Every image is addressed by its content, so anything unchanged is skipped:
 

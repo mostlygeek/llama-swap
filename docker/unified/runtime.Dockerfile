@@ -22,10 +22,10 @@ FROM ${SD_IMAGE} AS sd-src
 FROM ${AUDIO_IMAGE} AS audio-src
 FROM ${LLAMA_IMAGE} AS llama-src
 
-# Vulkan images ship no ik-llama-server. This gives the COPY below a real but
-# empty /install/bin so the runtime needs no backend branching. For CUDA the
-# arg names a real artifacts image and BuildKit prunes this stage; ubuntu:24.04
-# is already pulled as the Vulkan runtime base, so it costs nothing there.
+# Fallback for IK_LLAMA_IMAGE when the caller does not supply one, so the
+# COPY below always has a real (if empty) /install/bin and needs no backend
+# branching. build-image.sh passes a real artifacts image for every backend
+# it drives, and BuildKit prunes this stage when it does.
 FROM ubuntu:24.04 AS ik-llama-empty
 RUN mkdir -p /install/bin
 FROM ${IK_LLAMA_IMAGE} AS ik-llama-src
@@ -141,7 +141,7 @@ COPY --from=llama-src /install/bin/llama-cli /usr/local/bin/
 COPY --from=llama-src /install/bin/llama-tts /usr/local/bin/
 COPY --from=llama-src /install/bin/llama-bench /usr/local/bin/
 
-# Copy ik-llama-server (CUDA only; empty copy for vulkan)
+# Copy ik-llama-server
 COPY --from=ik-llama-src /install/bin/ /usr/local/bin/
 
 # Install uv
