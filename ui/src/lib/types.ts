@@ -69,6 +69,7 @@ export interface ActivityLogEntry {
 export interface TailcatStatus {
   enabled: boolean;
   address: string;
+  models: string[];
 }
 
 export interface ActivityPage {

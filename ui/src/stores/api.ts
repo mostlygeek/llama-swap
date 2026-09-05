@@ -49,7 +49,7 @@ const defaultUIConfig = (): UIConfig => ({
 });
 export const uiConfig = writable<UIConfig>(defaultUIConfig());
 export const performanceEnabled = writable<boolean>(false);
-export const tailcatStatus = writable<TailcatStatus>({ enabled: false, address: "" });
+export const tailcatStatus = writable<TailcatStatus>({ enabled: false, address: "", models: [] });
 export const versionInfo = writable<VersionInfo>({
   build_date: "unknown",
   commit: "unknown",

@@ -12,10 +12,12 @@ updated: 2026-08-25
 `cmd` is the only required setting on a model. It is a plain command line —
 whatever you would type in a shell to start the server yourself.
 
-If `llama-server` describes a tool call in prose instead of making one, add
-`--jinja` to `cmd`. Without `--jinja`, llama.cpp silently ignores the request's
-tools array. The separate `capabilities.tools` setting only advertises support
-to clients; it does not enable tool calling in llama-server.
+Recent `llama-server` builds enable `--jinja` by default. If a model
+describes a tool call in prose instead of making one, your build predates
+that default — add `--jinja` to `cmd` explicitly. Without it, llama.cpp
+silently ignores the request's tools array. The separate `capabilities.tools`
+setting only advertises support to clients; it does not enable tool calling
+in llama-server.
 
 ## Smallest working configuration
 
@@ -42,7 +44,7 @@ cmd: |
   llama-server --port ${PORT}
   --model /models/qwen3-8b.gguf
   --ctx-size 16384
-  # needed for tool calling
+  # only needed on builds older than --jinja's default-on change
   --jinja
   --cache-type-k q8_0
 ```

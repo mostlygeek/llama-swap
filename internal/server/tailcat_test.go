@@ -133,12 +133,60 @@ func TestServer_TailcatAdminUnlocksNormalSurface(t *testing.T) {
 	}
 }
 
+func TestServer_TailcatExposedModelIDsActiveProfileAndBarePeerNames(t *testing.T) {
+	s := newTailcatPolicyServer(t, `
+peers:
+  gpu:
+    proxy: http://localhost:3
+    models: [chat]
+profiles:
+  dev:
+    pins:
+      dev-only: real
+  prod:
+    pins:
+      prod-only: real
+`)
+	s.cfg.Tailcat.Models = []string{"*"}
+
+	if got := s.tailcatExposedModelIDs(); contains(got, "dev-only") || contains(got, "prod-only") {
+		t.Fatalf("no active profile: got %v, want neither profile's pins listed", got)
+	}
+
+	if _, err := s.setActiveProfile("prod"); err != nil {
+		t.Fatal(err)
+	}
+	got := s.tailcatExposedModelIDs()
+	if !contains(got, "prod-only") {
+		t.Fatalf("active profile's pin missing: %v", got)
+	}
+	if contains(got, "dev-only") {
+		t.Fatalf("inactive profile's pin leaked: %v", got)
+	}
+	if !contains(got, "gpu/chat") {
+		t.Fatalf("peer fully qualified name missing: %v", got)
+	}
+	if !contains(got, "chat") {
+		t.Fatalf("unambiguous bare peer model name missing: %v", got)
+	}
+}
+
 func TestServer_APITailcatStatus(t *testing.T) {
 	s := newTailcatPolicyServer(t, "")
 	s.SetTailcatAddress("tcCaseSensitiveToken")
 	w := httptest.NewRecorder()
 	s.ServeHTTP(w, tailcatRequest(http.MethodGet, "/api/tailcat", ""))
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"enabled":true`) || !strings.Contains(w.Body.String(), "tcCaseSensitiveToken") {
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"enabled":true`) ||
+		!strings.Contains(w.Body.String(), "tcCaseSensitiveToken") ||
+		!strings.Contains(w.Body.String(), `"models":["public"]`) {
 		t.Fatalf("status response = %d %q", w.Code, w.Body.String())
+	}
+
+	s.cfg.SetTailcatEnabled(false)
+	w = httptest.NewRecorder()
+	s.ServeHTTP(w, tailcatRequest(http.MethodGet, "/api/tailcat", ""))
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"enabled":false`) ||
+		!strings.Contains(w.Body.String(), `"models":[]`) {
+		t.Fatalf("disabled status response = %d %q, want models: []", w.Code, w.Body.String())
 	}
 }

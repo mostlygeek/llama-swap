@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { Check, Copy } from "@lucide/svelte";
+  import { Check, Copy, Eye, EyeOff } from "@lucide/svelte";
   import type { ActivityLogEntry } from "../lib/types";
   import { activityRevision, getActivity, tailcatStatus } from "../stores/api";
   import { connectionState } from "../stores/theme";
@@ -9,6 +9,11 @@
   import ActivityTable from "../components/ActivityTable.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
+  import { Tabs, TabsContent, TabsList, TabsTrigger } from "$lib/components/ui/tabs/index.js";
+  import { peerConfigYaml } from "../lib/tailcatPeerConfig";
+
+  const DOTS_MASK = "•".repeat(24);
+  const REDACTED_TOKEN = "(redacted)";
 
   const storedPageSize = persistentStore<number>("tailcat-activity-page-size", 25);
   let rows = $state<ActivityLogEntry[]>([]);
@@ -21,6 +26,19 @@
   let requestID = 0;
   let copied = $state(false);
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
+  let tokenRevealed = $state(false);
+  let configRevealed = $state(false);
+  let configCopied = $state(false);
+  let configCopyTimer: ReturnType<typeof setTimeout> | null = null;
+
+  async function copyPeerConfig() {
+    if ($tailcatStatus.models.length === 0) return;
+    const yaml = peerConfigYaml($tailcatStatus.address, $tailcatStatus.models);
+    if (!(await copyText(yaml))) return;
+    configCopied = true;
+    if (configCopyTimer !== null) clearTimeout(configCopyTimer);
+    configCopyTimer = setTimeout(() => { configCopied = false; }, 1800);
+  }
 
   async function refreshActivity() {
     const id = ++requestID;
@@ -72,25 +90,88 @@
 
   $effect(() => () => {
     if (copyTimer !== null) clearTimeout(copyTimer);
+    if (configCopyTimer !== null) clearTimeout(configCopyTimer);
   });
 </script>
 
 <div class="space-y-4 p-2">
   <Card.Root>
-    <Card.Header>
-      <Card.Title>Tailcat connection token</Card.Title>
-      <Card.Description>
-        Treat this case-sensitive token like a capability: anyone holding it can attempt to connect.
-      </Card.Description>
-    </Card.Header>
     <Card.Content>
       {#if $tailcatStatus.enabled && $tailcatStatus.address}
-        <div class="flex items-center gap-2">
-          <code class="bg-muted min-w-0 flex-1 overflow-x-auto rounded-md px-3 py-2 text-xs">{$tailcatStatus.address}</code>
-          <Button variant="outline" size="sm" onclick={copyAddress} aria-label="Copy Tailcat connection token">
-            {#if copied}<Check class="size-4" /> Copied{:else}<Copy class="size-4" /> Copy{/if}
-          </Button>
-        </div>
+        <Tabs value="token">
+          <TabsList variant="line">
+            <TabsTrigger value="token">Token</TabsTrigger>
+            <TabsTrigger value="peer-config">Peer Config</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="token" class="mt-4 space-y-2">
+            <p class="text-muted-foreground text-sm">
+              Treat this case-sensitive token like a capability: anyone holding it can attempt to connect.
+            </p>
+            <div class="relative">
+              <code class="bg-muted block overflow-x-auto rounded-md px-3 py-2 pr-18 text-xs">
+                {tokenRevealed ? $tailcatStatus.address : DOTS_MASK}
+              </code>
+              <div class="absolute top-1 right-1 flex gap-1">
+                <Button
+                  variant="secondary"
+                  size="icon-sm"
+                  onclick={() => (tokenRevealed = !tokenRevealed)}
+                  aria-label={tokenRevealed ? "Hide Tailcat connection token" : "Reveal Tailcat connection token"}
+                >
+                  {#if tokenRevealed}<EyeOff class="size-4" />{:else}<Eye class="size-4" />{/if}
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="icon-sm"
+                  onclick={copyAddress}
+                  aria-label="Copy Tailcat connection token"
+                >
+                  {#if copied}<Check class="size-4 text-green-600" />{:else}<Copy class="size-4" />{/if}
+                </Button>
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="peer-config" class="mt-4 space-y-2">
+            {#if $tailcatStatus.models.length === 0}
+              <p class="text-muted-foreground text-sm">
+                This Tailcat listener isn't exposing any models yet, so there's nothing to share.
+              </p>
+            {:else}
+              <p class="text-muted-foreground text-sm">
+                Copy a ready-to-paste <code>peers</code> entry, including the exposed models, for a friend to add to
+                their own config so they can route requests through this server.
+              </p>
+              <div class="relative">
+                <code class="bg-muted block overflow-x-auto rounded-md px-3 py-2 pr-18 text-xs whitespace-pre"
+                  >{peerConfigYaml(
+                    configRevealed ? $tailcatStatus.address : REDACTED_TOKEN,
+                    $tailcatStatus.models
+                  )}</code
+                >
+                <div class="absolute top-1 right-1 flex gap-1">
+                  <Button
+                    variant="secondary"
+                    size="icon-sm"
+                    onclick={() => (configRevealed = !configRevealed)}
+                    aria-label={configRevealed ? "Hide connection token" : "Reveal connection token"}
+                  >
+                    {#if configRevealed}<EyeOff class="size-4" />{:else}<Eye class="size-4" />{/if}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="icon-sm"
+                    onclick={copyPeerConfig}
+                    aria-label="Copy peer configuration"
+                  >
+                    {#if configCopied}<Check class="size-4 text-green-600" />{:else}<Copy class="size-4" />{/if}
+                  </Button>
+                </div>
+              </div>
+            {/if}
+          </TabsContent>
+        </Tabs>
       {:else}
         <p class="text-muted-foreground text-sm">Tailcat is not currently available.</p>
       {/if}
