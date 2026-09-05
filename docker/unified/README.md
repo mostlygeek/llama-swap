@@ -147,6 +147,13 @@ Substitute `--cuda13` or `--vulkan` for `--cuda` to drive another variant; the
 tags carry the variant name, so `--stage=llama` publishes
 `:art-llama-cuda13-<commit>-<recipe>` and never collides with the CUDA 12 one.
 
+`--cuda` and `--vulkan` are amd64 only, so `--manifest` with no `--platforms=`
+does what you want: it falls back to joining just the one platform present.
+`--cuda13` is the exception — it is built for both amd64 and arm64, so its
+`--manifest` needs `--platforms=linux/amd64,linux/arm64` spelled out, as in the
+[Platforms](#platforms) example above. Leaving it off does not fail; it quietly
+joins whichever single arch you built and drops the other from the tag.
+
 `--stage` and `--assemble` push to and read from `ARTIFACT_REPO` (default
 `ghcr.io/mostlygeek/llama-swap-build`), so they need registry credentials and a
 buildx container driver.
