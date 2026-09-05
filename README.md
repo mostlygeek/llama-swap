@@ -110,14 +110,22 @@ Two types of container images are built nightly for llama-swap:
 
 #### Unified container (Recommended)
 
+There are three unified images. Pick the one that matches your GPU:
+
+| tag | GPUs |
+| --- | --- |
+| `unified-cuda13` | NVIDIA Ampere through Blackwell: A100, RTX 30xx/40xx/50xx, H100, RTX PRO. Built with CUDA 13. |
+| `unified-cuda` | NVIDIA Pascal through Ada: P40, P100, GTX 10xx, RTX 20xx/30xx/40xx. Built with CUDA 12, for cards CUDA 13 dropped. |
+| `unified-vulkan` | AMD and other Vulkan capable GPUs. |
+
 ```shell
-$ docker pull ghcr.io/mostlygeek/llama-swap:unified-cuda
+$ docker pull ghcr.io/mostlygeek/llama-swap:unified-cuda13
 
 # run with a custom configuration and models directory
 $ docker run -it --rm --runtime nvidia -p 9292:8080 \
  -v /path/to/models:/models \
  -v /path/to/custom/config.yaml:/etc/llama-swap/config/config.yaml \
- ghcr.io/mostlygeek/llama-swap:unified-cuda
+ ghcr.io/mostlygeek/llama-swap:unified-cuda13
 ```
 
 #### Legacy container

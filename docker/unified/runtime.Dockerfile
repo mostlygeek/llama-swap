@@ -5,6 +5,10 @@
 # build-image.sh. Nothing is compiled here, so this build is minutes.
 
 ARG BACKEND=cuda
+# The published flavour name. cuda and cuda13 are both BACKEND=cuda; only the
+# CUDA toolkit they were compiled against and the architectures they cover
+# differ, so this is recorded in /versions.txt rather than used to build.
+ARG VARIANT=cuda
 ARG BUILDER_BASE
 ARG WHISPER_IMAGE
 ARG SD_IMAGE
@@ -93,6 +97,10 @@ ARG WHISPER_COMMIT_HASH=unknown
 ARG SD_COMMIT_HASH=unknown
 ARG IK_LLAMA_COMMIT_HASH=unknown
 ARG AUDIO_COMMIT_HASH=unknown
+# Bare ARG re-declares the global-scope value inside this stage.
+ARG VARIANT
+ARG CUDA_VERSION
+ARG CMAKE_CUDA_ARCHITECTURES=
 ARG RUN_UID=0
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -167,7 +175,11 @@ RUN echo "llama.cpp: ${LLAMA_COMMIT_HASH}" > /versions.txt && \
     echo "ik_llama.cpp: ${IK_LLAMA_COMMIT_HASH}" >> /versions.txt && \
     echo "audio.cpp: ${AUDIO_COMMIT_HASH}" >> /versions.txt && \
     echo "llama-swap: $(cat /tmp/llama-swap-version)" >> /versions.txt && \
-    echo "backend: ${BACKEND}" >> /versions.txt && \
+    echo "backend: ${VARIANT}" >> /versions.txt && \
+    if [ "${BACKEND}" = "cuda" ]; then \
+      echo "cuda_version: ${CUDA_VERSION}" >> /versions.txt; \
+      echo "cuda_architectures: ${CMAKE_CUDA_ARCHITECTURES}" >> /versions.txt; \
+    fi && \
     echo "build_timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> /versions.txt
 
 RUN mkdir -p /models && chown ${RUN_UID}:${RUN_UID} /models

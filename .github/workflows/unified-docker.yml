@@ -31,7 +31,12 @@ on:
         required: false
         default: "main"
       build_cuda:
-        description: "Build CUDA image"
+        description: "Build CUDA 12 image (Pascal through Ada)"
+        type: boolean
+        required: false
+        default: true
+      build_cuda13:
+        description: "Build CUDA 13 image (Ampere through Blackwell)"
         type: boolean
         required: false
         default: true
@@ -62,14 +67,23 @@ permissions:
 # base tag -- so anything unchanged is skipped, and one project overrunning no
 # longer discards the others.
 #
-# Each backend runs as its own call to unified-docker-backend.yml, so Vulkan
+# Each variant runs as its own call to unified-docker-backend.yml, so Vulkan
 # publishes as soon as its own projects finish rather than waiting on the
 # multi-hour CUDA compiles.
+#
+# There are two CUDA variants. cuda is CUDA 12 compiled for Pascal through Ada;
+# cuda13 is CUDA 13 compiled for Ampere through Blackwell. CUDA 13 removed
+# Maxwell, Pascal and Volta from nvcc, so the older cards need an image of their
+# own. They share every Dockerfile and install script -- only CUDA_VERSION and
+# CMAKE_CUDA_ARCHITECTURES differ, and the builder base tag is keyed on both, so
+# each variant gets its own base and artifacts images and neither invalidates
+# the other.
 jobs:
   setup:
     runs-on: ubuntu-latest
     outputs:
       build_cuda: ${{ steps.plan.outputs.build_cuda }}
+      build_cuda13: ${{ steps.plan.outputs.build_cuda13 }}
       build_vulkan: ${{ steps.plan.outputs.build_vulkan }}
       cuda_projects: ${{ steps.plan.outputs.cuda_projects }}
       vulkan_projects: ${{ steps.plan.outputs.vulkan_projects }}
@@ -100,23 +114,25 @@ jobs:
           chmod +x docker/unified/build-image.sh
           docker/unified/build-image.sh --cuda --resolve | tee -a "$GITHUB_OUTPUT"
 
-      - name: Plan backends
+      - name: Plan variants
         id: plan
         run: |
-          # schedule uses defaults (build both, push); workflow_dispatch respects inputs
+          # schedule uses defaults (build all, push); workflow_dispatch respects inputs
           if [[ "${{ github.event_name }}" == "schedule" ]]; then
-            build_cuda=true; build_vulkan=true; push=true
+            build_cuda=true; build_cuda13=true; build_vulkan=true; push=true
           else
             build_cuda="${{ inputs.build_cuda }}"
+            build_cuda13="${{ inputs.build_cuda13 }}"
             build_vulkan="${{ inputs.build_vulkan }}"
             push="${{ inputs.push_to_ghcr }}"
           fi
 
           {
             echo "build_cuda=${build_cuda}"
+            echo "build_cuda13=${build_cuda13}"
             echo "build_vulkan=${build_vulkan}"
             echo "push_to_ghcr=${push}"
-            # ik_llama.cpp has no Vulkan build.
+            # ik_llama.cpp has no Vulkan build. Both CUDA variants build it.
             echo 'cuda_projects=["whisper","sd","audio","llama","ik-llama"]'
             echo 'vulkan_projects=["whisper","sd","audio","llama"]'
           } >> "$GITHUB_OUTPUT"
@@ -129,7 +145,25 @@ jobs:
       contents: read
       packages: write
     with:
-      backend: cuda
+      variant: cuda
+      projects: ${{ needs.setup.outputs.cuda_projects }}
+      push_to_ghcr: ${{ needs.setup.outputs.push_to_ghcr == 'true' }}
+      llama_hash: ${{ needs.setup.outputs.llama_hash }}
+      whisper_hash: ${{ needs.setup.outputs.whisper_hash }}
+      sd_hash: ${{ needs.setup.outputs.sd_hash }}
+      audio_hash: ${{ needs.setup.outputs.audio_hash }}
+      ik_llama_hash: ${{ needs.setup.outputs.ik_llama_hash }}
+      ls_hash: ${{ needs.setup.outputs.ls_hash }}
+
+  cuda13:
+    needs: setup
+    if: ${{ needs.setup.outputs.build_cuda13 == 'true' }}
+    uses: ./.github/workflows/unified-docker-backend.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      variant: cuda13
       projects: ${{ needs.setup.outputs.cuda_projects }}
       push_to_ghcr: ${{ needs.setup.outputs.push_to_ghcr == 'true' }}
       llama_hash: ${{ needs.setup.outputs.llama_hash }}
@@ -147,7 +181,7 @@ jobs:
       contents: read
       packages: write
     with:
-      backend: vulkan
+      variant: vulkan
       projects: ${{ needs.setup.outputs.vulkan_projects }}
       push_to_ghcr: ${{ needs.setup.outputs.push_to_ghcr == 'true' }}
       llama_hash: ${{ needs.setup.outputs.llama_hash }}

@@ -15,10 +15,32 @@ that is reachable from the container; vLLM itself is not included in the image.
 ## Building
 
 ```bash
-./build-image.sh --cuda      # or --vulkan
+./build-image.sh --cuda      # or --cuda13, or --vulkan
 ```
 
 That compiles everything and assembles the image, same as before.
+
+Three images are built, and `--cuda`/`--cuda13`/`--vulkan` picks which:
+
+| flag | image | GPUs |
+|---|---|---|
+| `--cuda` | `llama-swap:unified-cuda` | NVIDIA Pascal through Ada, on CUDA 12 |
+| `--cuda13` | `llama-swap:unified-cuda13` | NVIDIA Ampere through Blackwell, on CUDA 13 |
+| `--vulkan` | `llama-swap:unified-vulkan` | AMD and other Vulkan hardware |
+
+`cuda` and `cuda13` are the same CUDA build: same Dockerfiles, same install
+scripts, `BACKEND=cuda` in both. Only `CUDA_VERSION` and
+`CMAKE_CUDA_ARCHITECTURES` differ, and the builder base tag is keyed on both,
+so each gets its own base and artifacts images and neither invalidates the
+other. The script calls that published flavour the **variant**, to keep it
+distinct from the backend that decides how things are compiled.
+
+One caveat for local builds: the BuildKit cache mounts holding ccache and the
+CMake build directories are keyed on the backend, so the two CUDA variants share
+them. Building one right after the other on the same machine reconfigures and
+recompiles from scratch — correct, because every install script clears
+`CMakeCache.txt` before configuring, but not incremental. CI is unaffected: each
+variant's jobs get their own runners and start cold anyway.
 
 ### Layout
 
@@ -46,11 +68,12 @@ next night rebuilt everything again — one overrun kept every later run failing
 ```
 setup ── resolve every upstream ref once
   ├─ cuda ─── base ── whisper sd audio llama ik-llama ── assemble ── push
+  ├─ cuda13 ─ base ── whisper sd audio llama ik-llama ── assemble ── push
   └─ vulkan ─ base ── whisper sd audio llama ─────────── assemble ── push
 ```
 
-Each backend is a separate call to `unified-docker-backend.yml`, which holds
-the base → projects → assemble chain for one backend. They are separate calls
+Each variant is a separate call to `unified-docker-backend.yml`, which holds
+the base → projects → assemble chain for one variant. They are separate calls
 rather than one matrix because `needs` applies to a whole job, not to
 individual matrix cells: sharing a job graph would keep the Vulkan image, whose
 four projects finish in minutes, waiting on CUDA's multi-hour ik_llama.cpp
@@ -67,9 +90,10 @@ Which gives, concretely:
 | edit | rebuilds |
 |---|---|
 | `runtime.Dockerfile`, this README | nothing |
-| `install-sd.sh` or `sd.Dockerfile` | sd, both backends |
-| `base-cuda.Dockerfile` (e.g. `CMAKE_CUDA_ARCHITECTURES`, or setting the env var of the same name) | the CUDA base and all 5 CUDA projects; no Vulkan |
-| `CUDA_VERSION` env var | the CUDA base, all 5 CUDA projects, and the runtime image; no Vulkan |
+| `install-sd.sh` or `sd.Dockerfile` | sd, all three variants |
+| `base-cuda.Dockerfile` | the base and all 5 projects of **both** CUDA variants; no Vulkan |
+| `CMAKE_CUDA_ARCHITECTURES` or `CUDA_VERSION` env var | the base and all 5 projects of the one variant being built, and its runtime image |
+| the built-in `CMAKE_CUDA_ARCHITECTURES`/`CUDA_VERSION` default for one variant, in `build-image.sh` | that variant only; the other CUDA variant and Vulkan are untouched |
 | `base-vulkan.Dockerfile` | the Vulkan base and all 4 Vulkan projects; no CUDA |
 
 and means a project that overruns its own job no longer discards the ones that
@@ -84,6 +108,10 @@ recompiling anything.
 ./build-image.sh --cuda --stage=llama     # build + push one project's artifacts
 ./build-image.sh --cuda --assemble        # assemble from published images
 ```
+
+Substitute `--cuda13` or `--vulkan` for `--cuda` to drive another variant; the
+tags carry the variant name, so `--stage=llama` publishes
+`:art-llama-cuda13-<commit>-<recipe>` and never collides with the CUDA 12 one.
 
 `--stage` and `--assemble` push to and read from `ARTIFACT_REPO` (default
 `ghcr.io/mostlygeek/llama-swap-build`), so they need registry credentials and a
@@ -120,7 +148,8 @@ container.
 
 The `backend` field must match the image: `cuda` or `vulkan`. `audiocpp_server`
 defaults to `cuda` regardless of how it was compiled, so a vulkan image with an
-unset backend fails to load models.
+unset backend fails to load models. The `unified-cuda13` image is a CUDA build,
+so its field is `cuda` too — the starter it ships already has it set.
 
 audio.cpp is compiled as a **deployment build**
 (`AUDIOCPP_DEPLOYMENT_BUILD=ON`), which compiles the `model_specs/*.json`
@@ -142,23 +171,46 @@ cmd: |
 
 The CUDA toolkit the projects compile against and the runtime libraries the
 final image ships both come from `nvidia/cuda` images, pinned to the same
-version: `12.9.1` by default. Set the `CUDA_VERSION` environment variable to
-use another one — it takes the version portion of the `nvidia/cuda` image tag,
-so `CUDA_VERSION=12.6.0` builds from `nvidia/cuda:12.6.0-devel-ubuntu24.04`.
-It changes the CUDA base's hash, so a new version rebuilds the base, all five
-CUDA projects, and the runtime image.
+version, so compiled binaries and their runtime libraries always come from the
+same CUDA. The default depends on the variant: `12.9.1` for `--cuda` and
+`13.3.1` for `--cuda13`.
+
+Set the `CUDA_VERSION` environment variable to use another one — it takes the
+version portion of the `nvidia/cuda` image tag, so `CUDA_VERSION=12.6.0` builds
+from `nvidia/cuda:12.6.0-devel-ubuntu24.04`. It changes the CUDA base's hash, so
+a new version rebuilds the base, all five CUDA projects, and the runtime image
+for that variant.
 
 ### GPU support
 
-The CUDA image compiles SASS for compute capabilities `60;61;75;86;89`, so
-Pascal (P100, GTX 10xx, P40) and newer NVIDIA GPUs are supported. Architectures
-between and above those entries — Volta (70), Ampere (80), Hopper (90) and
-Blackwell (100 on datacenter parts, 120 on GeForce and RTX PRO) — run by
-JIT-compiling the nearest lower PTX, which costs time on first load. Set the
-`CMAKE_CUDA_ARCHITECTURES` environment variable when invoking `build-image.sh`
-(to edit the default, change it in `base-cuda.Dockerfile`) to compile one of them
-natively. The base is what every CUDA project compiles from, so an addition
-lengthens all of them — and changes the base's hash, which rebuilds all five.
+Two CUDA images are built, because CUDA 13 removed Maxwell, Pascal and Volta
+from `nvcc` altogether and those cards still need an image:
+
+| image | CUDA | `CMAKE_CUDA_ARCHITECTURES` | covers |
+|---|---|---|---|
+| `unified-cuda` | 12.9.1 | `60;61;75;86;89` | Pascal (P100, GTX 10xx, P40), Turing, Ampere, Ada |
+| `unified-cuda13` | 13.3.1 | `80;86;89;90;100;120` | Ampere (A100, RTX 30xx), Ada (RTX 40xx), Hopper (H100), Blackwell (100 on datacenter parts, 120 on GeForce RTX 50xx and RTX PRO) |
+
+Those are the compute capabilities compiled as SASS. CMake emits PTX alongside
+SASS for every entry, so an architecture between or above the list still runs by
+JIT-compiling the nearest lower PTX — it just pays that cost on first load and
+misses arch-specific kernels. On `unified-cuda` that covers Volta (70), Ampere
+(80), Hopper (90) and Blackwell; on `unified-cuda13`, anything above `120`.
+
+Pick `unified-cuda13` for an Ampere or newer card and `unified-cuda` for
+anything older. Which one an image is, and what it was compiled for, is recorded
+in the image:
+
+```bash
+docker run --rm --entrypoint cat ghcr.io/mostlygeek/llama-swap:unified-cuda13 /versions.txt
+```
+
+To compile an architecture natively that a variant does not list — Jetson's
+`87`, say, or a future Blackwell derivative — set `CMAKE_CUDA_ARCHITECTURES`
+when invoking `build-image.sh`; to change a variant's default, edit the `case`
+on `VARIANT` near the top of `build-image.sh`. The base is what every CUDA
+project compiles from, so an addition lengthens all of them — and changes the
+base's hash, which rebuilds all five projects of that variant.
 
 The Vulkan image builds audio.cpp with `ENGINE_ENABLE_VULKAN=ON`. audio.cpp is
 tuned for CUDA, and the server prints a notice on startup that a non-CUDA

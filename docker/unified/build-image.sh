@@ -3,7 +3,8 @@
 # Build script for the unified container.
 #
 # Usage:
-#   ./build-image.sh --cuda                              # Build CUDA image
+#   ./build-image.sh --cuda                              # Build CUDA 12 image
+#   ./build-image.sh --cuda13                            # Build CUDA 13 image
 #   ./build-image.sh --vulkan                            # Build Vulkan image
 #   ./build-image.sh --cuda --no-cache                   # Build without cache
 #   LLAMA_REF=b1234 ./build-image.sh --vulkan            # Pin llama.cpp to a commit hash
@@ -23,6 +24,14 @@
 # so a project's inputs are exactly two files plus the base tag. That is what
 # the artifacts tag is keyed on, and why editing the runtime rebuilds nothing.
 #
+# CUDA variants. --cuda and --cuda13 are the same CUDA build against different
+# toolkits: CUDA 12 compiled for Pascal through Ada, and CUDA 13 compiled for
+# Ampere through Blackwell. CUDA 13 dropped Maxwell, Pascal and Volta from nvcc
+# entirely, so one image cannot cover both ranges. Only CUDA_VERSION and
+# CMAKE_CUDA_ARCHITECTURES differ between them, and the builder base's tag is
+# already keyed on both, so the two variants get their own base and artifacts
+# images without any Dockerfile or install script knowing about the split.
+#
 # Split modes (CI). Compiling every project in one job put five concurrent CUDA
 # builds on four cores, which no longer fits in a GitHub Actions job:
 #
@@ -34,20 +43,15 @@
 
 set -euo pipefail
 
+# BACKEND picks the build itself (which base Dockerfile, which cmake flags).
+# VARIANT names the flavour that gets published, and is what every image tag is
+# built from: cuda and cuda13 are both BACKEND=cuda.
 BACKEND=""
+VARIANT=""
 NO_CACHE=false
 MODE="unified"
 STAGE_TARGET=""
 WHISPER_FFMPEG="${WHISPER_FFMPEG:-yes}"
-
-# CUDA compute capabilities compiled as SASS. Only the CUDA base reads it as a
-# build arg; the projects inherit it through the base image's ENV.
-CMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES:-60;61;75;86;89}"
-
-# CUDA toolkit and runtime version, matching nvidia/cuda image tags. The CUDA
-# builder base and the runtime image are both built from it, so the compiled
-# binaries and their runtime libraries always come from the same CUDA.
-CUDA_VERSION="${CUDA_VERSION:-12.9.1}"
 
 # Registry holding the base and artifacts images used by --stage/--assemble.
 #
@@ -63,8 +67,9 @@ ALL_PROJECTS=(whisper sd audio llama ik-llama)
 
 for arg in "$@"; do
     case $arg in
-        --cuda)    BACKEND="cuda" ;;
-        --vulkan)  BACKEND="vulkan" ;;
+        --cuda)    BACKEND="cuda";   VARIANT="cuda" ;;
+        --cuda13)  BACKEND="cuda";   VARIANT="cuda13" ;;
+        --vulkan)  BACKEND="vulkan"; VARIANT="vulkan" ;;
         --no-cache) NO_CACHE=true ;;
         --resolve)  MODE="resolve" ;;
         --assemble) MODE="assemble" ;;
@@ -73,10 +78,11 @@ for arg in "$@"; do
             STAGE_TARGET="${arg#*=}"
             ;;
         --help|-h)
-            echo "Usage: ./build-image.sh --cuda|--vulkan [--no-cache]"
+            echo "Usage: ./build-image.sh --cuda|--cuda13|--vulkan [--no-cache]"
             echo ""
             echo "Options:"
-            echo "  --cuda      Build CUDA image (NVIDIA GPUs)"
+            echo "  --cuda      Build CUDA 12 image, Pascal through Ada (sm 60-89)"
+            echo "  --cuda13    Build CUDA 13 image, Ampere through Blackwell (sm 80-120)"
             echo "  --vulkan    Build Vulkan image (AMD GPUs and compatible hardware)"
             echo "  --no-cache  Force rebuild without using Docker cache"
             echo "  --help, -h  Show this help message"
@@ -89,7 +95,8 @@ for arg in "$@"; do
             echo "  --assemble       Assemble the unified image from published artifacts"
             echo ""
             echo "Environment variables:"
-            echo "  DOCKER_IMAGE_TAG     Set custom image tag (default: llama-swap:unified-cuda or llama-swap:unified-vulkan)"
+            echo "  DOCKER_IMAGE_TAG     Set custom image tag (default: llama-swap:unified-<variant>,"
+            echo "                       e.g. llama-swap:unified-cuda13)"
             echo "  LLAMA_REF            Pin llama.cpp to a commit, tag, or branch"
             echo "  WHISPER_REF          Pin whisper.cpp to a commit, tag, or branch"
             echo "  SD_REF               Pin stable-diffusion.cpp to a commit, tag, or branch"
@@ -98,9 +105,10 @@ for arg in "$@"; do
             echo "  LS_VERSION           Override llama-swap version (e.g., '170' or 'latest')"
             echo "  WHISPER_FFMPEG       Enable whisper.cpp FFmpeg support (default: yes)"
             echo "  CMAKE_CUDA_ARCHITECTURES  CUDA compute capabilities to compile natively"
-            echo "                       (default: 60;61;75;86;89, CUDA only)"
+            echo "                       (default: 60;61;75;86;89 for --cuda,"
+            echo "                       80;86;89;90;100;120 for --cuda13)"
             echo "  CUDA_VERSION         CUDA toolkit/runtime version as an nvidia/cuda image tag"
-            echo "                       (default: 12.9.1, CUDA only)"
+            echo "                       (default: 12.9.1 for --cuda, 13.3.1 for --cuda13)"
             echo "  ARTIFACT_REPO        Registry for base and artifacts images"
             echo "                       (default: ghcr.io/mostlygeek/llama-swap-build)"
             exit 0
@@ -109,11 +117,41 @@ for arg in "$@"; do
 done
 
 if [[ -z "$BACKEND" ]]; then
-    echo "Error: No backend specified. Please use --cuda or --vulkan."
+    echo "Error: No backend specified. Please use --cuda, --cuda13 or --vulkan."
     echo ""
-    echo "Usage: ./build-image.sh --cuda|--vulkan [--no-cache]"
+    echo "Usage: ./build-image.sh --cuda|--cuda13|--vulkan [--no-cache]"
     exit 1
 fi
+
+# CUDA toolkit/runtime version, matching nvidia/cuda image tags, and the compute
+# capabilities compiled as SASS. Together they are what separates the two CUDA
+# variants: the builder base and the runtime image are both built from
+# CUDA_VERSION, so compiled binaries and their runtime libraries always come
+# from the same CUDA, and the base tag is keyed on both.
+#
+#   cuda    CUDA 12: Pascal (60/61) through Ada (89). 12.x still ships nvcc
+#           support for Maxwell, Pascal and Volta.
+#   cuda13  CUDA 13: Ampere (80/86) through Blackwell (100 on datacenter parts,
+#           120 on GeForce and RTX PRO), by way of Ada (89) and Hopper (90).
+#           CUDA 13 removed everything below Turing from nvcc, and llama-swap
+#           still ships images for those cards, hence two CUDA variants rather
+#           than a version bump. Jetson's sm_87 is left out: those boards need
+#           an l4t base image, not nvidia/cuda.
+#
+# CMake emits PTX alongside SASS for every entry, so an architecture above the
+# list -- a future Blackwell derivative, say -- still runs by JIT-compiling the
+# nearest lower PTX. Only the CUDA base reads these as build args; the projects
+# inherit the architectures through the base image's ENV.
+case "${VARIANT}" in
+    cuda13)
+        CUDA_VERSION="${CUDA_VERSION:-13.3.1}"
+        CMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES:-80;86;89;90;100;120}"
+        ;;
+    *)
+        CUDA_VERSION="${CUDA_VERSION:-12.9.1}"
+        CMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES:-60;61;75;86;89}"
+        ;;
+esac
 
 # The value becomes part of nvidia/cuda image tags, so a bad version should
 # fail here with a clear message rather than a docker "image not found".
@@ -130,7 +168,7 @@ log() {
     fi
 }
 
-DOCKER_IMAGE_TAG="${DOCKER_IMAGE_TAG:-llama-swap:unified-${BACKEND}}"
+DOCKER_IMAGE_TAG="${DOCKER_IMAGE_TAG:-llama-swap:unified-${VARIANT}}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -220,14 +258,16 @@ project_image_arg() {
     esac
 }
 
-# The builder base is addressed by its own Dockerfile's content, so the two
+# The builder base is addressed by its own Dockerfile's content, so the
 # backends move independently and a base edit propagates into every project
 # tag below without anything having to inspect the base.
 base_tag() {
     local h
     # The CUDA base bakes CMAKE_CUDA_ARCHITECTURES into its ENV and the
     # CUDA_VERSION into its FROM line, so an override of either must change
-    # the tag even though the Dockerfile is unchanged.
+    # the tag even though the Dockerfile is unchanged. That is also what keeps
+    # the cuda and cuda13 variants apart: they share base-cuda.Dockerfile and
+    # differ only in these two values.
     h="$( {
         sha256sum "${SCRIPT_DIR}/base-${BACKEND}.Dockerfile"
         if [[ "${BACKEND}" == "cuda" ]]; then
@@ -235,7 +275,7 @@ base_tag() {
             echo "${CUDA_VERSION}"
         fi
     } | sha256sum | cut -c1-12)"
-    echo "${ARTIFACT_REPO}:base-${BACKEND}-${h}"
+    echo "${ARTIFACT_REPO}:base-${VARIANT}-${h}"
 }
 
 # A project's artifacts are determined by the upstream commit plus its recipe:
@@ -250,7 +290,7 @@ artifact_tag() {
         echo "base=$(base_tag)"
         echo "WHISPER_FFMPEG=${WHISPER_FFMPEG}"
     } | sha256sum | cut -c1-8 )"
-    echo "${ARTIFACT_REPO}:art-${project}-${BACKEND}-${commit:0:12}-${recipe}"
+    echo "${ARTIFACT_REPO}:art-${project}-${VARIANT}-${commit:0:12}-${recipe}"
 }
 
 image_exists() {
@@ -259,9 +299,9 @@ image_exists() {
 
 log "=========================================="
 case "$MODE" in
-    stage)    log "llama-swap Build (${STAGE_TARGET}, ${BACKEND})" ;;
-    assemble) log "llama-swap Unified Assemble (${BACKEND})" ;;
-    *)        log "llama-swap Unified Build (${BACKEND})" ;;
+    stage)    log "llama-swap Build (${STAGE_TARGET}, ${VARIANT})" ;;
+    assemble) log "llama-swap Unified Assemble (${VARIANT})" ;;
+    *)        log "llama-swap Unified Build (${VARIANT})" ;;
 esac
 log "=========================================="
 log ""
@@ -273,7 +313,7 @@ if [[ "$MODE" == "stage" && "$STAGE_TARGET" != "base" ]]; then
         exit 1
     fi
     if ! backend_projects | grep -qx -- "${STAGE_TARGET}"; then
-        echo "ERROR: project '${STAGE_TARGET}' is not built for the ${BACKEND} backend" >&2
+        echo "ERROR: project '${STAGE_TARGET}' is not built for the ${VARIANT} variant" >&2
         exit 1
     fi
 fi
@@ -374,7 +414,7 @@ build_base() {
     fi
     echo ""
     echo "=========================================="
-    echo "Building builder base (${BACKEND})..."
+    echo "Building builder base (${VARIANT})..."
     echo "=========================================="
     echo ""
     DOCKER_BUILDKIT=1 docker buildx build "${output[@]}" \
@@ -392,7 +432,7 @@ build_project() {
     tag="$(artifact_tag "${project}")"
     echo ""
     echo "=========================================="
-    echo "Building ${project} artifacts (${BACKEND})..."
+    echo "Building ${project} artifacts (${VARIANT})..."
     echo "=========================================="
     echo ""
     DOCKER_BUILDKIT=1 docker buildx build "${output[@]}" \
@@ -421,6 +461,8 @@ build_runtime() {
         --build-arg "AUDIO_COMMIT_HASH=${AUDIO_HASH}"
         --build-arg "IK_LLAMA_COMMIT_HASH=${IK_LLAMA_HASH}"
         --build-arg "CUDA_VERSION=${CUDA_VERSION}"
+        --build-arg "CMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES}"
+        --build-arg "VARIANT=${VARIANT}"
         # config.example.yaml lives at the repo root, outside this build
         # context, so it comes in as a named context instead.
         --build-context "repo-docs=${REPO_ROOT}/docs"
@@ -432,7 +474,7 @@ build_runtime() {
 
     echo ""
     echo "=========================================="
-    echo "Building runtime image (${BACKEND})..."
+    echo "Building runtime image (${VARIANT})..."
     echo "=========================================="
     echo ""
     DOCKER_BUILDKIT=1 docker buildx build --load \
@@ -465,7 +507,7 @@ if [[ "$MODE" == "stage" ]]; then
         if ! image_exists "${BASE_TAG}"; then
             echo "" >&2
             echo "ERROR: builder base ${BASE_TAG} has not been published." >&2
-            echo "  Run: build-image.sh --${BACKEND} --stage=base" >&2
+            echo "  Run: build-image.sh --${VARIANT} --stage=base" >&2
             exit 1
         fi
         build_project "${STAGE_TARGET}" --push
@@ -534,7 +576,7 @@ if [[ ${#MISSING_BINARIES[@]} -gt 0 ]]; then
     done
     echo ""
     echo "Try running with --no-cache flag:"
-    echo "  ./build-image.sh --${BACKEND} --no-cache"
+    echo "  ./build-image.sh --${VARIANT} --no-cache"
     exit 1
 fi
 

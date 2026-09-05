@@ -1,24 +1,24 @@
-name: Build Unified Docker Image (backend)
+name: Build Unified Docker Image (variant)
 
-# The build chain for ONE backend: builder base -> one job per upstream
+# The build chain for ONE variant: builder base -> one job per upstream
 # project -> assemble and push.
 #
-# unified-docker.yml calls this once per backend so the two are fully
-# independent. Vulkan's four projects finish in minutes; CUDA's ik_llama.cpp
-# takes hours. With both backends in one job graph the Vulkan image could not
-# publish until CUDA finished, because `needs` applies to a whole job and not
-# to individual matrix cells. Separate calls are the only way GitHub expresses
-# per-backend dependencies.
+# unified-docker.yml calls this once per variant so they are fully independent.
+# Vulkan's four projects finish in minutes; CUDA's ik_llama.cpp takes hours.
+# With every variant in one job graph the Vulkan image could not publish until
+# CUDA finished, because `needs` applies to a whole job and not to individual
+# matrix cells. Separate calls are the only way GitHub expresses per-variant
+# dependencies.
 
 on:
   workflow_call:
     inputs:
-      backend:
-        description: "cuda or vulkan"
+      variant:
+        description: "cuda, cuda13 or vulkan -- the build-image.sh flag, minus the dashes"
         required: true
         type: string
       projects:
-        description: "JSON array of projects to build for this backend"
+        description: "JSON array of projects to build for this variant"
         required: true
         type: string
       push_to_ghcr:
@@ -83,7 +83,7 @@ jobs:
       - name: Build and publish builder base
         run: |
           chmod +x docker/unified/build-image.sh
-          docker/unified/build-image.sh --${{ inputs.backend }} --stage=base
+          docker/unified/build-image.sh --${{ inputs.variant }} --stage=base
 
   artifacts:
     name: build ${{ matrix.project }}
@@ -135,7 +135,7 @@ jobs:
           LS_VERSION: ${{ inputs.ls_hash }}
         run: |
           chmod +x docker/unified/build-image.sh
-          docker/unified/build-image.sh --${{ inputs.backend }} --stage=${{ matrix.project }}
+          docker/unified/build-image.sh --${{ inputs.variant }} --stage=${{ matrix.project }}
 
   assemble:
     name: assemble
@@ -183,19 +183,19 @@ jobs:
           AUDIO_REF: ${{ inputs.audio_hash }}
           IK_LLAMA_REF: ${{ inputs.ik_llama_hash }}
           LS_VERSION: ${{ inputs.ls_hash }}
-          DOCKER_IMAGE_TAG: ghcr.io/mostlygeek/llama-swap:unified-${{ inputs.backend }}
+          DOCKER_IMAGE_TAG: ghcr.io/mostlygeek/llama-swap:unified-${{ inputs.variant }}
           # When running under act, use the local builder that has warm ccache.
           # On GitHub Actions, BUILDX_BUILDER is unset so docker uses the builder
           # created by setup-buildx-action above.
           BUILDX_BUILDER: ${{ env.ACT == 'true' && 'llama-swap-builder' || '' }}
         run: |
           chmod +x docker/unified/build-image.sh
-          docker/unified/build-image.sh --${{ inputs.backend }} --assemble
+          docker/unified/build-image.sh --${{ inputs.variant }} --assemble
 
       - name: Push to GitHub Container Registry
         if: ${{ !env.ACT && inputs.push_to_ghcr }}
         run: |
-          BASE_TAG="ghcr.io/mostlygeek/llama-swap:unified-${{ inputs.backend }}"
+          BASE_TAG="ghcr.io/mostlygeek/llama-swap:unified-${{ inputs.variant }}"
           DATE_TAG=$(date -u +%Y-%m-%d)
 
           docker push "${BASE_TAG}"
