@@ -114,6 +114,69 @@ store:
 	})
 }
 
+func TestConfig_StoreCapturePersistence(t *testing.T) {
+	t.Run("disabled by default", func(t *testing.T) {
+		dir := t.TempDir()
+		cfg, err := LoadConfigFromReader(strings.NewReader(`
+store:
+  path: ` + filepath.Join(dir, "db.sqlite") + `
+`))
+		require.NoError(t, err)
+		require.NotNil(t, cfg.Store)
+		assert.Equal(t, 0, cfg.Store.CaptureMaxMB)
+		assert.Equal(t, "", cfg.Store.CaptureDir)
+	})
+
+	t.Run("maxMB without dir stays disabled", func(t *testing.T) {
+		dir := t.TempDir()
+		cfg, err := LoadConfigFromReader(strings.NewReader(`
+store:
+  path: ` + filepath.Join(dir, "db.sqlite") + `
+  captureMaxMB: 256
+`))
+		require.NoError(t, err)
+		assert.Equal(t, 256, cfg.Store.CaptureMaxMB)
+		assert.Equal(t, "", cfg.Store.CaptureDir)
+	})
+
+	t.Run("explicit dir preserved", func(t *testing.T) {
+		dir := t.TempDir()
+		captureDir := filepath.Join(dir, "caps")
+		cfg, err := LoadConfigFromReader(strings.NewReader(`
+store:
+  path: ` + filepath.Join(dir, "db.sqlite") + `
+  captureMaxMB: 64
+  captureDir: ` + captureDir + `
+`))
+		require.NoError(t, err)
+		assert.Equal(t, captureDir, cfg.Store.CaptureDir)
+	})
+
+	t.Run("dir set with unlimited max", func(t *testing.T) {
+		dir := t.TempDir()
+		captureDir := filepath.Join(dir, "caps")
+		cfg, err := LoadConfigFromReader(strings.NewReader(`
+store:
+  path: ` + filepath.Join(dir, "db.sqlite") + `
+  captureDir: ` + captureDir + `
+`))
+		require.NoError(t, err)
+		assert.Equal(t, captureDir, cfg.Store.CaptureDir)
+		assert.Equal(t, 0, cfg.Store.CaptureMaxMB)
+	})
+
+	t.Run("negative max rejected", func(t *testing.T) {
+		dir := t.TempDir()
+		_, err := LoadConfigFromReader(strings.NewReader(`
+store:
+  path: ` + filepath.Join(dir, "db.sqlite") + `
+  captureMaxMB: -1
+`))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "store.captureMaxMB")
+	})
+}
+
 func TestConfig_FindConfig(t *testing.T) {
 
 	// TODO?

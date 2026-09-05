@@ -36,28 +36,52 @@ func (e ActivityLogEvent) Type() uint32 {
 
 // metricsMonitor parses upstream responses for token statistics, stores
 // activity in a store, and (when captures are enabled) stores
-// zstd+CBOR-compressed request/response captures in a sized in-memory cache.
+// zstd+CBOR-compressed request/response captures in a captureStore. The store
+// may be an in-memory cache, a disk tier, or a two-tier combination of both.
 type metricsMonitor struct {
 	store          *store.Store
 	maxMetrics     int
 	logger         *logmon.Monitor
 	enableCaptures bool
-	captureCache   *cache.Cache // zstd-compressed CBOR of ReqRespCapture
+	captureCache   captureStore // zstd-compressed CBOR of ReqRespCapture
 }
 
 func newMetricsMonitor(logger *logmon.Monitor, maxMetrics int, captureBufferMB int, st *store.Store) *metricsMonitor {
+	return newMetricsMonitorWithDisk(logger, maxMetrics, captureBufferMB, 0, "", st)
+}
+
+// newMetricsMonitorWithDisk builds a monitor whose captures span an in-memory
+// tier (captureBufferMB) and/or a disk tier written under diskDir. The disk tier
+// is enabled by a non-empty diskDir (the byte budget, diskMaxMB, only caps it;
+// 0 means unlimited). It is refused when st is in-memory: activity IDs reset
+// every boot, so persisted captures keyed by those IDs would orphan on restart.
+func newMetricsMonitorWithDisk(logger *logmon.Monitor, maxMetrics, captureBufferMB, diskMaxMB int, diskDir string, st *store.Store) *metricsMonitor {
 	if maxMetrics <= 0 {
 		maxMetrics = 1000
 	}
 	mm := &metricsMonitor{
-		logger:         logger,
-		store:          st,
-		maxMetrics:     maxMetrics,
-		enableCaptures: captureBufferMB > 0,
+		logger:     logger,
+		store:      st,
+		maxMetrics: maxMetrics,
 	}
+
+	var mem captureStore
 	if captureBufferMB > 0 {
-		mm.captureCache = cache.New(captureBufferMB * 1024 * 1024)
+		mem = cache.New(captureBufferMB * 1024 * 1024)
 	}
+	var disk captureStore
+	if diskDir != "" {
+		if st.IsInMemory() {
+			mm.warnf("capture persistence requires a persistent store.path; ignoring the disk capture tier")
+		} else if dc, err := newDiskCapture(diskDir, diskMaxMB*1024*1024); err != nil {
+			mm.warnf("failed to open disk capture store at %s: %v", diskDir, err)
+		} else {
+			disk = dc
+		}
+	}
+
+	mm.captureCache = combineCapture(mem, disk)
+	mm.enableCaptures = mm.captureCache != nil
 	return mm
 }
 

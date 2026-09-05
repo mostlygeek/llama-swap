@@ -93,6 +93,12 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		if err := validateStorePath(config.Store.Path); err != nil {
 			return Config{}, err
 		}
+		if config.Store.CaptureMaxMB < 0 {
+			return Config{}, fmt.Errorf("store.captureMaxMB must be >= 0")
+		}
+		// On-disk captures are opt-in and enabled by store.captureDir alone: an
+		// empty dir stores nothing on disk. store.captureMaxMB only caps the
+		// directory size; 0 (default) means unlimited disk usage.
 	}
 
 	// Apply default for upstream.ignorePaths when not specified. The default

@@ -228,6 +228,15 @@
                     "type": "string",
                     "minLength": 1,
                     "description": "SQLite database file path for persistent activity logs."
+                },
+                "captureDir": {
+                    "type": "string",
+                    "description": "Directory for on-disk request/response captures. Empty (default) stores nothing on disk; set it to opt in. Requires a persistent store.path."
+                },
+                "captureMaxMB": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Maximum MB of captures to keep under store.captureDir; 0 (default) means unlimited disk usage. Only used when store.captureDir is set."
                 }
             },
             "required": [

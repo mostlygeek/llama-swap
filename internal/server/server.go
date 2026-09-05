@@ -220,6 +220,10 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 	}
 
 	shutdownCtx, shutdownFn := context.WithCancel(context.Background())
+	diskCaptureMB, diskCaptureDir := 0, ""
+	if cfg.Store != nil {
+		diskCaptureMB, diskCaptureDir = cfg.Store.CaptureMaxMB, cfg.Store.CaptureDir
+	}
 	s := &Server{
 		cfg:           cfg,
 		muxlog:        muxlog,
@@ -227,7 +231,7 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 		upstreamlog:   upstreamlog,
 		perf:          perfMon,
 		inflight:      newInflightTracker(),
-		metrics:       newMetricsMonitor(proxylog, cfg.MetricsMaxInMemory, cfg.CaptureBuffer, st),
+		metrics:       newMetricsMonitorWithDisk(proxylog, cfg.MetricsMaxInMemory, cfg.CaptureBuffer, diskCaptureMB, diskCaptureDir, st),
 		store:         st,
 		build:         build,
 		hardware:      hardware,

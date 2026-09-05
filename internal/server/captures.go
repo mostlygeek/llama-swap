@@ -20,6 +20,80 @@ type ReqRespCapture struct {
 	RespBody    []byte            `json:"resp_body"`
 }
 
+// captureStore persists compressed (zstd+CBOR) capture blobs keyed by activity
+// ID. The in-memory cache.Cache and the file-backed diskCapture both satisfy it.
+type captureStore interface {
+	Add(id int, data []byte) error
+	Get(id int) ([]byte, error)
+	Has(id int) bool
+}
+
+// combineCapture layers the given tiers, ignoring unconfigured (nil) ones. It
+// returns a single store when one tier is set, a tiered store when several are,
+// or nil when none is. Reads probe tiers in order (memory before disk); writes
+// go to every tier so a capture evicted from memory still survives on disk.
+func combineCapture(tiers ...captureStore) captureStore {
+	var active []captureStore
+	for _, tier := range tiers {
+		if tier != nil {
+			active = append(active, tier)
+		}
+	}
+	switch len(active) {
+	case 0:
+		return nil
+	case 1:
+		return active[0]
+	default:
+		return &tieredCapture{tiers: active}
+	}
+}
+
+// tieredCapture spans an ordered set of captureStore tiers.
+type tieredCapture struct {
+	tiers []captureStore
+}
+
+func (t *tieredCapture) Add(id int, data []byte) error {
+	var lastErr error
+	stored := false
+	for _, tier := range t.tiers {
+		if err := tier.Add(id, data); err != nil {
+			lastErr = err
+		} else {
+			stored = true
+		}
+	}
+	if stored {
+		return nil
+	}
+	return lastErr
+}
+
+func (t *tieredCapture) Get(id int) ([]byte, error) {
+	var lastErr error
+	for _, tier := range t.tiers {
+		data, err := tier.Get(id)
+		if err == nil {
+			return data, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = errCaptureNotFound
+	}
+	return nil, lastErr
+}
+
+func (t *tieredCapture) Has(id int) bool {
+	for _, tier := range t.tiers {
+		if tier.Has(id) {
+			return true
+		}
+	}
+	return false
+}
+
 // captureFields is a bitmask controlling what a route stores in a ReqRespCapture.
 type captureFields uint
 

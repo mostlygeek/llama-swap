@@ -48,8 +48,16 @@ logToStdout: "proxy"
 # - optional, default: in-memory sqlite database capped by metricsMaxInMemory
 # - path is a sqlite database file path
 # - file-backed sqlite keeps activity logs across restarts
+# - captureDir opts into on-disk storage of raw request/response captures;
+#   empty (default) keeps captures in memory only (see captureBuffer)
+# - captureMaxMB caps that directory in MB; 0 (default) means unlimited
+# - persisted captures require a persistent store.path (activity IDs must
+#   survive restarts); the option is ignored for an in-memory database
 # store:
 #   path: /path/to/file.sqlite
+#   captureDir: /path/to/captures
+#   captureMaxMB: 512
+
 
 # metricsMaxInMemory: maximum number of metrics to keep in memory
 # - optional, default: 1000

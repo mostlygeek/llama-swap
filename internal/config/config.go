@@ -118,6 +118,13 @@ type HookOnStartup struct {
 
 type Store struct {
 	Path string `yaml:"path"`
+
+	// CaptureDir opts into on-disk storage of raw request/response captures;
+	// empty (default) stores nothing on disk. CaptureMaxMB caps the directory
+	// size in MB; 0 (default) means unlimited. Both require a persistent
+	// store.path (activity IDs must survive restarts) and are otherwise ignored.
+	CaptureDir   string `yaml:"captureDir"`
+	CaptureMaxMB int    `yaml:"captureMaxMB"`
 }
 
 type UIConfig struct {
