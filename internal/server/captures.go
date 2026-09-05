@@ -1,7 +1,9 @@
 package server
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -92,6 +94,20 @@ func (t *tieredCapture) Has(id int) bool {
 		}
 	}
 	return false
+}
+
+// Close releases each tier that is an io.Closer (the disk tier's reconcile
+// goroutine; the in-memory tier is not a Closer and is skipped).
+func (t *tieredCapture) Close() error {
+	var errs []error
+	for _, tier := range t.tiers {
+		if closer, ok := tier.(io.Closer); ok {
+			if err := closer.Close(); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // captureFields is a bitmask controlling what a route stores in a ReqRespCapture.

@@ -513,6 +513,10 @@ func (s *Server) Shutdown(timeout time.Duration) error {
 		errs = append(errs, err)
 	}
 
+	if err := s.metrics.Close(); err != nil {
+		errs = append(errs, err)
+	}
+
 	for _, rt := range []router.Router{s.local, s.peer} {
 		if rt == nil {
 			continue

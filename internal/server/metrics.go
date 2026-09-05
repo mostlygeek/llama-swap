@@ -73,7 +73,7 @@ func newMetricsMonitorWithDisk(logger *logmon.Monitor, maxMetrics, captureBuffer
 	if diskDir != "" {
 		if st.IsInMemory() {
 			mm.warnf("capture persistence requires a persistent store.path; ignoring the disk capture tier")
-		} else if dc, err := newDiskCapture(diskDir, diskMaxMB*1024*1024); err != nil {
+		} else if dc, err := newDiskCapture(diskDir, diskMaxMB*1024*1024, mm.logger); err != nil {
 			mm.warnf("failed to open disk capture store at %s: %v", diskDir, err)
 		} else {
 			disk = dc
@@ -136,6 +136,11 @@ func (mp *metricsMonitor) debugf(format string, args ...any) {
 }
 
 func (mp *metricsMonitor) Close() error {
+	// The capture store owns resources (the disk tier's reconcile goroutine)
+	// that must be released; the in-memory tier holds none and is not a Closer.
+	if closer, ok := mp.captureCache.(io.Closer); ok {
+		return closer.Close()
+	}
 	return nil
 }
 

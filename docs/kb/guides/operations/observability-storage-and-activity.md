@@ -40,6 +40,12 @@ oldest captures when exceeded; `0` (default) means unlimited disk usage. It also
 requires a persistent `store.path` because captures are keyed by activity IDs
 that reset on every in-memory boot.
 
+Each capture is stored as its own file, grouped into folders of 1000 IDs to keep
+directories small. Lookups read the exact file path directly, so no startup scan
+is needed and captures survive restarts; the `captureMaxMB` budget is enforced by
+a periodic background pass rather than inline, so disk usage can briefly exceed
+the cap right after a burst before the oldest captures are pruned.
+
 
 Do not put secrets in captures or debug logs. Reduce retention after diagnosing
 an issue.

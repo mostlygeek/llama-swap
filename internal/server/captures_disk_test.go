@@ -6,18 +6,21 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/cache"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/store"
 )
 
+// newTestDiskCapture opens a disk store with the background reconcile loop
+// disabled so tests drive eviction deterministically via reconcile().
 func newTestDiskCapture(t *testing.T, maxBytes int) *diskCapture {
 	t.Helper()
-	dir := t.TempDir()
-	dc, err := newDiskCapture(filepath.Join(dir, "captures"), maxBytes)
+	dir := filepath.Join(t.TempDir(), "captures")
+	dc, err := newDiskCaptureOpts(dir, maxBytes, nil, false)
 	if err != nil {
-		t.Fatalf("newDiskCapture: %v", err)
+		t.Fatalf("newDiskCaptureOpts: %v", err)
 	}
 	t.Cleanup(func() { dc.Close() })
 	return dc
@@ -62,13 +65,16 @@ func TestCaptureDisk_TooLargeRejected(t *testing.T) {
 }
 
 // TestCaptureDisk_UnlimitedWhenMaxIsZero shows captureMaxMB == 0 means no disk
-// budget: nothing is rejected for size and nothing is evicted.
+// budget: nothing is rejected for size and reconcile never evicts.
 func TestCaptureDisk_UnlimitedWhenMaxIsZero(t *testing.T) {
 	dc := newTestDiskCapture(t, 0)
 	for id := 1; id <= 50; id++ {
 		if err := dc.Add(id, make([]byte, 1000)); err != nil {
 			t.Fatalf("Add %d under unlimited budget: %v", id, err)
 		}
+	}
+	if err := dc.reconcile(); err != nil {
+		t.Fatalf("reconcile under unlimited budget: %v", err)
 	}
 	for id := 1; id <= 50; id++ {
 		if !dc.Has(id) {
@@ -77,13 +83,21 @@ func TestCaptureDisk_UnlimitedWhenMaxIsZero(t *testing.T) {
 	}
 }
 
-func TestCaptureDisk_EvictsOldestFirst(t *testing.T) {
-	// budget fits two 10-byte captures; the third evicts id 1 (lowest id).
+// TestCaptureDisk_ReconcileEvictsOldest proves eviction is reconcile-driven, not
+// inline: Add past the budget keeps everything until a reconcile pass runs, then
+// the lowest (oldest) ids go first until the total fits.
+func TestCaptureDisk_ReconcileEvictsOldest(t *testing.T) {
 	dc := newTestDiskCapture(t, 20)
 	for id := 1; id <= 3; id++ {
 		if err := dc.Add(id, make([]byte, 10)); err != nil {
 			t.Fatalf("Add %d: %v", id, err)
 		}
+	}
+	if !dc.Has(1) || !dc.Has(2) || !dc.Has(3) {
+		t.Fatal("Add must not evict inline; only reconcile enforces the budget")
+	}
+	if err := dc.reconcile(); err != nil {
+		t.Fatalf("reconcile: %v", err)
 	}
 	if dc.Has(1) {
 		t.Fatal("oldest (id 1) should be evicted")
@@ -110,73 +124,159 @@ func TestCaptureDisk_OverwriteSameID(t *testing.T) {
 	}
 }
 
-func TestCaptureDisk_SurvivesReopen(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "captures")
-	dc, err := newDiskCapture(dir, 1<<20)
-	if err != nil {
-		t.Fatalf("newDiskCapture: %v", err)
+// TestCaptureDisk_ShardsByThousandFiles checks the on-disk layout: ids are grouped
+// into decimal folders of 1000 (id/1000), no padding, and no flat files remain.
+func TestCaptureDisk_ShardsByThousandFiles(t *testing.T) {
+	dc := newTestDiskCapture(t, 1<<20)
+	for _, id := range []int{7, 999, 1000, 1050, 42_501} {
+		if err := dc.Add(id, []byte("x")); err != nil {
+			t.Fatalf("Add %d: %v", id, err)
+		}
 	}
-	if err := dc.Add(11, []byte("persisted")); err != nil {
+	cases := map[int]string{
+		7:      "0/7.cap",
+		999:    "0/999.cap",
+		1000:   "1/1000.cap",
+		1050:   "1/1050.cap",
+		42_501: "42/42501.cap",
+	}
+	for id, rel := range cases {
+		want := filepath.Join(dc.dir, filepath.FromSlash(rel))
+		if _, err := os.Stat(want); err != nil {
+			t.Fatalf("id %d not at %s: %v", id, rel, err)
+		}
+		// path() and direct layout must agree.
+		if got := dc.path(id); got != want {
+			t.Fatalf("path(%d) = %s, want %s", id, got, want)
+		}
+	}
+	// Nothing lives at the flat top level.
+	entries, err := os.ReadDir(dc.dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			t.Fatalf("unexpected top-level file %s (expected shard directories)", e.Name())
+		}
+	}
+}
+
+// TestCaptureDisk_LazyDiscoveryAcrossReopen proves no boot scan is required: a
+// fresh store with an empty in-memory state finds files purely by probing the
+// exact sharded path.
+func TestCaptureDisk_LazyDiscoveryAcrossReopen(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "captures")
+	dc, err := newDiskCaptureOpts(dir, 1<<20, nil, false)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := dc.Add(1050, []byte("persisted")); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 	if err := dc.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 
-	dc2, err := newDiskCapture(dir, 1<<20)
+	dc2, err := newDiskCaptureOpts(dir, 1<<20, nil, false)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer dc2.Close()
-	if !dc2.Has(11) {
-		t.Fatal("capture lost after reopen")
+	if !dc2.Has(1050) {
+		t.Fatal("capture lost after reopen (lazy discovery failed)")
 	}
-	data, err := dc2.Get(11)
+	data, err := dc2.Get(1050)
 	if err != nil || string(data) != "persisted" {
 		t.Fatalf("Get after reopen = %q, %v", data, err)
 	}
 }
 
-func TestCaptureDisk_RebuiltIndexHonorsBudget(t *testing.T) {
+// TestCaptureDisk_NoEvictionAtOpen proves opening never scans or evicts: over-budget
+// files from a previous run all survive until reconcile runs. This is the startup
+// cost guarantee (O(1) open regardless of capture count).
+func TestCaptureDisk_NoEvictionAtOpen(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "captures")
-	dc, _ := newDiskCapture(dir, 20)
-	for id := 1; id <= 2; id++ {
-		if err := dc.Add(id, make([]byte, 10)); err != nil {
+	dc, err := newDiskCaptureOpts(dir, 30, nil, false)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	for id := 1; id <= 5; id++ {
+		if err := dc.Add(id, make([]byte, 10)); err != nil { // 50 bytes over a 30 budget
 			t.Fatalf("Add %d: %v", id, err)
 		}
 	}
 	dc.Close()
 
-	// Reopen with the same budget: total is rebuilt from disk, so adding a
-	// third capture must evict the oldest (id 1), not exceed the budget.
-	dc2, err := newDiskCapture(dir, 20)
+	dc2, err := newDiskCaptureOpts(dir, 30, nil, false)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer dc2.Close()
-	if err := dc2.Add(3, make([]byte, 10)); err != nil {
-		t.Fatalf("Add after reopen: %v", err)
+	for id := 1; id <= 5; id++ {
+		if !dc2.Has(id) {
+			t.Fatalf("id %d evicted at open: reopening must not scan or evict", id)
+		}
 	}
-	if dc2.Has(1) {
-		t.Fatal("rebuilt index did not evict oldest id")
+	// One reconcile pass now enforces the budget by dropping the oldest ids.
+	if err := dc2.reconcile(); err != nil {
+		t.Fatalf("reconcile: %v", err)
 	}
-	if !dc2.Has(3) {
-		t.Fatal("new capture missing")
+	if dc2.Has(1) || dc2.Has(2) {
+		t.Fatal("reconcile must evict oldest ids to fit the budget")
+	}
+	for id := 3; id <= 5; id++ {
+		if !dc2.Has(id) {
+			t.Fatalf("id %d should be retained after reconcile", id)
+		}
 	}
 }
 
 func TestCaptureDisk_MissingFileTreatedAsNotFound(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "captures")
-	dc, _ := newDiskCapture(dir, 1<<20)
+	dc := newTestDiskCapture(t, 1<<20)
 	if err := dc.Add(9, []byte("x")); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 	if err := os.Remove(dc.path(9)); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
+	if dc.Has(9) {
+		t.Fatal("Has must be false after the file is removed")
+	}
 	if _, err := dc.Get(9); !errors.Is(err, errCaptureNotFound) {
 		t.Fatalf("Get missing file err = %v, want errCaptureNotFound", err)
 	}
+}
+
+// TestCaptureDisk_ReconcileLoopEvictsInBackground exercises the goroutine that the
+// production constructor starts: after writes push the store over budget, the
+// background pass evicts the oldest ids without an explicit reconcile call.
+func TestCaptureDisk_ReconcileLoopEvictsInBackground(t *testing.T) {
+	prevInterval, prevFirst := reconcileInterval, reconcileFirstDelay
+	reconcileFirstDelay, reconcileInterval = 5*time.Millisecond, 5*time.Millisecond
+	t.Cleanup(func() { reconcileInterval, reconcileFirstDelay = prevInterval, prevFirst })
+
+	dir := filepath.Join(t.TempDir(), "captures")
+	dc, err := newDiskCapture(dir, 20, nil) // startLoop = true
+	if err != nil {
+		t.Fatalf("newDiskCapture: %v", err)
+	}
+	defer dc.Close()
+
+	for id := 1; id <= 3; id++ { // 30 bytes over a 20 budget
+		if err := dc.Add(id, make([]byte, 10)); err != nil {
+			t.Fatalf("Add %d: %v", id, err)
+		}
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if !dc.Has(1) {
+			return // background reconcile evicted the oldest: pass
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatal("background reconcile did not evict the oldest capture")
 }
 
 // TestCaptureDisk_TieredFallsBackToDisk proves a two-tier store writes to both
@@ -222,8 +322,30 @@ func TestCaptureDisk_TieredMemTooLargeStoredOnDisk(t *testing.T) {
 	}
 }
 
+// TestCaptureDisk_CloseStopsLoop proves Close terminates the background reconcile
+// goroutine (waited on, not just signaled), so reloads do not leak reconcilers.
+func TestCaptureDisk_CloseStopsLoop(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "captures")
+	dc, err := newDiskCapture(dir, 1<<20, nil) // loop started
+	if err != nil {
+		t.Fatalf("newDiskCapture: %v", err)
+	}
+	done := make(chan struct{})
+	go func() { dc.Close(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close did not stop the reconcile loop")
+	}
+	// Close must be idempotent.
+	if err := dc.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+}
+
 // newPersistMetricsMonitor builds a metricsMonitor backed by a persistent sqlite
-// store and a disk capture dir, exercising the real two-tier constructor.
+// store and a disk capture dir, exercising the real two-tier constructor. It
+// registers mm.Close so the background reconcile goroutine is stopped at cleanup.
 func newPersistMetricsMonitor(t *testing.T, dir string, memMB, diskMB int) *metricsMonitor {
 	t.Helper()
 	st, err := store.New(filepath.Join(dir, "activity.sqlite"))
@@ -232,29 +354,31 @@ func newPersistMetricsMonitor(t *testing.T, dir string, memMB, diskMB int) *metr
 	}
 	t.Cleanup(func() { st.Close() })
 	mm := newMetricsMonitorWithDisk(logmon.NewWriter(io.Discard), 0, memMB, diskMB, filepath.Join(dir, "captures"), st)
+	t.Cleanup(func() { mm.Close() })
 	return mm
 }
 
 // TestCaptureDisk_MonitorPersistsAcrossRestart shows a capture written through
-// the metricsMonitor is retrievable by a fresh monitor over the same dir, i.e.
-// it survives a process restart (which the in-memory-only path cannot).
+// the metricsMonitor is retrievable by a fresh monitor over the same dir via the
+// lazy disk path, i.e. it survives a process restart (which the in-memory-only
+// path cannot) without any boot-time scan.
 func TestCaptureDisk_MonitorPersistsAcrossRestart(t *testing.T) {
 	dir := t.TempDir()
 	mm := newPersistMetricsMonitor(t, dir, 0, 8)
 	if !mm.enableCaptures {
 		t.Fatal("captures should be enabled when a disk tier is configured")
 	}
-	if !mm.addCapture(ReqRespCapture{ID: 4, ReqBody: []byte("durable")}) {
+	if !mm.addCapture(ReqRespCapture{ID: 1050, ReqBody: []byte("durable")}) {
 		t.Fatal("addCapture returned false")
 	}
 
 	reopened := newPersistMetricsMonitor(t, dir, 0, 8)
-	got := reopened.getCaptureByID(4)
+	got := reopened.getCaptureByID(1050)
 	if got == nil || string(got.ReqBody) != "durable" {
 		t.Fatalf("capture lost after restart: %+v", got)
 	}
 
-	entries := []ActivityLogEntry{{ID: 4}}
+	entries := []ActivityLogEntry{{ID: 1050}}
 	reopened.overlayCaptureState(entries)
 	if !entries[0].HasCapture {
 		t.Fatal("overlayCaptureState must report the persisted capture")
