@@ -131,6 +131,12 @@ $ docker run -it --rm --runtime nvidia -p 9292:8080 \
  ghcr.io/mostlygeek/llama-swap:unified-cuda13
 ```
 
+The unified images can also be configured with `LLAMA_SWAP_*` environment
+variables instead of flags — `LLAMA_SWAP_CONFIG`, `LLAMA_SWAP_LISTEN`,
+`LLAMA_SWAP_WATCH_CONFIG` and so on. See
+[docker/unified/README.md](docker/unified/README.md#configuring-with-environment-variables).
+Passing flags to the container works exactly as before.
+
 #### Legacy container
 
 ```shell

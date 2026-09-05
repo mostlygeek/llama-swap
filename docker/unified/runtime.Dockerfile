@@ -183,7 +183,16 @@ RUN echo "llama.cpp: ${LLAMA_COMMIT_HASH}" > /versions.txt && \
     echo "build_timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> /versions.txt
 
 RUN mkdir -p /models && chown ${RUN_UID}:${RUN_UID} /models
+
+# Entrypoint that turns LLAMA_SWAP_* environment variables into flags. The
+# defaults that used to live in CMD moved into it, so a container started with
+# no arguments behaves exactly as before, and arguments passed to the container
+# still replace them outright rather than being appended to ours.
+COPY --chmod=755 run.sh /usr/local/bin/run.sh
+
 WORKDIR /models
 USER ${RUN_UID}
-ENTRYPOINT ["llama-swap"]
-CMD ["-config", "/etc/llama-swap/config/config.yaml", "-listen", "0.0.0.0:8080", "-watch-config"]
+ENTRYPOINT ["run.sh"]
+# Explicitly empty: an inherited CMD would arrive as arguments to run.sh, which
+# reads arguments as a full override of the environment.
+CMD []

@@ -165,6 +165,64 @@ container driver.
 Because images are addressed by content, the old `:unified-<backend>-cache`
 BuildKit cache tags are no longer written and can be deleted from the registry.
 
+## Configuring with environment variables
+
+The image's entrypoint is `run.sh`, which turns `LLAMA_SWAP_*` variables into
+llama-swap flags so a compose file or Kubernetes manifest can configure the
+server without rewriting its command line. The mapping is mechanical — the flag
+name, uppercased, with dashes as underscores:
+
+| variable | flag | default in the image |
+|---|---|---|
+| `LLAMA_SWAP_CONFIG` | `-config` | `/etc/llama-swap/config/config.yaml` |
+| `LLAMA_SWAP_CONFIG_DIR` | `-config-dir` | — |
+| `LLAMA_SWAP_LISTEN` | `-listen` | `0.0.0.0:8080` |
+| `LLAMA_SWAP_TLS_CERT_FILE` | `-tls-cert-file` | — |
+| `LLAMA_SWAP_TLS_KEY_FILE` | `-tls-key-file` | — |
+| `LLAMA_SWAP_LISTEN_TAILCAT` | `-listen-tailcat` | — |
+| `LLAMA_SWAP_WATCH_CONFIG` | `-watch-config` | `true` |
+| `LLAMA_SWAP_VALIDATE` | `-validate` | `false` |
+
+```yaml
+services:
+  llama-swap:
+    image: ghcr.io/mostlygeek/llama-swap:unified-cuda13
+    environment:
+      LLAMA_SWAP_CONFIG: /models/llama-swap.yaml
+      LLAMA_SWAP_LISTEN: 0.0.0.0:9292
+      LLAMA_SWAP_WATCH_CONFIG: "false"
+```
+
+An unset or empty variable contributes nothing, leaving llama-swap's own
+default. Booleans take `true`/`false`, `1`/`0`, `yes`/`no` or `on`/`off` in any
+case; anything else stops the container rather than being read as "off". Setting
+`LLAMA_SWAP_CONFIG_DIR` alone drops the default `-config`, since `-config-dir` is
+additive and would otherwise merge the example models this image ships into your
+own set.
+
+`-version` is deliberately not mapped: as a variable it would only make the
+container print a version and exit, and `LLAMA_SWAP_VERSION` is the name someone
+is most likely to already be using to record which release they run. Use
+`docker run <image> -version` instead.
+
+### Backwards compatibility
+
+Passing arguments to the container still replaces every default, exactly as
+overriding `CMD` did before this entrypoint existed:
+
+```bash
+# unchanged: runs `llama-swap -config /models/my.yaml`, nothing else added
+docker run ghcr.io/mostlygeek/llama-swap:unified-cuda13 -config /models/my.yaml
+```
+
+Arguments therefore win outright over `LLAMA_SWAP_*`, rather than being appended
+to flags the entrypoint built. `--entrypoint llama-swap` still bypasses the
+script entirely. `run_test.sh` covers these cases against a stub binary:
+
+```bash
+./run_test.sh
+```
+
 ## audio.cpp
 
 `audiocpp_server` needs its own JSON config listing the models it serves. The

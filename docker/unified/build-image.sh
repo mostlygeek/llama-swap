@@ -803,6 +803,28 @@ fi
 
 echo "audio.cpp verified: deployment build (compiled model spec catalog), binary runs"
 
+# The entrypoint turns LLAMA_SWAP_* variables into flags, so exercise that path
+# end to end rather than just checking the script is present. -validate only
+# loads the config -- no listener, no hardware detection -- so this also catches
+# an image shipping a default config that cannot be parsed.
+if ! docker run --rm -e LLAMA_SWAP_VALIDATE=true "${RUNTIME_TAG}" | grep -q "config is valid"; then
+    echo "ERROR: LLAMA_SWAP_VALIDATE=true did not validate the shipped config;"
+    echo "       run.sh is not translating environment variables into flags, or"
+    echo "       /etc/llama-swap/config/config.yaml does not parse."
+    exit 1
+fi
+
+# A value that is not a boolean has to stop the container rather than be read as
+# "off", which would leave the server running with a setting the operator
+# believes they turned on.
+if docker run --rm -e LLAMA_SWAP_WATCH_CONFIG=notabool "${RUNTIME_TAG}" >/dev/null 2>&1; then
+    echo "ERROR: LLAMA_SWAP_WATCH_CONFIG=notabool was accepted; run.sh should"
+    echo "       refuse a non-boolean instead of treating it as false."
+    exit 1
+fi
+
+echo "entrypoint verified: LLAMA_SWAP_* variables become flags"
+
 build_rootless
 
 echo "Rootless image built: ${ROOTLESS_TAG}"
