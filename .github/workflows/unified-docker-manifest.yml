@@ -1,0 +1,61 @@
+name: Build Unified Docker Image (manifest)
+
+# Joins one variant's per-platform images into the tags users pull.
+#
+# Its own reusable workflow because it has to wait for every platform's assemble
+# job, which is a sibling of this one rather than a step inside it. Calling it
+# once per variant keeps the join in a single place instead of a copy per
+# variant in unified-docker.yml.
+
+on:
+  workflow_call:
+    inputs:
+      variant:
+        description: "cuda, cuda13 or vulkan"
+        required: true
+        type: string
+      platforms:
+        description: "JSON array of platforms whose images should be joined"
+        required: true
+        type: string
+      date_tag:
+        description: "Date suffix for the published tags, resolved once by setup"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  manifest:
+    name: manifest
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # Reads the per-platform images out of the registry and writes a manifest
+      # list, so there is nothing to build and nothing to pull here. Fails if a
+      # platform's image is missing rather than quietly publishing a manifest
+      # that lost an architecture.
+      - name: Publish multi-arch manifest
+        env:
+          VARIANT: ${{ inputs.variant }}
+          PLATFORMS: ${{ inputs.platforms }}
+          DATE_TAG: ${{ inputs.date_tag }}
+          DOCKER_IMAGE_TAG: ghcr.io/mostlygeek/llama-swap:unified-${{ inputs.variant }}
+        run: |
+          chmod +x docker/unified/build-image.sh
+          docker/unified/build-image.sh \
+            "--${VARIANT}" \
+            --manifest \
+            --platforms="$(echo "$PLATFORMS" | jq -r 'join(",")')"

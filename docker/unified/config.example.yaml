@@ -1,45 +1,37 @@
-# placeholder example configuration
-healthCheckTimeout: 300
-logRequests: true
+# Starter configuration for the llama-swap container.
+#
+# Mount your models at /models, download a GGUF into it, and this runs as-is.
+# It is deliberately small: one model, so there is something working to edit.
+# Every available option is documented in docs/config.example.yaml in the
+# llama-swap repository -- that file is reference material and is not meant to
+# be run.
+#
+# The image also ships whisper-server, sd-server, audiocpp_server and
+# ik-llama-server. Add them as further entries under models: when you need them.
 
 models:
-  "llama":
-    cmd: >
+  # https://huggingface.co/unsloth/gemma-4-12b-it-GGUF
+  #
+  #   uvx hf download unsloth/gemma-4-12b-it-GGUF \
+  #     gemma-4-12b-it-Q4_K_M.gguf --local-dir /path/to/models
+  #
+  #   # optional, for the MTP draft model enabled below
+  #   uvx hf download unsloth/gemma-4-12b-it-GGUF \
+  #     MTP/mtp-gemma-4-12b-it-Q8_0.gguf --local-dir /path/to/models
+  gemma-4-12B:
+    filters:
+      stripParams: "temperature, top_k, top_p, repeat_penalty, min_p, presence_penalty"
+    capabilities:
+      tools: true
+    cmd: |
       llama-server
-      -hf bartowski/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M
-      --port ${PORT}
+      --host 127.0.0.1 --port ${PORT}
+      --temp 1.0 --top-p 0.95 --top-k 64
 
-  "whisper":
-    checkEndpoint: /v1/audio/transcriptions/
-    cmd: >
-      whisper-server
-      --port ${PORT}
-      --m /models/whisper.bin
-      --flash-attn
-      --request-path /v1/audio/transcriptions --inference-path ""
+      # model params
+      --model /models/gemma-4-12b-it-Q4_K_M.gguf
+      --model-draft /models/MTP/mtp-gemma-4-12b-it-Q8_0.gguf
 
-  "audio":
-    checkEndpoint: /health
-    # audiocpp_server takes its own JSON config listing the models it serves.
-    # Copy the starter shipped in the image -- it already has this image's
-    # backend set -- and replace the example models with your own:
-    #   docker run --rm --entrypoint cat <image> \
-    #     /etc/llama-swap/audiocpp-server.example.json > /models/audiocpp-server.json
-    cmd: |
-      audiocpp_server
-      --config /models/audiocpp-server.json
-      --port ${PORT}
-
-  "image":
-    checkEndpoint: /
-    cmd: |
-      /app/sd-server
-      --listen-port 9999
-      --diffusion-fa
-      --diffusion-model /models/z_image_turbo-Q8_0.gguf
-      --vae /models/ae.safetensors
-      --llm /models/qwen3-4b-instruct-2507-q8_0.gguf
-      --offload-to-cpu
-      --cfg-scale 1.0
-      --height 512 --width 512
-      --steps 8
+      # enable MTP
+      --spec-type draft-mtp
+      --spec-draft-n-max 4 --spec-draft-p-min 0.75
