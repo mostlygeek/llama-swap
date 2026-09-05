@@ -71,44 +71,6 @@ tailcat:
 	}
 }
 
-func TestConfig_ExposedTailcatModels(t *testing.T) {
-	yaml := `
-models:
-  local:
-    proxy: http://localhost:1
-    aliases: [alias]
-selectors:
-  select:
-    strategy: pin
-    targets: [local]
-profiles:
-  prod:
-    pins:
-      public: local
-tailcat:
-  models: ["*"]
-`
-	cfg, err := LoadConfigFromReader(strings.NewReader(yaml))
-	if err != nil {
-		t.Fatalf("LoadConfigFromReader: %v", err)
-	}
-	want := []string{"alias", "local", "public", "select"}
-	if got := ExposedTailcatModels(cfg); fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Fatalf("ExposedTailcatModels = %v, want %v", got, want)
-	}
-
-	cfg.Tailcat.Models = []string{"local", "alias"}
-	want = []string{"alias", "local"}
-	if got := ExposedTailcatModels(cfg); fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Fatalf("ExposedTailcatModels = %v, want %v", got, want)
-	}
-
-	cfg.Tailcat = nil
-	if got := ExposedTailcatModels(cfg); got != nil {
-		t.Fatalf("ExposedTailcatModels = %v, want nil", got)
-	}
-}
-
 func TestConfig_TailcatRejectsInvalidValues(t *testing.T) {
 	tests := []struct {
 		name string

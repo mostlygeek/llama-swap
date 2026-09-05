@@ -365,10 +365,59 @@ func (s *Server) handleAPITailcat(w http.ResponseWriter, r *http.Request) {
 	enabled := s.cfg.TailcatEnabled()
 	if enabled {
 		address = s.TailcatAddress()
-		models = config.ExposedTailcatModels(s.cfg)
+		models = s.tailcatExposedModelIDs()
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"enabled": enabled, "address": address, "models": models})
+}
+
+// tailcatExposedModelIDs returns the sorted model IDs a Tailcat caller can
+// currently request, using the same active-profile routing rules as the
+// listener itself (ServeTailcatHTTP's tailcatModelAllowed check): local
+// models and their aliases, selectors, the active profile's pins, and peer
+// models addressed either by their fully qualified name or, where
+// unambiguous, their bare name. A "*" entry expands to every candidate.
+func (s *Server) tailcatExposedModelIDs() []string {
+	tc := s.cfg.Tailcat
+	if tc == nil {
+		return nil
+	}
+
+	candidates := make(map[string]struct{})
+	for id, mc := range s.cfg.Models {
+		candidates[id] = struct{}{}
+		for _, alias := range mc.Aliases {
+			candidates[alias] = struct{}{}
+		}
+	}
+	for selectorID := range s.cfg.Selectors {
+		candidates[selectorID] = struct{}{}
+	}
+	for peerID, peer := range s.cfg.Peers {
+		for _, modelID := range peer.Models {
+			candidates[config.PeerModelFQN(peerID, modelID)] = struct{}{}
+			if resolvedPeer, resolvedModel, found := s.cfg.ResolvePeerModel(modelID); found &&
+				resolvedPeer == peerID && resolvedModel == modelID {
+				candidates[modelID] = struct{}{}
+			}
+		}
+	}
+	if profile, ok := s.cfg.Profiles[s.ActiveProfile()]; ok {
+		for pin, target := range profile.Pins {
+			if target != "" {
+				candidates[pin] = struct{}{}
+			}
+		}
+	}
+
+	ids := make([]string, 0, len(candidates))
+	for id := range candidates {
+		if tailcatModelAllowed(tc.Models, id) {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // handleAPIHardware serves the hardware snapshot captured at process startup.

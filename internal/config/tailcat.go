@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"net/url"
-	"sort"
 	"strings"
 
 	"github.com/mostlygeek/llama-swap/internal/tailcat"
@@ -122,39 +121,6 @@ func validateTailcatConfig(cfg *Config) error {
 		used[client] = destination{server: server}
 	}
 	return nil
-}
-
-// ExposedTailcatModels returns the model IDs a Tailcat listener currently
-// serves, expanding a "*" entry into the full sorted list of public model
-// IDs. Callers use this to build a peer configuration a friend can paste
-// verbatim, since peers.<id>.models does not support "*" as a wildcard.
-func ExposedTailcatModels(cfg Config) []string {
-	tc := cfg.Tailcat
-	if tc == nil {
-		return nil
-	}
-
-	wildcard := false
-	explicit := make([]string, 0, len(tc.Models))
-	for _, model := range tc.Models {
-		if model == "*" {
-			wildcard = true
-			continue
-		}
-		explicit = append(explicit, model)
-	}
-	if !wildcard {
-		sort.Strings(explicit)
-		return explicit
-	}
-
-	ids := publicTailcatModelIDs(cfg)
-	all := make([]string, 0, len(ids))
-	for id := range ids {
-		all = append(all, id)
-	}
-	sort.Strings(all)
-	return all
 }
 
 func publicTailcatModelIDs(cfg Config) map[string]struct{} {
