@@ -226,17 +226,32 @@ from `nvcc` altogether and those cards still need an image:
 | `unified-cuda13` | amd64 | 13.3.1 | `80;86;89;90;100;120` | Ampere (A100, RTX 30xx), Ada (RTX 40xx), Hopper (H100), Blackwell (100 on datacenter parts, 120 on GeForce RTX 50xx and RTX PRO) |
 | `unified-cuda13` | arm64 | 13.3.1 | `90;100;120;121` | GB10 (DGX Spark) at 121, GH200 at 90, GB200 at 100, and a discrete GeForce or RTX PRO card in an aarch64 host at 120 |
 
-Those are the compute capabilities compiled as SASS. CMake emits PTX alongside
-SASS for every entry, so an architecture above one of them still runs by
-JIT-compiling that PTX — it just pays that cost on first load and misses
-arch-specific kernels. On `unified-cuda` that covers Volta (70), Ampere (80),
-Hopper (90) and Blackwell.
+Those are the compute capabilities compiled as SASS. For most entries CMake also
+emits PTX, so an architecture above one of them still runs by JIT-compiling that
+PTX — it pays that cost on first load and misses arch-specific kernels. On
+`unified-cuda` that covers Volta (70), Ampere (80) and Hopper (90).
 
-One trap when editing these lists: Blackwell spans two CUDA major versions, and
-PTX only JITs forward *within* a major version. Datacenter Blackwell is compute
-10.x (`100`, `103`) while GeForce and GB10 are 12.x (`120`, `121`). Neither side
-can stand in for the other, so both branches have to be listed — dropping `100`
-does not leave GB200 covered by `120`.
+Blackwell is the exception, in two ways that both matter when editing these
+lists.
+
+**`120` is not what actually gets compiled.** ggml's CUDA `CMakeLists.txt`
+rewrites any plain `12X` into the architecture-specific `12Xa`, because
+Blackwell's FP4 tensor core instructions are not forwards compatible and exist
+only under that target. Writing `120` is what you want: it is how an RTX 5090 or
+RTX PRO 6000 Blackwell (both GB202, sm_120) gets native FP4-capable code, without
+naming `120a` yourself — and naming it yourself would risk `ik_llama.cpp`, an
+older fork with no such rewrite, which compiles the plain number. The catch is
+that `12Xa` targets are real-only: they emit no PTX, so **nothing in the 12.x
+family is reachable by JIT**. A 12.x GPU runs only if its number is listed.
+
+**Blackwell spans two CUDA major versions.** Datacenter parts are compute 10.x
+(`100`, `103`); GeForce, RTX PRO and GB10 are 12.x (`120`, `121`). PTX only JITs
+forward within a major version, so neither branch can stand in for the other —
+dropping `100` does not leave GB200 covered by `120`.
+
+`121` is deliberately absent from the amd64 list. GB10 is a Grace SoC with no
+PCIe part, so sm_121 cannot appear in an x86 host; it is listed on arm64, where
+it is the whole point.
 
 Pick `unified-cuda13` for an Ampere or newer card and `unified-cuda` for
 anything older. `unified-cuda13` is a multi-arch tag, so on a DGX Spark or any

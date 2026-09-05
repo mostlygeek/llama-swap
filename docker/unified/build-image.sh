@@ -203,10 +203,17 @@ fi
 # image -- is essential. 90 is GH200, 100 is GB200, 120 covers a discrete
 # GeForce or RTX PRO card in an aarch64 host.
 #
-# Blackwell spans two major versions and PTX only JITs forward within one, so
-# 100 (compute 10.0, datacenter) and 120/121 (compute 12.x) cannot stand in for
-# each other -- both branches have to be listed. Everything above the highest
-# entry of a major version still runs by JIT-compiling that version's PTX.
+# Two things about Blackwell shape these lists. It spans two CUDA major versions
+# -- datacenter parts are compute 10.x (100, 103), GeForce, RTX PRO and GB10 are
+# 12.x (120, 121) -- and PTX only JITs forward within a major version, so the two
+# branches cannot stand in for each other and both have to be listed. And ggml
+# rewrites any plain 12X into the architecture-specific 12Xa, because Blackwell's
+# FP4 tensor core instructions exist only under that target. Writing 120 is
+# therefore what gets RTX 50xx and RTX PRO Blackwell native FP4 code, and writing
+# 120a here would only risk ik_llama.cpp, the one project with no such rewrite.
+# The 12Xa targets are real-only though: nothing in the 12.x family is reachable
+# by JIT, so a 12.x part runs only if it is named here.
+#
 # Jetson's 87 and Thor's 110 are left out: those boards need an l4t base image,
 # not nvidia/cuda. Only the CUDA base reads these as build args; the projects
 # inherit the architectures through the base image's ENV.
