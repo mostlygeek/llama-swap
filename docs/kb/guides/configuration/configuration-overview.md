@@ -23,8 +23,11 @@ page's Docs agent about everything else, instead of reading it all here.
 
 `cmd` is the only required setting on a model — see
 `guides/model-runtime/writing-cmd` for the full picture. Here's a minimal
-config for gemma-4-12B, the model the Docs agent is evaluated against and a
-good default because it's small, capable, and runs without a GPU:
+config for gemma-4-12B, the model the Docs agent is evaluated against, in
+[Q4_K_M](https://huggingface.co/unsloth/gemma-4-12b-it-GGUF). If you have a
+smaller GPU or none at all, use the lighter
+[gemma-4-E4B](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF) instead —
+same config, just point `--model` at that GGUF.
 
 ```yaml
 models:
@@ -32,17 +35,17 @@ models:
     cmd: |
       llama-server --port ${PORT}
       --model /path/to/gemma-4-12b-it-Q4_K_M.gguf
-      --jinja
     capabilities:
       tools: true
 ```
 
-`--jinja` is required for tool calling — without it llama-server silently
-ignores the request's `tools` array and the Docs agent can't call anything.
-`capabilities.tools: true` only advertises that support in `/v1/models`; it
-doesn't enable it by itself. See
-`guides/model-runtime/capabilities-and-model-listings` for more on that
-distinction.
+Recent llama-server builds enable `--jinja` (needed for tool calling) by
+default. If the model describes a tool call in prose instead of making one,
+your build is older than that — add `--jinja` to `cmd` explicitly. See
+`guides/model-runtime/writing-cmd` and
+`guides/model-runtime/capabilities-and-model-listings` for more on
+`capabilities.tools: true`, which only advertises support in `/v1/models`
+and doesn't enable it by itself.
 
 Start llama-swap and open http://localhost:8080:
 

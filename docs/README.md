@@ -19,8 +19,7 @@ Three steps to get started:
 ## Downloading gemma-4-12B
 
 Docs is evaluated against a gemma-4-12B Q4_K_M from Unsloth.
-It is a small and capable model that most people can run even
-if they don't have a GPU.
+It is a small and capable model.
 
 Download it form https://huggingface.co/unsloth/gemma-4-12b-it-GGUF
 
@@ -30,6 +29,9 @@ uvx hf download unsloth/gemma-4-12b-it-GGUF gemma-4-12b-it-Q4_K_M.gguf --local-d
 # download MTP
 uvx hf download unsloth/gemma-4-12b-it-GGUF MTP/mtp-gemma-4-12b-it-Q8_0.gguf --local-dir .
 ```
+
+If you have a smaller GPU or none at all, use the lighter
+[gemma-4-E4B](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF) instead.
 
 ## Installing llama-server
 
@@ -52,7 +54,6 @@ models:
       --host 127.0.0.1 --port ${PORT}
       --log-verbosity 4 --log-colors on
       --temp 1.0 --top-p 0.95 --top-k 64
-      --jinja
 
       # model params
       --model /path/to/gemma-4-12b-it-Q4_K_M.gguf

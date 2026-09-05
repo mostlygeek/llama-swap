@@ -367,8 +367,9 @@
           if (event.message.tool_calls?.length) {
             sawToolCall = true;
           } else if (!sawToolCall) {
-            // llama.cpp without --jinja ignores `tools` entirely and answers in
-            // prose, with no error anywhere. Catch the shape of that.
+            // llama.cpp without --jinja (default on recent builds, but not
+            // older ones) ignores `tools` entirely and answers in prose, with
+            // no error anywhere. Catch the shape of that.
             showJinjaHint = looksLikeUnparsedToolCall(getTextContent(event.message.content));
           }
           break;
@@ -533,8 +534,9 @@
         <div class="mb-2 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
           <TriangleAlert class="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
           <div class="min-w-0 flex-1">
-            The model described a tool call instead of making one. llama-server needs
-            <code class="font-mono">--jinja</code> for tool calling to work. See the
+            The model described a tool call instead of making one. Recent llama-server
+            builds enable <code class="font-mono">--jinja</code> by default, but older ones
+            need it added explicitly. See the
             <span class="font-mono">guides/model-runtime/writing-cmd</span> guide — ask about it here.
           </div>
           <Button variant="ghost" size="icon-sm" onclick={() => (showJinjaHint = false)} title="Dismiss">

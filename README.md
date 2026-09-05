@@ -240,7 +240,7 @@ configuration using the real text of `config.example.yaml` and the knowledge
 base, running entirely on a local model. Pick a tool-capable model on the
 **Help** page and ask away — see
 [Writing the cmd for a model](docs/kb/guides/model-runtime/writing-cmd.md) if the model
-answers without calling anything (llama-server needs `--jinja` for tool calling to work).
+answers without calling anything (older llama-server builds need `--jinja` added explicitly).
 
 Those same tools are served as an MCP endpoint at `/api/mcp`, so any MCP client
 can ask about your configuration too. See
