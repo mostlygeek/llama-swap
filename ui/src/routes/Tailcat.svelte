@@ -34,7 +34,7 @@
     // client identity, so nobody's private key ends up in a shared snippet.
     // The commented line shows how to generate a stable one if this server
     // allowlists callers.
-    return `peers:\n  friend:\n    proxy: tailcat://${address}\n    # tailcatKey: /path/to/client.private.json  # generate with: tailcat genkey --client --key=/path/to/client.private.json\n    models:\n${modelLines}\n`;
+    return `peers:\n  friend:\n    proxy: tailcat://${address}\n    # generate with: tailcat genkey --client --key=/path/to/client.private.json\n    # tailcatKey: /path/to/client.private.json\n    models:\n${modelLines}\n`;
   }
 
   async function copyPeerConfig() {
