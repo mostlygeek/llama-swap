@@ -69,6 +69,7 @@ func TestFilters_SanitizedSetParams(t *testing.T) {
 		setParams  map[string]any
 		wantParams map[string]any
 		wantKeys   []string
+		wantSoft   map[string]bool
 	}{
 		{
 			name:       "empty setParams",
@@ -131,12 +132,57 @@ func TestFilters_SanitizedSetParams(t *testing.T) {
 			},
 			wantKeys: []string{"provider", "transforms"},
 		},
+		{
+			name: "soft suffix stripped and reported",
+			setParams: map[string]any{
+				"max_tokens?": 32768,
+				"temperature": 0.2,
+			},
+			wantParams: map[string]any{
+				"max_tokens":  32768,
+				"temperature": 0.2,
+			},
+			wantKeys: []string{"max_tokens", "temperature"},
+			wantSoft: map[string]bool{"max_tokens": true},
+		},
+		{
+			name: "hard spelling wins over soft",
+			setParams: map[string]any{
+				"max_tokens":  4096,
+				"max_tokens?": 32768,
+			},
+			wantParams: map[string]any{
+				"max_tokens": 4096,
+			},
+			wantKeys: []string{"max_tokens"},
+		},
+		{
+			name: "protected param cannot be soft",
+			setParams: map[string]any{
+				"model?":      "should-be-filtered",
+				"temperature": 0.7,
+			},
+			wantParams: map[string]any{
+				"temperature": 0.7,
+			},
+			wantKeys: []string{"temperature"},
+		},
+		{
+			name: "bare question mark ignored",
+			setParams: map[string]any{
+				"?": 1,
+			},
+			wantParams: nil,
+			wantKeys:   nil,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := Filters{SetParams: tt.setParams}
-			gotParams, gotKeys := f.SanitizedSetParams()
+			gotParams, gotKeys, gotSoft := f.SanitizedSetParams()
+
+			assert.Equal(t, tt.wantSoft, gotSoft)
 
 			assert.Equal(t, len(tt.wantKeys), len(gotKeys), "keys length mismatch")
 			for i, key := range gotKeys {
@@ -169,6 +215,7 @@ func TestFilters_SanitizedSetParamsByID(t *testing.T) {
 		requestedModelID string
 		wantParams       map[string]any
 		wantKeys         []string
+		wantSoft         map[string]bool
 	}{
 		{
 			name:             "empty SetParamsByID returns nil",
@@ -260,21 +307,53 @@ func TestFilters_SanitizedSetParamsByID(t *testing.T) {
 			},
 			wantKeys: []string{"reasoning_effort"},
 		},
+		{
+			name: "soft suffix per alias",
+			setParamsByID: map[string]map[string]any{
+				"model1:extraction": {
+					"max_tokens?": 32768,
+					"temperature": 0.2,
+				},
+			},
+			requestedModelID: "model1:extraction",
+			wantParams: map[string]any{
+				"max_tokens":  32768,
+				"temperature": 0.2,
+			},
+			wantKeys: []string{"max_tokens", "temperature"},
+			wantSoft: map[string]bool{"max_tokens": true},
+		},
+		{
+			name: "hard spelling wins over soft",
+			setParamsByID: map[string]map[string]any{
+				"model1": {
+					"top_p":  0.9,
+					"top_p?": 0.5,
+				},
+			},
+			requestedModelID: "model1",
+			wantParams: map[string]any{
+				"top_p": 0.9,
+			},
+			wantKeys: []string{"top_p"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := Filters{SetParamsByID: tt.setParamsByID}
-			gotParams, gotKeys := f.SanitizedSetParamsByID(tt.requestedModelID)
+			gotParams, gotKeys, gotSoft := f.SanitizedSetParamsByID(tt.requestedModelID)
 
 			if tt.wantParams == nil {
 				assert.Nil(t, gotParams)
 				assert.Nil(t, gotKeys)
+				assert.Nil(t, gotSoft)
 				return
 			}
 
 			assert.Equal(t, tt.wantKeys, gotKeys)
 			assert.Equal(t, tt.wantParams, gotParams)
+			assert.Equal(t, tt.wantSoft, gotSoft)
 		})
 	}
 }

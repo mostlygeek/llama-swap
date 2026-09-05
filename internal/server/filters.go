@@ -11,6 +11,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
+	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
@@ -141,15 +142,27 @@ func applyFilters(body []byte, requested, useModelName string, f config.Filters)
 		}
 	}
 
-	setParams, setKeys := f.SanitizedSetParams()
+	setParams, setKeys, setSoft := f.SanitizedSetParams()
+	byID, byIDKeys, byIDSoft := f.SanitizedSetParamsByID(requested)
+
+	// Set-if-undefined keys ("key?", issue #1052) only fill parameters the body
+	// does not carry at that point in the pipeline. Filters apply like a pipe —
+	// stripParams | setParams | setParamsByID — so a stripped key counts as
+	// undefined, and a key an earlier stage set counts as defined (a "key?" in
+	// setParamsByID is a no-op when setParams already set it).
 	for _, key := range setKeys {
+		if setSoft[key] && gjson.GetBytes(body, key).Exists() {
+			continue
+		}
 		if body, err = sjson.SetBytes(body, key, setParams[key]); err != nil {
 			return nil, fmt.Errorf("error setting parameter %s in request", key)
 		}
 	}
 
-	byID, byIDKeys := f.SanitizedSetParamsByID(requested)
 	for _, key := range byIDKeys {
+		if byIDSoft[key] && gjson.GetBytes(body, key).Exists() {
+			continue
+		}
 		if body, err = sjson.SetBytes(body, key, byID[key]); err != nil {
 			return nil, fmt.Errorf("error setting parameter %s in request", key)
 		}
