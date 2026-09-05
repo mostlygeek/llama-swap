@@ -4,6 +4,7 @@
   import { statusDotColor } from "../stores/modelLoad";
   import type { Model } from "../lib/types";
   import ModelLoadButton from "../components/ModelLoadButton.svelte";
+  import LoadProgressBar from "../components/LoadProgressBar.svelte";
   import * as Card from "$lib/components/ui/card/index.js";
   import { Tabs, TabsList, TabsTrigger, TabsContent } from "$lib/components/ui/tabs/index.js";
   import { ExternalLink } from "@lucide/svelte";
@@ -59,6 +60,7 @@
         {#if model.aliases && model.aliases.length > 0}
           <p class="text-muted-foreground text-xs">Aliases: {model.aliases.join(", ")}</p>
         {/if}
+        <LoadProgressBar {model} className="mt-1 max-w-md" />
       </Card.Header>
     </Card.Root>
 

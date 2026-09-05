@@ -24,6 +24,10 @@ export interface Model {
   aliases?: string[];
   capabilities?: ModelCapabilities;
   context_length?: number;
+  /** Unix-ms when the current load began; present only while state === "starting". */
+  loadStartedAt?: number;
+  /** Estimated load duration in ms from this model's prior loads; absent when unknown. */
+  estLoadMs?: number;
   // selector-only fields from the v1/models llamaswap metadata
   strategy?: string;
   targets?: string[];

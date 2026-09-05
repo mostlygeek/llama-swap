@@ -360,6 +360,16 @@ func (b *baseRouter) ProcessLogger(modelID string) (*logmon.Monitor, bool) {
 	return nil, false
 }
 
+// LoadInfo returns the load-timing snapshot for the named model's process. Safe
+// without the run loop for the same reason as RunningModels: the processes map
+// keys are fixed at construction and LoadInfo() is a snapshot.
+func (b *baseRouter) LoadInfo(modelID string) (process.LoadInfo, bool) {
+	if p, ok := b.processes[modelID]; ok {
+		return p.LoadInfo(), true
+	}
+	return process.LoadInfo{}, false
+}
+
 // RunningModels returns the current state of every process that is not stopped
 // or shut down. The processes map keys are fixed at construction and State()
 // is a snapshot, so this is safe to call without the run loop.
