@@ -129,7 +129,9 @@ type ProcessCommand struct {
 	// Written only by run(); read by ServeHTTP via atomic load.
 	handler atomic.Pointer[http.HandlerFunc]
 
-	lastUse  atomic.Int64 // unix nano timestamp of last ServeHTTP completion
+	// lastUse is the unix-nano timestamp of the most recent activity baseline.
+	// It is initialized when the process becomes Ready and updated after ServeHTTP completes.
+	lastUse  atomic.Int64
 	inflight atomic.Int64 // current in-flight ServeHTTP calls
 }
 
