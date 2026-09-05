@@ -11,7 +11,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 )
@@ -23,33 +22,26 @@ var (
 
 const captureFileExt = ".cap"
 
-// captureShardSize groups capture files into decimal folders (id/captureShardSize)
-// so a single directory never accumulates an unbounded number of entries. This
-// keeps operations efficient on filesystems that degrade with very large
+// captureShardSize groups files into decimal folders (id/captureShardSize) so
+// no single directory grows unbounded on filesystems that degrade with large
 // directories.
 const captureShardSize = 1000
 
-// Reconcile loop timing. Package-level vars so tests can shorten the cadence.
-var (
-	reconcileInterval   = 30 * time.Second
-	reconcileFirstDelay = 2 * time.Second
-)
-
 // diskCapture is a durable captureStore backed by one file per capture under
-// dir/<id/1000>/<id>.cap. Reads and writes probe the exact path directly, so no
-// startup scan is needed regardless of how many captures exist: opening is O(1)
-// and a lookup is a single filesystem stat. When a byte budget is set, an
-// eviction pass runs in the background (never inline on Add, never at open) and
-// removes the lowest-id (oldest) captures until the store fits, recomputing the
-// total from disk each pass. maxSize == 0 means unlimited (no reconcile loop).
-// Activity IDs are monotonic AUTOINCREMENT values, so ascending id order equals
-// insertion order. IDs never reach the path from user input.
+// dir/<id/1000>/<id>.cap. Reads and writes probe the exact path, so opening is
+// O(1) and needs no startup scan regardless of capture count. Eviction of the
+// lowest-id (oldest) captures runs off the request path: Add signals a
+// background loop, which walks the disk only once the running byte total
+// crosses maxSize (0 = unlimited, no loop). Activity IDs are monotonic
+// AUTOINCREMENT values, so id order is insertion order; they never come from
+// user input.
 type diskCapture struct {
 	dir     string
 	maxSize int64 // 0 = unlimited
 	logger  *logmon.Monitor
 
-	dirty     atomic.Bool // set by Add, cleared by the reconcile loop
+	total     atomic.Int64 // bytes on disk, corrected by each reconcile walk
+	triggerCh chan struct{}
 	stopCh    chan struct{}
 	doneCh    chan struct{}
 	closeOnce sync.Once
@@ -73,6 +65,7 @@ func newDiskCaptureOpts(dir string, maxBytes int, logger *logmon.Monitor, startL
 	}
 	dc := &diskCapture{dir: dir, maxSize: int64(maxBytes), logger: logger}
 	if startLoop && dc.maxSize > 0 {
+		dc.triggerCh = make(chan struct{}, 1)
 		dc.stopCh = make(chan struct{})
 		dc.doneCh = make(chan struct{})
 		go dc.reconcileLoop()
@@ -88,9 +81,8 @@ func (dc *diskCapture) path(id int) string {
 	return filepath.Join(dc.shardDir(id), strconv.Itoa(id)+captureFileExt)
 }
 
-// Add writes a capture atomically (tmp + rename in the target shard dir) and
-// flags the store dirty for the background reconcile pass. A single blob larger
-// than the whole budget is rejected; it could never fit.
+// Add writes a capture atomically (tmp + rename) and signals the reconcile
+// loop. A blob larger than the whole budget is rejected; it could never fit.
 func (dc *diskCapture) Add(id int, data []byte) error {
 	size := int64(len(data))
 	if dc.maxSize > 0 && size > dc.maxSize {
@@ -109,12 +101,18 @@ func (dc *diskCapture) Add(id int, data []byte) error {
 		os.Remove(tmp)
 		return fmt.Errorf("store capture %d: %w", id, err)
 	}
-	dc.dirty.Store(true)
+
+	if dc.maxSize > 0 {
+		dc.total.Add(size)
+		select {
+		case dc.triggerCh <- struct{}{}:
+		default:
+		}
+	}
 	return nil
 }
 
-// Get reads the capture file for id directly from disk. A missing file reports
-// errCaptureNotFound; other I/O errors are surfaced unchanged.
+// Get reads the capture file for id. A missing file reports errCaptureNotFound.
 func (dc *diskCapture) Get(id int) ([]byte, error) {
 	data, err := os.ReadFile(dc.path(id))
 	if err != nil {
@@ -146,39 +144,37 @@ func (dc *diskCapture) Close() error {
 	return nil
 }
 
-// reconcileLoop enforces the byte budget off the request path: after a short
-// first delay (so a store with pre-existing files converges without a startup
-// scan) it runs on a fixed interval, but skips the disk walk when nothing was
-// written since the previous pass.
+// reconcileLoop enforces the byte budget off the request path. It reconciles
+// once at startup so over-budget files left by previous runs converge (open
+// itself never scans), then whenever Add signals and the running total says
+// the store may not fit.
 func (dc *diskCapture) reconcileLoop() {
 	defer close(dc.doneCh)
 
-	timer := time.NewTimer(reconcileFirstDelay)
-	defer timer.Stop()
-
-	first := true
+	dc.runReconcile()
 	for {
 		select {
 		case <-dc.stopCh:
 			return
-		case <-timer.C:
+		case <-dc.triggerCh:
+			if dc.total.Load() > dc.maxSize {
+				dc.runReconcile()
+			}
 		}
-		if !first && !dc.dirty.Swap(false) {
-			timer.Reset(reconcileInterval)
-			continue
-		}
-		first = false
-		if err := dc.reconcile(); err != nil {
-			dc.warnf("capture reconcile: %v", err)
-		}
-		timer.Reset(reconcileInterval)
 	}
 }
 
-// reconcile sums the sizes of all capture files from disk and, when the total is
-// over budget, deletes the lowest-id (oldest) files until it fits. The file list
-// is snapshotted first, so captures written concurrently during the pass (always
-// higher ids) are never removed here.
+func (dc *diskCapture) runReconcile() {
+	if err := dc.reconcile(); err != nil {
+		dc.warnf("capture reconcile: %v", err)
+	}
+}
+
+// reconcile sums all capture files from disk — the authoritative total, which
+// also corrects drift in the running counter — and deletes the lowest-id
+// (oldest) files until the store fits. The file list is snapshotted first so
+// captures written concurrently during the pass (always higher ids) are never
+// removed here.
 func (dc *diskCapture) reconcile() error {
 	if dc.maxSize <= 0 {
 		return nil
@@ -189,6 +185,12 @@ func (dc *diskCapture) reconcile() error {
 		path string
 		size int64
 	}
+	// Apply the walked sum as a delta onto the running counter instead of
+	// storing it, so Adds racing the walk are not clobbered. A racing write
+	// the walk missed can only skew total high (counted twice); the next
+	// walk corrects it.
+	before := dc.total.Load()
+
 	var entries []entry
 	var total int64
 
@@ -218,19 +220,20 @@ func (dc *diskCapture) reconcile() error {
 	if err != nil {
 		return err
 	}
+	dc.total.Add(total - before)
 	if total <= dc.maxSize {
 		return nil
 	}
 
 	slices.SortFunc(entries, func(a, b entry) int { return cmp.Compare(a.id, b.id) })
 	for _, e := range entries {
-		if total <= dc.maxSize {
+		if dc.total.Load() <= dc.maxSize {
 			break
 		}
 		if err := os.Remove(e.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		total -= e.size
+		dc.total.Add(-e.size)
 	}
 	return nil
 }
