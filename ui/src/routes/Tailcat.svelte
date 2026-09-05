@@ -25,6 +25,7 @@
   let copied = $state(false);
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
   let tokenRevealed = $state(false);
+  let configRevealed = $state(false);
   let configCopied = $state(false);
   let configCopyTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -139,8 +140,16 @@
             </p>
             <div class="flex items-center gap-2">
               <code class="bg-muted min-w-0 flex-1 overflow-x-auto rounded-md px-3 py-2 text-xs whitespace-pre">
-                {tokenRevealed ? peerConfigYaml($tailcatStatus.address, $tailcatStatus.models) : TOKEN_MASK}
+                {configRevealed ? peerConfigYaml($tailcatStatus.address, $tailcatStatus.models) : TOKEN_MASK}
               </code>
+              <Button
+                variant="outline"
+                size="sm"
+                onclick={() => (configRevealed = !configRevealed)}
+                aria-label={configRevealed ? "Hide peer configuration" : "Reveal peer configuration"}
+              >
+                {#if configRevealed}<EyeOff class="size-4" />{:else}<Eye class="size-4" />{/if}
+              </Button>
               <Button variant="outline" size="sm" onclick={copyPeerConfig} aria-label="Copy peer configuration">
                 {#if configCopied}<Check class="size-4" /> Copied{:else}<Copy class="size-4" /> Copy{/if}
               </Button>
