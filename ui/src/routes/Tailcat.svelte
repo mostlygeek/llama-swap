@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { Check, Copy } from "@lucide/svelte";
+  import { Check, Copy, Eye, EyeOff } from "@lucide/svelte";
   import type { ActivityLogEntry } from "../lib/types";
   import { activityRevision, getActivity, tailcatStatus } from "../stores/api";
   import { connectionState } from "../stores/theme";
@@ -11,7 +11,8 @@
   import * as Card from "$lib/components/ui/card/index.js";
   import { Tabs, TabsContent, TabsList, TabsTrigger } from "$lib/components/ui/tabs/index.js";
 
-  const MASKED_TOKEN = "******";
+  const DOTS_MASK = "•".repeat(24);
+  const REDACTED_TOKEN = "(redacted)";
 
   const storedPageSize = persistentStore<number>("tailcat-activity-page-size", 25);
   let rows = $state<ActivityLogEntry[]>([]);
@@ -24,6 +25,8 @@
   let requestID = 0;
   let copied = $state(false);
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
+  let tokenRevealed = $state(false);
+  let configRevealed = $state(false);
   let configCopied = $state(false);
   let configCopyTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -114,16 +117,27 @@
               Treat this case-sensitive token like a capability: anyone holding it can attempt to connect.
             </p>
             <div class="relative">
-              <code class="bg-muted block overflow-x-auto rounded-md px-3 py-2 pr-10 text-xs">{MASKED_TOKEN}</code>
-              <Button
-                variant="secondary"
-                size="icon-sm"
-                onclick={copyAddress}
-                aria-label="Copy Tailcat connection token"
-                class="absolute top-1 right-1"
-              >
-                {#if copied}<Check class="size-4 text-green-600" />{:else}<Copy class="size-4" />{/if}
-              </Button>
+              <code class="bg-muted block overflow-x-auto rounded-md px-3 py-2 pr-18 text-xs">
+                {tokenRevealed ? $tailcatStatus.address : DOTS_MASK}
+              </code>
+              <div class="absolute top-1 right-1 flex gap-1">
+                <Button
+                  variant="secondary"
+                  size="icon-sm"
+                  onclick={() => (tokenRevealed = !tokenRevealed)}
+                  aria-label={tokenRevealed ? "Hide Tailcat connection token" : "Reveal Tailcat connection token"}
+                >
+                  {#if tokenRevealed}<EyeOff class="size-4" />{:else}<Eye class="size-4" />{/if}
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="icon-sm"
+                  onclick={copyAddress}
+                  aria-label="Copy Tailcat connection token"
+                >
+                  {#if copied}<Check class="size-4 text-green-600" />{:else}<Copy class="size-4" />{/if}
+                </Button>
+              </div>
             </div>
           </TabsContent>
 
@@ -133,18 +147,22 @@
               their own config so they can route requests through this server.
             </p>
             <div class="relative">
-              <code class="bg-muted block overflow-x-auto rounded-md px-3 py-2 pr-10 text-xs whitespace-pre"
-                >{peerConfigYaml(MASKED_TOKEN, $tailcatStatus.models)}</code
+              <code class="bg-muted block overflow-x-auto rounded-md px-3 py-2 pr-18 text-xs whitespace-pre"
+                >{peerConfigYaml(configRevealed ? $tailcatStatus.address : REDACTED_TOKEN, $tailcatStatus.models)}</code
               >
-              <Button
-                variant="secondary"
-                size="icon-sm"
-                onclick={copyPeerConfig}
-                aria-label="Copy peer configuration"
-                class="absolute top-1 right-1"
-              >
-                {#if configCopied}<Check class="size-4 text-green-600" />{:else}<Copy class="size-4" />{/if}
-              </Button>
+              <div class="absolute top-1 right-1 flex gap-1">
+                <Button
+                  variant="secondary"
+                  size="icon-sm"
+                  onclick={() => (configRevealed = !configRevealed)}
+                  aria-label={configRevealed ? "Hide connection token" : "Reveal connection token"}
+                >
+                  {#if configRevealed}<EyeOff class="size-4" />{:else}<Eye class="size-4" />{/if}
+                </Button>
+                <Button variant="secondary" size="icon-sm" onclick={copyPeerConfig} aria-label="Copy peer configuration">
+                  {#if configCopied}<Check class="size-4 text-green-600" />{:else}<Copy class="size-4" />{/if}
+                </Button>
+              </div>
             </div>
           </TabsContent>
         </Tabs>
