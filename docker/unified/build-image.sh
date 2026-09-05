@@ -821,8 +821,10 @@ fi
 # The starter config the image ships has to load, or a container started with
 # nothing mounted exits on its first run. -validate only loads the config -- no
 # listener, no hardware detection -- so this is cheap and catches the config
-# drifting into something unloadable.
-VALIDATE_OUT="$(docker run --rm -e LLAMA_SWAP_VALIDATE=true "${RUNTIME_TAG}" 2>&1 || true)"
+# drifting into something unloadable. This calls llama-swap directly with
+# arguments (bypassing run.sh's env-var mapping, which does not cover
+# -validate -- see run.sh for why) at the same path run.sh defaults -config to.
+VALIDATE_OUT="$(docker run --rm "${RUNTIME_TAG}" -config /etc/llama-swap/config/config.yaml -validate 2>&1 || true)"
 if ! grep -q "config is valid" <<<"${VALIDATE_OUT}"; then
     echo "ERROR: the config shipped at /etc/llama-swap/config/config.yaml does not load,"
     echo "       so this image exits immediately when run with nothing mounted."

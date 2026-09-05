@@ -181,7 +181,6 @@ name, uppercased, with dashes as underscores:
 | `LLAMA_SWAP_TLS_KEY_FILE` | `-tls-key-file` | — |
 | `LLAMA_SWAP_LISTEN_TAILCAT` | `-listen-tailcat` | — |
 | `LLAMA_SWAP_WATCH_CONFIG` | `-watch-config` | `true` |
-| `LLAMA_SWAP_VALIDATE` | `-validate` | `false` |
 
 ```yaml
 services:
@@ -200,10 +199,13 @@ case; anything else stops the container rather than being read as "off". Setting
 additive and would otherwise merge the example models this image ships into your
 own set.
 
-`-version` is deliberately not mapped: as a variable it would only make the
-container print a version and exit, and `LLAMA_SWAP_VERSION` is the name someone
-is most likely to already be using to record which release they run. Use
-`docker run <image> -version` instead.
+`-version` and `-validate` are deliberately not mapped. `-version` as a
+variable would only make the container print a version and exit, and
+`LLAMA_SWAP_VERSION` is the name someone is most likely to already be using to
+record which release they run. `-validate` checks the config and exits instead
+of serving, so as a standing variable on a long-running container it would
+either do nothing or turn the container into something that exits right after
+start. Use `docker run <image> -version` or `-config /path -validate` instead.
 
 ### Backwards compatibility
 
@@ -217,11 +219,7 @@ docker run ghcr.io/mostlygeek/llama-swap:unified-cuda13 -config /models/my.yaml
 
 Arguments therefore win outright over `LLAMA_SWAP_*`, rather than being appended
 to flags the entrypoint built. `--entrypoint llama-swap` still bypasses the
-script entirely. `run_test.sh` covers these cases against a stub binary:
-
-```bash
-./run_test.sh
-```
+script entirely.
 
 ## The config the image ships
 
@@ -233,9 +231,9 @@ there is something working to edit. Mount your own over that path, or point
 
 It is **not** `docs/config.example.yaml`. That file documents every available
 option and uses strict `${env.X}` macros, which fail the whole config when the
-variable is unset, so it cannot be run as-is — it is reference material.
-`TestConfig_ContainerExampleLoads` keeps the container's copy loadable, and the
-image build re-checks it with `LLAMA_SWAP_VALIDATE=true` before publishing.
+variable is unset, so it cannot be run as-is — it is reference material. The
+image build checks that the container's copy loads with `-validate` before
+publishing.
 
 ## audio.cpp
 

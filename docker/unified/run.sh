@@ -13,10 +13,16 @@
 #   -tls-key-file    LLAMA_SWAP_TLS_KEY_FILE
 #   -listen-tailcat  LLAMA_SWAP_LISTEN_TAILCAT
 #   -watch-config    LLAMA_SWAP_WATCH_CONFIG    (boolean)
-#   -validate        LLAMA_SWAP_VALIDATE        (boolean)
 #
 # An unset or empty variable contributes nothing, so the flag keeps whatever
 # default llama-swap itself applies.
+#
+# -validate is deliberately not mapped. It makes llama-swap check the config
+# and exit instead of serving, so as a standing environment variable on a
+# long-running container it would either do nothing (server already running)
+# or turn the container into something that exits right after start -- neither
+# is what an operator setting an env var and restarting the container expects.
+# Use `docker run <image> -config /path/to.yaml -validate` for that instead.
 #
 # -version is deliberately not mapped. As an environment variable it would only
 # make the container print a version and exit, and LLAMA_SWAP_VERSION is the
@@ -41,7 +47,7 @@ fi
 # Flags that take a value, and flags that are on/off. Keep both lists in sync
 # with the flag definitions in llama-swap.go.
 STRING_FLAGS=(config config-dir listen tls-cert-file tls-key-file listen-tailcat)
-BOOL_FLAGS=(watch-config validate)
+BOOL_FLAGS=(watch-config)
 
 env_name() {
     local flag="$1"

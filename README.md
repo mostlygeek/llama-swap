@@ -146,7 +146,6 @@ Kubernetes manifest. Each one maps to a llama-swap flag:
 | `LLAMA_SWAP_TLS_KEY_FILE` | `-tls-key-file` | — |
 | `LLAMA_SWAP_LISTEN_TAILCAT` | `-listen-tailcat` | — |
 | `LLAMA_SWAP_WATCH_CONFIG` | `-watch-config` | `true` |
-| `LLAMA_SWAP_VALIDATE` | `-validate` | `false` |
 
 ```shell
 # configure startup with environment variables instead of flags
