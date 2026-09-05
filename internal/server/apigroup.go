@@ -361,11 +361,13 @@ func (s *Server) handleAPIVersion(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAPITailcat(w http.ResponseWriter, r *http.Request) {
 	address := ""
-	var models []string
+	models := []string{}
 	enabled := s.cfg.TailcatEnabled()
 	if enabled {
 		address = s.TailcatAddress()
-		models = s.tailcatExposedModelIDs()
+		if ids := s.tailcatExposedModelIDs(); ids != nil {
+			models = ids
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"enabled": enabled, "address": address, "models": models})

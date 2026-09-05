@@ -181,4 +181,12 @@ func TestServer_APITailcatStatus(t *testing.T) {
 		!strings.Contains(w.Body.String(), `"models":["public"]`) {
 		t.Fatalf("status response = %d %q", w.Code, w.Body.String())
 	}
+
+	s.cfg.SetTailcatEnabled(false)
+	w = httptest.NewRecorder()
+	s.ServeHTTP(w, tailcatRequest(http.MethodGet, "/api/tailcat", ""))
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"enabled":false`) ||
+		!strings.Contains(w.Body.String(), `"models":[]`) {
+		t.Fatalf("disabled status response = %d %q, want models: []", w.Code, w.Body.String())
+	}
 }
