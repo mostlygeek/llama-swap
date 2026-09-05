@@ -129,7 +129,9 @@ type ProcessCommand struct {
 	// Written only by run(); read by ServeHTTP via atomic load.
 	handler atomic.Pointer[http.HandlerFunc]
 
-	lastUse  atomic.Int64 // unix nano timestamp of last ServeHTTP completion
+	// lastUse is the unix-nano timestamp of the most recent activity baseline.
+	// It is initialized when the process becomes Ready and updated after ServeHTTP completes.
+	lastUse  atomic.Int64
 	inflight atomic.Int64 // current in-flight ServeHTTP calls
 }
 
@@ -329,6 +331,10 @@ func (p *ProcessCommand) run() {
 					cmdCancel = res.cancel
 					fn := res.handlerFn
 					p.handler.Store(&fn)
+					// A newly ready process starts a fresh idle window. Without this,
+					// lastUse is zero on first start or stale after a restart, so TTL
+					// can unload it on the first one-second ticker tick.
+					p.lastUse.Store(time.Now().UnixNano())
 					setState(StateReady)
 					notifyWaiters(nil)
 					if req.block {
