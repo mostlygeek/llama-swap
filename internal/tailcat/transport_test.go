@@ -157,14 +157,34 @@ func TestTailcatTransport_LocalDERPHTTP(t *testing.T) {
 	}
 	transport := &http.Transport{DialContext: client.DialContext}
 	httpClient := &http.Client{Transport: transport}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://server.tailcat/health", nil)
-	if err != nil {
-		t.Fatal(err)
+	var resp *http.Response
+	var responseCancel context.CancelFunc
+	for {
+		// A successful Ping means the peers authenticated, but the first TCP
+		// flow can still race the local DERP connection coming fully online.
+		// Keep each attempt short so slow CI runners can retry within the
+		// test's overall deadline.
+		requestCtx, requestCancel := context.WithTimeout(ctx, 2*time.Second)
+		req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, "http://server.tailcat/health", nil)
+		if err == nil {
+			resp, err = httpClient.Do(req)
+		}
+		if err == nil {
+			responseCancel = requestCancel
+			break
+		}
+		requestCancel()
+		httpClient.CloseIdleConnections()
+		if ctx.Err() != nil {
+			t.Fatalf("HTTP request over Tailcat: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("HTTP request over Tailcat: %v", err)
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		t.Fatalf("HTTP request over Tailcat: %v", err)
-	}
+	defer responseCancel()
 	body, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if err != nil {
