@@ -5,6 +5,7 @@ import (
 	"io"
 	"testing"
 
+	"github.com/mostlygeek/llama-swap/internal/cache"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 )
 
@@ -66,6 +67,43 @@ func TestServer_CaptureDisabled(t *testing.T) {
 	}
 	if mm.getCaptureByID(1) != nil {
 		t.Fatal("getCaptureByID should return nil when disabled")
+	}
+}
+
+// failingStore is a captureStore whose every method fails with err.
+type failingStore struct{ err error }
+
+func (f failingStore) Add(int, []byte) error   { return f.err }
+func (f failingStore) Get(int) ([]byte, error) { return nil, f.err }
+func (f failingStore) Has(int) bool            { return false }
+
+// TestServer_CaptureTierPartialFailureIsReported verifies a capture the memory
+// tier accepts but the disk tier rejects still reports success (it is stored,
+// for now) yet warns: operators must know the copy will vanish after eviction
+// or restart. When no tier stores the capture the error must be returned.
+func TestServer_CaptureTierPartialFailureIsReported(t *testing.T) {
+	var buf bytes.Buffer
+	logger := logmon.NewWriter(&buf)
+	layered := combineCapture(logger, cache.New(1<<20), failingStore{err: errExceedsCaptureMax})
+
+	if err := layered.Add(1, []byte("payload")); err != nil {
+		t.Fatalf("Add must succeed when one tier stored the capture: %v", err)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("capture 1")) || !bytes.Contains(buf.Bytes(), []byte("exceeds")) {
+		t.Fatalf("partial tier failure not reported, log = %q", buf.Bytes())
+	}
+
+	buf.Reset()
+	if err := combineCapture(logger, cache.New(1<<20), cache.New(1<<20)).Add(2, []byte("ok")); err != nil {
+		t.Fatalf("all tiers succeeding must not error: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("no warnings expected when every tier stored, log = %q", buf.Bytes())
+	}
+
+	buf.Reset()
+	if err := combineCapture(logger, failingStore{err: errExceedsCaptureMax}).Add(3, []byte("x")); err == nil {
+		t.Fatal("Add must fail when no tier stores the capture")
 	}
 }
 

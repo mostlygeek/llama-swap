@@ -40,11 +40,15 @@ type diskCapture struct {
 	maxSize int64 // 0 = unlimited
 	logger  *logmon.Monitor
 
-	total     atomic.Int64 // bytes on disk, corrected by each reconcile walk
+	writeMu sync.Mutex // serializes file writes with reconcile walks
+
+	total     atomic.Int64 // bytes on disk; the authoritative reconcile value, kept in step by Add
 	triggerCh chan struct{}
 	stopCh    chan struct{}
 	doneCh    chan struct{}
 	closeOnce sync.Once
+
+	onWalkStart func() // test hook: invoked once when a reconcile walk begins
 }
 
 // newDiskCapture opens (creating if needed) a disk capture store and starts its
@@ -62,6 +66,9 @@ func newDiskCaptureOpts(dir string, maxBytes int, logger *logmon.Monitor, startL
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("disk capture store: %w", err)
+	}
+	if info, err := os.Stat(dir); err == nil && info.Mode().Perm()&0o022 != 0 && logger != nil {
+		logger.Warnf("capture dir %s is group/world-writable (%o): local users can plant or read captures", dir, info.Mode().Perm())
 	}
 	dc := &diskCapture{dir: dir, maxSize: int64(maxBytes), logger: logger}
 	if startLoop && dc.maxSize > 0 {
@@ -81,24 +88,39 @@ func (dc *diskCapture) path(id int) string {
 	return filepath.Join(dc.shardDir(id), strconv.Itoa(id)+captureFileExt)
 }
 
-// Add writes a capture atomically (tmp + rename) and signals the reconcile
-// loop. A blob larger than the whole budget is rejected; it could never fit.
+// Add writes a capture atomically (random-named tmp + rename) and signals the
+// reconcile loop, serialized against reconcile walks via writeMu. A blob
+// larger than the whole budget is rejected; it could never fit.
 func (dc *diskCapture) Add(id int, data []byte) error {
 	size := int64(len(data))
 	if dc.maxSize > 0 && size > dc.maxSize {
 		return errExceedsCaptureMax
 	}
 
-	if err := os.MkdirAll(dc.shardDir(id), 0o700); err != nil {
+	dc.writeMu.Lock()
+	defer dc.writeMu.Unlock()
+
+	dir := dc.shardDir(id)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create capture shard for %d: %w", id, err)
 	}
-	p := dc.path(id)
-	tmp := p + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	// A random temp name keeps the path unpredictable, so a planted symlink
+	// there cannot redirect the write (O_EXCL also never follows links).
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temp capture %d: %w", id, err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
 		return fmt.Errorf("write capture %d: %w", id, err)
 	}
-	if err := os.Rename(tmp, p); err != nil {
-		os.Remove(tmp)
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmp.Name())
+		return fmt.Errorf("close capture %d: %w", id, err)
+	}
+	if err := os.Rename(tmp.Name(), dc.path(id)); err != nil {
+		os.Remove(tmp.Name())
 		return fmt.Errorf("store capture %d: %w", id, err)
 	}
 
@@ -172,9 +194,11 @@ func (dc *diskCapture) runReconcile() {
 
 // reconcile sums all capture files from disk — the authoritative total, which
 // also corrects drift in the running counter — and deletes the lowest-id
-// (oldest) files until the store fits. The file list is snapshotted first so
-// captures written concurrently during the pass (always higher ids) are never
-// removed here.
+// (oldest) files until the store fits. Add is serialized against the walk and
+// eviction via writeMu, so the sum used for eviction decisions is exact and a
+// write racing the pass can neither over- nor under-evict. The file list is
+// snapshotted first so captures written by a later pass (always higher ids)
+// are never removed by this one.
 func (dc *diskCapture) reconcile() error {
 	if dc.maxSize <= 0 {
 		return nil
@@ -185,14 +209,16 @@ func (dc *diskCapture) reconcile() error {
 		path string
 		size int64
 	}
-	// Apply the walked sum as a delta onto the running counter instead of
-	// storing it, so Adds racing the walk are not clobbered. A racing write
-	// the walk missed can only skew total high (counted twice); the next
-	// walk corrects it.
-	before := dc.total.Load()
 
 	var entries []entry
 	var total int64
+
+	dc.writeMu.Lock()
+	defer dc.writeMu.Unlock()
+	defer func() { dc.total.Store(total) }()
+	if dc.onWalkStart != nil {
+		dc.onWalkStart()
+	}
 
 	err := filepath.WalkDir(dc.dir, func(p string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -220,20 +246,15 @@ func (dc *diskCapture) reconcile() error {
 	if err != nil {
 		return err
 	}
-	dc.total.Add(total - before)
-	if total <= dc.maxSize {
-		return nil
-	}
-
 	slices.SortFunc(entries, func(a, b entry) int { return cmp.Compare(a.id, b.id) })
 	for _, e := range entries {
-		if dc.total.Load() <= dc.maxSize {
+		if total <= dc.maxSize {
 			break
 		}
 		if err := os.Remove(e.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		dc.total.Add(-e.size)
+		total -= e.size
 	}
 	return nil
 }

@@ -80,7 +80,7 @@ func newMetricsMonitorWithDisk(logger *logmon.Monitor, maxMetrics, captureBuffer
 		}
 	}
 
-	mm.captureCache = combineCapture(mem, disk)
+	mm.captureCache = combineCapture(mm.logger, mem, disk)
 	mm.enableCaptures = mm.captureCache != nil
 	return mm
 }

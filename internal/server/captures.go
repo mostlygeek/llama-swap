@@ -10,6 +10,7 @@ import (
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/klauspost/compress/zstd"
+	"github.com/mostlygeek/llama-swap/internal/logmon"
 )
 
 // ReqRespCapture is a stored request/response pair for a single metered request.
@@ -34,7 +35,7 @@ type captureStore interface {
 // returns a single store when one tier is set, a tiered store when several are,
 // or nil when none is. Reads probe tiers in order (memory before disk); writes
 // go to every tier so a capture evicted from memory still survives on disk.
-func combineCapture(tiers ...captureStore) captureStore {
+func combineCapture(logger *logmon.Monitor, tiers ...captureStore) captureStore {
 	var active []captureStore
 	for _, tier := range tiers {
 		if tier != nil {
@@ -47,15 +48,19 @@ func combineCapture(tiers ...captureStore) captureStore {
 	case 1:
 		return active[0]
 	default:
-		return &tieredCapture{tiers: active}
+		return &tieredCapture{tiers: active, logger: logger}
 	}
 }
 
 // tieredCapture spans an ordered set of captureStore tiers.
 type tieredCapture struct {
-	tiers []captureStore
+	tiers  []captureStore
+	logger *logmon.Monitor
 }
 
+// Add writes every tier and reports partial failures: a capture the first
+// tiers accept but a later one rejects would silently vanish once the working
+// tiers evict it, so the failure is warned about instead of hidden.
 func (t *tieredCapture) Add(id int, data []byte) error {
 	var lastErr error
 	stored := false
@@ -66,10 +71,13 @@ func (t *tieredCapture) Add(id int, data []byte) error {
 			stored = true
 		}
 	}
-	if stored {
-		return nil
+	if !stored {
+		return lastErr
 	}
-	return lastErr
+	if lastErr != nil && t.logger != nil {
+		t.logger.Warnf("capture %d stored in only some tiers: %v (may be lost after eviction or restart)", id, lastErr)
+	}
+	return nil
 }
 
 func (t *tieredCapture) Get(id int) ([]byte, error) {

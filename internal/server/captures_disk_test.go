@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"os"
@@ -237,7 +238,7 @@ func TestCaptureDisk_ReconcileLoopEvictsInBackground(t *testing.T) {
 func TestCaptureDisk_TieredStore(t *testing.T) {
 	dc := newTestDiskCapture(t, 1<<20)
 	mem := cache.New(16)
-	layered := combineCapture(mem, dc)
+	layered := combineCapture(logmon.NewWriter(io.Discard), mem, dc)
 
 	if err := layered.Add(1, []byte("payload")); err != nil {
 		t.Fatalf("tiered Add: %v", err)
@@ -356,5 +357,104 @@ func TestCaptureDisk_MonitorDiskTierGating(t *testing.T) {
 				t.Fatalf("disk tier must be disabled with an %s", name)
 			}
 		})
+	}
+}
+
+// TestCaptureDisk_ReconcileNotOverEvictedByRacingAdd guards the eviction
+// budget against writes racing the reconcile walk: a capture added mid-walk
+// (counted both by Add and missed by the walk) must not inflate the total the
+// eviction loop uses, or older captures that still fit get deleted.
+func TestCaptureDisk_ReconcileNotOverEvictedByRacingAdd(t *testing.T) {
+	dc := newTestDiskCapture(t, 100)
+	for id := 1; id <= 4; id++ { // 104 bytes over a 100 budget: exactly id 1 must go
+		if err := dc.Add(id, make([]byte, 26)); err != nil {
+			t.Fatalf("Add %d: %v", id, err)
+		}
+	}
+
+	walkStarted := make(chan struct{})
+	release := make(chan struct{})
+	dc.onWalkStart = func() { close(walkStarted); <-release }
+
+	reconcileDone := make(chan error, 1)
+	go func() { reconcileDone <- dc.reconcile() }()
+
+	<-walkStarted
+	addDone := make(chan error, 1)
+	go func() { addDone <- dc.Add(5, make([]byte, 40)) }()
+	time.Sleep(50 * time.Millisecond) // let the racing Add reach the store
+	close(release)
+
+	if err := <-reconcileDone; err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if err := <-addDone; err != nil {
+		t.Fatalf("racing Add: %v", err)
+	}
+
+	if dc.Has(1) {
+		t.Fatal("oldest capture (id 1) should be evicted")
+	}
+	for _, id := range []int{2, 3, 4, 5} {
+		if !dc.Has(id) {
+			t.Fatalf("id %d evicted: a racing Add must not over-evict captures that still fit", id)
+		}
+	}
+}
+
+// TestCaptureDisk_TmpWriteDoesNotFollowSymlink proves a planted symlink at the
+// predictable temp path cannot make the store write through to another file.
+func TestCaptureDisk_TmpWriteDoesNotFollowSymlink(t *testing.T) {
+	dc := newTestDiskCapture(t, 1<<20)
+	victim := filepath.Join(t.TempDir(), "victim")
+	if err := os.WriteFile(victim, []byte("secret"), 0o600); err != nil {
+		t.Fatalf("seed victim: %v", err)
+	}
+	if err := os.MkdirAll(dc.shardDir(9), 0o700); err != nil {
+		t.Fatalf("shard dir: %v", err)
+	}
+	if err := os.Symlink(victim, dc.path(9)+".tmp"); err != nil {
+		t.Fatalf("plant symlink: %v", err)
+	}
+
+	if err := dc.Add(9, []byte("capture")); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if data, err := os.ReadFile(victim); err != nil || string(data) != "secret" {
+		t.Fatalf("temp write followed a symlink: victim = %q, %v", data, err)
+	}
+	if data, err := dc.Get(9); err != nil || string(data) != "capture" {
+		t.Fatalf("Get = %q, %v, want %q", data, err, "capture")
+	}
+}
+
+// TestCaptureDisk_WarnsOnSharedWritableDir verifies opening an existing capture
+// dir that group/others can write to is reported: local users could then plant
+// the files the store reads back.
+func TestCaptureDisk_WarnsOnSharedWritableDir(t *testing.T) {
+	var buf bytes.Buffer
+	logger := logmon.NewWriter(&buf)
+
+	shared := filepath.Join(t.TempDir(), "shared")
+	if _, err := newDiskCaptureOpts(shared, 1<<20, logger, false); err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := os.Chmod(shared, 0o777); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	if _, err := newDiskCaptureOpts(shared, 1<<20, logger, false); err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("writable")) {
+		t.Fatalf("no warning for shared-writable capture dir, log = %q", buf.Bytes())
+	}
+
+	buf.Reset()
+	private := filepath.Join(t.TempDir(), "private")
+	if _, err := newDiskCaptureOpts(private, 1<<20, logger, false); err != nil {
+		t.Fatalf("open private: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("private capture dir must not warn, log = %q", buf.Bytes())
 	}
 }
