@@ -296,12 +296,16 @@ github.com/tailscale/peercred v0.0.0-20250107143737-35a0c7bd7edc h1:24heQPtnFR+y
 github.com/tailscale/peercred v0.0.0-20250107143737-35a0c7bd7edc/go.mod h1:f93CXfllFsO9ZQVq+Zocb1Gp4G5Fz0b0rXHLOzt/Djc=
 github.com/tailscale/tailcat v0.4.0 h1:WA8QIBcnn+x7BBmay3mPY+EeOp14RTQr4Qv1Df1GOxU=
 github.com/tailscale/tailcat v0.4.0/go.mod h1:ehG1UYhg+wPqPe8rlpmSyt9O+IMkBoxwA819l6qnM8Y=
+github.com/tailscale/tailcat v0.6.0 h1:q81gzzZpmitF9D87GHDqb36nLXSmwYO5gm/97+b2xMM=
+github.com/tailscale/tailcat v0.6.0/go.mod h1:QDtlF/V4jhC/EcZIB7nc8NaHelAN2BnllV9d/pQHyM8=
 github.com/tailscale/web-client-prebuilt v0.0.0-20250124233751-d4cd19a26976 h1:UBPHPtv8+nEAy2PD8RyAhOYvau1ek0HDJqLS/Pysi14=
 github.com/tailscale/web-client-prebuilt v0.0.0-20250124233751-d4cd19a26976/go.mod h1:agQPE6y6ldqCOui2gkIh7ZMztTkIQKH049tv8siLuNQ=
 github.com/tailscale/wf v0.0.0-20240214030419-6fbb0a674ee6 h1:l10Gi6w9jxvinoiq15g8OToDdASBni4CyJOdHY1Hr8M=
 github.com/tailscale/wf v0.0.0-20240214030419-6fbb0a674ee6/go.mod h1:ZXRML051h7o4OcI0d3AaILDIad/Xw0IkXaHM17dic1Y=
 github.com/tailscale/wireguard-go v0.0.0-20260821191448-23d18d66172c h1:rjqTtbumXpM5B1UR7u+dsOaI9wRetOfIDan5kJJrgn8=
 github.com/tailscale/wireguard-go v0.0.0-20260821191448-23d18d66172c/go.mod h1:6SerzcvHWQchKO2BfNdmquA77CHSECZuFl+D9fp4RnI=
+github.com/tailscale/wireguard-go v0.0.0-20260904023712-e855235c55a2 h1:nRCnARSGqRvSAK9S+vbH87dMykfv2vWwx6kb8rw9Ayk=
+github.com/tailscale/wireguard-go v0.0.0-20260904023712-e855235c55a2/go.mod h1:rUelGmuK4UnSJYM5gl5Mknp6YbwwcL8+VAPMhNYe+jg=
 github.com/tailscale/xnet v0.0.0-20240729143630-8497ac4dab2e h1:zOGKqN5D5hHhiYUp091JqK7DPCqSARyUfduhGUY8Bek=
 github.com/tailscale/xnet v0.0.0-20240729143630-8497ac4dab2e/go.mod h1:orPd6JZXXRyuDusYilywte7k094d7dycXXU5YnWsrwg=
 github.com/tidwall/gjson v1.14.2/go.mod h1:/wbyibRr2FHMks5tjHJ5F8dMZh3AcwJEMf5vlfC0lxk=
@@ -453,3 +457,5 @@ software.sslmate.com/src/go-pkcs12 v0.4.0 h1:H2g08FrTvSFKUj+D309j1DPfk5APnIdAQAB
 software.sslmate.com/src/go-pkcs12 v0.4.0/go.mod h1:Qiz0EyvDRJjjxGyUQa2cCNZn/wMyzrRJ/qcDXOQazLI=
 tailscale.com v1.103.0-pre.0.20260830144538-72780705eda8 h1:Ow72mYrStZyFA3kwBBACYJZ5EkicN7fc3IEQh/U7HBA=
 tailscale.com v1.103.0-pre.0.20260830144538-72780705eda8/go.mod h1:0FUeNgU+WylKFtsg4LOZQxceO16WyN9YjvrxmUiilbs=
+tailscale.com v1.103.0-pre.0.20260904030409-31d8badb3bfb h1:leFXEBE/Kgu/+RA+Zlfk2rgCQKc+YOL2JTBwjdTQHx4=
+tailscale.com v1.103.0-pre.0.20260904030409-31d8badb3bfb/go.mod h1:kDCPNk+EmNrMykwEddg757aH43nuhiPv/w58IfUeSQM=

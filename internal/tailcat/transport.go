@@ -69,7 +69,7 @@ func LoadPrivateKey(path string, requireRegion bool) (*PrivateKey, error) {
 	if requireRegion && pk.Public.RegionID == 0 && len(pk.Public.Region) == 0 {
 		return nil, fmt.Errorf("parse %q as Tailcat server key: relay region is missing", path)
 	}
-	if _, err := tailcatlib.ParseConnBlob(pk.Public.ConnBlob()); err != nil {
+	if _, err := tailcatlib.ParseAddr(pk.Public.Addr()); err != nil {
 		return nil, fmt.Errorf("parse %q as Tailcat PrivateKey JSON: invalid public connection data: %w", path, err)
 	}
 	return &PrivateKey{value: pk}, nil
@@ -86,7 +86,7 @@ func (p *PrivateKey) ConnectionBlob() string {
 	if p == nil {
 		return ""
 	}
-	return string(p.value.Public.ConnBlob())
+	return string(p.value.Public.Addr())
 }
 
 func ValidateNodePublic(raw string) (string, error) {
@@ -101,12 +101,12 @@ func ValidateNodePublic(raw string) (string, error) {
 }
 
 func ValidateConnectionBlob(blob string) error {
-	_, err := tailcatlib.ParseConnBlob(tailcatlib.ConnBlob(blob))
+	_, err := tailcatlib.ParseAddr(tailcatlib.Addr(blob))
 	return err
 }
 
 func ConnectionDestination(blob string) (string, error) {
-	ci, err := tailcatlib.ParseConnBlob(tailcatlib.ConnBlob(blob))
+	ci, err := tailcatlib.ParseAddr(tailcatlib.Addr(blob))
 	if err != nil {
 		return "", err
 	}
@@ -197,9 +197,11 @@ type Server struct {
 }
 
 type ephemeralServerIdentity struct {
-	private key.NodePrivate
-	region  *tailcfg.DERPRegion
-	blob    string
+	private             key.NodePrivate
+	presharedKey        tailcatlib.PresharedKey
+	disablePresharedKey bool
+	region              *tailcfg.DERPRegion
+	blob                string
 }
 
 var processServerIdentity struct {
@@ -214,13 +216,13 @@ func Start(ctx context.Context, opts ServerOptions) (*Server, error) {
 		return nil, errors.New("tailcat handler is required")
 	}
 
-	private, region, blob, err := resolveServerIdentity(ctx, opts.PrivateKey)
+	identity, err := resolveServerIdentity(ctx, opts.PrivateKey)
 	if err != nil {
 		return nil, err
 	}
 
 	ln := newChannelListener()
-	runtime := &Server{ln: ln, blob: blob}
+	runtime := &Server{ln: ln, blob: identity.blob}
 	allowed := make([]key.NodePublic, 0, len(opts.AllowedClients))
 	for _, raw := range opts.AllowedClients {
 		var public key.NodePublic
@@ -231,11 +233,13 @@ func Start(ctx context.Context, opts ServerOptions) (*Server, error) {
 		allowed = append(allowed, public)
 	}
 	tc := &tailcatlib.Server{
-		Key:            private,
-		Region:         region,
-		AllowedClients: allowed,
-		ServedTCPPorts: []filter.PortRange{{First: HTTPPort, Last: HTTPPort}},
-		Logf:           logFunc(opts.Logger, "tailcat server: "),
+		Key:                 identity.private,
+		PresharedKey:        identity.presharedKey,
+		DisablePresharedKey: identity.disablePresharedKey,
+		Region:              identity.region,
+		AllowedClients:      allowed,
+		ServedTCPPorts:      []filter.PortRange{{First: HTTPPort, Last: HTTPPort}},
+		Logf:                logFunc(opts.Logger, "tailcat server: "),
 	}
 	tc.OnTCP = func(port uint16) func(net.Conn) {
 		if port != HTTPPort {
@@ -269,12 +273,13 @@ func Start(ctx context.Context, opts ServerOptions) (*Server, error) {
 	if opts.PrivateKey == nil {
 		processServerIdentity.Lock()
 		if processServerIdentity.value == nil {
-			resolved, parseErr := tailcatlib.ParseConnBlob(tc.ConnBlob())
+			resolved, parseErr := tailcatlib.ParseAddr(tc.TailcatAddr())
 			if parseErr == nil && len(resolved.Region) > 0 {
 				processServerIdentity.value = &ephemeralServerIdentity{
-					private: private,
-					region:  resolved.Region[0],
-					blob:    string(tc.ConnBlob()),
+					private:      identity.private,
+					presharedKey: identity.presharedKey,
+					region:       resolved.Region[0],
+					blob:         string(tc.TailcatAddr()),
 				}
 				runtime.blob = processServerIdentity.value.blob
 			}
@@ -282,7 +287,7 @@ func Start(ctx context.Context, opts ServerOptions) (*Server, error) {
 		processServerIdentity.Unlock()
 	}
 	if runtime.blob == "" {
-		runtime.blob = string(tc.ConnBlob())
+		runtime.blob = string(tc.TailcatAddr())
 	}
 	runtime.http = newHTTPServer(opts)
 	go func() {
@@ -306,40 +311,52 @@ func newHTTPServer(opts ServerOptions) *http.Server {
 	}
 }
 
-func resolveServerIdentity(ctx context.Context, saved *PrivateKey) (key.NodePrivate, *tailcfg.DERPRegion, string, error) {
+func resolveServerIdentity(ctx context.Context, saved *PrivateKey) (ephemeralServerIdentity, error) {
 	if saved != nil {
 		ci := saved.value.Public
 		if err := ci.Expand(ctx, tailcatlib.ExpandForServer); err != nil {
-			return key.NodePrivate{}, nil, "", fmt.Errorf("resolve Tailcat server relay: %w", err)
+			return ephemeralServerIdentity{}, fmt.Errorf("resolve Tailcat server relay: %w", err)
 		}
 		if len(ci.Region) == 0 {
-			return key.NodePrivate{}, nil, "", errors.New("resolve Tailcat server relay: no region selected")
+			return ephemeralServerIdentity{}, errors.New("resolve Tailcat server relay: no region selected")
 		}
 		blob := ""
 		if saved.value.Public.RegionID != -1 {
-			blob = string(saved.value.Public.ConnBlob())
+			blob = string(saved.value.Public.Addr())
 		}
-		return saved.value.Private, ci.Region[0], blob, nil
+		return ephemeralServerIdentity{
+			private:             saved.value.Private,
+			presharedKey:        saved.value.Public.PresharedKey,
+			disablePresharedKey: saved.value.Public.PresharedKey.IsZero(),
+			region:              ci.Region[0],
+			blob:                blob,
+		}, nil
 	}
 
 	processServerIdentity.Lock()
 	defer processServerIdentity.Unlock()
 	if cached := processServerIdentity.value; cached != nil {
-		return cached.private, cached.region, cached.blob, nil
+		return *cached, nil
 	}
 	private := key.NewNode()
+	presharedKey := tailcatlib.NewPresharedKey()
 	ci := tailcatlib.ConnInfo{
 		ServerPublic:      tailcatlib.NodePublic{NodePublic: private.Public()},
 		ServerDiscoPublic: tailcatlib.DiscoPublicForNode(private),
+		PresharedKey:      presharedKey,
 		RegionID:          -1,
 	}
 	if err := ci.Expand(ctx, tailcatlib.ExpandForServer); err != nil {
-		return key.NodePrivate{}, nil, "", fmt.Errorf("select Tailcat server relay: %w", err)
+		return ephemeralServerIdentity{}, fmt.Errorf("select Tailcat server relay: %w", err)
 	}
 	if len(ci.Region) == 0 {
-		return key.NodePrivate{}, nil, "", errors.New("select Tailcat server relay: no region selected")
+		return ephemeralServerIdentity{}, errors.New("select Tailcat server relay: no region selected")
 	}
-	return private, ci.Region[0], "", nil
+	return ephemeralServerIdentity{
+		private:      private,
+		presharedKey: presharedKey,
+		region:       ci.Region[0],
+	}, nil
 }
 
 func resolveRemoteNodeKey(server *tailcatlib.Server, addr net.Addr) (key.NodePublic, bool) {
@@ -473,7 +490,7 @@ func NewClient(peerID, blob string, saved *PrivateKey, logger Logger) *Client {
 		processPeerKeys.Unlock()
 	}
 	return &Client{client: &tailcatlib.Client{
-		Server: tailcatlib.ConnBlob(blob),
+		Server: tailcatlib.Addr(blob),
 		Key:    private,
 		Logf:   logFunc(logger, "tailcat client "+peerID+": "),
 	}}

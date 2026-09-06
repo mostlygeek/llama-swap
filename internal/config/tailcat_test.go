@@ -15,7 +15,7 @@ import (
 func testTailcatBlob() string {
 	private := tailcat.NewPrivateKey()
 	private.Public.RegionID = 1
-	return string(private.Public.ConnBlob())
+	return string(private.Public.Addr())
 }
 
 func writeTailcatKey(t *testing.T) string {
