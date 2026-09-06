@@ -21,7 +21,7 @@
 </script>
 
 <script lang="ts">
-  import { Brain, ChevronDown, ChevronRight, LoaderCircle, Wrench } from "@lucide/svelte";
+  import { Brain, ChevronDown, ChevronRight, LoaderCircle } from "@lucide/svelte";
   import { formatDuration } from "../../lib/format";
   import ToolCallCard from "./ToolCallCard.svelte";
 
@@ -33,7 +33,6 @@
   let { items, running = false }: Props = $props();
   let expanded = $state(false);
   let expandedReasoning = $state<Set<number>>(new Set());
-  let currentItem = $derived(items[items.length - 1]);
   let isWorking = $derived(running || items.some((item) => item.running));
   let reasoningCharacters = $derived(
     items.reduce((total, item) => total + (item.kind === "reasoning" ? item.content.length : 0), 0)
@@ -64,26 +63,14 @@
       <ChevronRight class="size-4 shrink-0" />
     {/if}
     <span class="font-medium">Work</span>
-    {#if isWorking}
-      <span class="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs">
-        {#if currentItem?.kind === "tool" && currentItem.running}
-          <Wrench class="size-3.5 shrink-0" />
-          <span class="truncate">{currentItem.label || currentItem.name}</span>
-        {:else if currentItem?.kind === "reasoning" && currentItem.running}
-          <Brain class="size-3.5 shrink-0" />
-          <span>Reasoning…</span>
-        {:else}
-          <span>Working…</span>
-        {/if}
+    <span class="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs">
+      {reasoningCharacters.toLocaleString()} reasoning characters ·
+      {formatDuration(totalDurationMs, { precision: 1, subSecondMs: true })} ·
+      {toolCallCount} {toolCallCount === 1 ? "tool call" : "tool calls"}
+      {#if isWorking}
         <LoaderCircle class="size-3.5 shrink-0 animate-spin" />
-      </span>
-    {:else}
-      <span class="text-muted-foreground text-xs">
-        {reasoningCharacters.toLocaleString()} reasoning characters ·
-        {formatDuration(totalDurationMs, { precision: 1, subSecondMs: true })} ·
-        {toolCallCount} {toolCallCount === 1 ? "tool call" : "tool calls"}
-      </span>
-    {/if}
+      {/if}
+    </span>
   </button>
 
   {#if expanded}
