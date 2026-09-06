@@ -428,6 +428,85 @@ func TestCaptureDisk_TmpWriteDoesNotFollowSymlink(t *testing.T) {
 	}
 }
 
+// TestCaptureDisk_ReconcileRemovesCrashTmpFiles proves temp files left by a
+// crashed Add (both the current os.CreateTemp pattern and the legacy
+// <id>.cap.tmp name) are dropped by the next walk: they must not linger and
+// must not count against the budget.
+func TestCaptureDisk_ReconcileRemovesCrashTmpFiles(t *testing.T) {
+	dc := newTestDiskCapture(t, 100)
+	if err := dc.Add(1, make([]byte, 10)); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	shard := dc.shardDir(2)
+	if err := os.MkdirAll(shard, 0o700); err != nil {
+		t.Fatalf("shard dir: %v", err)
+	}
+	leftovers := []string{
+		filepath.Join(shard, ".tmp-crashed"),
+		filepath.Join(shard, "2.cap.tmp"),
+	}
+	for _, p := range leftovers {
+		if err := os.WriteFile(p, make([]byte, 90), 0o600); err != nil {
+			t.Fatalf("plant leftover %s: %v", p, err)
+		}
+	}
+
+	if err := dc.reconcile(); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	for _, p := range leftovers {
+		if _, err := os.Stat(p); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("crash leftover %s survived reconcile: %v", p, err)
+		}
+	}
+	if !dc.Has(1) {
+		t.Fatal("capture evicted despite fitting the budget once leftovers are gone")
+	}
+	if got := dc.total.Load(); got != 10 {
+		t.Fatalf("total = %d, want 10: leftover bytes must not be counted", got)
+	}
+}
+
+// TestCaptureDisk_ReconcileKeepsTotalOnWalkError guards the authoritative
+// total: a walk that aborts on an unreadable shard saw only part of the store,
+// so its partial sum must not replace the running counter, and eviction must
+// not run from it.
+func TestCaptureDisk_ReconcileKeepsTotalOnWalkError(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "captures")
+	dc, err := newDiskCaptureOpts(dir, 100, nil, false)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer dc.Close()
+	if err := dc.Add(1, make([]byte, 10)); err != nil {
+		t.Fatalf("Add 1: %v", err)
+	}
+	if err := dc.Add(1000, make([]byte, 10)); err != nil {
+		t.Fatalf("Add 1000: %v", err)
+	}
+
+	shard := dc.shardDir(1000)
+	if err := os.Chmod(shard, 0); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { os.Chmod(shard, 0o700) })
+	if _, err := os.ReadDir(shard); err == nil {
+		t.Skip("filesystem ignores directory permissions (running as root?)")
+	}
+
+	dc.total.Store(999) // the pre-walk running counter
+	err = dc.reconcile()
+	if err == nil {
+		t.Fatal("reconcile must report an unreadable shard")
+	}
+	if got := dc.total.Load(); got != 999 {
+		t.Fatalf("total = %d, want 999: a partial walk must not overwrite the authoritative total", got)
+	}
+	if !dc.Has(1) {
+		t.Fatal("id 1 evicted: a failed walk must not evict from its partial sum")
+	}
+}
+
 // TestCaptureDisk_WarnsOnSharedWritableDir verifies opening an existing capture
 // dir that group/others can write to is reported: local users could then plant
 // the files the store reads back.

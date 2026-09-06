@@ -20,7 +20,16 @@ var (
 	errExceedsCaptureMax = errors.New("capture exceeds maximum store size")
 )
 
-const captureFileExt = ".cap"
+const (
+	captureFileExt = ".cap"
+	// tmpPrefix is the os.CreateTemp pattern Add uses; tmpLegacyExt was the
+	// predictable <id>.cap.tmp name from before the CreateTemp switch. The
+	// reconcile walk removes both: with writes serialized under writeMu, any
+	// temp file it sees must be a crash leftover, and lingering ones would
+	// consume disk the budget silently does not account for.
+	tmpPrefix    = ".tmp-"
+	tmpLegacyExt = ".cap.tmp"
+)
 
 // captureShardSize groups files into decimal folders (id/captureShardSize) so
 // no single directory grows unbounded on filesystems that degrade with large
@@ -106,7 +115,7 @@ func (dc *diskCapture) Add(id int, data []byte) error {
 	}
 	// A random temp name keeps the path unpredictable, so a planted symlink
 	// there cannot redirect the write (O_EXCL also never follows links).
-	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	tmp, err := os.CreateTemp(dir, tmpPrefix+"*")
 	if err != nil {
 		return fmt.Errorf("create temp capture %d: %w", id, err)
 	}
@@ -212,19 +221,38 @@ func (dc *diskCapture) reconcile() error {
 
 	var entries []entry
 	var total int64
+	complete := true // whether the walk saw the whole store
 
 	dc.writeMu.Lock()
 	defer dc.writeMu.Unlock()
-	defer func() { dc.total.Store(total) }()
+	defer func() {
+		// A walk that aborted partway holds a partial sum: installing it as
+		// the authoritative total would understate usage and mute the trigger
+		// predicate, so keep the running counter and retry on the next signal.
+		if complete {
+			dc.total.Store(total)
+		}
+	}()
 	if dc.onWalkStart != nil {
 		dc.onWalkStart()
 	}
 
 	err := filepath.WalkDir(dc.dir, func(p string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+		if err != nil {
+			complete = false
+			return err
+		}
+		if d.IsDir() {
 			return nil
 		}
 		base := filepath.Base(p)
+		if strings.HasPrefix(base, tmpPrefix) || strings.HasSuffix(base, tmpLegacyExt) {
+			if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
+				complete = false
+				return err
+			}
+			return nil
+		}
 		if !strings.HasSuffix(base, captureFileExt) {
 			return nil
 		}
@@ -236,7 +264,8 @@ func (dc *diskCapture) reconcile() error {
 		if serr != nil {
 			info, serr = os.Stat(p)
 			if serr != nil {
-				return nil
+				complete = false
+				return serr
 			}
 		}
 		entries = append(entries, entry{id: id, path: p, size: info.Size()})
