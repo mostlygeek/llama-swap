@@ -518,6 +518,14 @@ func TestCaptureDisk_WarnsOnSharedWritableDir(t *testing.T) {
 	if _, err := newDiskCaptureOpts(shared, 1<<20, "db", logger, false); err != nil {
 		t.Fatalf("open: %v", err)
 	}
+	if err := os.Chmod(shared, 0o700); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	if info, err := os.Stat(shared); err != nil {
+		t.Fatalf("stat: %v", err)
+	} else if info.Mode().Perm()&0o077 != 0 {
+		t.Skip("filesystem ignores directory permissions (Windows?)")
+	}
 	if err := os.Chmod(shared, 0o777); err != nil {
 		t.Fatalf("chmod: %v", err)
 	}

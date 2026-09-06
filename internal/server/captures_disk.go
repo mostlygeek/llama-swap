@@ -85,7 +85,7 @@ func newDiskCaptureOpts(dir string, maxBytes int, dbID string, logger *logmon.Mo
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("disk capture store: %w", err)
 	}
-	if info, err := os.Stat(dir); err == nil && info.Mode().Perm()&0o022 != 0 && logger != nil {
+	if info, err := os.Stat(dir); err == nil && sharedWritable(info) && logger != nil {
 		logger.Warnf("capture dir %s is group/world-writable (%o): local users can plant or read captures", dir, info.Mode().Perm())
 	}
 	dc := &diskCapture{dir: dir, ns: dir, maxSize: int64(maxBytes), logger: logger}
