@@ -97,6 +97,7 @@ func TestTailcatTransport_LocalDERPHTTP(t *testing.T) {
 		Public: tailcatlib.ConnInfo{
 			ServerPublic:      tailcatlib.NodePublic{NodePublic: serverPrivate.Public()},
 			ServerDiscoPublic: tailcatlib.DiscoPublicForNode(serverPrivate),
+			PresharedKey:      tailcatlib.NewPresharedKey(),
 			Region:            []*tailcfg.DERPRegion{region},
 		},
 	}}
@@ -116,6 +117,9 @@ func TestTailcatTransport_LocalDERPHTTP(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
+	}
+	if !server.tailcat.PresharedKey.Equal(serverKey.value.Public.PresharedKey) {
+		t.Fatal("server did not retain the persistent key's pre-shared key")
 	}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

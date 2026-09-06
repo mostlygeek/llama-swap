@@ -747,7 +747,7 @@ func TestNewPeer_CustomTimeouts(t *testing.T) {
 func TestNewPeer_TailcatTransportDisablesEnvironmentProxyAndCleansUp(t *testing.T) {
 	private := tailcat.NewPrivateKey()
 	private.Public.RegionID = 1
-	blob := private.Public.ConnBlob()
+	blob := private.Public.Addr()
 	cfg, err := config.LoadConfigFromReader(strings.NewReader(`
 models: {}
 peers:
