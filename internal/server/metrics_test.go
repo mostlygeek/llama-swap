@@ -546,3 +546,51 @@ func TestServer_MetricsMiddleware_UpstreamAudioCaptureSkipsRespBody(t *testing.T
 		t.Error("RespHeaders not stored; want captureRespHeaders mask")
 	}
 }
+
+func TestServer_ProcessStreamingResponse_TabbyAPIUsageRates(t *testing.T) {
+	// Real TabbyAPI (ExLlamaV3) streaming usage chunk: rates live in
+	// usage.*_per_sec, not in timings (llama.cpp) or metrics (vLLM).
+	body := []byte(
+		"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n" +
+			"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":64,\"prompt_time\":0.06,\"prompt_tokens_per_sec\":1066.67,\"completion_tokens\":76,\"completion_time\":0.39,\"completion_tokens_per_sec\":193.93,\"total_tokens\":140,\"total_time\":0.45}}\n\n" +
+			"data: [DONE]\n\n")
+	entry, err := processStreamingResponse("m", time.Now(), body)
+	if err != nil {
+		t.Fatalf("processStreamingResponse: %v", err)
+	}
+	if entry.Tokens.InputTokens != 64 || entry.Tokens.OutputTokens != 76 {
+		t.Fatalf("tokens = %+v", entry.Tokens)
+	}
+	if entry.Tokens.PromptPerSecond != 1066.67 {
+		t.Fatalf("PromptPerSecond = %v, want 1066.67", entry.Tokens.PromptPerSecond)
+	}
+	if entry.Tokens.TokensPerSecond != 193.93 {
+		t.Fatalf("TokensPerSecond = %v, want 193.93", entry.Tokens.TokensPerSecond)
+	}
+}
+
+func TestServer_ParseMetrics_TabbyAPIUsageRates(t *testing.T) {
+	body := `{"usage":{"prompt_tokens":64,"prompt_tokens_per_sec":1066.67,"completion_tokens":76,"completion_tokens_per_sec":193.93,"total_tokens":140}}`
+	parsed := gjson.Parse(body)
+	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
+	if err != nil {
+		t.Fatalf("parseMetrics: %v", err)
+	}
+	if entry.Tokens.PromptPerSecond != 1066.67 || entry.Tokens.TokensPerSecond != 193.93 {
+		t.Fatalf("rates = %+v", entry.Tokens)
+	}
+}
+
+func TestServer_ProcessStreamingResponse_TabbyAPIRatesNotOverriddenByAbsence(t *testing.T) {
+	// No timings, no metrics -> TabbyAPI usage rates must survive (not reset to -1).
+	body := []byte(
+		"data: {\"usage\":{\"prompt_tokens\":10,\"prompt_tokens_per_sec\":500.0,\"completion_tokens\":20,\"completion_tokens_per_sec\":100.0}}\n\n" +
+			"data: [DONE]\n\n")
+	entry, err := processStreamingResponse("m", time.Now(), body)
+	if err != nil {
+		t.Fatalf("processStreamingResponse: %v", err)
+	}
+	if entry.Tokens.PromptPerSecond != 500.0 || entry.Tokens.TokensPerSecond != 100.0 {
+		t.Fatalf("rates = %+v", entry.Tokens)
+	}
+}

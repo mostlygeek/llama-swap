@@ -350,8 +350,10 @@ var usagePaths = []string{"usage", "response.usage", "message.usage"}
 
 // extractUsageTokens reads input/output/cached token counts from a usage
 // gjson.Result, handling the field-name differences across endpoints.
-func extractUsageTokens(usage gjson.Result) (input, output, cached int64, ok bool) {
+func extractUsageTokens(usage gjson.Result) (input, output, cached int64, promptPerSec, completionPerSec float64, ok bool) {
 	cached = -1
+	promptPerSec = -1
+	completionPerSec = -1
 	if !usage.Exists() {
 		return
 	}
@@ -382,16 +384,26 @@ func extractUsageTokens(usage gjson.Result) (input, output, cached int64, ok boo
 		cached = v.Int()
 		ok = true
 	}
+
+	// TabbyAPI (ExLlamaV3) reports prefill/decode rates inside usage, unlike
+	// llama.cpp (timings.*) and vLLM (metrics.*).
+	if v := usage.Get("prompt_tokens_per_sec"); v.Exists() {
+		promptPerSec = v.Float()
+	}
+	if v := usage.Get("completion_tokens_per_sec"); v.Exists() {
+		completionPerSec = v.Float()
+	}
 	return
 }
 
 func processStreamingResponse(modelID string, start time.Time, body []byte) (ActivityLogEntry, error) {
 	var (
-		inputTokens, outputTokens int64
-		cachedTokens              int64 = -1
-		hasAny                    bool
-		timings                   gjson.Result
-		responseMetrics           gjson.Result
+		inputTokens, outputTokens      int64
+		cachedTokens                   int64   = -1
+		promptPerSec, completionPerSec float64 = -1, -1
+		hasAny                         bool
+		timings                        gjson.Result
+		responseMetrics                gjson.Result
 	)
 
 	prefix := []byte("data:")
@@ -424,7 +436,7 @@ func processStreamingResponse(modelID string, start time.Time, body []byte) (Act
 			if !u.Exists() {
 				continue
 			}
-			i, o, c, ok := extractUsageTokens(u)
+			i, o, c, pps, cps, ok := extractUsageTokens(u)
 			if !ok {
 				continue
 			}
@@ -437,6 +449,12 @@ func processStreamingResponse(modelID string, start time.Time, body []byte) (Act
 			}
 			if c >= 0 {
 				cachedTokens = c
+			}
+			if pps > 0 {
+				promptPerSec = pps
+			}
+			if cps > 0 {
+				completionPerSec = cps
 			}
 		}
 		if t := parsed.Get("timings"); t.Exists() {
@@ -453,22 +471,30 @@ func processStreamingResponse(modelID string, start time.Time, body []byte) (Act
 		return ActivityLogEntry{}, fmt.Errorf("no valid JSON data found in stream")
 	}
 
-	return buildMetrics(modelID, start, inputTokens, outputTokens, cachedTokens, timings, responseMetrics), nil
+	return buildMetrics(modelID, start, inputTokens, outputTokens, cachedTokens, promptPerSec, completionPerSec, timings, responseMetrics), nil
 }
 
 func parseMetrics(modelID string, start time.Time, usage, timings, responseMetrics gjson.Result) (ActivityLogEntry, error) {
-	input, output, cached, _ := extractUsageTokens(usage)
-	return buildMetrics(modelID, start, input, output, cached, timings, responseMetrics), nil
+	input, output, cached, pps, cps, _ := extractUsageTokens(usage)
+	return buildMetrics(modelID, start, input, output, cached, pps, cps, timings, responseMetrics), nil
 }
 
 // buildMetrics composes an ActivityLogEntry from accumulated token counts and
 // optional llama-server timings (which override input/output and provide rates)
 // or vLLM response metrics (rates and speculative decoding counters).
-func buildMetrics(modelID string, start time.Time, inputTokens, outputTokens, cachedTokens int64, timings, responseMetrics gjson.Result) ActivityLogEntry {
+func buildMetrics(modelID string, start time.Time, inputTokens, outputTokens, cachedTokens int64, usagePromptPerSec, usageCompletionPerSec float64, timings, responseMetrics gjson.Result) ActivityLogEntry {
 	wallDurationMs := int(time.Since(start).Milliseconds())
 	durationMs := wallDurationMs
+	// TabbyAPI reports rates in usage.*_per_sec; seed them as a fallback so
+	// llama.cpp timings / vLLM metrics (below) can still override.
 	tokensPerSecond := -1.0
 	promptPerSecond := -1.0
+	if usageCompletionPerSec > 0 {
+		tokensPerSecond = usageCompletionPerSec
+	}
+	if usagePromptPerSec > 0 {
+		promptPerSecond = usagePromptPerSec
+	}
 	draftTokens := -1
 	draftAccTokens := -1
 
