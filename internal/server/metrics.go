@@ -73,7 +73,7 @@ func newMetricsMonitorWithDisk(logger *logmon.Monitor, maxMetrics, captureBuffer
 	if diskDir != "" {
 		if st.IsInMemory() {
 			mm.warnf("capture persistence requires a persistent store.path; ignoring the disk capture tier")
-		} else if dc, err := newDiskCapture(diskDir, diskMaxMB*1024*1024, mm.logger); err != nil {
+		} else if dc, err := newDiskCapture(diskDir, diskMaxMB*1024*1024, st.InstanceID(), mm.logger); err != nil {
 			mm.warnf("failed to open disk capture store at %s: %v", diskDir, err)
 		} else {
 			disk = dc

@@ -29,6 +29,10 @@ const (
 	// consume disk the budget silently does not account for.
 	tmpPrefix    = ".tmp-"
 	tmpLegacyExt = ".cap.tmp"
+	// namespacePrefix names each database's capture folder (db-<instanceID>).
+	// The prefix keeps namespaces distinct from the numeric shard folders the
+	// pre-namespacing layout wrote at the store root.
+	namespacePrefix = "db-"
 )
 
 // captureShardSize groups files into decimal folders (id/captureShardSize) so
@@ -37,16 +41,19 @@ const (
 const captureShardSize = 1000
 
 // diskCapture is a durable captureStore backed by one file per capture under
-// dir/<id/1000>/<id>.cap. Reads and writes probe the exact path, so opening is
-// O(1) and needs no startup scan regardless of capture count. Eviction of the
-// lowest-id (oldest) captures runs off the request path: Add signals a
-// background loop, which walks the disk only once the running byte total
-// crosses maxSize (0 = unlimited, no loop). Activity IDs are monotonic
-// AUTOINCREMENT values, so id order is insertion order; they never come from
-// user input.
+// dir/db-<dbID>/<id/1000>/<id>.cap: each activity database gets its own folder,
+// because ids restart at 1 when the database is swapped or recreated, and a
+// folder per id keeps generations from colliding. Reads and writes probe the
+// exact path of the current database's namespace, so opening is O(1) and needs
+// no startup scan. Eviction runs off the request path: Add signals a background
+// loop, which walks the whole store — every generation, so captureMaxMB spans
+// them all — and deletes the newest-file folder's lowest-id captures first
+// (maxSize 0 = unlimited, no loop). Activity IDs are monotonic AUTOINCREMENT
+// values, so id order is insertion order; they never come from user input.
 type diskCapture struct {
-	dir     string
-	maxSize int64 // 0 = unlimited
+	dir     string // store root: one folder per database, plus pre-namespacing leftovers
+	ns      string // captures of the bound database live here (dir when unbound)
+	maxSize int64  // 0 = unlimited
 	logger  *logmon.Monitor
 
 	writeMu sync.Mutex // serializes file writes with reconcile walks
@@ -60,16 +67,18 @@ type diskCapture struct {
 	onWalkStart func() // test hook: invoked once when a reconcile walk begins
 }
 
-// newDiskCapture opens (creating if needed) a disk capture store and starts its
-// background reconcile loop when a budget is set. maxBytes < 0 is a
-// configuration error; maxBytes == 0 means unlimited disk usage.
-func newDiskCapture(dir string, maxBytes int, logger *logmon.Monitor) (*diskCapture, error) {
-	return newDiskCaptureOpts(dir, maxBytes, logger, true)
+// newDiskCapture opens (creating if needed) a disk capture store bound to the
+// activity database identified by dbID, and starts its background reconcile
+// loop when a budget is set. maxBytes < 0 is a configuration error;
+// maxBytes == 0 means unlimited disk usage. An empty dbID skips the identity
+// binding (tests); production callers pass store.InstanceID.
+func newDiskCapture(dir string, maxBytes int, dbID string, logger *logmon.Monitor) (*diskCapture, error) {
+	return newDiskCaptureOpts(dir, maxBytes, dbID, logger, true)
 }
 
 // newDiskCaptureOpts is newDiskCapture with control over starting the reconcile
 // loop, so tests can drive eviction deterministically via reconcile().
-func newDiskCaptureOpts(dir string, maxBytes int, logger *logmon.Monitor, startLoop bool) (*diskCapture, error) {
+func newDiskCaptureOpts(dir string, maxBytes int, dbID string, logger *logmon.Monitor, startLoop bool) (*diskCapture, error) {
 	if maxBytes < 0 {
 		return nil, fmt.Errorf("disk capture store: maxBytes must be >= 0, got %d", maxBytes)
 	}
@@ -79,7 +88,13 @@ func newDiskCaptureOpts(dir string, maxBytes int, logger *logmon.Monitor, startL
 	if info, err := os.Stat(dir); err == nil && info.Mode().Perm()&0o022 != 0 && logger != nil {
 		logger.Warnf("capture dir %s is group/world-writable (%o): local users can plant or read captures", dir, info.Mode().Perm())
 	}
-	dc := &diskCapture{dir: dir, maxSize: int64(maxBytes), logger: logger}
+	dc := &diskCapture{dir: dir, ns: dir, maxSize: int64(maxBytes), logger: logger}
+	if dbID != "" {
+		dc.ns = filepath.Join(dir, namespacePrefix+dbID)
+		if err := dc.adoptLegacy(); err != nil {
+			return nil, fmt.Errorf("disk capture store: %w", err)
+		}
+	}
 	if startLoop && dc.maxSize > 0 {
 		dc.triggerCh = make(chan struct{}, 1)
 		dc.stopCh = make(chan struct{})
@@ -89,8 +104,65 @@ func newDiskCaptureOpts(dir string, maxBytes int, logger *logmon.Monitor, startL
 	return dc, nil
 }
 
+// adoptLegacy prepares the current database's namespace and moves any
+// root-level shard folders into it. That pre-namespacing layout recorded no
+// database identity, so the only honest attribution is the database in use
+// now; later identity changes are encoded in the folder names themselves and
+// need no bookkeeping file.
+func (dc *diskCapture) adoptLegacy() error {
+	if err := os.MkdirAll(dc.ns, 0o700); err != nil {
+		return err
+	}
+	return dc.migrateRoot(dc.ns)
+}
+
+// migrateRoot relocates pre-namespacing shard folders from the store root
+// into target in one pass. It runs at construction only, before the reconcile
+// loop and request path exist.
+func (dc *diskCapture) migrateRoot(target string) error {
+	entries, err := os.ReadDir(dc.dir)
+	if err != nil {
+		return err
+	}
+	var moved int
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if _, cerr := strconv.Atoi(e.Name()); cerr != nil {
+			continue // not a pre-namespacing shard folder
+		}
+		if moved == 0 {
+			if err := os.MkdirAll(target, 0o700); err != nil {
+				return err
+			}
+		}
+		from := filepath.Join(dc.dir, e.Name())
+		if err := os.Rename(from, filepath.Join(target, e.Name())); err != nil {
+			return fmt.Errorf("move legacy capture dir %s: %w", from, err)
+		}
+		moved++
+	}
+	if moved > 0 && dc.logger != nil {
+		dc.logger.Debugf("moved %d legacy capture folders into %s", moved, target)
+	}
+	return nil
+}
+
 func (dc *diskCapture) shardDir(id int) string {
-	return filepath.Join(dc.dir, strconv.Itoa(id/captureShardSize))
+	return filepath.Join(dc.ns, strconv.Itoa(id/captureShardSize))
+}
+
+// captureNamespace returns p's first component under the store root: the
+// database folder in the namespaced layout, or a shard folder name for
+// pre-namespacing or unbound (dbID-less) layouts.
+func captureNamespace(root, p string) string {
+	rel, err := filepath.Rel(root, p)
+	if err != nil {
+		return ""
+	}
+	gen, _, _ := strings.Cut(rel, string(filepath.Separator))
+	return gen
 }
 
 func (dc *diskCapture) path(id int) string {
@@ -202,10 +274,12 @@ func (dc *diskCapture) runReconcile() {
 }
 
 // reconcile sums all capture files from disk — the authoritative total, which
-// also corrects drift in the running counter — and deletes the lowest-id
-// (oldest) files until the store fits. Add is serialized against the walk and
-// eviction via writeMu, so the sum used for eviction decisions is exact and a
-// write racing the pass can neither over- nor under-evict. The file list is
+// also corrects drift in the running counter — and deletes the oldest files
+// until the store fits: lowest id first within a database folder, folders
+// ranked oldest by their newest file, so a replaced database's captures go
+// before the current one's. Add is serialized against the walk and eviction
+// via writeMu, so the sum used for eviction decisions is exact and a write
+// racing the pass can neither over- nor under-evict. The file list is
 // snapshotted first so captures written by a later pass (always higher ids)
 // are never removed by this one.
 func (dc *diskCapture) reconcile() error {
@@ -214,6 +288,7 @@ func (dc *diskCapture) reconcile() error {
 	}
 
 	type entry struct {
+		gen  string // first path component under the store root: the database folder
 		id   int
 		path string
 		size int64
@@ -221,7 +296,8 @@ func (dc *diskCapture) reconcile() error {
 
 	var entries []entry
 	var total int64
-	complete := true // whether the walk saw the whole store
+	genNewest := map[string]int64{} // folder → newest mtime in it
+	complete := true                // whether the walk saw the whole store
 
 	dc.writeMu.Lock()
 	defer dc.writeMu.Unlock()
@@ -268,14 +344,23 @@ func (dc *diskCapture) reconcile() error {
 				return serr
 			}
 		}
-		entries = append(entries, entry{id: id, path: p, size: info.Size()})
+		gen := captureNamespace(dc.dir, p)
+		if mt := info.ModTime().UnixNano(); mt > genNewest[gen] {
+			genNewest[gen] = mt
+		}
+		entries = append(entries, entry{gen: gen, id: id, path: p, size: info.Size()})
 		total += info.Size()
 		return nil
 	})
 	if err != nil {
 		return err
 	}
-	slices.SortFunc(entries, func(a, b entry) int { return cmp.Compare(a.id, b.id) })
+	slices.SortFunc(entries, func(a, b entry) int {
+		if c := cmp.Compare(genNewest[a.gen], genNewest[b.gen]); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.id, b.id)
+	})
 	for _, e := range entries {
 		if total <= dc.maxSize {
 			break

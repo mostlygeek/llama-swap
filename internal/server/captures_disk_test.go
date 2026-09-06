@@ -19,7 +19,7 @@ import (
 func newTestDiskCapture(t *testing.T, maxBytes int) *diskCapture {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "captures")
-	dc, err := newDiskCaptureOpts(dir, maxBytes, nil, false)
+	dc, err := newDiskCaptureOpts(dir, maxBytes, "db", nil, false)
 	if err != nil {
 		t.Fatalf("newDiskCaptureOpts: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestCaptureDisk_ShardsByThousandFiles(t *testing.T) {
 		if err := dc.Add(id, []byte("x")); err != nil {
 			t.Fatalf("Add %d: %v", id, err)
 		}
-		want := filepath.Join(dc.dir, filepath.FromSlash(rel))
+		want := filepath.Join(dc.ns, filepath.FromSlash(rel))
 		if _, err := os.Stat(want); err != nil {
 			t.Fatalf("id %d not at %s: %v", id, rel, err)
 		}
@@ -160,7 +160,7 @@ func TestCaptureDisk_ShardsByThousandFiles(t *testing.T) {
 // found purely by probing the exact sharded path (lazy discovery).
 func TestCaptureDisk_NoEvictionOrScanAtOpen(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "captures")
-	dc, err := newDiskCaptureOpts(dir, 30, nil, false)
+	dc, err := newDiskCaptureOpts(dir, 30, "db", nil, false)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestCaptureDisk_NoEvictionOrScanAtOpen(t *testing.T) {
 	}
 	dc.Close()
 
-	dc2, err := newDiskCaptureOpts(dir, 30, nil, false)
+	dc2, err := newDiskCaptureOpts(dir, 30, "db", nil, false)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestCaptureDisk_NoEvictionOrScanAtOpen(t *testing.T) {
 // the oldest ids without an explicit reconcile call.
 func TestCaptureDisk_ReconcileLoopEvictsInBackground(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "captures")
-	dc, err := newDiskCapture(dir, 20, nil) // startLoop = true
+	dc, err := newDiskCapture(dir, 20, "db", nil) // startLoop = true
 	if err != nil {
 		t.Fatalf("newDiskCapture: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestCaptureDisk_TieredStore(t *testing.T) {
 // reloads do not leak reconcilers.
 func TestCaptureDisk_CloseStopsLoop(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "captures")
-	dc, err := newDiskCapture(dir, 1<<20, nil) // loop started
+	dc, err := newDiskCapture(dir, 1<<20, "db", nil) // loop started
 	if err != nil {
 		t.Fatalf("newDiskCapture: %v", err)
 	}
@@ -473,7 +473,7 @@ func TestCaptureDisk_ReconcileRemovesCrashTmpFiles(t *testing.T) {
 // not run from it.
 func TestCaptureDisk_ReconcileKeepsTotalOnWalkError(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "captures")
-	dc, err := newDiskCaptureOpts(dir, 100, nil, false)
+	dc, err := newDiskCaptureOpts(dir, 100, "db", nil, false)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -515,13 +515,13 @@ func TestCaptureDisk_WarnsOnSharedWritableDir(t *testing.T) {
 	logger := logmon.NewWriter(&buf)
 
 	shared := filepath.Join(t.TempDir(), "shared")
-	if _, err := newDiskCaptureOpts(shared, 1<<20, logger, false); err != nil {
+	if _, err := newDiskCaptureOpts(shared, 1<<20, "db", logger, false); err != nil {
 		t.Fatalf("open: %v", err)
 	}
 	if err := os.Chmod(shared, 0o777); err != nil {
 		t.Fatalf("chmod: %v", err)
 	}
-	if _, err := newDiskCaptureOpts(shared, 1<<20, logger, false); err != nil {
+	if _, err := newDiskCaptureOpts(shared, 1<<20, "db", logger, false); err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
 	if !bytes.Contains(buf.Bytes(), []byte("writable")) {
@@ -530,10 +530,117 @@ func TestCaptureDisk_WarnsOnSharedWritableDir(t *testing.T) {
 
 	buf.Reset()
 	private := filepath.Join(t.TempDir(), "private")
-	if _, err := newDiskCaptureOpts(private, 1<<20, logger, false); err != nil {
+	if _, err := newDiskCaptureOpts(private, 1<<20, "db", logger, false); err != nil {
 		t.Fatalf("open private: %v", err)
 	}
 	if buf.Len() != 0 {
 		t.Fatalf("private capture dir must not warn, log = %q", buf.Bytes())
+	}
+}
+
+// TestCaptureDisk_CapturesSurviveIdentityChange covers the store identity
+// binding: same-id reopens keep captures; an identity change — the activity
+// database was swapped or recreated, so ids restart at 1 — keeps the old
+// captures side by side (unreachable, still under budget) instead of deleting
+// them; root-level files from before namespacing are adopted into the
+// current database's namespace.
+func TestCaptureDisk_CapturesSurviveIdentityChange(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "captures")
+
+	dc, err := newDiskCaptureOpts(dir, 0, "one", nil, false)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := dc.Add(1, []byte("old database")); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	dc.Close()
+
+	same, err := newDiskCaptureOpts(dir, 0, "one", nil, false)
+	if err != nil {
+		t.Fatalf("reopen same identity: %v", err)
+	}
+	if data, err := same.Get(1); err != nil || string(data) != "old database" {
+		t.Fatalf("Get = %q, %v, want %q", data, err, "old database")
+	}
+	same.Close()
+
+	swapped, err := newDiskCaptureOpts(dir, 1<<20, "two", nil, false)
+	if err != nil {
+		t.Fatalf("reopen swapped identity: %v", err)
+	}
+	if err := swapped.Add(1, []byte("new database")); err != nil {
+		t.Fatalf("Add after swap: %v", err)
+	}
+	if data, err := swapped.Get(1); err != nil || string(data) != "new database" {
+		t.Fatalf("Get after swap = %q, %v: id 1 must not expose old data", data, err)
+	}
+	oldFile := filepath.Join(dir, namespacePrefix+"one", "0", "1.cap")
+	if data, err := os.ReadFile(oldFile); err != nil || string(data) != "old database" {
+		t.Fatalf("old capture = %q, %v, want it kept at %s", data, err, oldFile)
+	}
+	swapped.Close()
+
+	// Flipping back to the old database finds its captures intact.
+	back, err := newDiskCaptureOpts(dir, 1<<20, "one", nil, false)
+	if err != nil {
+		t.Fatalf("reopen old identity: %v", err)
+	}
+	defer back.Close()
+	if data, err := back.Get(1); err != nil || string(data) != "old database" {
+		t.Fatalf("Get after flip back = %q, %v, want %q", data, err, "old database")
+	}
+
+	// The byte budget spans generations: an over-budget store evicts the
+	// older database's files before the current one's.
+	cross := filepath.Join(t.TempDir(), "cross")
+	a, err := newDiskCaptureOpts(cross, 1000, "ga", nil, false)
+	if err != nil {
+		t.Fatalf("open gen-a: %v", err)
+	}
+	if err := a.Add(1, make([]byte, 100)); err != nil {
+		t.Fatalf("gen-a Add: %v", err)
+	}
+	a.Close()
+	b, err := newDiskCaptureOpts(cross, 1000, "gb", nil, false)
+	if err != nil {
+		t.Fatalf("open gen-b: %v", err)
+	}
+	defer b.Close()
+	if err := b.Add(1, make([]byte, 500)); err != nil {
+		t.Fatalf("gen-b Add 1: %v", err)
+	}
+	if err := b.Add(2, make([]byte, 500)); err != nil {
+		t.Fatalf("gen-b Add 2: %v", err)
+	}
+	if err := b.reconcile(); err != nil {
+		t.Fatalf("cross-generation reconcile: %v", err)
+	}
+	if !b.Has(1) || !b.Has(2) {
+		t.Fatal("current database evicted while an older generation still had room to give")
+	}
+	if _, err := os.Stat(filepath.Join(cross, namespacePrefix+"ga", "0", "1.cap")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("oldest generation must be evicted first: %v", err)
+	}
+
+	// Root-level files from before namespacing are adopted into the current
+	// database's namespace at first open.
+	legacyDir := filepath.Join(t.TempDir(), "legacy")
+	if err := os.MkdirAll(filepath.Join(legacyDir, "0"), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "0", "7.cap"), []byte("adopted"), 0o600); err != nil {
+		t.Fatalf("write legacy capture: %v", err)
+	}
+	adopted, err := newDiskCaptureOpts(legacyDir, 0, "nine", nil, false)
+	if err != nil {
+		t.Fatalf("adopt open: %v", err)
+	}
+	defer adopted.Close()
+	if !adopted.Has(7) {
+		t.Fatal("existing captures must be adopted into the namespace")
+	}
+	if _, err := os.Stat(filepath.Join(legacyDir, namespacePrefix+"nine", "0", "7.cap")); err != nil {
+		t.Fatalf("adopted capture not relocated into its namespace: %v", err)
 	}
 }

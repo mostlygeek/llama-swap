@@ -53,6 +53,9 @@ logToStdout: "proxy"
 # - captureMaxMB caps that directory in MB; 0 (default) means unlimited
 # - persisted captures require a persistent store.path (activity IDs must
 #   survive restarts); the option is ignored for an in-memory database
+# - captures are namespaced by the store.path database: replacing or recreating
+#   it restarts IDs, so each database keeps its own folder (captureMaxMB spans
+#   them all and prunes the oldest generation first)
 # store:
 #   path: /path/to/file.sqlite
 #   captureDir: /path/to/captures

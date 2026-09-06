@@ -4,7 +4,7 @@ summary: Use logs, metrics, captures and the Activity view to diagnose requests 
 category: guides
 tags: [operations, logs, metrics, activity, captures]
 config_keys: [logLevel, logToStdout, metricsMaxInMemory, captureBuffer, store.captureDir, store.captureMaxMB]
-updated: 2026-09-05
+updated: 2026-09-06
 ---
 
 # Observability, storage and Activity
@@ -46,6 +46,12 @@ is needed and captures survive restarts; the `captureMaxMB` budget is enforced b
 a periodic background pass rather than inline, so disk usage can briefly exceed
 the cap right after a burst before the oldest captures are pruned.
 
+Captures are namespaced by the activity database at `store.path`: if that
+database is replaced or recreated, IDs restart at 1, so each database gets its
+own folder in the capture directory and old captures are never misread as new
+ones. They are kept, not deleted — flipping back to the old database serves
+them again — and the `captureMaxMB` budget spans all generations, pruning the
+older ones first.
 
 Do not put secrets in captures or debug logs. Reduce retention after diagnosing
 an issue.

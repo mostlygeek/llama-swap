@@ -414,3 +414,41 @@ func TestStore_NewFileUsesWAL(t *testing.T) {
 		t.Fatalf("journal_mode = %q, want wal", mode)
 	}
 }
+
+// TestStore_InstanceID proves the ID is seeded at open (via PRAGMA
+// user_version), stable across reopens of the same file, and distinct for a
+// recreated or different database — the signal capture storage uses to detect
+// restarting ids.
+func TestStore_InstanceID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "activity.sqlite")
+	s1, err := New(path)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	id1 := s1.InstanceID()
+	if id1 == "" {
+		t.Fatal("InstanceID is empty")
+	}
+	if again := s1.InstanceID(); again != id1 {
+		t.Fatalf("second InstanceID = %q, want %q", again, id1)
+	}
+	s1.Close()
+
+	s2, err := New(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer s2.Close()
+	if id2 := s2.InstanceID(); id2 != id1 {
+		t.Fatalf("reopened InstanceID = %q, want %q", id2, id1)
+	}
+
+	s3, err := New(filepath.Join(t.TempDir(), "other.sqlite"))
+	if err != nil {
+		t.Fatalf("New other: %v", err)
+	}
+	defer s3.Close()
+	if id3 := s3.InstanceID(); id3 == id1 {
+		t.Fatal("distinct databases share an InstanceID")
+	}
+}

@@ -2,8 +2,10 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"embed"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -124,13 +126,49 @@ type HistogramData struct {
 }
 
 type Store struct {
-	db       *sql.DB
-	inMemory bool
+	db         *sql.DB
+	inMemory   bool
+	instanceID string
 }
 
 // IsInMemory returns true if the store is using an in-memory database.
 func (s *Store) IsInMemory() bool {
 	return s.inMemory
+}
+
+// InstanceID returns a stable identifier for this database instance, seeded at
+// open and persisted in the SQLite header via PRAGMA user_version (a 4-byte
+// application-defined field), so it needs no table or migration. Deleting or
+// recreating the database file yields a new ID, letting dependents (disk
+// capture storage) detect that AUTOINCREMENT ids restart at 1; reopens — and
+// copies restored from backups — keep theirs.
+func (s *Store) InstanceID() string {
+	return s.instanceID
+}
+
+// seedInstanceID reads PRAGMA user_version and, when unset, persists a random
+// nonzero value. Pragmas reject bind parameters, so the generated number is
+// formatted directly into the statement.
+func seedInstanceID(ctx context.Context, db *sql.DB) (string, error) {
+	var ver int64
+	if err := db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&ver); err != nil {
+		return "", fmt.Errorf("read store instance id: %w", err)
+	}
+	if ver == 0 {
+		var b [4]byte
+		// 31 random bits, not 32: the driver silently ignores PRAGMA writes
+		// of values above 2^31-1, and 0 means "unset".
+		for ver == 0 {
+			if _, err := rand.Read(b[:]); err != nil {
+				return "", fmt.Errorf("generate store instance id: %w", err)
+			}
+			ver = int64(binary.BigEndian.Uint32(b[:]) & 0x7fffffff)
+		}
+		if _, err := db.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", ver)); err != nil {
+			return "", fmt.Errorf("persist store instance id: %w", err)
+		}
+	}
+	return fmt.Sprintf("%08x", uint32(ver)), nil
 }
 
 // New opens a SQLite store at path. An empty path creates an in-memory store.
@@ -167,7 +205,12 @@ func New(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	return &Store{db: db, inMemory: !diskFile}, nil
+	instanceID, err := seedInstanceID(ctx, db)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	return &Store{db: db, inMemory: !diskFile, instanceID: instanceID}, nil
 }
 
 func runMigrations(ctx context.Context, db *sql.DB) error {
