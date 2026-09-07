@@ -280,11 +280,70 @@ export interface ToolCall {
   function: { name: string; arguments: string };
 }
 
+/** Token count and duration of one phase of a turn. */
+export interface PhaseStats {
+  /** Tokens in this phase. Absent when unknown. */
+  tokens?: number;
+  /** Time spent in this phase. */
+  ms?: number;
+  /**
+   * Throughput. Usually tokens / ms, but for the prompt only the non-cached
+   * tokens count: the cached ones took no time.
+   */
+  perSecond?: number;
+  /**
+   * True when `tokens` was not reported by the backend: it is a count of
+   * streamed chunks, or the backend total split between thinking and answer
+   * by chunk ratio.
+   */
+  approxTokens: boolean;
+  /** True when `ms` is wall-clock time measured in the browser. */
+  approxTimings: boolean;
+}
+
+/**
+ * Per-turn generation stats shown with a chat message. Counts and durations
+ * come from the backend when it reports usage/timings; until then they are
+ * client-side measurements, flagged so the UI can mark them approximate.
+ */
+export interface GenerationStats {
+  /** Prompt processing. Its token count is backend-reported only. */
+  prompt: PhaseStats;
+  /** Everything generated: thinking plus answer. */
+  generation: PhaseStats;
+  /**
+   * Only when the turn streamed reasoning. The backend reports one total, so
+   * the two are split by streamed chunks and the boundary is the first answer
+   * token; `answer` is absent while the model is still thinking.
+   */
+  reasoning?: PhaseStats;
+  answer?: PhaseStats;
+
+  /** Prompt tokens served from the KV cache; backend-reported only. */
+  cachedTokens?: number;
+  /** Speculative decoding / MTP draft counts; backend-reported only. */
+  draftTokens?: number;
+  draftAccepted?: number;
+  /** Request start to first streamed token, measured in the browser. */
+  firstTokenMs?: number;
+  /** Request start to last streamed token, measured in the browser. */
+  wallMs?: number;
+  /** The backend's finish_reason: "stop", "length", "tool_calls", ... */
+  finishReason?: string;
+  /**
+   * Context window of the model that served the turn, captured when the turn
+   * started so the number stays put when a different model is selected later.
+   */
+  contextLength?: number;
+}
+
 export interface ChatMessage {
   role: ChatRole;
   content: string | ContentPart[];
   reasoning_content?: string;
   reasoningTimeMs?: number;
+  /** UI-only. Stats for the request that produced this assistant turn. */
+  stats?: GenerationStats;
 
   /** Wire fields. tool_calls is assistant-only; the rest are tool-only. */
   tool_calls?: ToolCall[];

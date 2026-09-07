@@ -27,11 +27,33 @@ export interface ToolCallDelta {
   function?: { name?: string; arguments?: string };
 }
 
+/**
+ * Token counts and timings reported by the backend, normalised across the
+ * endpoints. Every field is optional: OpenAI-style `usage` gives only the
+ * counts, llama.cpp's `timings` adds the time spent on each phase and the
+ * speculative-decoding draft counts.
+ */
+export interface StreamUsage {
+  /** The whole prompt, cached part included. */
+  prompt_tokens?: number;
+  /** Prompt tokens reused from the KV cache rather than processed. */
+  cached_tokens?: number;
+  completion_tokens?: number;
+  /** Time spent processing the non-cached part of the prompt. */
+  prompt_ms?: number;
+  completion_ms?: number;
+  /** Speculative decoding / MTP: tokens proposed by the draft, and accepted. */
+  draft_tokens?: number;
+  draft_accepted?: number;
+}
+
 export interface StreamChunk {
   content: string;
   reasoning_content?: string;
   tool_calls?: ToolCallDelta[];
   finish_reason?: string;
+  /** Present on the chunk(s) that carry usage; typically the last one. */
+  usage?: StreamUsage;
   done: boolean;
 }
 
@@ -41,6 +63,11 @@ export interface ChatOptions {
   max_tokens?: number;
   tools?: ToolDefinition[];
   tool_choice?: "auto" | "none" | "required";
+  /**
+   * Ask llama.cpp for `timings` on every streamed chunk instead of only the
+   * last one. Defaults to on; see perTokenTimingsWanted.
+   */
+  timingsPerToken?: boolean;
 }
 
 function parseDataUrl(url: string): { media_type: string; data: string } {
@@ -94,6 +121,13 @@ function buildChatCompletionsBody(model: string, messages: ChatMessage[], option
       return out;
     }),
     stream: true,
+    // Asks for a final chunk carrying token usage so the playground can show
+    // per-turn stats. Standard OpenAI; backends that predate it ignore it.
+    stream_options: { include_usage: true },
+    // llama.cpp extension: repeat the `timings` block on every chunk. Without
+    // it the exact numbers only arrive in the final chunk, which a cancelled
+    // stream never delivers.
+    ...(options?.timingsPerToken === false ? {} : { timings_per_token: true }),
     temperature: options?.temperature,
     ...(options?.max_tokens ? { max_tokens: options.max_tokens } : {}),
     ...(options?.tools?.length
@@ -193,6 +227,93 @@ export function buildRequest(
   }
 }
 
+function asNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * Reads a usage object in either the OpenAI (`prompt_tokens`) or Anthropic
+ * (`input_tokens`) spelling, with the cached-token count from whichever of
+ * the three places the endpoints put it. Returns undefined when neither
+ * token count is present.
+ */
+function parseUsageObject(usage: unknown): StreamUsage | undefined {
+  if (!usage || typeof usage !== "object") return undefined;
+  const u = usage as Record<string, unknown>;
+  const out: StreamUsage = {};
+  const prompt = asNumber(u.prompt_tokens) ?? asNumber(u.input_tokens);
+  const completion = asNumber(u.completion_tokens) ?? asNumber(u.output_tokens);
+  if (prompt !== undefined) out.prompt_tokens = prompt;
+  if (completion !== undefined) out.completion_tokens = completion;
+  if (prompt === undefined && completion === undefined) return undefined;
+  const cached =
+    asNumber((u.prompt_tokens_details as Record<string, unknown> | undefined)?.cached_tokens) ??
+    asNumber((u.input_tokens_details as Record<string, unknown> | undefined)?.cached_tokens) ??
+    asNumber(u.cache_read_input_tokens);
+  if (cached !== undefined) out.cached_tokens = cached;
+  return out;
+}
+
+/**
+ * Reads llama.cpp's `timings` object. Its `prompt_n` counts only the tokens
+ * actually processed, so the whole prompt is that plus `cache_n`.
+ */
+function parseTimingsObject(timings: unknown): StreamUsage | undefined {
+  if (!timings || typeof timings !== "object") return undefined;
+  const t = timings as Record<string, unknown>;
+  const out: StreamUsage = {};
+  const promptN = asNumber(t.prompt_n);
+  const cacheN = asNumber(t.cache_n);
+  const predictedN = asNumber(t.predicted_n);
+  const promptMs = asNumber(t.prompt_ms);
+  const predictedMs = asNumber(t.predicted_ms);
+  const draftN = asNumber(t.draft_n);
+  const draftAccepted = asNumber(t.draft_n_accepted);
+  if (promptN !== undefined) out.prompt_tokens = promptN + (cacheN ?? 0);
+  if (cacheN !== undefined) out.cached_tokens = cacheN;
+  if (predictedN !== undefined) out.completion_tokens = predictedN;
+  if (promptMs !== undefined) out.prompt_ms = promptMs;
+  if (predictedMs !== undefined) out.completion_ms = predictedMs;
+  if (draftN !== undefined) out.draft_tokens = draftN;
+  if (draftAccepted !== undefined) out.draft_accepted = draftAccepted;
+  return Object.keys(out).length ? out : undefined;
+}
+
+/**
+ * Maps an Anthropic `stop_reason` onto the OpenAI finish_reason vocabulary
+ * the stats use, so every endpoint reports why a turn ended the same way.
+ */
+export function normalizeAnthropicStopReason(reason: unknown): string | undefined {
+  if (typeof reason !== "string" || !reason) return undefined;
+  switch (reason) {
+    case "end_turn":
+    case "stop_sequence":
+      return "stop";
+    case "max_tokens":
+      return "length";
+    case "tool_use":
+      return "tool_calls";
+    default:
+      return reason;
+  }
+}
+
+/**
+ * Maps a Responses API terminal event (`response.completed`, `.incomplete`,
+ * `.failed`) and the response object it carries onto a finish_reason.
+ */
+export function normalizeResponsesStop(event: string, response: unknown): string | undefined {
+  const r = (response && typeof response === "object" ? response : {}) as Record<string, unknown>;
+  const details = r.incomplete_details as Record<string, unknown> | undefined;
+  if (event === "response.incomplete" || r.status === "incomplete") {
+    if (details?.reason === "max_output_tokens") return "length";
+    return typeof details?.reason === "string" ? details.reason : "incomplete";
+  }
+  if (event === "response.failed" || r.status === "failed") return "error";
+  if (event === "response.completed") return "stop";
+  return undefined;
+}
+
 // Exported for tests.
 export function parseChatCompletionsLine(line: string): StreamChunk | null {
   const trimmed = line.trim();
@@ -213,9 +334,14 @@ export function parseChatCompletionsLine(line: string): StreamChunk | null {
     const reasoning_content = delta?.reasoning_content || delta?.reasoning || "";
     const tool_calls = Array.isArray(delta?.tool_calls) ? (delta.tool_calls as ToolCallDelta[]) : undefined;
     const finish_reason = choice?.finish_reason || undefined;
+    const usageFields = parseUsageObject(parsed.usage);
+    const timingFields = parseTimingsObject(parsed.timings);
+    // usage wins for the token counts (its prompt_tokens is always the whole
+    // prompt); timings supply everything else.
+    const usage = usageFields || timingFields ? { ...timingFields, ...usageFields } : undefined;
 
-    if (content || reasoning_content || tool_calls || finish_reason) {
-      return { content, reasoning_content, tool_calls, finish_reason, done: false };
+    if (content || reasoning_content || tool_calls || finish_reason || usage) {
+      return { content, reasoning_content, tool_calls, finish_reason, usage, done: false };
     }
     return null;
   } catch {
@@ -292,9 +418,19 @@ async function* parseMessagesStream(
         yield { content: "", done: true };
         return;
       }
-      if (parsed.event !== "content_block_delta" || !parsed.data) continue;
+      if (!parsed.data) continue;
       try {
         const json = JSON.parse(parsed.data);
+        // Input tokens arrive on message_start; output tokens and the stop
+        // reason on message_delta.
+        if (parsed.event === "message_start" || parsed.event === "message_delta") {
+          const usage = parseUsageObject(parsed.event === "message_start" ? json.message?.usage : json.usage);
+          const finish_reason =
+            parsed.event === "message_delta" ? normalizeAnthropicStopReason(json.delta?.stop_reason) : undefined;
+          if (usage || finish_reason) yield { content: "", usage, finish_reason, done: false };
+          continue;
+        }
+        if (parsed.event !== "content_block_delta") continue;
         const delta = json.delta;
         if (!delta) continue;
         if (delta.type === "text_delta" && delta.text) {
@@ -326,13 +462,20 @@ async function* parseResponsesStream(
     for (const block of blocks) {
       const parsed = parseSSEEventBlock(block);
       if (!parsed) continue;
-      if (parsed.event === "response.completed") {
-        yield { content: "", done: true };
-        return;
-      }
       if (!parsed.data) continue;
       try {
         const json = JSON.parse(parsed.data);
+        if (
+          parsed.event === "response.completed" ||
+          parsed.event === "response.incomplete" ||
+          parsed.event === "response.failed"
+        ) {
+          const usage = parseUsageObject(json.response?.usage);
+          const finish_reason = normalizeResponsesStop(parsed.event, json.response);
+          if (usage || finish_reason) yield { content: "", usage, finish_reason, done: false };
+          yield { content: "", done: true };
+          return;
+        }
         if (parsed.event === "response.output_text.delta" && json.delta) {
           yield { content: json.delta, done: false };
         } else if (parsed.event === "response.reasoning_summary_text.delta" && json.delta) {
@@ -360,6 +503,16 @@ function parseStream(
   }
 }
 
+/**
+ * Whether to keep asking for per-chunk timings. The parameter is a llama.cpp
+ * extension, so a backend that validates its request body strictly answers
+ * 400 and names the field. The first such rejection turns it off for the
+ * rest of the session and the request is retried without it. A 400 that does
+ * not mention the field is an ordinary error and is reported as one.
+ */
+let perTokenTimingsWanted = true;
+const PER_TOKEN_TIMINGS_FIELD = "timings_per_token";
+
 export async function* streamChatCompletion(
   model: string,
   messages: ChatMessage[],
@@ -367,21 +520,33 @@ export async function* streamChatCompletion(
   options?: ChatOptions
 ): AsyncGenerator<StreamChunk> {
   const endpoint = options?.endpoint ?? "v1/chat/completions";
-  const { url, body } = buildRequest(endpoint, model, messages, options);
+  const send = (timingsPerToken: boolean) => {
+    const { url, body } = buildRequest(endpoint, model, messages, { ...options, timingsPerToken });
+    return fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...playgroundSessionHeaders,
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+  };
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...playgroundSessionHeaders,
-    },
-    body: JSON.stringify(body),
-    signal,
-  });
+  const askedForTimings = perTokenTimingsWanted && endpoint === "v1/chat/completions";
+  let response = await send(askedForTimings);
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Chat API error: ${response.status} - ${errorText}`);
+    const rejectedExtension = response.status === 400 && askedForTimings && errorText.includes(PER_TOKEN_TIMINGS_FIELD);
+    if (!rejectedExtension) {
+      throw new Error(`Chat API error: ${response.status} - ${errorText}`);
+    }
+    perTokenTimingsWanted = false;
+    response = await send(false);
+    if (!response.ok) {
+      throw new Error(`Chat API error: ${response.status} - ${await response.text()}`);
+    }
   }
 
   const reader = response.body?.getReader();

@@ -5,12 +5,14 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { getTextContent, getImageUrls } from "../../lib/types";
-  import type { ContentPart } from "../../lib/types";
+  import type { ContentPart, GenerationStats } from "../../lib/types";
   import { formatDuration } from "../../lib/format";
   import { copyText } from "../../lib/clipboard";
   import { isSubmitEnter } from "../../lib/ime";
   import ToolCallCard from "./ToolCallCard.svelte";
   import AgentWork from "./AgentWork.svelte";
+  import MessageStats from "./MessageStats.svelte";
+  import StatsBreakdown from "./StatsBreakdown.svelte";
   import type { WorkItem } from "./AgentWork.svelte";
 
   interface Props {
@@ -22,6 +24,15 @@
     isReasoning?: boolean;
     toolResults?: ToolWorkResult[];
     workItems?: WorkItem[];
+    /**
+     * Stats of the request this message belongs to: for an assistant message
+     * its own turn, for a user message the turn it prompted. Prompt processing
+     * is shown under the user message, reasoning in the Reasoning header, and
+     * the response under the reply.
+     */
+    stats?: GenerationStats;
+    /** That request is still in flight, so the stats are updating. */
+    statsLive?: boolean;
     onEdit?: (newContent: string) => void;
     onRegenerate?: () => void;
   }
@@ -45,6 +56,8 @@
     isReasoning = false,
     toolResults = [],
     workItems = [],
+    stats,
+    statsLive = false,
     onEdit,
     onRegenerate,
   }: Props = $props();
@@ -57,6 +70,21 @@
     role === "assistant" && !hasMessageText && !hasImages && Boolean(reasoning_content || workItems.length)
   );
   let canEdit = $derived(onEdit !== undefined && !hasImages);
+  let showActions = $derived(!isStreaming && hasMessageText);
+  // The footer shows the whole turn in one line; a chevron expands it into
+  // the detailed table. While the model is still thinking the footer would
+  // only repeat the live Reasoning header, so it waits for the answer; once
+  // the turn is over it shows even for a thinking-only turn, since that is
+  // where the stop reason and the details live.
+  let showGenerationStats = $derived(
+    stats?.generation?.tokens !== undefined && !(isStreaming && stats?.reasoning && !stats?.answer)
+  );
+  // Per message and deliberately not persisted: every new reply starts
+  // collapsed. The chat keys its list by position, so regenerating a reply
+  // reuses this component and keeps the choice made for it.
+  let statsExpanded = $state(false);
+  // The user message's prompt line pulses until the first generated token.
+  let waitingForFirstToken = $derived(statsLive && stats?.generation?.tokens === undefined);
 
   let streamingCache = createStreamingCache();
   let renderedParts = $derived.by(() => {
@@ -159,7 +187,7 @@
   }
 </script>
 
-<div class="flex {role === 'user' ? 'justify-end' : 'justify-start'}" class:mb-4={!isReasoningOnly}>
+<div class="flex flex-col {role === 'user' ? 'items-end' : 'items-start'}" class:mb-4={!isReasoningOnly}>
   <div
     class="group relative {role === 'user'
       ? 'bg-primary text-primary-foreground max-w-[85%] rounded-lg px-4 py-2'
@@ -183,9 +211,13 @@
             {/if}
             <Brain class="size-4" />
             <span class="font-medium">Reasoning</span>
-            <span class="text-muted-foreground ml-2">
-              ({reasoning_content.length} chars{#if !isReasoning && reasoningTimeMs > 0}, {formatDuration(reasoningTimeMs, { precision: 1, subSecondMs: true })}{/if})
-            </span>
+            {#if stats?.reasoning}
+              <MessageStats phase={stats.reasoning} kind="reasoning" class="ml-2 font-normal" />
+            {:else}
+              <span class="text-muted-foreground ml-2">
+                ({reasoning_content.length} chars{#if !isReasoning && reasoningTimeMs > 0}, {formatDuration(reasoningTimeMs, { precision: 1, subSecondMs: true })}{/if})
+              </span>
+            {/if}
             {#if isReasoning}
               <span class="text-muted-foreground ml-auto flex items-center gap-1">
                 <span class="bg-primary h-1.5 w-1.5 animate-pulse rounded-full"></span>
@@ -244,35 +276,58 @@
           {/if}
         </div>
       {/if}
-      {#if !isStreaming && hasMessageText}
-        <div class="mt-2 flex gap-1 border-t pt-1">
-          {#if onRegenerate}
-            <Button variant="ghost" size="icon-xs" class="text-muted-foreground" onclick={onRegenerate} title="Regenerate response">
-              <RefreshCw />
-            </Button>
-          {/if}
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            class="text-muted-foreground"
-            onclick={copyToClipboard}
-            title={copied ? "Copied!" : "Copy to clipboard"}
-          >
-            {#if copied}
-              <Check class="text-success" />
-            {:else}
-              <Copy />
+      {#if showActions || showGenerationStats}
+        <div class="mt-2 border-t pt-1">
+          <div class="flex items-center gap-1">
+            {#if showActions && onRegenerate}
+              <Button variant="ghost" size="icon-xs" class="text-muted-foreground" onclick={onRegenerate} title="Regenerate response">
+                <RefreshCw />
+              </Button>
             {/if}
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            class={showRaw ? "text-primary" : "text-muted-foreground"}
-            onclick={() => showRaw = !showRaw}
-            title={showRaw ? "Show rendered" : "Show raw"}
-          >
-            <Code />
-          </Button>
+            {#if showActions}
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                class="text-muted-foreground"
+                onclick={copyToClipboard}
+                title={copied ? "Copied!" : "Copy to clipboard"}
+              >
+                {#if copied}
+                  <Check class="text-success" />
+                {:else}
+                  <Copy />
+                {/if}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                class={showRaw ? "text-primary" : "text-muted-foreground"}
+                onclick={() => showRaw = !showRaw}
+                title={showRaw ? "Show rendered" : "Show raw"}
+              >
+                <Code />
+              </Button>
+            {/if}
+            {#if showGenerationStats && stats}
+              <span class="ml-auto inline-flex items-center gap-1 pr-1">
+                <button
+                  class="text-muted-foreground hover:text-foreground flex items-center"
+                  onclick={() => statsExpanded = !statsExpanded}
+                  title={statsExpanded ? "Hide detailed stats" : "Show detailed stats"}
+                >
+                  {#if statsExpanded}
+                    <ChevronDown class="size-3.5" />
+                  {:else}
+                    <ChevronRight class="size-3.5" />
+                  {/if}
+                </button>
+                <MessageStats phase={stats.generation} kind="generation" />
+              </span>
+            {/if}
+          </div>
+          {#if showGenerationStats && stats && statsExpanded}
+            <StatsBreakdown {stats} />
+          {/if}
         </div>
       {/if}
     {:else}
@@ -318,6 +373,15 @@
       {/if}
     {/if}
   </div>
+  {#if role === "user"}
+    <MessageStats
+      phase={stats?.prompt}
+      kind="prompt"
+      waiting={waitingForFirstToken}
+      cached={stats?.cachedTokens}
+      class="mt-1 pr-1"
+    />
+  {/if}
 </div>
 
 <!-- Full-size image modal -->

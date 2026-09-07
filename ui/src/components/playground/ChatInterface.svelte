@@ -1,8 +1,9 @@
 <script lang="ts">
   import { get } from "svelte/store";
-  import { hasListedModels } from "../../stores/api";
+  import { hasListedModels, playgroundModels } from "../../stores/api";
   import { persistentStore } from "../../stores/persistent";
   import { streamChatCompletion, type Endpoint } from "../../lib/chatApi";
+  import { currentStats, markCancelled, startTracking, trackChunk } from "../../lib/generationStats";
   import { DOCS_AGENT_SYSTEM_PROMPT } from "../../lib/prompts/docsAgent";
   import { playgroundStores } from "../../stores/playgroundActivity";
   import type { ChatMessage, ContentPart } from "../../lib/types";
@@ -17,6 +18,7 @@
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
+  import * as Switch from "$lib/components/ui/switch/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { X } from "@lucide/svelte";
 
@@ -25,6 +27,7 @@
   const temperatureStore = persistentStore<number>("playground-temperature", 0.7);
   const endpointStore = persistentStore<Endpoint>("playground-endpoint", "v1/chat/completions");
   const maxTokensStore = persistentStore<number>("playground-max-tokens", 4096);
+  const showStatsStore = persistentStore<boolean>("playground-show-stats", true);
 
   // This tab was briefly the docs agent; that is the Docs tab now. Anyone who
   // used it in between has the agent's prompt persisted here, which is not a
@@ -66,6 +69,17 @@
   let imageError = $state<string | null>(null);
 
   let userScrolledUp = $state(false);
+
+  /**
+   * Context window of the model the next request goes to. Looked up when the
+   * turn starts and stored with its stats, so a later switch of the dropdown
+   * does not rewrite older turns. The selector also offers aliases, which are
+   * not model entries themselves, so those resolve through their model.
+   */
+  function selectedContextLength(): number | undefined {
+    const id = $selectedModelStore;
+    return $playgroundModels.find((m) => m.id === id || m.aliases?.includes(id))?.context_length;
+  }
 
   $effect(() => {
     playgroundStores.chatStreaming.set(isStreaming);
@@ -209,6 +223,25 @@
     return out;
   }
 
+  /**
+   * The stats a message is shown with. An assistant turn carries its own; a
+   * user message borrows the turn it prompted, so its prompt-processing line
+   * sits right under it. Nothing when stats are switched off in settings;
+   * they are still tracked, so switching them back on shows past turns too.
+   */
+  function statsFor(idx: number) {
+    if (!$showStatsStore) return undefined;
+    const msg = messages[idx];
+    if (msg.role === "assistant") return msg.stats;
+    const next = messages[idx + 1];
+    return next?.role === "assistant" ? next.stats : undefined;
+  }
+
+  /** True for the streaming assistant turn and the user message that prompted it. */
+  function statsLiveFor(idx: number) {
+    return $showStatsStore && isStreaming && idx >= messages.length - 2;
+  }
+
   async function regenerateFromIndex(idx: number) {
     // Remove all messages after the edited user message
     messages = messages.slice(0, idx + 1);
@@ -221,6 +254,13 @@
     reasoningStartTime = 0;
     abortController = new AbortController();
 
+    // Stats are refreshed on every chunk and, so the clocks keep moving while
+    // the backend is quiet (prompt processing, a slow token), on a timer too.
+    const tracker = startTracking(performance.now(), selectedContextLength());
+    const ticker = window.setInterval(() => {
+      patchLast({ stats: currentStats(tracker, performance.now(), true) });
+    }, 200);
+
     try {
       const stream = streamChatCompletion(
         $selectedModelStore,
@@ -230,13 +270,19 @@
       );
 
       for await (const chunk of stream) {
+        const now = performance.now();
+        trackChunk(tracker, chunk, now);
         if (chunk.done) break;
         if (chunk.reasoning_content) appendDelta("reasoning", chunk.reasoning_content);
         if (chunk.content) appendDelta("content", chunk.content);
+        patchLast({ stats: currentStats(tracker, now, true) });
       }
     } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") markCancelled(tracker);
       handleTurnError(error);
     } finally {
+      window.clearInterval(ticker);
+      patchLast({ stats: currentStats(tracker, performance.now(), false) });
       isStreaming = false;
       isReasoning = false;
       abortController = null;
@@ -396,6 +442,15 @@
           <Input id="max-tokens" type="number" min="1" bind:value={$maxTokensStore} disabled={isStreaming} />
           <p class="text-muted-foreground mt-1 text-xs">Required for /v1/messages.</p>
         </div>
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <Label for="show-stats">Show generation stats</Label>
+            <p class="text-muted-foreground mt-1 text-xs">
+              Tokens, time and speed for each turn, with a detailed breakdown under every reply.
+            </p>
+          </div>
+          <Switch.Root id="show-stats" checked={$showStatsStore} onCheckedChange={(v) => showStatsStore.set(v)} />
+        </div>
       </div>
 
       <Dialog.Footer>
@@ -425,6 +480,8 @@
             reasoningTimeMs={message.reasoningTimeMs}
             isStreaming={isStreaming && idx === messages.length - 1 && message.role === "assistant"}
             isReasoning={isReasoning && idx === messages.length - 1 && message.role === "assistant"}
+            stats={statsFor(idx)}
+            statsLive={statsLiveFor(idx)}
             onEdit={message.role === "user" ? (newContent) => editMessage(idx, newContent) : undefined}
             onRegenerate={message.role === "assistant" && idx > 0 && messages[idx - 1].role === "user"
               ? () => regenerateFromIndex(idx - 1)
