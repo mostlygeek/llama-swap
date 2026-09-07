@@ -13,6 +13,9 @@
   export interface ReasoningWorkItem {
     kind: "reasoning";
     content: string;
+    /** Reasoning tokens reported or estimated from this model turn's stream. */
+    tokens?: number;
+    approxTokens?: boolean;
     durationMs?: number;
     running?: boolean;
   }
@@ -34,8 +37,14 @@
   let expanded = $state(false);
   let expandedReasoning = $state<Set<number>>(new Set());
   let isWorking = $derived(running || items.some((item) => item.running));
-  let reasoningCharacters = $derived(
-    items.reduce((total, item) => total + (item.kind === "reasoning" ? item.content.length : 0), 0)
+  let reasoningTokens = $derived(
+    items.reduce((total, item) => total + (item.kind === "reasoning" ? (item.tokens ?? 0) : 0), 0)
+  );
+  let hasReasoningTokens = $derived(
+    items.some((item) => item.kind === "reasoning" && item.tokens !== undefined)
+  );
+  let approximateReasoningTokens = $derived(
+    items.some((item) => item.kind === "reasoning" && item.approxTokens)
   );
   let totalDurationMs = $derived(
     items.reduce((total, item) => total + (item.durationMs ?? 0), 0)
@@ -64,7 +73,12 @@
     {/if}
     <span class="font-medium">Work</span>
     <span class="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs">
-      {reasoningCharacters.toLocaleString()} reasoning characters ·
+      {#if hasReasoningTokens}
+        {approximateReasoningTokens ? "~" : ""}{reasoningTokens.toLocaleString()} reasoning tokens
+      {:else}
+        reasoning tokens unavailable
+      {/if}
+      ·
       {formatDuration(totalDurationMs, { precision: 1, subSecondMs: true })} ·
       {toolCallCount} {toolCallCount === 1 ? "tool call" : "tool calls"}
       {#if isWorking}

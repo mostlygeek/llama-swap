@@ -2,6 +2,7 @@
   import { get } from "svelte/store";
   import { hasListedModels, playgroundModels } from "../../stores/api";
   import { persistentStore } from "../../stores/persistent";
+  import { showGenerationStats } from "../../stores/generationStats";
   import { streamChatCompletion, type Endpoint } from "../../lib/chatApi";
   import { currentStats, markCancelled, startTracking, trackChunk } from "../../lib/generationStats";
   import { DOCS_AGENT_SYSTEM_PROMPT } from "../../lib/prompts/docsAgent";
@@ -18,7 +19,6 @@
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
-  import * as Switch from "$lib/components/ui/switch/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { X } from "@lucide/svelte";
 
@@ -27,7 +27,6 @@
   const temperatureStore = persistentStore<number>("playground-temperature", 0.7);
   const endpointStore = persistentStore<Endpoint>("playground-endpoint", "v1/chat/completions");
   const maxTokensStore = persistentStore<number>("playground-max-tokens", 4096);
-  const showStatsStore = persistentStore<boolean>("playground-show-stats", true);
 
   // This tab was briefly the docs agent; that is the Docs tab now. Anyone who
   // used it in between has the agent's prompt persisted here, which is not a
@@ -230,7 +229,7 @@
    * they are still tracked, so switching them back on shows past turns too.
    */
   function statsFor(idx: number) {
-    if (!$showStatsStore) return undefined;
+    if (!$showGenerationStats) return undefined;
     const msg = messages[idx];
     if (msg.role === "assistant") return msg.stats;
     const next = messages[idx + 1];
@@ -239,7 +238,7 @@
 
   /** True for the streaming assistant turn and the user message that prompted it. */
   function statsLiveFor(idx: number) {
-    return $showStatsStore && isStreaming && idx >= messages.length - 2;
+    return $showGenerationStats && isStreaming && idx >= messages.length - 2;
   }
 
   async function regenerateFromIndex(idx: number) {
@@ -441,15 +440,6 @@
           <Label class="mb-1" for="max-tokens">Max Tokens</Label>
           <Input id="max-tokens" type="number" min="1" bind:value={$maxTokensStore} disabled={isStreaming} />
           <p class="text-muted-foreground mt-1 text-xs">Required for /v1/messages.</p>
-        </div>
-        <div class="flex items-start justify-between gap-4">
-          <div>
-            <Label for="show-stats">Show generation stats</Label>
-            <p class="text-muted-foreground mt-1 text-xs">
-              Tokens, time and speed for each turn, with a detailed breakdown under every reply.
-            </p>
-          </div>
-          <Switch.Root id="show-stats" checked={$showStatsStore} onCheckedChange={(v) => showStatsStore.set(v)} />
         </div>
       </div>
 

@@ -153,3 +153,57 @@ export function tokensPerSecond(tokens?: number, ms?: number): number | undefine
   if (tokens === undefined || ms === undefined || ms <= 0 || tokens <= 0) return undefined;
   return (tokens / ms) * 1000;
 }
+
+/**
+ * Combines the sequential model requests that make up one agent response.
+ * The aggregate is deliberately still a GenerationStats so ChatMessage and
+ * StatsBreakdown render a direct Playground turn and an agent group alike.
+ */
+export function combineGenerationStats(turns: GenerationStats[]): GenerationStats | undefined {
+  if (turns.length === 0) return undefined;
+
+  const totalOptional = (values: (number | undefined)[]) => {
+    if (values.length === 0) return undefined;
+    let total = 0;
+    for (const value of values) {
+      if (value === undefined) return undefined;
+      total += value;
+    }
+    return total;
+  };
+  const combinePhase = (phases: PhaseStats[], cachedTokens?: number): PhaseStats => {
+    const tokens = totalOptional(phases.map((phase) => phase.tokens));
+    const ms = totalOptional(phases.map((phase) => phase.ms));
+    const speedTokens = tokens === undefined || cachedTokens === undefined ? undefined : tokens - cachedTokens;
+    const perSecond = tokensPerSecond(speedTokens, ms);
+    return {
+      ...(tokens === undefined ? {} : { tokens }),
+      ...(ms === undefined ? {} : { ms }),
+      ...(perSecond === undefined ? {} : { perSecond }),
+      approxTokens: speedTokens === undefined || phases.some((phase) => phase.approxTokens),
+      approxTimings: ms === undefined || phases.some((phase) => phase.approxTimings),
+    };
+  };
+
+  const cachedTokens = totalOptional(turns.map((turn) => turn.cachedTokens));
+  const reasoning = turns.flatMap((turn) => turn.reasoning ? [turn.reasoning] : []);
+  const answer = turns.flatMap((turn) => turn.answer ? [turn.answer] : []);
+  const first = turns.find((turn) => turn.firstTokenMs !== undefined);
+
+  const stats: GenerationStats = {
+    prompt: combinePhase(turns.map((turn) => turn.prompt), cachedTokens),
+    generation: combinePhase(turns.map((turn) => turn.generation), 0),
+  };
+  if (reasoning.length > 0) stats.reasoning = combinePhase(reasoning, 0);
+  if (answer.length > 0) stats.answer = combinePhase(answer, 0);
+  if (cachedTokens !== undefined) stats.cachedTokens = cachedTokens;
+  const draftTokens = totalOptional(turns.map((turn) => turn.draftTokens));
+  if (draftTokens !== undefined) stats.draftTokens = draftTokens;
+  const draftAccepted = totalOptional(turns.map((turn) => turn.draftAccepted));
+  if (draftAccepted !== undefined) stats.draftAccepted = draftAccepted;
+  if (first?.firstTokenMs !== undefined) stats.firstTokenMs = first.firstTokenMs;
+  const wallMs = totalOptional(turns.map((turn) => turn.wallMs));
+  if (wallMs !== undefined) stats.wallMs = wallMs;
+  stats.finishReason = turns[turns.length - 1].finishReason;
+  return stats;
+}

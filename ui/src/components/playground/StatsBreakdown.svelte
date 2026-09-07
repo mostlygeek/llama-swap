@@ -12,9 +12,11 @@
    */
   interface Props {
     stats: GenerationStats;
+    /** Tool executions represented by an aggregated agent response. */
+    toolCallCount?: number;
   }
 
-  let { stats }: Props = $props();
+  let { stats, toolCallCount = 0 }: Props = $props();
   let contextLength = $derived(stats.contextLength);
 
   interface Row {
@@ -137,6 +139,12 @@
     {/if}
     {#if stats.wallMs !== undefined}
       <div title={DETAIL_TOOLTIP.wall}><dt class="inline font-medium">Wall</dt> <dd class="inline">{time(stats.wallMs)}</dd></div>
+    {/if}
+    {#if toolCallCount > 0}
+      <div title="Tool calls made while producing this response.">
+        <dt class="inline font-medium">Tool calls</dt>
+        <dd class="inline">{toolCallCount}</dd>
+      </div>
     {/if}
     {#if contextUsed !== undefined}
       <div title={DETAIL_TOOLTIP.context}>
