@@ -33,6 +33,8 @@
     stats?: GenerationStats;
     /** That request is still in flight, so the stats are updating. */
     statsLive?: boolean;
+    /** Tool calls included in an aggregated agent response. */
+    toolCallCount?: number;
     onEdit?: (newContent: string) => void;
     onRegenerate?: () => void;
   }
@@ -58,6 +60,7 @@
     workItems = [],
     stats,
     statsLive = false,
+    toolCallCount = 0,
     onEdit,
     onRegenerate,
   }: Props = $props();
@@ -326,7 +329,7 @@
             {/if}
           </div>
           {#if showGenerationStats && stats && statsExpanded}
-            <StatsBreakdown {stats} />
+            <StatsBreakdown {stats} {toolCallCount} />
           {/if}
         </div>
       {/if}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { currentStats, markCancelled, startTracking, tokensPerSecond, trackChunk } from "./generationStats";
+import { combineGenerationStats, currentStats, markCancelled, startTracking, tokensPerSecond, trackChunk } from "./generationStats";
 
 const text = (content: string) => ({ content, done: false });
 const think = (reasoning_content: string) => ({ content: "", reasoning_content, done: false });
@@ -229,5 +229,40 @@ describe("generationStats", () => {
     expect(tokensPerSecond(50, undefined)).toBeUndefined();
     expect(tokensPerSecond(50, 0)).toBeUndefined();
     expect(tokensPerSecond(0, 100)).toBeUndefined();
+  });
+
+  it("combines every model turn in an agent response", () => {
+    const exact = { approxTokens: false, approxTimings: false };
+    const combined = combineGenerationStats([
+      {
+        prompt: { tokens: 10, ms: 100, perSecond: 80, ...exact },
+        generation: { tokens: 3, ms: 60, perSecond: 50, ...exact },
+        reasoning: { tokens: 1, ms: 20, perSecond: 50, ...approx },
+        answer: { tokens: 2, ms: 40, perSecond: 50, ...approx },
+        cachedTokens: 2,
+        firstTokenMs: 30,
+        wallMs: 90,
+      },
+      {
+        prompt: { tokens: 20, ms: 200, perSecond: 75, ...exact },
+        generation: { tokens: 4, ms: 80, perSecond: 50, ...approx },
+        answer: { tokens: 4, ms: 80, perSecond: 50, ...approx },
+        cachedTokens: 5,
+        firstTokenMs: 10,
+        wallMs: 100,
+        finishReason: "stop",
+      },
+    ]);
+
+    expect(combined).toMatchObject({
+      prompt: { tokens: 30, ms: 300, perSecond: expect.closeTo(76.67, 2), ...exact },
+      generation: { tokens: 7, ms: 140, perSecond: 50, ...approx },
+      reasoning: { tokens: 1, ms: 20, perSecond: 50, ...approx },
+      answer: { tokens: 6, ms: 120, perSecond: 50, ...approx },
+      cachedTokens: 7,
+      firstTokenMs: 30,
+      wallMs: 190,
+      finishReason: "stop",
+    });
   });
 });
