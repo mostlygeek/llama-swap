@@ -69,6 +69,60 @@ func TestServer_ParseMetrics_Timings(t *testing.T) {
 	}
 }
 
+func TestServer_ParseMetrics_TabbyAPI(t *testing.T) {
+	body := `{"id":"chatcmpl-131b9995cd0c40c99e2ce958083ee406","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":83,"prompt_time":2.36,"prompt_tokens_per_sec":35.17,"completion_tokens":192,"completion_time":11.22,"completion_tokens_per_sec":17.11,"total_tokens":275,"total_time":13.63},"model":"SC_6.00bpw_H6_V6"}`
+	parsed := gjson.Parse(body)
+	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
+	if err != nil {
+		t.Fatalf("parseMetrics: %v", err)
+	}
+	if entry.Tokens.InputTokens != 83 || entry.Tokens.OutputTokens != 192 {
+		t.Fatalf("tokens = %+v", entry.Tokens)
+	}
+	if got, want := entry.Tokens.PromptPerSecond, 35.17; math.Abs(got-want) > 1e-9 {
+		t.Errorf("PromptPerSecond = %v, want %v", got, want)
+	}
+	if got, want := entry.Tokens.TokensPerSecond, 17.11; math.Abs(got-want) > 1e-9 {
+		t.Errorf("TokensPerSecond = %v, want %v", got, want)
+	}
+	if entry.DurationMs != 13630 {
+		t.Errorf("DurationMs = %d, want 13630", entry.DurationMs)
+	}
+}
+
+// llama-server timings and TabbyAPI usage rates never appear together, but a
+// response carrying both must keep the timings-sourced rates.
+func TestServer_ParseMetrics_TabbyAPINotOverwrittenByTimings(t *testing.T) {
+	body := `{"usage":{"prompt_tokens":83,"completion_tokens":192,"prompt_tokens_per_sec":35.17,"completion_tokens_per_sec":17.11},"timings":{"prompt_n":20,"predicted_n":50,"prompt_per_second":100.0,"predicted_per_second":40.0,"prompt_ms":200,"predicted_ms":1250}}`
+	parsed := gjson.Parse(body)
+	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
+	if err != nil {
+		t.Fatalf("parseMetrics: %v", err)
+	}
+	if entry.Tokens.PromptPerSecond != 100.0 || entry.Tokens.TokensPerSecond != 40.0 {
+		t.Fatalf("rates = %+v, want timings rates", entry.Tokens)
+	}
+}
+
+func TestServer_ProcessStreamingResponse_TabbyAPI(t *testing.T) {
+	body := []byte("data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n" +
+		"data: {\"id\":\"chatcmpl-131b9995cd0c40c99e2ce958083ee406\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":83,\"prompt_time\":2.36,\"prompt_tokens_per_sec\":35.17,\"completion_tokens\":192,\"completion_time\":11.22,\"completion_tokens_per_sec\":17.11,\"total_tokens\":275,\"total_time\":13.63},\"model\":\"SC_6.00bpw_H6_V6\"}\n\n" +
+		"data: [DONE]\n\n")
+	entry, err := processStreamingResponse("m", time.Now(), body)
+	if err != nil {
+		t.Fatalf("processStreamingResponse: %v", err)
+	}
+	if entry.Tokens.InputTokens != 83 || entry.Tokens.OutputTokens != 192 {
+		t.Fatalf("tokens = %+v", entry.Tokens)
+	}
+	if got, want := entry.Tokens.PromptPerSecond, 35.17; math.Abs(got-want) > 1e-9 {
+		t.Errorf("PromptPerSecond = %v, want %v", got, want)
+	}
+	if got, want := entry.Tokens.TokensPerSecond, 17.11; math.Abs(got-want) > 1e-9 {
+		t.Errorf("TokensPerSecond = %v, want %v", got, want)
+	}
+}
+
 func TestServer_ProcessStreamingResponse(t *testing.T) {
 	body := []byte("data: {\"choices\":[{}]}\n\n" +
 		"data: {\"usage\":{\"prompt_tokens\":15,\"completion_tokens\":33}}\n\n" +

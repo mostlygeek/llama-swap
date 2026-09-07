@@ -1,14 +1,16 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { hasListedModels } from "../../stores/api";
+  import { hasListedModels, playgroundModels } from "../../stores/api";
   import { persistentStore } from "../../stores/persistent";
+  import { showGenerationStats } from "../../stores/generationStats";
   import { streamChatCompletion, type ToolDefinition } from "../../lib/chatApi";
+  import { combineGenerationStats, currentStats, markCancelled, startTracking, trackChunk } from "../../lib/generationStats";
   import { runAgent, sanitizeMessages, DEFAULT_MAX_ITERATIONS } from "../../lib/agentLoop";
   import { fetchToolDefinitions, callTool, friendlyToolName } from "../../lib/agentTools";
   import { DOCS_AGENT_SYSTEM_PROMPT } from "../../lib/prompts/docsAgent";
   import { pickSuggestions } from "../../lib/prompts/docsSuggestions";
   import { docsAgentStreaming } from "../../stores/playgroundActivity";
-  import { getTextContent, type ChatMessage } from "../../lib/types";
+  import { getTextContent, type ChatMessage, type GenerationStats } from "../../lib/types";
   import { isSubmitEnter } from "../../lib/ime";
   import ChatMessageComponent from "./ChatMessage.svelte";
   import type { WorkItem } from "./AgentWork.svelte";
@@ -33,6 +35,12 @@
    */
 
   const selectedModelStore = persistentStore<string>("playground-docs-model", "");
+
+  /** Context length for the model selected when an agent iteration begins. */
+  function selectedContextLength(): number | undefined {
+    const id = $selectedModelStore;
+    return $playgroundModels.find((model) => model.id === id || model.aliases?.includes(id))?.context_length;
+  }
 
   function loadMessages(): ChatMessage[] {
     try {
@@ -71,6 +79,8 @@
         kind: "agent";
         content: string;
         workItems: WorkItem[];
+        stats?: GenerationStats;
+        toolCallCount: number;
         finalAssistantIdx: number;
         userMessageIdx: number | undefined;
         isCurrent: boolean;
@@ -134,6 +144,8 @@
               ? [{
                   kind: "reasoning" as const,
                   content: reasoning,
+                  tokens: message.stats?.reasoning?.tokens,
+                  approxTokens: message.stats?.reasoning?.approxTokens,
                   durationMs: message.reasoningTimeMs,
                   running: isReasoning && messageIdx === messages.length - 1,
                 }]
@@ -150,6 +162,10 @@
             running: message.toolOk === undefined,
           }];
         }),
+        stats: combineGenerationStats(
+          assistantTurns.flatMap(({ message }) => message.stats ? [message.stats] : [])
+        ),
+        toolCallCount: group.filter(({ message }) => message.role === "tool").length,
         finalAssistantIdx,
         userMessageIdx,
         isCurrent: finalAssistantIdx === messages.length - 1,
@@ -158,6 +174,17 @@
 
     return display;
   });
+
+  /** The first model turn after a user message processed that user's prompt. */
+  function promptStatsFor(idx: number) {
+    if (!$showGenerationStats) return undefined;
+    for (let messageIdx = idx + 1; messageIdx < messages.length; messageIdx++) {
+      const message = messages[messageIdx];
+      if (message.role === "user") return undefined;
+      if (message.role === "assistant") return message.stats;
+    }
+    return undefined;
+  }
 
   onMount(() => {
     fetchToolDefinitions()
@@ -329,11 +356,34 @@
   async function runAgentTurn(signal: AbortSignal) {
     const tools = toolDefs;
     const deps = {
-      streamChat: (msgs: ChatMessage[], sig: AbortSignal) =>
-        streamChatCompletion($selectedModelStore, msgs, sig, {
-          endpoint: "v1/chat/completions" as const,
-          tools,
-        }),
+      streamChat: async function* (msgs: ChatMessage[], sig: AbortSignal) {
+        const tracker = startTracking(performance.now(), selectedContextLength());
+        const ticker = window.setInterval(() => {
+          patchLast({ stats: currentStats(tracker, performance.now(), true) });
+        }, 200);
+
+        try {
+          for await (const chunk of streamChatCompletion($selectedModelStore, msgs, sig, {
+            endpoint: "v1/chat/completions" as const,
+            tools,
+            // Keep llama-server's per-chunk timings on for every agent
+            // iteration, including tool-call turns.
+            timingsPerToken: true,
+          })) {
+            const now = performance.now();
+            trackChunk(tracker, chunk, now);
+            patchLast({ stats: currentStats(tracker, now, true) });
+            yield chunk;
+          }
+        } catch (error) {
+          if (error instanceof Error && error.name === "AbortError") markCancelled(tracker);
+          throw error;
+        } finally {
+          window.clearInterval(ticker);
+          if (sig.aborted) markCancelled(tracker);
+          patchLast({ stats: currentStats(tracker, performance.now(), false) });
+        }
+      },
       callTool,
     };
 
@@ -505,6 +555,9 @@
               workItems={item.workItems}
               isStreaming={isStreaming && item.isCurrent}
               isReasoning={isReasoning && item.isCurrent}
+              stats={$showGenerationStats ? item.stats : undefined}
+              statsLive={isStreaming && item.isCurrent && $showGenerationStats}
+              toolCallCount={item.toolCallCount}
               onRegenerate={!isStreaming && item.userMessageIdx !== undefined
                 ? () => regenerateFromIndex(item.userMessageIdx!)
                 : undefined}
@@ -515,6 +568,8 @@
               content={item.message.content}
               reasoning_content={item.message.reasoning_content}
               reasoningTimeMs={item.message.reasoningTimeMs}
+              stats={item.message.role === "user" ? promptStatsFor(item.idx) : undefined}
+              statsLive={item.message.role === "user" && isStreaming && $showGenerationStats}
               onEdit={item.message.role === "user" ? (newContent) => editMessage(item.idx, newContent) : undefined}
             />
           {/if}

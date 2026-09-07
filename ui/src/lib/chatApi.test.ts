@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { buildRequest, parseChatCompletionsLine, type ChatOptions, type ToolDefinition } from "./chatApi";
+import {
+  buildRequest,
+  normalizeAnthropicStopReason,
+  normalizeResponsesStop,
+  parseChatCompletionsLine,
+  type ChatOptions,
+  type ToolDefinition,
+} from "./chatApi";
 import type { ChatMessage, ToolCall } from "./types";
 
 const sse = (payload: unknown) => `data: ${JSON.stringify(payload)}`;
@@ -49,6 +56,61 @@ describe("parseChatCompletionsLine", () => {
     expect(parseChatCompletionsLine("data: [DONE]")).toEqual({ content: "", done: true });
   });
 
+  // The include_usage chunk has an empty choices array and nothing else.
+  it("reads a usage-only chunk", () => {
+    const line = sse({ choices: [], usage: { prompt_tokens: 12, completion_tokens: 3, total_tokens: 15 } });
+    const chunk = parseChatCompletionsLine(line);
+    expect(chunk?.usage).toEqual({ prompt_tokens: 12, completion_tokens: 3 });
+    expect(chunk?.content).toBe("");
+    expect(chunk?.done).toBe(false);
+  });
+
+  // usage.prompt_tokens is always the whole prompt, so it wins over
+  // timings.prompt_n, which counts only the tokens actually processed.
+  it("merges usage counts with llama.cpp timings", () => {
+    const line = sse({
+      choices: [{ delta: {}, finish_reason: "stop" }],
+      usage: { prompt_tokens: 12, completion_tokens: 3 },
+      timings: { prompt_n: 10, prompt_ms: 120.5, predicted_n: 4, predicted_ms: 800, predicted_per_second: 5 },
+    });
+    expect(parseChatCompletionsLine(line)?.usage).toEqual({
+      prompt_tokens: 12,
+      completion_tokens: 3,
+      prompt_ms: 120.5,
+      completion_ms: 800,
+    });
+  });
+
+  it("reads cache and draft counts from llama.cpp timings", () => {
+    const line = sse({
+      choices: [],
+      timings: { prompt_n: 4, cache_n: 13, prompt_ms: 50, predicted_n: 500, predicted_ms: 14500, draft_n: 120, draft_n_accepted: 96 },
+    });
+    expect(parseChatCompletionsLine(line)?.usage).toEqual({
+      prompt_tokens: 17, // processed + cached
+      cached_tokens: 13,
+      completion_tokens: 500,
+      prompt_ms: 50,
+      completion_ms: 14500,
+      draft_tokens: 120,
+      draft_accepted: 96,
+    });
+  });
+
+  it("reads cached tokens from OpenAI-style usage details", () => {
+    const line = sse({
+      choices: [],
+      usage: { prompt_tokens: 20, completion_tokens: 1, prompt_tokens_details: { cached_tokens: 15 } },
+    });
+    expect(parseChatCompletionsLine(line)?.usage).toEqual({ prompt_tokens: 20, completion_tokens: 1, cached_tokens: 15 });
+  });
+
+  it("ignores malformed usage", () => {
+    const withText = sse({ choices: [{ delta: { content: "x" } }], usage: "nope" });
+    expect(parseChatCompletionsLine(withText)?.usage).toBeUndefined();
+    expect(parseChatCompletionsLine(sse({ choices: [], usage: { prompt_tokens: "12" } }))).toBeNull();
+  });
+
   it("returns null for lines with nothing to report", () => {
     for (const line of ["", "   ", ": keepalive", "event: message", "data: {not json", delta({})]) {
       expect(parseChatCompletionsLine(line)).toBeNull();
@@ -62,6 +124,20 @@ describe("buildRequest for v1/chat/completions", () => {
 
   it("targets the right url", () => {
     expect(buildRequest("v1/chat/completions", "m", [], {}).url).toBe("/v1/chat/completions");
+  });
+
+  it("asks for usage in the stream", () => {
+    expect(build([]).stream_options).toEqual({ include_usage: true });
+  });
+
+  // Without per-chunk timings the exact numbers only arrive in the final
+  // chunk, which a cancelled stream never delivers.
+  it("asks llama.cpp for timings on every chunk by default", () => {
+    expect(build([]).timings_per_token).toBe(true);
+  });
+
+  it("omits the timings extension when it is turned off", () => {
+    expect(build([], { timingsPerToken: false })).not.toHaveProperty("timings_per_token");
   });
 
   it("preserves tool_calls on an assistant turn", () => {
@@ -100,13 +176,23 @@ describe("buildRequest for v1/chat/completions", () => {
         toolOk: true,
         toolDurationMs: 12,
       },
-      { role: "assistant", content: "hi", reasoning_content: "think", reasoningTimeMs: 5 },
+      {
+        role: "assistant",
+        content: "hi",
+        reasoning_content: "think",
+        reasoningTimeMs: 5,
+        stats: {
+          prompt: { approxTokens: false, approxTimings: true },
+          generation: { tokens: 1, approxTokens: true, approxTimings: true },
+        },
+      },
     ]);
 
     expect(body.messages[0]).not.toHaveProperty("toolOk");
     expect(body.messages[0]).not.toHaveProperty("toolDurationMs");
     expect(body.messages[1]).not.toHaveProperty("reasoning_content");
     expect(body.messages[1]).not.toHaveProperty("reasoningTimeMs");
+    expect(body.messages[1]).not.toHaveProperty("stats");
   });
 
   it("does not put tool_calls on a non-assistant message", () => {
@@ -175,5 +261,27 @@ describe("buildRequest for the text-only endpoints", () => {
   it("still extracts the system prompt", () => {
     const body = buildRequest("v1/messages", "m", history, {}).body as any;
     expect(body.system).toBe("be helpful");
+  });
+});
+
+describe("stop reason normalization", () => {
+  it("maps Anthropic stop reasons onto the OpenAI vocabulary", () => {
+    expect(normalizeAnthropicStopReason("end_turn")).toBe("stop");
+    expect(normalizeAnthropicStopReason("stop_sequence")).toBe("stop");
+    expect(normalizeAnthropicStopReason("max_tokens")).toBe("length");
+    expect(normalizeAnthropicStopReason("tool_use")).toBe("tool_calls");
+    expect(normalizeAnthropicStopReason("refusal")).toBe("refusal"); // unknown ones pass through
+    expect(normalizeAnthropicStopReason(null)).toBeUndefined();
+    expect(normalizeAnthropicStopReason("")).toBeUndefined();
+  });
+
+  it("maps Responses terminal events onto the OpenAI vocabulary", () => {
+    expect(normalizeResponsesStop("response.completed", { status: "completed" })).toBe("stop");
+    expect(normalizeResponsesStop("response.incomplete", { incomplete_details: { reason: "max_output_tokens" } })).toBe("length");
+    expect(normalizeResponsesStop("response.incomplete", { incomplete_details: { reason: "content_filter" } })).toBe("content_filter");
+    expect(normalizeResponsesStop("response.incomplete", {})).toBe("incomplete");
+    expect(normalizeResponsesStop("response.completed", { status: "incomplete", incomplete_details: { reason: "max_output_tokens" } })).toBe("length");
+    expect(normalizeResponsesStop("response.failed", {})).toBe("error");
+    expect(normalizeResponsesStop("response.output_text.delta", {})).toBeUndefined();
   });
 });
