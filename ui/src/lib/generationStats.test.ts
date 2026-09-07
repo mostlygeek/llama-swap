@@ -265,4 +265,31 @@ describe("generationStats", () => {
       finishReason: "stop",
     });
   });
+
+  it("does not report partial prompt, cache, or draft totals as complete", () => {
+    const exact = { approxTokens: false, approxTimings: false };
+    const combined = combineGenerationStats([
+      {
+        prompt: { tokens: 10, ms: 100, perSecond: 100, ...exact },
+        generation: { tokens: 2, ms: 20, perSecond: 100, ...exact },
+        cachedTokens: 3,
+        draftTokens: 2,
+        draftAccepted: 1,
+      },
+      {
+        prompt: { ms: 50, ...exact },
+        generation: { tokens: 1, ms: 10, perSecond: 100, ...exact },
+      },
+    ]);
+
+    expect(combined).toMatchObject({
+      prompt: { ms: 150, approxTokens: true, approxTimings: false },
+      generation: { tokens: 3, ms: 30, perSecond: 100, ...exact },
+    });
+    expect(combined?.prompt.tokens).toBeUndefined();
+    expect(combined?.prompt.perSecond).toBeUndefined();
+    expect(combined?.cachedTokens).toBeUndefined();
+    expect(combined?.draftTokens).toBeUndefined();
+    expect(combined?.draftAccepted).toBeUndefined();
+  });
 });

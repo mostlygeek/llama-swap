@@ -178,7 +178,12 @@
   /** The first model turn after a user message processed that user's prompt. */
   function promptStatsFor(idx: number) {
     if (!$showGenerationStats) return undefined;
-    return messages.slice(idx + 1).find((message) => message.role === "assistant")?.stats;
+    for (let messageIdx = idx + 1; messageIdx < messages.length; messageIdx++) {
+      const message = messages[messageIdx];
+      if (message.role === "user") return undefined;
+      if (message.role === "assistant") return message.stats;
+    }
+    return undefined;
   }
 
   onMount(() => {
