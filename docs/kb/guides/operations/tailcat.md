@@ -116,6 +116,10 @@ tailcat --key=/path/to/client.private.json socks <token> \
 Tailcat uses virtual TCP port 80 for llama-swap; do not add another port to the
 connection URL or the `server.tailcat` hostname.
 
+To use the Playground against this node from a browser rather than from the
+command line, see [Use the Playground over Tailcat from a
+browser](tailcat-playground.md).
+
 ## List models with curl
 
 To list the models exposed by a llama-swap server's Tailcat listener, run curl

@@ -96,6 +96,49 @@ wol-proxy: $(BUILD_DIR)
 	@echo "Building wol-proxy"
 	go build -o $(BUILD_DIR)/wol-proxy-$(GOOS)-$(GOARCH)-$(shell date +%Y-%m-%d) cmd/wol-proxy/wol-proxy.go
 
+# Standalone browser Playground for a node started with -listen-tailcat. The
+# page carries its own Tailcat client as a js/wasm module, so it reaches the
+# node over the tunnel rather than over the network.
+#
+# Deliberately not a dependency of any binary target: nothing embeds this, and
+# the wasm module takes ~40s and 27MB to build.
+#
+# The build tag list comes from the tailcat module itself so it stays right
+# across upgrades. It is upstream's list for native binaries; their wasm list
+# lives in an internal package that cannot be imported, and the difference is
+# a couple of MB of code this page never calls.
+TAILCAT_DIST = $(BUILD_DIR)/tailcat-playground
+TAILCAT_TAGS = $(shell cat "$(shell go list -m -f '{{.Dir}}' github.com/tailscale/tailcat)/build-tags.txt")
+
+tailcat-playground: ui/node_modules
+	@echo "Building the Tailcat Playground page..."
+	mkdir -p $(TAILCAT_DIST) ui/src/tailcat/generated
+	cp "$(shell go env GOROOT)/lib/wasm/wasm_exec.js" ui/src/tailcat/generated/wasm_exec.js
+	GOOS=js GOARCH=wasm go build -tags "$(TAILCAT_TAGS)" -ldflags="-s -w" \
+		-o $(TAILCAT_DIST)/main.wasm ./cmd/tailcat-playground-wasm
+	gzip -9 -f -k $(TAILCAT_DIST)/main.wasm
+	cd ui && npm run build:tailcat
+	node ui/scripts/build-tailcat.mjs $(TAILCAT_DIST)
+
+# Tests for the Tailcat Playground's js/wasm fetch bridge. They run under Node
+# via the Go toolchain's own wasm runner, and stand an in-process HTTP server
+# where the tunnel would be, so they need no DERP relay and no peer.
+#
+# Kept out of `test` and `test-all` because the js/wasm build links the whole
+# Tailscale data plane and takes about a minute from cold.
+#
+# Compiling and running are separate steps on purpose. Go's wasm runner hands
+# the whole environment to the wasm binary as argv, against a 4KB limit, and a
+# containerised shell can exceed that on its own. Building keeps your
+# environment (GOPROXY and friends); only the run gets a bare one.
+TAILCAT_TEST_BIN = $(BUILD_DIR)/tailcat-bridge-test.wasm
+
+test-wasm: $(BUILD_DIR)
+	GOOS=js GOARCH=wasm go test -count=1 -tags "$(TAILCAT_TAGS)" \
+		-c -o $(TAILCAT_TEST_BIN) ./cmd/tailcat-playground-wasm/
+	env -i HOME="$$HOME" PATH="$(shell go env GOROOT)/lib/wasm:$$PATH" \
+		go_js_wasm_exec ./$(TAILCAT_TEST_BIN) -test.v
+
 test-ui:
 	cd ui && npm ci && npm run check && npm test
 
@@ -106,4 +149,5 @@ eval-docs-agent:
 
 # Phony targets
 .PHONY: all clean ui mac windows simple-responder simple-responder-windows test test-all test-dev test-ui wol-proxy eval-docs-agent
+.PHONY: tailcat-playground test-wasm
 .PHONY: linux linux-arm64 linux-amd64

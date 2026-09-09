@@ -1,0 +1,108 @@
+---
+title: Use the Playground over Tailcat from a browser
+summary: Build and use a standalone HTML page that reaches a Tailcat-exposed llama-swap node from any browser.
+category: guides
+tags: [tailcat, playground, ui, remote, browser, wasm]
+config_keys: [tailcat, tailcat.allow, tailcat.models, tailcat.admin, apiKeys]
+updated: 2026-09-09
+---
+
+# Use the Playground over Tailcat from a browser
+
+A node started with `-listen-tailcat` is reachable over Tailcat, but not by an
+ordinary browser: Tailcat is WireGuard relayed over DERP, which `fetch` does not
+speak. The built-in UI at `/ui/` is also blocked unless `tailcat.admin` is true.
+
+The Tailcat Playground page solves this by carrying a Tailcat client of its own,
+compiled to WebAssembly. Open the page, give it a connection token, and you get
+the normal Playground &mdash; chat, images, speech, transcription, rerank and the
+load test &mdash; talking to the node through the tunnel. Only your browser and
+the node see the traffic; whatever is hosting the page does not.
+
+It works against the default `tailcat.admin: false`, because everything the
+Playground calls (`/v1/models` and the model-dispatched inference routes) is
+already in Tailcat's narrow capability surface.
+
+## Build the page
+
+```bash
+make tailcat-playground
+```
+
+This writes two packagings of the same page to `build/tailcat-playground/`:
+
+| File | Use |
+| --- | --- |
+| `llama-swap-tailcat-playground.html` | One self-contained file, about 10MB. Copy it anywhere and open it, including from `file://`. |
+| `index.html` + `main.wasm.gz` | The same page with the module beside it instead of inside it. Serve both from any static web server. |
+
+The WebAssembly module is the whole Tailscale data plane, so the first build
+takes about a minute. Nothing embeds the page in the llama-swap binary.
+
+## Connect
+
+Start the node as usual (see [Connect llama-swap with
+Tailcat](tailcat.md)) and copy the connection token from its log:
+
+```text
+[INFO] Tailcat listening on virtual TCP port 80: tcREPLACE_WITH_CONNECTION_TOKEN
+```
+
+Open the page, choose **Add a server**, and fill in:
+
+- **Connection token** &mdash; the `tc...` value, exactly as printed. Tokens are
+  case-sensitive.
+- **API key** &mdash; only when the node configures `apiKeys`. Tailcat node
+  authorization and HTTP API-key authentication are independent, so a node can
+  require both.
+- **DERP map URL** &mdash; leave empty unless you run your own relays.
+
+Appending the token to the page's URL as a fragment connects immediately and
+skips the form, so a bookmark like this goes straight to the Playground:
+
+```text
+llama-swap-tailcat-playground.html#tcREPLACE_WITH_CONNECTION_TOKEN
+```
+
+The fragment is never sent to a web server, so hosting the page somewhere does
+not expose the token to whoever hosts it.
+
+## Allowlisted nodes
+
+When the node sets `tailcat.allow`, only the listed client keys may connect. The
+page generates its own client key on first load and shows it under **This
+browser's node key**:
+
+```yaml
+tailcat:
+  allow:
+    - nodekey:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  models:
+    - chat
+```
+
+The key is stored in the browser and stays the same across reloads, so it only
+has to be added once. `tailcat.allow` is read at startup, so restart llama-swap
+after changing it. Clearing the browser's storage generates a new key, and the
+page says so when that has happened.
+
+## What is stored, and where
+
+Saved servers live in the browser's local storage, which means the connection
+token and API key are held unencrypted on that device. Both are bearer
+credentials: anyone holding the token can attempt to reach the node. Treat the
+machine you save them on the way you would treat a file containing an API key,
+and delete the server entry when you are done with it.
+
+## Notes
+
+- The page fetches a DERP map from `https://tailcat.dev/derpmap.json` before it
+  can connect, so the browser needs to reach that once even though nothing
+  about the session goes through it.
+- The model list is fetched on connect rather than kept live, because
+  `/api/events` is not part of Tailcat's non-admin surface. Use **Refresh
+  models** after loading or unloading models on the node.
+- Only models listed in `tailcat.models` appear, which is the same filtering any
+  other Tailcat caller sees.
+- The Load Test tab drives its concurrency through one tunnel, so its numbers
+  describe the relay as much as the model.
