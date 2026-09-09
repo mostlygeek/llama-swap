@@ -171,19 +171,22 @@ func applyFilters(body []byte, requested, useModelName string, f config.Filters)
 	// Apply transforms: replace values based on path->mapping
 	// Transforms run last so they can override setParams/setParamsByID results
 	transforms := f.SanitizedTransformParams()
-	if len(transforms) > 0 {
-		for path, mapping := range transforms {
-			currentVal := gjson.GetBytes(body, path)
-			if currentVal.Exists() && currentVal.Type == gjson.String {
-				currentStr := currentVal.Str
-				if newVal, ok := mapping[currentStr]; ok {
-					if body, err = sjson.SetBytes(body, path, newVal); err != nil {
-						return nil, fmt.Errorf("error transforming %s: %w", path, err)
-					}
-				}
-			}
+	if len(transforms) == 0 {
+		return body, nil
+	}
+	for path, mapping := range transforms {
+		currentVal := gjson.GetBytes(body, path)
+		if !currentVal.Exists() || currentVal.Type != gjson.String {
+			continue
+		}
+		currentStr := currentVal.Str
+		newVal, ok := mapping[currentStr]
+		if !ok {
+			continue
+		}
+		if body, err = sjson.SetBytes(body, path, newVal); err != nil {
+			return nil, fmt.Errorf("error transforming %s: %w", path, err)
 		}
 	}
-
 	return body, nil
 }
