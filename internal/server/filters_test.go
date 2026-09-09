@@ -187,6 +187,82 @@ func TestServer_ApplyFilters(t *testing.T) {
 			t.Errorf("top_p = %v, want 0.1", got)
 		}
 	})
+
+	t.Run("transformParams replaces value at path", func(t *testing.T) {
+		f := config.Filters{
+			TransformParams: map[string]map[string]string{
+				"reasoning_effort": {"low": "medium", "medium": "high"},
+			},
+		}
+		out, err := applyFilters([]byte(`{"model":"m","reasoning_effort":"low"}`), "m", "", f)
+		if err != nil {
+			t.Fatalf("applyFilters: %v", err)
+		}
+		if got := gjson.GetBytes(out, "reasoning_effort").String(); got != "medium" {
+			t.Errorf("reasoning_effort = %q, want medium", got)
+		}
+	})
+
+	t.Run("transformParams no-op when value not in map", func(t *testing.T) {
+		f := config.Filters{
+			TransformParams: map[string]map[string]string{
+				"reasoning_effort": {"low": "medium"},
+			},
+		}
+		out, err := applyFilters([]byte(`{"model":"m","reasoning_effort":"high"}`), "m", "", f)
+		if err != nil {
+			t.Fatalf("applyFilters: %v", err)
+		}
+		if got := gjson.GetBytes(out, "reasoning_effort").String(); got != "high" {
+			t.Errorf("reasoning_effort = %q, want high (no transform)", got)
+		}
+	})
+
+	t.Run("transformParams applies after setParams", func(t *testing.T) {
+		f := config.Filters{
+			SetParams: map[string]any{"reasoning_effort": "low"},
+			TransformParams: map[string]map[string]string{
+				"reasoning_effort": {"low": "medium"},
+			},
+		}
+		out, err := applyFilters([]byte(`{"model":"m"}`), "m", "", f)
+		if err != nil {
+			t.Fatalf("applyFilters: %v", err)
+		}
+		if got := gjson.GetBytes(out, "reasoning_effort").String(); got != "medium" {
+			t.Errorf("reasoning_effort = %q, want medium (set then transform)", got)
+		}
+	})
+
+	t.Run("transformParams with nested path", func(t *testing.T) {
+		f := config.Filters{
+			TransformParams: map[string]map[string]string{
+				"chat_template_kwargs.reasoning_effort": {"medium": "xhigh"},
+			},
+		}
+		out, err := applyFilters([]byte(`{"model":"m","chat_template_kwargs":{"reasoning_effort":"medium"}}`), "m", "", f)
+		if err != nil {
+			t.Fatalf("applyFilters: %v", err)
+		}
+		if got := gjson.GetBytes(out, "chat_template_kwargs.reasoning_effort").String(); got != "xhigh" {
+			t.Errorf("reasoning_effort = %q, want xhigh", got)
+		}
+	})
+
+	t.Run("transformParams with missing path is no-op", func(t *testing.T) {
+		f := config.Filters{
+			TransformParams: map[string]map[string]string{
+				"reasoning_effort": {"low": "medium"},
+			},
+		}
+		out, err := applyFilters([]byte(`{"model":"m"}`), "m", "", f)
+		if err != nil {
+			t.Fatalf("applyFilters: %v", err)
+		}
+		if gjson.GetBytes(out, "reasoning_effort").Exists() {
+			t.Error("reasoning_effort should not exist when path is missing")
+		}
+	})
 }
 
 func TestServer_ResolveFilters_QualifiedPeer(t *testing.T) {

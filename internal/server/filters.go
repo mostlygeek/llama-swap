@@ -22,6 +22,7 @@ import (
 //   - StripParams removal (issue #174)
 //   - SetParams injection (issue #453)
 //   - SetParamsByID per-alias overrides
+//   - TransformParams value transformations
 //
 // Non-JSON requests (GET, multipart forms) pass through untouched. The buffered
 // body is re-attached with Content-Length / Transfer-Encoding cleanup so the
@@ -125,8 +126,8 @@ func resolveFilters(cfg config.Config, requested string) (useModelName string, f
 }
 
 // applyFilters rewrites the JSON body in place. Order matches the legacy
-// ProxyManager: useModelName, stripParams, setParams, then setParamsByID (which
-// can override setParams).
+// ProxyManager: useModelName, stripParams, setParams, setParamsByID, then
+// transformParams (which can override setParams/setParamsByID results).
 func applyFilters(body []byte, requested, useModelName string, f config.Filters) ([]byte, error) {
 	var err error
 
@@ -147,9 +148,8 @@ func applyFilters(body []byte, requested, useModelName string, f config.Filters)
 
 	// Set-if-undefined keys ("key?", issue #1052) only fill parameters the body
 	// does not carry at that point in the pipeline. Filters apply like a pipe —
-	// stripParams | setParams | setParamsByID — so a stripped key counts as
-	// undefined, and a key an earlier stage set counts as defined (a "key?" in
-	// setParamsByID is a no-op when setParams already set it).
+	// stripParams | setParams | setParamsByID | transformParams — so a stripped
+	// key counts as undefined, and a key an earlier stage set counts as defined.
 	for _, key := range setKeys {
 		if setSoft[key] && gjson.GetBytes(body, key).Exists() {
 			continue
@@ -165,6 +165,23 @@ func applyFilters(body []byte, requested, useModelName string, f config.Filters)
 		}
 		if body, err = sjson.SetBytes(body, key, byID[key]); err != nil {
 			return nil, fmt.Errorf("error setting parameter %s in request", key)
+		}
+	}
+
+	// Apply transforms: replace values based on path->mapping
+	// Transforms run last so they can override setParams/setParamsByID results
+	transforms := f.SanitizedTransformParams()
+	if len(transforms) > 0 {
+		for path, mapping := range transforms {
+			currentVal := gjson.GetBytes(body, path)
+			if currentVal.Exists() && currentVal.Type == gjson.String {
+				currentStr := currentVal.Str
+				if newVal, ok := mapping[currentStr]; ok {
+					if body, err = sjson.SetBytes(body, path, newVal); err != nil {
+						return nil, fmt.Errorf("error transforming %s: %w", path, err)
+					}
+				}
+			}
 		}
 	}
 
