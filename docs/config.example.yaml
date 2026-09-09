@@ -384,6 +384,28 @@ models:
           chat_template_kwargs:
             reasoning_effort: low
 
+      # transformParams: conditional string replacement for request parameters
+      # - optional, default: empty dictionary
+      # - maps JSON paths to value-translation maps
+      # - for each path, if the request carries a value that is a key in the map,
+      #   it is replaced with the corresponding map value
+      # - transforms run after setParams/setParamsByID so they can override them
+      # - supports nested paths using dot notation (e.g. "chat_template_kwargs.reasoning_effort")
+      # - protected paths like "model" are filtered out
+      # - useful for translating reasoning effort levels between Hermes and models
+      #   that interpret levels differently (e.g., Hermes "medium" -> model "high")
+      transformParams:
+        reasoning_effort:
+          medium: high
+          low: medium
+
+      # transformParams: conditional string replacement for request parameters
+      # - optional, default: empty dictionary
+      # - maps JSON paths to value-translation maps
+      # - for each path, if the request carries a value that is a key in the map,
+      #   it is replaced with the corresponding map value
+      # - trans
+
     # aliases: alternative model names that this model configuration is used for
     # - optional, default: empty array
     # - aliases must be unique globally
