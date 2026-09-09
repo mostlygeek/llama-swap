@@ -23,6 +23,12 @@ export interface TailcatServer {
 
 export const tailcatServers = persistentStore<TailcatServer[]>("tailcat-servers", []);
 
+/**
+ * The server the user last activated. Remembered so reopening the page starts
+ * on the node you were working with rather than on an anonymous list.
+ */
+export const activeServerID = persistentStore<string>("tailcat-active-server", "");
+
 /** The browser's own Tailcat client key, so its node key stays stable. */
 export const tailcatClientKey = persistentStore<string>("tailcat-client-key", "");
 
@@ -33,9 +39,8 @@ export function newServerID(): string {
   return `srv-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-/** Tokens are case-sensitive, so this match is too. */
-export function findByToken(list: TailcatServer[], token: string): TailcatServer | undefined {
-  return list.find((server) => server.token === token);
+export function findByID(list: TailcatServer[], id: string): TailcatServer | undefined {
+  return list.find((server) => server.id === id);
 }
 
 /** A readable stand-in when the user does not name a server. */
@@ -60,4 +65,15 @@ export function upsert(list: TailcatServer[], server: TailcatServer): TailcatSer
 
 export function remove(list: TailcatServer[], id: string): TailcatServer[] {
   return list.filter((server) => server.id !== id);
+}
+
+/**
+ * Puts the active server first, so the one you are most likely to want is at
+ * the top of a list that has grown past a couple of entries. Order within the
+ * rest is left alone.
+ */
+export function activeFirst(list: TailcatServer[], activeID: string): TailcatServer[] {
+  const active = findByID(list, activeID);
+  if (!active) return list;
+  return [active, ...list.filter((server) => server.id !== activeID)];
 }
