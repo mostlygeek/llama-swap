@@ -263,6 +263,21 @@ func TestServer_ApplyFilters(t *testing.T) {
 			t.Error("reasoning_effort should not exist when path is missing")
 		}
 	})
+
+	t.Run("transformParams protects model path", func(t *testing.T) {
+		f := config.Filters{
+			TransformParams: map[string]map[string]string{
+				"model": {"advanced": "wrong-model"},
+			},
+		}
+		out, err := applyFilters([]byte(`{"model":"advanced"}`), "advanced", "", f)
+		if err != nil {
+			t.Fatalf("applyFilters: %v", err)
+		}
+		if got := gjson.GetBytes(out, "model").String(); got != "advanced" {
+			t.Errorf("model = %q, want advanced (protected)", got)
+		}
+	})
 }
 
 func TestServer_ResolveFilters_QualifiedPeer(t *testing.T) {

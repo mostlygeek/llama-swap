@@ -93,13 +93,25 @@ func (f Filters) SanitizedSetParams() (map[string]any, []string, map[string]bool
 	return sanitizeParams(f.SetParams)
 }
 
-// SanitizedTransformParams returns the transform maps for all paths.
-// Returns nil if no transforms are configured.
+// SanitizedTransformParams returns the transform maps for all paths,
+// filtering out protected paths (like "model"). Returns nil if no transforms
+// are configured or all transforms are protected.
 func (f Filters) SanitizedTransformParams() map[string]map[string]string {
 	if len(f.TransformParams) == 0 {
 		return nil
 	}
-	return f.TransformParams
+	result := make(map[string]map[string]string, len(f.TransformParams))
+	for path, mapping := range f.TransformParams {
+		// Skip protected paths (e.g., "model")
+		if slices.Contains(ProtectedParams, path) {
+			continue
+		}
+		result[path] = mapping
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
 
 // sanitizeParams removes protected params from raw and strips the "?" suffix
