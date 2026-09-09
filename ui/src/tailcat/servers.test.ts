@@ -1,25 +1,37 @@
 import { describe, it, expect } from "vitest";
-import { defaultName, findByToken, maskToken, remove, upsert, type TailcatServer } from "./servers";
+import { activeFirst, defaultName, findByID, maskToken, remove, upsert, type TailcatServer } from "./servers";
 
 function server(id: string, token: string): TailcatServer {
   return { id, name: id, token, apiKey: "", derpMapURL: "" };
 }
 
-describe("findByToken", () => {
+describe("findByID", () => {
   const list = [server("a", "tcAAA"), server("b", "tcBBB")];
 
-  it("finds the saved entry so its API key comes along with a #token link", () => {
-    expect(findByToken(list, "tcBBB")?.id).toBe("b");
+  it("resolves the remembered active server", () => {
+    expect(findByID(list, "b")?.token).toBe("tcBBB");
   });
 
-  it("returns nothing for an unknown token", () => {
-    expect(findByToken(list, "tcCCC")).toBeUndefined();
+  // The active id outlives the entry it names when a server is deleted in
+  // another tab, so callers have to cope with nothing coming back.
+  it("returns nothing for an id that is no longer saved", () => {
+    expect(findByID(list, "gone")).toBeUndefined();
+  });
+});
+
+describe("activeFirst", () => {
+  const list = [server("a", "tcAAA"), server("b", "tcBBB"), server("c", "tcCCC")];
+
+  it("lifts the active server to the top", () => {
+    expect(activeFirst(list, "c").map((s) => s.id)).toEqual(["c", "a", "b"]);
   });
 
-  // Tokens are case-sensitive; the Tailcat docs say so explicitly, and matching
-  // loosely here would silently attach the wrong API key.
-  it("does not match on case", () => {
-    expect(findByToken(list, "tcaaa")).toBeUndefined();
+  it("leaves the order alone when nothing is active", () => {
+    expect(activeFirst(list, "").map((s) => s.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("leaves the order alone when the active id names a deleted server", () => {
+    expect(activeFirst(list, "gone").map((s) => s.id)).toEqual(["a", "b", "c"]);
   });
 });
 

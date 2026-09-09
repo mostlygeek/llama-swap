@@ -1,14 +1,16 @@
 <script lang="ts">
-  import { untrack } from "svelte";
   import { get } from "svelte/store";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
-  import { Copy, Check, Pencil, Trash2, TriangleAlert } from "@lucide/svelte";
+  import { Copy, Check, Pencil, Trash2, TriangleAlert, Plus } from "@lucide/svelte";
   import { copyText } from "$lib/clipboard";
   import {
     tailcatServers,
+    activeServerID,
+    activeFirst,
     defaultName,
     maskToken,
     newServerID,
@@ -22,42 +24,49 @@
     nodeKey: string;
     /** True when a saved client key could not be read and was replaced. */
     keyRegenerated: boolean;
-    /** Prefilled into a new entry, e.g. from the URL fragment. */
-    initialToken?: string;
-    onconnect: (server: TailcatServer) => void;
+    /** Activating a server means connecting to it and remembering the choice. */
+    onactivate: (server: TailcatServer) => void;
   }
 
-  let { nodeKey, keyRegenerated, initialToken = "", onconnect }: Props = $props();
+  let { nodeKey, keyRegenerated, onactivate }: Props = $props();
 
   function blank(): TailcatServer {
-    return { id: newServerID(), name: "", token: initialToken, apiKey: "", derpMapURL: "" };
+    return { id: newServerID(), name: "", token: "", apiKey: "", derpMapURL: "" };
   }
 
   // A draft is the add form when its id is not in the list yet, and the edit
   // form when it is. Null means the list is showing.
   //
-  // Opening straight into the form is only right for how things stood when the
-  // component mounted - nothing saved yet, or a token from the URL that is not
-  // saved - so the list is read once with get() rather than through the $ store
-  // subscription, which would make this a reactive decision.
-  let draft = $state<TailcatServer | null>(
-    untrack(() => (get(tailcatServers).length === 0 || initialToken ? blank() : null)),
-  );
+  // With nothing saved there is no list worth showing, so the form opens
+  // straight away. That is a decision about how things stood at mount, which is
+  // why the list is read once with get() rather than through the $ store.
+  let draft = $state<TailcatServer | null>(get(tailcatServers).length === 0 ? blank() : null);
   let copied = $state(false);
 
-  function save(connect: boolean) {
-    if (!draft) return;
-    const server: TailcatServer = {
-      ...draft,
-      name: draft.name.trim() || defaultName(draft.token.trim()),
-      token: draft.token.trim(),
-      apiKey: draft.apiKey.trim(),
-      derpMapURL: draft.derpMapURL.trim(),
+  let servers = $derived(activeFirst($tailcatServers, $activeServerID));
+  let editing = $derived(draft !== null && $tailcatServers.some((server) => server.id === draft?.id));
+
+  function normalized(server: TailcatServer): TailcatServer {
+    return {
+      ...server,
+      name: server.name.trim() || defaultName(server.token.trim()),
+      token: server.token.trim(),
+      apiKey: server.apiKey.trim(),
+      derpMapURL: server.derpMapURL.trim(),
     };
-    if (!server.token) return;
+  }
+
+  function save(activate: boolean) {
+    if (!draft?.token.trim()) return;
+    const server = normalized(draft);
     tailcatServers.update((list) => upsert(list, server));
     draft = null;
-    if (connect) onconnect(server);
+    if (activate) onactivate(server);
+  }
+
+  function deleteServer(id: string) {
+    tailcatServers.update((list) => remove(list, id));
+    if (get(activeServerID) === id) activeServerID.set("");
   }
 
   async function copyNodeKey() {
@@ -77,7 +86,6 @@
   </div>
 
   {#if draft}
-    {@const editing = $tailcatServers.some((s) => s.id === draft?.id)}
     <Card.Root class="p-4">
       <Card.Header class="p-0">
         <Card.Title>{editing ? "Edit server" : "Add a server"}</Card.Title>
@@ -133,23 +141,31 @@
     <Card.Root class="p-4">
       <Card.Header class="p-0">
         <Card.Title>Servers</Card.Title>
+        <Card.Description>
+          Pick a server to connect to. The one you last used is kept at the top.
+        </Card.Description>
       </Card.Header>
       <Card.Content class="flex flex-col gap-2 p-0">
-        {#each $tailcatServers as server (server.id)}
-          <div class="flex items-center gap-2 rounded-lg border p-2">
+        {#each servers as server (server.id)}
+          {@const isActive = server.id === $activeServerID}
+          <div class="flex items-center gap-2 rounded-lg border p-2" class:border-primary={isActive}>
             <div class="min-w-0 flex-1">
-              <div class="truncate font-medium">{server.name}</div>
+              <div class="flex items-center gap-2">
+                <span class="truncate font-medium">{server.name}</span>
+                {#if isActive}<Badge variant="secondary">Last used</Badge>{/if}
+                {#if server.apiKey}<Badge variant="outline">API key</Badge>{/if}
+              </div>
               <div class="text-muted-foreground truncate font-mono text-xs">{maskToken(server.token)}</div>
             </div>
-            <Button size="sm" onclick={() => onconnect(server)}>Connect</Button>
-            <Button size="sm" variant="ghost" aria-label="Edit" onclick={() => (draft = { ...server })}>
+            <Button size="sm" onclick={() => onactivate(server)}>Connect</Button>
+            <Button size="sm" variant="ghost" aria-label="Edit {server.name}" onclick={() => (draft = { ...server })}>
               <Pencil class="size-4" />
             </Button>
             <Button
               size="sm"
               variant="ghost"
-              aria-label="Delete"
-              onclick={() => tailcatServers.update((list) => remove(list, server.id))}
+              aria-label="Delete {server.name}"
+              onclick={() => deleteServer(server.id)}
             >
               <Trash2 class="size-4" />
             </Button>
@@ -157,7 +173,10 @@
         {/each}
       </Card.Content>
       <Card.Footer class="p-0">
-        <Button variant="outline" onclick={() => (draft = blank())}>Add a server</Button>
+        <Button variant="outline" onclick={() => (draft = blank())}>
+          <Plus class="size-4" />
+          Add a server
+        </Button>
       </Card.Footer>
     </Card.Root>
   {/if}
@@ -170,7 +189,7 @@
       {#if nodeKey}
         <div class="flex items-center gap-2">
           <code class="bg-muted min-w-0 flex-1 truncate rounded px-2 py-1 text-xs">{nodeKey}</code>
-          <Button size="sm" variant="outline" onclick={copyNodeKey}>
+          <Button size="sm" variant="outline" onclick={copyNodeKey} aria-label="Copy node key">
             {#if copied}<Check class="size-4" />{:else}<Copy class="size-4" />{/if}
           </Button>
         </div>

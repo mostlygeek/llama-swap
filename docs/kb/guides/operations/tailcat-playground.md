@@ -50,6 +50,8 @@ Tailcat](tailcat.md)) and copy the connection token from its log:
 
 Open the page, choose **Add a server**, and fill in:
 
+- **Name** &mdash; whatever you want to call the node. Defaults to a prefix of
+  the token.
 - **Connection token** &mdash; the `tc...` value, exactly as printed. Tokens are
   case-sensitive.
 - **API key** &mdash; only when the node configures `apiKeys`. Tailcat node
@@ -57,15 +59,23 @@ Open the page, choose **Add a server**, and fill in:
   require both.
 - **DERP map URL** &mdash; leave empty unless you run your own relays.
 
-Appending the token to the page's URL as a fragment connects immediately and
-skips the form, so a bookmark like this goes straight to the Playground:
+**Save and connect** stores the server and connects to it. **Save** just stores
+it, so you can add several before connecting to any of them.
 
-```text
-llama-swap-tailcat-playground.html#tcREPLACE_WITH_CONNECTION_TOKEN
-```
+## Manage several nodes
 
-The fragment is never sent to a web server, so hosting the page somewhere does
-not expose the token to whoever hosts it.
+The page keeps as many servers as you add. Each row in the list has **Connect**,
+an edit button and a delete button, so a token that rotates or an API key that
+changes is an edit rather than a re-entry.
+
+Connecting to a server makes it the active one. It is marked **Last used** and
+kept at the top of the list, and the page reopens on it, so switching between a
+workstation and a remote box is two clicks rather than a token paste. Rows also
+show an **API key** badge when one is set, which is the quickest way to see why
+a node is answering 401.
+
+**Disconnect** in the header returns to the list without dropping anything you
+have saved.
 
 ## Allowlisted nodes
 
@@ -88,8 +98,12 @@ page says so when that has happened.
 
 ## What is stored, and where
 
-Saved servers live in the browser's local storage, which means the connection
-token and API key are held unencrypted on that device. Both are bearer
+Everything the page remembers lives in the browser's local storage: the server
+list, which one was last used, and this browser's Tailcat client key. It never
+leaves the browser, which also means it is per-browser and per-profile &mdash;
+another machine starts with an empty list and a different node key.
+
+The connection token and API key are held there unencrypted. Both are bearer
 credentials: anyone holding the token can attempt to reach the node. Treat the
 machine you save them on the way you would treat a file containing an API key,
 and delete the server entry when you are done with it.

@@ -10,14 +10,7 @@
   import { startTailcatWasm, type LoadStage } from "./wasm";
   import { bridge } from "./bridge";
   import { installTailcatFetch } from "./transport";
-  import { get } from "svelte/store";
-  import {
-    tailcatClientKey,
-    tailcatServers,
-    findByToken,
-    newServerID,
-    type TailcatServer,
-  } from "./servers";
+  import { activeServerID, tailcatClientKey, type TailcatServer } from "./servers";
 
   type Phase = "servers" | "connecting" | "connected";
 
@@ -27,7 +20,6 @@
   let nodeKey = $state("");
   let keyRegenerated = $state(false);
   let active = $state<TailcatServer | null>(null);
-  let pendingToken = $state("");
   let restoreFetch: (() => void) | undefined;
 
   const loadMessages: Record<LoadStage, string> = {
@@ -49,12 +41,13 @@
     tailcatClientKey.set(identity.privateKeyJSON);
   });
 
-  async function connect(server: TailcatServer) {
+  /** Activating a server connects to it and remembers it for the next visit. */
+  async function activate(server: TailcatServer) {
     active = server;
+    activeServerID.set(server.id);
     error = "";
     phase = "connecting";
     connectionState.set("connecting");
-    location.hash = server.token;
 
     try {
       status = "Loading the Tailcat module";
@@ -108,40 +101,13 @@
   function disconnect() {
     teardown();
     active = null;
-    pendingToken = "";
-    history.replaceState(null, "", location.pathname + location.search);
     connectionState.set("disconnected");
     phase = "servers";
   }
 
-  /**
-   * Connects to whatever "#tc..." token the URL currently names.
-   *
-   * A saved entry brings its API key along; an unknown token connects without
-   * one and prefills the form, so it can be saved after it works.
-   *
-   * This also runs on hashchange, because pasting a token onto the end of an
-   * already-open page is a same-document navigation: nothing reloads, and
-   * without a listener the page would sit there ignoring it. Connecting sets
-   * the hash itself, which is why this only acts from the server list.
-   */
-  function connectFromHash() {
-    if (phase !== "servers") return;
-    const token = decodeURIComponent(location.hash.replace(/^#/, "")).trim();
-    if (!token.startsWith("tc")) return;
-
-    const saved = findByToken(get(tailcatServers), token);
-    if (!saved) pendingToken = token;
-    void connect(saved ?? { id: newServerID(), name: token, token, apiKey: "", derpMapURL: "" });
-  }
-
   onMount(() => {
     const cleanupTheme = initSystemThemeListener();
-    connectFromHash();
-    window.addEventListener("hashchange", connectFromHash);
-
     return () => {
-      window.removeEventListener("hashchange", connectFromHash);
       cleanupTheme();
       teardown();
     };
@@ -204,7 +170,7 @@
           </div>
         </div>
       {/if}
-      <ServerManager {nodeKey} {keyRegenerated} initialToken={pendingToken} onconnect={connect} />
+      <ServerManager {nodeKey} {keyRegenerated} onactivate={activate} />
     </main>
   {/if}
 </div>
