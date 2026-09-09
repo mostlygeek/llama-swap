@@ -340,7 +340,7 @@ models:
 
     # filters: a dictionary of filter settings
     # - optional, default: empty dictionary
-    # - same capabilities as peer filters (stripParams, setParams)
+    # - same capabilities as peer filters (stripParams, setParams, transformParams)
     filters:
       # stripParams: a comma separated list of parameters to remove from the request
       # - optional, default: ""
@@ -398,13 +398,6 @@ models:
         reasoning_effort:
           medium: high
           low: medium
-
-      # transformParams: conditional string replacement for request parameters
-      # - optional, default: empty dictionary
-      # - maps JSON paths to value-translation maps
-      # - for each path, if the request carries a value that is a key in the map,
-      #   it is replaced with the corresponding map value
-      # - trans
 
     # aliases: alternative model names that this model configuration is used for
     # - optional, default: empty array
@@ -777,7 +770,7 @@ peers:
 
     # filters: a dictionary of filter settings for peer requests
     # - optional, default: empty dictionary
-    # - same capabilities as model filters (stripParams, setParams)
+    # - same capabilities as model filters (stripParams, setParams, transformParams)
     filters:
       # stripParams: a comma separated list of parameters to remove from the request
       # - optional, default: ""
@@ -795,3 +788,16 @@ peers:
         provider:
           data_collection: "deny"
           zdr: true
+
+      # transformParams: conditional string replacement for request parameters
+      # - optional, default: empty dictionary
+      # - maps JSON paths to value-translation maps
+      # - for each path, if the request carries a value that is a key in the map,
+      #   it is replaced with the corresponding map value
+      # - transforms run after setParams so they can override them
+      # - supports nested paths using dot notation
+      # - protected paths like "model" are filtered out
+      transformParams:
+        # Example: translate reasoning effort for a peer that uses different levels
+        reasoning_effort:
+          medium: high
