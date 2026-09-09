@@ -160,6 +160,10 @@ peers:
       responseHeader: 600
 ```
 
+To use the Playground against this node from a browser rather than from the
+command line, see [Use the Playground over Tailcat from a
+browser](tailcat-playground.md).
+
 ## List models with curl
 
 To list the models exposed by a llama-swap server's Tailcat listener, run curl
