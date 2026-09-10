@@ -109,6 +109,9 @@ func (c *GroupConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 type HooksConfig struct {
 	OnStartup HookOnStartup `yaml:"on_startup"`
+	// OnRequest is an SPL program run for every JSON request after the
+	// model's legacy filters and before its filters.policy.
+	OnRequest string `yaml:"on_request"`
 }
 
 type HookOnStartup struct {
@@ -191,6 +194,10 @@ type Config struct {
 	// hooks, see: #209
 	Hooks HooksConfig `yaml:"hooks"`
 
+	// Policies are named SPL programs that other programs run with
+	// `apply <name>`. See internal/spl.
+	Policies map[string]string `yaml:"policies"`
+
 	// send loading state in reasoning
 	SendLoadingState bool `yaml:"sendLoadingState"`
 
@@ -210,6 +217,16 @@ type Config struct {
 	// It is runtime state, not user configuration, so it must never appear in
 	// rendered configuration output.
 	tailcatEnabled bool
+
+	// spl holds the compiled SPL programs. It is nil when the configuration
+	// declares no policies, on_request hook or filters.policy.
+	spl *SPLPrograms
+}
+
+// SPL returns the compiled SPL programs, or nil when none are configured or
+// the Config was not built by LoadConfigFromReader.
+func (c Config) SPL() *SPLPrograms {
+	return c.spl
 }
 
 // SetTailcatEnabled records whether this process has a Tailcat listener.

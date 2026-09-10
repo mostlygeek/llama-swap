@@ -340,7 +340,7 @@ models:
 
     # filters: a dictionary of filter settings
     # - optional, default: empty dictionary
-    # - same capabilities as peer filters (stripParams, setParams)
+    # - same capabilities as peer filters (stripParams, setParams, policy)
     filters:
       # stripParams: a comma separated list of parameters to remove from the request
       # - optional, default: ""
@@ -383,6 +383,20 @@ models:
         "${MODEL_ID}:low":
           chat_template_kwargs:
             reasoning_effort: low
+
+      # policy: a Swap Policy Language (SPL) program for this model's requests
+      # - optional, default: ""
+      # - runs after stripParams, setParams, setParamsByID and hooks.on_request
+      # - one clause per line: ACTION, optionally followed by `when CONDITION`
+      # - actions: default, set, remove, apply, deny
+      # - the `model` parameter cannot be set or removed
+      # - macros such as ${MODEL_ID} are expanded before the program is parsed
+      # - see the policies section below for the full syntax
+      policy: |
+        default top_k to 40
+        remove reasoning_effort
+          when request.model = "${MODEL_ID}:low"
+        set context.workload to "coding"
 
     # aliases: alternative model names that this model configuration is used for
     # - optional, default: empty array
@@ -507,10 +521,83 @@ models:
     # - processes have 5 seconds to shutdown until forceful termination is attempted
     cmdStop: docker stop ${MODEL_ID}
 
+# policies: named request policies written in the Swap Policy Language (SPL)
+# - optional, default: empty dictionary
+# - keys are policy names, values are SPL programs
+# - policies are run with `apply <name>` from hooks.on_request, from a
+#   model's or peer's filters.policy, or from another policy
+# - a policy that applies itself, directly or indirectly, fails to load
+# - programs modify the JSON request body before it is sent upstream
+#
+# SPL syntax, one clause per line:
+#
+#   default <path> to <value>   set the value only when the path is missing
+#   set <path> to <value>       always set the value
+#   remove <path>               delete the value
+#   apply <policy>              run a named policy, then continue
+#   deny "<message>"            reject the request with a 403
+#   deny <status> "<message>"   reject the request with a 4xx or 5xx status
+#
+# A clause can end with `when <condition>`, on the same line or the next:
+#
+#   <path> = <value>            also: !=, <, <=, >, >=
+#   <path> matches /<regex>/    Go regular expression, string values only
+#   <path> is present           the path exists (a JSON null is present)
+#   <path> is missing           the path does not exist
+#   <path> in [<value>, ...]    equal to any listed value
+#   combine with `and`, `or`, `not` and parentheses
+#
+# Values are "strings", numbers, true, false, null, [lists] or {"json": "objects"}.
+#
+# Paths address the request body (temperature, messages[-1].content) and
+# these read-only request facts: auth.key, request.model, request.path,
+# request.method, request.header.<name>. Writing context.<key> stores a
+# string that appears in the activity log. Use body.<path> when a request
+# field is literally named context, auth, request or body.
+policies:
+  coding-defaults: |
+    default temperature to 0.2
+    default top_p to 0.95
+    set context.workload to "coding"
+
+  # deny stops processing: nothing after it runs, including the caller
+  authenticated: |
+    deny 401 "API key required"
+      when auth.key is missing
+
+  # policies can apply other policies
+  private-model: |
+    apply authenticated
+    deny "Model is disabled"
+      when request.model = "private-old"
+
+  no-tools: |
+    remove tools
+    remove tool_choice
+    deny 400 "the last message must come from the user"
+      when messages[-1].role != "user"
+
 # hooks: a dictionary of event triggers and actions
 # - optional, default: empty dictionary
-# - the only supported hook is on_startup
+# - supported hooks are on_startup and on_request
 hooks:
+  # on_request: an SPL program run for every JSON request to a model or peer
+  # - optional, default: ""
+  # - runs after the model's legacy filters (stripParams, setParams,
+  #   setParamsByID) and before the model's or peer's filters.policy
+  # - see the policies section for the syntax
+  on_request: |
+    deny 400 "messages is required"
+      when messages is missing
+
+    apply private-model
+      when request.model matches /^private-/
+
+    apply coding-defaults
+      when request.model matches /coder/
+
+    default context.workload to "default"
+
   # on_startup: a dictionary of actions to perform on startup
   # - optional, default: empty dictionary
   on_startup:
@@ -773,3 +860,11 @@ peers:
         provider:
           data_collection: "deny"
           zdr: true
+
+      # policy: a Swap Policy Language (SPL) program for requests to this peer
+      # - optional, default: ""
+      # - runs after stripParams, setParams and hooks.on_request
+      # - see the policies section for the syntax
+      policy: |
+        remove reasoning_effort
+        default max_tokens to 4096

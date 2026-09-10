@@ -518,11 +518,16 @@
                                 },
                                 "default": {},
                                 "description": "Dictionary mapping requested model IDs (or aliases) to parameters to set/override in requests. Applied after setParams and can override those values. Useful with aliases to vary behaviour depending on which alias the client used (e.g. different reasoning_effort per alias). A parameter key ending in '?' (e.g. 'max_tokens?') is set-if-undefined: it is only applied when the request does not already contain that parameter. Keys support ${MODEL_ID} macro substitution. Protected params like 'model' cannot be overridden."
+                            },
+                            "policy": {
+                                "type": "string",
+                                "default": "",
+                                "description": "Swap Policy Language (SPL) program applied to requests for this model. Runs after stripParams, setParams, setParamsByID and hooks.on_request. The model parameter cannot be set or removed. See docs/kb/guides/api-integration/swap-policy-language.md."
                             }
                         },
                         "additionalProperties": false,
                         "default": {},
-                        "description": "Dictionary of filter settings. Supports stripParams, setParams, and setParamsByID."
+                        "description": "Dictionary of filter settings. Supports stripParams, setParams, setParamsByID and policy (SPL)."
                     },
                     "metadata": {
                         "type": "object",
@@ -619,6 +624,17 @@
                 }
             }
         },
+        "policies": {
+            "type": "object",
+            "default": {},
+            "propertyNames": {
+                "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+            },
+            "additionalProperties": {
+                "type": "string"
+            },
+            "description": "Named Swap Policy Language (SPL) programs. Other programs run them with `apply <name>`. Policies may apply other policies; unknown names and cycles are rejected when the configuration loads."
+        },
         "groups": {
             "$ref": "#/definitions/groupsConfig"
         },
@@ -647,10 +663,15 @@
                     },
                     "additionalProperties": false,
                     "description": "Actions to perform on startup."
+                },
+                "on_request": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Swap Policy Language (SPL) program run for every JSON request to a model or peer. Runs after the legacy filters (stripParams, setParams, setParamsByID) and before the model's or peer's filters.policy. A deny stops the request with an error response."
                 }
             },
             "additionalProperties": false,
-            "description": "A dictionary of event triggers and actions. Only supported hook is on_startup."
+            "description": "A dictionary of event triggers and actions. Supported hooks are on_startup and on_request."
         },
         "logToStdout": {
             "type": "string",
@@ -750,11 +771,16 @@
                                 "additionalProperties": true,
                                 "default": {},
                                 "description": "Dictionary of parameters to set/override in requests to this peer. Useful for injecting provider-specific settings. A key ending in '?' (e.g. 'max_tokens?') is set-if-undefined: it is only applied when the request does not already contain that parameter. Protected params like 'model' cannot be overridden. Values can be strings, numbers, booleans, arrays, or objects."
+                            },
+                            "policy": {
+                                "type": "string",
+                                "default": "",
+                                "description": "Swap Policy Language (SPL) program applied to requests for this peer. Runs after stripParams, setParams and hooks.on_request. The model parameter cannot be set or removed."
                             }
                         },
                         "additionalProperties": false,
                         "default": {},
-                        "description": "Dictionary of filter settings for peer requests. Supports stripParams and setParams."
+                        "description": "Dictionary of filter settings for peer requests. Supports stripParams, setParams and policy (SPL)."
                     },
                     "timeouts": {
                         "type": "object",

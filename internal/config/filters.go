@@ -29,6 +29,11 @@ type Filters struct {
 	// Keys ending in "?" are set-if-undefined, as in SetParams.
 	// Protected params (like "model") cannot be set.
 	SetParamsByID map[string]map[string]any `yaml:"setParamsByID"`
+
+	// Policy is an SPL program applied to requests for this model or peer.
+	// It runs after stripParams, setParams and setParamsByID, and after the
+	// global hooks.on_request program. See internal/spl.
+	Policy string `yaml:"policy"`
 }
 
 // SanitizedStripParams returns a sorted list of parameters to strip,

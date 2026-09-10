@@ -20,6 +20,7 @@ var identityMapPaths = map[string]bool{
 	"profiles":                       true,
 	"selectors":                      true,
 	"peers":                          true,
+	"policies":                       true,
 	"matrix":                         true,
 	"routing.router.settings.groups": true,
 	"routing.router.settings.matrix": true,

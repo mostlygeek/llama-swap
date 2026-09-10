@@ -305,6 +305,10 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		return Config{}, err
 	}
 
+	if err := validateSPL(&config); err != nil {
+		return Config{}, err
+	}
+
 	if err := validateTailcatConfig(&config); err != nil {
 		return Config{}, err
 	}
