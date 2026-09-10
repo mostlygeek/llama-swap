@@ -116,6 +116,16 @@ globalTTL: 0
 # - large values extend how long an unload can take when a process does not exit cleanly
 unloadTimeout: 10
 
+# globalConcurrencyLimit: caps the number of inference requests served at once
+# across all models combined
+# - optional, default: 0 (no limit)
+# - unlike models.*.concurrencyLimit, this is a single semaphore shared by
+#   every model rather than a per-model limit
+# - requests that exceed the limit receive an HTTP 429 Too Many Requests
+#   response immediately, rather than being queued
+# - see issue #1086
+globalConcurrencyLimit: 0
+
 # macros: a dictionary of string substitutions
 # - optional, default: empty dictionary
 # - macros are reusable snippets
