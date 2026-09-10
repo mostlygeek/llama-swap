@@ -49,12 +49,13 @@ func main() {
 // serveCmd implements the serve subcommand.
 func serveCmd(args []string) {
 	var (
-		vllmURL     string
-		listenAddr  string
-		sleepLevel  int
-		healthPath  string
-		waitTimeout time.Duration
-		journalUnit string
+		vllmURL               string
+		listenAddr            string
+		sleepLevel            int
+		healthPath            string
+		waitTimeout           time.Duration
+		journalUnit           string
+		responseHeaderTimeout time.Duration
 	)
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	fs.StringVar(&vllmURL, "vllm-url", "", "Base URL of vLLM server (e.g., http://127.0.0.1:8000)")
@@ -63,6 +64,8 @@ func serveCmd(args []string) {
 	fs.StringVar(&healthPath, "health-path", "/health", "Health check path (default /health)")
 	fs.DurationVar(&waitTimeout, "wait-timeout", 120*time.Second, "Timeout waiting for daemon to become healthy")
 	fs.StringVar(&journalUnit, "journal-unit", "", "User systemd unit whose logs should be forwarded to stdout")
+	fs.DurationVar(&responseHeaderTimeout, "response-header-timeout", 15*time.Minute,
+		"Max time to wait for response headers from vLLM after the request is written (e.g. 20m). 0 disables the timeout.")
 	fs.Parse(args)
 	startArgs := fs.Args()
 
@@ -125,22 +128,7 @@ func serveCmd(args []string) {
 		log.Fatalf("Invalid vLLM URL %q: %v", vllmURL, err)
 	}
 	proxy := httputil.NewSingleHostReverseProxy(proxyURL)
-
-	// Create a custom transport to set timeouts.
-	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ResponseHeaderTimeout: 300 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-		MaxIdleConns:          100,
-		MaxIdleConnsPerHost:   10,
-		IdleConnTimeout:       90 * time.Second,
-	}
-	proxy.Transport = transport
+	proxy.Transport = newProxyTransport(responseHeaderTimeout)
 
 	// Modify response to disable buffering for streaming.
 	proxy.ModifyResponse = func(resp *http.Response) error {
@@ -188,6 +176,27 @@ func serveCmd(args []string) {
 		log.Fatalf("Server shutdown failed: %v", err)
 	}
 	log.Println("Server stopped")
+}
+
+// newProxyTransport builds the HTTP transport used to proxy requests to the
+// vLLM upstream. responseHeaderTimeout bounds how long to wait for response
+// headers after a request is written; 0 disables the timeout (net/http
+// semantics), letting long-running generations run as long as the client
+// allows.
+func newProxyTransport(responseHeaderTimeout time.Duration) *http.Transport {
+	return &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: responseHeaderTimeout,
+		ExpectContinueTimeout: 1 * time.Second,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   10,
+		IdleConnTimeout:       90 * time.Second,
+	}
 }
 
 // sleepCmd implements the sleep subcommand.

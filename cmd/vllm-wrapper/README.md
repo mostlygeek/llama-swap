@@ -47,6 +47,7 @@ models:
       --vllm-url http://127.0.0.1:8000
       --listen :${PORT}
       --wait-timeout 600s
+      --response-header-timeout 20m
       --
       ${vllm}
       serve
@@ -56,6 +57,12 @@ models:
       --max-model-len ${context_size}
       --enable-sleep-mode
 ```
+
+`--response-header-timeout` (default `15m`) bounds how long the wrapper's
+reverse proxy waits for response headers from vLLM after a request is sent.
+Raise it for reasoning models or large-context requests that take a long
+time to produce their first token; set it to `0` to disable the timeout
+entirely and rely on the client's own timeout instead.
 
 Benefits of argv-based startup:
 - Enables native vLLM without Docker.

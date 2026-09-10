@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -98,6 +99,45 @@ func TestStartDaemon(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "daemon did not become healthy") {
 		t.Errorf("error expected to contain 'daemon did not become healthy', got %v", err)
+	}
+}
+
+// TestNewProxyTransport_ResponseHeaderTimeout verifies that the configured
+// response header timeout is applied to the transport, and that 0 disables
+// it per net/http semantics.
+func TestNewProxyTransport_ResponseHeaderTimeout(t *testing.T) {
+	transport := newProxyTransport(15 * time.Minute)
+	if transport.ResponseHeaderTimeout != 15*time.Minute {
+		t.Errorf("ResponseHeaderTimeout: got %v, want %v", transport.ResponseHeaderTimeout, 15*time.Minute)
+	}
+
+	transport = newProxyTransport(0)
+	if transport.ResponseHeaderTimeout != 0 {
+		t.Errorf("ResponseHeaderTimeout: got %v, want 0 (disabled)", transport.ResponseHeaderTimeout)
+	}
+}
+
+// TestServeCmd_ResponseHeaderTimeoutFlag verifies the -response-header-timeout
+// flag defaults to at least 15 minutes and can be overridden.
+func TestServeCmd_ResponseHeaderTimeoutFlag(t *testing.T) {
+	var responseHeaderTimeout time.Duration
+	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	fs.DurationVar(&responseHeaderTimeout, "response-header-timeout", 15*time.Minute, "")
+
+	if err := fs.Parse(nil); err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if responseHeaderTimeout < 15*time.Minute {
+		t.Errorf("default response-header-timeout: got %v, want >= 15m", responseHeaderTimeout)
+	}
+
+	fs2 := flag.NewFlagSet("serve", flag.ContinueOnError)
+	fs2.DurationVar(&responseHeaderTimeout, "response-header-timeout", 15*time.Minute, "")
+	if err := fs2.Parse([]string{"-response-header-timeout", "0"}); err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if responseHeaderTimeout != 0 {
+		t.Errorf("override response-header-timeout: got %v, want 0", responseHeaderTimeout)
 	}
 }
 
