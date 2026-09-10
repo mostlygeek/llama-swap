@@ -299,8 +299,14 @@ func stripAudioAPIPrefix(r *http.Request) {
 func (s *Server) routes() {
 
 	authMW := CreateAuthMiddleware(s.cfg)
-	modelChain := chain.New(
-		authMW,
+	modelMWs := []chain.Middleware{authMW}
+	// globalConcurrencyLimit guards the top of the inference chain; a limit of
+	// 0 (the default) means no limit, so the handler is left out of the chain
+	// entirely rather than wrapping every request in a no-op semaphore.
+	if s.cfg.GlobalConcurrencyLimit > 0 {
+		modelMWs = append(modelMWs, CreateConcurrencyLimitMiddleware(s.cfg.GlobalConcurrencyLimit))
+	}
+	modelMWs = append(modelMWs,
 		CreateProfileMiddleware(s),
 		CreateSelectorMiddleware(s),
 		CreateRequestContextMiddleware(s.cfg),
@@ -309,6 +315,7 @@ func (s *Server) routes() {
 		CreateFormFilterMiddleware(s.cfg),
 		CreateMetricsMiddleware(s.metrics, s.cfg),
 	)
+	modelChain := chain.New(modelMWs...)
 	// Custom endpoints only need auth.
 	apiChain := chain.New(authMW)
 
