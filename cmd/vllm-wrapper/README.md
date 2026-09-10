@@ -47,7 +47,6 @@ models:
       --vllm-url http://127.0.0.1:8000
       --listen :${PORT}
       --wait-timeout 600s
-      --response-header-timeout 20m
       --
       ${vllm}
       serve
@@ -57,12 +56,6 @@ models:
       --max-model-len ${context_size}
       --enable-sleep-mode
 ```
-
-`--response-header-timeout` (default `15m`) bounds how long the wrapper's
-reverse proxy waits for response headers from vLLM after a request is sent.
-Raise it for reasoning models or large-context requests that take a long
-time to produce their first token; set it to `0` to disable the timeout
-entirely and rely on the client's own timeout instead.
 
 Benefits of argv-based startup:
 - Enables native vLLM without Docker.
@@ -225,6 +218,7 @@ sudo -u llama env \
 - For production use, ensure the vLLM daemon is properly managed (e.g., restarted if it crashes) outside of this wrapper.
 - The wrapper does not handle TLS certificates; if your vLLM server uses HTTPS, provide the appropriate URL and ensure the system's root CAs are configured.
 - On SIGTERM, the wrapper sends a sleep request to vLLM (using the configured sleep level) before shutting down, then exits cleanly without killing the vLLM daemon.
+- The reverse proxy uses Go's default HTTP transport (`http.DefaultTransport`), so there is no fixed limit on how long it waits for response headers from vLLM. Long-running generations are bounded only by the client's own timeout.
 
 ## Building
 
