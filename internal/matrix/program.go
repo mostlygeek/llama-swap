@@ -5,6 +5,9 @@ import (
 	"sort"
 )
 
+// OrphanSetName is the reserved reference target for automatic orphan models.
+const OrphanSetName = "auto:orphans"
+
 // Definition is one named matrix DSL expression.
 type Definition struct {
 	Name string
@@ -26,9 +29,11 @@ type compiledSet struct {
 
 // Program is an immutable, compiled matrix DSL program.
 type Program struct {
-	sets      []compiledSet
-	modelBits map[string]int
-	words     int
+	sets         []compiledSet
+	modelBits    map[string]int
+	words        int
+	orphanModels []string
+	orphanMode   string
 }
 
 // Decision describes the selected matrix set and the running models it evicts.
@@ -42,7 +47,7 @@ type Decision struct {
 
 // Compile parses, validates, resolves, and links an ordered collection of DSL
 // definitions without expanding their Cartesian products.
-func Compile(definitions []Definition, resolve Resolver) (*Program, error) {
+func Compile(definitions []Definition, resolve Resolver, allModels []string) (*Program, error) {
 	if len(definitions) == 0 {
 		return nil, fmt.Errorf("matrix must define at least one set")
 	}
@@ -55,6 +60,8 @@ func Compile(definitions []Definition, resolve Resolver) (*Program, error) {
 		setNames[definition.Name] = true
 	}
 
+	seenModels := make(map[string]bool)
+	orphansReferenced := false
 	for _, definition := range definitions {
 		root, err := parseDSL(definition.DSL)
 		if err != nil {
@@ -71,9 +78,15 @@ func Compile(definitions []Definition, resolve Resolver) (*Program, error) {
 					return fmt.Errorf("set %q: unknown var or model %q", definition.Name, n.name)
 				}
 				n.name = model
+				seenModels[model] = true
 			case nodeRef:
-				if !setNames[n.name] {
-					return fmt.Errorf("set %q references undefined set %q", definition.Name, n.name)
+				if n.name == OrphanSetName {
+					orphansReferenced = true
+				}
+				if n.name != OrphanSetName || setNames[OrphanSetName] {
+					if !setNames[n.name] {
+						return fmt.Errorf("set %q references undefined set %q", definition.Name, n.name)
+					}
 				}
 				if !seenRefs[n.name] {
 					seenRefs[n.name] = true
@@ -90,11 +103,44 @@ func Compile(definitions []Definition, resolve Resolver) (*Program, error) {
 		deps[definition.Name] = refs
 	}
 
+	program := &Program{}
+	// Orphan membership must be computed from resolved user-authored leaves,
+	// before any other automatic sets are synthesized. Keep this phase outside
+	// reference walks: it registers at most one shared root per Compile call.
+	// Future automatic-set registration must not replace OrphanSetName.
+	if orphansReferenced {
+		if setNames[OrphanSetName] {
+			program.orphanMode = "user-defined"
+		} else {
+			orphans := make([]string, 0, len(allModels))
+			for _, model := range allModels {
+				if !seenModels[model] {
+					orphans = append(orphans, model)
+				}
+			}
+			sort.Strings(orphans)
+			setNames[OrphanSetName] = true
+			deps[OrphanSetName] = nil
+			roots[OrphanSetName] = buildModelSet(orphans)
+			if len(orphans) == 0 {
+				program.orphanMode = "empty"
+			} else {
+				program.orphanModels = orphans
+				program.orphanMode = "synthesized"
+			}
+		}
+	}
+
 	order, err := topologicalOrder(definitions, deps)
 	if err != nil {
 		return nil, err
 	}
 
+	if orphansReferenced {
+		for _, name := range order {
+			roots[name] = simplifyEmptyRefs(roots[name], roots)
+		}
+	}
 	for _, root := range roots {
 		if err := walk(root, func(n *node) error {
 			if n.kind == nodeRef {
@@ -108,6 +154,9 @@ func Compile(definitions []Definition, resolve Resolver) (*Program, error) {
 
 	sets := make([]compiledSet, 0, len(order))
 	for _, name := range order {
+		if name == OrphanSetName && (program.orphanMode == "synthesized" || program.orphanMode == "empty") {
+			continue
+		}
 		sets = append(sets, compiledSet{
 			name: name,
 			dsl:  dslByName[name],
@@ -115,9 +164,25 @@ func Compile(definitions []Definition, resolve Resolver) (*Program, error) {
 		})
 	}
 
-	program := &Program{sets: sets}
+	program.sets = sets
 	program.computeSupport()
 	return program, nil
+}
+
+// buildModelSet constructs alternatives from already-resolved model IDs without
+// parsing DSL or changing the input slice. Membership, reference registration,
+// and the treatment of empty sets belong to the caller.
+func buildModelSet(models []string) *node {
+	if len(models) == 0 {
+		return &node{kind: nodeEmpty}
+	}
+	models = append([]string(nil), models...)
+	sort.Strings(models)
+	children := make([]*node, len(models))
+	for i, model := range models {
+		children[i] = &node{kind: nodeLeaf, name: model}
+	}
+	return &node{kind: nodeOr, children: children}
 }
 
 // computeSupport builds the program-wide model registry and, for each set, a
@@ -136,6 +201,8 @@ func (p *Program) computeSupport() {
 			models = map[string]bool{n.name: true}
 		case nodeRef:
 			models = collect(n.ref)
+		case nodeEmpty:
+			models = make(map[string]bool)
 		default:
 			models = make(map[string]bool)
 			for _, child := range n.children {
@@ -181,6 +248,40 @@ func (p *Program) supportsAll(set *compiledSet, models []string) bool {
 		}
 	}
 	return true
+}
+
+func simplifyEmptyRefs(root *node, roots map[string]*node) *node {
+	if root.kind == nodeRef {
+		if target, ok := roots[root.name]; ok && target.kind == nodeEmpty {
+			return &node{kind: nodeEmpty}
+		}
+		return root
+	}
+	if root.kind == nodeLeaf || root.kind == nodeEmpty {
+		return root
+	}
+
+	children := root.children[:0]
+	for _, child := range root.children {
+		child = simplifyEmptyRefs(child, roots)
+		if child.kind == nodeEmpty {
+			continue
+		}
+		children = append(children, child)
+	}
+	root.children = children
+	if len(children) == 0 {
+		return &node{kind: nodeEmpty}
+	}
+	if len(children) == 1 {
+		return children[0]
+	}
+	return root
+}
+
+// SynthesizedOrphans reports the opt-in +auto:orphans compilation result.
+func (p *Program) SynthesizedOrphans() ([]string, string) {
+	return append([]string(nil), p.orphanModels...), p.orphanMode
 }
 
 func topologicalOrder(definitions []Definition, deps map[string][]string) ([]string, error) {
@@ -417,6 +518,8 @@ func (e *evaluator) evaluate(root *node) []projectedState {
 
 	var states []projectedState
 	switch root.kind {
+	case nodeEmpty:
+		states = nil
 	case nodeLeaf:
 		mask := make(bitMask, e.words)
 		if bit, relevant := e.modelBits[root.name]; relevant {
