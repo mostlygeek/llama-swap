@@ -2,9 +2,9 @@
 title: Rewriting requests with filters
 summary: Use stripParams, setParams and setParamsByID while preserving the protected model parameter.
 category: guides
-tags: [filters, strip-params, set-params, set-if-undefined, aliases, sampling]
-config_keys: [models.*.filters, models.*.filters.stripParams, models.*.filters.setParams, models.*.filters.setParamsByID, peers.*.filters]
-updated: 2026-09-01
+tags: [filters, strip-params, set-params, set-if-undefined, aliases, sampling, transform-params]
+config_keys: [models.*.filters, models.*.filters.stripParams, models.*.filters.setParams, models.*.filters.setParamsByID, models.*.filters.transformParams, peers.*.filters]
+updated: 2026-09-09
 ---
 
 # Rewriting requests with filters
@@ -106,11 +106,67 @@ reload — with different parameters applied.
 3. `stripParams` removes keys
 4. `setParams` applies
 5. `setParamsByID` applies, overriding `setParams`
-6. The request is proxied
+6. `transformParams` applies, overriding previous settings
+7. The request is proxied
 
-Filters apply like a pipe: `stripParams | setParams | setParamsByID`. A
+Filters apply like a pipe: `stripParams | setParams | setParamsByID | transformParams`. A
 set-if-undefined key (`key?`) checks the body at its own stage, so a stripped
 key counts as undefined and a key an earlier stage set counts as defined.
+
+## `transformParams` — conditional value translation
+
+`transformParams` performs conditional string replacement on request parameters.
+It maps JSON paths to translation dictionaries, allowing you to rewrite values
+based on their current content.
+
+```yaml
+models:
+  kat-coder:
+    filters:
+      transformParams:
+        reasoning_effort:
+          medium: high
+          low: medium
+```
+
+This translates Hermes's `medium` reasoning effort to `high` for the
+KAT-Coder model, and `low` to `medium`. Useful when different models interpret
+reasoning effort levels differently.
+
+The transform runs after `setParams` and `setParamsByID`, so it can override
+those settings. Only string values are transformed — non-string values are left
+unchanged. Protected paths like `model` are filtered out and cannot be transformed.
+
+### Nested paths
+
+You can use dot notation for nested JSON paths:
+
+```yaml
+      transformParams:
+        chat_template_kwargs.reasoning_effort:
+          medium: high
+```
+
+### Use case: Hermes + llama-swap reasoning translation
+
+When using llama-swap as an inference engine for Hermes, different models may
+interpret reasoning effort levels differently. You can configure per-model
+translations:
+
+```yaml
+models:
+  advanced:
+    # Qwen3.8-Flash expects xhigh for best results
+    cmd: |
+      ${bin} --model path/to/model.gguf --reasoning-effort xhigh
+  intermediate:
+    filters:
+      transformParams:
+        # Hermes sends medium, but KAT-Coder works better with high
+        reasoning_effort:
+          medium: high
+          low: medium
+```
 
 ## When not to use filters
 
