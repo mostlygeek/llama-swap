@@ -265,6 +265,46 @@ func TestParseNvidiaSmiLine_ZeroMemoryTotal(t *testing.T) {
 	assert.Equal(t, 0.0, stat.MemUtilPct)
 }
 
+func TestParseIntelGpuTop_ValidObject(t *testing.T) {
+	// "resident" as a string exercises flexFloat64's string path.
+	data := `{
+		"power": {"GPU": 5.5, "Package": 8.0, "unit": "W"},
+		"rc6": {"value": 40.0, "unit": "%"},
+		"engines": {
+			"Render/3D/0": {"busy": 75.0, "unit": "%"},
+			"Video/0": {"busy": 10.0, "unit": "%"}
+		},
+		"clients": {
+			"1": {"name": "llama-server", "pid": "1234",
+				"memory": {"local": {"resident": "1073741824"}}}
+		}
+	}`
+
+	stat := ParseIntelGpuTop(data)
+	require.NotNil(t, stat)
+	assert.Equal(t, 75.0, stat.GpuUtilPct) // max engine busy, not RC6 fallback
+	assert.Equal(t, 5.5, stat.PowerDrawW)  // GPU preferred over Package
+	assert.Equal(t, 1024, stat.MemUsedMB)  // 1 GiB resident summed across clients
+}
+
+func TestParseIntelGpuTop_RC6Fallback(t *testing.T) {
+	// Engines report 0 busy -> util derived from 100 - rc6, power falls back to Package.
+	data := `{
+		"power": {"GPU": 0.0, "Package": 8.0, "unit": "W"},
+		"rc6": {"value": 40.0, "unit": "%"},
+		"engines": {"Render/3D/0": {"busy": 0.0, "unit": "%"}}
+	}`
+
+	stat := ParseIntelGpuTop(data)
+	require.NotNil(t, stat)
+	assert.Equal(t, 60.0, stat.GpuUtilPct)
+	assert.Equal(t, 8.0, stat.PowerDrawW)
+}
+
+func TestParseIntelGpuTop_Invalid(t *testing.T) {
+	assert.Nil(t, ParseIntelGpuTop("not json"))
+}
+
 const ioregSample = `+-o AGXAcceleratorG13X  <class AGXAcceleratorG13X, id 0x1000009a1, registered, matched, active, busy 0 (39191 ms), retain 108>
     {
       "model" = "Apple M1 Pro"
