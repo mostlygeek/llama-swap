@@ -23,8 +23,11 @@ if echo "${VERSION}" | grep -qE '^[0-9a-f]{40}$'; then
         echo "Resolved to tag: ${TAG}"
         VERSION="${TAG#v}"
     else
-        echo "No release tag found for commit ${VERSION:0:7}, using latest"
-        VERSION="latest"
+        # No release points at this commit (e.g. a branch head that has
+        # never shipped): build the commit itself. Falling back to latest
+        # would silently change the revision, and the latest release may
+        # not contain cmd/kubeswap at all.
+        echo "No release tag found for commit ${VERSION:0:7}; building the commit directly"
     fi
 fi
 
@@ -43,7 +46,12 @@ if [ "$VERSION" = "latest" ]; then
     echo "Latest version: ${VERSION}"
 fi
 
-REF="v${VERSION}"
+# A raw commit hash checks out as-is; a release version needs its tag prefix.
+if echo "${VERSION}" | grep -qE '^[0-9a-f]{40}$'; then
+    REF="${VERSION}"
+else
+    REF="v${VERSION}"
+fi
 
 echo "=== Cloning ${REPO} @ ${REF} ==="
 git clone --filter=blob:none --no-checkout "https://github.com/${REPO}.git" "${SRC}"
