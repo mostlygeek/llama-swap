@@ -85,6 +85,7 @@ works inside model commands (it is how the default config keeps
 | `gateway.route.parentRefs` | the chart's Gateway | required when `name` is empty (attach to an existing Gateway) |
 | `gateway.route.hostnames` | `[]` | |
 | `gcInitContainer.enabled` | `true` | one-shot `kubeswap gc` per head-end start |
+| `gcInitContainer.securityContext` | no-escalation, read-only root FS, drop ALL | for the gc init container; `runAsNonRoot` is not defaulted (stock image runs as root) |
 | `podAnnotations` / `podLabels` | `{}` | |
 | `priorityClassName` | `""` | |
 | `nodeSelector` / `tolerations` / `affinity` | standard | schedule the head-end (it needs no GPU) |
