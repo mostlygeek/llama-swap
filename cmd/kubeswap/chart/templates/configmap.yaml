@@ -24,7 +24,7 @@ data:
 {{- $kubeKeys := list "id" "image" "command" "gpu" "volumes" "port" "extraKubeArgs" "startupTimeout" "healthPath" "livenessPath" "checkPath" "args" "proxy" "cmdStop" }}
       {{ $m.id | quote }}:
 {{- with index $merged "proxy" | default "http://127.0.0.1:${PORT}" }}
-        proxy: {{ if kindIs "string" . }}{{ . | quote }}{{ else }}{{ toYaml . | nindent 12 }}{{ end }}
+        proxy: {{ if kindIs "string" . }}{{ tpl . $ | quote }}{{ else }}{{ tpl (toYaml .) $ | nindent 12 }}{{ end }}
 {{- end }}
         cmd: >-
           kubeswap serve
