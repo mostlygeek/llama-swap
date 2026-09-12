@@ -142,4 +142,9 @@ func TestKubeswap_ParseServicePorts(t *testing.T) {
 	if _, err := parseServicePorts([]string{"m:9090", "m:9090"}); err == nil {
 		t.Error("expected error for duplicate port")
 	}
+	// Container port names must be unique, so the same name on a
+	// different port is a duplicate as well.
+	if _, err := parseServicePorts([]string{"metrics:9090", "metrics:9091"}); err == nil {
+		t.Error("expected error for duplicate name with different port")
+	}
 }
