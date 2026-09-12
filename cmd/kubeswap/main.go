@@ -170,13 +170,19 @@ func parseKeyValues(entries []string, what string) (map[string]string, error) {
 	return out, nil
 }
 
-// parseGPU parses "resource=count" entries like "amd.com/gpu=1".
+// parseGPUs parses "resource=count" entries like "amd.com/gpu=1"; the count
+// is a positive whole number — GPUs are exclusive, non-shareable devices, so
+// fractions and words like "many" are errors, not quantities.
 func parseGPUs(entries []string) (map[string]string, error) {
 	out := map[string]string{}
 	for _, e := range entries {
 		res, count, ok := strings.Cut(e, "=")
 		if !ok || res == "" || count == "" {
 			return nil, fmt.Errorf("invalid --gpu %q (want resource=count, e.g. amd.com/gpu=1)", e)
+		}
+		n, err := strconv.ParseInt(count, 10, 32)
+		if err != nil || n < 1 {
+			return nil, fmt.Errorf("invalid --gpu %q: count %q must be a positive whole number", e, count)
 		}
 		out[res] = count
 	}

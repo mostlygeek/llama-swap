@@ -76,6 +76,11 @@ func (c *serveConfig) renderDeployment() (*appsv1.Deployment, error) {
 		podTemplateLabels[k] = v
 	}
 
+	resources, err := c.renderResources()
+	if err != nil {
+		return nil, err
+	}
+
 	container := corev1.Container{
 		Name:      containerName,
 		Image:     c.Image,
@@ -83,7 +88,7 @@ func (c *serveConfig) renderDeployment() (*appsv1.Deployment, error) {
 		Args:      c.Args,
 		Ports:     c.renderPorts(),
 		Env:       c.renderEnv(),
-		Resources: c.renderResources(),
+		Resources: resources,
 		ReadinessProbe: &corev1.Probe{
 			ProbeHandler:        httpProbe(c.HealthPath, c.Port),
 			InitialDelaySeconds: 2,
@@ -201,33 +206,38 @@ func (c *serveConfig) renderEnv() []corev1.EnvVar {
 // renderResources merges --gpu with explicit --request/--limit entries.
 // GPUs are exclusive (non-shareable) resources, so --gpu sets BOTH requests
 // and limits; explicit --request/--limit entries override, GPU keys included.
-func (c *serveConfig) renderResources() corev1.ResourceRequirements {
+// Quantities are validated at parse time (parseGPUs, parseResources); a
+// parse failure here means a serveConfig was built without that validation,
+// and rendering returns it instead of zeroing or dropping the entry.
+func (c *serveConfig) renderResources() (corev1.ResourceRequirements, error) {
 	requests := corev1.ResourceList{}
 	limits := corev1.ResourceList{}
 	for _, k := range sortedKeys(c.GPUs) {
 		qty, err := resource.ParseQuantity(c.GPUs[k])
 		if err != nil {
-			// An unparseable quantity is surfaced at parse time already;
-			// fall back to a zero quantity so rendering cannot fail.
-			qty = resource.MustParse("0")
+			return corev1.ResourceRequirements{}, fmt.Errorf("invalid --gpu quantity %s=%q: %v", k, c.GPUs[k], err)
 		}
 		requests[corev1.ResourceName(k)] = qty
 		limits[corev1.ResourceName(k)] = qty
 	}
 	for _, k := range sortedKeys(c.Requests) {
-		if qty, err := resource.ParseQuantity(c.Requests[k]); err == nil {
-			requests[corev1.ResourceName(k)] = qty
+		qty, err := resource.ParseQuantity(c.Requests[k])
+		if err != nil {
+			return corev1.ResourceRequirements{}, fmt.Errorf("invalid --request quantity %s=%q: %v", k, c.Requests[k], err)
 		}
+		requests[corev1.ResourceName(k)] = qty
 	}
 	for _, k := range sortedKeys(c.Limits) {
-		if qty, err := resource.ParseQuantity(c.Limits[k]); err == nil {
-			limits[corev1.ResourceName(k)] = qty
+		qty, err := resource.ParseQuantity(c.Limits[k])
+		if err != nil {
+			return corev1.ResourceRequirements{}, fmt.Errorf("invalid --limit quantity %s=%q: %v", k, c.Limits[k], err)
 		}
+		limits[corev1.ResourceName(k)] = qty
 	}
 	if len(requests) == 0 && len(limits) == 0 {
-		return corev1.ResourceRequirements{}
+		return corev1.ResourceRequirements{}, nil
 	}
-	return corev1.ResourceRequirements{Requests: requests, Limits: limits}
+	return corev1.ResourceRequirements{Requests: requests, Limits: limits}, nil
 }
 
 func (c *serveConfig) renderTolerations() []corev1.Toleration {

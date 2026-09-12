@@ -33,6 +33,16 @@ func TestKubeswap_ParseGPUs(t *testing.T) {
 	if _, err := parseGPUs([]string{"nvidia.com/gpu"}); err == nil {
 		t.Error("expected error for missing count")
 	}
+	// Counts are positive whole numbers: no words, zero or fractions.
+	for _, bad := range []string{"nvidia.com/gpu=many", "amd.com/gpu=0", "amd.com/gpu=1.5"} {
+		if _, err := parseGPUs([]string{bad}); err == nil {
+			t.Errorf("expected error for %q", bad)
+		}
+	}
+	got, err = parseGPUs([]string{"amd.com/gpu=2"})
+	if err != nil || got["amd.com/gpu"] != "2" {
+		t.Errorf("got %v (err %v), want amd.com/gpu=2 preserved", got, err)
+	}
 }
 
 func TestKubeswap_ParseTolerations(t *testing.T) {
