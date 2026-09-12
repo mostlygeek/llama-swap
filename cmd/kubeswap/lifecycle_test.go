@@ -341,6 +341,25 @@ func TestKubeswap_GCAllowedModels(t *testing.T) {
 	if !allowed["a"] || !allowed["b"] || allowed["c"] {
 		t.Errorf("allowed: %v", allowed)
 	}
+
+	// The documented comma-separated form must produce separate entries,
+	// not one literal "a,b" key (which would GC both models).
+	allowed, err = gcAllowedModels([]string{"a,b"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !allowed["a"] || !allowed["b"] || allowed["a,b"] {
+		t.Errorf("comma-separated allowed: %v", allowed)
+	}
+
+	// Repeatable and comma-separated forms compose; whitespace is trimmed.
+	allowed, err = gcAllowedModels([]string{"a,b", " c ,"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !allowed["a"] || !allowed["b"] || !allowed["c"] || len(allowed) != 3 {
+		t.Errorf("mixed allowed: %v", allowed)
+	}
 	if _, err := gcAllowedModels(nil, ""); err == nil {
 		t.Error("expected error with no models and no config")
 	}

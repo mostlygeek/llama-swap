@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -182,11 +183,15 @@ type gcFlags struct {
 
 // gcAllowedModels builds the set of model IDs from --models entries and,
 // optionally, the keys of the models map in a llama-swap config.yaml.
+// --models is repeatable and each value may be comma-separated
+// (model-a,model-b); the entries are split so both forms work.
 func gcAllowedModels(models []string, configPath string) (map[string]bool, error) {
 	allowed := map[string]bool{}
 	for _, m := range models {
-		if m != "" {
-			allowed[m] = true
+		for _, id := range strings.Split(m, ",") {
+			if id = strings.TrimSpace(id); id != "" {
+				allowed[id] = true
+			}
 		}
 	}
 	if configPath != "" {
