@@ -145,14 +145,12 @@ func deleteCmd(args []string) error {
 	var (
 		model string
 		f     manageFlags
-		vols  bool
 	)
 	fs := newFlagSet("delete")
 	fs.StringVar(&model, "model", "", "llama-swap model ID (required)")
 	addKubeFlags(fs, &f.namespace, &f.kubeconfig)
-	fs.BoolVar(&vols, "delete-volumes", false, "also delete PVCs that kubeswap created for this model")
+	fs.BoolVar(&f.deleteVolumes, "delete-volumes", false, "also delete PVCs that kubeswap created for this model")
 	fs.DurationVar(&f.wait, "wait", 30*time.Second, "how long to wait for pods to terminate (0 = do not wait)")
-	f.deleteVolumes = vols
 	fs.Parse(args)
 
 	if model == "" {
