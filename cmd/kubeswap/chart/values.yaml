@@ -141,14 +141,16 @@ ingress:
           pathType: Prefix
   tls: []
 
-# Gateway API alternative to ingress. Set gateway.gateway.name to create a
-# Gateway; leave it empty to route against an existing one via
-# gateway.route.parentRefs.
+# Gateway API alternative to ingress. Two ways to wire the HTTPRoute:
+#   1. gateway.gateway.name + gateway.gateway.className — the chart
+#      creates the Gateway (className is required: the API field is).
+#   2. gateway.route.parentRefs — attach to an existing Gateway.
+# enabled with neither set fails rendering.
 gateway:
   enabled: false
   gateway:
-    name: ""
-    className: ""
+    name: "" # set to have the chart create this Gateway
+    className: "" # required when name is set, e.g. traefik
     listeners:
       - name: http
         protocol: HTTP
@@ -156,7 +158,7 @@ gateway:
         hostnames: []
   route:
     name: "" # defaults to the chart fullname
-    parentRefs: [] # defaults to the Gateway above
+    parentRefs: [] # required when gateway.name is empty; otherwise defaults to the chart's Gateway
     hostnames: []
 
 # ---------------------------------------------------------------------------
