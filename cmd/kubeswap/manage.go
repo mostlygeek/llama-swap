@@ -43,27 +43,13 @@ func deleteModel(client kubernetes.Interface, namespace, model string, deleteVol
 		return err
 	}
 
+	// Lookups are by exact name, never by the coarse model label, so
+	// sibling models that sanitize to the same string are out of reach.
 	deleted := false
 	dep, err := client.AppsV1().Deployments(namespace).Get(ctx, depName, metav1.GetOptions{})
 	switch {
 	case apierrors.IsNotFound(err):
-		// The name may have drifted (older kubeswap, renamed model); fall
-		// back to a label lookup.
-		selector := labels.Set(managedLabels(sanitized)).String()
-		deps, lerr := client.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
-		if lerr != nil {
-			return fmt.Errorf("listing deployments by label: %w", lerr)
-		}
-		for i := range deps.Items {
-			if err := verifyOwnership(&deps.Items[i], model); err != nil {
-				return err
-			}
-			if err := client.AppsV1().Deployments(namespace).Delete(ctx, deps.Items[i].Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
-				return fmt.Errorf("deleting deployment %s: %w", deps.Items[i].Name, err)
-			}
-			log.Printf("deleted deployment %s/%s", namespace, deps.Items[i].Name)
-			deleted = true
-		}
+		// not loaded
 	case err != nil:
 		return fmt.Errorf("getting deployment %s: %w", depName, err)
 	default:
@@ -139,11 +125,17 @@ func waitForPodsGone(ctx context.Context, client kubernetes.Interface, namespace
 		if err != nil {
 			return fmt.Errorf("listing pods: %w", err)
 		}
-		if len(pods.Items) == 0 {
+		count := 0
+		for i := range pods.Items {
+			if pods.Items[i].DeletionTimestamp == nil {
+				count++
+			}
+		}
+		if count == 0 {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("timed out after %s waiting for %d pods to terminate", timeout, len(pods.Items))
+			return fmt.Errorf("timed out after %s waiting for %d pods to terminate", timeout, count)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
