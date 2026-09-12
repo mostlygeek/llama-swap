@@ -477,6 +477,20 @@ func TestKubeswap_DeploymentSpecMatchesProbeInitialDelay(t *testing.T) {
 	}
 }
 
+// TestKubeswap_StringMapEqualMissingKeys verifies that keys missing from
+// the second map are not compared against the zero value.
+func TestKubeswap_StringMapEqualMissingKeys(t *testing.T) {
+	if stringMapEqual(map[string]string{"x": ""}, map[string]string{"y": ""}) {
+		t.Error("same-length maps with different keys and empty values should not be equal")
+	}
+	if stringMapEqual(map[string]string{"x": "1"}, map[string]string{"y": "1"}) {
+		t.Error("same-length maps with different keys should not be equal")
+	}
+	if !stringMapEqual(map[string]string{"x": "1"}, map[string]string{"x": "1"}) {
+		t.Error("identical maps should be equal")
+	}
+}
+
 func TestKubeswap_DeploymentSpecMatchesGracePeriod(t *testing.T) {
 	cfg := testConfig()
 	dep, _ := cfg.renderDeployment()
