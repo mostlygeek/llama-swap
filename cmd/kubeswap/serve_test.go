@@ -9,10 +9,12 @@ import (
 	"time"
 )
 
+// newTestServer Builds a proxy server over a fake client for the handler tests.
 func newTestServer(cfg *serveConfig, upstreamOverride string) *server {
 	return newServer(cfg, newFakeClient(), upstreamOverride, true, time.Millisecond)
 }
 
+// TestKubeswap_ToConfigRejectsReservedLabels Verifies managed label keys are rejected as extra labels.
 func TestKubeswap_ToConfigRejectsReservedLabels(t *testing.T) {
 	for _, key := range []string{labelManagedBy, labelModel, labelDeployment, labelAppName} {
 		f := &serveFlags{model: "m", extraLbls: stringList{key + "=x"}}
@@ -30,6 +32,7 @@ func TestKubeswap_ToConfigRejectsReservedLabels(t *testing.T) {
 	}
 }
 
+// TestKubeswap_ServeRejectsOutOfRangePort Verifies out-of-range --port values are rejected.
 func TestKubeswap_ServeRejectsOutOfRangePort(t *testing.T) {
 	for _, port := range []string{"0", "-1", "65536"} {
 		err := serveCmd([]string{
@@ -42,6 +45,7 @@ func TestKubeswap_ServeRejectsOutOfRangePort(t *testing.T) {
 	}
 }
 
+// TestKubeswap_HandlerNotReady Verifies the check path reports 503 with a reason before the backend is ready.
 func TestKubeswap_HandlerNotReady(t *testing.T) {
 	s := newTestServer(testConfig(), "")
 	rr := httptest.NewRecorder()
@@ -61,6 +65,7 @@ func TestKubeswap_HandlerNotReady(t *testing.T) {
 	}
 }
 
+// TestKubeswap_HandlerReadyButNoUpstream Verifies 502 is returned once ready but before an upstream pod exists.
 func TestKubeswap_HandlerReadyButNoUpstream(t *testing.T) {
 	s := newTestServer(testConfig(), "")
 	s.ready.Store(true)
@@ -73,6 +78,7 @@ func TestKubeswap_HandlerReadyButNoUpstream(t *testing.T) {
 	}
 }
 
+// TestKubeswap_HandlerProxies Verifies ready traffic is proxied to the upstream pod.
 func TestKubeswap_HandlerProxies(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/completions" {
@@ -98,6 +104,7 @@ func TestKubeswap_HandlerProxies(t *testing.T) {
 	}
 }
 
+// TestKubeswap_HandlerCheckPath Verifies the self-answered check path mirrors pod readiness state.
 func TestKubeswap_HandlerCheckPath(t *testing.T) {
 	upstreamCalled := false
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -157,6 +164,7 @@ func TestKubeswap_HandlerCheckPath(t *testing.T) {
 	}
 }
 
+// TestKubeswap_HandlerProxiesSSE Verifies streaming (SSE) responses are flushed through the proxy.
 func TestKubeswap_HandlerProxiesSSE(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -183,6 +191,7 @@ func TestKubeswap_HandlerProxiesSSE(t *testing.T) {
 	}
 }
 
+// TestKubeswap_HandlerOverrideUpstream Verifies the --upstream override redirects the proxy target.
 func TestKubeswap_HandlerOverrideUpstream(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, "from-override")

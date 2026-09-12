@@ -5,6 +5,7 @@ import (
 	"testing"
 )
 
+// TestKubeswap_ParseEnvVars Verifies env var parsing: valid K=V forms and rejection of malformed ones.
 func TestKubeswap_ParseEnvVars(t *testing.T) {
 	got, err := parseEnvVars([]string{"A=1", "B=x=y", "PATH=/usr/bin:/bin"})
 	if err != nil {
@@ -22,6 +23,7 @@ func TestKubeswap_ParseEnvVars(t *testing.T) {
 	}
 }
 
+// TestKubeswap_ParseGPUs Verifies GPU parsing accepts only positive whole-number counts.
 func TestKubeswap_ParseGPUs(t *testing.T) {
 	got, err := parseGPUs([]string{"amd.com/gpu=1"})
 	if err != nil {
@@ -45,6 +47,7 @@ func TestKubeswap_ParseGPUs(t *testing.T) {
 	}
 }
 
+// TestKubeswap_ParseTolerations Verifies toleration parsing: operator/effect validation and empty-effect preservation.
 func TestKubeswap_ParseTolerations(t *testing.T) {
 	got, err := parseTolerations([]string{"dedicated:Exists::NoSchedule"})
 	if err != nil {
@@ -86,6 +89,7 @@ func TestKubeswap_ParseTolerations(t *testing.T) {
 	}
 }
 
+// TestKubeswap_ParseVolumes Verifies volume parsing for the pvc, emptydir and hostpath forms.
 func TestKubeswap_ParseVolumes(t *testing.T) {
 	got, err := parseVolumes([]string{
 		"pvc:llama-swap-models:/models:ro",
@@ -110,6 +114,7 @@ func TestKubeswap_ParseVolumes(t *testing.T) {
 	}
 }
 
+// TestKubeswap_ParseKeyValues Verifies K=V parsing, including values that contain '='.
 func TestKubeswap_ParseKeyValues(t *testing.T) {
 	got, err := parseKeyValues([]string{"k1=v1", "k2=a=b"}, "x")
 	if err != nil {
@@ -120,6 +125,7 @@ func TestKubeswap_ParseKeyValues(t *testing.T) {
 	}
 }
 
+// TestKubeswap_ParseResources Verifies resource parsing rejects quantities the API would reject.
 func TestKubeswap_ParseResources(t *testing.T) {
 	got, err := parseResources([]string{"cpu=2", "memory=4Gi", "amd.com/gpu=1"}, "request")
 	if err != nil {
@@ -135,6 +141,7 @@ func TestKubeswap_ParseResources(t *testing.T) {
 	}
 }
 
+// TestKubeswap_ParseServicePorts Verifies service-port parsing: name rules, port range and duplicate names.
 func TestKubeswap_ParseServicePorts(t *testing.T) {
 	got, err := parseServicePorts([]string{"metrics:9090", "alt:8081"})
 	if err != nil {

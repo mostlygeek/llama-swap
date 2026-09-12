@@ -208,6 +208,7 @@ func (c *serveConfig) startupFailureThreshold() int32 {
 	return ft
 }
 
+// renderEnv Renders the parsed env vars as corev1.EnvVar values.
 func (c *serveConfig) renderEnv() []corev1.EnvVar {
 	out := make([]corev1.EnvVar, 0, len(c.Env))
 	for _, e := range c.Env {
@@ -253,6 +254,7 @@ func (c *serveConfig) renderResources() (corev1.ResourceRequirements, error) {
 	return corev1.ResourceRequirements{Requests: requests, Limits: limits}, nil
 }
 
+// renderTolerations Renders the parsed tolerations as corev1.Toleration values.
 func (c *serveConfig) renderTolerations() []corev1.Toleration {
 	out := make([]corev1.Toleration, 0, len(c.Tolerations))
 	for _, t := range c.Tolerations {
@@ -305,6 +307,7 @@ func (c *serveConfig) renderVolumes() (volumes []corev1.Volume, mounts []corev1.
 	return volumes, mounts, nil
 }
 
+// httpProbe Builds an HTTP probe handler for path on port.
 func httpProbe(path string, port int32) corev1.ProbeHandler {
 	return corev1.ProbeHandler{
 		HTTPGet: &corev1.HTTPGetAction{Path: path, Port: intstr.FromInt32(port)},
@@ -367,6 +370,7 @@ func (c *serveConfig) renderPVC(name string) (*corev1.PersistentVolumeClaim, err
 	return pvc, nil
 }
 
+// strPtr Returns a pointer to s, or nil when s is empty.
 func strPtr(s string) *string {
 	if s == "" {
 		return nil
@@ -434,6 +438,7 @@ func probePath(p *corev1.Probe) string {
 	return p.HTTPGet.Path
 }
 
+// deploymentContainer Returns the kubeswap-managed container of a Deployment (the named one, else the first).
 func deploymentContainer(dep *appsv1.Deployment) *corev1.Container {
 	containers := dep.Spec.Template.Spec.Containers
 	for i := range containers {
@@ -447,6 +452,7 @@ func deploymentContainer(dep *appsv1.Deployment) *corev1.Container {
 	return nil
 }
 
+// stringSlicesEqual Reports whether two string slices are element-for-element equal.
 func stringSlicesEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -459,6 +465,7 @@ func stringSlicesEqual(a, b []string) bool {
 	return true
 }
 
+// envsEqual Reports whether two env var lists define the same name-to-value mapping, ignoring order.
 func envsEqual(a, b []corev1.EnvVar) bool {
 	if len(a) != len(b) {
 		return false
@@ -479,10 +486,12 @@ func envsEqual(a, b []corev1.EnvVar) bool {
 	return true
 }
 
+// resourcesEqual Reports whether two resource requirement sets are equal (limits and requests).
 func resourcesEqual(a, b corev1.ResourceRequirements) bool {
 	return resourceListEqual(a.Limits, b.Limits) && resourceListEqual(a.Requests, b.Requests)
 }
 
+// resourceListEqual Reports whether two resource lists hold the same quantities.
 func resourceListEqual(a, b corev1.ResourceList) bool {
 	if len(a) != len(b) {
 		return false

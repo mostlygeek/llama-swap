@@ -95,6 +95,7 @@ func verifyOwnership(obj metav1.Object, modelID string) error {
 // model (verifyOwnership), so colliding model IDs cannot adopt or tear
 // down each other's backends.
 
+// ensureResources Creates the model's Deployment and Service, adopting or strictly replacing an existing Deployment and creating any missing PVCs.
 func ensureResources(client kubernetes.Interface, cfg *serveConfig) (*ensureResult, error) {
 	ctx := context.Background()
 	res := &ensureResult{}
@@ -280,6 +281,7 @@ type serveFlags struct {
 	noLogs         bool
 }
 
+// toConfig Builds the fully parsed serveConfig from the serve flags, validating every field.
 func (f *serveFlags) toConfig() (*serveConfig, error) {
 	sanitized, err := sanitizeModelID(f.model)
 	if err != nil {
@@ -387,6 +389,7 @@ func (f *serveFlags) toConfig() (*serveConfig, error) {
 	}, nil
 }
 
+// serveCmd Runs the serve subcommand: ensures the backend resources exist, then proxies the listen address to the backend pod until the model is unloaded.
 func serveCmd(args []string) error {
 	var f serveFlags
 	fs := newFlagSet("serve")
@@ -575,6 +578,7 @@ func newServer(cfg *serveConfig, client kubernetes.Interface, upstreamOverride s
 	return s
 }
 
+// pollInterval Returns the cluster polling interval (--poll, floored at one second).
 func (s *server) pollInterval() time.Duration {
 	if s.poll > 0 {
 		return s.poll
@@ -582,6 +586,7 @@ func (s *server) pollInterval() time.Duration {
 	return time.Second
 }
 
+// upstreamDescription Describes the current proxy upstream for log messages.
 func (s *server) upstreamDescription() string {
 	if s.upstreamOverride != "" {
 		return s.upstreamOverride + " (override)"
@@ -658,6 +663,7 @@ func (s *server) requestStop() {
 	s.stopMu.Do(func() { close(s.stopCh) })
 }
 
+// setReady Updates the proxy readiness state (and its reason), logging transitions.
 func (s *server) setReady(ready bool, reason string) {
 	if ready != s.ready.Load() || reason != s.readyReason.Load().(string) {
 		if ready {
@@ -670,6 +676,7 @@ func (s *server) setReady(ready bool, reason string) {
 	}
 }
 
+// pollOnce Polls the cluster once: updates readiness and the proxy upstream, and stops the wrapper when its Deployment has been deleted.
 func (s *server) pollOnce(ctx context.Context) {
 	cfg := s.cfg
 	depName := cfg.DepName
@@ -738,6 +745,7 @@ func (s *server) findPod(ctx context.Context, dep *appsv1.Deployment) podState {
 	return podState{pod: active, ready: false, reason: podNotReadyReason(active)}
 }
 
+// podIsReady Reports whether the pod carries the Ready condition.
 func podIsReady(p *corev1.Pod) bool {
 	for _, cond := range p.Status.Conditions {
 		if cond.Type == corev1.PodReady {
@@ -747,12 +755,14 @@ func podIsReady(p *corev1.Pod) bool {
 	return false
 }
 
+// deploymentSummary Formats a one-line replica/ready summary of the Deployment status.
 func deploymentSummary(dep *appsv1.Deployment) string {
 	st := dep.Status
 	return fmt.Sprintf("deployment replicas=%d ready=%d available=%d unavailable=%d",
 		st.Replicas, st.ReadyReplicas, st.AvailableReplicas, st.UnavailableReplicas)
 }
 
+// podNotReadyReason Describes why a pod is not ready (phase plus waiting/terminating container states).
 func podNotReadyReason(p *corev1.Pod) string {
 	reason := "pod " + p.Name + " " + string(p.Status.Phase)
 	for _, cs := range p.Status.ContainerStatuses {
@@ -792,12 +802,14 @@ func (s *server) followPodLogs(ctx context.Context, pod *corev1.Pod) {
 	go s.streamLogs(logCtx, pod)
 }
 
+// stopLogs Stops the background pod log forwarding.
 func (s *server) stopLogs() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.stopLogsLocked()
 }
 
+// stopLogsLocked Stops the pod log forwarding, with the server lock already held.
 func (s *server) stopLogsLocked() {
 	if s.logCancel != nil {
 		s.logCancel()
@@ -806,6 +818,7 @@ func (s *server) stopLogsLocked() {
 	s.logUID = ""
 }
 
+// streamLogs Follows the backend pod logs and forwards them to stderr until the pod or the wrapper goes away.
 func (s *server) streamLogs(ctx context.Context, pod *corev1.Pod) {
 	stream, err := s.client.CoreV1().Pods(pod.Namespace).GetLogs(pod.Name, &corev1.PodLogOptions{
 		Container: containerName,
