@@ -63,7 +63,7 @@ data:
 {{- with index $merged "args" }}
 {{ . | indent 12 }}
 {{- end }}
-{{- with index $merged "cmdStop" | default (printf "kubeswap delete --model %s --namespace %s --wait 60s" $m.id $ns) }}
+{{- with index $merged "cmdStop" | default (printf "kubeswap delete --model '%s' --namespace %s --wait 60s" (replace "'" "'\\''" $m.id) $ns) }}
         cmdStop: {{ . | quote }}
 {{- end }}
 {{- range $k, $v := $merged }}
