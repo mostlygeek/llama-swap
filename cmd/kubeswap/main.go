@@ -247,9 +247,13 @@ func parseServicePorts(entries []string) ([]servicePortSpec, error) {
 	return out, nil
 }
 
-// parseTolerations parses "key:operator:value:effect" entries. operator
-// defaults to Equal, effect to All; empty fields are allowed (e.g.
-// "dedicated:Exists::NoSchedule" tolerates the key with any value).
+// parseTolerations parses "key:operator:value:effect" entries, validating
+// against the values Kubernetes accepts: operator is Equal or Exists (empty
+// defaults to Equal), effect is NoSchedule, PreferNoSchedule or NoExecute —
+// or empty, which tolerates every effect (e.g. "dedicated:Exists::" or the
+// tolerate-everything "::Exists:"). A value is an error with operator
+// Exists. Invalid fields are rejected here, before renderTolerations turns
+// them into corev1 types ("All" was never a valid effect).
 func parseTolerations(entries []string) ([]toleration, error) {
 	out := make([]toleration, 0, len(entries))
 	for _, e := range entries {
@@ -257,16 +261,25 @@ func parseTolerations(entries []string) ([]toleration, error) {
 		if len(parts) != 4 {
 			return nil, fmt.Errorf("invalid --toleration %q (want key:operator:value:effect)", e)
 		}
-		op := parts[1]
+		key, op, value, effect := parts[0], parts[1], parts[2], parts[3]
 		if op == "" {
 			op = "Equal"
 		}
-		effect := parts[3]
-		if effect == "" {
-			effect = "All"
+		switch op {
+		case "Equal", "Exists":
+		default:
+			return nil, fmt.Errorf("invalid --toleration %q: operator %q (want Equal or Exists)", e, op)
+		}
+		switch effect {
+		case "", "NoSchedule", "PreferNoSchedule", "NoExecute":
+		default:
+			return nil, fmt.Errorf("invalid --toleration %q: effect %q (want NoSchedule, PreferNoSchedule, NoExecute, or empty for any effect)", e, effect)
+		}
+		if op == "Exists" && value != "" {
+			return nil, fmt.Errorf("invalid --toleration %q: value must be empty when operator is Exists", e)
 		}
 		out = append(out, toleration{
-			Key: parts[0], Operator: op, Value: parts[2], Effect: effect,
+			Key: key, Operator: op, Value: value, Effect: effect,
 		})
 	}
 	return out, nil
