@@ -33,17 +33,46 @@ type ensureResult struct {
 	Created []string
 }
 
+// verifyOwnership checks that obj was created by kubeswap for modelID.
+// Every object kubeswap creates carries the ORIGINAL model ID in the
+// llama-swap.io/model-id annotation, so two distinct IDs that sanitize to
+// the same string can never be confused. Objects without the annotation
+// (an older kubeswap) fall back to the sanitized model label.
+func verifyOwnership(obj metav1.Object, modelID string) error {
+	if v := obj.GetLabels()[labelManagedBy]; v != managedByValue {
+		return fmt.Errorf("%s/%s is not managed by kubeswap", obj.GetNamespace(), obj.GetName())
+	}
+	if v := obj.GetAnnotations()[annotationModelID]; v != "" {
+		if v != modelID {
+			return fmt.Errorf("%s/%s belongs to model %q, not %q", obj.GetNamespace(), obj.GetName(), v, modelID)
+		}
+		return nil
+	}
+	sanitized, err := sanitizeModelID(modelID)
+	if err != nil || obj.GetLabels()[labelModel] != sanitized {
+		return fmt.Errorf("%s/%s carries no verifiable model ID for %q", obj.GetNamespace(), obj.GetName(), modelID)
+	}
+	return nil
+}
+
 // ensureResources creates (or adopts) the model's PVCs, Deployment and
 // Service. Adopting an existing deployment keeps a backend alive across
 // head-end restarts; --strict replaces it when the container spec drifted.
+// Adoption and deletion only ever touch objects verified to belong to the
+// model (verifyOwnership), so colliding model IDs cannot adopt or tear
+// down each other's backends.
+
 func ensureResources(client kubernetes.Interface, cfg *serveConfig) (*ensureResult, error) {
 	ctx := context.Background()
 	res := &ensureResult{}
 
-	depName := deploymentName(cfg.Sanitized)
+	depName := cfg.DepName
 	dep, err := client.AppsV1().Deployments(cfg.Namespace).Get(ctx, depName, metav1.GetOptions{})
 	switch {
 	case err == nil:
+		if err := verifyOwnership(dep, cfg.Model); err != nil {
+			return nil, fmt.Errorf("adopting deployment %s/%s: %w", cfg.Namespace, depName, err)
+		}
 		res.Adopted = true
 		if cfg.Strict {
 			want, err := cfg.renderDeployment()
@@ -74,15 +103,21 @@ func ensureResources(client kubernetes.Interface, cfg *serveConfig) (*ensureResu
 
 	// A deployment can exist while its Service was deleted; recreate the
 	// Service so in-cluster consumers keep working.
-	svcName := serviceName(cfg.Sanitized)
-	if _, err := client.CoreV1().Services(cfg.Namespace).Get(ctx, svcName, metav1.GetOptions{}); apierrors.IsNotFound(err) {
+	svcName := cfg.SvcName
+	svc, err := client.CoreV1().Services(cfg.Namespace).Get(ctx, svcName, metav1.GetOptions{})
+	switch {
+	case apierrors.IsNotFound(err):
 		if _, err := client.CoreV1().Services(cfg.Namespace).Create(ctx, cfg.renderService(), metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
 			return nil, fmt.Errorf("creating service %s: %w", svcName, err)
 		}
 		if !res.Adopted {
 			res.Created = append(res.Created, "service/"+svcName)
 		}
-	} else if err != nil {
+	case err == nil:
+		if err := verifyOwnership(svc, cfg.Model); err != nil {
+			return nil, fmt.Errorf("adopting service %s/%s: %w", cfg.Namespace, svcName, err)
+		}
+	default:
 		return nil, fmt.Errorf("getting service %s: %w", svcName, err)
 	}
 
@@ -199,6 +234,14 @@ func (f *serveFlags) toConfig() (*serveConfig, error) {
 	if err != nil {
 		return nil, err
 	}
+	depName, err := deploymentName(f.model)
+	if err != nil {
+		return nil, err
+	}
+	svcName, err := serviceName(f.model)
+	if err != nil {
+		return nil, err
+	}
 	envs, err := parseEnvVars(f.envs)
 	if err != nil {
 		return nil, err
@@ -255,6 +298,8 @@ func (f *serveFlags) toConfig() (*serveConfig, error) {
 	return &serveConfig{
 		Model:          f.model,
 		Sanitized:      sanitized,
+		DepName:        depName,
+		SvcName:        svcName,
 		Namespace:      f.namespace,
 		Image:          f.image,
 		Args:           nil, // set by the caller from the post "--" args
@@ -346,7 +391,7 @@ func serveCmd(args []string) error {
 		return err
 	}
 	if res.Adopted {
-		log.Printf("adopting existing deployment %s/%s", cfg.Namespace, deploymentName(cfg.Sanitized))
+		log.Printf("adopting existing deployment %s/%s", cfg.Namespace, cfg.DepName)
 	} else {
 		log.Printf("created %v", res.Created)
 	}
@@ -564,7 +609,7 @@ func (s *server) setReady(ready bool, reason string) {
 
 func (s *server) pollOnce(ctx context.Context) {
 	cfg := s.cfg
-	depName := deploymentName(cfg.Sanitized)
+	depName := cfg.DepName
 	dep, err := s.client.AppsV1().Deployments(cfg.Namespace).Get(ctx, depName, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -599,7 +644,7 @@ func (s *server) pollOnce(ctx context.Context) {
 // readiness with a human-readable reason.
 func (s *server) findPod(ctx context.Context, dep *appsv1.Deployment) podState {
 	cfg := s.cfg
-	selector := labels.Set(managedLabels(cfg.Sanitized)).String()
+	selector := labels.Set(podSelectorLabels(cfg.Sanitized, cfg.DepName)).String()
 	pods, err := s.client.CoreV1().Pods(cfg.Namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
 	if err != nil {
 		return podState{reason: "error listing pods: " + err.Error()}

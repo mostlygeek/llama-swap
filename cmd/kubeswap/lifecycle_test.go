@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -34,21 +37,21 @@ func TestKubeswap_EnsureResourcesCreates(t *testing.T) {
 	for _, c := range res.Created {
 		created[c] = true
 	}
-	for _, want := range []string{"pvc/llama-swap-models", "deployment/author-model-tag", "service/author-model-tag-svc"} {
+	for _, want := range []string{"pvc/llama-swap-models", "deployment/" + cfg.DepName, "service/" + cfg.SvcName} {
 		if !created[want] {
 			t.Errorf("expected %q to be created, got %v", want, res.Created)
 		}
 	}
 
 	// Objects exist with the right labels.
-	dep, err := client.AppsV1().Deployments("llama-swap").Get(context.Background(), "author-model-tag", metav1.GetOptions{})
+	dep, err := client.AppsV1().Deployments("llama-swap").Get(context.Background(), cfg.DepName, metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("deployment: %v", err)
 	}
 	if dep.Labels[labelModel] != "author-model-tag" {
 		t.Errorf("labels: %v", dep.Labels)
 	}
-	if _, err := client.CoreV1().Services("llama-swap").Get(context.Background(), "author-model-tag-svc", metav1.GetOptions{}); err != nil {
+	if _, err := client.CoreV1().Services("llama-swap").Get(context.Background(), cfg.SvcName, metav1.GetOptions{}); err != nil {
 		t.Errorf("service: %v", err)
 	}
 	if _, err := client.CoreV1().PersistentVolumeClaims("llama-swap").Get(context.Background(), "llama-swap-models", metav1.GetOptions{}); err != nil {
@@ -84,7 +87,7 @@ func TestKubeswap_EnsureResourcesStrictReplace(t *testing.T) {
 
 	// Simulate drift: someone changed the image.
 	ctx := context.Background()
-	dep, _ := client.AppsV1().Deployments("llama-swap").Get(ctx, "author-model-tag", metav1.GetOptions{})
+	dep, _ := client.AppsV1().Deployments("llama-swap").Get(ctx, cfg.DepName, metav1.GetOptions{})
 	dep.Spec.Template.Spec.Containers[0].Image = "someone-else:latest"
 	if _, err := client.AppsV1().Deployments("llama-swap").Update(ctx, dep, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
@@ -108,7 +111,7 @@ func TestKubeswap_EnsureResourcesStrictReplace(t *testing.T) {
 	if res.Adopted {
 		t.Error("strict should replace drifted deployment")
 	}
-	got, err := client.AppsV1().Deployments("llama-swap").Get(ctx, "author-model-tag", metav1.GetOptions{})
+	got, err := client.AppsV1().Deployments("llama-swap").Get(ctx, cfg.DepName, metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,10 +154,10 @@ func TestKubeswap_DeleteModel(t *testing.T) {
 		t.Fatalf("deleteModel: %v", err)
 	}
 	ctx := context.Background()
-	if _, err := client.AppsV1().Deployments("llama-swap").Get(ctx, "author-model-tag", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+	if _, err := client.AppsV1().Deployments("llama-swap").Get(ctx, cfg.DepName, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
 		t.Errorf("deployment should be gone, err=%v", err)
 	}
-	if _, err := client.CoreV1().Services("llama-swap").Get(ctx, "author-model-tag-svc", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+	if _, err := client.CoreV1().Services("llama-swap").Get(ctx, cfg.SvcName, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
 		t.Errorf("service should be gone, err=%v", err)
 	}
 	if _, err := client.CoreV1().PersistentVolumeClaims("llama-swap").Get(ctx, "llama-swap-models", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
@@ -186,6 +189,147 @@ func TestKubeswap_DeleteModelKeepsUserPVC(t *testing.T) {
 	}
 	if _, err := client.CoreV1().PersistentVolumeClaims("llama-swap").Get(context.Background(), "llama-swap-models", metav1.GetOptions{}); err != nil {
 		t.Errorf("pre-existing PVC must survive deletion: %v", err)
+	}
+}
+
+func TestKubeswap_EnsureResourcesRejectsForeignModel(t *testing.T) {
+	client := newFakeClient()
+	ctx := context.Background()
+	cfg := testConfig()
+
+	// A deployment exists under this model's name but belongs to a
+	// different model (a name collision).
+	foreign := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        cfg.DepName,
+			Namespace:   cfg.Namespace,
+			Labels:      managedLabels(cfg.Sanitized),
+			Annotations: map[string]string{annotationModelID: "other-model"},
+		},
+	}
+	if _, err := client.AppsV1().Deployments(cfg.Namespace).Create(ctx, foreign, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := ensureResources(client, cfg); err == nil {
+		t.Fatal("expected adoption to be refused for a foreign model")
+	} else if !strings.Contains(err.Error(), "belongs to model \"other-model\"") {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// The foreign deployment is untouched.
+	dep, err := client.AppsV1().Deployments(cfg.Namespace).Get(ctx, cfg.DepName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("foreign deployment should still exist: %v", err)
+	}
+	if dep.Annotations[annotationModelID] != "other-model" {
+		t.Errorf("foreign deployment was modified: %v", dep.Annotations)
+	}
+}
+
+func TestKubeswap_DeleteModelRefusesForeignModel(t *testing.T) {
+	client := newFakeClient()
+	ctx := context.Background()
+	cfg := testConfig()
+	if _, err := ensureResources(client, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	// A differently-cased ID sanitizes to the same model label; deleting
+	// it must not touch this model's backend.
+	if err := deleteModel(client, cfg.Namespace, "AUTHOR/MODEL:TAG", true, 0); err == nil {
+		t.Fatal("expected deletion to be refused for a different model ID")
+	} else if !strings.Contains(err.Error(), "belongs to model") {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if _, err := client.AppsV1().Deployments(cfg.Namespace).Get(ctx, cfg.DepName, metav1.GetOptions{}); err != nil {
+		t.Errorf("deployment should survive a foreign delete: %v", err)
+	}
+	if _, err := client.CoreV1().Services(cfg.Namespace).Get(ctx, cfg.SvcName, metav1.GetOptions{}); err != nil {
+		t.Errorf("service should survive a foreign delete: %v", err)
+	}
+
+	// Deleting with the exact model ID works.
+	if err := deleteModel(client, cfg.Namespace, cfg.Model, true, 0); err != nil {
+		t.Fatalf("delete with the correct model ID: %v", err)
+	}
+	if _, err := client.AppsV1().Deployments(cfg.Namespace).Get(ctx, cfg.DepName, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Errorf("deployment should be gone: %v", err)
+	}
+}
+
+// collidingConfigs returns two configs whose model IDs sanitize to the
+// same label (the reviewer's Model_A / model-a case).
+func collidingConfigs() (*serveConfig, *serveConfig) {
+	a := testConfig()
+	a.Model = "Model_A"
+	a.Sanitized = "model-a"
+	a.DepName, _ = deploymentName(a.Model)
+	a.SvcName, _ = serviceName(a.Model)
+	b := testConfig()
+	b.Model = "model-a"
+	b.Sanitized = "model-a"
+	b.DepName, _ = deploymentName(b.Model)
+	b.SvcName, _ = serviceName(b.Model)
+	return a, b
+}
+
+func TestKubeswap_PodSelectionIsModelUnique(t *testing.T) {
+	client := newFakeClient()
+	ctx := context.Background()
+	cfgA, cfgB := collidingConfigs()
+	if _, err := ensureResources(client, cfgA); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ensureResources(client, cfgB); err != nil {
+		t.Fatal(err)
+	}
+
+	// Only model B has a pod, and it is ready; model A's pod is not
+	// (up) yet. Model A's wrapper must not see B's pod.
+	podB := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      cfgB.DepName + "-pod",
+			Namespace: cfgB.Namespace,
+			Labels:    podLabels(cfgB.Sanitized, cfgB.DepName),
+		},
+		Status: corev1.PodStatus{
+			PodIP: "10.0.0.9",
+			Conditions: []corev1.PodCondition{{
+				Type: corev1.PodReady, Status: corev1.ConditionTrue,
+			}},
+		},
+	}
+	if _, err := client.CoreV1().Pods(cfgB.Namespace).Create(ctx, podB, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	depA, err := client.AppsV1().Deployments(cfgA.Namespace).Get(ctx, cfgA.DepName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srvA := newServer(cfgA, client, "", false, time.Second)
+	if st := srvA.findPod(ctx, depA); st.pod != nil {
+		t.Fatalf("findPod for %q must not return sibling pod %q", cfgA.Model, st.pod.Name)
+	}
+
+	// Model A's Service selector must not match model B's pod.
+	selA := labels.SelectorFromSet(podSelectorLabels(cfgA.Sanitized, cfgA.DepName))
+	if selA.Matches(labels.Set(podB.Labels)) {
+		t.Errorf("service selector for %q matches sibling pod labels %v", cfgA.Model, podB.Labels)
+	}
+	selB := labels.SelectorFromSet(podSelectorLabels(cfgB.Sanitized, cfgB.DepName))
+	if !selB.Matches(labels.Set(podB.Labels)) {
+		t.Errorf("service selector for %q must match its own pod", cfgB.Model)
+	}
+
+	// Deleting model A (with wait) must succeed immediately despite the
+	// sibling pod still running, and must not touch model B.
+	if err := deleteModel(client, cfgA.Namespace, cfgA.Model, false, 5*time.Second); err != nil {
+		t.Fatalf("deleteModel: %v", err)
+	}
+	if _, err := client.CoreV1().Pods(cfgB.Namespace).Get(ctx, podB.Name, metav1.GetOptions{}); err != nil {
+		t.Errorf("sibling pod must survive deleting model A: %v", err)
 	}
 }
 
@@ -222,9 +366,13 @@ func TestKubeswap_GCCollectsStaleWorkloads(t *testing.T) {
 	cfgA := testConfig()
 	cfgA.Model = "model-a"
 	cfgA.Sanitized = "model-a"
+	cfgA.DepName, _ = deploymentName(cfgA.Model)
+	cfgA.SvcName, _ = serviceName(cfgA.Model)
 	cfgB := testConfig()
 	cfgB.Model = "model-b"
 	cfgB.Sanitized = "model-b"
+	cfgB.DepName, _ = deploymentName(cfgB.Model)
+	cfgB.SvcName, _ = serviceName(cfgB.Model)
 	if _, err := ensureResources(client, cfgA); err != nil {
 		t.Fatal(err)
 	}
@@ -242,13 +390,13 @@ func TestKubeswap_GCCollectsStaleWorkloads(t *testing.T) {
 	if len(deleted) != 1 || deleted[0] != "model-b" {
 		t.Errorf("deleted: %v", deleted)
 	}
-	if _, err := client.AppsV1().Deployments("llama-swap").Get(ctx, "model-a", metav1.GetOptions{}); err != nil {
+	if _, err := client.AppsV1().Deployments("llama-swap").Get(ctx, cfgA.DepName, metav1.GetOptions{}); err != nil {
 		t.Errorf("model-a should survive: %v", err)
 	}
-	if _, err := client.AppsV1().Deployments("llama-swap").Get(ctx, "model-b", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+	if _, err := client.AppsV1().Deployments("llama-swap").Get(ctx, cfgB.DepName, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
 		t.Errorf("model-b should be collected, err=%v", err)
 	}
-	if _, err := client.CoreV1().Services("llama-swap").Get(ctx, "model-b-svc", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+	if _, err := client.CoreV1().Services("llama-swap").Get(ctx, cfgB.SvcName, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
 		t.Errorf("model-b service should be collected, err=%v", err)
 	}
 }
@@ -270,7 +418,7 @@ func TestKubeswap_FindPod(t *testing.T) {
 	pending := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "p1", Namespace: "llama-swap",
-			Labels: managedLabels(cfg.Sanitized),
+			Labels: podLabels(cfg.Sanitized, cfg.DepName),
 			UID:    types.UID("u1"),
 		},
 		Status: corev1.PodStatus{Phase: corev1.PodPending},
@@ -287,7 +435,7 @@ func TestKubeswap_FindPod(t *testing.T) {
 	ready := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "p1", Namespace: "llama-swap",
-			Labels: managedLabels(cfg.Sanitized),
+			Labels: podLabels(cfg.Sanitized, cfg.DepName),
 			UID:    types.UID("u1"),
 		},
 		Status: corev1.PodStatus{
@@ -332,7 +480,7 @@ func TestKubeswap_PollOnceRequestsStopOnDeletion(t *testing.T) {
 	}
 
 	// Delete the deployment: serve must request a stop.
-	if err := client.AppsV1().Deployments("llama-swap").Delete(ctx, "author-model-tag", metav1.DeleteOptions{}); err != nil {
+	if err := client.AppsV1().Deployments("llama-swap").Delete(ctx, cfg.DepName, metav1.DeleteOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	s.pollOnce(ctx)

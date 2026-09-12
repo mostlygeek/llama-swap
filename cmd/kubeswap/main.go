@@ -51,6 +51,7 @@ func printVersion() {
 const (
 	labelManagedBy    = "llama-swap.io/managed-by"
 	labelModel        = "llama-swap.io/model"
+	labelDeployment   = "llama-swap.io/deployment"
 	labelAppName      = "app.kubernetes.io/name"
 	managedByValue    = "llama-swap"
 	appNameValue      = "llama-swap-backend"

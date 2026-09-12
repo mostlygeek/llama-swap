@@ -8,7 +8,7 @@ import (
 )
 
 func testConfig() *serveConfig {
-	return &serveConfig{
+	cfg := &serveConfig{
 		Model:        "author/model:tag",
 		Sanitized:    "author-model-tag",
 		Namespace:    "llama-swap",
@@ -32,6 +32,9 @@ func testConfig() *serveConfig {
 		PVCClass:     "local-path",
 		GraceSeconds: 30,
 	}
+	cfg.DepName, _ = deploymentName(cfg.Model)
+	cfg.SvcName, _ = serviceName(cfg.Model)
+	return cfg
 }
 
 func TestKubeswap_RenderDeployment(t *testing.T) {
@@ -41,11 +44,18 @@ func TestKubeswap_RenderDeployment(t *testing.T) {
 		t.Fatalf("renderDeployment: %v", err)
 	}
 
-	if dep.Name != "author-model-tag" || dep.Namespace != "llama-swap" {
+	if dep.Name != cfg.DepName || dep.Namespace != "llama-swap" {
 		t.Errorf("name/namespace: %s/%s", dep.Namespace, dep.Name)
 	}
 	if dep.Labels[labelModel] != "author-model-tag" || dep.Labels[labelManagedBy] != managedByValue {
 		t.Errorf("labels: %v", dep.Labels)
+	}
+	if dep.Spec.Selector.MatchLabels[labelDeployment] != cfg.DepName {
+		t.Errorf("deployment selector must carry the deployment label: %v", dep.Spec.Selector.MatchLabels)
+	}
+	tpl := dep.Spec.Template
+	if tpl.Labels[labelDeployment] != cfg.DepName {
+		t.Errorf("pod template deployment label: %v", tpl.Labels)
 	}
 	if dep.Annotations[annotationModelID] != "author/model:tag" {
 		t.Errorf("annotation model-id: %v", dep.Annotations)
@@ -147,11 +157,14 @@ func TestKubeswap_RenderDeploymentCPU(t *testing.T) {
 func TestKubeswap_RenderService(t *testing.T) {
 	cfg := testConfig()
 	svc := cfg.renderService()
-	if svc.Name != "author-model-tag-svc" || svc.Namespace != "llama-swap" {
+	if svc.Name != cfg.SvcName || svc.Namespace != "llama-swap" {
 		t.Errorf("service name/namespace: %s/%s", svc.Namespace, svc.Name)
 	}
 	if svc.Spec.Selector[labelModel] != "author-model-tag" {
 		t.Errorf("selector: %v", svc.Spec.Selector)
+	}
+	if svc.Spec.Selector[labelDeployment] != cfg.DepName {
+		t.Errorf("service selector must carry the deployment label: %v", svc.Spec.Selector)
 	}
 	if len(svc.Spec.Ports) != 1 || svc.Spec.Ports[0].Port != 8080 {
 		t.Errorf("ports: %v", svc.Spec.Ports)
@@ -228,11 +241,11 @@ func TestKubeswap_StartupFailureThreshold(t *testing.T) {
 		secs int64
 		want int32
 	}{
-		{0, int32(defaultStartupTimeout / 5)}, // unset -> default
-		{600, 120},                      // default value
-		{30, 6},                         // short load
-		{31, 7},                         // rounds up
-		{3, 1},                          // clamped to at least 1
+		{0, int32(defaultStartupTimeout / 5)},  // unset -> default
+		{600, 120},                             // default value
+		{30, 6},                                // short load
+		{31, 7},                                // rounds up
+		{3, 1},                                 // clamped to at least 1
 		{-5, int32(defaultStartupTimeout / 5)}, // negative -> default
 	}
 	for _, tc := range cases {

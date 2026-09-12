@@ -33,9 +33,19 @@ func deleteModel(client kubernetes.Interface, namespace, model string, deleteVol
 		return err
 	}
 
-	depName := deploymentName(sanitized)
+	depName, err := deploymentName(model)
+	if err != nil {
+		return err
+	}
+	svcName, err := serviceName(model)
+	if err != nil {
+		return err
+	}
+
 	deleted := false
-	if _, err := client.AppsV1().Deployments(namespace).Get(ctx, depName, metav1.GetOptions{}); apierrors.IsNotFound(err) {
+	dep, err := client.AppsV1().Deployments(namespace).Get(ctx, depName, metav1.GetOptions{})
+	switch {
+	case apierrors.IsNotFound(err):
 		// The name may have drifted (older kubeswap, renamed model); fall
 		// back to a label lookup.
 		selector := labels.Set(managedLabels(sanitized)).String()
@@ -44,15 +54,21 @@ func deleteModel(client kubernetes.Interface, namespace, model string, deleteVol
 			return fmt.Errorf("listing deployments by label: %w", lerr)
 		}
 		for i := range deps.Items {
+			if err := verifyOwnership(&deps.Items[i], model); err != nil {
+				return err
+			}
 			if err := client.AppsV1().Deployments(namespace).Delete(ctx, deps.Items[i].Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 				return fmt.Errorf("deleting deployment %s: %w", deps.Items[i].Name, err)
 			}
 			log.Printf("deleted deployment %s/%s", namespace, deps.Items[i].Name)
 			deleted = true
 		}
-	} else if err != nil {
+	case err != nil:
 		return fmt.Errorf("getting deployment %s: %w", depName, err)
-	} else {
+	default:
+		if err := verifyOwnership(dep, model); err != nil {
+			return err
+		}
 		if err := client.AppsV1().Deployments(namespace).Delete(ctx, depName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 			return fmt.Errorf("deleting deployment %s: %w", depName, err)
 		}
@@ -60,10 +76,19 @@ func deleteModel(client kubernetes.Interface, namespace, model string, deleteVol
 		deleted = true
 	}
 
-	svcName := serviceName(sanitized)
-	if err := client.CoreV1().Services(namespace).Delete(ctx, svcName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("deleting service %s: %w", svcName, err)
-	} else if !apierrors.IsNotFound(err) {
+	svc, err := client.CoreV1().Services(namespace).Get(ctx, svcName, metav1.GetOptions{})
+	switch {
+	case apierrors.IsNotFound(err):
+		// no service to delete
+	case err != nil:
+		return fmt.Errorf("getting service %s: %w", svcName, err)
+	default:
+		if err := verifyOwnership(svc, model); err != nil {
+			return err
+		}
+		if err := client.CoreV1().Services(namespace).Delete(ctx, svcName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("deleting service %s: %w", svcName, err)
+		}
 		log.Printf("deleted service %s/%s", namespace, svcName)
 		deleted = true
 	}
@@ -77,6 +102,9 @@ func deleteModel(client kubernetes.Interface, namespace, model string, deleteVol
 			return fmt.Errorf("listing PVCs: %w", err)
 		}
 		for i := range pvcs.Items {
+			if err := verifyOwnership(&pvcs.Items[i], model); err != nil {
+				return err
+			}
 			if err := client.CoreV1().PersistentVolumeClaims(namespace).Delete(ctx, pvcs.Items[i].Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 				return fmt.Errorf("deleting PVC %s: %w", pvcs.Items[i].Name, err)
 			}
@@ -91,7 +119,7 @@ func deleteModel(client kubernetes.Interface, namespace, model string, deleteVol
 	}
 
 	if wait > 0 {
-		if err := waitForPodsGone(ctx, client, namespace, sanitized, wait); err != nil {
+		if err := waitForPodsGone(ctx, client, namespace, sanitized, depName, wait); err != nil {
 			return err
 		}
 	}
@@ -100,8 +128,10 @@ func deleteModel(client kubernetes.Interface, namespace, model string, deleteVol
 
 // waitForPodsGone polls until no pods for the model remain (the deployment
 // deletion cascades, but we wait so cmdStop returns after the GPU is free).
-func waitForPodsGone(ctx context.Context, client kubernetes.Interface, namespace, sanitized string, timeout time.Duration) error {
-	selector := labels.Set(managedLabels(sanitized)).String()
+// The selector includes the deployment name so sibling models that
+// sanitize to the same label are not counted.
+func waitForPodsGone(ctx context.Context, client kubernetes.Interface, namespace, sanitized, depName string, timeout time.Duration) error {
+	selector := labels.Set(podSelectorLabels(sanitized, depName)).String()
 	deadline := time.Now().Add(timeout)
 	for {
 		pods, err := client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
@@ -273,8 +303,15 @@ func runStatus(namespace, kubeconfig string) error {
 		if p.DeletionTimestamp != nil {
 			continue
 		}
-		if _, ok := podByModel[p.Labels[labelModel]]; !ok {
-			podByModel[p.Labels[labelModel]] = p
+		// Key by the deployment label (unique per model); fall back to the
+		// coarse model label for pods rendered before the deployment label
+		// existed (there the deployment name IS the model label value).
+		key := p.Labels[labelDeployment]
+		if key == "" {
+			key = p.Labels[labelModel]
+		}
+		if _, ok := podByModel[key]; !ok {
+			podByModel[key] = p
 		}
 	}
 
@@ -289,7 +326,7 @@ func runStatus(namespace, kubeconfig string) error {
 		if !dep.CreationTimestamp.IsZero() {
 			age = time.Since(dep.CreationTimestamp.Time).Round(time.Second).String()
 		}
-		pod, ok := podByModel[dep.Labels[labelModel]]
+		pod, ok := podByModel[dep.Name]
 		podName, ready := "-", "-"
 		if ok {
 			podName = pod.Name

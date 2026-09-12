@@ -49,17 +49,76 @@ func TestKubeswap_SanitizeModelIDLong(t *testing.T) {
 	}
 }
 
-func TestKubeswap_ServiceName(t *testing.T) {
-	if got := serviceName("my-model"); got != "my-model-svc" {
-		t.Errorf("serviceName(my-model) = %q, want my-model-svc", got)
+func TestKubeswap_Names(t *testing.T) {
+	dep, err := deploymentName("my-model")
+	if err != nil {
+		t.Fatalf("deploymentName: %v", err)
 	}
-	long := strings.Repeat("b", 70)
-	got := serviceName(long[:63])
-	if len(got) > 63 {
-		t.Errorf("serviceName too long: %d", len(got))
+	svc, err := serviceName("my-model")
+	if err != nil {
+		t.Fatalf("serviceName: %v", err)
 	}
-	if !strings.HasSuffix(got, "-svc") {
-		t.Errorf("expected -svc suffix, got %q", got)
+	if svc != dep+"-svc" {
+		t.Errorf("serviceName = %q, want %q-svc", svc, dep)
+	}
+	if !strings.HasPrefix(dep, "my-model-") {
+		t.Errorf("deploymentName = %q, want my-model-<hash>", dep)
+	}
+
+	// Deterministic: same model ID, same name.
+	dep2, _ := deploymentName("my-model")
+	if dep != dep2 {
+		t.Errorf("deploymentName not deterministic: %q vs %q", dep, dep2)
+	}
+
+	// Long model IDs stay within DNS-1123 limits (names and services).
+	long := strings.Repeat("a", 200)
+	dl, err := deploymentName(long)
+	if err != nil {
+		t.Fatalf("deploymentName(long): %v", err)
+	}
+	if len(dl) > 63 {
+		t.Errorf("deploymentName too long: %d", len(dl))
+	}
+	sl, err := serviceName(long)
+	if err != nil {
+		t.Fatalf("serviceName(long): %v", err)
+	}
+	if len(sl) > 63 {
+		t.Errorf("serviceName too long: %d", len(sl))
+	}
+	if !strings.HasSuffix(sl, "-svc") {
+		t.Errorf("expected -svc suffix, got %q", sl)
+	}
+}
+
+func TestKubeswap_NamesCollisionFree(t *testing.T) {
+	// Distinct IDs that sanitize to the same string must get distinct names.
+	a, err := deploymentName("Model_A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := deploymentName("model-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a == b {
+		t.Fatalf("Model_A and model-a both map to %q", a)
+	}
+
+	// Distinct IDs sharing a long sanitized prefix must get distinct names.
+	prefix := strings.Repeat("x", 70)
+	c, _ := deploymentName(prefix + "-tail-1")
+	d, _ := deploymentName(prefix + "-tail-2")
+	if c == d {
+		t.Fatalf("prefix-sharing IDs both map to %q", c)
+	}
+
+	// Names must be valid DNS-1123 labels.
+	for _, n := range []string{a, b, c, d} {
+		if n != strings.ToLower(n) || strings.ContainsAny(n, "_:/.") {
+			t.Errorf("invalid label: %q", n)
+		}
 	}
 }
 
@@ -68,8 +127,12 @@ func TestKubeswap_Labels(t *testing.T) {
 	if l[labelManagedBy] != managedByValue || l[labelModel] != "my-model" {
 		t.Errorf("managedLabels wrong: %v", l)
 	}
-	p := podLabels("my-model")
-	if p[labelAppName] != appNameValue || p[labelModel] != "my-model" {
+	s := podSelectorLabels("my-model", "my-model-abc12345")
+	if s[labelManagedBy] != managedByValue || s[labelModel] != "my-model" || s[labelDeployment] != "my-model-abc12345" {
+		t.Errorf("podSelectorLabels wrong: %v", s)
+	}
+	p := podLabels("my-model", "my-model-abc12345")
+	if p[labelAppName] != appNameValue || p[labelModel] != "my-model" || p[labelDeployment] != "my-model-abc12345" {
 		t.Errorf("podLabels wrong: %v", p)
 	}
 }
