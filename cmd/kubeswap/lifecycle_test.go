@@ -375,6 +375,46 @@ func TestKubeswap_WaitForDeploymentGone(t *testing.T) {
 	}
 }
 
+// TestKubeswap_WaitForPodsGone verifies delete --wait holds until the pod
+// objects disappear, not just until they start terminating.
+func TestKubeswap_WaitForPodsGone(t *testing.T) {
+	client := newFakeClient()
+	ctx := context.Background()
+	sanitized := "m"
+	depName := "kubeswap-m-abcd1234"
+
+	// Absent: returns immediately.
+	if err := waitForPodsGone(ctx, client, "llama-swap", sanitized, depName, time.Second); err != nil {
+		t.Fatalf("absent: %v", err)
+	}
+
+	// Terminating (deletion timestamp set, object still listed): the pod
+	// may still hold the GPU, so the wait must time out rather than
+	// return. (The real API sets the timestamp on delete; the fake
+	// client stores the object as given, so we set it ourselves.)
+	now := metav1.Now()
+	terminating := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name:              "p1",
+		Namespace:         "llama-swap",
+		Labels:            podSelectorLabels(sanitized, depName),
+		DeletionTimestamp: &now,
+	}}
+	if _, err := client.CoreV1().Pods("llama-swap").Create(ctx, terminating, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitForPodsGone(ctx, client, "llama-swap", sanitized, depName, 700*time.Millisecond); err == nil {
+		t.Fatal("expected timeout for a pod that is only terminating, not gone")
+	}
+
+	// Object removed: the wait completes.
+	if err := client.CoreV1().Pods("llama-swap").Delete(ctx, "p1", metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitForPodsGone(ctx, client, "llama-swap", sanitized, depName, time.Second); err != nil {
+		t.Fatalf("removed: %v", err)
+	}
+}
+
 // reserveNameReactor makes deployment creates fail with AlreadyExists
 // until the given count is exhausted, simulating a name still reserved
 // by a deletion in progress.
