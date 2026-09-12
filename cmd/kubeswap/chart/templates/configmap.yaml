@@ -16,20 +16,27 @@ data:
 {{- end }}
     models:
 {{- range $m := .Values.config.models }}
+{{- /* The id is required: it names the config key, the --model argument
+      and the cmdStop default. Validate once and fail rendering instead of
+      emitting an empty key or a missing --model value. */}}
+{{- $id := index $m "id" }}
+{{- if not $id }}
+{{- fail (printf "config.models: an entry is missing a non-empty id: %v" $m) }}
+{{- end }}
 {{- /* merged = defaults with the model entry on top; a key present on
       the model wins, including an empty list (e.g. gpu: [] for a
       CPU-only model). Kube keys are consumed by the chart, every other
       merged key renders as a llama-swap model field. */}}
 {{- $merged := mergeOverwrite (deepCopy $defaults) $m }}
 {{- $kubeKeys := list "id" "image" "command" "gpu" "volumes" "port" "extraKubeArgs" "startupTimeout" "healthPath" "livenessPath" "checkPath" "args" "proxy" "cmdStop" }}
-      {{ $m.id | quote }}:
+      {{ $id | quote }}:
 {{- with index $merged "proxy" | default "http://127.0.0.1:${PORT}" }}
         proxy: {{ if kindIs "string" . }}{{ tpl . $ | quote }}{{ else }}{{ tpl (toYaml .) $ | nindent 12 }}{{ end }}
 {{- end }}
         cmd: >-
           kubeswap serve
           --listen 127.0.0.1:${PORT}
-          --model '{{ replace "'" "'\\''" $m.id }}'
+          --model '{{ replace "'" "'\\''" $id }}'
           --namespace {{ $ns }}
           --image {{ index $merged "image" }}
 {{- with index $merged "command" }}
@@ -63,7 +70,7 @@ data:
 {{- with index $merged "args" }}
 {{ . | indent 12 }}
 {{- end }}
-{{- with index $merged "cmdStop" | default (printf "kubeswap delete --model '%s' --namespace %s --wait 60s" (replace "'" "'\\''" $m.id) $ns) }}
+{{- with index $merged "cmdStop" | default (printf "kubeswap delete --model '%s' --namespace %s --wait 60s" (replace "'" "'\\''" $id) $ns) }}
         cmdStop: {{ . | quote }}
 {{- end }}
 {{- range $k, $v := $merged }}
