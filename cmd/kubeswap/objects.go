@@ -623,15 +623,22 @@ func volumesEqual(a, b []corev1.Volume) bool {
 }
 
 // tolerationsEqual compares tolerations as multisets (order-insensitive).
+// TolerationSeconds keeps nil and zero distinct: a nil pointer means the
+// taint is tolerated indefinitely, while zero means immediate eviction
+// (for NoExecute) — derefInt64 would collapse the two.
 func tolerationsEqual(a, b []corev1.Toleration) bool {
 	type tolKey struct {
 		key, op, value, effect string
 		seconds                int64
+		hasSeconds             bool
 	}
 	byKey := func(list []corev1.Toleration) map[tolKey]int {
 		m := make(map[tolKey]int, len(list))
 		for _, t := range list {
-			k := tolKey{t.Key, string(t.Operator), t.Value, string(t.Effect), derefInt64(t.TolerationSeconds)}
+			k := tolKey{t.Key, string(t.Operator), t.Value, string(t.Effect), 0, t.TolerationSeconds != nil}
+			if t.TolerationSeconds != nil {
+				k.seconds = *t.TolerationSeconds
+			}
 			m[k]++
 		}
 		return m

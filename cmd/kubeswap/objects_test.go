@@ -380,6 +380,18 @@ func TestKubeswap_DeploymentSpecMatchesTolerations(t *testing.T) {
 	if deploymentSpecMatches(dep, dep2) {
 		t.Error("toleration drift should not match")
 	}
+
+	// Rendered tolerations leave TolerationSeconds nil (tolerate the
+	// taint forever). A drifted NoExecute toleration with zero seconds
+	// means immediate eviction and must not match, even though both
+	// dereference to 0.
+	dep2, _ = cfg.renderDeployment()
+	zero := int64(0)
+	dep2.Spec.Template.Spec.Tolerations[0].Effect = corev1.TaintEffectNoExecute
+	dep2.Spec.Template.Spec.Tolerations[0].TolerationSeconds = &zero
+	if deploymentSpecMatches(dep, dep2) {
+		t.Error("nil vs zero TolerationSeconds should not match")
+	}
 }
 
 // TestKubeswap_DeploymentSpecMatchesVolumes Verifies the spec comparison detects volume drift.
