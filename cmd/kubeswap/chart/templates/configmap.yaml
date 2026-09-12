@@ -16,14 +16,14 @@ data:
 {{- end }}
     models:
 {{- range $m := .Values.config.models }}
-{{- $img := $m.image | default $defaults.image }}
-{{- $cmd := $m.command | default $defaults.command }}
-{{- $gpu := $m.gpu | default $defaults.gpu }}
-{{- $vol := $m.volumes | default $defaults.volumes }}
-{{- $port := $m.port | default $defaults.port }}
-{{- $kubeKeys := list "id" "image" "command" "gpu" "volumes" "port" "startupTimeout" "healthPath" "livenessPath" "checkPath" "args" "proxy" "cmdStop" }}
+{{- /* merged = defaults with the model entry on top; a key present on
+      the model wins, including an empty list (e.g. gpu: [] for a
+      CPU-only model). Kube keys are consumed by the chart, every other
+      merged key renders as a llama-swap model field. */}}
+{{- $merged := mergeOverwrite (deepCopy $defaults) $m }}
+{{- $kubeKeys := list "id" "image" "command" "gpu" "volumes" "port" "extraKubeArgs" "startupTimeout" "healthPath" "livenessPath" "checkPath" "args" "proxy" "cmdStop" }}
       {{ $m.id | quote }}:
-{{- with $m.proxy | default $defaults.proxy | default "http://127.0.0.1:${PORT}" }}
+{{- with index $merged "proxy" | default "http://127.0.0.1:${PORT}" }}
         proxy: {{ if kindIs "string" . }}"{{ . }}"{{ else }}{{ toYaml . | nindent 12 }}{{ end }}
 {{- end }}
         cmd: >-
@@ -31,45 +31,53 @@ data:
           --listen 127.0.0.1:${PORT}
           --model {{ $m.id }}
           --namespace {{ $ns }}
-          --image {{ $img }}
-{{- with $cmd }}
+          --image {{ index $merged "image" }}
+{{- with index $merged "command" }}
           --command {{ . }}
 {{- end }}
-{{- range $g := $gpu }}
-          --gpu {{ $g }}
+{{- range index $merged "gpu" }}
+          --gpu {{ . }}
 {{- end }}
-{{- range $v := $vol }}
-          --volume {{ $v }}
+{{- range index $merged "volumes" }}
+          --volume {{ . }}
 {{- end }}
-{{- with $port }}
+{{- with index $merged "port" }}
           --port {{ . }}
 {{- end }}
-{{- with $m.startupTimeout | default $defaults.startupTimeout }}
+{{- with index $merged "startupTimeout" }}
           --startup-timeout {{ . }}
 {{- end }}
-{{- with $m.healthPath | default $defaults.healthPath }}
+{{- with index $merged "healthPath" }}
           --health-path {{ . }}
 {{- end }}
-{{- with $m.livenessPath | default $defaults.livenessPath }}
+{{- with index $merged "livenessPath" }}
           --liveness-path {{ . }}
 {{- end }}
-{{- with $m.checkPath | default $defaults.checkPath }}
+{{- with index $merged "checkPath" }}
           --check-path {{ . }}
 {{- end }}
+{{- range index $merged "extraKubeArgs" }}
+          {{ . }}
+{{- end }}
           --
-{{- with $m.args }}
+{{- with index $merged "args" }}
 {{ . | indent 12 }}
 {{- end }}
-{{- with $m.cmdStop | default (printf "kubeswap delete --model %s --namespace %s --wait 60s" $m.id $ns) }}
+{{- with index $merged "cmdStop" | default (printf "kubeswap delete --model %s --namespace %s --wait 60s" $m.id $ns) }}
         cmdStop: {{ . | quote }}
 {{- end }}
-{{- range $k, $v := $m }}
+{{- range $k, $v := $merged }}
 {{- if not (has $k $kubeKeys) }}
-{{- if kindIs "string" $v }}
-        {{ $k }}: {{ tpl $v $ | quote }}
-{{- else }}
+{{- /* scalars render inline (block style would make YAML read ttl: 1800
+      as the string "1800"); collections render as indented blocks */}}
+{{- $kind := kindOf $v }}
+{{- if or (eq $kind "string") (eq $kind "invalid") }}
+        {{ $k }}: "{{ tpl $v $ }}"
+{{- else if or (eq $kind "slice") (eq $kind "map") }}
         {{ $k }}:
-{{ tpl (toYaml $v) $ | nindent 12 }}
+{{ trim (tpl (toYaml $v) $) | indent 12 }}
+{{- else }}
+        {{ $k }}: {{ trim (tpl (toYaml $v) $) }}
 {{- end }}
 {{- end }}
 {{- end }}

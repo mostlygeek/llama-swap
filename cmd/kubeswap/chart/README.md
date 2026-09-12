@@ -59,6 +59,9 @@ works inside model commands (it is how the default config keeps
 | `replicas` | `1` | keep at 1 — never two head-ends per namespace |
 | `strategy.type` | `Recreate` | deliberate (see replicas) |
 | `config.inline` | demo config | `config.yaml`, templated, into the chart's ConfigMap |
+| `config.top` | `{}` | structured: everything except `models:` (scalars, macros, routing); templated |
+| `config.defaults` | `{}` | structured: per-model defaults (see "Structured config") |
+| `config.models` | `[]` | structured: list of model entries; non-empty ⇒ `config.inline` is ignored |
 | `config.existing` | `""` | use this ConfigMap instead (chart renders none) |
 | `config.extraFiles` | `{}` | extra ConfigMap keys (e.g. an audio.cpp server JSON) |
 | `serviceAccount.create` | `true` | |
@@ -155,6 +158,58 @@ models:
     cmdStop: kubeswap delete --model krea2-turbo --namespace {{ .Release.Namespace }} --wait 60s
     ttl: 7200
 ```
+
+### Structured config (many models)
+
+For fleets, `config.models` replaces writing the `kubeswap serve`
+boilerplate per model: the chart generates each model's `proxy`,
+`cmd` (the whole `kubeswap serve ... -- <args>` line) and `cmdStop`.
+`config.top` carries everything else (scalars, llama-swap `macros`,
+routing) and `config.defaults` holds what most models share. A key on a
+model entry overrides the matching default — an empty list clears it
+(`gpu: []` for a CPU-only model).
+
+Kubeswap fields consumed by the chart: `id` (required), `image`,
+`command`, `gpu`, `volumes`, `port`, `extraKubeArgs` (verbatim
+`kubeswap serve` flags before `--`, e.g. `"--node-selector k=v"`,
+`"--request cpu=4"`), `startupTimeout`, `healthPath`, `livenessPath`,
+`checkPath`, `args` (backend command line after `--`), `proxy`,
+`cmdStop`. Every other key renders verbatim as a llama-swap model field
+(`name`, `ttl`, `capabilities`, `macros`, `filters`, `aliases`, ...).
+
+```yaml
+config:
+  top:                        # templated like config.inline
+    healthCheckTimeout: 600
+    macros:                   # llama-swap macros keep the args DRY
+      server_base: --port 8080 -ngl 99
+      sd_base: --listen-ip 0.0.0.0 --listen-port 8080 --diffusion-fa --offload-to-cpu
+  defaults:
+    image: ghcr.io/mostlygeek/llama-swap:unified-vulkan
+    command: llama-server
+    gpu: [amd.com/gpu=1]
+    volumes: [pvc:llama-swap-models:/models:ro]
+    extraKubeArgs: ["--node-selector feature.node.kubernetes.io/amd-gpu=true"]
+    ttl: 1800
+  models:
+    - id: lfm25-230m
+      args: ${server_base} --model /models/LFM2.5-230M-Q4_0.gguf
+    - id: krea2-turbo
+      command: sd-server
+      healthPath: /v1/models
+      capabilities: { in: [text], out: [image] }
+      args: ${sd_base} --diffusion-model /models/krea.gguf --llm /models/llm.gguf --vae /models/vae.safetensors
+    - id: whisper
+      command: whisper-server
+      gpu: []                 # empty list clears the default
+      args: --host 0.0.0.0 --port 8080 --model /models/whisper.bin
+```
+
+`args` still composes with llama-swap's `${...}` macros from
+`top.macros`. One limit: model maps render with sorted keys and
+llama-swap expands macros in reverse declaration order, so a model
+macro must not reference another model macro of the same model (global
+macros and literals are fine).
 
 ### Ingress
 
