@@ -194,7 +194,9 @@ gateway:
       - name: http
         protocol: HTTP
         port: 80
-        hostnames: []
+        # Add the singular `hostname: llama-swap.local` to restrict the
+        # listener; omitted, it matches all hostnames. (The plural
+        # `hostnames` array belongs to HTTPRoute, not Gateway listeners.)
   route:
     name: "" # defaults to the chart fullname
     parentRefs: [] # required when gateway.name is empty; otherwise defaults to the chart's Gateway

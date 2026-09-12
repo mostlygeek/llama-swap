@@ -247,9 +247,9 @@ gateway:
       - name: http
         protocol: HTTP
         port: 80
-        hostnames: ["llama-swap.example.com"]
+        hostname: llama-swap.example.com # singular: a Gateway listener field
   route:
-    hostnames: ["llama-swap.example.com"]
+    hostnames: ["llama-swap.example.com"] # plural: the HTTPRoute field
 ```
 
 ### Existing ConfigMap
