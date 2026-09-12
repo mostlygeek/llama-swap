@@ -418,9 +418,9 @@ func deploymentSpecMatches(have *appsv1.Deployment, want *appsv1.Deployment) boo
 	if !portsEqual(hc.Ports, wc.Ports) {
 		return false
 	}
-	if probePath(hc.ReadinessProbe) != probePath(wc.ReadinessProbe) ||
-		probePath(hc.LivenessProbe) != probePath(wc.LivenessProbe) ||
-		!startupProbeEqual(hc.StartupProbe, wc.StartupProbe) {
+	if !probeEqual(hc.ReadinessProbe, wc.ReadinessProbe) ||
+		!probeEqual(hc.LivenessProbe, wc.LivenessProbe) ||
+		!probeEqual(hc.StartupProbe, wc.StartupProbe) {
 		return false
 	}
 	return resourcesEqual(hc.Resources, wc.Resources)
@@ -516,9 +516,10 @@ func stringMapEqual(a, b map[string]string) bool {
 	return true
 }
 
-// startupProbeEqual compares the configuration-owned probe fields: the
-// endpoint (path + port) and the timing derived from --startup-timeout.
-func startupProbeEqual(a, b *corev1.Probe) bool {
+// probeEqual compares the configuration-owned probe fields: the endpoint
+// (path + port, the port from --port), the request timeout
+// (--probe-timeout) and the timing derived from --startup-timeout.
+func probeEqual(a, b *corev1.Probe) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
