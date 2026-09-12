@@ -85,7 +85,11 @@ Key flags:
   (e.g. a metrics port).
 - `--volume pvc:name:/mount[:ro]` and `--volume emptydir:/mount` — model
   cache, scratch, slot state.
-- `--strict` — fail on spec drift instead of patching a live Deployment.
+- `--strict` — a Deployment whose spec drifted from the config is
+  deleted and recreated instead of adopted. This interrupts the backend:
+  the old pod is gone before the new one is ready, so in-flight requests
+  are dropped and the model reloads from scratch. Enable it only when
+  drift is expected (e.g. image bumps) and plan for the downtime.
 
 ## Engines
 
