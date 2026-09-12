@@ -1008,6 +1008,43 @@ models:
 	})
 }
 
+func TestConfig_GlobalConcurrencyLimit(t *testing.T) {
+	t.Run("defaults to 0 (no limit)", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: server --port ${PORT}
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, 0, config.GlobalConcurrencyLimit)
+	})
+
+	t.Run("sets the configured value", func(t *testing.T) {
+		content := `
+globalConcurrencyLimit: 4
+models:
+  model1:
+    cmd: server --port ${PORT}
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, 4, config.GlobalConcurrencyLimit)
+	})
+
+	t.Run("negative value rejected", func(t *testing.T) {
+		content := `
+globalConcurrencyLimit: -1
+models:
+  model1:
+    cmd: server --port ${PORT}
+`
+		_, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "globalConcurrencyLimit must be >= 0")
+	})
+}
+
 func TestConfig_UnloadTimeout(t *testing.T) {
 	t.Run("defaults to 10 seconds", func(t *testing.T) {
 		content := `

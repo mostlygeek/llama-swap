@@ -87,6 +87,10 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		config.UnloadTimeout = DEFAULT_UNLOAD_TIMEOUT
 	}
 
+	if config.GlobalConcurrencyLimit < 0 {
+		return Config{}, fmt.Errorf("globalConcurrencyLimit must be >= 0")
+	}
+
 	config.UI.Activity.SessionID = normalizeHeaderNames(config.UI.Activity.SessionID)
 
 	if config.Store != nil {

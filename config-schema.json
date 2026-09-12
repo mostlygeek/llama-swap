@@ -176,6 +176,12 @@
             "default": 10,
             "description": "Graceful timeout in seconds when unloading a model (manual, API, or TTL expiry) before force-killing the model process. 0 uses the default of 10 seconds."
         },
+        "globalConcurrencyLimit": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Caps the number of inference requests served at once across all models combined, using a single shared semaphore rather than a per-model limit. 0 means no limit. Requests exceeding the limit receive an HTTP 429 Too Many Requests response immediately rather than being queued."
+        },
         "logLevel": {
             "type": "string",
             "enum": [
