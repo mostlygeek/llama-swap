@@ -512,13 +512,16 @@ func derefInt64(p *int64) int64 {
 	return *p
 }
 
-// stringMapEqual compares two string maps.
+// stringMapEqual compares two string maps. Keys missing from b are not
+// treated as empty values: a comma-ok lookup keeps {"x": ""} and
+// {"y": ""} distinct, which a bare b[k] comparison would collapse.
 func stringMapEqual(a, b map[string]string) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for k, v := range a {
-		if b[k] != v {
+		bv, ok := b[k]
+		if !ok || bv != v {
 			return false
 		}
 	}
