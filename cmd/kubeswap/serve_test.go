@@ -13,6 +13,23 @@ func newTestServer(cfg *serveConfig, upstreamOverride string) *server {
 	return newServer(cfg, newFakeClient(), upstreamOverride, true, time.Millisecond)
 }
 
+func TestKubeswap_ToConfigRejectsReservedLabels(t *testing.T) {
+	for _, key := range []string{labelManagedBy, labelModel, labelDeployment, labelAppName} {
+		f := &serveFlags{model: "m", extraLbls: stringList{key + "=x"}}
+		if _, err := f.toConfig(); err == nil || !strings.Contains(err.Error(), "reserved") {
+			t.Errorf("label %s: got %v, want reserved-key error", key, err)
+		}
+	}
+	f := &serveFlags{model: "m", extraLbls: stringList{"team=ml", "note=dev"}}
+	cfg, err := f.toConfig()
+	if err != nil {
+		t.Fatalf("non-reserved labels should pass: %v", err)
+	}
+	if cfg.ExtraLabels["team"] != "ml" || cfg.ExtraLabels["note"] != "dev" {
+		t.Errorf("got %v", cfg.ExtraLabels)
+	}
+}
+
 func TestKubeswap_ServeRejectsOutOfRangePort(t *testing.T) {
 	for _, port := range []string{"0", "-1", "65536"} {
 		err := serveCmd([]string{

@@ -317,6 +317,15 @@ func (f *serveFlags) toConfig() (*serveConfig, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The managed labels (ownership, model ID, deployment name, app name)
+	// are set by kubeswap on every object and drive ownership checks and
+	// pod selection, so an extra label must not be able to override them
+	// in renderDeployment. Reject them here, before they are stored.
+	for k := range extra {
+		if k == labelManagedBy || k == labelModel || k == labelDeployment || k == labelAppName {
+			return nil, fmt.Errorf("--label %q is reserved (managed by kubeswap); choose another key", k)
+		}
+	}
 	requests, err := parseResources(f.requests, "request")
 	if err != nil {
 		return nil, err
