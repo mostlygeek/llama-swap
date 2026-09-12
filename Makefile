@@ -96,6 +96,14 @@ wol-proxy: $(BUILD_DIR)
 	@echo "Building wol-proxy"
 	go build -o $(BUILD_DIR)/wol-proxy-$(GOOS)-$(GOARCH)-$(shell date +%Y-%m-%d) cmd/wol-proxy/wol-proxy.go
 
+# Build the kubeswap Kubernetes backend wrapper (host-side binary; also
+# built into the unified image, see docker/unified/install-kubeswap.sh)
+KUBESWAP_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+
+kubeswap: $(BUILD_DIR)
+	@echo "Building kubeswap"
+	go build -trimpath -ldflags "-X main.version=$(KUBESWAP_VERSION) -X main.buildTime=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)" -o $(BUILD_DIR)/kubeswap-$(GOOS)-$(GOARCH) ./cmd/kubeswap
+
 test-ui:
 	cd ui && npm ci && npm run check && npm test
 
@@ -105,5 +113,5 @@ eval-docs-agent:
 	./evals/docs-agent/run.sh $(EVAL_ARGS)
 
 # Phony targets
-.PHONY: all clean ui mac windows simple-responder simple-responder-windows test test-all test-dev test-ui wol-proxy eval-docs-agent
+.PHONY: all clean ui mac windows simple-responder simple-responder-windows test test-all test-dev test-ui wol-proxy kubeswap eval-docs-agent
 .PHONY: linux linux-arm64 linux-amd64
