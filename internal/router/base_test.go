@@ -87,6 +87,27 @@ func TestBaseRouter_RunningModels(t *testing.T) {
 	}
 }
 
+// TestBaseRouter_LoadInfo checks the router forwards a process's load-timing
+// snapshot verbatim for a known model and reports not-found for an unknown one.
+func TestBaseRouter_LoadInfo(t *testing.T) {
+	loading := newFakeProcess("loading")
+	loading.loadInfo = process.LoadInfo{StartedAt: 1700000000123, EstimateMs: 42000}
+
+	b := newTestBase(t, map[string]process.Process{"loading": loading}, &stubPlanner{})
+
+	got, ok := b.LoadInfo("loading")
+	if !ok {
+		t.Fatal("LoadInfo(loading): ok=false, want true")
+	}
+	if got != loading.loadInfo {
+		t.Errorf("LoadInfo(loading) = %+v, want %+v", got, loading.loadInfo)
+	}
+
+	if _, ok := b.LoadInfo("nope"); ok {
+		t.Errorf("LoadInfo(nope): ok=true, want false for unknown model")
+	}
+}
+
 func TestBaseRouter_UnloadAll(t *testing.T) {
 	a := newFakeProcess("a")
 	a.markReady()

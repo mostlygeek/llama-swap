@@ -53,4 +53,9 @@ type LocalRouter interface {
 	// modelID must be a real (non-alias) config key. Returns false when the
 	// model is not known to this router.
 	ProcessLogger(modelID string) (*logmon.Monitor, bool)
+
+	// LoadInfo returns the load-timing snapshot for the named model's process.
+	// modelID must be a real (non-alias) config key. Returns false when the
+	// model is not known to this router.
+	LoadInfo(modelID string) (process.LoadInfo, bool)
 }

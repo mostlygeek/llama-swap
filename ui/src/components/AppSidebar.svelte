@@ -11,6 +11,7 @@
   import { showUnlistedModels } from "../stores/modelDisplay";
   import { modelsMenuOpen } from "../stores/sidebar";
   import type { Model } from "../lib/types";
+  import { statusDotAppearance, statusDotStyle, statusDotRingColor, type StatusDotKind } from "../lib/statusDot";
   import { isComposingKey } from "../lib/ime";
   import ConnectionStatus from "./ConnectionStatus.svelte";
 
@@ -44,17 +45,43 @@
     $models.filter((model) => model.peerID && ($showUnlistedModels || !model.unlisted)),
   );
 
-  type DotColor = "grey" | "yellow" | "green";
-  function statusDotColor(model: Model): DotColor {
-    if (model.state === "ready") return "green";
-    if (model.state === "starting" || model.state === "stopping") return "yellow";
-    return "grey";
-  }
+  // Wall clock driving the loading pie in each model's status dot. Only local
+  // models carry load timing (peers never do), so only they can keep the timer
+  // alive; the tick stops as soon as nothing local is starting.
+  let now = $state(Date.now());
+  const anyLocalModelStarting = $derived(
+    visibleLocalModels.some((model) => model.state === "starting"),
+  );
 
-  const dotClass: Record<DotColor, string> = {
-    grey: "bg-muted-foreground/40",
-    yellow: "bg-warning",
-    green: "bg-success",
+  $effect(() => {
+    if (!anyLocalModelStarting) {
+      return;
+    }
+
+    const tick = () => {
+      now = Date.now();
+    };
+    tick(); // seed immediately so the pie doesn't sit at a stale angle for 250ms
+
+    const id = setInterval(tick, 250);
+
+    return () => {
+      clearInterval(id);
+    };
+  });
+
+  // Flat interior colour per dot kind. Filling kinds keep the grey track as
+  // their background so the unfilled portion of the conic pie (inline style from
+  // statusDotStyle) shows through. No animate-pulse on any loading kind: the
+  // animated ring (statusDotRingColor) is now the single "loading" motion, so a
+  // second interior pulse would just fight it.
+  const dotClass: Record<StatusDotKind, string> = {
+    stopped: "bg-muted-foreground/40",
+    stopping: "bg-warning",
+    indeterminate: "bg-warning",
+    filling: "bg-muted-foreground/40",
+    overrun: "bg-muted-foreground/40",
+    ready: "bg-success",
   };
 </script>
 
@@ -64,8 +91,22 @@
       isActive={$currentRoute === `/models/${encodeURIComponent(model.id)}`}
     >
       {#snippet child({ props })}
+        {@const dot = statusDotAppearance(model, now)}
+        {@const ringColor = statusDotRingColor(dot)}
         <a href="/models/{encodeURIComponent(model.id)}" use:link {...props}>
-          <span class={`size-2 shrink-0 rounded-full ${dotClass[statusDotColor(model)]}`}></span>
+          <span class="relative inline-flex size-2 shrink-0">
+            {#if ringColor}
+              <span
+                class="absolute inset-0 rounded-full border animate-ping"
+                style={`border-color: ${ringColor}`}
+                aria-hidden="true"
+              ></span>
+            {/if}
+            <span
+              class={`relative size-2 rounded-full ${dotClass[dot.kind]}`}
+              style={statusDotStyle(dot)}
+            ></span>
+          </span>
           <span class="flex-1 truncate">{model.id}</span>
         </a>
       {/snippet}

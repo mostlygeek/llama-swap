@@ -10,6 +10,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -131,7 +132,21 @@ type ProcessCommand struct {
 
 	lastUse  atomic.Int64 // unix nano timestamp of last ServeHTTP completion
 	inflight atomic.Int64 // current in-flight ServeHTTP calls
+
+	// loadStartedAt is the unix-ms timestamp of the in-flight start, or 0 when
+	// not starting. loadEstimateMs is the median of loadHistoryMs. Both are
+	// written only by run() and read by LoadInfo() via atomic load.
+	loadStartedAt  atomic.Int64
+	loadEstimateMs atomic.Int64
+	// loadHistoryMs holds the durations of the last successful loads (newest
+	// last, at most loadHistorySize entries). Owned exclusively by run().
+	loadHistoryMs []int64
 }
+
+// loadHistorySize bounds how many recent successful load durations feed the
+// estimate. Three absorbs a single cold-page-cache outlier without lagging when
+// the model/quant actually changes.
+const loadHistorySize = 3
 
 var _ Process = (*ProcessCommand)(nil)
 
@@ -161,6 +176,37 @@ func New(
 }
 
 func (p *ProcessCommand) Logger() *logmon.Monitor { return p.processLogger }
+
+func (p *ProcessCommand) LoadInfo() LoadInfo {
+	return LoadInfo{StartedAt: p.loadStartedAt.Load(), EstimateMs: p.loadEstimateMs.Load()}
+}
+
+// appendLoadHistory appends durMs and keeps only the most recent
+// loadHistorySize entries (newest last), so the estimate always reflects the
+// most recent loads rather than growing without bound.
+func appendLoadHistory(historyMs []int64, durMs int64) []int64 {
+	historyMs = append(historyMs, durMs)
+	if len(historyMs) > loadHistorySize {
+		historyMs = historyMs[len(historyMs)-loadHistorySize:]
+	}
+	return historyMs
+}
+
+// loadEstimate returns the median of the given load durations in ms, or 0 when
+// there are none. An even count averages the two middle values.
+func loadEstimate(historyMs []int64) int64 {
+	n := len(historyMs)
+	if n == 0 {
+		return 0
+	}
+	sorted := make([]int64, n)
+	copy(sorted, historyMs)
+	slices.Sort(sorted)
+	if n%2 == 1 {
+		return sorted[n/2]
+	}
+	return (sorted[n/2-1] + sorted[n/2]) / 2
+}
 
 // run is the single-writer goroutine that owns all mutable lifecycle state
 // (current ProcessState, the running *exec.Cmd, the active reverse-proxy
@@ -306,6 +352,11 @@ func (p *ProcessCommand) run() {
 				req.respond <- fmt.Errorf("[%s] could not be started in %s state", p.id, state)
 				continue
 			}
+			// Record the load-start timestamp BEFORE the setState that publishes
+			// it: setState emits ProcessStateChangeEvent, whose subscribers read
+			// the snapshot on another goroutine, so a write after setState would
+			// race the snapshot (see event.Emit).
+			p.loadStartedAt.Store(time.Now().UnixMilli())
 			setState(StateStarting)
 
 			startCtx, cancelStart := context.WithCancel(context.Background())
@@ -329,6 +380,20 @@ func (p *ProcessCommand) run() {
 					cmdCancel = res.cancel
 					fn := res.handlerFn
 					p.handler.Store(&fn)
+					// Record this successful load's duration and refresh the
+					// estimate before publishing StateReady (same ordering
+					// constraint as the start above). loadStartedAt is cleared
+					// last so the snapshot never carries a stale start time.
+					// Guard durMs > 0: a backward wall-clock step (e.g. NTP
+					// correction) mid-load would otherwise feed a negative
+					// sample into the median and skew later estimates.
+					if started := p.loadStartedAt.Load(); started > 0 {
+						if durMs := time.Now().UnixMilli() - started; durMs > 0 {
+							p.loadHistoryMs = appendLoadHistory(p.loadHistoryMs, durMs)
+							p.loadEstimateMs.Store(loadEstimate(p.loadHistoryMs))
+						}
+					}
+					p.loadStartedAt.Store(0)
 					setState(StateReady)
 					notifyWaiters(nil)
 					if req.block {
@@ -364,6 +429,10 @@ func (p *ProcessCommand) run() {
 						}()
 					}
 				} else {
+					// Failed start: a health-check timeout is not a load
+					// duration, so clear loadStartedAt (before setState) and
+					// leave the history untouched.
+					p.loadStartedAt.Store(0)
 					setState(StateStopped)
 					notifyWaiters(res.err)
 					req.respond <- res.err
@@ -381,6 +450,9 @@ func (p *ProcessCommand) run() {
 				if res.cmd != nil {
 					p.killProcess(res.cmd, res.cancel, res.cmdDone, stop.timeout)
 				}
+				// Aborted start: clear loadStartedAt before setState; an aborted
+				// load never feeds the history.
+				p.loadStartedAt.Store(0)
 				setState(StateStopped)
 				notifyWaiters(ErrStartAborted)
 				req.respond <- ErrStartAborted
@@ -396,6 +468,7 @@ func (p *ProcessCommand) run() {
 				// may block (e.g. taskkill on Windows is slow to spawn), and
 				// callers observing State() should see StateShutdown promptly
 				// rather than a stale StateStarting.
+				p.loadStartedAt.Store(0)
 				setState(StateShutdown)
 				res := <-resultCh
 				if res.cmd != nil {
