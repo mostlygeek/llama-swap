@@ -10,10 +10,6 @@
 nameOverride: ""
 fullnameOverride: ""
 
-# Render a Namespace object for the release namespace. With
-# `helm install --create-namespace` this is a no-op; without it, set this.
-createNamespace: false
-
 # ---------------------------------------------------------------------------
 # Head-end image
 # ---------------------------------------------------------------------------
