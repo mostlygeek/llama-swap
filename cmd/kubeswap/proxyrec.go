@@ -9,11 +9,13 @@ type statusRecorder struct {
 	wrote bool
 }
 
+// WriteHeader Records that the response has started, then forwards the status code.
 func (r *statusRecorder) WriteHeader(code int) {
 	r.wrote = true
 	r.ResponseWriter.WriteHeader(code)
 }
 
+// Write Records that the response has started, then writes the body.
 func (r *statusRecorder) Write(b []byte) (int, error) {
 	r.wrote = true
 	return r.ResponseWriter.Write(b)

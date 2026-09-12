@@ -141,6 +141,7 @@ func waitForPodsGone(ctx context.Context, client kubernetes.Interface, namespace
 	}
 }
 
+// deleteCmd Implements the delete subcommand: tears down a model's backend Deployment and Service (and, with --delete-volumes, the PVCs kubeswap created).
 func deleteCmd(args []string) error {
 	var (
 		model string
@@ -205,6 +206,7 @@ func gcAllowedModels(models []string, configPath string) (map[string]bool, error
 	return allowed, nil
 }
 
+// gcCmd Implements the gc subcommand: deletes backend workloads whose models are no longer allowed by the config.
 func gcCmd(args []string) error {
 	var f gcFlags
 	fs := newFlagSet("gc")
@@ -261,6 +263,7 @@ func gcCollect(client kubernetes.Interface, namespace string, allowed map[string
 	return deleted, nil
 }
 
+// statusCmd Implements the status subcommand: reports on the namespace's managed workloads.
 func statusCmd(args []string) error {
 	var (
 		namespace  string
@@ -272,6 +275,7 @@ func statusCmd(args []string) error {
 	return runStatus(namespace, kubeconfig)
 }
 
+// runStatus Lists the managed Deployments, their pods and the models they serve.
 func runStatus(namespace, kubeconfig string) error {
 	client, err := buildClient(kubeconfig)
 	if err != nil {
@@ -336,6 +340,7 @@ func runStatus(namespace, kubeconfig string) error {
 	return nil
 }
 
+// truncate Shortens s to at most n characters, appending an ellipsis when it cuts.
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s

@@ -7,6 +7,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+// testConfig Returns a serveConfig with every rendered field group populated, for the rendering tests.
 func testConfig() *serveConfig {
 	cfg := &serveConfig{
 		Model:        "author/model:tag",
@@ -37,6 +38,7 @@ func testConfig() *serveConfig {
 	return cfg
 }
 
+// TestKubeswap_RenderDeployment Verifies the rendered Deployment: labels, probes, volumes and GPU resources.
 func TestKubeswap_RenderDeployment(t *testing.T) {
 	cfg := testConfig()
 	dep, err := cfg.renderDeployment()
@@ -137,6 +139,7 @@ func TestKubeswap_RenderDeployment(t *testing.T) {
 	}
 }
 
+// TestKubeswap_RenderDeploymentCPU Verifies a GPU-less config renders a CPU-only pod spec.
 func TestKubeswap_RenderDeploymentCPU(t *testing.T) {
 	cfg := testConfig()
 	cfg.GPUs = nil
@@ -154,6 +157,7 @@ func TestKubeswap_RenderDeploymentCPU(t *testing.T) {
 	}
 }
 
+// TestKubeswap_RenderService Verifies the Service rendered for a model.
 func TestKubeswap_RenderService(t *testing.T) {
 	cfg := testConfig()
 	svc := cfg.renderService()
@@ -174,6 +178,7 @@ func TestKubeswap_RenderService(t *testing.T) {
 	}
 }
 
+// TestKubeswap_RenderDeploymentCommandPortsProbes Verifies command overrides, extra service ports and probe paths in the rendered spec.
 func TestKubeswap_RenderDeploymentCommandPortsProbes(t *testing.T) {
 	cfg := testConfig()
 	cfg.GPUs = nil
@@ -216,6 +221,7 @@ func TestKubeswap_RenderDeploymentCommandPortsProbes(t *testing.T) {
 	}
 }
 
+// TestKubeswap_RenderResourcesGPUPriority Verifies explicit --request/--limit entries override the --gpu resources.
 func TestKubeswap_RenderResourcesGPUPriority(t *testing.T) {
 	cfg := testConfig()                                  // gpu: amd.com/gpu=1
 	cfg.Requests = map[string]string{"amd.com/gpu": "2"} // explicit wins
@@ -236,6 +242,7 @@ func TestKubeswap_RenderResourcesGPUPriority(t *testing.T) {
 	}
 }
 
+// TestKubeswap_RenderResourcesRejectsInvalidQuantity Verifies rendering refuses to paper over an unparseable quantity.
 func TestKubeswap_RenderResourcesRejectsInvalidQuantity(t *testing.T) {
 	cfg := testConfig()
 	cfg.GPUs = map[string]string{"amd.com/gpu": "many"}
@@ -249,6 +256,7 @@ func TestKubeswap_RenderResourcesRejectsInvalidQuantity(t *testing.T) {
 	}
 }
 
+// TestKubeswap_StartupFailureThreshold Verifies the startup probe failure threshold derives from the startup timeout.
 func TestKubeswap_StartupFailureThreshold(t *testing.T) {
 	cases := []struct {
 		secs int64
@@ -269,6 +277,7 @@ func TestKubeswap_StartupFailureThreshold(t *testing.T) {
 	}
 }
 
+// TestKubeswap_LivenessPathDefault Verifies the liveness path defaults to the readiness path.
 func TestKubeswap_LivenessPathDefault(t *testing.T) {
 	cfg := testConfig()
 	if cfg.livenessPath() != "/health" {
@@ -284,6 +293,7 @@ func TestKubeswap_LivenessPathDefault(t *testing.T) {
 	}
 }
 
+// TestKubeswap_RenderPVC Verifies the PVC rendered for a missing volume (size, class, access mode).
 func TestKubeswap_RenderPVC(t *testing.T) {
 	cfg := testConfig()
 	pvc, err := cfg.renderPVC("llama-swap-models")
@@ -301,6 +311,7 @@ func TestKubeswap_RenderPVC(t *testing.T) {
 	}
 }
 
+// TestKubeswap_DeploymentSpecMatches Verifies the spec comparison detects image, args, command and resource drift.
 func TestKubeswap_DeploymentSpecMatches(t *testing.T) {
 	cfg := testConfig()
 	dep, err := cfg.renderDeployment()
@@ -349,6 +360,7 @@ func TestKubeswap_DeploymentSpecMatches(t *testing.T) {
 	}
 }
 
+// TestKubeswap_DeploymentSpecMatchesNodeSelector Verifies the spec comparison detects node-selector drift.
 func TestKubeswap_DeploymentSpecMatchesNodeSelector(t *testing.T) {
 	cfg := testConfig()
 	dep, _ := cfg.renderDeployment()
@@ -359,6 +371,7 @@ func TestKubeswap_DeploymentSpecMatchesNodeSelector(t *testing.T) {
 	}
 }
 
+// TestKubeswap_DeploymentSpecMatchesTolerations Verifies the spec comparison detects toleration drift.
 func TestKubeswap_DeploymentSpecMatchesTolerations(t *testing.T) {
 	cfg := testConfig()
 	dep, _ := cfg.renderDeployment()
@@ -369,6 +382,7 @@ func TestKubeswap_DeploymentSpecMatchesTolerations(t *testing.T) {
 	}
 }
 
+// TestKubeswap_DeploymentSpecMatchesVolumes Verifies the spec comparison detects volume drift.
 func TestKubeswap_DeploymentSpecMatchesVolumes(t *testing.T) {
 	cfg := testConfig()
 	dep, _ := cfg.renderDeployment()
@@ -379,6 +393,7 @@ func TestKubeswap_DeploymentSpecMatchesVolumes(t *testing.T) {
 	}
 }
 
+// TestKubeswap_DeploymentSpecMatchesServicePorts Verifies the spec comparison detects service-port drift.
 func TestKubeswap_DeploymentSpecMatchesServicePorts(t *testing.T) {
 	cfg := testConfig()
 	cfg.ServicePorts = []servicePortSpec{{Name: "metrics", Port: 9090}}
@@ -390,6 +405,7 @@ func TestKubeswap_DeploymentSpecMatchesServicePorts(t *testing.T) {
 	}
 }
 
+// TestKubeswap_DeploymentSpecMatchesStartupTimeout Verifies the spec comparison detects startup-timeout drift.
 func TestKubeswap_DeploymentSpecMatchesStartupTimeout(t *testing.T) {
 	cfg := testConfig()
 	cfg.StartupTimeout = 600
@@ -401,6 +417,7 @@ func TestKubeswap_DeploymentSpecMatchesStartupTimeout(t *testing.T) {
 	}
 }
 
+// TestKubeswap_DeploymentSpecMatchesProbePort Verifies the spec comparison detects probe-port drift.
 func TestKubeswap_DeploymentSpecMatchesProbePort(t *testing.T) {
 	cfg := testConfig()
 	dep, _ := cfg.renderDeployment()
@@ -416,6 +433,7 @@ func TestKubeswap_DeploymentSpecMatchesProbePort(t *testing.T) {
 	}
 }
 
+// TestKubeswap_DeploymentSpecMatchesProbeTimeout Verifies the spec comparison detects probe-timeout drift.
 func TestKubeswap_DeploymentSpecMatchesProbeTimeout(t *testing.T) {
 	cfg := testConfig()
 	dep, _ := cfg.renderDeployment()
@@ -431,6 +449,7 @@ func TestKubeswap_DeploymentSpecMatchesProbeTimeout(t *testing.T) {
 	}
 }
 
+// TestKubeswap_DeploymentSpecMatchesGracePeriod Verifies the spec comparison detects grace-period drift.
 func TestKubeswap_DeploymentSpecMatchesGracePeriod(t *testing.T) {
 	cfg := testConfig()
 	dep, _ := cfg.renderDeployment()

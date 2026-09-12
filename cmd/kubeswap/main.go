@@ -38,6 +38,7 @@ var (
 	buildTime = ""
 )
 
+// printVersion Prints the kubeswap version (plus build time, when set) and exits.
 func printVersion() {
 	suffix := ""
 	if buildTime != "" {
@@ -58,6 +59,7 @@ const (
 	annotationModelID = "llama-swap.io/model-id"
 )
 
+// main is the entry point: it parses the subcommand and its arguments and dispatches to serve, delete, gc, status or version.
 func main() {
 	if len(os.Args) < 2 {
 		usage(os.Stderr)
@@ -90,6 +92,7 @@ func main() {
 	}
 }
 
+// usage Writes the command-line usage text to w.
 func usage(w *os.File) {
 	fmt.Fprint(w, `kubeswap - manage llama-swap inference backends in a Kubernetes namespace
 
@@ -120,7 +123,10 @@ Run "kubeswap <command> -h" for command flags.
 // stringList is a repeatable flag value: --env K=V --env K2=V2.
 type stringList []string
 
-func (s *stringList) String() string     { return strings.Join(*s, ",") }
+// String String implements flag.Value, returning the entries comma-joined.
+func (s *stringList) String() string { return strings.Join(*s, ",") }
+
+// Set Set implements flag.Value, appending an entry to the repeatable flag.
 func (s *stringList) Set(v string) error { *s = append(*s, v); return nil }
 
 // newFlagSet builds a per-command flag set with the shared kube flags.
@@ -133,6 +139,7 @@ func newFlagSet(name string) *flag.FlagSet {
 	return fs
 }
 
+// addKubeFlags Adds the --namespace and --kubeconfig flags shared by every subcommand.
 func addKubeFlags(fs *flag.FlagSet, namespace, kubeconfig *string) {
 	fs.StringVar(namespace, "namespace", defaultNamespace, "Kubernetes namespace to manage")
 	fs.StringVar(kubeconfig, "kubeconfig", "", "Path to a kubeconfig (default: in-cluster config, then KUBECONFIG / ~/.kube/config)")

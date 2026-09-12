@@ -19,13 +19,16 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 )
 
+// newFakeClient Returns a fresh fake client-go clientset.
 func newFakeClient() *fake.Clientset { return fake.NewClientset() }
 
+// makeDep Creates the config's backend resources against the fake client via ensureResources.
 func makeDep(cfg *serveConfig, client *fake.Clientset) (*serveConfig, error) {
 	_, err := ensureResources(client, cfg)
 	return cfg, err
 }
 
+// TestKubeswap_EnsureResourcesCreates Verifies a missing backend gets its Deployment and Service created.
 func TestKubeswap_EnsureResourcesCreates(t *testing.T) {
 	client := newFakeClient()
 	cfg := testConfig()
@@ -62,6 +65,7 @@ func TestKubeswap_EnsureResourcesCreates(t *testing.T) {
 	}
 }
 
+// TestKubeswap_EnsureResourcesAdopts Verifies an existing Deployment is adopted, not replaced.
 func TestKubeswap_EnsureResourcesAdopts(t *testing.T) {
 	client := newFakeClient()
 	cfg := testConfig()
@@ -81,6 +85,7 @@ func TestKubeswap_EnsureResourcesAdopts(t *testing.T) {
 	}
 }
 
+// TestKubeswap_EnsureResourcesStrictReplace Verifies --strict deletes and recreates a drifted Deployment.
 func TestKubeswap_EnsureResourcesStrictReplace(t *testing.T) {
 	client := newFakeClient()
 	cfg := testConfig()
@@ -123,6 +128,7 @@ func TestKubeswap_EnsureResourcesStrictReplace(t *testing.T) {
 	}
 }
 
+// TestKubeswap_EnsureResourcesAdoptsExistingPVC Verifies an existing PVC is adopted rather than recreated.
 func TestKubeswap_EnsureResourcesAdoptsExistingPVC(t *testing.T) {
 	client := newFakeClient()
 	// Pre-create the PVC without kubeswap labels (user-managed shared cache).
@@ -146,6 +152,7 @@ func TestKubeswap_EnsureResourcesAdoptsExistingPVC(t *testing.T) {
 	}
 }
 
+// TestKubeswap_DeleteModel Verifies delete tears down the model's Deployment and Service.
 func TestKubeswap_DeleteModel(t *testing.T) {
 	client := newFakeClient()
 	cfg := testConfig()
@@ -173,6 +180,7 @@ func TestKubeswap_DeleteModel(t *testing.T) {
 	}
 }
 
+// TestKubeswap_DeleteModelKeepsUserPVC Verifies delete leaves unowned PVCs alone.
 func TestKubeswap_DeleteModelKeepsUserPVC(t *testing.T) {
 	client := newFakeClient()
 	cfg := testConfig()
@@ -195,6 +203,7 @@ func TestKubeswap_DeleteModelKeepsUserPVC(t *testing.T) {
 	}
 }
 
+// TestKubeswap_EnsureResourcesRejectsForeignModel Verifies a Deployment owned by another model is refused, not adopted.
 func TestKubeswap_EnsureResourcesRejectsForeignModel(t *testing.T) {
 	client := newFakeClient()
 	ctx := context.Background()
@@ -230,6 +239,7 @@ func TestKubeswap_EnsureResourcesRejectsForeignModel(t *testing.T) {
 	}
 }
 
+// TestKubeswap_DeleteModelRefusesForeignModel Verifies delete refuses to tear down another model's Deployment.
 func TestKubeswap_DeleteModelRefusesForeignModel(t *testing.T) {
 	client := newFakeClient()
 	ctx := context.Background()
@@ -277,6 +287,7 @@ func collidingConfigs() (*serveConfig, *serveConfig) {
 	return a, b
 }
 
+// TestKubeswap_PodSelectionIsModelUnique Verifies pod lookups are scoped to one deployment via its unique label.
 func TestKubeswap_PodSelectionIsModelUnique(t *testing.T) {
 	client := newFakeClient()
 	ctx := context.Background()
@@ -336,6 +347,7 @@ func TestKubeswap_PodSelectionIsModelUnique(t *testing.T) {
 	}
 }
 
+// TestKubeswap_WaitForDeploymentGone Verifies delete waits for the Deployment and its pods to actually terminate.
 func TestKubeswap_WaitForDeploymentGone(t *testing.T) {
 	client := newFakeClient()
 	ctx := context.Background()
@@ -376,6 +388,7 @@ func reserveNameReactor(client *fake.Clientset, name string, fails int) {
 	})
 }
 
+// TestKubeswap_CreateMissingRetriesReservedName Verifies creation retries while the old Deployment's name is still reserved.
 func TestKubeswap_CreateMissingRetriesReservedName(t *testing.T) {
 	client := newFakeClient()
 	cfg := testConfig()
@@ -402,6 +415,7 @@ func TestKubeswap_CreateMissingRetriesReservedName(t *testing.T) {
 	}
 }
 
+// TestKubeswap_CreateMissingFailsOnPersistentReservation Verifies creation fails with a clear error when the name stays reserved.
 func TestKubeswap_CreateMissingFailsOnPersistentReservation(t *testing.T) {
 	client := newFakeClient()
 	cfg := testConfig()
@@ -417,6 +431,7 @@ func TestKubeswap_CreateMissingFailsOnPersistentReservation(t *testing.T) {
 	}
 }
 
+// TestKubeswap_StrictReplaceRetriesReservedName Verifies a strict replacement retries creation while the name is still reserved.
 func TestKubeswap_StrictReplaceRetriesReservedName(t *testing.T) {
 	client := newFakeClient()
 	ctx := context.Background()
@@ -458,6 +473,7 @@ func TestKubeswap_StrictReplaceRetriesReservedName(t *testing.T) {
 	}
 }
 
+// TestKubeswap_DeleteIgnoresSiblingDeployment Verifies delete leaves a sibling model's Deployment untouched.
 func TestKubeswap_DeleteIgnoresSiblingDeployment(t *testing.T) {
 	client := newFakeClient()
 	ctx := context.Background()
@@ -475,6 +491,7 @@ func TestKubeswap_DeleteIgnoresSiblingDeployment(t *testing.T) {
 	}
 }
 
+// TestKubeswap_GCAllowedModels Verifies --models parsing, including comma-separated entries.
 func TestKubeswap_GCAllowedModels(t *testing.T) {
 	allowed, err := gcAllowedModels([]string{"a", "b"}, "")
 	if err != nil {
@@ -507,6 +524,7 @@ func TestKubeswap_GCAllowedModels(t *testing.T) {
 	}
 }
 
+// TestKubeswap_GCAllowedModelsFromConfig Verifies gc derives the allowed model set from a llama-swap config file.
 func TestKubeswap_GCAllowedModelsFromConfig(t *testing.T) {
 	cfgFile := t.TempDir() + "/config.yaml"
 	data := []byte("models:\n  model-a:\n    cmd: sleep 1\n  model-b:\n    cmd: sleep 2\n")
@@ -522,6 +540,7 @@ func TestKubeswap_GCAllowedModelsFromConfig(t *testing.T) {
 	}
 }
 
+// TestKubeswap_GCCollectsStaleWorkloads Verifies gc collects the workloads of models no longer allowed.
 func TestKubeswap_GCCollectsStaleWorkloads(t *testing.T) {
 	client := newFakeClient()
 	cfgA := testConfig()
@@ -562,6 +581,7 @@ func TestKubeswap_GCCollectsStaleWorkloads(t *testing.T) {
 	}
 }
 
+// TestKubeswap_FindPod Verifies pod lookup by the deployment's unique label.
 func TestKubeswap_FindPod(t *testing.T) {
 	client := newFakeClient()
 	cfg := testConfig()
@@ -617,6 +637,7 @@ func TestKubeswap_FindPod(t *testing.T) {
 	}
 }
 
+// TestKubeswap_PollOnceRequestsStopOnDeletion Verifies the poll loop stops the wrapper when its Deployment is deleted.
 func TestKubeswap_PollOnceRequestsStopOnDeletion(t *testing.T) {
 	client := newFakeClient()
 	cfg := testConfig()

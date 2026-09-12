@@ -5,6 +5,7 @@ import (
 	"testing"
 )
 
+// TestKubeswap_SanitizeModelID Verifies model IDs are sanitized to DNS-safe form.
 func TestKubeswap_SanitizeModelID(t *testing.T) {
 	tests := []struct {
 		in      string
@@ -38,6 +39,7 @@ func TestKubeswap_SanitizeModelID(t *testing.T) {
 	}
 }
 
+// TestKubeswap_SanitizeModelIDLong Verifies long model IDs are truncated to safe length.
 func TestKubeswap_SanitizeModelIDLong(t *testing.T) {
 	long := strings.Repeat("a", 80)
 	got, err := sanitizeModelID(long)
@@ -49,6 +51,7 @@ func TestKubeswap_SanitizeModelIDLong(t *testing.T) {
 	}
 }
 
+// TestKubeswap_Names Verifies Deployment/Service name derivation from a model ID.
 func TestKubeswap_Names(t *testing.T) {
 	dep, err := deploymentName("my-model")
 	if err != nil {
@@ -92,6 +95,7 @@ func TestKubeswap_Names(t *testing.T) {
 	}
 }
 
+// TestKubeswap_NamesCollisionFree Verifies distinct model IDs that collide on basename get distinct names.
 func TestKubeswap_NamesCollisionFree(t *testing.T) {
 	// Distinct IDs that sanitize to the same string must get distinct names.
 	a, err := deploymentName("Model_A")
@@ -122,6 +126,7 @@ func TestKubeswap_NamesCollisionFree(t *testing.T) {
 	}
 }
 
+// TestKubeswap_Labels Verifies the managed and selector labels attached to rendered names.
 func TestKubeswap_Labels(t *testing.T) {
 	l := managedLabels("my-model")
 	if l[labelManagedBy] != managedByValue || l[labelModel] != "my-model" {
