@@ -113,10 +113,12 @@ func deleteModel(client kubernetes.Interface, namespace, model string, deleteVol
 	return nil
 }
 
-// waitForPodsGone polls until no pods for the model remain (the deployment
-// deletion cascades, but we wait so cmdStop returns after the GPU is free).
-// The selector includes the deployment name so sibling models that
-// sanitize to the same label are not counted.
+// waitForPodsGone polls until no pod objects for the model remain (the
+// deployment deletion cascades, but we wait so cmdStop returns after the
+// GPU is free). A pod that merely has a deletion timestamp is still
+// terminating and may still hold the GPU, so we wait for the objects
+// themselves to disappear. The selector includes the deployment name so
+// sibling models that sanitize to the same label are not counted.
 func waitForPodsGone(ctx context.Context, client kubernetes.Interface, namespace, sanitized, depName string, timeout time.Duration) error {
 	selector := labels.Set(podSelectorLabels(sanitized, depName)).String()
 	deadline := time.Now().Add(timeout)
@@ -125,12 +127,7 @@ func waitForPodsGone(ctx context.Context, client kubernetes.Interface, namespace
 		if err != nil {
 			return fmt.Errorf("listing pods: %w", err)
 		}
-		count := 0
-		for i := range pods.Items {
-			if pods.Items[i].DeletionTimestamp == nil {
-				count++
-			}
-		}
+		count := len(pods.Items)
 		if count == 0 {
 			return nil
 		}
