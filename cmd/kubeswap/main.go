@@ -266,9 +266,11 @@ func parseServicePorts(entries []string) ([]servicePortSpec, error) {
 // against the values Kubernetes accepts: operator is Equal or Exists (empty
 // defaults to Equal), effect is NoSchedule, PreferNoSchedule or NoExecute —
 // or empty, which tolerates every effect (e.g. "dedicated:Exists::" or the
-// tolerate-everything "::Exists:"). A value is an error with operator
-// Exists. Invalid fields are rejected here, before renderTolerations turns
-// them into corev1 types ("All" was never a valid effect).
+// tolerate-everything "::Exists:"). An empty key is only valid with Exists
+// (an Equal toleration without a key can never match a taint); a value is an
+// error with operator Exists. Invalid fields are rejected here, before
+// renderTolerations turns them into corev1 types ("All" was never a valid
+// effect).
 func parseTolerations(entries []string) ([]toleration, error) {
 	out := make([]toleration, 0, len(entries))
 	for _, e := range entries {
@@ -289,6 +291,9 @@ func parseTolerations(entries []string) ([]toleration, error) {
 		case "", "NoSchedule", "PreferNoSchedule", "NoExecute":
 		default:
 			return nil, fmt.Errorf("invalid --toleration %q: effect %q (want NoSchedule, PreferNoSchedule, NoExecute, or empty for any effect)", e, effect)
+		}
+		if op == "Equal" && key == "" {
+			return nil, fmt.Errorf("invalid --toleration %q: key must not be empty when operator is Equal", e)
 		}
 		if op == "Exists" && value != "" {
 			return nil, fmt.Errorf("invalid --toleration %q: value must be empty when operator is Exists", e)

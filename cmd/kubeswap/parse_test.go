@@ -72,6 +72,7 @@ func TestKubeswap_ParseTolerations(t *testing.T) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 	for _, bad := range []string{
+		":Equal::NoSchedule",      // empty key under Equal
 		"key:All::NoSchedule",     // bad operator
 		"key:Equal:v:All",         // bad effect
 		"key:Exists:v:NoSchedule", // value under Exists
