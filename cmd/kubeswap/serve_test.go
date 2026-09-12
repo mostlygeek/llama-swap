@@ -13,6 +13,18 @@ func newTestServer(cfg *serveConfig, upstreamOverride string) *server {
 	return newServer(cfg, newFakeClient(), upstreamOverride, true, time.Millisecond)
 }
 
+func TestKubeswap_ServeRejectsOutOfRangePort(t *testing.T) {
+	for _, port := range []string{"0", "-1", "65536"} {
+		err := serveCmd([]string{
+			"--listen", "127.0.0.1:0", "--model", "m", "--image", "img",
+			"--port", port,
+		})
+		if err == nil || !strings.Contains(err.Error(), "invalid --port") {
+			t.Errorf("--port %s: got %v, want invalid --port error", port, err)
+		}
+	}
+}
+
 func TestKubeswap_HandlerNotReady(t *testing.T) {
 	s := newTestServer(testConfig(), "")
 	rr := httptest.NewRecorder()

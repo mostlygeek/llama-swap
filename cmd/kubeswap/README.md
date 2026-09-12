@@ -499,7 +499,7 @@ in-cluster config else standard kubeconfig rules):
 | `--listen` | (required) | local proxy address, e.g. `127.0.0.1:${PORT}` |
 | `--model` | (required) | llama-swap model ID (source of object names) |
 | `--image` | (required) | backend container image |
-| `--port` | `8080` | container listen port (probe + upstream target) |
+| `--port` | `8080` | container listen port (probe + upstream target); 1-65535 |
 | `--command` | (image entrypoint) | container command token, repeatable; exec'd directly (no shell), overriding the image's entrypoint — the unified image needs it (its entrypoint runs llama-swap, not a backend server); use the full path if the binary is not on the container's `PATH` |
 | `--health-path` | `/health` | backend health endpoint (readiness probe) |
 | `--check-path` | `/health` | path the wrapper answers itself from pod readiness (200 ready / 503 + reason); point consumers' health checks here |

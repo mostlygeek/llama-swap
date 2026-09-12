@@ -425,6 +425,9 @@ func serveCmd(args []string) error {
 			return fmt.Errorf("--%s %q must start with /", name, p)
 		}
 	}
+	if f.port < 1 || f.port > 65535 {
+		return fmt.Errorf("invalid --port %d (want 1-65535)", f.port)
+	}
 
 	cfg, err := f.toConfig()
 	if err != nil {
