@@ -97,11 +97,16 @@ config:
   #             chart, not rendered into the model record): id (required),
   #             image, command, gpu (list, "resource=count"), volumes (list,
   #             "pvc|emptydir|hostpath:name:path[:ro]"), port,
+  #             extraKubeArgs (list, verbatim kubeswap serve flags before
+  #             "--", e.g. "--node-selector k=v" or "--request cpu=4"),
   #             startupTimeout, healthPath, livenessPath, checkPath,
   #             args (backend command line after "--"), proxy, cmdStop.
   #             Every other key is rendered verbatim as a llama-swap model
   #             field (name, ttl, capabilities, macros, filters, aliases,
   #             unlisted, ...).
+  #             A key present on a model entry overrides the matching
+  #             defaults entry, including with an empty list (e.g. gpu: []
+  #             for a CPU-only model).
   #
   #             Note: model maps are rendered with sorted keys, and
   #             llama-swap expands macros in reverse declaration order,
