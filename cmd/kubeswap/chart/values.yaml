@@ -102,6 +102,12 @@ config:
   #             Every other key is rendered verbatim as a llama-swap model
   #             field (name, ttl, capabilities, macros, filters, aliases,
   #             unlisted, ...).
+  #
+  #             Note: model maps are rendered with sorted keys, and
+  #             llama-swap expands macros in reverse declaration order,
+  #             so a model macro must not reference another model macro of
+  #             the same model — only global macros (top.macros) and
+  #             literals. (config.inline has no such limit.)
   top: {}
   defaults: {}
   models: []
