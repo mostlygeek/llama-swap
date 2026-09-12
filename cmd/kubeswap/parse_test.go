@@ -48,6 +48,32 @@ func TestKubeswap_ParseTolerations(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for malformed toleration")
 	}
+	// Empty effect is preserved (it tolerates every effect); "All" is not a
+	// Kubernetes effect and must be rejected, as are bad operators and a
+	// value under Exists.
+	got, err = parseTolerations([]string{":Exists::"}) // tolerate everything
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if want := []toleration{{Key: "", Operator: "Exists", Value: "", Effect: ""}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	for _, bad := range []string{
+		"key:All::NoSchedule",     // bad operator
+		"key:Equal:v:All",         // bad effect
+		"key:Exists:v:NoSchedule", // value under Exists
+	} {
+		if _, err := parseTolerations([]string{bad}); err == nil {
+			t.Errorf("%q: expected error", bad)
+		}
+	}
+	got, err = parseTolerations([]string{"key:Equal:v:"})
+	if err != nil {
+		t.Fatalf("empty effect should be accepted: %v", err)
+	}
+	if want := []toleration{{Key: "key", Operator: "Equal", Value: "v", Effect: ""}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
 }
 
 func TestKubeswap_ParseVolumes(t *testing.T) {

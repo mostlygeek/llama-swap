@@ -512,7 +512,7 @@ in-cluster config else standard kubeconfig rules):
 | `--service-port` | — | extra Service port `name:port` (repeatable; e.g. expose backend metrics) |
 | `--env` | — | `KEY=VALUE` container env, repeatable |
 | `--node-selector` | — | `key=value`, repeatable |
-| `--toleration` | — | `key=operator:value:effect` (operator defaults Equal, effect All), repeatable |
+| `--toleration` | — | `key:operator:value:effect` (operator Equal or Exists, default Equal; effect NoSchedule/PreferNoSchedule/NoExecute or empty for any effect; value must be empty with Exists), repeatable |
 | `--label` | — | extra pod label `K=V`, repeatable |
 | `--volume` | — | `pvc:name:path[:ro]`, `emptydir:name:path[:ro]` or `hostpath:nodePath:mountPath[:ro]`, repeatable |
 | `--pvc-size` | `1Gi` | size for PVCs kubeswap must create |
