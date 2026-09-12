@@ -33,6 +33,39 @@ type ensureResult struct {
 	Created []string
 }
 
+// strictReplaceTimeout bounds how long serve waits for a drifted
+// deployment's deletion to finish before creating the replacement
+// (the cascade includes pod termination).
+const strictReplaceTimeout = 5 * time.Minute
+
+// createRetryInterval is the pause between create retries while a name
+// is still reserved; a variable so tests can shrink it.
+var createRetryInterval = 500 * time.Millisecond
+
+const maxCreateAttempts = 20
+
+// waitForDeploymentGone polls until the deployment no longer exists. A
+// successful Delete can return while the object is still terminating
+// (finalizers, pod teardown); creating the replacement before it is
+// gone can fail with AlreadyExists and then lose the name entirely
+// when the old object finally disappears.
+func waitForDeploymentGone(ctx context.Context, client kubernetes.Interface, namespace, name string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		_, err := client.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("checking deployment %s: %w", name, err)
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out after %s waiting for deployment %s to finish deleting", timeout, name)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
 // verifyOwnership checks that obj was created by kubeswap for modelID.
 // Every object kubeswap creates carries the ORIGINAL model ID in the
 // llama-swap.io/model-id annotation, so two distinct IDs that sanitize to
@@ -83,6 +116,14 @@ func ensureResources(client kubernetes.Interface, cfg *serveConfig) (*ensureResu
 				log.Printf("deployment %s/%s exists but spec drifted; replacing (--strict)", cfg.Namespace, depName)
 				if err := client.AppsV1().Deployments(cfg.Namespace).Delete(ctx, depName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 					return nil, fmt.Errorf("deleting drifted deployment %s: %w", depName, err)
+				}
+				// Wait for the deletion to actually complete before creating
+				// the replacement: an immediate Create can return
+				// AlreadyExists while the old object is still terminating,
+				// and the name then vanishes with it (no replacement, serve
+				// shuts down on the next poll, the model never starts).
+				if err := waitForDeploymentGone(ctx, client, cfg.Namespace, depName, strictReplaceTimeout); err != nil {
+					return nil, fmt.Errorf("replacing drifted deployment %s: %w", depName, err)
 				}
 				res.Adopted = false
 			}
@@ -153,12 +194,22 @@ func createMissing(client kubernetes.Interface, cfg *serveConfig) ([]string, err
 	if err != nil {
 		return nil, err
 	}
-	if _, err := client.AppsV1().Deployments(cfg.Namespace).Create(ctx, dep, metav1.CreateOptions{}); err != nil {
+	// Retry while the name is still reserved by a deletion in progress;
+	// a persistent AlreadyExists means something else holds the name -
+	// fail loudly instead of assuming adoption.
+	for attempt := 1; ; attempt++ {
+		_, err = client.AppsV1().Deployments(cfg.Namespace).Create(ctx, dep, metav1.CreateOptions{})
+		if err == nil {
+			created = append(created, "deployment/"+dep.Name)
+			break
+		}
 		if !apierrors.IsAlreadyExists(err) {
 			return nil, fmt.Errorf("creating deployment %s: %w", dep.Name, err)
 		}
-	} else {
-		created = append(created, "deployment/"+dep.Name)
+		if attempt >= maxCreateAttempts {
+			return nil, fmt.Errorf("creating deployment %s: name still reserved after %d attempts (a deletion may still be in progress)", dep.Name, attempt)
+		}
+		time.Sleep(createRetryInterval)
 	}
 
 	svc := cfg.renderService()

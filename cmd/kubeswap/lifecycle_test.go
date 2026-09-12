@@ -12,8 +12,11 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func newFakeClient() *fake.Clientset { return fake.NewClientset() }
@@ -330,6 +333,128 @@ func TestKubeswap_PodSelectionIsModelUnique(t *testing.T) {
 	}
 	if _, err := client.CoreV1().Pods(cfgB.Namespace).Get(ctx, podB.Name, metav1.GetOptions{}); err != nil {
 		t.Errorf("sibling pod must survive deleting model A: %v", err)
+	}
+}
+
+func TestKubeswap_WaitForDeploymentGone(t *testing.T) {
+	client := newFakeClient()
+	ctx := context.Background()
+
+	// Absent: returns immediately.
+	if err := waitForDeploymentGone(ctx, client, "llama-swap", "nope", time.Second); err != nil {
+		t.Fatalf("absent: %v", err)
+	}
+
+	// Present and never deleted: times out.
+	stuck := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "stuck", Namespace: "llama-swap"}}
+	if _, err := client.AppsV1().Deployments("llama-swap").Create(ctx, stuck, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitForDeploymentGone(ctx, client, "llama-swap", "stuck", 700*time.Millisecond); err == nil {
+		t.Fatal("expected timeout for a deployment that is never deleted")
+	}
+
+	// Deleted: the wait completes.
+	if err := client.AppsV1().Deployments("llama-swap").Delete(ctx, "stuck", metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitForDeploymentGone(ctx, client, "llama-swap", "stuck", time.Second); err != nil {
+		t.Fatalf("deleted: %v", err)
+	}
+}
+
+// reserveNameReactor makes deployment creates fail with AlreadyExists
+// until the given count is exhausted, simulating a name still reserved
+// by a deletion in progress.
+func reserveNameReactor(client *fake.Clientset, name string, fails int) {
+	client.PrependReactor("create", "deployments", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if action.GetResource().Resource == "deployments" && fails > 0 {
+			fails--
+			return true, nil, apierrors.NewAlreadyExists(schema.GroupResource{Group: "apps", Resource: "deployments"}, name)
+		}
+		return false, nil, nil
+	})
+}
+
+func TestKubeswap_CreateMissingRetriesReservedName(t *testing.T) {
+	client := newFakeClient()
+	cfg := testConfig()
+	reserveNameReactor(client, cfg.DepName, 2) // two failed attempts, then success
+	old := createRetryInterval
+	createRetryInterval = 10 * time.Millisecond
+	defer func() { createRetryInterval = old }()
+
+	created, err := createMissing(client, cfg)
+	if err != nil {
+		t.Fatalf("createMissing: %v", err)
+	}
+	found := false
+	for _, c := range created {
+		if c == "deployment/"+cfg.DepName {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected deployment in created list: %v", created)
+	}
+	if _, err := client.AppsV1().Deployments(cfg.Namespace).Get(context.Background(), cfg.DepName, metav1.GetOptions{}); err != nil {
+		t.Errorf("deployment should exist after retries: %v", err)
+	}
+}
+
+func TestKubeswap_CreateMissingFailsOnPersistentReservation(t *testing.T) {
+	client := newFakeClient()
+	cfg := testConfig()
+	reserveNameReactor(client, cfg.DepName, 1000)
+	old := createRetryInterval
+	createRetryInterval = 10 * time.Millisecond
+	defer func() { createRetryInterval = old }()
+
+	if _, err := createMissing(client, cfg); err == nil {
+		t.Fatal("expected an error when the name stays reserved")
+	} else if !strings.Contains(err.Error(), "still reserved") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestKubeswap_StrictReplaceRetriesReservedName(t *testing.T) {
+	client := newFakeClient()
+	ctx := context.Background()
+	cfg := testConfig()
+	if _, err := ensureResources(client, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	// Drift the image, then make the first create after the delete hit a
+	// name still reserved (the reported race).
+	dep, _ := client.AppsV1().Deployments(cfg.Namespace).Get(ctx, cfg.DepName, metav1.GetOptions{})
+	dep.Spec.Template.Spec.Containers[0].Image = "someone-else:latest"
+	if _, err := client.AppsV1().Deployments(cfg.Namespace).Update(ctx, dep, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	reserveNameReactor(client, cfg.DepName, 1)
+	old := createRetryInterval
+	createRetryInterval = 10 * time.Millisecond
+	defer func() { createRetryInterval = old }()
+
+	cfg.Strict = true
+	res, err := ensureResources(client, cfg)
+	if err != nil {
+		t.Fatalf("strict replace: %v", err)
+	}
+	if res.Adopted {
+		t.Error("drifted deployment should be replaced")
+	}
+
+	// The regression: the replacement must actually exist with the new
+	// spec (old code accepted AlreadyExists, then the name disappeared
+	// with the old object and serve shut down).
+	got, err := client.AppsV1().Deployments(cfg.Namespace).Get(ctx, cfg.DepName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("replacement deployment missing: %v", err)
+	}
+	if got.Spec.Template.Spec.Containers[0].Image != cfg.Image {
+		t.Errorf("replacement image: %s", got.Spec.Template.Spec.Containers[0].Image)
 	}
 }
 

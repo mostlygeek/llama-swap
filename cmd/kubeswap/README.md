@@ -485,7 +485,13 @@ backends left over from an abnormal head-end death (SIGKILL, node loss) or a
 model without a `cmdStop` keep running, with no model reload. With
 `--strict`, a
 deployment whose image/command/args/env/resources/probe paths drifted from
-the config is deleted and recreated instead of adopted.
+the config is deleted and recreated instead of adopted. The replacement
+waits for the old deployment's deletion to actually complete (bounded at
+5 minutes) before creating, and retries creation while the name is still
+reserved — a successful Delete can return while the object is still
+terminating, and creating against that window would lose the name
+entirely (no replacement, and the next poll would shut the wrapper
+down).
 
 ### Flag reference
 
