@@ -348,3 +348,66 @@ func TestKubeswap_DeploymentSpecMatches(t *testing.T) {
 		t.Error("probe path drift should not match")
 	}
 }
+
+func TestKubeswap_DeploymentSpecMatchesNodeSelector(t *testing.T) {
+	cfg := testConfig()
+	dep, _ := cfg.renderDeployment()
+	dep2, _ := cfg.renderDeployment()
+	dep2.Spec.Template.Spec.NodeSelector["other.node.kubernetes.io/label"] = "yes"
+	if deploymentSpecMatches(dep, dep2) {
+		t.Error("node selector drift should not match")
+	}
+}
+
+func TestKubeswap_DeploymentSpecMatchesTolerations(t *testing.T) {
+	cfg := testConfig()
+	dep, _ := cfg.renderDeployment()
+	dep2, _ := cfg.renderDeployment()
+	dep2.Spec.Template.Spec.Tolerations[0].Effect = corev1.TaintEffectNoExecute
+	if deploymentSpecMatches(dep, dep2) {
+		t.Error("toleration drift should not match")
+	}
+}
+
+func TestKubeswap_DeploymentSpecMatchesVolumes(t *testing.T) {
+	cfg := testConfig()
+	dep, _ := cfg.renderDeployment()
+	dep2, _ := cfg.renderDeployment()
+	dep2.Spec.Template.Spec.Volumes[0].PersistentVolumeClaim.ClaimName = "other-pvc"
+	if deploymentSpecMatches(dep, dep2) {
+		t.Error("volume drift should not match")
+	}
+}
+
+func TestKubeswap_DeploymentSpecMatchesServicePorts(t *testing.T) {
+	cfg := testConfig()
+	cfg.ServicePorts = []servicePortSpec{{Name: "metrics", Port: 9090}}
+	dep, _ := cfg.renderDeployment()
+	dep2, _ := cfg.renderDeployment()
+	dep2.Spec.Template.Spec.Containers[0].Ports[1].ContainerPort = 9091
+	if deploymentSpecMatches(dep, dep2) {
+		t.Error("service port drift should not match")
+	}
+}
+
+func TestKubeswap_DeploymentSpecMatchesStartupTimeout(t *testing.T) {
+	cfg := testConfig()
+	cfg.StartupTimeout = 600
+	dep, _ := cfg.renderDeployment()
+	dep2, _ := cfg.renderDeployment()
+	dep2.Spec.Template.Spec.Containers[0].StartupProbe.FailureThreshold = 1
+	if deploymentSpecMatches(dep, dep2) {
+		t.Error("startup timeout drift should not match")
+	}
+}
+
+func TestKubeswap_DeploymentSpecMatchesGracePeriod(t *testing.T) {
+	cfg := testConfig()
+	dep, _ := cfg.renderDeployment()
+	dep2, _ := cfg.renderDeployment()
+	grace := int64(90)
+	dep2.Spec.Template.Spec.TerminationGracePeriodSeconds = &grace
+	if deploymentSpecMatches(dep, dep2) {
+		t.Error("grace period drift should not match")
+	}
+}
