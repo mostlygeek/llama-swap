@@ -77,12 +77,12 @@ works inside model commands (it is how the default config keeps
 | `ingress.annotations` | `{}` | |
 | `ingress.hosts` | `llama-swap.local` | list of `{host, paths: [{path, pathType}]}` |
 | `ingress.tls` | `[]` | standard ingress TLS blocks |
-| `gateway.enabled` | `false` | Gateway API |
-| `gateway.gateway.name` | `<fullname>-gateway` | set to create a Gateway; omit to use an existing one |
-| `gateway.gateway.className` | `""` | e.g. `traefik` |
+| `gateway.enabled` | `false` | Gateway API; with `name` and `parentRefs` both empty, rendering fails |
+| `gateway.gateway.name` | `""` | set to have the chart create a Gateway |
+| `gateway.gateway.className` | `""` | required when `name` is set (e.g. `traefik`) |
 | `gateway.gateway.listeners` | one HTTP :80 | |
 | `gateway.route.name` | fullname | HTTPRoute name |
-| `gateway.route.parentRefs` | the Gateway above | override to attach elsewhere |
+| `gateway.route.parentRefs` | the chart's Gateway | required when `name` is empty (attach to an existing Gateway) |
 | `gateway.route.hostnames` | `[]` | |
 | `gcInitContainer.enabled` | `true` | one-shot `kubeswap gc` per head-end start |
 | `podAnnotations` / `podLabels` | `{}` | |
