@@ -23,6 +23,10 @@ helm install llama-swap ./cmd/kubeswap/chart \
   -n llama-swap --create-namespace
 ```
 
+The chart never renders a Namespace object — create the release
+namespace yourself (`--create-namespace` above) or point the install
+at one that already exists.
+
 <!-- TODO: the chart's home (Helm repo / OCI registry) is not decided yet.
      Once it is, add the canonical install here:
        helm repo add llama-swap <repo-url>        # or: oci://<registry>/...
@@ -54,7 +58,6 @@ works inside model commands (it is how the default config keeps
 | `imagePullSecrets` | `[]` | list of secret names |
 | `replicas` | `1` | keep at 1 — never two head-ends per namespace |
 | `strategy.type` | `Recreate` | deliberate (see replicas) |
-| `createNamespace` | `false` | render a Namespace object |
 | `config.inline` | demo config | `config.yaml`, templated, into the chart's ConfigMap |
 | `config.existing` | `""` | use this ConfigMap instead (chart renders none) |
 | `config.extraFiles` | `{}` | extra ConfigMap keys (e.g. an audio.cpp server JSON) |
