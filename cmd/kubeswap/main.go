@@ -221,7 +221,10 @@ func validPortName(s string) bool {
 	return true
 }
 
-// parseServicePorts parses "name:port" entries, rejecting duplicates.
+// parseServicePorts parses "name:port" entries, rejecting duplicate names.
+// Container port names must be unique within the container, so the same
+// name on a different port is a duplicate too — renderPorts would emit
+// two ports with one name and the API server would reject the Deployment.
 func parseServicePorts(entries []string) ([]servicePortSpec, error) {
 	out := make([]servicePortSpec, 0, len(entries))
 	seen := map[string]bool{}
@@ -237,11 +240,10 @@ func parseServicePorts(entries []string) ([]servicePortSpec, error) {
 		if err != nil || port < 1 || port > 65535 {
 			return nil, fmt.Errorf("invalid --service-port port %q (want 1-65535)", portS)
 		}
-		key := name + ":" + portS
-		if seen[key] {
+		if seen[name] {
 			return nil, fmt.Errorf("duplicate --service-port %q", e)
 		}
-		seen[key] = true
+		seen[name] = true
 		out = append(out, servicePortSpec{Name: name, Port: int32(port)})
 	}
 	return out, nil
