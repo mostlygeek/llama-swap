@@ -401,6 +401,36 @@ func TestKubeswap_DeploymentSpecMatchesStartupTimeout(t *testing.T) {
 	}
 }
 
+func TestKubeswap_DeploymentSpecMatchesProbePort(t *testing.T) {
+	cfg := testConfig()
+	dep, _ := cfg.renderDeployment()
+	dep2, _ := cfg.renderDeployment()
+	dep2.Spec.Template.Spec.Containers[0].ReadinessProbe.HTTPGet.Port.IntVal = 9999
+	if deploymentSpecMatches(dep, dep2) {
+		t.Error("readiness probe port drift should not match")
+	}
+	dep2, _ = cfg.renderDeployment()
+	dep2.Spec.Template.Spec.Containers[0].LivenessProbe.HTTPGet.Port.IntVal = 9999
+	if deploymentSpecMatches(dep, dep2) {
+		t.Error("liveness probe port drift should not match")
+	}
+}
+
+func TestKubeswap_DeploymentSpecMatchesProbeTimeout(t *testing.T) {
+	cfg := testConfig()
+	dep, _ := cfg.renderDeployment()
+	dep2, _ := cfg.renderDeployment()
+	dep2.Spec.Template.Spec.Containers[0].ReadinessProbe.TimeoutSeconds = 40
+	if deploymentSpecMatches(dep, dep2) {
+		t.Error("readiness probe timeout drift should not match")
+	}
+	dep2, _ = cfg.renderDeployment()
+	dep2.Spec.Template.Spec.Containers[0].LivenessProbe.TimeoutSeconds = 40
+	if deploymentSpecMatches(dep, dep2) {
+		t.Error("liveness probe timeout drift should not match")
+	}
+}
+
 func TestKubeswap_DeploymentSpecMatchesGracePeriod(t *testing.T) {
 	cfg := testConfig()
 	dep, _ := cfg.renderDeployment()
