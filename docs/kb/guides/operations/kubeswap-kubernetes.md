@@ -44,7 +44,7 @@ models:
       kubeswap serve
       --listen 127.0.0.1:${PORT}
       --model krea2-turbo
-      --namespace llama-swap
+      --namespace {{ .Release.Namespace }}
       --image <backend image>
       --gpu amd.com/gpu=1
       --node-selector feature.node.kubernetes.io/amd-gpu=true
@@ -52,8 +52,14 @@ models:
       --
       --diffusion-model /models/krea-2-turbo-Q4_K_M.gguf
       --listen-port 8080
-    cmdStop: kubeswap delete --model krea2-turbo --namespace llama-swap --wait 60s
+    cmdStop: kubeswap delete --model krea2-turbo --namespace {{ .Release.Namespace }} --wait 60s
 ```
+
+`--namespace` must be the namespace the head-end runs in: kubeswap's
+RBAC (the chart's Role/RoleBinding) is namespace-scoped, so a different
+namespace fails with 403s. The chart's `{{ .Release.Namespace }}`
+placeholder keeps it correct; in a hand-rolled deployment or an existing
+ConfigMap, set the release namespace literally.
 
 One config gotcha: llama-swap substitutes only `${PID}` in `cmdStop` (not
 `${PORT}`), so the model ID and namespace there are literal text.

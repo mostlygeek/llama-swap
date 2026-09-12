@@ -89,7 +89,7 @@ models:
       kubeswap serve
       --listen 127.0.0.1:${PORT}
       --model lfm25-230m
-      --namespace llama-swap
+      --namespace {{ .Release.Namespace }}
       --image ghcr.io/mostlygeek/llama-swap:unified-vulkan
       --command llama-server
       --gpu amd.com/gpu=1
@@ -103,7 +103,7 @@ models:
       -np 2
       --cache-ram 8
       --slot-save-path /slots
-    cmdStop: kubeswap delete --model lfm25-230m --namespace llama-swap --wait 60s
+    cmdStop: kubeswap delete --model lfm25-230m --namespace {{ .Release.Namespace }} --wait 60s
     ttl: 1800
 
   # --- image generation (stable-diffusion.cpp) ---------------------------
@@ -118,7 +118,7 @@ models:
       kubeswap serve
       --listen 127.0.0.1:${PORT}
       --model krea2-turbo
-      --namespace llama-swap
+      --namespace {{ .Release.Namespace }}
       --image ghcr.io/mostlygeek/llama-swap:unified-vulkan
       --command sd-server
       --health-path /v1/models
@@ -136,7 +136,7 @@ models:
       --offload-to-cpu
       --cfg-scale 1.0
       -H 1024 -W 1024
-    cmdStop: kubeswap delete --model krea2-turbo --namespace llama-swap --wait 60s
+    cmdStop: kubeswap delete --model krea2-turbo --namespace {{ .Release.Namespace }} --wait 60s
     ttl: 1800
 
   ideogram4:
@@ -146,7 +146,7 @@ models:
       kubeswap serve
       --listen 127.0.0.1:${PORT}
       --model ideogram4
-      --namespace llama-swap
+      --namespace {{ .Release.Namespace }}
       --image ghcr.io/mostlygeek/llama-swap:unified-vulkan
       --command sd-server
       --health-path /v1/models
@@ -165,7 +165,7 @@ models:
       --offload-to-cpu
       --cfg-scale 1.0
       -H 1024 -W 1024
-    cmdStop: kubeswap delete --model ideogram4 --namespace llama-swap --wait 60s
+    cmdStop: kubeswap delete --model ideogram4 --namespace {{ .Release.Namespace }} --wait 60s
     ttl: 1800
 
   # --- speech recognition (whisper.cpp) ----------------------------------
@@ -179,7 +179,7 @@ models:
       kubeswap serve
       --listen 127.0.0.1:${PORT}
       --model distil-whisper-lgv3
-      --namespace llama-swap
+      --namespace {{ .Release.Namespace }}
       --image ghcr.io/mostlygeek/llama-swap:unified-vulkan
       --command whisper-server
       --volume pvc:llama-swap-models:/models:ro
@@ -188,7 +188,7 @@ models:
       --port 8080
       --model /models/distil-large-v3-q5_0.bin
       --inference-path /v1/audio/transcriptions
-    cmdStop: kubeswap delete --model distil-whisper-lgv3 --namespace llama-swap --wait 60s
+    cmdStop: kubeswap delete --model distil-whisper-lgv3 --namespace {{ .Release.Namespace }} --wait 60s
     ttl: 1800
 
   # --- text to speech (audio.cpp) ----------------------------------------
@@ -202,7 +202,7 @@ models:
       kubeswap serve
       --listen 127.0.0.1:${PORT}
       --model qwen3-tts-06b
-      --namespace llama-swap
+      --namespace {{ .Release.Namespace }}
       --image ghcr.io/mostlygeek/llama-swap:unified-vulkan
       --command audiocpp_server
       --volume pvc:llama-swap-models:/models:ro
@@ -210,7 +210,7 @@ models:
       server
       --config /models/qwen3-tts-server.json
       --backend cpu
-    cmdStop: kubeswap delete --model qwen3-tts-06b --namespace llama-swap --wait 60s
+    cmdStop: kubeswap delete --model qwen3-tts-06b --namespace {{ .Release.Namespace }} --wait 60s
     ttl: 1800
 ```
 
