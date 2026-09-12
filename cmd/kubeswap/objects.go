@@ -120,6 +120,19 @@ func (c *serveConfig) renderDeployment() (*appsv1.Deployment, error) {
 	}
 	container.VolumeMounts = mounts
 
+	// Copies, not references: rendered objects must stay independent of the
+	// config (a later mutation of c.NodeSel must not rewrite a rendered
+	// Deployment, and two renders of one config must not share maps). An
+	// empty selector stays nil, as before.
+	var nodeSel map[string]string
+	if len(c.NodeSel) > 0 {
+		nodeSel = make(map[string]string, len(c.NodeSel))
+		for k, v := range c.NodeSel {
+			nodeSel[k] = v
+		}
+	}
+	grace := c.GraceSeconds
+
 	annotations := map[string]string{annotationModelID: c.Model}
 	recreate := appsv1.RecreateDeploymentStrategyType
 	replicas := int32(1)
@@ -143,9 +156,9 @@ func (c *serveConfig) renderDeployment() (*appsv1.Deployment, error) {
 				Spec: corev1.PodSpec{
 					Containers:                    []corev1.Container{container},
 					Volumes:                       volumes,
-					NodeSelector:                  c.NodeSel,
+					NodeSelector:                  nodeSel,
 					Tolerations:                   c.renderTolerations(),
-					TerminationGracePeriodSeconds: &c.GraceSeconds,
+					TerminationGracePeriodSeconds: &grace,
 					RestartPolicy:                 corev1.RestartPolicyAlways,
 				},
 			},
@@ -361,10 +374,26 @@ func strPtr(s string) *string {
 	return &s
 }
 
-// deploymentSpecMatches reports whether an existing deployment's container
-// spec matches the desired one (used by --strict adoption).
+// deploymentSpecMatches reports whether an existing deployment's pod
+// template matches the desired one (used by --strict adoption). Every
+// configuration-owned field is compared — image, command, args, env, ports,
+// volumes, node selector, tolerations, grace period, probes and resources —
+// so strict mode replaces the Deployment whenever any of them drifted.
 func deploymentSpecMatches(have *appsv1.Deployment, want *appsv1.Deployment) bool {
 	if have == nil || want == nil {
+		return false
+	}
+	hs, ws := have.Spec.Template.Spec, want.Spec.Template.Spec
+	if !stringMapEqual(hs.NodeSelector, ws.NodeSelector) {
+		return false
+	}
+	if !tolerationsEqual(hs.Tolerations, ws.Tolerations) {
+		return false
+	}
+	if !volumesEqual(hs.Volumes, ws.Volumes) {
+		return false
+	}
+	if derefInt64(hs.TerminationGracePeriodSeconds) != derefInt64(ws.TerminationGracePeriodSeconds) {
 		return false
 	}
 	hc, wc := deploymentContainer(have), deploymentContainer(want)
@@ -383,8 +412,15 @@ func deploymentSpecMatches(have *appsv1.Deployment, want *appsv1.Deployment) boo
 	if !envsEqual(hc.Env, wc.Env) {
 		return false
 	}
+	if !mountsEqual(hc.VolumeMounts, wc.VolumeMounts) {
+		return false
+	}
+	if !portsEqual(hc.Ports, wc.Ports) {
+		return false
+	}
 	if probePath(hc.ReadinessProbe) != probePath(wc.ReadinessProbe) ||
-		probePath(hc.LivenessProbe) != probePath(wc.LivenessProbe) {
+		probePath(hc.LivenessProbe) != probePath(wc.LivenessProbe) ||
+		!startupProbeEqual(hc.StartupProbe, wc.StartupProbe) {
 		return false
 	}
 	return resourcesEqual(hc.Resources, wc.Resources)
@@ -453,6 +489,147 @@ func resourceListEqual(a, b corev1.ResourceList) bool {
 	}
 	for k, v := range a {
 		if !b[k].Equal(v) {
+			return false
+		}
+	}
+	return true
+}
+
+// derefInt64 dereferences a *int64 (nil counts as 0).
+func derefInt64(p *int64) int64 {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
+// stringMapEqual compares two string maps.
+func stringMapEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+// startupProbeEqual compares the configuration-owned probe fields: the
+// endpoint (path + port) and the timing derived from --startup-timeout.
+func startupProbeEqual(a, b *corev1.Probe) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	aHas, bHas := a.HTTPGet != nil, b.HTTPGet != nil
+	if aHas != bHas || probePath(a) != probePath(b) {
+		return false
+	}
+	if aHas && a.HTTPGet.Port != b.HTTPGet.Port {
+		return false
+	}
+	return a.PeriodSeconds == b.PeriodSeconds &&
+		a.TimeoutSeconds == b.TimeoutSeconds &&
+		a.FailureThreshold == b.FailureThreshold
+}
+
+// portsEqual compares container ports by name (order-insensitive); the
+// primary http port and every --service-port entry are configuration-owned.
+func portsEqual(a, b []corev1.ContainerPort) bool {
+	byName := func(ports []corev1.ContainerPort) map[string]int32 {
+		m := make(map[string]int32, len(ports))
+		for _, p := range ports {
+			m[p.Name] = p.ContainerPort
+		}
+		return m
+	}
+	ma, mb := byName(a), byName(b)
+	if len(ma) != len(mb) {
+		return false
+	}
+	for k, v := range ma {
+		if mb[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+// mountsEqual compares volume mounts by name (order-insensitive).
+func mountsEqual(a, b []corev1.VolumeMount) bool {
+	type mountKey struct {
+		path     string
+		readOnly bool
+	}
+	byName := func(mounts []corev1.VolumeMount) map[string]mountKey {
+		m := make(map[string]mountKey, len(mounts))
+		for _, v := range mounts {
+			m[v.Name] = mountKey{v.MountPath, v.ReadOnly}
+		}
+		return m
+	}
+	ma, mb := byName(a), byName(b)
+	if len(ma) != len(mb) {
+		return false
+	}
+	for k, v := range ma {
+		if mb[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+// volumesEqual compares pod volumes by name and source (order-insensitive).
+func volumesEqual(a, b []corev1.Volume) bool {
+	source := func(v corev1.Volume) string {
+		switch {
+		case v.PersistentVolumeClaim != nil:
+			return "pvc:" + v.PersistentVolumeClaim.ClaimName
+		case v.HostPath != nil:
+			return "host:" + v.HostPath.Path
+		case v.EmptyDir != nil:
+			return "emptydir"
+		default:
+			return v.Name + ":unknown-source"
+		}
+	}
+	ma := make(map[string]string, len(a))
+	for _, v := range a {
+		ma[v.Name] = source(v)
+	}
+	if len(ma) != len(b) {
+		return false
+	}
+	for _, v := range b {
+		if ma[v.Name] != source(v) {
+			return false
+		}
+	}
+	return true
+}
+
+// tolerationsEqual compares tolerations as multisets (order-insensitive).
+func tolerationsEqual(a, b []corev1.Toleration) bool {
+	type tolKey struct {
+		key, op, value, effect string
+		seconds                int64
+	}
+	byKey := func(list []corev1.Toleration) map[tolKey]int {
+		m := make(map[tolKey]int, len(list))
+		for _, t := range list {
+			k := tolKey{t.Key, string(t.Operator), t.Value, string(t.Effect), derefInt64(t.TolerationSeconds)}
+			m[k]++
+		}
+		return m
+	}
+	ma, mb := byKey(a), byKey(b)
+	if len(ma) != len(mb) {
+		return false
+	}
+	for k, n := range ma {
+		if mb[k] != n {
 			return false
 		}
 	}
