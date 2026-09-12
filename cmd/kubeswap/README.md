@@ -420,12 +420,8 @@ proxy/health/log lookups, and delete waits) additionally uses the label
 `llama-swap.io/deployment=<deployment name>`, which IS unique per model —
 the sanitized `model` label alone is not, so sibling models with
 sanitizingly-identical IDs can never be confused at the pod level either.
-
-One-time migration: deployments rendered by an earlier kubeswap (before
-the `llama-swap.io/deployment` label) cannot be adopted by a newer one
-(`spec.selector` is immutable). Delete them (`kubeswap delete`/`gc` —
-which still verify the model-id annotation) or run `serve --strict`
-before upgrading.
+Adoption and deletion look objects up by exact name, never by that
+coarse label, for the same reason.
 
 Use the **configured model ID** in `cmdStop`/`gc`, not the sanitized name.
 

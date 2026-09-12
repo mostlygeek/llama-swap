@@ -458,6 +458,23 @@ func TestKubeswap_StrictReplaceRetriesReservedName(t *testing.T) {
 	}
 }
 
+func TestKubeswap_DeleteIgnoresSiblingDeployment(t *testing.T) {
+	client := newFakeClient()
+	ctx := context.Background()
+	cfgA, cfgB := collidingConfigs()
+	// Model B (a sanitizing sibling) is loaded; model A is not. Deleting
+	// A must be a clean no-op, not an ownership error on B's resources.
+	if _, err := ensureResources(client, cfgB); err != nil {
+		t.Fatal(err)
+	}
+	if err := deleteModel(client, cfgA.Namespace, cfgA.Model, false, 0); err != nil {
+		t.Fatalf("deleteModel: %v", err)
+	}
+	if _, err := client.AppsV1().Deployments(cfgB.Namespace).Get(ctx, cfgB.DepName, metav1.GetOptions{}); err != nil {
+		t.Errorf("sibling deployment must survive: %v", err)
+	}
+}
+
 func TestKubeswap_GCAllowedModels(t *testing.T) {
 	allowed, err := gcAllowedModels([]string{"a", "b"}, "")
 	if err != nil {
