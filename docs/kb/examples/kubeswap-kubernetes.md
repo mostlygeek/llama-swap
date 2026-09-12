@@ -2,7 +2,7 @@
 title: "kubeswap: a complete multi-engine Kubernetes configuration"
 summary: A verified llama-swap config that runs llama-server, sd-server, whisper-server and audiocpp_server as Kubernetes workloads through the kubeswap wrapper.
 category: examples
-tags: [kubeswap, kubernetes, multi-backend, sd-server, whisper-server, audiocpp_server, llama-server, pvc, gpu, exclusive-group]
+tags: [kubeswap, kubernetes, multi-backend, sd-server, whisper-server, audiocpp_server, llama-server, pvc, gpu, exclusive-group, helm]
 config_keys: [models.*.cmd, models.*.cmdStop, models.*.proxy, models.*.capabilities, healthCheckTimeout, unloadTimeout, routing]
 updated: 2026-09-12
 ---
@@ -301,6 +301,91 @@ Hugging Face into a per-pod emptyDir), so `helm install` with no values
 file works out of the box. `helm upgrade` with a changed
 `config.inline` hot-reloads the models (the head-end runs with
 `-watch-config`); changing `selectorLabels` is not supported.
+
+## The same fleet as structured chart values
+
+The chart can render `config.yaml` from structured values instead of
+`config.inline`: `config.top` (scalars, macros, routing),
+`config.defaults` (what most models share) and `config.models` (one entry
+per model). The chart then generates each model's `proxy`, the whole
+`kubeswap serve ... -- <args>` command and the `cmdStop` — a model entry
+only carries its ID, backend args, and whatever differs from the
+defaults. This is the same fleet as above, about four times shorter:
+
+```yaml
+# values.yaml — replaces config.inline when config.models is non-empty
+config:
+  top:
+    healthCheckTimeout: 600
+    unloadTimeout: 60
+    # kubeswap picks the server binary with --command, so these bases
+    # carry only flags (the backend port is fixed at 8080, kubeswap
+    # --port). "Last flag wins" still lets per-model args override.
+    macros:
+      server_base: --port 8080 -ngl 99 -np 2 --cache-ram 8 --slot-save-path /slots
+      sd_base: --listen-ip 0.0.0.0 --listen-port 8080 --diffusion-fa --offload-to-cpu --cfg-scale 1.0 -H 1024 -W 1024
+    routing:
+      router:
+        use: group
+        settings:
+          groups:
+            llm:    { swap: true, exclusive: true, members: [lfm25-230m] }
+            image:  { swap: true, exclusive: true, members: [krea2-turbo, ideogram4] }
+            audio:  { swap: true, exclusive: true, members: [distil-whisper-lgv3, qwen3-tts-06b] }
+  defaults:
+    image: ghcr.io/mostlygeek/llama-swap:unified-vulkan
+    command: llama-server
+    gpu: [amd.com/gpu=1]
+    volumes: ["pvc:llama-swap-models:/models:ro", "emptydir:slots:/slots"]
+    extraKubeArgs: ["--node-selector feature.node.kubernetes.io/amd-gpu=true"]
+    ttl: 1800
+  models:
+    - id: lfm25-230m
+      args: ${server_base} --model /models/LFM2.5-230M-Q4_0.gguf
+
+    # image models: sd-server has no /health route (healthPath), and the
+    # text encoders are big — add CPU headroom via extraKubeArgs
+    - id: krea2-turbo
+      command: sd-server
+      healthPath: /v1/models
+      capabilities: { in: [text], out: [image] }
+      extraKubeArgs: ["--node-selector feature.node.kubernetes.io/amd-gpu=true", "--request cpu=4"]
+      args: ${sd_base} --diffusion-model /models/krea-2-turbo-Q4_K_M.gguf --llm /models/Qwen3VL-4B-Instruct-Q4_K_M.gguf --vae /models/wan_2.1_vae.safetensors
+
+    - id: ideogram4
+      command: sd-server
+      healthPath: /v1/models
+      capabilities: { in: [text], out: [image] }
+      extraKubeArgs: ["--node-selector feature.node.kubernetes.io/amd-gpu=true", "--request cpu=4"]
+      args: ${sd_base} --diffusion-model /models/ideogram4-Q4_0.gguf --uncond-diffusion-model /models/ideogram4_uncond-Q4_0.gguf --llm /models/Qwen3-VL-8B-Instruct-Q4_K_M.gguf --vae /models/flux2-vae.safetensors
+
+    # audio models: CPU-only — an empty list clears the default gpu
+    - id: distil-whisper-lgv3
+      command: whisper-server
+      capabilities: { in: [audio], out: [text] }
+      gpu: []
+      extraKubeArgs: []
+      args: --host 0.0.0.0 --port 8080 --model /models/distil-large-v3-q5_0.bin --inference-path /v1/audio/transcriptions
+
+    - id: qwen3-tts-06b
+      command: audiocpp_server
+      capabilities: { in: [text], out: [audio] }
+      gpu: []
+      extraKubeArgs: []
+      args: server --config /models/qwen3-tts-server.json --backend cpu
+```
+
+Every key on a model entry that is not a kubeswap field (`command`,
+`healthPath`, `gpu`, `extraKubeArgs`, ...) renders verbatim as a
+llama-swap model field — so `capabilities`, `ttl`, `macros`, `filters`
+and `aliases` all pass straight through. Install with the values file
+instead of `--set-file config.inline`:
+
+```bash
+helm install llama-swap ./cmd/kubeswap/chart \
+  -n llama-swap --create-namespace \
+  -f values.yaml
+```
 
 ## Talking to it
 
