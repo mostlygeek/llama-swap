@@ -55,6 +55,10 @@ spec:
             - name: config
               mountPath: /etc/llama-swap/config
               readOnly: true
+          {{- with .Values.gcInitContainer.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
         {{- end }}
         {{- with .Values.initContainers }}
         {{- toYaml . | nindent 8 }}
