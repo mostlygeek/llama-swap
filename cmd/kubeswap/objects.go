@@ -527,7 +527,8 @@ func stringMapEqual(a, b map[string]string) bool {
 
 // probeEqual compares the configuration-owned probe fields: the endpoint
 // (path + port, the port from --port), the request timeout
-// (--probe-timeout) and the timing derived from --startup-timeout.
+// (--probe-timeout) and the timing (initial delay, period, failure
+// threshold) that kubeswap explicitly configures.
 func probeEqual(a, b *corev1.Probe) bool {
 	if a == nil || b == nil {
 		return a == b
@@ -539,7 +540,8 @@ func probeEqual(a, b *corev1.Probe) bool {
 	if aHas && a.HTTPGet.Port != b.HTTPGet.Port {
 		return false
 	}
-	return a.PeriodSeconds == b.PeriodSeconds &&
+	return a.InitialDelaySeconds == b.InitialDelaySeconds &&
+		a.PeriodSeconds == b.PeriodSeconds &&
 		a.TimeoutSeconds == b.TimeoutSeconds &&
 		a.FailureThreshold == b.FailureThreshold
 }

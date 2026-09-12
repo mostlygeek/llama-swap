@@ -450,6 +450,21 @@ func TestKubeswap_DeploymentSpecMatchesProbeTimeout(t *testing.T) {
 }
 
 // TestKubeswap_DeploymentSpecMatchesGracePeriod Verifies the spec comparison detects grace-period drift.
+func TestKubeswap_DeploymentSpecMatchesProbeInitialDelay(t *testing.T) {
+	cfg := testConfig()
+	dep, _ := cfg.renderDeployment()
+	dep2, _ := cfg.renderDeployment()
+	dep2.Spec.Template.Spec.Containers[0].ReadinessProbe.InitialDelaySeconds = 99
+	if deploymentSpecMatches(dep, dep2) {
+		t.Error("readiness probe initial delay drift should not match")
+	}
+	dep2, _ = cfg.renderDeployment()
+	dep2.Spec.Template.Spec.Containers[0].LivenessProbe.InitialDelaySeconds = 99
+	if deploymentSpecMatches(dep, dep2) {
+		t.Error("liveness probe initial delay drift should not match")
+	}
+}
+
 func TestKubeswap_DeploymentSpecMatchesGracePeriod(t *testing.T) {
 	cfg := testConfig()
 	dep, _ := cfg.renderDeployment()
