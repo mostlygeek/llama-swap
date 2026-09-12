@@ -16,6 +16,8 @@ import (
 type serveConfig struct {
 	Model        string // original model ID
 	Sanitized    string // DNS-safe model ID
+	DepName      string // Deployment name (sanitized ID + original-ID hash)
+	SvcName      string // Service name (deployment name + -svc)
 	Namespace    string
 	Image        string
 	Command      []string // container command (overrides the image entrypoint)
@@ -69,7 +71,7 @@ func (c *serveConfig) renderDeployment() (*appsv1.Deployment, error) {
 		depLabels[k] = v
 	}
 
-	podTemplateLabels := podLabels(c.Sanitized)
+	podTemplateLabels := podLabels(c.Sanitized, c.DepName)
 	for k, v := range c.ExtraLabels {
 		podTemplateLabels[k] = v
 	}
@@ -119,7 +121,7 @@ func (c *serveConfig) renderDeployment() (*appsv1.Deployment, error) {
 
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        deploymentName(c.Sanitized),
+			Name:        c.DepName,
 			Namespace:   c.Namespace,
 			Labels:      depLabels,
 			Annotations: annotations,
@@ -127,7 +129,7 @@ func (c *serveConfig) renderDeployment() (*appsv1.Deployment, error) {
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
 			Strategy: appsv1.DeploymentStrategy{Type: recreate},
-			Selector: &metav1.LabelSelector{MatchLabels: managedLabels(c.Sanitized)},
+			Selector: &metav1.LabelSelector{MatchLabels: podSelectorLabels(c.Sanitized, c.DepName)},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels:      podTemplateLabels,
@@ -303,13 +305,13 @@ func (c *serveConfig) renderService() *corev1.Service {
 	}
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        serviceName(c.Sanitized),
+			Name:        c.SvcName,
 			Namespace:   c.Namespace,
 			Labels:      managedLabels(c.Sanitized),
 			Annotations: map[string]string{annotationModelID: c.Model},
 		},
 		Spec: corev1.ServiceSpec{
-			Selector: managedLabels(c.Sanitized),
+			Selector: podSelectorLabels(c.Sanitized, c.DepName),
 			Ports:    ports,
 		},
 	}

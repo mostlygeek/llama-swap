@@ -404,11 +404,29 @@ Notes:
 
 ### Naming
 
-The Deployment, Service and PVCs are named from the model ID, translated to
-lowercase alphanumerics and dashes (e.g. `author/model:v1` →
-`author-model-v1`). The original ID is preserved in the
-`llama-swap.io/model-id` annotation; every object is labeled
-`llama-swap.io/managed-by=llama-swap` and `llama-swap.io/model=<sanitized>`.
+The Deployment name is the model ID translated to lowercase alphanumerics
+and dashes (up to 50 chars) plus a short hash of the **original** ID
+(e.g. `author/model:v1` → `author-model-v1-9a3b7c1d`); the Service is the
+Deployment name plus `-svc`. The hash makes names collision-resistant:
+distinct IDs that sanitize to the same string (`Model_A` and `model-a`)
+or share a long prefix still get distinct objects. The original ID is
+preserved in the `llama-swap.io/model-id` annotation; every object is
+labeled `llama-swap.io/managed-by=llama-swap` and
+`llama-swap.io/model=<sanitized>`. Adoption and deletion verify the
+managed-by and model-id metadata against the requested model ID before
+acting, so a model can never adopt or tear down another model's backend.
+Pod *selection* (the Deployment and Service selectors, the wrapper's
+proxy/health/log lookups, and delete waits) additionally uses the label
+`llama-swap.io/deployment=<deployment name>`, which IS unique per model —
+the sanitized `model` label alone is not, so sibling models with
+sanitizingly-identical IDs can never be confused at the pod level either.
+
+One-time migration: deployments rendered by an earlier kubeswap (before
+the `llama-swap.io/deployment` label) cannot be adopted by a newer one
+(`spec.selector` is immutable). Delete them (`kubeswap delete`/`gc` —
+which still verify the model-id annotation) or run `serve --strict`
+before upgrading.
+
 Use the **configured model ID** in `cmdStop`/`gc`, not the sanitized name.
 
 Note that llama-swap substitutes only `${PID}` in `cmdStop` (unlike `cmd`,
