@@ -40,7 +40,7 @@ per-pod emptyDir — no PVC required. For real use, override
 "Model cache PVC" below).
 
 ```bash
-helm install llama-swap ./chart -n llama-swap --create-namespace \
+helm install llama-swap cmd/kubeswap/chart -n llama-swap --create-namespace \
   --set-file config.inline=/path/to/your-config.yaml
 ```
 
