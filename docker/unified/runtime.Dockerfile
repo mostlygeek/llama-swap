@@ -49,6 +49,19 @@ RUN --mount=type=cache,id=go-build,target=/root/.cache/go-build \
     --mount=type=cache,id=go-mod,target=/go/pkg/mod \
     bash /build/install-vllm-wrapper.sh "${LS_VERSION}"
 
+# ── kubeswap ──────────────────────────────────────────────────────────
+#
+# kubeswap is the Kubernetes backend wrapper (cmd/cmdStop) for managing
+# inference servers in a namespace; see cmd/kubeswap/README.md. Like
+# vllm-wrapper it is compiled from the same revision as llama-swap.
+
+FROM golang:1.27-bookworm AS kubeswap-build
+ARG LS_VERSION=latest
+COPY install-kubeswap.sh /build/
+RUN --mount=type=cache,id=go-build,target=/root/.cache/go-build \
+    --mount=type=cache,id=go-mod,target=/go/pkg/mod \
+    bash /build/install-kubeswap.sh "${LS_VERSION}"
+
 # ── Runtime bases ─────────────────────────────────────────────────────
 
 # The CUDA stubs live in the devel base, which is the CUDA builder base. This
@@ -153,6 +166,9 @@ COPY --from=llama-swap-download /install/llama-swap-version /tmp/
 
 # Copy vllm-wrapper binary
 COPY --from=vllm-wrapper-build /install/bin/vllm-wrapper /usr/local/bin/
+
+# Copy kubeswap binary
+COPY --from=kubeswap-build /install/bin/kubeswap /usr/local/bin/
 
 RUN ldconfig
 
