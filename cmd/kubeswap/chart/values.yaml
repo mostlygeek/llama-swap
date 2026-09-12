@@ -77,6 +77,34 @@ config:
           --slot-save-path /slots
         cmdStop: kubeswap delete --model smollm2 --namespace {{ .Release.Namespace }} --wait 60s
         ttl: 1800
+  # ---------------------------------------------------------------------------
+  # Structured configuration (alternative to inline).
+  # ---------------------------------------------------------------------------
+  # When models is non-empty the chart ignores inline and renders config.yaml
+  # from these three parts. This keeps large multi-model configs DRY: the
+  # kubeswap serve boilerplate (listen/model/namespace/image/command/gpu/
+  # volumes, the "--" separator and cmdStop) is generated per model; you only
+  # write the model ID, the backend args, and any llama-swap model fields.
+  # llama-swap's own ${...} macros keep working — define shared server flags
+  # in top.macros and reference them from each model's args.
+  #
+  #   top:      everything in config.yaml except models: (scalars, macros,
+  #             routing, peers, ...). Templated like inline.
+  #   defaults: per-model defaults for the kubeswap fields below, plus any
+  #             llama-swap model fields (ttl, checkEndpoint, ...) that most
+  #             models share. A model's own entry always wins.
+  #   models:   list of model entries. Kubeswap fields (consumed by the
+  #             chart, not rendered into the model record): id (required),
+  #             image, command, gpu (list, "resource=count"), volumes (list,
+  #             "pvc|emptydir|hostpath:name:path[:ro]"), port,
+  #             startupTimeout, healthPath, livenessPath, checkPath,
+  #             args (backend command line after "--"), proxy, cmdStop.
+  #             Every other key is rendered verbatim as a llama-swap model
+  #             field (name, ttl, capabilities, macros, filters, aliases,
+  #             unlisted, ...).
+  top: {}
+  defaults: {}
+  models: []
   # Name of an existing ConfigMap with a config.yaml key. When set, the
   # chart renders no ConfigMap of its own and mounts this one.
   existing: ""
