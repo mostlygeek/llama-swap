@@ -8,8 +8,76 @@ metadata:
     {{- include "llama-swap.labels" . | nindent 4 }}
 data:
   config.yaml: |
+{{- if .Values.config.models }}
+{{- $ns := .Release.Namespace }}
+{{- $defaults := .Values.config.defaults | default dict }}
+{{- with .Values.config.top }}
+{{ tpl (toYaml .) $ | nindent 4 }}
+{{- end }}
+    models:
+{{- range $m := .Values.config.models }}
+{{- $img := $m.image | default $defaults.image }}
+{{- $cmd := $m.command | default $defaults.command }}
+{{- $gpu := $m.gpu | default $defaults.gpu }}
+{{- $vol := $m.volumes | default $defaults.volumes }}
+{{- $port := $m.port | default $defaults.port }}
+{{- $kubeKeys := list "id" "image" "command" "gpu" "volumes" "port" "startupTimeout" "healthPath" "livenessPath" "checkPath" "args" "proxy" "cmdStop" }}
+      {{ $m.id | quote }}:
+{{- with $m.proxy | default $defaults.proxy | default "http://127.0.0.1:${PORT}" }}
+        proxy: {{ if kindIs "string" . }}"{{ . }}"{{ else }}{{ toYaml . | nindent 12 }}{{ end }}
+{{- end }}
+        cmd: >-
+          kubeswap serve
+          --listen 127.0.0.1:${PORT}
+          --model {{ $m.id }}
+          --namespace {{ $ns }}
+          --image {{ $img }}
+{{- with $cmd }}
+          --command {{ . }}
+{{- end }}
+{{- range $g := $gpu }}
+          --gpu {{ $g }}
+{{- end }}
+{{- range $v := $vol }}
+          --volume {{ $v }}
+{{- end }}
+{{- with $port }}
+          --port {{ . }}
+{{- end }}
+{{- with $m.startupTimeout | default $defaults.startupTimeout }}
+          --startup-timeout {{ . }}
+{{- end }}
+{{- with $m.healthPath | default $defaults.healthPath }}
+          --health-path {{ . }}
+{{- end }}
+{{- with $m.livenessPath | default $defaults.livenessPath }}
+          --liveness-path {{ . }}
+{{- end }}
+{{- with $m.checkPath | default $defaults.checkPath }}
+          --check-path {{ . }}
+{{- end }}
+          --
+{{- with $m.args }}
+{{ . | indent 12 }}
+{{- end }}
+{{- with $m.cmdStop | default (printf "kubeswap delete --model %s --namespace %s --wait 60s" $m.id $ns) }}
+        cmdStop: {{ . | quote }}
+{{- end }}
+{{- range $k, $v := $m }}
+{{- if not (has $k $kubeKeys) }}
+{{- if kindIs "string" $v }}
+        {{ $k }}: {{ tpl $v $ | quote }}
+{{- else }}
+        {{ $k }}:
+{{ tpl (toYaml $v) $ | nindent 12 }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- else }}
 {{- with .Values.config.inline }}
 {{- tpl . $ | nindent 4 }}
+{{- end }}
 {{- end }}
 {{- range $name, $content := .Values.config.extraFiles }}
   {{ $name }}: |
