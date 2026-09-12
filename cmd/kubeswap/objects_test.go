@@ -236,6 +236,19 @@ func TestKubeswap_RenderResourcesGPUPriority(t *testing.T) {
 	}
 }
 
+func TestKubeswap_RenderResourcesRejectsInvalidQuantity(t *testing.T) {
+	cfg := testConfig()
+	cfg.GPUs = map[string]string{"amd.com/gpu": "many"}
+	if _, err := cfg.renderResources(); err == nil {
+		t.Error("expected error for unparseable GPU quantity")
+	}
+	cfg = testConfig()
+	cfg.Requests = map[string]string{"cpu": "lots"}
+	if _, err := cfg.renderResources(); err == nil {
+		t.Error("expected error for unparseable request quantity")
+	}
+}
+
 func TestKubeswap_StartupFailureThreshold(t *testing.T) {
 	cases := []struct {
 		secs int64
