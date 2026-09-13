@@ -302,6 +302,12 @@ func statusCmd(args []string) error {
 	fs.BoolVar(&watch, "watch", false, "keep refreshing the table (for interactive use; Ctrl-C to stop)")
 	fs.DurationVar(&interval, "interval", 5*time.Second, "refresh interval for --watch")
 	fs.Parse(args)
+	// time.NewTicker panics on a non-positive duration; reject at parse
+	// time like the other flag validation instead of crashing after the
+	// initial status print.
+	if watch && interval <= 0 {
+		return fmt.Errorf("invalid --interval %s (must be positive with --watch)", interval)
+	}
 	return runStatus(namespace, kubeconfig, watch, interval)
 }
 
