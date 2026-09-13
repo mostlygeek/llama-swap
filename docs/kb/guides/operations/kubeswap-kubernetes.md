@@ -28,7 +28,8 @@ Kubernetes API.
   readiness, so `checkEndpoint` can stay at the default `/health` for every
   engine.
 - **Models**: a shared ReadWriteMany PVC (e.g. longhorn) holds the weights;
-  backends mount it read-only at `/models`.
+  backends mount it read-only at `/models`. RWX vs RWO vs emptyDir, and
+  when each is right, is covered in the storage article below.
 
 ## Model config
 
@@ -90,6 +91,26 @@ Key flags:
   the old pod is gone before the new one is ready, so in-flight requests
   are dropped and the model reloads from scratch. Enable it only when
   drift is expected (e.g. image bumps) and plan for the downtime.
+
+## GPU and CPU resources
+
+A GPU is **not** a requirement anywhere: the head-end needs none, and a
+model without `--gpu` is a plain CPU pod that schedules on any node (the
+whisper and TTS models in the examples article run exactly that way).
+`--gpu key=count` sets the resource in both requests and limits — an
+exclusive device assigned by the scheduler.
+
+| hardware | `--gpu` | `--node-selector` |
+| --- | --- | --- |
+| NVIDIA | `nvidia.com/gpu=1` | the NVIDIA node label, or omit if every node has a GPU |
+| AMD | `amd.com/gpu=1` | e.g. `feature.node.kubernetes.io/amd-gpu=true` |
+| CPU only | omit | omit (or pin a node when RWO storage demands it) |
+
+Other vendors' device plugins register their own resource names — read the
+real one from `kubectl describe node` under `Capacity` rather than guessing.
+On CPU, drop GPU-only engine flags too (`-ngl` for llama-server is a no-op,
+`--diffusion-fa` for sd-server needs a GPU; CPU image generation works but
+is slow).
 
 ## Engines
 
@@ -160,10 +181,73 @@ Until a release ships `kubeswap`, set `image.repository`/`image.tag` to an
 image that does (the unified image built from a revision containing
 `cmd/kubeswap/`).
 
+## Hand-rolled RBAC
+
+The chart renders a ServiceAccount + Role + RoleBinding; here is the same
+pair verbatim, for deployments that do not use the chart. The rules are
+namespaced and minimal — no `update`/`patch` anywhere on purpose: kubeswap
+only creates and deletes (spec drift is handled by deleting and recreating
+with `--strict`), so a tighter role is not a trade-off.
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: llama-swap
+  namespace: llama-swap
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: llama-swap
+  namespace: llama-swap
+rules:
+  - apiGroups: ["apps"]
+    resources: [deployments]
+    verbs: [create, get, list, watch, delete]
+  - apiGroups: [""]
+    resources: [services]
+    verbs: [create, get, list, watch, delete]
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    verbs: [get, create, delete]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: llama-swap
+  namespace: llama-swap
+subjects:
+  - kind: ServiceAccount
+    name: llama-swap
+    namespace: llama-swap
+roleRef:
+  kind: Role
+  name: llama-swap
+  apiGroup: rbac.authorization.k8s.io
+```
+
+Bind the head-end Deployment to the ServiceAccount
+(`serviceAccountName: llama-swap`) and keep `--namespace` in every model
+command equal to it — the role is namespace-scoped, so anything else fails
+with 403s.
+
 ## Related
 
 - `examples/kubeswap-kubernetes` — complete multi-engine config (all four
   engine families, copy-pasteable)
+- `guides/operations/debugging-backends` — the status → logs → kubectl
+  failure chain and the symptom table
+- `guides/operations/storage-options-kubernetes` — RWX vs RWO vs emptyDir
+  for the model cache, and the node-pin escape
+- `guides/operations/building-unified-image` — building the image, adding
+  an engine, verifying kubeswap is inside
 - `cmd/kubeswap/chart/` — the Helm chart (values reference,
   ingress/gateway/LoadBalancer/extraResources options)
 - `guides/model-runtime/writing-cmd` — `cmd`, `${PORT}`, `proxy`, `checkEndpoint`
