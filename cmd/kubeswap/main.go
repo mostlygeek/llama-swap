@@ -212,8 +212,8 @@ func validDNSLabel(s string) bool {
 }
 
 // validLabelKey reports whether s is a valid Kubernetes label key: an
-// optional DNS-subdomain prefix, a /, and a DNS-label name (up to 63
-// characters) — the same rule the API server applies.
+// optional DNS-subdomain prefix (lowercase), a /, and a name — the same
+// rule the API server applies.
 func validLabelKey(s string) bool {
 	name := s
 	if i := strings.LastIndex(s, "/"); i >= 0 {
@@ -228,7 +228,36 @@ func validLabelKey(s string) bool {
 		}
 		name = rest
 	}
-	return validDNSLabel(name)
+	return validQualifiedNameName(name)
+}
+
+// validQualifiedNameName reports whether s is a valid label-key name part:
+// 1-63 characters, beginning and ending with an alphanumeric, with only
+// [A-Za-z0-9_.-] in between. Wider than a DNS label — Kubernetes label and
+// node-selector key names may carry uppercase, underscores and periods
+// (e.g. "My_Key"), and the API server accepts them.
+func validQualifiedNameName(s string) bool {
+	if s == "" || len(s) > 63 {
+		return false
+	}
+	if !isAlnum(s[0]) || !isAlnum(s[len(s)-1]) {
+		return false
+	}
+	for _, c := range s {
+		if isAlnumRune(c) || c == '_' || c == '.' || c == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// isAlnum reports whether c is an ASCII letter or digit.
+func isAlnum(c byte) bool { return isAlnumRune(rune(c)) }
+
+// isAlnumRune reports whether c is an ASCII letter or digit.
+func isAlnumRune(c rune) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
 }
 
 // parseKeyValues parses repeated "K=V" entries (values may contain '='),
@@ -239,7 +268,7 @@ func parseKeyValues(entries []string, what string) (map[string]string, error) {
 	for _, e := range entries {
 		k, v, ok := strings.Cut(e, "=")
 		if !ok || !validLabelKey(k) {
-			return nil, fmt.Errorf("invalid --%s %q (key must be a valid label key: optional prefix/, then up to 63 lowercase alphanumerics, dots and dashes)", what, e)
+			return nil, fmt.Errorf("invalid --%s %q (key must be a valid label key: optional lowercase subdomain prefix, then a name of up to 63 characters that starts and ends with an alphanumeric)", what, e)
 		}
 		out[k] = v
 	}

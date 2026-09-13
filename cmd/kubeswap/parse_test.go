@@ -131,7 +131,21 @@ func TestKubeswap_ParseKeyValues(t *testing.T) {
 	if _, err := parseKeyValues([]string{"feature.node.kubernetes.io/amd-gpu=v"}, "node-selector"); err != nil {
 		t.Errorf("prefixed key should be valid: %v", err)
 	}
-	for _, bad := range []string{"BAD KEY=v", "/=v", "a/=v", "UPPER=v", "a/b/c=v", "a" + strings.Repeat("b", 63) + "=v"} {
+	// Qualified-name names: uppercase, underscores and periods are legal
+	// (the API server accepts them), so they must not be rejected here.
+	for _, good := range []string{"UPPER=v", "My_Key=v", "a.B_c=v", "feature.node.kubernetes.io/My.Key=v"} {
+		if _, err := parseKeyValues([]string{good}, "label"); err != nil {
+			t.Errorf("expected label key %q to be valid: %v", good, err)
+		}
+	}
+	for _, bad := range []string{
+		"BAD KEY=v",   // space
+		"/=v", "a/=v", // empty name / empty prefix
+		"My.Prefix/key=v",                               // the prefix must stay a lowercase subdomain
+		"_leading=v", "trailing_=v", ".dot=v", "dot.=v", // must start/end alphanumeric
+		"a/b/c=v",                            // two slashes
+		"a" + strings.Repeat("b", 63) + "=v", // 64 characters
+	} {
 		if _, err := parseKeyValues([]string{bad}, "label"); err == nil {
 			t.Errorf("expected error for label key %q", bad)
 		}
