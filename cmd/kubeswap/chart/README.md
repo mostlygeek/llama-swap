@@ -56,7 +56,7 @@ works inside model commands (it is how the default config keeps
 | `image.tag` | `unified-vulkan` | `unified-cuda13` / `unified-cuda` for NVIDIA |
 | `image.pullPolicy` | `IfNotPresent` | |
 | `imagePullSecrets` | `[]` | list of secret names |
-| `replicas` | `1` | keep at 1 — never two head-ends per namespace |
+| `replicas` | `1` | must be 1 (the chart fails on more) — never two head-ends per namespace |
 | `strategy.type` | `Recreate` | deliberate (see replicas) |
 | `config.inline` | demo config | `config.yaml`, templated, into the chart's ConfigMap |
 | `config.top` | `{}` | structured: everything except `models:` (scalars, macros, routing); templated |
@@ -261,6 +261,11 @@ config:
 
 ## Notes
 
+- **Compatibility**: the chart and the kubeswap binary in the image are
+  versioned together in this repo; this chart is tested against kubeswap
+  as it exists on this branch. If you mix a newer image with an older
+  chart (or vice versa), check `rbac.rules`, the probe values and the
+  config rendering against the kubeswap changes in between.
 - **Upgrade behavior**: `helm upgrade` changes to `config.inline` update
   the ConfigMap; the head-end runs with `-watch-config`, so model
   changes apply on reload (added/removed models are unloaded/reloaded
