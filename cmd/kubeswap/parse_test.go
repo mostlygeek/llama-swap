@@ -196,3 +196,15 @@ func TestKubeswap_ParseServicePorts(t *testing.T) {
 		t.Error("expected error for duplicate name with different port")
 	}
 }
+
+// TestKubeswap_StatusWatchRejectsNonPositiveInterval verifies --interval
+// is validated at parse time: time.NewTicker would panic on a non-positive
+// duration after the initial status print.
+func TestKubeswap_StatusWatchRejectsNonPositiveInterval(t *testing.T) {
+	for _, iv := range []string{"0", "-5s"} {
+		err := statusCmd([]string{"--watch", "--interval", iv})
+		if err == nil || !strings.Contains(err.Error(), "invalid --interval") {
+			t.Errorf("--interval %s: expected invalid --interval error, got %v", iv, err)
+		}
+	}
+}
