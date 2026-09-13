@@ -345,17 +345,8 @@ func runStatus(namespace, kubeconfig string) error {
 	return nil
 }
 
-// truncate Shortens s to at most n characters, appending an ellipsis when
-// it cuts. Control characters (including ANSI escapes) are stripped first:
-// the model column shows the ORIGINAL config-supplied ID, which the API
-// server never validated, and this output goes to a terminal.
+// truncate Shortens s to at most n characters, appending an ellipsis when it cuts.
 func truncate(s string, n int) string {
-	s = strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f {
-			return -1
-		}
-		return r
-	}, s)
 	if len(s) <= n {
 		return s
 	}
