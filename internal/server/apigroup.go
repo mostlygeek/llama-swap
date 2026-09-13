@@ -414,7 +414,7 @@ func (s *Server) tailcatExposedModelIDs() []string {
 
 	ids := make([]string, 0, len(candidates))
 	for id := range candidates {
-		if tailcatModelAllowed(tc.Models, id) {
+		if s.tailcatModelAllowed(id) {
 			ids = append(ids, id)
 		}
 	}

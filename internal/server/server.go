@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -418,7 +419,7 @@ func (s *Server) ServeTailcatHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if inference && r.Method != http.MethodOptions {
 		model, err := swaputil.ExtractModel(r)
-		if err != nil || !tailcatModelAllowed(tc.Models, model) {
+		if err != nil || !s.tailcatModelAllowed(model) {
 			http.NotFound(w, r)
 			return
 		}
@@ -469,9 +470,23 @@ func isTailcatInferencePath(path string) bool {
 	return false
 }
 
-func tailcatModelAllowed(models []string, id string) bool {
-	for _, exposed := range models {
+// tailcatModelAllowed reports whether a Tailcat caller may request id. An
+// entry in tailcat.models exposes that ID and, when it names a local model,
+// that model's aliases too: the setParamsByID variants of a model are aliases,
+// and listing a model without them would offer picks that 404. The reverse
+// does not hold: an entry naming an alias exposes only that alias, which is
+// what lets a config publish a model under a public name while keeping its
+// real ID private.
+func (s *Server) tailcatModelAllowed(id string) bool {
+	tc := s.cfg.Tailcat
+	if tc == nil {
+		return false
+	}
+	for _, exposed := range tc.Models {
 		if exposed == "*" || exposed == id {
+			return true
+		}
+		if mc, ok := s.cfg.Models[exposed]; ok && slices.Contains(mc.Aliases, id) {
 			return true
 		}
 	}

@@ -59,9 +59,11 @@ llama-swap -config /path/to/config.yaml \
 
 `-listen-tailcat` requires a valid Tailcat server PrivateKey JSON file and a
 non-empty `tailcat.models` list. Use `models: ["*"]` explicitly to expose all
-callable local and peer IDs. An empty `allow` list permits any client holding
-the token, though an explicit allowlist is strongly recommended for a
-persistent address.
+callable local and peer IDs. Naming a local model exposes its aliases too,
+including the variants `setParamsByID` creates; naming only an alias exposes
+just that alias and keeps the model's real ID private. An empty `allow` list
+permits any client holding the token, though an explicit allowlist is strongly
+recommended for a persistent address.
 
 With `admin: false` (the default), Tailcat serves only `/health`, filtered model
 listings, and allowlisted model-dispatched inference routes. Set `admin: true`
