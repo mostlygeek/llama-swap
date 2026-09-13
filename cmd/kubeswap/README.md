@@ -566,6 +566,12 @@ error during a watch is printed and the watch continues.
   image pull failure, crash loop, ...).
 - `kubeswap logs --model <id>` — the backend's own logs; model load errors
   (bad path, OOM, missing device) show up here.
+- A model that keeps restarting is failing to load. kubeswap keeps
+  retrying by design (transient storage or image hiccups recover that
+  way), so read its logs instead of waiting it out. To apply a config
+  fix to a model that is already failing, run `kubeswap delete --model
+  <id>` first (or run serve with `--strict`): a plain adoption keeps the
+  old spec.
 - `serve` forwards pod logs to stderr with a `[pod/<name>]` prefix, which
   llama-swap records in its log monitor.
 - While the pod is not Ready, the proxy answers every request with 503 and
