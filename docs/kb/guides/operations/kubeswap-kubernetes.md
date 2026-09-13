@@ -21,7 +21,7 @@ Kubernetes API.
 
 - **Head end**: llama-swap (with `kubeswap` on its PATH) runs as a Deployment
   with a mounted `config.yaml` (`-watch-config` enabled) and a ServiceAccount
-  with namespaced RBAC (deployments, services, PVCs, pods, pods/log, events).
+  with namespaced RBAC (deployments, services, PVCs, pods, pods/log).
 - **Backends**: one pod per model, labeled `llama-swap.io/managed-by:
   llama-swap`. The wrapper polls pod readiness, streams the backend's logs
   into llama-swap's logs, and answers llama-swap's health check from pod

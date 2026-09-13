@@ -90,7 +90,7 @@ upstreamable on its own):
 - RBAC for the namespace: the [Helm chart](chart/) renders a
   starter ServiceAccount + Role + RoleBinding (deployments/services
   create-get-list-watch-delete, PVCs get/create/delete, pods get/list/watch,
-  pod logs, events); the rules are overridable via `rbac.rules`.
+  pod logs); the rules are overridable via `rbac.rules`.
 - A StorageClass that supports `ReadWriteMany` if the model cache PVC should
   be reachable from every GPU node (e.g. longhorn, nfs). kubeswap creates
   missing PVCs with `--pvc-size` / `--pvc-class` / `--pvc-access-mode`;
