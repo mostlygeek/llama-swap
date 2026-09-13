@@ -184,20 +184,22 @@ func TestKubeswap_EnsureResourcesRejectsReadOnlyPVCForWritableMount(t *testing.T
 	}
 
 	// A read-write PVC serves a read-write mount.
-	client2 := newFakeClient()
-	rwPVC := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "cache", Namespace: "llama-swap"},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
-		},
-	}
-	if _, err := client2.CoreV1().PersistentVolumeClaims("llama-swap").Create(context.Background(), rwPVC, metav1.CreateOptions{}); err != nil {
-		t.Fatal(err)
-	}
-	cfg2 := testConfig()
-	cfg2.Volumes = []volumeSpec{{Kind: volPVC, Name: "cache", Path: "/models"}}
-	if _, err := ensureResources(client2, cfg2); err != nil {
-		t.Fatalf("read-write mount on a read-write PVC should be fine: %v", err)
+	for _, mode := range []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce, corev1.ReadWriteOncePod, corev1.ReadWriteMany} {
+		client2 := newFakeClient()
+		rwPVC := &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: "cache", Namespace: "llama-swap"},
+			Spec: corev1.PersistentVolumeClaimSpec{
+				AccessModes: []corev1.PersistentVolumeAccessMode{mode},
+			},
+		}
+		if _, err := client2.CoreV1().PersistentVolumeClaims("llama-swap").Create(context.Background(), rwPVC, metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		cfg2 := testConfig()
+		cfg2.Volumes = []volumeSpec{{Kind: volPVC, Name: "cache", Path: "/models"}}
+		if _, err := ensureResources(client2, cfg2); err != nil {
+			t.Fatalf("read-write mount on a %v PVC should be fine: %v", mode, err)
+		}
 	}
 }
 
