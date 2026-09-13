@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
+	kvalidation "k8s.io/apimachinery/pkg/util/validation"
 )
 
 const (
@@ -159,29 +160,14 @@ func addKubeFlags(fs *flag.FlagSet, namespace, kubeconfig *string) {
 	fs.StringVar(kubeconfig, "kubeconfig", "", "Path to a kubeconfig (default: in-cluster config, then KUBECONFIG / ~/.kube/config)")
 }
 
-// validEnvName reports whether s is a valid environment variable name
-// (C identifier: letters, digits and underscores, not starting with a
-// digit) — the same rule the API server applies to env names.
-func validEnvName(s string) bool {
-	for i, c := range s {
-		switch {
-		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c == '_':
-		case i > 0 && c >= '0' && c <= '9':
-		default:
-			return false
-		}
-	}
-	return s != ""
-}
-
-// envVar parses "K=V" entries (V may contain '='), validating K as an
-// environment variable name so bad names fail at flag parse instead of
-// at Deployment creation.
+// parseEnvVars parses "K=V" entries (V may contain '='), validating K
+// with the API server's own rule (IsEnvVarName) so bad names fail at
+// flag parse instead of at Deployment creation.
 func parseEnvVars(entries []string) (out []envVar, err error) {
 	for _, e := range entries {
 		k, v, ok := strings.Cut(e, "=")
-		if !ok || !validEnvName(k) {
-			return nil, fmt.Errorf("invalid --env %q (name must match [A-Za-z_][A-Za-z0-9_]*)", e)
+		if !ok || len(kvalidation.IsEnvVarName(k)) > 0 {
+			return nil, fmt.Errorf("invalid --env %q (name must be a valid environment variable name: letters, digits, '_', '-', or '.', not starting with a digit)", e)
 		}
 		out = append(out, envVar{Key: k, Value: v})
 	}
@@ -315,31 +301,6 @@ type servicePortSpec struct {
 	Port int32
 }
 
-// validPortName reports whether s is a legal Kubernetes Service port
-// name (IANA_SVC_NAME): up to 15 characters of lowercase alphanumerics
-// and dashes (not at either end), and not consisting solely of digits.
-func validPortName(s string) bool {
-	if s == "" || len(s) > 15 {
-		return false
-	}
-	allDigits := true
-	for i, c := range s {
-		switch {
-		case c >= 'a' && c <= 'z':
-			allDigits = false
-		case c >= '0' && c <= '9':
-		case c == '-' && i != 0 && i != len(s)-1:
-			allDigits = false
-		default:
-			return false
-		}
-	}
-	if allDigits {
-		return false
-	}
-	return true
-}
-
 // parseServicePorts parses "name:port" entries, rejecting duplicate names.
 // Container port names must be unique within the container, so the same
 // name on a different port is a duplicate too — renderPorts would emit
@@ -352,8 +313,8 @@ func parseServicePorts(entries []string) ([]servicePortSpec, error) {
 		if !ok || portS == "" {
 			return nil, fmt.Errorf("invalid --service-port %q (want name:port)", e)
 		}
-		if !validPortName(name) {
-			return nil, fmt.Errorf("invalid --service-port name %q (want up to 15 lowercase alphanumerics and dashes, not all digits)", name)
+		if len(kvalidation.IsValidPortName(name)) > 0 {
+			return nil, fmt.Errorf("invalid --service-port name %q (IANA_SVC_NAME: up to 15 lowercase alphanumerics and hyphens, at least one letter, no consecutive or edge hyphens)", name)
 		}
 		port, err := strconv.Atoi(portS)
 		if err != nil || port < 1 || port > 65535 {

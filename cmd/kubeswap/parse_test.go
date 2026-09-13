@@ -19,7 +19,14 @@ func TestKubeswap_ParseEnvVars(t *testing.T) {
 	if _, err := parseEnvVars([]string{"NOEQUALS"}); err == nil {
 		t.Error("expected error for missing '='")
 	}
-	for _, bad := range []string{"=v", "FOO BAR=v", "a.b=v", "1abc=v", "-abc=v"} {
+	// Dots and hyphens are part of the API server's env-name rule
+	// ([-._a-zA-Z][-._a-zA-Z0-9]*) and must not be rejected here.
+	for _, good := range []string{"a.b=v", "MY-ENV.NAME=v", "-abc=v"} {
+		if _, err := parseEnvVars([]string{good}); err != nil {
+			t.Errorf("expected env name %q to be valid: %v", good, err)
+		}
+	}
+	for _, bad := range []string{"=v", "FOO BAR=v", "1abc=v", ".=v", "..=v", "..foo=v"} {
 		if _, err := parseEnvVars([]string{bad}); err == nil {
 			t.Errorf("expected error for env name %q", bad)
 		}
@@ -178,7 +185,19 @@ func TestKubeswap_ParseServicePorts(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	for _, bad := range []string{"noprefix", "metrics:", "metrics:abc", "Metrics:9090", "a:b:c", "metrics:70000", "8080:9090", "abcdefghijklmnop:9090"} {
+	for _, bad := range []string{
+		"noprefix",              // no name
+		"metrics:",              // empty name
+		"metrics:abc",           // non-numeric port
+		"Metrics:9090",          // uppercase
+		"a:b:c",                 // extra colon
+		"metrics:70000",         // port out of range
+		"8080:9090",             // no letter (must contain at least one a-z)
+		"met--rics:9090",        // consecutive hyphens
+		"-metrics:9090",         // leading hyphen
+		"metrics-:9090",         // trailing hyphen
+		"abcdefghijklmnop:9090", // 16 characters
+	} {
 		if _, err := parseServicePorts([]string{bad}); err == nil {
 			t.Errorf("expected error for %q", bad)
 		}
