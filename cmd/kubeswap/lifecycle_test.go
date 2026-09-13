@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"os"
 	"strings"
@@ -651,7 +652,7 @@ func TestKubeswap_GCCollectsStaleWorkloads(t *testing.T) {
 	// model-b was removed from config: only model-a survives.
 	allowed := map[string]bool{"model-a": true}
 	ctx := context.Background()
-	deleted, err := gcCollect(client, "llama-swap", allowed, false)
+	deleted, err := gcCollect(client, "llama-swap", allowed, false, false)
 	if err != nil {
 		t.Fatalf("gcCollect: %v", err)
 	}
@@ -678,7 +679,7 @@ func TestKubeswap_GCCollectsStaleWorkloads(t *testing.T) {
 	if _, err := client.AppsV1().Deployments("llama-swap").Create(ctx, stale, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	deleted, err = gcCollect(client, "llama-swap", allowed, false)
+	deleted, err = gcCollect(client, "llama-swap", allowed, false, false)
 	if err != nil {
 		t.Fatalf("gcCollect (second pass): %v", err)
 	}
@@ -894,5 +895,79 @@ func TestKubeswap_RunLogs(t *testing.T) {
 	found, err := findModelPod(context.Background(), client, "llama-swap", cfg.Sanitized, cfg.DepName)
 	if err != nil || found == nil || found.Name != "m1" {
 		t.Fatalf("findModelPod: got %v, err %v; want pod m1", found, err)
+	}
+}
+
+// TestKubeswap_GCDryRunKeepsWorkloads verifies --dry-run reports the
+// collection plan without deleting anything.
+func TestKubeswap_GCDryRunKeepsWorkloads(t *testing.T) {
+	client := newFakeClient()
+	cfg := testConfig()
+	if _, err := ensureResources(client, cfg); err != nil {
+		t.Fatal(err)
+	}
+	allowed := map[string]bool{} // the model is not allowed: gc would collect it
+	ctx := context.Background()
+
+	got, err := gcCollect(client, "llama-swap", allowed, false, true)
+	if err != nil {
+		t.Fatalf("gcCollect dry-run: %v", err)
+	}
+	if len(got) != 1 || got[0] != cfg.Model {
+		t.Errorf("dry-run should report the model, got %v", got)
+	}
+	if _, err := client.AppsV1().Deployments("llama-swap").Get(ctx, cfg.DepName, metav1.GetOptions{}); err != nil {
+		t.Fatalf("dry-run must not delete the deployment: %v", err)
+	}
+	if _, err := client.CoreV1().Services("llama-swap").Get(ctx, cfg.SvcName, metav1.GetOptions{}); err != nil {
+		t.Fatalf("dry-run must not delete the service: %v", err)
+	}
+
+	got, err = gcCollect(client, "llama-swap", allowed, false, false)
+	if err != nil {
+		t.Fatalf("gcCollect: %v", err)
+	}
+	if len(got) != 1 || got[0] != cfg.Model {
+		t.Errorf("collect should report the model, got %v", got)
+	}
+	if _, err := client.AppsV1().Deployments("llama-swap").Get(ctx, cfg.DepName, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Errorf("the real run should delete the deployment, err=%v", err)
+	}
+}
+
+// TestKubeswap_StatusWatchSurvivesTransientError verifies the watch loop
+// prints a tick error instead of dying: the second API call fails, the
+// loop keeps going, and ctx cancellation stops it cleanly.
+func TestKubeswap_StatusWatchSurvivesTransientError(t *testing.T) {
+	client := newFakeClient()
+	cfg := testConfig()
+	if _, err := ensureResources(client, cfg); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	client.PrependReactor("list", "deployments", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		calls++
+		if calls == 2 {
+			return true, nil, errors.New("boom")
+		}
+		return false, nil, nil
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- runStatusWithClient(ctx, client, "llama-swap", true, 10*time.Millisecond)
+	}()
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("watch should survive the transient error and stop on ctx cancel, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("watch did not stop on ctx cancel")
+	}
+	if calls < 2 {
+		t.Errorf("expected at least 2 list calls, got %d", calls)
 	}
 }

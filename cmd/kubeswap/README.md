@@ -538,9 +538,12 @@ in-cluster config else standard kubeconfig rules):
 and kills the wrapper, which can leave the pod terminating behind it.
 
 `gc`: `--models` (repeatable or comma-separated allow-list), `--config`
-(llama-swap config.yaml — its model keys survive), `--delete-volumes`.
+(llama-swap config.yaml — its model keys survive), `--delete-volumes`,
+`--dry-run` (print the collection plan without deleting anything).
 
-`status`: none beyond the global flags.
+`status`: `--watch` (keep refreshing; for interactive use, Ctrl-C to
+stop), `--interval` (refresh period, default `5s`). A transient API
+error during a watch is printed and the watch continues.
 
 `logs`: `--model` (required), `--tail` (default `100`; `0` = all lines),
 `--follow` (keep streaming until the pod or container stops).

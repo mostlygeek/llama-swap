@@ -175,6 +175,7 @@ type gcFlags struct {
 	models        stringList
 	config        string
 	deleteVolumes bool
+	dryRun        bool
 }
 
 // gcAllowedModels builds the set of model IDs from --models entries and,
@@ -219,6 +220,7 @@ func gcCmd(args []string) error {
 	fs.Var(&f.models, "models", "comma-separated model IDs that should survive GC (repeatable)")
 	fs.StringVar(&f.config, "config", "", "path to a llama-swap config.yaml; its models keep surviving GC")
 	fs.BoolVar(&f.deleteVolumes, "delete-volumes", false, "also delete PVCs that kubeswap created for collected models")
+	fs.BoolVar(&f.dryRun, "dry-run", false, "report what would be collected without deleting anything")
 	fs.Parse(args)
 
 	client, err := buildClient(f.kubeconfig)
@@ -230,17 +232,22 @@ func gcCmd(args []string) error {
 		return err
 	}
 
-	deleted, err := gcCollect(client, f.namespace, allowed, f.deleteVolumes)
+	deleted, err := gcCollect(client, f.namespace, allowed, f.deleteVolumes, f.dryRun)
 	if err != nil {
 		return err
 	}
-	log.Printf("gc complete: collected %v", deleted)
+	if f.dryRun {
+		log.Printf("gc complete (dry run): would collect %v", deleted)
+	} else {
+		log.Printf("gc complete: collected %v", deleted)
+	}
 	return nil
 }
 
 // gcCollect deletes managed workloads whose model ID is not in allowed and
-// returns the collected model IDs.
-func gcCollect(client kubernetes.Interface, namespace string, allowed map[string]bool, deleteVolumes bool) ([]string, error) {
+// returns the collected model IDs. With dryRun the workloads are only
+// reported, so the operator can see the plan before letting it run.
+func gcCollect(client kubernetes.Interface, namespace string, allowed map[string]bool, deleteVolumes, dryRun bool) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	managed := labels.Set(map[string]string{labelManagedBy: managedByValue}).String()
@@ -268,6 +275,11 @@ func gcCollect(client kubernetes.Interface, namespace string, allowed map[string
 			log.Printf("keeping %s/%s (model %q)", namespace, dep.Name, modelID)
 			continue
 		}
+		if dryRun {
+			log.Printf("would collect %s/%s (model %q not in config)", namespace, dep.Name, modelID)
+			deleted = append(deleted, modelID)
+			continue
+		}
 		log.Printf("collecting %s/%s (model %q not in config)", namespace, dep.Name, modelID)
 		if err := deleteModel(client, namespace, modelID, deleteVolumes, 0); err != nil {
 			return deleted, fmt.Errorf("collecting model %q: %w", modelID, err)
@@ -282,25 +294,57 @@ func statusCmd(args []string) error {
 	var (
 		namespace  string
 		kubeconfig string
+		watch      bool
+		interval   time.Duration
 	)
 	fs := newFlagSet("status")
 	addKubeFlags(fs, &namespace, &kubeconfig)
+	fs.BoolVar(&watch, "watch", false, "keep refreshing the table (for interactive use; Ctrl-C to stop)")
+	fs.DurationVar(&interval, "interval", 5*time.Second, "refresh interval for --watch")
 	fs.Parse(args)
-	return runStatus(namespace, kubeconfig)
+	return runStatus(namespace, kubeconfig, watch, interval)
 }
 
 // runStatus Lists the managed Deployments, their pods and the models they serve.
-func runStatus(namespace, kubeconfig string) error {
+func runStatus(namespace, kubeconfig string, watch bool, interval time.Duration) error {
 	client, err := buildClient(kubeconfig)
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-	return statusOnce(ctx, client, namespace)
+	return runStatusWithClient(context.Background(), client, namespace, watch, interval)
 }
 
-// statusOnce prints one status table; the watch loop calls it on a ticker.
+func runStatusWithClient(ctx context.Context, client kubernetes.Interface, namespace string, watch bool, interval time.Duration) error {
+	bounded, cancel := context.WithTimeout(ctx, apiCallTimeout)
+	err := statusOnce(bounded, client, namespace)
+	cancel()
+	if err != nil {
+		return err
+	}
+	if !watch {
+		return nil
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			bounded, cancel := context.WithTimeout(ctx, apiCallTimeout)
+			err := statusOnce(bounded, client, namespace)
+			cancel()
+			if err != nil {
+				fmt.Println("status:", err)
+			}
+		}
+	}
+}
+
+// runStatusWithClient prints the status table and, with watch, refreshes it
+// on a ticker until ctx is done. A transient API error in the loop is
+// printed but does not kill the watch; the initial print failing is an
+// error (there is nothing to watch yet).
 func statusOnce(ctx context.Context, client kubernetes.Interface, namespace string) error {
 	managed := labels.Set(map[string]string{labelManagedBy: managedByValue}).String()
 	deps, err := client.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{LabelSelector: managed})
