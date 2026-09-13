@@ -13,8 +13,6 @@
     TriangleAlert,
     Plus,
     ShieldCheck,
-    EyeOff,
-    HardDrive,
     LoaderCircle,
     CircleAlert,
   } from "@lucide/svelte";
@@ -97,38 +95,16 @@
 <div class="mx-auto flex w-full max-w-2xl flex-col gap-5 p-4">
   <div class="flex flex-col gap-4">
     <div>
-      <h1 class="text-3xl font-semibold tracking-tight">Connect to llama-swap securely</h1>
-      <p class="text-muted-foreground mt-2 text-sm leading-relaxed">
-        The Playground, running entirely in your browser, reaching a llama-swap node over Tailcat.
-        Your prompts, keys and servers never leave this device except to go to the node itself.
-      </p>
+      <h1 class="text-3xl font-semibold tracking-tight">Connect securely to llama-swap</h1>
     </div>
-    <ul class="grid gap-2 sm:grid-cols-3">
-      <li class="bg-muted/40 flex flex-col gap-1.5 rounded-xl border p-3">
-        <EyeOff class="text-primary size-4" />
-        <div class="text-sm font-medium">Nothing sent to this site</div>
-        <div class="text-muted-foreground text-xs leading-relaxed">
-          This page is a static file. The connection is made from your browser, and the site serving
-          it sees none of your traffic.
-        </div>
-      </li>
-      <li class="bg-muted/40 flex flex-col gap-1.5 rounded-xl border p-3">
-        <ShieldCheck class="text-primary size-4" />
-        <div class="text-sm font-medium">Encrypted end to end</div>
-        <div class="text-muted-foreground text-xs leading-relaxed">
-          Tailcat is WireGuard. Only your browser and the node can read what passes between them,
-          not the relay in the middle.
-        </div>
-      </li>
-      <li class="bg-muted/40 flex flex-col gap-1.5 rounded-xl border p-3">
-        <HardDrive class="text-primary size-4" />
-        <div class="text-sm font-medium">Saved only on this device</div>
-        <div class="text-muted-foreground text-xs leading-relaxed">
-          Servers, tokens and this browser's node key live in local storage here. No account, no
-          sync, no cloud.
-        </div>
-      </li>
-    </ul>
+    <p class="bg-muted/40 flex items-start gap-2 rounded-xl border p-3 text-sm leading-relaxed">
+      <ShieldCheck class="text-primary mt-0.5 size-4 shrink-0" />
+      <span>
+        This page is a static file, so nothing you do here is sent to the site serving it. Your
+        browser connects straight to your llama-swap host over Tailcat's WireGuard encryption.
+        All settings is kept in local storage on this device and never saved in the cloud.
+      </span>
+    </p>
   </div>
 
   {#if draft}
@@ -194,7 +170,7 @@
       <Card.Content class="flex flex-col gap-2 p-0">
         {#each servers as server (server.id)}
           {@const isActive = server.id === $activeServerID}
-          <div class="flex items-center gap-2 rounded-lg border p-2" class:border-primary={isActive}>
+          <div class="flex items-center gap-2 rounded-lg border p-2">
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2">
                 <span class="truncate font-medium">{server.name}</span>
