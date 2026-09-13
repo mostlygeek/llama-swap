@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strings"
@@ -296,6 +297,11 @@ func runStatus(namespace, kubeconfig string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
+	return statusOnce(ctx, client, namespace)
+}
+
+// statusOnce prints one status table; the watch loop calls it on a ticker.
+func statusOnce(ctx context.Context, client kubernetes.Interface, namespace string) error {
 	managed := labels.Set(map[string]string{labelManagedBy: managedByValue}).String()
 	deps, err := client.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{LabelSelector: managed})
 	if err != nil {
@@ -328,7 +334,7 @@ func runStatus(namespace, kubeconfig string) error {
 		}
 	}
 
-	fmt.Printf("%-32s %-28s %-24s %-8s %s\n", "MODEL", "DEPLOYMENT", "POD", "READY", "AGE")
+	fmt.Printf("%-32s %-28s %-24s %-8s %-10s %s\n", "MODEL", "DEPLOYMENT", "POD", "READY", "AGE", "REASON")
 	for i := range deps.Items {
 		dep := &deps.Items[i]
 		model := dep.Annotations[annotationModelID]
@@ -340,18 +346,131 @@ func runStatus(namespace, kubeconfig string) error {
 			age = time.Since(dep.CreationTimestamp.Time).Round(time.Second).String()
 		}
 		pod, ok := podByModel[dep.Name]
-		podName, ready := "-", "-"
+		podName, ready, reason := "-", "-", ""
 		if ok {
 			podName = pod.Name
 			ready = "no"
 			if podIsReady(pod) {
 				ready = "yes"
+			} else {
+				reason = podReason(pod)
 			}
 		}
-		fmt.Printf("%-32s %-28s %-24s %-8s %s\n",
-			truncate(model, 32), truncate(dep.Name, 28), truncate(podName, 24), ready, age)
+		fmt.Printf("%-32s %-28s %-24s %-8s %-10s %s\n",
+			truncate(model, 32), truncate(dep.Name, 28), truncate(podName, 24), ready, age, reason)
 	}
 	return nil
+}
+
+// podReason summarizes why a pod is not ready (empty when it is): the
+// container waiting state (CrashLoopBackOff, ImagePullBackOff, ...) when
+// there is one, the scheduler's verdict when the pod is unscheduled, or
+// "starting" when the container is up but the probes have not passed.
+func podReason(p *corev1.Pod) string {
+	if podIsReady(p) {
+		return ""
+	}
+	for _, cs := range p.Status.ContainerStatuses {
+		if w := cs.State.Waiting; w != nil && w.Reason != "" {
+			if w.Message != "" {
+				return truncate(w.Reason+": "+w.Message, 64)
+			}
+			return w.Reason
+		}
+	}
+	for _, cond := range p.Status.Conditions {
+		if cond.Type == corev1.PodScheduled && cond.Status == corev1.ConditionFalse && cond.Message != "" {
+			return truncate("unscheduled: "+cond.Message, 64)
+		}
+	}
+	return "starting"
+}
+
+// logsCmd Implements the logs subcommand: prints (and, with --follow, streams) the backend container logs of a model's pod.
+func logsCmd(args []string) error {
+	var (
+		model  string
+		f      manageFlags
+		tail   int
+		follow bool
+	)
+	fs := newFlagSet("logs")
+	fs.StringVar(&model, "model", "", "llama-swap model ID (required)")
+	addKubeFlags(fs, &f.namespace, &f.kubeconfig)
+	fs.IntVar(&tail, "tail", 100, "number of lines to start from (0 = all lines)")
+	fs.BoolVar(&follow, "follow", false, "keep streaming until the pod or container stops")
+	fs.Parse(args)
+
+	if model == "" {
+		return errors.New("--model is required")
+	}
+	client, err := buildClient(f.kubeconfig)
+	if err != nil {
+		return err
+	}
+	return runLogs(client, f.namespace, model, tail, follow)
+}
+
+// runLogs finds the model's pod and copies the backend container's logs to
+// stdout. The pod lookup is bounded (a hung control plane must not hang the
+// CLI); the log stream itself runs until it ends or the process is killed.
+func runLogs(client kubernetes.Interface, namespace, model string, tail int, follow bool) error {
+	sanitized, err := sanitizeModelID(model)
+	if err != nil {
+		return err
+	}
+	depName, err := deploymentName(model)
+	if err != nil {
+		return err
+	}
+	pod, err := findModelPod(context.Background(), client, namespace, sanitized, depName)
+	if err != nil {
+		return err
+	}
+	if pod == nil {
+		return fmt.Errorf("no pod found for model %q in namespace %s (is it loaded?)", model, namespace)
+	}
+	opts := &corev1.PodLogOptions{Container: containerName, Follow: follow}
+	if tail > 0 {
+		n := int64(tail)
+		opts.TailLines = &n
+	}
+	stream, err := client.CoreV1().Pods(namespace).GetLogs(pod.Name, opts).Stream(context.Background())
+	if err != nil {
+		return fmt.Errorf("opening logs for pod %s: %w", pod.Name, err)
+	}
+	defer stream.Close()
+	if _, err := io.Copy(os.Stdout, stream); err != nil {
+		return fmt.Errorf("reading logs for pod %s: %w", pod.Name, err)
+	}
+	return nil
+}
+
+// findModelPod returns the model's current pod (preferring a ready one, then
+// the newest), or nil if the model has no live pod. The deployment name in
+// the selector keeps sibling models that sanitize to the same label out of
+// reach.
+func findModelPod(ctx context.Context, client kubernetes.Interface, namespace, sanitized, depName string) (*corev1.Pod, error) {
+	selector := labels.Set(podSelectorLabels(sanitized, depName)).String()
+	callCtx, cancel := context.WithTimeout(ctx, apiCallTimeout)
+	defer cancel()
+	pods, err := client.CoreV1().Pods(namespace).List(callCtx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		return nil, fmt.Errorf("listing pods: %w", err)
+	}
+	var best *corev1.Pod
+	for i := range pods.Items {
+		p := &pods.Items[i]
+		if p.DeletionTimestamp != nil {
+			continue
+		}
+		if best == nil ||
+			(podIsReady(p) && !podIsReady(best)) ||
+			(podIsReady(p) == podIsReady(best) && p.CreationTimestamp.After(best.CreationTimestamp.Time)) {
+			best = p
+		}
+	}
+	return best, nil
 }
 
 // truncate Shortens s to at most n characters, appending an ellipsis when it cuts.

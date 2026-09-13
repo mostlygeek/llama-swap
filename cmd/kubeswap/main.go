@@ -10,6 +10,7 @@
 //	delete  one-shot: delete a model's managed objects (used as cmdStop)
 //	gc      one-shot: delete managed objects for models not in the config
 //	status  one-shot: print the managed workloads
+//	logs    one-shot: print (or --follow) a model's backend logs
 package main
 
 import (
@@ -59,7 +60,7 @@ const (
 	annotationModelID = "llama-swap.io/model-id"
 )
 
-// main is the entry point: it parses the subcommand and its arguments and dispatches to serve, delete, gc, status or version.
+// main is the entry point: it parses the subcommand and its arguments and dispatches to serve, start, delete, gc, status, logs or version.
 func main() {
 	if len(os.Args) < 2 {
 		usage(os.Stderr)
@@ -75,6 +76,8 @@ func main() {
 		err = gcCmd(os.Args[2:])
 	case "status":
 		err = statusCmd(os.Args[2:])
+	case "logs":
+		err = logsCmd(os.Args[2:])
 	case "version":
 		printVersion()
 		return
@@ -101,6 +104,7 @@ Usage:
   kubeswap delete --model <id> [flags]
   kubeswap gc [flags]
   kubeswap status [flags]
+  kubeswap logs --model <id> [flags]
   kubeswap version
 
 Commands:
@@ -113,7 +117,10 @@ Commands:
            process exits on its own when it observes the deletion.
   gc       Delete managed workloads whose model is not in the given list
            (--models or --config pointing at a llama-swap config.yaml).
-  status   Print the managed workloads in the namespace.
+  status   Print the managed workloads in the namespace, including why a
+           not-ready pod is not ready.
+  logs     Print a model's backend container logs (--tail, --follow);
+           the quick way to see why a model fails to load.
   version  Print version and build information.
 
 Run "kubeswap <command> -h" for command flags.
