@@ -152,6 +152,53 @@ func TestKubeswap_EnsureResourcesAdoptsExistingPVC(t *testing.T) {
 	}
 }
 
+// TestKubeswap_EnsureResourcesRejectsReadOnlyPVCForWritableMount verifies
+// that adoption checks the PVC access modes against the mount.
+func TestKubeswap_EnsureResourcesRejectsReadOnlyPVCForWritableMount(t *testing.T) {
+	client := newFakeClient()
+	roPVC := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "cache", Namespace: "llama-swap"},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadOnlyMany},
+		},
+	}
+	if _, err := client.CoreV1().PersistentVolumeClaims("llama-swap").Create(context.Background(), roPVC, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Read-write mount on a read-only PVC: must fail with a clear error.
+	cfg := testConfig()
+	cfg.Volumes = []volumeSpec{{Kind: volPVC, Name: "cache", Path: "/models"}}
+	if _, err := ensureResources(client, cfg); err == nil {
+		t.Fatal("expected error for a read-write mount on a read-only PVC")
+	} else if !strings.Contains(err.Error(), "read-only") {
+		t.Errorf("error should explain the access mode mismatch: %v", err)
+	}
+
+	// The same PVC is fine with a :ro mount.
+	cfg.Volumes = []volumeSpec{{Kind: volPVC, Name: "cache", Path: "/models", ReadOnly: true}}
+	if _, err := ensureResources(client, cfg); err != nil {
+		t.Fatalf("read-only mount on a read-only PVC should be fine: %v", err)
+	}
+
+	// A read-write PVC serves a read-write mount.
+	client2 := newFakeClient()
+	rwPVC := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "cache", Namespace: "llama-swap"},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+		},
+	}
+	if _, err := client2.CoreV1().PersistentVolumeClaims("llama-swap").Create(context.Background(), rwPVC, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	cfg2 := testConfig()
+	cfg2.Volumes = []volumeSpec{{Kind: volPVC, Name: "cache", Path: "/models"}}
+	if _, err := ensureResources(client2, cfg2); err != nil {
+		t.Fatalf("read-write mount on a read-write PVC should be fine: %v", err)
+	}
+}
+
 // TestKubeswap_DeleteModel Verifies delete tears down the model's Deployment and Service.
 func TestKubeswap_DeleteModel(t *testing.T) {
 	client := newFakeClient()
