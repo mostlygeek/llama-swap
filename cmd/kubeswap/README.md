@@ -534,12 +534,13 @@ in-cluster config else standard kubeconfig rules):
 | `--strict` | `false` | replace a drifted deployment instead of adopting it |
 | `--upstream` | discovered pod IP | fixed proxy upstream URL |
 | `--poll` | `1s` | cluster state poll interval |
+| `--proxy-response-timeout` | `300s` | bound on how long a ready backend may take before sending response headers; CPU image generation can need several minutes per image (`0` disables the bound) |
 | `--no-logs` | `false` | disable pod log forwarding |
 | `--` | — | everything after becomes the container args |
 
 `start`: the same flags as `serve` minus the proxy-only ones
-(`--listen`, `--check-path`, `--upstream`, `--poll`, `--no-logs`), plus
-the `--` container args.
+(`--listen`, `--check-path`, `--upstream`, `--poll`,
+`--proxy-response-timeout`, `--no-logs`), plus the `--` container args.
 
 `delete`: `--model` (required), `--delete-volumes`, `--wait` (default `30s`;
 `0` = do not wait). Keep `--wait` (and `--grace`) within llama-swap's

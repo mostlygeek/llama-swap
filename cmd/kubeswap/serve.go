@@ -275,12 +275,13 @@ func createMissing(ctx context.Context, client kubernetes.Interface, cfg *serveC
 
 // server is the state of a running `kubeswap serve` process.
 type server struct {
-	cfg              *serveConfig
-	client           kubernetes.Interface
-	proxy            *httputil.ReverseProxy
-	upstreamOverride string
-	noLogs           bool
-	poll             time.Duration
+	cfg                  *serveConfig
+	client               kubernetes.Interface
+	proxy                *httputil.ReverseProxy
+	upstreamOverride     string
+	noLogs               bool
+	poll                 time.Duration
+	proxyResponseTimeout time.Duration
 
 	ready       atomic.Bool
 	readyReason atomic.Value // string
@@ -298,35 +299,36 @@ type server struct {
 
 // serveFlags holds the parsed `serve` flags.
 type serveFlags struct {
-	listen         string
-	model          string
-	namespace      string
-	kubeconfig     string
-	image          string
-	port           int
-	healthPath     string
-	checkPath      string
-	livenessPath   string
-	probeTimeout   time.Duration
-	startupTimeout time.Duration
-	command        stringList
-	requests       stringList
-	limits         stringList
-	servicePorts   stringList
-	envs           stringList
-	gpus           stringList
-	nodeSel        stringList
-	tols           stringList
-	volumes        stringList
-	extraLbls      stringList
-	pvcSize        string
-	pvcClass       string
-	pvcMode        string
-	grace          time.Duration
-	strict         bool
-	upstream       string
-	poll           time.Duration
-	noLogs         bool
+	listen               string
+	model                string
+	namespace            string
+	kubeconfig           string
+	image                string
+	port                 int
+	healthPath           string
+	checkPath            string
+	livenessPath         string
+	probeTimeout         time.Duration
+	startupTimeout       time.Duration
+	command              stringList
+	requests             stringList
+	limits               stringList
+	servicePorts         stringList
+	envs                 stringList
+	gpus                 stringList
+	nodeSel              stringList
+	tols                 stringList
+	volumes              stringList
+	extraLbls            stringList
+	pvcSize              string
+	pvcClass             string
+	pvcMode              string
+	grace                time.Duration
+	strict               bool
+	upstream             string
+	poll                 time.Duration
+	noLogs               bool
+	proxyResponseTimeout time.Duration
 }
 
 // toConfig Builds the fully parsed serveConfig from the serve flags, validating every field.
@@ -395,6 +397,9 @@ func (f *serveFlags) toConfig() (*serveConfig, error) {
 	}
 	if f.grace < 0 {
 		return nil, fmt.Errorf("invalid --grace %s (must be zero or positive)", f.grace)
+	}
+	if f.proxyResponseTimeout < 0 {
+		return nil, fmt.Errorf("invalid --proxy-response-timeout %s (must be zero or positive)", f.proxyResponseTimeout)
 	}
 	livenessPath := f.livenessPath
 	if livenessPath == "" {
@@ -498,6 +503,7 @@ func serveCmd(args []string) error {
 	fs.StringVar(&f.checkPath, "check-path", "/health", "path the wrapper answers itself from pod readiness (200 when ready, 503+reason until then); point consumers' health checks here")
 	fs.StringVar(&f.upstream, "upstream", "", "override the proxy upstream URL (default: discovered pod IP)")
 	fs.DurationVar(&f.poll, "poll", time.Second, "interval for cluster state polling")
+	fs.DurationVar(&f.proxyResponseTimeout, "proxy-response-timeout", 300*time.Second, "bound on how long a READY backend may take before sending response headers; CPU image generation can need several minutes per image (0 disables the bound)")
 	fs.BoolVar(&f.noLogs, "no-logs", false, "disable pod log forwarding to stderr")
 	fs.Parse(args)
 
@@ -529,7 +535,7 @@ func serveCmd(args []string) error {
 		log.Printf("created %v", res.Created)
 	}
 
-	s := newServer(cfg, client, f.upstream, f.noLogs, f.poll)
+	s := newServer(cfg, client, f.upstream, f.noLogs, f.poll, f.proxyResponseTimeout)
 
 	ln, err := net.Listen("tcp", f.listen)
 	if err != nil {
@@ -613,14 +619,15 @@ func startModel(client kubernetes.Interface, f *serveFlags, fs *flag.FlagSet) er
 
 // newServer wires up the reverse proxy and HTTP server. The upstream is
 // dynamic (discovered pod IP) unless an override was given.
-func newServer(cfg *serveConfig, client kubernetes.Interface, upstreamOverride string, noLogs bool, poll time.Duration) *server {
+func newServer(cfg *serveConfig, client kubernetes.Interface, upstreamOverride string, noLogs bool, poll, proxyResponseTimeout time.Duration) *server {
 	s := &server{
-		cfg:              cfg,
-		client:           client,
-		upstreamOverride: strings.TrimRight(upstreamOverride, "/"),
-		noLogs:           noLogs,
-		poll:             poll,
-		stopCh:           make(chan struct{}),
+		cfg:                  cfg,
+		client:               client,
+		upstreamOverride:     strings.TrimRight(upstreamOverride, "/"),
+		noLogs:               noLogs,
+		poll:                 poll,
+		proxyResponseTimeout: proxyResponseTimeout,
+		stopCh:               make(chan struct{}),
 	}
 	s.readyReason.Store("starting")
 	s.upstream.Store("")
@@ -653,7 +660,10 @@ func newServer(cfg *serveConfig, client kubernetes.Interface, upstreamOverride s
 			// only forwards once the check path reports the pod ready
 			// (startup probe passed), so this caps how long a ready
 			// backend may stall before producing response headers.
-			ResponseHeaderTimeout: 300 * time.Second,
+			// Overridable per model (--proxy-response-timeout) because
+			// CPU image generation legitimately needs more than the
+			// default 300s for a single image.
+			ResponseHeaderTimeout: s.proxyResponseTimeout,
 			ExpectContinueTimeout: 1 * time.Second,
 			MaxIdleConns:          100,
 			MaxIdleConnsPerHost:   10,

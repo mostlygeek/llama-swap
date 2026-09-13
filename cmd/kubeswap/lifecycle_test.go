@@ -373,7 +373,7 @@ func TestKubeswap_PodSelectionIsModelUnique(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srvA := newServer(cfgA, client, "", false, time.Second)
+	srvA := newServer(cfgA, client, "", false, time.Second, 300*time.Second)
 	if st := srvA.findPod(ctx, depA); st.pod != nil {
 		t.Fatalf("findPod for %q must not return sibling pod %q", cfgA.Model, st.pod.Name)
 	}
@@ -725,7 +725,7 @@ func TestKubeswap_GCCollectsStaleWorkloads(t *testing.T) {
 func TestKubeswap_FindPod(t *testing.T) {
 	client := newFakeClient()
 	cfg := testConfig()
-	s := newServer(cfg, client, "", true, time.Millisecond)
+	s := newServer(cfg, client, "", true, time.Millisecond, 300*time.Second)
 	ctx := context.Background()
 
 	// No pods at all.
@@ -796,7 +796,7 @@ func TestKubeswap_PollOnceBoundedByContext(t *testing.T) {
 		return true, nil, apierrors.NewGenericServerResponse(
 			http.StatusInternalServerError, "get", schema.GroupResource{Resource: "deployments"}, "", "boom", 0, false)
 	})
-	s := newServer(cfg, client, "", true, time.Millisecond)
+	s := newServer(cfg, client, "", true, time.Millisecond, 300*time.Second)
 	start := time.Now()
 	s.pollOnce(context.Background())
 	if time.Since(start) > 5*time.Second {
@@ -817,7 +817,7 @@ func TestKubeswap_PollOnceRequestsStopOnDeletion(t *testing.T) {
 	if _, err := ensureResources(client, cfg); err != nil {
 		t.Fatal(err)
 	}
-	s := newServer(cfg, client, "", true, time.Millisecond)
+	s := newServer(cfg, client, "", true, time.Millisecond, 300*time.Second)
 	ctx := context.Background()
 
 	// Deployment exists: no stop requested, not-ready (no pod) reported.

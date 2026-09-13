@@ -15,7 +15,7 @@ import (
 
 // newTestServer Builds a proxy server over a fake client for the handler tests.
 func newTestServer(cfg *serveConfig, upstreamOverride string) *server {
-	return newServer(cfg, newFakeClient(), upstreamOverride, true, time.Millisecond)
+	return newServer(cfg, newFakeClient(), upstreamOverride, true, time.Millisecond, 300*time.Second)
 }
 
 // TestKubeswap_StartModel verifies the start path: creates the backend
@@ -100,6 +100,19 @@ func TestKubeswap_ServeRejectsNegativeGrace(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "invalid --grace") {
 		t.Errorf("expected invalid --grace error, got %v", err)
+	}
+}
+
+// TestKubeswap_ServeRejectsNegativeProxyResponseTimeout Verifies a negative
+// --proxy-response-timeout is rejected at parse time (zero is valid: no
+// bound, for slow CPU image generation).
+func TestKubeswap_ServeRejectsNegativeProxyResponseTimeout(t *testing.T) {
+	err := serveCmd([]string{
+		"--listen", "127.0.0.1:0", "--model", "m", "--image", "img",
+		"--proxy-response-timeout", "-5s",
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid --proxy-response-timeout") {
+		t.Errorf("expected invalid --proxy-response-timeout error, got %v", err)
 	}
 }
 
