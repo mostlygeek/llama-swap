@@ -422,6 +422,14 @@ func podReason(p *corev1.Pod) string {
 	if podIsReady(p) {
 		return ""
 	}
+	// A container that just crashed is Terminated (reason + exit code)
+	// until the kubelet's backoff starts and flips it to Waiting —
+	// report it rather than the "starting" fallback.
+	for _, cs := range p.Status.ContainerStatuses {
+		if t := cs.State.Terminated; t != nil {
+			return fmt.Sprintf("%s (exit code %d)", t.Reason, t.ExitCode)
+		}
+	}
 	for _, cs := range p.Status.ContainerStatuses {
 		if w := cs.State.Waiting; w != nil && w.Reason != "" {
 			if w.Message != "" {

@@ -876,6 +876,28 @@ func TestKubeswap_PodReason(t *testing.T) {
 		t.Errorf("crashlooping pod: got %q, want CrashLoopBackOff", got)
 	}
 
+	// Just crashed: Terminated with a reason and exit code, reported
+	// before the waiting state (which only appears once the backoff
+	// starts) and before the starting fallback.
+	justCrashed := &corev1.Pod{}
+	justCrashed.Status.ContainerStatuses = []corev1.ContainerStatus{{
+		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+			ExitCode: 1, Reason: "Error",
+		}},
+	}}
+	if got := podReason(justCrashed); got != "Error (exit code 1)" {
+		t.Errorf("terminated pod: got %q, want %q", got, "Error (exit code 1)")
+	}
+	oom := &corev1.Pod{}
+	oom.Status.ContainerStatuses = []corev1.ContainerStatus{{
+		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+			ExitCode: 137, Reason: "OOMKilled",
+		}},
+	}}
+	if got := podReason(oom); got != "OOMKilled (exit code 137)" {
+		t.Errorf("OOM-killed pod: got %q, want %q", got, "OOMKilled (exit code 137)")
+	}
+
 	// Running but not ready: probes still passing.
 	starting := &corev1.Pod{}
 	starting.Status.ContainerStatuses = []corev1.ContainerStatus{{
