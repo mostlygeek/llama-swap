@@ -1,0 +1,275 @@
+# Default values for llama-swap.
+#
+# The chart installs the llama-swap head-end (the router + lifecycle manager)
+# and lets it manage inference backends in the same namespace through
+# kubeswap: each model in config.inline gets a pod on demand. The head-end
+# image must ship /usr/local/bin/llama-swap and /usr/local/bin/kubeswap —
+# the unified llama-swap images do (they also ship every backend server,
+# which the models in config.inline use as their backend image).
+
+nameOverride: ""
+fullnameOverride: ""
+
+# ---------------------------------------------------------------------------
+# Head-end image
+# ---------------------------------------------------------------------------
+# Variant tags: unified-vulkan (AMD/other Vulkan), unified-cuda13
+# (NVIDIA Ampere-Blackwell), unified-cuda (NVIDIA Pascal-Ada, CUDA 12).
+image:
+  repository: ghcr.io/mostlygeek/llama-swap
+  tag: unified-vulkan
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# One by design: never two head-ends in a namespace at once (both would
+# drive the same set of backend workloads).
+replicas: 1
+
+# Recreate is deliberate for the same reason — a RollingUpdate would run
+# two head-ends briefly.
+strategy:
+  type: Recreate
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+config:
+  # The head-end's config.yaml, rendered into the chart's ConfigMap. It is
+  # processed as a Go template, so {{ .Release.Namespace }} works inside
+  # model commands. llama-swap's own ${PORT} macro is unaffected.
+  #
+  # The default below is a demo: one tiny model, downloaded on demand from
+  # Hugging Face into a per-pod emptyDir (no PVC required). Point it at your
+  # own models and a pre-staged model-cache PVC for real use (see
+  # extraResources for the PVC, and the README for a multi-engine config).
+  inline: |
+    healthCheckTimeout: 300
+    unloadTimeout: 60
+
+    routing:
+      router:
+        use: group
+        settings:
+          groups:
+            demo:
+              swap: true
+              exclusive: true
+              members: [smollm2]
+
+    models:
+      smollm2:
+        proxy: "http://127.0.0.1:${PORT}"
+        cmd: >-
+          kubeswap serve
+          --listen 127.0.0.1:${PORT}
+          --model smollm2
+          --namespace {{ .Release.Namespace }}
+          --image ghcr.io/mostlygeek/llama-swap:unified-vulkan
+          --command llama-server
+          --volume emptydir:model-cache:/models
+          --volume emptydir:slots:/slots
+          --
+          --model /models/SmolLM2-135M-Instruct-Q4_0.gguf
+          -hf QuantFactory/SmolLM2-135M-Instruct-GGUF:Q4_0
+          --port 8080
+          --cache-ram 4
+          --slot-save-path /slots
+        cmdStop: kubeswap delete --model smollm2 --namespace {{ .Release.Namespace }} --wait 60s
+        ttl: 1800
+  # ---------------------------------------------------------------------------
+  # Structured configuration (alternative to inline).
+  # ---------------------------------------------------------------------------
+  # When models is non-empty the chart ignores inline and renders config.yaml
+  # from these three parts. This keeps large multi-model configs DRY: the
+  # kubeswap serve boilerplate (listen/model/namespace/image/command/gpu/
+  # volumes, the "--" separator and cmdStop) is generated per model; you only
+  # write the model ID, the backend args, and any llama-swap model fields.
+  # llama-swap's own ${...} macros keep working — define shared server flags
+  # in top.macros and reference them from each model's args.
+  #
+  #   top:      everything in config.yaml except models: (scalars, macros,
+  #             routing, peers, ...). Templated like inline.
+  #   defaults: per-model defaults for the kubeswap fields below, plus any
+  #             llama-swap model fields (ttl, checkEndpoint, ...) that most
+  #             models share. A model's own entry always wins.
+  #   models:   list of model entries. Kubeswap fields (consumed by the
+  #             chart, not rendered into the model record): id (required),
+  #             image, command, gpu (list, "resource=count"), volumes (list,
+  #             "pvc|emptydir|hostpath:name:path[:ro]"), port,
+  #             extraKubeArgs (list, verbatim kubeswap serve flags before
+  #             "--", e.g. "--node-selector k=v" or "--request cpu=4"),
+  #             startupTimeout, healthPath, livenessPath, checkPath,
+  #             args (backend command line after "--"), proxy, cmdStop.
+  #             Every other key is rendered verbatim as a llama-swap model
+  #             field (name, ttl, capabilities, macros, filters, aliases,
+  #             unlisted, ...).
+  #             A key present on a model entry overrides the matching
+  #             defaults entry, including with an empty list (e.g. gpu: []
+  #             for a CPU-only model).
+  #
+  #             Note: model maps are rendered with sorted keys, and
+  #             llama-swap expands macros in reverse declaration order,
+  #             so a model macro must not reference another model macro of
+  #             the same model — only global macros (top.macros) and
+  #             literals. (config.inline has no such limit.)
+  top: {}
+  defaults: {}
+  models: []
+  # Name of an existing ConfigMap with a config.yaml key. When set, the
+  # chart renders no ConfigMap of its own and mounts this one.
+  existing: ""
+  # Additional ConfigMap keys, mounted alongside config.yaml under
+  # /etc/llama-swap/config/ (e.g. an audio.cpp server JSON). Values are
+  # templated like inline.
+  extraFiles: {}
+
+# ---------------------------------------------------------------------------
+# ServiceAccount / RBAC
+# ---------------------------------------------------------------------------
+serviceAccount:
+  create: true
+  name: "" # defaults to the chart fullname
+  annotations: {}
+
+rbac:
+  create: true
+  # Namespaced rules kubeswap needs to manage backend workloads.
+  rules:
+    - apiGroups: ["apps"]
+      resources: [deployments]
+      verbs: [create, get, list, watch, delete]
+    - apiGroups: [""]
+      resources: [services]
+      verbs: [create, get, list, watch, delete]
+    - apiGroups: [""]
+      resources: [persistentvolumeclaims]
+      verbs: [get, create, delete]
+    - apiGroups: [""]
+      resources: [pods]
+      verbs: [get, list, watch]
+    - apiGroups: [""]
+      resources: [pods/log]
+      verbs: [get, list]
+
+# ---------------------------------------------------------------------------
+# Service / exposure
+# ---------------------------------------------------------------------------
+service:
+  # ClusterIP by default. LoadBalancer / NodePort work unchanged; the
+  # loadBalancer* keys only apply when type is LoadBalancer.
+  type: ClusterIP
+  port: 8080
+  annotations: {}
+  loadBalancerIP: ""
+  loadBalancerSourceRanges: []
+  # externalTrafficPolicy: Local
+
+# Ingress (networking.k8s.io/v1).
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: llama-swap.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Gateway API alternative to ingress. Two ways to wire the HTTPRoute:
+#   1. gateway.gateway.name + gateway.gateway.className — the chart
+#      creates the Gateway (className is required: the API field is).
+#   2. gateway.route.parentRefs — attach to an existing Gateway.
+# enabled with neither set fails rendering.
+gateway:
+  enabled: false
+  gateway:
+    name: "" # set to have the chart create this Gateway
+    className: "" # required when name is set, e.g. traefik
+    listeners:
+      - name: http
+        protocol: HTTP
+        port: 80
+        # Add the singular `hostname: llama-swap.local` to restrict the
+        # listener; omitted, it matches all hostnames. (The plural
+        # `hostnames` array belongs to HTTPRoute, not Gateway listeners.)
+  route:
+    name: "" # defaults to the chart fullname
+    parentRefs: [] # required when gateway.name is empty; otherwise defaults to the chart's Gateway
+    hostnames: []
+
+# ---------------------------------------------------------------------------
+# One-shot garbage collection
+# ---------------------------------------------------------------------------
+gcInitContainer:
+  # Runs `kubeswap gc` once per head-end start: deletes backend workloads
+  # whose models are no longer in the config (leftovers from removed or
+  # renamed models).
+  enabled: true
+  # Security posture for the gc container. runAsNonRoot is deliberately NOT
+  # defaulted: the stock image runs as root (as the head-end container
+  # does); set it (and a user) only for non-root image builds. Override
+  # fields individually, or drop the whole context with
+  # --set-json gcInitContainer.securityContext=null.
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+
+# ---------------------------------------------------------------------------
+# Head-end pod
+# ---------------------------------------------------------------------------
+podAnnotations: {}
+podLabels: {}
+priorityClassName: ""
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podSecurityContext: {}
+securityContext: {}
+resources: {}
+
+# env is a list of {name, value, valueFrom...} entries.
+env: []
+envFrom: []
+
+# Standard k8s volume/mount/sidecar escape hatches for the head-end pod
+# itself (backend pods get their own volumes from the kubeswap --volume
+# flags in config.inline).
+extraVolumes: []
+extraVolumeMounts: []
+extraContainers: []
+initContainers: []
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  periodSeconds: 5
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 15
+
+# ---------------------------------------------------------------------------
+# Escape hatch
+# ---------------------------------------------------------------------------
+# Full Kubernetes manifests, rendered verbatim (helm applies the release
+# namespace to objects without one). Use for things that have no dedicated
+# value: a pre-staged model-cache PVC, extra services, monitoring.
+extraResources: []
+#  - apiVersion: v1
+#    kind: PersistentVolumeClaim
+#    metadata:
+#      name: llama-swap-models
+#    spec:
+#      accessModes: [ReadWriteMany]
+#      storageClassName: longhorn
+#      resources:
+#        requests:
+#          storage: 35Gi

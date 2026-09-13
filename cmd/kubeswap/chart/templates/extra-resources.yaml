@@ -1,0 +1,8 @@
+{{- /*
+Additional manifests, rendered verbatim. Objects without a namespace get
+the release namespace from helm. See values.yaml extraResources.
+*/}}
+{{- range .Values.extraResources }}
+---
+{{ toYaml . }}
+{{- end }}

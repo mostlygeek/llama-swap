@@ -49,6 +49,25 @@ RUN --mount=type=cache,id=go-build,target=/root/.cache/go-build \
     --mount=type=cache,id=go-mod,target=/go/pkg/mod \
     bash /build/install-vllm-wrapper.sh "${LS_VERSION}"
 
+# ── kubeswap ──────────────────────────────────────────────────────────
+#
+# kubeswap is the Kubernetes backend wrapper (cmd/cmdStop) for managing
+# inference servers in a namespace; see cmd/kubeswap/README.md. Like
+# vllm-wrapper it is compiled from the same revision as llama-swap.
+
+FROM golang:1.27-bookworm AS kubeswap-build
+# Default to an explicit revision known to contain cmd/kubeswap (the
+# kubeswap PR head): "latest" resolves to the newest release, and no
+# release ships kubeswap yet, so the default build would die on the
+# installer's cmd/kubeswap guard. Bump this when a newer revision is
+# needed; once the first release containing cmd/kubeswap is out, latest
+# works again and can be restored.
+ARG LS_VERSION=60e4f27261bd54044677a0a3b8d3b69dfbd88d42
+COPY install-kubeswap.sh /build/
+RUN --mount=type=cache,id=go-build,target=/root/.cache/go-build \
+    --mount=type=cache,id=go-mod,target=/go/pkg/mod \
+    bash /build/install-kubeswap.sh "${LS_VERSION}"
+
 # ── Runtime bases ─────────────────────────────────────────────────────
 
 # The CUDA stubs live in the devel base, which is the CUDA builder base. This
@@ -153,6 +172,9 @@ COPY --from=llama-swap-download /install/llama-swap-version /tmp/
 
 # Copy vllm-wrapper binary
 COPY --from=vllm-wrapper-build /install/bin/vllm-wrapper /usr/local/bin/
+
+# Copy kubeswap binary
+COPY --from=kubeswap-build /install/bin/kubeswap /usr/local/bin/
 
 RUN ldconfig
 

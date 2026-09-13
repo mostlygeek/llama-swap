@@ -1,0 +1,49 @@
+{{- if .Values.gateway.enabled }}
+{{- $fullname := include "llama-swap.fullname" . -}}
+{{- $gwName := .Values.gateway.gateway.name -}}
+{{- $parentRefs := .Values.gateway.route.parentRefs -}}
+{{- if and (not $gwName) (not $parentRefs) }}
+{{- fail "gateway: gateway.gateway.name and gateway.route.parentRefs are both empty. Set gateway.gateway.name (and gateway.gateway.className) to have the chart create a Gateway, or set gateway.route.parentRefs to attach the HTTPRoute to an existing Gateway" }}
+{{- end }}
+{{- if $gwName }}
+{{- if not .Values.gateway.gateway.className }}
+{{- fail "gateway: gateway.gateway.className is required when gateway.gateway.name is set (Gateway.spec.gatewayClassName is a required field)" }}
+{{- end }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: {{ $gwName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "llama-swap.labels" . | nindent 4 }}
+spec:
+  gatewayClassName: {{ .Values.gateway.gateway.className }}
+  listeners:
+    {{- toYaml .Values.gateway.gateway.listeners | nindent 4 }}
+---
+{{- end }}
+{{- /* With a name, an empty parentRefs defaults to the Gateway rendered
+      above; without one, parentRefs is guaranteed non-empty by the check
+      at the top. */ -}}
+{{- if not $parentRefs }}
+{{- $parentRefs = list (dict "name" $gwName "namespace" .Release.Namespace) -}}
+{{- end }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ .Values.gateway.route.name | default $fullname }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "llama-swap.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    {{- toYaml $parentRefs | nindent 4 }}
+  {{- with .Values.gateway.route.hostnames }}
+  hostnames:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - backendRefs:
+        - name: {{ $fullname }}
+          port: {{ .Values.service.port }}
+{{- end }}
