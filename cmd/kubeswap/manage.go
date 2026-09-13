@@ -28,7 +28,10 @@ type manageFlags struct {
 // objects are not an error. A running `kubeswap serve` observes the
 // deployment deletion and exits on its own.
 func deleteModel(client kubernetes.Interface, namespace, model string, deleteVolumes bool, wait time.Duration) error {
-	ctx := context.Background()
+	// The user's --wait plus headroom for the API calls: a hung control
+	// plane must not hang the CLI (rest.Config has no request timeout).
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute+wait)
+	defer cancel()
 	sanitized, err := sanitizeModelID(model)
 	if err != nil {
 		return err
@@ -123,7 +126,11 @@ func waitForPodsGone(ctx context.Context, client kubernetes.Interface, namespace
 	selector := labels.Set(podSelectorLabels(sanitized, depName)).String()
 	deadline := time.Now().Add(timeout)
 	for {
-		pods, err := client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+		// Per-iteration bound: a hung List must not stall the loop past
+		// its deadline.
+		callCtx, cancel := context.WithTimeout(ctx, apiCallTimeout)
+		pods, err := client.CoreV1().Pods(namespace).List(callCtx, metav1.ListOptions{LabelSelector: selector})
+		cancel()
 		if err != nil {
 			return fmt.Errorf("listing pods: %w", err)
 		}
@@ -233,7 +240,8 @@ func gcCmd(args []string) error {
 // gcCollect deletes managed workloads whose model ID is not in allowed and
 // returns the collected model IDs.
 func gcCollect(client kubernetes.Interface, namespace string, allowed map[string]bool, deleteVolumes bool) ([]string, error) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
 	managed := labels.Set(map[string]string{labelManagedBy: managedByValue}).String()
 	deps, err := client.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{LabelSelector: managed})
 	if err != nil {
@@ -286,7 +294,8 @@ func runStatus(namespace, kubeconfig string) error {
 	if err != nil {
 		return err
 	}
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
 	managed := labels.Set(map[string]string{labelManagedBy: managedByValue}).String()
 	deps, err := client.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{LabelSelector: managed})
 	if err != nil {

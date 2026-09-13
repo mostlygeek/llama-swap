@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -746,6 +747,39 @@ func TestKubeswap_FindPod(t *testing.T) {
 }
 
 // TestKubeswap_PollOnceRequestsStopOnDeletion Verifies the poll loop stops the wrapper when its Deployment is deleted.
+// TestKubeswap_PollOnceBoundedByContext verifies a failing API call
+// (what a hung control plane produces once the per-call timeout fires)
+// surfaces as a not-ready reason instead of stalling the poller. The
+// fake client ignores context deadlines, so the failure is simulated
+// with a reactor returning a server error on the deployment Get.
+func TestKubeswap_PollOnceBoundedByContext(t *testing.T) {
+	client := newFakeClient()
+	cfg := testConfig()
+	if _, err := ensureResources(client, cfg); err != nil {
+		t.Fatal(err)
+	}
+	old := apiCallTimeout
+	apiCallTimeout = 50 * time.Millisecond
+	defer func() { apiCallTimeout = old }()
+	client.PrependReactor("get", "deployments", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewGenericServerResponse(
+			http.StatusInternalServerError, "get", schema.GroupResource{Resource: "deployments"}, "", "boom", 0, false)
+	})
+	s := newServer(cfg, client, "", true, time.Millisecond)
+	start := time.Now()
+	s.pollOnce(context.Background())
+	if time.Since(start) > 5*time.Second {
+		t.Error("pollOnce should not block long on an API failure")
+	}
+	if s.ready.Load() {
+		t.Fatal("expected not ready")
+	}
+	reason := s.readyReason.Load().(string)
+	if !strings.Contains(reason, "error getting deployment") {
+		t.Errorf("reason should report the API failure, got %q", reason)
+	}
+}
+
 func TestKubeswap_PollOnceRequestsStopOnDeletion(t *testing.T) {
 	client := newFakeClient()
 	cfg := testConfig()
