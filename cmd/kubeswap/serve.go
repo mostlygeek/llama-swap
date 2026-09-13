@@ -164,6 +164,17 @@ func ensureResources(client kubernetes.Interface, cfg *serveConfig) (*ensureResu
 	return res, nil
 }
 
+// pvcAllowsReadWrite reports whether the PVC's access modes can serve a
+// read-write mount (RWO or RWX; ROX cannot).
+func pvcAllowsReadWrite(pvc *corev1.PersistentVolumeClaim) bool {
+	for _, m := range pvc.Spec.AccessModes {
+		if m == corev1.ReadWriteOnce || m == corev1.ReadWriteMany {
+			return true
+		}
+	}
+	return false
+}
+
 // createMissing creates the PVCs, Deployment and Service for cfg.
 func createMissing(client kubernetes.Interface, cfg *serveConfig) ([]string, error) {
 	for _, v := range cfg.Volumes {
@@ -174,23 +185,31 @@ func createMissing(client kubernetes.Interface, cfg *serveConfig) ([]string, err
 	ctx := context.Background()
 	var created []string
 
-	for _, name := range cfg.pvcNames() {
-		_, err := client.CoreV1().PersistentVolumeClaims(cfg.Namespace).Get(ctx, name, metav1.GetOptions{})
+	for _, v := range cfg.Volumes {
+		if v.Kind != volPVC {
+			continue
+		}
+		pvc, err := client.CoreV1().PersistentVolumeClaims(cfg.Namespace).Get(ctx, v.Name, metav1.GetOptions{})
 		switch {
 		case err == nil:
 			// Adopt the existing PVC as-is (it may be user-managed, e.g. a
-			// shared model cache); do not relabel it.
+			// shared model cache); do not relabel it. But a read-only PVC
+			// cannot serve a read-write mount: the pod would sit in
+			// ContainerCreating with a cryptic volume error, so check now.
+			if !v.ReadOnly && !pvcAllowsReadWrite(pvc) {
+				return nil, fmt.Errorf("PVC %s/%s is read-only (access modes %v) but the model mounts it read-write at %s; add :ro to the --volume or use a read-write PVC", cfg.Namespace, v.Name, pvc.Spec.AccessModes, v.Path)
+			}
 		case apierrors.IsNotFound(err):
-			pvc, err := cfg.renderPVC(name)
+			pvc, err := cfg.renderPVC(v.Name)
 			if err != nil {
 				return nil, err
 			}
 			if _, err := client.CoreV1().PersistentVolumeClaims(cfg.Namespace).Create(ctx, pvc, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
-				return nil, fmt.Errorf("creating PVC %s: %w", name, err)
+				return nil, fmt.Errorf("creating PVC %s: %w", v.Name, err)
 			}
-			created = append(created, "pvc/"+name)
+			created = append(created, "pvc/"+v.Name)
 		default:
-			return nil, fmt.Errorf("getting PVC %s: %w", name, err)
+			return nil, fmt.Errorf("getting PVC %s: %w", v.Name, err)
 		}
 	}
 

@@ -50,17 +50,6 @@ type serveConfig struct {
 	Strict       bool
 }
 
-// pvcNames returns the names of PVCs referenced by the config.
-func (c *serveConfig) pvcNames() []string {
-	var out []string
-	for _, v := range c.Volumes {
-		if v.Kind == volPVC {
-			out = append(out, v.Name)
-		}
-	}
-	return out
-}
-
 // renderDeployment builds the model's Deployment.
 func (c *serveConfig) renderDeployment() (*appsv1.Deployment, error) {
 	depLabels := map[string]string{labelAppName: appNameValue}
