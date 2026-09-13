@@ -28,10 +28,12 @@ type manageFlags struct {
 // deleteModel removes a model's managed objects. It is idempotent: missing
 // objects are not an error. A running `kubeswap serve` observes the
 // deployment deletion and exits on its own.
-func deleteModel(client kubernetes.Interface, namespace, model string, deleteVolumes bool, wait time.Duration) error {
-	// The user's --wait plus headroom for the API calls: a hung control
-	// plane must not hang the CLI (rest.Config has no request timeout).
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute+wait)
+func deleteModel(ctx context.Context, client kubernetes.Interface, namespace, model string, deleteVolumes bool, wait time.Duration) error {
+	// The user's --wait plus headroom for the API calls, derived from the
+	// caller's context: a hung control plane must not hang the CLI
+	// (rest.Config has no request timeout), and a gc pass stays inside
+	// its own overall budget rather than 2 minutes per model.
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute+wait)
 	defer cancel()
 	sanitized, err := sanitizeModelID(model)
 	if err != nil {
@@ -166,7 +168,7 @@ func deleteCmd(args []string) error {
 	if err != nil {
 		return err
 	}
-	return deleteModel(client, f.namespace, model, f.deleteVolumes, f.wait)
+	return deleteModel(context.Background(), client, f.namespace, model, f.deleteVolumes, f.wait)
 }
 
 type gcFlags struct {
@@ -281,7 +283,7 @@ func gcCollect(client kubernetes.Interface, namespace string, allowed map[string
 			continue
 		}
 		log.Printf("collecting %s/%s (model %q not in config)", namespace, dep.Name, modelID)
-		if err := deleteModel(client, namespace, modelID, deleteVolumes, 0); err != nil {
+		if err := deleteModel(ctx, client, namespace, modelID, deleteVolumes, 0); err != nil {
 			return deleted, fmt.Errorf("collecting model %q: %w", modelID, err)
 		}
 		deleted = append(deleted, modelID)

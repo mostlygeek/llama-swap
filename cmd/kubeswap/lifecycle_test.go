@@ -209,7 +209,7 @@ func TestKubeswap_DeleteModel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := deleteModel(client, "llama-swap", "author/model:tag", true, 0); err != nil {
+	if err := deleteModel(context.Background(), client, "llama-swap", "author/model:tag", true, 0); err != nil {
 		t.Fatalf("deleteModel: %v", err)
 	}
 	ctx := context.Background()
@@ -224,7 +224,7 @@ func TestKubeswap_DeleteModel(t *testing.T) {
 	}
 
 	// Idempotent: deleting again is not an error.
-	if err := deleteModel(client, "llama-swap", "author/model:tag", true, 0); err != nil {
+	if err := deleteModel(context.Background(), client, "llama-swap", "author/model:tag", true, 0); err != nil {
 		t.Errorf("second deleteModel: %v", err)
 	}
 }
@@ -244,7 +244,7 @@ func TestKubeswap_DeleteModelKeepsUserPVC(t *testing.T) {
 	if _, err := ensureResources(client, cfg); err != nil {
 		t.Fatal(err)
 	}
-	if err := deleteModel(client, "llama-swap", "author/model:tag", true, 0); err != nil {
+	if err := deleteModel(context.Background(), client, "llama-swap", "author/model:tag", true, 0); err != nil {
 		t.Fatalf("deleteModel: %v", err)
 	}
 	if _, err := client.CoreV1().PersistentVolumeClaims("llama-swap").Get(context.Background(), "llama-swap-models", metav1.GetOptions{}); err != nil {
@@ -299,7 +299,7 @@ func TestKubeswap_DeleteModelRefusesForeignModel(t *testing.T) {
 
 	// A differently-cased ID sanitizes to the same model label; deleting
 	// it must not touch this model's backend.
-	if err := deleteModel(client, cfg.Namespace, "AUTHOR/MODEL:TAG", true, 0); err == nil {
+	if err := deleteModel(context.Background(), client, cfg.Namespace, "AUTHOR/MODEL:TAG", true, 0); err == nil {
 		t.Fatal("expected deletion to be refused for a different model ID")
 	} else if !strings.Contains(err.Error(), "belongs to model") {
 		t.Errorf("unexpected error: %v", err)
@@ -312,7 +312,7 @@ func TestKubeswap_DeleteModelRefusesForeignModel(t *testing.T) {
 	}
 
 	// Deleting with the exact model ID works.
-	if err := deleteModel(client, cfg.Namespace, cfg.Model, true, 0); err != nil {
+	if err := deleteModel(context.Background(), client, cfg.Namespace, cfg.Model, true, 0); err != nil {
 		t.Fatalf("delete with the correct model ID: %v", err)
 	}
 	if _, err := client.AppsV1().Deployments(cfg.Namespace).Get(ctx, cfg.DepName, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
@@ -388,7 +388,7 @@ func TestKubeswap_PodSelectionIsModelUnique(t *testing.T) {
 
 	// Deleting model A (with wait) must succeed immediately despite the
 	// sibling pod still running, and must not touch model B.
-	if err := deleteModel(client, cfgA.Namespace, cfgA.Model, false, 5*time.Second); err != nil {
+	if err := deleteModel(context.Background(), client, cfgA.Namespace, cfgA.Model, false, 5*time.Second); err != nil {
 		t.Fatalf("deleteModel: %v", err)
 	}
 	if _, err := client.CoreV1().Pods(cfgB.Namespace).Get(ctx, podB.Name, metav1.GetOptions{}); err != nil {
@@ -600,7 +600,7 @@ func TestKubeswap_DeleteIgnoresSiblingDeployment(t *testing.T) {
 	if _, err := ensureResources(client, cfgB); err != nil {
 		t.Fatal(err)
 	}
-	if err := deleteModel(client, cfgA.Namespace, cfgA.Model, false, 0); err != nil {
+	if err := deleteModel(context.Background(), client, cfgA.Namespace, cfgA.Model, false, 0); err != nil {
 		t.Fatalf("deleteModel: %v", err)
 	}
 	if _, err := client.AppsV1().Deployments(cfgB.Namespace).Get(ctx, cfgB.DepName, metav1.GetOptions{}); err != nil {
