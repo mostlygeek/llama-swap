@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 // testConfig Returns a serveConfig with every rendered field group populated, for the rendering tests.
@@ -488,6 +489,47 @@ func TestKubeswap_StringMapEqualMissingKeys(t *testing.T) {
 	}
 	if !stringMapEqual(map[string]string{"x": "1"}, map[string]string{"x": "1"}) {
 		t.Error("identical maps should be equal")
+	}
+}
+
+// TestKubeswap_HelperEqualMissingKeys verifies that the remaining spec
+// comparison helpers do not treat a missing key as its zero value.
+func TestKubeswap_HelperEqualMissingKeys(t *testing.T) {
+	// envs: empty values are legal (--env FOO=), so different names with
+	// empty values must not compare equal.
+	if envsEqual(
+		[]corev1.EnvVar{{Name: "FOO", Value: ""}},
+		[]corev1.EnvVar{{Name: "BAR", Value: ""}},
+	) {
+		t.Error("envs with different names and empty values should not be equal")
+	}
+	if !envsEqual(
+		[]corev1.EnvVar{{Name: "FOO", Value: ""}},
+		[]corev1.EnvVar{{Name: "FOO", Value: ""}},
+	) {
+		t.Error("identical envs should be equal")
+	}
+	// ports: a missing name must not compare against port 0.
+	if portsEqual(
+		[]corev1.ContainerPort{{Name: "a", ContainerPort: 1}},
+		[]corev1.ContainerPort{{Name: "b", ContainerPort: 1}},
+	) {
+		t.Error("ports with different names should not be equal")
+	}
+	// mounts: a missing name must not compare against an empty path.
+	if mountsEqual(
+		[]corev1.VolumeMount{{Name: "a", MountPath: "/x"}},
+		[]corev1.VolumeMount{{Name: "b", MountPath: "/x"}},
+	) {
+		t.Error("mounts with different names should not be equal")
+	}
+	// resources: a missing name must not compare against the zero quantity.
+	zero := resource.MustParse("0")
+	if resourceListEqual(
+		corev1.ResourceList{"cpu": zero},
+		corev1.ResourceList{"memory": zero},
+	) {
+		t.Error("resource lists with different names and zero quantities should not be equal")
 	}
 }
 

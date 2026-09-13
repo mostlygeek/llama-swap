@@ -465,7 +465,10 @@ func stringSlicesEqual(a, b []string) bool {
 	return true
 }
 
-// envsEqual Reports whether two env var lists define the same name-to-value mapping, ignoring order.
+// envsEqual Reports whether two env var lists define the same name-to-value
+// mapping, ignoring order. A name missing from b is not compared against
+// the empty value: env values may legitimately be empty (--env FOO=), so a
+// bare mb[k] lookup would make {FOO: ""} and {BAR: ""} look equal.
 func envsEqual(a, b []corev1.EnvVar) bool {
 	if len(a) != len(b) {
 		return false
@@ -479,7 +482,8 @@ func envsEqual(a, b []corev1.EnvVar) bool {
 	}
 	ma, mb := byKey(a), byKey(b)
 	for k, v := range ma {
-		if mb[k] != v {
+		bv, ok := mb[k]
+		if !ok || bv != v {
 			return false
 		}
 	}
@@ -492,12 +496,15 @@ func resourcesEqual(a, b corev1.ResourceRequirements) bool {
 }
 
 // resourceListEqual Reports whether two resource lists hold the same quantities.
+// A key missing from b is not compared against the zero quantity (a bare
+// b[k] would make {cpu: "0"} and {mem: "0"} look equal).
 func resourceListEqual(a, b corev1.ResourceList) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for k, v := range a {
-		if !b[k].Equal(v) {
+		bv, ok := b[k]
+		if !ok || !bv.Equal(v) {
 			return false
 		}
 	}
@@ -549,8 +556,9 @@ func probeEqual(a, b *corev1.Probe) bool {
 		a.FailureThreshold == b.FailureThreshold
 }
 
-// portsEqual compares container ports by name (order-insensitive); the
-// primary http port and every --service-port entry are configuration-owned.
+// portsEqual compares container ports by name (order-insensitive; a name
+// missing from b is not compared against port 0); the primary http port
+// and every --service-port entry are configuration-owned.
 func portsEqual(a, b []corev1.ContainerPort) bool {
 	byName := func(ports []corev1.ContainerPort) map[string]int32 {
 		m := make(map[string]int32, len(ports))
@@ -564,14 +572,16 @@ func portsEqual(a, b []corev1.ContainerPort) bool {
 		return false
 	}
 	for k, v := range ma {
-		if mb[k] != v {
+		bv, ok := mb[k]
+		if !ok || bv != v {
 			return false
 		}
 	}
 	return true
 }
 
-// mountsEqual compares volume mounts by name (order-insensitive).
+// mountsEqual compares volume mounts by name (order-insensitive; a name
+// missing from b is not compared against an empty mount path).
 func mountsEqual(a, b []corev1.VolumeMount) bool {
 	type mountKey struct {
 		path     string
@@ -589,7 +599,8 @@ func mountsEqual(a, b []corev1.VolumeMount) bool {
 		return false
 	}
 	for k, v := range ma {
-		if mb[k] != v {
+		mv, ok := mb[k]
+		if !ok || mv != v {
 			return false
 		}
 	}
