@@ -145,12 +145,29 @@ func addKubeFlags(fs *flag.FlagSet, namespace, kubeconfig *string) {
 	fs.StringVar(kubeconfig, "kubeconfig", "", "Path to a kubeconfig (default: in-cluster config, then KUBECONFIG / ~/.kube/config)")
 }
 
-// envVar parses "K=V" entries (V may contain '=').
+// validEnvName reports whether s is a valid environment variable name
+// (C identifier: letters, digits and underscores, not starting with a
+// digit) — the same rule the API server applies to env names.
+func validEnvName(s string) bool {
+	for i, c := range s {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c == '_':
+		case i > 0 && c >= '0' && c <= '9':
+		default:
+			return false
+		}
+	}
+	return s != ""
+}
+
+// envVar parses "K=V" entries (V may contain '='), validating K as an
+// environment variable name so bad names fail at flag parse instead of
+// at Deployment creation.
 func parseEnvVars(entries []string) (out []envVar, err error) {
 	for _, e := range entries {
 		k, v, ok := strings.Cut(e, "=")
-		if !ok || k == "" {
-			return nil, fmt.Errorf("invalid --env %q (want K=V)", e)
+		if !ok || !validEnvName(k) {
+			return nil, fmt.Errorf("invalid --env %q (name must match [A-Za-z_][A-Za-z0-9_]*)", e)
 		}
 		out = append(out, envVar{Key: k, Value: v})
 	}
@@ -164,13 +181,51 @@ type envVar struct {
 	Value string
 }
 
-// parseKeyValues parses repeated "K=V" entries (values may contain '=').
+// validDNSLabel reports whether s is a lowercase RFC 1123 label.
+func validDNSLabel(s string) bool {
+	if s == "" || len(s) > 63 {
+		return false
+	}
+	for i, c := range s {
+		switch {
+		case c >= 'a' && c <= 'z', c >= '0' && c <= '9':
+		case c == '-' && i != 0 && i != len(s)-1:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// validLabelKey reports whether s is a valid Kubernetes label key: an
+// optional DNS-subdomain prefix, a /, and a DNS-label name (up to 63
+// characters) — the same rule the API server applies.
+func validLabelKey(s string) bool {
+	name := s
+	if i := strings.LastIndex(s, "/"); i >= 0 {
+		prefix, rest := s[:i], s[i+1:]
+		if len(prefix) == 0 || len(prefix) > 253 {
+			return false
+		}
+		for _, seg := range strings.Split(prefix, ".") {
+			if !validDNSLabel(seg) {
+				return false
+			}
+		}
+		name = rest
+	}
+	return validDNSLabel(name)
+}
+
+// parseKeyValues parses repeated "K=V" entries (values may contain '='),
+// validating K as a Kubernetes label key so bad keys fail at flag parse
+// instead of at Deployment creation.
 func parseKeyValues(entries []string, what string) (map[string]string, error) {
 	out := map[string]string{}
 	for _, e := range entries {
 		k, v, ok := strings.Cut(e, "=")
-		if !ok || k == "" {
-			return nil, fmt.Errorf("invalid --%s %q (want K=V)", what, e)
+		if !ok || !validLabelKey(k) {
+			return nil, fmt.Errorf("invalid --%s %q (key must be a valid label key: optional prefix/, then up to 63 lowercase alphanumerics, dots and dashes)", what, e)
 		}
 		out[k] = v
 	}

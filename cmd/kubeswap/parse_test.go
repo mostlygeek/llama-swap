@@ -2,6 +2,7 @@ package main
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -18,8 +19,10 @@ func TestKubeswap_ParseEnvVars(t *testing.T) {
 	if _, err := parseEnvVars([]string{"NOEQUALS"}); err == nil {
 		t.Error("expected error for missing '='")
 	}
-	if _, err := parseEnvVars([]string{"=v"}); err == nil {
-		t.Error("expected error for empty key")
+	for _, bad := range []string{"=v", "FOO BAR=v", "a.b=v", "1abc=v", "-abc=v"} {
+		if _, err := parseEnvVars([]string{bad}); err == nil {
+			t.Errorf("expected error for env name %q", bad)
+		}
 	}
 }
 
@@ -123,6 +126,15 @@ func TestKubeswap_ParseKeyValues(t *testing.T) {
 	}
 	if got["k1"] != "v1" || got["k2"] != "a=b" {
 		t.Errorf("got %v", got)
+	}
+	// A prefixed key is valid label-key form.
+	if _, err := parseKeyValues([]string{"feature.node.kubernetes.io/amd-gpu=v"}, "node-selector"); err != nil {
+		t.Errorf("prefixed key should be valid: %v", err)
+	}
+	for _, bad := range []string{"BAD KEY=v", "/=v", "a/=v", "UPPER=v", "a/b/c=v", "a" + strings.Repeat("b", 63) + "=v"} {
+		if _, err := parseKeyValues([]string{bad}, "label"); err == nil {
+			t.Errorf("expected error for label key %q", bad)
+		}
 	}
 }
 
