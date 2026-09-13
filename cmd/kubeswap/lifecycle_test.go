@@ -918,7 +918,7 @@ func TestKubeswap_RunLogs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := runLogs(client, "llama-swap", cfg.Model, 10, false); err == nil || !strings.Contains(err.Error(), "no pod") {
+	if err := runLogs(context.Background(), client, "llama-swap", cfg.Model, 10, false); err == nil || !strings.Contains(err.Error(), "no pod") {
 		t.Fatalf("expected a no-pod error, got %v", err)
 	}
 
@@ -929,7 +929,7 @@ func TestKubeswap_RunLogs(t *testing.T) {
 	if _, err := client.CoreV1().Pods("llama-swap").Create(context.Background(), pod, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := runLogs(client, "llama-swap", cfg.Model, 10, false); err != nil {
+	if err := runLogs(context.Background(), client, "llama-swap", cfg.Model, 10, false); err != nil {
 		t.Fatalf("runLogs with a pod: %v", err)
 	}
 
@@ -946,6 +946,18 @@ func TestKubeswap_RunLogs(t *testing.T) {
 	if err != nil || found == nil || found.Name != "m1" {
 		t.Fatalf("findModelPod: got %v, err %v; want pod m1", found, err)
 	}
+
+	// A canceled context in follow mode is a normal stop (the Ctrl+C
+	// path): it must not surface as an error.
+	fctx, fcancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		fcancel()
+	}()
+	if err := runLogs(fctx, client, "llama-swap", cfg.Model, 10, true); err != nil {
+		t.Errorf("canceled follow should exit quietly, got %v", err)
+	}
+	fcancel()
 }
 
 // TestKubeswap_GCDryRunKeepsWorkloads verifies --dry-run reports the
