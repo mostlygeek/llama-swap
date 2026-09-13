@@ -182,3 +182,17 @@ func TestKubeswap_ParseServicePorts(t *testing.T) {
 		t.Error("expected error for duplicate name with different port")
 	}
 }
+
+// TestKubeswap_TruncateStripsControlChars verifies status display input
+// from the config cannot carry terminal escapes.
+func TestKubeswap_TruncateStripsControlChars(t *testing.T) {
+	if got := truncate("a\x1b[31mb\n", 32); got != "ab" {
+		t.Errorf("got %q, want %q", got, "ab")
+	}
+	if got := truncate("plain", 32); got != "plain" {
+		t.Errorf("got %q, want %q", got, "plain")
+	}
+	if got := truncate("abc", 2); got != "ab" {
+		t.Errorf("got %q, want %q", got, "ab")
+	}
+}
