@@ -12,7 +12,7 @@ to it. Engines differ only in the container args, the command to run, and
 the health endpoint — all covered by flags. All four servers ship in the
 unified llama-swap image, so a single `--image` covers every engine.
 
-It provides six subcommands:
+It provides seven subcommands:
 
 - `serve`: used as a model's `cmd`. Ensures the model's PVCs, Deployment and
   Service exist (adopting them if a previous run left them), then runs a
@@ -26,6 +26,11 @@ It provides six subcommands:
   config reload, `cmdStop` runs first and unloads the backends; the
   keep-on-SIGTERM path is what matters for abnormal deaths — SIGKILL, node
   loss — and for models configured without a `cmdStop`.)
+- `start`: like `serve` without the proxy. Creates (or adopts) the
+  model's PVCs, Deployment and Service and exits. Use it to pre-warm a
+  model so the first request is fast, or to manage a backend by hand
+  without a live router. Idempotent: a second run adopts the existing
+  deployment (replacing it only with `--strict`).
 - `delete`: used as a model's `cmdStop`. Deletes the model's Deployment and
   Service (and the PVCs kubeswap itself created, with `--delete-volumes`),
   then waits for the pods to terminate so the GPU is released before
@@ -531,6 +536,10 @@ in-cluster config else standard kubeconfig rules):
 | `--poll` | `1s` | cluster state poll interval |
 | `--no-logs` | `false` | disable pod log forwarding |
 | `--` | — | everything after becomes the container args |
+
+`start`: the same flags as `serve` minus the proxy-only ones
+(`--listen`, `--check-path`, `--upstream`, `--poll`, `--no-logs`), plus
+the `--` container args.
 
 `delete`: `--model` (required), `--delete-volumes`, `--wait` (default `30s`;
 `0` = do not wait). Keep `--wait` (and `--grace`) within llama-swap's

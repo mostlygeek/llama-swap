@@ -1,17 +1,77 @@
 package main
 
 import (
+	"context"
+	"flag"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // newTestServer Builds a proxy server over a fake client for the handler tests.
 func newTestServer(cfg *serveConfig, upstreamOverride string) *server {
 	return newServer(cfg, newFakeClient(), upstreamOverride, true, time.Millisecond)
+}
+
+// TestKubeswap_StartModel verifies the start path: creates the backend
+// resources and exits, and a second run adopts instead of failing.
+func TestKubeswap_StartModel(t *testing.T) {
+	client := newFakeClient()
+	f := &serveFlags{
+		model: "m", namespace: "llama-swap", image: "img", port: 8080,
+		healthPath: "/health", probeTimeout: 5 * time.Second,
+		startupTimeout: 10 * time.Minute, grace: 30 * time.Second,
+		pvcSize: "1Gi", pvcMode: "rwo",
+	}
+	fs := flag.NewFlagSet("start", flag.ContinueOnError)
+	if err := f.validateServeFlags(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if err := startModel(client, f, fs); err != nil {
+		t.Fatalf("startModel: %v", err)
+	}
+	depName, _ := deploymentName("m")
+	svcName, _ := serviceName("m")
+	ctx := context.Background()
+	if _, err := client.AppsV1().Deployments("llama-swap").Get(ctx, depName, metav1.GetOptions{}); err != nil {
+		t.Errorf("deployment should exist: %v", err)
+	}
+	if _, err := client.CoreV1().Services("llama-swap").Get(ctx, svcName, metav1.GetOptions{}); err != nil {
+		t.Errorf("service should exist: %v", err)
+	}
+	if err := startModel(client, f, fs); err != nil {
+		t.Errorf("second startModel should adopt, got %v", err)
+	}
+}
+
+// TestKubeswap_ServeFlagsValidation verifies required fields and invalid
+// values are rejected before they reach the API server.
+func TestKubeswap_ServeFlagsValidation(t *testing.T) {
+	base := &serveFlags{model: "m", image: "img", port: 8080, healthPath: "/health", checkPath: "/health"}
+	if err := (&serveFlags{image: "img", port: 8080}).validateServeFlags(); err == nil || !strings.Contains(err.Error(), "--model") {
+		t.Errorf("missing model: %v", err)
+	}
+	if err := (&serveFlags{model: "m", port: 8080}).validateServeFlags(); err == nil || !strings.Contains(err.Error(), "--image") {
+		t.Errorf("missing image: %v", err)
+	}
+	if err := base.validateServeFlags(); err != nil {
+		t.Errorf("valid flags: %v", err)
+	}
+	badPort := *base
+	badPort.port = 70000
+	if err := badPort.validateServeFlags(); err == nil || !strings.Contains(err.Error(), "invalid --port") {
+		t.Errorf("bad port: %v", err)
+	}
+	badPath := *base
+	badPath.livenessPath = "health"
+	if err := badPath.validateServeFlags(); err == nil || !strings.Contains(err.Error(), "must start with /") {
+		t.Errorf("bad path: %v", err)
+	}
 }
 
 // TestKubeswap_ToConfigRejectsReservedLabels Verifies managed label keys are rejected as extra labels.
