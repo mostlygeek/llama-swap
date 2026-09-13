@@ -486,7 +486,7 @@ func TestKubeswap_CreateMissingRetriesReservedName(t *testing.T) {
 	createRetryInterval = 10 * time.Millisecond
 	defer func() { createRetryInterval = old }()
 
-	created, err := createMissing(client, cfg)
+	created, err := createMissing(context.Background(), client, cfg)
 	if err != nil {
 		t.Fatalf("createMissing: %v", err)
 	}
@@ -513,10 +513,38 @@ func TestKubeswap_CreateMissingFailsOnPersistentReservation(t *testing.T) {
 	createRetryInterval = 10 * time.Millisecond
 	defer func() { createRetryInterval = old }()
 
-	if _, err := createMissing(client, cfg); err == nil {
+	if _, err := createMissing(context.Background(), client, cfg); err == nil {
 		t.Fatal("expected an error when the name stays reserved")
 	} else if !strings.Contains(err.Error(), "still reserved") {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestKubeswap_CreateMissingHonorsContext verifies the retry wait is
+// interruptible: with the name held forever and the context canceled
+// mid-retry, createMissing returns the context error instead of burning
+// all maxCreateAttempts (a stalled API must not pin serve before it
+// opens its listener).
+func TestKubeswap_CreateMissingHonorsContext(t *testing.T) {
+	client := newFakeClient()
+	cfg := testConfig()
+	reserveNameReactor(client, cfg.DepName, 1000) // never frees up
+	old := createRetryInterval
+	createRetryInterval = 10 * time.Millisecond
+	defer func() { createRetryInterval = old }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { _, err := createMissing(ctx, client, cfg); errCh <- err }()
+	time.Sleep(50 * time.Millisecond) // a few retry rounds
+	cancel()
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("expected context.Canceled, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("createMissing did not return on context cancel")
 	}
 }
 
