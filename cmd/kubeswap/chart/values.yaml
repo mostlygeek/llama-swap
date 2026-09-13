@@ -151,9 +151,6 @@ rbac:
     - apiGroups: [""]
       resources: [pods/log]
       verbs: [get, list]
-    - apiGroups: [""]
-      resources: [events]
-      verbs: [get, list]
 
 # ---------------------------------------------------------------------------
 # Service / exposure

@@ -68,7 +68,7 @@ works inside model commands (it is how the default config keeps
 | `serviceAccount.name` | fullname | |
 | `serviceAccount.annotations` | `{}` | e.g. workload-identity |
 | `rbac.create` | `true` | namespaced Role + RoleBinding for kubeswap |
-| `rbac.rules` | (kubeswap minimum) | deployments/services CRUD, PVC get/create/delete, pods get/list/watch, pods/log, events |
+| `rbac.rules` | (kubeswap minimum) | deployments/services CRUD, PVC get/create/delete, pods get/list/watch, pods/log |
 | `service.type` | `ClusterIP` | `LoadBalancer` / `NodePort` work unchanged |
 | `service.port` | `8080` | |
 | `service.annotations` | `{}` | |
