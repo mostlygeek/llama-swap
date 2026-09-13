@@ -20,6 +20,9 @@ spec:
   {{- end }}
   rules:
     {{- range .Values.ingress.hosts }}
+    {{- if not .paths }}
+    {{- fail (printf "ingress: host %s has no paths (add paths: [{path: /, pathType: Prefix}])" .host) }}
+    {{- end }}
     - host: {{ .host | quote }}
       http:
         paths:
