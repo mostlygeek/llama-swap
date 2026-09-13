@@ -209,3 +209,16 @@ func TestKubeswap_HandlerOverrideUpstream(t *testing.T) {
 		t.Errorf("body: %s", rr.Body.String())
 	}
 }
+
+// TestKubeswap_ProxyTransportBypassesEnvironmentProxy verifies the proxy
+// does not route in-cluster traffic through the environment proxy.
+func TestKubeswap_ProxyTransportBypassesEnvironmentProxy(t *testing.T) {
+	s := newTestServer(testConfig(), "")
+	tr, ok := s.proxy.Transport.(*http.Transport)
+	if !ok {
+		t.Fatal("proxy transport is not an *http.Transport")
+	}
+	if tr.Proxy != nil {
+		t.Error("proxy transport must not use the environment proxy for pod traffic")
+	}
+}

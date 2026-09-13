@@ -532,8 +532,12 @@ func newServer(cfg *serveConfig, client kubernetes.Interface, upstreamOverride s
 			r.URL.Host = u.Host
 			r.Host = u.Host
 		},
+		// No Proxy: the upstream is a pod IP in this cluster and must
+		// never be routed through the environment proxy (the head-end
+		// container may carry HTTP_PROXY for other purposes, and
+		// ProxyFromEnvironment would send in-cluster traffic through
+		// it).
 		Transport: &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
 			DialContext: (&net.Dialer{
 				Timeout:   30 * time.Second,
 				KeepAlive: 30 * time.Second,
