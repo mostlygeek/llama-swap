@@ -435,7 +435,10 @@ literal text.
 
 - `pvc:llama-swap-models:/models:ro` — existing or auto-created PVC
 - `emptydir:slots:/slots` — per-pod scratch (KV slot state)
-- `hostpath:/data/models:/models:ro` — path on the scheduled node
+- `hostpath:/data/models:/models:ro` — path on the scheduled node.
+  Hostpath volumes escape the namespace boundary (the pod reads and,
+  without `:ro`, writes that part of the node), so kubeswap logs a
+  warning when one is used.
 
 PVCs that already exist are adopted as-is (a shared model cache is typically
 pre-created once, RWX, by the operator); missing ones are created with

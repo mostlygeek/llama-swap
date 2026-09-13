@@ -166,6 +166,11 @@ func ensureResources(client kubernetes.Interface, cfg *serveConfig) (*ensureResu
 
 // createMissing creates the PVCs, Deployment and Service for cfg.
 func createMissing(client kubernetes.Interface, cfg *serveConfig) ([]string, error) {
+	for _, v := range cfg.Volumes {
+		if v.Kind == volHostPath {
+			log.Printf("WARNING: mounting host path %q at %q in the backend pod: hostpath volumes escape the namespace boundary, so the pod can read (and, without :ro, write) that part of the node", v.Name, v.Path)
+		}
+	}
 	ctx := context.Background()
 	var created []string
 
