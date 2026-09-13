@@ -217,19 +217,27 @@ type servicePortSpec struct {
 	Port int32
 }
 
-// validPortName reports whether s is a lowercase RFC 1123 label (a legal
-// Service port name).
+// validPortName reports whether s is a legal Kubernetes Service port
+// name (IANA_SVC_NAME): up to 15 characters of lowercase alphanumerics
+// and dashes (not at either end), and not consisting solely of digits.
 func validPortName(s string) bool {
-	if s == "" || len(s) > 63 {
+	if s == "" || len(s) > 15 {
 		return false
 	}
+	allDigits := true
 	for i, c := range s {
 		switch {
-		case c >= 'a' && c <= 'z', c >= '0' && c <= '9':
+		case c >= 'a' && c <= 'z':
+			allDigits = false
+		case c >= '0' && c <= '9':
 		case c == '-' && i != 0 && i != len(s)-1:
+			allDigits = false
 		default:
 			return false
 		}
+	}
+	if allDigits {
+		return false
 	}
 	return true
 }
@@ -247,7 +255,7 @@ func parseServicePorts(entries []string) ([]servicePortSpec, error) {
 			return nil, fmt.Errorf("invalid --service-port %q (want name:port)", e)
 		}
 		if !validPortName(name) {
-			return nil, fmt.Errorf("invalid --service-port name %q (want lowercase alphanumerics and dashes)", name)
+			return nil, fmt.Errorf("invalid --service-port name %q (want up to 15 lowercase alphanumerics and dashes, not all digits)", name)
 		}
 		port, err := strconv.Atoi(portS)
 		if err != nil || port < 1 || port > 65535 {
