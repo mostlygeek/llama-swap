@@ -12,7 +12,7 @@ to it. Engines differ only in the container args, the command to run, and
 the health endpoint — all covered by flags. All four servers ship in the
 unified llama-swap image, so a single `--image` covers every engine.
 
-It provides five subcommands:
+It provides six subcommands:
 
 - `serve`: used as a model's `cmd`. Ensures the model's PVCs, Deployment and
   Service exist (adopting them if a previous run left them), then runs a
@@ -35,7 +35,11 @@ It provides five subcommands:
   is no longer in the given model list (`--models`) or llama-swap config
   (`--config path/to/config.yaml`). Use it to clean up leftovers from removed
   or renamed models.
-- `status`: prints the managed workloads in the namespace.
+- `status`: prints the managed workloads in the namespace, including why
+  a not-ready pod is not ready (scheduler verdict, container waiting
+  state, or "starting").
+- `logs`: prints a model's backend container logs (`--tail`, `--follow`) —
+  the quick way to see why a model fails to load.
 - `version`: prints version and build information.
 
 ## Why use this?
@@ -538,11 +542,18 @@ and kills the wrapper, which can leave the pod terminating behind it.
 
 `status`: none beyond the global flags.
 
+`logs`: `--model` (required), `--tail` (default `100`; `0` = all lines),
+`--follow` (keep streaming until the pod or container stops).
+
 `version`: none.
 
 ### Troubleshooting
 
-- `kubeswap status` — quick view of models, pods and readiness.
+- `kubeswap status` — quick view of models, pods and readiness; the
+  REASON column says why a not-ready pod is not ready (no GPU capacity,
+  image pull failure, crash loop, ...).
+- `kubeswap logs --model <id>` — the backend's own logs; model load errors
+  (bad path, OOM, missing device) show up here.
 - `serve` forwards pod logs to stderr with a `[pod/<name>]` prefix, which
   llama-swap records in its log monitor.
 - While the pod is not Ready, the proxy answers every request with 503 and

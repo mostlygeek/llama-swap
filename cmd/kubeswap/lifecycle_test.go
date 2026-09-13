@@ -814,3 +814,85 @@ func TestKubeswap_PollOnceRequestsStopOnDeletion(t *testing.T) {
 		t.Fatal("stop not requested after deployment deletion")
 	}
 }
+
+// TestKubeswap_PodReason verifies the status REASON column summarizes the
+// common not-ready causes.
+func TestKubeswap_PodReason(t *testing.T) {
+	// Ready: no reason.
+	ready := &corev1.Pod{}
+	ready.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
+	if got := podReason(ready); got != "" {
+		t.Errorf("ready pod: got %q, want empty", got)
+	}
+
+	// Unscheduled: the scheduler's verdict, e.g. no GPU capacity.
+	pending := &corev1.Pod{}
+	pending.Status.Phase = corev1.PodPending
+	pending.Status.Conditions = []corev1.PodCondition{{
+		Type: corev1.PodScheduled, Status: corev1.ConditionFalse,
+		Message: "0/9 nodes are available: 9 Insufficient amd.com/gpu",
+	}}
+	if got := podReason(pending); !strings.Contains(got, "Insufficient amd.com/gpu") {
+		t.Errorf("pending pod: got %q, want the scheduler message", got)
+	}
+
+	// CrashLoopBackOff: the container waiting state.
+	crashed := &corev1.Pod{}
+	crashed.Status.ContainerStatuses = []corev1.ContainerStatus{{
+		State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{
+			Reason: "CrashLoopBackOff", Message: "back-off 5m0s restarting failed container=server",
+		}},
+	}}
+	if got := podReason(crashed); !strings.Contains(got, "CrashLoopBackOff") {
+		t.Errorf("crashlooping pod: got %q, want CrashLoopBackOff", got)
+	}
+
+	// Running but not ready: probes still passing.
+	starting := &corev1.Pod{}
+	starting.Status.ContainerStatuses = []corev1.ContainerStatus{{
+		State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+	}}
+	if got := podReason(starting); got != "starting" {
+		t.Errorf("running pod: got %q, want starting", got)
+	}
+}
+
+// TestKubeswap_RunLogs verifies log tailing: a model with no pod gets a
+// clean error, a model with a pod streams, and a sibling model's pod
+// (same sanitized label, different deployment) is out of reach.
+func TestKubeswap_RunLogs(t *testing.T) {
+	client := newFakeClient()
+	cfg := testConfig()
+	if _, err := ensureResources(client, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runLogs(client, "llama-swap", cfg.Model, 10, false); err == nil || !strings.Contains(err.Error(), "no pod") {
+		t.Fatalf("expected a no-pod error, got %v", err)
+	}
+
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name: "m1", Namespace: "llama-swap",
+		Labels: podSelectorLabels(cfg.Sanitized, cfg.DepName),
+	}}
+	if _, err := client.CoreV1().Pods("llama-swap").Create(context.Background(), pod, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runLogs(client, "llama-swap", cfg.Model, 10, false); err != nil {
+		t.Fatalf("runLogs with a pod: %v", err)
+	}
+
+	// A pod carrying only the coarse model label for a DIFFERENT deployment
+	// must not be picked up.
+	sibling := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name: "m2", Namespace: "llama-swap",
+		Labels: podSelectorLabels(cfg.Sanitized, "some-other-deployment"),
+	}}
+	if _, err := client.CoreV1().Pods("llama-swap").Create(context.Background(), sibling, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	found, err := findModelPod(context.Background(), client, "llama-swap", cfg.Sanitized, cfg.DepName)
+	if err != nil || found == nil || found.Name != "m1" {
+		t.Fatalf("findModelPod: got %v, err %v; want pod m1", found, err)
+	}
+}
