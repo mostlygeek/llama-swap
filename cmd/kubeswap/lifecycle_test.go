@@ -619,6 +619,27 @@ func TestKubeswap_GCCollectsStaleWorkloads(t *testing.T) {
 	if _, err := client.CoreV1().Services("llama-swap").Get(ctx, cfgB.SvcName, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
 		t.Errorf("model-b service should be collected, err=%v", err)
 	}
+
+	// A managed object without the model-id annotation cannot be matched
+	// against the config (the allowed set holds original IDs) nor deleted
+	// by name: gc must skip it, not claim it.
+	stale, _ := cfgA.renderDeployment()
+	stale.Name = "stale-no-annotation"
+	stale.Annotations = map[string]string{}
+	stale.Labels = map[string]string{labelManagedBy: managedByValue, labelModel: "stale"}
+	if _, err := client.AppsV1().Deployments("llama-swap").Create(ctx, stale, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	deleted, err = gcCollect(client, "llama-swap", allowed, false)
+	if err != nil {
+		t.Fatalf("gcCollect (second pass): %v", err)
+	}
+	if len(deleted) != 0 {
+		t.Errorf("second pass should collect nothing, got %v", deleted)
+	}
+	if _, err := client.AppsV1().Deployments("llama-swap").Get(ctx, "stale-no-annotation", metav1.GetOptions{}); err != nil {
+		t.Errorf("unannotated deployment should be skipped, not deleted: %v", err)
+	}
 }
 
 // TestKubeswap_FindPod Verifies pod lookup by the deployment's unique label.

@@ -245,7 +245,15 @@ func gcCollect(client kubernetes.Interface, namespace string, allowed map[string
 		dep := &deps.Items[i]
 		modelID := dep.Annotations[annotationModelID]
 		if modelID == "" {
-			modelID = dep.Labels[labelModel]
+			// No annotation: the allowed set holds ORIGINAL model IDs
+			// (the label carries only the sanitized form, which several
+			// distinct IDs share) and the deployment name hashes the
+			// original ID, so such an object can neither be matched
+			// against the config nor deleted by name. Skip it with a
+			// loud log instead of guessing: every Deployment kubeswap
+			// creates carries the annotation.
+			log.Printf("skipping %s/%s: no %s annotation (not a kubeswap object?)", namespace, dep.Name, annotationModelID)
+			continue
 		}
 		if allowed[modelID] {
 			log.Printf("keeping %s/%s (model %q)", namespace, dep.Name, modelID)
