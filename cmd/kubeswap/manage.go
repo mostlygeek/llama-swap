@@ -7,7 +7,9 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -468,13 +470,25 @@ func logsCmd(args []string) error {
 	if err != nil {
 		return err
 	}
-	return runLogs(client, f.namespace, model, tail, follow)
+	return runLogs(context.Background(), client, f.namespace, model, tail, follow)
 }
 
 // runLogs finds the model's pod and copies the backend container's logs to
-// stdout. The pod lookup is bounded (a hung control plane must not hang the
-// CLI); the log stream itself runs until it ends or the process is killed.
-func runLogs(client kubernetes.Interface, namespace, model string, tail int, follow bool) error {
+// stdout under the caller's context. Non-follow reads run under a bounded
+// timeout (a stalled stream must not hang the CLI); follow mode runs under
+// a signal-cancelled context, so Ctrl+C cancels the stream, the copy stops,
+// and the exit is quiet — a canceled follow is a normal stop, not a failure.
+func runLogs(ctx context.Context, client kubernetes.Interface, namespace, model string, tail int, follow bool) error {
+	var streamCtx context.Context
+	if follow {
+		var cancel context.CancelFunc
+		streamCtx, cancel = signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+	} else {
+		var cancel context.CancelFunc
+		streamCtx, cancel = context.WithTimeout(ctx, apiCallTimeout)
+		defer cancel()
+	}
 	sanitized, err := sanitizeModelID(model)
 	if err != nil {
 		return err
@@ -483,8 +497,11 @@ func runLogs(client kubernetes.Interface, namespace, model string, tail int, fol
 	if err != nil {
 		return err
 	}
-	pod, err := findModelPod(context.Background(), client, namespace, sanitized, depName)
+	pod, err := findModelPod(streamCtx, client, namespace, sanitized, depName)
 	if err != nil {
+		if follow && streamCtx.Err() != nil {
+			return nil
+		}
 		return err
 	}
 	if pod == nil {
@@ -495,12 +512,18 @@ func runLogs(client kubernetes.Interface, namespace, model string, tail int, fol
 		n := int64(tail)
 		opts.TailLines = &n
 	}
-	stream, err := client.CoreV1().Pods(namespace).GetLogs(pod.Name, opts).Stream(context.Background())
+	stream, err := client.CoreV1().Pods(namespace).GetLogs(pod.Name, opts).Stream(streamCtx)
 	if err != nil {
+		if follow && streamCtx.Err() != nil {
+			return nil
+		}
 		return fmt.Errorf("opening logs for pod %s: %w", pod.Name, err)
 	}
 	defer stream.Close()
 	if _, err := io.Copy(os.Stdout, stream); err != nil {
+		if follow && streamCtx.Err() != nil {
+			return nil
+		}
 		return fmt.Errorf("reading logs for pod %s: %w", pod.Name, err)
 	}
 	return nil
