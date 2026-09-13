@@ -1,8 +1,9 @@
 import { get, writable, type Writable } from "svelte/store";
 import { persistentStore } from "../stores/persistent";
+import { perServerKey } from "./serverKey";
 
 export interface PlaygroundInterface {
-  /** Persisted selected-model id for this interface. */
+  /** Persisted selected-model id for this interface, namespaced by the active server. */
   selectedModel: Writable<string>;
   /** True while a request is in flight. Shared with the global activity store. */
   busy: Writable<boolean>;
@@ -23,7 +24,7 @@ export function createPlaygroundInterface(
   storageKey: string,
   busy: Writable<boolean>
 ): PlaygroundInterface {
-  const selectedModel = persistentStore<string>(storageKey, "");
+  const selectedModel = persistentStore<string>(perServerKey(storageKey), "");
   const error = writable<string | null>(null);
   let abort: AbortController | null = null;
 

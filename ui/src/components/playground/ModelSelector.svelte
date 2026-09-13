@@ -26,6 +26,21 @@
       || grouped.local.length > 0
       || grouped.peers.length > 0
   );
+
+  // Selectable ids: every id/alias actually offered below. A value survives a
+  // server switch in storage (it's keyed per server), but the model it named
+  // may not exist on whichever server is now connected, in which case it
+  // should not keep showing as selected.
+  let selectableIds = $derived(new Set([
+    ...$profileModels.map((model) => model.id),
+    ...$selectorModels.map((model) => model.id),
+    ...[...grouped.localMatching, ...grouped.local].flatMap((model) => [model.id, ...(model.aliases ?? [])]),
+    ...grouped.peers.map((model) => model.id),
+  ]));
+
+  $effect(() => {
+    if (value && hasModels && !selectableIds.has(value)) value = "";
+  });
 </script>
 
 {#if hasModels}
