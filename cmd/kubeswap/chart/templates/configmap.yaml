@@ -1,3 +1,6 @@
+{{- if and .Values.config.existing .Values.config.models }}
+{{- fail "config: config.existing is set, so the chart mounts the existing ConfigMap and ignores config.models (and config.defaults/top); remove config.models to use the existing ConfigMap" }}
+{{- end }}
 {{- if not .Values.config.existing }}
 apiVersion: v1
 kind: ConfigMap
