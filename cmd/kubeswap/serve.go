@@ -182,10 +182,11 @@ func ensureResources(client kubernetes.Interface, cfg *serveConfig) (*ensureResu
 }
 
 // pvcAllowsReadWrite reports whether the PVC's access modes can serve a
-// read-write mount (RWO or RWX; ROX cannot).
+// read-write mount (RWO, RWOP or RWX; ROX cannot). RWOP is single-pod
+// like RWO, which is the shape kubeswap backends have anyway.
 func pvcAllowsReadWrite(pvc *corev1.PersistentVolumeClaim) bool {
 	for _, m := range pvc.Spec.AccessModes {
-		if m == corev1.ReadWriteOnce || m == corev1.ReadWriteMany {
+		if m == corev1.ReadWriteOnce || m == corev1.ReadWriteOncePod || m == corev1.ReadWriteMany {
 			return true
 		}
 	}
