@@ -20,6 +20,11 @@ export interface ConnectOptions {
   privateKeyJSON: string;
   derpMapURL: string;
   verbose: boolean;
+  /**
+   * Told what connect is waiting on: "handshake" with the attempt number as
+   * detail, then "probe" once the tunnel is up and the node's HTTP is checked.
+   */
+  onProgress?: (stage: "handshake" | "probe", detail: string) => void;
 }
 
 /** The request shape doFetch() expects. Headers are pairs so repeats survive. */
