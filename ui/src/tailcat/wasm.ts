@@ -22,6 +22,38 @@ const SIDECAR_URL = "./main.wasm.gz";
 
 export type LoadStage = "fetching" | "decompressing" | "compiling" | "starting";
 
+/**
+ * Reports a load stage. detail is the bytes received so far while fetching,
+ * as "2.1 of 6.0 MB", and empty otherwise.
+ */
+export type LoadProgress = (stage: LoadStage, detail: string) => void;
+
+function megabytes(n: number): string {
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/**
+ * Wraps body so every chunk that passes updates the fetch progress, and the
+ * end of the stream marks the move to decompressing. The bytes are pulled
+ * through gunzip as they arrive, so this is the only place the boundary
+ * between the two stages is observable.
+ */
+function counting(body: ReadableStream<Uint8Array>, total: number, onProgress: LoadProgress) {
+  let received = 0;
+  return body.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        received += chunk.byteLength;
+        onProgress("fetching", total ? `${megabytes(received)} of ${megabytes(total)}` : megabytes(received));
+        controller.enqueue(chunk);
+      },
+      flush() {
+        onProgress("decompressing", "");
+      },
+    }),
+  );
+}
+
 let started: Promise<void> | undefined;
 
 function installGoRuntime(): void {
@@ -33,20 +65,33 @@ function installGoRuntime(): void {
   new Function(wasmExecSource)();
 }
 
-async function moduleBytes(onStage: (stage: LoadStage) => void): Promise<ArrayBuffer> {
+async function moduleBytes(onProgress: LoadProgress): Promise<ArrayBuffer> {
   const inline = document.getElementById(INLINE_ELEMENT_ID);
-  const source = inline
-    ? `data:application/octet-stream;base64,${(inline.textContent ?? "").trim()}`
-    : SIDECAR_URL;
+  // Browsers refuse fetch() of a sibling file on file://, so the split pair
+  // only works from a web server. Say so, instead of a bare "Failed to fetch".
+  if (!inline && location.protocol === "file:") {
+    throw new Error(
+      "This copy of the page loads main.wasm.gz from beside it, which browsers do not allow " +
+        "from file://. Serve index.html and main.wasm.gz from a web server, or open " +
+        "llama-swap-tailcat-playground.html, which has the module built in.",
+    );
+  }
+  const base64 = inline ? (inline.textContent ?? "").trim() : "";
+  const source = inline ? `data:application/octet-stream;base64,${base64}` : SIDECAR_URL;
 
-  onStage("fetching");
+  onProgress("fetching", "");
   const response = await fetch(source);
   if (!response.ok || !response.body) {
     throw new Error(`could not load the Tailcat module (${response.status})`);
   }
+  // A data: response carries no Content-Length; its size follows from the base64.
+  const total = inline
+    ? Math.floor((base64.length * 3) / 4)
+    : Number(response.headers.get("content-length") ?? 0);
 
-  onStage("decompressing");
-  const decompressed = response.body.pipeThrough(new DecompressionStream("gzip"));
+  const decompressed = counting(response.body, total, onProgress).pipeThrough(
+    new DecompressionStream("gzip"),
+  );
   return await new Response(decompressed).arrayBuffer();
 }
 
@@ -54,16 +99,16 @@ async function moduleBytes(onStage: (stage: LoadStage) => void): Promise<ArrayBu
  * Loads, instantiates and starts the module, resolving once it has installed
  * its globals. Repeat calls share the first load.
  */
-export function startTailcatWasm(onStage: (stage: LoadStage) => void = () => {}): Promise<void> {
+export function startTailcatWasm(onProgress: LoadProgress = () => {}): Promise<void> {
   started ??= (async () => {
     installGoRuntime();
-    const bytes = await moduleBytes(onStage);
+    const bytes = await moduleBytes(onProgress);
 
-    onStage("compiling");
+    onProgress("compiling", "");
     const go = new Go();
     const { instance } = await WebAssembly.instantiate(bytes, go.importObject);
 
-    onStage("starting");
+    onProgress("starting", "");
     const ready = new Promise<void>((resolve) => {
       globalThis.onLlamaSwapTailcatReady = resolve;
     });

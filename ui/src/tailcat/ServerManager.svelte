@@ -5,7 +5,19 @@
   import { Label } from "$lib/components/ui/label/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
-  import { Copy, Check, Pencil, Trash2, TriangleAlert, Plus } from "@lucide/svelte";
+  import {
+    Copy,
+    Check,
+    Pencil,
+    Trash2,
+    TriangleAlert,
+    Plus,
+    ShieldCheck,
+    EyeOff,
+    HardDrive,
+    LoaderCircle,
+    CircleAlert,
+  } from "@lucide/svelte";
   import { copyText } from "$lib/clipboard";
   import {
     tailcatServers,
@@ -24,11 +36,17 @@
     nodeKey: string;
     /** True when a saved client key could not be read and was replaced. */
     keyRegenerated: boolean;
+    /** Where the module load is, shown in place of the node key until there is one. */
+    moduleMessage: string;
+    /** Why the module failed to load, or "" while it is loading or loaded. */
+    moduleError: string;
+    /** Starts the module load again after a failure. */
+    onretry: () => void;
     /** Activating a server means connecting to it and remembering the choice. */
     onactivate: (server: TailcatServer) => void;
   }
 
-  let { nodeKey, keyRegenerated, onactivate }: Props = $props();
+  let { nodeKey, keyRegenerated, moduleMessage, moduleError, onretry, onactivate }: Props = $props();
 
   function blank(): TailcatServer {
     return { id: newServerID(), name: "", token: "", apiKey: "", derpMapURL: "" };
@@ -76,13 +94,41 @@
   }
 </script>
 
-<div class="mx-auto flex w-full max-w-2xl flex-col gap-4 p-4">
-  <div>
-    <h1 class="text-2xl font-semibold">llama-swap Playground over Tailcat</h1>
-    <p class="text-muted-foreground mt-1 text-sm">
-      Connects to a llama-swap node started with <code>-listen-tailcat</code>. Nothing is sent to the
-      site serving this page &mdash; the connection is made from your browser, over Tailcat.
-    </p>
+<div class="mx-auto flex w-full max-w-2xl flex-col gap-5 p-4">
+  <div class="flex flex-col gap-4">
+    <div>
+      <h1 class="text-3xl font-semibold tracking-tight">Connect to llama-swap securely</h1>
+      <p class="text-muted-foreground mt-2 text-sm leading-relaxed">
+        The Playground, running entirely in your browser, reaching a llama-swap node over Tailcat.
+        Your prompts, keys and servers never leave this device except to go to the node itself.
+      </p>
+    </div>
+    <ul class="grid gap-2 sm:grid-cols-3">
+      <li class="bg-muted/40 flex flex-col gap-1.5 rounded-xl border p-3">
+        <EyeOff class="text-primary size-4" />
+        <div class="text-sm font-medium">Nothing sent to this site</div>
+        <div class="text-muted-foreground text-xs leading-relaxed">
+          This page is a static file. The connection is made from your browser, and the site serving
+          it sees none of your traffic.
+        </div>
+      </li>
+      <li class="bg-muted/40 flex flex-col gap-1.5 rounded-xl border p-3">
+        <ShieldCheck class="text-primary size-4" />
+        <div class="text-sm font-medium">Encrypted end to end</div>
+        <div class="text-muted-foreground text-xs leading-relaxed">
+          Tailcat is WireGuard. Only your browser and the node can read what passes between them,
+          not the relay in the middle.
+        </div>
+      </li>
+      <li class="bg-muted/40 flex flex-col gap-1.5 rounded-xl border p-3">
+        <HardDrive class="text-primary size-4" />
+        <div class="text-sm font-medium">Saved only on this device</div>
+        <div class="text-muted-foreground text-xs leading-relaxed">
+          Servers, tokens and this browser's node key live in local storage here. No account, no
+          sync, no cloud.
+        </div>
+      </li>
+    </ul>
   </div>
 
   {#if draft}
@@ -203,8 +249,17 @@
             <code>tailcat.allow</code> list still naming the old key needs updating.
           </p>
         {/if}
+      {:else if moduleError}
+        <div class="flex items-center gap-2 text-sm" aria-live="polite">
+          <CircleAlert class="text-destructive size-4 shrink-0" />
+          <span class="text-destructive min-w-0">{moduleMessage}: {moduleError}</span>
+          <Button variant="outline" size="sm" class="ml-auto shrink-0" onclick={onretry}>Retry</Button>
+        </div>
       {:else}
-        <p class="text-muted-foreground text-sm">Loading the Tailcat module&hellip;</p>
+        <p class="text-muted-foreground flex items-center gap-2 text-sm" aria-live="polite">
+          <LoaderCircle class="size-4 animate-spin" />
+          {moduleMessage}&hellip;
+        </p>
       {/if}
     </Card.Content>
   </Card.Root>

@@ -14,7 +14,7 @@
 // It sets globalThis.llamaSwapTailcat with four functions:
 //
 //	identity(privateKeyJSON: string|null) -> {nodeKey, privateKeyJSON, regenerated}
-//	connect({token, privateKeyJSON, derpMapURL, verbose}) -> Promise<{nodeKey}>
+//	connect({token, privateKeyJSON, derpMapURL, verbose, onProgress}) -> Promise<{nodeKey}>
 //	fetch({method, url, headers, body, signal}) -> Promise<Response>
 //	disconnect() -> undefined
 //
@@ -120,6 +120,12 @@ func identity(this js.Value, args []js.Value) any {
 
 // connect brings up a Tailcat client for token and, once the tunnel carries
 // HTTP, installs it as the transport every later fetch call uses.
+//
+// The optional onProgress(stage, detail) callback is told what connect is
+// waiting on. The handshake alone can take most of a minute when the token is
+// stale or the browser's node key is not on the allowlist, and a page that
+// sits silently for that long looks broken. Stages are "handshake", with the
+// attempt number as detail, and "probe".
 func connect(this js.Value, args []js.Value) any {
 	if len(args) != 1 || args[0].Type() != js.TypeObject {
 		return rejectedPromise(errors.New("connect requires an options object"))
@@ -129,6 +135,7 @@ func connect(this js.Value, args []js.Value) any {
 	keyJSON := optString(opts, "privateKeyJSON")
 	derpMapURL := strings.TrimSpace(optString(opts, "derpMapURL"))
 	logf := optLogf(opts)
+	progress := optProgress(opts)
 
 	return makePromise(func() (any, error) {
 		if token == "" {
@@ -152,7 +159,7 @@ func connect(this js.Value, args []js.Value) any {
 
 		ctx, cancel := context.WithTimeout(context.Background(), handshakeTimeout)
 		defer cancel()
-		if err := pingUntil(ctx, cl); err != nil {
+		if err := pingUntil(ctx, cl, progress); err != nil {
 			cl.Close()
 			return nil, fmt.Errorf("could not reach the node over Tailcat. Check the token, "+
 				"and that the node's tailcat.allow list includes this browser's node key: %w", err)
@@ -169,6 +176,7 @@ func connect(this js.Value, args []js.Value) any {
 			MaxIdleConnsPerHost: maxIdleConnsPerHost,
 		}}
 
+		progress("probe", "")
 		if err := probeHealth(hc); err != nil {
 			cl.Close()
 			return nil, err
@@ -418,8 +426,9 @@ func bodyStream(body io.ReadCloser, cancel context.CancelFunc, releaseAbort func
 // pingUntil retries the meow/meowed handshake until it succeeds or ctx
 // expires. The first pings can be lost while either side's DERP connection is
 // still coming up.
-func pingUntil(ctx context.Context, cl *tailcatlib.Client) error {
-	for {
+func pingUntil(ctx context.Context, cl *tailcatlib.Client, progress progressFunc) error {
+	for n := 1; ; n++ {
+		progress("handshake", strconv.Itoa(n))
 		attempt, cancel := context.WithTimeout(ctx, 5*time.Second)
 		_, err := cl.Ping(attempt)
 		cancel()
@@ -453,6 +462,20 @@ func optString(v js.Value, name string) string {
 		return p.String()
 	}
 	return ""
+}
+
+// progressFunc reports a connect stage to the page.
+type progressFunc func(stage, detail string)
+
+// optProgress wraps the onProgress option, or is a no-op when the page did not
+// pass one. Calls are dispatched to the JS thread by js.Value.Invoke, which is
+// safe from the goroutine makePromise runs f on.
+func optProgress(v js.Value) progressFunc {
+	f := v.Get("onProgress")
+	if f.Type() != js.TypeFunction {
+		return func(string, string) {}
+	}
+	return func(stage, detail string) { f.Invoke(stage, detail) }
 }
 
 func optLogf(v js.Value) logger.Logf {

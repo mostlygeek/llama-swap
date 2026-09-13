@@ -34,7 +34,8 @@ This writes two packagings of the same page to `build/tailcat-playground/`:
 | File | Use |
 | --- | --- |
 | `llama-swap-tailcat-playground.html` | One self-contained file, about 10MB. Copy it anywhere and open it, including from `file://`. |
-| `index.html` + `main.wasm.gz` | The same page with the module beside it instead of inside it. Serve both from any static web server. |
+| `index.html` + `main.wasm.gz` | The same page with the module beside it instead of inside it. Serve both from any static web server. It does not work from `file://`: browsers refuse to fetch a sibling file there, so use the single file for that. |
+| `tailcat-playground-server` | A binary for the machine you built on, with the split pair embedded. Run it and open the address it prints; `-listen` changes it from the default `127.0.0.1:8090`. |
 
 The WebAssembly module is the whole Tailscale data plane, so the first build
 takes about a minute. Nothing embeds the page in the llama-swap binary.

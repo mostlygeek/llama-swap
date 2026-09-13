@@ -107,7 +107,11 @@ wol-proxy: $(BUILD_DIR)
 # across upgrades. It is upstream's list for native binaries; their wasm list
 # lives in an internal package that cannot be imported, and the difference is
 # a couple of MB of code this page never calls.
+#
+# Also builds tailcat-playground-server for the host, a small binary with the
+# split pair embedded, for when there is no web server to hand.
 TAILCAT_DIST = $(BUILD_DIR)/tailcat-playground
+TAILCAT_SERVER_DIST = cmd/tailcat-playground-server/dist
 TAILCAT_TAGS = $(shell cat "$(shell go list -m -f '{{.Dir}}' github.com/tailscale/tailcat)/build-tags.txt")
 
 tailcat-playground: ui/node_modules
@@ -119,6 +123,10 @@ tailcat-playground: ui/node_modules
 	gzip -9 -f -k $(TAILCAT_DIST)/main.wasm
 	cd ui && npm run build:tailcat
 	node ui/scripts/build-tailcat.mjs $(TAILCAT_DIST)
+	@echo "Building the Tailcat Playground server..."
+	mkdir -p $(TAILCAT_SERVER_DIST)
+	cp $(TAILCAT_DIST)/index.html $(TAILCAT_DIST)/main.wasm.gz $(TAILCAT_SERVER_DIST)/
+	go build -tags embed_playground -ldflags="-s -w" -o $(TAILCAT_DIST)/tailcat-playground-server ./cmd/tailcat-playground-server
 
 # Tests for the Tailcat Playground's js/wasm fetch bridge. They run under Node
 # via the Go toolchain's own wasm runner, and stand an in-process HTTP server
