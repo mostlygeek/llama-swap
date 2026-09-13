@@ -367,6 +367,9 @@ func (f *serveFlags) toConfig() (*serveConfig, error) {
 			return nil, fmt.Errorf("--service-port %s:%d collides with the primary http port (%d)", sp.Name, sp.Port, f.port)
 		}
 	}
+	if f.grace < 0 {
+		return nil, fmt.Errorf("invalid --grace %s (must be zero or positive)", f.grace)
+	}
 	livenessPath := f.livenessPath
 	if livenessPath == "" {
 		livenessPath = f.healthPath
