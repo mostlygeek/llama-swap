@@ -38,6 +38,17 @@ type ensureResult struct {
 // (the cascade includes pod termination).
 const strictReplaceTimeout = 5 * time.Minute
 
+// apiCallTimeout bounds a single Kubernetes API call. rest.Config has
+// no default request timeout, so a hung (not down) control plane would
+// otherwise block a call — and with it the poller or the whole serve
+// — forever. A variable so tests can shrink it.
+var apiCallTimeout = 30 * time.Second
+
+// ensureTimeout bounds the whole ensureResources pass; it must cover
+// the strict path's strictReplaceTimeout deletion wait plus the create
+// retries on top.
+const ensureTimeout = 10 * time.Minute
+
 // createRetryInterval is the pause between create retries while a name
 // is still reserved; a variable so tests can shrink it.
 var createRetryInterval = 500 * time.Millisecond
@@ -52,7 +63,11 @@ const maxCreateAttempts = 20
 func waitForDeploymentGone(ctx context.Context, client kubernetes.Interface, namespace, name string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
-		_, err := client.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+		// Per-iteration bound: a hung Get must not stall the loop past
+		// its deadline.
+		callCtx, cancel := context.WithTimeout(ctx, apiCallTimeout)
+		_, err := client.AppsV1().Deployments(namespace).Get(callCtx, name, metav1.GetOptions{})
+		cancel()
 		if apierrors.IsNotFound(err) {
 			return nil
 		}
@@ -95,7 +110,8 @@ func verifyOwnership(obj metav1.Object, modelID string) error {
 // model (verifyOwnership), so colliding model IDs cannot adopt or tear
 // down each other's backends.
 func ensureResources(client kubernetes.Interface, cfg *serveConfig) (*ensureResult, error) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), ensureTimeout)
+	defer cancel()
 	res := &ensureResult{}
 
 	depName := cfg.DepName
@@ -713,7 +729,13 @@ func (s *server) setReady(ready bool, reason string) {
 func (s *server) pollOnce(ctx context.Context) {
 	cfg := s.cfg
 	depName := cfg.DepName
-	dep, err := s.client.AppsV1().Deployments(cfg.Namespace).Get(ctx, depName, metav1.GetOptions{})
+	// Bound the API calls: a hung control plane must not stall the
+	// poller (a timed-out call surfaces as a not-ready reason and the
+	// next tick retries). Log streaming keeps the outer ctx: it is a
+	// long-lived stream, not a single call.
+	apiCtx, cancel := context.WithTimeout(ctx, apiCallTimeout)
+	defer cancel()
+	dep, err := s.client.AppsV1().Deployments(cfg.Namespace).Get(apiCtx, depName, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			log.Printf("deployment %s/%s deleted, shutting down", cfg.Namespace, depName)
@@ -725,7 +747,7 @@ func (s *server) pollOnce(ctx context.Context) {
 		return
 	}
 
-	st := s.findPod(ctx, dep)
+	st := s.findPod(apiCtx, dep)
 	if st.ready {
 		s.setReady(true, "pod ready")
 	} else {
