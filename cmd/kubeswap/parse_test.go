@@ -152,10 +152,14 @@ func TestKubeswap_ParseServicePorts(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	for _, bad := range []string{"noprefix", "metrics:", "metrics:abc", "Metrics:9090", "a:b:c", "metrics:70000"} {
+	for _, bad := range []string{"noprefix", "metrics:", "metrics:abc", "Metrics:9090", "a:b:c", "metrics:70000", "8080:9090", "abcdefghijklmnop:9090"} {
 		if _, err := parseServicePorts([]string{bad}); err == nil {
 			t.Errorf("expected error for %q", bad)
 		}
+	}
+	// 15 characters is the IANA_SVC_NAME limit and is accepted.
+	if _, err := parseServicePorts([]string{"abcdefghijklmno:9090"}); err != nil {
+		t.Errorf("15-character name should be valid: %v", err)
 	}
 	if _, err := parseServicePorts([]string{"m:9090", "m:9090"}); err == nil {
 		t.Error("expected error for duplicate port")
