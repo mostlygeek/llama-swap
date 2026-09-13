@@ -2,6 +2,7 @@
   import { get } from "svelte/store";
   import { hasListedModels, playgroundModels } from "../../stores/api";
   import { persistentStore } from "../../stores/persistent";
+  import { perServerKey } from "../../lib/serverKey";
   import { showGenerationStats } from "../../stores/generationStats";
   import { streamChatCompletion, type Endpoint } from "../../lib/chatApi";
   import { currentStats, markCancelled, startTracking, trackChunk } from "../../lib/generationStats";
@@ -23,7 +24,7 @@
   import { Tabs, TabsContent, TabsList, TabsTrigger } from "$lib/components/ui/tabs/index.js";
   import { X } from "@lucide/svelte";
 
-  const selectedModelStore = persistentStore<string>("playground-selected-model", "");
+  const selectedModelStore = persistentStore<string>(perServerKey("playground-selected-model"), "");
   const systemPromptStore = persistentStore<string>("playground-system-prompt", "");
   const temperatureStore = persistentStore<number>("playground-temperature", 0.7);
   const endpointStore = persistentStore<Endpoint>("playground-endpoint", "v1/chat/completions");
