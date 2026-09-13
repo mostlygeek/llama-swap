@@ -7,6 +7,7 @@
 // Subcommands:
 //
 //	serve   long-running: lifecycle + local proxy (used as a model's cmd)
+//	start   one-shot: ensure a model's backend resources exist (pre-warm)
 //	delete  one-shot: delete a model's managed objects (used as cmdStop)
 //	gc      one-shot: delete managed objects for models not in the config
 //	status  one-shot: print the managed workloads
@@ -70,6 +71,8 @@ func main() {
 	switch os.Args[1] {
 	case "serve":
 		err = serveCmd(os.Args[2:])
+	case "start":
+		err = startCmd(os.Args[2:])
 	case "delete":
 		err = deleteCmd(os.Args[2:])
 	case "gc":
@@ -101,6 +104,7 @@ func usage(w *os.File) {
 
 Usage:
   kubeswap serve [flags] -- <container args...>
+  kubeswap start [flags] -- <container args...>
   kubeswap delete --model <id> [flags]
   kubeswap gc [flags]
   kubeswap status [flags]
@@ -112,6 +116,9 @@ Commands:
            Creates or adopts the model's Deployment + Service and proxies
            --listen to the backend pod until stopped. SIGTERM exits without
            deleting anything (the backend is kept for adoption on restart).
+  start    Like serve without the proxy: create (or adopt) the model's
+           backend resources and exit. Pre-warms a model so the first
+           request is fast, or manages a backend by hand.
   delete   Delete a model's Deployment/Service (and PVCs with
            --delete-volumes). Used as a model's cmdStop; a running serve
            process exits on its own when it observes the deletion.

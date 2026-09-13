@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -430,17 +431,15 @@ func (f *serveFlags) toConfig() (*serveConfig, error) {
 	}, nil
 }
 
-// serveCmd Runs the serve subcommand: ensures the backend resources exist, then proxies the listen address to the backend pod until the model is unloaded.
-func serveCmd(args []string) error {
-	var f serveFlags
-	fs := newFlagSet("serve")
-	fs.StringVar(&f.listen, "listen", "", "address to listen on (required, e.g. 127.0.0.1:${PORT})")
+// addServeFlags Registers the flags shared by serve and start —
+// everything that shapes the backend resources (the serve-only proxy
+// flags are registered by the callers).
+func addServeFlags(fs *flag.FlagSet, f *serveFlags) {
 	fs.StringVar(&f.model, "model", "", "llama-swap model ID (required)")
 	addKubeFlags(fs, &f.namespace, &f.kubeconfig)
 	fs.StringVar(&f.image, "image", "", "container image (required)")
 	fs.IntVar(&f.port, "port", defaultPort, "port the backend container listens on (must match the backend's --port)")
 	fs.StringVar(&f.healthPath, "health-path", "/health", "backend health endpoint (drives the pod readiness probe)")
-	fs.StringVar(&f.checkPath, "check-path", "/health", "path the wrapper answers itself from pod readiness (200 when ready, 503+reason until then); point consumers' health checks here")
 	fs.StringVar(&f.livenessPath, "liveness-path", "", "backend liveness probe endpoint (default: same as --health-path)")
 	fs.DurationVar(&f.probeTimeout, "probe-timeout", 5*time.Second, "timeout for the readiness/liveness probe requests")
 	fs.DurationVar(&f.startupTimeout, "startup-timeout", 10*time.Minute, "model loading time the startup probe tolerates before the pod restarts; llama-swap's global healthCheckTimeout should be at least this long")
@@ -459,14 +458,11 @@ func serveCmd(args []string) error {
 	fs.StringVar(&f.pvcMode, "pvc-access-mode", "rwo", "access mode for created PVCs: rwo or rwx")
 	fs.DurationVar(&f.grace, "grace", 30*time.Second, "terminationGracePeriodSeconds for the pod")
 	fs.BoolVar(&f.strict, "strict", false, "replace the backend when its spec drifts from the config (default: adopt as-is)")
-	fs.StringVar(&f.upstream, "upstream", "", "override the proxy upstream URL (default: discovered pod IP)")
-	fs.DurationVar(&f.poll, "poll", time.Second, "interval for cluster state polling")
-	fs.BoolVar(&f.noLogs, "no-logs", false, "disable pod log forwarding to stderr")
-	fs.Parse(args)
+}
 
-	if f.listen == "" {
-		return errors.New("--listen is required")
-	}
+// validateServeFlags rejects values that would only fail at Deployment
+// creation (required fields, path prefixes, port range).
+func (f *serveFlags) validateServeFlags() error {
 	if f.model == "" {
 		return errors.New("--model is required")
 	}
@@ -480,6 +476,27 @@ func serveCmd(args []string) error {
 	}
 	if f.port < 1 || f.port > 65535 {
 		return fmt.Errorf("invalid --port %d (want 1-65535)", f.port)
+	}
+	return nil
+}
+
+// serveCmd Runs the serve subcommand: ensures the backend resources exist, then proxies the listen address to the backend pod until the model is unloaded.
+func serveCmd(args []string) error {
+	var f serveFlags
+	fs := newFlagSet("serve")
+	fs.StringVar(&f.listen, "listen", "", "address to listen on (required, e.g. 127.0.0.1:${PORT})")
+	addServeFlags(fs, &f)
+	fs.StringVar(&f.checkPath, "check-path", "/health", "path the wrapper answers itself from pod readiness (200 when ready, 503+reason until then); point consumers' health checks here")
+	fs.StringVar(&f.upstream, "upstream", "", "override the proxy upstream URL (default: discovered pod IP)")
+	fs.DurationVar(&f.poll, "poll", time.Second, "interval for cluster state polling")
+	fs.BoolVar(&f.noLogs, "no-logs", false, "disable pod log forwarding to stderr")
+	fs.Parse(args)
+
+	if f.listen == "" {
+		return errors.New("--listen is required")
+	}
+	if err := f.validateServeFlags(); err != nil {
+		return err
 	}
 
 	cfg, err := f.toConfig()
@@ -543,6 +560,45 @@ func serveCmd(args []string) error {
 	if err := s.srv.Shutdown(shutCtx); err != nil {
 		log.Printf("http server shutdown: %v", err)
 	}
+	return nil
+}
+
+// startCmd Implements the start subcommand: ensures the backend resources exist and exits — pre-warming a model or creating the backend by hand (no proxy, unlike serve).
+func startCmd(args []string) error {
+	var f serveFlags
+	fs := newFlagSet("start")
+	addServeFlags(fs, &f)
+	fs.Parse(args)
+	if err := f.validateServeFlags(); err != nil {
+		return err
+	}
+	client, err := buildClient(f.kubeconfig)
+	if err != nil {
+		return err
+	}
+	return startModel(client, &f, fs)
+}
+
+// startModel builds the config from the parsed flags and ensures the
+// backend resources exist; the created or adopted objects are logged and
+// the command exits. Idempotent: a second run adopts the existing
+// deployment (replacing it only with --strict, like serve).
+func startModel(client kubernetes.Interface, f *serveFlags, fs *flag.FlagSet) error {
+	cfg, err := f.toConfig()
+	if err != nil {
+		return err
+	}
+	cfg.Args = fs.Args()
+	res, err := ensureResources(client, cfg)
+	if err != nil {
+		return err
+	}
+	if res.Adopted {
+		log.Printf("model %q: deployment %s/%s already exists (adopted as-is; use --strict to replace on drift)", cfg.Model, cfg.Namespace, cfg.DepName)
+	} else {
+		log.Printf("model %q: created %v", cfg.Model, res.Created)
+	}
+	log.Printf("model %q: watch it with: kubeswap status --namespace %s (logs: kubeswap logs --model %s --namespace %s)", cfg.Model, cfg.Namespace, cfg.Model, cfg.Namespace)
 	return nil
 }
 
