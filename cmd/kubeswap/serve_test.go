@@ -32,6 +32,17 @@ func TestKubeswap_ToConfigRejectsReservedLabels(t *testing.T) {
 	}
 }
 
+// TestKubeswap_ServeRejectsNegativeGrace Verifies a negative --grace is rejected at parse time.
+func TestKubeswap_ServeRejectsNegativeGrace(t *testing.T) {
+	err := serveCmd([]string{
+		"--listen", "127.0.0.1:0", "--model", "m", "--image", "img",
+		"--grace", "-5s",
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid --grace") {
+		t.Errorf("expected invalid --grace error, got %v", err)
+	}
+}
+
 // TestKubeswap_ServeRejectsOutOfRangePort Verifies out-of-range --port values are rejected.
 func TestKubeswap_ServeRejectsOutOfRangePort(t *testing.T) {
 	for _, port := range []string{"0", "-1", "65536"} {
