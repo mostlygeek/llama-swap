@@ -63,9 +63,12 @@ non-empty `tailcat.models` list. Use `models: ["*"]` explicitly to expose all
 callable local and peer IDs.
 
 `tailcat.models` accepts any public model ID: a model's own ID, one of its
-`aliases`, a `selectors` entry, a profile pin, or a peer's `peerID/model`
-name. Listing a selector exposes it the same way as a regular model ID, and
-requests still resolve through the selector's normal routing logic.
+`aliases` (including the variants `setParamsByID` creates), a `selectors`
+entry, a profile pin, or a peer's `peerID/model` name. Listing a selector
+exposes it the same way as a regular model ID, and requests still resolve
+through the selector's normal routing logic. Naming a local model exposes its
+aliases too; naming only an alias exposes just that alias and keeps the
+model's real ID private.
 
 `allow` denies by default. llama-swap checks it on every HTTP request, using
 the node key that Tailcat authenticated for the connection. A client whose key
