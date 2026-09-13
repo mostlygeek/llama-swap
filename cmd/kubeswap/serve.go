@@ -94,8 +94,6 @@ func verifyOwnership(obj metav1.Object, modelID string) error {
 // Adoption and deletion only ever touch objects verified to belong to the
 // model (verifyOwnership), so colliding model IDs cannot adopt or tear
 // down each other's backends.
-
-// ensureResources Creates the model's Deployment and Service, adopting or strictly replacing an existing Deployment and creating any missing PVCs.
 func ensureResources(client kubernetes.Interface, cfg *serveConfig) (*ensureResult, error) {
 	ctx := context.Background()
 	res := &ensureResult{}
