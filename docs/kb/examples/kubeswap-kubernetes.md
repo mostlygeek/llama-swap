@@ -215,8 +215,11 @@ models:
 ```
 
 NVIDIA clusters use `--gpu nvidia.com/gpu=1` and drop the AMD node
-selector (or point it at your own GPU label). CPU-only: drop
-`--gpu`/`--node-selector` (and `--diffusion-fa` for image models).
+selector (or point it at your own GPU label). CPU-only is a first-class
+mode, not a fallback: drop `--gpu`/`--node-selector` (and `--diffusion-fa`
+for image models) and the pod schedules on any node — the whisper and TTS
+models above already do exactly that. A CPU LLM works the same way on small
+models (drop `-ngl`; expect CPU speed, not GPU speed).
 
 ### /models/qwen3-tts-server.json
 
@@ -437,7 +440,13 @@ curl -s $LS/v1/audio/speech -H 'Content-Type: application/json' \
 ## Related
 
 - `guides/operations/kubeswap-kubernetes` — how the wrapper works,
-  lifecycle semantics, flag reference
+  lifecycle semantics, GPU/CPU resource mapping, hand-rolled RBAC
+- `guides/operations/debugging-backends` — the status → logs → kubectl
+  failure chain and the symptom table
+- `guides/operations/storage-options-kubernetes` — RWX vs RWO vs emptyDir
+  for the model cache, and the node-pin escape
+- `guides/operations/building-unified-image` — building the image, adding
+  an engine, verifying kubeswap is inside
 - `cmd/kubeswap/README.md` — full flag reference and troubleshooting
 - `cmd/kubeswap/chart/` — the Helm chart (values reference,
   exposure and storage options)
