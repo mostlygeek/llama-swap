@@ -542,7 +542,11 @@ func newServer(cfg *serveConfig, client kubernetes.Interface, upstreamOverride s
 				Timeout:   30 * time.Second,
 				KeepAlive: 30 * time.Second,
 			}).DialContext,
-			TLSHandshakeTimeout:   10 * time.Second,
+			TLSHandshakeTimeout: 10 * time.Second,
+			// Bounds a wedged backend, not model loading: llama-swap
+			// only forwards once the check path reports the pod ready
+			// (startup probe passed), so this caps how long a ready
+			// backend may stall before producing response headers.
 			ResponseHeaderTimeout: 300 * time.Second,
 			ExpectContinueTimeout: 1 * time.Second,
 			MaxIdleConns:          100,
@@ -855,11 +859,7 @@ func (s *server) streamLogs(ctx context.Context, pod *corev1.Pod) {
 	for scanner.Scan() {
 		fmt.Fprintf(os.Stderr, "[pod/%s] %s\n", pod.Name, scanner.Text())
 	}
-	ioCopyDone(stream)
-}
-
-// ioCopyDone drains the stream so the transport connection closes cleanly.
-func ioCopyDone(r io.ReadCloser) {
-	_, _ = io.Copy(io.Discard, r)
-	_ = r.Close()
+	// The scanner has consumed the stream to EOF; close releases the
+	// transport connection.
+	_ = stream.Close()
 }
