@@ -151,7 +151,7 @@ func ensureResources(client kubernetes.Interface, cfg *serveConfig) (*ensureResu
 	}
 
 	if !res.Adopted {
-		created, err := createMissing(client, cfg)
+		created, err := createMissing(ctx, client, cfg)
 		if err != nil {
 			return nil, err
 		}
@@ -193,13 +193,15 @@ func pvcAllowsReadWrite(pvc *corev1.PersistentVolumeClaim) bool {
 }
 
 // createMissing creates the PVCs, Deployment and Service for cfg.
-func createMissing(client kubernetes.Interface, cfg *serveConfig) ([]string, error) {
+// createMissing creates the PVCs, Deployment and Service for cfg under the
+// caller's bounded context: a stalled API must not pin serve before it
+// opens its listener, or keep a start from returning.
+func createMissing(ctx context.Context, client kubernetes.Interface, cfg *serveConfig) ([]string, error) {
 	for _, v := range cfg.Volumes {
 		if v.Kind == volHostPath {
 			log.Printf("WARNING: mounting host path %q at %q in the backend pod: hostpath volumes escape the namespace boundary, so the pod can read (and, without :ro, write) that part of the node", v.Name, v.Path)
 		}
 	}
-	ctx := context.Background()
 	var created []string
 
 	for _, v := range cfg.Volumes {
@@ -249,7 +251,13 @@ func createMissing(client kubernetes.Interface, cfg *serveConfig) ([]string, err
 		if attempt >= maxCreateAttempts {
 			return nil, fmt.Errorf("creating deployment %s: name still reserved after %d attempts (a deletion may still be in progress)", dep.Name, attempt)
 		}
-		time.Sleep(createRetryInterval)
+		// Interruptible: the bounded context must win over the retry
+		// wait, not just the API calls.
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("creating deployment %s: %w", dep.Name, ctx.Err())
+		case <-time.After(createRetryInterval):
+		}
 	}
 
 	svc := cfg.renderService()
