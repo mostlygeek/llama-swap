@@ -290,11 +290,13 @@ type server struct {
 	mu         sync.Mutex
 	logUID     string
 	logCancel  context.CancelFunc
+	logDone    chan struct{} // closed when the current log-stream goroutine exits
 	logsFailed bool
 
-	srv    *http.Server
-	stopCh chan struct{}
-	stopMu sync.Once
+	srv     *http.Server
+	stopCh  chan struct{}
+	stopMu  sync.Once
+	crashCh chan int // exit code to end the wrapper with when the backend fails
 }
 
 // serveFlags holds the parsed `serve` flags.
@@ -559,11 +561,16 @@ func serveCmd(args []string) error {
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 
 	var shutdownReason string
+	var crashCode int
+	crashed := false
 	select {
 	case sig := <-sigCh:
 		shutdownReason = fmt.Sprintf("received %s; shutting down (deployment kept for adoption)", sig)
 	case <-s.stopCh:
 		shutdownReason = "deployment deleted; shutting down"
+	case code := <-s.crashCh:
+		shutdownReason = fmt.Sprintf("backend failed; exiting with code %d", code)
+		crashCode, crashed = code, true
 	case err := <-errCh:
 		shutdownReason = err.Error()
 	}
@@ -575,8 +582,23 @@ func serveCmd(args []string) error {
 	if err := s.srv.Shutdown(shutCtx); err != nil {
 		log.Printf("http server shutdown: %v", err)
 	}
+	if crashed {
+		// exitError carries the backend's exit code so main exits with it
+		// instead of a blanket 1: llama-swap (and anyone else running the
+		// wrapper) sees the command fail the way the backend failed.
+		return &exitError{code: crashCode, msg: shutdownReason}
+	}
 	return nil
 }
+
+// exitError is an error that carries a process exit code: main exits with
+// the code rather than the blanket 1 it uses for ordinary failures.
+type exitError struct {
+	code int
+	msg  string
+}
+
+func (e *exitError) Error() string { return e.msg }
 
 // startCmd Implements the start subcommand: ensures the backend resources exist and exits — pre-warming a model or creating the backend by hand (no proxy, unlike serve).
 func startCmd(args []string) error {
@@ -628,6 +650,7 @@ func newServer(cfg *serveConfig, client kubernetes.Interface, upstreamOverride s
 		poll:                 poll,
 		proxyResponseTimeout: proxyResponseTimeout,
 		stopCh:               make(chan struct{}),
+		crashCh:              make(chan int, 1),
 	}
 	s.readyReason.Store("starting")
 	s.upstream.Store("")
@@ -823,6 +846,17 @@ func (s *server) pollOnce(ctx context.Context) {
 	}
 
 	st := s.findPod(apiCtx, dep)
+	if code, desc, failed := podCrashState(st.pod); failed {
+		select {
+		case <-s.stopCh:
+			// A graceful shutdown is already in progress; let it win (it
+			// keeps the deployment and exits 0).
+			return
+		default:
+			s.fail(code, desc)
+		}
+		return
+	}
 	if st.ready {
 		s.setReady(true, "pod ready")
 	} else {
@@ -885,6 +919,112 @@ func podIsReady(p *corev1.Pod) bool {
 	return false
 }
 
+// podCrashState reports whether any of the pod's main containers has failed,
+// with the exit code to propagate. Terminated covers a crash (or a backend
+// that simply exited) the moment it is observed; CrashLoopBackOff covers the
+// backoff window between restarts, where the latest crash sits in
+// LastTerminationState. Init containers are not consulted: they run to
+// completion before the server starts and legitimately end up Terminated.
+func podCrashState(p *corev1.Pod) (code int, desc string, failed bool) {
+	if p == nil {
+		return 0, "", false
+	}
+	for _, cs := range p.Status.ContainerStatuses {
+		switch {
+		case cs.State.Terminated != nil:
+			t := cs.State.Terminated
+			reason := t.Reason
+			if reason == "" {
+				reason = "exited"
+			}
+			return int(t.ExitCode), fmt.Sprintf("container %s %s (exit %d)", cs.Name, reason, t.ExitCode), true
+		case cs.State.Waiting != nil && cs.State.Waiting.Reason == "CrashLoopBackOff":
+			if t := cs.LastTerminationState.Terminated; t != nil {
+				reason := t.Reason
+				if reason == "" {
+					reason = "crashed"
+				}
+				return int(t.ExitCode), fmt.Sprintf("container %s in CrashLoopBackOff (last %s, exit %d)", cs.Name, reason, t.ExitCode), true
+			}
+			// No termination state to read: report the failure with the
+			// wrapper's own failure code rather than a misleading zero.
+			return 1, fmt.Sprintf("container %s in CrashLoopBackOff (no termination state)", cs.Name), true
+		}
+	}
+	return 0, "", false
+}
+
+// fail ends the wrapper because the backend has failed: it records the
+// failure on the check path, stops the log stream with a bounded wait so the
+// crash output is flushed to stderr, deletes the objects kubeswap manages
+// for the model, and signals serveCmd to exit with the backend's exit code.
+// A crashed backend needs intervention, not time - waiting out
+// llama-swap's health-check timeout would only delay the same error.
+func (s *server) fail(code int, desc string) {
+	log.Printf("model %q: backend failing (%s); cleaning up and exiting with code %d", s.cfg.Model, desc, code)
+	s.setReady(false, "backend failing: "+desc)
+
+	// Flush the pod log stream so the crash output is visible; bound the
+	// wait so a wedged stream cannot hold the exit.
+	s.stopLogs()
+	if s.logDone != nil {
+		select {
+		case <-s.logDone:
+		case <-time.After(3 * time.Second):
+		}
+	}
+
+	s.cleanupOwned()
+
+	select {
+	case s.crashCh <- code:
+	default: // already signalled
+	}
+}
+
+// cleanupOwned deletes the model's Deployment and Service when they are
+// verified to be kubeswap-managed for this model (adoption guarantees this;
+// foreign objects are never touched). Errors are logged, not returned: the
+// exit is already decided and llama-swap's subsequent cmdStop (kubeswap
+// delete) is an idempotent second pass.
+func (s *server) cleanupOwned() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cfg := s.cfg
+
+	dep, err := s.client.AppsV1().Deployments(cfg.Namespace).Get(ctx, cfg.DepName, metav1.GetOptions{})
+	switch {
+	case apierrors.IsNotFound(err):
+		// already gone
+	case err != nil:
+		log.Printf("cleanup: getting deployment %s: %v", cfg.DepName, err)
+	default:
+		if err := verifyOwnership(dep, cfg.Model); err != nil {
+			log.Printf("cleanup: keeping deployment %s: %v", cfg.DepName, err)
+		} else if err := s.client.AppsV1().Deployments(cfg.Namespace).Delete(ctx, cfg.DepName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			log.Printf("cleanup: deleting deployment %s: %v", cfg.DepName, err)
+		} else {
+			log.Printf("cleanup: deleted deployment %s/%s", cfg.Namespace, cfg.DepName)
+		}
+	}
+
+	svc, err := s.client.CoreV1().Services(cfg.Namespace).Get(ctx, cfg.SvcName, metav1.GetOptions{})
+	switch {
+	case apierrors.IsNotFound(err):
+		// no service to delete
+	case err != nil:
+		log.Printf("cleanup: getting service %s: %v", cfg.SvcName, err)
+	default:
+		if err := verifyOwnership(svc, cfg.Model); err != nil {
+			log.Printf("cleanup: keeping service %s: %v", cfg.SvcName, err)
+		} else if err := s.client.CoreV1().Services(cfg.Namespace).Delete(ctx, cfg.SvcName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			log.Printf("cleanup: deleting service %s: %v", cfg.SvcName, err)
+		} else {
+			log.Printf("cleanup: deleted service %s/%s", cfg.Namespace, cfg.SvcName)
+		}
+	}
+}
+
 // deploymentSummary Formats a one-line replica/ready summary of the Deployment status.
 func deploymentSummary(dep *appsv1.Deployment) string {
 	st := dep.Status
@@ -929,7 +1069,12 @@ func (s *server) followPodLogs(ctx context.Context, pod *corev1.Pod) {
 	logCtx, cancel := context.WithCancel(ctx)
 	s.logUID = uid
 	s.logCancel = cancel
-	go s.streamLogs(logCtx, pod)
+	done := make(chan struct{})
+	s.logDone = done
+	go func() {
+		defer close(done)
+		s.streamLogs(logCtx, pod)
+	}()
 }
 
 // stopLogs Stops the background pod log forwarding.
@@ -939,7 +1084,9 @@ func (s *server) stopLogs() {
 	s.stopLogsLocked()
 }
 
-// stopLogsLocked Stops the pod log forwarding, with the server lock already held.
+// stopLogsLocked Stops the pod log forwarding, with the server lock already
+// held. The stream goroutine is the sole closer of logDone (its deferred
+// close); cancelling the context is what makes it exit and close.
 func (s *server) stopLogsLocked() {
 	if s.logCancel != nil {
 		s.logCancel()

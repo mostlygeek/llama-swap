@@ -15,6 +15,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -95,6 +96,10 @@ func main() {
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "kubeswap %s: %v\n", os.Args[1], err)
+		var ee *exitError
+		if errors.As(err, &ee) {
+			os.Exit(ee.code)
+		}
 		os.Exit(1)
 	}
 }

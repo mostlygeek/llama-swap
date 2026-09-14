@@ -25,7 +25,13 @@ It provides seven subcommands:
   kept so the next `serve` adopts it. (On a *clean* llama-swap shutdown or
   config reload, `cmdStop` runs first and unloads the backends; the
   keep-on-SIGTERM path is what matters for abnormal deaths — SIGKILL, node
-  loss — and for models configured without a `cmdStop`.)
+  loss — and for models configured without a `cmdStop`.) A *failed*
+  backend is different: when the pod's container crashes (Terminated or
+  CrashLoopBackOff), `serve` flushes the pod log tail, deletes the
+  Deployment and Service it manages for the model, and **exits with the
+  backend's exit code**, so llama-swap sees the command fail instead of
+  running its health-check timeout out. A crashed backend needs
+  intervention, not time.
 - `start`: like `serve` without the proxy. Creates (or adopts) the
   model's PVCs, Deployment and Service and exits. Use it to pre-warm a
   model so the first request is fast, or to manage a backend by hand
@@ -567,12 +573,20 @@ error during a watch is printed and the watch continues.
   image pull failure, crash loop, ...).
 - `kubeswap logs --model <id>` — the backend's own logs; model load errors
   (bad path, OOM, missing device) show up here.
-- A model that keeps restarting is failing to load. kubeswap keeps
-  retrying by design (transient storage or image hiccups recover that
-  way), so read its logs instead of waiting it out. To apply a config
-  fix to a model that is already failing, run `kubeswap delete --model
-  <id>` first (or run serve with `--strict`): a plain adoption keeps the
-  old spec.
+- A model whose backend crashes fails fast: `serve` detects the crashed
+  container within one poll, flushes the pod logs, tears down the model's
+  Deployment and Service, and exits with the backend's exit code —
+  llama-swap reports the load failure ("upstream command exited
+  prematurely") within seconds instead of waiting out
+  `healthCheckTimeout`, and a model that was already running transitions
+  to stopped. Read the forwarded logs for the crash cause, fix it, and
+  the next request rebuilds the backend. (If you want the old
+  behaviour — sit through the health-check timeout — nothing to change:
+  the detection only acts on an actually crashed container, so a healthy
+  but slow load is unaffected.)
+- To apply a config fix to a model that is already failing, run
+  `kubeswap delete --model <id>` first (or run serve with `--strict`):
+  a plain adoption keeps the old spec.
 - `serve` forwards pod logs to stderr with a `[pod/<name>]` prefix, which
   llama-swap records in its log monitor.
 - While the pod is not Ready, the proxy answers every request with 503 and

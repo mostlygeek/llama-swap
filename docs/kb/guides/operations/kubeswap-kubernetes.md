@@ -4,7 +4,7 @@ summary: Use the kubeswap wrapper as cmd/cmdStop so llama-swap starts and stops 
 category: guides
 tags: [kubernetes, kubeswap, deployment, k8s, operator, pod, namespace, pvc, gpu, multi-backend, sd-server, whisper-server, audiocpp_server]
 config_keys: [models.*.cmd, models.*.cmdStop, models.*.proxy, models.*.checkEndpoint, models.*.capabilities, healthCheckTimeout, unloadTimeout]
-updated: 2026-09-12
+updated: 2026-09-14
 ---
 
 # Running inference servers in Kubernetes with kubeswap
@@ -141,6 +141,14 @@ presets.
   Deployment, so backends *survive* a clean restart/reload and are adopted
   with no model reload. The same keep-and-adopt path covers abnormal deaths
   (SIGKILL, node loss) either way.
+- **A crashed backend fails fast.** When the pod's container crashes
+  (Terminated or CrashLoopBackOff), `serve` flushes the pod log tail,
+  deletes the model's Deployment and Service, and exits with the backend's
+  exit code. llama-swap then reports the load failure within seconds
+  ("upstream command exited prematurely") instead of waiting out
+  `healthCheckTimeout`, and a model that was already running transitions
+  to stopped. The crash output is in the forwarded pod logs; fix the root
+  cause and the next request rebuilds the backend.
 - A `kubeswap gc` init container on head-end start removes workloads whose
   model id is no longer in the config.
 - Slot state (`--slot-save-path`) can live on an `emptyDir` (default) or a
