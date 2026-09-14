@@ -3,6 +3,7 @@ package router
 import (
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
@@ -24,14 +25,27 @@ func NewMatrix(conf config.Config, logs *logmon.Group) (*Matrix, error) {
 		}
 	}
 
+	// The process table exists before the swapper so the lru tie-breaker
+	// can read idle ages from it at decision time (the closure captures the
+	// map, which is populated below).
+	processes := make(map[string]process.Process, len(conf.Models))
 	swapper := &matrixSwapper{
-		solver: newMatrixSolver(mtx.Program(), mtx.ResolvedEvictCosts()),
+		solver: newMatrixSolver(mtx.Program(), mtx.ResolvedEvictCosts(), mtx.EvictionTieBreaker),
 		logger: logs.ProxyLogs,
+		idleOf: func(id string) time.Duration {
+			proc, ok := processes[id]
+			if !ok {
+				return 0
+			}
+			if d := time.Since(proc.LastUse()); d > 0 {
+				return d
+			}
+			return 0
+		},
 	}
 
 	// Build a process for every model in the config. Any model can run alone
 	// even if it is not part of a set; this mirrors proxy.NewMatrix.
-	processes := make(map[string]process.Process, len(conf.Models))
 	base, err := newBaseRouter("matrix", conf, processes, logs.ProxyLogs, swapper)
 	if err != nil {
 		return nil, fmt.Errorf("creating base router: %w", err)
@@ -59,10 +73,16 @@ func NewMatrix(conf config.Config, logs *logmon.Group) (*Matrix, error) {
 // The scheduler drives planners from a single event-loop goroutine and calls
 // OnSwapStart with the same target and running set it just gave EvictionFor,
 // so the last decision is cached and reused instead of solving twice per
-// swap. The cache is only valid under that single-goroutine access pattern.
+// swap. The cache is only valid under that single-goroutine access pattern,
+// and only in lexical mode: an lru decision depends on idle ages, which move
+// between calls, so lru solves are never cached.
 type matrixSwapper struct {
 	solver *matrixSolver
 	logger *logmon.Monitor
+	// idleOf reports how long a running model has gone without finishing a
+	// request; wired to the router's process table by NewMatrix. Only used
+	// by the lru tie-breaker.
+	idleOf func(id string) time.Duration
 
 	lastTarget  string
 	lastRunning []string
@@ -71,15 +91,31 @@ type matrixSwapper struct {
 }
 
 func (p *matrixSwapper) solve(target string, running []string) solveResult {
-	if p.lastValid && p.lastTarget == target && slices.Equal(p.lastRunning, running) {
+	lru := p.solver.tieBreaker == config.EvictionTieBreakerLRU
+	if !lru && p.lastValid && p.lastTarget == target && slices.Equal(p.lastRunning, running) {
 		return p.lastResult
 	}
-	result := p.solver.Solve(target, running)
-	p.lastTarget = target
-	p.lastRunning = slices.Clone(running)
-	p.lastResult = result
-	p.lastValid = true
+	result := p.solver.Solve(target, running, p.idleSnapshot(running))
+	if !lru {
+		p.lastTarget = target
+		p.lastRunning = slices.Clone(running)
+		p.lastResult = result
+		p.lastValid = true
+	}
 	return result
+}
+
+// idleSnapshot captures the idle age of every running model for one lru
+// solve; it returns nil in lexical mode, where the solver ignores it.
+func (p *matrixSwapper) idleSnapshot(running []string) map[string]time.Duration {
+	if p.solver.tieBreaker != config.EvictionTieBreakerLRU || p.idleOf == nil {
+		return nil
+	}
+	idle := make(map[string]time.Duration, len(running))
+	for _, id := range running {
+		idle[id] = p.idleOf(id)
+	}
+	return idle
 }
 
 func (p *matrixSwapper) EvictionFor(target string, running []string) []string {

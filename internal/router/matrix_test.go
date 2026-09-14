@@ -30,7 +30,7 @@ func newTestMatrix(t *testing.T, conf config.Config, sets config.OrderedSets, ev
 
 	logger := logmon.NewWriter(io.Discard)
 	swapper := &matrixSwapper{
-		solver: newMatrixSolver(matrix.Program(), matrix.ResolvedEvictCosts()),
+		solver: newMatrixSolver(matrix.Program(), matrix.ResolvedEvictCosts(), config.EvictionTieBreakerLexical),
 		logger: logger,
 	}
 	base, err := newBaseRouter("matrix", conf, processes, logger, swapper)
@@ -231,7 +231,7 @@ func TestMatrixSolver_TieBreakDefinitionOrder(t *testing.T) {
 
 	// No models running, request "a": both sets have cost 0 and contain a.
 	// Definition order: "first" wins.
-	result := s.Solve("a", nil)
+	result := s.Solve("a", nil, nil)
 	if result.SetName != "first" {
 		t.Errorf("SetName=%q want %q", result.SetName, "first")
 	}
@@ -247,7 +247,7 @@ func TestMatrixSolver_EvictCostsPreferred(t *testing.T) {
 		{Name: "a_with_b", DSL: "a & b"}, // would evict c (cost 1)
 	}, map[string]int{"b": 10, "c": 1}, "a", "b", "c")
 
-	result := s.Solve("a", []string{"b", "c"})
+	result := s.Solve("a", []string{"b", "c"}, nil)
 	if result.SetName != "a_with_b" {
 		t.Errorf("SetName=%q want %q (keep expensive b)", result.SetName, "a_with_b")
 	}
@@ -269,5 +269,62 @@ func newTestMatrixSolver(t *testing.T, sets config.OrderedSets, evictCosts map[s
 	if err := config.ValidateMatrix(matrix, models); err != nil {
 		t.Fatalf("ValidateMatrix: %v", err)
 	}
-	return newMatrixSolver(matrix.Program(), matrix.ResolvedEvictCosts())
+	return newMatrixSolver(matrix.Program(), matrix.ResolvedEvictCosts(), config.EvictionTieBreakerLexical)
+}
+
+// TestMatrixSwapper_LRUFollowsIdleAges verifies that the swapper feeds
+// idleOf into the solver, that the decision follows the idlest model, and
+// that lru decisions are not cached: when idle ages move, the decision
+// moves with them.
+func TestMatrixSwapper_LRUFollowsIdleAges(t *testing.T) {
+	models := map[string]config.ModelConfig{"t": {}, "a": {}, "b": {}, "c": {}}
+	matrix := &config.MatrixConfig{
+		Sets: config.OrderedSets{
+			{Name: "pool", DSL: "(t | a | b | c)"},
+			{Name: "all", DSL: "+pool & +pool & +pool"},
+		},
+	}
+	if err := config.ValidateMatrix(matrix, models); err != nil {
+		t.Fatalf("ValidateMatrix: %v", err)
+	}
+	idles := map[string]time.Duration{"a": 10 * time.Minute, "b": time.Hour, "c": time.Minute}
+	sw := &matrixSwapper{
+		solver: newMatrixSolver(matrix.Program(), matrix.ResolvedEvictCosts(), config.EvictionTieBreakerLRU),
+		idleOf: func(id string) time.Duration { return idles[id] },
+	}
+
+	if evict := sw.EvictionFor("t", []string{"a", "b", "c"}); len(evict) != 1 || evict[0] != "b" {
+		t.Fatalf("Evict=%v want [b] (longest idle)", evict)
+	}
+	if sw.lastValid {
+		t.Fatal("lru decisions must not be cached")
+	}
+
+	// a becomes idlest; the next decision must follow (no stale cache).
+	idles["a"] = 2 * time.Hour
+	if evict := sw.EvictionFor("t", []string{"a", "b", "c"}); len(evict) != 1 || evict[0] != "a" {
+		t.Fatalf("Evict=%v want [a] after idle ages changed", evict)
+	}
+}
+
+// TestMatrixSwapper_LexicalCachesDecision verifies that the historical
+// (target, running) decision cache still applies in lexical mode.
+func TestMatrixSwapper_LexicalCachesDecision(t *testing.T) {
+	models := map[string]config.ModelConfig{"a": {}, "b": {}}
+	matrix := &config.MatrixConfig{
+		Sets: config.OrderedSets{{Name: "pair", DSL: "a & b"}},
+	}
+	if err := config.ValidateMatrix(matrix, models); err != nil {
+		t.Fatalf("ValidateMatrix: %v", err)
+	}
+	sw := &matrixSwapper{
+		solver: newMatrixSolver(matrix.Program(), matrix.ResolvedEvictCosts(), config.EvictionTieBreakerLexical),
+	}
+	sw.EvictionFor("a", []string{"b"})
+	if !sw.lastValid {
+		t.Fatal("lexical decisions should be cached")
+	}
+	if evict := sw.EvictionFor("a", []string{"b"}); evict != nil {
+		t.Fatalf("Evict=%v want none (a and b may run together)", evict)
+	}
 }

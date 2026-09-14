@@ -10,11 +10,25 @@ import (
 
 var varKeyPattern = regexp.MustCompile(`^[a-zA-Z0-9.-]{1,32}$`)
 
+// EvictionTieBreaker selects how the matrix solver chooses between
+// candidate sets that score the same eviction cost.
+const (
+	// EvictionTieBreakerLexical keeps the first candidate in set-definition
+	// order. This is the historical behaviour and the default.
+	EvictionTieBreakerLexical = "lexical"
+	// EvictionTieBreakerLRU prefers the candidate that evicts the
+	// longest-idle running model.
+	EvictionTieBreakerLRU = "lru"
+)
+
 // MatrixConfig represents the swap matrix configuration block.
 type MatrixConfig struct {
 	Var        map[string]string `yaml:"vars"`
 	EvictCosts map[string]int    `yaml:"evict_costs"`
 	Sets       OrderedSets       `yaml:"sets"`
+	// EvictionTieBreaker is normalized to a non-empty value by
+	// ValidateMatrix; empty means EvictionTieBreakerLexical.
+	EvictionTieBreaker string `yaml:"eviction_tiebreaker"`
 
 	program *matrixdsl.Program
 }
@@ -59,6 +73,15 @@ func (os *OrderedSets) UnmarshalYAML(value *yaml.Node) error {
 func ValidateMatrix(matrix *MatrixConfig, models map[string]ModelConfig) error {
 	if len(matrix.Sets) == 0 {
 		return fmt.Errorf("matrix must define at least one set")
+	}
+
+	// Normalize the tie-breaker so consumers never see the empty string.
+	switch matrix.EvictionTieBreaker {
+	case "":
+		matrix.EvictionTieBreaker = EvictionTieBreakerLexical
+	case EvictionTieBreakerLexical, EvictionTieBreakerLRU:
+	default:
+		return fmt.Errorf("eviction_tiebreaker must be %q or %q, got %q", EvictionTieBreakerLexical, EvictionTieBreakerLRU, matrix.EvictionTieBreaker)
 	}
 
 	// Validate var entries

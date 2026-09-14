@@ -144,7 +144,7 @@ func TestProgram_OverlappingReferences(t *testing.T) {
 		{Name: "extended", DSL: "target & +base & b"},
 	}, models)
 
-	result := program.Solve("target", []string{"a", "b"}, nil)
+	result := program.Solve("target", []string{"a", "b"}, SolveOptions{EvictCosts: nil})
 	assert.Empty(t, result.Evict)
 	assert.Equal(t, []string{"a", "b", "target"}, result.TargetSet)
 }
@@ -200,7 +200,7 @@ func TestProgram_NoExpansionLimit(t *testing.T) {
 	}
 	running = append(running, "outside")
 
-	result := program.Solve("target", running, nil)
+	result := program.Solve("target", running, SolveOptions{EvictCosts: nil})
 	assert.Equal(t, []string{"outside"}, result.Evict)
 	assert.Equal(t, "large", result.SetName)
 	assert.Len(t, result.TargetSet, dimensions+1)
@@ -218,7 +218,7 @@ func TestProgram_MoreThan64RelevantModels(t *testing.T) {
 	}}, models)
 
 	running := append(append([]string(nil), models[1:]...), "outside")
-	result := program.Solve("target", running, nil)
+	result := program.Solve("target", running, SolveOptions{EvictCosts: nil})
 	assert.Equal(t, []string{"outside"}, result.Evict)
 	assert.Len(t, result.TargetSet, modelCount+1)
 }
@@ -229,7 +229,7 @@ func TestProgram_DominatedProjection(t *testing.T) {
 		DSL:  "target & (a | (a & b))",
 	}}, []string{"target", "a", "b"})
 
-	result := program.Solve("target", []string{"a", "b"}, nil)
+	result := program.Solve("target", []string{"a", "b"}, SolveOptions{EvictCosts: nil})
 	assert.Empty(t, result.Evict)
 	assert.Equal(t, []string{"a", "b", "target"}, result.TargetSet)
 }
@@ -240,7 +240,7 @@ func TestProgram_TargetAbsent(t *testing.T) {
 		DSL:  "a & b",
 	}}, []string{"a", "b"})
 
-	result := program.Solve("missing", []string{"a", "b"}, nil)
+	result := program.Solve("missing", []string{"a", "b"}, SolveOptions{EvictCosts: nil})
 	assert.Equal(t, []string{"a", "b"}, result.Evict)
 	assert.Equal(t, []string{"missing"}, result.TargetSet)
 	assert.Empty(t, result.SetName)

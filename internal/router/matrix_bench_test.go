@@ -25,7 +25,7 @@ func BenchmarkMatrixSolver_Solve(b *testing.B) {
 		b.Run(fmt.Sprintf("Combinations_%d", combinations), func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				benchmarkSolveResult = solver.Solve("target", running)
+				benchmarkSolveResult = solver.Solve("target", running, nil)
 			}
 		})
 	}
@@ -43,7 +43,7 @@ func BenchmarkMatrixSwapPath(b *testing.B) {
 		b.Fatal(err)
 	}
 	swapper := &matrixSwapper{
-		solver: newMatrixSolver(matrix.Program(), matrix.ResolvedEvictCosts()),
+		solver: newMatrixSolver(matrix.Program(), matrix.ResolvedEvictCosts(), config.EvictionTieBreakerLexical),
 		logger: logmon.NewWriter(io.Discard),
 	}
 	// Rotate the running set so each EvictionFor sees a fresh picture (cache
@@ -120,7 +120,7 @@ func benchmarkCompiledMatrix(b *testing.B, dimensions, choices int) *matrixSolve
 	if err := config.ValidateMatrix(matrix, models); err != nil {
 		b.Fatal(err)
 	}
-	return newMatrixSolver(matrix.Program(), nil)
+	return newMatrixSolver(matrix.Program(), nil, config.EvictionTieBreakerLexical)
 }
 
 func benchmarkIntPow(base, exponent int) int {

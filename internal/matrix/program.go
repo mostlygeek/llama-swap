@@ -3,12 +3,41 @@ package matrix
 import (
 	"fmt"
 	"sort"
+	"time"
 )
 
 // Definition is one named matrix DSL expression.
 type Definition struct {
 	Name string
 	DSL  string
+}
+
+// Tie-breaker policies for candidate sets that score the same eviction
+// cost. Eviction cost is always the primary key; the tie-breaker only
+// orders equal-cost candidates.
+const (
+	// TieBreakerLexical keeps the first equal-cost candidate in
+	// set-definition order. This is the historical behaviour and the
+	// default.
+	TieBreakerLexical = "lexical"
+	// TieBreakerLRU prefers the equal-cost candidate that evicts the
+	// longest-idle running model.
+	TieBreakerLRU = "lru"
+)
+
+// SolveOptions configures one Solve call.
+type SolveOptions struct {
+	// EvictCosts is the relative cost of evicting a running model; models
+	// not listed cost 1.
+	EvictCosts map[string]int
+	// TieBreaker selects the policy for equal-cost candidates
+	// (TieBreakerLexical or TieBreakerLRU; the empty string behaves as
+	// lexical).
+	TieBreaker string
+	// Idle holds how long each running model has gone without finishing a
+	// request. It is consulted only when TieBreaker is TieBreakerLRU; a
+	// model absent from the map is treated as idle for zero.
+	Idle map[string]time.Duration
 }
 
 // Resolver maps a DSL identifier to a real model name.
@@ -219,7 +248,12 @@ func topologicalOrder(definitions []Definition, deps map[string][]string) ([]str
 // Solve chooses the compatible set with the lowest eviction cost. It performs
 // a fresh projection because the relevant model universe changes with the
 // running set supplied by the scheduler.
-func (p *Program) Solve(target string, running []string, evictionCosts map[string]int) Decision {
+//
+// Equal-cost candidates are ordered by opts.TieBreaker: lexical (the default)
+// keeps the first in set-definition order; lru prefers the candidate that
+// evicts the longest-idle running model. A candidate evicting nothing ranks
+// zero, so zero-cost ties keep the lexical winner.
+func (p *Program) Solve(target string, running []string, opts SolveOptions) Decision {
 	if contains(running, target) {
 		setName, dsl := p.findContaining(running)
 		return Decision{
@@ -238,7 +272,9 @@ func (p *Program) Solve(target string, running []string, evictionCosts map[strin
 	// Skip every set when the target appears in no set's expression.
 	globalTargetBit, targetKnown := p.modelBits[target]
 
+	lru := opts.TieBreaker == TieBreakerLRU
 	bestCost := -1
+	bestIdleRank := time.Duration(0)
 	var bestSet *compiledSet
 	var bestState projectedState
 	for i := range p.sets {
@@ -252,13 +288,31 @@ func (p *Program) Solve(target string, running []string, evictionCosts map[strin
 			}
 
 			cost := 0
+			var evicted []string
 			for _, model := range running {
 				if !state.mask.has(evaluator.modelBits[model]) {
-					cost += evictionCost(evictionCosts, model)
+					cost += evictionCost(opts.EvictCosts, model)
+					evicted = append(evicted, model)
 				}
 			}
-			if bestCost < 0 || cost < bestCost {
+
+			better := false
+			switch {
+			case bestCost < 0:
+				better = true
+			case cost < bestCost:
+				better = true
+			case lru:
+				// cost == bestCost here: prefer evicting the longer-idle
+				// model. A strict comparison keeps the first candidate on a
+				// residual tie, so outcomes stay deterministic.
+				if rank := idleRank(evicted, opts.Idle); rank > bestIdleRank {
+					better = true
+				}
+			}
+			if better {
 				bestCost = cost
+				bestIdleRank = idleRank(evicted, opts.Idle)
 				bestSet = set
 				bestState = state
 			}
@@ -335,6 +389,19 @@ func evictionCost(costs map[string]int, model string) int {
 		return cost
 	}
 	return 1
+}
+
+// idleRank is a candidate's lru score: the longest idle time among the
+// models it evicts. Candidates evicting nothing (or only models without idle
+// data) rank zero.
+func idleRank(evicted []string, idle map[string]time.Duration) time.Duration {
+	var rank time.Duration
+	for _, model := range evicted {
+		if d := idle[model]; d > rank {
+			rank = d
+		}
+	}
+	return rank
 }
 
 func contains(items []string, target string) bool {
