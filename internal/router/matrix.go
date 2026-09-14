@@ -37,6 +37,16 @@ func NewMatrix(conf config.Config, logs *logmon.Group) (*Matrix, error) {
 			if !ok {
 				return 0
 			}
+			// A model that is not ready (still loading, or stopping) is not
+			// idle: it is mid-transition, and its LastUse baseline is the
+			// epoch, which would otherwise read as "idle since before time"
+			// and make lru prefer it over every genuinely idle model. Because
+			// the scheduler cannot evict a model mid-load, ranking it first
+			// only defers the swap; report it as freshly busy instead so the
+			// tie-breaker evicts a ready model and the swap starts now.
+			if proc.State() != process.StateReady {
+				return 0
+			}
 			if d := time.Since(proc.LastUse()); d > 0 {
 				return d
 			}
