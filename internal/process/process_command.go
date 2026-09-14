@@ -165,6 +165,10 @@ func New(
 
 func (p *ProcessCommand) Logger() *logmon.Monitor { return p.processLogger }
 
+// LastUse exposes the idle-window baseline (lastUse), which run() sets when
+// the process becomes ready and ServeHTTP refreshes after each completion.
+func (p *ProcessCommand) LastUse() time.Time { return time.Unix(0, p.lastUse.Load()) }
+
 // run is the single-writer goroutine that owns all mutable lifecycle state
 // (current ProcessState, the running *exec.Cmd, the active reverse-proxy
 // handler, and the list of WaitReady subscribers). Every public method

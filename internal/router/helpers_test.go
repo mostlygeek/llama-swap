@@ -86,6 +86,10 @@ type fakeProcess struct {
 	// "swap mid-request" anti-property.
 	inFlightServe       atomic.Int32
 	stoppedWhileServing atomic.Bool
+
+	// lastUse mirrors ProcessCommand: baselined when the fake becomes ready.
+	// Tests may store their own values to drive idle-time-dependent code.
+	lastUse atomic.Int64
 }
 
 func newFakeProcess(id string) *fakeProcess {
@@ -116,6 +120,10 @@ func (f *fakeProcess) setStateLocked(s process.ProcessState) {
 	f.state = s
 	switch s {
 	case process.StateReady:
+		// A newly ready process starts a fresh idle window (mirrors
+		// ProcessCommand); tests overwrite lastUse directly when they need a
+		// specific idle age.
+		f.lastUse.Store(time.Now().UnixNano())
 		select {
 		case <-f.readyCh:
 		default:
@@ -145,6 +153,8 @@ func (f *fakeProcess) Status() process.Status {
 	defer f.mu.Unlock()
 	return process.Status{State: f.state, ReadySince: f.readySince}
 }
+
+func (f *fakeProcess) LastUse() time.Time { return time.Unix(0, f.lastUse.Load()) }
 
 func (f *fakeProcess) markReady() { f.setState(process.StateReady) }
 

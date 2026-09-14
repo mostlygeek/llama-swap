@@ -80,4 +80,10 @@ type Process interface {
 
 	// Logger returns the monitor that captures this process's stdout/stderr.
 	Logger() *logmon.Monitor
+
+	// LastUse returns the baseline of the process's current idle window:
+	// the moment the process became ready, updated after each completed
+	// request. The time elapsed since LastUse is how long the process has
+	// gone without finishing a request.
+	LastUse() time.Time
 }
