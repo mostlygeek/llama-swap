@@ -11,9 +11,9 @@
   import { isSubmitEnter } from "../../lib/ime";
   import ChatMessageComponent from "./ChatMessage.svelte";
   import ModelSelector from "./ModelSelector.svelte";
-  import ExpandableTextarea from "./ExpandableTextarea.svelte";
+  import ChatComposer from "./ChatComposer.svelte";
   import EmptyState from "../EmptyState.svelte";
-  import { Settings, Paperclip } from "@lucide/svelte";
+  import { Settings, Paperclip, SquarePen } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
@@ -371,14 +371,15 @@
 
 <div class="flex flex-col h-full">
   <!-- Model selector and controls -->
-  <div class="shrink-0 flex flex-wrap gap-2 mb-4">
+  <div class="mb-3 flex shrink-0 gap-2">
     <ModelSelector bind:value={$selectedModelStore} placeholder="Select a model..." disabled={isStreaming} />
-    <div class="flex gap-2">
-      <Button variant="outline" size="icon" onclick={() => (showSettings = true)} title="Settings">
+    <div class="flex shrink-0 gap-2">
+      <Button variant="outline" size="icon" onclick={() => (showSettings = true)} title="Chat settings">
         <Settings />
       </Button>
-      <Button variant="outline" onclick={newChat} disabled={messages.length === 0 && !isStreaming}>
-        New Chat
+      <Button variant="outline" onclick={newChat} disabled={messages.length === 0 && !isStreaming} title="New chat">
+        <SquarePen />
+        <span class="hidden sm:inline">New Chat</span>
       </Button>
     </div>
   </div>
@@ -453,15 +454,18 @@
   {#if !$hasListedModels}
     <EmptyState message="No models configured. Add models to your configuration to start chatting." />
   {:else}
-    <!-- Messages area -->
+    <!-- Messages area. The conversation is one centered column, the same
+         width as the composer below it, so lines stay readable on a wide
+         desktop and take the full width of a phone. -->
     <div
-      class="mb-4 flex-1 overflow-y-auto px-2"
+      class="mb-3 flex-1 overflow-y-auto px-1 sm:px-2"
       bind:this={messagesContainer}
       onscroll={handleMessagesScroll}
     >
       {#if messages.length === 0}
         <EmptyState full message="Start a conversation by typing a message below." />
       {:else}
+        <div class="mx-auto w-full max-w-3xl py-2">
         {#each messages as message, idx (idx)}
           <ChatMessageComponent
             role={message.role}
@@ -478,83 +482,77 @@
               : undefined}
           />
         {/each}
+        </div>
       {/if}
     </div>
 
     <!-- Input area -->
-    <div class="shrink-0">
-      <!-- Image preview strip -->
-      {#if attachedImages.length > 0}
-        <div class="mb-2 flex flex-wrap gap-2">
-          {#each attachedImages as imageUrl, idx (idx)}
-            <div class="group relative">
-              <img
-                src={imageUrl}
-                alt="Attached image {idx + 1}"
-                class="h-20 w-20 rounded-md border object-cover"
-              />
-              <Button
-                variant="destructive"
-                size="icon-sm"
-                class="absolute -right-2 -top-2 h-6 w-6 rounded-full opacity-0 transition-opacity group-hover:opacity-100"
-                onclick={() => removeImage(idx)}
-                title="Remove image"
-              >
-                <X class="size-3" />
-              </Button>
+    <div class="mx-auto w-full max-w-3xl shrink-0 px-1 sm:px-2">
+      <!-- Hidden file input -->
+      <input
+        type="file"
+        accept=".jpg,.jpeg,.png,.gif,.webp"
+        multiple
+        class="hidden"
+        bind:this={fileInput}
+        onchange={handleImageSelect}
+      />
+
+      <ChatComposer
+        bind:ref={inputRef}
+        bind:value={userInput}
+        placeholder="Type a message..."
+        onkeydown={handleKeyDown}
+        disabled={isStreaming || !$selectedModelStore}
+        streaming={isStreaming}
+        canSend={Boolean(userInput.trim()) || attachedImages.length > 0}
+        onsend={sendMessage}
+        onstop={cancelStreaming}
+      >
+        {#snippet attachments()}
+          {#if attachedImages.length > 0}
+            <div class="flex flex-wrap gap-2 px-3 pt-3">
+              {#each attachedImages as imageUrl, idx (idx)}
+                <div class="relative">
+                  <img
+                    src={imageUrl}
+                    alt="Attached image {idx + 1}"
+                    class="size-16 rounded-lg object-cover"
+                  />
+                  <Button
+                    variant="secondary"
+                    size="icon-xs"
+                    class="absolute -top-1.5 -right-1.5 rounded-full shadow-sm"
+                    onclick={() => removeImage(idx)}
+                    title="Remove image"
+                  >
+                    <X class="size-3" />
+                  </Button>
+                </div>
+              {/each}
             </div>
-          {/each}
-        </div>
-      {/if}
-
-      <!-- Error message -->
-      {#if imageError}
-        <div class="bg-destructive/10 text-destructive mb-2 rounded-md p-2 text-sm">
-          {imageError}
-        </div>
-      {/if}
-
-      <div class="flex gap-2">
-        <!-- Hidden file input -->
-        <input
-          type="file"
-          accept=".jpg,.jpeg,.png,.gif,.webp"
-          multiple
-          class="hidden"
-          bind:this={fileInput}
-          onchange={handleImageSelect}
-        />
-
-        <ExpandableTextarea
-          bind:ref={inputRef}
-          bind:value={userInput}
-          placeholder="Type a message..."
-          rows={3}
-          onkeydown={handleKeyDown}
-          disabled={isStreaming || !$selectedModelStore}
-        />
-        <div class="flex flex-col gap-2">
-          {#if isStreaming}
-            <Button variant="destructive" onclick={cancelStreaming}>Cancel</Button>
-          {:else}
-            <Button
-              variant="outline"
-              size="icon"
-              onclick={() => fileInput?.click()}
-              disabled={isStreaming || !$selectedModelStore}
-              title="Attach image"
-            >
-              <Paperclip />
-            </Button>
-            <Button
-              onclick={sendMessage}
-              disabled={(!userInput.trim() && attachedImages.length === 0) || !$selectedModelStore}
-            >
-              Send
-            </Button>
           {/if}
-        </div>
-      </div>
+          {#if imageError}
+            <div class="text-destructive px-3 pt-2 text-xs">
+              {imageError}
+            </div>
+          {/if}
+        {/snippet}
+        {#snippet leading()}
+          <Button
+            variant="ghost"
+            size="icon-lg"
+            class="text-muted-foreground shrink-0 rounded-full"
+            onclick={() => fileInput?.click()}
+            disabled={isStreaming || !$selectedModelStore}
+            title="Attach image"
+            aria-label="Attach image"
+          >
+            <Paperclip />
+          </Button>
+        {/snippet}
+      </ChatComposer>
     </div>
   {/if}
 </div>
+

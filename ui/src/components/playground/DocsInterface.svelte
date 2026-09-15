@@ -15,9 +15,9 @@
   import ChatMessageComponent from "./ChatMessage.svelte";
   import type { WorkItem } from "./AgentWork.svelte";
   import ModelSelector from "./ModelSelector.svelte";
-  import ExpandableTextarea from "./ExpandableTextarea.svelte";
+  import ChatComposer from "./ChatComposer.svelte";
   import EmptyState from "../EmptyState.svelte";
-  import { RefreshCw, TriangleAlert, X } from "@lucide/svelte";
+  import { RefreshCw, SquarePen, TriangleAlert, X } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button/index.js";
 
   /**
@@ -478,19 +478,19 @@
 
 <div class="flex h-full flex-col">
   <!-- Model selector and controls -->
-  <div class="mb-4 shrink-0">
-    <div class="flex flex-wrap gap-2">
+  <div class="mb-3 shrink-0">
+    <div class="flex gap-2">
       <ModelSelector
         bind:value={$selectedModelStore}
         placeholder="Select a tool-capable model..."
         disabled={isStreaming}
         capabilities={["function_calling"]}
       />
-      <Button variant="outline" onclick={newChat} disabled={messages.length === 0 && !isStreaming}>
-        New Chat
+      <Button variant="outline" class="shrink-0" onclick={newChat} disabled={messages.length === 0 && !isStreaming} title="New chat">
+        <SquarePen />
+        <span class="hidden sm:inline">New Chat</span>
       </Button>
     </div>
-
   </div>
 
   {#if !$hasListedModels}
@@ -503,7 +503,7 @@
   {:else}
     <!-- Messages area -->
     <div
-      class="mb-4 flex-1 overflow-y-auto px-2"
+      class="mb-3 flex-1 overflow-y-auto px-1 sm:px-2"
       bind:this={messagesContainer}
       onscroll={handleMessagesScroll}
     >
@@ -547,6 +547,7 @@
           </div>
         </EmptyState>
       {:else}
+        <div class="mx-auto w-full max-w-3xl py-2">
         {#each displayMessages as item, idx (idx)}
           {#if item.kind === "agent"}
             <ChatMessageComponent
@@ -580,11 +581,12 @@
             {agentNotice}
           </div>
         {/if}
+        </div>
       {/if}
     </div>
 
     <!-- Input area -->
-    <div class="shrink-0">
+    <div class="mx-auto w-full max-w-3xl shrink-0 px-1 sm:px-2">
       {#if showJinjaHint}
         <div class="mb-2 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
           <TriangleAlert class="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
@@ -600,23 +602,17 @@
         </div>
       {/if}
 
-      <div class="flex gap-2">
-        <ExpandableTextarea
-          bind:ref={inputRef}
-          bind:value={userInput}
-          placeholder="Ask a question about llama-swap..."
-          rows={3}
-          onkeydown={handleKeyDown}
-          disabled={isStreaming || !$selectedModelStore}
-        />
-        <div class="flex flex-col gap-2">
-          {#if isStreaming}
-            <Button variant="destructive" onclick={cancelStreaming}>Cancel</Button>
-          {:else}
-            <Button onclick={sendMessage} disabled={!userInput.trim() || !canSend}>Send</Button>
-          {/if}
-        </div>
-      </div>
+      <ChatComposer
+        bind:ref={inputRef}
+        bind:value={userInput}
+        placeholder="Ask about llama-swap..."
+        onkeydown={handleKeyDown}
+        disabled={isStreaming || !$selectedModelStore}
+        streaming={isStreaming}
+        canSend={Boolean(userInput.trim()) && canSend}
+        onsend={sendMessage}
+        onstop={cancelStreaming}
+      />
     </div>
   {/if}
 </div>
