@@ -35,8 +35,10 @@ func TestServer_HandleListModels(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d", w.Code)
 	}
-	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "http://example.com" {
-		t.Errorf("Access-Control-Allow-Origin = %q", got)
+	// The global CORS middleware sets this on every response now, so the
+	// listing no longer echoes the request Origin back.
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Errorf("Access-Control-Allow-Origin = %q want *", got)
 	}
 
 	var resp struct {

@@ -345,6 +345,25 @@ func TestServer_CORSPreflight(t *testing.T) {
 	}
 }
 
+// A passing preflight does not let a browser read the response; the actual
+// response needs the header too. Without it a cross-origin GET /running is
+// fetched and then discarded, which is what broke browser dashboards.
+func TestServer_CORSActualResponse(t *testing.T) {
+	s := newTestServer(newStubRouter([]string{"m1"}, ""), newStubRouter(nil, ""))
+
+	req := httptest.NewRequest(http.MethodGet, "/running", nil)
+	req.Header.Set("Origin", "http://example.com")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d want 200", w.Code)
+	}
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Errorf("Access-Control-Allow-Origin=%q want * on the actual response", got)
+	}
+}
+
 func TestServer_Unload(t *testing.T) {
 	local := newStubRouter([]string{"m1"}, "")
 	s := newTestServer(local, newStubRouter(nil, ""))
