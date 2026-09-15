@@ -367,13 +367,19 @@ func strPtr(s string) *string {
 	return &s
 }
 
-// deploymentSpecMatches reports whether an existing deployment's pod
-// template matches the desired one (used by --strict adoption). Every
-// configuration-owned field is compared — image, command, args, env, ports,
+// deploymentSpecMatches reports whether an existing deployment matches the
+// desired one (used by --strict adoption). Every configuration-owned field
+// is compared — the deployment's labels (which carry the extra --label
+// entries), and in the pod template the image, command, args, env, ports,
 // volumes, node selector, tolerations, grace period, probes and resources —
 // so strict mode replaces the Deployment whenever any of them drifted.
 func deploymentSpecMatches(have *appsv1.Deployment, want *appsv1.Deployment) bool {
 	if have == nil || want == nil {
+		return false
+	}
+	// The API server adds nothing to a Deployment's labels, so the label
+	// sets must be exactly the rendered ones (managed + extra --label).
+	if !stringMapEqual(have.Labels, want.Labels) {
 		return false
 	}
 	hs, ws := have.Spec.Template.Spec, want.Spec.Template.Spec

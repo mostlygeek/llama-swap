@@ -361,6 +361,44 @@ func TestKubeswap_DeploymentSpecMatches(t *testing.T) {
 	}
 }
 
+// TestKubeswap_DeploymentSpecMatchesLabels Verifies the spec comparison
+// detects drift in the deployment-level labels (the extra --label entries
+// land there, so a label change must trigger a --strict replacement).
+func TestKubeswap_DeploymentSpecMatchesLabels(t *testing.T) {
+	cfg := testConfig()
+	cfg.ExtraLabels = map[string]string{"team": "inference"}
+	dep, err := cfg.renderDeployment()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Same labels match.
+	dep2, _ := cfg.renderDeployment()
+	if !deploymentSpecMatches(dep, dep2) {
+		t.Error("identical labels should match")
+	}
+
+	// An added label is drift.
+	dep2.Labels["extra"] = "label"
+	if deploymentSpecMatches(dep, dep2) {
+		t.Error("added label should not match")
+	}
+
+	// A changed value is drift.
+	dep2, _ = cfg.renderDeployment()
+	dep2.Labels["team"] = "other"
+	if deploymentSpecMatches(dep, dep2) {
+		t.Error("changed label value should not match")
+	}
+
+	// A removed label is drift.
+	dep2, _ = cfg.renderDeployment()
+	delete(dep2.Labels, "team")
+	if deploymentSpecMatches(dep, dep2) {
+		t.Error("removed label should not match")
+	}
+}
+
 // TestKubeswap_DeploymentSpecMatchesNodeSelector Verifies the spec comparison detects node-selector drift.
 func TestKubeswap_DeploymentSpecMatchesNodeSelector(t *testing.T) {
 	cfg := testConfig()
