@@ -13,6 +13,8 @@
   import AgentWork from "./AgentWork.svelte";
   import MessageStats from "./MessageStats.svelte";
   import StatsBreakdown from "./StatsBreakdown.svelte";
+  import TextEditDialog from "./TextEditDialog.svelte";
+  import { screenWidth } from "../../stores/theme";
   import type { WorkItem } from "./AgentWork.svelte";
 
   interface Props {
@@ -104,6 +106,11 @@
   let showRaw = $state(false);
   let isEditing = $state(false);
   let editContent = $state("");
+  // In-place editing suits a mouse and a wide page. On a phone the on-screen
+  // keyboard covers half the screen, so the edit opens in a sheet that
+  // tracks the keyboard instead.
+  let editInDialog = $derived($screenWidth === "xs" || $screenWidth === "sm");
+  let showEditDialog = $state(false);
   let showReasoning = $state(false);
   let modalImageUrl = $state<string | null>(null);
 
@@ -115,8 +122,19 @@
   }
 
   function startEdit() {
+    if (editInDialog) {
+      showEditDialog = true;
+      return;
+    }
     editContent = textContent;
     isEditing = true;
+  }
+
+  function submitEdit(text: string) {
+    const trimmed = text.trim();
+    if (onEdit && trimmed && trimmed !== textContent) {
+      onEdit(trimmed);
+    }
   }
 
   function cancelEdit() {
@@ -125,11 +143,14 @@
   }
 
   function saveEdit() {
-    if (onEdit && editContent.trim() !== textContent) {
-      onEdit(editContent.trim());
-    }
+    submitEdit(editContent);
     isEditing = false;
     editContent = "";
+  }
+
+  function saveDialogEdit(text: string) {
+    showEditDialog = false;
+    submitEdit(text);
   }
 
   function openModal(imageUrl: string) {
@@ -410,6 +431,16 @@
     </div>
   {/if}
 </div>
+
+{#if showEditDialog}
+  <TextEditDialog
+    value={textContent}
+    title="Edit message"
+    saveLabel="Send"
+    onsave={saveDialogEdit}
+    oncancel={() => (showEditDialog = false)}
+  />
+{/if}
 
 <!-- Full-size image modal -->
 {#if modalImageUrl}

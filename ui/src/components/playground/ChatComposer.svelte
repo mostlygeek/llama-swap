@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { untrack, type Snippet } from "svelte";
-  import { ArrowUp, Maximize2, Square, X } from "@lucide/svelte";
+  import type { Snippet } from "svelte";
+  import { ArrowUp, Maximize2, Square } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button/index.js";
-  import { Textarea } from "$lib/components/ui/textarea/index.js";
+  import TextEditDialog from "./TextEditDialog.svelte";
 
   /**
    * The message box at the bottom of a chat. One rounded surface holds the
@@ -55,36 +55,11 @@
   });
 
   let isExpanded = $state(false);
-  let expandedValue = $state("");
-  let expandedTextarea: HTMLTextAreaElement | undefined = $state();
 
-  function openExpanded() {
-    expandedValue = value;
-    isExpanded = true;
-  }
-
-  function closeExpanded() {
+  function saveExpanded(text: string) {
+    value = text;
     isExpanded = false;
   }
-
-  function saveExpanded() {
-    value = expandedValue;
-    isExpanded = false;
-  }
-
-  function handleExpandedKeyDown(event: KeyboardEvent) {
-    if (event.key === "Escape") {
-      closeExpanded();
-    }
-  }
-
-  $effect(() => {
-    if (isExpanded && expandedTextarea) {
-      expandedTextarea.focus();
-      const len = untrack(() => expandedValue.length);
-      expandedTextarea.setSelectionRange(len, len);
-    }
-  });
 </script>
 
 <div
@@ -112,7 +87,7 @@
       variant="ghost"
       size="icon-lg"
       class="text-muted-foreground hidden shrink-0 rounded-full sm:inline-flex"
-      onclick={openExpanded}
+      onclick={() => (isExpanded = true)}
       title="Expand to edit"
       {disabled}
     >
@@ -145,27 +120,5 @@
 </div>
 
 {#if isExpanded}
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-    <div class="bg-card flex h-[80vh] w-full max-w-4xl flex-col rounded-lg border shadow-xl">
-      <div class="flex items-center justify-between border-b p-4">
-        <h3 class="pb-0 font-medium">Edit Text</h3>
-        <Button variant="ghost" size="icon-sm" onclick={closeExpanded} title="Close">
-          <X />
-        </Button>
-      </div>
-      <div class="flex-1 p-4">
-        <Textarea
-          bind:ref={expandedTextarea}
-          class="h-full resize-none"
-          {placeholder}
-          bind:value={expandedValue}
-          onkeydown={handleExpandedKeyDown}
-        />
-      </div>
-      <div class="flex justify-end gap-2 border-t p-4">
-        <Button variant="outline" onclick={closeExpanded}>Cancel</Button>
-        <Button onclick={saveExpanded}>Done</Button>
-      </div>
-    </div>
-  </div>
+  <TextEditDialog {value} {placeholder} onsave={saveExpanded} oncancel={() => (isExpanded = false)} />
 {/if}
