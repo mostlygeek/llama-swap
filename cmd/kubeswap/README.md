@@ -131,17 +131,27 @@ Deployment (with the `kubeswap gc` init container), the Service, and
 optional Ingress / Gateway API exposure. Its full values reference and
 worked examples are in the [chart README](chart/README.md).
 
-From a checkout:
+From the published OCI registry (one chart version per llama-swap
+release — tag `vNNN` publishes chart `NNN.0.0` with appVersion `NNN`;
+the published chart ships `image.tag` unset and derives its default
+image from the app version, `unified-vulkan-<appVersion>`, whose versioned
+docker tag the publish workflow mints as an alias of the floating
+manifest):
+
+```bash
+helm repo add llama-swap oci://ghcr.io/mostlygeek/llama-swap-helm
+helm install llama-swap llama-swap/llama-swap \
+  -n llama-swap --create-namespace \
+  --version 256.0.0    # the chart version for release v256; omit for latest
+```
+
+For development, install from a checkout instead (floating image tag by
+default):
 
 ```bash
 helm install llama-swap ./cmd/kubeswap/chart \
   -n llama-swap --create-namespace
 ```
-
-<!-- TODO: once the chart is published to a Helm repo / OCI registry,
-     replace the checkout install with:
-       helm repo add llama-swap <repo-url>      # or: oci://<registry>/...
-       helm install llama-swap llama-swap/llama-swap -n llama-swap --create-namespace -->
 
 The default values are a zero-prerequisite demo: one tiny model (SmolLM2,
 ~135MB) that llama-server pulls from Hugging Face into a per-pod emptyDir —

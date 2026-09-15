@@ -73,7 +73,20 @@ ConfigMap holding config.yaml: the chart's own, or an existing one.
 
 {{/*
 Head-end image reference.
+
+When image.tag is set it is used as-is. When it is unset, the tag is
+derived from the chart's app version: unified-vulkan-<appVersion>. The
+chart's default values.yaml carries the floating unified-vulkan tag for
+dev use; the publish workflow overrides the app version to the release
+number (vNNN -> NNN) and leaves the tag unset, so a published release
+chart defaults to the versioned docker release tag built from that
+release's commit, without the version being codified into the tag
+string.
 */}}
 {{- define "llama-swap.image" -}}
-{{- printf "%s:%s" .Values.image.repository (default .Chart.AppVersion .Values.image.tag) -}}
+{{- $tag := .Values.image.tag -}}
+{{- if not $tag -}}
+{{- $tag = printf "unified-vulkan-%s" .Chart.AppVersion -}}
+{{- end -}}
+{{- printf "%s:%s" .Values.image.repository $tag -}}
 {{- end -}}

@@ -156,8 +156,22 @@ presets.
 
 ## Deploying with Helm
 
-The chart in `cmd/kubeswap/chart/` deploys the head-end end to
-end from a checkout:
+The chart deploys the head-end end to end. It is published to an OCI
+registry (one version per llama-swap release — tag `vNNN` publishes
+chart `NNN.0.0` with appVersion `NNN`; the published chart ships
+`image.tag` unset and derives its default image from the app version,
+`unified-vulkan-<appVersion>`, whose versioned docker tag the publish
+workflow mints as an alias of the floating manifest):
+
+```bash
+helm repo add llama-swap oci://ghcr.io/mostlygeek/llama-swap-helm
+helm install llama-swap llama-swap/llama-swap \
+  -n llama-swap --create-namespace \
+  --version 256.0.0    # the chart version for release v256; omit for latest
+```
+
+For development, install from a checkout instead (the chart lives in
+`cmd/kubeswap/chart/`, floating image tag by default):
 
 ```bash
 helm install llama-swap ./cmd/kubeswap/chart \
@@ -250,13 +264,14 @@ charset (`[A-Za-z0-9._-]`); anything else fails rendering with a message
 instead of breaking the router at runtime. The full values table, including
 the `pools` and `manual` shapes, is in the chart README.
 
-<!-- TODO: once the chart is published to a Helm repo / OCI registry, this
-     becomes `helm repo add llama-swap <repo-url>` +
-     `helm install llama-swap llama-swap/llama-swap`. -->
-
-Until a release ships `kubeswap`, set `image.repository`/`image.tag` to an
-image that does (the unified image built from a revision containing
-`cmd/kubeswap/`).
+The published chart ships `image.tag` unset and derives its default
+image from the app version (`unified-vulkan-<appVersion>`) rather than
+codifying the version into the tag string. The publish workflow mints
+the versioned docker tags `unified-<variant>-NNN` as manifest aliases of
+the current floating `unified-<variant>` tags (digest logged) so the
+names the chart references exist; a checkout install defaults to the
+floating tag. To use a different variant or a hand-built image, override
+`image.repository`/`image.tag`.
 
 ## Hand-rolled RBAC
 

@@ -15,8 +15,30 @@ and all backend pods.
 
 ## Install
 
-From a checkout of llama-swap (the chart lives in
-`cmd/kubeswap/chart/`):
+From the published OCI registry (one chart version per llama-swap
+release):
+
+```bash
+helm repo add llama-swap oci://ghcr.io/mostlygeek/llama-swap-helm
+helm repo update
+helm install llama-swap llama-swap/llama-swap \
+  -n llama-swap --create-namespace \
+  --version 256.0.0    # the chart version for release v256; omit for latest
+```
+
+Versioning follows the llama-swap release convention: tag `vNNN` publishes
+chart version `NNN.0.0` with appVersion `NNN`. The published chart ships
+`image.tag` unset, so its default image is derived from the app version
+(`unified-vulkan-<appVersion>`) rather than codified into the tag string.
+The publish workflow (`.github/workflows/publish-chart.yml`) mints the
+versioned docker tags `unified-<variant>-NNN` as manifest aliases of the
+current floating `unified-<variant>` tags before publishing, so the names
+the chart references exist (each alias's digest is logged). Override
+`image.tag` per variant (`unified-cuda-NNN`, `unified-cuda13-NNN`) or to a
+floating tag.
+
+For development, install from a checkout instead (the chart lives in
+`cmd/kubeswap/chart/`, with the floating image tag by default):
 
 ```bash
 helm install llama-swap ./cmd/kubeswap/chart \
@@ -26,12 +48,6 @@ helm install llama-swap ./cmd/kubeswap/chart \
 The chart never renders a Namespace object — create the release
 namespace yourself (`--create-namespace` above) or point the install
 at one that already exists.
-
-<!-- TODO: the chart's home (Helm repo / OCI registry) is not decided yet.
-     Once it is, add the canonical install here:
-       helm repo add llama-swap <repo-url>        # or: oci://<registry>/...
-       helm install llama-swap llama-swap/llama-swap -n llama-swap --create-namespace
-     and version the chart against llama-swap releases (see Chart.yaml). -->
 
 The default `values.yaml` is a demo config: one tiny model (SmolLM2,
 ~135MB) that llama-server downloads from Hugging Face on demand into a
@@ -53,7 +69,7 @@ works inside model commands (it is how the default config keeps
 | key | default | meaning |
 | --- | --- | --- |
 | `image.repository` | `ghcr.io/mostlygeek/llama-swap` | head-end image |
-| `image.tag` | `unified-vulkan` | `unified-cuda13` / `unified-cuda` for NVIDIA |
+| `image.tag` | `unified-vulkan` (dev); published release charts ship it unset and derive `unified-vulkan-<appVersion>` | `unified-cuda13` / `unified-cuda` for NVIDIA |
 | `image.pullPolicy` | `IfNotPresent` | |
 | `imagePullSecrets` | `[]` | list of secret names |
 | `replicas` | `1` | must be 1 (the chart fails on more) — never two head-ends per namespace |

@@ -1,0 +1,130 @@
+name: Publish Helm chart
+
+# Publishes the kubeswap chart for a llama-swap release tag. Everything
+# this workflow does is chart publication:
+#
+#   * the chart is published at oci://ghcr.io/mostlygeek/llama-swap-helm as
+#     version NNN.0.0 with the app version overridden to NNN (the release
+#     number, the local vNNN convention)
+#   * its image.tag is left UNSET in the published values; the chart's
+#     image helper then derives the tag as unified-vulkan-<appVersion>, so
+#     the version lives in the app version field rather than being
+#     codified into the tag string
+#   * before publishing, the versioned docker tags unified-<variant>-NNN
+#     that the chart defaults to are cut as manifest aliases of the
+#     current floating unified-<variant> tags (the unified pipeline is
+#     unchanged: it builds on schedule / dispatch as before; this only
+#     mints the release-numbered names the chart references, and logs
+#     the digest each alias lands on)
+#
+# The checked-in Chart.yaml (0.1.0) and values.yaml (floating tag, for
+# dev use) stay as they are; both are overridden at publish time only.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+  # Allows manual triggering of the workflow
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag version to publish (e.g. v256)"
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
+        with:
+          # The tag ref is checked out for tag pushes; for dispatch the
+          # input names the tag whose chart commit to publish.
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Resolve version
+        id: version
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VER="${TAG#v}"
+          if [[ ! "$VER" =~ ^[0-9]+$ ]]; then
+            echo "tag $TAG does not follow the vNNN release convention" >&2
+            exit 1
+          fi
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          echo "chart-version=${VER}.0.0" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # Mint the release-numbered image names the published chart
+      # references, as aliases of the current floating manifests. A
+      # re-run re-points the tags (-f) and logs the digest they land on,
+      # so the alias is auditable.
+      - name: Cut versioned docker tags
+        env:
+          VER: ${{ steps.version.outputs.version }}
+        run: |
+          for variant in vulkan cuda cuda13; do
+            docker buildx imagetools create -f \
+              -t "ghcr.io/mostlygeek/llama-swap:unified-${variant}-${VER}" \
+              "ghcr.io/mostlygeek/llama-swap:unified-${variant}"
+            echo "unified-${variant}-${VER} -> $(docker buildx imagetools inspect "ghcr.io/mostlygeek/llama-swap:unified-${variant}-${VER}" | head -1)"
+          done
+
+      # helm ships on the runner; the fallback keeps the step working if a
+      # future image drops it (same pin as go-ci's Test chart step).
+      - name: Set up helm
+        run: |
+          if ! command -v helm >/dev/null; then
+            curl -fsSL https://get.helm.sh/helm-v3.19.0-linux-amd64.tar.gz \
+              | sudo tar xz --strip-components=1 -C /usr/local/bin
+          fi
+          helm version --short
+
+      # Leave the published chart's image.tag unset: the image helper then
+      # derives unified-vulkan-<appVersion>, so the release number comes
+      # from the app version field instead of being codified into the tag
+      # string. The checked-in default (floating tag) stays for dev use.
+      - name: Unset the default image tag for the published chart
+        run: |
+          sed -i 's/^  tag: unified-vulkan$/  tag: ""/' cmd/kubeswap/chart/values.yaml
+          grep -n '  tag:' cmd/kubeswap/chart/values.yaml | head -1
+
+      - name: Package and push the chart
+        env:
+          HELM_REGISTRY_HOST: ghcr.io
+          HELM_REGISTRY_AUTH: $HOME/.docker/config.json
+        run: |
+          helm package cmd/kubeswap/chart \
+            -d dist \
+            --version ${{ steps.version.outputs.chart-version }} \
+            --app-version ${{ steps.version.outputs.version }}
+          helm push dist/llama-swap-*.tgz oci://ghcr.io/mostlygeek/llama-swap-helm
+
+      # Prove the end result: pull the chart back and render it, so the
+      # default image resolves to the versioned docker release tag via
+      # the app version.
+      - name: Verify the published chart
+        env:
+          HELM_REGISTRY_HOST: ghcr.io
+          HELM_REGISTRY_AUTH: $HOME/.docker/config.json
+        run: |
+          helm show chart oci://ghcr.io/mostlygeek/llama-swap-helm/llama-swap \
+            --version ${{ steps.version.outputs.chart-version }}
+          helm pull oci://ghcr.io/mostlygeek/llama-swap-helm/llama-swap \
+            --version ${{ steps.version.outputs.chart-version }} -d /tmp/pulled
+          helm template llama-swap /tmp/pulled/llama-swap-*.tgz -n llama-swap \
+            | grep -m1 "image: ghcr.io" \
+            | grep -q "unified-vulkan-${{ steps.version.outputs.version }}$" \
+            || { echo "published chart does not default to the versioned image tag" >&2; exit 1; }
+          echo "published chart defaults to unified-vulkan-${{ steps.version.outputs.version }}"

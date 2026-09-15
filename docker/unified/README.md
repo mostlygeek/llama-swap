@@ -79,6 +79,16 @@ its build, the manifest job does not run: the arch-qualified images that did
 succeed are still published, but the shared tag keeps pointing at the last
 complete build rather than silently losing an architecture.
 
+Release-versioned tags (`unified-<variant>-NNN`) are minted separately by
+the chart's publish workflow (`.github/workflows/publish-chart.yml`) when a
+llama-swap release tag `vNNN` is pushed: it aliases the then-current
+floating `unified-<variant>` manifest as `unified-<variant>-NNN` for each
+variant (digest logged), so the kubeswap chart published for that release
+can default to an image tag that is versioned together with it. This
+pipeline itself is unchanged: it builds on schedule and on manual
+dispatch, and the versioned tags are release-time names for whatever the
+floating tags point at at that moment.
+
 ### Layout
 
 The build is one Dockerfile per piece:

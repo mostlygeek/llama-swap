@@ -15,6 +15,13 @@ fullnameOverride: ""
 # ---------------------------------------------------------------------------
 # Variant tags: unified-vulkan (AMD/other Vulkan), unified-cuda13
 # (NVIDIA Ampere-Blackwell), unified-cuda (NVIDIA Pascal-Ada, CUDA 12).
+#
+# The floating tag below is the dev default. A published release chart
+# ships image.tag unset, in which case the image helper derives
+# unified-vulkan-<appVersion> — the versioned docker release tag the
+# publish workflow mints for the chart's release number (overridden at
+# package time). Override with any variant, date tag, or local build to
+# pin otherwise.
 image:
   repository: ghcr.io/mostlygeek/llama-swap
   tag: unified-vulkan
