@@ -1,0 +1,29 @@
+# Structured config with the gpu-budget matrix builder: two GPU models
+# (one marked exclusive) and one CPU model (gpu: []).
+config:
+  top:
+    healthCheckTimeout: 600
+  matrix:
+    builder: gpu-budget
+    budget: 2
+    evict_costs:
+      big-image: 10
+    exclusive:
+      - big-image
+  defaults:
+    image: ghcr.io/mostlygeek/llama-swap:unified-vulkan
+    command: llama-server
+    gpu: [amd.com/gpu=1]
+    volumes:
+      - pvc:model-cache:/models
+  models:
+    - id: llm-a
+      args: --model /models/a.gguf
+    - id: llm-b
+      args: --model /models/b.gguf
+    - id: big-image
+      args: --diffusion-model /models/c.gguf
+    - id: asr
+      gpu: []
+      command: whisper-server
+      args: --model /models/d.bin

@@ -1,0 +1,10 @@
+# builder must be gpu-budget, pools or manual.
+config:
+  matrix:
+    builder: round-robin
+    budget: 1
+  defaults:
+    gpu: [amd.com/gpu=1]
+  models:
+    - id: llm-a
+      args: --model /models/a.gguf

@@ -29,9 +29,30 @@ test-dev:
 test:
 	go test -short -count=1 ./internal/...
 
-# for CI - full test (takes longer)
+# for CI - full test (takes longer); the cmd packages are included so
+# the kubeswap and vllm-wrapper suites run in CI, not just locally
 test-all:
-	go test -race -count=1 ./internal/...
+	go test -race -count=1 ./internal/... ./cmd/kubeswap ./cmd/vllm-wrapper
+
+# Lint and render the kubeswap Helm chart (requires helm on PATH).
+# Renders every supported config shape (stock defaults, structured with
+# each matrix builder, an existing ConfigMap) and asserts that the
+# chart's own contradictory-input guards still fail rendering.
+test-chart:
+	helm lint cmd/kubeswap/chart
+	@helm template llama-swap cmd/kubeswap/chart -n llama-swap > /dev/null \
+		&& echo "chart: default (inline demo) render OK"
+	@for f in cmd/kubeswap/chart/test-values/*.yaml; do \
+		helm template llama-swap cmd/kubeswap/chart -n llama-swap -f $$f > /dev/null \
+			&& echo "chart: render OK: $$f"; \
+	done
+	@for f in cmd/kubeswap/chart/test-values-invalid/*.yaml; do \
+		if helm template llama-swap cmd/kubeswap/chart -n llama-swap -f $$f > /dev/null 2>&1; then \
+			echo "chart: $$f was expected to fail rendering"; exit 1; \
+		else \
+			echo "chart: correctly rejected: $$f"; \
+		fi; \
+	done
 
 ui/node_modules:
 	cd ui && npm install
@@ -117,5 +138,5 @@ eval-docs-agent:
 	./evals/docs-agent/run.sh $(EVAL_ARGS)
 
 # Phony targets
-.PHONY: all clean ui mac windows simple-responder simple-responder-windows test test-all test-dev test-ui wol-proxy kubeswap eval-docs-agent release
+.PHONY: all clean ui mac windows simple-responder simple-responder-windows test test-all test-chart test-dev test-ui wol-proxy kubeswap eval-docs-agent release
 .PHONY: linux linux-arm64 linux-amd64

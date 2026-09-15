@@ -68,3 +68,13 @@ jobs:
 
       - name: Test all
         run: make test-all
+
+      # Lint + render the kubeswap Helm chart (helm ships on the runner;
+      # the fallback keeps the step working if a future image drops it).
+      - name: Test chart
+        run: |
+          if ! command -v helm >/dev/null; then
+            curl -fsSL https://get.helm.sh/helm-v3.19.0-linux-amd64.tar.gz \
+              | sudo tar xz --strip-components=1 -C /usr/local/bin
+          fi
+          make test-chart
