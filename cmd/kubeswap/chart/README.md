@@ -170,7 +170,9 @@ routing comes from `config.matrix` instead, see below) and
 model entry overrides the matching default — an empty list clears it
 (`gpu: []` for a CPU-only model).
 
-Kubeswap fields consumed by the chart: `id` (required), `image`,
+Kubeswap fields consumed by the chart: `id` (required, unique — a
+duplicate fails rendering, since it would overwrite the earlier entry
+and share one Deployment), `image`,
 `command`, `gpu`, `volumes`, `port`, `extraKubeArgs` (verbatim
 `kubeswap serve` flags before `--`, e.g. `"--node-selector k=v"`,
 `"--request cpu=4"`), `startupTimeout`, `healthPath`, `livenessPath`,

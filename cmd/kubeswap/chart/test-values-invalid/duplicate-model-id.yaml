@@ -1,0 +1,13 @@
+# Model ids must be unique: a duplicate would overwrite the earlier entry
+# in the rendered YAML and point two configs at one Deployment. This is
+# the structured path WITHOUT config.matrix.
+config:
+  defaults:
+    gpu: [amd.com/gpu=1]
+  models:
+    - id: llm-a
+      args: --model /models/a.gguf
+    - id: llm-b
+      args: --model /models/b.gguf
+    - id: llm-a
+      args: --model /models/a2.gguf

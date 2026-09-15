@@ -94,7 +94,9 @@ config:
   #             llama-swap model fields (ttl, checkEndpoint, ...) that most
   #             models share. A model's own entry always wins.
   #   models:   list of model entries. Kubeswap fields (consumed by the
-  #             chart, not rendered into the model record): id (required),
+  #             chart, not rendered into the model record): id (required,
+  #             unique: a duplicate fails rendering, it would overwrite the
+  #             earlier entry and share one Deployment),
   #             image, command, gpu (list, "resource=count"), volumes (list,
   #             "pvc|emptydir|hostpath:name:path[:ro]"), port,
   #             extraKubeArgs (list, verbatim kubeswap serve flags before

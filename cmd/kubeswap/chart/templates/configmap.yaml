@@ -24,6 +24,23 @@ data:
 {{- if .Values.config.models }}
 {{- $ns := .Release.Namespace }}
 {{- $defaults := .Values.config.defaults | default dict }}
+{{- /* Shared roster validation: runs once, before anything consumes the
+      ids (matrix identifiers, pool membership and the model mappings
+      below), so every structured path rejects missing or duplicate ids
+      here instead of halfway through rendering. A duplicate id would
+      otherwise silently drop the earlier entry (YAML key overwrite) and
+      point two model configs at one Deployment. */}}
+{{- $seenIDs := dict }}
+{{- range $.Values.config.models }}
+{{- $id := index . "id" }}
+{{- if not $id }}
+{{- fail (printf "config.models: an entry is missing a non-empty id: %v" .) }}
+{{- end }}
+{{- if hasKey $seenIDs $id }}
+{{- fail (printf "config.models: duplicate model id %q (the id names the config key, the kubeswap --model argument and the Deployment name, so it must be unique)" $id) }}
+{{- end }}
+{{- $seenIDs = set $seenIDs $id true }}
+{{- end }}
 {{- with .Values.config.top }}
 {{ tpl (toYaml .) $ | nindent 4 }}
 {{- end }}
