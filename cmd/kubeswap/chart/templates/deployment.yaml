@@ -17,7 +17,17 @@ spec:
       {{- include "llama-swap.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      {{- with .Values.podAnnotations }}
+      {{- /* Restart the head-end when the rendered config changes. The
+            pod already hot-reloads via -watch-config, but a failed
+            reload only logs a warning and keeps serving the old config;
+            the annotation makes drift visible as a rollout. Skipped for
+            config.existing — the chart cannot hash a ConfigMap it does
+            not render. */}}
+      {{- $annotations := .Values.podAnnotations | default dict }}
+      {{- if not .Values.config.existing }}
+      {{- $annotations = merge $annotations (dict "checksum/config" (include (print $.Template.BasePath "/configmap.yaml") . | sha256sum)) }}
+      {{- end }}
+      {{- with $annotations }}
       annotations:
         {{- toYaml . | nindent 8 }}
       {{- end }}

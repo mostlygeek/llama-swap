@@ -1,6 +1,16 @@
 {{- if and .Values.config.existing .Values.config.models }}
 {{- fail "config: config.existing is set, so the chart mounts the existing ConfigMap and ignores config.models (and config.defaults/top); remove config.models to use the existing ConfigMap" }}
 {{- end }}
+{{- $matrixSet := not (empty (.Values.config.matrix | default dict)) }}
+{{- if and .Values.config.existing $matrixSet }}
+{{- fail "config: config.existing mounts an existing ConfigMap, so config.matrix would be ignored — remove config.matrix (or config.existing)" }}
+{{- end }}
+{{- if and $matrixSet (not .Values.config.models) }}
+{{- fail "config: config.matrix generates the routing section from the config.models roster, so config.models is required (config.inline and config.existing are not)" }}
+{{- end }}
+{{- if and $matrixSet (hasKey (.Values.config.top | default dict) "routing") }}
+{{- fail "config: config.matrix generates the routing section, so config.top must not also define 'routing' — for a hand-written matrix use config.matrix.manual instead" }}
+{{- end }}
 {{- if not .Values.config.existing }}
 apiVersion: v1
 kind: ConfigMap
@@ -17,6 +27,190 @@ data:
 {{- with .Values.config.top }}
 {{ tpl (toYaml .) $ | nindent 4 }}
 {{- end }}
+{{- with .Values.config.matrix }}
+{{- /* Matrix builder: turns a high-level description into the routing
+      section. gpu-budget renders the repeated-reference construction
+      (any N of the GPU pool + an unlimited CPU pool); pools is the
+      generalization to named pools; manual renders the user's matrix
+      verbatim. The DSL is [A-Za-z0-9._-] identifiers, &, |, () and +
+      set refs, so model ids are validated against that charset. */}}
+{{- $builder := .builder | default "" }}
+{{- if not (has $builder (list "gpu-budget" "pools" "manual")) }}
+{{- fail (printf "config.matrix: unknown builder %q (valid: gpu-budget, pools, manual)" $builder) }}
+{{- end }}
+{{- $exclusive := .exclusive | default list }}
+{{- if eq $builder "manual" }}
+{{- if or (not (hasKey . "manual")) (empty .manual) }}
+{{- fail "config.matrix: builder 'manual' requires a non-empty config.matrix.manual block (vars/evict_costs/sets)" }}
+{{- end }}
+{{- if not (hasKey .manual "sets") }}
+{{- fail "config.matrix.manual: 'sets' is required" }}
+{{- end }}
+    routing:
+      router:
+        use: matrix
+        settings:
+          matrix:
+{{ tpl (toYaml .manual) $ | indent 12 }}
+{{- else }}
+{{- /* Generated builders: validate the roster (ids the DSL can express)
+      and the exclusive list first. */}}
+{{- $allIDs := list }}
+{{- range $.Values.config.models }}
+{{- $id := index . "id" }}
+{{- if not $id }}
+{{- fail (printf "config.matrix: a model entry is missing a non-empty id: %v" .) }}
+{{- end }}
+{{- if not (regexMatch "^[A-Za-z0-9._-]+$" $id) }}
+{{- fail (printf "config.matrix: model id %q is not expressible in the matrix DSL (allowed characters: [A-Za-z0-9._-])" $id) }}
+{{- end }}
+{{- $allIDs = append $allIDs $id }}
+{{- end }}
+{{- range $exclusive }}
+{{- if not (has . $allIDs) }}
+{{- fail (printf "config.matrix.exclusive: %q is not a model id" .) }}
+{{- end }}
+{{- end }}
+{{- /* Shared state: declared here (with-scope) because Go template
+      variables do not escape their control structure; the branches
+      below reassign with '=' and the rendering section reads them. */}}
+{{- $b := 1 }}
+{{- $budget := 0 }}
+{{- $gpu := list }}
+{{- $cpu := list }}
+{{- $pools := list }}
+{{- $poolNames := list }}
+{{- $members := dict }}
+{{- if eq $builder "gpu-budget" }}
+{{- /* hasKey, not 'default 1': sprig default treats 0 as empty and a
+      budget of 0 would silently become 1. */}}
+{{- if hasKey . "budget" }}
+{{- $b = .budget }}
+{{- end }}
+{{- if not (or (kindIs "float64" $b) (kindIs "int" $b)) }}
+{{- fail (printf "config.matrix: budget must be a number, got %s" (kindOf $b)) }}
+{{- end }}
+{{- if or (lt (float64 $b) 1.0) (ne (float64 $b) (float64 (int $b))) }}
+{{- fail (printf "config.matrix: budget must be an integer >= 1, got %v" $b) }}
+{{- end }}
+{{- $budget = int $b }}
+{{- /* A model is in the GPU pool when its merged gpu list is non-empty;
+      GPU-by-default, gpu: [] (or no gpu at all) is the CPU exception. */}}
+{{- range $.Values.config.models }}
+{{- $id := index . "id" }}
+{{- if has $id $exclusive }}
+{{- else }}
+{{- $mg := mergeOverwrite (deepCopy $defaults) . }}
+{{- $g := index $mg "gpu" | default list }}
+{{- if gt (len $g) 0 }}{{- $gpu = append $gpu $id }}{{- else }}{{- $cpu = append $cpu $id }}{{- end }}
+{{- end }}
+{{- end }}
+{{- if empty $gpu }}
+{{- fail "config.matrix: gpu-budget found no GPU models (a model is GPU when its merged gpu list is non-empty); the budget would be meaningless — check the gpu default and mark CPU-only models with gpu: []" }}
+{{- end }}
+{{- else }}
+{{- $pools = .pools | default list }}
+{{- if empty $pools }}
+{{- fail "config.matrix: builder 'pools' requires config.matrix.pools (a list of {name, budget}; omit budget for an unlimited pool)" }}
+{{- end }}
+{{- range $pools }}
+{{- $pn := .name | default "" }}
+{{- if not (regexMatch "^[A-Za-z0-9._-]+$" $pn) }}
+{{- fail (printf "config.matrix.pools: pool name %q is not expressible in the matrix DSL (allowed characters: [A-Za-z0-9._-])" $pn) }}
+{{- end }}
+{{- if has $pn (list "all" "gpu_pool" "cpu_pool") }}
+{{- fail (printf "config.matrix.pools: pool name %q is reserved (generated set names)" $pn) }}
+{{- end }}
+{{- if has $pn $poolNames }}
+{{- fail (printf "config.matrix.pools: duplicate pool name %q" $pn) }}
+{{- end }}
+{{- $poolNames = append $poolNames $pn }}
+{{- end }}
+{{- range $.Values.config.models }}
+{{- $id := index . "id" }}
+{{- if has $id $exclusive }}
+{{- else }}
+{{- $pm := index (mergeOverwrite (deepCopy $defaults) .) "pool" | default "" }}
+{{- if not $pm }}
+{{- fail (printf "config.matrix: builder 'pools' requires a 'pool' key on every model entry; %q has none" $id) }}
+{{- else if not (kindIs "string" $pm) }}
+{{- /* 'pool: y' is the YAML 1.1 boolean true, not the string "y" */}}
+{{- fail (printf "config.matrix: builder 'pools': model %q pool value must be a string (got %s) — quote it if it reads like a number or a boolean" $id (kindOf $pm)) }}
+{{- else if not (has $pm $poolNames) }}
+{{- fail (printf "config.matrix: model %q has pool %q which is not defined in config.matrix.pools (defined: %s)" $id $pm (join ", " $poolNames)) }}
+{{- else }}
+{{- $members = set $members $pm (append (get $members $pm | default list) $id) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- range $pools }}
+{{- if empty (get $members (.name)) }}
+{{- fail (printf "config.matrix.pools: pool %q has no members" .name) }}
+{{- end }}
+{{- end }}
+{{- end }}
+    routing:
+      router:
+        use: matrix
+        settings:
+          matrix:
+{{- with .evict_costs }}
+            evict_costs:
+{{- range $k, $v := . }}
+              {{ $k }}: {{ $v }}
+{{- end }}
+{{- end }}
+            sets:
+{{- if eq $builder "gpu-budget" }}
+              gpu_pool: ({{ $gpu | join " | " }})
+{{- if $cpu }}
+              cpu_pool: ({{ $cpu | join " & " }})
+{{- end }}
+{{- $refs := list }}
+{{- range $i := until $budget }}
+{{- $refs = append $refs "+gpu_pool" }}
+{{- end }}
+              all: {{ $refs | join " & " }}{{ if $cpu }} & +cpu_pool{{ end }}
+{{- else }}
+{{- range $pools }}
+{{- $pn := .name }}
+{{- $pbRaw := .budget | default 0 }}
+{{- if not (or (kindIs "float64" $pbRaw) (kindIs "int" $pbRaw)) }}
+{{- fail (printf "config.matrix.pools: pool %q budget must be a number, got %s" $pn (kindOf $pbRaw)) }}
+{{- end }}
+{{- $pb := int $pbRaw }}
+{{- if or (lt (float64 $pbRaw) 0.0) (ne (float64 $pbRaw) (float64 $pb)) }}
+{{- fail (printf "config.matrix.pools: pool %q budget must be a non-negative integer, got %v" $pn $pbRaw) }}
+{{- end }}
+{{- $ids := get $members $pn }}
+{{- if gt $pb 0 }}
+              {{ $pn }}: ({{ $ids | join " | " }})
+{{- else }}
+              {{ $pn }}: ({{ $ids | join " & " }})
+{{- end }}
+{{- end }}
+{{- $refs := list }}
+{{- range $pools }}
+{{- $pn := .name }}
+{{- $pb := int (.budget | default 0) }}
+{{- if gt $pb 0 }}
+{{- range $i := until $pb }}
+{{- $refs = append $refs (printf "+%s" $pn) }}
+{{- end }}
+{{- else }}
+{{- $refs = append $refs (printf "+%s" $pn) }}
+{{- end }}
+{{- end }}
+              all: {{ $refs | join " & " }}
+{{- end }}
+{{- range $exclusive }}
+{{- /* Exclusive models run alone: their own single-member set, and they
+      are left out of the generated pools above so they never count
+      against a budget. */}}
+              alone-{{ . }}: {{ . }}
+{{- end }}
+{{- end }}
+{{- end }}
     models:
 {{- range $m := .Values.config.models }}
 {{- /* The id is required: it names the config key, the --model argument
@@ -31,7 +225,7 @@ data:
       CPU-only model). Kube keys are consumed by the chart, every other
       merged key renders as a llama-swap model field. */}}
 {{- $merged := mergeOverwrite (deepCopy $defaults) $m }}
-{{- $kubeKeys := list "id" "image" "command" "gpu" "volumes" "port" "extraKubeArgs" "startupTimeout" "healthPath" "livenessPath" "checkPath" "args" "proxy" "cmdStop" }}
+{{- $kubeKeys := list "id" "image" "command" "gpu" "volumes" "port" "extraKubeArgs" "startupTimeout" "healthPath" "livenessPath" "checkPath" "args" "proxy" "cmdStop" "pool" }}
       {{ $id | quote }}:
 {{- with index $merged "proxy" | default "http://127.0.0.1:${PORT}" }}
         proxy: {{ if kindIs "string" . }}{{ tpl . $ | quote }}{{ else }}{{ tpl (toYaml .) $ | nindent 12 }}{{ end }}

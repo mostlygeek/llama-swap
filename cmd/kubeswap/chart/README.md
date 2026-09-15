@@ -164,8 +164,9 @@ models:
 For fleets, `config.models` replaces writing the `kubeswap serve`
 boilerplate per model: the chart generates each model's `proxy`,
 `cmd` (the whole `kubeswap serve ... -- <args>` line) and `cmdStop`.
-`config.top` carries everything else (scalars, llama-swap `macros`,
-routing) and `config.defaults` holds what most models share. A key on a
+`config.top` carries everything else (scalars, llama-swap `macros`;
+routing comes from `config.matrix` instead, see below) and
+`config.defaults` holds what most models share. A key on a
 model entry overrides the matching default — an empty list clears it
 (`gpu: []` for a CPU-only model).
 
@@ -210,6 +211,79 @@ config:
 llama-swap expands macros in reverse declaration order, so a model
 macro must not reference another model macro of the same model (global
 macros and literals are fine).
+
+### Matrix router builder
+
+`config.matrix` generates the llama-swap `routing` section from the
+`config.models` roster instead of writing matrix DSL by hand. It
+replaces a `routing:` block under `config.top` (defining both fails
+rendering).
+
+```yaml
+config:
+  matrix:
+    builder: gpu-budget    # gpu-budget | pools | manual
+    budget: 5              # gpu-budget: how many GPU models may run at once
+    evict_costs:           # optional: model id -> cost (default 1); a high
+      qwen3-8-27b: 10      # cost makes the router evict other models first
+    exclusive:             # optional: models that run alone, outside the budget
+    - gpt-oss-120b
+```
+
+**`gpu-budget`** — "any *N* of the GPU models may run; CPU models are
+unlimited and do not count toward *N*". A model is in the GPU pool
+when its merged `gpu` list is non-empty (so the usual `defaults.gpu`
+makes the fleet GPU-by-default) and in the CPU pool when it is
+`gpu: []`. It renders the repeated set-reference construction:
+
+```yaml
+routing:
+  router:
+    use: matrix
+    settings:
+      matrix:
+        sets:
+          gpu_pool: (model-a | model-b | …)
+          cpu_pool: (model-c & model-d)      # omitted when there are no CPU models
+          all: +gpu_pool & +gpu_pool & +gpu_pool & +gpu_pool & +gpu_pool & +cpu_pool
+```
+
+Each `+gpu_pool` is one slot; the router evicts the cheapest running
+GPU model when a sixth is requested. The budget is a hard cap (a set
+never contains more than *N* GPU models), CPU models are never
+evicted to make room for GPU ones, and models in no set cannot run
+with anything else — so every model lands in a pool automatically.
+
+**`pools`** — the generalization: any number of named pools, each with
+its own budget (omit `budget` for a pool whose members all coexist).
+Every model entry needs a `pool:` key naming one of the pools; each
+pool needs at least one member. This covers category spreads like
+"1 big LLM, 1 small LLM, 1 TTS, 1 ASR, 1 embeddings, up to 2 image
+models" — one pool per category. Fine-grained displacement rules
+between pools (e.g. "image displaces the big LLM") are beyond the
+builder; use `manual` for those.
+
+**`manual`** — renders your matrix verbatim, the escape hatch:
+
+```yaml
+config:
+  matrix:
+    builder: manual
+    manual:
+      vars: { q: qwen }
+      evict_costs: { q: 10 }
+      sets:
+        pair: (q | llama) & whisper
+```
+
+Model ids used by the generated builders must match the matrix DSL
+identifier charset (`[A-Za-z0-9._-]`); ids with other characters fail
+rendering with a message instead of breaking the router at runtime.
+`exclusive:` models are left out of the generated pools and get their
+own single-member set (`alone-<id>`), so they evict everything and are
+evicted by everything. The builder requires `config.models` (it reads
+the roster) and is not available with `config.existing` or
+`config.inline`.
 
 ### Ingress
 
