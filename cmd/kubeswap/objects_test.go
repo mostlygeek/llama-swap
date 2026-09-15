@@ -6,6 +6,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 // testConfig Returns a serveConfig with every rendered field group populated, for the rendering tests.
@@ -176,6 +177,70 @@ func TestKubeswap_RenderService(t *testing.T) {
 	}
 	if svc.Annotations[annotationModelID] != "author/model:tag" {
 		t.Errorf("annotation: %v", svc.Annotations)
+	}
+}
+
+// TestKubeswap_ServiceSpecMatches Verifies the Service comparison detects
+// selector and port drift (primary port, extra service ports, TargetPort)
+// while ignoring order and non-owned fields.
+func TestKubeswap_ServiceSpecMatches(t *testing.T) {
+	cfg := testConfig()
+	cfg.ServicePorts = []servicePortSpec{{Name: "metrics", Port: 9090}}
+	want := cfg.renderService()
+
+	// Identical specs match.
+	if !serviceSpecMatches(want, want) {
+		t.Error("identical services should match")
+	}
+
+	// Port order is irrelevant.
+	shuffled := want.DeepCopy()
+	shuffled.Spec.Ports = []corev1.ServicePort{shuffled.Spec.Ports[1], shuffled.Spec.Ports[0]}
+	if !serviceSpecMatches(shuffled, want) {
+		t.Error("port reordering should match")
+	}
+
+	// Primary port drift.
+	drifted := want.DeepCopy()
+	drifted.Spec.Ports[0].Port = 9999
+	if serviceSpecMatches(drifted, want) {
+		t.Error("primary port drift should not match")
+	}
+
+	// TargetPort drift.
+	drifted = want.DeepCopy()
+	drifted.Spec.Ports[0].TargetPort = intstr.FromInt32(1234)
+	if serviceSpecMatches(drifted, want) {
+		t.Error("target port drift should not match")
+	}
+
+	// An added service port is drift.
+	drifted = want.DeepCopy()
+	drifted.Spec.Ports = append(drifted.Spec.Ports, corev1.ServicePort{Name: "extra", Port: 8443, TargetPort: intstr.FromInt32(8443)})
+	if serviceSpecMatches(drifted, want) {
+		t.Error("added service port should not match")
+	}
+
+	// A removed service port is drift.
+	drifted = want.DeepCopy()
+	drifted.Spec.Ports = drifted.Spec.Ports[:1]
+	if serviceSpecMatches(drifted, want) {
+		t.Error("removed service port should not match")
+	}
+
+	// Selector drift.
+	drifted = want.DeepCopy()
+	drifted.Spec.Selector = map[string]string{labelModel: "someone-else"}
+	if serviceSpecMatches(drifted, want) {
+		t.Error("selector drift should not match")
+	}
+
+	// Nil handling.
+	if serviceSpecMatches(nil, want) || serviceSpecMatches(want, nil) {
+		t.Error("nil and non-nil services should not match")
+	}
+	if !serviceSpecMatches(nil, nil) {
+		t.Error("two nil services should match")
 	}
 }
 

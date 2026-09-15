@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
@@ -127,6 +128,61 @@ func TestKubeswap_EnsureResourcesStrictReplace(t *testing.T) {
 	}
 	if got.Spec.Template.Spec.Containers[0].Image != cfg.Image {
 		t.Errorf("image after replace: %s", got.Spec.Template.Spec.Containers[0].Image)
+	}
+}
+
+// TestKubeswap_EnsureResourcesUpdatesDriftedService Verifies a Service whose
+// selector or ports drifted (a changed --port or --service-port) is updated
+// in place, keeping its identity, while an unchanged Service is left alone.
+func TestKubeswap_EnsureResourcesUpdatesDriftedService(t *testing.T) {
+	client := newFakeClient()
+	cfg := testConfig()
+	if _, err := ensureResources(client, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	svc, err := client.CoreV1().Services(cfg.Namespace).Get(ctx, cfg.SvcName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uid := svc.UID
+	sameVersion := svc.ResourceVersion
+
+	// Unchanged Service: no update (resourceVersion stays).
+	if _, err := ensureResources(client, cfg); err != nil {
+		t.Fatal(err)
+	}
+	svc, _ = client.CoreV1().Services(cfg.Namespace).Get(ctx, cfg.SvcName, metav1.GetOptions{})
+	if svc.ResourceVersion != sameVersion {
+		t.Error("unchanged service should not be updated")
+	}
+
+	// Simulate a changed --port: the old Service still points at the old
+	// port/selector. ensureResources must adopt the desired spec.
+	cfg.Port = 9090
+	svc.Spec.Ports = []corev1.ServicePort{{Name: "http", Port: 8080, TargetPort: intstr.FromInt32(8080)}}
+	if _, err := client.CoreV1().Services(cfg.Namespace).Update(ctx, svc, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := ensureResources(client, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Adopted || len(res.Created) != 0 {
+		t.Errorf("drifted service should be updated in place, not recreated: %+v", res)
+	}
+
+	svc, _ = client.CoreV1().Services(cfg.Namespace).Get(ctx, cfg.SvcName, metav1.GetOptions{})
+	if len(svc.Spec.Ports) != 1 || svc.Spec.Ports[0].Port != 9090 || svc.Spec.Ports[0].TargetPort.IntValue() != 9090 {
+		t.Errorf("ports after update: %v", svc.Spec.Ports)
+	}
+	if svc.UID != uid {
+		t.Error("update must keep the Service UID")
+	}
+	if svc.Annotations[annotationModelID] != cfg.Model {
+		t.Errorf("annotations after update: %v", svc.Annotations)
 	}
 }
 

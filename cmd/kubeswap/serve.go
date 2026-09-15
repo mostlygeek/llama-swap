@@ -174,6 +174,19 @@ func ensureResources(client kubernetes.Interface, cfg *serveConfig) (*ensureResu
 		if err := verifyOwnership(svc, cfg.Model); err != nil {
 			return nil, fmt.Errorf("adopting service %s/%s: %w", cfg.Namespace, svcName, err)
 		}
+		// A changed --port or --service-port drifts the selector or ports
+		// away from renderService; adopt the desired spec in place. Update
+		// (not replace) keeps the Service identity — ClusterIP, UID and
+		// annotations — so in-cluster consumers that pin the address keep
+		// working.
+		if want := cfg.renderService(); !serviceSpecMatches(svc, want) {
+			log.Printf("service %s/%s exists but spec drifted (selector/ports); updating", cfg.Namespace, svcName)
+			svc.Spec.Selector = want.Spec.Selector
+			svc.Spec.Ports = want.Spec.Ports
+			if _, err := client.CoreV1().Services(cfg.Namespace).Update(ctx, svc, metav1.UpdateOptions{}); err != nil && !apierrors.IsNotFound(err) {
+				return nil, fmt.Errorf("updating service %s: %w", svcName, err)
+			}
+		}
 	default:
 		return nil, fmt.Errorf("getting service %s: %w", svcName, err)
 	}

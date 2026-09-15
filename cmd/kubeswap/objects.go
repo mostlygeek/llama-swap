@@ -575,6 +575,49 @@ func portsEqual(a, b []corev1.ContainerPort) bool {
 	return true
 }
 
+// serviceSpecMatches reports whether an existing Service's
+// configuration-owned fields — the pod selector and the port list, primary
+// http port plus every --service-port entry — match the desired one. The
+// other Service fields (ClusterIP, session affinity, ...) are either
+// cluster-assigned or not set by kubeswap, so they are not compared.
+func serviceSpecMatches(have, want *corev1.Service) bool {
+	if have == nil || want == nil {
+		return have == want
+	}
+	if !stringMapEqual(have.Spec.Selector, want.Spec.Selector) {
+		return false
+	}
+	return servicePortsEqual(have.Spec.Ports, want.Spec.Ports)
+}
+
+// servicePortsEqual compares service ports by name (order-insensitive),
+// matching Port and TargetPort; a name missing from b is not compared
+// against zero values.
+func servicePortsEqual(a, b []corev1.ServicePort) bool {
+	type portKey struct {
+		port       int32
+		targetPort intstr.IntOrString
+	}
+	byName := func(ports []corev1.ServicePort) map[string]portKey {
+		m := make(map[string]portKey, len(ports))
+		for _, p := range ports {
+			m[p.Name] = portKey{p.Port, p.TargetPort}
+		}
+		return m
+	}
+	ma, mb := byName(a), byName(b)
+	if len(ma) != len(mb) {
+		return false
+	}
+	for k, v := range ma {
+		bv, ok := mb[k]
+		if !ok || bv != v {
+			return false
+		}
+	}
+	return true
+}
+
 // mountsEqual compares volume mounts by name (order-insensitive; a name
 // missing from b is not compared against an empty mount path).
 func mountsEqual(a, b []corev1.VolumeMount) bool {
