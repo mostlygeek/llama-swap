@@ -28,9 +28,15 @@ spec:
             the annotation makes drift visible as a rollout. Skipped for
             config.existing — the chart cannot hash a ConfigMap it does
             not render. */}}
-      {{- $annotations := .Values.podAnnotations | default dict }}
+      {{- /* deepCopy: merge mutates its first argument, so without a
+            copy the generated checksum would be injected into
+            .Values.podAnnotations itself; mergeOverwrite then lets the
+            generated checksum/config win over any user-supplied value
+            (a stale user value would hide config drift) while leaving
+            the original values untouched. */}}
+      {{- $annotations := deepCopy (.Values.podAnnotations | default dict) }}
       {{- if not .Values.config.existing }}
-      {{- $annotations = merge $annotations (dict "checksum/config" (include (print $.Template.BasePath "/configmap.yaml") . | sha256sum)) }}
+      {{- $annotations = mergeOverwrite $annotations (dict "checksum/config" (include (print $.Template.BasePath "/configmap.yaml") . | sha256sum)) }}
       {{- end }}
       {{- with $annotations }}
       annotations:
