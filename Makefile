@@ -43,8 +43,10 @@ test-chart:
 	@helm template llama-swap cmd/kubeswap/chart -n llama-swap > /dev/null \
 		&& echo "chart: default (inline demo) render OK"
 	@for f in cmd/kubeswap/chart/test-values/*.yaml; do \
-		helm template llama-swap cmd/kubeswap/chart -n llama-swap -f $$f > /dev/null \
-			&& echo "chart: render OK: $$f"; \
+		if ! helm template llama-swap cmd/kubeswap/chart -n llama-swap -f $$f > /dev/null; then \
+			echo "chart: render FAILED: $$f"; exit 1; \
+		fi; \
+		echo "chart: render OK: $$f"; \
 	done
 	@for f in cmd/kubeswap/chart/test-values-invalid/*.yaml; do \
 		if helm template llama-swap cmd/kubeswap/chart -n llama-swap -f $$f > /dev/null 2>&1; then \
