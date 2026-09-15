@@ -388,7 +388,12 @@ func statusOnce(ctx context.Context, client kubernetes.Interface, namespace stri
 		}
 	}
 
-	fmt.Printf("%-32s %-28s %-24s %-8s %-10s %s\n", "MODEL", "DEPLOYMENT", "POD", "READY", "AGE", "REASON")
+	// Column widths adapt to the content: model IDs and the
+	// hash-suffixed deployment/pod names can run to 60+ characters and
+	// are printed in full (REASON stays a bounded summary; the full
+	// text is one `kubeswap logs` away).
+	type statusRow struct{ model, dep, pod, ready, age, reason string }
+	rows := make([]statusRow, 0, len(deps.Items))
 	for i := range deps.Items {
 		dep := &deps.Items[i]
 		model := dep.Annotations[annotationModelID]
@@ -410,8 +415,34 @@ func statusOnce(ctx context.Context, client kubernetes.Interface, namespace stri
 				reason = podReason(pod)
 			}
 		}
-		fmt.Printf("%-32s %-28s %-24s %-8s %-10s %s\n",
-			truncate(model, 32), truncate(dep.Name, 28), truncate(podName, 24), ready, age, reason)
+		rows = append(rows, statusRow{model, dep.Name, podName, ready, age, reason})
+	}
+
+	headers := []string{"MODEL", "DEPLOYMENT", "POD", "READY", "AGE", "REASON"}
+	widths := make([]int, len(headers))
+	for i, h := range headers {
+		widths[i] = len(h)
+	}
+	for _, r := range rows {
+		vals := []string{r.model, r.dep, r.pod, r.ready, r.age, r.reason}
+		for i, v := range vals {
+			if len(v) > widths[i] {
+				widths[i] = len(v)
+			}
+		}
+	}
+	printRow := func(vals ...string) {
+		for i, v := range vals {
+			if i < len(vals)-1 {
+				fmt.Printf("%-*s ", widths[i], v)
+			} else {
+				fmt.Printf("%s\n", v)
+			}
+		}
+	}
+	printRow(headers...)
+	for _, r := range rows {
+		printRow(r.model, r.dep, r.pod, r.ready, r.age, r.reason)
 	}
 	return nil
 }
