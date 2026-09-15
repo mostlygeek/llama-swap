@@ -68,7 +68,7 @@ works inside model commands (it is how the default config keeps
 | `serviceAccount.name` | fullname | |
 | `serviceAccount.annotations` | `{}` | e.g. workload-identity |
 | `rbac.create` | `true` | namespaced Role + RoleBinding for kubeswap |
-| `rbac.rules` | (kubeswap minimum) | deployments/services CRUD, PVC get/create/delete, pods get/list/watch, pods/log |
+| `rbac.rules` | (kubeswap minimum) | deployments/services CRUD, PVC get/create/delete, pods get/list, pods/log |
 | `service.type` | `ClusterIP` | `LoadBalancer` / `NodePort` work unchanged |
 | `service.port` | `8080` | |
 | `service.annotations` | `{}` | |
@@ -177,6 +177,11 @@ Kubeswap fields consumed by the chart: `id` (required), `image`,
 `checkPath`, `args` (backend command line after `--`), `proxy`,
 `cmdStop`. Every other key renders verbatim as a llama-swap model field
 (`name`, `ttl`, `capabilities`, `macros`, `filters`, `aliases`, ...).
+
+`args` is rendered verbatim and is **not** Go-templated (unlike
+`config.top`, `proxy`, `extraFiles` and the other model fields), so
+literal `{{ }}` in backend arguments is safe; everything else in the
+rendered config is templated.
 
 ```yaml
 config:

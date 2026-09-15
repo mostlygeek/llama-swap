@@ -104,6 +104,8 @@ config:
   #             Every other key is rendered verbatim as a llama-swap model
   #             field (name, ttl, capabilities, macros, filters, aliases,
   #             unlisted, ...).
+  #             args is rendered verbatim and is NOT Go-templated (unlike
+  #             top/proxy/extraFiles): literal {{ }} in backend args is safe.
   #             A key present on a model entry overrides the matching
   #             defaults entry, including with an empty list (e.g. gpu: []
   #             for a CPU-only model).
@@ -197,7 +199,7 @@ rbac:
       verbs: [get, create, delete]
     - apiGroups: [""]
       resources: [pods]
-      verbs: [get, list, watch]
+      verbs: [get, list]
     - apiGroups: [""]
       resources: [pods/log]
       verbs: [get, list]
