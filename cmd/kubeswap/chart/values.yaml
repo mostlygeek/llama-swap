@@ -116,6 +116,56 @@ config:
   top: {}
   defaults: {}
   models: []
+  # ---------------------------------------------------------------------------
+  # Matrix router builder (alternative to a hand-written routing section).
+  # ---------------------------------------------------------------------------
+  # When non-empty, generates the routing: section from the models roster,
+  # so the matrix DSL is never written by hand. Requires models (not
+  # available with inline or existing), and top must not also define
+  # routing (rendering fails). Pool membership for gpu-budget comes from
+  # each model's merged gpu list: a non-empty list (the usual defaults.gpu)
+  # is a GPU model, gpu: [] is a CPU model (unlimited, never counted
+  # against the budget). The README's 'Matrix router builder' section has
+  # the full reference.
+  #
+  #   builder: gpu-budget  any N of the GPU models may run (budget: N);
+  #                        CPU models unlimited
+  #   builder: pools       any number of named pools, each with its own
+  #                        budget (omit for a pool whose members all
+  #                        coexist); every model entry needs a pool: key
+  #   builder: manual      renders vars/evict_costs/sets verbatim — the
+  #                        escape hatch, identical to a hand-written
+  #                        matrix under top.routing
+  #
+  # Worked examples of both forms (for a models roster of lfm25-230m,
+  # krea2-turbo and ideogram4 on the GPU, distil-whisper-lgv3 and
+  # qwen3-tts-06b with gpu: []):
+  #
+  #   # Matrix builder: at most one GPU model at a time, both CPU models
+  #   # always, image models evicted last (expensive to reload).
+  #   matrix:
+  #     builder: gpu-budget
+  #     budget: 1
+  #     evict_costs:
+  #       krea2-turbo: 10
+  #       ideogram4: 10
+  #     exclusive: []
+  #
+  #   # No builder: the same routing hand-written under top.routing
+  #   # (or the same block under matrix: { builder: manual, manual: ... }).
+  #   top:
+  #     routing:
+  #       router:
+  #         use: matrix
+  #         settings:
+  #           matrix:
+  #             evict_costs:
+  #               krea2-turbo: 10
+  #               ideogram4: 10
+  #             sets:
+  #               gpu: (lfm25-230m | krea2-turbo | ideogram4)
+  #               all: "+gpu & distil-whisper-lgv3 & qwen3-tts-06b"
+  matrix: {}
   # Name of an existing ConfigMap with a config.yaml key. When set, the
   # chart renders no ConfigMap of its own and mounts this one.
   existing: ""
