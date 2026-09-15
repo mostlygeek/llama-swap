@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
+	content "k8s.io/apimachinery/pkg/api/validate/content"
 	kvalidation "k8s.io/apimachinery/pkg/util/validation"
 )
 
@@ -186,80 +187,23 @@ type envVar struct {
 	Value string
 }
 
-// validDNSLabel reports whether s is a lowercase RFC 1123 label.
-func validDNSLabel(s string) bool {
-	if s == "" || len(s) > 63 {
-		return false
-	}
-	for i, c := range s {
-		switch {
-		case c >= 'a' && c <= 'z', c >= '0' && c <= '9':
-		case c == '-' && i != 0 && i != len(s)-1:
-		default:
-			return false
-		}
-	}
-	return true
-}
-
-// validLabelKey reports whether s is a valid Kubernetes label key: an
-// optional DNS-subdomain prefix (lowercase), a /, and a name — the same
-// rule the API server applies.
-func validLabelKey(s string) bool {
-	name := s
-	if i := strings.LastIndex(s, "/"); i >= 0 {
-		prefix, rest := s[:i], s[i+1:]
-		if len(prefix) == 0 || len(prefix) > 253 {
-			return false
-		}
-		for _, seg := range strings.Split(prefix, ".") {
-			if !validDNSLabel(seg) {
-				return false
-			}
-		}
-		name = rest
-	}
-	return validQualifiedNameName(name)
-}
-
-// validQualifiedNameName reports whether s is a valid label-key name part:
-// 1-63 characters, beginning and ending with an alphanumeric, with only
-// [A-Za-z0-9_.-] in between. Wider than a DNS label — Kubernetes label and
-// node-selector key names may carry uppercase, underscores and periods
-// (e.g. "My_Key"), and the API server accepts them.
-func validQualifiedNameName(s string) bool {
-	if s == "" || len(s) > 63 {
-		return false
-	}
-	if !isAlnum(s[0]) || !isAlnum(s[len(s)-1]) {
-		return false
-	}
-	for _, c := range s {
-		if isAlnumRune(c) || c == '_' || c == '.' || c == '-' {
-			continue
-		}
-		return false
-	}
-	return true
-}
-
-// isAlnum reports whether c is an ASCII letter or digit.
-func isAlnum(c byte) bool { return isAlnumRune(rune(c)) }
-
-// isAlnumRune reports whether c is an ASCII letter or digit.
-func isAlnumRune(c rune) bool {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
-}
-
-// parseKeyValues parses repeated "K=V" entries (values may contain '='),
-// validating K as a Kubernetes label key so bad keys fail at flag parse
-// instead of at Deployment creation.
+// parseKeyValues parses repeated "K=V" entries, validating K and V with
+// the API server's own label rules (content.IsLabelKey / IsLabelValue)
+// so bad entries fail at flag parse instead of at Deployment creation.
+// Values are label values: no '=', so a K=V with '=' in the value is
+// rejected here (env vars use parseEnvVars, whose values are free-form).
 func parseKeyValues(entries []string, what string) (map[string]string, error) {
 	out := map[string]string{}
 	for _, e := range entries {
 		k, v, ok := strings.Cut(e, "=")
-		if !ok || !validLabelKey(k) {
-			return nil, fmt.Errorf("invalid --%s %q (key must be a valid label key: optional lowercase subdomain prefix, then a name of up to 63 characters that starts and ends with an alphanumeric)", what, e)
+		if !ok {
+			return nil, fmt.Errorf("invalid --%s %q (want key=value)", what, e)
+		}
+		if errs := content.IsLabelKey(k); len(errs) > 0 {
+			return nil, fmt.Errorf("invalid --%s key %q: %v", what, k, errs)
+		}
+		if errs := content.IsLabelValue(v); len(errs) > 0 {
+			return nil, fmt.Errorf("invalid --%s value %q for key %q: %v", what, v, k, errs)
 		}
 		out[k] = v
 	}
@@ -353,6 +297,13 @@ func parseTolerations(entries []string) ([]toleration, error) {
 		key, op, value, effect := parts[0], parts[1], parts[2], parts[3]
 		if op == "" {
 			op = "Equal"
+		}
+		// A toleration value is a label value (only reachable with
+		// operator Equal; Exists requires an empty value below).
+		if value != "" {
+			if errs := content.IsLabelValue(value); len(errs) > 0 {
+				return nil, fmt.Errorf("invalid --toleration %q: value %q: %v", e, value, errs)
+			}
 		}
 		switch op {
 		case "Equal", "Exists":

@@ -127,12 +127,29 @@ func TestKubeswap_ParseVolumes(t *testing.T) {
 
 // TestKubeswap_ParseKeyValues Verifies K=V parsing, including values that contain '='.
 func TestKubeswap_ParseKeyValues(t *testing.T) {
-	got, err := parseKeyValues([]string{"k1=v1", "k2=a=b"}, "x")
+	got, err := parseKeyValues([]string{"k1=v1"}, "x")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got["k1"] != "v1" || got["k2"] != "a=b" {
+	if got["k1"] != "v1" {
 		t.Errorf("got %v", got)
+	}
+	// Values are label values: no '=', no spaces, max 63 characters.
+	// (Env var values are free-form; --env uses parseEnvVars.)
+	for _, bad := range []string{
+		"k2=a=b",                       // '=' in the value
+		"k=BAD VALUE",                  // space
+		"k=" + strings.Repeat("v", 64), // 64 characters
+		"k=-lead", "k=trail-",          // must start/end alphanumeric
+		"k=a/b", // '/' is not a label-value character
+	} {
+		if _, err := parseKeyValues([]string{bad}, "label"); err == nil {
+			t.Errorf("expected error for label value %q", bad)
+		}
+	}
+	// An empty value is a valid label value.
+	if _, err := parseKeyValues([]string{"k="}, "label"); err != nil {
+		t.Errorf("empty label value should be valid: %v", err)
 	}
 	// A prefixed key is valid label-key form.
 	if _, err := parseKeyValues([]string{"feature.node.kubernetes.io/amd-gpu=v"}, "node-selector"); err != nil {
@@ -155,6 +172,22 @@ func TestKubeswap_ParseKeyValues(t *testing.T) {
 	} {
 		if _, err := parseKeyValues([]string{bad}, "label"); err == nil {
 			t.Errorf("expected error for label key %q", bad)
+		}
+	}
+}
+
+// TestKubeswap_ParseTolerationValueIsLabelValue verifies a toleration value
+// is checked with the API server's label-value rule at parse time.
+func TestKubeswap_ParseTolerationValueIsLabelValue(t *testing.T) {
+	if _, err := parseTolerations([]string{"gpu:Exists::", "dedicated:Equal:gpu-only:NoSchedule"}); err != nil {
+		t.Errorf("valid tolerations rejected: %v", err)
+	}
+	for _, bad := range []string{
+		"dedicated:Equal:bad value:NoSchedule", // space
+		"dedicated:Equal:-lead:NoSchedule",     // must start alphanumeric
+	} {
+		if _, err := parseTolerations([]string{bad}); err == nil {
+			t.Errorf("expected error for toleration %q", bad)
 		}
 	}
 }
