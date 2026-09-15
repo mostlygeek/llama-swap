@@ -3,7 +3,7 @@ title: Running inference servers in Kubernetes with kubeswap
 summary: Use the kubeswap wrapper as cmd/cmdStop so llama-swap starts and stops backend servers as Kubernetes workloads in a dedicated namespace.
 category: guides
 tags: [kubernetes, kubeswap, deployment, k8s, operator, pod, namespace, pvc, gpu, multi-backend, sd-server, whisper-server, audiocpp_server]
-config_keys: [models.*.cmd, models.*.cmdStop, models.*.proxy, models.*.checkEndpoint, models.*.capabilities, healthCheckTimeout, unloadTimeout]
+config_keys: [models.*.cmd, models.*.cmdStop, models.*.proxy, models.*.checkEndpoint, models.*.capabilities, healthCheckTimeout, unloadTimeout, routing]
 updated: 2026-09-14
 ---
 
@@ -180,6 +180,75 @@ values table in the chart README):
 The default values need no PVC at all: one tiny model that llama-server
 pulls from Hugging Face into a per-pod emptyDir. A complete multi-engine
 `config.inline` is in the examples article below.
+
+The head-end pod also carries a `checksum/config` annotation over the
+rendered ConfigMap: the pod already hot-reloads via `-watch-config`, but a
+failed reload only logs a warning and keeps serving the old config, so the
+annotation makes config drift visible as a rollout.
+
+### Matrix router builder
+
+For a model fleet, `config.matrix` generates the llama-swap `routing`
+section from the `config.models` roster, so the matrix DSL is never written
+by hand. It replaces a `routing:` block under `config.top` (defining both
+fails rendering) and requires `config.models` — it is not available with
+`config.inline` or `config.existing`. The groups-and-matrix article covers
+how the generated router behaves; this section covers what the builder
+generates.
+
+Pool membership comes from each model's `gpu` list, so the same flags that
+size the pod decide the routing pool: a model with a non-empty merged `gpu`
+list (the usual `defaults.gpu`) is a **GPU model**; `gpu: []` marks a model
+**CPU-only**, which runs on any node and never counts against the GPU
+budget.
+
+```yaml
+config:
+  matrix:
+    builder: gpu-budget        # gpu-budget | pools | manual
+    budget: 1                  # how many GPU models may run at once
+    evict_costs:               # optional: model id -> cost (default 1); a
+      krea2-turbo: 10           # high cost makes the router evict other
+      ideogram4: 10             # models first
+    exclusive: []              # optional: models that run alone, outside the budget
+```
+
+**`gpu-budget`** renders "any *N* of the GPU models may run; CPU models are
+unlimited":
+
+```yaml
+routing:
+  router:
+    use: matrix
+    settings:
+      matrix:
+        sets:
+          gpu_pool: (lfm25-230m | krea2-turbo | ideogram4)
+          cpu_pool: (distil-whisper-lgv3 & qwen3-tts-06b)
+          all: +gpu_pool & +cpu_pool
+```
+
+Each `+gpu_pool` is one slot, so `budget: 1` allows exactly one GPU model at
+a time plus every CPU model. The budget is a hard cap — a set never contains
+more than *N* GPU models, CPU models are never evicted to make room for GPU
+ones — and every model lands in a pool automatically (a model in no set can
+only run alone).
+
+**`pools`** generalizes that to any number of named pools, each with its own
+per-pool `budget` (omit it for a pool whose members all coexist); every model
+entry then needs a `pool:` key. It covers category spreads like "1 big LLM,
+1 TTS, up to 2 image models" — one pool per category. Fine-grained
+displacement rules *between* pools are beyond the builder.
+
+**`manual`** is the escape hatch: it renders `vars`/`evict_costs`/`sets`
+verbatim, exactly as you would write them under `config.top.routing`.
+
+`exclusive:` models are left out of the generated pools and get their own
+single-member set, so they evict everything and are evicted by everything.
+Model ids used by the generated builders must match the matrix identifier
+charset (`[A-Za-z0-9._-]`); anything else fails rendering with a message
+instead of breaking the router at runtime. The full values table, including
+the `pools` and `manual` shapes, is in the chart README.
 
 <!-- TODO: once the chart is published to a Helm repo / OCI registry, this
      becomes `helm repo add llama-swap <repo-url>` +

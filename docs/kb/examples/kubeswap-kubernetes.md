@@ -4,7 +4,7 @@ summary: A verified llama-swap config that runs llama-server, sd-server, whisper
 category: examples
 tags: [kubeswap, kubernetes, multi-backend, sd-server, whisper-server, audiocpp_server, llama-server, pvc, gpu, exclusive-group, helm]
 config_keys: [models.*.cmd, models.*.cmdStop, models.*.proxy, models.*.capabilities, healthCheckTimeout, unloadTimeout, routing]
-updated: 2026-09-12
+updated: 2026-09-14
 ---
 
 # kubeswap: a complete multi-engine Kubernetes configuration
@@ -389,6 +389,63 @@ helm install llama-swap ./cmd/kubeswap/chart \
   -n llama-swap --create-namespace \
   -f values.yaml
 ```
+
+## The same fleet with matrix routing
+
+The group routing above says "these run together, those swap". The matrix
+router instead enumerates the combinations that may run together and evicts
+the cheapest way to serve each request (the groups-and-matrix article covers
+how the solver works). For this fleet the matrix view is: *at most one GPU
+model at a time, both audio models always*. There are two ways to write it.
+
+### Hand-written (no builder)
+
+Put the matrix under `config.top.routing`, exactly as you would in a plain
+`config.yaml` (or in `config.matrix.manual`, below). In the values above,
+replace the `routing:` block under `config.top` with:
+
+```yaml
+    routing:
+      router:
+        use: matrix
+        settings:
+          matrix:
+            evict_costs:
+              krea2-turbo: 10     # image models load 10-16GB of weights -
+              ideogram4: 10       # the router evicts them last
+            sets:
+              gpu: (lfm25-230m | krea2-turbo | ideogram4)
+              all: "+gpu & distil-whisper-lgv3 & qwen3-tts-06b"
+```
+
+Any one of the three GPU models, plus both CPU models. Requesting a second
+GPU model evicts the cheapest running one (`evict_costs` breaks the tie;
+default 1).
+
+### Matrix builder
+
+`config.matrix` renders the same routing from the model roster, using each
+model's `gpu` flag for pool membership — the defaults give the three GPU
+models `amd.com/gpu=1`, and the two audio models set `gpu: []`. Delete the
+`routing:` block from `config.top` (the two are mutually exclusive) and add:
+
+```yaml
+  matrix:
+    builder: gpu-budget
+    budget: 1
+    evict_costs:
+      krea2-turbo: 10
+      ideogram4: 10
+```
+
+which renders the `routing` section above: `gpu_pool` from the three `gpu`
+models, `cpu_pool` from the two `gpu: []` models, and one `+gpu_pool` slot
+for `budget: 1`. The builder exists so a large fleet (dozens of models,
+mostly sharing the same pool shape) stays a few lines; for a small fleet
+like this one, the hand-written matrix is about the same length and gives
+you full DSL control. Other builder shapes (`pools` for per-category
+budgets, `manual` for a verbatim pass-through) and the `exclusive:` option
+are documented in the kubeswap-kubernetes article and the chart README.
 
 ## Talking to it
 
