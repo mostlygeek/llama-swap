@@ -36,7 +36,7 @@ type Server struct {
 	perf     *perf.Monitor
 	inflight *inflightTracker
 	metrics  *metricsMonitor
-	store    *store.Store
+	store    store.Store
 	build    BuildInfo
 	hardware *hw.HardwareSnapshot
 
@@ -193,7 +193,7 @@ type BuildInfo struct {
 	Date    string
 }
 
-func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, upstreamlog *logmon.Monitor, perfMon *perf.Monitor, st *store.Store, build BuildInfo, hardware *hw.HardwareSnapshot, refs *docagent.Docs) (*Server, error) {
+func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, upstreamlog *logmon.Monitor, perfMon *perf.Monitor, st store.Store, build BuildInfo, hardware *hw.HardwareSnapshot, refs *docagent.Docs) (*Server, error) {
 	var local router.LocalRouter
 	var err error
 

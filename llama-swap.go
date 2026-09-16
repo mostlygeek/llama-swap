@@ -27,7 +27,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/server"
-	"github.com/mostlygeek/llama-swap/internal/store"
+	"github.com/mostlygeek/llama-swap/internal/store/sqlite"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 	"github.com/mostlygeek/llama-swap/internal/tailcat"
 	"github.com/mostlygeek/llama-swap/internal/watcher"
@@ -234,7 +234,7 @@ func main() {
 	referenceDocs := docagent.NewWithSchema(docs.Files, docsConfigSchema)
 
 	initialStorePath := configStorePath(cfg)
-	initialStore, err := store.New(initialStorePath)
+	initialStore, err := sqlite.New(initialStorePath)
 	if err != nil {
 		slog.Error("failed to create store", "error", err)
 		os.Exit(1)
@@ -339,7 +339,7 @@ func main() {
 		newStore := currentStore
 		storeChanged := newStorePath != currentStorePath
 		if storeChanged {
-			newStore, err = store.New(newStorePath)
+			newStore, err = sqlite.New(newStorePath)
 			if err != nil {
 				proxyLog.Warnf("failed to create new store during reload: %v", err)
 				return
