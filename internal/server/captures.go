@@ -3,8 +3,8 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"runtime"
 	"strings"
-	"sync"
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/klauspost/compress/zstd"
@@ -57,25 +57,50 @@ func captureFieldsFor(path string) captureFields {
 	return captureAll
 }
 
-// zstdEncOptions are the shared zstd encoder options for maximum compression.
+// zstdConcurrency bounds how many captures compress (or decompress) at once.
+// Each in-flight EncodeAll holds one sub-encoder, so this is also the number
+// of sub-encoders the shared encoder allocates.
+var zstdConcurrency = max(1, min(runtime.GOMAXPROCS(0), 4))
+
+// zstdEncOptions are the shared zstd encoder options.
+//
+// Memory retained by a sub-encoder is dominated by its match tables (~4 MiB at
+// SpeedBetterCompression) and a history buffer of twice the window size. The
+// library defaults create GOMAXPROCS sub-encoders with an 8 MiB window, so a
+// single encoder retained ~20 MiB per core once every sub-encoder had been
+// used (#1106). Captures are mostly JSON bodies of a few MB at most, which a
+// 1 MiB window compresses just as well.
 var zstdEncOptions = []zstd.EOption{
 	zstd.WithEncoderLevel(zstd.SpeedBetterCompression),
+	zstd.WithEncoderConcurrency(zstdConcurrency),
+	zstd.WithWindowSize(1 << 20),
 }
 
-// zstdEncPool pools zstd.Encoder instances to reduce allocations.
-var zstdEncPool = &sync.Pool{
-	New: func() interface{} {
-		enc, _ := zstd.NewWriter(nil, zstdEncOptions...)
-		return enc
-	},
+// zstdEnc is the shared capture encoder. EncodeAll is safe for concurrent use
+// and blocks while every sub-encoder is busy, which caps compression memory
+// at zstdConcurrency sub-encoders (~6 MiB each) regardless of how many
+// requests finish at once. A sync.Pool of encoders instead grew to one
+// encoder per peak concurrent request and held them until the GC drained it.
+var zstdEnc = mustZstdEncoder()
+
+// zstdDec is the shared capture decoder. DecodeAll is safe for concurrent use
+// and bounded by the decoder concurrency the same way.
+var zstdDec = mustZstdDecoder()
+
+func mustZstdEncoder() *zstd.Encoder {
+	enc, err := zstd.NewWriter(nil, zstdEncOptions...)
+	if err != nil {
+		panic(fmt.Sprintf("capture zstd encoder: %v", err))
+	}
+	return enc
 }
 
-// zstdDecPool pools zstd.Decoder instances to reduce allocations.
-var zstdDecPool = &sync.Pool{
-	New: func() interface{} {
-		dec, _ := zstd.NewReader(nil)
-		return dec
-	},
+func mustZstdDecoder() *zstd.Decoder {
+	dec, err := zstd.NewReader(nil, zstd.WithDecoderConcurrency(zstdConcurrency))
+	if err != nil {
+		panic(fmt.Sprintf("capture zstd decoder: %v", err))
+	}
+	return dec
 }
 
 // compressCapture marshals a ReqRespCapture to CBOR and compresses it with zstd.
@@ -85,16 +110,12 @@ func compressCapture(c *ReqRespCapture) ([]byte, int, error) {
 	if err != nil {
 		return nil, 0, fmt.Errorf("marshal capture: %w", err)
 	}
-	zenc := zstdEncPool.Get().(*zstd.Encoder)
-	defer zstdEncPool.Put(zenc)
-	return zenc.EncodeAll(cborBytes, nil), len(cborBytes), nil
+	return zstdEnc.EncodeAll(cborBytes, nil), len(cborBytes), nil
 }
 
 // decompressCapture decompresses zstd-compressed CBOR into a ReqRespCapture.
 func decompressCapture(data []byte) (*ReqRespCapture, error) {
-	dec := zstdDecPool.Get().(*zstd.Decoder)
-	defer zstdDecPool.Put(dec)
-	cborBytes, err := dec.DecodeAll(data, nil)
+	cborBytes, err := zstdDec.DecodeAll(data, nil)
 	if err != nil {
 		return nil, fmt.Errorf("decompress capture: %w", err)
 	}
