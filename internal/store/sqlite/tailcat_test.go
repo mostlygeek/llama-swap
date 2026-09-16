@@ -1,9 +1,11 @@
-package store
+package sqlite
 
 import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/mostlygeek/llama-swap/internal/store"
 )
 
 func TestStore_ActivitySourcePrefixSortAndLegacyDefault(t *testing.T) {
@@ -14,7 +16,7 @@ func TestStore_ActivitySourcePrefixSortAndLegacyDefault(t *testing.T) {
 	defer st.Close()
 	ctx := context.Background()
 	for i, source := range []string{"ip:127.0.0.1:10", "tc:nodekey:bbb", "tc:nodekey:aaa", "tc:%_literal"} {
-		if _, err := st.InsertActivity(ctx, ActivityLogEntry{Timestamp: time.Unix(int64(i+1), 0), Src: source, Model: "m"}); err != nil {
+		if _, err := st.Activity().Insert(ctx, store.ActivityLogEntry{Timestamp: time.Unix(int64(i+1), 0), Src: source, Model: "m"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -22,18 +24,18 @@ func TestStore_ActivitySourcePrefixSortAndLegacyDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	page, err := st.ListActivity(ctx, ActivityQuery{ActivityFilter: ActivityFilter{SrcPrefix: "tc:"}, Limit: 10, Page: 1, Sort: "src", Order: "asc"})
+	page, err := st.Activity().List(ctx, store.ActivityQuery{ActivityFilter: store.ActivityFilter{SrcPrefix: "tc:"}, Limit: 10, Page: 1, Sort: "src", Order: "asc"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if page.Total != 3 || page.Data[0].Src != "tc:%_literal" || page.Data[2].Src != "tc:nodekey:bbb" {
 		t.Fatalf("source page = %+v", page)
 	}
-	literal, err := st.ListActivity(ctx, ActivityQuery{ActivityFilter: ActivityFilter{SrcPrefix: "tc:%_"}, Limit: 10, Page: 1})
+	literal, err := st.Activity().List(ctx, store.ActivityQuery{ActivityFilter: store.ActivityFilter{SrcPrefix: "tc:%_"}, Limit: 10, Page: 1})
 	if err != nil || literal.Total != 1 {
 		t.Fatalf("literal metacharacter prefix = %+v, %v", literal, err)
 	}
-	legacy, err := st.ListActivity(ctx, ActivityQuery{ActivityFilter: ActivityFilter{Models: []string{"legacy"}}, Limit: 10, Page: 1})
+	legacy, err := st.Activity().List(ctx, store.ActivityQuery{ActivityFilter: store.ActivityFilter{Models: []string{"legacy"}}, Limit: 10, Page: 1})
 	if err != nil || len(legacy.Data) != 1 || legacy.Data[0].Src != "" {
 		t.Fatalf("legacy source = %+v, %v", legacy, err)
 	}

@@ -20,6 +20,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/router"
 	"github.com/mostlygeek/llama-swap/internal/store"
+	"github.com/mostlygeek/llama-swap/internal/store/sqlite"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
@@ -80,7 +81,7 @@ func newTestServer(local router.LocalRouter, peer router.Router) *Server {
 func newTestServerWithConfig(cfg config.Config, local router.LocalRouter, peer router.Router) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	proxylog := logmon.NewWriter(io.Discard)
-	st, err := store.New("")
+	st, err := sqlite.New("")
 	if err != nil {
 		panic(err)
 	}
@@ -125,9 +126,9 @@ var testClock = time.Date(2026, 3, 14, 15, 9, 26, 0, time.UTC)
 
 func newTestMetricsMonitor(t *testing.T, logger *logmon.Monitor, maxMetrics int, captureBufferMB int) *metricsMonitor {
 	t.Helper()
-	st, err := store.New("")
+	st, err := sqlite.New("")
 	if err != nil {
-		t.Fatalf("store.New: %v", err)
+		t.Fatalf("sqlite.New: %v", err)
 	}
 	t.Cleanup(func() {
 		if err := st.Close(); err != nil {
@@ -139,7 +140,7 @@ func newTestMetricsMonitor(t *testing.T, logger *logmon.Monitor, maxMetrics int,
 
 func metricsEntries(t *testing.T, mm *metricsMonitor) []ActivityLogEntry {
 	t.Helper()
-	page, err := mm.store.ListActivity(context.Background(), store.ActivityQuery{Limit: 1000, Page: 1})
+	page, err := mm.store.Activity().List(context.Background(), store.ActivityQuery{Limit: 1000, Page: 1})
 	if err != nil {
 		t.Fatalf("ListActivity: %v", err)
 	}
@@ -167,9 +168,9 @@ func TestServer_New_GroupConfig(t *testing.T) {
 	discard := logmon.NewWriter(io.Discard)
 	cfg := config.Config{HealthCheckTimeout: 15}
 	cfg.Routing.Router.Use = "group"
-	st, err := store.New("")
+	st, err := sqlite.New("")
 	if err != nil {
-		t.Fatalf("store.New: %v", err)
+		t.Fatalf("sqlite.New: %v", err)
 	}
 	defer st.Close()
 	s, err := New(cfg, discard, discard, discard, nil, st, BuildInfo{}, nil, nil)
@@ -197,9 +198,9 @@ func TestServer_New_MatrixConfig(t *testing.T) {
 	cfg.Routing.Router.Settings.Matrix = &config.MatrixConfig{
 		Sets: config.OrderedSets{{Name: "single", DSL: "model"}},
 	}
-	st, err := store.New("")
+	st, err := sqlite.New("")
 	if err != nil {
-		t.Fatalf("store.New: %v", err)
+		t.Fatalf("sqlite.New: %v", err)
 	}
 	defer st.Close()
 	s, err := New(cfg, discard, discard, discard, nil, st, BuildInfo{}, nil, nil)
@@ -500,9 +501,9 @@ func TestServer_New_OnStartupProfile(t *testing.T) {
 		"coding": {Pins: map[string]string{"llm-code": "model"}},
 	}
 	cfg.Hooks.OnStartup.Profile = "coding"
-	st, err := store.New("")
+	st, err := sqlite.New("")
 	if err != nil {
-		t.Fatalf("store.New: %v", err)
+		t.Fatalf("sqlite.New: %v", err)
 	}
 	defer st.Close()
 	s, err := New(cfg, discard, discard, discard, nil, st, BuildInfo{}, nil, nil)
