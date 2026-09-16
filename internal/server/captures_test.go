@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"runtime"
 	"sync"
 	"testing"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 )
 
@@ -158,5 +160,75 @@ func TestServer_CaptureCompressConcurrent(t *testing.T) {
 	close(errs)
 	for err := range errs {
 		t.Fatal(err)
+	}
+}
+
+// BenchmarkCaptureCompress reports the transient allocations of compressing a
+// 2 MiB embeddings-style capture through the shared encoder.
+func BenchmarkCaptureCompress(b *testing.B) {
+	capture := &ReqRespCapture{
+		ID:       1,
+		ReqPath:  "/v1/embeddings",
+		ReqBody:  jsonBody(4<<10, 1),
+		RespBody: jsonBody(2<<20, 2),
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, _, err := compressCapture(capture); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// heapInuse returns the live heap after a full GC.
+func heapInuse() uint64 {
+	runtime.GC()
+	runtime.GC()
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	return ms.HeapInuse
+}
+
+// BenchmarkCaptureEncoderRetained measures the heap one encoder retains once
+// every sub-encoder has been used, which is what an encoder converges to on a
+// busy server. "before" is the library defaults the capture sync.Pool used
+// before #1106 (GOMAXPROCS sub-encoders, 8 MiB window); multiply its
+// retained-MiB by the peak number of concurrent requests to get the old pool
+// footprint. "after" is zstdEncOptions; since one encoder is shared, its
+// retained-MiB is the total cap for capture compression.
+//
+// Measured on a 4-core host with a 2 MiB embeddings-style body:
+//
+//	before  82.7 retained-MiB per pooled encoder (20.7 MiB per core)
+//	after   26.7 retained-MiB total
+func BenchmarkCaptureEncoderRetained(b *testing.B) {
+	cases := []struct {
+		name string
+		opts []zstd.EOption
+	}{
+		{"before", []zstd.EOption{zstd.WithEncoderLevel(zstd.SpeedBetterCompression)}},
+		{"after", zstdEncOptions},
+	}
+	src := jsonBody(2<<20, 3)
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			base := heapInuse()
+			enc, err := zstd.NewWriter(nil, tc.opts...)
+			if err != nil {
+				b.Fatal(err)
+			}
+			// Touch every sub-encoder so each allocates its history buffer.
+			for i := 0; i < runtime.GOMAXPROCS(0)+1; i++ {
+				enc.EncodeAll(src, nil)
+			}
+			retained := float64(heapInuse()-base) / (1 << 20)
+			runtime.KeepAlive(enc)
+
+			b.ReportAllocs()
+			for b.Loop() {
+				enc.EncodeAll(src, nil)
+			}
+			b.ReportMetric(retained, "retained-MiB")
+		})
 	}
 }
