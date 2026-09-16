@@ -29,10 +29,16 @@ test-dev:
 test:
 	go test -short -count=1 ./internal/...
 
-# for CI - full test (takes longer); the cmd packages are included so
-# the kubeswap and vllm-wrapper suites run in CI, not just locally
+# for CI - full test (takes longer)
 test-all:
-	go test -race -count=1 ./internal/... ./cmd/kubeswap ./cmd/vllm-wrapper
+	go test -race -count=1 ./internal/...
+
+# Test suites for the cmd utilities (kubeswap, vllm-wrapper). Kept
+# separate from test-all: those packages are unix-only (vllm-wrapper
+# signals the serve proxy with syscall.Kill), so they must not be part
+# of the target the Windows CI runs.
+test-cmd:
+	go test -race -count=1 ./cmd/kubeswap ./cmd/vllm-wrapper
 
 # Lint and render the kubeswap Helm chart (requires helm on PATH).
 # Renders every supported config shape (stock defaults, structured with
