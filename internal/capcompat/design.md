@@ -57,10 +57,14 @@ image, speech and transcription servers llama-swap also fronts.
 **llama-server** (`owned_by: llamacpp`, covers forks such as ik_llama.cpp)
 reads `/props`:
 
-- `in` is `text` plus `image` when `modalities.vision` and `audio` when
-  `modalities.audio`. Modalities are decoded as a map so a new one upstream
-  does not break parsing, and unknown keys are dropped rather than passed
-  through, where they would fail `ModelCapConfig.Validate`.
+- `in` is `text` plus `image` when `modalities.vision`. Modalities are decoded
+  as a map so a new one upstream does not break parsing, and keys with no
+  mapping are dropped rather than passed through, where they would fail
+  `ModelCapConfig.Validate`. Audio is not detected: llama.cpp does report
+  audio multimodal input, but the key name under `/props.modalities` has not
+  been confirmed against a running server, and only `vision` appears in the
+  README example. Confirm it with `curl /props | jq .modalities` on an audio
+  model before adding it.
 - `out` is `text`.
 - `tools` requires both `supports_tools` and `supports_tool_calls` in
   `chat_template_caps`. Several flags in llama.cpp's caps struct are

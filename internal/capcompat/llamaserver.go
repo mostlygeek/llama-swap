@@ -33,9 +33,14 @@ type propsResponse struct {
 
 // modalityForProp maps a llama-server modality key onto a llama-swap input
 // modality. Text is always supported and is added unconditionally.
+//
+// Audio is deliberately missing. llama.cpp does report audio multimodal
+// input, but the key it uses under /props.modalities has not been confirmed
+// against a running server, and guessing it would advertise a modality that
+// was only ever exercised against a fixture we wrote ourselves. Add the entry
+// once `curl /props | jq .modalities` on an audio model says what it is.
 var modalityForProp = map[string]string{
 	"vision": "image",
-	"audio":  "audio",
 }
 
 // llamaServerProber reads capabilities from llama-server's /props endpoint.

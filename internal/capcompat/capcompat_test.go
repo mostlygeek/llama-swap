@@ -23,6 +23,9 @@ import (
 // props_vision.json from real builds and confirm supports_tools actually
 // differs between a tool-capable model and a plain completion model; several
 // of those flags are initialised to true in llama.cpp's C++ struct.
+//
+// The audio key in props_omni.json is a guess and is deliberately not mapped
+// by the prober. Confirm the real key name before adding it.
 
 // fixture reads a testdata file.
 func fixture(t *testing.T, parts ...string) []byte {
@@ -98,7 +101,7 @@ func TestCapcompat_DetectLlamaServerVision(t *testing.T) {
 	assert.Equal(t, 8192, info.Capabilities.Context)
 }
 
-func TestCapcompat_DetectLlamaServerAudioAndUnknownModality(t *testing.T) {
+func TestCapcompat_DetectLlamaServerIgnoresUnmappedModalities(t *testing.T) {
 	up := newUpstream(t, map[string][]byte{
 		"/v1/models": fixture(t, "llama-server", "v1_models.json"),
 		"/props":     fixture(t, "llama-server", "props_omni.json"),
@@ -107,9 +110,11 @@ func TestCapcompat_DetectLlamaServerAudioAndUnknownModality(t *testing.T) {
 	info, err := Detect(context.Background(), up.client(t), "model-a")
 	require.NoError(t, err)
 
-	// A modality llama-swap does not know about is ignored rather than
-	// passed through, which would fail ModelCapConfig.Validate.
-	assert.Equal(t, []string{"text", "image", "audio"}, info.Capabilities.In)
+	// This fixture reports vision, audio and a made up modality. Only vision
+	// is mapped: audio has no entry yet because its key name is unconfirmed,
+	// and an unrecognised key must be dropped rather than passed through,
+	// where it would fail ModelCapConfig.Validate.
+	assert.Equal(t, []string{"text", "image"}, info.Capabilities.In)
 	require.NoError(t, info.Capabilities.Validate())
 }
 

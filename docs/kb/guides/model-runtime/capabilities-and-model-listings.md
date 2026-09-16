@@ -38,7 +38,7 @@ What each server can report:
 | | llama-server | vLLM |
 | --- | --- | --- |
 | context length | yes, the loaded `n_ctx` | yes, `max_model_len` |
-| image or audio input | yes | no |
+| image input | yes | no |
 | tools | yes, from the chat template | no |
 | reranker | no | no |
 
