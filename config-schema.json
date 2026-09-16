@@ -617,10 +617,15 @@
                                 "minimum": 0,
                                 "default": 0,
                                 "description": "Maximum token context length supported by the model."
+                            },
+                            "disableAuto": {
+                                "type": "boolean",
+                                "default": false,
+                                "description": "Disable automatic capability discovery for this model. By default llama-swap asks the upstream server what it supports when the model becomes ready and fills in any capability left unset here."
                             }
                         },
                         "additionalProperties": false,
-                        "description": "Defines what the model accepts for input, output and other metadata. Used in v1/models to inform clients what the model can do. An empty capabilities block (all zero values) is treated as not configured."
+                        "description": "Defines what the model accepts for input, output and other metadata. Used in v1/models to inform clients what the model can do. Fields left unset are filled in automatically from the upstream server unless disableAuto is true."
                     }
                 }
             }

@@ -204,7 +204,10 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 		if len(mc.Aliases) > 0 {
 			internalMetadata["aliases"] = mc.Aliases
 		}
-		data = append(data, newRecord(id, mc.Name, mc.Description, mc.Metadata, mc.Capabilities, status, internalMetadata))
+		// Resolved once and reused for the aliases, which describe the same
+		// upstream and must not disagree with the model they point at.
+		caps := s.resolveCapabilities(r.Context(), id, mc)
+		data = append(data, newRecord(id, mc.Name, mc.Description, mc.Metadata, caps, status, internalMetadata))
 
 		if s.cfg.IncludeAliasesInList {
 			for _, alias := range mc.Aliases {
@@ -214,7 +217,7 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 						mc.Name,
 						mc.Description,
 						mc.Metadata,
-						mc.Capabilities,
+						caps,
 						status,
 						map[string]any{"type": "alias", "modelID": id},
 					))

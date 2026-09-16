@@ -13,6 +13,9 @@ type Store interface {
 	// Activity returns the repository for request activity log rows.
 	Activity() ActivityRepository
 
+	// Cache returns the repository for cached key/blob records.
+	Cache() CacheRepository
+
 	// IsInMemory reports whether the backing database is not persisted to
 	// disk. In-memory stores are bounded by pruning rather than by disk.
 	IsInMemory() bool

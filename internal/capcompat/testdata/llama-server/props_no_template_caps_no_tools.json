@@ -1,0 +1,13 @@
+{
+  "default_generation_settings": {
+    "n_ctx": 2048
+  },
+  "total_slots": 1,
+  "model_path": "../models/legacy-base.gguf",
+  "chat_template": "{%- for message in messages %}{{ message.content }}{%- endfor %}",
+  "modalities": {
+    "vision": false
+  },
+  "build_info": "b4000-legacy",
+  "is_sleeping": false
+}

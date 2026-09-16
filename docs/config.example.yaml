@@ -458,6 +458,9 @@ models:
     # capabilities: defines what the model accepts for input, output and other metadata
     # - optional; omitted or all-zero means no capabilities
     # - used in v1/models to inform clients what the model can do
+    # - any field left unset is filled in automatically by asking the upstream
+    #   server when the model becomes ready (llama-server and vllm today)
+    # - values set here always win, field by field
     capabilities:
       # in: list of modalities understood by the model
       # - default: []
@@ -485,6 +488,12 @@ models:
       # - default: 0
       # - must be an integer > 0
       context: 32000
+
+      # disableAuto: turn off automatic capability discovery for this model
+      # - default: false
+      # - a field set to its zero value (false, 0, []) cannot be told apart
+      #   from an unset one, so use this to suppress a wrong discovered value
+      disableAuto: false
 
   # Unlisted model example:
   "unlisted-model":
