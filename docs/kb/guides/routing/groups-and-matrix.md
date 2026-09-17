@@ -119,6 +119,48 @@ Two things worth internalising:
 `evict_costs` (default 1) is how you express "this one is painful to reload".
 Give slow cold-starting backends a high cost.
 
+### Use `+auto:orphans` for the models that no set names
+
+A leaf is a model ID or a var in a set expression. The reserved reference
+`+auto:orphans` includes each model that is not a leaf in your sets. llama-swap
+changes a var to its model ID before this test. A reference such as `+base` is
+not a leaf and adds no models.
+
+The name of the set is `auto:orphans`. The first `+` is the usual syntax for a
+reference to a set. Only a reference name can contain a colon. A model name or a
+var name cannot contain a colon.
+
+llama-swap makes the orphan list one time, when it reads the configuration, and
+sorts the list by model ID. The expression is therefore always the same. For
+example, a leaf names `a`, but no leaf names `b` or `c`. Then `+auto:orphans`
+operates as `(b | c)`:
+
+```yaml
+sets:
+  always:  "task-small & embed-model"
+  main:    "+always & moe-medium & (dense-a | dense-b)"
+  scratch: "+always & +auto:orphans"
+```
+
+If there are no orphan models, llama-swap removes the `+auto:orphans` term. An
+empty term also moves through references. For example, the set `empty` resolves
+only to an empty `+auto:orphans`. The set `outer: "+empty & x"` then operates as
+`x`. llama-swap can never select a set that contains only an empty
+`+auto:orphans`.
+
+If you define a set with the name `auto:orphans`, llama-swap uses your set and
+does not make the automatic set.
+
+If a set refers to `+auto:orphans`, llama-swap writes one of these lines to the
+log at startup and at each reload of the configuration:
+
+- `matrix: synthesized set "auto:orphans" = (modelA | modelB | ...)`
+- `matrix: synthesized set "auto:orphans" is empty; +auto:orphans terms dropped`
+- `matrix: set "auto:orphans" is user-defined; orphan synthesis disabled`
+
+If you change `models:`, llama-swap makes a new orphan list at the next reload.
+This is the intended behavior.
+
 ## Which one?
 
 Use **group** if your setup is describable as "these run together, those swap
