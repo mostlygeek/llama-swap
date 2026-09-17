@@ -15,7 +15,7 @@ release. Group related work into two to four themes, covering material new
 features, fixes, and behavior changes; leave PR-level detail to the list below.
 Keep it to one to three sentences and wrap lines at 80 characters.
 
-- [PR #1](https://github.com/mostlygeek/llama-swap/pulls/1) Title from PR: summary of the changes it introduced
-- [PR #2](https://github.com/mostlygeek/llama-swap/pulls/2) Title from PR: summary of the changes it introduced
-- [PR #3](https://github.com/mostlygeek/llama-swap/pulls/2) Title from PR: summary of the changes it introduced
+- [PR #1](https://github.com/mostlygeek/llama-swap/pull/1) Title from PR: summary of the changes it introduced
+- [PR #2](https://github.com/mostlygeek/llama-swap/pull/2) Title from PR: summary of the changes it introduced
+- [PR #3](https://github.com/mostlygeek/llama-swap/pull/2) Title from PR: summary of the changes it introduced
 ```
