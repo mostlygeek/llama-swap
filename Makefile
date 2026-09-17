@@ -87,6 +87,10 @@ release:
 # Get the highest tag in v{number} format, increment it, and create a new tag
 	@highest_tag=$$(git tag --sort=-v:refname | grep -E '^v[0-9]+$$' | head -n 1 || echo "v0"); \
 	new_tag="v$$(( $${highest_tag#v} + 1 ))"; \
+	echo "Generating changelog entry for: $$new_tag"; \
+	scripts/add-changelog.sh "$$new_tag"; \
+	git add CHANGELOG.md; \
+	git commit -m "changelog: $$new_tag"; \
 	echo "tagging new version: $$new_tag"; \
 	git tag "$$new_tag";
 
@@ -105,5 +109,5 @@ eval-docs-agent:
 	./evals/docs-agent/run.sh $(EVAL_ARGS)
 
 # Phony targets
-.PHONY: all clean ui mac windows simple-responder simple-responder-windows test test-all test-dev test-ui wol-proxy eval-docs-agent
+.PHONY: all clean ui mac windows simple-responder simple-responder-windows test test-all test-dev test-ui wol-proxy eval-docs-agent release
 .PHONY: linux linux-arm64 linux-amd64
