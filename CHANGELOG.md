@@ -1,5 +1,25 @@
 # Changelog
 
+## v256
+
+Refreshes Playground chat with a responsive layout, editable prompts, sampling
+controls, and live generation statistics across Chat and the Help agent. Adds a
+global inference concurrency cap, richer TabbyAPI activity metrics, leaner zstd
+memory use, and a storage-layer refactor, alongside release-changelog tooling.
+
+- CHANGELOG.md,docs: fix pull request link
+- [PR #1125](https://github.com/mostlygeek/llama-swap/pull/1125) changelog: add scripts and automation to generate changelog entries
+- [PR #1120](https://github.com/mostlygeek/llama-swap/pull/1120) ui: make the playground chat responsive and lighter
+- [PR #1123](https://github.com/mostlygeek/llama-swap/pull/1123) internal/server: reduce zstd pool memory consumption
+- [PR #1122](https://github.com/mostlygeek/llama-swap/pull/1122) internal/store: split repository interfaces from the sqlite backend
+- [PR #1095](https://github.com/mostlygeek/llama-swap/pull/1095) process: start TTL idle window when model becomes ready
+- [PR #1110](https://github.com/mostlygeek/llama-swap/pull/1110) internal/server: add global concurrency semaphore
+- cmd/vllm-wrapper: use default timeouts
+- [PR #1104](https://github.com/mostlygeek/llama-swap/pull/1104) internal/server: add tabbyapi usage data extraction
+- ui: show chat stats in Help agent
+- [PR #1099](https://github.com/mostlygeek/llama-swap/pull/1099) ui: show live generation stats in Chat
+- [PR #1101](https://github.com/mostlygeek/llama-swap/pull/1101) ui: keep Work status bar stable while streaming
+
 ## v255
 
 Updates Tailcat to v0.6.0, including WireGuard preshared-key support for
