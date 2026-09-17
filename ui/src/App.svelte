@@ -10,6 +10,8 @@
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { Separator } from "$lib/components/ui/separator/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import { Check, ChevronDown } from "@lucide/svelte";
   import {
     activeProfile,
     checkPerformanceEnabled,
@@ -57,6 +59,13 @@
     "/hardware": "Hardware",
     "/tailcat": "Tailcat",
   };
+
+  // The phone header is tight (sidebar button, title, profile picker), so the
+  // Playground's tab picker there shows the tab name alone rather than the
+  // full "Playground / Chat", which would truncate to nothing useful.
+  let playgroundTabLabel = $derived(
+    playgroundTabs.find((t) => t.id === $selectedPlaygroundTab)?.label ?? "Playground"
+  );
 
   let sectionTitle = $derived.by(() => {
     if ($currentRoute === "/playground") {
@@ -147,7 +156,33 @@
       >
         <Sidebar.Trigger class="-ml-1" />
         <Separator orientation="vertical" class="mr-2 !h-4" />
-        <h2 class="truncate pb-0 text-sm font-semibold">{sectionTitle}</h2>
+        {#if $currentRoute === "/playground"}
+          <!-- Phones hide the Playground's tab strip so the full height goes to
+               the tab itself, so the header title doubles as the tab picker
+               there. Wider screens keep the strip and a plain title. -->
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger
+              class="hover:bg-muted -mx-1 flex min-w-0 items-center gap-1 rounded-md px-1 py-1 sm:hidden"
+              aria-label="Switch playground tab"
+            >
+              <span class="truncate text-sm font-semibold">{playgroundTabLabel}</span>
+              <ChevronDown class="text-muted-foreground size-4 shrink-0" />
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Content align="start" class="min-w-44">
+              {#each playgroundTabs as tab (tab.id)}
+                <DropdownMenu.Item class="gap-2 py-2 text-base" onSelect={() => selectedPlaygroundTab.set(tab.id)}>
+                  <Check
+                    class="size-4 {$selectedPlaygroundTab === tab.id ? '' : 'invisible'}"
+                  />
+                  {tab.label}
+                </DropdownMenu.Item>
+              {/each}
+            </DropdownMenu.Content>
+          </DropdownMenu.Root>
+          <h2 class="hidden truncate pb-0 text-sm font-semibold sm:block">{sectionTitle}</h2>
+        {:else}
+          <h2 class="truncate pb-0 text-sm font-semibold">{sectionTitle}</h2>
+        {/if}
         {#if $profiles.length > 0}
           <div class="ml-auto flex items-center gap-2">
             <span class="text-muted-foreground hidden text-xs sm:inline">Profile</span>

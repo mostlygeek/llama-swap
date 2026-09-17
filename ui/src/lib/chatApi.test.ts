@@ -264,6 +264,46 @@ describe("buildRequest for the text-only endpoints", () => {
   });
 });
 
+describe("buildRequest sampling parameters", () => {
+  const sampling: ChatOptions = { top_p: 0.9, top_k: 50, min_p: 0.05 };
+
+  it("sends all three on /v1/chat/completions", () => {
+    const body = buildRequest("v1/chat/completions", "m", [{ role: "user", content: "hi" }], sampling).body as any;
+    expect(body.top_p).toBe(0.9);
+    expect(body.top_k).toBe(50);
+    expect(body.min_p).toBe(0.05);
+  });
+
+  // 0 is "off" for top_k and min_p; sending it just asks the backend to
+  // redo the no-op.
+  it("omits top_k and min_p when zero", () => {
+    const body = buildRequest(
+      "v1/chat/completions",
+      "m",
+      [{ role: "user", content: "hi" }],
+      { top_p: 1, top_k: 0, min_p: 0 }
+    ).body as any;
+    expect(body).not.toHaveProperty("top_k");
+    expect(body).not.toHaveProperty("min_p");
+  });
+
+  // min_p is not in the Anthropic schema; strict validation would reject it.
+  it("sends top_p and top_k but not min_p on /v1/messages", () => {
+    const body = buildRequest("v1/messages", "m", [{ role: "user", content: "hi" }], sampling).body as any;
+    expect(body.top_p).toBe(0.9);
+    expect(body.top_k).toBe(50);
+    expect(body).not.toHaveProperty("min_p");
+  });
+
+  // top_k and min_p are llama.cpp extensions the Responses API rejects.
+  it("sends top_p only on /v1/responses", () => {
+    const body = buildRequest("v1/responses", "m", [{ role: "user", content: "hi" }], sampling).body as any;
+    expect(body.top_p).toBe(0.9);
+    expect(body).not.toHaveProperty("top_k");
+    expect(body).not.toHaveProperty("min_p");
+  });
+});
+
 describe("stop reason normalization", () => {
   it("maps Anthropic stop reasons onto the OpenAI vocabulary", () => {
     expect(normalizeAnthropicStopReason("end_turn")).toBe("stop");
