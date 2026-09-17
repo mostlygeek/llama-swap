@@ -31,9 +31,11 @@
     onValueChange={(v: string) => v && selectedPlaygroundTab.set(v as PlaygroundTab)}
     class="flex flex-1 w-full flex-col gap-2 overflow-hidden"
   >
+    <!-- Hidden on phones: the header title becomes the tab picker there, so
+         the whole height below it belongs to the tab. -->
     <TabsList
       variant="line"
-      class="w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      class="w-full justify-start overflow-x-auto max-sm:hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       {#each playgroundTabs as tab (tab.id)}
         <TabsTrigger value={tab.id}>{tab.label}</TabsTrigger>
