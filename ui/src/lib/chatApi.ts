@@ -59,6 +59,12 @@ export interface StreamChunk {
 
 export interface ChatOptions {
   temperature?: number;
+  /** Nucleus sampling. 1 is a no-op; sent on every endpoint. */
+  top_p?: number;
+  /** Candidate pool size. 0 means disabled and is never sent. */
+  top_k?: number;
+  /** llama.cpp-only floor on token probability. 0 means disabled. */
+  min_p?: number;
   endpoint?: Endpoint;
   max_tokens?: number;
   tools?: ToolDefinition[];
@@ -129,6 +135,10 @@ function buildChatCompletionsBody(model: string, messages: ChatMessage[], option
     // stream never delivers.
     ...(options?.timingsPerToken === false ? {} : { timings_per_token: true }),
     temperature: options?.temperature,
+    top_p: options?.top_p,
+    // 0 means "off" for both, so a zero value is not worth sending.
+    ...(options?.top_k ? { top_k: options.top_k } : {}),
+    ...(options?.min_p ? { min_p: options.min_p } : {}),
     ...(options?.max_tokens ? { max_tokens: options.max_tokens } : {}),
     ...(options?.tools?.length
       ? {
@@ -174,6 +184,10 @@ function buildMessagesBody(model: string, messages: ChatMessage[], options?: Cha
   };
   if (system) body.system = system;
   if (options?.temperature !== undefined) body.temperature = options.temperature;
+  if (options?.top_p !== undefined) body.top_p = options.top_p;
+  // top_k is standard here; min_p is not, and Anthropic-style validation
+  // would reject it, so it stays off this endpoint.
+  if (options?.top_k) body.top_k = options.top_k;
   return body;
 }
 
@@ -201,6 +215,8 @@ function buildResponsesBody(model: string, messages: ChatMessage[], options?: Ch
   };
   if (system) body.instructions = system;
   if (options?.temperature !== undefined) body.temperature = options.temperature;
+  if (options?.top_p !== undefined) body.top_p = options.top_p;
+  // top_k and min_p are llama.cpp extensions this endpoint does not accept.
   if (options?.max_tokens) body.max_output_tokens = options.max_tokens;
   return body;
 }

@@ -20,6 +20,7 @@
   import { Label } from "$lib/components/ui/label/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
+  import { Tabs, TabsContent, TabsList, TabsTrigger } from "$lib/components/ui/tabs/index.js";
   import { X } from "@lucide/svelte";
 
   const selectedModelStore = persistentStore<string>("playground-selected-model", "");
@@ -27,6 +28,9 @@
   const temperatureStore = persistentStore<number>("playground-temperature", 0.7);
   const endpointStore = persistentStore<Endpoint>("playground-endpoint", "v1/chat/completions");
   const maxTokensStore = persistentStore<number>("playground-max-tokens", 4096);
+  const topPStore = persistentStore<number>("playground-top-p", 1);
+  const topKStore = persistentStore<number>("playground-top-k", 40);
+  const minPStore = persistentStore<number>("playground-min-p", 0);
 
   // This tab was briefly the docs agent; that is the Docs tab now. Anyone who
   // used it in between has the agent's prompt persisted here, which is not a
@@ -90,6 +94,42 @@
       inputRef?.focus();
     }
     wasStreaming = isStreaming;
+  });
+
+  // The settings dialog follows the visual viewport (see TextEditDialog):
+  // mobile browsers keep the layout viewport full size when the keyboard
+  // opens, so without this the keys cover the bottom of the dialog. While
+  // open, the dialog tracks the visible area and is anchored to its top.
+  let visibleViewport = $state<{ top: number; height: number } | null>(null);
+  $effect(() => {
+    if (!showSettings) return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => {
+      visibleViewport = { top: vv.offsetTop, height: vv.height };
+    };
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+    };
+  });
+
+  const settingsStyle = $derived(
+    visibleViewport
+      ? `top: ${visibleViewport.top + 16}px; max-height: ${visibleViewport.height - 32}px`
+      : ""
+  );
+
+  // The prompt is bound straight to the store, so "save" is the dialog
+  // closing (Done, X, overlay, Escape). That is when surrounding whitespace
+  // is trimmed, whichever way it closes.
+  $effect(() => {
+    if (showSettings) return;
+    const trimmed = $systemPromptStore.trim();
+    if (trimmed !== $systemPromptStore) systemPromptStore.set(trimmed);
   });
 
   function handleMessagesScroll() {
@@ -265,7 +305,14 @@
         $selectedModelStore,
         requestMessages(),
         abortController.signal,
-        { temperature: $temperatureStore, endpoint: $endpointStore, max_tokens: $maxTokensStore }
+        {
+          temperature: $temperatureStore,
+          endpoint: $endpointStore,
+          max_tokens: $maxTokensStore,
+          top_p: $topPStore,
+          top_k: $topKStore,
+          min_p: $minPStore,
+        }
       );
 
       for await (const chunk of stream) {
@@ -386,63 +433,125 @@
 
   <!-- Settings dialog -->
   <Dialog.Root bind:open={showSettings}>
-    <Dialog.Content class="max-w-xl">
+    <Dialog.Content
+      class="top-8 translate-y-0 max-w-xl max-h-[calc(100dvh-2rem)] overflow-y-auto"
+      style={settingsStyle}
+    >
       <Dialog.Header>
         <Dialog.Title>Chat Settings</Dialog.Title>
       </Dialog.Header>
 
-      <div class="space-y-4">
-        <div>
-          <Label class="mb-1" for="endpoint">Endpoint</Label>
-          <Select.Root
-            type="single"
-            value={$endpointStore}
-            onValueChange={(v) => v && endpointStore.set(v as Endpoint)}
-          >
-            <Select.Trigger class="w-full">/{$endpointStore}</Select.Trigger>
-            <Select.Content>
-              <Select.Item value="v1/chat/completions">/v1/chat/completions</Select.Item>
-              <Select.Item value="v1/messages">/v1/messages</Select.Item>
-              <Select.Item value="v1/responses">/v1/responses</Select.Item>
-            </Select.Content>
-          </Select.Root>
-        </div>
-        <div>
-          <Label class="mb-1" for="system-prompt">System Prompt</Label>
+      <!-- Stacking every setting in one scroll left the system prompt textarea
+         huge on a phone with no way to shrink the window, so the sections are
+         tabs now and only one shows at a time. -->
+      <Tabs value="prompt" class="flex flex-col gap-2">
+        <TabsList variant="line" class="justify-start">
+          <TabsTrigger value="prompt">Prompt</TabsTrigger>
+          <TabsTrigger value="params">Parameters</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="prompt">
+          <Label class="sr-only" for="system-prompt">System Prompt</Label>
           <Textarea
             id="system-prompt"
-            class="resize-none"
+            class="resize-y min-h-24 max-h-[50dvh]"
             placeholder="You are a helpful assistant..."
-            rows={3}
+            rows={5}
             bind:value={$systemPromptStore}
             disabled={isStreaming}
           />
-        </div>
-        <div>
-          <Label class="mb-1" for="temperature">
-            Temperature: {$temperatureStore.toFixed(2)}
-          </Label>
-          <input
-            id="temperature"
-            type="range"
-            min="0"
-            max="2"
-            step="0.05"
-            class="accent-primary w-full"
-            bind:value={$temperatureStore}
-            disabled={isStreaming}
-          />
-          <div class="text-muted-foreground mt-1 flex justify-between text-xs">
-            <span>Precise (0)</span>
-            <span>Creative (2)</span>
+        </TabsContent>
+
+        <TabsContent value="params" class="space-y-4">
+          <div>
+            <Label class="mb-1" for="endpoint">Endpoint</Label>
+            <Select.Root
+              type="single"
+              value={$endpointStore}
+              onValueChange={(v) => v && endpointStore.set(v as Endpoint)}
+            >
+              <Select.Trigger class="w-full">/{$endpointStore}</Select.Trigger>
+              <Select.Content>
+                <Select.Item value="v1/chat/completions">/v1/chat/completions</Select.Item>
+                <Select.Item value="v1/messages">/v1/messages</Select.Item>
+                <Select.Item value="v1/responses">/v1/responses</Select.Item>
+              </Select.Content>
+            </Select.Root>
           </div>
-        </div>
-        <div>
-          <Label class="mb-1" for="max-tokens">Max Tokens</Label>
-          <Input id="max-tokens" type="number" min="1" bind:value={$maxTokensStore} disabled={isStreaming} />
-          <p class="text-muted-foreground mt-1 text-xs">Required for /v1/messages.</p>
-        </div>
-      </div>
+          <div>
+            <Label class="mb-1" for="temperature">
+              Temperature: {$temperatureStore.toFixed(2)}
+            </Label>
+            <input
+              id="temperature"
+              type="range"
+              min="0"
+              max="2"
+              step="0.05"
+              class="accent-primary w-full"
+              bind:value={$temperatureStore}
+              disabled={isStreaming}
+            />
+            <div class="text-muted-foreground mt-1 flex justify-between text-xs">
+              <span>Precise (0)</span>
+              <span>Creative (2)</span>
+            </div>
+          </div>
+          <div>
+            <Label class="mb-1" for="top-p">
+              Top P (nucleus): {$topPStore.toFixed(2)}
+            </Label>
+            <input
+              id="top-p"
+              type="range"
+              min="0.01"
+              max="1"
+              step="0.01"
+              class="accent-primary w-full"
+              bind:value={$topPStore}
+              disabled={isStreaming}
+            />
+            <div class="text-muted-foreground mt-1 flex justify-between text-xs">
+              <span>Narrow (0.01)</span>
+              <span>Off (1)</span>
+            </div>
+          </div>
+          <div>
+            <Label class="mb-1" for="min-p">
+              Min P: {$minPStore.toFixed(2)}
+            </Label>
+            <input
+              id="min-p"
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              class="accent-primary w-full"
+              bind:value={$minPStore}
+              disabled={isStreaming}
+            />
+            <p class="text-muted-foreground mt-1 text-xs">Off at 0. Only sent on /v1/chat/completions.</p>
+          </div>
+          <div>
+            <Label class="mb-1" for="top-k">Top K</Label>
+            <Input
+              id="top-k"
+              type="number"
+              min="0"
+              max="10000"
+              step="1"
+              bind:value={$topKStore}
+              disabled={isStreaming}
+            />
+            <p class="text-muted-foreground mt-1 text-xs">0 disables it. Not sent on /v1/responses.</p>
+          </div>
+          <div>
+            <Label class="mb-1" for="max-tokens">Max Tokens</Label>
+            <Input id="max-tokens" type="number" min="1" bind:value={$maxTokensStore} disabled={isStreaming} />
+            <p class="text-muted-foreground mt-1 text-xs">Required for /v1/messages.</p>
+          </div>
+        </TabsContent>
+      </Tabs>
 
       <Dialog.Footer>
         <Button variant="outline" onclick={() => (showSettings = false)}>Done</Button>
