@@ -3,9 +3,10 @@ name: Publish Helm chart
 # Publishes the kubeswap chart for a llama-swap release tag. Everything
 # this workflow does is chart publication:
 #
-#   * the chart is published at oci://ghcr.io/mostlygeek/llama-swap-helm as
+#   * the chart is published at oci://ghcr.io/mostlygeek/charts as
 #     version NNN.0.0 with the app version overridden to NNN (the release
-#     number, the local vNNN convention)
+#     number, the local vNNN convention). helm appends the chart name to
+#     the push target, so it lands at .../charts/llama-swap:NNN.0.0
 #   * its image.tag is left UNSET in the published values; the chart's
 #     image helper then derives the tag as unified-vulkan-<appVersion>, so
 #     the version lives in the app version field rather than being
@@ -202,7 +203,7 @@ jobs:
             -d dist \
             --version ${{ steps.version.outputs.chart-version }} \
             --app-version ${{ steps.version.outputs.version }}
-          helm push dist/llama-swap-*.tgz oci://ghcr.io/mostlygeek/llama-swap-helm
+          helm push dist/llama-swap-*.tgz oci://ghcr.io/mostlygeek/charts
 
       # Prove the end result: pull the chart back and render it, so the
       # default image resolves to the versioned docker release tag via
@@ -212,7 +213,7 @@ jobs:
       # fresh one keeps the glob below matching exactly one chart.
       - name: Verify the published chart
         env:
-          CHART: oci://ghcr.io/mostlygeek/llama-swap-helm/llama-swap
+          CHART: oci://ghcr.io/mostlygeek/charts/llama-swap
           CHART_VERSION: ${{ steps.version.outputs.chart-version }}
           VER: ${{ steps.version.outputs.version }}
         run: |

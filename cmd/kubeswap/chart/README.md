@@ -19,9 +19,7 @@ From the published OCI registry (one chart version per llama-swap
 release):
 
 ```bash
-helm repo add llama-swap oci://ghcr.io/mostlygeek/llama-swap-helm
-helm repo update
-helm install llama-swap llama-swap/llama-swap \
+helm install llama-swap oci://ghcr.io/mostlygeek/charts/llama-swap \
   -n llama-swap --create-namespace \
   --version 256.0.0    # the chart version for release v256; omit for latest
 ```
