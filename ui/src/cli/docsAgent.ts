@@ -10,24 +10,20 @@ import {
   gradeRun,
   summarizeCase,
   summarizeSuite,
-  type RunRecord,
-  type ToolInvocation,
   type CaseResult,
 } from "./grade";
 import { formatSummary, formatCaseLine, formatFailureReport } from "./report";
 import { judgeCase, summarizeJudge, type JudgeVerdict } from "./judge";
 import { recordRun, evaluateStop, DEFAULT_HISTORY } from "./history";
 
-import { runAgent, DEFAULT_MAX_ITERATIONS } from "../lib/agentLoop";
-import { streamChatCompletion } from "../lib/chatApi";
-import { fetchToolDefinitions, callTool } from "../lib/agentTools";
+import { DEFAULT_MAX_ITERATIONS } from "../lib/agentLoop";
 import { DOCS_AGENT_SYSTEM_PROMPT } from "../lib/prompts/docsAgent";
-import type { ChatMessage } from "../lib/types";
+import { loadTools, askDocsAgent } from "./headless";
 
 /**
- * Headless driver for the Docs Agent behind the UI's Help page.
+ * Eval driver for the Docs Agent behind the UI's Help page.
  *
- * The whole point is that this imports agentLoop.ts, chatApi.ts and
+ * The whole point is that headless.ts imports agentLoop.ts, chatApi.ts and
  * agentTools.ts unmodified, so what is measured here is exactly what the
  * browser runs. installFetchBase() is the only adaptation, and it lives
  * outside src/lib for that reason. See evals/docs-agent/README.md.
@@ -163,133 +159,26 @@ async function common(values: CLIValues): Promise<CommonOpts> {
   };
 }
 
-/**
- * Fails loudly when the server has no MCP tools.
- *
- * fetchToolDefinitions() swallows a 404 and a 503 and returns [], because in
- * the browser that correctly means "this build has no docs, hide agent mode".
- * Here it would mean the whole suite silently ran with no tools and scored
- * terribly for a reason unrelated to whatever was being tested -- and pointing
- * --base-url at a release build that predates /api/mcp is an easy mistake.
- */
-async function preflight(opts: CommonOpts) {
-  const hint =
-    `  The server at ${opts.baseUrl} must be built from this branch.\n` +
-    `  A release build predating /api/mcp answers 404 there, and a build with no\n` +
-    `  indexed documentation answers 503.\n` +
-    `  Start one with: go run . -config <your config> -listen :8080`;
-
-  let tools;
-  try {
-    // A 404 throws here; a 503 and an unsupported protocol version are
-    // swallowed and come back as [], because in the browser both correctly
-    // mean "this build has no docs, hide agent mode". Neither is survivable
-    // for an eval: the suite would run with no tools and score terribly for a
-    // reason unrelated to whatever was being tested.
-    tools = await fetchToolDefinitions();
-  } catch (error) {
-    die(
-      `cannot reach ${opts.baseUrl}/api/mcp: ${error instanceof Error ? error.message : String(error)}\n${hint}`,
-    );
-  }
-  if (!tools.length) {
-    die(`no MCP tools at ${opts.baseUrl}/api/mcp.\n${hint}`);
-  }
-  return tools;
-}
-
-async function runOnce(
+/** Runs one question with the eval's option set. */
+function runOnce(
   question: string,
   opts: CommonOpts,
-  tools: Awaited<ReturnType<typeof preflight>>,
+  tools: Awaited<ReturnType<typeof loadTools>>,
   onDelta?: (text: string) => void,
-): Promise<RunRecord> {
-  const seed: ChatMessage[] = [];
-  if (opts.systemPrompt.trim())
-    seed.push({ role: "system", content: opts.systemPrompt.trim() });
-  seed.push({ role: "user", content: question });
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), opts.timeoutMs);
-  const startedAt = Date.now();
-
-  let answer = "";
-  let reasoning = "";
-  let iterations = 0;
-  let doneReason = "error";
-  let error: string | undefined;
-  const toolCalls: ToolInvocation[] = [];
-
-  try {
-    const deps = {
-      streamChat: (msgs: ChatMessage[], signal: AbortSignal) =>
-        streamChatCompletion(opts.model, msgs, signal, {
-          temperature: opts.temperature,
-          max_tokens: opts.maxTokens,
-          tools,
-        }),
-      callTool,
-    };
-
-    for await (const event of runAgent(seed, deps, {
+) {
+  return askDocsAgent(
+    question,
+    {
+      model: opts.model,
+      systemPrompt: opts.systemPrompt,
       maxIterations: opts.maxIterations,
-      signal: controller.signal,
-    })) {
-      switch (event.type) {
-        case "iteration":
-          iterations = event.n;
-          break;
-        case "content":
-          answer += event.delta;
-          onDelta?.(event.delta);
-          break;
-        case "reasoning":
-          reasoning += event.delta;
-          break;
-        case "assistant_end":
-          // Only the final assistant message is the answer; earlier ones are
-          // the model narrating its tool use.
-          if (
-            !event.message.tool_calls?.length &&
-            typeof event.message.content === "string"
-          ) {
-            answer = event.message.content;
-          }
-          break;
-        case "tool_end":
-          toolCalls.push({
-            name: event.call.function.name,
-            args: event.call.function.arguments,
-            ok: event.ok,
-            durationMs: event.durationMs,
-          });
-          break;
-        case "error":
-          error = event.message;
-          break;
-        case "done":
-          doneReason = event.reason;
-          break;
-      }
-    }
-  } finally {
-    clearTimeout(timer);
-  }
-
-  if (doneReason === "aborted" && !error)
-    error = `timed out after ${opts.timeoutMs / 1000}s`;
-
-  return {
-    caseId: "",
-    attempt: 1,
-    answer,
-    reasoning,
-    toolCalls,
-    iterations,
-    doneReason,
-    durationMs: Date.now() - startedAt,
-    error,
-  };
+      temperature: opts.temperature,
+      maxTokens: opts.maxTokens,
+      timeoutMs: opts.timeoutMs,
+    },
+    tools,
+    onDelta,
+  );
 }
 
 async function cmdAsk(question: string, values: CLIValues) {
@@ -299,7 +188,7 @@ async function cmdAsk(question: string, values: CLIValues) {
     apiKey: opts.apiKey,
   });
   try {
-    const tools = await preflight(opts);
+    const tools = await loadTools(opts.baseUrl);
     process.stderr.write(
       `model ${opts.model} @ ${opts.baseUrl}, ${tools.length} tools, prompt: ${opts.systemPromptSource}\n\n`,
     );
@@ -376,7 +265,7 @@ async function cmdEval(values: CLIValues) {
     apiKey: opts.apiKey,
   });
   try {
-    const tools = await preflight(opts);
+    const tools = await loadTools(opts.baseUrl);
     process.stderr.write(
       `${cases.length} cases x ${repeat}, concurrency ${concurrency} against ${opts.model} @ ${opts.baseUrl}\n` +
         `${tools.length} tools, prompt: ${opts.systemPromptSource}\n\n`,
