@@ -115,11 +115,17 @@ func (mp *metricsMonitor) Close() error {
 	return nil
 }
 
-// activitySource returns trusted connection metadata for activity records.
-// Forwarding headers are intentionally ignored because callers can spoof them.
+// activitySource returns connection metadata for activity records. It
+// prefers Tailcat's authenticated source, then falls back to the
+// X-Forwarded-For/X-Real-IP headers (prefixed with "xff:" since a proxy
+// header is client-supplied and can be spoofed), and finally the raw
+// connection address.
 func activitySource(r *http.Request) string {
 	if source, ok := tailcat.SourceFromContext(r.Context()); ok {
 		return source
+	}
+	if ip, ok := forwardedIP(r); ok {
+		return "xff:" + ip
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {

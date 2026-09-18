@@ -210,17 +210,29 @@ func (sr *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return nil, nil, fmt.Errorf("underlying ResponseWriter does not support hijacking")
 }
 
+// forwardedIP reads the client address from the X-Forwarded-For or
+// X-Real-IP headers, preferring X-Forwarded-For's first (left-most) entry.
+// ok is false when neither header is set.
+func forwardedIP(r *http.Request) (ip string, ok bool) {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		first, _, _ := strings.Cut(xff, ",")
+		if trimmed := strings.TrimSpace(first); trimmed != "" {
+			return trimmed, true
+		}
+	}
+	if xr := r.Header.Get("X-Real-IP"); xr != "" {
+		if trimmed := strings.TrimSpace(xr); trimmed != "" {
+			return trimmed, true
+		}
+	}
+	return "", false
+}
+
 // clientIP resolves the originating client address, preferring proxy headers
 // over the raw connection address.
 func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if first, _, found := strings.Cut(xff, ","); found {
-			return strings.TrimSpace(first)
-		}
-		return strings.TrimSpace(xff)
-	}
-	if xr := r.Header.Get("X-Real-IP"); xr != "" {
-		return strings.TrimSpace(xr)
+	if ip, ok := forwardedIP(r); ok {
+		return ip
 	}
 	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
 		return host
