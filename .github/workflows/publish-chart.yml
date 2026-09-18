@@ -107,11 +107,14 @@ jobs:
               exit 1
             fi
           else
+            # A vNNN tag carries the release number: v256 -> 256. This is
+            # the tag-push path, where there is no version input to fall
+            # back on, so the message has to make sense for both.
             VER="${REF#v}"
             if [[ ! "$VER" =~ ^[0-9]+$ ]]; then
-              echo "cannot determine the release number: ref '$REF' does" \
-                "not follow the vNNN release convention, so set the version" \
-                "input to the release number, as in 256" >&2
+              echo "no release number can be taken from ref '$REF': it does" \
+                "not follow the vNNN release convention. On a manual run," \
+                "set the version input; a tag push must use a vNNN tag." >&2
               exit 1
             fi
           fi
