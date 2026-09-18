@@ -919,7 +919,7 @@ func (s *server) findPod(ctx context.Context, dep *appsv1.Deployment) podState {
 	if podIsReady(active) && active.Status.PodIP != "" {
 		return podState{pod: active, ready: true, reason: "pod " + active.Name + " ready"}
 	}
-	return podState{pod: active, ready: false, reason: podNotReadyReason(active)}
+	return podState{pod: active, ready: false, reason: podNotReadyReason(active, time.Duration(cfg.StartupTimeout)*time.Second)}
 }
 
 // podIsReady Reports whether the pod carries the Ready condition.
@@ -1045,15 +1045,27 @@ func deploymentSummary(dep *appsv1.Deployment) string {
 		st.Replicas, st.ReadyReplicas, st.AvailableReplicas, st.UnavailableReplicas)
 }
 
-// podNotReadyReason Describes why a pod is not ready (phase plus waiting/terminating container states).
-func podNotReadyReason(p *corev1.Pod) string {
+// podNotReadyReason Describes a not-ready pod. startupWindow is the
+// configured startup probe window: a running container inside it is a
+// normal load (described neutrally), and only once it has elapsed does
+// the reason offer a diagnosis (the classic loopback bind).
+func podNotReadyReason(p *corev1.Pod, startupWindow time.Duration) string {
 	reason := "pod " + p.Name + " " + string(p.Status.Phase)
 	for _, cs := range p.Status.ContainerStatuses {
+		running := cs.State.Running
+		stuck := running != nil && startupWindow > 0 && !running.StartedAt.Time.IsZero() && time.Since(running.StartedAt.Time) > startupWindow
 		switch {
 		case cs.State.Waiting != nil && cs.State.Waiting.Reason != "":
 			reason += fmt.Sprintf(", container %s waiting: %s", cs.Name, cs.State.Waiting.Reason)
 		case cs.State.Terminated != nil:
 			reason += fmt.Sprintf(", container %s terminated (exit %d)", cs.Name, cs.State.Terminated.ExitCode)
+		case running != nil && stuck:
+			// The most common stuck-running cause is a backend bound to
+			// loopback: probes (and the proxy) reach it via the pod IP, so
+			// the pod can never become ready even though the model loaded.
+			reason += fmt.Sprintf(", container %s running but probes not passing (does the backend bind to 0.0.0.0? engines default to 127.0.0.1; check the backend log via kubeswap logs)", cs.Name)
+		case running != nil:
+			reason += fmt.Sprintf(", container %s running: not ready yet (startup in progress; the pod is ready once the probes pass)", cs.Name)
 		}
 		if cs.RestartCount > 0 {
 			reason += fmt.Sprintf(", restarts=%d", cs.RestartCount)

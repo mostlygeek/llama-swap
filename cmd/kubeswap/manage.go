@@ -476,8 +476,44 @@ func podReason(p *corev1.Pod) string {
 			return truncate("unscheduled: "+cond.Message, 64)
 		}
 	}
+	// A running but not-ready container inside the configured startup
+	// window is still loading a model (probes are expected to fail until
+	// the backend is up). Past the window it is stuck: the probe cannot be
+	// passing, most often because the backend bound to loopback (engines
+	// default to 127.0.0.1 without an explicit host flag) or the health
+	// path is wrong.
+	for _, cs := range p.Status.ContainerStatuses {
+		if r := cs.State.Running; r != nil && !r.StartedAt.Time.IsZero() {
+			if age := time.Since(r.StartedAt.Time); age > startupWindowFromSpec(p, cs.Name) {
+				return fmt.Sprintf("running %s, still not ready (probe failing?)", age.Truncate(time.Minute))
+			}
+		}
+	}
 	return "starting"
 }
+
+// startupWindowFromSpec reports the startup window configured for the
+// named container from the pod spec (the startup probe's
+// failureThreshold × periodSeconds — the exact load time the wrapper
+// allows before restarting the pod). A container without a startup probe
+// gets the generic fallback.
+func startupWindowFromSpec(p *corev1.Pod, container string) time.Duration {
+	for _, c := range p.Spec.Containers {
+		if c.Name != container {
+			continue
+		}
+		if sp := c.StartupProbe; sp != nil && sp.PeriodSeconds > 0 {
+			return time.Duration(sp.FailureThreshold*sp.PeriodSeconds) * time.Second
+		}
+	}
+	return stuckRunningThreshold
+}
+
+// stuckRunningThreshold Fallback window for a pod that carries no startup
+// probe: how long a container may be running while the pod stays not-ready
+// before the status reason escalates from "starting" (normal model load)
+// to "still not ready" (something is wrong).
+const stuckRunningThreshold = 5 * time.Minute
 
 // logsCmd Implements the logs subcommand: prints (and, with --follow, streams) the backend container logs of a model's pod.
 func logsCmd(args []string) error {

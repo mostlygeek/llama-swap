@@ -964,6 +964,85 @@ func TestKubeswap_PodReason(t *testing.T) {
 	if got := podReason(starting); got != "starting" {
 		t.Errorf("running pod: got %q, want starting", got)
 	}
+
+	// Running but not ready, container started recently: still a normal
+	// model load, not "stuck".
+	loading := &corev1.Pod{}
+	loading.Status.ContainerStatuses = []corev1.ContainerStatus{{
+		State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{
+			StartedAt: metav1.NewTime(time.Now().Add(-time.Minute)),
+		}},
+	}}
+	if got := podReason(loading); got != "starting" {
+		t.Errorf("recently started running pod: got %q, want starting", got)
+	}
+
+	// Running but not ready for a long time: the probe cannot be passing
+	// (the classic cause is a backend bound to loopback); say so. No
+	// startup probe in the spec, so the fallback window applies.
+	stuck := &corev1.Pod{}
+	stuck.Status.ContainerStatuses = []corev1.ContainerStatus{{
+		State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{
+			StartedAt: metav1.NewTime(time.Now().Add(-10 * time.Minute)),
+		}},
+	}}
+	if got := podReason(stuck); !strings.Contains(got, "still not ready") {
+		t.Errorf("long-running not-ready pod: got %q, want a stuck reason", got)
+	}
+
+	// Running beyond the generic window but INSIDE a configured startup
+	// window (the spec's startup probe allows ten minutes): a slow model
+	// load is still normal, not stuck.
+	slowLoad := &corev1.Pod{}
+	slowLoad.Spec.Containers = []corev1.Container{{
+		Name: "server",
+		StartupProbe: &corev1.Probe{
+			PeriodSeconds:    5,
+			FailureThreshold: 120, // 120 × 5s = 10m startup window
+		},
+	}}
+	slowLoad.Status.ContainerStatuses = []corev1.ContainerStatus{{
+		Name: "server",
+		State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{
+			StartedAt: metav1.NewTime(time.Now().Add(-7 * time.Minute)),
+		}},
+	}}
+	if got := podReason(slowLoad); got != "starting" {
+		t.Errorf("slow load inside its startup window: got %q, want starting", got)
+	}
+
+	// ... and the same pod past the window is stuck again.
+	slowLoad.Status.ContainerStatuses[0].State.Running.StartedAt = metav1.NewTime(time.Now().Add(-11 * time.Minute))
+	if got := podReason(slowLoad); !strings.Contains(got, "still not ready") {
+		t.Errorf("load past its startup window: got %q, want a stuck reason", got)
+	}
+}
+
+// TestKubeswap_PodNotReadyReason verifies the wrapper's readiness reason
+// describes a running container neutrally inside the startup window and
+// only offers the loopback diagnosis once the window has elapsed.
+func TestKubeswap_PodNotReadyReason(t *testing.T) {
+	window := 10 * time.Minute
+
+	pod := &corev1.Pod{}
+	pod.Name = "smollm2-abc"
+	pod.Status.Phase = corev1.PodRunning
+	pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+		Name: "server",
+		State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{
+			StartedAt: metav1.NewTime(time.Now().Add(-time.Minute)),
+		}},
+	}}
+	if got := podNotReadyReason(pod, window); strings.Contains(got, "probes not passing") {
+		t.Errorf("running pod inside the startup window: got %q, want no stuck diagnosis", got)
+	}
+
+	// Past the window: the loopback diagnosis is the point of the hint.
+	pod.Status.ContainerStatuses[0].State.Running.StartedAt = metav1.NewTime(time.Now().Add(-11 * time.Minute))
+	got := podNotReadyReason(pod, window)
+	if !strings.Contains(got, "server running but probes not passing") || !strings.Contains(got, "0.0.0.0") {
+		t.Errorf("running pod past the startup window: got %q, want the probe/loopback hint", got)
+	}
 }
 
 // TestKubeswap_RunLogs verifies log tailing: a model with no pod gets a
