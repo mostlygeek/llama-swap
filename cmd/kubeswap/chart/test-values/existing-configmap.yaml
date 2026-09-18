@@ -1,0 +1,7 @@
+# config.existing: the chart mounts a ConfigMap it does not render and
+# renders no ConfigMap of its own (the checksum annotation is skipped).
+config:
+  existing: my-config
+  extraFiles:
+    server.json: |
+      { "port": 9999 }

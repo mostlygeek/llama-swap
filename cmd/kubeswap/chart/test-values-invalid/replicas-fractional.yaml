@@ -1,0 +1,3 @@
+# replicas must be exactly 1: fractional values render an invalid
+# Deployment.
+replicas: 0.5

@@ -1,0 +1,3 @@
+# replicas > 1 must fail at render time (two head-ends would both drive
+# the same backend workloads).
+replicas: 2

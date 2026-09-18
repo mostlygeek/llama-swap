@@ -4,7 +4,7 @@ summary: Choosing between the group and matrix routers, and how each decides wha
 category: guides
 tags: [routing, groups, matrix, concurrency, swap, vram]
 config_keys: [routing, routing.router.use, routing.router.settings.groups, routing.router.settings.matrix]
-updated: 2026-08-25
+updated: 2026-09-14
 ---
 
 # Running several models at once: groups and matrix
@@ -119,6 +119,12 @@ Two things worth internalising:
 `evict_costs` (default 1) is how you express "this one is painful to reload".
 Give slow cold-starting backends a high cost.
 
+When you deploy the head end with the kubeswap Helm chart, the chart's
+`config.matrix` values can *generate* this whole section from the model
+roster instead of you writing the DSL (see the kubeswap-kubernetes
+article's matrix-builder section); hand-written routing and the builder are
+mutually exclusive.
+
 ## Which one?
 
 Use **group** if your setup is describable as "these run together, those swap
@@ -149,3 +155,5 @@ Higher numbers are serviced first. Models default to 0.
 
 - `reference/config/routing` — the full annotated section
 - `guides/model-runtime/ttl-and-unloading` — reclaiming VRAM from idle models
+- `guides/operations/kubeswap-kubernetes` — the kubeswap Helm chart, whose
+  `config.matrix` builds this section from the model roster

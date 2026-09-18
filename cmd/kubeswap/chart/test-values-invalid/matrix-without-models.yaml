@@ -1,0 +1,10 @@
+# config.matrix generates routing from the model roster, so it requires
+# config.models; with an inline config there is no roster to read.
+config:
+  inline: |
+    models:
+      demo:
+        proxy: "http://127.0.0.1:${PORT}"
+  matrix:
+    builder: gpu-budget
+    budget: 1

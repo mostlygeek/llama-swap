@@ -1,0 +1,12 @@
+# config.existing mounts a ConfigMap the chart does not render, so
+# config.matrix would be silently ignored; refuse instead.
+config:
+  existing: my-config
+  matrix:
+    builder: gpu-budget
+    budget: 1
+  defaults:
+    gpu: [amd.com/gpu=1]
+  models:
+    - id: llm-a
+      args: --model /models/a.gguf

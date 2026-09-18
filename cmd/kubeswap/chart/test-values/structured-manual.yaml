@@ -1,0 +1,25 @@
+# Structured config with the manual matrix builder: the matrix DSL is
+# rendered verbatim (the chart does not parse it; the router does).
+config:
+  matrix:
+    builder: manual
+    manual:
+      vars:
+        a: llm-a
+        b: llm-b
+      evict_costs:
+        a: 5
+      sets:
+        llms: (a | b)
+        all: +llms & asr
+  defaults:
+    image: ghcr.io/mostlygeek/llama-swap:unified-vulkan
+    gpu: [amd.com/gpu=1]
+  models:
+    - id: llm-a
+      args: --model /models/a.gguf
+    - id: llm-b
+      args: --model /models/b.gguf
+    - id: asr
+      gpu: []
+      args: --model /models/asr.bin

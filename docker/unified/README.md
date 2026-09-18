@@ -7,10 +7,18 @@ These scripts create a custom llama-swap container that contains:
 - whisper.cpp for ASR
 - audiocpp_server (audio.cpp) for TTS and audio tasks (`/audioapi/v1/tasks/run`)
 - vllm-wrapper for vLLM sleep mode support (see [cmd/vllm-wrapper](../../cmd/vllm-wrapper/README.md))
+- kubeswap for managing inference backends in a Kubernetes namespace (see [cmd/kubeswap](../../cmd/kubeswap/README.md))
 
 `vllm-wrapper` is built from the same llama-swap revision as the `llama-swap`
 binary in the image. It expects a vLLM server started with `--enable-sleep-mode`
 that is reachable from the container; vLLM itself is not included in the image.
+
+`kubeswap` is likewise built from the same revision. It is a backend wrapper:
+a model's `cmd` runs `kubeswap serve`, which creates/adopts a Deployment +
+Service in a namespace and proxies a local port to the backend pod; `cmdStop`
+runs `kubeswap delete`. A Kubernetes client (in-cluster token or kubeconfig)
+and namespaced RBAC (the Helm chart in `cmd/kubeswap/chart/`
+renders a starter ServiceAccount + Role + RoleBinding) are required.
 
 ## Building
 
@@ -70,6 +78,16 @@ tags, so a tag users pull never names one platform's image. If any platform fail
 its build, the manifest job does not run: the arch-qualified images that did
 succeed are still published, but the shared tag keeps pointing at the last
 complete build rather than silently losing an architecture.
+
+Release-versioned tags (`unified-<variant>-NNN`) are minted separately by
+the chart's publish workflow (`.github/workflows/publish-chart.yml`) when a
+llama-swap release tag `vNNN` is pushed: it aliases the then-current
+floating `unified-<variant>` manifest as `unified-<variant>-NNN` for each
+variant (digest logged), so the kubeswap chart published for that release
+can default to an image tag that is versioned together with it. This
+pipeline itself is unchanged: it builds on schedule and on manual
+dispatch, and the versioned tags are release-time names for whatever the
+floating tags point at at that moment.
 
 ### Layout
 

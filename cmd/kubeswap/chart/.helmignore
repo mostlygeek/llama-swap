@@ -1,0 +1,4 @@
+# Test fixtures for the repo's `make test-chart`; they are not part of
+# the packaged chart.
+test-values/
+test-values-invalid/
