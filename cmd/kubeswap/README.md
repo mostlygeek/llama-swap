@@ -582,6 +582,17 @@ error during a watch is printed and the watch continues.
   image pull failure, crash loop, ...).
 - `kubeswap logs --model <id>` — the backend's own logs; model load errors
   (bad path, OOM, missing device) show up here.
+- A model that stays in loading while its pod is Running: once the
+  configured startup window (`--startup-timeout`, default ten minutes)
+  has elapsed without the pod becoming ready, the REASON column (and the
+  wrapper's log) escalates from `starting` to `running Xm, still not
+  ready (probe failing?)`. That means the backend is up but the
+  readiness probe cannot pass — most often the engine bound to 127.0.0.1
+  (engines default to loopback without an explicit host flag; its log
+  says `listening on http://127.0.0.1:…`): add `--host 0.0.0.0` (or the
+  engine's equivalent) to the model's backend args, or fix
+  `--health-path`. (A load inside the window still reads `starting` —
+  that is a normal slow load, not a stuck probe.)
 - A model whose backend crashes fails fast: `serve` detects the crashed
   container within one poll, flushes the pod logs, tears down the model's
   Deployment and Service, and exits with the backend's exit code —

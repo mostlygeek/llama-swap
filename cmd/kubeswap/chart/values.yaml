@@ -50,6 +50,11 @@ config:
   # Hugging Face into a per-pod emptyDir (no PVC required). Point it at your
   # own models and a pre-staged model-cache PVC for real use (see
   # extraResources for the PVC, and the README for a multi-engine config).
+  #
+  # Note the explicit --host 0.0.0.0 in the model args: llama-server (and
+  # other engines) bind to 127.0.0.1 by default, and a backend reachable
+  # only from inside its own pod can never pass the readiness probe — the
+  # model would sit in loading forever.
   inline: |
     healthCheckTimeout: 300
     unloadTimeout: 60
@@ -66,7 +71,8 @@ config:
 
     models:
       smollm2:
-        proxy: "http://127.0.0.1:${PORT}"
+        # No proxy: llama-swap defaults it to http://localhost:${PORT},
+        # where the wrapper listens.
         cmd: >-
           kubeswap serve
           --listen 127.0.0.1:${PORT}
@@ -77,6 +83,7 @@ config:
           --volume emptydir:model-cache:/models
           --volume emptydir:slots:/slots
           --
+          --host 0.0.0.0
           --model /models/SmolLM2-135M-Instruct-Q4_0.gguf
           -hf QuantFactory/SmolLM2-135M-Instruct-GGUF:Q4_0
           --port 8080
