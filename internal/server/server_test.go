@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mostlygeek/llama-swap/internal/capcompat"
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/docagent"
 	"github.com/mostlygeek/llama-swap/internal/event"
@@ -93,6 +94,7 @@ func newTestServerWithConfig(cfg config.Config, local router.LocalRouter, peer r
 		inflight:    newInflightTracker(),
 		metrics:     newMetricsMonitor(proxylog, 0, 0, st),
 		store:       st,
+		capcompat:   capcompat.New(st.Cache(), proxylog),
 		local:       local,
 		peer:        peer,
 		shutdownCtx: ctx,

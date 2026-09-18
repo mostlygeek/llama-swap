@@ -25,6 +25,7 @@ type Store struct {
 	db       *sql.DB
 	inMemory bool
 	activity *activityRepository
+	cache    *cacheRepository
 }
 
 var _ store.Store = (*Store)(nil)
@@ -67,11 +68,19 @@ func New(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	return &Store{
+	s := &Store{
 		db:       db,
 		inMemory: !diskFile,
 		activity: &activityRepository{db: db},
-	}, nil
+		cache:    &cacheRepository{db: db},
+	}
+	// Drop cache rows that expired while the process was not running, so a
+	// long-lived database does not accumulate them.
+	if err := s.cache.Prune(ctx); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return s, nil
 }
 
 func runMigrations(ctx context.Context, db *sql.DB) error {
@@ -92,6 +101,11 @@ func runMigrations(ctx context.Context, db *sql.DB) error {
 // Activity implements store.Store.
 func (s *Store) Activity() store.ActivityRepository {
 	return s.activity
+}
+
+// Cache implements store.Store.
+func (s *Store) Cache() store.CacheRepository {
+	return s.cache
 }
 
 // IsInMemory implements store.Store.

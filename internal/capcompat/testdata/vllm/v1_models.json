@@ -1,0 +1,30 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "meta-llama/Llama-3.1-8B-Instruct",
+      "object": "model",
+      "created": 1735142223,
+      "owned_by": "vllm",
+      "root": "meta-llama/Llama-3.1-8B-Instruct",
+      "parent": null,
+      "max_model_len": 131072,
+      "permission": [
+        {
+          "id": "modelperm-9a1c0f2e3b5d4a7c8e6f1b2d3c4a5b6e",
+          "object": "model_permission",
+          "created": 1735142223,
+          "allow_create_engine": false,
+          "allow_sampling": true,
+          "allow_logprobs": true,
+          "allow_search_indices": false,
+          "allow_view": true,
+          "allow_fine_tuning": false,
+          "organization": "*",
+          "group": null,
+          "is_blocking": false
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "default_generation_settings": {
+    "id": 0,
+    "n_ctx": 8192,
+    "params": {
+      "n_predict": -1
+    }
+  },
+  "total_slots": 1,
+  "model_path": "../models/Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf",
+  "chat_template": "{%- for message in messages %}{{ message.content }}{%- endfor %}",
+  "chat_template_caps": {
+    "supports_tools": false,
+    "supports_tool_calls": false,
+    "supports_system_role": true,
+    "supports_parallel_tool_calls": false,
+    "supports_string_content": true,
+    "supports_typed_content": true,
+    "supports_object_arguments": false
+  },
+  "modalities": {
+    "vision": true,
+    "audio": false
+  },
+  "media_marker": "<__media__>",
+  "build_info": "b6100-0e1f797",
+  "is_sleeping": false
+}

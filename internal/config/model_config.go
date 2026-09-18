@@ -26,16 +26,52 @@ var validModalities = map[string]struct{}{
 // Used in /v1/models to inform clients. An empty block (all zero values) is
 // treated as not configured.
 type ModelCapConfig struct {
-	In       []string `yaml:"in"`
-	Out      []string `yaml:"out"`
-	Tools    bool     `yaml:"tools"`
-	Reranker bool     `yaml:"reranker"`
-	Context  int      `yaml:"context"`
+	In       []string `yaml:"in" json:"in,omitempty"`
+	Out      []string `yaml:"out" json:"out,omitempty"`
+	Tools    bool     `yaml:"tools" json:"tools,omitempty"`
+	Reranker bool     `yaml:"reranker" json:"reranker,omitempty"`
+	Context  int      `yaml:"context" json:"context,omitempty"`
+
+	// DisableAuto turns off automatic capability discovery for this model.
+	// It is a switch, not a capability, so Empty ignores it and it is never
+	// rendered into /v1/models.
+	DisableAuto bool `yaml:"disableAuto" json:"-"`
 }
 
-// Empty returns true when all fields are at their zero values.
+// Empty returns true when all capability fields are at their zero values.
+// DisableAuto is deliberately excluded: a block that only turns discovery off
+// still advertises nothing, so it must render as if it were absent.
 func (c ModelCapConfig) Empty() bool {
 	return len(c.In) == 0 && len(c.Out) == 0 && !c.Tools && !c.Reranker && c.Context == 0
+}
+
+// Merge returns c with every field left at its zero value filled in from
+// auto. Configured values always win, field by field, so a model that sets
+// only capabilities.tools still picks up a discovered context length.
+//
+// A field explicitly set to its zero value in the config is indistinguishable
+// from an omitted one, so `tools: false` cannot override a discovered true.
+// Use capabilities.disableAuto to suppress discovery for the model instead.
+//
+// DisableAuto is carried over from c unchanged; auto never sets it.
+func (c ModelCapConfig) Merge(auto ModelCapConfig) ModelCapConfig {
+	merged := c
+	if len(merged.In) == 0 {
+		merged.In = auto.In
+	}
+	if len(merged.Out) == 0 {
+		merged.Out = auto.Out
+	}
+	if !merged.Tools {
+		merged.Tools = auto.Tools
+	}
+	if !merged.Reranker {
+		merged.Reranker = auto.Reranker
+	}
+	if merged.Context == 0 {
+		merged.Context = auto.Context
+	}
+	return merged
 }
 
 // Validate checks that all modality values are recognized and context is
