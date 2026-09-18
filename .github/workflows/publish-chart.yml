@@ -68,17 +68,24 @@ jobs:
 
       # Mint the release-numbered image names the published chart
       # references, as aliases of the current floating manifests. A
-      # re-run re-points the tags (-f) and logs the digest they land on,
-      # so the alias is auditable.
+      # re-run re-points the tags at whatever the floating manifest is
+      # then, and the digest each alias lands on is logged so the alias
+      # is auditable. Note imagetools create has no force flag: -f is
+      # --file (read a source descriptor), and re-tagging an existing
+      # name needs no flag.
       - name: Cut versioned docker tags
         env:
           VER: ${{ steps.version.outputs.version }}
         run: |
           for variant in vulkan cuda cuda13; do
-            docker buildx imagetools create -f \
+            docker buildx imagetools create \
               -t "ghcr.io/mostlygeek/llama-swap:unified-${variant}-${VER}" \
               "ghcr.io/mostlygeek/llama-swap:unified-${variant}"
-            echo "unified-${variant}-${VER} -> $(docker buildx imagetools inspect "ghcr.io/mostlygeek/llama-swap:unified-${variant}-${VER}" | head -1)"
+            digest="$(docker buildx imagetools inspect \
+              --format '{{json .Manifest}}' \
+              "ghcr.io/mostlygeek/llama-swap:unified-${variant}-${VER}" \
+              | jq -r .digest)"
+            echo "unified-${variant}-${VER} -> ${digest}"
           done
 
       # helm ships on the runner; the fallback keeps the step working if a
