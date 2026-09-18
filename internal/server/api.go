@@ -314,11 +314,6 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 		data = filtered
 	}
 
-	// Echo the Origin so browser clients can read the listing.
-	if origin := r.Header.Get("Origin"); origin != "" {
-		w.Header().Set("Access-Control-Allow-Origin", origin)
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
 		"object": "list",

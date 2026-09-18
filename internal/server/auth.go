@@ -59,17 +59,21 @@ func CreateRequestContextMiddleware(cfg config.Config) chain.Middleware {
 }
 
 // CreateCORSMiddleware returns middleware that answers OPTIONS preflight
-// requests with permissive CORS headers (see issues #81, #77, #42). Non-OPTIONS
-// requests pass through untouched.
+// requests with permissive CORS headers (see issues #81, #77, #42) and sets
+// Access-Control-Allow-Origin on every other response too. A passing preflight
+// is not enough on its own: the browser also requires the header on the actual
+// response, and without it a cross-origin GET /running or POST
+// /api/models/unload is discarded before the page can read it.
 func CreateCORSMiddleware() chain.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+
 			if r.Method != http.MethodOptions {
 				next.ServeHTTP(w, r)
 				return
 			}
 
-			w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			if headers := r.Header.Get("Access-Control-Request-Headers"); headers != "" {
 				w.Header().Set("Access-Control-Allow-Headers", sanitizeAccessControlRequestHeaderValues(headers))
