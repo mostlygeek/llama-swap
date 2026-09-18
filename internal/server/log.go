@@ -215,13 +215,15 @@ func (sr *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 // ok is false when neither header is set.
 func forwardedIP(r *http.Request) (ip string, ok bool) {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if first, _, found := strings.Cut(xff, ","); found {
-			return strings.TrimSpace(first), true
+		first, _, _ := strings.Cut(xff, ",")
+		if trimmed := strings.TrimSpace(first); trimmed != "" {
+			return trimmed, true
 		}
-		return strings.TrimSpace(xff), true
 	}
 	if xr := r.Header.Get("X-Real-IP"); xr != "" {
-		return strings.TrimSpace(xr), true
+		if trimmed := strings.TrimSpace(xr); trimmed != "" {
+			return trimmed, true
+		}
 	}
 	return "", false
 }

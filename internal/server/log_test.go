@@ -96,6 +96,14 @@ func TestServer_ClientIP(t *testing.T) {
 			r.Header.Set("X-Forwarded-For", "1.2.3.4, 5.6.7.8")
 		}, "1.2.3.4"},
 		{"x-real-ip", func(r *http.Request) { r.Header.Set("X-Real-IP", "9.9.9.9") }, "9.9.9.9"},
+		{"x-forwarded-for whitespace-only first entry falls back to x-real-ip", func(r *http.Request) {
+			r.Header.Set("X-Forwarded-For", "   , 5.6.7.8")
+			r.Header.Set("X-Real-IP", "9.9.9.9")
+		}, "9.9.9.9"},
+		{"x-forwarded-for empty first entry falls back to remote addr", func(r *http.Request) {
+			r.Header.Set("X-Forwarded-For", ",5.6.7.8")
+			r.RemoteAddr = "10.0.0.9:1234"
+		}, "10.0.0.9"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
