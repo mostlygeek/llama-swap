@@ -19,6 +19,11 @@ name: Publish Helm chart
 #
 # The checked-in Chart.yaml (0.1.0) and values.yaml (floating tag, for
 # dev use) stay as they are; both are overridden at publish time only.
+#
+# A tag push publishes the chart as of that tag. A manual run publishes
+# the chart as of the ref it is dispatched from and takes only the
+# release number from the tag input, so a release tagged before the
+# chart existed can still get a chart.
 
 on:
   push:
@@ -40,12 +45,15 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
+      # The triggering ref is checked out: the release tag for a tag push,
+      # the ref the run was dispatched from for a manual run. A manual run
+      # therefore publishes the chart as it stands on the ref you dispatch
+      # from, and the tag input only supplies the release number. That is
+      # deliberate: the chart moves independently of the release tags (it
+      # did not exist at v256), and a versioned name that pointed at a
+      # commit without a chart could not be published at all.
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
-        with:
-          # The tag ref is checked out for tag pushes; for dispatch the
-          # input names the tag whose chart commit to publish.
-          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Resolve version
         id: version
@@ -98,19 +106,42 @@ jobs:
           fi
           helm version --short
 
+      # helm keeps its own credential store (HELM_REGISTRY_CONFIG,
+      # ~/.config/helm/registry/config.json) and does not read
+      # ~/.docker/config.json, so the docker login above does not cover
+      # `helm push`. Log in again for helm, or the push 401s.
+      - name: Log in to GitHub Container Registry for helm
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | helm registry login ghcr.io \
+            --username "${{ github.actor }}" --password-stdin
+
       # Leave the published chart's image.tag unset: the image helper then
       # derives unified-vulkan-<appVersion>, so the release number comes
       # from the app version field instead of being codified into the tag
       # string. The checked-in default (floating tag) stays for dev use.
+      # The edit is asserted rather than assumed: a silent sed no-op would
+      # otherwise publish a chart pinned to the floating tag.
       - name: Unset the default image tag for the published chart
+        env:
+          VALUES: cmd/kubeswap/chart/values.yaml
         run: |
-          sed -i 's/^  tag: unified-vulkan$/  tag: ""/' cmd/kubeswap/chart/values.yaml
-          grep -n '  tag:' cmd/kubeswap/chart/values.yaml | head -1
+          if [[ ! -f "$VALUES" ]]; then
+            echo "$VALUES is missing from the checked-out tree; the chart" \
+              "cannot be published from this ref" >&2
+            exit 1
+          fi
+          sed -i 's/^  tag: unified-vulkan$/  tag: ""/' "$VALUES"
+          if ! grep -q '^  tag: ""$' "$VALUES"; then
+            echo "failed to unset image.tag in $VALUES; the default tag line" \
+              "no longer matches what this step edits" >&2
+            grep -n 'tag:' "$VALUES" >&2
+            exit 1
+          fi
+          grep -n '  tag:' "$VALUES" | head -1
 
       - name: Package and push the chart
-        env:
-          HELM_REGISTRY_HOST: ghcr.io
-          HELM_REGISTRY_AUTH: $HOME/.docker/config.json
         run: |
           helm package cmd/kubeswap/chart \
             -d dist \
@@ -122,9 +153,6 @@ jobs:
       # default image resolves to the versioned docker release tag via
       # the app version.
       - name: Verify the published chart
-        env:
-          HELM_REGISTRY_HOST: ghcr.io
-          HELM_REGISTRY_AUTH: $HOME/.docker/config.json
         run: |
           helm show chart oci://ghcr.io/mostlygeek/llama-swap-helm/llama-swap \
             --version ${{ steps.version.outputs.chart-version }}
