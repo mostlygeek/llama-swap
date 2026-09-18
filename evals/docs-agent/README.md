@@ -6,8 +6,10 @@ Codex — can improve the Docs Agent's accuracy on a small local model by
 measuring, changing one thing, and measuring again.
 
 The CLI imports `ui/src/lib/agentLoop.ts`, `chatApi.ts` and `agentTools.ts`
-**unmodified**. What is measured here is exactly what the browser runs, so an
-improvement to the score is an improvement to the product.
+**unmodified**, through `ui/src/cli/headless.ts`. What is measured here is
+exactly what the browser runs, so an improvement to the score is an
+improvement to the product. The GitHub bot in `cmd/gh-helpbot/` answers
+through the same `headless.ts`, so it benefits from every improvement too.
 
 ## One server serves everything
 

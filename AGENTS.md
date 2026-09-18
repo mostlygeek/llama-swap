@@ -4,6 +4,8 @@ Only use these technologies:
 
 - Go 1.26+
 - Typescript, Vite and Svelte 5 for UI (ui/)
+- Typescript on Node 24, bundled with esbuild, for the GitHub bot (cmd/gh-helpbot/);
+  it imports the Help agent from ui/src and has no runtime dependencies
 - Docker
 - Markdown
 - YAML
@@ -21,6 +23,7 @@ Only use these technologies:
 - Use `go test -v -run <new tests>` to quickly check new tests
 - Use `make test-dev` after any changes to Go source
 - Use `make test-ui` after any changes in ui/
+- Use `make test-gh-helpbot` after any changes in cmd/gh-helpbot/, ui/src/lib/ or ui/src/cli/
 - Use `make test-all` for commiting changes
 - Use the ./build subdirectory for testing binary builds
 - Only when the user asks use `make eval-docs-agent` to score the
