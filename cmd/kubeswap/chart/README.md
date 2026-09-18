@@ -19,9 +19,7 @@ From the published OCI registry (one chart version per llama-swap
 release):
 
 ```bash
-helm repo add llama-swap oci://ghcr.io/mostlygeek/llama-swap-helm
-helm repo update
-helm install llama-swap llama-swap/llama-swap \
+helm install llama-swap oci://ghcr.io/mostlygeek/charts/llama-swap \
   -n llama-swap --create-namespace \
   --version 256.0.0    # the chart version for release v256; omit for latest
 ```
@@ -36,6 +34,12 @@ current floating `unified-<variant>` tags before publishing, so the names
 the chart references exist (each alias's digest is logged). Override
 `image.tag` per variant (`unified-cuda-NNN`, `unified-cuda13-NNN`) or to a
 floating tag.
+
+The workflow also runs on manual dispatch, which takes the ref to publish
+from (a tag, a branch or a commit) and the release number separately. That
+is how a chart change reaches the registry without tagging a release, and
+how a release tagged before this chart existed gets one; the release
+number is required whenever the ref is not a `vNNN` tag.
 
 For development, install from a checkout instead (the chart lives in
 `cmd/kubeswap/chart/`, with the floating image tag by default):

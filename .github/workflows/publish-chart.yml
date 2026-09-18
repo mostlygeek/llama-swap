@@ -3,9 +3,10 @@ name: Publish Helm chart
 # Publishes the kubeswap chart for a llama-swap release tag. Everything
 # this workflow does is chart publication:
 #
-#   * the chart is published at oci://ghcr.io/mostlygeek/llama-swap-helm as
+#   * the chart is published at oci://ghcr.io/mostlygeek/charts as
 #     version NNN.0.0 with the app version overridden to NNN (the release
-#     number, the local vNNN convention)
+#     number, the local vNNN convention). helm appends the chart name to
+#     the push target, so it lands at .../charts/llama-swap:NNN.0.0
 #   * its image.tag is left UNSET in the published values; the chart's
 #     image helper then derives the tag as unified-vulkan-<appVersion>, so
 #     the version lives in the app version field rather than being
@@ -19,6 +20,14 @@ name: Publish Helm chart
 #
 # The checked-in Chart.yaml (0.1.0) and values.yaml (floating tag, for
 # dev use) stay as they are; both are overridden at publish time only.
+#
+# A tag push publishes the chart as of that tag, with the release number
+# taken from the tag. A manual run publishes the chart as of the ref
+# input -- a tag, a branch or a commit -- and takes the release number
+# from the version input (or from the ref when it is a vNNN tag). That
+# split is what lets a release tagged before the chart existed get a
+# chart, and lets a chart change be published from a branch or a single
+# commit without tagging a release first.
 
 on:
   push:
@@ -28,9 +37,13 @@ on:
   # Allows manual triggering of the workflow
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Tag version to publish (e.g. v256)"
+      ref:
+        description: "Tag, branch or commit to publish the chart from (e.g. v256, main, 1a2b3c4)"
         required: true
+        default: main
+      version:
+        description: "Release number for the chart (e.g. 256). Required unless ref is a vNNN tag."
+        required: false
 
 permissions:
   contents: read
@@ -40,22 +53,73 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
+      # Full history and tags: the ref input may name a tag, a branch or a
+      # commit (including a short SHA), and a shallow clone cannot resolve
+      # an arbitrary one of those.
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
         with:
-          # The tag ref is checked out for tag pushes; for dispatch the
-          # input names the tag whose chart commit to publish.
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
 
-      - name: Resolve version
-        id: version
+      # A tag push already has its tag checked out. A manual run publishes
+      # whatever the ref input names, so resolve it here rather than in the
+      # checkout: tags, branches (as origin/<branch>), and full or short
+      # commit SHAs all resolve the same way, which `ref:` alone does not
+      # manage for a short SHA.
+      - name: Check out the requested ref
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          REF: ${{ inputs.ref }}
         run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          VER="${TAG#v}"
-          if [[ ! "$VER" =~ ^[0-9]+$ ]]; then
-            echo "tag $TAG does not follow the vNNN release convention" >&2
+          SHA=""
+          for candidate in "$REF" "origin/$REF"; do
+            if SHA="$(git rev-parse --verify --quiet "${candidate}^{commit}")"; then
+              break
+            fi
+            SHA=""
+          done
+          if [[ -z "$SHA" ]]; then
+            echo "ref '$REF' is not a tag, branch or commit in this" \
+              "repository" >&2
             exit 1
           fi
+          git checkout --detach "$SHA"
+          git --no-pager log -1 --format='publishing the chart from %H (%s)'
+
+      # The release number drives everything version-shaped here: the
+      # chart version NNN.0.0, the app version NNN, and the docker aliases
+      # unified-<variant>-NNN. The version input wins; otherwise it is
+      # taken from a vNNN ref. A branch or commit carries no release
+      # number, so publishing from one requires the version input rather
+      # than a guess -- guessing would quietly republish over an existing
+      # chart version.
+      - name: Resolve version
+        id: version
+        env:
+          REF: ${{ inputs.ref || github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ -n "$INPUT_VERSION" ]]; then
+            # A leading v is accepted so either 256 or v256 works.
+            VER="${INPUT_VERSION#v}"
+            if [[ ! "$VER" =~ ^[0-9]+$ ]]; then
+              echo "version input '$INPUT_VERSION' is not a release number;" \
+                "expected 256 or v256" >&2
+              exit 1
+            fi
+          else
+            # A vNNN tag carries the release number: v256 -> 256. This is
+            # the tag-push path, where there is no version input to fall
+            # back on, so the message has to make sense for both.
+            VER="${REF#v}"
+            if [[ ! "$VER" =~ ^[0-9]+$ ]]; then
+              echo "no release number can be taken from ref '$REF': it does" \
+                "not follow the vNNN release convention. On a manual run," \
+                "set the version input; a tag push must use a vNNN tag." >&2
+              exit 1
+            fi
+          fi
+          echo "publishing chart ${VER}.0.0 with app version ${VER}"
           echo "version=${VER}" >> "$GITHUB_OUTPUT"
           echo "chart-version=${VER}.0.0" >> "$GITHUB_OUTPUT"
 
@@ -68,17 +132,24 @@ jobs:
 
       # Mint the release-numbered image names the published chart
       # references, as aliases of the current floating manifests. A
-      # re-run re-points the tags (-f) and logs the digest they land on,
-      # so the alias is auditable.
+      # re-run re-points the tags at whatever the floating manifest is
+      # then, and the digest each alias lands on is logged so the alias
+      # is auditable. Note imagetools create has no force flag: -f is
+      # --file (read a source descriptor), and re-tagging an existing
+      # name needs no flag.
       - name: Cut versioned docker tags
         env:
           VER: ${{ steps.version.outputs.version }}
         run: |
           for variant in vulkan cuda cuda13; do
-            docker buildx imagetools create -f \
+            docker buildx imagetools create \
               -t "ghcr.io/mostlygeek/llama-swap:unified-${variant}-${VER}" \
               "ghcr.io/mostlygeek/llama-swap:unified-${variant}"
-            echo "unified-${variant}-${VER} -> $(docker buildx imagetools inspect "ghcr.io/mostlygeek/llama-swap:unified-${variant}-${VER}" | head -1)"
+            digest="$(docker buildx imagetools inspect \
+              --format '{{json .Manifest}}' \
+              "ghcr.io/mostlygeek/llama-swap:unified-${variant}-${VER}" \
+              | jq -r .digest)"
+            echo "unified-${variant}-${VER} -> ${digest}"
           done
 
       # helm ships on the runner; the fallback keeps the step working if a
@@ -91,40 +162,66 @@ jobs:
           fi
           helm version --short
 
+      # helm keeps its own credential store (HELM_REGISTRY_CONFIG,
+      # ~/.config/helm/registry/config.json) and does not read
+      # ~/.docker/config.json, so the docker login above does not cover
+      # `helm push`. Log in again for helm, or the push 401s.
+      - name: Log in to GitHub Container Registry for helm
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | helm registry login ghcr.io \
+            --username "${{ github.actor }}" --password-stdin
+
       # Leave the published chart's image.tag unset: the image helper then
       # derives unified-vulkan-<appVersion>, so the release number comes
       # from the app version field instead of being codified into the tag
       # string. The checked-in default (floating tag) stays for dev use.
+      # The edit is asserted rather than assumed: a silent sed no-op would
+      # otherwise publish a chart pinned to the floating tag.
       - name: Unset the default image tag for the published chart
+        env:
+          VALUES: cmd/kubeswap/chart/values.yaml
         run: |
-          sed -i 's/^  tag: unified-vulkan$/  tag: ""/' cmd/kubeswap/chart/values.yaml
-          grep -n '  tag:' cmd/kubeswap/chart/values.yaml | head -1
+          if [[ ! -f "$VALUES" ]]; then
+            echo "$VALUES is missing from the checked-out tree; the chart" \
+              "cannot be published from this ref" >&2
+            exit 1
+          fi
+          sed -i 's/^  tag: unified-vulkan$/  tag: ""/' "$VALUES"
+          if ! grep -q '^  tag: ""$' "$VALUES"; then
+            echo "failed to unset image.tag in $VALUES; the default tag line" \
+              "no longer matches what this step edits" >&2
+            grep -n 'tag:' "$VALUES" >&2
+            exit 1
+          fi
+          grep -n '  tag:' "$VALUES" | head -1
 
       - name: Package and push the chart
-        env:
-          HELM_REGISTRY_HOST: ghcr.io
-          HELM_REGISTRY_AUTH: $HOME/.docker/config.json
         run: |
           helm package cmd/kubeswap/chart \
             -d dist \
             --version ${{ steps.version.outputs.chart-version }} \
             --app-version ${{ steps.version.outputs.version }}
-          helm push dist/llama-swap-*.tgz oci://ghcr.io/mostlygeek/llama-swap-helm
+          helm push dist/llama-swap-*.tgz oci://ghcr.io/mostlygeek/charts
 
       # Prove the end result: pull the chart back and render it, so the
       # default image resolves to the versioned docker release tag via
-      # the app version.
+      # the app version. The destination is created with mktemp -d: helm
+      # writes its download into a temp file inside -d and does not
+      # create that directory, so a missing one fails the pull, and a
+      # fresh one keeps the glob below matching exactly one chart.
       - name: Verify the published chart
         env:
-          HELM_REGISTRY_HOST: ghcr.io
-          HELM_REGISTRY_AUTH: $HOME/.docker/config.json
+          CHART: oci://ghcr.io/mostlygeek/charts/llama-swap
+          CHART_VERSION: ${{ steps.version.outputs.chart-version }}
+          VER: ${{ steps.version.outputs.version }}
         run: |
-          helm show chart oci://ghcr.io/mostlygeek/llama-swap-helm/llama-swap \
-            --version ${{ steps.version.outputs.chart-version }}
-          helm pull oci://ghcr.io/mostlygeek/llama-swap-helm/llama-swap \
-            --version ${{ steps.version.outputs.chart-version }} -d /tmp/pulled
-          helm template llama-swap /tmp/pulled/llama-swap-*.tgz -n llama-swap \
+          helm show chart "$CHART" --version "$CHART_VERSION"
+          dest="$(mktemp -d)"
+          helm pull "$CHART" --version "$CHART_VERSION" -d "$dest"
+          helm template llama-swap "$dest"/llama-swap-*.tgz -n llama-swap \
             | grep -m1 "image: ghcr.io" \
-            | grep -q "unified-vulkan-${{ steps.version.outputs.version }}$" \
+            | grep -q "unified-vulkan-${VER}$" \
             || { echo "published chart does not default to the versioned image tag" >&2; exit 1; }
-          echo "published chart defaults to unified-vulkan-${{ steps.version.outputs.version }}"
+          echo "published chart defaults to unified-vulkan-${VER}"
