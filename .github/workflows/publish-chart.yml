@@ -20,10 +20,13 @@ name: Publish Helm chart
 # The checked-in Chart.yaml (0.1.0) and values.yaml (floating tag, for
 # dev use) stay as they are; both are overridden at publish time only.
 #
-# A tag push publishes the chart as of that tag. A manual run publishes
-# the chart as of the ref it is dispatched from and takes only the
-# release number from the tag input, so a release tagged before the
-# chart existed can still get a chart.
+# A tag push publishes the chart as of that tag, with the release number
+# taken from the tag. A manual run publishes the chart as of the ref
+# input -- a tag, a branch or a commit -- and takes the release number
+# from the version input (or from the ref when it is a vNNN tag). That
+# split is what lets a release tagged before the chart existed get a
+# chart, and lets a chart change be published from a branch or a single
+# commit without tagging a release first.
 
 on:
   push:
@@ -33,9 +36,13 @@ on:
   # Allows manual triggering of the workflow
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Tag version to publish (e.g. v256)"
+      ref:
+        description: "Tag, branch or commit to publish the chart from (e.g. v256, main, 1a2b3c4)"
         required: true
+        default: main
+      version:
+        description: "Release number for the chart (e.g. 256). Required unless ref is a vNNN tag."
+        required: false
 
 permissions:
   contents: read
@@ -45,25 +52,70 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      # The triggering ref is checked out: the release tag for a tag push,
-      # the ref the run was dispatched from for a manual run. A manual run
-      # therefore publishes the chart as it stands on the ref you dispatch
-      # from, and the tag input only supplies the release number. That is
-      # deliberate: the chart moves independently of the release tags (it
-      # did not exist at v256), and a versioned name that pointed at a
-      # commit without a chart could not be published at all.
+      # Full history and tags: the ref input may name a tag, a branch or a
+      # commit (including a short SHA), and a shallow clone cannot resolve
+      # an arbitrary one of those.
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
+        with:
+          fetch-depth: 0
 
-      - name: Resolve version
-        id: version
+      # A tag push already has its tag checked out. A manual run publishes
+      # whatever the ref input names, so resolve it here rather than in the
+      # checkout: tags, branches (as origin/<branch>), and full or short
+      # commit SHAs all resolve the same way, which `ref:` alone does not
+      # manage for a short SHA.
+      - name: Check out the requested ref
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          REF: ${{ inputs.ref }}
         run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          VER="${TAG#v}"
-          if [[ ! "$VER" =~ ^[0-9]+$ ]]; then
-            echo "tag $TAG does not follow the vNNN release convention" >&2
+          SHA=""
+          for candidate in "$REF" "origin/$REF"; do
+            if SHA="$(git rev-parse --verify --quiet "${candidate}^{commit}")"; then
+              break
+            fi
+            SHA=""
+          done
+          if [[ -z "$SHA" ]]; then
+            echo "ref '$REF' is not a tag, branch or commit in this" \
+              "repository" >&2
             exit 1
           fi
+          git checkout --detach "$SHA"
+          git --no-pager log -1 --format='publishing the chart from %H (%s)'
+
+      # The release number drives everything version-shaped here: the
+      # chart version NNN.0.0, the app version NNN, and the docker aliases
+      # unified-<variant>-NNN. The version input wins; otherwise it is
+      # taken from a vNNN ref. A branch or commit carries no release
+      # number, so publishing from one requires the version input rather
+      # than a guess -- guessing would quietly republish over an existing
+      # chart version.
+      - name: Resolve version
+        id: version
+        env:
+          REF: ${{ inputs.ref || github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ -n "$INPUT_VERSION" ]]; then
+            # A leading v is accepted so either 256 or v256 works.
+            VER="${INPUT_VERSION#v}"
+            if [[ ! "$VER" =~ ^[0-9]+$ ]]; then
+              echo "version input '$INPUT_VERSION' is not a release number;" \
+                "expected 256 or v256" >&2
+              exit 1
+            fi
+          else
+            VER="${REF#v}"
+            if [[ ! "$VER" =~ ^[0-9]+$ ]]; then
+              echo "cannot determine the release number: ref '$REF' does" \
+                "not follow the vNNN release convention, so set the version" \
+                "input to the release number, as in 256" >&2
+              exit 1
+            fi
+          fi
+          echo "publishing chart ${VER}.0.0 with app version ${VER}"
           echo "version=${VER}" >> "$GITHUB_OUTPUT"
           echo "chart-version=${VER}.0.0" >> "$GITHUB_OUTPUT"
 

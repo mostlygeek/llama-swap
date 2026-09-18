@@ -37,6 +37,12 @@ the chart references exist (each alias's digest is logged). Override
 `image.tag` per variant (`unified-cuda-NNN`, `unified-cuda13-NNN`) or to a
 floating tag.
 
+The workflow also runs on manual dispatch, which takes the ref to publish
+from (a tag, a branch or a commit) and the release number separately. That
+is how a chart change reaches the registry without tagging a release, and
+how a release tagged before this chart existed gets one; the release
+number is required whenever the ref is not a `vNNN` tag.
+
 For development, install from a checkout instead (the chart lives in
 `cmd/kubeswap/chart/`, with the floating image tag by default):
 
