@@ -1,0 +1,12 @@
+# exclusive entries must name real model ids.
+config:
+  matrix:
+    builder: gpu-budget
+    budget: 1
+    exclusive:
+      - not-a-model
+  defaults:
+    gpu: [amd.com/gpu=1]
+  models:
+    - id: llm-a
+      args: --model /models/a.gguf

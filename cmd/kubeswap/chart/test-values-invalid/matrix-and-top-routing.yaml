@@ -1,0 +1,21 @@
+# config.matrix and a hand-written routing under config.top are mutually
+# exclusive; the chart must refuse to render.
+config:
+  top:
+    routing:
+      router:
+        use: group
+        settings:
+          groups:
+            demo:
+              swap: true
+              exclusive: true
+              members: [llm-a]
+  matrix:
+    builder: gpu-budget
+    budget: 1
+  defaults:
+    gpu: [amd.com/gpu=1]
+  models:
+    - id: llm-a
+      args: --model /models/a.gguf

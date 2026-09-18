@@ -7,6 +7,7 @@ Only use these technologies:
 - Typescript on Node 24, bundled with esbuild, for the GitHub bot (cmd/gh-helpbot/);
   it imports the Help agent from ui/src and has no runtime dependencies
 - Docker
+- Kubernetes (API, e.g. client-go) for cmd/kubeswap ONLY
 - Markdown
 - YAML
 - Makefile

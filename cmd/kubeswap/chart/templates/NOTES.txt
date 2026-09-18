@@ -1,0 +1,31 @@
+llama-swap has been deployed to namespace "{{ .Release.Namespace }}".
+
+Head-end:
+  kubectl -n {{ .Release.Namespace }} get deploy {{ include "llama-swap.fullname" . }}
+
+Backend workloads the head-end manages (kubeswap ships in the same image):
+  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "llama-swap.fullname" . }} \
+    -- /usr/local/bin/kubeswap status --namespace {{ .Release.Namespace }}
+
+Try it (from a machine with cluster access):
+  kubectl -n {{ .Release.Namespace }} port-forward \
+    svc/{{ include "llama-swap.fullname" . }} 8080:{{ .Values.service.port }}
+  curl http://localhost:8080/v1/models
+  curl http://localhost:8080/v1/chat/completions \
+    -H 'Content-Type: application/json' \
+    -d '{"model":"<model id from config>","messages":[{"role":"user","content":"hello"}]}'
+
+Models are provisioned on demand: the first request for a model takes as
+long as its pod takes to start and load (healthCheckTimeout in config
+bounds that wait).
+{{- if .Values.ingress.enabled }}
+
+Ingress is enabled:
+{{- range .Values.ingress.hosts }}
+  http://{{ .host }}/
+{{- end }}
+{{- else if eq .Values.service.type "LoadBalancer" }}
+
+The service is a LoadBalancer; once the cloud provider assigns an address:
+  kubectl -n {{ .Release.Namespace }} get svc {{ include "llama-swap.fullname" . }}
+{{- end }}

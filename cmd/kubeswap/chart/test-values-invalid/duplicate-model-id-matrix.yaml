@@ -1,0 +1,14 @@
+# The duplicate-id check runs before the matrix branch, so a duplicate
+# must fail before pool membership or set identifiers are generated.
+config:
+  matrix:
+    builder: gpu-budget
+    budget: 1
+  defaults:
+    gpu: [amd.com/gpu=1]
+  models:
+    - id: llm-a
+      args: --model /models/a.gguf
+    - id: llm-a
+      gpu: []
+      args: --model /models/a2.gguf

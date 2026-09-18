@@ -1,0 +1,11 @@
+# budget 0 is not a mistake Helm should paper over (sprig default would
+# treat 0 as empty and quietly make it 1); refuse it.
+config:
+  matrix:
+    builder: gpu-budget
+    budget: 0
+  defaults:
+    gpu: [amd.com/gpu=1]
+  models:
+    - id: llm-a
+      args: --model /models/a.gguf

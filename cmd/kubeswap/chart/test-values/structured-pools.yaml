@@ -1,0 +1,27 @@
+# Structured config with the pools matrix builder: one pool with a budget
+# (llm) and one unlimited pool (audio).
+config:
+  matrix:
+    builder: pools
+    pools:
+      - name: llm
+        budget: 1
+      - name: audio
+  defaults:
+    image: ghcr.io/mostlygeek/llama-swap:unified-vulkan
+    gpu: [amd.com/gpu=1]
+  models:
+    - id: llm-a
+      pool: llm
+      args: --model /models/a.gguf
+    - id: llm-b
+      pool: llm
+      args: --model /models/b.gguf
+    - id: tts
+      pool: audio
+      gpu: []
+      args: --model /models/tts.bin
+    - id: asr
+      pool: audio
+      gpu: []
+      args: --model /models/asr.bin

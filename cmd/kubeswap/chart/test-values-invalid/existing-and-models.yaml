@@ -1,0 +1,7 @@
+# config.existing and config.models are mutually exclusive: with
+# existing set the chart ignores the structured config.
+config:
+  existing: my-config
+  models:
+    - id: llm-a
+      args: --model /models/a.gguf

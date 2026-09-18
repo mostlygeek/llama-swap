@@ -1,0 +1,15 @@
+# builder pools requires a pool key on every model entry.
+config:
+  matrix:
+    builder: pools
+    pools:
+      - name: llm
+        budget: 1
+  defaults:
+    gpu: [amd.com/gpu=1]
+  models:
+    - id: llm-a
+      pool: llm
+      args: --model /models/a.gguf
+    - id: llm-b
+      args: --model /models/b.gguf

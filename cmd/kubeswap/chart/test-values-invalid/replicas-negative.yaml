@@ -1,0 +1,3 @@
+# replicas must be exactly 1: negative values render an invalid
+# Deployment.
+replicas: -1

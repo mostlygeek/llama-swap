@@ -1,0 +1,393 @@
+// kubeswap is a cmd/cmdStop wrapper that lets llama-swap manage inference
+// backends in a Kubernetes namespace the same way it manages docker backends:
+// the model's cmd launches `kubeswap serve`, which creates (or adopts) a
+// Deployment + Service for the model and proxies a local port to it; the
+// model's cmdStop runs `kubeswap delete` to tear the objects down.
+//
+// Subcommands:
+//
+//	serve   long-running: lifecycle + local proxy (used as a model's cmd)
+//	start   one-shot: ensure a model's backend resources exist (pre-warm)
+//	delete  one-shot: delete a model's managed objects (used as cmdStop)
+//	gc      one-shot: delete managed objects for models not in the config
+//	status  one-shot: print the managed workloads
+//	logs    one-shot: print (or --follow) a model's backend logs
+package main
+
+import (
+	"errors"
+	"flag"
+	"fmt"
+	"os"
+	"runtime"
+	"sort"
+	"strconv"
+	"strings"
+
+	"k8s.io/apimachinery/pkg/api/resource"
+	content "k8s.io/apimachinery/pkg/api/validate/content"
+	kvalidation "k8s.io/apimachinery/pkg/util/validation"
+)
+
+const (
+	defaultNamespace      = "llama-swap"
+	containerName         = "server"
+	defaultPort           = 8080
+	defaultStartupTimeout = int64(600) // seconds of model loading the startup probe tolerates
+)
+
+// Set at build time via -ldflags (see the Makefile kubeswap target and
+// docker/unified/install-kubeswap.sh).
+var (
+	version   = "dev"
+	buildTime = ""
+)
+
+// printVersion Prints the kubeswap version (plus build time, when set) and exits.
+func printVersion() {
+	suffix := ""
+	if buildTime != "" {
+		suffix = ", built " + buildTime
+	}
+	fmt.Printf("kubeswap %s (go %s%s)\n", version, runtime.Version(), suffix)
+}
+
+// managed-object labels/annotations. Every object kubeswap creates carries
+// these so `gc` and adoption can find them later.
+const (
+	labelManagedBy    = "llama-swap.io/managed-by"
+	labelModel        = "llama-swap.io/model"
+	labelDeployment   = "llama-swap.io/deployment"
+	labelAppName      = "app.kubernetes.io/name"
+	managedByValue    = "llama-swap"
+	appNameValue      = "llama-swap-backend"
+	annotationModelID = "llama-swap.io/model-id"
+)
+
+// main is the entry point: it parses the subcommand and its arguments and dispatches to serve, start, delete, gc, status, logs or version.
+func main() {
+	if len(os.Args) < 2 {
+		usage(os.Stderr)
+		os.Exit(2)
+	}
+	var err error
+	switch os.Args[1] {
+	case "serve":
+		err = serveCmd(os.Args[2:])
+	case "start":
+		err = startCmd(os.Args[2:])
+	case "delete":
+		err = deleteCmd(os.Args[2:])
+	case "gc":
+		err = gcCmd(os.Args[2:])
+	case "status":
+		err = statusCmd(os.Args[2:])
+	case "logs":
+		err = logsCmd(os.Args[2:])
+	case "version":
+		printVersion()
+		return
+	case "help", "-h", "--help":
+		usage(os.Stdout)
+		return
+	default:
+		fmt.Fprintf(os.Stderr, "kubeswap: unknown command %q\n\n", os.Args[1])
+		usage(os.Stderr)
+		os.Exit(2)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "kubeswap %s: %v\n", os.Args[1], err)
+		var ee *exitError
+		if errors.As(err, &ee) {
+			os.Exit(ee.code)
+		}
+		os.Exit(1)
+	}
+}
+
+// usage Writes the command-line usage text to w.
+func usage(w *os.File) {
+	fmt.Fprint(w, `kubeswap - manage llama-swap inference backends in a Kubernetes namespace
+
+Usage:
+  kubeswap serve [flags] -- <container args...>
+  kubeswap start [flags] -- <container args...>
+  kubeswap delete --model <id> [flags]
+  kubeswap gc [flags]
+  kubeswap status [flags]
+  kubeswap logs --model <id> [flags]
+  kubeswap version
+
+Commands:
+  serve    Start as a forward proxy for a model's backend (a model's cmd).
+           Creates or adopts the model's Deployment + Service and proxies
+           --listen to the backend pod until stopped. SIGTERM exits without
+           deleting anything (the backend is kept for adoption on restart).
+  start    Like serve without the proxy: create (or adopt) the model's
+           backend resources and exit. Pre-warms a model so the first
+           request is fast, or manages a backend by hand.
+  delete   Delete a model's Deployment/Service (and PVCs with
+           --delete-volumes). Used as a model's cmdStop; a running serve
+           process exits on its own when it observes the deletion.
+  gc       Delete managed workloads whose model is not in the given list
+           (--models or --config pointing at a llama-swap config.yaml).
+  status   Print the managed workloads in the namespace, including why a
+           not-ready pod is not ready.
+  logs     Print a model's backend container logs (--tail, --follow);
+           the quick way to see why a model fails to load.
+  version  Print version and build information.
+
+Run "kubeswap <command> -h" for command flags.
+`)
+}
+
+// stringList is a repeatable flag value: --env K=V --env K2=V2.
+type stringList []string
+
+// String String implements flag.Value, returning the entries comma-joined.
+func (s *stringList) String() string { return strings.Join(*s, ",") }
+
+// Set Set implements flag.Value, appending an entry to the repeatable flag.
+func (s *stringList) Set(v string) error { *s = append(*s, v); return nil }
+
+// newFlagSet builds a per-command flag set with the shared kube flags.
+func newFlagSet(name string) *flag.FlagSet {
+	fs := flag.NewFlagSet(name, flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: kubeswap %s [flags]\n\nFlags:\n", name)
+		fs.PrintDefaults()
+	}
+	return fs
+}
+
+// addKubeFlags Adds the --namespace and --kubeconfig flags shared by every subcommand.
+func addKubeFlags(fs *flag.FlagSet, namespace, kubeconfig *string) {
+	fs.StringVar(namespace, "namespace", defaultNamespace, "Kubernetes namespace to manage")
+	fs.StringVar(kubeconfig, "kubeconfig", "", "Path to a kubeconfig (default: in-cluster config, then KUBECONFIG / ~/.kube/config)")
+}
+
+// parseEnvVars parses "K=V" entries (V may contain '='), validating K
+// with the API server's own rule (IsEnvVarName) so bad names fail at
+// flag parse instead of at Deployment creation.
+func parseEnvVars(entries []string) (out []envVar, err error) {
+	for _, e := range entries {
+		k, v, ok := strings.Cut(e, "=")
+		if !ok || len(kvalidation.IsEnvVarName(k)) > 0 {
+			return nil, fmt.Errorf("invalid --env %q (name must be a valid environment variable name: letters, digits, '_', '-', or '.', not starting with a digit)", e)
+		}
+		out = append(out, envVar{Key: k, Value: v})
+	}
+	return out, nil
+}
+
+// envVar is a plain key/value so the renderer stays decoupled from corev1 in
+// parse code paths (it is converted in the renderer).
+type envVar struct {
+	Key   string
+	Value string
+}
+
+// parseKeyValues parses repeated "K=V" entries, validating K and V with
+// the API server's own label rules (content.IsLabelKey / IsLabelValue)
+// so bad entries fail at flag parse instead of at Deployment creation.
+// Values are label values: no '=', so a K=V with '=' in the value is
+// rejected here (env vars use parseEnvVars, whose values are free-form).
+func parseKeyValues(entries []string, what string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, e := range entries {
+		k, v, ok := strings.Cut(e, "=")
+		if !ok {
+			return nil, fmt.Errorf("invalid --%s %q (want key=value)", what, e)
+		}
+		if errs := content.IsLabelKey(k); len(errs) > 0 {
+			return nil, fmt.Errorf("invalid --%s key %q: %v", what, k, errs)
+		}
+		if errs := content.IsLabelValue(v); len(errs) > 0 {
+			return nil, fmt.Errorf("invalid --%s value %q for key %q: %v", what, v, k, errs)
+		}
+		out[k] = v
+	}
+	return out, nil
+}
+
+// parseGPUs parses "resource=count" entries like "amd.com/gpu=1"; the count
+// is a positive whole number — GPUs are exclusive, non-shareable devices, so
+// fractions and words like "many" are errors, not quantities.
+func parseGPUs(entries []string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, e := range entries {
+		res, count, ok := strings.Cut(e, "=")
+		if !ok || res == "" || count == "" {
+			return nil, fmt.Errorf("invalid --gpu %q (want resource=count, e.g. amd.com/gpu=1)", e)
+		}
+		n, err := strconv.ParseInt(count, 10, 32)
+		if err != nil || n < 1 {
+			return nil, fmt.Errorf("invalid --gpu %q: count %q must be a positive whole number", e, count)
+		}
+		out[res] = count
+	}
+	return out, nil
+}
+
+// parseResources parses repeated "name=quantity" entries for resource
+// requests or limits, validating the quantities up front.
+func parseResources(entries []string, what string) (map[string]string, error) {
+	m, err := parseKeyValues(entries, what)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range m {
+		if _, err := resource.ParseQuantity(v); err != nil {
+			return nil, fmt.Errorf("invalid --%s quantity %s=%q: %v", what, k, v, err)
+		}
+	}
+	return m, nil
+}
+
+// servicePortSpec is one parsed --service-port entry: name:port.
+type servicePortSpec struct {
+	Name string
+	Port int32
+}
+
+// parseServicePorts parses "name:port" entries, rejecting duplicate names.
+// Container port names must be unique within the container, so the same
+// name on a different port is a duplicate too — renderPorts would emit
+// two ports with one name and the API server would reject the Deployment.
+func parseServicePorts(entries []string) ([]servicePortSpec, error) {
+	out := make([]servicePortSpec, 0, len(entries))
+	seen := map[string]bool{}
+	for _, e := range entries {
+		name, portS, ok := strings.Cut(e, ":")
+		if !ok || portS == "" {
+			return nil, fmt.Errorf("invalid --service-port %q (want name:port)", e)
+		}
+		if len(kvalidation.IsValidPortName(name)) > 0 {
+			return nil, fmt.Errorf("invalid --service-port name %q (IANA_SVC_NAME: up to 15 lowercase alphanumerics and hyphens, at least one letter, no consecutive or edge hyphens)", name)
+		}
+		port, err := strconv.Atoi(portS)
+		if err != nil || port < 1 || port > 65535 {
+			return nil, fmt.Errorf("invalid --service-port port %q (want 1-65535)", portS)
+		}
+		if seen[name] {
+			return nil, fmt.Errorf("duplicate --service-port %q", e)
+		}
+		seen[name] = true
+		out = append(out, servicePortSpec{Name: name, Port: int32(port)})
+	}
+	return out, nil
+}
+
+// parseTolerations parses "key:operator:value:effect" entries, validating
+// against the values Kubernetes accepts: operator is Equal or Exists (empty
+// defaults to Equal), effect is NoSchedule, PreferNoSchedule or NoExecute —
+// or empty, which tolerates every effect (e.g. "dedicated:Exists::" or the
+// tolerate-everything "::Exists:"). An empty key is only valid with Exists
+// (an Equal toleration without a key can never match a taint); a value is an
+// error with operator Exists. Invalid fields are rejected here, before
+// renderTolerations turns them into corev1 types ("All" was never a valid
+// effect).
+func parseTolerations(entries []string) ([]toleration, error) {
+	out := make([]toleration, 0, len(entries))
+	for _, e := range entries {
+		parts := strings.Split(e, ":")
+		if len(parts) != 4 {
+			return nil, fmt.Errorf("invalid --toleration %q (want key:operator:value:effect)", e)
+		}
+		key, op, value, effect := parts[0], parts[1], parts[2], parts[3]
+		if op == "" {
+			op = "Equal"
+		}
+		// A toleration value is a label value (only reachable with
+		// operator Equal; Exists requires an empty value below).
+		if value != "" {
+			if errs := content.IsLabelValue(value); len(errs) > 0 {
+				return nil, fmt.Errorf("invalid --toleration %q: value %q: %v", e, value, errs)
+			}
+		}
+		switch op {
+		case "Equal", "Exists":
+		default:
+			return nil, fmt.Errorf("invalid --toleration %q: operator %q (want Equal or Exists)", e, op)
+		}
+		switch effect {
+		case "", "NoSchedule", "PreferNoSchedule", "NoExecute":
+		default:
+			return nil, fmt.Errorf("invalid --toleration %q: effect %q (want NoSchedule, PreferNoSchedule, NoExecute, or empty for any effect)", e, effect)
+		}
+		if op == "Equal" && key == "" {
+			return nil, fmt.Errorf("invalid --toleration %q: key must not be empty when operator is Equal", e)
+		}
+		if op == "Exists" && value != "" {
+			return nil, fmt.Errorf("invalid --toleration %q: value must be empty when operator is Exists", e)
+		}
+		out = append(out, toleration{
+			Key: key, Operator: op, Value: value, Effect: effect,
+		})
+	}
+	return out, nil
+}
+
+type toleration struct {
+	Key      string
+	Operator string
+	Value    string
+	Effect   string
+}
+
+// volumeKind is a parsed --volume kind prefix.
+type volumeKind string
+
+const (
+	volPVC      volumeKind = "pvc"
+	volEmptyDir volumeKind = "emptydir"
+	volHostPath volumeKind = "hostpath"
+)
+
+// volumeSpec is one parsed --volume entry: kind:name:path[:ro].
+type volumeSpec struct {
+	Kind     volumeKind
+	Name     string
+	Path     string
+	ReadOnly bool
+}
+
+// parseVolumes parses "kind:name:path[:ro]" entries. kind is pvc, emptydir or
+// hostpath; for hostpath the "name" field is the path on the host.
+func parseVolumes(entries []string) ([]volumeSpec, error) {
+	out := make([]volumeSpec, 0, len(entries))
+	for _, e := range entries {
+		fields := strings.Split(e, ":")
+		if len(fields) < 3 || len(fields) > 4 {
+			return nil, fmt.Errorf("invalid --volume %q (want pvc|emptydir|hostpath:name:path[:ro])", e)
+		}
+		kind := volumeKind(fields[0])
+		switch kind {
+		case volPVC, volEmptyDir, volHostPath:
+		default:
+			return nil, fmt.Errorf("invalid --volume kind %q (want pvc, emptydir or hostpath)", fields[0])
+		}
+		if fields[1] == "" || fields[2] == "" {
+			return nil, fmt.Errorf("invalid --volume %q (name and mount path are required)", e)
+		}
+		spec := volumeSpec{Kind: kind, Name: fields[1], Path: fields[2]}
+		if len(fields) == 4 {
+			if fields[3] != "ro" {
+				return nil, fmt.Errorf("invalid --volume %q (access mode must be 'ro')", e)
+			}
+			spec.ReadOnly = true
+		}
+		out = append(out, spec)
+	}
+	return out, nil
+}
+
+// sortedKeys returns keys in stable order (deterministic manifests).
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
