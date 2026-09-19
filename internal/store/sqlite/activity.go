@@ -48,7 +48,16 @@ func (r *activityRepository) Insert(ctx context.Context, entry store.ActivityLog
 		return store.ActivityLogEntry{}, err
 	}
 
-	res, err := r.db.ExecContext(ctx, `
+	// Keep the activity row and its lifetime aggregate in one transaction. The
+	// row may later be pruned from the bounded activity log, but the aggregate
+	// must continue to count it.
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return store.ActivityLogEntry{}, fmt.Errorf("begin activity insert: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx, `
 		INSERT INTO activity (
 			ts_created, src, model_id, req_path, resp_content_type, resp_status_code,
 			cache_tokens, draft_tokens, draft_acc_tokens, input_tokens, output_tokens,
@@ -77,6 +86,18 @@ func (r *activityRepository) Insert(ctx context.Context, entry store.ActivityLog
 	id, err := res.LastInsertId()
 	if err != nil {
 		return store.ActivityLogEntry{}, fmt.Errorf("insert activity id: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO activity_totals (model_id, request_count)
+		VALUES (?, 1)
+		ON CONFLICT(model_id) DO UPDATE SET
+			request_count = request_count + 1`,
+		entry.Model,
+	); err != nil {
+		return store.ActivityLogEntry{}, fmt.Errorf("update activity totals: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return store.ActivityLogEntry{}, fmt.Errorf("commit activity insert: %w", err)
 	}
 	entry.ID = int(id)
 	return entry, nil
@@ -135,15 +156,26 @@ func (r *activityRepository) Stats(ctx context.Context, query store.ActivityStat
 	where, args := activityWhere(filter)
 	row := r.db.QueryRowContext(ctx, `
 		SELECT
-			COUNT(*),
 			COALESCE(SUM(input_tokens), 0),
 			COALESCE(SUM(output_tokens), 0),
 			COALESCE(SUM(CASE WHEN cache_tokens > 0 THEN cache_tokens ELSE 0 END), 0)
 		FROM activity`+where, args...)
 
 	var stats store.ActivityStats
-	if err := row.Scan(&stats.TotalRequests, &stats.TotalInputTokens, &stats.TotalOutputTokens, &stats.TotalCacheTokens); err != nil {
+	if err := row.Scan(&stats.TotalInputTokens, &stats.TotalOutputTokens, &stats.TotalCacheTokens); err != nil {
 		return store.ActivityStats{}, fmt.Errorf("activity stats: %w", err)
+	}
+
+	var requestCountQuery string
+	var requestCountArgs []any
+	if model := strings.TrimSpace(query.Model); model != "" {
+		requestCountQuery = `SELECT COALESCE((SELECT request_count FROM activity_totals WHERE model_id = ?), 0)`
+		requestCountArgs = []any{model}
+	} else {
+		requestCountQuery = `SELECT COALESCE(SUM(request_count), 0) FROM activity_totals`
+	}
+	if err := r.db.QueryRowContext(ctx, requestCountQuery, requestCountArgs...).Scan(&stats.TotalRequests); err != nil {
+		return store.ActivityStats{}, fmt.Errorf("activity request total: %w", err)
 	}
 
 	promptValues, genValues, err := r.speedValues(ctx, where, args)

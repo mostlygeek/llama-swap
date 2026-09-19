@@ -33,6 +33,7 @@ type ActivityRepository interface {
 	List(ctx context.Context, query ActivityQuery) (ActivityPage, error)
 
 	// Stats aggregates totals and speed histograms over the matching entries.
+	// TotalRequests remains a lifetime count when the backend prunes rows.
 	Stats(ctx context.Context, query ActivityStatsQuery) (ActivityStats, error)
 
 	// Prune deletes all but the newest maxRows entries. A maxRows of zero or
