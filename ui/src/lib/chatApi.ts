@@ -74,6 +74,12 @@ export interface ChatOptions {
    * last one. Defaults to on; see perTokenTimingsWanted.
    */
   timingsPerToken?: boolean;
+  /**
+   * Ask OpenAI-compatible backends to include usage in the final stream
+   * chunk. Defaults to on; strict backends can reject this otherwise-standard
+   * field, in which case streamChatCompletion retries without it.
+   */
+  streamOptions?: boolean;
 }
 
 function parseDataUrl(url: string): { media_type: string; data: string } {
@@ -128,8 +134,9 @@ function buildChatCompletionsBody(model: string, messages: ChatMessage[], option
     }),
     stream: true,
     // Asks for a final chunk carrying token usage so the playground can show
-    // per-turn stats. Standard OpenAI; backends that predate it ignore it.
-    stream_options: { include_usage: true },
+    // per-turn stats. Standard OpenAI; some strict backends reject it instead
+    // of ignoring it, so streamChatCompletion can retry without this field.
+    ...(options?.streamOptions === false ? {} : { stream_options: { include_usage: true } }),
     // llama.cpp extension: repeat the `timings` block on every chunk. Without
     // it the exact numbers only arrive in the final chunk, which a cancelled
     // stream never delivers.
@@ -520,14 +527,23 @@ function parseStream(
 }
 
 /**
- * Whether to keep asking for per-chunk timings. The parameter is a llama.cpp
- * extension, so a backend that validates its request body strictly answers
- * 400 and names the field. The first such rejection turns it off for the
- * rest of the session and the request is retried without it. A 400 that does
- * not mention the field is an ordinary error and is reported as one.
+ * Whether to keep asking for optional stream fields. The parameters are
+ * extensions (or optional additions) that strict OpenAI-compatible backends
+ * may reject by name. Remember the capability per model and endpoint so
+ * switching models does not make one backend's rejection affect another.
  */
-let perTokenTimingsWanted = true;
+const perTokenTimingsWanted = new Map<string, boolean>();
+const streamOptionsWanted = new Map<string, boolean>();
 const PER_TOKEN_TIMINGS_FIELD = "timings_per_token";
+const STREAM_OPTIONS_FIELDS = ["stream_options", "include_usage"];
+
+function capabilityKey(endpoint: Endpoint, model: string): string {
+  return `${endpoint}:${model}`;
+}
+
+function mentionsField(errorText: string, fields: string[]): boolean {
+  return fields.some((field) => errorText.includes(field));
+}
 
 export async function* streamChatCompletion(
   model: string,
@@ -536,8 +552,13 @@ export async function* streamChatCompletion(
   options?: ChatOptions
 ): AsyncGenerator<StreamChunk> {
   const endpoint = options?.endpoint ?? "v1/chat/completions";
-  const send = (timingsPerToken: boolean) => {
-    const { url, body } = buildRequest(endpoint, model, messages, { ...options, timingsPerToken });
+  const key = capabilityKey(endpoint, model);
+  const send = (timingsPerToken: boolean, streamOptions: boolean) => {
+    const { url, body } = buildRequest(endpoint, model, messages, {
+      ...options,
+      timingsPerToken,
+      streamOptions,
+    });
     return fetch(url, {
       method: "POST",
       headers: {
@@ -549,20 +570,35 @@ export async function* streamChatCompletion(
     });
   };
 
-  const askedForTimings = perTokenTimingsWanted && endpoint === "v1/chat/completions";
-  let response = await send(askedForTimings);
+  let timingsPerToken =
+    options?.timingsPerToken !== false &&
+    (perTokenTimingsWanted.get(key) ?? true) &&
+    endpoint === "v1/chat/completions";
+  let streamOptions =
+    options?.streamOptions !== false &&
+    (streamOptionsWanted.get(key) ?? true) &&
+    endpoint === "v1/chat/completions";
+  let response = await send(timingsPerToken, streamOptions);
 
-  if (!response.ok) {
+  while (!response.ok) {
     const errorText = await response.text();
-    const rejectedExtension = response.status === 400 && askedForTimings && errorText.includes(PER_TOKEN_TIMINGS_FIELD);
-    if (!rejectedExtension) {
+    const validationError = response.status === 400 || response.status === 422;
+    const rejectedTimings = validationError && timingsPerToken && errorText.includes(PER_TOKEN_TIMINGS_FIELD);
+    const rejectedStreamOptions = validationError && streamOptions && mentionsField(errorText, STREAM_OPTIONS_FIELDS);
+    if (!rejectedTimings && !rejectedStreamOptions) {
       throw new Error(`Chat API error: ${response.status} - ${errorText}`);
     }
-    perTokenTimingsWanted = false;
-    response = await send(false);
-    if (!response.ok) {
-      throw new Error(`Chat API error: ${response.status} - ${await response.text()}`);
+
+    if (rejectedTimings) {
+      timingsPerToken = false;
+      perTokenTimingsWanted.set(key, false);
     }
+    if (rejectedStreamOptions) {
+      streamOptions = false;
+      streamOptionsWanted.set(key, false);
+    }
+
+    response = await send(timingsPerToken, streamOptions);
   }
 
   const reader = response.body?.getReader();
