@@ -135,7 +135,7 @@ func (r *activityRepository) Stats(ctx context.Context, query store.ActivityStat
 	where, args := activityWhere(filter)
 	row := r.db.QueryRowContext(ctx, `
 		SELECT
-			COUNT(*),
+			COALESCE(MAX(id), 0),
 			COALESCE(SUM(input_tokens), 0),
 			COALESCE(SUM(output_tokens), 0),
 			COALESCE(SUM(CASE WHEN cache_tokens > 0 THEN cache_tokens ELSE 0 END), 0)
