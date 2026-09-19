@@ -524,11 +524,22 @@
                                 },
                                 "default": {},
                                 "description": "Dictionary mapping requested model IDs (or aliases) to parameters to set/override in requests. Applied after setParams and can override those values. Useful with aliases to vary behaviour depending on which alias the client used (e.g. different reasoning_effort per alias). A parameter key ending in '?' (e.g. 'max_tokens?') is set-if-undefined: it is only applied when the request does not already contain that parameter. Keys support ${MODEL_ID} macro substitution. Protected params like 'model' cannot be overridden."
+                            },
+                            "transformParams": {
+                                "type": "object",
+                                "additionalProperties": {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    }
+                                },
+                                "default": {},
+                                "description": "Dictionary mapping JSON paths to value-translation maps. For each path, if the request carries a value that is a key in the map, it is replaced with the corresponding map value. Transforms run after setParams/setParamsByID so they can override them. Supports nested paths using dot notation (e.g. 'chat_template_kwargs.reasoning_effort'). Protected paths like 'model' are filtered out."
                             }
                         },
                         "additionalProperties": false,
                         "default": {},
-                        "description": "Dictionary of filter settings. Supports stripParams, setParams, and setParamsByID."
+                        "description": "Dictionary of filter settings. Supports stripParams, setParams, setParamsByID, and transformParams."
                     },
                     "metadata": {
                         "type": "object",
@@ -756,11 +767,22 @@
                                 "additionalProperties": true,
                                 "default": {},
                                 "description": "Dictionary of parameters to set/override in requests to this peer. Useful for injecting provider-specific settings. A key ending in '?' (e.g. 'max_tokens?') is set-if-undefined: it is only applied when the request does not already contain that parameter. Protected params like 'model' cannot be overridden. Values can be strings, numbers, booleans, arrays, or objects."
+                            },
+                            "transformParams": {
+                                "type": "object",
+                                "additionalProperties": {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    }
+                                },
+                                "default": {},
+                                "description": "Dictionary mapping JSON paths to value-translation maps. For each path, if the request carries a value that is a key in the map, it is replaced with the corresponding map value. Transforms run after setParams so they can override them. Supports nested paths using dot notation. Protected paths like 'model' are filtered out."
                             }
                         },
                         "additionalProperties": false,
                         "default": {},
-                        "description": "Dictionary of filter settings for peer requests. Supports stripParams and setParams."
+                        "description": "Dictionary of filter settings for peer requests. Supports stripParams, setParams, and transformParams."
                     },
                     "timeouts": {
                         "type": "object",
