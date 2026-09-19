@@ -128,8 +128,6 @@ type ActivityStatsQuery struct {
 }
 
 // ActivityStats are aggregate totals and speed histograms over activity rows.
-// TotalRequests is a lifetime counter and remains accurate when old activity
-// rows are pruned; the other aggregates describe the retained rows.
 type ActivityStats struct {
 	TotalRequests       int            `json:"total_requests"`
 	TotalInputTokens    int            `json:"total_input_tokens"`
