@@ -72,8 +72,14 @@ A higher `concurrencyLimit` in your config is kept. A lower one is raised to
 
 ## The websocket cannot start the model
 
-`GET /comfyui/ws` is the one request that never loads `comfyui_auto`. While the
-model is not ready it returns `409 Conflict` with `/ws does not start it`.
+A `GET` to `/comfyui/ws` is the one request that never loads `comfyui_auto`.
+While the model is not ready it returns `409 Conflict` with
+`/ws does not start it`.
+
+`/ws` matches as a path prefix, so `/ws/anything` is ignored too and query
+parameters such as `?clientId=...` make no difference. A path that merely
+starts with those letters, like `/wsapi`, is a different path and is not
+ignored.
 
 This is deliberate. The ComfyUI frontend retries that websocket for as long as
 the tab is open, so after an unload it would reload the model on its own and
@@ -89,9 +95,9 @@ action and may start the model as usual.
 - **A stale tab reports a lost connection.** The model unloaded while the tab
   was open and its websocket now gets the 409 above. Interacting with the page
   starts the model again; the websocket reconnects once it is ready.
-- **An idle tab keeps the model loaded.** Only `GET /ws` is ignored. Anything
-  else the page polls on a timer counts as a real request and can reload the
-  model after a TTL unload. Close the tab, or route that instance through
+- **An idle tab keeps the model loaded.** Only `GET /ws` and paths under it are
+  ignored. Anything else the page polls on a timer counts as a real request and
+  can reload the model after a TTL unload. Close the tab, or route that instance through
   `/upstream/` with an `upstream.ignorePaths` entry for the path it polls.
 - **The model unloads while you are working.** Websocket traffic is ignored, so
   it does not reset the TTL timer. Watching a long render over the websocket

@@ -287,8 +287,9 @@ func TestServer_HandleComfyUI(t *testing.T) {
 		}{
 			{name: "api path", method: http.MethodGet, target: "/comfyui/api/prompt"},
 			{name: "asset path", method: http.MethodGet, target: "/comfyui/assets/app.js"},
-			{name: "ws prefix only", method: http.MethodGet, target: "/comfyui/ws/sub"},
+			{name: "ws name prefix", method: http.MethodGet, target: "/comfyui/wsapi"},
 			{name: "non-GET ws", method: http.MethodPost, target: "/comfyui/ws"},
+			{name: "non-GET ws sub path", method: http.MethodPost, target: "/comfyui/ws/sub"},
 		} {
 			before := serveCalls
 			w = httptest.NewRecorder()
@@ -301,22 +302,32 @@ func TestServer_HandleComfyUI(t *testing.T) {
 			}
 		}
 
+		// /ws matches as a path prefix, so sub paths and query parameters
+		// are ignored the same way.
+		targets := []string{
+			"/comfyui/ws",
+			"/comfyui/ws?clientId=abc123",
+			"/comfyui/ws/",
+			"/comfyui/ws/sub/path?a=1",
+		}
 		for _, state := range []map[string]process.ProcessState{
 			nil,
 			{config.ComfyUIModelID: process.StateStarting},
 		} {
 			local.running = state
-			before := serveCalls
-			w = httptest.NewRecorder()
-			s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/comfyui/ws", nil))
-			if w.Code != http.StatusConflict {
-				t.Fatalf("ws status=%d want 409 body=%q running=%v", w.Code, w.Body.String(), state)
-			}
-			if serveCalls != before {
-				t.Fatalf("unready model received a /ws request, running=%v", state)
-			}
-			if !strings.Contains(w.Body.String(), "/ws does not start it") {
-				t.Errorf("body=%q missing websocket explanation", w.Body.String())
+			for _, target := range targets {
+				before := serveCalls
+				w = httptest.NewRecorder()
+				s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, target, nil))
+				if w.Code != http.StatusConflict {
+					t.Fatalf("%s status=%d want 409 body=%q running=%v", target, w.Code, w.Body.String(), state)
+				}
+				if serveCalls != before {
+					t.Fatalf("unready model received %s, running=%v", target, state)
+				}
+				if !strings.Contains(w.Body.String(), "/ws does not start it") {
+					t.Errorf("%s body=%q missing websocket explanation", target, w.Body.String())
+				}
 			}
 		}
 	})
