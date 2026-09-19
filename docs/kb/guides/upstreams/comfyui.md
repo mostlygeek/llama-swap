@@ -70,24 +70,29 @@ Two settings are applied while the config loads and cannot be lowered:
 A higher `concurrencyLimit` in your config is kept. A lower one is raised to
 50.
 
-## Only the root path starts the model
+## The websocket cannot start the model
 
-A request to `/comfyui/` may load `comfyui_auto`. Every other path under
-`/comfyui/` returns `409 Conflict` with `only /comfyui/ can start it` when the
-model is not ready.
+`GET /comfyui/ws` is the one request that never loads `comfyui_auto`. While the
+model is not ready it returns `409 Conflict` with `/ws does not start it`.
 
-This is deliberate. After the model unloads, an open browser tab keeps
-requesting assets, polling APIs, and reconnecting its websocket. Without the
-rule, that background traffic would reload the model forever and nothing else
-would get the GPU. Reload `/comfyui/` to start it again.
+This is deliberate. The ComfyUI frontend retries that websocket for as long as
+the tab is open, so after an unload it would reload the model on its own and
+never give the GPU back. Every other request under `/comfyui/` — the page
+itself, assets, `/api/...`, and a non-GET to `/ws` — is treated as a deliberate
+action and may start the model as usual.
 
 ## What goes wrong
 
 - **`404 local model comfyui_auto not found`.** The model is named something
   else, or it is defined on a peer. `/comfyui/` only serves a local model with
   that exact ID. Aliases do not work here — the lookup is by model ID.
-- **A stale tab shows broken images and failed requests.** The model unloaded
-  while the tab was open; those are the 409s above. Reload the page.
+- **A stale tab reports a lost connection.** The model unloaded while the tab
+  was open and its websocket now gets the 409 above. Interacting with the page
+  starts the model again; the websocket reconnects once it is ready.
+- **An idle tab keeps the model loaded.** Only `GET /ws` is ignored. Anything
+  else the page polls on a timer counts as a real request and can reload the
+  model after a TTL unload. Close the tab, or route that instance through
+  `/upstream/` with an `upstream.ignorePaths` entry for the path it polls.
 - **The model unloads while you are working.** Websocket traffic is ignored, so
   it does not reset the TTL timer. Watching a long render over the websocket
   counts as idle. Use a longer `ttl`, or `ttl: 0` to disable automatic
@@ -135,8 +140,9 @@ with the `comfyui-auto` container, and keep the default static-asset pattern —
 listing `ignorePaths` at all replaces the default instead of adding to it.
 
 `upstream.ignorePaths` applies to `/upstream/` only, never to `/comfyui/`,
-which has the stricter root-only rule instead. Ignored paths refuse with a 409
-when the model is not loaded rather than triggering a swap.
+which has its built-in `GET /ws` rule instead. Both refuse with a 409 when the
+model is not loaded rather than triggering a swap, so `ignorePaths` is the way
+to ignore more paths than the one `/comfyui/` covers.
 
 ## Related
 

@@ -267,7 +267,7 @@ func TestServer_HandleComfyUI(t *testing.T) {
 		}
 	})
 
-	t.Run("only root starts unloaded model", func(t *testing.T) {
+	t.Run("unloaded model ignores only a GET to /ws", func(t *testing.T) {
 		local.running = nil
 
 		w := httptest.NewRecorder()
@@ -279,27 +279,58 @@ func TestServer_HandleComfyUI(t *testing.T) {
 			t.Errorf("root path=%q query=%q want path=/ query=token=value", gotPath, gotQuery)
 		}
 
-		before := serveCalls
-		w = httptest.NewRecorder()
-		s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/comfyui/api/prompt", nil))
-		if w.Code != http.StatusConflict {
-			t.Fatalf("subpath status=%d want 409 body=%q", w.Code, w.Body.String())
-		}
-		if serveCalls != before {
-			t.Fatal("unloaded model received a non-root ComfyUI request")
-		}
-		if !strings.Contains(w.Body.String(), "only /comfyui/ can start it") {
-			t.Errorf("body=%q missing root-path explanation", w.Body.String())
+		// Everything but the websocket may start the model.
+		for _, tt := range []struct {
+			name   string
+			method string
+			target string
+		}{
+			{name: "api path", method: http.MethodGet, target: "/comfyui/api/prompt"},
+			{name: "asset path", method: http.MethodGet, target: "/comfyui/assets/app.js"},
+			{name: "ws prefix only", method: http.MethodGet, target: "/comfyui/ws/sub"},
+			{name: "non-GET ws", method: http.MethodPost, target: "/comfyui/ws"},
+		} {
+			before := serveCalls
+			w = httptest.NewRecorder()
+			s.ServeHTTP(w, httptest.NewRequest(tt.method, tt.target, nil))
+			if w.Code != http.StatusOK {
+				t.Errorf("%s status=%d want 200 body=%q", tt.name, w.Code, w.Body.String())
+			}
+			if serveCalls != before+1 {
+				t.Errorf("%s did not reach the model router", tt.name)
+			}
 		}
 
-		local.running = map[string]process.ProcessState{config.ComfyUIModelID: process.StateStarting}
-		w = httptest.NewRecorder()
-		s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/comfyui/api/prompt", nil))
-		if w.Code != http.StatusConflict {
-			t.Fatalf("starting model status=%d want 409 body=%q", w.Code, w.Body.String())
+		for _, state := range []map[string]process.ProcessState{
+			nil,
+			{config.ComfyUIModelID: process.StateStarting},
+		} {
+			local.running = state
+			before := serveCalls
+			w = httptest.NewRecorder()
+			s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/comfyui/ws", nil))
+			if w.Code != http.StatusConflict {
+				t.Fatalf("ws status=%d want 409 body=%q running=%v", w.Code, w.Body.String(), state)
+			}
+			if serveCalls != before {
+				t.Fatalf("unready model received a /ws request, running=%v", state)
+			}
+			if !strings.Contains(w.Body.String(), "/ws does not start it") {
+				t.Errorf("body=%q missing websocket explanation", w.Body.String())
+			}
 		}
-		if serveCalls != before {
-			t.Fatal("starting model received a non-root ComfyUI request")
+	})
+
+	t.Run("ready model proxies /ws", func(t *testing.T) {
+		local.running = map[string]process.ProcessState{config.ComfyUIModelID: process.StateReady}
+		before := serveCalls
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/comfyui/ws", nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("status=%d want 200 body=%q", w.Code, w.Body.String())
+		}
+		if serveCalls != before+1 || gotPath != "/ws" {
+			t.Errorf("serveCalls=%d path=%q want one call to /ws", serveCalls-before, gotPath)
 		}
 	})
 

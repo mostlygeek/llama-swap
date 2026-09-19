@@ -451,6 +451,10 @@ func handleComfyUIRedirect(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, location, status)
 }
 
+// comfyUIWebsocketPath is the ComfyUI frontend's websocket endpoint. It is the
+// only path under /comfyui/ that may not start an unloaded model.
+const comfyUIWebsocketPath = "/ws"
+
 // handleComfyUI proxies requests under /comfyui/ to the fixed local
 // ComfyUI model. Its compatibility settings are applied while loading config.
 func (s *Server) handleComfyUI(w http.ResponseWriter, r *http.Request) {
@@ -467,14 +471,14 @@ func (s *Server) handleComfyUI(w http.ResponseWriter, r *http.Request) {
 	r.URL.Path = remainingPath
 	r.URL.RawPath = escapedRemaining
 
-	// Only an explicit request for the ComfyUI root may start the model. Once
-	// it is unloaded, stale browser requests for assets, APIs, or websockets
-	// must not cause it to be loaded again.
-	if remainingPath != "/" {
+	// An open ComfyUI tab keeps retrying its websocket for as long as it is
+	// open, so that one path must not load the model back after an unload.
+	// Every other request is a deliberate action and may start it.
+	if r.Method == http.MethodGet && remainingPath == comfyUIWebsocketPath {
 		state, ok := s.local.RunningModels()[config.ComfyUIModelID]
 		if !ok || state != process.StateReady {
 			swaputil.SendResponse(w, r, http.StatusConflict,
-				"model "+config.ComfyUIModelID+" is not loaded; only /comfyui/ can start it")
+				"model "+config.ComfyUIModelID+" is not loaded; "+comfyUIWebsocketPath+" does not start it")
 			return
 		}
 	}
