@@ -2,8 +2,8 @@
 title: ComfyUI with the /comfyui endpoint
 summary: Name a model comfyui_auto and use /comfyui/ so ComfyUI's websocket does not block model swapping.
 category: guides
-tags: [comfyui, image, websocket, upstream, swapping, ttl]
-config_keys: [models.*.compat.ignoreWebsockets, models.*.concurrencyLimit, models.*.checkEndpoint, models.*.ttl, models.*.unlisted, upstream.ignorePaths]
+tags: [comfyui, image, websocket, upstream, swapping, ttl, docker]
+config_keys: [models.*.compat.ignoreWebsockets, models.*.concurrencyLimit, models.*.checkEndpoint, models.*.cmdStop, models.*.unloadTimeout, models.*.ttl, models.*.unlisted, upstream.ignorePaths]
 updated: 2026-09-19
 ---
 
@@ -25,15 +25,34 @@ Name the model exactly `comfyui_auto` and point a browser at
 ```yaml
 models:
   comfyui_auto:
-    cmd: |
-      python /opt/ComfyUI/main.py
-      --port ${PORT}
-      --listen 127.0.0.1
     # ComfyUI has no /health; its root returns 200 once the server is up
     checkEndpoint: /
+    cmdStop: docker stop comfyui-auto
+    cmd: >
+      docker run --rm
+      --name comfyui-auto --runtime=nvidia
+      --gpus '"device=2,3"' -p ${PORT}:8188
+      -v /path/to/comfyui/storage-cache/dot-cache:/root/.cache
+      -v /path/to/comfyui/storage-cache/dot-config:/root/.config
+      -v /path/to/comfyui/storage-nodes/dot-local:/root/.local
+      -v /path/to/comfyui/storage-nodes/custom_nodes:/root/ComfyUI/custom_nodes
+      -v /path/to/comfyui/storage-models/models:/root/ComfyUI/models
+      -v /path/to/comfyui/storage-models/hf-hub:/root/.cache/huggingface/hub
+      -v /path/to/comfyui/storage-models/torch-hub:/root/.cache/torch/hub
+      -v /path/to/comfyui/storage-user/input:/root/ComfyUI/input
+      -v /path/to/comfyui/storage-user/output:/root/ComfyUI/output
+      -v /path/to/comfyui/storage-user/user-profile:/root/ComfyUI/user
+      -v /path/to/comfyui/storage-user/user-scripts:/root/user-scripts
+      -e CLI_ARGS=""
+      yanwk/comfyui-boot:cu130-slim-v2
+    unloadTimeout: 30   # docker stop is slow
     ttl: 600
-    unlisted: true   # it is not an OpenAI model, keep it out of /v1/models
+    unlisted: true      # it is not an OpenAI model, keep it out of /v1/models
 ```
+
+`cmdStop` matters here: without it llama-swap stops the local `docker run`
+client and the container keeps the GPU. See
+`guides/model-runtime/ttl-and-unloading`.
 
 Nothing else is required. `/comfyui` (no trailing slash) redirects to
 `/comfyui/` and keeps the query string, so `?token=...` style links survive.
@@ -85,12 +104,21 @@ settings by hand:
 
 ```yaml
 models:
-  comfy-second:
-    cmd: python /opt/ComfyUI2/main.py --port ${PORT}
+  my-other-comfyui-model:
     checkEndpoint: /
+    # the two settings /comfyui/ would have applied for you
     concurrencyLimit: 50
     compat:
       ignoreWebsockets: true
+    cmdStop: docker stop ${MODEL_ID}
+    cmd: >
+      docker run --rm
+      --name ${MODEL_ID} --runtime=nvidia
+      --gpus '"device=2,3"' -p ${PORT}:8188
+      -v /path/to/comfyui/storage-models/models:/root/ComfyUI/models
+      -v /path/to/comfyui/storage-user/output:/root/ComfyUI/output
+      -e CLI_ARGS=""
+      yanwk/comfyui-boot:cu130-slim-v2
 
 upstream:
   ignorePaths:
@@ -98,6 +126,13 @@ upstream:
     # ComfyUI polls these while the UI is open; do not swap for them
     - ^\/ws$|^\/api\/jobs$
 ```
+
+The mounts are trimmed here; copy the full set from the block above. `cmd` is a
+folded YAML scalar, so a `#` line inside it is an argument, not a comment.
+
+Use `${MODEL_ID}` for the container name so a second instance cannot collide
+with the `comfyui-auto` container, and keep the default static-asset pattern —
+listing `ignorePaths` at all replaces the default instead of adding to it.
 
 `upstream.ignorePaths` applies to `/upstream/` only, never to `/comfyui/`,
 which has the stricter root-only rule instead. Ignored paths refuse with a 409
