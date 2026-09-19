@@ -130,6 +130,10 @@ describe("buildRequest for v1/chat/completions", () => {
     expect(build([]).stream_options).toEqual({ include_usage: true });
   });
 
+  it("omits stream usage when the backend does not support it", () => {
+    expect(build([], { streamOptions: false })).not.toHaveProperty("stream_options");
+  });
+
   // Without per-chunk timings the exact numbers only arrive in the final
   // chunk, which a cancelled stream never delivers.
   it("asks llama.cpp for timings on every chunk by default", () => {

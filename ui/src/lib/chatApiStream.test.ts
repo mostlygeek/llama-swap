@@ -45,6 +45,16 @@ describe("streamChatCompletion", () => {
     expect(chunks[0]).toMatchObject({ content: "ok" });
   });
 
+  it("honors explicit opt-outs for both optional fields", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okStream());
+    vi.stubGlobal("fetch", fetchMock);
+
+    await collect({ timingsPerToken: false, streamOptions: false });
+
+    expect(bodyOf(fetchMock.mock.calls[0])).not.toHaveProperty("timings_per_token");
+    expect(bodyOf(fetchMock.mock.calls[0])).not.toHaveProperty("stream_options");
+  });
+
   // A backend that validates its request body rejects the llama.cpp
   // extension by name; the turn must still go through, and later turns must
   // not pay for the rejection again.
@@ -87,6 +97,40 @@ describe("streamChatCompletion", () => {
 
     await expect(collect()).rejects.toThrow(/500 - boom/);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries without stream usage when a strict backend rejects stream_options", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(badRequest("json: unknown field \\\"stream_options\\\""))
+      .mockResolvedValue(okStream());
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect((await collect()).some((c) => c.content === "ok")).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(bodyOf(fetchMock.mock.calls[0])).toHaveProperty("stream_options");
+    expect(bodyOf(fetchMock.mock.calls[1])).not.toHaveProperty("stream_options");
+    expect(bodyOf(fetchMock.mock.calls[1]).timings_per_token).toBe(true);
+
+    await collect();
+    expect(fetchMock).toHaveBeenCalledTimes(3); // one request, no retry
+    expect(bodyOf(fetchMock.mock.calls[2])).not.toHaveProperty("stream_options");
+  });
+
+  it("removes both optional fields when a backend rejects them one at a time", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(badRequest("unknown field stream_options"))
+      .mockResolvedValueOnce(badRequest("unknown field timings_per_token"))
+      .mockResolvedValue(okStream());
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect((await collect()).some((c) => c.content === "ok")).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(bodyOf(fetchMock.mock.calls[1])).not.toHaveProperty("stream_options");
+    expect(bodyOf(fetchMock.mock.calls[1])).toHaveProperty("timings_per_token");
+    expect(bodyOf(fetchMock.mock.calls[2])).not.toHaveProperty("stream_options");
+    expect(bodyOf(fetchMock.mock.calls[2])).not.toHaveProperty("timings_per_token");
   });
 
   it("does not send the extension to the other endpoints", async () => {
