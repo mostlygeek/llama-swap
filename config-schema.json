@@ -561,6 +561,14 @@
                                 "type": "boolean",
                                 "default": false,
                                 "description": "Do not let websocket connections load a stopped model or count toward concurrency, TTL activity, swap decisions, selector load, or in-flight activity."
+                            },
+                            "allowPaths": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                },
+                                "default": [],
+                                "description": "List of RE2-compatible regular expressions for paths allowed to start a stopped compatibility model."
                             }
                         },
                         "additionalProperties": false,

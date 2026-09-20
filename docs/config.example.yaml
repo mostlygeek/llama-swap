@@ -341,6 +341,12 @@ models:
       # or count toward concurrency, TTL activity, or swap decisions
       # - optional, default: false
       ignoreWebsockets: true
+      # allowPaths: RE2-compatible paths that may start a stopped compatibility model
+      # - optional, default: empty (only the endpoint root may start it)
+      # - useful for clients such as ComfyUI MCP that begin with an API request
+      # allowPaths:
+      #   - '^/api/(prompt|queue)$'
+      #   - '^/system_stats$'
 
     # useModelName: override the model name that is sent to upstream server
     # - optional, default: ""

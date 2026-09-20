@@ -288,7 +288,7 @@ func TestServer_HandleComfyUI(t *testing.T) {
 		if serveCalls != before {
 			t.Fatal("unloaded model received a non-root ComfyUI request")
 		}
-		if !strings.Contains(w.Body.String(), "only /comfyui/ can start it") {
+		if !strings.Contains(w.Body.String(), "not allowed to start it") {
 			t.Errorf("body=%q missing root-path explanation", w.Body.String())
 		}
 
@@ -300,6 +300,22 @@ func TestServer_HandleComfyUI(t *testing.T) {
 		}
 		if serveCalls != before {
 			t.Fatal("starting model received a non-root ComfyUI request")
+		}
+	})
+
+	t.Run("configured allow-list path starts unloaded model", func(t *testing.T) {
+		local.running = nil
+		modelConfig := s.cfg.Models[config.ComfyUIModelID]
+		modelConfig.Compat.AllowPaths = []*regexp.Regexp{regexp.MustCompile(`^/api/(prompt|queue)$`)}
+		s.cfg.Models[config.ComfyUIModelID] = modelConfig
+		before := serveCalls
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/comfyui/api/prompt", nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("allow-listed path status=%d body=%q", w.Code, w.Body.String())
+		}
+		if serveCalls != before+1 {
+			t.Fatalf("serve calls=%d, want %d", serveCalls, before+1)
 		}
 	})
 

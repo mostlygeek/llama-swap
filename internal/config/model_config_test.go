@@ -119,6 +119,9 @@ models:
     cmd: enabled --port ${PORT}
     compat:
       ignoreWebsockets: true
+      allowPaths:
+        - '^/api/(prompt|queue)$'
+        - '^/system_stats$'
   default:
     cmd: default --port ${PORT}
 `
@@ -126,7 +129,25 @@ models:
 	cfg, err := LoadConfigFromReader(strings.NewReader(content))
 	assert.NoError(t, err)
 	assert.True(t, cfg.Models["enabled"].Compat.IgnoreWebsockets)
+	if assert.Len(t, cfg.Models["enabled"].Compat.AllowPaths, 2) {
+		assert.True(t, cfg.Models["enabled"].Compat.AllowPaths[0].MatchString("/api/prompt"))
+		assert.False(t, cfg.Models["enabled"].Compat.AllowPaths[0].MatchString("/api/history"))
+		assert.True(t, cfg.Models["enabled"].Compat.AllowPaths[1].MatchString("/system_stats"))
+	}
 	assert.False(t, cfg.Models["default"].Compat.IgnoreWebsockets)
+	assert.Empty(t, cfg.Models["default"].Compat.AllowPaths)
+}
+
+func TestConfig_ModelCompatAllowPathsRejectsInvalidRegex(t *testing.T) {
+	_, err := LoadConfigFromReader(strings.NewReader(`
+models:
+  model:
+    cmd: model --port ${PORT}
+    compat:
+      allowPaths: ["["]
+`))
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "compat.allowPaths")
 }
 
 func TestConfig_SetParamsByIDAutoAlias(t *testing.T) {

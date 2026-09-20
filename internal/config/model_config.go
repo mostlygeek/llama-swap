@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"runtime"
 )
 
@@ -73,6 +74,33 @@ type CompatConfig struct {
 	// IgnoreWebsockets prevents websocket connections from participating in
 	// model lifecycle activity such as swapping, concurrency, and TTL tracking.
 	IgnoreWebsockets bool `yaml:"ignoreWebsockets"`
+	// AllowPaths permits matching paths to start the model when it is stopped.
+	// This is used by fixed-path compatibility endpoints such as ComfyUI;
+	// an empty list preserves their conservative root-only startup behavior.
+	AllowPaths []*regexp.Regexp `yaml:"-"`
+}
+
+// UnmarshalYAML compiles compatibility allow-list expressions while keeping
+// the runtime representation as regular expressions.
+func (c *CompatConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var raw struct {
+		IgnoreWebsockets bool     `yaml:"ignoreWebsockets"`
+		AllowPaths       []string `yaml:"allowPaths"`
+	}
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+
+	paths := make([]*regexp.Regexp, 0, len(raw.AllowPaths))
+	for _, pattern := range raw.AllowPaths {
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return fmt.Errorf("compat.allowPaths: invalid regular expression %q: %w", pattern, err)
+		}
+		paths = append(paths, re)
+	}
+	*c = CompatConfig{IgnoreWebsockets: raw.IgnoreWebsockets, AllowPaths: paths}
+	return nil
 }
 
 type ModelConfig struct {

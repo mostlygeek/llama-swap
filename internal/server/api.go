@@ -467,14 +467,24 @@ func (s *Server) handleComfyUI(w http.ResponseWriter, r *http.Request) {
 	r.URL.Path = remainingPath
 	r.URL.RawPath = escapedRemaining
 
-	// Only an explicit request for the ComfyUI root may start the model. Once
-	// it is unloaded, stale browser requests for assets, APIs, or websockets
-	// must not cause it to be loaded again.
-	if remainingPath != "/" {
+	// Only the explicit root, or a configured compatibility path, may start the
+	// model. This keeps stale browser asset/websocket requests from bringing an
+	// unloaded model back while allowing API clients whose first request is not
+	// the root page (for example ComfyUI MCP clients).
+	allowStart := remainingPath == "/"
+	if !allowStart {
+		for _, re := range s.cfg.Models[config.ComfyUIModelID].Compat.AllowPaths {
+			if re.MatchString(remainingPath) {
+				allowStart = true
+				break
+			}
+		}
+	}
+	if !allowStart {
 		state, ok := s.local.RunningModels()[config.ComfyUIModelID]
 		if !ok || state != process.StateReady {
 			swaputil.SendResponse(w, r, http.StatusConflict,
-				"model "+config.ComfyUIModelID+" is not loaded; only /comfyui/ can start it")
+				"model "+config.ComfyUIModelID+" is not loaded; path is not allowed to start it")
 			return
 		}
 	}
