@@ -177,6 +177,16 @@ data:
               {{ $k }}: {{ $v }}
 {{- end }}
 {{- end }}
+{{- /* Solver knob the builders pass through as-is (a settings.matrix key
+      supported by llama-swap). Enum-validated so a typo fails rendering
+      instead of being silently dropped (the solver would then run with
+      the defaults). */}}
+{{- with .eviction_tiebreaker }}
+{{- if not (has . (list "lexical" "lru")) }}
+{{- fail (printf "config.matrix: eviction_tiebreaker must be lexical or lru, got %q" .) }}
+{{- end }}
+            eviction_tiebreaker: {{ . }}
+{{- end }}
             sets:
 {{- if eq $builder "gpu-budget" }}
               gpu_pool: ({{ $gpu | join " | " }})
