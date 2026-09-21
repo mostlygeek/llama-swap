@@ -42,6 +42,7 @@ type Peer struct {
 	shutdownCtx  context.Context
 	shutdownFn   context.CancelFunc
 	shuttingDown atomic.Bool
+	admissionMu  sync.Mutex
 	inflight     sync.WaitGroup
 }
 
@@ -192,9 +193,12 @@ func (r *Peer) Handles(model string) bool {
 }
 
 func (r *Peer) Shutdown(timeout time.Duration) error {
+	r.admissionMu.Lock()
 	if !r.shuttingDown.CompareAndSwap(false, true) {
+		r.admissionMu.Unlock()
 		return fmt.Errorf("shutdown already in progress")
 	}
+	r.admissionMu.Unlock()
 
 	if timeout == 0 {
 		r.shutdownFn()
@@ -271,11 +275,14 @@ func (r *Peer) closeTransports(timeout time.Duration) error {
 }
 
 func (r *Peer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	r.admissionMu.Lock()
 	if r.shuttingDown.Load() {
+		r.admissionMu.Unlock()
 		swaputil.SendError(w, req, fmt.Errorf("peer proxy is shutting down"))
 		return
 	}
 	r.inflight.Add(1)
+	r.admissionMu.Unlock()
 	defer r.inflight.Done()
 
 	data, err := swaputil.FetchContext(req, r.cfg)
