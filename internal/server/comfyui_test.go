@@ -48,7 +48,7 @@ func TestServer_HandleComfyUI(t *testing.T) {
 		}
 	})
 
-	t.Run("unloaded model ignores only a GET to /ws", func(t *testing.T) {
+	t.Run("unloaded model ignores only GETs to ignored paths", func(t *testing.T) {
 		local.running = nil
 
 		w := httptest.NewRecorder()
@@ -60,17 +60,20 @@ func TestServer_HandleComfyUI(t *testing.T) {
 			t.Errorf("root path=%q query=%q want path=/ query=token=value", gotPath, gotQuery)
 		}
 
-		// Everything but the websocket may start the model.
+		// Paths outside the ignore list, and any write, may start the model.
 		for _, tt := range []struct {
 			name   string
 			method string
 			target string
 		}{
 			{name: "api path", method: http.MethodGet, target: "/comfyui/api/prompt"},
-			{name: "asset path", method: http.MethodGet, target: "/comfyui/assets/app.js"},
+			{name: "html asset", method: http.MethodGet, target: "/comfyui/index.html"},
 			{name: "ws name prefix", method: http.MethodGet, target: "/comfyui/wsapi"},
+			{name: "jobs sub path", method: http.MethodGet, target: "/comfyui/api/jobs/12"},
 			{name: "non-GET ws", method: http.MethodPost, target: "/comfyui/ws"},
 			{name: "non-GET ws sub path", method: http.MethodPost, target: "/comfyui/ws/sub"},
+			{name: "non-GET jobs", method: http.MethodPost, target: "/comfyui/api/jobs"},
+			{name: "non-GET asset", method: http.MethodPost, target: "/comfyui/assets/app.js"},
 		} {
 			before := serveCalls
 			w = httptest.NewRecorder()
@@ -84,12 +87,18 @@ func TestServer_HandleComfyUI(t *testing.T) {
 		}
 
 		// /ws matches as a path prefix, so sub paths and query parameters
-		// are ignored the same way.
+		// are ignored the same way. Static assets and /api/jobs come from
+		// the same list the /upstream equivalent is configured with.
 		targets := []string{
 			"/comfyui/ws",
 			"/comfyui/ws?clientId=abc123",
 			"/comfyui/ws/",
 			"/comfyui/ws/sub/path?a=1",
+			"/comfyui/api/jobs",
+			"/comfyui/api/jobs?open=1",
+			"/comfyui/assets/app.js",
+			"/comfyui/user/workflow.json",
+			"/comfyui/style.css",
 		}
 		for _, state := range []map[string]process.ProcessState{
 			nil,
@@ -106,14 +115,14 @@ func TestServer_HandleComfyUI(t *testing.T) {
 				if serveCalls != before {
 					t.Fatalf("unready model received %s, running=%v", target, state)
 				}
-				if !strings.Contains(w.Body.String(), "/ws does not start it") {
-					t.Errorf("%s body=%q missing websocket explanation", target, w.Body.String())
+				if !strings.Contains(w.Body.String(), "ignored ComfyUI paths cannot start it") {
+					t.Errorf("%s body=%q missing ignored-path explanation", target, w.Body.String())
 				}
 			}
 		}
 	})
 
-	t.Run("ready model proxies /ws", func(t *testing.T) {
+	t.Run("ready model proxies ignored paths", func(t *testing.T) {
 		local.running = map[string]process.ProcessState{config.ComfyUIModelID: process.StateReady}
 		before := serveCalls
 		w := httptest.NewRecorder()
@@ -228,5 +237,46 @@ func TestServer_HandleComfyUI_UsesAuthentication(t *testing.T) {
 	s.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("authenticated status=%d want 200 body=%q", w.Code, w.Body.String())
+	}
+}
+
+// TestServer_ComfyUIIgnorePaths pins the built-in list. It is documented in
+// docs/kb/guides/upstreams/comfyui.md as the upstream.ignorePaths a second
+// ComfyUI instance needs, so the two must not drift apart.
+func TestServer_ComfyUIIgnorePaths(t *testing.T) {
+	want := []string{
+		config.DefaultUpstreamIgnorePathsPattern,
+		`^/ws(/|$)`,
+		`^/api/jobs$`,
+	}
+	if len(comfyUIIgnorePaths) != len(want) {
+		t.Fatalf("got %d patterns, want %d", len(comfyUIIgnorePaths), len(want))
+	}
+	for i, pattern := range want {
+		if got := comfyUIIgnorePaths[i].String(); got != pattern {
+			t.Errorf("pattern %d = %q, want %q", i, got, pattern)
+		}
+	}
+
+	for _, tt := range []struct {
+		path string
+		want bool
+	}{
+		{path: "/", want: false},
+		{path: "/ws", want: true},
+		{path: "/ws/", want: true},
+		{path: "/ws/sub", want: true},
+		{path: "/wsapi", want: false},
+		{path: "/api/ws", want: false},
+		{path: "/api/jobs", want: true},
+		{path: "/api/jobs/12", want: false},
+		{path: "/api/prompt", want: false},
+		{path: "/assets/app.js", want: true},
+		{path: "/user/workflow.json", want: true},
+		{path: "/index.html", want: false},
+	} {
+		if got := comfyUIIgnoresPath(tt.path); got != tt.want {
+			t.Errorf("comfyUIIgnoresPath(%q) = %v, want %v", tt.path, got, tt.want)
+		}
 	}
 }

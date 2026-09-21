@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
@@ -27,16 +28,30 @@ func handleComfyUIRedirect(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, location, status)
 }
 
-// comfyUIWebsocketPath is the ComfyUI frontend's websocket endpoint. It is the
-// only path under /comfyui/ that may not start an unloaded model.
-const comfyUIWebsocketPath = "/ws"
+// comfyUIIgnorePaths are the paths under /comfyui/ that may not start an
+// unloaded model. An open ComfyUI tab retries them on its own, so letting them
+// swap the model in would undo every unload while a browser is pointed at it.
+//
+// This is the built-in equivalent of the upstream.ignorePaths a second ComfyUI
+// instance needs when it is served through /upstream/<model>/ instead, so the
+// two lists are kept the same: the shared static-asset default, the frontend
+// websocket, and its job polling.
+var comfyUIIgnorePaths = append(
+	config.DefaultUpstreamIgnorePaths(),
+	regexp.MustCompile(`^/ws(/|$)`),
+	regexp.MustCompile(`^/api/jobs$`),
+)
 
-// isComfyUIWebsocketPath reports whether path is the ComfyUI websocket
-// endpoint or a sub path of it. path is the decoded path only, so query
-// parameters such as ?clientId= never affect the match.
-func isComfyUIWebsocketPath(path string) bool {
-	return path == comfyUIWebsocketPath ||
-		strings.HasPrefix(path, comfyUIWebsocketPath+"/")
+// comfyUIIgnoresPath reports whether path is one that may not start the model.
+// path is the decoded path only, so query parameters such as ?clientId= never
+// affect the match.
+func comfyUIIgnoresPath(path string) bool {
+	for _, re := range comfyUIIgnorePaths {
+		if re.MatchString(path) {
+			return true
+		}
+	}
+	return false
 }
 
 // handleComfyUI proxies requests under /comfyui/ to the fixed local
@@ -55,14 +70,13 @@ func (s *Server) handleComfyUI(w http.ResponseWriter, r *http.Request) {
 	r.URL.Path = remainingPath
 	r.URL.RawPath = escapedRemaining
 
-	// An open ComfyUI tab keeps retrying its websocket for as long as it is
-	// open, so that one path must not load the model back after an unload.
-	// Every other request is a deliberate action and may start it.
-	if r.Method == http.MethodGet && isComfyUIWebsocketPath(remainingPath) {
+	// Only a GET is ignored. A write is a deliberate action even on an ignored
+	// path, so queueing a job still starts the model.
+	if r.Method == http.MethodGet && comfyUIIgnoresPath(remainingPath) {
 		state, ok := s.local.RunningModels()[config.ComfyUIModelID]
 		if !ok || state != process.StateReady {
 			swaputil.SendResponse(w, r, http.StatusConflict,
-				"model "+config.ComfyUIModelID+" is not loaded; "+comfyUIWebsocketPath+" does not start it")
+				"model "+config.ComfyUIModelID+" is not loaded; ignored ComfyUI paths cannot start it")
 			return
 		}
 	}
