@@ -4,7 +4,7 @@ summary: Name a model comfyui_auto and use /comfyui/ so ComfyUI's websocket does
 category: guides
 tags: [comfyui, image, websocket, upstream, swapping, ttl, docker]
 config_keys: [models.*.compat.ignoreWebsockets, models.*.concurrencyLimit, models.*.checkEndpoint, models.*.cmdStop, models.*.unloadTimeout, models.*.ttl, models.*.unlisted, upstream.ignorePaths]
-updated: 2026-09-19
+updated: 2026-09-21
 ---
 
 # ComfyUI with the /comfyui endpoint
@@ -60,32 +60,39 @@ API key checks apply exactly as they do on other endpoints.
 
 ## What llama-swap forces on comfyui_auto
 
-Two settings are applied while the config loads and cannot be lowered:
+Two settings are applied while the config loads:
 
 | setting | value | why |
 | --- | --- | --- |
-| `compat.ignoreWebsockets` | always `true` | the frontend websocket does not count toward concurrency, in-flight requests, TTL activity, or swap decisions |
-| `concurrencyLimit` | at least `50` | one open ComfyUI tab makes many parallel requests for assets and job polling |
+| `compat.ignoreWebsockets` | forced to `true` | a websocket connection does not start or queue the model, and does not count toward concurrency, in-flight requests, TTL activity, or swap decisions |
+| `concurrencyLimit` | raised to at least `50` | the per-model default is 10; one open ComfyUI tab makes many parallel asset and API requests |
 
-A higher `concurrencyLimit` in your config is kept. A lower one is raised to
-50.
+Setting `ignoreWebsockets: false` yourself has no effect, and a
+`concurrencyLimit` below 50 is raised. A higher one is kept.
 
-## The websocket cannot start the model
+## What cannot start the model
 
-A `GET` to `/comfyui/ws` is the one request that never loads `comfyui_auto`.
-While the model is not ready it returns `409 Conflict` with
-`/ws does not start it`.
+The ComfyUI frontend retries its websocket for as long as the tab is open, so
+after an unload it would pull the model back in on its own and never give up the
+GPU. Two separate rules prevent that. Both answer `409 Conflict` while the model
+is not ready, with different messages:
 
-`/ws` matches as a path prefix, so `/ws/anything` is ignored too and query
-parameters such as `?clientId=...` make no difference. A path that merely
-starts with those letters, like `/wsapi`, is a different path and is not
-ignored.
+| request | message | comes from |
+| --- | --- | --- |
+| a `GET` to `/comfyui/ws`, or any path under it | `/ws does not start it` | the `/comfyui/` endpoint |
+| a websocket upgrade, on any path | `ignored websocket requests cannot start it` | `compat.ignoreWebsockets` |
 
-This is deliberate. The ComfyUI frontend retries that websocket for as long as
-the tab is open, so after an unload it would reload the model on its own and
-never give the GPU back. Every other request under `/comfyui/` — the page
-itself, assets, `/api/...`, and a non-GET to `/ws` — is treated as a deliberate
-action and may start the model as usual.
+The second rule is what `ignoreWebsockets` does everywhere, not something
+`/comfyui/` adds; it also keeps the connection out of the scheduler entirely.
+The endpoint's own rule matches on the path alone, so it covers a plain `GET` to
+`/ws` that carries no upgrade headers — the case the websocket rule would miss.
+
+`/ws` matches as a path prefix: `/ws/anything` is covered and query parameters
+such as `?clientId=...` make no difference. A path that merely starts with those
+letters, like `/wsapi`, is a different path and is not covered.
+
+Everything else may start the model as usual: the page itself, assets, `/api/...`
+over ordinary HTTP, and a non-GET to `/ws`.
 
 ## What goes wrong
 
@@ -93,12 +100,12 @@ action and may start the model as usual.
   else, or it is defined on a peer. `/comfyui/` only serves a local model with
   that exact ID. Aliases do not work here — the lookup is by model ID.
 - **A stale tab reports a lost connection.** The model unloaded while the tab
-  was open and its websocket now gets the 409 above. Interacting with the page
-  starts the model again; the websocket reconnects once it is ready.
-- **An idle tab keeps the model loaded.** Only `GET /ws` and paths under it are
-  ignored. Anything else the page polls on a timer counts as a real request and
-  can reload the model after a TTL unload. Close the tab, or route that instance through
-  `/upstream/` with an `upstream.ignorePaths` entry for the path it polls.
+  was open and its websocket now gets one of the 409s above. Interacting with
+  the page starts the model again; the websocket reconnects once it is ready.
+- **An idle tab keeps the model loaded.** Ordinary HTTP requests are not
+  ignored, so anything the page polls on a timer can reload the model after a
+  TTL unload. Close the tab, or route that instance through `/upstream/` with an
+  `upstream.ignorePaths` entry for the path it polls.
 - **The model unloads while you are working.** Websocket traffic is ignored, so
   it does not reset the TTL timer. Watching a long render over the websocket
   counts as idle. Use a longer `ttl`, or `ttl: 0` to disable automatic
@@ -145,10 +152,13 @@ Use `${MODEL_ID}` for the container name so a second instance cannot collide
 with the `comfyui-auto` container, and keep the default static-asset pattern —
 listing `ignorePaths` at all replaces the default instead of adding to it.
 
-`upstream.ignorePaths` applies to `/upstream/` only, never to `/comfyui/`,
-which has its built-in `GET /ws` rule instead. Both refuse with a 409 when the
-model is not loaded rather than triggering a swap, so `ignorePaths` is the way
-to ignore more paths than the one `/comfyui/` covers.
+`compat.ignoreWebsockets` does the same job here as it does on `/comfyui/`.
+`upstream.ignorePaths` replaces the endpoint's built-in `GET /ws` rule, which
+applies to `/comfyui/` only; it is also the way to ignore more paths than that
+one. Ignored paths refuse with a 409 when the model is not loaded rather than
+triggering a swap, and unlike the endpoint's rule they match any method. Note
+that `^\/ws$` is an exact match: use `^\/ws(\/|$)` to cover sub paths the way
+`/comfyui/` does.
 
 ## Related
 
