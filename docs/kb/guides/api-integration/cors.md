@@ -9,12 +9,45 @@ updated: 2026-09-21
 
 # CORS and browser access
 
-## The default
+## Two modes
 
-Out of the box llama-swap allows any origin. A browser page on any host can
-call `/v1/...`, `/api/...` and `/running`.
+There is no `security.cors` block by default, and that absence is itself the
+setting: llama-swap allows any origin, which is what it did before the option
+existed. Existing configs keep working untouched.
 
-Two rules matter more than the defaults:
+Declaring the block switches to the configured policy. You are then in charge
+of access, so `allowedOrigins` is required and nothing falls back to allow-all.
+To keep the permissive behaviour, delete the block rather than writing `"*"` —
+though writing `"*"` deliberately is fine and means the same thing.
+
+```yaml
+# no security block at all  -> any origin allowed
+```
+
+```yaml
+security:
+  cors:
+    allowedOrigins: ["https://dashboard.example.com"]
+# -> only that origin; every other browser origin gets nothing
+```
+
+A `security.cors:` block that lists no origins is refused at startup:
+
+```console
+error: security.cors: allowedOrigins must list at least one origin, or "*" to
+allow any; remove the security.cors block to keep the permissive default
+```
+
+That is deliberate. A half-finished block that silently blocked every browser
+would surface as a mystery CORS error in a console instead of a message at
+startup.
+
+Only `allowedOrigins` loses its default this way. `allowedMethods`,
+`allowedHeaders` and `maxAge` describe preflight mechanics rather than access,
+so each one you leave out still takes its default and the minimal block above
+answers a browser's preflight correctly.
+
+Two rules apply in both modes:
 
 1. **Headers are only sent when the request carries an `Origin`.** Only browsers
    send that header. curl, litellm and most SDKs do not, so they get a response
@@ -39,8 +72,7 @@ Each origin is a bare `scheme://host[:port]`. A trailing slash or a path would
 never match what a browser sends, so llama-swap rejects the config at startup
 rather than failing silently later.
 
-When the list does not contain `*`, the matching origin is echoed back and
-`Vary: Origin` is set.
+The matching origin is echoed back and `Vary: Origin` is set.
 
 A request from an unlisted origin is still handled normally — llama-swap runs
 it and returns the full response, just without CORS headers. The browser then

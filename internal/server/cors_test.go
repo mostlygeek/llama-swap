@@ -23,11 +23,17 @@ var corsHeaders = []string{
 	"Access-Control-Allow-Private-Network",
 }
 
-// corsTestServer builds a Server whose security.cors is cfg.
-func corsTestServer(t *testing.T, cfg config.CORSConfig) *Server {
+// corsTestServer builds a Server whose security.cors is cfg. A nil cfg stands
+// for a config that declares no security.cors block, which selects the legacy
+// permissive policy.
+func corsTestServer(t *testing.T, cfg *config.CORSConfig) *Server {
 	t.Helper()
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("test CORS config is invalid: %v", err)
+	if cfg != nil {
+		// Mirror the load-time check so a test never exercises a policy the
+		// loader would have rejected.
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("test CORS config is invalid: %v", err)
+		}
 	}
 	return newTestServerWithConfig(
 		config.Config{Security: config.SecurityConfig{CORS: cfg}},
@@ -53,7 +59,7 @@ func assertNoCORSHeaders(t *testing.T, w *httptest.ResponseRecorder, context str
 // CORS headers at all, so the upstream's copy can never be folded together
 // with llama-swap's into an invalid "*, ".
 func TestServer_CORSNoOriginEmitsNoHeaders(t *testing.T) {
-	s := corsTestServer(t, config.CORSConfig{})
+	s := corsTestServer(t, nil)
 
 	requests := []struct {
 		method string
@@ -77,7 +83,7 @@ func TestServer_CORSNoOriginEmitsNoHeaders(t *testing.T) {
 // empty one. PR #1121 would have failed this once a proxied upstream added its
 // own header.
 func TestServer_CORSHeadersAreSingleValued(t *testing.T) {
-	s := corsTestServer(t, config.CORSConfig{})
+	s := corsTestServer(t, nil)
 
 	requests := []struct {
 		method string
@@ -122,7 +128,7 @@ func TestServer_CORSHeadersAreSingleValued(t *testing.T) {
 // for: a passing preflight is not enough, the browser needs the header on the
 // real response too.
 func TestServer_CORSActualResponseWithOrigin(t *testing.T) {
-	s := corsTestServer(t, config.CORSConfig{})
+	s := corsTestServer(t, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/running", nil)
 	req.Header.Set("Origin", "http://example.com")
@@ -147,7 +153,7 @@ func TestServer_CORSActualResponseWithOrigin(t *testing.T) {
 }
 
 func TestServer_CORSPreflight(t *testing.T) {
-	s := corsTestServer(t, config.CORSConfig{})
+	s := corsTestServer(t, nil)
 
 	req := httptest.NewRequest(http.MethodOptions, "/v1/chat/completions", nil)
 	req.Header.Set("Origin", "http://example.com")
@@ -172,7 +178,7 @@ func TestServer_CORSPreflight(t *testing.T) {
 }
 
 func TestServer_CORSPreflightEchoesRequestHeaders(t *testing.T) {
-	s := corsTestServer(t, config.CORSConfig{})
+	s := corsTestServer(t, nil)
 
 	req := httptest.NewRequest(http.MethodOptions, "/v1/chat/completions", nil)
 	req.Header.Set("Origin", "http://example.com")
@@ -191,7 +197,7 @@ func TestServer_CORSPreflightEchoesRequestHeaders(t *testing.T) {
 // TestServer_CORSPreflightDropsIllegalRequestHeaders keeps the echo from
 // turning a hostile request header into an illegal response header value.
 func TestServer_CORSPreflightDropsIllegalRequestHeaders(t *testing.T) {
-	s := corsTestServer(t, config.CORSConfig{})
+	s := corsTestServer(t, nil)
 
 	req := httptest.NewRequest(http.MethodOptions, "/v1/chat/completions", nil)
 	req.Header.Set("Origin", "http://example.com")
@@ -207,7 +213,7 @@ func TestServer_CORSPreflightDropsIllegalRequestHeaders(t *testing.T) {
 // TestServer_CORSPreflightAllIllegalFallsBackToDefaults covers an echo that
 // sanitizes down to nothing: the defaults are sent rather than an empty header.
 func TestServer_CORSPreflightAllIllegalFallsBackToDefaults(t *testing.T) {
-	s := corsTestServer(t, config.CORSConfig{})
+	s := corsTestServer(t, nil)
 
 	req := httptest.NewRequest(http.MethodOptions, "/v1/chat/completions", nil)
 	req.Header.Set("Origin", "http://example.com")
@@ -223,7 +229,7 @@ func TestServer_CORSPreflightAllIllegalFallsBackToDefaults(t *testing.T) {
 // TestServer_CORSPreflightWithoutOrigin covers a non-browser OPTIONS probe: it
 // still gets 204 so behaviour is unchanged, but no CORS headers.
 func TestServer_CORSPreflightWithoutOrigin(t *testing.T) {
-	s := corsTestServer(t, config.CORSConfig{})
+	s := corsTestServer(t, nil)
 
 	w := httptest.NewRecorder()
 	s.ServeHTTP(w, httptest.NewRequest(http.MethodOptions, "/v1/chat/completions", nil))
@@ -258,7 +264,7 @@ func TestServer_CORSPreflightBypassesAuth(t *testing.T) {
 }
 
 func TestServer_CORSAllowedOriginsExactMatch(t *testing.T) {
-	s := corsTestServer(t, config.CORSConfig{
+	s := corsTestServer(t, &config.CORSConfig{
 		AllowedOrigins: []string{"https://dash.example.com"},
 	})
 
@@ -278,7 +284,7 @@ func TestServer_CORSAllowedOriginsExactMatch(t *testing.T) {
 // TestServer_CORSAllowedOriginsMismatch checks a disallowed origin gets no CORS
 // headers while the request itself is still served normally.
 func TestServer_CORSAllowedOriginsMismatch(t *testing.T) {
-	s := corsTestServer(t, config.CORSConfig{
+	s := corsTestServer(t, &config.CORSConfig{
 		AllowedOrigins: []string{"https://dash.example.com"},
 	})
 
@@ -294,7 +300,7 @@ func TestServer_CORSAllowedOriginsMismatch(t *testing.T) {
 }
 
 func TestServer_CORSAllowCredentials(t *testing.T) {
-	s := corsTestServer(t, config.CORSConfig{
+	s := corsTestServer(t, &config.CORSConfig{
 		AllowedOrigins:   []string{"https://dash.example.com"},
 		AllowCredentials: true,
 	})
@@ -315,7 +321,8 @@ func TestServer_CORSAllowCredentials(t *testing.T) {
 }
 
 func TestServer_CORSExposeHeaders(t *testing.T) {
-	s := corsTestServer(t, config.CORSConfig{
+	s := corsTestServer(t, &config.CORSConfig{
+		AllowedOrigins: []string{"*"},
 		ExposedHeaders: []string{"X-Request-Id", "X-Model"},
 	})
 
@@ -332,7 +339,7 @@ func TestServer_CORSExposeHeaders(t *testing.T) {
 // TestServer_CORSExposeHeadersOmittedWhenEmpty keeps an unset list from sending
 // an empty header, which is the shape that folds badly downstream.
 func TestServer_CORSExposeHeadersOmittedWhenEmpty(t *testing.T) {
-	s := corsTestServer(t, config.CORSConfig{})
+	s := corsTestServer(t, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/running", nil)
 	req.Header.Set("Origin", "http://example.com")
@@ -345,7 +352,8 @@ func TestServer_CORSExposeHeadersOmittedWhenEmpty(t *testing.T) {
 }
 
 func TestServer_CORSCustomMethodsAndMaxAge(t *testing.T) {
-	s := corsTestServer(t, config.CORSConfig{
+	s := corsTestServer(t, &config.CORSConfig{
+		AllowedOrigins: []string{"*"},
 		AllowedMethods: []string{"GET", "POST"},
 		AllowedHeaders: []string{"Content-Type"},
 		MaxAge:         60,
@@ -398,10 +406,59 @@ func TestServer_CORSDefaultPolicyMatchesLegacy(t *testing.T) {
 	}
 }
 
+// TestServer_CORSDeclaredBlockKeepsPreflightDefaults is the runtime half of
+// the two-mode model. Declaring security.cors takes charge of which origins
+// may reach llama-swap, but not of preflight mechanics: a block that names
+// only origins must still answer a browser's preflight with usable methods,
+// headers and max-age, or a cross-origin POST would be blocked by a config
+// that looks complete.
+func TestServer_CORSDeclaredBlockKeepsPreflightDefaults(t *testing.T) {
+	s := corsTestServer(t, &config.CORSConfig{
+		AllowedOrigins: []string{"https://dash.example.com"},
+	})
+
+	req := httptest.NewRequest(http.MethodOptions, "/v1/chat/completions", nil)
+	req.Header.Set("Origin", "https://dash.example.com")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status=%d want 204", w.Code)
+	}
+	want := map[string]string{
+		"Access-Control-Allow-Origin":  "https://dash.example.com",
+		"Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+		"Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, X-Requested-With",
+		"Access-Control-Max-Age":       "86400",
+	}
+	for name, value := range want {
+		if got := w.Header().Get(name); got != value {
+			t.Errorf("%s=%q want %q", name, got, value)
+		}
+	}
+}
+
+// TestServer_CORSDeclaredBlockDoesNotWidenToWildcard guards the point of the
+// two-mode model: a declared block never falls back to allowing any origin.
+func TestServer_CORSDeclaredBlockDoesNotWidenToWildcard(t *testing.T) {
+	s := corsTestServer(t, &config.CORSConfig{
+		AllowedOrigins: []string{"https://dash.example.com"},
+	})
+
+	for _, origin := range []string{"https://evil.example.com", "http://localhost:5173", "null"} {
+		req := httptest.NewRequest(http.MethodGet, "/running", nil)
+		req.Header.Set("Origin", origin)
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, req)
+		assertNoCORSHeaders(t, w, "unlisted origin "+origin)
+	}
+}
+
 // TestServer_CORSOriginMatchIsHostCaseInsensitive covers a browser sending the
 // host in different case than the config lists it.
 func TestServer_CORSOriginMatchIsHostCaseInsensitive(t *testing.T) {
-	s := corsTestServer(t, config.CORSConfig{
+	s := corsTestServer(t, &config.CORSConfig{
 		AllowedOrigins: []string{"https://Dash.Example.com"},
 	})
 
@@ -418,7 +475,7 @@ func TestServer_CORSOriginMatchIsHostCaseInsensitive(t *testing.T) {
 // TestServer_CORSNullOriginNotAllowedByList checks that the sandboxed-document
 // "null" origin does not match a configured list.
 func TestServer_CORSNullOriginNotAllowedByList(t *testing.T) {
-	s := corsTestServer(t, config.CORSConfig{
+	s := corsTestServer(t, &config.CORSConfig{
 		AllowedOrigins: []string{"https://dash.example.com"},
 	})
 

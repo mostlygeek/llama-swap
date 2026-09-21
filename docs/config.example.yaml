@@ -172,17 +172,22 @@ apiKeys:
   - "${env.API_KEY_2}"
 
 # security: settings that control who may talk to llama-swap
-# - optional, default: CORS allows any origin
+# - optional, omit the whole block to allow any origin (the legacy default)
 # - llama-swap only sends Access-Control-* headers when the request carries an
 #   Origin header, so curl, litellm and other non-browser clients get none
 # - any CORS headers an upstream (llama-server, vLLM) sets are stripped from
 #   proxied responses so exactly one set reaches the client, see issue #85
 security:
+  # cors: declaring this block takes charge of browser access
+  # - allowedOrigins becomes required; nothing falls back to allow-all
+  # - the other settings only describe preflight mechanics, so each one you
+  #   leave out still takes its default and a minimal block keeps working
+  # - to keep the permissive default, delete this block rather than listing "*"
   cors:
     # allowedOrigins: browser origins allowed to read responses
-    # - optional, default: ["*"] (any origin)
+    # - REQUIRED when the cors block is present
     # - each entry is a bare scheme://host[:port], no trailing slash or path
-    # - "*" cannot be combined with allowCredentials
+    # - "*" allows any origin, and cannot be combined with allowCredentials
     allowedOrigins:
       - "*"
 

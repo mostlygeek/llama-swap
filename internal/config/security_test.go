@@ -5,15 +5,16 @@ import (
 	"testing"
 )
 
-// TestConfig_SecurityCORSDefaultsWhenAbsent pins that a config with no
-// security block keeps the permissive behaviour llama-swap had before the
-// setting existed, so adding it never changes an existing deployment.
-func TestConfig_SecurityCORSDefaultsWhenAbsent(t *testing.T) {
+// TestConfig_SecurityCORSAbsentSelectsLegacyPolicy pins that a config
+// declaring no security.cors block leaves CORS nil, which selects the
+// permissive behaviour llama-swap had before the setting existed. Adding the
+// setting must never change an existing deployment.
+func TestConfig_SecurityCORSAbsentSelectsLegacyPolicy(t *testing.T) {
 	configs := map[string]string{
-		"no security block":  "models:\n  m1:\n    cmd: echo ${PORT}\n",
-		"empty security":     "security:\nmodels:\n  m1:\n    cmd: echo ${PORT}\n",
-		"empty cors":         "security:\n  cors: {}\nmodels:\n  m1:\n    cmd: echo ${PORT}\n",
-		"empty allowOrigins": "security:\n  cors:\n    allowedOrigins: []\nmodels:\n  m1:\n    cmd: echo ${PORT}\n",
+		"no security block": "models:\n  m1:\n    cmd: echo ${PORT}\n",
+		"empty security":    "security:\nmodels:\n  m1:\n    cmd: echo ${PORT}\n",
+		"explicit wildcard is a declared block": "security:\n  cors:\n" +
+			"    allowedOrigins: [\"*\"]\nmodels:\n  m1:\n    cmd: echo ${PORT}\n",
 	}
 
 	for name, yaml := range configs {
@@ -22,17 +23,71 @@ func TestConfig_SecurityCORSDefaultsWhenAbsent(t *testing.T) {
 			if err != nil {
 				t.Fatalf("LoadConfigFromReader: %v", err)
 			}
-			cors := cfg.Security.CORS
-			if cors.AllowCredentials {
-				t.Error("allowCredentials defaulted to true")
+			if name == "explicit wildcard is a declared block" {
+				// An explicit wildcard is a declared block, not an absent one.
+				if cfg.Security.CORS == nil {
+					t.Fatal("CORS is nil for a declared block")
+				}
+				return
 			}
-			if cors.MaxAge != 0 {
-				t.Errorf("maxAge=%d want 0, which newCORSPolicy resolves to the default", cors.MaxAge)
-			}
-			if err := cors.Validate(); err != nil {
-				t.Errorf("default config failed validation: %v", err)
+			if cfg.Security.CORS != nil {
+				t.Errorf("CORS = %+v, want nil so the legacy policy applies", cfg.Security.CORS)
 			}
 		})
+	}
+}
+
+// TestConfig_SecurityCORSDeclaredRequiresOrigins covers the second half of the
+// two-mode model: declaring the block means taking charge of access, so a
+// block that names no origins is a half-finished edit and fails at startup
+// rather than silently blocking every browser.
+func TestConfig_SecurityCORSDeclaredRequiresOrigins(t *testing.T) {
+	configs := map[string]string{
+		"empty cors mapping": "security:\n  cors: {}\nmodels:\n  m1:\n    cmd: echo ${PORT}\n",
+		"cors with null value": "security:\n  cors:\nmodels:\n  m1:\n" +
+			"    cmd: echo ${PORT}\n",
+		"empty allowedOrigins": "security:\n  cors:\n    allowedOrigins: []\n" +
+			"models:\n  m1:\n    cmd: echo ${PORT}\n",
+		"only maxAge set": "security:\n  cors:\n    maxAge: 600\n" +
+			"models:\n  m1:\n    cmd: echo ${PORT}\n",
+	}
+
+	for name, yaml := range configs {
+		t.Run(name, func(t *testing.T) {
+			_, err := LoadConfigFromReader(strings.NewReader(yaml))
+			if err == nil {
+				t.Fatal("LoadConfigFromReader accepted a security.cors block with no origins")
+			}
+			if !strings.Contains(err.Error(), "allowedOrigins") {
+				t.Errorf("error = %q, want it to name allowedOrigins", err)
+			}
+		})
+	}
+}
+
+// TestConfig_SecurityCORSDeclaredKeepsPreflightDefaults checks the other side
+// of the model: only allowedOrigins loses its default. The preflight mechanics
+// stay empty in the config and are resolved to defaults by newCORSPolicy, so a
+// block that only names origins still works in a browser.
+func TestConfig_SecurityCORSDeclaredKeepsPreflightDefaults(t *testing.T) {
+	const yaml = `
+security:
+  cors:
+    allowedOrigins: ["https://dash.example.com"]
+models:
+  m1:
+    cmd: echo ${PORT}
+`
+	cfg, err := LoadConfigFromReader(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("LoadConfigFromReader: %v", err)
+	}
+	cors := cfg.Security.CORS
+	if cors == nil {
+		t.Fatal("CORS is nil for a declared block")
+	}
+	if len(cors.AllowedMethods) != 0 || len(cors.AllowedHeaders) != 0 || cors.MaxAge != 0 {
+		t.Errorf("unset preflight fields were populated at load: %+v", cors)
 	}
 }
 
@@ -114,23 +169,33 @@ func TestConfig_SecurityCORSValidation(t *testing.T) {
 			wantErr: "whitespace",
 		},
 		{
+			name:    "no origins at all",
+			cors:    CORSConfig{},
+			wantErr: "allowedOrigins",
+		},
+		{
+			name:    "origins set but empty",
+			cors:    CORSConfig{AllowedOrigins: []string{}, MaxAge: 600},
+			wantErr: "allowedOrigins",
+		},
+		{
 			name:    "negative maxAge",
-			cors:    CORSConfig{MaxAge: -1},
+			cors:    CORSConfig{AllowedOrigins: []string{"*"}, MaxAge: -1},
 			wantErr: "maxAge",
 		},
 		{
 			name:    "non-token method",
-			cors:    CORSConfig{AllowedMethods: []string{"GET POST"}},
+			cors:    CORSConfig{AllowedOrigins: []string{"*"}, AllowedMethods: []string{"GET POST"}},
 			wantErr: "allowedMethods",
 		},
 		{
 			name:    "non-token allowed header",
-			cors:    CORSConfig{AllowedHeaders: []string{"Bad Header"}},
+			cors:    CORSConfig{AllowedOrigins: []string{"*"}, AllowedHeaders: []string{"Bad Header"}},
 			wantErr: "allowedHeaders",
 		},
 		{
 			name:    "non-token exposed header",
-			cors:    CORSConfig{ExposedHeaders: []string{"Bad@Header"}},
+			cors:    CORSConfig{AllowedOrigins: []string{"*"}, ExposedHeaders: []string{"Bad@Header"}},
 			wantErr: "exposedHeaders",
 		},
 	}

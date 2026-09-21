@@ -27,14 +27,19 @@ type corsPolicy struct {
 	maxAge           string   // pre-formatted seconds
 }
 
-// newCORSPolicy resolves cfg into a corsPolicy, applying the default for every
-// field the config leaves empty. The zero CORSConfig therefore yields the
-// permissive policy llama-swap had before security.cors existed.
-func newCORSPolicy(cfg config.CORSConfig) corsPolicy {
-	origins := cfg.AllowedOrigins
-	if len(origins) == 0 {
-		origins = config.DefaultCORSAllowedOrigins()
+// newCORSPolicy resolves cfg into a corsPolicy.
+//
+// A nil cfg means the config declared no security.cors block, which selects
+// the permissive policy llama-swap had before the setting existed: any origin
+// allowed. A declared block always lists its own origins — config validation
+// rejects one that does not — so nothing here widens access beyond it. The
+// preflight mechanics still take their defaults either way, so a block that
+// only names origins keeps working for a browser.
+func newCORSPolicy(cfg *config.CORSConfig) corsPolicy {
+	if cfg == nil {
+		cfg = &config.CORSConfig{AllowedOrigins: config.DefaultCORSAllowedOrigins()}
 	}
+	origins := cfg.AllowedOrigins
 	p := corsPolicy{
 		allowedOrigins:   make(map[string]string, len(origins)),
 		allowCredentials: cfg.AllowCredentials,

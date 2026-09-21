@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // CORSWildcardOrigin allows any origin. It is the default when
@@ -37,18 +39,56 @@ func DefaultCORSAllowedHeaders() []string {
 
 // SecurityConfig groups settings that control who may talk to llama-swap.
 type SecurityConfig struct {
-	CORS CORSConfig `yaml:"cors"`
+	// CORS is nil when the config declares no security.cors block at all.
+	// That absence selects the legacy permissive policy, kept for backwards
+	// compatibility with configs written before the setting existed. Declaring
+	// the block opts into the configured policy instead, where nothing widens
+	// access beyond the origins it lists.
+	CORS *CORSConfig `yaml:"cors"`
 }
 
-// CORSConfig controls the Access-Control-* headers llama-swap sends. The zero
-// value is the historical permissive policy: any origin, no credentials. See
-// issues #85 and #1121 — llama-swap must be the only source of these headers,
-// because upstreams such as llama-server set their own and
+// UnmarshalYAML distinguishes a missing cors block from one written as
+// `cors:` with nothing under it. yaml.v3 decodes an explicit null into a nil
+// pointer, which would silently select the permissive policy for a config that
+// plainly meant to restrict something, so an empty block is materialized and
+// left for Validate to reject.
+func (s *SecurityConfig) UnmarshalYAML(value *yaml.Node) error {
+	type rawSecurityConfig SecurityConfig
+	var raw rawSecurityConfig
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	*s = SecurityConfig(raw)
+
+	if s.CORS != nil || value.Kind != yaml.MappingNode {
+		return nil
+	}
+	// Keys alternate name, value in a mapping node's content.
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		if value.Content[i].Value == "cors" {
+			s.CORS = &CORSConfig{}
+			return nil
+		}
+	}
+	return nil
+}
+
+// CORSConfig controls the Access-Control-* headers llama-swap sends.
+//
+// Declaring the block means taking charge of who may reach llama-swap from a
+// browser, so allowedOrigins is required and nothing falls back to the
+// permissive default; write "*" to allow any origin deliberately. The
+// remaining fields describe preflight mechanics rather than access, so each
+// one left empty still takes its default and a minimal block keeps working.
+//
+// See issues #85, #1121 and #1133 — llama-swap must be the only source of
+// these headers, because upstreams such as llama-server set their own and
 // httputil.ReverseProxy adds rather than replaces them.
 type CORSConfig struct {
-	// AllowedOrigins lists the browser origins that may read responses.
-	// Empty means DefaultCORSAllowedOrigins (any origin). A "*" entry cannot
-	// be combined with AllowCredentials.
+	// AllowedOrigins lists the browser origins that may read responses. It is
+	// required whenever the block is declared: there is no permissive default
+	// to fall back on here. A "*" entry allows any origin and cannot be
+	// combined with AllowCredentials.
 	AllowedOrigins []string `yaml:"allowedOrigins"`
 
 	// AllowCredentials sends Access-Control-Allow-Credentials: true, letting
@@ -73,8 +113,14 @@ type CORSConfig struct {
 	MaxAge int `yaml:"maxAge"`
 }
 
-// Validate reports configuration that cannot produce a usable CORS policy.
+// Validate reports configuration that cannot produce a usable CORS policy. It
+// runs only for a declared security.cors block; an absent one needs no
+// validation because it selects the legacy permissive policy.
 func (c CORSConfig) Validate() error {
+	if len(c.AllowedOrigins) == 0 {
+		return fmt.Errorf(`allowedOrigins must list at least one origin, or "*" to allow any; remove the security.cors block to keep the permissive default`)
+	}
+
 	for _, origin := range c.AllowedOrigins {
 		if origin == CORSWildcardOrigin {
 			if c.AllowCredentials {
