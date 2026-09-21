@@ -365,8 +365,8 @@ func (s *Server) routes() {
 	mux.Handle("/upstream/{upstreamPath...}", upstreamChain.ThenFunc(s.handleUpstream))
 
 	// ComfyUI compatibility passthrough. This uses the fixed comfyui_auto model,
-	// whose compatibility settings are applied while loading config. Only the
-	// root path may start an unloaded model.
+	// whose compatibility settings are applied while loading config. A GET to
+	// /ws may not start an unloaded model.
 	mux.Handle("/comfyui", apiChain.ThenFunc(handleComfyUIRedirect))
 	mux.Handle("/comfyui/{comfyPath...}", apiChain.ThenFunc(s.handleComfyUI))
 
