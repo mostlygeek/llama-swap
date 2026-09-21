@@ -185,7 +185,8 @@ security:
   #   leave out still takes its default and naming only origins keeps working
   cors:
     # allowedOrigins: browser origins allowed to read responses
-    # - omit to allow any origin; REQUIRED once any other cors setting is set
+    # - omit the key to allow any origin; an empty list [] is an error
+    # - REQUIRED once any other cors setting is set
     # - each entry is a bare scheme://host[:port], no trailing slash or path
     # - "*" allows any origin, and cannot be combined with allowCredentials
     allowedOrigins:

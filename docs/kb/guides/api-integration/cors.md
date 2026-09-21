@@ -34,16 +34,26 @@ Only `allowedOrigins` works this way. `allowedMethods`, `allowedHeaders` and
 out still takes its default and the minimal config above answers a browser's
 preflight correctly.
 
-Because those settings are meaningless without origins to apply them to,
-setting one without `allowedOrigins` is refused at startup:
+Two shapes are refused at startup rather than falling back to allow-all, since
+quietly widening access for a config that meant to restrict something is the
+worst thing this setting could do.
+
+Setting one of those other fields without naming origins to apply it to:
 
 ```console
 error: security.cors: allowedOrigins is required when any other cors setting
 is present; remove the security.cors block to keep the permissive default
 ```
 
-That is deliberate. Quietly falling back to allow-all would widen access for a
-config that plainly meant to restrict something.
+And writing the list as empty, which says the opposite of "allow everything":
+
+```console
+error: security.cors: allowedOrigins must list at least one origin, or "*" to
+allow any; remove the key to keep the permissive default
+```
+
+Omitting the key and writing `allowedOrigins: []` are therefore different.
+Omit it to allow any origin; write `["*"]` if you want that on the record.
 
 Two rules apply in both modes:
 

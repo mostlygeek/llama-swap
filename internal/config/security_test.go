@@ -3,6 +3,8 @@ package config
 import (
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // TestConfig_SecurityCORSUnsetOriginsSelectLegacyPolicy pins that a config
@@ -12,11 +14,11 @@ import (
 func TestConfig_SecurityCORSUnsetOriginsSelectLegacyPolicy(t *testing.T) {
 	const models = "models:\n  m1:\n    cmd: echo ${PORT}\n"
 	configs := map[string]string{
-		"no security block":    models,
-		"empty security":       "security:\n" + models,
-		"cors with null value": "security:\n  cors:\n" + models,
-		"empty cors mapping":   "security:\n  cors: {}\n" + models,
-		"empty allowedOrigins": "security:\n  cors:\n    allowedOrigins: []\n" + models,
+		"no security block":            models,
+		"empty security":               "security:\n" + models,
+		"cors with null value":         "security:\n  cors:\n" + models,
+		"empty cors mapping":           "security:\n  cors: {}\n" + models,
+		"allowedOrigins with no value": "security:\n  cors:\n    allowedOrigins:\n" + models,
 	}
 
 	for name, yaml := range configs {
@@ -27,6 +29,63 @@ func TestConfig_SecurityCORSUnsetOriginsSelectLegacyPolicy(t *testing.T) {
 			}
 			if got := cfg.Security.CORS.AllowedOrigins; len(got) != 0 {
 				t.Errorf("allowedOrigins = %q, want empty so the legacy policy applies", got)
+			}
+		})
+	}
+}
+
+// TestConfig_SecurityCORSEmptyOriginListRejected covers a list written as
+// empty. Reading `allowedOrigins: []` as "allow every origin" would invert
+// what it plainly says, so it fails at startup instead.
+func TestConfig_SecurityCORSEmptyOriginListRejected(t *testing.T) {
+	const models = "models:\n  m1:\n    cmd: echo ${PORT}\n"
+	configs := map[string]string{
+		"flow empty list":           "security:\n  cors:\n    allowedOrigins: []\n" + models,
+		"flow empty list with more": "security:\n  cors:\n    allowedOrigins: []\n    maxAge: 600\n" + models,
+	}
+
+	for name, yaml := range configs {
+		t.Run(name, func(t *testing.T) {
+			_, err := LoadConfigFromReader(strings.NewReader(yaml))
+			if err == nil {
+				t.Fatal("LoadConfigFromReader accepted an empty allowedOrigins list")
+			}
+			if !strings.Contains(err.Error(), "at least one origin") {
+				t.Errorf("error = %q, want it to ask for at least one origin", err)
+			}
+		})
+	}
+}
+
+// TestConfig_SecurityCORSNilVsEmptyOrigins pins the yaml.v3 behaviour that
+// telling an absent allowedOrigins from an empty one depends on: an absent key
+// leaves the slice nil, while `allowedOrigins: []` produces a non-nil empty
+// one. If a yaml.v3 upgrade ever collapsed the two, the empty-list rule above
+// would quietly become a no-op, so fail here instead.
+func TestConfig_SecurityCORSNilVsEmptyOrigins(t *testing.T) {
+	cases := []struct {
+		name    string
+		yaml    string
+		wantNil bool
+	}{
+		{"absent key", "maxAge: 600\n", true},
+		{"null value", "allowedOrigins:\n", true},
+		{"explicit null", "allowedOrigins: null\n", true},
+		{"flow empty list", "allowedOrigins: []\n", false},
+		{"block empty list", "allowedOrigins: [\n]\n", false},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var cors CORSConfig
+			if err := yaml.Unmarshal([]byte(c.yaml), &cors); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			if got := cors.AllowedOrigins == nil; got != c.wantNil {
+				t.Errorf("AllowedOrigins == nil is %v, want %v", got, c.wantNil)
+			}
+			if len(cors.AllowedOrigins) != 0 {
+				t.Errorf("AllowedOrigins = %q, want empty", cors.AllowedOrigins)
 			}
 		})
 	}
@@ -168,6 +227,11 @@ func TestConfig_SecurityCORSValidation(t *testing.T) {
 			wantErr: "whitespace",
 		},
 		{
+			name:    "explicitly empty origin list",
+			cors:    CORSConfig{AllowedOrigins: []string{}},
+			wantErr: "at least one origin",
+		},
+		{
 			name:    "maxAge without origins",
 			cors:    CORSConfig{MaxAge: 600},
 			wantErr: "allowedOrigins is required",
@@ -176,6 +240,11 @@ func TestConfig_SecurityCORSValidation(t *testing.T) {
 			name:    "credentials without origins",
 			cors:    CORSConfig{AllowCredentials: true},
 			wantErr: "allowedOrigins is required",
+		},
+		{
+			name:    "empty origin list beats the orphan rule",
+			cors:    CORSConfig{AllowedOrigins: []string{}, MaxAge: 600},
+			wantErr: "at least one origin",
 		},
 		{
 			name:    "negative maxAge",

@@ -836,7 +836,8 @@
                                 "type": "string",
                                 "minLength": 1
                             },
-                            "description": "Browser origins allowed to read responses, each a bare scheme://host[:port] with no trailing slash or path. Leaving this out allows any origin; listing \"*\" allows any origin deliberately. Required once any other cors setting is present. \"*\" cannot be combined with allowCredentials."
+                            "minItems": 1,
+                            "description": "Browser origins allowed to read responses, each a bare scheme://host[:port] with no trailing slash or path. Omit the key entirely to allow any origin; an empty list is rejected rather than read as \"allow everything\". List \"*\" to allow any origin deliberately. Required once any other cors setting is present. \"*\" cannot be combined with allowCredentials."
                         },
                         "allowCredentials": {
                             "type": "boolean",

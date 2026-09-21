@@ -55,10 +55,15 @@ type SecurityConfig struct {
 // httputil.ReverseProxy adds rather than replaces them.
 type CORSConfig struct {
 	// AllowedOrigins lists the browser origins that may read responses, and
-	// selects the mode: empty means the permissive legacy policy, non-empty
+	// selects the mode: absent means the permissive legacy policy, present
 	// means only these origins. It is required once any other field here is
-	// set. A "*" entry allows any origin and cannot be combined with
-	// AllowCredentials.
+	// set, and writing it as an empty list is rejected rather than read as
+	// "allow everything". A "*" entry allows any origin and cannot be
+	// combined with AllowCredentials.
+	//
+	// Nil and empty are therefore different: yaml.v3 leaves this nil for an
+	// absent key and produces a non-nil empty slice for `allowedOrigins: []`,
+	// which is what lets Validate tell them apart.
 	AllowedOrigins []string `yaml:"allowedOrigins"`
 
 	// AllowCredentials sends Access-Control-Allow-Credentials: true, letting
@@ -86,6 +91,13 @@ type CORSConfig struct {
 // Validate reports configuration that cannot produce a usable CORS policy.
 func (c CORSConfig) Validate() error {
 	if len(c.AllowedOrigins) == 0 {
+		// A nil slice means the key was never written, which selects the
+		// legacy permissive policy. A non-nil empty one means the key is
+		// there as `allowedOrigins: []`, and allowing every origin because
+		// someone asked for none would invert what they wrote.
+		if c.AllowedOrigins != nil {
+			return fmt.Errorf(`allowedOrigins must list at least one origin, or "*" to allow any; remove the key to keep the permissive default`)
+		}
 		if !c.hasNonOriginSettings() {
 			// Nothing configured at all, which selects the legacy permissive
 			// policy and needs no further checking.
