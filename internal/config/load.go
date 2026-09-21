@@ -105,6 +105,10 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		config.Upstream.IgnorePaths = DefaultUpstreamIgnorePaths()
 	}
 
+	if err := config.Security.CORS.Validate(); err != nil {
+		return Config{}, fmt.Errorf("security.cors: %w", err)
+	}
+
 	switch config.LogToStdout {
 	case LogToStdoutProxy, LogToStdoutUpstream, LogToStdoutBoth, LogToStdoutNone:
 	default:

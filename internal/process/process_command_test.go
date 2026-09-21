@@ -424,6 +424,69 @@ func TestProcessCommand_RunStopCycle(t *testing.T) {
 	}
 }
 
+// TestProcessCommand_StripsUpstreamCORSHeaders is the model-proxy half of the
+// issue #85 regression. llama-server sets its own Access-Control-Allow-Origin
+// on every response, and httputil.ReverseProxy adds upstream headers rather
+// than replacing them, so llama-swap's CORS middleware and the upstream would
+// both contribute a value. Clients that fold repeated headers then see the
+// illegal "*, " and drop the request. The proxy must forward none of them.
+func TestProcessCommand_StripsUpstreamCORSHeaders(t *testing.T) {
+	skipIfNoSimpleResponder(t)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		// Mimic llama-server: echo whatever Origin arrived, so the header is
+		// present-but-empty when the client sent none.
+		w.Header().Set("Access-Control-Allow-Origin", r.Header.Get("Origin"))
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Max-Age", "600")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"choices":[]}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	cmd, _ := simpleResponderCmd(t, "-silent")
+	p, err := New(context.Background(), t.Name(), config.ModelConfig{
+		Cmd:                cmd,
+		Proxy:              upstream.URL,
+		CheckEndpoint:      "/health",
+		HealthCheckTimeout: 10,
+	}, logmon.NewWriter(io.Discard), logmon.NewWriter(io.Discard))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { p.Stop(testStopTimeout) })
+
+	_ = runAsync(t, p)
+
+	for _, origin := range []string{"", "http://example.com"} {
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{}`))
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		w := httptest.NewRecorder()
+		p.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("Origin=%q: status=%d want 200", origin, w.Code)
+		}
+		for name := range w.Header() {
+			if strings.HasPrefix(http.CanonicalHeaderKey(name), "Access-Control-") {
+				t.Errorf("Origin=%q: upstream %s=%q was copied through; it must be stripped",
+					origin, name, w.Header().Values(name))
+			}
+		}
+		if got := w.Header().Get("Content-Type"); got != "application/json" {
+			t.Errorf("Origin=%q: Content-Type=%q, unrelated headers must be untouched", origin, got)
+		}
+	}
+}
+
 // TestProcessCommand_ReverseProxyPanicIsRecovered drives the full proxy path:
 // the upstream responds healthy on /health (so Run completes), then on the
 // actual proxied request it hijacks the connection and closes it mid-body.

@@ -822,6 +822,78 @@
             "additionalProperties": false,
             "default": {}
         },
+        "security": {
+            "type": "object",
+            "description": "Settings that control who may talk to llama-swap.",
+            "properties": {
+                "cors": {
+                    "type": "object",
+                    "description": "Controls the Access-Control-* headers llama-swap sends to browsers. llama-swap is the only source of these headers: any set by an upstream such as llama-server are stripped from proxied responses, because httputil.ReverseProxy adds rather than replaces them and strict clients reject the folded value (see issue #85). Headers are only sent when the request carries an Origin, so non-browser clients such as curl and litellm receive none.",
+                    "properties": {
+                        "allowedOrigins": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "default": [
+                                "*"
+                            ],
+                            "description": "Browser origins allowed to read responses, each a bare scheme://host[:port] with no trailing slash or path. A single \"*\" entry allows any origin and is the default. \"*\" cannot be combined with allowCredentials."
+                        },
+                        "allowCredentials": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "Send Access-Control-Allow-Credentials: true so browsers may attach cookies and Authorization headers. Requires allowedOrigins to list origins explicitly."
+                        },
+                        "allowedMethods": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "default": [
+                                "GET",
+                                "POST",
+                                "PUT",
+                                "PATCH",
+                                "DELETE",
+                                "OPTIONS"
+                            ],
+                            "description": "Methods advertised on preflight responses. When empty the default list is used."
+                        },
+                        "allowedHeaders": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "default": [],
+                            "description": "Request headers advertised on preflight responses. When empty the client's Access-Control-Request-Headers is echoed back after dropping any name that is not a valid HTTP token, falling back to Content-Type, Authorization, Accept, X-Requested-With when the client sent none."
+                        },
+                        "exposedHeaders": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "default": [],
+                            "description": "Response headers a browser may read beyond the CORS-safelisted set. When empty the Access-Control-Expose-Headers header is omitted."
+                        },
+                        "maxAge": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "default": 86400,
+                            "description": "How long in seconds a browser may cache a preflight response. 0 uses the default of 86400."
+                        }
+                    },
+                    "additionalProperties": false,
+                    "default": {}
+                }
+            },
+            "additionalProperties": false,
+            "default": {}
+        },
         "routing": {
             "type": "object",
             "description": "Canonical routing/scheduling configuration. Alternative to the legacy top-level 'groups'/'matrix' keys; a config must not use both styles.",
