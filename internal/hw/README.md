@@ -127,6 +127,7 @@ on supported Linux and Windows systems.
 - `amd_linux.go`: Linux ROCm and KFD topology detection for AMD GPUs.
 - `intel.go`: Intel PCI device-ID to architecture and model table.
 - `intel_linux.go`: Linux `xpu-smi` (Intel XPU Manager) detection for Intel GPUs. The sysfs DRM probe reports discrete Arc cards as `shared_system` when the driver does not expose `mem_info_vram_total`; `xpu-smi discovery` supplies the dedicated capacity (`memory_physical_size_byte`) and merges over the sysfs record by PCI identity.
+- `apple.go`: macOS `system_profiler` Metal family key names and version parsing.
 - `detect_linux.go`: Linux environment, memory, and generic DRM/sysfs probes.
 - `detect_darwin.go`: macOS environment and `system_profiler` probes.
 - `detect_windows.go`: Windows environment and WMI enrichment.
