@@ -452,20 +452,25 @@ func TestServer_CORSDeclaredBlockDoesNotWidenToWildcard(t *testing.T) {
 	}
 }
 
-// TestServer_CORSOriginMatchIsHostCaseInsensitive covers a browser sending the
-// host in different case than the config lists it.
+// TestServer_CORSOriginMatchIsHostCaseInsensitive covers a config that spells
+// the host in different case than the browser does. The match must ignore
+// case, and the answer must be the request's spelling: a browser compares
+// Access-Control-Allow-Origin against its own origin, which it serializes with
+// the host lowercased, so replying with the config's mixed-case spelling would
+// fail that check on an origin that is in fact allowed.
 func TestServer_CORSOriginMatchIsHostCaseInsensitive(t *testing.T) {
 	s := corsTestServer(t, config.CORSConfig{
 		AllowedOrigins: []string{"https://Dash.Example.com"},
 	})
 
+	const origin = "https://dash.example.com"
 	req := httptest.NewRequest(http.MethodGet, "/running", nil)
-	req.Header.Set("Origin", "https://dash.example.com")
+	req.Header.Set("Origin", origin)
 	w := httptest.NewRecorder()
 	s.ServeHTTP(w, req)
 
-	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "https://Dash.Example.com" {
-		t.Errorf("Access-Control-Allow-Origin=%q want the configured spelling echoed", got)
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != origin {
+		t.Errorf("Access-Control-Allow-Origin=%q want %q, the origin the request sent", got, origin)
 	}
 }
 

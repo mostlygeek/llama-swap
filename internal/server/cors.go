@@ -16,9 +16,11 @@ type corsPolicy struct {
 	// is then sent back, which is what browsers expect for a public API.
 	allowAnyOrigin bool
 
-	// allowedOrigins holds the lowercased origins allowed when
-	// allowAnyOrigin is false. The matching origin is echoed verbatim.
-	allowedOrigins map[string]string
+	// allowedOrigins is a membership set of the allowed origins, lowercased
+	// so a config entry and a browser's Origin match whatever their case.
+	// Only membership is read: the response echoes the request's own
+	// spelling, never this one. Unused when allowAnyOrigin is set.
+	allowedOrigins map[string]struct{}
 
 	allowCredentials bool
 	allowedMethods   string   // pre-joined header value
@@ -41,7 +43,7 @@ func newCORSPolicy(cfg config.CORSConfig) corsPolicy {
 		origins = config.DefaultCORSAllowedOrigins()
 	}
 	p := corsPolicy{
-		allowedOrigins:   make(map[string]string, len(origins)),
+		allowedOrigins:   make(map[string]struct{}, len(origins)),
 		allowCredentials: cfg.AllowCredentials,
 		allowedHeaders:   cfg.AllowedHeaders,
 	}
@@ -50,7 +52,7 @@ func newCORSPolicy(cfg config.CORSConfig) corsPolicy {
 			p.allowAnyOrigin = true
 			continue
 		}
-		p.allowedOrigins[strings.ToLower(origin)] = origin
+		p.allowedOrigins[strings.ToLower(origin)] = struct{}{}
 	}
 
 	methods := cfg.AllowedMethods
@@ -86,8 +88,12 @@ func (p corsPolicy) resolveOrigin(origin string) (string, bool) {
 		// that pairing, so the wildcard is always safe to send here.
 		return config.CORSWildcardOrigin, true
 	}
-	if allowed, ok := p.allowedOrigins[strings.ToLower(origin)]; ok {
-		return allowed, true
+	// Echo what the request sent, not how the config spelled it. A browser
+	// compares Access-Control-Allow-Origin against its own origin, which it
+	// serializes with the host lowercased, so answering a config entry's
+	// mixed-case spelling would fail that check on an allowed origin.
+	if _, ok := p.allowedOrigins[strings.ToLower(origin)]; ok {
+		return origin, true
 	}
 	return "", false
 }
