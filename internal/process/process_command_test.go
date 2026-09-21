@@ -676,9 +676,9 @@ func TestProcessCommand_TTL_DoesNotResetOnMetricsPolling(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	if got := p.State(); got != StateStopped {
-		t.Fatalf("metrics polling kept process alive; state is %s", got)
-	}
+	// The TTL stop is asynchronous, so allow the normal Ready -> Stopping ->
+	// Stopped transition to complete before asserting the final state.
+	waitForState(t, p, StateStopped)
 	select {
 	case err := <-runErr:
 		if err != nil {
