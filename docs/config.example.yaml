@@ -197,6 +197,13 @@ security:
     # - requires allowedOrigins to list origins explicitly
     allowCredentials: false
 
+    # allowPrivateNetwork: answer Chrome's Private Network Access preflight,
+    #   so a page on a public origin may reach llama-swap on a LAN address
+    # - optional, default: false
+    # - requires allowedOrigins to list origins explicitly, not "*"
+    # - only sent on a preflight that asked for it
+    allowPrivateNetwork: false
+
     # allowedMethods: methods advertised on preflight (OPTIONS) responses
     # - optional, default: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
     allowedMethods:

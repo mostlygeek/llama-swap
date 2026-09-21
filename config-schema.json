@@ -828,7 +828,7 @@
             "properties": {
                 "cors": {
                     "type": "object",
-                    "description": "Controls the Access-Control-* headers llama-swap sends to browsers. allowedOrigins selects the mode: leave it out to keep the permissive legacy policy (any origin allowed), which is what llama-swap did before the setting existed, or set it to take charge of access, after which nothing widens beyond the list. The remaining fields describe preflight mechanics and each still takes its default when left out, so they require allowedOrigins to be set too. llama-swap is the only source of these headers: any set by an upstream such as llama-server are stripped from proxied responses, because httputil.ReverseProxy adds rather than replaces them and strict clients reject the folded value (see issue #85). Headers are only sent when the request carries an Origin, so non-browser clients such as curl and litellm receive none.",
+                    "description": "Access-Control-* headers llama-swap sends to browsers. Omit allowedOrigins to keep the permissive default of any origin, or set it to restrict access. Headers are only sent when the request carries an Origin, and any an upstream set are stripped from proxied responses.",
                     "properties": {
                         "allowedOrigins": {
                             "type": "array",
@@ -837,12 +837,17 @@
                                 "minLength": 1
                             },
                             "minItems": 1,
-                            "description": "Browser origins allowed to read responses, each a bare scheme://host[:port] with no trailing slash or path. Omit the key entirely to allow any origin; an empty list is rejected rather than read as \"allow everything\". List \"*\" to allow any origin deliberately. Required once any other cors setting is present. \"*\" cannot be combined with allowCredentials."
+                            "description": "Browser origins allowed to read responses, each a bare scheme://host[:port]. Omit the key to allow any origin, or list \"*\" to allow any deliberately. Required once any other cors setting is present."
                         },
                         "allowCredentials": {
                             "type": "boolean",
                             "default": false,
                             "description": "Send Access-Control-Allow-Credentials: true so browsers may attach cookies and Authorization headers. Requires allowedOrigins to list origins explicitly."
+                        },
+                        "allowPrivateNetwork": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "Answer Chrome's Private Network Access preflight so a page on a public origin may reach llama-swap on a private address. Off by default, and cannot be combined with a \"*\" origin."
                         },
                         "allowedMethods": {
                             "type": "array",
@@ -867,7 +872,7 @@
                                 "minLength": 1
                             },
                             "default": [],
-                            "description": "Request headers advertised on preflight responses. When empty the client's Access-Control-Request-Headers is echoed back after dropping any name that is not a valid HTTP token, falling back to Content-Type, Authorization, Accept, X-Requested-With when the client sent none."
+                            "description": "Request headers advertised on preflight responses. When empty the client's sanitized Access-Control-Request-Headers is echoed back, falling back to Content-Type, Authorization, Accept, X-Requested-With."
                         },
                         "exposedHeaders": {
                             "type": "array",
@@ -887,6 +892,9 @@
                     },
                     "dependencies": {
                         "allowCredentials": [
+                            "allowedOrigins"
+                        ],
+                        "allowPrivateNetwork": [
                             "allowedOrigins"
                         ],
                         "allowedMethods": [

@@ -70,6 +70,14 @@ type CORSConfig struct {
 	// the browser attach cookies and Authorization headers.
 	AllowCredentials bool `yaml:"allowCredentials"`
 
+	// AllowPrivateNetwork answers Chrome's Private Network Access preflight
+	// with Access-Control-Allow-Private-Network: true, letting a page on a
+	// public origin reach llama-swap on a private address. Off by default,
+	// and cannot be combined with a "*" origin: that pairing would let any
+	// page in any open tab drive a llama-swap on the user's own network,
+	// which is what Private Network Access exists to prevent.
+	AllowPrivateNetwork bool `yaml:"allowPrivateNetwork"`
+
 	// AllowedMethods is advertised on preflight responses. Empty means
 	// DefaultCORSAllowedMethods.
 	AllowedMethods []string `yaml:"allowedMethods"`
@@ -115,6 +123,9 @@ func (c CORSConfig) Validate() error {
 			if c.AllowCredentials {
 				return fmt.Errorf(`allowedOrigins may not contain "*" when allowCredentials is true; list the origins explicitly`)
 			}
+			if c.AllowPrivateNetwork {
+				return fmt.Errorf(`allowedOrigins may not contain "*" when allowPrivateNetwork is true; list the origins explicitly`)
+			}
 			continue
 		}
 		if err := validateCORSOrigin(origin); err != nil {
@@ -149,6 +160,7 @@ func (c CORSConfig) Validate() error {
 // carries a non-zero value, which is how a half-written block is recognized.
 func (c CORSConfig) hasNonOriginSettings() bool {
 	return c.AllowCredentials ||
+		c.AllowPrivateNetwork ||
 		len(c.AllowedMethods) > 0 ||
 		len(c.AllowedHeaders) > 0 ||
 		len(c.ExposedHeaders) > 0 ||

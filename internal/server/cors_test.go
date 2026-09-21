@@ -452,6 +452,126 @@ func TestServer_CORSDeclaredBlockDoesNotWidenToWildcard(t *testing.T) {
 	}
 }
 
+// pnaTestConfig is a policy with Private Network Access turned on, which
+// requires explicit origins.
+func pnaTestConfig() config.CORSConfig {
+	return config.CORSConfig{
+		AllowedOrigins:      []string{"https://dash.example.com"},
+		AllowPrivateNetwork: true,
+	}
+}
+
+// pnaPreflight builds a Chrome-style Private Network Access preflight.
+func pnaPreflight(origin string, ask bool) *http.Request {
+	req := httptest.NewRequest(http.MethodOptions, "/v1/chat/completions", nil)
+	req.Header.Set("Origin", origin)
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	if ask {
+		req.Header.Set("Access-Control-Request-Private-Network", "true")
+	}
+	return req
+}
+
+func TestServer_CORSPrivateNetworkPreflight(t *testing.T) {
+	s := corsTestServer(t, pnaTestConfig())
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, pnaPreflight("https://dash.example.com", true))
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status=%d want 204", w.Code)
+	}
+	if got := w.Header().Get("Access-Control-Allow-Private-Network"); got != "true" {
+		t.Errorf("Access-Control-Allow-Private-Network=%q want true", got)
+	}
+	if got := w.Header().Get("Vary"); !strings.Contains(got, "Access-Control-Request-Private-Network") {
+		t.Errorf("Vary=%q want it to contain Access-Control-Request-Private-Network", got)
+	}
+}
+
+// TestServer_CORSPrivateNetworkOnlyWhenRequested keeps the header off an
+// ordinary preflight, so it is never sent to a browser that did not ask.
+func TestServer_CORSPrivateNetworkOnlyWhenRequested(t *testing.T) {
+	s := corsTestServer(t, pnaTestConfig())
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, pnaPreflight("https://dash.example.com", false))
+
+	if _, ok := w.Header()["Access-Control-Allow-Private-Network"]; ok {
+		t.Error("Access-Control-Allow-Private-Network sent on a preflight that did not request it")
+	}
+}
+
+// TestServer_CORSPrivateNetworkOffByDefault is the backwards-compatibility
+// guard: llama-swap never sent this header, so a config that does not ask for
+// it must not start, even when a browser requests it.
+func TestServer_CORSPrivateNetworkOffByDefault(t *testing.T) {
+	configs := map[string]config.CORSConfig{
+		"legacy permissive policy": {},
+		"origins but no opt-in":    {AllowedOrigins: []string{"https://dash.example.com"}},
+	}
+
+	for name, cfg := range configs {
+		t.Run(name, func(t *testing.T) {
+			s := corsTestServer(t, cfg)
+			w := httptest.NewRecorder()
+			s.ServeHTTP(w, pnaPreflight("https://dash.example.com", true))
+
+			if _, ok := w.Header()["Access-Control-Allow-Private-Network"]; ok {
+				t.Error("Access-Control-Allow-Private-Network sent without being configured")
+			}
+		})
+	}
+}
+
+// TestServer_CORSPrivateNetworkNotOnActualResponse covers the header being
+// preflight-only: it has no meaning on a real response.
+func TestServer_CORSPrivateNetworkNotOnActualResponse(t *testing.T) {
+	s := corsTestServer(t, pnaTestConfig())
+
+	req := httptest.NewRequest(http.MethodGet, "/running", nil)
+	req.Header.Set("Origin", "https://dash.example.com")
+	req.Header.Set("Access-Control-Request-Private-Network", "true")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if _, ok := w.Header()["Access-Control-Allow-Private-Network"]; ok {
+		t.Error("Access-Control-Allow-Private-Network sent on a non-preflight response")
+	}
+}
+
+func TestServer_CORSPrivateNetworkDisallowedOrigin(t *testing.T) {
+	s := corsTestServer(t, pnaTestConfig())
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, pnaPreflight("https://evil.example.com", true))
+
+	assertNoCORSHeaders(t, w, "PNA preflight from an unlisted origin")
+}
+
+// TestServer_CORSPrivateNetworkNeverWithWildcardOrigin pins the invariant that
+// private-network access is never granted alongside a wildcard origin, whether
+// the wildcard came from the legacy fallback or was written out. Config
+// validation rejects both of these, so this exercises newCORSPolicy directly:
+// the guarantee has to survive without the validator in front of it.
+func TestServer_CORSPrivateNetworkNeverWithWildcardOrigin(t *testing.T) {
+	configs := map[string]config.CORSConfig{
+		"legacy fallback to wildcard": {AllowPrivateNetwork: true},
+		"explicit wildcard": {
+			AllowedOrigins:      []string{"*"},
+			AllowPrivateNetwork: true,
+		},
+	}
+
+	for name, cfg := range configs {
+		t.Run(name, func(t *testing.T) {
+			if newCORSPolicy(cfg).allowPrivateNetwork {
+				t.Error("allowPrivateNetwork survived alongside a wildcard origin")
+			}
+		})
+	}
+}
+
 // TestServer_CORSOriginMatchIsHostCaseInsensitive covers a config that spells
 // the host in different case than the browser does. The match must ignore
 // case, and the answer must be the request's spelling: a browser compares

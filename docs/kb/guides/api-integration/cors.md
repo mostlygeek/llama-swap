@@ -134,8 +134,31 @@ API key there would break every cross-origin request.
 `Access-Control-Request-Headers`, after dropping any name that is not a valid
 HTTP token. Set it explicitly to pin the list instead.
 
-## Known gap
+## Reaching llama-swap on a LAN address
 
-`Access-Control-Allow-Private-Network` is not sent. Chrome's Private Network
-Access handshake can block a page on a public origin from reaching llama-swap
-on a LAN address, and no `security.cors` setting changes that today.
+Chrome blocks a page on a public origin from reaching a more-private address,
+so an HTTPS dashboard talking to llama-swap at `192.168.1.50:8080` fails even
+with the origin allowed. The browser sends a preflight carrying
+`Access-Control-Request-Private-Network: true` and needs
+`Access-Control-Allow-Private-Network: true` back.
+
+llama-swap sends it only if you ask:
+
+```yaml
+security:
+  cors:
+    allowedOrigins:
+      - "https://dashboard.example.com"
+    allowPrivateNetwork: true
+```
+
+It is off by default and cannot be combined with `allowedOrigins: ["*"]` —
+that pairing would let any page in any open tab drive a llama-swap on your own
+network, which is the attack Private Network Access exists to stop. The header
+is only sent on a preflight that asked for it, never on an ordinary response.
+
+Chrome is moving this to **Local Network Access**, which asks the user for
+permission instead of reading a server header. Where that applies, the setting
+above is necessary but not sufficient: the person at the browser has to accept
+the prompt, and nothing llama-swap sends can grant it. Firefox and Safari have
+never implemented either handshake, so neither blocks these requests today.

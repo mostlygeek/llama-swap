@@ -23,10 +23,15 @@ type corsPolicy struct {
 	allowedOrigins map[string]struct{}
 
 	allowCredentials bool
-	allowedMethods   string   // pre-joined header value
-	allowedHeaders   []string // empty means echo the request's
-	exposedHeaders   string   // pre-joined, empty means omit the header
-	maxAge           string   // pre-formatted seconds
+
+	// allowPrivateNetwork answers Chrome's Private Network Access preflight.
+	// Forced off whenever allowAnyOrigin is set; see newCORSPolicy.
+	allowPrivateNetwork bool
+
+	allowedMethods string   // pre-joined header value
+	allowedHeaders []string // empty means echo the request's
+	exposedHeaders string   // pre-joined, empty means omit the header
+	maxAge         string   // pre-formatted seconds
 }
 
 // newCORSPolicy resolves cfg into a corsPolicy.
@@ -68,6 +73,14 @@ func newCORSPolicy(cfg config.CORSConfig) corsPolicy {
 		maxAge = config.DefaultCORSMaxAge
 	}
 	p.maxAge = strconv.Itoa(maxAge)
+
+	// llama-swap has never sent Access-Control-Allow-Private-Network, so the
+	// permissive legacy policy must not start. Config validation already
+	// rejects the setting without explicit origins, but gate it here too so a
+	// policy built directly in Go cannot pair wildcard origins with
+	// private-network access. Keying off allowAnyOrigin covers both the legacy
+	// fallback and an explicit "*".
+	p.allowPrivateNetwork = cfg.AllowPrivateNetwork && !p.allowAnyOrigin
 
 	return p
 }
@@ -142,6 +155,13 @@ func (p corsPolicy) writePreflightHeaders(h http.Header, r *http.Request) {
 	}
 
 	h.Set("Access-Control-Max-Age", p.maxAge)
+
+	// Chrome's Private Network Access handshake. Answer only the preflight
+	// that asked, so the header never appears on an ordinary one.
+	if p.allowPrivateNetwork && r.Header.Get("Access-Control-Request-Private-Network") == "true" {
+		h.Set("Access-Control-Allow-Private-Network", "true")
+		addVary(h, "Access-Control-Request-Private-Network")
+	}
 }
 
 // CreateCORSMiddleware returns middleware that answers OPTIONS preflight

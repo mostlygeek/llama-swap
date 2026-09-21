@@ -98,11 +98,12 @@ func TestConfig_SecurityCORSNilVsEmptyOrigins(t *testing.T) {
 func TestConfig_SecurityCORSOrphanSettingsRejected(t *testing.T) {
 	const models = "models:\n  m1:\n    cmd: echo ${PORT}\n"
 	configs := map[string]string{
-		"allowCredentials alone": "security:\n  cors:\n    allowCredentials: true\n" + models,
-		"allowedMethods alone":   "security:\n  cors:\n    allowedMethods: [\"GET\"]\n" + models,
-		"allowedHeaders alone":   "security:\n  cors:\n    allowedHeaders: [\"Content-Type\"]\n" + models,
-		"exposedHeaders alone":   "security:\n  cors:\n    exposedHeaders: [\"X-Request-Id\"]\n" + models,
-		"maxAge alone":           "security:\n  cors:\n    maxAge: 600\n" + models,
+		"allowCredentials alone":    "security:\n  cors:\n    allowCredentials: true\n" + models,
+		"allowPrivateNetwork alone": "security:\n  cors:\n    allowPrivateNetwork: true\n" + models,
+		"allowedMethods alone":      "security:\n  cors:\n    allowedMethods: [\"GET\"]\n" + models,
+		"allowedHeaders alone":      "security:\n  cors:\n    allowedHeaders: [\"Content-Type\"]\n" + models,
+		"exposedHeaders alone":      "security:\n  cors:\n    exposedHeaders: [\"X-Request-Id\"]\n" + models,
+		"maxAge alone":              "security:\n  cors:\n    maxAge: 600\n" + models,
 		"several without origins": "security:\n  cors:\n    maxAge: 600\n" +
 			"    allowedMethods: [\"GET\"]\n" + models,
 	}
@@ -157,6 +158,7 @@ security:
       - "https://dash.example.com"
       - "http://localhost:5173"
     allowCredentials: true
+    allowPrivateNetwork: true
     allowedMethods: ["GET", "POST"]
     allowedHeaders: ["Content-Type"]
     exposedHeaders: ["X-Request-Id"]
@@ -177,11 +179,48 @@ models:
 	if !cors.AllowCredentials {
 		t.Error("allowCredentials=false want true")
 	}
+	if !cors.AllowPrivateNetwork {
+		t.Error("allowPrivateNetwork=false want true")
+	}
 	if len(cors.AllowedMethods) != 2 {
 		t.Errorf("allowedMethods=%q", cors.AllowedMethods)
 	}
 	if cors.MaxAge != 600 {
 		t.Errorf("maxAge=%d want 600", cors.MaxAge)
+	}
+}
+
+// TestConfig_SecurityCORSPrivateNetworkRequiresExplicitOrigins covers the two
+// ways of asking for private-network access without naming who gets it.
+// Granting it to every origin would let any page in any open tab drive a
+// llama-swap on the user's own network.
+func TestConfig_SecurityCORSPrivateNetworkRequiresExplicitOrigins(t *testing.T) {
+	const models = "models:\n  m1:\n    cmd: echo ${PORT}\n"
+	cases := map[string]struct {
+		yaml    string
+		wantErr string
+	}{
+		"with a wildcard origin": {
+			yaml: "security:\n  cors:\n    allowedOrigins: [\"*\"]\n" +
+				"    allowPrivateNetwork: true\n" + models,
+			wantErr: "allowPrivateNetwork",
+		},
+		"with no origins at all": {
+			yaml:    "security:\n  cors:\n    allowPrivateNetwork: true\n" + models,
+			wantErr: "allowedOrigins is required",
+		},
+	}
+
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := LoadConfigFromReader(strings.NewReader(c.yaml))
+			if err == nil {
+				t.Fatal("LoadConfigFromReader accepted allowPrivateNetwork without explicit origins")
+			}
+			if !strings.Contains(err.Error(), c.wantErr) {
+				t.Errorf("error = %q, want it to name %q", err, c.wantErr)
+			}
+		})
 	}
 }
 
@@ -195,6 +234,11 @@ func TestConfig_SecurityCORSValidation(t *testing.T) {
 			name:    "wildcard with credentials",
 			cors:    CORSConfig{AllowedOrigins: []string{"*"}, AllowCredentials: true},
 			wantErr: "allowCredentials",
+		},
+		{
+			name:    "wildcard with private network",
+			cors:    CORSConfig{AllowedOrigins: []string{"*"}, AllowPrivateNetwork: true},
+			wantErr: "allowPrivateNetwork",
 		},
 		{
 			name:    "wildcard among explicit origins with credentials",
