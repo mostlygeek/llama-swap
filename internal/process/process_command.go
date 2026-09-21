@@ -809,7 +809,11 @@ func (p *ProcessCommand) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	p.inflight.Add(1)
 	defer func() {
-		p.lastUse.Store(time.Now().UnixNano())
+		// Metrics polling is observability traffic, not user activity. Do not
+		// let a frequent GET /metrics request keep an idle model loaded forever.
+		if r.Method != http.MethodGet || r.URL.Path != "/metrics" {
+			p.lastUse.Store(time.Now().UnixNano())
+		}
 		p.inflight.Add(-1)
 	}()
 	(*fn)(w, r)

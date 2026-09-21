@@ -647,6 +647,48 @@ func TestProcessCommand_TTL_ResetsOnRequest(t *testing.T) {
 	}
 }
 
+func TestProcessCommand_TTL_DoesNotResetOnMetricsPolling(t *testing.T) {
+	skipIfNoSimpleResponder(t)
+
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(mock.Close)
+
+	cmd, _ := simpleResponderCmd(t, "-silent")
+	p := newProcessCommand(t, config.ModelConfig{
+		Cmd:                cmd,
+		Proxy:              mock.URL,
+		CheckEndpoint:      "/health",
+		HealthCheckTimeout: 10,
+		UnloadAfter:        1,
+	})
+	runErr := runAsync(t, p)
+
+	// Repeated metrics polling must not keep the model alive past its TTL.
+	deadline := time.Now().Add(3 * time.Second)
+	for p.State() == StateReady && time.Now().Before(deadline) {
+		rr := httptest.NewRecorder()
+		p.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", rr.Code)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if got := p.State(); got != StateStopped {
+		t.Fatalf("metrics polling kept process alive; state is %s", got)
+	}
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Errorf("Run() after TTL stop: expected nil, got %v", err)
+		}
+	case <-time.After(testReturnTimeout):
+		t.Fatal("Run() did not return after TTL-induced stop")
+	}
+}
+
 func TestProcessCommand_TTL_IgnoresWebsocket(t *testing.T) {
 	skipIfNoSimpleResponder(t)
 
