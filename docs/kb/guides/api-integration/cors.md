@@ -11,17 +11,15 @@ updated: 2026-09-21
 
 ## Two modes
 
-There is no `security.cors` block by default, and that absence is itself the
-setting: llama-swap allows any origin, which is what it did before the option
-existed. Existing configs keep working untouched.
+`security.cors.allowedOrigins` is the switch. Leave it out and llama-swap
+allows any origin, which is what it did before the option existed — so configs
+written without it are unaffected.
 
-Declaring the block switches to the configured policy. You are then in charge
-of access, so `allowedOrigins` is required and nothing falls back to allow-all.
-To keep the permissive behaviour, delete the block rather than writing `"*"` —
-though writing `"*"` deliberately is fine and means the same thing.
+Set it and you take charge of access: only the origins you list get CORS
+headers, and nothing falls back to allow-all.
 
 ```yaml
-# no security block at all  -> any origin allowed
+# no allowedOrigins anywhere  -> any origin allowed
 ```
 
 ```yaml
@@ -31,21 +29,21 @@ security:
 # -> only that origin; every other browser origin gets nothing
 ```
 
-A `security.cors:` block that lists no origins is refused at startup:
+Only `allowedOrigins` works this way. `allowedMethods`, `allowedHeaders` and
+`maxAge` describe preflight mechanics rather than access, so each one you leave
+out still takes its default and the minimal config above answers a browser's
+preflight correctly.
+
+Because those settings are meaningless without origins to apply them to,
+setting one without `allowedOrigins` is refused at startup:
 
 ```console
-error: security.cors: allowedOrigins must list at least one origin, or "*" to
-allow any; remove the security.cors block to keep the permissive default
+error: security.cors: allowedOrigins is required when any other cors setting
+is present; remove the security.cors block to keep the permissive default
 ```
 
-That is deliberate. A half-finished block that silently blocked every browser
-would surface as a mystery CORS error in a console instead of a message at
-startup.
-
-Only `allowedOrigins` loses its default this way. `allowedMethods`,
-`allowedHeaders` and `maxAge` describe preflight mechanics rather than access,
-so each one you leave out still takes its default and the minimal block above
-answers a browser's preflight correctly.
+That is deliberate. Quietly falling back to allow-all would widen access for a
+config that plainly meant to restrict something.
 
 Two rules apply in both modes:
 

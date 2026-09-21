@@ -828,7 +828,7 @@
             "properties": {
                 "cors": {
                     "type": "object",
-                    "description": "Controls the Access-Control-* headers llama-swap sends to browsers. Omit this block entirely to keep the permissive legacy policy (any origin allowed), which is what llama-swap did before the setting existed. Declaring it takes charge of access, so allowedOrigins is required and never falls back to a permissive default; the remaining fields describe preflight mechanics and each still takes its default when left out. llama-swap is the only source of these headers: any set by an upstream such as llama-server are stripped from proxied responses, because httputil.ReverseProxy adds rather than replaces them and strict clients reject the folded value (see issue #85). Headers are only sent when the request carries an Origin, so non-browser clients such as curl and litellm receive none.",
+                    "description": "Controls the Access-Control-* headers llama-swap sends to browsers. allowedOrigins selects the mode: leave it out to keep the permissive legacy policy (any origin allowed), which is what llama-swap did before the setting existed, or set it to take charge of access, after which nothing widens beyond the list. The remaining fields describe preflight mechanics and each still takes its default when left out, so they require allowedOrigins to be set too. llama-swap is the only source of these headers: any set by an upstream such as llama-server are stripped from proxied responses, because httputil.ReverseProxy adds rather than replaces them and strict clients reject the folded value (see issue #85). Headers are only sent when the request carries an Origin, so non-browser clients such as curl and litellm receive none.",
                     "properties": {
                         "allowedOrigins": {
                             "type": "array",
@@ -836,8 +836,7 @@
                                 "type": "string",
                                 "minLength": 1
                             },
-                            "description": "Browser origins allowed to read responses, each a bare scheme://host[:port] with no trailing slash or path. Required whenever the security.cors block is declared: omit the whole block to allow any origin, or list \"*\" here to allow any origin deliberately. \"*\" cannot be combined with allowCredentials.",
-                            "minItems": 1
+                            "description": "Browser origins allowed to read responses, each a bare scheme://host[:port] with no trailing slash or path. Leaving this out allows any origin; listing \"*\" allows any origin deliberately. Required once any other cors setting is present. \"*\" cannot be combined with allowCredentials."
                         },
                         "allowCredentials": {
                             "type": "boolean",
@@ -885,10 +884,24 @@
                             "description": "How long in seconds a browser may cache a preflight response. 0 uses the default of 86400."
                         }
                     },
-                    "additionalProperties": false,
-                    "required": [
-                        "allowedOrigins"
-                    ]
+                    "dependencies": {
+                        "allowCredentials": [
+                            "allowedOrigins"
+                        ],
+                        "allowedMethods": [
+                            "allowedOrigins"
+                        ],
+                        "allowedHeaders": [
+                            "allowedOrigins"
+                        ],
+                        "exposedHeaders": [
+                            "allowedOrigins"
+                        ],
+                        "maxAge": [
+                            "allowedOrigins"
+                        ]
+                    },
+                    "additionalProperties": false
                 }
             },
             "additionalProperties": false,

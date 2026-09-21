@@ -178,14 +178,14 @@ apiKeys:
 # - any CORS headers an upstream (llama-server, vLLM) sets are stripped from
 #   proxied responses so exactly one set reaches the client, see issue #85
 security:
-  # cors: declaring this block takes charge of browser access
-  # - allowedOrigins becomes required; nothing falls back to allow-all
+  # cors: allowedOrigins is what switches modes
+  # - leave allowedOrigins out to keep the permissive default
+  # - set it to take charge of access; nothing then falls back to allow-all
   # - the other settings only describe preflight mechanics, so each one you
-  #   leave out still takes its default and a minimal block keeps working
-  # - to keep the permissive default, delete this block rather than listing "*"
+  #   leave out still takes its default and naming only origins keeps working
   cors:
     # allowedOrigins: browser origins allowed to read responses
-    # - REQUIRED when the cors block is present
+    # - omit to allow any origin; REQUIRED once any other cors setting is set
     # - each entry is a bare scheme://host[:port], no trailing slash or path
     # - "*" allows any origin, and cannot be combined with allowCredentials
     allowedOrigins:

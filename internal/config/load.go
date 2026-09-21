@@ -105,12 +105,8 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		config.Upstream.IgnorePaths = DefaultUpstreamIgnorePaths()
 	}
 
-	// A nil CORS block means the config declared none, which selects the
-	// legacy permissive policy and needs no validation.
-	if config.Security.CORS != nil {
-		if err := config.Security.CORS.Validate(); err != nil {
-			return Config{}, fmt.Errorf("security.cors: %w", err)
-		}
+	if err := config.Security.CORS.Validate(); err != nil {
+		return Config{}, fmt.Errorf("security.cors: %w", err)
 	}
 
 	switch config.LogToStdout {

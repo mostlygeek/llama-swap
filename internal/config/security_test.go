@@ -5,16 +5,18 @@ import (
 	"testing"
 )
 
-// TestConfig_SecurityCORSAbsentSelectsLegacyPolicy pins that a config
-// declaring no security.cors block leaves CORS nil, which selects the
-// permissive behaviour llama-swap had before the setting existed. Adding the
-// setting must never change an existing deployment.
-func TestConfig_SecurityCORSAbsentSelectsLegacyPolicy(t *testing.T) {
+// TestConfig_SecurityCORSUnsetOriginsSelectLegacyPolicy pins that a config
+// naming no origins keeps the permissive behaviour llama-swap had before the
+// setting existed. Adding the setting must never change an existing
+// deployment, and every way of writing "nothing configured" means the same.
+func TestConfig_SecurityCORSUnsetOriginsSelectLegacyPolicy(t *testing.T) {
+	const models = "models:\n  m1:\n    cmd: echo ${PORT}\n"
 	configs := map[string]string{
-		"no security block": "models:\n  m1:\n    cmd: echo ${PORT}\n",
-		"empty security":    "security:\nmodels:\n  m1:\n    cmd: echo ${PORT}\n",
-		"explicit wildcard is a declared block": "security:\n  cors:\n" +
-			"    allowedOrigins: [\"*\"]\nmodels:\n  m1:\n    cmd: echo ${PORT}\n",
+		"no security block":    models,
+		"empty security":       "security:\n" + models,
+		"cors with null value": "security:\n  cors:\n" + models,
+		"empty cors mapping":   "security:\n  cors: {}\n" + models,
+		"empty allowedOrigins": "security:\n  cors:\n    allowedOrigins: []\n" + models,
 	}
 
 	for name, yaml := range configs {
@@ -23,50 +25,47 @@ func TestConfig_SecurityCORSAbsentSelectsLegacyPolicy(t *testing.T) {
 			if err != nil {
 				t.Fatalf("LoadConfigFromReader: %v", err)
 			}
-			if name == "explicit wildcard is a declared block" {
-				// An explicit wildcard is a declared block, not an absent one.
-				if cfg.Security.CORS == nil {
-					t.Fatal("CORS is nil for a declared block")
-				}
-				return
-			}
-			if cfg.Security.CORS != nil {
-				t.Errorf("CORS = %+v, want nil so the legacy policy applies", cfg.Security.CORS)
+			if got := cfg.Security.CORS.AllowedOrigins; len(got) != 0 {
+				t.Errorf("allowedOrigins = %q, want empty so the legacy policy applies", got)
 			}
 		})
 	}
 }
 
-// TestConfig_SecurityCORSDeclaredRequiresOrigins covers the second half of the
-// two-mode model: declaring the block means taking charge of access, so a
-// block that names no origins is a half-finished edit and fails at startup
-// rather than silently blocking every browser.
-func TestConfig_SecurityCORSDeclaredRequiresOrigins(t *testing.T) {
+// TestConfig_SecurityCORSOrphanSettingsRejected covers the other half of the
+// two-mode model. A config that tunes CORS but never says which origins the
+// tuning applies to is a half-finished edit; falling back to allow-all there
+// would widen access for a config that meant to restrict it.
+func TestConfig_SecurityCORSOrphanSettingsRejected(t *testing.T) {
+	const models = "models:\n  m1:\n    cmd: echo ${PORT}\n"
 	configs := map[string]string{
-		"empty cors mapping": "security:\n  cors: {}\nmodels:\n  m1:\n    cmd: echo ${PORT}\n",
-		"cors with null value": "security:\n  cors:\nmodels:\n  m1:\n" +
-			"    cmd: echo ${PORT}\n",
-		"empty allowedOrigins": "security:\n  cors:\n    allowedOrigins: []\n" +
-			"models:\n  m1:\n    cmd: echo ${PORT}\n",
-		"only maxAge set": "security:\n  cors:\n    maxAge: 600\n" +
-			"models:\n  m1:\n    cmd: echo ${PORT}\n",
+		"allowCredentials alone": "security:\n  cors:\n    allowCredentials: true\n" + models,
+		"allowedMethods alone":   "security:\n  cors:\n    allowedMethods: [\"GET\"]\n" + models,
+		"allowedHeaders alone":   "security:\n  cors:\n    allowedHeaders: [\"Content-Type\"]\n" + models,
+		"exposedHeaders alone":   "security:\n  cors:\n    exposedHeaders: [\"X-Request-Id\"]\n" + models,
+		"maxAge alone":           "security:\n  cors:\n    maxAge: 600\n" + models,
+		"several without origins": "security:\n  cors:\n    maxAge: 600\n" +
+			"    allowedMethods: [\"GET\"]\n" + models,
 	}
 
 	for name, yaml := range configs {
 		t.Run(name, func(t *testing.T) {
 			_, err := LoadConfigFromReader(strings.NewReader(yaml))
 			if err == nil {
-				t.Fatal("LoadConfigFromReader accepted a security.cors block with no origins")
+				t.Fatal("LoadConfigFromReader accepted cors settings with no allowedOrigins")
 			}
 			if !strings.Contains(err.Error(), "allowedOrigins") {
 				t.Errorf("error = %q, want it to name allowedOrigins", err)
+			}
+			if !strings.Contains(err.Error(), "security.cors") {
+				t.Errorf("error = %q, want it prefixed with security.cors", err)
 			}
 		})
 	}
 }
 
-// TestConfig_SecurityCORSDeclaredKeepsPreflightDefaults checks the other side
-// of the model: only allowedOrigins loses its default. The preflight mechanics
+// TestConfig_SecurityCORSDeclaredKeepsPreflightDefaults checks that naming
+// origins does not force you to spell out the rest. The preflight mechanics
 // stay empty in the config and are resolved to defaults by newCORSPolicy, so a
 // block that only names origins still works in a browser.
 func TestConfig_SecurityCORSDeclaredKeepsPreflightDefaults(t *testing.T) {
@@ -83,8 +82,8 @@ models:
 		t.Fatalf("LoadConfigFromReader: %v", err)
 	}
 	cors := cfg.Security.CORS
-	if cors == nil {
-		t.Fatal("CORS is nil for a declared block")
+	if len(cors.AllowedOrigins) != 1 {
+		t.Fatalf("allowedOrigins = %q, want the one configured origin", cors.AllowedOrigins)
 	}
 	if len(cors.AllowedMethods) != 0 || len(cors.AllowedHeaders) != 0 || cors.MaxAge != 0 {
 		t.Errorf("unset preflight fields were populated at load: %+v", cors)
@@ -169,14 +168,14 @@ func TestConfig_SecurityCORSValidation(t *testing.T) {
 			wantErr: "whitespace",
 		},
 		{
-			name:    "no origins at all",
-			cors:    CORSConfig{},
-			wantErr: "allowedOrigins",
+			name:    "maxAge without origins",
+			cors:    CORSConfig{MaxAge: 600},
+			wantErr: "allowedOrigins is required",
 		},
 		{
-			name:    "origins set but empty",
-			cors:    CORSConfig{AllowedOrigins: []string{}, MaxAge: 600},
-			wantErr: "allowedOrigins",
+			name:    "credentials without origins",
+			cors:    CORSConfig{AllowCredentials: true},
+			wantErr: "allowedOrigins is required",
 		},
 		{
 			name:    "negative maxAge",
