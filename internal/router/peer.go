@@ -112,6 +112,11 @@ func NewPeer(cfg config.Config, logger *logmon.Monitor) (*Peer, error) {
 		}
 
 		reverseProxy.ModifyResponse = func(resp *http.Response) error {
+			// The peer is another llama-swap that already applied its own CORS
+			// policy. ReverseProxy adds rather than replaces headers, so keep
+			// only this instance's; see issue #85.
+			swaputil.StripUpstreamCORSHeaders(resp.Header)
+
 			if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
 				resp.Header.Set("X-Accel-Buffering", "no")
 			}

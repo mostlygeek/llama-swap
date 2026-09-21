@@ -479,6 +479,11 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 	}
 	reverseProxy.ErrorHandler = newProxyErrorHandler(p.id, p.proxyLogger)
 	reverseProxy.ModifyResponse = func(resp *http.Response) error {
+		// Upstreams such as llama-server set their own CORS headers, and
+		// ReverseProxy adds rather than replaces them, so both llama-swap's
+		// and the upstream's would be sent. Keep only ours; see issue #85.
+		swaputil.StripUpstreamCORSHeaders(resp.Header)
+
 		if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
 			resp.Header.Set("X-Accel-Buffering", "no")
 		}

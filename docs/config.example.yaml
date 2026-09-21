@@ -171,6 +171,64 @@ apiKeys:
   - "${env.API_KEY_1}"
   - "${env.API_KEY_2}"
 
+# security: settings that control who may talk to llama-swap
+# - optional, omit the whole block to allow any origin (the legacy default)
+# - llama-swap only sends Access-Control-* headers when the request carries an
+#   Origin header, so curl, litellm and other non-browser clients get none
+# - any CORS headers an upstream (llama-server, vLLM) sets are stripped from
+#   proxied responses so exactly one set reaches the client, see issue #85
+security:
+  # cors: allowedOrigins is what switches modes
+  # - leave allowedOrigins out to keep the permissive default
+  # - set it to take charge of access; nothing then falls back to allow-all
+  # - the other settings only describe preflight mechanics, so each one you
+  #   leave out still takes its default and naming only origins keeps working
+  cors:
+    # allowedOrigins: browser origins allowed to read responses
+    # - omit the key to allow any origin; an empty list [] is an error
+    # - REQUIRED once any other cors setting is set
+    # - each entry is a bare scheme://host[:port], no trailing slash or path
+    # - "*" allows any origin, and cannot be combined with allowCredentials
+    allowedOrigins:
+      - "*"
+
+    # allowCredentials: let browsers send cookies and Authorization headers
+    # - optional, default: false
+    # - requires allowedOrigins to list origins explicitly
+    allowCredentials: false
+
+    # allowPrivateNetwork: answer Chrome's Private Network Access preflight,
+    #   so a page on a public origin may reach llama-swap on a LAN address
+    # - optional, default: false
+    # - requires allowedOrigins to list origins explicitly, not "*"
+    # - only sent on a preflight that asked for it
+    allowPrivateNetwork: false
+
+    # allowedMethods: methods advertised on preflight (OPTIONS) responses
+    # - optional, default: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+    allowedMethods:
+      - "GET"
+      - "POST"
+      - "PUT"
+      - "PATCH"
+      - "DELETE"
+      - "OPTIONS"
+
+    # allowedHeaders: request headers advertised on preflight responses
+    # - optional, default: [] which echoes the client's
+    #   Access-Control-Request-Headers, falling back to
+    #   [Content-Type, Authorization, Accept, X-Requested-With]
+    allowedHeaders: []
+
+    # exposedHeaders: response headers a browser may read beyond the
+    #   CORS-safelisted set
+    # - optional, default: [] which omits the header
+    exposedHeaders: []
+
+    # maxAge: how long in seconds a browser may cache a preflight response
+    # - optional, default: 86400
+    maxAge: 86400
+
 # tailcat: configure models exposed over Tailcat virtual TCP port 80
 # - requires -listen-tailcat /path/to/server.private.json to start the listener
 # - when -listen-tailcat is set, models must contain at least one public ID

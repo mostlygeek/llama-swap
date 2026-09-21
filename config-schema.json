@@ -822,6 +822,100 @@
             "additionalProperties": false,
             "default": {}
         },
+        "security": {
+            "type": "object",
+            "description": "Settings that control who may talk to llama-swap.",
+            "properties": {
+                "cors": {
+                    "type": "object",
+                    "description": "Access-Control-* headers llama-swap sends to browsers. Omit allowedOrigins to keep the permissive default of any origin, or set it to restrict access. Headers are only sent when the request carries an Origin, and any an upstream set are stripped from proxied responses.",
+                    "properties": {
+                        "allowedOrigins": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "minItems": 1,
+                            "description": "Browser origins allowed to read responses, each a bare scheme://host[:port]. Omit the key to allow any origin, or list \"*\" to allow any deliberately. Required once any other cors setting is present."
+                        },
+                        "allowCredentials": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "Send Access-Control-Allow-Credentials: true so browsers may attach cookies and Authorization headers. Requires allowedOrigins to list origins explicitly."
+                        },
+                        "allowPrivateNetwork": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "Answer Chrome's Private Network Access preflight so a page on a public origin may reach llama-swap on a private address. Off by default, and cannot be combined with a \"*\" origin."
+                        },
+                        "allowedMethods": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "default": [
+                                "GET",
+                                "POST",
+                                "PUT",
+                                "PATCH",
+                                "DELETE",
+                                "OPTIONS"
+                            ],
+                            "description": "Methods advertised on preflight responses. When empty the default list is used."
+                        },
+                        "allowedHeaders": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "default": [],
+                            "description": "Request headers advertised on preflight responses. When empty the client's sanitized Access-Control-Request-Headers is echoed back, falling back to Content-Type, Authorization, Accept, X-Requested-With."
+                        },
+                        "exposedHeaders": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "default": [],
+                            "description": "Response headers a browser may read beyond the CORS-safelisted set. When empty the Access-Control-Expose-Headers header is omitted."
+                        },
+                        "maxAge": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "default": 86400,
+                            "description": "How long in seconds a browser may cache a preflight response. 0 uses the default of 86400."
+                        }
+                    },
+                    "dependencies": {
+                        "allowCredentials": [
+                            "allowedOrigins"
+                        ],
+                        "allowPrivateNetwork": [
+                            "allowedOrigins"
+                        ],
+                        "allowedMethods": [
+                            "allowedOrigins"
+                        ],
+                        "allowedHeaders": [
+                            "allowedOrigins"
+                        ],
+                        "exposedHeaders": [
+                            "allowedOrigins"
+                        ],
+                        "maxAge": [
+                            "allowedOrigins"
+                        ]
+                    },
+                    "additionalProperties": false
+                }
+            },
+            "additionalProperties": false,
+            "default": {}
+        },
         "routing": {
             "type": "object",
             "description": "Canonical routing/scheduling configuration. Alternative to the legacy top-level 'groups'/'matrix' keys; a config must not use both styles.",

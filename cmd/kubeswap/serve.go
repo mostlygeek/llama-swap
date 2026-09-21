@@ -706,6 +706,9 @@ func newServer(cfg *serveConfig, client kubernetes.Interface, upstreamOverride s
 			IdleConnTimeout:       90 * time.Second,
 		},
 		FlushInterval: -1, // stream responses (SSE) without buffering
+		// Upstream CORS headers are deliberately left in place: kubeswap has no
+		// CORS middleware of its own, so stripping them would leave browsers
+		// with none. Only llama-swap's own proxies strip them; see issue #85.
 		ModifyResponse: func(resp *http.Response) error {
 			if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
 				resp.Header.Set("X-Accel-Buffering", "no")

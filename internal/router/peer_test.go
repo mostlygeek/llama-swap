@@ -431,6 +431,55 @@ func TestPeer_ServeHTTP_SSEHeaderModification(t *testing.T) {
 	}
 }
 
+// TestPeer_ServeHTTP_StripsUpstreamCORSHeaders covers the peer half of issue
+// #85. A peer is another llama-swap that already applied its own CORS policy;
+// httputil.ReverseProxy adds rather than replaces headers, so leaving the
+// peer's copies in place would send two values that strict clients fold into
+// an illegal "*, ". This instance's CORS middleware is the only source.
+func TestPeer_ServeHTTP_StripsUpstreamCORSHeaders(t *testing.T) {
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Mimic llama-server: echo whatever Origin arrived, so the header is
+		// present-but-empty when the client sent none.
+		w.Header().Set("Access-Control-Allow-Origin", r.Header.Get("Origin"))
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST")
+		w.Header().Set("Access-Control-Max-Age", "600")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer testServer.Close()
+
+	proxyURL, _ := url.Parse(testServer.URL)
+	peers := config.PeerDictionaryConfig{
+		"peer1": config.PeerConfig{
+			Proxy:    testServer.URL,
+			ProxyURL: proxyURL,
+			Models:   []string{"test-model"},
+		},
+	}
+
+	pr, err := NewPeer(config.Config{Peers: peers}, testLogger)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	req.Header.Set("Origin", "http://example.com")
+	*req = *req.WithContext(swaputil.SetContext(req.Context(), swaputil.ReqContextData{Model: "test-model", ModelID: "test-model"}))
+	w := httptest.NewRecorder()
+
+	pr.ServeHTTP(w, req)
+
+	for name := range w.Header() {
+		if strings.HasPrefix(http.CanonicalHeaderKey(name), "Access-Control-") {
+			t.Errorf("peer's %s=%q was copied through; it must be stripped", name, w.Header().Values(name))
+		}
+	}
+	// Unrelated upstream headers must still come through.
+	if got := w.Header().Get("Content-Type"); got != "application/json" {
+		t.Errorf("Content-Type=%q, unrelated headers must be untouched", got)
+	}
+}
+
 func TestPeer_ServeHTTP_ShutdownRejectsNewRequests(t *testing.T) {
 	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

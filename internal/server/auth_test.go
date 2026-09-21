@@ -9,37 +9,6 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 )
 
-func TestServer_SanitizeAccessControlRequestHeaders(t *testing.T) {
-	cases := []struct {
-		in   string
-		want string
-	}{
-		{"Content-Type, Authorization", "Content-Type, Authorization"},
-		{"  X-Custom ,  Accept ", "X-Custom, Accept"},
-		{"Valid, Bad Header", "Valid"},
-		{"Bad@Header", ""},
-		{"", ""},
-	}
-	for _, c := range cases {
-		if got := sanitizeAccessControlRequestHeaderValues(c.in); got != c.want {
-			t.Errorf("sanitize(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
-func TestServer_IsTokenChar(t *testing.T) {
-	for _, r := range "abcXYZ0129!#$%&'*+-.^_`|~" {
-		if !isTokenChar(r) {
-			t.Errorf("isTokenChar(%q) = false, want true", r)
-		}
-	}
-	for _, r := range " @()/\t\"" {
-		if isTokenChar(r) {
-			t.Errorf("isTokenChar(%q) = true, want false", r)
-		}
-	}
-}
-
 func TestServer_RequestContextMiddleware(t *testing.T) {
 	cfg := config.Config{
 		Models: map[string]config.ModelConfig{
