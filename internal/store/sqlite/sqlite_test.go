@@ -381,8 +381,31 @@ func TestStore_PruneActivity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("model ActivityStats: %v", err)
 	}
-	if modelStats.TotalRequests != 5 {
-		t.Fatalf("model total requests after prune = %d, want 5", modelStats.TotalRequests)
+	if modelStats.TotalRequests != 2 {
+		t.Fatalf("model total requests after prune = %d, want 2", modelStats.TotalRequests)
+	}
+}
+
+func TestStore_ActivityStatsModelFilterCountsInterleavedRows(t *testing.T) {
+	ctx := context.Background()
+	st, err := New("")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer st.Close()
+
+	for _, model := range []string{"m1", "m2", "m1", "m2", "m1"} {
+		if _, err := st.Activity().Insert(ctx, store.ActivityLogEntry{Model: model}); err != nil {
+			t.Fatalf("InsertActivity: %v", err)
+		}
+	}
+
+	stats, err := st.Activity().Stats(ctx, store.ActivityStatsQuery{Model: "m1"})
+	if err != nil {
+		t.Fatalf("ActivityStats: %v", err)
+	}
+	if stats.TotalRequests != 3 {
+		t.Fatalf("model total requests = %d, want 3", stats.TotalRequests)
 	}
 }
 
