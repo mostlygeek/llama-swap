@@ -40,9 +40,19 @@ never match what a browser sends, so llama-swap rejects the config at startup
 rather than failing silently later.
 
 When the list does not contain `*`, the matching origin is echoed back and
-`Vary: Origin` is set. A request from an origin that is not listed is still
-served normally, just without CORS headers — the browser discards the response,
-which is the point.
+`Vary: Origin` is set.
+
+A request from an unlisted origin is still handled normally — llama-swap runs
+it and returns the full response, just without CORS headers. The browser then
+refuses to hand that response to the page that asked for it. Enforcement is
+entirely on the browser side, so `allowedOrigins` is not access control: curl,
+scripts and any non-browser client ignore it and get the response. Use
+`apiKeys` for that.
+
+For requests that are preflighted (a `POST` with a JSON body, for example) the
+browser stops at the failed `OPTIONS` and never sends the real request, so no
+model is loaded. A plain cross-origin `GET` has no preflight, so the work
+happens and the result is thrown away.
 
 `allowCredentials: true` lets browsers attach cookies and `Authorization`
 headers. It cannot be combined with `"*"`: the Fetch spec forbids that pairing,
