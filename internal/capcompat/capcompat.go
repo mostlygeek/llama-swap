@@ -50,18 +50,60 @@ type ModelEntry struct {
 	Object  string `json:"object"`
 	OwnedBy string `json:"owned_by"`
 
-	// MaxModelLen is vLLM's context length for this entry.
+	// MaxModelLen is vLLM's context length for this entry. Halogen reports
+	// it too.
 	MaxModelLen int `json:"max_model_len"`
+	// ContextLength is the same number under the name Halogen also publishes.
+	ContextLength int `json:"context_length"`
 	// Root and Parent are vLLM's adapter lineage. A LoRA adapter has a
 	// non-empty Parent naming the base model it is served on top of.
 	Root   string `json:"root"`
 	Parent string `json:"parent"`
 
-	// Meta is llama-server's model metadata block.
+	// Meta is the model metadata block llama-server and Halogen both use.
 	Meta struct {
+		// NCtx is the context actually loaded. NCtxTrain is the model's
+		// training limit, which is usually larger and is never a capability.
+		NCtx      int `json:"n_ctx"`
 		NCtxTrain int `json:"n_ctx_train"`
 		NParams   int `json:"n_params"`
 	} `json:"meta"`
+}
+
+// ContextTokens returns the usable context length this entry reports, or 0
+// when it reports none.
+//
+// Servers spell it differently, so the names are tried in order of how
+// specific they are: max_model_len, then context_length, then meta.n_ctx.
+// meta.n_ctx_train is deliberately excluded. It is what the model was trained
+// for, not what the server loaded, and advertising it would promise a window
+// the server will refuse to fill.
+func (e ModelEntry) ContextTokens() int {
+	switch {
+	case e.MaxModelLen > 0:
+		return e.MaxModelLen
+	case e.ContextLength > 0:
+		return e.ContextLength
+	default:
+		return e.Meta.NCtx
+	}
+}
+
+// listingOnlyCaps builds capabilities for a server whose model listing is the
+// only thing it exposes to this package: text in and out, plus whatever
+// context length the matched entry reports.
+//
+// Find skips adapter entries, whose context belongs to the adapter rather
+// than to the base model being served.
+func listingOnlyCaps(models ModelsResponse, modelName string) config.ModelCapConfig {
+	caps := config.ModelCapConfig{
+		In:  []string{"text"},
+		Out: []string{"text"},
+	}
+	if entry, found := models.Find(modelName); found {
+		caps.Context = entry.ContextTokens()
+	}
+	return caps
 }
 
 // ModelsResponse is an OpenAI-compatible /v1/models listing.
@@ -121,7 +163,7 @@ type Prober interface {
 
 // defaultProbers is the registry Detect consults, in order.
 func defaultProbers() []Prober {
-	return []Prober{llamaServerProber{}, vllmProber{}}
+	return []Prober{llamaServerProber{}, vllmProber{}, halogenProber{}}
 }
 
 // Detect identifies the upstream behind c and returns what it reports about

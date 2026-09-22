@@ -29,15 +29,5 @@ func (vllmProber) Matches(models ModelsResponse) bool {
 }
 
 func (vllmProber) Probe(_ context.Context, _ *Client, models ModelsResponse, modelName string) (config.ModelCapConfig, error) {
-	caps := config.ModelCapConfig{
-		In:  []string{"text"},
-		Out: []string{"text"},
-	}
-
-	// Find skips LoRA adapters, whose max_model_len belongs to the adapter
-	// rather than to the base model being served.
-	if entry, found := models.Find(modelName); found && entry.MaxModelLen > 0 {
-		caps.Context = entry.MaxModelLen
-	}
-	return caps, nil
+	return listingOnlyCaps(models, modelName), nil
 }

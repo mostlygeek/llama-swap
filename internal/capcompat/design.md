@@ -82,11 +82,36 @@ match, then the first entry with no `parent`, so a LoRA adapter's context
 length is not mistaken for the base model's. Nothing vLLM serves reveals
 tool support or modalities.
 
-Fixtures under `testdata/` are built from the documented response shapes, not
-captured from live servers. Before relying on the `tools` mapping in
-production, re-capture `props.json` and `props_vision.json` from real builds
-and confirm `supports_tools` actually differs between a tool-capable model
-and a plain completion model.
+**halogen-flash-server** (`owned_by: halogen`) reads `/health`, which that
+project documents as the authoritative account of what the running build
+accepts:
+
+- `in` is `text` plus `image` when `vision.enabled`. Images are off unless
+  the server was started with a vision tower, so this varies per deployment
+  and is read rather than assumed for the engine.
+- `tools` is true when `supported` lists `tools`, which is the server naming
+  the request fields it takes. A non-empty `tool_calls.wire_format` is a
+  second signal for a build that omits that list.
+- `context` is `/health.context`, falling back to the listing, which
+  publishes the same number three times over as `max_model_len`,
+  `context_length` and `meta.n_ctx`.
+- `max_tokens_cap` and `max_tokens_default` bound one request's output rather
+  than the window, and have no field to map onto, so they are ignored.
+
+Context is read through `ModelEntry.ContextTokens`, shared by the
+listing-only probers. It tries `max_model_len`, then `context_length`, then
+`meta.n_ctx`, and never `meta.n_ctx_train`: that is what the model was
+trained for, not what the server loaded.
+
+The llama-server and vLLM fixtures under `testdata/` are built from the
+documented response shapes, not captured from live servers. Before relying on
+the llama-server `tools` mapping in production, re-capture `props.json` and
+`props_vision.json` from real builds and confirm `supports_tools` actually
+differs between a tool-capable model and a plain completion model.
+
+The halogen fixtures are verbatim captures from a running server. The two
+variants alongside them are that capture with the vision tower off, and with
+the tool signals removed.
 
 ## Caching
 

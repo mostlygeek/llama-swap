@@ -2,9 +2,9 @@
 title: Model capabilities and model listings
 summary: Advertise images, tools and context length in /v1/models, automatically or by hand.
 category: guides
-tags: [capabilities, models, tools, vision, context, autodetect]
+tags: [capabilities, models, tools, vision, context, autodetect, llama-server, vllm, halogen]
 config_keys: [models.*.capabilities, models.*.capabilities.disableAuto, store.path]
-updated: 2026-09-16
+updated: 2026-09-22
 ---
 
 # Model capabilities and model listings
@@ -35,18 +35,24 @@ and image input on its own.
 
 What each server can report:
 
-| | llama-server | vLLM |
-| --- | --- | --- |
-| context length | yes, the loaded `n_ctx` | yes, `max_model_len` |
-| image input | yes | no |
-| tools | yes, from the chat template | no |
-| reranker | no | no |
+| | llama-server | vLLM | halogen |
+| --- | --- | --- | --- |
+| context length | yes, the loaded `n_ctx` | yes, `max_model_len` | yes |
+| image input | yes | no | yes |
+| tools | yes, from the chat template | no | yes |
+| reranker | no | no | no |
 
-Everything llama-server reports comes from `/props`. vLLM exposes nothing that
-says whether it was started with `--enable-auto-tool-choice`, or whether the
-model takes images, so set those by hand on vLLM models.
+llama-server is read from `/props`, and halogen-flash-server from its
+`/health`, which that project documents as the authoritative report of what
+the running build accepts. Both vary per deployment: halogen serves images
+only when it was started with a vision tower, and that is read rather than
+assumed.
 
-Servers other than these two are left alone. That includes image, speech and
+vLLM is the thin one. Nothing it serves says whether it was started with
+`--enable-auto-tool-choice`, or whether the model takes images, so set those
+by hand on vLLM models.
+
+Servers other than these three are left alone. That includes image, speech and
 transcription servers, which have no capability surface to read.
 
 ## Setting capabilities by hand

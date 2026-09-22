@@ -26,6 +26,12 @@ import (
 //
 // The audio key in props_omni.json is a guess and is deliberately not mapped
 // by the prober. Confirm the real key name before adding it.
+//
+// The halogen fixtures are the exception: v1_models.json and health.json are
+// verbatim captures from a running halogen-flash-server. The two other
+// halogen files are that same capture with vision turned off, and with the
+// supported list and tool-call block removed, to cover builds configured
+// differently. Their derivation is noted where they are used.
 
 // fixture reads a testdata file.
 func fixture(t *testing.T, parts ...string) []byte {
@@ -177,6 +183,107 @@ func TestCapcompat_VLLMSkipsLoRAAdapters(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 4096, info.Capabilities.Context)
 	})
+}
+
+func TestCapcompat_DetectHalogen(t *testing.T) {
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "halogen", "v1_models.json"),
+		"/health":    fixture(t, "halogen", "health.json"),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "halogen-qwen3.8-flash-next")
+	require.NoError(t, err)
+
+	assert.Equal(t, "halogen", info.Upstream)
+	assert.Equal(t, []string{"text", "image"}, info.Capabilities.In, "this build has a vision tower")
+	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
+	assert.True(t, info.Capabilities.Tools)
+	assert.Equal(t, 262144, info.Capabilities.Context)
+	assert.False(t, info.Capabilities.Reranker, "not reported anywhere")
+	require.NoError(t, info.Capabilities.Validate())
+}
+
+func TestCapcompat_DetectHalogenVisionDisabled(t *testing.T) {
+	// The real capture with the vision tower turned off. Images are off
+	// unless the server is started with one, so this is the default build.
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "halogen", "v1_models.json"),
+		"/health":    fixture(t, "halogen", "health_no_vision.json"),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "halogen-qwen3.8-flash-next")
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"text"}, info.Capabilities.In)
+	assert.True(t, info.Capabilities.Tools)
+	assert.Equal(t, 262144, info.Capabilities.Context)
+}
+
+func TestCapcompat_DetectHalogenWithoutToolSignals(t *testing.T) {
+	// The real capture with the supported list and the tool-call block
+	// removed, standing in for a build that publishes neither.
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "halogen", "v1_models.json"),
+		"/health":    fixture(t, "halogen", "health_no_tools.json"),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "halogen-qwen3.8-flash-next")
+	require.NoError(t, err)
+
+	assert.False(t, info.Capabilities.Tools, "nothing in /health claims tool support")
+	assert.Equal(t, 262144, info.Capabilities.Context)
+}
+
+func TestCapcompat_DetectHalogenFallsBackToListingContext(t *testing.T) {
+	// A build whose /health omits context still has three names for it in
+	// the model listing.
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "halogen", "v1_models.json"),
+		"/health":    []byte(`{"status":"ok","vision":{"enabled":false},"supported":["tools"]}`),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "halogen-qwen3.8-flash-next")
+	require.NoError(t, err)
+	assert.Equal(t, 262144, info.Capabilities.Context)
+}
+
+func TestCapcompat_DetectHalogenHealthUnreachable(t *testing.T) {
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "halogen", "v1_models.json"),
+	})
+
+	_, err := Detect(context.Background(), up.client(t), "halogen-qwen3.8-flash-next")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "halogen")
+}
+
+func TestCapcompat_ModelEntryContextTokens(t *testing.T) {
+	// Servers spell the context length differently, and n_ctx_train is the
+	// training limit rather than the loaded window, so it is never used.
+	tests := []struct {
+		name  string
+		entry ModelEntry
+		want  int
+	}{
+		{"max_model_len wins", ModelEntry{MaxModelLen: 1, ContextLength: 2}, 1},
+		{"context_length next", ModelEntry{ContextLength: 2}, 2},
+		{"meta n_ctx last", func() ModelEntry {
+			var e ModelEntry
+			e.Meta.NCtx = 3
+			return e
+		}(), 3},
+		{"n_ctx_train is never used", func() ModelEntry {
+			var e ModelEntry
+			e.Meta.NCtxTrain = 999
+			return e
+		}(), 0},
+		{"nothing reported", ModelEntry{}, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.entry.ContextTokens())
+		})
+	}
 }
 
 func TestCapcompat_DetectUnsupportedUpstream(t *testing.T) {
