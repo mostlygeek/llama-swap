@@ -116,7 +116,12 @@
 <div class="flex flex-col h-full">
   <!-- Model selector -->
   <div class="shrink-0 flex flex-wrap gap-2 mb-4">
-    <ModelSelector bind:value={$selectedModelStore} placeholder="Select an audio model..." disabled={isTranscribing} capabilities={["audio_transcriptions"]} />
+    <ModelSelector
+      bind:value={$selectedModelStore}
+      placeholder="Select an audio model..."
+      disabled={isTranscribing}
+      match={{ inputModalities: ["audio"], outputModalities: ["text"] }}
+    />
   </div>
 
   <!-- Empty state for no models configured -->

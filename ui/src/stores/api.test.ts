@@ -221,6 +221,7 @@ describe("api store event handling", () => {
             id: "real",
             name: "Real",
             capabilities: { vision: true },
+            architecture: { input_modalities: ["text", "image"], output_modalities: ["text"] },
             meta: { llamaswap: { type: "model", aliases: ["variant", "alternate"] } },
           },
           {
@@ -258,7 +259,12 @@ describe("api store event handling", () => {
     expect(get(playgroundModels).find((model) => model.id === "real")).toMatchObject({
       aliases: ["variant", "alternate"],
       capabilities: { vision: true },
+      modalities: { in: ["text", "image"], out: ["text"] },
       playgroundType: "model",
+    });
+    // Models without an architecture block report no modalities at all.
+    expect(get(playgroundModels).find((model) => model.id === "remote/remote-model")).toMatchObject({
+      modalities: { in: [], out: [] },
     });
     expect(get(playgroundModels).find((model) => model.id === "remote/remote-model")).toMatchObject({
       peerID: "remote",

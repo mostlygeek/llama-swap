@@ -222,7 +222,12 @@
 <div class="flex flex-col h-full">
   <!-- Model and voice selectors -->
   <div class="shrink-0 flex gap-2 mb-4">
-    <ModelSelector bind:value={$selectedModelStore} placeholder="Select a speech model..." disabled={isGenerating} capabilities={["audio_speech"]} />
+    <ModelSelector
+      bind:value={$selectedModelStore}
+      placeholder="Select a speech model..."
+      disabled={isGenerating}
+      match={{ inputModalities: ["text"], outputModalities: ["audio"] }}
+    />
     <div class="flex gap-2">
       <Select.Root
         type="single"

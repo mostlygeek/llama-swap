@@ -2,7 +2,7 @@
 title: Model capabilities and model listings
 summary: Advertise images, tools and context length in /v1/models, automatically or by hand.
 category: guides
-tags: [capabilities, models, tools, vision, context, autodetect, llama-server, vllm, halogen]
+tags: [capabilities, models, tools, vision, context, autodetect, llama-server, vllm, halogen, playground]
 config_keys: [models.*.capabilities, models.*.capabilities.disableAuto, store.path]
 updated: 2026-09-22
 ---
@@ -109,6 +109,27 @@ models:
 
 With `disableAuto: true` the model advertises exactly what you wrote, and
 nothing else. On its own, with no other fields, it advertises nothing.
+
+## How the Playground uses this
+
+Each Playground tab looks for the modalities it needs and lists those models
+first, under "Matching Capabilities":
+
+| tab | wants |
+| --- | --- |
+| Chat | `in` has `text` or `image`, `out` has `text` |
+| Images | `out` has `image` |
+| Speech | `in` has `text`, `out` has `audio` |
+| Transcription | `in` has `audio`, `out` has `text` |
+| Rerank | `reranker: true` |
+| Help's Docs agent | `tools: true` |
+
+Discovery fills most of this in on its own once a model has been loaded, so a
+llama-server model usually sorts itself. Models that report nothing are still
+listed, further down under "Local", so nothing disappears from the selector for
+want of configuration. Image, speech and transcription servers are the ones
+worth setting by hand: nothing is read from them, so without an `in`/`out` block
+they never sort to the top of their own tab.
 
 ## What goes wrong
 

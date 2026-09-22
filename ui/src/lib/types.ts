@@ -13,6 +13,13 @@ export interface ModelCapabilities {
   reranker?: boolean;
 }
 
+// Input/output modalities a model reports through the /v1/models
+// architecture block. Values are "text", "audio", "image" or "video".
+export interface ModelModalities {
+  in: string[];
+  out: string[];
+}
+
 export interface Model {
   id: string;
   state: ModelStatus;
@@ -23,6 +30,7 @@ export interface Model {
   playgroundType?: PlaygroundModelType;
   aliases?: string[];
   capabilities?: ModelCapabilities;
+  modalities?: ModelModalities;
   context_length?: number;
   // selector-only fields from the v1/models llamaswap metadata
   strategy?: string;

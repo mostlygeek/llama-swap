@@ -484,7 +484,7 @@
         bind:value={$selectedModelStore}
         placeholder="Select a tool-capable model..."
         disabled={isStreaming}
-        capabilities={["function_calling"]}
+        match={{ capabilities: ["function_calling"] }}
       />
       <Button variant="outline" class="shrink-0" onclick={newChat} disabled={messages.length === 0 && !isStreaming} title="New chat">
         <SquarePen />

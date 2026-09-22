@@ -252,7 +252,12 @@
 <div class="flex flex-col h-full">
   <!-- Top bar: model selector + query input (table mode) + mode toggle -->
   <div class="shrink-0 flex flex-wrap gap-2 mb-4">
-    <ModelSelector bind:value={$selectedModelStore} placeholder="Select a rerank model..." disabled={isLoading} capabilities={["reranker"]} />
+    <ModelSelector
+      bind:value={$selectedModelStore}
+      placeholder="Select a rerank model..."
+      disabled={isLoading}
+      match={{ capabilities: ["reranker"] }}
+    />
     {#if editorMode === "table"}
       <Input
         type="text"
