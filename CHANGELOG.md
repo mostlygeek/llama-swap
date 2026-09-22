@@ -1,5 +1,24 @@
 # Changelog
 
+## v257
+
+Adds Kubernetes-backed model lifecycle management with a Helm chart, readiness
+diagnostics, and publishing fixes. Improves CORS controls and forwarded-client
+metrics, automatically discovers backend context and modalities, and refines
+ComfyUI support. The Playground now has a searchable, capability-aware model
+picker, while activity totals remain accurate after pruning.
+
+- [PR #1114](https://github.com/mostlygeek/llama-swap/pull/1114) cmd/kubeswap: kubernetes backend for llama-swap (wrapper + helm chart)
+- [PR #1129](https://github.com/mostlygeek/llama-swap/pull/1129) .github/workflows: fix helm chat publishing
+- [PR #1131](https://github.com/mostlygeek/llama-swap/pull/1131) cmd/kubeswap/chart: fix the default demo's loopback bind
+- internal/server: support proxy forwarded for headers
+- internal/server: fix CORS handler returning too early
+- [PR #1136](https://github.com/mostlygeek/llama-swap/pull/1136) internal/store: preserve request totals after pruning
+- [PR #1145](https://github.com/mostlygeek/llama-swap/pull/1145) docs,server: improve comfyui endpoint and add a guide
+- internal/server,internal/config: Add tighter CORS controls
+- internal/capcompat: automatic context and modality discovery
+- [PR #1153](https://github.com/mostlygeek/llama-swap/pull/1153) ui/playground: add a searchable model picker
+
 ## v256
 
 Refreshes Playground chat with a responsive layout, editable prompts, sampling
