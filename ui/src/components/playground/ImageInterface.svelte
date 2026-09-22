@@ -172,7 +172,12 @@
 <div class="flex flex-col h-full">
   <!-- Model selector and mode toggle -->
   <div class="shrink-0 flex flex-wrap gap-2 mb-4">
-    <ModelSelector bind:value={$selectedModelStore} placeholder="Select an image model..." disabled={isGenerating} capabilities={["image_generation", "image_to_image"]} matchAny={true} />
+    <ModelSelector
+      bind:value={$selectedModelStore}
+      placeholder="Select an image model..."
+      disabled={isGenerating}
+      match={{ outputModalities: ["image"] }}
+    />
 
     <Select.Root
       type="single"

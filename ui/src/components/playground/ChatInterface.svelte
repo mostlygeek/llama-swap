@@ -419,7 +419,12 @@
 <div class="flex flex-col h-full">
   <!-- Model selector and controls -->
   <div class="mb-3 flex shrink-0 gap-2">
-    <ModelSelector bind:value={$selectedModelStore} placeholder="Select a model..." disabled={isStreaming} />
+    <ModelSelector
+      bind:value={$selectedModelStore}
+      placeholder="Select a model..."
+      disabled={isStreaming}
+      match={{ inputModalities: ["text", "image"], outputModalities: ["text"] }}
+    />
     <div class="flex shrink-0 gap-2">
       <Button variant="outline" size="icon" onclick={() => (showSettings = true)} title="Chat settings">
         <Settings />

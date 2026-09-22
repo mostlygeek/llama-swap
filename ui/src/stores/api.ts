@@ -263,6 +263,10 @@ interface ModelListRecord {
   name?: string;
   description?: string;
   capabilities?: Model["capabilities"];
+  architecture?: {
+    input_modalities?: string[];
+    output_modalities?: string[];
+  };
   context_length?: number;
   meta?: {
     llamaswap?: {
@@ -315,6 +319,10 @@ async function loadPlaygroundModels(request: number): Promise<Model[]> {
           playgroundType,
           aliases: [...(aliasesByModel.get(record.id) ?? [])],
           capabilities: record.capabilities,
+          modalities: {
+            in: record.architecture?.input_modalities ?? [],
+            out: record.architecture?.output_modalities ?? [],
+          },
           context_length: record.context_length,
           strategy: metadata?.strategy,
           targets: metadata?.targets ?? [],
