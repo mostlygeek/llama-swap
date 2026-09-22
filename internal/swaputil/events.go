@@ -8,6 +8,7 @@ const ActivityLogEventID = 0x05
 const ModelPreloadedEventID = 0x06
 const InFlightRequestsEventID = 0x07
 const ProfileChangedEventID = 0x08
+const ModelCapabilitiesChangedEventID = 0x09
 
 // ProcessStateChangeEvent is emitted whenever a process transitions between
 // lifecycle states. States are carried as strings so this package stays a leaf
@@ -77,4 +78,17 @@ type ProfileChangedEvent struct {
 
 func (e ProfileChangedEvent) Type() uint32 {
 	return ProfileChangedEventID
+}
+
+// ModelCapabilitiesChangedEvent is emitted when capability discovery changes
+// what a model advertises. Discovery has to wait for the upstream to answer,
+// so it finishes well after the process reported itself ready, and the model
+// listing pushed on that state change is already stale by then. Without this
+// the UI shows the pre-discovery view until something else makes it re-read.
+type ModelCapabilitiesChangedEvent struct {
+	ModelID string
+}
+
+func (e ModelCapabilitiesChangedEvent) Type() uint32 {
+	return ModelCapabilitiesChangedEventID
 }

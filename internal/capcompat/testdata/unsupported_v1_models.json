@@ -1,0 +1,11 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "stable-diffusion-xl",
+      "object": "model",
+      "created": 1735142223,
+      "owned_by": "some-other-server"
+    }
+  ]
+}

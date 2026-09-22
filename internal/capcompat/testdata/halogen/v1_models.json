@@ -1,0 +1,19 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "halogen-qwen3.8-flash-next",
+      "object": "model",
+      "owned_by": "halogen",
+      "created": 0,
+      "max_model_len": 262144,
+      "context_length": 262144,
+      "meta": {
+        "n_ctx_train": 262144,
+        "n_ctx": 262144
+      },
+      "max_tokens_cap": 65536,
+      "max_tokens_default": 8192
+    }
+  ]
+}

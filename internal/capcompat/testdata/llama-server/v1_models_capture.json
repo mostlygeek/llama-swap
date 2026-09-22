@@ -1,0 +1,43 @@
+{
+  "models": [
+    {
+      "name": "/home/mostlygeek/llms/models/unsloth/gemma-4-12b-it-Q4_K_M.gguf",
+      "model": "/home/mostlygeek/llms/models/unsloth/gemma-4-12b-it-Q4_K_M.gguf",
+      "modified_at": "",
+      "size": "",
+      "digest": "",
+      "type": "model",
+      "description": "",
+      "tags": [""],
+      "capabilities": ["completion", "multimodal"],
+      "parameters": "",
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "",
+        "families": [""],
+        "parameter_size": "",
+        "quantization_level": ""
+      }
+    }
+  ],
+  "object": "list",
+  "data": [
+    {
+      "id": "/home/mostlygeek/llms/models/unsloth/gemma-4-12b-it-Q4_K_M.gguf",
+      "aliases": ["/home/mostlygeek/llms/models/unsloth/gemma-4-12b-it-Q4_K_M.gguf"],
+      "tags": [],
+      "object": "model",
+      "created": 1790057313,
+      "owned_by": "llamacpp",
+      "meta": {
+        "vocab_type": true,
+        "n_vocab": 262144,
+        "n_ctx": 262144,
+        "n_ctx_train": 262144,
+        "n_embd": 3840,
+        "n_params": 11907350576
+      }
+    }
+  ]
+}

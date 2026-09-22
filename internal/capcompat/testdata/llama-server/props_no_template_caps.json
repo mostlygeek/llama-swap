@@ -1,0 +1,15 @@
+{
+  "default_generation_settings": {
+    "n_ctx": 16384
+  },
+  "total_slots": 1,
+  "model_path": "../models/legacy-build.gguf",
+  "chat_template": "{%- if tools %}{{- 'You may call tools' }}{%- endif %}",
+  "modalities": {
+    "vision": false,
+    "video": false,
+    "audio": false
+  },
+  "build_info": "b4000-legacy",
+  "is_sleeping": false
+}

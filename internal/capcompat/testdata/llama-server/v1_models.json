@@ -1,0 +1,19 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "../models/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
+      "object": "model",
+      "created": 1735142223,
+      "owned_by": "llamacpp",
+      "meta": {
+        "vocab_type": 2,
+        "n_vocab": 128256,
+        "n_ctx_train": 131072,
+        "n_embd": 4096,
+        "n_params": 8030261312,
+        "size": 4912898304
+      }
+    }
+  ]
+}

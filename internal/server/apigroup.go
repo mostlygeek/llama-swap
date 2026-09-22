@@ -112,7 +112,12 @@ func (s *Server) modelStatus() []apiModel {
 		if st, ok := running[id]; ok {
 			state = string(st)
 		}
-		_, capsMap, _, ctxLen := renderCapabilities(mc.Capabilities)
+		// Same resolution /v1/models uses, so the dashboard and the OpenAI
+		// listing never disagree about what a model can do. Bound by
+		// shutdownCtx rather than a request: modelStatus is also called from
+		// event callbacks that have no request of their own.
+		caps := s.resolveCapabilities(s.shutdownCtx, id, mc)
+		_, capsMap, _, ctxLen := renderCapabilities(caps)
 		models = append(models, apiModel{
 			Id:            id,
 			Name:          mc.Name,
@@ -582,6 +587,7 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	defer event.On(func(e swaputil.ProcessStateChangeEvent) { sendModels() })()
+	defer event.On(func(e swaputil.ModelCapabilitiesChangedEvent) { sendModels() })()
 	defer event.On(func(e swaputil.ConfigFileChangedEvent) { sendModels() })()
 	defer event.On(func(e swaputil.ProfileChangedEvent) {
 		sendProfile()

@@ -1,0 +1,20 @@
+{
+  "default_generation_settings": {
+    "n_ctx": 4096
+  },
+  "total_slots": 2,
+  "model_path": "../models/Qwen2.5-Omni-7B-Q4_K_M.gguf",
+  "chat_template": "{%- for message in messages %}{{ message.content }}{%- endfor %}",
+  "chat_template_caps": {
+    "supports_tools": true,
+    "supports_tool_calls": true
+  },
+  "modalities": {
+    "vision": true,
+    "video": true,
+    "audio": true,
+    "some_future_modality": true
+  },
+  "build_info": "b6100-0e1f797",
+  "is_sleeping": false
+}

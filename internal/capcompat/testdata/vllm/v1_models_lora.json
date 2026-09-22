@@ -1,0 +1,25 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "sql-lora",
+      "object": "model",
+      "created": 1735142300,
+      "owned_by": "vllm",
+      "root": "/adapters/sql-lora",
+      "parent": "meta-llama/Llama-3.1-8B-Instruct",
+      "max_model_len": 4096,
+      "permission": []
+    },
+    {
+      "id": "meta-llama/Llama-3.1-8B-Instruct",
+      "object": "model",
+      "created": 1735142223,
+      "owned_by": "vllm",
+      "root": "meta-llama/Llama-3.1-8B-Instruct",
+      "parent": null,
+      "max_model_len": 131072,
+      "permission": []
+    }
+  ]
+}

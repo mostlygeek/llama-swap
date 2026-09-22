@@ -1,0 +1,45 @@
+{
+  "models": [
+    {
+      "name": "/home/mostlygeek/llms/models/bartowski/Qwen_Qwen3.6-35B-A3B-Q8_0.gguf",
+      "model": "/home/mostlygeek/llms/models/bartowski/Qwen_Qwen3.6-35B-A3B-Q8_0.gguf",
+      "modified_at": "",
+      "size": "",
+      "digest": "",
+      "type": "model",
+      "description": "",
+      "tags": [""],
+      "capabilities": ["completion"],
+      "parameters": "",
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "",
+        "families": [""],
+        "parameter_size": "",
+        "quantization_level": ""
+      }
+    }
+  ],
+  "object": "list",
+  "data": [
+    {
+      "id": "/home/mostlygeek/llms/models/bartowski/Qwen_Qwen3.6-35B-A3B-Q8_0.gguf",
+      "aliases": ["/home/mostlygeek/llms/models/bartowski/Qwen_Qwen3.6-35B-A3B-Q8_0.gguf"],
+      "tags": [],
+      "object": "model",
+      "created": 1790058182,
+      "owned_by": "llamacpp",
+      "meta": {
+        "vocab_type": true,
+        "n_vocab": 248320,
+        "n_ctx": 220160,
+        "n_ctx_train": 262144,
+        "n_embd": 2048,
+        "n_params": 35505251456,
+        "size": 37801656832,
+        "ftype": "Q8_0"
+      }
+    }
+  ]
+}
