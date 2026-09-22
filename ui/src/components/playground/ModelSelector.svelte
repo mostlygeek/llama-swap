@@ -33,6 +33,9 @@
   }));
   let visible = $derived(filterModelOptions(options, query));
   let hasModels = $derived(options.length > 0);
+  // Aliases sit indented under their model, so they only need to name it when
+  // the filter has left them on their own.
+  let visibleValues = $derived(new Set(visible.map((option) => option.value)));
 
   // Rows in dropdown order, split into their group headings.
   let sections = $derived.by(() => {
@@ -140,13 +143,17 @@
           <Combobox.Group>
             <Combobox.GroupHeading>{section.group}</Combobox.GroupHeading>
             {#each section.options as option (option.group + option.value)}
-              <Combobox.Item value={option.value} label={option.value}>
-                <span class="flex min-w-0 flex-1 items-baseline gap-2">
+              {@const nested = !!option.aliasOf && visibleValues.has(option.aliasOf)}
+              <Combobox.Item value={option.value} label={option.value} class={nested ? "pl-5" : undefined}>
+                <span class="flex min-w-0 flex-1 items-baseline gap-1.5">
+                  {#if nested}
+                    <span class="text-muted-foreground shrink-0" aria-hidden="true">↳</span>
+                  {/if}
                   <span class="truncate">{option.value}</span>
-                  {#if option.aliasOf}
-                    <span class="text-muted-foreground shrink-0 text-xs">alias of {option.aliasOf}</span>
+                  {#if option.aliasOf && !nested}
+                    <span class="text-muted-foreground shrink-0 pl-0.5 text-xs">alias of {option.aliasOf}</span>
                   {:else if option.name}
-                    <span class="text-muted-foreground shrink-0 truncate text-xs">{option.name}</span>
+                    <span class="text-muted-foreground shrink-0 truncate pl-0.5 text-xs">{option.name}</span>
                   {/if}
                 </span>
               </Combobox.Item>
