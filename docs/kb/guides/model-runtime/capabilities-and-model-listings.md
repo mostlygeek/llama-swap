@@ -59,8 +59,17 @@ vLLM is the thin one. Nothing it serves says whether it was started with
 `--enable-auto-tool-choice`, or whether the model takes images, so set those
 by hand on vLLM models.
 
-Servers other than these three are left alone. That includes image, speech and
-transcription servers, which have no capability surface to read.
+llama-swap picks the right reader from the `owned_by` field in the server's
+own `/v1/models`: `llamacpp`, `vllm` or `halogen`. To check what a server
+will be detected as, ask it directly:
+
+```bash
+curl -s localhost:PORT/v1/models | jq -r '.data[0].owned_by'
+```
+
+Servers reporting anything else are left alone, including image, speech and
+transcription servers, which have no capability surface to read. A llama.cpp
+fork that keeps the upstream API reports `llamacpp` and is read the same way.
 
 ## Setting capabilities by hand
 

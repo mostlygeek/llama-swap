@@ -50,9 +50,26 @@ it is listening.
 ## Upstream support
 
 `Detect` fetches `/v1/models` once and picks a prober from the `owned_by`
-field. A server nobody recognises returns `ErrUnsupportedUpstream`, which is
-logged at debug and cached as a miss. That is the normal outcome for the
-image, speech and transcription servers llama-swap also fronts.
+field, which every supported server sets to a stable name of its own:
+
+| `owned_by` | prober | reads |
+| --- | --- | --- |
+| `llamacpp` | llama-server, and forks keeping its API | `/v1/models`, `/props` |
+| `vllm` | vLLM | `/v1/models` |
+| `halogen` | halogen-flash-server | `/v1/models`, `/health` |
+
+The owner is taken from the first entry that sets one rather than strictly
+`data[0]`, so a listing whose first entry omits it still resolves. Matching
+ignores case.
+
+A server nobody recognises returns `ErrUnsupportedUpstream`, which is logged
+at debug and cached as a miss. That is the normal outcome for the image,
+speech and transcription servers llama-swap also fronts. To check what a
+given server will be detected as:
+
+```bash
+curl -s localhost:PORT/v1/models | jq -r '.data[0].owned_by'
+```
 
 **llama-server** (`owned_by: llamacpp`, covers forks such as ik_llama.cpp)
 reads `/props`:
@@ -87,8 +104,11 @@ reads `/props`:
 **vLLM** (`owned_by: vllm`) reads only the listing it already fetched:
 `max_model_len` on the matched entry. Entry selection prefers an exact name
 match, then the first entry with no `parent`, so a LoRA adapter's context
-length is not mistaken for the base model's. Nothing vLLM serves reveals
-tool support or modalities.
+length is not mistaken for the base model's. A base model sends `parent` as
+JSON null, which decodes to the empty string, and a capture pins that: if it
+decoded to anything else every base model would look like an adapter. The
+served `id` and the `root` checkpoint path differ, so only `id` is matched
+on. Nothing vLLM serves reveals tool support or modalities.
 
 **halogen-flash-server** (`owned_by: halogen`) reads `/health`, which that
 project documents as the authoritative account of what the running build
@@ -114,8 +134,8 @@ trained for, not what the server loaded.
 Fixture provenance under `testdata/`:
 
 - `llama-server/props_capture.json`, `v1_models_capture.json`,
-  `v1_models_capture_qwen.json` and all four halogen files come from running
-  servers. The halogen variants are that capture with the vision tower off
+  `v1_models_capture_qwen.json`, `vllm/v1_models_capture.json` and all four
+  halogen files come from running servers. The halogen variants are that capture with the vision tower off
   and with the tool signals removed.
 - The first two llama-server captures are from **different** servers, and are
   paired in one test only to exercise the code path: 262144 in that listing
@@ -126,7 +146,7 @@ Fixture provenance under `testdata/`:
   `n_params` were dropped rather than invented, and the prober does not read
   them. `v1_models_capture_qwen.json` is complete and self-consistent, so the
   context assertions live there.
-- The remaining llama-server fixtures and the vLLM ones are built from
+- The remaining llama-server fixtures and the vLLM LoRA one are built from
   documented response shapes. Their modality blocks now carry the real key
   set, but `chat_template_caps` is still unconfirmed against a live build:
   before relying on the `tools` mapping in production, capture `/props` from

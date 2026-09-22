@@ -40,6 +40,9 @@ import (
 // v1_models_capture_qwen.json is complete and self-consistent, which is why
 // the n_ctx assertions live there.
 //
+// vllm/v1_models_capture.json is also a verbatim capture. The other vllm
+// file, with its LoRA adapter entry, is still synthetic.
+//
 // The halogen fixtures are the exception: v1_models.json and health.json are
 // verbatim captures from a running halogen-flash-server. The two other
 // halogen files are that same capture with vision turned off, and with the
@@ -240,6 +243,46 @@ func TestCapcompat_DetectVLLM(t *testing.T) {
 	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
 	assert.False(t, info.Capabilities.Tools, "vllm exposes nothing about tool support")
 	assert.Equal(t, 0, up.hits["/props"], "vllm has no /props to read")
+}
+
+func TestCapcompat_DetectVLLMCapture(t *testing.T) {
+	// Verbatim from a running vLLM. Note the served id differs from root,
+	// which is the checkpoint path, and parent is JSON null rather than
+	// absent: this is a base model, not an adapter.
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "vllm", "v1_models_capture.json"),
+	})
+
+	t.Run("exact served name", func(t *testing.T) {
+		info, err := Detect(context.Background(), up.client(t), "qwen3-4b-vllm")
+		require.NoError(t, err)
+
+		assert.Equal(t, "vllm", info.Upstream)
+		assert.Equal(t, 40960, info.Capabilities.Context)
+		assert.Equal(t, []string{"text"}, info.Capabilities.In)
+		assert.Equal(t, []string{"text"}, info.Capabilities.Out)
+		assert.False(t, info.Capabilities.Tools, "vllm exposes nothing about tool support")
+		assert.Equal(t, 0, up.hits["/props"], "vllm has no /props to read")
+	})
+
+	t.Run("llama-swap model id that vllm does not know", func(t *testing.T) {
+		// A model llama-swap calls something else, with no useModelName set.
+		// parent is null, so this entry is still the base model to read.
+		info, err := Detect(context.Background(), up.client(t), "my-local-name")
+		require.NoError(t, err)
+		assert.Equal(t, 40960, info.Capabilities.Context)
+	})
+}
+
+func TestCapcompat_VLLMNullParentIsNotAnAdapter(t *testing.T) {
+	// vLLM sends parent as JSON null for a base model. Decoding that into a
+	// string has to leave it empty, or Find would treat every base model as
+	// an adapter and skip it.
+	var models ModelsResponse
+	require.NoError(t, json.Unmarshal(fixture(t, "vllm", "v1_models_capture.json"), &models))
+	require.Len(t, models.Data, 1)
+	assert.Empty(t, models.Data[0].Parent)
+	assert.Equal(t, "/models/qwen-4b", models.Data[0].Root)
 }
 
 func TestCapcompat_VLLMSkipsLoRAAdapters(t *testing.T) {
