@@ -20,6 +20,11 @@ fi
 git fetch --depth=1 origin "${COMMIT_HASH}"
 git checkout FETCH_HEAD
 
+# MP3 input/output support lives in an optional submodule whose upstream URL
+# uses SSH. Builders do not have GitHub credentials, so rewrite it to HTTPS.
+git -c 'url.https://github.com/.insteadOf=git@github.com:' \
+    submodule update --init external/audio.cpp-server-frontends
+
 # Common cmake flags
 #
 # AUDIOCPP_DEPLOYMENT_BUILD=ON is what audio.cpp calls a deployment build: it
@@ -42,6 +47,10 @@ CMAKE_FLAGS=(
     -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
     -DAUDIOCPP_DEPLOYMENT_BUILD=ON
     -DAUDIOCPP_MODEL_SET=full
+    -DAUDIOCPP_BUILD_NATIVE_MODEL_MANAGER=ON
+    -DAUDIOCPP_BUILD_SERVER_FRONTENDS=ON
+    -DAUDIOCPP_SERVER_FRONTENDS_DIR=external/audio.cpp-server-frontends
+    '-DAUDIOCPP_SERVER_FRONTEND_MODULES=audio_decode;mp3_encode'
     -DENGINE_ENABLE_NATIVE_CPU=OFF
     -DENGINE_ENABLE_OPENMP=ON
     -DENGINE_BUILD_EXAMPLES=OFF
