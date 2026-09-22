@@ -34,7 +34,7 @@ FROM ${IK_LLAMA_IMAGE} AS ik-llama-src
 
 FROM ${BUILDER_BASE} AS llama-swap-download
 ARG LS_VERSION=latest
-COPY install-llama-swap.sh /build/
+COPY lib-release.sh install-llama-swap.sh /build/
 RUN bash /build/install-llama-swap.sh "${LS_VERSION}"
 
 # ── vllm-wrapper ──────────────────────────────────────────────────────
@@ -44,7 +44,7 @@ RUN bash /build/install-llama-swap.sh "${LS_VERSION}"
 
 FROM golang:1.27-bookworm AS vllm-wrapper-build
 ARG LS_VERSION=latest
-COPY install-vllm-wrapper.sh /build/
+COPY lib-release.sh install-vllm-wrapper.sh /build/
 RUN --mount=type=cache,id=go-build,target=/root/.cache/go-build \
     --mount=type=cache,id=go-mod,target=/go/pkg/mod \
     bash /build/install-vllm-wrapper.sh "${LS_VERSION}"
@@ -63,7 +63,7 @@ FROM golang:1.27-bookworm AS kubeswap-build
 # first such release is out, build an explicit revision with
 # --build-arg LS_VERSION=<commit-or-tag>.
 ARG LS_VERSION=latest
-COPY install-kubeswap.sh /build/
+COPY lib-release.sh install-kubeswap.sh /build/
 RUN --mount=type=cache,id=go-build,target=/root/.cache/go-build \
     --mount=type=cache,id=go-mod,target=/go/pkg/mod \
     bash /build/install-kubeswap.sh "${LS_VERSION}"

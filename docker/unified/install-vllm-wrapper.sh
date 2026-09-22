@@ -7,6 +7,9 @@
 # from the same source revision the llama-swap binary was released from.
 set -e
 
+# shellcheck source=lib-release.sh
+source "$(dirname "$0")/lib-release.sh"
+
 VERSION="${1:-latest}"
 REPO="mostlygeek/llama-swap"
 SRC=/src/llama-swap
@@ -23,8 +26,11 @@ if echo "${VERSION}" | grep -qE '^[0-9a-f]{40}$'; then
         echo "Resolved to tag: ${TAG}"
         VERSION="${TAG#v}"
     else
-        echo "No release tag found for commit ${VERSION:0:7}, using latest"
-        VERSION="latest"
+        # No release points at this commit (e.g. a branch head that has
+        # never shipped): build the commit itself. Falling back to latest
+        # would silently change the revision and depends on the GitHub API,
+        # which is rate limited for unauthenticated builders.
+        echo "No release tag found for commit ${VERSION:0:7}; building the commit directly"
     fi
 fi
 
@@ -34,8 +40,7 @@ VERSION="${VERSION#v}"
 # Resolve "latest" to the tag of the most recent release
 if [ "$VERSION" = "latest" ]; then
     echo "=== Resolving latest llama-swap release ==="
-    VERSION=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
-        | grep '"tag_name"' | head -1 | cut -d'"' -f4 | sed 's/^v//')
+    VERSION=$(resolve_latest_version "${REPO}")
     if [ -z "$VERSION" ]; then
         echo "FATAL: Could not determine latest release version" >&2
         exit 1
@@ -43,14 +48,19 @@ if [ "$VERSION" = "latest" ]; then
     echo "Latest version: ${VERSION}"
 fi
 
-REF="v${VERSION}"
+# A raw commit hash checks out as-is; a release version needs its tag prefix.
+if echo "${VERSION}" | grep -qE '^[0-9a-f]{40}$'; then
+    REF="${VERSION}"
+else
+    REF="v${VERSION}"
+fi
 
 echo "=== Cloning ${REPO} @ ${REF} ==="
 git clone --filter=blob:none --no-checkout "https://github.com/${REPO}.git" "${SRC}"
 git -C "${SRC}" checkout --detach "${REF}"
 
 if [ ! -d "${SRC}/cmd/vllm-wrapper" ]; then
-    echo "FATAL: ${REF} has no cmd/vllm-wrapper (added in v243), pin LS_VERSION to v243 or newer" >&2
+    echo "FATAL: ${REF} has no cmd/vllm-wrapper (added in v243); pin LS_VERSION to v243 or newer" >&2
     exit 1
 fi
 
