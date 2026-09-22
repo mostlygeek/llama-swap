@@ -7,6 +7,9 @@
 # from the same source revision the llama-swap binary was released from.
 set -e
 
+# shellcheck source=lib-release.sh
+source "$(dirname "$0")/lib-release.sh"
+
 VERSION="${1:-latest}"
 REPO="mostlygeek/llama-swap"
 SRC=/src/llama-swap
@@ -37,8 +40,7 @@ VERSION="${VERSION#v}"
 # Resolve "latest" to the tag of the most recent release
 if [ "$VERSION" = "latest" ]; then
     echo "=== Resolving latest llama-swap release ==="
-    VERSION=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
-        | grep '"tag_name"' | head -1 | cut -d'"' -f4 | sed 's/^v//')
+    VERSION=$(resolve_latest_version "${REPO}")
     if [ -z "$VERSION" ]; then
         echo "FATAL: Could not determine latest release version" >&2
         exit 1
