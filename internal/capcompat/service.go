@@ -143,8 +143,18 @@ func (s *Service) Refresh(ctx context.Context, key string, c *Client, modelName 
 	info, err := s.detect(ctx, c, modelName)
 	if err != nil {
 		if errors.Is(err, ErrUnsupportedUpstream) {
-			// Not every upstream has capabilities to report. Remember the
-			// miss so /v1/models stops hitting the store for this key.
+			// Not every upstream has capabilities to report. Drop anything
+			// stored under this key first: a server can be replaced by one
+			// llama-swap does not recognise without cmd, proxy or
+			// useModelName changing, and the key would still be the same.
+			// The memo would hide the old row for the life of the process,
+			// but a restart starts with an empty memo and would serve it.
+			if s.cache != nil {
+				if err := s.cache.Delete(ctx, key); err != nil {
+					return fmt.Errorf("capcompat: dropping stale %s: %w", key, err)
+				}
+			}
+			// Remember the miss so /v1/models stops hitting the store.
 			s.remember(key, config.ModelCapConfig{}, false)
 			s.logf("capcompat: %s: %v", key, err)
 			return nil
@@ -157,6 +167,12 @@ func (s *Service) Refresh(ctx context.Context, key string, c *Client, modelName 
 		return fmt.Errorf("capcompat: encoding %s: %w", key, err)
 	}
 
+	// Remember before persisting. The probe succeeded either way, so a store
+	// that cannot be written should cost durability across a restart, not the
+	// value this process just learned.
+	s.remember(key, info.Capabilities, true)
+	s.logf("capcompat: %s reported by %s: %s", key, info.Upstream, describe(info.Capabilities))
+
 	if s.cache != nil {
 		if err := s.cache.Set(ctx, store.CacheEntry{
 			Key:       key,
@@ -168,8 +184,6 @@ func (s *Service) Refresh(ctx context.Context, key string, c *Client, modelName 
 		}
 	}
 
-	s.remember(key, info.Capabilities, true)
-	s.logf("capcompat: %s reported by %s: %s", key, info.Upstream, describe(info.Capabilities))
 	return nil
 }
 

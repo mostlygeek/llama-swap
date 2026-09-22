@@ -128,6 +128,80 @@ func TestStore_CacheZeroTTLNeverExpires(t *testing.T) {
 	assert.Equal(t, []byte("v"), got.Data)
 }
 
+func TestStore_CacheSubSecondTTLExpires(t *testing.T) {
+	ctx := context.Background()
+	_, cache := newCacheStore(t)
+
+	t.Run("does not become permanent", func(t *testing.T) {
+		// A TTL under a second must not round down to 0, which is the
+		// sentinel for "never expires".
+		require.NoError(t, cache.Set(ctx, store.CacheEntry{
+			Key:       "brief",
+			Data:      []byte("v"),
+			TTL:       time.Millisecond,
+			Timestamp: time.Now().Add(-time.Hour),
+		}))
+
+		_, found, err := cache.Get(ctx, "brief")
+		require.NoError(t, err)
+		assert.False(t, found)
+	})
+
+	t.Run("rounds up to one second", func(t *testing.T) {
+		require.NoError(t, cache.Set(ctx, store.CacheEntry{
+			Key:  "half",
+			Data: []byte("v"),
+			TTL:  500 * time.Millisecond,
+		}))
+
+		got, found, err := cache.Get(ctx, "half")
+		require.NoError(t, err)
+		require.True(t, found, "it should still be readable within the rounded up window")
+		assert.Equal(t, time.Second, got.TTL)
+	})
+}
+
+func TestStore_CacheExpiryDeleteSparesReplacementRow(t *testing.T) {
+	// Get reads a row, decides it is expired, then deletes it in a second
+	// statement. A Set landing between those two must not be discarded, so
+	// the delete repeats the expiry test instead of matching the key alone.
+	// The hook produces that interleaving; scheduling almost never does.
+	ctx := context.Background()
+	_, cache := newCacheStore(t)
+
+	require.NoError(t, cache.Set(ctx, store.CacheEntry{
+		Key:       "k",
+		Data:      []byte("stale"),
+		TTL:       time.Second,
+		Timestamp: time.Now().Add(-time.Hour),
+	}))
+
+	var replaced bool
+	beforeExpiryDelete = func() {
+		if replaced {
+			return
+		}
+		replaced = true
+		require.NoError(t, cache.Set(ctx, store.CacheEntry{
+			Key: "k", Data: []byte("fresh"), TTL: time.Hour,
+		}))
+	}
+	t.Cleanup(func() { beforeExpiryDelete = nil })
+
+	// This Get still reports the stale row it read, which is correct: it saw
+	// the state before the write.
+	_, found, err := cache.Get(ctx, "k")
+	require.NoError(t, err)
+	assert.False(t, found)
+	require.True(t, replaced, "the hook should have fired on the expired row")
+
+	// The row written in the gap must have survived the cleanup.
+	got, found, err := cache.Get(ctx, "k")
+	require.NoError(t, err)
+	require.True(t, found, "expiry cleanup deleted a row written after the read")
+	assert.Equal(t, []byte("fresh"), got.Data)
+}
+
 func TestStore_CacheDeleteMissingIsNotAnError(t *testing.T) {
 	ctx := context.Background()
 	_, cache := newCacheStore(t)

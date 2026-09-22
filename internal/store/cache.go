@@ -10,8 +10,10 @@ import (
 //
 // TTL bounds how long the entry stays readable. A zero or negative TTL never
 // expires, which suits data that is rewritten on a known event rather than
-// aged out. Timestamp is when the entry was written; a zero Timestamp is
-// replaced with the current time on Set.
+// aged out. A positive TTL always expires, but is stored with whole-second
+// granularity and rounded up, so a sub-second TTL lasts one second and reads
+// back as one second. Timestamp is when the entry was written; a zero
+// Timestamp is replaced with the current time on Set.
 type CacheEntry struct {
 	Key       string
 	Data      []byte

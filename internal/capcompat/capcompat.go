@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -177,7 +178,14 @@ const maxResponseBytes = 8 << 20
 // llama-swap, but the overall request deadline still comes from the context.
 func NewClient(base *url.URL, timeouts config.TimeoutsConfig) *Client {
 	transport := &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
+		Proxy: http.ProxyFromEnvironment,
+		// Same dialer settings the model's own reverse proxy transport uses,
+		// so a probe respects timeouts.connect instead of hanging on a dial
+		// until the probe deadline.
+		DialContext: (&net.Dialer{
+			Timeout:   time.Duration(timeouts.Connect) * time.Second,
+			KeepAlive: time.Duration(timeouts.KeepAlive) * time.Second,
+		}).DialContext,
 		TLSHandshakeTimeout:   time.Duration(timeouts.TLSHandshake) * time.Second,
 		ResponseHeaderTimeout: time.Duration(timeouts.ResponseHeader) * time.Second,
 		ExpectContinueTimeout: time.Duration(timeouts.ExpectContinue) * time.Second,

@@ -51,8 +51,9 @@ transcription servers, which have no capability surface to read.
 
 ## Setting capabilities by hand
 
-Values you write always win, field by field. Discovery only fills the gaps, so
-you can correct one field without giving up the rest:
+Values you write win, field by field, as long as they are not the zero value
+for their type. Discovery only fills the gaps, so you can correct one field
+without giving up the rest:
 
 ```yaml
 models:

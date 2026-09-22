@@ -27,6 +27,7 @@ type countingCache struct {
 	gets    atomic.Int64
 	getErr  error
 	setErr  error
+	delErr  error
 }
 
 func newCountingCache() *countingCache {
@@ -55,6 +56,9 @@ func (c *countingCache) Set(_ context.Context, entry store.CacheEntry) error {
 }
 
 func (c *countingCache) Delete(_ context.Context, key string) error {
+	if c.delErr != nil {
+		return c.delErr
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.entries, key)
@@ -149,6 +153,41 @@ func TestCapcompat_RefreshRetriesUntilUpstreamAnswers(t *testing.T) {
 	caps, found := svc.Lookup(context.Background(), "k")
 	require.True(t, found)
 	assert.Equal(t, 32768, caps.Context)
+}
+
+func TestCapcompat_RefreshDropsStaleEntryOnUnsupportedUpstream(t *testing.T) {
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "unsupported_v1_models.json"),
+	})
+	cache := newCountingCache()
+	stale := Info{
+		Upstream:     "llama-server",
+		Capabilities: config.ModelCapConfig{In: []string{"text"}, Context: 8192},
+		DetectedAt:   time.Now(),
+	}
+	require.NoError(t, cache.Set(context.Background(), store.CacheEntry{Key: "k", Data: mustJSON(t, stale)}))
+
+	// A server can be swapped for one llama-swap does not recognise without
+	// cmd, proxy or useModelName changing, so the key stays the same. The
+	// memo would hide the old row until a restart emptied it.
+	require.NoError(t, New(cache, nil).Refresh(context.Background(), "k", up.client(t), "model-a"))
+	assert.False(t, cache.has("k"), "the stale entry must not outlive the upstream that produced it")
+
+	// A fresh Service, as after a restart, must not find it either.
+	_, found := New(cache, nil).Lookup(context.Background(), "k")
+	assert.False(t, found)
+}
+
+func TestCapcompat_RefreshReportsStaleDeleteFailure(t *testing.T) {
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "unsupported_v1_models.json"),
+	})
+	cache := newCountingCache()
+	cache.delErr = errors.New("database is locked")
+
+	err := New(cache, nil).Refresh(context.Background(), "k", up.client(t), "model-a")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dropping stale")
 }
 
 func TestCapcompat_RefreshDoesNotRetryUnsupportedUpstream(t *testing.T) {
@@ -314,8 +353,11 @@ func TestCapcompat_RefreshReportsCacheWriteFailure(t *testing.T) {
 	assert.Contains(t, err.Error(), "caching")
 
 	// The probe still succeeded, so the value is not lost for this process.
-	_, found := svc.Lookup(context.Background(), "k")
-	assert.False(t, found, "a value that could not be stored is not remembered as present")
+	// Failing to persist costs durability across a restart, not the answer
+	// this process already has.
+	caps, found := svc.Lookup(context.Background(), "k")
+	require.True(t, found)
+	assert.Equal(t, 32768, caps.Context)
 }
 
 func TestCapcompat_NilServiceIsSafe(t *testing.T) {

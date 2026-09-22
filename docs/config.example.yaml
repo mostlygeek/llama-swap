@@ -460,7 +460,9 @@ models:
     # - used in v1/models to inform clients what the model can do
     # - any field left unset is filled in automatically by asking the upstream
     #   server when the model becomes ready (llama-server and vllm today)
-    # - values set here always win, field by field
+    # - values set here win, field by field; note a field set to its zero
+    #   value (false, 0, []) reads as unset, so use disableAuto to suppress
+    #   a discovered value rather than writing the zero value
     capabilities:
       # in: list of modalities understood by the model
       # - default: []
