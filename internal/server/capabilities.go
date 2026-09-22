@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"net/url"
+	"reflect"
 
 	"github.com/mostlygeek/llama-swap/internal/capcompat"
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
@@ -45,12 +47,23 @@ func (s *Server) refreshCapabilities(modelID string, mc config.ModelConfig) {
 	key := capcompat.LocalKey(modelID, mc)
 	name := capcompat.UpstreamModelName(modelID, mc)
 
+	// What the model advertised before the probe, so a refresh that learns
+	// nothing new does not push a redundant model list to every UI client.
+	before := s.resolveCapabilities(s.shutdownCtx, modelID, mc)
+
 	if err := s.capcompat.Refresh(s.shutdownCtx, key, client, name); err != nil {
 		// Debug, not warn. llama-swap also fronts image, speech and
 		// transcription servers with no capability surface, and a model that
 		// stopped again mid-probe is normal. Neither is worth a warning on
 		// every model start.
 		s.proxylog.Debugf("capcompat: <%s> discovery failed: %v", modelID, err)
+		return
+	}
+
+	// The listing pushed when this model went ready was built before the
+	// probe finished, so anything new has to announce itself.
+	if after := s.resolveCapabilities(s.shutdownCtx, modelID, mc); !reflect.DeepEqual(before, after) {
+		event.Emit(swaputil.ModelCapabilitiesChangedEvent{ModelID: modelID})
 	}
 }
 

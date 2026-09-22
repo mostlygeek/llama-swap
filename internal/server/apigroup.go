@@ -587,6 +587,7 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	defer event.On(func(e swaputil.ProcessStateChangeEvent) { sendModels() })()
+	defer event.On(func(e swaputil.ModelCapabilitiesChangedEvent) { sendModels() })()
 	defer event.On(func(e swaputil.ConfigFileChangedEvent) { sendModels() })()
 	defer event.On(func(e swaputil.ProfileChangedEvent) {
 		sendProfile()

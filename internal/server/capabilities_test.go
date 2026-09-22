@@ -419,3 +419,114 @@ func TestAPI_ModelStatusAgreesWithListModels(t *testing.T) {
 	assert.Equal(t, rec.Capabilities, status[0].Capabilities)
 	assert.Equal(t, rec.ContextLength, status[0].ContextLength)
 }
+
+// Discovery finishes after the process reported itself ready, so the model
+// list pushed on that state change predates the probe. These cover the event
+// that tells the UI to re-read.
+
+func TestAPI_RefreshCapabilitiesAnnouncesNewCapabilities(t *testing.T) {
+	upstream := newCapUpstream(t)
+	mc := config.ModelConfig{Cmd: "llama-server -m vision.gguf", Proxy: upstream.URL}
+	s := capServer(t, "m", mc)
+
+	changed := make(chan swaputil.ModelCapabilitiesChangedEvent, 1)
+	cancel := event.On(func(e swaputil.ModelCapabilitiesChangedEvent) {
+		select {
+		case changed <- e:
+		default:
+		}
+	})
+	defer cancel()
+
+	s.onProcessStateChange(swaputil.ProcessStateChangeEvent{
+		ProcessName: "m",
+		NewState:    string(process.StateReady),
+	})
+
+	select {
+	case e := <-changed:
+		assert.Equal(t, "m", e.ModelID)
+	case <-time.After(5 * time.Second):
+		t.Fatal("discovery never announced the capabilities it found")
+	}
+
+	// The push the UI receives must carry the discovered values.
+	status := s.modelStatus()
+	require.Len(t, status, 1)
+	assert.Equal(t, 8192, status[0].ContextLength)
+}
+
+func TestAPI_RefreshCapabilitiesSilentWhenNothingChanged(t *testing.T) {
+	upstream := newCapUpstream(t)
+	mc := config.ModelConfig{Cmd: "llama-server -m vision.gguf", Proxy: upstream.URL}
+	s := capServer(t, "m", mc)
+
+	// First start discovers and announces.
+	first := make(chan struct{}, 1)
+	cancelFirst := event.On(func(e swaputil.ModelCapabilitiesChangedEvent) {
+		select {
+		case first <- struct{}{}:
+		default:
+		}
+	})
+	s.onProcessStateChange(swaputil.ProcessStateChangeEvent{
+		ProcessName: "m", NewState: string(process.StateReady),
+	})
+	select {
+	case <-first:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first discovery never announced")
+	}
+	cancelFirst()
+
+	// Every later start re-probes the same server. Nothing changed, so the
+	// UI must not be pushed a fresh model list on every model load.
+	again := make(chan struct{}, 1)
+	cancelAgain := event.On(func(e swaputil.ModelCapabilitiesChangedEvent) {
+		select {
+		case again <- struct{}{}:
+		default:
+		}
+	})
+	defer cancelAgain()
+
+	s.onProcessStateChange(swaputil.ProcessStateChangeEvent{
+		ProcessName: "m", NewState: string(process.StateReady),
+	})
+
+	select {
+	case <-again:
+		t.Fatal("a refresh that learned nothing new should stay quiet")
+	case <-time.After(500 * time.Millisecond):
+	}
+}
+
+func TestAPI_RefreshCapabilitiesSilentOnUnsupportedUpstream(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"object":"list","data":[{"id":"sd","owned_by":"comfyui"}]}`))
+	}))
+	defer server.Close()
+
+	mc := config.ModelConfig{Cmd: "sd-server", Proxy: server.URL}
+	s := capServer(t, "m", mc)
+
+	fired := make(chan struct{}, 1)
+	cancel := event.On(func(e swaputil.ModelCapabilitiesChangedEvent) {
+		select {
+		case fired <- struct{}{}:
+		default:
+		}
+	})
+	defer cancel()
+
+	s.onProcessStateChange(swaputil.ProcessStateChangeEvent{
+		ProcessName: "m", NewState: string(process.StateReady),
+	})
+
+	select {
+	case <-fired:
+		t.Fatal("an upstream with nothing to report should not announce a change")
+	case <-time.After(500 * time.Millisecond):
+	}
+}
