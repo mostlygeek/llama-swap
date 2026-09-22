@@ -33,10 +33,11 @@ models:
 After this model has been loaded once, `/v1/models` reports its context length
 and image input on its own.
 
-The context length reported is the window the server will actually serve, not
+The context length reported is the window one request can actually use, not
 the one the model was trained for. A llama-server started with a smaller
-`--ctx-size` than the model supports advertises the smaller number, which is
-the one a client needs.
+`--ctx-size` than the model supports advertises the smaller number, and a
+server whose slots are capped advertises the per-slot window rather than the
+total it loaded.
 
 What each server can report:
 

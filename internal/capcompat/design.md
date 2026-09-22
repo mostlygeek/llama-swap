@@ -75,11 +75,14 @@ reads `/props`:
   through on a template llama.cpp could not fully inspect. Builds predating
   `chat_template_caps` fall back to looking for a tools loop in the template
   source.
-- `context` is `default_generation_settings.n_ctx`, the window a request can
-  actually use. It is not `meta.n_ctx` from the listing: a captured server
-  reports 220160 in `/props` while the listing says 262144 for both `n_ctx`
-  and `n_ctx_train`, so reading the listing would advertise a window the
-  server refuses to fill.
+- `context` is `default_generation_settings.n_ctx`, the window one
+  generation slot is configured with and so the window a single request is
+  bounded by. `meta.n_ctx` in the listing is the context the model was
+  loaded with across all slots. llama.cpp sizes a slot with `n_ctx_slot()`,
+  which `--kv-unified-per-slot` can cap independently, so the two agree on a
+  single-slot server and the listing can be larger otherwise.
+  `meta.n_ctx_train` is the model's training ceiling and is never used: a
+  capture shows a server that loaded 220160 for a model trained at 262144.
 
 **vLLM** (`owned_by: vllm`) reads only the listing it already fetched:
 `max_model_len` on the matched entry. Entry selection prefers an exact name
@@ -110,12 +113,19 @@ trained for, not what the server loaded.
 
 Fixture provenance under `testdata/`:
 
-- `llama-server/props_capture.json` and `v1_models_capture.json`, and all
-  four halogen files, come from running servers. The halogen variants are
-  that capture with the vision tower off and with the tool signals removed.
-  The llama-server listing capture was truncated in transit inside its `meta`
-  block; the fields after `n_params` were dropped rather than invented, and
-  the prober does not read them.
+- `llama-server/props_capture.json`, `v1_models_capture.json`,
+  `v1_models_capture_qwen.json` and all four halogen files come from running
+  servers. The halogen variants are that capture with the vision tower off
+  and with the tool signals removed.
+- The first two llama-server captures are from **different** servers, and are
+  paired in one test only to exercise the code path: 262144 in that listing
+  is not an integer multiple of 220160 in that `/props`, so one llama.cpp
+  process could not have produced both. No conclusion about a single
+  deployment should be drawn from that pair. `v1_models_capture.json` was
+  also truncated in transit inside its `meta` block; the fields after
+  `n_params` were dropped rather than invented, and the prober does not read
+  them. `v1_models_capture_qwen.json` is complete and self-consistent, so the
+  context assertions live there.
 - The remaining llama-server fixtures and the vLLM ones are built from
   documented response shapes. Their modality blocks now carry the real key
   set, but `chat_template_caps` is still unconfirmed against a live build:

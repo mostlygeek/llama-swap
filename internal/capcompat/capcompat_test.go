@@ -2,6 +2,7 @@ package capcompat
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -24,12 +25,20 @@ import (
 // differs between a tool-capable model and a plain completion model; several
 // of those flags are initialised to true in llama.cpp's C++ struct.
 //
-// The exceptions are real captures. props_capture.json and
-// v1_models_capture.json come from a running llama-server, and confirm the
-// modality key set (vision, video, audio) and that the loaded context in
-// /props differs from meta.n_ctx in the listing. The listing capture was
-// truncated in transit inside its meta block; the fields after n_params were
-// dropped rather than invented, which the prober does not read.
+// The exceptions are real captures. props_capture.json,
+// v1_models_capture.json and v1_models_capture_qwen.json come from running
+// llama-servers, and confirm the modality key set (vision, video, audio).
+//
+// The first two are from DIFFERENT servers and are only paired in a test to
+// exercise the code path: 262144 in that listing is not an integer multiple
+// of 220160 in that /props, so llama.cpp could not have produced both from
+// one process. Do not read a conclusion about one server out of that pair.
+// v1_models_capture.json was also truncated in transit inside its meta
+// block; the fields after n_params were dropped rather than invented, and
+// the prober does not read them.
+//
+// v1_models_capture_qwen.json is complete and self-consistent, which is why
+// the n_ctx assertions live there.
 //
 // The halogen fixtures are the exception: v1_models.json and health.json are
 // verbatim captures from a running halogen-flash-server. The two other
@@ -128,8 +137,12 @@ func TestCapcompat_DetectLlamaServerIgnoresUnmappedModalities(t *testing.T) {
 }
 
 func TestCapcompat_DetectLlamaServerCapture(t *testing.T) {
-	// Verbatim from a running llama-server. A text-only build reports all
+	// Verbatim from running llama-servers. A text-only build reports all
 	// three modality keys as false, which is what confirmed their names.
+	//
+	// These two files are from different servers, so the only thing the
+	// context assertion below shows is that the prober reads /props and not
+	// the listing. It is not evidence about any one deployment.
 	up := newUpstream(t, map[string][]byte{
 		"/v1/models": fixture(t, "llama-server", "v1_models_capture.json"),
 		"/props":     fixture(t, "llama-server", "props_capture.json"),
@@ -140,12 +153,22 @@ func TestCapcompat_DetectLlamaServerCapture(t *testing.T) {
 
 	assert.Equal(t, "llama-server", info.Upstream)
 	assert.Equal(t, []string{"text"}, info.Capabilities.In)
+	assert.Equal(t, 220160, info.Capabilities.Context, "context comes from /props")
+}
 
-	// The capture is the reason /props wins over the listing: the server can
-	// actually serve 220160 tokens, while the listing's meta.n_ctx and
-	// n_ctx_train both say 262144. Reading the listing would advertise a
-	// window the server refuses to fill.
-	assert.Equal(t, 220160, info.Capabilities.Context)
+func TestCapcompat_LlamaServerListingNeverUsesTrainingContext(t *testing.T) {
+	// A complete capture where the two listing fields disagree: the server
+	// loaded 220160 tokens for a model trained at 262144. Nothing may ever
+	// advertise the training limit, which is the model's ceiling rather than
+	// anything this server will serve.
+	var models ModelsResponse
+	require.NoError(t, json.Unmarshal(fixture(t, "llama-server", "v1_models_capture_qwen.json"), &models))
+	require.Len(t, models.Data, 1)
+
+	entry := models.Data[0]
+	require.Equal(t, 220160, entry.Meta.NCtx)
+	require.Equal(t, 262144, entry.Meta.NCtxTrain)
+	assert.Equal(t, 220160, entry.ContextTokens())
 }
 
 func TestCapcompat_DetectLlamaServerIgnoresListingCapabilities(t *testing.T) {

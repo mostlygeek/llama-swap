@@ -13,11 +13,16 @@ const llamaServerOwner = "llamacpp"
 // propsResponse is the subset of llama-server's GET /props that describes what
 // the loaded model can do.
 type propsResponse struct {
-	// DefaultGenerationSettings.NCtx is the context a request can actually
-	// use, which is what a client needs. It is not the same number as
-	// meta.n_ctx in /v1/models: a captured server reports 220160 here while
-	// the listing says 262144, so reading the listing would advertise a
-	// window the server will refuse to fill.
+	// DefaultGenerationSettings.NCtx is the context one generation slot is
+	// configured with, which is the window a single request is bounded by
+	// and so the number a client needs.
+	//
+	// meta.n_ctx in /v1/models is the context the model was loaded with,
+	// across all slots. llama.cpp sizes a slot with n_ctx_slot(), which an
+	// operator can cap independently with --kv-unified-per-slot, so the two
+	// agree on a single-slot server and the listing can be the larger of the
+	// two otherwise. Reading the listing would then advertise a window no
+	// one request can fill.
 	DefaultGenerationSettings struct {
 		NCtx int `json:"n_ctx"`
 	} `json:"default_generation_settings"`
