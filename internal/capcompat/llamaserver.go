@@ -13,9 +13,11 @@ const llamaServerOwner = "llamacpp"
 // propsResponse is the subset of llama-server's GET /props that describes what
 // the loaded model can do.
 type propsResponse struct {
-	// DefaultGenerationSettings.NCtx is the context size actually loaded,
-	// which is what a client needs. The n_ctx_train in /v1/models is the
-	// model's training limit and is usually much larger.
+	// DefaultGenerationSettings.NCtx is the context a request can actually
+	// use, which is what a client needs. It is not the same number as
+	// meta.n_ctx in /v1/models: a captured server reports 220160 here while
+	// the listing says 262144, so reading the listing would advertise a
+	// window the server will refuse to fill.
 	DefaultGenerationSettings struct {
 		NCtx int `json:"n_ctx"`
 	} `json:"default_generation_settings"`
@@ -34,13 +36,14 @@ type propsResponse struct {
 // modalityForProp maps a llama-server modality key onto a llama-swap input
 // modality. Text is always supported and is added unconditionally.
 //
-// Audio is deliberately missing. llama.cpp does report audio multimodal
-// input, but the key it uses under /props.modalities has not been confirmed
-// against a running server, and guessing it would advertise a modality that
-// was only ever exercised against a fixture we wrote ourselves. Add the entry
-// once `curl /props | jq .modalities` on an audio model says what it is.
+// All three keys are confirmed against a running server, which reports
+// {"vision":false,"video":false,"audio":false} for a text-only build. Keys
+// outside this map are dropped rather than passed through, where an
+// unrecognised name would fail ModelCapConfig.Validate.
 var modalityForProp = map[string]string{
 	"vision": "image",
+	"audio":  "audio",
+	"video":  "video",
 }
 
 // llamaServerProber reads capabilities from llama-server's /props endpoint.

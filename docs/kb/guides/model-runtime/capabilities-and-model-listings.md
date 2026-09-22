@@ -33,12 +33,18 @@ models:
 After this model has been loaded once, `/v1/models` reports its context length
 and image input on its own.
 
+The context length reported is the window the server will actually serve, not
+the one the model was trained for. A llama-server started with a smaller
+`--ctx-size` than the model supports advertises the smaller number, which is
+the one a client needs.
+
 What each server can report:
 
 | | llama-server | vLLM | halogen |
 | --- | --- | --- | --- |
 | context length | yes, the loaded `n_ctx` | yes, `max_model_len` | yes |
 | image input | yes | no | yes |
+| audio or video input | yes | no | no |
 | tools | yes, from the chat template | no | yes |
 | reranker | no | no | no |
 

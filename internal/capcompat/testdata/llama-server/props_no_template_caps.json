@@ -6,7 +6,9 @@
   "model_path": "../models/legacy-build.gguf",
   "chat_template": "{%- if tools %}{{- 'You may call tools' }}{%- endif %}",
   "modalities": {
-    "vision": false
+    "vision": false,
+    "video": false,
+    "audio": false
   },
   "build_info": "b4000-legacy",
   "is_sleeping": false

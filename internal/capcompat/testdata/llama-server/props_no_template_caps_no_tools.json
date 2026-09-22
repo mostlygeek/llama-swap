@@ -6,7 +6,9 @@
   "model_path": "../models/legacy-base.gguf",
   "chat_template": "{%- for message in messages %}{{ message.content }}{%- endfor %}",
   "modalities": {
-    "vision": false
+    "vision": false,
+    "video": false,
+    "audio": false
   },
   "build_info": "b4000-legacy",
   "is_sleeping": false

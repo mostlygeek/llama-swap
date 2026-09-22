@@ -10,7 +10,15 @@
       "temperature": 0.800000011920929,
       "top_k": 40,
       "top_p": 0.949999988079071,
-      "samplers": ["dry", "top_k", "typ_p", "top_p", "min_p", "xtc", "temperature"]
+      "samplers": [
+        "dry",
+        "top_k",
+        "typ_p",
+        "top_p",
+        "min_p",
+        "xtc",
+        "temperature"
+      ]
     },
     "prompt": "",
     "next_token": {
@@ -37,6 +45,7 @@
   },
   "modalities": {
     "vision": false,
+    "video": false,
     "audio": false
   },
   "media_marker": "<__media_YoNhud46VdDqbuFmKYEO9PY7A4ARzRfg__>",

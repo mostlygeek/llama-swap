@@ -24,8 +24,12 @@ import (
 // differs between a tool-capable model and a plain completion model; several
 // of those flags are initialised to true in llama.cpp's C++ struct.
 //
-// The audio key in props_omni.json is a guess and is deliberately not mapped
-// by the prober. Confirm the real key name before adding it.
+// The exceptions are real captures. props_capture.json and
+// v1_models_capture.json come from a running llama-server, and confirm the
+// modality key set (vision, video, audio) and that the loaded context in
+// /props differs from meta.n_ctx in the listing. The listing capture was
+// truncated in transit inside its meta block; the fields after n_params were
+// dropped rather than invented, which the prober does not read.
 //
 // The halogen fixtures are the exception: v1_models.json and health.json are
 // verbatim captures from a running halogen-flash-server. The two other
@@ -116,12 +120,61 @@ func TestCapcompat_DetectLlamaServerIgnoresUnmappedModalities(t *testing.T) {
 	info, err := Detect(context.Background(), up.client(t), "model-a")
 	require.NoError(t, err)
 
-	// This fixture reports vision, audio and a made up modality. Only vision
-	// is mapped: audio has no entry yet because its key name is unconfirmed,
-	// and an unrecognised key must be dropped rather than passed through,
-	// where it would fail ModelCapConfig.Validate.
-	assert.Equal(t, []string{"text", "image"}, info.Capabilities.In)
+	// This fixture reports the three real modality keys plus a made up one.
+	// All three map; the unrecognised key must be dropped rather than passed
+	// through, where it would fail ModelCapConfig.Validate.
+	assert.Equal(t, []string{"text", "image", "audio", "video"}, info.Capabilities.In)
 	require.NoError(t, info.Capabilities.Validate())
+}
+
+func TestCapcompat_DetectLlamaServerCapture(t *testing.T) {
+	// Verbatim from a running llama-server. A text-only build reports all
+	// three modality keys as false, which is what confirmed their names.
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "llama-server", "v1_models_capture.json"),
+		"/props":     fixture(t, "llama-server", "props_capture.json"),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "gemma")
+	require.NoError(t, err)
+
+	assert.Equal(t, "llama-server", info.Upstream)
+	assert.Equal(t, []string{"text"}, info.Capabilities.In)
+
+	// The capture is the reason /props wins over the listing: the server can
+	// actually serve 220160 tokens, while the listing's meta.n_ctx and
+	// n_ctx_train both say 262144. Reading the listing would advertise a
+	// window the server refuses to fill.
+	assert.Equal(t, 220160, info.Capabilities.Context)
+}
+
+func TestCapcompat_DetectLlamaServerIgnoresListingCapabilities(t *testing.T) {
+	// The listing carries an Ollama-style models[] block whose capabilities
+	// array says "multimodal" for this model, while /props reports every
+	// modality false. /props describes what this server will accept, so it
+	// wins and nothing reads that array.
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "llama-server", "v1_models_capture.json"),
+		"/props":     fixture(t, "llama-server", "props_capture.json"),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "gemma")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"text"}, info.Capabilities.In,
+		"a multimodal model served without a projector accepts text only")
+}
+
+func TestCapcompat_DetectLlamaServerAudioAndVideo(t *testing.T) {
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "llama-server", "v1_models.json"),
+		"/props":     fixture(t, "llama-server", "props_omni.json"),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "model-a")
+	require.NoError(t, err)
+
+	// Order is fixed so the cached blob is byte-stable across probes.
+	assert.Equal(t, []string{"text", "image", "audio", "video"}, info.Capabilities.In)
 }
 
 func TestCapcompat_DetectLlamaServerNoTemplateCaps(t *testing.T) {

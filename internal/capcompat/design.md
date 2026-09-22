@@ -57,14 +57,17 @@ image, speech and transcription servers llama-swap also fronts.
 **llama-server** (`owned_by: llamacpp`, covers forks such as ik_llama.cpp)
 reads `/props`:
 
-- `in` is `text` plus `image` when `modalities.vision`. Modalities are decoded
-  as a map so a new one upstream does not break parsing, and keys with no
-  mapping are dropped rather than passed through, where they would fail
-  `ModelCapConfig.Validate`. Audio is not detected: llama.cpp does report
-  audio multimodal input, but the key name under `/props.modalities` has not
-  been confirmed against a running server, and only `vision` appears in the
-  README example. Confirm it with `curl /props | jq .modalities` on an audio
-  model before adding it.
+- `in` is `text` plus `image`, `audio` and `video` from `modalities.vision`,
+  `modalities.audio` and `modalities.video`. All three key names are
+  confirmed against a running server, which reports
+  `{"vision":false,"video":false,"audio":false}` on a text-only build.
+  Modalities are decoded as a map so a new one upstream does not break
+  parsing, and keys with no mapping are dropped rather than passed through,
+  where they would fail `ModelCapConfig.Validate`.
+- The listing also carries an Ollama-style `models[]` block with its own
+  `capabilities` array. It is not read. A capture of a multimodal model
+  served without a projector lists `"multimodal"` there while `/props`
+  reports every modality false, and `/props` is what the server will honour.
 - `out` is `text`.
 - `tools` requires both `supports_tools` and `supports_tool_calls` in
   `chat_template_caps`. Several flags in llama.cpp's caps struct are
@@ -72,9 +75,11 @@ reads `/props`:
   through on a template llama.cpp could not fully inspect. Builds predating
   `chat_template_caps` fall back to looking for a tools loop in the template
   source.
-- `context` is `default_generation_settings.n_ctx`, the size actually loaded.
-  The `n_ctx_train` in `/v1/models` is the training limit and is usually much
-  larger.
+- `context` is `default_generation_settings.n_ctx`, the window a request can
+  actually use. It is not `meta.n_ctx` from the listing: a captured server
+  reports 220160 in `/props` while the listing says 262144 for both `n_ctx`
+  and `n_ctx_train`, so reading the listing would advertise a window the
+  server refuses to fill.
 
 **vLLM** (`owned_by: vllm`) reads only the listing it already fetched:
 `max_model_len` on the matched entry. Entry selection prefers an exact name
@@ -103,15 +108,20 @@ listing-only probers. It tries `max_model_len`, then `context_length`, then
 `meta.n_ctx`, and never `meta.n_ctx_train`: that is what the model was
 trained for, not what the server loaded.
 
-The llama-server and vLLM fixtures under `testdata/` are built from the
-documented response shapes, not captured from live servers. Before relying on
-the llama-server `tools` mapping in production, re-capture `props.json` and
-`props_vision.json` from real builds and confirm `supports_tools` actually
-differs between a tool-capable model and a plain completion model.
+Fixture provenance under `testdata/`:
 
-The halogen fixtures are verbatim captures from a running server. The two
-variants alongside them are that capture with the vision tower off, and with
-the tool signals removed.
+- `llama-server/props_capture.json` and `v1_models_capture.json`, and all
+  four halogen files, come from running servers. The halogen variants are
+  that capture with the vision tower off and with the tool signals removed.
+  The llama-server listing capture was truncated in transit inside its `meta`
+  block; the fields after `n_params` were dropped rather than invented, and
+  the prober does not read them.
+- The remaining llama-server fixtures and the vLLM ones are built from
+  documented response shapes. Their modality blocks now carry the real key
+  set, but `chat_template_caps` is still unconfirmed against a live build:
+  before relying on the `tools` mapping in production, capture `/props` from
+  a tool-capable model and a plain completion model and confirm
+  `supports_tools` actually differs.
 
 ## Caching
 

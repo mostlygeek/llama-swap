@@ -20,6 +20,7 @@
   },
   "modalities": {
     "vision": true,
+    "video": false,
     "audio": false
   },
   "media_marker": "<__media__>",

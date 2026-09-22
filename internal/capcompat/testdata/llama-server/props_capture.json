@@ -1,0 +1,29 @@
+{
+  "modalities": {
+    "vision": false,
+    "video": false,
+    "audio": false
+  },
+  "default_generation_settings": {
+    "params": {
+      "seed": 4294967295,
+      "temperature": 1.0,
+      "top_k": 20,
+      "top_p": 0.949999988079071,
+      "min_p": 0.0,
+      "top_n_sigma": -1.0,
+      "repeat_last_n": 64,
+      "repeat_penalty": 1.0,
+      "max_tokens": -1,
+      "n_predict": -1,
+      "chat_format": "Content-only",
+      "reasoning_format": "none",
+      "reasoning_in_content": false,
+      "samplers": ["penalties", "dry", "top_n_sigma", "top_k", "typ_p", "top_p", "min_p", "xtc", "temperature"],
+      "speculative.types": "none",
+      "backend_sampling": false,
+      "lora": []
+    },
+    "n_ctx": 220160
+  }
+}

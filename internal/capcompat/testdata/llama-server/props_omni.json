@@ -11,6 +11,7 @@
   },
   "modalities": {
     "vision": true,
+    "video": true,
     "audio": true,
     "some_future_modality": true
   },
