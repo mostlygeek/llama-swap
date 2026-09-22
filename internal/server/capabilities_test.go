@@ -350,3 +350,72 @@ func requireCached(t *testing.T, s *Server, modelID string, mc config.ModelConfi
 		return err == nil && found
 	}, 5*time.Second, 10*time.Millisecond, "probe never reached the cache")
 }
+
+// The models dashboard does not read /v1/models. It renders the modelStatus
+// payload pushed over /api/events, which is built separately, so it needs its
+// own coverage: the two listings must not disagree about a model.
+
+func TestAPI_ModelStatusIncludesDiscoveredCapabilities(t *testing.T) {
+	mc := config.ModelConfig{Cmd: "llama-server -m vision.gguf", Proxy: "http://localhost:9001"}
+	s := capServer(t, "m", mc)
+	seedCapabilities(t, s, "m", mc, config.ModelCapConfig{
+		In:      []string{"text", "image"},
+		Out:     []string{"text"},
+		Context: 8192,
+	})
+
+	status := s.modelStatus()
+	require.Len(t, status, 1)
+	assert.Equal(t, true, status[0].Capabilities["vision"])
+	assert.Equal(t, 8192, status[0].ContextLength)
+}
+
+func TestAPI_ModelStatusConfigWinsPerField(t *testing.T) {
+	mc := config.ModelConfig{
+		Cmd:          "vllm serve a",
+		Proxy:        "http://localhost:9001",
+		Capabilities: config.ModelCapConfig{Tools: true},
+	}
+	s := capServer(t, "m", mc)
+	seedCapabilities(t, s, "m", mc, config.ModelCapConfig{Context: 131072})
+
+	status := s.modelStatus()
+	require.Len(t, status, 1)
+	assert.Equal(t, true, status[0].Capabilities["function_calling"])
+	assert.Equal(t, 131072, status[0].ContextLength)
+}
+
+func TestAPI_ModelStatusDisableAutoIgnoresCache(t *testing.T) {
+	mc := config.ModelConfig{
+		Cmd:          "llama-server -m a.gguf",
+		Proxy:        "http://localhost:9001",
+		Capabilities: config.ModelCapConfig{DisableAuto: true},
+	}
+	s := capServer(t, "m", mc)
+	seedCapabilities(t, s, "m", mc, config.ModelCapConfig{In: []string{"text", "image"}, Context: 8192})
+
+	status := s.modelStatus()
+	require.Len(t, status, 1)
+	assert.Nil(t, status[0].Capabilities)
+	assert.Zero(t, status[0].ContextLength)
+}
+
+func TestAPI_ModelStatusAgreesWithListModels(t *testing.T) {
+	// The two surfaces are built by different code. Pin them together so a
+	// change to one is not silently missed in the other.
+	mc := config.ModelConfig{Cmd: "llama-server -m vision.gguf", Proxy: "http://localhost:9001"}
+	s := capServer(t, "m", mc)
+	seedCapabilities(t, s, "m", mc, config.ModelCapConfig{
+		In:      []string{"text", "image"},
+		Out:     []string{"text"},
+		Tools:   true,
+		Context: 8192,
+	})
+
+	rec := listModel(t, s)
+	status := s.modelStatus()
+	require.Len(t, status, 1)
+
+	assert.Equal(t, rec.Capabilities, status[0].Capabilities)
+	assert.Equal(t, rec.ContextLength, status[0].ContextLength)
+}
