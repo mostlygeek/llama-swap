@@ -233,10 +233,12 @@ security:
 # - requires -listen-tailcat /path/to/server.private.json to start the listener
 # - when -listen-tailcat is set, models must contain at least one public ID
 # - empty allow permits any client holding the case-sensitive connection token
+# - clients whose node key is not in allow get HTTP 403 Forbidden
 # - "*" exposes every callable public ID
 # - admin defaults false and keeps the UI, /api, logs, metrics and operations private
 # - debug defaults false; set true to include verbose Tailcat transport logs in proxy logs
-# - changing allow or debug requires restarting llama-swap; models and admin update on reload
+# - allow, models, admin and debug all update on config reload without
+#   restarting the listener; changing the -listen-tailcat key requires a restart
 tailcat:
   allow:
     - nodekey:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef

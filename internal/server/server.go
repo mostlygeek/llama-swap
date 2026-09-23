@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -22,6 +23,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/router"
 	"github.com/mostlygeek/llama-swap/internal/store"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
+	"github.com/mostlygeek/llama-swap/internal/tailcat"
 )
 
 // Server owns the HTTP mux, cross-cutting middleware, and the local/peer model
@@ -422,6 +424,13 @@ func (s *Server) ServeTailcatHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	// tailcat.allow is enforced per request rather than by the Tailcat
+	// listener so config reloads can change it without restarting the
+	// listener, and so removed keys lose access on kept-alive connections.
+	if !tailcatClientAllowed(tc.Allow, r) {
+		http.Error(w, "Tailcat client not allowed", http.StatusForbidden)
+		return
+	}
 
 	inference := isTailcatInferenceRequest(r)
 	if !tc.Admin {
@@ -447,6 +456,16 @@ func (s *Server) ServeTailcatHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	r = r.WithContext(context.WithValue(r.Context(), tailcatRequestContextKey{}, true))
 	s.handler.ServeHTTP(w, r)
+}
+
+// tailcatClientAllowed reports whether the request's authenticated Tailcat
+// node key is in allow. An empty allow list permits any client.
+func tailcatClientAllowed(allow []string, r *http.Request) bool {
+	if len(allow) == 0 {
+		return true
+	}
+	nodeKey, ok := tailcat.NodeKeyFromContext(r.Context())
+	return ok && slices.Contains(allow, nodeKey)
 }
 
 func isTailcatInferenceRequest(r *http.Request) bool {

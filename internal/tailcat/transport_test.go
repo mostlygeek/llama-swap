@@ -83,9 +83,8 @@ func TestTailcatTransport_LocalDERPHTTP(t *testing.T) {
 		},
 	}}
 	server, err := Start(t.Context(), ServerOptions{
-		PrivateKey:     serverKey,
-		AllowedClients: []string{clientPrivate.Public().String()},
-		Logger:         testLogger{t},
+		PrivateKey: serverKey,
+		Logger:     testLogger{t},
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			source, ok := SourceFromContext(r.Context())
 			if !ok {

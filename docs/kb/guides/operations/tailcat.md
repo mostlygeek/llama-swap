@@ -4,7 +4,7 @@ summary: Privately expose inference over Tailcat and route peers through Tailcat
 category: guides
 tags: [tailcat, peers, remote, networking, security]
 config_keys: [tailcat, tailcat.allow, tailcat.models, tailcat.admin, tailcat.debug, peers, peers.*.proxy, peers.*.tailcatKey]
-updated: 2026-09-02
+updated: 2026-09-23
 ---
 
 # Connect llama-swap with Tailcat
@@ -63,6 +63,13 @@ callable local and peer IDs. An empty `allow` list permits any client holding
 the token, though an explicit allowlist is strongly recommended for a
 persistent address.
 
+llama-swap checks `allow` on every HTTP request, using the node key that
+Tailcat authenticated for the connection. A client whose key is not listed
+can still complete the Tailcat handshake (it needs the connection token for
+that), but every request it sends gets `403 Forbidden`. If a client you
+expect to work gets 403, check that its `printpub` output is in `allow`
+exactly, and that it is using its saved key rather than an ephemeral one.
+
 With `admin: false` (the default), Tailcat serves only `/health`, filtered model
 listings, and allowlisted model-dispatched inference routes. Set `admin: true`
 only when remote callers also need the UI, `/api`, logs, metrics, operations,
@@ -71,9 +78,11 @@ or upstream passthrough. The model allowlist still applies in admin mode.
 Set `debug: true` to include Tailcat transport diagnostics in the proxy log.
 It defaults to `false` to keep routine proxy logs concise.
 
-The listener key, `allow`, and `debug` values are applied at process startup.
-Changing them requires restarting llama-swap. Configuration reloads can update
-the `models` and `admin` request policy without changing the listener token.
+Configuration reloads (`-watch-config` or `SIGHUP`) apply changes to `allow`,
+`models`, `admin`, and `debug` without restarting the listener, so connected
+clients stay connected and the token does not change. A key removed from
+`allow` loses access on its next request, even over an open connection. Only
+the listener key (`-listen-tailcat`) requires restarting llama-swap.
 
 ## Find the server token
 

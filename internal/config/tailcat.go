@@ -17,8 +17,6 @@ type TailcatConfig struct {
 	Models []string `yaml:"models"`
 	Admin  bool     `yaml:"admin"`
 	Debug  bool     `yaml:"debug"`
-
-	AllowedClients []string `yaml:"-"`
 }
 
 func validatePeerTailcat(peer *rawPeerConfig) error {
@@ -80,7 +78,6 @@ func validateTailcatConfig(cfg *Config) error {
 			allowedClients = append(allowedClients, canonical)
 		}
 		tc.Allow = allowedClients
-		tc.AllowedClients = allowedClients
 
 		validModels := publicTailcatModelIDs(*cfg)
 		seenModels := make(map[string]struct{}, len(tc.Models))

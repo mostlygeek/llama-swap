@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/tailcat"
 )
 
 func newTailcatPolicyServer(t *testing.T, extra string) *Server {
@@ -66,6 +67,49 @@ func TestServer_TailcatNonAdminStrictSurface(t *testing.T) {
 				t.Fatalf("status = %d, want %d, body=%q", w.Code, tt.want, w.Body.String())
 			}
 		})
+	}
+}
+
+func TestServer_TailcatClientAllowlist(t *testing.T) {
+	allowed := "nodekey:" + strings.Repeat("ab", 32)
+	other := "nodekey:" + strings.Repeat("cd", 32)
+	withKey := func(r *http.Request, nodeKey string) *http.Request {
+		return r.WithContext(tailcat.ContextWithNodeKey(r.Context(), nodeKey))
+	}
+
+	s := newTailcatPolicyServer(t, "  allow: ["+allowed+"]\n")
+	tests := []struct {
+		name string
+		req  *http.Request
+		want int
+	}{
+		{"allowed key", withKey(tailcatRequest(http.MethodGet, "/health", ""), allowed), http.StatusOK},
+		{"allowed key inference", withKey(tailcatRequest(http.MethodPost, "/v1/chat/completions", `{"model":"public"}`), allowed), http.StatusOK},
+		{"other key", withKey(tailcatRequest(http.MethodGet, "/health", ""), other), http.StatusForbidden},
+		{"other key inference", withKey(tailcatRequest(http.MethodPost, "/v1/chat/completions", `{"model":"public"}`), other), http.StatusForbidden},
+		{"no key", tailcatRequest(http.MethodGet, "/health", ""), http.StatusForbidden},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			s.ServeTailcatHTTP(w, tt.req)
+			if w.Code != tt.want {
+				t.Fatalf("status = %d, want %d, body=%q", w.Code, tt.want, w.Body.String())
+			}
+		})
+	}
+
+	// An empty allow list permits any client, with or without a node key.
+	open := newTailcatPolicyServer(t, "")
+	for _, r := range []*http.Request{
+		withKey(tailcatRequest(http.MethodGet, "/health", ""), other),
+		tailcatRequest(http.MethodGet, "/health", ""),
+	} {
+		w := httptest.NewRecorder()
+		open.ServeTailcatHTTP(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("open server status = %d, want 200", w.Code)
+		}
 	}
 }
 

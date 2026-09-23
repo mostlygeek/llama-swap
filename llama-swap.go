@@ -259,18 +259,20 @@ func main() {
 		activeMu.RUnlock()
 		srv.ServeTailcatHTTP(w, r)
 	})
+	tailcatLogger := func(cfg config.Config) tailcat.Logger {
+		if cfg.Tailcat != nil && cfg.Tailcat.Debug {
+			return proxyLog
+		}
+		return nil
+	}
 	startTailcat := func(cfg config.Config) (*tailcat.Server, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
-		opts := tailcat.ServerOptions{
-			PrivateKey:     tailcatPrivateKey,
-			AllowedClients: cfg.Tailcat.AllowedClients,
-			Handler:        tailcatHandler,
-		}
-		if cfg.Tailcat.Debug {
-			opts.Logger = proxyLog
-		}
-		return tailcat.Start(ctx, opts)
+		return tailcat.Start(ctx, tailcat.ServerOptions{
+			PrivateKey: tailcatPrivateKey,
+			Handler:    tailcatHandler,
+			Logger:     tailcatLogger(cfg),
+		})
 	}
 
 	var activeTailcat *tailcat.Server
@@ -357,6 +359,10 @@ func main() {
 
 		if currentTailcat != nil {
 			newSrv.SetTailcatAddress(currentTailcat.Address())
+			// The listener is never restarted: connected Tailcat clients do not
+			// reconnect to a restarted server. tailcat.allow is enforced by
+			// newSrv per request; only the debug logger needs updating here.
+			currentTailcat.SetLogger(tailcatLogger(newCfg))
 		}
 
 		activeMu.Lock()

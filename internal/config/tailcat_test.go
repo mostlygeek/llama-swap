@@ -62,8 +62,8 @@ tailcat:
 	if !cfg.Tailcat.Debug {
 		t.Fatal("Debug = false, want true")
 	}
-	if got := len(cfg.Tailcat.AllowedClients); got != 1 {
-		t.Fatalf("AllowedClients = %d, want 1", got)
+	if got := len(cfg.Tailcat.Allow); got != 1 {
+		t.Fatalf("Allow = %d, want 1", got)
 	}
 	wantModels := []string{"local", "alias", "select", "public", "*"}
 	if fmt.Sprint(cfg.Tailcat.Models) != fmt.Sprint(wantModels) {
