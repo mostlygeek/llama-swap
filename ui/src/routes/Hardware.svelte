@@ -37,6 +37,12 @@
       .join(" ");
   }
 
+  function systemLabel(snapshot: HardwareSnapshot): string {
+    const device = [snapshot.system.vendor, snapshot.system.model].filter(Boolean).join(" ");
+    if (!device) return "Not detected";
+    return snapshot.system.family ? `${device} (${snapshot.system.family})` : device;
+  }
+
   function acceleratorTitle(accelerator: HardwareAccelerator): string {
     return accelerator.model ?? `${titleCase(accelerator.kind)} ${accelerator.index + 1}`;
   }
@@ -76,6 +82,7 @@
       "",
       "System",
       `  Operating System: ${osLabel(snapshot)}`,
+      `  Device: ${systemLabel(snapshot)}`,
       `  Kernel: ${shown(snapshot.operating_system.kernel)}`,
       `  Architecture: ${snapshot.architecture.name}`,
       `  Environment: ${environmentLabel(snapshot)}`,
@@ -134,6 +141,7 @@
             <h4 class="mb-3 text-sm font-semibold text-muted-foreground">System</h4>
             <dl class="grid grid-cols-[minmax(8rem,auto)_1fr] gap-x-4 gap-y-2 text-sm">
               <dt class="text-muted-foreground">Operating System</dt><dd>{osLabel(hardware)}</dd>
+              <dt class="text-muted-foreground">Device</dt><dd>{systemLabel(hardware)}</dd>
               <dt class="text-muted-foreground">Kernel</dt><dd>{shown(hardware.operating_system.kernel)}</dd>
               <dt class="text-muted-foreground">Architecture</dt><dd>{hardware.architecture.name}</dd>
               <dt class="text-muted-foreground">Environment</dt><dd>{environmentLabel(hardware)}</dd>

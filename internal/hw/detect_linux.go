@@ -17,14 +17,24 @@ import (
 
 var drmCardPattern = regexp.MustCompile(`^card\d+$`)
 
+var numaNodePattern = regexp.MustCompile(`^node\d+$`)
+
 func detectPlatform(ctx context.Context, snapshot *HardwareSnapshot) ([]detectedAccelerator, error) {
 	var result []detectedAccelerator
-	if nvidia, err := detectNvidia(ctx); err == nil {
+	if nvidia, err := detectNvidia(ctx, snapshot); err == nil {
 		result = append(result, nvidia...)
 	}
 	result = append(result, detectAMD(ctx)...)
 	if sysfs, err := detectDRMSysfs(); err == nil {
 		result = append(result, sysfs...)
+	}
+	snapshot.System = detectSystem("/sys/class/dmi/id")
+	if snapshot.CPU.SocketCount == nil {
+		// arm64 systems have no physical id in /proc/cpuinfo, so the NUMA
+		// topology is the only available estimate of the socket count.
+		if nodes := numaSocketCount("/sys/devices/system/node"); nodes > 0 {
+			snapshot.CPU.SocketCount = intPtr(nodes)
+		}
 	}
 	return result, nil
 }
@@ -255,4 +265,59 @@ func readTrimmed(path string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(data))
+}
+
+// dmiPlaceholders lists the standard vendor placeholder values that mean
+// "no data" rather than an actual value.
+var dmiPlaceholders = map[string]struct{}{
+	"":                       {},
+	"none":                   {},
+	"unknown":                {},
+	"default string":         {},
+	"to be filled by o.e.m.": {},
+	"system manufacturer":    {},
+	"system product name":    {},
+	"not defined":            {},
+	"invalid":                {},
+}
+
+// detectSystem identifies the machine from DMI product data. product_version
+// is the human-readable product name; product_name is the machine type.
+func detectSystem(root string) System {
+	model := cleanDMIValue(readTrimmed(filepath.Join(root, "product_version")))
+	if model == nil {
+		model = cleanDMIValue(readTrimmed(filepath.Join(root, "product_name")))
+	}
+	return System{
+		Vendor: cleanDMIValue(readTrimmed(filepath.Join(root, "sys_vendor"))),
+		Model:  model,
+		Family: cleanDMIValue(readTrimmed(filepath.Join(root, "product_family"))),
+	}
+}
+
+func cleanDMIValue(value string) *string {
+	value = strings.TrimSpace(value)
+	if _, placeholder := dmiPlaceholders[strings.ToLower(value)]; placeholder {
+		return nil
+	}
+	return &value
+}
+
+// numaSocketCount counts NUMA nodes that have at least one CPU, as indicated
+// by a non-empty cpulist file.
+func numaSocketCount(root string) int {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, entry := range entries {
+		if !entry.IsDir() || !numaNodePattern.MatchString(entry.Name()) {
+			continue
+		}
+		if readTrimmed(filepath.Join(root, entry.Name(), "cpulist")) != "" {
+			count++
+		}
+	}
+	return count
 }

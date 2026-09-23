@@ -206,10 +206,17 @@ export interface HardwareSnapshot {
   capture: HardwareCapture;
   architecture: HardwareArchitecture;
   operating_system: HardwareOperatingSystem;
+  system: HardwareSystem;
   environment: HardwareEnvironment;
   cpu: HardwareCPU;
   memory: HardwareMemory;
   accelerators: HardwareAccelerator[];
+}
+
+export interface HardwareSystem {
+  vendor: string | null;
+  model: string | null;
+  family: string | null;
 }
 
 export interface HardwareCapture {

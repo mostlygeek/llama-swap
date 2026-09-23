@@ -15,10 +15,19 @@ type HardwareSnapshot struct {
 	Capture         HardwareCapture      `json:"capture"`
 	Architecture    Architecture         `json:"architecture"`
 	OperatingSystem OperatingSystem      `json:"operating_system"`
+	System          System               `json:"system"`
 	Environment     ExecutionEnvironment `json:"environment"`
 	CPU             CPU                  `json:"cpu"`
 	Memory          SystemMemory         `json:"memory"`
 	Accelerators    []Accelerator        `json:"accelerators"`
+}
+
+// System identifies the physical machine from DMI product data. A nil field
+// means the value is not exposed by the platform.
+type System struct {
+	Vendor *string `json:"vendor"`
+	Model  *string `json:"model"`
+	Family *string `json:"family"`
 }
 
 type HardwareCapture struct {
