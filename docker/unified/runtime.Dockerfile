@@ -84,7 +84,7 @@ ENV PATH="/usr/local/bin:${PATH}"
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 python3 curl ca-certificates \
     libavcodec60 libavformat60 libavutil58 libswresample4 \
-    ffmpeg \
+    ffmpeg libmp3lame0 \
     && rm -rf /var/lib/apt/lists/*
 
 # CUDA stub drivers for container compatibility
@@ -103,7 +103,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rocm-smi \
     python3 curl ca-certificates \
     libavcodec60 libavformat60 libavutil58 libswresample4 \
-    ffmpeg \
+    ffmpeg libmp3lame0 \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Select runtime base by BACKEND ────────────────────────────────────
