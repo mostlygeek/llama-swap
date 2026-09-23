@@ -5,19 +5,19 @@ package hw
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/shirou/gopsutil/v4/host"
 )
 
 var drmCardPattern = regexp.MustCompile(`^card\d+$`)
-
-var numaNodePattern = regexp.MustCompile(`^node\d+$`)
 
 func detectPlatform(ctx context.Context, snapshot *HardwareSnapshot) ([]detectedAccelerator, error) {
 	var result []detectedAccelerator
@@ -30,10 +30,11 @@ func detectPlatform(ctx context.Context, snapshot *HardwareSnapshot) ([]detected
 	}
 	snapshot.System = detectSystem("/sys/class/dmi/id")
 	if snapshot.CPU.SocketCount == nil {
-		// arm64 systems have no physical id in /proc/cpuinfo, so the NUMA
-		// topology is the only available estimate of the socket count.
-		if nodes := numaSocketCount("/sys/devices/system/node"); nodes > 0 {
-			snapshot.CPU.SocketCount = intPtr(nodes)
+		// arm64 systems have no physical id in /proc/cpuinfo, so the socket
+		// count falls back to the CPU package topology; systems without a
+		// physical id and without package topology keep an unknown count.
+		if sockets := packageSocketCount("/sys/devices/system/cpu"); sockets > 0 {
+			snapshot.CPU.SocketCount = intPtr(sockets)
 		}
 	}
 	return result, nil
@@ -282,9 +283,15 @@ var dmiPlaceholders = map[string]struct{}{
 }
 
 // detectSystem identifies the machine from DMI product data. product_version
-// is the human-readable product name; product_name is the machine type.
+// is the human-readable product name where meaningful; product_name is the
+// machine type.
 func detectSystem(root string) System {
 	model := cleanDMIValue(readTrimmed(filepath.Join(root, "product_version")))
+	if model != nil && isRevisionLike(*model) {
+		// Many OEMs put a revision number (1.0, 0001) or "Not Specified"
+		// in product_version; that is not a useful model name.
+		model = nil
+	}
 	if model == nil {
 		model = cleanDMIValue(readTrimmed(filepath.Join(root, "product_name")))
 	}
@@ -295,6 +302,24 @@ func detectSystem(root string) System {
 	}
 }
 
+// isRevisionLike reports whether a DMI product_version value is a bare
+// revision (digits, dots and dashes only) or an explicit "not specified"
+// marker rather than a descriptive product name.
+func isRevisionLike(value string) bool {
+	if strings.EqualFold(value, "not specified") {
+		return true
+	}
+	if value == "" {
+		return true
+	}
+	for _, r := range value {
+		if !unicode.IsDigit(r) && r != '.' && r != '-' && r != ' ' {
+			return false
+		}
+	}
+	return true
+}
+
 func cleanDMIValue(value string) *string {
 	value = strings.TrimSpace(value)
 	if _, placeholder := dmiPlaceholders[strings.ToLower(value)]; placeholder {
@@ -303,21 +328,17 @@ func cleanDMIValue(value string) *string {
 	return &value
 }
 
-// numaSocketCount counts NUMA nodes that have at least one CPU, as indicated
-// by a non-empty cpulist file.
-func numaSocketCount(root string) int {
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return 0
-	}
-	count := 0
-	for _, entry := range entries {
-		if !entry.IsDir() || !numaNodePattern.MatchString(entry.Name()) {
-			continue
+// packageSocketCount estimates the socket count as the number of distinct
+// physical package IDs reported by the CPU topology, matching lscpu. It
+// returns 0 when the topology files are absent, in which case the socket
+// count stays unknown.
+func packageSocketCount(cpuRoot string) int {
+	packages := make(map[string]struct{})
+	for id := 0; ; id++ {
+		value := readTrimmed(filepath.Join(cpuRoot, fmt.Sprintf("cpu%d", id), "topology", "physical_package_id"))
+		if value == "" {
+			return len(packages)
 		}
-		if readTrimmed(filepath.Join(root, entry.Name(), "cpulist")) != "" {
-			count++
-		}
+		packages[value] = struct{}{}
 	}
-	return count
 }

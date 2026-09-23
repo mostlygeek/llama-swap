@@ -57,6 +57,12 @@
       : "Not detected";
   }
 
+  function powerLabel(accelerator: HardwareAccelerator): string {
+    if (accelerator.power_limit_watts !== null) return `${accelerator.power_limit_watts} W`;
+    if (accelerator.nominal_power_watts !== null) return `${accelerator.nominal_power_watts} W (nominal SoC)`;
+    return "Not detected";
+  }
+
   function acceleratorSummary(accelerator: HardwareAccelerator): string[] {
     return [
       `Accelerator ${accelerator.index + 1}: ${acceleratorTitle(accelerator)}`,
@@ -65,7 +71,7 @@
       `  Architecture: ${shown(accelerator.architecture)}`,
       `  Memory: ${accelerator.memory.capacity_bytes ? formatCapacity(accelerator.memory.capacity_bytes) : "Not detected"} (${titleCase(accelerator.memory.kind)})`,
       `  Driver: ${driverLabel(accelerator)}`,
-      `  Power Limit: ${accelerator.power_limit_watts === null ? "Not detected" : `${accelerator.power_limit_watts} W`}`,
+      `  Power: ${powerLabel(accelerator)}`,
     ];
   }
 
@@ -181,8 +187,8 @@
                     <dt class="text-muted-foreground">Memory</dt>
                     <dd>{accelerator.memory.capacity_bytes ? formatCapacity(accelerator.memory.capacity_bytes) : "Not detected"} ({titleCase(accelerator.memory.kind)})</dd>
                     <dt class="text-muted-foreground">Driver</dt><dd>{driverLabel(accelerator)}</dd>
-                    <dt class="text-muted-foreground">Power Limit</dt>
-                    <dd>{accelerator.power_limit_watts === null ? "Not detected" : `${accelerator.power_limit_watts} W`}</dd>
+                    <dt class="text-muted-foreground">Power</dt>
+                    <dd>{powerLabel(accelerator)}</dd>
                   </dl>
                 </article>
               {/each}

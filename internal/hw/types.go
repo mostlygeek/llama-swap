@@ -83,6 +83,10 @@ type Accelerator struct {
 	Memory          AcceleratorMemory `json:"memory"`
 	Driver          *Driver           `json:"driver"`
 	PowerLimitWatts *float64          `json:"power_limit_watts"`
+	// NominalPowerWatts is a vendor-documented nominal power figure for the
+	// accelerator or its SoC, reported when the platform exposes no power
+	// limit. It is a design figure, not an enforced limit.
+	NominalPowerWatts *float64 `json:"nominal_power_watts"`
 }
 
 type AcceleratorMemory struct {

@@ -165,26 +165,33 @@ func TestHardware_NvidiaMemory(t *testing.T) {
 func TestHardware_NvidiaPowerLimit(t *testing.T) {
 	tests := []struct {
 		reported float64
-		name     string
 		want     float64
 		wantNil  bool
 	}{
-		{reported: 450, name: "NVIDIA GeForce RTX 4090", want: 450},
-		{reported: 95, name: "NVIDIA GB10", want: 95},
-		{reported: 0, name: "NVIDIA GB10", want: gb10NominalPowerLimitWatts},
-		{reported: 0, name: "NVIDIA GeForce RTX 4090", wantNil: true},
+		{reported: 450, want: 450},
+		{reported: 95, want: 95},
+		{reported: 0, wantNil: true},
 	}
 	for _, test := range tests {
-		got := nvidiaPowerLimit(test.reported, test.name)
+		got := nvidiaPowerLimit(test.reported)
 		if test.wantNil {
 			if got != nil {
-				t.Fatalf("nvidiaPowerLimit(%v, %q) = %v, want nil", test.reported, test.name, *got)
+				t.Fatalf("nvidiaPowerLimit(%v) = %v, want nil", test.reported, *got)
 			}
 			continue
 		}
 		if got == nil || *got != test.want {
-			t.Fatalf("nvidiaPowerLimit(%v, %q) = %v, want %v", test.reported, test.name, got, test.want)
+			t.Fatalf("nvidiaPowerLimit(%v) = %v, want %v", test.reported, got, test.want)
 		}
+	}
+}
+
+func TestHardware_NvidiaNominalPower(t *testing.T) {
+	if got := nvidiaNominalPower("NVIDIA GB10"); got == nil || *got != gb10NominalPowerWatts {
+		t.Fatalf("nvidiaNominalPower(GB10) = %v, want %v", got, gb10NominalPowerWatts)
+	}
+	if got := nvidiaNominalPower("NVIDIA GeForce RTX 4090"); got != nil {
+		t.Fatalf("nvidiaNominalPower(RTX 4090) = %v, want nil", *got)
 	}
 }
 

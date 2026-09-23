@@ -14,12 +14,11 @@ import (
 
 var errNvidiaSMINotAvailable = errors.New("nvidia-smi not available")
 
-// gb10NominalPowerLimitWatts is the vendor-documented TDP of the GB10 SoC,
-// which covers its CPU and GPU together. GB10 (DGX Spark class) systems
-// expose no power limit (nvidia-smi reports N/A for every limit field), so
-// this nominal value is the best available estimate of the accelerator's
-// power budget.
-const gb10NominalPowerLimitWatts = 140
+// gb10NominalPowerWatts is the vendor-documented TDP of the GB10 SoC, which
+// covers its CPU and GPU together. GB10 (DGX Spark class) systems expose no
+// power limit (nvidia-smi reports N/A for every limit field), so the nominal
+// figure is reported as nominal_power_watts rather than as a limit.
+const gb10NominalPowerWatts = 140
 
 // isGB10 reports whether an nvidia-smi device name identifies a GB10
 // (DGX Spark class) SoC.
@@ -44,15 +43,21 @@ func nvidiaMemory(gb10 bool, memoryBytes, systemBytes uint64) AcceleratorMemory 
 	return AcceleratorMemory{Kind: "dedicated"}
 }
 
-// nvidiaPowerLimit resolves the power limit for an nvidia-smi record. The
-// GB10 driver reports no power limit, so the nominal SoC TDP stands in for
-// it.
-func nvidiaPowerLimit(powerLimit float64, name string) *float64 {
+// nvidiaPowerLimit resolves the power limit for an nvidia-smi record.
+// Drivers that report no limit (GB10 among them) leave it unset.
+func nvidiaPowerLimit(powerLimit float64) *float64 {
 	if powerLimit > 0 {
 		return float64Ptr(powerLimit)
 	}
+	return nil
+}
+
+// nvidiaNominalPower resolves the vendor-documented nominal power figure for
+// an nvidia-smi record. GB10 systems expose no power limit, so the nominal
+// SoC TDP is reported separately as a design figure.
+func nvidiaNominalPower(name string) *float64 {
 	if isGB10(name) {
-		return float64Ptr(gb10NominalPowerLimitWatts)
+		return float64Ptr(gb10NominalPowerWatts)
 	}
 	return nil
 }
@@ -139,13 +144,14 @@ func detectNvidia(ctx context.Context, snapshot *HardwareSnapshot) ([]detectedAc
 		}
 		gb10 := isGB10(record.name)
 		accelerator := Accelerator{
-			Kind:            "gpu",
-			Vendor:          stringPtr("NVIDIA"),
-			Model:           nonEmptyStringPtr(record.name),
-			Architecture:    nonEmptyStringPtr(record.architecture),
-			Memory:          nvidiaMemory(gb10, record.memoryBytes, snapshot.Memory.CapacityBytes),
-			Driver:          driver,
-			PowerLimitWatts: nvidiaPowerLimit(record.powerLimit, record.name),
+			Kind:              "gpu",
+			Vendor:            stringPtr("NVIDIA"),
+			Model:             nonEmptyStringPtr(record.name),
+			Architecture:      nonEmptyStringPtr(record.architecture),
+			Memory:            nvidiaMemory(gb10, record.memoryBytes, snapshot.Memory.CapacityBytes),
+			Driver:            driver,
+			PowerLimitWatts:   nvidiaPowerLimit(record.powerLimit),
+			NominalPowerWatts: nvidiaNominalPower(record.name),
 		}
 		if gb10 {
 			applyGB10CPUModel(ctx, snapshot)
