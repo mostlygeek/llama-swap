@@ -232,8 +232,9 @@ security:
 # tailcat: configure models exposed over Tailcat virtual TCP port 80
 # - requires -listen-tailcat /path/to/server.private.json to start the listener
 # - when -listen-tailcat is set, models must contain at least one public ID
-# - empty allow permits any client holding the case-sensitive connection token
-# - clients whose node key is not in allow get HTTP 403 Forbidden
+# - allow denies by default: clients whose node key is not listed get HTTP 403
+# - an empty allow denies every client; "*" permits any client holding the
+#   case-sensitive connection token
 # - "*" exposes every callable public ID
 # - admin defaults false and keeps the UI, /api, logs, metrics and operations private
 # - debug defaults false; set true to include verbose Tailcat transport logs in proxy logs

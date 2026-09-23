@@ -48,7 +48,7 @@ profiles:
     pins:
       public: local
 tailcat:
-  allow: [%q, %q]
+  allow: [%q, %q, "*", "*"]
   models: [local, alias, select, public, "*", local]
   debug: true
 `, client, client)
@@ -62,8 +62,8 @@ tailcat:
 	if !cfg.Tailcat.Debug {
 		t.Fatal("Debug = false, want true")
 	}
-	if got := len(cfg.Tailcat.Allow); got != 1 {
-		t.Fatalf("Allow = %d, want 1", got)
+	if want := []string{client, "*"}; fmt.Sprint(cfg.Tailcat.Allow) != fmt.Sprint(want) {
+		t.Fatalf("Allow = %v, want %v", cfg.Tailcat.Allow, want)
 	}
 	wantModels := []string{"local", "alias", "select", "public", "*"}
 	if fmt.Sprint(cfg.Tailcat.Models) != fmt.Sprint(wantModels) {

@@ -11,7 +11,14 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/tailcat"
 )
 
+// newTailcatPolicyServer allows every Tailcat client so tests can focus on
+// the HTTP surface policy.
 func newTailcatPolicyServer(t *testing.T, extra string) *Server {
+	t.Helper()
+	return newTailcatAllowServer(t, `["*"]`, extra)
+}
+
+func newTailcatAllowServer(t *testing.T, allow, extra string) *Server {
 	t.Helper()
 	cfg, err := config.LoadConfigFromReader(strings.NewReader(`
 models:
@@ -22,6 +29,7 @@ models:
     proxy: http://localhost:2
 tailcat:
   models: [public]
+  allow: ` + allow + `
 ` + extra))
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +85,7 @@ func TestServer_TailcatClientAllowlist(t *testing.T) {
 		return r.WithContext(tailcat.ContextWithNodeKey(r.Context(), nodeKey))
 	}
 
-	s := newTailcatPolicyServer(t, "  allow: ["+allowed+"]\n")
+	s := newTailcatAllowServer(t, "["+allowed+"]", "")
 	tests := []struct {
 		name string
 		req  *http.Request
@@ -99,8 +107,18 @@ func TestServer_TailcatClientAllowlist(t *testing.T) {
 		})
 	}
 
-	// An empty allow list permits any client, with or without a node key.
-	open := newTailcatPolicyServer(t, "")
+	// Access is denied by default: an empty allow list admits nobody.
+	for _, allow := range []string{"[]", "null"} {
+		closed := newTailcatAllowServer(t, allow, "")
+		w := httptest.NewRecorder()
+		closed.ServeTailcatHTTP(w, withKey(tailcatRequest(http.MethodGet, "/health", ""), allowed))
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("allow %s status = %d, want 403", allow, w.Code)
+		}
+	}
+
+	// "*" permits any client, with or without a node key.
+	open := newTailcatAllowServer(t, `["*", `+allowed+`]`, "")
 	for _, r := range []*http.Request{
 		withKey(tailcatRequest(http.MethodGet, "/health", ""), other),
 		tailcatRequest(http.MethodGet, "/health", ""),

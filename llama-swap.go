@@ -83,6 +83,9 @@ func configureTailcatListener(cfg *config.Config, keyPath string) error {
 	if cfg.Tailcat == nil || len(cfg.Tailcat.Models) == 0 {
 		return fmt.Errorf("-listen-tailcat requires tailcat.models to define at least one exposed model")
 	}
+	if len(cfg.Tailcat.Allow) == 0 {
+		slog.Warn(`tailcat.allow is empty: every Tailcat client will get 403 Forbidden; add client node keys, or "*" to allow any client`)
+	}
 	return nil
 }
 

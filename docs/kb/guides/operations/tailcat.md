@@ -32,7 +32,7 @@ tailcat --key=/path/to/client.private.json printpub
 ```
 
 This prints the full `nodekey:...` public key. Put that exact value in the
-server allowlist.
+server's `tailcat.allow` list.
 
 Use `tailcat genkey --client --key=/path/to/client.private.json` only when
 intentionally creating or rotating a client private key. After a rotation,
@@ -59,16 +59,28 @@ llama-swap -config /path/to/config.yaml \
 
 `-listen-tailcat` requires a valid Tailcat server PrivateKey JSON file and a
 non-empty `tailcat.models` list. Use `models: ["*"]` explicitly to expose all
-callable local and peer IDs. An empty `allow` list permits any client holding
-the token, though an explicit allowlist is strongly recommended for a
-persistent address.
+callable local and peer IDs.
 
-llama-swap checks `allow` on every HTTP request, using the node key that
-Tailcat authenticated for the connection. A client whose key is not listed
-can still complete the Tailcat handshake (it needs the connection token for
-that), but every request it sends gets `403 Forbidden`. If a client you
-expect to work gets 403, check that its `printpub` output is in `allow`
-exactly, and that it is using its saved key rather than an ephemeral one.
+`allow` denies by default. llama-swap checks it on every HTTP request, using
+the node key that Tailcat authenticated for the connection. A client whose key
+is not listed can still complete the Tailcat handshake (it needs the
+connection token for that), but every request it sends gets `403 Forbidden`.
+An empty or missing `allow` denies every client, and llama-swap logs a warning
+at startup and on reload when that happens.
+
+To let anyone holding the connection token in, including ephemeral clients,
+use the wildcard:
+
+```yaml
+tailcat:
+  allow: ["*"]
+  models: [chat]
+```
+
+An explicit list of keys is strongly recommended for a persistent address. If
+a client you expect to work gets 403, check that its `printpub` output is in
+`allow` exactly, and that it is using its saved key rather than an ephemeral
+one.
 
 With `admin: false` (the default), Tailcat serves only `/health`, filtered model
 listings, and allowlisted model-dispatched inference routes. Set `admin: true`
@@ -103,13 +115,15 @@ Tailcat node authorization and HTTP API-key authentication are independent.
 
 ## Connect a client
 
-Use the token from the console log or Tailcat page. An ephemeral client can run:
+Use the token from the console log or Tailcat page. An ephemeral client works
+only when the server's `allow` is `"*"`:
 
 ```bash
 tailcat socks <token> curl http://server.tailcat/v1/models
 ```
 
-Use the stable client key when the server has an allowlist:
+Otherwise use a stable client key whose public key is in the server's `allow`
+list:
 
 ```bash
 tailcat --key=/path/to/client.private.json socks <token> curl http://server.tailcat/v1/models
@@ -129,15 +143,16 @@ connection URL or the `server.tailcat` hostname.
 
 To list the models exposed by a llama-swap server's Tailcat listener, run curl
 through Tailcat's SOCKS wrapper. Replace the token with the exact value shown
-on the Tailcat page; it is case-sensitive.
+on the Tailcat page; it is case-sensitive. This ephemeral example only works
+when the server's `allow` is `"*"`.
 
 ```bash
 tailcat socks tcREPLACE_WITH_CONNECTION_TOKEN \
   curl --fail --silent http://server.tailcat/v1/models
 ```
 
-For a server that uses a caller allowlist and HTTP API keys, use the saved
-client key and include the normal llama-swap authentication header:
+With a saved client key listed in the server's `allow`, and HTTP API keys,
+include the normal llama-swap authentication header:
 
 ```bash
 tailcat --key=/path/to/client.private.json socks tcREPLACE_WITH_CONNECTION_TOKEN \
@@ -160,8 +175,9 @@ peers:
 ```
 
 Omit `tailcatKey` (or set it to `ephemeral`) to create one client identity for
-that peer for the lifetime of the llama-swap process. A saved client key is
-needed when the destination allowlists callers.
+that peer for the lifetime of the llama-swap process. That only works when the
+destination's `allow` is `"*"`; otherwise use a saved client key and add its
+`printpub` output to the destination's `allow` list.
 
 Avoid cyclic peer graphs. If host A routes a model to B and B routes that same
 request back to A, requests loop until they fail and may repeatedly start or

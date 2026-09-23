@@ -459,9 +459,10 @@ func (s *Server) ServeTailcatHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // tailcatClientAllowed reports whether the request's authenticated Tailcat
-// node key is in allow. An empty allow list permits any client.
+// node key is in allow. Access is denied by default: an empty allow list
+// permits no client, and "*" permits every client.
 func tailcatClientAllowed(allow []string, r *http.Request) bool {
-	if len(allow) == 0 {
+	if slices.Contains(allow, config.TailcatAllowAll) {
 		return true
 	}
 	nodeKey, ok := tailcat.NodeKeyFromContext(r.Context())
