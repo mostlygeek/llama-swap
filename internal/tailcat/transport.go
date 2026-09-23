@@ -12,9 +12,8 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/netip"
 	"os"
-	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -152,7 +151,7 @@ func (l *authenticatedListener) Accept() (net.Conn, error) {
 		if err != nil {
 			return nil, err
 		}
-		public, ok := resolveRemoteNodeKey(l.server, conn.RemoteAddr())
+		public, ok := resolveRemoteNodeKey(l.server, conn.LocalAddr(), conn.RemoteAddr())
 		if !ok {
 			if l.logger != nil {
 				l.logger.Warnf("tailcat server: rejecting connection with unresolved identity from %v", conn.RemoteAddr())
@@ -324,44 +323,22 @@ func resolveServerIdentity(ctx context.Context, saved *PrivateKey) (ephemeralSer
 	}, nil
 }
 
-func resolveRemoteNodeKey(server *tailcatlib.Server, addr net.Addr) (key.NodePublic, bool) {
+// resolveRemoteNodeKey returns the node key WireGuard authenticated for an
+// accepted connection, using Tailcat's own client registry via PeerEnv.
+func resolveRemoteNodeKey(server *tailcatlib.Server, local, remote net.Addr) (key.NodePublic, bool) {
 	var zero key.NodePublic
-	host, _, err := net.SplitHostPort(addr.String())
-	if err != nil {
-		return zero, false
-	}
-	ip, err := netip.ParseAddr(host)
-	if err != nil {
-		return zero, false
-	}
-	ip = ip.Unmap()
-	status := server.Status()
-	if status == nil {
-		return zero, false
-	}
-	// Tailcat v0.7.0 lists connected clients in Status().Peer but leaves
-	// TailscaleIPs empty, so also match on the address Tailcat derives from
-	// each client's node key. WireGuard only admits packets from a peer's
-	// own derived address, so the source IP identifies the client.
-	for public, peer := range status.Peer {
-		if peer == nil {
+	for _, kv := range server.PeerEnv(local, remote) {
+		raw, ok := strings.CutPrefix(kv, "TAILCAT_PEER_KEY=")
+		if !ok {
 			continue
 		}
-		if slices.Contains(peer.TailscaleIPs, ip) || clientAddrForKey(public) == ip {
-			return public, true
+		var public key.NodePublic
+		if err := public.UnmarshalText([]byte(raw)); err != nil || public.IsZero() {
+			return zero, false
 		}
+		return public, true
 	}
 	return zero, false
-}
-
-// clientAddrForKey mirrors Tailcat's tcAddrForKey: Tailscale's ULA prefix
-// fd7a:115c:a1e0::/48 followed by the first 10 bytes of the node key.
-func clientAddrForKey(k key.NodePublic) netip.Addr {
-	var a [16]byte
-	copy(a[:6], []byte{0xfd, 0x7a, 0x11, 0x5c, 0xa1, 0xe0})
-	raw := k.Raw32()
-	copy(a[6:], raw[:10])
-	return netip.AddrFrom16(a)
 }
 
 func (s *Server) Address() string {
