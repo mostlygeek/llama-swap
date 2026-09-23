@@ -18,41 +18,22 @@ import (
 	"tailscale.com/types/key"
 )
 
-func TestTailcatTransport_ChannelListenerClose(t *testing.T) {
-	listener := newChannelListener()
-	left, right := net.Pipe()
-	defer left.Close()
-	defer right.Close()
-	delivered := make(chan bool, 1)
-	go func() { delivered <- listener.deliver(left) }()
-	accepted, err := listener.Accept()
-	if err != nil || accepted != left || !<-delivered {
-		t.Fatalf("Accept = %v, %v", accepted, err)
-	}
-	if err := listener.Close(); err != nil {
+func TestTailcatTransport_ReadHeaderTimeout(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := listener.Accept(); err == nil {
-		t.Fatal("Accept succeeded after Close")
-	}
-}
-
-func TestTailcatTransport_ReadHeaderTimeout(t *testing.T) {
-	listener := newChannelListener()
 	server := newHTTPServer(ServerOptions{
 		Handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}),
 	})
 	go server.Serve(listener)
-	t.Cleanup(func() {
-		server.Close()
-		listener.Close()
-	})
+	t.Cleanup(func() { server.Close() })
 
-	client, connection := net.Pipe()
-	defer client.Close()
-	if !listener.deliver(connection) {
-		t.Fatal("could not deliver connection to HTTP server")
+	client, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
 	}
+	defer client.Close()
 	if _, err := client.Write([]byte("GET / HTTP/1.1\r\nHost: example.test\r\n")); err != nil {
 		t.Fatalf("write incomplete request headers: %v", err)
 	}
@@ -60,7 +41,7 @@ func TestTailcatTransport_ReadHeaderTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	started := time.Now()
-	_, err := io.ReadAll(client)
+	_, err = io.ReadAll(client)
 	if err != nil && !errors.Is(err, io.EOF) {
 		t.Fatalf("read after incomplete headers: %v", err)
 	}

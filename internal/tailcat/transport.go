@@ -14,12 +14,10 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
-	"reflect"
 	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
-	"unsafe"
 
 	tailcatlib "github.com/tailscale/tailcat"
 	"tailscale.com/tailcfg"
@@ -140,45 +138,31 @@ type authenticatedConn struct {
 	source string
 }
 
-type channelListener struct {
-	connections chan net.Conn
-	done        chan struct{}
-	closeOnce   sync.Once
+// authenticatedListener wraps Tailcat's port listener and tags each accepted
+// connection with the client's node key before net/http sees it.
+type authenticatedListener struct {
+	net.Listener
+	server *tailcatlib.Server
+	logger Logger
 }
 
-func newChannelListener() *channelListener {
-	return &channelListener{connections: make(chan net.Conn), done: make(chan struct{})}
-}
-
-func (l *channelListener) Accept() (net.Conn, error) {
-	select {
-	case conn := <-l.connections:
-		return conn, nil
-	case <-l.done:
-		return nil, net.ErrClosed
+func (l *authenticatedListener) Accept() (net.Conn, error) {
+	for {
+		conn, err := l.Listener.Accept()
+		if err != nil {
+			return nil, err
+		}
+		public, ok := resolveRemoteNodeKey(l.server, conn.RemoteAddr())
+		if !ok {
+			if l.logger != nil {
+				l.logger.Warnf("tailcat server: rejecting connection with unresolved identity from %v", conn.RemoteAddr())
+			}
+			conn.Close()
+			continue
+		}
+		return &authenticatedConn{Conn: conn, source: "tc:" + public.String()}, nil
 	}
 }
-
-func (l *channelListener) deliver(conn net.Conn) bool {
-	select {
-	case l.connections <- conn:
-		return true
-	case <-l.done:
-		return false
-	}
-}
-
-func (l *channelListener) Close() error {
-	l.closeOnce.Do(func() { close(l.done) })
-	return nil
-}
-
-func (l *channelListener) Addr() net.Addr { return tailcatAddr("tailcat:80") }
-
-type tailcatAddr string
-
-func (a tailcatAddr) Network() string { return "tailcat" }
-func (a tailcatAddr) String() string  { return string(a) }
 
 type ServerOptions struct {
 	PrivateKey     *PrivateKey
@@ -191,7 +175,6 @@ type ServerOptions struct {
 type Server struct {
 	tailcat *tailcatlib.Server
 	http    *http.Server
-	ln      *channelListener
 	blob    string
 	closed  atomic.Bool
 }
@@ -221,13 +204,11 @@ func Start(ctx context.Context, opts ServerOptions) (*Server, error) {
 		return nil, err
 	}
 
-	ln := newChannelListener()
-	runtime := &Server{ln: ln, blob: identity.blob}
+	runtime := &Server{blob: identity.blob}
 	allowed := make([]key.NodePublic, 0, len(opts.AllowedClients))
 	for _, raw := range opts.AllowedClients {
 		var public key.NodePublic
 		if err := public.UnmarshalText([]byte(raw)); err != nil {
-			ln.Close()
 			return nil, fmt.Errorf("parse allowed Tailcat client: %w", err)
 		}
 		allowed = append(allowed, public)
@@ -241,30 +222,14 @@ func Start(ctx context.Context, opts ServerOptions) (*Server, error) {
 		ServedTCPPorts:      []filter.PortRange{{First: HTTPPort, Last: HTTPPort}},
 		Logf:                logFunc(opts.Logger, "tailcat server: "),
 	}
-	tc.OnTCP = func(port uint16) func(net.Conn) {
-		if port != HTTPPort {
-			return nil
-		}
-		return func(conn net.Conn) {
-			public, ok := resolveRemoteNodeKey(tc, conn.RemoteAddr())
-			if !ok {
-				if opts.Logger != nil {
-					opts.Logger.Warnf("tailcat server: rejecting connection with unresolved identity from %v", conn.RemoteAddr())
-				}
-				conn.Close()
-				return
-			}
-			authenticated := &authenticatedConn{Conn: conn, source: "tc:" + public.String()}
-			if !ln.deliver(authenticated) {
-				conn.Close()
-			}
-		}
-	}
 
-	if err := tc.Start(); err != nil {
-		ln.Close()
+	// Listen starts the Tailcat server and claims the HTTP port.
+	tcListener, err := tc.Listen(ctx, "tcp", fmt.Sprintf(":%d", HTTPPort))
+	if err != nil {
+		tc.Close()
 		return nil, fmt.Errorf("start Tailcat server: %w", err)
 	}
+	ln := &authenticatedListener{Listener: tcListener, server: tc, logger: opts.Logger}
 	runtime.tailcat = tc
 
 	// Tailcat's server token embeds the resolved relay. Stable key files keep
@@ -369,61 +334,34 @@ func resolveRemoteNodeKey(server *tailcatlib.Server, addr net.Addr) (key.NodePub
 	if err != nil {
 		return zero, false
 	}
+	ip = ip.Unmap()
 	status := server.Status()
-	if status != nil {
-		for public, peer := range status.Peer {
-			if peer != nil && slices.Contains(peer.TailscaleIPs, ip) {
-				return public, true
-			}
-		}
+	if status == nil {
+		return zero, false
 	}
-
-	// Tailcat v0.4.0's public Status method creates an ipnstate builder with
-	// peer collection disabled, so Status().Peer is always empty even after a
-	// successful meow handshake. Until Tailcat exposes the authenticated key
-	// on OnTCP (or fixes Status), read its authenticated client registry under
-	// its own mutex. This dependency is deliberately isolated here and guarded
-	// by the exact v0.4.0 module pin and the local-DERP integration test.
-	if public, ok := tailcatV040RemoteNodeKey(server, ip); ok {
-		return public, true
+	// Tailcat v0.7.0 lists connected clients in Status().Peer but leaves
+	// TailscaleIPs empty, so also match on the address Tailcat derives from
+	// each client's node key. WireGuard only admits packets from a peer's
+	// own derived address, so the source IP identifies the client.
+	for public, peer := range status.Peer {
+		if peer == nil {
+			continue
+		}
+		if slices.Contains(peer.TailscaleIPs, ip) || clientAddrForKey(public) == ip {
+			return public, true
+		}
 	}
 	return zero, false
 }
 
-func tailcatV040RemoteNodeKey(server *tailcatlib.Server, ip netip.Addr) (key.NodePublic, bool) {
-	var zero key.NodePublic
-	serverValue := reflect.ValueOf(server)
-	if !serverValue.IsValid() || serverValue.IsNil() {
-		return zero, false
-	}
-	lbPointer := serverValue.Elem().FieldByName("lb")
-	if !lbPointer.IsValid() || lbPointer.IsNil() {
-		return zero, false
-	}
-	lb := lbPointer.Elem()
-	mutexValue := lb.FieldByName("mu")
-	clients := lb.FieldByName("clients")
-	if !mutexValue.IsValid() || !mutexValue.CanAddr() || !clients.IsValid() || clients.Kind() != reflect.Map {
-		return zero, false
-	}
-
-	mutex := (*sync.Mutex)(unsafe.Pointer(mutexValue.UnsafeAddr()))
-	mutex.Lock()
-	defer mutex.Unlock()
-	iter := clients.MapRange()
-	for iter.Next() {
-		nodeValue := iter.Value()
-		if nodeValue.Kind() != reflect.Pointer || nodeValue.IsNil() {
-			continue
-		}
-		node := (*tailcfg.Node)(unsafe.Pointer(nodeValue.Pointer()))
-		for _, prefix := range node.Addresses {
-			if prefix.Addr() == ip {
-				return node.Key, true
-			}
-		}
-	}
-	return zero, false
+// clientAddrForKey mirrors Tailcat's tcAddrForKey: Tailscale's ULA prefix
+// fd7a:115c:a1e0::/48 followed by the first 10 bytes of the node key.
+func clientAddrForKey(k key.NodePublic) netip.Addr {
+	var a [16]byte
+	copy(a[:6], []byte{0xfd, 0x7a, 0x11, 0x5c, 0xa1, 0xe0})
+	raw := k.Raw32()
+	copy(a[6:], raw[:10])
+	return netip.AddrFrom16(a)
 }
 
 func (s *Server) Address() string {
