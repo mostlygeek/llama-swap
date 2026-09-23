@@ -1,0 +1,19 @@
+{
+  "action": "created",
+  "discussion": {
+    "number": 7,
+    "node_id": "D_kwDOAAAAAF",
+    "title": "Docker on a Mac?",
+    "body": "Is Docker on Apple Silicon supported?",
+    "html_url": "https://github.com/mostlygeek/llama-swap/discussions/7",
+    "user": { "login": "asker", "type": "User" }
+  },
+  "comment": {
+    "node_id": "DC_kwDOAAAAAG",
+    "parent_id": 9001,
+    "body": "@help which container image should I use on a Mac?",
+    "html_url": "https://github.com/mostlygeek/llama-swap/discussions/7#discussioncomment-2",
+    "user": { "login": "asker", "type": "User" }
+  },
+  "repository": { "full_name": "mostlygeek/llama-swap" }
+}

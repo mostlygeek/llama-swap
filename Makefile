@@ -140,6 +140,15 @@ kubeswap: $(BUILD_DIR)
 test-ui:
 	cd ui && npm ci && npm run check && npm test
 
+# The GitHub bot shares the Help agent's code with ui/, so a change in
+# ui/src/lib or ui/src/cli can break it; run this alongside test-ui.
+test-gh-helpbot:
+	cd cmd/gh-helpbot && npm ci && npm run check && npm test
+
+# Build context is the repo root because the bot imports from ui/src.
+gh-helpbot-image:
+	docker build -f cmd/gh-helpbot/Dockerfile -t gh-helpbot .
+
 # Score the Playground's Docs Agent against a local model. Builds and starts
 # llama-swap itself; see evals/docs-agent/README.md for the tuning loop.
 eval-docs-agent:
@@ -147,4 +156,5 @@ eval-docs-agent:
 
 # Phony targets
 .PHONY: all clean ui mac windows simple-responder simple-responder-windows test test-all test-chart test-dev test-ui wol-proxy kubeswap eval-docs-agent release
+.PHONY: test-gh-helpbot gh-helpbot-image
 .PHONY: linux linux-arm64 linux-amd64

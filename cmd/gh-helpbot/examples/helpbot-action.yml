@@ -1,0 +1,68 @@
+# Example workflow for gh-helpbot's `action` mode.
+#
+# Copy to .github/workflows/helpbot.yml in the repository that should get
+# answers. The job runs the bot once per event, so it needs a runner that can
+# reach the llama-swap serving the model and the docs tools: a self-hosted
+# runner on the same network, or a tunnel. GitHub's hosted runners cannot
+# reach a machine on your LAN.
+#
+# Secrets to set on the repository:
+#   LLAMA_SWAP_URL       e.g. http://llama-box:8080
+#   DOCS_AGENT_MODEL     the model id llama-swap serves for answers
+#   LLAMA_SWAP_API_KEY   only when llama-swap sets apiKeys
+#
+# The workflow token posts as github-actions[bot]; the bot never answers
+# comments authored by a Bot, so it cannot loop on its own replies.
+
+name: helpbot
+
+on:
+  issue_comment:
+    types: [created]
+  issues:
+    types: [opened]
+  discussion_comment:
+    types: [created]
+  discussion:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+  discussions: write
+
+# One answer at a time: a local model serves one request well and several badly.
+concurrency:
+  group: helpbot
+  cancel-in-progress: false
+
+jobs:
+  answer:
+    # Start a runner only when the trigger word is present. The bot re-checks
+    # this properly (quoted lines and code blocks do not count).
+    if: contains(github.event.comment.body || github.event.issue.body || github.event.discussion.body, '@help')
+    runs-on: self-hosted
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
+        with:
+          repository: mostlygeek/llama-swap
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # 6.4.0
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: cmd/gh-helpbot/package-lock.json
+
+      - name: Install
+        working-directory: cmd/gh-helpbot
+        run: npm ci
+
+      - name: Answer
+        working-directory: cmd/gh-helpbot
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LLAMA_SWAP_URL: ${{ secrets.LLAMA_SWAP_URL }}
+          DOCS_AGENT_MODEL: ${{ secrets.DOCS_AGENT_MODEL }}
+          LLAMA_SWAP_API_KEY: ${{ secrets.LLAMA_SWAP_API_KEY }}
+        run: npm run --silent start -- action
