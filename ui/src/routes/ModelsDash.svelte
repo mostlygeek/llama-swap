@@ -212,7 +212,9 @@
                   ? $models.find((m) => m.id === target) ??
                     $models.find((m) => m.aliases?.includes(target))
                   : undefined}
-                <div class="hover:bg-muted/50 flex items-center gap-3 px-4 py-2.5">
+                <div
+                  class="hover:bg-muted/50 flex items-center gap-3 px-4 py-2.5 has-[>button]:py-1.5"
+                >
                   {#if targetModel && !targetModel.peerID}
                     <span class={`size-2.5 shrink-0 rounded-full ${statusDotColor(targetModel)}`} role="img" aria-label={`Model ${targetModel.state}`}></span>
                   {/if}
