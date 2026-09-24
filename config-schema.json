@@ -690,10 +690,10 @@
                     "type": "array",
                     "items": {
                         "type": "string",
-                        "pattern": "^nodekey:[0-9a-f]{64}$"
+                        "pattern": "^(\\*|nodekey:[0-9a-f]{64})$"
                     },
                     "default": [],
-                    "description": "Client node public keys allowed to connect. Empty allows any client possessing the connection token."
+                    "description": "Client node public keys allowed to make requests. Other clients receive HTTP 403. Empty (the default) denies every client; '*' allows any client possessing the connection token. Updates on config reload."
                 },
                 "models": {
                     "type": "array",
@@ -709,7 +709,7 @@
                 "debug": {
                     "type": "boolean",
                     "default": false,
-                    "description": "Include verbose Tailcat transport diagnostics in the proxy log."
+                    "description": "Include verbose Tailcat transport diagnostics in the proxy log. Updates on config reload."
                 }
             },
             "additionalProperties": false,
