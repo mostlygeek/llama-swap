@@ -516,6 +516,9 @@ func (c *Client) replaceClient(current *tailcatlib.Client) {
 	c.client = c.newClient()
 	c.usedClient = nil
 	c.mu.Unlock()
+	drainCtx, cancel := context.WithTimeout(context.Background(), serverDrainTimeout)
+	_ = current.DrainTCP(drainCtx)
+	cancel()
 	_ = current.Close()
 }
 
