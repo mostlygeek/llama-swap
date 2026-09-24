@@ -223,7 +223,7 @@
                   {#if target}
                     {#if targetModel}
                       <a
-                        href="/models/{encodeURIComponent(target)}"
+                        href="/models/{encodeURIComponent(targetModel.id)}"
                         use:link
                         class="min-w-0 flex-1 truncate text-sm hover:text-foreground hover:underline"
                       >{target}</a>
