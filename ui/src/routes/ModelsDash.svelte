@@ -208,11 +208,31 @@
           {:else}
             <div class="divide-y">
               {#each profileMappings as [modelID, target] (modelID)}
-                <div class="hover:bg-muted/50 flex items-center gap-2 px-4 py-2.5">
+                {@const targetModel = target
+                  ? $models.find((m) => m.id === target) ??
+                    $models.find((m) => m.aliases?.includes(target))
+                  : undefined}
+                <div
+                  class="hover:bg-muted/50 flex items-center gap-3 px-4 py-2.5 has-[>button]:py-1.5"
+                >
+                  {#if targetModel && !targetModel.peerID}
+                    <span class={`size-2.5 shrink-0 rounded-full ${statusDotColor(targetModel)}`} role="img" aria-label={`Model ${targetModel.state}`}></span>
+                  {/if}
                   <span class="max-w-[45%] truncate text-sm font-medium">{modelID}</span>
                   <span class="text-muted-foreground text-xs" aria-hidden="true">→</span>
                   {#if target}
-                    <span class="min-w-0 truncate text-sm">{target}</span>
+                    {#if targetModel}
+                      <a
+                        href="/models/{encodeURIComponent(targetModel.id)}"
+                        use:link
+                        class="min-w-0 flex-1 truncate text-sm hover:text-foreground hover:underline"
+                      >{target}</a>
+                      {#if !targetModel.peerID}
+                        <ModelLoadButton model={targetModel} />
+                      {/if}
+                    {:else}
+                      <span class="min-w-0 truncate text-sm">{target}</span>
+                    {/if}
                   {:else}
                     <Tag class="px-1.5 text-[0.625rem] uppercase">disabled</Tag>
                   {/if}
@@ -237,7 +257,7 @@
         <Card.Content class="p-0">
           <div class="divide-y">
             {#each $selectorModels as selector (selector.id)}
-              <div class="hover:bg-muted/50 flex items-center gap-2 px-4 py-2.5">
+              <div class="hover:bg-muted/50 flex items-center gap-3 px-4 py-2.5">
                 <div class="min-w-0 flex-1">
                   <div class="truncate text-sm font-medium">
                     {selector.name ? `${selector.id} - ${selector.name}` : selector.id}
