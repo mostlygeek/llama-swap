@@ -214,7 +214,7 @@
                   : undefined}
                 <div class="hover:bg-muted/50 flex items-center gap-3 px-4 py-2.5">
                   {#if targetModel && !targetModel.peerID}
-                    <span class={`size-2.5 shrink-0 rounded-full ${statusDotColor(targetModel)}`}></span>
+                    <span class={`size-2.5 shrink-0 rounded-full ${statusDotColor(targetModel)}`} role="img" aria-label={`Model ${targetModel.state}`}></span>
                   {/if}
                   <span class="max-w-[45%] truncate text-sm font-medium">{modelID}</span>
                   <span class="text-muted-foreground text-xs" aria-hidden="true">→</span>
