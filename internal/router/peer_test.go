@@ -519,6 +519,59 @@ func TestPeer_ServeHTTP_ShutdownRejectsNewRequests(t *testing.T) {
 	}
 }
 
+func TestPeer_ServeHTTP_ShutdownAdmissionIsSerialized(t *testing.T) {
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer testServer.Close()
+
+	proxyURL, _ := url.Parse(testServer.URL)
+	pr, err := NewPeer(config.Config{Peers: config.PeerDictionaryConfig{
+		"peer1": {Proxy: testServer.URL, ProxyURL: proxyURL, Models: []string{"test-model"}},
+	}}, testLogger)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Hold the admission lock to force request admission and shutdown to
+	// contend at the exact boundary protected by the lock.
+	pr.admissionMu.Lock()
+	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	*req = *req.WithContext(swaputil.SetContext(req.Context(), swaputil.ReqContextData{
+		Model: "test-model", ModelID: "test-model",
+	}))
+	requestDone := make(chan struct{})
+	go func() {
+		pr.ServeHTTP(httptest.NewRecorder(), req)
+		close(requestDone)
+	}()
+	shutdownDone := make(chan error, 1)
+	go func() { shutdownDone <- pr.Shutdown(time.Second) }()
+
+	select {
+	case <-requestDone:
+		t.Fatal("request crossed the admission lock")
+	case <-shutdownDone:
+		t.Fatal("shutdown crossed the admission lock")
+	case <-time.After(50 * time.Millisecond):
+	}
+	pr.admissionMu.Unlock()
+
+	select {
+	case <-requestDone:
+	case <-time.After(time.Second):
+		t.Fatal("request did not finish after admission unlock")
+	}
+	select {
+	case err := <-shutdownDone:
+		if err != nil {
+			t.Fatalf("Shutdown: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not finish after admission unlock")
+	}
+}
+
 func TestPeer_ServeHTTP_WaitsForInflightDuringShutdown(t *testing.T) {
 	started := make(chan struct{})
 	released := make(chan struct{})
