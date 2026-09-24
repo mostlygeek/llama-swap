@@ -821,6 +821,9 @@ peers:
 	if member.reverseProxy.Transport != member.transport {
 		t.Fatal("reverse proxy does not use the Tailcat transport")
 	}
+	if !member.transport.DisableKeepAlives {
+		t.Fatal("Tailcat transport must dial each request to detect server restarts")
+	}
 	if err := pr.Shutdown(time.Second); err != nil {
 		t.Fatalf("Shutdown: %v", err)
 	}

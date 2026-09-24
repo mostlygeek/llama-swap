@@ -785,8 +785,8 @@
                             "responseHeader": {
                                 "type": "integer",
                                 "minimum": 0,
-                                "default": 0,
-                                "description": "Time to wait for response headers in seconds."
+                                "default": 60,
+                                "description": "Time to wait for response headers in seconds. Defaults to 300 for Tailcat peers and 60 for other peers."
                             },
                             "tlsHandshake": {
                                 "type": "integer",

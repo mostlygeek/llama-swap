@@ -3,8 +3,8 @@ title: Connect llama-swap with Tailcat
 summary: Privately expose inference over Tailcat and route peers through Tailcat connection tokens.
 category: guides
 tags: [tailcat, peers, remote, networking, security]
-config_keys: [tailcat, tailcat.allow, tailcat.models, tailcat.admin, tailcat.debug, peers, peers.*.proxy, peers.*.tailcatKey]
-updated: 2026-09-23
+config_keys: [tailcat, tailcat.allow, tailcat.models, tailcat.admin, tailcat.debug, peers, peers.*.proxy, peers.*.tailcatKey, peers.*.timeouts]
+updated: 2026-09-24
 ---
 
 # Connect llama-swap with Tailcat
@@ -138,6 +138,21 @@ tailcat --key=/path/to/client.private.json socks <token> \
 
 Tailcat uses virtual TCP port 80 for llama-swap; do not add another port to the
 connection URL or the `server.tailcat` hostname.
+
+An unloaded remote model may take longer than a minute to send response
+headers. Tailcat peers wait up to 300 seconds by default; other peers wait 60.
+If a cold start takes longer, set `peers.<name>.timeouts.responseHeader` in
+seconds. A `502` with `timeout awaiting response headers` means this wait
+expired while the remote server was still loading or preparing the response.
+
+```yaml
+peers:
+  friend:
+    proxy: tailcat://tcREPLACE_WITH_CONNECTION_TOKEN
+    models: [large-model]
+    timeouts:
+      responseHeader: 600
+```
 
 ## List models with curl
 
