@@ -125,6 +125,10 @@ type ProcessCommand struct {
 	// current ProcessState. Written only by run(); read by State() via atomic load.
 	state atomic.Value
 
+	// readySince is the unix-nano time the process last entered StateReady,
+	// or 0 when it is not ready. Written only by run(); read by ReadySince().
+	readySince atomic.Int64
+
 	// stores the active reverse-proxy handler when the process is running.
 	// Written only by run(); read by ServeHTTP via atomic load.
 	handler atomic.Pointer[http.HandlerFunc]
@@ -180,6 +184,13 @@ func (p *ProcessCommand) run() {
 	setState := func(s ProcessState) {
 		old := state
 		state = s
+		// Update readySince before state so a reader that sees StateReady
+		// also sees its timestamp.
+		if s != StateReady {
+			p.readySince.Store(0)
+		} else if old != StateReady {
+			p.readySince.Store(time.Now().UnixNano())
+		}
 		p.state.Store(s)
 		if old != s {
 			event.Emit(swaputil.ProcessStateChangeEvent{
@@ -811,6 +822,13 @@ func (p *ProcessCommand) State() ProcessState {
 		return s
 	}
 	return StateStopped
+}
+
+func (p *ProcessCommand) ReadySince() time.Time {
+	if n := p.readySince.Load(); n != 0 {
+		return time.Unix(0, n)
+	}
+	return time.Time{}
 }
 
 func (p *ProcessCommand) ServeHTTP(w http.ResponseWriter, r *http.Request) {

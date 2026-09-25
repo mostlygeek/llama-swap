@@ -13,6 +13,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/perf"
+	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/store"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
@@ -28,6 +29,9 @@ type apiModel struct {
 	Aliases       []string       `json:"aliases,omitempty"`
 	Capabilities  map[string]any `json:"capabilities,omitempty"`
 	ContextLength int            `json:"context_length,omitempty"`
+	// ReadySince is when the model last became ready (RFC 3339). Only set
+	// while the model is ready.
+	ReadySince string `json:"readySince,omitempty"`
 }
 
 type apiProfile struct {
@@ -112,6 +116,10 @@ func (s *Server) modelStatus() []apiModel {
 		if st, ok := running[id]; ok {
 			state = string(st)
 		}
+		var readySince string
+		if t, ok := s.local.ReadySince(id); ok && state == string(process.StateReady) {
+			readySince = t.UTC().Format(time.RFC3339)
+		}
 		// Same resolution /v1/models uses, so the dashboard and the OpenAI
 		// listing never disagree about what a model can do. Bound by
 		// shutdownCtx rather than a request: modelStatus is also called from
@@ -127,6 +135,7 @@ func (s *Server) modelStatus() []apiModel {
 			Aliases:       mc.Aliases,
 			Capabilities:  capsMap,
 			ContextLength: ctxLen,
+			ReadySince:    readySince,
 		})
 	}
 

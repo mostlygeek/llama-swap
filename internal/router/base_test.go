@@ -87,6 +87,34 @@ func TestBaseRouter_RunningModels(t *testing.T) {
 	}
 }
 
+func TestBaseRouter_ReadySince(t *testing.T) {
+	ready := newFakeProcess("ready")
+	before := time.Now()
+	ready.markReady()
+	starting := newFakeProcess("starting")
+	starting.setState(process.StateStarting)
+
+	b := newTestBase(t, map[string]process.Process{
+		"ready": ready, "starting": starting,
+	}, &stubPlanner{})
+
+	got, ok := b.ReadySince("ready")
+	if !ok || got.Before(before) {
+		t.Errorf("ReadySince(ready) = %v, %v; want a time after %v", got, ok, before)
+	}
+	if _, ok := b.ReadySince("starting"); ok {
+		t.Errorf("ReadySince(starting) ok = true, want false")
+	}
+	if _, ok := b.ReadySince("unknown"); ok {
+		t.Errorf("ReadySince(unknown) ok = true, want false")
+	}
+
+	ready.setState(process.StateStopped)
+	if _, ok := b.ReadySince("ready"); ok {
+		t.Errorf("ReadySince after stop ok = true, want false")
+	}
+}
+
 func TestBaseRouter_UnloadAll(t *testing.T) {
 	a := newFakeProcess("a")
 	a.markReady()

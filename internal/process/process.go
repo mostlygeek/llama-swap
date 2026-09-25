@@ -60,6 +60,10 @@ type Process interface {
 	// and may change at any time after the call returns.
 	State() ProcessState
 
+	// ReadySince returns when the process last entered the ready state, or
+	// the zero time when it is not currently ready.
+	ReadySince() time.Time
+
 	// ServeHTTP forwards requests to the underlying process
 	// Calling it when the process is not ready will result in a
 	// 503 response with an error body identifying llama-swap as the source

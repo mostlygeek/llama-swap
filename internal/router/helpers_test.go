@@ -36,6 +36,7 @@ type fakeProcess struct {
 
 	mu          sync.Mutex
 	state       process.ProcessState
+	readySince  time.Time
 	readyCh     chan struct{}
 	stopCh      chan struct{}
 	runStarted  chan struct{} // closed on the first Run/EnsureReady call that starts
@@ -107,6 +108,11 @@ func (f *fakeProcess) setState(s process.ProcessState) {
 }
 
 func (f *fakeProcess) setStateLocked(s process.ProcessState) {
+	if s != process.StateReady {
+		f.readySince = time.Time{}
+	} else if f.state != process.StateReady {
+		f.readySince = time.Now()
+	}
 	f.state = s
 	switch s {
 	case process.StateReady:
@@ -132,6 +138,12 @@ func (f *fakeProcess) State() process.ProcessState {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.state
+}
+
+func (f *fakeProcess) ReadySince() time.Time {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.readySince
 }
 
 func (f *fakeProcess) markReady() { f.setState(process.StateReady) }

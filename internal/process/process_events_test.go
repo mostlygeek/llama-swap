@@ -80,3 +80,34 @@ func TestProcessCommand_EmitsStateChangeEvents(t *testing.T) {
 		}
 	}
 }
+
+func TestProcessCommand_ReadySince(t *testing.T) {
+	skipIfNoSimpleResponder(t)
+
+	cmd, port := simpleResponderCmd(t, "-silent", "-respond hello")
+	p := newProcessCommand(t, config.ModelConfig{
+		Cmd:                cmd,
+		Proxy:              fmt.Sprintf("http://127.0.0.1:%d", port),
+		CheckEndpoint:      "/health",
+		HealthCheckTimeout: 10,
+	})
+
+	if got := p.ReadySince(); !got.IsZero() {
+		t.Fatalf("ReadySince before start = %v, want zero", got)
+	}
+
+	before := time.Now()
+	runErr := runAsync(t, p)
+	got := p.ReadySince()
+	if got.Before(before) || got.After(time.Now()) {
+		t.Errorf("ReadySince = %v, want between %v and now", got, before)
+	}
+
+	if err := p.Stop(testStopTimeout); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	<-runErr
+	if got := p.ReadySince(); !got.IsZero() {
+		t.Errorf("ReadySince after stop = %v, want zero", got)
+	}
+}

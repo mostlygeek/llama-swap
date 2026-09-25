@@ -32,6 +32,7 @@ type stubRouter struct {
 	serveHTTP     func(http.ResponseWriter, *http.Request)
 	shutdownCalls atomic.Int32
 	running       map[string]process.ProcessState
+	readySince    map[string]time.Time
 	unloadCalls   atomic.Int32
 	unloadModels  []string
 	unloadTimeout time.Duration
@@ -58,6 +59,10 @@ func (s *stubRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *stubRouter) RunningModels() map[string]process.ProcessState { return s.running }
+func (s *stubRouter) ReadySince(modelID string) (time.Time, bool) {
+	t, ok := s.readySince[modelID]
+	return t, ok
+}
 func (s *stubRouter) Unload(timeout time.Duration, models ...string) {
 	s.unloadCalls.Add(1)
 	s.unloadTimeout = timeout

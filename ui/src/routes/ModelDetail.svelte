@@ -12,6 +12,7 @@
   import ModelLogsTab from "../components/model/ModelLogsTab.svelte";
   import ModelDetailsTab from "../components/model/ModelDetailsTab.svelte";
   import { modelServerPath } from "../lib/modelUtils";
+  import { formatAbsoluteTime, formatUptime } from "../lib/format";
 
   let modelId = $derived($params?.id ?? "");
 
@@ -25,6 +26,17 @@
   // Only show a separate name when it differs from the ID, so the ID isn't
   // displayed twice.
   let hasName = $derived(!!model?.name && model.name !== model.id);
+
+  // Uptime ticks once a second while the model is ready.
+  let readySince = $derived(model?.readySince);
+  let now = $state(Date.now());
+  $effect(() => {
+    if (!readySince) return;
+    now = Date.now();
+    const timer = setInterval(() => (now = Date.now()), 1000);
+    return () => clearInterval(timer);
+  });
+  let uptime = $derived(readySince ? formatUptime(now - Date.parse(readySince)) : "");
 </script>
 
 <div class="flex h-full flex-col gap-4 overflow-y-auto p-2">
@@ -50,6 +62,11 @@
                 <CopyableId value={model.id} class="-ml-1 font-mono text-xs" />
               {/if}
               <span class="text-xs uppercase tracking-wide">{model.state}</span>
+              {#if readySince}
+                <span class="text-xs" title="Ready since {formatAbsoluteTime(readySince)}">
+                  up {uptime}
+                </span>
+              {/if}
             </div>
           </div>
           <div class="flex shrink-0 items-center gap-2">

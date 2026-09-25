@@ -32,6 +32,8 @@ export interface Model {
   capabilities?: ModelCapabilities;
   modalities?: ModelModalities;
   context_length?: number;
+  // when the model last became ready (RFC 3339); only set while ready
+  readySince?: string;
   // selector-only fields from the v1/models llamaswap metadata
   strategy?: string;
   targets?: string[];

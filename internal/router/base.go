@@ -375,6 +375,16 @@ func (b *baseRouter) RunningModels() map[string]process.ProcessState {
 	return running
 }
 
+// ReadySince returns when the named model's process last became ready.
+func (b *baseRouter) ReadySince(modelID string) (time.Time, bool) {
+	p, ok := b.processes[modelID]
+	if !ok {
+		return time.Time{}, false
+	}
+	t := p.ReadySince()
+	return t, !t.IsZero()
+}
+
 // Unload stops the named models, or every running model when none are named.
 // It blocks until each targeted process has stopped.
 //
