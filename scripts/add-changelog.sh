@@ -9,7 +9,7 @@ usage() {
 Usage: scripts/add-changelog.sh <version> [codex|claude|opencode]
 
 Adds the supplied release version to CHANGELOG.md. The default harness is
-codex.
+claude.
 EOF
 }
 
@@ -25,7 +25,7 @@ validate_version() {
 changelog_prompt() {
   local version="$1"
 
-  printf '%s\n' "Use docs/changelog-rules.md to add the ${version} release entry to CHANGELOG.md. The release changes are committed: inspect them with git log from the last release tag to HEAD (or main as the rules require). Do not use Git reflogs or .git/logs paths. Complete the edit before replying; do not only describe the planned work. Make only the required changelog update."
+  printf '%s\n' "Use docs/changelog-rules.md to add the ${version} release entry to CHANGELOG.md. The release changes are committed: inspect them with git log from the last release tag to HEAD (or main as the rules require). Read each commit's full message and use gh pr view to read each pull request's description and author. Do not use Git reflogs or .git/logs paths. Complete the edit before replying; do not only describe the planned work. Make only the required changelog update."
 }
 
 run_codex() {
@@ -41,7 +41,12 @@ run_codex() {
 run_claude() {
   local prompt="$1"
 
-  claude --print --model claude-sonnet-5 "$prompt"
+  claude --print \
+    --model claude-opus-5-5 \
+    --permission-mode acceptEdits \
+    --allowedTools 'Read' 'Edit' 'Bash(git log:*)' 'Bash(git tag:*)' \
+      'Bash(git show:*)' 'Bash(gh pr view:*)' \
+    -- "$prompt" </dev/null
 }
 
 run_opencode() {
@@ -57,7 +62,7 @@ main() {
   fi
 
   local version="$1"
-  local harness="${2:-codex}"
+  local harness="${2:-claude}"
   local repo_root
   local prompt
 

@@ -28,6 +28,22 @@ jobs:
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c #6.4.0
         with:
           go-version-file: go.mod
+      - name: Extract release notes from CHANGELOG.md
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          NOTES: ${{ runner.temp }}/release-notes.md
+        run: |
+          # print lines after "## <tag>" up to the next "## " heading
+          awk -v tag="## ${TAG}" '
+            $0 == tag { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > "${NOTES}"
+
+          if ! grep -q '[^[:space:]]' "${NOTES}"; then
+            echo "::error::no CHANGELOG.md entry for ${TAG}, run make release to generate it"
+            exit 1
+          fi
       - name: Set up Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # 6.4.0
         with:
@@ -43,7 +59,7 @@ jobs:
           distribution: goreleaser
           # 'latest', 'nightly', or a semver
           version: "~> v2"
-          args: release --clean
+          args: release --clean --release-notes=${{ runner.temp }}/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

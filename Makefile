@@ -121,7 +121,15 @@ release:
 	git add CHANGELOG.md; \
 	git commit -m "changelog: $$new_tag"; \
 	echo "tagging new version: $$new_tag"; \
-	git tag "$$new_tag";
+	git tag "$$new_tag"; \
+	printf "Push main and %s to origin? [y/N] " "$$new_tag"; \
+	read -r answer; \
+	if [ "$$answer" = "y" ] || [ "$$answer" = "Y" ]; then \
+		git push origin main "$$new_tag"; \
+	else \
+		echo "Not pushed. To push manually run:"; \
+		echo "  git push origin main $$new_tag"; \
+	fi
 
 GOOS ?= $(shell go env GOOS 2>/dev/null || echo linux)
 GOARCH ?= $(shell go env GOARCH 2>/dev/null || echo amd64)
