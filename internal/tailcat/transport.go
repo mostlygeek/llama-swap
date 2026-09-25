@@ -28,6 +28,7 @@ const (
 	HTTPPort                uint16 = 80
 	serverDrainTimeout             = time.Second
 	serverReadHeaderTimeout        = time.Second
+	staleClientDialTimeout         = 5 * time.Second
 )
 
 // PrivateKey is the adapter-owned representation of a validated Tailcat key
@@ -166,21 +167,20 @@ type authenticatedListener struct {
 }
 
 func (l *authenticatedListener) Accept() (net.Conn, error) {
-	for {
-		conn, err := l.Listener.Accept()
-		if err != nil {
-			return nil, err
-		}
-		public, ok := resolveRemoteNodeKey(l.server, conn.LocalAddr(), conn.RemoteAddr())
-		if !ok {
-			if logger := l.runtime.currentLogger(); logger != nil {
-				logger.Warnf("tailcat server: rejecting connection with unresolved identity from %v", conn.RemoteAddr())
-			}
-			conn.Close()
-			continue
-		}
-		return &authenticatedConn{Conn: conn, nodeKey: public.String()}, nil
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
 	}
+	public, ok := resolveRemoteNodeKey(l.server, conn.LocalAddr(), conn.RemoteAddr())
+	if !ok {
+		if logger := l.runtime.currentLogger(); logger != nil {
+			logger.Warnf("tailcat server: rejecting connection with unresolved identity from %v", conn.RemoteAddr())
+		}
+		// Let net/http read the request and return 403. Closing here leaves
+		// clients waiting for an HTTP response that will never arrive.
+		return &authenticatedConn{Conn: conn}, nil
+	}
+	return &authenticatedConn{Conn: conn, nodeKey: public.String()}, nil
 }
 
 // ServerOptions configures a Tailcat listener. Client authorization is not
@@ -285,7 +285,14 @@ func Start(ctx context.Context, opts ServerOptions) (*Server, error) {
 
 func newHTTPServer(opts ServerOptions) *http.Server {
 	return &http.Server{
-		Handler:           opts.Handler,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if _, ok := NodeKeyFromContext(r.Context()); !ok {
+				w.Header().Set("Connection", "close")
+				http.Error(w, "Tailcat client identity not recognized", http.StatusForbidden)
+				return
+			}
+			opts.Handler.ServeHTTP(w, r)
+		}),
 		ReadHeaderTimeout: serverReadHeaderTimeout,
 		ConnContext: func(ctx context.Context, conn net.Conn) context.Context {
 			if authenticated, ok := conn.(*authenticatedConn); ok {
@@ -419,9 +426,23 @@ func (s *Server) Close(ctx context.Context) error {
 
 // Client is a reusable outbound Tailcat identity and network stack.
 type Client struct {
-	client *tailcatlib.Client
-	closed atomic.Bool
-	used   atomic.Bool
+	mu         sync.Mutex
+	client     *tailcatlib.Client
+	newClient  func() *tailcatlib.Client
+	closed     atomic.Bool
+	usedClient *tailcatlib.Client
+	retired    map[*tailcatlib.Client]*retiredClient
+	// A dial may still be starting when its client is replaced. DrainTCP
+	// cannot see that connection until Tailcat creates its TCP endpoint.
+	pending map[*tailcatlib.Client]int
+}
+
+type retiredClient struct {
+	cancel    context.CancelFunc
+	done      chan struct{}
+	dialsDone chan struct{}
+	used      bool
+	err       error
 }
 
 var processPeerKeys struct {
@@ -445,40 +466,198 @@ func NewClient(peerID, blob string, saved *PrivateKey, logger Logger) *Client {
 		}
 		processPeerKeys.Unlock()
 	}
-	return &Client{client: &tailcatlib.Client{
-		Server: tailcatlib.Addr(blob),
-		Key:    private,
-		Logf:   logFunc(logger, "tailcat client "+peerID+": "),
-	}}
+	newClient := func() *tailcatlib.Client {
+		return &tailcatlib.Client{
+			Server: tailcatlib.Addr(blob),
+			Key:    private,
+			Logf:   logFunc(logger, "tailcat client "+peerID+": "),
+		}
+	}
+	return &Client{client: newClient(), newClient: newClient}
 }
 
 func (c *Client) DialContext(ctx context.Context, _, _ string) (net.Conn, error) {
 	if c == nil || c.closed.Load() {
 		return nil, net.ErrClosed
 	}
-	conn, err := c.client.DialTCPPort(ctx, HTTPPort)
-	if err == nil {
-		c.used.Store(true)
+	c.mu.Lock()
+	if c.closed.Load() {
+		c.mu.Unlock()
+		return nil, net.ErrClosed
+	}
+	current := c.client
+	used := c.usedClient == current
+	c.startDialLocked(current)
+	c.mu.Unlock()
+	// An already authenticated Tailcat client does not repeat its handshake.
+	// If the server restarted, its old TCP dial can wait for the entire
+	// request deadline. Bound that attempt so a fresh client can reconnect.
+	attemptCtx := ctx
+	if used {
+		var cancel context.CancelFunc
+		attemptCtx, cancel = context.WithTimeout(ctx, staleClientDialTimeout)
+		defer cancel()
+	}
+	conn, err := current.DialTCPPort(attemptCtx, HTTPPort)
+	conn, err = c.finishDial(current, conn, err)
+	if err != nil && ctx.Err() == nil {
+		if c.closed.Load() {
+			return nil, net.ErrClosed
+		}
+		c.replaceClient(current)
+		c.mu.Lock()
+		current = c.client
+		if c.closed.Load() {
+			c.mu.Unlock()
+			return nil, net.ErrClosed
+		}
+		c.startDialLocked(current)
+		c.mu.Unlock()
+		conn, err = current.DialTCPPort(ctx, HTTPPort)
+		conn, err = c.finishDial(current, conn, err)
 	}
 	return conn, err
 }
 
+func (c *Client) startDialLocked(client *tailcatlib.Client) {
+	if c.pending == nil {
+		c.pending = make(map[*tailcatlib.Client]int)
+	}
+	c.pending[client]++
+}
+
+func (c *Client) finishDial(client *tailcatlib.Client, conn net.Conn, err error) (net.Conn, error) {
+	c.mu.Lock()
+	closeConn := false
+	if err == nil {
+		if c.closed.Load() {
+			closeConn = true
+		} else if c.client == client {
+			c.usedClient = client
+		} else if retired := c.retired[client]; retired != nil {
+			retired.used = true
+		}
+	}
+	c.pending[client]--
+	if c.pending[client] == 0 {
+		delete(c.pending, client)
+		if retired := c.retired[client]; retired != nil {
+			close(retired.dialsDone)
+		}
+	}
+	c.mu.Unlock()
+	if closeConn {
+		conn.Close()
+		return nil, net.ErrClosed
+	}
+	return conn, err
+}
+
+func (c *Client) replaceClient(current *tailcatlib.Client) {
+	c.mu.Lock()
+	if c.closed.Load() || c.client != current {
+		c.mu.Unlock()
+		return
+	}
+	used := c.usedClient == current
+	c.client = c.newClient()
+	c.usedClient = nil
+	if c.retired == nil {
+		c.retired = make(map[*tailcatlib.Client]*retiredClient)
+	}
+	retireCtx, cancel := context.WithCancel(context.Background())
+	retired := &retiredClient{cancel: cancel, done: make(chan struct{}), dialsDone: make(chan struct{}), used: used}
+	if c.pending[current] == 0 {
+		close(retired.dialsDone)
+	}
+	c.retired[current] = retired
+	c.mu.Unlock()
+	go c.drainRetiredClient(retireCtx, current, retired)
+}
+
+func (c *Client) drainRetiredClient(ctx context.Context, client *tailcatlib.Client, retired *retiredClient) {
+	defer func() {
+		retired.err = client.Close()
+		c.mu.Lock()
+		if c.retired[client] == retired {
+			delete(c.retired, client)
+		}
+		c.mu.Unlock()
+		close(retired.done)
+		retired.cancel()
+	}()
+	select {
+	case <-retired.dialsDone:
+	case <-ctx.Done():
+		return
+	}
+	c.mu.Lock()
+	used := retired.used
+	c.mu.Unlock()
+	if !used {
+		// A failed first dial may leave Tailcat without a network stack.
+		return
+	}
+	for {
+		drainCtx, cancel := context.WithTimeout(ctx, serverDrainTimeout)
+		err := client.DrainTCP(drainCtx)
+		cancel()
+		if err == nil {
+			return
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		timer := time.NewTimer(serverDrainTimeout)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return
+		case <-timer.C:
+		}
+	}
+}
+
 // PublicKey returns the canonical node-key string without exposing Tailcat's
 // concrete key type outside the adapter.
-func (c *Client) PublicKey() string { return c.client.PublicKey().String() }
+func (c *Client) PublicKey() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.client.PublicKey().String()
+}
 
 func (c *Client) Close(ctx context.Context) error {
 	if c == nil || !c.closed.CompareAndSwap(false, true) {
 		return nil
 	}
+	c.mu.Lock()
+	current := c.client
+	used := c.usedClient == current
+	retired := c.retired
+	c.retired = nil
+	c.mu.Unlock()
 	var errs []error
-	if c.used.Load() {
-		if err := c.client.DrainTCP(ctx); err != nil && ctx.Err() == nil {
+	if used {
+		if err := current.DrainTCP(ctx); err != nil && ctx.Err() == nil {
 			errs = append(errs, err)
 		}
 	}
-	if err := c.client.Close(); err != nil {
+	if err := current.Close(); err != nil {
 		errs = append(errs, err)
+	}
+	for _, state := range retired {
+		state.cancel()
+	}
+	for _, state := range retired {
+		<-state.done
+		if state.err != nil {
+			errs = append(errs, state.err)
+		}
 	}
 	return errors.Join(errs...)
 }

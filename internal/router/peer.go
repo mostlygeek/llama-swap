@@ -91,9 +91,12 @@ func NewPeer(cfg config.Config, logger *logmon.Monitor) (*Peer, error) {
 			}
 		}
 
+		// Tailcat needs a new dial per request so a restarted server cannot
+		// strand an HTTP request on a connection from the old server.
 		peerTransport := &http.Transport{
 			Proxy:                 proxyFromEnvironment,
 			DialContext:           dialContext,
+			DisableKeepAlives:     tailcatClient != nil,
 			TLSHandshakeTimeout:   time.Duration(peer.Timeouts.TLSHandshake) * time.Second,
 			ResponseHeaderTimeout: time.Duration(peer.Timeouts.ResponseHeader) * time.Second,
 			ExpectContinueTimeout: time.Duration(peer.Timeouts.ExpectContinue) * time.Second,

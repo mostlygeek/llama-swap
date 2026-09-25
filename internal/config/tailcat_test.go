@@ -120,6 +120,33 @@ func TestConfig_TailcatPeerURLValidation(t *testing.T) {
 	}
 }
 
+func TestConfig_TailcatPeerResponseHeaderTimeout(t *testing.T) {
+	blob := testTailcatBlob()
+	tests := []struct {
+		name     string
+		proxy    string
+		timeouts string
+		want     int
+	}{
+		{"HTTP default", "http://localhost:8080", "", 60},
+		{"Tailcat default", "tailcat://" + blob, "", 300},
+		{"Tailcat explicit", "tailcat://" + blob, "    timeouts:\n      responseHeader: 60\n", 60},
+		{"Tailcat disabled", "tailcat://" + blob, "    timeouts:\n      responseHeader: 0\n", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			yaml := fmt.Sprintf("models: {}\npeers:\n  cat:\n    proxy: %s\n    models: [m]\n%s", tt.proxy, tt.timeouts)
+			cfg, err := LoadConfigFromReader(strings.NewReader(yaml))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := cfg.Peers["cat"].Timeouts.ResponseHeader; got != tt.want {
+				t.Fatalf("responseHeader = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestConfig_PeerTailcatAccessor(t *testing.T) {
 	blob := testTailcatBlob()
 	keyPath := writeTailcatKey(t)

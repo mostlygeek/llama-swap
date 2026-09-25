@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"sort"
+	"strings"
 
 	"github.com/mostlygeek/llama-swap/internal/tailcat"
 )
@@ -154,18 +155,28 @@ func ValidatePeerNamespace(c Config) error {
 }
 
 func (c *PeerConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var probe rawPeerConfig
+	if err := unmarshal(&probe); err != nil {
+		return err
+	}
+	responseHeaderDefault := 60
+	if u, err := url.Parse(probe.Proxy); err == nil && strings.EqualFold(u.Scheme, "tailcat") {
+		// Tailcat peers can spend minutes loading a remote model before
+		// sending response headers. Keep an explicit timeout bounded.
+		responseHeaderDefault = 300
+	}
 	defaults := rawPeerConfig{
 		Proxy:   "",
 		ApiKey:  "",
 		Models:  []string{},
 		Filters: Filters{},
 
-		// mostly matches http.DefaultTransport but with a 60s ResponseHeader timeout
-		// to match the pre PR #619 functionality
+		// Mostly matches http.DefaultTransport. HTTP peers retain the 60s
+		// response-header timeout from before PR #619.
 		Timeouts: TimeoutsConfig{
 			Connect:        30,
 			KeepAlive:      30,
-			ResponseHeader: 60,
+			ResponseHeader: responseHeaderDefault,
 			TLSHandshake:   10,
 			ExpectContinue: 1,
 			IdleConn:       90,

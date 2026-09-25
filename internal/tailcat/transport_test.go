@@ -1,13 +1,16 @@
 package tailcat
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +20,63 @@ import (
 	"tailscale.com/tailcfg"
 	"tailscale.com/types/key"
 )
+
+type singleConnListener struct {
+	conn net.Conn
+	addr net.Addr
+}
+
+func (l *singleConnListener) Accept() (net.Conn, error) {
+	if l.conn == nil {
+		return nil, net.ErrClosed
+	}
+	conn := l.conn
+	l.conn = nil
+	return conn, nil
+}
+
+func (l *singleConnListener) Close() error   { return nil }
+func (l *singleConnListener) Addr() net.Addr { return l.addr }
+
+func TestTailcatTransport_UnrecognizedNodeKeyReturnsForbidden(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+	var handled atomic.Bool
+	server := newHTTPServer(ServerOptions{Handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		handled.Store(true)
+	})})
+	listener := &authenticatedListener{
+		Listener: &singleConnListener{conn: serverConn, addr: serverConn.LocalAddr()},
+		server:   &tailcatlib.Server{},
+		runtime:  &Server{},
+	}
+	go server.Serve(listener)
+	t.Cleanup(func() { server.Close() })
+
+	if err := clientConn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(clientConn, "GET /health HTTP/1.1\r\nHost: server.tailcat\r\n\r\n"); err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(clientConn), nil)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+	if !resp.Close {
+		t.Fatal("403 response did not close the unrecognized connection")
+	}
+	if handled.Load() {
+		t.Fatal("unrecognized peer reached application handler")
+	}
+}
 
 func TestTailcatTransport_ReadHeaderTimeout(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -65,6 +125,40 @@ func TestTailcatTransport_ProcessLifetimePeerIdentity(t *testing.T) {
 	_ = first.Close(ctx)
 	_ = second.Close(ctx)
 	_ = other.Close(ctx)
+}
+
+func TestTailcatTransport_RetiredClientWaitsForInFlightDial(t *testing.T) {
+	client := NewClient("retired-dial", "invalid-until-dial", nil, nil)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = client.Close(ctx)
+	})
+
+	client.mu.Lock()
+	old := client.client
+	client.startDialLocked(old)
+	client.mu.Unlock()
+	client.replaceClient(old)
+
+	client.mu.Lock()
+	retired := client.retired[old]
+	client.mu.Unlock()
+	if retired == nil {
+		t.Fatal("old client was not retired")
+	}
+	select {
+	case <-retired.done:
+		t.Fatal("old client closed while its dial was still in flight")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	client.finishDial(old, nil, context.DeadlineExceeded)
+	select {
+	case <-retired.done:
+	case <-time.After(time.Second):
+		t.Fatal("old client did not retire after its dial finished")
+	}
 }
 
 func TestTailcatTransport_LocalDERPHTTP(t *testing.T) {
@@ -191,6 +285,95 @@ func TestTailcatTransport_LocalDERPHTTP(t *testing.T) {
 		t.Fatalf("server Close took %v, want no more than %v", elapsed, 2*serverDrainTimeout)
 	}
 	transport.CloseIdleConnections()
+}
+
+func TestTailcatTransport_ReconnectAfterServerRestart(t *testing.T) {
+	region := runLocalDERP(t)
+	private := key.NewNode()
+	serverKey := &PrivateKey{value: tailcatlib.PrivateKey{
+		Private: private,
+		Public: tailcatlib.ConnInfo{
+			ServerPublic:      tailcatlib.NodePublic{NodePublic: private.Public()},
+			ServerDiscoPublic: tailcatlib.DiscoPublicForNode(private),
+			PresharedKey:      tailcatlib.NewPresharedKey(),
+			Region:            []*tailcfg.DERPRegion{region},
+		},
+	}}
+	start := func() (*Server, <-chan string) {
+		seenKeys := make(chan string, 16)
+		s, err := Start(t.Context(), ServerOptions{
+			PrivateKey: serverKey,
+			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if nodeKey, ok := NodeKeyFromContext(r.Context()); ok {
+					seenKeys <- nodeKey
+				}
+				io.WriteString(w, "ok")
+			}),
+		})
+		if err != nil {
+			t.Fatalf("start Tailcat server: %v", err)
+		}
+		return s, seenKeys
+	}
+	server, firstKeys := start()
+	client := NewClient("restart-test", server.Address(), nil, nil)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = client.Close(ctx)
+		_ = server.Close(ctx)
+	})
+	httpClient := &http.Client{Transport: &http.Transport{
+		DialContext:       client.DialContext,
+		DisableKeepAlives: true,
+	}}
+	get := func(ctx context.Context) error {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://server.tailcat/health", nil)
+		if err != nil {
+			return err
+		}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("status = %d", resp.StatusCode)
+		}
+		_, err = io.Copy(io.Discard, resp.Body)
+		return err
+	}
+	initialCtx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	for {
+		requestCtx, requestCancel := context.WithTimeout(initialCtx, 3*time.Second)
+		err := get(requestCtx)
+		requestCancel()
+		if err == nil {
+			break
+		}
+		if initialCtx.Err() != nil {
+			t.Fatalf("initial request: %v", err)
+		}
+	}
+	if nodeKey := <-firstKeys; nodeKey != client.PublicKey() {
+		t.Fatalf("initial node key = %q, want %q", nodeKey, client.PublicKey())
+	}
+	ctx, closeCancel := context.WithTimeout(t.Context(), 5*time.Second)
+	if err := server.Close(ctx); err != nil {
+		t.Fatalf("close first server: %v", err)
+	}
+	closeCancel()
+	server, restartedKeys := start()
+
+	reconnectCtx, reconnectCancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer reconnectCancel()
+	if err := get(reconnectCtx); err != nil {
+		t.Fatalf("request after server restart: %v", err)
+	}
+	if nodeKey := <-restartedKeys; nodeKey != client.PublicKey() {
+		t.Fatalf("node key changed across restart: %q", nodeKey)
+	}
 }
 
 type testLogger struct{ t *testing.T }

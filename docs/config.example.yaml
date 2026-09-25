@@ -809,6 +809,8 @@ peers:
     proxy: tailcat://tcREPLACE_WITH_CONNECTION_TOKEN
     # Optional. Omit (or use "ephemeral") for a process-lifetime client key.
     tailcatKey: /path/to/client.private.json
+    # Tailcat peers wait 300s for response headers by default so cold starts
+    # can finish; override with timeouts.responseHeader when needed.
     models:
       - model_a
   openrouter:
