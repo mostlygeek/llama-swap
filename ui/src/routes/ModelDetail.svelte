@@ -4,6 +4,7 @@
   import { statusDotColor } from "../stores/modelLoad";
   import type { Model } from "../lib/types";
   import ModelLoadButton from "../components/ModelLoadButton.svelte";
+  import CopyableId from "../components/CopyableId.svelte";
   import * as Card from "$lib/components/ui/card/index.js";
   import { Tabs, TabsList, TabsTrigger, TabsContent } from "$lib/components/ui/tabs/index.js";
   import { ExternalLink } from "@lucide/svelte";
@@ -21,6 +22,9 @@
       $models.find((m) => m.aliases?.includes(modelId)),
   );
   let resolvedId = $derived(model?.id ?? modelId);
+  // Only show a separate name when it differs from the ID, so the ID isn't
+  // displayed twice.
+  let hasName = $derived(!!model?.name && model.name !== model.id);
 </script>
 
 <div class="flex h-full flex-col gap-4 overflow-y-auto p-2">
@@ -32,12 +36,24 @@
   {:else}
     <Card.Root class="shrink-0 gap-0 overflow-hidden py-0">
       <Card.Header class="shrink-0 gap-2 border-b px-4 py-3">
-        <div class="flex items-center gap-2">
-          <span class={`size-2.5 shrink-0 rounded-full ${statusDotColor(model)}`}></span>
-          <Card.Title class="text-lg">{model.name || model.id}</Card.Title>
-          <span class="text-muted-foreground text-sm">({model.id})</span>
-          <span class="text-muted-foreground text-xs uppercase tracking-wide">{model.state}</span>
-          <div class="ml-auto flex items-center gap-2">
+        <div class="flex items-start gap-2">
+          <span class={`mt-2 size-2.5 shrink-0 rounded-full ${statusDotColor(model)}`}></span>
+          <div class="flex min-w-0 flex-1 flex-col gap-1">
+            {#if hasName}
+              <Card.Title class="text-lg break-words">{model.name}</Card.Title>
+            {:else}
+              <Card.Title class="-ml-1 text-lg">
+                <CopyableId value={model.id} />
+              </Card.Title>
+            {/if}
+            <div class="text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+              {#if hasName}
+                <CopyableId value={model.id} class="-ml-1 font-mono text-xs" />
+              {/if}
+              <span class="text-xs uppercase tracking-wide">{model.state}</span>
+            </div>
+          </div>
+          <div class="flex shrink-0 items-center gap-2">
             {#if !model.peerID}
               <a
                 href={modelServerPath(resolvedId)}
@@ -57,7 +73,12 @@
           <p class="text-muted-foreground text-sm"><em>{model.description}</em></p>
         {/if}
         {#if model.aliases && model.aliases.length > 0}
-          <p class="text-muted-foreground text-xs">Aliases: {model.aliases.join(", ")}</p>
+          <div class="text-muted-foreground flex flex-wrap items-center gap-x-1 gap-y-1 text-xs">
+            <span>Aliases:</span>
+            {#each model.aliases as alias (alias)}
+              <CopyableId value={alias} class="font-mono" />
+            {/each}
+          </div>
         {/if}
       </Card.Header>
     </Card.Root>
