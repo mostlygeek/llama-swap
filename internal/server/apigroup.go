@@ -642,32 +642,33 @@ func (s *Server) handleAPILogEvents(w http.ResponseWriter, r *http.Request) {
 		swaputil.SendResponse(w, r, http.StatusBadRequest, "at least one stream is required: proxy, upstream or http")
 		return
 	}
-	streams := make(map[string]*logmon.Monitor, len(names))
+	streams := make(map[logmon.StreamID]*logmon.Monitor, len(names))
 	for _, name := range names {
-		log, ok := s.logs.Stream(name)
+		id := logmon.StreamID(name)
+		log, ok := s.logs.Stream(id)
 		if !ok {
 			swaputil.SendResponse(w, r, http.StatusBadRequest, fmt.Sprintf("invalid stream %q. Use proxy, upstream or http", name))
 			return
 		}
-		streams[name] = log
+		streams[id] = log
 	}
 	_, skipHistory := query["no-history"]
 
 	s.serveSSE(w, r, "handleAPILogEvents", func(send func(messageEnvelope)) func() {
-		sendLogData := func(source string, data []byte) {
-			if j, err := json.Marshal(map[string]string{"source": source, "data": string(data)}); err == nil {
+		sendLogData := func(source logmon.StreamID, data []byte) {
+			if j, err := json.Marshal(map[string]string{"source": string(source), "data": string(data)}); err == nil {
 				send(messageEnvelope{Type: msgTypeLogData, Data: string(j)})
 			}
 		}
 
 		unsubscribe := make([]context.CancelFunc, 0, len(streams))
-		for name, log := range streams {
-			unsubscribe = append(unsubscribe, log.OnLogData(func(data []byte) { sendLogData(name, data) }))
+		for id, log := range streams {
+			unsubscribe = append(unsubscribe, log.OnLogData(func(data []byte) { sendLogData(id, data) }))
 		}
 		if !skipHistory {
-			for name, log := range streams {
+			for id, log := range streams {
 				if history := log.GetHistory(); len(history) != 0 {
-					sendLogData(name, history)
+					sendLogData(id, history)
 				}
 			}
 		}

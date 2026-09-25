@@ -53,13 +53,13 @@ func TestGroup_NoStreamsDiscardsStdout(t *testing.T) {
 
 func TestGroup_Stream(t *testing.T) {
 	g := NewGroup(&bytes.Buffer{}, true, true, true)
-	for name, want := range map[string]*Monitor{
+	for id, want := range map[StreamID]*Monitor{
 		StreamProxy:    g.ProxyLogs,
 		StreamUpstream: g.UpstreamLogs,
 		StreamHTTP:     g.HttpLogs,
 	} {
-		if got, ok := g.Stream(name); !ok || got != want {
-			t.Errorf("Stream(%q) = %p, %v; want %p", name, got, ok, want)
+		if got, ok := g.Stream(id); !ok || got != want {
+			t.Errorf("Stream(%q) = %p, %v; want %p", id, got, ok, want)
 		}
 	}
 	if _, ok := g.Stream("mux"); ok {

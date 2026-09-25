@@ -2,11 +2,14 @@ package logmon
 
 import "io"
 
-// Stream names accepted by Group.Stream.
+// StreamID names one of a Group's log streams.
+type StreamID string
+
+// Stream IDs accepted by Group.Stream.
 const (
-	StreamProxy    = "proxy"
-	StreamUpstream = "upstream"
-	StreamHTTP     = "http"
+	StreamProxy    StreamID = "proxy"
+	StreamUpstream StreamID = "upstream"
+	StreamHTTP     StreamID = "http"
 )
 
 // Group holds llama-swap's log streams. Each stream keeps its own history and
@@ -45,9 +48,9 @@ func NewGroup(stdout io.Writer, proxy, upstream, http bool) *Group {
 	}
 }
 
-// Stream returns the monitor for a stream name: "proxy", "upstream" or "http".
-func (g *Group) Stream(name string) (*Monitor, bool) {
-	switch name {
+// Stream returns the monitor for a stream ID.
+func (g *Group) Stream(id StreamID) (*Monitor, bool) {
+	switch id {
 	case StreamProxy:
 		return g.ProxyLogs, true
 	case StreamUpstream:

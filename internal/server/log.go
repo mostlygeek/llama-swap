@@ -45,7 +45,7 @@ func (s *Server) getLogger(logMonitorID string) (*logmon.Monitor, error) {
 	if logMonitorID == "" {
 		return s.logs.MuxLogs, nil
 	}
-	if log, ok := s.logs.Stream(logMonitorID); ok {
+	if log, ok := s.logs.Stream(logmon.StreamID(logMonitorID)); ok {
 		return log, nil
 	}
 	if _, modelID, _, found := swaputil.FindModelInPath(s.cfg, "/"+logMonitorID); found {
