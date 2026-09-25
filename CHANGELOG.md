@@ -1,5 +1,44 @@
 # Changelog
 
+## v258
+
+Tailcat is updated to v0.7.0 and now checks allowed clients in the HTTP
+handler. A client that is not allowed gets a 403 instead of a TCP timeout,
+which makes peer connections much easier to troubleshoot, and changes to
+tailcat.allow now apply on hot reload. A bug that dropped the connection when
+a node key was not recognized, which could leave clients hanging, now also
+returns a 403. Peer connections recover better when the server disconnects,
+and they wait longer for the first response header by default.
+
+Upgrading: an empty tailcat.allow list now denies every client. To keep
+allowing anyone to connect, set tailcat.allow to "*".
+
+The output of cmdStop goes to the process log again, the same as cmd. This was
+lost in an earlier change (#790). A cmdStop that leaves a background child
+holding its output open can no longer hang the stop, and hitting that wait
+limit after a successful stop is logged as a warning instead of a failure.
+
+The Models page shows a status icon for each target of the selected profile,
+and those models can be loaded and unloaded from the profile pane.
+
+The unified Docker image adds mp3 support and native downloads to audio.cpp.
+The image build also stops failing on untagged main-branch commits. Those
+builds fell back to looking up the "latest" release through the GitHub API,
+which rate limited the shared CI runners. The installers now build the commit
+directly and fall back to git tags when the API is not available.
+
+Release notes on GitHub now use the CHANGELOG.md entry for the tag, and
+changelog entries are written as plain-language summaries that credit outside
+contributors.
+
+- release: improve generated changelog and release notes: generate readable changelog entries, credit outside contributors and use each entry as the GitHub release notes
+- [PR #1169](https://github.com/mostlygeek/llama-swap/pull/1169) internal/tailcat: various reliability and bug fixes: return a 403 for unrecognized node keys, improve peer reconnects and raise the default time to first header
+- [PR #1170](https://github.com/mostlygeek/llama-swap/pull/1170) ui: link profile targets and add load controls: show status and load/unload controls for profile target models by [@sousekd](https://github.com/sousekd)
+- [PR #1165](https://github.com/mostlygeek/llama-swap/pull/1165) internal/process: log cmdStop stdout and stderr: send cmdStop output to the process log and stop a lingering child from hanging it by [@dividehex](https://github.com/dividehex)
+- [PR #1166](https://github.com/mostlygeek/llama-swap/pull/1166) internal/tailcat: upgrade to tailcat v0.7.0 and use Server.Listen: check tailcat.allow per request, deny by default when empty and add a "*" wildcard
+- [PR #1157](https://github.com/mostlygeek/llama-swap/pull/1157) docker/unified: audio.cpp add download and mp3 support: add mp3 and native download support
+- [PR #1156](https://github.com/mostlygeek/llama-swap/pull/1156) docker/unified: fix vllm-wrapper build on untagged commits: build untagged commits directly and fall back to git tags when the GitHub API is rate limited
+
 ## v257
 
 Adds Kubernetes-backed model lifecycle management with a Helm chart, readiness
