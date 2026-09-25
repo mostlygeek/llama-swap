@@ -354,6 +354,8 @@ export interface ChatMessage {
   reasoningTimeMs?: number;
   /** UI-only. Stats for the request that produced this assistant turn. */
   stats?: GenerationStats;
+  /** UI-only. Set when this turn failed or the user cancelled it. */
+  interrupted?: "error" | "cancelled";
 
   /** Wire fields. tool_calls is assistant-only; the rest are tool-only. */
   tool_calls?: ToolCall[];
