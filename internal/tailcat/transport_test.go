@@ -70,6 +70,9 @@ func TestTailcatTransport_UnrecognizedNodeKeyReturnsForbidden(t *testing.T) {
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", resp.StatusCode)
 	}
+	if !resp.Close {
+		t.Fatal("403 response did not close the unrecognized connection")
+	}
 	if handled.Load() {
 		t.Fatal("unrecognized peer reached application handler")
 	}
@@ -122,6 +125,40 @@ func TestTailcatTransport_ProcessLifetimePeerIdentity(t *testing.T) {
 	_ = first.Close(ctx)
 	_ = second.Close(ctx)
 	_ = other.Close(ctx)
+}
+
+func TestTailcatTransport_RetiredClientWaitsForInFlightDial(t *testing.T) {
+	client := NewClient("retired-dial", "invalid-until-dial", nil, nil)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = client.Close(ctx)
+	})
+
+	client.mu.Lock()
+	old := client.client
+	client.startDialLocked(old)
+	client.mu.Unlock()
+	client.replaceClient(old)
+
+	client.mu.Lock()
+	retired := client.retired[old]
+	client.mu.Unlock()
+	if retired == nil {
+		t.Fatal("old client was not retired")
+	}
+	select {
+	case <-retired.done:
+		t.Fatal("old client closed while its dial was still in flight")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	client.finishDial(old, nil, context.DeadlineExceeded)
+	select {
+	case <-retired.done:
+	case <-time.After(time.Second):
+		t.Fatal("old client did not retire after its dial finished")
+	}
 }
 
 func TestTailcatTransport_LocalDERPHTTP(t *testing.T) {
