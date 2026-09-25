@@ -22,6 +22,7 @@
   import { initScreenWidth, initSystemThemeListener, isDarkMode, themeName, appTitle, connectionState } from "./stores/theme";
   import { currentRoute } from "./stores/route";
   import { selectedPlaygroundTab, playgroundTabs } from "./stores/playground";
+  import { sidebarOpen, sidebarWidth } from "./stores/sidebar";
 
   // svelte-spa-router's types predate Svelte 5 (loadingComponent wants the
   // old class-component ComponentType); the cast is safe since Router.svelte
@@ -148,7 +149,12 @@
 </script>
 
 <Tooltip.Provider>
-  <Sidebar.Provider>
+  <Sidebar.Provider
+    open={$sidebarOpen}
+    onOpenChange={(v) => sidebarOpen.set(v)}
+    width={$sidebarWidth}
+    onWidthChange={(w) => sidebarWidth.set(w)}
+  >
     <AppSidebar />
     <Sidebar.Inset class="h-screen min-w-0 overflow-hidden">
       <header

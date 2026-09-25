@@ -3,10 +3,9 @@
 	import { cn, type WithElementRef } from "$lib/utils.js";
 	import type { HTMLAttributes } from "svelte/elements";
 	import {
-		SIDEBAR_COOKIE_MAX_AGE,
-		SIDEBAR_COOKIE_NAME,
-		SIDEBAR_WIDTH,
+		SIDEBAR_WIDTH_DEFAULT_PX,
 		SIDEBAR_WIDTH_ICON,
+		clampSidebarWidth,
 	} from "./constants.js";
 	import { setSidebar } from "./context.svelte.js";
 
@@ -14,6 +13,8 @@
 		ref = $bindable(null),
 		open = $bindable(true),
 		onOpenChange = () => {},
+		width = $bindable(SIDEBAR_WIDTH_DEFAULT_PX),
+		onWidthChange = () => {},
 		class: className,
 		style,
 		children,
@@ -21,6 +22,9 @@
 	}: WithElementRef<HTMLAttributes<HTMLDivElement>> & {
 		open?: boolean;
 		onOpenChange?: (open: boolean) => void;
+		/** Desktop sidebar width in px; clamped to the min/max bounds. */
+		width?: number;
+		onWidthChange?: (width: number) => void;
 	} = $props();
 
 	const sidebar = setSidebar({
@@ -28,9 +32,11 @@
 		setOpen: (value: boolean) => {
 			open = value;
 			onOpenChange(value);
-
-			// This sets the cookie to keep the sidebar state.
-			document.cookie = `${SIDEBAR_COOKIE_NAME}=${open}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`;
+		},
+		width: () => clampSidebarWidth(width),
+		setWidth: (value: number) => {
+			width = clampSidebarWidth(value);
+			onWidthChange(width);
 		},
 	});
 </script>
@@ -40,7 +46,7 @@
 <Tooltip.Provider delayDuration={0}>
 	<div
 		data-slot="sidebar-wrapper"
-		style="--sidebar-width: {SIDEBAR_WIDTH}; --sidebar-width-icon: {SIDEBAR_WIDTH_ICON}; {style}"
+		style="--sidebar-width: {sidebar.width}px; --sidebar-width-icon: {SIDEBAR_WIDTH_ICON}; {style}"
 		class={cn(
 			"group/sidebar-wrapper has-data-[variant=inset]:bg-sidebar flex min-h-svh w-full",
 			className

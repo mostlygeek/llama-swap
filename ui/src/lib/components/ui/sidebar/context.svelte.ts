@@ -18,6 +18,12 @@ export type SidebarStateProps = {
 	 * the sub-components and any `bind:` references.
 	 */
 	setOpen: (open: boolean) => void;
+
+	/** A getter function that returns the current desktop sidebar width in px. */
+	width: Getter<number>;
+
+	/** A function that sets the desktop sidebar width in px. */
+	setWidth: (width: number) => void;
 };
 
 class SidebarState {
@@ -25,11 +31,16 @@ class SidebarState {
 	open = $derived.by(() => this.props.open());
 	openMobile = $state(false);
 	setOpen: SidebarStateProps["setOpen"];
+	width = $derived.by(() => this.props.width());
+	setWidth: SidebarStateProps["setWidth"];
+	// True while the user is dragging the rail to resize the sidebar.
+	resizing = $state(false);
 	#isMobile: IsMobile;
 	state = $derived.by(() => (this.open ? "expanded" : "collapsed"));
 
 	constructor(props: SidebarStateProps) {
 		this.setOpen = props.setOpen;
+		this.setWidth = props.setWidth;
 		this.#isMobile = new IsMobile();
 		this.props = props;
 	}
