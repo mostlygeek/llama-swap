@@ -35,9 +35,8 @@
     </Card.Root>
   {:else}
     <Card.Root class="shrink-0 gap-0 overflow-hidden py-0">
-      <Card.Header class="shrink-0 gap-2 border-b px-4 py-3">
+      <Card.Header class="shrink-0 gap-2 px-4 py-3">
         <div class="flex items-start gap-2">
-          <span class={`mt-2 size-2.5 shrink-0 rounded-full ${statusDotColor(model)}`}></span>
           <div class="flex min-w-0 flex-1 flex-col gap-1">
             {#if hasName}
               <Card.Title class="text-lg break-words">{model.name}</Card.Title>
@@ -81,6 +80,12 @@
           </div>
         {/if}
       </Card.Header>
+      <!-- Load status bar; the state text in the header carries it for screen readers. -->
+      <div
+        aria-hidden="true"
+        class={`h-1 w-full shrink-0 transition-colors ${statusDotColor(model)}`}
+        class:animate-pulse={model.state === "starting" || model.state === "stopping"}
+      ></div>
     </Card.Root>
 
     <Tabs value="activity" class="min-h-0 flex-1">
