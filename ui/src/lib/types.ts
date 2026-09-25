@@ -97,8 +97,10 @@ export interface ReqRespCapture {
   resp_body: string; // base64 encoded bytes
 }
 
+export type LogSource = "proxy" | "upstream" | "http";
+
 export interface LogData {
-  source: "upstream" | "proxy";
+  source: LogSource;
   data: string;
 }
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/event"
+	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/perf"
 	"github.com/mostlygeek/llama-swap/internal/store"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
@@ -435,7 +436,7 @@ func (s *Server) handleAPIHardware(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(s.hardware); err != nil {
-		s.proxylog.Warnf("failed to encode hardware snapshot: %v", err)
+		s.logs.ProxyLogs.Warnf("failed to encode hardware snapshot: %v", err)
 	}
 }
 
@@ -486,7 +487,7 @@ const (
 	msgTypeProfile     messageType = "profileChanged"
 )
 
-// sendDropReportInterval is how often handleAPIEvents reports messages that
+// sendDropReportInterval is how often an SSE handler reports messages that
 // were dropped because the send buffer was full.
 const sendDropReportInterval = 5 * time.Second
 
@@ -495,9 +496,11 @@ type messageEnvelope struct {
 	Data string      `json:"data"`
 }
 
-// handleAPIEvents streams server events (model status, log data, metrics,
-// in-flight counts) to the client as Server-Sent Events.
-func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
+// serveSSE streams messages to the client as Server-Sent Events until the
+// client disconnects or the server shuts down. setup subscribes to the events
+// the stream carries, queues any initial payload with send, and returns a
+// function that unsubscribes. name identifies the handler in drop warnings.
+func (s *Server) serveSSE(w http.ResponseWriter, r *http.Request, name string, setup func(send func(messageEnvelope)) (unsubscribe func())) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -519,17 +522,17 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 
 	// Dropped messages are counted and reported at most once per interval.
 	// Logging every drop floods the logs because each warning becomes a log
-	// event that is sent over this same buffer, which drops again.
+	// event that may be sent over this same buffer, which drops again.
 	dropped := newSuppressionCounter(sendDropReportInterval)
 	cancelled := newSuppressionCounter(sendDropReportInterval)
 	reportDropped := func(n int) {
-		s.proxylog.Warnf("handleAPIEvents sendBuffer full, %d messages suppressed", n)
+		s.logs.ProxyLogs.Warnf("%s sendBuffer full, %d messages suppressed", name, n)
 	}
 	reportCancelled := func(n int) {
-		s.proxylog.Warnf("handleAPIEvents send suppressed due to context done, %d messages suppressed", n)
+		s.logs.ProxyLogs.Warnf("%s send suppressed due to context done, %d messages suppressed", name, n)
 	}
-	// runs after the event handlers below are unsubscribed so any remaining
-	// counts are reported before the connection goes away
+	// runs after setup's subscriptions are removed so any remaining counts
+	// are reported before the connection goes away
 	defer func() {
 		if n, ok := dropped.Flush(); ok {
 			reportDropped(n)
@@ -552,59 +555,8 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	sendModels := func() {
-		if data, err := json.Marshal(s.modelStatus()); err == nil {
-			send(messageEnvelope{Type: msgTypeModelStatus, Data: string(data)})
-		}
-	}
-	sendLogData := func(source string, data []byte) {
-		if j, err := json.Marshal(map[string]string{"source": source, "data": string(data)}); err == nil {
-			send(messageEnvelope{Type: msgTypeLogData, Data: string(j)})
-		}
-	}
-	sendActivity := func(id int) {
-		if j, err := json.Marshal(map[string]int{"id": id}); err == nil {
-			send(messageEnvelope{Type: msgTypeActivity, Data: string(j)})
-		}
-	}
-	sendInFlight := func(update swaputil.InFlightRequestsEvent) {
-		if update.Operation == inflightOperationSnapshot && update.Requests == nil {
-			update.Requests = []swaputil.InflightRequestEntry{}
-		}
-		if j, err := json.Marshal(update); err == nil {
-			send(messageEnvelope{Type: msgTypeInFlight, Data: string(j)})
-		}
-	}
-	sendUIConfig := func() {
-		if j, err := json.Marshal(s.cfg.UI); err == nil {
-			send(messageEnvelope{Type: msgTypeUIConfig, Data: string(j)})
-		}
-	}
-	sendProfile := func() {
-		if j, err := json.Marshal(map[string]any{"active": nullableProfile(s.ActiveProfile())}); err == nil {
-			send(messageEnvelope{Type: msgTypeProfile, Data: string(j)})
-		}
-	}
 
-	defer event.On(func(e swaputil.ProcessStateChangeEvent) { sendModels() })()
-	defer event.On(func(e swaputil.ModelCapabilitiesChangedEvent) { sendModels() })()
-	defer event.On(func(e swaputil.ConfigFileChangedEvent) { sendModels() })()
-	defer event.On(func(e swaputil.ProfileChangedEvent) {
-		sendProfile()
-		sendModels()
-	})()
-	defer s.proxylog.OnLogData(func(data []byte) { sendLogData("proxy", data) })()
-	defer s.upstreamlog.OnLogData(func(data []byte) { sendLogData("upstream", data) })()
-	defer event.On(func(e ActivityLogEvent) { sendActivity(e.Metrics.ID) })()
-	defer event.On(func(e swaputil.InFlightRequestsEvent) { sendInFlight(e) })()
-
-	// initial payload
-	sendLogData("proxy", s.proxylog.GetHistory())
-	sendLogData("upstream", s.upstreamlog.GetHistory())
-	sendModels()
-	sendUIConfig()
-	sendProfile()
-	sendInFlight(s.inflight.Current())
+	defer setup(send)()
 
 	for {
 		select {
@@ -620,5 +572,113 @@ func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, "event:message\ndata:%s\n\n", data)
 			flusher.Flush()
 		}
+	}
+}
+
+// handleAPIEvents streams server events (model status, activity, in-flight
+// requests, UI config, profile changes) to the client as Server-Sent Events.
+// Log data has its own stream, handleAPILogEvents.
+func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
+	s.serveSSE(w, r, "handleAPIEvents", func(send func(messageEnvelope)) func() {
+		sendModels := func() {
+			if data, err := json.Marshal(s.modelStatus()); err == nil {
+				send(messageEnvelope{Type: msgTypeModelStatus, Data: string(data)})
+			}
+		}
+		sendActivity := func(id int) {
+			if j, err := json.Marshal(map[string]int{"id": id}); err == nil {
+				send(messageEnvelope{Type: msgTypeActivity, Data: string(j)})
+			}
+		}
+		sendInFlight := func(update swaputil.InFlightRequestsEvent) {
+			if update.Operation == inflightOperationSnapshot && update.Requests == nil {
+				update.Requests = []swaputil.InflightRequestEntry{}
+			}
+			if j, err := json.Marshal(update); err == nil {
+				send(messageEnvelope{Type: msgTypeInFlight, Data: string(j)})
+			}
+		}
+		sendUIConfig := func() {
+			if j, err := json.Marshal(s.cfg.UI); err == nil {
+				send(messageEnvelope{Type: msgTypeUIConfig, Data: string(j)})
+			}
+		}
+		sendProfile := func() {
+			if j, err := json.Marshal(map[string]any{"active": nullableProfile(s.ActiveProfile())}); err == nil {
+				send(messageEnvelope{Type: msgTypeProfile, Data: string(j)})
+			}
+		}
+
+		unsubscribe := []context.CancelFunc{
+			event.On(func(e swaputil.ProcessStateChangeEvent) { sendModels() }),
+			event.On(func(e swaputil.ModelCapabilitiesChangedEvent) { sendModels() }),
+			event.On(func(e swaputil.ConfigFileChangedEvent) { sendModels() }),
+			event.On(func(e swaputil.ProfileChangedEvent) {
+				sendProfile()
+				sendModels()
+			}),
+			event.On(func(e ActivityLogEvent) { sendActivity(e.Metrics.ID) }),
+			event.On(func(e swaputil.InFlightRequestsEvent) { sendInFlight(e) }),
+		}
+
+		// initial payload
+		sendModels()
+		sendUIConfig()
+		sendProfile()
+		sendInFlight(s.inflight.Current())
+
+		return func() { cancelAll(unsubscribe) }
+	})
+}
+
+// handleAPILogEvents streams log data to the client as Server-Sent Events.
+// The streams are chosen with repeated query parameters, for example
+// ?stream=proxy&stream=http. Each stream's history is sent first unless
+// ?no-history is set.
+func (s *Server) handleAPILogEvents(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	names := query["stream"]
+	if len(names) == 0 {
+		swaputil.SendResponse(w, r, http.StatusBadRequest, "at least one stream is required: proxy, upstream or http")
+		return
+	}
+	streams := make(map[string]*logmon.Monitor, len(names))
+	for _, name := range names {
+		log, ok := s.logs.Stream(name)
+		if !ok {
+			swaputil.SendResponse(w, r, http.StatusBadRequest, fmt.Sprintf("invalid stream %q. Use proxy, upstream or http", name))
+			return
+		}
+		streams[name] = log
+	}
+	_, skipHistory := query["no-history"]
+
+	s.serveSSE(w, r, "handleAPILogEvents", func(send func(messageEnvelope)) func() {
+		sendLogData := func(source string, data []byte) {
+			if j, err := json.Marshal(map[string]string{"source": source, "data": string(data)}); err == nil {
+				send(messageEnvelope{Type: msgTypeLogData, Data: string(j)})
+			}
+		}
+
+		unsubscribe := make([]context.CancelFunc, 0, len(streams))
+		for name, log := range streams {
+			unsubscribe = append(unsubscribe, log.OnLogData(func(data []byte) { sendLogData(name, data) }))
+		}
+		if !skipHistory {
+			for name, log := range streams {
+				if history := log.GetHistory(); len(history) != 0 {
+					sendLogData(name, history)
+				}
+			}
+		}
+		return func() { cancelAll(unsubscribe) }
+	})
+}
+
+// cancelAll calls every cancel function, last first, matching the order
+// deferred calls would run in.
+func cancelAll(cancels []context.CancelFunc) {
+	for i := len(cancels) - 1; i >= 0; i-- {
+		cancels[i]()
 	}
 }

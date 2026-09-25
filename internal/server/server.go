@@ -32,9 +32,7 @@ import (
 type Server struct {
 	cfg config.Config
 
-	muxlog      *logmon.Monitor
-	proxylog    *logmon.Monitor
-	upstreamlog *logmon.Monitor
+	logs *logmon.Group
 
 	perf     *perf.Monitor
 	inflight *inflightTracker
@@ -125,7 +123,7 @@ func (s *Server) setActiveProfile(name string) (bool, error) {
 	s.activeProfile = name
 	s.profileMu.Unlock()
 
-	s.proxylog.Infof("active profile changed to %q", name)
+	s.logs.ProxyLogs.Infof("active profile changed to %q", name)
 	event.Emit(swaputil.ProfileChangedEvent{Active: name})
 	return true, nil
 }
@@ -207,24 +205,24 @@ type BuildInfo struct {
 	Date    string
 }
 
-func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, upstreamlog *logmon.Monitor, perfMon *perf.Monitor, st store.Store, build BuildInfo, hardware *hw.HardwareSnapshot, refs *docagent.Docs) (*Server, error) {
+func New(cfg config.Config, logs *logmon.Group, perfMon *perf.Monitor, st store.Store, build BuildInfo, hardware *hw.HardwareSnapshot, refs *docagent.Docs) (*Server, error) {
 	var local router.LocalRouter
 	var err error
 
 	switch cfg.Routing.Router.Use {
 	case "matrix":
-		local, err = router.NewMatrix(cfg, proxylog, upstreamlog)
+		local, err = router.NewMatrix(cfg, logs)
 		if err != nil {
 			return nil, fmt.Errorf("creating matrix router: %w", err)
 		}
 	default: // "group"
-		local, err = router.NewGroup(cfg, proxylog, upstreamlog)
+		local, err = router.NewGroup(cfg, logs)
 		if err != nil {
 			return nil, fmt.Errorf("creating group router: %w", err)
 		}
 	}
 
-	peer, err := router.NewPeer(cfg, proxylog)
+	peer, err := router.NewPeer(cfg, logs.ProxyLogs)
 	if err != nil {
 		return nil, fmt.Errorf("creating peer router: %w", err)
 	}
@@ -236,12 +234,10 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 	shutdownCtx, shutdownFn := context.WithCancel(context.Background())
 	s := &Server{
 		cfg:           cfg,
-		muxlog:        muxlog,
-		proxylog:      proxylog,
-		upstreamlog:   upstreamlog,
+		logs:          logs,
 		perf:          perfMon,
 		inflight:      newInflightTracker(),
-		metrics:       newMetricsMonitor(proxylog, cfg.MetricsMaxInMemory, cfg.CaptureBuffer, st),
+		metrics:       newMetricsMonitor(logs.ProxyLogs, cfg.MetricsMaxInMemory, cfg.CaptureBuffer, st),
 		store:         st,
 		build:         build,
 		hardware:      hardware,
@@ -252,7 +248,7 @@ func New(cfg config.Config, muxlog *logmon.Monitor, proxylog *logmon.Monitor, up
 		shutdownCtx:   shutdownCtx,
 		shutdownFn:    shutdownFn,
 	}
-	s.capcompat = capcompat.New(st.Cache(), proxylog)
+	s.capcompat = capcompat.New(st.Cache(), logs.ProxyLogs)
 	s.capcompatCancel = event.On(s.onProcessStateChange)
 
 	// SysProvider is constructed here because this is where perf and hardware
@@ -286,10 +282,10 @@ func (s *Server) localPeerHandler(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case s.local.Handles(data.ModelID):
-		s.proxylog.Debugf("dispatch: using local process for model: %s", data.ModelID)
+		s.logs.ProxyLogs.Debugf("dispatch: using local process for model: %s", data.ModelID)
 		s.local.ServeHTTP(w, r)
 	case s.peer.Handles(data.ModelID):
-		s.proxylog.Debugf("dispatch: using peer for model: %s", data.ModelID)
+		s.logs.ProxyLogs.Debugf("dispatch: using peer for model: %s", data.ModelID)
 		s.peer.ServeHTTP(w, r)
 	default:
 		swaputil.SendError(w, r, router.ErrNoRouterFound)
@@ -394,6 +390,7 @@ func (s *Server) routes() {
 	mux.Handle("PUT /api/profiles/active", apiChain.ThenFunc(s.handleAPIActiveProfile))
 	mux.Handle("POST /api/inflight/{id}/cancel", apiChain.ThenFunc(s.handleAPICancelInflight))
 	mux.Handle("GET /api/events", apiChain.ThenFunc(s.handleAPIEvents))
+	mux.Handle("GET /api/events/logs", apiChain.ThenFunc(s.handleAPILogEvents))
 	mux.Handle("GET /api/metrics/activity", apiChain.ThenFunc(s.handleAPIActivity))
 	mux.Handle("GET /api/metrics/stats", apiChain.ThenFunc(s.handleAPIActivityStats))
 	mux.Handle("GET /api/performance", apiChain.ThenFunc(s.handleAPIPerformance))
@@ -409,7 +406,7 @@ func (s *Server) routes() {
 	mux.Handle("/api/mcp", apiChain.ThenFunc(s.handleAPIMCP))
 
 	s.mux = mux
-	s.handler = chain.New(CreateRequestLogMiddleware(s.proxylog), CreateCORSMiddleware(s.cfg)).Then(mux)
+	s.handler = chain.New(CreateRequestLogMiddleware(s.logs.HttpLogs), CreateCORSMiddleware(s.cfg)).Then(mux)
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {

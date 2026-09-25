@@ -134,7 +134,7 @@ func CreateSelectorMiddleware(s *Server) chain.Middleware {
 				return
 			}
 
-			s.proxylog.Debugf("selector: id=%s target=%s", model, target)
+			s.logs.ProxyLogs.Debugf("selector: id=%s target=%s", model, target)
 
 			if selector.Strategy == config.SelectorStrategySpillover {
 				modelConfig, _, local := s.cfg.FindConfig(target)

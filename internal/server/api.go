@@ -395,10 +395,10 @@ func (s *Server) startPreload() {
 	go func() {
 		for _, modelID := range models {
 			if !s.local.Handles(modelID) {
-				s.proxylog.Warnf("preload: model %s is not a local model, skipping", modelID)
+				s.logs.ProxyLogs.Warnf("preload: model %s is not a local model, skipping", modelID)
 				continue
 			}
-			s.proxylog.Infof("preloading model: %s", modelID)
+			s.logs.ProxyLogs.Infof("preloading model: %s", modelID)
 
 			req, err := http.NewRequestWithContext(s.shutdownCtx, http.MethodGet, "/", nil)
 			if err != nil {
@@ -411,7 +411,7 @@ func (s *Server) startPreload() {
 
 			success := dw.status < http.StatusBadRequest
 			if !success {
-				s.proxylog.Errorf("failed to preload model %s: status %d", modelID, dw.status)
+				s.logs.ProxyLogs.Errorf("failed to preload model %s: status %d", modelID, dw.status)
 			}
 			event.Emit(swaputil.ModelPreloadedEvent{ModelName: modelID, Success: success})
 		}

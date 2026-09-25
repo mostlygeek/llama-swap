@@ -287,16 +287,15 @@ func TestProxy_HandleUpstreamPreservesEscapedPath(t *testing.T) {
 func upstreamMetricsServer(t *testing.T, response string) *Server {
 	t.Helper()
 	cfg := config.Config{Models: map[string]config.ModelConfig{"m1": {}}}
-	proxylog := logmon.NewWriter(io.Discard)
+	logs := logmon.NewGroup(io.Discard, true, true, true)
+	proxylog := logs.ProxyLogs
 	s := &Server{
-		cfg:         cfg,
-		muxlog:      logmon.NewWriter(io.Discard),
-		proxylog:    proxylog,
-		upstreamlog: logmon.NewWriter(io.Discard),
-		inflight:    newInflightTracker(),
-		metrics:     newTestMetricsMonitor(t, proxylog, 10, 0),
-		local:       newStubRouter([]string{"m1"}, response),
-		peer:        newStubRouter(nil, ""),
+		cfg:      cfg,
+		logs:     logs,
+		inflight: newInflightTracker(),
+		metrics:  newTestMetricsMonitor(t, proxylog, 10, 0),
+		local:    newStubRouter([]string{"m1"}, response),
+		peer:     newStubRouter(nil, ""),
 	}
 	s.routes()
 	return s
@@ -541,16 +540,15 @@ func TestServer_HandleUpstream_InflightIgnoresConfiguredWebsocket(t *testing.T) 
 func upstreamInflightServer(t *testing.T, local *stubRouter, mc config.ModelConfig) *Server {
 	t.Helper()
 	cfg := config.Config{Models: map[string]config.ModelConfig{"m1": mc}}
-	proxylog := logmon.NewWriter(io.Discard)
+	logs := logmon.NewGroup(io.Discard, true, true, true)
+	proxylog := logs.ProxyLogs
 	s := &Server{
-		cfg:         cfg,
-		muxlog:      logmon.NewWriter(io.Discard),
-		proxylog:    proxylog,
-		upstreamlog: logmon.NewWriter(io.Discard),
-		inflight:    newInflightTracker(),
-		metrics:     newTestMetricsMonitor(t, proxylog, 10, 0),
-		local:       local,
-		peer:        newStubRouter(nil, ""),
+		cfg:      cfg,
+		logs:     logs,
+		inflight: newInflightTracker(),
+		metrics:  newTestMetricsMonitor(t, proxylog, 10, 0),
+		local:    local,
+		peer:     newStubRouter(nil, ""),
 	}
 	s.routes()
 	return s
