@@ -86,8 +86,8 @@ func parseSystemProfiler(data []byte, snapshot *HardwareSnapshot) ([]detectedAcc
 			architecture = match
 		}
 		var driver *Driver
-		if firstMapString(display, "spdisplays_metal", "spdisplays_metal_support") != "" {
-			driver = &Driver{Name: stringPtr("Metal")}
+		if metal := firstMapString(display, metalFamilyKeys...); metal != "" {
+			driver = &Driver{Name: stringPtr("Metal"), Version: nonEmptyStringPtr(metalVersion(metal))}
 		}
 		result = append(result, detectedAccelerator{
 			identity: fmt.Sprintf("display-%04d", index),
