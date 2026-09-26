@@ -22,10 +22,12 @@ apiKeys:
 Clients may present it as `Authorization: Bearer <key>`, `x-api-key: <key>`, or
 HTTP Basic. The web UI and everything under `/api/` are covered too.
 
-Two static files stay reachable without a key regardless: `/favicon.ico` and
-`/ui/site.webmanifest`. Browsers fetch both themselves — the favicon for the
-tab, the manifest to decide whether to offer installing llama-swap as a PWA —
-and have no way to attach your API key to those requests.
+A handful of static files stay reachable without a key regardless:
+`/favicon.ico`, `/ui/site.webmanifest`, and the two icons it references
+(`/ui/web-app-manifest-192x192.png`, `/ui/web-app-manifest-512x512.png`).
+Browsers fetch all of these themselves — the favicon for the tab, the
+manifest and its icons to decide whether to offer installing llama-swap as a
+PWA — and have no way to attach your API key to those requests.
 
 Generate a real one:
 

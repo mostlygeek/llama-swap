@@ -362,11 +362,18 @@ func (s *Server) routes() {
 
 	// Embedded UI.
 	mux.Handle("GET /ui/", chain.New(authMW).ThenFunc(s.handleUI))
-	// The browser fetches the web app manifest itself while deciding whether to
-	// offer installing the PWA, and it has no way to attach an API key to that
-	// request. Serve it without auth so the install prompt isn't silently lost
-	// behind a 401 when apiKeys is set (issue #1175).
-	mux.HandleFunc("GET /ui/site.webmanifest", s.handleUI)
+	// The browser fetches the web app manifest - and the icons it references -
+	// itself while deciding whether to offer installing the PWA, and it has no
+	// way to attach an API key to those requests. Serve them without auth so
+	// the install prompt isn't silently lost behind a 401 when apiKeys is set
+	// (issue #1175).
+	for _, name := range []string{
+		"site.webmanifest",
+		"web-app-manifest-192x192.png",
+		"web-app-manifest-512x512.png",
+	} {
+		mux.HandleFunc("GET /ui/"+name, s.handleUI)
+	}
 	mux.HandleFunc("GET /favicon.ico", s.handleFavicon)
 
 	// Prometheus metrics (wrapped by apiChain, matches the legacy endpoint).
