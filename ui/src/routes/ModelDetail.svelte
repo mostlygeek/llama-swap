@@ -27,16 +27,22 @@
   // displayed twice.
   let hasName = $derived(!!model?.name && model.name !== model.id);
 
-  // Uptime ticks once a second while the model is ready.
+  // Uptime ticks once a second while the model is ready. It counts from
+  // readyAt, which is on this browser's clock, so it works even when the
+  // server's clock differs; readySince is only shown in the tooltip.
   let readySince = $derived(model?.readySince);
+  let readyAt = $derived(model?.readyAt);
+  let isReady = $derived(readyAt !== undefined);
   let now = $state(Date.now());
+  // Re-runs when a status update moves readyAt, so `now` is never older
+  // than readyAt's anchor.
   $effect(() => {
-    if (!readySince) return;
+    if (readyAt === undefined) return;
     now = Date.now();
     const timer = setInterval(() => (now = Date.now()), 1000);
     return () => clearInterval(timer);
   });
-  let uptime = $derived(readySince ? formatUptime(now - Date.parse(readySince)) : "");
+  let uptime = $derived(readyAt !== undefined ? formatUptime(now - readyAt) : "");
 </script>
 
 <div class="flex h-full flex-col gap-4 overflow-y-auto p-2">
@@ -62,8 +68,8 @@
                 <CopyableId value={model.id} class="-ml-1 font-mono text-xs" />
               {/if}
               <span class="text-xs uppercase tracking-wide">{model.state}</span>
-              {#if readySince}
-                <span class="text-xs" title="Ready since {formatAbsoluteTime(readySince)}">
+              {#if isReady}
+                <span class="text-xs" title={readySince ? `Ready since ${formatAbsoluteTime(readySince)}` : undefined}>
                   up {uptime}
                 </span>
               {/if}

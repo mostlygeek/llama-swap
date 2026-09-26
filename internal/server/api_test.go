@@ -897,8 +897,16 @@ func TestServer_ModelStatus_ReadySince(t *testing.T) {
 	}}
 
 	got := make(map[string]string)
+	uptime := make(map[string]int64)
 	for _, m := range s.modelStatus() {
 		got[m.Id] = m.ReadySince
+		uptime[m.Id] = m.UptimeMs
+	}
+	if want := time.Since(since).Milliseconds(); uptime["ready"] < want-1000 || uptime["ready"] > want+1000 {
+		t.Errorf("ready uptimeMs = %d, want about %d", uptime["ready"], want)
+	}
+	if uptime["stopping"] != 0 || uptime["stopped"] != 0 {
+		t.Errorf("uptimeMs = %v, want 0 for models that are not ready", uptime)
 	}
 	want := map[string]string{
 		"ready":    "2026-09-25T06:41:37Z",

@@ -34,6 +34,11 @@ export interface Model {
   context_length?: number;
   // when the model last became ready (RFC 3339); only set while ready
   readySince?: string;
+  // how long the model had been ready when the server sent this (ms)
+  uptimeMs?: number;
+  // client-only: when the model became ready by this browser's clock,
+  // derived from uptimeMs on receipt so server clock skew doesn't matter
+  readyAt?: number;
   // selector-only fields from the v1/models llamaswap metadata
   strategy?: string;
   targets?: string[];

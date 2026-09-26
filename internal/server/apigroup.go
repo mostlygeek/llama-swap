@@ -32,6 +32,10 @@ type apiModel struct {
 	// ReadySince is when the model last became ready (RFC 3339). Only set
 	// while the model is ready.
 	ReadySince string `json:"readySince,omitempty"`
+	// UptimeMs is how long the model has been ready as of this payload. The
+	// UI counts from it rather than from ReadySince, so a browser clock that
+	// differs from the server's doesn't skew the uptime.
+	UptimeMs int64 `json:"uptimeMs,omitempty"`
 }
 
 type apiProfile struct {
@@ -114,10 +118,13 @@ func (s *Server) modelStatus() []apiModel {
 		mc := s.cfg.Models[id]
 		state := "stopped"
 		var readySince string
+		var uptimeMs int64
 		if st, ok := running[id]; ok {
 			state = string(st.State)
 			if st.State == process.StateReady && !st.ReadySince.IsZero() {
 				readySince = st.ReadySince.UTC().Format(time.RFC3339)
+				// At least 1 so omitempty keeps it for a model that just became ready.
+				uptimeMs = max(1, time.Since(st.ReadySince).Milliseconds())
 			}
 		}
 		// Same resolution /v1/models uses, so the dashboard and the OpenAI
@@ -136,6 +143,7 @@ func (s *Server) modelStatus() []apiModel {
 			Capabilities:  capsMap,
 			ContextLength: ctxLen,
 			ReadySince:    readySince,
+			UptimeMs:      uptimeMs,
 		})
 	}
 
