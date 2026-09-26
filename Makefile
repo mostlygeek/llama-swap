@@ -114,10 +114,18 @@ release:
 	fi
 
 # Get the highest tag in v{number} format, increment it, and create a new tag
-	@highest_tag=$$(git tag --sort=-v:refname | grep -E '^v[0-9]+$$' | head -n 1 || echo "v0"); \
+	@if command -v claude >/dev/null 2>&1; then \
+		harness=claude; \
+	elif command -v codex >/dev/null 2>&1; then \
+		harness=codex; \
+	else \
+		echo "Error: Claude or Codex must be installed to generate the changelog before tagging." >&2; \
+		exit 1; \
+	fi; \
+	highest_tag=$$(git tag --sort=-v:refname | grep -E '^v[0-9]+$$' | head -n 1 || echo "v0"); \
 	new_tag="v$$(( $${highest_tag#v} + 1 ))"; \
 	echo "Generating changelog entry for: $$new_tag"; \
-	scripts/add-changelog.sh "$$new_tag"; \
+	scripts/add-changelog.sh "$$new_tag" "$$harness"; \
 	git add CHANGELOG.md; \
 	git commit -m "changelog: $$new_tag"; \
 	echo "tagging new version: $$new_tag"; \
