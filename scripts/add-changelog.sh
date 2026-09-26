@@ -33,7 +33,7 @@ run_codex() {
 
   codex exec \
     --approve-for-me \
-    --model gpt-5.6-terra \
+    --model gpt-6-sol \
     -c 'model_reasoning_effort="medium"' \
     "$prompt"
 }
