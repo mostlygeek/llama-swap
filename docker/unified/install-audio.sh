@@ -41,6 +41,12 @@ git -c 'url.https://github.com/.insteadOf=git@github.com:' \
 # libraries under ENGINE_ENABLE_CPU_ALL_VARIANTS, which would drop a third,
 # ABI-incompatible libggml*.so into the /usr/local/lib shared with whisper.cpp
 # and stable-diffusion.cpp. The check after the build enforces that.
+#
+# AUDIOCPP_STATIC_ESPEAK=ON builds the pinned eSpeak-ng release from source and
+# links it into both binaries. Kokoro, SanoTTS and Inflect use it as their
+# phonemizer; without it they fail at runtime with "Could not load eSpeak-ng".
+# The phoneme data stays a separate directory, installed next to the binaries
+# below. See docs/espeak_phonemizer.md in audio.cpp.
 CMAKE_FLAGS=(
     -DCMAKE_BUILD_TYPE=Release
     -DCMAKE_C_COMPILER_LAUNCHER=ccache
@@ -50,6 +56,7 @@ CMAKE_FLAGS=(
     -DAUDIOCPP_BUILD_NATIVE_MODEL_MANAGER=ON
     -DAUDIOCPP_BUILD_SERVER_FRONTENDS=ON
     -DAUDIOCPP_SERVER_FRONTENDS_DIR=external/audio.cpp-server-frontends
+    -DAUDIOCPP_STATIC_ESPEAK=ON
     '-DAUDIOCPP_SERVER_FRONTEND_MODULES=audio_decode;mp3_encode'
     -DENGINE_ENABLE_NATIVE_CPU=OFF
     -DENGINE_ENABLE_OPENMP=ON
@@ -125,7 +132,7 @@ verify_linkage() {
     # whisper.cpp's and stable-diffusion.cpp's libggml*.so into /usr/local/lib,
     # so a shared audio.cpp build would either collide with them or need its own
     # library directory. Keep it static and fail loudly if that ever changes.
-    if grep -qE 'libggml|libengine' <<<"$needed"; then
+    if grep -qE 'libggml|libengine|libespeak' <<<"$needed"; then
         echo "FATAL: $bin expects audio.cpp shared libraries; only static builds" >&2
         echo "       are installed here (see the CMAKE_FLAGS comment)." >&2
         echo "$needed" >&2
@@ -148,5 +155,31 @@ done
 rm -rf "/install/share/audiocpp/model_specs"
 cp -r model_specs "/install/share/audiocpp/model_specs"
 
+# eSpeak-ng data. With static eSpeak and no explicit data path, audio.cpp looks
+# next to the executable for espeak-ng-data.bin first, then an espeak-ng-data
+# directory. The .bin is a packed copy of the same directory that gets
+# unpacked into $HOME/.cache/audio.cpp on first use, which fails when HOME is
+# not writable (the non-root image's /app is owned by root, or a read-only root
+# filesystem). Install the unpacked directory instead so it is read in place,
+# and do not install the .bin, since it would take precedence.
+ESPEAK_DATA=build/_deps/espeak-static/build/espeak-ng-data
+if [ ! -f "$ESPEAK_DATA/phontab" ] || [ ! -f "$ESPEAK_DATA/en_dict" ]; then
+    echo "FATAL: eSpeak-ng data not found at $ESPEAK_DATA" >&2
+    exit 1
+fi
+rm -rf /install/bin/espeak-ng-data
+cp -r "$ESPEAK_DATA" /install/bin/espeak-ng-data
+
+# eSpeak-ng is GPL-3.0-or-later. audio.cpp stages its COPYING file and the
+# exact upstream source archive it built from; ship both with the image.
+if [ ! -f build/bin/licenses/espeak-ng/COPYING ]; then
+    echo "FATAL: eSpeak-ng license files not found in build/bin/licenses/" >&2
+    exit 1
+fi
+rm -rf /install/share/audiocpp/licenses/espeak-ng
+mkdir -p /install/share/audiocpp/licenses
+cp -r build/bin/licenses/espeak-ng /install/share/audiocpp/licenses/espeak-ng
+
 echo "=== audio.cpp build complete ==="
 ls -la /install/bin/
+du -sh /install/bin/espeak-ng-data
