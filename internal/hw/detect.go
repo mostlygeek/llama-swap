@@ -108,7 +108,7 @@ func populateOperatingSystem(out *OperatingSystem, info *host.InfoStat) {
 }
 
 func populateCPU(ctx context.Context, out *CPU) {
-	infos, _ := cpu.InfoWithContext(ctx)
+	infos, _ := cpuInfo(ctx)
 	for _, info := range infos {
 		if out.Vendor == nil {
 			out.Vendor = nonEmptyStringPtr(info.VendorID)
