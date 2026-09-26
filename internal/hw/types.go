@@ -15,10 +15,19 @@ type HardwareSnapshot struct {
 	Capture         HardwareCapture      `json:"capture"`
 	Architecture    Architecture         `json:"architecture"`
 	OperatingSystem OperatingSystem      `json:"operating_system"`
+	System          System               `json:"system"`
 	Environment     ExecutionEnvironment `json:"environment"`
 	CPU             CPU                  `json:"cpu"`
 	Memory          SystemMemory         `json:"memory"`
 	Accelerators    []Accelerator        `json:"accelerators"`
+}
+
+// System identifies the physical machine from DMI product data. A nil field
+// means the value is not exposed by the platform.
+type System struct {
+	Vendor *string `json:"vendor"`
+	Model  *string `json:"model"`
+	Family *string `json:"family"`
 }
 
 type HardwareCapture struct {
@@ -74,6 +83,10 @@ type Accelerator struct {
 	Memory          AcceleratorMemory `json:"memory"`
 	Driver          *Driver           `json:"driver"`
 	PowerLimitWatts *float64          `json:"power_limit_watts"`
+	// NominalPowerWatts is a vendor-documented nominal power figure for the
+	// accelerator or its SoC, reported when the platform exposes no power
+	// limit. It is a design figure, not an enforced limit.
+	NominalPowerWatts *float64 `json:"nominal_power_watts"`
 }
 
 type AcceleratorMemory struct {

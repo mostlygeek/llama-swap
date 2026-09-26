@@ -5,12 +5,14 @@ package hw
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/shirou/gopsutil/v4/host"
 )
@@ -19,12 +21,21 @@ var drmCardPattern = regexp.MustCompile(`^card\d+$`)
 
 func detectPlatform(ctx context.Context, snapshot *HardwareSnapshot) ([]detectedAccelerator, error) {
 	var result []detectedAccelerator
-	if nvidia, err := detectNvidia(ctx); err == nil {
+	if nvidia, err := detectNvidia(ctx, snapshot); err == nil {
 		result = append(result, nvidia...)
 	}
 	result = append(result, detectAMD(ctx)...)
 	if sysfs, err := detectDRMSysfs(); err == nil {
 		result = append(result, sysfs...)
+	}
+	snapshot.System = detectSystem("/sys/class/dmi/id")
+	if snapshot.CPU.SocketCount == nil {
+		// arm64 systems have no physical id in /proc/cpuinfo, so the socket
+		// count falls back to the CPU package topology; systems without a
+		// physical id and without package topology keep an unknown count.
+		if sockets := packageSocketCount("/sys/devices/system/cpu"); sockets > 0 {
+			snapshot.CPU.SocketCount = intPtr(sockets)
+		}
 	}
 	return result, nil
 }
@@ -255,4 +266,79 @@ func readTrimmed(path string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(data))
+}
+
+// dmiPlaceholders lists the standard vendor placeholder values that mean
+// "no data" rather than an actual value.
+var dmiPlaceholders = map[string]struct{}{
+	"":                       {},
+	"none":                   {},
+	"unknown":                {},
+	"default string":         {},
+	"to be filled by o.e.m.": {},
+	"system manufacturer":    {},
+	"system product name":    {},
+	"not defined":            {},
+	"invalid":                {},
+}
+
+// detectSystem identifies the machine from DMI product data. product_version
+// is the human-readable product name where meaningful; product_name is the
+// machine type.
+func detectSystem(root string) System {
+	model := cleanDMIValue(readTrimmed(filepath.Join(root, "product_version")))
+	if model != nil && isRevisionLike(*model) {
+		// Many OEMs put a revision number (1.0, 0001) or "Not Specified"
+		// in product_version; that is not a useful model name.
+		model = nil
+	}
+	if model == nil {
+		model = cleanDMIValue(readTrimmed(filepath.Join(root, "product_name")))
+	}
+	return System{
+		Vendor: cleanDMIValue(readTrimmed(filepath.Join(root, "sys_vendor"))),
+		Model:  model,
+		Family: cleanDMIValue(readTrimmed(filepath.Join(root, "product_family"))),
+	}
+}
+
+// isRevisionLike reports whether a DMI product_version value is a bare
+// revision (digits, dots and dashes only) or an explicit "not specified"
+// marker rather than a descriptive product name.
+func isRevisionLike(value string) bool {
+	if strings.EqualFold(value, "not specified") {
+		return true
+	}
+	if value == "" {
+		return true
+	}
+	for _, r := range value {
+		if !unicode.IsDigit(r) && r != '.' && r != '-' && r != ' ' {
+			return false
+		}
+	}
+	return true
+}
+
+func cleanDMIValue(value string) *string {
+	value = strings.TrimSpace(value)
+	if _, placeholder := dmiPlaceholders[strings.ToLower(value)]; placeholder {
+		return nil
+	}
+	return &value
+}
+
+// packageSocketCount estimates the socket count as the number of distinct
+// physical package IDs reported by the CPU topology, matching lscpu. It
+// returns 0 when the topology files are absent, in which case the socket
+// count stays unknown.
+func packageSocketCount(cpuRoot string) int {
+	packages := make(map[string]struct{})
+	for id := 0; ; id++ {
+		value := readTrimmed(filepath.Join(cpuRoot, fmt.Sprintf("cpu%d", id), "topology", "physical_package_id"))
+		if value == "" {
+			return len(packages)
+		}
+		packages[value] = struct{}{}
+	}
 }
