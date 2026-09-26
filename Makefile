@@ -168,7 +168,7 @@ kubeswap: $(BUILD_DIR)
 # Also builds tailcat-playground-server for the host, a small binary with the
 # split pair embedded, for when there is no web server to hand.
 TAILCAT_DIST = $(BUILD_DIR)/tailcat-playground
-TAILCAT_SERVER_DIST = cmd/tailcat-playground-server/dist
+TAILCAT_SERVER_DIST = cmd/tailcat-playground/dist
 TAILCAT_TAGS = $(shell cat "$(shell go list -m -f '{{.Dir}}' github.com/tailscale/tailcat)/build-tags.txt")
 
 tailcat-playground: ui/node_modules
@@ -176,14 +176,14 @@ tailcat-playground: ui/node_modules
 	mkdir -p $(TAILCAT_DIST) ui/src/tailcat/generated
 	cp "$(shell go env GOROOT)/lib/wasm/wasm_exec.js" ui/src/tailcat/generated/wasm_exec.js
 	GOOS=js GOARCH=wasm go build -tags "$(TAILCAT_TAGS)" -ldflags="-s -w" \
-		-o $(TAILCAT_DIST)/main.wasm ./cmd/tailcat-playground-wasm
+		-o $(TAILCAT_DIST)/main.wasm ./cmd/tailcat-playground
 	gzip -9 -f -k $(TAILCAT_DIST)/main.wasm
 	cd ui && npm run build:tailcat
 	node ui/scripts/build-tailcat.mjs $(TAILCAT_DIST)
 	@echo "Building the Tailcat Playground server..."
 	mkdir -p $(TAILCAT_SERVER_DIST)
 	cp $(TAILCAT_DIST)/index.html $(TAILCAT_DIST)/main.wasm.gz $(TAILCAT_SERVER_DIST)/
-	go build -tags embed_playground -ldflags="-s -w" -o $(TAILCAT_DIST)/tailcat-playground-server ./cmd/tailcat-playground-server
+	go build -tags embed_playground -ldflags="-s -w" -o $(TAILCAT_DIST)/tailcat-playground-server ./cmd/tailcat-playground
 
 # Tests for the Tailcat Playground's js/wasm fetch bridge. They run under Node
 # via the Go toolchain's own wasm runner, and stand an in-process HTTP server
@@ -200,7 +200,7 @@ TAILCAT_TEST_BIN = $(BUILD_DIR)/tailcat-bridge-test.wasm
 
 test-wasm: $(BUILD_DIR)
 	GOOS=js GOARCH=wasm go test -count=1 -tags "$(TAILCAT_TAGS)" \
-		-c -o $(TAILCAT_TEST_BIN) ./cmd/tailcat-playground-wasm/
+		-c -o $(TAILCAT_TEST_BIN) ./cmd/tailcat-playground/
 	env -i HOME="$$HOME" PATH="$(shell go env GOROOT)/lib/wasm:$$PATH" \
 		go_js_wasm_exec ./$(TAILCAT_TEST_BIN) -test.v
 

@@ -1,3 +1,13 @@
+//go:build !js || !wasm
+
+// This is the native half of the Tailcat Playground; main_js.go, sharing this
+// directory, is the js/wasm half that runs in the browser. The build
+// constraint above is what keeps their two main()s apart: main_js.go only
+// compiles under js/wasm, this only compiles everywhere else, so a given
+// build always sees exactly one of them (it is the same constraint
+// cmd/tailcat-playground-wasm's old main_notjs.go stub carried, which this
+// file replaced when the two packages merged).
+//
 // The tailcat-playground-server binary serves the split packaging of the
 // Tailcat Playground page (index.html + main.wasm.gz) from memory, so the page
 // can be used without a web server of your own. Browsers refuse to fetch the

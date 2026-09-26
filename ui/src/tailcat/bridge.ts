@@ -1,7 +1,7 @@
 /**
  * Typed view of the globals the js/wasm module installs.
  *
- * See cmd/tailcat-playground-wasm/main_js.go for the other side of each of
+ * See cmd/tailcat-playground/main_js.go for the other side of each of
  * these. The module sets globalThis.llamaSwapTailcat once it has started, and
  * calls globalThis.onLlamaSwapTailcatReady if the page defined one.
  */

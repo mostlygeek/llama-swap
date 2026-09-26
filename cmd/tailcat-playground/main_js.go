@@ -1,9 +1,10 @@
 //go:build js && wasm
 
-// The tailcat-playground-wasm module is the browser half of the standalone
-// Tailcat Playground page. It carries a Tailcat client into the browser and
-// exposes it as an HTTP transport, so the page can talk to a llama-swap node
-// that is only reachable over Tailcat.
+// This is the js/wasm half of the Tailcat Playground: the browser module that
+// carries a Tailcat client into the page and exposes it as an HTTP transport,
+// so the page can talk to a llama-swap node that is only reachable over
+// Tailcat. main_server.go, sharing this directory, is the native half that
+// serves the built page; see its own comment for how the two main()s coexist.
 //
 // The browser cannot do this itself: Tailcat is WireGuard relayed over DERP,
 // not something fetch() speaks. All the browser sees is WebSocket traffic to
