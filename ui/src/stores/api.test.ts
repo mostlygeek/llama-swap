@@ -77,6 +77,29 @@ describe("hardware api", () => {
 });
 
 describe("api store event handling", () => {
+  it("anchors model uptime to the browser clock on receipt", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-26T12:00:00Z"));
+    try {
+      handleAPIEventMessage(
+        JSON.stringify({
+          type: "modelStatus",
+          data: JSON.stringify([
+            // readySince is an hour in the future, as a server clock that runs
+            // ahead would report it; uptimeMs is what the UI counts from.
+            { id: "ready", state: "ready", readySince: "2026-09-26T13:00:00Z", uptimeMs: 90_000 },
+            { id: "stopped", state: "stopped" },
+          ]),
+        })
+      );
+      const byId = Object.fromEntries(get(models).map((m) => [m.id, m]));
+      expect(byId.ready.readyAt).toBe(Date.parse("2026-09-26T12:00:00Z") - 90_000);
+      expect(byId.stopped.readyAt).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("parses inflight request entries", () => {
     inFlightRequests.set(0);
     inflightRequestEntries.set([]);

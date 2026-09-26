@@ -14,6 +14,7 @@ import (
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/perf"
+	"github.com/mostlygeek/llama-swap/internal/process"
 	"github.com/mostlygeek/llama-swap/internal/store"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
@@ -29,6 +30,13 @@ type apiModel struct {
 	Aliases       []string       `json:"aliases,omitempty"`
 	Capabilities  map[string]any `json:"capabilities,omitempty"`
 	ContextLength int            `json:"context_length,omitempty"`
+	// ReadySince is when the model last became ready (RFC 3339). Only set
+	// while the model is ready.
+	ReadySince string `json:"readySince,omitempty"`
+	// UptimeMs is how long the model has been ready as of this payload. The
+	// UI counts from it rather than from ReadySince, so a browser clock that
+	// differs from the server's doesn't skew the uptime.
+	UptimeMs int64 `json:"uptimeMs,omitempty"`
 }
 
 type apiProfile struct {
@@ -98,7 +106,7 @@ func (s *Server) handleAPIActiveProfile(w http.ResponseWriter, r *http.Request) 
 // modelStatus returns every configured model joined with its current process
 // state (defaulting to "stopped"), followed by peer models.
 func (s *Server) modelStatus() []apiModel {
-	running := s.local.RunningModels()
+	running := s.local.RunningStatus()
 
 	ids := make([]string, 0, len(s.cfg.Models))
 	for id := range s.cfg.Models {
@@ -110,8 +118,15 @@ func (s *Server) modelStatus() []apiModel {
 	for _, id := range ids {
 		mc := s.cfg.Models[id]
 		state := "stopped"
+		var readySince string
+		var uptimeMs int64
 		if st, ok := running[id]; ok {
-			state = string(st)
+			state = string(st.State)
+			if st.State == process.StateReady && !st.ReadySince.IsZero() {
+				readySince = st.ReadySince.UTC().Format(time.RFC3339)
+				// At least 1 so omitempty keeps it for a model that just became ready.
+				uptimeMs = max(1, time.Since(st.ReadySince).Milliseconds())
+			}
 		}
 		// Same resolution /v1/models uses, so the dashboard and the OpenAI
 		// listing never disagree about what a model can do. Bound by
@@ -128,6 +143,8 @@ func (s *Server) modelStatus() []apiModel {
 			Aliases:       mc.Aliases,
 			Capabilities:  capsMap,
 			ContextLength: ctxLen,
+			ReadySince:    readySince,
+			UptimeMs:      uptimeMs,
 		})
 	}
 

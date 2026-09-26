@@ -4,6 +4,7 @@
   import { statusDotColor } from "../stores/modelLoad";
   import type { Model } from "../lib/types";
   import ModelLoadButton from "../components/ModelLoadButton.svelte";
+  import CopyableId from "../components/CopyableId.svelte";
   import * as Card from "$lib/components/ui/card/index.js";
   import { Tabs, TabsList, TabsTrigger, TabsContent } from "$lib/components/ui/tabs/index.js";
   import { ExternalLink } from "@lucide/svelte";
@@ -11,6 +12,7 @@
   import ModelLogsTab from "../components/model/ModelLogsTab.svelte";
   import ModelDetailsTab from "../components/model/ModelDetailsTab.svelte";
   import { modelServerPath } from "../lib/modelUtils";
+  import { formatAbsoluteTime, formatUptime } from "../lib/format";
 
   let modelId = $derived($params?.id ?? "");
 
@@ -21,6 +23,26 @@
       $models.find((m) => m.aliases?.includes(modelId)),
   );
   let resolvedId = $derived(model?.id ?? modelId);
+  // Only show a separate name when it differs from the ID, so the ID isn't
+  // displayed twice.
+  let hasName = $derived(!!model?.name && model.name !== model.id);
+
+  // Uptime ticks once a second while the model is ready. It counts from
+  // readyAt, which is on this browser's clock, so it works even when the
+  // server's clock differs; readySince is only shown in the tooltip.
+  let readySince = $derived(model?.readySince);
+  let readyAt = $derived(model?.readyAt);
+  let isReady = $derived(readyAt !== undefined);
+  let now = $state(Date.now());
+  // Re-runs when a status update moves readyAt, so `now` is never older
+  // than readyAt's anchor.
+  $effect(() => {
+    if (readyAt === undefined) return;
+    now = Date.now();
+    const timer = setInterval(() => (now = Date.now()), 1000);
+    return () => clearInterval(timer);
+  });
+  let uptime = $derived(readyAt !== undefined ? formatUptime(now - readyAt) : "");
 </script>
 
 <div class="flex h-full flex-col gap-4 overflow-y-auto p-2">
@@ -31,13 +53,29 @@
     </Card.Root>
   {:else}
     <Card.Root class="shrink-0 gap-0 overflow-hidden py-0">
-      <Card.Header class="shrink-0 gap-2 border-b px-4 py-3">
-        <div class="flex items-center gap-2">
-          <span class={`size-2.5 shrink-0 rounded-full ${statusDotColor(model)}`}></span>
-          <Card.Title class="text-lg">{model.name || model.id}</Card.Title>
-          <span class="text-muted-foreground text-sm">({model.id})</span>
-          <span class="text-muted-foreground text-xs uppercase tracking-wide">{model.state}</span>
-          <div class="ml-auto flex items-center gap-2">
+      <Card.Header class="shrink-0 gap-2 px-4 py-3">
+        <div class="flex items-start gap-2">
+          <div class="flex min-w-0 flex-1 flex-col gap-1">
+            {#if hasName}
+              <Card.Title class="text-lg break-words">{model.name}</Card.Title>
+            {:else}
+              <Card.Title class="-ml-1 text-lg">
+                <CopyableId value={model.id} />
+              </Card.Title>
+            {/if}
+            <div class="text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+              {#if hasName}
+                <CopyableId value={model.id} class="-ml-1 font-mono text-xs" />
+              {/if}
+              <span class="text-xs uppercase tracking-wide">{model.state}</span>
+              {#if isReady}
+                <span class="text-xs" title={readySince ? `Ready since ${formatAbsoluteTime(readySince)}` : undefined}>
+                  up {uptime}
+                </span>
+              {/if}
+            </div>
+          </div>
+          <div class="flex shrink-0 items-center gap-2">
             {#if !model.peerID}
               <a
                 href={modelServerPath(resolvedId)}
@@ -57,9 +95,20 @@
           <p class="text-muted-foreground text-sm"><em>{model.description}</em></p>
         {/if}
         {#if model.aliases && model.aliases.length > 0}
-          <p class="text-muted-foreground text-xs">Aliases: {model.aliases.join(", ")}</p>
+          <div class="text-muted-foreground flex flex-wrap items-center gap-x-1 gap-y-1 text-xs">
+            <span>Aliases:</span>
+            {#each model.aliases as alias (alias)}
+              <CopyableId value={alias} class="font-mono" />
+            {/each}
+          </div>
         {/if}
       </Card.Header>
+      <!-- Load status bar; the state text in the header carries it for screen readers. -->
+      <div
+        aria-hidden="true"
+        class={`h-1 w-full shrink-0 transition-colors ${statusDotColor(model)}`}
+        class:animate-pulse={model.state === "starting" || model.state === "stopping"}
+      ></div>
     </Card.Root>
 
     <Tabs value="activity" class="min-h-0 flex-1">

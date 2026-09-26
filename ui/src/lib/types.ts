@@ -32,6 +32,13 @@ export interface Model {
   capabilities?: ModelCapabilities;
   modalities?: ModelModalities;
   context_length?: number;
+  // when the model last became ready (RFC 3339); only set while ready
+  readySince?: string;
+  // how long the model had been ready when the server sent this (ms)
+  uptimeMs?: number;
+  // client-only: when the model became ready by this browser's clock,
+  // derived from uptimeMs on receipt so server clock skew doesn't matter
+  readyAt?: number;
   // selector-only fields from the v1/models llamaswap metadata
   strategy?: string;
   targets?: string[];
@@ -362,6 +369,8 @@ export interface ChatMessage {
   reasoningTimeMs?: number;
   /** UI-only. Stats for the request that produced this assistant turn. */
   stats?: GenerationStats;
+  /** UI-only. Set when this turn failed or the user cancelled it. */
+  interrupted?: "error" | "cancelled";
 
   /** Wire fields. tool_calls is assistant-only; the rest are tool-only. */
   tool_calls?: ToolCall[];

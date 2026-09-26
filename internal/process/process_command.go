@@ -122,8 +122,9 @@ type ProcessCommand struct {
 	stopCh      chan stopReq
 	waitReadyCh chan waitReadyReq
 
-	// current ProcessState. Written only by run(); read by State() via atomic load.
-	state atomic.Value
+	// current Status. Written only by run(); read by State() and Status()
+	// via atomic load.
+	status atomic.Pointer[Status]
 
 	// stores the active reverse-proxy handler when the process is running.
 	// Written only by run(); read by ServeHTTP via atomic load.
@@ -156,7 +157,7 @@ func New(
 		waitReadyCh: make(chan waitReadyReq),
 		waitDelay:   cmdWaitDelay,
 	}
-	p.state.Store(StateStopped)
+	p.status.Store(&Status{State: StateStopped})
 
 	go p.run()
 	return p, nil
@@ -174,13 +175,21 @@ func (p *ProcessCommand) Logger() *logmon.Monitor { return p.processLogger }
 func (p *ProcessCommand) run() {
 	// Mutable state — only read/written from this goroutine. ServeHTTP reads
 	// p.handler concurrently, which is why handler is an atomic.Pointer.
-	// p.state mirrors `state` so State() can observe transitions; setState
+	// p.status mirrors `state` so State() can observe transitions; setState
 	// writes both.
 	state := StateStopped
 	setState := func(s ProcessState) {
 		old := state
 		state = s
-		p.state.Store(s)
+		next := &Status{State: s}
+		if s == StateReady {
+			if old == StateReady {
+				next.ReadySince = p.status.Load().ReadySince
+			} else {
+				next.ReadySince = time.Now()
+			}
+		}
+		p.status.Store(next)
 		if old != s {
 			event.Emit(swaputil.ProcessStateChangeEvent{
 				ProcessName: p.id,
@@ -807,10 +816,14 @@ func (p *ProcessCommand) Stop(timeout time.Duration) error {
 }
 
 func (p *ProcessCommand) State() ProcessState {
-	if s, ok := p.state.Load().(ProcessState); ok {
-		return s
+	return p.Status().State
+}
+
+func (p *ProcessCommand) Status() Status {
+	if st := p.status.Load(); st != nil {
+		return *st
 	}
-	return StateStopped
+	return Status{State: StateStopped}
 }
 
 func (p *ProcessCommand) ServeHTTP(w http.ResponseWriter, r *http.Request) {

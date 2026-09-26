@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
@@ -877,6 +878,44 @@ func TestServer_ModelStatus_Capabilities(t *testing.T) {
 			t.Errorf("expected no context_length, got %d", m.ContextLength)
 		}
 	})
+}
+
+func TestServer_ModelStatus_ReadySince(t *testing.T) {
+	since := time.Date(2026, 9, 25, 6, 41, 37, 0, time.UTC)
+	local := newStubRouter(nil, "")
+	local.running = map[string]process.ProcessState{
+		"ready":    process.StateReady,
+		"stopping": process.StateStopping,
+	}
+	// stopping still has a timestamp to check that only ready models report it.
+	local.readySince = map[string]time.Time{"ready": since, "stopping": since}
+	s := newTestServer(local, newStubRouter(nil, ""))
+	s.cfg = config.Config{Models: map[string]config.ModelConfig{
+		"ready": {}, "stopping": {}, "stopped": {},
+	}}
+
+	got := make(map[string]string)
+	uptime := make(map[string]int64)
+	for _, m := range s.modelStatus() {
+		got[m.Id] = m.ReadySince
+		uptime[m.Id] = m.UptimeMs
+	}
+	if want := time.Since(since).Milliseconds(); uptime["ready"] < want-1000 || uptime["ready"] > want+1000 {
+		t.Errorf("ready uptimeMs = %d, want about %d", uptime["ready"], want)
+	}
+	if uptime["stopping"] != 0 || uptime["stopped"] != 0 {
+		t.Errorf("uptimeMs = %v, want 0 for models that are not ready", uptime)
+	}
+	want := map[string]string{
+		"ready":    "2026-09-25T06:41:37Z",
+		"stopping": "",
+		"stopped":  "",
+	}
+	for id, w := range want {
+		if got[id] != w {
+			t.Errorf("%s readySince = %q, want %q", id, got[id], w)
+		}
+	}
 }
 
 func stringSliceEqual(a, b []string) bool {

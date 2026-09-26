@@ -87,6 +87,35 @@ func TestBaseRouter_RunningModels(t *testing.T) {
 	}
 }
 
+func TestBaseRouter_RunningStatus(t *testing.T) {
+	ready := newFakeProcess("ready")
+	before := time.Now()
+	ready.markReady()
+	starting := newFakeProcess("starting")
+	starting.setState(process.StateStarting)
+	stopped := newFakeProcess("stopped")
+
+	b := newTestBase(t, map[string]process.Process{
+		"ready": ready, "starting": starting, "stopped": stopped,
+	}, &stubPlanner{})
+
+	running := b.RunningStatus()
+	if len(running) != 2 {
+		t.Fatalf("running=%v want 2 entries", running)
+	}
+	if st := running["ready"]; st.State != process.StateReady || st.ReadySince.Before(before) {
+		t.Errorf("ready status=%+v, want ready with ReadySince after %v", st, before)
+	}
+	if st := running["starting"]; st.State != process.StateStarting || !st.ReadySince.IsZero() {
+		t.Errorf("starting status=%+v, want starting with zero ReadySince", st)
+	}
+
+	ready.setState(process.StateStopped)
+	if _, ok := b.RunningStatus()["ready"]; ok {
+		t.Errorf("stopped process should be excluded from RunningStatus")
+	}
+}
+
 func TestBaseRouter_UnloadAll(t *testing.T) {
 	a := newFakeProcess("a")
 	a.markReady()

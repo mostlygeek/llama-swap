@@ -20,6 +20,15 @@ const (
 	StateShutdown ProcessState = ProcessState("shutdown")
 )
 
+// Status is a snapshot of a process's state together with when it became
+// ready. Both fields are read at once, so they never disagree.
+type Status struct {
+	State ProcessState
+	// ReadySince is when the process last entered StateReady. It is the zero
+	// time unless State is StateReady.
+	ReadySince time.Time
+}
+
 type Process interface {
 	// Run starts the process blocks until the process is terminated.
 	// The timeout parameter controls how long to wait for the process to get
@@ -59,6 +68,10 @@ type Process interface {
 	// Note: this is a snapshot of the state at the time of the call
 	// and may change at any time after the call returns.
 	State() ProcessState
+
+	// Status returns the current state and, while ready, when the process
+	// became ready, read together as one snapshot.
+	Status() Status
 
 	// ServeHTTP forwards requests to the underlying process
 	// Calling it when the process is not ready will result in a
