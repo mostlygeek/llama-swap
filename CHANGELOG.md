@@ -1,5 +1,43 @@
 # Changelog
 
+## v259
+
+Logging is split into three separate streams: proxy, upstream and HTTP access
+logs. HTTP request lines used to be mixed in with the proxy log, which made it
+hard to search. They now have their own stream and their own tab in the log
+viewer. The logToStdout setting accepts a comma separated list of streams, such
+as "proxy,http", and the old values still work.
+
+Upgrading: log data has moved off GET /api/events to a new GET /api/events/logs
+endpoint. Pick streams with ?stream=proxy&stream=http. Tools that read logs
+from /api/events need to switch to the new endpoint.
+
+The UI sidebar can be resized by dragging its edge, and the width is
+remembered. The model page has a new header that shows the model name, a
+copyable ID, its state and how long it has been ready. The API also returns a
+new readySince field for models that are ready.
+
+The Hardware page now recognizes DGX Spark (GB10) systems. Before this, it
+could not count sockets on arm64, labeled the unified memory as dedicated
+memory it could not detect, showed only the efficiency cores and had no power
+figure. It now shows the system model, the hybrid CPU layout, shared memory
+and the nominal 140 W SoC power.
+
+The "install as app" prompt now works when apiKeys is set. The browser fetches
+the web app manifest without an API key, so it got a 401. The manifest is now
+served without auth, like the favicon.
+
+The release process now checks for Claude or Codex before generating the
+changelog and uses a newer model for it.
+
+- [PR #1177](https://github.com/mostlygeek/llama-swap/pull/1177) internal/server: serve web app manifest without requiring auth: let browsers fetch site.webmanifest when apiKeys is set so the install prompt appears
+- AGENTS.md: revise contribution guidelines for PRs: agents check pull requests and issues against CONTRIBUTING.md and ask when there is a problem
+- [PR #1172](https://github.com/mostlygeek/llama-swap/pull/1172) Refactor logging to support multiple streams and separate log endpoints: split proxy, upstream and HTTP logs, add /api/events/logs and allow a stream list in logToStdout
+- [PR #1163](https://github.com/mostlygeek/llama-swap/pull/1163) hw: detect DGX Spark (GB10) systems: report the system model, hybrid CPU, sockets, shared memory and nominal power on GB10 boxes by [@lemassykoi](https://github.com/lemassykoi)
+- [PR #1173](https://github.com/mostlygeek/llama-swap/pull/1173) ui: sidebar resize, model uptime tracking, small tweaks: drag to resize the sidebar and show how long each model has been ready
+- scripts/add-changelog.sh: use gpt-6-sol: update the model used to generate changelog entries with Codex
+- Makefile: detect harness before release: use Claude or Codex to generate the changelog and stop with an error when neither is installed
+
 ## v258
 
 Tailcat is updated to v0.7.0 and now checks allowed clients in the HTTP
