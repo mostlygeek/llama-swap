@@ -4,7 +4,7 @@ summary: Privately expose inference over Tailcat and route peers through Tailcat
 category: guides
 tags: [tailcat, peers, remote, networking, security]
 config_keys: [tailcat, tailcat.allow, tailcat.models, tailcat.admin, tailcat.debug, peers, peers.*.proxy, peers.*.tailcatKey, peers.*.timeouts]
-updated: 2026-09-24
+updated: 2026-09-26
 ---
 
 # Connect llama-swap with Tailcat
@@ -45,6 +45,7 @@ tailcat:
     - nodekey:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
   models:
     - chat
+    - coding-model # a selectors entry
     - gpu-box/embeddings
   admin: false
   debug: false
@@ -60,6 +61,11 @@ llama-swap -config /path/to/config.yaml \
 `-listen-tailcat` requires a valid Tailcat server PrivateKey JSON file and a
 non-empty `tailcat.models` list. Use `models: ["*"]` explicitly to expose all
 callable local and peer IDs.
+
+`tailcat.models` accepts any public model ID: a model's own ID, one of its
+`aliases`, a `selectors` entry, a profile pin, or a peer's `peerID/model`
+name. Listing a selector exposes it the same way as a regular model ID, and
+requests still resolve through the selector's normal routing logic.
 
 `allow` denies by default. llama-swap checks it on every HTTP request, using
 the node key that Tailcat authenticated for the connection. A client whose key
