@@ -65,6 +65,14 @@ type sysfsGpu struct {
 	fdState     map[string]map[string]fdEngineSample
 	fdSampledAt time.Time
 	lastHwmonAt time.Time
+
+	// renderNodePCI caches renderD node -> PCI address, resolved through
+	// sysfs for fdinfo records that omit drm-pdev (kernels before ~6.8).
+	renderNodePCI map[string]string
+	// ambiguous is true when more than one GPU was discovered: fdinfo
+	// records that cannot be attributed to a card are then skipped rather
+	// than counted on every GPU.
+	ambiguous bool
 }
 
 type fdEngineSample struct {
@@ -154,6 +162,13 @@ func discoverSysfsGpus() []sysfsGpu {
 			g.vramTotalMB = pciLargestBarMB(filepath.Join(sysfsRoot, "bus", "pci", "devices", pciAddr, "resource"))
 		}
 		gpus = append(gpus, g)
+	}
+	// Unattributable fdinfo records must not count toward several cards at
+	// once, so on multi-GPU hosts they are dropped instead of guessed.
+	if len(gpus) > 1 {
+		for i := range gpus {
+			gpus[i].ambiguous = true
+		}
 	}
 	return gpus
 }
@@ -281,6 +296,7 @@ func (g *sysfsGpu) readFdInfo(stat *GpuStat) bool {
 
 	enginePct := map[string]float64{} // engine -> summed utilization %
 	vramUsedKB := uint64(0)
+	seenClients := map[string]bool{} // drm-client-id -> VRAM already counted
 	fdsFound := false
 
 	procs, err := os.ReadDir(procRoot)
@@ -306,10 +322,32 @@ func (g *sysfsGpu) readFdInfo(stat *GpuStat) bool {
 			if len(kv) == 0 {
 				continue
 			}
-			if pdev, ok := kv["drm-pdev"]; ok && g.uuid != "" && pdev != g.uuid {
-				continue // render node of a different GPU
+			// Attribute the record to this card. drm-pdev is the kernel's
+			// own answer but only exists on newer kernels; fall back to
+			// resolving the render node's PCI address through sysfs. Records
+			// that cannot be attributed are counted on every GPU otherwise,
+			// so on multi-GPU hosts they are skipped entirely.
+			if pdev := kv["drm-pdev"]; pdev != "" {
+				if pdev != g.uuid {
+					continue // render node of a different GPU
+				}
+			} else if resolved := g.renderNodeAddress(target); resolved != "" {
+				if resolved != g.uuid {
+					continue
+				}
+			} else if g.ambiguous {
+				continue
 			}
 			fdsFound = true
+			// Duplicated or fork-inherited DRM fds share one drm-client-id;
+			// count their VRAM (and engines) only once per client per poll.
+			client := kv["drm-client-id"]
+			if client != "" && seenClients[client] {
+				continue
+			}
+			if client != "" {
+				seenClients[client] = true
+			}
 			vramUsedKB += fdInfoVramKB(kv)
 			fdInfoEnginePct(kv, g.fdState, elapsed, enginePct)
 		}
@@ -334,9 +372,35 @@ func (g *sysfsGpu) readFdInfo(stat *GpuStat) bool {
 	return fdsFound
 }
 
+// renderNodeAddress resolves a /dev/dri/renderDN link target to the PCI
+// address of the card behind it, via the sysfs class tree. Results are
+// cached; "" means the node could not be resolved.
+func (g *sysfsGpu) renderNodeAddress(target string) string {
+	node := filepath.Base(target)
+	if node == "" || node == "." || node == "/" {
+		return ""
+	}
+	if g.renderNodePCI == nil {
+		g.renderNodePCI = map[string]string{}
+	}
+	if addr, ok := g.renderNodePCI[node]; ok {
+		return addr
+	}
+	addr := readBaseName(filepath.Join(sysfsRoot, "class", "drm", node, "device"))
+	if addr == "" {
+		// cache misses too: /proc can hold stale fds for vanished nodes
+		addr = "?"
+	}
+	g.renderNodePCI[node] = addr
+	if addr == "?" {
+		return ""
+	}
+	return addr
+}
+
 // parseFdInfo reads a /proc/<pid>/fdinfo/<fd> file into key/value strings.
 func parseFdInfo(path string) map[string]string {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- /proc path built from ReadDir entries
 	if err != nil {
 		return nil
 	}
@@ -500,7 +564,7 @@ func gpuDisplayName(devPath, driver string) string {
 // pciLargestBarMB returns the largest PCI BAR size >= 1 GiB (the VRAM BAR
 // on discrete cards), or 0.
 func pciLargestBarMB(resourcePath string) int {
-	f, err := os.Open(resourcePath)
+	f, err := os.Open(resourcePath) // #nosec G304 -- path under sysfsRoot
 	if err != nil {
 		return 0
 	}
@@ -549,7 +613,7 @@ func readBaseName(path string) string {
 }
 
 func readString(path string) string {
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) // #nosec G304 -- paths built from sysfsRoot
 	if err != nil {
 		return ""
 	}

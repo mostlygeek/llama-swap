@@ -5,6 +5,7 @@ package perf
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -96,6 +97,7 @@ func fakeSysfs(t *testing.T) string {
 	// drm class entries
 	symlink(t, root, "class/drm/card0/device", "../../../"+gpuDir)
 	symlink(t, root, "class/drm/card1/device", "../../../"+igpuDir)
+	symlink(t, root, "class/drm/renderD128/device", "../../../"+gpuDir)
 	symlink(t, root, "bus/pci/devices/0000:03:00.0", "../../../"+gpuDir)
 
 	return root
@@ -108,7 +110,7 @@ func withSysfs(t *testing.T, root string) {
 	t.Cleanup(func() { sysfsRoot = old })
 }
 
-func TestDiscoverSysfsGpusSkipsIGpuWithoutHwmon(t *testing.T) {
+func TestSysfs_DiscoverSkipsIGpuWithoutHwmon(t *testing.T) {
 	withSysfs(t, fakeSysfs(t))
 
 	gpus := discoverSysfsGpus()
@@ -130,7 +132,7 @@ func TestDiscoverSysfsGpusSkipsIGpuWithoutHwmon(t *testing.T) {
 	}
 }
 
-func TestReadHwmonTempsFanWhenActive(t *testing.T) {
+func TestSysfs_ReadHwmonTempsFanWhenActive(t *testing.T) {
 	sysRoot := fakeSysfs(t)
 	withSysfs(t, sysRoot)
 
@@ -162,7 +164,7 @@ func TestReadHwmonTempsFanWhenActive(t *testing.T) {
 
 // An idle GPU (no process holds the render node) must not be woken just to
 // read sensors: telemetry zeroes out instead of touching hwmon.
-func TestIdleGpuTelemetryZeroedWithoutHwmon(t *testing.T) {
+func TestSysfs_IdleGpuTelemetryZeroed(t *testing.T) {
 	withSysfs(t, fakeSysfs(t))
 	oldProc := procRoot
 	procRoot = t.TempDir()
@@ -181,7 +183,7 @@ func TestIdleGpuTelemetryZeroedWithoutHwmon(t *testing.T) {
 	}
 }
 
-func TestPollReportsVramViaFdinfo(t *testing.T) {
+func TestSysfs_PollReportsVramViaFdinfo(t *testing.T) {
 	sysRoot := fakeSysfs(t)
 
 	procRootLocal := t.TempDir()
@@ -209,7 +211,7 @@ func TestPollReportsVramViaFdinfo(t *testing.T) {
 
 // Even while active, hwmon must not be read more than once per
 // sysfsHwmonMinInterval -- each read wakes a sleeping card.
-func TestHwmonThrottledWhileActive(t *testing.T) {
+func TestSysfs_HwmonThrottledWhileActive(t *testing.T) {
 	sysRoot := fakeSysfs(t)
 	withSysfs(t, sysRoot)
 
@@ -236,7 +238,7 @@ func TestHwmonThrottledWhileActive(t *testing.T) {
 	}
 }
 
-func TestFdInfoVramFallsBackToResident(t *testing.T) {
+func TestSysfs_FdInfoVramFallsBackToResident(t *testing.T) {
 	kv := map[string]string{
 		"drm-resident-vram0": "16000 MiB",
 	}
@@ -245,7 +247,7 @@ func TestFdInfoVramFallsBackToResident(t *testing.T) {
 	}
 }
 
-func TestParseSizeKB(t *testing.T) {
+func TestSysfs_ParseSizeKB(t *testing.T) {
 	cases := []struct {
 		in   string
 		want uint64
@@ -263,7 +265,7 @@ func TestParseSizeKB(t *testing.T) {
 	}
 }
 
-func TestFdInfoEngineUtilCycles(t *testing.T) {
+func TestSysfs_FdInfoEngineUtilCycles(t *testing.T) {
 	state := map[string]map[string]fdEngineSample{}
 	out := map[string]float64{}
 
@@ -281,7 +283,7 @@ func TestFdInfoEngineUtilCycles(t *testing.T) {
 	}
 }
 
-func TestFdInfoEngineUtilNs(t *testing.T) {
+func TestSysfs_FdInfoEngineUtilNs(t *testing.T) {
 	state := map[string]map[string]fdEngineSample{}
 	out := map[string]float64{}
 
@@ -296,5 +298,100 @@ func TestFdInfoEngineUtilNs(t *testing.T) {
 
 	if got := out["render"]; got < 49.9 || got > 50.1 {
 		t.Errorf("render util = %.2f%%, want ~50%%", got)
+	}
+}
+
+// A duplicated DRM fd (dup or fork inheritance) shares one drm-client-id;
+// its VRAM must be counted once, not once per fd.
+func TestSysfs_DuplicateClientVramCountedOnce(t *testing.T) {
+	sysRoot := fakeSysfs(t)
+
+	procRootLocal := t.TempDir()
+	writeFiles(t, procRootLocal, map[string]string{
+		"1234/fdinfo/17": xeFdinfo,
+		"1234/fdinfo/18": xeFdinfo,
+	})
+	symlink(t, procRootLocal, "1234/fd/17", "/dev/dri/renderD128")
+	symlink(t, procRootLocal, "1234/fd/18", "/dev/dri/renderD128")
+
+	oldSys, oldProc := sysfsRoot, procRoot
+	sysfsRoot, procRoot = sysRoot, procRootLocal
+	t.Cleanup(func() { sysfsRoot, procRoot = oldSys, oldProc })
+
+	g := discoverSysfsGpus()[0]
+	stat, err := g.poll()
+	if err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+	if want := 16946852 / 1024; stat.MemUsedMB != want {
+		t.Errorf("MemUsedMB = %d, want %d (one client, two fds)", stat.MemUsedMB, want)
+	}
+}
+
+// fdinfo without drm-pdev (kernels before ~6.8) is attributed through the
+// render node's sysfs device link.
+func TestSysfs_FdinfoWithoutPdevResolvedViaSysfs(t *testing.T) {
+	sysRoot := fakeSysfs(t)
+	noPdev := strings.Replace(xeFdinfo, "drm-pdev:\t0000:03:00.0\n", "", 1)
+	if noPdev == xeFdinfo {
+		t.Fatal("fixture has no drm-pdev line to strip")
+	}
+
+	procRootLocal := t.TempDir()
+	writeFiles(t, procRootLocal, map[string]string{"1234/fdinfo/17": noPdev})
+	symlink(t, procRootLocal, "1234/fd/17", "/dev/dri/renderD128")
+
+	oldSys, oldProc := sysfsRoot, procRoot
+	sysfsRoot, procRoot = sysRoot, procRootLocal
+	t.Cleanup(func() { sysfsRoot, procRoot = oldSys, oldProc })
+
+	g := discoverSysfsGpus()[0]
+	stat, err := g.poll()
+	if err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+	if want := 16946852 / 1024; stat.MemUsedMB != want {
+		t.Errorf("MemUsedMB = %d, want %d (render node resolves to this GPU)", stat.MemUsedMB, want)
+	}
+}
+
+// On a multi-GPU host a record that cannot be attributed to any card must
+// be dropped: counting it everywhere inflates VRAM and wakes idle cards.
+func TestSysfs_UnattributableFdinfoSkippedOnMultiGpu(t *testing.T) {
+	sysRoot := fakeSysfs(t)
+
+	// A second accelerator so discovery marks the host ambiguous: another
+	// xe card with its own hwmon at a different PCI address. Same nesting
+	// depth as the first card so the relative driver symlink resolves.
+	gpu2 := "devices/pci0000:00/0000:00:03.0/0000:01:00.0/0000:04:00.0"
+	writeFiles(t, sysRoot, map[string]string{
+		gpu2 + "/vendor":                   "0x8086",
+		gpu2 + "/device":                   "0xe223",
+		gpu2 + "/hwmon/hwmon8/name":        "xe",
+		gpu2 + "/hwmon/hwmon8/temp1_input": "41000",
+	})
+	symlink(t, sysRoot, gpu2+"/driver", "../../../../../bus/pci/drivers/xe")
+	symlink(t, sysRoot, "class/drm/card2/device", "../../../"+gpu2)
+
+	// The fd points at a render node that does not exist in the fake sysfs
+	// tree, and the fixture carries no drm-pdev, so nothing can attribute
+	// it to a card.
+	noPdev := strings.Replace(xeFdinfo, "drm-pdev:\t0000:03:00.0\n", "", 1)
+	procRootLocal := t.TempDir()
+	writeFiles(t, procRootLocal, map[string]string{"1234/fdinfo/17": noPdev})
+	symlink(t, procRootLocal, "1234/fd/17", "/dev/dri/renderD999")
+
+	oldSys, oldProc := sysfsRoot, procRoot
+	sysfsRoot, procRoot = sysRoot, procRootLocal
+	t.Cleanup(func() { sysfsRoot, procRoot = oldSys, oldProc })
+
+	for _, g := range discoverSysfsGpus() {
+		stat, err := g.poll()
+		if err != nil {
+			t.Fatalf("poll: %v", err)
+		}
+		if stat.MemUsedMB != 0 || stat.TempC != 0 {
+			t.Errorf("gpu %s stat = %+v, want zeroed (unattributable fdinfo must be skipped)", g.uuid, stat)
+		}
 	}
 }
