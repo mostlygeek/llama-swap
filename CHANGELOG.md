@@ -1,5 +1,20 @@
 # Changelog
 
+## v260
+
+This release fixes a crash at startup on macOS 27 with Apple M6 hardware
+(#1178). Hardware detection reads the CPU frequency through gopsutil, which
+expects a voltage-states5-sram property that is missing on M6. It passed the
+empty value straight to CFDataGetLength, which segfaulted before the server
+could start listening.
+
+As a temporary fix, gopsutil now points at a fork with the patch from
+shirou/gopsutil#2163, which checks for the missing property. This will be
+removed once the upstream project picks up the patch. Some Go dependencies
+were also updated as required by the newer gopsutil.
+
+- [PR #1180](https://github.com/mostlygeek/llama-swap/pull/1180) go.mod: use gopsutil PR #2163 to fix darwin/arm64 crash: replace gopsutil with a patched fork that guards the CPU frequency probe against a missing property on Apple M6
+
 ## v259
 
 Logging is split into three separate streams: proxy, upstream and HTTP access
