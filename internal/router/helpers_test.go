@@ -140,10 +140,10 @@ func (f *fakeProcess) State() process.ProcessState {
 	return f.state
 }
 
-func (f *fakeProcess) ReadySince() time.Time {
+func (f *fakeProcess) Status() process.Status {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.readySince
+	return process.Status{State: f.state, ReadySince: f.readySince}
 }
 
 func (f *fakeProcess) markReady() { f.setState(process.StateReady) }

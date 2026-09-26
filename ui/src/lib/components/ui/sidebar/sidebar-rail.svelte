@@ -42,24 +42,30 @@
 				if (!sidebar.open) sidebar.setOpen(true);
 			}
 			const width = side === "right" ? window.innerWidth - ev.clientX : ev.clientX;
-			sidebar.setWidth(width);
+			// Saved once when the drag ends, not on every move.
+			sidebar.setWidth(width, false);
 		}
 
-		function onEnd(): void {
+		function finish(completed: boolean): void {
 			rail.removeEventListener("pointermove", onMove);
-			rail.removeEventListener("pointerup", onEnd);
-			rail.removeEventListener("pointercancel", onEnd);
+			rail.removeEventListener("pointerup", onUp);
+			rail.removeEventListener("pointercancel", onCancel);
 			if (dragging) {
-				suppressClick = true;
+				// A cancelled pointer never produces the click this would
+				// swallow, so only a completed drag suppresses it.
+				suppressClick = completed;
 				sidebar.resizing = false;
+				sidebar.setWidth(sidebar.width);
 				document.body.style.cursor = prevCursor;
 				document.body.style.userSelect = prevUserSelect;
 			}
 		}
+		const onUp = () => finish(true);
+		const onCancel = () => finish(false);
 
 		rail.addEventListener("pointermove", onMove);
-		rail.addEventListener("pointerup", onEnd);
-		rail.addEventListener("pointercancel", onEnd);
+		rail.addEventListener("pointerup", onUp);
+		rail.addEventListener("pointercancel", onCancel);
 	}
 
 	function handleClick(): void {

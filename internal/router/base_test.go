@@ -87,31 +87,32 @@ func TestBaseRouter_RunningModels(t *testing.T) {
 	}
 }
 
-func TestBaseRouter_ReadySince(t *testing.T) {
+func TestBaseRouter_RunningStatus(t *testing.T) {
 	ready := newFakeProcess("ready")
 	before := time.Now()
 	ready.markReady()
 	starting := newFakeProcess("starting")
 	starting.setState(process.StateStarting)
+	stopped := newFakeProcess("stopped")
 
 	b := newTestBase(t, map[string]process.Process{
-		"ready": ready, "starting": starting,
+		"ready": ready, "starting": starting, "stopped": stopped,
 	}, &stubPlanner{})
 
-	got, ok := b.ReadySince("ready")
-	if !ok || got.Before(before) {
-		t.Errorf("ReadySince(ready) = %v, %v; want a time after %v", got, ok, before)
+	running := b.RunningStatus()
+	if len(running) != 2 {
+		t.Fatalf("running=%v want 2 entries", running)
 	}
-	if _, ok := b.ReadySince("starting"); ok {
-		t.Errorf("ReadySince(starting) ok = true, want false")
+	if st := running["ready"]; st.State != process.StateReady || st.ReadySince.Before(before) {
+		t.Errorf("ready status=%+v, want ready with ReadySince after %v", st, before)
 	}
-	if _, ok := b.ReadySince("unknown"); ok {
-		t.Errorf("ReadySince(unknown) ok = true, want false")
+	if st := running["starting"]; st.State != process.StateStarting || !st.ReadySince.IsZero() {
+		t.Errorf("starting status=%+v, want starting with zero ReadySince", st)
 	}
 
 	ready.setState(process.StateStopped)
-	if _, ok := b.ReadySince("ready"); ok {
-		t.Errorf("ReadySince after stop ok = true, want false")
+	if _, ok := b.RunningStatus()["ready"]; ok {
+		t.Errorf("stopped process should be excluded from RunningStatus")
 	}
 }
 

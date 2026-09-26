@@ -22,8 +22,12 @@ export type SidebarStateProps = {
 	/** A getter function that returns the current desktop sidebar width in px. */
 	width: Getter<number>;
 
-	/** A function that sets the desktop sidebar width in px. */
-	setWidth: (width: number) => void;
+	/**
+	 * A function that sets the desktop sidebar width in px. Pass
+	 * `persist: false` for intermediate values, such as during a drag, that
+	 * should not be reported through `onWidthChange`.
+	 */
+	setWidth: (width: number, persist?: boolean) => void;
 };
 
 class SidebarState {

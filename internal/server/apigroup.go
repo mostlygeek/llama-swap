@@ -101,7 +101,7 @@ func (s *Server) handleAPIActiveProfile(w http.ResponseWriter, r *http.Request) 
 // modelStatus returns every configured model joined with its current process
 // state (defaulting to "stopped"), followed by peer models.
 func (s *Server) modelStatus() []apiModel {
-	running := s.local.RunningModels()
+	running := s.local.RunningStatus()
 
 	ids := make([]string, 0, len(s.cfg.Models))
 	for id := range s.cfg.Models {
@@ -113,12 +113,12 @@ func (s *Server) modelStatus() []apiModel {
 	for _, id := range ids {
 		mc := s.cfg.Models[id]
 		state := "stopped"
-		if st, ok := running[id]; ok {
-			state = string(st)
-		}
 		var readySince string
-		if t, ok := s.local.ReadySince(id); ok && state == string(process.StateReady) {
-			readySince = t.UTC().Format(time.RFC3339)
+		if st, ok := running[id]; ok {
+			state = string(st.State)
+			if st.State == process.StateReady && !st.ReadySince.IsZero() {
+				readySince = st.ReadySince.UTC().Format(time.RFC3339)
+			}
 		}
 		// Same resolution /v1/models uses, so the dashboard and the OpenAI
 		// listing never disagree about what a model can do. Bound by

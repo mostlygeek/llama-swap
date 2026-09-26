@@ -34,9 +34,9 @@
 			onOpenChange(value);
 		},
 		width: () => clampSidebarWidth(width),
-		setWidth: (value: number) => {
+		setWidth: (value: number, persist = true) => {
 			width = clampSidebarWidth(value);
-			onWidthChange(width);
+			if (persist) onWidthChange(width);
 		},
 	});
 </script>

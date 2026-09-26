@@ -41,9 +41,9 @@ type LocalRouter interface {
 	// stopped or shut down, keyed by model ID.
 	RunningModels() map[string]process.ProcessState
 
-	// ReadySince returns when the named model's process last became ready.
-	// It returns false when the model is unknown or not currently ready.
-	ReadySince(modelID string) (time.Time, bool)
+	// RunningStatus is RunningModels with each model's ready time, read
+	// together with its state so the two never disagree.
+	RunningStatus() map[string]process.Status
 
 	// Unload stops the named models, or every running model when none are
 	// named. It blocks until each targeted process has stopped. A timeout <= 0
