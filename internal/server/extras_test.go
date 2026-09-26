@@ -199,6 +199,30 @@ func TestServer_HandleUIAndFavicon(t *testing.T) {
 	}
 }
 
+// TestServer_WebManifestBypassesAuth reproduces issue #1175: the browser
+// fetches /ui/site.webmanifest itself while deciding whether to offer
+// installing the PWA and can't attach an API key, so it must stay reachable
+// even when apiKeys is set, while the rest of /ui/ stays protected.
+func TestServer_WebManifestBypassesAuth(t *testing.T) {
+	cfg := config.Config{RequiredAPIKeys: []string{"secret"}}
+	s := newTestServerWithConfig(cfg, newStubRouter(nil, ""), newStubRouter(nil, ""))
+
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/ui/site.webmanifest", nil))
+	// Tests build without the `embed_ui` tag, so uiFS is empty and this
+	// resolves to 404 rather than 200 — what matters is that auth didn't
+	// reject it first with 401.
+	if w.Code == http.StatusUnauthorized {
+		t.Errorf("/ui/site.webmanifest: status = %d, want not 401", w.Code)
+	}
+
+	w = httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/ui/", nil))
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("/ui/: status = %d, want 401", w.Code)
+	}
+}
+
 func TestServer_HandleAPIUnloadAll(t *testing.T) {
 	local := newStubRouter([]string{"m1"}, "")
 	s := newTestServer(local, newStubRouter(nil, ""))
