@@ -13,6 +13,7 @@
   import type { Model } from "../lib/types";
   import { isComposingKey } from "../lib/ime";
   import ConnectionStatus from "./ConnectionStatus.svelte";
+  import MiddleTruncate from "./MiddleTruncate.svelte";
 
   function handleTitleChange(newTitle: string): void {
     const sanitized = newTitle.replace(/\n/g, "").trim().substring(0, 64) || "llama-swap";
@@ -66,7 +67,7 @@
       {#snippet child({ props })}
         <a href="/models/{encodeURIComponent(model.id)}" use:link {...props}>
           <span class={`size-2 shrink-0 rounded-full ${dotClass[statusDotColor(model)]}`}></span>
-          <span class="flex-1 truncate">{model.id}</span>
+          <MiddleTruncate text={model.id} class="flex-1" />
         </a>
       {/snippet}
     </Sidebar.MenuSubButton>
