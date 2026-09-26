@@ -10,23 +10,6 @@ import (
 	"testing"
 )
 
-const xpusmiListing = `{
-  "device_list": [
-    {
-      "device_function_type": "physical",
-      "device_id": 0,
-      "device_name": "Intel(R) Data Center GPU Flex 170",
-      "device_state": "Normal",
-      "device_type": "Discrete GPU",
-      "drm_device": "/dev/dri/card1",
-      "pci_bdf_address": "0000:4d:00.0",
-      "pci_device_id": "0x56c0",
-      "uuid": "00000000-0000-0000-6769-df256e271362",
-      "vendor_name": "Intel(R) Corporation"
-    }
-  ]
-}`
-
 const xpusmiDeviceDetail = `{
   "device_id": 0,
   "device_name": "Intel(R) Data Center GPU Flex 170",
@@ -140,6 +123,35 @@ func TestHardware_IntelXPUSMIIntegratedKeepsSharedSystem(t *testing.T) {
 	if got.value.Memory.Kind != "shared_system" {
 		t.Errorf("memory kind = %q, want shared_system", got.value.Memory.Kind)
 	}
+	// xpu-smi reports physical size for integrated parts too, but that is
+	// borrowed system RAM: publishing it as capacity double-counts.
+	if got.value.Memory.CapacityBytes != nil {
+		t.Errorf("memory capacity = %v, want nil for integrated", *got.value.Memory.CapacityBytes)
+	}
+}
+
+func TestHardware_IntelXPUSMIGenericNameReplacedByMappedModel(t *testing.T) {
+	// xpu-smi reports unknown SKUs as "Intel(R) Graphics [0xNNNN]"; the PCI
+	// table's marketing name must win over the generic string.
+	detail := `{
+  "device_id": 0,
+  "device_name": "Intel(R) Graphics [0xe211]",
+  "device_type": "Discrete GPU",
+  "driver_version": "17012946",
+  "pci_bdf_address": "0000:03:00.0",
+  "pci_device_id": "0xe211"
+}`
+	var device xpusmiDevice
+	if err := json.Unmarshal([]byte(detail), &device); err != nil {
+		t.Fatal(err)
+	}
+	got := xpusmiRecordToAccelerator(device, "0000:03:00.0")
+	if stringValue(got.value.Model) != "Arc Pro B60" {
+		t.Errorf("model = %q, want Arc Pro B60 (mapped from 0xe211)", stringValue(got.value.Model))
+	}
+	if stringValue(got.value.Architecture) != "Battlemage" {
+		t.Errorf("architecture = %q, want Battlemage", stringValue(got.value.Architecture))
+	}
 }
 
 func TestHardware_IntelXPUSMIMissingMemoryStaysDedicatedWithoutCapacity(t *testing.T) {
@@ -172,8 +184,10 @@ func TestHardware_IntelXPUSMIDiscoveryFallsBackToDetailBDF(t *testing.T) {
 }
 
 func TestHardware_IntelXPUSMIAbsent(t *testing.T) {
-	// On machines without xpu-smi (or without PATH access), detection must
-	// silently contribute nothing.
+	// Detection must silently contribute nothing when xpu-smi is missing.
+	// A stripped PATH guarantees the absent-tool path on every host, even
+	// ones with xpu-smi installed.
+	t.Setenv("PATH", t.TempDir())
 	if got := detectIntel(context.Background()); got != nil {
 		t.Errorf("detectIntel() = %+v, want nil without xpu-smi", got)
 	}

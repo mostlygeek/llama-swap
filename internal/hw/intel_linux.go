@@ -78,26 +78,30 @@ func detectXPUSMI(ctx context.Context) ([]detectedAccelerator, error) {
 
 func queryXPUSMIDevice(ctx context.Context, deviceID int) (xpusmiDevice, error) {
 	var device xpusmiDevice
-	// Fixed probe binary, integer device index: no caller-supplied arguments.
-	output, err := exec.CommandContext(ctx, "xpu-smi", "discovery", "-d", fmt.Sprint(deviceID), "-j").Output()
+	output, err := exec.CommandContext(ctx, "xpu-smi", "discovery", "-d", fmt.Sprint(deviceID), "-j").Output() // #nosec G204 -- launches a fixed system probe binary with an integer device index, not attacker-controlled input
 	if err != nil {
 		return device, fmt.Errorf("querying xpu-smi device %d: %w", deviceID, err)
 	}
 	if err := json.Unmarshal(output, &device); err != nil {
 		return device, fmt.Errorf("parsing xpu-smi device %d detail: %w", deviceID, err)
 	}
-	if device.BDF == "" {
-		return device, fmt.Errorf("xpu-smi device %d missing pci_bdf_address", deviceID)
-	}
+	// A detail response with an empty BDF is still useful: detectXPUSMI
+	// falls back to the listing's BDF for the identity. Rejecting it here
+	// would drop the device before that fallback can run.
 	return device, nil
 }
 
 func xpusmiRecordToAccelerator(device xpusmiDevice, identity string) detectedAccelerator {
+	deviceType := strings.ToLower(device.DeviceType)
 	memory := AcceleratorMemory{Kind: "dedicated"}
-	if strings.Contains(strings.ToLower(device.DeviceType), "integrated") {
+	integrated := strings.Contains(deviceType, "integrated")
+	if integrated {
 		memory = AcceleratorMemory{Kind: "shared_system"}
 	}
-	if capacity, err := device.MemoryPhysicalSizeByte.Int64(); err == nil && capacity > 0 {
+	// Only discrete devices carry their own memory; an integrated record's
+	// physical size describes borrowed system RAM and publishing it as
+	// capacity would double-count host memory.
+	if capacity, err := device.MemoryPhysicalSizeByte.Int64(); err == nil && capacity > 0 && !integrated {
 		memory.CapacityBytes = uint64Ptr(uint64(capacity))
 	}
 	// The kernel module name is not reported as a field; infer it from the
@@ -119,10 +123,13 @@ func xpusmiRecordToAccelerator(device xpusmiDevice, identity string) detectedAcc
 	// it is populated even when the sysfs probe is unavailable.
 	var architecture *string
 	model := device.DeviceName
+	// xpu-smi names unknown SKUs generically ("Intel(R) Graphics [0xe211]");
+	// a mapped marketing name is always preferable to a generic string.
+	genericName := model == "" || strings.HasPrefix(model, "Intel(R) Graphics")
 	if id, err := strconv.ParseUint(strings.TrimPrefix(strings.ToLower(strings.TrimSpace(device.PCIDeviceID)), "0x"), 16, 16); err == nil {
 		if info, ok := intelGPU(uint16(id)); ok {
 			architecture = nonEmptyStringPtr(info.Architecture)
-			if model == "" {
+			if genericName && info.Model != "" {
 				model = info.Model
 			}
 		}
