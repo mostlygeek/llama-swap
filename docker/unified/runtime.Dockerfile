@@ -149,9 +149,13 @@ COPY --from=sd-src /install/lib/ /usr/local/lib/
 
 # Copy audio.cpp binaries (statically linked, model specs compiled in via
 # AUDIOCPP_DEPLOYMENT_BUILD). The on-disk spec catalog is installed too so
-# --model-spec-override has a path to point at.
+# --model-spec-override has a path to point at. eSpeak-ng is linked in
+# statically and finds its data directory next to the executable, so
+# espeak-ng-data must stay in /usr/local/bin. Its GPL license and source
+# archive are in /usr/local/share/audiocpp/licenses/espeak-ng.
 COPY --from=audio-src /install/bin/audiocpp_server /usr/local/bin/
 COPY --from=audio-src /install/bin/audiocpp_cli /usr/local/bin/
+COPY --from=audio-src /install/bin/espeak-ng-data/ /usr/local/bin/espeak-ng-data/
 COPY --from=audio-src /install/share/audiocpp/ /usr/local/share/audiocpp/
 
 # Copy llama.cpp binaries (statically linked)

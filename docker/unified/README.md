@@ -296,6 +296,18 @@ cmd: |
   --port ${PORT}
 ```
 
+### eSpeak-ng
+
+Kokoro, SanoTTS and Inflect use eSpeak-ng to turn text into phonemes. audio.cpp
+is built with `AUDIOCPP_STATIC_ESPEAK=ON`, so eSpeak-ng 1.52.0 is linked into
+`audiocpp_server` and `audiocpp_cli` and no shared library is needed. Its data
+is installed unpacked at `/usr/local/bin/espeak-ng-data`, where audio.cpp looks
+for it by default, so these models need no eSpeak settings in the config.
+Nothing is written to `$HOME` at runtime.
+
+eSpeak-ng is GPL-3.0-or-later. Its license and the source archive it was built
+from are in `/usr/local/share/audiocpp/licenses/espeak-ng`.
+
 ### CUDA version
 
 The CUDA toolkit the projects compile against and the runtime libraries the
