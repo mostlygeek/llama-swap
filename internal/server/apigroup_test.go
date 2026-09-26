@@ -622,9 +622,98 @@ func TestServer_APIEvents_InitialPayload(t *testing.T) {
 	}
 
 	body := w.Body.String()
-	for _, want := range []string{`"type":"modelStatus"`, `"type":"inflight"`, `"type":"uiConfig"`, `"type":"profileChanged"`, `"type":"logData"`, `X-Trace-ID`} {
+	for _, want := range []string{`"type":"modelStatus"`, `"type":"inflight"`, `"type":"uiConfig"`, `"type":"profileChanged"`, `X-Trace-ID`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("initial SSE payload missing %s; body=%q", want, body)
+		}
+	}
+	// Log data has its own stream, /api/events/logs.
+	if strings.Contains(body, `"type":"logData"`) {
+		t.Errorf("/api/events should not carry log data; body=%q", body)
+	}
+}
+
+// serveLogEvents runs GET target against s for a short time. during is called
+// once the handler has subscribed, so it can write live log lines. It returns
+// the recorded response after the handler exits.
+func serveLogEvents(t *testing.T, s *Server, target string, during func()) *httptest.ResponseRecorder {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodGet, target, nil).WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		s.ServeHTTP(w, req)
+		close(done)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	if during != nil {
+		during()
+		time.Sleep(100 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not return after context cancel")
+	}
+	return w
+}
+
+func TestServer_APILogEvents_SelectedStreams(t *testing.T) {
+	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
+	s.logs.ProxyLogs.Info("PROXYHIST")
+	s.logs.UpstreamLogs.Info("UPSTREAMHIST")
+	s.logs.HttpLogs.Info("HTTPHIST")
+
+	w := serveLogEvents(t, s, "/api/events/logs?stream=proxy&stream=http", func() {
+		s.logs.ProxyLogs.Info("PROXYLIVE")
+		s.logs.UpstreamLogs.Info("UPSTREAMLIVE")
+		s.logs.HttpLogs.Info("HTTPLIVE")
+	})
+
+	if ct := w.Header().Get("Content-Type"); ct != "text/event-stream" {
+		t.Errorf("Content-Type = %q, want text/event-stream", ct)
+	}
+	body := w.Body.String()
+	for _, want := range []string{`"type":"logData"`, `\"source\":\"proxy\"`, `\"source\":\"http\"`, "PROXYHIST", "HTTPHIST", "PROXYLIVE", "HTTPLIVE"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("log stream missing %s; body=%q", want, body)
+		}
+	}
+	for _, notWant := range []string{`\"source\":\"upstream\"`, "UPSTREAMHIST", "UPSTREAMLIVE"} {
+		if strings.Contains(body, notWant) {
+			t.Errorf("log stream should not contain %s; body=%q", notWant, body)
+		}
+	}
+}
+
+func TestServer_APILogEvents_NoHistory(t *testing.T) {
+	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
+	s.logs.UpstreamLogs.Info("UPSTREAMHIST")
+
+	w := serveLogEvents(t, s, "/api/events/logs?stream=upstream&no-history", func() {
+		s.logs.UpstreamLogs.Info("UPSTREAMLIVE")
+	})
+
+	body := w.Body.String()
+	if strings.Contains(body, "UPSTREAMHIST") {
+		t.Errorf("history should be skipped; body=%q", body)
+	}
+	if !strings.Contains(body, "UPSTREAMLIVE") {
+		t.Errorf("live data missing; body=%q", body)
+	}
+}
+
+func TestServer_APILogEvents_InvalidStream(t *testing.T) {
+	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
+	for _, target := range []string{"/api/events/logs", "/api/events/logs?stream=proxy&stream=bogus"} {
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, target, nil))
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", target, w.Code)
 		}
 	}
 }

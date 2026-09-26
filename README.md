@@ -56,6 +56,7 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
       - Stream endpoints send buffered history first by default; add `?no-history` to stream only new lines.
     - `GET /logs/stream/proxy` streams proxy logs only.
     - `GET /logs/stream/upstream` streams upstream process logs only.
+    - `GET /logs/stream/http` streams the HTTP access log only.
     - `GET /logs/stream/{model_id}` streams logs for one model (including IDs with slashes, like `author/model`).
   - `/health` - just returns "OK"
   - `/metrics` - system and GPU metrics for prometheus
@@ -351,7 +352,7 @@ If you deploy llama-swap behind nginx, disable response buffering for streaming 
 Recommended nginx configuration snippets:
 
 ```nginx
-# SSE for UI events/logs
+# SSE for UI events and logs (also covers /api/events/logs)
 location /api/events {
     proxy_pass http://your-llama-swap-backend;
     proxy_buffering off;
@@ -382,6 +383,9 @@ curl -Ns http://host/logs/stream/proxy
 
 # stream logs from upstream processes that llama-swap loads
 curl -Ns http://host/logs/stream/upstream
+
+# stream the HTTP access log, one line per request
+curl -Ns http://host/logs/stream/http
 
 # stream logs only from a specific model
 curl -Ns http://host/logs/stream/{model_id}

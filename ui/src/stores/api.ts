@@ -4,7 +4,6 @@ import type {
   ActivityPage,
   ActivityStatsData,
   VersionInfo,
-  LogData,
   APIEventEnvelope,
   ReqRespCapture,
   InFlightStats,
@@ -19,8 +18,6 @@ import type {
 } from "../lib/types";
 import { appendActivityFilters, type ActivityFilters } from "../lib/activityFilters";
 import { connectionState } from "./theme";
-
-const LOG_LENGTH_LIMIT = 1024 * 100; /* 100KB of log data */
 
 // Stores
 export const models = writable<Model[]>([]);
@@ -39,8 +36,6 @@ export const selectorModels = derived(
 );
 
 export const hasListedModels = derived(playgroundModels, ($playgroundModels) => $playgroundModels.length > 0);
-export const proxyLogs = writable<string>("");
-export const upstreamLogs = writable<string>("");
 export const activityRevision = writable<number>(0);
 export const inFlightRequests = writable<number>(0);
 export const inflightRequestEntries = writable<InflightRequestEntry[]>([]);
@@ -61,13 +56,6 @@ let profileRevision = 0;
 let playgroundModelsRequest = 0;
 let playgroundModelsFetch: Promise<Model[]> | null = null;
 let playgroundModelsRefreshQueued = false;
-
-function appendLog(newData: string, store: typeof proxyLogs | typeof upstreamLogs): void {
-  store.update((prev) => {
-    const updatedLog = prev + newData;
-    return updatedLog.length > LOG_LENGTH_LIMIT ? updatedLog.slice(-LOG_LENGTH_LIMIT) : updatedLog;
-  });
-}
 
 export function enableAPIEvents(enabled: boolean): void {
   if (!enabled) {
@@ -97,8 +85,6 @@ export function enableAPIEvents(enabled: boolean): void {
 
     apiEventSource.onopen = () => {
       // Clear everything on connect to keep things in sync
-      proxyLogs.set("");
-      upstreamLogs.set("");
       activityRevision.update((n) => n + 1);
       inFlightRequests.set(0);
       inflightRequestEntries.set([]);
@@ -146,19 +132,6 @@ export function handleAPIEventMessage(data: string): void {
         return (a.name + a.id).localeCompare(b.name + b.id, undefined, { numeric: true });
       });
       models.set(newModels);
-      break;
-    }
-
-    case "logData": {
-      const logData = JSON.parse(message.data) as LogData;
-      switch (logData.source) {
-        case "proxy":
-          appendLog(logData.data, proxyLogs);
-          break;
-        case "upstream":
-          appendLog(logData.data, upstreamLogs);
-          break;
-      }
       break;
     }
 

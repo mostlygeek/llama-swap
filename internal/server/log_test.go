@@ -18,42 +18,50 @@ import (
 )
 
 func TestServer_NewLoggers(t *testing.T) {
-	t.Run("proxy mode routes proxy into muxlog, discards upstream", func(t *testing.T) {
-		mux, proxy, upstream := NewLoggers(config.LogToStdoutProxy)
-		proxy.Info("PROXYLINE")
-		upstream.Info("UPSTREAMLINE")
-		h := string(mux.GetHistory())
-		if !strings.Contains(h, "PROXYLINE") {
-			t.Errorf("muxlog missing proxy line: %q", h)
-		}
-		if strings.Contains(h, "UPSTREAMLINE") {
-			t.Errorf("muxlog should not contain upstream line: %q", h)
-		}
-	})
+	tests := []struct {
+		logToStdout string
+		want        []string // lines expected in the combined log
+		notWant     []string
+	}{
+		{config.LogToStdoutProxy, []string{"PROXYLINE"}, []string{"UPSTREAMLINE", "HTTPLINE"}},
+		{config.LogToStdoutUpstream, []string{"UPSTREAMLINE"}, []string{"PROXYLINE", "HTTPLINE"}},
+		{config.LogToStdoutBoth, []string{"PROXYLINE", "UPSTREAMLINE", "HTTPLINE"}, nil},
+		{config.LogToStdoutNone, nil, []string{"PROXYLINE", "UPSTREAMLINE", "HTTPLINE"}},
+		{"proxy,http", []string{"PROXYLINE", "HTTPLINE"}, []string{"UPSTREAMLINE"}},
+		{"upstream, http", []string{"UPSTREAMLINE", "HTTPLINE"}, []string{"PROXYLINE"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.logToStdout, func(t *testing.T) {
+			logs, err := NewLoggers(tt.logToStdout)
+			if err != nil {
+				t.Fatal(err)
+			}
+			logs.ProxyLogs.Info("PROXYLINE")
+			logs.UpstreamLogs.Info("UPSTREAMLINE")
+			logs.HttpLogs.Info("HTTPLINE")
 
-	t.Run("both mode routes proxy and upstream into muxlog", func(t *testing.T) {
-		mux, proxy, upstream := NewLoggers(config.LogToStdoutBoth)
-		proxy.Info("PROXYLINE")
-		upstream.Info("UPSTREAMLINE")
-		h := string(mux.GetHistory())
-		if !strings.Contains(h, "PROXYLINE") || !strings.Contains(h, "UPSTREAMLINE") {
-			t.Errorf("muxlog history = %q", h)
-		}
-	})
+			h := string(logs.MuxLogs.GetHistory())
+			for _, line := range tt.want {
+				if !strings.Contains(h, line) {
+					t.Errorf("combined log missing %s: %q", line, h)
+				}
+			}
+			for _, line := range tt.notWant {
+				if strings.Contains(h, line) {
+					t.Errorf("combined log should not contain %s: %q", line, h)
+				}
+			}
+		})
+	}
 
-	t.Run("none mode discards everything from muxlog", func(t *testing.T) {
-		mux, proxy, upstream := NewLoggers(config.LogToStdoutNone)
-		proxy.Info("PROXYLINE")
-		upstream.Info("UPSTREAMLINE")
-		if len(mux.GetHistory()) != 0 {
-			t.Errorf("muxlog should be empty, got %q", mux.GetHistory())
-		}
-	})
+	if _, err := NewLoggers("proxy,bogus"); err == nil {
+		t.Error("expected an error for an invalid logToStdout value")
+	}
 }
 
 func TestServer_HandleLogs_Plain(t *testing.T) {
 	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
-	s.muxlog.Write([]byte("a log line"))
+	s.logs.MuxLogs.Write([]byte("a log line"))
 
 	w := httptest.NewRecorder()
 	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/logs", nil))
@@ -66,6 +74,37 @@ func TestServer_HandleLogs_Plain(t *testing.T) {
 	}
 	if w.Body.String() != "a log line" {
 		t.Errorf("body = %q", w.Body.String())
+	}
+}
+
+func TestServer_GetLogger(t *testing.T) {
+	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
+	for id, want := range map[string]*logmon.Monitor{
+		"":         s.logs.MuxLogs,
+		"proxy":    s.logs.ProxyLogs,
+		"upstream": s.logs.UpstreamLogs,
+		"http":     s.logs.HttpLogs,
+	} {
+		if got, err := s.getLogger(id); err != nil || got != want {
+			t.Errorf("getLogger(%q) = %p, %v; want %p", id, got, err, want)
+		}
+	}
+	if _, err := s.getLogger("bogus"); err == nil {
+		t.Error("getLogger(\"bogus\") should fail")
+	}
+}
+
+// TestServer_RequestLogGoesToHTTPStream checks that access log lines are
+// written to the http stream and not the proxy stream.
+func TestServer_RequestLogGoesToHTTPStream(t *testing.T) {
+	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
+	s.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/health", nil))
+
+	if h := string(s.logs.HttpLogs.GetHistory()); !strings.Contains(h, `"GET /health HTTP/1.1" 200`) {
+		t.Errorf("http log missing request line: %q", h)
+	}
+	if h := string(s.logs.ProxyLogs.GetHistory()); strings.Contains(h, "/health") {
+		t.Errorf("proxy log should not contain request line: %q", h)
 	}
 }
 

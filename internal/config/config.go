@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -13,9 +14,35 @@ const DEFAULT_UNLOAD_TIMEOUT = 10
 const (
 	LogToStdoutProxy    = "proxy"
 	LogToStdoutUpstream = "upstream"
+	LogToStdoutHTTP     = "http"
 	LogToStdoutBoth     = "both"
 	LogToStdoutNone     = "none"
 )
+
+// ParseLogToStdout reports which log streams logToStdout sends to stdout. It
+// accepts "none", "both" (every stream), or a comma separated list of
+// "proxy", "upstream" and "http".
+func ParseLogToStdout(value string) (proxy, upstream, http bool, err error) {
+	switch strings.TrimSpace(value) {
+	case LogToStdoutNone:
+		return false, false, false, nil
+	case LogToStdoutBoth:
+		return true, true, true, nil
+	}
+	for item := range strings.SplitSeq(value, ",") {
+		switch strings.TrimSpace(item) {
+		case LogToStdoutProxy:
+			proxy = true
+		case LogToStdoutUpstream:
+			upstream = true
+		case LogToStdoutHTTP:
+			http = true
+		default:
+			return false, false, false, fmt.Errorf("logToStdout must be none, both, or a comma separated list of proxy, upstream, http; got %q", value)
+		}
+	}
+	return proxy, upstream, http, nil
+}
 
 type MacroEntry struct {
 	Name  string

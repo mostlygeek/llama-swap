@@ -1,14 +1,28 @@
 <script lang="ts">
-  import { proxyLogs, upstreamLogs } from "../stores/api";
+  import { connectLogStreams, httpLogs, proxyLogs, upstreamLogs } from "../stores/logs";
   import { screenWidth } from "../stores/theme";
   import { persistentStore } from "../stores/persistent";
   import LogPanel from "../components/LogPanel.svelte";
   import ResizablePanels from "../components/ResizablePanels.svelte";
   import { Tabs, TabsList, TabsTrigger, TabsContent } from "$lib/components/ui/tabs/index.js";
+  import type { LogSource } from "../lib/types";
 
-  type ViewMode = "proxy" | "upstream" | "panels";
+  type ViewMode = "proxy" | "upstream" | "http" | "panels";
 
   const viewModeStore = persistentStore<ViewMode>("logviewer-view-mode", "panels");
+
+  // Only the streams the current tab shows are connected. The connection is
+  // closed when the tab changes or the page is left.
+  const streamsFor: Record<ViewMode, LogSource[]> = {
+    panels: ["proxy", "upstream"],
+    proxy: ["proxy"],
+    upstream: ["upstream"],
+    http: ["http"],
+  };
+
+  $effect(() => {
+    return connectLogStreams(streamsFor[$viewModeStore] ?? streamsFor.panels);
+  });
 
   let direction = $derived<"horizontal" | "vertical">(
     $screenWidth === "xs" || $screenWidth === "sm" ? "vertical" : "horizontal",
@@ -25,6 +39,7 @@
       <TabsTrigger value="panels">Both</TabsTrigger>
       <TabsTrigger value="proxy">Proxy</TabsTrigger>
       <TabsTrigger value="upstream">Upstream</TabsTrigger>
+      <TabsTrigger value="http">HTTP</TabsTrigger>
     </TabsList>
 
     <div class="flex-1 w-full overflow-hidden">
@@ -45,6 +60,10 @@
 
       <TabsContent value="upstream" class="h-full">
         <LogPanel id="upstream" title="Upstream Logs" logData={$upstreamLogs} />
+      </TabsContent>
+
+      <TabsContent value="http" class="h-full">
+        <LogPanel id="http" title="HTTP Logs" logData={$httpLogs} />
       </TabsContent>
     </div>
   </Tabs>
