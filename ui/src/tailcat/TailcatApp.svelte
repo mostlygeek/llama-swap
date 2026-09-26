@@ -4,9 +4,11 @@
   import ServerManager from "./ServerManager.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
-  import { Check, Circle, LoaderCircle, RefreshCw } from "@lucide/svelte";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import { Check, ChevronDown, Circle, LoaderCircle, LogOut, RefreshCw } from "@lucide/svelte";
   import { isDarkMode, themeName, connectionState, initSystemThemeListener } from "../stores/theme";
   import { fetchPlaygroundModels } from "../stores/api";
+  import { selectedPlaygroundTab, playgroundTabs } from "../stores/playground";
   import { startTailcatWasm, type LoadStage } from "./wasm";
   import { bridge } from "./bridge";
   import { installTailcatFetch } from "./transport";
@@ -71,9 +73,11 @@
   loadModule();
 
   // The connect sequence, shown as a checklist so a slow stage is visibly
-  // still working rather than hung. The handshake is the usual one: it retries
-  // for up to a minute when the token is stale or this browser's node key is
-  // not on the node's allowlist.
+  // still working rather than hung. The handshake is the usual one: it
+  // retries for up to a minute when the token is stale or the node is
+  // unreachable. tailcat.allow plays no part here -- it is enforced on every
+  // HTTP request once the handshake succeeds, not on the handshake itself, so
+  // a rejected node key surfaces as an error on the "probe" step instead.
   // "done" is a pause with every step ticked: a connect can finish in well
   // under a second, and a checklist that flashes past reads as a glitch. The
   // Go button counts it down and skips it when clicked.
@@ -222,19 +226,48 @@
     const icon = $connectionState === "connecting" ? "\u{1F7E1}" : $connectionState === "connected" ? "\u{1F7E2}" : "\u{1F534}";
     document.title = `${icon} llama-swap Playground`;
   });
+  // The phone header is tight (server name, Refresh, Disconnect all compete
+  // for room), so the connected header's tab picker there shows just the tab
+  // name, matching App.svelte's own phone-width Playground header.
+  let playgroundTabLabel = $derived(
+    playgroundTabs.find((t) => t.id === $selectedPlaygroundTab)?.label ?? "Playground",
+  );
 </script>
 
 <div class="flex h-screen min-h-0 flex-col">
   {#if phase === "connected"}
     <header class="flex shrink-0 items-center gap-2 border-b px-4 py-2">
-      <span class="min-w-0 truncate font-medium">{active?.name}</span>
-      <span class="text-muted-foreground text-xs">over Tailcat</span>
+      <!-- Phones: the tab strip inside Playground hides itself below sm, so
+           this dropdown is the only way to switch tabs there. Wider screens
+           keep the strip and show the connected server's name instead. -->
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger
+          class="hover:bg-muted -mx-1 flex min-w-0 items-center gap-1 rounded-md px-1 py-1 sm:hidden"
+          aria-label="Switch playground tab"
+        >
+          <span class="truncate text-sm font-medium">{playgroundTabLabel}</span>
+          <ChevronDown class="text-muted-foreground size-4 shrink-0" />
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Content align="start" class="min-w-44">
+          {#each playgroundTabs as tab (tab.id)}
+            <DropdownMenu.Item class="gap-2 py-2 text-base" onSelect={() => selectedPlaygroundTab.set(tab.id)}>
+              <Check class="size-4 {$selectedPlaygroundTab === tab.id ? '' : 'invisible'}" />
+              {tab.label}
+            </DropdownMenu.Item>
+          {/each}
+        </DropdownMenu.Content>
+      </DropdownMenu.Root>
+      <span class="hidden min-w-0 truncate font-medium sm:inline">{active?.name}</span>
+      <span class="text-muted-foreground hidden text-xs sm:inline">over Tailcat</span>
       <div class="flex-1"></div>
-      <Button size="sm" variant="ghost" onclick={() => fetchPlaygroundModels()}>
+      <Button size="sm" variant="ghost" onclick={() => fetchPlaygroundModels()} aria-label="Refresh models">
         <RefreshCw class="size-4" />
-        Refresh models
+        <span class="hidden sm:inline">Refresh models</span>
       </Button>
-      <Button size="sm" variant="outline" onclick={disconnect}>Disconnect</Button>
+      <Button size="sm" variant="outline" onclick={disconnect} aria-label="Disconnect">
+        <LogOut class="size-4" />
+        <span class="hidden sm:inline">Disconnect</span>
+      </Button>
     </header>
     <main class="min-h-0 flex-1 overflow-auto p-4">
       <Playground />
@@ -279,8 +312,8 @@
           </ol>
           {#if handshakeHint}
             <p class="text-muted-foreground text-xs">
-              Still trying. If this does not complete, check the token, and that this browser's node
-              key is in the node's <code>tailcat.allow</code> list. It gives up after a minute.
+              Still trying. If this does not complete, check the token and that the node is
+              running. It gives up after a minute.
             </p>
           {/if}
           {#if step === "done"}

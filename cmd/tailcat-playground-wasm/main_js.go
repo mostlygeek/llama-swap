@@ -123,9 +123,10 @@ func identity(this js.Value, args []js.Value) any {
 //
 // The optional onProgress(stage, detail) callback is told what connect is
 // waiting on. The handshake alone can take most of a minute when the token is
-// stale or the browser's node key is not on the allowlist, and a page that
-// sits silently for that long looks broken. Stages are "handshake", with the
-// attempt number as detail, and "probe".
+// stale or the node is unreachable, and a page that sits silently for that
+// long looks broken. tailcat.allow plays no part here: it no longer gates the
+// handshake (see probeHealth), only the HTTP requests that follow it. Stages
+// are "handshake", with the attempt number as detail, and "probe".
 func connect(this js.Value, args []js.Value) any {
 	if len(args) != 1 || args[0].Type() != js.TypeObject {
 		return rejectedPromise(errors.New("connect requires an options object"))
@@ -161,8 +162,11 @@ func connect(this js.Value, args []js.Value) any {
 		defer cancel()
 		if err := pingUntil(ctx, cl, progress); err != nil {
 			cl.Close()
-			return nil, fmt.Errorf("could not reach the node over Tailcat. Check the token, "+
-				"and that the node's tailcat.allow list includes this browser's node key: %w", err)
+			// tailcat.allow no longer gates the handshake (see probeHealth):
+			// any client holding the token reaches this far, so a failure
+			// here means the token, the node, or the relay path.
+			return nil, fmt.Errorf("could not reach the node over Tailcat. Check the token "+
+				"and that the node is running: %w", err)
 		}
 
 		hc := &http.Client{Transport: &http.Transport{
@@ -190,10 +194,13 @@ func connect(this js.Value, args []js.Value) any {
 }
 
 // probeHealth confirms the node is serving HTTP over the tunnel. GET /health
-// is deliberate: it is the one route llama-swap serves without an API key, so
-// a failure here means the tunnel or the server, never the credentials. An
-// API key problem surfaces later, on the page's own /v1/models request, where
-// it can be reported as such.
+// is deliberate: llama-swap never requires an API key for it, so a non-403
+// failure here means the tunnel or the server, never credentials. A 403 is
+// unambiguous too, just for a different reason: tailcat.allow is enforced on
+// every Tailcat HTTP request, /health included, so it is the first place a
+// browser whose node key isn't allowed will find out. An apiKeys problem
+// surfaces later, on the page's own /v1/models request, where it can be
+// reported as such.
 func probeHealth(hc *http.Client) error {
 	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
 	defer cancel()
@@ -207,6 +214,11 @@ func probeHealth(hc *http.Client) error {
 	}
 	defer resp.Body.Close()
 	io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
+	if resp.StatusCode == http.StatusForbidden {
+		return errors.New("the node rejected this browser's client key. Add it to the node's " +
+			"tailcat.allow list (shown below), or set tailcat.allow to [\"*\"] to allow any " +
+			"client holding the token")
+	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("the node answered GET /health with %s; it may not be a llama-swap server", resp.Status)
 	}

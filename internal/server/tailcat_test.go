@@ -199,6 +199,7 @@ models:
     aliases: [other-alias]
 tailcat:
   models: [real]
+  allow: ["*"]
 `))
 	if err != nil {
 		t.Fatal(err)

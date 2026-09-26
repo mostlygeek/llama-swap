@@ -381,6 +381,52 @@ func TestTailcatBridge_FetchAbortStopsTheRequest(t *testing.T) {
 	}
 }
 
+// tailcat.allow is enforced on every Tailcat HTTP request, /health included,
+// so a browser whose client key isn't listed finds out right here, as a 403 -
+// not as a hung or dropped tunnel handshake (the tunnel itself no longer
+// checks client identity at all). The message must name the actual cause
+// rather than the generic "may not be a llama-swap server" guess.
+func TestTailcatBridge_ProbeHealthReportsAllowlistRejection(t *testing.T) {
+	serveOverPipe(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "Tailcat client not allowed", http.StatusForbidden)
+	}))
+
+	conn.Lock()
+	hc := conn.http
+	conn.Unlock()
+
+	err := probeHealth(hc)
+	if err == nil {
+		t.Fatal("a 403 from /health resolved instead of erroring")
+	}
+	if !strings.Contains(err.Error(), "tailcat.allow") {
+		t.Errorf("error = %q, want it to mention tailcat.allow", err)
+	}
+	if strings.Contains(err.Error(), "may not be a llama-swap server") {
+		t.Errorf("error = %q, misdiagnosed an allowlist rejection as an unrecognized server", err)
+	}
+}
+
+// A non-403, non-200 /health response still gets the generic diagnosis: this
+// covers the case where the node is not actually llama-swap.
+func TestTailcatBridge_ProbeHealthReportsOtherFailures(t *testing.T) {
+	serveOverPipe(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+
+	conn.Lock()
+	hc := conn.http
+	conn.Unlock()
+
+	err := probeHealth(hc)
+	if err == nil {
+		t.Fatal("a 502 from /health resolved instead of erroring")
+	}
+	if !strings.Contains(err.Error(), "502") {
+		t.Errorf("error = %q, want it to name the status", err)
+	}
+}
+
 func TestTailcatBridge_FetchWithoutAConnection(t *testing.T) {
 	conn.Lock()
 	conn.http = nil

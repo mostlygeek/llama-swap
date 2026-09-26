@@ -4,7 +4,7 @@ summary: Build and use a standalone HTML page that reaches a Tailcat-exposed lla
 category: guides
 tags: [tailcat, playground, ui, remote, browser, wasm]
 config_keys: [tailcat, tailcat.allow, tailcat.models, tailcat.admin, apiKeys]
-updated: 2026-09-09
+updated: 2026-09-26
 ---
 
 # Use the Playground over Tailcat from a browser
@@ -78,10 +78,16 @@ a node is answering 401.
 **Disconnect** in the header returns to the list without dropping anything you
 have saved.
 
-## Allowlisted nodes
+## `tailcat.allow`
 
-When the node sets `tailcat.allow`, only the listed client keys may connect. The
-page generates its own client key on first load and shows it under **This
+`tailcat.allow` denies by default: an empty or missing list rejects every
+client, including this page. The Tailcat tunnel itself no longer checks who is
+connecting &mdash; any browser holding the token completes the handshake &mdash;
+so the allowlist is enforced on every HTTP request the page makes afterward,
+starting with the very first one. A rejected browser gets a clear error on the
+connecting screen rather than a hang, naming `tailcat.allow` as the cause.
+
+The page generates its own client key on first load and shows it under **This
 browser's node key**:
 
 ```yaml
@@ -93,9 +99,22 @@ tailcat:
 ```
 
 The key is stored in the browser and stays the same across reloads, so it only
-has to be added once. `tailcat.allow` is read at startup, so restart llama-swap
-after changing it. Clearing the browser's storage generates a new key, and the
-page says so when that has happened.
+has to be added once. Clearing the browser's storage generates a new key, and
+the page says so when that has happened. Config reloads (`-watch-config` or
+`SIGHUP`) apply an updated `allow` immediately, without restarting llama-swap
+or dropping the page's connection.
+
+To let any browser holding the token in, without adding individual keys, use
+the wildcard instead of a key list:
+
+```yaml
+tailcat:
+  allow: ["*"]
+  models: [chat]
+```
+
+An explicit list is strongly recommended for a persistent address; see
+[Connect llama-swap with Tailcat](tailcat.md) for the full `allow` reference.
 
 ## What is stored, and where
 
