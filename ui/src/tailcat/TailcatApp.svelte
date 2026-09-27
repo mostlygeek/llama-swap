@@ -95,8 +95,10 @@
   let elapsed = $state(0);
   let stepStartedAt = 0;
   let ticker: ReturnType<typeof setInterval> | undefined;
-  // Bumped by every connect and cancel, so a connect that was cancelled during
-  // its pause cannot finish on top of the one started after it.
+  // Bumped by every connect and cancel. After each await a connect checks it
+  // is still the current attempt and quits if not, so one that was cancelled
+  // or replaced cannot install its tunnel, tear down the one started after it,
+  // or change what the page shows.
   let attempt = 0;
 
   const stepIndex = $derived(step === "done" ? steps.length : steps.findIndex((s) => s.id === step));
@@ -130,9 +132,12 @@
       elapsed = Math.floor((Date.now() - stepStartedAt) / 1000);
     }, 1000);
 
+    const superseded = () => thisAttempt !== attempt;
+
     try {
       if (moduleState === "failed") loadModule();
       await wasmReady;
+      if (superseded()) return;
 
       setStep("handshake");
       await bridge().connect({
@@ -141,18 +146,23 @@
         derpMapURL: server.derpMapURL,
         verbose: false,
         onProgress(stage, detail) {
+          if (superseded()) return;
           if (stage === "handshake") stepDetail = `attempt ${detail}`;
           else setStep("probe");
         },
       });
+      if (superseded()) return;
 
+      // The key of the server this attempt connected to, not whichever is
+      // active by the time a request is made.
       restoreFetch?.();
-      restoreFetch = installTailcatFetch(() => active?.apiKey ?? "");
+      restoreFetch = installTailcatFetch(() => server.apiKey);
 
       // The node is reachable by this point; this is the first request that
       // needs the API key, so it is where a credentials problem shows up.
       setStep("models");
       const models = await fetch("/v1/models");
+      if (superseded()) return;
       if (models.status === 401 || models.status === 403) {
         throw new Error(
           "The node rejected the API key. Edit the server and set the key from its apiKeys config.",
@@ -162,25 +172,29 @@
         throw new Error(`The node answered GET /v1/models with ${models.status}.`);
       }
       await fetchPlaygroundModels();
+      if (superseded()) return;
 
       setStep("done");
       await new Promise<void>((resolve) => {
         skipPause = resolve;
         setTimeout(resolve, donePause * 1000);
       });
+      // Cancel during the pause has already torn the connection down, and
+      // skipPause may belong to the attempt started after it.
+      if (superseded()) return;
       skipPause = undefined;
-      // Cancel during the pause has already torn the connection down.
-      if (thisAttempt !== attempt) return;
 
       connectionState.set("connected");
       phase = "connected";
     } catch (e) {
+      // The connection torn down here would be the newer attempt's.
+      if (superseded()) return;
       error = e instanceof Error ? e.message : String(e);
       connectionState.set("disconnected");
       phase = "servers";
       teardown();
     } finally {
-      stopTicker();
+      if (!superseded()) stopTicker();
     }
   }
 

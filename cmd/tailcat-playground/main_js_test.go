@@ -93,6 +93,23 @@ func serveOverPipe(t *testing.T, h http.Handler) {
 	})
 }
 
+// jsRejection is the error await returns for a rejected promise. name is the
+// rejection's JS error name, which is how the Playground tells an abort
+// ("AbortError") from a failure.
+type jsRejection struct {
+	name    string
+	message string
+}
+
+func (e *jsRejection) Error() string { return e.message }
+
+// isAbortError reports whether err is a promise rejection the Playground treats
+// as a user's cancel rather than a failure.
+func isAbortError(err error) bool {
+	var rejection *jsRejection
+	return errors.As(err, &rejection) && rejection.name == "AbortError"
+}
+
 // await resolves a JS promise. Blocking on the channel parks this goroutine and
 // lets the JS event loop run, which is what lets the promise settle at all.
 func await(t *testing.T, promise js.Value) (js.Value, error) {
@@ -109,11 +126,12 @@ func await(t *testing.T, promise js.Value) (js.Value, error) {
 	})
 	defer onResolve.Release()
 	onReject := js.FuncOf(func(_ js.Value, args []js.Value) any {
-		message := "rejected"
+		rejection := &jsRejection{message: "rejected"}
 		if len(args) > 0 && args[0].Truthy() {
-			message = args[0].Get("message").String()
+			rejection.name = args[0].Get("name").String()
+			rejection.message = args[0].Get("message").String()
 		}
-		done <- outcome{err: errors.New(message)}
+		done <- outcome{err: rejection}
 		return nil
 	})
 	defer onReject.Release()
@@ -362,16 +380,19 @@ func TestTailcatBridge_FetchAbortStopsTheRequest(t *testing.T) {
 	controller.Call("abort")
 
 	// Reading on drains what is already buffered and then fails, which is what
-	// the Playground's stream loop sees when the user cancels.
-	failed := false
+	// the Playground's stream loop sees when the user cancels. It must fail as
+	// an AbortError, or the Playground reports the stop as an error.
+	var readErr error
 	for range 100 {
 		if _, err := await(t, reader.Call("read")); err != nil {
-			failed = true
+			readErr = err
 			break
 		}
 	}
-	if !failed {
+	if readErr == nil {
 		t.Error("the response stream kept delivering chunks after abort")
+	} else if !isAbortError(readErr) {
+		t.Errorf("read after abort failed with %v, want an AbortError", readErr)
 	}
 
 	select {
@@ -395,7 +416,7 @@ func TestTailcatBridge_ProbeHealthReportsAllowlistRejection(t *testing.T) {
 	hc := conn.http
 	conn.Unlock()
 
-	err := probeHealth(hc)
+	err := probeHealth(context.Background(), hc)
 	if err == nil {
 		t.Fatal("a 403 from /health resolved instead of erroring")
 	}
@@ -418,12 +439,69 @@ func TestTailcatBridge_ProbeHealthReportsOtherFailures(t *testing.T) {
 	hc := conn.http
 	conn.Unlock()
 
-	err := probeHealth(hc)
+	err := probeHealth(context.Background(), hc)
 	if err == nil {
 		t.Fatal("a 502 from /health resolved instead of erroring")
 	}
 	if !strings.Contains(err.Error(), "502") {
 		t.Errorf("error = %q, want it to name the status", err)
+	}
+}
+
+// A stop can also land before the node has sent response headers, for example
+// while a model is still loading. That too must reject as an AbortError.
+func TestTailcatBridge_FetchAbortBeforeResponse(t *testing.T) {
+	serveOverPipe(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(testTimeout):
+		}
+	}))
+
+	controller := js.Global().Get("AbortController").New()
+	request := wireRequest(http.MethodPost, "http://server.tailcat/v1/chat/completions", nil, []byte("{}"), controller.Get("signal"))
+	promise := doFetch(js.Undefined(), []js.Value{request}).(js.Value)
+	controller.Call("abort")
+
+	_, err := await(t, promise)
+	if err == nil {
+		t.Fatal("an aborted fetch resolved")
+	}
+	if !isAbortError(err) {
+		t.Errorf("aborted fetch failed with %v, want an AbortError", err)
+	}
+}
+
+// Cancelling a slow connect and starting another must leave the first one
+// unable to install its client: otherwise it could replace the connection the
+// page moved on to, and send that server's requests and API key to itself.
+func TestTailcatBridge_SupersededConnectCannotInstall(t *testing.T) {
+	t.Cleanup(func() { resetConn(nil) })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stale := resetConn(cancel)
+
+	// What the page does when the user cancels, or picks another server.
+	disconnect(js.Undefined(), nil)
+	if ctx.Err() == nil {
+		t.Error("disconnect left the pending connect running")
+	}
+
+	hc := &http.Client{}
+	if installConn(stale, nil, hc) {
+		t.Error("a superseded connect installed its client")
+	}
+	conn.Lock()
+	installed := conn.http
+	conn.Unlock()
+	if installed != nil {
+		t.Error("a superseded connect's client became the live connection")
+	}
+
+	current := resetConn(nil)
+	if !installConn(current, nil, hc) {
+		t.Error("the current connect could not install its client")
 	}
 }
 

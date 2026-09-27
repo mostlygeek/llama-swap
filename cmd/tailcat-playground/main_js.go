@@ -72,7 +72,22 @@ var conn struct {
 	sync.Mutex
 	client *tailcatlib.Client
 	http   *http.Client
+	// gen is bumped by every connect and disconnect. A connect installs its
+	// client only if gen still holds the value it started with, so one that
+	// was cancelled or superseded cannot replace the connection the page has
+	// since moved on to.
+	gen uint64
+	// cancelPending aborts the connect still in flight, if there is one.
+	cancelPending context.CancelFunc
 }
+
+// errAborted is rejected to JS as a DOMException named AbortError, which is
+// what the Playground checks for to tell a user's cancel from a failure.
+var errAborted = errors.New("the request was aborted")
+
+// errSuperseded is what a connect resolves to when a later connect or a
+// disconnect cancelled it. The page has already moved on and ignores it.
+var errSuperseded = errors.New("the connection attempt was cancelled")
 
 func main() {
 	js.Global().Set("llamaSwapTailcat", map[string]any{
@@ -151,7 +166,9 @@ func connect(this js.Value, args []js.Value) any {
 			return nil, fmt.Errorf("reading the saved client key: %w", err)
 		}
 
-		closeConn()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		gen := resetConn(cancel)
 		cl := &tailcatlib.Client{
 			Server:     tailcatlib.Addr(token),
 			Key:        pk.Private,
@@ -159,10 +176,13 @@ func connect(this js.Value, args []js.Value) any {
 			DERPMapURL: derpMapURL,
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), handshakeTimeout)
-		defer cancel()
-		if err := pingUntil(ctx, cl, progress); err != nil {
+		handshakeCtx, handshakeCancel := context.WithTimeout(ctx, handshakeTimeout)
+		defer handshakeCancel()
+		if err := pingUntil(handshakeCtx, cl, progress); err != nil {
 			cl.Close()
+			if ctx.Err() != nil {
+				return nil, errSuperseded
+			}
 			// tailcat.allow no longer gates the handshake (see probeHealth):
 			// any client holding the token reaches this far, so a failure
 			// here means the token, the node, or the relay path.
@@ -182,16 +202,34 @@ func connect(this js.Value, args []js.Value) any {
 		}}
 
 		progress("probe", "")
-		if err := probeHealth(hc); err != nil {
+		if err := probeHealth(ctx, hc); err != nil {
+			hc.CloseIdleConnections()
 			cl.Close()
+			if ctx.Err() != nil {
+				return nil, errSuperseded
+			}
 			return nil, err
 		}
 
-		conn.Lock()
-		conn.client, conn.http = cl, hc
-		conn.Unlock()
+		if !installConn(gen, cl, hc) {
+			hc.CloseIdleConnections()
+			cl.Close()
+			return nil, errSuperseded
+		}
 		return map[string]any{"nodeKey": pk.Private.Public().String()}, nil
 	})
+}
+
+// installConn makes cl and hc the live connection, unless a connect or
+// disconnect has happened since the one that started generation gen.
+func installConn(gen uint64, cl *tailcatlib.Client, hc *http.Client) bool {
+	conn.Lock()
+	defer conn.Unlock()
+	if conn.gen != gen {
+		return false
+	}
+	conn.client, conn.http, conn.cancelPending = cl, hc, nil
+	return true
 }
 
 // probeHealth confirms the node is serving HTTP over the tunnel. GET /health
@@ -202,8 +240,8 @@ func connect(this js.Value, args []js.Value) any {
 // browser whose node key isn't allowed will find out. An apiKeys problem
 // surfaces later, on the page's own /v1/models request, where it can be
 // reported as such.
-func probeHealth(hc *http.Client) error {
-	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+func probeHealth(ctx context.Context, hc *http.Client) error {
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://server.tailcat/health", nil)
 	if err != nil {
@@ -226,24 +264,34 @@ func probeHealth(hc *http.Client) error {
 	return nil
 }
 
-// disconnect tears down the current connection. The page calls it when the
-// user goes back to the server list.
+// disconnect tears down the current connection and cancels a connect still in
+// flight. The page calls it when the user goes back to the server list,
+// including by cancelling a connect.
 func disconnect(this js.Value, args []js.Value) any {
-	closeConn()
+	resetConn(nil)
 	return js.Undefined()
 }
 
-func closeConn() {
+// resetConn closes the live connection, cancels the connect in flight and
+// starts a new generation, which it returns. pending is the cancel func of the
+// connect that is starting, or nil for a disconnect.
+func resetConn(pending context.CancelFunc) uint64 {
 	conn.Lock()
-	cl, hc := conn.client, conn.http
-	conn.client, conn.http = nil, nil
+	cl, hc, cancel := conn.client, conn.http, conn.cancelPending
+	conn.client, conn.http, conn.cancelPending = nil, nil, pending
+	conn.gen++
+	gen := conn.gen
 	conn.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 	if hc != nil {
 		hc.CloseIdleConnections()
 	}
 	if cl != nil {
 		cl.Close()
 	}
+	return gen
 }
 
 // doFetch performs one HTTP request over the tunnel and resolves to a JS
@@ -310,9 +358,13 @@ func doFetch(this js.Value, args []js.Value) any {
 
 		resp, err := hc.Do(hreq)
 		if err != nil {
+			// Only the abort listener cancels ctx before fail runs.
+			if ctx.Err() != nil {
+				err = errAborted
+			}
 			return fail(err)
 		}
-		return makeResponse(resp, cancel, releaseAbort), nil
+		return makeResponse(ctx, resp, cancel, releaseAbort), nil
 	})
 }
 
@@ -345,7 +397,7 @@ func watchAbort(cancel context.CancelFunc, signal js.Value) func() {
 	}
 }
 
-func makeResponse(resp *http.Response, cancel context.CancelFunc, releaseAbort func()) js.Value {
+func makeResponse(ctx context.Context, resp *http.Response, cancel context.CancelFunc, releaseAbort func()) js.Value {
 	headers := js.Global().Get("Headers").New()
 	for name, values := range resp.Header {
 		for _, value := range values {
@@ -367,7 +419,7 @@ func makeResponse(resp *http.Response, cancel context.CancelFunc, releaseAbort f
 		cancel()
 		return js.Global().Get("Response").New(js.Null(), init)
 	}
-	return js.Global().Get("Response").New(bodyStream(resp.Body, cancel, releaseAbort), init)
+	return js.Global().Get("Response").New(bodyStream(ctx, resp.Body, cancel, releaseAbort), init)
 }
 
 // statusText recovers the reason phrase from Go's "200 OK" status line. An
@@ -379,7 +431,9 @@ func statusText(resp *http.Response) string {
 // bodyStream adapts an http response body to a ReadableStream. pull returns a
 // promise, which is what gives the stream backpressure and what makes server
 // sent events arrive as they are produced rather than in one lump at the end.
-func bodyStream(body io.ReadCloser, cancel context.CancelFunc, releaseAbort func()) js.Value {
+// ctx is the request's context, cancelled by the abort listener before the
+// stream is done, so a read failing with ctx done is the page's own cancel.
+func bodyStream(ctx context.Context, body io.ReadCloser, cancel context.CancelFunc, releaseAbort func()) js.Value {
 	buf := make([]byte, readBufferSize)
 	var (
 		finish  sync.Once
@@ -413,6 +467,9 @@ func bodyStream(body io.ReadCloser, cancel context.CancelFunc, releaseAbort func
 				js.CopyBytesToJS(chunk, buf[:n])
 				controller.Call("enqueue", chunk)
 				return js.Undefined(), nil
+			}
+			if err != nil && !errors.Is(err, io.EOF) && ctx.Err() != nil {
+				err = errAborted
 			}
 			done()
 			if err == nil || errors.Is(err, io.EOF) {
@@ -499,7 +556,8 @@ func optLogf(v js.Value) logger.Logf {
 }
 
 // makePromise runs f on a new goroutine and returns a JavaScript Promise of
-// its result, rejected with a JavaScript Error if f returns an error.
+// its result, rejected with a JavaScript Error if f returns an error (see
+// jsError).
 func makePromise(f func() (any, error)) js.Value {
 	handler := js.FuncOf(func(this js.Value, args []js.Value) any {
 		resolve, reject := args[0], args[1]
@@ -507,7 +565,7 @@ func makePromise(f func() (any, error)) js.Value {
 			if res, err := f(); err == nil {
 				resolve.Invoke(res)
 			} else {
-				reject.Invoke(js.Global().Get("Error").New(err.Error()))
+				reject.Invoke(jsError(err))
 			}
 		}()
 		return nil
@@ -516,5 +574,15 @@ func makePromise(f func() (any, error)) js.Value {
 }
 
 func rejectedPromise(err error) js.Value {
-	return js.Global().Get("Promise").Call("reject", js.Global().Get("Error").New(err.Error()))
+	return js.Global().Get("Promise").Call("reject", jsError(err))
+}
+
+// jsError converts err to the value a promise rejects with. errAborted
+// becomes a DOMException named AbortError, matching what a browser's own fetch
+// rejects with when its signal fires; anything else is a plain Error.
+func jsError(err error) js.Value {
+	if errors.Is(err, errAborted) {
+		return js.Global().Get("DOMException").New(err.Error(), "AbortError")
+	}
+	return js.Global().Get("Error").New(err.Error())
 }
