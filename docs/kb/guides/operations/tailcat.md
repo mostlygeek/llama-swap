@@ -68,7 +68,8 @@ entry, a profile pin, or a peer's `peerID/model` name. Listing a selector
 exposes it the same way as a regular model ID, and requests still resolve
 through the selector's normal routing logic. Naming a local model exposes its
 aliases too; naming only an alias exposes just that alias and keeps the
-model's real ID private.
+model's real ID private. Tailcat clients see such an alias in `/v1/models` as
+a model of its own, whether or not `includeAliasesInList` is set.
 
 `allow` denies by default. llama-swap checks it on every HTTP request, using
 the node key that Tailcat authenticated for the connection. A client whose key
