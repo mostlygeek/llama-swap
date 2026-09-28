@@ -13,7 +13,7 @@ func newTieBreakerProgram(t *testing.T) *Program {
 	t.Helper()
 	p, err := Compile([]Definition{
 		{Name: "pool", DSL: "(t | a | b | c)"},
-		{Name: "all",  DSL: "+pool & +pool & +pool"},
+		{Name: "all", DSL: "+pool & +pool & +pool"},
 	}, func(ident string) (string, bool) { return ident, true })
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
@@ -81,6 +81,27 @@ func TestProgram_SolveTieBreakerLRUResidualTie(t *testing.T) {
 	})
 	if !reflect.DeepEqual(result.Evict, []string{"b"}) {
 		t.Fatalf("Evict=%v want [b] (first of the equal-idle pair in definition order)", result.Evict)
+	}
+}
+
+// Cost dominance holds regardless of candidate order: a later candidate
+// that evicts the most idle model must not win over an earlier cheaper
+// one on idle age alone (the program's evaluation order visits the
+// evict-a candidate last, so under an unguarded idle comparison the
+// expensive a would have stolen the decision from b).
+func TestProgram_SolveTieBreakerLRUCostBeatsIdleAcrossOrder(t *testing.T) {
+	p := newTieBreakerProgram(t)
+	result := p.Solve("t", []string{"a", "b", "c"}, SolveOptions{
+		TieBreaker: TieBreakerLRU,
+		EvictCosts: map[string]int{"a": 10},
+		Idle: map[string]time.Duration{
+			"a": 2 * time.Hour, // idlest, but costs 10 to evict
+			"b": 10 * time.Minute,
+			"c": time.Minute,
+		},
+	})
+	if !reflect.DeepEqual(result.Evict, []string{"b"}) {
+		t.Fatalf("Evict=%v want [b] (cost dominates idle across candidate order)", result.Evict)
 	}
 }
 

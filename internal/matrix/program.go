@@ -302,10 +302,12 @@ func (p *Program) Solve(target string, running []string, opts SolveOptions) Deci
 				better = true
 			case cost < bestCost:
 				better = true
-			case lru:
-				// cost == bestCost here: prefer evicting the longer-idle
-				// model. A strict comparison keeps the first candidate on a
-				// residual tie, so outcomes stay deterministic.
+			case lru && cost == bestCost:
+				// Eviction cost is the primary key: a more expensive
+				// candidate never wins on idle age alone. Only equal-cost
+				// candidates compare by idle — prefer evicting the
+				// longer-idle model. A strict comparison keeps the first
+				// candidate on a residual tie, so outcomes stay deterministic.
 				if rank := idleRank(evicted, opts.Idle); rank > bestIdleRank {
 					better = true
 				}
