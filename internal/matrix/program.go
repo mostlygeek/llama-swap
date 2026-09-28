@@ -272,11 +272,17 @@ func (p *Program) Solve(target string, running []string, opts SolveOptions) Deci
 	// Skip every set when the target appears in no set's expression.
 	globalTargetBit, targetKnown := p.modelBits[target]
 
+	// The lru policy needs each candidate's eviction list (to rank it by
+	// idle age); lexical never does, so the list is only constructed and
+	// tracked when lru is active. The lru idle score is the longest idle
+	// among the evicted models, which is accumulated in the same pass as
+	// the cost instead of a second scan.
 	lru := opts.TieBreaker == TieBreakerLRU
 	bestCost := -1
 	bestIdleRank := time.Duration(0)
 	var bestSet *compiledSet
 	var bestState projectedState
+	var bestEvict []string
 	for i := range p.sets {
 		set := &p.sets[i]
 		if !targetKnown || !set.support.has(globalTargetBit) {
@@ -288,11 +294,17 @@ func (p *Program) Solve(target string, running []string, opts SolveOptions) Deci
 			}
 
 			cost := 0
+			idle := time.Duration(0)
 			var evicted []string
 			for _, model := range running {
 				if !state.mask.has(evaluator.modelBits[model]) {
 					cost += evictionCost(opts.EvictCosts, model)
-					evicted = append(evicted, model)
+					if lru {
+						evicted = append(evicted, model)
+						if d := opts.Idle[model]; d > idle {
+							idle = d
+						}
+					}
 				}
 			}
 
@@ -308,13 +320,14 @@ func (p *Program) Solve(target string, running []string, opts SolveOptions) Deci
 				// candidates compare by idle — prefer evicting the
 				// longer-idle model. A strict comparison keeps the first
 				// candidate on a residual tie, so outcomes stay deterministic.
-				if rank := idleRank(evicted, opts.Idle); rank > bestIdleRank {
-					better = true
-				}
+				better = idle > bestIdleRank
 			}
 			if better {
 				bestCost = cost
-				bestIdleRank = idleRank(evicted, opts.Idle)
+				bestIdleRank = idle
+				if lru {
+					bestEvict = evicted
+				}
 				bestSet = set
 				bestState = state
 			}
@@ -328,10 +341,16 @@ func (p *Program) Solve(target string, running []string, opts SolveOptions) Deci
 		}
 	}
 
+	// Under lru the winner's eviction list was already built while ranking;
+	// lexical reconstructs the single list it never had.
 	var evict []string
-	for _, model := range running {
-		if !bestState.mask.has(evaluator.modelBits[model]) {
-			evict = append(evict, model)
+	if lru {
+		evict = bestEvict
+	} else {
+		for _, model := range running {
+			if !bestState.mask.has(evaluator.modelBits[model]) {
+				evict = append(evict, model)
+			}
 		}
 	}
 	return Decision{
@@ -391,19 +410,6 @@ func evictionCost(costs map[string]int, model string) int {
 		return cost
 	}
 	return 1
-}
-
-// idleRank is a candidate's lru score: the longest idle time among the
-// models it evicts. Candidates evicting nothing (or only models without idle
-// data) rank zero.
-func idleRank(evicted []string, idle map[string]time.Duration) time.Duration {
-	var rank time.Duration
-	for _, model := range evicted {
-		if d := idle[model]; d > rank {
-			rank = d
-		}
-	}
-	return rank
 }
 
 func contains(items []string, target string) bool {
