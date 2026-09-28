@@ -307,6 +307,51 @@ func TestMatrixSwapper_LRUFollowsIdleAges(t *testing.T) {
 	}
 }
 
+// idleProcStub is a process.Process that reports a fixed state, in-flight
+// count, and LastUse baseline. It overrides only the methods
+// processIdle consults; any other call panics, which keeps the stub
+// honest about what the idle source may rely on.
+type idleProcStub struct {
+	process.Process
+	state process.ProcessState
+	last  time.Time
+	infl  int
+}
+
+func (s idleProcStub) State() process.ProcessState { return s.state }
+func (s idleProcStub) LastUse() time.Time          { return s.last }
+func (s idleProcStub) InFlight() int               { return s.infl }
+
+// TestMatrixProcessIdle verifies the lru idle source: only a ready, unbusy
+// model is idle. A loading model (LastUse at the epoch) and a ready model
+// with in-flight requests must both be reported as freshly busy, so the
+// tie-breaker names an evictable model and the swap starts now.
+func TestMatrixProcessIdle(t *testing.T) {
+	idle := time.Now().Add(-30 * time.Minute)
+
+	if got := processIdle(idleProcStub{state: process.StateReady, last: idle}); got == 0 {
+		t.Errorf("ready, unbusy: got 0, want a ~30m idle window")
+	}
+
+	// Loading: LastUse is the epoch, which would read as "idle since before
+	// time" if reported raw.
+	if got := processIdle(idleProcStub{state: process.StateStarting, last: time.Time{}}); got != 0 {
+		t.Errorf("not ready: got %v, want 0 (freshly busy)", got)
+	}
+
+	// Ready but busy: LastUse advances only when the request completes, so
+	// the stale baseline must not rank a long-running request above a
+	// genuinely idle model.
+	if got := processIdle(idleProcStub{state: process.StateReady, last: idle, infl: 1}); got != 0 {
+		t.Errorf("ready with in-flight request: got %v, want 0 (freshly busy)", got)
+	}
+
+	// A ready process whose baseline never ran is freshly busy too.
+	if got := processIdle(idleProcStub{state: process.StateReady, last: time.Time{}}); got != 0 {
+		t.Errorf("ready with zero baseline: got %v, want 0", got)
+	}
+}
+
 // TestMatrixSwapper_LexicalCachesDecision verifies that the historical
 // (target, running) decision cache still applies in lexical mode.
 func TestMatrixSwapper_LexicalCachesDecision(t *testing.T) {

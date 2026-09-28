@@ -156,6 +156,8 @@ func (f *fakeProcess) Status() process.Status {
 
 func (f *fakeProcess) LastUse() time.Time { return time.Unix(0, f.lastUse.Load()) }
 
+func (f *fakeProcess) InFlight() int { return int(f.inFlightServe.Load()) }
+
 func (f *fakeProcess) markReady() { f.setState(process.StateReady) }
 
 func (f *fakeProcess) Run(_ time.Duration) error {

@@ -165,6 +165,10 @@ func New(
 
 func (p *ProcessCommand) Logger() *logmon.Monitor { return p.processLogger }
 
+// InFlight reports the number of requests currently being handled in
+// ServeHTTP; the count advances on entry and recedes on completion.
+func (p *ProcessCommand) InFlight() int { return int(p.inflight.Load()) }
+
 // LastUse exposes the idle-window baseline (lastUse), which run() sets when
 // the process becomes ready and ServeHTTP refreshes after each completion.
 func (p *ProcessCommand) LastUse() time.Time { return time.Unix(0, p.lastUse.Load()) }

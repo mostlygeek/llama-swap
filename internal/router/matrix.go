@@ -37,25 +37,10 @@ func NewMatrix(conf config.Config, logs *logmon.Group) (*Matrix, error) {
 			if !ok {
 				return 0
 			}
-			// A model that is not ready (still loading, or stopping) is not
-			// idle: it is mid-transition, and its LastUse baseline is the
-			// epoch, which would otherwise read as "idle since before time"
-			// and make lru prefer it over every genuinely idle model. Because
-			// the scheduler cannot evict a model mid-load, ranking it first
-			// only defers the swap; report it as freshly busy instead so the
-			// tie-breaker evicts a ready model and the swap starts now.
-			if proc.State() != process.StateReady {
-				return 0
-			}
-			if d := time.Since(proc.LastUse()); d > 0 {
-				return d
-			}
-			return 0
+			return processIdle(proc)
 		},
 	}
 
-	// Build a process for every model in the config. Any model can run alone
-	// even if it is not part of a set; this mirrors proxy.NewMatrix.
 	base, err := newBaseRouter("matrix", conf, processes, logs.ProxyLogs, swapper)
 	if err != nil {
 		return nil, fmt.Errorf("creating base router: %w", err)
@@ -143,4 +128,33 @@ func (p *matrixSwapper) OnSwapStart(target string, running []string) {
 	default:
 		p.logger.Debugf("matrix: model=%s already running in set=%s dsl=%q", target, result.SetName, result.DSL)
 	}
+}
+
+// processIdle reports how long a process has been idle, for the lru
+// eviction tie-breaker. Anything that is not a ready, unbusy model is
+// reported as freshly busy (zero):
+//
+//   - a model that is not ready (still loading, or stopping) is
+//     mid-transition, and its LastUse baseline is the epoch, which would
+//     read as "idle since before time" and make lru prefer it over every
+//     genuinely idle model. The scheduler cannot evict a model mid-load,
+//     so ranking it first only defers the swap;
+//   - a ready model with in-flight requests is busy even though ready:
+//     LastUse advances only when a request completes, so a long-running
+//     request would age the baseline and rank the busy model above a
+//     genuinely idle, equally costly one. The scheduler cannot evict a
+//     model mid-request either, so naming it would defer the swap;
+//   - a ready model whose baseline was never set (zero LastUse) would
+//     read as "idle since before time" and outrank every real model.
+//
+// Reporting all of these as freshly busy lets lru name an evictable model
+// instead, and the swap starts now.
+func processIdle(proc process.Process) time.Duration {
+	if proc.State() != process.StateReady || proc.InFlight() > 0 || proc.LastUse().IsZero() {
+		return 0
+	}
+	if d := time.Since(proc.LastUse()); d > 0 {
+		return d
+	}
+	return 0
 }
