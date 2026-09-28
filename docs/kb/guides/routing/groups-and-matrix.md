@@ -144,7 +144,14 @@ settings:
 - **`lru`**: the candidate that evicts the **longest-idle** model wins
   (idle = time since the model became ready or last finished a request). A
   cost tie between evicting a model idle for an hour and one idle for a
-  minute evicts the hour-old one.
+  minute evicts the hour-old one. When a candidate would evict several
+  models it is scored by the longest idle among them (budget-style setups
+  where every candidate evicts exactly one model are unaffected).
+
+  A model is only eligible for lru eviction if it is ready and not
+  currently handling a request: loading models and busy models are ranked
+  as freshly used, so the tie-breaker always names a model the scheduler
+  can actually evict right away.
 
 Cost is always the primary key: lru never evicts a high-cost model in favour
 of a cheaper idle one — it only orders candidates that cost the same. When
