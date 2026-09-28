@@ -17,6 +17,8 @@ func makeModels(names ...string) map[string]ModelConfig {
 	return m
 }
 
+// TestValidateMatrix_Basic verifies a standard matrix passes validation and
+// that the compiled program routes and evicts as documented.
 func TestValidateMatrix_Basic(t *testing.T) {
 	models := makeModels("gemma", "qwen", "mistral", "voxtral", "llama70B")
 
@@ -52,6 +54,8 @@ func TestValidateMatrix_Basic(t *testing.T) {
 	assert.Equal(t, []string{"voxtral"}, result.Evict)
 }
 
+// TestValidateMatrix_WithRef verifies a set built from a +ref expansion
+// passes validation and coexists with the referenced set's models.
 func TestValidateMatrix_WithRef(t *testing.T) {
 	models := makeModels("gemma", "qwen", "mistral", "voxtral", "reranker")
 
@@ -79,6 +83,8 @@ func TestValidateMatrix_WithRef(t *testing.T) {
 	assert.Empty(t, result.Evict)
 }
 
+// TestValidateMatrix_DirectAndMixedModelNames verifies matrix definitions
+// that mix var references and direct model names.
 func TestValidateMatrix_DirectAndMixedModelNames(t *testing.T) {
 	models := makeModels("gemma", "qwen", "voxtral")
 
@@ -327,6 +333,8 @@ matrix:
 	assert.Contains(t, err.Error(), "cannot use both")
 }
 
+// TestValidateMatrix_ConfigMatrixOnly verifies a config that routes via
+// matrix leaves the groups section empty.
 func TestValidateMatrix_ConfigMatrixOnly(t *testing.T) {
 	yaml := `
 models:
@@ -353,6 +361,9 @@ matrix:
 	assert.Empty(t, cfg.Groups)
 }
 
+// TestValidateMatrix_EvictionTieBreaker verifies the eviction_tiebreaker
+// policy is validated and normalized: unknown values are rejected and the
+// empty string becomes lexical.
 func TestValidateMatrix_EvictionTieBreaker(t *testing.T) {
 	models := map[string]ModelConfig{"gemma": {}}
 	newMatrix := func(tieBreaker string) *MatrixConfig {

@@ -15,6 +15,8 @@ type matrixSolver struct {
 	tieBreaker string
 }
 
+// newMatrixSolver wraps a compiled matrix program with its eviction costs
+// and tie-breaker policy.
 func newMatrixSolver(program *matrixdsl.Program, evictCosts map[string]int, tieBreaker string) *matrixSolver {
 	return &matrixSolver{
 		program:    program,

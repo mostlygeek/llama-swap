@@ -137,6 +137,8 @@ func TestProgram_References(t *testing.T) {
 	}, projectedSets(program, "mega", models))
 }
 
+// TestProgram_OverlappingReferences verifies a set that inline-references
+// another set keeps its members running without eviction.
 func TestProgram_OverlappingReferences(t *testing.T) {
 	models := []string{"target", "a", "b"}
 	program := compileIdentity(t, []Definition{
@@ -185,6 +187,8 @@ func TestProgram_CompileErrors(t *testing.T) {
 	}
 }
 
+// TestProgram_NoExpansionLimit verifies a wide program (6 dimensions with
+// 10 choices each) compiles and solves, evicting only the outside model.
 func TestProgram_NoExpansionLimit(t *testing.T) {
 	const (
 		dimensions = 6
@@ -206,6 +210,8 @@ func TestProgram_NoExpansionLimit(t *testing.T) {
 	assert.Len(t, result.TargetSet, dimensions+1)
 }
 
+// TestProgram_MoreThan64RelevantModels verifies solving works with more
+// than 64 relevant models (multi-word bitmask projection).
 func TestProgram_MoreThan64RelevantModels(t *testing.T) {
 	const modelCount = 70
 	models := []string{"target"}
@@ -223,6 +229,8 @@ func TestProgram_MoreThan64RelevantModels(t *testing.T) {
 	assert.Len(t, result.TargetSet, modelCount+1)
 }
 
+// TestProgram_DominatedProjection verifies dominated sub-terms are pruned:
+// a running set already inside an alternative needs no eviction.
 func TestProgram_DominatedProjection(t *testing.T) {
 	program := compileIdentity(t, []Definition{{
 		Name: "preferred",
@@ -234,6 +242,8 @@ func TestProgram_DominatedProjection(t *testing.T) {
 	assert.Equal(t, []string{"a", "b", "target"}, result.TargetSet)
 }
 
+// TestProgram_TargetAbsent verifies a target in no set's expression yields
+// a decision that evicts everything running.
 func TestProgram_TargetAbsent(t *testing.T) {
 	program := compileIdentity(t, []Definition{{
 		Name: "known",

@@ -111,6 +111,8 @@ func (f *fakeProcess) setState(s process.ProcessState) {
 	f.setStateLocked(s)
 }
 
+// setStateLocked records a state transition, baselining readySince and the
+// idle window on the way into ready; callers must hold f.mu.
 func (f *fakeProcess) setStateLocked(s process.ProcessState) {
 	if s != process.StateReady {
 		f.readySince = time.Time{}
@@ -148,14 +150,17 @@ func (f *fakeProcess) State() process.ProcessState {
 	return f.state
 }
 
+// Status reports the fake's current state and ready-since baseline.
 func (f *fakeProcess) Status() process.Status {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return process.Status{State: f.state, ReadySince: f.readySince}
 }
 
+// LastUse reports the baseline of the fake's current idle window.
 func (f *fakeProcess) LastUse() time.Time { return time.Unix(0, f.lastUse.Load()) }
 
+// InFlight reports the fake's count of in-flight ServeHTTP calls.
 func (f *fakeProcess) InFlight() int { return int(f.inFlightServe.Load()) }
 
 func (f *fakeProcess) markReady() { f.setState(process.StateReady) }

@@ -12,6 +12,8 @@ import (
 
 var benchmarkSolveResult solveResult
 
+// BenchmarkMatrixSolver_Solve measures a lexical solve against matrices of
+// growing combinatorial size: all combinations of one choice per dimension.
 func BenchmarkMatrixSolver_Solve(b *testing.B) {
 	for _, dimensions := range []int{2, 3, 4, 5} {
 		solver := benchmarkCompiledMatrix(b, dimensions, 10)
@@ -97,6 +99,8 @@ func benchmarkMultiSetMatrix(setCount, choices int) (*config.MatrixConfig, map[s
 	return &config.MatrixConfig{EvictCosts: evictCosts, Sets: sets}, models
 }
 
+// benchmarkCompiledMatrix compiles a matrix of the target AND-ed with
+// dimensions OR-groups of choices models each, and returns its solver.
 func benchmarkCompiledMatrix(b *testing.B, dimensions, choices int) *matrixSolver {
 	b.Helper()
 	groups := make([]string, dimensions)

@@ -256,6 +256,8 @@ func TestMatrixSolver_EvictCostsPreferred(t *testing.T) {
 	}
 }
 
+// newTestMatrixSolver compiles the given sets over the supplied model names
+// into a lexical solver with the given eviction costs.
 func newTestMatrixSolver(t *testing.T, sets config.OrderedSets, evictCosts map[string]int, modelNames ...string) *matrixSolver {
 	t.Helper()
 	models := make(map[string]config.ModelConfig, len(modelNames))
@@ -318,9 +320,14 @@ type idleProcStub struct {
 	infl  int
 }
 
+// State reports the stub's fixed process state.
 func (s idleProcStub) State() process.ProcessState { return s.state }
-func (s idleProcStub) LastUse() time.Time          { return s.last }
-func (s idleProcStub) InFlight() int               { return s.infl }
+
+// LastUse reports the stub's fixed idle-window baseline.
+func (s idleProcStub) LastUse() time.Time { return s.last }
+
+// InFlight reports the stub's fixed in-flight count.
+func (s idleProcStub) InFlight() int { return s.infl }
 
 // TestMatrixProcessIdle verifies the lru idle source: only a ready, unbusy
 // model is idle. A loading model (LastUse at the epoch) and a ready model

@@ -14,6 +14,9 @@ type Matrix struct {
 	*baseRouter
 }
 
+// NewMatrix builds the matrix router: it compiles the configured matrix,
+// wires the solver into a swapper (with the lru idle source bound to the
+// process table), and creates one process per configured model.
 func NewMatrix(conf config.Config, logs *logmon.Group) (*Matrix, error) {
 	mtx := conf.Routing.Router.Settings.Matrix
 	if mtx == nil {
@@ -85,6 +88,9 @@ type matrixSwapper struct {
 	lastValid   bool
 }
 
+// solve returns the swap decision for target among running. Lexical
+// decisions are cached on (target, running); lru decisions are never
+// cached because they depend on idle ages, which move between calls.
 func (p *matrixSwapper) solve(target string, running []string) solveResult {
 	lru := p.solver.tieBreaker == config.EvictionTieBreakerLRU
 	if !lru && p.lastValid && p.lastTarget == target && slices.Equal(p.lastRunning, running) {
@@ -117,6 +123,8 @@ func (p *matrixSwapper) EvictionFor(target string, running []string) []string {
 	return p.solve(target, running).Evict
 }
 
+// OnSwapStart re-derives the decision the scheduler is acting on and logs
+// it (evictions, a cold start, or an already-running target).
 func (p *matrixSwapper) OnSwapStart(target string, running []string) {
 	result := p.solve(target, running)
 	switch {
