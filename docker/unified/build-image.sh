@@ -137,7 +137,7 @@ for arg in "$@"; do
             echo "  LS_VERSION           Override llama-swap version (e.g., '170' or 'latest')"
             echo "  WHISPER_FFMPEG       Enable whisper.cpp FFmpeg support (default: yes)"
             echo "  CMAKE_CUDA_ARCHITECTURES  CUDA compute capabilities to compile natively"
-            echo "                       (default: 60;61;75;86;89 for --cuda,"
+            echo "                       (default: 60;61;70;75;86;89 for --cuda,"
             echo "                       80;86;89;90;100;120 for --cuda13 on amd64,"
             echo "                       90;100;120;121 for --cuda13 on arm64)"
             echo "  CUDA_VERSION         CUDA toolkit/runtime version as an nvidia/cuda image tag"
@@ -228,7 +228,7 @@ case "${VARIANT}:${ARCH}" in
         ;;
     *)
         CUDA_VERSION="${CUDA_VERSION:-12.9.1}"
-        CMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES:-60;61;75;86;89}"
+        CMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES:-60;61;70;75;86;89}"
         ;;
 esac
 
