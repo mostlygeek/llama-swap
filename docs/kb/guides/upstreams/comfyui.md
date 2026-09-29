@@ -65,10 +65,10 @@ Two settings are applied while the config loads:
 | setting | value | why |
 | --- | --- | --- |
 | `compat.ignoreWebsockets` | forced to `true` | a websocket connection does not start or queue the model, and does not count toward concurrency, in-flight requests, TTL activity, or swap decisions |
-| `concurrencyLimit` | raised to at least `50` | the per-model default is 10; one open ComfyUI tab makes many parallel asset and API requests |
+| `concurrencyLimit` | raised to at least `999` | the per-model default is 10; one open ComfyUI tab makes many parallel asset and API requests |
 
 Setting `ignoreWebsockets: false` yourself has no effect, and a
-`concurrencyLimit` below 50 is raised. A higher one is kept.
+`concurrencyLimit` below 999 is raised. A higher one is kept.
 
 ## What cannot start the model
 
@@ -137,7 +137,7 @@ models:
   my-other-comfyui-model:
     checkEndpoint: /
     # the two settings /comfyui/ would have applied for you
-    concurrencyLimit: 50
+    concurrencyLimit: 999
     compat:
       ignoreWebsockets: true
     cmdStop: docker stop ${MODEL_ID}

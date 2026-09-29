@@ -83,10 +83,10 @@ func TestConfig_ComfyUIOverrides(t *testing.T) {
 		concurrencyLimit int
 		wantLimit        int
 	}{
-		{name: "unset limit", wantLimit: 50},
-		{name: "lower limit", concurrencyLimit: 10, wantLimit: 50},
-		{name: "minimum limit", concurrencyLimit: 50, wantLimit: 50},
-		{name: "higher limit", concurrencyLimit: 60, wantLimit: 60},
+		{name: "unset limit", wantLimit: 999},
+		{name: "lower limit", concurrencyLimit: 10, wantLimit: 999},
+		{name: "minimum limit", concurrencyLimit: 999, wantLimit: 999},
+		{name: "higher limit", concurrencyLimit: 1500, wantLimit: 1500},
 	}
 
 	for _, tt := range tests {
