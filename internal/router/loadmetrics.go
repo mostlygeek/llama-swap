@@ -4,7 +4,6 @@ import (
 	"context"
 	"sort"
 	"sync"
-	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
@@ -32,20 +31,16 @@ const loadSampleWindow = 7
 // scheduler goroutine. The mutex guards both.
 type loadCostTracker struct {
 	mu          sync.Mutex
-	multipliers map[string]int       // model -> configured evict_costs multiplier
-	pending     map[string]time.Time // process -> when it last entered starting
-	samples     map[string][]int64   // model -> recent load durations in ms
-	logger      *logmon.Monitor      // debug trail for recorded costs; may be nil
-	now         func() time.Time     // clock seam for tests
+	multipliers map[string]int     // model -> configured evict_costs multiplier
+	samples     map[string][]int64 // model -> recent load durations in ms
+	logger      *logmon.Monitor    // debug trail for recorded costs; may be nil
 }
 
 func newLoadCostTracker(multipliers map[string]int, logger *logmon.Monitor) *loadCostTracker {
 	return &loadCostTracker{
 		multipliers: multipliers,
-		pending:     make(map[string]time.Time),
 		samples:     make(map[string][]int64),
 		logger:      logger,
-		now:         time.Now,
 	}
 }
 
@@ -61,33 +56,34 @@ func (t *loadCostTracker) attach(ctx context.Context) {
 	}()
 }
 
-// observe records a load sample for a starting->ready transition. Loads that
-// never reach ready (failed, aborted, stopped mid-start) leave no sample.
+// observe records a load sample from the Elapsed duration the starting->ready
+// transition carries — the emitter measured the time genuinely spent in
+// starting, so a dispatcher backlog delaying delivery cannot distort or
+// collapse the measurement. Loads that never reach ready (failed, aborted,
+// stopped mid-start) produce no such event and leave no sample.
 func (t *loadCostTracker) observe(e swaputil.ProcessStateChangeEvent) {
+	if e.NewState != string(process.StateReady) || e.OldState != string(process.StateStarting) {
+		return
+	}
+	elapsed := e.Elapsed.Milliseconds()
+	if elapsed <= 0 {
+		// An emitter that did not measure the transition cannot contribute.
+		return
+	}
+
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	switch e.NewState {
-	case string(process.StateStarting):
-		t.pending[e.ProcessName] = t.now()
-	case string(process.StateReady):
-		if start, ok := t.pending[e.ProcessName]; ok {
-			elapsed := t.now().Sub(start).Milliseconds()
-			samples := append(t.samples[e.ProcessName], elapsed)
-			if len(samples) > loadSampleWindow {
-				samples = samples[len(samples)-loadSampleWindow:]
-			}
-			t.samples[e.ProcessName] = samples
-			delete(t.pending, e.ProcessName)
-			if t.logger != nil {
-				estimate := t.estimateLocked(e.ProcessName, t.fleetMedianLocked())
-				t.logger.Debugf("matrix: loadcost model=%s load=%dms samples=%d cost=%d",
-					e.ProcessName, elapsed, len(samples),
-					t.multiplierLocked(e.ProcessName)*estimate)
-			}
-		}
-	default:
-		delete(t.pending, e.ProcessName)
+	samples := append(t.samples[e.ProcessName], elapsed)
+	if len(samples) > loadSampleWindow {
+		samples = samples[len(samples)-loadSampleWindow:]
+	}
+	t.samples[e.ProcessName] = samples
+	if t.logger != nil {
+		estimate := t.estimateLocked(e.ProcessName, t.fleetMedianLocked())
+		t.logger.Debugf("matrix: loadcost model=%s load=%dms samples=%d cost=%d",
+			e.ProcessName, elapsed, len(samples),
+			t.multiplierLocked(e.ProcessName)*estimate)
 	}
 }
 

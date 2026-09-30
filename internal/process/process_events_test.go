@@ -59,6 +59,22 @@ func TestProcessCommand_EmitsStateChangeEvents(t *testing.T) {
 		if e.OldState == e.NewState {
 			t.Errorf("emitted no-op transition: %s -> %s", e.OldState, e.NewState)
 		}
+		if e.Timestamp.IsZero() {
+			t.Errorf("transition %s -> %s has zero Timestamp", e.OldState, e.NewState)
+		}
+		if e.Elapsed <= 0 {
+			t.Errorf("transition %s -> %s has non-positive Elapsed %v", e.OldState, e.NewState, e.Elapsed)
+		}
+	}
+
+	// Elapsed must equal the gap between consecutive transition instants:
+	// the time spent in the previous state, measured by the emitter.
+	for i := 1; i < len(transitions); i++ {
+		gap := transitions[i].Timestamp.Sub(transitions[i-1].Timestamp)
+		if transitions[i].Elapsed != gap {
+			t.Errorf("transition %s -> %s Elapsed=%v, want gap %v",
+				transitions[i].OldState, transitions[i].NewState, transitions[i].Elapsed, gap)
+		}
 	}
 
 	want := []string{
