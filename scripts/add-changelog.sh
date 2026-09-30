@@ -6,10 +6,12 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: scripts/add-changelog.sh <version> [codex|claude|opencode]
+Usage: scripts/add-changelog.sh [harness] [version]
+       scripts/add-changelog.sh [version]
 
-Adds the supplied release version to CHANGELOG.md. The default harness is
-claude.
+Adds a release version to CHANGELOG.md. The harness is codex, claude or
+opencode and defaults to claude. When version is omitted it is the highest
+v<number> tag plus one.
 EOF
 }
 
@@ -18,6 +20,27 @@ validate_version() {
 
   if [[ ! "$version" =~ ^v[0-9]+$ ]]; then
     printf 'Version must be in the form v<number>, for example v256.\n' >&2
+    exit 1
+  fi
+}
+
+next_version() {
+  local highest
+
+  highest="$(git tag --sort=-v:refname | grep -E '^v[0-9]+$' | head -n 1 || true)"
+  printf 'v%d\n' "$(( ${highest#v} + 1 ))"
+}
+
+check_changelog() {
+  local version="$1"
+
+  if ! git diff --quiet -- CHANGELOG.md; then
+    printf 'CHANGELOG.md has unstaged changes. Commit, stage or stash them first.\n' >&2
+    exit 1
+  fi
+
+  if grep -qE "^## ${version}( |$)" CHANGELOG.md; then
+    printf 'CHANGELOG.md already has an entry for %s.\n' "$version" >&2
     exit 1
   fi
 }
@@ -56,19 +79,32 @@ run_opencode() {
 }
 
 main() {
-  if [[ $# -lt 1 || $# -gt 2 ]]; then
+  if [[ $# -gt 2 ]]; then
     usage >&2
     exit 1
   fi
 
-  local version="$1"
-  local harness="${2:-claude}"
+  local harness="claude"
+  local version=""
+
+  # The harness is optional: a leading v<number> is taken as the version.
+  if [[ $# -gt 0 && "$1" =~ ^v[0-9]+$ ]]; then
+    version="$1"
+  else
+    harness="${1:-claude}"
+    version="${2:-}"
+  fi
   local repo_root
   local prompt
 
-  validate_version "$version"
   repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
   cd "$repo_root"
+  if [[ -z "$version" ]]; then
+    version="$(next_version)"
+  fi
+  validate_version "$version"
+  check_changelog "$version"
+  printf 'Adding changelog entry for %s using %s\n' "$version" "$harness"
   prompt="$(changelog_prompt "$version")"
 
   case "$harness" in

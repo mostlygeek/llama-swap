@@ -1,5 +1,18 @@
 # Changelog
 
+## v261 (Sep 30, 2026)
+
+This release has a bunch of small compatibility improvements requested by the community.
+Also the changelog summaries have been changed to only AI for the list below. These notes at
+the top will be written by humans (or my dog) for humans. The AI's writing more correct but
+fuck it we have too much AI slop in our lives already.
+
+- [PR #1189](https://github.com/mostlygeek/llama-swap/pull/1189) Increase ComfyUI concurrency limit from 50 to 999: fix ComfyUI stuck on the splash screen via /comfyui because one tab makes more parallel requests than the old minimum of 50 allowed (#1188) by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1187](https://github.com/mostlygeek/llama-swap/pull/1187) docker/unified: compile sm_70 in the CUDA 12 image for V100: fix ik-llama-server aborting on V100 GPUs, where only sm_61 PTX without a WMMA flash-attention kernel was available (#1185) by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1158](https://github.com/mostlygeek/llama-swap/pull/1158) Hardware Detection: detect Intel GPUs on Linux via xpu-smi, including dedicated Arc memory, and read the Metal version on macOS across system_profiler key names by [@anantshri](https://github.com/anantshri)
+- [PR #1183](https://github.com/mostlygeek/llama-swap/pull/1183) docs/kb: document that tailcat.models accepts selectors: note that aliases, selectors, profile pins and peer model names are accepted, with a selector example by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1182](https://github.com/mostlygeek/llama-swap/pull/1182) Build audio.cpp with static eSpeak-ng and install phoneme data: link eSpeak-ng statically and ship its phoneme data so Kokoro, SanoTTS and Inflect phonemization works without a writable cache (#1181) by [@mostlygeek](https://github.com/mostlygeek)
+
 ## v260
 
 This release fixes a crash at startup on macOS 27 with Apple M6 hardware
@@ -64,7 +77,7 @@ returns a 403. Peer connections recover better when the server disconnects,
 and they wait longer for the first response header by default.
 
 Upgrading: an empty tailcat.allow list now denies every client. To keep
-allowing anyone to connect, set tailcat.allow to "*".
+allowing anyone to connect, set tailcat.allow to "\*".
 
 The output of cmdStop goes to the process log again, the same as cmd. This was
 lost in an earlier change (#790). A cmdStop that leaves a background child
@@ -88,7 +101,7 @@ contributors.
 - [PR #1169](https://github.com/mostlygeek/llama-swap/pull/1169) internal/tailcat: various reliability and bug fixes: return a 403 for unrecognized node keys, improve peer reconnects and raise the default time to first header
 - [PR #1170](https://github.com/mostlygeek/llama-swap/pull/1170) ui: link profile targets and add load controls: show status and load/unload controls for profile target models by [@sousekd](https://github.com/sousekd)
 - [PR #1165](https://github.com/mostlygeek/llama-swap/pull/1165) internal/process: log cmdStop stdout and stderr: send cmdStop output to the process log and stop a lingering child from hanging it by [@dividehex](https://github.com/dividehex)
-- [PR #1166](https://github.com/mostlygeek/llama-swap/pull/1166) internal/tailcat: upgrade to tailcat v0.7.0 and use Server.Listen: check tailcat.allow per request, deny by default when empty and add a "*" wildcard
+- [PR #1166](https://github.com/mostlygeek/llama-swap/pull/1166) internal/tailcat: upgrade to tailcat v0.7.0 and use Server.Listen: check tailcat.allow per request, deny by default when empty and add a "\*" wildcard
 - [PR #1157](https://github.com/mostlygeek/llama-swap/pull/1157) docker/unified: audio.cpp add download and mp3 support: add mp3 and native download support
 - [PR #1156](https://github.com/mostlygeek/llama-swap/pull/1156) docker/unified: fix vllm-wrapper build on untagged commits: build untagged commits directly and fall back to git tags when the GitHub API is rate limited
 
