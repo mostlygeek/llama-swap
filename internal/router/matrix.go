@@ -24,8 +24,13 @@ func NewMatrix(conf config.Config, logs *logmon.Group) (*Matrix, error) {
 		}
 	}
 
+	// Eviction cost = evict_costs multiplier * measured median load time.
+	// The tracker observes process state transitions so slow-recovering
+	// models become expensive to evict without any operator input.
+	costs := newLoadCostTracker(mtx.ResolvedEvictCosts(), logs.ProxyLogs)
+
 	swapper := &matrixSwapper{
-		solver: newMatrixSolver(mtx.Program(), mtx.ResolvedEvictCosts()),
+		solver: newMatrixSolver(mtx.Program(), costs.EvictCosts),
 		logger: logs.ProxyLogs,
 	}
 
@@ -47,6 +52,8 @@ func NewMatrix(conf config.Config, logs *logmon.Group) (*Matrix, error) {
 		}
 		processes[mid] = p
 	}
+
+	costs.attach(base.procCtx)
 
 	r := &Matrix{baseRouter: base}
 	go base.run()
