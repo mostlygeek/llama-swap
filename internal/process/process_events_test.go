@@ -62,8 +62,11 @@ func TestProcessCommand_EmitsStateChangeEvents(t *testing.T) {
 		if e.Timestamp.IsZero() {
 			t.Errorf("transition %s -> %s has zero Timestamp", e.OldState, e.NewState)
 		}
-		if e.Elapsed <= 0 {
-			t.Errorf("transition %s -> %s has non-positive Elapsed %v", e.OldState, e.NewState, e.Elapsed)
+		// Elapsed may legitimately be 0 when two transitions land within a
+		// single clock tick (coarse Windows clocks, back-to-back queued
+		// requests), but it can never be negative.
+		if e.Elapsed < 0 {
+			t.Errorf("transition %s -> %s has negative Elapsed %v", e.OldState, e.NewState, e.Elapsed)
 		}
 	}
 
