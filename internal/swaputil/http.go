@@ -173,6 +173,12 @@ func SendError(w http.ResponseWriter, r *http.Request, err error) {
 		return
 	}
 
+	var bodyErr *RequestBodyError
+	if errors.As(err, &bodyErr) {
+		SendResponse(w, r, http.StatusBadRequest, bodyErr.Message)
+		return
+	}
+
 	switch {
 	case errors.Is(err, ErrNoModelInContext):
 		SendResponse(w, r, http.StatusNotFound, "no model id could be identified")
