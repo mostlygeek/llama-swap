@@ -3,6 +3,7 @@ package router
 import (
 	"bytes"
 	"io"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -152,6 +153,19 @@ func TestLoadCostTracker_logsRecordedCost(t *testing.T) {
 	if !strings.Contains(logged, "loadcost") || !strings.Contains(logged, "model=a") ||
 		!strings.Contains(logged, "load=2500ms") || !strings.Contains(logged, "cost=2500") {
 		t.Errorf("debug log missing recorded cost, got: %q", logged)
+	}
+}
+
+func TestLoadCostTracker_saturatesHugeCost(t *testing.T) {
+	// A legal-but-absurd multiplier must not wrap the cost negative: the
+	// solver's dominance logic requires positive eviction costs.
+	tracker := newTestTracker(map[string]int{"a": math.MaxInt})
+
+	loadModel(tracker, "a", 2*time.Millisecond)
+
+	costs := tracker.EvictCosts([]string{"a"})
+	if costs["a"] != math.MaxInt {
+		t.Errorf("cost a=%d want %d (saturated, not wrapped)", costs["a"], math.MaxInt)
 	}
 }
 

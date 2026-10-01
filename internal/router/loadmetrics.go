@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"math"
 	"sort"
 	"sync"
 
@@ -83,7 +84,7 @@ func (t *loadCostTracker) observe(e swaputil.ProcessStateChangeEvent) {
 		estimate := t.estimateLocked(e.ProcessName, t.fleetMedianLocked())
 		t.logger.Debugf("matrix: loadcost model=%s load=%dms samples=%d cost=%d",
 			e.ProcessName, elapsed, len(samples),
-			t.multiplierLocked(e.ProcessName)*estimate)
+			multiplyCost(t.multiplierLocked(e.ProcessName), estimate))
 	}
 }
 
@@ -97,9 +98,20 @@ func (t *loadCostTracker) EvictCosts(running []string) map[string]int {
 	fleet := t.fleetMedianLocked()
 	costs := make(map[string]int, len(running))
 	for _, model := range running {
-		costs[model] = t.multiplierLocked(model) * t.estimateLocked(model, fleet)
+		costs[model] = multiplyCost(t.multiplierLocked(model), t.estimateLocked(model, fleet))
 	}
 	return costs
+}
+
+// multiplyCost combines a multiplier with a millisecond estimate, saturating
+// at math.MaxInt instead of wrapping: the solver's subset-dominance reasoning
+// assumes eviction costs are positive, and a wrapped negative would invert
+// which models it prefers to evict.
+func multiplyCost(multiplier, estimate int) int {
+	if estimate > 0 && multiplier > math.MaxInt/estimate {
+		return math.MaxInt
+	}
+	return multiplier * estimate
 }
 
 func (t *loadCostTracker) multiplierLocked(model string) int {
