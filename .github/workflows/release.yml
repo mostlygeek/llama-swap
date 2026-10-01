@@ -33,9 +33,10 @@ jobs:
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
           NOTES: ${{ runner.temp }}/release-notes.md
         run: |
-          # print lines after "## <tag>" up to the next "## " heading
+          # print lines after "## <tag>" or "## <tag> (Jan 2, 2026)" up to
+          # the next "## " heading
           awk -v tag="## ${TAG}" '
-            $0 == tag { found = 1; next }
+            $0 == tag || index($0, tag " ") == 1 { found = 1; next }
             found && /^## / { exit }
             found { print }
           ' CHANGELOG.md > "${NOTES}"
