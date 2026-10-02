@@ -297,8 +297,9 @@ func parseRocmSmiLine(header string, line string) *GpuStat {
 		case "Current Socket Graphics Package Power (W)":
 			fallthrough
 		case "Average Graphics Package Power (W)":
-			powerDraw, _ := strconv.ParseFloat(val, 64)
-			result.PowerDrawW = powerDraw
+			if powerDraw, err := strconv.ParseFloat(val, 64); err == nil {
+				result.PowerDrawW = powerDraw
+			}
 		case "GPU use (%)":
 			gpuUtil, _ := strconv.ParseFloat(val, 64)
 			result.GpuUtilPct = gpuUtil
