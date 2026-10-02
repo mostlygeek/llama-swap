@@ -1,6 +1,8 @@
 package perf
 
 import (
+	"context"
+	"errors"
 	"io"
 	"sync"
 	"testing"
@@ -194,6 +196,137 @@ func TestStart_SubscriberReceivesStats(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("timed out waiting for sys stats")
 	}
+}
+
+// fakeGpuCollector stands in for the platform GPU collector. Each call to its
+// start method runs the next step: a step either fails to start, or returns a
+// channel that delivers one sample and then closes or stays open until ctx is
+// done.
+type fakeGpuCollector struct {
+	mu    sync.Mutex
+	calls int
+	steps []fakeGpuStep
+}
+
+type fakeGpuStep struct {
+	err      error
+	stayOpen bool
+}
+
+func (f *fakeGpuCollector) start(ctx context.Context, _ time.Duration, _ *logmon.Monitor) (chan []GpuStat, error) {
+	f.mu.Lock()
+	f.calls++
+	call := f.calls
+	step := fakeGpuStep{stayOpen: true}
+	if call <= len(f.steps) {
+		step = f.steps[call-1]
+	}
+	f.mu.Unlock()
+
+	if step.err != nil {
+		return nil, step.err
+	}
+
+	ch := make(chan []GpuStat, 1)
+	go func() {
+		defer close(ch)
+		// ID carries the call number so a test can tell collectors apart
+		select {
+		case ch <- []GpuStat{{ID: call}}:
+		case <-ctx.Done():
+			return
+		}
+		if step.stayOpen {
+			<-ctx.Done()
+		}
+	}()
+	return ch, nil
+}
+
+func (f *fakeGpuCollector) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
+func newGpuTestMonitor(t *testing.T, f *fakeGpuCollector) (*Monitor, chan []GpuStat) {
+	t.Helper()
+	m, err := New(config.PerformanceConfig{Every: 100 * time.Millisecond}, newTestLogger())
+	require.NoError(t, err)
+	m.gpuStats = f.start
+	m.gpuRestartDelay = 10 * time.Millisecond
+
+	_, gpuCh, unsub := m.Subscribe()
+	t.Cleanup(unsub)
+	return m, gpuCh
+}
+
+func waitGpuStat(t *testing.T, gpuCh chan []GpuStat, wantID int) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case g := <-gpuCh:
+			if len(g) == 1 && g[0].ID == wantID {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for GPU stats from collector %d", wantID)
+		}
+	}
+}
+
+func TestStart_RestartsGpuCollectorAfterItStops(t *testing.T) {
+	// the first collector delivers one sample and exits, like nvidia-smi dying
+	f := &fakeGpuCollector{steps: []fakeGpuStep{{stayOpen: false}}}
+	m, gpuCh := newGpuTestMonitor(t, f)
+
+	m.Start()
+	defer m.Stop()
+
+	waitGpuStat(t, gpuCh, 1)
+	waitGpuStat(t, gpuCh, 2)
+	assert.Equal(t, 2, f.callCount())
+}
+
+func TestStart_RetriesWhenGpuCollectorRestartFails(t *testing.T) {
+	f := &fakeGpuCollector{steps: []fakeGpuStep{
+		{stayOpen: false},
+		{err: ErrNoGpuTool},
+		{err: errors.New("nvidia-smi start failed")},
+	}}
+	m, gpuCh := newGpuTestMonitor(t, f)
+
+	m.Start()
+	defer m.Stop()
+
+	waitGpuStat(t, gpuCh, 1)
+	waitGpuStat(t, gpuCh, 4)
+	assert.Equal(t, 4, f.callCount())
+}
+
+func TestStart_GpuCollectorNotRestartedAfterStop(t *testing.T) {
+	f := &fakeGpuCollector{}
+	m, gpuCh := newGpuTestMonitor(t, f)
+
+	m.Start()
+	waitGpuStat(t, gpuCh, 1)
+	m.Stop()
+
+	// several restart delays
+	time.Sleep(100 * time.Millisecond)
+	assert.Equal(t, 1, f.callCount())
+}
+
+func TestStart_GpuCollectorUnavailableAtStartIsNotRetried(t *testing.T) {
+	f := &fakeGpuCollector{steps: []fakeGpuStep{{err: ErrNoGpuTool}}}
+	m, _ := newGpuTestMonitor(t, f)
+
+	m.Start()
+	defer m.Stop()
+
+	time.Sleep(100 * time.Millisecond)
+	assert.Equal(t, 1, f.callCount())
 }
 
 func TestReadSysStats(t *testing.T) {

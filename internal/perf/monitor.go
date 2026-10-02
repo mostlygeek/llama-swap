@@ -16,6 +16,15 @@ var (
 	ErrNoGpuTool      = errors.New("no GPU monitoring tool available")
 )
 
+// A GPU collector that stops is restarted after gpuRestartDelay. The delay
+// doubles on each consecutive failure up to gpuRestartMaxDelay.
+const (
+	gpuRestartDelay    = 5 * time.Second
+	gpuRestartMaxDelay = 30 * time.Second
+)
+
+type gpuStatsFunc func(ctx context.Context, every time.Duration, logger *logmon.Monitor) (chan []GpuStat, error)
+
 type Monitor struct {
 	mutex   sync.RWMutex
 	log     *logmon.Monitor
@@ -28,6 +37,10 @@ type Monitor struct {
 
 	sysListeners map[chan SysStat]struct{}
 	gpuListeners map[chan []GpuStat]struct{}
+
+	// gpuStats starts the GPU collector. Tests replace it.
+	gpuStats        gpuStatsFunc
+	gpuRestartDelay time.Duration
 }
 
 func ringCapacity(c config.PerformanceConfig) int {
@@ -56,6 +69,9 @@ func New(c config.PerformanceConfig, logger *logmon.Monitor) (*Monitor, error) {
 		gpuRing:      ring.NewBuffer[[]GpuStat](capacity),
 		sysListeners: make(map[chan SysStat]struct{}),
 		gpuListeners: make(map[chan []GpuStat]struct{}),
+
+		gpuStats:        getGpuStats,
+		gpuRestartDelay: gpuRestartDelay,
 	}, nil
 }
 
@@ -148,38 +164,73 @@ func (m *Monitor) Start() {
 		}
 	}()
 
-	go func() {
-		gpuCh, err := getGpuStats(m.stopCtx, m.conf.Every, m.log)
-		if err != nil {
-			if errors.Is(err, ErrNotImplemented) || errors.Is(err, ErrNoGpuTool) {
-				m.log.Infof("GPU monitoring not available: %s", err.Error())
-			} else {
-				m.log.Errorf("failed to initialize GPU monitoring: %s", err.Error())
-			}
+	go m.collectGpuStats(m.stopCtx, m.conf.Every)
+}
+
+// collectGpuStats reads GPU stats until ctx is done. A collector that stops
+// while the monitor is running, for example because its nvidia-smi child
+// exited, is restarted after a backoff so GPU stats do not stay frozen.
+func (m *Monitor) collectGpuStats(ctx context.Context, every time.Duration) {
+	gpuCh, err := m.gpuStats(ctx, every, m.log)
+	if err != nil {
+		if errors.Is(err, ErrNotImplemented) || errors.Is(err, ErrNoGpuTool) {
+			m.log.Infof("GPU monitoring not available: %s", err.Error())
+		} else {
+			m.log.Errorf("failed to initialize GPU monitoring: %s", err.Error())
+		}
+		return
+	}
+
+	delay := m.gpuRestartDelay
+	for {
+		if gpuCh != nil && m.forwardGpuStats(ctx, gpuCh) {
+			// it worked before stopping, so start the backoff over
+			delay = m.gpuRestartDelay
+		}
+		if ctx.Err() != nil {
 			return
 		}
 
-		for {
-			select {
-			case <-m.stopCtx.Done():
-				return
-			case g, ok := <-gpuCh:
-				if !ok {
-					m.log.Errorf("failed reading from gpuCh - stopping read goroutine")
-					return
-				}
-				m.mutex.Lock()
-				m.gpuRing.Push(g)
-				for l := range m.gpuListeners {
-					select {
-					case l <- g:
-					default:
-					}
-				}
-				m.mutex.Unlock()
-			}
+		m.log.Errorf("GPU monitoring stopped - restarting in %s", delay)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
 		}
-	}()
+
+		gpuCh, err = m.gpuStats(ctx, every, m.log)
+		if err != nil {
+			m.log.Errorf("failed to restart GPU monitoring: %s", err.Error())
+			gpuCh = nil
+		}
+		delay = min(delay*2, gpuRestartMaxDelay)
+	}
+}
+
+// forwardGpuStats publishes stats from gpuCh until it closes or ctx is done.
+// It reports whether any stats were received.
+func (m *Monitor) forwardGpuStats(ctx context.Context, gpuCh chan []GpuStat) bool {
+	received := false
+	for {
+		select {
+		case <-ctx.Done():
+			return received
+		case g, ok := <-gpuCh:
+			if !ok {
+				return received
+			}
+			received = true
+			m.mutex.Lock()
+			m.gpuRing.Push(g)
+			for l := range m.gpuListeners {
+				select {
+				case l <- g:
+				default:
+				}
+			}
+			m.mutex.Unlock()
+		}
+	}
 }
 
 // Current returns a copy of the current log of system and GPU stats.
