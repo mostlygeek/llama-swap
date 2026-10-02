@@ -2,7 +2,9 @@ package swaputil
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -30,6 +32,12 @@ type RequestBodyError struct {
 	Status  int
 }
 
+// LimitRequestBody caps r.Body at MaxRequestBodySize. Readers past the cap get
+// an *http.MaxBytesError.
+func LimitRequestBody(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, MaxRequestBodySize)
+}
+
 func (e *RequestBodyError) Error() string { return e.Message }
 
 // NormalizeBodyContentType makes a request's Content-Type match what the
@@ -42,7 +50,6 @@ func (e *RequestBodyError) Error() string { return e.Message }
 // application/json. Bodies that cannot be used return a *RequestBodyError that
 // says what was expected, rather than a generic "no model id" error.
 //
-// Call BufferRequestBody first so the body is read once and size-capped.
 // Requests that already declare the expected type are not read. A form-encoded
 // body that carries a "model" field is left alone for the existing form
 // handling. Only methods that carry a body are inspected.
@@ -61,10 +68,18 @@ func NormalizeBodyContentType(r *http.Request, kind BodyKind) error {
 		return nil
 	}
 
-	body, err := RequestBody(r)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			return &RequestBodyError{
+				Message: fmt.Sprintf("request body exceeds the %d MB limit", MaxRequestBodySize>>20),
+				Status:  http.StatusRequestEntityTooLarge,
+			}
+		}
 		return fmt.Errorf("error reading request body: %w", err)
 	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
 
 	trimmed := bytes.TrimSpace(body)
 	if len(trimmed) == 0 {

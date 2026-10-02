@@ -1,6 +1,8 @@
 package server
 
 import (
+	"bytes"
+	"io"
 	"net/http"
 	"strings"
 
@@ -54,8 +56,10 @@ func CreateMetricsMiddleware(mm *metricsMonitor, cfg config.Config) chain.Middle
 			var reqHeaders map[string]string
 			if mm.enableCaptures {
 				if cf&captureReqBody != 0 && r.Body != nil {
-					if buffered, err := swaputil.RequestBody(r); err == nil {
+					if buffered, err := io.ReadAll(r.Body); err == nil {
 						reqBody = buffered
+						r.Body.Close()
+						r.Body = io.NopCloser(bytes.NewReader(reqBody))
 					}
 				}
 				if cf&captureReqHeaders != 0 {

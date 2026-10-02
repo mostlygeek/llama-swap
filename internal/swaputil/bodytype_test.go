@@ -11,7 +11,9 @@ import (
 func TestNormalizeBodyContentType_StreamedBodyTooLarge(t *testing.T) {
 	// No Content-Length, so only the reader-side cap can catch it.
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", io.LimitReader(zeroReader{}, MaxRequestBodySize+1))
-	r, err := BufferRequestBody(httptest.NewRecorder(), r)
+	LimitRequestBody(httptest.NewRecorder(), r)
+
+	err := NormalizeBodyContentType(r, BodyJSON)
 	var bodyErr *RequestBodyError
 	if !errors.As(err, &bodyErr) || bodyErr.Status != http.StatusRequestEntityTooLarge {
 		t.Fatalf("err = %v, want RequestBodyError with status 413", err)
