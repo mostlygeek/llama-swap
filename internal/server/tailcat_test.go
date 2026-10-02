@@ -185,6 +185,90 @@ func TestServer_TailcatFiltersModelListing(t *testing.T) {
 	}
 }
 
+func TestServer_TailcatListsAliasOnlyModelAsModel(t *testing.T) {
+	// tailcat.models names only the alias "public". Whether or not aliases
+	// are listed normally, a Tailcat caller must see "public" as a model it
+	// can pick, with nothing in the record naming the hidden real ID.
+	for _, extra := range []string{"", "\nincludeAliasesInList: true\n"} {
+		s := newTailcatPolicyServer(t, extra)
+		w := httptest.NewRecorder()
+		s.ServeTailcatHTTP(w, tailcatRequest(http.MethodGet, "/v1/models", ""))
+		if w.Code != http.StatusOK {
+			t.Fatalf("includeAliasesInList=%v: status = %d", extra != "", w.Code)
+		}
+		var response struct {
+			Data []struct {
+				ID   string `json:"id"`
+				Meta struct {
+					LlamaSwap map[string]any `json:"llamaswap"`
+				} `json:"meta"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		if len(response.Data) != 1 || response.Data[0].ID != "public" {
+			t.Fatalf("includeAliasesInList=%v: listed models = %+v", extra != "", response.Data)
+		}
+		meta := response.Data[0].Meta.LlamaSwap
+		if meta["type"] != "model" {
+			t.Errorf("includeAliasesInList=%v: type = %v, want model", extra != "", meta["type"])
+		}
+		if _, leaked := meta["modelID"]; leaked {
+			t.Errorf("includeAliasesInList=%v: record names the real model: %v", extra != "", meta)
+		}
+		if strings.Contains(w.Body.String(), `"real"`) {
+			t.Errorf("includeAliasesInList=%v: listing mentions the real ID: %s", extra != "", w.Body.String())
+		}
+	}
+}
+
+func TestServer_TailcatListedModelExposesItsAliases(t *testing.T) {
+	// Listing a model exposes its aliases, which is where setParamsByID
+	// variants live; the Playground offers each alias as a pick and they
+	// must not 404. Listing only an alias still keeps the real ID private.
+	cfg, err := config.LoadConfigFromReader(strings.NewReader(`
+models:
+  real:
+    proxy: http://localhost:1
+    aliases: [public, "real:high"]
+  other:
+    proxy: http://localhost:2
+    aliases: [other-alias]
+tailcat:
+  models: [real]
+  allow: ["*"]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.SetTailcatEnabled(true)
+	s := newTestServer(newStubRouter([]string{"real", "other"}, "ok"), newStubRouter(nil, ""))
+	s.cfg = cfg
+	s.routes()
+
+	for _, tt := range []struct {
+		model string
+		want  int
+	}{
+		{"real", http.StatusOK},
+		{"public", http.StatusOK},
+		{"real:high", http.StatusOK},
+		{"other", http.StatusNotFound},
+		{"other-alias", http.StatusNotFound},
+	} {
+		w := httptest.NewRecorder()
+		s.ServeTailcatHTTP(w, tailcatRequest(http.MethodPost, "/v1/chat/completions", `{"model":"`+tt.model+`"}`))
+		if w.Code != tt.want {
+			t.Errorf("model %q status = %d, want %d", tt.model, w.Code, tt.want)
+		}
+	}
+
+	if got := s.tailcatExposedModelIDs(); strings.Join(got, ",") != "public,real,real:high" {
+		t.Fatalf("exposed IDs = %v", got)
+	}
+}
+
 func TestServer_TailcatAdminUnlocksNormalSurface(t *testing.T) {
 	s := newTailcatPolicyServer(t, "")
 	s.cfg.Tailcat.Admin = true

@@ -6,6 +6,7 @@
   "scripts": {
     "start": "vite",
     "build": "vite build --emptyOutDir",
+    "build:tailcat": "vite build -c vite.config.tailcat.ts",
     "preview": "vite preview",
     "agent": "tsx src/cli/docsAgent.ts",
     "check": "svelte-check --tsconfig ./tsconfig.json",
