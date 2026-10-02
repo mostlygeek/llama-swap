@@ -1,11 +1,8 @@
 package server
 
 import (
-	"bytes"
 	"fmt"
-	"io"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/mostlygeek/llama-swap/internal/chain"
@@ -46,7 +43,7 @@ func CreateFilterMiddleware(cfg config.Config) chain.Middleware {
 				return
 			}
 
-			body, err := io.ReadAll(r.Body)
+			body, err := swaputil.RequestBody(r)
 			if err != nil {
 				swaputil.SendResponse(w, r, http.StatusBadRequest, "could not read request body")
 				return
@@ -58,10 +55,7 @@ func CreateFilterMiddleware(cfg config.Config) chain.Middleware {
 				return
 			}
 
-			r.Body = io.NopCloser(bytes.NewReader(body))
-			r.Header.Del("Transfer-Encoding")
-			r.Header.Set("Content-Length", strconv.Itoa(len(body)))
-			r.ContentLength = int64(len(body))
+			swaputil.ReplaceRequestBody(r, body)
 
 			next.ServeHTTP(w, r)
 		})

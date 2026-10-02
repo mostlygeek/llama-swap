@@ -11,7 +11,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -318,16 +317,15 @@ func ReplaceRequestModel(r *http.Request, model, replacement string) (*http.Requ
 	contentType := r.Header.Get("Content-Type")
 	switch {
 	case strings.Contains(contentType, "application/json"):
-		body, err := io.ReadAll(r.Body)
+		body, err := RequestBody(r)
 		if err != nil {
 			return r, fmt.Errorf("could not read request body")
 		}
-		r.Body = io.NopCloser(bytes.NewReader(body))
 		body, err = sjson.SetBytes(body, "model", replacement)
 		if err != nil {
 			return r, fmt.Errorf("could not rewrite model in JSON body: %w", err)
 		}
-		replaceRequestBody(r, body)
+		ReplaceRequestBody(r, body)
 	case strings.Contains(contentType, "multipart/form-data"):
 		if err := r.ParseMultipartForm(MaxMultiPartSize); err != nil {
 			return r, fmt.Errorf("could not parse multipart form: %w", err)
@@ -342,19 +340,19 @@ func ReplaceRequestModel(r *http.Request, model, replacement string) (*http.Requ
 		r.Form = nil
 		r.PostForm = nil
 		r.Header.Set("Content-Type", rewrittenContentType)
-		replaceRequestBody(r, body)
+		ReplaceRequestBody(r, body)
 	case strings.Contains(contentType, "application/x-www-form-urlencoded"):
 		if err := r.ParseForm(); err != nil {
 			return r, fmt.Errorf("could not parse form: %w", err)
 		}
 		r.PostForm.Set("model", replacement)
-		replaceRequestBody(r, []byte(r.PostForm.Encode()))
+		ReplaceRequestBody(r, []byte(r.PostForm.Encode()))
 	default:
 		if err := r.ParseForm(); err != nil {
 			return r, fmt.Errorf("could not parse form: %w", err)
 		}
 		r.PostForm.Set("model", replacement)
-		replaceRequestBody(r, []byte(r.PostForm.Encode()))
+		ReplaceRequestBody(r, []byte(r.PostForm.Encode()))
 	}
 
 	return invalidateRequestContext(r), nil
@@ -365,13 +363,6 @@ func invalidateRequestContext(r *http.Request) *http.Request {
 		return r
 	}
 	return r.WithContext(context.WithValue(r.Context(), ReqContextKey, struct{}{}))
-}
-
-func replaceRequestBody(r *http.Request, body []byte) {
-	r.Body = io.NopCloser(bytes.NewReader(body))
-	r.Header.Del("Transfer-Encoding")
-	r.Header.Set("Content-Length", strconv.Itoa(len(body)))
-	r.ContentLength = int64(len(body))
 }
 
 func replaceMultipartModel(form *multipart.Form, replacement string) ([]byte, string, error) {
@@ -549,7 +540,7 @@ func extractContext(r *http.Request) (ReqContextData, error) {
 		}, nil
 	}
 
-	bodyBytes, err := io.ReadAll(r.Body)
+	bodyBytes, err := RequestBody(r)
 	if err != nil {
 		return ReqContextData{}, fmt.Errorf("error reading request body: %w", err)
 	}

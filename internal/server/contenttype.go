@@ -33,8 +33,11 @@ func CreateContentTypeMiddleware() chain.Middleware {
 				})
 				return
 			}
-			swaputil.LimitRequestBody(w, r)
-			if err := swaputil.NormalizeBodyContentType(r, bodyKindForPath(r.URL.Path)); err != nil {
+			r, err := swaputil.BufferRequestBody(w, r)
+			if err == nil {
+				err = swaputil.NormalizeBodyContentType(r, bodyKindForPath(r.URL.Path))
+			}
+			if err != nil {
 				swaputil.SendError(w, r, err)
 				return
 			}
