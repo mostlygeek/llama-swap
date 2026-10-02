@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"slices"
 
@@ -25,6 +26,14 @@ func bodyKindForPath(path string) swaputil.BodyKind {
 func CreateContentTypeMiddleware() chain.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.ContentLength > swaputil.MaxRequestBodySize {
+				swaputil.SendError(w, r, &swaputil.RequestBodyError{
+					Message: fmt.Sprintf("request body exceeds the %d MB limit", swaputil.MaxRequestBodySize>>20),
+					Status:  http.StatusRequestEntityTooLarge,
+				})
+				return
+			}
+			swaputil.LimitRequestBody(w, r)
 			if err := swaputil.NormalizeBodyContentType(r, bodyKindForPath(r.URL.Path)); err != nil {
 				swaputil.SendError(w, r, err)
 				return

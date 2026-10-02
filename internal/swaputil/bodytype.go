@@ -2,6 +2,7 @@ package swaputil
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,10 +22,20 @@ const (
 	BodyMultipart
 )
 
+// MaxRequestBodySize caps the request bodies read for model-dispatched POSTs.
+const MaxRequestBodySize = 250 << 20
+
 // RequestBodyError reports a request body that cannot be used to route the
-// request. SendError renders it as a 400 with Message.
+// request. SendError renders it with Status, or 400 when Status is zero.
 type RequestBodyError struct {
 	Message string
+	Status  int
+}
+
+// LimitRequestBody caps r.Body at MaxRequestBodySize. Readers past the cap get
+// an *http.MaxBytesError.
+func LimitRequestBody(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, MaxRequestBodySize)
 }
 
 func (e *RequestBodyError) Error() string { return e.Message }
@@ -59,6 +70,13 @@ func NormalizeBodyContentType(r *http.Request, kind BodyKind) error {
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			return &RequestBodyError{
+				Message: fmt.Sprintf("request body exceeds the %d MB limit", MaxRequestBodySize>>20),
+				Status:  http.StatusRequestEntityTooLarge,
+			}
+		}
 		return fmt.Errorf("error reading request body: %w", err)
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))

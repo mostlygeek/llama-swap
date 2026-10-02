@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mostlygeek/llama-swap/internal/swaputil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -99,4 +100,20 @@ func TestServer_ContentType_GetRoutesUntouched(t *testing.T) {
 	w := httptest.NewRecorder()
 	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/props?model=m", nil))
 	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+}
+
+func TestServer_ContentType_BodyTooLarge(t *testing.T) {
+	s := newTestServer(newStubRouter([]string{"m"}, "ok"), newStubRouter(nil, ""))
+
+	for _, contentType := range []string{"application/json", "text/plain"} {
+		t.Run(contentType, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"m"}`))
+			req.Header.Set("Content-Type", contentType)
+			req.ContentLength = swaputil.MaxRequestBodySize + 1
+			w := httptest.NewRecorder()
+			s.ServeHTTP(w, req)
+			require.Equal(t, http.StatusRequestEntityTooLarge, w.Code, w.Body.String())
+			assert.Contains(t, gjson.Get(w.Body.String(), "error.message").String(), "250 MB")
+		})
+	}
 }

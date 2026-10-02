@@ -459,6 +459,7 @@ func (s *Server) ServeTailcatHTTP(w http.ResponseWriter, r *http.Request) {
 	if inference && r.Method != http.MethodOptions {
 		// Normalize first so the model lookup sees the same body format the
 		// model chain will.
+		swaputil.LimitRequestBody(w, r)
 		if err := swaputil.NormalizeBodyContentType(r, bodyKindForPath(r.URL.Path)); err != nil {
 			http.NotFound(w, r)
 			return

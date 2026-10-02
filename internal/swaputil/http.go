@@ -175,7 +175,11 @@ func SendError(w http.ResponseWriter, r *http.Request, err error) {
 
 	var bodyErr *RequestBodyError
 	if errors.As(err, &bodyErr) {
-		SendResponse(w, r, http.StatusBadRequest, bodyErr.Message)
+		status := bodyErr.Status
+		if status == 0 {
+			status = http.StatusBadRequest
+		}
+		SendResponse(w, r, status, bodyErr.Message)
 		return
 	}
 
