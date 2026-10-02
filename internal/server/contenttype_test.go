@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mostlygeek/llama-swap/internal/swaputil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -109,7 +108,7 @@ func TestServer_ContentType_BodyTooLarge(t *testing.T) {
 		t.Run(contentType, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"m"}`))
 			req.Header.Set("Content-Type", contentType)
-			req.ContentLength = swaputil.MaxRequestBodySize + 1
+			req.ContentLength = maxRequestBodySize + 1
 			w := httptest.NewRecorder()
 			s.ServeHTTP(w, req)
 			require.Equal(t, http.StatusRequestEntityTooLarge, w.Code, w.Body.String())
@@ -117,3 +116,18 @@ func TestServer_ContentType_BodyTooLarge(t *testing.T) {
 		})
 	}
 }
+
+func TestServer_ContentType_StreamedBodyTooLarge(t *testing.T) {
+	// No Content-Length, so only the reader-side cap can catch it.
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", io.LimitReader(zeroReader{}, maxRequestBodySize+1))
+	r.ContentLength = -1
+	r.Header.Set("Content-Type", "text/plain")
+
+	bodyErr := prepareModelBody(httptest.NewRecorder(), r)
+	require.NotNil(t, bodyErr)
+	assert.Equal(t, http.StatusRequestEntityTooLarge, bodyErr.status)
+}
+
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) { clear(p); return len(p), nil }
