@@ -1,0 +1,8 @@
+# Patterns are relative to the build context, which is the repository root:
+#   docker build -f cmd/gh-helpbot/Dockerfile -t gh-helpbot .
+.git
+build
+**/node_modules
+**/dist
+internal/server/ui_dist
+evals/docs-agent/runs
