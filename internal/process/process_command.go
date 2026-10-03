@@ -178,24 +178,34 @@ func (p *ProcessCommand) run() {
 	// p.status mirrors `state` so State() can observe transitions; setState
 	// writes both.
 	state := StateStopped
+	// stateSince is when the process entered `state`; no-op setState calls
+	// (old == s) leave it alone so durations accumulate through them.
+	stateSince := time.Now()
 	setState := func(s ProcessState) {
 		old := state
 		state = s
+		now := time.Now()
 		next := &Status{State: s}
 		if s == StateReady {
 			if old == StateReady {
 				next.ReadySince = p.status.Load().ReadySince
 			} else {
-				next.ReadySince = time.Now()
+				next.ReadySince = now
 			}
 		}
 		p.status.Store(next)
 		if old != s {
+			// Timestamp is the transition instant, not the delivery instant,
+			// and Elapsed is the time genuinely spent in the old state —
+			// dispatcher backlog must not skew subscriber measurements.
 			event.Emit(swaputil.ProcessStateChangeEvent{
 				ProcessName: p.id,
 				OldState:    string(old),
 				NewState:    string(s),
+				Timestamp:   now,
+				Elapsed:     now.Sub(stateSince),
 			})
+			stateSince = now
 		}
 	}
 	var (

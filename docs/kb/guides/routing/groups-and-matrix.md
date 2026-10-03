@@ -4,7 +4,7 @@ summary: Choosing between the group and matrix routers, and how each decides wha
 category: guides
 tags: [routing, groups, matrix, concurrency, swap, vram]
 config_keys: [routing, routing.router.use, routing.router.settings.groups, routing.router.settings.matrix]
-updated: 2026-09-14
+updated: 2026-09-30
 ---
 
 # Running several models at once: groups and matrix
@@ -79,8 +79,8 @@ routing:
           v: voxtral-model
 
         evict_costs:
-          v: 50              # vLLM, slow cold start — avoid evicting
-          llama-70B: 30
+          v: 3               # protect vLLM beyond its measured load time
+          llama-70B: 2
 
         sets:
           standard:    "(g | q) & v"
@@ -106,7 +106,7 @@ How the solver works when a request for model X arrives:
 
 1. If X is already running, forward the request.
 2. Otherwise collect every set containing X.
-3. For each set, sum the `evict_costs` of running models *not* in that set.
+3. For each set, sum the eviction cost of running models *not* in that set.
 4. Pick the lowest-cost set, ties broken by definition order.
 5. Evict the models outside it, start X, forward the request.
 
@@ -116,8 +116,18 @@ Two things worth internalising:
   so on. Only the requested model is started; the rest are not preloaded.
 - **A model in no set can only run alone.**
 
-`evict_costs` (default 1) is how you express "this one is painful to reload".
-Give slow cold-starting backends a high cost.
+A model's eviction cost is `evict_costs` multiplier x its measured median
+load time in milliseconds. llama-swap times every load (starting to ready)
+and keeps the median of the last few, so models that are painful to reload —
+big weights, slow backends — are automatically evicted last with no
+configuration. A model never loaded yet is assumed to cost about the fleet
+median. Before enough samples exist, a single unusually slow load (say,
+while other models loaded at the same time) is shrunk toward the fleet
+median rather than defining the model's cost outright.
+
+`evict_costs` (default multiplier 1) is now mostly optional: raise it above 1
+to protect a model beyond what its measured reload time implies — licensing
+limits, warm caches or prompt caches a stopwatch cannot see.
 
 When you deploy the head end with the kubeswap Helm chart, the chart's
 `config.matrix` values can *generate* this whole section from the model
