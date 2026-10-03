@@ -94,6 +94,12 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	config.UI.Activity.SessionID = normalizeHeaderNames(config.UI.Activity.SessionID)
 
 	if config.Store != nil {
+		// Captures are validated first: its store.path requirement explains the
+		// dependency, where the plain store.path check would only say the path
+		// is empty.
+		if err := validateStoreCaptures(config.Store, raw); err != nil {
+			return Config{}, err
+		}
 		if err := validateStorePath(config.Store.Path); err != nil {
 			return Config{}, err
 		}
@@ -316,6 +322,56 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	}
 
 	return config, nil
+}
+
+// legacyCaptureKeys are the top-level settings store.captures supersedes.
+var legacyCaptureKeys = []string{"captureBuffer", "metricsMaxInMemory"}
+
+// validateStoreCaptures checks the store.captures section. It runs only when
+// the section is present: a config without it keeps the legacy in-memory
+// capture behavior unchanged.
+//
+// raw is the resolved config map, used to tell "set" from "defaulted":
+// captureBuffer and metricsMaxInMemory are filled in on every load, so the
+// decoded values cannot answer whether the user wrote them.
+func validateStoreCaptures(store *Store, raw map[string]any) error {
+	captures := store.Captures
+	if captures == nil {
+		return nil
+	}
+
+	for _, key := range legacyCaptureKeys {
+		if _, set := raw[key]; set {
+			return fmt.Errorf("store.captures supersedes the legacy %s setting; remove %s, or remove the store.captures section", key, key)
+		}
+	}
+
+	// Captures are keyed by activity row ID. An in-memory activity log is
+	// pruned by metricsMaxInMemory, which would leave captures pointing at
+	// rows that no longer exist.
+	if strings.TrimSpace(store.Path) == "" {
+		return fmt.Errorf("store.captures requires a non-empty store.path: captures are keyed by activity rows and an in-memory activity log is pruned")
+	}
+
+	if err := validateStoreCapturesPath(captures.Path); err != nil {
+		return err
+	}
+	if sameStorePath(captures.Path, store.Path) {
+		return fmt.Errorf("store.captures.path: %s is also store.path; captures must use their own database file", captures.Path)
+	}
+
+	if captures.MaxSizeMB < 1 {
+		return fmt.Errorf("store.captures.maxSizeMB must be >= 1")
+	}
+	if captures.MaxCaptureMB < 1 {
+		return fmt.Errorf("store.captures.maxCaptureMB must be >= 1")
+	}
+	if captures.MaxCaptureMB > captures.MaxSizeMB {
+		return fmt.Errorf("store.captures.maxCaptureMB (%d) is larger than store.captures.maxSizeMB (%d): such a capture could never be stored",
+			captures.MaxCaptureMB, captures.MaxSizeMB)
+	}
+
+	return nil
 }
 
 func validateProfiles(config Config) error {

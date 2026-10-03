@@ -67,11 +67,28 @@ var logTimeFormats = map[string]string{
 	"stampnano":   time.StampNano,
 }
 
+// megabyte is the unit the store size settings are expressed in.
+const megabyte int64 = 1024 * 1024
+
 func configStorePath(cfg config.Config) string {
 	if cfg.Store == nil {
 		return ""
 	}
 	return strings.TrimSpace(cfg.Store.Path)
+}
+
+// storeOptions maps the config's store section onto the databases the store
+// package opens. Captures keep their own file: see sqlite.Options.
+func storeOptions(cfg config.Config) sqlite.Options {
+	opts := sqlite.Options{Path: configStorePath(cfg)}
+	if cfg.Store == nil || cfg.Store.Captures == nil {
+		return opts
+	}
+	captures := cfg.Store.Captures
+	opts.CapturesPath = strings.TrimSpace(captures.Path)
+	opts.CapturesMaxBytes = int64(captures.MaxSizeMB) * megabyte
+	opts.CapturesMaxItemBytes = int64(captures.MaxCaptureMB) * megabyte
+	return opts
 }
 
 func configureTailcatListener(cfg *config.Config, keyPath string) error {
@@ -240,8 +257,8 @@ func main() {
 	// depend on cfg.
 	referenceDocs := docagent.NewWithSchema(docs.Files, docsConfigSchema)
 
-	initialStorePath := configStorePath(cfg)
-	initialStore, err := sqlite.New(initialStorePath)
+	initialStoreOpts := storeOptions(cfg)
+	initialStore, err := sqlite.New(initialStoreOpts)
 	if err != nil {
 		slog.Error("failed to create store", "error", err)
 		os.Exit(1)
@@ -258,7 +275,7 @@ func main() {
 	var activeMu sync.RWMutex
 	activeSrv := initialSrv
 	activeStore := initialStore
-	activeStorePath := initialStorePath
+	activeStoreOpts := initialStoreOpts
 
 	tailcatHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		activeMu.RLock()
@@ -338,17 +355,17 @@ func main() {
 			return
 		}
 
-		newStorePath := configStorePath(newCfg)
+		newStoreOpts := storeOptions(newCfg)
 		activeMu.RLock()
 		currentStore := activeStore
-		currentStorePath := activeStorePath
+		currentStoreOpts := activeStoreOpts
 		currentTailcat := activeTailcat
 		activeMu.RUnlock()
 
 		newStore := currentStore
-		storeChanged := newStorePath != currentStorePath
+		storeChanged := newStoreOpts != currentStoreOpts
 		if storeChanged {
-			newStore, err = sqlite.New(newStorePath)
+			newStore, err = sqlite.New(newStoreOpts)
 			if err != nil {
 				proxyLog.Warnf("failed to create new store during reload: %v", err)
 				return
@@ -377,7 +394,7 @@ func main() {
 		oldStore := activeStore
 		activeSrv = newSrv
 		activeStore = newStore
-		activeStorePath = newStorePath
+		activeStoreOpts = newStoreOpts
 		activeMu.Unlock()
 
 		applyLogSettings(newCfg)
