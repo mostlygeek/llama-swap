@@ -20,6 +20,7 @@ import (
 type defaultProber struct{}
 
 var _ Prober = defaultProber{}
+
 func (defaultProber) Name() string { return "default" }
 
 func (defaultProber) Matches(models ModelsResponse) bool {
