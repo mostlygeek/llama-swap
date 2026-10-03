@@ -153,7 +153,7 @@ func metricsEntries(t *testing.T, mm *metricsMonitor) []ActivityLogEntry {
 	if err != nil {
 		t.Fatalf("ListActivity: %v", err)
 	}
-	mm.overlayCaptureState(page.Data)
+	mm.overlayCaptureState(context.Background(), page.Data)
 	return page.Data
 }
 

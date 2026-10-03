@@ -2,15 +2,22 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"math/rand"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/store"
+	"github.com/mostlygeek/llama-swap/internal/store/sqlite"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestServer_CaptureCompressRoundtrip(t *testing.T) {
@@ -42,8 +49,9 @@ func TestServer_CaptureCompressRoundtrip(t *testing.T) {
 }
 
 func TestServer_CaptureStoreAndRetrieve(t *testing.T) {
+	ctx := context.Background()
 	mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 100, 5)
-	if !mm.enableCaptures {
+	if mm.captures == nil {
 		t.Fatal("captures should be enabled with non-zero buffer")
 	}
 
@@ -52,26 +60,102 @@ func TestServer_CaptureStoreAndRetrieve(t *testing.T) {
 		t.Fatal("addCapture returned false")
 	}
 
-	got := mm.getCaptureByID(3)
+	got := mm.getCaptureByID(ctx, 3)
 	if got == nil || !bytes.Equal(got.ReqBody, []byte("hello")) {
 		t.Fatalf("getCaptureByID = %+v", got)
 	}
-	if mm.getCaptureByID(999) != nil {
+	if mm.getCaptureByID(ctx, 999) != nil {
 		t.Fatal("expected nil for unknown capture ID")
 	}
 }
 
 func TestServer_CaptureDisabled(t *testing.T) {
+	ctx := context.Background()
 	mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 100, 0)
-	if mm.enableCaptures {
+	if mm.captures != nil {
 		t.Fatal("captures should be disabled with zero buffer")
 	}
 	if mm.addCapture(ReqRespCapture{ID: 1}) {
 		t.Fatal("addCapture should return false when disabled")
 	}
-	if mm.getCaptureByID(1) != nil {
+	if mm.getCaptureByID(ctx, 1) != nil {
 		t.Fatal("getCaptureByID should return nil when disabled")
 	}
+}
+
+// newCapturesStore builds a store whose captures live in a database of their
+// own, the way store.captures configures them, plus a monitor reading it.
+// captureBufferMB is passed through so a test can put the legacy setting in
+// front of it.
+func newCapturesStore(t *testing.T, captureBufferMB int) (*metricsMonitor, store.Store, string) {
+	t.Helper()
+
+	dir := t.TempDir()
+	capturesPath := filepath.Join(dir, "captures.db")
+	st, err := sqlite.New(sqlite.Options{
+		Path:                 filepath.Join(dir, "activity.db"),
+		CapturesPath:         capturesPath,
+		CapturesMaxBytes:     1 << 20,
+		CapturesMaxItemBytes: 1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("sqlite.New: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Errorf("store.Close: %v", err)
+		}
+	})
+
+	return newMetricsMonitor(logmon.NewWriter(io.Discard), 10, captureBufferMB, st), st, capturesPath
+}
+
+// store.captures supersedes the legacy in-memory buffer, and that is what makes
+// a capture readable once the process that wrote it is gone: the capture lands
+// in the captures database, so a monitor built from the same files reads it
+// back. The legacy buffer has nothing to show there.
+func TestServer_CapturesUseThePersistentRepository(t *testing.T) {
+	ctx := context.Background()
+
+	mm, st, capturesPath := newCapturesStore(t, 0)
+	require.NotNil(t, mm.captures)
+	require.Same(t, st.Captures(), mm.captures, "the monitor must write through store.captures")
+
+	metric, ok := mm.queueMetrics(ActivityLogEntry{
+		Timestamp: time.Unix(1, 0),
+		Model:     "m1",
+		ReqPath:   "/v1/chat/completions",
+	})
+	require.True(t, ok, "queueMetrics failed")
+	require.True(t, mm.addCapture(ReqRespCapture{
+		ID:       metric.ID,
+		ReqPath:  "/v1/chat/completions",
+		ReqBody:  []byte("hello"),
+		RespBody: []byte("world"),
+	}), "addCapture returned false")
+
+	// A second reader over the same files, standing in for the next process.
+	reopen, err := sqlite.New(sqlite.Options{
+		Path:                 filepath.Join(t.TempDir(), "activity.db"),
+		CapturesPath:         capturesPath,
+		CapturesMaxBytes:     1 << 20,
+		CapturesMaxItemBytes: 1 << 20,
+	})
+	require.NoError(t, err)
+	defer reopen.Close()
+
+	got := newMetricsMonitor(logmon.NewWriter(io.Discard), 10, 0, reopen).getCaptureByID(ctx, metric.ID)
+	require.NotNil(t, got, "capture must survive the process that wrote it")
+	assert.Equal(t, []byte("hello"), got.ReqBody)
+	assert.Equal(t, []byte("world"), got.RespBody)
+}
+
+// store.captures wins over captureBuffer instead of being combined with it:
+// config validation rejects the two together, so the monitor takes the
+// repository and ignores the legacy buffer.
+func TestServer_CapturesPersistentRepositoryWinsOverCaptureBuffer(t *testing.T) {
+	mm, st, _ := newCapturesStore(t, 5)
+	require.Same(t, st.Captures(), mm.captures)
 }
 
 func TestServer_CaptureFieldsFor(t *testing.T) {

@@ -85,6 +85,21 @@ func (c *Cache) Has(id int) bool {
 	return exists
 }
 
+// Delete drops the entry stored under id and frees its space. Deleting an id
+// the cache does not hold is not an error.
+func (c *Cache) Delete(id int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	old, exists := c.items[id]
+	if !exists {
+		return
+	}
+	c.size -= len(old)
+	delete(c.items, id)
+	c.removeOrder(id)
+}
+
 func (c *Cache) Size() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()

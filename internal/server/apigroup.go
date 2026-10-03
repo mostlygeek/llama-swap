@@ -193,7 +193,7 @@ func (s *Server) handleAPIActivity(w http.ResponseWriter, r *http.Request) {
 		swaputil.SendResponse(w, r, http.StatusInternalServerError, "failed to get activity")
 		return
 	}
-	s.metrics.overlayCaptureState(page.Data)
+	s.metrics.overlayCaptureState(r.Context(), page.Data)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(page)
 }
@@ -465,7 +465,7 @@ func (s *Server) handleAPICapture(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	capture := s.metrics.getCaptureByID(id)
+	capture := s.metrics.getCaptureByID(r.Context(), id)
 	if capture == nil {
 		swaputil.SendResponse(w, r, http.StatusNotFound, "capture not found")
 		return

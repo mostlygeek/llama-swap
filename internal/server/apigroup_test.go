@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mostlygeek/llama-swap/internal/cache"
 	"github.com/mostlygeek/llama-swap/internal/config"
 	"github.com/mostlygeek/llama-swap/internal/hw"
 	"github.com/mostlygeek/llama-swap/internal/store"
+	"github.com/mostlygeek/llama-swap/internal/store/memory"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 )
 
@@ -377,8 +377,7 @@ func TestServer_APIMetricsActivity_Empty(t *testing.T) {
 
 func TestServer_APIMetricsActivity(t *testing.T) {
 	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
-	s.metrics.enableCaptures = true
-	s.metrics.captureCache = cache.New(1024 * 1024)
+	s.metrics.captures = memory.New(1024*1024, 0)
 
 	storedM1, ok := s.metrics.queueMetrics(ActivityLogEntry{
 		Timestamp: time.Unix(1, 0),

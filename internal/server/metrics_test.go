@@ -445,7 +445,7 @@ func TestMetricsMonitor_RecordFailedRequestCapture(t *testing.T) {
 		t.Fatal("failed request should capture the request so it can be inspected")
 	}
 
-	got := mm.getCaptureByID(entry.ID)
+	got := mm.getCaptureByID(context.Background(), entry.ID)
 	if got == nil {
 		t.Fatal("capture not found")
 	}
@@ -503,7 +503,7 @@ func TestMetricsMonitor_RecordFailedRequestCaptureDisabled(t *testing.T) {
 	if entries[0].ErrorMsg != "boom" {
 		t.Errorf("error_msg = %q, want boom", entries[0].ErrorMsg)
 	}
-	if mm.getCaptureByID(entries[0].ID) != nil {
+	if mm.getCaptureByID(context.Background(), entries[0].ID) != nil {
 		t.Fatal("no capture should be stored when disabled")
 	}
 }
@@ -624,7 +624,7 @@ func TestServer_MetricsMiddleware_UpstreamAudioCaptureSkipsRespBody(t *testing.T
 	if !last.HasCapture {
 		t.Fatal("expected capture to be stored")
 	}
-	cap := mm.getCaptureByID(last.ID)
+	cap := mm.getCaptureByID(context.Background(), last.ID)
 	if cap == nil {
 		t.Fatal("capture not found")
 	}

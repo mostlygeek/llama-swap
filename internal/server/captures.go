@@ -1,13 +1,18 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/klauspost/compress/zstd"
+
+	"github.com/mostlygeek/llama-swap/internal/store"
 )
 
 // ReqRespCapture is a stored request/response pair for a single metered request.
@@ -126,10 +131,14 @@ func decompressCapture(data []byte) (*ReqRespCapture, error) {
 	return &capture, nil
 }
 
-// addCapture compresses and stores a capture in the cache. Returns true if the
-// capture was stored.
+// captureWriteTimeout bounds a capture write. Captures are stored after the
+// handler has returned, so the write is not part of the request's lifetime.
+const captureWriteTimeout = 5 * time.Second
+
+// addCapture compresses and stores a capture. Returns true if the capture was
+// stored.
 func (mp *metricsMonitor) addCapture(capture ReqRespCapture) bool {
-	if !mp.enableCaptures {
+	if mp.captures == nil {
 		return false
 	}
 
@@ -139,8 +148,18 @@ func (mp *metricsMonitor) addCapture(capture ReqRespCapture) bool {
 		return false
 	}
 
-	if err := mp.captureCache.Add(capture.ID, compressed); err != nil {
-		mp.logger.Warnf("capture %d too large (%d bytes), skipping: %v", capture.ID, len(compressed), err)
+	// Deliberately detached from the request context, for the same reason
+	// queueMetrics gives: this runs after the handler returns, and a client
+	// that hung up is exactly the request whose capture is worth keeping.
+	ctx, cancel := context.WithTimeout(context.Background(), captureWriteTimeout)
+	defer cancel()
+
+	if err := mp.captures.Put(ctx, capture.ID, compressed); err != nil {
+		if errors.Is(err, store.ErrCaptureTooLarge) {
+			mp.logger.Warnf("capture %d too large (%d bytes), skipping: %v", capture.ID, len(compressed), err)
+			return false
+		}
+		mp.warnf("failed to store capture %d: %v", capture.ID, err)
 		return false
 	}
 
@@ -151,12 +170,16 @@ func (mp *metricsMonitor) addCapture(capture ReqRespCapture) bool {
 
 // getCaptureByID decompresses and unmarshals a capture by ID. Returns nil if
 // the capture is not found or decompression fails.
-func (mp *metricsMonitor) getCaptureByID(id int) *ReqRespCapture {
-	if mp.captureCache == nil {
+func (mp *metricsMonitor) getCaptureByID(ctx context.Context, id int) *ReqRespCapture {
+	if mp.captures == nil {
 		return nil
 	}
-	data, err := mp.captureCache.Get(id)
+	data, found, err := mp.captures.Get(ctx, id)
 	if err != nil {
+		mp.warnf("failed to read capture %d: %v", id, err)
+		return nil
+	}
+	if !found {
 		return nil
 	}
 	capture, err := decompressCapture(data)
