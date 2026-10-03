@@ -25,6 +25,10 @@ const (
 
 type gpuStatsFunc func(ctx context.Context, every time.Duration, logger *logmon.Monitor) (chan []GpuStat, error)
 
+// gpuWaitFunc waits d before a collector restart. It returns false if ctx is
+// done first.
+type gpuWaitFunc func(ctx context.Context, d time.Duration) bool
+
 type Monitor struct {
 	mutex   sync.RWMutex
 	log     *logmon.Monitor
@@ -38,9 +42,10 @@ type Monitor struct {
 	sysListeners map[chan SysStat]struct{}
 	gpuListeners map[chan []GpuStat]struct{}
 
-	// gpuStats starts the GPU collector. Tests replace it.
-	gpuStats        gpuStatsFunc
-	gpuRestartDelay time.Duration
+	// gpuStats starts the GPU collector and gpuWait waits before a restart.
+	// Tests replace both.
+	gpuStats gpuStatsFunc
+	gpuWait  gpuWaitFunc
 }
 
 func ringCapacity(c config.PerformanceConfig) int {
@@ -70,8 +75,8 @@ func New(c config.PerformanceConfig, logger *logmon.Monitor) (*Monitor, error) {
 		sysListeners: make(map[chan SysStat]struct{}),
 		gpuListeners: make(map[chan []GpuStat]struct{}),
 
-		gpuStats:        getGpuStats,
-		gpuRestartDelay: gpuRestartDelay,
+		gpuStats: getGpuStats,
+		gpuWait:  waitOrDone,
 	}, nil
 }
 
@@ -181,21 +186,19 @@ func (m *Monitor) collectGpuStats(ctx context.Context, every time.Duration) {
 		return
 	}
 
-	delay := m.gpuRestartDelay
+	delay := gpuRestartDelay
 	for {
 		if gpuCh != nil && m.forwardGpuStats(ctx, gpuCh) {
 			// it worked before stopping, so start the backoff over
-			delay = m.gpuRestartDelay
+			delay = gpuRestartDelay
 		}
 		if ctx.Err() != nil {
 			return
 		}
 
 		m.log.Errorf("GPU monitoring stopped - restarting in %s", delay)
-		select {
-		case <-ctx.Done():
+		if !m.gpuWait(ctx, delay) {
 			return
-		case <-time.After(delay):
 		}
 
 		gpuCh, err = m.gpuStats(ctx, every, m.log)
@@ -204,6 +207,19 @@ func (m *Monitor) collectGpuStats(ctx context.Context, every time.Duration) {
 			gpuCh = nil
 		}
 		delay = min(delay*2, gpuRestartMaxDelay)
+	}
+}
+
+// waitOrDone waits d and returns true, or returns false as soon as ctx is
+// done.
+func waitOrDone(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
 	}
 }
 
