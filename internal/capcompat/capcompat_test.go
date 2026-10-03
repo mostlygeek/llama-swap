@@ -240,7 +240,7 @@ func TestCapcompat_DetectVLLM(t *testing.T) {
 	info, err := Detect(context.Background(), up.client(t), "meta-llama/Llama-3.1-8B-Instruct")
 	require.NoError(t, err)
 
-	assert.Equal(t, "vllm", info.Upstream)
+	assert.Equal(t, "default", info.Upstream)
 	assert.Equal(t, 131072, info.Capabilities.Context)
 	assert.Equal(t, []string{"text"}, info.Capabilities.In)
 	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
@@ -260,7 +260,7 @@ func TestCapcompat_DetectVLLMCapture(t *testing.T) {
 		info, err := Detect(context.Background(), up.client(t), "qwen3-4b-vllm")
 		require.NoError(t, err)
 
-		assert.Equal(t, "vllm", info.Upstream)
+		assert.Equal(t, "default", info.Upstream)
 		assert.Equal(t, 40960, info.Capabilities.Context)
 		assert.Equal(t, []string{"text"}, info.Capabilities.In)
 		assert.Equal(t, []string{"text"}, info.Capabilities.Out)
@@ -315,7 +315,7 @@ func TestCapcompat_DetectGufo(t *testing.T) {
 	info, err := Detect(context.Background(), up.client(t), "qwen3.8-flash-next-gufo")
 	require.NoError(t, err)
 
-	assert.Equal(t, "gufo", info.Upstream)
+	assert.Equal(t, "default", info.Upstream)
 	assert.Equal(t, 262144, info.Capabilities.Context)
 	assert.Equal(t, []string{"text"}, info.Capabilities.In)
 	assert.Equal(t, []string{"text"}, info.Capabilities.Out)

@@ -163,7 +163,7 @@ type Prober interface {
 
 // defaultProbers is the registry Detect consults, in order.
 func defaultProbers() []Prober {
-	return []Prober{llamaServerProber{}, vllmProber{}, halogenProber{}, gufoProber{}}
+	return []Prober{llamaServerProber{}, halogenProber{}, defaultProber{}}
 }
 
 // Detect identifies the upstream behind c and returns what it reports about
