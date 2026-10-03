@@ -3,12 +3,41 @@ package matrix
 import (
 	"fmt"
 	"sort"
+	"time"
 )
 
 // Definition is one named matrix DSL expression.
 type Definition struct {
 	Name string
 	DSL  string
+}
+
+// Tie-breaker policies for candidate sets that score the same eviction
+// cost. Eviction cost is always the primary key; the tie-breaker only
+// orders equal-cost candidates.
+const (
+	// TieBreakerLexical keeps the first equal-cost candidate in
+	// set-definition order. This is the historical behaviour and the
+	// default.
+	TieBreakerLexical = "lexical"
+	// TieBreakerLRU prefers the equal-cost candidate that evicts the
+	// longest-idle running model.
+	TieBreakerLRU = "lru"
+)
+
+// SolveOptions configures one Solve call.
+type SolveOptions struct {
+	// EvictCosts is the relative cost of evicting a running model; models
+	// not listed cost 1.
+	EvictCosts map[string]int
+	// TieBreaker selects the policy for equal-cost candidates
+	// (TieBreakerLexical or TieBreakerLRU; the empty string behaves as
+	// lexical).
+	TieBreaker string
+	// Idle holds how long each running model has gone without finishing a
+	// request. It is consulted only when TieBreaker is TieBreakerLRU; a
+	// model absent from the map is treated as idle for zero.
+	Idle map[string]time.Duration
 }
 
 // Resolver maps a DSL identifier to a real model name.
@@ -219,7 +248,12 @@ func topologicalOrder(definitions []Definition, deps map[string][]string) ([]str
 // Solve chooses the compatible set with the lowest eviction cost. It performs
 // a fresh projection because the relevant model universe changes with the
 // running set supplied by the scheduler.
-func (p *Program) Solve(target string, running []string, evictionCosts map[string]int) Decision {
+//
+// Equal-cost candidates are ordered by opts.TieBreaker: lexical (the default)
+// keeps the first in set-definition order; lru prefers the candidate that
+// evicts the longest-idle running model. A candidate evicting nothing ranks
+// zero, so zero-cost ties keep the lexical winner.
+func (p *Program) Solve(target string, running []string, opts SolveOptions) Decision {
 	if contains(running, target) {
 		setName, dsl := p.findContaining(running)
 		return Decision{
@@ -238,9 +272,17 @@ func (p *Program) Solve(target string, running []string, evictionCosts map[strin
 	// Skip every set when the target appears in no set's expression.
 	globalTargetBit, targetKnown := p.modelBits[target]
 
+	// The lru policy needs each candidate's eviction list (to rank it by
+	// idle age); lexical never does, so the list is only constructed and
+	// tracked when lru is active. The lru idle score is the longest idle
+	// among the evicted models, which is accumulated in the same pass as
+	// the cost instead of a second scan.
+	lru := opts.TieBreaker == TieBreakerLRU
 	bestCost := -1
+	bestIdleRank := time.Duration(0)
 	var bestSet *compiledSet
 	var bestState projectedState
+	var bestEvict []string
 	for i := range p.sets {
 		set := &p.sets[i]
 		if !targetKnown || !set.support.has(globalTargetBit) {
@@ -252,13 +294,40 @@ func (p *Program) Solve(target string, running []string, evictionCosts map[strin
 			}
 
 			cost := 0
+			idle := time.Duration(0)
+			var evicted []string
 			for _, model := range running {
 				if !state.mask.has(evaluator.modelBits[model]) {
-					cost += evictionCost(evictionCosts, model)
+					cost += evictionCost(opts.EvictCosts, model)
+					if lru {
+						evicted = append(evicted, model)
+						if d := opts.Idle[model]; d > idle {
+							idle = d
+						}
+					}
 				}
 			}
-			if bestCost < 0 || cost < bestCost {
+
+			better := false
+			switch {
+			case bestCost < 0:
+				better = true
+			case cost < bestCost:
+				better = true
+			case lru && cost == bestCost:
+				// Eviction cost is the primary key: a more expensive
+				// candidate never wins on idle age alone. Only equal-cost
+				// candidates compare by idle — prefer evicting the
+				// longer-idle model. A strict comparison keeps the first
+				// candidate on a residual tie, so outcomes stay deterministic.
+				better = idle > bestIdleRank
+			}
+			if better {
 				bestCost = cost
+				bestIdleRank = idle
+				if lru {
+					bestEvict = evicted
+				}
 				bestSet = set
 				bestState = state
 			}
@@ -272,10 +341,16 @@ func (p *Program) Solve(target string, running []string, evictionCosts map[strin
 		}
 	}
 
+	// Under lru the winner's eviction list was already built while ranking;
+	// lexical reconstructs the single list it never had.
 	var evict []string
-	for _, model := range running {
-		if !bestState.mask.has(evaluator.modelBits[model]) {
-			evict = append(evict, model)
+	if lru {
+		evict = bestEvict
+	} else {
+		for _, model := range running {
+			if !bestState.mask.has(evaluator.modelBits[model]) {
+				evict = append(evict, model)
+			}
 		}
 	}
 	return Decision{
