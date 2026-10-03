@@ -147,6 +147,7 @@ var modelPostJSONRoutes = []string{
 	"/v1/images/generations",
 	"/sdapi/v1/txt2img",
 	"/sdapi/v1/img2img",
+	"/v1/systemone",
 
 	// audio.cpp generic task API
 	"/audioapi/v1/tasks/run",
