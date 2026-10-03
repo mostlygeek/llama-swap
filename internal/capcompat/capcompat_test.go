@@ -48,6 +48,9 @@ import (
 // halogen files are that same capture with vision turned off, and with the
 // supported list and tool-call block removed, to cover builds configured
 // differently. Their derivation is noted where they are used.
+//
+// gufo/v1_models.json is a verbatim capture from a running Gufo instance
+// (AMD Strix Halo gfx1151).
 
 // fixture reads a testdata file.
 func fixture(t *testing.T, parts ...string) []byte {
@@ -314,9 +317,9 @@ func TestCapcompat_DetectGufo(t *testing.T) {
 
 	assert.Equal(t, "gufo", info.Upstream)
 	assert.Equal(t, 262144, info.Capabilities.Context)
-	assert.Equal(t, []string{"text", "image"}, info.Capabilities.In)
+	assert.Equal(t, []string{"text"}, info.Capabilities.In)
 	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
-	assert.True(t, info.Capabilities.Tools)
+	assert.False(t, info.Capabilities.Tools, "gufo exposes nothing about tool support in /v1/models")
 	assert.Equal(t, 0, up.hits["/props"], "gufo has no /props to read")
 	require.NoError(t, info.Capabilities.Validate())
 }

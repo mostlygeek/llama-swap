@@ -12,9 +12,11 @@ const gufoOwner = "gufo"
 
 // gufoProber reads capabilities from Gufo's /v1/models listing.
 //
-// Gufo (AMD Strix Halo optimized inference engine) reports context_length
-// directly in its OpenAI-compatible /v1/models response. It also has built-in
-// tool call support and vision (mmproj) support for compatible models.
+// Like vLLM, Gufo's listing carries context_length, but nothing it serves
+// reports whether the deployment loaded an mmproj vision tower or enabled
+// specific tool support. So only context length and text in/out are advertised
+// automatically, matching listingOnlyCaps; tools and non-text modalities remain
+// manual settings in models.*.capabilities.
 type gufoProber struct{}
 
 var _ Prober = gufoProber{}
@@ -26,8 +28,5 @@ func (gufoProber) Matches(models ModelsResponse) bool {
 }
 
 func (gufoProber) Probe(_ context.Context, _ *Client, models ModelsResponse, modelName string) (config.ModelCapConfig, error) {
-	caps := listingOnlyCaps(models, modelName)
-	caps.Tools = true
-	caps.In = []string{"text", "image"}
-	return caps, nil
+	return listingOnlyCaps(models, modelName), nil
 }
