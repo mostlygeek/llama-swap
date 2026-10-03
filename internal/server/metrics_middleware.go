@@ -54,7 +54,7 @@ func CreateMetricsMiddleware(mm *metricsMonitor, cfg config.Config) chain.Middle
 			cf := captureFieldsFor(checkPath)
 			var reqBody []byte
 			var reqHeaders map[string]string
-			if mm.enableCaptures {
+			if mm.captures != nil {
 				if cf&captureReqBody != 0 && r.Body != nil {
 					if buffered, err := io.ReadAll(r.Body); err == nil {
 						reqBody = buffered

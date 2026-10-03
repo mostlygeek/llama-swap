@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mostlygeek/llama-swap/internal/cache"
 	"github.com/mostlygeek/llama-swap/internal/event"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 	"github.com/mostlygeek/llama-swap/internal/store"
+	"github.com/mostlygeek/llama-swap/internal/store/memory"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 	"github.com/mostlygeek/llama-swap/internal/tailcat"
 	"github.com/tidwall/gjson"
@@ -36,13 +36,14 @@ func (e ActivityLogEvent) Type() uint32 {
 
 // metricsMonitor parses upstream responses for token statistics, stores
 // activity in a store, and (when captures are enabled) stores
-// zstd+CBOR-compressed request/response captures in a sized in-memory cache.
+// zstd+CBOR-compressed request/response captures in a capture repository.
 type metricsMonitor struct {
-	store          store.Store
-	maxMetrics     int
-	logger         *logmon.Monitor
-	enableCaptures bool
-	captureCache   *cache.Cache // zstd-compressed CBOR of ReqRespCapture
+	store      store.Store
+	maxMetrics int
+	logger     *logmon.Monitor
+	// captures holds zstd-compressed CBOR of ReqRespCapture; nil disables
+	// captures.
+	captures store.CaptureRepository
 }
 
 func newMetricsMonitor(logger *logmon.Monitor, maxMetrics int, captureBufferMB int, st store.Store) *metricsMonitor {
@@ -50,13 +51,16 @@ func newMetricsMonitor(logger *logmon.Monitor, maxMetrics int, captureBufferMB i
 		maxMetrics = 1000
 	}
 	mm := &metricsMonitor{
-		logger:         logger,
-		store:          st,
-		maxMetrics:     maxMetrics,
-		enableCaptures: captureBufferMB > 0,
+		logger:     logger,
+		store:      st,
+		maxMetrics: maxMetrics,
 	}
-	if captureBufferMB > 0 {
-		mm.captureCache = cache.New(captureBufferMB * 1024 * 1024)
+	// A configured repository wins over the legacy buffer.
+	if st != nil {
+		mm.captures = st.Captures()
+	}
+	if mm.captures == nil && captureBufferMB > 0 {
+		mm.captures = memory.New(int64(captureBufferMB) * 1024 * 1024)
 	}
 	return mm
 }
@@ -87,15 +91,30 @@ func (mp *metricsMonitor) emitMetric(metric ActivityLogEntry) {
 	event.Emit(ActivityLogEvent{Metrics: metric})
 }
 
-func (mp *metricsMonitor) overlayCaptureState(entries []ActivityLogEntry) {
-	if mp.captureCache == nil {
+// overlayCaptureState marks which activity rows have a stored capture.
+func (mp *metricsMonitor) overlayCaptureState(ctx context.Context, entries []ActivityLogEntry) {
+	if mp.captures == nil {
+		for i := range entries {
+			entries[i].HasCapture = false
+		}
+		return
+	}
+
+	ids := make([]int, len(entries))
+	for i := range entries {
+		ids[i] = entries[i].ID
+	}
+	found, err := mp.captures.Has(ctx, ids)
+	if err != nil {
+		// Degrade to "no captures" rather than fail the page.
+		mp.warnf("failed to check captures: %v", err)
 		for i := range entries {
 			entries[i].HasCapture = false
 		}
 		return
 	}
 	for i := range entries {
-		entries[i].HasCapture = mp.captureCache.Has(entries[i].ID)
+		entries[i].HasCapture = found[entries[i].ID]
 	}
 }
 
@@ -265,7 +284,7 @@ func (mp *metricsMonitor) record(modelID string, r *http.Request, recorder *resp
 // capture (already decompressed by the caller); pass nil to omit it. Returns
 // true if a capture was stored.
 func (mp *metricsMonitor) storeCapture(id int, r *http.Request, recorder *responseBodyCopier, cf captureFields, reqBody []byte, reqHeaders map[string]string, body []byte) bool {
-	if !mp.enableCaptures {
+	if mp.captures == nil {
 		return false
 	}
 	capture := ReqRespCapture{

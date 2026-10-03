@@ -144,7 +144,37 @@ type HookOnStartup struct {
 }
 
 type Store struct {
+	Path     string         `yaml:"path"`
+	Captures *StoreCaptures `yaml:"captures"`
+}
+
+const StoreCapturesDefaultMaxSizeMB = 500
+
+// StoreCaptures persists request/response captures on disk so they survive
+// restarts. Defining it supersedes the legacy top-level captureBuffer and
+// metricsMaxInMemory settings: a config may use the new section, those two
+// settings, or neither, never both.
+type StoreCaptures struct {
+	// Path is the SQLite file holding captures; it must differ from
+	// store.path.
 	Path string `yaml:"path"`
+
+	// MaxSizeMB is the total budget for stored captures; the oldest are
+	// evicted to make room.
+	MaxSizeMB int `yaml:"maxSizeMB"`
+}
+
+// UnmarshalYAML applies the store.captures defaults.
+func (c *StoreCaptures) UnmarshalYAML(value *yaml.Node) error {
+	type rawStoreCaptures StoreCaptures
+	defaults := rawStoreCaptures{
+		MaxSizeMB: StoreCapturesDefaultMaxSizeMB,
+	}
+	if err := value.Decode(&defaults); err != nil {
+		return err
+	}
+	*c = StoreCaptures(defaults)
+	return nil
 }
 
 type UIConfig struct {
