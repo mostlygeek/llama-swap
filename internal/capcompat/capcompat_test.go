@@ -304,6 +304,23 @@ func TestCapcompat_VLLMSkipsLoRAAdapters(t *testing.T) {
 	})
 }
 
+func TestCapcompat_DetectGufo(t *testing.T) {
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "gufo", "v1_models.json"),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "qwen3.8-flash-next-gufo")
+	require.NoError(t, err)
+
+	assert.Equal(t, "gufo", info.Upstream)
+	assert.Equal(t, 262144, info.Capabilities.Context)
+	assert.Equal(t, []string{"text", "image"}, info.Capabilities.In)
+	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
+	assert.True(t, info.Capabilities.Tools)
+	assert.Equal(t, 0, up.hits["/props"], "gufo has no /props to read")
+	require.NoError(t, info.Capabilities.Validate())
+}
+
 func TestCapcompat_DetectHalogen(t *testing.T) {
 	up := newUpstream(t, map[string][]byte{
 		"/v1/models": fixture(t, "halogen", "v1_models.json"),
