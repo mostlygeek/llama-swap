@@ -1,5 +1,14 @@
 # Changelog
 
+## v262 (Oct 2, 2026)
+
+systemone models are mega hyped right now. This release adds support for
+/v1/systemone for that fast thinking goodness(?). Also requests missing a
+Content-Type will get one automatically added for the inference endpoints.
+
+- [PR #1197](https://github.com/mostlygeek/llama-swap/pull/1197) Add /v1/systemone endpoint to POST JSON routes: route llama.cpp's new /v1/systemone decision model endpoint to the model named in the JSON body (#1195) by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1194](https://github.com/mostlygeek/llama-swap/pull/1194) internal/server: accept JSON bodies with a missing or wrong Content-Type: fix a misleading "no model id could be identified" 404 when `curl -d` sent JSON as form-urlencoded; a middleware now relabels JSON object bodies as application/json and returns a 400 naming the expected format for unusable bodies (#1192) by [@mostlygeek](https://github.com/mostlygeek)
+
 ## v261 (Sep 30, 2026)
 
 This release has a bunch of small compatibility improvements requested by the community.
