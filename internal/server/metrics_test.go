@@ -125,6 +125,102 @@ func TestServer_ParseMetrics_TabbyAPI(t *testing.T) {
 	}
 }
 
+func TestServer_ParseMetrics_OMLX(t *testing.T) {
+	tests := []struct {
+		name         string
+		rates        string
+		extra        string
+		wantPrompt   float64
+		wantGenerate float64
+	}{
+		{"reported", `,"prompt_tokens_per_second":63.74,"generation_tokens_per_second":66.38`, "", 63.74, 66.38},
+		{"zero", `,"prompt_tokens_per_second":0,"generation_tokens_per_second":0`, "", 0, 0},
+		{"null", `,"prompt_tokens_per_second":null,"generation_tokens_per_second":null`, "", -1, -1},
+		{"missing", "", "", -1, -1},
+		{"prompt only", `,"prompt_tokens_per_second":63.74`, "", 63.74, -1},
+		{"generation only", `,"generation_tokens_per_second":66.38`, "", -1, 66.38},
+		{"non-numeric", `,"prompt_tokens_per_second":"unknown","generation_tokens_per_second":false`, "", -1, -1},
+		{"TabbyAPI precedence", `,"prompt_tokens_per_sec":35.17,"completion_tokens_per_sec":17.11,"prompt_tokens_per_second":63.74,"generation_tokens_per_second":66.38`, "", 35.17, 17.11},
+		{"TabbyAPI zero precedence", `,"prompt_tokens_per_sec":0,"completion_tokens_per_sec":0,"prompt_tokens_per_second":63.74,"generation_tokens_per_second":66.38`, "", 0, 0},
+		{"TabbyAPI string precedence", `,"prompt_tokens_per_sec":"35.17","completion_tokens_per_sec":"17.11","prompt_tokens_per_second":63.74,"generation_tokens_per_second":66.38`, "", 35.17, 17.11},
+		{"TabbyAPI null fallback", `,"prompt_tokens_per_sec":null,"completion_tokens_per_sec":null,"prompt_tokens_per_second":63.74,"generation_tokens_per_second":66.38`, "", 63.74, 66.38},
+		{"all null", `,"prompt_tokens_per_sec":null,"completion_tokens_per_sec":null,"prompt_tokens_per_second":null,"generation_tokens_per_second":null`, "", -1, -1},
+		{"independent generation fallback", `,"prompt_tokens_per_sec":35.17,"prompt_tokens_per_second":63.74,"generation_tokens_per_second":66.38`, "", 35.17, 66.38},
+		{"independent prompt fallback", `,"completion_tokens_per_sec":17.11,"prompt_tokens_per_second":63.74,"generation_tokens_per_second":66.38`, "", 63.74, 17.11},
+		{"timings precedence", `,"prompt_tokens_per_second":63.74,"generation_tokens_per_second":66.38`, `,"timings":{"prompt_n":56,"predicted_n":8,"cache_n":16,"prompt_per_second":100,"predicted_per_second":40}`, 100, 40},
+		{"vLLM precedence", `,"prompt_tokens_per_second":63.74,"generation_tokens_per_second":66.38`, `,"metrics":{"time_to_first_token_ms":200,"mean_itl_ms":10}`, 200, 100},
+		{"vLLM over timings", `,"prompt_tokens_per_second":63.74,"generation_tokens_per_second":66.38`, `,"timings":{"prompt_n":56,"predicted_n":8,"cache_n":16,"prompt_per_second":100,"predicted_per_second":40},"metrics":{"time_to_first_token_ms":200,"mean_itl_ms":10}`, 200, 100},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			body := `{"usage":{"prompt_tokens":56,"completion_tokens":8,"prompt_tokens_details":{"cached_tokens":16}` + test.rates + `}` + test.extra + `}`
+			for _, streaming := range []bool{false, true} {
+				name := "JSON"
+				if streaming {
+					name = "SSE"
+				}
+				t.Run(name, func(t *testing.T) {
+					var entry ActivityLogEntry
+					var err error
+					if streaming {
+						stream := "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n" + "data: " + body + "\n\ndata: [DONE]\n\n"
+						entry, err = processStreamingResponse("m", time.Now(), []byte(stream))
+					} else {
+						parsed := gjson.Parse(body)
+						entry, err = parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
+					}
+					if err != nil {
+						t.Fatalf("parse metrics: %v", err)
+					}
+					if entry.Tokens.InputTokens != 56 || entry.Tokens.OutputTokens != 8 || entry.Tokens.CachedTokens != 16 {
+						t.Fatalf("tokens = %+v", entry.Tokens)
+					}
+					if entry.Tokens.PromptPerSecond != test.wantPrompt || entry.Tokens.TokensPerSecond != test.wantGenerate {
+						t.Fatalf("rates = %+v, want prompt %v, generation %v", entry.Tokens, test.wantPrompt, test.wantGenerate)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestServer_MetricsMiddleware_OMLX(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		name := "JSON"
+		if streaming {
+			name = "SSE"
+		}
+		t.Run(name, func(t *testing.T) {
+			mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 10, 0)
+			cfg := config.Config{Models: map[string]config.ModelConfig{"m": {}}}
+			body := `{"usage":{"prompt_tokens":56,"completion_tokens":8,"prompt_tokens_per_second":63.74,"generation_tokens_per_second":66.38}}`
+			contentType := "application/json"
+			if streaming {
+				contentType = "text/event-stream"
+				body = "data: " + body + "\n\ndata: [DONE]\n\n"
+			}
+			handler := chain.New(CreateMetricsMiddleware(mm, cfg)).ThenFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", contentType)
+				io.WriteString(w, body)
+			})
+			r := chatRequest("m")
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			if w.Code != http.StatusOK || w.Body.String() != body {
+				t.Fatalf("response = %d %q, want 200 %q", w.Code, w.Body.String(), body)
+			}
+			entries := metricsEntries(t, mm)
+			if len(entries) != 1 {
+				t.Fatalf("want 1 entry, got %d", len(entries))
+			}
+			entry := entries[0]
+			if entry.Model != "m" || entry.Tokens.InputTokens != 56 || entry.Tokens.OutputTokens != 8 || entry.Tokens.PromptPerSecond != 63.74 || entry.Tokens.TokensPerSecond != 66.38 {
+				t.Fatalf("recorded activity = %+v", entry)
+			}
+		})
+	}
+}
+
 // llama-server timings and TabbyAPI usage rates never appear together, but a
 // response carrying both must keep the timings-sourced rates.
 func TestServer_ParseMetrics_TabbyAPINotOverwrittenByTimings(t *testing.T) {
