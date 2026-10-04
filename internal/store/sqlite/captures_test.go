@@ -377,6 +377,7 @@ func TestStore_CapturesBudgetPrunesOldestFirstAcrossDatabases(t *testing.T) {
 	for id := 1; id <= 3; id++ {
 		require.NoError(t, old.Captures().Put(ctx, id, []byte(blobOf(10_000))))
 	}
+	require.NoError(t, old.Close())
 
 	// A new activity database, with a budget that only fits two of them.
 	fresh, err := New(Options{
@@ -402,8 +403,8 @@ func TestStore_CapturesBudgetPrunesOldestFirstAcrossDatabases(t *testing.T) {
 	assert.Len(t, got, 10_000)
 }
 
-// A deleted captures file is a missing file, not a mismatched one: it is
-// recreated in place and adopts the activity database's identity.
+// A deleted captures file is a missing file: it is recreated in place, with
+// the same name, and the new store's captures land in it.
 func TestStore_DeletedCapturesDatabaseIsRecreated(t *testing.T) {
 	dir := t.TempDir()
 	activityPath := filepath.Join(dir, "activity.db")
