@@ -35,9 +35,12 @@ type Swapper interface {
 	// in-flight swaps the scheduler has already committed to (which are not yet
 	// visible in process state). upcoming is the pending request queue as an
 	// ordered, de-duplicated list of model IDs (excluding target); planners
-	// may use it to shape the decision or ignore it. The planner does not
-	// inspect process state itself. Pure decision; must not log.
-	EvictionFor(target string, running, upcoming []string) []string
+	// may use it to shape the decision or ignore it. reserved are the
+	// running models in-flight swaps have claimed as their target: they are
+	// loading, not idle, so a planner that can avoid evicting one should.
+	// The planner does not inspect process state itself. Pure decision;
+	// must not log.
+	EvictionFor(target string, running, upcoming, reserved []string) []string
 
 	// OnSwapStart runs once at the start of every swap, with the same running
 	// set EvictionFor was given for this decision. Planners may log their

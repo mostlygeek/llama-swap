@@ -45,6 +45,14 @@ type SolveOptions struct {
 	// list of model IDs. It is consulted only when Reclaim is ReclaimQueue;
 	// with an empty list ReclaimQueue behaves as ReclaimMinimal.
 	Upcoming []string
+	// Reserved are the running models in-flight swaps have already claimed
+	// as their target: they are loading, not idle, and a decision that
+	// evicted one would cancel that load and collide with the swap. The
+	// solver never evicts a reserved model while a candidate exists that
+	// does not; when every candidate must evict a reserved model it falls
+	// back to the plain ranking, and the scheduler's collision check parks
+	// the request until a slot genuinely frees up.
+	Reserved []string
 }
 
 // Resolver maps a DSL identifier to a real model name.
@@ -265,6 +273,12 @@ func topologicalOrder(definitions []Definition, deps map[string][]string) ([]str
 // objective). A residual exact tie keeps the first candidate in
 // set-definition order, so outcomes stay deterministic.
 //
+// Candidates that would evict a Reserved model are excluded while any
+// non-reserved candidate exists (loading models are not eviction candidates
+// for a request that could have taken an idle one); when all candidates are
+// reserved the plain ranking is used, which always collides with the
+// in-flight swap that reserved the model and parks the request correctly.
+//
 // The evict list is the models the winning set drops — never more. Every
 // candidate set is maximal (budget-sized), so the list is exactly the number
 // of slots the target's load refills: the fleet stays full and each queued
@@ -304,10 +318,22 @@ func (p *Program) Solve(target string, running []string, opts SolveOptions) Deci
 		}
 	}
 
-	var best solveRank
-	bestValid := false
-	var bestSet *compiledSet
-	var bestState projectedState
+	// Reserved models are loading (an in-flight swap's target), not idle:
+	// a candidate that evicts one is held back while any candidate that
+	// does not exists, so an idle unclaimed model always turns over before
+	// a load is cancelled.
+	var reservedSet map[string]bool
+	if len(opts.Reserved) > 0 {
+		reservedSet = make(map[string]bool, len(opts.Reserved))
+		for _, model := range opts.Reserved {
+			reservedSet[model] = true
+		}
+	}
+
+	var best, bestForbidden solveRank
+	bestValid, forbiddenValid := false, false
+	var bestSet, bestForbiddenSet *compiledSet
+	var bestState, bestForbiddenState projectedState
 	for i := range p.sets {
 		set := &p.sets[i]
 		if !targetKnown || !set.support.has(globalTargetBit) {
@@ -319,6 +345,7 @@ func (p *Program) Solve(target string, running []string, opts SolveOptions) Deci
 			}
 
 			rank := solveRank{}
+			forbidden := false
 			for _, model := range running {
 				if !state.mask.has(evaluator.modelBits[model]) {
 					c := evictionCost(opts.EvictCosts, model)
@@ -326,7 +353,19 @@ func (p *Program) Solve(target string, running []string, opts SolveOptions) Deci
 					if queueReclaim && queued[model] {
 						addCost(&rank.charged, c)
 					}
+					if reservedSet != nil && reservedSet[model] {
+						forbidden = true
+					}
 				}
+			}
+			if forbidden {
+				if !forbiddenValid || rank.less(bestForbidden, queueReclaim) {
+					bestForbidden = rank
+					forbiddenValid = true
+					bestForbiddenSet = set
+					bestForbiddenState = state
+				}
+				continue
 			}
 			if !bestValid || rank.less(best, queueReclaim) {
 				best = rank
@@ -335,6 +374,14 @@ func (p *Program) Solve(target string, running []string, opts SolveOptions) Deci
 				bestState = state
 			}
 		}
+	}
+
+	// Only when no candidate avoids the reserved models does the forbidden
+	// winner run: it names a model an in-flight swap already claims, so the
+	// scheduler's collision check queues the request until a slot frees up.
+	if !bestValid {
+		best, bestValid = bestForbidden, forbiddenValid
+		bestSet, bestState = bestForbiddenSet, bestForbiddenState
 	}
 
 	if bestSet == nil {

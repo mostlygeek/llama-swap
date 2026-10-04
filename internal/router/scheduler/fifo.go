@@ -112,7 +112,7 @@ func (s *FIFO) OnRequest(req HandlerReq) {
 	}
 
 	running := s.runningSet(req.Model)
-	evict := s.planner.EvictionFor(req.Model, running, s.upcoming(req.Model))
+	evict := s.planner.EvictionFor(req.Model, running, s.upcoming(req.Model), s.reservedTargets(req.Model))
 
 	// (3) Fast path: ready, nothing to evict, and nobody is evicting us.
 	if state == process.StateReady && len(evict) == 0 && !collidesWith(req.Model, evict, s.active) {
@@ -419,7 +419,7 @@ func (s *FIFO) drainQueue() {
 			continue
 		}
 		running := s.runningSet(req.Model)
-		evict := s.planner.EvictionFor(req.Model, running, s.upcoming(req.Model))
+		evict := s.planner.EvictionFor(req.Model, running, s.upcoming(req.Model), s.reservedTargets(req.Model))
 		if state == process.StateReady && len(evict) == 0 && !collidesWith(req.Model, evict, s.active) {
 			s.logger.Debugf("%s: queued request for model %s now served fast-path", s.name, req.Model)
 			s.grantHandler(req, req.Model)
@@ -441,11 +441,23 @@ func (s *FIFO) drainQueue() {
 }
 
 // runningSet is the live model set handed to the Swapper: every process the
-// baseRouter reports as running, unioned with the targets of in-flight swaps
-// (excluding excludeActive, the model whose own swap is being decided — its
-// in-flight entry must not count as "already running"). The result is sorted so
-// eviction decisions derived from it are deterministic.
+// baseRouter reports as running, EXCEPT the ones an in-flight swap is already
+// evicting — their slots are claimed by that swap's target and they are on
+// the way out, so counting them would inflate the fleet by the number of
+// in-flight swaps and force every decision to evict more models than its
+// target needs (and to collide with the swap already reclaiming them). The
+// set is unioned with the targets of in-flight swaps (excluding excludeActive,
+// the model whose own swap is being decided — its in-flight entry must not
+// count as "already running"): the picture the planner sees is the steady
+// state the fleet reaches when the in-flight swaps complete. The result is
+// sorted so eviction decisions derived from it are deterministic.
 func (s *FIFO) runningSet(excludeActive string) []string {
+	claimed := make(map[string]struct{})
+	for _, sw := range s.active {
+		for _, id := range sw.evict {
+			claimed[id] = struct{}{}
+		}
+	}
 	seen := make(map[string]struct{})
 	var out []string
 	add := func(id string) {
@@ -456,10 +468,33 @@ func (s *FIFO) runningSet(excludeActive string) []string {
 		out = append(out, id)
 	}
 	for id := range s.effects.RunningModels() {
+		if _, dying := claimed[id]; dying {
+			continue
+		}
 		add(id)
 	}
 	for _, id := range activeTargets(s.active, excludeActive) {
 		add(id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// reservedTargets summarizes the models in-flight swaps have claimed as their
+// target, for the planner deciding about exclude: they are loading, not
+// idle, and a decision evicting one would cancel that load and collide with
+// the swap. The planner keeps them out of the eviction candidates while a
+// non-reserved alternative exists. Models an in-flight swap is evicting are
+// not listed: runningSet already leaves them out of the picture.
+func (s *FIFO) reservedTargets(exclude string) []string {
+	seen := make(map[string]struct{})
+	var out []string
+	for _, id := range activeTargets(s.active, exclude) {
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
 	}
 	sort.Strings(out)
 	return out

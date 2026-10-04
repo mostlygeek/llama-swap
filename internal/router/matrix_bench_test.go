@@ -25,7 +25,7 @@ func BenchmarkMatrixSolver_Solve(b *testing.B) {
 		b.Run(fmt.Sprintf("Combinations_%d", combinations), func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				benchmarkSolveResult = solver.Solve("target", running, nil)
+				benchmarkSolveResult = solver.Solve("target", running, nil, nil)
 			}
 		})
 	}
@@ -61,7 +61,7 @@ func BenchmarkMatrixSwapPath(b *testing.B) {
 	for b.Loop() {
 		running := runSets[i%len(runSets)]
 		i++
-		benchmarkEvict = swapper.EvictionFor("target-3", running, nil)
+		benchmarkEvict = swapper.EvictionFor("target-3", running, nil, nil)
 		swapper.OnSwapStart("target-3", running)
 	}
 }

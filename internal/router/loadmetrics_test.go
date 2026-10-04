@@ -202,7 +202,7 @@ func TestMatrixSolver_MeasuredLoadTimeDrivesEviction(t *testing.T) {
 	loadModel(tracker, "c", 100*time.Millisecond)
 
 	s := newMatrixSolver(matrix.Program(), tracker.EvictCosts, config.ReclaimMinimal)
-	result := s.Solve("a", []string{"b", "c"}, nil)
+	result := s.Solve("a", []string{"b", "c"}, nil, nil)
 	if result.SetName != "a_with_b" {
 		t.Errorf("SetName=%q want a_with_b (slow b is pricier to evict)", result.SetName)
 	}

@@ -68,8 +68,9 @@ type groupSwapper struct {
 }
 
 // The group policy evicts its whole swap set deterministically; there is no
-// candidate space for the pending queue to shape, so upcoming is ignored.
-func (p *groupSwapper) EvictionFor(target string, running, _ []string) []string {
+// candidate space for the pending queue to shape, so upcoming and reserved
+// are ignored.
+func (p *groupSwapper) EvictionFor(target string, running, _, _ []string) []string {
 	tg := p.modelToGroup[target]
 	tgCfg := p.config.Routing.Router.Settings.Groups[tg]
 

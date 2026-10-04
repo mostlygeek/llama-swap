@@ -73,12 +73,14 @@ func NewMatrix(conf config.Config, logs *logmon.Group) (*Matrix, error) {
 type matrixSwapper struct {
 	solver *matrixSolver
 	logger *logmon.Monitor
-	// lastUpcoming carries the pending queue from EvictionFor into the
-	// immediate OnSwapStart re-solve: queue reclaim bypasses the decision
-	// cache, so OnSwapStart must re-solve against the same queue EvictionFor
-	// decided on. FIFO calls the two back-to-back on the event-loop
-	// goroutine, so the last value is the right one.
+	// lastUpcoming and lastReserved carry the queue and the in-flight swap
+	// targets from EvictionFor into the immediate OnSwapStart re-solve:
+	// decisions that depend on them bypass the decision cache, so
+	// OnSwapStart must re-solve against the same picture EvictionFor decided
+	// on. FIFO calls the two back-to-back on the event-loop goroutine, so
+	// the last values are the right ones.
 	lastUpcoming []string
+	lastReserved []string
 
 	lastTarget  string
 	lastRunning []string
@@ -89,17 +91,22 @@ type matrixSwapper struct {
 // cacheable reports whether the decision is a pure function of (target,
 // running) and may be cached between EvictionFor and OnSwapStart. A
 // queue-reclaim decision depends on the pending queue (lastUpcoming, which
-// the cache key does not cover). Queue reclaim with an empty queue behaves
+// the cache key does not cover), and a decision with in-flight swap targets
+// reserved depends on the active set (lastReserved, which it does not
+// cover). Queue reclaim with an empty queue and no reserved models behaves
 // as minimal and is cacheable again.
 func (p *matrixSwapper) cacheable() bool {
+	if len(p.lastReserved) > 0 {
+		return false
+	}
 	return p.solver.reclaim == config.ReclaimMinimal || len(p.lastUpcoming) == 0
 }
 
-func (p *matrixSwapper) solve(target string, running, upcoming []string) solveResult {
+func (p *matrixSwapper) solve(target string, running, upcoming, reserved []string) solveResult {
 	if p.cacheable() && p.lastValid && p.lastTarget == target && slices.Equal(p.lastRunning, running) {
 		return p.lastResult
 	}
-	result := p.solver.Solve(target, running, upcoming)
+	result := p.solver.Solve(target, running, upcoming, reserved)
 	if p.cacheable() {
 		p.lastTarget = target
 		p.lastRunning = slices.Clone(running)
@@ -109,17 +116,27 @@ func (p *matrixSwapper) solve(target string, running, upcoming []string) solveRe
 	return result
 }
 
-func (p *matrixSwapper) EvictionFor(target string, running, upcoming []string) []string {
+func (p *matrixSwapper) EvictionFor(target string, running, upcoming, reserved []string) []string {
 	p.lastUpcoming = upcoming
-	return p.solve(target, running, upcoming).Evict
+	p.lastReserved = reserved
+	return p.solve(target, running, upcoming, reserved).Evict
 }
 
 func (p *matrixSwapper) OnSwapStart(target string, running []string) {
-	result := p.solve(target, running, p.lastUpcoming)
+	result := p.solve(target, running, p.lastUpcoming, p.lastReserved)
 	switch {
 	case len(result.Evict) > 0:
-		p.logger.Infof("matrix: model=%s set=%s dsl=%q evict=%v target=%v cost=%d",
-			target, result.SetName, result.DSL, result.Evict, result.TargetSet, result.TotalCost)
+		// The reserved list explains the picture the decision was made
+		// against: which models were loading (and therefore protected) when
+		// the idle model was turned over. It is only printed when non-empty
+		// — with no in-flight swaps there is nothing to explain.
+		if len(p.lastReserved) > 0 {
+			p.logger.Infof("matrix: model=%s set=%s dsl=%q evict=%v target=%v cost=%d reserved=%v",
+				target, result.SetName, result.DSL, result.Evict, result.TargetSet, result.TotalCost, p.lastReserved)
+		} else {
+			p.logger.Infof("matrix: model=%s set=%s dsl=%q evict=%v target=%v cost=%d",
+				target, result.SetName, result.DSL, result.Evict, result.TargetSet, result.TotalCost)
+		}
 	case len(running) == 0:
 		p.logger.Infof("matrix: model=%s starting (no models running)", target)
 	default:

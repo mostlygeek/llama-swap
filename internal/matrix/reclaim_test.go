@@ -156,3 +156,51 @@ func TestProgram_SolveRankSumsDoNotWrap(t *testing.T) {
 		t.Fatalf("TotalCost=%d want 1", result.TotalCost)
 	}
 }
+
+// A reserved model is loading (an in-flight swap's target), not idle: even
+// though it is the cheapest to reload, it must not be evicted while an idle
+// unreserved alternative exists.
+func TestProgram_SolveReservedNeverEvictedWhenIdleExists(t *testing.T) {
+	p := newReclaimProgram(t)
+	result := p.Solve("t", []string{"a", "b", "c"}, SolveOptions{
+		// b is reserved and the cheapest; a and c are idle.
+		EvictCosts: map[string]int{"a": 100, "b": 1, "c": 100},
+		Reserved:   []string{"b"},
+	})
+	if len(result.Evict) != 1 {
+		t.Fatalf("Evict=%v want exactly one eviction", result.Evict)
+	}
+	if result.Evict[0] == "b" {
+		t.Fatalf("Evict=%v must not evict reserved (loading) b while idle a/c exist", result.Evict)
+	}
+}
+
+// When every candidate must evict a reserved model there is no idle slot:
+// the solver falls back to the plain ranking (cheapest reserved model), and
+// the scheduler's collision check parks the request until a slot frees up.
+func TestProgram_SolveReservedFallbackWhenNoIdleExists(t *testing.T) {
+	p := newReclaimProgram(t)
+	result := p.Solve("t", []string{"a", "b", "c"}, SolveOptions{
+		EvictCosts: map[string]int{"a": 1, "b": 2, "c": 3},
+		Reserved:   []string{"a", "b", "c"},
+	})
+	if !reflect.DeepEqual(result.Evict, []string{"a"}) {
+		t.Fatalf("Evict=%v want [a] (plain ranking fallback; the scheduler queues the request)", result.Evict)
+	}
+}
+
+// Reserved and queue reclaim compose: the queued model is protected by the
+// charged cost and the reserved (loading) model is protected by the
+// reservation, so the single eviction lands on the remaining idle model.
+func TestProgram_SolveReservedComposesWithQueueReclaim(t *testing.T) {
+	p := newReclaimProgram(t)
+	result := p.Solve("t", []string{"a", "b", "c"}, SolveOptions{
+		Reclaim:    ReclaimQueue,
+		EvictCosts: map[string]int{"a": 1, "b": 10, "c": 1},
+		Upcoming:   []string{"b"}, // b is queued and running
+		Reserved:   []string{"c"}, // c is loading
+	})
+	if !reflect.DeepEqual(result.Evict, []string{"a"}) {
+		t.Fatalf("Evict=%v want [a] (queued b protected, reserved c protected)", result.Evict)
+	}
+}

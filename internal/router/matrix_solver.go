@@ -28,10 +28,14 @@ type solveResult = matrixdsl.Decision
 // Solve decides the evictions for requestedModel among runningModels.
 // upcoming is the pending request queue (excluding requestedModel); it is
 // consulted only when the solver was built with the queue reclaim objective.
-func (s *matrixSolver) Solve(requestedModel string, runningModels []string, upcoming []string) solveResult {
+// reserved are the running models in-flight swaps have claimed as their
+// target: loading, not idle, and never evicted while an idle alternative
+// exists.
+func (s *matrixSolver) Solve(requestedModel string, runningModels []string, upcoming, reserved []string) solveResult {
 	return s.program.Solve(requestedModel, runningModels, matrixdsl.SolveOptions{
 		EvictCosts: s.costs(runningModels),
 		Reclaim:    s.reclaim,
 		Upcoming:   upcoming,
+		Reserved:   reserved,
 	})
 }
