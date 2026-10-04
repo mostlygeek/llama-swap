@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -194,6 +195,132 @@ func TestStore_CapturesInMemoryStoreAllowsCapturesPath(t *testing.T) {
 
 	require.NotNil(t, st.Captures())
 	assert.True(t, st.IsInMemory())
+}
+
+// databaseIDIn reads a file's meta.database_id directly.
+func databaseIDIn(t *testing.T, path string) string {
+	t.Helper()
+
+	db := openRaw(t, path)
+	var id string
+	require.NoError(t, db.QueryRowContext(context.Background(),
+		`SELECT value FROM meta WHERE key = 'database_id'`).Scan(&id))
+
+	return id
+}
+
+// The activity and captures files must record the same identity.
+func TestStore_DatabasesShareIdentity(t *testing.T) {
+	dir := t.TempDir()
+	activityPath := filepath.Join(dir, "activity.db")
+	capturesPath := filepath.Join(dir, "captures.db")
+
+	st, err := New(Options{
+		Path:             activityPath,
+		CapturesPath:     capturesPath,
+		CapturesMaxBytes: 1 << 20,
+	})
+	require.NoError(t, err)
+	require.NoError(t, st.Close())
+
+	activityID := databaseIDIn(t, activityPath)
+	capturesID := databaseIDIn(t, capturesPath)
+	assert.NotEmpty(t, activityID)
+	assert.Equal(t, activityID, capturesID)
+}
+
+// A captures file from a different activity database must be moved aside and
+// replaced by a fresh one.
+func TestStore_MismatchedCapturesDatabaseRotatedAside(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	capturesPath := filepath.Join(dir, "captures.db")
+	activityPath := filepath.Join(dir, "activity.db")
+
+	first, err := New(Options{
+		Path:             activityPath,
+		CapturesPath:     capturesPath,
+		CapturesMaxBytes: 1 << 20,
+	})
+	require.NoError(t, err)
+	require.NoError(t, first.Captures().Put(ctx, 1, []byte("old")))
+	require.NoError(t, first.Close())
+
+	// A brand-new activity database paired with the stale captures file.
+	recreatedActivityPath := filepath.Join(dir, "activity-recreated.db")
+	second, err := New(Options{
+		Path:             recreatedActivityPath,
+		CapturesPath:     capturesPath,
+		CapturesMaxBytes: 1 << 20,
+	})
+	require.NoError(t, err)
+	defer second.Close()
+
+	_, err = os.Stat(capturesPath + ".1")
+	require.NoError(t, err, "the mismatched captures file should move to captures.db.1")
+
+	_, found, err := second.Captures().Get(ctx, 1)
+	require.NoError(t, err)
+	assert.False(t, found, "a fresh captures database must not expose the old capture")
+	assert.Equal(t, databaseIDIn(t, recreatedActivityPath), databaseIDIn(t, capturesPath))
+}
+
+// A deleted captures file is a missing file, not a mismatched one: it is
+// recreated in place and adopts the activity database's identity.
+func TestStore_DeletedCapturesDatabaseIsRecreated(t *testing.T) {
+	dir := t.TempDir()
+	activityPath := filepath.Join(dir, "activity.db")
+	capturesPath := filepath.Join(dir, "captures.db")
+
+	first, err := New(Options{
+		Path:             activityPath,
+		CapturesPath:     capturesPath,
+		CapturesMaxBytes: 1 << 20,
+	})
+	require.NoError(t, err)
+	require.NoError(t, first.Close())
+
+	require.NoError(t, os.Remove(capturesPath))
+
+	second, err := New(Options{
+		Path:             activityPath,
+		CapturesPath:     capturesPath,
+		CapturesMaxBytes: 1 << 20,
+	})
+	require.NoError(t, err)
+	defer second.Close()
+
+	if _, err := os.Stat(capturesPath + ".1"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("a deleted captures database must be recreated in place, not moved aside")
+	}
+	assert.Equal(t, databaseIDIn(t, activityPath), databaseIDIn(t, capturesPath))
+}
+
+// Rotation must not overwrite an existing aside file.
+func TestStore_RotationUsesLowestFreeSuffix(t *testing.T) {
+	dir := t.TempDir()
+	capturesPath := filepath.Join(dir, "captures.db")
+
+	first, err := New(Options{
+		Path:             filepath.Join(dir, "activity-a.db"),
+		CapturesPath:     capturesPath,
+		CapturesMaxBytes: 1 << 20,
+	})
+	require.NoError(t, err)
+	require.NoError(t, first.Close())
+
+	require.NoError(t, os.WriteFile(capturesPath+".1", []byte("occupied"), 0o600))
+
+	second, err := New(Options{
+		Path:             filepath.Join(dir, "activity-b.db"),
+		CapturesPath:     capturesPath,
+		CapturesMaxBytes: 1 << 20,
+	})
+	require.NoError(t, err)
+	defer second.Close()
+
+	_, err = os.Stat(capturesPath + ".2")
+	require.NoError(t, err, "rotation must skip an existing captures.db.1")
 }
 
 func tableNames(t *testing.T, path string) []string {

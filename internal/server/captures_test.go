@@ -85,14 +85,15 @@ func TestServer_CaptureDisabled(t *testing.T) {
 
 // newCapturesStore builds a store with persistent captures and a monitor
 // reading it, with the legacy captureBuffer set too: the repository must win.
-func newCapturesStore(t *testing.T) (*metricsMonitor, store.Store, string) {
+func newCapturesStore(t *testing.T) (*metricsMonitor, store.Store, string, string) {
 	t.Helper()
 	const captureBufferMB = 5
 
 	dir := t.TempDir()
+	activityPath := filepath.Join(dir, "activity.db")
 	capturesPath := filepath.Join(dir, "captures.db")
 	st, err := sqlite.New(sqlite.Options{
-		Path:             filepath.Join(dir, "activity.db"),
+		Path:             activityPath,
 		CapturesPath:     capturesPath,
 		CapturesMaxBytes: 1 << 20,
 	})
@@ -105,14 +106,14 @@ func newCapturesStore(t *testing.T) (*metricsMonitor, store.Store, string) {
 		}
 	})
 
-	return newMetricsMonitor(logmon.NewWriter(io.Discard), 10, captureBufferMB, st), st, capturesPath
+	return newMetricsMonitor(logmon.NewWriter(io.Discard), 10, captureBufferMB, st), st, capturesPath, activityPath
 }
 
 // A capture must be readable by a new reader over the same files.
 func TestServer_CapturesUseThePersistentRepository(t *testing.T) {
 	ctx := context.Background()
 
-	mm, st, capturesPath := newCapturesStore(t)
+	mm, st, capturesPath, activityPath := newCapturesStore(t)
 	require.NotNil(t, mm.captures)
 	require.Same(t, st.Captures(), mm.captures, "the monitor must write through store.captures, not the legacy buffer")
 
@@ -131,7 +132,7 @@ func TestServer_CapturesUseThePersistentRepository(t *testing.T) {
 
 	// A second reader over the same files, standing in for the next process.
 	reopen, err := sqlite.New(sqlite.Options{
-		Path:             filepath.Join(t.TempDir(), "activity.db"),
+		Path:             activityPath,
 		CapturesPath:     capturesPath,
 		CapturesMaxBytes: 1 << 20,
 	})
