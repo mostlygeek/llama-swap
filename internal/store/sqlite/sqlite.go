@@ -10,6 +10,8 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/pressly/goose/v3"
@@ -120,6 +122,11 @@ func (s *Store) openCaptures(ctx context.Context, capturesPath, activityDSN stri
 // openDatabase opens one SQLite file with the pragmas every llama-swap
 // database uses, then applies the migrations embedded under dir.
 func openDatabase(ctx context.Context, dsn string, migrations embed.FS, dir string) (*sql.DB, error) {
+	if dsn != ":memory:" {
+		if err := os.MkdirAll(filepath.Dir(dsn), 0755); err != nil {
+			return nil, fmt.Errorf("create sqlite store directory: %w", err)
+		}
+	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite store: %w", err)

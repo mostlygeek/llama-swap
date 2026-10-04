@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -112,12 +113,26 @@ store:
 	})
 
 	t.Run("unwritable captures directory rejected", func(t *testing.T) {
+		// A missing directory is created on startup; only a directory that
+		// exists and cannot be written is a config error.
+		if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+			t.Skip("directory permissions do not restrict this test")
+		}
 		dir := t.TempDir()
+		sub := filepath.Join(dir, "sub")
+		require.NoError(t, os.Mkdir(sub, 0o500))
 		_, err := LoadConfigFromReader(strings.NewReader(
-			capturesYAML(filepath.Join(dir, "activity.db"), "/no/such/dir/captures.db")))
+			capturesYAML(filepath.Join(dir, "activity.db"), filepath.Join(sub, "captures.db"))))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "store.captures.path")
 		assert.Contains(t, err.Error(), "not writable")
+	})
+
+	t.Run("missing captures directory is created on startup", func(t *testing.T) {
+		dir := t.TempDir()
+		_, err := LoadConfigFromReader(strings.NewReader(
+			capturesYAML(filepath.Join(dir, "activity.db"), filepath.Join(dir, "sub", "captures.db"))))
+		require.NoError(t, err, "a missing parent directory must not fail config loading")
 	})
 
 	t.Run("sharing the activity database is rejected", func(t *testing.T) {

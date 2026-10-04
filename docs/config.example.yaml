@@ -52,6 +52,7 @@ logToStdout: "proxy"
 # - optional, default: in-memory sqlite database capped by metricsMaxInMemory
 # - path is a sqlite database file path
 # - file-backed sqlite keeps activity logs across restarts
+# - a missing parent directory is created on startup
 # - captures: stores request/response captures in their own sqlite file so they
 #   survive restarts. It requires path, it supersedes captureBuffer and
 #   metricsMaxInMemory, and naming those legacy keys alongside it is a config

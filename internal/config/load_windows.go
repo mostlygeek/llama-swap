@@ -31,8 +31,12 @@ func validateDatabasePath(path string, key string) error {
 		}
 		// File does not exist; ensure the parent directory is writable by
 		// probing it with a temporary file. os.Access is unreliable on
-		// Windows because it only reflects the read-only attribute.
+		// Windows because it only reflects the read-only attribute. A missing
+		// directory is created when the store opens.
 		dir := filepath.Dir(path)
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			return nil
+		}
 		if err := checkDirWritableWindows(dir); err != nil {
 			return fmt.Errorf("%s: directory %s is not writable: %w", key, dir, err)
 		}

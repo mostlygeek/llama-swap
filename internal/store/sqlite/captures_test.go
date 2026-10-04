@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -48,6 +49,26 @@ func rowCount(t *testing.T, path string) int {
 		`SELECT COUNT(*) FROM captures`).Scan(&count))
 
 	return count
+}
+
+func TestStore_NewCreatesMissingDirectories(t *testing.T) {
+	dir := t.TempDir()
+	activityPath := filepath.Join(dir, "a", "b", "activity.db")
+	capturesPath := filepath.Join(dir, "c", "d", "captures.db")
+
+	st, err := New(Options{
+		Path:             activityPath,
+		CapturesPath:     capturesPath,
+		CapturesMaxBytes: 1 << 20,
+	})
+	require.NoError(t, err)
+	require.NoError(t, st.Captures().Put(context.Background(), 1, []byte("x")))
+	require.NoError(t, st.Close())
+
+	for _, path := range []string{activityPath, capturesPath} {
+		_, err := os.Stat(path)
+		require.NoError(t, err, path)
+	}
 }
 
 func TestStore_CapturesDisabledWithoutPath(t *testing.T) {

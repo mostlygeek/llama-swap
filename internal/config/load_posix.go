@@ -30,8 +30,12 @@ func validateDatabasePath(path string, key string) error {
 		if !os.IsNotExist(err) {
 			return fmt.Errorf("%s: %w", key, err)
 		}
-		// File does not exist; ensure the parent directory is writable.
+		// File does not exist; ensure the parent directory is writable. A
+		// missing directory is created when the store opens.
 		dir := filepath.Dir(path)
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			return nil
+		}
 		if err := unix.Access(dir, unix.W_OK); err != nil {
 			return fmt.Errorf("%s: directory %s is not writable: %w", key, dir, err)
 		}

@@ -233,7 +233,7 @@
                 "path": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "SQLite database file path for persistent activity logs."
+                    "description": "SQLite database file path for persistent activity logs. A missing parent directory is created on startup."
                 },
                 "captures": {
                     "type": "object",
@@ -241,7 +241,7 @@
                         "path": {
                             "type": "string",
                             "minLength": 1,
-                            "description": "SQLite database file path for request/response captures. Must be a different file than store.path."
+                            "description": "SQLite database file path for request/response captures. Must be a different file than store.path. A missing parent directory is created on startup."
                         },
                         "maxSizeMB": {
                             "type": "integer",

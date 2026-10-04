@@ -95,13 +95,12 @@ store:
 		assert.Equal(t, storePath, cfg.Store.Path)
 	})
 
-	t.Run("non-existent directory rejected", func(t *testing.T) {
+	t.Run("missing directory is created on startup", func(t *testing.T) {
 		_, err := LoadConfigFromReader(strings.NewReader(`
 store:
-  path: /no/such/dir/llama-swap.db
+  path: ` + filepath.Join(t.TempDir(), "sub", "llama-swap.db") + `
 `))
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "not writable")
+		require.NoError(t, err, "a missing parent directory must not fail config loading")
 	})
 
 	t.Run("empty path rejected", func(t *testing.T) {
