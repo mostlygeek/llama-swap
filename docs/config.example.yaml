@@ -56,8 +56,8 @@ logToStdout: "proxy"
 # - captures: stores request/response captures in their own sqlite file so they
 #   survive restarts. It requires path, it supersedes captureBuffer and
 #   metricsMaxInMemory, and naming those legacy keys alongside it is a config
-#   error. maxSizeMB is the total budget: oldest captures are evicted to make
-#   room once it is exceeded.
+#   error. maxSizeMB is the total budget: the oldest captures, by write time,
+#   are evicted to make room once it is exceeded.
 # store:
 #   path: /path/to/file.sqlite
 #   captures:

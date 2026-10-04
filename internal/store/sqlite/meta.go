@@ -6,12 +6,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"os"
 )
 
-// databaseIDKey names the meta row that identifies which activity database a
-// file belongs to. The activity and captures databases write the same value;
-// a mismatch means one of the two files was replaced.
+// databaseIDKey names the meta row that identifies an activity database. The
+// captures table tags every row with it, so one captures file can hold the
+// captures of several activity databases without their ids ever naming the
+// same request.
 const databaseIDKey = "database_id"
 
 // ensureDatabaseID returns db's database id, creating one the first time the
@@ -51,54 +51,11 @@ func readDatabaseID(ctx context.Context, db *sql.DB) (string, bool, error) {
 	return id, true, nil
 }
 
-// writeDatabaseID records id, replacing any existing value.
-func writeDatabaseID(ctx context.Context, db *sql.DB, id string) error {
-	if _, err := db.ExecContext(ctx,
-		`INSERT INTO meta (key, value) VALUES (?, ?)
-		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-		databaseIDKey, id,
-	); err != nil {
-		return fmt.Errorf("write database id: %w", err)
-	}
-	return nil
-}
-
-// newDatabaseID returns a random identifier for a store's database pair.
+// newDatabaseID returns a random identifier for an activity database.
 func newDatabaseID() (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", fmt.Errorf("generate database id: %w", err)
 	}
 	return fmt.Sprintf("%x", b), nil
-}
-
-// rotateDatabaseFile moves path, and any SQLite sidecar files, to the lowest
-// unused "<path>.N" and returns the new path.
-func rotateDatabaseFile(path string) (string, error) {
-	var target string
-	for i := 1; ; i++ {
-		candidate := fmt.Sprintf("%s.%d", path, i)
-		switch _, err := os.Stat(candidate); {
-		case errors.Is(err, os.ErrNotExist):
-			target = candidate
-		case err != nil:
-			return "", fmt.Errorf("rotate database %s: %w", path, err)
-		}
-		if target != "" {
-			break
-		}
-	}
-
-	if err := os.Rename(path, target); err != nil {
-		return "", fmt.Errorf("rotate database %s: %w", path, err)
-	}
-	for _, suffix := range []string{"-wal", "-shm"} {
-		if _, err := os.Stat(path + suffix); err != nil {
-			continue
-		}
-		if err := os.Rename(path+suffix, target+suffix); err != nil {
-			return "", fmt.Errorf("rotate database %s%s: %w", path, suffix, err)
-		}
-	}
-	return target, nil
 }

@@ -10,7 +10,6 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -77,8 +76,9 @@ func New(opts Options) (*Store, error) {
 		activity: &activityRepository{db: db},
 		cache:    &cacheRepository{db: db},
 	}
-	// Every database in the pair carries this id; a captures file with a
-	// different one belongs to another activity database and is set aside.
+	// Captures are tagged with this id, so one captures file can hold the rows
+	// of several activity databases without their ids ever naming the same
+	// request.
 	activityID, err := ensureDatabaseID(ctx, db)
 	if err != nil {
 		db.Close()
@@ -101,10 +101,14 @@ func New(opts Options) (*Store, error) {
 	return s, nil
 }
 
-// openCaptures opens the capture database and enforces its size budget. The
-// captures file must carry the same database id as the activity database; a
-// mismatch means the two do not belong together, so the captures file is moved
-// aside and a fresh one is created.
+// openCaptures opens the capture database and enforces its size budget.
+//
+// The captures file is shared by every activity database that has used it:
+// each row carries the id of the activity database that wrote it, so ids from
+// two activity databases never name the same request. Nothing is moved aside
+// when the activity database changes, which is what makes a hot reload safe:
+// the new store is built while the old one is still serving requests, so a
+// rename would move the file out from under a store writing to it.
 func (s *Store) openCaptures(ctx context.Context, capturesPath, activityDSN, activityID string, opts Options) error {
 	if capturesPath == activityDSN {
 		return fmt.Errorf("open captures: %s is also the activity database; captures need their own file", capturesPath)
@@ -115,41 +119,10 @@ func (s *Store) openCaptures(ctx context.Context, capturesPath, activityDSN, act
 		return err
 	}
 
-	capturesID, found, err := readDatabaseID(ctx, capturesDB)
-	if err != nil {
-		capturesDB.Close()
-		return err
-	}
-	if found && capturesID != activityID {
-		if err := capturesDB.Close(); err != nil {
-			return fmt.Errorf("close mismatched captures database: %w", err)
-		}
-		rotated, err := rotateDatabaseFile(capturesPath)
-		if err != nil {
-			return err
-		}
-		slog.Warn("captures database does not belong to the activity database; moved it aside and started a new one",
-			"captures_path", capturesPath,
-			"moved_to", rotated,
-			"captures_database_id", capturesID,
-			"activity_database_id", activityID,
-		)
-		if capturesDB, err = openDatabase(ctx, capturesPath, captureMigrationFS, "capture_migrations"); err != nil {
-			return err
-		}
-		found = false
-	}
-	if !found {
-		// A fresh captures database adopts the activity database's identity.
-		if err := writeDatabaseID(ctx, capturesDB, activityID); err != nil {
-			capturesDB.Close()
-			return err
-		}
-	}
-
 	repo := &captureRepository{
-		db:       capturesDB,
-		maxBytes: opts.CapturesMaxBytes,
+		db:         capturesDB,
+		databaseID: activityID,
+		maxBytes:   opts.CapturesMaxBytes,
 	}
 	// Enforce a budget lowered while the process was not running.
 	if err := repo.enforceBudget(ctx); err != nil {

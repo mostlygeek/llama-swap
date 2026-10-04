@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/mostlygeek/llama-swap/internal/store"
 )
@@ -16,6 +17,11 @@ import (
 // its high-water mark.
 type captureRepository struct {
 	db *sql.DB
+	// databaseID is the id of the activity database this repository's ids come
+	// from. Every row it writes carries it and every read is limited to it, so
+	// ids from two activity databases can share one captures file without ever
+	// naming the same request.
+	databaseID string
 	// maxBytes is the total budget for stored blob bytes; zero means no
 	// limit.
 	maxBytes int64
@@ -36,11 +42,12 @@ func (r *captureRepository) Put(ctx context.Context, id int, data []byte) error 
 	defer tx.Rollback()
 
 	// A repeated id replaces rather than conflicts.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM captures WHERE id = ?`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM captures WHERE db = ? AND id = ?`, r.databaseID, id); err != nil {
 		return fmt.Errorf("put capture: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO captures (id, data, size) VALUES (?, ?, ?)`, id, data, size,
+		`INSERT INTO captures (db, id, created, data, size) VALUES (?, ?, ?, ?, ?)`,
+		r.databaseID, id, time.Now().Unix(), data, size,
 	); err != nil {
 		return fmt.Errorf("put capture: %w", err)
 	}
@@ -53,7 +60,7 @@ func (r *captureRepository) Put(ctx context.Context, id int, data []byte) error 
 
 func (r *captureRepository) Get(ctx context.Context, id int) ([]byte, bool, error) {
 	var data []byte
-	err := r.db.QueryRowContext(ctx, `SELECT data FROM captures WHERE id = ?`, id).Scan(&data)
+	err := r.db.QueryRowContext(ctx, `SELECT data FROM captures WHERE db = ? AND id = ?`, r.databaseID, id).Scan(&data)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil
 	}
@@ -77,7 +84,8 @@ func (r *captureRepository) Has(ctx context.Context, ids []int) (map[int]bool, e
 	}
 
 	rows, err := r.db.QueryContext(ctx,
-		fmt.Sprintf(`SELECT id FROM captures WHERE id IN (%s)`, placeholders), args...,
+		fmt.Sprintf(`SELECT id FROM captures WHERE db = ? AND id IN (%s)`, placeholders),
+		append([]any{r.databaseID}, args...)...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("has capture: %w", err)
@@ -130,8 +138,10 @@ func (r *captureRepository) storedBytes(ctx context.Context) (int64, error) {
 	return stored, err
 }
 
-// evictOldest deletes the oldest captures, by id, until at least excess
-// bytes are freed.
+// evictOldest deletes the oldest captures until at least excess bytes are
+// freed. Write time orders the rows, not id: a captures file holds rows from
+// every activity database that has used it, and ids restart at 1 in each of
+// them. Rows written in the same second are freed in insert order.
 func (r *captureRepository) evictOldest(ctx context.Context, excess int64) (int64, error) {
 	if excess <= 0 {
 		return 0, nil
@@ -145,18 +155,20 @@ func (r *captureRepository) evictOldest(ctx context.Context, excess int64) (int6
 
 	var freed int64
 	for freed < excess {
-		var id int
+		var rowid int64
 		var size int64
+		// rowid is the insert order within the file, which breaks the ties a
+		// one-second timestamp leaves.
 		err := tx.QueryRowContext(ctx,
-			`SELECT id, size FROM captures ORDER BY id LIMIT 1`,
-		).Scan(&id, &size)
+			`SELECT rowid, size FROM captures ORDER BY created ASC, rowid ASC LIMIT 1`,
+		).Scan(&rowid, &size)
 		if errors.Is(err, sql.ErrNoRows) {
 			break
 		}
 		if err != nil {
 			return 0, err
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM captures WHERE id = ?`, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM captures WHERE rowid = ?`, rowid); err != nil {
 			return 0, err
 		}
 		freed += size

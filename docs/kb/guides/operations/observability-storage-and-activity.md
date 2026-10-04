@@ -64,15 +64,20 @@ marks and opens them exactly as it does for in-memory captures.
 - `store.captures.path` must be a different file than `store.path`, and
   `store.path` must be set: captures point at activity rows, and an in-memory
   activity log is pruned.
-- Both files record the same `database_id`. If the captures file belongs to a
-  different activity database (either file was deleted or replaced), llama-swap
-  logs a warning, moves the captures file aside to `captures.sqlite.1` (the
-  lowest free number), and starts a fresh one. This stops an activity row from
-  opening another request's capture.
+- The captures file is shared, not paired. It keeps the captures of every
+  activity database that has used it, and each capture records the `database_id`
+  of the activity database its Activity row lives in, so ids from two activity
+  databases never name the same request.
+- Nothing is renamed at startup, which is what makes a hot reload safe: a reload
+  that changes `store.path` builds the new store while the old one is still
+  serving requests, and both write the same file, each reading only its own rows.
+  Captures left behind by an activity database you deleted are invisible, and
+  the budget prunes them as the oldest rows in the file.
 - A missing parent directory is created on startup, for both files.
-- `maxSizeMB` is the whole budget. Once it is exceeded, the oldest captures are
-  evicted to make room. A single capture larger than the whole budget is
-  skipped rather than stored.
+- `maxSizeMB` is the whole budget, counted across every activity database's
+  captures. Once it is exceeded, the oldest captures are pruned first, by write
+  time. A single capture larger than the whole budget is skipped rather than
+  stored.
 - `store.captures` supersedes `captureBuffer` and `metricsMaxInMemory`. Naming
   either one alongside it is a config error: llama-swap refuses to start rather
   than guess which setting you meant.
