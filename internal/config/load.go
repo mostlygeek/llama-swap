@@ -336,7 +336,7 @@ func validateStoreCaptures(store *Store, raw map[string]any) error {
 
 	for _, key := range legacyCaptureKeys {
 		if _, set := raw[key]; set {
-			return fmt.Errorf("store.captures supersedes the legacy %s setting; remove %s, or remove the store.captures section", key, key)
+			return fmt.Errorf("store.captures and %s are mutually exclusive config options; remove %s, or remove the store.captures section", key, key)
 		}
 	}
 

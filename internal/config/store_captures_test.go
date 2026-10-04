@@ -78,7 +78,7 @@ store:
 				_, err := LoadConfigFromReader(strings.NewReader(legacy +
 					capturesYAML(filepath.Join(dir, "activity.db"), filepath.Join(dir, "captures.db"))))
 				require.Error(t, err)
-				assert.Contains(t, err.Error(), "store.captures supersedes the legacy")
+				assert.Contains(t, err.Error(), "mutually exclusive")
 			})
 		}
 	})
