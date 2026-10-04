@@ -1,0 +1,12 @@
+# reclaim is a closed set (minimal | queue); anything else fails rendering
+# instead of dying in llama-swap's config validation at startup.
+config:
+  matrix:
+    builder: gpu-budget
+    budget: 2
+    reclaim: aggressive
+  defaults:
+    gpu: [amd.com/gpu=1]
+  models:
+    - id: llm-a
+      args: --model /models/a.gguf

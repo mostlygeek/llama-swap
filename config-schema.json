@@ -152,6 +152,12 @@
                     "additionalProperties": {
                         "type": "string"
                     }
+                },
+                "reclaim": {
+                    "type": "string",
+                    "enum": ["minimal", "queue"],
+                    "default": "minimal",
+                    "description": "Eviction objective. minimal (default) minimizes total eviction cost, ignoring the pending request queue. queue: while the queue is non-empty, eviction cost is charged only for models the queue references, so idle unqueued models turn over first and models the queue still needs are protected. The evict count stays minimal either way."
                 }
             },
             "additionalProperties": false

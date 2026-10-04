@@ -2,6 +2,7 @@ package matrix
 
 import (
 	"fmt"
+	"math"
 	"sort"
 )
 
@@ -9,6 +10,41 @@ import (
 type Definition struct {
 	Name string
 	DSL  string
+}
+
+// Reclaim policies for the eviction objective. Both keep the evict list at
+// the minimal count — the models the chosen (always maximal, budget-sized)
+// set drops — so the fleet stays full and each queued connection meets
+// exactly one idle model. ReclaimMinimal (the default) orders candidates by
+// raw eviction cost. ReclaimQueue, used while the scheduler has a pending
+// queue of requests, charges eviction cost only for models the queue
+// references, so idle unqueued models turn over first and a model still in
+// the queue is protected: the queue drains one-for-one instead of churning
+// work that is about to run.
+const (
+	// ReclaimMinimal is the historical objective: minimise total eviction
+	// cost. Upcoming is ignored.
+	ReclaimMinimal = "minimal"
+	// ReclaimQueue charges eviction cost only for models referenced by the
+	// pending queue, steering the single (minimal) eviction toward idle
+	// unqueued models and away from models the queue still needs. It does
+	// not widen the evict list. With an empty queue it behaves as
+	// ReclaimMinimal.
+	ReclaimQueue = "queue"
+)
+
+// SolveOptions configures one Solve call.
+type SolveOptions struct {
+	// EvictCosts is the relative cost of evicting a running model; models
+	// not listed cost 1.
+	EvictCosts map[string]int
+	// Reclaim selects the eviction objective (ReclaimMinimal or
+	// ReclaimQueue; the empty string behaves as minimal).
+	Reclaim string
+	// Upcoming is the pending request queue as an ordered, de-duplicated
+	// list of model IDs. It is consulted only when Reclaim is ReclaimQueue;
+	// with an empty list ReclaimQueue behaves as ReclaimMinimal.
+	Upcoming []string
 }
 
 // Resolver maps a DSL identifier to a real model name.
@@ -37,7 +73,10 @@ type Decision struct {
 	TargetSet []string
 	SetName   string
 	DSL       string
-	TotalCost int
+	// TotalCost is the raw eviction cost of the evict list. int64 because
+	// per-model costs may be as large as int max (measured, saturated
+	// load-time costs) and the sum of several of them overflows int.
+	TotalCost int64
 }
 
 // Compile parses, validates, resolves, and links an ordered collection of DSL
@@ -219,7 +258,23 @@ func topologicalOrder(definitions []Definition, deps map[string][]string) ([]str
 // Solve chooses the compatible set with the lowest eviction cost. It performs
 // a fresh projection because the relevant model universe changes with the
 // running set supplied by the scheduler.
-func (p *Program) Solve(target string, running []string, evictionCosts map[string]int) Decision {
+//
+// Candidate sets are ordered, best first: (1) when ReclaimQueue is active, the
+// cost of evicting models the pending queue references — evicting only
+// unqueued models scores zero; (2) the raw eviction cost (the historical
+// objective). A residual exact tie keeps the first candidate in
+// set-definition order, so outcomes stay deterministic.
+//
+// The evict list is the models the winning set drops — never more. Every
+// candidate set is maximal (budget-sized), so the list is exactly the number
+// of slots the target's load refills: the fleet stays full and each queued
+// connection meets one idle model. The queue (ReclaimQueue) shapes only the
+// choice, steering the eviction toward idle unqueued models and protecting
+// models the queue still references; it does not widen the list. Because
+// different queued targets evict different idle models, the scheduler's
+// non-intersection check lets their swaps run in parallel, draining the
+// backlog one-for-one.
+func (p *Program) Solve(target string, running []string, opts SolveOptions) Decision {
 	if contains(running, target) {
 		setName, dsl := p.findContaining(running)
 		return Decision{
@@ -238,7 +293,19 @@ func (p *Program) Solve(target string, running []string, evictionCosts map[strin
 	// Skip every set when the target appears in no set's expression.
 	globalTargetBit, targetKnown := p.modelBits[target]
 
-	bestCost := -1
+	// Queue reclaim is active only with a non-empty queue; with an empty
+	// queue the objective (and the evict list) fall back to minimal.
+	queueReclaim := opts.Reclaim == ReclaimQueue && len(opts.Upcoming) > 0
+	var queued map[string]bool
+	if queueReclaim {
+		queued = make(map[string]bool, len(opts.Upcoming))
+		for _, model := range opts.Upcoming {
+			queued[model] = true
+		}
+	}
+
+	var best solveRank
+	bestValid := false
 	var bestSet *compiledSet
 	var bestState projectedState
 	for i := range p.sets {
@@ -251,14 +318,19 @@ func (p *Program) Solve(target string, running []string, evictionCosts map[strin
 				continue
 			}
 
-			cost := 0
+			rank := solveRank{}
 			for _, model := range running {
 				if !state.mask.has(evaluator.modelBits[model]) {
-					cost += evictionCost(evictionCosts, model)
+					c := evictionCost(opts.EvictCosts, model)
+					addCost(&rank.cost, c)
+					if queueReclaim && queued[model] {
+						addCost(&rank.charged, c)
+					}
 				}
 			}
-			if bestCost < 0 || cost < bestCost {
-				bestCost = cost
+			if !bestValid || rank.less(best, queueReclaim) {
+				best = rank
+				bestValid = true
 				bestSet = set
 				bestState = state
 			}
@@ -272,6 +344,13 @@ func (p *Program) Solve(target string, running []string, evictionCosts map[strin
 		}
 	}
 
+	// The evict list is the set complement only: the models the winning set
+	// drops. Because every candidate set is maximal (budget-sized), this is
+	// exactly the number of slots the target's load refills, so the fleet
+	// stays full and no slot is left idle. Under ReclaimQueue the queue does
+	// not widen this list; it only steers which idle models turn over (the
+	// charged cost above keeps queued models out of it) so the queue keeps
+	// draining one-for-one instead of the fleet collapsing.
 	var evict []string
 	for _, model := range running {
 		if !bestState.mask.has(evaluator.modelBits[model]) {
@@ -283,8 +362,39 @@ func (p *Program) Solve(target string, running []string, evictionCosts map[strin
 		TargetSet: flattenWitness(bestState.witness),
 		SetName:   bestSet.name,
 		DSL:       bestSet.dsl,
-		TotalCost: bestCost,
+		TotalCost: best.cost,
 	}
+}
+
+// solveRank scores one candidate set. Lower is better; the ordering depends
+// on the reclaim policy (see Solve). The sums are int64: measured costs are
+// saturated at int max per model, and a candidate can drop several of them.
+type solveRank struct {
+	// charged is the eviction cost of queued models (queue reclaim only).
+	charged int64
+	// cost is the raw eviction cost of every model the set drops.
+	cost int64
+}
+
+// addCost raises *dst by c, saturating at the int64 ceiling: measured costs
+// are saturated at int max per model, and two of them already exceed int64
+// max. The cap keeps the ordering total instead of wrapping it.
+func addCost(dst *int64, c int64) {
+	if c > math.MaxInt64-*dst {
+		*dst = math.MaxInt64
+		return
+	}
+	*dst += c
+}
+
+// less reports whether r orders before o. A false result on an exact tie
+// keeps the first candidate in set-definition order, so outcomes stay
+// deterministic.
+func (r solveRank) less(o solveRank, queueReclaim bool) bool {
+	if queueReclaim && r.charged != o.charged {
+		return r.charged < o.charged
+	}
+	return r.cost < o.cost
 }
 
 // CanContainAll reports whether one generated set contains every supplied model.
@@ -330,9 +440,9 @@ func (p *Program) findContaining(models []string) (string, string) {
 	return "", ""
 }
 
-func evictionCost(costs map[string]int, model string) int {
+func evictionCost(costs map[string]int, model string) int64 {
 	if cost, ok := costs[model]; ok {
-		return cost
+		return int64(cost)
 	}
 	return 1
 }

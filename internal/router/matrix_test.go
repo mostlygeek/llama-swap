@@ -31,7 +31,7 @@ func newTestMatrix(t *testing.T, conf config.Config, sets config.OrderedSets, ev
 	logger := logmon.NewWriter(io.Discard)
 	tracker := newLoadCostTracker(matrix.ResolvedEvictCosts(), logger)
 	swapper := &matrixSwapper{
-		solver: newMatrixSolver(matrix.Program(), tracker.EvictCosts),
+		solver: newMatrixSolver(matrix.Program(), tracker.EvictCosts, config.ReclaimMinimal),
 		logger: logger,
 	}
 	base, err := newBaseRouter("matrix", conf, processes, logger, swapper)
@@ -232,7 +232,7 @@ func TestMatrixSolver_TieBreakDefinitionOrder(t *testing.T) {
 
 	// No models running, request "a": both sets have cost 0 and contain a.
 	// Definition order: "first" wins.
-	result := s.Solve("a", nil)
+	result := s.Solve("a", nil, nil)
 	if result.SetName != "first" {
 		t.Errorf("SetName=%q want %q", result.SetName, "first")
 	}
@@ -248,7 +248,7 @@ func TestMatrixSolver_EvictCostsPreferred(t *testing.T) {
 		{Name: "a_with_b", DSL: "a & b"}, // would evict c (cost 1)
 	}, map[string]int{"b": 10, "c": 1}, "a", "b", "c")
 
-	result := s.Solve("a", []string{"b", "c"})
+	result := s.Solve("a", []string{"b", "c"}, nil)
 	if result.SetName != "a_with_b" {
 		t.Errorf("SetName=%q want %q (keep expensive b)", result.SetName, "a_with_b")
 	}
@@ -271,5 +271,63 @@ func newTestMatrixSolver(t *testing.T, sets config.OrderedSets, evictCosts map[s
 		t.Fatalf("ValidateMatrix: %v", err)
 	}
 	tracker := newLoadCostTracker(matrix.ResolvedEvictCosts(), logmon.NewWriter(io.Discard))
-	return newMatrixSolver(matrix.Program(), tracker.EvictCosts)
+	return newMatrixSolver(matrix.Program(), tracker.EvictCosts, config.ReclaimMinimal)
+}
+
+// TestMatrixSwapper_ReclaimQueueProtectsQueued verifies that queue reclaim
+// keeps the evict list at the minimal count (the budget-2 set drops two of
+// the three running models) while steering the choice away from a model the
+// queue still references; that the decision is not cached while the queue is
+// non-empty; and that an empty queue falls back to the cacheable minimal
+// behaviour.
+func TestMatrixSwapper_ReclaimQueueProtectsQueued(t *testing.T) {
+	models := map[string]config.ModelConfig{"t": {}, "a": {}, "b": {}, "c": {}, "d": {}}
+	matrix := &config.MatrixConfig{
+		Reclaim: config.ReclaimQueue,
+		Sets: config.OrderedSets{
+			{Name: "pool", DSL: "(t | a | b | c | d)"},
+			{Name: "all", DSL: "+pool & +pool"},
+		},
+	}
+	if err := config.ValidateMatrix(matrix, models); err != nil {
+		t.Fatalf("ValidateMatrix: %v", err)
+	}
+	tracker := newLoadCostTracker(matrix.ResolvedEvictCosts(), logmon.NewWriter(io.Discard))
+	sw := &matrixSwapper{
+		solver: newMatrixSolver(matrix.Program(), tracker.EvictCosts, config.ReclaimQueue),
+	}
+
+	// Budget 2: with a, b, c running and d queued (not running), the minimal
+	// set keeps the target plus one of a, b, c and evicts two. The queue does
+	// not widen the list.
+	evict := sw.EvictionFor("t", []string{"a", "b", "c"}, []string{"d"})
+	if len(evict) != 2 {
+		t.Fatalf("Evict=%v want exactly two evictions (minimal count, no extension)", evict)
+	}
+	if sw.lastValid {
+		t.Fatal("queue-reclaim decisions with a non-empty queue must not be cached")
+	}
+
+	// The queue changes: now a is queued and running, so a is protected and
+	// the two idle unqueued models turn over. The next decision must follow
+	// (no stale cache).
+	evict = sw.EvictionFor("t", []string{"a", "b", "c"}, []string{"a"})
+	if len(evict) != 2 {
+		t.Fatalf("Evict=%v want two evictions", evict)
+	}
+	for _, m := range evict {
+		if m == "a" {
+			t.Fatalf("Evict=%v must not evict queued model a", evict)
+		}
+	}
+
+	// Empty queue: minimal behaviour (the budget-2 set drops two of the three
+	// running models) and the cache engages.
+	evict = sw.EvictionFor("t", []string{"a", "b", "c"}, nil)
+	if len(evict) != 2 {
+		t.Fatalf("Evict=%v want exactly two evictions (empty queue is minimal)", evict)
+	}
+	if !sw.lastValid {
+		t.Fatal("queue-reclaim decisions with an empty queue should be cached")
+	}
 }

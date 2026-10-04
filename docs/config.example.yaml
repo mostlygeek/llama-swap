@@ -779,6 +779,17 @@ routing:
           # Vars are not required when using real model IDs.
           full: "llama-70B"
 
+        # reclaim: the eviction objective while requests are queued.
+        # - optional, default: "minimal"
+        # - "minimal": minimise total eviction cost; the pending request
+        #   queue is ignored
+        # - "queue": while the queue is non-empty, eviction cost is charged
+        #   only for models the queue references, so idle models nobody has
+        #   queued for turn over first and queued models are protected. The
+        #   evict count stays minimal either way; with an empty queue this
+        #   behaves exactly like "minimal"
+        # reclaim: queue
+
   # scheduler: how queued requests are ordered.
   # The default and only valid scheduler is "fifo"
   scheduler:

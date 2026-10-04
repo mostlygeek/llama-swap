@@ -31,7 +31,7 @@ type stubPlanner struct {
 	evict map[string][]string
 }
 
-func (s *stubPlanner) EvictionFor(target string, _ []string) []string {
+func (s *stubPlanner) EvictionFor(target string, _, _ []string) []string {
 	if s.evict == nil {
 		return nil
 	}

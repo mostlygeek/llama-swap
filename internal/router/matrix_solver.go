@@ -11,17 +11,27 @@ type matrixSolver struct {
 	// solve time, so measured costs (loadCostTracker) are always fresh
 	// rather than snapshotted at construction.
 	costs func(running []string) map[string]int
+	// reclaim selects the eviction objective; see config.Reclaim*.
+	reclaim string
 }
 
-func newMatrixSolver(program *matrixdsl.Program, costs func(running []string) map[string]int) *matrixSolver {
+func newMatrixSolver(program *matrixdsl.Program, costs func(running []string) map[string]int, reclaim string) *matrixSolver {
 	return &matrixSolver{
 		program: program,
 		costs:   costs,
+		reclaim: reclaim,
 	}
 }
 
 type solveResult = matrixdsl.Decision
 
-func (s *matrixSolver) Solve(requestedModel string, runningModels []string) solveResult {
-	return s.program.Solve(requestedModel, runningModels, s.costs(runningModels))
+// Solve decides the evictions for requestedModel among runningModels.
+// upcoming is the pending request queue (excluding requestedModel); it is
+// consulted only when the solver was built with the queue reclaim objective.
+func (s *matrixSolver) Solve(requestedModel string, runningModels []string, upcoming []string) solveResult {
+	return s.program.Solve(requestedModel, runningModels, matrixdsl.SolveOptions{
+		EvictCosts: s.costs(runningModels),
+		Reclaim:    s.reclaim,
+		Upcoming:   upcoming,
+	})
 }

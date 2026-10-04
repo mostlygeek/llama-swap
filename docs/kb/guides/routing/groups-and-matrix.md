@@ -4,7 +4,7 @@ summary: Choosing between the group and matrix routers, and how each decides wha
 category: guides
 tags: [routing, groups, matrix, concurrency, swap, vram]
 config_keys: [routing, routing.router.use, routing.router.settings.groups, routing.router.settings.matrix]
-updated: 2026-09-30
+updated: 2026-10-04
 ---
 
 # Running several models at once: groups and matrix
@@ -128,6 +128,33 @@ median rather than defining the model's cost outright.
 `evict_costs` (default multiplier 1) is now mostly optional: raise it above 1
 to protect a model beyond what its measured reload time implies — licensing
 limits, warm caches or prompt caches a stopwatch cannot see.
+
+### Queue-aware reclaim
+
+Measured costs answer "what is this model expensive to reload?" but not
+"what will the next request need?" The solver's job is to pick the eviction
+for one request, and it does not know what is sitting in the request queue.
+Left alone it evicts the cheapest model overall — which can be exactly the
+model the backlog is about to ask for, so queued work loads, gets evicted for
+the next request, and loads again.
+
+`settings.matrix.reclaim: queue` changes the objective while the queue is
+non-empty: eviction cost is charged only for models the queue references.
+An idle model nobody has queued for turns over first (its eviction is free),
+a model the queue still needs is protected, and the count stays minimal —
+each queued connection meets exactly one evicted model, and because different
+queued targets evict different idle models their swaps run in parallel and
+the backlog drains one-for-one. With an empty queue the router behaves
+equally to the default:
+
+```yaml
+routing:
+  router:
+    use: matrix
+    settings:
+      matrix:
+        reclaim: queue   # default: minimal
+```
 
 When you deploy the head end with the kubeswap Helm chart, the chart's
 `config.matrix` values can *generate* this whole section from the model

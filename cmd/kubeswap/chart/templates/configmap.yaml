@@ -177,6 +177,12 @@ data:
               {{ $k }}: {{ $v }}
 {{- end }}
 {{- end }}
+{{- if hasKey . "reclaim" }}
+{{- if and (ne (.reclaim | toString) "minimal") (ne (.reclaim | toString) "queue") }}
+{{- fail (printf "config.matrix: reclaim must be 'minimal' or 'queue', got %v" .reclaim) }}
+{{- end }}
+            reclaim: {{ .reclaim }}
+{{- end }}
             sets:
 {{- if eq $builder "gpu-budget" }}
               gpu_pool: ({{ $gpu | join " | " }})

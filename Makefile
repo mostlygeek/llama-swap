@@ -54,6 +54,11 @@ test-chart:
 		fi; \
 		echo "chart: render OK: $$f"; \
 	done
+	@helm template llama-swap cmd/kubeswap/chart -n llama-swap \
+		-f cmd/kubeswap/chart/test-values/structured-gpu-budget-reclaim.yaml \
+		| grep -q 'reclaim: queue' \
+		&& echo "chart: solver knob (reclaim) passes through" \
+		|| { echo "chart: reclaim knob missing from rendered configmap"; exit 1; }
 	@for f in cmd/kubeswap/chart/test-values-invalid/*.yaml; do \
 		if helm template llama-swap cmd/kubeswap/chart -n llama-swap -f $$f > /dev/null 2>&1; then \
 			echo "chart: $$f was expected to fail rendering"; exit 1; \

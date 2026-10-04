@@ -112,7 +112,7 @@ func (s *FIFO) OnRequest(req HandlerReq) {
 	}
 
 	running := s.runningSet(req.Model)
-	evict := s.planner.EvictionFor(req.Model, running)
+	evict := s.planner.EvictionFor(req.Model, running, s.upcoming(req.Model))
 
 	// (3) Fast path: ready, nothing to evict, and nobody is evicting us.
 	if state == process.StateReady && len(evict) == 0 && !collidesWith(req.Model, evict, s.active) {
@@ -419,7 +419,7 @@ func (s *FIFO) drainQueue() {
 			continue
 		}
 		running := s.runningSet(req.Model)
-		evict := s.planner.EvictionFor(req.Model, running)
+		evict := s.planner.EvictionFor(req.Model, running, s.upcoming(req.Model))
 		if state == process.StateReady && len(evict) == 0 && !collidesWith(req.Model, evict, s.active) {
 			s.logger.Debugf("%s: queued request for model %s now served fast-path", s.name, req.Model)
 			s.grantHandler(req, req.Model)
@@ -462,6 +462,26 @@ func (s *FIFO) runningSet(excludeActive string) []string {
 		add(id)
 	}
 	sort.Strings(out)
+	return out
+}
+
+// upcoming summarizes the pending request queue for the planner deciding
+// about exclude: the queued model IDs in queue order, de-duplicated, with
+// the request being decided left out. Planners using queue reclaim charge
+// eviction cost only for models in this list.
+func (s *FIFO) upcoming(exclude string) []string {
+	seen := make(map[string]struct{}, len(s.queued))
+	var out []string
+	for _, q := range s.queued {
+		if q.Model == exclude {
+			continue
+		}
+		if _, dup := seen[q.Model]; dup {
+			continue
+		}
+		seen[q.Model] = struct{}{}
+		out = append(out, q.Model)
+	}
 	return out
 }
 
