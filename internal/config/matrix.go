@@ -10,11 +10,27 @@ import (
 
 var varKeyPattern = regexp.MustCompile(`^[a-zA-Z0-9.-]{1,32}$`)
 
+// Reclaim selects the matrix solver's eviction objective. The values mirror
+// matrixdsl.ReclaimMinimal/ReclaimQueue.
+const (
+	// ReclaimMinimal minimises total eviction cost (the historical
+	// objective); models not in the pending queue are still costed.
+	ReclaimMinimal = matrixdsl.ReclaimMinimal
+	// ReclaimQueue charges eviction cost only for models the pending
+	// request queue references, so idle unqueued models turn over first
+	// and a model the queue still references is protected while a backlog
+	// exists.
+	ReclaimQueue = matrixdsl.ReclaimQueue
+)
+
 // MatrixConfig represents the swap matrix configuration block.
 type MatrixConfig struct {
 	Var        map[string]string `yaml:"vars"`
 	EvictCosts map[string]int    `yaml:"evict_costs"`
 	Sets       OrderedSets       `yaml:"sets"`
+	// Reclaim is normalized to a non-empty value by ValidateMatrix; empty
+	// means ReclaimMinimal.
+	Reclaim string `yaml:"reclaim"`
 
 	program *matrixdsl.Program
 }
@@ -59,6 +75,16 @@ func (os *OrderedSets) UnmarshalYAML(value *yaml.Node) error {
 func ValidateMatrix(matrix *MatrixConfig, models map[string]ModelConfig) error {
 	if len(matrix.Sets) == 0 {
 		return fmt.Errorf("matrix must define at least one set")
+	}
+
+	// Normalize the reclaim objective so consumers never see the empty
+	// string.
+	switch matrix.Reclaim {
+	case "":
+		matrix.Reclaim = ReclaimMinimal
+	case ReclaimMinimal, ReclaimQueue:
+	default:
+		return fmt.Errorf("reclaim must be %q or %q, got %q", ReclaimMinimal, ReclaimQueue, matrix.Reclaim)
 	}
 
 	// Validate var entries

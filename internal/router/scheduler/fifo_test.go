@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"reflect"
 	"testing"
 	"time"
 
@@ -25,7 +26,7 @@ type stubPlanner struct {
 	evict map[string][]string
 }
 
-func (s *stubPlanner) EvictionFor(target string, _ []string) []string {
+func (s *stubPlanner) EvictionFor(target string, _, _, _ []string) []string {
 	if s.evict == nil {
 		return nil
 	}
@@ -944,5 +945,141 @@ func TestFIFO_ConcurrencyLimit_CancelledQueuedWaiterReleasesReservation(t *testi
 
 	if got := len(s.queued); got != 1 {
 		t.Fatalf("queue len=%d want 1 after cancel and retry", got)
+	}
+}
+
+// TestFIFO_UpcomingDedupesAndExcludes verifies the queue summary handed to
+// the planner: de-duplicated, in queue order, excluding the decided request.
+func TestFIFO_UpcomingDedupesAndExcludes(t *testing.T) {
+	eff := newFakeEffects()
+	s := newFIFO(&stubPlanner{}, eff)
+
+	s.enqueue(HandlerReq{Model: "a"})
+	s.enqueue(HandlerReq{Model: "b"})
+	s.enqueue(HandlerReq{Model: "a"})
+	s.enqueue(HandlerReq{Model: "c"})
+
+	if got := s.upcoming("a"); !reflect.DeepEqual(got, []string{"b", "c"}) {
+		t.Fatalf("upcoming(a)=%v want [b c]", got)
+	}
+	if got := s.upcoming("d"); !reflect.DeepEqual(got, []string{"a", "b", "c"}) {
+		t.Fatalf("upcoming(d)=%v want [a b c]", got)
+	}
+}
+
+// recordingPlanner captures the upcoming slice it is given, so the forwarding
+// from the FIFO into EvictionFor can be observed.
+type recordingPlanner struct {
+	evict    map[string][]string
+	upcoming [][]string
+	reserved [][]string
+}
+
+func (p *recordingPlanner) EvictionFor(target string, _, upcoming, reserved []string) []string {
+	p.upcoming = append(p.upcoming, upcoming)
+	p.reserved = append(p.reserved, reserved)
+	if p.evict == nil {
+		return nil
+	}
+	return p.evict[target]
+}
+
+func (p *recordingPlanner) OnSwapStart(string, []string) {}
+
+// TestFIFO_ForwardsUpcomingToPlanner verifies that the planner sees the queued
+// models (minus the decided request) on both the new-request path and the
+// queue-drain path.
+func TestFIFO_ForwardsUpcomingToPlanner(t *testing.T) {
+	eff := newFakeEffects()
+	p := &recordingPlanner{}
+	s := newFIFO(p, eff)
+
+	// "a" is unknown to the effects, so the request is rejected before any
+	// planner call; the queue summary is verified on the drain path below.
+	s.OnRequest(HandlerReq{Model: "a", Ctx: context.Background(), Admit: make(chan error, 1), Respond: make(chan HandlerResp, 1)})
+	if len(p.upcoming) != 0 {
+		t.Fatalf("expected no planner calls for an unknown model, got %d", len(p.upcoming))
+	}
+
+	// With b and c queued (a's request still waiting), the queued requests'
+	// planner calls must see the other queued models.
+	eff.states = map[string]process.ProcessState{"a": process.StateStopped, "b": process.StateStopped, "c": process.StateStopped}
+	s.queued = []HandlerReq{
+		{Model: "b", Ctx: context.Background(), Admit: make(chan error, 1), Respond: make(chan HandlerResp, 1)},
+		{Model: "c", Ctx: context.Background(), Admit: make(chan error, 1), Respond: make(chan HandlerResp, 1)},
+	}
+	s.drainQueue()
+	if len(p.upcoming) < 2 {
+		t.Fatalf("expected planner calls for the drained requests, got %d", len(p.upcoming))
+	}
+	if got := p.upcoming[len(p.upcoming)-2]; !reflect.DeepEqual(got, []string{"c"}) {
+		t.Fatalf("b's EvictionFor upcoming=%v want [c]", got)
+	}
+	if got := p.upcoming[len(p.upcoming)-1]; !reflect.DeepEqual(got, []string{"b"}) {
+		t.Fatalf("c's EvictionFor upcoming=%v want [b]", got)
+	}
+}
+
+// TestFIFO_RunningSetExcludesDyingModels verifies the planner's picture of
+// the fleet: a model an in-flight swap is already evicting is on the way out
+// — its slot is claimed by that swap's target — so it is not counted as a
+// live model. Without this the running set inflates by one per in-flight
+// swap and every decision is forced to evict more models than its target
+// needs, colliding with the swap already reclaiming them.
+func TestFIFO_RunningSetExcludesDyingModels(t *testing.T) {
+	eff := newFakeEffects()
+	s := newFIFO(&stubPlanner{}, eff)
+	// d's swap just started: the active entry exists, the process is not
+	// started yet (the start runs asynchronously after the entry is set).
+	eff.states = map[string]process.ProcessState{
+		"a": process.StateStopping, // being evicted by the active swap
+		"b": process.StateReady,
+		"c": process.StateReady,
+		"d": process.StateStopped,
+	}
+	s.active = map[string]*activeSwap{
+		"d": {modelID: "d", evict: []string{"a"}},
+	}
+
+	// Deciding for an unrelated target x: a (dying) is out, b and c are
+	// live, d (the in-flight target) is live via the active set.
+	if got := s.runningSet("x"); !reflect.DeepEqual(got, []string{"b", "c", "d"}) {
+		t.Fatalf("runningSet(x)=%v want [b c d] (dying a excluded)", got)
+	}
+	// Deciding for d itself: its own active entry is not counted as running.
+	if got := s.runningSet("d"); !reflect.DeepEqual(got, []string{"b", "c"}) {
+		t.Fatalf("runningSet(d)=%v want [b c] (d's own swap entry excluded)", got)
+	}
+}
+
+// TestFIFO_ForwardsReservedTargets verifies that the planner sees the
+// in-flight swap targets in the reserved list: loading models are not idle,
+// and a planner that can avoid evicting one should, so the decision does not
+// collide with the swap and can start in parallel.
+func TestFIFO_ForwardsReservedTargets(t *testing.T) {
+	eff := newFakeEffects()
+	p := &recordingPlanner{evict: map[string][]string{"d": {"a"}, "e": {"b"}}}
+	s := newFIFO(p, eff)
+	eff.states = map[string]process.ProcessState{
+		"a": process.StateReady,
+		"b": process.StateReady,
+		"c": process.StateReady,
+		"d": process.StateStopped,
+		"e": process.StateStopped,
+	}
+
+	// d starts a swap evicting a: no active swaps yet, so reserved is empty.
+	s.OnRequest(HandlerReq{Model: "d", Ctx: context.Background(), Admit: make(chan error, 1), Respond: make(chan HandlerResp, 1)})
+	if len(p.reserved) != 1 || len(p.reserved[0]) != 0 {
+		t.Fatalf("first reserved=%v want [] (no active swaps yet)", p.reserved)
+	}
+
+	// e now decides with d's swap in flight: reserved carries d (loading).
+	s.OnRequest(HandlerReq{Model: "e", Ctx: context.Background(), Admit: make(chan error, 1), Respond: make(chan HandlerResp, 1)})
+	if len(p.reserved) != 2 {
+		t.Fatalf("expected two planner calls, got %d", len(p.reserved))
+	}
+	if got := p.reserved[1]; !reflect.DeepEqual(got, []string{"d"}) {
+		t.Fatalf("second reserved=%v want [d] (the in-flight target)", got)
 	}
 }

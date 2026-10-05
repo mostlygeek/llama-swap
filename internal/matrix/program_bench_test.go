@@ -33,7 +33,7 @@ func BenchmarkProgram_SolveMultiSet(b *testing.B) {
 		b.Run(fmt.Sprintf("Sets_%d", setCount), func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				benchmarkDecision = program.Solve(target, running, costs)
+				benchmarkDecision = program.Solve(target, running, SolveOptions{EvictCosts: costs})
 			}
 		})
 	}

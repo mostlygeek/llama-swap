@@ -4,7 +4,7 @@ summary: Choosing between the group and matrix routers, and how each decides wha
 category: guides
 tags: [routing, groups, matrix, concurrency, swap, vram]
 config_keys: [routing, routing.router.use, routing.router.settings.groups, routing.router.settings.matrix]
-updated: 2026-09-30
+updated: 2026-10-04
 ---
 
 # Running several models at once: groups and matrix
@@ -128,6 +128,58 @@ median rather than defining the model's cost outright.
 `evict_costs` (default multiplier 1) is now mostly optional: raise it above 1
 to protect a model beyond what its measured reload time implies — licensing
 limits, warm caches or prompt caches a stopwatch cannot see.
+
+### Queue-aware reclaim
+
+Measured costs answer "what is this model expensive to reload?" but not
+"what will the next request need?" The solver's job is to pick the eviction
+for one request, and left alone it evicts the cheapest model overall — which
+can be exactly the model the backlog is about to ask for, so queued work
+loads, gets evicted for the next request, and loads again.
+
+`settings.matrix.reclaim: queue` changes the objective while the queue is
+non-empty: eviction cost is charged only for models the queue references.
+An idle model nobody has queued for turns over first (its eviction is free),
+a model the queue still needs is protected, and the count stays minimal —
+each queued connection meets exactly one evicted model, and because different
+queued targets evict different idle models their swaps run in parallel and
+the backlog drains one-for-one. With an empty queue the router behaves
+equally to the default.
+
+Two picture fixes apply in both reclaim modes, because they are about what
+the decision sees rather than what it optimizes:
+
+- **Loading models are not eviction candidates.** A model whose swap is in
+  flight is *loading*, not idle, and cancelling that load would only trade
+  one wait for another. The scheduler tells the solver which models in-flight
+  swaps have claimed as their target, and the solver never evicts one while
+  an idle, unclaimed alternative exists — cost cannot rescue a loading
+  model. When nothing idle is left (every slot is loading), the solver falls
+  back to the plain ranking and the request queues until a slot genuinely
+  frees up.
+- **Models on the way out are not live.** A model an in-flight swap is
+  already evicting holds its GPU until the stop completes, but its slot
+  belongs to that swap's target. Counting it as live would inflate the fleet
+  by one per in-flight swap, force every decision to evict more models than
+  its target needs, and make every queued decision collide with the swap
+  already reclaiming one of its candidates. The planner therefore sees the
+  steady state the fleet reaches when the in-flight swaps complete: ready
+  models plus the in-flight targets, never the dying models.
+
+Together these turn a full-fleet burst from a serial one-model-at-a-time
+chain into parallel disjoint swaps with exactly one request queued, and the
+queued request takes the first slot that goes idle — the moment a loaded
+model finishes its request, it is turned over for the queued target while
+the still-loading models are left alone.
+
+```yaml
+routing:
+  router:
+    use: matrix
+    settings:
+      matrix:
+        reclaim: queue   # default: minimal
+```
 
 When you deploy the head end with the kubeswap Helm chart, the chart's
 `config.matrix` values can *generate* this whole section from the model
