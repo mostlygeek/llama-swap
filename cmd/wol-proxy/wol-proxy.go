@@ -29,6 +29,10 @@ var confirmPageHTML string
 // wakePath is the endpoint the confirmation page posts to when -require-confirm is set
 const wakePath = "/wol-wake"
 
+// wake durations longer than this are discarded, they most likely mean the
+// wake failed and the upstream was started some other way much later
+const maxTrackedWake = 10 * time.Minute
+
 var (
 	flagMac      = flag.String("mac", "", "mac address to send WoL packet to")
 	flagUpstream = flag.String("upstream", "", "upstream proxy address to send requests to")
@@ -135,6 +139,10 @@ type proxyServer struct {
 	status        upstreamStatus
 	sseBodyMu     sync.Mutex
 	sseBody       io.Closer
+
+	// guarded by statusMutex
+	wakeStart time.Time     // when the pending wake began, zero if none
+	lastWake  time.Duration // how long the last wake took, zero if unknown
 }
 
 func newProxy(url *url.URL, apiKey string) *proxyServer {
@@ -314,6 +322,7 @@ func (p *proxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		slog.Info("upstream not ready, sending magic packet", "req", path, "from", r.RemoteAddr)
+		p.beginWake()
 		if err := sendMagicPacket(*flagMac); err != nil {
 			slog.Warn("failed to send magic WoL packet", "error", err)
 		}
@@ -358,13 +367,40 @@ func (p *proxyServer) handleWake(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("start confirmed, sending magic packet", "from", r.RemoteAddr)
+	p.beginWake()
 	if err := sendMagicPacket(*flagMac); err != nil {
 		slog.Warn("failed to send magic WoL packet", "error", err)
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, loadingPageHTML)
+	fmt.Fprint(w, p.loadingPage())
+}
+
+// loadingPage returns the loading page with the duration of the last wake, so
+// the progress bar can estimate how long this one will take
+func (p *proxyServer) loadingPage() string {
+	last := p.lastWakeDuration()
+	if last <= 0 {
+		return loadingPageHTML // no estimate yet
+	}
+	expected := fmt.Sprintf(`data-expected="%.1f"`, last.Seconds())
+	return strings.Replace(loadingPageHTML, `data-expected="0"`, expected, 1)
+}
+
+// beginWake marks the start of a wake, the first request of a wake wins
+func (p *proxyServer) beginWake() {
+	p.statusMutex.Lock()
+	defer p.statusMutex.Unlock()
+	if p.wakeStart.IsZero() || time.Since(p.wakeStart) > maxTrackedWake {
+		p.wakeStart = time.Now()
+	}
+}
+
+func (p *proxyServer) lastWakeDuration() time.Duration {
+	p.statusMutex.RLock()
+	defer p.statusMutex.RUnlock()
+	return p.lastWake
 }
 
 func (p *proxyServer) getStatus() upstreamStatus {
@@ -377,6 +413,14 @@ func (p *proxyServer) setStatus(status upstreamStatus) {
 	p.statusMutex.Lock()
 	defer p.statusMutex.Unlock()
 	p.status = status
+
+	if status == ready && !p.wakeStart.IsZero() {
+		if d := time.Since(p.wakeStart); d <= maxTrackedWake {
+			p.lastWake = d
+			slog.Info("upstream ready after wake", "took", d.Round(100*time.Millisecond))
+		}
+		p.wakeStart = time.Time{}
+	}
 }
 
 func (p *proxyServer) incFail(num int) {

@@ -34,6 +34,10 @@ By default any request wakes the server. With `-require-confirm`, nothing is sen
 - Browser requests to `/` and `/ui/` show a page with a "Start server" button. Pressing it sends the WoL packet and shows the loading page until the server is ready.
 - All other requests (e.g. API calls) fail immediately with `503 Service Unavailable` and no WoL packet is sent.
 
+## Loading page
+
+While the server wakes up, a loading page shows a progress bar. The proxy remembers in memory how long the last start took, and the bar fills against that time. The bar never shows full before the server is actually ready, and says so if the start takes longer than last time. After a proxy restart, or before the first start, there is no estimate and the bar just loops.
+
 ## API
 
 `GET /status` - that's it. Everything else is proxied to the upstream server.

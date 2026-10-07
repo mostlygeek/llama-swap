@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 // newTestProxy returns a proxy whose upstream is unreachable, so it stays "not ready"
@@ -74,5 +75,44 @@ func TestProxy_WakePathIgnoredWithoutRequireConfirm(t *testing.T) {
 	rec := serve(p, "POST", wakePath)
 	if rec.Code == http.StatusSeeOther || rec.Code == http.StatusOK {
 		t.Fatalf("wake endpoint should be disabled, got status %d", rec.Code)
+	}
+}
+
+func TestProxy_LastWakeDurationIsRememberedAndShownInLoadingPage(t *testing.T) {
+	p := newTestProxy(t, true)
+
+	if got := p.loadingPage(); !strings.Contains(got, `data-expected="0"`) {
+		t.Fatalf("expected no estimate before the first wake")
+	}
+
+	p.beginWake()
+	p.statusMutex.Lock()
+	p.wakeStart = time.Now().Add(-12500 * time.Millisecond) // pretend the wake began 12.5s ago
+	p.statusMutex.Unlock()
+	p.setStatus(ready)
+
+	if d := p.lastWakeDuration(); d < 12*time.Second || d > 14*time.Second {
+		t.Fatalf("unexpected last wake duration %v", d)
+	}
+	if got := p.loadingPage(); !strings.Contains(got, `data-expected="12.5"`) {
+		t.Fatalf("expected the last wake duration in the loading page")
+	}
+
+	// becoming ready without a pending wake must not change the estimate
+	p.setStatus(notready)
+	p.setStatus(ready)
+	if d := p.lastWakeDuration(); d < 12*time.Second || d > 14*time.Second {
+		t.Fatalf("estimate changed without a wake: %v", d)
+	}
+}
+
+func TestProxy_StaleWakeIsNotTracked(t *testing.T) {
+	p := newTestProxy(t, true)
+	p.statusMutex.Lock()
+	p.wakeStart = time.Now().Add(-2 * maxTrackedWake)
+	p.statusMutex.Unlock()
+	p.setStatus(ready)
+	if d := p.lastWakeDuration(); d != 0 {
+		t.Fatalf("stale wake should be discarded, got %v", d)
 	}
 }
