@@ -29,6 +29,7 @@ func TestProcessCommand_ParseLoadingProgress(t *testing.T) {
 		{"message only", `{"message":"  warming up  "}`, LoadingProgress{Message: "warming up"}, true},
 		{"progress clamped high", `{"progress":7}`, LoadingProgress{Progress: f(1)}, true},
 		{"progress clamped low", `{"progress":-1}`, LoadingProgress{Progress: f(0)}, true},
+		{"kyojin loading body", `{"status":"loading","source":"kyojin","message":"loading weights, 42% (stage 2 of 4)","progress":0.42,"stage":"weights","stage_index":2,"stage_count":4,"stage_progress":0.7,"elapsed_s":12.5,"eta_s":null,"stage_eta_s":null,"progress_basis":"stages"}`, LoadingProgress{Progress: f(0.42), Message: "loading weights, 42% (stage 2 of 4)"}, true},
 		{"llama-server loading body", `{"error":{"code":503,"message":"Loading model","type":"unavailable_error"}}`, LoadingProgress{}, false},
 		{"empty message", `{"message":""}`, LoadingProgress{}, false},
 		{"not json", `Service Unavailable`, LoadingProgress{}, false},

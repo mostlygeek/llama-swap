@@ -46,10 +46,11 @@ export function onToggleLoad(m: Model): void {
 }
 
 // loadingPercent is the reported loading progress as a whole percentage, or
-// undefined when the model is not starting or its upstream reports none.
+// undefined when the model is not starting or its upstream reports none. It
+// rounds down so a load that is not finished never shows 100%.
 export function loadingPercent(m: Model | undefined): number | undefined {
   if (m?.state !== "starting" || m.loadingProgress === undefined) return undefined;
-  return Math.round(Math.min(Math.max(m.loadingProgress, 0), 1) * 100);
+  return Math.floor(Math.min(Math.max(m.loadingProgress, 0), 1) * 100);
 }
 
 // loadingMessage is the upstream's reported loading step while starting.

@@ -7,9 +7,11 @@ function model(fields: Partial<Model>): Model {
 }
 
 describe("loadingPercent", () => {
-  it("rounds the reported fraction to a whole percentage", () => {
-    expect(loadingPercent(model({ state: "starting", loadingProgress: 0.426 }))).toBe(43);
+  it("rounds the reported fraction down to a whole percentage", () => {
+    expect(loadingPercent(model({ state: "starting", loadingProgress: 0.426 }))).toBe(42);
     expect(loadingPercent(model({ state: "starting", loadingProgress: 0 }))).toBe(0);
+    // kyojin caps progress at 0.999 until it is ready
+    expect(loadingPercent(model({ state: "starting", loadingProgress: 0.999 }))).toBe(99);
   });
 
   it("is undefined without progress or once the model is no longer starting", () => {
