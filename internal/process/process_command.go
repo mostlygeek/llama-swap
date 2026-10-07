@@ -485,10 +485,7 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 		MaxIdleConns:          100,
 		MaxIdleConnsPerHost:   10,
 		IdleConnTimeout:       time.Duration(p.config.Timeouts.IdleConn) * time.Second,
-		// llama-server advertises keep-alive on streamed responses and then closes
-		// the connection (#1205); reusing it fails the next request with a 502.
-		// Open a new connection per request instead.
-		DisableKeepAlives: true,
+		DisableKeepAlives:     p.config.DisableKeepAlives,
 	}
 	reverseProxy.ErrorHandler = newProxyErrorHandler(p.id, p.proxyLogger)
 	reverseProxy.ModifyResponse = func(resp *http.Response) error {
