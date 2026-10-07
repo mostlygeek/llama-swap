@@ -23,6 +23,12 @@ import (
 //go:embed index.html
 var loadingPageHTML string
 
+//go:embed confirm.html
+var confirmPageHTML string
+
+// wakePath is the endpoint the confirmation page posts to when -require-confirm is set
+const wakePath = "/wol-wake"
+
 var (
 	flagMac      = flag.String("mac", "", "mac address to send WoL packet to")
 	flagUpstream = flag.String("upstream", "", "upstream proxy address to send requests to")
@@ -30,6 +36,8 @@ var (
 	flagLog      = flag.String("log", "info", "log level (debug, info, warn, error)")
 	flagTimeout  = flag.Int("timeout", 60, "seconds requests wait for upstream response before failing")
 	flagAPIKey   = flag.String("api-key", "", "API key sent as Bearer token to the upstream SSE endpoint (falls back to LLAMA_SWAP_API_KEY env var)")
+
+	flagRequireConfirm = flag.Bool("require-confirm", false, "do not wake the upstream automatically; the root page asks for confirmation first and other requests return an error")
 )
 
 func main() {
@@ -278,11 +286,30 @@ func (p *proxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if *flagRequireConfirm && r.Method == http.MethodPost && r.URL.Path == wakePath {
+		p.handleWake(w, r)
+		return
+	}
+
 	if p.getStatus() == notready {
 		path := r.URL.Path
 		if strings.HasPrefix(path, "/api/events") {
 			slog.Debug("Skipping wake up", "req", path)
 			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		if *flagRequireConfirm {
+			// never wake the upstream without the user's consent
+			if path == "/" || strings.HasPrefix(path, "/ui/") {
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				w.WriteHeader(http.StatusOK)
+				fmt.Fprint(w, confirmPageHTML)
+				return
+			}
+
+			slog.Info("upstream not ready, confirmation required", "req", path, "from", r.RemoteAddr)
+			http.Error(w, "upstream is not running, open the root page to confirm starting it", http.StatusServiceUnavailable)
 			return
 		}
 
@@ -320,6 +347,24 @@ func (p *proxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p.upstreamProxy.ServeHTTP(w, r)
+}
+
+// handleWake sends the WoL packet after the user confirmed on the confirmation
+// page and responds with the loading page that polls until upstream is ready.
+func (p *proxyServer) handleWake(w http.ResponseWriter, r *http.Request) {
+	if p.getStatus() == ready {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	slog.Info("start confirmed, sending magic packet", "from", r.RemoteAddr)
+	if err := sendMagicPacket(*flagMac); err != nil {
+		slog.Warn("failed to send magic WoL packet", "error", err)
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprint(w, loadingPageHTML)
 }
 
 func (p *proxyServer) getStatus() upstreamStatus {
