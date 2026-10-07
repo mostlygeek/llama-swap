@@ -178,7 +178,9 @@ func tryNvidiaSmi(ctx context.Context, every time.Duration, logger *logmon.Monit
 				}
 			}
 		}
-		cmd.Wait()
+		if err := cmd.Wait(); err != nil && ctx.Err() == nil {
+			logger.Errorf("nvidia-smi exited: %s", err.Error())
+		}
 	}()
 
 	return ch, nil
