@@ -583,7 +583,11 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 	case <-time.After(250 * time.Millisecond):
 	}
 
+	// The deadline is pushed back each time the upstream reports new loading
+	// progress, so healthCheckTimeout bounds how long a load may go without
+	// progress rather than how long it may take in total.
 	deadline := time.Now().Add(healthCheckTimeout)
+	var lastProgress *LoadingProgress
 	for {
 		select {
 		case <-startCtx.Done():
@@ -594,6 +598,9 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 		}
 
 		if time.Now().After(deadline) {
+			if lastProgress != nil {
+				return abort(fmt.Errorf("health check timed out after %v without loading progress", healthCheckTimeout))
+			}
 			return abort(fmt.Errorf("health check timed out after %v", healthCheckTimeout))
 		}
 
@@ -610,6 +617,12 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 			break
 		} else if startCtx.Err() != nil {
 			return abort(ErrStartAborted)
+		}
+
+		if lp, ok := parseLoadingProgress(rr.Body.Bytes()); ok && !lp.equal(lastProgress) {
+			lastProgress = &lp
+			deadline = time.Now().Add(healthCheckTimeout)
+			p.setLoading(lp)
 		}
 
 		select {

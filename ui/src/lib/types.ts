@@ -39,6 +39,11 @@ export interface Model {
   // client-only: when the model became ready by this browser's clock,
   // derived from uptimeMs on receipt so server clock skew doesn't matter
   readyAt?: number;
+  // fraction loaded (0 to 1) the upstream last reported through its health
+  // check; only set while starting and the upstream reports progress
+  loadingProgress?: number;
+  // the loading step the upstream last reported; only set while starting
+  loadingMessage?: string;
   // selector-only fields from the v1/models llamaswap metadata
   strategy?: string;
   targets?: string[];

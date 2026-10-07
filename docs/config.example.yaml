@@ -19,6 +19,9 @@
 # healthCheckTimeout: number of seconds to wait for a model to be ready to serve requests
 # - optional, default: 120
 # - minimum value is 15 seconds, anything less will be set to this value
+# - when the health check reports loading progress, the countdown restarts each
+#   time the progress or message changes, so this limits how long a load may
+#   go without progress
 healthCheckTimeout: 500
 
 # logLevel: sets the logging value
@@ -384,6 +387,9 @@ models:
     # - optional, default: /health
     # - endpoint is expected to return an HTTP 200 response
     # - all requests wait until the endpoint is ready or fails
+    # - while loading, a non-200 response with a JSON body like
+    #   {"progress": 0.42, "message": "loading tensors"} reports loading progress
+    #   (progress is 0 to 1) that is shown in the UI
     # - use "none" to skip endpoint health checking
     checkEndpoint: /custom-endpoint
 

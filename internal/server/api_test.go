@@ -918,6 +918,34 @@ func TestServer_ModelStatus_ReadySince(t *testing.T) {
 	}
 }
 
+func TestServer_ModelStatus_LoadingProgress(t *testing.T) {
+	progress := 0.4
+	lp := &process.LoadingProgress{Progress: &progress, Message: "loading tensors"}
+	local := newStubRouter(nil, "")
+	local.running = map[string]process.ProcessState{
+		"starting": process.StateStarting,
+		"ready":    process.StateReady,
+	}
+	// ready still has progress to check that only starting models report it.
+	local.loading = map[string]*process.LoadingProgress{"starting": lp, "ready": lp}
+	s := newTestServer(local, newStubRouter(nil, ""))
+	s.cfg = config.Config{Models: map[string]config.ModelConfig{
+		"starting": {}, "ready": {}, "stopped": {},
+	}}
+
+	for _, m := range s.modelStatus() {
+		if m.Id == "starting" {
+			if m.LoadingProgress == nil || *m.LoadingProgress != progress || m.LoadingMessage != "loading tensors" {
+				t.Errorf("starting: progress = %v, message = %q, want %v and %q", m.LoadingProgress, m.LoadingMessage, progress, "loading tensors")
+			}
+			continue
+		}
+		if m.LoadingProgress != nil || m.LoadingMessage != "" {
+			t.Errorf("%s: progress = %v, message = %q, want neither", m.Id, m.LoadingProgress, m.LoadingMessage)
+		}
+	}
+}
+
 func stringSliceEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
