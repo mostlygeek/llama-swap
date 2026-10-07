@@ -147,6 +147,11 @@ type ModelConfig struct {
 	// Timeout settings for proxy connections
 	Timeouts TimeoutsConfig `yaml:"timeouts"`
 
+	// DisableKeepAlives opens a new upstream connection for every request
+	// instead of reusing pooled ones. Works around upstreams that advertise
+	// keep-alive and then close the connection (#1205).
+	DisableKeepAlives bool `yaml:"disableKeepAlives"`
+
 	// Compatibility settings for upstream applications.
 	Compat CompatConfig `yaml:"compat"`
 

@@ -1660,6 +1660,23 @@ models:
 	assert.Equal(t, 90, modelConfig.Timeouts.IdleConn)
 }
 
+func TestConfig_DisableKeepAlives(t *testing.T) {
+	configYaml := `
+models:
+  model1:
+    cmd: test-server --port ${PORT}
+  model2:
+    cmd: test-server --port ${PORT}
+    disableKeepAlives: true
+`
+
+	config, err := LoadConfigFromReader(strings.NewReader(configYaml))
+	require.NoError(t, err)
+
+	assert.False(t, config.Models["model1"].DisableKeepAlives, "keep-alives stay on by default")
+	assert.True(t, config.Models["model2"].DisableKeepAlives)
+}
+
 func TestConfig_TimeoutsZeroAllowed(t *testing.T) {
 	configYaml := `
 models:

@@ -554,6 +554,11 @@
                     "timeouts": {
                         "$ref": "#/definitions/timeouts"
                     },
+                    "disableKeepAlives": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Open a new upstream connection for every request instead of reusing idle ones. Works around upstreams that close a connection they advertised as keep-alive, such as llama-server after a streamed response (#1205). When true, timeouts.idleConn has no effect."
+                    },
                     "compat": {
                         "type": "object",
                         "properties": {

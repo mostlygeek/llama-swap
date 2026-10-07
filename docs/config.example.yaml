@@ -522,6 +522,15 @@ models:
       tlsHandshake: 10
       idleConn: 90
 
+    # disableKeepAlives: open a new upstream connection for every request
+    # - optional, default: false
+    # - works around upstreams that advertise keep-alive and then close the
+    #   connection, such as llama-server after a streamed response (#1205).
+    #   Symptom: a request right after a stream fails with 502 "proxy error: EOF"
+    # - when true, idle connections are never pooled, so timeouts.idleConn has
+    #   no effect for this model
+    disableKeepAlives: false
+
     # capabilities: defines what the model accepts for input, output and other metadata
     # - optional; omitted or all-zero means no capabilities
     # - used in v1/models to inform clients what the model can do

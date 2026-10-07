@@ -485,6 +485,7 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 		MaxIdleConns:          100,
 		MaxIdleConnsPerHost:   10,
 		IdleConnTimeout:       time.Duration(p.config.Timeouts.IdleConn) * time.Second,
+		DisableKeepAlives:     p.config.DisableKeepAlives,
 	}
 	reverseProxy.ErrorHandler = newProxyErrorHandler(p.id, p.proxyLogger)
 	reverseProxy.ModifyResponse = func(resp *http.Response) error {
