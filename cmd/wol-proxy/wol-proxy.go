@@ -145,13 +145,17 @@ type proxyServer struct {
 	lastWake  time.Duration // how long the last wake took, zero if unknown
 }
 
-func newProxy(url *url.URL, apiKey string) *proxyServer {
-	p := httputil.NewSingleHostReverseProxy(url)
-	proxy := &proxyServer{
-		upstreamProxy: p,
+func newProxyServer(url *url.URL) *proxyServer {
+	return &proxyServer{
+		upstreamProxy: httputil.NewSingleHostReverseProxy(url),
 		status:        notready,
 		failCount:     0,
 	}
+}
+
+// newProxy creates a proxy and starts the goroutines that watch the upstream
+func newProxy(url *url.URL, apiKey string) *proxyServer {
+	proxy := newProxyServer(url)
 
 	// start a goroutine to monitor upstream status via SSE
 	go func() {
@@ -294,9 +298,15 @@ func (p *proxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if *flagRequireConfirm && r.Method == http.MethodPost && r.URL.Path == wakePath {
-		p.handleWake(w, r)
-		return
+	if *flagRequireConfirm && r.URL.Path == wakePath {
+		switch r.Method {
+		case http.MethodPost:
+			p.handleWake(w, r)
+			return
+		case http.MethodGet:
+			p.handleWakeProgress(w, r)
+			return
+		}
 	}
 
 	if p.getStatus() == notready {
@@ -359,7 +369,8 @@ func (p *proxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleWake sends the WoL packet after the user confirmed on the confirmation
-// page and responds with the loading page that polls until upstream is ready.
+// page. It redirects to a GET page so the browser never has to re-submit the
+// form when the loading page reloads itself.
 func (p *proxyServer) handleWake(w http.ResponseWriter, r *http.Request) {
 	if p.getStatus() == ready {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -370,6 +381,18 @@ func (p *proxyServer) handleWake(w http.ResponseWriter, r *http.Request) {
 	p.beginWake()
 	if err := sendMagicPacket(*flagMac); err != nil {
 		slog.Warn("failed to send magic WoL packet", "error", err)
+	}
+
+	http.Redirect(w, r, wakePath, http.StatusSeeOther)
+}
+
+// handleWakeProgress shows the loading page while a confirmed wake is pending.
+// Without a pending wake there is nothing to wait for, so it goes back to the
+// root page.
+func (p *proxyServer) handleWakeProgress(w http.ResponseWriter, r *http.Request) {
+	if p.getStatus() == ready || !p.wakePending() {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -392,9 +415,18 @@ func (p *proxyServer) loadingPage() string {
 func (p *proxyServer) beginWake() {
 	p.statusMutex.Lock()
 	defer p.statusMutex.Unlock()
+	if p.status == ready {
+		return // came up in the meantime, nothing to time
+	}
 	if p.wakeStart.IsZero() || time.Since(p.wakeStart) > maxTrackedWake {
 		p.wakeStart = time.Now()
 	}
+}
+
+func (p *proxyServer) wakePending() bool {
+	p.statusMutex.RLock()
+	defer p.statusMutex.RUnlock()
+	return !p.wakeStart.IsZero()
 }
 
 func (p *proxyServer) lastWakeDuration() time.Duration {

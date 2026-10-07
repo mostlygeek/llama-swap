@@ -9,7 +9,8 @@ import (
 	"time"
 )
 
-// newTestProxy returns a proxy whose upstream is unreachable, so it stays "not ready"
+// newTestProxy returns a proxy that starts "not ready" and has no background
+// monitors, so tests fully control its status
 func newTestProxy(t *testing.T, requireConfirm bool) *proxyServer {
 	t.Helper()
 	oldConfirm, oldMac := *flagRequireConfirm, *flagMac
@@ -18,7 +19,7 @@ func newTestProxy(t *testing.T, requireConfirm bool) *proxyServer {
 	t.Cleanup(func() { *flagRequireConfirm, *flagMac = oldConfirm, oldMac })
 
 	u, _ := url.Parse("http://127.0.0.1:1")
-	return newProxy(u, "")
+	return newProxyServer(u)
 }
 
 func serve(p *proxyServer, method, path string) *httptest.ResponseRecorder {
@@ -48,14 +49,43 @@ func TestProxy_RequireConfirmOtherRequestsReturnError(t *testing.T) {
 	}
 }
 
-func TestProxy_RequireConfirmWakeShowsLoadingPage(t *testing.T) {
+func TestProxy_RequireConfirmWakeRedirectsToLoadingPage(t *testing.T) {
 	p := newTestProxy(t, true)
 	rec := serve(p, "POST", wakePath)
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != wakePath {
+		t.Fatalf("got status %d location %q, want redirect to %s", rec.Code, rec.Header().Get("Location"), wakePath)
+	}
+
+	// the redirect target is a GET page, so reloading it never re-submits the form
+	rec = serve(p, "GET", wakePath)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("got status %d", rec.Code)
 	}
 	if !strings.Contains(rec.Body.String(), "Waking up upstream server") {
 		t.Fatalf("expected loading page, got %q", rec.Body.String())
+	}
+
+	p.setStatus(ready)
+	rec = serve(p, "GET", wakePath)
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/" {
+		t.Fatalf("ready: got status %d location %q, want redirect to /", rec.Code, rec.Header().Get("Location"))
+	}
+}
+
+func TestProxy_RequireConfirmLoadingPageWithoutWakeGoesToRoot(t *testing.T) {
+	p := newTestProxy(t, true)
+	rec := serve(p, "GET", wakePath)
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/" {
+		t.Fatalf("got status %d location %q, want redirect to /", rec.Code, rec.Header().Get("Location"))
+	}
+}
+
+func TestProxy_BeginWakeIgnoredWhenReady(t *testing.T) {
+	p := newTestProxy(t, true)
+	p.setStatus(ready)
+	p.beginWake()
+	if p.wakePending() {
+		t.Fatal("a wake must not start while upstream is ready")
 	}
 }
 
