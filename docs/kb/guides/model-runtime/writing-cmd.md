@@ -111,11 +111,17 @@ the health check with a non-200 status and a JSON body like this:
 The Models page and the model's detail page show the percentage, a progress
 bar and the message while the model starts.
 
-Each time the reported progress or message changes, llama-swap restarts the
+Each time the reported `progress` value changes, llama-swap restarts the
 `healthCheckTimeout` countdown. The timeout then limits how long a load may go
 *without progress*, not how long it may take in total, so a large model that
-keeps reporting progress is never cut off. A server that repeats the same
-report fails with `health check timed out after ... without loading progress`.
+keeps reporting progress is never cut off. A server whose `progress` stops
+changing fails with `health check timed out after ... without loading
+progress`, even if its `message` keeps changing (an ETA countdown, say).
+
+Without `progress`, the timeout works as usual: the server must return 200
+within `healthCheckTimeout`. A `message` on its own is shown in the UI but
+does not extend the timeout. Set `healthCheckTimeout` longer than any loading
+step during which `progress` does not move.
 
 ## Environment variables
 

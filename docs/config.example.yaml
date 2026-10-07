@@ -20,8 +20,8 @@
 # - optional, default: 120
 # - minimum value is 15 seconds, anything less will be set to this value
 # - when the health check reports loading progress, the countdown restarts each
-#   time the progress or message changes, so this limits how long a load may
-#   go without progress
+#   time the progress value changes, so this limits how long a load may go
+#   without progress
 healthCheckTimeout: 500
 
 # logLevel: sets the logging value

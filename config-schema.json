@@ -162,7 +162,7 @@
             "type": "integer",
             "minimum": 15,
             "default": 120,
-            "description": "Number of seconds to wait for a model to be ready to serve requests. When the health check reports loading progress, the countdown restarts each time the progress or message changes."
+            "description": "Number of seconds to wait for a model to be ready to serve requests. When the health check reports loading progress, the countdown restarts each time the progress value changes."
         },
         "globalTTL": {
             "type": "integer",

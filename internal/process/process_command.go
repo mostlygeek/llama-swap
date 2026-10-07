@@ -583,11 +583,14 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 	case <-time.After(250 * time.Millisecond):
 	}
 
-	// The deadline is pushed back each time the upstream reports new loading
-	// progress, so healthCheckTimeout bounds how long a load may go without
-	// progress rather than how long it may take in total.
+	// The deadline is pushed back each time the reported progress value
+	// changes, so healthCheckTimeout bounds how long a load may go without
+	// progress rather than how long it may take in total. A message alone does
+	// not count: it can change while the load is stuck, e.g. a growing ETA.
+	// Without a progress value, the deadline is fixed as before.
 	deadline := time.Now().Add(healthCheckTimeout)
-	var lastProgress *LoadingProgress
+	var lastReport *LoadingProgress
+	var lastProgress *float64
 	for {
 		select {
 		case <-startCtx.Done():
@@ -619,10 +622,15 @@ func (p *ProcessCommand) doStart(startCtx context.Context, healthCheckTimeout ti
 			return abort(ErrStartAborted)
 		}
 
-		if lp, ok := parseLoadingProgress(rr.Body.Bytes()); ok && !lp.equal(lastProgress) {
-			lastProgress = &lp
-			deadline = time.Now().Add(healthCheckTimeout)
-			p.setLoading(lp)
+		if lp, ok := parseLoadingProgress(rr.Body.Bytes()); ok {
+			if lp.Progress != nil && (lastProgress == nil || *lp.Progress != *lastProgress) {
+				lastProgress = lp.Progress
+				deadline = time.Now().Add(healthCheckTimeout)
+			}
+			if !lp.equal(lastReport) {
+				lastReport = &lp
+				p.setLoading(lp)
+			}
 		}
 
 		select {

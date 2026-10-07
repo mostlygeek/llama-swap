@@ -64,10 +64,9 @@ func TestProcessCommand_ParseLoadingProgressTrimsMessage(t *testing.T) {
 	}
 }
 
-// progressUpstream serves a health check that reports loading progress for
-// the first `reports` polls and then becomes ready. When advance is false
-// every report is the same, so no progress is ever made.
-func progressUpstream(t *testing.T, reports int64, advance bool) *httptest.Server {
+// progressUpstream serves a health check that answers 503 with body(n) for
+// the first `reports` polls, n counting from 1, and then becomes ready.
+func progressUpstream(t *testing.T, reports int64, body func(n int64) string) *httptest.Server {
 	t.Helper()
 	var polls atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -76,13 +75,9 @@ func progressUpstream(t *testing.T, reports int64, advance bool) *httptest.Serve
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		step := int64(1)
-		if advance {
-			step = n
-		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		fmt.Fprintf(w, `{"progress":%g,"message":"step %d"}`, float64(step)/float64(reports+1), step)
+		fmt.Fprint(w, body(n))
 	}))
 	t.Cleanup(srv.Close)
 	return srv
@@ -95,7 +90,9 @@ func TestProcessCommand_LoadingProgressExtendsTimeout(t *testing.T) {
 	skipIfNoSimpleResponder(t)
 
 	// Three reports one second apart take longer than the timeout below.
-	mock := progressUpstream(t, 3, true)
+	mock := progressUpstream(t, 3, func(n int64) string {
+		return fmt.Sprintf(`{"progress":%g,"message":"step %d"}`, float64(n)/4, n)
+	})
 	cmd, _ := simpleResponderCmd(t, "-silent")
 	p := newProcessCommand(t, config.ModelConfig{
 		Cmd:           cmd,
@@ -151,23 +148,54 @@ func TestProcessCommand_LoadingProgressExtendsTimeout(t *testing.T) {
 	}
 }
 
-// TestProcessCommand_LoadingProgressStalls checks that repeating the same
-// progress report does not hold the start open past the health check timeout.
+// TestProcessCommand_LoadingProgressStalls checks that only a change in the
+// reported progress value holds the start open past the health check timeout.
 func TestProcessCommand_LoadingProgressStalls(t *testing.T) {
 	skipIfNoSimpleResponder(t)
 
-	mock := progressUpstream(t, 1000, false)
-	cmd, _ := simpleResponderCmd(t, "-silent")
-	p := newProcessCommand(t, config.ModelConfig{
-		Cmd:           cmd,
-		Proxy:         mock.URL,
-		CheckEndpoint: "/health",
-	})
+	tests := []struct {
+		name    string
+		body    func(n int64) string
+		wantErr string
+	}{
+		{
+			name:    "same report",
+			body:    func(int64) string { return `{"progress":0.1,"message":"step 1"}` },
+			wantErr: "without loading progress",
+		},
+		{
+			// kyojin's message carries an ETA that keeps changing, and grows,
+			// while a stage is stuck.
+			name:    "message changes but progress does not",
+			body:    func(n int64) string { return fmt.Sprintf(`{"progress":0.1,"message":"about %d s left"}`, 10+n) },
+			wantErr: "without loading progress",
+		},
+		{
+			name:    "message without progress",
+			body:    func(n int64) string { return fmt.Sprintf(`{"message":"step %d"}`, n) },
+			wantErr: "health check timed out after 1.5s",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := progressUpstream(t, 1000, tt.body)
+			cmd, _ := simpleResponderCmd(t, "-silent")
+			p := newProcessCommand(t, config.ModelConfig{
+				Cmd:           cmd,
+				Proxy:         mock.URL,
+				CheckEndpoint: "/health",
+			})
 
-	ctx, cancelCtx := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancelCtx()
-	err := p.EnsureReady(ctx, 1500*time.Millisecond)
-	if err == nil || !strings.Contains(err.Error(), "without loading progress") {
-		t.Fatalf("EnsureReady error = %v, want a timeout without loading progress", err)
+			ctx, cancelCtx := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancelCtx()
+			start := time.Now()
+			err := p.EnsureReady(ctx, 1500*time.Millisecond)
+			if err == nil || !strings.HasSuffix(err.Error(), tt.wantErr) {
+				t.Fatalf("EnsureReady error = %v, want one ending in %q", err, tt.wantErr)
+			}
+			if elapsed := time.Since(start); elapsed > 3*time.Second {
+				t.Errorf("start failed after %v, want about the 1.5s timeout", elapsed)
+			}
+		})
 	}
 }
