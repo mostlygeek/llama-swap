@@ -162,7 +162,7 @@
             "type": "integer",
             "minimum": 15,
             "default": 120,
-            "description": "Number of seconds to wait for a model to be ready to serve requests."
+            "description": "Number of seconds to wait for a model to be ready to serve requests. When the health check reports loading progress, the countdown restarts each time the progress value changes."
         },
         "globalTTL": {
             "type": "integer",
@@ -482,7 +482,7 @@
                         "type": "string",
                         "default": "/health",
                         "pattern": "^/.*$|^none$",
-                        "description": "URL path to check if the server is ready. Use 'none' to skip health checking."
+                        "description": "URL path to check if the server is ready. Use 'none' to skip health checking. A non-200 response with a JSON body like {\"progress\": 0.42, \"message\": \"...\"} reports loading progress."
                     },
                     "ttl": {
                         "type": "integer",

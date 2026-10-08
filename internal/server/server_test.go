@@ -33,6 +33,7 @@ type stubRouter struct {
 	shutdownCalls atomic.Int32
 	running       map[string]process.ProcessState
 	readySince    map[string]time.Time
+	loading       map[string]*process.LoadingProgress
 	unloadCalls   atomic.Int32
 	unloadModels  []string
 	unloadTimeout time.Duration
@@ -62,7 +63,7 @@ func (s *stubRouter) RunningModels() map[string]process.ProcessState { return s.
 func (s *stubRouter) RunningStatus() map[string]process.Status {
 	out := make(map[string]process.Status, len(s.running))
 	for id, st := range s.running {
-		out[id] = process.Status{State: st, ReadySince: s.readySince[id]}
+		out[id] = process.Status{State: st, ReadySince: s.readySince[id], Loading: s.loading[id]}
 	}
 	return out
 }

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { params } from "svelte-spa-router";
   import { models } from "../stores/api";
-  import { statusDotColor } from "../stores/modelLoad";
+  import { loadingMessage, loadingPercent, statusDotColor } from "../stores/modelLoad";
   import type { Model } from "../lib/types";
   import ModelLoadButton from "../components/ModelLoadButton.svelte";
   import CopyableId from "../components/CopyableId.svelte";
@@ -43,6 +43,10 @@
     return () => clearInterval(timer);
   });
   let uptime = $derived(readyAt !== undefined ? formatUptime(now - readyAt) : "");
+
+  // Loading progress the upstream reports through its health check while starting.
+  let percent = $derived(loadingPercent(model));
+  let message = $derived(loadingMessage(model));
 </script>
 
 <div class="flex h-full flex-col gap-4 overflow-y-auto p-2">
@@ -68,6 +72,9 @@
                 <CopyableId value={model.id} class="-ml-1 font-mono text-xs" />
               {/if}
               <span class="text-xs uppercase tracking-wide">{model.state}</span>
+              {#if percent !== undefined}
+                <span class="text-xs tabular-nums">{percent}%</span>
+              {/if}
               {#if isReady}
                 <span class="text-xs" title={readySince ? `Ready since ${formatAbsoluteTime(readySince)}` : undefined}>
                   up {uptime}
@@ -94,6 +101,9 @@
         {#if model.description}
           <p class="text-muted-foreground text-sm"><em>{model.description}</em></p>
         {/if}
+        {#if message}
+          <p class="text-muted-foreground text-xs break-words">{message}</p>
+        {/if}
         {#if model.aliases && model.aliases.length > 0}
           <div class="text-muted-foreground flex flex-wrap items-center gap-x-1 gap-y-1 text-xs">
             <span>Aliases:</span>
@@ -104,11 +114,18 @@
         {/if}
       </Card.Header>
       <!-- Load status bar; the state text in the header carries it for screen readers. -->
-      <div
-        aria-hidden="true"
-        class={`h-1 w-full shrink-0 transition-colors ${statusDotColor(model)}`}
-        class:animate-pulse={model.state === "starting" || model.state === "stopping"}
-      ></div>
+      {#if percent !== undefined}
+        <!-- The upstream reports progress, so fill the bar to it instead of pulsing. -->
+        <div aria-hidden="true" class="bg-muted h-1 w-full shrink-0">
+          <div class="bg-warning h-full transition-[width] duration-500" style:width="{percent}%"></div>
+        </div>
+      {:else}
+        <div
+          aria-hidden="true"
+          class={`h-1 w-full shrink-0 transition-colors ${statusDotColor(model)}`}
+          class:animate-pulse={model.state === "starting" || model.state === "stopping"}
+        ></div>
+      {/if}
     </Card.Root>
 
     <Tabs value="activity" class="min-h-0 flex-1">
