@@ -186,15 +186,16 @@ func TestProcessCommand_LoadingProgressStalls(t *testing.T) {
 				CheckEndpoint: "/health",
 			})
 
-			ctx, cancelCtx := context.WithTimeout(context.Background(), 10*time.Second)
+			// The upstream never becomes ready, so if the health check timeout
+			// did not fire, EnsureReady would end with this context's deadline
+			// error instead. The wait is not timed: after the timeout the
+			// process is torn down, which on Windows takes the full 5s graceful
+			// stop because simple-responder ignores a taskkill without /f.
+			ctx, cancelCtx := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancelCtx()
-			start := time.Now()
 			err := p.EnsureReady(ctx, 1500*time.Millisecond)
 			if err == nil || !strings.HasSuffix(err.Error(), tt.wantErr) {
 				t.Fatalf("EnsureReady error = %v, want one ending in %q", err, tt.wantErr)
-			}
-			if elapsed := time.Since(start); elapsed > 3*time.Second {
-				t.Errorf("start failed after %v, want about the 1.5s timeout", elapsed)
 			}
 		})
 	}
