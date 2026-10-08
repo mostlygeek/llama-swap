@@ -111,6 +111,9 @@ func NewPeer(cfg config.Config, logger *logmon.Monitor) (*Peer, error) {
 			Rewrite: func(r *httputil.ProxyRequest) {
 				r.SetURL(peer.ProxyURL)
 				r.Out.Host = r.Out.URL.Host
+				// The peer is a server-to-server hop. Some APIs (Anthropic)
+				// reject requests carrying a browser Origin; see issue #1214.
+				swaputil.StripBrowserRequestHeaders(r.Out.Header)
 			},
 		}
 

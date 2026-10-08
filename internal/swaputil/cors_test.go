@@ -46,6 +46,27 @@ func TestStripUpstreamCORSHeaders_LowercaseKeys(t *testing.T) {
 	}
 }
 
+func TestStripBrowserRequestHeaders(t *testing.T) {
+	h := http.Header{}
+	h.Set("Origin", "http://localhost:8080")
+	h.Set("Referer", "http://localhost:8080/ui/")
+	h.Set("Sec-Fetch-Mode", "cors")
+	h.Set("Sec-Fetch-Site", "same-site")
+	h.Set("Access-Control-Request-Method", "POST")
+	h.Set("Access-Control-Request-Headers", "content-type")
+	h.Set("Access-Control-Request-Private-Network", "true")
+	// Non-canonical spelling, as a raw map literal would produce.
+	h["sec-fetch-dest"] = []string{"empty"}
+	h.Set("Content-Type", "application/json")
+	h.Set("Authorization", "Bearer key")
+
+	StripBrowserRequestHeaders(h)
+
+	if len(h) != 2 || h.Get("Content-Type") != "application/json" || h.Get("Authorization") != "Bearer key" {
+		t.Errorf("want only Content-Type and Authorization left, got %v", h)
+	}
+}
+
 func TestStripUpstreamCORSHeaders_EmptyHeader(t *testing.T) {
 	h := http.Header{}
 	StripUpstreamCORSHeaders(h)
