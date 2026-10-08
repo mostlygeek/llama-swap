@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -692,7 +693,24 @@ func TestServer_APILogEvents_SelectedStreams(t *testing.T) {
 
 func TestServer_APILogEvents_NoHistory(t *testing.T) {
 	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
+
+	// Monitor.Write only queues the message; a separate goroutine publishes it
+	// to subscribers. Wait for that publish so a slow runner cannot deliver
+	// UPSTREAMHIST after the handler has subscribed and make it look live.
+	published := make(chan struct{})
+	var once sync.Once
+	stop := s.logs.UpstreamLogs.OnLogData(func(data []byte) {
+		if bytes.Contains(data, []byte("UPSTREAMHIST")) {
+			once.Do(func() { close(published) })
+		}
+	})
+	defer stop()
 	s.logs.UpstreamLogs.Info("UPSTREAMHIST")
+	select {
+	case <-published:
+	case <-time.After(2 * time.Second):
+		t.Fatal("UPSTREAMHIST was never published to subscribers")
+	}
 
 	w := serveLogEvents(t, s, "/api/events/logs?stream=upstream&no-history", func() {
 		s.logs.UpstreamLogs.Info("UPSTREAMLIVE")

@@ -480,6 +480,55 @@ func TestPeer_ServeHTTP_StripsUpstreamCORSHeaders(t *testing.T) {
 	}
 }
 
+// TestPeer_ServeHTTP_StripsBrowserRequestHeaders covers issue #1214: the
+// browser's Origin was forwarded to the peer, and Anthropic rejects any request
+// carrying Origin as a direct browser call.
+func TestPeer_ServeHTTP_StripsBrowserRequestHeaders(t *testing.T) {
+	var got http.Header
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer testServer.Close()
+
+	proxyURL, _ := url.Parse(testServer.URL)
+	peers := config.PeerDictionaryConfig{
+		"peer1": config.PeerConfig{
+			Proxy:    testServer.URL,
+			ProxyURL: proxyURL,
+			Models:   []string{"test-model"},
+			ApiKey:   "secret",
+		},
+	}
+
+	pr, err := NewPeer(config.Config{Peers: peers}, testLogger)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	req.Header.Set("Origin", "http://example.com")
+	req.Header.Set("Referer", "http://example.com/ui/")
+	req.Header.Set("Sec-Fetch-Mode", "cors")
+	req.Header.Set("Content-Type", "application/json")
+	*req = *req.WithContext(swaputil.SetContext(req.Context(), swaputil.ReqContextData{Model: "test-model", ModelID: "test-model"}))
+	w := httptest.NewRecorder()
+
+	pr.ServeHTTP(w, req)
+
+	for _, name := range []string{"Origin", "Referer", "Sec-Fetch-Mode"} {
+		if v := got.Values(name); len(v) != 0 {
+			t.Errorf("%s=%q reached the peer; it must be stripped", name, v)
+		}
+	}
+	if v := got.Get("Content-Type"); v != "application/json" {
+		t.Errorf("Content-Type=%q, unrelated headers must be forwarded", v)
+	}
+	if v := got.Get("Authorization"); v != "Bearer secret" {
+		t.Errorf("Authorization=%q, the peer API key must still be sent", v)
+	}
+}
+
 func TestPeer_ServeHTTP_ShutdownRejectsNewRequests(t *testing.T) {
 	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
