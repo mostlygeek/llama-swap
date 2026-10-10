@@ -129,13 +129,20 @@ func (r *activityRepository) List(ctx context.Context, query store.ActivityQuery
 
 func (r *activityRepository) Stats(ctx context.Context, query store.ActivityStatsQuery) (store.ActivityStats, error) {
 	filter := store.ActivityFilter{}
-	if model := strings.TrimSpace(query.Model); model != "" {
+	model := strings.TrimSpace(query.Model)
+	if model != "" {
 		filter.Models = []string{model}
 	}
 	where, args := activityWhere(filter)
+	requestTotal := "COALESCE(MAX(id), 0)"
+	if model != "" {
+		// Activity ids are global across models, so MAX(id) is not a count
+		// when a model filter is applied (interleaved rows would overcount).
+		requestTotal = "COUNT(*)"
+	}
 	row := r.db.QueryRowContext(ctx, `
 		SELECT
-			COALESCE(MAX(id), 0),
+			`+requestTotal+`,
 			COALESCE(SUM(input_tokens), 0),
 			COALESCE(SUM(output_tokens), 0),
 			COALESCE(SUM(CASE WHEN cache_tokens > 0 THEN cache_tokens ELSE 0 END), 0)
