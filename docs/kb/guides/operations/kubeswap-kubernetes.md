@@ -2,9 +2,9 @@
 title: Running inference servers in Kubernetes with kubeswap
 summary: Use the kubeswap wrapper as cmd/cmdStop so llama-swap starts and stops backend servers as Kubernetes workloads in a dedicated namespace.
 category: guides
-tags: [kubernetes, kubeswap, deployment, k8s, operator, pod, namespace, pvc, gpu, multi-backend, sd-server, whisper-server, audiocpp_server]
+tags: [kubernetes, kubeswap, deployment, k8s, operator, pod, namespace, pvc, gpu, dra, resourceclaim, multi-backend, sd-server, whisper-server, audiocpp_server]
 config_keys: [models.*.cmd, models.*.cmdStop, models.*.proxy, models.*.checkEndpoint, models.*.capabilities, healthCheckTimeout, unloadTimeout, routing]
-updated: 2026-09-14
+updated: 2026-10-10
 ---
 
 # Running inference servers in Kubernetes with kubeswap
@@ -108,6 +108,33 @@ exclusive device assigned by the scheduler.
 
 Other vendors' device plugins register their own resource names — read the
 real one from `kubectl describe node` under `Capacity` rather than guessing.
+
+On a cluster that exposes GPUs through Dynamic Resource Allocation (DRA)
+instead of a device plugin, there is no GPU resource under `Capacity`, and
+`--gpu` leaves the pod Pending forever. Create a `ResourceClaim` in the
+namespace and attach it with `--resource-claim name=claim` (repeatable):
+kubeswap adds it to the pod's `resourceClaims` and the container's
+`resources.claims`, and the scheduler places the pod on the node holding
+the allocated device. The claim must exist before the model loads (a
+missing claim also leaves the pod Pending; `kubeswap status` shows why),
+and every pod referencing it shares the device. kubeswap never creates or
+deletes the claim, so its RBAC needs no change.
+
+```yaml
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaim
+metadata:
+  name: single-gpu
+  namespace: llama-swap
+spec:
+  devices:
+    requests:
+      - name: gpu
+        exactly:
+          deviceClassName: gpu.nvidia.com
+```
+
+Then use `--resource-claim gpu=single-gpu` in place of `--gpu`.
 On CPU, drop GPU-only engine flags too (`-ngl` for llama-server is a no-op,
 `--diffusion-fa` for sd-server needs a GPU; CPU image generation works but
 is slow).

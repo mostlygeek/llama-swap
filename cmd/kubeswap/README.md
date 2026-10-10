@@ -235,6 +235,35 @@ models:
     ttl: 30m
 ```
 
+#### GPU (Dynamic Resource Allocation, existing `ResourceClaim`)
+
+On a cluster where the GPU driver publishes devices through DRA (e.g. the
+NVIDIA DRA driver) instead of a device plugin, there is no `nvidia.com/gpu`
+resource to request. Create a `ResourceClaim` in the namespace and attach it
+with `--resource-claim`; the scheduler places the pod on the node holding
+the allocated device. Pods that reference the same claim share its device.
+
+```yaml
+models:
+  qwen25:
+    proxy: 127.0.0.1:${PORT}
+    cmd: |
+      kubeswap serve
+      --listen 127.0.0.1:${PORT}
+      --model qwen25
+      --namespace llama-swap
+      --image ghcr.io/mostlygeek/llama-swap:unified-cuda13
+      --command llama-server
+      --resource-claim gpu=single-gpu
+      --volume pvc:llama-swap-models:/models:ro
+      --
+      -hf bartowski/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M
+      --port 8080
+      --ctx-size 4096
+    cmdStop: kubeswap delete --model qwen25 --namespace llama-swap
+    ttl: 30m
+```
+
 #### CPU (no `--gpu`, no node selector; lavapipe Vulkan works)
 
 ```yaml
@@ -534,6 +563,7 @@ in-cluster config else standard kubeconfig rules):
 | `--probe-timeout` | `5s` | readiness/liveness probe request timeout |
 | `--startup-timeout` | `10m` | model loading time the **startup probe** tolerates before the pod restarts; it also gates readiness/liveness until the backend answers once (llama-swap's global `healthCheckTimeout` should be at least this long) |
 | `--gpu` | — | GPU resource, e.g. `amd.com/gpu=1` (sets requests **and** limits — GPUs are exclusive) |
+| `--resource-claim` | — | attach an existing DRA ResourceClaim `name=claim` to the pod and the container, e.g. `gpu=my-gpu-claim` (repeatable; `name` is a DNS-1123 label, unique per pod) |
 | `--request` | — | resource request `name=quantity`, e.g. `cpu=2`, `memory=4Gi` (repeatable; overrides `--gpu` for the same key) |
 | `--limit` | — | resource limit `name=quantity`, e.g. `cpu=4` (repeatable; overrides `--gpu` for the same key) |
 | `--service-port` | — | extra Service port `name:port` (repeatable; e.g. expose backend metrics) |

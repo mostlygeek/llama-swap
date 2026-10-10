@@ -96,6 +96,22 @@ func TestKubeswap_ToConfigRejectsReservedLabels(t *testing.T) {
 	}
 }
 
+// TestKubeswap_ToConfigResourceClaims Verifies --resource-claim reaches the config and invalid entries fail at parse time.
+func TestKubeswap_ToConfigResourceClaims(t *testing.T) {
+	f := &serveFlags{model: "m", resourceClaims: stringList{"gpu=pro2000"}}
+	cfg, err := f.toConfig()
+	if err != nil {
+		t.Fatalf("toConfig: %v", err)
+	}
+	if len(cfg.ResourceClaims) != 1 || cfg.ResourceClaims[0] != (resourceClaimSpec{Name: "gpu", Claim: "pro2000"}) {
+		t.Errorf("got %v", cfg.ResourceClaims)
+	}
+	f = &serveFlags{model: "m", resourceClaims: stringList{"gpu=a", "gpu=b"}}
+	if _, err := f.toConfig(); err == nil || !strings.Contains(err.Error(), "--resource-claim") {
+		t.Errorf("duplicate name: got %v, want --resource-claim error", err)
+	}
+}
+
 // TestKubeswap_ServeRejectsNegativeGrace Verifies a negative --grace is rejected at parse time.
 func TestKubeswap_ServeRejectsNegativeGrace(t *testing.T) {
 	err := serveCmd([]string{

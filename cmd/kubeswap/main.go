@@ -229,6 +229,40 @@ func parseGPUs(entries []string) (map[string]string, error) {
 	return out, nil
 }
 
+// resourceClaimSpec is one parsed --resource-claim entry: the pod-level
+// claim name and the existing ResourceClaim it references.
+type resourceClaimSpec struct {
+	Name  string
+	Claim string
+}
+
+// parseResourceClaims parses "name=claim" entries, validating both with
+// the API server's own rules: the pod-level name is a DNS-1123 label and
+// the ResourceClaim name a DNS-1123 subdomain. Pod claim names must be
+// unique within the pod, so a repeated name is rejected.
+func parseResourceClaims(entries []string) ([]resourceClaimSpec, error) {
+	out := make([]resourceClaimSpec, 0, len(entries))
+	seen := map[string]bool{}
+	for _, e := range entries {
+		name, claim, ok := strings.Cut(e, "=")
+		if !ok {
+			return nil, fmt.Errorf("invalid --resource-claim %q (want name=claim, e.g. gpu=my-gpu-claim)", e)
+		}
+		if errs := content.IsDNS1123Label(name); len(errs) > 0 {
+			return nil, fmt.Errorf("invalid --resource-claim name %q: %v", name, errs)
+		}
+		if errs := content.IsDNS1123Subdomain(claim); len(errs) > 0 {
+			return nil, fmt.Errorf("invalid --resource-claim claim %q: %v", claim, errs)
+		}
+		if seen[name] {
+			return nil, fmt.Errorf("duplicate --resource-claim name %q", name)
+		}
+		seen[name] = true
+		out = append(out, resourceClaimSpec{Name: name, Claim: claim})
+	}
+	return out, nil
+}
+
 // parseResources parses repeated "name=quantity" entries for resource
 // requests or limits, validating the quantities up front.
 func parseResources(entries []string, what string) (map[string]string, error) {
