@@ -552,6 +552,35 @@ func TestKubeswap_DeploymentSpecMatchesVolumes(t *testing.T) {
 	}
 }
 
+// TestKubeswap_RenderDeploymentNFSVolume Verifies an nfs volume renders its server, export and access mode, and that changing any of them is drift.
+func TestKubeswap_RenderDeploymentNFSVolume(t *testing.T) {
+	cfg := testConfig()
+	cfg.Volumes = []volumeSpec{{Kind: volNFS, Name: "nas.lan/export/models", Path: "/library", ReadOnly: true}}
+	dep, err := cfg.renderDeployment()
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	pod := dep.Spec.Template.Spec
+	want := corev1.NFSVolumeSource{Server: "nas.lan", Path: "/export/models", ReadOnly: true}
+	if got := pod.Volumes[0].NFS; got == nil || *got != want {
+		t.Errorf("nfs source = %+v, want %+v", got, want)
+	}
+	if m := pod.Containers[0].VolumeMounts[0]; m.MountPath != "/library" || !m.ReadOnly {
+		t.Errorf("mount = %+v, want read-only /library", m)
+	}
+	for name, mutate := range map[string]func(*corev1.NFSVolumeSource){
+		"server":   func(n *corev1.NFSVolumeSource) { n.Server = "other.lan" },
+		"export":   func(n *corev1.NFSVolumeSource) { n.Path = "/export/other" },
+		"readOnly": func(n *corev1.NFSVolumeSource) { n.ReadOnly = false },
+	} {
+		dep2, _ := cfg.renderDeployment()
+		mutate(dep2.Spec.Template.Spec.Volumes[0].NFS)
+		if deploymentSpecMatches(dep, dep2) {
+			t.Errorf("nfs %s drift should not match", name)
+		}
+	}
+}
+
 // TestKubeswap_DeploymentSpecMatchesResourceClaims Verifies the spec comparison detects pod and container resource-claim drift, ignoring order.
 func TestKubeswap_DeploymentSpecMatchesResourceClaims(t *testing.T) {
 	cfg := testConfig()

@@ -302,6 +302,14 @@ func (c *serveConfig) renderVolumes() (volumes []corev1.Volume, mounts []corev1.
 					HostPath: &corev1.HostPathVolumeSource{Path: v.Name},
 				},
 			})
+		case volNFS:
+			server, export := nfsSource(v.Name)
+			volumes = append(volumes, corev1.Volume{
+				Name: name,
+				VolumeSource: corev1.VolumeSource{
+					NFS: &corev1.NFSVolumeSource{Server: server, Path: export, ReadOnly: v.ReadOnly},
+				},
+			})
 		default:
 			return nil, nil, fmt.Errorf("unknown volume kind %q", v.Kind)
 		}
@@ -725,6 +733,8 @@ func volumesEqual(a, b []corev1.Volume) bool {
 			return "host:" + v.HostPath.Path
 		case v.EmptyDir != nil:
 			return "emptydir"
+		case v.NFS != nil:
+			return fmt.Sprintf("nfs:%s:%s:%t", v.NFS.Server, v.NFS.Path, v.NFS.ReadOnly)
 		default:
 			return v.Name + ":unknown-source"
 		}

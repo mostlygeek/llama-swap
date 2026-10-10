@@ -133,12 +133,13 @@ func TestKubeswap_ParseTolerations(t *testing.T) {
 	}
 }
 
-// TestKubeswap_ParseVolumes Verifies volume parsing for the pvc, emptydir and hostpath forms.
+// TestKubeswap_ParseVolumes Verifies volume parsing for the pvc, emptydir, hostpath and nfs forms.
 func TestKubeswap_ParseVolumes(t *testing.T) {
 	got, err := parseVolumes([]string{
 		"pvc:llama-swap-models:/models:ro",
 		"emptydir:slots:/slots",
 		"hostpath:/data/models:/models:ro",
+		"nfs:nas.lan/export/models:/library:ro",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -147,11 +148,12 @@ func TestKubeswap_ParseVolumes(t *testing.T) {
 		{Kind: volPVC, Name: "llama-swap-models", Path: "/models", ReadOnly: true},
 		{Kind: volEmptyDir, Name: "slots", Path: "/slots"},
 		{Kind: volHostPath, Name: "/data/models", Path: "/models", ReadOnly: true},
+		{Kind: volNFS, Name: "nas.lan/export/models", Path: "/library", ReadOnly: true},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	for _, bad := range []string{"pvc:only-two", "blob:foo:/mnt", "pvc:/models", "pvc:claim:/models:rw"} {
+	for _, bad := range []string{"pvc:only-two", "blob:foo:/mnt", "pvc:/models", "pvc:claim:/models:rw", "nfs:nas.lan:/library", "nfs:/export:/library", "nfs:nas.lan/:/library"} {
 		if _, err := parseVolumes([]string{bad}); err == nil {
 			t.Errorf("expected error for %q", bad)
 		}

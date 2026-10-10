@@ -487,7 +487,7 @@ func addServeFlags(fs *flag.FlagSet, f *serveFlags) {
 	fs.Var(&f.resourceClaims, "resource-claim", "existing DRA ResourceClaim to attach, name=claim (repeatable)")
 	fs.Var(&f.nodeSel, "node-selector", "node selector K=V (repeatable)")
 	fs.Var(&f.tols, "toleration", "toleration key:operator:value:effect (repeatable)")
-	fs.Var(&f.volumes, "volume", "volume pvc|emptydir|hostpath:name:path[:ro] (repeatable)")
+	fs.Var(&f.volumes, "volume", "volume pvc|emptydir|hostpath|nfs:name:path[:ro] (repeatable)")
 	fs.Var(&f.extraLbls, "label", "extra pod label K=V (repeatable)")
 	fs.StringVar(&f.pvcSize, "pvc-size", "1Gi", "size used when kubeswap must create a missing PVC")
 	fs.StringVar(&f.pvcClass, "pvc-class", "", "storage class for created PVCs (default: cluster default)")

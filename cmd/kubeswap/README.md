@@ -492,6 +492,8 @@ literal text.
   Hostpath volumes escape the namespace boundary (the pod reads and,
   without `:ro`, writes that part of the node), so kubeswap logs a
   warning when one is used.
+- `nfs:nas.lan/export/models:/models:ro` — NFS export mounted directly
+  (`server/export`), with no PersistentVolume or PVC to create.
 
 PVCs that already exist are adopted as-is (a shared model cache is typically
 pre-created once, RWX, by the operator); missing ones are created with
@@ -571,7 +573,7 @@ in-cluster config else standard kubeconfig rules):
 | `--node-selector` | — | `key=value`, repeatable |
 | `--toleration` | — | `key:operator:value:effect` (operator Equal or Exists, default Equal; effect NoSchedule/PreferNoSchedule/NoExecute or empty for any effect; value must be empty with Exists; key must not be empty with Equal), repeatable |
 | `--label` | — | extra pod label `K=V`, repeatable; `llama-swap.io/managed-by`, `llama-swap.io/model`, `llama-swap.io/deployment` and `app.kubernetes.io/name` are reserved |
-| `--volume` | — | `pvc:name:path[:ro]`, `emptydir:name:path[:ro]` or `hostpath:nodePath:mountPath[:ro]`, repeatable |
+| `--volume` | — | `pvc:name:path[:ro]`, `emptydir:name:path[:ro]` or `hostpath:nodePath:mountPath[:ro]` or `nfs:server/export:mountPath[:ro]`, repeatable |
 | `--pvc-size` | `1Gi` | size for PVCs kubeswap must create |
 | `--pvc-class` | cluster default | StorageClass for created PVCs |
 | `--pvc-access-mode` | `rwo` | `rwo` or `rwx` for created PVCs |
