@@ -1,0 +1,64 @@
+{
+  "models": [
+    {
+      "name": "Clef-Flash-Q8_0",
+      "model": "Clef-Flash-Q8_0",
+      "modified_at": "",
+      "size": "",
+      "digest": "",
+      "type": "model",
+      "description": "",
+      "tags": [
+        ""
+      ],
+      "capabilities": [
+        "completion",
+        "multimodal"
+      ],
+      "parameters": "",
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "",
+        "families": [
+          ""
+        ],
+        "parameter_size": "",
+        "quantization_level": ""
+      }
+    }
+  ],
+  "object": "list",
+  "data": [
+    {
+      "id": "Clef-Flash-Q8_0",
+      "aliases": [
+        "Clef-Flash-Q8_0"
+      ],
+      "tags": [],
+      "object": "model",
+      "architecture": {
+        "input_modalities": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output_modalities": [
+          "decisions"
+        ]
+      },
+      "created": 1791672294,
+      "owned_by": "llamacpp",
+      "meta": {
+        "vocab_type": 2,
+        "n_vocab": 248320,
+        "n_ctx": 16384,
+        "n_ctx_train": 262144,
+        "n_embd": 4096,
+        "n_params": 9075566084,
+        "size": 9664761872,
+        "ftype": "Q8_0"
+      }
+    }
+  ]
+}

@@ -365,6 +365,19 @@ func TestConfig_ModelCapabilities_Validate(t *testing.T) {
 		assert.NoError(t, caps.Validate())
 	})
 
+	t.Run("decisions_output_modality", func(t *testing.T) {
+		caps := ModelCapConfig{In: []string{"text", "image"}, Out: []string{"decisions"}}
+		assert.NoError(t, caps.Validate())
+	})
+
+	t.Run("decisions_is_output_only", func(t *testing.T) {
+		caps := ModelCapConfig{In: []string{"decisions"}}
+		err := caps.Validate()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "capabilities.in")
+		assert.Contains(t, err.Error(), "decisions")
+	})
+
 	t.Run("video_with_other_modalities", func(t *testing.T) {
 		caps := ModelCapConfig{
 			In:  []string{"text", "image", "video"},

@@ -60,6 +60,11 @@ type ModelEntry struct {
 	Root   string `json:"root"`
 	Parent string `json:"parent"`
 
+	// Architecture is llama-server's modality block for this entry.
+	Architecture struct {
+		OutputModalities []string `json:"output_modalities"`
+	} `json:"architecture"`
+
 	// Meta is the model metadata block llama-server and Halogen both use.
 	Meta struct {
 		// NCtx is the context actually loaded. NCtxTrain is the model's

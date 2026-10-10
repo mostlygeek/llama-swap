@@ -51,6 +51,11 @@ import (
 //
 // gufo/v1_models.json is a verbatim capture from a running Gufo instance
 // (AMD Strix Halo gfx1151).
+//
+// v1_models_capture_clef.json and props_capture_clef.json are one capture from
+// a single llama-server (b11429) serving the Clef-Flash decision model. The
+// listing is verbatim; the /props file keeps only modalities,
+// default_generation_settings and chat_template_caps.
 
 // fixture reads a testdata file.
 func fixture(t *testing.T, parts ...string) []byte {
@@ -124,6 +129,24 @@ func TestCapcompat_DetectLlamaServerVision(t *testing.T) {
 	assert.Equal(t, []string{"text"}, info.Capabilities.Out)
 	assert.False(t, info.Capabilities.Tools, "template reports no tool support")
 	assert.Equal(t, 8192, info.Capabilities.Context)
+}
+
+// A decision model answers /v1/systemone and generates no text. Only the
+// listing says so, through output_modalities; /props looks like a chat model
+// and even reports tool support from its chat template.
+func TestCapcompat_DetectLlamaServerDecisionModel(t *testing.T) {
+	up := newUpstream(t, map[string][]byte{
+		"/v1/models": fixture(t, "llama-server", "v1_models_capture_clef.json"),
+		"/props":     fixture(t, "llama-server", "props_capture_clef.json"),
+	})
+
+	info, err := Detect(context.Background(), up.client(t), "Clef-Flash-Q8_0")
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"text", "image", "video"}, info.Capabilities.In)
+	assert.Equal(t, []string{"decisions"}, info.Capabilities.Out)
+	assert.False(t, info.Capabilities.Tools, "no text output, so no tool calls")
+	assert.Equal(t, 16384, info.Capabilities.Context)
 }
 
 func TestCapcompat_DetectLlamaServerIgnoresUnmappedModalities(t *testing.T) {

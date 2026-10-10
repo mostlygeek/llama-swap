@@ -2,6 +2,7 @@ package capcompat
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/mostlygeek/llama-swap/internal/config"
@@ -64,17 +65,25 @@ func (llamaServerProber) Matches(models ModelsResponse) bool {
 	return strings.EqualFold(models.OwnedBy(), llamaServerOwner)
 }
 
-func (p llamaServerProber) Probe(ctx context.Context, c *Client, _ ModelsResponse, _ string) (config.ModelCapConfig, error) {
+func (p llamaServerProber) Probe(ctx context.Context, c *Client, models ModelsResponse, modelName string) (config.ModelCapConfig, error) {
 	var props propsResponse
 	if err := c.GetJSON(ctx, "/props", &props); err != nil {
 		return config.ModelCapConfig{}, err
 	}
 
 	caps := config.ModelCapConfig{
-		// llama-server always accepts and produces text. Everything else is
-		// additive and depends on what the build reports.
+		// llama-server always accepts text and, except for decision models,
+		// produces it. Everything else is additive and depends on what the
+		// build reports.
 		In:  []string{"text"},
 		Out: []string{"text"},
+	}
+
+	// A decision model only answers /v1/systemone and generates no text.
+	// /props has no output field to say so, so this is the one place the
+	// listing is read: llama-server reports output_modalities ["decisions"].
+	if entry, ok := models.Find(modelName); ok && slices.Contains(entry.Architecture.OutputModalities, "decisions") {
+		caps.Out = []string{"decisions"}
 	}
 
 	for prop, modality := range modalityForProp {
@@ -86,7 +95,9 @@ func (p llamaServerProber) Probe(ctx context.Context, c *Client, _ ModelsRespons
 	// for the cached blob.
 	sortModalities(caps.In)
 
-	caps.Tools = p.supportsTools(props)
+	// Tool calls are text, so a model that generates none cannot make them,
+	// whatever its chat template reports.
+	caps.Tools = slices.Contains(caps.Out, "text") && p.supportsTools(props)
 	caps.Context = props.DefaultGenerationSettings.NCtx
 
 	// reranker is not reported by /props. A reranking server answers
