@@ -140,6 +140,7 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	data := make([]modelRecord, 0, len(s.cfg.Models)+len(s.cfg.Selectors))
 	running := s.local.RunningModels()
 	modelIDs := make(map[string]struct{})
+	tailcat := isTailcatRequest(r.Context())
 
 	modelStatus := func(id string) string {
 		if _, ok := running[id]; ok {
@@ -200,6 +201,28 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		status := modelStatus(id)
+		if tailcat && !s.tailcatModelAllowed(id) {
+			// tailcat.models named only some of this model's aliases, to
+			// publish it under those names and keep its real ID private. List
+			// each such alias as a model in its own right: an alias record
+			// would carry the real ID, and the Playground offers no pick for
+			// an alias whose model is missing from the list.
+			var published []string
+			for _, alias := range mc.Aliases {
+				if alias = strings.TrimSpace(alias); alias != "" && s.tailcatModelAllowed(alias) {
+					published = append(published, alias)
+				}
+			}
+			if len(published) == 0 {
+				continue
+			}
+			caps := s.resolveCapabilities(r.Context(), id, mc)
+			for _, alias := range published {
+				data = append(data, newRecord(alias, mc.Name, mc.Description, mc.Metadata, caps, status,
+					map[string]any{"type": "model"}))
+			}
+			continue
+		}
 		internalMetadata := map[string]any{"type": "model"}
 		if len(mc.Aliases) > 0 {
 			internalMetadata["aliases"] = mc.Aliases
@@ -304,14 +327,11 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sort.Slice(data, func(i, j int) bool { return data[i].ID < data[j].ID })
-	if isTailcatRequest(r.Context()) {
-		exposed := s.cfg.Tailcat
+	if tailcat {
 		filtered := data[:0]
-		if exposed != nil {
-			for _, record := range data {
-				if tailcatModelAllowed(exposed.Models, record.ID) {
-					filtered = append(filtered, record)
-				}
+		for _, record := range data {
+			if s.tailcatModelAllowed(record.ID) {
+				filtered = append(filtered, record)
 			}
 		}
 		data = filtered
