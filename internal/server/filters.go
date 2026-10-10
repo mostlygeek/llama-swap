@@ -10,6 +10,7 @@ import (
 
 	"github.com/mostlygeek/llama-swap/internal/chain"
 	"github.com/mostlygeek/llama-swap/internal/config"
+	"github.com/mostlygeek/llama-swap/internal/spl"
 	"github.com/mostlygeek/llama-swap/internal/swaputil"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -22,6 +23,7 @@ import (
 //   - StripParams removal (issue #174)
 //   - SetParams injection (issue #453)
 //   - SetParamsByID per-alias overrides
+//   - SPL programs: hooks.on_request, then the model or peer filters.policy
 //
 // Non-JSON requests (GET, multipart forms) pass through untouched. The buffered
 // body is re-attached with Content-Length / Transfer-Encoding cleanup so the
@@ -56,6 +58,38 @@ func CreateFilterMiddleware(cfg config.Config) chain.Middleware {
 			if err != nil {
 				swaputil.SendResponse(w, r, http.StatusInternalServerError, err.Error())
 				return
+			}
+
+			if programs := cfg.SPL(); programs != nil {
+				hook, policy := resolvePolicies(cfg, programs, data.Model)
+				if hook != nil || policy != nil {
+					if data.Metadata == nil {
+						// extractContext allocates the map on the normal path;
+						// this covers hand-built contexts so context.* writes
+						// still reach the metrics middleware.
+						data.Metadata = make(map[string]string)
+						*r = *r.WithContext(swaputil.SetContext(r.Context(), data))
+					}
+					req := &spl.Request{
+						Body:    body,
+						Context: data.Metadata,
+						APIKey:  data.ApiKey,
+						Model:   data.Model,
+						Path:    r.URL.Path,
+						Method:  r.Method,
+						Header:  r.Header,
+					}
+					denied, err := runPolicies(programs.Library, req, hook, policy)
+					if err != nil {
+						swaputil.SendResponse(w, r, http.StatusInternalServerError, err.Error())
+						return
+					}
+					if denied != nil {
+						swaputil.SendResponse(w, r, denied.Status, denied.Message)
+						return
+					}
+					body = req.Body
+				}
 			}
 
 			r.Body = io.NopCloser(bytes.NewReader(body))
@@ -122,6 +156,38 @@ func resolveFilters(cfg config.Config, requested string) (useModelName string, f
 		return "", cfg.Peers[peerID].Filters, true
 	}
 	return "", config.Filters{}, false
+}
+
+// resolvePolicies returns the global hooks.on_request program and the
+// filters.policy of the requested model or peer. The lookup order matches
+// resolveFilters: local models first, then peers.
+func resolvePolicies(cfg config.Config, programs *config.SPLPrograms, requested string) (hook, policy *spl.Program) {
+	hook = programs.OnRequest
+	if realName, found := cfg.RealModelName(requested); found {
+		return hook, programs.Models[realName]
+	}
+	if peerID, _, found := cfg.ResolvePeerModel(requested); found {
+		return hook, programs.Peers[peerID]
+	}
+	return hook, nil
+}
+
+// runPolicies runs each non-nil program in order over req. The body and
+// context carry from one program to the next. The first deny stops the chain.
+func runPolicies(lib *spl.Library, req *spl.Request, programs ...*spl.Program) (*spl.Denial, error) {
+	for _, prog := range programs {
+		if prog == nil {
+			continue
+		}
+		denied, err := prog.Run(lib, req)
+		if err != nil {
+			return nil, fmt.Errorf("policy error: %w", err)
+		}
+		if denied != nil {
+			return denied, nil
+		}
+	}
+	return nil, nil
 }
 
 // applyFilters rewrites the JSON body in place. Order matches the legacy
