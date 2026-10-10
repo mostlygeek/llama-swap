@@ -1,5 +1,21 @@
 # Changelog
 
+## v263 (Oct 9, 2026)
+
+I've been busy, busy, busy and have not had as much time for llama-swap as I
+would like. This release includes reliability improvements, improved
+compatibility and some small quality of life improvements. Thank you for the
+amazing contributors for this release! Everyone who files issues or submits a
+PR is greatly appreciated.
+
+- [PR #1213](https://github.com/mostlygeek/llama-swap/pull/1213) Add confirmation UI and progress tracking for WoL wake: wol-proxy gets a `-require-confirm` flag that shows a "Start server" page instead of waking on every request, plus a retro loading page with a progress bar estimated from the last wake duration by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1215](https://github.com/mostlygeek/llama-swap/pull/1215) internal/router: strip browser headers before proxying to peers: fix UI chats failing with a 401 against an api.anthropic.com peer, which treated the forwarded browser Origin header as a direct browser call; Origin, Referer, Sec-Fetch-* and Access-Control-Request-* are now removed (#1214) by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1212](https://github.com/mostlygeek/llama-swap/pull/1212) internal/process: report loading progress from the health check: parse `progress`/`message` from not-ready health check JSON bodies, show it on the Models and model detail pages, and restart the `healthCheckTimeout` countdown when progress changes so long loads don't time out (#1079, #1208) by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1196](https://github.com/mostlygeek/llama-swap/pull/1196) internal/perf: restart loop to trigger GPU collector when the monitor still running: fix GPU stats stopping for good after `nvidia-smi` exited; the exit error is now logged and the collector restarts with a 5 to 30 second backoff (#1155) by [@hpdkhoa](https://github.com/hpdkhoa)
+- [PR #1211](https://github.com/mostlygeek/llama-swap/pull/1211) internal/process: add a per-model disableKeepAlives option (#1205): fix intermittent 502 `proxy error: EOF` when a POST reused a pooled connection that llama-server closed after a streamed response; `disableKeepAlives: true` opens a new connection per request by [@johnnieCR](https://github.com/johnnieCR)
+- [PR #1199](https://github.com/mostlygeek/llama-swap/pull/1199) fix(metrics): show oMLX token rates in Activity: read oMLX's `usage.prompt_tokens_per_second` and `usage.generation_tokens_per_second` as a fallback so rates no longer show as unknown by [@junmo-kim](https://github.com/junmo-kim)
+- [PR #1198](https://github.com/mostlygeek/llama-swap/pull/1198) internal/capcompat: add Gufo inference engine prober: add a default capability prober that uses only `/v1/models` data as the fallback for servers without a custom prober (vLLM, Gufo, SGLang, etc.), replacing the vLLM-specific one by [@berney](https://github.com/berney)
+
 ## v262 (Oct 2, 2026)
 
 systemone models are mega hyped right now. This release adds support for
