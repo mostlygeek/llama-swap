@@ -1,0 +1,24 @@
+# eviction_tiebreaker is enum-validated by the chart (lexical | lru);
+# a typo must fail rendering instead of being silently dropped.
+config:
+  top:
+    healthCheckTimeout: 600
+  matrix:
+    builder: gpu-budget
+    budget: 2
+    eviction_tiebreaker: recency
+  defaults:
+    image: ghcr.io/mostlygeek/llama-swap:unified-vulkan
+    command: llama-server
+    gpu: [amd.com/gpu=1]
+    volumes:
+      - pvc:model-cache:/models
+  models:
+    - id: llm-a
+      args: --model /models/a.gguf
+    - id: llm-b
+      args: --model /models/b.gguf
+    - id: asr
+      gpu: []
+      command: whisper-server
+      args: --model /models/d.bin

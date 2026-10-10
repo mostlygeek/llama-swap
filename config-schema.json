@@ -145,6 +145,11 @@
                         "minimum": 1
                     }
                 },
+                "eviction_tiebreaker": {
+                    "type": "string",
+                    "enum": ["lexical", "lru"],
+                    "description": "Policy for choosing between candidate sets with equal eviction cost. lexical (default) keeps the first set in definition order; lru prefers the candidate that evicts the longest-idle running model. Eviction cost is always the primary key."
+                },
                 "sets": {
                     "type": "object",
                     "description": "Named sets of concurrent model combinations. Values are DSL strings using & (AND), | (OR), () (grouping), and +ref (inline another set). Definition order is used for tie-breaking.",

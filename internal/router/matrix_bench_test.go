@@ -12,6 +12,8 @@ import (
 
 var benchmarkSolveResult solveResult
 
+// BenchmarkMatrixSolver_Solve measures a lexical solve against matrices of
+// growing combinatorial size: all combinations of one choice per dimension.
 func BenchmarkMatrixSolver_Solve(b *testing.B) {
 	for _, dimensions := range []int{2, 3, 4, 5} {
 		solver := benchmarkCompiledMatrix(b, dimensions, 10)
@@ -25,7 +27,7 @@ func BenchmarkMatrixSolver_Solve(b *testing.B) {
 		b.Run(fmt.Sprintf("Combinations_%d", combinations), func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				benchmarkSolveResult = solver.Solve("target", running)
+				benchmarkSolveResult = solver.Solve("target", running, nil)
 			}
 		})
 	}
@@ -43,7 +45,7 @@ func BenchmarkMatrixSwapPath(b *testing.B) {
 		b.Fatal(err)
 	}
 	swapper := &matrixSwapper{
-		solver: newMatrixSolver(matrix.Program(), matrix.ResolvedEvictCosts()),
+		solver: newMatrixSolver(matrix.Program(), matrix.ResolvedEvictCosts(), config.EvictionTieBreakerLexical),
 		logger: logmon.NewWriter(io.Discard),
 	}
 	// Rotate the running set so each EvictionFor sees a fresh picture (cache
@@ -97,6 +99,8 @@ func benchmarkMultiSetMatrix(setCount, choices int) (*config.MatrixConfig, map[s
 	return &config.MatrixConfig{EvictCosts: evictCosts, Sets: sets}, models
 }
 
+// benchmarkCompiledMatrix compiles a matrix of the target AND-ed with
+// dimensions OR-groups of choices models each, and returns its solver.
 func benchmarkCompiledMatrix(b *testing.B, dimensions, choices int) *matrixSolver {
 	b.Helper()
 	groups := make([]string, dimensions)
@@ -120,7 +124,7 @@ func benchmarkCompiledMatrix(b *testing.B, dimensions, choices int) *matrixSolve
 	if err := config.ValidateMatrix(matrix, models); err != nil {
 		b.Fatal(err)
 	}
-	return newMatrixSolver(matrix.Program(), nil)
+	return newMatrixSolver(matrix.Program(), nil, config.EvictionTieBreakerLexical)
 }
 
 func benchmarkIntPow(base, exponent int) int {

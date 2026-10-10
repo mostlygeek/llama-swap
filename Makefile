@@ -61,6 +61,11 @@ test-chart:
 			echo "chart: correctly rejected: $$f"; \
 		fi; \
 	done
+	@helm template llama-swap cmd/kubeswap/chart -n llama-swap \
+		-f cmd/kubeswap/chart/test-values/structured-gpu-budget-lru.yaml \
+		| grep -q "eviction_tiebreaker: lru" \
+		&& echo "chart: eviction_tiebreaker knob renders into the config" \
+		|| { echo "chart: eviction_tiebreaker knob missing from rendered config"; exit 1; }
 
 ui/node_modules:
 	cd ui && npm install

@@ -754,6 +754,14 @@ routing:
           v: 50 # vllm backend, slow cold start
           llama-70B: 30 # 70B weights, slow to load
 
+        # eviction_tiebreaker: how to choose between candidates that score
+        # the same eviction cost (cost is always the primary key):
+        # - lexical (default): first candidate in set-definition order wins
+        # - lru: prefer the candidate evicting the longest-idle running
+        #        model (idle = time since it became ready or last finished
+        #        a request); equal idle times fall back to definition order
+        # eviction_tiebreaker: lru
+
         # sets: named combinations of models that may run together.
         # Each value is an expression built from these operators:
         #   &     AND   (models run together)

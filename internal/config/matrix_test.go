@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	matrixdsl "github.com/mostlygeek/llama-swap/internal/matrix"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -16,6 +17,8 @@ func makeModels(names ...string) map[string]ModelConfig {
 	return m
 }
 
+// TestValidateMatrix_Basic verifies a standard matrix passes validation and
+// that the compiled program routes and evicts as documented.
 func TestValidateMatrix_Basic(t *testing.T) {
 	models := makeModels("gemma", "qwen", "mistral", "voxtral", "llama70B")
 
@@ -40,17 +43,19 @@ func TestValidateMatrix_Basic(t *testing.T) {
 	err := ValidateMatrix(&matrix, models)
 	require.NoError(t, err)
 
-	result := matrix.Program().Solve("gemma", []string{"voxtral"}, matrix.ResolvedEvictCosts())
+	result := matrix.Program().Solve("gemma", []string{"voxtral"}, matrixdsl.SolveOptions{EvictCosts: matrix.ResolvedEvictCosts()})
 	assert.Equal(t, "standard", result.SetName)
 	assert.Equal(t, []string{"gemma", "voxtral"}, result.TargetSet)
 	assert.Empty(t, result.Evict)
 
-	result = matrix.Program().Solve("llama70B", []string{"voxtral"}, matrix.ResolvedEvictCosts())
+	result = matrix.Program().Solve("llama70B", []string{"voxtral"}, matrixdsl.SolveOptions{EvictCosts: matrix.ResolvedEvictCosts()})
 	assert.Equal(t, "full", result.SetName)
 	assert.Equal(t, []string{"llama70B"}, result.TargetSet)
 	assert.Equal(t, []string{"voxtral"}, result.Evict)
 }
 
+// TestValidateMatrix_WithRef verifies a set built from a +ref expansion
+// passes validation and coexists with the referenced set's models.
 func TestValidateMatrix_WithRef(t *testing.T) {
 	models := makeModels("gemma", "qwen", "mistral", "voxtral", "reranker")
 
@@ -72,12 +77,14 @@ func TestValidateMatrix_WithRef(t *testing.T) {
 	err := ValidateMatrix(&matrix, models)
 	require.NoError(t, err)
 
-	result := matrix.Program().Solve("reranker", []string{"gemma", "voxtral"}, nil)
+	result := matrix.Program().Solve("reranker", []string{"gemma", "voxtral"}, matrixdsl.SolveOptions{EvictCosts: matrix.ResolvedEvictCosts()})
 	assert.Equal(t, "mega", result.SetName)
 	assert.Equal(t, []string{"gemma", "reranker", "voxtral"}, result.TargetSet)
 	assert.Empty(t, result.Evict)
 }
 
+// TestValidateMatrix_DirectAndMixedModelNames verifies matrix definitions
+// that mix var references and direct model names.
 func TestValidateMatrix_DirectAndMixedModelNames(t *testing.T) {
 	models := makeModels("gemma", "qwen", "voxtral")
 
@@ -88,7 +95,7 @@ func TestValidateMatrix_DirectAndMixedModelNames(t *testing.T) {
 
 		err := ValidateMatrix(&matrix, models)
 		require.NoError(t, err)
-		result := matrix.Program().Solve("gemma", []string{"voxtral"}, nil)
+		result := matrix.Program().Solve("gemma", []string{"voxtral"}, matrixdsl.SolveOptions{EvictCosts: matrix.ResolvedEvictCosts()})
 		assert.Equal(t, []string{"gemma", "voxtral"}, result.TargetSet)
 	})
 
@@ -103,7 +110,7 @@ func TestValidateMatrix_DirectAndMixedModelNames(t *testing.T) {
 
 		err := ValidateMatrix(&matrix, models)
 		require.NoError(t, err)
-		result := matrix.Program().Solve("qwen", []string{"voxtral"}, nil)
+		result := matrix.Program().Solve("qwen", []string{"voxtral"}, matrixdsl.SolveOptions{EvictCosts: matrix.ResolvedEvictCosts()})
 		assert.Equal(t, "combo", result.SetName)
 		assert.Equal(t, []string{"qwen", "voxtral"}, result.TargetSet)
 	})
@@ -116,7 +123,7 @@ func TestValidateMatrix_DirectAndMixedModelNames(t *testing.T) {
 
 		err := ValidateMatrix(&matrix, models)
 		require.NoError(t, err)
-		result := matrix.Program().Solve("gemma", nil, nil)
+		result := matrix.Program().Solve("gemma", nil, matrixdsl.SolveOptions{})
 		assert.Equal(t, []string{"gemma"}, result.TargetSet)
 	})
 
@@ -128,7 +135,7 @@ func TestValidateMatrix_DirectAndMixedModelNames(t *testing.T) {
 
 		err := ValidateMatrix(&matrix, models)
 		require.NoError(t, err)
-		result := matrix.Program().Solve("gemma", nil, nil)
+		result := matrix.Program().Solve("gemma", nil, matrixdsl.SolveOptions{})
 		assert.Equal(t, []string{"gemma"}, result.TargetSet)
 	})
 }
@@ -326,6 +333,8 @@ matrix:
 	assert.Contains(t, err.Error(), "cannot use both")
 }
 
+// TestValidateMatrix_ConfigMatrixOnly verifies a config that routes via
+// matrix leaves the groups section empty.
 func TestValidateMatrix_ConfigMatrixOnly(t *testing.T) {
 	yaml := `
 models:
@@ -350,4 +359,33 @@ matrix:
 	assert.Same(t, cfg.Matrix.Program(), cfg.Routing.Router.Settings.Matrix.Program())
 	// Groups should be empty when matrix is used
 	assert.Empty(t, cfg.Groups)
+}
+
+// TestValidateMatrix_EvictionTieBreaker verifies the eviction_tiebreaker
+// policy is validated and normalized: unknown values are rejected and the
+// empty string becomes lexical.
+func TestValidateMatrix_EvictionTieBreaker(t *testing.T) {
+	models := map[string]ModelConfig{"gemma": {}}
+	newMatrix := func(tieBreaker string) *MatrixConfig {
+		return &MatrixConfig{
+			Var:                map[string]string{"g": "gemma"},
+			Sets:               OrderedSets{{Name: "solo", DSL: "g"}},
+			EvictionTieBreaker: tieBreaker,
+		}
+	}
+
+	// An unknown policy is rejected.
+	err := ValidateMatrix(newMatrix("recency"), models)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "eviction_tiebreaker")
+
+	// The empty string normalizes to the historical lexical policy.
+	m := newMatrix("")
+	require.NoError(t, ValidateMatrix(m, models))
+	assert.Equal(t, EvictionTieBreakerLexical, m.EvictionTieBreaker)
+
+	// lru is accepted as-is.
+	m = newMatrix(EvictionTieBreakerLRU)
+	require.NoError(t, ValidateMatrix(m, models))
+	assert.Equal(t, EvictionTieBreakerLRU, m.EvictionTieBreaker)
 }

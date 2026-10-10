@@ -3,6 +3,7 @@ package matrix
 import (
 	"fmt"
 	"testing"
+	"time"
 )
 
 var (
@@ -33,7 +34,48 @@ func BenchmarkProgram_SolveMultiSet(b *testing.B) {
 		b.Run(fmt.Sprintf("Sets_%d", setCount), func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				benchmarkDecision = program.Solve(target, running, costs)
+				benchmarkDecision = program.Solve(target, running, SolveOptions{EvictCosts: costs})
+			}
+		})
+	}
+}
+
+// BenchmarkProgram_SolveMultiSetLRU measures the lru tie-breaker path: the
+// same scenarios as BenchmarkProgram_SolveMultiSet with idle ages supplied,
+// so the eviction lists are built and ranked.
+func BenchmarkProgram_SolveMultiSetLRU(b *testing.B) {
+	for _, setCount := range []int{1, 8, 32} {
+		definitions, known, costs := multiSetDefinitions(setCount, 10)
+		program, err := Compile(definitions, func(name string) (string, bool) {
+			return name, known[name]
+		})
+		if err != nil {
+			b.Fatal(err)
+		}
+		q := setCount / 2
+		target := fmt.Sprintf("target-%d", q)
+		running := []string{
+			fmt.Sprintf("a-%d-1", q), fmt.Sprintf("b-%d-2", q),
+			"a-0-0", "b-0-1", "outside",
+		}
+		// Distinct idle ages so the ranking is exercised, not a residual
+		// tie fallthrough.
+		idle := map[string]time.Duration{
+			running[0]: 30 * time.Minute,
+			running[1]: time.Hour,
+			running[2]: 5 * time.Minute,
+			running[3]: 45 * time.Minute,
+			running[4]: time.Minute,
+		}
+
+		b.Run(fmt.Sprintf("Sets_%d", setCount), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				benchmarkDecision = program.Solve(target, running, SolveOptions{
+					EvictCosts: costs,
+					TieBreaker: TieBreakerLRU,
+					Idle:       idle,
+				})
 			}
 		})
 	}
