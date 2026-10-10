@@ -1,0 +1,12 @@
+{
+  "action": "opened",
+  "issue": {
+    "number": 44,
+    "node_id": "I_kwDOAAAAAE",
+    "title": "How do groups work?",
+    "body": "@help I have two GPUs and want two models resident at once. How do groups work?",
+    "html_url": "https://github.com/mostlygeek/llama-swap/issues/44",
+    "user": { "login": "someone", "type": "User" }
+  },
+  "repository": { "full_name": "mostlygeek/llama-swap" }
+}

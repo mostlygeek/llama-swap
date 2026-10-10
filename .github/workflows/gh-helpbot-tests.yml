@@ -1,0 +1,37 @@
+name: gh-helpbot Tests
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'cmd/gh-helpbot/**'
+      - 'ui/src/lib/**'
+      - 'ui/src/cli/**'
+      - '.github/workflows/gh-helpbot-tests.yml'
+
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'cmd/gh-helpbot/**'
+      - 'ui/src/lib/**'
+      - 'ui/src/cli/**'
+      - '.github/workflows/gh-helpbot-tests.yml'
+
+  workflow_dispatch:
+
+jobs:
+
+  run-tests:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # 6.0.2
+
+    - name: Set up Node.js
+      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # 6.4.0
+      with:
+        node-version: '24'
+        cache: 'npm'
+        cache-dependency-path: cmd/gh-helpbot/package-lock.json
+
+    - name: Run gh-helpbot tests
+      run: make test-gh-helpbot

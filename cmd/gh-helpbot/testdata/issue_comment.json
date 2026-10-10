@@ -1,0 +1,18 @@
+{
+  "action": "created",
+  "issue": {
+    "number": 42,
+    "node_id": "I_kwDOAAAAAA",
+    "title": "Model unloads too early",
+    "body": "My model unloads after a minute. Config below.\n\n```yaml\nmodels:\n  qwen:\n    cmd: llama-server -m qwen.gguf\n    ttl: 60\n```",
+    "html_url": "https://github.com/mostlygeek/llama-swap/issues/42",
+    "user": { "login": "someone", "type": "User" }
+  },
+  "comment": {
+    "node_id": "IC_kwDOAAAAAB",
+    "body": "@help how do I make a model unload after 5 minutes instead?",
+    "html_url": "https://github.com/mostlygeek/llama-swap/issues/42#issuecomment-1",
+    "user": { "login": "someone", "type": "User" }
+  },
+  "repository": { "full_name": "mostlygeek/llama-swap" }
+}
