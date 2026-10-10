@@ -220,9 +220,10 @@ config:
   matrix:
     builder: gpu-budget        # gpu-budget | pools | manual
     budget: 1                  # how many GPU models may run at once
-    evict_costs:               # optional: model id -> cost (default 1); a
-      krea2-turbo: 10           # high cost makes the router evict other
-      ideogram4: 10             # models first
+    evict_costs:               # optional: model id -> multiplier on its
+      krea2-turbo: 2            # measured load time (default 1); a high
+      ideogram4: 2              # multiplier makes the router evict other
+                                # models first
     exclusive: []              # optional: models that run alone, outside the budget
 ```
 

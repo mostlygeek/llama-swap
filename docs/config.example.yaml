@@ -725,8 +725,10 @@ routing:
       #   1. A request arrives for model X.
       #   2. If X is already running, forward the request. Done.
       #   3. Collect every set that contains X.
-      #   4. For each set, add up the evict_costs of the running models that
-      #      are NOT in that set — that is the set's cost.
+      #   4. For each set, add up the eviction costs of the running models
+      #      that are NOT in that set — that is the set's cost. A model's
+      #      cost is its evict_costs multiplier multiplied by its measured
+      #      median load time in milliseconds (see evict_costs below).
       #   5. Choose the lowest-cost set. Break ties by definition order.
       #   6. Evict the models outside that set, start X, forward the request.
       #
@@ -749,10 +751,17 @@ routing:
           v: voxtral-model
           e: reranker-model
 
-        # evict_costs: relative cost of losing a running model (default: 1)
+        # evict_costs: multiplier on the model's measured median load time
+        # used when costing an eviction (default: 1). llama-swap times every
+        # model load (starting -> ready) and keeps the median of its last few
+        # loads, so slow-to-reload models are expensive to evict without any
+        # configuration. Use a multiplier above 1 to protect a model beyond
+        # what its measured reload time implies (e.g. licensing, warm caches
+        # a timer cannot see).
         evict_costs:
-          v: 50 # vllm backend, slow cold start
-          llama-70B: 30 # 70B weights, slow to load
+          v: 3 # penalize vllm beyond its already-slow measured load
+          llama-70B: 2 # keep the 70B loaded a bit harder than its
+                       # load time alone would justify
 
         # sets: named combinations of models that may run together.
         # Each value is an expression built from these operators:

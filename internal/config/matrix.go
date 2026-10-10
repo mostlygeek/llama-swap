@@ -77,7 +77,7 @@ func ValidateMatrix(matrix *MatrixConfig, models map[string]ModelConfig) error {
 	if matrix.EvictCosts != nil {
 		for key, cost := range matrix.EvictCosts {
 			if cost <= 0 {
-				return fmt.Errorf("evict_cost for %q must be a positive integer, got %d", key, cost)
+				return fmt.Errorf("evict_cost multiplier for %q must be a positive integer, got %d", key, cost)
 			}
 			if _, ok := resolveMatrixModel(key, matrix.Var, models); !ok {
 				return fmt.Errorf("evict_costs: unknown var or model %q", key)
@@ -113,8 +113,10 @@ func resolveMatrixModel(ident string, vars map[string]string, models map[string]
 	return "", false
 }
 
-// ResolvedEvictCosts returns a map of real model name -> evict cost,
-// resolving var IDs. Models not listed default to 1.
+// ResolvedEvictCosts returns a map of real model name -> evict cost
+// multiplier, resolving var IDs. The multiplier scales the model's measured
+// median load time when the router costs an eviction. Models not listed
+// default to 1.
 func (m *MatrixConfig) ResolvedEvictCosts() map[string]int {
 	costs := make(map[string]int)
 	if m.EvictCosts == nil {

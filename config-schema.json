@@ -139,7 +139,7 @@
                 },
                 "evict_costs": {
                     "type": "object",
-                    "description": "Relative cost of evicting a running model. Models not listed default to 1. Values must be positive integers.",
+                    "description": "Multiplier applied to a model's measured median load time (ms) when costing an eviction. The solver evicts the models with the lowest multiplier x load time first. Models not listed default to a multiplier of 1. Values must be positive integers.",
                     "additionalProperties": {
                         "type": "integer",
                         "minimum": 1
