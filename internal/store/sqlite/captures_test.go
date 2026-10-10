@@ -1,0 +1,529 @@
+package sqlite
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// newCaptureStore opens a store whose captures live in their own file.
+func newCaptureStore(t *testing.T, maxBytes int64) (*Store, string) {
+	t.Helper()
+
+	dir := t.TempDir()
+	st, err := New(Options{
+		Path:             filepath.Join(dir, "activity.db"),
+		CapturesPath:     filepath.Join(dir, "captures.db"),
+		CapturesMaxBytes: maxBytes,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { st.Close() })
+
+	return st, filepath.Join(dir, "captures.db")
+}
+
+// openRaw opens a database file directly, for assertions the API does not
+// expose.
+func openRaw(t *testing.T, path string) *sql.DB {
+	t.Helper()
+
+	db, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { db.Close() })
+
+	return db
+}
+
+func rowCount(t *testing.T, path string) int {
+	t.Helper()
+
+	db := openRaw(t, path)
+	var count int
+	require.NoError(t, db.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM captures`).Scan(&count))
+
+	return count
+}
+
+// storedBytes reads the budget's own total from a file.
+func storedBytes(t *testing.T, path string) int64 {
+	t.Helper()
+
+	db := openRaw(t, path)
+	var stored int64
+	require.NoError(t, db.QueryRowContext(context.Background(),
+		`SELECT COALESCE(SUM(size), 0) FROM captures`).Scan(&stored))
+
+	return stored
+}
+
+// survivingIDs lists the capture ids in prune order: oldest write first, and
+// within one second, inserted first.
+func survivingIDs(t *testing.T, path string) []int {
+	t.Helper()
+
+	db := openRaw(t, path)
+	rows, err := db.QueryContext(context.Background(),
+		`SELECT id FROM captures ORDER BY created ASC, rowid ASC`)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	var ids []int
+	for rows.Next() {
+		var id int
+		require.NoError(t, rows.Scan(&id))
+		ids = append(ids, id)
+	}
+	require.NoError(t, rows.Err())
+
+	return ids
+}
+
+func TestStore_NewCreatesMissingDirectories(t *testing.T) {
+	dir := t.TempDir()
+	activityPath := filepath.Join(dir, "a", "b", "activity.db")
+	capturesPath := filepath.Join(dir, "c", "d", "captures.db")
+
+	st, err := New(Options{
+		Path:             activityPath,
+		CapturesPath:     capturesPath,
+		CapturesMaxBytes: 1 << 20,
+	})
+	require.NoError(t, err)
+	require.NoError(t, st.Captures().Put(context.Background(), 1, []byte("x")))
+	require.NoError(t, st.Close())
+
+	for _, path := range []string{activityPath, capturesPath} {
+		_, err := os.Stat(path)
+		require.NoError(t, err, path)
+	}
+}
+
+func TestStore_CapturesDisabledWithoutPath(t *testing.T) {
+	st, err := New(Options{Path: filepath.Join(t.TempDir(), "activity.db")})
+	require.NoError(t, err)
+	defer st.Close()
+
+	if st.Captures() != nil {
+		t.Fatal("Captures() must be nil when no captures file is configured")
+	}
+}
+
+// The repository contract is asserted for every backend in
+// captures_conformance_test.go; the tests below cover the SQLite backend.
+
+func TestStore_CapturesEnforcesLoweredBudgetOnOpen(t *testing.T) {
+	const blobSize = 10_000
+	ctx := context.Background()
+
+	dir := t.TempDir()
+	activityPath := filepath.Join(dir, "activity.db")
+	capturesPath := filepath.Join(dir, "captures.db")
+
+	first, err := New(Options{
+		Path:             activityPath,
+		CapturesPath:     capturesPath,
+		CapturesMaxBytes: 400_000,
+	})
+	require.NoError(t, err)
+	for id := 1; id <= 20; id++ {
+		require.NoError(t, first.Captures().Put(ctx, id, []byte(blobOf(blobSize))))
+	}
+	require.Equal(t, 20, rowCount(t, capturesPath))
+	require.NoError(t, first.Close())
+
+	// 200 KB stored under a 150 KB budget evicts the oldest 50 KB.
+	second, err := New(Options{
+		Path:             activityPath,
+		CapturesPath:     capturesPath,
+		CapturesMaxBytes: 150_000,
+	})
+	require.NoError(t, err)
+	defer second.Close()
+
+	count := rowCount(t, capturesPath)
+	require.Greater(t, count, 5)
+	require.Less(t, count, 20)
+	assert.Equal(t, 15, count, "the budget should free exactly the excess")
+
+	found, err := second.Captures().Has(ctx, []int{1, 20})
+	require.NoError(t, err)
+	assert.NotContains(t, found, 1, "the oldest capture should be evicted")
+	assert.Contains(t, found, 20, "the newest capture should survive")
+}
+
+func TestStore_CapturesPersistsAcrossReopen(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	opts := Options{
+		Path:             filepath.Join(dir, "activity.db"),
+		CapturesPath:     filepath.Join(dir, "captures.db"),
+		CapturesMaxBytes: 1 << 20,
+	}
+
+	first, err := New(opts)
+	require.NoError(t, err)
+	require.NoError(t, first.Captures().Put(ctx, 11, []byte("persisted")))
+	require.NoError(t, first.Close())
+
+	second, err := New(opts)
+	require.NoError(t, err)
+	defer second.Close()
+
+	got, found, err := second.Captures().Get(ctx, 11)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, []byte("persisted"), got)
+}
+
+func TestStore_CapturesUseTheirOwnDatabaseFile(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	activityPath := filepath.Join(dir, "activity.db")
+	capturesPath := filepath.Join(dir, "captures.db")
+
+	st, err := New(Options{
+		Path:             activityPath,
+		CapturesPath:     capturesPath,
+		CapturesMaxBytes: 1 << 20,
+	})
+	require.NoError(t, err)
+	require.NoError(t, st.Captures().Put(ctx, 1, []byte("x")))
+	require.NoError(t, st.Close())
+
+	capturesTables := tableNames(t, capturesPath)
+	assert.Contains(t, capturesTables, "captures")
+	assert.NotContains(t, capturesTables, "activity")
+	assert.NotContains(t, capturesTables, "cache")
+
+	activityTables := tableNames(t, activityPath)
+	assert.Contains(t, activityTables, "activity")
+	assert.NotContains(t, activityTables, "captures")
+}
+
+func TestStore_CapturesRejectSharedDatabaseFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "store.db")
+
+	st, err := New(Options{Path: path, CapturesPath: path})
+	require.Error(t, err)
+	assert.Nil(t, st)
+	assert.Contains(t, err.Error(), "captures need their own file")
+}
+
+func TestStore_CapturesInMemoryStoreAllowsCapturesPath(t *testing.T) {
+	// Only the config layer requires store.path.
+	st, err := New(Options{
+		Path:             "",
+		CapturesPath:     filepath.Join(t.TempDir(), "captures.db"),
+		CapturesMaxBytes: 1 << 20,
+	})
+	require.NoError(t, err)
+	defer st.Close()
+
+	require.NotNil(t, st.Captures())
+	assert.True(t, st.IsInMemory())
+}
+
+// activityIDIn reads an activity database's own id.
+func activityIDIn(t *testing.T, path string) string {
+	t.Helper()
+
+	db := openRaw(t, path)
+	var id string
+	require.NoError(t, db.QueryRowContext(context.Background(),
+		`SELECT value FROM meta WHERE key = 'database_id'`).Scan(&id))
+
+	return id
+}
+
+// A capture row records the activity database it belongs to, and the captures
+// file keeps no identity of its own: it is shared by every activity database
+// that has used it.
+func TestStore_CapturesRowsCarryTheActivityDatabaseID(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	activityPath := filepath.Join(dir, "activity.db")
+	capturesPath := filepath.Join(dir, "captures.db")
+
+	st, err := New(Options{
+		Path:             activityPath,
+		CapturesPath:     capturesPath,
+		CapturesMaxBytes: 1 << 20,
+	})
+	require.NoError(t, err)
+	require.NoError(t, st.Captures().Put(ctx, 1, []byte("x")))
+	require.NoError(t, st.Close())
+
+	db := openRaw(t, capturesPath)
+	var rowDB string
+	require.NoError(t, db.QueryRowContext(ctx,
+		`SELECT db FROM captures WHERE id = 1`).Scan(&rowDB))
+	assert.Equal(t, activityIDIn(t, activityPath), rowDB)
+
+	assert.NotContains(t, tableNames(t, capturesPath), "meta")
+}
+
+// A captures file left by another activity database is kept: its rows belong
+// to that database, so they are invisible here and the budget prunes them as
+// the oldest captures in the file.
+func TestStore_CapturesFileFromAnotherActivityDatabaseIsKept(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	capturesPath := filepath.Join(dir, "captures.db")
+
+	first, err := New(Options{
+		Path:             filepath.Join(dir, "activity.db"),
+		CapturesPath:     capturesPath,
+		CapturesMaxBytes: 1 << 20,
+	})
+	require.NoError(t, err)
+	require.NoError(t, first.Captures().Put(ctx, 1, []byte("old")))
+	require.NoError(t, first.Close())
+
+	// A brand-new activity database paired with the stale captures file.
+	recreatedActivityPath := filepath.Join(dir, "activity-recreated.db")
+	second, err := New(Options{
+		Path:             recreatedActivityPath,
+		CapturesPath:     capturesPath,
+		CapturesMaxBytes: 1 << 20,
+	})
+	require.NoError(t, err)
+	defer second.Close()
+
+	_, err = os.Stat(capturesPath + ".1")
+	require.True(t, errors.Is(err, os.ErrNotExist), "the file is taken over in place")
+
+	_, found, err := second.Captures().Get(ctx, 1)
+	require.NoError(t, err)
+	assert.False(t, found, "the other activity database's capture is not this store's")
+	assert.Equal(t, 1, rowCount(t, capturesPath), "its rows stay until the budget prunes them")
+}
+
+// A config reload builds the new store while the old one is still serving
+// requests, so both name the same captures file. Nothing is moved out from
+// under the live store: the two stores write one file and read only their own
+// rows, because ids restart at 1 in every activity database.
+func TestStore_TwoLiveStoresShareOneCapturesFile(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	capturesPath := filepath.Join(dir, "captures.db")
+	oldActivityPath := filepath.Join(dir, "activity-a.db")
+	newActivityPath := filepath.Join(dir, "activity-b.db")
+
+	old, err := New(Options{
+		Path:             oldActivityPath,
+		CapturesPath:     capturesPath,
+		CapturesMaxBytes: 1 << 20,
+	})
+	require.NoError(t, err)
+	require.NoError(t, old.Captures().Put(ctx, 1, []byte("old")))
+
+	// store.path changed, so this store's activity database has a new id and
+	// the captures file looks like it belongs to somebody else.
+	fresh, err := New(Options{
+		Path:             newActivityPath,
+		CapturesPath:     capturesPath,
+		CapturesMaxBytes: 1 << 20,
+	})
+	require.NoError(t, err)
+
+	_, err = os.Stat(capturesPath + ".1")
+	require.True(t, errors.Is(err, os.ErrNotExist), "a live store is writing to this file")
+
+	require.NoError(t, fresh.Captures().Put(ctx, 1, []byte("new")))
+
+	got, found, err := fresh.Captures().Get(ctx, 1)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, []byte("new"), got)
+
+	got, found, err = old.Captures().Get(ctx, 1)
+	require.NoError(t, err)
+	require.True(t, found, "both stores use id 1, so each must read its own capture")
+	assert.Equal(t, []byte("old"), got)
+
+	// The retiring store closing its handle must not disturb the new one.
+	require.NoError(t, old.Close())
+	require.NoError(t, fresh.Captures().Put(ctx, 2, []byte("after")))
+	got, found, err = fresh.Captures().Get(ctx, 2)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, []byte("after"), got)
+
+	require.NoError(t, fresh.Close())
+}
+
+// The budget counts stored bytes from every activity database that has used
+// the file, and prunes them oldest-first: write time orders the rows, because
+// ids restart at 1 in every activity database.
+func TestStore_CapturesBudgetPrunesOldestFirstAcrossDatabases(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	capturesPath := filepath.Join(dir, "captures.db")
+
+	old, err := New(Options{
+		Path:             filepath.Join(dir, "activity-a.db"),
+		CapturesPath:     capturesPath,
+		CapturesMaxBytes: 1 << 20,
+	})
+	require.NoError(t, err)
+	for id := 1; id <= 3; id++ {
+		require.NoError(t, old.Captures().Put(ctx, id, []byte(blobOf(10_000))))
+	}
+	require.NoError(t, old.Close())
+
+	// A new activity database, with a budget that only fits two of them.
+	fresh, err := New(Options{
+		Path:             filepath.Join(dir, "activity-b.db"),
+		CapturesPath:     capturesPath,
+		CapturesMaxBytes: 25_000,
+	})
+	require.NoError(t, err)
+	defer fresh.Close()
+
+	// Opening pruned the oldest capture of the old database.
+	assert.Equal(t, []int{2, 3}, survivingIDs(t, capturesPath))
+
+	// Writing one more prunes the next oldest: the survivors are the newest
+	// capture of the old database, then the new store's own.
+	require.NoError(t, fresh.Captures().Put(ctx, 1, []byte(blobOf(10_000))))
+	assert.Equal(t, []int{3, 1}, survivingIDs(t, capturesPath))
+	assert.LessOrEqual(t, storedBytes(t, capturesPath), int64(25_000))
+
+	got, found, err := fresh.Captures().Get(ctx, 1)
+	require.NoError(t, err)
+	require.True(t, found, "the newest capture must survive")
+	assert.Len(t, got, 10_000)
+}
+
+// A deleted captures file is a missing file: it is recreated in place, with
+// the same name, and the new store's captures land in it.
+func TestStore_DeletedCapturesDatabaseIsRecreated(t *testing.T) {
+	dir := t.TempDir()
+	activityPath := filepath.Join(dir, "activity.db")
+	capturesPath := filepath.Join(dir, "captures.db")
+
+	first, err := New(Options{
+		Path:             activityPath,
+		CapturesPath:     capturesPath,
+		CapturesMaxBytes: 1 << 20,
+	})
+	require.NoError(t, err)
+	require.NoError(t, first.Close())
+
+	require.NoError(t, os.Remove(capturesPath))
+
+	second, err := New(Options{
+		Path:             activityPath,
+		CapturesPath:     capturesPath,
+		CapturesMaxBytes: 1 << 20,
+	})
+	require.NoError(t, err)
+	defer second.Close()
+
+	if _, err := os.Stat(capturesPath + ".1"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("a deleted captures database must be recreated in place, not moved aside")
+	}
+}
+
+// The store that takes over a captures file takes its identity with it, so the
+// captures it writes outlive the reload that created it.
+func TestStore_CapturesWrittenAfterReloadSurviveRestart(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	capturesPath := filepath.Join(dir, "captures.db")
+	newActivityPath := filepath.Join(dir, "activity-b.db")
+
+	old, err := New(Options{
+		Path:             filepath.Join(dir, "activity-a.db"),
+		CapturesPath:     capturesPath,
+		CapturesMaxBytes: 1 << 20,
+	})
+	require.NoError(t, err)
+
+	reloaded, err := New(Options{
+		Path:             newActivityPath,
+		CapturesPath:     capturesPath,
+		CapturesMaxBytes: 1 << 20,
+	})
+	require.NoError(t, err)
+	require.NoError(t, old.Close())
+
+	require.NoError(t, reloaded.Captures().Put(ctx, 5, []byte("after reload")))
+	require.NoError(t, reloaded.Close())
+
+	restarted, err := New(Options{
+		Path:             newActivityPath,
+		CapturesPath:     capturesPath,
+		CapturesMaxBytes: 1 << 20,
+	})
+	require.NoError(t, err)
+	defer restarted.Close()
+
+	_, err = os.Stat(capturesPath + ".1")
+	require.True(t, errors.Is(err, os.ErrNotExist), "the captures file is never renamed")
+
+	got, found, err := restarted.Captures().Get(ctx, 5)
+	require.NoError(t, err)
+	require.True(t, found, "captures written after the reload must survive the restart")
+	assert.Equal(t, []byte("after reload"), got)
+}
+
+func tableNames(t *testing.T, path string) []string {
+	t.Helper()
+
+	db := openRaw(t, path)
+	rows, err := db.QueryContext(context.Background(),
+		`SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name`)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		require.NoError(t, rows.Scan(&name))
+		names = append(names, name)
+	}
+	require.NoError(t, rows.Err())
+
+	return names
+}
+
+func blobOf(n int) string {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = byte('a' + i%26)
+	}
+	return string(b)
+}
+
+// BenchmarkCapturesPutAtCap measures a capture write at the size budget,
+// where every write evicts the oldest capture.
+func BenchmarkCapturesPutAtCap(b *testing.B) {
+	ctx := context.Background()
+	dir := b.TempDir()
+	st, err := New(Options{
+		Path:             filepath.Join(dir, "activity.db"),
+		CapturesPath:     filepath.Join(dir, "captures.db"),
+		CapturesMaxBytes: 2_000_000,
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer st.Close()
+
+	blob := []byte(blobOf(10_000))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := st.Captures().Put(ctx, i, blob); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

@@ -9,7 +9,7 @@ import (
 )
 
 func TestStore_ActivitySourcePrefixSortAndLegacyDefault(t *testing.T) {
-	st, err := New("")
+	st, err := New(Options{Path: ""})
 	if err != nil {
 		t.Fatal(err)
 	}

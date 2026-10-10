@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -94,6 +95,9 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	config.UI.Activity.SessionID = normalizeHeaderNames(config.UI.Activity.SessionID)
 
 	if config.Store != nil {
+		if err := validateStoreCaptures(config.Store, raw); err != nil {
+			return Config{}, err
+		}
 		if err := validateStorePath(config.Store.Path); err != nil {
 			return Config{}, err
 		}
@@ -316,6 +320,47 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	}
 
 	return config, nil
+}
+
+// legacyCaptureKeys are the top-level settings store.captures supersedes.
+var legacyCaptureKeys = []string{"captureBuffer", "metricsMaxInMemory"}
+
+// validateStoreCaptures checks the store.captures section when present. raw
+// is the resolved config map: it tells "set" from "defaulted" for the legacy
+// keys, which are filled in on every load.
+func validateStoreCaptures(store *Store, raw map[string]any) error {
+	captures := store.Captures
+	if captures == nil {
+		return nil
+	}
+
+	for _, key := range legacyCaptureKeys {
+		if _, set := raw[key]; set {
+			return fmt.Errorf("store.captures and %s are mutually exclusive config options; remove %s, or remove the store.captures section", key, key)
+		}
+	}
+
+	if strings.TrimSpace(store.Path) == "" {
+		return fmt.Errorf("store.captures requires a non-empty store.path: captures are keyed by activity rows and an in-memory activity log is pruned")
+	}
+
+	if err := validateStoreCapturesPath(captures.Path); err != nil {
+		return err
+	}
+	if sameStorePath(captures.Path, store.Path) {
+		return fmt.Errorf("store.captures.path: %s is also store.path; captures must use their own database file", captures.Path)
+	}
+
+	if captures.MaxSizeMB < 1 {
+		return fmt.Errorf("store.captures.maxSizeMB must be >= 1")
+	}
+
+	return nil
+}
+
+// sameStorePath reports whether two store settings spell the same file path.
+func sameStorePath(a, b string) bool {
+	return filepath.Clean(strings.TrimSpace(a)) == filepath.Clean(strings.TrimSpace(b))
 }
 
 func validateProfiles(config Config) error {

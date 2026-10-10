@@ -11,7 +11,7 @@ import (
 
 func TestStore_InsertListAndFilterActivity(t *testing.T) {
 	ctx := context.Background()
-	st, err := New("")
+	st, err := New(Options{Path: ""})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestStore_InsertListAndFilterActivity(t *testing.T) {
 func seedFilterActivity(t *testing.T) (*Store, context.Context) {
 	t.Helper()
 	ctx := context.Background()
-	st, err := New("")
+	st, err := New(Options{Path: ""})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestStore_ListActivityFilterCombinedPaging(t *testing.T) {
 
 func TestStore_ListActivitySort(t *testing.T) {
 	ctx := context.Background()
-	st, err := New("")
+	st, err := New(Options{Path: ""})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -286,7 +286,7 @@ func TestStore_ListActivitySort(t *testing.T) {
 
 func TestStore_ActivityStats(t *testing.T) {
 	ctx := context.Background()
-	st, err := New("")
+	st, err := New(Options{Path: ""})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -345,7 +345,7 @@ func TestStore_ActivityStats(t *testing.T) {
 
 func TestStore_PruneActivity(t *testing.T) {
 	ctx := context.Background()
-	st, err := New("")
+	st, err := New(Options{Path: ""})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -390,7 +390,7 @@ func TestStore_NewFilePersistsActivity(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "llama-swap.sqlite")
 
-	st, err := New(path)
+	st, err := New(Options{Path: path})
 	if err != nil {
 		t.Fatalf("New file store: %v", err)
 	}
@@ -401,7 +401,7 @@ func TestStore_NewFilePersistsActivity(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	st, err = New(path)
+	st, err = New(Options{Path: path})
 	if err != nil {
 		t.Fatalf("reopen file store: %v", err)
 	}
@@ -424,7 +424,7 @@ func TestStore_NewFilePersistsActivity(t *testing.T) {
 
 func TestStore_NewFileUsesWAL(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "llama-swap.sqlite")
-	st, err := New(path)
+	st, err := New(Options{Path: path})
 	if err != nil {
 		t.Fatalf("New file store: %v", err)
 	}

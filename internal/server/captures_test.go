@@ -2,15 +2,22 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"math/rand"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
+	"github.com/mostlygeek/llama-swap/internal/store"
+	"github.com/mostlygeek/llama-swap/internal/store/sqlite"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestServer_CaptureCompressRoundtrip(t *testing.T) {
@@ -42,8 +49,9 @@ func TestServer_CaptureCompressRoundtrip(t *testing.T) {
 }
 
 func TestServer_CaptureStoreAndRetrieve(t *testing.T) {
+	ctx := context.Background()
 	mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 100, 5)
-	if !mm.enableCaptures {
+	if mm.captures == nil {
 		t.Fatal("captures should be enabled with non-zero buffer")
 	}
 
@@ -52,26 +60,89 @@ func TestServer_CaptureStoreAndRetrieve(t *testing.T) {
 		t.Fatal("addCapture returned false")
 	}
 
-	got := mm.getCaptureByID(3)
+	got := mm.getCaptureByID(ctx, 3)
 	if got == nil || !bytes.Equal(got.ReqBody, []byte("hello")) {
 		t.Fatalf("getCaptureByID = %+v", got)
 	}
-	if mm.getCaptureByID(999) != nil {
+	if mm.getCaptureByID(ctx, 999) != nil {
 		t.Fatal("expected nil for unknown capture ID")
 	}
 }
 
 func TestServer_CaptureDisabled(t *testing.T) {
+	ctx := context.Background()
 	mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 100, 0)
-	if mm.enableCaptures {
+	if mm.captures != nil {
 		t.Fatal("captures should be disabled with zero buffer")
 	}
 	if mm.addCapture(ReqRespCapture{ID: 1}) {
 		t.Fatal("addCapture should return false when disabled")
 	}
-	if mm.getCaptureByID(1) != nil {
+	if mm.getCaptureByID(ctx, 1) != nil {
 		t.Fatal("getCaptureByID should return nil when disabled")
 	}
+}
+
+// newCapturesStore builds a store with persistent captures and a monitor
+// reading it, with the legacy captureBuffer set too: the repository must win.
+func newCapturesStore(t *testing.T) (*metricsMonitor, store.Store, string, string) {
+	t.Helper()
+	const captureBufferMB = 5
+
+	dir := t.TempDir()
+	activityPath := filepath.Join(dir, "activity.db")
+	capturesPath := filepath.Join(dir, "captures.db")
+	st, err := sqlite.New(sqlite.Options{
+		Path:             activityPath,
+		CapturesPath:     capturesPath,
+		CapturesMaxBytes: 1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("sqlite.New: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Errorf("store.Close: %v", err)
+		}
+	})
+
+	return newMetricsMonitor(logmon.NewWriter(io.Discard), 10, captureBufferMB, st), st, capturesPath, activityPath
+}
+
+// A capture must be readable by a new reader over the same files.
+func TestServer_CapturesUseThePersistentRepository(t *testing.T) {
+	ctx := context.Background()
+
+	mm, st, capturesPath, activityPath := newCapturesStore(t)
+	require.NotNil(t, mm.captures)
+	require.Same(t, st.Captures(), mm.captures, "the monitor must write through store.captures, not the legacy buffer")
+
+	metric, ok := mm.queueMetrics(ActivityLogEntry{
+		Timestamp: time.Unix(1, 0),
+		Model:     "m1",
+		ReqPath:   "/v1/chat/completions",
+	})
+	require.True(t, ok, "queueMetrics failed")
+	require.True(t, mm.addCapture(ReqRespCapture{
+		ID:       metric.ID,
+		ReqPath:  "/v1/chat/completions",
+		ReqBody:  []byte("hello"),
+		RespBody: []byte("world"),
+	}), "addCapture returned false")
+
+	// A second reader over the same files, standing in for the next process.
+	reopen, err := sqlite.New(sqlite.Options{
+		Path:             activityPath,
+		CapturesPath:     capturesPath,
+		CapturesMaxBytes: 1 << 20,
+	})
+	require.NoError(t, err)
+	defer reopen.Close()
+
+	got := newMetricsMonitor(logmon.NewWriter(io.Discard), 10, 0, reopen).getCaptureByID(ctx, metric.ID)
+	require.NotNil(t, got, "capture must survive the process that wrote it")
+	assert.Equal(t, []byte("hello"), got.ReqBody)
+	assert.Equal(t, []byte("world"), got.RespBody)
 }
 
 func TestServer_CaptureFieldsFor(t *testing.T) {

@@ -15,7 +15,7 @@ import (
 // newCacheStore returns an in-memory store with its cache repository.
 func newCacheStore(t *testing.T) (*Store, store.CacheRepository) {
 	t.Helper()
-	st, err := New("")
+	st, err := New(Options{Path: ""})
 	require.NoError(t, err)
 	t.Cleanup(func() { st.Close() })
 	return st, st.Cache()
@@ -249,14 +249,14 @@ func TestStore_CachePersistsAcrossReopen(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "cache.db")
 
-	first, err := New(path)
+	first, err := New(Options{Path: path})
 	require.NoError(t, err)
 	require.NoError(t, first.Cache().Set(ctx, store.CacheEntry{
 		Key: "k", Data: []byte("persisted"), TTL: time.Hour,
 	}))
 	require.NoError(t, first.Close())
 
-	second, err := New(path)
+	second, err := New(Options{Path: path})
 	require.NoError(t, err)
 	defer second.Close()
 
@@ -270,7 +270,7 @@ func TestStore_CachePrunesExpiredRowsOnOpen(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "cache.db")
 
-	first, err := New(path)
+	first, err := New(Options{Path: path})
 	require.NoError(t, err)
 	require.NoError(t, first.Cache().Set(ctx, store.CacheEntry{
 		Key:       "stale",
@@ -280,7 +280,7 @@ func TestStore_CachePrunesExpiredRowsOnOpen(t *testing.T) {
 	}))
 	require.NoError(t, first.Close())
 
-	second, err := New(path)
+	second, err := New(Options{Path: path})
 	require.NoError(t, err)
 	defer second.Close()
 

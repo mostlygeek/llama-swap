@@ -12,27 +12,41 @@ import (
 )
 
 func validateStorePath(path string) error {
+	return validateDatabasePath(path, "store.path")
+}
+
+func validateStoreCapturesPath(path string) error {
+	return validateDatabasePath(path, "store.captures.path")
+}
+
+// validateDatabasePath checks a SQLite file path; key names the setting in
+// error messages.
+func validateDatabasePath(path string, key string) error {
 	if strings.TrimSpace(path) == "" {
-		return fmt.Errorf("store.path must not be empty")
+		return fmt.Errorf("%s must not be empty", key)
 	}
 
 	if info, err := os.Stat(path); err != nil {
 		if !os.IsNotExist(err) {
-			return fmt.Errorf("store.path: %w", err)
+			return fmt.Errorf("%s: %w", key, err)
 		}
-		// File does not exist; ensure the parent directory is writable.
+		// File does not exist; ensure the parent directory is writable. A
+		// missing directory is created when the store opens.
 		dir := filepath.Dir(path)
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			return nil
+		}
 		if err := unix.Access(dir, unix.W_OK); err != nil {
-			return fmt.Errorf("store.path: directory %s is not writable: %w", dir, err)
+			return fmt.Errorf("%s: directory %s is not writable: %w", key, dir, err)
 		}
 		return nil
 	} else if info.IsDir() {
-		return fmt.Errorf("store.path: %s is a directory, not a file", path)
+		return fmt.Errorf("%s: %s is a directory, not a file", key, path)
 	}
 
 	// File exists; ensure it is writable.
 	if err := unix.Access(path, unix.W_OK); err != nil {
-		return fmt.Errorf("store.path: %s is not writable: %w", path, err)
+		return fmt.Errorf("%s: %s is not writable: %w", key, path, err)
 	}
 	return nil
 }

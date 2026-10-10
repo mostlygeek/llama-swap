@@ -219,13 +219,13 @@
         "metricsMaxInMemory": {
             "type": "integer",
             "default": 1000,
-            "description": "Maximum number of metrics to keep in memory. Controls how many metrics are stored before older ones are discarded."
+            "description": "Legacy. Maximum number of metrics to keep in memory. Controls how many metrics are stored before older ones are discarded. Has no effect when store.path is set. Mutually exclusive with store.captures."
         },
         "captureBuffer": {
             "type": "integer",
             "minimum": 0,
             "default": 5,
-            "description": "Size in megabytes of the buffer for storing request/response captures. Set to 0 to disable captures."
+            "description": "Legacy. Size in megabytes of the in-memory buffer for storing request/response captures. Set to 0 to disable captures. Mutually exclusive with store.captures, which stores captures on disk."
         },
         "store": {
             "type": "object",
@@ -233,7 +233,28 @@
                 "path": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "SQLite database file path for persistent activity logs."
+                    "description": "SQLite database file path for persistent activity logs. A missing parent directory is created on startup."
+                },
+                "captures": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "SQLite database file path for request/response captures. Must be a different file than store.path. A missing parent directory is created on startup."
+                        },
+                        "maxSizeMB": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "default": 500,
+                            "description": "Total budget in megabytes for stored captures. Once it is exceeded, the oldest captures are evicted to make room."
+                        }
+                    },
+                    "required": [
+                        "path"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Stores request/response captures in their own SQLite file so they survive restarts. Requires store.path and supersedes the legacy captureBuffer and metricsMaxInMemory settings: defining both is a config error."
                 }
             },
             "required": [

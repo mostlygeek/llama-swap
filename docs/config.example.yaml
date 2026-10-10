@@ -55,19 +55,32 @@ logToStdout: "proxy"
 # - optional, default: in-memory sqlite database capped by metricsMaxInMemory
 # - path is a sqlite database file path
 # - file-backed sqlite keeps activity logs across restarts
+# - a missing parent directory is created on startup
+# - captures: stores request/response captures in their own sqlite file so they
+#   survive restarts. It requires path, it supersedes captureBuffer and
+#   metricsMaxInMemory, and naming those legacy keys alongside it is a config
+#   error. maxSizeMB is the total budget: the oldest captures, by write time,
+#   are evicted to make room once it is exceeded.
 # store:
 #   path: /path/to/file.sqlite
+#   captures:
+#     path: /path/to/captures.sqlite
+#     maxSizeMB: 500
 
 # metricsMaxInMemory: maximum number of metrics to keep in memory
 # - optional, default: 1000
 # - controls how many metrics are stored in memory before older ones are discarded
 # - useful for limiting memory usage when processing large volumes of metrics
 # - when persistent sqlite storage is defined in store.path this has no effect
+# - mutually exclusive with store.captures
 metricsMaxInMemory: 1000
 
 # captureBuffer: how many MBs to allocate for storing request/response captures
-# - optional, default: 10
+# - optional, default: 5
 # - set to 0 to disable
+# - captures are held in RAM and are lost on restart; store.captures stores
+#   them on disk instead and replaces this setting
+# - mutually exclusive with store.captures
 captureBuffer: 15
 
 # ui.activity.session_id: ordered request headers used to identify sessions in
