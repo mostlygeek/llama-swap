@@ -39,6 +39,7 @@ export interface ModelOption {
 
 export function modelServerPath(modelId: string): string {
   if (modelId === "comfyui_auto") return "/comfyui/";
+  if (modelId === "audiocpp_auto") return "/audiocpp/";
   return `/upstream/${encodeURIComponent(modelId)}/`;
 }
 

@@ -13,6 +13,9 @@ const (
 
 	// ComfyUIModelID identifies the model used by the /comfyui endpoint.
 	ComfyUIModelID = "comfyui_auto"
+
+	// AudioCppModelID identifies the model used by the /audiocpp endpoint.
+	AudioCppModelID = "audiocpp_auto"
 )
 
 var validModalities = map[string]struct{}{
