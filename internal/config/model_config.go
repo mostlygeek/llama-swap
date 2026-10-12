@@ -45,6 +45,12 @@ type ModelCapConfig struct {
 	Reranker bool     `yaml:"reranker" json:"reranker,omitempty"`
 	Context  int      `yaml:"context" json:"context,omitempty"`
 
+	// Voices, when set, is returned as the response to
+	// GET /v1/audio/voices?model={id} instead of asking the upstream. It is
+	// never discovered and never rendered into /v1/models, so Empty and Merge
+	// leave it alone.
+	Voices []string `yaml:"voices" json:"-"`
+
 	// DisableAuto turns off automatic capability discovery for this model.
 	// It is a switch, not a capability, so Empty ignores it and it is never
 	// rendered into /v1/models.

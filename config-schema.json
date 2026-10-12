@@ -624,6 +624,15 @@
                                 "default": 0,
                                 "description": "Maximum token context length supported by the model."
                             },
+                            "voices": {
+                                "type": "array",
+                                "uniqueItems": true,
+                                "default": [],
+                                "items": {
+                                    "type": "string"
+                                },
+                                "description": "List of voice names returned by GET /v1/audio/voices?model={id} instead of asking the upstream server. The model is not started to answer."
+                            },
                             "disableAuto": {
                                 "type": "boolean",
                                 "default": false,

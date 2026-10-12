@@ -2,8 +2,8 @@
 title: Model capabilities and model listings
 summary: Advertise images, tools and context length in /v1/models, automatically or by hand.
 category: guides
-tags: [capabilities, models, tools, vision, context, autodetect, llama-server, vllm, halogen, playground, decisions]
-config_keys: [models.*.capabilities, models.*.capabilities.disableAuto, store.path]
+tags: [capabilities, voices, speech, models, tools, vision, context, autodetect, llama-server, vllm, halogen, playground, decisions]
+config_keys: [models.*.capabilities, models.*.capabilities.disableAuto, models.*.capabilities.voices, store.path]
 updated: 2026-10-10
 ---
 
@@ -116,6 +116,30 @@ models:
 
 With `disableAuto: true` the model advertises exactly what you wrote, and
 nothing else. On its own, with no other fields, it advertises nothing.
+
+## Setting the voice list for a speech model
+
+`GET /v1/audio/voices?model={id}` normally goes to the upstream server. Set
+`capabilities.voices` to answer it from the config instead:
+
+```yaml
+models:
+  tts:
+    cmd: my-tts-server --port ${PORT}
+    capabilities:
+      in: [text]
+      out: [audio]
+      voices: ["voicea", "voiceb", "voicec"]
+```
+
+```bash
+curl -s 'localhost:8080/v1/audio/voices?model=tts'
+# {"model":"tts","voices":["voicea","voiceb","voicec"]}
+```
+
+The model is not started to answer, and voices are not shown in `/v1/models`.
+If `voices` is empty or unset, the request goes to the upstream as before. This
+applies to local models only, not peers.
 
 ## How the Playground uses this
 
