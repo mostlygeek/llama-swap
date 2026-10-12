@@ -86,6 +86,11 @@ Key flags:
   (e.g. a metrics port).
 - `--volume pvc:name:/mount[:ro]` and `--volume emptydir:/mount` — model
   cache, scratch, slot state.
+- `--volume nfs:server/export:/mount[:ro]` — mounts an NFS export straight
+  into the pod, with no PersistentVolume, PVC or CSI driver, e.g.
+  `--volume nfs:nas.lan/export/models:/models:ro`. The node mounts it, so
+  every node that can run a backend needs NFS client support and access to
+  the export, and the export's permissions must allow the pod's uid.
 - `--strict` — a Deployment whose spec drifted from the config is
   deleted and recreated instead of adopted. This interrupts the backend:
   the old pod is gone before the new one is ready, so in-flight requests
