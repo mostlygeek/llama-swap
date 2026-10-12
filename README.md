@@ -40,6 +40,7 @@ Built in Go for performance and simplicity, llama-swap has zero dependencies and
   - `/sdapi/v1/loras` - requires `model` in request body to fetch the correct loras
 - ✅ [audio.cpp](https://github.com/0xShug0/audio.cpp) supported [extra endpoints](https://github.com/0xShug0/audio.cpp/blob/main/app/server/README.md#post-v1tasksrun)
   - `/audioapi/v1/tasks/run`
+- ✅ `/audiocpp/` - audio.cpp UI endpoint, served by the `audiocpp_auto` model ([#1221](https://github.com/mostlygeek/llama-swap/issues/1221))
 - ✅ `/comfyui/` - ComfyUI custom endpoint ([#1001](https://github.com/mostlygeek/llama-swap/issues/1001)) for more reliable swapping
 - ✅ llama-swap API
   - `/ui` - web UI
