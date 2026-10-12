@@ -23,7 +23,7 @@ models:
   audiocpp_auto:
     # audio.cpp is compiled into the unified image
     cmd: >
-      docker run -it --rm --runtime nvidia
+      docker run --rm --runtime nvidia
       -p ${PORT}:8080
       -v /mnt/nvme/audio.cpp:/models
       --entrypoint audiocpp_server
