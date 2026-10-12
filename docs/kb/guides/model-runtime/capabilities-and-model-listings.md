@@ -119,8 +119,9 @@ nothing else. On its own, with no other fields, it advertises nothing.
 
 ## Setting the voice list for a speech model
 
-`GET /v1/audio/voices?model={id}` normally goes to the upstream server. Set
-`capabilities.voices` to answer it from the config instead:
+`GET /v1/audio/voices?model={id}` normally goes to the upstream server.
+`capabilities.voices` is an override: set it to answer the request from the
+config instead:
 
 ```yaml
 models:
@@ -138,8 +139,9 @@ curl -s 'localhost:8080/v1/audio/voices?model=tts'
 ```
 
 The model is not started to answer, and voices are not shown in `/v1/models`.
-If `voices` is empty or unset, the request goes to the upstream as before. This
-applies to local models only, not peers.
+When `voices` is empty or unset there is no override, and the request goes to
+the upstream server as before, which starts the model if it is not running.
+This applies to local models only, not peers.
 
 ## How the Playground uses this
 

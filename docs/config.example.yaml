@@ -576,8 +576,10 @@ models:
 
       # voices: list of voice names for a speech model
       # - default: []
-      # - when set, GET /v1/audio/voices?model={id} returns these instead of
-      #   asking the upstream server, and the model is not started to answer
+      # - an override for GET /v1/audio/voices?model={id}
+      # - when set, these are returned instead of asking the upstream server,
+      #   and the model is not started to answer
+      # - when empty or unset, the request goes to the upstream server
       # - the response is {"voices": [...], "model": "{id}"}
       # - not discovered and not shown in v1/models
       voices:
