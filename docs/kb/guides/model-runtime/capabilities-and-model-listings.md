@@ -138,7 +138,10 @@ curl -s 'localhost:8080/v1/audio/voices?model=tts'
 # {"model":"tts","voices":["voicea","voiceb","voicec"]}
 ```
 
-The model is not started to answer, and voices are not shown in `/v1/models`.
+The response is a JSON object with a `voices` array and the `model` id. OpenAI
+has no endpoint for listing voices, so this is a llama-swap convention, not an
+OpenAI format. The Playground's speech tab reads it. The model is not started to
+answer, and voices are not shown in `/v1/models`.
 When `voices` is empty or unset there is no override, and the request goes to
 the upstream server as before, which starts the model if it is not running.
 This applies to local models only, not peers.
