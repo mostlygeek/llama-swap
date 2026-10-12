@@ -9,9 +9,9 @@ usage() {
 Usage: scripts/add-changelog.sh [harness] [version]
        scripts/add-changelog.sh [version]
 
-Adds a release version to CHANGELOG.md. The harness is codex, claude or
-opencode and defaults to claude. When version is omitted it is the highest
-v<number> tag plus one.
+Adds a release version to CHANGELOG.md. The harness is codex, claude,
+opencode or pi and defaults to pi. When version is omitted it is the
+highest v<number> tag plus one.
 EOF
 }
 
@@ -78,20 +78,28 @@ run_opencode() {
   opencode run "$prompt"
 }
 
+run_pi() {
+  local prompt="$1"
+
+  pi --print \
+    --model qwen-3.8-next \
+    -- "$prompt" </dev/null
+}
+
 main() {
   if [[ $# -gt 2 ]]; then
     usage >&2
     exit 1
   fi
 
-  local harness="claude"
+  local harness="pi"
   local version=""
 
   # The harness is optional: a leading v<number> is taken as the version.
   if [[ $# -gt 0 && "$1" =~ ^v[0-9]+$ ]]; then
     version="$1"
   else
-    harness="${1:-claude}"
+    harness="${1:-pi}"
     version="${2:-}"
   fi
   local repo_root
@@ -116,6 +124,9 @@ main() {
       ;;
     opencode)
       run_opencode "$prompt"
+      ;;
+    pi)
+      run_pi "$prompt"
       ;;
     *)
       printf 'Unknown harness: %s\n' "$harness" >&2

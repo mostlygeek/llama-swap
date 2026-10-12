@@ -1,5 +1,19 @@
 # Changelog
 
+## v264 (Oct 12, 2026)
+
+This release includes a new `auto:orphans` set for swap matrix rules. This new set automatically includes all models that were not explictly added to a set.  It is defined as `(orphan1 | orphan2 | orphan3 | ...)`. The orphans set is handy for definitions like: `+always & +auto:orphans`, where `+always` is a set of models that are always loaded and should never be swapped out.
+
+The /audiocpp endpoint was added to make working with audio.cpp server eaiser. The `audiocpp_auto` model is automatically used when the endpoint is requested. audio.cpp's OpenAI compatible endpoints can be accessed directly via `/audiocpp/v1/audio/*`. Very handy when used with llama-swap's unified docker container which builds audio.cpp with the UI and native model downloader.
+
+Also one tiny commit to improve compatibility with llama-server's decision model functionality.
+
+Thanks to the contributors in this release, especially @knguyen298 for being patient and keeping his PR updated.
+
+- [PR #1026](https://github.com/mostlygeek/llama-swap/pull/1026) internal/matrix: add synthetic auto:orphans set: adds a `+auto:orphans` selector that expands to every model not named in another set, so a catch-all set like `"+always & +auto:orphans"` picks up new models automatically (#1025) by [@knguyen298](https://github.com/knguyen298)
+- [PR #1223](https://github.com/mostlygeek/llama-swap/pull/1223) Add /audiocpp endpoint for audio.cpp UI passthrough: serves audio.cpp's web UI and model management through a dedicated `/audiocpp/` endpoint bound to the reserved `audiocpp_auto` model, like `/comfyui/`, so the unified container works without naming a model per request by [@mostlygeek](https://github.com/mostlygeek)
+- [PR #1220](https://github.com/mostlygeek/llama-swap/pull/1220) internal/capcompat: detect decision models from llama-server's listing: fix decision models being reported as `out: [text]` (and `capabilities.out: [decisions]` failing validation) because discovery only read `/props`; `output_modalities` from `/v1/models` is now used, and tools are only advertised when the model outputs text (#1219) by [@nazeshinjite](https://github.com/nazeshinjite)
+
 ## v263 (Oct 9, 2026)
 
 I've been busy, busy, busy and have not had as much time for llama-swap as I
