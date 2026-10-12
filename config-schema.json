@@ -147,7 +147,7 @@
                 },
                 "sets": {
                     "type": "object",
-                    "description": "Named sets of concurrent model combinations. Values are DSL strings using & (AND), | (OR), () (grouping), and +ref (inline another set). Definition order is used for tie-breaking.",
+                    "description": "Named sets of concurrent model combinations. Values are DSL strings using & (AND), | (OR), () (grouping), +ref (inline another set), and +auto:orphans (each model that is not a leaf in a set). Definition order is used for tie-breaking.",
                     "minProperties": 1,
                     "additionalProperties": {
                         "type": "string"
