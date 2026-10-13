@@ -574,6 +574,19 @@ models:
       # - must be an integer > 0
       context: 32000
 
+      # voices: list of voice names for a speech model
+      # - default: []
+      # - an override for GET /v1/audio/voices?model={id}
+      # - when set, these are returned instead of asking the upstream server,
+      #   and the model is not started to answer
+      # - when empty or unset, the request goes to the upstream server
+      # - the response is {"voices": [...], "model": "{id}"}
+      # - not discovered and not shown in v1/models
+      voices:
+        - voicea
+        - voiceb
+        - voicec
+
       # disableAuto: turn off automatic capability discovery for this model
       # - default: false
       # - a field set to its zero value (false, 0, []) cannot be told apart

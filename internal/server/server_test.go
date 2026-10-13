@@ -569,3 +569,43 @@ func TestServer_LogStream_UnknownID_Returns400(t *testing.T) {
 		t.Errorf("status=%d want 400", w.Code)
 	}
 }
+
+func TestProxy_ConfiguredVoicesOverrideUpstream(t *testing.T) {
+	cfg := config.Config{Models: map[string]config.ModelConfig{
+		"tts":      {Capabilities: config.ModelCapConfig{Voices: []string{"voicea", "voiceb", "voicec"}}},
+		"tts-none": {},
+	}}
+	local := newStubRouter([]string{"tts", "tts-none"}, "upstream")
+	s := newTestServerWithConfig(cfg, local, newStubRouter(nil, ""))
+
+	t.Run("configured voices are returned", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/audio/voices?model=tts", nil))
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", w.Code)
+		}
+		if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+			t.Errorf("Content-Type = %q", ct)
+		}
+		var got struct {
+			Voices []string `json:"voices"`
+			Model  string   `json:"model"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Join(got.Voices, ",") != "voicea,voiceb,voicec" || got.Model != "tts" {
+			t.Errorf("unexpected body: %s", w.Body.String())
+		}
+	})
+
+	t.Run("model without voices goes to upstream", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/audio/voices?model=tts-none", nil))
+
+		if w.Body.String() != "upstream" {
+			t.Errorf("body = %q, want upstream", w.Body.String())
+		}
+	})
+}

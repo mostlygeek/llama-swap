@@ -136,14 +136,6 @@
     }
   }
 
-  function handleVoiceChange(value: string) {
-    if (value === "(refresh)") {
-      refreshVoices();
-    } else {
-      selectedVoiceStore.set(value);
-    }
-  }
-
   // Auto-play effect when new audio is generated
   $effect(() => {
     if (generatedAudioUrl && $autoPlayStore && audioElement) {
@@ -232,14 +224,13 @@
       <Select.Root
         type="single"
         value={$selectedVoiceStore}
-        onValueChange={(v) => v && handleVoiceChange(v)}
+        onValueChange={(v) => v && selectedVoiceStore.set(v)}
       >
         <Select.Trigger class="h-9 w-40">{$selectedVoiceStore}</Select.Trigger>
         <Select.Content class="max-h-[60vh]">
           {#each availableVoices as voice (voice)}
             <Select.Item value={voice}>{voice}</Select.Item>
           {/each}
-          <Select.Item value="(refresh)">(refresh)</Select.Item>
         </Select.Content>
       </Select.Root>
       {#if $selectedModelStore}

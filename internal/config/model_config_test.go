@@ -686,3 +686,20 @@ models:
 	assert.True(t, mc.Capabilities.DisableAuto)
 	assert.True(t, mc.Capabilities.Empty(), "disableAuto alone is still an empty block")
 }
+
+func TestConfig_ModelCapabilities_Voices(t *testing.T) {
+	content := `
+models:
+  tts:
+    cmd: path/to/cmd --port ${PORT}
+    capabilities:
+      voices: ["voicea", "voiceb", "voicec"]
+`
+	config, err := LoadConfigFromReader(strings.NewReader(content))
+	assert.NoError(t, err)
+
+	caps := config.Models["tts"].Capabilities
+	assert.Equal(t, []string{"voicea", "voiceb", "voicec"}, caps.Voices)
+	assert.True(t, caps.Empty(), "voices are not advertised in /v1/models")
+	assert.Equal(t, caps.Voices, caps.Merge(ModelCapConfig{Tools: true}).Voices)
+}

@@ -624,6 +624,15 @@
                                 "default": 0,
                                 "description": "Maximum token context length supported by the model."
                             },
+                            "voices": {
+                                "type": "array",
+                                "uniqueItems": true,
+                                "default": [],
+                                "items": {
+                                    "type": "string"
+                                },
+                                "description": "Override for GET /v1/audio/voices?model={id}. When set, this list is returned instead of asking the upstream server and the model is not started to answer. When empty, the request goes to the upstream server."
+                            },
                             "disableAuto": {
                                 "type": "boolean",
                                 "default": false,
