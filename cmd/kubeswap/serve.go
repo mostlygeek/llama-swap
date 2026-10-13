@@ -331,6 +331,7 @@ type serveFlags struct {
 	servicePorts         stringList
 	envs                 stringList
 	gpus                 stringList
+	resourceClaims       stringList
 	nodeSel              stringList
 	tols                 stringList
 	volumes              stringList
@@ -365,6 +366,10 @@ func (f *serveFlags) toConfig() (*serveConfig, error) {
 		return nil, err
 	}
 	gpus, err := parseGPUs(f.gpus)
+	if err != nil {
+		return nil, err
+	}
+	claims, err := parseResourceClaims(f.resourceClaims)
 	if err != nil {
 		return nil, err
 	}
@@ -448,6 +453,7 @@ func (f *serveFlags) toConfig() (*serveConfig, error) {
 		ServicePorts:   servicePorts,
 		Env:            envs,
 		GPUs:           gpus,
+		ResourceClaims: claims,
 		NodeSel:        nodeSel,
 		Tolerations:    tols,
 		Volumes:        volumes,
@@ -478,9 +484,10 @@ func addServeFlags(fs *flag.FlagSet, f *serveFlags) {
 	fs.Var(&f.servicePorts, "service-port", "additional service port name:port (repeatable)")
 	fs.Var(&f.envs, "env", "container env var K=V (repeatable)")
 	fs.Var(&f.gpus, "gpu", "GPU resource to request, resource=count (e.g. amd.com/gpu=1, nvidia.com/gpu=1)")
+	fs.Var(&f.resourceClaims, "resource-claim", "existing DRA ResourceClaim to attach, name=claim (repeatable)")
 	fs.Var(&f.nodeSel, "node-selector", "node selector K=V (repeatable)")
 	fs.Var(&f.tols, "toleration", "toleration key:operator:value:effect (repeatable)")
-	fs.Var(&f.volumes, "volume", "volume pvc|emptydir|hostpath:name:path[:ro] (repeatable)")
+	fs.Var(&f.volumes, "volume", "volume pvc|emptydir|hostpath|nfs:name:path[:ro] (repeatable)")
 	fs.Var(&f.extraLbls, "label", "extra pod label K=V (repeatable)")
 	fs.StringVar(&f.pvcSize, "pvc-size", "1Gi", "size used when kubeswap must create a missing PVC")
 	fs.StringVar(&f.pvcClass, "pvc-class", "", "storage class for created PVCs (default: cluster default)")
