@@ -42,8 +42,8 @@ func TestServer_HandleComfyUI(t *testing.T) {
 			if w.Code != tt.status {
 				t.Errorf("%s status=%d want %d", tt.method, w.Code, tt.status)
 			}
-			if got := w.Header().Get("Location"); got != "/comfyui/?token=value" {
-				t.Errorf("%s Location=%q want /comfyui/?token=value", tt.method, got)
+			if got := w.Header().Get("Location"); got != "comfyui/?token=value" {
+				t.Errorf("%s Location=%q want comfyui/?token=value", tt.method, got)
 			}
 		}
 	})

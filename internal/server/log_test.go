@@ -119,8 +119,8 @@ func TestServer_HandleLogs_HTMLRedirect(t *testing.T) {
 	if w.Code != http.StatusFound {
 		t.Fatalf("status = %d, want 302", w.Code)
 	}
-	if got := w.Header().Get("Location"); got != "/ui/" {
-		t.Errorf("Location = %q, want /ui/", got)
+	if got := w.Header().Get("Location"); got != "ui/" {
+		t.Errorf("Location = %q, want ui/", got)
 	}
 }
 

@@ -220,6 +220,17 @@ func TestServer_HandleUpstream(t *testing.T) {
 		if w.Code != http.StatusMovedPermanently {
 			t.Errorf("status = %d, want 301", w.Code)
 		}
+		if got := w.Header().Get("Location"); got != "./m1/" {
+			t.Errorf("Location = %q, want ./m1/", got)
+		}
+	})
+
+	t.Run("preserves query string", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/upstream/m1?token=abc", nil))
+		if got := w.Header().Get("Location"); got != "./m1/?token=abc" {
+			t.Errorf("Location = %q, want ./m1/?token=abc", got)
+		}
 	})
 
 	t.Run("unknown model 404", func(t *testing.T) {
@@ -229,6 +240,52 @@ func TestServer_HandleUpstream(t *testing.T) {
 			t.Errorf("status = %d, want 404", w.Code)
 		}
 	})
+}
+
+// TestServer_HandleUpstreamRedirect_TrailingSlash covers the bare-model
+// trailing-slash redirect for names whose echoed form would break the
+// relative Location: slash names (a bare "author/model/" resolves against
+// /upstream/author/, doubling the path) and colon aliases (a bare
+// "model1:high/" parses as a URL scheme, not a path).
+func TestServer_HandleUpstreamRedirect_TrailingSlash(t *testing.T) {
+	cfg, err := config.LoadConfigFromReader(strings.NewReader(`
+models:
+  author/model:
+    cmd: echo ${PORT}
+  model1:
+    cmd: echo ${PORT}
+    aliases: [model1:high]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newTestServerWithConfig(cfg, newStubRouter([]string{"author/model", "model1"}, "ok"), newStubRouter(nil, ""))
+
+	tests := []struct {
+		name   string
+		method string
+		target string
+		code   int
+		loc    string
+	}{
+		{"slash name two segments", http.MethodGet, "/upstream/author/model", http.StatusMovedPermanently, "./model/"},
+		{"slash name escaped segment", http.MethodGet, "/upstream/author%2Fmodel", http.StatusMovedPermanently, "./author%2Fmodel/"},
+		{"colon alias", http.MethodGet, "/upstream/model1:high", http.StatusMovedPermanently, "./model1:high/"},
+		{"colon alias non-GET", http.MethodPost, "/upstream/model1:high", http.StatusPermanentRedirect, "./model1:high/"},
+		{"colon alias with query", http.MethodGet, "/upstream/model1:high?prompt=hi", http.StatusMovedPermanently, "./model1:high/?prompt=hi"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			s.ServeHTTP(w, httptest.NewRequest(tt.method, tt.target, nil))
+			if w.Code != tt.code {
+				t.Errorf("status = %d, want %d", w.Code, tt.code)
+			}
+			if got := w.Header().Get("Location"); got != tt.loc {
+				t.Errorf("Location = %q, want %q", got, tt.loc)
+			}
+		})
+	}
 }
 func TestProxy_HandleUpstreamPreservesEscapedPath(t *testing.T) {
 	tests := []struct {
@@ -568,7 +625,7 @@ func TestServer_HandleMetrics_Unavailable(t *testing.T) {
 func TestServer_Redirects(t *testing.T) {
 	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
 
-	for path, want := range map[string]string{"/": "/ui", "/upstream": "/ui/models"} {
+	for path, want := range map[string]string{"/": "ui/", "/upstream": "ui/#/models"} {
 		w := httptest.NewRecorder()
 		s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
 		if w.Code != http.StatusFound {
