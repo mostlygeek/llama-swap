@@ -223,6 +223,11 @@ type Config struct {
 	// hooks, see: #209
 	Hooks HooksConfig `yaml:"hooks"`
 
+	// DefaultModel is the model ID served when a request carries no usable
+	// model field. Empty (the default) keeps the historical behaviour: such a
+	// request is a 404. See issue #1226.
+	DefaultModel string `yaml:"defaultModel"`
+
 	// send loading state in reasoning
 	SendLoadingState bool `yaml:"sendLoadingState"`
 

@@ -97,6 +97,18 @@ performance:
 # - it is automatically incremented for every model that uses it
 startPort: 10001
 
+# defaultModel: the model ID served when a request carries no usable "model"
+# field
+# - optional, default: "" (such requests are a 404)
+# - a model ID or one of its aliases; must name a configured model or the config
+#   fails to load
+# - useful for setups that want a single primary model while still exposing
+#   others, and for clients that omit "model" (curl -d, some SDK defaults,
+#   health probes). An explicit "model" in the request always wins.
+# - does not affect /upstream/<model>, which always addresses that model
+# - see #1226 for more details
+defaultModel: ""
+
 # sendLoadingState: inject loading status updates into the reasoning (thinking)
 # field
 # - optional, default: false

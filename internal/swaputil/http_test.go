@@ -992,3 +992,110 @@ func TestSendError_MapsSentinelErrors(t *testing.T) {
 		})
 	}
 }
+
+// A request with no model field falls back to defaultModel when one is set,
+// which is what lets curl -d and model-less SDK clients reach a default model
+// instead of getting a 404. See issue #1226.
+//
+// The configs come from LoadConfigFromReader because alias resolution depends on
+// the alias map that only the loader populates.
+func TestFetchContext_DefaultModelFallback(t *testing.T) {
+	load := func(t *testing.T, extra string) config.Config {
+		t.Helper()
+		yaml := `
+models:
+  "m1":
+    cmd: /bin/true --port ${PORT}
+  "real":
+    cmd: /bin/true --port ${PORT}
+    aliases: [nick]
+` + extra
+		cfg, err := config.LoadConfigFromReader(strings.NewReader(yaml))
+		if err != nil {
+			t.Fatalf("load config: %v", err)
+		}
+		return cfg
+	}
+
+	cases := []struct {
+		name        string
+		extra       string
+		body        string
+		wantModel   string
+		wantModelID string
+		wantErr     bool
+	}{
+		{"unset default still errors", "", `{"messages":[]}`, "", "", true},
+		{"configured default", "defaultModel: m1\n", `{"messages":[]}`, "m1", "m1", false},
+		{"default by alias", "defaultModel: nick\n", `{"messages":[]}`, "nick", "real", false},
+		{"explicit model still wins", "defaultModel: m1\n", `{"model":"m1","messages":[]}`, "m1", "m1", false},
+		{"explicit model beats a different default", "defaultModel: m1\n", `{"model":"real","messages":[]}`, "real", "real", false},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg := load(t, c.extra)
+			r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(c.body))
+			r.Header.Set("Content-Type", "application/json")
+			data, err := FetchContext(r, cfg)
+			if (err != nil) != c.wantErr {
+				t.Fatalf("wantErr=%v got err=%v", c.wantErr, err)
+			}
+			if c.wantErr {
+				return
+			}
+			if data.Model != c.wantModel {
+				t.Errorf("model = %q, want %q", data.Model, c.wantModel)
+			}
+			if data.ModelID != c.wantModelID {
+				t.Errorf("modelID = %q, want %q", data.ModelID, c.wantModelID)
+			}
+		})
+	}
+}
+
+// The fallback must land in the request context, otherwise downstream handlers
+// that re-read it (routing, the peer router) would still see no model.
+func TestFetchContext_DefaultModelCachedInContext(t *testing.T) {
+	cfg, err := config.LoadConfigFromReader(strings.NewReader(`
+models:
+  "m1":
+    cmd: /bin/true --port ${PORT}
+defaultModel: m1
+`))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"messages":[]}`))
+	r.Header.Set("Content-Type", "application/json")
+	if _, err := FetchContext(r, cfg); err != nil {
+		t.Fatalf("FetchContext: %v", err)
+	}
+	cached, ok := ReadContext(r.Context())
+	if !ok {
+		t.Fatal("default model was not cached in the request context")
+	}
+	if cached.ModelID != "m1" {
+		t.Fatalf("cached modelID = %q, want %q", cached.ModelID, "m1")
+	}
+}
+
+// /upstream/<model> addresses a specific model directly and must keep erroring
+// on a bad name rather than silently serving the default.
+func TestFetchContext_DefaultModelDoesNotMaskUpstreamPath(t *testing.T) {
+	cfg, err := config.LoadConfigFromReader(strings.NewReader(`
+models:
+  "m1":
+    cmd: /bin/true --port ${PORT}
+defaultModel: m1
+`))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	r := httptest.NewRequest(http.MethodPost, "/upstream/nope/v1/chat/completions", strings.NewReader(`{}`))
+	if _, err := FetchContext(r, cfg); err == nil {
+		t.Fatal("expected an error for an unknown /upstream/ model")
+	}
+}

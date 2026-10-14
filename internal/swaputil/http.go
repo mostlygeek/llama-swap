@@ -251,6 +251,26 @@ func FetchContext(r *http.Request, cfg config.Config) (ReqContextData, error) {
 		return data, nil
 	}
 
+	// No model in the request: fall back to the configured default when one is
+	// set, so clients that omit "model" (curl -d, some SDKs, probes) still get
+	// a model instead of a 404. An unknown or self-referential default is
+	// ignored here and reported by config validation instead, so a typo
+	// surfaces at startup rather than as a 404 on every request.
+	if cfg.DefaultModel != "" && cfg.DefaultModel != "default" {
+		realName, _ := cfg.RealModelName(cfg.DefaultModel)
+		if realName == "" {
+			realName = cfg.DefaultModel
+		}
+		if _, ok := cfg.Models[realName]; ok {
+			data := ReqContextData{Model: cfg.DefaultModel, ModelID: realName}
+			if mc, ok := cfg.Models[realName]; ok {
+				data.SendLoadingState = mc.SendLoadingState != nil && *mc.SendLoadingState
+			}
+			*r = *r.WithContext(SetContext(r.Context(), data))
+			return data, nil
+		}
+	}
+
 	return ReqContextData{}, ErrNoModelInContext
 }
 

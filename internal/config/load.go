@@ -192,6 +192,18 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		config.Models[modelId] = modelConfig
 	}
 
+	// defaultModel must name a model that exists, so a typo fails at startup
+	// rather than turning every model-less request into a 404 at runtime.
+	if config.DefaultModel != "" {
+		resolved := config.DefaultModel
+		if real, ok := config.RealModelName(resolved); ok && real != "" {
+			resolved = real
+		}
+		if _, ok := config.Models[resolved]; !ok {
+			return Config{}, fmt.Errorf("defaultModel %q is not a known model ID or alias", config.DefaultModel)
+		}
+	}
+
 	// Normalize routing config. The legacy top-level `matrix`/`groups` keys and
 	// the new `routing.router` block are mutually exclusive: a config may use
 	// either style, never both.
