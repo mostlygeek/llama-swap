@@ -10,6 +10,10 @@ import (
 	"time"
 )
 
+// gpuDirHwmon locates the xe card's hwmon node inside the fake sysfs tree,
+// so tests can corrupt or remove it.
+const gpuDirHwmon = "devices/pci0000:00/0000:00:01.0/0000:01:00.0/0000:03:00.0/hwmon/hwmon9"
+
 // Fixture mirrors a real Intel Arc Pro B70 (xe driver) as observed on kernel
 // 7.1: hwmon temps labelled pkg/vram, energy counter, fan RPM+max, a 32 GiB
 // VRAM BAR in the PCI resource file, and fdinfo using the cycles-based engine
@@ -210,7 +214,10 @@ func TestSysfs_PollReportsVramViaFdinfo(t *testing.T) {
 }
 
 // Even while active, hwmon must not be read more than once per
-// sysfsHwmonMinInterval -- each read wakes a sleeping card.
+// sysfsHwmonMinInterval -- each read wakes a sleeping card. Throttled
+// polls must carry the last known values forward, not publish zeros: a
+// busy GPU dipping to 0 on every other chart sample is worse than a value
+// a few seconds stale.
 func TestSysfs_HwmonThrottledWhileActive(t *testing.T) {
 	sysRoot := fakeSysfs(t)
 	withSysfs(t, sysRoot)
@@ -227,14 +234,91 @@ func TestSysfs_HwmonThrottledWhileActive(t *testing.T) {
 	if err != nil || first.TempC != 48 {
 		t.Fatalf("first poll should read hwmon (TempC=48), got %+v err=%v", first, err)
 	}
+
+	// Change the underlying sensor value, then poll again inside the
+	// throttle window: the carried-forward 48 proves hwmon was skipped.
+	writeFiles(t, sysRoot, map[string]string{gpuDirHwmon + "/temp2_input": "55000"})
 	second, _ := g.poll()
-	if second.TempC != 0 {
-		t.Errorf("immediate second poll must skip hwmon, got TempC=%d", second.TempC)
+	if second.TempC != 48 {
+		t.Errorf("throttled poll must carry last known value, got TempC=%d (want 48, not a fresh 55)", second.TempC)
 	}
+
 	g.lastHwmonAt = time.Now().Add(-2 * sysfsHwmonMinInterval)
 	third, _ := g.poll()
-	if third.TempC != 48 {
-		t.Errorf("poll after interval must read hwmon again, got TempC=%d", third.TempC)
+	if third.TempC != 55 {
+		t.Errorf("poll after interval must re-read hwmon, got TempC=%d (want 55)", third.TempC)
+	}
+}
+
+// A hwmon pass that reads nothing (e.g. the card was mid-resume) must not
+// publish zeros while the GPU is busy: last known values are carried, and
+// the throttle clock is not advanced so the next tick retries.
+func TestSysfs_HwmonFailureCarriesLastKnown(t *testing.T) {
+	sysRoot := fakeSysfs(t)
+	withSysfs(t, sysRoot)
+
+	procRootLocal := t.TempDir()
+	writeFiles(t, procRootLocal, map[string]string{"1234/fdinfo/17": xeFdinfo})
+	symlink(t, procRootLocal, "1234/fd/17", "/dev/dri/renderD128")
+	oldProc := procRoot
+	procRoot = procRootLocal
+	t.Cleanup(func() { procRoot = oldProc })
+
+	g := discoverSysfsGpus()[0]
+	first, err := g.poll()
+	if err != nil || first.TempC != 48 {
+		t.Fatalf("first poll should read hwmon (TempC=48), got %+v err=%v", first, err)
+	}
+
+	// Break the hwmon node and make the pass due: the poll must carry 48
+	// and leave lastHwmonAt alone so the next tick retries.
+	if err := os.Rename(filepath.Join(sysRoot, gpuDirHwmon), filepath.Join(sysRoot, gpuDirHwmon+".gone")); err != nil {
+		t.Fatal(err)
+	}
+	g.lastHwmonAt = time.Now().Add(-2 * sysfsHwmonMinInterval)
+	dueAt := g.lastHwmonAt
+	second, _ := g.poll()
+	if second.TempC != 48 || second.VramTempC != 50 {
+		t.Errorf("failed hwmon pass must carry last known temps, got %+v", second)
+	}
+	if !g.lastHwmonAt.Equal(dueAt) {
+		t.Errorf("failed pass must not advance lastHwmonAt")
+	}
+}
+
+// Carried telemetry expires: once the last good reading is too old, the
+// sample honestly reports zeros instead of an ancient value.
+func TestSysfs_TelemetryHoldExpiry(t *testing.T) {
+	sysRoot := fakeSysfs(t)
+	withSysfs(t, sysRoot)
+
+	procRootLocal := t.TempDir()
+	writeFiles(t, procRootLocal, map[string]string{"1234/fdinfo/17": xeFdinfo})
+	symlink(t, procRootLocal, "1234/fd/17", "/dev/dri/renderD128")
+	oldProc := procRoot
+	procRoot = procRootLocal
+	t.Cleanup(func() { procRoot = oldProc })
+
+	g := discoverSysfsGpus()[0]
+	if _, err := g.poll(); err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+
+	if err := os.Rename(filepath.Join(sysRoot, gpuDirHwmon), filepath.Join(sysRoot, gpuDirHwmon+".gone")); err != nil {
+		t.Fatal(err)
+	}
+	g.lastHwmonAt = time.Now().Add(-2 * sysfsHwmonMinInterval)
+
+	g.lastTelemetry = time.Now().Add(-29 * time.Second)
+	fresh, _ := g.poll()
+	if fresh.TempC != 48 {
+		t.Errorf("reading under the hold window must be carried, got TempC=%d", fresh.TempC)
+	}
+
+	g.lastTelemetry = time.Now().Add(-31 * time.Second)
+	stale, _ := g.poll()
+	if stale.TempC != 0 || stale.PowerDrawW != 0 {
+		t.Errorf("stale telemetry must expire to zeros, got %+v", stale)
 	}
 }
 

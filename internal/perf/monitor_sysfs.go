@@ -66,8 +66,14 @@ type sysfsGpu struct {
 	fdSampledAt time.Time
 	lastHwmonAt time.Time
 
-	// renderNodePCI caches renderD node -> PCI address, resolved through
-	// sysfs for fdinfo records that omit drm-pdev (kernels before ~6.8).
+	// Last successfully read hwmon values, carried forward over throttled
+	// or failed passes: while the card is busy, a chart that dips to zero
+	// every few samples is worse than one a few seconds stale.
+	lastTempC     int
+	lastVramTempC int
+	lastFanPct    float64
+	lastPowerW    float64
+	lastTelemetry time.Time
 	renderNodePCI map[string]string
 	// ambiguous is true when more than one GPU was discovered: fdinfo
 	// records that cannot be attributed to a card are then skipped rather
@@ -190,12 +196,16 @@ func (g *sysfsGpu) poll() (GpuStat, error) {
 	active := g.readFdInfo(&stat)
 
 	if active && time.Since(g.lastHwmonAt) >= sysfsHwmonMinInterval {
-		g.readHwmon(&stat)
+		// Advance the clock only on success: a failed pass (the card was
+		// mid-resume) should be retried on the next tick, not 5s later.
+		if g.readHwmon(&stat) {
+			g.lastHwmonAt = time.Now()
+		}
 		if g.amdgpu {
 			g.readAmdgpuSysfs(&stat)
 		}
-		g.lastHwmonAt = time.Now()
 	}
+	g.carryTelemetry(&stat, active)
 
 	if stat.MemTotalMB == 0 {
 		stat.MemTotalMB = g.vramTotalMB
@@ -207,11 +217,66 @@ func (g *sysfsGpu) poll() (GpuStat, error) {
 	return stat, nil
 }
 
-// readHwmon fills temps/fan/power from the card's hwmon node.
-func (g *sysfsGpu) readHwmon(stat *GpuStat) {
+// readHwmon fills temps/fan/power from the card's hwmon node. ok is true
+// when at least one sensor attribute read succeeded. A total failure is
+// retried once after a short pause: the first read of a runtime-suspended
+// card usually errors while kick-starting the resume, and the retry then
+// finds the card awake.
+func (g *sysfsGpu) readHwmon(stat *GpuStat) bool {
 	if g.hwmonPath == "" {
+		return false
+	}
+	ok := g.readHwmonOnce(stat)
+	if !ok {
+		time.Sleep(100 * time.Millisecond)
+		ok = g.readHwmonOnce(stat)
+	}
+	if ok {
+		if stat.TempC > 0 {
+			g.lastTempC = stat.TempC
+		}
+		if stat.VramTempC > 0 {
+			g.lastVramTempC = stat.VramTempC
+		}
+		if stat.FanSpeedPct > 0 {
+			g.lastFanPct = stat.FanSpeedPct
+		}
+		if stat.PowerDrawW > 0 {
+			g.lastPowerW = stat.PowerDrawW
+		}
+		g.lastTelemetry = time.Now()
+	}
+	return ok
+}
+
+// carryTelemetry replaces zeroed sensor values with the last successful
+// reading while it is still fresh, so charts do not saw-tooth to zero
+// between throttled hwmon passes or across a failed read. Power is only
+// carried while the card is busy: an idle (usually runtime-suspended) GPU
+// really does draw ~nothing.
+func (g *sysfsGpu) carryTelemetry(stat *GpuStat, active bool) {
+	if time.Since(g.lastTelemetry) >= telemetryHold {
 		return
 	}
+	if stat.TempC == 0 {
+		stat.TempC = g.lastTempC
+	}
+	if stat.VramTempC == 0 {
+		stat.VramTempC = g.lastVramTempC
+	}
+	if stat.FanSpeedPct == 0 {
+		stat.FanSpeedPct = g.lastFanPct
+	}
+	if active && stat.PowerDrawW == 0 {
+		stat.PowerDrawW = g.lastPowerW
+	}
+}
+
+// telemetryHold bounds how long a stale reading is carried forward.
+const telemetryHold = 30 * time.Second
+
+func (g *sysfsGpu) readHwmonOnce(stat *GpuStat) bool {
+	reads := 0
 
 	type entry struct {
 		label string
@@ -223,6 +288,7 @@ func (g *sysfsGpu) readHwmon(stat *GpuStat) {
 		if !ok || v <= 0 {
 			continue
 		}
+		reads++
 		temps = append(temps, entry{
 			label: strings.ToLower(readString(filepath.Join(g.hwmonPath, "temp"+strconv.Itoa(i)+"_label"))),
 			tempC: int(v / 1000),
@@ -244,18 +310,22 @@ func (g *sysfsGpu) readHwmon(stat *GpuStat) {
 	if fan, ok := readInt(filepath.Join(g.hwmonPath, "fan1_input")); ok && fan > 0 {
 		if fanMax, ok := readInt(filepath.Join(g.hwmonPath, "fan1_max")); ok && fanMax > 0 {
 			stat.FanSpeedPct = float64(fan) / float64(fanMax) * 100
+			reads++
 		}
 	}
 	if stat.FanSpeedPct == 0 {
 		if pwm, ok := readInt(filepath.Join(g.hwmonPath, "pwm1")); ok && pwm > 0 {
 			stat.FanSpeedPct = float64(pwm) / 255 * 100
+			reads++
 		}
 	}
 
 	// power: instant average if exposed (amdgpu, µW), else energy counter deltas (µJ)
 	if avg, ok := readInt(filepath.Join(g.hwmonPath, "power1_average")); ok && avg > 0 {
 		stat.PowerDrawW = float64(avg) / 1e6
+		reads++
 	} else if energy, ok := readUint(filepath.Join(g.hwmonPath, "energy1_input")); ok {
+		reads++
 		now := time.Now()
 		if g.lastEnergyUJ > 0 && energy >= g.lastEnergyUJ && now.After(g.lastEnergyAt) {
 			elapsed := now.Sub(g.lastEnergyAt).Seconds()
@@ -265,6 +335,8 @@ func (g *sysfsGpu) readHwmon(stat *GpuStat) {
 		}
 		g.lastEnergyUJ, g.lastEnergyAt = energy, now
 	}
+
+	return reads > 0
 }
 
 // readAmdgpuSysfs fills util/vram from amdgpu-specific sysfs files.
