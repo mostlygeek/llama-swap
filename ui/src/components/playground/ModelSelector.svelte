@@ -36,6 +36,11 @@
   // Aliases sit indented under their model, so they only need to name it when
   // the filter has left them on their own.
   let visibleValues = $derived(new Set(visible.map((option) => option.value)));
+  // Every id/alias actually offered, regardless of the search box's current
+  // filter. A value survives a server switch in storage (it's keyed per
+  // server), but the model it named may not exist on whichever server is now
+  // connected, in which case it should not keep showing as selected.
+  let optionValues = $derived(new Set(options.map((option) => option.value)));
 
   // Rows in dropdown order, split into their group headings.
   let sections = $derived.by(() => {
@@ -64,6 +69,10 @@
     const el = inputRef;
     const next = text;
     if (el && el.value !== next) el.value = next;
+  });
+
+  $effect(() => {
+    if (value && hasModels && !optionValues.has(value)) value = "";
   });
 
   function openList() {
