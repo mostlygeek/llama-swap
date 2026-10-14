@@ -568,7 +568,7 @@ func TestServer_HandleMetrics_Unavailable(t *testing.T) {
 func TestServer_Redirects(t *testing.T) {
 	s := newTestServer(newStubRouter(nil, ""), newStubRouter(nil, ""))
 
-	for path, want := range map[string]string{"/": "/ui", "/upstream": "/ui/models"} {
+	for path, want := range map[string]string{"/": "ui/", "/upstream": "ui/models"} {
 		w := httptest.NewRecorder()
 		s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
 		if w.Code != http.StatusFound {

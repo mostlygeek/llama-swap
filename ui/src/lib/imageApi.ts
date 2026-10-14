@@ -1,5 +1,6 @@
 import type { ImageGenerationRequest, ImageGenerationResponse } from "./types";
 import { playgroundSessionHeaders } from "./playgroundSession";
+import { apiUrl } from "./apiPath";
 
 export async function generateImage(
   model: string,
@@ -14,7 +15,7 @@ export async function generateImage(
     size,
   };
 
-  const response = await fetch("/v1/images/generations", {
+  const response = await fetch(apiUrl("/v1/images/generations"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

@@ -381,7 +381,13 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /wol-health", handleHealth)
 	mux.HandleFunc("GET /{$}", handleRootRedirect)
 
-	// Embedded UI.
+	// Embedded UI. ServeMux's built-in /ui -> /ui/ redirect uses an absolute
+	// Location, which would drop a prefix-stripping reverse proxy's path
+	// prefix; this exact-match route keeps it relative instead (308 preserves
+	// the method).
+	mux.HandleFunc("/ui", func(w http.ResponseWriter, r *http.Request) {
+		redirectRelative(w, "ui/", http.StatusPermanentRedirect)
+	})
 	mux.Handle("GET /ui/", chain.New(authMW).ThenFunc(s.handleUI))
 	// The browser fetches the web app manifest - and the icons it references -
 	// itself while deciding whether to offer installing the PWA, and it has no

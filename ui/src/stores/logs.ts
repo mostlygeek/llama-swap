@@ -1,5 +1,6 @@
 import { writable, type Writable } from "svelte/store";
 import type { APIEventEnvelope, LogData, LogSource } from "../lib/types";
+import { apiUrl } from "../lib/apiPath";
 
 const LOG_LENGTH_LIMIT = 1024 * 100; /* 100KB of log data */
 
@@ -49,7 +50,7 @@ export function connectLogStreams(sources: LogSource[]): () => void {
 
   const connect = () => {
     retryTimer = null;
-    eventSource = new EventSource(url);
+    eventSource = new EventSource(apiUrl(url));
 
     eventSource.onopen = () => {
       clear();

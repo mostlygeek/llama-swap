@@ -43,7 +43,11 @@ export default defineConfig({
       threshold: 1024,
     }),
   ],
-  base: "/ui/",
+  // Relative base so the build works behind reverse proxies that serve
+  // llama-swap under a path prefix (see lib/apiPath.ts); the server mounts
+  // the UI at <prefix>/ui/ and the app uses hash routing, so the document
+  // path is stable and relative asset URLs resolve correctly everywhere.
+  base: "./",
   resolve: {
     alias: {
       $lib: path.resolve(__dirname, "./src/lib"),

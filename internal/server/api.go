@@ -434,12 +434,23 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("OK"))
 }
 
+// redirectRelative sends a redirect whose Location header stays relative to
+// the URL the client requested. http.Redirect resolves its destination
+// against the server-visible request path, which drops the path prefix when
+// llama-swap runs behind a prefix-stripping reverse proxy (a browser resolves
+// a relative Location against the URL it actually asked for, so the prefix
+// survives). Target must not start with "/".
+func redirectRelative(w http.ResponseWriter, target string, code int) {
+	w.Header().Set("Location", target)
+	w.WriteHeader(code)
+}
+
 func handleRootRedirect(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, "/ui", http.StatusFound)
+	redirectRelative(w, "ui/", http.StatusFound)
 }
 
 func handleUpstreamRedirect(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, "/ui/models", http.StatusFound)
+	redirectRelative(w, "ui/models", http.StatusFound)
 }
 
 // handleUpstream proxies ANY request under /upstream/<model>/<path> directly to
@@ -454,16 +465,18 @@ func (s *Server) handleUpstream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Redirect /upstream/model to /upstream/model/ so relative URLs in upstream
-	// responses resolve. 301 for GET/HEAD, 308 otherwise to preserve the method.
+	// responses resolve. The Location stays relative so the redirect keeps a
+	// reverse proxy's path prefix (see redirectRelative). 301 for GET/HEAD,
+	// 308 otherwise to preserve the method.
 	if remainingPath == "/" && !strings.HasSuffix(r.URL.Path, "/") {
-		newPath := "/upstream/" + searchName + "/"
+		newPath := searchName + "/"
 		if r.URL.RawQuery != "" {
 			newPath += "?" + r.URL.RawQuery
 		}
 		if r.Method == http.MethodGet || r.Method == http.MethodHead {
-			http.Redirect(w, r, newPath, http.StatusMovedPermanently)
+			redirectRelative(w, newPath, http.StatusMovedPermanently)
 		} else {
-			http.Redirect(w, r, newPath, http.StatusPermanentRedirect)
+			redirectRelative(w, newPath, http.StatusPermanentRedirect)
 		}
 		return
 	}
