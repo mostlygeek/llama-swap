@@ -187,13 +187,17 @@ func (g *sysfsGpu) poll() (GpuStat, error) {
 		UUID:      g.uuid,
 	}
 
-	// fdinfo first: reading /proc never wakes the GPU. It doubles as an
-	// activity check -- hwmon/power reads go through the GPU's firmware
-	// and wake a runtime-suspended card, so only touch them when a process
-	// holds the GPU, and at most once per sysfsHwmonMinInterval (a resident
-	// but idle model is not a reason to keep the GPU awake). A sleeping GPU
-	// reports zeroed telemetry, which is exactly the truth.
-	active := g.readFdInfo(&stat)
+	// fdinfo first: reading /proc never wakes the GPU. It is one activity
+	// check, but it only sees processes in llama-swap's own PID namespace
+	// — on a shared GPU another container's workload keeps the card awake
+	// without any fdinfo record here. The kernel's runtime PM status is
+	// the namespace-independent signal: "active" means someone is already
+	// using the card, and reading the attribute never touches the GPU
+	// firmware. hwmon/power reads DO wake a runtime-suspended card, so
+	// they only happen when one of the two signals says the card is awake,
+	// and at most once per sysfsHwmonMinInterval.
+	fdActive := g.readFdInfo(&stat)
+	active := fdActive || g.runtimeStatusActive()
 
 	if active && time.Since(g.lastHwmonAt) >= sysfsHwmonMinInterval {
 		// Advance the clock only on success: a failed pass (the card was
@@ -201,9 +205,13 @@ func (g *sysfsGpu) poll() (GpuStat, error) {
 		if g.readHwmon(&stat) {
 			g.lastHwmonAt = time.Now()
 		}
-		if g.amdgpu {
-			g.readAmdgpuSysfs(&stat)
-		}
+	}
+	if g.amdgpu {
+		// amdgpu's busy-percent and mem_info counters are plain driver
+		// counters: reading them neither wakes the card nor is limited to
+		// this PID namespace (they cover every client), so they refresh
+		// every tick rather than riding the throttled hwmon pass.
+		g.readAmdgpuSysfs(&stat)
 	}
 	g.carryTelemetry(&stat, active)
 
@@ -736,4 +744,16 @@ func isDigits(s string) bool {
 		}
 	}
 	return true
+}
+
+// runtimeStatusActive reports whether the kernel's runtime PM considers the
+// card awake (power/runtime_status == "active"). This is the
+// namespace-independent activity signal: another container's workload keeps
+// the card active with no fdinfo record visible here, and reading the
+// attribute itself never touches the GPU firmware, so it cannot wake the
+// card. Any error or missing attribute reports false (fdinfo remains the
+// gate on such systems).
+func (g *sysfsGpu) runtimeStatusActive() bool {
+	status := strings.TrimSpace(readString(filepath.Join(g.sysDevPath, "power", "runtime_status")))
+	return status == "active"
 }

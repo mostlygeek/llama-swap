@@ -5,6 +5,7 @@ package perf
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -479,3 +480,77 @@ func TestSysfs_UnattributableFdinfoSkippedOnMultiGpu(t *testing.T) {
 		}
 	}
 }
+
+// CircuitGuy part 2 (PR #1159 review): the activity gate must not go dark
+// just because llama-swap has no local processes — another container's
+// workload keeps runtime_status active, and reading that attribute never
+// wakes the card.
+func TestSysfs_RuntimeStatusGatesHwmonAcrossNamespaces(t *testing.T) {
+	sysRoot := fakeSysfs(t)
+	withSysfs(t, sysRoot)
+
+	// No fdinfo at all: proc is empty.
+	procRootLocal := t.TempDir()
+	oldProc := procRoot
+	procRoot = procRootLocal
+	t.Cleanup(func() { procRoot = oldProc })
+
+	g := discoverSysfsGpus()[0]
+
+	// Card suspended: no hwmon read, telemetry zeroed.
+	if stat, _ := g.poll(); stat.TempC != 0 {
+		t.Fatalf("suspended card must not read hwmon, got TempC=%d", stat.TempC)
+	}
+
+	// Another container keeps the card awake: runtime_status says active.
+	writeFiles(t, sysRoot, map[string]string{"devices/pci0000:00/0000:00:01.0/0000:01:00.0/0000:03:00.0/power/runtime_status": "active"})
+	if stat, _ := g.poll(); stat.TempC != 48 {
+		t.Fatalf("runtime-active card must read hwmon despite no local fdinfo, got TempC=%d (want 48)", stat.TempC)
+	}
+}
+
+// amdgpu driver counters cover every client and are cheap, so they refresh
+// every tick — a throttled tick still reports exact VRAM/util (no fdinfo
+// under-count, no BAR fallback).
+func TestSysfs_AmdgpuCountersRefreshOnThrottledTicks(t *testing.T) {
+	root := t.TempDir()
+	amdDir := "devices/pci0000:00/0000:00:01.0/0000:01:00.0"
+	writeFiles(t, root, map[string]string{
+		amdDir + "/vendor":                   "0x1002",
+		amdDir + "/device":                   "0x7551",
+		amdDir + "/gpu_busy_percent":         "42",
+		amdDir + "/mem_info_vram_total":      str(32 * 1024 * 1024 * 1024),
+		amdDir + "/mem_info_vram_used":       str(8 * 1024 * 1024 * 1024),
+		amdDir + "/hwmon/hwmon4/name":        "amdgpu",
+		amdDir + "/hwmon/hwmon4/temp1_input": "60000",
+	})
+	os.MkdirAll(filepath.Join(root, "bus/pci/drivers/amdgpu"), 0755)
+	symlink(t, root, amdDir+"/driver", "../../../../bus/pci/drivers/amdgpu")
+	symlink(t, root, "class/drm/card0/device", "../../../"+amdDir)
+	withSysfs(t, root)
+
+	g := discoverSysfsGpus()[0]
+	if !g.amdgpu {
+		t.Fatal("expected amdgpu discovery")
+	}
+	first, _ := g.poll()
+	if first.MemUsedMB != 8192 || first.MemTotalMB != 32768 || first.GpuUtilPct != 42 {
+		t.Fatalf("first poll amdgpu counters, got %+v", first)
+	}
+
+	// VRAM grows (another client) and the busy percent changes; the next
+	// poll is inside the hwmon throttle window but must still see it.
+	writeFiles(t, root, map[string]string{
+		amdDir + "/gpu_busy_percent":   "97",
+		amdDir + "/mem_info_vram_used": str(16 * 1024 * 1024 * 1024),
+	})
+	second, _ := g.poll()
+	if second.GpuUtilPct != 97 || second.MemUsedMB != 16384 {
+		t.Fatalf("throttled tick must refresh amdgpu counters, got util=%v used=%d", second.GpuUtilPct, second.MemUsedMB)
+	}
+	if second.MemTotalMB != 32768 {
+		t.Fatalf("exact total must stay, got %d (BAR fallback would differ)", second.MemTotalMB)
+	}
+}
+
+func str(v int64) string { return strconv.FormatInt(v, 10) }
