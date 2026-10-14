@@ -29,8 +29,9 @@ func newTestMatrix(t *testing.T, conf config.Config, sets config.OrderedSets, ev
 	}
 
 	logger := logmon.NewWriter(io.Discard)
+	tracker := newLoadCostTracker(matrix.ResolvedEvictCosts(), logger)
 	swapper := &matrixSwapper{
-		solver: newMatrixSolver(matrix.Program(), matrix.ResolvedEvictCosts()),
+		solver: newMatrixSolver(matrix.Program(), tracker.EvictCosts),
 		logger: logger,
 	}
 	base, err := newBaseRouter("matrix", conf, processes, logger, swapper)
@@ -269,5 +270,6 @@ func newTestMatrixSolver(t *testing.T, sets config.OrderedSets, evictCosts map[s
 	if err := config.ValidateMatrix(matrix, models); err != nil {
 		t.Fatalf("ValidateMatrix: %v", err)
 	}
-	return newMatrixSolver(matrix.Program(), matrix.ResolvedEvictCosts())
+	tracker := newLoadCostTracker(matrix.ResolvedEvictCosts(), logmon.NewWriter(io.Discard))
+	return newMatrixSolver(matrix.Program(), tracker.EvictCosts)
 }

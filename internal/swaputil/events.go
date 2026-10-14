@@ -18,6 +18,16 @@ type ProcessStateChangeEvent struct {
 	ProcessName string
 	OldState    string
 	NewState    string
+	// Timestamp is when the transition actually happened, captured by the
+	// emitter. Delivery through the dispatcher is asynchronous, so
+	// subscribers must never substitute their own clock: a queued event
+	// could be handled long after the transition.
+	Timestamp time.Time
+	// Elapsed is how long the process sat in OldState before this
+	// transition, measured by the emitter (zero for emitters that do not
+	// track it). A NewState of ready with OldState of starting therefore
+	// carries the true load time regardless of delivery delays.
+	Elapsed time.Duration
 }
 
 func (e ProcessStateChangeEvent) Type() uint32 {

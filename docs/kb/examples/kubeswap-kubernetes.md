@@ -411,16 +411,16 @@ replace the `routing:` block under `config.top` with:
         settings:
           matrix:
             evict_costs:
-              krea2-turbo: 10     # image models load 10-16GB of weights -
-              ideogram4: 10       # the router evicts them last
+              krea2-turbo: 2      # already slow to load (big weights); the
+              ideogram4: 2        # multiplier keeps them loaded extra hard
             sets:
               gpu: (lfm25-230m | krea2-turbo | ideogram4)
               all: "+gpu & distil-whisper-lgv3 & qwen3-tts-06b"
 ```
 
 Any one of the three GPU models, plus both CPU models. Requesting a second
-GPU model evicts the cheapest running one (`evict_costs` breaks the tie;
-default 1).
+GPU model evicts the cheapest-to-recover running one: eviction cost is the
+measured median load time multiplied by `evict_costs` (default 1).
 
 ### Matrix builder
 
