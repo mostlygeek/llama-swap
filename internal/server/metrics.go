@@ -546,6 +546,12 @@ func buildMetrics(modelID string, start time.Time, inputTokens, outputTokens, ca
 	if meanInterTokenLatency := responseMetrics.Get("mean_itl_ms"); meanInterTokenLatency.Exists() && meanInterTokenLatency.Float() > 0 {
 		tokensPerSecond = 1000 / meanInterTokenLatency.Float()
 	}
+	// Embedding and rerank requests generate no output tokens and carry no
+	// backend rates, so fall back to the wall-clock duration to supply the
+	// prompt rate — Activity then shows a prefill speed instead of "unknown".
+	if promptPerSecond < 0 && outputTokens == 0 && inputTokens > 0 && wallDurationMs > 0 {
+		promptPerSecond = float64(inputTokens) / (float64(wallDurationMs) / 1000)
+	}
 
 	return ActivityLogEntry{
 		Timestamp: time.Now(),
