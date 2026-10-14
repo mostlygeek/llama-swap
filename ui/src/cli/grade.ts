@@ -1,4 +1,5 @@
 import type { EvalCase } from "./cases";
+import type { HeadlessRun, ToolInvocation } from "./headless";
 
 /**
  * Stage-1 grading: deterministic assertions over one agent turn.
@@ -8,27 +9,13 @@ import type { EvalCase } from "./cases";
  * The LLM judge in judge.ts is a separate, later pass.
  */
 
-/** One tool invocation, as recorded from the agent event stream. */
-export interface ToolInvocation {
-  name: string;
-  args: string;
-  ok: boolean;
-  durationMs: number;
-}
+export type { ToolInvocation };
 
 /** Everything one run of one case produced. */
-export interface RunRecord {
+export type RunRecord = HeadlessRun & {
   caseId: string;
   attempt: number;
-  answer: string;
-  reasoning: string;
-  toolCalls: ToolInvocation[];
-  iterations: number;
-  /** The agent loop's own termination reason: stop | max_iterations | aborted | error. */
-  doneReason: string;
-  durationMs: number;
-  error?: string;
-}
+};
 
 export interface Assertion {
   kind: string;

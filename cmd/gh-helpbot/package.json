@@ -1,0 +1,24 @@
+{
+  "name": "gh-helpbot",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Answers @help questions on GitHub issues and discussions with llama-swap's Help agent",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "build": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node24 --outfile=dist/gh-helpbot.js --banner:js=\"#!/usr/bin/env node\"",
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "^25.1.0",
+    "esbuild": "^0.27.0",
+    "tsx": "^4.23.12",
+    "typescript": "~5.8.3",
+    "vitest": "^4.1.0"
+  }
+}
