@@ -29,6 +29,13 @@ type Filters struct {
 	// Keys ending in "?" are set-if-undefined, as in SetParams.
 	// Protected params (like "model") cannot be set.
 	SetParamsByID map[string]map[string]any `yaml:"setParamsByID"`
+
+	// TransformParams maps JSON paths to value-translation maps.
+	// For each path, if the request carries a value that is a key in the map,
+	// that value is replaced with the corresponding map value.
+	// Example: "reasoning_effort": {"low": "medium", "medium": "high"}
+	// Transforms are applied after setParams/setParamsByID so they can override them.
+	TransformParams map[string]map[string]string `yaml:"transformParams"`
 }
 
 // SanitizedStripParams returns a sorted list of parameters to strip,
@@ -84,6 +91,27 @@ func (f Filters) SanitizedSetParams() (map[string]any, []string, map[string]bool
 		return nil, nil, nil
 	}
 	return sanitizeParams(f.SetParams)
+}
+
+// SanitizedTransformParams returns the transform maps for all paths,
+// filtering out protected paths (like "model"). Returns nil if no transforms
+// are configured or all transforms are protected.
+func (f Filters) SanitizedTransformParams() map[string]map[string]string {
+	if len(f.TransformParams) == 0 {
+		return nil
+	}
+	result := make(map[string]map[string]string, len(f.TransformParams))
+	for path, mapping := range f.TransformParams {
+		// Skip protected paths (e.g., "model")
+		if slices.Contains(ProtectedParams, path) {
+			continue
+		}
+		result[path] = mapping
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
 
 // sanitizeParams removes protected params from raw and strips the "?" suffix
