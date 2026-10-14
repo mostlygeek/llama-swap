@@ -106,11 +106,18 @@ reload — with different parameters applied.
 3. `stripParams` removes keys
 4. `setParams` applies
 5. `setParamsByID` applies, overriding `setParams`
-6. The request is proxied
+6. The global `hooks.on_request` SPL program runs
+7. The model's or peer's `filters.policy` SPL program runs
+8. The request is proxied
 
 Filters apply like a pipe: `stripParams | setParams | setParamsByID`. A
 set-if-undefined key (`key?`) checks the body at its own stage, so a stripped
 key counts as undefined and a key an earlier stage set counts as defined.
+
+SPL programs see the body after the filters above ran, so a `default` in a
+policy fills a key that `stripParams` removed. When a rule needs a condition,
+such as "only for requests without an API key", use a policy instead of a
+filter; see `guides/api-integration/swap-policy-language`.
 
 ## When not to use filters
 
@@ -120,6 +127,7 @@ only rewrite the request body; they cannot change how the server was started.
 
 ## Related
 
+- `guides/api-integration/swap-policy-language` — conditional rewriting and denying with SPL
 - `guides/api-integration/set-if-undefined` — set a parameter only if the request didn't
 - `reference/config/models` — the annotated `filters` block
 - `reference/config/peers` — peer filters
