@@ -449,8 +449,13 @@ func handleRootRedirect(w http.ResponseWriter, r *http.Request) {
 	redirectRelative(w, "ui/", http.StatusFound)
 }
 
+// handleUpstreamRedirect sends /upstream to the Models page. The target uses
+// the hash router (ui/#/models) so the document stays mounted at <prefix>/ui/:
+// a path route (ui/models) would leave the UI's prefix detection in
+// ui/src/lib/apiPath.ts unable to recover the proxy prefix, disconnecting the
+// page behind a prefix-stripping reverse proxy.
 func handleUpstreamRedirect(w http.ResponseWriter, r *http.Request) {
-	redirectRelative(w, "ui/models", http.StatusFound)
+	redirectRelative(w, "ui/#/models", http.StatusFound)
 }
 
 // handleUpstream proxies ANY request under /upstream/<model>/<path> directly to
@@ -468,8 +473,17 @@ func (s *Server) handleUpstream(w http.ResponseWriter, r *http.Request) {
 	// responses resolve. The Location stays relative so the redirect keeps a
 	// reverse proxy's path prefix (see redirectRelative). 301 for GET/HEAD,
 	// 308 otherwise to preserve the method.
+	//
+	// The target is built from the last escaped segment of the requested URL,
+	// not from searchName: a slash name ("author/model") arriving as two
+	// segments would resolve "author/model/" against /upstream/author/ and
+	// double the path, and a colon alias ("model1:high") would parse as a URL
+	// scheme (RFC 3986 4.2). "./<segment>/" stays path-relative for both, and
+	// reusing the escaped segment keeps %2F-encoded names redirecting to the
+	// URL the client actually requested.
 	if remainingPath == "/" && !strings.HasSuffix(r.URL.Path, "/") {
-		newPath := searchName + "/"
+		escapedPath := r.URL.EscapedPath()
+		newPath := "./" + escapedPath[strings.LastIndex(escapedPath, "/")+1:] + "/"
 		if r.URL.RawQuery != "" {
 			newPath += "?" + r.URL.RawQuery
 		}
