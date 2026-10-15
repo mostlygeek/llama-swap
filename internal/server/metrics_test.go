@@ -1,11 +1,14 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -20,7 +23,7 @@ import (
 func TestServer_ParseMetrics_ChatCompletions(t *testing.T) {
 	body := `{"usage":{"prompt_tokens":12,"completion_tokens":7,"prompt_tokens_details":{"cached_tokens":4}}}`
 	parsed := gjson.Parse(body)
-	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
+	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"), parsed.Get("tensorfold"))
 	if err != nil {
 		t.Fatalf("parseMetrics: %v", err)
 	}
@@ -89,7 +92,7 @@ func TestServer_ActivitySourceForwardedHeaders(t *testing.T) {
 func TestServer_ParseMetrics_Timings(t *testing.T) {
 	body := `{"timings":{"prompt_n":20,"predicted_n":50,"prompt_per_second":100.0,"predicted_per_second":40.0,"prompt_ms":200,"predicted_ms":1250,"cache_n":8}}`
 	parsed := gjson.Parse(body)
-	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
+	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"), parsed.Get("tensorfold"))
 	if err != nil {
 		t.Fatalf("parseMetrics: %v", err)
 	}
@@ -107,7 +110,7 @@ func TestServer_ParseMetrics_Timings(t *testing.T) {
 func TestServer_ParseMetrics_TabbyAPI(t *testing.T) {
 	body := `{"id":"chatcmpl-131b9995cd0c40c99e2ce958083ee406","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":83,"prompt_time":2.36,"prompt_tokens_per_sec":35.17,"completion_tokens":192,"completion_time":11.22,"completion_tokens_per_sec":17.11,"total_tokens":275,"total_time":13.63},"model":"SC_6.00bpw_H6_V6"}`
 	parsed := gjson.Parse(body)
-	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
+	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"), parsed.Get("tensorfold"))
 	if err != nil {
 		t.Fatalf("parseMetrics: %v", err)
 	}
@@ -167,7 +170,7 @@ func TestServer_ParseMetrics_OMLX(t *testing.T) {
 						entry, err = processStreamingResponse("m", time.Now(), []byte(stream))
 					} else {
 						parsed := gjson.Parse(body)
-						entry, err = parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
+						entry, err = parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"), parsed.Get("tensorfold"))
 					}
 					if err != nil {
 						t.Fatalf("parse metrics: %v", err)
@@ -226,7 +229,7 @@ func TestServer_MetricsMiddleware_OMLX(t *testing.T) {
 func TestServer_ParseMetrics_TabbyAPINotOverwrittenByTimings(t *testing.T) {
 	body := `{"usage":{"prompt_tokens":83,"completion_tokens":192,"prompt_tokens_per_sec":35.17,"completion_tokens_per_sec":17.11},"timings":{"prompt_n":20,"predicted_n":50,"prompt_per_second":100.0,"predicted_per_second":40.0,"prompt_ms":200,"predicted_ms":1250}}`
 	parsed := gjson.Parse(body)
-	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
+	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"), parsed.Get("tensorfold"))
 	if err != nil {
 		t.Fatalf("parseMetrics: %v", err)
 	}
@@ -293,7 +296,7 @@ data: [DONE]
 func TestServer_ParseMetrics_VLLMMetrics(t *testing.T) {
 	body := `{"id":"chatcmpl-abc123","object":"chat.completion","usage":{"prompt_tokens":42,"completion_tokens":128,"total_tokens":170,"prompt_tokens_details":{"cached_tokens":20}},"metrics":{"time_to_first_token_ms":85.2,"generation_time_ms":1240.5,"queue_time_ms":12.3,"mean_itl_ms":9.1,"tokens_per_second":103.2}}`
 	parsed := gjson.Parse(body)
-	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
+	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"), parsed.Get("tensorfold"))
 	if err != nil {
 		t.Fatalf("parseMetrics: %v", err)
 	}
@@ -311,7 +314,7 @@ func TestServer_ParseMetrics_VLLMMetrics(t *testing.T) {
 func TestServer_ParseMetrics_VLLMSpeculativeDecoding(t *testing.T) {
 	body := `{"id":"chatcmpl-abc123","object":"chat.completion","usage":{"prompt_tokens":42,"completion_tokens":128},"metrics":{"mean_itl_ms":9.1,"speculative_decoding":{"mean_acceptance_length":1.7,"draft_acceptance_rate":0.7,"acceptance_histogram":[6,14],"num_spec_steps":20,"num_accepted_draft_tokens":14,"num_draft_tokens":20,"num_spec_tokens":1}}}`
 	parsed := gjson.Parse(body)
-	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
+	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"), parsed.Get("tensorfold"))
 	if err != nil {
 		t.Fatalf("parseMetrics: %v", err)
 	}
@@ -325,7 +328,7 @@ func TestServer_ParseMetrics_VLLMSpeculativeDecoding(t *testing.T) {
 func TestServer_ParseMetrics_VLLMSpeculativeDecodingPartial(t *testing.T) {
 	body := `{"usage":{"prompt_tokens":42,"completion_tokens":128},"metrics":{"speculative_decoding":{"num_draft_tokens":20}}}`
 	parsed := gjson.Parse(body)
-	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
+	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"), parsed.Get("tensorfold"))
 	if err != nil {
 		t.Fatalf("parseMetrics: %v", err)
 	}
@@ -356,7 +359,7 @@ data: [DONE]
 func TestServer_ParseMetrics_TimingsDraftTokensNotOverwritten(t *testing.T) {
 	body := `{"timings":{"prompt_n":20,"predicted_n":50,"draft_n":30,"draft_n_accepted":12},"metrics":{"speculative_decoding":{}}}`
 	parsed := gjson.Parse(body)
-	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"))
+	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"), parsed.Get("tensorfold"))
 	if err != nil {
 		t.Fatalf("parseMetrics: %v", err)
 	}
@@ -686,7 +689,7 @@ func TestServer_ParseMetrics_Infill(t *testing.T) {
 	if arr := parsed.Array(); len(arr) > 0 {
 		timings = arr[len(arr)-1].Get("timings")
 	}
-	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), timings, parsed.Get("metrics"))
+	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), timings, parsed.Get("metrics"), parsed.Get("tensorfold"))
 	if err != nil {
 		t.Fatalf("parseMetrics: %v", err)
 	}
@@ -729,5 +732,332 @@ func TestServer_MetricsMiddleware_UpstreamAudioCaptureSkipsRespBody(t *testing.T
 	}
 	if len(cap.RespHeaders) == 0 {
 		t.Error("RespHeaders not stored; want captureRespHeaders mask")
+	}
+}
+
+// tensorfoldFixture reads a captured TensorFold response fixture.
+func tensorfoldFixture(t *testing.T, name string) []byte {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join("testdata", "tensorfold", name))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	return body
+}
+
+// TestServer_ParseMetrics_TensorFold parses the captured non-streaming
+// response from #1226.
+func TestServer_ParseMetrics_TensorFold(t *testing.T) {
+	parsed := gjson.ParseBytes(tensorfoldFixture(t, "completion.json"))
+	entry, err := parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"), parsed.Get("tensorfold"))
+	if err != nil {
+		t.Fatalf("parseMetrics: %v", err)
+	}
+	if entry.Tokens.InputTokens != 63 || entry.Tokens.OutputTokens != 64 || entry.Tokens.CachedTokens != 0 {
+		t.Fatalf("tokens = %+v", entry.Tokens)
+	}
+	if got, want := entry.Tokens.PromptPerSecond, float64(63)/0.1146; math.Abs(got-want) > 1e-9 {
+		t.Errorf("PromptPerSecond = %v, want %v", got, want)
+	}
+	if got, want := entry.Tokens.TokensPerSecond, float64(64)/2.0696; math.Abs(got-want) > 1e-9 {
+		t.Errorf("TokensPerSecond = %v, want %v", got, want)
+	}
+}
+
+// TestServer_ProcessStreamingResponse_TensorFold parses the captured SSE
+// response from #1226, where tensorfold arrives on the finish_reason chunk and
+// usage follows in a separate chunk.
+func TestServer_ProcessStreamingResponse_TensorFold(t *testing.T) {
+	entry, err := processStreamingResponse("m", time.Now(), tensorfoldFixture(t, "stream.sse"))
+	if err != nil {
+		t.Fatalf("processStreamingResponse: %v", err)
+	}
+	if entry.Tokens.InputTokens != 59 || entry.Tokens.OutputTokens != 32 || entry.Tokens.CachedTokens != 0 {
+		t.Fatalf("tokens = %+v", entry.Tokens)
+	}
+	if got, want := entry.Tokens.PromptPerSecond, float64(59)/0.2393; math.Abs(got-want) > 1e-9 {
+		t.Errorf("PromptPerSecond = %v, want %v", got, want)
+	}
+	if got, want := entry.Tokens.TokensPerSecond, float64(32)/0.7758; math.Abs(got-want) > 1e-9 {
+		t.Errorf("TokensPerSecond = %v, want %v", got, want)
+	}
+}
+
+// TestServer_ParseMetrics_TensorFoldEdgeCases covers missing or invalid
+// tensorfold measurements, the cached-token override, and the existing
+// timings/metrics precedence over TensorFold base rates.
+func TestServer_ParseMetrics_TensorFoldEdgeCases(t *testing.T) {
+	tests := []struct {
+		name         string
+		usage        string
+		tensorfold   string
+		extra        string
+		wantInput    int
+		wantOutput   int
+		wantCached   int
+		wantPrompt   float64
+		wantGenerate float64
+		wantDraft    int
+		wantDraftAcc int
+	}{
+		{
+			name:       "reported",
+			usage:      `"prompt_tokens":56,"completion_tokens":8,"prompt_tokens_details":{"cached_tokens":16}`,
+			tensorfold: `,"tensorfold":{"prefill_s":0.5,"decode_s":2.0,"rounds":9,"drafts":true,"cached":0,"drafted":63,"accepted":36}`,
+			wantInput:  56, wantOutput: 8, wantCached: 0,
+			wantPrompt: 112, wantGenerate: 4,
+			wantDraft: -1, wantDraftAcc: -1,
+		},
+		{
+			name:       "uncached subtracted",
+			usage:      `"prompt_tokens":56,"completion_tokens":8,"prompt_tokens_details":{"cached_tokens":16}`,
+			tensorfold: `,"tensorfold":{"prefill_s":0.4,"decode_s":2.0,"cached":16}`,
+			wantInput:  56, wantOutput: 8, wantCached: 16,
+			wantPrompt: 100, wantGenerate: 4,
+			wantDraft: -1, wantDraftAcc: -1,
+		},
+		{
+			name:       "zero durations",
+			usage:      `"prompt_tokens":56,"completion_tokens":8,"prompt_tokens_details":{"cached_tokens":16}`,
+			tensorfold: `,"tensorfold":{"prefill_s":0,"decode_s":0,"cached":0}`,
+			wantInput:  56, wantOutput: 8, wantCached: 0,
+			wantPrompt: -1, wantGenerate: -1,
+			wantDraft: -1, wantDraftAcc: -1,
+		},
+		{
+			name:       "negative durations",
+			usage:      `"prompt_tokens":56,"completion_tokens":8,"prompt_tokens_details":{"cached_tokens":16}`,
+			tensorfold: `,"tensorfold":{"prefill_s":-1,"decode_s":-1,"cached":0}`,
+			wantInput:  56, wantOutput: 8, wantCached: 0,
+			wantPrompt: -1, wantGenerate: -1,
+			wantDraft: -1, wantDraftAcc: -1,
+		},
+		{
+			name:       "null durations",
+			usage:      `"prompt_tokens":56,"completion_tokens":8,"prompt_tokens_details":{"cached_tokens":16}`,
+			tensorfold: `,"tensorfold":{"prefill_s":null,"decode_s":null,"cached":0}`,
+			wantInput:  56, wantOutput: 8, wantCached: 0,
+			wantPrompt: -1, wantGenerate: -1,
+			wantDraft: -1, wantDraftAcc: -1,
+		},
+		{
+			name:       "missing",
+			usage:      `"prompt_tokens":56,"completion_tokens":8,"prompt_tokens_details":{"cached_tokens":16}`,
+			tensorfold: "",
+			wantInput:  56, wantOutput: 8, wantCached: 16,
+			wantPrompt: -1, wantGenerate: -1,
+			wantDraft: -1, wantDraftAcc: -1,
+		},
+		{
+			name:       "empty object",
+			usage:      `"prompt_tokens":56,"completion_tokens":8,"prompt_tokens_details":{"cached_tokens":16}`,
+			tensorfold: `,"tensorfold":{}`,
+			wantInput:  56, wantOutput: 8, wantCached: 16,
+			wantPrompt: -1, wantGenerate: -1,
+			wantDraft: -1, wantDraftAcc: -1,
+		},
+		{
+			name:       "string durations",
+			usage:      `"prompt_tokens":56,"completion_tokens":8,"prompt_tokens_details":{"cached_tokens":16}`,
+			tensorfold: `,"tensorfold":{"prefill_s":"0.5","decode_s":"2.0","cached":0}`,
+			wantInput:  56, wantOutput: 8, wantCached: 0,
+			wantPrompt: -1, wantGenerate: -1,
+			wantDraft: -1, wantDraftAcc: -1,
+		},
+		{
+			name:       "prefill only",
+			usage:      `"prompt_tokens":56,"completion_tokens":8,"prompt_tokens_details":{"cached_tokens":16}`,
+			tensorfold: `,"tensorfold":{"prefill_s":0.5}`,
+			wantInput:  56, wantOutput: 8, wantCached: 16,
+			wantPrompt: 80, wantGenerate: -1,
+			wantDraft: -1, wantDraftAcc: -1,
+		},
+		{
+			name:       "decode only",
+			usage:      `"prompt_tokens":56,"completion_tokens":8,"prompt_tokens_details":{"cached_tokens":16}`,
+			tensorfold: `,"tensorfold":{"decode_s":2.0}`,
+			wantInput:  56, wantOutput: 8, wantCached: 16,
+			wantPrompt: -1, wantGenerate: 4,
+			wantDraft: -1, wantDraftAcc: -1,
+		},
+		{
+			name:       "cached without usage",
+			usage:      "",
+			tensorfold: `,"tensorfold":{"cached":9}`,
+			wantInput:  0, wantOutput: 0, wantCached: 9,
+			wantPrompt: -1, wantGenerate: -1,
+			wantDraft: -1, wantDraftAcc: -1,
+		},
+		{
+			name:       "negative cached ignored",
+			usage:      `"prompt_tokens":56,"completion_tokens":8,"prompt_tokens_details":{"cached_tokens":16}`,
+			tensorfold: `,"tensorfold":{"prefill_s":0.5,"decode_s":2.0,"cached":-1}`,
+			wantInput:  56, wantOutput: 8, wantCached: 16,
+			wantPrompt: 80, wantGenerate: 4,
+			wantDraft: -1, wantDraftAcc: -1,
+		},
+		{
+			name:       "null cached ignored",
+			usage:      `"prompt_tokens":56,"completion_tokens":8,"prompt_tokens_details":{"cached_tokens":16}`,
+			tensorfold: `,"tensorfold":{"prefill_s":0.5,"decode_s":2.0,"cached":null}`,
+			wantInput:  56, wantOutput: 8, wantCached: 16,
+			wantPrompt: 80, wantGenerate: 4,
+			wantDraft: -1, wantDraftAcc: -1,
+		},
+		{
+			name:       "TabbyAPI precedence",
+			usage:      `"prompt_tokens":56,"completion_tokens":8,"prompt_tokens_details":{"cached_tokens":16},"prompt_tokens_per_sec":35.17,"completion_tokens_per_sec":17.11`,
+			tensorfold: `,"tensorfold":{"prefill_s":0.5,"decode_s":2.0,"cached":0}`,
+			wantInput:  56, wantOutput: 8, wantCached: 0,
+			wantPrompt: 112, wantGenerate: 4,
+			wantDraft: -1, wantDraftAcc: -1,
+		},
+		{
+			name:       "invalid keeps TabbyAPI",
+			usage:      `"prompt_tokens":56,"completion_tokens":8,"prompt_tokens_details":{"cached_tokens":16},"prompt_tokens_per_sec":35.17,"completion_tokens_per_sec":17.11`,
+			tensorfold: `,"tensorfold":{"prefill_s":null,"decode_s":null,"cached":0}`,
+			wantInput:  56, wantOutput: 8, wantCached: 0,
+			wantPrompt: 35.17, wantGenerate: 17.11,
+			wantDraft: -1, wantDraftAcc: -1,
+		},
+		{
+			name:       "timings precedence",
+			usage:      `"prompt_tokens":56,"completion_tokens":8,"prompt_tokens_details":{"cached_tokens":16}`,
+			tensorfold: `,"tensorfold":{"prefill_s":0.5,"decode_s":2.0,"cached":0}`,
+			extra:      `,"timings":{"prompt_n":56,"predicted_n":8,"cache_n":16,"prompt_per_second":100,"predicted_per_second":40}`,
+			wantInput:  56, wantOutput: 8, wantCached: 16,
+			wantPrompt: 100, wantGenerate: 40,
+			wantDraft: -1, wantDraftAcc: -1,
+		},
+		{
+			name:       "vLLM precedence",
+			usage:      `"prompt_tokens":56,"completion_tokens":8,"prompt_tokens_details":{"cached_tokens":16}`,
+			tensorfold: `,"tensorfold":{"prefill_s":0.5,"decode_s":2.0,"cached":0}`,
+			extra:      `,"metrics":{"time_to_first_token_ms":200,"mean_itl_ms":10}`,
+			wantInput:  56, wantOutput: 8, wantCached: 0,
+			wantPrompt: 280, wantGenerate: 100,
+			wantDraft: -1, wantDraftAcc: -1,
+		},
+		{
+			name:       "vLLM over timings",
+			usage:      `"prompt_tokens":56,"completion_tokens":8,"prompt_tokens_details":{"cached_tokens":16}`,
+			tensorfold: `,"tensorfold":{"prefill_s":0.5,"decode_s":2.0,"cached":0}`,
+			extra:      `,"timings":{"prompt_n":56,"predicted_n":8,"cache_n":16,"prompt_per_second":100,"predicted_per_second":40},"metrics":{"time_to_first_token_ms":200,"mean_itl_ms":10}`,
+			wantInput:  56, wantOutput: 8, wantCached: 16,
+			wantPrompt: 200, wantGenerate: 100,
+			wantDraft: -1, wantDraftAcc: -1,
+		},
+		{
+			name:       "vLLM speculative decoding",
+			usage:      `"prompt_tokens":56,"completion_tokens":8,"prompt_tokens_details":{"cached_tokens":16}`,
+			tensorfold: `,"tensorfold":{"prefill_s":0.5,"decode_s":2.0,"cached":0,"drafted":63,"accepted":36}`,
+			extra:      `,"metrics":{"speculative_decoding":{"num_draft_tokens":20,"num_accepted_draft_tokens":14}}`,
+			wantInput:  56, wantOutput: 8, wantCached: 0,
+			wantPrompt: 112, wantGenerate: 4,
+			wantDraft: 20, wantDraftAcc: 14,
+		},
+		{
+			name:       "partial vLLM speculative decoding",
+			usage:      `"prompt_tokens":56,"completion_tokens":8,"prompt_tokens_details":{"cached_tokens":16}`,
+			tensorfold: `,"tensorfold":{"prefill_s":0.5,"decode_s":2.0,"cached":0,"drafted":63,"accepted":36}`,
+			extra:      `,"metrics":{"speculative_decoding":{"num_draft_tokens":20}}`,
+			wantInput:  56, wantOutput: 8, wantCached: 0,
+			wantPrompt: 112, wantGenerate: 4,
+			wantDraft: -1, wantDraftAcc: -1,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			body := `{"usage":{` + test.usage + `}` + test.tensorfold + test.extra + `}`
+			for _, streaming := range []bool{false, true} {
+				name := "JSON"
+				if streaming {
+					name = "SSE"
+				}
+				t.Run(name, func(t *testing.T) {
+					var entry ActivityLogEntry
+					var err error
+					if streaming {
+						stream := "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n" + "data: " + body + "\n\ndata: [DONE]\n\n"
+						entry, err = processStreamingResponse("m", time.Now(), []byte(stream))
+					} else {
+						parsed := gjson.Parse(body)
+						entry, err = parseMetrics("m", time.Now(), parsed.Get("usage"), parsed.Get("timings"), parsed.Get("metrics"), parsed.Get("tensorfold"))
+					}
+					if err != nil {
+						t.Fatalf("parse metrics: %v", err)
+					}
+					if entry.Tokens.InputTokens != test.wantInput || entry.Tokens.OutputTokens != test.wantOutput || entry.Tokens.CachedTokens != test.wantCached {
+						t.Fatalf("tokens = %+v, want input %d, output %d, cached %d", entry.Tokens, test.wantInput, test.wantOutput, test.wantCached)
+					}
+					if entry.Tokens.PromptPerSecond != test.wantPrompt || entry.Tokens.TokensPerSecond != test.wantGenerate {
+						t.Fatalf("rates = %+v, want prompt %v, generation %v", entry.Tokens, test.wantPrompt, test.wantGenerate)
+					}
+					if entry.Tokens.DraftTokens != test.wantDraft || entry.Tokens.DraftAccTokens != test.wantDraftAcc {
+						t.Fatalf("draft tokens = %+v, want %d/%d", entry.Tokens, test.wantDraft, test.wantDraftAcc)
+					}
+				})
+			}
+		})
+	}
+}
+
+// TestServer_MetricsMiddleware_TensorFold exercises the full middleware path
+// with the captured fixtures from #1226.
+func TestServer_MetricsMiddleware_TensorFold(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		name := "JSON"
+		if streaming {
+			name = "SSE"
+		}
+		t.Run(name, func(t *testing.T) {
+			mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 10, 0)
+			cfg := config.Config{Models: map[string]config.ModelConfig{"m": {}}}
+			contentType := "application/json"
+			body := tensorfoldFixture(t, "completion.json")
+			if streaming {
+				contentType = "text/event-stream"
+				body = tensorfoldFixture(t, "stream.sse")
+			}
+			handler := chain.New(CreateMetricsMiddleware(mm, cfg)).ThenFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", contentType)
+				w.Write(body)
+			})
+			r := chatRequest("m")
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			if w.Code != http.StatusOK || !bytes.Equal(w.Body.Bytes(), body) {
+				t.Fatalf("response = %d, want 200 with the fixture body", w.Code)
+			}
+			entries := metricsEntries(t, mm)
+			if len(entries) != 1 {
+				t.Fatalf("want 1 entry, got %d", len(entries))
+			}
+			entry := entries[0]
+			if entry.Model != "m" {
+				t.Fatalf("recorded activity = %+v", entry)
+			}
+			if streaming {
+				if entry.Tokens.InputTokens != 59 || entry.Tokens.OutputTokens != 32 || entry.Tokens.CachedTokens != 0 {
+					t.Fatalf("tokens = %+v", entry.Tokens)
+				}
+				if got, want := entry.Tokens.PromptPerSecond, float64(59)/0.2393; math.Abs(got-want) > 1e-9 {
+					t.Errorf("PromptPerSecond = %v, want %v", got, want)
+				}
+				if got, want := entry.Tokens.TokensPerSecond, float64(32)/0.7758; math.Abs(got-want) > 1e-9 {
+					t.Errorf("TokensPerSecond = %v, want %v", got, want)
+				}
+			} else {
+				if entry.Tokens.InputTokens != 63 || entry.Tokens.OutputTokens != 64 || entry.Tokens.CachedTokens != 0 {
+					t.Fatalf("tokens = %+v", entry.Tokens)
+				}
+				if got, want := entry.Tokens.PromptPerSecond, float64(63)/0.1146; math.Abs(got-want) > 1e-9 {
+					t.Errorf("PromptPerSecond = %v, want %v", got, want)
+				}
+				if got, want := entry.Tokens.TokensPerSecond, float64(64)/2.0696; math.Abs(got-want) > 1e-9 {
+					t.Errorf("TokensPerSecond = %v, want %v", got, want)
+				}
+			}
+		})
 	}
 }
