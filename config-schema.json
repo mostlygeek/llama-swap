@@ -434,7 +434,7 @@
                     },
                     "capacity": {
                         "type": "object",
-                        "description": "Usage and eviction tie-breaking for the capacity router. Required for every local model when use: capacity is selected.",
+                        "description": "Usage and eviction cost for the capacity router. Required for every local model when use: capacity is selected.",
                         "required": ["usage"],
                         "properties": {
                             "usage": {
@@ -443,12 +443,12 @@
                                 "maximum": 9223372036854775807,
                                 "description": "Declared capacity consumption, no greater than routing.router.settings.capacity.total."
                             },
-                            "evictionPriority": {
+                            "evict_cost": {
                                 "type": "integer",
-                                "minimum": 0,
+                                "minimum": 1,
                                 "maximum": 9223372036854775807,
-                                "default": 0,
-                                "description": "For equally sized eviction sets, prefer evicting higher numbers. Compare ascending priority vectors, then sorted model IDs."
+                                "default": 1,
+                                "description": "Cost of unloading and later recovering this model. Minimize summed eviction cost, then eviction count, then sorted model IDs. Higher costs favor keeping the model resident."
                             }
                         },
                         "additionalProperties": false

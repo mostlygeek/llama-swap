@@ -7,15 +7,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// CapacityConfig declares an operator-measured budget in a common integer unit
-// (for example MiB). Usage and eviction preference are declared on each model.
+// CapacityConfig declares an abstract budget in an operator-chosen integer unit
+// (for example MiB). Usage and eviction cost are declared on each model.
 type CapacityConfig struct {
 	Total int64 `yaml:"total"`
 }
 
 type ModelCapacityConfig struct {
-	Usage            int64 `yaml:"usage"`
-	EvictionPriority int64 `yaml:"evictionPriority"`
+	Usage     int64 `yaml:"usage"`
+	EvictCost int64 `yaml:"evict_cost"`
 }
 
 func (c *CapacityConfig) UnmarshalYAML(node *yaml.Node) error {
@@ -30,8 +30,8 @@ func (c *CapacityConfig) UnmarshalYAML(node *yaml.Node) error {
 
 func (c *ModelCapacityConfig) UnmarshalYAML(node *yaml.Node) error {
 	type rawCapacity ModelCapacityConfig
-	var raw rawCapacity
-	if err := decodeCapacity(node, &raw, "usage", "evictionPriority"); err != nil {
+	raw := rawCapacity{EvictCost: 1}
+	if err := decodeCapacity(node, &raw, "usage", "evict_cost"); err != nil {
 		return err
 	}
 	*c = ModelCapacityConfig(raw)
@@ -67,15 +67,14 @@ func (c ModelCapacityConfig) Validate() error {
 	if c.Usage <= 0 {
 		return fmt.Errorf("capacity.usage must be a positive integer")
 	}
-	if c.EvictionPriority < 0 {
-		return fmt.Errorf("capacity.evictionPriority must be non-negative")
+	if c.EvictCost <= 0 {
+		return fmt.Errorf("capacity.evict_cost must be a positive integer")
 	}
 	return nil
 }
 
 // ValidateCapacity rejects incomplete budgets and bounds the sum used by the
-// planner so usage arithmetic cannot wrap around. Priorities are compared,
-// rather than added, so their magnitude cannot overflow a solution score.
+// planner so usage and eviction cost arithmetic cannot wrap around.
 func ValidateCapacity(c *CapacityConfig, models map[string]ModelConfig) error {
 	if c == nil {
 		return fmt.Errorf("capacity configuration is required")
@@ -83,7 +82,7 @@ func ValidateCapacity(c *CapacityConfig, models map[string]ModelConfig) error {
 	if c.Total <= 0 {
 		return fmt.Errorf("total must be a positive integer")
 	}
-	var usage int64
+	var usage, cost int64
 	for id, model := range models {
 		if model.Capacity == nil {
 			return fmt.Errorf("model %q: capacity.usage is required", id)
@@ -99,6 +98,10 @@ func ValidateCapacity(c *CapacityConfig, models map[string]ModelConfig) error {
 			return fmt.Errorf("sum of capacity.usage exceeds int64 range")
 		}
 		usage += amount
+		if model.Capacity.EvictCost > math.MaxInt64-cost {
+			return fmt.Errorf("sum of capacity.evict_cost exceeds int64 range")
+		}
+		cost += model.Capacity.EvictCost
 	}
 	return nil
 }

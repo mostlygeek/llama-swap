@@ -358,15 +358,14 @@ models:
       --ctx-size ${default_ctx}
       --temperature ${temp}
 
-    # capacity: declared usage and eviction preference for use: capacity
+    # capacity: declared usage and eviction cost for use: capacity
     # - required for every local model when the capacity router is selected
     # - usage: positive integer, in the same unit as the router's total
-    # - evictionPriority: non-negative integer, default 0; higher evicts first
-    # - priorities break ties between complete sets with the same eviction count
-    # - lowest priorities are protected first; remaining ties use sorted IDs
+    # - evict_cost: positive integer, default 1; higher favors keeping resident
+    # - minimizes summed eviction cost, then eviction count, then sorted IDs
     # capacity:
     #   usage: 18000
-    #   evictionPriority: 10
+    #   evict_cost: 10
 
     # name: a display name for the model
     # - optional, default: empty string
@@ -687,8 +686,7 @@ routing:
       # - total: positive integer in the same unit as models.*.capacity.usage
       #   (for example MiB of RAM); every local model needs a capacity block
       # - models larger than total, missing usage, and invalid values are errors
-      # - minimizes eviction count, then prefers higher evictionPriority values,
-      #   then sorted model IDs; priorities are tie-breakers, not recovery costs
+      # - minimizes summed evict_cost, then eviction count, then sorted model IDs
       # - only resident models are searched; only the requested model is started
       # Example (also add capacity blocks to every local model):
       # capacity:

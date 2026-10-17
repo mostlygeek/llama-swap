@@ -41,7 +41,7 @@ func TestServer_CapacityProcessLifecycle(t *testing.T) {
     use: capacity
     settings:
       capacity:
-        total: 10
+        total: 20
 hooks:
   on_startup:
     preload: [a]
@@ -52,15 +52,18 @@ models:
   a:
     cmd: '"%s" -port ${PORT} -silent'
     aliases: [alias-a]
-    capacity: {usage: 4, evictionPriority: 1}
+    capacity: {usage: 10, evict_cost: 100}
   b:
-    capacity: {usage: 6, evictionPriority: 10}
+    capacity: {usage: 5, evict_cost: 1}
     cmd: '"%s" -port ${PORT} -silent'
   c:
-    capacity: {usage: 4, evictionPriority: 10}
+    capacity: {usage: 5, evict_cost: 1}
+    cmd: '"%s" -port ${PORT} -silent'
+  d:
+    capacity: {usage: 10, evict_cost: 1}
     cmd: '"%s" -port ${PORT} -silent'
     ttl: 1
-`, filepath.ToSlash(binary), filepath.ToSlash(binary), filepath.ToSlash(binary))
+`, filepath.ToSlash(binary), filepath.ToSlash(binary), filepath.ToSlash(binary), filepath.ToSlash(binary))
 	cfg, err := config.LoadConfigFromReader(strings.NewReader(input))
 	require.NoError(t, err)
 	// Use ephemeral ports rather than depending on fixed ports being available.
@@ -106,9 +109,11 @@ models:
 	_, err = s.setActiveProfile("test")
 	require.NoError(t, err)
 	request("public")
-	resident("a", "c")
+	resident("a", "b", "c") // Exact fit; nothing is evicted.
+	request("d")
+	resident("a", "d") // Evict B+C (cost 2), retaining A (cost 100).
 	require.Equal(t, before, s.local.RunningStatus()["a"].ReadySince, "retained process must not restart")
-	require.Eventually(t, func() bool { _, ok := s.local.RunningModels()["c"]; return !ok }, 4*time.Second, 20*time.Millisecond)
+	require.Eventually(t, func() bool { _, ok := s.local.RunningModels()["d"]; return !ok }, 4*time.Second, 20*time.Millisecond)
 	request("b")
 	resident("a", "b")
 	s.local.Unload(time.Second, "b")
@@ -116,7 +121,7 @@ models:
 	require.NoError(t, s.Shutdown(3*time.Second))
 	require.Empty(t, s.local.RunningModels())
 	// Reload uses a fresh server; no stale capacity or resident accounting.
-	cfg.Routing.Router.Settings.Capacity.Total = 6
+	cfg.Routing.Router.Settings.Capacity.Total = 10
 	cfg.Hooks.OnStartup.Preload = nil
 	s, err = New(cfg, logmon.NewGroup(io.Discard, true, true, true), nil, st, BuildInfo{}, nil, nil)
 	require.NoError(t, err)

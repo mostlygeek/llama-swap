@@ -17,11 +17,11 @@ const capacityModels = `models:
     cmd: echo a
     proxy: http://localhost:8080
     aliases: [alias-a]
-    capacity: {usage: 4, evictionPriority: 1}
+    capacity: {usage: 4, evict_cost: 1}
   b:
     cmd: echo b
     proxy: http://localhost:8081
-    capacity: {usage: 6, evictionPriority: 10}
+    capacity: {usage: 6, evict_cost: 10}
 `
 const capacityRouting = `routing:
   router:
@@ -37,14 +37,14 @@ func TestConfig_Capacity(t *testing.T) {
 	require.Equal(t, "capacity", cfg.Routing.Router.Use)
 	require.Equal(t, int64(10), cfg.Routing.Router.Settings.Capacity.Total)
 	require.Equal(t, int64(4), cfg.Models["a"].Capacity.Usage)
-	require.Equal(t, int64(10), cfg.Models["b"].Capacity.EvictionPriority)
+	require.Equal(t, int64(10), cfg.Models["b"].Capacity.EvictCost)
 	require.Empty(t, cfg.Groups)
 	require.Empty(t, cfg.Routing.Router.Settings.Groups)
 	require.Nil(t, cfg.Matrix)
 	require.Nil(t, cfg.Routing.Router.Settings.Matrix)
-	cfg, err = LoadConfigFromReader(strings.NewReader(strings.Replace(capacityModels+capacityRouting, ", evictionPriority: 1", "", 1)))
+	cfg, err = LoadConfigFromReader(strings.NewReader(strings.Replace(capacityModels+capacityRouting, ", evict_cost: 1", "", 1)))
 	require.NoError(t, err)
-	require.Zero(t, cfg.Models["a"].Capacity.EvictionPriority)
+	require.Equal(t, int64(1), cfg.Models["a"].Capacity.EvictCost)
 }
 
 func TestConfig_CapacityValidation(t *testing.T) {
@@ -60,10 +60,11 @@ func TestConfig_CapacityValidation(t *testing.T) {
 		{"missing usage", "usage: 4, ", "", "usage must be a positive integer"},
 		{"fraction usage", "usage: 4", "usage: 4.5", "usage must be an integer"},
 		{"oversized model", "usage: 4", "usage: 11", "exceeds total"},
-		{"missing model capacity", "    capacity: {usage: 4, evictionPriority: 1}\n", "", "capacity.usage is required"},
-		{"negative priority", "evictionPriority: 1}", "evictionPriority: -1}", "evictionPriority must be non-negative"},
-		{"fraction priority", "evictionPriority: 1}", "evictionPriority: 1.5}", "evictionPriority must be an integer"},
-		{"unknown model setting", "evictionPriority: 1}", "eviction_priority: 1}", "unknown capacity setting"},
+		{"missing model capacity", "    capacity: {usage: 4, evict_cost: 1}\n", "", "capacity.usage is required"},
+		{"negative cost", "evict_cost: 1}", "evict_cost: -1}", "evict_cost must be a positive integer"},
+		{"zero cost", "evict_cost: 1}", "evict_cost: 0}", "evict_cost must be a positive integer"},
+		{"fraction cost", "evict_cost: 1}", "evict_cost: 1.5}", "evict_cost must be an integer"},
+		{"unknown model setting", "evict_cost: 1}", "eviction_priority: 1}", "unknown capacity setting"},
 		{"unknown router setting", "total: 10", "budget: 10", "unknown capacity setting"},
 		{"old router name", "use: capacity", "use: resource", "requires use: capacity"},
 		{"old cost map", "total: 10", "total: 10\n        evict_costs: {a: 1}", "unknown capacity setting"},
@@ -85,12 +86,12 @@ func TestConfig_CapacityValidation(t *testing.T) {
 	_, err := LoadConfigFromReader(strings.NewReader(capacityModels + capacityRouting + "groups: {}"))
 	require.ErrorContains(t, err, "cannot be combined")
 	err = ValidateCapacity(&CapacityConfig{Total: 9223372036854775807}, map[string]ModelConfig{
-		"a": {Capacity: &ModelCapacityConfig{Usage: 9223372036854775807}}, "b": {Capacity: &ModelCapacityConfig{Usage: 1}},
+		"a": {Capacity: &ModelCapacityConfig{Usage: 9223372036854775807, EvictCost: 1}}, "b": {Capacity: &ModelCapacityConfig{Usage: 1, EvictCost: 1}},
 	})
 	require.ErrorContains(t, err, "sum of capacity.usage")
-	// Large priorities are compared without being summed.
-	_, err = LoadConfigFromReader(strings.NewReader(strings.ReplaceAll(capacityModels, "evictionPriority: 1}", "evictionPriority: 9223372036854775807}") + capacityRouting))
-	require.NoError(t, err)
+	// Cost sums are bounded too, so the planner's score cannot overflow.
+	_, err = LoadConfigFromReader(strings.NewReader(strings.ReplaceAll(capacityModels, "evict_cost: 1}", "evict_cost: 9223372036854775807}") + capacityRouting))
+	require.ErrorContains(t, err, "sum of capacity.evict_cost")
 }
 
 func TestConfig_CapacityConfigSources(t *testing.T) {
@@ -138,10 +139,11 @@ func TestConfig_CapacitySchema(t *testing.T) {
 		{"missing total", capacityModels + strings.Replace(capacityRouting, "total: 10", "{}", 1), false},
 		{"zero total", capacityModels + strings.Replace(capacityRouting, "total: 10", "total: 0", 1), false},
 		{"fraction usage", strings.Replace(capacityModels, "usage: 4", "usage: 4.5", 1) + capacityRouting, false},
-		{"negative priority", strings.Replace(capacityModels, "evictionPriority: 1}", "evictionPriority: -1}", 1) + capacityRouting, false},
+		{"negative cost", strings.Replace(capacityModels, "evict_cost: 1}", "evict_cost: -1}", 1) + capacityRouting, false},
+		{"zero cost", strings.Replace(capacityModels, "evict_cost: 1}", "evict_cost: 0}", 1) + capacityRouting, false},
 		{"missing usage", strings.Replace(capacityModels, "usage: 4, ", "", 1) + capacityRouting, false},
-		{"missing model capacity", strings.Replace(capacityModels, "    capacity: {usage: 4, evictionPriority: 1}\n", "", 1) + capacityRouting, false},
-		{"default priority", strings.Replace(capacityModels, ", evictionPriority: 1", "", 1) + capacityRouting, true},
+		{"missing model capacity", strings.Replace(capacityModels, "    capacity: {usage: 4, evict_cost: 1}\n", "", 1) + capacityRouting, false},
+		{"default cost", strings.Replace(capacityModels, ", evict_cost: 1", "", 1) + capacityRouting, true},
 		{"missing capacity settings", capacityModels + "routing: {router: {use: capacity}}", false},
 		{"inactive settings", capacityModels + strings.Replace(capacityRouting, "use: capacity", "use: matrix", 1), false},
 		{"matrix settings", capacityModels + strings.Replace(capacityRouting, "    settings:\n", "    settings:\n      matrix: {vars: {a: a}, sets: {s: a}}\n", 1), false},

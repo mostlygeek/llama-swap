@@ -15,38 +15,42 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newCapacityPlanner(total int64, usage map[string]int64, priorities map[string]int64) *capacitySwapper {
+func newCapacityPlanner(total int64, usage map[string]int64, costs map[string]int64) *capacitySwapper {
 	models := make(map[string]config.ModelConfig, len(usage))
 	for id, amount := range usage {
-		models[id] = config.ModelConfig{Capacity: &config.ModelCapacityConfig{Usage: amount, EvictionPriority: priorities[id]}}
+		cost := int64(1)
+		if value, ok := costs[id]; ok {
+			cost = value
+		}
+		models[id] = config.ModelConfig{Capacity: &config.ModelCapacityConfig{Usage: amount, EvictCost: cost}}
 	}
 	return &capacitySwapper{total: total, models: models, logger: logmon.NewWriter(io.Discard)}
 }
 
 func TestCapacity_EvictionFor(t *testing.T) {
 	for _, tc := range []struct {
-		name              string
-		total             int64
-		usage, priorities map[string]int64
-		running, want     []string
+		name          string
+		total         int64
+		usage, costs  map[string]int64
+		running, want []string
 	}{
 		{"empty", 10, map[string]int64{"x": 10}, nil, nil, nil},
-		{"below total", 10, map[string]int64{"a": 2, "x": 3}, nil, []string{"a"}, nil},
+		{"below total regardless of cost", 10, map[string]int64{"a": 2, "x": 3}, map[string]int64{"a": 1, "x": 100}, []string{"a"}, nil},
 		{"exact total", 10, map[string]int64{"a": 4, "x": 6}, nil, []string{"a"}, nil},
 		{"already resident", 10, map[string]int64{"a": 4, "x": 6}, nil, []string{"x", "a"}, nil},
 		{"single", 10, map[string]int64{"a": 8, "x": 6}, nil, []string{"a"}, []string{"a"}},
 		{"multiple", 10, map[string]int64{"a": 4, "b": 4, "x": 9}, nil, []string{"b", "a"}, []string{"a", "b"}},
-		// Evicting preferred A first would still require B. B alone suffices.
+		// A alone cannot free enough capacity. B alone is the cheapest solution.
 		{"complete solution", 10, map[string]int64{"a": 2, "b": 8, "x": 7}, map[string]int64{"a": 100, "b": 1}, []string{"a", "b"}, []string{"b"}},
-		{"retain lower priority", 10, map[string]int64{"a": 4, "b": 6, "x": 4}, map[string]int64{"a": 1, "b": 10}, []string{"a", "b"}, []string{"b"}},
-		{"count before priority", 10, map[string]int64{"a": 5, "b": 2, "c": 3, "x": 5}, map[string]int64{"b": 100, "c": 100}, []string{"a", "b", "c"}, []string{"a"}},
-		{"protect lowest across whole set", 12, map[string]int64{"a": 5, "b": 1, "c": 3, "d": 3, "x": 6}, map[string]int64{"b": 100, "c": 40, "d": 40}, []string{"a", "b", "c", "d"}, []string{"c", "d"}},
+		{"retain expensive model", 10, map[string]int64{"a": 4, "b": 6, "x": 4}, map[string]int64{"a": 1, "b": 10}, []string{"a", "b"}, []string{"a"}},
+		{"cheapest requires multiple models", 20, map[string]int64{"a": 10, "b": 5, "c": 5, "x": 10}, map[string]int64{"a": 100, "b": 1, "c": 1}, []string{"a", "b", "c"}, []string{"b", "c"}},
+		{"equal cost prefers fewer models", 20, map[string]int64{"a": 5, "b": 5, "c": 10, "x": 10}, map[string]int64{"a": 1, "b": 1, "c": 2}, []string{"a", "b", "c"}, []string{"c"}},
 		{"tie IDs", 10, map[string]int64{"a": 5, "b": 5, "x": 5}, nil, []string{"b", "a"}, []string{"a"}},
-		{"maximum priority", 10, map[string]int64{"a": 5, "b": 5, "x": 5}, map[string]int64{"b": 9223372036854775807}, []string{"a", "b"}, []string{"b"}},
+		{"large cost", 10, map[string]int64{"a": 5, "b": 5, "x": 5}, map[string]int64{"b": 9223372036854775805}, []string{"a", "b"}, []string{"a"}},
 		{"maximum total", 9223372036854775807, map[string]int64{"a": 9223372036854775806, "x": 1}, nil, []string{"a"}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := newCapacityPlanner(tc.total, tc.usage, tc.priorities)
+			s := newCapacityPlanner(tc.total, tc.usage, tc.costs)
 			original := slices.Clone(tc.running)
 			require.Equal(t, tc.want, s.EvictionFor("x", tc.running))
 			require.Equal(t, original, tc.running, "must not mutate scheduler snapshot")
@@ -57,12 +61,12 @@ func TestCapacity_EvictionFor(t *testing.T) {
 }
 
 // Compare the pruned search to an independent exhaustive oracle on small
-// random budgets, including count, priority-vector and model-ID ties.
+// random budgets, including total cost, eviction count and model-ID ties.
 func TestCapacity_ExhaustiveOracle(t *testing.T) {
 	rng := rand.New(rand.NewSource(1004))
 	for trial := 0; trial < 500; trial++ {
 		usage := map[string]int64{"x": int64(1 + rng.Intn(30))}
-		priorities := map[string]int64{}
+		costs := map[string]int64{}
 		var running []string
 		var used int64
 		for i := 0; i < 8; i++ {
@@ -74,32 +78,30 @@ func TestCapacity_ExhaustiveOracle(t *testing.T) {
 			used += amount
 			running = append(running, id)
 			usage[id] = amount
-			priorities[id] = int64(rng.Intn(7))
+			costs[id] = int64(1 + rng.Intn(7))
 		}
 		var want []string
-		var bestPriorities []int64
+		var bestCost int64
 		found := false
 		for mask := 0; mask < 1<<len(running); mask++ {
 			var evict []string
-			var values []int64
+			var cost int64
 			var freed int64
 			for i, id := range running {
 				if mask&(1<<i) != 0 {
 					evict = append(evict, id)
-					values = append(values, priorities[id])
+					cost += costs[id]
 					freed += usage[id]
 				}
 			}
 			if used-freed+usage["x"] > 30 {
 				continue
 			}
-			slices.Sort(values)
-			cmp := slices.Compare(values, bestPriorities)
-			if !found || len(evict) < len(want) || len(evict) == len(want) && (cmp > 0 || cmp == 0 && slices.Compare(evict, want) < 0) {
-				want, bestPriorities, found = evict, values, true
+			if !found || cost < bestCost || cost == bestCost && (len(evict) < len(want) || len(evict) == len(want) && slices.Compare(evict, want) < 0) {
+				want, bestCost, found = evict, cost, true
 			}
 		}
-		s := newCapacityPlanner(30, usage, priorities)
+		s := newCapacityPlanner(30, usage, costs)
 		require.Equal(t, want, s.EvictionFor("x", running), "trial %d", trial)
 	}
 }
@@ -107,7 +109,7 @@ func TestCapacity_ExhaustiveOracle(t *testing.T) {
 func TestCapacity_UnloadAndRestart(t *testing.T) {
 	a, b, c := newFakeProcess("a"), newFakeProcess("b"), newFakeProcess("c")
 	a.autoReady, b.autoReady, c.autoReady = true, true, true
-	r := newTestBase(t, map[string]process.Process{"a": a, "b": b, "c": c}, newCapacityPlanner(10, map[string]int64{"a": 4, "b": 6, "c": 6}, map[string]int64{"b": 10, "c": 10}))
+	r := newTestBase(t, map[string]process.Process{"a": a, "b": b, "c": c}, newCapacityPlanner(10, map[string]int64{"a": 4, "b": 6, "c": 6}, map[string]int64{"a": 100}))
 	for _, id := range []string{"a", "b", "a", "c"} {
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, newRequest(id))

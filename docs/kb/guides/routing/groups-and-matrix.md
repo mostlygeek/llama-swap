@@ -169,11 +169,11 @@ This is the intended behavior.
 
 ## `capacity` — a declared capacity budget
 
-Use this when a memory budget describes which models fit, without listing
-combinations. The router's total and each model's usage are positive integers
-in the same unit; this example uses MiB. The operator measures and declares
-usage, including context and backend overhead. llama-swap does not detect
-RAM or VRAM use.
+Capacity is an abstract scalar budget: any combination whose summed usage is
+within the total may coexist, without listing combinations. The operator
+chooses a unit and uses it consistently for total and per-model usage, both
+positive integers. MiB of RAM or unified memory is a common use case; include
+context and backend overhead. llama-swap does not measure usage automatically.
 
 ```yaml
 routing:
@@ -181,36 +181,37 @@ routing:
     use: capacity
     settings:
       capacity:
-        total: 10000
+        total: 20000
 models:
   a:
     cmd: llama-server -m /models/a.gguf --port ${PORT}
-    capacity: {usage: 4000, evictionPriority: 1}
+    capacity: {usage: 10000, evict_cost: 100}
   b:
     cmd: llama-server -m /models/b.gguf --port ${PORT}
-    capacity: {usage: 6000, evictionPriority: 10}
+    capacity: {usage: 5000, evict_cost: 1}
   c:
     cmd: llama-server -m /models/c.gguf --port ${PORT}
-    capacity: {usage: 4000, evictionPriority: 10}
+    capacity: {usage: 5000, evict_cost: 1}
+  d:
+    cmd: llama-server -m /models/d.gguf --port ${PORT}
+    capacity: {usage: 10000}
 ```
 
-A and B fit exactly. Requesting C evicts B and retains A: B has a higher
-`evictionPriority`. A request that already fits causes no eviction. Only the
-requested model starts. The planner chooses a complete eviction set by:
+A, B and C fit exactly. Requesting D evicts B+C (cost 2), retaining A
+(cost 100). A request that already fits causes no eviction. Only the requested
+model starts. The planner chooses a complete eviction set by:
 
-1. Fewest models evicted, regardless of priority.
-2. Higher eviction priorities: compare each set's priorities sorted from lowest
-   to highest, and prefer the larger value at the first difference. This keeps
-   lower-numbered models resident whenever possible within the minimum count.
+1. Lowest summed `evict_cost`, like matrix's `evict_costs`.
+2. Fewest models evicted for equal cost.
 3. Lexicographically smaller sorted evicted model IDs for remaining ties.
 
-Priority is a non-negative integer, default 0. It breaks ties; it is not a
-recovery cost and is not summed. A model with priority 100 can remain if evicting
-it would require two evictions while a single priority-0 model would suffice.
+Eviction cost is a positive integer, default 1. It represents how undesirable
+or expensive it is to unload and later recover a model. Higher costs favor
+keeping the model resident, even when that requires more evictions elsewhere.
 
 Every local model must have a positive `capacity.usage` no larger than the
-router's `total`, including unlisted models. Missing usage, negative priorities,
-nonpositive usage or total, fractions, and overflowing usage totals are
+router's `total`, including unlisted models. Missing usage, nonpositive values,
+fractions, and sums of declared usage or eviction costs exceeding int64 are
 configuration errors. Peer models use no local budget. Remove group and matrix
 settings and legacy top-level `groups`/`matrix` when selecting `capacity`; they
 cannot be combined with it.
@@ -227,8 +228,8 @@ processes. Allow headroom when reloading near the physical memory limit.
 
 The exact search operates only on resident models, with exponential worst-case
 time. It is intended for a small concurrently resident set, even with many
-configured models. This version supports one pool; use matrix for constraints
-involving independent GPUs or allowed combinations beyond a single budget.
+configured models. Use matrix when you want to explicitly describe legal
+combinations beyond a single scalar budget.
 
 ## Which one?
 

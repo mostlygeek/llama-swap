@@ -43,11 +43,9 @@ type capacitySwapper struct {
 }
 
 // EvictionFor searches only resident models, including pending starts supplied
-// by the scheduler. Minimize eviction count first. For equal counts, compare
-// ascending priority vectors, preferring the larger first difference: this
-// protects the lowest-numbered models whenever possible. Remaining ties use
-// lexicographically sorted model IDs. No priority scores are added together.
-// Suffix usage sums and the best count prune the search. Worst-case time is
+// by the scheduler. Minimize total eviction cost, then eviction count, then
+// lexicographically sorted model IDs. Higher costs protect expensive models.
+// Suffix usage sums and the best cost prune the search. Worst-case time is
 // exponential in resident count; no configured combinations are generated.
 func (s *capacitySwapper) EvictionFor(target string, running []string) []string {
 	ids := slices.Clone(running)
@@ -69,40 +67,32 @@ func (s *capacitySwapper) EvictionFor(target string, running []string) []string 
 	for i := len(candidates) - 1; i >= 0; i-- {
 		suffix[i] = suffix[i+1] + s.models[candidates[i]].Capacity.Usage
 	}
-	priorities := func(ids []string, values []int64) []int64 {
-		values = values[:len(ids)]
-		for i, id := range ids {
-			values[i] = s.models[id].Capacity.EvictionPriority
-		}
-		slices.Sort(values)
-		return values
-	}
 	// Evicting every candidate is always feasible after validation.
 	best := slices.Clone(candidates)
-	bestPriorities := priorities(best, make([]int64, len(candidates)))
-	priorityBuffer := make([]int64, len(candidates))
+	var bestCost int64
+	for _, id := range best {
+		bestCost += s.models[id].Capacity.EvictCost
+	}
 	chosen := make([]string, 0, len(candidates))
-	var search func(int, int64)
-	search = func(i int, freed int64) {
+	var search func(int, int64, int64)
+	search = func(i int, freed, cost int64) {
 		if freed >= need {
-			values := priorities(chosen, priorityBuffer)
-			comparison := slices.Compare(values, bestPriorities)
-			if len(chosen) < len(best) || len(chosen) == len(best) && (comparison > 0 || comparison == 0 && slices.Compare(chosen, best) < 0) {
+			if cost < bestCost || cost == bestCost && (len(chosen) < len(best) || len(chosen) == len(best) && slices.Compare(chosen, best) < 0) {
 				best = slices.Clone(chosen)
-				bestPriorities = append(bestPriorities[:0], values...)
+				bestCost = cost
 			}
 			return
 		}
-		if i == len(candidates) || freed+suffix[i] < need || len(chosen) >= len(best) {
+		if i == len(candidates) || freed+suffix[i] < need || cost >= bestCost {
 			return
 		}
 		id := candidates[i]
 		chosen = append(chosen, id)
-		search(i+1, freed+s.models[id].Capacity.Usage)
+		search(i+1, freed+s.models[id].Capacity.Usage, cost+s.models[id].Capacity.EvictCost)
 		chosen = chosen[:len(chosen)-1]
-		search(i+1, freed)
+		search(i+1, freed, cost)
 	}
-	search(0, 0)
+	search(0, 0, 0)
 	return best
 }
 
