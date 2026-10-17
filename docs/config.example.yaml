@@ -647,7 +647,7 @@ hooks:
 
 # routing:
 # Controls how llama-swap decides which models can run at the same time and
-# which get swapped out. Choose one of two swap engines:
+# which get swapped out. Choose one of three swap engines:
 #
 # - group:  the default engine. Simpler to configure. You define groups of
 #           models that run together, and loading one group typically unloads
@@ -658,16 +658,38 @@ hooks:
 #           model combinations are allowed to run concurrently, enabling
 #           setups that groups cannot express.
 #
+# - resource: declare a finite budget and each local model's requirement.
+#             Any combination whose sum fits the capacity may coexist.
+#
 # The routing section is optional.
 routing:
   router:
     # use: a string defining which engine to use
     # - optional, default: "group"
-    # - valid values: group, matrix
+    # - valid values: group, matrix, resource
     use: group
 
     # settings: a dictionary of settings for the specific engines
     settings:
+      # resource: one operator-declared resource pool (no automatic measurement)
+      # - requires use: resource; remove groups and matrix settings when enabling
+      # - cannot combine with legacy top-level groups/matrix either
+      # - capacity and requirements are positive integers in the same unit
+      #   (for example MiB of RAM); every local model needs a requirement
+      # - unknown IDs, missing requirements, and models larger than capacity
+      #   are configuration errors; use real model IDs, not aliases
+      # - evict_costs: positive recovery costs, default 1, as in matrix
+      # - minimizes total eviction cost, then number of evictions, then sorted IDs
+      # - only resident models are searched; only the requested model is started
+      # Example (replace the requirements with your complete local model roster):
+      # resource:
+      #   capacity: 24000
+      #   requirements:
+      #     llm: 18000
+      #     embeddings: 2000
+      #   evict_costs:
+      #     embeddings: 10
+
       # groups: a dictionary of named groups
       # - optional, default: empty dictionary
       # - lets you keep some models loaded while others swap out

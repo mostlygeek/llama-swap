@@ -1,21 +1,21 @@
 ---
-title: Running several models at once with groups and matrix
-summary: Choosing between the group and matrix routers, and how each decides what gets unloaded.
+title: Running several models at once with groups, matrix and resource
+summary: Choosing between group, matrix and resource routers, and how each decides what gets unloaded.
 category: guides
-tags: [routing, groups, matrix, concurrency, swap, vram]
-config_keys: [routing, routing.router.use, routing.router.settings.groups, routing.router.settings.matrix]
-updated: 2026-09-14
+tags: [routing, groups, matrix, resource, concurrency, swap, vram, memory]
+config_keys: [routing, routing.router.use, routing.router.settings.groups, routing.router.settings.matrix, routing.router.settings.resource]
+updated: 2026-10-17
 ---
 
-# Running several models at once: groups and matrix
+# Running several models at once: groups, matrix and resource
 
 Out of the box llama-swap runs one model at a time. The `routing` section
-changes that. There are two engines and you pick one:
+changes that. There are three engines and you pick one:
 
 ```yaml
 routing:
   router:
-    use: group     # or: matrix
+    use: group     # or: matrix, resource
 ```
 
 ## `group` — the default, simpler
@@ -167,6 +167,60 @@ log at startup and at each reload of the configuration:
 If you change `models:`, llama-swap makes a new orphan list at the next reload.
 This is the intended behavior.
 
+## `resource` — a declared capacity budget
+
+Use this when a memory budget describes which models fit, without listing
+combinations. Capacity and requirements are positive integers in the same unit;
+this example uses MiB. The operator measures and declares usage, including
+context and backend overhead. llama-swap does not detect RAM or VRAM use.
+
+```yaml
+routing:
+  router:
+    use: resource
+    settings:
+      resource:
+        capacity: 10000
+        requirements: {a: 4000, b: 6000, c: 6000}
+        evict_costs: {a: 10, b: 1, c: 1}
+models:
+  a:
+    cmd: llama-server -m /models/a.gguf --port ${PORT}
+  b:
+    cmd: llama-server -m /models/b.gguf --port ${PORT}
+  c:
+    cmd: llama-server -m /models/c.gguf --port ${PORT}
+```
+
+A and B fit exactly. Requesting C evicts B and retains A: A costs more to
+recover. A request that already fits causes no eviction. Only the requested
+model starts. `evict_costs` are positive integers, default 1, with the same
+meaning as matrix costs. The planner minimizes the **sum** of costs over a
+complete eviction set, then the number evicted, then the sorted evicted model
+IDs in lexicographic order. It does not repeatedly evict the cheapest model.
+
+Every local model must have a positive requirement no larger than capacity,
+including unlisted models. Missing declarations, unknown IDs, zero or negative
+values, fractions, and overflowing totals are configuration errors. Keys must
+be real model IDs, not aliases or selectors. Peer models use no local budget.
+Remove group and matrix settings and legacy top-level `groups`/`matrix` when
+selecting `resource`; they cannot be combined with it.
+
+Pending starts count against the budget. Eviction waits for active requests to
+finish. TTL and explicit unload release capacity when the process stops;
+preload uses the same router and may evict earlier preloads. Profiles and
+selectors resolve to the concrete model before accounting. Local spillover
+targets must fit together. Reload builds a fresh router using the new budget,
+and the old server shuts down through the existing reload lifecycle.
+Accounting is per router instance: reload constructs the new server before
+stopping the old one, so new requests or preloads can briefly overlap old
+processes. Allow headroom when reloading near the physical memory limit.
+
+The exact search operates only on resident models, with exponential worst-case
+time. It is intended for a small concurrently resident set, even with many
+configured models. This version supports one pool; use matrix for constraints
+involving independent GPUs or allowed combinations beyond a single budget.
+
 ## Which one?
 
 Use **group** if your setup is describable as "these run together, those swap
@@ -175,6 +229,9 @@ out". It is easier to read and easier to get right.
 Use **matrix** when the combinations depend on which models are involved — a
 70B that needs every GPU alone, versus several small models that fit together,
 versus a mid-size LLM plus TTS. Groups cannot express that; matrix can.
+
+Use **resource** when every combination within a single declared capacity is
+valid and maintaining explicit matrix combinations would be tedious.
 
 ## Request ordering
 

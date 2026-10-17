@@ -212,6 +212,11 @@ func New(cfg config.Config, logs *logmon.Group, perfMon *perf.Monitor, st store.
 	var err error
 
 	switch cfg.Routing.Router.Use {
+	case "resource":
+		local, err = router.NewResource(cfg, logs)
+		if err != nil {
+			return nil, fmt.Errorf("creating resource router: %w", err)
+		}
 	case "matrix":
 		local, err = router.NewMatrix(cfg, logs)
 		if err != nil {
