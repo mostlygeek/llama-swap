@@ -185,16 +185,23 @@ routing:
 models:
   a:
     cmd: llama-server -m /models/a.gguf --port ${PORT}
-    capacity: {usage: 10000, evict_cost: 100}
+    capacity:
+      usage: 10000
+      evict_cost: 100
   b:
     cmd: llama-server -m /models/b.gguf --port ${PORT}
-    capacity: {usage: 5000, evict_cost: 1}
+    capacity:
+      usage: 5000
+      evict_cost: 1
   c:
     cmd: llama-server -m /models/c.gguf --port ${PORT}
-    capacity: {usage: 5000, evict_cost: 1}
+    capacity:
+      usage: 5000
+      evict_cost: 1
   d:
     cmd: llama-server -m /models/d.gguf --port ${PORT}
-    capacity: {usage: 10000}
+    capacity:
+      usage: 10000
 ```
 
 A, B and C fit exactly. Requesting D evicts B+C (cost 2), retaining A
