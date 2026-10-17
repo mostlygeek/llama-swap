@@ -432,6 +432,27 @@
                     "macros": {
                         "$ref": "#/definitions/macros"
                     },
+                    "capacity": {
+                        "type": "object",
+                        "description": "Usage and eviction tie-breaking for the capacity router. Required for every local model when use: capacity is selected.",
+                        "required": ["usage"],
+                        "properties": {
+                            "usage": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 9223372036854775807,
+                                "description": "Declared capacity consumption, no greater than routing.router.settings.capacity.total."
+                            },
+                            "evictionPriority": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9223372036854775807,
+                                "default": 0,
+                                "description": "For equally sized eviction sets, prefer evicting higher numbers. Compare ascending priority vectors, then sorted model IDs."
+                            }
+                        },
+                        "additionalProperties": false
+                    },
                     "cmd": {
                         "type": "string",
                         "minLength": 1,
@@ -971,17 +992,17 @@
                 },
                 "router": {
                     "type": "object",
-                    "description": "Router configuration. Selects group, matrix, or resource swapping.",
+                    "description": "Router configuration. Selects group, matrix, or capacity swapping.",
                     "properties": {
                         "use": {
                             "type": "string",
                             "enum": [
                                 "group",
                                 "matrix",
-                                "resource"
+                                "capacity"
                             ],
                             "default": "group",
-                            "description": "Router to use. 'group' uses static groups, 'matrix' uses allowed combinations, 'resource' uses a declared capacity budget."
+                            "description": "Router to use. 'group' uses static groups, 'matrix' uses allowed combinations, 'capacity' uses a declared capacity budget."
                         },
                         "settings": {
                             "type": "object",
@@ -992,31 +1013,15 @@
                                 "matrix": {
                                     "$ref": "#/definitions/matrixConfig"
                                 },
-                                "resource": {
+                                "capacity": {
                                     "type": "object",
-                                    "description": "One declared resource pool. Use the same integer unit for capacity and all requirements, for example MiB. No automatic measurement. Every local model must have a requirement no larger than capacity; keys must be real model IDs.",
-                                    "required": ["capacity", "requirements"],
+                                    "description": "Operator-declared budget in the same integer unit as models.*.capacity.usage (for example MiB). No automatic measurement.",
+                                    "required": ["total"],
                                     "properties": {
-                                        "capacity": {
+                                        "total": {
                                             "type": "integer",
                                             "minimum": 1,
                                             "maximum": 9223372036854775807
-                                        },
-                                        "requirements": {
-                                            "type": "object",
-                                            "additionalProperties": {
-                                                "type": "integer",
-                                                "minimum": 1,
-                                                "maximum": 9223372036854775807
-                                            }
-                                        },
-                                        "evict_costs": {
-                                            "type": "object",
-                                            "description": "Relative recovery costs keyed by real model ID, default 1. Minimize total eviction cost, then count, then sorted IDs.",
-                                            "additionalProperties": {
-                                                "type": "integer",
-                                                "minimum": 1
-                                            }
                                         }
                                     },
                                     "additionalProperties": false
@@ -1030,19 +1035,19 @@
                         {
                             "if": {
                                 "required": ["use"],
-                                "properties": {"use": {"const": "resource"}}
+                                "properties": {"use": {"const": "capacity"}}
                             },
                             "then": {
                                 "required": ["settings"],
                                 "properties": {
                                     "settings": {
-                                        "required": ["resource"],
+                                        "required": ["capacity"],
                                         "not": {"anyOf": [{"required": ["groups"]}, {"required": ["matrix"]}]}
                                     }
                                 }
                             },
                             "else": {
-                                "properties": {"settings": {"not": {"required": ["resource"]}}}
+                                "properties": {"settings": {"not": {"required": ["capacity"]}}}
                             }
                         }
                     ]
@@ -1061,13 +1066,20 @@
                         "properties": {
                             "router": {
                                 "required": ["use"],
-                                "properties": {"use": {"const": "resource"}}
+                                "properties": {"use": {"const": "capacity"}}
                             }
                         }
                     }
                 }
             },
-            "then": {"not": {"anyOf": [{"required": ["groups"]}, {"required": ["matrix"]}]}}
+            "then": {
+                "not": {"anyOf": [{"required": ["groups"]}, {"required": ["matrix"]}]},
+                "properties": {
+                    "models": {
+                        "additionalProperties": {"required": ["capacity"]}
+                    }
+                }
+            }
         },
         {
             "if": {

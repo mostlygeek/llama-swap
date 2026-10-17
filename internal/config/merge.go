@@ -23,7 +23,7 @@ var identityMapPaths = map[string]bool{
 	"matrix":                           true,
 	"routing.router.settings.groups":   true,
 	"routing.router.settings.matrix":   true,
-	"routing.router.settings.resource": true,
+	"routing.router.settings.capacity": true,
 }
 
 // LoadConfigSources loads and merges configuration from -config (optional)

@@ -358,6 +358,16 @@ models:
       --ctx-size ${default_ctx}
       --temperature ${temp}
 
+    # capacity: declared usage and eviction preference for use: capacity
+    # - required for every local model when the capacity router is selected
+    # - usage: positive integer, in the same unit as the router's total
+    # - evictionPriority: non-negative integer, default 0; higher evicts first
+    # - priorities break ties between complete sets with the same eviction count
+    # - lowest priorities are protected first; remaining ties use sorted IDs
+    # capacity:
+    #   usage: 18000
+    #   evictionPriority: 10
+
     # name: a display name for the model
     # - optional, default: empty string
     # - if set, it will be used in the v1/models API response
@@ -658,37 +668,31 @@ hooks:
 #           model combinations are allowed to run concurrently, enabling
 #           setups that groups cannot express.
 #
-# - resource: declare a finite budget and each local model's requirement.
-#             Any combination whose sum fits the capacity may coexist.
+# - capacity: declare a finite budget and each local model's usage.
+#             Any combination whose total usage fits the budget may coexist.
 #
 # The routing section is optional.
 routing:
   router:
     # use: a string defining which engine to use
     # - optional, default: "group"
-    # - valid values: group, matrix, resource
+    # - valid values: group, matrix, capacity
     use: group
 
     # settings: a dictionary of settings for the specific engines
     settings:
-      # resource: one operator-declared resource pool (no automatic measurement)
-      # - requires use: resource; remove groups and matrix settings when enabling
+      # capacity: one operator-declared budget (no automatic measurement)
+      # - requires use: capacity; remove groups and matrix settings when enabling
       # - cannot combine with legacy top-level groups/matrix either
-      # - capacity and requirements are positive integers in the same unit
-      #   (for example MiB of RAM); every local model needs a requirement
-      # - unknown IDs, missing requirements, and models larger than capacity
-      #   are configuration errors; use real model IDs, not aliases
-      # - evict_costs: positive recovery costs, default 1, as in matrix
-      # - minimizes total eviction cost, then number of evictions, then sorted IDs
+      # - total: positive integer in the same unit as models.*.capacity.usage
+      #   (for example MiB of RAM); every local model needs a capacity block
+      # - models larger than total, missing usage, and invalid values are errors
+      # - minimizes eviction count, then prefers higher evictionPriority values,
+      #   then sorted model IDs; priorities are tie-breakers, not recovery costs
       # - only resident models are searched; only the requested model is started
-      # Example (replace the requirements with your complete local model roster):
-      # resource:
-      #   capacity: 24000
-      #   requirements:
-      #     llm: 18000
-      #     embeddings: 2000
-      #   evict_costs:
-      #     embeddings: 10
+      # Example (also add capacity blocks to every local model):
+      # capacity:
+      #   total: 24000
 
       # groups: a dictionary of named groups
       # - optional, default: empty dictionary

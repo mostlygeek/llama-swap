@@ -23,7 +23,7 @@ import (
 
 // Exercise real subprocesses through server dispatch, including preload, alias
 // and profile resolution, explicit unload, TTL, and constructing a new budget.
-func TestServer_ResourceProcessLifecycle(t *testing.T) {
+func TestServer_CapacityProcessLifecycle(t *testing.T) {
 	name := fmt.Sprintf("simple-responder_%s_%s", runtime.GOOS, runtime.GOARCH)
 	if runtime.GOOS == "windows" {
 		name = "simple-responder.exe"
@@ -38,12 +38,10 @@ func TestServer_ResourceProcessLifecycle(t *testing.T) {
 	defer st.Close()
 	input := fmt.Sprintf(`routing:
   router:
-    use: resource
+    use: capacity
     settings:
-      resource:
-        capacity: 10
-        requirements: {a: 4, b: 6, c: 6}
-        evict_costs: {a: 10}
+      capacity:
+        total: 10
 hooks:
   on_startup:
     preload: [a]
@@ -54,9 +52,12 @@ models:
   a:
     cmd: '"%s" -port ${PORT} -silent'
     aliases: [alias-a]
+    capacity: {usage: 4, evictionPriority: 1}
   b:
+    capacity: {usage: 6, evictionPriority: 10}
     cmd: '"%s" -port ${PORT} -silent'
   c:
+    capacity: {usage: 4, evictionPriority: 10}
     cmd: '"%s" -port ${PORT} -silent'
     ttl: 1
 `, filepath.ToSlash(binary), filepath.ToSlash(binary), filepath.ToSlash(binary))
@@ -74,7 +75,7 @@ models:
 	}
 	s, err := New(cfg, logmon.NewGroup(io.Discard, true, true, true), nil, st, BuildInfo{}, nil, nil)
 	require.NoError(t, err)
-	require.IsType(t, &router.Resource{}, s.local)
+	require.IsType(t, &router.Capacity{}, s.local)
 	// Shutdown before closing the shared test store, including on failure.
 	defer s.Shutdown(3 * time.Second)
 	require.Eventually(t, func() bool { return s.local.RunningModels()["a"] == process.StateReady }, 5*time.Second, 10*time.Millisecond)
@@ -93,9 +94,9 @@ models:
 		var total int64
 		for _, id := range ids {
 			require.Equal(t, process.StateReady, running[id])
-			total += cfg.Routing.Router.Settings.Resource.Requirements[id]
+			total += cfg.Models[id].Capacity.Usage
 		}
-		require.LessOrEqual(t, total, cfg.Routing.Router.Settings.Resource.Capacity)
+		require.LessOrEqual(t, total, cfg.Routing.Router.Settings.Capacity.Total)
 	}
 	request("b")
 	resident("a", "b")
@@ -115,7 +116,7 @@ models:
 	require.NoError(t, s.Shutdown(3*time.Second))
 	require.Empty(t, s.local.RunningModels())
 	// Reload uses a fresh server; no stale capacity or resident accounting.
-	cfg.Routing.Router.Settings.Resource.Capacity = 6
+	cfg.Routing.Router.Settings.Capacity.Total = 6
 	cfg.Hooks.OnStartup.Preload = nil
 	s, err = New(cfg, logmon.NewGroup(io.Discard, true, true, true), nil, st, BuildInfo{}, nil, nil)
 	require.NoError(t, err)

@@ -1,13 +1,13 @@
 ---
-title: Running several models at once with groups, matrix and resource
-summary: Choosing between group, matrix and resource routers, and how each decides what gets unloaded.
+title: Running several models at once with groups, matrix and capacity
+summary: Choosing between group, matrix and capacity routers, and how each decides what gets unloaded.
 category: guides
-tags: [routing, groups, matrix, resource, concurrency, swap, vram, memory]
-config_keys: [routing, routing.router.use, routing.router.settings.groups, routing.router.settings.matrix, routing.router.settings.resource]
+tags: [routing, groups, matrix, capacity, concurrency, swap, vram, memory]
+config_keys: [routing, routing.router.use, routing.router.settings.groups, routing.router.settings.matrix, routing.router.settings.capacity, models.*.capacity]
 updated: 2026-10-17
 ---
 
-# Running several models at once: groups, matrix and resource
+# Running several models at once: groups, matrix and capacity
 
 Out of the box llama-swap runs one model at a time. The `routing` section
 changes that. There are three engines and you pick one:
@@ -15,7 +15,7 @@ changes that. There are three engines and you pick one:
 ```yaml
 routing:
   router:
-    use: group     # or: matrix, resource
+    use: group     # or: matrix, capacity
 ```
 
 ## `group` — the default, simpler
@@ -167,44 +167,53 @@ log at startup and at each reload of the configuration:
 If you change `models:`, llama-swap makes a new orphan list at the next reload.
 This is the intended behavior.
 
-## `resource` — a declared capacity budget
+## `capacity` — a declared capacity budget
 
 Use this when a memory budget describes which models fit, without listing
-combinations. Capacity and requirements are positive integers in the same unit;
-this example uses MiB. The operator measures and declares usage, including
-context and backend overhead. llama-swap does not detect RAM or VRAM use.
+combinations. The router's total and each model's usage are positive integers
+in the same unit; this example uses MiB. The operator measures and declares
+usage, including context and backend overhead. llama-swap does not detect
+RAM or VRAM use.
 
 ```yaml
 routing:
   router:
-    use: resource
+    use: capacity
     settings:
-      resource:
-        capacity: 10000
-        requirements: {a: 4000, b: 6000, c: 6000}
-        evict_costs: {a: 10, b: 1, c: 1}
+      capacity:
+        total: 10000
 models:
   a:
     cmd: llama-server -m /models/a.gguf --port ${PORT}
+    capacity: {usage: 4000, evictionPriority: 1}
   b:
     cmd: llama-server -m /models/b.gguf --port ${PORT}
+    capacity: {usage: 6000, evictionPriority: 10}
   c:
     cmd: llama-server -m /models/c.gguf --port ${PORT}
+    capacity: {usage: 4000, evictionPriority: 10}
 ```
 
-A and B fit exactly. Requesting C evicts B and retains A: A costs more to
-recover. A request that already fits causes no eviction. Only the requested
-model starts. `evict_costs` are positive integers, default 1, with the same
-meaning as matrix costs. The planner minimizes the **sum** of costs over a
-complete eviction set, then the number evicted, then the sorted evicted model
-IDs in lexicographic order. It does not repeatedly evict the cheapest model.
+A and B fit exactly. Requesting C evicts B and retains A: B has a higher
+`evictionPriority`. A request that already fits causes no eviction. Only the
+requested model starts. The planner chooses a complete eviction set by:
 
-Every local model must have a positive requirement no larger than capacity,
-including unlisted models. Missing declarations, unknown IDs, zero or negative
-values, fractions, and overflowing totals are configuration errors. Keys must
-be real model IDs, not aliases or selectors. Peer models use no local budget.
-Remove group and matrix settings and legacy top-level `groups`/`matrix` when
-selecting `resource`; they cannot be combined with it.
+1. Fewest models evicted, regardless of priority.
+2. Higher eviction priorities: compare each set's priorities sorted from lowest
+   to highest, and prefer the larger value at the first difference. This keeps
+   lower-numbered models resident whenever possible within the minimum count.
+3. Lexicographically smaller sorted evicted model IDs for remaining ties.
+
+Priority is a non-negative integer, default 0. It breaks ties; it is not a
+recovery cost and is not summed. A model with priority 100 can remain if evicting
+it would require two evictions while a single priority-0 model would suffice.
+
+Every local model must have a positive `capacity.usage` no larger than the
+router's `total`, including unlisted models. Missing usage, negative priorities,
+nonpositive usage or total, fractions, and overflowing usage totals are
+configuration errors. Peer models use no local budget. Remove group and matrix
+settings and legacy top-level `groups`/`matrix` when selecting `capacity`; they
+cannot be combined with it.
 
 Pending starts count against the budget. Eviction waits for active requests to
 finish. TTL and explicit unload release capacity when the process stops;
@@ -230,7 +239,7 @@ Use **matrix** when the combinations depend on which models are involved — a
 70B that needs every GPU alone, versus several small models that fit together,
 versus a mid-size LLM plus TTS. Groups cannot express that; matrix can.
 
-Use **resource** when every combination within a single declared capacity is
+Use **capacity** when every combination within a single declared capacity is
 valid and maintaining explicit matrix combinations would be tedious.
 
 ## Request ordering
