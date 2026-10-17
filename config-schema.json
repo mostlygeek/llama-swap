@@ -432,6 +432,27 @@
                     "macros": {
                         "$ref": "#/definitions/macros"
                     },
+                    "capacity": {
+                        "type": "object",
+                        "description": "Usage and eviction cost for the capacity router. Required for every local model when use: capacity is selected.",
+                        "required": ["usage"],
+                        "properties": {
+                            "usage": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 9223372036854775807,
+                                "description": "Declared capacity consumption, no greater than routing.router.settings.capacity.total."
+                            },
+                            "evict_cost": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 9223372036854775807,
+                                "default": 1,
+                                "description": "Cost of unloading and later recovering this model. Minimize summed eviction cost, then eviction count, then sorted model IDs. Higher costs favor keeping the model resident."
+                            }
+                        },
+                        "additionalProperties": false
+                    },
                     "cmd": {
                         "type": "string",
                         "minLength": 1,
@@ -971,16 +992,17 @@
                 },
                 "router": {
                     "type": "object",
-                    "description": "Router configuration. Selects between the group and matrix swapping strategies.",
+                    "description": "Router configuration. Selects group, matrix, or capacity swapping.",
                     "properties": {
                         "use": {
                             "type": "string",
                             "enum": [
                                 "group",
-                                "matrix"
+                                "matrix",
+                                "capacity"
                             ],
                             "default": "group",
-                            "description": "Router to use. 'group' uses static groups, 'matrix' uses the solver-based swap matrix."
+                            "description": "Router to use. 'group' uses static groups, 'matrix' uses allowed combinations, 'capacity' uses a declared capacity budget."
                         },
                         "settings": {
                             "type": "object",
@@ -990,18 +1012,75 @@
                                 },
                                 "matrix": {
                                     "$ref": "#/definitions/matrixConfig"
+                                },
+                                "capacity": {
+                                    "type": "object",
+                                    "description": "Operator-declared budget in the same integer unit as models.*.capacity.usage (for example MiB). No automatic measurement.",
+                                    "required": ["total"],
+                                    "properties": {
+                                        "total": {
+                                            "type": "integer",
+                                            "minimum": 1,
+                                            "maximum": 9223372036854775807
+                                        }
+                                    },
+                                    "additionalProperties": false
                                 }
                             },
                             "additionalProperties": false
                         }
                     },
-                    "additionalProperties": false
+                    "additionalProperties": false,
+                    "allOf": [
+                        {
+                            "if": {
+                                "required": ["use"],
+                                "properties": {"use": {"const": "capacity"}}
+                            },
+                            "then": {
+                                "required": ["settings"],
+                                "properties": {
+                                    "settings": {
+                                        "required": ["capacity"],
+                                        "not": {"anyOf": [{"required": ["groups"]}, {"required": ["matrix"]}]}
+                                    }
+                                }
+                            },
+                            "else": {
+                                "properties": {"settings": {"not": {"required": ["capacity"]}}}
+                            }
+                        }
+                    ]
                 }
             },
             "additionalProperties": false
         }
     },
     "allOf": [
+        {
+            "if": {
+                "required": ["routing"],
+                "properties": {
+                    "routing": {
+                        "required": ["router"],
+                        "properties": {
+                            "router": {
+                                "required": ["use"],
+                                "properties": {"use": {"const": "capacity"}}
+                            }
+                        }
+                    }
+                }
+            },
+            "then": {
+                "not": {"anyOf": [{"required": ["groups"]}, {"required": ["matrix"]}]},
+                "properties": {
+                    "models": {
+                        "additionalProperties": {"required": ["capacity"]}
+                    }
+                }
+            }
+        },
         {
             "if": {
                 "required": [

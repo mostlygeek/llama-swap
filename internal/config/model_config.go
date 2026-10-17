@@ -142,6 +142,9 @@ type ModelConfig struct {
 	Unlisted      bool     `yaml:"unlisted"`
 	UseModelName  string   `yaml:"useModelName"`
 
+	// Capacity declares usage and eviction cost for the capacity router.
+	Capacity *ModelCapacityConfig `yaml:"capacity"`
+
 	// #179 for /v1/models
 	Name        string `yaml:"name"`
 	Description string `yaml:"description"`

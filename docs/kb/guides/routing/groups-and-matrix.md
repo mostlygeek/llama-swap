@@ -1,21 +1,21 @@
 ---
-title: Running several models at once with groups and matrix
-summary: Choosing between the group and matrix routers, and how each decides what gets unloaded.
+title: Running several models at once with groups, matrix and capacity
+summary: Choosing between group, matrix and capacity routers, and how each decides what gets unloaded.
 category: guides
-tags: [routing, groups, matrix, concurrency, swap, vram]
-config_keys: [routing, routing.router.use, routing.router.settings.groups, routing.router.settings.matrix]
-updated: 2026-09-14
+tags: [routing, groups, matrix, capacity, concurrency, swap, vram, memory]
+config_keys: [routing, routing.router.use, routing.router.settings.groups, routing.router.settings.matrix, routing.router.settings.capacity, models.*.capacity]
+updated: 2026-10-17
 ---
 
-# Running several models at once: groups and matrix
+# Running several models at once: groups, matrix and capacity
 
 Out of the box llama-swap runs one model at a time. The `routing` section
-changes that. There are two engines and you pick one:
+changes that. There are three engines and you pick one:
 
 ```yaml
 routing:
   router:
-    use: group     # or: matrix
+    use: group     # or: matrix, capacity
 ```
 
 ## `group` — the default, simpler
@@ -167,6 +167,77 @@ log at startup and at each reload of the configuration:
 If you change `models:`, llama-swap makes a new orphan list at the next reload.
 This is the intended behavior.
 
+## `capacity` — a declared capacity budget
+
+Capacity is an abstract scalar budget: any combination whose summed usage is
+within the total may coexist, without listing combinations. The operator
+chooses a unit and uses it consistently for total and per-model usage, both
+positive integers. MiB of RAM or unified memory is a common use case; include
+context and backend overhead. llama-swap does not measure usage automatically.
+
+```yaml
+routing:
+  router:
+    use: capacity
+    settings:
+      capacity:
+        total: 20000
+models:
+  a:
+    cmd: llama-server -m /models/a.gguf --port ${PORT}
+    capacity:
+      usage: 10000
+      evict_cost: 100
+  b:
+    cmd: llama-server -m /models/b.gguf --port ${PORT}
+    capacity:
+      usage: 5000
+      evict_cost: 1
+  c:
+    cmd: llama-server -m /models/c.gguf --port ${PORT}
+    capacity:
+      usage: 5000
+      evict_cost: 1
+  d:
+    cmd: llama-server -m /models/d.gguf --port ${PORT}
+    capacity:
+      usage: 10000
+```
+
+A, B and C fit exactly. Requesting D evicts B+C (cost 2), retaining A
+(cost 100). A request that already fits causes no eviction. Only the requested
+model starts. The planner chooses a complete eviction set by:
+
+1. Lowest summed `evict_cost`, like matrix's `evict_costs`.
+2. Fewest models evicted for equal cost.
+3. Lexicographically smaller sorted evicted model IDs for remaining ties.
+
+Eviction cost is a positive integer, default 1. It represents how undesirable
+or expensive it is to unload and later recover a model. Higher costs favor
+keeping the model resident, even when that requires more evictions elsewhere.
+
+Every local model must have a positive `capacity.usage` no larger than the
+router's `total`, including unlisted models. Missing usage, nonpositive values,
+fractions, and sums of declared usage or eviction costs exceeding int64 are
+configuration errors. Peer models use no local budget. Remove group and matrix
+settings and legacy top-level `groups`/`matrix` when selecting `capacity`; they
+cannot be combined with it.
+
+Pending starts count against the budget. Eviction waits for active requests to
+finish. TTL and explicit unload release capacity when the process stops;
+preload uses the same router and may evict earlier preloads. Profiles and
+selectors resolve to the concrete model before accounting. Local spillover
+targets must fit together. Reload builds a fresh router using the new budget,
+and the old server shuts down through the existing reload lifecycle.
+Accounting is per router instance: reload constructs the new server before
+stopping the old one, so new requests or preloads can briefly overlap old
+processes. Allow headroom when reloading near the physical memory limit.
+
+The exact search operates only on resident models, with exponential worst-case
+time. It is intended for a small concurrently resident set, even with many
+configured models. Use matrix when you want to explicitly describe legal
+combinations beyond a single scalar budget.
+
 ## Which one?
 
 Use **group** if your setup is describable as "these run together, those swap
@@ -175,6 +246,9 @@ out". It is easier to read and easier to get right.
 Use **matrix** when the combinations depend on which models are involved — a
 70B that needs every GPU alone, versus several small models that fit together,
 versus a mid-size LLM plus TTS. Groups cannot express that; matrix can.
+
+Use **capacity** when every combination within a single declared capacity is
+valid and maintaining explicit matrix combinations would be tedious.
 
 ## Request ordering
 

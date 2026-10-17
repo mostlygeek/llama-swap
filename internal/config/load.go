@@ -161,6 +161,11 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		if err := modelConfig.Capabilities.Validate(); err != nil {
 			return Config{}, fmt.Errorf("model %s: %w", modelId, err)
 		}
+		if modelConfig.Capacity != nil {
+			if err := modelConfig.Capacity.Validate(); err != nil {
+				return Config{}, fmt.Errorf("model %s: %w", modelId, err)
+			}
+		}
 
 		// Auto-register setParamsByID keys as aliases (skip the model's own ID)
 		for key := range modelConfig.Filters.SetParamsByID {
@@ -197,17 +202,29 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	// either style, never both.
 	hasTopLevel := config.Matrix != nil || len(config.Groups) > 0
 	rtr := config.Routing.Router
-	hasRouting := rtr.Use != "" || rtr.Settings.Matrix != nil || len(rtr.Settings.Groups) > 0
+	hasRouting := rtr.Use != "" || rtr.Settings.Matrix != nil || len(rtr.Settings.Groups) > 0 || rtr.Settings.Capacity != nil
 
 	if hasTopLevel && hasRouting {
 		return Config{}, fmt.Errorf("config uses both the legacy top-level 'matrix'/'groups' keys and the new 'routing.router' block; please migrate the top-level keys into 'routing.router' and remove them")
 	}
 
 	if !hasTopLevel {
+		if rtr.Use == "capacity" || rtr.Settings.Capacity != nil {
+			if rtr.Use != "capacity" || rtr.Settings.Capacity == nil {
+				return Config{}, fmt.Errorf("capacity routing requires use: capacity and routing.router.settings.capacity")
+			}
+			if rtr.Settings.Matrix != nil || rtr.Settings.Groups != nil || config.Groups != nil {
+				return Config{}, fmt.Errorf("capacity router cannot be combined with groups or matrix settings")
+			}
+			if err := ValidateCapacity(rtr.Settings.Capacity, config.Models); err != nil {
+				return Config{}, fmt.Errorf("routing.router.settings.capacity: %w", err)
+			}
+		}
 		// Both groups and matrix may be defined under routing.router.settings;
 		// routing.router.use selects which one is active, so there is no conflict.
 		rs := config.Routing.Router.Settings
 		switch config.Routing.Router.Use {
+		case "capacity": // validated above; no legacy representation
 		case "matrix":
 			if rs.Matrix == nil {
 				return Config{}, fmt.Errorf("routing.router.use is 'matrix' but routing.router.settings.matrix is not set")
@@ -216,7 +233,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		case "group", "":
 			config.Groups = rs.Groups
 		default:
-			return Config{}, fmt.Errorf("routing.router.use: unknown router %q (valid: group, matrix)", config.Routing.Router.Use)
+			return Config{}, fmt.Errorf("routing.router.use: unknown router %q (valid: group, matrix, capacity)", config.Routing.Router.Use)
 		}
 	}
 
@@ -229,7 +246,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 		if err := ValidateMatrix(config.Matrix, config.Models); err != nil {
 			return Config{}, fmt.Errorf("matrix: %w", err)
 		}
-	} else {
+	} else if rtr.Use != "capacity" {
 		config = AddDefaultGroupToConfig(config)
 
 		// Validate group members
@@ -255,7 +272,7 @@ func LoadConfigFromReader(r io.Reader) (Config, error) {
 	// compiled matrix program stays in one place.
 	if config.Matrix != nil {
 		config.Routing.Router.Use = "matrix"
-	} else {
+	} else if rtr.Use != "capacity" {
 		config.Routing.Router.Use = "group"
 	}
 	config.Routing.Router.Settings.Matrix = config.Matrix

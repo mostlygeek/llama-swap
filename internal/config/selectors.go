@@ -121,6 +121,17 @@ func validateSpilloverCoexistence(config Config, selectorID string, targets []st
 	if len(targets) <= 1 {
 		return nil
 	}
+	if config.Routing.Router.Use == "capacity" {
+		capacity := config.Routing.Router.Settings.Capacity
+		var total int64
+		for _, target := range targets {
+			total += config.Models[target].Capacity.Usage
+		}
+		if total > capacity.Total {
+			return fmt.Errorf("selectors.%s spillover targets exceed capacity total", selectorID)
+		}
+		return nil
+	}
 
 	if config.Routing.Router.Use == "matrix" {
 		matrix := config.Routing.Router.Settings.Matrix
