@@ -40,14 +40,34 @@ type capacitySwapper struct {
 	total  int64
 	models map[string]config.ModelConfig
 	logger *logmon.Monitor
+
+	// The scheduler calls planners from a single event-loop goroutine, with
+	// the same inputs for EvictionFor and OnSwapStart. Reuse that decision so
+	// logging does not repeat the search. Model configuration is immutable.
+	lastTarget  string
+	lastRunning []string
+	lastEvict   []string
+	lastValid   bool
 }
 
-// EvictionFor searches only resident models, including pending starts supplied
+func (s *capacitySwapper) EvictionFor(target string, running []string) []string {
+	if s.lastValid && s.lastTarget == target && slices.Equal(s.lastRunning, running) {
+		return s.lastEvict
+	}
+	evict := s.evictionFor(target, running)
+	s.lastTarget = target
+	s.lastRunning = slices.Clone(running)
+	s.lastEvict = evict
+	s.lastValid = true
+	return evict
+}
+
+// evictionFor searches only resident models, including pending starts supplied
 // by the scheduler. Minimize total eviction cost, then eviction count, then
 // lexicographically sorted model IDs. Higher costs protect expensive models.
 // Suffix usage sums and the best cost prune the search. Worst-case time is
 // exponential in resident count; no configured combinations are generated.
-func (s *capacitySwapper) EvictionFor(target string, running []string) []string {
+func (s *capacitySwapper) evictionFor(target string, running []string) []string {
 	ids := slices.Clone(running)
 	slices.Sort(ids)
 	ids = slices.Compact(ids)

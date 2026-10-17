@@ -1,6 +1,7 @@
 package router
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"math/rand"
@@ -58,6 +59,41 @@ func TestCapacity_EvictionFor(t *testing.T) {
 			require.Equal(t, tc.want, s.EvictionFor("x", tc.running))
 		})
 	}
+}
+
+func TestCapacity_DecisionCache(t *testing.T) {
+	s := newCapacityPlanner(10, map[string]int64{"a": 6, "b": 4, "x": 6, "y": 4}, map[string]int64{"a": 2, "x": 2})
+	var logs bytes.Buffer
+	s.logger = logmon.NewWriter(&logs)
+	running := []string{"a", "b"}
+	evict := s.EvictionFor("x", running)
+	require.Equal(t, []string{"a"}, evict)
+
+	// An equal snapshot must reuse the search result without allocating.
+	snapshot := slices.Clone(running)
+	require.Zero(t, testing.AllocsPerRun(10, func() {
+		s.EvictionFor("x", snapshot)
+	}))
+	s.OnSwapStart("x", snapshot)
+	require.Contains(t, logs.String(), "capacity: model=x evict=[a] total=10")
+	require.Same(t, &evict[0], &s.lastEvict[0])
+
+	// A different target needs a new decision even with the same residents.
+	require.Equal(t, []string{"b"}, s.EvictionFor("y", running))
+
+	// The scheduler can reuse its input slice. The cache must own its snapshot.
+	running[1] = "x"
+	require.Equal(t, []string{"a", "b"}, s.lastRunning)
+	require.Equal(t, []string{"a"}, s.EvictionFor("y", running))
+
+	// Cache empty decisions too; logging must not repeat their search.
+	running = []string{"b"}
+	require.Empty(t, s.EvictionFor("y", running))
+	require.Zero(t, testing.AllocsPerRun(10, func() {
+		s.OnSwapStart("y", running)
+	}))
+	// An empty decision must not hide a later change in residents.
+	require.Equal(t, []string{"a"}, s.EvictionFor("y", []string{"a", "x"}))
 }
 
 // Compare the pruned search to an independent exhaustive oracle on small
@@ -140,7 +176,8 @@ func BenchmarkCapacity_EvictionFor(b *testing.B) {
 			s := newCapacityPlanner(int64(n), usage, nil)
 			b.ReportAllocs()
 			for b.Loop() {
-				s.EvictionFor("x", running)
+				// Measure the search rather than repeated cache hits.
+				s.evictionFor("x", running)
 			}
 		})
 	}
