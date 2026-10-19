@@ -337,7 +337,7 @@ func stripAudioAPIPrefix(r *http.Request) {
 func (s *Server) routes() {
 
 	authMW := CreateAuthMiddleware(s.cfg)
-	modelMWs := []chain.Middleware{authMW, createContentTypeMiddleware()}
+	modelMWs := []chain.Middleware{authMW, createContentTypeMiddleware(s.cfg.MaxRequestBodyBytes())}
 	// globalConcurrencyLimit guards the top of the inference chain; a limit of
 	// 0 (the default) means no limit, so the handler is left out of the chain
 	// entirely rather than wrapping every request in a no-op semaphore.
@@ -495,7 +495,7 @@ func (s *Server) ServeTailcatHTTP(w http.ResponseWriter, r *http.Request) {
 	if inference && r.Method != http.MethodOptions {
 		// Normalize first so the model lookup sees the same body format the
 		// model chain will.
-		if bodyErr := prepareModelBody(w, r); bodyErr != nil {
+		if bodyErr := prepareModelBody(w, r, s.cfg.MaxRequestBodyBytes()); bodyErr != nil {
 			http.NotFound(w, r)
 			return
 		}

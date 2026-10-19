@@ -211,6 +211,7 @@ groups:
 		},
 		SendLoadingState: false,
 		UnloadTimeout:    DEFAULT_UNLOAD_TIMEOUT,
+		MaxRequestBodyMB: DEFAULT_MAX_REQUEST_BODY_MB,
 		Models: map[string]ModelConfig{
 			"model1": {
 				Cmd:                "path/to/cmd --arg1 one",

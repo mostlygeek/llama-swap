@@ -1012,6 +1012,51 @@ models:
 	})
 }
 
+func TestConfig_MaxRequestBodyMB(t *testing.T) {
+	t.Run("defaults to 250", func(t *testing.T) {
+		content := `
+models:
+  model1:
+    cmd: server --port ${PORT}
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, 250, config.MaxRequestBodyMB)
+		assert.Equal(t, int64(250<<20), config.MaxRequestBodyBytes())
+	})
+
+	t.Run("sets the configured value", func(t *testing.T) {
+		content := `
+maxRequestBodyMB: 1024
+models:
+  model1:
+    cmd: server --port ${PORT}
+`
+		config, err := LoadConfigFromReader(strings.NewReader(content))
+		assert.NoError(t, err)
+		assert.Equal(t, 1024, config.MaxRequestBodyMB)
+		assert.Equal(t, int64(1024<<20), config.MaxRequestBodyBytes())
+	})
+
+	for _, value := range []string{"0", "-1"} {
+		t.Run("rejects "+value, func(t *testing.T) {
+			content := `
+maxRequestBodyMB: ` + value + `
+models:
+  model1:
+    cmd: server --port ${PORT}
+`
+			_, err := LoadConfigFromReader(strings.NewReader(content))
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "maxRequestBodyMB must be >= 1")
+		})
+	}
+
+	t.Run("zero-value Config uses the default", func(t *testing.T) {
+		assert.Equal(t, int64(250<<20), Config{}.MaxRequestBodyBytes())
+	})
+}
+
 func TestConfig_UnloadTimeout(t *testing.T) {
 	t.Run("defaults to 10 seconds", func(t *testing.T) {
 		content := `
