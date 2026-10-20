@@ -53,6 +53,16 @@ func bodyTooLarge(maxBytes int64) *requestBodyError {
 	}
 }
 
+// bodyTooLargeFrom returns a 413 error when err came from reading a body past
+// the cap set by prepareModelBody, and nil for any other error.
+func bodyTooLargeFrom(err error) *requestBodyError {
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		return bodyTooLarge(tooLarge.Limit)
+	}
+	return nil
+}
+
 // prepareModelBody caps the request body at maxBytes and makes its
 // Content-Type match what the endpoint expects. See normalizeBodyContentType.
 func prepareModelBody(w http.ResponseWriter, r *http.Request, maxBytes int64) *requestBodyError {
@@ -93,9 +103,8 @@ func normalizeBodyContentType(r *http.Request, kind bodyKind) *requestBodyError 
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			return bodyTooLarge(tooLarge.Limit)
+		if bodyErr := bodyTooLargeFrom(err); bodyErr != nil {
+			return bodyErr
 		}
 		return badBody("error reading request body: %v", err)
 	}

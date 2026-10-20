@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -251,4 +252,39 @@ func TestServer_APITailcatStatus(t *testing.T) {
 		!strings.Contains(w.Body.String(), `"models":[]`) {
 		t.Fatalf("disabled status response = %d %q, want models: []", w.Code, w.Body.String())
 	}
+}
+
+func TestServer_TailcatBodyTooLarge(t *testing.T) {
+	s := newTailcatPolicyServer(t, "maxRequestBodyMB: 1\n")
+
+	t.Run("Content-Length over the limit", func(t *testing.T) {
+		r := tailcatRequest(http.MethodPost, "/v1/chat/completions", `{"model":"public"}`)
+		r.ContentLength = 1<<20 + 1
+		w := httptest.NewRecorder()
+		s.ServeTailcatHTTP(w, r)
+		if w.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("status = %d, want 413: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("streamed JSON body over the limit", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", io.LimitReader(zeroReader{}, 1<<20+1))
+		r.ContentLength = -1
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		s.ServeTailcatHTTP(w, r)
+		if w.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("status = %d, want 413: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("bad body still looks like an unknown model", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader("not json"))
+		r.Header.Set("Content-Type", "text/plain")
+		w := httptest.NewRecorder()
+		s.ServeTailcatHTTP(w, r)
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404: %s", w.Code, w.Body.String())
+		}
+	})
 }
