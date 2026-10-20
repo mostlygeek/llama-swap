@@ -9,9 +9,50 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/klauspost/compress/zstd"
+	"github.com/mostlygeek/llama-swap/internal/cache"
 	"github.com/mostlygeek/llama-swap/internal/logmon"
 )
+
+func TestServer_CaptureCacheRetainedCapacity(t *testing.T) {
+	mm := newTestMetricsMonitor(t, logmon.NewWriter(io.Discard), 100, 1)
+	// A compressible body below the encoder window exercises EncodeAll's
+	// allocation based on the uncompressed size.
+	body := bytes.Repeat([]byte("capture body\n"), 20000)
+	var retained int
+	for id := 1; id <= 8; id++ {
+		capture := ReqRespCapture{ID: id, ReqPath: "/v1/chat/completions", ReqBody: body, RespBody: body}
+		if !mm.addCapture(capture) {
+			t.Fatal("addCapture returned false")
+		}
+		stored, err := mm.captureCache.Get(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		retained += cap(stored)
+		got := mm.getCaptureByID(id)
+		if got == nil || got.ID != id || got.ReqPath != capture.ReqPath || !bytes.Equal(got.ReqBody, body) || !bytes.Equal(got.RespBody, body) {
+			t.Fatal("stored capture roundtrip mismatch")
+		}
+	}
+	if got := mm.captureCache.Size(); got != retained {
+		t.Fatalf("cache size=%d, retained capacity=%d", got, retained)
+	}
+	t.Logf("cache size and retained capacity: %d bytes", retained)
+	// The same slices must obey a cache budget of exactly one capture.
+	stored, _ := mm.captureCache.Get(1)
+	bounded := cache.New(cap(stored))
+	if err := bounded.Add(1, stored); err != nil {
+		t.Fatal(err)
+	}
+	if err := bounded.Add(2, stored); err != nil {
+		t.Fatal(err)
+	}
+	if bounded.Has(1) || !bounded.Has(2) || bounded.Size() != cap(stored) {
+		t.Fatal("capture cache did not enforce retained-byte budget")
+	}
+}
 
 func TestServer_CaptureCompressRoundtrip(t *testing.T) {
 	orig := &ReqRespCapture{
@@ -230,5 +271,67 @@ func BenchmarkCaptureEncoderRetained(b *testing.B) {
 			}
 			b.ReportMetric(retained, "retained-MiB")
 		})
+	}
+}
+
+func TestServer_CaptureEncodedByteCount(t *testing.T) {
+	cases := []ReqRespCapture{
+		{},
+		{ID: 7, ReqPath: "/v1/chat/completions", ReqHeaders: map[string]string{"Content-Type": "application/json"}, ReqBody: []byte(`{"model":"a"}`), RespBody: []byte(`{"choices":[]}`)},
+		{ID: 8, ReqPath: "/v1/embeddings", ReqBody: jsonBody(64<<10, 1), RespBody: jsonBody(2<<20, 2)},
+	}
+	for _, capture := range cases {
+		t.Run(fmt.Sprint(capture.ID), func(t *testing.T) {
+			expected, err := cbor.Marshal(&capture)
+			if err != nil {
+				t.Fatal(err)
+			}
+			compressed, n, err := compressCapture(&capture)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if n != len(expected) {
+				t.Fatalf("encoded byte count=%d want=%d", n, len(expected))
+			}
+			got, err := decompressCapture(compressed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.ID != capture.ID || got.ReqPath != capture.ReqPath || !bytes.Equal(got.ReqBody, capture.ReqBody) || !bytes.Equal(got.RespBody, capture.RespBody) {
+				t.Fatal("roundtrip mismatch")
+			}
+		})
+	}
+}
+
+func TestServer_CaptureOutputOwnership(t *testing.T) {
+	capture := ReqRespCapture{ID: 1, ReqPath: "/v1/chat/completions", RespBody: jsonBody(2<<20, 3)}
+	first, _, err := compressCapture(&capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := bytes.Clone(first)
+	var wg sync.WaitGroup
+	for id := 2; id <= 17; id++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			next := capture
+			next.ID = id
+			if _, _, err := compressCapture(&next); err != nil {
+				t.Error(err)
+			}
+		}(id)
+	}
+	wg.Wait()
+	if !bytes.Equal(first, saved) {
+		t.Fatal("later captures changed retained output")
+	}
+	got, err := decompressCapture(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != capture.ID || !bytes.Equal(got.RespBody, capture.RespBody) {
+		t.Fatal("retained output roundtrip mismatch")
 	}
 }

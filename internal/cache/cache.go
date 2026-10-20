@@ -27,17 +27,25 @@ func New(maxBytes int) *Cache {
 }
 
 func (c *Cache) Add(id int, data []byte) error {
+	// Charge the array retained by the cache, including unused slice capacity.
+	dataSize := cap(data)
+	if dataSize > c.maxSize {
+		if len(data) > c.maxSize {
+			return ErrExceedsMaxSize
+		}
+		// A payload that fits must not be rejected just for spare capacity.
+		compact := make([]byte, len(data))
+		copy(compact, data)
+		data = compact
+		dataSize = cap(data)
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	dataSize := len(data)
-	if dataSize > c.maxSize {
-		return ErrExceedsMaxSize
-	}
-
 	// If key already exists, remove old entry from size and order
 	if old, exists := c.items[id]; exists {
-		c.size -= len(old)
+		c.size -= cap(old)
 		c.removeOrder(id)
 	}
 
@@ -46,7 +54,7 @@ func (c *Cache) Add(id int, data []byte) error {
 		oldestID := c.order[0]
 		c.order = c.order[1:]
 		if evicted, exists := c.items[oldestID]; exists {
-			c.size -= len(evicted)
+			c.size -= cap(evicted)
 			delete(c.items, oldestID)
 		}
 	}

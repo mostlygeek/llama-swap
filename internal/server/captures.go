@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
 	"runtime"
@@ -103,14 +104,25 @@ func mustZstdDecoder() *zstd.Decoder {
 	return dec
 }
 
+// Limit serialization together with compression so queued captures do not
+// hold a serialization buffer each while waiting for a shared encoder.
+var captureEncodingSlots = make(chan struct{}, zstdConcurrency)
+
 // compressCapture marshals a ReqRespCapture to CBOR and compresses it with zstd.
 // Returns the compressed bytes and the original CBOR byte count for logging.
 func compressCapture(c *ReqRespCapture) ([]byte, int, error) {
-	cborBytes, err := cbor.Marshal(c)
-	if err != nil {
+	captureEncodingSlots <- struct{}{}
+	defer func() { <-captureEncodingSlots }()
+	// Keep serialization storage local so a burst does not leave large
+	// borrowed CBOR buffers in the library's pool after compression.
+	var buf bytes.Buffer
+	buf.Grow(len(c.ReqBody) + len(c.RespBody) + len(c.ReqPath))
+	if err := cbor.MarshalToBuffer(c, &buf); err != nil {
 		return nil, 0, fmt.Errorf("marshal capture: %w", err)
 	}
-	return zstdEnc.EncodeAll(cborBytes, nil), len(cborBytes), nil
+	// Nonzero capacity avoids reserving the uncompressed input size. The
+	// cache accounts for the capacity of the returned array without a copy.
+	return zstdEnc.EncodeAll(buf.Bytes(), make([]byte, 0, 1)), buf.Len(), nil
 }
 
 // decompressCapture decompresses zstd-compressed CBOR into a ReqRespCapture.
@@ -140,7 +152,7 @@ func (mp *metricsMonitor) addCapture(capture ReqRespCapture) bool {
 	}
 
 	if err := mp.captureCache.Add(capture.ID, compressed); err != nil {
-		mp.logger.Warnf("capture %d too large (%d bytes), skipping: %v", capture.ID, len(compressed), err)
+		mp.logger.Warnf("capture %d exceeds cache budget (%d compressed bytes, %d capacity bytes), skipping: %v", capture.ID, len(compressed), cap(compressed), err)
 		return false
 	}
 
