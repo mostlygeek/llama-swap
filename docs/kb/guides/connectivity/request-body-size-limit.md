@@ -1,10 +1,10 @@
 ---
 title: Request body size limit
-summary: Raise or lower maxRequestBodyMB when large audio uploads or base64 images get HTTP 413 Request Entity Too Large.
+summary: Raise maxRequestBodyMB when large uploads or base64 images fail with HTTP 413, or with a 404 for chunked uploads.
 category: guides
-tags: [413, request-entity-too-large, upload, body-size, audio, images, base64, limit]
+tags: [413, 404, request-entity-too-large, chunked, upload, body-size, audio, images, base64, limit]
 config_keys: [maxRequestBodyMB]
-updated: 2026-10-19
+updated: 2026-10-20
 ---
 
 # Request body size limit
@@ -17,9 +17,19 @@ model endpoint such as `/v1/chat/completions`, `/v1/embeddings` or
 maxRequestBodyMB: 1024
 ```
 
-A request over the limit fails with HTTP 413 and the message
+A request over the limit usually fails with HTTP 413 and the message
 `request body exceeds the 250 MB limit` (showing your configured value). The
 request never reaches the model and no model is loaded for it.
+
+Some oversized requests get HTTP 404 instead:
+
+- A request sent without a `Content-Length` header (chunked upload) with
+  `Content-Type: application/json` or `multipart/form-data` returns 404
+  `no model id could be identified`.
+- Any oversized request sent through the Tailcat listener returns a plain 404.
+
+If a large upload fails with a 404 like this and the `model` field is correct,
+the size limit is the likely cause.
 
 ## What goes wrong
 
