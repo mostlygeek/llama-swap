@@ -134,6 +134,12 @@ type ProcessCommand struct {
 	// It is initialized when the process becomes Ready and updated after ServeHTTP completes.
 	lastUse  atomic.Int64
 	inflight atomic.Int64 // current in-flight ServeHTTP calls
+
+	// busy is the last result of the busyCheck probe, see busy.go. busyKick
+	// wakes the poller early.
+	busy          atomic.Bool
+	busyHoldUntil atomic.Int64 // unix nanos until which Busy() stays true
+	busyKick      chan struct{}
 }
 
 var _ Process = (*ProcessCommand)(nil)
@@ -156,6 +162,7 @@ func New(
 		stopCh:      make(chan stopReq),
 		waitReadyCh: make(chan waitReadyReq),
 		waitDelay:   cmdWaitDelay,
+		busyKick:    make(chan struct{}, 1),
 	}
 	p.status.Store(&Status{State: StateStopped})
 
@@ -356,6 +363,14 @@ func (p *ProcessCommand) run() {
 						req.respond <- nil
 					}
 
+					// Poll the busy check, if configured. Self-terminates when
+					// state leaves StateReady.
+					if p.config.BusyCheck.Enabled() {
+						if fn := p.handler.Load(); fn != nil {
+							go p.pollBusy(*fn)
+						}
+					}
+
 					// Start TTL goroutine if configured — self-terminates
 					// when state leaves StateReady.
 					if p.config.UnloadAfter > 0 {
@@ -367,7 +382,7 @@ func (p *ProcessCommand) run() {
 								if p.State() != StateReady {
 									return
 								}
-								if p.inflight.Load() != 0 {
+								if p.inflight.Load() != 0 || p.Busy() {
 									continue
 								}
 								if time.Since(time.Unix(0, p.lastUse.Load())) > ttlDuration {
@@ -862,6 +877,7 @@ func (p *ProcessCommand) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		p.lastUse.Store(time.Now().UnixNano())
 		p.inflight.Add(-1)
+		p.kickBusyCheck()
 	}()
 	(*fn)(w, r)
 }

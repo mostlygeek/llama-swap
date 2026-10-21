@@ -58,6 +58,7 @@ type fakeEffects struct {
 	states       map[string]process.ProcessState // model -> state; missing => not handled
 	serveResult  map[string]bool                 // GrantServe return per model (default true)
 	lastServeReq HandlerReq
+	busy         map[string]bool // model -> Busy result
 
 	starts []startRec
 	grants []grantRec
@@ -68,6 +69,7 @@ func newFakeEffects() *fakeEffects {
 	return &fakeEffects{
 		states:      map[string]process.ProcessState{},
 		serveResult: map[string]bool{},
+		busy:        map[string]bool{},
 	}
 }
 
@@ -85,6 +87,10 @@ func (f *fakeEffects) RunningModels() map[string]process.ProcessState {
 		out[id] = st
 	}
 	return out
+}
+
+func (f *fakeEffects) Busy(modelID string) bool {
+	return f.busy[modelID]
 }
 
 func (f *fakeEffects) StartSwap(modelID string, evict []string) {
@@ -944,5 +950,52 @@ func TestFIFO_ConcurrencyLimit_CancelledQueuedWaiterReleasesReservation(t *testi
 
 	if got := len(s.queued); got != 1 {
 		t.Fatalf("queue len=%d want 1 after cancel and retry", got)
+	}
+}
+
+// TestFIFO_NoSwapWhileBusy verifies a model whose process reports unfinished
+// work (no open request) is not evicted: the evicting request waits until the
+// model reports idle and the router's tick retries the queue.
+func TestFIFO_NoSwapWhileBusy(t *testing.T) {
+	eff := newFakeEffects()
+	eff.states["a"] = process.StateReady
+	eff.states["b"] = process.StateStopped
+	s := newFIFO(&stubPlanner{evict: map[string][]string{"b": {"a"}}}, eff)
+
+	eff.busy["a"] = true
+	s.OnRequest(req("b")) // would evict busy a -> queue
+	if eff.startsFor("b") != 0 {
+		t.Fatalf("b started while a was busy")
+	}
+
+	s.OnBusyTick()
+	if eff.startsFor("b") != 0 {
+		t.Fatalf("b started on a tick while a was still busy")
+	}
+
+	eff.busy["a"] = false
+	s.OnBusyTick()
+	if eff.startsFor("b") != 1 {
+		t.Fatalf("StartSwap(b)=%d want 1 after a went idle", eff.startsFor("b"))
+	}
+}
+
+// TestFIFO_BusyDoesNotBlockUnrelatedSwap verifies a busy model only holds back
+// requests that would evict it.
+func TestFIFO_BusyDoesNotBlockUnrelatedSwap(t *testing.T) {
+	eff := newFakeEffects()
+	eff.states["a"] = process.StateReady
+	eff.states["b"] = process.StateStopped
+	eff.states["c"] = process.StateStopped
+	s := newFIFO(&stubPlanner{evict: map[string][]string{"b": {"a"}}}, eff)
+
+	eff.busy["a"] = true
+	s.OnRequest(req("b")) // evicts busy a -> queue
+	s.OnRequest(req("c")) // evicts nothing -> starts
+	if eff.startsFor("b") != 0 {
+		t.Fatalf("b started while a was busy")
+	}
+	if eff.startsFor("c") != 1 {
+		t.Fatalf("StartSwap(c)=%d want 1", eff.startsFor("c"))
 	}
 }

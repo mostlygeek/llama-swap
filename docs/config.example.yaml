@@ -407,6 +407,30 @@ models:
     # - useful for slow cmdStop commands such as docker stop
     unloadTimeout: 10
 
+    # busyCheck: keep the model loaded while the upstream reports unfinished work
+    # that no open HTTP request represents, e.g. a queued job of an asynchronous
+    # API such as ComfyUI
+    # - optional, default: empty (disabled)
+    # - the upstream path is polled with GET once per second and right after
+    #   every proxied request
+    # - while busy, a swap will not evict the model (the request that needs its
+    #   VRAM waits in the queue) and its ttl will not unload it
+    # - Unload from the API or UI still stops it
+    busyCheck:
+      # endpoint: path that returns a JSON object, must start with /
+      # - required to enable the check
+      endpoint: /queue
+      # fields: top-level keys of that object. The model is busy while any one
+      # holds a non-empty array or object, a non-zero number, a non-empty
+      # string or true
+      # - required when endpoint is set
+      fields: [queue_running, queue_pending]
+      # hold: seconds the model still counts as busy after the check reports
+      # idle, so a client can fetch the result of a finished job before a
+      # swap or ttl unload stops the upstream
+      # - optional, default: 0
+      hold: 30
+
     # compat: compatibility settings for upstream applications
     # - optional, default: empty
     compat:

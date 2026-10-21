@@ -110,11 +110,41 @@ func (b *baseRouter) notifyProcessed() {
 	}
 }
 
+// busyReporter is implemented by processes that can report work an in-flight
+// request does not show, see config.BusyCheckConfig.
+type busyReporter interface {
+	Busy() bool
+}
+
+// Busy implements scheduler.Effects.
+func (b *baseRouter) Busy(modelID string) bool {
+	r, ok := b.processes[modelID].(busyReporter)
+	return ok && r.Busy()
+}
+
+// busyTick returns a channel that ticks while any model has a busy check, and
+// a nil channel, which never fires, otherwise.
+func (b *baseRouter) busyTick() (<-chan time.Time, func()) {
+	for id := range b.processes {
+		if b.config.Models[id].BusyCheck.Enabled() {
+			t := time.NewTicker(time.Second)
+			return t.C, t.Stop
+		}
+	}
+	return nil, func() {}
+}
+
 func (b *baseRouter) run() {
 	defer close(b.runDone)
 
+	tick, stopTick := b.busyTick()
+	defer stopTick()
+
 	for {
 		select {
+		case <-tick:
+			b.schedule.OnBusyTick()
+
 		case req := <-b.shutdownCh:
 			b.handleShutdown(req)
 			return

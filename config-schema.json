@@ -559,6 +559,33 @@
                         "default": false,
                         "description": "Open a new upstream connection for every request instead of reusing idle ones. Works around upstreams that close a connection they advertised as keep-alive, such as llama-server after a streamed response (#1205). When true, timeouts.idleConn has no effect."
                     },
+                    "busyCheck": {
+                        "type": "object",
+                        "properties": {
+                            "endpoint": {
+                                "type": "string",
+                                "default": "",
+                                "description": "Path on the upstream, polled with GET, that returns a JSON object. Must start with /."
+                            },
+                            "fields": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                },
+                                "default": [],
+                                "description": "Top-level keys of the JSON object. The model is busy while any holds a non-empty array or object, a non-zero number, a non-empty string or true. A busy model is not evicted by a swap and is not unloaded by its TTL."
+                            },
+                            "hold": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "default": 0,
+                                "description": "Seconds the model keeps counting as busy after the check stops reporting work, so clients can fetch the result of a finished job before a swap or TTL unload stops the upstream."
+                            }
+                        },
+                        "additionalProperties": false,
+                        "default": {},
+                        "description": "Keep a model loaded while the upstream reports unfinished work that no open HTTP request represents, such as a queued job of an asynchronous API."
+                    },
                     "compat": {
                         "type": "object",
                         "properties": {

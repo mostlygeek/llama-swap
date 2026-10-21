@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strings"
 )
 
 const (
@@ -130,6 +131,53 @@ type CompatConfig struct {
 	IgnoreWebsockets bool `yaml:"ignoreWebsockets"`
 }
 
+// BusyCheckConfig lets llama-swap ask an upstream whether it is still working
+// on something that no open HTTP request represents, e.g. a queued job of an
+// asynchronous API such as ComfyUI. While the check reports busy the model is
+// treated like one with in-flight requests: swaps will not evict it and the
+// TTL will not unload it.
+type BusyCheckConfig struct {
+	// Endpoint is a path on the upstream that is polled with GET and returns
+	// a JSON object, e.g. /queue.
+	Endpoint string `yaml:"endpoint"`
+	// Fields are top-level keys of that JSON object. The model is busy when
+	// any of them holds a non-empty array or object, a non-zero number, a
+	// non-empty string or true.
+	Fields []string `yaml:"fields"`
+	// Hold is how many seconds the model keeps counting as busy after the
+	// check stops reporting work. It gives clients time to fetch the result
+	// of a finished job before a swap or TTL unload stops the upstream.
+	Hold int `yaml:"hold"`
+}
+
+// Enabled reports whether a busy check is configured.
+func (c BusyCheckConfig) Enabled() bool { return c.Endpoint != "" }
+
+// Validate checks that an enabled busy check is usable.
+func (c BusyCheckConfig) Validate() error {
+	if c.Hold < 0 {
+		return errors.New("busyCheck.hold must be >= 0")
+	}
+	if !c.Enabled() {
+		if len(c.Fields) > 0 || c.Hold > 0 {
+			return errors.New("busyCheck.fields and busyCheck.hold require busyCheck.endpoint")
+		}
+		return nil
+	}
+	if !strings.HasPrefix(c.Endpoint, "/") {
+		return fmt.Errorf("busyCheck.endpoint must start with /, got %q", c.Endpoint)
+	}
+	if len(c.Fields) == 0 {
+		return errors.New("busyCheck.fields must list at least one field")
+	}
+	for _, f := range c.Fields {
+		if strings.TrimSpace(f) == "" {
+			return errors.New("busyCheck.fields must not contain empty names")
+		}
+	}
+	return nil
+}
+
 type ModelConfig struct {
 	Cmd           string   `yaml:"cmd"`
 	CmdStop       string   `yaml:"cmdStop"`
@@ -173,6 +221,10 @@ type ModelConfig struct {
 
 	// Compatibility settings for upstream applications.
 	Compat CompatConfig `yaml:"compat"`
+
+	// BusyCheck keeps a model loaded while the upstream reports unfinished
+	// work that no open HTTP request represents.
+	BusyCheck BusyCheckConfig `yaml:"busyCheck"`
 
 	// Capabilities defines what modalities and features the model supports.
 	Capabilities ModelCapConfig `yaml:"capabilities"`
