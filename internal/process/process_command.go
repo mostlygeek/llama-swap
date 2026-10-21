@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os/exec"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -137,9 +138,18 @@ type ProcessCommand struct {
 
 	// busy is the last result of the busyCheck probe, see busy.go. busyKick
 	// wakes the poller early.
-	busy          atomic.Bool
-	busyHoldUntil atomic.Int64 // unix nanos until which Busy() stays true
-	busyKick      chan struct{}
+	busyUntil atomic.Int64 // unix nanos until which Busy() stays true, MaxInt64 while busy
+	busyKick  chan struct{}
+	// busyGen numbers the polling runs, one per start, so a poller left over
+	// from an earlier start cannot touch the state of a newer one. kickSeq
+	// counts finished requests and probedSeq the last one a probe has covered,
+	// busyPolling says a poller is active. busyMu guards their updates.
+	busyGen     atomic.Uint64
+	kickSeq     atomic.Uint64
+	probedSeq   atomic.Uint64
+	busyPolling bool // guarded by busyMu
+	busyActive  bool // last busy check result, guarded by busyMu
+	busyMu      sync.Mutex
 }
 
 var _ Process = (*ProcessCommand)(nil)
@@ -367,7 +377,7 @@ func (p *ProcessCommand) run() {
 					// state leaves StateReady.
 					if p.config.BusyCheck.Enabled() {
 						if fn := p.handler.Load(); fn != nil {
-							go p.pollBusy(*fn)
+							p.startBusyPolling(*fn)
 						}
 					}
 
