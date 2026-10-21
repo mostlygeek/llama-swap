@@ -992,3 +992,20 @@ func TestSendError_MapsSentinelErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestFetchContext_BodyOverSizeCap(t *testing.T) {
+	cfg := config.Config{Models: map[string]config.ModelConfig{"m1": {}}}
+	body := `{"model":"m1","pad":"` + strings.Repeat("x", 100) + `"}`
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	r.Body = http.MaxBytesReader(httptest.NewRecorder(), r.Body, 10)
+
+	_, err := FetchContext(r, cfg)
+	if !errors.Is(err, ErrNoModelInContext) {
+		t.Fatalf("err = %v, want it to wrap ErrNoModelInContext", err)
+	}
+	var tooLarge *http.MaxBytesError
+	if !errors.As(err, &tooLarge) || tooLarge.Limit != 10 {
+		t.Fatalf("err = %v, want it to wrap *http.MaxBytesError with Limit 10", err)
+	}
+}

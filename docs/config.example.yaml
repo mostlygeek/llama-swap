@@ -133,6 +133,14 @@ unloadTimeout: 10
 # - see issue #1086
 globalConcurrencyLimit: 0
 
+# maxRequestBodyMB: maximum size, in megabytes, of a request body sent to a
+# model endpoint (chat, completions, embeddings, audio, images, etc.)
+# - optional, default: 250
+# - must be 1 or more
+# - larger requests receive an HTTP 413 Request Entity Too Large response
+# - raise it for large audio uploads or many base64 images in one request
+maxRequestBodyMB: 250
+
 # macros: a dictionary of string substitutions
 # - optional, default: empty dictionary
 # - macros are reusable snippets

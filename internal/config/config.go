@@ -11,6 +11,7 @@ import (
 
 const DEFAULT_GROUP_ID = "(default)"
 const DEFAULT_UNLOAD_TIMEOUT = 10
+const DEFAULT_MAX_REQUEST_BODY_MB = 250
 const (
 	LogToStdoutProxy    = "proxy"
 	LogToStdoutUpstream = "upstream"
@@ -201,6 +202,10 @@ type Config struct {
 	// once across all models. 0 (default) means no limit. See issue #1086.
 	GlobalConcurrencyLimit int `yaml:"globalConcurrencyLimit"`
 
+	// MaxRequestBodyMB caps the size, in megabytes, of request bodies on
+	// model-dispatched POSTs. Larger requests get HTTP 413.
+	MaxRequestBodyMB int `yaml:"maxRequestBodyMB"`
+
 	// routing is the canonical source for swap/scheduling configuration.
 	// New code must read Routing, never the backwards-compat fields below.
 	Routing RoutingConfig `yaml:"routing"`
@@ -256,6 +261,16 @@ func (c *Config) SetTailcatEnabled(enabled bool) {
 // TailcatEnabled reports whether this process has a Tailcat listener.
 func (c Config) TailcatEnabled() bool {
 	return c.tailcatEnabled
+}
+
+// MaxRequestBodyBytes returns MaxRequestBodyMB in bytes. Configs not built by
+// LoadConfigFromReader leave MaxRequestBodyMB at 0 and get the default.
+func (c Config) MaxRequestBodyBytes() int64 {
+	mb := c.MaxRequestBodyMB
+	if mb <= 0 {
+		mb = DEFAULT_MAX_REQUEST_BODY_MB
+	}
+	return int64(mb) << 20
 }
 
 // RoutingConfig is the canonical, normalized routing/scheduling configuration.

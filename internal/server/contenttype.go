@@ -15,9 +15,6 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// maxRequestBodySize caps the request bodies read for model-dispatched POSTs.
-const maxRequestBodySize = 250 << 20
-
 // bodyKind is the request body format an endpoint expects.
 type bodyKind int
 
@@ -49,20 +46,30 @@ func badBody(format string, args ...any) *requestBodyError {
 	return &requestBodyError{status: http.StatusBadRequest, message: fmt.Sprintf(format, args...)}
 }
 
-func bodyTooLarge() *requestBodyError {
+func bodyTooLarge(maxBytes int64) *requestBodyError {
 	return &requestBodyError{
 		status:  http.StatusRequestEntityTooLarge,
-		message: fmt.Sprintf("request body exceeds the %d MB limit", maxRequestBodySize>>20),
+		message: fmt.Sprintf("request body exceeds the %d MB limit", maxBytes>>20),
 	}
 }
 
-// prepareModelBody caps the request body at maxRequestBodySize and makes its
-// Content-Type match what the endpoint expects. See normalizeBodyContentType.
-func prepareModelBody(w http.ResponseWriter, r *http.Request) *requestBodyError {
-	if r.ContentLength > maxRequestBodySize {
-		return bodyTooLarge()
+// bodyTooLargeFrom returns a 413 error when err came from reading a body past
+// the cap set by prepareModelBody, and nil for any other error.
+func bodyTooLargeFrom(err error) *requestBodyError {
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		return bodyTooLarge(tooLarge.Limit)
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+	return nil
+}
+
+// prepareModelBody caps the request body at maxBytes and makes its
+// Content-Type match what the endpoint expects. See normalizeBodyContentType.
+func prepareModelBody(w http.ResponseWriter, r *http.Request, maxBytes int64) *requestBodyError {
+	if r.ContentLength > maxBytes {
+		return bodyTooLarge(maxBytes)
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 	return normalizeBodyContentType(r, bodyKindForPath(r.URL.Path))
 }
 
@@ -96,9 +103,8 @@ func normalizeBodyContentType(r *http.Request, kind bodyKind) *requestBodyError 
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			return bodyTooLarge()
+		if bodyErr := bodyTooLargeFrom(err); bodyErr != nil {
+			return bodyErr
 		}
 		return badBody("error reading request body: %v", err)
 	}
@@ -134,13 +140,13 @@ func normalizeBodyContentType(r *http.Request, kind bodyKind) *requestBodyError 
 }
 
 // createContentTypeMiddleware returns middleware that tolerates a missing or
-// wrong Content-Type on model-dispatched POST requests and caps the body size.
-// A JSON body sent with another type is relabelled application/json; unusable
-// bodies are rejected with an error that names the expected format.
-func createContentTypeMiddleware() chain.Middleware {
+// wrong Content-Type on model-dispatched POST requests and caps the body size at
+// maxBytes. A JSON body sent with another type is relabelled application/json;
+// unusable bodies are rejected with an error that names the expected format.
+func createContentTypeMiddleware(maxBytes int64) chain.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if bodyErr := prepareModelBody(w, r); bodyErr != nil {
+			if bodyErr := prepareModelBody(w, r, maxBytes); bodyErr != nil {
 				swaputil.SendResponse(w, r, bodyErr.status, bodyErr.message)
 				return
 			}

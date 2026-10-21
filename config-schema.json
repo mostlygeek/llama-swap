@@ -182,6 +182,12 @@
             "default": 0,
             "description": "Caps the number of inference requests served at once across all models combined, using a single shared semaphore rather than a per-model limit. 0 means no limit. Requests exceeding the limit receive an HTTP 429 Too Many Requests response immediately rather than being queued."
         },
+        "maxRequestBodyMB": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 250,
+            "description": "Maximum size in megabytes of a request body sent to a model endpoint (chat, completions, embeddings, audio, images, etc.). Larger requests receive an HTTP 413 Request Entity Too Large response."
+        },
         "logLevel": {
             "type": "string",
             "enum": [
