@@ -1,0 +1,12 @@
+{
+  "action": "created",
+  "discussion": {
+    "number": 8,
+    "node_id": "D_kwDOAAAAAH",
+    "title": "Speculative decoding",
+    "body": "@help",
+    "html_url": "https://github.com/mostlygeek/llama-swap/discussions/8",
+    "user": { "login": "asker", "type": "User" }
+  },
+  "repository": { "full_name": "mostlygeek/llama-swap" }
+}

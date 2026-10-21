@@ -1,0 +1,19 @@
+{
+  "action": "created",
+  "issue": {
+    "number": 43,
+    "node_id": "PR_kwDOAAAAAC",
+    "title": "Some pull request",
+    "body": "",
+    "pull_request": { "url": "https://api.github.com/repos/mostlygeek/llama-swap/pulls/43" },
+    "html_url": "https://github.com/mostlygeek/llama-swap/pull/43",
+    "user": { "login": "someone", "type": "User" }
+  },
+  "comment": {
+    "node_id": "IC_kwDOAAAAAD",
+    "body": "@help does this look right?",
+    "html_url": "https://github.com/mostlygeek/llama-swap/pull/43#issuecomment-2",
+    "user": { "login": "someone", "type": "User" }
+  },
+  "repository": { "full_name": "mostlygeek/llama-swap" }
+}
